@@ -10,4 +10,4 @@ LDFLAGS+=`pkg-config --libs libssl openssl`
 CFLAGS+=`pkg-config --cflags spice-protocol`
 
 all:
-	gcc ${CFLAGS} -o main main.c spice/spice.c ${LDFLAGS}
+	gcc ${CFLAGS} -o main main.c spice/spice.c ivshmem/ivshmem.c ${LDFLAGS}
