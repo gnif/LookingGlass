@@ -327,13 +327,32 @@ int renderThread(void * unused)
   return 0;
 }
 
+int ivshmemThread(void * arg)
+{
+  while(state.running)
+    if (!ivshmem_process())
+    {
+      if (state.running)
+      {
+        state.running = false;
+        DEBUG_ERROR("failed to process ivshmem messages");
+      }
+      break;
+    }
+
+  return 0;
+}
+
 int spiceThread(void * arg)
 {
   while(state.running)
     if (!spice_process())
     {
-      state.running = false;
-      DEBUG_ERROR("Failed to process spice messages");
+      if (state.running)
+      {
+        state.running = false;
+        DEBUG_ERROR("failed to process spice messages");
+      }
       break;
     }
 
@@ -463,15 +482,22 @@ int main(int argc, char * argv[])
   memset(&state, 0, sizeof(state));
   state.running = true;
 
-  int         shm_fd  = 0;
-  SDL_Thread *t_spice = NULL;
-  SDL_Thread *t_event = NULL;
+  int         shm_fd    = 0;
+  SDL_Thread *t_ivshmem = NULL;
+  SDL_Thread *t_spice   = NULL;
+  SDL_Thread *t_event   = NULL;
 
   while(1)
   {
     if (!ivshmem_connect("/tmp/ivshmem_socket"))
     {
       DEBUG_ERROR("failed to connect to the ivshmem server");
+      break;
+    }
+
+    if (!(t_ivshmem = SDL_CreateThread(ivshmemThread, "ivshmemThread", NULL)))
+    {
+      DEBUG_ERROR("ivshmem create thread failed");
       break;
     }
 
@@ -518,6 +544,12 @@ int main(int argc, char * argv[])
 
   if (t_event)
     SDL_WaitThread(t_event, NULL);
+
+  // this needs to happen here to abort any waiting reads
+  // as ivshmem uses recvmsg which has no timeout
+  ivshmem_disconnect();
+  if (t_ivshmem)
+    SDL_WaitThread(t_ivshmem, NULL);
 
   if (t_spice)
     SDL_WaitThread(t_spice, NULL);

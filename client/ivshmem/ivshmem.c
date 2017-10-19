@@ -42,6 +42,7 @@ struct IVSHMEMClient
 struct IVSHMEM
 {
   bool                   connected;
+  bool                   shutdown;
   int                    socket;
   struct IVSHMEMServer   server;
   struct IVSHMEMClient * clients;
@@ -53,6 +54,7 @@ struct IVSHMEM
 struct IVSHMEM ivshmem =
 {
   .connected = false,
+  .shutdown  = false,
   .socket    = -1
 };
 
@@ -69,6 +71,7 @@ void ivshmem_remove_client(struct IVSHMEMClient * client);
 
 bool ivshmem_connect(const char * unix_socket)
 {
+  ivshmem.shutdown = false;
   ivshmem.socket = socket(AF_UNIX, SOCK_STREAM, 0);
   if (ivshmem.socket < 0)
   {
@@ -177,6 +180,8 @@ void ivshmem_cleanup()
 
   if (ivshmem.socket >= 0)
   {
+    ivshmem.shutdown = true;
+    shutdown(ivshmem.socket, SHUT_RDWR);
     close(ivshmem.socket);
     ivshmem.socket = -1;
   }
@@ -186,7 +191,7 @@ void ivshmem_cleanup()
 
 // ============================================================================
 
-void ivshmem_close()
+void ivshmem_disconnect()
 {
   if (!ivshmem.connected)
   {
@@ -250,13 +255,15 @@ bool ivshmem_read_msg(int64_t * index, int * fd)
   int ret = recvmsg(ivshmem.socket, &msg, 0);
   if (ret < sizeof(*index))
   {
-    DEBUG_ERROR("failed ot read message\n");
+    if (!ivshmem.shutdown)
+      DEBUG_ERROR("failed to read message\n");
     return false;
   }
 
   if (ret == 0)
   {
-    DEBUG_ERROR("lost connetion to server\n");
+    if (!ivshmem.shutdown)
+      DEBUG_ERROR("lost connetion to server\n");
     return false;
   }
 
@@ -277,6 +284,17 @@ bool ivshmem_read_msg(int64_t * index, int * fd)
   }
 
   return true;
+}
+
+uint16_t ivshmem_get_id()
+{
+  if (!ivshmem.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return -1;
+  }
+
+  return ivshmem.server.clientID;
 }
 
 // ============================================================================
@@ -378,7 +396,8 @@ bool ivshmem_process()
 
   if (!ivshmem_read_msg(&index, &fd))
   {
-    DEBUG_ERROR("failed to read message");
+    if (!ivshmem.shutdown)
+      DEBUG_ERROR("failed to read message");
     return false;
   }
 
