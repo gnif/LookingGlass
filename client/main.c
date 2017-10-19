@@ -16,7 +16,7 @@
 #define DEBUG
 #include "debug.h"
 #include "KVMGFXHeader.h"
-#include "spice.h"
+#include "spice/spice.h"
 #include "kb.h"
 
 #define MAP_SIZE (16*1024*1024)
