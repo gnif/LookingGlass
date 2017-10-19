@@ -1,8 +1,6 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
@@ -16,6 +14,7 @@
 #define DEBUG
 #include "debug.h"
 #include "KVMGFXHeader.h"
+#include "ivshmem/ivshmem.h"
 #include "spice/spice.h"
 #include "kb.h"
 
@@ -470,21 +469,16 @@ int main(int argc, char * argv[])
 
   while(1)
   {
-    umask(0);
-    const mode_t mode =
-      S_IRUSR | S_IWUSR |
-      S_IRGRP | S_IWGRP |
-      S_IROTH | S_IWOTH;  
-
-    if ((shm_fd = shm_open("ivshmem", O_CREAT | O_RDWR, mode)) < 0)
+    if (!ivshmem_connect("/tmp/ivshmem_socket"))
     {
-      DEBUG_ERROR("failed to open shared memory: %d %s", errno, strerror(errno));
+      DEBUG_ERROR("failed to connect to the ivshmem server");
       break;
     }
 
-    if (ftruncate(shm_fd, MAP_SIZE) != 0)
+    state.shm = (struct KVMGFXHeader *)ivshmem_get_map();
+    if (!state.shm)
     {
-      DEBUG_ERROR("failed to truncate memory region");
+      DEBUG_ERROR("Failed to map memory");
       break;
     }
 
@@ -505,13 +499,6 @@ int main(int argc, char * argv[])
     if (!(t_spice = SDL_CreateThread(spiceThread, "spiceThread", NULL)))
     {
       DEBUG_ERROR("spice create thread failed");
-      break;
-    }
-
-    state.shm = (struct KVMGFXHeader *)mmap(NULL, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (!state.shm)
-    {
-      DEBUG_ERROR("Failed to map memory");
       break;
     }
 
@@ -541,12 +528,8 @@ int main(int argc, char * argv[])
   if (state.window)
     SDL_DestroyWindow(state.window);
 
-  if (state.shm)
-    munmap(state.shm, MAP_SIZE);
-
   if (shm_fd)
     close(shm_fd);
-  //shm_unlink("kvm-windows");
 
   SDL_Quit();
   return 0;

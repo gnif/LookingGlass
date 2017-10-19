@@ -9,13 +9,27 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <sys/mman.h>
+
+struct IVSHMEMServer
+{
+   int64_t version;
+   int64_t clientID;
+   int     sharedFD;
+};
+
 struct IVSHMEM
 {
-  bool connected;
-  int  socket;
+  bool                 connected;
+  int                  socket;
+  struct IVSHMEMServer server;
+
+  off_t  mapSize;
+  void * map;
 };
 
 struct IVSHMEM ivshmem =
@@ -29,6 +43,7 @@ struct IVSHMEM ivshmem =
 
 void ivshmem_cleanup();
 bool ivshmem_read(void * buffer, const ssize_t size);
+bool ivshmem_read_msg(int64_t * index, int *fd);
 
 // ============================================================================
 
@@ -54,46 +69,62 @@ bool ivshmem_connect(const char * unix_socket)
 
   ivshmem.connected = true;
 
-  struct IVSHMEMInit init;
-  if (!ivshmem_read(&init.version, sizeof(init.version)))
+  if (!ivshmem_read(&ivshmem.server.version, sizeof(ivshmem.server.version)))
   {
     DEBUG_ERROR("read protocol version failed");
     ivshmem_cleanup();
     return false;
   }
 
-  if (init.version != 0)
+  if (ivshmem.server.version != 0)
   {
-    DEBUG_ERROR("unsupported protocol version %ld", init.version);
+    DEBUG_ERROR("unsupported protocol version %ld", ivshmem.server.version);
     ivshmem_cleanup();
     return false;
   }
 
-  if (!ivshmem_read(&init.clientID, sizeof(init.clientID)))
+  if (!ivshmem_read(&ivshmem.server.clientID, sizeof(ivshmem.server.clientID)))
   {
     DEBUG_ERROR("read client id failed");
     ivshmem_cleanup();
     return false;
   }
 
-  if (!ivshmem_read(&init.unused, sizeof(init.unused)))
+  DEBUG_PROTO("Protocol : %ld", ivshmem.server.version );
+  DEBUG_PROTO("Client ID: %ld", ivshmem.server.clientID);
+
+  if (!ivshmem_read_msg(NULL, &ivshmem.server.sharedFD))
   {
-    DEBUG_ERROR("read unused failed");
+    DEBUG_ERROR("failed to read shared memory file descriptor");
     ivshmem_cleanup();
     return false;
   }
 
-  if (!ivshmem_read(&init.sharedFD, sizeof(init.sharedFD)))
+  struct stat stat;
+  if (fstat(ivshmem.server.sharedFD, &stat) != 0)
   {
-    DEBUG_ERROR("read shared memory file descriptor failed");
+    DEBUG_ERROR("failed to stat shared FD");
     ivshmem_cleanup();
     return false;
   }
 
-  DEBUG_PROTO("Protocol : %ld", init.version );
-  DEBUG_PROTO("Client ID: %ld", init.clientID);
-  DEBUG_PROTO("Unused   : %ld", init.unused  );
-  DEBUG_PROTO("Shared FD: %ld", init.sharedFD);
+  ivshmem.mapSize = stat.st_size;
+
+  DEBUG_INFO("RAM Size : %ld", ivshmem.mapSize);
+  ivshmem.map = mmap(
+      NULL,
+      stat.st_size,
+      PROT_READ | PROT_WRITE,
+      MAP_SHARED,
+      ivshmem.server.sharedFD,
+      0);
+
+  if (!ivshmem.map)
+  {
+    DEBUG_ERROR("failed to map memory");
+    ivshmem_cleanup();
+    return false;
+  }
 
   return true;
 }
@@ -102,6 +133,11 @@ bool ivshmem_connect(const char * unix_socket)
 
 void ivshmem_cleanup()
 {
+  if (ivshmem.map)
+    munmap(ivshmem.map, ivshmem.mapSize);
+  ivshmem.map     = NULL;
+  ivshmem.mapSize = 0;
+
   if (ivshmem.socket >= 0)
   {
     close(ivshmem.socket);
@@ -142,4 +178,104 @@ bool ivshmem_read(void * buffer, const ssize_t size)
   }
 
   return true;
+}
+
+// ============================================================================
+
+bool ivshmem_read_msg(int64_t * index, int * fd)
+{
+  if (!ivshmem.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
+
+  struct msghdr msg;
+  struct iovec  iov[1];
+  union {
+    struct cmsghdr cmsg;
+    char control[CMSG_SPACE(sizeof(int))];
+  } msg_control;
+
+  int64_t tmp;
+  if (!index)
+    index = &tmp;
+
+  iov[0].iov_base = index;
+  iov[0].iov_len  = sizeof(*index);
+
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov        = iov;
+  msg.msg_iovlen     = 1;
+  msg.msg_control    = &msg_control;
+  msg.msg_controllen = sizeof(msg_control);
+
+  int ret = recvmsg(ivshmem.socket, &msg, 0);
+  if (ret < sizeof(*index))
+  {
+    DEBUG_ERROR("failed ot read message\n");
+    return false;
+  }
+
+  if (ret == 0)
+  {
+    DEBUG_ERROR("lost connetion to server\n");
+    return false;
+  }
+
+  if (!fd)
+    return true;
+
+  struct cmsghdr *cmsg;
+  for(cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg))
+  {
+    if (cmsg->cmsg_len   != CMSG_LEN(sizeof(int)) ||
+        cmsg->cmsg_level != SOL_SOCKET ||
+        cmsg->cmsg_type  != SCM_RIGHTS)
+    {
+      continue;
+    }
+
+    memcpy(fd, CMSG_DATA(cmsg), sizeof(*fd));
+  }
+
+  return true;
+}
+
+// ============================================================================
+
+void * ivshmem_get_map()
+{
+  if (!ivshmem.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return NULL;
+  }
+
+  if (!ivshmem.map)
+  {
+    DEBUG_ERROR("not mapped");
+    return NULL;
+  }
+
+  return ivshmem.map;
+}
+
+// ============================================================================
+
+size_t ivshmem_get_map_size()
+{
+  if (!ivshmem.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return 0;
+  }
+
+  if (!ivshmem.map)
+  {
+    DEBUG_ERROR("not mapped");
+    return 0;
+  }
+
+  return ivshmem.mapSize;
 }
