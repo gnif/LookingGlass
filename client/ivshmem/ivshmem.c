@@ -4,6 +4,7 @@
 #define DEBUG_IVSHMEM
 #include "debug.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
@@ -15,21 +16,38 @@
 
 #include <sys/mman.h>
 
+#define MAX_IRQS 32
+
 struct IVSHMEMServer
 {
    int64_t version;
    int64_t clientID;
    int     sharedFD;
+
+   int     irqs[MAX_IRQS];
+   int     irqCount;
+};
+
+struct IVSHMEMClient
+{
+  uint16_t clientID;
+
+  int      irqs[MAX_IRQS];
+  int      irqCount;
+
+  struct IVSHMEMClient * last;
+  struct IVSHMEMClient * next;
 };
 
 struct IVSHMEM
 {
-  bool                 connected;
-  int                  socket;
-  struct IVSHMEMServer server;
+  bool                   connected;
+  int                    socket;
+  struct IVSHMEMServer   server;
+  struct IVSHMEMClient * clients;
 
   off_t  mapSize;
-  void * map;
+  void * map;  
 };
 
 struct IVSHMEM ivshmem =
@@ -44,6 +62,8 @@ struct IVSHMEM ivshmem =
 void ivshmem_cleanup();
 bool ivshmem_read(void * buffer, const ssize_t size);
 bool ivshmem_read_msg(int64_t * index, int *fd);
+struct IVSHMEMClient * ivshmem_get_client(uint16_t clientID);
+void ivshmem_remove_client(struct IVSHMEMClient * client);
 
 // ============================================================================
 
@@ -133,6 +153,23 @@ bool ivshmem_connect(const char * unix_socket)
 
 void ivshmem_cleanup()
 {
+  struct IVSHMEMClient * client, * next;
+  client = ivshmem.clients;
+  while(client)
+  {
+    for(int i = 0; i < client->irqCount; ++i)
+      close(client->irqs[i]);
+
+    next = client->next;
+    free(client);
+    client = next;
+  }
+  ivshmem.clients = NULL;
+
+  for(int i = 0; i < ivshmem.server.irqCount; ++i)
+    close(ivshmem.server.irqs[i]);
+  ivshmem.server.irqCount = 0;
+
   if (ivshmem.map)
     munmap(ivshmem.map, ivshmem.mapSize);
   ivshmem.map     = NULL;
@@ -278,4 +315,125 @@ size_t ivshmem_get_map_size()
   }
 
   return ivshmem.mapSize;
+}
+
+// ============================================================================
+
+struct IVSHMEMClient * ivshmem_get_client(uint16_t clientID)
+{
+  struct IVSHMEMClient * client = NULL;
+
+  if (ivshmem.clients == NULL)
+  {
+    client = (struct IVSHMEMClient *)malloc(sizeof(struct IVSHMEMClient));
+    client->clientID = clientID;
+    client->last     = NULL;
+    client->next     = NULL;
+    client->irqCount = 0;
+    ivshmem.clients  = client;
+    return client;
+  }
+
+  client = ivshmem.clients;
+  while(client)
+  {
+    if (client->clientID == clientID)
+      return client;
+    client = client->next;
+  }
+
+  client = (struct IVSHMEMClient *)malloc(sizeof(struct IVSHMEMClient));
+  client->clientID   = clientID;
+  client->last       = NULL;
+  client->next       = ivshmem.clients;
+  client->irqCount   = 0;
+  client->next->last = client;
+  ivshmem.clients    = client;
+
+  return client;
+}
+
+// ============================================================================
+
+void ivshmem_remove_client(struct IVSHMEMClient * client)
+{
+  if (client->last)
+    client->last->next = client->next;
+
+  if (client->next)
+    client->next->last = client->last;
+
+  if (ivshmem.clients == client)
+    ivshmem.clients = client->next;  
+
+  free(client);
+}
+
+// ============================================================================
+
+bool ivshmem_process()
+{
+  int64_t index;
+  int     fd;
+
+  if (!ivshmem_read_msg(&index, &fd))
+  {
+    DEBUG_ERROR("failed to read message");
+    return false;
+  }
+
+  if (index == -1)
+  {
+    DEBUG_ERROR("invalid index -1");
+    return false;
+  }
+
+  if (index > 0xFFFF)
+  {
+    DEBUG_ERROR("invalid index > 0xFFFF");
+    return false;    
+  }
+
+  if (index == ivshmem.server.clientID)
+  {
+    if (fd == -1)
+    {
+      DEBUG_ERROR("server sent disconnect");
+      return false;
+    }
+
+    if (ivshmem.server.irqCount == MAX_IRQS)
+    {
+      DEBUG_WARN("maximum IRQs reached, closing extra");
+      close(fd);
+      return true;
+    }
+
+    ivshmem.server.irqs[ivshmem.server.irqCount++] = fd;
+    return true;
+  }
+
+  struct IVSHMEMClient * client = ivshmem_get_client(index);
+  if (!client)
+  {
+    DEBUG_ERROR("failed to get/create client record");
+    return false;
+  }
+
+  if (fd == -1)
+  {
+    DEBUG_PROTO("remove client %u", client->clientID);
+    ivshmem_remove_client(client);
+    return true;
+  }
+
+  if (client->irqCount == MAX_IRQS)
+  {
+    DEBUG_WARN("maximum client IRQs reached, closing extra");
+    close(fd);
+    return true;
+  }
+
+  client->irqs[client->irqCount++] = fd;
+  return true;
 }
