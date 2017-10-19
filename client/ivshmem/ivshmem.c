@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <errno.h>
 
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -270,6 +271,7 @@ bool ivshmem_read_msg(int64_t * index, int * fd)
   if (!fd)
     return true;
 
+  *fd = -1;
   struct cmsghdr *cmsg;
   for(cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg))
   {
@@ -280,11 +282,13 @@ bool ivshmem_read_msg(int64_t * index, int * fd)
       continue;
     }
 
-    memcpy(fd, CMSG_DATA(cmsg), sizeof(*fd));
+    *fd = *(int*)CMSG_DATA(cmsg);
   }
 
   return true;
 }
+
+// ============================================================================
 
 uint16_t ivshmem_get_id()
 {
@@ -455,4 +459,72 @@ bool ivshmem_process()
 
   client->irqs[client->irqCount++] = fd;
   return true;
+}
+
+// ============================================================================
+
+enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector)
+{
+  if (vector > ivshmem.server.irqCount - 1)
+    return false;
+
+  int fd = ivshmem.server.irqs[vector];
+  fd_set fds;
+  FD_ZERO(&fds);
+  FD_SET(fd, &fds);
+
+  struct timeval timeout;
+  timeout.tv_sec  = 1;
+  timeout.tv_usec = 0;
+
+  while(true)
+  {
+    int ret = select(fd+1, &fds, NULL, NULL, &timeout);
+    if (ret < 0)
+    {
+      if (errno == EINTR)
+        continue;
+
+      DEBUG_ERROR("select error");
+      break;
+    }
+
+    if (ret == 0)
+      return IVSHMEM_WAIT_RESULT_TIMEOUT;
+
+    if (FD_ISSET(fd, &fds))
+    {
+      uint64_t kick;
+      read(fd, &kick, sizeof(kick));
+      return IVSHMEM_WAIT_RESULT_OK;
+    }
+  }
+
+  return IVSHMEM_WAIT_RESULT_ERROR;
+}
+
+// ============================================================================
+
+bool ivshmem_kick_irq(uint16_t clientID, uint16_t vector)
+{
+  struct IVSHMEMClient * client = ivshmem_get_client(clientID);
+  if (!client)
+  {
+    DEBUG_ERROR("invalid client");
+    return false;
+  }
+
+  if (vector > client->irqCount - 1)
+  {
+    DEBUG_ERROR("invalid vector for client");
+    return false;
+  }
+
+  int fd = client->irqs[vector];
+  uint64_t kick = ivshmem.server.clientID;
+  if (write(fd, &kick, sizeof(kick)) == sizeof(kick))
+    return true;
+
+  DEBUG_ERROR("failed to send kick");  
+  return false;
 }

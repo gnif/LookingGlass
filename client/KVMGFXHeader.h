@@ -23,6 +23,8 @@ struct KVMGFXHeader
 {
   char      magic[sizeof(KVMGFX_HEADER_MAGIC)];
   uint32_t  version;     // version of this structure
+  uint16_t  hostID;      // the host ivshmem client id
+  uint16_t  guestID;     // the guest ivshmem client id
   FrameType frameType;   // the frame type
   FrameComp compType;    // frame compression mode
   uint32_t  width;       // the width

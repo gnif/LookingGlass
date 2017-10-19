@@ -211,7 +211,6 @@ void drawFunc_YUV420P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, c
 
 int renderThread(void * unused)
 {
-  bool                startup    = true;
   struct KVMGFXHeader format;
   SDL_Texture        *texture    = NULL;
   uint8_t             *pixels    = (uint8_t*)(state.shm + 1);
@@ -254,16 +253,40 @@ int renderThread(void * unused)
     if (memcmp(state.shm->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0)
       continue;
 
-    // if the frame count hasn't changed, we don't do anything
-    if (!startup && format.frames == state.shm->frames)
-    {
-      if (!state.running)
-        break;
-
-      usleep(100);
+    if (state.shm->version != 2)
       continue;
+
+    bool ready = false;
+    bool error = false;
+    while(state.running && !ready && !error)
+    {    
+      // kick the guest and wait for a frame
+      ivshmem_kick_irq(state.shm->guestID, 0);
+      switch(ivshmem_wait_irq(0))
+      {
+        case IVSHMEM_WAIT_RESULT_OK:
+          ready = true;
+          break;
+
+        case IVSHMEM_WAIT_RESULT_TIMEOUT:
+          ready = false;
+          break;
+
+        case IVSHMEM_WAIT_RESULT_ERROR:
+          error = true;
+          break;
+      }  
     }
-    startup = false;
+
+    if (error)
+    {
+      DEBUG_ERROR("error during wait for host");
+      break;
+    }    
+
+//      continue;
+//    }
+//    startup = false;
 
     // if the format is invalid or it has changed
     if (format.frameType == FRAME_TYPE_INVALID || !areFormatsSame(format, *state.shm))
@@ -507,6 +530,7 @@ int main(int argc, char * argv[])
       DEBUG_ERROR("Failed to map memory");
       break;
     }
+    state.shm->hostID = ivshmem_get_id();
 
     if (!spice_connect("127.0.0.1", 5900, ""))
     {
