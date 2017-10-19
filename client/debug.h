@@ -1,7 +1,7 @@
 #include <stdio.h>
 
 #ifdef DEBUG
-  #define DEBUG_PRINT(type, fmt, args...) do {fprintf(stderr, type " %-30s : %-5u | " fmt "\n", __FUNCTION__, __LINE__, ##args);} while (0)
+  #define DEBUG_PRINT(type, fmt, args...) do {fprintf(stderr, type " %20s:%-5u | %-20s | " fmt "\n", __FILE__, __LINE__, __FUNCTION__, ##args);} while (0)
 #else
   #define DEBUG_PRINT(type, fmt, args...) do {} while(0)
 #endif
