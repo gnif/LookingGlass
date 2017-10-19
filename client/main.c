@@ -238,7 +238,9 @@ int renderThread(void * unused)
     return -1;
   }
 
-  state.renderer = SDL_CreateRenderer(state.window  , -1, 0);
+  state.renderer = SDL_CreateRenderer(state.window, -1,
+      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
   if (!state.renderer)
   {
     DEBUG_ERROR("failed to create window");
@@ -261,7 +263,6 @@ int renderThread(void * unused)
     while(state.running && !ready && !error)
     {    
       // kick the guest and wait for a frame
-      ivshmem_kick_irq(state.shm->guestID, 0);
       switch(ivshmem_wait_irq(0))
       {
         case IVSHMEM_WAIT_RESULT_OK:
@@ -269,6 +270,7 @@ int renderThread(void * unused)
           break;
 
         case IVSHMEM_WAIT_RESULT_TIMEOUT:
+          ivshmem_kick_irq(state.shm->guestID, 0);
           ready = false;
           break;
 
@@ -282,11 +284,7 @@ int renderThread(void * unused)
     {
       DEBUG_ERROR("error during wait for host");
       break;
-    }    
-
-//      continue;
-//    }
-//    startup = false;
+    }
 
     // if the format is invalid or it has changed
     if (format.frameType == FRAME_TYPE_INVALID || !areFormatsSame(format, *state.shm))
@@ -338,11 +336,8 @@ int renderThread(void * unused)
 
     glDisable(GL_COLOR_LOGIC_OP);
     drawFunc(compFunc, texture, texPixels, pixels);
-
     state.shm->clientFrame = format.frames;
-
-    // dont waste CPU, frames don't come that fast!
-    usleep(10);
+    ivshmem_kick_irq(state.shm->guestID, 0);
   }
 
   SDL_DestroyTexture(texture);
@@ -491,7 +486,6 @@ int eventThread(void * arg)
           break;
       }
     }
-
     usleep(1000);
   }
 
