@@ -44,9 +44,16 @@ struct SpiceKeyboard
   uint32_t modifiers;
 };
 
+#define SPICE_MOUSE_QUEUE_SIZE 32
+
 struct SpiceMouse
 {
   uint32_t buttonState;
+
+  int                  sentCount;
+  SpiceMsgcMouseMotion queue[SPICE_MOUSE_QUEUE_SIZE];
+  int                  rpos, wpos;
+  int                  queueLen;
 };
 
 struct Spice
@@ -422,6 +429,25 @@ bool spice_on_inputs_channel_read()
     case SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
     {
       DEBUG_PROTO("SPICE_MSG_INPUTS_MOUSE_MOTION_ACK");
+      int sent = 0;
+      while(spice.mouse.queueLen && sent < 4)
+      {
+        SpiceMsgcMouseMotion *msg = &spice.mouse.queue[spice.mouse.rpos];
+        if (!spice_write_msg(channel, SPICE_MSGC_INPUTS_MOUSE_MOTION, msg, sizeof(SpiceMsgcMouseMotion)))
+        {
+          DEBUG_ERROR("failed to send post ack");
+          spice.mouse.sentCount = sent;
+          return false;
+        }
+
+        if (++spice.mouse.rpos == SPICE_MOUSE_QUEUE_SIZE)
+          spice.mouse.rpos = 0;
+
+        ++sent;
+        --spice.mouse.queueLen;
+      }
+
+      spice.mouse.sentCount = sent;
       return true;
     }
   }
@@ -738,11 +764,33 @@ bool spice_mouse_motion(int32_t x, int32_t y)
 {
   DEBUG_PROTO("x=%d, y=%d", x, y);
 
+  if (spice.mouse.sentCount == 4)
+  {
+    if (spice.mouse.queueLen == SPICE_MOUSE_QUEUE_SIZE)
+    {
+      DEBUG_ERROR("mouse motion ringbuffer full!");
+      return false;
+    }
+
+    SpiceMsgcMouseMotion *msg =
+      &spice.mouse.queue[spice.mouse.wpos++];
+    msg->x            = x;
+    msg->y            = y;
+    msg->button_state = spice.mouse.buttonState;
+
+    if (spice.mouse.wpos == SPICE_MOUSE_QUEUE_SIZE)
+      spice.mouse.wpos = 0;
+
+    ++spice.mouse.queueLen;
+    return true;
+  }
+
   SpiceMsgcMouseMotion msg;
   msg.x            = x;
   msg.y            = y;
   msg.button_state = spice.mouse.buttonState;
 
+  ++spice.mouse.sentCount;
   return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_MOTION, &msg, sizeof(msg));
 }
 
