@@ -124,7 +124,7 @@ void compFunc_BLACK_RLE(uint8_t * dst, const uint8_t * src, const size_t len)
   for(size_t i = 0; i < pixels;)
   {
     if (!src[0] && !src[1] && !src[2])
-    {      
+    {
       struct RLEHeader * h = (struct RLEHeader *)src;
       dst += h->length * 3;
       i   += h->length;
@@ -272,7 +272,7 @@ int renderThread(void * unused)
     bool ready = false;
     bool error = false;
     while(state.running && !ready && !error)
-    {    
+    {
       // kick the guest and wait for a frame
       switch(ivshmem_wait_irq(0))
       {
@@ -288,7 +288,7 @@ int renderThread(void * unused)
         case IVSHMEM_WAIT_RESULT_ERROR:
           error = true;
           break;
-      }  
+      }
     }
 
     if (error)
