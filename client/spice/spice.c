@@ -66,7 +66,7 @@ struct Spice
 // globals
 struct Spice spice =
 {
-  .sessionID            = 0,  
+  .sessionID            = 0,
   .scMain  .connected   = false,
   .scMain  .channelType = SPICE_CHANNEL_MAIN,
   .scInputs.connected   = false,
@@ -99,7 +99,7 @@ bool spice_connect(const char * host, const short port, const char * password)
   spice.addr.sin_family = AF_INET;
   spice.addr.sin_port   = htons(port);
 
-  spice.channelID = 0;  
+  spice.channelID = 0;
   if (!spice_connect_channel(&spice.scMain))
   {
     DEBUG_ERROR("connect main channel failed");
@@ -224,11 +224,11 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceDataHeader * heade
   if (!channel->initDone)
   {
     *handled = false;
-   
+
     return true;
   }
   switch(header->type)
-  {    
+  {
     case SPICE_MSG_MIGRATE:
     case SPICE_MSG_MIGRATE_DATA:
     {
@@ -354,7 +354,7 @@ bool spice_on_main_channel_read()
       DEBUG_ERROR("failed to set mouse mode");
       return false;
     }
- 
+
     if (!spice_connect_channel(&spice.scInputs))
     {
       DEBUG_ERROR("failed to connect inputs channel");
@@ -424,7 +424,7 @@ bool spice_on_inputs_channel_read()
       DEBUG_PROTO("SPICE_MSG_INPUTS_MOUSE_MOTION_ACK");
       return true;
     }
-  }  
+  }
 
   DEBUG_WARN("inputs channel unhandled message type %u", header.type);
   spice_discard(channel, header.size);
@@ -446,7 +446,7 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 
   int flag = 1;
   setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
- 
+
   if (connect(channel->socket, (const struct sockaddr *)&spice.addr, sizeof(spice.addr)) == -1)
   {
     DEBUG_ERROR("socket connect failure");
@@ -563,7 +563,7 @@ bool spice_connect_channel(struct SpiceChannel * channel)
     spice_disconnect_channel(channel);
     return false;
   }
-  
+
   if (linkResult != SPICE_LINK_ERR_OK)
   {
     DEBUG_ERROR("connect code error %u", linkResult);
@@ -645,13 +645,13 @@ bool spice_read(const struct SpiceChannel * channel, void * buffer, const ssize_
   {
     DEBUG_ERROR("invalid buffer argument supplied");
     return false;
-  }  
+  }
 
   ssize_t len = read(channel->socket, buffer, size);
   if (len != size)
   {
     DEBUG_ERROR("incomplete write");
-    return false;    
+    return false;
   }
 
   return true;
