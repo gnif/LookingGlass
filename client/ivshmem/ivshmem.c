@@ -282,7 +282,7 @@ bool ivshmem_read_msg(int64_t * index, int * fd)
       continue;
     }
 
-    *fd = *(int*)CMSG_DATA(cmsg);
+    memcpy(fd, CMSG_DATA(cmsg), sizeof(int));
   }
 
   return true;

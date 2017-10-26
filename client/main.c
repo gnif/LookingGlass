@@ -152,6 +152,8 @@ inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHead
 void drawFunc_ARGB10(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
 {
   SDL_UpdateTexture(texture, NULL, src, state.shm->stride * 4);
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
   SDL_RenderClear(state.renderer);
 
   SDL_RenderCopy(state.renderer, texture, NULL, NULL);
@@ -161,6 +163,8 @@ void drawFunc_ARGB10(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, co
 void drawFunc_ARGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 4);
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
   SDL_UnlockTexture(texture);
   SDL_RenderClear(state.renderer);
 
@@ -171,6 +175,8 @@ void drawFunc_ARGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, cons
 void drawFunc_RGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 3);
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
   SDL_UnlockTexture(texture);
   SDL_RenderClear(state.renderer);
 
@@ -182,7 +188,10 @@ void drawFunc_XOR(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const
 {
   glEnable(GL_COLOR_LOGIC_OP);
   glLogicOp(GL_XOR);
+
   compFunc(dst, src, state.shm->height * state.shm->stride * 3);
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
   SDL_UnlockTexture(texture);
   if (state.shm->frames == 1)
     SDL_RenderClear(state.renderer);
@@ -203,8 +212,10 @@ void drawFunc_YUV420P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, c
       src + pixels             , state.shm->stride / 2,
       src + pixels + pixels / 4, state.shm->stride / 2
   );
-  SDL_RenderClear(state.renderer);
 
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
+  SDL_RenderClear(state.renderer);
   SDL_RenderCopy(state.renderer, texture, NULL, NULL);
   SDL_RenderPresent(state.renderer);
 }
@@ -337,7 +348,6 @@ int renderThread(void * unused)
     glDisable(GL_COLOR_LOGIC_OP);
     drawFunc(compFunc, texture, texPixels, pixels);
     state.shm->clientFrame = format.frames;
-    ivshmem_kick_irq(state.shm->guestID, 0);
   }
 
   SDL_DestroyTexture(texture);
