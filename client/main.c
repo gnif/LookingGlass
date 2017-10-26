@@ -47,6 +47,11 @@ struct KVMGFXState
   SDL_sem    * cpySem;
   SDL_Thread * cpyThreads[COPY_THREADS];
   CopyJob      cpyJobs   [COPY_THREADS];
+
+#ifdef DEBUG_INPUT_STATE
+  uint8_t kb[(SDL_NUM_SCANCODES / sizeof(uint8_t))+1];
+  bool    mouse[10];
+#endif
 };
 
 struct KVMGFXState state;
@@ -438,12 +443,34 @@ int eventThread(void * arg)
             serverMode = !serverMode;
             spice_mouse_mode(serverMode);
             SDL_SetRelativeMouseMode(serverMode);
+
+#ifdef DEBUG_INPUT_STATE
+            DEBUG_INFO("mouse state:");
+            for (unsigned int i = 0; i < sizeof(state.mouse) / sizeof(bool); ++i)
+            {
+              if (state.mouse[i])
+                DEBUG_INFO("0x%02x", i);
+            }
+
+            DEBUG_INFO("keyboard state:");
+            for (unsigned int i = 0; i < SDL_NUM_SCANCODES; ++i)
+            {
+              unsigned int block = i / 8;
+              if (state.kb[block] & (1 << (i - block * 8)))
+                DEBUG_INFO("0x%02x", i);
+            }
+#endif
             break;
           }
 
           uint32_t scancode = mapScancode(sc);
           if (scancode == 0)
             break;
+
+#ifdef DEBUG_INPUT_STATE
+          uint16_t block = scancode / 8;
+          state.kb[block] |= 1 << (scancode - block * 8);
+#endif
 
           spice_key_down(scancode);
           break;
@@ -459,6 +486,11 @@ int eventThread(void * arg)
           uint32_t scancode = mapScancode(sc);
           if (scancode == 0)
             break;
+
+#ifdef DEBUG_INPUT_STATE
+          uint16_t block = scancode / 8;
+          state.kb[block] &= ~(1 << (scancode - block * 8));
+#endif
 
           spice_key_up(scancode);
           break;
@@ -483,11 +515,17 @@ int eventThread(void * arg)
           break;
 
         case SDL_MOUSEBUTTONDOWN:
+#ifdef DEBUG_INPUT_STATE
+          state.mouse[event.button.button] = true;
+#endif
           spice_mouse_position(event.button.x, event.button.y);
           spice_mouse_press(event.button.button);
           break;
 
         case SDL_MOUSEBUTTONUP:
+#ifdef DEBUG_INPUT_STATE
+          state.mouse[event.button.button] = false;
+#endif
           spice_mouse_position(event.button.x, event.button.y);
           spice_mouse_release(event.button.button);
           break;
