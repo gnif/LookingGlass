@@ -390,13 +390,6 @@ int eventThread(void * arg)
   spice_mouse_mode(true);
   SDL_SetRelativeMouseMode(true);
 
-  // work around SDL_ShowCursor being non functional
-  SDL_Cursor *cursor;
-  int32_t cursorData[2] = {0, 0};
-  cursor = SDL_CreateCursor((uint8_t*)cursorData, (uint8_t*)cursorData, 8, 8, 4, 4);
-  SDL_SetCursor(cursor);
-  SDL_ShowCursor(SDL_DISABLE);
-
   // ensure mouse acceleration is identical in server mode
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
 
@@ -513,8 +506,6 @@ int eventThread(void * arg)
     usleep(1000);
   }
 
-  SDL_FreeCursor(cursor);
-
   return 0;
 }
 
@@ -535,6 +526,13 @@ int main(int argc, char * argv[])
     DEBUG_ERROR("failed to create window");
     return -1;
   }
+
+  // work around SDL_ShowCursor being non functional
+  SDL_Cursor *cursor = NULL;
+  int32_t cursorData[2] = {0, 0};
+  cursor = SDL_CreateCursor((uint8_t*)cursorData, (uint8_t*)cursorData, 8, 8, 4, 4);
+  SDL_SetCursor(cursor);
+  SDL_ShowCursor(SDL_DISABLE);
 
   state.renderer = SDL_CreateRenderer(state.window, -1,
       SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -626,6 +624,9 @@ int main(int argc, char * argv[])
 
   if (state.window)
     SDL_DestroyWindow(state.window);
+
+  if (cursor)
+    SDL_FreeCursor(cursor);
 
   if (shm_fd)
     close(shm_fd);
