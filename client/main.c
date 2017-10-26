@@ -385,13 +385,13 @@ int eventThread(void * arg)
   int  mouseX = 0;
   int  mouseY = 0;
 
+  // ensure mouse acceleration is identical in server mode
+  SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
+
   // default to server mode
   bool serverMode = true;
   spice_mouse_mode(true);
   SDL_SetRelativeMouseMode(true);
-
-  // ensure mouse acceleration is identical in server mode
-  SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
 
   SDL_Event event;
   while(state.running)
