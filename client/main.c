@@ -239,31 +239,7 @@ int renderThread(void * unused)
   format.width     = 0;
   format.height    = 0;
   format.stride    = 0;
-  format.frames    = 0;  
-
-  if (SDL_Init(SDL_INIT_VIDEO) < 0)
-  {
-    DEBUG_ERROR("SDL_Init Failed");
-    return -1;
-  }
-
-  state.window = SDL_CreateWindow("KVM-GFX Test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 100, 100, SDL_WINDOW_BORDERLESS);
-  if (!state.window)
-  {
-    DEBUG_ERROR("failed to create window");
-    return -1;
-  }
-
-  state.renderer = SDL_CreateRenderer(state.window, -1,
-      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-
-  if (!state.renderer)
-  {
-    DEBUG_ERROR("failed to create window");
-    return -1;
-  }
-
-  startCopyThreads();
+  format.frames    = 0;
 
   while(state.running)
   {
@@ -546,6 +522,31 @@ int main(int argc, char * argv[])
 {
   memset(&state, 0, sizeof(state));
   state.running = true;
+
+  if (SDL_Init(SDL_INIT_VIDEO) < 0)
+  {
+    DEBUG_ERROR("SDL_Init Failed");
+    return -1;
+  }
+
+  state.window = SDL_CreateWindow("KVM-GFX Test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 100, 100, SDL_WINDOW_BORDERLESS);
+  if (!state.window)
+  {
+    DEBUG_ERROR("failed to create window");
+    return -1;
+  }
+
+  state.renderer = SDL_CreateRenderer(state.window, -1,
+      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+  if (!state.renderer)
+  {
+    DEBUG_ERROR("failed to create window");
+    return -1;
+  }
+
+  startCopyThreads();
+
 
   int         shm_fd    = 0;
   SDL_Thread *t_ivshmem = NULL;
