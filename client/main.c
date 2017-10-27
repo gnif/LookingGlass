@@ -382,8 +382,9 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
 
 int eventThread(void * arg)
 {
-  int  mouseX = 0;
-  int  mouseY = 0;
+  int  mouseX      = 0;
+  int  mouseY      = 0;
+  int  repeatCount = 0;
 
   // ensure mouse acceleration is identical in server mode
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
@@ -407,8 +408,16 @@ int eventThread(void * arg)
         case SDL_KEYDOWN:
         {
           SDL_Scancode sc = event.key.keysym.scancode;
+          if (event.key.repeat)
+            ++repeatCount;
+          else
+            repeatCount = 0;
+
           if (sc == SDL_SCANCODE_SCROLLLOCK)
           {
+            if (event.key.repeat)
+              break;
+
             serverMode = !serverMode;
             spice_mouse_mode(serverMode);
             SDL_SetRelativeMouseMode(serverMode);
@@ -432,6 +441,10 @@ int eventThread(void * arg)
             break;
           }
 
+          if (repeatCount != 0 && repeatCount != 100)
+            break;
+
+          repeatCount = 0;
           uint32_t scancode = mapScancode(sc);
           if (scancode == 0)
             break;
