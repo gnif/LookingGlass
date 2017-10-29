@@ -207,6 +207,16 @@ void drawFunc_XOR(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const
   memset(dst, 0, state.shm->height * state.shm->stride * 3);
 }
 
+void drawFunc_YUV444P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
+{
+  compFunc(dst, src, state.shm->height * state.shm->stride * 3);
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
+  SDL_UnlockTexture(texture);
+  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
+  SDL_RenderPresent(state.renderer);
+}
+
 void drawFunc_YUV420P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
 {
   const unsigned int pixels = state.shm->width * state.shm->height;
@@ -285,14 +295,17 @@ int renderThread(void * unused)
         texture = NULL;
       }
 
+#define SDL_PIXELFORMAT_YUV444P SDL_PIXELTYPE_ARRAYU8 | SDL_ARRAYORDER_RGB
+
       Uint32 sdlFormat;
       switch(state.shm->frameType)
       {
         case FRAME_TYPE_ARGB   : sdlFormat = SDL_PIXELFORMAT_ARGB8888   ; drawFunc = drawFunc_ARGB   ; break;
         case FRAME_TYPE_RGB    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_RGB    ; break;
+        case FRAME_TYPE_XOR    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_XOR    ; break;
+        case FRAME_TYPE_YUV444P: sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_YUV444P; break; // incorrect for now
         case FRAME_TYPE_YUV420P: sdlFormat = SDL_PIXELFORMAT_YV12       ; drawFunc = drawFunc_YUV420P; break;
         case FRAME_TYPE_ARGB10 : sdlFormat = SDL_PIXELFORMAT_ARGB2101010; drawFunc = drawFunc_ARGB10 ; break;
-        case FRAME_TYPE_XOR    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_XOR    ; break;
         default:
           format.frameType = FRAME_TYPE_INVALID;
           continue;
