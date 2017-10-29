@@ -40,6 +40,8 @@ struct KVMGFXState
 {
   bool                  running;
   bool                  started;
+  bool                  windowChanged;
+
   SDL_Window          * window;
   SDL_Renderer        * renderer;
   struct KVMGFXHeader * shm;
@@ -316,6 +318,7 @@ int renderThread(void * unused)
       SDL_LockTexture(texture, NULL, (void**)&texPixels, &unused);
 
       memcpy(&format, state.shm, sizeof(format));
+      state.windowChanged = true;
     }
 
     glDisable(GL_COLOR_LOGIC_OP);
@@ -404,6 +407,14 @@ int eventThread(void * arg)
         spice_mouse_mode(false);
         SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
         init = true;
+      }
+
+      if (state.windowChanged)
+      {
+        mouseX = state.shm->mouseX;
+        mouseY = state.shm->mouseY;
+        SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
+        state.windowChanged = false;
       }
 
       switch(event.type)
