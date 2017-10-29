@@ -55,7 +55,7 @@ struct SpiceKeyboard
   uint32_t modifiers;
 };
 
-#define SPICE_MOUSE_QUEUE_SIZE 8
+#define SPICE_MOUSE_QUEUE_SIZE 16
 
 struct SpiceMouse
 {
