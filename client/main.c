@@ -425,6 +425,13 @@ int eventThread(void * arg)
             spice_mouse_mode(serverMode);
             SDL_SetRelativeMouseMode(serverMode);
 
+            if (!serverMode)
+            {
+              mouseX = state.shm->mouseX;
+              mouseY = state.shm->mouseY;
+              SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
+            }
+
 #ifdef DEBUG_INPUT_STATE
             DEBUG_INFO("mouse state:");
             for (unsigned int i = 0; i < sizeof(state.mouse) / sizeof(bool); ++i)
