@@ -367,15 +367,15 @@ bool spice_on_main_channel_read()
     }
 
     spice.sessionID = msg.session_id;
-    if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT && !spice_mouse_mode(false))
-    {
-      DEBUG_ERROR("failed to set mouse mode");
-      return false;
-    }
-
     if (!spice_connect_channel(&spice.scInputs))
     {
       DEBUG_ERROR("failed to connect inputs channel");
+      return false;
+    }
+
+    if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT && !spice_mouse_mode(false))
+    {
+      DEBUG_ERROR("failed to set mouse mode");
       return false;
     }
 
