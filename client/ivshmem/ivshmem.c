@@ -46,7 +46,7 @@ struct IVSHMEM
   struct IVSHMEMClient * clients;
 
   off_t  mapSize;
-  void * map;  
+  void * map;
 };
 
 struct IVSHMEM ivshmem =
@@ -383,7 +383,7 @@ void ivshmem_remove_client(struct IVSHMEMClient * client)
     client->next->last = client->last;
 
   if (ivshmem.clients == client)
-    ivshmem.clients = client->next;  
+    ivshmem.clients = client->next;
 
   free(client);
 }
@@ -411,7 +411,7 @@ bool ivshmem_process()
   if (index > 0xFFFF)
   {
     DEBUG_ERROR("invalid index > 0xFFFF");
-    return false;    
+    return false;
   }
 
   if (index == ivshmem.server.clientID)
@@ -522,6 +522,6 @@ bool ivshmem_kick_irq(uint16_t clientID, uint16_t vector)
   if (write(fd, &kick, sizeof(kick)) == sizeof(kick))
     return true;
 
-  DEBUG_ERROR("failed to send kick");  
+  DEBUG_ERROR("failed to send kick");
   return false;
 }
