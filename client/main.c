@@ -478,37 +478,70 @@ int eventThread(void * arg)
         }
 
         case SDL_MOUSEWHEEL:
-          spice_mouse_press  (event.wheel.y == 1 ? 4 : 5);
-          spice_mouse_release(event.wheel.y == 1 ? 4 : 5);
+          if (
+            !spice_mouse_press  (event.wheel.y == 1 ? 4 : 5) ||
+            !spice_mouse_release(event.wheel.y == 1 ? 4 : 5)
+            )
+          {
+            DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
+            break;
+          }
           break;
 
         case SDL_MOUSEMOTION:
+        {
+          bool ok;
           if (serverMode)
-            spice_mouse_motion(event.motion.xrel, event.motion.yrel);
+            ok = spice_mouse_motion(event.motion.xrel, event.motion.yrel);
           else
-            spice_mouse_motion(
+            ok = spice_mouse_motion(
                 (int)event.motion.x - mouseX,
                 (int)event.motion.y - mouseY
             );
 
+          if (!ok)
+          {
+            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+            break;
+          }
+
           mouseX = event.motion.x;
           mouseY = event.motion.y;
           break;
+        }
 
         case SDL_MOUSEBUTTONDOWN:
 #ifdef DEBUG_INPUT_STATE
           state.mouse[event.button.button] = true;
 #endif
-          spice_mouse_position(event.button.x, event.button.y);
-          spice_mouse_press(event.button.button);
+          if (
+            !spice_mouse_position(event.button.x, event.button.y) ||
+            !spice_mouse_press(event.button.button)
+          )
+          {
+            DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
+            break;
+          }
+
+          mouseX = event.motion.x;
+          mouseY = event.motion.y;
           break;
 
         case SDL_MOUSEBUTTONUP:
 #ifdef DEBUG_INPUT_STATE
           state.mouse[event.button.button] = false;
 #endif
-          spice_mouse_position(event.button.x, event.button.y);
-          spice_mouse_release(event.button.button);
+          if (
+            !spice_mouse_position(event.button.x, event.button.y) ||
+            !spice_mouse_release(event.button.button)
+          )
+          {
+            DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
+            break;
+          }
+
+          mouseX = event.motion.x;
+          mouseY = event.motion.y;
           break;
 
         default:
