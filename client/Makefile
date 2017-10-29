@@ -1,4 +1,4 @@
-CFLAGS=-g -Og -std=gnu99 -march=native -Wall -Werror -I./
+CFLAGS=-g -Og -std=gnu99 -march=native -Wall -Werror -I./ -DDEBUG
 LDFLAGS=-lrt -lGL
 
 CFLAGS+=`pkg-config --cflags sdl2`

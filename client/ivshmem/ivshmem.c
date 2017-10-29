@@ -1,7 +1,4 @@
 #include "ivshmem.h"
-
-#define DEBUG
-#define DEBUG_IVSHMEM
 #include "debug.h"
 
 #include <stdlib.h>

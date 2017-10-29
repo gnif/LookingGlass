@@ -11,7 +11,6 @@
 
 #include <GL/gl.h>
 
-#define DEBUG
 #include "debug.h"
 #include "KVMGFXHeader.h"
 #include "ivshmem/ivshmem.h"

@@ -1,6 +1,4 @@
 #include "spice.h"
-
-#define DEBUG
 #include "debug.h"
 
 #include <string.h>
