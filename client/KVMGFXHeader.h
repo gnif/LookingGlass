@@ -30,9 +30,9 @@ struct KVMGFXHeader
   uint32_t  width;       // the width
   uint32_t  height;      // the height
   uint32_t  stride;      // the row stride
-  uint64_t  frames;      // total frame count
-  uint64_t  clientFrame; // current client frame
-  uint32_t  dataLen;     // total lengh of the data after this header
+  int32_t   mouseX;      // the initial mouse X position
+  int32_t   mouseY;      // the initial mouse Y position
+  uint64_t  dataLen;     // total lengh of the data after this header
 };
 
 #pragma pack(push,1)

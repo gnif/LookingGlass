@@ -39,6 +39,7 @@ CopyJob;
 struct KVMGFXState
 {
   bool                  running;
+  bool                  started;
   SDL_Window          * window;
   SDL_Renderer        * renderer;
   struct KVMGFXHeader * shm;
@@ -197,9 +198,6 @@ void drawFunc_XOR(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const
   ivshmem_kick_irq(state.shm->guestID, 0);
 
   SDL_UnlockTexture(texture);
-  if (state.shm->frames == 1)
-    SDL_RenderClear(state.renderer);
-
   SDL_RenderCopy(state.renderer, texture, NULL, NULL);
   SDL_RenderPresent(state.renderer);
 
@@ -238,7 +236,6 @@ int renderThread(void * unused)
   format.width     = 0;
   format.height    = 0;
   format.stride    = 0;
-  format.frames    = 0;
 
   while(state.running)
   {
@@ -321,13 +318,9 @@ int renderThread(void * unused)
       memcpy(&format, state.shm, sizeof(format));
     }
 
-    if (format.frames != state.shm->frames - 1)
-      DEBUG_INFO("dropped %lu", state.shm->frames - format.frames);
-    format.frames = state.shm->frames;
-
     glDisable(GL_COLOR_LOGIC_OP);
     drawFunc(compFunc, texture, texPixels, pixels);
-    state.shm->clientFrame = format.frames;
+    state.started = true;
   }
 
   SDL_DestroyTexture(texture);
@@ -381,29 +374,40 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
 
 int eventThread(void * arg)
 {
+  bool serverMode  = false;
   int  mouseX      = 0;
   int  mouseY      = 0;
   int  repeatCount = 0;
+  bool init        = false;
 
   // ensure mouse acceleration is identical in server mode
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
 
-  // default to server mode
-  bool serverMode = true;
-  spice_mouse_mode(true);
-  SDL_SetRelativeMouseMode(true);
-
-  SDL_Event event;
   while(state.running)
   {
+    SDL_Event event;
     while(SDL_PollEvent(&event))
     {
+      if (event.type == SDL_QUIT)
+      {
+        state.running = false;
+        break;
+      }
+
+      if (!state.started)
+        continue;
+
+      if (!init)
+      {
+        mouseX = state.shm->mouseX;
+        mouseY = state.shm->mouseY;
+        spice_mouse_mode(false);
+        SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
+        init = true;
+      }
+
       switch(event.type)
       {
-        case SDL_QUIT:
-          state.running = false;
-          break;
-
         case SDL_KEYDOWN:
         {
           SDL_Scancode sc = event.key.keysym.scancode;
