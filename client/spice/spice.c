@@ -717,6 +717,11 @@ bool spice_discard(const struct SpiceChannel * channel, ssize_t size)
 bool spice_key_down(uint32_t code)
 {
   DEBUG_KEYBOARD("%u", code);
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   if (code > 0x100)
     code = 0xe0 | ((code - 0x100) << 8);
@@ -732,6 +737,11 @@ bool spice_key_down(uint32_t code)
 bool spice_key_up(uint32_t code)
 {
   DEBUG_KEYBOARD("%u", code);
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   if (code < 0x100)
     code |= 0x80;
@@ -749,6 +759,11 @@ bool spice_key_up(uint32_t code)
 bool spice_mouse_mode(bool server)
 {
   DEBUG_MOUSE("%s", server ? "server" : "client");
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   SpiceMsgcMainMouseModeRequest msg;
   msg.mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
@@ -761,6 +776,11 @@ bool spice_mouse_mode(bool server)
 bool spice_mouse_position(uint32_t x, uint32_t y)
 {
   DEBUG_MOUSE("x=%u, y=%u", x, y);
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   SpiceMsgcMousePosition msg;
   msg.x            = x;
@@ -776,6 +796,11 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
 bool spice_mouse_motion(int32_t x, int32_t y)
 {
   DEBUG_MOUSE("x=%d, y=%d", x, y);
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   if (spice.mouse.sentCount == 4)
   {
@@ -812,6 +837,11 @@ bool spice_mouse_motion(int32_t x, int32_t y)
 bool spice_mouse_press(uint32_t button)
 {
   DEBUG_MOUSE("%u", button);
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   switch(button)
   {
@@ -832,6 +862,11 @@ bool spice_mouse_press(uint32_t button)
 bool spice_mouse_release(uint32_t button)
 {
   DEBUG_MOUSE("%u", button);
+  if (!spice.scInputs.connected)
+  {
+    DEBUG_ERROR("not connected");
+    return false;
+  }
 
   switch(button)
   {
