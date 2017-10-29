@@ -25,6 +25,19 @@
 
 #include "spice/messages.h"
 
+#ifdef DEBUG_SPICE_MOUSE
+  #define DEBUG_MOUSE(fmt, args...) DEBUG_PRINT("[M]", fmt, ##args)
+#else
+  #define DEBUG_MOUSE(fmt, args...) do {} while(0)
+#endif
+
+#ifdef DEBUG_SPICE_KEYBOARD
+  #define DEBUG_KEYBOARD(fmt, args...) DEBUG_PRINT("[K]", fmt, ##args)
+#else
+  #define DEBUG_KEYBOARD(fmt, args...) do {} while(0)
+#endif
+
+
 // ============================================================================
 
 // internal structures
@@ -703,7 +716,7 @@ bool spice_discard(const struct SpiceChannel * channel, ssize_t size)
 
 bool spice_key_down(uint32_t code)
 {
-  DEBUG_PROTO("%u", code);
+  DEBUG_KEYBOARD("%u", code);
 
   if (code > 0x100)
     code = 0xe0 | ((code - 0x100) << 8);
@@ -718,7 +731,7 @@ bool spice_key_down(uint32_t code)
 
 bool spice_key_up(uint32_t code)
 {
-  DEBUG_PROTO("%u", code);
+  DEBUG_KEYBOARD("%u", code);
 
   if (code < 0x100)
     code |= 0x80;
@@ -735,7 +748,7 @@ bool spice_key_up(uint32_t code)
 
 bool spice_mouse_mode(bool server)
 {
-  DEBUG_PROTO("%s", server ? "server" : "client");
+  DEBUG_MOUSE("%s", server ? "server" : "client");
 
   SpiceMsgcMainMouseModeRequest msg;
   msg.mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
@@ -747,7 +760,7 @@ bool spice_mouse_mode(bool server)
 
 bool spice_mouse_position(uint32_t x, uint32_t y)
 {
-  DEBUG_PROTO("x=%u, y=%u", x, y);
+  DEBUG_MOUSE("x=%u, y=%u", x, y);
 
   SpiceMsgcMousePosition msg;
   msg.x            = x;
@@ -762,7 +775,7 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
 
 bool spice_mouse_motion(int32_t x, int32_t y)
 {
-  DEBUG_PROTO("x=%d, y=%d", x, y);
+  DEBUG_MOUSE("x=%d, y=%d", x, y);
 
   if (spice.mouse.sentCount == 4)
   {
@@ -798,7 +811,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
 
 bool spice_mouse_press(uint32_t button)
 {
-  DEBUG_PROTO("%u", button);
+  DEBUG_MOUSE("%u", button);
 
   switch(button)
   {
@@ -818,7 +831,7 @@ bool spice_mouse_press(uint32_t button)
 
 bool spice_mouse_release(uint32_t button)
 {
-  DEBUG_PROTO("%u", button);
+  DEBUG_MOUSE("%u", button);
 
   switch(button)
   {
