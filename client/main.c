@@ -290,8 +290,6 @@ int renderThread(void * unused)
         texture = NULL;
       }
 
-#define SDL_PIXELFORMAT_YUV444P SDL_PIXELTYPE_ARRAYU8 | SDL_ARRAYORDER_RGB
-
       Uint32 sdlFormat;
       switch(state.shm->frameType)
       {
