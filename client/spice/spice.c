@@ -21,7 +21,7 @@
 #include <spice/protocol.h>
 #include <spice/error_codes.h>
 
-#include "spice/messages.h"
+#include "messages.h"
 
 #ifdef DEBUG_SPICE_MOUSE
   #define DEBUG_MOUSE(fmt, args...) DEBUG_PRINT("[M]", fmt, ##args)
