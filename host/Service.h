@@ -4,7 +4,7 @@
 #include <Windows.h>
 #include <stdbool.h>
 
-#include "ivshmem.h"
+#include "IVSHMEM.h"
 #include "ICapture.h"
 
 class Service

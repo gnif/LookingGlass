@@ -1,5 +1,5 @@
-#include "service.h"
-#include "ivshmem.h"
+#include "Service.h"
+#include "IVSHMEM.h"
 
 #include <common\debug.h>
 #include <common\KVMGFXHeader.h>
