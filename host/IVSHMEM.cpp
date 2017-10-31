@@ -187,6 +187,7 @@ void * IVSHMEM::GetMemory()
   m_size       = static_cast<UINT64>(map.size   );
   m_peerID     = static_cast<UINT16>(map.peerID );
   m_vectors    = static_cast<UINT16>(map.vectors);
+  m_memory     = map.ptr;
 
   return m_memory;
 }
