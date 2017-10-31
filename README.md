@@ -139,10 +139,12 @@ guest.
 Results
 -------
 
-Latency has not been measured but it is sufficient to say that it would be
-difficult to obtain an accurate measurement. In practice to this author it is
-impossible to see any latency between the physical display and host client
-output.
+Latency has not yet been measured, but in practice to this author it is
+extremely hard to notice any latency between the physical display and host
+client output when streaming 24bit RGB. When streaming YUV422P there no
+percevable latency at all, this indicates that the memory copy is the slowest
+part of the process. To combat this multi-threaded memory copy has been
+implemented on both the host and guest ends of the transfer.
 
 At this time we are waiting for a signed ivshmem driver by Red Hat to be
 released but since this may take quite some time we are currently in the
@@ -151,12 +153,15 @@ process of obtaining a driver signing certificate.
 Status
 ------
 
-The guest software at current needs to be rewritten, in it's current state it
-is simply proof of concept.
+The host software is considered 90% complete for devices that are capable of
+NvFBC and has been written in such as way to allow for other capture interfaces
+to be easily added to support other platforms.
 
-The host software is considered 90% complete, features such as copy & paste
-between client and guest are missing and it would be nice if it could also
-serve as the ivshmem-server.
+The client software is considered 90% complete, features such as copy & paste
+between client and host are missing and it would be nice if it could also
+serve as the ivshmem-server. The client is able to support a variaty of pixel
+formats types depending on the capability and performance of the capture API
+that is in use.
 
 Security
 --------
@@ -168,6 +173,19 @@ input invalid information that could be used to compromise the host system.
 At this time this is not a concern as our use case of this application at this
 time is in a completely trusted environment, but before it is more widely put
 into use this will need to be addressed.
+
+Improvements
+------------
+
+It may be possible to avoid the additional copy by handing the guest a block
+of memory directly from the hosts graphics device. This would allow the guest
+to stream directly into the texture on the host. This however could be another
+avenue of escape for malicious code on the guest and would need very careful
+consideration before any attempt is made to implement this.
+
+To achieve the above it would be required to modify qemu integrating the
+features of this client directly so that a SDL\_Texture's RAM could be mapped
+directly into the guest.
 
 License
 -------
