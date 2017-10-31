@@ -127,13 +127,13 @@ guest.
 | CPU       | AMD Ryzen 7 1700 @ 3.8GHz                                  |
 | RAM       | 16GB DDR4                                                  |
 | Host GPU  | NVidia GTX 1080 Ti running 4 monitors @ 1920x1200          |
-| Guest GPU | NVidia GTX 680 [modified to a Quadro K5000][2] @ 1920x1200 |
+| Guest GPU | NVidia GTX 680 [modified to a Quadro K5000][3] @ 1920x1200 |
 
 ### Software
 
 |       |                                                    |
 |-------|----------------------------------------------------|
-| Host  | Debian 9 + [NPT patch][2]                          |
+| Host  | Debian 9 + [NPT patch][4]                          |
 | Guest | Windows 10 running in KVM on the i440 device tree. |
 
 Results
