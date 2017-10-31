@@ -19,18 +19,18 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 
 #ifdef DEBUG
-  #define DEBUG_PRINT(type, fmt, args...) do {fprintf(stderr, type " %20s:%-5u | %-24s | " fmt "\n", __FILE__, __LINE__, __FUNCTION__, ##args);} while (0)
+  #define DEBUG_PRINT(type, fmt, ...) do {fprintf(stderr, type " %20s:%-5u | %-24s | " fmt "\n", __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
 #else
-  #define DEBUG_PRINT(type, fmt, args...) do {} while(0)
+  #define DEBUG_PRINT(type, fmt, ...) do {} while(0)
 #endif
 
-#define DEBUG_INFO(fmt, args...) DEBUG_PRINT("[I]", fmt, ##args)
-#define DEBUG_WARN(fmt, args...) DEBUG_PRINT("[W]", fmt, ##args)
-#define DEBUG_ERROR(fmt, args...) DEBUG_PRINT("[E]", fmt, ##args)
-#define DEBUG_FIXME(fmt, args...) DEBUG_PRINT("[F]", fmt, ##args)
+#define DEBUG_INFO(fmt, ...) DEBUG_PRINT("[I]", fmt, ##__VA_ARGS__)
+#define DEBUG_WARN(fmt, ...) DEBUG_PRINT("[W]", fmt, ##__VA_ARGS__)
+#define DEBUG_ERROR(fmt, ...) DEBUG_PRINT("[E]", fmt, ##__VA_ARGS__)
+#define DEBUG_FIXME(fmt, ...) DEBUG_PRINT("[F]", fmt, ##__VA_ARGS__)
 
 #if defined(DEBUG_SPICE) | defined(DEBUG_IVSHMEM)
   #define DEBUG_PROTO(fmt, args...) DEBUG_PRINT("[P]", fmt, ##args)
 #else
-  #define DEBUG_PROTO(fmt, args...) do {} while(0)
+  #define DEBUG_PROTO(fmt, ...) do {} while(0)
 #endif
