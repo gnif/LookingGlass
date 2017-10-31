@@ -1,8 +1,8 @@
 #include "Service.h"
 #include "IVSHMEM.h"
 
-#include <common\debug.h>
-#include <common\KVMGFXHeader.h>
+#include "common\debug.h"
+#include "common\KVMGFXHeader.h"
 
 #include "CaptureFactory.h"
 
@@ -25,6 +25,14 @@ bool Service::Initialize()
 {
   if (m_initialized)
     DeInitialize();
+
+  m_capture = CaptureFactory::GetCaptureDevice();
+  if (!m_capture || !m_capture->Initialize())
+  {
+    DEBUG_ERROR("Failed to initialize capture interface");
+    DeInitialize();
+    return false;
+  }
 
   if (!m_ivshmem->Initialize())
   {
@@ -56,14 +64,6 @@ bool Service::Initialize()
     return false;
   }
 
-  m_capture = CaptureFactory::GetCaptureDevice();
-  if (!m_capture || !m_capture->Initialize())
-  {
-    DEBUG_ERROR("Failed to initialize capture interface");
-    DeInitialize();
-    return false;
-  }
-
   KVMGFXHeader * header = static_cast<KVMGFXHeader*>(m_memory);
   ZeroMemory(header, sizeof(KVMGFXHeader));
   memcpy(header->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC));
@@ -77,17 +77,18 @@ bool Service::Initialize()
 
 void Service::DeInitialize()
 {
+  if (m_readyEvent != INVALID_HANDLE_VALUE)
+    CloseHandle(m_readyEvent);
+
+  m_memory = NULL;
+  m_ivshmem->DeInitialize();
+
   if (m_capture)
   {
     m_capture->DeInitialize();
     m_capture = NULL;
   }
 
-  if (m_readyEvent != INVALID_HANDLE_VALUE)
-    CloseHandle(m_readyEvent);
-
-  m_memory = NULL;
-  m_ivshmem->DeInitialize();
   m_initialized = false;
 }
 

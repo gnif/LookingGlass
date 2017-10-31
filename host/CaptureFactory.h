@@ -4,12 +4,13 @@
 #include <Windows.h>
 
 #include "ICapture.h"
+#include "Capture\NvFBC.h"
 
 static class CaptureFactory
 {
 public:
   static ICapture * GetCaptureDevice()
   {
-    return NULL;
+    return new Capture::NvFBC();
   }
 };

@@ -2,8 +2,8 @@
 
 #include <Windows.h>
 #include <SetupAPI.h>
-#include <vendor\kvm-guest-drivers-windows\ivshmem\Public.h>
-#include <common\debug.h>
+#include "vendor\kvm-guest-drivers-windows\ivshmem\Public.h"
+#include "common\debug.h"
 
 IVSHMEM * IVSHMEM::m_instance = NULL;
 

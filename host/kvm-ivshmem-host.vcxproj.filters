@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\Capture">
+      <UniqueIdentifier>{3a65593b-37a9-448d-acf0-6339dea46ed1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Capture">
+      <UniqueIdentifier>{0a865d22-907e-44ea-a230-ad7ede7edeb0}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ivshmem.cpp">
@@ -23,6 +29,9 @@
     </ClCompile>
     <ClCompile Include="Service.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Capture\NvFBC.cpp">
+      <Filter>Source Files\Capture</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -36,6 +45,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CaptureFactory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Capture\NvFBC.h">
+      <Filter>Header Files\Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="Util.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

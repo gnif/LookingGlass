@@ -1,6 +1,6 @@
 #include <Windows.h>
 #include <tchar.h>
-#include <common\debug.h>
+#include "common\debug.h"
 
 #include "Service.h"
 

@@ -1,12 +1,12 @@
 #pragma once
 
-#include <common/KVMGFXHeader.h>
+#include "common/KVMGFXHeader.h"
 
 __interface ICapture
 {
 public:
   bool Initialize();
-  bool DeInitialize();
+  void DeInitialize();
   enum FrameType GetFrameType();
   enum FrameComp GetFrameCompression();
   size_t GetMaxFrameSize();
