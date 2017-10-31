@@ -22,6 +22,7 @@ public:
   UINT16 GetPeerID();
   UINT16 GetVectors();
   void * GetMemory();
+  HANDLE CreateVectorEvent(UINT16 vector);
 
 protected:
 

@@ -190,3 +190,30 @@ void * IVSHMEM::GetMemory()
 
   return m_memory;
 }
+
+HANDLE IVSHMEM::CreateVectorEvent(UINT16 vector)
+{
+  if (!m_initialized)
+    return INVALID_HANDLE_VALUE;
+
+  HANDLE event = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (event == INVALID_HANDLE_VALUE)
+  {
+    DEBUG_ERROR("CreateEvent Failed: %d", GetLastError());
+    return INVALID_HANDLE_VALUE;
+  }
+
+  IVSHMEM_EVENT msg;
+  msg.event      = event;
+  msg.singleShot = false;
+  msg.vector     = vector;
+
+  if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REGISTER_EVENT, &msg, sizeof(IVSHMEM_EVENT), NULL, 0, NULL, NULL))
+  {
+    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    CloseHandle(event);
+    return INVALID_HANDLE_VALUE;
+  }
+
+  return event;
+}
