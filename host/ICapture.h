@@ -2,6 +2,16 @@
 
 #include "common/KVMGFXHeader.h"
 
+struct FrameInfo
+{
+  unsigned int width;
+  unsigned int height;
+  unsigned int stride;
+  void * buffer;
+  size_t bufferSize;
+  size_t outSize;
+};
+
 __interface ICapture
 {
 public:
@@ -10,5 +20,5 @@ public:
   enum FrameType GetFrameType();
   enum FrameComp GetFrameCompression();
   size_t GetMaxFrameSize();
-  bool GrabFrame(void * buffer, size_t bufferSize, size_t * outLen);
+  bool GrabFrame(struct FrameInfo & frame);
 };

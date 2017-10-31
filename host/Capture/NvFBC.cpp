@@ -15,7 +15,9 @@ namespace Capture
 {
 
   NvFBC::NvFBC() :
-    m_hDLL(NULL)
+    m_initialized(false),
+    m_hDLL(NULL),
+    m_nvFBC(NULL)
   {
   }
 
@@ -81,8 +83,6 @@ namespace Capture
     params.pDevice         = NULL;
     params.dwAdapterIdx    = 0;
 
-    // do not remove this
-    #include "NvFBCSpecial.h"
 
     if (m_fnCreateEx(&params) != NVFBC_SUCCESS)
     {
@@ -91,44 +91,135 @@ namespace Capture
       return false;
     }
 
-    m_maxCaptureWidth  = params.dwMaxDisplayWidth;
-    m_maxCaptureHeight = params.dwMaxDisplayHeight;
+m_maxCaptureWidth = params.dwMaxDisplayWidth;
+m_maxCaptureHeight = params.dwMaxDisplayHeight;
+m_nvFBC = static_cast<NvFBCToSys *>(params.pNvFBC);
 
+NVFBC_TOSYS_SETUP_PARAMS setupParams;
+ZeroMemory(&setupParams, sizeof(NVFBC_TOSYS_SETUP_PARAMS));
+setupParams.dwVersion = NVFBC_TOSYS_SETUP_PARAMS_VER;
+setupParams.eMode = NVFBC_TOSYS_RGB;
+setupParams.bWithHWCursor = TRUE;
+setupParams.bDiffMap = FALSE;
+setupParams.ppBuffer = (void **)&m_frameBuffer;
+setupParams.ppDiffMap = NULL;
 
-    m_initialized = true;
-    return true;
+if (m_nvFBC->NvFBCToSysSetUp(&setupParams) != NVFBC_SUCCESS)
+{
+  DEBUG_ERROR("NvFBCToSysSetUp Failed");
+  DeInitialize();
+  return false;
+}
+
+// this is required according to NVidia sample code
+Sleep(100);
+
+ZeroMemory(&m_grabFrameParams, sizeof(NVFBC_TOSYS_GRAB_FRAME_PARAMS));
+ZeroMemory(&m_grabInfo, sizeof(NvFBCFrameGrabInfo));
+m_grabFrameParams.dwVersion = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
+m_grabFrameParams.dwFlags = NVFBC_TOSYS_NOFLAGS;
+m_grabFrameParams.dwStartX = 0;
+m_grabFrameParams.dwStartY = 0;
+m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_SCALE;
+m_grabFrameParams.pNvFBCFrameGrabInfo = &m_grabInfo;
+
+m_initialized = true;
+return true;
   }
 
   void NvFBC::DeInitialize()
   {
-    m_fnCreateEx       = NULL;
-    m_fnSetGlobalFlags = NULL;
-    m_fnGetStatusEx    = NULL;
-    m_fnEnable         = NULL;
+    m_frameBuffer = NULL;
 
-    FreeLibrary(m_hDLL);
-    m_hDLL = NULL;
+    if (m_nvFBC)
+    {
+      m_nvFBC->NvFBCToSysRelease();
+      m_nvFBC = NULL;
+    }
+
+    m_maxCaptureWidth = 0;
+    m_maxCaptureHeight = 0;
+    m_fnCreateEx = NULL;
+    m_fnSetGlobalFlags = NULL;
+    m_fnGetStatusEx = NULL;
+    m_fnEnable = NULL;
+
+    if (m_hDLL)
+    {
+      FreeLibrary(m_hDLL);
+      m_hDLL = NULL;
+    }
 
     m_initialized = false;
   }
 
   FrameType NvFBC::GetFrameType()
   {
+    if (!m_initialized)
+      return FRAME_TYPE_INVALID;
+
     return FRAME_TYPE_RGB;
   }
 
   FrameComp NvFBC::GetFrameCompression()
   {
+    if (!m_initialized)
+      return FRAME_COMP_NONE;
+
     return FRAME_COMP_NONE;
   }
 
   size_t NvFBC::GetMaxFrameSize()
   {
-    return 0;
+    if (!m_initialized)
+      return false;
+
+    return m_maxCaptureWidth * m_maxCaptureHeight * 3;
   }
 
-  bool NvFBC::GrabFrame(void * buffer, size_t bufferSize, size_t * outLen)
+  bool NvFBC::GrabFrame(struct FrameInfo & frame)
   {
+    if (!m_initialized)
+      return false;
+
+    const HWND hDesktop = GetDesktopWindow();
+    RECT desktop;
+    GetWindowRect(hDesktop, &desktop);
+
+    m_grabFrameParams.dwTargetWidth  = desktop.right;
+    m_grabFrameParams.dwTargetHeight = desktop.bottom;
+    for(int i = 0; i < 2; ++i)
+    {
+      NVFBCRESULT status = m_nvFBC->NvFBCToSysGrabFrame(&m_grabFrameParams);
+      if (status == NVFBC_SUCCESS)
+      {
+        frame.width   = m_grabInfo.dwWidth;
+        frame.height  = m_grabInfo.dwHeight;
+        frame.stride  = m_grabInfo.dwBufferWidth;
+        frame.outSize = m_grabInfo.dwBufferWidth * m_grabInfo.dwHeight * 3;
+        memcpy(frame.buffer, m_frameBuffer, frame.outSize);
+        return true;
+      }
+
+      if (status == NVFBC_ERROR_DYNAMIC_DISABLE)
+      {
+        DEBUG_ERROR("NvFBC was disabled by someone else");
+        return false;
+      }
+
+      if (status == NVFBC_ERROR_INVALIDATED_SESSION)
+      {
+        DEBUG_WARN("Session was invalidated, attempting to restart");
+        DeInitialize();
+        if (!Initialize())
+        {
+          DEBUG_ERROR("Failed to re-iniaialize");
+          return false;
+        }
+      }
+    }
+
+    DEBUG_ERROR("Failed to grab frame");
     return false;
   }
 

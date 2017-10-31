@@ -65,11 +65,16 @@ bool Service::Initialize()
   }
 
   KVMGFXHeader * header = static_cast<KVMGFXHeader*>(m_memory);
+
+  // we save this as it might actually be valid
+  UINT16 hostID = header->hostID;
+
   ZeroMemory(header, sizeof(KVMGFXHeader));
   memcpy(header->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC));
 
   header->version   = 2;
   header->guestID   = m_ivshmem->GetPeerID();
+  header->hostID    = hostID;
 
   m_initialized = true;
   return true;
@@ -109,16 +114,25 @@ bool Service::Process(HANDLE stopEvent)
   // setup the header
   header->frameType = m_capture->GetFrameType();
   header->compType  = m_capture->GetFrameCompression();
+  header->dataLen   = 0;
+
+  FrameInfo frame;
+  frame.buffer     = data;
+  frame.bufferSize = m_ivshmem->GetSize() - sizeof(KVMGFXHeader);
 
   // capture a frame of data
-  if (!m_capture->GrabFrame(
-    data,
-    m_ivshmem->GetSize() - sizeof(KVMGFXHeader),
-    &header->dataLen))
+  if (!m_capture->GrabFrame(frame))
   {
+    header->dataLen = 0;
     DEBUG_ERROR("Capture failed");
     return false;
   }
+
+  // copy the frame details into the header
+  header->width   = frame.width;
+  header->height  = frame.height;
+  header->stride  = frame.stride;
+  header->dataLen = frame.outSize;
 
   // tell the host where the cursor is
   POINT cursorPos;

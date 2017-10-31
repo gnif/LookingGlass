@@ -3,7 +3,7 @@
 
 #include "common\debug.h"
 
-static class Util
+class Util
 {
 public:
   static std::string GetSystemRoot()

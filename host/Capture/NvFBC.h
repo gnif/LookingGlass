@@ -20,7 +20,7 @@ namespace Capture
     enum FrameType GetFrameType();
     enum FrameComp GetFrameCompression();
     size_t GetMaxFrameSize();
-    bool GrabFrame(void * buffer, size_t bufferSize, size_t * outLen);
+    bool GrabFrame(struct FrameInfo & frame);
 
   private:
     bool m_initialized;
@@ -32,5 +32,9 @@ namespace Capture
     NvFBC_EnableFunctionType      m_fnEnable;
 
     DWORD m_maxCaptureWidth, m_maxCaptureHeight;
+    NvFBCToSys * m_nvFBC;
+    void * m_frameBuffer;
+    NvFBCFrameGrabInfo m_grabInfo;
+    NVFBC_TOSYS_GRAB_FRAME_PARAMS m_grabFrameParams;
   };
 };

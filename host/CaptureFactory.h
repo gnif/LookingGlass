@@ -6,7 +6,7 @@
 #include "ICapture.h"
 #include "Capture\NvFBC.h"
 
-static class CaptureFactory
+class CaptureFactory
 {
 public:
   static ICapture * GetCaptureDevice()
