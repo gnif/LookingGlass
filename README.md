@@ -158,9 +158,13 @@ The host software is considered 90% complete, features such as copy & paste
 between client and guest are missing and it would be nice if it could also
 serve as the ivshmem-server.
 
+Security
+--------
+
 This project has not been written with security of the shared memory in mind,
 it is certainly possible at this time for the client to abuse the headers and
 input invalid information that could be used to compromise the host system.
+
 At this time this is not a concern as our use case of this application at this
 time is in a completely trusted environment, but before it is more widely put
 into use this will need to be addressed.
