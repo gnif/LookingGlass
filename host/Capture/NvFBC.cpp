@@ -55,12 +55,24 @@ namespace Capture
     status.dwVersion    = NVFBC_STATUS_VER;
     status.dwAdapterIdx = 0;
 
-    if (m_fnGetStatusEx(&status) != NVFBC_SUCCESS)
+    NVFBCRESULT ret = m_fnGetStatusEx(&status);
+    if (ret != NVFBC_SUCCESS)
     {
-      DEBUG_ERROR("Failed to get NvFBC status");
-      DeInitialize();
-      return false;
+      DEBUG_INFO("Attempting to enable NvFBC");
+      if (m_fnEnable(NVFBC_STATE_ENABLE) == NVFBC_SUCCESS)
+      {
+        DEBUG_INFO("Success, attempting to get status again");
+        ret = m_fnGetStatusEx(&status);
+      }
+
+      if (ret != NVFBC_SUCCESS)
+      {
+        DEBUG_ERROR("Failed to get NvFBC status");
+        DeInitialize();
+        return false;
+      }
     }
+
 
     if (!status.bIsCapturePossible)
     {

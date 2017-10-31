@@ -19,7 +19,7 @@ public:
 
   bool Initialize();
   void DeInitialize();
-  bool Process(HANDLE stopEvent);
+  bool Process();
 
 private:
   static Service * m_instance;

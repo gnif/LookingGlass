@@ -97,7 +97,7 @@ void Service::DeInitialize()
   m_initialized = false;
 }
 
-bool Service::Process(HANDLE stopEvent)
+bool Service::Process()
 {
   if (!m_initialized)
     return false;
@@ -142,10 +142,7 @@ bool Service::Process(HANDLE stopEvent)
 
   // wait for the host to notify that is it is ready to proceed
   ResetEvent(m_readyEvent);
-  while(
-    stopEvent == INVALID_HANDLE_VALUE ||
-    (WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0)
-  )
+  while(true)
   {
     if (!m_ivshmem->RingDoorbell(header->hostID, 0))
     {
