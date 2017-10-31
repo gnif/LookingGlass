@@ -154,9 +154,13 @@
   <ItemGroup>
     <ClCompile Include="ivshmem.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Service.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CaptureFactory.h" />
+    <ClInclude Include="ICapture.h" />
     <ClInclude Include="ivshmem.h" />
+    <ClInclude Include="Service.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

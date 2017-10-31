@@ -2,7 +2,7 @@
 #include <tchar.h>
 #include <common\debug.h>
 
-#include "ivshmem.h"
+#include "Service.h"
 
 #define SERVICE_NAME "kvm-ivshmem-host"
 
@@ -146,19 +146,18 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode)
 
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
 {
-  IVSHMEM * ivshmem = IVSHMEM::Get();
-  if (!ivshmem->Initialize())
+  Service *svc = svc->Get();
+  if (!svc->Initialize())
   {
-    DEBUG_ERROR("Failed to initialize IVSHMEM");
+    DEBUG_ERROR("Failed to initialize service");
     return ERROR;
   }
 
   while (WaitForSingleObject(app.serviceStopEvent, 0) != WAIT_OBJECT_0)
-  {
-    Sleep(1000);
-  }
+    if (!svc->Process(app.serviceStopEvent))
+      break;
 
-  ivshmem->DeInitialize();
+  svc->DeInitialize();
   return ERROR_SUCCESS;
 }
 

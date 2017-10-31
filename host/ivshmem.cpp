@@ -217,3 +217,21 @@ HANDLE IVSHMEM::CreateVectorEvent(UINT16 vector)
 
   return event;
 }
+
+bool IVSHMEM::RingDoorbell(UINT16 peerID, UINT16 door)
+{
+  if (!m_initialized)
+    return false;
+
+  IVSHMEM_RING msg;
+  msg.peerID = peerID;
+  msg.vector = door;
+
+  if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_RING_DOORBELL, &msg, sizeof(IVSHMEM_RING), NULL, 0, NULL, NULL))
+  {
+    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    return false;
+  }
+
+  return true;
+}

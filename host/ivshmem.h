@@ -23,6 +23,7 @@ public:
   UINT16 GetVectors();
   void * GetMemory();
   HANDLE CreateVectorEvent(UINT16 vector);
+  bool   RingDoorbell(UINT16 peerID, UINT16 door);
 
 protected:
 
