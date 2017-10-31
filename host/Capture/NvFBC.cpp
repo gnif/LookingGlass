@@ -91,40 +91,40 @@ namespace Capture
       return false;
     }
 
-m_maxCaptureWidth = params.dwMaxDisplayWidth;
-m_maxCaptureHeight = params.dwMaxDisplayHeight;
-m_nvFBC = static_cast<NvFBCToSys *>(params.pNvFBC);
+    m_maxCaptureWidth = params.dwMaxDisplayWidth;
+    m_maxCaptureHeight = params.dwMaxDisplayHeight;
+    m_nvFBC = static_cast<NvFBCToSys *>(params.pNvFBC);
 
-NVFBC_TOSYS_SETUP_PARAMS setupParams;
-ZeroMemory(&setupParams, sizeof(NVFBC_TOSYS_SETUP_PARAMS));
-setupParams.dwVersion = NVFBC_TOSYS_SETUP_PARAMS_VER;
-setupParams.eMode = NVFBC_TOSYS_RGB;
-setupParams.bWithHWCursor = TRUE;
-setupParams.bDiffMap = FALSE;
-setupParams.ppBuffer = (void **)&m_frameBuffer;
-setupParams.ppDiffMap = NULL;
+    NVFBC_TOSYS_SETUP_PARAMS setupParams;
+    ZeroMemory(&setupParams, sizeof(NVFBC_TOSYS_SETUP_PARAMS));
+    setupParams.dwVersion = NVFBC_TOSYS_SETUP_PARAMS_VER;
+    setupParams.eMode = NVFBC_TOSYS_RGB;
+    setupParams.bWithHWCursor = TRUE;
+    setupParams.bDiffMap = FALSE;
+    setupParams.ppBuffer = (void **)&m_frameBuffer;
+    setupParams.ppDiffMap = NULL;
 
-if (m_nvFBC->NvFBCToSysSetUp(&setupParams) != NVFBC_SUCCESS)
-{
-  DEBUG_ERROR("NvFBCToSysSetUp Failed");
-  DeInitialize();
-  return false;
-}
+    if (m_nvFBC->NvFBCToSysSetUp(&setupParams) != NVFBC_SUCCESS)
+    {
+      DEBUG_ERROR("NvFBCToSysSetUp Failed");
+      DeInitialize();
+      return false;
+    }
 
-// this is required according to NVidia sample code
-Sleep(100);
+    // this is required according to NVidia sample code
+    Sleep(100);
 
-ZeroMemory(&m_grabFrameParams, sizeof(NVFBC_TOSYS_GRAB_FRAME_PARAMS));
-ZeroMemory(&m_grabInfo, sizeof(NvFBCFrameGrabInfo));
-m_grabFrameParams.dwVersion = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
-m_grabFrameParams.dwFlags = NVFBC_TOSYS_NOFLAGS;
-m_grabFrameParams.dwStartX = 0;
-m_grabFrameParams.dwStartY = 0;
-m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_SCALE;
-m_grabFrameParams.pNvFBCFrameGrabInfo = &m_grabInfo;
+    ZeroMemory(&m_grabFrameParams, sizeof(NVFBC_TOSYS_GRAB_FRAME_PARAMS));
+    ZeroMemory(&m_grabInfo, sizeof(NvFBCFrameGrabInfo));
+    m_grabFrameParams.dwVersion = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
+    m_grabFrameParams.dwFlags = NVFBC_TOSYS_NOFLAGS;
+    m_grabFrameParams.dwStartX = 0;
+    m_grabFrameParams.dwStartY = 0;
+    m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_SCALE;
+    m_grabFrameParams.pNvFBCFrameGrabInfo = &m_grabInfo;
 
-m_initialized = true;
-return true;
+    m_initialized = true;
+    return true;
   }
 
   void NvFBC::DeInitialize()
