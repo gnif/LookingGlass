@@ -43,8 +43,8 @@ int main(int argc, TCHAR *argv[])
     DWORD lastError = GetLastError();
     if (lastError == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
     {
-      HANDLE hThread = CreateThread(NULL, 0, ServiceWorkerThread, NULL, 0, NULL);
-      WaitForSingleObject(hThread, INFINITE);
+      ServiceWorkerThread(INVALID_HANDLE_VALUE);
+      getc(stdin);
       return 0;
     }
 
