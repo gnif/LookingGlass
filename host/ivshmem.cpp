@@ -1,0 +1,192 @@
+#include "ivshmem.h"
+
+#include <Windows.h>
+#include <SetupAPI.h>
+#include <vendor\kvm-guest-drivers-windows\ivshmem\Public.h>
+#include <common\debug.h>
+
+IVSHMEM * IVSHMEM::m_instance = NULL;
+
+IVSHMEM::IVSHMEM() :
+  m_initialized(false),
+  m_handle(INVALID_HANDLE_VALUE),
+  m_gotSize(false),
+  m_gotPeerID(false),
+  m_gotMemory(false)
+{
+
+}
+
+IVSHMEM::~IVSHMEM()
+{
+  DeInitialize();
+}
+
+bool IVSHMEM::Initialize()
+{
+  if (m_initialized)
+    DeInitialize();
+
+  HDEVINFO deviceInfoSet;
+  PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
+  SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
+
+  deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
+  ZeroMemory(&deviceInterfaceData, sizeof(SP_DEVICE_INTERFACE_DATA));
+  deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+  while (true)
+  {
+    if (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, 0, &deviceInterfaceData) == FALSE)
+    {
+      DWORD error = GetLastError();
+      if (error == ERROR_NO_MORE_ITEMS)
+      {
+        DEBUG_ERROR("Unable to enumerate the device, is it attached?");
+        break;
+      }
+
+      DEBUG_ERROR("SetupDiEnumDeviceInterfaces failed");
+      break;
+    }
+
+    DWORD reqSize = 0;
+    SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &reqSize, NULL);
+    if (!reqSize)
+    {
+      DEBUG_ERROR("SetupDiGetDeviceInterfaceDetail");
+      break;
+    }
+
+    infData = static_cast<PSP_DEVICE_INTERFACE_DETAIL_DATA>(malloc(reqSize));
+    ZeroMemory(infData, reqSize);
+    infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+    if (!SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, infData, reqSize, NULL, NULL))
+    {
+      DEBUG_ERROR("SetupDiGetDeviceInterfaceDetail");
+      break;
+    }
+
+    m_handle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
+    if (m_handle == INVALID_HANDLE_VALUE)
+    {
+      DEBUG_ERROR("CreateFile returned INVALID_HANDLE_VALUE");
+      break;
+    }
+
+    m_initialized = true;
+    break;
+  }
+
+  if (infData)
+    free(infData);
+
+  SetupDiDestroyDeviceInfoList(deviceInfoSet);
+  return m_initialized;
+}
+
+void IVSHMEM::DeInitialize()
+{
+  if (!m_initialized)
+    return;
+
+  if (m_gotMemory)
+  {
+    if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
+      DEBUG_ERROR("DeviceIoControl failed: %d", GetLastError());
+    m_memory = NULL;
+  }
+
+  if (m_handle != INVALID_HANDLE_VALUE)
+    CloseHandle(m_handle);
+
+  m_initialized = false;
+  m_handle      = INVALID_HANDLE_VALUE;
+  m_gotSize     = false;
+  m_gotPeerID   = false;
+  m_gotVectors  = false;
+  m_gotMemory   = false;
+}
+
+bool IVSHMEM::IsInitialized()
+{
+  return m_initialized;
+}
+
+UINT64 IVSHMEM::GetSize()
+{
+  if (!m_initialized)
+    return 0;
+
+  if (m_gotSize)
+    return m_size;
+
+  IVSHMEM_SIZE size;
+  if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
+  {
+    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    return 0;
+  }
+
+  m_gotSize = true;
+  m_size    = static_cast<UINT64>(size);
+  return m_size;
+}
+
+UINT16 IVSHMEM::GetPeerID()
+{
+  if (!m_initialized)
+    return 0;
+
+  if (m_gotPeerID)
+    return m_peerID;
+
+  IVSHMEM_PEERID peerID;
+  if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &peerID, sizeof(IVSHMEM_PEERID), NULL, NULL))
+  {
+    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    return 0;
+  }
+
+  m_gotPeerID = true;
+  m_peerID    = static_cast<UINT16>(peerID);
+  return m_peerID;
+}
+
+UINT16 IVSHMEM::GetVectors()
+{
+  if (!m_initialized)
+    return 0;
+
+  if (!m_gotVectors)
+    return 0;
+
+  return m_vectors;
+}
+
+void * IVSHMEM::GetMemory()
+{
+  if (!m_initialized)
+    return NULL;
+
+  if (m_gotMemory)
+    return m_memory;
+
+  IVSHMEM_MMAP map;
+  ZeroMemory(&map, sizeof(IVSHMEM_MMAP));
+  if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_MMAP, NULL, 0, &map, sizeof(IVSHMEM_MMAP), NULL, NULL))
+  {
+    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    return NULL;
+  }
+
+  m_gotSize    = true;
+  m_gotPeerID  = true;
+  m_gotMemory  = true;
+  m_gotVectors = true;
+  m_size       = static_cast<UINT64>(map.size   );
+  m_peerID     = static_cast<UINT16>(map.peerID );
+  m_vectors    = static_cast<UINT16>(map.vectors);
+
+  return m_memory;
+}

@@ -1,11 +1,10 @@
 #include <Windows.h>
 #include <tchar.h>
+#include <common\debug.h>
+
+#include "ivshmem.h"
 
 #define SERVICE_NAME "kvm-ivshmem-host"
-
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
-#define DEBUG_HERE(...) SERVICE_NAME " " __FUNCTION__ ":" STR(__LINE__) " " ## __VA_ARGS__
 
 //=============================================================================
 
@@ -18,9 +17,9 @@ struct App
 
 struct App app =
 {
-  .serviceStatus    = {0},
-  .statusHandle     = NULL,
-  .serviceStopEvent = INVALID_HANDLE_VALUE
+  {0},
+  NULL,
+  INVALID_HANDLE_VALUE
 };
 
 //=============================================================================
@@ -35,7 +34,7 @@ int main(int argc, TCHAR *argv[])
 {
   SERVICE_TABLE_ENTRY ServiceTable[] =
   {
-    {SERVICE_NAME, (LPSERVICE_MAIN_FUNCTION)ServiceMain},
+    {_T(SERVICE_NAME), (LPSERVICE_MAIN_FUNCTION)ServiceMain},
     {NULL, NULL}
   };
 
@@ -59,7 +58,7 @@ int main(int argc, TCHAR *argv[])
 
 VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 {
-  app.statusHandle = RegisterServiceCtrlHandler(SERVICE_NAME, ServiceCtrlHandler);
+  app.statusHandle = RegisterServiceCtrlHandler(_T(SERVICE_NAME), ServiceCtrlHandler);
   if (!app.statusHandle)
     return;
 
@@ -73,7 +72,7 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 
   if (SetServiceStatus(app.statusHandle, &app.serviceStatus) == FALSE)
   {
-    OutputDebugString(DEBUG_HERE("SetServiceStatus failed"));
+    DEBUG_ERROR("SetServiceStatus failed");
     return;
   }
 
@@ -86,7 +85,7 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
     app.serviceStatus.dwCheckPoint       = 1;
     if (SetServiceStatus(app.statusHandle, &app.serviceStatus) == FALSE)
     {
-      OutputDebugString(DEBUG_HERE("SetServiceStatus failed"));
+      DEBUG_ERROR("SetServiceStatus failed");
       return;
     }
   }
@@ -97,7 +96,7 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
   app.serviceStatus.dwCheckPoint       = 0;
   if (SetServiceStatus(app.statusHandle, &app.serviceStatus) == FALSE)
   {
-    OutputDebugString(DEBUG_HERE("SetServiceStatus failed"));
+    DEBUG_ERROR("SetServiceStatus failed");
     return;
   }
 
@@ -112,7 +111,7 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 
   if (SetServiceStatus(app.statusHandle, &app.serviceStatus) == FALSE)
   {
-    OutputDebugString(DEBUG_HERE("SetServiceStatus failed"));
+    DEBUG_ERROR("SetServiceStatus failed");
     return;
   }
 }
@@ -133,7 +132,7 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode)
       app.serviceStatus.dwCheckPoint       = 4;
 
       if (SetServiceStatus(app.statusHandle, &app.serviceStatus) == FALSE)
-        OutputDebugString(DEBUG_HERE("SetServiceStatus failed"));
+        DEBUG_ERROR("SetServiceStatus failed");
 
       SetEvent(app.serviceStopEvent);
       break;
@@ -147,10 +146,19 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode)
 
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
 {
+  IVSHMEM * ivshmem = IVSHMEM::Get();
+  if (!ivshmem->Initialize())
+  {
+    DEBUG_ERROR("Failed to initialize IVSHMEM");
+    return ERROR;
+  }
+
   while (WaitForSingleObject(app.serviceStopEvent, 0) != WAIT_OBJECT_0)
   {
     Sleep(1000);
   }
+
+  ivshmem->DeInitialize();
   return ERROR_SUCCESS;
 }
 
