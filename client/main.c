@@ -467,7 +467,11 @@ int eventThread(void * arg)
           if (scancode == 0)
             break;
 
-          spice_key_down(scancode);
+          if (!spice_key_down(scancode))
+          {
+            DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
+            break;
+          }
           break;
         }
 
@@ -482,7 +486,11 @@ int eventThread(void * arg)
           if (scancode == 0)
             break;
 
-          spice_key_up(scancode);
+          if (!spice_key_up(scancode))
+          {
+            DEBUG_ERROR("SDL_KEYUP: failed to send message");
+            break;
+          }
           break;
         }
 
