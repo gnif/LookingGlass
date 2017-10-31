@@ -1,0 +1,3 @@
+[submodule "vendor/kvm-guest-drivers-windows"]
+	path = vendor/kvm-guest-drivers-windows
+	url = https://github.com/virtio-win/kvm-guest-drivers-windows.git
