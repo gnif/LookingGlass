@@ -123,12 +123,21 @@ namespace Capture
     m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_SCALE;
     m_grabFrameParams.pNvFBCFrameGrabInfo = &m_grabInfo;
 
+    if (!m_memcpy.Initialize())
+    {
+      DEBUG_ERROR("Failed to initialize MTMemcpy");
+      DeInitialize();
+      return false;
+    }
+
     m_initialized = true;
     return true;
   }
 
   void NvFBC::DeInitialize()
   {
+    m_memcpy.DeInitialize();
+
     m_frameBuffer = NULL;
 
     if (m_nvFBC)
@@ -197,7 +206,11 @@ namespace Capture
         frame.height  = m_grabInfo.dwHeight;
         frame.stride  = m_grabInfo.dwBufferWidth;
         frame.outSize = m_grabInfo.dwBufferWidth * m_grabInfo.dwHeight * 3;
-        memcpy(frame.buffer, m_frameBuffer, frame.outSize);
+        if (!m_memcpy.Copy(frame.buffer, m_frameBuffer, frame.outSize))
+        {
+          DEBUG_ERROR("Memory copy failed");
+          return false;
+        }
         return true;
       }
 

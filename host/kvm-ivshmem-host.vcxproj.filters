@@ -33,6 +33,9 @@
     <ClCompile Include="Capture\NvFBC.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
+    <ClCompile Include="MTMemcpy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ivshmem.h">
@@ -51,6 +54,9 @@
       <Filter>Header Files\Capture</Filter>
     </ClInclude>
     <ClInclude Include="Util.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MTMemcpy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
