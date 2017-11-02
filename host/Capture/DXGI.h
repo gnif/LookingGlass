@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "ICapture.h"
-#include <vendor\DXGICaptureSample\DXGICaptureSample\DXGIManager.h>
+#include <vendor\DXGICapture\DXGIManager.h>
 
 #define W32_LEAN_AND_MEAN
 #include <windows.h>

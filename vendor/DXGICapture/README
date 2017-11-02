@@ -1,0 +1,5 @@
+code in this directory is temporary and requires a re-write, it is horrible and
+to be deprecated ASAP.
+
+The reason for keeping a local copy is because I have fixed some stupid bugs
+and implemented proper alpha blending for the cursor.

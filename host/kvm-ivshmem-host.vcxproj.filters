@@ -39,7 +39,7 @@
     <ClCompile Include="Capture\DXGI.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
-    <ClCompile Include="..\vendor\DXGICaptureSample\DXGICaptureSample\DXGIManager.cpp">
+    <ClCompile Include="..\vendor\DXGICapture\DXGIManager.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
   </ItemGroup>
@@ -68,7 +68,7 @@
     <ClInclude Include="Capture\DXGI.h">
       <Filter>Header Files\Capture</Filter>
     </ClInclude>
-    <ClInclude Include="..\vendor\DXGICaptureSample\DXGICaptureSample\DXGIManager.h">
+    <ClInclude Include="..\vendor\DXGICapture\DXGIManager.h">
       <Filter>Header Files\Capture</Filter>
     </ClInclude>
   </ItemGroup>
