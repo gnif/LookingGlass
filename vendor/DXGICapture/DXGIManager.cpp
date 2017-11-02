@@ -562,9 +562,9 @@ void DXGIManager::DrawMousePointer(BYTE* pDesktopBits, RECT rcDesktop, RECT rcDe
         // alpha blend the cursor
         const int maxX = min(shapeInfo.Width , dwDesktopWidth  - PtrX);
         const int maxY = min(shapeInfo.Height, dwDesktopHeight - PtrY);
-        for(int y = 0; y < maxY; ++y)
+        for(int y = abs(min(0, PtrY)); y < maxY; ++y)
         {
-          for (int x = 0; x < maxX; ++x)
+          for (int x = abs(min(0, PtrX)); x < maxX; ++x)
           {
             BYTE *srcPix = &PtrBuf[y * shapeInfo.Pitch + x * 4];
             BYTE *dstPix = &pDesktopBits[((PtrY + y) * dwDesktopWidth * 4) + (PtrX + x) * 4];
