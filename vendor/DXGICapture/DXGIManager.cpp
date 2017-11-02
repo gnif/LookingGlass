@@ -97,7 +97,8 @@ HRESULT DXGIOutputDuplication::AcquireNextFrame(IDXGISurface1** pDXGISurface, DX
 
 	*pDXGISurface = spDXGISurface.Detach();
 
-  if (pDXGIPointer)
+
+  if (pDXGIPointer && fi.LastMouseUpdateTime.QuadPart != 0)
     pDXGIPointer->GetFrameInfo().PointerPosition.Visible = fi.PointerPosition.Visible;
 	
 	// Updating mouse pointer, if visible
