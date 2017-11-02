@@ -45,7 +45,7 @@ bool Service::Initialize()
     DeInitialize();
 
   m_capture = CaptureFactory::GetCaptureDevice();
-  if (!m_capture || !m_capture->Initialize())
+  if (!m_capture)
   {
     DEBUG_ERROR("Failed to initialize capture interface");
     DeInitialize();

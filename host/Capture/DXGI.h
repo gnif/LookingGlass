@@ -18,40 +18,23 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #pragma once
 
-#define W32_LEAN_AND_MEAN
-#include <Windows.h>
-
-#include "common\debug.h"
 #include "ICapture.h"
-#include "Capture\NvFBC.h"
-#include "Capture\DXGI.h"
 
-class CaptureFactory
+namespace Capture
 {
-public:
-  static ICapture * GetCaptureDevice()
+  class DXGI : public ICapture
   {
-    ICapture *dev;
+  public:
+    DXGI();
+    ~DXGI();
+    bool Initialize();
+    void DeInitialize();
+    enum FrameType GetFrameType();
+    enum FrameComp GetFrameCompression();
+    size_t GetMaxFrameSize();
+    bool GrabFrame(struct FrameInfo & frame);
 
-    dev = new Capture::NvFBC();
-    if (dev->Initialize())
-    {
-      DEBUG_INFO("Using NvFBC");
-      return dev;
-    }
-    dev->DeInitialize();
-    delete dev;
-    
-    dev = new Capture::DXGI();
-    if (dev->Initialize())
-    {
-      DEBUG_INFO("Using DXGI");
-      return dev;
-    }
-    dev->DeInitialize();
-    delete dev;
-
-    DEBUG_ERROR("Failed to initialize a compatible capture device");
-    return NULL;
-  }
+  private:
+    bool m_initialized;
+  };
 };

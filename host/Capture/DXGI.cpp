@@ -16,42 +16,56 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
+#include "DXGI.h"
+using namespace Capture;
 
-#define W32_LEAN_AND_MEAN
-#include <Windows.h>
-
-#include "common\debug.h"
-#include "ICapture.h"
-#include "Capture\NvFBC.h"
-#include "Capture\DXGI.h"
-
-class CaptureFactory
+DXGI::DXGI() :
+  m_initialized(false)
 {
-public:
-  static ICapture * GetCaptureDevice()
-  {
-    ICapture *dev;
 
-    dev = new Capture::NvFBC();
-    if (dev->Initialize())
-    {
-      DEBUG_INFO("Using NvFBC");
-      return dev;
-    }
-    dev->DeInitialize();
-    delete dev;
-    
-    dev = new Capture::DXGI();
-    if (dev->Initialize())
-    {
-      DEBUG_INFO("Using DXGI");
-      return dev;
-    }
-    dev->DeInitialize();
-    delete dev;
+}
 
-    DEBUG_ERROR("Failed to initialize a compatible capture device");
-    return NULL;
-  }
-};
+DXGI::~DXGI()
+{
+
+}
+
+bool DXGI::Initialize()
+{
+  if (m_initialized)
+    DeInitialize();
+
+  m_initialized = true;
+  return true;
+}
+
+void DXGI::DeInitialize()
+{
+  m_initialized = false;
+}
+
+FrameType DXGI::GetFrameType()
+{
+  if (!m_initialized)
+    return FRAME_TYPE_INVALID;
+
+  return FrameType();
+}
+
+FrameComp DXGI::GetFrameCompression()
+{
+  if (!m_initialized)
+    return FRAME_COMP_NONE;
+
+  return FrameComp();
+}
+
+size_t DXGI::GetMaxFrameSize()
+{
+  return size_t();
+}
+
+bool DXGI::GrabFrame(FrameInfo & frame)
+{
+  return false;
+}
