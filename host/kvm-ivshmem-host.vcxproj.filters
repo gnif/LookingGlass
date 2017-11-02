@@ -39,6 +39,9 @@
     <ClCompile Include="Capture\DXGI.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
+    <ClCompile Include="..\vendor\DXGICaptureSample\DXGICaptureSample\DXGIManager.cpp">
+      <Filter>Source Files\Capture</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ivshmem.h">
@@ -63,6 +66,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Capture\DXGI.h">
+      <Filter>Header Files\Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="..\vendor\DXGICaptureSample\DXGICaptureSample\DXGIManager.h">
       <Filter>Header Files\Capture</Filter>
     </ClInclude>
   </ItemGroup>

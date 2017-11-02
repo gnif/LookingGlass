@@ -19,6 +19,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "ICapture.h"
+#include <vendor\DXGICaptureSample\DXGICaptureSample\DXGIManager.h>
+
+#define W32_LEAN_AND_MEAN
+#include <windows.h>
 
 namespace Capture
 {
@@ -35,6 +39,9 @@ namespace Capture
     bool GrabFrame(struct FrameInfo & frame);
 
   private:
-    bool m_initialized;
+    bool          m_initialized;
+    DXGIManager * m_manager;
+    unsigned int  m_width;
+    unsigned int  m_height;
   };
 };

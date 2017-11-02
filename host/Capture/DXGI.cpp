@@ -19,10 +19,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "DXGI.h"
 using namespace Capture;
 
-DXGI::DXGI() :
-  m_initialized(false)
-{
+#include "common\debug.h"
 
+DXGI::DXGI() :
+  m_initialized(false),
+  m_manager(NULL)
+{
 }
 
 DXGI::~DXGI()
@@ -35,12 +37,32 @@ bool DXGI::Initialize()
   if (m_initialized)
     DeInitialize();
 
+  if (FAILED(CoInitializeEx(NULL, COINIT_MULTITHREADED)))
+  {
+    DEBUG_ERROR("CoInitializeEx failed");
+    return false;
+  }
+
+  m_manager = new DXGIManager();
+  m_manager->SetCaptureSource(CSDesktop);
+
+  RECT rect;
+  m_manager->GetOutputRect(rect);
+  m_width  = rect.right  - rect.left;
+  m_height = rect.bottom - rect.top;
+
   m_initialized = true;
   return true;
 }
 
 void DXGI::DeInitialize()
 {
+  if (m_manager)
+  {
+    delete m_manager;
+    m_manager = NULL;
+  }
+
   m_initialized = false;
 }
 
@@ -49,7 +71,7 @@ FrameType DXGI::GetFrameType()
   if (!m_initialized)
     return FRAME_TYPE_INVALID;
 
-  return FrameType();
+  return FRAME_TYPE_ARGB;
 }
 
 FrameComp DXGI::GetFrameCompression()
@@ -57,15 +79,39 @@ FrameComp DXGI::GetFrameCompression()
   if (!m_initialized)
     return FRAME_COMP_NONE;
 
-  return FrameComp();
+  return FRAME_COMP_NONE;
 }
 
 size_t DXGI::GetMaxFrameSize()
 {
-  return size_t();
+  if (!m_initialized);
+    return 0;
+
+  return m_width * m_height * 4;
 }
 
 bool DXGI::GrabFrame(FrameInfo & frame)
 {
-  return false;
+  RECT rect;
+  m_manager->GetOutputRect(rect);
+  m_width  = rect.right  - rect.left;
+  m_height = rect.bottom - rect.top;
+
+  HRESULT result;
+  for(int i = 0; i < 2; ++i)
+  {
+    result = m_manager->GetOutputBits((BYTE*)frame.buffer, rect);
+    if (SUCCEEDED(result))
+      break;
+  }
+
+  if (FAILED(result))
+    return false;
+
+
+  frame.width   = m_width;
+  frame.height  = m_height;
+  frame.stride  = m_width;
+  frame.outSize = m_width * m_height * 4;
+  return true;
 }
