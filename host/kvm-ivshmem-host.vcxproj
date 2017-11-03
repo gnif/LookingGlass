@@ -160,7 +160,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\vendor\DXGICapture\DXGIManager.cpp" />
     <ClCompile Include="Capture\DXGI.cpp" />
     <ClCompile Include="Capture\NvFBC.cpp" />
     <ClCompile Include="ivshmem.cpp" />
@@ -169,7 +168,6 @@
     <ClCompile Include="Service.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\vendor\DXGICapture\DXGIManager.h" />
     <ClInclude Include="CaptureFactory.h" />
     <ClInclude Include="Capture\DXGI.h" />
     <ClInclude Include="Capture\NvFBC.h" />
