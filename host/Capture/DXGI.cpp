@@ -118,7 +118,7 @@ bool DXGI::Initialize()
   );
   adapter.Release();
 
-  if (FAILED(status) || !m_device)
+  if (FAILED(status))
   {
     DEBUG_ERROR("Failed to create D3D11 device");
     DeInitialize();
