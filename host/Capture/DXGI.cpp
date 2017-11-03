@@ -27,7 +27,8 @@ DXGI::DXGI() :
   m_device(NULL),
   m_deviceContext(NULL),
   m_dup(NULL),
-  m_texture(NULL)
+  m_texture(NULL),
+  m_pointer(NULL)
 {
 }
 
@@ -176,6 +177,12 @@ void DXGI::DeInitialize()
 {
   m_memcpy.DeInitialize();
 
+  if (m_pointer)
+  {
+    delete[] m_pointer;
+    m_pointer = NULL;
+  }
+
   if (m_texture)
     m_texture.Release();
 
@@ -268,6 +275,26 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   src->GetDesc(&desc);
 
   m_deviceContext->CopyResource(m_texture, src);
+
+  // if the pointer shape has changed
+  if (frameInfo.PointerShapeBufferSize > 0)
+  {
+    if (m_pointerBufSize < frameInfo.PointerShapeBufferSize)
+    {
+      if (m_pointer)
+        delete[] m_pointer;
+      m_pointer = new BYTE[frameInfo.PointerShapeBufferSize];
+      m_pointerBufSize = frameInfo.PointerShapeBufferSize;
+    }
+
+    status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &m_shapeInfo);
+    if (!SUCCEEDED(status))
+    {
+      DEBUG_ERROR("Failed to get the new pointer shape: %08x", status);
+      return false;
+    }
+  }
+
   m_dup->ReleaseFrame();
   res.Release();
   src.Release();
@@ -293,10 +320,75 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   frame.width   = desc.Width;
   frame.height  = desc.Height;
   frame.stride  = rect.Pitch / 4;
+
   frame.outSize = min(frame.bufferSize, m_height * rect.Pitch);
   m_memcpy.Copy(frame.buffer, rect.pBits, frame.outSize);
-
   status = surface->Unmap();
+
+  // if we have a mouse update
+  if (frameInfo.LastMouseUpdateTime.QuadPart)
+  {
+    m_pointerVisible = frameInfo.PointerPosition.Visible;
+    m_pointerPos     = frameInfo.PointerPosition.Position;
+  }
+
+  // if the pointer is to be drawn
+  if (m_pointerVisible)
+  {
+    const int maxHeight = min(m_shapeInfo.Height, desc.Height - m_pointerPos.y);
+    const int maxWidth  = min(m_shapeInfo.Width , desc.Width  - m_pointerPos.x);
+
+    switch (m_shapeInfo.Type)
+    {
+      case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR:
+      {
+        for(int y = abs(min(0, m_pointerPos.y)); y < maxHeight; ++y)
+          for (int x = abs(min(0, m_pointerPos.x)); x < maxWidth; ++x)
+          {
+            BYTE *src = (BYTE *)m_pointer + (m_shapeInfo.Pitch * y) + (x * 4);
+            BYTE *dst = (BYTE *)frame.buffer + (rect.Pitch * (y + m_pointerPos.y)) + ((x + m_pointerPos.x) * 4);
+
+            const unsigned int alpha = src[3] + 1;
+            const unsigned int inv = 256 - alpha;
+            dst[0] = (BYTE)((alpha * src[0] + inv * dst[0]) >> 8);
+            dst[1] = (BYTE)((alpha * src[1] + inv * dst[1]) >> 8);
+            dst[2] = (BYTE)((alpha * src[2] + inv * dst[2]) >> 8);
+          }
+        break;
+      }
+
+      case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR:
+      {
+        for (int y = abs(min(0, m_pointerPos.y)); y < maxHeight; ++y)
+          for (int x = abs(min(0, m_pointerPos.x)); x < maxWidth; ++x)
+          {
+            UINT32 *src = (UINT32 *)m_pointer + ((m_shapeInfo.Pitch/4) * y) + x;
+            UINT32 *dst = (UINT32 *)frame.buffer + (frame.stride * (y + m_pointerPos.y)) + (x + m_pointerPos.x);
+            if (*src & 0xff000000)
+                 *dst = 0xff000000 | (*dst ^ *src);
+            else *dst = 0xff000000 | *src;
+          }
+        break;
+      }
+
+      case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME:
+      {
+        for (int y = abs(min(0, m_pointerPos.y)); y < maxHeight / 2; ++y)
+          for (int x = abs(min(0, m_pointerPos.x)); x < maxWidth; ++x)
+          {
+            UINT8  *srcAnd = (UINT8  *)m_pointer + (m_shapeInfo.Pitch * y) + (x/8);
+            UINT8  *srcXor = srcAnd + m_shapeInfo.Pitch * (m_shapeInfo.Height / 2);
+            UINT32 *dst    = (UINT32 *)frame.buffer + (frame.stride * (y + m_pointerPos.y)) + (x + m_pointerPos.x);
+            const BYTE mask = 0x80 >> (x % 8);
+            const UINT32 andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
+            const UINT32 xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
+            *dst = (*dst & andMask) ^ xorMask;
+          }
+        break;
+      }
+    }
+  }
+
   if (FAILED(status))
   {
     DEBUG_ERROR("Failed to unmap surface: %08x", status);

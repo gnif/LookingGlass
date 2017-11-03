@@ -54,5 +54,11 @@ namespace Capture
     CComQIPtr<IDXGIOutput1>         m_output;
     CComPtr<IDXGIOutputDuplication> m_dup;
     CComPtr<ID3D11Texture2D>        m_texture;
+    BYTE *                          m_pointer;
+    UINT                            m_pointerBufSize;
+    UINT                            m_pointerSize;
+    DXGI_OUTDUPL_POINTER_SHAPE_INFO m_shapeInfo;
+    BOOL                            m_pointerVisible;
+    POINT                           m_pointerPos;
   };
 };
