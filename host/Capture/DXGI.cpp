@@ -263,12 +263,24 @@ bool DXGI::GrabFrame(FrameInfo & frame)
       case DXGI_ERROR_ACCESS_LOST: // desktop switch, mode change or switch DWM on or off
       case WAIT_ABANDONED:         // this can happen also during desktop switches, not documented by MS though
       {
+        // see if we can open the desktop, if not the secure desktop
+        // is active so just wait for it instead of aborting out
+        HDESK desktop = NULL;
+        while(!desktop)
+        {
+          desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
+          if (desktop)
+            break;
+          Sleep(100);
+        }
+        CloseDesktop(desktop);
+
         if (!ReInitialize())
         {
-          DEBUG_ERROR("Failed to re-initialize after access was lost");
+          DEBUG_ERROR("Failed to ReInitialize after lost access to desktop");
           return false;
         }
-        continue;
+        break;
       }
 
       default:
