@@ -21,10 +21,50 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "Service.h"
 
+#ifdef DEBUG
+#include <io.h>
+#include <fcntl.h>
+#include <iostream>
+#endif
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam, int iCmdShow)
 {
 #ifdef DEBUG
-  AllocConsole();
+  {
+    HANDLE _handle;
+    int    _conout;
+    FILE * fp;
+
+    AllocConsole();
+
+    CONSOLE_SCREEN_BUFFER_INFO conInfo;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &conInfo);
+    conInfo.dwSize.Y = 500;
+    SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), conInfo.dwSize);
+
+    _handle = GetStdHandle(STD_INPUT_HANDLE);
+    _conout = _open_osfhandle((intptr_t)_handle, _O_TEXT);
+    fp = _fdopen(_conout, "r");
+    freopen_s(&fp, "CONIN$", "r", stdin);
+
+    _handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    _conout = _open_osfhandle((intptr_t)_handle, _O_TEXT);
+    fp      = _fdopen(_conout, "w");
+    freopen_s(&fp, "CONOUT$", "w", stdout);
+
+    _handle = GetStdHandle(STD_ERROR_HANDLE);
+    _conout = _open_osfhandle((intptr_t)_handle, _O_TEXT);
+    fp = _fdopen(_conout, "w");
+    freopen_s(&fp, "CONOUT$", "w", stderr);
+
+    std::ios::sync_with_stdio();
+    std::wcout.clear();
+    std::cout.clear();
+    std::wcerr.clear();
+    std::cerr.clear();
+    std::wcin.clear();
+    std::cin.clear();
+  }
 #endif
 
   Service *svc = svc->Get();
@@ -35,7 +75,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
   }
 
   while (true)
-    svc->Process();
+    if (!svc->Process())
+      break;
 
   svc->DeInitialize();
   return 0;
