@@ -79,5 +79,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
       break;
 
   svc->DeInitialize();
+#ifdef DEBUG
+  getc(stdin);
+#endif
   return 0;
 }
