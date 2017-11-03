@@ -42,6 +42,8 @@ namespace Capture
     bool GrabFrame(struct FrameInfo & frame);
 
   private:
+    bool ReInitialize();
+
     bool          m_initialized;
     MTMemcpy      m_memcpy;
     unsigned int  m_width;

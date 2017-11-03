@@ -118,22 +118,23 @@ bool DXGI::Initialize()
   );
   adapter.Release();
 
-  if (FAILED(status))
+  if (FAILED(status) || !m_device)
   {
     DEBUG_ERROR("Failed to create D3D11 device");
     DeInitialize();
     return false;
   }
 
-  CComQIPtr<IDXGIDevice1> device1 = m_device;
-  if (!device1)
+  // we try this twice just incase we still get an error
+  // on re-initialization
+  for(int i = 0; i < 2; ++i)
   {
-    DEBUG_ERROR("Failed to get IDXGIDevice1");
-    DeInitialize();
-    return false;
+    status = m_output->DuplicateOutput(m_device, &m_dup);
+    if (SUCCEEDED(status))
+      break;
+    Sleep(200);
   }
 
-  status = m_output->DuplicateOutput(m_device, &m_dup);
   if (FAILED(status))
   {
     DEBUG_ERROR("DuplicateOutput Failed: %08x", status);
@@ -181,6 +182,7 @@ void DXGI::DeInitialize()
   {
     delete[] m_pointer;
     m_pointer = NULL;
+    m_pointerBufSize = 0;
   }
 
   if (m_texture)
@@ -202,6 +204,19 @@ void DXGI::DeInitialize()
     m_dxgiFactory.Release();
 
   m_initialized = false;
+}
+
+bool DXGI::ReInitialize()
+{
+  DeInitialize();
+
+  /*
+    DXGI needs some time when mode switches occur, failing to do so causes
+    failure to start and exceptions internal to DXGI
+  */
+  Sleep(200);
+
+  return Initialize();
 }
 
 FrameType DXGI::GetFrameType()
@@ -230,6 +245,9 @@ size_t DXGI::GetMaxFrameSize()
 
 bool DXGI::GrabFrame(FrameInfo & frame)
 {
+  if (!m_initialized)
+    return false;
+
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   CComPtr<IDXGIResource> res;
 
@@ -239,27 +257,31 @@ bool DXGI::GrabFrame(FrameInfo & frame)
     status = m_dup->AcquireNextFrame(INFINITE, &frameInfo, &res);
     if (SUCCEEDED(status))
       break;
-
-    // desktop switch, mode change or switch DWM on or off
-    if (status == DXGI_ERROR_ACCESS_LOST)
-    {
-      DeInitialize();
-      if (!Initialize())
+    
+    switch (status)
+    {      
+      case DXGI_ERROR_ACCESS_LOST: // desktop switch, mode change or switch DWM on or off
+      case WAIT_ABANDONED:         // this can happen also during desktop switches, not documented by MS though
       {
-        DEBUG_ERROR("Failed to re-initialize after access was lost");
-        return false;
+        if (!ReInitialize())
+        {
+          DEBUG_ERROR("Failed to re-initialize after access was lost");
+          return false;
+        }
+        continue;
       }
-      continue;
-    }
 
-    // unknown failure
-    DEBUG_INFO("AcquireNextFrame failed: %08x", status);
-    return false;
+      default:
+        // unknown failure
+        DEBUG_INFO("AcquireNextFrame failed: %08x", status);
+        return false;
+    }
   }
 
   // retry count exceeded
   if (FAILED(status))
   {
+    m_dup->ReleaseFrame();
     DEBUG_ERROR("Failed to acquire next frame");
     return false;
   }
@@ -267,6 +289,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   CComQIPtr<ID3D11Texture2D> src = res;
   if (!src)
   {
+    m_dup->ReleaseFrame();
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
     return false;
   }
@@ -290,6 +313,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
     status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &m_shapeInfo);
     if (!SUCCEEDED(status))
     {
+      m_dup->ReleaseFrame();
       DEBUG_ERROR("Failed to get the new pointer shape: %08x", status);
       return false;
     }
