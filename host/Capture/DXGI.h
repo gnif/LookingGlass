@@ -19,10 +19,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "ICapture.h"
-#include <vendor\DXGICapture\DXGIManager.h>
+#include "MTMemcpy.h"
 
 #define W32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dxgi1_2.h>
+#include <d3d11.h>
+#include <atlbase.h>
 
 namespace Capture
 {
@@ -40,8 +43,16 @@ namespace Capture
 
   private:
     bool          m_initialized;
-    DXGIManager * m_manager;
+    MTMemcpy      m_memcpy;
     unsigned int  m_width;
     unsigned int  m_height;
+
+    CComPtr<IDXGIFactory1>          m_dxgiFactory;
+    CComPtr<ID3D11Device>           m_device;
+    D3D_FEATURE_LEVEL               m_featureLevel;
+    CComPtr<ID3D11DeviceContext>    m_deviceContext;
+    CComQIPtr<IDXGIOutput1>         m_output;
+    CComPtr<IDXGIOutputDuplication> m_dup;
+    CComPtr<ID3D11Texture2D>        m_texture;
   };
 };
