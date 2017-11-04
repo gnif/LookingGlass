@@ -280,7 +280,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
           DEBUG_ERROR("Failed to ReInitialize after lost access to desktop");
           return false;
         }
-        break;
+        continue;
       }
 
       default:
