@@ -80,6 +80,8 @@ void compFunc_BLACK_RLE(uint8_t * dst, const uint8_t * src, const size_t len)
 inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
 {
   return
+    (s1.frameType != FRAME_TYPE_INVALID) &&
+    (s2.frameType != FRAME_TYPE_INVALID) &&
     (s1.version   == s2.version  ) &&
     (s1.frameType == s2.frameType) &&
     (s1.compType  == s2.compType ) &&
@@ -218,7 +220,7 @@ int renderThread(void * unused)
     }
 
     // if the format is invalid or it has changed
-    if (format.frameType == FRAME_TYPE_INVALID || !areFormatsSame(format, *state.shm))
+    if (!areFormatsSame(format, *state.shm))
     {
       if (texture)
       {
