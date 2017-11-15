@@ -54,6 +54,7 @@ struct KVMGFXHeader
   int32_t   mouseX;      // the initial mouse X position
   int32_t   mouseY;      // the initial mouse Y position
   uint64_t  dataLen;     // total lengh of the data after this header
+  uint64_t  dataPos;     // offset to the frame
 };
 
 #pragma pack(push,1)

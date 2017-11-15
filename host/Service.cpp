@@ -30,7 +30,8 @@ Service::Service() :
   m_initialized(false),
   m_readyEvent(INVALID_HANDLE_VALUE),
   m_capture(NULL),
-  m_memory(NULL)
+  m_memory(NULL),
+  m_frameIndex(0)
 {
   m_ivshmem = IVSHMEM::Get();
 }
@@ -66,7 +67,7 @@ bool Service::Initialize()
     return false;
   }
 
-  m_memory = m_ivshmem->GetMemory();
+  m_memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
   if (!m_memory)
   {
     DEBUG_ERROR("Failed to get IVSHMEM memory");
@@ -82,7 +83,7 @@ bool Service::Initialize()
     return false;
   }
 
-  KVMGFXHeader * header = static_cast<KVMGFXHeader*>(m_memory);
+  KVMGFXHeader * header = reinterpret_cast<KVMGFXHeader*>(m_memory);
 
   // we save this as it might actually be valid
   UINT16 hostID = header->hostID;
@@ -120,12 +121,14 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  KVMGFXHeader * header  = static_cast<KVMGFXHeader *>(m_memory  );
-  void         * data    = static_cast<void         *>(header + 1);
-  const size_t available = m_ivshmem->GetSize() - sizeof(KVMGFXHeader);
-  if (m_capture->GetMaxFrameSize() > available)
+  KVMGFXHeader * header     = reinterpret_cast<KVMGFXHeader *>(m_memory);
+  const uint64_t dataOffset = sizeof(KVMGFXHeader) + m_frameIndex * m_capture->GetMaxFrameSize();
+  uint8_t      * data       = m_memory + dataOffset;
+  const size_t   available  = m_ivshmem->GetSize() - sizeof(KVMGFXHeader);
+
+  if (dataOffset + m_capture->GetMaxFrameSize() > available)
   {
-    DEBUG_ERROR("Frame could exceed buffer size!");
+    DEBUG_ERROR("Frame can exceed buffer size!");
     return false;
   }
 
@@ -146,10 +149,40 @@ bool Service::Process()
     return false;
   }
 
+  // wait for the host to notify that is it is ready to proceed
+  ResetEvent(m_readyEvent);
+  bool eventDone = false;
+  while (!eventDone)
+  {
+    switch (WaitForSingleObject(m_readyEvent, 1000))
+    {
+    case WAIT_ABANDONED:
+      DEBUG_ERROR("Wait abandoned");
+      return false;
+
+    case WAIT_OBJECT_0:
+      eventDone = true;
+      break;
+
+      // if we timed out we just continue to ring until we get an answer or we are stopped
+    case WAIT_TIMEOUT:
+      continue;
+
+    case WAIT_FAILED:
+      DEBUG_ERROR("Wait failed");
+      return false;
+
+    default:
+      DEBUG_ERROR("Unknown error");
+      return false;
+    }
+  }
+
   // copy the frame details into the header
   header->width   = frame.width;
   header->height  = frame.height;
   header->stride  = frame.stride;
+  header->dataPos = dataOffset;
   header->dataLen = frame.outSize;
 
   // tell the host where the cursor is
@@ -158,38 +191,14 @@ bool Service::Process()
   header->mouseX = cursorPos.x;
   header->mouseY = cursorPos.y;
 
-  // wait for the host to notify that is it is ready to proceed
-  ResetEvent(m_readyEvent);
-  while(true)
+  if (!m_ivshmem->RingDoorbell(header->hostID, 0))
   {
-    if (!m_ivshmem->RingDoorbell(header->hostID, 0))
-    {
-      DEBUG_ERROR("Failed to ring doorbell");
-      return false;
-    }
-
-    switch (WaitForSingleObject(m_readyEvent, 1000))
-    {
-      case WAIT_ABANDONED:
-        DEBUG_ERROR("Wait abandoned");
-        return false;
-
-      case WAIT_OBJECT_0:
-        return true;
-
-      // if we timed out we just continue to ring until we get an answer or we are stopped
-      case WAIT_TIMEOUT:
-        break;
-
-      case WAIT_FAILED:
-        DEBUG_ERROR("Wait failed");
-        return false;
-
-      default:
-        DEBUG_ERROR("Unknown error");
-        return false;
-    }
+    DEBUG_ERROR("Failed to ring doorbell");
+    return false;
   }
+
+  if (++m_frameIndex == 2)
+    m_frameIndex = 0;
 
   return true;
 }
