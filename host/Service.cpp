@@ -150,7 +150,6 @@ bool Service::Process()
   }
 
   // wait for the host to notify that is it is ready to proceed
-  ResetEvent(m_readyEvent);
   bool eventDone = false;
   while (!eventDone)
   {
@@ -191,6 +190,7 @@ bool Service::Process()
   header->mouseX = cursorPos.x;
   header->mouseY = cursorPos.y;
 
+  ResetEvent(m_readyEvent);
   if (!m_ivshmem->RingDoorbell(header->hostID, 0))
   {
     DEBUG_ERROR("Failed to ring doorbell");
