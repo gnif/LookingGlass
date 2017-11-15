@@ -35,17 +35,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "spice/spice.h"
 #include "kb.h"
 
-#define MAP_SIZE (16*1024*1024)
-#define COPY_THREADS 4
-
 typedef void (*CompFunc)(uint8_t * dst, const uint8_t * src, const size_t len);
 typedef void (*DrawFunc)(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src);
 
 struct KVMGFXState
 {
-  bool                  running;
-  bool                  started;
-  bool                  windowChanged;
+  bool      running;
+  bool      started;
+  bool      windowChanged;
 
   SDL_Window          * window;
   SDL_Renderer        * renderer;
