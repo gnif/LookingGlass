@@ -177,7 +177,6 @@ int renderThread(void * unused)
           break;
 
         case IVSHMEM_WAIT_RESULT_TIMEOUT:
-          DEBUG_INFO("timed out");
           ivshmem_kick_irq(state.shm->guestID, 0);
           ready = false;
           break;
