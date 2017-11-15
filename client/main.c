@@ -41,19 +41,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 typedef void (*CompFunc)(uint8_t * dst, const uint8_t * src, const size_t len);
 typedef void (*DrawFunc)(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src);
 
-typedef struct
-{
-  SDL_mutex  * mutex;
-  SDL_cond   * cond;
-  SDL_Thread * thread;
-
-  bool  rdy;
-  void  *dst;
-  const void * src;
-  size_t len;
-}
-CopyJob;
-
 struct KVMGFXState
 {
   bool                  running;
@@ -63,79 +50,13 @@ struct KVMGFXState
   SDL_Window          * window;
   SDL_Renderer        * renderer;
   struct KVMGFXHeader * shm;
-
-  SDL_sem    * cpySem;
-  SDL_Thread * cpyThreads[COPY_THREADS];
-  CopyJob      cpyJobs   [COPY_THREADS];
 };
 
 struct KVMGFXState state;
 
-int copyThread(void * arg)
-{
-  CopyJob * job = (CopyJob *)arg;
-
-  while(state.running)
-  {
-    SDL_LockMutex(job->mutex);
-    while(!job->rdy)
-      SDL_CondWait(job->cond, job->mutex);
-    job->rdy = false;
-    SDL_UnlockMutex(job->mutex);
-
-    memcpy(job->dst, job->src, job->len);
-
-    // return a lock to the pool
-    SDL_SemPost(state.cpySem);
-  }
-
-  return 0;
-}
-
-bool startCopyThreads()
-{
-  state.cpySem = SDL_CreateSemaphore(COPY_THREADS);
-
-  for(int i = 0; i < COPY_THREADS; ++i)
-  {
-    // take a lock from the pool
-    SDL_SemWait(state.cpySem);
-
-    CopyJob * job = &state.cpyJobs[i];
-    job->mutex  = SDL_CreateMutex();
-    job->cond   = SDL_CreateCond();
-    job->rdy    = false;
-    job->dst    = NULL;
-    job->src    = NULL;
-    job->len    = 0;
-
-    job->thread = SDL_CreateThread(
-        copyThread, "copyThread", &state.cpyJobs[i]);
-  }
-
-  return true;
-}
-
-void stopCopyThreads()
-{
-}
-
 void compFunc_NONE(uint8_t * dst, const uint8_t * src, const size_t len)
 {
-  const size_t part = len / COPY_THREADS;
-  for(int i = 0; i < COPY_THREADS; ++i)
-  {
-    CopyJob * job = &state.cpyJobs[i];
-    job->dst = dst + i * part;
-    job->src = src + i * part;
-    job->len = part;
-    job->rdy = true;
-    SDL_CondSignal(job->cond);
-  }
-
-  // wait for the threads to complete
-  for(int i = 0; i < COPY_THREADS; ++i)
-    SDL_SemWait(state.cpySem);
+  memcpy(dst, src, len);
 }
 
 void compFunc_BLACK_RLE(uint8_t * dst, const uint8_t * src, const size_t len)
@@ -351,7 +272,6 @@ int renderThread(void * unused)
   }
 
   SDL_DestroyTexture(texture);
-  stopCopyThreads();
   return 0;
 }
 
@@ -598,9 +518,6 @@ int main(int argc, char * argv[])
     DEBUG_ERROR("failed to create window");
     return -1;
   }
-
-  startCopyThreads();
-
 
   int         shm_fd    = 0;
   SDL_Thread *t_ivshmem = NULL;
