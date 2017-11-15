@@ -93,35 +93,20 @@ void drawFunc_ARGB10(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, co
 {
   SDL_UpdateTexture(texture, NULL, src, state.shm->stride * 4);
   ivshmem_kick_irq(state.shm->guestID, 0);
-
-  SDL_RenderClear(state.renderer);
-
-  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
-  SDL_RenderPresent(state.renderer);
 }
 
 void drawFunc_ARGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 4);
   ivshmem_kick_irq(state.shm->guestID, 0);
-
   SDL_UnlockTexture(texture);
-  SDL_RenderClear(state.renderer);
-
-  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
-  SDL_RenderPresent(state.renderer);
 }
 
 void drawFunc_RGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 3);
   ivshmem_kick_irq(state.shm->guestID, 0);
-
   SDL_UnlockTexture(texture);
-  SDL_RenderClear(state.renderer);
-
-  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
-  SDL_RenderPresent(state.renderer);
 }
 
 void drawFunc_XOR(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
@@ -131,10 +116,7 @@ void drawFunc_XOR(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const
 
   compFunc(dst, src, state.shm->height * state.shm->stride * 3);
   ivshmem_kick_irq(state.shm->guestID, 0);
-
   SDL_UnlockTexture(texture);
-  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
-  SDL_RenderPresent(state.renderer);
 
   // clear the buffer for the next frame
   memset(dst, 0, state.shm->height * state.shm->stride * 3);
@@ -144,10 +126,7 @@ void drawFunc_YUV444P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, c
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 3);
   ivshmem_kick_irq(state.shm->guestID, 0);
-
   SDL_UnlockTexture(texture);
-  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
-  SDL_RenderPresent(state.renderer);
 }
 
 void drawFunc_YUV420P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
@@ -159,19 +138,14 @@ void drawFunc_YUV420P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, c
       src + pixels             , state.shm->stride / 2,
       src + pixels + pixels / 4, state.shm->stride / 2
   );
-
   ivshmem_kick_irq(state.shm->guestID, 0);
-
-  SDL_RenderClear(state.renderer);
-  SDL_RenderCopy(state.renderer, texture, NULL, NULL);
-  SDL_RenderPresent(state.renderer);
 }
 
 int renderThread(void * unused)
 {
   struct KVMGFXHeader format;
   SDL_Texture        *texture    = NULL;
-  uint8_t             *pixels    = (uint8_t*)(state.shm + 1);
+  uint8_t             *pixels    = (uint8_t*)state.shm;
   uint8_t             *texPixels = NULL;
   DrawFunc            drawFunc   = NULL;
   CompFunc            compFunc   = NULL;
@@ -203,6 +177,7 @@ int renderThread(void * unused)
           break;
 
         case IVSHMEM_WAIT_RESULT_TIMEOUT:
+          DEBUG_INFO("timed out");
           ivshmem_kick_irq(state.shm->guestID, 0);
           ready = false;
           break;
@@ -266,7 +241,10 @@ int renderThread(void * unused)
     }
 
     glDisable(GL_COLOR_LOGIC_OP);
-    drawFunc(compFunc, texture, texPixels, pixels);
+    drawFunc(compFunc, texture, texPixels, pixels + state.shm->dataPos);
+    SDL_RenderCopy(state.renderer, texture, NULL, NULL);
+    SDL_RenderPresent(state.renderer);
+
     state.started = true;
   }
 
