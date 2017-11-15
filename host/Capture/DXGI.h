@@ -19,7 +19,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "ICapture.h"
-#include "MTMemcpy.h"
 
 #define W32_LEAN_AND_MEAN
 #include <windows.h>
@@ -45,7 +44,6 @@ namespace Capture
     bool ReInitialize();
 
     bool          m_initialized;
-    MTMemcpy      m_memcpy;
     unsigned int  m_width;
     unsigned int  m_height;
 

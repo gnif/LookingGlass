@@ -18,7 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #pragma once
 #include "ICapture.h"
-#include "MTMemcpy.h"
 
 #define W32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -44,7 +43,6 @@ namespace Capture
   private:
     bool m_initialized;
     HMODULE  m_hDLL;
-    MTMemcpy m_memcpy;
 
     NvFBC_CreateFunctionExType    m_fnCreateEx;
     NvFBC_SetGlobalFlagsType      m_fnSetGlobalFlags;

@@ -163,12 +163,6 @@ bool DXGI::Initialize()
     DeInitialize();
     return false;
   }
-
-  if (!m_memcpy.Initialize())
-  {
-    DEBUG_ERROR("Failed to initialize memcpy");
-    return false;
-  }
   
   m_initialized = true;
   return true;
@@ -176,8 +170,6 @@ bool DXGI::Initialize()
 
 void DXGI::DeInitialize()
 {
-  m_memcpy.DeInitialize();
-
   if (m_pointer)
   {
     delete[] m_pointer;
@@ -358,7 +350,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   frame.stride  = rect.Pitch / 4;
 
   frame.outSize = min(frame.bufferSize, m_height * rect.Pitch);
-  m_memcpy.Copy(frame.buffer, rect.pBits, frame.outSize);
+  memcpy_s(frame.buffer, frame.bufferSize, rect.pBits, frame.outSize);
   status = surface->Unmap();
 
   // if we have a mouse update
