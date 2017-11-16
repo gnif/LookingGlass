@@ -145,10 +145,13 @@ bool NvFBC::Initialize()
   ZeroMemory(&m_grabInfo, sizeof(NvFBCFrameGrabInfo));
   m_grabFrameParams.dwVersion = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
   m_grabFrameParams.dwFlags = NVFBC_TOSYS_NOFLAGS;
+  m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_FULL;
   m_grabFrameParams.dwStartX = 0;
   m_grabFrameParams.dwStartY = 0;
-  m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_SCALE;
+  m_grabFrameParams.dwTargetWidth = 0;
+  m_grabFrameParams.dwTargetHeight = 0;
   m_grabFrameParams.pNvFBCFrameGrabInfo = &m_grabInfo;
+
 
   m_initialized = true;
   return true;
@@ -213,18 +216,28 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
   RECT desktop;
   GetWindowRect(hDesktop, &desktop);
 
-  m_grabFrameParams.dwTargetWidth  = desktop.right;
-  m_grabFrameParams.dwTargetHeight = desktop.bottom;
   for(int i = 0; i < 2; ++i)
   {
     NVFBCRESULT status = m_nvFBC->NvFBCToSysGrabFrame(&m_grabFrameParams);
     if (status == NVFBC_SUCCESS)
     {
-      frame.width   = m_grabInfo.dwWidth;
-      frame.height  = m_grabInfo.dwHeight;
-      frame.stride  = m_grabInfo.dwBufferWidth;
-      frame.outSize = m_grabInfo.dwBufferWidth * m_grabInfo.dwHeight * 3;
-      memcpy_s(frame.buffer, frame.bufferSize, m_frameBuffer, frame.outSize);
+      const unsigned int realHeight = min(m_grabInfo.dwHeight, desktop.bottom - desktop.top );
+      const unsigned int realWidth  = min(m_grabInfo.dwWidth , desktop.right  - desktop.left);
+      const unsigned int dataWidth  = realWidth * 3;
+      const unsigned int dataOffset =
+        (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
+        ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 3;
+
+      frame.width   = realWidth;
+      frame.height  = realHeight;
+      frame.stride  = frame.width;
+      frame.outSize = frame.width * frame.height * 3;
+
+      uint8_t *src = (uint8_t *)m_frameBuffer + dataOffset;
+      uint8_t *dst = (uint8_t *)frame.buffer;
+      for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 3)
+        memcpy_s(dst, dataWidth, src, dataWidth);
+
       return true;
     }
 
