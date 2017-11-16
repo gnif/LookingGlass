@@ -114,8 +114,12 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  KVMGFXHeader * header     = reinterpret_cast<KVMGFXHeader *>(m_memory);
-  const uint64_t dataOffset = sizeof(KVMGFXHeader) + m_frameIndex * m_capture->GetMaxFrameSize();
+  KVMGFXHeader * header = reinterpret_cast<KVMGFXHeader *>(m_memory);
+
+  // calculate the current offset and ensure it is 16-byte aligned for SMID performance
+  uint64_t dataOffset = sizeof(KVMGFXHeader) + m_frameIndex * m_capture->GetMaxFrameSize();
+  dataOffset = (dataOffset + 0xF) & ~0xF;
+
   uint8_t      * data       = m_memory + dataOffset;
   const size_t   available  = m_ivshmem->GetSize() - sizeof(KVMGFXHeader);
 

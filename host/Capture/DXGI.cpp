@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using namespace Capture;
 
 #include "common\debug.h"
+#include "Util.h"
 
 DXGI::DXGI() :
   m_options(NULL),
@@ -218,7 +219,7 @@ FrameType DXGI::GetFrameType()
   if (!m_initialized)
     return FRAME_TYPE_INVALID;
 
-  return FRAME_TYPE_ARGB;
+  return FRAME_TYPE_RGB;
 }
 
 FrameComp DXGI::GetFrameCompression()
@@ -234,7 +235,7 @@ size_t DXGI::GetMaxFrameSize()
   if (!m_initialized)
     return 0;
 
-  return m_width * m_height * 4;
+  return (m_width * m_height * 3) + 4;
 }
 
 bool DXGI::GrabFrame(FrameInfo & frame)
@@ -346,14 +347,12 @@ bool DXGI::GrabFrame(FrameInfo & frame)
 
   m_width  = desc.Width;
   m_height = desc.Height;
+  const int pitch = m_width * 3;
 
   frame.width   = desc.Width;
   frame.height  = desc.Height;
-  frame.stride  = rect.Pitch / 4;
-
-  frame.outSize = min(frame.bufferSize, m_height * rect.Pitch);
-  memcpy_s(frame.buffer, frame.bufferSize, rect.pBits, frame.outSize);
-  status = surface->Unmap();
+  frame.stride  = desc.Width;
+  frame.outSize = min(frame.bufferSize, m_height * pitch);
 
   // if we have a mouse update
   if (frameInfo.LastMouseUpdateTime.QuadPart)
@@ -376,7 +375,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
           for (int x = abs(min(0, m_pointerPos.x)); x < maxWidth; ++x)
           {
             BYTE *src = (BYTE *)m_pointer + (m_shapeInfo.Pitch * y) + (x * 4);
-            BYTE *dst = (BYTE *)frame.buffer + (rect.Pitch * (y + m_pointerPos.y)) + ((x + m_pointerPos.x) * 4);
+            BYTE *dst = (BYTE *)rect.pBits + (rect.Pitch * (y + m_pointerPos.y)) + ((x + m_pointerPos.x) * 4);
 
             const unsigned int alpha = src[3] + 1;
             const unsigned int inv = 256 - alpha;
@@ -393,7 +392,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
           for (int x = abs(min(0, m_pointerPos.x)); x < maxWidth; ++x)
           {
             UINT32 *src = (UINT32 *)m_pointer + ((m_shapeInfo.Pitch/4) * y) + x;
-            UINT32 *dst = (UINT32 *)frame.buffer + (frame.stride * (y + m_pointerPos.y)) + (x + m_pointerPos.x);
+            UINT32 *dst = (UINT32 *)rect.pBits + (frame.stride * (y + m_pointerPos.y)) + (x + m_pointerPos.x);
             if (*src & 0xff000000)
                  *dst = 0xff000000 | (*dst ^ *src);
             else *dst = 0xff000000 | *src;
@@ -408,7 +407,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
           {
             UINT8  *srcAnd = (UINT8  *)m_pointer + (m_shapeInfo.Pitch * y) + (x/8);
             UINT8  *srcXor = srcAnd + m_shapeInfo.Pitch * (m_shapeInfo.Height / 2);
-            UINT32 *dst    = (UINT32 *)frame.buffer + (frame.stride * (y + m_pointerPos.y)) + (x + m_pointerPos.x);
+            UINT32 *dst    = (UINT32 *)rect.pBits + (frame.stride * (y + m_pointerPos.y)) + (x + m_pointerPos.x);
             const BYTE mask = 0x80 >> (x % 8);
             const UINT32 andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
             const UINT32 xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
@@ -418,6 +417,9 @@ bool DXGI::GrabFrame(FrameInfo & frame)
       }
     }
   }
+
+  Util::BGRAtoRGB(rect.pBits, m_height * m_width, (uint8_t *)frame.buffer);
+  status = surface->Unmap();
 
   if (FAILED(status))
   {
