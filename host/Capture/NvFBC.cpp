@@ -31,6 +31,8 @@ using namespace Capture;
 #endif
 
 NvFBC::NvFBC() :
+  m_options(NULL),
+  m_optNoCrop(false),
   m_initialized(false),
   m_hDLL(NULL),
   m_nvFBC(NULL)
@@ -41,10 +43,17 @@ NvFBC::~NvFBC()
 {
 }
 
-bool NvFBC::Initialize()
+bool NvFBC::Initialize(CaptureOptions * options)
 {
   if (m_initialized)
     DeInitialize();
+
+  m_options   = options;
+  m_optNoCrop = false;
+  for (CaptureOptions::const_iterator it = options->begin(); it != options->end(); ++it)
+  {
+    if (_strcmpi(*it, "nocrop") == 0) { m_optNoCrop = true; continue; }
+  }
 
   std::string nvfbc = Util::GetSystemRoot() + "\\" + NVFBC_LIBRARY_NAME;
   m_hDLL = LoadLibraryA(nvfbc.c_str());
@@ -221,15 +230,30 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
     NVFBCRESULT status = m_nvFBC->NvFBCToSysGrabFrame(&m_grabFrameParams);
     if (status == NVFBC_SUCCESS)
     {
-      const unsigned int realHeight = min(m_grabInfo.dwHeight, desktop.bottom - desktop.top );
-      const unsigned int realWidth  = min(m_grabInfo.dwWidth , desktop.right  - desktop.left);
-      const unsigned int dataWidth  = realWidth * 3;
-      const unsigned int dataOffset =
-        (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
-        ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 3;
+      unsigned int dataWidth;
+      unsigned int dataOffset;
 
-      frame.width   = realWidth;
-      frame.height  = realHeight;
+      if (m_optNoCrop)
+      {
+        dataWidth  = m_grabInfo.dwWidth * 3;
+        dataOffset = 0;
+
+        frame.width   = m_grabInfo.dwWidth;
+        frame.height  = m_grabInfo.dwHeight;
+      }
+      else
+      {
+        const unsigned int realHeight = min(m_grabInfo.dwHeight, (unsigned int)(desktop.bottom - desktop.top));
+        const unsigned int realWidth  = min(m_grabInfo.dwWidth , (unsigned int)(desktop.right  - desktop.left));
+        dataWidth  = realWidth * 3;
+        dataOffset =
+          (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
+          ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 3;
+
+        frame.width  = realWidth;
+        frame.height = realHeight;
+      }
+
       frame.stride  = frame.width;
       frame.outSize = frame.width * frame.height * 3;
 
@@ -251,7 +275,7 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
     {
       DEBUG_WARN("Session was invalidated, attempting to restart");
       DeInitialize();
-      if (!Initialize())
+      if (!Initialize(m_options))
       {
         DEBUG_ERROR("Failed to re-iniaialize");
         return false;

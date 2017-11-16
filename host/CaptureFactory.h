@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define W32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <vector>
 
 #include "common\debug.h"
 #include "ICapture.h"
@@ -29,29 +30,61 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 class CaptureFactory
 {
 public:
-  static ICapture * GetCaptureDevice()
+  typedef std::vector<ICapture *> DeviceList;
+
+  static DeviceList & GetDevices()
   {
-    ICapture *dev;
+    static DeviceList devices;
+    if (!devices.empty())
+      return devices;
 
-    dev = new Capture::NvFBC();
-    if (dev->Initialize())
-    {
-      DEBUG_INFO("Using NvFBC");
-      return dev;
-    }
-    dev->DeInitialize();
-    delete dev;
-    
-    dev = new Capture::DXGI();
-    if (dev->Initialize())
-    {
-      DEBUG_INFO("Using DXGI");
-      return dev;
-    }
-    dev->DeInitialize();
-    delete dev;
+    devices.push_back(new Capture::NvFBC());
+    devices.push_back(new Capture::DXGI ());
 
-    DEBUG_ERROR("Failed to initialize a compatible capture device");
+    return devices;
+  }
+
+  static ICapture * GetDevice(const char * name, CaptureOptions * options)
+  {
+    DeviceList devices = GetDevices();
+    for (DeviceList::const_iterator it = devices.begin(); it != devices.end(); ++it)
+    {
+      ICapture * device = *it;
+      if (_strcmpi(name, device->GetName()) != 0)
+        continue;
+
+      if (device->Initialize(options))
+      {
+        DEBUG_INFO("Using %s", device->GetName());
+        return device;
+      }
+
+      device->DeInitialize();
+      DEBUG_ERROR("Failed to initialize %s", device->GetName());
+      return NULL;
+    }
+
+    DEBUG_ERROR("No such device: %s", name);
+    return NULL;
+  }
+
+  static ICapture * DetectDevice(CaptureOptions * options)
+  {
+    DeviceList devices = GetDevices();
+    for (DeviceList::const_iterator it = devices.begin(); it != devices.end(); ++it)
+    {
+      ICapture * device = *it;
+
+      DEBUG_INFO("Trying %s", device->GetName());
+      if (device->Initialize(options))
+      {
+        DEBUG_INFO("Using %s", device->GetName());
+        return device;
+      }
+      device->DeInitialize();
+    }
+
+    DEBUG_ERROR("Failed to initialize a capture device");
     return NULL;
   }
 };

@@ -160,6 +160,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\vendor\getopt\getopt.c" />
     <ClCompile Include="Capture\DXGI.cpp" />
     <ClCompile Include="Capture\NvFBC.cpp" />
     <ClCompile Include="ivshmem.cpp" />

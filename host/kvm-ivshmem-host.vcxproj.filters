@@ -39,6 +39,9 @@
     <ClCompile Include="Capture\DXGI.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
+    <ClCompile Include="..\vendor\getopt\getopt.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ivshmem.h">

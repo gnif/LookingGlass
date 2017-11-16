@@ -40,19 +40,12 @@ Service::~Service()
 {
 }
 
-bool Service::Initialize()
+bool Service::Initialize(ICapture * captureDevice)
 {
   if (m_initialized)
     DeInitialize();
 
-  m_capture = CaptureFactory::GetCaptureDevice();
-  if (!m_capture)
-  {
-    DEBUG_ERROR("Failed to initialize capture interface");
-    DeInitialize();
-    return false;
-  }
-
+  m_capture = captureDevice;
   if (!m_ivshmem->Initialize())
   {
     DEBUG_ERROR("IVSHMEM failed to initalize");

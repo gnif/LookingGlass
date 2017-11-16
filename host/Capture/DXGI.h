@@ -33,7 +33,10 @@ namespace Capture
   public:
     DXGI();
     ~DXGI();
-    bool Initialize();
+
+    const char * GetName() { return "DXGI"; }
+
+    bool Initialize(CaptureOptions * options);
     void DeInitialize();
     enum FrameType GetFrameType();
     enum FrameComp GetFrameCompression();
@@ -41,6 +44,8 @@ namespace Capture
     bool GrabFrame(struct FrameInfo & frame);
 
   private:
+    CaptureOptions * m_options;
+
     bool ReInitialize();
 
     bool          m_initialized;

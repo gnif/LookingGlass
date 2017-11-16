@@ -35,7 +35,7 @@ public:
     return m_instance;
   }
 
-  bool Initialize();
+  bool Initialize(ICapture * captureDevice);
   void DeInitialize();
   bool Process();
 

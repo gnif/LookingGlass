@@ -33,7 +33,9 @@ namespace Capture
     NvFBC();
     ~NvFBC();
 
-    bool Initialize();
+    const char * GetName() { return "NvFBC"; }
+
+    bool Initialize(CaptureOptions * options);
     void DeInitialize();
     enum FrameType GetFrameType();
     enum FrameComp GetFrameCompression();
@@ -41,6 +43,9 @@ namespace Capture
     bool GrabFrame(struct FrameInfo & frame);
 
   private:
+    CaptureOptions * m_options;
+    bool m_optNoCrop;
+
     bool m_initialized;
     HMODULE  m_hDLL;
 

@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "common/KVMGFXHeader.h"
+#include <vector>
 
 struct FrameInfo
 {
@@ -30,10 +31,14 @@ struct FrameInfo
   size_t outSize;
 };
 
+typedef std::vector<const char *> CaptureOptions;
+
 __interface ICapture
 {
 public:
-  bool Initialize();
+  const char * GetName();
+  
+  bool Initialize(CaptureOptions * options);
   void DeInitialize();
   enum FrameType GetFrameType();
   enum FrameComp GetFrameCompression();

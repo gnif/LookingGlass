@@ -22,6 +22,7 @@ using namespace Capture;
 #include "common\debug.h"
 
 DXGI::DXGI() :
+  m_options(NULL),
   m_initialized(false),
   m_dxgiFactory(NULL),
   m_device(NULL),
@@ -37,11 +38,12 @@ DXGI::~DXGI()
 
 }
 
-bool DXGI::Initialize()
+bool DXGI::Initialize(CaptureOptions * options)
 {
   if (m_initialized)
     DeInitialize();
 
+  m_options = options;
   HRESULT status;
 
   status = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)(&m_dxgiFactory));
@@ -208,7 +210,7 @@ bool DXGI::ReInitialize()
   */
   Sleep(200);
 
-  return Initialize();
+  return Initialize(m_options);
 }
 
 FrameType DXGI::GetFrameType()
