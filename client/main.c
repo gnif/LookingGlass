@@ -298,10 +298,8 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
 
 int eventThread(void * arg)
 {
-  bool serverMode = false;
-  int  mouseX     = 0;
-  int  mouseY     = 0;
-  bool init       = false;
+  bool serverMode   = false;
+  bool realignGuest = true;
 
   // ensure mouse acceleration is identical in server mode
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
@@ -320,23 +318,6 @@ int eventThread(void * arg)
       if (!state.started)
         continue;
 
-      if (!init)
-      {
-        mouseX = state.shm->mouseX;
-        mouseY = state.shm->mouseY;
-        spice_mouse_mode(false);
-        SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
-        init = true;
-      }
-
-      if (state.windowChanged)
-      {
-        mouseX = state.shm->mouseX;
-        mouseY = state.shm->mouseY;
-        SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
-        state.windowChanged = false;
-      }
-
       switch(event.type)
       {
         case SDL_KEYDOWN:
@@ -352,11 +333,7 @@ int eventThread(void * arg)
             SDL_SetRelativeMouseMode(serverMode);
 
             if (!serverMode)
-            {
-              mouseX = state.shm->mouseX;
-              mouseY = state.shm->mouseY;
-              SDL_WarpMouseInWindow(state.window, mouseX, mouseY);
-            }
+              realignGuest = true;
             break;
           }
 
@@ -404,23 +381,27 @@ int eventThread(void * arg)
 
         case SDL_MOUSEMOTION:
         {
-          bool ok;
-          if (serverMode)
-            ok = spice_mouse_motion(event.motion.xrel, event.motion.yrel);
-          else
-            ok = spice_mouse_motion(
-                (int)event.motion.x - mouseX,
-                (int)event.motion.y - mouseY
-            );
-
-          if (!ok)
+          int x = 0;
+          int y = 0;
+          if (realignGuest || state.windowChanged)
           {
-            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-            break;
+            x = event.motion.x - state.shm->mouseX;
+            y = event.motion.y - state.shm->mouseY;
+            realignGuest        = false;
+            state.windowChanged = false;
+          }
+          else
+          {
+            x = event.motion.xrel;
+            y = event.motion.yrel;
           }
 
-          mouseX = event.motion.x;
-          mouseY = event.motion.y;
+          if (x != 0 || y != 0)
+            if (!spice_mouse_motion(x, y))
+            {
+              DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+              break;
+            }
           break;
         }
 
@@ -433,9 +414,6 @@ int eventThread(void * arg)
             DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
             break;
           }
-
-          mouseX = event.motion.x;
-          mouseY = event.motion.y;
           break;
 
         case SDL_MOUSEBUTTONUP:
@@ -447,10 +425,18 @@ int eventThread(void * arg)
             DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
             break;
           }
-
-          mouseX = event.motion.x;
-          mouseY = event.motion.y;
           break;
+
+        case SDL_WINDOWEVENT:
+        {
+          switch(event.window.event)
+          {
+            case SDL_WINDOWEVENT_ENTER:
+              realignGuest = true;
+              break;
+          }
+          break;
+        }
 
         default:
           break;
