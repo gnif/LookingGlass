@@ -154,7 +154,8 @@ bool NvFBC::Initialize(CaptureOptions * options)
   ZeroMemory(&m_grabFrameParams, sizeof(NVFBC_TOSYS_GRAB_FRAME_PARAMS));
   ZeroMemory(&m_grabInfo, sizeof(NvFBCFrameGrabInfo));
   m_grabFrameParams.dwVersion = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
-  m_grabFrameParams.dwFlags = NVFBC_TOSYS_NOFLAGS;
+  m_grabFrameParams.dwFlags = NVFBC_TOSYS_WAIT_WITH_TIMEOUT;
+  m_grabFrameParams.dwWaitTime = 100;
   m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_FULL;
   m_grabFrameParams.dwStartX = 0;
   m_grabFrameParams.dwStartY = 0;
