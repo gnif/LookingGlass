@@ -30,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <GL/gl.h>
 
 #include "debug.h"
+#include "memcpySSE.h"
 #include "KVMGFXHeader.h"
 #include "ivshmem/ivshmem.h"
 #include "spice/spice.h"
@@ -53,7 +54,7 @@ struct KVMGFXState state;
 
 void compFunc_NONE(uint8_t * dst, const uint8_t * src, const size_t len)
 {
-  memcpy(dst, src, len);
+  memcpySSE(dst, src, len);
 }
 
 void compFunc_BLACK_RLE(uint8_t * dst, const uint8_t * src, const size_t len)
