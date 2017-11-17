@@ -236,7 +236,7 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
 
       if (m_optNoCrop)
       {
-        dataWidth  = m_grabInfo.dwWidth * 3;
+        dataWidth  = m_grabInfo.dwWidth * 4;
         dataOffset = 0;
 
         frame.width   = m_grabInfo.dwWidth;
