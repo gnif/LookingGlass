@@ -135,7 +135,7 @@ bool NvFBC::Initialize(CaptureOptions * options)
   NVFBC_TOSYS_SETUP_PARAMS setupParams;
   ZeroMemory(&setupParams, sizeof(NVFBC_TOSYS_SETUP_PARAMS));
   setupParams.dwVersion = NVFBC_TOSYS_SETUP_PARAMS_VER;
-  setupParams.eMode = NVFBC_TOSYS_RGB;
+  setupParams.eMode = NVFBC_TOSYS_ARGB;
   setupParams.bWithHWCursor = TRUE;
   setupParams.bDiffMap = FALSE;
   setupParams.ppBuffer = (void **)&m_frameBuffer;
@@ -198,7 +198,7 @@ FrameType NvFBC::GetFrameType()
   if (!m_initialized)
     return FRAME_TYPE_INVALID;
 
-  return FRAME_TYPE_RGB;
+  return FRAME_TYPE_ARGB;
 }
 
 FrameComp NvFBC::GetFrameCompression()
@@ -214,7 +214,7 @@ size_t NvFBC::GetMaxFrameSize()
   if (!m_initialized)
     return false;
 
-  return m_maxCaptureWidth * m_maxCaptureHeight * 3;
+  return m_maxCaptureWidth * m_maxCaptureHeight * 4;
 }
 
 bool NvFBC::GrabFrame(struct FrameInfo & frame)
@@ -246,21 +246,21 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
       {
         const unsigned int realHeight = min(m_grabInfo.dwHeight, (unsigned int)(desktop.bottom - desktop.top));
         const unsigned int realWidth  = min(m_grabInfo.dwWidth , (unsigned int)(desktop.right  - desktop.left));
-        dataWidth  = realWidth * 3;
+        dataWidth  = realWidth * 4;
         dataOffset =
           (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
-          ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 3;
+          ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 4;
 
         frame.width  = realWidth;
         frame.height = realHeight;
       }
 
       frame.stride  = frame.width;
-      frame.outSize = frame.width * frame.height * 3;
+      frame.outSize = frame.width * frame.height * 4;
 
       uint8_t *src = (uint8_t *)m_frameBuffer + dataOffset;
       uint8_t *dst = (uint8_t *)frame.buffer;
-      for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 3)
+      for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 4)
         memcpySSE(dst, src, dataWidth);
 
       return true;

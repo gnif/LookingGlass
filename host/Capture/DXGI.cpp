@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using namespace Capture;
 
 #include "common\debug.h"
-#include "Util.h"
+#include "common\memcpySSE.h"
 
 DXGI::DXGI() :
   m_options(NULL),
@@ -219,7 +219,7 @@ FrameType DXGI::GetFrameType()
   if (!m_initialized)
     return FRAME_TYPE_INVALID;
 
-  return FRAME_TYPE_RGB;
+  return FRAME_TYPE_ARGB;
 }
 
 FrameComp DXGI::GetFrameCompression()
@@ -235,7 +235,7 @@ size_t DXGI::GetMaxFrameSize()
   if (!m_initialized)
     return 0;
 
-  return (m_width * m_height * 3) + 4;
+  return (m_width * m_height * 4);
 }
 
 bool DXGI::GrabFrame(FrameInfo & frame)
@@ -347,7 +347,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
 
   m_width  = desc.Width;
   m_height = desc.Height;
-  const int pitch = m_width * 3;
+  const int pitch = m_width * 4;
 
   frame.width   = desc.Width;
   frame.height  = desc.Height;
@@ -418,7 +418,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
     }
   }
 
-  Util::BGRAtoRGB(rect.pBits, m_height * m_width, (uint8_t *)frame.buffer);
+  memcpySSE(frame.buffer, rect.pBits, frame.outSize);
   status = surface->Unmap();
 
   if (FAILED(status))
