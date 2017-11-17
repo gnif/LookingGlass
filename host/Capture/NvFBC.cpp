@@ -22,6 +22,7 @@ using namespace Capture;
 #include <string>
 
 #include "common\debug.h"
+#include "common\memcpySSE.h"
 #include "Util.h"
 
 #ifdef _WIN64
@@ -260,7 +261,7 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
       uint8_t *src = (uint8_t *)m_frameBuffer + dataOffset;
       uint8_t *dst = (uint8_t *)frame.buffer;
       for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 3)
-        Util::Memcpy64(dst, src, dataWidth);
+        memcpySSE(dst, src, dataWidth);
 
       return true;
     }
