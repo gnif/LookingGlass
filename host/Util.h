@@ -60,7 +60,7 @@ public:
     return defaultPath;
   }
 
-  static void BGRAtoRGB(uint8_t * orig, size_t imagesize, uint8_t * dest)
+  static inline void BGRAtoRGB(uint8_t * orig, size_t imagesize, uint8_t * dest)
   {
     assert((uintptr_t)orig % 16 == 0);
     assert((uintptr_t)dest % 16 == 0);
@@ -86,6 +86,9 @@ public:
     uint8_t *end = orig + imagesize * 4;
     for (; orig != end; orig += 64, dest += 48)
     {
+      _mm_prefetch((char *)(orig + 128), _MM_HINT_NTA);
+      _mm_prefetch((char *)(orig + 192), _MM_HINT_NTA);
+
       __m128i v0 = _mm_shuffle_epi8(_mm_load_si128((__m128i *)&orig[0 ]), mask_right);
       __m128i v1 = _mm_shuffle_epi8(_mm_load_si128((__m128i *)&orig[16]), mask_left );
       __m128i v2 = _mm_shuffle_epi8(_mm_load_si128((__m128i *)&orig[32]), mask_left );
@@ -98,6 +101,73 @@ public:
       _mm_stream_si128((__m128i *)&dest[0 ], v0);
       _mm_stream_si128((__m128i *)&dest[16], v1);
       _mm_stream_si128((__m128i *)&dest[32], v2);
+    }
+  }
+
+  static inline void Memcpy64(void * dst, void * src, size_t length)
+  {
+    // check if we can't perform an aligned copy
+    if (((uintptr_t)src & 0xF) != ((uintptr_t)dst & 0xF))
+    {
+
+      static bool unalignedDstWarn = false;
+      if (!unalignedDstWarn)
+      {
+        DEBUG_WARN("Memcpy64 unable to perform aligned copy, performance will suffer");
+        unalignedDstWarn = true;
+      }
+
+      memcpy(dst, src, length);
+      return;
+    }
+
+    // check if the source needs slight alignment
+    {
+      uint8_t * _src = (uint8_t *)src;
+      unsigned int count = (16 - ((uintptr_t)src & 0xF)) & 0xF;
+
+      static bool unalignedSrcWarn = false;
+      if (count > 0)
+      {
+        if (!unalignedSrcWarn)
+        {
+          DEBUG_WARN("Memcpy64 unaligned source, performance will suffer");
+          unalignedSrcWarn = true;
+        }
+
+        uint8_t * _dst = (uint8_t *)dst;
+        for (unsigned int i = count; i > 0; --i)
+          *_dst++ = *_src++;
+        src = _src;
+        dst = _dst;
+        length -= count;
+      }
+    }
+
+    // perform the SMID copy
+    __m128i * _src = (__m128i *)src;
+    __m128i * _dst = (__m128i *)dst;
+    __m128i * _end = (__m128i *)src + (length / 16);
+    for (; _src != _end; _src += 8, _dst += 8)
+    {
+      _mm_prefetch((char *)(_src + 16), _MM_HINT_NTA);
+      _mm_prefetch((char *)(_src + 24), _MM_HINT_NTA);
+      __m128i v0 = _mm_load_si128(_src + 0);
+      __m128i v1 = _mm_load_si128(_src + 1);
+      __m128i v2 = _mm_load_si128(_src + 2);
+      __m128i v3 = _mm_load_si128(_src + 3);
+      __m128i v4 = _mm_load_si128(_src + 4);
+      __m128i v5 = _mm_load_si128(_src + 5);
+      __m128i v6 = _mm_load_si128(_src + 6);
+      __m128i v7 = _mm_load_si128(_src + 7);
+      _mm_stream_si128(_dst + 0, v0);
+      _mm_stream_si128(_dst + 1, v1);
+      _mm_stream_si128(_dst + 2, v2);
+      _mm_stream_si128(_dst + 3, v3);
+      _mm_stream_si128(_dst + 4, v4);
+      _mm_stream_si128(_dst + 5, v5);
+      _mm_stream_si128(_dst + 6, v6);
+      _mm_stream_si128(_dst + 7, v7);
     }
   }
 };

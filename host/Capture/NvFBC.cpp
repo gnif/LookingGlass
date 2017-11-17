@@ -260,7 +260,7 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
       uint8_t *src = (uint8_t *)m_frameBuffer + dataOffset;
       uint8_t *dst = (uint8_t *)frame.buffer;
       for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 3)
-        memcpy_s(dst, dataWidth, src, dataWidth);
+        Util::Memcpy64(dst, src, dataWidth);
 
       return true;
     }
