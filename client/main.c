@@ -27,7 +27,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <assert.h>
 
+#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
+#include <GL/glu.h>
 
 #include "debug.h"
 #include "memcpySSE.h"
@@ -37,10 +39,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "kb.h"
 
 typedef void (*CompFunc)(uint8_t * dst, const uint8_t * src, const size_t len);
-typedef void (*DrawFunc)(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src);
+typedef void (*DrawFunc)(CompFunc compFunc, uint8_t * dst, const uint8_t * src);
 
 struct KVMGFXState
 {
+  bool      hasBufferStorage;
+
   bool      running;
   bool      started;
   bool      windowChanged;
@@ -90,66 +94,29 @@ inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHead
     (s1.height    == s2.height   );
 }
 
-void drawFunc_ARGB10(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
-{
-  SDL_UpdateTexture(texture, NULL, src, state.shm->stride * 4);
-  ivshmem_kick_irq(state.shm->guestID, 0);
-}
-
-void drawFunc_ARGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
+void drawFunc_ARGB(CompFunc compFunc, uint8_t * dst, const uint8_t * src)
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 4);
   ivshmem_kick_irq(state.shm->guestID, 0);
-  SDL_UnlockTexture(texture);
 }
 
-void drawFunc_RGB(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
+void drawFunc_RGB(CompFunc compFunc, uint8_t * dst, const uint8_t * src)
 {
   compFunc(dst, src, state.shm->height * state.shm->stride * 3);
-  ivshmem_kick_irq(state.shm->guestID, 0);
-  SDL_UnlockTexture(texture);
-}
-
-void drawFunc_XOR(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
-{
-  glEnable(GL_COLOR_LOGIC_OP);
-  glLogicOp(GL_XOR);
-
-  compFunc(dst, src, state.shm->height * state.shm->stride * 3);
-  ivshmem_kick_irq(state.shm->guestID, 0);
-  SDL_UnlockTexture(texture);
-
-  // clear the buffer for the next frame
-  memset(dst, 0, state.shm->height * state.shm->stride * 3);
-}
-
-void drawFunc_YUV444P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
-{
-  compFunc(dst, src, state.shm->height * state.shm->stride * 3);
-  ivshmem_kick_irq(state.shm->guestID, 0);
-  SDL_UnlockTexture(texture);
-}
-
-void drawFunc_YUV420P(CompFunc compFunc, SDL_Texture * texture, uint8_t * dst, const uint8_t * src)
-{
-  const unsigned int pixels = state.shm->width * state.shm->height;
-
-  SDL_UpdateYUVTexture(texture, NULL,
-      src                      , state.shm->stride,
-      src + pixels             , state.shm->stride / 2,
-      src + pixels + pixels / 4, state.shm->stride / 2
-  );
   ivshmem_kick_irq(state.shm->guestID, 0);
 }
 
 int renderThread(void * unused)
 {
   struct KVMGFXHeader format;
-  SDL_Texture        *texture    = NULL;
-  uint8_t             *pixels    = (uint8_t*)state.shm;
-  uint8_t             *texPixels = NULL;
-  DrawFunc            drawFunc   = NULL;
-  CompFunc            compFunc   = NULL;
+  SDL_Texture        *texture      = NULL;
+  GLuint              vboID[2]     = {0, 0};
+  GLuint              vboTex       = 0;
+  unsigned int        texIndex     = 0;
+  uint8_t            *pixels       = (uint8_t*)state.shm;
+  uint8_t            *texPixels[2] = {NULL, NULL};
+  DrawFunc            drawFunc     = NULL;
+  CompFunc            compFunc     = NULL;
 
   format.version   = 1;
   format.frameType = FRAME_TYPE_INVALID;
@@ -197,21 +164,36 @@ int renderThread(void * unused)
     // if the format is invalid or it has changed
     if (!areFormatsSame(format, *state.shm))
     {
-      if (texture)
+      if (state.hasBufferStorage)
       {
-        SDL_DestroyTexture(texture);
-        texture = NULL;
+        if (vboID[0])
+        {
+          if (vboTex)
+          {
+            glDeleteTextures(1, &vboTex);
+            vboTex = 0;
+          }
+
+          glUnmapBuffer(GL_TEXTURE_BUFFER);
+          glDeleteBuffers(2, vboID);
+          memset(vboID, 0, sizeof(vboID));
+        }
+      }
+      else
+      {
+        if (texture)
+        {
+          SDL_DestroyTexture(texture);
+          texture = NULL;
+        }
       }
 
-      Uint32 sdlFormat;
+      Uint32  sdlFormat;
+      uint8_t bpp;
       switch(state.shm->frameType)
       {
-        case FRAME_TYPE_ARGB   : sdlFormat = SDL_PIXELFORMAT_ARGB8888   ; drawFunc = drawFunc_ARGB   ; break;
-        case FRAME_TYPE_RGB    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_RGB    ; break;
-        case FRAME_TYPE_XOR    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_XOR    ; break;
-        case FRAME_TYPE_YUV444P: sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_YUV444P; break; // incorrect for now
-        case FRAME_TYPE_YUV420P: sdlFormat = SDL_PIXELFORMAT_YV12       ; drawFunc = drawFunc_YUV420P; break;
-        case FRAME_TYPE_ARGB10 : sdlFormat = SDL_PIXELFORMAT_ARGB2101010; drawFunc = drawFunc_ARGB10 ; break;
+        case FRAME_TYPE_ARGB   : sdlFormat = SDL_PIXELFORMAT_ARGB8888   ; drawFunc = drawFunc_ARGB   ; bpp = 4; break;
+        case FRAME_TYPE_RGB    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_RGB    ; bpp = 3; break;
         default:
           format.frameType = FRAME_TYPE_INVALID;
           continue;
@@ -230,25 +212,113 @@ int renderThread(void * unused)
       SDL_SetWindowSize(state.window, state.shm->width, state.shm->height);
       SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-      texture = SDL_CreateTexture(state.renderer, sdlFormat, SDL_TEXTUREACCESS_STREAMING, state.shm->width, state.shm->height);
+      if (state.hasBufferStorage)
+      {
+        // setup two buffers so we don't have to use fences
+        const size_t bufferSize = state.shm->width * state.shm->height * bpp;
+        glGenBuffers(2, vboID);
+        for (int i = 0; i < 2; ++i)
+        {
+          glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[i]);
+                         glBufferStorage (GL_PIXEL_UNPACK_BUFFER, bufferSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+          texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, bufferSize, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+          if (!texPixels[i])
+          {
+            DEBUG_ERROR("Failed to map buffer range, turning off buffer storage");
+            state.hasBufferStorage = false;
+            glDeleteBuffers(2, vboID);
+            memset(vboID, 0, sizeof(vboID));
+            continue;
+          }
+          glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        }
 
-      // this doesnt "lock" anything, pre-fetch the pointers for later use
-      int unused;
-      SDL_LockTexture(texture, NULL, (void**)&texPixels, &unused);
+        // create the texture
+        glGenTextures(1, &vboTex);
+        glBindTexture(GL_TEXTURE_2D, vboTex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexImage2D(
+          GL_TEXTURE_2D,
+          0,
+          GL_RGBA8,
+          state.shm->width, state.shm->height,
+          0,
+          GL_BGRA,
+          GL_UNSIGNED_BYTE,
+          (void*)0
+        );
+        glBindTexture(GL_TEXTURE_2D, 0);
+      }
+      else
+      {
+        texture = SDL_CreateTexture(state.renderer, sdlFormat, SDL_TEXTUREACCESS_STREAMING, state.shm->width, state.shm->height);
+        // this doesnt "lock" anything, pre-fetch the pointers for later use
+        int unused;
+        SDL_LockTexture(texture, NULL, (void**)&texPixels, &unused);
+      }
 
       memcpy(&format, state.shm, sizeof(format));
       state.windowChanged = true;
     }
 
-    glDisable(GL_COLOR_LOGIC_OP);
-    drawFunc(compFunc, texture, texPixels, pixels + state.shm->dataPos);
-    SDL_RenderCopy(state.renderer, texture, NULL, NULL);
+    if (state.hasBufferStorage)
+    {
+      // update the pixels
+      drawFunc(compFunc, texPixels[texIndex ? 0 : 1], pixels + state.shm->dataPos);
+
+      // update the texture
+      glEnable(GL_TEXTURE_2D);
+      glBindTexture(GL_TEXTURE_2D, vboTex);
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[texIndex ? 0 : 1]);
+      glTexSubImage2D(
+          GL_TEXTURE_2D,
+          0,
+          0, 0,
+          state.shm->width, state.shm->height,
+          GL_BGRA,
+          GL_UNSIGNED_BYTE,
+          (void*)0
+      );
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+      // draw the screen
+      glBegin(GL_TRIANGLE_STRIP);
+      glTexCoord2f(0.0f, 0.0f); glVertex2f(0.0f            , 0.0f             );
+      glTexCoord2f(1.0f, 0.0f); glVertex2f(state.shm->width, 0.0f             );
+      glTexCoord2f(0.0f, 1.0f); glVertex2f(0.0f            , state.shm->height);
+      glTexCoord2f(1.0f, 1.0f); glVertex2f(state.shm->width, state.shm->height);
+      glEnd();
+      glBindTexture(GL_TEXTURE_2D, 0);
+      glDisable(GL_TEXTURE_2D);
+
+      // update our texture index
+      if (++texIndex == 2)
+        texIndex = 0;
+    }
+    else
+    {
+      drawFunc(compFunc, texPixels[0], pixels + state.shm->dataPos);
+      SDL_UnlockTexture(texture);
+      SDL_RenderCopy(state.renderer, texture, NULL, NULL);
+    }
+
     SDL_RenderPresent(state.renderer);
 
     state.started = true;
   }
 
-  SDL_DestroyTexture(texture);
+  if (state.hasBufferStorage)
+  {
+    glDeleteTextures(1, &vboTex       );
+    glUnmapBuffer   (GL_TEXTURE_BUFFER);
+    glDeleteBuffers (2, vboID         );
+  }
+  else
+    SDL_DestroyTexture(texture);
+
   return 0;
 }
 
@@ -475,6 +545,13 @@ int main(int argc, char * argv[])
 
   state.renderer = SDL_CreateRenderer(state.window, -1,
       SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+  const GLubyte * extensions = glGetString(GL_EXTENSIONS);
+  if (gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
+  {
+    DEBUG_INFO("Using GL_ARB_buffer_storage");
+    state.hasBufferStorage = true;
+  }
 
   if (!state.renderer)
   {
