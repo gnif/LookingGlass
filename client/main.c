@@ -111,6 +111,8 @@ int renderThread(void * unused)
   struct KVMGFXHeader format;
   SDL_Texture        *texture      = NULL;
   GLuint              vboID[2]     = {0, 0};
+  GLuint              intFormat    = 0;
+  GLuint              vboFormat    = 0;
   GLuint              vboTex       = 0;
   unsigned int        texIndex     = 0;
   uint8_t            *pixels       = (uint8_t*)state.shm;
@@ -192,8 +194,22 @@ int renderThread(void * unused)
       uint8_t bpp;
       switch(state.shm->frameType)
       {
-        case FRAME_TYPE_ARGB   : sdlFormat = SDL_PIXELFORMAT_ARGB8888   ; drawFunc = drawFunc_ARGB   ; bpp = 4; break;
-        case FRAME_TYPE_RGB    : sdlFormat = SDL_PIXELFORMAT_RGB24      ; drawFunc = drawFunc_RGB    ; bpp = 3; break;
+        case FRAME_TYPE_ARGB:
+          sdlFormat = SDL_PIXELFORMAT_ARGB8888;
+          drawFunc  = drawFunc_ARGB;
+          bpp       = 4;
+          intFormat = GL_RGBA8;
+          vboFormat = GL_BGRA;
+          break;
+
+        case FRAME_TYPE_RGB:
+          sdlFormat = SDL_PIXELFORMAT_RGB24;
+          drawFunc  = drawFunc_RGB;
+          bpp       = 3;
+          intFormat = GL_RGB8;
+          vboFormat = GL_BGR;
+          break;
+
         default:
           format.frameType = FRAME_TYPE_INVALID;
           continue;
@@ -243,10 +259,10 @@ int renderThread(void * unused)
         glTexImage2D(
           GL_TEXTURE_2D,
           0,
-          GL_RGBA8,
+          intFormat,
           state.shm->width, state.shm->height,
           0,
-          GL_BGRA,
+          vboFormat,
           GL_UNSIGNED_BYTE,
           (void*)0
         );
@@ -278,7 +294,7 @@ int renderThread(void * unused)
           0,
           0, 0,
           state.shm->width, state.shm->height,
-          GL_BGRA,
+          vboFormat,
           GL_UNSIGNED_BYTE,
           (void*)0
       );
