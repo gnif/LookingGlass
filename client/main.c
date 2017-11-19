@@ -126,6 +126,10 @@ int renderThread(void * unused)
   format.height    = 0;
   format.stride    = 0;
 
+  // kick the guest early for our intial frame
+  // the guestID may be invalid, it doesn't matter
+  ivshmem_kick_irq(state.shm->guestID, 0);
+
   while(state.running)
   {
     // ensure the header magic is valid, this will help prevent crash out when the memory hasn't yet been initialized
