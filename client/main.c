@@ -16,6 +16,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#include <getopt.h>
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +58,8 @@ struct AppParams
   const char * ivshmemSocket;
   bool         useBufferStorage;
   bool         useSpice;
+  const char * spiceHost;
+  unsigned int spicePort;
 };
 
 struct AppState  state;
@@ -65,7 +68,9 @@ struct AppParams params =
   .borderless       = true,
   .ivshmemSocket    = "/tmp/ivshmem_socket",
   .useBufferStorage = true,
-  .useSpice         = true
+  .useSpice         = true,
+  .spiceHost        = "127.0.0.1",
+  .spicePort        = 5900
 };
 
 inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
@@ -209,16 +214,18 @@ int renderThread(void * unused)
           {
             DEBUG_ERROR("Failed to map buffer range, turning off buffer storage");
             state.hasBufferStorage = false;
-            texIndex = 0;
-            glDeleteBuffers(2, vboID);
-            memset(vboID, 0, sizeof(vboID));
             break;
           }
           glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 
         if (!state.hasBufferStorage)
+        {
+          texIndex = 0;
+          glDeleteBuffers(2, vboID);
+          memset(vboID, 0, sizeof(vboID));
           continue;
+        }
 
         // create the texture
         glGenTextures(1, &vboTex);
@@ -397,7 +404,7 @@ int eventThread(void * arg)
       break;
     }
 
-    if (!state.started || !params.useSpice)
+    if (!params.useSpice)
       continue;
 
     switch(event.type)
@@ -528,7 +535,7 @@ int eventThread(void * arg)
   return 0;
 }
 
-int main(int argc, char * argv[])
+int run()
 {
   memset(&state, 0, sizeof(state));
   state.running = true;
@@ -608,7 +615,7 @@ int main(int argc, char * argv[])
 
     if (params.useSpice)
     {
-      if (!spice_connect("127.0.0.1", 5900, ""))
+      if (!spice_connect(params.spiceHost, params.spicePort, ""))
       {
         DEBUG_ERROR("Failed to connect to spice server");
         return 0;
@@ -669,4 +676,90 @@ int main(int argc, char * argv[])
 
   SDL_Quit();
   return 0;
+}
+
+void doHelp(char * app)
+{
+  fprintf(stderr,
+    "Usage: %s [OPTION]...\n"
+    "Example: %s -h\n"
+    "\n"
+    "  -h       Print out this help\n"
+    "  -f PATH  Specify the path to the ivshmem socket [current: %s]\n"
+    "  -d       Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
+    "  -s       Disable spice client\n"
+    "  -c HOST  Specify the spice host [current: %s]\n"
+    "  -p PORT  Specify the spice port [current: %d]\n"
+    "  -l       License information\n"
+    "\n",
+    app,
+    app,
+    params.ivshmemSocket,
+    params.spiceHost,
+    params.spicePort
+  );
+}
+
+void doLicense()
+{
+  fprintf(stderr,
+    "\n"
+    "KVMGFX Client - A KVM Client for VGA Passthrough\n"
+    "Copyright(C) 2017 Geoffrey McRae <geoff@hostfission.com>\n"
+    "\n"
+    "This program is free software; you can redistribute it and / or modify it under\n"
+    "the terms of the GNU General Public License as published by the Free Software\n"
+    "Foundation; either version 2 of the License, or (at your option) any later\n"
+    "version.\n"
+    "\n"
+    "This program is distributed in the hope that it will be useful, but WITHOUT ANY\n"
+    "WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A\n"
+    "PARTICULAR PURPOSE.See the GNU General Public License for more details.\n"
+    "\n"
+    "You should have received a copy of the GNU General Public License along with\n"
+    "this program; if not, write to the Free Software Foundation, Inc., 59 Temple\n"
+    "Place, Suite 330, Boston, MA 02111 - 1307 USA\n"
+    "\n"
+  );
+}
+
+int main(int argc, char * argv[])
+{
+  int c;
+  while((c = getopt(argc, argv, "hf:dsc:p:l")) != -1)
+    switch(c)
+    {
+      case '?':
+      case 'h':
+      default :
+        doHelp(argv[0]);
+        return (c == 'h') ? 0 : -1;
+
+      case 'f':
+        params.ivshmemSocket = optarg;
+        break;
+
+      case 'd':
+        params.useBufferStorage = false;
+        break;
+
+      case 's':
+        params.useSpice = false;
+        break;
+
+      case 'c':
+        params.spiceHost = optarg;
+        break;
+
+      case 'p':
+        params.spicePort = atoi(optarg);
+        break;
+
+      case 'l':
+        doLicense();
+        return 0;
+
+    }
+
+  return run();
 }
