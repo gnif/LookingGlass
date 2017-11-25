@@ -293,14 +293,20 @@ int renderThread(void * unused)
       state.windowChanged = true;
     }
 
+    format.dataPos = state.shm->dataPos;
+    format.guestID = state.shm->guestID;
+
+    //beyond this point DO NOT use state.shm for security
+
     // final sanity checks on the data presented by the guest
     // this is critical as the guest could overflow this buffer to
     // try to take control of the host
-    if (state.shm->dataPos + texSize > state.shmSize)
+    if (format.dataPos + texSize > state.shmSize)
     {
       DEBUG_ERROR("The guest sent an invalid dataPos");
       break;
     }
+
 
     SDL_RenderClear(state.renderer);
     if (state.hasBufferStorage)
@@ -309,8 +315,8 @@ int renderThread(void * unused)
       SDL_GetWindowSize(state.window, &w, &h);
 
       // copy the buffer to the texture and let the guest advance
-      memcpySSE(texPixels[texIndex], pixels + state.shm->dataPos, texSize);
-      ivshmem_kick_irq(state.shm->guestID, 0);
+      memcpySSE(texPixels[texIndex], pixels + format.dataPos, texSize);
+      ivshmem_kick_irq(format.guestID, 0);
 
       // update the texture
       glEnable(GL_TEXTURE_2D);
@@ -320,7 +326,7 @@ int renderThread(void * unused)
           GL_TEXTURE_2D,
           0,
           0, 0,
-          state.shm->width, state.shm->height,
+          format.width, format.height,
           vboFormat,
           GL_UNSIGNED_BYTE,
           (void*)0
@@ -352,11 +358,11 @@ int renderThread(void * unused)
         DEBUG_ERROR("Failed to lock the texture for update");
         break;
       }
-      texSize = state.shm->height * pitch;
+      texSize = format.height * pitch;
 
       // copy the buffer to the texture and let the guest advance
-      memcpySSE(texPixels[texIndex], pixels + state.shm->dataPos, texSize);
-      ivshmem_kick_irq(state.shm->guestID, 0);
+      memcpySSE(texPixels[texIndex], pixels + format.dataPos, texSize);
+      ivshmem_kick_irq(format.guestID, 0);
 
       SDL_UnlockTexture(texture);
       SDL_RenderCopy(state.renderer, texture, NULL, NULL);
