@@ -62,6 +62,7 @@ struct AppParams
   unsigned int w, h;
   const char * ivshmemSocket;
   bool         useBufferStorage;
+  bool         useMipmap;
   bool         useSpice;
   const char * spiceHost;
   unsigned int spicePort;
@@ -79,6 +80,7 @@ struct AppParams params =
   .h                = 768,
   .ivshmemSocket    = "/tmp/ivshmem_socket",
   .useBufferStorage = true,
+  .useMipmap        = false,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
   .spicePort        = 5900
@@ -254,8 +256,17 @@ int renderThread(void * unused)
         glBindTexture(GL_TEXTURE_2D, vboTex);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        if (params.useMipmap)
+        {
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        }
+        else
+        {
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        }
+
         glTexImage2D(
           GL_TEXTURE_2D,
           0,
@@ -314,6 +325,9 @@ int renderThread(void * unused)
           GL_UNSIGNED_BYTE,
           (void*)0
       );
+      if (params.useMipmap)
+        glGenerateMipmap(GL_TEXTURE_2D);
+
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
       // draw the screen
@@ -730,11 +744,15 @@ void doHelp(char * app)
     "Example: %s -h\n"
     "\n"
     "  -h        Print out this help\n"
+    "\n"
     "  -f PATH   Specify the path to the ivshmem socket [current: %s]\n"
-    "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
+    "\n"
     "  -s        Disable spice client\n"
     "  -c HOST   Specify the spice host [current: %s]\n"
     "  -p PORT   Specify the spice port [current: %d]\n"
+    "\n"
+    "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
+    "  -m        Enable mipmapping (improves a stretched screen)\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -d        Borderless mode\n"
@@ -783,7 +801,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:gsc:p:adx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:gmadx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -796,10 +814,6 @@ int main(int argc, char * argv[])
         params.ivshmemSocket = optarg;
         break;
 
-      case 'g':
-        params.useBufferStorage = false;
-        break;
-
       case 's':
         params.useSpice = false;
         break;
@@ -810,6 +824,14 @@ int main(int argc, char * argv[])
 
       case 'p':
         params.spicePort = atoi(optarg);
+        break;
+
+      case 'g':
+        params.useBufferStorage = false;
+        break;
+
+      case 'm':
+        params.useMipmap = true;
         break;
 
       case 'a':
