@@ -207,10 +207,11 @@ int renderThread(void * unused)
 
       // update the window size and create the render texture
       if (params.autoResize)
+      {
         SDL_SetWindowSize(state.window, state.shm->width, state.shm->height);
-
-      if (params.center)
-        SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        if (params.center)
+          SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+      }
 
       if (state.hasBufferStorage)
       {
