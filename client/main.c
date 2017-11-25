@@ -435,6 +435,9 @@ int eventThread(void * arg)
 {
   bool serverMode   = false;
   bool realignGuest = true;
+  bool keyDown[SDL_NUM_SCANCODES];
+
+  memset(keyDown, 0, sizeof(keyDown));
 
   // ensure mouse acceleration is identical in server mode
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
@@ -451,6 +454,7 @@ int eventThread(void * arg)
         state.running = false;
         break;
       }
+      continue;
     }
 
     if (event.type == SDL_QUIT)
@@ -485,7 +489,9 @@ int eventThread(void * arg)
         if (scancode == 0)
           break;
 
-        if (!spice_key_down(scancode))
+        if (spice_key_down(scancode))
+          keyDown[sc] = true;
+        else
         {
           DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
           break;
@@ -499,12 +505,17 @@ int eventThread(void * arg)
         if (sc == SDL_SCANCODE_SCROLLLOCK)
           break;
 
+        // avoid sending key up events when we didn't send a down
+        if (!keyDown[sc])
+          break;
 
         uint32_t scancode = mapScancode(sc);
         if (scancode == 0)
           break;
 
-        if (!spice_key_up(scancode))
+        if (spice_key_up(scancode))
+          keyDown[sc] = false;
+        else
         {
           DEBUG_ERROR("SDL_KEYUP: failed to send message");
           break;
