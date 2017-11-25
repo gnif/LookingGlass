@@ -54,7 +54,11 @@ struct AppState
 
 struct AppParams
 {
+  bool         autoResize;
   bool         borderless;
+  bool         center;
+  int          x, y;
+  unsigned int w, h;
   const char * ivshmemSocket;
   bool         useBufferStorage;
   bool         useSpice;
@@ -65,7 +69,13 @@ struct AppParams
 struct AppState  state;
 struct AppParams params =
 {
-  .borderless       = true,
+  .autoResize       = false,
+  .borderless       = false,
+  .center           = true,
+  .x                = 0,
+  .y                = 0,
+  .w                = 100,
+  .h                = 100,
   .ivshmemSocket    = "/tmp/ivshmem_socket",
   .useBufferStorage = true,
   .useSpice         = true,
@@ -195,8 +205,11 @@ int renderThread(void * unused)
       }
 
       // update the window size and create the render texture
-      SDL_SetWindowSize(state.window, state.shm->width, state.shm->height);
-      SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+      if (params.autoResize)
+        SDL_SetWindowSize(state.window, state.shm->width, state.shm->height);
+
+      if (params.center)
+        SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
       if (state.hasBufferStorage)
       {
@@ -260,6 +273,7 @@ int renderThread(void * unused)
       state.windowChanged = true;
     }
 
+    SDL_RenderClear(state.renderer);
     if (state.hasBufferStorage)
     {
       // copy the buffer to the texture and let the guest advance
@@ -547,11 +561,16 @@ int run()
   }
 
   state.window = SDL_CreateWindow(
-      "KVM-GFX Test",
-      SDL_WINDOWPOS_CENTERED,
-      SDL_WINDOWPOS_CENTERED,
-      100, 100,
-      params.borderless ? SDL_WINDOW_BORDERLESS : 0
+    "KVM-GFX Test",
+    params.center ? SDL_WINDOWPOS_CENTERED : params.x,
+    params.center ? SDL_WINDOWPOS_CENTERED : params.y,
+    params.w,
+    params.h,
+    (
+      SDL_WINDOW_SHOWN |
+      (!params.autoResize ? SDL_WINDOW_RESIZABLE  : 0) |
+      ( params.borderless ? SDL_WINDOW_BORDERLESS : 0)
+    )
   );
 
   if (!state.window)
@@ -680,23 +699,39 @@ int run()
 
 void doHelp(char * app)
 {
+  char x[8], y[8];
+  snprintf(x, sizeof(x), "%d", params.x);
+  snprintf(y, sizeof(y), "%d", params.y);
+
   fprintf(stderr,
     "Usage: %s [OPTION]...\n"
     "Example: %s -h\n"
     "\n"
-    "  -h       Print out this help\n"
-    "  -f PATH  Specify the path to the ivshmem socket [current: %s]\n"
-    "  -d       Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
-    "  -s       Disable spice client\n"
-    "  -c HOST  Specify the spice host [current: %s]\n"
-    "  -p PORT  Specify the spice port [current: %d]\n"
-    "  -l       License information\n"
+    "  -h        Print out this help\n"
+    "  -f PATH   Specify the path to the ivshmem socket [current: %s]\n"
+    "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
+    "  -s        Disable spice client\n"
+    "  -c HOST   Specify the spice host [current: %s]\n"
+    "  -p PORT   Specify the spice port [current: %d]\n"
+    "\n"
+    "  -a        Auto resize the window to the guest\n"
+    "  -d        Borderless mode\n"
+    "  -x XPOS   Initial window X position [current: %s]\n"
+    "  -y YPOS   Initial window Y position [current: %s]\n"
+    "  -w WIDTH  Initial window width [current: %u]\n"
+    "  -b HEIGHT Initial window height [current: %u]\n"
+    "\n"
+    "  -l        License information\n"
     "\n",
     app,
     app,
     params.ivshmemSocket,
     params.spiceHost,
-    params.spicePort
+    params.spicePort,
+    params.center ? "center" : x,
+    params.center ? "center" : y,
+    params.w,
+    params.h
   );
 }
 
@@ -726,7 +761,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:dsc:p:l")) != -1)
+  while((c = getopt(argc, argv, "hf:gsc:p:adx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -739,7 +774,7 @@ int main(int argc, char * argv[])
         params.ivshmemSocket = optarg;
         break;
 
-      case 'd':
+      case 'g':
         params.useBufferStorage = false;
         break;
 
@@ -755,10 +790,35 @@ int main(int argc, char * argv[])
         params.spicePort = atoi(optarg);
         break;
 
+      case 'a':
+        params.autoResize = true;
+        break;
+
+      case 'd':
+        params.borderless = true;
+        break;
+
+      case 'x':
+        params.center = false;
+        params.x = atoi(optarg);
+        break;
+
+      case 'y':
+        params.center = false;
+        params.y = atoi(optarg);
+        break;
+
+      case 'w':
+        params.w = atoi(optarg);
+        break;
+
+      case 'b':
+        params.h = atoi(optarg);
+        break;
+
       case 'l':
         doLicense();
         return 0;
-
     }
 
   return run();
