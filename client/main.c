@@ -38,8 +38,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "spice/spice.h"
 #include "kb.h"
 
-typedef void (*DrawFunc)(uint8_t * dst, const uint8_t * src);
-
 struct AppState
 {
   bool      hasBufferStorage;
