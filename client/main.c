@@ -51,7 +51,22 @@ struct AppState
   struct KVMGFXHeader * shm;
 };
 
-struct AppState state;
+struct AppParams
+{
+  bool         borderless;
+  const char * ivshmemSocket;
+  bool         useBufferStorage;
+  bool         useSpice;
+};
+
+struct AppState  state;
+struct AppParams params =
+{
+  .borderless       = true,
+  .ivshmemSocket    = "/tmp/ivshmem_socket",
+  .useBufferStorage = true,
+  .useSpice         = true
+};
 
 inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
 {
@@ -365,142 +380,149 @@ int eventThread(void * arg)
   while(state.running)
   {
     SDL_Event event;
-    while(SDL_PollEvent(&event))
+    if (!SDL_WaitEventTimeout(&event, 1000))
     {
-      if (event.type == SDL_QUIT)
+      const char * err = SDL_GetError();
+      if (err[0] != '\0')
       {
+        DEBUG_ERROR("SDL Error: %s", err);
         state.running = false;
         break;
       }
-
-      if (!state.started)
-        continue;
-
-      switch(event.type)
-      {
-        case SDL_KEYDOWN:
-        {
-          SDL_Scancode sc = event.key.keysym.scancode;
-          if (sc == SDL_SCANCODE_SCROLLLOCK)
-          {
-            if (event.key.repeat)
-              break;
-
-            serverMode = !serverMode;
-            spice_mouse_mode(serverMode);
-            SDL_SetRelativeMouseMode(serverMode);
-
-            if (!serverMode)
-              realignGuest = true;
-            break;
-          }
-
-          uint32_t scancode = mapScancode(sc);
-          if (scancode == 0)
-            break;
-
-          if (!spice_key_down(scancode))
-          {
-            DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
-            break;
-          }
-          break;
-        }
-
-        case SDL_KEYUP:
-        {
-          SDL_Scancode sc = event.key.keysym.scancode;
-          if (sc == SDL_SCANCODE_SCROLLLOCK)
-            break;
-
-
-          uint32_t scancode = mapScancode(sc);
-          if (scancode == 0)
-            break;
-
-          if (!spice_key_up(scancode))
-          {
-            DEBUG_ERROR("SDL_KEYUP: failed to send message");
-            break;
-          }
-          break;
-        }
-
-        case SDL_MOUSEWHEEL:
-          if (
-            !spice_mouse_press  (event.wheel.y == 1 ? 4 : 5) ||
-            !spice_mouse_release(event.wheel.y == 1 ? 4 : 5)
-            )
-          {
-            DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
-            break;
-          }
-          break;
-
-        case SDL_MOUSEMOTION:
-        {
-          int x = 0;
-          int y = 0;
-          if (realignGuest || state.windowChanged)
-          {
-            x = event.motion.x - state.shm->mouseX;
-            y = event.motion.y - state.shm->mouseY;
-            realignGuest        = false;
-            state.windowChanged = false;
-          }
-          else
-          {
-            x = event.motion.xrel;
-            y = event.motion.yrel;
-          }
-
-          if (x != 0 || y != 0)
-            if (!spice_mouse_motion(x, y))
-            {
-              DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-              break;
-            }
-          break;
-        }
-
-        case SDL_MOUSEBUTTONDOWN:
-          if (
-            !spice_mouse_position(event.button.x, event.button.y) ||
-            !spice_mouse_press(event.button.button)
-          )
-          {
-            DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
-            break;
-          }
-          break;
-
-        case SDL_MOUSEBUTTONUP:
-          if (
-            !spice_mouse_position(event.button.x, event.button.y) ||
-            !spice_mouse_release(event.button.button)
-          )
-          {
-            DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
-            break;
-          }
-          break;
-
-        case SDL_WINDOWEVENT:
-        {
-          switch(event.window.event)
-          {
-            case SDL_WINDOWEVENT_ENTER:
-              realignGuest = true;
-              break;
-          }
-          break;
-        }
-
-        default:
-          break;
-      }
     }
-    usleep(1000);
+
+    if (event.type == SDL_QUIT)
+    {
+      state.running = false;
+      break;
+    }
+
+    if (!state.started || !params.useSpice)
+      continue;
+
+    switch(event.type)
+    {
+      case SDL_KEYDOWN:
+      {
+        SDL_Scancode sc = event.key.keysym.scancode;
+        if (sc == SDL_SCANCODE_SCROLLLOCK)
+        {
+          if (event.key.repeat)
+            break;
+
+          serverMode = !serverMode;
+          spice_mouse_mode(serverMode);
+          SDL_SetRelativeMouseMode(serverMode);
+
+          if (!serverMode)
+            realignGuest = true;
+          break;
+        }
+
+        uint32_t scancode = mapScancode(sc);
+        if (scancode == 0)
+          break;
+
+        if (!spice_key_down(scancode))
+        {
+          DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
+          break;
+        }
+        break;
+      }
+
+      case SDL_KEYUP:
+      {
+        SDL_Scancode sc = event.key.keysym.scancode;
+        if (sc == SDL_SCANCODE_SCROLLLOCK)
+          break;
+
+
+        uint32_t scancode = mapScancode(sc);
+        if (scancode == 0)
+          break;
+
+        if (!spice_key_up(scancode))
+        {
+          DEBUG_ERROR("SDL_KEYUP: failed to send message");
+          break;
+        }
+        break;
+      }
+
+      case SDL_MOUSEWHEEL:
+        if (
+          !spice_mouse_press  (event.wheel.y == 1 ? 4 : 5) ||
+          !spice_mouse_release(event.wheel.y == 1 ? 4 : 5)
+          )
+        {
+          DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
+          break;
+        }
+        break;
+
+      case SDL_MOUSEMOTION:
+      {
+        int x = 0;
+        int y = 0;
+        if (realignGuest || state.windowChanged)
+        {
+          x = event.motion.x - state.shm->mouseX;
+          y = event.motion.y - state.shm->mouseY;
+          realignGuest        = false;
+          state.windowChanged = false;
+        }
+        else
+        {
+          x = event.motion.xrel;
+          y = event.motion.yrel;
+        }
+
+        if (x != 0 || y != 0)
+          if (!spice_mouse_motion(x, y))
+          {
+            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+            break;
+          }
+        break;
+      }
+
+      case SDL_MOUSEBUTTONDOWN:
+        if (
+          !spice_mouse_position(event.button.x, event.button.y) ||
+          !spice_mouse_press(event.button.button)
+        )
+        {
+          DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
+          break;
+        }
+        break;
+
+      case SDL_MOUSEBUTTONUP:
+        if (
+          !spice_mouse_position(event.button.x, event.button.y) ||
+          !spice_mouse_release(event.button.button)
+        )
+        {
+          DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
+          break;
+        }
+        break;
+
+      case SDL_WINDOWEVENT:
+      {
+        switch(event.window.event)
+        {
+          case SDL_WINDOWEVENT_ENTER:
+            realignGuest = true;
+            break;
+        }
+        break;
+      }
+
+      default:
+        break;
+    }
   }
 
   return 0;
@@ -517,7 +539,14 @@ int main(int argc, char * argv[])
     return -1;
   }
 
-  state.window = SDL_CreateWindow("KVM-GFX Test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 100, 100, SDL_WINDOW_BORDERLESS);
+  state.window = SDL_CreateWindow(
+      "KVM-GFX Test",
+      SDL_WINDOWPOS_CENTERED,
+      SDL_WINDOWPOS_CENTERED,
+      100, 100,
+      params.borderless ? SDL_WINDOW_BORDERLESS : 0
+  );
+
   if (!state.window)
   {
     DEBUG_ERROR("failed to create window");
@@ -534,11 +563,14 @@ int main(int argc, char * argv[])
   state.renderer = SDL_CreateRenderer(state.window, -1,
       SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
-  const GLubyte * extensions = glGetString(GL_EXTENSIONS);
-  if (gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
+  if (params.useBufferStorage)
   {
-    DEBUG_INFO("Using GL_ARB_buffer_storage");
-    state.hasBufferStorage = true;
+    const GLubyte * extensions = glGetString(GL_EXTENSIONS);
+    if (gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
+    {
+      DEBUG_INFO("Using GL_ARB_buffer_storage");
+      state.hasBufferStorage = true;
+    }
   }
 
   if (!state.renderer)
@@ -554,7 +586,7 @@ int main(int argc, char * argv[])
 
   while(1)
   {
-    if (!ivshmem_connect("/tmp/ivshmem_socket"))
+    if (!ivshmem_connect(params.ivshmemSocket))
     {
       DEBUG_ERROR("failed to connect to the ivshmem server");
       break;
@@ -574,24 +606,27 @@ int main(int argc, char * argv[])
     }
     state.shm->hostID = ivshmem_get_id();
 
-    if (!spice_connect("127.0.0.1", 5900, ""))
+    if (params.useSpice)
     {
-      DEBUG_ERROR("Failed to connect to spice server");
-      return 0;
-    }
-
-    while(state.running && !spice_ready())
-      if (!spice_process())
+      if (!spice_connect("127.0.0.1", 5900, ""))
       {
-        state.running = false;
-        DEBUG_ERROR("Failed to process spice messages");
-        break;
+        DEBUG_ERROR("Failed to connect to spice server");
+        return 0;
       }
 
-    if (!(t_spice = SDL_CreateThread(spiceThread, "spiceThread", NULL)))
-    {
-      DEBUG_ERROR("spice create thread failed");
-      break;
+      while(state.running && !spice_ready())
+        if (!spice_process())
+        {
+          state.running = false;
+          DEBUG_ERROR("Failed to process spice messages");
+          break;
+        }
+
+      if (!(t_spice = SDL_CreateThread(spiceThread, "spiceThread", NULL)))
+      {
+        DEBUG_ERROR("spice create thread failed");
+        break;
+      }
     }
 
     if (!(t_event = SDL_CreateThread(eventThread, "eventThread", NULL)))
