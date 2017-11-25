@@ -66,18 +66,6 @@ inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHead
     (s1.height    == s2.height   );
 }
 
-void drawFunc_ARGB(uint8_t * dst, const uint8_t * src)
-{
-  memcpySSE(dst, src, state.shm->height * state.shm->stride * 4);
-  ivshmem_kick_irq(state.shm->guestID, 0);
-}
-
-void drawFunc_RGB(uint8_t * dst, const uint8_t * src)
-{
-  memcpySSE(dst, src, state.shm->height * state.shm->stride * 3);
-  ivshmem_kick_irq(state.shm->guestID, 0);
-}
-
 int renderThread(void * unused)
 {
   struct KVMGFXHeader format;
@@ -87,9 +75,9 @@ int renderThread(void * unused)
   GLuint              vboFormat    = 0;
   GLuint              vboTex       = 0;
   unsigned int        texIndex     = 0;
+  unsigned int        texSize      = 0;
   uint8_t            *pixels       = (uint8_t*)state.shm;
   uint8_t            *texPixels[2] = {NULL, NULL};
-  DrawFunc            drawFunc     = NULL;
 
   format.version   = 1;
   format.frameType = FRAME_TYPE_INVALID;
@@ -166,12 +154,11 @@ int renderThread(void * unused)
       }
 
       Uint32  sdlFormat;
-      uint8_t bpp;
+      unsigned int bpp;
       switch(state.shm->frameType)
       {
         case FRAME_TYPE_ARGB:
           sdlFormat = SDL_PIXELFORMAT_ARGB8888;
-          drawFunc  = drawFunc_ARGB;
           bpp       = 4;
           intFormat = GL_RGBA8;
           vboFormat = GL_BGRA;
@@ -179,7 +166,6 @@ int renderThread(void * unused)
 
         case FRAME_TYPE_RGB:
           sdlFormat = SDL_PIXELFORMAT_RGB24;
-          drawFunc  = drawFunc_RGB;
           bpp       = 3;
           intFormat = GL_RGB8;
           vboFormat = GL_BGR;
@@ -196,24 +182,30 @@ int renderThread(void * unused)
 
       if (state.hasBufferStorage)
       {
+        // calculate the texture size in bytes
+        texSize = state.shm->width * state.shm->stride * bpp;
+
         // setup two buffers so we don't have to use fences
-        const size_t bufferSize = state.shm->width * state.shm->height * bpp;
         glGenBuffers(2, vboID);
         for (int i = 0; i < 2; ++i)
         {
           glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[i]);
-                         glBufferStorage (GL_PIXEL_UNPACK_BUFFER, bufferSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
-          texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, bufferSize, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+                         glBufferStorage (GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+          texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
           if (!texPixels[i])
           {
             DEBUG_ERROR("Failed to map buffer range, turning off buffer storage");
             state.hasBufferStorage = false;
+            texIndex = 0;
             glDeleteBuffers(2, vboID);
             memset(vboID, 0, sizeof(vboID));
-            continue;
+            break;
           }
           glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
+
+        if (!state.hasBufferStorage)
+          continue;
 
         // create the texture
         glGenTextures(1, &vboTex);
@@ -237,9 +229,11 @@ int renderThread(void * unused)
       else
       {
         texture = SDL_CreateTexture(state.renderer, sdlFormat, SDL_TEXTUREACCESS_STREAMING, state.shm->width, state.shm->height);
-        // this doesnt "lock" anything, pre-fetch the pointers for later use
-        int unused;
-        SDL_LockTexture(texture, NULL, (void**)&texPixels, &unused);
+        if (!texture)
+        {
+          DEBUG_ERROR("Failed to create a texture");
+          break;
+        }
       }
 
       memcpy(&format, state.shm, sizeof(format));
@@ -248,8 +242,9 @@ int renderThread(void * unused)
 
     if (state.hasBufferStorage)
     {
-      // update the pixels
-      drawFunc(texPixels[texIndex ? 0 : 1], pixels + state.shm->dataPos);
+      // copy the buffer to the texture and let the guest advance
+      memcpySSE(texPixels[texIndex], pixels + state.shm->dataPos, texSize);
+      ivshmem_kick_irq(state.shm->guestID, 0);
 
       // update the texture
       glEnable(GL_TEXTURE_2D);
@@ -282,7 +277,18 @@ int renderThread(void * unused)
     }
     else
     {
-      drawFunc(texPixels[0], pixels + state.shm->dataPos);
+      int pitch;
+      if (SDL_LockTexture(texture, NULL, (void**)&texPixels[0], &pitch) != 0)
+      {
+        DEBUG_ERROR("Failed to lock the texture for update");
+        break;
+      }
+      texSize = state.shm->height * pitch;
+
+      // copy the buffer to the texture and let the guest advance
+      memcpySSE(texPixels[texIndex], pixels + state.shm->dataPos, texSize);
+      ivshmem_kick_irq(state.shm->guestID, 0);
+
       SDL_UnlockTexture(texture);
       SDL_RenderCopy(state.renderer, texture, NULL, NULL);
     }
@@ -292,6 +298,7 @@ int renderThread(void * unused)
     state.started = true;
   }
 
+  state.running = false;
   if (state.hasBufferStorage)
   {
     glDeleteTextures(1, &vboTex       );
@@ -299,7 +306,8 @@ int renderThread(void * unused)
     glDeleteBuffers (2, vboID         );
   }
   else
-    SDL_DestroyTexture(texture);
+    if (texture)
+      SDL_DestroyTexture(texture);
 
   return 0;
 }

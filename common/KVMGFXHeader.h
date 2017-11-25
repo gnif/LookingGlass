@@ -33,13 +33,6 @@ typedef enum FrameType
   FRAME_TYPE_MAX       , // sentinel value
 } FrameType;
 
-typedef enum FrameComp
-{
-  FRAME_COMP_NONE      , // no compression
-  FRAME_COMP_BLACK_RLE , // basic run length encoding of black pixels for XOR mode
-  FRAME_COMP_MAX       , // sentinel valule
-} FrameComp;
-
 struct KVMGFXHeader
 {
   char      magic[sizeof(KVMGFX_HEADER_MAGIC)];
@@ -47,7 +40,6 @@ struct KVMGFXHeader
   uint16_t  hostID;      // the host ivshmem client id
   uint16_t  guestID;     // the guest ivshmem client id
   FrameType frameType;   // the frame type
-  FrameComp compType;    // frame compression mode
   uint32_t  width;       // the width
   uint32_t  height;      // the height
   uint32_t  stride;      // the row stride
