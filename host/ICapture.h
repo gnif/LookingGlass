@@ -41,7 +41,6 @@ public:
   bool Initialize(CaptureOptions * options);
   void DeInitialize();
   enum FrameType GetFrameType();
-  enum FrameComp GetFrameCompression();
   size_t GetMaxFrameSize();
   bool GrabFrame(struct FrameInfo & frame);
 };

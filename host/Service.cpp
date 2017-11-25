@@ -84,7 +84,7 @@ bool Service::Initialize(ICapture * captureDevice)
   ZeroMemory(header, sizeof(KVMGFXHeader));
   memcpy(header->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC));
 
-  header->version   = 2;
+  header->version   = KVMGFX_HEADER_VERSION;
   header->guestID   = m_ivshmem->GetPeerID();
   header->hostID    = hostID;
 
@@ -131,7 +131,6 @@ bool Service::Process()
 
   // setup the header
   header->frameType = m_capture->GetFrameType();
-  header->compType  = m_capture->GetFrameCompression();
   header->dataLen   = 0;
 
   FrameInfo frame;

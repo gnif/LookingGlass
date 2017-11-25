@@ -222,14 +222,6 @@ FrameType DXGI::GetFrameType()
   return FRAME_TYPE_ARGB;
 }
 
-FrameComp DXGI::GetFrameCompression()
-{
-  if (!m_initialized)
-    return FRAME_COMP_NONE;
-
-  return FRAME_COMP_NONE;
-}
-
 size_t DXGI::GetMaxFrameSize()
 {
   if (!m_initialized)

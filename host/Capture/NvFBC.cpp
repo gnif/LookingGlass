@@ -202,14 +202,6 @@ FrameType NvFBC::GetFrameType()
   return FRAME_TYPE_ARGB;
 }
 
-FrameComp NvFBC::GetFrameCompression()
-{
-  if (!m_initialized)
-    return FRAME_COMP_NONE;
-
-  return FRAME_COMP_NONE;
-}
-
 size_t NvFBC::GetMaxFrameSize()
 {
   if (!m_initialized)
