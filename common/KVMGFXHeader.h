@@ -19,7 +19,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdint.h>
 
-#define KVMGFX_HEADER_MAGIC "[[KVMGFXHeader]]"
+#define KVMGFX_HEADER_MAGIC   "[[KVMGFXHeader]]"
+#define KVMGFX_HEADER_VERSION 3
 
 typedef enum FrameType
 {

@@ -93,7 +93,7 @@ int renderThread(void * unused)
     if (memcmp(state.shm->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0)
       continue;
 
-    if (state.shm->version != 2)
+    if (state.shm->version != KVMGFX_HEADER_VERSION)
       continue;
 
     bool ready = false;
