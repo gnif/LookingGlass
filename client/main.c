@@ -41,7 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 typedef void (*CompFunc)(uint8_t * dst, const uint8_t * src, const size_t len);
 typedef void (*DrawFunc)(CompFunc compFunc, uint8_t * dst, const uint8_t * src);
 
-struct KVMGFXState
+struct AppState
 {
   bool      hasBufferStorage;
 
@@ -54,7 +54,7 @@ struct KVMGFXState
   struct KVMGFXHeader * shm;
 };
 
-struct KVMGFXState state;
+struct AppState state;
 
 void compFunc_NONE(uint8_t * dst, const uint8_t * src, const size_t len)
 {
