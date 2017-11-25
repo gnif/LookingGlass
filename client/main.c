@@ -50,6 +50,7 @@ struct AppState
   SDL_Window          * window;
   SDL_Renderer        * renderer;
   struct KVMGFXHeader * shm;
+  unsigned int          shmSize;
 };
 
 struct AppParams
@@ -216,6 +217,13 @@ int renderThread(void * unused)
         // calculate the texture size in bytes
         texSize = state.shm->width * state.shm->stride * bpp;
 
+        // ensure the size makes sense
+        if (state.shm->dataPos + texSize > state.shmSize)
+        {
+          DEBUG_ERROR("The guest sent an invalid dataPos");
+          break;
+        }
+
         // setup two buffers so we don't have to use fences
         glGenBuffers(2, vboID);
         for (int i = 0; i < 2; ++i)
@@ -271,6 +279,15 @@ int renderThread(void * unused)
 
       memcpy(&format, state.shm, sizeof(format));
       state.windowChanged = true;
+    }
+
+    // final sanity checks on the data presented by the guest
+    // this is critical as the guest could overflow this buffer to
+    // try to take control of the host
+    if (state.shm->dataPos + texSize > state.shmSize)
+    {
+      DEBUG_ERROR("The guest sent an invalid dataPos");
+      break;
     }
 
     SDL_RenderClear(state.renderer);
@@ -630,6 +647,7 @@ int run()
       DEBUG_ERROR("Failed to map memory");
       break;
     }
+    state.shmSize     = ivshmem_get_map_size();
     state.shm->hostID = ivshmem_get_id();
 
     if (params.useSpice)
