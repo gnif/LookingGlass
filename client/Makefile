@@ -1,3 +1,4 @@
+BINARY=kvmgfx-client
 CFLAGS=-g -Og -std=gnu99 -march=native -Wall -Werror -I../common -DDEBUG
 LDFLAGS=-lrt
 
@@ -16,4 +17,5 @@ LDFLAGS+=`pkg-config --libs libssl openssl`
 CFLAGS+=`pkg-config --cflags spice-protocol`
 
 all:
-	gcc ${CFLAGS} -o bin/main main.c spice/spice.c ivshmem/ivshmem.c ${LDFLAGS}
+	mkdir -p bin
+	gcc ${CFLAGS} -o bin/${BINARY} main.c spice/spice.c ivshmem/ivshmem.c ${LDFLAGS}
