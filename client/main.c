@@ -293,6 +293,9 @@ int renderThread(void * unused)
     SDL_RenderClear(state.renderer);
     if (state.hasBufferStorage)
     {
+      int w, h;
+      SDL_GetWindowSize(state.window, &w, &h);
+
       // copy the buffer to the texture and let the guest advance
       memcpySSE(texPixels[texIndex], pixels + state.shm->dataPos, texSize);
       ivshmem_kick_irq(state.shm->guestID, 0);
@@ -314,10 +317,10 @@ int renderThread(void * unused)
 
       // draw the screen
       glBegin(GL_TRIANGLE_STRIP);
-      glTexCoord2f(0.0f, 0.0f); glVertex2f(0.0f            , 0.0f             );
-      glTexCoord2f(1.0f, 0.0f); glVertex2f(state.shm->width, 0.0f             );
-      glTexCoord2f(0.0f, 1.0f); glVertex2f(0.0f            , state.shm->height);
-      glTexCoord2f(1.0f, 1.0f); glVertex2f(state.shm->width, state.shm->height);
+      glTexCoord2f(0.0f, 0.0f); glVertex2i(0, 0);
+      glTexCoord2f(1.0f, 0.0f); glVertex2i(w, 0);
+      glTexCoord2f(0.0f, 1.0f); glVertex2i(0, h);
+      glTexCoord2f(1.0f, 1.0f); glVertex2i(w, h);
       glEnd();
       glBindTexture(GL_TEXTURE_2D, 0);
       glDisable(GL_TEXTURE_2D);
