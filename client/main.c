@@ -38,8 +38,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "spice/spice.h"
 #include "kb.h"
 
-typedef void (*CompFunc)(uint8_t * dst, const uint8_t * src, const size_t len);
-typedef void (*DrawFunc)(CompFunc compFunc, uint8_t * dst, const uint8_t * src);
+typedef void (*DrawFunc)(uint8_t * dst, const uint8_t * src);
 
 struct AppState
 {
@@ -56,32 +55,6 @@ struct AppState
 
 struct AppState state;
 
-void compFunc_NONE(uint8_t * dst, const uint8_t * src, const size_t len)
-{
-  memcpySSE(dst, src, len);
-}
-
-void compFunc_BLACK_RLE(uint8_t * dst, const uint8_t * src, const size_t len)
-{
-  const size_t pixels = len / 3;
-  for(size_t i = 0; i < pixels;)
-  {
-    if (!src[0] && !src[1] && !src[2])
-    {
-      struct RLEHeader * h = (struct RLEHeader *)src;
-      dst += h->length * 3;
-      i   += h->length;
-      src += sizeof(struct RLEHeader);
-      continue;
-    }
-
-    memcpy(dst, src, 3);
-    dst += 3;
-    src += 3;
-    ++i;
-  }
-}
-
 inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
 {
   return
@@ -89,20 +62,19 @@ inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHead
     (s2.frameType != FRAME_TYPE_INVALID) &&
     (s1.version   == s2.version  ) &&
     (s1.frameType == s2.frameType) &&
-    (s1.compType  == s2.compType ) &&
     (s1.width     == s2.width    ) &&
     (s1.height    == s2.height   );
 }
 
-void drawFunc_ARGB(CompFunc compFunc, uint8_t * dst, const uint8_t * src)
+void drawFunc_ARGB(uint8_t * dst, const uint8_t * src)
 {
-  compFunc(dst, src, state.shm->height * state.shm->stride * 4);
+  memcpySSE(dst, src, state.shm->height * state.shm->stride * 4);
   ivshmem_kick_irq(state.shm->guestID, 0);
 }
 
-void drawFunc_RGB(CompFunc compFunc, uint8_t * dst, const uint8_t * src)
+void drawFunc_RGB(uint8_t * dst, const uint8_t * src)
 {
-  compFunc(dst, src, state.shm->height * state.shm->stride * 3);
+  memcpySSE(dst, src, state.shm->height * state.shm->stride * 3);
   ivshmem_kick_irq(state.shm->guestID, 0);
 }
 
@@ -118,7 +90,6 @@ int renderThread(void * unused)
   uint8_t            *pixels       = (uint8_t*)state.shm;
   uint8_t            *texPixels[2] = {NULL, NULL};
   DrawFunc            drawFunc     = NULL;
-  CompFunc            compFunc     = NULL;
 
   format.version   = 1;
   format.frameType = FRAME_TYPE_INVALID;
@@ -219,15 +190,6 @@ int renderThread(void * unused)
           continue;
       }
 
-      switch(state.shm->compType)
-      {
-        case FRAME_COMP_NONE     : compFunc = compFunc_NONE     ; break;
-        case FRAME_COMP_BLACK_RLE: compFunc = compFunc_BLACK_RLE; break;
-        default:
-          format.frameType = FRAME_TYPE_INVALID;
-          continue;
-      }
-
       // update the window size and create the render texture
       SDL_SetWindowSize(state.window, state.shm->width, state.shm->height);
       SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -287,7 +249,7 @@ int renderThread(void * unused)
     if (state.hasBufferStorage)
     {
       // update the pixels
-      drawFunc(compFunc, texPixels[texIndex ? 0 : 1], pixels + state.shm->dataPos);
+      drawFunc(texPixels[texIndex ? 0 : 1], pixels + state.shm->dataPos);
 
       // update the texture
       glEnable(GL_TEXTURE_2D);
@@ -320,7 +282,7 @@ int renderThread(void * unused)
     }
     else
     {
-      drawFunc(compFunc, texPixels[0], pixels + state.shm->dataPos);
+      drawFunc(texPixels[0], pixels + state.shm->dataPos);
       SDL_UnlockTexture(texture);
       SDL_RenderCopy(state.renderer, texture, NULL, NULL);
     }
