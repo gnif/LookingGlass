@@ -300,7 +300,7 @@ int renderThread(void * unused)
       // update the texture
       glEnable(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, vboTex);
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[texIndex ? 0 : 1]);
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[texIndex]);
       glTexSubImage2D(
           GL_TEXTURE_2D,
           0,
