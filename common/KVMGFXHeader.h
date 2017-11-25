@@ -27,10 +27,6 @@ typedef enum FrameType
   FRAME_TYPE_INVALID   ,
   FRAME_TYPE_ARGB      , // ABGR interleaved: A,R,G,B 32bpp
   FRAME_TYPE_RGB       , // RGB interleaved :   R,G,B 24bpp
-  FRAME_TYPE_XOR       , // xor of the previous frame: R, G, B
-  FRAME_TYPE_YUV444P   , // YUV444 planar
-  FRAME_TYPE_YUV420P   , // YUV420 12bpp
-  FRAME_TYPE_ARGB10    , // rgb 10 bit packed, a2 b10 r10
   FRAME_TYPE_MAX       , // sentinel value
 } FrameType;
 
