@@ -238,7 +238,7 @@ int renderThread(void * unused)
         for (int i = 0; i < 2; ++i)
         {
           glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[i]);
-                         glBufferStorage (GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
+          glBufferStorage(GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
           texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize,
               GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
           if (!texPixels[i])
@@ -261,8 +261,8 @@ int renderThread(void * unused)
         // create the texture
         glGenTextures(1, &vboTex);
         glBindTexture(GL_TEXTURE_2D, vboTex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         if (params.useMipmap)
         {
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
