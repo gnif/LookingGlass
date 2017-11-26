@@ -108,17 +108,26 @@ bool DXGI::Initialize(CaptureOptions * options)
     D3D_FEATURE_LEVEL_9_1
   };
 
+  #if DEBUG
+    #define CREATE_FLAGS (D3D11_CREATE_DEVICE_DEBUG)
+  #else
+    #define CREATE_FLAGS (0)
+  #endif
+
   status = D3D11CreateDevice(
     adapter,
     D3D_DRIVER_TYPE_UNKNOWN,
     NULL,
-    D3D11_CREATE_DEVICE_DEBUG,
+    CREATE_FLAGS,
     featureLevels, ARRAYSIZE(featureLevels),
     D3D11_SDK_VERSION,
     &m_device,
     &m_featureLevel,
     &m_deviceContext
   );
+
+#undef CREATE_FLAGS
+
   adapter.Release();
 
   if (FAILED(status))
