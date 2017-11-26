@@ -238,8 +238,9 @@ int renderThread(void * unused)
         for (int i = 0; i < 2; ++i)
         {
           glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[i]);
-                         glBufferStorage (GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
-          texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+                         glBufferStorage (GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
+          texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize,
+              GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
           if (!texPixels[i])
           {
             DEBUG_ERROR("Failed to map buffer range, turning off buffer storage");
@@ -324,6 +325,7 @@ int renderThread(void * unused)
       glEnable(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, vboTex);
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[texIndex]);
+      glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize);
       glTexSubImage2D(
           GL_TEXTURE_2D,
           0,
