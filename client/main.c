@@ -99,7 +99,8 @@ inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHead
 
 int renderThread(void * unused)
 {
-  struct KVMGFXHeader format;
+  struct KVMGFXHeader header;
+  struct KVMGFXHeader newHeader;
   SDL_Texture        *texture      = NULL;
   GLuint              vboID[2]     = {0, 0};
   GLuint              intFormat    = 0;
@@ -110,11 +111,7 @@ int renderThread(void * unused)
   uint8_t            *pixels       = (uint8_t*)state.shm;
   uint8_t            *texPixels[2] = {NULL, NULL};
 
-  format.version   = 1;
-  format.frameType = FRAME_TYPE_INVALID;
-  format.width     = 0;
-  format.height    = 0;
-  format.stride    = 0;
+  memset(&header, 0, sizeof(struct KVMGFXHeader));
 
   // kick the guest early for our intial frame
   // the guestID may be invalid, it doesn't matter
@@ -122,11 +119,14 @@ int renderThread(void * unused)
 
   while(state.running)
   {
+    // copy the header for our use
+    memcpy(&newHeader, state.shm, sizeof(struct KVMGFXHeader));
+
     // ensure the header magic is valid, this will help prevent crash out when the memory hasn't yet been initialized
-    if (memcmp(state.shm->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0)
+    if (memcmp(newHeader.magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0)
       continue;
 
-    if (state.shm->version != KVMGFX_HEADER_VERSION)
+    if (newHeader.version != KVMGFX_HEADER_VERSION)
       continue;
 
     bool ready = false;
@@ -141,7 +141,7 @@ int renderThread(void * unused)
           break;
 
         case IVSHMEM_WAIT_RESULT_TIMEOUT:
-          ivshmem_kick_irq(state.shm->guestID, 0);
+          ivshmem_kick_irq(newHeader.guestID, 0);
           ready = false;
           break;
 
@@ -157,8 +157,14 @@ int renderThread(void * unused)
       break;
     }
 
-    // if the format is invalid or it has changed
-    if (!areFormatsSame(format, *state.shm))
+    // we can tell the guest to advance early, it won't
+    // touch the frame @ dataPos as it double buffers
+    // so we can safely read from it while the guest now
+    // writes the next frame
+    ivshmem_kick_irq(newHeader.guestID, 0);
+
+    // if the header is invalid or it has changed
+    if (!areFormatsSame(header, newHeader))
     {
       if (state.hasBufferStorage)
       {
@@ -186,7 +192,7 @@ int renderThread(void * unused)
 
       Uint32  sdlFormat;
       unsigned int bpp;
-      switch(state.shm->frameType)
+      switch(newHeader.frameType)
       {
         case FRAME_TYPE_ARGB:
           sdlFormat = SDL_PIXELFORMAT_ARGB8888;
@@ -203,14 +209,14 @@ int renderThread(void * unused)
           break;
 
         default:
-          format.frameType = FRAME_TYPE_INVALID;
+          header.frameType = FRAME_TYPE_INVALID;
           continue;
       }
 
       // update the window size and create the render texture
       if (params.autoResize)
       {
-        SDL_SetWindowSize(state.window, state.shm->width, state.shm->height);
+        SDL_SetWindowSize(state.window, newHeader.width, newHeader.height);
         if (params.center)
           SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
       }
@@ -218,10 +224,10 @@ int renderThread(void * unused)
       if (state.hasBufferStorage)
       {
         // calculate the texture size in bytes
-        texSize = state.shm->width * state.shm->stride * bpp;
+        texSize = newHeader.width * newHeader.stride * bpp;
 
         // ensure the size makes sense
-        if (state.shm->dataPos + texSize > state.shmSize)
+        if (newHeader.dataPos + texSize > state.shmSize)
         {
           DEBUG_ERROR("The guest sent an invalid dataPos");
           break;
@@ -271,7 +277,7 @@ int renderThread(void * unused)
           GL_TEXTURE_2D,
           0,
           intFormat,
-          state.shm->width, state.shm->height,
+          newHeader.width, newHeader.height,
           0,
           vboFormat,
           GL_UNSIGNED_BYTE,
@@ -281,7 +287,7 @@ int renderThread(void * unused)
       }
       else
       {
-        texture = SDL_CreateTexture(state.renderer, sdlFormat, SDL_TEXTUREACCESS_STREAMING, state.shm->width, state.shm->height);
+        texture = SDL_CreateTexture(state.renderer, sdlFormat, SDL_TEXTUREACCESS_STREAMING, newHeader.width, newHeader.height);
         if (!texture)
         {
           DEBUG_ERROR("Failed to create a texture");
@@ -289,19 +295,16 @@ int renderThread(void * unused)
         }
       }
 
-      memcpy(&format, state.shm, sizeof(format));
+      memcpy(&header, &newHeader, sizeof(header));
       state.windowChanged = true;
     }
-
-    format.dataPos = state.shm->dataPos;
-    format.guestID = state.shm->guestID;
 
     //beyond this point DO NOT use state.shm for security
 
     // final sanity checks on the data presented by the guest
     // this is critical as the guest could overflow this buffer to
     // try to take control of the host
-    if (format.dataPos + texSize > state.shmSize)
+    if (newHeader.dataPos + texSize > state.shmSize)
     {
       DEBUG_ERROR("The guest sent an invalid dataPos");
       break;
@@ -315,8 +318,7 @@ int renderThread(void * unused)
       SDL_GetWindowSize(state.window, &w, &h);
 
       // copy the buffer to the texture and let the guest advance
-      memcpySSE(texPixels[texIndex], pixels + format.dataPos, texSize);
-      ivshmem_kick_irq(format.guestID, 0);
+      memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
 
       // update the texture
       glEnable(GL_TEXTURE_2D);
@@ -326,7 +328,7 @@ int renderThread(void * unused)
           GL_TEXTURE_2D,
           0,
           0, 0,
-          format.width, format.height,
+          header.width, header.height,
           vboFormat,
           GL_UNSIGNED_BYTE,
           (void*)0
@@ -358,11 +360,10 @@ int renderThread(void * unused)
         DEBUG_ERROR("Failed to lock the texture for update");
         break;
       }
-      texSize = format.height * pitch;
+      texSize = header.height * pitch;
 
       // copy the buffer to the texture and let the guest advance
-      memcpySSE(texPixels[texIndex], pixels + format.dataPos, texSize);
-      ivshmem_kick_irq(format.guestID, 0);
+      memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
 
       SDL_UnlockTexture(texture);
       SDL_RenderCopy(state.renderer, texture, NULL, NULL);
