@@ -56,6 +56,7 @@ struct AppState
 struct AppParams
 {
   bool         autoResize;
+  bool         keepAspect;
   bool         borderless;
   bool         center;
   int          x, y;
@@ -72,6 +73,7 @@ struct AppState  state;
 struct AppParams params =
 {
   .autoResize       = false,
+  .keepAspect       = true,
   .borderless       = false,
   .center           = true,
   .x                = 0,
@@ -281,13 +283,32 @@ int renderThread(void * unused)
       break;
     }
 
+    SDL_Rect dest;
+    dest.x = 0;
+    dest.y = 0;
+    SDL_GetWindowSize(state.window, &dest.w, &dest.h);
+
+    if (params.keepAspect)
+    {
+      const float texAspect = (float)header.height / (float)header.width;
+      const float scnAspect = (float)dest.h / (float)dest.w;
+      if (scnAspect < texAspect)
+      {
+        const int w = (float)dest.h / texAspect;
+        dest.x = (dest.w / 2) - (w / 2);
+        dest.w = w;
+      }
+      else
+      {
+        const int h = (float)dest.w * texAspect;
+        dest.y = (dest.h / 2) - (h / 2);
+        dest.h = h;
+      }
+    }
 
     SDL_RenderClear(state.renderer);
     if (state.hasBufferStorage)
     {
-      int w, h;
-      SDL_GetWindowSize(state.window, &w, &h);
-
       // copy the buffer to the texture and let the guest advance
       memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
 
@@ -312,11 +333,12 @@ int renderThread(void * unused)
 
       // draw the screen
       glBegin(GL_TRIANGLE_STRIP);
-      glTexCoord2f(0.0f, 0.0f); glVertex2i(0, 0);
-      glTexCoord2f(1.0f, 0.0f); glVertex2i(w, 0);
-      glTexCoord2f(0.0f, 1.0f); glVertex2i(0, h);
-      glTexCoord2f(1.0f, 1.0f); glVertex2i(w, h);
+      glTexCoord2f(0.0f, 0.0f); glVertex2i(dest.x         , dest.y         );
+      glTexCoord2f(1.0f, 0.0f); glVertex2i(dest.x + dest.w, dest.y         );
+      glTexCoord2f(0.0f, 1.0f); glVertex2i(dest.x         , dest.y + dest.h);
+      glTexCoord2f(1.0f, 1.0f); glVertex2i(dest.x + dest.w, dest.y + dest.h);
       glEnd();
+
       glBindTexture(GL_TEXTURE_2D, 0);
       glDisable(GL_TEXTURE_2D);
 
@@ -338,7 +360,7 @@ int renderThread(void * unused)
       memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
 
       SDL_UnlockTexture(texture);
-      SDL_RenderCopy(state.renderer, texture, NULL, NULL);
+      SDL_RenderCopy(state.renderer, texture, NULL, &dest);
     }
 
     SDL_RenderPresent(state.renderer);
@@ -772,6 +794,7 @@ void doHelp(char * app)
     "  -m        Enable mipmapping (improves a stretched screen)\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
+    "  -r        Don't maintain the aspect ratio\n"
     "  -d        Borderless mode\n"
     "  -x XPOS   Initial window X position [current: %s]\n"
     "  -y YPOS   Initial window Y position [current: %s]\n"
@@ -818,7 +841,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:gmadx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:gmardx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -853,6 +876,10 @@ int main(int argc, char * argv[])
 
       case 'a':
         params.autoResize = true;
+        break;
+
+      case 'r':
+        params.keepAspect = false;
         break;
 
       case 'd':
