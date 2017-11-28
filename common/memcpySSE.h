@@ -68,22 +68,25 @@ static inline void memcpySSE(void * dst, const void * src, size_t length)
 
   __m128i * _src = (__m128i *)src;
   __m128i * _dst = (__m128i *)dst;
-  __m128i * _end = (__m128i *)src + (length / 16);
+  __m128i v0, v1, v2, v3, v4, v5, v6, v7;
+
+  const size_t sselen = length & ~0x7F;
+  const __m128i * _end = (__m128i *)((uintptr_t)src + sselen);
   for (; _src != _end; _src += 8, _dst += 8)
   {
-    _mm_prefetch(((char *)_src + 8 ), _MM_HINT_NTA);
-    _mm_prefetch(((char *)_src + 9 ), _MM_HINT_NTA);
-    _mm_prefetch(((char *)_src + 10), _MM_HINT_NTA);
-    _mm_prefetch(((char *)_src + 11), _MM_HINT_NTA);
+    _mm_prefetch(((char *)(_src + 8 )), _MM_HINT_NTA);
+    _mm_prefetch(((char *)(_src + 9 )), _MM_HINT_NTA);
+    _mm_prefetch(((char *)(_src + 10)), _MM_HINT_NTA);
+    _mm_prefetch(((char *)(_src + 11)), _MM_HINT_NTA);
 
-    __m128i v0 = _mm_load_si128(_src + 0);
-    __m128i v1 = _mm_load_si128(_src + 1);
-    __m128i v2 = _mm_load_si128(_src + 2);
-    __m128i v3 = _mm_load_si128(_src + 3);
-    __m128i v4 = _mm_load_si128(_src + 4);
-    __m128i v5 = _mm_load_si128(_src + 5);
-    __m128i v6 = _mm_load_si128(_src + 6);
-    __m128i v7 = _mm_load_si128(_src + 7);
+    v0 = _mm_load_si128(_src + 0);
+    v1 = _mm_load_si128(_src + 1);
+    v2 = _mm_load_si128(_src + 2);
+    v3 = _mm_load_si128(_src + 3);
+    v4 = _mm_load_si128(_src + 4);
+    v5 = _mm_load_si128(_src + 5);
+    v6 = _mm_load_si128(_src + 6);
+    v7 = _mm_load_si128(_src + 7);
 
     _mm_stream_si128(_dst + 0, v0);
     _mm_stream_si128(_dst + 1, v1);
@@ -93,5 +96,28 @@ static inline void memcpySSE(void * dst, const void * src, size_t length)
     _mm_stream_si128(_dst + 5, v5);
     _mm_stream_si128(_dst + 6, v6);
     _mm_stream_si128(_dst + 7, v7);
+  }
+
+  const size_t remain = ((length - sselen) & ~0xF) >> 4;
+  switch (remain)
+  {
+    case 7: v0 = _mm_load_si128(_src++);
+    case 6: v1 = _mm_load_si128(_src++);
+    case 5: v2 = _mm_load_si128(_src++);
+    case 4: v3 = _mm_load_si128(_src++);
+    case 3: v4 = _mm_load_si128(_src++);
+    case 2: v5 = _mm_load_si128(_src++);
+    case 1: v6 = _mm_load_si128(_src++);
+  }
+
+  switch (remain)
+  {
+    case 7: _mm_stream_si128(_dst++, v0);
+    case 6: _mm_stream_si128(_dst++, v1);
+    case 5: _mm_stream_si128(_dst++, v2);
+    case 4: _mm_stream_si128(_dst++, v3);
+    case 3: _mm_stream_si128(_dst++, v4);
+    case 2: _mm_stream_si128(_dst++, v5);
+    case 1: _mm_stream_si128(_dst++, v6);
   }
 }
