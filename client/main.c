@@ -56,6 +56,7 @@ struct AppState
 struct AppParams
 {
   bool         autoResize;
+  bool         allowResize;
   bool         keepAspect;
   bool         borderless;
   bool         center;
@@ -73,6 +74,7 @@ struct AppState  state;
 struct AppParams params =
 {
   .autoResize       = false,
+  .allowResize      = true,
   .keepAspect       = true,
   .borderless       = false,
   .center           = true,
@@ -642,8 +644,8 @@ int run()
     params.h,
     (
       SDL_WINDOW_SHOWN |
-      (!params.autoResize ? SDL_WINDOW_RESIZABLE  : 0) |
-      ( params.borderless ? SDL_WINDOW_BORDERLESS : 0)
+      (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
+      (params.borderless  ? SDL_WINDOW_BORDERLESS : 0)
     )
   );
 
@@ -794,6 +796,7 @@ void doHelp(char * app)
     "  -m        Disable mipmapping\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
+    "  -n        Don't allow the window to resize\n"
     "  -r        Don't maintain the aspect ratio\n"
     "  -d        Borderless mode\n"
     "  -x XPOS   Initial window X position [current: %s]\n"
@@ -841,7 +844,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:gmardx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:gmanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -876,6 +879,10 @@ int main(int argc, char * argv[])
 
       case 'a':
         params.autoResize = true;
+        break;
+
+      case 'n':
+        params.allowResize = false;
         break;
 
       case 'r':
