@@ -82,7 +82,7 @@ struct AppParams params =
   .h                = 768,
   .ivshmemSocket    = "/tmp/ivshmem_socket",
   .useBufferStorage = true,
-  .useMipmap        = false,
+  .useMipmap        = true,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
   .spicePort        = 5900
@@ -791,7 +791,7 @@ void doHelp(char * app)
     "  -p PORT   Specify the spice port [current: %d]\n"
     "\n"
     "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
-    "  -m        Enable mipmapping (improves a stretched screen)\n"
+    "  -m        Disable mipmapping\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -r        Don't maintain the aspect ratio\n"
@@ -871,7 +871,7 @@ int main(int argc, char * argv[])
         break;
 
       case 'm':
-        params.useMipmap = true;
+        params.useMipmap = false;
         break;
 
       case 'a':
