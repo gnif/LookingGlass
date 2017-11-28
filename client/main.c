@@ -121,47 +121,17 @@ int renderThread(void * unused)
   {
     // copy the header for our use
     memcpy(&newHeader, state.shm, sizeof(struct KVMGFXHeader));
+    ivshmem_kick_irq(newHeader.guestID, 0);
 
     // ensure the header magic is valid, this will help prevent crash out when the memory hasn't yet been initialized
-    if (memcmp(newHeader.magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0)
-      continue;
-
-    if (newHeader.version != KVMGFX_HEADER_VERSION)
-      continue;
-
-    bool ready = false;
-    bool error = false;
-    while(state.running && !ready && !error)
+    if (
+      memcmp(newHeader.magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0 ||
+      newHeader.version != KVMGFX_HEADER_VERSION
+    )
     {
-      // kick the guest and wait for a frame
-      switch(ivshmem_wait_irq(0))
-      {
-        case IVSHMEM_WAIT_RESULT_OK:
-          ready = true;
-          break;
-
-        case IVSHMEM_WAIT_RESULT_TIMEOUT:
-          ivshmem_kick_irq(newHeader.guestID, 0);
-          ready = false;
-          break;
-
-        case IVSHMEM_WAIT_RESULT_ERROR:
-          error = true;
-          break;
-      }
+      usleep(1000);
+      continue;
     }
-
-    if (error)
-    {
-      DEBUG_ERROR("error during wait for host");
-      break;
-    }
-
-    // we can tell the guest to advance early, it won't
-    // touch the frame @ dataPos as it double buffers
-    // so we can safely read from it while the guest now
-    // writes the next frame
-    ivshmem_kick_irq(newHeader.guestID, 0);
 
     // if the header is invalid or it has changed
     if (!areFormatsSame(header, newHeader))
@@ -372,8 +342,35 @@ int renderThread(void * unused)
     }
 
     SDL_RenderPresent(state.renderer);
-
     state.started = true;
+
+    bool ready = false;
+    bool error = false;
+    while(state.running && !ready && !error)
+    {
+      // kick the guest and wait for a frame
+      switch(ivshmem_wait_irq(0))
+      {
+        case IVSHMEM_WAIT_RESULT_OK:
+          ready = true;
+          break;
+
+        case IVSHMEM_WAIT_RESULT_TIMEOUT:
+          ivshmem_kick_irq(newHeader.guestID, 0);
+          ready = false;
+          break;
+
+        case IVSHMEM_WAIT_RESULT_ERROR:
+          error = true;
+          break;
+      }
+    }
+
+    if (error)
+    {
+      DEBUG_ERROR("error during wait for host");
+      break;
+    }
   }
 
   state.running = false;
