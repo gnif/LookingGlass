@@ -33,9 +33,6 @@
     <ClCompile Include="Capture\NvFBC.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
-    <ClCompile Include="MTMemcpy.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Capture\DXGI.cpp">
       <Filter>Source Files\Capture</Filter>
     </ClCompile>
@@ -63,9 +60,6 @@
       <Filter>Header Files\Capture</Filter>
     </ClInclude>
     <ClInclude Include="Util.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MTMemcpy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Capture\DXGI.h">
