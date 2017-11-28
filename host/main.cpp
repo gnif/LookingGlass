@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common\debug.h"
 #include "vendor\getopt\getopt.h"
 
+#include "CrashHandler.h"
 #include "CaptureFactory.h"
 #include "Service.h"
 
@@ -47,6 +48,8 @@ struct StartupArgs
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam, int iCmdShow)
 {
+  CrashHandler::Initialize();
+
   struct StartupArgs args;
   ZeroMemory(&args, sizeof(struct StartupArgs));
   int ret = parseArgs(args);
