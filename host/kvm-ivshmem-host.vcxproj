@@ -163,6 +163,7 @@
     <ClCompile Include="..\vendor\getopt\getopt.c" />
     <ClCompile Include="Capture\DXGI.cpp" />
     <ClCompile Include="Capture\NvFBC.cpp" />
+    <ClCompile Include="CrashHandler.cpp" />
     <ClCompile Include="ivshmem.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MTMemcpy.cpp" />
@@ -172,6 +173,7 @@
     <ClInclude Include="CaptureFactory.h" />
     <ClInclude Include="Capture\DXGI.h" />
     <ClInclude Include="Capture\NvFBC.h" />
+    <ClInclude Include="CrashHandler.h" />
     <ClInclude Include="ICapture.h" />
     <ClInclude Include="ivshmem.h" />
     <ClInclude Include="MTMemcpy.h" />

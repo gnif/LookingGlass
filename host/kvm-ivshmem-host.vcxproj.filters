@@ -42,6 +42,9 @@
     <ClCompile Include="..\vendor\getopt\getopt.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CrashHandler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ivshmem.h">
@@ -67,6 +70,9 @@
     </ClInclude>
     <ClInclude Include="Capture\DXGI.h">
       <Filter>Header Files\Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="CrashHandler.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
