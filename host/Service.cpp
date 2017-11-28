@@ -145,34 +145,6 @@ bool Service::Process()
     return false;
   }
 
-  // wait for the host to notify that is it is ready to proceed
-  bool eventDone = false;
-  while (!eventDone)
-  {
-    switch (WaitForSingleObject(m_readyEvent, 1000))
-    {
-    case WAIT_ABANDONED:
-      DEBUG_ERROR("Wait abandoned");
-      return false;
-
-    case WAIT_OBJECT_0:
-      eventDone = true;
-      break;
-
-      // if we timed out we just continue to ring until we get an answer or we are stopped
-    case WAIT_TIMEOUT:
-      continue;
-
-    case WAIT_FAILED:
-      DEBUG_ERROR("Wait failed");
-      return false;
-
-    default:
-      DEBUG_ERROR("Unknown error");
-      return false;
-    }
-  }
-
   // copy the frame details into the header
   header->width   = frame.width;
   header->height  = frame.height;
@@ -191,6 +163,33 @@ bool Service::Process()
   {
     DEBUG_ERROR("Failed to ring doorbell");
     return false;
+  }
+
+  // wait for the host to notify that is it is ready to proceed
+  bool eventDone = false;
+  while (!eventDone)
+  {
+    switch (WaitForSingleObject(m_readyEvent, 1000))
+    {
+    case WAIT_ABANDONED:
+      DEBUG_ERROR("Wait abandoned");
+      return false;
+
+    case WAIT_OBJECT_0:
+      eventDone = true;
+      break;
+
+    case WAIT_TIMEOUT:
+      continue;
+
+    case WAIT_FAILED:
+      DEBUG_ERROR("Wait failed");
+      return false;
+
+    default:
+      DEBUG_ERROR("Unknown error");
+      return false;
+    }
   }
 
   if (++m_frameIndex == 2)
