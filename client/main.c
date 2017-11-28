@@ -796,7 +796,7 @@ void doHelp(char * app)
     "  -m        Disable mipmapping\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
-    "  -n        Don't allow the window to resize\n"
+    "  -n        Don't allow the window to be manually resized\n"
     "  -r        Don't maintain the aspect ratio\n"
     "  -d        Borderless mode\n"
     "  -x XPOS   Initial window X position [current: %s]\n"
