@@ -45,10 +45,8 @@ struct AppState
 
   bool      running;
   bool      started;
-  bool      windowChanged;
 
-  int       offsetX, offsetY;
-  int       guestW, guestH;
+  SDL_Rect  srcRect, dstRect;
   float     scaleX, scaleY;
 
   SDL_Window          * window;
@@ -95,6 +93,40 @@ struct AppParams params =
   .spicePort        = 5900,
   .scaleMouseInput  = true
 };
+
+inline void updatePositionInfo()
+{
+  int w, h;
+  SDL_GetRendererOutputSize(state.renderer, &w, &h);
+
+  if (params.keepAspect)
+  {
+    const float srcAspect = (float)state.srcRect.h / (float)state.srcRect.w;
+    const float wndAspect = (float)h / (float)w;
+    if (wndAspect < srcAspect)
+    {
+      state.dstRect.w = (float)h / srcAspect;
+      state.dstRect.h = h;
+      state.dstRect.x = (w >> 1) - (state.dstRect.w >> 1);
+    }
+    else
+    {
+      state.dstRect.w = w;
+      state.dstRect.h = (float)w * srcAspect;
+      state.dstRect.y = (h >> 1) - (state.dstRect.h >> 1);
+    }
+  }
+  else
+  {
+    state.dstRect.x = 0;
+    state.dstRect.y = 0;
+    state.dstRect.w = w;
+    state.dstRect.h = h;
+  }
+
+  state.scaleX = (float)state.srcRect.h / (float)state.dstRect.h;
+  state.scaleY = (float)state.srcRect.w / (float)state.dstRect.w;
+}
 
 inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
 {
@@ -277,7 +309,11 @@ int renderThread(void * unused)
       }
 
       memcpy(&header, &newHeader, sizeof(header));
-      state.windowChanged = true;
+      state.srcRect.x = 0;
+      state.srcRect.y = 0;
+      state.srcRect.w = header.width;
+      state.srcRect.h = header.height;
+      updatePositionInfo();
     }
 
     //beyond this point DO NOT use state.shm for security
@@ -290,36 +326,6 @@ int renderThread(void * unused)
       DEBUG_ERROR("The guest sent an invalid dataPos");
       break;
     }
-
-    SDL_Rect dest;
-    dest.x = 0;
-    dest.y = 0;
-    SDL_GetWindowSize(state.window, &dest.w, &dest.h);
-
-    if (params.keepAspect)
-    {
-      const float texAspect = (float)header.height / (float)header.width;
-      const float scnAspect = (float)dest.h / (float)dest.w;
-      if (scnAspect < texAspect)
-      {
-        const int w = (float)dest.h / texAspect;
-        dest.x = (dest.w / 2) - (w / 2);
-        dest.w = w;
-      }
-      else
-      {
-        const int h = (float)dest.w * texAspect;
-        dest.y = (dest.h / 2) - (h / 2);
-        dest.h = h;
-      }
-    }
-
-    state.offsetX = dest.x;
-    state.offsetY = dest.y;
-    state.guestW  = dest.w;
-    state.guestH  = dest.h;
-    state.scaleX  = (float)header.height / dest.h;
-    state.scaleY  = (float)header.width  / dest.w;
 
     SDL_RenderClear(state.renderer);
     if (state.hasBufferStorage)
@@ -348,10 +354,10 @@ int renderThread(void * unused)
 
       // draw the screen
       glBegin(GL_TRIANGLE_STRIP);
-      glTexCoord2f(0.0f, 0.0f); glVertex2i(dest.x         , dest.y         );
-      glTexCoord2f(1.0f, 0.0f); glVertex2i(dest.x + dest.w, dest.y         );
-      glTexCoord2f(0.0f, 1.0f); glVertex2i(dest.x         , dest.y + dest.h);
-      glTexCoord2f(1.0f, 1.0f); glVertex2i(dest.x + dest.w, dest.y + dest.h);
+        glTexCoord2f(0.0f, 0.0f); glVertex2i(state.dstRect.x                  , state.dstRect.y                  );
+        glTexCoord2f(1.0f, 0.0f); glVertex2i(state.dstRect.x + state.dstRect.w, state.dstRect.y                  );
+        glTexCoord2f(0.0f, 1.0f); glVertex2i(state.dstRect.x                  , state.dstRect.y + state.dstRect.h);
+        glTexCoord2f(1.0f, 1.0f); glVertex2i(state.dstRect.x + state.dstRect.w, state.dstRect.y + state.dstRect.h);
       glEnd();
 
       glBindTexture(GL_TEXTURE_2D, 0);
@@ -375,7 +381,7 @@ int renderThread(void * unused)
       memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
 
       SDL_UnlockTexture(texture);
-      SDL_RenderCopy(state.renderer, texture, NULL, &dest);
+      SDL_RenderCopy(state.renderer, texture, NULL, &state.dstRect);
     }
 
     SDL_RenderPresent(state.renderer);
@@ -574,10 +580,10 @@ int eventThread(void * arg)
       case SDL_MOUSEMOTION:
       {
         if (
-          event.motion.x < state.offsetX                ||
-          event.motion.x > state.offsetX + state.guestW ||
-          event.motion.y < state.offsetY                ||
-          event.motion.y > state.offsetY + state.guestH
+          event.motion.x < state.dstRect.x                   ||
+          event.motion.x > state.dstRect.x + state.dstRect.w ||
+          event.motion.y < state.dstRect.y                   ||
+          event.motion.y > state.dstRect.y + state.dstRect.h
         )
         {
           realignGuest = true;
@@ -586,19 +592,18 @@ int eventThread(void * arg)
 
         int x = 0;
         int y = 0;
-        if (realignGuest || state.windowChanged)
+        if (realignGuest)
         {
-          x = event.motion.x - state.offsetX;
-          y = event.motion.y - state.offsetY;
+          x = event.motion.x - state.dstRect.x;
+          y = event.motion.y - state.dstRect.y;
           if (params.scaleMouseInput)
           {
-            x *= state.scaleX;
-            y *= state.scaleY;
+            x = (float)x * state.scaleX;
+            y = (float)y * state.scaleY;
           }
           x -= state.shm->mouseX;
           y -= state.shm->mouseY;
-          realignGuest        = false;
-          state.windowChanged = false;
+          realignGuest = false;
 
           if (!spice_mouse_motion(x, y))
             DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
@@ -612,8 +617,8 @@ int eventThread(void * arg)
         {
           if (params.scaleMouseInput)
           {
-            x *= state.scaleX;
-            y *= state.scaleY;
+            x = (float)x * state.scaleX;
+            y = (float)y * state.scaleY;
           }
           if (!spice_mouse_motion(x, y))
           {
@@ -651,6 +656,11 @@ int eventThread(void * arg)
         switch(event.window.event)
         {
           case SDL_WINDOWEVENT_ENTER:
+            realignGuest = true;
+            break;
+
+          case SDL_WINDOWEVENT_SIZE_CHANGED:
+            updatePositionInfo();
             realignGuest = true;
             break;
         }
