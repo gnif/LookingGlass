@@ -108,11 +108,13 @@ inline void updatePositionInfo()
       state.dstRect.w = (float)h / srcAspect;
       state.dstRect.h = h;
       state.dstRect.x = (w >> 1) - (state.dstRect.w >> 1);
+      state.dstRect.y = 0;
     }
     else
     {
       state.dstRect.w = w;
       state.dstRect.h = (float)w * srcAspect;
+      state.dstRect.x = 0;
       state.dstRect.y = (h >> 1) - (state.dstRect.h >> 1);
     }
   }
