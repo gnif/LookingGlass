@@ -899,7 +899,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:gmanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jgmanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
