@@ -47,6 +47,10 @@ struct AppState
   bool      started;
   bool      windowChanged;
 
+  int       offsetX, offsetY;
+  int       guestW, guestH;
+  float     scaleX, scaleY;
+
   SDL_Window          * window;
   SDL_Renderer        * renderer;
   struct KVMGFXHeader * shm;
@@ -68,6 +72,7 @@ struct AppParams
   bool         useSpice;
   const char * spiceHost;
   unsigned int spicePort;
+  bool         scaleMouseInput;
 };
 
 struct AppState  state;
@@ -87,7 +92,8 @@ struct AppParams params =
   .useMipmap        = true,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
-  .spicePort        = 5900
+  .spicePort        = 5900,
+  .scaleMouseInput  = true
 };
 
 inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
@@ -307,6 +313,13 @@ int renderThread(void * unused)
         dest.h = h;
       }
     }
+
+    state.offsetX = dest.x;
+    state.offsetY = dest.y;
+    state.guestW  = dest.w;
+    state.guestH  = dest.h;
+    state.scaleX  = (float)header.height / dest.h;
+    state.scaleY  = (float)header.width  / dest.w;
 
     SDL_RenderClear(state.renderer);
     if (state.hasBufferStorage)
@@ -560,27 +573,54 @@ int eventThread(void * arg)
 
       case SDL_MOUSEMOTION:
       {
+        if (
+          event.motion.x < state.offsetX                ||
+          event.motion.x > state.offsetX + state.guestW ||
+          event.motion.y < state.offsetY                ||
+          event.motion.y > state.offsetY + state.guestH
+        )
+        {
+          realignGuest = true;
+          break;
+        }
+
         int x = 0;
         int y = 0;
         if (realignGuest || state.windowChanged)
         {
-          x = event.motion.x - state.shm->mouseX;
-          y = event.motion.y - state.shm->mouseY;
+          x = event.motion.x - state.offsetX;
+          y = event.motion.y - state.offsetY;
+          if (params.scaleMouseInput)
+          {
+            x *= state.scaleX;
+            y *= state.scaleY;
+          }
+          x -= state.shm->mouseX;
+          y -= state.shm->mouseY;
           realignGuest        = false;
           state.windowChanged = false;
-        }
-        else
-        {
-          x = event.motion.xrel;
-          y = event.motion.yrel;
+
+          if (!spice_mouse_motion(x, y))
+            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+
+          break;
         }
 
+        x = event.motion.xrel;
+        y = event.motion.yrel;
         if (x != 0 || y != 0)
+        {
+          if (params.scaleMouseInput)
+          {
+            x *= state.scaleX;
+            y *= state.scaleY;
+          }
           if (!spice_mouse_motion(x, y))
           {
             DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
             break;
           }
+        }
         break;
       }
 
@@ -629,6 +669,8 @@ int run()
 {
   memset(&state, 0, sizeof(state));
   state.running = true;
+  state.scaleX  = 1.0f;
+  state.scaleY  = 1.0f;
 
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
@@ -791,6 +833,7 @@ void doHelp(char * app)
     "  -s        Disable spice client\n"
     "  -c HOST   Specify the spice host [current: %s]\n"
     "  -p PORT   Specify the spice port [current: %d]\n"
+    "  -j        Disable cursor position scaling\n"
     "\n"
     "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
     "  -m        Disable mipmapping\n"
@@ -867,6 +910,10 @@ int main(int argc, char * argv[])
 
       case 'p':
         params.spicePort = atoi(optarg);
+        break;
+
+      case 'j':
+        params.scaleMouseInput = false;
         break;
 
       case 'g':
