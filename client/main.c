@@ -59,6 +59,7 @@ struct AppState
 
 struct AppParams
 {
+  bool         vsync;
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
@@ -79,6 +80,7 @@ struct AppParams
 struct AppState  state;
 struct AppParams params =
 {
+  .vsync            = true,
   .autoResize       = false,
   .allowResize      = true,
   .keepAspect       = true,
@@ -810,7 +812,9 @@ int run()
   SDL_ShowCursor(SDL_DISABLE);
 
   state.renderer = SDL_CreateRenderer(state.window, -1,
-      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_RENDERER_ACCELERATED |
+    (params.vsync ? SDL_RENDERER_PRESENTVSYNC : 0)
+  );
 
   if (params.useBufferStorage)
   {
@@ -943,6 +947,7 @@ void doHelp(char * app)
     "\n"
     "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
     "  -m        Disable mipmapping\n"
+    "  -v        Disable VSync\n"
     "  -k        Enable FPS display\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
@@ -994,7 +999,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jgmkanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jgmvkanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -1029,6 +1034,10 @@ int main(int argc, char * argv[])
 
       case 'm':
         params.useMipmap = false;
+        break;
+
+      case 'v':
+        params.vsync = false;
         break;
 
       case 'k':
