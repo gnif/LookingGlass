@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <getopt.h>
 #include <SDL2/SDL.h>
+#include <SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -46,6 +47,7 @@ struct AppState
   bool      running;
   bool      started;
 
+  TTF_Font  *font;
   SDL_Rect  srcRect, dstRect;
   float     scaleX, scaleY;
 
@@ -67,6 +69,7 @@ struct AppParams
   const char * ivshmemSocket;
   bool         useBufferStorage;
   bool         useMipmap;
+  bool         showFPS;
   bool         useSpice;
   const char * spiceHost;
   unsigned int spicePort;
@@ -88,6 +91,7 @@ struct AppParams params =
   .ivshmemSocket    = "/tmp/ivshmem_socket",
   .useBufferStorage = true,
   .useMipmap        = true,
+  .showFPS          = false,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
   .spicePort        = 5900,
@@ -149,11 +153,16 @@ int renderThread(void * unused)
   GLuint              vboID[2]     = {0, 0};
   GLuint              intFormat    = 0;
   GLuint              vboFormat    = 0;
-  GLuint              vboTex       = 0;
+  GLuint              vboTex[2]    = {0, 0};
   unsigned int        texIndex     = 0;
   unsigned int        texSize      = 0;
   uint8_t            *pixels       = (uint8_t*)state.shm;
   uint8_t            *texPixels[2] = {NULL, NULL};
+
+  unsigned int        ticks        = SDL_GetTicks();
+  unsigned int        frameCount   = 0;
+  SDL_Texture        *textTexture  = NULL;
+  SDL_Rect            textRect     = {0, 0, 0, 0};
 
   memset(&header, 0, sizeof(struct KVMGFXHeader));
 
@@ -184,10 +193,10 @@ int renderThread(void * unused)
       {
         if (vboID[0])
         {
-          if (vboTex)
+          if (vboTex[0])
           {
-            glDeleteTextures(1, &vboTex);
-            vboTex = 0;
+            glDeleteTextures(1, vboTex);
+            memset(vboTex, 0, sizeof(vboTex));
           }
 
           glUnmapBuffer(GL_TEXTURE_BUFFER);
@@ -273,21 +282,8 @@ int renderThread(void * unused)
         }
 
         // create the texture
-        glGenTextures(1, &vboTex);
-        glBindTexture(GL_TEXTURE_2D, vboTex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        if (params.useMipmap)
-        {
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        }
-        else
-        {
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        }
-
+        glGenTextures(1, vboTex);
+        glBindTexture(GL_TEXTURE_2D, vboTex[0]);
         glTexImage2D(
           GL_TEXTURE_2D,
           0,
@@ -310,6 +306,9 @@ int renderThread(void * unused)
         }
       }
 
+      ticks = SDL_GetTicks();
+      frameCount = 0;
+
       memcpy(&header, &newHeader, sizeof(header));
       state.srcRect.x = 0;
       state.srcRect.y = 0;
@@ -330,16 +329,19 @@ int renderThread(void * unused)
     }
 
     SDL_RenderClear(state.renderer);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
     if (state.hasBufferStorage)
     {
       // copy the buffer to the texture and let the guest advance
       memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
-
-      // update the texture
-      glEnable(GL_TEXTURE_2D);
-      glBindTexture(GL_TEXTURE_2D, vboTex);
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[texIndex]);
       glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize);
+
+      // bind the texture and update it
+      glBindTexture(GL_TEXTURE_2D       , vboTex[0]   );
+      glPixelStorei(GL_UNPACK_ALIGNMENT , 1           );
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, header.width);
       glTexSubImage2D(
           GL_TEXTURE_2D,
           0,
@@ -352,18 +354,33 @@ int renderThread(void * unused)
       if (params.useMipmap)
         glGenerateMipmap(GL_TEXTURE_2D);
 
+      // unbind the buffer
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
+      // configure the texture
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      if (params.useMipmap)
+      {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      }
+      else
+      {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      }
+
       // draw the screen
+      glEnable(GL_TEXTURE_2D);
       glBegin(GL_TRIANGLE_STRIP);
         glTexCoord2f(0.0f, 0.0f); glVertex2i(state.dstRect.x                  , state.dstRect.y                  );
         glTexCoord2f(1.0f, 0.0f); glVertex2i(state.dstRect.x + state.dstRect.w, state.dstRect.y                  );
         glTexCoord2f(0.0f, 1.0f); glVertex2i(state.dstRect.x                  , state.dstRect.y + state.dstRect.h);
         glTexCoord2f(1.0f, 1.0f); glVertex2i(state.dstRect.x + state.dstRect.w, state.dstRect.y + state.dstRect.h);
       glEnd();
-
-      glBindTexture(GL_TEXTURE_2D, 0);
       glDisable(GL_TEXTURE_2D);
+      glBindTexture(GL_TEXTURE_2D, 0);
 
       // update our texture index
       if (++texIndex == 2)
@@ -386,7 +403,70 @@ int renderThread(void * unused)
       SDL_RenderCopy(state.renderer, texture, NULL, &state.dstRect);
     }
 
+    if (params.showFPS)
+    {
+      if (frameCount == 10)
+      {
+        SDL_Surface *textSurface = NULL;
+        if (textTexture)
+        {
+          SDL_DestroyTexture(textTexture);
+          textTexture = NULL;
+        }
+        const unsigned int time = SDL_GetTicks();
+        const float avgFPS = frameCount / ((time - ticks) / 1000.0f);
+        char strFPS[12];
+        snprintf(strFPS, sizeof(strFPS), "FPS: %6.2f", avgFPS);
+        SDL_Color color = {0xff, 0xff, 0xff};
+        if (!(textSurface = TTF_RenderText_Blended(state.font, strFPS, color)))
+        {
+          DEBUG_ERROR("Failed to render text");
+          break;
+        }
+
+        textRect.x = 5;
+        textRect.y = 5;
+        textRect.w = textSurface->w;
+        textRect.h = textSurface->h;
+
+        textTexture = SDL_CreateTextureFromSurface(state.renderer, textSurface);
+        SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
+        SDL_FreeSurface(textSurface);
+
+        frameCount = 0;
+        ticks = time;
+      }
+
+      if (textTexture)
+      {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+        glBegin(GL_TRIANGLE_STRIP);
+          glVertex2i(textRect.x             , textRect.y             );
+          glVertex2i(textRect.x + textRect.w, textRect.y             );
+          glVertex2i(textRect.x             , textRect.y + textRect.h);
+          glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
+        glEnd();
+
+
+        float tw, th;
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        SDL_GL_BindTexture(textTexture, &tw, &th);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(textRect.x             , textRect.y             );
+          glTexCoord2f(tw  , 0.0f); glVertex2i(textRect.x + textRect.w, textRect.y             );
+          glTexCoord2f(0.0f, th  ); glVertex2i(textRect.x             , textRect.y + textRect.h);
+          glTexCoord2f(tw  , th  ); glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
+        glEnd();
+        glDisable(GL_BLEND);
+        SDL_GL_UnbindTexture(textTexture);
+      }
+    }
+
     SDL_RenderPresent(state.renderer);
+    ++frameCount;
     state.started = true;
 
     bool ready = false;
@@ -421,7 +501,7 @@ int renderThread(void * unused)
   state.running = false;
   if (state.hasBufferStorage)
   {
-    glDeleteTextures(1, &vboTex       );
+    glDeleteTextures(1, vboTex        );
     glUnmapBuffer   (GL_TEXTURE_BUFFER);
     glDeleteBuffers (2, vboID         );
   }
@@ -690,6 +770,19 @@ int run()
     return -1;
   }
 
+  if (TTF_Init() < 0)
+  {
+    DEBUG_ERROR("TTL_Init Failed");
+    return -1;
+  }
+
+  state.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 16);
+  if (!state.font)
+  {
+    DEBUG_ERROR("TTL_OpenFont Failed");
+    return -1;
+  }
+
   state.window = SDL_CreateWindow(
     "KVM-GFX Test",
     params.center ? SDL_WINDOWPOS_CENTERED : params.x,
@@ -824,6 +917,7 @@ int run()
   if (shm_fd)
     close(shm_fd);
 
+  TTF_Quit();
   SDL_Quit();
   return 0;
 }
@@ -849,6 +943,7 @@ void doHelp(char * app)
     "\n"
     "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
     "  -m        Disable mipmapping\n"
+    "  -k        Enable FPS display\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -n        Don't allow the window to be manually resized\n"
@@ -899,7 +994,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jgmanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jgmkanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -934,6 +1029,10 @@ int main(int argc, char * argv[])
 
       case 'm':
         params.useMipmap = false;
+        break;
+
+      case 'k':
+        params.showFPS = true;
         break;
 
       case 'a':

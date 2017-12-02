@@ -5,6 +5,9 @@ LDFLAGS=-lrt
 CFLAGS+=`pkg-config --cflags sdl2`
 LDFLAGS+=`pkg-config --libs sdl2`
 
+CFLAGS+=`pkg-config --cflags SDL2_ttf`
+LDFLAGS+=`pkg-config --libs SDL2_ttf`
+
 CFLAGS+=`pkg-config --cflags gl`
 LDFLAGS+=`pkg-config --libs gl`
 
