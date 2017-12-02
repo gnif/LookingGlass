@@ -407,7 +407,7 @@ int renderThread(void * unused)
 
     if (params.showFPS)
     {
-      if (frameCount == 10)
+      if (++frameCount == 10)
       {
         SDL_Surface *textSurface = NULL;
         if (textTexture)
@@ -416,7 +416,7 @@ int renderThread(void * unused)
           textTexture = NULL;
         }
         const unsigned int time = SDL_GetTicks();
-        const float avgFPS = frameCount / ((time - ticks) / 1000.0f);
+        const float avgFPS = (float)frameCount / ((time - ticks) / 1000.0f);
         char strFPS[12];
         snprintf(strFPS, sizeof(strFPS), "FPS: %6.2f", avgFPS);
         SDL_Color color = {0xff, 0xff, 0xff};
@@ -468,7 +468,6 @@ int renderThread(void * unused)
     }
 
     SDL_RenderPresent(state.renderer);
-    ++frameCount;
     state.started = true;
 
     bool ready = false;
