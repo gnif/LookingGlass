@@ -771,17 +771,20 @@ int run()
     return -1;
   }
 
-  if (TTF_Init() < 0)
+  if (params.showFPS)
   {
-    DEBUG_ERROR("TTL_Init Failed");
-    return -1;
-  }
+    if (TTF_Init() < 0)
+    {
+      DEBUG_ERROR("TTL_Init Failed");
+      return -1;
+    }
 
-  state.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 16);
-  if (!state.font)
-  {
-    DEBUG_ERROR("TTL_OpenFont Failed");
-    return -1;
+    state.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 16);
+    if (!state.font)
+    {
+      DEBUG_ERROR("TTL_OpenFont Failed");
+      return -1;
+    }
   }
 
   state.window = SDL_CreateWindow(
