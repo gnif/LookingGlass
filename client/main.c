@@ -828,6 +828,15 @@ int run()
     }
   }
 
+  if (params.vsync)
+  {
+    // try for late swap tearing to help keep sync with the guest
+    if (SDL_GL_SetSwapInterval(-1) == -1)
+      SDL_GL_SetSwapInterval(1);
+  }
+  else
+    SDL_GL_SetSwapInterval(0);
+
   if (!state.renderer)
   {
     DEBUG_ERROR("failed to create window");
