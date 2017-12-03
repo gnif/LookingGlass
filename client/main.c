@@ -216,7 +216,6 @@ int renderThread(void * unused)
       break;
 
     memcpy(&newHeader, state.shm, sizeof(struct KVMGFXHeader));
-    ivshmem_kick_irq(newHeader.guestID, 0);
 
     // ensure the header magic is valid, this will help prevent crash out when the memory hasn't yet been initialized
     if (
@@ -511,6 +510,8 @@ int renderThread(void * unused)
     }
 
     SDL_RenderPresent(state.renderer);
+    ivshmem_kick_irq(newHeader.guestID, 0);
+
     state.started = true;
   }
 
