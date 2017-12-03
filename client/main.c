@@ -587,15 +587,9 @@ int eventThread(void * arg)
   while(state.running)
   {
     SDL_Event event;
-    if (!SDL_WaitEventTimeout(&event, 1000))
+    if (!SDL_PollEvent(&event))
     {
-      const char * err = SDL_GetError();
-      if (err[0] != '\0')
-      {
-        DEBUG_ERROR("SDL Error: %s", err);
-        state.running = false;
-        break;
-      }
+      usleep(1000);
       continue;
     }
 
