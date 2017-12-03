@@ -1,5 +1,5 @@
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR) Client
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
 
 This program is free software; you can redistribute it and/or modify it under
@@ -35,7 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "debug.h"
 #include "memcpySSE.h"
-#include "KVMGFXHeader.h"
+#include "KVMFR.h"
 #include "ivshmem/ivshmem.h"
 #include "spice/spice.h"
 #include "kb.h"
@@ -55,7 +55,7 @@ struct AppState
 
   SDL_Window          * window;
   SDL_Renderer        * renderer;
-  struct KVMGFXHeader * shm;
+  struct KVMFRHeader * shm;
   unsigned int          shmSize;
 };
 
@@ -140,7 +140,7 @@ inline void updatePositionInfo()
   state.scaleY = (float)state.srcRect.w / (float)state.dstRect.w;
 }
 
-inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHeader s2)
+inline bool areFormatsSame(const struct KVMFRHeader s1, const struct KVMFRHeader s2)
 {
   return
     (s1.frameType != FRAME_TYPE_INVALID) &&
@@ -184,8 +184,8 @@ inline bool waitGuest()
 
 int renderThread(void * unused)
 {
-  struct KVMGFXHeader header;
-  struct KVMGFXHeader newHeader;
+  struct KVMFRHeader header;
+  struct KVMFRHeader newHeader;
   SDL_Texture        *texture      = NULL;
   GLuint              vboID[VBO_BUFFERS];
   GLuint              intFormat    = 0;
@@ -201,7 +201,7 @@ int renderThread(void * unused)
   SDL_Texture        *textTexture  = NULL;
   SDL_Rect            textRect     = {0, 0, 0, 0};
 
-  memset(&header   , 0, sizeof(struct KVMGFXHeader));
+  memset(&header   , 0, sizeof(struct KVMFRHeader));
   memset(&vboID    , 0, sizeof(vboID));
   memset(&vboTex   , 0, sizeof(vboTex));
   memset(&texPixels, 0, sizeof(texPixels));
@@ -215,12 +215,12 @@ int renderThread(void * unused)
     if (!waitGuest())
       break;
 
-    memcpy(&newHeader, state.shm, sizeof(struct KVMGFXHeader));
+    memcpy(&newHeader, state.shm, sizeof(struct KVMFRHeader));
 
     // ensure the header magic is valid, this will help prevent crash out when the memory hasn't yet been initialized
     if (
-      memcmp(newHeader.magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC)) != 0 ||
-      newHeader.version != KVMGFX_HEADER_VERSION
+      memcmp(newHeader.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0 ||
+      newHeader.version != KVMFR_HEADER_VERSION
     )
     {
       usleep(1000);
@@ -800,7 +800,7 @@ int run()
   }
 
   state.window = SDL_CreateWindow(
-    "KVM-GFX Test",
+    "Looking Glass (Client)",
     params.center ? SDL_WINDOWPOS_CENTERED : params.x,
     params.center ? SDL_WINDOWPOS_CENTERED : params.y,
     params.w,
@@ -877,7 +877,7 @@ int run()
       break;
     }
 
-    state.shm = (struct KVMGFXHeader *)ivshmem_get_map();
+    state.shm = (struct KVMFRHeader *)ivshmem_get_map();
     if (!state.shm)
     {
       DEBUG_ERROR("Failed to map memory");
@@ -959,6 +959,7 @@ void doHelp(char * app)
   snprintf(y, sizeof(y), "%d", params.y);
 
   fprintf(stderr,
+    "Looking Glass Client\n"
     "Usage: %s [OPTION]...\n"
     "Example: %s -h\n"
     "\n"
@@ -1004,7 +1005,7 @@ void doLicense()
 {
   fprintf(stderr,
     "\n"
-    "KVMGFX Client - A KVM Client for VGA Passthrough\n"
+    "Looking Glass - KVM FrameRelay (KVMFR) Client\n"
     "Copyright(C) 2017 Geoffrey McRae <geoff@hostfission.com>\n"
     "\n"
     "This program is free software; you can redistribute it and / or modify it under\n"

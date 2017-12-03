@@ -1,5 +1,5 @@
-BINARY=kvmgfx-client
-CFLAGS=-g -Og -std=gnu99 -march=native -Wall -Werror -I../common -DDEBUG
+BINARY=looking-glass-client
+CFLAGS=-g -O3 -std=gnu99 -march=native -Wall -Werror -I../common -DDEBUG
 LDFLAGS=-lrt
 
 CFLAGS+=`pkg-config --cflags sdl2`

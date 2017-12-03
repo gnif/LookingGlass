@@ -1,5 +1,5 @@
-KVMGFX
-======
+Looking Glass
+=============
 
 Purpose
 -------
@@ -56,6 +56,8 @@ have it included into the official [VirtIO windows driver repository][1].
 The shared memory segment is intialized by the guest with a strcture that
 describes the format of the frame and the current mouse coordinates. Frame data
 is appended to the buffer after this header.
+
+We have decided upon he name "KVM FrameRelay", or "KVMFR" for this technology.
 
 ### Video Transfer
 

@@ -1,6 +1,5 @@
-#pragma once
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR)
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
 
 This program is free software; you can redistribute it and/or modify it under
@@ -16,11 +15,12 @@ You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
+#pragma once
 
 #include <stdint.h>
 
-#define KVMGFX_HEADER_MAGIC   "[[KVMGFXHeader]]"
-#define KVMGFX_HEADER_VERSION 3
+#define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
+#define KVMFR_HEADER_VERSION 1
 
 typedef enum FrameType
 {
@@ -30,9 +30,9 @@ typedef enum FrameType
   FRAME_TYPE_MAX       , // sentinel value
 } FrameType;
 
-struct KVMGFXHeader
+struct KVMFRHeader
 {
-  char      magic[sizeof(KVMGFX_HEADER_MAGIC)];
+  char      magic[sizeof(KVMFR_HEADER_MAGIC)];
   uint32_t  version;     // version of this structure
   uint16_t  hostID;      // the host ivshmem client id
   uint16_t  guestID;     // the guest ivshmem client id
@@ -45,11 +45,3 @@ struct KVMGFXHeader
   uint64_t  dataLen;     // total lengh of the data after this header
   uint64_t  dataPos;     // offset to the frame
 };
-
-#pragma pack(push,1)
-struct RLEHeader
-{
-  uint8_t  magic[3];
-  uint16_t length;
-};
-#pragma pack(pop)
