@@ -40,6 +40,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "spice/spice.h"
 #include "kb.h"
 
+#define VBO_BUFFERS 2
+
 struct AppState
 {
   bool      hasBufferStorage;
@@ -185,21 +187,24 @@ int renderThread(void * unused)
   struct KVMGFXHeader header;
   struct KVMGFXHeader newHeader;
   SDL_Texture        *texture      = NULL;
-  GLuint              vboID[2]     = {0, 0};
+  GLuint              vboID[VBO_BUFFERS];
   GLuint              intFormat    = 0;
   GLuint              vboFormat    = 0;
-  GLuint              vboTex[2]    = {0, 0};
+  GLuint              vboTex[VBO_BUFFERS];
   unsigned int        texIndex     = 0;
   unsigned int        texSize      = 0;
   uint8_t            *pixels       = (uint8_t*)state.shm;
-  uint8_t            *texPixels[2] = {NULL, NULL};
+  uint8_t            *texPixels[VBO_BUFFERS];
 
   unsigned int        ticks        = SDL_GetTicks();
   unsigned int        frameCount   = 0;
   SDL_Texture        *textTexture  = NULL;
   SDL_Rect            textRect     = {0, 0, 0, 0};
 
-  memset(&header, 0, sizeof(struct KVMGFXHeader));
+  memset(&header   , 0, sizeof(struct KVMGFXHeader));
+  memset(&vboID    , 0, sizeof(vboID));
+  memset(&vboTex   , 0, sizeof(vboTex));
+  memset(&texPixels, 0, sizeof(texPixels));
 
   // initial guest kick to get things started
   ivshmem_kick_irq(state.shm->guestID, 0);
@@ -232,12 +237,12 @@ int renderThread(void * unused)
         {
           if (vboTex[0])
           {
-            glDeleteTextures(1, vboTex);
+            glDeleteTextures(VBO_BUFFERS, vboTex);
             memset(vboTex, 0, sizeof(vboTex));
           }
 
           glUnmapBuffer(GL_TEXTURE_BUFFER);
-          glDeleteBuffers(2, vboID);
+          glDeleteBuffers(VBO_BUFFERS, vboID);
           memset(vboID, 0, sizeof(vboID));
         }
       }
@@ -294,8 +299,8 @@ int renderThread(void * unused)
         }
 
         // setup two buffers so we don't have to use fences
-        glGenBuffers(2, vboID);
-        for (int i = 0; i < 2; ++i)
+        glGenBuffers(VBO_BUFFERS, vboID);
+        for (int i = 0; i < VBO_BUFFERS; ++i)
         {
           glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[i]);
           glBufferStorage(GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
@@ -313,25 +318,28 @@ int renderThread(void * unused)
         if (!state.hasBufferStorage)
         {
           texIndex = 0;
-          glDeleteBuffers(2, vboID);
+          glDeleteBuffers(VBO_BUFFERS, vboID);
           memset(vboID, 0, sizeof(vboID));
           continue;
         }
 
-        // create the texture
-        glGenTextures(1, vboTex);
-        glBindTexture(GL_TEXTURE_2D, vboTex[0]);
-        glTexImage2D(
-          GL_TEXTURE_2D,
-          0,
-          intFormat,
-          newHeader.width, newHeader.height,
-          0,
-          vboFormat,
-          GL_UNSIGNED_BYTE,
-          (void*)0
-        );
-        glBindTexture(GL_TEXTURE_2D, 0);
+        // create the textures
+        glGenTextures(VBO_BUFFERS, vboTex);
+        for (int i = 0; i < VBO_BUFFERS; ++i)
+        {
+          glBindTexture(GL_TEXTURE_2D, vboTex[i]);
+          glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            intFormat,
+            newHeader.width, newHeader.height,
+            0,
+            vboFormat,
+            GL_UNSIGNED_BYTE,
+            (void*)0
+          );
+          glBindTexture(GL_TEXTURE_2D, 0);
+        }
       }
       else
       {
@@ -376,9 +384,9 @@ int renderThread(void * unused)
       glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize);
 
       // bind the texture and update it
-      glBindTexture(GL_TEXTURE_2D       , vboTex[0]   );
-      glPixelStorei(GL_UNPACK_ALIGNMENT , 1           );
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, header.width);
+      glBindTexture(GL_TEXTURE_2D         , vboTex[texIndex]);
+      glPixelStorei(GL_UNPACK_ALIGNMENT   , 1               );
+      glPixelStorei(GL_UNPACK_ROW_LENGTH  , header.width    );
       glTexSubImage2D(
           GL_TEXTURE_2D,
           0,
@@ -420,7 +428,7 @@ int renderThread(void * unused)
       glBindTexture(GL_TEXTURE_2D, 0);
 
       // update our texture index
-      if (++texIndex == 2)
+      if (++texIndex == VBO_BUFFERS)
         texIndex = 0;
     }
     else
@@ -509,9 +517,9 @@ int renderThread(void * unused)
   state.running = false;
   if (state.hasBufferStorage)
   {
-    glDeleteTextures(1, vboTex        );
-    glUnmapBuffer   (GL_TEXTURE_BUFFER);
-    glDeleteBuffers (2, vboID         );
+    glDeleteTextures(VBO_BUFFERS, vboTex);
+    glUnmapBuffer   (GL_TEXTURE_BUFFER  );
+    glDeleteBuffers (VBO_BUFFERS, vboID );
   }
   else
     if (texture)
