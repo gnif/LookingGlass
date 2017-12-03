@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "kvm-ivshmem-host", "kvm-ivshmem-host.vcxproj", "{D439DE3E-32FB-4599-8B5D-C92674D400D4}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "looking-glass-host", "looking-glass-host.vcxproj", "{D439DE3E-32FB-4599-8B5D-C92674D400D4}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

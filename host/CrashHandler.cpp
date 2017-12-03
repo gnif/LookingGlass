@@ -1,5 +1,5 @@
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR) Client
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
 
 This program is free software; you can redistribute it and/or modify it under
@@ -47,7 +47,7 @@ LONG WINAPI CrashHandler::ExceptionFilter(struct _EXCEPTION_POINTERS * apExcepti
     return EXCEPTION_CONTINUE_SEARCH;
 
   HANDLE hFile = CreateFileA(
-    "kvm-ivshmem-host.dump",
+    "looking-glass-host.dump",
     GENERIC_WRITE,
     FILE_SHARE_WRITE,
     NULL,

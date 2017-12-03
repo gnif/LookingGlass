@@ -1,5 +1,5 @@
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR) Client
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
 
 This program is free software; you can redistribute it and/or modify it under
@@ -202,7 +202,7 @@ void doLicense()
 {
   setupConsole();
   fprintf(stderr,
-    "KVMGFX Client - A KVM Client for VGA Passthrough\n"
+    "Looking Glass - KVM FrameRelay (KVMFR) Client\n"
     "Copyright(C) 2017 Geoffrey McRae <geoff@hostfission.com>\n"
     "\n"
     "This program is free software; you can redistribute it and / or modify it under\n"

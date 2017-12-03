@@ -1,5 +1,5 @@
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR) Client
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
 
 This program is free software; you can redistribute it and/or modify it under
@@ -50,7 +50,7 @@ private:
   HANDLE     m_readyEvent;
   ICapture * m_capture;
 
-  KVMGFXHeader * m_header;
+  KVMFRHeader * m_header;
   uint8_t      * m_frame[2];
   size_t         m_frameSize;
   uint64_t       m_dataOffset[2];

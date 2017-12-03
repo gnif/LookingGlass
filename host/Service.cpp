@@ -1,5 +1,5 @@
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR) Client
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
 
 This program is free software; you can redistribute it and/or modify it under
@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "IVSHMEM.h"
 
 #include "common\debug.h"
-#include "common\KVMGFXHeader.h"
+#include "common\KVMFR.h"
 
 #include "CaptureFactory.h"
 
@@ -53,9 +53,9 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  if (m_ivshmem->GetSize() < sizeof(KVMGFXHeader))
+  if (m_ivshmem->GetSize() < sizeof(KVMFRHeader))
   {
-    DEBUG_ERROR("Shared memory is not large enough for the KVMGFXHeader");
+    DEBUG_ERROR("Shared memory is not large enough for the KVMFRHeader");
     DeInitialize();
     return false;
   }
@@ -76,8 +76,8 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  m_header        = reinterpret_cast<KVMGFXHeader *>(memory);
-  m_frame[0]      = (uint8_t *)(((uintptr_t)memory + sizeof(KVMGFXHeader *) + 0x7F) & ~0x7F);
+  m_header        = reinterpret_cast<KVMFRHeader *>(memory);
+  m_frame[0]      = (uint8_t *)(((uintptr_t)memory + sizeof(KVMFRHeader *) + 0x7F) & ~0x7F);
   m_frameSize     = ((m_ivshmem->GetSize() - (m_frame[0] - memory)) & ~0x7F) >> 1;
   m_frame[1]      = m_frame[0] + m_frameSize;
   m_dataOffset[0] = m_frame[0] - memory;
@@ -93,10 +93,10 @@ bool Service::Initialize(ICapture * captureDevice)
   // we save this as it might actually be valid
   UINT16 hostID = m_header->hostID;
 
-  ZeroMemory(m_header, sizeof(KVMGFXHeader));
-  memcpy(m_header->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC));
+  ZeroMemory(m_header, sizeof(KVMFRHeader));
+  memcpy(m_header->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
 
-  m_header->version   = KVMGFX_HEADER_VERSION;
+  m_header->version   = KVMFR_HEADER_VERSION;
   m_header->guestID   = m_ivshmem->GetPeerID();
   m_header->hostID    = hostID;
   m_header->frameType = m_capture->GetFrameType();
