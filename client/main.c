@@ -149,6 +149,37 @@ inline bool areFormatsSame(const struct KVMGFXHeader s1, const struct KVMGFXHead
     (s1.height    == s2.height   );
 }
 
+inline bool waitGuest()
+{
+  bool ready = false;
+  bool error = false;
+  while(state.running && !ready && !error)
+  {
+    switch(ivshmem_wait_irq(0))
+    {
+      case IVSHMEM_WAIT_RESULT_OK:
+        ready = true;
+        break;
+
+      case IVSHMEM_WAIT_RESULT_TIMEOUT:
+        ivshmem_kick_irq(state.shm->guestID, 0);
+        break;
+
+      case IVSHMEM_WAIT_RESULT_ERROR:
+        error = true;
+        break;
+    }
+  }
+
+  if (error)
+  {
+    DEBUG_ERROR("error during wait for host");
+    return false;
+  }
+
+  return true;
+}
+
 int renderThread(void * unused)
 {
   struct KVMGFXHeader header;
@@ -170,13 +201,15 @@ int renderThread(void * unused)
 
   memset(&header, 0, sizeof(struct KVMGFXHeader));
 
-  // kick the guest early for our intial frame
-  // the guestID may be invalid, it doesn't matter
+  // initial guest kick to get things started
   ivshmem_kick_irq(state.shm->guestID, 0);
 
   while(state.running)
   {
-    // copy the header for our use
+    // wait for the guest to signal ready and copy the header
+    if (!waitGuest())
+      break;
+
     memcpy(&newHeader, state.shm, sizeof(struct KVMGFXHeader));
     ivshmem_kick_irq(newHeader.guestID, 0);
 
@@ -471,34 +504,6 @@ int renderThread(void * unused)
 
     SDL_RenderPresent(state.renderer);
     state.started = true;
-
-    bool ready = false;
-    bool error = false;
-    while(state.running && !ready && !error)
-    {
-      // kick the guest and wait for a frame
-      switch(ivshmem_wait_irq(0))
-      {
-        case IVSHMEM_WAIT_RESULT_OK:
-          ready = true;
-          break;
-
-        case IVSHMEM_WAIT_RESULT_TIMEOUT:
-          ivshmem_kick_irq(newHeader.guestID, 0);
-          ready = false;
-          break;
-
-        case IVSHMEM_WAIT_RESULT_ERROR:
-          error = true;
-          break;
-      }
-    }
-
-    if (error)
-    {
-      DEBUG_ERROR("error during wait for host");
-      break;
-    }
   }
 
   state.running = false;
