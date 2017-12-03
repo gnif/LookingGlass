@@ -679,10 +679,12 @@ int eventThread(void * arg)
       case SDL_MOUSEMOTION:
       {
         if (
-          event.motion.x < state.dstRect.x                   ||
-          event.motion.x > state.dstRect.x + state.dstRect.w ||
-          event.motion.y < state.dstRect.y                   ||
-          event.motion.y > state.dstRect.y + state.dstRect.h
+          !serverMode && (
+            event.motion.x < state.dstRect.x                   ||
+            event.motion.x > state.dstRect.x + state.dstRect.w ||
+            event.motion.y < state.dstRect.y                   ||
+            event.motion.y > state.dstRect.y + state.dstRect.h
+          )
         )
         {
           realignGuest = true;
