@@ -49,6 +49,10 @@ private:
   IVSHMEM  * m_ivshmem;
   HANDLE     m_readyEvent;
   ICapture * m_capture;
-  uint8_t  * m_memory;
-  int        m_frameIndex;
+
+  KVMGFXHeader * m_header;
+  uint8_t      * m_frame[2];
+  size_t         m_frameSize;
+  uint64_t       m_dataOffset[2];
+  int            m_frameIndex;
 };

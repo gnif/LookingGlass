@@ -30,7 +30,7 @@ Service::Service() :
   m_initialized(false),
   m_readyEvent(INVALID_HANDLE_VALUE),
   m_capture(NULL),
-  m_memory(NULL),
+  m_header(NULL),
   m_frameIndex(0)
 {
   m_ivshmem = IVSHMEM::Get();
@@ -60,8 +60,8 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  m_memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
-  if (!m_memory)
+  uint8_t * memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
+  if (!memory)
   {
     DEBUG_ERROR("Failed to get IVSHMEM memory");
     DeInitialize();
@@ -76,17 +76,30 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  KVMGFXHeader * header = reinterpret_cast<KVMGFXHeader*>(m_memory);
+  m_header        = reinterpret_cast<KVMGFXHeader *>(memory);
+  m_frame[0]      = (uint8_t *)(((uintptr_t)memory + sizeof(KVMGFXHeader *) + 0x7F) & ~0x7F);
+  m_frameSize     = ((m_ivshmem->GetSize() - (m_frame[0] - memory)) & ~0x7F) >> 1;
+  m_frame[1]      = m_frame[0] + m_frameSize;
+  m_dataOffset[0] = m_frame[0] - memory;
+  m_dataOffset[1] = m_frame[1] - memory;
+
+  if (m_capture->GetMaxFrameSize() > m_frameSize)
+  {
+    DEBUG_ERROR("Frame can exceed buffer size!");
+    DeInitialize();
+    return false;
+  }
 
   // we save this as it might actually be valid
-  UINT16 hostID = header->hostID;
+  UINT16 hostID = m_header->hostID;
 
-  ZeroMemory(header, sizeof(KVMGFXHeader));
-  memcpy(header->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC));
+  ZeroMemory(m_header, sizeof(KVMGFXHeader));
+  memcpy(m_header->magic, KVMGFX_HEADER_MAGIC, sizeof(KVMGFX_HEADER_MAGIC));
 
-  header->version   = KVMGFX_HEADER_VERSION;
-  header->guestID   = m_ivshmem->GetPeerID();
-  header->hostID    = hostID;
+  m_header->version   = KVMGFX_HEADER_VERSION;
+  m_header->guestID   = m_ivshmem->GetPeerID();
+  m_header->hostID    = hostID;
+  m_header->frameType = m_capture->GetFrameType();
 
   m_initialized = true;
   return true;
@@ -97,7 +110,12 @@ void Service::DeInitialize()
   if (m_readyEvent != INVALID_HANDLE_VALUE)
     CloseHandle(m_readyEvent);
 
-  m_memory = NULL;
+  m_header        = NULL;
+  m_frame[0]      = NULL;
+  m_frame[1]      = NULL;
+  m_dataOffset[0] = 0;
+  m_dataOffset[1] = 0;
+
   m_ivshmem->DeInitialize();
 
   if (m_capture)
@@ -114,56 +132,9 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  KVMGFXHeader * header = reinterpret_cast<KVMGFXHeader *>(m_memory);
-
-  // calculate the current offset and ensure it is 16-byte aligned for SMID performance
-  uint64_t dataOffset = sizeof(KVMGFXHeader) + m_frameIndex * m_capture->GetMaxFrameSize();
-  dataOffset = (dataOffset + 0xF) & ~0xF;
-
-  uint8_t      * data       = m_memory + dataOffset;
-  const size_t   available  = m_ivshmem->GetSize() - sizeof(KVMGFXHeader);
-
-  if (dataOffset + m_capture->GetMaxFrameSize() > available)
-  {
-    DEBUG_ERROR("Frame can exceed buffer size!");
-    return false;
-  }
-
-  // setup the header
-  header->frameType = m_capture->GetFrameType();
-  header->dataLen   = 0;
-
   FrameInfo frame;
-  frame.buffer     = data;
-  frame.bufferSize = m_ivshmem->GetSize() - sizeof(KVMGFXHeader);
-
-  // capture a frame of data
-  if (!m_capture->GrabFrame(frame))
-  {
-    header->dataLen = 0;
-    DEBUG_ERROR("Capture failed");
-    return false;
-  }
-
-  // copy the frame details into the header
-  header->width   = frame.width;
-  header->height  = frame.height;
-  header->stride  = frame.stride;
-  header->dataPos = dataOffset;
-  header->dataLen = frame.outSize;
-
-  // tell the host where the cursor is
-  POINT cursorPos;
-  GetCursorPos(&cursorPos);
-  header->mouseX = cursorPos.x;
-  header->mouseY = cursorPos.y;
-
-  ResetEvent(m_readyEvent);
-  if (!m_ivshmem->RingDoorbell(header->hostID, 0))
-  {
-    DEBUG_ERROR("Failed to ring doorbell");
-    return false;
-  }
+  frame.buffer     = m_frame[m_frameIndex];
+  frame.bufferSize = m_frameSize;
 
   // wait for the host to notify that is it is ready to proceed
   bool eventDone = false;
@@ -190,6 +161,35 @@ bool Service::Process()
       DEBUG_ERROR("Unknown error");
       return false;
     }
+  }
+  ResetEvent(m_readyEvent);
+
+  // capture a frame of data
+  if (!m_capture->GrabFrame(frame))
+  {
+    m_header->dataLen = 0;
+    DEBUG_ERROR("Capture failed");
+    return false;
+  }
+
+  // copy the frame details into the header
+  // setup the header
+  m_header->width   = frame.width;
+  m_header->height  = frame.height;
+  m_header->stride  = frame.stride;
+  m_header->dataPos = m_dataOffset[m_frameIndex];
+  m_header->dataLen = frame.outSize;
+
+  // tell the host where the cursor is
+  POINT cursorPos;
+  GetCursorPos(&cursorPos);
+  m_header->mouseX = cursorPos.x;
+  m_header->mouseY = cursorPos.y;
+
+  if (!m_ivshmem->RingDoorbell(m_header->hostID, 0))
+  {
+    DEBUG_ERROR("Failed to ring doorbell");
+    return false;
   }
 
   if (++m_frameIndex == 2)
