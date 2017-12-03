@@ -288,7 +288,7 @@ int renderThread(void * unused)
       if (state.hasBufferStorage)
       {
         // calculate the texture size in bytes
-        texSize = newHeader.width * newHeader.stride * bpp;
+        texSize = newHeader.height * newHeader.stride * bpp;
 
         // ensure the size makes sense
         if (newHeader.dataPos + texSize > state.shmSize)
