@@ -75,6 +75,7 @@ struct AppParams
   const char * spiceHost;
   unsigned int spicePort;
   bool         scaleMouseInput;
+  bool         hideMouse;
 };
 
 struct AppState  state;
@@ -97,7 +98,8 @@ struct AppParams params =
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
   .spicePort        = 5900,
-  .scaleMouseInput  = true
+  .scaleMouseInput  = true,
+  .hideMouse        = true
 };
 
 inline void updatePositionInfo()
@@ -806,12 +808,15 @@ int run()
     return -1;
   }
 
-  // work around SDL_ShowCursor being non functional
   SDL_Cursor *cursor = NULL;
-  int32_t cursorData[2] = {0, 0};
-  cursor = SDL_CreateCursor((uint8_t*)cursorData, (uint8_t*)cursorData, 8, 8, 4, 4);
-  SDL_SetCursor(cursor);
-  SDL_ShowCursor(SDL_DISABLE);
+  if (params.hideMouse)
+  {
+    // work around SDL_ShowCursor being non functional
+    int32_t cursorData[2] = {0, 0};
+    cursor = SDL_CreateCursor((uint8_t*)cursorData, (uint8_t*)cursorData, 8, 8, 4, 4);
+    SDL_SetCursor(cursor);
+    SDL_ShowCursor(SDL_DISABLE);
+  }
 
   state.renderer = SDL_CreateRenderer(state.window, -1,
     SDL_RENDERER_ACCELERATED |
@@ -955,6 +960,7 @@ void doHelp(char * app)
     "  -c HOST   Specify the spice host [current: %s]\n"
     "  -p PORT   Specify the spice port [current: %d]\n"
     "  -j        Disable cursor position scaling\n"
+    "  -M        Don't hide the host cursor\n"
     "\n"
     "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
     "  -m        Disable mipmapping\n"
@@ -1010,7 +1016,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jgmvkanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMgmvkanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -1037,6 +1043,10 @@ int main(int argc, char * argv[])
 
       case 'j':
         params.scaleMouseInput = false;
+        break;
+
+      case 'M':
+        params.hideMouse = false;
         break;
 
       case 'g':
