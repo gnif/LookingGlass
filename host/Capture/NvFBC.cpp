@@ -140,6 +140,7 @@ bool NvFBC::Initialize(CaptureOptions * options)
   setupParams.eMode = NVFBC_TOSYS_ARGB;
   setupParams.bWithHWCursor = TRUE;
   setupParams.bDiffMap = TRUE;
+  setupParams.eDiffMapBlockSize = (NvU32)NVFBC_TOSYS_DIFFMAP_BLOCKSIZE_128X128;
   setupParams.ppBuffer = (void **)&m_frameBuffer;
   setupParams.ppDiffMap = (void **)&m_diffMap;
 
@@ -226,13 +227,16 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
 
     if (status == NVFBC_SUCCESS)
     {
+      const int diffW = (m_grabInfo.dwWidth  + 0x7F) >> 7;
+      const int diffH = (m_grabInfo.dwHeight + 0x7F) >> 7;
       bool hasDiff = false;
-      for (int r = (m_grabInfo.dwWidth * m_grabInfo.dwHeight) / (128 * 128); r >= 0; --r)
-        if (*((uint8_t*)m_diffMap + r))
-        {
-          hasDiff = true;
-          break;
-        }
+      for(int y = 0; y < diffH && !hasDiff; ++y)
+        for (int x = 0; x < diffW; ++x)
+          if (m_diffMap[y * diffW + x])
+          {
+            hasDiff = true;
+            break;
+          }
 
       if (!hasDiff)
       {

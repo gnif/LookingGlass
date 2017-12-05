@@ -57,8 +57,8 @@ namespace Capture
 
     DWORD m_maxCaptureWidth, m_maxCaptureHeight;
     NvFBCToSys * m_nvFBC;
-    void * m_frameBuffer;
-    void * m_diffMap;
+    uint8_t * m_frameBuffer;
+    uint8_t * m_diffMap;
     NvFBCFrameGrabInfo m_grabInfo;
     NVFBC_TOSYS_GRAB_FRAME_PARAMS m_grabFrameParams;
   };
