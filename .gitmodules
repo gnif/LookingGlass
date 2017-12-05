@@ -1,3 +1,6 @@
 [submodule "vendor/kvm-guest-drivers-windows"]
 	path = vendor/kvm-guest-drivers-windows
 	url = https://github.com/virtio-win/kvm-guest-drivers-windows.git
+[submodule "client/cimgui"]
+	path = client/cimgui
+	url = https://github.com/Extrawurst/cimgui.git

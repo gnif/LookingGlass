@@ -40,6 +40,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "spice/spice.h"
 #include "kb.h"
 
+#include "lg-renderers.h"
+
 #define VBO_BUFFERS 2
 
 struct AppState
@@ -49,14 +51,15 @@ struct AppState
   bool      running;
   bool      started;
 
-  TTF_Font  *font;
-  SDL_Rect  srcRect, dstRect;
-  float     scaleX, scaleY;
+  TTF_Font       *font;
+  SDL_Rect        srcRect;
+  LG_RendererRect dstRect;
+  float           scaleX, scaleY;
 
-  SDL_Window          * window;
-  SDL_Renderer        * renderer;
+  SDL_Window         * window;
+  SDL_Renderer       * renderer;
   struct KVMFRHeader * shm;
-  unsigned int          shmSize;
+  unsigned int         shmSize;
 };
 
 struct AppParams
@@ -184,30 +187,14 @@ inline bool waitGuest()
 
 int renderThread(void * unused)
 {
-  struct KVMFRHeader header;
-  struct KVMFRHeader newHeader;
-  SDL_Texture        *texture      = NULL;
-  GLuint              vboID[VBO_BUFFERS];
-  GLuint              intFormat    = 0;
-  GLuint              vboFormat    = 0;
-  GLuint              vboTex[VBO_BUFFERS];
-  unsigned int        texIndex     = 0;
-  unsigned int        texSize      = 0;
-  uint8_t            *pixels       = (uint8_t*)state.shm;
-  uint8_t            *texPixels[VBO_BUFFERS];
-
-  unsigned int        ticks        = SDL_GetTicks();
-  unsigned int        frameCount   = 0;
-  SDL_Texture        *textTexture  = NULL;
-  SDL_Rect            textRect     = {0, 0, 0, 0};
-
-  memset(&header   , 0, sizeof(struct KVMFRHeader));
-  memset(&vboID    , 0, sizeof(vboID));
-  memset(&vboTex   , 0, sizeof(vboTex));
-  memset(&texPixels, 0, sizeof(texPixels));
-
-  // initial guest kick to get things started
-  ivshmem_kick_irq(state.shm->guestID, 0);
+  bool                error = false;
+  struct KVMFRHeader  header;
+  const LG_Renderer * lgr = NULL;
+  void              * lgrData;
+  unsigned int        lastTicks = SDL_GetTicks();
+  unsigned int        frameCount = 0, lastFrameCount = 0;
+  SDL_Texture       * textTexture = NULL;
+  SDL_Rect            textRect;
 
   while(state.running)
   {
@@ -215,145 +202,112 @@ int renderThread(void * unused)
     if (!waitGuest())
       break;
 
-    memcpy(&newHeader, state.shm, sizeof(struct KVMFRHeader));
+    // we must take a copy of the header, both to let the guest advance and to
+    // prevent the contained arguments being abused to overflow buffers
+    memcpy(&header, state.shm, sizeof(struct KVMFRHeader));
+    ivshmem_kick_irq(header.guestID, 0);
 
-    // ensure the header magic is valid, this will help prevent crash out when the memory hasn't yet been initialized
+    // check the header's magic and version are valid
     if (
-      memcmp(newHeader.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0 ||
-      newHeader.version != KVMFR_HEADER_VERSION
+      memcmp(header.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0 ||
+      header.version != KVMFR_HEADER_VERSION
     )
     {
       usleep(1000);
       continue;
     }
 
-    // if the header is invalid or it has changed
-    if (!areFormatsSame(header, newHeader))
+    // setup the renderer format with the frame format details
+    LG_RendererFormat lgrFormat;
+    lgrFormat.width  = header.width;
+    lgrFormat.height = header.height;
+    lgrFormat.stride = header.stride;
+
+    switch(header.frameType)
     {
-      if (state.hasBufferStorage)
+      case FRAME_TYPE_ARGB:
+        lgrFormat.pitch = header.stride * 4;
+        lgrFormat.bpp   = 32;
+        break;
+
+      case FRAME_TYPE_RGB:
+        lgrFormat.pitch = header.stride * 3;
+        lgrFormat.bpp   = 24;
+        break;
+
+      default:
+        DEBUG_ERROR("Unsupported frameType");
+        error = true;
+        break;
+    }
+
+    if (error)
+      break;
+
+    // check the header's dataPos is sane
+    const size_t dataSize = lgrFormat.height * lgrFormat.pitch;
+    if (header.dataPos + dataSize > state.shmSize)
+    {
+      DEBUG_ERROR("The guest sent an invalid dataPos");
+      break;
+    }
+
+    // check if we have a compatible renderer
+    if (!lgr || !lgr->is_compatible(lgrData, lgrFormat))
+    {
+      LG_RendererParams lgrParams;
+      lgrParams.window   = state.window;
+      lgrParams.renderer = state.renderer;
+
+      DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
+          lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
+
+      // first try to reinitialize any existing renderer
+      if (lgr)
       {
-        if (vboID[0])
+        lgr->deinitialize(lgrData);
+        if (lgr->initialize(&lgrData, lgrParams, lgrFormat))
         {
-          if (vboTex[0])
+          DEBUG_INFO("Reinitialized %s", lgr->get_name());
+        }
+        else
+        {
+          DEBUG_ERROR("Failed to reinitialize %s, trying other renderers", lgr->get_name());
+          lgr->deinitialize(lgrData);
+          lgr = NULL;
+        }
+      }
+
+      if (!lgr)
+      {
+        // probe for a a suitable renderer
+        for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
+        {
+          if (!IS_LG_RENDERER_VALID(*r))
           {
-            glDeleteTextures(VBO_BUFFERS, vboTex);
-            memset(vboTex, 0, sizeof(vboTex));
+            DEBUG_ERROR("FIXME: Renderer %d is invalid, skpping", (int)(r - &LG_Renderers[0]));
+            continue;
           }
 
-          glUnmapBuffer(GL_TEXTURE_BUFFER);
-          glDeleteBuffers(VBO_BUFFERS, vboID);
-          memset(vboID, 0, sizeof(vboID));
-        }
-      }
-      else
-      {
-        if (texture)
-        {
-          SDL_DestroyTexture(texture);
-          texture = NULL;
-        }
-      }
-
-      Uint32  sdlFormat;
-      unsigned int bpp;
-      switch(newHeader.frameType)
-      {
-        case FRAME_TYPE_ARGB:
-          sdlFormat = SDL_PIXELFORMAT_ARGB8888;
-          bpp       = 4;
-          intFormat = GL_RGBA8;
-          vboFormat = GL_BGRA;
-          break;
-
-        case FRAME_TYPE_RGB:
-          sdlFormat = SDL_PIXELFORMAT_RGB24;
-          bpp       = 3;
-          intFormat = GL_RGB8;
-          vboFormat = GL_BGR;
-          break;
-
-        default:
-          header.frameType = FRAME_TYPE_INVALID;
-          continue;
-      }
-
-      // update the window size and create the render texture
-      if (params.autoResize)
-      {
-        SDL_SetWindowSize(state.window, newHeader.width, newHeader.height);
-        if (params.center)
-          SDL_SetWindowPosition(state.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-      }
-
-      if (state.hasBufferStorage)
-      {
-        // calculate the texture size in bytes
-        texSize = newHeader.height * newHeader.stride * bpp;
-
-        // ensure the size makes sense
-        if (newHeader.dataPos + texSize > state.shmSize)
-        {
-          DEBUG_ERROR("The guest sent an invalid dataPos");
-          break;
-        }
-
-        // setup two buffers so we don't have to use fences
-        glGenBuffers(VBO_BUFFERS, vboID);
-        for (int i = 0; i < VBO_BUFFERS; ++i)
-        {
-          glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[i]);
-          glBufferStorage(GL_PIXEL_UNPACK_BUFFER, texSize, 0, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
-          texPixels[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize,
-              GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
-          if (!texPixels[i])
+          lgrData = NULL;
+          if (!(*r)->initialize(&lgrData, lgrParams, lgrFormat))
           {
-            DEBUG_ERROR("Failed to map buffer range, turning off buffer storage");
-            state.hasBufferStorage = false;
-            break;
+            (*r)->deinitialize(lgrData);
+            continue;
           }
-          glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        }
 
-        if (!state.hasBufferStorage)
-        {
-          texIndex = 0;
-          glDeleteBuffers(VBO_BUFFERS, vboID);
-          memset(vboID, 0, sizeof(vboID));
-          continue;
-        }
-
-        // create the textures
-        glGenTextures(VBO_BUFFERS, vboTex);
-        for (int i = 0; i < VBO_BUFFERS; ++i)
-        {
-          glBindTexture(GL_TEXTURE_2D, vboTex[i]);
-          glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            intFormat,
-            newHeader.width, newHeader.height,
-            0,
-            vboFormat,
-            GL_UNSIGNED_BYTE,
-            (void*)0
-          );
-          glBindTexture(GL_TEXTURE_2D, 0);
-        }
-      }
-      else
-      {
-        texture = SDL_CreateTexture(state.renderer, sdlFormat, SDL_TEXTUREACCESS_STREAMING, newHeader.width, newHeader.height);
-        if (!texture)
-        {
-          DEBUG_ERROR("Failed to create a texture");
+          lgr = *r;
+          DEBUG_INFO("Initialized %s", (*r)->get_name());
           break;
         }
+
+        if (!lgr)
+        {
+          DEBUG_INFO("Unable to find a suitable renderer");
+          return -1;
+        }
       }
 
-      ticks = SDL_GetTicks();
-      frameCount = 0;
-
-      memcpy(&header, &newHeader, sizeof(header));
       state.srcRect.x = 0;
       state.srcRect.y = 0;
       state.srcRect.w = header.width;
@@ -361,170 +315,91 @@ int renderThread(void * unused)
       updatePositionInfo();
     }
 
-    //beyond this point DO NOT use state.shm for security
-
-    // final sanity checks on the data presented by the guest
-    // this is critical as the guest could overflow this buffer to
-    // try to take control of the host
-    if (newHeader.dataPos + texSize > state.shmSize)
+    if (!lgr->render(
+      lgrData,
+      state.dstRect,
+      (uint8_t *)state.shm + header.dataPos,
+      params.useMipmap
+    ))
     {
-      DEBUG_ERROR("The guest sent an invalid dataPos");
+      DEBUG_ERROR("Failed to render the frame");
       break;
     }
 
-    SDL_RenderClear(state.renderer);
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-    if (state.hasBufferStorage)
+    ++frameCount;
+    if (!params.showFPS)
     {
-      // copy the buffer to the texture and let the guest advance
-      memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, vboID[texIndex]);
-      glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texSize);
-
-      // bind the texture and update it
-      glBindTexture(GL_TEXTURE_2D         , vboTex[texIndex]);
-      glPixelStorei(GL_UNPACK_ALIGNMENT   , 1               );
-      glPixelStorei(GL_UNPACK_ROW_LENGTH  , header.width    );
-      glTexSubImage2D(
-          GL_TEXTURE_2D,
-          0,
-          0, 0,
-          header.width, header.height,
-          vboFormat,
-          GL_UNSIGNED_BYTE,
-          (void*)0
-      );
-      if (params.useMipmap)
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-      // unbind the buffer
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-      // configure the texture
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      if (params.useMipmap)
-      {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-      }
-      else
-      {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-      }
-
-      // draw the screen
-      glEnable(GL_TEXTURE_2D);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.0f); glVertex2i(state.dstRect.x                  , state.dstRect.y                  );
-        glTexCoord2f(1.0f, 0.0f); glVertex2i(state.dstRect.x + state.dstRect.w, state.dstRect.y                  );
-        glTexCoord2f(0.0f, 1.0f); glVertex2i(state.dstRect.x                  , state.dstRect.y + state.dstRect.h);
-        glTexCoord2f(1.0f, 1.0f); glVertex2i(state.dstRect.x + state.dstRect.w, state.dstRect.y + state.dstRect.h);
-      glEnd();
-      glDisable(GL_TEXTURE_2D);
-      glBindTexture(GL_TEXTURE_2D, 0);
-
-      // update our texture index
-      if (++texIndex == VBO_BUFFERS)
-        texIndex = 0;
-    }
-    else
-    {
-      int pitch;
-      if (SDL_LockTexture(texture, NULL, (void**)&texPixels[0], &pitch) != 0)
-      {
-        DEBUG_ERROR("Failed to lock the texture for update");
-        break;
-      }
-      texSize = header.height * pitch;
-
-      // copy the buffer to the texture and let the guest advance
-      memcpySSE(texPixels[texIndex], pixels + newHeader.dataPos, texSize);
-
-      SDL_UnlockTexture(texture);
-      SDL_RenderCopy(state.renderer, texture, NULL, &state.dstRect);
+      SDL_RenderPresent(state.renderer);
+      continue;
     }
 
-    if (params.showFPS)
+    // for now render the frame counter here, we really should
+    // move this into the renderers though.
+    if (frameCount % 10 == 0)
     {
-      if (++frameCount == 10)
-      {
-        SDL_Surface *textSurface = NULL;
-        if (textTexture)
-        {
-          SDL_DestroyTexture(textTexture);
-          textTexture = NULL;
-        }
-        const unsigned int time = SDL_GetTicks();
-        const float avgFPS = (float)frameCount / ((time - ticks) / 1000.0f);
-        char strFPS[12];
-        snprintf(strFPS, sizeof(strFPS), "FPS: %6.2f", avgFPS);
-        SDL_Color color = {0xff, 0xff, 0xff};
-        if (!(textSurface = TTF_RenderText_Blended(state.font, strFPS, color)))
-        {
-          DEBUG_ERROR("Failed to render text");
-          break;
-        }
-
-        textRect.x = 5;
-        textRect.y = 5;
-        textRect.w = textSurface->w;
-        textRect.h = textSurface->h;
-
-        textTexture = SDL_CreateTextureFromSurface(state.renderer, textSurface);
-        SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
-        SDL_FreeSurface(textSurface);
-
-        frameCount = 0;
-        ticks = time;
-      }
-
+      SDL_Surface *textSurface = NULL;
       if (textTexture)
       {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-        glBegin(GL_TRIANGLE_STRIP);
-          glVertex2i(textRect.x             , textRect.y             );
-          glVertex2i(textRect.x + textRect.w, textRect.y             );
-          glVertex2i(textRect.x             , textRect.y + textRect.h);
-          glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
-        glEnd();
-
-
-        float tw, th;
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        SDL_GL_BindTexture(textTexture, &tw, &th);
-        glBegin(GL_TRIANGLE_STRIP);
-          glTexCoord2f(0.0f, 0.0f); glVertex2i(textRect.x             , textRect.y             );
-          glTexCoord2f(tw  , 0.0f); glVertex2i(textRect.x + textRect.w, textRect.y             );
-          glTexCoord2f(0.0f, th  ); glVertex2i(textRect.x             , textRect.y + textRect.h);
-          glTexCoord2f(tw  , th  ); glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
-        glEnd();
-        glDisable(GL_BLEND);
-        SDL_GL_UnbindTexture(textTexture);
+        SDL_DestroyTexture(textTexture);
+        textTexture = NULL;
       }
+
+      const unsigned int ticks = SDL_GetTicks();
+      const float avgFPS = (float)(frameCount - lastFrameCount) / ((ticks - lastTicks) / 1000.0f);
+      char strFPS[12];
+      snprintf(strFPS, sizeof(strFPS), "FPS: %6.2f", avgFPS);
+      SDL_Color color = {0xff, 0xff, 0xff};
+      if (!(textSurface = TTF_RenderText_Blended(state.font, strFPS, color)))
+      {
+        DEBUG_ERROR("Failed to render text");
+        break;
+      }
+
+      textRect.x = 5;
+      textRect.y = 5;
+      textRect.w = textSurface->w;
+      textRect.h = textSurface->h;
+
+      textTexture = SDL_CreateTextureFromSurface(state.renderer, textSurface);
+      SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
+      SDL_FreeSurface(textSurface);
+
+      lastTicks      = ticks;
+      lastFrameCount = frameCount;
+    }
+
+    if (textTexture)
+    {
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+      glBegin(GL_TRIANGLE_STRIP);
+        glVertex2i(textRect.x             , textRect.y             );
+        glVertex2i(textRect.x + textRect.w, textRect.y             );
+        glVertex2i(textRect.x             , textRect.y + textRect.h);
+        glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
+      glEnd();
+
+
+      float tw, th;
+      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+      SDL_GL_BindTexture(textTexture, &tw, &th);
+      glBegin(GL_TRIANGLE_STRIP);
+        glTexCoord2f(0.0f, 0.0f); glVertex2i(textRect.x             , textRect.y             );
+        glTexCoord2f(tw  , 0.0f); glVertex2i(textRect.x + textRect.w, textRect.y             );
+        glTexCoord2f(0.0f, th  ); glVertex2i(textRect.x             , textRect.y + textRect.h);
+        glTexCoord2f(tw  , th  ); glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
+      glEnd();
+      glDisable(GL_BLEND);
+      SDL_GL_UnbindTexture(textTexture);
     }
 
     SDL_RenderPresent(state.renderer);
-    ivshmem_kick_irq(newHeader.guestID, 0);
-
-    state.started = true;
   }
 
-  state.running = false;
-  if (state.hasBufferStorage)
-  {
-    glDeleteTextures(VBO_BUFFERS, vboTex);
-    glUnmapBuffer   (GL_TEXTURE_BUFFER  );
-    glDeleteBuffers (VBO_BUFFERS, vboID );
-  }
-  else
-    if (texture)
-      SDL_DestroyTexture(texture);
+  if (lgr)
+    lgr->deinitialize(lgrData);
 
   return 0;
 }
@@ -833,14 +708,10 @@ int run()
     (params.vsync ? SDL_RENDERER_PRESENTVSYNC : 0)
   );
 
-  if (params.useBufferStorage)
+  if (!state.renderer)
   {
-    const GLubyte * extensions = glGetString(GL_EXTENSIONS);
-    if (gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
-    {
-      DEBUG_INFO("Using GL_ARB_buffer_storage");
-      state.hasBufferStorage = true;
-    }
+    DEBUG_ERROR("failed to create renderer");
+    return -1;
   }
 
   if (params.vsync)
@@ -852,10 +723,14 @@ int run()
   else
     SDL_GL_SetSwapInterval(0);
 
-  if (!state.renderer)
+  if (params.useBufferStorage)
   {
-    DEBUG_ERROR("failed to create window");
-    return -1;
+    const GLubyte * extensions = glGetString(GL_EXTENSIONS);
+    if (gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
+    {
+      DEBUG_INFO("Using GL_ARB_buffer_storage");
+      state.hasBufferStorage = true;
+    }
   }
 
   int         shm_fd    = 0;
