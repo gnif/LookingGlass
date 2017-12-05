@@ -1,24 +1,30 @@
-BINARY=looking-glass-client
-CFLAGS=-g -O3 -std=gnu99 -march=native -Wall -Werror -I../common -DDEBUG
-LDFLAGS=-lrt
+BINARY  = looking-glass-client
+CFLAGS  = -g -Og -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG
+LDFLAGS = -lrt
 
-CFLAGS+=`pkg-config --cflags sdl2`
-LDFLAGS+=`pkg-config --libs sdl2`
+LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol
+CFLAGS  += $(shell pkg-config --cflags $(LIBS))
+LDFLAGS += $(shell pkg-config --libs   $(LIBS))
+BUILD   ?= .build
+BIN     ?= bin
 
-CFLAGS+=`pkg-config --cflags SDL2_ttf`
-LDFLAGS+=`pkg-config --libs SDL2_ttf`
+OBJS	= main.o \
+	  spice/spice.o \
+	  ivshmem/ivshmem.o
 
-CFLAGS+=`pkg-config --cflags gl`
-LDFLAGS+=`pkg-config --libs gl`
+BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))
 
-CFLAGS+=`pkg-config --cflags glu`
-LDFLAGS+=`pkg-config --libs glu`
+all: $(BINARY)
 
-CFLAGS+=`pkg-config --cflags libssl openssl`
-LDFLAGS+=`pkg-config --libs libssl openssl`
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	gcc -c $(CFLAGS) -o $@ $< $(LDFLAGS)
 
-CFLAGS+=`pkg-config --cflags spice-protocol`
+$(BINARY): $(BUILD_OBJS)
+	@mkdir -p $(dir $(BIN)/$@)
+	gcc $(CFLAGS) -o $(BIN)/$(BINARY) $(BUILD_OBJS) $(LDFLAGS)
 
-all:
-	mkdir -p bin
-	gcc ${CFLAGS} -o bin/${BINARY} main.c spice/spice.c ivshmem/ivshmem.c ${LDFLAGS}
+clean:
+	rm -rf $(BUILD) $(BIN)
+
+.PHONY: clean
