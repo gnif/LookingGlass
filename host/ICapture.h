@@ -29,6 +29,9 @@ struct FrameInfo
   void * buffer;
   size_t bufferSize;
   size_t outSize;
+
+  bool hasMousePos;
+  int mouseX, mouseY;
 };
 
 typedef std::vector<const char *> CaptureOptions;

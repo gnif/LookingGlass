@@ -71,7 +71,7 @@ public:
   static ICapture * DetectDevice(CaptureOptions * options)
   {
     DeviceList devices = GetDevices();
-    for (DeviceList::const_iterator it = devices.begin(); it != devices.end(); ++it)
+    for (DeviceList::const_iterator it = devices.cbegin(); it != devices.cend(); ++it)
     {
       ICapture * device = *it;
 

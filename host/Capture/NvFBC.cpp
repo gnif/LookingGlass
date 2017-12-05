@@ -34,6 +34,7 @@ using namespace Capture;
 NvFBC::NvFBC() :
   m_options(NULL),
   m_optNoCrop(false),
+  m_optNoWait(false),
   m_initialized(false),
   m_hDLL(NULL),
   m_nvFBC(NULL)
@@ -51,9 +52,10 @@ bool NvFBC::Initialize(CaptureOptions * options)
 
   m_options   = options;
   m_optNoCrop = false;
-  for (CaptureOptions::const_iterator it = options->begin(); it != options->end(); ++it)
+  for (CaptureOptions::const_iterator it = options->cbegin(); it != options->cend(); ++it)
   {
     if (_strcmpi(*it, "nocrop") == 0) { m_optNoCrop = true; continue; }
+    if (_strcmpi(*it, "nowait") == 0) { m_optNoWait = true; continue; }
   }
 
   std::string nvfbc = Util::GetSystemRoot() + "\\" + NVFBC_LIBRARY_NAME;
@@ -137,9 +139,9 @@ bool NvFBC::Initialize(CaptureOptions * options)
   setupParams.dwVersion = NVFBC_TOSYS_SETUP_PARAMS_VER;
   setupParams.eMode = NVFBC_TOSYS_ARGB;
   setupParams.bWithHWCursor = TRUE;
-  setupParams.bDiffMap = FALSE;
+  setupParams.bDiffMap = TRUE;
   setupParams.ppBuffer = (void **)&m_frameBuffer;
-  setupParams.ppDiffMap = NULL;
+  setupParams.ppDiffMap = (void **)&m_diffMap;
 
   if (m_nvFBC->NvFBCToSysSetUp(&setupParams) != NVFBC_SUCCESS)
   {
@@ -154,15 +156,14 @@ bool NvFBC::Initialize(CaptureOptions * options)
   ZeroMemory(&m_grabFrameParams, sizeof(NVFBC_TOSYS_GRAB_FRAME_PARAMS));
   ZeroMemory(&m_grabInfo, sizeof(NvFBCFrameGrabInfo));
   m_grabFrameParams.dwVersion = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
-  m_grabFrameParams.dwFlags = NVFBC_TOSYS_NOWAIT;
-  m_grabFrameParams.dwWaitTime = 100;
+  m_grabFrameParams.dwFlags = m_optNoWait ? NVFBC_TOSYS_NOWAIT : NVFBC_TOSYS_WAIT_WITH_TIMEOUT;
+  m_grabFrameParams.dwWaitTime = 1000;
   m_grabFrameParams.eGMode = NVFBC_TOSYS_SOURCEMODE_FULL;
   m_grabFrameParams.dwStartX = 0;
   m_grabFrameParams.dwStartY = 0;
   m_grabFrameParams.dwTargetWidth = 0;
   m_grabFrameParams.dwTargetHeight = 0;
   m_grabFrameParams.pNvFBCFrameGrabInfo = &m_grabInfo;
-
 
   m_initialized = true;
   return true;
@@ -222,8 +223,23 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
   for(int i = 0; i < 2; ++i)
   {
     NVFBCRESULT status = m_nvFBC->NvFBCToSysGrabFrame(&m_grabFrameParams);
+
     if (status == NVFBC_SUCCESS)
     {
+      bool hasDiff = false;
+      for (int r = (m_grabInfo.dwWidth * m_grabInfo.dwHeight) / (128 * 128); r >= 0; --r)
+        if (*((uint8_t*)m_diffMap + r))
+        {
+          hasDiff = true;
+          break;
+        }
+
+      if (!hasDiff)
+      {
+        i = 0;
+        continue;
+      }
+
       unsigned int dataWidth;
       unsigned int dataOffset;
 
@@ -232,8 +248,8 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
         dataWidth  = m_grabInfo.dwWidth * 4;
         dataOffset = 0;
 
-        frame.width   = m_grabInfo.dwWidth;
-        frame.height  = m_grabInfo.dwHeight;
+        frame.width  = m_grabInfo.dwWidth;
+        frame.height = m_grabInfo.dwHeight;
       }
       else
       {

@@ -51,7 +51,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
   CrashHandler::Initialize();
 
   struct StartupArgs args;
-  ZeroMemory(&args, sizeof(struct StartupArgs));
+  args.foreground = false;
+  args.captureDevice = NULL;
+
   int ret = parseArgs(args);
   if (ret == 0)
   {

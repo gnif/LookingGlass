@@ -45,6 +45,7 @@ namespace Capture
   private:
     CaptureOptions * m_options;
     bool m_optNoCrop;
+    bool m_optNoWait;
 
     bool m_initialized;
     HMODULE  m_hDLL;
@@ -57,6 +58,7 @@ namespace Capture
     DWORD m_maxCaptureWidth, m_maxCaptureHeight;
     NvFBCToSys * m_nvFBC;
     void * m_frameBuffer;
+    void * m_diffMap;
     NvFBCFrameGrabInfo m_grabInfo;
     NVFBC_TOSYS_GRAB_FRAME_PARAMS m_grabFrameParams;
   };

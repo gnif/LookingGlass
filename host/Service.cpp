@@ -133,8 +133,9 @@ bool Service::Process()
     return false;
 
   FrameInfo frame;
-  frame.buffer     = m_frame[m_frameIndex];
-  frame.bufferSize = m_frameSize;
+  frame.buffer      = m_frame[m_frameIndex];
+  frame.bufferSize  = m_frameSize;
+  frame.hasMousePos = false;
 
   // wait for the host to notify that is it is ready to proceed
   bool eventDone = false;
@@ -181,10 +182,18 @@ bool Service::Process()
   m_header->dataLen = frame.outSize;
 
   // tell the host where the cursor is
-  POINT cursorPos;
-  GetCursorPos(&cursorPos);
-  m_header->mouseX = cursorPos.x;
-  m_header->mouseY = cursorPos.y;
+  if (frame.hasMousePos)
+  {
+    m_header->mouseX = frame.mouseX;
+    m_header->mouseY = frame.mouseY;
+  }
+  else
+  {
+    POINT cursorPos;
+    GetCursorPos(&cursorPos);
+    m_header->mouseX = cursorPos.x;
+    m_header->mouseY = cursorPos.y;
+  }
 
   if (!m_ivshmem->RingDoorbell(m_header->hostID, 0))
   {
