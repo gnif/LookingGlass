@@ -35,5 +35,5 @@ enum IVSHMEMWaitResult
   IVSHMEM_WAIT_RESULT_ERROR
 };
 
-enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector);
+enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector, unsigned int timeout);
 bool ivshmem_kick_irq(uint16_t clientID, uint16_t vector);

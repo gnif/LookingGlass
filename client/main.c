@@ -154,35 +154,23 @@ inline bool areFormatsSame(const struct KVMFRHeader s1, const struct KVMFRHeader
     (s1.height    == s2.height   );
 }
 
-inline bool waitGuest()
+inline int waitGuest()
 {
-  bool ready = false;
-  bool error = false;
-  while(state.running && !ready && !error)
+  while(state.running)
   {
-    switch(ivshmem_wait_irq(0))
+    switch(ivshmem_wait_irq(0, (1000/30)))
     {
-      case IVSHMEM_WAIT_RESULT_OK:
-        ready = true;
-        break;
-
+      case IVSHMEM_WAIT_RESULT_OK     :
       case IVSHMEM_WAIT_RESULT_TIMEOUT:
-        ivshmem_kick_irq(state.shm->guestID, 0);
-        break;
+        return true;
 
       case IVSHMEM_WAIT_RESULT_ERROR:
-        error = true;
-        break;
+        DEBUG_ERROR("error during wait for host");
+        return false;
     }
   }
 
-  if (error)
-  {
-    DEBUG_ERROR("error during wait for host");
-    return false;
-  }
-
-  return true;
+  return false;
 }
 
 int renderThread(void * unused)
@@ -192,15 +180,17 @@ int renderThread(void * unused)
   const LG_Renderer * lgr = NULL;
   void              * lgrData;
   unsigned int        lastTicks = SDL_GetTicks();
-  unsigned int        frameCount = 0, lastFrameCount = 0;
+  unsigned int        frameCount = 0;
+  unsigned int        lastFrameCount = 0;
   SDL_Texture       * textTexture = NULL;
   SDL_Rect            textRect;
 
   while(state.running)
   {
-    // wait for the guest to signal ready and copy the header
     if (!waitGuest())
       break;
+
+    ++frameCount;
 
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
@@ -326,7 +316,6 @@ int renderThread(void * unused)
       break;
     }
 
-    ++frameCount;
     if (!params.showFPS)
     {
       SDL_RenderPresent(state.renderer);

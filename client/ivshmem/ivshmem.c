@@ -478,7 +478,7 @@ bool ivshmem_process()
 
 // ============================================================================
 
-enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector)
+enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector, unsigned int timeout)
 {
   if (vector > ivshmem.server.irqCount - 1)
     return false;
@@ -488,13 +488,13 @@ enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector)
   FD_ZERO(&fds);
   FD_SET(fd, &fds);
 
-  struct timeval timeout;
-  timeout.tv_sec  = 1;
-  timeout.tv_usec = 0;
+  struct timeval tv;
+  tv.tv_sec  = timeout / 1000;
+  tv.tv_usec = (timeout - tv.tv_sec * 1000) * 1000;
 
   while(true)
   {
-    int ret = select(fd+1, &fds, NULL, NULL, &timeout);
+    int ret = select(fd+1, &fds, NULL, NULL, &tv);
     if (ret < 0)
     {
       if (errno == EINTR)
