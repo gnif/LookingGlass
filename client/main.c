@@ -203,7 +203,6 @@ int renderThread(void * unused)
 
   while(state.running)
   {
-    DEBUG_INFO("delay: %lu", pollDelay);
     usleep(pollDelay);
     if(header.dataPos == state.shm->dataPos)
     {
