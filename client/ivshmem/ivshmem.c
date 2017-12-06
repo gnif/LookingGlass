@@ -489,8 +489,8 @@ enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector, unsigned int timeout)
   FD_SET(fd, &fds);
 
   struct timeval tv;
-  tv.tv_sec  = timeout / 1000;
-  tv.tv_usec = (timeout - tv.tv_sec * 1000) * 1000;
+  tv.tv_sec  = timeout / 1000000L;
+  tv.tv_usec = timeout % 1000000L;
 
   while(true)
   {

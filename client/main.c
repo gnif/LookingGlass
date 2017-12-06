@@ -43,8 +43,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "lg-renderers.h"
 
-#define VBO_BUFFERS 2
-
 struct AppState
 {
   bool      hasBufferStorage;
@@ -194,37 +192,47 @@ int renderThread(void * unused)
   const uint64_t presentTime = detectPresentTime();
 
   uint64_t pollDelay = 0;
-  uint64_t pollStep  = 0;
   uint64_t drawStart = 0;
   uint64_t drawTime  = 0;
 
   uint64_t fpsStart = 0;
   uint64_t fpsTime  = 0;
 
+  #define SYNC_WINDOW 2000
+
   while(state.running)
   {
-    usleep(pollDelay);
-    if(header.dataPos == state.shm->dataPos)
-    {
-      pollStep = 0;
-      do
-      {
-        ++pollStep;
-        if (pollDelay + pollStep < 30000)
-          pollDelay += pollStep;
-        usleep(1);
-      }
-      while(header.dataPos == state.shm->dataPos && state.running);
+    // wait for a frame
+    if (pollDelay > SYNC_WINDOW)
+      usleep(pollDelay - SYNC_WINDOW);
+    else
+      usleep(pollDelay);
 
-      if (!state.running)
-        break;
+    // we shouldn't have a frame yet, retard the timing a bit
+    if (header.dataPos != state.shm->dataPos)
+    {
+      if (pollDelay >= SYNC_WINDOW / 2)
+        pollDelay -= SYNC_WINDOW / 2;
+      else
+        pollDelay = 0;
     }
     else
     {
-      // we were late, step back a chunk
-      pollStep += 100;
-      if (pollDelay > pollStep)
-        pollDelay -= pollStep;
+      const uint64_t loopStart = microtime();
+      while(header.dataPos == state.shm->dataPos && state.running)
+      {
+        // if we timed out, wait for an interrupt or a timeout
+        if (microtime() - loopStart > SYNC_WINDOW)
+        {
+          ivshmem_wait_irq(0, 1000000/30);
+          break;
+        }
+      }
+
+      pollDelay += microtime() - loopStart;
+      pollDelay -= SYNC_WINDOW / 2;
+      if (pollDelay > (1000000/30))
+        pollDelay = presentTime;
     }
 
     if (!state.running)
@@ -386,7 +394,7 @@ int renderThread(void * unused)
 
         char str[32];
         const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
-        snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
+        snprintf(str, sizeof(str), "FPS: %8.4f, Sync: %5lu", avgFPS, pollDelay);
         SDL_Color color = {0xff, 0xff, 0xff};
         if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
         {
