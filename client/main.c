@@ -35,7 +35,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <GL/glu.h>
 
 #include "debug.h"
-#include "delay.h"
 #include "memcpySSE.h"
 #include "KVMFR.h"
 #include "ivshmem/ivshmem.h"
@@ -670,8 +669,6 @@ int run()
   state.running = true;
   state.scaleX  = 1.0f;
   state.scaleY  = 1.0f;
-
-  delay_calibrate();
 
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
