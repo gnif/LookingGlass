@@ -13,6 +13,7 @@ BUILD   ?= .build
 BIN     ?= bin
 
 OBJS	= main.o \
+	  delay.o \
 	  spice/spice.o \
 	  ivshmem/ivshmem.o \
 	  renderers/basic.o \
