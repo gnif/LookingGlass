@@ -162,6 +162,25 @@ inline uint64_t microtime()
   return ((uint64_t)time.tv_sec * 1000000) + time.tv_usec;
 }
 
+uint64_t detectPresentTime()
+{
+  // warm up first as the GPU driver may have multiple buffers
+  for(int i = 0; i < 10; ++i)
+    SDL_RenderPresent(state.renderer);
+
+  // time 10 iterations and compute the average
+  const uint64_t start = microtime();
+  for(int i = 0; i < 10; ++i)
+    SDL_RenderPresent(state.renderer);
+  const uint64_t t = (microtime() - start) / 10;
+
+  // ensure all buffers are flushed
+  glFinish();
+
+  DEBUG_INFO("detected: %lu (%f Hz)", t, 1000000.0f / t);
+  return t;
+}
+
 int renderThread(void * unused)
 {
   bool                error = false;
@@ -172,49 +191,62 @@ int renderThread(void * unused)
   SDL_Texture       * textTexture = NULL;
   SDL_Rect            textRect;
 
-  uint64_t            waitTime    = 0;
-  uint64_t            presentTime = 0;
-  uint64_t            fpsTime     = 0;
+  const uint64_t presentTime = detectPresentTime();
+
+  uint64_t pollDelay = 0;
+  uint64_t pollStep  = 0;
+  uint64_t drawStart = 0;
+  uint64_t drawTime  = 0;
+
+  uint64_t fpsStart = 0;
+  uint64_t fpsTime  = 0;
 
   while(state.running)
   {
-    glFlush();
-
-    if (waitTime < 30000 && waitTime > 2000)
-      usleep(waitTime - 2000);
-
-    // poll for a new frame
-    while(state.running && header.dataPos == state.shm->dataPos)
+    DEBUG_INFO("delay: %lu", pollDelay);
+    usleep(pollDelay);
+    if(header.dataPos == state.shm->dataPos)
     {
-      // if the frame is overdue
-      if (microtime() - presentTime > waitTime)
+      pollStep = 0;
+      do
       {
-        enum IVSHMEMWaitResult result = ivshmem_wait_irq(0, (1000/30));
-        if (result == IVSHMEM_WAIT_RESULT_OK)
-          continue;
-
-        if (result == IVSHMEM_WAIT_RESULT_TIMEOUT)
-          break;
-
-        if (result == IVSHMEM_WAIT_RESULT_ERROR)
-        {
-          DEBUG_ERROR("error during wait for host");
-          state.running = false;
-          break;
-        }
+        ++pollStep;
+        if (pollDelay + pollStep < 30000)
+          pollDelay += pollStep;
+        usleep(1);
       }
+      while(header.dataPos == state.shm->dataPos && state.running);
+
+      if (!state.running)
+        break;
+    }
+    else
+    {
+      // we were late, step back a chunk
+      pollStep += 100;
+      if (pollDelay > pollStep)
+        pollDelay -= pollStep;
     }
 
     if (!state.running)
       break;
 
-    // normally you would never put this into an OpenGL application but because
-    // of our hybrid sleep/poll logic above the GPU has had time to finish up
-    // anyway. Having this here ensures that the GPU doesn't buffer up
-    // additional frames if the guest starts to outpace us.
-    glFinish();
+    // sleep for the remainder of the presentation time
+    if (frameCount > 0)
+    {
+      drawTime = microtime() - drawStart;
+      if (drawTime < presentTime)
+      {
+        uint64_t delta = presentTime - drawTime;
+        if (delta > 1000)
+          usleep(delta - 1000);
+      }
 
-    waitTime = microtime() - presentTime;
+      // ensure buffers are flushed
+      glFinish();
+    }
+
+    drawStart = microtime();
 
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
@@ -340,80 +372,77 @@ int renderThread(void * unused)
       break;
     }
 
-    if (!params.showFPS)
+    if (params.showFPS)
     {
-      SDL_RenderPresent(state.renderer);
-      presentTime = microtime();
-      continue;
-    }
+      // for now render the frame counter here, we really should
+      // move this into the renderers though.
+      if (fpsTime > 1000000)
+      {
+        SDL_Surface *textSurface = NULL;
+        if (textTexture)
+        {
+          SDL_DestroyTexture(textTexture);
+          textTexture = NULL;
+        }
 
-    // for now render the frame counter here, we really should
-    // move this into the renderers though.
-    if (fpsTime > 1000000)
-    {
-      SDL_Surface *textSurface = NULL;
+        char str[32];
+        const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
+        snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
+        SDL_Color color = {0xff, 0xff, 0xff};
+        if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
+        {
+          DEBUG_ERROR("Failed to render text");
+          break;
+        }
+
+        textRect.x = 5;
+        textRect.y = 5;
+        textRect.w = textSurface->w;
+        textRect.h = textSurface->h;
+
+        textTexture = SDL_CreateTextureFromSurface(state.renderer, textSurface);
+        SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
+        SDL_FreeSurface(textSurface);
+
+        fpsTime    = 0;
+        frameCount = 0;
+      }
+
       if (textTexture)
       {
-        SDL_DestroyTexture(textTexture);
-        textTexture = NULL;
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+        glBegin(GL_TRIANGLE_STRIP);
+          glVertex2i(textRect.x             , textRect.y             );
+          glVertex2i(textRect.x + textRect.w, textRect.y             );
+          glVertex2i(textRect.x             , textRect.y + textRect.h);
+          glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
+        glEnd();
+
+
+        float tw, th;
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        SDL_GL_BindTexture(textTexture, &tw, &th);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(textRect.x             , textRect.y             );
+          glTexCoord2f(tw  , 0.0f); glVertex2i(textRect.x + textRect.w, textRect.y             );
+          glTexCoord2f(0.0f, th  ); glVertex2i(textRect.x             , textRect.y + textRect.h);
+          glTexCoord2f(tw  , th  ); glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
+        glEnd();
+        glDisable(GL_BLEND);
+        SDL_GL_UnbindTexture(textTexture);
       }
-
-      char str[32];
-      const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
-      snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
-      SDL_Color color = {0xff, 0xff, 0xff};
-      if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
-      {
-        DEBUG_ERROR("Failed to render text");
-        break;
-      }
-
-      textRect.x = 5;
-      textRect.y = 5;
-      textRect.w = textSurface->w;
-      textRect.h = textSurface->h;
-
-      textTexture = SDL_CreateTextureFromSurface(state.renderer, textSurface);
-      SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
-      SDL_FreeSurface(textSurface);
-
-      fpsTime    = 0;
-      frameCount = 0;
     }
 
-    if (textTexture)
-    {
-      glEnable(GL_BLEND);
-      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glVertex2i(textRect.x             , textRect.y             );
-        glVertex2i(textRect.x + textRect.w, textRect.y             );
-        glVertex2i(textRect.x             , textRect.y + textRect.h);
-        glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
-      glEnd();
-
-
-      float tw, th;
-      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-      SDL_GL_BindTexture(textTexture, &tw, &th);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.0f); glVertex2i(textRect.x             , textRect.y             );
-        glTexCoord2f(tw  , 0.0f); glVertex2i(textRect.x + textRect.w, textRect.y             );
-        glTexCoord2f(0.0f, th  ); glVertex2i(textRect.x             , textRect.y + textRect.h);
-        glTexCoord2f(tw  , th  ); glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
-      glEnd();
-      glDisable(GL_BLEND);
-      SDL_GL_UnbindTexture(textTexture);
-    }
 
     SDL_RenderPresent(state.renderer);
 
     ++frameCount;
-    uint64_t  t = microtime();
-    fpsTime    += t - presentTime;
-    presentTime = t;
+    uint64_t t = microtime();
+    fpsTime  += t - fpsStart;
+    fpsStart  = t;
   }
 
   if (lgr)
