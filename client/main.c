@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -155,23 +156,11 @@ inline bool areFormatsSame(const struct KVMFRHeader s1, const struct KVMFRHeader
     (s1.height    == s2.height   );
 }
 
-inline int waitGuest()
+inline uint64_t microtime()
 {
-  while(state.running)
-  {
-    switch(ivshmem_wait_irq(0, (1000/30)))
-    {
-      case IVSHMEM_WAIT_RESULT_OK     :
-      case IVSHMEM_WAIT_RESULT_TIMEOUT:
-        return true;
-
-      case IVSHMEM_WAIT_RESULT_ERROR:
-        DEBUG_ERROR("error during wait for host");
-        return false;
-    }
-  }
-
-  return false;
+  struct timeval time;
+  gettimeofday(&time, NULL);
+  return ((uint64_t)time.tv_sec * 1000000) + time.tv_usec;
 }
 
 int renderThread(void * unused)
@@ -180,18 +169,53 @@ int renderThread(void * unused)
   struct KVMFRHeader  header;
   const LG_Renderer * lgr = NULL;
   void              * lgrData;
-  unsigned int        lastTicks = SDL_GetTicks();
   unsigned int        frameCount = 0;
-  unsigned int        lastFrameCount = 0;
   SDL_Texture       * textTexture = NULL;
   SDL_Rect            textRect;
 
+  uint64_t            waitTime    = 0;
+  uint64_t            presentTime = 0;
+  uint64_t            fpsTime     = 0;
+
   while(state.running)
   {
-    if (!waitGuest())
+    glFlush();
+
+    if (waitTime < 30000 && waitTime > 2000)
+      usleep(waitTime - 2000);
+
+    // poll for a new frame
+    while(state.running && header.dataPos == state.shm->dataPos)
+    {
+      // if the frame is overdue
+      if (microtime() - presentTime > waitTime)
+      {
+        enum IVSHMEMWaitResult result = ivshmem_wait_irq(0, (1000/30));
+        if (result == IVSHMEM_WAIT_RESULT_OK)
+          continue;
+
+        if (result == IVSHMEM_WAIT_RESULT_TIMEOUT)
+          break;
+
+        if (result == IVSHMEM_WAIT_RESULT_ERROR)
+        {
+          DEBUG_ERROR("error during wait for host");
+          state.running = false;
+          break;
+        }
+      }
+    }
+
+    if (!state.running)
       break;
 
-    ++frameCount;
+    // normally you would never put this into an OpenGL application but because
+    // of our hybrid sleep/poll logic above the GPU has had time to finish up
+    // anyway. Having this here ensures that the GPU doesn't buffer up
+    // additional frames if the guest starts to outpace us.
+    glFinish();
+
+    waitTime = microtime() - presentTime;
 
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
@@ -320,12 +344,13 @@ int renderThread(void * unused)
     if (!params.showFPS)
     {
       SDL_RenderPresent(state.renderer);
+      presentTime = microtime();
       continue;
     }
 
     // for now render the frame counter here, we really should
     // move this into the renderers though.
-    if (frameCount % 10 == 0)
+    if (fpsTime > 1000000)
     {
       SDL_Surface *textSurface = NULL;
       if (textTexture)
@@ -334,12 +359,11 @@ int renderThread(void * unused)
         textTexture = NULL;
       }
 
-      const unsigned int ticks = SDL_GetTicks();
-      const float avgFPS = (float)(frameCount - lastFrameCount) / ((ticks - lastTicks) / 1000.0f);
-      char strFPS[12];
-      snprintf(strFPS, sizeof(strFPS), "FPS: %6.2f", avgFPS);
+      char str[32];
+      const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
+      snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
       SDL_Color color = {0xff, 0xff, 0xff};
-      if (!(textSurface = TTF_RenderText_Blended(state.font, strFPS, color)))
+      if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
       {
         DEBUG_ERROR("Failed to render text");
         break;
@@ -354,8 +378,8 @@ int renderThread(void * unused)
       SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
       SDL_FreeSurface(textSurface);
 
-      lastTicks      = ticks;
-      lastFrameCount = frameCount;
+      fpsTime    = 0;
+      frameCount = 0;
     }
 
     if (textTexture)
@@ -386,6 +410,11 @@ int renderThread(void * unused)
     }
 
     SDL_RenderPresent(state.renderer);
+
+    ++frameCount;
+    uint64_t  t = microtime();
+    fpsTime    += t - presentTime;
+    presentTime = t;
   }
 
   if (lgr)
@@ -706,15 +735,7 @@ int run()
     return -1;
   }
 
-  if (params.vsync)
-  {
-    // try for late swap tearing to help keep sync with the guest
-    if (SDL_GL_SetSwapInterval(-1) == -1)
-      SDL_GL_SetSwapInterval(1);
-  }
-  else
-    SDL_GL_SetSwapInterval(0);
-
+  SDL_GL_SetSwapInterval(params.vsync ? 1 : 0);
   if (params.useBufferStorage)
   {
     const GLubyte * extensions = glGetString(GL_EXTENSIONS);
