@@ -27,8 +27,8 @@ $(BUILD)/%.o: %.c
 	gcc -c $(CFLAGS) -o $@ $<
 
 $(BIN)/$(BINARY): $(BUILD_OBJS)
-	@mkdir -p $(dir $(BIN)/$@)
-	gcc -o $(BIN)/$(BINARY) $(BUILD_OBJS) $(LDFLAGS)
+	@mkdir -p $(dir $@)
+	gcc -o $@ $(BUILD_OBJS) $(LDFLAGS)
 
 clean:
 	rm -rf $(BUILD) $(BIN)
