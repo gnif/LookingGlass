@@ -16,6 +16,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+// limit the FPS when sync is turned off
+#define FPS_LIMIT 240
+
 #include <getopt.h>
 #include <SDL2/SDL.h>
 #include <SDL_ttf.h>
@@ -185,75 +188,63 @@ int renderThread(void * unused)
   SDL_Texture       * textTexture = NULL;
   SDL_Rect            textRect;
 
-  const uint64_t presentTime = detectPresentTime();
+  const uint64_t presentTime =
+    params.vsync ?
+      detectPresentTime() :
+      ceil((1000000.0/(double)FPS_LIMIT));
 
-  uint64_t pollDelay = 0;
+  unsigned int   lateCount   = 0;
+
+  int      pollDelay = 0;
   uint64_t drawStart = 0;
-  uint64_t drawTime  = 0;
+  int      drawTime  = 0;
 
-  uint64_t fpsStart = 0;
-  uint64_t fpsTime  = 0;
+  uint64_t fpsStart  = microtime();
+  int      fpsTime   = 0;
 
-  unsigned int retardCount = 0;
-  unsigned int resyncCount = 0;
 
-  #define SYNC_WINDOW 2000
+  volatile uint64_t * dataPos = &state.shm->dataPos;
 
   while(state.running)
   {
-    // wait for a frame
-    if (pollDelay > SYNC_WINDOW)
-      usleep(pollDelay - SYNC_WINDOW);
-    else
-      usleep(pollDelay);
-
-    // we shouldn't have a frame yet, retard the timing a bit
-    if (header.dataPos != state.shm->dataPos)
+    // if the next frame isn't aready available
+    if (header.dataPos == *dataPos)
     {
-      ++retardCount;
-      if (pollDelay >= SYNC_WINDOW / 2)
-        pollDelay -= SYNC_WINDOW / 2;
-      else
-        pollDelay = 0;
-    }
-    else
-    {
-      const uint64_t loopStart = microtime();
-      while(header.dataPos == state.shm->dataPos && state.running)
-      {
-        // if we timed out, wait for an interrupt or a timeout
-        if (microtime() - loopStart > SYNC_WINDOW)
-        {
-          if (ivshmem_wait_irq(0, 1000000/30) == IVSHMEM_WAIT_RESULT_OK)
-          {
-            // might be a spurious interrupt we didn't answer earlier
-            if (header.dataPos == state.shm->dataPos)
-              continue;
+      // wait for a frame
+      const uint64_t pollStart = microtime();
+      if (pollDelay > 0)
+        usleep(pollDelay);
 
-            ++resyncCount;
-          }
+      if (header.dataPos != *dataPos)
+        ++lateCount;
+
+      // poll until we have a new frame, or we time out
+      while(header.dataPos == *dataPos && state.running) {
+        if (microtime() - pollStart > 100)
           break;
-        }
       }
 
-      pollDelay += microtime() - loopStart;
-      pollDelay -= SYNC_WINDOW / 2;
-      if (pollDelay > (1000000/30))
-        pollDelay = presentTime;
+      // update the delay
+      pollDelay = microtime() - pollStart - 100;
     }
-
-    if (!state.running)
-      break;
 
     // sleep for the remainder of the presentation time
     if (frameCount > 0)
     {
-      drawTime = microtime() - drawStart;
+      const uint64_t t = microtime();
+      drawTime = t - drawStart;
       if (drawTime < presentTime)
       {
-        uint64_t delta = presentTime - drawTime;
+        const uint64_t delta = presentTime - drawTime;
         if (delta > 1000)
           usleep(delta - 1000);
+
+        if (!params.vsync)
+        {
+          // poll for the final microsecond
+          const uint64_t target = t + delta;
+          while(microtime() <= target) {}
+        }
       }
 
       // ensure buffers are flushed
@@ -401,7 +392,7 @@ int renderThread(void * unused)
 
         char str[128];
         const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
-        snprintf(str, sizeof(str), "FPS: %8.4f, Retard: %d, Resync: %d", avgFPS, retardCount, resyncCount);
+        snprintf(str, sizeof(str), "FPS: %8.4f (Frames: %d, Late: %d)", avgFPS, frameCount, lateCount);
         SDL_Color color = {0xff, 0xff, 0xff};
         if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
         {
@@ -420,6 +411,7 @@ int renderThread(void * unused)
 
         fpsTime    = 0;
         frameCount = 0;
+        lateCount  = 0;
       }
 
       if (textTexture)
