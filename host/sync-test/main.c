@@ -87,12 +87,13 @@ int main(int argc, char * argv[])
 
     const SDL_Color c = {0x00, 0xff, 0x00, 0xff};
     char text[128];
-    snprintf(text, sizeof(text), "FPS: %5.2f, Frame: %05u    \"F11\" to toggle Full Screen", fps, frameCount);
+    snprintf(text, sizeof(text), "FPS: %7.4f, Frame: %05u    \"F11\" to toggle Full Screen", fps, frameCount);
     SDL_Surface * fpsSurf = TTF_RenderText_Solid(fpsFont, text, c);
     if (fpsText)
       SDL_DestroyTexture(fpsText);
     fpsText = SDL_CreateTextureFromSurface(renderer, fpsSurf);
     fpsTextRect.x = width / 2 - fpsSurf->w / 2;
+    fpsTextRect.y = 20 - fpsSurf->h / 2;
     fpsTextRect.w = fpsSurf->w;
     fpsTextRect.h = fpsSurf->h;
     SDL_FreeSurface(fpsSurf);
