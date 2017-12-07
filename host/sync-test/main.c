@@ -17,14 +17,15 @@ int main(int argc, char * argv[])
   bool            running     = true;
   unsigned int    frameCount  = 0;
   Uint32          fpsFrame    = 0;
-  Uint32          fpsStart    = SDL_GetTicks();
+  Uint32          fpsStart    = SDL_GetTicks();  
   float           fps         = 0.0f;
   TTF_Font      * fpsFont     = NULL;
   SDL_Rect        fpsTextRect = {5, 5};
   SDL_Texture   * fpsText     = NULL;
 
-  int boxX = 100;
-  int boxY = 100;
+  int width = 1000;
+  int boxX  = 100;
+  int boxY  = 100;
 
   fpsFont = TTF_OpenFont("C:\\Windows\\Fonts\\cour.ttf", 24);
 
@@ -53,8 +54,9 @@ int main(int argc, char * argv[])
           switch (event.window.event)
           {
             case SDL_WINDOWEVENT_RESIZED:
-              boxX = event.window.data1 / 10;
-              boxY = (event.window.data2 - 40) / 10;
+              width = event.window.data1;
+              boxX  = event.window.data1 / 10;
+              boxY  = (event.window.data2 - 40) / 10;
               break;
           }
       }
@@ -90,6 +92,7 @@ int main(int argc, char * argv[])
     if (fpsText)
       SDL_DestroyTexture(fpsText);
     fpsText = SDL_CreateTextureFromSurface(renderer, fpsSurf);
+    fpsTextRect.x = width / 2 - fpsSurf->w / 2;
     fpsTextRect.w = fpsSurf->w;
     fpsTextRect.h = fpsSurf->h;
     SDL_FreeSurface(fpsSurf);
