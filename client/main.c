@@ -226,31 +226,6 @@ int renderThread(void * unused)
       pollDelay = microtime() - pollStart - 100;
     }
 
-    // sleep for the remainder of the presentation time
-    if (frameCount > 0)
-    {
-      const uint64_t t = microtime();
-      drawTime = t - drawStart;
-      if (drawTime < presentTime)
-      {
-        const uint64_t delta = presentTime - drawTime;
-        if (delta > 1000)
-          usleep(delta - 1000);
-
-        if (!params.vsync)
-        {
-          // poll for the final microsecond
-          const uint64_t target = t + delta;
-          while(microtime() <= target) {}
-        }
-      }
-
-      // ensure buffers are flushed
-      glFinish();
-    }
-
-    drawStart = microtime();
-
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
     memcpy(&header, state.shm, sizeof(struct KVMFRHeader));
@@ -443,8 +418,31 @@ int renderThread(void * unused)
 
     SDL_RenderPresent(state.renderer);
 
+    // sleep for the remainder of the presentation time
+    {
+      const uint64_t t = microtime();
+      drawTime = t - drawStart;
+      if (drawTime < presentTime)
+      {
+        const uint64_t delta = presentTime - drawTime;
+        if (delta > 1000)
+          usleep(delta - 1000);
+
+        if (!params.vsync)
+        {
+          // poll for the final microsecond
+          const uint64_t target = t + delta;
+          while(microtime() <= target) {}
+        }
+      }
+
+      // ensure buffers are flushed
+      glFinish();
+      drawStart = microtime();
+    }
+
     ++frameCount;
-    uint64_t t = microtime();
+    const uint64_t t = microtime();
     fpsTime  += t - fpsStart;
     fpsStart  = t;
   }
