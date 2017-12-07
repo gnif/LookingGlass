@@ -194,6 +194,9 @@ int renderThread(void * unused)
   uint64_t fpsStart = 0;
   uint64_t fpsTime  = 0;
 
+  unsigned int retardCount = 0;
+  unsigned int resyncCount = 0;
+
   #define SYNC_WINDOW 2000
 
   while(state.running)
@@ -207,6 +210,7 @@ int renderThread(void * unused)
     // we shouldn't have a frame yet, retard the timing a bit
     if (header.dataPos != state.shm->dataPos)
     {
+      ++retardCount;
       if (pollDelay >= SYNC_WINDOW / 2)
         pollDelay -= SYNC_WINDOW / 2;
       else
@@ -220,7 +224,14 @@ int renderThread(void * unused)
         // if we timed out, wait for an interrupt or a timeout
         if (microtime() - loopStart > SYNC_WINDOW)
         {
-          ivshmem_wait_irq(0, 1000000/30);
+          if (ivshmem_wait_irq(0, 1000000/30) == IVSHMEM_WAIT_RESULT_OK)
+          {
+            // might be a spurious interrupt we didn't answer earlier
+            if (header.dataPos == state.shm->dataPos)
+              continue;
+
+            ++resyncCount;
+          }
           break;
         }
       }
@@ -388,9 +399,9 @@ int renderThread(void * unused)
           textTexture = NULL;
         }
 
-        char str[32];
+        char str[128];
         const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
-        snprintf(str, sizeof(str), "FPS: %8.4f, Sync: %5lu", avgFPS, pollDelay);
+        snprintf(str, sizeof(str), "FPS: %8.4f, Retard: %d, Resync: %d", avgFPS, retardCount, resyncCount);
         SDL_Color color = {0xff, 0xff, 0xff};
         if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
         {
@@ -716,7 +727,7 @@ int run()
       return -1;
     }
 
-    state.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 16);
+    state.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 14);
     if (!state.font)
     {
       DEBUG_ERROR("TTL_OpenFont Failed");
