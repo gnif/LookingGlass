@@ -161,18 +161,16 @@ inline uint64_t microtime()
 
 uint64_t detectPresentTime()
 {
-  // warm up first as the GPU driver may have multiple buffers
-  for(int i = 0; i < 10; ++i)
-    SDL_RenderPresent(state.renderer);
-
-  // time 10 iterations and compute the average
-  const uint64_t start = microtime();
-  for(int i = 0; i < 10; ++i)
-    SDL_RenderPresent(state.renderer);
-  const uint64_t t = (microtime() - start) / 10;
-
-  // ensure all buffers are flushed
   glFinish();
+
+  // time 20 iterations and compute the average
+  const uint64_t start = microtime();
+  for(int i = 0; i < 20; ++i)
+  {
+    SDL_RenderPresent(state.renderer);
+    glFinish();
+  }
+  const uint64_t t = (microtime() - start) / 20;
 
   DEBUG_INFO("detected: %lu (%f Hz)", t, 1000000.0f / t);
   return t;
