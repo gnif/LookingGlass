@@ -211,19 +211,6 @@ void DXGI::DeInitialize()
   m_initialized = false;
 }
 
-bool DXGI::ReInitialize()
-{
-  DeInitialize();
-
-  /*
-    DXGI needs some time when mode switches occur, failing to do so causes
-    failure to start and exceptions internal to DXGI
-  */
-  Sleep(200);
-
-  return Initialize(m_options);
-}
-
 FrameType DXGI::GetFrameType()
 {
   if (!m_initialized)
@@ -240,10 +227,10 @@ size_t DXGI::GetMaxFrameSize()
   return (m_width * m_height * 4);
 }
 
-bool DXGI::GrabFrame(FrameInfo & frame)
+GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 {
   if (!m_initialized)
-    return false;
+    return GRAB_STATUS_ERROR;
 
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   CComPtr<IDXGIResource> res;
@@ -258,6 +245,8 @@ bool DXGI::GrabFrame(FrameInfo & frame)
     switch (status)
     {      
       case DXGI_ERROR_ACCESS_LOST: // desktop switch, mode change or switch DWM on or off
+        return GRAB_STATUS_REINIT;
+
       case WAIT_ABANDONED:         // this can happen also during desktop switches, not documented by MS though
       {
         // see if we can open the desktop, if not the secure desktop
@@ -275,7 +264,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
         if (!ReInitialize())
         {
           DEBUG_ERROR("Failed to ReInitialize after lost access to desktop");
-          return false;
+          return GRAB_STATUS_ERROR;
         }
         continue;
       }
@@ -283,7 +272,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
       default:
         // unknown failure
         DEBUG_INFO("AcquireNextFrame failed: %08x", status);
-        return false;
+        return GRAB_STATUS_ERROR;
     }
   }
 
@@ -292,7 +281,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   {
     m_dup->ReleaseFrame();
     DEBUG_ERROR("Failed to acquire next frame");
-    return false;
+    return GRAB_STATUS_ERROR;
   }
 
   CComQIPtr<ID3D11Texture2D> src = res;
@@ -300,7 +289,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   {
     m_dup->ReleaseFrame();
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
-    return false;
+    return GRAB_STATUS_ERROR;
   }
 
   D3D11_TEXTURE2D_DESC desc;
@@ -324,7 +313,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
     {
       m_dup->ReleaseFrame();
       DEBUG_ERROR("Failed to get the new pointer shape: %08x", status);
-      return false;
+      return GRAB_STATUS_ERROR;
     }
   }
 
@@ -336,7 +325,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   if (!surface)
   {
     DEBUG_ERROR("Failed to get IDXGISurface1");
-    return false;
+    return GRAB_STATUS_ERROR;
   }
 
   DXGI_MAPPED_RECT rect;
@@ -344,7 +333,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   if (FAILED(status))
   {
     DEBUG_ERROR("Failed to map surface: %08x", status);
-    return false;
+    return GRAB_STATUS_ERROR;
   }
 
   m_width  = desc.Width;
@@ -381,7 +370,7 @@ bool DXGI::GrabFrame(FrameInfo & frame)
       case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : type = CURSOR_TYPE_MONOCHROME  ; break;
       default:
         DEBUG_ERROR("Invalid cursor type");
-        return false;
+        return GRAB_STATUS_ERROR;
     }
 
     POINT cursorPos;
@@ -404,8 +393,8 @@ bool DXGI::GrabFrame(FrameInfo & frame)
   if (FAILED(status))
   {
     DEBUG_ERROR("Failed to unmap surface: %08x", status);
-    return false;
+    return GRAB_STATUS_ERROR;
   }
 
-  return true;
+  return GRAB_STATUS_OK;
 }

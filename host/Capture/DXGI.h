@@ -38,15 +38,24 @@ namespace Capture
 
     bool Initialize(CaptureOptions * options);
     void DeInitialize();
+    bool ReInitialize()
+    {
+      DeInitialize();
+      /*
+      DXGI needs some time when mode switches occur, failing to do so causes
+      failure to start and exceptions internal to DXGI
+      */
+      Sleep(200);
+      return Initialize(m_options);
+    }
+
     enum FrameType GetFrameType();
     enum FrameComp GetFrameCompression();
     size_t GetMaxFrameSize();
-    bool GrabFrame(struct FrameInfo & frame);
+    enum GrabStatus GrabFrame(struct FrameInfo & frame);
 
   private:
     CaptureOptions * m_options;
-
-    bool ReInitialize();
 
     bool          m_initialized;
     unsigned int  m_width;

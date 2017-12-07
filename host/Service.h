@@ -40,12 +40,15 @@ public:
   bool Process();
 
 private:
+  bool InitPointers();
+
   static Service * m_instance;
 
   Service();
   ~Service();
 
   bool       m_initialized;
+  uint8_t  * m_memory;
   IVSHMEM  * m_ivshmem;
   HANDLE     m_readyEvent;
   ICapture * m_capture;

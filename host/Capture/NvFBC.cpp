@@ -50,7 +50,7 @@ bool NvFBC::Initialize(CaptureOptions * options)
   if (m_initialized)
     DeInitialize();
 
-  m_options   = options;
+  m_options = options;
   m_optNoCrop = false;
   for (CaptureOptions::const_iterator it = options->cbegin(); it != options->cend(); ++it)
   {
@@ -212,12 +212,14 @@ size_t NvFBC::GetMaxFrameSize()
   return m_maxCaptureWidth * m_maxCaptureHeight * 4;
 }
 
-bool NvFBC::GrabFrame(struct FrameInfo & frame)
+enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
 {
   if (!m_initialized)
-    return false;
+    return GRAB_STATUS_ERROR;
 
   const HWND hDesktop = GetDesktopWindow();
+  const unsigned int screenWidth  = GetSystemMetrics(SM_CXSCREEN);
+  const unsigned int screenHeight = GetSystemMetrics(SM_CYSCREEN);
   RECT desktop;
   GetWindowRect(hDesktop, &desktop);
 
@@ -249,22 +251,22 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
 
       if (m_optNoCrop)
       {
-        dataWidth  = m_grabInfo.dwWidth * 4;
+        dataWidth = m_grabInfo.dwWidth * 4;
         dataOffset = 0;
 
-        frame.width  = m_grabInfo.dwWidth;
+        frame.width = m_grabInfo.dwWidth;
         frame.height = m_grabInfo.dwHeight;
       }
       else
       {
-        const unsigned int realHeight = min(m_grabInfo.dwHeight, (unsigned int)(desktop.bottom - desktop.top));
-        const unsigned int realWidth  = min(m_grabInfo.dwWidth , (unsigned int)(desktop.right  - desktop.left));
-        dataWidth  = realWidth * 4;
+        const unsigned int realHeight = min(m_grabInfo.dwHeight, screenHeight);
+        const unsigned int realWidth = min(m_grabInfo.dwWidth, screenWidth);
+        dataWidth = realWidth * 4;
         dataOffset =
           (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
-          ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 4;
+          ((m_grabInfo.dwWidth - realWidth) >> 1)) * 4;
 
-        frame.width  = realWidth;
+        frame.width = realWidth;
         frame.height = realHeight;
       }
 
@@ -276,27 +278,22 @@ bool NvFBC::GrabFrame(struct FrameInfo & frame)
       for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 4)
         memcpySSE(dst, src, dataWidth);
 
-      return true;
+      return GRAB_STATUS_OK;
     }
 
     if (status == NVFBC_ERROR_DYNAMIC_DISABLE)
     {
       DEBUG_ERROR("NvFBC was disabled by someone else");
-      return false;
+      return GRAB_STATUS_ERROR;
     }
 
     if (status == NVFBC_ERROR_INVALIDATED_SESSION)
     {
       DEBUG_WARN("Session was invalidated, attempting to restart");
-      DeInitialize();
-      if (!Initialize(m_options))
-      {
-        DEBUG_ERROR("Failed to re-iniaialize");
-        return false;
-      }
+      return GRAB_STATUS_REINIT;
     }
   }
 
   DEBUG_ERROR("Failed to grab frame");
-  return false;
+  return GRAB_STATUS_ERROR;
 }

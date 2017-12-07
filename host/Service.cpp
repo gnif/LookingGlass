@@ -28,6 +28,7 @@ Service * Service::m_instance = NULL;
 
 Service::Service() :
   m_initialized(false),
+  m_memory(NULL),
   m_readyEvent(INVALID_HANDLE_VALUE),
   m_capture(NULL),
   m_header(NULL),
@@ -60,32 +61,21 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  uint8_t * memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
-  if (!memory)
+  m_memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
+  if (!m_memory)
   {
     DEBUG_ERROR("Failed to get IVSHMEM memory");
     DeInitialize();
     return false;
   }
 
+  if (!InitPointers())
+    return false;
+
   m_readyEvent = m_ivshmem->CreateVectorEvent(0);
   if (m_readyEvent == INVALID_HANDLE_VALUE)
   {
     DEBUG_ERROR("Failed to get event for vector 0");
-    DeInitialize();
-    return false;
-  }
-
-  m_header        = reinterpret_cast<KVMFRHeader *>(memory);
-  m_frame[0]      = (uint8_t *)(((uintptr_t)memory + sizeof(KVMFRHeader *) + 0x7F) & ~0x7F);
-  m_frameSize     = ((m_ivshmem->GetSize() - (m_frame[0] - memory)) & ~0x7F) >> 1;
-  m_frame[1]      = m_frame[0] + m_frameSize;
-  m_dataOffset[0] = m_frame[0] - memory;
-  m_dataOffset[1] = m_frame[1] - memory;
-
-  if (m_capture->GetMaxFrameSize() > m_frameSize)
-  {
-    DEBUG_ERROR("Frame can exceed buffer size!");
     DeInitialize();
     return false;
   }
@@ -105,10 +95,32 @@ bool Service::Initialize(ICapture * captureDevice)
   return true;
 }
 
+bool Service::InitPointers()
+{
+  m_header = reinterpret_cast<KVMFRHeader *>(m_memory);
+  m_frame[0] = (uint8_t *)(((uintptr_t)m_memory + sizeof(KVMFRHeader *) + 0x7F) & ~0x7F);
+  m_frameSize = ((m_ivshmem->GetSize() - (m_frame[0] - m_memory)) & ~0x7F) >> 1;
+  m_frame[1] = m_frame[0] + m_frameSize;
+  m_dataOffset[0] = m_frame[0] - m_memory;
+  m_dataOffset[1] = m_frame[1] - m_memory;
+
+  if (m_capture->GetMaxFrameSize() > m_frameSize)
+  {
+    DEBUG_ERROR("Frame can exceed buffer size!");
+    DeInitialize();
+    return false;
+  }
+
+  return true;
+}
+
 void Service::DeInitialize()
 {
   if (m_readyEvent != INVALID_HANDLE_VALUE)
+  {
     CloseHandle(m_readyEvent);
+    m_readyEvent = INVALID_HANDLE_VALUE;
+  }
 
   m_header        = NULL;
   m_frame[0]      = NULL;
@@ -124,6 +136,7 @@ void Service::DeInitialize()
     m_capture = NULL;
   }
 
+  m_memory = NULL;
   m_initialized = false;
 }
 
@@ -165,11 +178,38 @@ bool Service::Process()
   }
   ResetEvent(m_readyEvent);
 
-  // capture a frame of data
-  if (!m_capture->GrabFrame(frame))
+  bool ok = false;
+  for(int i = 0; i < 2; ++i)
   {
-    m_header->dataLen = 0;
-    DEBUG_ERROR("Capture failed");
+    // capture a frame of data
+    switch (m_capture->GrabFrame(frame))
+    {
+      case GRAB_STATUS_OK:
+        ok = true;
+        break;
+
+      case GRAB_STATUS_ERROR:
+        m_header->dataLen = 0;
+        DEBUG_ERROR("Capture failed");
+        return false;
+
+      case GRAB_STATUS_REINIT:
+        DEBUG_INFO("ReInitialize Requested");
+        if (!m_capture->ReInitialize() || !InitPointers())
+        {
+          DEBUG_ERROR("ReInitialize Failed");
+          return false;
+        }
+        continue;
+    }
+
+    if (ok)
+      break;
+  }
+
+  if (!ok)
+  {
+    DEBUG_ERROR("Capture retry count exceeded");
     return false;
   }
 
@@ -190,7 +230,7 @@ bool Service::Process()
   else
   {
     POINT cursorPos;
-    GetCursorPos(&cursorPos);
+    GetPhysicalCursorPos(&cursorPos);
     m_header->mouseX = cursorPos.x;
     m_header->mouseY = cursorPos.y;
   }

@@ -34,6 +34,13 @@ struct FrameInfo
   int mouseX, mouseY;
 };
 
+enum GrabStatus
+{
+  GRAB_STATUS_OK,
+  GRAB_STATUS_REINIT,
+  GRAB_STATUS_ERROR
+};
+
 typedef std::vector<const char *> CaptureOptions;
 
 __interface ICapture
@@ -43,7 +50,8 @@ public:
   
   bool Initialize(CaptureOptions * options);
   void DeInitialize();
+  bool ReInitialize();
   enum FrameType GetFrameType();
   size_t GetMaxFrameSize();
-  bool GrabFrame(struct FrameInfo & frame);
+  enum GrabStatus GrabFrame(struct FrameInfo & frame);
 };

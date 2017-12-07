@@ -37,10 +37,15 @@ namespace Capture
 
     bool Initialize(CaptureOptions * options);
     void DeInitialize();
+    bool ReInitialize()
+    {
+      DeInitialize();
+      return Initialize(m_options);
+    }
     enum FrameType GetFrameType();
     enum FrameComp GetFrameCompression();
     size_t GetMaxFrameSize();
-    bool GrabFrame(struct FrameInfo & frame);
+    enum GrabStatus GrabFrame(struct FrameInfo & frame);
 
   private:
     CaptureOptions * m_options;
