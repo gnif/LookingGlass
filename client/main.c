@@ -72,7 +72,6 @@ struct AppParams
   int          x, y;
   unsigned int w, h;
   const char * ivshmemSocket;
-  bool         useBufferStorage;
   bool         useMipmap;
   bool         showFPS;
   bool         useSpice;
@@ -96,7 +95,6 @@ struct AppParams params =
   .w                = 1024,
   .h                = 768,
   .ivshmemSocket    = "/tmp/ivshmem_socket",
-  .useBufferStorage = true,
   .useMipmap        = true,
   .showFPS          = false,
   .useSpice         = true,
@@ -768,17 +766,6 @@ int run()
     return -1;
   }
 
-  SDL_GL_SetSwapInterval(params.vsync ? 1 : 0);
-  if (params.useBufferStorage)
-  {
-    const GLubyte * extensions = glGetString(GL_EXTENSIONS);
-    if (gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
-    {
-      DEBUG_INFO("Using GL_ARB_buffer_storage");
-      state.hasBufferStorage = true;
-    }
-  }
-
   int         shm_fd    = 0;
   SDL_Thread *t_ivshmem = NULL;
   SDL_Thread *t_spice   = NULL;
@@ -894,7 +881,6 @@ void doHelp(char * app)
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
     "\n"
-    "  -g        Disable OpenGL 4.3 Buffer Storage (GL_ARB_buffer_storage)\n"
     "  -m        Disable mipmapping\n"
     "  -v        Disable VSync\n"
     "  -k        Enable FPS display\n"
@@ -948,7 +934,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMgmvkanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMmvkanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -979,10 +965,6 @@ int main(int argc, char * argv[])
 
       case 'M':
         params.hideMouse = false;
-        break;
-
-      case 'g':
-        params.useBufferStorage = false;
         break;
 
       case 'm':
