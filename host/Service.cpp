@@ -195,12 +195,6 @@ bool Service::Process()
     m_header->mouseY = cursorPos.y;
   }
 
-  if (!m_ivshmem->RingDoorbell(m_header->hostID, 0))
-  {
-    DEBUG_ERROR("Failed to ring doorbell");
-    return false;
-  }
-
   if (++m_frameIndex == 2)
     m_frameIndex = 0;
 
