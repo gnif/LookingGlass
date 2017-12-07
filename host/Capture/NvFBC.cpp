@@ -33,7 +33,7 @@ using namespace Capture;
 
 NvFBC::NvFBC() :
   m_options(NULL),
-  m_optNoCrop(false),
+  m_optCrop(false),
   m_optNoWait(false),
   m_initialized(false),
   m_hDLL(NULL),
@@ -51,10 +51,10 @@ bool NvFBC::Initialize(CaptureOptions * options)
     DeInitialize();
 
   m_options = options;
-  m_optNoCrop = false;
+  m_optCrop = false;
   for (CaptureOptions::const_iterator it = options->cbegin(); it != options->cend(); ++it)
   {
-    if (_strcmpi(*it, "nocrop") == 0) { m_optNoCrop = true; continue; }
+    if (_strcmpi(*it, "crop"  ) == 0) { m_optCrop   = true; continue; }
     if (_strcmpi(*it, "nowait") == 0) { m_optNoWait = true; continue; }
   }
 
@@ -249,15 +249,7 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
       unsigned int dataWidth;
       unsigned int dataOffset;
 
-      if (m_optNoCrop)
-      {
-        dataWidth = m_grabInfo.dwWidth * 4;
-        dataOffset = 0;
-
-        frame.width = m_grabInfo.dwWidth;
-        frame.height = m_grabInfo.dwHeight;
-      }
-      else
+      if (m_optCrop)
       {
         const unsigned int realHeight = min(m_grabInfo.dwHeight, screenHeight);
         const unsigned int realWidth = min(m_grabInfo.dwWidth, screenWidth);
@@ -268,6 +260,14 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
 
         frame.width = realWidth;
         frame.height = realHeight;
+      }
+      else
+      {
+        dataWidth = m_grabInfo.dwWidth * 4;
+        dataOffset = 0;
+
+        frame.width = m_grabInfo.dwWidth;
+        frame.height = m_grabInfo.dwHeight;
       }
 
       frame.stride  = frame.width;
