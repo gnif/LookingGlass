@@ -52,7 +52,7 @@ struct AppState
   bool      started;
 
   TTF_Font       *font;
-  SDL_Rect        srcRect;
+  SDL_Point       srcSize;
   LG_RendererRect dstRect;
   float           scaleX, scaleY;
 
@@ -112,7 +112,7 @@ inline void updatePositionInfo()
 
   if (params.keepAspect)
   {
-    const float srcAspect = (float)state.srcRect.h / (float)state.srcRect.w;
+    const float srcAspect = (float)state.srcSize.y / (float)state.srcSize.x;
     const float wndAspect = (float)h / (float)w;
     if (wndAspect < srcAspect)
     {
@@ -137,19 +137,8 @@ inline void updatePositionInfo()
     state.dstRect.h = h;
   }
 
-  state.scaleX = (float)state.srcRect.h / (float)state.dstRect.h;
-  state.scaleY = (float)state.srcRect.w / (float)state.dstRect.w;
-}
-
-inline bool areFormatsSame(const struct KVMFRHeader s1, const struct KVMFRHeader s2)
-{
-  return
-    (s1.frameType != FRAME_TYPE_INVALID) &&
-    (s2.frameType != FRAME_TYPE_INVALID) &&
-    (s1.version   == s2.version  ) &&
-    (s1.frameType == s2.frameType) &&
-    (s1.width     == s2.width    ) &&
-    (s1.height    == s2.height   );
+  state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
+  state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
 }
 
 inline uint64_t microtime()
@@ -332,10 +321,8 @@ int renderThread(void * unused)
         }
       }
 
-      state.srcRect.x = 0;
-      state.srcRect.y = 0;
-      state.srcRect.w = header.width;
-      state.srcRect.h = header.height;
+      state.srcSize.x = header.width;
+      state.srcSize.y = header.height;
       updatePositionInfo();
     }
 
