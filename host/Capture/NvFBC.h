@@ -49,7 +49,7 @@ namespace Capture
 
   private:
     CaptureOptions * m_options;
-    bool m_optCrop;
+    bool m_optNoCrop;
     bool m_optNoWait;
 
     bool m_initialized;

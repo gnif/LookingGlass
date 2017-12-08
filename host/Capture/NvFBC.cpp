@@ -33,7 +33,7 @@ using namespace Capture;
 
 NvFBC::NvFBC() :
   m_options(NULL),
-  m_optCrop(false),
+  m_optNoCrop(false),
   m_optNoWait(false),
   m_initialized(false),
   m_hDLL(NULL),
@@ -51,11 +51,11 @@ bool NvFBC::Initialize(CaptureOptions * options)
     DeInitialize();
 
   m_options = options;
-  m_optCrop = false;
+  m_optNoCrop = false;
   for (CaptureOptions::const_iterator it = options->cbegin(); it != options->cend(); ++it)
   {
-    if (_strcmpi(*it, "crop"  ) == 0) { m_optCrop   = true; continue; }
-    if (_strcmpi(*it, "nowait") == 0) { m_optNoWait = true; continue; }
+    if (_strcmpi(*it, "nocrop") == 0) { m_optNoCrop = false; continue; }
+    if (_strcmpi(*it, "nowait") == 0) { m_optNoWait = true ; continue; }
   }
 
   std::string nvfbc = Util::GetSystemRoot() + "\\" + NVFBC_LIBRARY_NAME;
@@ -217,15 +217,9 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
-  const HWND hDesktop = GetDesktopWindow();
-  const unsigned int screenWidth  = GetSystemMetrics(SM_CXSCREEN);
-  const unsigned int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-  RECT desktop;
-  GetWindowRect(hDesktop, &desktop);
-
   for(int i = 0; i < 2; ++i)
   {
-    NVFBCRESULT status = m_nvFBC->NvFBCToSysGrabFrame(&m_grabFrameParams);
+    NVFBCRESULT status  = m_nvFBC->NvFBCToSysGrabFrame(&m_grabFrameParams);
 
     if (status == NVFBC_SUCCESS)
     {
@@ -249,25 +243,46 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
       unsigned int dataWidth;
       unsigned int dataOffset;
 
-      if (m_optCrop)
+      if (m_optNoCrop)
       {
-        const unsigned int realHeight = min(m_grabInfo.dwHeight, screenHeight);
-        const unsigned int realWidth = min(m_grabInfo.dwWidth, screenWidth);
-        dataWidth = realWidth * 4;
-        dataOffset =
-          (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
-          ((m_grabInfo.dwWidth - realWidth) >> 1)) * 4;
-
-        frame.width = realWidth;
-        frame.height = realHeight;
+        dataWidth    = m_grabInfo.dwWidth * 4;
+        dataOffset   = 0;
+        frame.width  = m_grabInfo.dwWidth;
+        frame.height = m_grabInfo.dwHeight;
       }
       else
       {
-        dataWidth = m_grabInfo.dwWidth * 4;
-        dataOffset = 0;
+        // get the actual resolution
+        HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO monitorInfo;
+        monitorInfo.cbSize = sizeof(MONITORINFO);
 
-        frame.width = m_grabInfo.dwWidth;
-        frame.height = m_grabInfo.dwHeight;
+        unsigned int screenWidth, screenHeight;
+        if (!GetMonitorInfo(monitor, &monitorInfo))
+        {
+          DEBUG_WARN("Failed to get monitor dimensions, assuming no cropping required");
+          screenWidth  = m_grabInfo.dwWidth;
+          screenHeight = m_grabInfo.dwHeight;;
+        }
+        else
+        {
+          screenWidth  = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+          screenHeight = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+        }
+
+        // use the smaller or the two dimensions provided just to be sure we don't overflow the buffer
+        const unsigned int realHeight = min(m_grabInfo.dwHeight, screenHeight);
+        const unsigned int realWidth  = min(m_grabInfo.dwWidth , screenWidth );
+
+        // calculate the new data width and offset to the start of the data
+        dataWidth  = realWidth * 4;
+        dataOffset =
+          (((m_grabInfo.dwHeight - realHeight) >> 1)  * m_grabInfo.dwBufferWidth +
+            ((m_grabInfo.dwWidth  - realWidth ) >> 1)) * 4;
+
+        // update the frame size
+        frame.width  = realWidth;
+        frame.height = realHeight;
       }
 
       frame.stride  = frame.width;
