@@ -206,8 +206,8 @@ bool lgr_opengl_render(void * opaque, const LG_RendererRect destRect, const uint
   );
 
   const bool mipmap = resample && (
-    (this->format.width  != destRect.w) ||
-    (this->format.height != destRect.h));
+    (this->format.width  > destRect.w) ||
+    (this->format.height > destRect.h));
 
   // unbind the buffer
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
