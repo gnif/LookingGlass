@@ -323,6 +323,8 @@ int renderThread(void * unused)
 
       state.srcSize.x = header.width;
       state.srcSize.y = header.height;
+      if (params.autoResize)
+        SDL_SetWindowSize(state.window, header.width, header.height);
       updatePositionInfo();
     }
 
