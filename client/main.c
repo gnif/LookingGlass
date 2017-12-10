@@ -562,6 +562,8 @@ int eventThread(void * arg)
 
 int run()
 {
+  DEBUG_INFO("Looking Glass (" BUILD_VERSION ")");
+
   memset(&state, 0, sizeof(state));
   state.running = true;
   state.scaleX  = 1.0f;

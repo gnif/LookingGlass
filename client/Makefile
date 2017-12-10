@@ -12,6 +12,8 @@ LDFLAGS += $(shell pkg-config --libs   $(LIBS))
 BUILD   ?= .build
 BIN     ?= bin
 
+CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbrev=10 --tags)"'
+
 OBJS	= main.o \
 	  spice/spice.o \
 	  ivshmem/ivshmem.o \
