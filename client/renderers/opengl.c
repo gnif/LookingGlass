@@ -95,6 +95,10 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     return false;
   }
 
+  DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
+  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
+  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+
   if (!glXGetVideoSyncSGI)
   {
     glXGetVideoSyncSGI  = (PFNGLXGETVIDEOSYNCSGIPROC )glXGetProcAddress((const GLubyte *)"glXGetVideoSyncSGI" );
