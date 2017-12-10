@@ -280,7 +280,7 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
     gluOrtho2D(0, this->params.width, this->params.height, 0);
     glMatrixMode(GL_MODELVIEW);
 
-    DEBUG_INFO("resize");
+    // update the display lists
     for(int i = 0; i < VBO_BUFFERS; ++i)
     {
       glNewList(this->texList + i, GL_COMPILE);
