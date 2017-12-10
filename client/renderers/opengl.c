@@ -420,9 +420,10 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
   if (this->fpsTexture)
     glCallList(this->fpsList);
 
+  glFlush();
+
   ++this->frameCount;
   SDL_GL_SwapWindow(this->params.window);
-  glFlush();
 
   // wait until the frame has been presented, this is to avoid the video card
   // buffering frames, we would rather skip a frame then fall behind the guest
@@ -432,10 +433,8 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
   {
     uint remainder;
     glXWaitVideoSyncSGI(count, 1, &remainder);
-    this->gpuFrameCount = count + 1;
   }
-  else
-    this->gpuFrameCount = count;
+  this->gpuFrameCount = count + 1;
 
   const uint64_t t    = nanotime();
   this->renderTime   += t - this->lastFrameTime;
