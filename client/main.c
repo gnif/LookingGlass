@@ -612,6 +612,11 @@ int run()
     FcPatternDestroy(pat);
   }
 
+  // while this is related to opengl, it must happen before the window is created
+  // as such it can not be part of the opengl renderer
+  if (!params.vsync)
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+
   state.window = SDL_CreateWindow(
     "Looking Glass (Client)",
     params.center ? SDL_WINDOWPOS_CENTERED : params.x,

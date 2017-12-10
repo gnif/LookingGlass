@@ -8,15 +8,17 @@
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glu.h>
+#include <GL/glx.h>
 
 #include "debug.h"
 #include "memcpySSE.h"
 #include "utils.h"
 
-// limit the FPS when sync is turned off
-#define FPS_LIMIT 240
-
 #define VBO_BUFFERS 2
+
+static PFNGLXGETVIDEOSYNCSGIPROC  glXGetVideoSyncSGI  = NULL;
+static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
+static PFNGLXSWAPINTERVALSGIPROC  glXSwapIntervalSGI  = NULL;
 
 struct LGR_OpenGL
 {
@@ -30,7 +32,6 @@ struct LGR_OpenGL
   GLuint            vboFormat;
   size_t            texSize;
 
-  uint64_t          presentTime;
   uint64_t          drawStart;
   bool              hasBuffers;
   GLuint            vboID[VBO_BUFFERS];
@@ -40,6 +41,7 @@ struct LGR_OpenGL
   bool              hasTextures;
   GLuint            vboTex[VBO_BUFFERS + 1]; // extra texture for FPS
 
+  uint              gpuFrameCount;
   bool              fpsTexture;
   uint64_t          lastFrameTime;
   uint64_t          renderTime;
@@ -47,8 +49,7 @@ struct LGR_OpenGL
   SDL_Rect          fpsRect;
 };
 
-uint64_t lgr_opengl_benchmark();
-void     lgr_opengl_on_resize(void * opaque, const int width, const int height);
+void lgr_opengl_on_resize(void * opaque, const int width, const int height);
 
 bool lgr_opengl_check_error(const char * name)
 {
@@ -92,14 +93,21 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     return false;
   }
 
-  if (params.vsync)
+  if (!glXGetVideoSyncSGI)
   {
-    // try for dynamic vsync first
-    if (!SDL_GL_SetSwapInterval(-1))
-      SDL_GL_SetSwapInterval(1);
+    glXGetVideoSyncSGI  = (PFNGLXGETVIDEOSYNCSGIPROC )glXGetProcAddress((const GLubyte *)"glXGetVideoSyncSGI" );
+    glXWaitVideoSyncSGI = (PFNGLXWAITVIDEOSYNCSGIPROC)glXGetProcAddress((const GLubyte *)"glXWaitVideoSyncSGI");
+    glXSwapIntervalSGI  = (PFNGLXSWAPINTERVALSGIPROC )glXGetProcAddress((const GLubyte *)"glXSwapIntervalSGI" );
+
+    if (!glXGetVideoSyncSGI || !glXWaitVideoSyncSGI || !glXSwapIntervalSGI)
+    {
+      glXGetVideoSyncSGI = NULL;
+      DEBUG_ERROR("Failed to get proc addresses");
+      return false;
+    }
   }
-  else
-    SDL_GL_SetSwapInterval(0);
+
+  SDL_GL_SetSwapInterval(params.vsync ? 1 : 0);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -196,36 +204,12 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   glBlendEquation(GL_FUNC_ADD);
 
   this->resizeWindow = true;
-  this->presentTime  = lgr_opengl_benchmark(this);
   this->drawStart    = nanotime();
 
   // copy the format into the local storage
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
   this->initialized = true;
   return true;
-}
-
-uint64_t lgr_opengl_benchmark(struct LGR_OpenGL * this)
-{
-  glFinish();
-
-  // time 20 iterations and compute the average
-  const uint64_t start = nanotime();
-  for(int i = 0; i < 20; ++i)
-  {
-    SDL_GL_SwapWindow(this->params.window);
-    glFinish();
-  }
-  const uint64_t t = (nanotime() - start) / 20;
-
-  DEBUG_INFO("detected: %lu (%f Hz)", t, 1e9f / t);
-  if (t < 2e6)
-  {
-    DEBUG_INFO("present time too low, setting framerate limit to %d Hz", FPS_LIMIT);
-    return ceil(((double)1e9/(double)FPS_LIMIT));
-  }
-
-  return t;
 }
 
 void lgr_opengl_deinitialize(void * opaque)
@@ -291,8 +275,56 @@ bool lgr_opengl_render(void * opaque, const LG_RendererRect destRect, const uint
     glClear(GL_COLOR_BUFFER_BIT);
   }
 
+  if (this->params.showFPS && this->renderTime > 1e9)
+  {
+    char str[128];
+    const float avgFPS = 1000.0f / (((float)this->renderTime / this->frameCount) / 1e6f);
+    snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
+    SDL_Color color = {0xff, 0xff, 0xff};
+    SDL_Surface *textSurface = NULL;
+    if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
+    {
+      DEBUG_ERROR("Failed to render text");
+      return false;
+    }
+
+    glBindTexture(GL_TEXTURE_2D       , this->vboTex[VBO_BUFFERS]);
+    glPixelStorei(GL_UNPACK_ALIGNMENT , 4              );
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w );
+    glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      textSurface->format->BytesPerPixel,
+      textSurface->w,
+      textSurface->h,
+      0,
+      GL_BGRA,
+      GL_UNSIGNED_BYTE,
+      textSurface->pixels
+    );
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    this->fpsRect.x = 5;
+    this->fpsRect.y = 5;
+    this->fpsRect.w = textSurface->w;
+    this->fpsRect.h = textSurface->h;
+
+    SDL_FreeSurface(textSurface);
+
+    this->renderTime = 0;
+    this->frameCount = 0;
+    this->fpsTexture = true;
+  }
+
   // copy the buffer to the texture
   memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
+
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
   glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
 
@@ -300,11 +332,26 @@ bool lgr_opengl_render(void * opaque, const LG_RendererRect destRect, const uint
   glBindTexture(GL_TEXTURE_2D         , this->vboTex[this->texIndex]);
   glPixelStorei(GL_UNPACK_ALIGNMENT   , 4                           );
   glPixelStorei(GL_UNPACK_ROW_LENGTH  , this->format.width          );
+
+  // wait until the last frame has been presented
+  glFlush();
+  uint count;
+  glXGetVideoSyncSGI(&count);
+  if (this->gpuFrameCount == count)
+  {
+    uint remainder;
+    glXWaitVideoSyncSGI(count, 1, &remainder);
+    this->gpuFrameCount = count + 1;
+  }
+  else
+    this->gpuFrameCount = count;
+
+  // update the texture
   glTexSubImage2D(
     GL_TEXTURE_2D,
     0,
     0, 0,
-    this->format.width,
+    this->format.width ,
     this->format.height,
     this->vboFormat,
     GL_UNSIGNED_BYTE,
@@ -343,109 +390,33 @@ bool lgr_opengl_render(void * opaque, const LG_RendererRect destRect, const uint
     glTexCoord2f(1.0f, 1.0f); glVertex2i(destRect.x + destRect.w, destRect.y + destRect.h);
   glEnd();
 
-  glBindTexture(GL_TEXTURE_2D, 0);
-
-  if (this->params.showFPS)
+  if (this->fpsTexture)
   {
-    if (this->renderTime > 1e9)
-    {
-      char str[128];
-      const float avgFPS = 1000.0f / (((float)this->renderTime / this->frameCount) / 1e6f);
-      snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
-      SDL_Color color = {0xff, 0xff, 0xff};
-      SDL_Surface *textSurface = NULL;
-      if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
-      {
-        DEBUG_ERROR("Failed to render text");
-        return false;
-      }
+    glEnable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+    glBegin(GL_TRIANGLE_STRIP);
+      glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+      glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+      glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+      glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+    glEnd();
+    glEnable(GL_TEXTURE_2D);
 
-      glBindTexture(GL_TEXTURE_2D       , this->vboTex[2]);
-      glPixelStorei(GL_UNPACK_ALIGNMENT , 4              );
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w );
-      glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        textSurface->format->BytesPerPixel,
-        textSurface->w,
-        textSurface->h,
-        0,
-        GL_BGRA,
-        GL_UNSIGNED_BYTE,
-        textSurface->pixels
-      );
-
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-      glBindTexture(GL_TEXTURE_2D, 0);
-
-      this->fpsRect.x = 5;
-      this->fpsRect.y = 5;
-      this->fpsRect.w = textSurface->w;
-      this->fpsRect.h = textSurface->h;
-
-      SDL_FreeSurface(textSurface);
-
-      this->renderTime = 0;
-      this->frameCount = 0;
-      this->fpsTexture = true;
-    }
-
-    if (this->fpsTexture)
-    {
-      glEnable(GL_BLEND);
-      glDisable(GL_TEXTURE_2D);
-      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-        glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-      glEnd();
-      glEnable(GL_TEXTURE_2D);
-
-      glBindTexture(GL_TEXTURE_2D, this->vboTex[2]);
-      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-        glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-        glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-        glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-      glEnd();
-      glBindTexture(GL_TEXTURE_2D, 0);
-      glDisable(GL_BLEND);
-    }
-  }
-  glFlush();
-
-  // sleep for the remainder of the presentation time
-  {
-    const uint64_t t        = nanotime();
-    const uint64_t drawTime = t - this->drawStart;
-    if (drawTime < this->presentTime)
-    {
-      const uint64_t delta = (this->presentTime - drawTime);
-      if (delta > 1e5)
-        usleep((delta - 1e5) / 1e3);
-
-      if (!this->params.vsync)
-      {
-        // poll for the final microsecond
-        const uint64_t target = t + delta;
-        while(nanotime() <= target) {}
-      }
-    }
-
-    // ensure buffers are flushed
-    glFinish();
-    this->drawStart = nanotime();
+    glBindTexture(GL_TEXTURE_2D, this->vboTex[VBO_BUFFERS]);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_TRIANGLE_STRIP);
+      glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+      glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+      glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+      glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+    glEnd();
+    glDisable(GL_BLEND);
   }
 
-  SDL_GL_SwapWindow(this->params.window);
   ++this->frameCount;
+  if (this->params.vsync)
+    SDL_GL_SwapWindow(this->params.window);
 
   const uint64_t t    = nanotime();
   this->renderTime   += t - this->lastFrameTime;
