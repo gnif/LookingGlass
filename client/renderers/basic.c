@@ -110,6 +110,13 @@ bool lgr_basic_is_compatible(void * opaque, const LG_RendererFormat format)
   return (memcmp(&this->format, &format, sizeof(LG_RendererFormat)) == 0);
 }
 
+void lgr_basic_on_resize(void * opaque, const int width, const int height)
+{
+  const struct LGR_Basic * this = (struct LGR_Basic *)opaque;
+  if (!this || !this->initialized)
+    return;
+}
+
 bool lgr_basic_render(void * opaque, const LG_RendererRect destRect, const uint8_t * data, bool resample)
 {
   struct LGR_Basic * this = (struct LGR_Basic *)opaque;
@@ -145,6 +152,7 @@ bool lgr_basic_render(void * opaque, const LG_RendererRect destRect, const uint8
 
   SDL_UnlockTexture(this->texture);
   SDL_RenderCopy(this->renderer, this->texture, NULL, &rect);
+  SDL_RenderPresent(this->renderer);
 
   return true;
 }
@@ -155,5 +163,6 @@ const LG_Renderer LGR_Basic =
   .initialize    = lgr_basic_initialize,
   .deinitialize  = lgr_basic_deinitialize,
   .is_compatible = lgr_basic_is_compatible,
+  .on_resize     = lgr_basic_on_resize,
   .render        = lgr_basic_render
 };

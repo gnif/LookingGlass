@@ -271,7 +271,7 @@ int renderThread(void * unused)
         {
           if (!IS_LG_RENDERER_VALID(*r))
           {
-            DEBUG_ERROR("FIXME: Renderer %d is invalid, skpping", (int)(r - &LG_Renderers[0]));
+            DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", (int)(r - &LG_Renderers[0]));
             continue;
           }
 
