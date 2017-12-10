@@ -375,8 +375,8 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
     POINT cursorPos;
     POINT cursorRect;
-    cursorPos.x  = m_pointerPos.x - m_shapeInfo.HotSpot.x;
-    cursorPos.y  = m_pointerPos.y - m_shapeInfo.HotSpot.y;
+    cursorPos.x  = m_pointerPos.x;
+    cursorPos.y  = m_pointerPos.y;
     cursorRect.x = m_shapeInfo.Width;
     cursorRect.y = m_shapeInfo.Height;
 
