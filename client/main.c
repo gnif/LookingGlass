@@ -32,6 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <fontconfig/fontconfig.h>
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
@@ -715,12 +716,35 @@ int run()
       return -1;
     }
 
-    state.font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 14);
-    if (!state.font)
+    FcConfig  * config = FcInitLoadConfigAndFonts();
+    if (!config)
     {
-      DEBUG_ERROR("TTL_OpenFont Failed");
+      DEBUG_ERROR("FcInitLoadConfigAndFonts Failed");
       return -1;
     }
+
+    FcPattern * pat = FcNameParse((const FcChar8*)"FreeMono");
+    FcConfigSubstitute (config, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+    FcResult result;
+    FcChar8 * file = NULL;
+    FcPattern * font = FcFontMatch(config, pat, &result);
+
+    if (font && (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch))
+    {
+      state.font = TTF_OpenFont((char *)file, 14);
+      if (!state.font)
+      {
+        DEBUG_ERROR("TTL_OpenFont Failed");
+        return -1;
+      }
+    }
+    else
+    {
+      DEBUG_ERROR("Failed to locate a font for FPS display");
+      return -1;
+    }
+    FcPatternDestroy(pat);
   }
 
   state.window = SDL_CreateWindow(
