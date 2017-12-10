@@ -163,6 +163,12 @@ uint64_t detectPresentTime()
   const uint64_t t = (microtime() - start) / 20;
 
   DEBUG_INFO("detected: %lu (%f Hz)", t, 1000000.0f / t);
+  if (t < 2000)
+  {
+    DEBUG_INFO("present time too low, setting framerate limit to %d Hz", FPS_LIMIT);
+    return ceil((1000000.0/(double)FPS_LIMIT));
+  }
+
   return t;
 }
 
@@ -176,11 +182,7 @@ int renderThread(void * unused)
   SDL_Texture       * textTexture = NULL;
   SDL_Rect            textRect;
 
-  const uint64_t presentTime =
-    params.vsync ?
-      detectPresentTime() :
-      ceil((1000000.0/(double)FPS_LIMIT));
-
+  const uint64_t presentTime = detectPresentTime();
   unsigned int   lateCount   = 0;
 
   int      pollDelay = 0;
