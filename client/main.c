@@ -18,7 +18,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <getopt.h>
 #include <SDL2/SDL.h>
-#include <SDL_ttf.h>
+#include <SDL2/SDL_syswm.h>
+#include <SDL2/SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -624,6 +625,32 @@ int run()
       (params.borderless  ? SDL_WINDOW_BORDERLESS : 0)
     )
   );
+
+  // set the compositor hint to bypass for low latency
+  SDL_SysWMinfo wminfo;
+  SDL_VERSION(&wminfo.version);
+  if (SDL_GetWindowWMInfo(state.window, &wminfo))
+  {
+    if (wminfo.subsystem == SDL_SYSWM_X11)
+    {
+      Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
+        wminfo.info.x11.display,
+        "NETWM_BYPASS_COMPOSITOR",
+        False);
+
+      unsigned long value = 1;
+      XChangeProperty(
+        wminfo.info.x11.display,
+        wminfo.info.x11.window,
+        NETWM_BYPASS_COMPOSITOR,
+        XA_CARDINAL,
+        32,
+        PropModeReplace,
+        (unsigned char *)&value,
+        1
+      );
+    }
+  }
 
   if (!state.window)
   {
