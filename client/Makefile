@@ -6,7 +6,7 @@ CFLAGS  += -ffast-math
 CFLAGS  += -fdata-sections -ffunction-sections
 LDFLAGS += -Wl,--gc-sections
 
-LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig
+LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11
 CFLAGS  += $(shell pkg-config --cflags $(LIBS))
 LDFLAGS += $(shell pkg-config --libs   $(LIBS))
 BUILD   ?= .build
