@@ -223,7 +223,14 @@ int renderThread(void * unused)
     // check the header's magic and version are valid
     if (
       memcmp(header.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0 ||
-      header.version != KVMFR_HEADER_VERSION
+      header.version != KVMFR_HEADER_VERSION ||
+      (
+       header.dataPos   == 0 ||
+       header.width     == 0 ||
+       header.height    == 0 ||
+       header.stride    == 0 ||
+       header.frameType >= FRAME_TYPE_MAX
+     )
     )
     {
       usleep(1000);
