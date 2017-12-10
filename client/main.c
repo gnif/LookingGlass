@@ -136,7 +136,7 @@ inline void updatePositionInfo()
   state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
 
   if (state.lgr)
-    state.lgr->on_resize(state.lgrData, w, h);
+    state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
 }
 
 int renderThread(void * unused)
@@ -303,7 +303,6 @@ int renderThread(void * unused)
 
     if (!state.lgr->render(
       state.lgrData,
-      state.dstRect,
       (uint8_t *)state.shm + header.dataPos,
       params.useMipmap
     ))
@@ -611,11 +610,6 @@ int run()
     }
     FcPatternDestroy(pat);
   }
-
-  // while this is related to opengl, it must happen before the window is created
-  // as such it can not be part of the opengl renderer
-  if (!params.vsync)
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
 
   state.window = SDL_CreateWindow(
     "Looking Glass (Client)",

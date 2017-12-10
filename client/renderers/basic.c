@@ -15,6 +15,7 @@ struct LGR_Basic
   size_t             dataWidth;
   SDL_Renderer     * renderer;
   SDL_Texture      * texture;
+  SDL_Rect           destRect;
 };
 
 const char * lgr_basic_get_name()
@@ -110,14 +111,19 @@ bool lgr_basic_is_compatible(void * opaque, const LG_RendererFormat format)
   return (memcmp(&this->format, &format, sizeof(LG_RendererFormat)) == 0);
 }
 
-void lgr_basic_on_resize(void * opaque, const int width, const int height)
+void lgr_basic_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
-  const struct LGR_Basic * this = (struct LGR_Basic *)opaque;
+  struct LGR_Basic * this = (struct LGR_Basic *)opaque;
   if (!this || !this->initialized)
     return;
+
+  this->destRect.x = destRect.x;
+  this->destRect.y = destRect.y;
+  this->destRect.w = destRect.w;
+  this->destRect.h = destRect.h;
 }
 
-bool lgr_basic_render(void * opaque, const LG_RendererRect destRect, const uint8_t * data, bool resample)
+bool lgr_basic_render(void * opaque, const uint8_t * data, bool resample)
 {
   struct LGR_Basic * this = (struct LGR_Basic *)opaque;
   if (!this || !this->initialized)
@@ -144,14 +150,8 @@ bool lgr_basic_render(void * opaque, const LG_RendererRect destRect, const uint8
     }
   }
 
-  SDL_Rect rect;
-  rect.x = destRect.x;
-  rect.y = destRect.y;
-  rect.w = destRect.w;
-  rect.h = destRect.h;
-
   SDL_UnlockTexture(this->texture);
-  SDL_RenderCopy(this->renderer, this->texture, NULL, &rect);
+  SDL_RenderCopy(this->renderer, this->texture, NULL, &this->destRect);
   SDL_RenderPresent(this->renderer);
 
   return true;

@@ -65,8 +65,8 @@ typedef const char * (* LG_RendererGetName     )();
 typedef bool         (* LG_RendererInitialize  )(void ** opaque, const LG_RendererParams params, const LG_RendererFormat format);
 typedef void         (* LG_RendererDeInitialize)(void * opaque);
 typedef bool         (* LG_RendererIsCompatible)(void * opaque, const LG_RendererFormat format);
-typedef void         (* LG_RendererOnResize    )(void * opaque, const int width, const int height);
-typedef bool         (* LG_RendererRender      )(void * opaque, const LG_RendererRect destRect, const uint8_t * data, bool resample);
+typedef void         (* LG_RendererOnResize    )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
+typedef bool         (* LG_RendererRender      )(void * opaque, const uint8_t * data, bool resample);
 
 typedef struct LG_Renderer
 {
