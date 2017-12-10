@@ -16,16 +16,12 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-// limit the FPS when sync is turned off
-#define FPS_LIMIT 240
-
 #include <getopt.h>
 #include <SDL2/SDL.h>
 #include <SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -34,12 +30,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <assert.h>
 #include <fontconfig/fontconfig.h>
 
-#define GL_GLEXT_PROTOTYPES
-#include <GL/gl.h>
-#include <GL/glu.h>
-
 #include "debug.h"
-#include "memcpySSE.h"
+#include "utils.h"
 #include "KVMFR.h"
 #include "ivshmem/ivshmem.h"
 #include "spice/spice.h"
@@ -57,8 +49,10 @@ struct AppState
   LG_RendererRect dstRect;
   float           scaleX, scaleY;
 
+  const LG_Renderer * lgr ;
+  void              * lgrData;
+
   SDL_Window         * window;
-  SDL_Renderer       * renderer;
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
 };
@@ -109,7 +103,7 @@ struct AppParams params =
 inline void updatePositionInfo()
 {
   int w, h;
-  SDL_GetRendererOutputSize(state.renderer, &w, &h);
+  SDL_GetWindowSize(state.window, &w, &h);
 
   if (params.keepAspect)
   {
@@ -140,59 +134,17 @@ inline void updatePositionInfo()
 
   state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
   state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
-}
 
-inline uint64_t microtime()
-{
-  struct timeval time;
-  gettimeofday(&time, NULL);
-  return ((uint64_t)time.tv_sec * 1000000) + time.tv_usec;
-}
-
-uint64_t detectPresentTime()
-{
-  glFinish();
-
-  // time 20 iterations and compute the average
-  const uint64_t start = microtime();
-  for(int i = 0; i < 20; ++i)
-  {
-    SDL_RenderPresent(state.renderer);
-    glFinish();
-  }
-  const uint64_t t = (microtime() - start) / 20;
-
-  DEBUG_INFO("detected: %lu (%f Hz)", t, 1000000.0f / t);
-  if (t < 2000)
-  {
-    DEBUG_INFO("present time too low, setting framerate limit to %d Hz", FPS_LIMIT);
-    return ceil((1000000.0/(double)FPS_LIMIT));
-  }
-
-  return t;
+  if (state.lgr)
+    state.lgr->on_resize(state.lgrData, w, h);
 }
 
 int renderThread(void * unused)
 {
   bool                error = false;
   struct KVMFRHeader  header;
-  const LG_Renderer * lgr = NULL;
-  void              * lgrData;
-  unsigned int        frameCount = 0;
-  SDL_Texture       * textTexture = NULL;
-  SDL_Rect            textRect;
-
-  const uint64_t presentTime = detectPresentTime();
-  unsigned int   lateCount   = 0;
-
-  int      pollDelay = 0;
-  uint64_t drawStart = 0;
-  int      drawTime  = 0;
-
-  uint64_t fpsStart  = microtime();
-  int      fpsTime   = 0;
-
-
+  int                 pollDelay = 0;
+  int                 lateCount = 0;
   volatile uint64_t * dataPos = &state.shm->dataPos;
 
   while(state.running)
@@ -280,32 +232,39 @@ int renderThread(void * unused)
     }
 
     // check if we have a compatible renderer
-    if (!lgr || !lgr->is_compatible(lgrData, lgrFormat))
+    if (!state.lgr || !state.lgr->is_compatible(state.lgrData, lgrFormat))
     {
+      int width, height;
+      SDL_GetWindowSize(state.window, &width, &height);
+
       LG_RendererParams lgrParams;
-      lgrParams.window   = state.window;
-      lgrParams.renderer = state.renderer;
+      lgrParams.window  = state.window;
+      lgrParams.font    = state.font;
+      lgrParams.showFPS = params.showFPS;
+      lgrParams.vsync   = params.vsync;
+      lgrParams.width   = width;
+      lgrParams.height  = height;
 
       DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
           lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
 
       // first try to reinitialize any existing renderer
-      if (lgr)
+      if (state.lgr)
       {
-        lgr->deinitialize(lgrData);
-        if (lgr->initialize(&lgrData, lgrParams, lgrFormat))
+        state.lgr->deinitialize(state.lgrData);
+        if (state.lgr->initialize(&state.lgrData, lgrParams, lgrFormat))
         {
-          DEBUG_INFO("Reinitialized %s", lgr->get_name());
+          DEBUG_INFO("Reinitialized %s", state.lgr->get_name());
         }
         else
         {
-          DEBUG_ERROR("Failed to reinitialize %s, trying other renderers", lgr->get_name());
-          lgr->deinitialize(lgrData);
-          lgr = NULL;
+          DEBUG_ERROR("Failed to reinitialize %s, trying other renderers", state.lgr->get_name());
+          state.lgr->deinitialize(state.lgrData);
+          state.lgr = NULL;
         }
       }
 
-      if (!lgr)
+      if (!state.lgr)
       {
         // probe for a a suitable renderer
         for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
@@ -316,19 +275,19 @@ int renderThread(void * unused)
             continue;
           }
 
-          lgrData = NULL;
-          if (!(*r)->initialize(&lgrData, lgrParams, lgrFormat))
+          state.lgrData = NULL;
+          if (!(*r)->initialize(&state.lgrData, lgrParams, lgrFormat))
           {
-            (*r)->deinitialize(lgrData);
+            (*r)->deinitialize(state.lgrData);
             continue;
           }
 
-          lgr = *r;
+          state.lgr = *r;
           DEBUG_INFO("Initialized %s", (*r)->get_name());
           break;
         }
 
-        if (!lgr)
+        if (!state.lgr)
         {
           DEBUG_INFO("Unable to find a suitable renderer");
           return -1;
@@ -342,8 +301,8 @@ int renderThread(void * unused)
       updatePositionInfo();
     }
 
-    if (!lgr->render(
-      lgrData,
+    if (!state.lgr->render(
+      state.lgrData,
       state.dstRect,
       (uint8_t *)state.shm + header.dataPos,
       params.useMipmap
@@ -352,106 +311,10 @@ int renderThread(void * unused)
       DEBUG_ERROR("Failed to render the frame");
       break;
     }
-
-    if (params.showFPS)
-    {
-      // for now render the frame counter here, we really should
-      // move this into the renderers though.
-      if (fpsTime > 1000000)
-      {
-        SDL_Surface *textSurface = NULL;
-        if (textTexture)
-        {
-          SDL_DestroyTexture(textTexture);
-          textTexture = NULL;
-        }
-
-        char str[128];
-        const float avgFPS = 1000.0f / (((float)fpsTime / frameCount) / 1000.0f);
-        snprintf(str, sizeof(str), "FPS: %8.4f (Frames: %d, Late: %d)", avgFPS, frameCount, lateCount);
-        SDL_Color color = {0xff, 0xff, 0xff};
-        if (!(textSurface = TTF_RenderText_Blended(state.font, str, color)))
-        {
-          DEBUG_ERROR("Failed to render text");
-          break;
-        }
-
-        textRect.x = 5;
-        textRect.y = 5;
-        textRect.w = textSurface->w;
-        textRect.h = textSurface->h;
-
-        textTexture = SDL_CreateTextureFromSurface(state.renderer, textSurface);
-        SDL_SetTextureBlendMode(textTexture, SDL_BLENDMODE_BLEND);
-        SDL_FreeSurface(textSurface);
-
-        fpsTime    = 0;
-        frameCount = 0;
-        lateCount  = 0;
-      }
-
-      if (textTexture)
-      {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-        glBegin(GL_TRIANGLE_STRIP);
-          glVertex2i(textRect.x             , textRect.y             );
-          glVertex2i(textRect.x + textRect.w, textRect.y             );
-          glVertex2i(textRect.x             , textRect.y + textRect.h);
-          glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
-        glEnd();
-
-
-        float tw, th;
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        SDL_GL_BindTexture(textTexture, &tw, &th);
-        glBegin(GL_TRIANGLE_STRIP);
-          glTexCoord2f(0.0f, 0.0f); glVertex2i(textRect.x             , textRect.y             );
-          glTexCoord2f(tw  , 0.0f); glVertex2i(textRect.x + textRect.w, textRect.y             );
-          glTexCoord2f(0.0f, th  ); glVertex2i(textRect.x             , textRect.y + textRect.h);
-          glTexCoord2f(tw  , th  ); glVertex2i(textRect.x + textRect.w, textRect.y + textRect.h);
-        glEnd();
-        glDisable(GL_BLEND);
-        SDL_GL_UnbindTexture(textTexture);
-      }
-    }
-
-
-    SDL_RenderPresent(state.renderer);
-
-    // sleep for the remainder of the presentation time
-    {
-      const uint64_t t = microtime();
-      drawTime = t - drawStart;
-      if (drawTime < presentTime)
-      {
-        const uint64_t delta = presentTime - drawTime;
-        if (delta > 1000)
-          usleep(delta - 1000);
-
-        if (!params.vsync)
-        {
-          // poll for the final microsecond
-          const uint64_t target = t + delta;
-          while(microtime() <= target) {}
-        }
-      }
-
-      // ensure buffers are flushed
-      glFinish();
-      drawStart = microtime();
-    }
-
-    ++frameCount;
-    const uint64_t t = microtime();
-    fpsTime  += t - fpsStart;
-    fpsStart  = t;
   }
 
-  if (lgr)
-    lgr->deinitialize(lgrData);
+  if (state.lgr)
+    state.lgr->deinitialize(state.lgrData);
 
   return 0;
 }
@@ -756,7 +619,8 @@ int run()
     params.w,
     params.h,
     (
-      SDL_WINDOW_SHOWN |
+      SDL_WINDOW_SHOWN  |
+      SDL_WINDOW_OPENGL |
       (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
       (params.borderless  ? SDL_WINDOW_BORDERLESS : 0)
     )
@@ -776,17 +640,6 @@ int run()
     cursor = SDL_CreateCursor((uint8_t*)cursorData, (uint8_t*)cursorData, 8, 8, 4, 4);
     SDL_SetCursor(cursor);
     SDL_ShowCursor(SDL_DISABLE);
-  }
-
-  state.renderer = SDL_CreateRenderer(state.window, -1,
-    SDL_RENDERER_ACCELERATED |
-    (params.vsync ? SDL_RENDERER_PRESENTVSYNC : 0)
-  );
-
-  if (!state.renderer)
-  {
-    DEBUG_ERROR("failed to create renderer");
-    return -1;
   }
 
   int         shm_fd    = 0;
@@ -865,9 +718,6 @@ int run()
 
   if (t_spice)
     SDL_WaitThread(t_spice, NULL);
-
-  if (state.renderer)
-    SDL_DestroyRenderer(state.renderer);
 
   if (state.window)
     SDL_DestroyWindow(state.window);

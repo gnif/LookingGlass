@@ -1,6 +1,9 @@
 #include "lg-renderer.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <unistd.h>
+
+#include <SDL_ttf.h>
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
@@ -8,25 +11,44 @@
 
 #include "debug.h"
 #include "memcpySSE.h"
+#include "utils.h"
+
+// limit the FPS when sync is turned off
+#define FPS_LIMIT 240
 
 #define VBO_BUFFERS 2
 
 struct LGR_OpenGL
 {
+  LG_RendererParams params;
   bool              initialized;
+  SDL_GLContext     glContext;
+  bool              resizeWindow;
+
   LG_RendererFormat format;
   GLuint            intFormat;
   GLuint            vboFormat;
   size_t            texSize;
 
+  uint64_t          presentTime;
+  uint64_t          drawStart;
   bool              hasBuffers;
   GLuint            vboID[VBO_BUFFERS];
   uint8_t         * texPixels[VBO_BUFFERS];
   int               texIndex;
 
   bool              hasTextures;
-  GLuint            vboTex[VBO_BUFFERS];
+  GLuint            vboTex[VBO_BUFFERS + 1]; // extra texture for FPS
+
+  bool              fpsTexture;
+  uint64_t          lastFrameTime;
+  uint64_t          renderTime;
+  uint64_t          frameCount;
+  SDL_Rect          fpsRect;
 };
+
+uint64_t lgr_opengl_benchmark();
+void     lgr_opengl_on_resize(void * opaque, const int width, const int height);
 
 bool lgr_opengl_check_error(const char * name)
 {
@@ -46,15 +68,6 @@ const char * lgr_opengl_get_name()
 
 bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const LG_RendererFormat format)
 {
-  // check if the GPU supports GL_ARB_buffer_storage first
-  // there is no advantage to this renderer if it is not present.
-  const GLubyte * extensions = glGetString(GL_EXTENSIONS);
-  if (!gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
-  {
-    DEBUG_INFO("The GPU doesn't support GL_ARB_buffer_storage");
-    return false;
-  }
-
   // create our local storage
   *opaque = malloc(sizeof(struct LGR_OpenGL));
   if (!*opaque)
@@ -64,6 +77,38 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   }
   memset(*opaque, 0, sizeof(struct LGR_OpenGL));
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)*opaque;
+  memcpy(&this->params, &params, sizeof(LG_RendererParams));
+
+  this->glContext = SDL_GL_CreateContext(params.window);
+  if (!this->glContext)
+  {
+    DEBUG_ERROR("Failed to create the OpenGL context");
+    return false;
+  }
+
+  if (SDL_GL_MakeCurrent(params.window, this->glContext) != 0)
+  {
+    DEBUG_ERROR("Failed to make the GL context current");
+    return false;
+  }
+
+  if (params.vsync)
+  {
+    // try for dynamic vsync first
+    if (!SDL_GL_SetSwapInterval(-1))
+      SDL_GL_SetSwapInterval(1);
+  }
+  else
+    SDL_GL_SetSwapInterval(0);
+
+  // check if the GPU supports GL_ARB_buffer_storage first
+  // there is no advantage to this renderer if it is not present.
+  const GLubyte * extensions = glGetString(GL_EXTENSIONS);
+  if (!gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
+  {
+    DEBUG_INFO("The GPU doesn't support GL_ARB_buffer_storage");
+    return false;
+  }
 
   // assume 24 and 32 bit formats are RGB and RGBA
   switch(format.bpp)
@@ -118,7 +163,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   }
 
   // create the textures
-  glGenTextures(VBO_BUFFERS, this->vboTex);
+  glGenTextures(VBO_BUFFERS + (params.showFPS ? 1 : 0), this->vboTex);
   if (lgr_opengl_check_error("glGenTextures"))
     return false;
   this->hasTextures = true;
@@ -146,11 +191,41 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   }
 
   glEnable(GL_TEXTURE_2D);
+  glEnable(GL_COLOR_MATERIAL);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendEquation(GL_FUNC_ADD);
+
+  this->resizeWindow = true;
+  this->presentTime  = lgr_opengl_benchmark(this);
+  this->drawStart    = nanotime();
 
   // copy the format into the local storage
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
   this->initialized = true;
   return true;
+}
+
+uint64_t lgr_opengl_benchmark(struct LGR_OpenGL * this)
+{
+  glFinish();
+
+  // time 20 iterations and compute the average
+  const uint64_t start = nanotime();
+  for(int i = 0; i < 20; ++i)
+  {
+    SDL_GL_SwapWindow(this->params.window);
+    glFinish();
+  }
+  const uint64_t t = (nanotime() - start) / 20;
+
+  DEBUG_INFO("detected: %lu (%f Hz)", t, 1e9f / t);
+  if (t < 2e6)
+  {
+    DEBUG_INFO("present time too low, setting framerate limit to %d Hz", FPS_LIMIT);
+    return ceil(((double)1e9/(double)FPS_LIMIT));
+  }
+
+  return t;
 }
 
 void lgr_opengl_deinitialize(void * opaque)
@@ -165,6 +240,9 @@ void lgr_opengl_deinitialize(void * opaque)
   if (this->hasBuffers)
     glDeleteBuffers(VBO_BUFFERS, this->vboID);
 
+  if (this->glContext)
+    SDL_GL_DeleteContext(this->glContext);
+
   free(this);
 }
 
@@ -177,13 +255,41 @@ bool lgr_opengl_is_compatible(void * opaque, const LG_RendererFormat format)
   return (memcmp(&this->format, &format, sizeof(LG_RendererFormat)) == 0);
 }
 
+void lgr_opengl_on_resize(void * opaque, const int width, const int height)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this || !this->initialized)
+    return;
+
+  this->params.width  = width;
+  this->params.height = height;
+  this->resizeWindow  = true;
+}
+
 bool lgr_opengl_render(void * opaque, const LG_RendererRect destRect, const uint8_t * data, bool resample)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
   if (!this || !this->initialized)
     return false;
 
-  glClear(GL_COLOR_BUFFER_BIT);
+  if (SDL_GL_MakeCurrent(this->params.window, this->glContext) != 0)
+  {
+    DEBUG_ERROR("Failed to make the GL context current");
+    return false;
+  }
+
+  if (this->resizeWindow)
+  {
+    // setup the projection matrix
+    glViewport(0, 0, this->params.width, this->params.height);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluOrtho2D(0, this->params.width, this->params.height, 0);
+    glMatrixMode(GL_MODELVIEW);
+    this->resizeWindow = false;
+
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
 
   // copy the buffer to the texture
   memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
@@ -228,16 +334,122 @@ bool lgr_opengl_render(void * opaque, const LG_RendererRect destRect, const uint
   }
 
   // draw the screen
-  glEnable(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, this->vboTex[this->texIndex]);
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
   glBegin(GL_TRIANGLE_STRIP);
     glTexCoord2f(0.0f, 0.0f); glVertex2i(destRect.x             , destRect.y             );
     glTexCoord2f(1.0f, 0.0f); glVertex2i(destRect.x + destRect.w, destRect.y             );
     glTexCoord2f(0.0f, 1.0f); glVertex2i(destRect.x             , destRect.y + destRect.h);
     glTexCoord2f(1.0f, 1.0f); glVertex2i(destRect.x + destRect.w, destRect.y + destRect.h);
   glEnd();
-  glDisable(GL_TEXTURE_2D);
 
   glBindTexture(GL_TEXTURE_2D, 0);
+
+  if (this->params.showFPS)
+  {
+    if (this->renderTime > 1e9)
+    {
+      char str[128];
+      const float avgFPS = 1000.0f / (((float)this->renderTime / this->frameCount) / 1e6f);
+      snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
+      SDL_Color color = {0xff, 0xff, 0xff};
+      SDL_Surface *textSurface = NULL;
+      if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
+      {
+        DEBUG_ERROR("Failed to render text");
+        return false;
+      }
+
+      glBindTexture(GL_TEXTURE_2D       , this->vboTex[2]);
+      glPixelStorei(GL_UNPACK_ALIGNMENT , 4              );
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w );
+      glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        textSurface->format->BytesPerPixel,
+        textSurface->w,
+        textSurface->h,
+        0,
+        GL_BGRA,
+        GL_UNSIGNED_BYTE,
+        textSurface->pixels
+      );
+
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+      glBindTexture(GL_TEXTURE_2D, 0);
+
+      this->fpsRect.x = 5;
+      this->fpsRect.y = 5;
+      this->fpsRect.w = textSurface->w;
+      this->fpsRect.h = textSurface->h;
+
+      SDL_FreeSurface(textSurface);
+
+      this->renderTime = 0;
+      this->frameCount = 0;
+      this->fpsTexture = true;
+    }
+
+    if (this->fpsTexture)
+    {
+      glEnable(GL_BLEND);
+      glDisable(GL_TEXTURE_2D);
+      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+      glBegin(GL_TRIANGLE_STRIP);
+        glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+        glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+      glEnd();
+      glEnable(GL_TEXTURE_2D);
+
+      glBindTexture(GL_TEXTURE_2D, this->vboTex[2]);
+      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+      glBegin(GL_TRIANGLE_STRIP);
+        glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+        glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+        glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+        glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+      glEnd();
+      glBindTexture(GL_TEXTURE_2D, 0);
+      glDisable(GL_BLEND);
+    }
+  }
+  glFlush();
+
+  // sleep for the remainder of the presentation time
+  {
+    const uint64_t t        = nanotime();
+    const uint64_t drawTime = t - this->drawStart;
+    if (drawTime < this->presentTime)
+    {
+      const uint64_t delta = (this->presentTime - drawTime);
+      if (delta > 1e5)
+        usleep((delta - 1e5) / 1e3);
+
+      if (!this->params.vsync)
+      {
+        // poll for the final microsecond
+        const uint64_t target = t + delta;
+        while(nanotime() <= target) {}
+      }
+    }
+
+    // ensure buffers are flushed
+    glFinish();
+    this->drawStart = nanotime();
+  }
+
+  SDL_GL_SwapWindow(this->params.window);
+  ++this->frameCount;
+
+  const uint64_t t    = nanotime();
+  this->renderTime   += t - this->lastFrameTime;
+  this->lastFrameTime = t;
 
   if (++this->texIndex == VBO_BUFFERS)
     this->texIndex = 0;
@@ -251,5 +463,6 @@ const LG_Renderer LGR_OpenGL =
   .initialize    = lgr_opengl_initialize,
   .deinitialize  = lgr_opengl_deinitialize,
   .is_compatible = lgr_opengl_is_compatible,
+  .on_resize     = lgr_opengl_on_resize,
   .render        = lgr_opengl_render
 };

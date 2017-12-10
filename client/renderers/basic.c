@@ -34,6 +34,17 @@ bool lgr_basic_initialize(void ** opaque, const LG_RendererParams params, const 
   memset(*opaque, 0, sizeof(struct LGR_Basic));
   struct LGR_Basic * this = (struct LGR_Basic *)*opaque;
 
+  this->renderer = SDL_CreateRenderer(params.window, -1,
+    SDL_RENDERER_ACCELERATED |
+    (params.vsync ? SDL_RENDERER_PRESENTVSYNC : 0)
+  );
+
+  if (!this->renderer)
+  {
+    DEBUG_ERROR("Failed to create renderer");
+    return false;
+  }
+
   Uint32 sdlFormat;
   switch(format.bpp)
   {
@@ -55,7 +66,7 @@ bool lgr_basic_initialize(void ** opaque, const LG_RendererParams params, const 
 
   // create the target texture
   this->texture = SDL_CreateTexture(
-    params.renderer,
+    this->renderer,
     sdlFormat,
     SDL_TEXTUREACCESS_STREAMING,
     format.width,
@@ -70,7 +81,6 @@ bool lgr_basic_initialize(void ** opaque, const LG_RendererParams params, const 
 
 
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-  this->renderer    = params.renderer;
   this->dataWidth   = this->format.width * (this->format.bpp / 8);
   this->initialized = true;
   return true;
@@ -84,6 +94,9 @@ void lgr_basic_deinitialize(void * opaque)
 
   if (this->texture)
     SDL_DestroyTexture(this->texture);
+
+  if (this->renderer)
+    SDL_DestroyRenderer(this->renderer);
 
   free(this);
 }
