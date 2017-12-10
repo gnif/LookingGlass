@@ -144,8 +144,6 @@ int renderThread(void * unused)
 {
   bool                error = false;
   struct KVMFRHeader  header;
-  int                 pollDelay = 0;
-  int                 lateCount = 0;
   volatile uint64_t * dataPos = &state.shm->dataPos;
 
   while(state.running)
@@ -153,22 +151,14 @@ int renderThread(void * unused)
     // if the next frame isn't aready available
     if (header.dataPos == *dataPos)
     {
-      // wait for a frame
-      const uint64_t pollStart = microtime();
-      if (pollDelay > 0)
-        usleep(pollDelay);
-
-      if (header.dataPos != *dataPos)
-        ++lateCount;
-
       // poll until we have a new frame, or we time out
       while(header.dataPos == *dataPos && state.running) {
-        if (microtime() - pollStart > 100)
-          break;
+        const struct timespec s = {
+          .tv_sec  = 0,
+          .tv_nsec = 1000
+        };
+        nanosleep(&s, NULL);
       }
-
-      // update the delay
-      pollDelay = microtime() - pollStart - 100;
     }
 
     // we must take a copy of the header, both to let the guest advance and to
