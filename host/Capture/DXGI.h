@@ -46,7 +46,7 @@ namespace Capture
       DXGI needs some time when mode switches occur, failing to do so causes
       failure to start and exceptions internal to DXGI
       */
-      Sleep(200);
+      Sleep(400);
       return Initialize(m_options);
     }
 
