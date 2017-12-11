@@ -145,15 +145,15 @@ int renderThread(void * unused)
 {
   bool                error = false;
   struct KVMFRHeader  header;
-  volatile uint64_t * dataPos = &state.shm->dataPos;
+  volatile int32_t  * updateCount = &state.shm->updateCount - 1;
 
   while(state.running)
   {
     // if the next frame isn't aready available
-    if (header.dataPos == *dataPos)
+    if (header.updateCount == *updateCount)
     {
       // poll until we have a new frame, or we time out
-      while(header.dataPos == *dataPos && state.running) {
+      while(header.updateCount == *updateCount && state.running) {
         const struct timespec s = {
           .tv_sec  = 0,
           .tv_nsec = 1000
@@ -174,133 +174,140 @@ int renderThread(void * unused)
     // check the header's magic and version are valid
     if (
       memcmp(header.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0 ||
-      header.version != KVMFR_HEADER_VERSION ||
-      (
-       header.dataPos   == 0 ||
-       header.width     == 0 ||
-       header.height    == 0 ||
-       header.stride    == 0 ||
-       header.frameType >= FRAME_TYPE_MAX
-     )
-    )
-    {
+      header.version != KVMFR_HEADER_VERSION
+    ){
       usleep(1000);
       continue;
     }
 
-    // setup the renderer format with the frame format details
-    LG_RendererFormat lgrFormat;
-    lgrFormat.width  = header.width;
-    lgrFormat.height = header.height;
-    lgrFormat.stride = header.stride;
-
-    switch(header.frameType)
+    if(header.flags & KVMFR_HEADER_FLAG_FRAME)
     {
-      case FRAME_TYPE_ARGB:
-        lgrFormat.pitch = header.stride * 4;
-        lgrFormat.bpp   = 32;
-        break;
-
-      case FRAME_TYPE_RGB:
-        lgrFormat.pitch = header.stride * 3;
-        lgrFormat.bpp   = 24;
-        break;
-
-      default:
-        DEBUG_ERROR("Unsupported frameType");
-        error = true;
-        break;
-    }
-
-    if (error)
-      break;
-
-    // check the header's dataPos is sane
-    const size_t dataSize = lgrFormat.height * lgrFormat.pitch;
-    if (header.dataPos + dataSize > state.shmSize)
-    {
-      DEBUG_ERROR("The guest sent an invalid dataPos");
-      break;
-    }
-
-    // check if we have a compatible renderer
-    if (!state.lgr || !state.lgr->is_compatible(state.lgrData, lgrFormat))
-    {
-      int width, height;
-      SDL_GetWindowSize(state.window, &width, &height);
-
-      LG_RendererParams lgrParams;
-      lgrParams.window  = state.window;
-      lgrParams.font    = state.font;
-      lgrParams.showFPS = params.showFPS;
-      lgrParams.vsync   = params.vsync;
-      lgrParams.width   = width;
-      lgrParams.height  = height;
-
-      DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
-          lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
-
-      // first try to reinitialize any existing renderer
-      if (state.lgr)
-      {
-        state.lgr->deinitialize(state.lgrData);
-        if (state.lgr->initialize(&state.lgrData, lgrParams, lgrFormat))
-        {
-          DEBUG_INFO("Reinitialized %s", state.lgr->get_name());
-        }
-        else
-        {
-          DEBUG_ERROR("Failed to reinitialize %s, trying other renderers", state.lgr->get_name());
-          state.lgr->deinitialize(state.lgrData);
-          state.lgr = NULL;
-        }
+      if (
+        header.frame.type    >= FRAME_TYPE_MAX ||
+        header.frame.width   == 0 ||
+        header.frame.height  == 0 ||
+        header.frame.stride  == 0 ||
+        header.frame.dataPos == 0 ||
+        header.frame.dataPos > state.shmSize
+      ){
+        usleep(1000);
+        continue;
       }
 
-      if (!state.lgr)
+      // setup the renderer format with the frame format details
+      LG_RendererFormat lgrFormat;
+      lgrFormat.width  = header.frame.width;
+      lgrFormat.height = header.frame.height;
+      lgrFormat.stride = header.frame.stride;
+
+      switch(header.frame.type)
       {
-        // probe for a a suitable renderer
-        for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
-        {
-          if (!IS_LG_RENDERER_VALID(*r))
-          {
-            DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", (int)(r - &LG_Renderers[0]));
-            continue;
-          }
-
-          state.lgrData = NULL;
-          if (!(*r)->initialize(&state.lgrData, lgrParams, lgrFormat))
-          {
-            (*r)->deinitialize(state.lgrData);
-            continue;
-          }
-
-          state.lgr = *r;
-          DEBUG_INFO("Initialized %s", (*r)->get_name());
+        case FRAME_TYPE_ARGB:
+          lgrFormat.pitch = header.frame.stride * 4;
+          lgrFormat.bpp   = 32;
           break;
+
+        case FRAME_TYPE_RGB:
+          lgrFormat.pitch = header.frame.stride * 3;
+          lgrFormat.bpp   = 24;
+          break;
+
+        default:
+          DEBUG_ERROR("Unsupported frameType");
+          error = true;
+          break;
+      }
+
+      if (error)
+        break;
+
+      // check the header's dataPos is sane
+      const size_t dataSize = lgrFormat.height * lgrFormat.pitch;
+      if (header.frame.dataPos + dataSize > state.shmSize)
+      {
+        DEBUG_ERROR("The guest sent an invalid dataPos");
+        break;
+      }
+
+      // check if we have a compatible renderer
+      if (!state.lgr || !state.lgr->is_compatible(state.lgrData, lgrFormat))
+      {
+        int width, height;
+        SDL_GetWindowSize(state.window, &width, &height);
+
+        LG_RendererParams lgrParams;
+        lgrParams.window  = state.window;
+        lgrParams.font    = state.font;
+        lgrParams.showFPS = params.showFPS;
+        lgrParams.vsync   = params.vsync;
+        lgrParams.width   = width;
+        lgrParams.height  = height;
+
+        DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
+            lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
+
+        // first try to reinitialize any existing renderer
+        if (state.lgr)
+        {
+          state.lgr->deinitialize(state.lgrData);
+          if (state.lgr->initialize(&state.lgrData, lgrParams, lgrFormat))
+          {
+            DEBUG_INFO("Reinitialized %s", state.lgr->get_name());
+          }
+          else
+          {
+            DEBUG_ERROR("Failed to reinitialize %s, trying other renderers", state.lgr->get_name());
+            state.lgr->deinitialize(state.lgrData);
+            state.lgr = NULL;
+          }
         }
 
         if (!state.lgr)
         {
-          DEBUG_INFO("Unable to find a suitable renderer");
-          return -1;
+          // probe for a a suitable renderer
+          for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
+          {
+            if (!IS_LG_RENDERER_VALID(*r))
+            {
+              DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", (int)(r - &LG_Renderers[0]));
+              continue;
+            }
+
+            state.lgrData = NULL;
+            if (!(*r)->initialize(&state.lgrData, lgrParams, lgrFormat))
+            {
+              (*r)->deinitialize(state.lgrData);
+              continue;
+            }
+
+            state.lgr = *r;
+            DEBUG_INFO("Initialized %s", (*r)->get_name());
+            break;
+          }
+
+          if (!state.lgr)
+          {
+            DEBUG_INFO("Unable to find a suitable renderer");
+            return -1;
+          }
         }
+
+        state.srcSize.x = header.frame.width;
+        state.srcSize.y = header.frame.height;
+        if (params.autoResize)
+          SDL_SetWindowSize(state.window, header.frame.width, header.frame.height);
+        updatePositionInfo();
       }
 
-      state.srcSize.x = header.width;
-      state.srcSize.y = header.height;
-      if (params.autoResize)
-        SDL_SetWindowSize(state.window, header.width, header.height);
-      updatePositionInfo();
-    }
-
-    if (!state.lgr->render(
-      state.lgrData,
-      (uint8_t *)state.shm + header.dataPos,
-      params.useMipmap
-    ))
-    {
-      DEBUG_ERROR("Failed to render the frame");
-      break;
+      if (!state.lgr->render(
+        state.lgrData,
+        (uint8_t *)state.shm + header.frame.dataPos,
+        params.useMipmap
+      ))
+      {
+        DEBUG_ERROR("Failed to render the frame");
+        break;
+      }
     }
   }
 
@@ -477,8 +484,8 @@ int eventThread(void * arg)
             x = (float)x * state.scaleX;
             y = (float)y * state.scaleY;
           }
-          x -= state.shm->mouseX;
-          y -= state.shm->mouseY;
+          x -= state.shm->cursor.x;
+          y -= state.shm->cursor.y;
           realignGuest = false;
 
           if (!spice_mouse_motion(x, y))
@@ -604,6 +611,9 @@ int run()
     }
     FcPatternDestroy(pat);
   }
+
+  if (!params.vsync)
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
 
   state.window = SDL_CreateWindow(
     "Looking Glass (Client)",
