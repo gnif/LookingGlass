@@ -1,6 +1,7 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR)
 Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
+https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
