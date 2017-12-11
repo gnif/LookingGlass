@@ -26,6 +26,15 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #endif
 
 #define STRIPPATH(s) ( \
+  sizeof(s) > 27 && (s)[sizeof(s)-28] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 27 : \
+  sizeof(s) > 26 && (s)[sizeof(s)-27] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 26 : \
+  sizeof(s) > 25 && (s)[sizeof(s)-26] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 25 : \
+  sizeof(s) > 24 && (s)[sizeof(s)-25] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 24 : \
+  sizeof(s) > 23 && (s)[sizeof(s)-24] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 23 : \
+  sizeof(s) > 22 && (s)[sizeof(s)-23] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 22 : \
+  sizeof(s) > 21 && (s)[sizeof(s)-22] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 21 : \
+  sizeof(s) > 20 && (s)[sizeof(s)-21] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 20 : \
+  sizeof(s) > 19 && (s)[sizeof(s)-20] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 19 : \
   sizeof(s) > 18 && (s)[sizeof(s)-19] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 18 : \
   sizeof(s) > 17 && (s)[sizeof(s)-18] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 17 : \
   sizeof(s) > 16 && (s)[sizeof(s)-17] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 16 : \
@@ -44,7 +53,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   sizeof(s) > 3  && (s)[sizeof(s)- 4] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  3 : \
   sizeof(s) > 2  && (s)[sizeof(s)- 3] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  2 : (s))
 
-#define DEBUG_PRINT(type, fmt, ...) do {fprintf(stderr, type " %10s:%-4u | %-24s | " fmt "\n", STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
+#define DEBUG_PRINT(type, fmt, ...) do {fprintf(stderr, type " %20s:%-4u | %-24s | " fmt "\n", STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
 
 #define DEBUG_INFO(fmt, ...) DEBUG_PRINT("[I]", fmt, ##__VA_ARGS__)
 #define DEBUG_WARN(fmt, ...) DEBUG_PRINT("[W]", fmt, ##__VA_ARGS__)
