@@ -21,7 +21,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 #define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 1
+#define KVMFR_HEADER_VERSION 2
+#define KVMFR_CURSOR_BUFFER  (32*32*4)
 
 typedef enum FrameType
 {
@@ -29,20 +30,54 @@ typedef enum FrameType
   FRAME_TYPE_ARGB      , // ABGR interleaved: A,R,G,B 32bpp
   FRAME_TYPE_RGB       , // RGB interleaved :   R,G,B 24bpp
   FRAME_TYPE_MAX       , // sentinel value
-} FrameType;
+}
+FrameType;
 
-struct KVMFRHeader
+typedef enum CursorType
 {
-  char      magic[sizeof(KVMFR_HEADER_MAGIC)];
-  uint32_t  version;     // version of this structure
-  uint16_t  hostID;      // the host ivshmem client id
-  uint16_t  guestID;     // the guest ivshmem client id
-  FrameType frameType;   // the frame type
-  uint32_t  width;       // the width
-  uint32_t  height;      // the height
-  uint32_t  stride;      // the row stride
-  int32_t   mouseX;      // the initial mouse X position
-  int32_t   mouseY;      // the initial mouse Y position
-  uint64_t  dataLen;     // total lengh of the data after this header
-  uint64_t  dataPos;     // offset to the frame
-};
+  CURSOR_TYPE_COLOR       ,
+  CURSOR_TYPE_MONOCHROME  ,
+  CURSOR_TYPE_MASKED_COLOR
+}
+CursorType;
+
+#define KVMFR_CURSOR_FLAG_VISIBLE 1 // cursor is visible
+#define KVMFR_CURSOR_FLAG_SHAPE   2 // shape updated
+#define KVMFR_CURSOR_FLAG_POS     4 // position updated
+
+typedef struct KVMFRCursor
+{
+  uint8_t    flags;       // KVMFR_CURSOR_FLAGS
+  int16_t    x, y;        // cursor x & y position
+  CursorType type;        // shape buffer data type
+  uint8_t    w, h;        // shape width and height
+  uint8_t    shape[KVMFR_CURSOR_BUFFER];
+}
+KVMFRCursor;
+
+typedef struct KVMFRFrame
+{
+  FrameType   type;        // the frame data type
+  uint32_t    width;       // the width
+  uint32_t    height;      // the height
+  uint32_t    stride;      // the row stride
+  uint64_t    dataPos;     // offset to the frame
+}
+KVMFRFrame;
+
+#define KVMFR_HEADER_FLAG_FRAME  1 // frame update available
+#define KVMFR_HEADER_FLAG_CURSOR 2 // cursor update available
+
+typedef struct KVMFRHeader
+{
+  char        magic[sizeof(KVMFR_HEADER_MAGIC)];
+  uint32_t    version;     // version of this structure
+  uint16_t    hostID;      // the host ivshmem client id
+  uint16_t    guestID;     // the guest ivshmem client id
+  int32_t     updateCount; // updated each change
+  uint8_t     flags;       // KVMFR_HEADER_FLAGS
+
+  KVMFRFrame  frame;    // the frame information
+  KVMFRCursor cursor;   // the cursor information
+}
+KVMFRHeader;

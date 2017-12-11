@@ -20,7 +20,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "DXGI.h"
 using namespace Capture;
 
-#include "Util.h"
 #include "common\debug.h"
 #include "common\memcpySSE.h"
 
@@ -237,9 +236,73 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   CComPtr<IDXGIResource> res;
 
   HRESULT status;
+  bool    cursorUpdate = false;
   for(int i = 0; i < 2; ++i)
   {
-    status = m_dup->AcquireNextFrame(INFINITE, &frameInfo, &res);
+    while(true)
+    {
+      status = m_dup->AcquireNextFrame(INFINITE, &frameInfo, &res);
+      if (!SUCCEEDED(status))
+        break;
+
+      // if we have a mouse update
+      if (frameInfo.LastMouseUpdateTime.QuadPart)
+      {
+        cursorUpdate = true;
+        frame.cursor.hasPos  = true;
+        frame.cursor.visible = frameInfo.PointerPosition.Visible;
+        frame.cursor.x       = frameInfo.PointerPosition.Position.x;
+        frame.cursor.y       = frameInfo.PointerPosition.Position.x;
+      }
+
+      // if the pointer shape has changed
+      if (frameInfo.PointerShapeBufferSize > 0)
+      {
+        cursorUpdate = true;
+        if (m_pointerBufSize < frameInfo.PointerShapeBufferSize)
+        {
+          if (m_pointer)
+            delete[] m_pointer;
+          m_pointer        = new BYTE[frameInfo.PointerShapeBufferSize];
+          m_pointerBufSize = frameInfo.PointerShapeBufferSize;
+        }
+
+        DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
+        status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &shapeInfo);
+        if (!SUCCEEDED(status))
+        {
+          m_dup->ReleaseFrame();
+          DEBUG_ERROR("Failed to get the new pointer shape: %08x", status);
+          return GRAB_STATUS_ERROR;
+        }
+
+        switch (shapeInfo.Type)
+        {
+          case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : frame.cursor.type = CURSOR_TYPE_COLOR;        break;
+          case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: frame.cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
+          case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : frame.cursor.type = CURSOR_TYPE_MONOCHROME;   break;
+          default:
+            DEBUG_ERROR("Invalid cursor type");
+            return GRAB_STATUS_ERROR;
+        }
+
+        frame.cursor.hasShape = true;
+        frame.cursor.shape    = m_pointer;
+        frame.cursor.w        = shapeInfo.Width;
+        frame.cursor.h        = shapeInfo.Height;
+        frame.cursor.dataSize = m_pointerSize;
+      }
+
+      if (frameInfo.AccumulatedFrames == 1)
+        break;
+
+      m_dup->ReleaseFrame();
+      res.Release();
+
+      if (cursorUpdate)
+        return GRAB_STATUS_CURSOR;
+    }
+
     if (SUCCEEDED(status))
       break;
     
@@ -298,26 +361,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   m_deviceContext->CopyResource(m_texture, src);
 
-  // if the pointer shape has changed
-  if (frameInfo.PointerShapeBufferSize > 0)
-  {
-    if (m_pointerBufSize < frameInfo.PointerShapeBufferSize)
-    {
-      if (m_pointer)
-        delete[] m_pointer;
-      m_pointer = new BYTE[frameInfo.PointerShapeBufferSize];
-      m_pointerBufSize = frameInfo.PointerShapeBufferSize;
-    }
-
-    status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &m_shapeInfo);
-    if (!SUCCEEDED(status))
-    {
-      m_dup->ReleaseFrame();
-      DEBUG_ERROR("Failed to get the new pointer shape: %08x", status);
-      return GRAB_STATUS_ERROR;
-    }
-  }
-
   m_dup->ReleaseFrame();
   res.Release();
   src.Release();
@@ -344,52 +387,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.width   = desc.Width;
   frame.height  = desc.Height;
   frame.stride  = desc.Width;
-  frame.outSize = min(frame.bufferSize, m_height * pitch);
 
-  // if we have a mouse update
-  if (frameInfo.LastMouseUpdateTime.QuadPart)
-  {
-    m_pointerVisible = frameInfo.PointerPosition.Visible;
-    m_pointerPos     = frameInfo.PointerPosition.Position;
-
-    frame.hasMousePos = true;
-    frame.mouseX = m_pointerPos.x;
-    frame.mouseY = m_pointerPos.y;
-  }
-
-  memcpySSE(frame.buffer, rect.pBits, frame.outSize);
+  memcpySSE(frame.buffer, rect.pBits, min(frame.bufferSize, m_height * pitch));
   status = surface->Unmap();
-
-  // if the pointer is to be drawn
-  if (m_pointerVisible)
-  {
-    enum CursorType type;
-    switch (m_shapeInfo.Type)
-    {
-      case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : type = CURSOR_TYPE_COLOR       ; break;
-      case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: type = CURSOR_TYPE_MASKED_COLOR; break;
-      case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : type = CURSOR_TYPE_MONOCHROME  ; break;
-      default:
-        DEBUG_ERROR("Invalid cursor type");
-        return GRAB_STATUS_ERROR;
-    }
-
-    POINT cursorPos;
-    POINT cursorRect;
-    cursorPos.x  = m_pointerPos.x;
-    cursorPos.y  = m_pointerPos.y;
-    cursorRect.x = m_shapeInfo.Width;
-    cursorRect.y = m_shapeInfo.Height;
-
-    Util::DrawCursor(
-      type,
-      m_pointer,
-      cursorRect,
-      m_shapeInfo.Pitch,
-      cursorPos,
-      frame
-    );
-  }
 
   if (FAILED(status))
   {

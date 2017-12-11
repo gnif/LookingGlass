@@ -25,14 +25,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common\debug.h"
 
-enum CursorType
-{
-  CURSOR_TYPE_COLOR,
-  CURSOR_TYPE_MONOCHROME,
-  CURSOR_TYPE_MASKED_COLOR,
-  CURSOR_TYPE_PACKED_MONOCHROME,
-  CURSOR_TYPE_PACKED_MASKED_COLOR
-};
 
 class Util
 {

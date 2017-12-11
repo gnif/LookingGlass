@@ -22,6 +22,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/KVMFR.h"
 #include <vector>
 
+struct CursorInfo
+{
+  bool            visible;
+  bool            hasShape;
+  bool            hasPos;
+  int             x, y;
+
+  enum CursorType type;
+  unsigned int    w, h;
+  void          * shape;
+  unsigned int    dataSize;
+};
+
 struct FrameInfo
 {
   unsigned int width;
@@ -29,16 +42,15 @@ struct FrameInfo
   unsigned int stride;
   void * buffer;
   size_t bufferSize;
-  size_t outSize;
 
-  bool hasMousePos;
-  int mouseX, mouseY;
+  struct CursorInfo cursor;
 };
 
 enum GrabStatus
 {
   GRAB_STATUS_OK,
   GRAB_STATUS_REINIT,
+  GRAB_STATUS_CURSOR,
   GRAB_STATUS_ERROR
 };
 

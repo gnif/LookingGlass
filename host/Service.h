@@ -55,8 +55,8 @@ private:
   ICapture * m_capture;
 
   KVMFRHeader * m_header;
-  uint8_t      * m_frame[2];
-  size_t         m_frameSize;
-  uint64_t       m_dataOffset[2];
-  int            m_frameIndex;
+  uint8_t     * m_frame[2];
+  size_t        m_frameSize;
+  uint64_t      m_dataOffset[2];
+  int           m_frameIndex;
 };

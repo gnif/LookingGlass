@@ -87,10 +87,10 @@ bool Service::Initialize(ICapture * captureDevice)
   ZeroMemory(m_header, sizeof(KVMFRHeader));
   memcpy(m_header->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
 
-  m_header->version   = KVMFR_HEADER_VERSION;
-  m_header->guestID   = m_ivshmem->GetPeerID();
-  m_header->hostID    = hostID;
-  m_header->frameType = m_capture->GetFrameType();
+  m_header->version     = KVMFR_HEADER_VERSION;
+  m_header->guestID     = m_ivshmem->GetPeerID();
+  m_header->hostID      = hostID;
+  m_header->updateCount = 0;
 
   m_initialized = true;
   return true;
@@ -146,10 +146,10 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  FrameInfo frame;
+  struct FrameInfo frame;
+  ZeroMemory(&frame, sizeof(FrameInfo));
   frame.buffer      = m_frame[m_frameIndex];
   frame.bufferSize  = m_frameSize;
-  frame.hasMousePos = false;
 
   // wait for the host to notify that is it is ready to proceed
   bool eventDone = false;
@@ -179,7 +179,8 @@ bool Service::Process()
   }
   ResetEvent(m_readyEvent);
 
-  bool ok = false;
+  bool ok         = false;
+  bool cursorOnly = false;
   for(int i = 0; i < 2; ++i)
   {
     // capture a frame of data
@@ -189,8 +190,12 @@ bool Service::Process()
         ok = true;
         break;
 
+      case GRAB_STATUS_CURSOR:
+        ok         = true;
+        cursorOnly = true;
+        break;
+
       case GRAB_STATUS_ERROR:
-        m_header->dataLen = 0;
         DEBUG_ERROR("Capture failed");
         return false;
 
@@ -214,30 +219,49 @@ bool Service::Process()
     return false;
   }
 
-  // copy the frame details into the header
-  // setup the header
-  m_header->width   = frame.width;
-  m_header->height  = frame.height;
-  m_header->stride  = frame.stride;
-  m_header->dataPos = m_dataOffset[m_frameIndex];
-  m_header->dataLen = frame.outSize;
+  m_header->flags        = 0;
+  m_header->cursor.flags = 0;
 
-  // tell the host where the cursor is
-  if (frame.hasMousePos)
+  if (!cursorOnly)
   {
-    m_header->mouseX = frame.mouseX;
-    m_header->mouseY = frame.mouseY;
-  }
-  else
-  {
-    POINT cursorPos;
-    GetPhysicalCursorPos(&cursorPos);
-    m_header->mouseX = cursorPos.x;
-    m_header->mouseY = cursorPos.y;
+    // signal a frame update
+    m_header->flags        |= KVMFR_HEADER_FLAG_FRAME;
+    m_header->frame.type    = m_capture->GetFrameType();
+    m_header->frame.width   = frame.width;
+    m_header->frame.height  = frame.height;
+    m_header->frame.stride  = frame.stride;
+    m_header->frame.dataPos = m_dataOffset[m_frameIndex];
+    if (++m_frameIndex == 2)
+      m_frameIndex = 0;
   }
 
-  if (++m_frameIndex == 2)
-    m_frameIndex = 0;
+  if (frame.cursor.hasPos)
+  {
+    // tell the host where the cursor is
+    m_header->flags        |= KVMFR_HEADER_FLAG_CURSOR;
+    m_header->cursor.flags |= KVMFR_CURSOR_FLAG_POS;
+    m_header->cursor.x      = frame.cursor.x;
+    m_header->cursor.y      = frame.cursor.y;
+  }
+
+  if (frame.cursor.hasShape)
+  {
+    // give the host the new cursor shape
+    m_header->flags        |= KVMFR_HEADER_FLAG_CURSOR;
+    m_header->cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
+    m_header->cursor.type   = frame.cursor.type;
+    m_header->cursor.w      = frame.cursor.w;
+    m_header->cursor.h      = frame.cursor.h;
+    if (frame.cursor.dataSize > KVMFR_CURSOR_BUFFER)
+    {
+      DEBUG_ERROR("Cursor shape size exceeds buffer size");
+      return false;
+    }
+    memcpy(m_header->cursor.shape, frame.cursor.shape, frame.cursor.dataSize);
+  }
+
+  // increment the update count to resume the host
+  ++m_header->updateCount;
 
   return true;
 }
