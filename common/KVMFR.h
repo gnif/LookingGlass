@@ -74,7 +74,7 @@ typedef struct KVMFRHeader
   uint32_t    version;     // version of this structure
   uint16_t    hostID;      // the host ivshmem client id
   uint16_t    guestID;     // the guest ivshmem client id
-  int32_t     updateCount; // updated each change
+  uint32_t    updateCount; // updated each change
   uint8_t     flags;       // KVMFR_HEADER_FLAGS
 
   KVMFRFrame  frame;    // the frame information
