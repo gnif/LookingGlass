@@ -492,49 +492,54 @@ bool lgr_opengl_render(void * opaque)
     return false;
   }
 
-  if (this->resizeWindow)
-  {
-    // setup the projection matrix
-    glViewport(0, 0, this->params.width, this->params.height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(0, this->params.width, this->params.height, 0);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
-    glScalef(
-      (float)this->destRect.w / (float)this->format.width,
-      (float)this->destRect.h / (float)this->format.height,
-      1.0f
-    );
-
-    // update the display lists
-    for(int i = 0; i < VBO_BUFFERS; ++i)
-    {
-      glNewList(this->texList + i, GL_COMPILE);
-        glBindTexture(GL_TEXTURE_2D, this->textures[i]);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        glBegin(GL_TRIANGLE_STRIP);
-          glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
-          glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
-          glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
-          glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
-       glEnd();
-      glEndList();
-    }
-
-    // update the scissor rect to prevent drawing outside of the frame
-    glScissor(0, 0, this->format.width, this->format.height);
-
-    this->resizeWindow = false;
-    glDisable(GL_SCISSOR_TEST);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glEnable(GL_SCISSOR_TEST);
-  }
-
   if (this->frameUpdate)
   {
+    if (this->resizeWindow)
+    {
+      // setup the projection matrix
+      glViewport(0, 0, this->params.width, this->params.height);
+      glMatrixMode(GL_PROJECTION);
+      glLoadIdentity();
+      gluOrtho2D(0, this->params.width, this->params.height, 0);
+
+      glMatrixMode(GL_MODELVIEW);
+      glLoadIdentity();
+      glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+      glScalef(
+        (float)this->destRect.w / (float)this->format.width,
+        (float)this->destRect.h / (float)this->format.height,
+        1.0f
+      );
+
+      // update the display lists
+      for(int i = 0; i < VBO_BUFFERS; ++i)
+      {
+        glNewList(this->texList + i, GL_COMPILE);
+          glBindTexture(GL_TEXTURE_2D, this->textures[i]);
+          glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+          glBegin(GL_TRIANGLE_STRIP);
+            glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
+            glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
+            glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
+            glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
+         glEnd();
+        glEndList();
+      }
+
+      // update the scissor rect to prevent drawing outside of the frame
+      glScissor(
+        this->destRect.x,
+        this->destRect.y,
+        this->destRect.w,
+        this->destRect.h
+      );
+
+      this->resizeWindow = false;
+      glDisable(GL_SCISSOR_TEST);
+      glClear(GL_COLOR_BUFFER_BIT);
+      glEnable(GL_SCISSOR_TEST);
+    }
+
     glXWaitVideoSyncSGI(1, 0, &this->gpuFrameCount);
     glFinish();
 
