@@ -31,6 +31,7 @@ struct CursorInfo
 
   enum CursorType type;
   unsigned int    w, h;
+  unsigned int    pitch;
   void          * shape;
   unsigned int    dataSize;
 };

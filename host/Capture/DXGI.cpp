@@ -304,6 +304,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         frame.cursor.shape    = m_pointer;
         frame.cursor.w        = shapeInfo.Width;
         frame.cursor.h        = shapeInfo.Height;
+        frame.cursor.pitch    = shapeInfo.Pitch;
         frame.cursor.dataSize = m_pointerSize;
       }
 

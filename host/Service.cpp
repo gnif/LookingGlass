@@ -254,6 +254,7 @@ bool Service::Process()
     m_header->cursor.type   = frame.cursor.type;
     m_header->cursor.w      = frame.cursor.w;
     m_header->cursor.h      = frame.cursor.h;
+    m_header->cursor.pitch  = frame.cursor.pitch;
     if (frame.cursor.dataSize > KVMFR_CURSOR_BUFFER)
     {
       DEBUG_ERROR("Cursor shape size exceeds buffer size");
