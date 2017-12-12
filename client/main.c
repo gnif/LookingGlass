@@ -317,6 +317,31 @@ int renderThread(void * unused)
 
       if (header.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE)
       {
+        LG_RendererCursor c = LG_CURSOR_COLOR;
+        switch(header.cursor.type)
+        {
+          case CURSOR_TYPE_COLOR       : c = LG_CURSOR_COLOR       ; break;
+          case CURSOR_TYPE_MONOCHROME  : c = LG_CURSOR_MONOCHROME  ; break;
+          case CURSOR_TYPE_MASKED_COLOR: c = LG_CURSOR_MASKED_COLOR; break;
+          default:
+            DEBUG_ERROR("Invalid cursor type");
+            break;
+        }
+
+        if (state.lgr)
+        {
+          if (!state.lgr->on_mouse_shape(
+            state.lgrData,
+            c,
+            header.cursor.w,
+            header.cursor.h,
+            header.cursor.shape
+          ))
+          {
+            DEBUG_ERROR("Failed to update mouse shape");
+            break;
+          }
+        }
       }
 
       if (state.lgr)

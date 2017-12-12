@@ -277,6 +277,15 @@ void lgr_opengl_on_resize(void * opaque, const int width, const int height, cons
   this->resizeWindow  = true;
 }
 
+bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const uint8_t * data)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this || !this->initialized)
+    return false;
+
+  return true;
+}
+
 bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
@@ -576,6 +585,7 @@ const LG_Renderer LGR_OpenGL =
   .deinitialize   = lgr_opengl_deinitialize,
   .is_compatible  = lgr_opengl_is_compatible,
   .on_resize      = lgr_opengl_on_resize,
+  .on_mouse_shape = lgr_opengl_on_mouse_shape,
   .on_mouse_event = lgr_opengl_on_mouse_event,
   .on_frame_event = lgr_opengl_on_frame_event,
   .render         = lgr_opengl_render
