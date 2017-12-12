@@ -18,8 +18,7 @@
 
 #define FPS_TEXTURE        (VBO_BUFFERS  )
 #define MOUSE_TEXTURE      (VBO_BUFFERS+1)
-
-#define TEXTURE_COUNT MOUSE_TEXTURE
+#define TEXTURE_COUNT      (VBO_BUFFERS+2)
 
 static PFNGLXGETVIDEOSYNCSGIPROC  glXGetVideoSyncSGI  = NULL;
 static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
@@ -58,9 +57,9 @@ struct LGR_OpenGL
   SDL_Rect          fpsRect;
 
   bool              mouseRepair;
-  SDL_Point         mouseRepairPos;
+  SDL_Rect          mouseRepairPos;
   bool              mouseVisible;
-  SDL_Point         mousePos;
+  SDL_Rect          mousePos;
 };
 
 void lgr_opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect);
@@ -283,6 +282,55 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
   if (!this || !this->initialized)
     return false;
 
+  if (SDL_GL_MakeCurrent(this->params.window, this->glContext) != 0)
+  {
+    DEBUG_ERROR("Failed to make the GL context current");
+    return false;
+  }
+
+  switch(cursor)
+  {
+    case LG_CURSOR_COLOR:
+    {
+      DEBUG_INFO("%d %d", width, height);
+      glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
+      glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+      glTexImage2D
+      (
+        GL_TEXTURE_2D,
+        0      ,
+        GL_RGBA,
+        width  ,
+        height ,
+        0      ,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        data
+      );
+      lgr_opengl_check_error("glTexImage2D");
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glBindTexture(GL_TEXTURE_2D, 0);
+
+      this->mousePos.w = width;
+      this->mousePos.h = height;
+      break;
+    }
+
+    case LG_CURSOR_MONOCHROME:
+    {
+      break;
+    }
+
+    case LG_CURSOR_MASKED_COLOR:
+    {
+      break;
+    }
+  }
+
   return true;
 }
 
@@ -452,10 +500,10 @@ void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
     glBindTexture(GL_TEXTURE_2D, this->textures[this->texIndex]);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glBegin(GL_TRIANGLE_STRIP);
-      glTexCoord2f(0 , 0 ); glVertex2i(0 , 0 );
-      glTexCoord2f(32, 0 ); glVertex2i(32, 0  );
-      glTexCoord2f(0 , 32); glVertex2i(0 , 32);
-      glTexCoord2f(32, 32); glVertex2i(32, 32);
+      glTexCoord2f(0                     , 0                     ); glVertex2i(0                     , 0                     );
+      glTexCoord2f(this->mouseRepairPos.w, 0                     ); glVertex2i(this->mouseRepairPos.w, 0                     );
+      glTexCoord2f(0                     , this->mouseRepairPos.h); glVertex2i(0                     , this->mouseRepairPos.h);
+      glTexCoord2f(this->mouseRepairPos.w, this->mouseRepairPos.h); glVertex2i(this->mouseRepairPos.w, this->mouseRepairPos.h);
     glEnd();
     glBindTexture(GL_TEXTURE_2D, 0);
     this->mouseRepair = false;
@@ -469,22 +517,23 @@ void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
   if (!this->mouseVisible)
     return;
 
-  this->mouseRepairPos.x = this->mousePos.x;
-  this->mouseRepairPos.y = this->mousePos.y;
-  this->mouseRepair      = true;
+  memcpy(&this->mouseRepairPos, &this->mousePos, sizeof(SDL_Rect));
+  this->mouseRepair = true;
 
   glPushMatrix();
   glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
 
-  glDisable(GL_TEXTURE_2D);
+  glEnable(GL_BLEND);
+  glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
   glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
   glBegin(GL_TRIANGLE_STRIP);
-    glVertex2i(0 , 0 );
-    glVertex2i(32, 0 );
-    glVertex2i(0 , 32);
-    glVertex2i(32, 32);
+    glTexCoord2f(0.0f, 0.0f); glVertex2i(0               , 0               );
+    glTexCoord2f(1.0f, 0.0f); glVertex2i(this->mousePos.w, 0               );
+    glTexCoord2f(0.0f, 1.0f); glVertex2i(0               , this->mousePos.h);
+    glTexCoord2f(1.0f, 1.0f); glVertex2i(this->mousePos.w, this->mousePos.h);
   glEnd();
-  glEnable(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glDisable(GL_BLEND);
 
   glPopMatrix();
 }
