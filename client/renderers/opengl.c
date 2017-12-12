@@ -16,6 +16,11 @@
 
 #define VBO_BUFFERS 2
 
+#define FPS_TEXTURE        (VBO_BUFFERS  )
+#define MOUSE_TEXTURE      (VBO_BUFFERS+1)
+
+#define TEXTURE_COUNT MOUSE_TEXTURE
+
 static PFNGLXGETVIDEOSYNCSGIPROC  glXGetVideoSyncSGI  = NULL;
 static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
 
@@ -25,6 +30,8 @@ struct LGR_OpenGL
   bool              initialized;
   SDL_GLContext     glContext;
   bool              resizeWindow;
+  bool              mouseUpdate;
+  bool              frameUpdate;
 
   LG_RendererFormat format;
   GLuint            intFormat;
@@ -41,7 +48,7 @@ struct LGR_OpenGL
   LG_RendererRect   destRect;
 
   bool              hasTextures;
-  GLuint            vboTex[VBO_BUFFERS + 1]; // extra texture for FPS
+  GLuint            textures[TEXTURE_COUNT];
 
   uint              gpuFrameCount;
   bool              fpsTexture;
@@ -49,6 +56,11 @@ struct LGR_OpenGL
   uint64_t          renderTime;
   uint64_t          frameCount;
   SDL_Rect          fpsRect;
+
+  bool              mouseRepair;
+  SDL_Point         mouseRepairPos;
+  bool              mouseVisible;
+  SDL_Point         mousePos;
 };
 
 void lgr_opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect);
@@ -112,7 +124,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     }
   }
 
-  SDL_GL_SetSwapInterval(params.vsync ? 1 : 0);
+  SDL_GL_SetSwapInterval(0);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -180,7 +192,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   }
 
   // create the textures
-  glGenTextures(VBO_BUFFERS + (params.showFPS ? 1 : 0), this->vboTex);
+  glGenTextures(TEXTURE_COUNT, this->textures);
   if (lgr_opengl_check_error("glGenTextures"))
     return false;
   this->hasTextures = true;
@@ -188,7 +200,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   // bind the textures to the unpack buffers
   for (int i = 0; i < VBO_BUFFERS; ++i)
   {
-    glBindTexture(GL_TEXTURE_2D, this->vboTex[i]);
+    glBindTexture(GL_TEXTURE_2D, this->textures[i]);
     if (lgr_opengl_check_error("glBindTexture"))
       return false;
 
@@ -207,10 +219,13 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
       return false;
   }
 
+  glBindTexture(GL_TEXTURE_2D, 0);
+
   glEnable(GL_TEXTURE_2D);
   glEnable(GL_COLOR_MATERIAL);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glBlendEquation(GL_FUNC_ADD);
+  glEnable(GL_SCISSOR_TEST);
 
   this->resizeWindow = true;
   this->drawStart    = nanotime();
@@ -229,7 +244,7 @@ void lgr_opengl_deinitialize(void * opaque)
     return;
 
   if (this->hasTextures)
-    glDeleteTextures(VBO_BUFFERS, this->vboTex);
+    glDeleteTextures(VBO_BUFFERS, this->textures);
 
   if (this->hasBuffers)
     glDeleteBuffers(VBO_BUFFERS, this->vboID);
@@ -262,7 +277,24 @@ void lgr_opengl_on_resize(void * opaque, const int width, const int height, cons
   this->resizeWindow  = true;
 }
 
-bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
+bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this || !this->initialized)
+    return false;
+
+  if (this->mousePos.x == x && this->mousePos.y == y)
+    return true;
+
+  this->mouseUpdate  = true;
+  this->mouseVisible = visible;
+  this->mousePos.x   = x;
+  this->mousePos.y   = y;
+
+  return false;
+}
+
+bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resample)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
   if (!this || !this->initialized)
@@ -274,34 +306,9 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
     return false;
   }
 
-  if (this->resizeWindow)
-  {
-    // setup the projection matrix
-    glViewport(0, 0, this->params.width, this->params.height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(0, this->params.width, this->params.height, 0);
-    glMatrixMode(GL_MODELVIEW);
+  if (++this->texIndex == VBO_BUFFERS)
+    this->texIndex = 0;
 
-    // update the display lists
-    for(int i = 0; i < VBO_BUFFERS; ++i)
-    {
-      glNewList(this->texList + i, GL_COMPILE);
-        glBindTexture(GL_TEXTURE_2D, this->vboTex[i]);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        glBegin(GL_TRIANGLE_STRIP);
-          glTexCoord2f(0.0f, 0.0f); glVertex2i(this->destRect.x                   , this->destRect.y                   );
-          glTexCoord2f(1.0f, 0.0f); glVertex2i(this->destRect.x + this->destRect.w, this->destRect.y                   );
-          glTexCoord2f(0.0f, 1.0f); glVertex2i(this->destRect.x                   , this->destRect.y + this->destRect.h);
-          glTexCoord2f(1.0f, 1.0f); glVertex2i(this->destRect.x + this->destRect.w, this->destRect.y + this->destRect.h);
-        glEnd();
-      glEndList();
-    }
-
-    this->resizeWindow  = false;
-  }
-
-  glClear(GL_COLOR_BUFFER_BIT);
   if (this->params.showFPS && this->renderTime > 1e9)
   {
     char str[128];
@@ -315,9 +322,9 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
       return false;
     }
 
-    glBindTexture(GL_TEXTURE_2D       , this->vboTex[VBO_BUFFERS]);
-    glPixelStorei(GL_UNPACK_ALIGNMENT , 4                        );
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w           );
+    glBindTexture(GL_TEXTURE_2D       , this->textures[VBO_BUFFERS]);
+    glPixelStorei(GL_UNPACK_ALIGNMENT , 4                          );
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w             );
     glTexImage2D(
       GL_TEXTURE_2D,
       0,
@@ -360,7 +367,7 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
       glEnd();
       glEnable(GL_TEXTURE_2D);
 
-      glBindTexture(GL_TEXTURE_2D, this->vboTex[VBO_BUFFERS]);
+      glBindTexture(GL_TEXTURE_2D, this->textures[VBO_BUFFERS]);
       glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
       glBegin(GL_TRIANGLE_STRIP);
         glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
@@ -374,14 +381,13 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
 
   // copy the buffer to the texture
   memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
-
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
   glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
 
   // bind the texture and update it
-  glBindTexture(GL_TEXTURE_2D         , this->vboTex[this->texIndex]);
-  glPixelStorei(GL_UNPACK_ALIGNMENT   , 4                           );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH  , this->format.width          );
+  glBindTexture(GL_TEXTURE_2D         , this->textures[this->texIndex]);
+  glPixelStorei(GL_UNPACK_ALIGNMENT   , 4                             );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH  , this->format.width            );
 
   // update the texture
   glTexSubImage2D(
@@ -417,37 +423,155 @@ bool lgr_opengl_render(void * opaque, const uint8_t * data, bool resample)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   }
 
-  // draw the screen
-  glCallList(this->texList + this->texIndex);
+  this->frameUpdate = true;
+  return true;
+}
 
-  if (this->fpsTexture)
-    glCallList(this->fpsList);
+void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
+{
+  if (this->mouseRepair)
+  {
+    glMatrixMode(GL_TEXTURE);
+    glPushMatrix();
+    glScalef(1.0f / (float)this->format.width, 1.0f / (float)this->format.height, 1.0f);
+    glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
 
-  glFlush();
+    // repair the damage from the cursor's last position
+    glBindTexture(GL_TEXTURE_2D, this->textures[this->texIndex]);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_TRIANGLE_STRIP);
+      glTexCoord2f(0 , 0 ); glVertex2i(0 , 0 );
+      glTexCoord2f(32, 0 ); glVertex2i(32, 0  );
+      glTexCoord2f(0 , 32); glVertex2i(0 , 32);
+      glTexCoord2f(32, 32); glVertex2i(32, 32);
+    glEnd();
+    glBindTexture(GL_TEXTURE_2D, 0);
+    this->mouseRepair = false;
 
-  ++this->frameCount;
-  SDL_GL_SwapWindow(this->params.window);
+    glMatrixMode(GL_TEXTURE);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+  }
 
-  // wait until the frame has been presented, this is to avoid the video card
-  // buffering frames, we would rather skip a frame then fall behind the guest
-  glXWaitVideoSyncSGI(1, 0, &this->gpuFrameCount);
+  if (!this->mouseVisible)
+    return;
 
-  const uint64_t t    = nanotime();
-  this->renderTime   += t - this->lastFrameTime;
-  this->lastFrameTime = t;
+  this->mouseRepairPos.x = this->mousePos.x;
+  this->mouseRepairPos.y = this->mousePos.y;
+  this->mouseRepair      = true;
 
-  if (++this->texIndex == VBO_BUFFERS)
-    this->texIndex = 0;
+  glPushMatrix();
+  glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
 
+  glDisable(GL_TEXTURE_2D);
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+  glBegin(GL_TRIANGLE_STRIP);
+    glVertex2i(0 , 0 );
+    glVertex2i(32, 0 );
+    glVertex2i(0 , 32);
+    glVertex2i(32, 32);
+  glEnd();
+  glEnable(GL_TEXTURE_2D);
+
+  glPopMatrix();
+}
+
+bool lgr_opengl_render(void * opaque)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this || !this->initialized)
+    return false;
+
+  if (SDL_GL_MakeCurrent(this->params.window, this->glContext) != 0)
+  {
+    DEBUG_ERROR("Failed to make the GL context current");
+    return false;
+  }
+
+  if (this->resizeWindow)
+  {
+    // setup the projection matrix
+    glViewport(0, 0, this->params.width, this->params.height);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluOrtho2D(0, this->params.width, this->params.height, 0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+    glScalef(
+      (float)this->destRect.w / (float)this->format.width,
+      (float)this->destRect.h / (float)this->format.height,
+      1.0f
+    );
+
+    // update the display lists
+    for(int i = 0; i < VBO_BUFFERS; ++i)
+    {
+      glNewList(this->texList + i, GL_COMPILE);
+        glBindTexture(GL_TEXTURE_2D, this->textures[i]);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
+       glEnd();
+      glEndList();
+    }
+
+    // update the scissor rect to prevent drawing outside of the frame
+    glScissor(0, 0, this->format.width, this->format.height);
+
+    this->resizeWindow = false;
+    glDisable(GL_SCISSOR_TEST);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+  }
+
+  if (this->frameUpdate)
+  {
+    glXWaitVideoSyncSGI(1, 0, &this->gpuFrameCount);
+    glFinish();
+
+    glCallList(this->texList + this->texIndex);
+    this->mouseRepair = false;
+    lgr_opengl_draw_mouse(this);
+    if (this->fpsTexture)
+      glCallList(this->fpsList);
+
+    glFlush();
+
+    ++this->frameCount;
+    const uint64_t t    = nanotime();
+    this->renderTime   += t - this->lastFrameTime;
+    this->lastFrameTime = t;
+  }
+  else
+    if (this->mouseUpdate)
+    {
+      lgr_opengl_draw_mouse(this);
+      glFlush();
+    }
+
+
+  this->frameUpdate = false;
+  this->mouseUpdate = false;
   return true;
 }
 
 const LG_Renderer LGR_OpenGL =
 {
-  .get_name      = lgr_opengl_get_name,
-  .initialize    = lgr_opengl_initialize,
-  .deinitialize  = lgr_opengl_deinitialize,
-  .is_compatible = lgr_opengl_is_compatible,
-  .on_resize     = lgr_opengl_on_resize,
-  .render        = lgr_opengl_render
+  .get_name       = lgr_opengl_get_name,
+  .initialize     = lgr_opengl_initialize,
+  .deinitialize   = lgr_opengl_deinitialize,
+  .is_compatible  = lgr_opengl_is_compatible,
+  .on_resize      = lgr_opengl_on_resize,
+  .on_mouse_event = lgr_opengl_on_mouse_event,
+  .on_frame_event = lgr_opengl_on_frame_event,
+  .render         = lgr_opengl_render
 };

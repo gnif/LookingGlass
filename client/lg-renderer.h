@@ -25,18 +25,18 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL_ttf.h>
 
 #define IS_LG_RENDERER_VALID(x) \
-  ((x)->get_name      && \
-   (x)->initialize    && \
-   (x)->deinitialize  && \
-   (x)->is_compatible && \
-   (x)->on_resize     && \
+  ((x)->get_name       && \
+   (x)->initialize     && \
+   (x)->deinitialize   && \
+   (x)->is_compatible  && \
+   (x)->on_resize      && \
+   (x)->on_mouse_event && \
    (x)->render)
 
 typedef struct LG_RendererParams
 {
   SDL_Window * window;
   TTF_Font   * font;
-  bool         vsync;
   bool         showFPS;
   int          width;
   int          height;
@@ -62,12 +62,14 @@ typedef struct LG_RendererRect
 }
 LG_RendererRect;
 
-typedef const char * (* LG_RendererGetName     )();
-typedef bool         (* LG_RendererInitialize  )(void ** opaque, const LG_RendererParams params, const LG_RendererFormat format);
-typedef void         (* LG_RendererDeInitialize)(void * opaque);
-typedef bool         (* LG_RendererIsCompatible)(void * opaque, const LG_RendererFormat format);
-typedef void         (* LG_RendererOnResize    )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
-typedef bool         (* LG_RendererRender      )(void * opaque, const uint8_t * data, bool resample);
+typedef const char * (* LG_RendererGetName       )();
+typedef bool         (* LG_RendererInitialize    )(void ** opaque, const LG_RendererParams params, const LG_RendererFormat format);
+typedef void         (* LG_RendererDeInitialize  )(void * opaque);
+typedef bool         (* LG_RendererIsCompatible  )(void * opaque, const LG_RendererFormat format);
+typedef void         (* LG_RendererOnResize      )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
+typedef bool         (* LG_RendererOnMouseEvent  )(void * opaque, const bool visible , const int x, const int y);
+typedef bool         (* LG_RendererOnFrameEvent  )(void * opaque, const uint8_t * data, bool resample);
+typedef bool         (* LG_RendererRender        )(void * opaque);
 
 typedef struct LG_Renderer
 {
@@ -76,6 +78,8 @@ typedef struct LG_Renderer
   LG_RendererDeInitialize deinitialize;
   LG_RendererIsCompatible is_compatible;
   LG_RendererOnResize     on_resize;
+  LG_RendererOnMouseEvent on_mouse_event;
+  LG_RendererOnFrameEvent on_frame_event;
   LG_RendererRender       render;
 }
 LG_Renderer;

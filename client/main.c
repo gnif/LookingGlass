@@ -49,6 +49,7 @@ struct AppState
   TTF_Font       *font;
   SDL_Point       srcSize;
   LG_RendererRect dstRect;
+  SDL_Point       cursor;
   float           scaleX, scaleY;
 
   const LG_Renderer * lgr ;
@@ -61,7 +62,6 @@ struct AppState
 
 struct AppParams
 {
-  bool         vsync;
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
@@ -82,7 +82,6 @@ struct AppParams
 struct AppState  state;
 struct AppParams params =
 {
-  .vsync            = true,
   .autoResize       = false,
   .allowResize      = true,
   .keepAspect       = true,
@@ -145,22 +144,21 @@ int renderThread(void * unused)
 {
   bool                error = false;
   struct KVMFRHeader  header;
-  volatile int32_t  * updateCount = &state.shm->updateCount - 1;
+  volatile uint32_t * updateCount = &state.shm->updateCount;
 
   while(state.running)
   {
-    // if the next frame isn't aready available
-    if (header.updateCount == *updateCount)
-    {
-      // poll until we have a new frame, or we time out
-      while(header.updateCount == *updateCount && state.running) {
-        const struct timespec s = {
-          .tv_sec  = 0,
-          .tv_nsec = 1000
-        };
-        nanosleep(&s, NULL);
-      }
+    // poll until we have a new frame, or we time out
+    while(header.updateCount == *updateCount && state.running) {
+      const struct timespec s = {
+        .tv_sec  = 0,
+        .tv_nsec = 1000
+      };
+      nanosleep(&s, NULL);
     }
+
+    if (!state.running)
+      break;
 
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
@@ -180,8 +178,10 @@ int renderThread(void * unused)
       continue;
     }
 
-    if(header.flags & KVMFR_HEADER_FLAG_FRAME)
+    // if we have a frame
+    if (header.flags & KVMFR_HEADER_FLAG_FRAME)
     {
+      // sainty check of the frame format
       if (
         header.frame.type    >= FRAME_TYPE_MAX ||
         header.frame.width   == 0 ||
@@ -239,7 +239,6 @@ int renderThread(void * unused)
         lgrParams.window  = state.window;
         lgrParams.font    = state.font;
         lgrParams.showFPS = params.showFPS;
-        lgrParams.vsync   = params.vsync;
         lgrParams.width   = width;
         lgrParams.height  = height;
 
@@ -299,16 +298,40 @@ int renderThread(void * unused)
         updatePositionInfo();
       }
 
-      if (!state.lgr->render(
-        state.lgrData,
-        (uint8_t *)state.shm + header.frame.dataPos,
-        params.useMipmap
-      ))
+      const uint8_t * data = (const uint8_t *)state.shm + header.frame.dataPos;
+      if (!state.lgr->on_frame_event(state.lgrData, data, params.useMipmap))
       {
         DEBUG_ERROR("Failed to render the frame");
         break;
       }
     }
+
+    // if we have cursor data
+    if (header.flags & KVMFR_HEADER_FLAG_CURSOR)
+    {
+      if (header.cursor.flags & KVMFR_CURSOR_FLAG_POS)
+      {
+        state.cursor.x = header.cursor.x;
+        state.cursor.y = header.cursor.y;
+      }
+
+      if (header.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE)
+      {
+      }
+
+      if (state.lgr)
+      {
+        state.lgr->on_mouse_event(
+          state.lgrData,
+          (header.cursor.flags & KVMFR_CURSOR_FLAG_VISIBLE) != 0,
+          state.cursor.x,
+          state.cursor.y
+        );
+      }
+    }
+
+    if (state.lgr)
+      state.lgr->render(state.lgrData);
   }
 
   if (state.lgr)
@@ -484,13 +507,12 @@ int eventThread(void * arg)
             x = (float)x * state.scaleX;
             y = (float)y * state.scaleY;
           }
-          x -= state.shm->cursor.x;
-          y -= state.shm->cursor.y;
+          x -= state.cursor.x;
+          y -= state.cursor.y;
           realignGuest = false;
 
           if (!spice_mouse_motion(x, y))
             DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-
           break;
         }
 
@@ -612,9 +634,7 @@ int run()
     FcPatternDestroy(pat);
   }
 
-  if (!params.vsync)
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
-
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
   state.window = SDL_CreateWindow(
     "Looking Glass (Client)",
     params.center ? SDL_WINDOWPOS_CENTERED : params.x,
@@ -837,7 +857,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMmvkanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMmkanrdx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -872,10 +892,6 @@ int main(int argc, char * argv[])
 
       case 'm':
         params.useMipmap = false;
-        break;
-
-      case 'v':
-        params.vsync = false;
         break;
 
       case 'k':

@@ -26,6 +26,5 @@ extern const LG_Renderer LGR_Basic;
 const LG_Renderer * LG_Renderers[] =
 {
   &LGR_OpenGL,
-  &LGR_Basic,
   NULL // end of array sentinal
 };

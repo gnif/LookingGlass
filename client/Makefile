@@ -17,7 +17,6 @@ CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbr
 OBJS	= main.o \
 	  spice/spice.o \
 	  ivshmem/ivshmem.o \
-	  renderers/basic.o \
 	  renderers/opengl.o
 
 BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))

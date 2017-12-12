@@ -37,7 +37,7 @@ bool lgr_basic_initialize(void ** opaque, const LG_RendererParams params, const 
 
   this->renderer = SDL_CreateRenderer(params.window, -1,
     SDL_RENDERER_ACCELERATED |
-    (params.vsync ? SDL_RENDERER_PRESENTVSYNC : 0)
+    SDL_RENDERER_PRESENTVSYNC
   );
 
   if (!this->renderer)
