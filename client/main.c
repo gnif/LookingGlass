@@ -335,6 +335,7 @@ int renderThread(void * unused)
             c,
             header.cursor.w,
             header.cursor.h,
+            header.cursor.pitch,
             header.cursor.shape
           ))
           {

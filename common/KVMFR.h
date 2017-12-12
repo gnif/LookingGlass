@@ -51,6 +51,7 @@ typedef struct KVMFRCursor
   int16_t    x, y;        // cursor x & y position
   CursorType type;        // shape buffer data type
   uint8_t    w, h;        // shape width and height
+  uint8_t    pitch;       // shape row length in bytes
   uint8_t    shape[KVMFR_CURSOR_BUFFER];
 }
 KVMFRCursor;
