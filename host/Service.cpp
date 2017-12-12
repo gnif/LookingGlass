@@ -240,6 +240,8 @@ bool Service::Process()
     // tell the host where the cursor is
     m_header->flags        |= KVMFR_HEADER_FLAG_CURSOR;
     m_header->cursor.flags |= KVMFR_CURSOR_FLAG_POS;
+    if (frame.cursor.visible)
+      m_header->cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
     m_header->cursor.x      = frame.cursor.x;
     m_header->cursor.y      = frame.cursor.y;
   }

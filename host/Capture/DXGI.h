@@ -72,5 +72,7 @@ namespace Capture
     BYTE *                          m_pointer;
     UINT                            m_pointerBufSize;
     UINT                            m_pointerSize;
+    BOOL                            m_lastMouseVis;
+    POINT                           m_lastMousePos;
   };
 };

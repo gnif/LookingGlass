@@ -248,11 +248,25 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
       // if we have a mouse update
       if (frameInfo.LastMouseUpdateTime.QuadPart)
       {
-        cursorUpdate = true;
-        frame.cursor.hasPos  = true;
-        frame.cursor.visible = frameInfo.PointerPosition.Visible;
-        frame.cursor.x       = frameInfo.PointerPosition.Position.x;
-        frame.cursor.y       = frameInfo.PointerPosition.Position.x;
+        if (
+          m_lastMousePos.x != frameInfo.PointerPosition.Position.x ||
+          m_lastMousePos.y != frameInfo.PointerPosition.Position.y
+        ) {
+          cursorUpdate         = true;
+          frame.cursor.hasPos  = true;
+          frame.cursor.x       = frameInfo.PointerPosition.Position.x;
+          frame.cursor.y       = frameInfo.PointerPosition.Position.y;
+          m_lastMousePos.x     = frameInfo.PointerPosition.Position.x;
+          m_lastMousePos.y     = frameInfo.PointerPosition.Position.y;
+        }
+
+        if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
+        {
+          cursorUpdate   = true;
+          m_lastMouseVis = frameInfo.PointerPosition.Visible;
+        }
+
+        frame.cursor.visible = m_lastMouseVis;
       }
 
       // if the pointer shape has changed
@@ -293,7 +307,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         frame.cursor.dataSize = m_pointerSize;
       }
 
-      if (frameInfo.AccumulatedFrames == 1)
+      if (frameInfo.AccumulatedFrames > 0)
         break;
 
       m_dup->ReleaseFrame();
