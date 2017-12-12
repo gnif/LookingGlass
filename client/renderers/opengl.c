@@ -124,7 +124,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     }
   }
 
-  SDL_GL_SetSwapInterval(0);
+  SDL_GL_SetSwapInterval(1);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -669,16 +669,24 @@ bool lgr_opengl_render(void * opaque)
       glEnable(GL_SCISSOR_TEST);
     }
 
-    glXWaitVideoSyncSGI(1, 0, &this->gpuFrameCount);
-    glFinish();
-
     glCallList(this->texList + this->texIndex);
     this->mouseRepair = false;
     lgr_opengl_draw_mouse(this);
     if (this->fpsTexture)
       glCallList(this->fpsList);
 
-    glFlush();
+    glXGetVideoSyncSGI(&this->gpuFrameCount);
+    SDL_GL_SwapWindow(this->params.window);
+
+    unsigned int count;
+    glXGetVideoSyncSGI(&count);
+    while(count == this->gpuFrameCount)
+    {
+      unsigned int remainder;
+      glXWaitVideoSyncSGI(1, 0, &remainder);
+      glXGetVideoSyncSGI(&count);
+      glFinish();
+    }
 
     ++this->frameCount;
     const uint64_t t    = nanotime();
@@ -688,8 +696,10 @@ bool lgr_opengl_render(void * opaque)
   else
     if (this->mouseUpdate)
     {
+      glDrawBuffer(GL_FRONT);
       lgr_opengl_draw_mouse(this);
       glFlush();
+      glDrawBuffer(GL_BACK);
     }
 
 
