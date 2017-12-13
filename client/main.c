@@ -50,6 +50,7 @@ struct AppState
   SDL_Point       srcSize;
   LG_RendererRect dstRect;
   SDL_Point       cursor;
+  bool            haveCursorPos;
   float           scaleX, scaleY;
 
   const LG_Renderer * lgr ;
@@ -313,8 +314,9 @@ int renderThread(void * unused)
     {
       if (header.cursor.flags & KVMFR_CURSOR_FLAG_POS)
       {
-        state.cursor.x = header.cursor.x;
-        state.cursor.y = header.cursor.y;
+        state.cursor.x      = header.cursor.x;
+        state.cursor.y      = header.cursor.y;
+        state.haveCursorPos = true;
       }
 
       if (header.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE)
@@ -526,7 +528,7 @@ int eventThread(void * arg)
 
         int x = 0;
         int y = 0;
-        if (realignGuest)
+        if (realignGuest && state.haveCursorPos)
         {
           x = event.motion.x - state.dstRect.x;
           y = event.motion.y - state.dstRect.y;
