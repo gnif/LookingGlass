@@ -81,16 +81,16 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  // we save this as it might actually be valid
-  UINT16 hostID = m_header->hostID;
-
-  ZeroMemory(m_header, sizeof(KVMFRHeader));
+  // update everything except for the hostID
   memcpy(m_header->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
-
   m_header->version     = KVMFR_HEADER_VERSION;
   m_header->guestID     = m_ivshmem->GetPeerID();
-  m_header->hostID      = hostID;
   m_header->updateCount = 0;
+
+  // clear but retain the restart flag if it was set by the client
+  InterlockedAnd8((char *)&m_header->flags, KVMFR_HEADER_FLAG_RESTART);
+  ZeroMemory(&m_header->frame , sizeof(KVMFRFrame ));
+  ZeroMemory(&m_header->cursor, sizeof(KVMFRCursor));
 
   m_initialized = true;
   return true;
@@ -155,6 +155,13 @@ bool Service::Process()
   bool eventDone = false;
   while (!eventDone)
   {
+    // check if the client has flagged a restart
+    if (m_header->flags & KVMFR_HEADER_FLAG_RESTART)
+    {
+      InterlockedAnd8((char *)&m_header->flags, ~(KVMFR_HEADER_FLAG_RESTART));
+      break;
+    }
+
     switch (WaitForSingleObject(m_readyEvent, 1000))
     {
     case WAIT_ABANDONED:
