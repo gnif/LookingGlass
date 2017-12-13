@@ -29,7 +29,6 @@ struct LGR_OpenGL
   bool              initialized;
   SDL_GLContext     glContext;
   bool              resizeWindow;
-  bool              mouseUpdate;
   bool              frameUpdate;
 
   LG_RendererFormat format;
@@ -123,7 +122,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     }
   }
 
-  SDL_GL_SetSwapInterval(1);
+  SDL_GL_SetSwapInterval(0);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -425,10 +424,9 @@ bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, c
   if (!this || !this->initialized)
     return false;
 
-  if (this->mousePos.x == x && this->mousePos.y == y)
+  if (this->mousePos.x == x && this->mousePos.y == y && this->mouseVisible == visible)
     return true;
 
-  this->mouseUpdate  = true;
   this->mouseVisible = visible;
   this->mousePos.x   = x;
   this->mousePos.y   = y;
@@ -636,40 +634,30 @@ bool lgr_opengl_render(void * opaque)
   {
     glCallList(this->texList + this->texIndex);
     this->mouseRepair = false;
-    lgr_opengl_draw_mouse(this);
-    if (this->fpsTexture)
-      glCallList(this->fpsList);
-
-    glXGetVideoSyncSGI(&this->gpuFrameCount);
-    SDL_GL_SwapWindow(this->params.window);
-
-    unsigned int count;
-    glXGetVideoSyncSGI(&count);
-    while(count == this->gpuFrameCount)
-    {
-      unsigned int remainder;
-      glXWaitVideoSyncSGI(1, 0, &remainder);
-      glXGetVideoSyncSGI(&count);
-      glFinish();
-    }
-
-    ++this->frameCount;
-    const uint64_t t    = nanotime();
-    this->renderTime   += t - this->lastFrameTime;
-    this->lastFrameTime = t;
   }
-  else
-    if (this->mouseUpdate)
-    {
-      glDrawBuffer(GL_FRONT);
-      lgr_opengl_draw_mouse(this);
-      glFlush();
-      glDrawBuffer(GL_BACK);
-    }
 
+  lgr_opengl_draw_mouse(this);
+  if (this->fpsTexture)
+    glCallList(this->fpsList);
+
+  GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  glWaitSync(sync, 0, 1000);
+  glDeleteSync(sync);
+
+  unsigned int count;
+  glXGetVideoSyncSGI(&count);
+  if (count == this->gpuFrameCount)
+    glXWaitVideoSyncSGI(1, 0, &count);
+
+  SDL_GL_SwapWindow(this->params.window);
+  glXGetVideoSyncSGI(&this->gpuFrameCount);
+
+  ++this->frameCount;
+  const uint64_t t    = nanotime();
+  this->renderTime   += t - this->lastFrameTime;
+  this->lastFrameTime = t;
 
   this->frameUpdate = false;
-  this->mouseUpdate = false;
   return true;
 }
 
