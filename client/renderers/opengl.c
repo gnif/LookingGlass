@@ -633,8 +633,8 @@ bool lgr_opengl_render(void * opaque)
   }
 
   // wait for vsync
-  unsigned int count;
-  glXWaitVideoSyncSGI(1, 0, &count);
+//  unsigned int count;
+//  glXWaitVideoSyncSGI(1, 0, &count);
 
   glDisable(GL_SCISSOR_TEST);
   glClear(GL_COLOR_BUFFER_BIT);
