@@ -166,11 +166,7 @@ int renderThread(void * unused)
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
     memcpy(&header, state.shm, sizeof(struct KVMFRHeader));
-    if (!ivshmem_kick_irq(header.guestID, 0))
-    {
-      usleep(1000);
-      continue;
-    }
+    __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_READY);
 
     // check the header's magic and version are valid
     if (
