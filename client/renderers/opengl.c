@@ -294,12 +294,6 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
   if (!this || !this->initialized)
     return false;
 
-  if (SDL_GL_MakeCurrent(this->params.window, this->glContext) != 0)
-  {
-    DEBUG_ERROR("Failed to make the GL context current");
-    return false;
-  }
-
   this->mouseType = cursor;
   switch(cursor)
   {
@@ -439,12 +433,6 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
   if (!this || !this->initialized)
     return false;
-
-  if (SDL_GL_MakeCurrent(this->params.window, this->glContext) != 0)
-  {
-    DEBUG_ERROR("Failed to make the GL context current");
-    return false;
-  }
 
   if (++this->texIndex == VBO_BUFFERS)
     this->texIndex = 0;
@@ -592,12 +580,6 @@ bool lgr_opengl_render(void * opaque)
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
   if (!this || !this->initialized)
     return false;
-
-  if (SDL_GL_MakeCurrent(this->params.window, this->glContext) != 0)
-  {
-    DEBUG_ERROR("Failed to make the GL context current");
-    return false;
-  }
 
   if (this->resizeWindow)
   {
