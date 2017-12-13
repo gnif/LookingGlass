@@ -39,6 +39,7 @@ typedef struct LG_RendererParams
   SDL_Window * window;
   TTF_Font   * font;
   bool         showFPS;
+  bool         resample;
   int          width;
   int          height;
 }
@@ -78,7 +79,7 @@ typedef bool         (* LG_RendererIsCompatible  )(void * opaque, const LG_Rende
 typedef void         (* LG_RendererOnResize      )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
 typedef bool         (* LG_RendererOnMouseShape  )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent  )(void * opaque, const bool visible , const int x, const int y);
-typedef bool         (* LG_RendererOnFrameEvent  )(void * opaque, const uint8_t * data, bool resample);
+typedef bool         (* LG_RendererOnFrameEvent  )(void * opaque, const uint8_t * data);
 typedef bool         (* LG_RendererRender        )(void * opaque);
 
 typedef struct LG_Renderer

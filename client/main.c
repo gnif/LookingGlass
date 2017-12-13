@@ -235,11 +235,12 @@ int renderThread(void * unused)
         SDL_GetWindowSize(state.window, &width, &height);
 
         LG_RendererParams lgrParams;
-        lgrParams.window  = state.window;
-        lgrParams.font    = state.font;
-        lgrParams.showFPS = params.showFPS;
-        lgrParams.width   = width;
-        lgrParams.height  = height;
+        lgrParams.window   = state.window;
+        lgrParams.font     = state.font;
+        lgrParams.resample = params.useMipmap;
+        lgrParams.showFPS  = params.showFPS;
+        lgrParams.width    = width;
+        lgrParams.height   = height;
 
         DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
             lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
@@ -298,7 +299,7 @@ int renderThread(void * unused)
       }
 
       const uint8_t * data = (const uint8_t *)state.shm + header.frame.dataPos;
-      if (!state.lgr->on_frame_event(state.lgrData, data, params.useMipmap))
+      if (!state.lgr->on_frame_event(state.lgrData, data))
       {
         DEBUG_ERROR("Failed to render the frame");
         break;

@@ -124,7 +124,8 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     }
   }
 
-  SDL_GL_SetSwapInterval(1);
+  SDL_GL_SetSwapInterval(0);
+  glDrawBuffer(GL_FRONT);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -176,8 +177,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     this->texSize * BUFFER_COUNT,
     NULL,
     GL_MAP_WRITE_BIT      |
-    GL_MAP_PERSISTENT_BIT |
-    GL_MAP_COHERENT_BIT
+    GL_MAP_PERSISTENT_BIT
   );
   if (lgr_opengl_check_error("glBufferStorage"))
     return false;
@@ -188,7 +188,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     this->texSize * BUFFER_COUNT,
     GL_MAP_WRITE_BIT         |
     GL_MAP_PERSISTENT_BIT    |
-    GL_MAP_COHERENT_BIT
+    GL_MAP_FLUSH_EXPLICIT_BIT
   );
 
   if (lgr_opengl_check_error("glMapBufferRange"))
@@ -446,15 +446,11 @@ bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, c
   return false;
 }
 
-bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resample)
+bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
   if (!this || !this->initialized)
     return false;
-
-  int texIndex = this->texIndex + 1;
-  if (texIndex == BUFFER_COUNT)
-    texIndex = 0;
 
   if (this->params.showFPS && this->renderTime > 1e9)
   {
@@ -526,33 +522,38 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
     glEndList();
   }
 
-  // copy the buffer to the texture
-  memcpySSE(this->texPixels[texIndex], data, this->texSize);
-
   // bind the texture and update it
   glBindTexture(GL_TEXTURE_2D        , this->textures[FRAME_TEXTURE]);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[0]               );
   glPixelStorei(GL_UNPACK_ALIGNMENT  , 4                            );
   glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.width           );
 
+  // copy the buffer to the texture
+  memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
+  glFlushMappedBufferRange(
+    GL_PIXEL_UNPACK_BUFFER,
+    this->texSize * this->texIndex,
+    this->texSize
+  );
+
   // update the texture
   glTexSubImage2D(
     GL_TEXTURE_2D,
     0,
     0,
-    texIndex * this->format.height,
+    this->texIndex * this->format.height,
     this->format.width ,
     this->format.height,
     this->vboFormat,
     GL_UNSIGNED_BYTE,
-    (void*)(texIndex * this->texSize)
+    (void*)(this->texIndex * this->texSize)
   );
   lgr_opengl_check_error("glTexSubImage2D");
 
   // unbind the buffer
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-  const bool mipmap = resample && (
+  const bool mipmap = this->params.resample && (
     (this->format.width  > this->destRect.w) ||
     (this->format.height > this->destRect.h));
 
@@ -568,8 +569,10 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
+  if (++this->texIndex == BUFFER_COUNT)
+    this->texIndex = 0;
+
   this->frameUpdate = true;
-  this->texIndex = texIndex;
   return true;
 }
 
@@ -616,9 +619,6 @@ bool lgr_opengl_render(void * opaque)
     );
 
     this->resizeWindow = false;
-    glDisable(GL_SCISSOR_TEST);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glEnable(GL_SCISSOR_TEST);
   }
 
 
@@ -631,23 +631,25 @@ bool lgr_opengl_render(void * opaque)
     const uint64_t delta = nanotime() - this->lastMouseDraw;
     if (delta < 1e7)
       return true;
-
-    glDrawBuffer(GL_FRONT);
-    glCallList(this->texList + this->texIndex);
-    lgr_opengl_draw_mouse(this);
-    glFlush();
-
-    this->mouseUpdate   = false;
-    this->lastMouseDraw = nanotime();
-    return true;
   }
 
-  glDrawBuffer(GL_BACK);
+  // wait for vsync
+  unsigned int count;
+  glXGetVideoSyncSGI(&count);
+  if (count == this->gpuFrameCount)
+    glXWaitVideoSyncSGI(1, 0, &count);
+  glXGetVideoSyncSGI(&this->gpuFrameCount);
+
+  glDisable(GL_SCISSOR_TEST);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glEnable(GL_SCISSOR_TEST);
+
   glCallList(this->texList + this->texIndex);
   lgr_opengl_draw_mouse(this);
   if (this->fpsTexture)
     glCallList(this->fpsList);
-  SDL_GL_SwapWindow(this->params.window);
+
+  glFlush();
 
   ++this->frameCount;
   const uint64_t t    = nanotime();
