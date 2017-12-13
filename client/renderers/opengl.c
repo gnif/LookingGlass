@@ -573,7 +573,7 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
   return true;
 }
 
-inline void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
+static inline void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
 {
   if (!this->mouseVisible)
     return;

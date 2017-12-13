@@ -22,14 +22,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <time.h>
 #include <stdint.h>
 
-inline uint64_t microtime()
+static inline uint64_t microtime()
 {
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);
   return ((uint64_t)time.tv_sec * 1000000) + (time.tv_nsec / 1000);
 }
 
-inline uint64_t nanotime()
+static inline uint64_t nanotime()
 {
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);
