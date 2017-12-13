@@ -151,21 +151,25 @@ bool Service::Process()
   frame.buffer      = m_frame[m_frameIndex];
   frame.bufferSize  = m_frameSize;
 
+  volatile uint8_t *flags = &m_header->flags;
+
   // wait for the host to notify that is it is ready to proceed
   while (true)
   {
+    const uint8_t f = *flags;
+
     // check if the client has flagged a restart
-    if (m_header->flags & KVMFR_HEADER_FLAG_RESTART)
+    if (f & KVMFR_HEADER_FLAG_RESTART)
     {
-      InterlockedAnd8((char *)&m_header->flags, ~(KVMFR_HEADER_FLAG_RESTART));
+      InterlockedAnd8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
       restart = true;
       break;
     }
 
     // check if the client has flagged it's ready
-    if (m_header->flags & KVMFR_HEADER_FLAG_READY)
+    if (f & KVMFR_HEADER_FLAG_READY)
     {
-      InterlockedAnd8((char *)&m_header->flags, ~(KVMFR_HEADER_FLAG_READY));
+      InterlockedAnd8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_READY));
       break;
     }
 
@@ -220,13 +224,13 @@ bool Service::Process()
     return false;
   }
 
-  uint8_t flags = 0;
+  uint8_t updateFlags = 0;
   m_header->cursor.flags = 0;
 
   if (!cursorOnly)
   {
     // signal a frame update
-    flags                  |= KVMFR_HEADER_FLAG_FRAME;
+    updateFlags            |= KVMFR_HEADER_FLAG_FRAME;
     m_header->frame.type    = m_capture->GetFrameType();
     m_header->frame.width   = frame.width;
     m_header->frame.height  = frame.height;
@@ -239,7 +243,7 @@ bool Service::Process()
   if (frame.cursor.hasPos)
   {
     // tell the host where the cursor is
-    flags                  |= KVMFR_HEADER_FLAG_CURSOR;
+    updateFlags            |= KVMFR_HEADER_FLAG_CURSOR;
     m_header->cursor.flags |= KVMFR_CURSOR_FLAG_POS;
     if (frame.cursor.visible)
       m_header->cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
@@ -255,7 +259,7 @@ bool Service::Process()
   if (frame.cursor.hasShape)
   {
     // give the host the new cursor shape
-    flags                  |= KVMFR_HEADER_FLAG_CURSOR;
+    updateFlags            |= KVMFR_HEADER_FLAG_CURSOR;
     m_header->cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
     m_header->cursor.type   = frame.cursor.type;
     m_header->cursor.w      = frame.cursor.w;
@@ -279,15 +283,15 @@ bool Service::Process()
     // if we already have a shape and the client restarted send it to them
     if (restart && m_haveShape)
     {
-      flags          |= KVMFR_HEADER_FLAG_CURSOR;
+      updateFlags    |= KVMFR_HEADER_FLAG_CURSOR;
       m_cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
       memcpy(&m_header->cursor, &m_cursor, sizeof(KVMFRCursor));
     }
   }
 
   // update the flags
-  InterlockedAnd8((char *)&m_header->flags, KVMFR_HEADER_FLAG_RESTART);
-  InterlockedOr8 ((char *)&m_header->flags, flags);
+  InterlockedAnd8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
+  InterlockedOr8 ((volatile char *)flags, updateFlags);
 
   // increment the update count to resume the host
   ++m_header->updateCount;
