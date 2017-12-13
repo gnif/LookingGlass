@@ -30,7 +30,7 @@ Service * Service::m_instance = NULL;
 Service::Service() :
   m_initialized(false),
   m_memory(NULL),
-  m_readyEvent(INVALID_HANDLE_VALUE),
+  m_timer(NULL),
   m_capture(NULL),
   m_header(NULL),
   m_frameIndex(0)
@@ -73,11 +73,10 @@ bool Service::Initialize(ICapture * captureDevice)
   if (!InitPointers())
     return false;
 
-  m_readyEvent = m_ivshmem->CreateVectorEvent(0);
-  if (m_readyEvent == INVALID_HANDLE_VALUE)
+  m_timer = CreateWaitableTimer(NULL, TRUE, NULL);
+  if (!m_timer)
   {
-    DEBUG_ERROR("Failed to get event for vector 0");
-    DeInitialize();
+    DEBUG_ERROR("Failed to create waitable timer");
     return false;
   }
 
@@ -117,10 +116,10 @@ bool Service::InitPointers()
 
 void Service::DeInitialize()
 {
-  if (m_readyEvent != INVALID_HANDLE_VALUE)
+  if (m_timer)
   {
-    CloseHandle(m_readyEvent);
-    m_readyEvent = INVALID_HANDLE_VALUE;
+    CloseHandle(m_timer);
+    m_timer = NULL;
   }
 
   m_header        = NULL;
@@ -153,8 +152,7 @@ bool Service::Process()
   frame.bufferSize  = m_frameSize;
 
   // wait for the host to notify that is it is ready to proceed
-  bool eventDone = false;
-  while (!eventDone)
+  while (true)
   {
     // check if the client has flagged a restart
     if (m_header->flags & KVMFR_HEADER_FLAG_RESTART)
@@ -164,29 +162,23 @@ bool Service::Process()
       break;
     }
 
-    switch (WaitForSingleObject(m_readyEvent, 200))
+    // check if the client has flagged it's ready
+    if (m_header->flags & KVMFR_HEADER_FLAG_READY)
     {
-    case WAIT_ABANDONED:
-      DEBUG_ERROR("Wait abandoned");
-      return false;
-
-    case WAIT_OBJECT_0:
-      eventDone = true;
+      InterlockedAnd8((char *)&m_header->flags, ~(KVMFR_HEADER_FLAG_READY));
       break;
+    }
 
-    case WAIT_TIMEOUT:
-      continue;
-
-    case WAIT_FAILED:
-      DEBUG_ERROR("Wait failed");
-      return false;
-
-    default:
-      DEBUG_ERROR("Unknown error");
+    // wait for 100ns before polling again
+    LARGE_INTEGER timeout;
+    timeout.QuadPart = -100;
+    if (!SetWaitableTimer(m_timer, &timeout, 0, NULL, NULL, FALSE))
+    {
+      DEBUG_ERROR("Failed to set waitable timer");
       return false;
     }
+    WaitForSingleObject(m_timer, INFINITE);
   }
-  ResetEvent(m_readyEvent);
 
   bool ok         = false;
   bool cursorOnly = false;

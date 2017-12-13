@@ -51,7 +51,7 @@ private:
   bool       m_initialized;
   uint8_t  * m_memory;
   IVSHMEM  * m_ivshmem;
-  HANDLE     m_readyEvent;
+  HANDLE     m_timer;
   ICapture * m_capture;
 
   KVMFRHeader * m_header;

@@ -69,6 +69,7 @@ KVMFRFrame;
 #define KVMFR_HEADER_FLAG_FRAME   1 // frame update available
 #define KVMFR_HEADER_FLAG_CURSOR  2 // cursor update available
 #define KVMFR_HEADER_FLAG_RESTART 4 // restart signal from client
+#define KVMFR_HEADER_FLAG_READY   8 // ready signal from client
 
 typedef struct KVMFRHeader
 {
