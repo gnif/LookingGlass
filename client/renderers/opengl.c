@@ -44,6 +44,7 @@ struct LGR_OpenGL
   int               texIndex;
   int               texList;
   int               fpsList;
+  int               mouseList;
   LG_RendererRect   destRect;
 
   bool              hasTextures;
@@ -62,8 +63,6 @@ struct LGR_OpenGL
   bool              mouseVisible;
   SDL_Rect          mousePos;
 };
-
-void lgr_opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect);
 
 bool lgr_opengl_check_error(const char * name)
 {
@@ -157,8 +156,9 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   this->texSize = format.height * format.pitch;
 
   // generate lists for drawing
-  this->texList = glGenLists(2);
-  this->fpsList = glGenLists(1);
+  this->texList    = glGenLists(2);
+  this->fpsList    = glGenLists(1);
+  this->mouseList  = glGenLists(1);
 
   // generate the pixel unpack buffers
   glGenBuffers(VBO_BUFFERS, this->vboID);
@@ -214,6 +214,18 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
       GL_UNSIGNED_BYTE,
       (void*)0
     );
+
+    // create the display lists
+    glNewList(this->texList + i, GL_COMPILE);
+      glBindTexture(GL_TEXTURE_2D, this->textures[i]);
+      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+      glBegin(GL_TRIANGLE_STRIP);
+        glTexCoord2f(0.0f, 0.0f); glVertex2i(0           , 0            );
+        glTexCoord2f(1.0f, 0.0f); glVertex2i(format.width, 0            );
+        glTexCoord2f(0.0f, 1.0f); glVertex2i(0           , format.height);
+        glTexCoord2f(1.0f, 1.0f); glVertex2i(format.width, format.height);
+     glEnd();
+    glEndList();
 
     if (lgr_opengl_check_error("glTexImage2D"))
       return false;
@@ -274,7 +286,7 @@ void lgr_opengl_on_resize(void * opaque, const int width, const int height, cons
   this->params.height = height;
   memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
-  this->resizeWindow  = true;
+  this->resizeWindow = true;
 }
 
 bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -317,23 +329,38 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
 
       this->mousePos.w = width;
       this->mousePos.h = height;
+
+      glNewList(this->mouseList, GL_COMPILE);
+        glEnable(GL_BLEND);
+        glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0    , 0     );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(width, 0     );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0    , height);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(width, height);
+        glEnd();
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_BLEND);
+      glEndList();
       break;
     }
 
     case LG_CURSOR_MONOCHROME:
     {
+      const int hheight = height / 2;
       uint32_t d[width * height];
-      for(int y = 0; y < height / 2; ++y)
+      for(int y = 0; y < hheight; ++y)
         for(int x = 0; x < width; ++x)
         {
           const uint8_t  * srcAnd  = data + (pitch * y) + (x / 8);
-          const uint8_t  * srcXor  = srcAnd + pitch * (height / 2);
+          const uint8_t  * srcXor  = srcAnd + pitch * hheight;
           const uint8_t    mask    = 0x80 >> (x % 8);
           const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
           const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
 
-          d[y * width + x                       ] = andMask;
-          d[y * width + x + width * (height / 2)] = xorMask;
+          d[y * width + x                  ] = andMask;
+          d[y * width + x + width * hheight] = xorMask;
         }
 
       glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
@@ -358,12 +385,33 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
       glBindTexture(GL_TEXTURE_2D, 0);
 
       this->mousePos.w = width;
-      this->mousePos.h = height / 2;
+      this->mousePos.h = hheight;
+
+      glNewList(this->mouseList, GL_COMPILE);
+        glEnable(GL_COLOR_LOGIC_OP);
+        glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
+        glLogicOp(GL_AND);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0    , 0     );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(width, 0     );
+          glTexCoord2f(0.0f, 0.5f); glVertex2i(0    , hheight);
+          glTexCoord2f(1.0f, 0.5f); glVertex2i(width, hheight);
+        glEnd();
+        glLogicOp(GL_XOR);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.5f); glVertex2i(0    , 0     );
+          glTexCoord2f(1.0f, 0.5f); glVertex2i(width, 0     );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0    , hheight);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(width, hheight);
+        glEnd();
+        glDisable(GL_COLOR_LOGIC_OP);
+      glEndList();
       break;
     }
 
     case LG_CURSOR_MASKED_COLOR:
     {
+      //TODO
       break;
     }
   }
@@ -525,30 +573,8 @@ void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
 {
   if (this->mouseRepair)
   {
-    glMatrixMode(GL_TEXTURE);
-    glPushMatrix();
-    glScalef(1.0f / (float)this->format.width, 1.0f / (float)this->format.height, 1.0f);
-    glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
-
-    // repair the damage from the cursor's last position
-    glBindTexture(GL_TEXTURE_2D, this->textures[this->texIndex]);
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    glBegin(GL_TRIANGLE_STRIP);
-      glTexCoord2f(0                     , 0                     ); glVertex2i(0                     , 0                     );
-      glTexCoord2f(this->mouseRepairPos.w, 0                     ); glVertex2i(this->mouseRepairPos.w, 0                     );
-      glTexCoord2f(0                     , this->mouseRepairPos.h); glVertex2i(0                     , this->mouseRepairPos.h);
-      glTexCoord2f(this->mouseRepairPos.w, this->mouseRepairPos.h); glVertex2i(this->mouseRepairPos.w, this->mouseRepairPos.h);
-    glEnd();
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glCallList(this->texList + this->texIndex);
     this->mouseRepair = false;
-
-    glMatrixMode(GL_TEXTURE);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
   }
 
   if (!this->mouseVisible)
@@ -559,53 +585,7 @@ void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
 
   glPushMatrix();
   glTranslatef(this->mouseRepairPos.x, this->mouseRepairPos.y, 0.0f);
-
-  switch(this->mouseType)
-  {
-    case LG_CURSOR_COLOR:
-    {
-      glEnable(GL_BLEND);
-      glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
-      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.0f); glVertex2i(0               , 0               );
-        glTexCoord2f(1.0f, 0.0f); glVertex2i(this->mousePos.w, 0               );
-        glTexCoord2f(0.0f, 1.0f); glVertex2i(0               , this->mousePos.h);
-        glTexCoord2f(1.0f, 1.0f); glVertex2i(this->mousePos.w, this->mousePos.h);
-      glEnd();
-      glBindTexture(GL_TEXTURE_2D, 0);
-      glDisable(GL_BLEND);
-      break;
-    }
-
-    case LG_CURSOR_MONOCHROME:
-    {
-      glEnable(GL_COLOR_LOGIC_OP);
-      glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
-      glLogicOp(GL_AND);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.0f); glVertex2i(0               , 0               );
-        glTexCoord2f(1.0f, 0.0f); glVertex2i(this->mousePos.w, 0               );
-        glTexCoord2f(0.0f, 0.5f); glVertex2i(0               , this->mousePos.h);
-        glTexCoord2f(1.0f, 0.5f); glVertex2i(this->mousePos.w, this->mousePos.h);
-      glEnd();
-      glLogicOp(GL_XOR);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.5f); glVertex2i(0               , 0               );
-        glTexCoord2f(1.0f, 0.5f); glVertex2i(this->mousePos.w, 0               );
-        glTexCoord2f(0.0f, 1.0f); glVertex2i(0               , this->mousePos.h);
-        glTexCoord2f(1.0f, 1.0f); glVertex2i(this->mousePos.w, this->mousePos.h);
-      glEnd();
-      glDisable(GL_COLOR_LOGIC_OP);
-      glBindTexture(GL_TEXTURE_2D, 0);
-      break;
-    }
-
-    case LG_CURSOR_MASKED_COLOR:
-      // TODO
-      break;
-  }
-
+  glCallList(this->mouseList);
   glPopMatrix();
 }
 
@@ -621,54 +601,39 @@ bool lgr_opengl_render(void * opaque)
     return false;
   }
 
+  if (this->resizeWindow)
+  {
+    // setup the projection matrix
+    glViewport(0, 0, this->params.width, this->params.height);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluOrtho2D(0, this->params.width, this->params.height, 0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+    glScalef(
+      (float)this->destRect.w / (float)this->format.width,
+      (float)this->destRect.h / (float)this->format.height,
+      1.0f
+    );
+
+    // update the scissor rect to prevent drawing outside of the frame
+    glScissor(
+      this->destRect.x,
+      this->destRect.y,
+      this->destRect.w,
+      this->destRect.h
+    );
+
+    this->resizeWindow = false;
+    glDisable(GL_SCISSOR_TEST);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+  }
+
   if (this->frameUpdate)
   {
-    if (this->resizeWindow)
-    {
-      // setup the projection matrix
-      glViewport(0, 0, this->params.width, this->params.height);
-      glMatrixMode(GL_PROJECTION);
-      glLoadIdentity();
-      gluOrtho2D(0, this->params.width, this->params.height, 0);
-
-      glMatrixMode(GL_MODELVIEW);
-      glLoadIdentity();
-      glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
-      glScalef(
-        (float)this->destRect.w / (float)this->format.width,
-        (float)this->destRect.h / (float)this->format.height,
-        1.0f
-      );
-
-      // update the display lists
-      for(int i = 0; i < VBO_BUFFERS; ++i)
-      {
-        glNewList(this->texList + i, GL_COMPILE);
-          glBindTexture(GL_TEXTURE_2D, this->textures[i]);
-          glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-          glBegin(GL_TRIANGLE_STRIP);
-            glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
-            glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
-            glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
-            glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
-         glEnd();
-        glEndList();
-      }
-
-      // update the scissor rect to prevent drawing outside of the frame
-      glScissor(
-        this->destRect.x,
-        this->destRect.y,
-        this->destRect.w,
-        this->destRect.h
-      );
-
-      this->resizeWindow = false;
-      glDisable(GL_SCISSOR_TEST);
-      glClear(GL_COLOR_BUFFER_BIT);
-      glEnable(GL_SCISSOR_TEST);
-    }
-
     glCallList(this->texList + this->texIndex);
     this->mouseRepair = false;
     lgr_opengl_draw_mouse(this);
