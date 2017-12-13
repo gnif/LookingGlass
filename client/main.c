@@ -661,6 +661,8 @@ int run()
     FcPatternDestroy(pat);
   }
 
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+
   state.window = SDL_CreateWindow(
     "Looking Glass (Client)",
     params.center ? SDL_WINDOWPOS_CENTERED : params.x,

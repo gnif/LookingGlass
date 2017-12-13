@@ -14,7 +14,7 @@
 #include "memcpySSE.h"
 #include "utils.h"
 
-#define BUFFER_COUNT       2
+#define BUFFER_COUNT       1
 
 #define FRAME_TEXTURE      0
 #define FPS_TEXTURE        1
@@ -125,7 +125,6 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
   }
 
   SDL_GL_SetSwapInterval(0);
-  glDrawBuffer(GL_FRONT);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -645,7 +644,6 @@ bool lgr_opengl_render(void * opaque)
   lgr_opengl_draw_mouse(this);
   if (this->fpsTexture)
     glCallList(this->fpsList);
-
   glFlush();
 
   ++this->frameCount;
