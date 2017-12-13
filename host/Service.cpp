@@ -162,7 +162,7 @@ bool Service::Process()
       break;
     }
 
-    switch (WaitForSingleObject(m_readyEvent, 1000))
+    switch (WaitForSingleObject(m_readyEvent, 200))
     {
     case WAIT_ABANDONED:
       DEBUG_ERROR("Wait abandoned");
