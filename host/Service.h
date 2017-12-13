@@ -59,4 +59,7 @@ private:
   size_t        m_frameSize;
   uint64_t      m_dataOffset[2];
   int           m_frameIndex;
+
+  KVMFRCursor m_cursor;
+  bool        m_haveShape;
 };

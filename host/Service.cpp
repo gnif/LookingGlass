@@ -146,6 +146,7 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
+  bool restart = false;
   struct FrameInfo frame;
   ZeroMemory(&frame, sizeof(FrameInfo));
   frame.buffer      = m_frame[m_frameIndex];
@@ -159,6 +160,7 @@ bool Service::Process()
     if (m_header->flags & KVMFR_HEADER_FLAG_RESTART)
     {
       InterlockedAnd8((char *)&m_header->flags, ~(KVMFR_HEADER_FLAG_RESTART));
+      restart = true;
       break;
     }
 
@@ -226,13 +228,13 @@ bool Service::Process()
     return false;
   }
 
-  m_header->flags        = 0;
+  uint8_t flags = 0;
   m_header->cursor.flags = 0;
 
   if (!cursorOnly)
   {
     // signal a frame update
-    m_header->flags        |= KVMFR_HEADER_FLAG_FRAME;
+    flags                  |= KVMFR_HEADER_FLAG_FRAME;
     m_header->frame.type    = m_capture->GetFrameType();
     m_header->frame.width   = frame.width;
     m_header->frame.height  = frame.height;
@@ -245,18 +247,23 @@ bool Service::Process()
   if (frame.cursor.hasPos)
   {
     // tell the host where the cursor is
-    m_header->flags        |= KVMFR_HEADER_FLAG_CURSOR;
+    flags                  |= KVMFR_HEADER_FLAG_CURSOR;
     m_header->cursor.flags |= KVMFR_CURSOR_FLAG_POS;
     if (frame.cursor.visible)
       m_header->cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
     m_header->cursor.x      = frame.cursor.x;
     m_header->cursor.y      = frame.cursor.y;
+
+    // update our local copy for client restarts
+    m_cursor.flags = m_header->cursor.flags;
+    m_cursor.x     = frame.cursor.x;
+    m_cursor.y     = frame.cursor.y;
   }
 
   if (frame.cursor.hasShape)
   {
     // give the host the new cursor shape
-    m_header->flags        |= KVMFR_HEADER_FLAG_CURSOR;
+    flags                  |= KVMFR_HEADER_FLAG_CURSOR;
     m_header->cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
     m_header->cursor.type   = frame.cursor.type;
     m_header->cursor.w      = frame.cursor.w;
@@ -268,7 +275,27 @@ bool Service::Process()
       return false;
     }
     memcpy(m_header->cursor.shape, frame.cursor.shape, frame.cursor.dataSize);
+
+    // take a copy of the information for client restarts
+    uint8_t f = m_cursor.flags;
+    memcpy(&m_cursor, &m_header->cursor, sizeof(KVMFRCursor));
+    m_cursor.flags = f | m_header->cursor.flags;
+    m_haveShape = true;
   }
+  else
+  {
+    // if we already have a shape and the client restarted send it to them
+    if (restart && m_haveShape)
+    {
+      flags          |= KVMFR_HEADER_FLAG_CURSOR;
+      m_cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
+      memcpy(&m_header->cursor, &m_cursor, sizeof(KVMFRCursor));
+    }
+  }
+
+  // update the flags
+  InterlockedAnd8((char *)&m_header->flags, KVMFR_HEADER_FLAG_RESTART);
+  InterlockedOr8 ((char *)&m_header->flags, flags);
 
   // increment the update count to resume the host
   ++m_header->updateCount;
