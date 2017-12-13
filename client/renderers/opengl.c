@@ -56,6 +56,8 @@ struct LGR_OpenGL
   uint64_t          frameCount;
   SDL_Rect          fpsRect;
 
+  bool              mouseUpdate;
+  uint64_t          lastMouseDraw;
   LG_RendererCursor mouseType;
   bool              mouseRepair;
   SDL_Rect          mouseRepairPos;
@@ -213,6 +215,8 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
       GL_UNSIGNED_BYTE,
       (void*)0
     );
+    if (lgr_opengl_check_error("glTexImage2D"))
+      return false;
 
     // create the display lists
     glNewList(this->texList + i, GL_COMPILE);
@@ -409,6 +413,7 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
     }
   }
 
+  this->mouseUpdate = true;
   return true;
 }
 
@@ -424,7 +429,7 @@ bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, c
   this->mouseVisible = visible;
   this->mousePos.x   = x;
   this->mousePos.y   = y;
-
+  this->mouseUpdate  = true;
   return false;
 }
 
@@ -434,8 +439,9 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
   if (!this || !this->initialized)
     return false;
 
-  if (++this->texIndex == VBO_BUFFERS)
-    this->texIndex = 0;
+  int texIndex = this->texIndex + 1;
+  if (texIndex == VBO_BUFFERS)
+    texIndex = 0;
 
   if (this->params.showFPS && this->renderTime > 1e9)
   {
@@ -508,14 +514,14 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
   }
 
   // copy the buffer to the texture
-  memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
+  memcpySSE(this->texPixels[texIndex], data, this->texSize);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[texIndex]);
   glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
 
   // bind the texture and update it
-  glBindTexture(GL_TEXTURE_2D         , this->textures[this->texIndex]);
-  glPixelStorei(GL_UNPACK_ALIGNMENT   , 4                             );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH  , this->format.width            );
+  glBindTexture(GL_TEXTURE_2D         , this->textures[texIndex]);
+  glPixelStorei(GL_UNPACK_ALIGNMENT   , 4                       );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH  , this->format.width      );
 
   // update the texture
   glTexSubImage2D(
@@ -552,17 +558,12 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data, bool resampl
   }
 
   this->frameUpdate = true;
+  this->texIndex = texIndex;
   return true;
 }
 
-void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
+inline void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
 {
-  if (this->mouseRepair)
-  {
-    glCallList(this->texList + this->texIndex);
-    this->mouseRepair = false;
-  }
-
   if (!this->mouseVisible)
     return;
 
@@ -612,34 +613,48 @@ bool lgr_opengl_render(void * opaque)
     glEnable(GL_SCISSOR_TEST);
   }
 
-  if (this->frameUpdate)
+  if (!this->frameUpdate)
   {
+    if (!this->mouseUpdate)
+      return true;
+
+    // don't update the mouse too fast
+    const uint64_t delta = nanotime() - this->lastMouseDraw;
+    if (delta < 1e7)
+      return true;
+
     glCallList(this->texList + this->texIndex);
-    this->mouseRepair = false;
+    lgr_opengl_draw_mouse(this);
+    glFinish();
+
+    this->mouseUpdate   = false;
+    this->lastMouseDraw = nanotime();
   }
+  else
+  {
+    glDrawBuffer(GL_BACK);
+      glCallList(this->texList + this->texIndex);
+      lgr_opengl_draw_mouse(this);
+      if (this->fpsTexture)
+        glCallList(this->fpsList);
+    glDrawBuffer(GL_FRONT);
 
-  lgr_opengl_draw_mouse(this);
-  if (this->fpsTexture)
-    glCallList(this->fpsList);
-
-  GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  glWaitSync(sync, 0, 1000);
-  glDeleteSync(sync);
-
-  unsigned int count;
-  glXGetVideoSyncSGI(&count);
-  if (count == this->gpuFrameCount)
-    glXWaitVideoSyncSGI(1, 0, &count);
-
-  SDL_GL_SwapWindow(this->params.window);
-  glXGetVideoSyncSGI(&this->gpuFrameCount);
+    unsigned int count;
+    glXGetVideoSyncSGI(&count);
+    if (count == this->gpuFrameCount)
+      glXWaitVideoSyncSGI(1, 0, &count);
+    SDL_GL_SwapWindow(this->params.window);
+    glXGetVideoSyncSGI(&this->gpuFrameCount);
+  }
 
   ++this->frameCount;
   const uint64_t t    = nanotime();
   this->renderTime   += t - this->lastFrameTime;
   this->lastFrameTime = t;
 
-  this->frameUpdate = false;
+  this->frameUpdate   = false;
+  this->mouseUpdate   = false;
+  this->lastMouseDraw = t;
   return true;
 }
 
