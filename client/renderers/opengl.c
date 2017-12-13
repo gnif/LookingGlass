@@ -635,10 +635,7 @@ bool lgr_opengl_render(void * opaque)
 
   // wait for vsync
   unsigned int count;
-  glXGetVideoSyncSGI(&count);
-  if (count == this->gpuFrameCount)
-    glXWaitVideoSyncSGI(1, 0, &count);
-  glXGetVideoSyncSGI(&this->gpuFrameCount);
+  glXWaitVideoSyncSGI(1, 0, &count);
 
   glDisable(GL_SCISSOR_TEST);
   glClear(GL_COLOR_BUFFER_BIT);
