@@ -146,17 +146,24 @@ int renderThread(void * unused)
   struct KVMFRHeader  header;
   volatile uint32_t * updateCount = &state.shm->updateCount;
 
-  ivshmem_kick_irq(state.shm->guestID, 0);
+  const struct timespec s =
+  {
+    .tv_sec  = 0,
+    .tv_nsec = 1000
+  };
+
+  // flag the host that we are starting up this is important so that
+  // the host wakes up if it is waiting on an interrupt, the host will
+  // also send us the current mouse shape since we won't know it yet
+  __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
+  while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
+    nanosleep(&s, NULL);
+
   while(state.running)
   {
     // poll until we have a new frame, or we time out
-    while(header.updateCount == *updateCount && state.running) {
-      const struct timespec s = {
-        .tv_sec  = 0,
-        .tv_nsec = 1000
-      };
+    while(header.updateCount == *updateCount && state.running)
       nanosleep(&s, NULL);
-    }
 
     if (!state.running)
       break;
