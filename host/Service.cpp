@@ -25,6 +25,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "CaptureFactory.h"
 
+#if __MINGW32__
+#define INTERLOCKED_AND8 __sync_and_and_fetch
+#define INTERLOCKED_OR8 __sync_or_and_fetch
+#else
+#define INTERLOCKED_OR8 InterlockedOr8
+#define INTERLOCKED_AND8 InterlockedAnd8
+#endif
+
 Service * Service::m_instance = NULL;
 
 Service::Service() :
@@ -87,7 +95,7 @@ bool Service::Initialize(ICapture * captureDevice)
   m_header->updateCount = 0;
 
   // clear but retain the restart flag if it was set by the client
-  InterlockedAnd8((char *)&m_header->flags, KVMFR_HEADER_FLAG_RESTART);
+  INTERLOCKED_AND8((char *)&m_header->flags, KVMFR_HEADER_FLAG_RESTART);
   ZeroMemory(&m_header->frame , sizeof(KVMFRFrame ));
   ZeroMemory(&m_header->cursor, sizeof(KVMFRCursor));
 
@@ -161,7 +169,7 @@ bool Service::Process()
     // check if the client has flagged a restart
     if (f & KVMFR_HEADER_FLAG_RESTART)
     {
-      InterlockedAnd8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
+      INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
       restart = true;
       break;
     }
@@ -169,7 +177,7 @@ bool Service::Process()
     // check if the client has flagged it's ready
     if (f & KVMFR_HEADER_FLAG_READY)
     {
-      InterlockedAnd8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_READY));
+      INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_READY));
       break;
     }
 
@@ -290,8 +298,8 @@ bool Service::Process()
   }
 
   // update the flags
-  InterlockedAnd8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
-  InterlockedOr8 ((volatile char *)flags, updateFlags);
+  INTERLOCKED_AND8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
+  INTERLOCKED_OR8 ((volatile char *)flags, updateFlags);
 
   // increment the update count to resume the host
   ++m_header->updateCount;
