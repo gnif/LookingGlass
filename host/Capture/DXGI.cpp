@@ -397,13 +397,13 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   m_width  = desc.Width;
   m_height = desc.Height;
-  const int pitch = m_width * 4;
 
   frame.width   = desc.Width;
   frame.height  = desc.Height;
-  frame.stride  = desc.Width;
+  frame.stride  = rect.Pitch / 4;
+  
+  memcpySSE(frame.buffer, rect.pBits, min(frame.bufferSize, m_height * rect.Pitch));
 
-  memcpySSE(frame.buffer, rect.pBits, min(frame.bufferSize, m_height * pitch));
   status = surface->Unmap();
 
   if (FAILED(status))

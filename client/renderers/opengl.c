@@ -599,7 +599,7 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
   glBindTexture(GL_TEXTURE_2D        , this->textures[FRAME_TEXTURE]);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[0]               );
   glPixelStorei(GL_UNPACK_ALIGNMENT  , 4                            );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.width           );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.stride          );
 
   // copy the buffer to the texture
   memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
