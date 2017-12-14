@@ -51,7 +51,7 @@ bool DXGI::Initialize(CaptureOptions * options)
   status = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)(&m_dxgiFactory));
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to create DXGIFactory: %08x", status);
+    DEBUG_ERROR("Failed to create DXGIFactory: %08x", (int)status);
     return false;
   }
 
@@ -150,7 +150,7 @@ bool DXGI::Initialize(CaptureOptions * options)
 
   if (FAILED(status))
   {
-    DEBUG_ERROR("DuplicateOutput Failed: %08x", status);
+    DEBUG_ERROR("DuplicateOutput Failed: %08x", (int)status);
     DeInitialize();
     return false;
   }
@@ -172,7 +172,7 @@ bool DXGI::Initialize(CaptureOptions * options)
   status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture);
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to create texture: %08x", status);
+    DEBUG_ERROR("Failed to create texture: %08x", (int)status);
     DeInitialize();
     return false;
   }
@@ -286,7 +286,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         if (!SUCCEEDED(status))
         {
           m_dup->ReleaseFrame();
-          DEBUG_ERROR("Failed to get the new pointer shape: %08x", status);
+          DEBUG_ERROR("Failed to get the new pointer shape: %08x", (int)status);
           return GRAB_STATUS_ERROR;
         }
 
@@ -350,7 +350,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
       default:
         // unknown failure
-        DEBUG_INFO("AcquireNextFrame failed: %08x", status);
+        DEBUG_INFO("AcquireNextFrame failed: %08x", (int)status);
         return GRAB_STATUS_ERROR;
     }
   }
@@ -391,7 +391,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   status = surface->Map(&rect, DXGI_MAP_READ);
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to map surface: %08x", status);
+    DEBUG_ERROR("Failed to map surface: %08x", (int)status);
     return GRAB_STATUS_ERROR;
   }
 
@@ -408,7 +408,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to unmap surface: %08x", status);
+    DEBUG_ERROR("Failed to unmap surface: %08x", (int)status);
     return GRAB_STATUS_ERROR;
   }
 

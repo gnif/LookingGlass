@@ -112,7 +112,7 @@ void IVSHMEM::DeInitialize()
   if (m_gotMemory)
   {
     if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
-      DEBUG_ERROR("DeviceIoControl failed: %d", GetLastError());
+      DEBUG_ERROR("DeviceIoControl failed: %d", (int)GetLastError());
     m_memory = NULL;
   }
 
@@ -143,7 +143,7 @@ UINT64 IVSHMEM::GetSize()
   IVSHMEM_SIZE size;
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
   {
-    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    DEBUG_ERROR("DeviceIoControl Failed: %d", (int)GetLastError());
     return 0;
   }
 
@@ -163,7 +163,7 @@ UINT16 IVSHMEM::GetPeerID()
   IVSHMEM_PEERID peerID;
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &peerID, sizeof(IVSHMEM_PEERID), NULL, NULL))
   {
-    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    DEBUG_ERROR("DeviceIoControl Failed: %d", (int)GetLastError());
     return 0;
   }
 
@@ -195,7 +195,7 @@ void * IVSHMEM::GetMemory()
   ZeroMemory(&map, sizeof(IVSHMEM_MMAP));
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_MMAP, NULL, 0, &map, sizeof(IVSHMEM_MMAP), NULL, NULL))
   {
-    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    DEBUG_ERROR("DeviceIoControl Failed: %d", (int)GetLastError());
     return NULL;
   }
 
@@ -219,7 +219,7 @@ HANDLE IVSHMEM::CreateVectorEvent(UINT16 vector)
   HANDLE event = CreateEvent(NULL, TRUE, FALSE, NULL);
   if (event == INVALID_HANDLE_VALUE)
   {
-    DEBUG_ERROR("CreateEvent Failed: %d", GetLastError());
+    DEBUG_ERROR("CreateEvent Failed: %d", (int)GetLastError());
     return INVALID_HANDLE_VALUE;
   }
 
@@ -230,7 +230,7 @@ HANDLE IVSHMEM::CreateVectorEvent(UINT16 vector)
 
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REGISTER_EVENT, &msg, sizeof(IVSHMEM_EVENT), NULL, 0, NULL, NULL))
   {
-    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    DEBUG_ERROR("DeviceIoControl Failed: %d", (int)GetLastError());
     CloseHandle(event);
     return INVALID_HANDLE_VALUE;
   }
@@ -249,7 +249,7 @@ bool IVSHMEM::RingDoorbell(UINT16 peerID, UINT16 door)
 
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_RING_DOORBELL, &msg, sizeof(IVSHMEM_RING), NULL, 0, NULL, NULL))
   {
-    DEBUG_ERROR("DeviceIoControl Failed: %d", GetLastError());
+    DEBUG_ERROR("DeviceIoControl Failed: %d", (int)GetLastError());
     return false;
   }
 
