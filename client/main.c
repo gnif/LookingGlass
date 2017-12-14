@@ -378,10 +378,27 @@ int eventThread(void * arg)
       continue;
     }
 
-    if (event.type == SDL_QUIT)
+    switch(event.type)
     {
+      case SDL_QUIT:
       state.running = false;
       break;
+
+      case SDL_WINDOWEVENT:
+      {
+        switch(event.window.event)
+        {
+          case SDL_WINDOWEVENT_ENTER:
+            realignGuest = true;
+            break;
+
+          case SDL_WINDOWEVENT_SIZE_CHANGED:
+            updatePositionInfo();
+            realignGuest = true;
+            break;
+        }
+        break;
+      }
     }
 
     if (!params.useSpice)
@@ -529,22 +546,6 @@ int eventThread(void * arg)
           break;
         }
         break;
-
-      case SDL_WINDOWEVENT:
-      {
-        switch(event.window.event)
-        {
-          case SDL_WINDOWEVENT_ENTER:
-            realignGuest = true;
-            break;
-
-          case SDL_WINDOWEVENT_SIZE_CHANGED:
-            updatePositionInfo();
-            realignGuest = true;
-            break;
-        }
-        break;
-      }
 
       default:
         break;
