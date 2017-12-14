@@ -391,7 +391,7 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
         width  ,
         height ,
         0      ,
-        GL_RGBA,
+        GL_BGRA, // windows cursors are in BGRA format
         GL_UNSIGNED_BYTE,
         data
       );
