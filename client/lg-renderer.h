@@ -22,7 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 
 #include <SDL2/SDL.h>
-#include <SDL_ttf.h>
+#include <SDL2/SDL_ttf.h>
 
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->get_name       && \
