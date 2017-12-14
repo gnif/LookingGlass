@@ -58,15 +58,15 @@ enum GrabStatus
 
 typedef std::vector<const char *> CaptureOptions;
 
-__interface ICapture
+class ICapture
 {
 public:
-  const char * GetName();
-  
-  bool Initialize(CaptureOptions * options);
-  void DeInitialize();
-  bool ReInitialize();
-  enum FrameType GetFrameType();
-  size_t GetMaxFrameSize();
-  enum GrabStatus GrabFrame(struct FrameInfo & frame);
+  virtual const char * GetName() = 0;
+
+  virtual bool Initialize(CaptureOptions * options) = 0;
+  virtual void DeInitialize() = 0;
+  virtual bool ReInitialize() = 0;
+  virtual enum FrameType GetFrameType() = 0;
+  virtual size_t GetMaxFrameSize() = 0;
+  virtual enum GrabStatus GrabFrame(struct FrameInfo & frame) = 0;
 };
