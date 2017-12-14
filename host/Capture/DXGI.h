@@ -28,16 +28,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <comdef.h>
 
-_COM_SMARTPTR_TYPEDEF(IDXGIFactory1, IID_IDXGIFactory1);
-_COM_SMARTPTR_TYPEDEF(ID3D11Device, IID_ID3D11Device);
-_COM_SMARTPTR_TYPEDEF(ID3D11DeviceContext, IID_ID3D11DeviceContext);
-_COM_SMARTPTR_TYPEDEF(IDXGIOutput1, IID_IDXGIOutput1);
-_COM_SMARTPTR_TYPEDEF(IDXGIOutput, IID_IDXGIOutput);
-_COM_SMARTPTR_TYPEDEF(IDXGIAdapter1, IID_IDXGIAdapter1);
-_COM_SMARTPTR_TYPEDEF(IDXGIOutputDuplication, IID_IDXGIOutputDuplication);
-_COM_SMARTPTR_TYPEDEF(ID3D11Texture2D, IID_ID3D11Texture2D);
-_COM_SMARTPTR_TYPEDEF(IDXGIResource, IID_IDXGIResource);
-_COM_SMARTPTR_TYPEDEF(IDXGISurface1, IID_IDXGISurface1);
+_COM_SMARTPTR_TYPEDEF(IDXGIFactory1         , __uuidof(IDXGIFactory1         ));
+_COM_SMARTPTR_TYPEDEF(ID3D11Device          , __uuidof(ID3D11Device          ));
+_COM_SMARTPTR_TYPEDEF(ID3D11DeviceContext   , __uuidof(ID3D11DeviceContext   ));
+_COM_SMARTPTR_TYPEDEF(IDXGIOutput1          , __uuidof(IDXGIOutput1          ));
+_COM_SMARTPTR_TYPEDEF(IDXGIOutput           , __uuidof(IDXGIOutput           ));
+_COM_SMARTPTR_TYPEDEF(IDXGIAdapter1         , __uuidof(IDXGIAdapter1         ));
+_COM_SMARTPTR_TYPEDEF(IDXGIOutputDuplication, __uuidof(IDXGIOutputDuplication));
+_COM_SMARTPTR_TYPEDEF(ID3D11Texture2D       , __uuidof(ID3D11Texture2D       ));
+_COM_SMARTPTR_TYPEDEF(IDXGIResource         , __uuidof(IDXGIResource         ));
+_COM_SMARTPTR_TYPEDEF(IDXGISurface1         , __uuidof(IDXGISurface1         ));
 
 namespace Capture
 {

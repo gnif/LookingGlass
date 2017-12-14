@@ -266,7 +266,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
           m_lastMouseVis = frameInfo.PointerPosition.Visible;
         }
 
-        frame.cursor.visible = m_lastMouseVis;
+        frame.cursor.visible = m_lastMouseVis == TRUE;
       }
 
       // if the pointer shape has changed

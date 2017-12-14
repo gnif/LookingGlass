@@ -71,4 +71,4 @@ namespace Capture
   };
 };
 
-#endif
+#endif //CONFIG_CAPTURE_NVFBC

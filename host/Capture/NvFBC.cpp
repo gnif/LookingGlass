@@ -17,6 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#if CONFIG_CAPTURE_NVFBC
+
 #include "NvFBC.h"
 using namespace Capture;
 
@@ -311,3 +313,5 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
   DEBUG_ERROR("Failed to grab frame");
   return GRAB_STATUS_ERROR;
 }
+
+#endif// CONFIG_CAPTURE_NVFBC
