@@ -27,8 +27,11 @@ static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
 struct LGR_OpenGL
 {
   LG_RendererParams params;
-  bool              initialized;
+  bool              configured;
   SDL_GLContext     glContext;
+  bool              doneInfo;
+
+  SDL_Point         window;
   bool              resizeWindow;
   bool              frameUpdate;
 
@@ -81,7 +84,7 @@ const char * lgr_opengl_get_name()
   return "OpenGL";
 }
 
-bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const LG_RendererFormat format)
+bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, Uint32 * sdlFlags)
 {
   // create our local storage
   *opaque = malloc(sizeof(struct LGR_OpenGL));
@@ -91,25 +94,9 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
     return false;
   }
   memset(*opaque, 0, sizeof(struct LGR_OpenGL));
+
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)*opaque;
   memcpy(&this->params, &params, sizeof(LG_RendererParams));
-
-  this->glContext = SDL_GL_CreateContext(params.window);
-  if (!this->glContext)
-  {
-    DEBUG_ERROR("Failed to create the OpenGL context");
-    return false;
-  }
-
-  if (SDL_GL_MakeCurrent(params.window, this->glContext) != 0)
-  {
-    DEBUG_ERROR("Failed to make the GL context current");
-    return false;
-  }
-
-  DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
-  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
-  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
 
   if (!glXGetVideoSyncSGI)
   {
@@ -122,6 +109,44 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
       DEBUG_ERROR("Failed to get proc addresses");
       return false;
     }
+  }
+
+  *sdlFlags = SDL_WINDOW_OPENGL;
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+  return true;
+}
+
+bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFormat format)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this)
+    return false;
+
+  if (this->configured)
+  {
+    DEBUG_ERROR("Renderer already configured, call deconfigure first");
+    return false;
+  }
+
+  this->glContext = SDL_GL_CreateContext(window);
+  if (!this->glContext)
+  {
+    DEBUG_ERROR("Failed to create the OpenGL context");
+    return false;
+  }
+
+  if (!this->doneInfo)
+  {
+    DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
+    DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
+    DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+    this->doneInfo = true;
+  }
+
+  if (SDL_GL_MakeCurrent(window, this->glContext) != 0)
+  {
+    DEBUG_ERROR("Failed to make the GL context current");
+    return false;
   }
 
   SDL_GL_SetSwapInterval(0);
@@ -260,8 +285,35 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, const
 
   // copy the format into the local storage
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-  this->initialized = true;
+  this->configured = true;
   return true;
+}
+
+void lgr_opengl_deconfigure(void * opaque)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this || !this->configured)
+    return;
+
+  if (this->hasTextures)
+  {
+    glDeleteTextures(TEXTURE_COUNT, this->textures);
+    this->hasTextures = false;
+  }
+
+  if (this->hasBuffers)
+  {
+    glDeleteBuffers(1, this->vboID);
+    this->hasBuffers = false;
+  }
+
+  if (this->glContext)
+  {
+    SDL_GL_DeleteContext(this->glContext);
+    this->glContext = NULL;
+  }
+
+  this->configured = false;
 }
 
 void lgr_opengl_deinitialize(void * opaque)
@@ -270,14 +322,8 @@ void lgr_opengl_deinitialize(void * opaque)
   if (!this)
     return;
 
-  if (this->hasTextures)
-    glDeleteTextures(TEXTURE_COUNT, this->textures);
-
-  if (this->hasBuffers)
-    glDeleteBuffers(1, this->vboID);
-
-  if (this->glContext)
-    SDL_GL_DeleteContext(this->glContext);
+  if (this->configured)
+    lgr_opengl_deconfigure(opaque);
 
   free(this);
 }
@@ -285,7 +331,7 @@ void lgr_opengl_deinitialize(void * opaque)
 bool lgr_opengl_is_compatible(void * opaque, const LG_RendererFormat format)
 {
   const struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->initialized)
+  if (!this || !this->configured)
     return false;
 
   return (memcmp(&this->format, &format, sizeof(LG_RendererFormat)) == 0);
@@ -294,11 +340,11 @@ bool lgr_opengl_is_compatible(void * opaque, const LG_RendererFormat format)
 void lgr_opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->initialized)
+  if (!this || !this->configured)
     return;
 
-  this->params.width  = width;
-  this->params.height = height;
+  this->window.x  = width;
+  this->window.y = height;
   memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
   this->resizeWindow = true;
@@ -307,7 +353,7 @@ void lgr_opengl_on_resize(void * opaque, const int width, const int height, cons
 bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->initialized)
+  if (!this || !this->configured)
     return false;
 
   this->mouseType = cursor;
@@ -432,7 +478,7 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
 bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->initialized)
+  if (!this || !this->configured)
     return false;
 
   if (this->mousePos.x == x && this->mousePos.y == y && this->mouseVisible == visible)
@@ -448,8 +494,17 @@ bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, c
 bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->initialized)
+  if (!this)
+  {
+    DEBUG_ERROR("Invalid opaque pointer");
     return false;
+  }
+
+  if (!this->configured)
+  {
+    DEBUG_ERROR("Not configured");
+    return false;
+  }
 
   if (this->params.showFPS && this->renderTime > 1e9)
   {
@@ -589,16 +644,16 @@ static inline void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
 bool lgr_opengl_render(void * opaque)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->initialized)
+  if (!this || !this->configured)
     return false;
 
   if (this->resizeWindow)
   {
     // setup the projection matrix
-    glViewport(0, 0, this->params.width, this->params.height);
+    glViewport(0, 0, this->window.x, this->window.y);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluOrtho2D(0, this->params.width, this->params.height, 0);
+    gluOrtho2D(0, this->window.x, this->window.y, 0);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
@@ -661,6 +716,8 @@ const LG_Renderer LGR_OpenGL =
 {
   .get_name       = lgr_opengl_get_name,
   .initialize     = lgr_opengl_initialize,
+  .configure      = lgr_opengl_configure,
+  .deconfigure    = lgr_opengl_deconfigure,
   .deinitialize   = lgr_opengl_deinitialize,
   .is_compatible  = lgr_opengl_is_compatible,
   .on_resize      = lgr_opengl_on_resize,

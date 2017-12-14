@@ -228,67 +228,17 @@ int renderThread(void * unused)
         break;
       }
 
-      // check if we have a compatible renderer
-      if (!state.lgr || !state.lgr->is_compatible(state.lgrData, lgrFormat))
+      // check if the renderer needs reconfiguration
+      if (!state.lgr->is_compatible(state.lgrData, lgrFormat))
       {
-        int width, height;
-        SDL_GetWindowSize(state.window, &width, &height);
-
-        LG_RendererParams lgrParams;
-        lgrParams.window   = state.window;
-        lgrParams.font     = state.font;
-        lgrParams.resample = params.useMipmap;
-        lgrParams.showFPS  = params.showFPS;
-        lgrParams.width    = width;
-        lgrParams.height   = height;
-
         DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
             lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
 
-        // first try to reinitialize any existing renderer
-        if (state.lgr)
+        state.lgr->deconfigure(state.lgrData);
+        if (!state.lgr->configure(state.lgrData, state.window, lgrFormat))
         {
-          state.lgr->deinitialize(state.lgrData);
-          if (state.lgr->initialize(&state.lgrData, lgrParams, lgrFormat))
-          {
-            DEBUG_INFO("Reinitialized %s", state.lgr->get_name());
-          }
-          else
-          {
-            DEBUG_ERROR("Failed to reinitialize %s, trying other renderers", state.lgr->get_name());
-            state.lgr->deinitialize(state.lgrData);
-            state.lgr = NULL;
-          }
-        }
-
-        if (!state.lgr)
-        {
-          // probe for a a suitable renderer
-          for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
-          {
-            if (!IS_LG_RENDERER_VALID(*r))
-            {
-              DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", (int)(r - &LG_Renderers[0]));
-              continue;
-            }
-
-            state.lgrData = NULL;
-            if (!(*r)->initialize(&state.lgrData, lgrParams, lgrFormat))
-            {
-              (*r)->deinitialize(state.lgrData);
-              continue;
-            }
-
-            state.lgr = *r;
-            DEBUG_INFO("Initialized %s", (*r)->get_name());
-            break;
-          }
-
-          if (!state.lgr)
-          {
-            DEBUG_INFO("Unable to find a suitable renderer");
-            return -1;
-          }
+          DEBUG_ERROR("Failed to reconfigure %s", state.lgr->get_name());
+          break;
         }
 
         state.srcSize.x = header.frame.width;
@@ -360,9 +310,6 @@ int renderThread(void * unused)
     if (state.lgr)
       state.lgr->render(state.lgrData);
   }
-
-  if (state.lgr)
-    state.lgr->deinitialize(state.lgrData);
 
   return 0;
 }
@@ -661,7 +608,39 @@ int run()
     FcPatternDestroy(pat);
   }
 
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+  LG_RendererParams lgrParams;
+  lgrParams.font     = state.font;
+  lgrParams.resample = params.useMipmap;
+  lgrParams.showFPS  = params.showFPS;
+  Uint32 sdlFlags;
+
+  // probe for a a suitable renderer
+  for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
+  {
+    if (!IS_LG_RENDERER_VALID(*r))
+    {
+      DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", (int)(r - &LG_Renderers[0]));
+      continue;
+    }
+
+    state.lgrData = NULL;
+    sdlFlags      = 0;
+    if (!(*r)->initialize(&state.lgrData, lgrParams, &sdlFlags))
+    {
+      (*r)->deinitialize(state.lgrData);
+      continue;
+    }
+
+    state.lgr = *r;
+    DEBUG_INFO("Initialized %s", (*r)->get_name());
+    break;
+  }
+
+  if (!state.lgr)
+  {
+    DEBUG_INFO("Unable to find a suitable renderer");
+    return -1;
+  }
 
   state.window = SDL_CreateWindow(
     "Looking Glass (Client)",
@@ -670,10 +649,10 @@ int run()
     params.w,
     params.h,
     (
-      SDL_WINDOW_SHOWN  |
-      SDL_WINDOW_OPENGL |
+      SDL_WINDOW_SHOWN |
       (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
-      (params.borderless  ? SDL_WINDOW_BORDERLESS : 0)
+      (params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
+      sdlFlags
     )
   );
 
@@ -785,9 +764,7 @@ int run()
       usleep(1000);
     DEBUG_INFO("Host ready, starting session");
 
-    while(state.running)
-      renderThread(NULL);
-
+    renderThread(NULL);
     break;
   }
 
@@ -804,6 +781,9 @@ int run()
 
   if (t_spice)
     SDL_WaitThread(t_spice, NULL);
+
+  if (state.lgr)
+    state.lgr->deinitialize(state.lgrData);
 
   if (state.window)
     SDL_DestroyWindow(state.window);

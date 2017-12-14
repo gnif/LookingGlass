@@ -27,6 +27,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->get_name       && \
    (x)->initialize     && \
+   (x)->configure      && \
+   (x)->deconfigure    && \
    (x)->deinitialize   && \
    (x)->is_compatible  && \
    (x)->on_resize      && \
@@ -36,12 +38,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef struct LG_RendererParams
 {
-  SDL_Window * window;
-  TTF_Font   * font;
-  bool         showFPS;
-  bool         resample;
-  int          width;
-  int          height;
+  TTF_Font * font;
+  bool       showFPS;
+  bool       resample;
 }
 LG_RendererParams;
 
@@ -73,7 +72,9 @@ typedef enum LG_RendererCursor
 LG_RendererCursor;
 
 typedef const char * (* LG_RendererGetName       )();
-typedef bool         (* LG_RendererInitialize    )(void ** opaque, const LG_RendererParams params, const LG_RendererFormat format);
+typedef bool         (* LG_RendererInitialize    )(void ** opaque, const LG_RendererParams params, Uint32 * sdlFlags);
+typedef bool         (* LG_RendererConfigure     )(void * opaque, SDL_Window *window, const LG_RendererFormat format);
+typedef void         (* LG_RendererDeConfigure   )(void * opaque);
 typedef void         (* LG_RendererDeInitialize  )(void * opaque);
 typedef bool         (* LG_RendererIsCompatible  )(void * opaque, const LG_RendererFormat format);
 typedef void         (* LG_RendererOnResize      )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
@@ -86,6 +87,8 @@ typedef struct LG_Renderer
 {
   LG_RendererGetName      get_name;
   LG_RendererInitialize   initialize;
+  LG_RendererConfigure    configure;
+  LG_RendererDeConfigure  deconfigure;
   LG_RendererDeInitialize deinitialize;
   LG_RendererIsCompatible is_compatible;
   LG_RendererOnResize     on_resize;
