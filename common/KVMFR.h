@@ -21,8 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 #define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 2
-#define KVMFR_CURSOR_BUFFER  (32*32*4)
+#define KVMFR_HEADER_VERSION 3
 
 typedef enum FrameType
 {
@@ -52,7 +51,7 @@ typedef struct KVMFRCursor
   CursorType type;        // shape buffer data type
   uint8_t    w, h;        // shape width and height
   uint8_t    pitch;       // shape row length in bytes
-  uint8_t    shape[KVMFR_CURSOR_BUFFER];
+  uint64_t   dataPos;     // offset to the cursor data
 }
 KVMFRCursor;
 
