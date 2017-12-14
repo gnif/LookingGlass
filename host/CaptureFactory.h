@@ -20,13 +20,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #define W32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <windows.h>
 #include <vector>
 
-#include "common\debug.h"
+#include "common/debug.h"
 #include "ICapture.h"
-#include "Capture\NvFBC.h"
-#include "Capture\DXGI.h"
+#include "Capture/NvFBC.h"
+#include "Capture/DXGI.h"
 
 class CaptureFactory
 {

@@ -22,8 +22,8 @@ using namespace Capture;
 
 #include <string>
 
-#include "common\debug.h"
-#include "common\memcpySSE.h"
+#include "common/debug.h"
+#include "common/memcpySSE.h"
 #include "Util.h"
 
 #ifdef _WIN64

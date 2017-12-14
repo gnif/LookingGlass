@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #define W32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <windows.h>
 #include <stdbool.h>
 
 #include "IVSHMEM.h"

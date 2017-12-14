@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/KVMFR.h"
 #include <vector>
+#include <windows.h>
 
 struct CursorInfo
 {

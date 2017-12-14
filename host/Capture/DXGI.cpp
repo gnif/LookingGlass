@@ -17,11 +17,11 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "DXGI.h"
+#include "Capture/DXGI.h"
 using namespace Capture;
 
-#include "common\debug.h"
-#include "common\memcpySSE.h"
+#include "common/debug.h"
+#include "common/memcpySSE.h"
 
 DXGI::DXGI() :
   m_options(NULL),

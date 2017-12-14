@@ -21,10 +21,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "ICapture.h"
 
 #define W32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <windows.h>
 
-#include <NvFBC\nvFBC.h>
-#include <NvFBC\nvFBCToSys.h>
+#include <NvFBC/nvFBC.h>
+#include <NvFBC/nvFBCToSys.h>
 
 namespace Capture
 {
