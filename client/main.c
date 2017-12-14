@@ -169,12 +169,17 @@ int renderThread(void * unused)
     __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_READY);
 
     // check the header's magic and version are valid
-    if (
-      memcmp(header.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0 ||
-      header.version != KVMFR_HEADER_VERSION
-    ){
+    if (memcmp(header.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
+    {
       usleep(1000);
       continue;
+    }
+
+    if (header.version != KVMFR_HEADER_VERSION)
+    {
+      DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, header.version);
+      DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
+      break;
     }
 
     // if we have a frame
@@ -281,13 +286,22 @@ int renderThread(void * unused)
 
         if (state.lgr)
         {
+          // check the data position is sane
+          const uint64_t dataSize = header.cursor.h * header.cursor.pitch;
+          if (header.cursor.dataPos + dataSize > state.shmSize)
+          {
+            DEBUG_ERROR("The guest sent an invalid mouse dataPos");
+            break;
+          }
+
+          const uint8_t * data = (const uint8_t *)state.shm + header.cursor.dataPos;
           if (!state.lgr->on_mouse_shape(
             state.lgrData,
             c,
             header.cursor.w,
             header.cursor.h,
             header.cursor.pitch,
-            header.cursor.shape
+            data
           ))
           {
             DEBUG_ERROR("Failed to update mouse shape");
