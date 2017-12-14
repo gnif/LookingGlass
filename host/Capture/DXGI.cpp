@@ -401,8 +401,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.width   = desc.Width;
   frame.height  = desc.Height;
   frame.stride  = rect.Pitch / 4;
-  
-  memcpySSE(frame.buffer, rect.pBits, min(frame.bufferSize, m_height * rect.Pitch));
+
+  unsigned int size = m_height * rect.Pitch;
+  memcpySSE(frame.buffer, rect.pBits, size < frame.bufferSize ? size : frame.bufferSize);
 
   status = surface->Unmap();
 
