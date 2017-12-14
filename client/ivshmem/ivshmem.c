@@ -511,7 +511,8 @@ enum IVSHMEMWaitResult ivshmem_wait_irq(uint16_t vector, unsigned int timeout)
     if (FD_ISSET(fd, &fds))
     {
       uint64_t kick;
-      read(fd, &kick, sizeof(kick));
+      int unused = read(fd, &kick, sizeof(kick));
+      (void)unused;
       return IVSHMEM_WAIT_RESULT_OK;
     }
   }
