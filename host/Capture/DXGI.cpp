@@ -26,11 +26,11 @@ using namespace Capture;
 DXGI::DXGI() :
   m_options(NULL),
   m_initialized(false),
-  m_dxgiFactory(NULL),
-  m_device(NULL),
-  m_deviceContext(NULL),
-  m_dup(NULL),
-  m_texture(NULL),
+  m_dxgiFactory(),
+  m_device(),
+  m_deviceContext(),
+  m_dup(),
+  m_texture(),
   m_pointer(NULL)
 {
 }
@@ -56,10 +56,10 @@ bool DXGI::Initialize(CaptureOptions * options)
   }
 
   bool done = false;
-  CComPtr<IDXGIAdapter1> adapter;
+  IDXGIAdapter1Ptr adapter;
   for (int i = 0; m_dxgiFactory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; i++)
   {
-    CComPtr<IDXGIOutput> output;
+    IDXGIOutputPtr output;
     for (int i = 0; adapter->EnumOutputs(i, &output) != DXGI_ERROR_NOT_FOUND; i++)
     {
       DXGI_OUTPUT_DESC outputDesc;
@@ -233,7 +233,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
 
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
-  CComPtr<IDXGIResource> res;
+  IDXGIResourcePtr res;
 
   HRESULT status;
   bool    cursorUpdate = false;
@@ -363,7 +363,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
   }
 
-  CComQIPtr<ID3D11Texture2D> src = res;
+  ID3D11Texture2DPtr src(res);
   if (!src)
   {
     m_dup->ReleaseFrame();
@@ -380,7 +380,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   res.Release();
   src.Release();
 
-  CComQIPtr<IDXGISurface1> surface = m_texture;
+  IDXGISurface1Ptr surface(m_texture);
   if (!surface)
   {
     DEBUG_ERROR("Failed to get IDXGISurface1");

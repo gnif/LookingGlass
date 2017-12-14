@@ -25,7 +25,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 #include <dxgi1_2.h>
 #include <d3d11.h>
-#include <atlbase.h>
+#include <stdio.h>
+#include <comdef.h>
+
+_COM_SMARTPTR_TYPEDEF(IDXGIFactory1, IID_IDXGIFactory1);
+_COM_SMARTPTR_TYPEDEF(ID3D11Device, IID_ID3D11Device);
+_COM_SMARTPTR_TYPEDEF(ID3D11DeviceContext, IID_ID3D11DeviceContext);
+_COM_SMARTPTR_TYPEDEF(IDXGIOutput1, IID_IDXGIOutput1);
+_COM_SMARTPTR_TYPEDEF(IDXGIOutput, IID_IDXGIOutput);
+_COM_SMARTPTR_TYPEDEF(IDXGIAdapter1, IID_IDXGIAdapter1);
+_COM_SMARTPTR_TYPEDEF(IDXGIOutputDuplication, IID_IDXGIOutputDuplication);
+_COM_SMARTPTR_TYPEDEF(ID3D11Texture2D, IID_ID3D11Texture2D);
+_COM_SMARTPTR_TYPEDEF(IDXGIResource, IID_IDXGIResource);
+_COM_SMARTPTR_TYPEDEF(IDXGISurface1, IID_IDXGISurface1);
 
 namespace Capture
 {
@@ -61,13 +73,13 @@ namespace Capture
     unsigned int  m_width;
     unsigned int  m_height;
 
-    CComPtr<IDXGIFactory1>          m_dxgiFactory;
-    CComPtr<ID3D11Device>           m_device;
+    IDXGIFactory1Ptr                m_dxgiFactory;
+    ID3D11DevicePtr                 m_device;
     D3D_FEATURE_LEVEL               m_featureLevel;
-    CComPtr<ID3D11DeviceContext>    m_deviceContext;
-    CComQIPtr<IDXGIOutput1>         m_output;
-    CComPtr<IDXGIOutputDuplication> m_dup;
-    CComPtr<ID3D11Texture2D>        m_texture;
+    ID3D11DeviceContextPtr          m_deviceContext;
+    IDXGIOutput1Ptr                 m_output;
+    IDXGIOutputDuplicationPtr       m_dup;
+    ID3D11Texture2DPtr              m_texture;
     BYTE *                          m_pointer;
     UINT                            m_pointerBufSize;
     UINT                            m_pointerSize;
