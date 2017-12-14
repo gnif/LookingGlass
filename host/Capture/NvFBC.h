@@ -17,6 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#if CONFIG_CAPTURE_NVFBC
+
 #pragma once
 #include "ICapture.h"
 
@@ -68,3 +70,5 @@ namespace Capture
     NVFBC_TOSYS_GRAB_FRAME_PARAMS m_grabFrameParams;
   };
 };
+
+#endif

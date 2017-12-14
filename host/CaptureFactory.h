@@ -25,7 +25,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/debug.h"
 #include "ICapture.h"
+#if CONFIG_CAPTURE_NVFBC
 #include "Capture/NvFBC.h"
+#endif
 #include "Capture/DXGI.h"
 
 class CaptureFactory
@@ -39,7 +41,9 @@ public:
     if (!devices.empty())
       return devices;
 
+#if CONFIG_CAPTURE_NVFBC
     devices.push_back(new Capture::NvFBC());
+#endif
     devices.push_back(new Capture::DXGI ());
 
     return devices;
