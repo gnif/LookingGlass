@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-#include <SDL_ttf.h>
+#include <SDL2/SDL_ttf.h>
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
