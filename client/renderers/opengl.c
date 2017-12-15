@@ -712,6 +712,15 @@ bool lgr_opengl_render(void * opaque)
         return true;
     }
     this->newShape = false;
+
+    glDrawBuffer(GL_FRONT);
+    glCallList(this->texList + this->texIndex);
+    lgr_opengl_draw_mouse(this);
+    if (this->fpsTexture)
+      glCallList(this->fpsList);
+    glDrawBuffer(GL_BACK);
+    glFlush();
+    return true;
   }
 
   glDisable(GL_SCISSOR_TEST);
