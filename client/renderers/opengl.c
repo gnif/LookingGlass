@@ -47,6 +47,7 @@ struct LGR_OpenGL
 {
   LG_RendererParams params;
   bool              configured;
+  SDL_Window      * sdlWindow;
   SDL_GLContext     glContext;
   bool              doneInfo;
 
@@ -131,7 +132,7 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, Uint3
   }
 
   *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
   return true;
 }
 
@@ -147,6 +148,7 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
     return false;
   }
 
+  this->sdlWindow = window;
   this->glContext = SDL_GL_CreateContext(window);
   if (!this->glContext)
   {
@@ -168,7 +170,7 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
     return false;
   }
 
-  SDL_GL_SetSwapInterval(0);
+  SDL_GL_SetSwapInterval(this->params.vsync ? 1 : 0);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.
@@ -706,10 +708,6 @@ bool lgr_opengl_render(void * opaque)
       return true;
   }
 
-  // wait for vsync
-  unsigned int count;
-  glXWaitVideoSyncSGI(1, 0, &count);
-
   glDisable(GL_SCISSOR_TEST);
   glClear(GL_COLOR_BUFFER_BIT);
   glEnable(GL_SCISSOR_TEST);
@@ -718,7 +716,15 @@ bool lgr_opengl_render(void * opaque)
   lgr_opengl_draw_mouse(this);
   if (this->fpsTexture)
     glCallList(this->fpsList);
-  glFlush();
+
+  unsigned int before, after;
+  glXGetVideoSyncSGI(&before);
+  SDL_GL_SwapWindow(this->sdlWindow);
+
+  // wait for the swap to happen to ensure we dont buffer frames
+  glXGetVideoSyncSGI(&after);
+  if (before == after)
+    glXWaitVideoSyncSGI(1, 0, &before);
 
   ++this->frameCount;
   const uint64_t t    = nanotime();
