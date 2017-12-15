@@ -54,7 +54,8 @@ private:
   HANDLE     m_timer;
   ICapture * m_capture;
 
-  KVMFRHeader * m_header;
+  KVMFRHeader   m_header;
+  KVMFRHeader * m_shmHeader;
   uint8_t     * m_frame[2];
   size_t        m_frameSize;
   uint64_t      m_dataOffset[2];
