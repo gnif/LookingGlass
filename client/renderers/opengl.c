@@ -704,7 +704,7 @@ bool lgr_opengl_render(void * opaque)
 
     // don't update the mouse too fast
     const uint64_t delta = nanotime() - this->lastMouseDraw;
-    if (delta < 1e7)
+    if (delta < 5e6)
       return true;
   }
 
