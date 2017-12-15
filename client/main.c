@@ -848,6 +848,7 @@ void doHelp(char * app)
     "  -n        Don't allow the window to be manually resized\n"
     "  -r        Don't maintain the aspect ratio\n"
     "  -d        Borderless mode\n"
+    "  -F        Borderless fullscreen mode\n"
     "  -x XPOS   Initial window X position [current: %s]\n"
     "  -y YPOS   Initial window Y position [current: %s]\n"
     "  -w WIDTH  Initial window width [current: %u]\n"
