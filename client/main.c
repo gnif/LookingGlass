@@ -67,6 +67,7 @@ struct AppParams
   bool         allowResize;
   bool         keepAspect;
   bool         borderless;
+  bool         fullscreen;
   bool         center;
   int          x, y;
   unsigned int w, h;
@@ -87,6 +88,7 @@ struct AppParams params =
   .allowResize      = true,
   .keepAspect       = true,
   .borderless       = false,
+  .fullscreen       = false,
   .center           = true,
   .x                = 0,
   .y                = 0,
@@ -667,6 +669,7 @@ int run()
     params.h,
     (
       SDL_WINDOW_SHOWN |
+      (params.fullscreen  ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) |
       (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
       (params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
       sdlFlags
@@ -891,7 +894,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMmkanrdx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMmkanrdFx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -946,6 +949,10 @@ int main(int argc, char * argv[])
 
       case 'd':
         params.borderless = true;
+        break;
+
+      case 'F':
+        params.fullscreen = true;
         break;
 
       case 'x':
