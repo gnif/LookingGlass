@@ -676,6 +676,11 @@ int run()
     )
   );
 
+  if (params.fullscreen)
+  {
+    SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+  }
+
   // set the compositor hint to bypass for low latency
   SDL_SysWMinfo wminfo;
   SDL_VERSION(&wminfo.version);
