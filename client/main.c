@@ -63,6 +63,7 @@ struct AppState
 
 struct AppParams
 {
+  bool         vsync;
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
@@ -84,6 +85,7 @@ struct AppParams
 struct AppState  state;
 struct AppParams params =
 {
+  .vsync            = true,
   .autoResize       = false,
   .allowResize      = true,
   .keepAspect       = true,
@@ -631,6 +633,7 @@ int run()
   lgrParams.font     = state.font;
   lgrParams.resample = params.useMipmap;
   lgrParams.showFPS  = params.showFPS;
+  lgrParams.vsync    = params.vsync;
   Uint32 sdlFlags;
 
   // probe for a a suitable renderer
@@ -846,7 +849,7 @@ void doHelp(char * app)
     "  -M        Don't hide the host cursor\n"
     "\n"
     "  -m        Disable mipmapping\n"
-    "  -v        Disable VSync\n"
+    "  -v        Disable VSYNC\n"
     "  -k        Enable FPS display\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
@@ -900,7 +903,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMmkanrdFx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMmvkanrdFx:y:w:b:l")) != -1)
     switch(c)
     {
       case '?':
@@ -935,6 +938,10 @@ int main(int argc, char * argv[])
 
       case 'm':
         params.useMipmap = false;
+        break;
+
+      case 'v':
+        params.vsync = false;
         break;
 
       case 'k':
