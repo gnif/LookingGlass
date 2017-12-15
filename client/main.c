@@ -147,6 +147,8 @@ int renderThread(void * unused)
   struct KVMFRHeader  header;
   volatile uint32_t * updateCount = &state.shm->updateCount;
 
+  memset(&header, 0, sizeof(struct KVMFRHeader));
+
   while(state.running)
   {
     // poll until we have a new frame, or we time out
