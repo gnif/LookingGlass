@@ -63,6 +63,5 @@ private:
   CursorInfo   m_cursor;
   size_t       m_cursorDataSize;
   uint8_t    * m_cursorData;
-  bool         m_haveShape;
   bool         m_shapePending;
 };

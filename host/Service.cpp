@@ -44,7 +44,6 @@ Service::Service() :
   m_frameIndex(0),
   m_cursorDataSize(0),
   m_cursorData(NULL),
-  m_haveShape(false),
   m_shapePending(false)
 {
   m_ivshmem = IVSHMEM::Get();
@@ -134,7 +133,6 @@ void Service::DeInitialize()
     m_timer = NULL;
   }
 
-  m_haveShape    = false;
   m_shapePending = false;
 
   if (m_cursorData)
@@ -271,9 +269,9 @@ bool Service::Process()
 
   if (frame.cursor.hasPos || (m_cursor.hasPos && restart))
   {
-    if (!restart)
+    // remember the last state for client restart
+    if (frame.cursor.hasPos)
     {
-      // remember the last state for client restart
       m_cursor.hasPos  = true;
       m_cursor.visible = frame.cursor.visible;
       m_cursor.x       = frame.cursor.x;
@@ -291,7 +289,7 @@ bool Service::Process()
 
   if (frame.cursor.hasShape || m_shapePending || (m_cursor.hasShape && restart))
   {
-    if (!m_shapePending)
+    if (!m_shapePending && !restart)
     {
       if (frame.cursor.dataSize > m_frameSize)
       {
@@ -315,7 +313,6 @@ bool Service::Process()
       }
 
       memcpy(m_cursorData, frame.cursor.shape, frame.cursor.dataSize);
-      m_haveShape = true;
     }
 
     // we can't send a frame with the cursor shape as we need the buffer location
