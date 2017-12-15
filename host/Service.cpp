@@ -183,6 +183,7 @@ bool Service::Process()
     // check if the client has flagged a restart
     if (f & KVMFR_HEADER_FLAG_RESTART)
     {
+      m_header->updateCount = 0;
       INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
       restart = true;
       break;
