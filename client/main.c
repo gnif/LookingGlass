@@ -50,6 +50,7 @@ struct AppState
   SDL_Point       srcSize;
   LG_RendererRect dstRect;
   SDL_Point       cursor;
+  bool            cursorVisible;
   bool            haveCursorPos;
   float           scaleX, scaleY;
 
@@ -152,6 +153,12 @@ int renderThread(void * unused)
 {
   bool                error = false;
   struct KVMFRHeader  header;
+
+  LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
+  struct KVMFRCursor  cursor         = {};
+  size_t              cursorDataSize = 0;
+  uint8_t           * cursorData     = NULL;
+
   volatile uint32_t * updateCount = &state.shm->updateCount;
 
   memset(&header, 0, sizeof(struct KVMFRHeader));
@@ -262,6 +269,32 @@ int renderThread(void * unused)
 
         state.started = true;
         updatePositionInfo();
+
+        // if we have saved shape info, send it now
+        if (cursorData)
+        {
+          if (!state.lgr->on_mouse_shape(state.lgrData, cursorType, cursor.w,
+            cursor.h, cursor.pitch, cursorData))
+          {
+            DEBUG_ERROR("Failed to update mouse shape");
+            break;
+          }
+
+          free(cursorData);
+          cursorData     = NULL;
+          cursorDataSize = 0;
+        }
+
+        // if we have a cursor position, send it now
+        if (state.haveCursorPos)
+        {
+          state.lgr->on_mouse_event(
+            state.lgrData,
+            state.cursorVisible,
+            state.cursor.x,
+            state.cursor.y
+          );
+        }
       }
 
       const uint8_t * data = (const uint8_t *)state.shm + header.frame.dataPos;
@@ -279,24 +312,29 @@ int renderThread(void * unused)
       {
         state.cursor.x      = header.cursor.x;
         state.cursor.y      = header.cursor.y;
+        state.cursorVisible = header.cursor.flags & KVMFR_CURSOR_FLAG_VISIBLE;
         state.haveCursorPos = true;
       }
 
       if (header.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE)
       {
-        LG_RendererCursor c = LG_CURSOR_COLOR;
-        switch(header.cursor.type)
-        {
-          case CURSOR_TYPE_COLOR       : c = LG_CURSOR_COLOR       ; break;
-          case CURSOR_TYPE_MONOCHROME  : c = LG_CURSOR_MONOCHROME  ; break;
-          case CURSOR_TYPE_MASKED_COLOR: c = LG_CURSOR_MASKED_COLOR; break;
-          default:
-            DEBUG_ERROR("Invalid cursor type");
-            break;
-        }
-
         if (state.lgr)
         {
+          bool bad = false;
+          switch(header.cursor.type)
+          {
+            case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
+            case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
+            case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
+            default:
+              DEBUG_ERROR("Invalid cursor type");
+              bad = true;
+              break;
+          }
+
+          if (bad)
+            break;
+
           // check the data position is sane
           const uint64_t dataSize = header.cursor.h * header.cursor.pitch;
           if (header.cursor.dataPos + dataSize > state.shmSize)
@@ -306,14 +344,22 @@ int renderThread(void * unused)
           }
 
           const uint8_t * data = (const uint8_t *)state.shm + header.cursor.dataPos;
-          if (!state.lgr->on_mouse_shape(
-            state.lgrData,
-            c,
-            header.cursor.w,
-            header.cursor.h,
-            header.cursor.pitch,
-            data
-          ))
+          if (!state.started)
+          {
+            // save off the cursor data so we can tell the renderer when it's ready
+            if (cursorDataSize < dataSize)
+            {
+              if (cursorData) free(cursorData);
+              cursorData     = (uint8_t *)malloc(dataSize);
+              cursorDataSize = dataSize;
+            }
+            memcpy(&cursor, &header.cursor, sizeof(struct KVMFRCursor));
+            memcpy(cursorData, data, dataSize);
+            continue;
+          }
+
+          if (!state.lgr->on_mouse_shape(state.lgrData, cursorType, header.cursor.w,
+            header.cursor.h, header.cursor.pitch, data))
           {
             DEBUG_ERROR("Failed to update mouse shape");
             break;
@@ -321,20 +367,23 @@ int renderThread(void * unused)
         }
       }
 
-      if (state.lgr)
+      if (state.lgr && state.started)
       {
         state.lgr->on_mouse_event(
           state.lgrData,
-          (header.cursor.flags & KVMFR_CURSOR_FLAG_VISIBLE) != 0,
+          state.cursorVisible,
           state.cursor.x,
           state.cursor.y
         );
       }
     }
 
-    if (state.lgr)
+    if (state.started && state.lgr)
       state.lgr->render(state.lgrData);
   }
+
+  if (cursorData)
+    free(cursorData);
 
   return 0;
 }
