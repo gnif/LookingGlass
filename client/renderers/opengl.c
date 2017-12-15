@@ -720,6 +720,9 @@ bool lgr_opengl_render(void * opaque)
       glCallList(this->fpsList);
     glDrawBuffer(GL_BACK);
     glFlush();
+
+    this->mouseUpdate   = false;
+    this->lastMouseDraw = nanotime();
     return true;
   }
 
