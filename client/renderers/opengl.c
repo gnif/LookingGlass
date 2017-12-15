@@ -82,6 +82,7 @@ struct LGR_OpenGL
   SDL_Rect          fpsRect;
 
   bool              mouseUpdate;
+  bool              newShape;
   uint64_t          lastMouseDraw;
   LG_RendererCursor mouseType;
   bool              mouseVisible;
@@ -493,6 +494,7 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
   }
 
   this->mouseUpdate = true;
+  this->newShape    = true;
   return true;
 }
 
@@ -702,10 +704,14 @@ bool lgr_opengl_render(void * opaque)
     if (!this->mouseUpdate)
       return true;
 
-    // don't update the mouse too fast
-    const uint64_t delta = nanotime() - this->lastMouseDraw;
-    if (delta < 5e6)
-      return true;
+    if (!this->newShape)
+    {
+      // don't update the mouse too fast
+      const uint64_t delta = nanotime() - this->lastMouseDraw;
+      if (delta < 5e6)
+        return true;
+    }
+    this->newShape = false;
   }
 
   glDisable(GL_SCISSOR_TEST);
