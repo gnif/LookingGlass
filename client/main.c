@@ -138,8 +138,11 @@ inline void updatePositionInfo()
     state.dstRect.h = h;
   }
 
-  state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
-  state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+  if (state.started)
+  {
+    state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
+    state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+  }
 
   if (state.lgr)
     state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
@@ -256,6 +259,8 @@ int renderThread(void * unused)
         state.srcSize.y = header.frame.height;
         if (params.autoResize)
           SDL_SetWindowSize(state.window, header.frame.width, header.frame.height);
+
+        state.started = true;
         updatePositionInfo();
       }
 
