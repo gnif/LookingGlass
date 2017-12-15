@@ -41,7 +41,11 @@ Service::Service() :
   m_timer(NULL),
   m_capture(NULL),
   m_header(NULL),
-  m_frameIndex(0)
+  m_frameIndex(0),
+  m_cursorDataSize(0),
+  m_cursorData(NULL),
+  m_haveShape(false),
+  m_shapePending(false)
 {
   m_ivshmem = IVSHMEM::Get();
 }
@@ -130,6 +134,16 @@ void Service::DeInitialize()
     m_timer = NULL;
   }
 
+  m_haveShape    = false;
+  m_shapePending = false;
+
+  if (m_cursorData)
+  {
+    delete[] m_cursorData;
+    m_cursorDataSize = 0;
+    m_cursorData     = NULL;
+  }
+
   m_header        = NULL;
   m_frame[0]      = NULL;
   m_frame[1]      = NULL;
@@ -194,37 +208,43 @@ bool Service::Process()
 
   bool ok         = false;
   bool cursorOnly = false;
-  for(int i = 0; i < 2; ++i)
+  if (m_shapePending)
   {
-    // capture a frame of data
-    switch (m_capture->GrabFrame(frame))
-    {
-      case GRAB_STATUS_OK:
-        ok = true;
-        break;
-
-      case GRAB_STATUS_CURSOR:
-        ok         = true;
-        cursorOnly = true;
-        break;
-
-      case GRAB_STATUS_ERROR:
-        DEBUG_ERROR("Capture failed");
-        return false;
-
-      case GRAB_STATUS_REINIT:
-        DEBUG_INFO("ReInitialize Requested");
-        if (!m_capture->ReInitialize() || !InitPointers())
-        {
-          DEBUG_ERROR("ReInitialize Failed");
-          return false;
-        }
-        continue;
-    }
-
-    if (ok)
-      break;
+    ok         = true;
+    cursorOnly = true;
   }
+  else
+    for(int i = 0; i < 2; ++i)
+    {
+      // capture a frame of data
+      switch (m_capture->GrabFrame(frame))
+      {
+        case GRAB_STATUS_OK:
+          ok = true;
+          break;
+
+        case GRAB_STATUS_CURSOR:
+          ok         = true;
+          cursorOnly = true;
+          break;
+
+        case GRAB_STATUS_ERROR:
+          DEBUG_ERROR("Capture failed");
+          return false;
+
+        case GRAB_STATUS_REINIT:
+          DEBUG_INFO("ReInitialize Requested");
+          if (!m_capture->ReInitialize() || !InitPointers())
+          {
+            DEBUG_ERROR("ReInitialize Failed");
+            return false;
+          }
+          continue;
+      }
+
+      if (ok)
+        break;
+    }
 
   if (!ok)
   {
@@ -248,52 +268,77 @@ bool Service::Process()
       m_frameIndex = 0;
   }
 
-  if (frame.cursor.hasPos)
+  if (frame.cursor.hasPos || (m_cursor.hasPos && restart))
   {
+    if (!restart)
+    {
+      // remember the last state for client restart
+      m_cursor.hasPos  = true;
+      m_cursor.visible = frame.cursor.visible;
+      m_cursor.x       = frame.cursor.x;
+      m_cursor.y       = frame.cursor.y;
+    }
+
     // tell the host where the cursor is
     updateFlags            |= KVMFR_HEADER_FLAG_CURSOR;
     m_header->cursor.flags |= KVMFR_CURSOR_FLAG_POS;
-    if (frame.cursor.visible)
+    if (m_cursor.visible)
       m_header->cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
-    m_header->cursor.x      = frame.cursor.x;
-    m_header->cursor.y      = frame.cursor.y;
-
-    // update our local copy for client restarts
-    m_cursor.flags = m_header->cursor.flags;
-    m_cursor.x     = frame.cursor.x;
-    m_cursor.y     = frame.cursor.y;
+    m_header->cursor.x      = m_cursor.x;
+    m_header->cursor.y      = m_cursor.y;
   }
 
-  if (frame.cursor.hasShape)
+  if (frame.cursor.hasShape || m_shapePending || (m_cursor.hasShape && restart))
   {
-    // give the host the new cursor shape
-    updateFlags            |= KVMFR_HEADER_FLAG_CURSOR;
-    m_header->cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
-    m_header->cursor.type   = frame.cursor.type;
-    m_header->cursor.w      = frame.cursor.w;
-    m_header->cursor.h      = frame.cursor.h;
-    m_header->cursor.pitch  = frame.cursor.pitch;
-    if (frame.cursor.dataSize > KVMFR_CURSOR_BUFFER)
+    if (!m_shapePending)
     {
-      DEBUG_ERROR("Cursor shape size exceeds buffer size");
-      return false;
+      if (frame.cursor.dataSize > m_frameSize)
+      {
+        DEBUG_ERROR("Cursor size exceeds frame size! This should never happen unless your shared memory is WAY too small");
+        return false;
+      }        
+
+      // take a copy of the shape information for client restarts or pending shape changes
+      m_cursor.hasShape = frame.cursor.hasShape;
+      m_cursor.type     = frame.cursor.type;
+      m_cursor.w        = frame.cursor.w;
+      m_cursor.h        = frame.cursor.h;
+      m_cursor.pitch    = frame.cursor.pitch;
+      m_cursor.dataSize = frame.cursor.dataSize;
+      memcpy(&m_cursor, &frame.cursor, sizeof(CursorInfo));
+      if (m_cursorDataSize < frame.cursor.dataSize)
+      {
+        delete[] m_cursorData;
+        m_cursorData     = new uint8_t[frame.cursor.dataSize];
+        m_cursorDataSize = frame.cursor.dataSize;
+      }
+
+      memcpy(m_cursorData, frame.cursor.shape, frame.cursor.dataSize);
+      m_haveShape = true;
     }
-    memcpy(m_header->cursor.shape, frame.cursor.shape, frame.cursor.dataSize);
 
-    // take a copy of the information for client restarts
-    uint8_t f = m_cursor.flags;
-    memcpy(&m_cursor, &m_header->cursor, sizeof(KVMFRCursor));
-    m_cursor.flags = f | m_header->cursor.flags;
-    m_haveShape = true;
-  }
-  else
-  {
-    // if we already have a shape and the client restarted send it to them
-    if (restart && m_haveShape)
+    // we can't send a frame with the cursor shape as we need the buffer location
+    // flag it to send on the next packet
+    if (updateFlags & KVMFR_HEADER_FLAG_FRAME)
+      m_shapePending = true;
+    else
     {
-      updateFlags    |= KVMFR_HEADER_FLAG_CURSOR;
-      m_cursor.flags |= KVMFR_CURSOR_FLAG_SHAPE;
-      memcpy(&m_header->cursor, &m_cursor, sizeof(KVMFRCursor));
+      // give the host the new cursor shape
+      updateFlags             |= KVMFR_HEADER_FLAG_CURSOR;
+      m_header->cursor.flags  |= KVMFR_CURSOR_FLAG_SHAPE;
+      if (m_cursor.visible)
+        m_header->cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
+
+      m_header->cursor.type    = m_cursor.type;
+      m_header->cursor.w       = m_cursor.w;
+      m_header->cursor.h       = m_cursor.h;
+      m_header->cursor.pitch   = m_cursor.pitch;
+      m_header->cursor.dataPos = m_dataOffset[m_frameIndex];
+      memcpy(m_frame[m_frameIndex], m_cursorData, m_cursor.dataSize);
+      m_shapePending = false;
+
+      if (++m_frameIndex == 2)
+        m_frameIndex = 0;
     }
   }
 

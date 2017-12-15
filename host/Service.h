@@ -60,6 +60,9 @@ private:
   uint64_t      m_dataOffset[2];
   int           m_frameIndex;
 
-  KVMFRCursor m_cursor;
-  bool        m_haveShape;
+  CursorInfo   m_cursor;
+  size_t       m_cursorDataSize;
+  uint8_t    * m_cursorData;
+  bool         m_haveShape;
+  bool         m_shapePending;
 };
