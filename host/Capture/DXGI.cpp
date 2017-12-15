@@ -31,6 +31,7 @@ DXGI::DXGI() :
   m_deviceContext(),
   m_dup(),
   m_texture(),
+  m_surface(),
   m_pointer(NULL)
 {
 }
@@ -190,6 +191,15 @@ void DXGI::DeInitialize()
     m_pointerBufSize = 0;
   }
 
+  if (m_surfaceMapped)
+  {
+    m_surface->Unmap();
+    m_surfaceMapped = false;
+  }
+
+  if (m_surface)
+    m_surface.Release();
+
   if (m_texture)
     m_texture.Release();
 
@@ -241,7 +251,22 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   {
     while(true)
     {
-      status = m_dup->AcquireNextFrame(INFINITE, &frameInfo, &res);
+      status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
+      if (status == DXGI_ERROR_WAIT_TIMEOUT)
+      {
+        if (!m_surfaceMapped)
+          break;
+
+        // send the last frame again if we timeout to prevent the client stalling on restart
+        frame.width = m_desc.Width;
+        frame.height = m_desc.Height;
+        frame.stride = m_rect.Pitch / 4;
+
+        unsigned int size = m_height * m_rect.Pitch;
+        memcpySSE(frame.buffer, m_rect.pBits, size < frame.bufferSize ? size : frame.bufferSize);
+        return GRAB_STATUS_OK;
+      }
+
       if (!SUCCEEDED(status))
         break;
 
@@ -371,8 +396,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
   }
 
-  D3D11_TEXTURE2D_DESC desc;
-  src->GetDesc(&desc);
+  src->GetDesc(&m_desc);
 
   m_deviceContext->CopyResource(m_texture, src);
 
@@ -380,38 +404,42 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   res.Release();
   src.Release();
 
-  IDXGISurface1Ptr surface(m_texture);
-  if (!surface)
+  if (m_surfaceMapped)
+  {
+    status = m_surface->Unmap();
+    if (FAILED(status))
+    {
+      DEBUG_ERROR("Failed to unmap surface: %08x", (int)status);
+      return GRAB_STATUS_ERROR;
+    }
+    m_surfaceMapped = false;
+    m_surface.Release();
+  }
+
+  m_surface = m_texture;
+  if (!m_surface)
   {
     DEBUG_ERROR("Failed to get IDXGISurface1");
     return GRAB_STATUS_ERROR;
   }
 
-  DXGI_MAPPED_RECT rect;
-  status = surface->Map(&rect, DXGI_MAP_READ);
+  status = m_surface->Map(&m_rect, DXGI_MAP_READ);
   if (FAILED(status))
   {
     DEBUG_ERROR("Failed to map surface: %08x", (int)status);
     return GRAB_STATUS_ERROR;
   }
+  m_surfaceMapped = true;
 
-  m_width  = desc.Width;
-  m_height = desc.Height;
+  m_width  = m_desc.Width;
+  m_height = m_desc.Height;
 
-  frame.width   = desc.Width;
-  frame.height  = desc.Height;
-  frame.stride  = rect.Pitch / 4;
+  frame.width   = m_desc.Width;
+  frame.height  = m_desc.Height;
+  frame.stride  = m_rect.Pitch / 4;
 
-  unsigned int size = m_height * rect.Pitch;
-  memcpySSE(frame.buffer, rect.pBits, size < frame.bufferSize ? size : frame.bufferSize);
-
-  status = surface->Unmap();
-
-  if (FAILED(status))
-  {
-    DEBUG_ERROR("Failed to unmap surface: %08x", (int)status);
-    return GRAB_STATUS_ERROR;
-  }
+  unsigned int size = m_height * m_rect.Pitch;
+  memcpySSE(frame.buffer, m_rect.pBits, size < frame.bufferSize ? size : frame.bufferSize);
 
   return GRAB_STATUS_OK;
 }

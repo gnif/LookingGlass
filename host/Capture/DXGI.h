@@ -80,6 +80,10 @@ namespace Capture
     IDXGIOutput1Ptr                 m_output;
     IDXGIOutputDuplicationPtr       m_dup;
     ID3D11Texture2DPtr              m_texture;
+    IDXGISurface1Ptr                m_surface;
+    D3D11_TEXTURE2D_DESC            m_desc;
+    DXGI_MAPPED_RECT                m_rect;
+    bool                            m_surfaceMapped;
     BYTE *                          m_pointer;
     UINT                            m_pointerBufSize;
     UINT                            m_pointerSize;
