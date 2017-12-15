@@ -61,11 +61,10 @@ bool NvFBC::Initialize(CaptureOptions * options)
     if (_strcmpi(*it, "nowait") == 0) { m_optNoWait = true ; continue; }
   }
 
-  std::string nvfbc = Util::GetSystemRoot() + "\\" + NVFBC_LIBRARY_NAME;
-  m_hDLL = LoadLibraryA(nvfbc.c_str());
+  m_hDLL = LoadLibraryA(NVFBC_LIBRARY_NAME);
   if (!m_hDLL)
   {
-    DEBUG_ERROR("Failed to load the NvFBC library: %d - %s", GetLastError(), nvfbc.c_str());
+    DEBUG_ERROR("Failed to load the NvFBC library: %d - %s", GetLastError(), NVFBC_LIBRARY_NAME);
     return false;
   }
 
@@ -76,7 +75,7 @@ bool NvFBC::Initialize(CaptureOptions * options)
 
   if (!m_fnCreateEx || !m_fnSetGlobalFlags || !m_fnGetStatusEx || !m_fnEnable)
   {
-    DEBUG_ERROR("Unable to locate required entry points in %s", nvfbc.c_str());
+    DEBUG_ERROR("Unable to locate required entry points in %s", NVFBC_LIBRARY_NAME);
     DeInitialize();
     return false;
   }
