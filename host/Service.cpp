@@ -95,13 +95,11 @@ bool Service::Initialize(ICapture * captureDevice)
   // update everything except for the hostID
   memcpy(m_shmHeader->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
   m_shmHeader->version     = KVMFR_HEADER_VERSION;
-  m_shmHeader->guestID     = m_ivshmem->GetPeerID();
   m_shmHeader->updateCount = 0;
 
   // clear but retain the restart flag if it was set by the client
   INTERLOCKED_AND8((char *)&m_shmHeader->flags, KVMFR_HEADER_FLAG_RESTART);
-  ZeroMemory(&m_shmHeader->frame , sizeof(KVMFRFrame ));
-  ZeroMemory(&m_shmHeader->cursor, sizeof(KVMFRCursor));
+  ZeroMemory(&m_shmHeader->detail, sizeof(KVMFRDetail));
 
   m_initialized = true;
   return true;
@@ -260,17 +258,17 @@ bool Service::Process()
   }
 
   uint8_t updateFlags = 0;
-  m_header.cursor.flags = 0;
+  m_detail.cursor.flags = 0;
 
   if (!cursorOnly)
   {
     // signal a frame update
     updateFlags            |= KVMFR_HEADER_FLAG_FRAME;
-    m_header.frame.type    = m_capture->GetFrameType();
-    m_header.frame.width   = frame.width;
-    m_header.frame.height  = frame.height;
-    m_header.frame.stride  = frame.stride;
-    m_header.frame.dataPos = m_dataOffset[m_frameIndex];
+    m_detail.frame.type    = m_capture->GetFrameType();
+    m_detail.frame.width   = frame.width;
+    m_detail.frame.height  = frame.height;
+    m_detail.frame.stride  = frame.stride;
+    m_detail.frame.dataPos = m_dataOffset[m_frameIndex];
     if (++m_frameIndex == 2)
       m_frameIndex = 0;
   }
@@ -288,11 +286,11 @@ bool Service::Process()
 
     // tell the host where the cursor is
     updateFlags            |= KVMFR_HEADER_FLAG_CURSOR;
-    m_header.cursor.flags |= KVMFR_CURSOR_FLAG_POS;
+    m_detail.cursor.flags |= KVMFR_CURSOR_FLAG_POS;
     if (m_cursor.visible)
-      m_header.cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
-    m_header.cursor.x      = m_cursor.x;
-    m_header.cursor.y      = m_cursor.y;
+      m_detail.cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
+    m_detail.cursor.x      = m_cursor.x;
+    m_detail.cursor.y      = m_cursor.y;
   }
 
   if (frame.cursor.hasShape || m_shapePending || (m_cursor.hasShape && restart))
@@ -331,15 +329,17 @@ bool Service::Process()
     {
       // give the host the new cursor shape
       updateFlags             |= KVMFR_HEADER_FLAG_CURSOR;
-      m_header.cursor.flags  |= KVMFR_CURSOR_FLAG_SHAPE;
+      m_detail.cursor.flags  |= KVMFR_CURSOR_FLAG_SHAPE;
       if (m_cursor.visible)
-        m_header.cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
+        m_detail.cursor.flags |= KVMFR_CURSOR_FLAG_VISIBLE;
 
-      m_header.cursor.type    = m_cursor.type;
-      m_header.cursor.w       = m_cursor.w;
-      m_header.cursor.h       = m_cursor.h;
-      m_header.cursor.pitch   = m_cursor.pitch;
-      m_header.cursor.dataPos = m_dataOffset[m_frameIndex];
+      // shapes are sent as frame data
+      m_detail.cursor.type   = m_cursor.type;
+      m_detail.frame.width   = m_cursor.w;
+      m_detail.frame.height  = m_cursor.h;
+      m_detail.frame.stride  = 0;
+      m_detail.frame.pitch   = m_cursor.pitch;
+      m_detail.frame.dataPos = m_dataOffset[m_frameIndex];
       memcpy(m_frame[m_frameIndex], m_cursorData, m_cursor.dataSize);
       m_shapePending = false;
 
@@ -352,13 +352,8 @@ bool Service::Process()
   INTERLOCKED_AND8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
   INTERLOCKED_OR8 ((volatile char *)flags, updateFlags);
 
-  // update the shared header but don't touch the setup fields  
-  const size_t offset = (uintptr_t)&m_header.frame - (uintptr_t)&m_header;
-  memcpy(
-    (uint8_t *)m_shmHeader + offset,
-    (uint8_t *)&m_header   + offset,
-    sizeof(KVMFRHeader) - offset
-  );
+  // update the shared details only
+  memcpy(&m_shmHeader->detail, &m_detail, sizeof(KVMFRDetail));
 
   // increment the update count so the guest stops waiting
   ++m_shmHeader->updateCount;
