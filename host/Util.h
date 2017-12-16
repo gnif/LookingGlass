@@ -23,8 +23,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <inttypes.h>
 #include <tmmintrin.h>
 
-#include "common\debug.h"
+#include "common/debug.h"
 
+#if __MINGW32__
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 class Util
 {
@@ -33,16 +36,15 @@ public:
   {
     std::string defaultPath;
 
-    size_t pathSize;
-    char *libPath;
+    const char *libPath = getenv("SystemRoot");
 
-    if (_dupenv_s(&libPath, &pathSize, "SystemRoot") != 0)
+    if (!libPath)
     {
       DEBUG_ERROR("Unable to get the SystemRoot environment variable");
       return defaultPath;
     }
 
-    if (!pathSize)
+    if (!strlen(libPath))
     {
       DEBUG_ERROR("The SystemRoot environment variable is not set");
       return defaultPath;

@@ -65,7 +65,7 @@ bool NvFBC::Initialize(CaptureOptions * options)
   m_hDLL = LoadLibraryA(nvfbc.c_str());
   if (!m_hDLL)
   {
-    DEBUG_ERROR("Failed to load the NvFBC library: %d - %s", GetLastError(), nvfbc.c_str());
+    DEBUG_ERROR("Failed to load the NvFBC library: %d - %s", (int)GetLastError(), nvfbc.c_str());
     return false;
   }
 
