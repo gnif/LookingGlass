@@ -16,7 +16,6 @@ LD     = $(CXX)
 BUILD  ?= .build
 BIN    ?= bin
 
-#CFLAGS  += -DCONFIG_CAPTURE_NVFBC=1
 
 CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbrev=10 --tags)"'
 
@@ -25,6 +24,11 @@ OBJS	= main.o \
 	  IVSHMEM.o \
 	  Service.o \
 	  Capture/DXGI.o
+
+ifeq ($(CONFIG_CAPTURE_NVFBC),1)
+CFLAGS  += -DCONFIG_CAPTURE_NVFBC=1 -I../vendor
+OBJS    += Capture/NvFBC.o
+endif
 
 BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))
 
