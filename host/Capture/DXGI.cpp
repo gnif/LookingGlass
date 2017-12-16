@@ -260,6 +260,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         // send the last frame again if we timeout to prevent the client stalling on restart
         frame.width = m_desc.Width;
         frame.height = m_desc.Height;
+        frame.pitch  = m_rect.Pitch;
         frame.stride = m_rect.Pitch / 4;
 
         unsigned int size = m_height * m_rect.Pitch;

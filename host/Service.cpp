@@ -268,6 +268,7 @@ bool Service::Process()
     m_detail.frame.width   = frame.width;
     m_detail.frame.height  = frame.height;
     m_detail.frame.stride  = frame.stride;
+    m_detail.frame.pitch   = frame.pitch;
     m_detail.frame.dataPos = m_dataOffset[m_frameIndex];
     if (++m_frameIndex == 2)
       m_frameIndex = 0;

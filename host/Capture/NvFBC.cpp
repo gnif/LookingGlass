@@ -289,6 +289,7 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
       }
 
       frame.stride = frame.width;
+      frame.pitch  = dataWidth;
       uint8_t *src = (uint8_t *)m_frameBuffer + dataOffset;
       uint8_t *dst = (uint8_t *)frame.buffer;
       for(unsigned int y = 0; y < frame.height; ++y, dst += dataWidth, src += m_grabInfo.dwBufferWidth * 4)

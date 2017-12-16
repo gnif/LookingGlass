@@ -42,6 +42,7 @@ struct FrameInfo
   unsigned int width;
   unsigned int height;
   unsigned int stride;
+  unsigned int pitch;
   void * buffer;
   size_t bufferSize;
 
