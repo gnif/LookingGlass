@@ -69,7 +69,6 @@ struct LGR_OpenGL
   int               fpsList;
   int               mouseList;
   LG_RendererRect   destRect;
-  bool              mipmap;
 
   bool              hasTextures;
   GLuint            textures[TEXTURE_COUNT];
@@ -365,7 +364,7 @@ void lgr_opengl_on_resize(void * opaque, const int width, const int height, cons
   if (!this || !this->configured)
     return;
 
-  this->window.x  = width;
+  this->window.x = width;
   this->window.y = height;
   memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
@@ -634,15 +633,17 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
     (this->format.width  > this->destRect.w) ||
     (this->format.height > this->destRect.h));
 
-  if (this->mipmap != mipmap)
-  {
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-        mipmap ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-    this->mipmap = mipmap;
-  }
-
   if (mipmap)
+  {
     glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  }
+  else
+  {
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  }
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
