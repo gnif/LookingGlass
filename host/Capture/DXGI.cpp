@@ -346,32 +346,34 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     if (SUCCEEDED(status))
       break;
     
+    HDESK desktop = NULL;
     switch (status)
     {      
-      case DXGI_ERROR_ACCESS_LOST: // desktop switch, mode change or switch DWM on or off
-        return GRAB_STATUS_REINIT;
+      // desktop switch, mode change, switch DWM on or off or Secure Desktop
+      case DXGI_ERROR_ACCESS_LOST:
+        // see if we can open the desktop, if so request a reinit
+        // if not the secure desktop is active so just wait for it
+        // instead of aborting out
+        desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
+        if (desktop)
+        {
+          // open suceeded, not on the secure desktop, return to reinit
+          CloseDesktop(desktop);
+          return GRAB_STATUS_REINIT;
+        }
+        // fall through
 
-      case WAIT_ABANDONED:         // this can happen also during desktop switches, not documented by MS though
-      {
-        // see if we can open the desktop, if not the secure desktop
-        // is active so just wait for it instead of aborting out
-        HDESK desktop = NULL;
-        while(!desktop)
+      // this can happen during desktop switches also, not documented by MS though
+      case WAIT_ABANDONED:
+        do
         {
           desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
           if (desktop)
             break;
           Sleep(100);
-        }
+        } while (!desktop);
         CloseDesktop(desktop);
-
-        if (!ReInitialize())
-        {
-          DEBUG_ERROR("Failed to ReInitialize after lost access to desktop");
-          return GRAB_STATUS_ERROR;
-        }
-        continue;
-      }
+        return GRAB_STATUS_REINIT;
 
       default:
         // unknown failure
