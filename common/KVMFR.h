@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 #define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 3
+#define KVMFR_HEADER_VERSION 4
 
 typedef enum FrameType
 {
@@ -49,9 +49,6 @@ typedef struct KVMFRCursor
   uint8_t    flags;       // KVMFR_CURSOR_FLAGS
   int16_t    x, y;        // cursor x & y position
   CursorType type;        // shape buffer data type
-  uint8_t    w, h;        // shape width and height
-  uint8_t    pitch;       // shape row length in bytes
-  uint64_t   dataPos;     // offset to the cursor data
 }
 KVMFRCursor;
 
@@ -60,7 +57,8 @@ typedef struct KVMFRFrame
   FrameType   type;        // the frame data type
   uint32_t    width;       // the width
   uint32_t    height;      // the height
-  uint32_t    stride;      // the row stride
+  uint32_t    stride;      // the row stride (zero if cursor data)
+  uint32_t    pitch;       // the row pitch  (stride in bytes)
   uint64_t    dataPos;     // offset to the frame
 }
 KVMFRFrame;
@@ -70,16 +68,19 @@ KVMFRFrame;
 #define KVMFR_HEADER_FLAG_RESTART 4 // restart signal from client
 #define KVMFR_HEADER_FLAG_READY   8 // ready signal from client
 
+typedef struct KVMFRDetail
+{
+  KVMFRFrame  frame;       // the frame information
+  KVMFRCursor cursor;      // the cursor information
+}
+KVMFRDetail;
+
 typedef struct KVMFRHeader
 {
   char        magic[sizeof(KVMFR_HEADER_MAGIC)];
   uint32_t    version;     // version of this structure
-  uint16_t    hostID;      // the host ivshmem client id
-  uint16_t    guestID;     // the guest ivshmem client id
   uint32_t    updateCount; // updated each change
   uint8_t     flags;       // KVMFR_HEADER_FLAGS
-
-  KVMFRFrame  frame;    // the frame information
-  KVMFRCursor cursor;   // the cursor information
+  KVMFRDetail detail;      // details
 }
 KVMFRHeader;
