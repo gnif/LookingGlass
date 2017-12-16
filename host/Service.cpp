@@ -46,6 +46,7 @@ Service::Service() :
   m_cursorData(NULL),
   m_shapePending(false)
 {
+  m_consoleSessionID = WTSGetActiveConsoleSessionId();
   m_ivshmem = IVSHMEM::Get();
 }
 
@@ -233,6 +234,13 @@ bool Service::Process()
 
         case GRAB_STATUS_REINIT:
           DEBUG_INFO("ReInitialize Requested");
+          if(WTSGetActiveConsoleSessionId() != m_consoleSessionID)
+          {
+            DEBUG_INFO("User switch detected, waiting to regain control");
+            while (WTSGetActiveConsoleSessionId() != m_consoleSessionID)
+              Sleep(100);
+          }
+
           if (!m_capture->ReInitialize() || !InitPointers())
           {
             DEBUG_ERROR("ReInitialize Failed");

@@ -49,6 +49,7 @@ private:
   ~Service();
 
   bool       m_initialized;
+  DWORD      m_consoleSessionID;
   uint8_t  * m_memory;
   IVSHMEM  * m_ivshmem;
   HANDLE     m_timer;
