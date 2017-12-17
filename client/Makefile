@@ -18,7 +18,8 @@ OBJS	= main.o \
 	  lg-renderer.o \
 	  spice/spice.o \
 	  ivshmem/ivshmem.o \
-	  renderers/opengl.o
+	  renderers/opengl.o \
+	  renderers/opengl-basic.o
 
 BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))
 
