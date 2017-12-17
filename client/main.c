@@ -44,19 +44,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct AppState
 {
-  bool      running;
-  bool      started;
+  bool                 running;
+  bool                 started;
 
-  TTF_Font       *font;
-  SDL_Point       srcSize;
-  LG_RendererRect dstRect;
-  SDL_Point       cursor;
-  bool            cursorVisible;
-  bool            haveCursorPos;
-  float           scaleX, scaleY;
+  TTF_Font           * font;
+  SDL_Point            srcSize;
+  LG_RendererRect      dstRect;
+  SDL_Point            cursor;
+  bool                 cursorVisible;
+  bool                 haveCursorPos;
+  float                scaleX, scaleY;
 
-  const LG_Renderer * lgr ;
-  void              * lgrData;
+  const LG_Renderer  * lgr ;
+  void               * lgrData;
 
   SDL_Window         * window;
   struct KVMFRHeader * shm;
