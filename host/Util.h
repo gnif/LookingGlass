@@ -36,7 +36,14 @@ public:
   {
     std::string defaultPath;
 
-    const char *libPath = getenv("SystemRoot");
+#if __MINGW32__
+    const char  * libPath    = getenv("SystemRoot");
+    const size_t  libPathLen = strlen(libPath);
+#else
+    char  * libPath;
+    size_t  libPathLen;
+    _dupenv_s(&libPath, &libPathLen, "SystemRoot");
+#endif
 
     if (!libPath)
     {
@@ -44,9 +51,12 @@ public:
       return defaultPath;
     }
 
-    if (!strlen(libPath))
+    if (!libPathLen)
     {
       DEBUG_ERROR("The SystemRoot environment variable is not set");
+#ifndef __MINGW32__
+      free(libPath);
+#endif
       return defaultPath;
     }
 #ifdef _WIN64
@@ -60,6 +70,9 @@ public:
     {
       defaultPath = std::string(libPath) + "\\System32";
     }
+#endif
+#ifndef __MINGW32__
+    free(libPath);
 #endif
     return defaultPath;
   }
