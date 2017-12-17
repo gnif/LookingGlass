@@ -800,8 +800,18 @@ static void handle_opt_vsync(void * opaque, const char *value)
 
 static LG_RendererOpt lgr_opengl_options[] =
 {
-  { .name = "mipmap", .validator = LG_RendererValidatorBool, .handler = handle_opt_mipmap },
-  { .name = "vsync" , .validator = LG_RendererValidatorBool, .handler = handle_opt_vsync  }
+  {
+    .name      = "mipmap",
+    .desc      = "Enable or disable mipmapping [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_mipmap
+  },
+  {
+    .name      = "vsync",
+    .desc      ="Enable or disable vsync [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_vsync
+  }
 };
 
 const LG_Renderer LGR_OpenGL =

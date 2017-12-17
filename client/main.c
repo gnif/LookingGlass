@@ -951,6 +951,7 @@ void doHelp(char * app)
     "\n"
     "  -k        Enable FPS display\n"
     "  -o FLAG   Specify a renderer option (ie: opengl:vsync=0)\n"
+    "            Alternatively specify \"list\" to list all renderer's and options\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -n        Don't allow the window to be manually resized\n"
@@ -1043,6 +1044,20 @@ int main(int argc, char * argv[])
 
       case 'o':
       {
+        if (strcasecmp(optarg, "list") == 0)
+        {
+          fprintf(stderr, "\nRenderer Option List\n");
+          for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+          {
+            const LG_Renderer * r = LG_Renderers[i];
+            fprintf(stderr, "\n%s\n", r->get_name());
+            for(unsigned int i = 0; i < r->option_count; ++i)
+              fprintf(stderr, "  %10s - %s\n", r->options[i].name, r->options[i].desc);
+          }
+          fprintf(stderr, "\n");
+          return -1;
+        }
+
         const LG_Renderer  * renderer = NULL;
         RendererOpts       * opts     = NULL;
 
