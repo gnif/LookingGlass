@@ -90,6 +90,8 @@ struct AppParams
   bool         hideMouse;
   bool         ignoreQuit;
 
+  bool         forceRenderer;
+  unsigned int forceRendererIndex;
   RendererOpts rendererOpts[LG_RENDERER_COUNT];
 };
 
@@ -113,7 +115,8 @@ struct AppParams params =
   .spicePort        = 5900,
   .scaleMouseInput  = true,
   .hideMouse        = true,
-  .ignoreQuit       = false
+  .ignoreQuit       = false,
+  .forceRenderer    = false
 };
 
 inline void updatePositionInfo()
@@ -663,6 +666,37 @@ void intHandler(int signal)
   }
 }
 
+static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
+{
+  const LG_Renderer *r    = LG_Renderers[index];
+  RendererOpts      *opts = &params.rendererOpts[index];
+
+  if (!IS_LG_RENDERER_VALID(r))
+  {
+    DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", index);
+    return false;
+  }
+
+  // create the renderer
+  state.lgrData = NULL;
+  if (!r->create(&state.lgrData, lgrParams))
+    return false;
+
+  // set it's options
+  for(unsigned int i = 0; i < opts->argc; ++i)
+    opts->argv[i].opt->handler(state.lgrData, opts->argv[i].value);
+
+  // initialize the renderer
+  if (!r->initialize(state.lgrData, sdlFlags))
+  {
+    r->deinitialize(state.lgrData);
+    return false;
+  }
+
+  DEBUG_INFO("Using Renderer: %s", r->get_name());
+  return true;
+}
+
 int run()
 {
   DEBUG_INFO("Looking Glass (" BUILD_VERSION ")");
@@ -726,38 +760,30 @@ int run()
   lgrParams.showFPS  = params.showFPS;
   Uint32 sdlFlags;
 
-  // probe for a a suitable renderer
-  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+  if (params.forceRenderer)
   {
-    const LG_Renderer *r    = LG_Renderers[i];
-    RendererOpts      *opts = &params.rendererOpts[i];
-
-    if (!IS_LG_RENDERER_VALID(r))
-    {
-      DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", i);
-      continue;
-    }
-
-    // create the renderer
-    state.lgrData = NULL;
-    if (!r->create(&state.lgrData, lgrParams))
-      continue;
-
-    // set it's options
-    for(unsigned int i = 0; i < opts->argc; ++i)
-      opts->argv[i].opt->handler(state.lgrData, opts->argv[i].value);
-
-    // initialize the renderer
+    DEBUG_INFO("Trying forced renderer");
     sdlFlags = 0;
-    if (!r->initialize(state.lgrData, &sdlFlags))
+    if (!try_renderer(params.forceRendererIndex, lgrParams, &sdlFlags))
     {
-      r->deinitialize(state.lgrData);
-      continue;
+      DEBUG_ERROR("Forced renderer failed to iniailize");
+      return -1;
     }
-
-    state.lgr = r;
-    DEBUG_INFO("Initialized %s", r->get_name());
-    break;
+    state.lgr = LG_Renderers[params.forceRendererIndex];
+  }
+  else
+  {
+    // probe for a a suitable renderer
+    for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+    {
+      sdlFlags = 0;
+      if (try_renderer(i, lgrParams, &sdlFlags))
+      {
+        state.lgr = LG_Renderers[i];
+        DEBUG_INFO("Using: %s", state.lgr->get_name());
+        break;
+      }
+    }
   }
 
   if (!state.lgr)
@@ -950,6 +976,7 @@ void doHelp(char * app)
     "  -M        Don't hide the host cursor\n"
     "\n"
     "  -k        Enable FPS display\n"
+    "  -g NAME   Force the use of a specific renderer\n"
     "  -o FLAG   Specify a renderer option (ie: opengl:vsync=0)\n"
     "            Alternatively specify \"list\" to list all renderers and their options\n"
     "\n"
@@ -1005,7 +1032,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMvko:anrdFx:y:w:b:Ql")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMvkg:o:anrdFx:y:w:b:Ql")) != -1)
     switch(c)
     {
       case '?':
@@ -1041,6 +1068,29 @@ int main(int argc, char * argv[])
       case 'k':
         params.showFPS = true;
         break;
+
+      case 'g':
+      {
+        bool ok = false;
+        for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+          if (strcasecmp(LG_Renderers[i]->get_name(), optarg) == 0)
+          {
+            params.forceRenderer      = true;
+            params.forceRendererIndex = i;
+            ok = true;
+            break;
+          }
+
+        if (!ok)
+        {
+          fprintf(stderr, "No such renderer: %s\n", optarg);
+          fprintf(stderr, "Use '-o list' obtain a list of options\n");
+          doHelp(argv[0]);
+          return -1;
+        }
+
+        break;
+      }
 
       case 'o':
       {
