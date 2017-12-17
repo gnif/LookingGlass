@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include <getopt.h>
+#include <signal.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_ttf.h>
@@ -81,6 +82,7 @@ struct AppParams
   unsigned int spicePort;
   bool         scaleMouseInput;
   bool         hideMouse;
+  bool         ignoreQuit;
 };
 
 struct AppState  state;
@@ -104,7 +106,8 @@ struct AppParams params =
   .spiceHost        = "127.0.0.1",
   .spicePort        = 5900,
   .scaleMouseInput  = true,
-  .hideMouse        = true
+  .hideMouse        = true,
+  .ignoreQuit       = false
 };
 
 inline void updatePositionInfo()
@@ -469,7 +472,8 @@ int eventThread(void * arg)
     switch(event.type)
     {
       case SDL_QUIT:
-      state.running = false;
+      if (!params.ignoreQuit)
+        state.running = false;
       break;
 
       case SDL_WINDOWEVENT:
@@ -643,6 +647,16 @@ int eventThread(void * arg)
   return 0;
 }
 
+void intHandler(int signal)
+{
+  switch(signal)
+  {
+    case SIGINT:
+      state.running = false;
+      break;
+  }
+}
+
 int run()
 {
   DEBUG_INFO("Looking Glass (" BUILD_VERSION ")");
@@ -657,6 +671,10 @@ int run()
     DEBUG_ERROR("SDL_Init Failed");
     return -1;
   }
+
+  // override SDL's SIGINIT handler so that we can tell the difference between
+  // SIGINT and the user sending a close event, such as ALT+F4
+  signal(SIGINT, intHandler);
 
   if (params.showFPS)
   {
@@ -928,6 +946,7 @@ void doHelp(char * app)
     "  -y YPOS   Initial window Y position [current: %s]\n"
     "  -w WIDTH  Initial window width [current: %u]\n"
     "  -b HEIGHT Initial window height [current: %u]\n"
+    "  -Q        Ignore requests to quit (ie: Alt+F4)\n"
     "\n"
     "  -l        License information\n"
     "\n",
@@ -970,7 +989,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMmvkanrdFx:y:w:b:l")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMmvkanrdFx:y:w:b:Ql")) != -1)
     switch(c)
     {
       case '?':
@@ -1051,6 +1070,10 @@ int main(int argc, char * argv[])
 
       case 'b':
         params.h = atoi(optarg);
+        break;
+
+      case 'Q':
+        params.ignoreQuit = true;
         break;
 
       case 'l':
