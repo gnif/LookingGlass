@@ -255,7 +255,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
       {
         if (!m_surfaceMapped)
-          break;
+          continue;
 
         // send the last frame again if we timeout to prevent the client stalling on restart
         frame.width = m_desc.Width;
