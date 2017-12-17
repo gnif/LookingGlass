@@ -194,7 +194,7 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
     return false;
   }
 
-  SDL_GL_SetSwapInterval(this->params.vsync ? 1 : 0);
+  SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
 
   // check if the GPU supports GL_ARB_buffer_storage first
   // there is no advantage to this renderer if it is not present.

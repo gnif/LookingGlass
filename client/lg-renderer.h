@@ -63,7 +63,6 @@ typedef struct LG_RendererParams
 {
   TTF_Font * font;
   bool       showFPS;
-  bool       vsync;
 }
 LG_RendererParams;
 
