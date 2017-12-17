@@ -63,9 +63,16 @@ struct AppState
   unsigned int         shmSize;
 };
 
+typedef struct RenderOpts
+{
+  unsigned int          size;
+  unsigned int          argc;
+  LG_RendererOptValue * argv;
+}
+RendererOpts;
+
 struct AppParams
 {
-  bool         vsync;
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
@@ -75,7 +82,6 @@ struct AppParams
   int          x, y;
   unsigned int w, h;
   const char * ivshmemSocket;
-  bool         useMipmap;
   bool         showFPS;
   bool         useSpice;
   const char * spiceHost;
@@ -84,15 +90,12 @@ struct AppParams
   bool         hideMouse;
   bool         ignoreQuit;
 
-  unsigned int  rendererOptSize;
-  unsigned int  rendererOptCount;
-  const char ** rendererOpts;
+  RendererOpts rendererOpts[LG_RENDERER_COUNT];
 };
 
 struct AppState  state;
 struct AppParams params =
 {
-  .vsync            = true,
   .autoResize       = false,
   .allowResize      = true,
   .keepAspect       = true,
@@ -104,7 +107,6 @@ struct AppParams params =
   .w                = 1024,
   .h                = 768,
   .ivshmemSocket    = "/tmp/ivshmem_socket",
-  .useMipmap        = true,
   .showFPS          = false,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
@@ -720,33 +722,41 @@ int run()
   }
 
   LG_RendererParams lgrParams;
-  lgrParams.argc     = params.rendererOptCount;
-  lgrParams.argv     = params.rendererOpts;
   lgrParams.font     = state.font;
-  lgrParams.resample = params.useMipmap;
   lgrParams.showFPS  = params.showFPS;
-  lgrParams.vsync    = params.vsync;
   Uint32 sdlFlags;
 
   // probe for a a suitable renderer
-  for(const LG_Renderer **r = &LG_Renderers[0]; *r; ++r)
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
   {
-    if (!IS_LG_RENDERER_VALID(*r))
+    const LG_Renderer *r    = LG_Renderers[i];
+    RendererOpts      *opts = &params.rendererOpts[i];
+
+    if (!IS_LG_RENDERER_VALID(r))
     {
-      DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", (int)(r - &LG_Renderers[0]));
+      DEBUG_ERROR("FIXME: Renderer %d is invalid, skipping", i);
       continue;
     }
 
+    // create the renderer
     state.lgrData = NULL;
-    sdlFlags      = 0;
-    if (!(*r)->initialize(&state.lgrData, lgrParams, &sdlFlags))
+    if (!r->create(&state.lgrData, lgrParams))
+      continue;
+
+    // set it's options
+    for(unsigned int i = 0; i < opts->argc; ++i)
+      opts->argv[i].opt->handler(state.lgrData, opts->argv[i].value);
+
+    // initialize the renderer
+    sdlFlags = 0;
+    if (!r->initialize(state.lgrData, &sdlFlags))
     {
-      (*r)->deinitialize(state.lgrData);
+      r->deinitialize(state.lgrData);
       continue;
     }
 
-    state.lgr = *r;
-    DEBUG_INFO("Initialized %s", (*r)->get_name());
+    state.lgr = r;
+    DEBUG_INFO("Initialized %s", r->get_name());
     break;
   }
 
@@ -939,10 +949,8 @@ void doHelp(char * app)
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
     "\n"
-    "  -m        Disable mipmapping\n"
-    "  -v        Disable VSYNC\n"
     "  -k        Enable FPS display\n"
-    "  -o FLAG   Specify a renderer flag\n"
+    "  -o FLAG   Specify a renderer option (ie: opengl:vsync=0)\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -n        Don't allow the window to be manually resized\n"
@@ -996,7 +1004,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMmvko:anrdFx:y:w:b:Ql")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMvko:anrdFx:y:w:b:Ql")) != -1)
     switch(c)
     {
       case '?':
@@ -1029,19 +1037,79 @@ int main(int argc, char * argv[])
         params.hideMouse = false;
         break;
 
-      case 'm':
-        params.useMipmap = false;
-        break;
-
-      case 'v':
-        params.vsync = false;
-        break;
-
       case 'k':
         params.showFPS = true;
         break;
 
       case 'o':
+      {
+        const LG_Renderer  * renderer = NULL;
+        RendererOpts       * opts     = NULL;
+
+        const size_t len  = strlen(optarg);
+        const char * name = strtok(optarg, ":");
+
+        for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+          if (strcasecmp(LG_Renderers[i]->get_name(), name) == 0)
+          {
+            renderer = LG_Renderers[i];
+            opts     = &params.rendererOpts[i];
+            break;
+          }
+
+        if (!renderer)
+        {
+          fprintf(stderr, "No such renderer: %s\n", name);
+          doHelp(argv[0]);
+          return -1;
+        }
+
+        const char * option = strtok(NULL  , "=");
+        if (!option)
+        {
+          fprintf(stderr, "Renderer option name not specified\n");
+          doHelp(argv[0]);
+          return -1;
+        }
+
+        const LG_RendererOpt * opt = NULL;
+        for(unsigned int i = 0; i < renderer->option_count; ++i)
+          if (strcasecmp(option, renderer->options[i].name) == 0)
+          {
+            opt = &renderer->options[i];
+            break;
+          }
+
+        if (!opt)
+        {
+          fprintf(stderr, "Renderer \"%s\" doesn't have the option: %s\n", renderer->get_name(), option);
+          doHelp(argv[0]);
+          return -1;
+        }
+
+        const char * value = NULL;
+        if (len > strlen(name) + strlen(option) + 2)
+          value = option + strlen(option) + 1;
+
+        if (opt->validator && !opt->validator(value))
+        {
+          fprintf(stderr, "Renderer \"%s\" reported Invalid value for option \"%s\"\n", renderer->get_name(), option);
+          doHelp(argv[0]);
+          return -1;
+        }
+
+        if (opts->argc == opts->size)
+        {
+          opts->size += 5;
+          opts->argv  = realloc(opts->argv, sizeof(LG_RendererOptValue) * opts->size);
+        }
+
+        opts->argv[opts->argc].opt   = opt;
+        opts->argv[opts->argc].value = value;
+        ++opts->argc;
+        break;
+      }
+#if 0
         if (params.rendererOptCount == params.rendererOptSize)
         {
           params.rendererOptSize += 5;
@@ -1050,6 +1118,7 @@ int main(int argc, char * argv[])
             params.rendererOptSize * sizeof(char *));
         }
         params.rendererOpts[params.rendererOptCount++] = optarg;
+#endif
         break;
 
       case 'a':

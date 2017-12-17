@@ -17,16 +17,34 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
 #include "lg-renderer.h"
 
-extern const LG_Renderer LGR_OpenGL;
-extern const LG_Renderer LGR_Basic;
+#include <string.h>
 
-const LG_Renderer * LG_Renderers[] =
+bool LG_RendererValidatorBool(const char * value)
 {
-  &LGR_OpenGL,
-  NULL // end of array sentinal
-};
+  if (!value)
+    return false;
 
-#define LG_RENDERER_COUNT ((sizeof(LG_Renderers) / sizeof(LG_Renderer *)) - 1)
+  return
+    (strcasecmp(value, "1"      ) == 0) ||
+    (strcasecmp(value, "0"      ) == 0) ||
+    (strcasecmp(value, "true"   ) == 0) ||
+    (strcasecmp(value, "false"  ) == 0) ||
+    (strcasecmp(value, "yes"    ) == 0) ||
+    (strcasecmp(value, "no"     ) == 0) ||
+    (strcasecmp(value, "on"     ) == 0) ||
+    (strcasecmp(value, "off"    ) == 0) ||
+    (strcasecmp(value, "enable" ) == 0) ||
+    (strcasecmp(value, "disable") == 0);
+}
+
+bool LG_RendererValueToBool(const char * value)
+{
+  return
+    (strcasecmp(value, "1"      ) == 0) ||
+    (strcasecmp(value, "true"   ) == 0) ||
+    (strcasecmp(value, "yes"    ) == 0) ||
+    (strcasecmp(value, "on"     ) == 0) ||
+    (strcasecmp(value, "enable" ) == 0);
+}

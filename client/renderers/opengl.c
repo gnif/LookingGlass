@@ -43,9 +43,23 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 static PFNGLXGETVIDEOSYNCSGIPROC  glXGetVideoSyncSGI  = NULL;
 static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
 
+struct Options
+{
+  bool mipmap;
+  bool vsync;
+};
+
+static struct Options defaultOptions =
+{
+  .mipmap = true,
+  .vsync  = true
+};
+
 struct LGR_OpenGL
 {
   LG_RendererParams params;
+  struct Options    opt;
+
   bool              configured;
   SDL_Window      * sdlWindow;
   SDL_GLContext     glContext;
@@ -104,7 +118,7 @@ const char * lgr_opengl_get_name()
   return "OpenGL";
 }
 
-bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, Uint32 * sdlFlags)
+bool lgr_opengl_create(void ** opaque, const LG_RendererParams params)
 {
   // create our local storage
   *opaque = malloc(sizeof(struct LGR_OpenGL));
@@ -116,7 +130,17 @@ bool lgr_opengl_initialize(void ** opaque, const LG_RendererParams params, Uint3
   memset(*opaque, 0, sizeof(struct LGR_OpenGL));
 
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)*opaque;
-  memcpy(&this->params, &params, sizeof(LG_RendererParams));
+  memcpy(&this->params, &params        , sizeof(LG_RendererParams));
+  memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
+
+  return true;
+}
+
+bool lgr_opengl_initialize(void * opaque, Uint32 * sdlFlags)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this)
+    return false;
 
   if (!glXGetVideoSyncSGI)
   {
@@ -629,7 +653,7 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
   // unbind the buffer
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-  const bool mipmap = this->params.resample && (
+  const bool mipmap = this->opt.mipmap && (
     (this->format.width  > this->destRect.w) ||
     (this->format.height > this->destRect.h));
 
@@ -756,9 +780,36 @@ bool lgr_opengl_render(void * opaque)
   return true;
 }
 
+static void handle_opt_mipmap(void * opaque, const char *value)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this)
+    return;
+
+  this->opt.mipmap = LG_RendererValueToBool(value);
+}
+
+static void handle_opt_vsync(void * opaque, const char *value)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this)
+    return;
+
+  this->opt.vsync = LG_RendererValueToBool(value);
+}
+
+static LG_RendererOpt lgr_opengl_options[] =
+{
+  { .name = "mipmap", .validator = LG_RendererValidatorBool, .handler = handle_opt_mipmap },
+  { .name = "vsync" , .validator = LG_RendererValidatorBool, .handler = handle_opt_vsync  }
+};
+
 const LG_Renderer LGR_OpenGL =
 {
   .get_name       = lgr_opengl_get_name,
+  .options        = lgr_opengl_options,
+  .option_count   = LGR_OPTION_COUNT(lgr_opengl_options),
+  .create         = lgr_opengl_create,
   .initialize     = lgr_opengl_initialize,
   .configure      = lgr_opengl_configure,
   .deconfigure    = lgr_opengl_deconfigure,

@@ -15,6 +15,7 @@ BIN     ?= bin
 CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbrev=10 --tags)"'
 
 OBJS	= main.o \
+	  lg-renderer.o \
 	  spice/spice.o \
 	  ivshmem/ivshmem.o \
 	  renderers/opengl.o

@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->get_name       && \
+   (x)->create         && \
    (x)->initialize     && \
    (x)->configure      && \
    (x)->deconfigure    && \
@@ -36,14 +37,33 @@ Place, Suite 330, Boston, MA 02111-1307 USA
    (x)->on_mouse_event && \
    (x)->render)
 
+#define LGR_OPTION_COUNT(x) (sizeof(x) / sizeof(LG_RendererOpt))
+
+typedef bool(* LG_RendererOptValidator)(const char * value);
+typedef void(* LG_RendererOptHandler  )(void * opaque, const char * value);
+
+typedef struct LG_RendererOpt
+{
+  const char              * name;
+  const char              * desc;
+  LG_RendererOptValidator   validator;
+  LG_RendererOptHandler     handler;
+}
+LG_RendererOpt;
+
+typedef struct LG_RendererOptValue
+{
+  const LG_RendererOpt   * opt;
+  const char             * value;
+} LG_RendererOptValue;
+
+typedef LG_RendererOpt * LG_RendererOptions;
+
 typedef struct LG_RendererParams
 {
-  int           argc;
-  const char ** argv;
-  TTF_Font *    font;
-  bool          showFPS;
-  bool          resample;
-  bool          vsync;
+  TTF_Font * font;
+  bool       showFPS;
+  bool       vsync;
 }
 LG_RendererParams;
 
@@ -75,7 +95,8 @@ typedef enum LG_RendererCursor
 LG_RendererCursor;
 
 typedef const char * (* LG_RendererGetName       )();
-typedef bool         (* LG_RendererInitialize    )(void ** opaque, const LG_RendererParams params, Uint32 * sdlFlags);
+typedef bool         (* LG_RendererCreate        )(void ** opaque, const LG_RendererParams params);
+typedef bool         (* LG_RendererInitialize    )(void * opaque, Uint32 * sdlFlags);
 typedef bool         (* LG_RendererConfigure     )(void * opaque, SDL_Window *window, const LG_RendererFormat format);
 typedef void         (* LG_RendererDeConfigure   )(void * opaque);
 typedef void         (* LG_RendererDeInitialize  )(void * opaque);
@@ -88,7 +109,10 @@ typedef bool         (* LG_RendererRender        )(void * opaque);
 
 typedef struct LG_Renderer
 {
+  LG_RendererCreate       create;
   LG_RendererGetName      get_name;
+  LG_RendererOptions      options;
+  unsigned int            option_count;
   LG_RendererInitialize   initialize;
   LG_RendererConfigure    configure;
   LG_RendererDeConfigure  deconfigure;
@@ -101,3 +125,7 @@ typedef struct LG_Renderer
   LG_RendererRender       render;
 }
 LG_Renderer;
+
+// generic option helpers
+bool LG_RendererValidatorBool(const char * value);
+bool LG_RendererValueToBool  (const char * value);
