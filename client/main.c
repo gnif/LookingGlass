@@ -951,7 +951,7 @@ void doHelp(char * app)
     "\n"
     "  -k        Enable FPS display\n"
     "  -o FLAG   Specify a renderer option (ie: opengl:vsync=0)\n"
-    "            Alternatively specify \"list\" to list all renderer's and options\n"
+    "            Alternatively specify \"list\" to list all renderers and their options\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -n        Don't allow the window to be manually resized\n"
