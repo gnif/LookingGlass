@@ -83,6 +83,10 @@ struct AppParams
   bool         scaleMouseInput;
   bool         hideMouse;
   bool         ignoreQuit;
+
+  unsigned int  rendererOptSize;
+  unsigned int  rendererOptCount;
+  const char ** rendererOpts;
 };
 
 struct AppState  state;
@@ -716,6 +720,8 @@ int run()
   }
 
   LG_RendererParams lgrParams;
+  lgrParams.argc     = params.rendererOptCount;
+  lgrParams.argv     = params.rendererOpts;
   lgrParams.font     = state.font;
   lgrParams.resample = params.useMipmap;
   lgrParams.showFPS  = params.showFPS;
@@ -936,6 +942,7 @@ void doHelp(char * app)
     "  -m        Disable mipmapping\n"
     "  -v        Disable VSYNC\n"
     "  -k        Enable FPS display\n"
+    "  -o FLAG   Specify a renderer flag\n"
     "\n"
     "  -a        Auto resize the window to the guest\n"
     "  -n        Don't allow the window to be manually resized\n"
@@ -989,7 +996,7 @@ void doLicense()
 int main(int argc, char * argv[])
 {
   int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMmvkanrdFx:y:w:b:Ql")) != -1)
+  while((c = getopt(argc, argv, "hf:sc:p:jMmvko:anrdFx:y:w:b:Ql")) != -1)
     switch(c)
     {
       case '?':
@@ -1032,6 +1039,17 @@ int main(int argc, char * argv[])
 
       case 'k':
         params.showFPS = true;
+        break;
+
+      case 'o':
+        if (params.rendererOptCount == params.rendererOptSize)
+        {
+          params.rendererOptSize += 5;
+          params.rendererOpts     = realloc(
+            params.rendererOpts,
+            params.rendererOptSize * sizeof(char *));
+        }
+        params.rendererOpts[params.rendererOptCount++] = optarg;
         break;
 
       case 'a':

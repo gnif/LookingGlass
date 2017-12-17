@@ -38,10 +38,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef struct LG_RendererParams
 {
-  TTF_Font * font;
-  bool       showFPS;
-  bool       resample;
-  bool       vsync;
+  int           argc;
+  const char ** argv;
+  TTF_Font *    font;
+  bool          showFPS;
+  bool          resample;
+  bool          vsync;
 }
 LG_RendererParams;
 
