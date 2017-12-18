@@ -50,6 +50,7 @@ struct StartupArgs
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam, int iCmdShow)
 {
   CrashHandler::Initialize();
+  SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
 
   struct StartupArgs args;
   args.foreground = false;
