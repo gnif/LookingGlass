@@ -195,6 +195,16 @@ bool DXGI::Initialize(CaptureOptions * options)
     return false;
   }
   m_surfaceMapped = true;
+
+  D3D11_QUERY_DESC qd;
+  qd.MiscFlags = 0;
+  qd.Query     = D3D11_QUERY_EVENT;
+  if (FAILED(m_device->CreateQuery(&qd, &this->m_eventQuery)))
+  {
+    DEBUG_ERROR("Failed to create event query");
+    DeInitialize();
+    return false;
+  }
   
   m_initialized = true;
   return true;
@@ -202,6 +212,9 @@ bool DXGI::Initialize(CaptureOptions * options)
 
 void DXGI::DeInitialize()
 {
+  if (m_eventQuery)
+    m_eventQuery.Release();
+
   if (m_releaseFrame)
   {
     m_releaseFrame = false;
@@ -434,6 +447,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   src->GetDesc(&m_desc);
   m_deviceContext->CopyResource(m_texture, src);
+  m_deviceContext->End(m_eventQuery);
   src.Release();
 
   m_width  = m_desc.Width;
@@ -443,8 +457,10 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.height  = m_desc.Height;
   frame.pitch   = m_mapping.RowPitch;
   frame.stride  = m_mapping.RowPitch / 4;
-
   unsigned int size = m_height * m_mapping.RowPitch;
+
+  // wait for the copy to complete before trying to perform the copy
+  while(S_FALSE == m_deviceContext->GetData(m_eventQuery, NULL, 0, 0)) {}
   memcpySSE(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
 
   return GRAB_STATUS_OK;
