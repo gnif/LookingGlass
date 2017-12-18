@@ -184,6 +184,12 @@ bool DXGI::Initialize(CaptureOptions * options)
 
 void DXGI::DeInitialize()
 {
+  if (m_releaseFrame)
+  {
+    m_releaseFrame = false;
+    m_dup->ReleaseFrame();
+  }
+
   if (m_pointer)
   {
     delete[] m_pointer;
@@ -237,6 +243,20 @@ size_t DXGI::GetMaxFrameSize()
   return (m_width * m_height * 4);
 }
 
+void DXGI::WaitForDesktop()
+{
+  HDESK desktop;
+  do
+  {
+    desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
+    if (desktop)
+      break;
+    Sleep(100);
+  }
+  while (!desktop);
+  CloseDesktop(desktop);
+}
+
 GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 {
   if (!m_initialized)
@@ -251,6 +271,25 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   {
     while(true)
     {
+      if (m_releaseFrame)
+      {
+        m_releaseFrame = false;
+        status = m_dup->ReleaseFrame();
+        switch (status)
+        {
+          case S_OK:
+            break;
+
+          case DXGI_ERROR_INVALID_CALL:
+            DEBUG_ERROR("Frame was already released");
+            return GRAB_STATUS_ERROR;
+
+          case DXGI_ERROR_ACCESS_LOST:
+            WaitForDesktop();
+            return GRAB_STATUS_REINIT;
+        }
+      }
+
       status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
       {
@@ -270,6 +309,8 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
       if (!SUCCEEDED(status))
         break;
+
+      m_releaseFrame = true;
 
       // if we have a mouse update
       if (frameInfo.LastMouseUpdateTime.QuadPart)
@@ -311,7 +352,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &shapeInfo);
         if (!SUCCEEDED(status))
         {
-          m_dup->ReleaseFrame();
           DEBUG_ERROR("Failed to get the new pointer shape: %08x", (int)status);
           return GRAB_STATUS_ERROR;
         }
@@ -334,10 +374,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         frame.cursor.dataSize = m_pointerSize;
       }
 
-      if (frameInfo.AccumulatedFrames > 0)
+      if (frameInfo.LastPresentTime.QuadPart != 0)
         break;
 
-      m_dup->ReleaseFrame();
       res.Release();
 
       if (cursorUpdate)
@@ -352,28 +391,8 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     {      
       // desktop switch, mode change, switch DWM on or off or Secure Desktop
       case DXGI_ERROR_ACCESS_LOST:
-        // see if we can open the desktop, if so request a reinit
-        // if not the secure desktop is active so just wait for it
-        // instead of aborting out
-        desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
-        if (desktop)
-        {
-          // open suceeded, not on the secure desktop, return to reinit
-          CloseDesktop(desktop);
-          return GRAB_STATUS_REINIT;
-        }
-        // fall through
-
-      // this can happen during desktop switches also, not documented by MS though
       case WAIT_ABANDONED:
-        do
-        {
-          desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
-          if (desktop)
-            break;
-          Sleep(100);
-        } while (!desktop);
-        CloseDesktop(desktop);
+        WaitForDesktop();
         return GRAB_STATUS_REINIT;
 
       default:
@@ -386,7 +405,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   // retry count exceeded
   if (FAILED(status))
   {
-    m_dup->ReleaseFrame();
     DEBUG_ERROR("Failed to acquire next frame");
     return GRAB_STATUS_ERROR;
   }
@@ -394,7 +412,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   ID3D11Texture2DPtr src(res);
   if (!src)
   {
-    m_dup->ReleaseFrame();
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
     return GRAB_STATUS_ERROR;
   }
@@ -403,7 +420,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   m_deviceContext->CopyResource(m_texture, src);
 
-  m_dup->ReleaseFrame();
   res.Release();
   src.Release();
 

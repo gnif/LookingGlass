@@ -67,6 +67,8 @@ namespace Capture
     enum GrabStatus GrabFrame(struct FrameInfo & frame);
 
   private:
+    void WaitForDesktop();
+
     CaptureOptions * m_options;
 
     bool          m_initialized;
@@ -79,6 +81,7 @@ namespace Capture
     ID3D11DeviceContextPtr          m_deviceContext;
     IDXGIOutput1Ptr                 m_output;
     IDXGIOutputDuplicationPtr       m_dup;
+    bool                            m_releaseFrame;
     ID3D11Texture2DPtr              m_texture;
     IDXGISurface1Ptr                m_surface;
     D3D11_TEXTURE2D_DESC            m_desc;
