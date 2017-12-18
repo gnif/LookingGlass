@@ -47,12 +47,14 @@ struct Options
 {
   bool mipmap;
   bool vsync;
+  bool splitMouse;
 };
 
 static struct Options defaultOptions =
 {
-  .mipmap = true,
-  .vsync  = true
+  .mipmap     = true,
+  .vsync      = true,
+  .splitMouse = false
 };
 
 struct LGR_OpenGL
@@ -723,32 +725,34 @@ bool lgr_opengl_render(void * opaque)
     this->resizeWindow = false;
   }
 
-
-  if (!this->frameUpdate)
+  if (this->opt.splitMouse)
   {
-    if (!this->mouseUpdate)
-      return true;
-
-    if (!this->newShape)
+    if (!this->frameUpdate)
     {
-      // don't update the mouse too fast
-      const uint64_t delta = nanotime() - this->lastMouseDraw;
-      if (delta < 5e6)
+      if (!this->mouseUpdate)
         return true;
+
+      if (!this->newShape)
+      {
+        // don't update the mouse too fast
+        const uint64_t delta = nanotime() - this->lastMouseDraw;
+        if (delta < 5e6)
+          return true;
+      }
+      this->newShape = false;
+
+      glDrawBuffer(GL_FRONT);
+      glCallList(this->texList + this->texIndex);
+      lgr_opengl_draw_mouse(this);
+      if (this->fpsTexture)
+        glCallList(this->fpsList);
+      glDrawBuffer(GL_BACK);
+      glFlush();
+
+      this->mouseUpdate   = false;
+      this->lastMouseDraw = nanotime();
+      return true;
     }
-    this->newShape = false;
-
-    glDrawBuffer(GL_FRONT);
-    glCallList(this->texList + this->texIndex);
-    lgr_opengl_draw_mouse(this);
-    if (this->fpsTexture)
-      glCallList(this->fpsList);
-    glDrawBuffer(GL_BACK);
-    glFlush();
-
-    this->mouseUpdate   = false;
-    this->lastMouseDraw = nanotime();
-    return true;
   }
 
   glDisable(GL_SCISSOR_TEST);
@@ -798,6 +802,15 @@ static void handle_opt_vsync(void * opaque, const char *value)
   this->opt.vsync = LG_RendererValueToBool(value);
 }
 
+static void handle_opt_split_mouse(void * opaque, const char *value)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this)
+    return;
+
+  this->opt.splitMouse = LG_RendererValueToBool(value);
+}
+
 static LG_RendererOpt lgr_opengl_options[] =
 {
   {
@@ -811,6 +824,12 @@ static LG_RendererOpt lgr_opengl_options[] =
     .desc      ="Enable or disable vsync [default: enabled]",
     .validator = LG_RendererValidatorBool,
     .handler   = handle_opt_vsync
+  },
+  {
+    .name      = "splitMouse",
+    .desc      = "Draw mouse updates directly to the front buffer [default: disabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_split_mouse
   }
 };
 
