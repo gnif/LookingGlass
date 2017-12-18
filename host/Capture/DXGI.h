@@ -31,13 +31,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 _COM_SMARTPTR_TYPEDEF(IDXGIFactory1         , __uuidof(IDXGIFactory1         ));
 _COM_SMARTPTR_TYPEDEF(ID3D11Device          , __uuidof(ID3D11Device          ));
 _COM_SMARTPTR_TYPEDEF(ID3D11DeviceContext   , __uuidof(ID3D11DeviceContext   ));
+_COM_SMARTPTR_TYPEDEF(IDXGIDevice           , __uuidof(IDXGIDevice           ));
 _COM_SMARTPTR_TYPEDEF(IDXGIOutput1          , __uuidof(IDXGIOutput1          ));
 _COM_SMARTPTR_TYPEDEF(IDXGIOutput           , __uuidof(IDXGIOutput           ));
 _COM_SMARTPTR_TYPEDEF(IDXGIAdapter1         , __uuidof(IDXGIAdapter1         ));
 _COM_SMARTPTR_TYPEDEF(IDXGIOutputDuplication, __uuidof(IDXGIOutputDuplication));
 _COM_SMARTPTR_TYPEDEF(ID3D11Texture2D       , __uuidof(ID3D11Texture2D       ));
 _COM_SMARTPTR_TYPEDEF(IDXGIResource         , __uuidof(IDXGIResource         ));
-_COM_SMARTPTR_TYPEDEF(IDXGISurface1         , __uuidof(IDXGISurface1         ));
 
 namespace Capture
 {
@@ -83,9 +83,8 @@ namespace Capture
     IDXGIOutputDuplicationPtr       m_dup;
     bool                            m_releaseFrame;
     ID3D11Texture2DPtr              m_texture;
-    IDXGISurface1Ptr                m_surface;
     D3D11_TEXTURE2D_DESC            m_desc;
-    DXGI_MAPPED_RECT                m_rect;
+    D3D11_MAPPED_SUBRESOURCE        m_mapping;
     bool                            m_surfaceMapped;
     BYTE *                          m_pointer;
     UINT                            m_pointerBufSize;

@@ -31,7 +31,6 @@ DXGI::DXGI() :
   m_deviceContext(),
   m_dup(),
   m_texture(),
-  m_surface(),
   m_pointer(NULL)
 {
 }
@@ -139,6 +138,16 @@ bool DXGI::Initialize(CaptureOptions * options)
     return false;
   }
 
+  IDXGIDevicePtr dxgi;
+  if (FAILED(m_device->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi)))
+  {
+    DEBUG_ERROR("Failed to obtain the IDXGIDevice interface from the D3D11 device");
+    DeInitialize();
+    return false;
+  }
+
+  dxgi->SetGPUThreadPriority(7);
+
   // we try this twice just incase we still get an error
   // on re-initialization
   for(int i = 0; i < 2; ++i)
@@ -177,6 +186,15 @@ bool DXGI::Initialize(CaptureOptions * options)
     DeInitialize();
     return false;
   }
+
+  status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
+  if (FAILED(status))
+  {
+    DEBUG_ERROR("Failed to map the texture: %08x", (int)status);
+    DeInitialize();
+    return false;
+  }
+  m_surfaceMapped = true;
   
   m_initialized = true;
   return true;
@@ -199,12 +217,9 @@ void DXGI::DeInitialize()
 
   if (m_surfaceMapped)
   {
-    m_surface->Unmap();
+    m_deviceContext->Unmap(m_texture, 0);
     m_surfaceMapped = false;
   }
-
-  if (m_surface)
-    m_surface.Release();
 
   if (m_texture)
     m_texture.Release();
@@ -299,11 +314,11 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         // send the last frame again if we timeout to prevent the client stalling on restart
         frame.width = m_desc.Width;
         frame.height = m_desc.Height;
-        frame.pitch  = m_rect.Pitch;
-        frame.stride = m_rect.Pitch / 4;
+        frame.pitch  = m_mapping.RowPitch;
+        frame.stride = m_mapping.RowPitch / 4;
 
-        unsigned int size = m_height * m_rect.Pitch;
-        memcpySSE(frame.buffer, m_rect.pBits, size < frame.bufferSize ? size : frame.bufferSize);
+        unsigned int size = m_height * m_mapping.RowPitch;
+        memcpySSE(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
         return GRAB_STATUS_OK;
       }
 
@@ -410,6 +425,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   }
 
   ID3D11Texture2DPtr src(res);
+  res.Release();
   if (!src)
   {
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
@@ -417,49 +433,19 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   }
 
   src->GetDesc(&m_desc);
-
   m_deviceContext->CopyResource(m_texture, src);
-
-  res.Release();
   src.Release();
-
-  if (m_surfaceMapped)
-  {
-    status = m_surface->Unmap();
-    if (FAILED(status))
-    {
-      DEBUG_ERROR("Failed to unmap surface: %08x", (int)status);
-      return GRAB_STATUS_ERROR;
-    }
-    m_surfaceMapped = false;
-    m_surface.Release();
-  }
-
-  m_surface = m_texture;
-  if (!m_surface)
-  {
-    DEBUG_ERROR("Failed to get IDXGISurface1");
-    return GRAB_STATUS_ERROR;
-  }
-
-  status = m_surface->Map(&m_rect, DXGI_MAP_READ);
-  if (FAILED(status))
-  {
-    DEBUG_ERROR("Failed to map surface: %08x", (int)status);
-    return GRAB_STATUS_ERROR;
-  }
-  m_surfaceMapped = true;
 
   m_width  = m_desc.Width;
   m_height = m_desc.Height;
 
   frame.width   = m_desc.Width;
   frame.height  = m_desc.Height;
-  frame.pitch   = m_rect.Pitch;
-  frame.stride  = m_rect.Pitch / 4;
+  frame.pitch   = m_mapping.RowPitch;
+  frame.stride  = m_mapping.RowPitch / 4;
 
-  unsigned int size = m_height * m_rect.Pitch;
-  memcpySSE(frame.buffer, m_rect.pBits, size < frame.bufferSize ? size : frame.bufferSize);
+  unsigned int size = m_height * m_mapping.RowPitch;
+  memcpySSE(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
 
   return GRAB_STATUS_OK;
 }
