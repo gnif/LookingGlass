@@ -1096,13 +1096,31 @@ int main(int argc, char * argv[])
       {
         if (strcasecmp(optarg, "list") == 0)
         {
+          size_t maxLen = 0;
+          for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+          {
+            const LG_Renderer * r = LG_Renderers[i];
+            for(unsigned int j = 0; j < r->option_count; ++j)
+            {
+              const size_t len = strlen(r->options[j].name);
+              if (len > maxLen)
+                maxLen = len;
+            }
+          }
+
           fprintf(stderr, "\nRenderer Option List\n");
           for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
           {
             const LG_Renderer * r = LG_Renderers[i];
             fprintf(stderr, "\n%s\n", r->get_name());
-            for(unsigned int i = 0; i < r->option_count; ++i)
-              fprintf(stderr, "  %10s - %s\n", r->options[i].name, r->options[i].desc);
+            for(unsigned int j = 0; j < r->option_count; ++j)
+            {
+              const size_t pad = maxLen - strlen(r->options[j].name);
+              for(int i = 0; i < pad; ++i)
+                fputc(' ', stderr);
+
+              fprintf(stderr, "  %s - %s\n", r->options[j].name, r->options[j].desc);
+            }
           }
           fprintf(stderr, "\n");
           return -1;
