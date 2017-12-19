@@ -62,8 +62,7 @@ private:
   uint64_t      m_dataOffset[2];
   int           m_frameIndex;
 
-  CursorInfo   m_cursor;
-  size_t       m_cursorDataSize;
-  uint8_t    * m_cursorData;
-  bool         m_shapePending;
+  size_t        m_cursorDataSize;
+  uint8_t     * m_cursorData;
+  uint64_t      m_cursorOffset;
 };

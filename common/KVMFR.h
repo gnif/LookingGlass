@@ -51,9 +51,9 @@ typedef struct KVMFRCursor
 
   uint32_t   version;     // shape version
   CursorType type;        // shape buffer data type
-  uint32_t   width;       // shape width
-  uint32_t   height;      // shape height
-  uint32_t   pitch;       // shape row pitch  (stride in bytes)
+  uint32_t   width;       // width of the shape
+  uint32_t   height;      // height of the shape
+  uint32_t   pitch;       // row length in bytes of the shape
   uint64_t   dataPos;     // offset to the shape data
 }
 KVMFRCursor;
