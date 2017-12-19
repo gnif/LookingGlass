@@ -448,8 +448,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.stride  = m_mapping.RowPitch / 4;
   unsigned int size = m_height * m_mapping.RowPitch;
 
-  // wait for the copy to complete before trying to perform the copy
-//  while(S_FALSE == m_deviceContext->GetData(m_eventQuery, NULL, 0, 0)) {}
   memcpySSE(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
 
   return GRAB_STATUS_OK;
