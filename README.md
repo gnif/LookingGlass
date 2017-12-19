@@ -8,7 +8,7 @@ An extremely low latency KVMFR (KVM FrameRelay) implementation for guests with V
 # Help and support
 
 ## Web
-https://forums.level1techs.com/t/looking-glass-guides-help-and-support/122387
+https://forum.level1techs.com/t/looking-glass-guides-help-and-support/122387
 
 ## IRC
 Join us in the #LookingGlass channel on the FreeNode network
