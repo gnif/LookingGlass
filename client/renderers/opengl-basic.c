@@ -90,6 +90,7 @@ struct LGR_OpenGLBasic
   uint64_t          lastFrameTime;
   uint64_t          renderTime;
   uint64_t          frameCount;
+  uint64_t          renderCount;
   SDL_Rect          fpsRect;
 
   bool              mouseUpdate;
@@ -506,8 +507,9 @@ bool lgr_opengl_basic_on_frame_event(void * opaque, const uint8_t * data)
   if (this->params.showFPS && this->renderTime > 1e9)
   {
     char str[128];
-    const float avgFPS = 1000.0f / (((float)this->renderTime / this->frameCount) / 1e6f);
-    snprintf(str, sizeof(str), "FPS: %8.4f", avgFPS);
+    const float avgFPS    = 1000.0f / (((float)this->renderTime / this->frameCount ) / 1e6f);
+    const float renderFPS = 1000.0f / (((float)this->renderTime / this->renderCount) / 1e6f);
+    snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
     SDL_Color color = {0xff, 0xff, 0xff};
     SDL_Surface *textSurface = NULL;
     if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
@@ -545,9 +547,10 @@ bool lgr_opengl_basic_on_frame_event(void * opaque, const uint8_t * data)
 
     SDL_FreeSurface(textSurface);
 
-    this->renderTime = 0;
-    this->frameCount = 0;
-    this->fpsTexture = true;
+    this->renderTime  = 0;
+    this->frameCount  = 0;
+    this->renderCount = 0;
+    this->fpsTexture  = true;
 
     glNewList(this->fpsList, GL_COMPILE);
       glEnable(GL_BLEND);
@@ -613,6 +616,7 @@ bool lgr_opengl_basic_on_frame_event(void * opaque, const uint8_t * data)
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
+  ++this->frameCount;
   this->frameUpdate = true;
   return true;
 }
@@ -716,10 +720,10 @@ bool lgr_opengl_basic_render(void * opaque)
   else
     SDL_GL_SwapWindow(this->sdlWindow);
 
-  ++this->frameCount;
   const uint64_t t    = nanotime();
   this->renderTime   += t - this->lastFrameTime;
   this->lastFrameTime = t;
+  ++this->renderCount;
 
   this->frameUpdate   = false;
   this->mouseUpdate   = false;
