@@ -297,7 +297,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         }
       }
 
-      status = m_dup->AcquireNextFrame(10000, &frameInfo, &res);
+      status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
       {
         if (!m_surfaceMapped)
