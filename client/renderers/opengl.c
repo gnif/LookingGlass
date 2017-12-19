@@ -47,14 +47,16 @@ struct Options
 {
   bool mipmap;
   bool vsync;
+  bool preventBuffer;
   bool splitMouse;
 };
 
 static struct Options defaultOptions =
 {
-  .mipmap     = true,
-  .vsync      = true,
-  .splitMouse = false
+  .mipmap        = true,
+  .vsync         = true,
+  .preventBuffer = true,
+  .splitMouse    = false
 };
 
 struct LGR_OpenGL
@@ -764,14 +766,19 @@ bool lgr_opengl_render(void * opaque)
   if (this->fpsTexture)
     glCallList(this->fpsList);
 
-  unsigned int before, after;
-  glXGetVideoSyncSGI(&before);
-  SDL_GL_SwapWindow(this->sdlWindow);
+  if (this->opt.preventBuffer)
+  {
+    unsigned int before, after;
+    glXGetVideoSyncSGI(&before);
+    SDL_GL_SwapWindow(this->sdlWindow);
 
-  // wait for the swap to happen to ensure we dont buffer frames
-  glXGetVideoSyncSGI(&after);
-  if (before == after)
-    glXWaitVideoSyncSGI(1, 0, &before);
+    // wait for the swap to happen to ensure we dont buffer frames  //
+    glXGetVideoSyncSGI(&after);
+    if (before == after)
+      glXWaitVideoSyncSGI(1, 0, &before);
+  }
+  else
+    SDL_GL_SwapWindow(this->sdlWindow);
 
   ++this->frameCount;
   const uint64_t t    = nanotime();
@@ -802,6 +809,15 @@ static void handle_opt_vsync(void * opaque, const char *value)
   this->opt.vsync = LG_RendererValueToBool(value);
 }
 
+static void handle_opt_prevent_buffer(void * opaque, const char *value)
+{
+  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  if (!this)
+    return;
+
+  this->opt.preventBuffer = LG_RendererValueToBool(value);
+}
+
 static void handle_opt_split_mouse(void * opaque, const char *value)
 {
   struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
@@ -824,6 +840,12 @@ static LG_RendererOpt lgr_opengl_options[] =
     .desc      ="Enable or disable vsync [default: enabled]",
     .validator = LG_RendererValidatorBool,
     .handler   = handle_opt_vsync
+  },
+  {
+    .name      = "preventBuffer",
+    .desc      = "Prevent the driver from buffering frames [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_prevent_buffer
   },
   {
     .name      = "splitMouse",
