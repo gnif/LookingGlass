@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 #define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 4
+#define KVMFR_HEADER_VERSION 5
 
 typedef enum FrameType
 {
@@ -48,7 +48,13 @@ typedef struct KVMFRCursor
 {
   uint8_t    flags;       // KVMFR_CURSOR_FLAGS
   int16_t    x, y;        // cursor x & y position
+
+  uint32_t   version;     // shape version
   CursorType type;        // shape buffer data type
+  uint32_t   width;       // shape width
+  uint32_t   height;      // shape height
+  uint32_t   pitch;       // shape row pitch  (stride in bytes)
+  uint64_t   dataPos;     // offset to the shape data
 }
 KVMFRCursor;
 
@@ -79,7 +85,6 @@ typedef struct KVMFRHeader
 {
   char        magic[sizeof(KVMFR_HEADER_MAGIC)];
   uint32_t    version;     // version of this structure
-  uint32_t    updateCount; // updated each change
   uint8_t     flags;       // KVMFR_HEADER_FLAGS
   KVMFRDetail detail;      // details
 }

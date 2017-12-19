@@ -35,3 +35,13 @@ static inline uint64_t nanotime()
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);
   return ((uint64_t)time.tv_sec * 1e9) + time.tv_nsec;
 }
+
+static inline void nsleep(uint64_t ns)
+{
+  const struct timespec ts =
+  {
+    .tv_sec  = ns / 1e9,
+    .tv_nsec = ns - ((ns / 1e9) * 1e9)
+  };
+  nanosleep(&ts, NULL);
+}

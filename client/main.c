@@ -119,7 +119,7 @@ struct AppParams params =
   .forceRenderer    = false
 };
 
-inline void updatePositionInfo()
+static inline void updatePositionInfo()
 {
   int w, h;
   SDL_GetWindowSize(state.window, &w, &h);
@@ -161,255 +161,194 @@ inline void updatePositionInfo()
     state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
 }
 
-int renderThread(void * unused)
+void mainThread()
 {
-  bool                error = false;
+  while(state.running)
+  {
+    nsleep(1000);
+    if (state.started)
+      if (!state.lgr->render(state.lgrData, state.window))
+        break;
+  }
+}
+
+int cursorThread(void * unused)
+{
   struct KVMFRHeader  header;
-
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
-  struct KVMFRFrame   cursor         = {};
-  size_t              cursorDataSize = 0;
-  uint8_t           * cursorData     = NULL;
-
-  volatile uint32_t * updateCount = &state.shm->updateCount;
+  uint32_t            version        = 0;
 
   memset(&header, 0, sizeof(struct KVMFRHeader));
 
   while(state.running)
   {
-    // poll until we have a new frame, or we time out
-    while(header.updateCount == *updateCount && state.running)
-    {
-      const struct timespec s =
-      {
-        .tv_sec  = 0,
-        .tv_nsec = 1000
-      };
-      nanosleep(&s, NULL);
-    }
-
-    if (!state.running)
-      break;
-
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
-    memcpy(&header, state.shm, sizeof(struct KVMFRHeader));
-    __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_READY);
+    memcpy(&header, (KVMFRHeader *)state.shm, sizeof(struct KVMFRHeader));
+    __sync_and_and_fetch(&state.shm->flags, ~KVMFR_HEADER_FLAG_CURSOR);
 
-    // check the header's magic and version are valid
-    if (memcmp(header.magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
+    if (header.detail.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE &&
+        header.detail.cursor.version != version)
+    {
+      version = header.detail.cursor.version;
+
+      bool bad = false;
+      switch(header.detail.cursor.type)
+      {
+        case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
+        case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
+        case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
+        default:
+          DEBUG_ERROR("Invalid cursor type");
+          bad = true;
+          break;
+      }
+
+      if (bad)
+        break;
+
+      // check the data position is sane
+      const uint64_t dataSize = header.detail.frame.height * header.detail.frame.pitch;
+      if (header.detail.cursor.dataPos + dataSize > state.shmSize)
+      {
+        DEBUG_ERROR("The guest sent an invalid mouse dataPos");
+        break;
+      }
+
+      const uint8_t * data = (const uint8_t *)state.shm + header.detail.cursor.dataPos;
+      if (!state.lgr->on_mouse_shape(
+        state.lgrData,
+        cursorType,
+        header.detail.cursor.width,
+        header.detail.cursor.height,
+        header.detail.cursor.pitch,
+        data)
+      )
+      {
+        DEBUG_ERROR("Failed to update mouse shape");
+        break;
+      }
+    }
+
+    if (header.detail.cursor.flags & KVMFR_CURSOR_FLAG_POS)
+    {
+      state.cursor.x      = header.detail.cursor.x;
+      state.cursor.y      = header.detail.cursor.y;
+      state.cursorVisible = header.detail.cursor.flags & KVMFR_CURSOR_FLAG_VISIBLE;
+      state.haveCursorPos = true;
+
+      state.lgr->on_mouse_event
+      (
+        state.lgrData,
+        state.cursorVisible,
+        state.cursor.x,
+        state.cursor.y
+      );
+    }
+
+    // poll until we have cursor data
+    while(((state.shm->flags & KVMFR_HEADER_FLAG_CURSOR) == 0) && state.running)
     {
       usleep(1000);
       continue;
     }
+  }
 
-    if (header.version != KVMFR_HEADER_VERSION)
+  return 0;
+}
+
+int frameThread(void * unused)
+{
+  bool                error = false;
+  struct KVMFRHeader  header;
+
+  memset(&header, 0, sizeof(struct KVMFRHeader));
+
+  while(state.running)
+  {
+    // poll until we have a new frame
+    if(!(state.shm->flags & KVMFR_HEADER_FLAG_FRAME))
     {
-      DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, header.version);
-      DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
+      nsleep(100);
+      continue;
+    }
+
+    // we must take a copy of the header, both to let the guest advance and to
+    // prevent the contained arguments being abused to overflow buffers
+    memcpy(&header, (KVMFRHeader *)state.shm, sizeof(struct KVMFRHeader));
+    __sync_and_and_fetch(&state.shm->flags, ~KVMFR_HEADER_FLAG_FRAME);
+
+    // sainty check of the frame format
+    if (
+      header.detail.frame.type    >= FRAME_TYPE_MAX ||
+      header.detail.frame.width   == 0 ||
+      header.detail.frame.height  == 0 ||
+      header.detail.frame.stride  == 0 ||
+      header.detail.frame.pitch   == 0 ||
+      header.detail.frame.dataPos == 0 ||
+      header.detail.frame.dataPos > state.shmSize ||
+      header.detail.frame.pitch   < header.detail.frame.width
+    ){
+      usleep(1000);
+      continue;
+    }
+
+    // setup the renderer format with the frame format details
+    LG_RendererFormat lgrFormat;
+    lgrFormat.width  = header.detail.frame.width;
+    lgrFormat.height = header.detail.frame.height;
+    lgrFormat.stride = header.detail.frame.stride;
+    lgrFormat.pitch  = header.detail.frame.pitch;
+
+    switch(header.detail.frame.type)
+    {
+      case FRAME_TYPE_ARGB:
+        lgrFormat.bpp = 32;
+        break;
+
+      case FRAME_TYPE_RGB:
+        lgrFormat.bpp = 24;
+        break;
+
+      default:
+        DEBUG_ERROR("Unsupported frameType");
+        error = true;
+        break;
+    }
+
+    if (error)
+      break;
+
+    // check the header's dataPos is sane
+    const size_t dataSize = lgrFormat.height * lgrFormat.pitch;
+    if (header.detail.frame.dataPos + dataSize > state.shmSize)
+    {
+      DEBUG_ERROR("The guest sent an invalid dataPos");
       break;
     }
 
-    // if we have a frame
-    if (header.flags & KVMFR_HEADER_FLAG_FRAME)
+    if (header.detail.frame.width != state.srcSize.x || header.detail.frame.height != state.srcSize.y)
     {
-      // sainty check of the frame format
-      if (
-        header.detail.frame.type    >= FRAME_TYPE_MAX ||
-        header.detail.frame.width   == 0 ||
-        header.detail.frame.height  == 0 ||
-        header.detail.frame.stride  == 0 ||
-        header.detail.frame.pitch   == 0 ||
-        header.detail.frame.dataPos == 0 ||
-        header.detail.frame.dataPos > state.shmSize ||
-        header.detail.frame.pitch   < header.detail.frame.width
-      ){
-        usleep(1000);
-        continue;
-      }
-
-      // setup the renderer format with the frame format details
-      LG_RendererFormat lgrFormat;
-      lgrFormat.width  = header.detail.frame.width;
-      lgrFormat.height = header.detail.frame.height;
-      lgrFormat.stride = header.detail.frame.stride;
-      lgrFormat.pitch  = header.detail.frame.pitch;
-
-      switch(header.detail.frame.type)
-      {
-        case FRAME_TYPE_ARGB:
-          lgrFormat.bpp   = 32;
-          break;
-
-        case FRAME_TYPE_RGB:
-          lgrFormat.bpp   = 24;
-          break;
-
-        default:
-          DEBUG_ERROR("Unsupported frameType");
-          error = true;
-          break;
-      }
-
-      if (error)
-        break;
-
-      // check the header's dataPos is sane
-      const size_t dataSize = lgrFormat.height * lgrFormat.pitch;
-      if (header.detail.frame.dataPos + dataSize > state.shmSize)
-      {
-        DEBUG_ERROR("The guest sent an invalid dataPos");
-        break;
-      }
-
-      // check if the renderer needs reconfiguration
-      if (!state.lgr->is_compatible(state.lgrData, lgrFormat))
-      {
-        DEBUG_INFO("Data Format: w=%u, h=%u, s=%u, p=%u, bpp=%u",
-            lgrFormat.width, lgrFormat.height, lgrFormat.stride, lgrFormat.pitch, lgrFormat.bpp);
-
-        state.lgr->deconfigure(state.lgrData);
-        if (!state.lgr->configure(state.lgrData, state.window, lgrFormat))
-        {
-          DEBUG_ERROR("Failed to reconfigure %s", state.lgr->get_name());
-          break;
-        }
-
-        state.srcSize.x = header.detail.frame.width;
-        state.srcSize.y = header.detail.frame.height;
-        if (params.autoResize)
-          SDL_SetWindowSize(state.window, header.detail.frame.width, header.detail.frame.height);
-
-        state.started = true;
-        updatePositionInfo();
-
-        // if we have saved shape info, send it now
-        if (cursorData)
-        {
-          if (!state.lgr->on_mouse_shape(
-            state.lgrData,
-            cursorType,
-            cursor.width,
-            cursor.height,
-            cursor.pitch,
-            cursorData
-          ))
-          {
-            DEBUG_ERROR("Failed to update mouse shape");
-            break;
-          }
-
-          free(cursorData);
-          cursorData     = NULL;
-          cursorDataSize = 0;
-        }
-
-        // if we have a cursor position, send it now
-        if (state.haveCursorPos)
-        {
-          state.lgr->on_mouse_event
-          (
-            state.lgrData,
-            state.cursorVisible,
-            state.cursor.x,
-            state.cursor.y
-          );
-        }
-      }
-
-      const uint8_t * data = (const uint8_t *)state.shm + header.detail.frame.dataPos;
-      if (!state.lgr->on_frame_event(state.lgrData, data))
-      {
-        DEBUG_ERROR("Failed to render the frame");
-        break;
-      }
+      state.srcSize.x = header.detail.frame.width;
+      state.srcSize.y = header.detail.frame.height;
+      if (params.autoResize)
+        SDL_SetWindowSize(state.window, header.detail.frame.width, header.detail.frame.height);
+      updatePositionInfo();
     }
 
-    // if we have cursor data
-    if (header.flags & KVMFR_HEADER_FLAG_CURSOR)
+    const uint8_t * data = (const uint8_t *)state.shm + header.detail.frame.dataPos;
+    if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, data))
     {
-      if (header.detail.cursor.flags & KVMFR_CURSOR_FLAG_POS)
-      {
-        state.cursor.x      = header.detail.cursor.x;
-        state.cursor.y      = header.detail.cursor.y;
-        state.cursorVisible = header.detail.cursor.flags & KVMFR_CURSOR_FLAG_VISIBLE;
-        state.haveCursorPos = true;
-      }
-
-      if (header.detail.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE)
-      {
-        if (state.lgr)
-        {
-          bool bad = false;
-          switch(header.detail.cursor.type)
-          {
-            case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
-            case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
-            case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
-            default:
-              DEBUG_ERROR("Invalid cursor type");
-              bad = true;
-              break;
-          }
-
-          if (bad)
-            break;
-
-          // check the data position is sane
-          const uint64_t dataSize = header.detail.frame.height * header.detail.frame.pitch;
-          if (header.detail.frame.dataPos + dataSize > state.shmSize)
-          {
-            DEBUG_ERROR("The guest sent an invalid mouse dataPos");
-            break;
-          }
-
-          const uint8_t * data = (const uint8_t *)state.shm + header.detail.frame.dataPos;
-          if (!state.started)
-          {
-            // save off the cursor data so we can tell the renderer when it's ready
-            if (cursorDataSize < dataSize)
-            {
-              if (cursorData) free(cursorData);
-              cursorData     = (uint8_t *)malloc(dataSize);
-              cursorDataSize = dataSize;
-            }
-            memcpy(&cursor, &header.detail.frame, sizeof(struct KVMFRFrame));
-            memcpy(cursorData, data, dataSize);
-            continue;
-          }
-
-          if (!state.lgr->on_mouse_shape(
-            state.lgrData,
-            cursorType,
-            header.detail.frame.width,
-            header.detail.frame.height,
-            header.detail.frame.pitch,
-            data)
-          )
-          {
-            DEBUG_ERROR("Failed to update mouse shape");
-            break;
-          }
-        }
-      }
-
-      if (state.lgr && state.started)
-      {
-        state.lgr->on_mouse_event(
-          state.lgrData,
-          state.cursorVisible,
-          state.cursor.x,
-          state.cursor.y
-        );
-      }
+      DEBUG_ERROR("renderer on frame event returned failure");
+      break;
     }
 
-    if (state.started && state.lgr)
-      state.lgr->render(state.lgrData);
+    if (!state.started)
+    {
+      DEBUG_INFO("feed started");
+      state.started = true;
+    }
   }
-
-  if (cursorData)
-    free(cursorData);
 
   return 0;
 }
@@ -906,7 +845,7 @@ int run()
 
     if (!(t_event = SDL_CreateThread(eventThread, "eventThread", NULL)))
     {
-      DEBUG_ERROR("gpu create thread failed");
+      DEBUG_ERROR("event create thread failed");
       break;
     }
 
@@ -919,7 +858,33 @@ int run()
       usleep(1000);
     DEBUG_INFO("Host ready, starting session");
 
-    renderThread(NULL);
+    // check the header's magic and version are valid
+    if (memcmp(state.shm->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
+    {
+      DEBUG_ERROR("Invalid header magic, is the host running?");
+      break;
+    }
+
+    if (state.shm->version != KVMFR_HEADER_VERSION)
+    {
+      DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.shm->version);
+      DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
+      break;
+    }
+
+    if (!(t_event = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
+    {
+      DEBUG_ERROR("cursor create thread failed");
+      break;
+    }
+
+    if (!(t_event = SDL_CreateThread(frameThread, "frameThread", NULL)))
+    {
+      DEBUG_ERROR("frame create thread failed");
+      break;
+    }
+
+    mainThread();
     break;
   }
 

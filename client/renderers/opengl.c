@@ -33,7 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "memcpySSE.h"
 #include "utils.h"
 
-#define BUFFER_COUNT       1
+#define BUFFER_COUNT       2
 
 #define FRAME_TEXTURE      0
 #define FPS_TEXTURE        1
@@ -48,7 +48,6 @@ struct Options
   bool mipmap;
   bool vsync;
   bool preventBuffer;
-  bool splitMouse;
 };
 
 static struct Options defaultOptions =
@@ -56,16 +55,15 @@ static struct Options defaultOptions =
   .mipmap        = true,
   .vsync         = true,
   .preventBuffer = true,
-  .splitMouse    = false
 };
 
-struct LGR_OpenGL
+struct Inst
 {
   LG_RendererParams params;
   struct Options    opt;
 
   bool              configured;
-  SDL_Window      * sdlWindow;
+  bool              reconfigure;
   SDL_GLContext     glContext;
   bool              doneInfo;
 
@@ -73,6 +71,7 @@ struct LGR_OpenGL
   bool              resizeWindow;
   bool              frameUpdate;
 
+  volatile int      formatLock;
   LG_RendererFormat format;
   GLuint            intFormat;
   GLuint            vboFormat;
@@ -82,7 +81,8 @@ struct LGR_OpenGL
   bool              hasBuffers;
   GLuint            vboID[1];
   uint8_t         * texPixels[BUFFER_COUNT];
-  int               texIndex;
+  volatile int      syncLock;
+  int               texIndex, wTexIndex;
   int               texList;
   int               fpsList;
   int               mouseList;
@@ -99,6 +99,14 @@ struct LGR_OpenGL
   uint64_t          renderCount;
   SDL_Rect          fpsRect;
 
+  volatile int      mouseLock;
+  LG_RendererCursor mouseCursor;
+  int               mouseWidth;
+  int               mouseHeight;
+  int               mousePitch;
+  uint8_t *         mouseData;
+  size_t            mouseDataSize;
+
   bool              mouseUpdate;
   bool              newShape;
   uint64_t          lastMouseDraw;
@@ -107,43 +115,41 @@ struct LGR_OpenGL
   SDL_Rect          mousePos;
 };
 
-bool lgr_opengl_check_error(const char * name)
-{
-  GLenum error = glGetError();
-  if (error == GL_NO_ERROR)
-    return false;
+static bool _check_gl_error(unsigned int line, const char * name);
+#define check_gl_error(name) _check_gl_error(__LINE__, name)
 
-  const GLubyte * errStr = gluErrorString(error);
-  DEBUG_ERROR("%s = %d (%s)", name, error, errStr);
-  return true;
-}
+static void deconfigure(struct Inst * this);
+static bool configure(struct Inst * this, SDL_Window *window);
+static void update_mouse_shape(struct Inst * this, bool * newShape);
+static bool draw_frame(struct Inst * this, bool * frameUpdate);
+static void draw_mouse(struct Inst * this);
 
-const char * lgr_opengl_get_name()
+const char * opengl_get_name()
 {
   return "OpenGL";
 }
 
-bool lgr_opengl_create(void ** opaque, const LG_RendererParams params)
+bool opengl_create(void ** opaque, const LG_RendererParams params)
 {
   // create our local storage
-  *opaque = malloc(sizeof(struct LGR_OpenGL));
+  *opaque = malloc(sizeof(struct Inst));
   if (!*opaque)
   {
-    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(struct LGR_OpenGL));
+    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(struct Inst));
     return false;
   }
-  memset(*opaque, 0, sizeof(struct LGR_OpenGL));
+  memset(*opaque, 0, sizeof(struct Inst));
 
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)*opaque;
+  struct Inst * this = (struct Inst *)*opaque;
   memcpy(&this->params, &params        , sizeof(LG_RendererParams));
   memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
 
   return true;
 }
 
-bool lgr_opengl_initialize(void * opaque, Uint32 * sdlFlags)
+bool opengl_initialize(void * opaque, Uint32 * sdlFlags)
 {
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
 
@@ -165,23 +171,280 @@ bool lgr_opengl_initialize(void * opaque, Uint32 * sdlFlags)
   return true;
 }
 
-bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFormat format)
+void opengl_deinitialize(void * opaque)
 {
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  deconfigure(this);
+  if (this->mouseData)
+    free(this->mouseData);
+
+  free(this);
+}
+
+void opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  this->window.x = width;
+  this->window.y = height;
+  memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
+
+  this->resizeWindow = true;
+}
+
+bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
+{
+  struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
 
-  if (this->configured)
+  while(__sync_lock_test_and_set(&this->mouseLock, 1));
+  this->mouseCursor = cursor;
+  this->mouseWidth  = width;
+  this->mouseHeight = height;
+  this->mousePitch  = pitch;
+
+  const size_t size = height * pitch;
+  if (size > this->mouseDataSize)
   {
-    DEBUG_ERROR("Renderer already configured, call deconfigure first");
+    if (this->mouseData)
+      free(this->mouseData);
+    this->mouseData     = (uint8_t *)malloc(size);
+    this->mouseDataSize = size;
+  }
+
+  memcpy(this->mouseData, data, size);
+  this->newShape = true;
+  __sync_lock_release(&this->mouseLock);
+
+  return true;
+}
+
+bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return false;
+
+  if (this->mousePos.x == x && this->mousePos.y == y && this->mouseVisible == visible)
+    return true;
+
+  this->mouseVisible = visible;
+  this->mousePos.x   = x;
+  this->mousePos.y   = y;
+  this->mouseUpdate  = true;
+  return false;
+}
+
+bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const uint8_t * data)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+  {
+    DEBUG_ERROR("Invalid opaque pointer");
     return false;
   }
 
-  this->sdlWindow = window;
+  while(__sync_lock_test_and_set(&this->formatLock, 1));
+  if (this->reconfigure)
+  {
+    __sync_lock_release(&this->formatLock);
+    return true;
+  }
+
+  if (!this->configured || memcmp(&this->format, &format, sizeof(LG_RendererFormat)) != 0)
+  {
+    memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+    this->reconfigure = true;
+    __sync_lock_release(&this->formatLock);
+    return true;
+  }
+  __sync_lock_release(&this->formatLock);
+
+  // lock, perform the update, then unlock
+  while(__sync_lock_test_and_set(&this->syncLock, 1));
+  memcpySSE(this->texPixels[this->wTexIndex], data, this->texSize);
+  this->frameUpdate = true;
+  __sync_lock_release(&this->syncLock);
+
+  ++this->frameCount;
+  return true;
+}
+
+bool opengl_render(void * opaque, SDL_Window * window)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return false;
+
+  if (!configure(this, window))
+    return true;
+
+  if (this->resizeWindow)
+  {
+    // setup the projection matrix
+    glViewport(0, 0, this->window.x, this->window.y);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluOrtho2D(0, this->window.x, this->window.y, 0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+    glScalef(
+      (float)this->destRect.w / (float)this->format.width,
+      (float)this->destRect.h / (float)this->format.height,
+      1.0f
+    );
+
+    // update the scissor rect to prevent drawing outside of the frame
+    glScissor(
+      this->destRect.x,
+      this->destRect.y,
+      this->destRect.w,
+      this->destRect.h
+    );
+
+    this->resizeWindow = false;
+  }
+
+  bool frameUpdate;
+  if (!draw_frame(this, &frameUpdate))
+    return false;
+
+  bool newShape;
+  update_mouse_shape(this, &newShape);
+
+  glDisable(GL_SCISSOR_TEST);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glEnable(GL_SCISSOR_TEST);
+
+  glCallList(this->texList + this->texIndex);
+  draw_mouse(this);
+  if (this->fpsTexture)
+    glCallList(this->fpsList);
+
+  if (this->opt.preventBuffer)
+  {
+    unsigned int before, after;
+    glXGetVideoSyncSGI(&before);
+    SDL_GL_SwapWindow(window);
+
+    // wait for the swap to happen to ensure we dont buffer frames  //
+    glXGetVideoSyncSGI(&after);
+    if (before == after)
+      glXWaitVideoSyncSGI(1, 0, &before);
+  }
+  else
+    SDL_GL_SwapWindow(window);
+
+  const uint64_t t    = nanotime();
+  this->renderTime   += t - this->lastFrameTime;
+  this->lastFrameTime = t;
+  ++this->renderCount;
+
+  this->mouseUpdate   = false;
+  this->lastMouseDraw = t;
+  return true;
+}
+
+static void handle_opt_mipmap(void * opaque, const char *value)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  this->opt.mipmap = LG_RendererValueToBool(value);
+}
+
+static void handle_opt_vsync(void * opaque, const char *value)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  this->opt.vsync = LG_RendererValueToBool(value);
+}
+
+static void handle_opt_prevent_buffer(void * opaque, const char *value)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  this->opt.preventBuffer = LG_RendererValueToBool(value);
+}
+
+static LG_RendererOpt opengl_options[] =
+{
+  {
+    .name      = "mipmap",
+    .desc      = "Enable or disable mipmapping [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_mipmap
+  },
+  {
+    .name      = "vsync",
+    .desc      ="Enable or disable vsync [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_vsync
+  },
+  {
+    .name      = "preventBuffer",
+    .desc      = "Prevent the driver from buffering frames [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_prevent_buffer
+  }
+};
+
+const LG_Renderer LGR_OpenGL =
+{
+  .get_name       = opengl_get_name,
+  .options        = opengl_options,
+  .option_count   = LGR_OPTION_COUNT(opengl_options),
+  .create         = opengl_create,
+  .initialize     = opengl_initialize,
+  .deinitialize   = opengl_deinitialize,
+  .on_resize      = opengl_on_resize,
+  .on_mouse_shape = opengl_on_mouse_shape,
+  .on_mouse_event = opengl_on_mouse_event,
+  .on_frame_event = opengl_on_frame_event,
+  .render         = opengl_render
+};
+
+static bool _check_gl_error(unsigned int line, const char * name)
+{
+  GLenum error = glGetError();
+  if (error == GL_NO_ERROR)
+    return false;
+
+  const GLubyte * errStr = gluErrorString(error);
+  DEBUG_ERROR("%d: %s = %d (%s)", line, name, error, errStr);
+  return true;
+}
+
+static bool configure(struct Inst * this, SDL_Window *window)
+{
+  while(__sync_lock_test_and_set(&this->formatLock, 1));
+  if (!this->reconfigure)
+  {
+    __sync_lock_release(&this->formatLock);
+    return this->configured;
+  }
+
+  if (this->configured)
+    deconfigure(this);
+
   this->glContext = SDL_GL_CreateContext(window);
   if (!this->glContext)
   {
     DEBUG_ERROR("Failed to create the OpenGL context");
+    __sync_lock_release(&this->formatLock);
     return false;
   }
 
@@ -193,12 +456,6 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
     this->doneInfo = true;
   }
 
-  if (SDL_GL_MakeCurrent(window, this->glContext) != 0)
-  {
-    DEBUG_ERROR("Failed to make the GL context current");
-    return false;
-  }
-
   SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
 
   // check if the GPU supports GL_ARB_buffer_storage first
@@ -207,11 +464,12 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
   if (!gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
   {
     DEBUG_INFO("The GPU doesn't support GL_ARB_buffer_storage");
+    __sync_lock_release(&this->formatLock);
     return false;
   }
 
   // assume 24 and 32 bit formats are RGB and RGBA
-  switch(format.bpp)
+  switch(this->format.bpp)
   {
     case 24:
       this->intFormat = GL_RGB8;
@@ -224,12 +482,13 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
       break;
 
     default:
-      DEBUG_INFO("%d bpp not supported", format.bpp);
+      DEBUG_INFO("%d bpp not supported", this->format.bpp);
+      __sync_lock_release(&this->formatLock);
       return false;
   }
 
   // calculate the texture size in bytes
-  this->texSize = format.height * format.pitch;
+  this->texSize = this->format.height * this->format.pitch;
 
   // generate lists for drawing
   this->texList    = glGenLists(BUFFER_COUNT);
@@ -238,13 +497,19 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
 
   // generate the pixel unpack buffers
   glGenBuffers(1, this->vboID);
-  if (lgr_opengl_check_error("glGenBuffers"))
+  if (check_gl_error("glGenBuffers"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
   this->hasBuffers = true;
 
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[0]);
-  if (lgr_opengl_check_error("glBindBuffer"))
+  if (check_gl_error("glBindBuffer"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
 
   glBufferStorage(
     GL_PIXEL_UNPACK_BUFFER,
@@ -253,8 +518,11 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
     GL_MAP_WRITE_BIT      |
     GL_MAP_PERSISTENT_BIT
   );
-  if (lgr_opengl_check_error("glBufferStorage"))
+  if (check_gl_error("glBufferStorage"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
 
   this->texPixels[0] = glMapBufferRange(
     GL_PIXEL_UNPACK_BUFFER,
@@ -265,36 +533,48 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
     GL_MAP_FLUSH_EXPLICIT_BIT
   );
 
-  if (lgr_opengl_check_error("glMapBufferRange"))
+  if (check_gl_error("glMapBufferRange"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
 
   for(int i = 1; i < BUFFER_COUNT; ++i)
     this->texPixels[i] = this->texPixels[i-1] + this->texSize;
 
   // create the textures
   glGenTextures(TEXTURE_COUNT, this->textures);
-  if (lgr_opengl_check_error("glGenTextures"))
+  if (check_gl_error("glGenTextures"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
   this->hasTextures = true;
 
   // create the frame texture
   glBindTexture(GL_TEXTURE_2D, this->textures[FRAME_TEXTURE]);
-  if (lgr_opengl_check_error("glBindTexture"))
+  if (check_gl_error("glBindTexture"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
 
   glTexImage2D(
     GL_TEXTURE_2D,
     0,
     this->intFormat,
-    format.width,
-    format.height * BUFFER_COUNT,
+    this->format.width,
+    this->format.height * BUFFER_COUNT,
     0,
     this->vboFormat,
     GL_UNSIGNED_BYTE,
     (void*)0
   );
-  if (lgr_opengl_check_error("glTexImage2D"))
+  if (check_gl_error("glTexImage2D"))
+  {
+    __sync_lock_release(&this->formatLock);
     return false;
+  }
 
   // configure the texture
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -312,10 +592,10 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
       glBindTexture(GL_TEXTURE_2D, this->textures[FRAME_TEXTURE]);
       glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
       glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, ts); glVertex2i(0           , 0            );
-        glTexCoord2f(1.0f, ts); glVertex2i(format.width, 0            );
-        glTexCoord2f(0.0f, te); glVertex2i(0           , format.height);
-        glTexCoord2f(1.0f, te); glVertex2i(format.width, format.height);
+        glTexCoord2f(0.0f, ts); glVertex2i(0                 , 0                  );
+        glTexCoord2f(1.0f, ts); glVertex2i(this->format.width, 0                  );
+        glTexCoord2f(0.0f, te); glVertex2i(0                 , this->format.height);
+        glTexCoord2f(1.0f, te); glVertex2i(this->format.width, this->format.height);
      glEnd();
     glEndList();
   }
@@ -333,16 +613,16 @@ bool lgr_opengl_configure(void * opaque, SDL_Window *window, const LG_RendererFo
   this->drawStart    = nanotime();
   glXGetVideoSyncSGI(&this->gpuFrameCount);
 
-  // copy the format into the local storage
-  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-  this->configured = true;
+  this->configured  = true;
+  this->reconfigure = false;
+
+  __sync_lock_release(&this->formatLock);
   return true;
 }
 
-void lgr_opengl_deconfigure(void * opaque)
+static void deconfigure(struct Inst * this)
 {
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->configured)
+  if (!this->configured)
     return;
 
   if (this->hasTextures)
@@ -366,45 +646,21 @@ void lgr_opengl_deconfigure(void * opaque)
   this->configured = false;
 }
 
-void lgr_opengl_deinitialize(void * opaque)
+static void update_mouse_shape(struct Inst * this, bool * newShape)
 {
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this)
+  while(__sync_lock_test_and_set(&this->mouseLock, 1));
+  *newShape = this->newShape;
+  if (!this->newShape)
+  {
+    __sync_lock_release(&this->mouseLock);
     return;
+  }
 
-  if (this->configured)
-    lgr_opengl_deconfigure(opaque);
-
-  free(this);
-}
-
-bool lgr_opengl_is_compatible(void * opaque, const LG_RendererFormat format)
-{
-  const struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->configured)
-    return false;
-
-  return (memcmp(&this->format, &format, sizeof(LG_RendererFormat)) == 0);
-}
-
-void lgr_opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->configured)
-    return;
-
-  this->window.x = width;
-  this->window.y = height;
-  memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
-
-  this->resizeWindow = true;
-}
-
-bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->configured)
-    return false;
+  const LG_RendererCursor cursor = this->mouseCursor;
+  const int               width  = this->mouseWidth;
+  const int               height = this->mouseHeight;
+  const int               pitch  = this->mousePitch;
+  const uint8_t *         data   = this->mouseData;
 
   this->mouseType = cursor;
   switch(cursor)
@@ -522,41 +778,26 @@ bool lgr_opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, co
   }
 
   this->mouseUpdate = true;
-  this->newShape    = true;
-  return true;
+  __sync_lock_release(&this->mouseLock);
 }
 
-bool lgr_opengl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
+static bool draw_frame(struct Inst * this, bool * frameUpdate)
 {
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->configured)
-    return false;
-
-  if (this->mousePos.x == x && this->mousePos.y == y && this->mouseVisible == visible)
+  while(__sync_lock_test_and_set(&this->syncLock, 1));
+  *frameUpdate = this->frameUpdate;
+  if (!this->frameUpdate)
+  {
+    __sync_lock_release(&this->syncLock);
     return true;
-
-  this->mouseVisible = visible;
-  this->mousePos.x   = x;
-  this->mousePos.y   = y;
-  this->mouseUpdate  = true;
-  return false;
-}
-
-bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this)
-  {
-    DEBUG_ERROR("Invalid opaque pointer");
-    return false;
   }
 
-  if (!this->configured)
-  {
-    DEBUG_ERROR("Not configured");
-    return false;
-  }
+  this->texIndex = this->wTexIndex;
+  if (++this->wTexIndex == BUFFER_COUNT)
+    this->wTexIndex = 0;
+  this->frameUpdate = false;
+  __sync_lock_release(&this->syncLock);
 
+  while(__sync_lock_test_and_set(&this->formatLock, 1));
   if (this->params.showFPS && this->renderTime > 1e9)
   {
     char str[128];
@@ -568,6 +809,7 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
     if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
     {
       DEBUG_ERROR("Failed to render text");
+      __sync_lock_release(&this->formatLock);
       return false;
     }
 
@@ -636,7 +878,6 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
   glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.stride          );
 
   // copy the buffer to the texture
-  memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
   glFlushMappedBufferRange(
     GL_PIXEL_UNPACK_BUFFER,
     this->texSize * this->texIndex,
@@ -655,7 +896,10 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
     GL_UNSIGNED_BYTE,
     (void*)(this->texIndex * this->texSize)
   );
-  lgr_opengl_check_error("glTexSubImage2D");
+  if (check_gl_error("glTexSubImage2D"))
+    DEBUG_ERROR("texIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
+      this->texIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
+    );
 
   // unbind the buffer
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -677,16 +921,11 @@ bool lgr_opengl_on_frame_event(void * opaque, const uint8_t * data)
   }
 
   glBindTexture(GL_TEXTURE_2D, 0);
-
-  if (++this->texIndex == BUFFER_COUNT)
-    this->texIndex = 0;
-
-  ++this->frameCount;
-  this->frameUpdate = true;
+  __sync_lock_release(&this->formatLock);
   return true;
 }
 
-static inline void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
+static void draw_mouse(struct Inst * this)
 {
   if (!this->mouseVisible)
     return;
@@ -696,183 +935,3 @@ static inline void lgr_opengl_draw_mouse(struct LGR_OpenGL * this)
   glCallList(this->mouseList);
   glPopMatrix();
 }
-
-bool lgr_opengl_render(void * opaque)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this || !this->configured)
-    return false;
-
-  if (this->resizeWindow)
-  {
-    // setup the projection matrix
-    glViewport(0, 0, this->window.x, this->window.y);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(0, this->window.x, this->window.y, 0);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
-    glScalef(
-      (float)this->destRect.w / (float)this->format.width,
-      (float)this->destRect.h / (float)this->format.height,
-      1.0f
-    );
-
-    // update the scissor rect to prevent drawing outside of the frame
-    glScissor(
-      this->destRect.x,
-      this->destRect.y,
-      this->destRect.w,
-      this->destRect.h
-    );
-
-    this->resizeWindow = false;
-  }
-
-  if (this->opt.splitMouse)
-  {
-    if (!this->frameUpdate)
-    {
-      if (!this->mouseUpdate)
-        return true;
-
-      if (!this->newShape)
-      {
-        // don't update the mouse too fast
-        const uint64_t delta = nanotime() - this->lastMouseDraw;
-        if (delta < 5e6)
-          return true;
-      }
-      this->newShape = false;
-
-      glDrawBuffer(GL_FRONT);
-      glCallList(this->texList + this->texIndex);
-      lgr_opengl_draw_mouse(this);
-      if (this->fpsTexture)
-        glCallList(this->fpsList);
-      glDrawBuffer(GL_BACK);
-      glFlush();
-
-      this->mouseUpdate   = false;
-      this->lastMouseDraw = nanotime();
-      return true;
-    }
-  }
-
-  glDisable(GL_SCISSOR_TEST);
-  glClear(GL_COLOR_BUFFER_BIT);
-  glEnable(GL_SCISSOR_TEST);
-
-  glCallList(this->texList + this->texIndex);
-  lgr_opengl_draw_mouse(this);
-  if (this->fpsTexture)
-    glCallList(this->fpsList);
-
-  if (this->opt.preventBuffer)
-  {
-    unsigned int before, after;
-    glXGetVideoSyncSGI(&before);
-    SDL_GL_SwapWindow(this->sdlWindow);
-
-    // wait for the swap to happen to ensure we dont buffer frames  //
-    glXGetVideoSyncSGI(&after);
-    if (before == after)
-      glXWaitVideoSyncSGI(1, 0, &before);
-  }
-  else
-    SDL_GL_SwapWindow(this->sdlWindow);
-
-  const uint64_t t    = nanotime();
-  this->renderTime   += t - this->lastFrameTime;
-  this->lastFrameTime = t;
-  ++this->renderCount;
-
-  this->frameUpdate   = false;
-  this->mouseUpdate   = false;
-  this->lastMouseDraw = t;
-  return true;
-}
-
-static void handle_opt_mipmap(void * opaque, const char *value)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this)
-    return;
-
-  this->opt.mipmap = LG_RendererValueToBool(value);
-}
-
-static void handle_opt_vsync(void * opaque, const char *value)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this)
-    return;
-
-  this->opt.vsync = LG_RendererValueToBool(value);
-}
-
-static void handle_opt_prevent_buffer(void * opaque, const char *value)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this)
-    return;
-
-  this->opt.preventBuffer = LG_RendererValueToBool(value);
-}
-
-static void handle_opt_split_mouse(void * opaque, const char *value)
-{
-  struct LGR_OpenGL * this = (struct LGR_OpenGL *)opaque;
-  if (!this)
-    return;
-
-  this->opt.splitMouse = LG_RendererValueToBool(value);
-}
-
-static LG_RendererOpt lgr_opengl_options[] =
-{
-  {
-    .name      = "mipmap",
-    .desc      = "Enable or disable mipmapping [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_mipmap
-  },
-  {
-    .name      = "vsync",
-    .desc      ="Enable or disable vsync [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_vsync
-  },
-  {
-    .name      = "preventBuffer",
-    .desc      = "Prevent the driver from buffering frames [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_prevent_buffer
-  },
-  {
-    .name      = "splitMouse",
-    .desc      = "Draw mouse updates directly to the front buffer [default: disabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_split_mouse
-  }
-};
-
-const LG_Renderer LGR_OpenGL =
-{
-  .get_name       = lgr_opengl_get_name,
-  .options        = lgr_opengl_options,
-  .option_count   = LGR_OPTION_COUNT(lgr_opengl_options),
-  .create         = lgr_opengl_create,
-  .initialize     = lgr_opengl_initialize,
-  .configure      = lgr_opengl_configure,
-  .deconfigure    = lgr_opengl_deconfigure,
-  .deinitialize   = lgr_opengl_deinitialize,
-  .is_compatible  = lgr_opengl_is_compatible,
-  .on_resize      = lgr_opengl_on_resize,
-  .on_mouse_shape = lgr_opengl_on_mouse_shape,
-  .on_mouse_event = lgr_opengl_on_mouse_event,
-  .on_frame_event = lgr_opengl_on_frame_event,
-  .render         = lgr_opengl_render
-};
