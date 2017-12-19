@@ -1031,43 +1031,46 @@ void doLicense()
 
 int main(int argc, char * argv[])
 {
-  int c;
-  while((c = getopt(argc, argv, "hf:sc:p:jMvkg:o:anrdFx:y:w:b:Ql")) != -1)
-    switch(c)
+  for(;;)
+  {
+    switch(getopt(argc, argv, "hf:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
     {
       case '?':
       case 'h':
       default :
         doHelp(argv[0]);
-        return (c == 'h') ? 0 : -1;
+        return -1;
+
+      case -1:
+        break;
 
       case 'f':
         params.ivshmemSocket = optarg;
-        break;
+        continue;
 
       case 's':
         params.useSpice = false;
-        break;
+        continue;
 
       case 'c':
         params.spiceHost = optarg;
-        break;
+        continue;
 
       case 'p':
         params.spicePort = atoi(optarg);
-        break;
+        continue;
 
       case 'j':
         params.scaleMouseInput = false;
-        break;
+        continue;
 
       case 'M':
         params.hideMouse = false;
-        break;
+        continue;
 
       case 'k':
         params.showFPS = true;
-        break;
+        continue;
 
       case 'g':
       {
@@ -1089,7 +1092,7 @@ int main(int argc, char * argv[])
           return -1;
         }
 
-        break;
+        continue;
       }
 
       case 'o':
@@ -1190,66 +1193,64 @@ int main(int argc, char * argv[])
         opts->argv[opts->argc].opt   = opt;
         opts->argv[opts->argc].value = value;
         ++opts->argc;
-        break;
+        continue;
       }
-#if 0
-        if (params.rendererOptCount == params.rendererOptSize)
-        {
-          params.rendererOptSize += 5;
-          params.rendererOpts     = realloc(
-            params.rendererOpts,
-            params.rendererOptSize * sizeof(char *));
-        }
-        params.rendererOpts[params.rendererOptCount++] = optarg;
-#endif
-        break;
 
       case 'a':
         params.autoResize = true;
-        break;
+        continue;
 
       case 'n':
         params.allowResize = false;
-        break;
+        continue;
 
       case 'r':
         params.keepAspect = false;
-        break;
+        continue;
 
       case 'd':
         params.borderless = true;
-        break;
+        continue;
 
       case 'F':
         params.fullscreen = true;
-        break;
+        continue;
 
       case 'x':
         params.center = false;
         params.x = atoi(optarg);
-        break;
+        continue;
 
       case 'y':
         params.center = false;
         params.y = atoi(optarg);
-        break;
+        continue;
 
       case 'w':
         params.w = atoi(optarg);
-        break;
+        continue;
 
       case 'b':
         params.h = atoi(optarg);
-        break;
+        continue;
 
       case 'Q':
         params.ignoreQuit = true;
-        break;
+        continue;
 
       case 'l':
         doLicense();
         return 0;
     }
+    break;
+  }
+
+  if (optind != argc)
+  {
+    fprintf(stderr, "A non option was supplied\n");
+    doHelp(argv[0]);
+    return -1;
+  }
 
   return run();
 }
