@@ -257,7 +257,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   LG_LOCK(this->formatLock);
   if (this->reconfigure)
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return true;
   }
 
@@ -265,13 +265,13 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   {
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
     this->reconfigure = true;
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return true;
   }
-  __sync_lock_release(&this->formatLock);
+  LG_UNLOCK(this->formatLock);
 
   // lock, perform the update, then unlock
-  while(__sync_lock_test_and_set(&this->syncLock, 1));
+  LG_LOCK(this->syncLock);
   memcpySSE(this->texPixels[this->wTexIndex], data, this->texSize);
   this->frameUpdate = true;
   LG_UNLOCK(this->syncLock);
@@ -437,7 +437,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   LG_LOCK(this->formatLock);
   if (!this->reconfigure)
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return this->configured;
   }
 
@@ -448,7 +448,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   if (!this->glContext)
   {
     DEBUG_ERROR("Failed to create the OpenGL context");
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -468,7 +468,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   if (!gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
   {
     DEBUG_INFO("The GPU doesn't support GL_ARB_buffer_storage");
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -487,7 +487,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
     default:
       DEBUG_INFO("%d bpp not supported", this->format.bpp);
-      __sync_lock_release(&this->formatLock);
+      LG_UNLOCK(this->formatLock);
       return false;
   }
 
@@ -503,7 +503,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   glGenBuffers(1, this->vboID);
   if (check_gl_error("glGenBuffers"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
   this->hasBuffers = true;
@@ -511,7 +511,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[0]);
   if (check_gl_error("glBindBuffer"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -524,7 +524,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   );
   if (check_gl_error("glBufferStorage"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -539,7 +539,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   if (check_gl_error("glMapBufferRange"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -550,7 +550,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   glGenTextures(TEXTURE_COUNT, this->textures);
   if (check_gl_error("glGenTextures"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
   this->hasTextures = true;
@@ -559,7 +559,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   glBindTexture(GL_TEXTURE_2D, this->textures[FRAME_TEXTURE]);
   if (check_gl_error("glBindTexture"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -576,7 +576,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   );
   if (check_gl_error("glTexImage2D"))
   {
-    __sync_lock_release(&this->formatLock);
+    LG_UNLOCK(this->formatLock);
     return false;
   }
 
@@ -620,7 +620,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   this->configured  = true;
   this->reconfigure = false;
 
-  __sync_lock_release(&this->formatLock);
+  LG_UNLOCK(this->formatLock);
   return true;
 }
 
@@ -652,11 +652,11 @@ static void deconfigure(struct Inst * this)
 
 static void update_mouse_shape(struct Inst * this, bool * newShape)
 {
-  while(__sync_lock_test_and_set(&this->mouseLock, 1));
+  LG_LOCK(this->mouseLock);
   *newShape = this->newShape;
   if (!this->newShape)
   {
-    __sync_lock_release(&this->mouseLock);
+    LG_UNLOCK(this->mouseLock);
     return;
   }
 
@@ -782,12 +782,12 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
   }
 
   this->mouseUpdate = true;
-  __sync_lock_release(&this->mouseLock);
+  LG_UNLOCK(this->mouseLock);
 }
 
 static bool draw_frame(struct Inst * this, bool * frameUpdate)
 {
-  while(__sync_lock_test_and_set(&this->syncLock, 1));
+  LG_LOCK(this->syncLock);
   *frameUpdate = this->frameUpdate;
   if (!this->frameUpdate)
   {
@@ -813,7 +813,7 @@ static bool draw_frame(struct Inst * this, bool * frameUpdate)
     if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
     {
       DEBUG_ERROR("Failed to render text");
-      __sync_lock_release(&this->formatLock);
+      LG_UNLOCK(this->formatLock);
       return false;
     }
 
@@ -925,7 +925,7 @@ static bool draw_frame(struct Inst * this, bool * frameUpdate)
   }
 
   glBindTexture(GL_TEXTURE_2D, 0);
-  __sync_lock_release(&this->formatLock);
+  LG_UNLOCK(this->formatLock);
   return true;
 }
 
