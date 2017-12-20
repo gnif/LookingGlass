@@ -154,11 +154,18 @@ static inline void updatePositionInfo()
     state.dstRect.h = h;
   }
 
-  if (state.started)
-  {
-    state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
-    state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
-  }
+  state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
+  state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+
+  DEBUG_INFO("client %dx%d, guest %dx%d, target %dx%d, scaleX: %.2f, scaleY %.2f",
+    w, h,
+    state.srcSize.x, state.srcSize.y,
+    state.dstRect.w, state.dstRect.h,
+    state.scaleX   , state.scaleY
+  );
+
+  if (w != state.srcSize.x || h != state.srcSize.y)
+    DEBUG_WARN("Window size doesn't match guest resolution, cursor alignment may not be reliable");
 
   if (state.lgr)
     state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
