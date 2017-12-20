@@ -642,6 +642,7 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
 int run()
 {
   DEBUG_INFO("Looking Glass (" BUILD_VERSION ")");
+  DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
 
   memset(&state, 0, sizeof(state));
   state.running = true;
