@@ -71,7 +71,7 @@ struct Inst
   bool              resizeWindow;
   bool              frameUpdate;
 
-  volatile int      formatLock;
+  LG_Lock           formatLock;
   LG_RendererFormat format;
   GLuint            intFormat;
   GLuint            vboFormat;
@@ -81,7 +81,7 @@ struct Inst
   bool              hasBuffers;
   GLuint            vboID[1];
   uint8_t         * texPixels[BUFFER_COUNT];
-  volatile int      syncLock;
+  LG_Lock           syncLock;
   int               texIndex, wTexIndex;
   int               texList;
   int               fpsList;
@@ -99,7 +99,7 @@ struct Inst
   uint64_t          renderCount;
   SDL_Rect          fpsRect;
 
-  volatile int      mouseLock;
+  LG_Lock           mouseLock;
   LG_RendererCursor mouseCursor;
   int               mouseWidth;
   int               mouseHeight;
@@ -143,6 +143,10 @@ bool opengl_create(void ** opaque, const LG_RendererParams params)
   struct Inst * this = (struct Inst *)*opaque;
   memcpy(&this->params, &params        , sizeof(LG_RendererParams));
   memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
+
+  LG_LOCK_INIT(this->formatLock);
+  LG_LOCK_INIT(this->syncLock  );
+  LG_LOCK_INIT(this->mouseLock );
 
   return true;
 }
@@ -203,7 +207,7 @@ bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const 
   if (!this)
     return false;
 
-  while(__sync_lock_test_and_set(&this->mouseLock, 1));
+  LG_LOCK(this->mouseLock);
   this->mouseCursor = cursor;
   this->mouseWidth  = width;
   this->mouseHeight = height;
@@ -220,7 +224,7 @@ bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const 
 
   memcpy(this->mouseData, data, size);
   this->newShape = true;
-  __sync_lock_release(&this->mouseLock);
+  LG_UNLOCK(this->mouseLock);
 
   return true;
 }
@@ -250,7 +254,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
     return false;
   }
 
-  while(__sync_lock_test_and_set(&this->formatLock, 1));
+  LG_LOCK(this->formatLock);
   if (this->reconfigure)
   {
     __sync_lock_release(&this->formatLock);
@@ -270,7 +274,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   while(__sync_lock_test_and_set(&this->syncLock, 1));
   memcpySSE(this->texPixels[this->wTexIndex], data, this->texSize);
   this->frameUpdate = true;
-  __sync_lock_release(&this->syncLock);
+  LG_UNLOCK(this->syncLock);
 
   ++this->frameCount;
   return true;
@@ -430,7 +434,7 @@ static bool _check_gl_error(unsigned int line, const char * name)
 
 static bool configure(struct Inst * this, SDL_Window *window)
 {
-  while(__sync_lock_test_and_set(&this->formatLock, 1));
+  LG_LOCK(this->formatLock);
   if (!this->reconfigure)
   {
     __sync_lock_release(&this->formatLock);
@@ -787,7 +791,7 @@ static bool draw_frame(struct Inst * this, bool * frameUpdate)
   *frameUpdate = this->frameUpdate;
   if (!this->frameUpdate)
   {
-    __sync_lock_release(&this->syncLock);
+    LG_UNLOCK(this->syncLock);
     return true;
   }
 
@@ -795,9 +799,9 @@ static bool draw_frame(struct Inst * this, bool * frameUpdate)
   if (++this->wTexIndex == BUFFER_COUNT)
     this->wTexIndex = 0;
   this->frameUpdate = false;
-  __sync_lock_release(&this->syncLock);
+  LG_UNLOCK(this->syncLock);
 
-  while(__sync_lock_test_and_set(&this->formatLock, 1));
+  LG_LOCK(this->formatLock);
   if (this->params.showFPS && this->renderTime > 1e9)
   {
     char str[128];
