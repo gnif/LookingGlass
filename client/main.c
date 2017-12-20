@@ -185,6 +185,13 @@ int cursorThread(void * unused)
 
   while(state.running)
   {
+    // poll until we have cursor data
+    if(!(state.shm->flags & KVMFR_HEADER_FLAG_CURSOR))
+    {
+      nsleep(100);
+      continue;
+    }
+
     // we must take a copy of the header, both to let the guest advance and to
     // prevent the contained arguments being abused to overflow buffers
     memcpy(&header, (KVMFRHeader *)state.shm, sizeof(struct KVMFRHeader));
