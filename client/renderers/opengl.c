@@ -185,6 +185,10 @@ void opengl_deinitialize(void * opaque)
   if (this->mouseData)
     free(this->mouseData);
 
+  LG_LOCK_FREE(this->formatLock);
+  LG_LOCK_FREE(this->syncLock  );
+  LG_LOCK_FREE(this->mouseLock );
+
   free(this);
 }
 

@@ -46,7 +46,16 @@ static inline void nsleep(uint64_t ns)
   nanosleep(&ts, NULL);
 }
 
-typedef volatile int LG_Lock;
-#define LG_LOCK_INIT(x) (x) = 0
-#define LG_LOCK(x)      while(__sync_lock_test_and_set(&(x), 1)) {nsleep(100);}
-#define LG_UNLOCK(x)    __sync_lock_release(&x)
+#ifdef ATOMIC_LOCKING
+  typedef volatile int LG_Lock;
+  #define LG_LOCK_INIT(x) (x) = 0
+  #define LG_LOCK(x)      while(__sync_lock_test_and_set(&(x), 1)) {nsleep(100);}
+  #define LG_UNLOCK(x)    __sync_lock_release(&x)
+  #define LG_LOCK_FREE(x)
+#else
+  typedef SDL_mutex * LG_Lock;
+  #define LG_LOCK_INIT(x) (x = SDL_CreateMutex())
+  #define LG_LOCK(x)      SDL_LockMutex(x)
+  #define LG_UNLOCK(x)    SDL_UnlockMutex(x)
+  #define LG_LOCK_FREE(x) SDL_DestroyMutex(x)
+#endif
