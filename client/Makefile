@@ -1,5 +1,5 @@
 BINARY  = looking-glass-client
-CFLAGS  = -g -O3 -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG
+CFLAGS  = -g -O3 -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG -DATOMIC_LOCKING
 LDFLAGS = -lrt
 
 CFLAGS  += -ffast-math
