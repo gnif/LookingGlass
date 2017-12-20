@@ -317,6 +317,79 @@ bool opengl_render(void * opaque, SDL_Window * window)
     this->resizeWindow = false;
   }
 
+  if (this->params.showFPS && this->renderTime > 1e9)
+  {
+    char str[128];
+    const float avgFPS    = 1000.0f / (((float)this->renderTime / this->frameCount ) / 1e6f);
+    const float renderFPS = 1000.0f / (((float)this->renderTime / this->renderCount) / 1e6f);
+    snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
+    SDL_Color color = {0xff, 0xff, 0xff};
+    SDL_Surface *textSurface = NULL;
+    if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
+    {
+      DEBUG_ERROR("Failed to render text");
+      LG_UNLOCK(this->formatLock);
+      return false;
+    }
+
+    glBindTexture(GL_TEXTURE_2D       , this->textures[FPS_TEXTURE]);
+    glPixelStorei(GL_UNPACK_ALIGNMENT , 4                          );
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w             );
+    glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      textSurface->format->BytesPerPixel,
+      textSurface->w,
+      textSurface->h,
+      0,
+      GL_BGRA,
+      GL_UNSIGNED_BYTE,
+      textSurface->pixels
+    );
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    this->fpsRect.x = 5;
+    this->fpsRect.y = 5;
+    this->fpsRect.w = textSurface->w;
+    this->fpsRect.h = textSurface->h;
+
+    SDL_FreeSurface(textSurface);
+
+    this->renderTime  = 0;
+    this->frameCount  = 0;
+    this->renderCount = 0;
+    this->fpsTexture  = true;
+
+    glNewList(this->fpsList, GL_COMPILE);
+      glEnable(GL_BLEND);
+      glDisable(GL_TEXTURE_2D);
+      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+      glBegin(GL_TRIANGLE_STRIP);
+        glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+        glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+      glEnd();
+      glEnable(GL_TEXTURE_2D);
+
+      glBindTexture(GL_TEXTURE_2D, this->textures[FPS_TEXTURE]);
+      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+      glBegin(GL_TRIANGLE_STRIP);
+        glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+        glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+        glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+        glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+      glEnd();
+      glDisable(GL_BLEND);
+    glEndList();
+  }
+
   bool frameUpdate;
   if (!draw_frame(this, &frameUpdate))
     return false;
@@ -802,78 +875,6 @@ static bool draw_frame(struct Inst * this, bool * frameUpdate)
   LG_UNLOCK(this->syncLock);
 
   LG_LOCK(this->formatLock);
-  if (this->params.showFPS && this->renderTime > 1e9)
-  {
-    char str[128];
-    const float avgFPS    = 1000.0f / (((float)this->renderTime / this->frameCount ) / 1e6f);
-    const float renderFPS = 1000.0f / (((float)this->renderTime / this->renderCount) / 1e6f);
-    snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
-    SDL_Color color = {0xff, 0xff, 0xff};
-    SDL_Surface *textSurface = NULL;
-    if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
-    {
-      DEBUG_ERROR("Failed to render text");
-      LG_UNLOCK(this->formatLock);
-      return false;
-    }
-
-    glBindTexture(GL_TEXTURE_2D       , this->textures[FPS_TEXTURE]);
-    glPixelStorei(GL_UNPACK_ALIGNMENT , 4                          );
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w             );
-    glTexImage2D(
-      GL_TEXTURE_2D,
-      0,
-      textSurface->format->BytesPerPixel,
-      textSurface->w,
-      textSurface->h,
-      0,
-      GL_BGRA,
-      GL_UNSIGNED_BYTE,
-      textSurface->pixels
-    );
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    this->fpsRect.x = 5;
-    this->fpsRect.y = 5;
-    this->fpsRect.w = textSurface->w;
-    this->fpsRect.h = textSurface->h;
-
-    SDL_FreeSurface(textSurface);
-
-    this->renderTime  = 0;
-    this->frameCount  = 0;
-    this->renderCount = 0;
-    this->fpsTexture  = true;
-
-    glNewList(this->fpsList, GL_COMPILE);
-      glEnable(GL_BLEND);
-      glDisable(GL_TEXTURE_2D);
-      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-        glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-      glEnd();
-      glEnable(GL_TEXTURE_2D);
-
-      glBindTexture(GL_TEXTURE_2D, this->textures[FPS_TEXTURE]);
-      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-        glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-        glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-        glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-      glEnd();
-      glDisable(GL_BLEND);
-    glEndList();
-  }
 
   // bind the texture and update it
   glBindTexture(GL_TEXTURE_2D        , this->textures[FRAME_TEXTURE]);
