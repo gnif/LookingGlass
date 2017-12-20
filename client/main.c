@@ -121,6 +121,9 @@ struct AppParams params =
 
 static inline void updatePositionInfo()
 {
+  if (!state.started)
+    return;
+
   int w, h;
   SDL_GetWindowSize(state.window, &w, &h);
 
@@ -355,8 +358,8 @@ int frameThread(void * unused)
 
     if (!state.started)
     {
-      DEBUG_INFO("feed started");
       state.started = true;
+      updatePositionInfo();
     }
   }
 
