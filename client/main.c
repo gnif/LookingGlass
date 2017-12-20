@@ -165,10 +165,13 @@ void mainThread()
 {
   while(state.running)
   {
-    nsleep(1000);
     if (state.started)
+    {
       if (!state.lgr->render(state.lgrData, state.window))
         break;
+    }
+    else
+      usleep(1000);
   }
 }
 
