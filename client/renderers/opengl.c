@@ -371,6 +371,9 @@ bool opengl_render(void * opaque, SDL_Window * window)
     this->fpsTexture  = true;
 
     glNewList(this->fpsList, GL_COMPILE);
+      glPushMatrix();
+      glLoadIdentity();
+
       glEnable(GL_BLEND);
       glDisable(GL_TEXTURE_2D);
       glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
@@ -391,6 +394,8 @@ bool opengl_render(void * opaque, SDL_Window * window)
         glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
       glEnd();
       glDisable(GL_BLEND);
+
+      glPopMatrix();
     glEndList();
   }
 
