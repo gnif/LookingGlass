@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define MULTIMEMCPY_THREADS 4
 
-#include <Windows.h>
+#include <windows.h>
 #include <stdint.h>
 
 #pragma once
