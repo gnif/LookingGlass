@@ -154,7 +154,6 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  bool restart = false;
   struct FrameInfo frame;
   ZeroMemory(&frame, sizeof(FrameInfo));
   frame.buffer      = m_frame[m_frameIndex];
@@ -171,7 +170,6 @@ bool Service::Process()
     if (f & KVMFR_HEADER_FLAG_RESTART)
     {
       INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
-      restart = true;
       break;
     }
 

@@ -392,7 +392,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     if (SUCCEEDED(status))
       break;
     
-    HDESK desktop = NULL;
     switch (status)
     {      
       // desktop switch, mode change, switch DWM on or off or Secure Desktop
