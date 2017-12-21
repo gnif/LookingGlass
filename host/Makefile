@@ -16,11 +16,11 @@ LD     = $(CXX)
 BUILD  ?= .build
 BIN    ?= bin
 
-
 CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbrev=10 --tags)"'
 
 OBJS	= main.o \
 	  CrashHandler.o \
+	  MultiMemcpy.o \
 	  IVSHMEM.o \
 	  Service.o \
 	  Capture/DXGI.o
