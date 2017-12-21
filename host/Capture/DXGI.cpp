@@ -21,7 +21,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using namespace Capture;
 
 #include "common/debug.h"
-#include "common/memcpySSE.h"
 
 DXGI::DXGI() :
   m_options(NULL),
@@ -33,11 +32,11 @@ DXGI::DXGI() :
   m_texture(),
   m_pointer(NULL)
 {
+
 }
 
 DXGI::~DXGI()
 {
-
 }
 
 bool DXGI::Initialize(CaptureOptions * options)
@@ -310,7 +309,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         frame.stride = m_mapping.RowPitch / 4;
 
         unsigned int size = m_height * m_mapping.RowPitch;
-        memcpySSE(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+        m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
         return GRAB_STATUS_OK;
       }
 
@@ -448,7 +447,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.stride  = m_mapping.RowPitch / 4;
   unsigned int size = m_height * m_mapping.RowPitch;
 
-  memcpySSE(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+  m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
 
   return GRAB_STATUS_OK;
 }

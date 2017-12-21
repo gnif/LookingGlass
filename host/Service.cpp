@@ -23,15 +23,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/KVMFR.h"
 
+#include "Util.h"
 #include "CaptureFactory.h"
-
-#if __MINGW32__
-#define INTERLOCKED_AND8 __sync_and_and_fetch
-#define INTERLOCKED_OR8 __sync_or_and_fetch
-#else
-#define INTERLOCKED_OR8 InterlockedOr8
-#define INTERLOCKED_AND8 InterlockedAnd8
-#endif
 
 Service * Service::m_instance = NULL;
 

@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "ICapture.h"
+#include "MultiMemcpy.h"
 
 #define W32_LEAN_AND_MEAN
 #include <windows.h>
@@ -75,6 +76,7 @@ namespace Capture
     unsigned int  m_width;
     unsigned int  m_height;
 
+    MultiMemcpy                     m_memcpy;
     IDXGIFactory1Ptr                m_dxgiFactory;
     ID3D11DevicePtr                 m_device;
     D3D_FEATURE_LEVEL               m_featureLevel;

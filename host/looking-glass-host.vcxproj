@@ -335,6 +335,7 @@
     <ClCompile Include="CrashHandler.cpp" />
     <ClCompile Include="ivshmem.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="MultiMemcpy.cpp" />
     <ClCompile Include="Service.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -344,6 +345,7 @@
     <ClInclude Include="CrashHandler.h" />
     <ClInclude Include="ICapture.h" />
     <ClInclude Include="ivshmem.h" />
+    <ClInclude Include="MultiMemcpy.h" />
     <ClInclude Include="Service.h" />
     <ClInclude Include="Util.h" />
   </ItemGroup>

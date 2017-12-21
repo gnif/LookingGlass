@@ -42,6 +42,9 @@
     <ClCompile Include="CrashHandler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MultiMemcpy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ivshmem.h">
@@ -66,6 +69,9 @@
       <Filter>Header Files\Capture</Filter>
     </ClInclude>
     <ClInclude Include="CrashHandler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MultiMemcpy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
