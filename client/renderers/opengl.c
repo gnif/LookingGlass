@@ -310,14 +310,6 @@ bool opengl_render(void * opaque, SDL_Window * window)
       1.0f
     );
 
-    // update the scissor rect to prevent drawing outside of the frame
-    glScissor(
-      this->destRect.x,
-      this->destRect.y,
-      this->destRect.w,
-      this->destRect.h
-    );
-
     this->resizeWindow = false;
   }
 
@@ -405,9 +397,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
   bool newShape;
   update_mouse_shape(this, &newShape);
 
-  glDisable(GL_SCISSOR_TEST);
   glClear(GL_COLOR_BUFFER_BIT);
-  glEnable(GL_SCISSOR_TEST);
 
   glCallList(this->texList + this->texIndex);
   draw_mouse(this);
@@ -692,7 +682,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
   glEnable(GL_COLOR_MATERIAL);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glBlendEquation(GL_FUNC_ADD);
-  glEnable(GL_SCISSOR_TEST);
 
   this->resizeWindow = true;
   this->drawStart    = nanotime();
