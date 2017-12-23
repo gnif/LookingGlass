@@ -121,7 +121,7 @@ static bool _check_gl_error(unsigned int line, const char * name);
 static void deconfigure(struct Inst * this);
 static bool configure(struct Inst * this, SDL_Window *window);
 static void update_mouse_shape(struct Inst * this, bool * newShape);
-static bool draw_frame(struct Inst * this, bool * frameUpdate);
+static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
 
 const char * opengl_get_name()
@@ -399,8 +399,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
     glEndList();
   }
 
-  bool frameUpdate;
-  if (!draw_frame(this, &frameUpdate))
+  if (!draw_frame(this))
     return false;
 
   bool newShape;
@@ -867,10 +866,9 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
   LG_UNLOCK(this->mouseLock);
 }
 
-static bool draw_frame(struct Inst * this, bool * frameUpdate)
+static bool draw_frame(struct Inst * this)
 {
   LG_LOCK(this->syncLock);
-  *frameUpdate = this->frameUpdate;
   if (!this->frameUpdate)
   {
     LG_UNLOCK(this->syncLock);
