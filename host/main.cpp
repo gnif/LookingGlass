@@ -24,6 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "vendor/getopt/getopt.h"
 
 #include "CrashHandler.h"
+#include "TraceUtil.h"
 #include "CaptureFactory.h"
 #include "Service.h"
 
@@ -50,6 +51,8 @@ struct StartupArgs
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam, int iCmdShow)
 {
   CrashHandler::Initialize();
+  TraceUtil::Initialize();
+
   SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
 
   struct StartupArgs args;

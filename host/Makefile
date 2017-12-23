@@ -25,6 +25,11 @@ OBJS	= main.o \
 	  Service.o \
 	  Capture/DXGI.o
 
+ifeq ($(ENABLE_TRACING),1)
+CFLAGS  += -DENABLE_TRACING
+OBJS    += TraceUtil.o
+endif
+
 ifeq ($(CONFIG_CAPTURE_NVFBC),1)
 CFLAGS  += -DCONFIG_CAPTURE_NVFBC=1 -I../vendor
 OBJS    += Capture/NvFBC.o

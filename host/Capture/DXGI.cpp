@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using namespace Capture;
 
 #include "common/debug.h"
+#include "TraceUtil.h"
 
 DXGI::DXGI() :
   m_options(NULL),
@@ -264,6 +265,7 @@ void DXGI::WaitForDesktop()
 
 GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 {
+  TRACE;
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
@@ -446,7 +448,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.stride  = m_mapping.RowPitch / 4;
   unsigned int size = m_height * m_mapping.RowPitch;
 
+  TRACE_START("DXGI Memory Copy");
   m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+  TRACE_END;
 
   return GRAB_STATUS_OK;
 }
