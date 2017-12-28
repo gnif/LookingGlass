@@ -265,7 +265,6 @@ void DXGI::WaitForDesktop()
 
 GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 {
-  TRACE;
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
@@ -303,6 +302,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
       {
         if (!m_surfaceMapped)
           continue;
+        m_memcpy.Wake();
 
         // send the last frame again if we timeout to prevent the client stalling on restart
         frame.width  = m_width;
@@ -416,6 +416,10 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
   }
 
+  TRACE_START("DXGI Memory Copy");
+  // wake up the copy threads
+  m_memcpy.Wake();
+
   ID3D11Texture2DPtr src(res);
   res.Release();
   if (!src)
@@ -426,12 +430,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   m_deviceContext->CopyResource(m_texture, src);
   src.Release();  
-
-  if (m_surfaceMapped)
-  {
-    m_deviceContext->Unmap(m_texture, 0);
-    m_surfaceMapped = false;
-  }
 
   status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
   if (FAILED(status))
@@ -445,10 +443,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   frame.width   = m_width;
   frame.height  = m_height;
   frame.pitch   = m_mapping.RowPitch;
-  frame.stride  = m_mapping.RowPitch / 4;
-  unsigned int size = m_height * m_mapping.RowPitch;
+  frame.stride  = m_mapping.RowPitch >> 2;
 
-  TRACE_START("DXGI Memory Copy");
+  const unsigned int size = m_height * m_mapping.RowPitch;
   m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
   TRACE_END;
 
