@@ -191,9 +191,26 @@ void * IVSHMEM::GetMemory()
   if (m_gotMemory)
     return m_memory;
 
+// this if define can be removed later once everyone is un the latest version
+// old versions of the IVSHMEM driver ignore the input argument, as such this
+// is completely backwards compatible
+#if defined(IVSHMEM_CACHE_WRITECOMBINED)
+  IVSHMEM_MMAP_CONFIG config;
+  config.cacheMode = IVSHMEM_CACHE_WRITECOMBINED;
+#endif
+
   IVSHMEM_MMAP map;
   ZeroMemory(&map, sizeof(IVSHMEM_MMAP));
-  if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_MMAP, NULL, 0, &map, sizeof(IVSHMEM_MMAP), NULL, NULL))
+  if (!DeviceIoControl(
+    m_handle,
+    IOCTL_IVSHMEM_REQUEST_MMAP,
+#if defined(IVSHMEM_CACHE_WRITECOMBINED)
+    &config, sizeof(IVSHMEM_MMAP_CONFIG),
+#else
+    NULL   , 0,
+#endif
+    &map   , sizeof(IVSHMEM_MMAP       ),
+    NULL, NULL))
   {
     DEBUG_ERROR("DeviceIoControl Failed: %d", (int)GetLastError());
     return NULL;
