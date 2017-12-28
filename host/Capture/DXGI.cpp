@@ -416,10 +416,6 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
   }
 
-  TRACE_START("DXGI Memory Copy");
-  // wake up the copy threads
-  m_memcpy.Wake();
-
   ID3D11Texture2DPtr src(res);
   res.Release();
   if (!src)
@@ -431,6 +427,12 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   m_deviceContext->CopyResource(m_texture, src);
   src.Release();  
 
+  if (m_surfaceMapped)
+  {
+    m_deviceContext->Unmap(m_texture, 0);
+    m_surfaceMapped = false;
+  }
+
   status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
   if (FAILED(status))
   {
@@ -439,6 +441,10 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
   }
   m_surfaceMapped = true;
+
+  TRACE_START("DXGI Memory Copy");
+  // wake up the copy threads
+  m_memcpy.Wake();
 
   frame.width   = m_width;
   frame.height  = m_height;
