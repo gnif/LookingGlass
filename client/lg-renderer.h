@@ -50,8 +50,8 @@ LG_RendererOpt;
 
 typedef struct LG_RendererOptValue
 {
-  const LG_RendererOpt   * opt;
-  const char             * value;
+  const LG_RendererOpt * opt;
+  char                 * value;
 } LG_RendererOptValue;
 
 typedef LG_RendererOpt * LG_RendererOptions;

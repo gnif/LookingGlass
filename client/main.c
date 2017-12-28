@@ -24,6 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -33,6 +34,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <libconfig.h>
 #include <fontconfig/fontconfig.h>
 
 #include "debug.h"
@@ -75,6 +77,7 @@ RendererOpts;
 
 struct AppParams
 {
+  const char * configFile;
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
@@ -83,10 +86,10 @@ struct AppParams
   bool         center;
   int          x, y;
   unsigned int w, h;
-  const char * shmFile;
+  char       * shmFile;
   bool         showFPS;
   bool         useSpice;
-  const char * spiceHost;
+  char       * spiceHost;
   unsigned int spicePort;
   bool         scaleMouseInput;
   bool         hideMouse;
@@ -100,6 +103,7 @@ struct AppParams
 struct AppState  state;
 struct AppParams params =
 {
+  .configFile       = "/etc/looking-glass.conf",
   .autoResize       = false,
   .allowResize      = true,
   .keepAspect       = true,
@@ -950,6 +954,7 @@ void doHelp(char * app)
     "\n"
     "  -h        Print out this help\n"
     "\n"
+    "  -C PATH   Specify an additional configuration file to load\n"
     "  -f PATH   Specify the path to the shared memory file [current: %s]\n"
     "\n"
     "  -s        Disable spice client\n"
@@ -1012,11 +1017,156 @@ void doLicense()
   );
 }
 
+static bool load_config(const char * configFile)
+{
+  config_t cfg;
+  int itmp;
+  const char *stmp;
+
+  config_init(&cfg);
+  if (!config_read_file(&cfg, configFile))
+  {
+    DEBUG_ERROR("Config file error %s:%d - %s",
+      config_error_file(&cfg),
+      config_error_line(&cfg),
+      config_error_text(&cfg)
+    );
+    return false;
+  }
+
+  config_setting_t * global = config_lookup(&cfg, "global");
+  if (global)
+  {
+    if (config_setting_lookup_string(global, "shmFile", &stmp))
+    {
+      free(params.shmFile);
+      params.shmFile = strdup(stmp);
+    }
+
+    if (config_setting_lookup_string(global, "forceRenderer", &stmp))
+    {
+      bool ok = false;
+      for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+        if (strcasecmp(LG_Renderers[i]->get_name(), stmp) == 0)
+        {
+          params.forceRenderer      = true;
+          params.forceRendererIndex = i;
+          ok = true;
+          break;
+        }
+
+      if (!ok)
+      {
+        DEBUG_ERROR("No such renderer: %s", stmp);
+        config_destroy(&cfg);
+        return false;
+      }
+    }
+
+    if (config_setting_lookup_bool  (global, "scaleMouseInput", &itmp)) params.scaleMouseInput = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "hideMouse"      , &itmp)) params.hideMouse       = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "showFPS"        , &itmp)) params.showFPS         = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "autoResize"     , &itmp)) params.autoResize      = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "allowResize"    , &itmp)) params.allowResize     = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "keepAspect"     , &itmp)) params.keepAspect      = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "borderless"     , &itmp)) params.borderless      = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "fullScreen"     , &itmp)) params.fullscreen      = (itmp != 0);
+    if (config_setting_lookup_bool  (global, "ignoreQuit"     , &itmp)) params.ignoreQuit      = (itmp != 0);
+
+    if (config_setting_lookup_int(global, "x", &params.x)) params.center = false;
+    if (config_setting_lookup_int(global, "y", &params.y)) params.center = false;
+
+    if (config_setting_lookup_int(global, "w", &itmp))
+    {
+      if (itmp < 1)
+      {
+        DEBUG_ERROR("Invalid window width, must be greater then 1px");
+        config_destroy(&cfg);
+        return false;
+      }
+      params.w = (unsigned int)itmp;
+    }
+
+    if (config_setting_lookup_int(global, "h", &itmp))
+    {
+      if (itmp < 1)
+      {
+        DEBUG_ERROR("Invalid window height, must be greater then 1px");
+        config_destroy(&cfg);
+        return false;
+      }
+      params.h = (unsigned int)itmp;
+    }
+  }
+
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+  {
+    const LG_Renderer * r     = LG_Renderers[i];
+    RendererOpts      * opts  = &params.rendererOpts[i];
+    config_setting_t  * group = config_lookup(&cfg, r->get_name());
+    if (!group)
+      continue;
+
+    for(unsigned int j = 0; j < r->option_count; ++j)
+    {
+      const char * name = r->options[j].name;
+      if (!config_setting_lookup_string(group, name, &stmp))
+        continue;
+
+      if (r->options[j].validator && !r->options[j].validator(stmp))
+      {
+        DEBUG_ERROR("Renderer \"%s\" reported invalid value for option \"%s\"", r->get_name(), name);
+        config_destroy(&cfg);
+        return false;
+      }
+
+      if (opts->argc == opts->size)
+      {
+        opts->size += 5;
+        opts->argv  = realloc(opts->argv, sizeof(LG_RendererOptValue) * opts->size);
+      }
+
+      opts->argv[opts->argc].opt   = &r->options[j];
+      opts->argv[opts->argc].value = strdup(stmp);
+      ++opts->argc;
+    }
+  }
+
+  config_destroy(&cfg);
+  return true;
+}
+
 int main(int argc, char * argv[])
 {
+  params.shmFile   = strdup(params.shmFile  );
+  params.spiceHost = strdup(params.spiceHost);
+
+  {
+    // load any global then local config options first
+    struct stat st;
+    if (stat("/etc/looking-glass.conf", &st) >= 0)
+    {
+      DEBUG_INFO("Loading config from: /etc/looking-glass.conf");
+      if (!load_config("/etc/looking-glass.conf"))
+        return -1;
+    }
+
+    struct passwd * pw = getpwuid(getuid());
+    const char pattern[] = "%s/.looking-glass.conf";
+    const size_t len = strlen(pw->pw_dir) + sizeof(pattern);
+    char buffer[len];
+    snprintf(buffer, len, pattern, pw->pw_dir);
+    if (stat(buffer, &st) >= 0)
+    {
+      DEBUG_INFO("Loading config from: %s", buffer);
+      if (!load_config(buffer))
+        return -1;
+    }
+  }
+
   for(;;)
   {
-    switch(getopt(argc, argv, "hf:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
+    switch(getopt(argc, argv, "hC:f:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
     {
       case '?':
       case 'h':
@@ -1027,8 +1177,15 @@ int main(int argc, char * argv[])
       case -1:
         break;
 
+      case 'C':
+        params.configFile = optarg;
+        if (!load_config(optarg))
+          return -1;
+        continue;
+
       case 'f':
-        params.shmFile = optarg;
+        free(params.shmFile);
+        params.shmFile = strdup(optarg);
         continue;
 
       case 's':
@@ -1036,7 +1193,8 @@ int main(int argc, char * argv[])
         continue;
 
       case 'c':
-        params.spiceHost = optarg;
+        free(params.spiceHost);
+        params.spiceHost = strdup(optarg);
         continue;
 
       case 'p':
@@ -1162,7 +1320,7 @@ int main(int argc, char * argv[])
 
         if (opt->validator && !opt->validator(value))
         {
-          fprintf(stderr, "Renderer \"%s\" reported Invalid value for option \"%s\"\n", renderer->get_name(), option);
+          fprintf(stderr, "Renderer \"%s\" reported invalid value for option \"%s\"\n", renderer->get_name(), option);
           doHelp(argv[0]);
           return -1;
         }
@@ -1174,7 +1332,7 @@ int main(int argc, char * argv[])
         }
 
         opts->argv[opts->argc].opt   = opt;
-        opts->argv[opts->argc].value = value;
+        opts->argv[opts->argc].value = strdup(value);
         ++opts->argc;
         continue;
       }
@@ -1235,5 +1393,18 @@ int main(int argc, char * argv[])
     return -1;
   }
 
-  return run();
+  const int ret = run();
+
+  free(params.shmFile);
+  free(params.spiceHost);
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+  {
+    RendererOpts * opts = &params.rendererOpts[i];
+    for(unsigned int j = 0; j < opts->argc; ++j)
+      free(opts->argv[j].value);
+    free(opts->argv);
+  }
+
+
+  return ret;
 }
