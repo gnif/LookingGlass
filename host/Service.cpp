@@ -292,6 +292,7 @@ bool Service::Process()
   // update the flags
   INTERLOCKED_AND8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
   INTERLOCKED_OR8 ((volatile char *)flags, updateFlags);
+  _mm_sfence();
 
   return true;
 }
