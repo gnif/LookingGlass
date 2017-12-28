@@ -75,7 +75,17 @@ bool Service::Initialize(ICapture * captureDevice)
   }
 
   if (!InitPointers())
+  {
+    DeInitialize();
     return false;
+  }
+
+  if (m_capture->GetMaxFrameSize() > m_frameSize)
+  {
+    DEBUG_ERROR("Maximum frame size of %zu bytes excceds maximum space available", m_capture->GetMaxFrameSize());
+    DeInitialize();
+    return false;
+  }
 
   m_timer = CreateWaitableTimer(NULL, TRUE, NULL);
   if (!m_timer)
@@ -96,25 +106,29 @@ bool Service::Initialize(ICapture * captureDevice)
   return true;
 }
 
+#define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
+#define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
+
 bool Service::InitPointers()
 {
   m_shmHeader      = reinterpret_cast<KVMFRHeader *>(m_memory);
-  m_cursorData     = (uint8_t *)(((uintptr_t)m_memory + sizeof(KVMFRHeader *) + 0x7F) & ~0x7F);
-  m_cursorDataSize = (128 * 128 * 4);
-  m_frame[0]       = m_cursorData + (128*128*4);
-  m_frameSize      = ((m_ivshmem->GetSize() - (m_frame[0] - m_memory)) & ~0x7F) >> 1;
-  m_frame[1]       = m_frame[0] + m_frameSize;
+  m_cursorData     = (uint8_t *)ALIGN_UP(m_memory + sizeof(KVMFRHeader));
+  m_cursorDataSize = 1048576; // 1MB fixed for cursor size, should be more then enough
+  m_frame[0]       = (uint8_t *)ALIGN_UP(m_cursorData + m_cursorDataSize);
+  m_frameSize      = ALIGN_DN((m_ivshmem->GetSize() - (m_frame[0] - m_memory)) >> 1);
+  m_frame[1]       = (uint8_t *)ALIGN_DN(m_frame[0] + m_frameSize);
+
 
   m_cursorOffset  = m_cursorData - m_memory;
   m_dataOffset[0] = m_frame[0]   - m_memory;
   m_dataOffset[1] = m_frame[1]   - m_memory;
 
-  if (m_capture->GetMaxFrameSize() > m_frameSize)
-  {
-    DEBUG_ERROR("Frame can exceed buffer size!");
-    DeInitialize();
-    return false;
-  }
+  DEBUG_INFO("Total Available : %3I64u MB", m_ivshmem->GetSize() / 1024 / 1024);
+  DEBUG_INFO("Max Cursor Size : %3I64u MB", m_cursorDataSize / 1024 / 1024);
+  DEBUG_INFO("Max Frame Size  : %3I64u MB", m_frameSize / 1024 / 1024);
+  DEBUG_INFO("Cursor          : %p (0x%08I64x)", m_cursorData, m_cursorOffset );
+  DEBUG_INFO("Frame 1         : %p (0x%08I64x)", m_frame[0]  , m_dataOffset[0]);
+  DEBUG_INFO("Frame 2         : %p (0x%08I64x)", m_frame[1]  , m_dataOffset[1]);
 
   return true;
 }
@@ -217,9 +231,15 @@ bool Service::Process()
             Sleep(100);
         }
 
-        if (!m_capture->ReInitialize() || !InitPointers())
+        if (!m_capture->ReInitialize())
         {
           DEBUG_ERROR("ReInitialize Failed");
+          return false;
+        }
+
+        if (m_capture->GetMaxFrameSize() > m_frameSize)
+        {
+          DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
           return false;
         }
         continue;
