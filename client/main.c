@@ -25,6 +25,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -36,7 +38,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "utils.h"
 #include "KVMFR.h"
-#include "ivshmem/ivshmem.h"
 #include "spice/spice.h"
 #include "kb.h"
 
@@ -59,6 +60,7 @@ struct AppState
   void               * lgrData;
 
   SDL_Window         * window;
+  int                  shmFD;
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
 };
@@ -81,7 +83,7 @@ struct AppParams
   bool         center;
   int          x, y;
   unsigned int w, h;
-  const char * ivshmemSocket;
+  const char * shmFile;
   bool         showFPS;
   bool         useSpice;
   const char * spiceHost;
@@ -108,7 +110,7 @@ struct AppParams params =
   .y                = 0,
   .w                = 1024,
   .h                = 768,
-  .ivshmemSocket    = "/tmp/ivshmem_socket",
+  .shmFile          = "/dev/shm/looking-glass",
   .showFPS          = false,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
@@ -373,22 +375,6 @@ int frameThread(void * unused)
   return 0;
 }
 
-int ivshmemThread(void * arg)
-{
-  while(state.running)
-    if (!ivshmem_process())
-    {
-      if (state.running)
-      {
-        state.running = false;
-        DEBUG_ERROR("failed to process ivshmem messages");
-      }
-      break;
-    }
-
-  return 0;
-}
-
 int spiceThread(void * arg)
 {
   while(state.running)
@@ -625,6 +611,35 @@ void intHandler(int signal)
   }
 }
 
+static void * map_memory()
+{
+  struct stat st;
+  if (stat(params.shmFile, &st) < 0)
+  {
+    DEBUG_ERROR("Failed to stat the shared memory file: %s", params.shmFile);
+    return NULL;
+  }
+
+  state.shmSize = st.st_size;
+  state.shmFD   = open(params.shmFile, O_RDWR, (mode_t)0600);
+  if (state.shmFD < 0)
+  {
+    DEBUG_ERROR("Failed to open the shared memory file: %s", params.shmFile);
+    return NULL;
+  }
+
+  void * map = mmap(0, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, state.shmFD, 0);
+  if (map == MAP_FAILED)
+  {
+    DEBUG_ERROR("Failed to map the shared memory file: %s", params.shmFile);
+    close(state.shmFD);
+    state.shmFD = 0;
+    return NULL;
+  }
+
+  return map;
+}
+
 static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
 {
   const LG_Renderer *r    = LG_Renderers[index];
@@ -814,32 +829,17 @@ int run()
     SDL_ShowCursor(SDL_DISABLE);
   }
 
-  int         shm_fd    = 0;
-  SDL_Thread *t_ivshmem = NULL;
   SDL_Thread *t_spice   = NULL;
   SDL_Thread *t_event   = NULL;
 
   while(1)
   {
-    if (!ivshmem_connect(params.ivshmemSocket))
-    {
-      DEBUG_ERROR("failed to connect to the ivshmem server");
-      break;
-    }
-
-    if (!(t_ivshmem = SDL_CreateThread(ivshmemThread, "ivshmemThread", NULL)))
-    {
-      DEBUG_ERROR("ivshmem create thread failed");
-      break;
-    }
-
-    state.shm = (struct KVMFRHeader *)ivshmem_get_map();
+    state.shm = (struct KVMFRHeader *)map_memory();
     if (!state.shm)
     {
       DEBUG_ERROR("Failed to map memory");
       break;
     }
-    state.shmSize = ivshmem_get_map_size();
 
     if (params.useSpice)
     {
@@ -914,12 +914,6 @@ int run()
   if (t_event)
     SDL_WaitThread(t_event, NULL);
 
-  // this needs to happen here to abort any waiting reads
-  // as ivshmem uses recvmsg which has no timeout
-  ivshmem_disconnect();
-  if (t_ivshmem)
-    SDL_WaitThread(t_ivshmem, NULL);
-
   if (t_spice)
     SDL_WaitThread(t_spice, NULL);
 
@@ -932,8 +926,11 @@ int run()
   if (cursor)
     SDL_FreeCursor(cursor);
 
-  if (shm_fd)
-    close(shm_fd);
+  if (state.shm)
+  {
+    munmap(state.shm, state.shmSize);
+    close(state.shmFD);
+  }
 
   TTF_Quit();
   SDL_Quit();
@@ -953,7 +950,7 @@ void doHelp(char * app)
     "\n"
     "  -h        Print out this help\n"
     "\n"
-    "  -f PATH   Specify the path to the ivshmem socket [current: %s]\n"
+    "  -f PATH   Specify the path to the shared memory file [current: %s]\n"
     "\n"
     "  -s        Disable spice client\n"
     "  -c HOST   Specify the spice host [current: %s]\n"
@@ -981,7 +978,7 @@ void doHelp(char * app)
     "\n",
     app,
     app,
-    params.ivshmemSocket,
+    params.shmFile,
     params.spiceHost,
     params.spicePort,
     params.center ? "center" : x,
@@ -1031,7 +1028,7 @@ int main(int argc, char * argv[])
         break;
 
       case 'f':
-        params.ivshmemSocket = optarg;
+        params.shmFile = optarg;
         continue;
 
       case 's':
