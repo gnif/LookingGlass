@@ -25,9 +25,9 @@ MultiMemcpy::MultiMemcpy()
 {
   for (int i = 0; i < MULTIMEMCPY_THREADS; ++i)
   {
-    m_workers[i].start  = CreateSemaphore(NULL, 0, 1, NULL);
-    m_workers[i].stop   = CreateSemaphore(NULL, 0, 1, NULL);
-    m_semaphores[i]     = m_workers[i].stop;
+    m_workers[i].id      = (1 << i);
+    m_workers[i].running = &m_running;
+    m_workers[i].start   = CreateSemaphore(NULL, 0, 1, NULL);
 
     m_workers[i].thread = CreateThread(0, 0, WorkerFunction, &m_workers[i], 0, NULL);
   }
@@ -39,22 +39,26 @@ MultiMemcpy::~MultiMemcpy()
   {
     TerminateThread(m_workers[i].thread, 0);
     CloseHandle(m_workers[i].start);
-    CloseHandle(m_workers[i].stop );
   }
 }
 
 void MultiMemcpy::Copy(void * dst, void * src, size_t size)
 {
+  if (!m_awake)
+    Wake();
+
   const size_t block = size / MULTIMEMCPY_THREADS;
   for (int i = 0; i < MULTIMEMCPY_THREADS; ++i)
   {
     m_workers[i].dst  = (uint8_t *)dst + i * block;
     m_workers[i].src  = (uint8_t *)src + i * block;
     m_workers[i].size = (i + 1) * block - i * block;
-    ReleaseSemaphore(m_workers[i].start, 1, NULL);
   }
-  
-  WaitForMultipleObjects(MULTIMEMCPY_THREADS, m_semaphores, TRUE, INFINITE);
+
+  INTERLOCKED_OR8(&m_running, (1 << MULTIMEMCPY_THREADS) - 1);
+  while(m_running) {}
+
+  m_awake = false;
 }
 
 DWORD WINAPI MultiMemcpy::WorkerFunction(LPVOID param)
@@ -64,7 +68,9 @@ DWORD WINAPI MultiMemcpy::WorkerFunction(LPVOID param)
   for(;;)
   {
     WaitForSingleObject(w->start, INFINITE);
+    while(!(*w->running & w->id)) {}
+
     memcpySSE(w->dst, w->src, w->size);
-    ReleaseSemaphore(w->stop, 1, NULL);
+    INTERLOCKED_AND8(w->running, ~w->id);
   }
 }

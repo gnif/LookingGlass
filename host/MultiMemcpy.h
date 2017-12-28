@@ -29,19 +29,34 @@ public:
   MultiMemcpy();
   ~MultiMemcpy();
 
+  // preempt the copy and wake up the threads early
+  inline void Wake()
+  {
+    if (m_awake)
+      return;
+
+    for (int i = 0; i < MULTIMEMCPY_THREADS; ++i)
+      ReleaseSemaphore(m_workers[i].start, 1, NULL);
+
+    m_awake = true;
+  }
+
   void Copy(void * dst, void * src, size_t size);
 private:
   struct Worker
   {
+    unsigned int id;
+    volatile char *running;
+
     HANDLE  start;
-    HANDLE  stop;
     HANDLE  thread;
     void  * dst;
     void  * src;
     size_t  size;
   };
 
-  HANDLE m_semaphores[MULTIMEMCPY_THREADS];
+  bool m_awake;
+  volatile char m_running;
   struct Worker m_workers[MULTIMEMCPY_THREADS];
   static DWORD WINAPI WorkerFunction(LPVOID param);
 };
