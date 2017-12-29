@@ -265,7 +265,13 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
     return true;
   }
 
-  if (!this->configured || memcmp(&this->format, &format, sizeof(LG_RendererFormat)) != 0)
+  if (!this->configured ||
+    this->format.comp   != format.comp   ||
+    this->format.width  != format.width  ||
+    this->format.height != format.height ||
+    this->format.stride != format.stride ||
+    this->format.bpp    != format.bpp
+  )
   {
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
     this->reconfigure = true;
@@ -543,14 +549,20 @@ static bool configure(struct Inst * this, SDL_Window *window)
     return false;
   }
 
-  // assume 24 and 32 bit formats are RGB and RGBA
-  switch(this->format.bpp)
+  switch(this->format.comp)
   {
-    case 24:
-      this->intFormat = GL_RGB8;
-      this->vboFormat = GL_BGR;
+    case LG_COMPRESSION_NONE:
       break;
 
+    case LG_COMPRESSION_H264:
+      DEBUG_INFO("h264 not supported yet");
+      LG_UNLOCK(this->formatLock);
+      return false;
+  }
+
+  // assume 32 bit formats are BGRA
+  switch(this->format.bpp)
+  {
     case 32:
       this->intFormat = GL_RGBA8;
       this->vboFormat = GL_BGRA;

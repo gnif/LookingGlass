@@ -309,7 +309,6 @@ int frameThread(void * unused)
       header.detail.frame.type    >= FRAME_TYPE_MAX ||
       header.detail.frame.width   == 0 ||
       header.detail.frame.height  == 0 ||
-      header.detail.frame.stride  == 0 ||
       header.detail.frame.pitch   == 0 ||
       header.detail.frame.dataPos == 0 ||
       header.detail.frame.dataPos > state.shmSize ||
@@ -329,11 +328,13 @@ int frameThread(void * unused)
     switch(header.detail.frame.type)
     {
       case FRAME_TYPE_ARGB:
-        lgrFormat.bpp = 32;
+        lgrFormat.comp = LG_COMPRESSION_NONE;
+        lgrFormat.bpp  = 32;
         break;
 
-      case FRAME_TYPE_RGB:
-        lgrFormat.bpp = 24;
+      case FRAME_TYPE_H264:
+        lgrFormat.comp = LG_COMPRESSION_H264;
+        lgrFormat.bpp  = 0;
         break;
 
       default:

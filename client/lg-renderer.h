@@ -63,13 +63,21 @@ typedef struct LG_RendererParams
 }
 LG_RendererParams;
 
+typedef enum LG_RendererComp
+{
+  LG_COMPRESSION_NONE,
+  LG_COMPRESSION_H264
+}
+LG_RendererComp;
+
 typedef struct LG_RendererFormat
 {
-  unsigned int width;   // image width
-  unsigned int height;  // image height
-  unsigned int stride;  // scanline width
-  unsigned int pitch;   // scanline bytes
-  unsigned int bpp;     // bits per pixel
+  LG_RendererComp comp;    // compression format
+  unsigned int    width;   // image width
+  unsigned int    height;  // image height
+  unsigned int    stride;  // scanline width (zero if compresed)
+  unsigned int    pitch;   // scanline bytes (or compressed size)
+  unsigned int    bpp;     // bits per pixel (zero if compressed)
 }
 LG_RendererFormat;
 
