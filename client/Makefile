@@ -1,12 +1,12 @@
 BINARY  = looking-glass-client
-CFLAGS  = -g -O3 -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG -DATOMIC_LOCKING
+CFLAGS  = -g -Og -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG -DATOMIC_LOCKING
 LDFLAGS = -lrt
 
 CFLAGS  += -ffast-math
 CFLAGS  += -fdata-sections -ffunction-sections
 LDFLAGS += -Wl,--gc-sections
 
-LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig
+LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig libva
 CFLAGS  += $(shell pkg-config --cflags $(LIBS))
 LDFLAGS += $(shell pkg-config --libs   $(LIBS))
 BUILD   ?= .build
@@ -17,6 +17,8 @@ CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbr
 OBJS	= main.o \
 	  lg-renderer.o \
 	  spice/spice.o \
+	  decoders/null.o \
+	  decoders/h264.o \
 	  renderers/opengl.o
 #	  renderers/opengl-basic.o
 

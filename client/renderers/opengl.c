@@ -32,6 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "memcpySSE.h"
 #include "utils.h"
+#include "lg-decoders.h"
 
 #define BUFFER_COUNT       2
 
@@ -76,6 +77,8 @@ struct Inst
   GLuint            intFormat;
   GLuint            vboFormat;
   size_t            texSize;
+  const LG_Decoder* decoder;
+  void            * decoderData;
 
   uint64_t          drawStart;
   bool              hasBuffers;
@@ -282,7 +285,18 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
 
   // lock, perform the update, then unlock
   LG_LOCK(this->syncLock);
-  memcpySSE(this->texPixels[this->wTexIndex], data, this->texSize);
+  if (!this->decoder->decode(
+    this->decoderData,
+    this->texPixels[this->wTexIndex],
+    this->texSize,
+    data,
+    this->format.pitch
+    ))
+  {
+    DEBUG_ERROR("decode returned failure");
+    LG_UNLOCK(this->syncLock);
+    return false;
+  }
   this->frameUpdate = true;
   LG_UNLOCK(this->syncLock);
 
@@ -552,30 +566,52 @@ static bool configure(struct Inst * this, SDL_Window *window)
   switch(this->format.comp)
   {
     case LG_COMPRESSION_NONE:
+      this->decoder = &LGD_NULL;
       break;
 
     case LG_COMPRESSION_H264:
-      DEBUG_INFO("h264 not supported yet");
-      LG_UNLOCK(this->formatLock);
+      this->decoder = &LGD_H264;
+      break;
+
+    default:
+      DEBUG_ERROR("Unknown/unsupported compression type");
       return false;
   }
 
-  // assume 32 bit formats are BGRA
-  switch(this->format.bpp)
+  DEBUG_INFO("Using decoder: %s", this->decoder->name);
+
+  if (!this->decoder->create(&this->decoderData))
   {
-    case 32:
+    DEBUG_ERROR("Failed to create the decoder");
+    return false;
+  }
+
+  if (!this->decoder->initialize(
+    this->decoderData,
+    this->format
+    ))
+  {
+    DEBUG_ERROR("Failed to initialize decoder");
+    return false;
+  }
+
+  switch(this->decoder->get_out_format(this->decoderData))
+  {
+    case LG_OUTPUT_BGRA:
       this->intFormat = GL_RGBA8;
       this->vboFormat = GL_BGRA;
       break;
 
     default:
-      DEBUG_INFO("%d bpp not supported", this->format.bpp);
+      DEBUG_ERROR("Format not supported");
       LG_UNLOCK(this->formatLock);
       return false;
   }
 
   // calculate the texture size in bytes
-  this->texSize = this->format.height * this->format.pitch;
+  this->texSize =
+    this->format.height *
+    this->decoder->get_frame_pitch(this->decoderData);
 
   // generate lists for drawing
   this->texList    = glGenLists(BUFFER_COUNT);
@@ -727,6 +763,12 @@ static void deconfigure(struct Inst * this)
   {
     SDL_GL_DeleteContext(this->glContext);
     this->glContext = NULL;
+  }
+
+  if (this->decoder)
+  {
+    this->decoder->destroy(this->decoderData);
+    this->decoderData = NULL;
   }
 
   this->configured = false;

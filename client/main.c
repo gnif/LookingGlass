@@ -325,14 +325,17 @@ int frameThread(void * unused)
     lgrFormat.stride = header.detail.frame.stride;
     lgrFormat.pitch  = header.detail.frame.pitch;
 
+    size_t dataSize;
     switch(header.detail.frame.type)
     {
       case FRAME_TYPE_ARGB:
+        dataSize       = lgrFormat.height * lgrFormat.pitch;
         lgrFormat.comp = LG_COMPRESSION_NONE;
         lgrFormat.bpp  = 32;
         break;
 
       case FRAME_TYPE_H264:
+        dataSize       = lgrFormat.pitch;
         lgrFormat.comp = LG_COMPRESSION_H264;
         lgrFormat.bpp  = 0;
         break;
@@ -347,7 +350,6 @@ int frameThread(void * unused)
       break;
 
     // check the header's dataPos is sane
-    const size_t dataSize = lgrFormat.height * lgrFormat.pitch;
     if (header.detail.frame.dataPos + dataSize > state.shmSize)
     {
       DEBUG_ERROR("The guest sent an invalid dataPos");
