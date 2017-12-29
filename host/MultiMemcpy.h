@@ -22,6 +22,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 #include <stdint.h>
 
+#include "Util.h"
+
 #pragma once
 class MultiMemcpy
 {
@@ -41,12 +43,29 @@ public:
     m_awake = true;
   }
 
+  // abort a pre-empted copy
+  inline void Abort()
+  {
+    if (!m_awake)
+      return;
+
+    for (int i = 0; i < MULTIMEMCPY_THREADS; ++i)
+      m_workers[i].abort = true;
+
+    INTERLOCKED_OR8(&m_running, (1 << MULTIMEMCPY_THREADS) - 1);
+    while (m_running) {}
+
+    m_awake = false;
+  }
+
+
   void Copy(void * dst, void * src, size_t size);
 private:
   struct Worker
   {
-    unsigned int id;
+    unsigned int   id;
     volatile char *running;
+    bool           abort;
 
     HANDLE  start;
     HANDLE  thread;

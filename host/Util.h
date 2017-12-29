@@ -40,6 +40,27 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 class Util
 {
 public:
+  static void DebugWinError(const char * file, const unsigned int line, const char * function, const char * desc, HRESULT status)
+  {
+    char *buffer;
+    FormatMessageA(
+      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER,
+      NULL,
+      status,
+      MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      (char*)&buffer,
+      1024,
+      NULL
+    );
+
+    for(size_t i = strlen(buffer) - 1; i > 0; --i)
+      if (buffer[i] == '\n' || buffer[i] == '\r')
+        buffer[i] = 0;
+
+    fprintf(stderr, "[E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", file, line, function, desc, status, buffer);
+    LocalFree(buffer);
+  }
+
   static std::string GetSystemRoot()
   {
     std::string defaultPath;

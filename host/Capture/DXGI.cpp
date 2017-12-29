@@ -23,7 +23,24 @@ using namespace Capture;
 #include "common/debug.h"
 #include "TraceUtil.h"
 
+#include <mfapi.h>
+#include <wmcodecdsp.h>
+#include <codecapi.h>
+#include <mferror.h>
+#include <evr.h>
+#include <mfreadwrite.h>
+
+template <class T> void SafeRelease(T **ppT)
+{
+  if (*ppT)
+  {
+    (*ppT)->Release();
+    *ppT = NULL;
+  }
+}
+
 DXGI::DXGI() :
+  m_cRef(1),
   m_options(NULL),
   m_initialized(false),
   m_dxgiFactory(),
@@ -33,7 +50,7 @@ DXGI::DXGI() :
   m_texture(),
   m_pointer(NULL)
 {
-
+  MFStartup(MF_VERSION);
 }
 
 DXGI::~DXGI()
@@ -66,15 +83,15 @@ bool DXGI::Initialize(CaptureOptions * options)
       output->GetDesc(&outputDesc);
       if (!outputDesc.AttachedToDesktop)
       {
-        output.Release();
+        SafeRelease(&output);
         continue;
       }
 
       m_output = output;
       if (!m_output)
       {
-        output.Release();
-        adapter.Release();
+        SafeRelease(&output);
+        SafeRelease(&adapter);
         DEBUG_ERROR("Failed to get IDXGIOutput1");
         DeInitialize();
         return false;
@@ -83,7 +100,7 @@ bool DXGI::Initialize(CaptureOptions * options)
       m_width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
       m_height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
 
-      output.Release();
+      SafeRelease(&output);
       done = true;
       break;
     }
@@ -91,7 +108,7 @@ bool DXGI::Initialize(CaptureOptions * options)
     if (done)
       break;
 
-    adapter.Release();
+    SafeRelease(&adapter);
   }
 
   if (!done)
@@ -102,6 +119,8 @@ bool DXGI::Initialize(CaptureOptions * options)
   }
 
   static const D3D_FEATURE_LEVEL featureLevels[] = {
+    D3D_FEATURE_LEVEL_11_1,
+    D3D_FEATURE_LEVEL_11_0,
     D3D_FEATURE_LEVEL_10_1,
     D3D_FEATURE_LEVEL_10_0,
     D3D_FEATURE_LEVEL_9_3,
@@ -119,29 +138,54 @@ bool DXGI::Initialize(CaptureOptions * options)
     adapter,
     D3D_DRIVER_TYPE_UNKNOWN,
     NULL,
-    CREATE_FLAGS,
+    CREATE_FLAGS | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
     featureLevels, ARRAYSIZE(featureLevels),
     D3D11_SDK_VERSION,
     &m_device,
     &m_featureLevel,
     &m_deviceContext
   );
-
-#undef CREATE_FLAGS
-
-  adapter.Release();
+  SafeRelease(&adapter);
+  #undef CREATE_FLAGS  
 
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to create D3D11 device");
+    DEBUG_WINERROR("Failed to create D3D11 device", status);
     DeInitialize();
     return false;
   }
 
-  IDXGIDevicePtr dxgi;
-  if (FAILED(m_device->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi)))
+  bool h264 = false;
+  for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
   {
-    DEBUG_ERROR("Failed to obtain the IDXGIDevice interface from the D3D11 device");
+    if (_stricmp(*it, "h264") == 0) h264 = true;
+  }
+
+  if (h264)
+  {
+    DEBUG_WARN("Enabling experimental H.264 compression");
+    m_frameType = FRAME_TYPE_H264;
+    if (!InitH264Capture())
+    {
+      DeInitialize();
+      return false;
+    }
+  }
+  else
+  {
+    m_frameType = FRAME_TYPE_ARGB;
+    if (!InitRawCapture())
+    {
+      DeInitialize();
+      return false;
+    }
+  }
+
+  IDXGIDevicePtr dxgi;
+  status = m_device->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to obtain the IDXGIDevice interface from the D3D11 device", status);
     DeInitialize();
     return false;
   }
@@ -160,11 +204,17 @@ bool DXGI::Initialize(CaptureOptions * options)
 
   if (FAILED(status))
   {
-    DEBUG_ERROR("DuplicateOutput Failed: %08x", (int)status);
+    DEBUG_WINERROR("DuplicateOutput Failed", status);
     DeInitialize();
     return false;
   }
 
+  m_initialized = true;
+  return true;
+}
+
+bool DXGI::InitRawCapture()
+{
   D3D11_TEXTURE2D_DESC texDesc;
   ZeroMemory(&texDesc, sizeof(texDesc));
   texDesc.Width              = m_width;
@@ -179,15 +229,180 @@ bool DXGI::Initialize(CaptureOptions * options)
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
 
-  status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture);
+  HRESULT status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture);
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to create texture: %08x", (int)status);
-    DeInitialize();
+    DEBUG_WINERROR("Failed to create texture", status);
     return false;
   }
-  
-  m_initialized = true;
+
+  return true;
+}
+
+bool DXGI::InitH264Capture()
+{
+  HRESULT status;
+
+  MFT_REGISTER_TYPE_INFO typeInfo;
+  IMFActivate  **activationPointers;
+  UINT32         activationPointerCount;
+
+  ID3D10MultithreadPtr mt(m_device);
+  mt->SetMultithreadProtected(TRUE);
+
+  m_encodeEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+  InitializeCriticalSection(&m_encodeCS);
+
+  typeInfo.guidMajorType = MFMediaType_Video;
+  typeInfo.guidSubtype   = MFVideoFormat_H264;
+
+  status = MFTEnumEx(
+    MFT_CATEGORY_VIDEO_ENCODER,
+    MFT_ENUM_FLAG_HARDWARE,
+    NULL,
+    &typeInfo,
+    &activationPointers,
+    &activationPointerCount
+  );
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to enumerate encoder MFTs", status);
+    return false;
+  }
+
+  if (activationPointerCount == 0)
+  {
+    DEBUG_WINERROR("Hardware H264 MFT not available", status);
+    return false;
+  }
+
+  {
+    UINT32 nameLen = 0;
+    activationPointers[0]->GetStringLength(MFT_FRIENDLY_NAME_Attribute, &nameLen);
+    wchar_t * name = new wchar_t[nameLen+1];
+    activationPointers[0]->GetString(MFT_FRIENDLY_NAME_Attribute, name, nameLen + 1, NULL);
+    DEBUG_INFO("Using Encoder: %S", name);
+    delete[] name;
+  }
+
+  status = activationPointers[0]->ActivateObject(IID_PPV_ARGS(&m_mfTransform));
+  if (FAILED(status))
+  {
+    CoTaskMemFree(activationPointers);
+    DEBUG_WINERROR("Failed to create H264 encoder MFT", status);
+    return false;
+  }
+  CoTaskMemFree(activationPointers);
+
+  IMFAttributesPtr attribs;
+  m_mfTransform->GetAttributes(&attribs);
+  attribs->SetUINT32 (MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS          , TRUE);
+  attribs->SetUINT32 (MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING         , TRUE);
+  attribs->SetUINT32 (MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+  attribs->SetUINT32 (MF_LOW_LATENCY                                   , TRUE);
+
+  UINT32 d3d11Aware = 0;
+  UINT32 async = 0;
+  attribs->GetUINT32(MF_TRANSFORM_ASYNC, &async);
+  attribs->GetUINT32(MF_SA_D3D11_AWARE, &d3d11Aware);
+  if (async)
+    attribs->SetUINT32(MF_TRANSFORM_ASYNC_UNLOCK, TRUE);
+  SafeRelease(&attribs);
+
+  status = m_mfTransform.QueryInterface(IID_PPV_ARGS(&m_mediaEventGen));
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to obtain th emedia event generator interface", status);
+    return false;
+  }
+
+  status = m_mediaEventGen->BeginGetEvent(this, NULL);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to set the begin get event", status);
+    return false;
+  }
+
+  if (d3d11Aware)
+  {    
+    MFCreateDXGIDeviceManager(&m_resetToken, &m_mfDeviceManager);
+    status = m_mfDeviceManager->ResetDevice(m_device, m_resetToken);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to call reset device", status);
+      return false;
+    }
+
+    status = m_mfTransform->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, ULONG_PTR(m_mfDeviceManager.GetInterfacePtr()));
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to set the D3D manager", status);
+      return false;
+    }
+  }
+
+  IMFMediaTypePtr outType;
+  MFCreateMediaType(&outType);
+
+  outType->SetGUID  (MF_MT_MAJOR_TYPE             , MFMediaType_Video);
+  outType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_H264);
+  outType->SetUINT32(MF_MT_AVG_BITRATE            , 240000);
+  outType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
+  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_444);
+  outType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+
+  MFSetAttributeSize (outType, MF_MT_FRAME_SIZE        , m_width, m_height);
+  MFSetAttributeRatio(outType, MF_MT_FRAME_RATE        , 30, 1);
+  MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+
+  status = m_mfTransform->SetOutputType(0, outType, 0);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to set the output media type on the H264 encoder MFT", status);
+    return false;
+  }
+
+  IMFMediaTypePtr inType;
+  MFCreateMediaType(&inType);
+
+  inType->SetGUID  (MF_MT_MAJOR_TYPE             , MFMediaType_Video );
+  inType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_NV12);
+  inType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
+  inType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+
+  MFSetAttributeSize (inType, MF_MT_FRAME_SIZE        , m_width, m_height);
+  MFSetAttributeRatio(inType, MF_MT_FRAME_RATE        , 30, 1);
+  MFSetAttributeRatio(inType, MF_MT_PIXEL_ASPECT_RATIO, 1 , 1);
+
+  status = m_mfTransform->SetInputType(0, inType, 0);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to set the input media type on the H264 encoder MFT", status);
+    return false;
+  }
+
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH         , NULL);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL);
+
+#if 0  
+  status = MFTRegisterLocalByCLSID(
+    __uuidof(CColorConvertDMO),
+    MFT_CATEGORY_VIDEO_PROCESSOR,
+    L"",
+    MFT_ENUM_FLAG_SYNCMFT,
+    0,
+    NULL,
+    0,
+    NULL
+  );
+  if (FAILED(status))
+  {
+    DEBUG_ERROR("Failed to register color converter DSP");
+    return false;
+  }
+#endif
+
   return true;
 }
 
@@ -212,23 +427,22 @@ void DXGI::DeInitialize()
     m_surfaceMapped = false;
   }
 
-  if (m_texture)
-    m_texture.Release();
+  SafeRelease(&m_texture);
+  SafeRelease(&m_dup);
+  SafeRelease(&m_output);
+  SafeRelease(&m_deviceContext);
+  SafeRelease(&m_device);
+  SafeRelease(&m_dxgiFactory);
+  SafeRelease(&m_mfTransform);
+  SafeRelease(&m_mfDeviceManager);
+  SafeRelease(&m_mediaEventGen);
 
-  if (m_dup)
-    m_dup.Release();
-
-  if (m_output)
-    m_output.Release();
-
-  if (m_deviceContext)
-    m_deviceContext.Release();
-
-  if (m_device)
-    m_device.Release();
-
-  if (m_dxgiFactory)
-    m_dxgiFactory.Release();
+  if (m_encodeEvent)
+  {
+    CloseHandle(m_encodeEvent);
+    m_encodeEvent = NULL;
+    DeleteCriticalSection(&m_encodeCS);
+  }
 
   m_initialized = false;
 }
@@ -237,8 +451,7 @@ FrameType DXGI::GetFrameType()
 {
   if (!m_initialized)
     return FRAME_TYPE_INVALID;
-
-  return FRAME_TYPE_ARGB;
+  return m_frameType;
 }
 
 size_t DXGI::GetMaxFrameSize()
@@ -247,6 +460,89 @@ size_t DXGI::GetMaxFrameSize()
     return 0;
 
   return (m_width * m_height * 4);
+}
+
+STDMETHODIMP Capture::DXGI::Invoke(IMFAsyncResult * pAsyncResult)
+{
+  HRESULT status, evtStatus;
+  MediaEventType meType = MEUnknown;
+  IMFMediaEvent *pEvent = NULL;
+
+  status = m_mediaEventGen->EndGetEvent(pAsyncResult, &pEvent);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("EndGetEvent", status);
+    return status;
+  }
+
+  status = pEvent->GetStatus(&evtStatus);
+  if (FAILED(status))
+  {
+    SafeRelease(&pEvent);
+    DEBUG_WINERROR("GetStatus", status);
+    return status;
+  }
+
+  if (FAILED(evtStatus))
+  {
+    SafeRelease(&pEvent);
+    DEBUG_WINERROR("evtStatus", evtStatus);
+    return evtStatus;
+  }
+
+  status = pEvent->GetType(&meType);
+  if (FAILED(status))
+  {
+    SafeRelease(&pEvent);
+    DEBUG_WINERROR("GetType", status);
+    return status;
+  }
+  SafeRelease(&pEvent);
+
+  switch (meType)
+  {
+    case METransformNeedInput:
+      EnterCriticalSection(&m_encodeCS);
+      m_encodeNeedsData = true;
+      SetEvent(m_encodeEvent);
+      LeaveCriticalSection(&m_encodeCS);
+      break;
+
+    case METransformHaveOutput:
+      EnterCriticalSection(&m_encodeCS);
+      m_encodeHasData = true;
+      SetEvent(m_encodeEvent);
+      LeaveCriticalSection(&m_encodeCS);
+      break;
+
+    case METransformDrainComplete:
+    {
+      status = m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("MFT_MESSAGE_COMMAND_FLUSH", status);
+        return status;
+      }
+      break;
+    }
+
+    case MEError:
+      DEBUG_INFO("err");
+      break;
+
+    default:
+      DEBUG_INFO("unk");
+      break;
+  }
+
+  status = m_mediaEventGen->BeginGetEvent(this, NULL);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("BeginGetEvent", status);
+    return status;
+  }
+
+  return status;
 }
 
 void DXGI::WaitForDesktop()
@@ -263,7 +559,7 @@ void DXGI::WaitForDesktop()
   CloseDesktop(desktop);
 }
 
-GrabStatus DXGI::GrabFrame(FrameInfo & frame)
+GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture)
 {
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
@@ -273,9 +569,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
   HRESULT status;
   bool    cursorUpdate = false;
-  for(int i = 0; i < 2; ++i)
+  for (int i = 0; i < 2; ++i)
   {
-    while(true)
+    while (true)
     {
       if (m_releaseFrame)
       {
@@ -284,16 +580,16 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
         switch (status)
         {
-          case S_OK:
-            break;
+        case S_OK:
+          break;
 
-          case DXGI_ERROR_INVALID_CALL:
-            DEBUG_ERROR("Frame was already released");
-            return GRAB_STATUS_ERROR;
+        case DXGI_ERROR_INVALID_CALL:
+          DEBUG_ERROR("Frame was already released");
+          return GRAB_STATUS_ERROR;
 
-          case DXGI_ERROR_ACCESS_LOST:
-            WaitForDesktop();
-            return GRAB_STATUS_REINIT;
+        case DXGI_ERROR_ACCESS_LOST:
+          WaitForDesktop();
+          return GRAB_STATUS_REINIT;
         }
       }
 
@@ -305,9 +601,9 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         m_memcpy.Wake();
 
         // send the last frame again if we timeout to prevent the client stalling on restart
-        frame.width  = m_width;
+        frame.width = m_width;
         frame.height = m_height;
-        frame.pitch  = m_mapping.RowPitch;
+        frame.pitch = m_mapping.RowPitch;
         frame.stride = m_mapping.RowPitch / 4;
 
         unsigned int size = m_height * m_mapping.RowPitch;
@@ -326,18 +622,18 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         if (
           m_lastMousePos.x != frameInfo.PointerPosition.Position.x ||
           m_lastMousePos.y != frameInfo.PointerPosition.Position.y
-        ) {
-          cursorUpdate         = true;
-          frame.cursor.hasPos  = true;
-          frame.cursor.x       = frameInfo.PointerPosition.Position.x;
-          frame.cursor.y       = frameInfo.PointerPosition.Position.y;
-          m_lastMousePos.x     = frameInfo.PointerPosition.Position.x;
-          m_lastMousePos.y     = frameInfo.PointerPosition.Position.y;
+          ) {
+          cursorUpdate = true;
+          frame.cursor.hasPos = true;
+          frame.cursor.x = frameInfo.PointerPosition.Position.x;
+          frame.cursor.y = frameInfo.PointerPosition.Position.y;
+          m_lastMousePos.x = frameInfo.PointerPosition.Position.x;
+          m_lastMousePos.y = frameInfo.PointerPosition.Position.y;
         }
 
         if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
         {
-          cursorUpdate   = true;
+          cursorUpdate = true;
           m_lastMouseVis = frameInfo.PointerPosition.Visible;
         }
 
@@ -352,7 +648,7 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         {
           if (m_pointer)
             delete[] m_pointer;
-          m_pointer        = new BYTE[frameInfo.PointerShapeBufferSize];
+          m_pointer = new BYTE[frameInfo.PointerShapeBufferSize];
           m_pointerBufSize = frameInfo.PointerShapeBufferSize;
         }
 
@@ -360,32 +656,32 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
         status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &shapeInfo);
         if (!SUCCEEDED(status))
         {
-          DEBUG_ERROR("Failed to get the new pointer shape: %08x", (int)status);
+          DEBUG_WINERROR("Failed to get the new pointer shape", status);
           return GRAB_STATUS_ERROR;
         }
 
         switch (shapeInfo.Type)
         {
-          case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : frame.cursor.type = CURSOR_TYPE_COLOR;        break;
-          case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: frame.cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
-          case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : frame.cursor.type = CURSOR_TYPE_MONOCHROME;   break;
-          default:
-            DEBUG_ERROR("Invalid cursor type");
-            return GRAB_STATUS_ERROR;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR: frame.cursor.type = CURSOR_TYPE_COLOR;        break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: frame.cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME: frame.cursor.type = CURSOR_TYPE_MONOCHROME;   break;
+        default:
+          DEBUG_ERROR("Invalid cursor type");
+          return GRAB_STATUS_ERROR;
         }
 
         frame.cursor.hasShape = true;
-        frame.cursor.shape    = m_pointer;
-        frame.cursor.w        = shapeInfo.Width;
-        frame.cursor.h        = shapeInfo.Height;
-        frame.cursor.pitch    = shapeInfo.Pitch;
+        frame.cursor.shape = m_pointer;
+        frame.cursor.w = shapeInfo.Width;
+        frame.cursor.h = shapeInfo.Height;
+        frame.cursor.pitch = shapeInfo.Pitch;
         frame.cursor.dataSize = m_pointerSize;
       }
 
       if (frameInfo.LastPresentTime.QuadPart != 0)
         break;
 
-      res.Release();
+      SafeRelease(&res);
 
       if (cursorUpdate)
         return GRAB_STATUS_CURSOR;
@@ -393,39 +689,51 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
 
     if (SUCCEEDED(status))
       break;
-    
-    switch (status)
-    {      
-      // desktop switch, mode change, switch DWM on or off or Secure Desktop
-      case DXGI_ERROR_ACCESS_LOST:
-      case WAIT_ABANDONED:
-        WaitForDesktop();
-        return GRAB_STATUS_REINIT;
 
-      default:
-        // unknown failure
-        DEBUG_INFO("AcquireNextFrame failed: %08x", (int)status);
-        return GRAB_STATUS_ERROR;
+    switch (status)
+    {
+      // desktop switch, mode change, switch DWM on or off or Secure Desktop
+    case DXGI_ERROR_ACCESS_LOST:
+    case WAIT_ABANDONED:
+      WaitForDesktop();
+      return GRAB_STATUS_REINIT;
+
+    default:
+      // unknown failure
+      DEBUG_WINERROR("AcquireNextFrame failed", status);
+      return GRAB_STATUS_ERROR;
     }
   }
 
   // retry count exceeded
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to acquire next frame");
+    DEBUG_WINERROR("Failed to acquire next frame", status);
     return GRAB_STATUS_ERROR;
   }
+  
+  res.QueryInterface(IID_PPV_ARGS(&texture));
+  SafeRelease(&res);
 
-  ID3D11Texture2DPtr src(res);
-  res.Release();
-  if (!src)
+  if (!texture)
   {
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
     return GRAB_STATUS_ERROR;
   }
 
+  return GRAB_STATUS_OK;
+}
+
+GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
+{
+  GrabStatus result;
+  ID3D11Texture2DPtr src;
+  result = GrabFrameTexture(frame, src);
+  if (result != GRAB_STATUS_OK)
+    return result;
+
   m_deviceContext->CopyResource(m_texture, src);
-  src.Release();  
+  SafeRelease(&src);
 
   if (m_surfaceMapped)
   {
@@ -433,10 +741,11 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
     m_surfaceMapped = false;
   }
 
+  HRESULT status;
   status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
   if (FAILED(status))
   {
-    DEBUG_ERROR("Failed to map the texture: %08x", (int)status);
+    DEBUG_WINERROR("Failed to map the texture", status);
     DeInitialize();
     return GRAB_STATUS_ERROR;
   }
@@ -446,14 +755,153 @@ GrabStatus DXGI::GrabFrame(FrameInfo & frame)
   // wake up the copy threads
   m_memcpy.Wake();
 
-  frame.width   = m_width;
-  frame.height  = m_height;
-  frame.pitch   = m_mapping.RowPitch;
-  frame.stride  = m_mapping.RowPitch >> 2;
+  frame.pitch  = m_mapping.RowPitch;
+  frame.stride = m_mapping.RowPitch >> 2;
 
   const unsigned int size = m_height * m_mapping.RowPitch;
   m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
   TRACE_END;
 
   return GRAB_STATUS_OK;
+}
+
+GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
+{
+  while(true)
+  {
+    // only reset the event if there isn't work pending
+    EnterCriticalSection(&m_encodeCS);
+    if (!m_encodeHasData && !m_encodeNeedsData)
+      ResetEvent(m_encodeEvent);
+    LeaveCriticalSection(&m_encodeCS);
+
+    switch (WaitForSingleObject(m_encodeEvent, 1000))
+    {
+      case WAIT_FAILED:
+        DEBUG_WINERROR("Wait for encode event failed", GetLastError());
+        return GRAB_STATUS_ERROR;
+
+      case WAIT_ABANDONED:
+        DEBUG_ERROR("Wait abandoned");
+        return GRAB_STATUS_ERROR;
+
+      case WAIT_TIMEOUT:
+        continue;
+
+      case WAIT_OBJECT_0:
+        break;
+    }
+
+    EnterCriticalSection(&m_encodeCS);
+
+    HRESULT status;
+    if (m_encodeNeedsData)
+    {
+      LeaveCriticalSection(&m_encodeCS);
+      GrabStatus result;
+      ID3D11Texture2DPtr src;
+      result = GrabFrameTexture(frame, src);
+      if (result != GRAB_STATUS_OK)
+      {
+        return result;
+      }
+
+      // cursor data may be returned, only turn off the flag if we have a frame
+      EnterCriticalSection(&m_encodeCS);
+      m_encodeNeedsData = false;
+      LeaveCriticalSection(&m_encodeCS);
+
+      IMFMediaBufferPtr buffer;
+      status = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), src, 0, FALSE, &buffer);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to create DXGI surface buffer from texture", status);
+        return GRAB_STATUS_ERROR;
+      }
+
+      IMF2DBufferPtr imfBuffer(buffer);
+      DWORD length;
+      imfBuffer->GetContiguousLength(&length);
+      buffer->SetCurrentLength(length);
+      SafeRelease(&imfBuffer);
+
+      IMFSamplePtr sample;
+      MFCreateSample(&sample);
+      sample->AddBuffer(buffer);
+
+      status = m_mfTransform->ProcessInput(0, sample, 0);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to process the input", status);
+        return GRAB_STATUS_ERROR;
+      }
+
+      SafeRelease(&src   );
+      SafeRelease(&sample);
+      SafeRelease(&buffer);
+
+      EnterCriticalSection(&m_encodeCS);
+    }
+
+    if (m_encodeHasData)
+    {
+      m_encodeHasData = false;
+      LeaveCriticalSection(&m_encodeCS);
+
+      // wake up the copy threads
+      TRACE_START("copy");
+      m_memcpy.Wake();
+
+      MFT_OUTPUT_STREAM_INFO streamInfo;
+      status = m_mfTransform->GetOutputStreamInfo(0, &streamInfo);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("GetOutputStreamInfo", status);
+        return GRAB_STATUS_ERROR;
+      }
+
+      DWORD outStatus;
+      MFT_OUTPUT_DATA_BUFFER outDataBuffer;
+      outDataBuffer.dwStreamID = 0;
+      outDataBuffer.dwStatus   = 0;
+      outDataBuffer.pEvents    = NULL;
+      outDataBuffer.pSample    = NULL;
+
+      status = m_mfTransform->ProcessOutput(0, 1, &outDataBuffer, &outStatus);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("ProcessOutput", status);
+        return GRAB_STATUS_ERROR;
+      }
+
+      IMFMediaBufferPtr buffer;
+      MFCreateAlignedMemoryBuffer((DWORD)frame.bufferSize, MF_128_BYTE_ALIGNMENT, &buffer);
+      outDataBuffer.pSample->CopyToBuffer(buffer);
+      SafeRelease(&outDataBuffer.pEvents);
+      SafeRelease(&outDataBuffer.pSample);
+
+      BYTE *pixels;
+      DWORD maxLen, curLen;
+      buffer->Lock(&pixels, &maxLen, &curLen);      
+      m_memcpy.Copy(frame.buffer, pixels, curLen);
+      buffer->Unlock();
+
+      SafeRelease(&buffer);
+      TRACE_END;
+      return GRAB_STATUS_OK;
+    }
+
+    LeaveCriticalSection(&m_encodeCS);
+  }
+}
+
+GrabStatus DXGI::GrabFrame(FrameInfo & frame)
+{
+  frame.width  = m_width;
+  frame.height = m_height;
+
+  if (m_frameType == FRAME_TYPE_H264)
+    return GrabFrameH264(frame);
+  else
+    return GrabFrameRaw(frame);
 }

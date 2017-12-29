@@ -18,7 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "MultiMemcpy.h"
-#include "Util.h"
 #include "common/memcpySSE.h"
 
 MultiMemcpy::MultiMemcpy()
@@ -27,6 +26,7 @@ MultiMemcpy::MultiMemcpy()
   {
     m_workers[i].id      = (1 << i);
     m_workers[i].running = &m_running;
+    m_workers[i].abort   = false;
     m_workers[i].start   = CreateSemaphore(NULL, 0, 1, NULL);
 
     m_workers[i].thread = CreateThread(0, 0, WorkerFunction, &m_workers[i], 0, NULL);
@@ -44,15 +44,23 @@ MultiMemcpy::~MultiMemcpy()
 
 void MultiMemcpy::Copy(void * dst, void * src, size_t size)
 {
-  if (!m_awake)
-    Wake();
+  const size_t block = (size / MULTIMEMCPY_THREADS) & ~0x7F;
+  if (block == 0)
+  {
+    Abort();
+    memcpySSE(dst, src, size);
+    return;
+  }
 
-  const size_t block = size / MULTIMEMCPY_THREADS;
+  Wake();
   for (int i = 0; i < MULTIMEMCPY_THREADS; ++i)
   {
     m_workers[i].dst  = (uint8_t *)dst + i * block;
     m_workers[i].src  = (uint8_t *)src + i * block;
-    m_workers[i].size = (i + 1) * block - i * block;
+    if (i == MULTIMEMCPY_THREADS - 1)
+      m_workers[i].size = size - (block * i);
+    else
+      m_workers[i].size = block;
   }
 
   INTERLOCKED_OR8(&m_running, (1 << MULTIMEMCPY_THREADS) - 1);
@@ -69,6 +77,12 @@ DWORD WINAPI MultiMemcpy::WorkerFunction(LPVOID param)
   {
     WaitForSingleObject(w->start, INFINITE);
     while(!(*w->running & w->id)) {}
+    if (w->abort)
+    {
+      w->abort = false;
+      INTERLOCKED_AND8(w->running, ~w->id);
+      continue;
+    }
 
     memcpySSE(w->dst, w->src, w->size);
     INTERLOCKED_AND8(w->running, ~w->id);

@@ -52,6 +52,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
 {
   CrashHandler::Initialize();
   TraceUtil::Initialize();
+  CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
   SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
 

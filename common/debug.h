@@ -59,3 +59,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #else
   #define DEBUG_PROTO(fmt, ...) do {} while(0)
 #endif
+
+#ifdef _WIN32
+  #include "Util.h"
+  #define DEBUG_WINERROR(x, y) Util::DebugWinError(STRIPPATH(__FILE__), __LINE__, __FUNCTION__, x, y)
+#endif
