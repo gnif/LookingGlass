@@ -885,8 +885,11 @@ GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
       buffer->Lock(&pixels, &maxLen, &curLen);      
       m_memcpy.Copy(frame.buffer, pixels, curLen);
       buffer->Unlock();
-
       SafeRelease(&buffer);
+
+      frame.stride = 0;
+      frame.pitch  = curLen;
+
       TRACE_END;
       return GRAB_STATUS_OK;
     }

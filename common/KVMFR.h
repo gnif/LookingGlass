@@ -63,8 +63,8 @@ typedef struct KVMFRFrame
   FrameType   type;        // the frame data type
   uint32_t    width;       // the width
   uint32_t    height;      // the height
-  uint32_t    stride;      // the row stride (zero if cursor data)
-  uint32_t    pitch;       // the row pitch  (stride in bytes)
+  uint32_t    stride;      // the row stride (zero if compressed data)
+  uint32_t    pitch;       // the row pitch  (stride in bytes or the compressed frame size)
   uint64_t    dataPos;     // offset to the frame
 }
 KVMFRFrame;
