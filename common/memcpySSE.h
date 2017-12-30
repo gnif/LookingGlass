@@ -99,26 +99,35 @@ static inline void memcpySSE(void * dst, const void * src, size_t length)
     _mm_stream_si128(_dst + 7, v7);
   }
 
-  const size_t remain = ((length - sselen) & ~0xF) >> 4;
-  switch (remain)
+  const size_t remain = length - sselen;
+  switch (remain & ~0xF)
   {
-    case 7: v0 = _mm_load_si128(_src++);
-    case 6: v1 = _mm_load_si128(_src++);
-    case 5: v2 = _mm_load_si128(_src++);
-    case 4: v3 = _mm_load_si128(_src++);
-    case 3: v4 = _mm_load_si128(_src++);
-    case 2: v5 = _mm_load_si128(_src++);
-    case 1: v6 = _mm_load_si128(_src++);
+    case 112: v0 = _mm_load_si128(_src++);
+    case  96: v1 = _mm_load_si128(_src++);
+    case  80: v2 = _mm_load_si128(_src++);
+    case  64: v3 = _mm_load_si128(_src++);
+    case  48: v4 = _mm_load_si128(_src++);
+    case  32: v5 = _mm_load_si128(_src++);
+    case  16: v6 = _mm_load_si128(_src++);
   }
 
-  switch (remain)
+  switch (remain & ~0xF)
   {
-    case 7: _mm_stream_si128(_dst++, v0);
-    case 6: _mm_stream_si128(_dst++, v1);
-    case 5: _mm_stream_si128(_dst++, v2);
-    case 4: _mm_stream_si128(_dst++, v3);
-    case 3: _mm_stream_si128(_dst++, v4);
-    case 2: _mm_stream_si128(_dst++, v5);
-    case 1: _mm_stream_si128(_dst++, v6);
+    case 112: _mm_stream_si128(_dst++, v0);
+    case  96: _mm_stream_si128(_dst++, v1);
+    case  80: _mm_stream_si128(_dst++, v2);
+    case  64: _mm_stream_si128(_dst++, v3);
+    case  48: _mm_stream_si128(_dst++, v4);
+    case  32: _mm_stream_si128(_dst++, v5);
+    case  16: _mm_stream_si128(_dst++, v6);
+  }
+
+  // copy any remaining data
+  if (remain & 0xF)
+  {
+    uint8_t * rsrc = (uint8_t *)_src;
+    uint8_t * rdst = (uint8_t *)_dst;
+    for (size_t i = remain & 0xF; i > 0; --i)
+      *rdst++ = *rsrc++;
   }
 }
