@@ -1,12 +1,12 @@
 BINARY  = looking-glass-client
-CFLAGS  = -g -Og -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG -DATOMIC_LOCKING
+CFLAGS  = -g -O3 -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG -DATOMIC_LOCKING
 LDFLAGS = -lrt
 
 CFLAGS  += -ffast-math
 CFLAGS  += -fdata-sections -ffunction-sections
 LDFLAGS += -Wl,--gc-sections
 
-LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig libva
+LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig libva libva-glx
 CFLAGS  += $(shell pkg-config --cflags $(LIBS))
 LDFLAGS += $(shell pkg-config --libs   $(LIBS))
 BUILD   ?= .build

@@ -36,10 +36,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define BUFFER_COUNT       2
 
-#define FRAME_TEXTURE      0
-#define FPS_TEXTURE        1
-#define MOUSE_TEXTURE      2
-#define TEXTURE_COUNT      3
+#define FPS_TEXTURE        0
+#define MOUSE_TEXTURE      1
+#define TEXTURE_COUNT      2
 
 static PFNGLXGETVIDEOSYNCSGIPROC  glXGetVideoSyncSGI  = NULL;
 static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
@@ -82,16 +81,18 @@ struct Inst
 
   uint64_t          drawStart;
   bool              hasBuffers;
-  GLuint            vboID[1];
+  GLuint            vboID[BUFFER_COUNT];
   uint8_t         * texPixels[BUFFER_COUNT];
   LG_Lock           syncLock;
-  int               texIndex, wTexIndex;
+  int               texIndex;
   int               texList;
   int               fpsList;
   int               mouseList;
   LG_RendererRect   destRect;
 
-  bool              hasTextures;
+  bool              hasTextures, hasFrames;
+  GLuint            frames[BUFFER_COUNT];
+  void            * decoderFrames[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
 
   uint              gpuFrameCount;
@@ -283,15 +284,8 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   }
   LG_UNLOCK(this->formatLock);
 
-  // lock, perform the update, then unlock
   LG_LOCK(this->syncLock);
-  if (!this->decoder->decode(
-    this->decoderData,
-    this->texPixels[this->wTexIndex],
-    this->texSize,
-    data,
-    this->format.pitch
-    ))
+  if (!this->decoder->decode(this->decoderData, data, format.pitch))
   {
     DEBUG_ERROR("decode returned failure");
     LG_UNLOCK(this->syncLock);
@@ -430,7 +424,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
     glXGetVideoSyncSGI(&before);
     SDL_GL_SwapWindow(window);
 
-    // wait for the swap to happen to ensure we dont buffer frames  //
+    // wait for the swap to happen to ensure we dont buffer frames
     glXGetVideoSyncSGI(&after);
     if (before == after)
       glXWaitVideoSyncSGI(1, 0, &before);
@@ -588,8 +582,8 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   if (!this->decoder->initialize(
     this->decoderData,
-    this->format
-    ))
+    this->format,
+    window))
   {
     DEBUG_ERROR("Failed to initialize decoder");
     return false;
@@ -598,6 +592,12 @@ static bool configure(struct Inst * this, SDL_Window *window)
   switch(this->decoder->get_out_format(this->decoderData))
   {
     case LG_OUTPUT_BGRA:
+      this->intFormat = GL_RGBA8;
+      this->vboFormat = GL_BGRA;
+      break;
+
+    case LG_OUTPUT_YUV420:
+      // fixme
       this->intFormat = GL_RGBA8;
       this->vboFormat = GL_BGRA;
       break;
@@ -618,54 +618,57 @@ static bool configure(struct Inst * this, SDL_Window *window)
   this->fpsList    = glGenLists(1);
   this->mouseList  = glGenLists(1);
 
-  // generate the pixel unpack buffers
-  glGenBuffers(1, this->vboID);
-  if (check_gl_error("glGenBuffers"))
+  // generate the pixel unpack buffers if the decoder isn't going to do it for us
+  if (!this->decoder->has_gl)
   {
-    LG_UNLOCK(this->formatLock);
-    return false;
+    glGenBuffers(BUFFER_COUNT, this->vboID);
+    if (check_gl_error("glGenBuffers"))
+    {
+      LG_UNLOCK(this->formatLock);
+      return false;
+    }
+    this->hasBuffers = true;
+
+    for(int i = 0; i < BUFFER_COUNT; ++i)
+    {
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
+      if (check_gl_error("glBindBuffer"))
+      {
+        LG_UNLOCK(this->formatLock);
+        return false;
+      }
+
+      glBufferStorage(
+        GL_PIXEL_UNPACK_BUFFER,
+        this->texSize,
+        NULL,
+        GL_MAP_WRITE_BIT      |
+        GL_MAP_PERSISTENT_BIT
+      );
+      if (check_gl_error("glBufferStorage"))
+      {
+        LG_UNLOCK(this->formatLock);
+        return false;
+      }
+
+      this->texPixels[i] = glMapBufferRange(
+        GL_PIXEL_UNPACK_BUFFER,
+        0,
+        this->texSize,
+        GL_MAP_WRITE_BIT         |
+        GL_MAP_PERSISTENT_BIT    |
+        GL_MAP_FLUSH_EXPLICIT_BIT
+      );
+
+      if (check_gl_error("glMapBufferRange"))
+      {
+        LG_UNLOCK(this->formatLock);
+        return false;
+      }
+    }
   }
-  this->hasBuffers = true;
 
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[0]);
-  if (check_gl_error("glBindBuffer"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-
-  glBufferStorage(
-    GL_PIXEL_UNPACK_BUFFER,
-    this->texSize * BUFFER_COUNT,
-    NULL,
-    GL_MAP_WRITE_BIT      |
-    GL_MAP_PERSISTENT_BIT
-  );
-  if (check_gl_error("glBufferStorage"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-
-  this->texPixels[0] = glMapBufferRange(
-    GL_PIXEL_UNPACK_BUFFER,
-    0,
-    this->texSize * BUFFER_COUNT,
-    GL_MAP_WRITE_BIT         |
-    GL_MAP_PERSISTENT_BIT    |
-    GL_MAP_FLUSH_EXPLICIT_BIT
-  );
-
-  if (check_gl_error("glMapBufferRange"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-
-  for(int i = 1; i < BUFFER_COUNT; ++i)
-    this->texPixels[i] = this->texPixels[i-1] + this->texSize;
-
-  // create the textures
+  // create the overlay textures
   glGenTextures(TEXTURE_COUNT, this->textures);
   if (check_gl_error("glGenTextures"))
   {
@@ -674,51 +677,72 @@ static bool configure(struct Inst * this, SDL_Window *window)
   }
   this->hasTextures = true;
 
-  // create the frame texture
-  glBindTexture(GL_TEXTURE_2D, this->textures[FRAME_TEXTURE]);
-  if (check_gl_error("glBindTexture"))
+  // create the frame textures
+  glGenTextures(BUFFER_COUNT, this->frames);
+  if (check_gl_error("glGenTextures"))
   {
     LG_UNLOCK(this->formatLock);
     return false;
   }
+  this->hasFrames = true;
 
-  glTexImage2D(
-    GL_TEXTURE_2D,
-    0,
-    this->intFormat,
-    this->format.width,
-    this->format.height * BUFFER_COUNT,
-    0,
-    this->vboFormat,
-    GL_UNSIGNED_BYTE,
-    (void*)0
-  );
-  if (check_gl_error("glTexImage2D"))
+  for(int i = 0; i < BUFFER_COUNT; ++i)
   {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
+    // bind and create the new texture
+    glBindTexture(GL_TEXTURE_2D, this->frames[i]);
+    if (check_gl_error("glBindTexture"))
+    {
+      LG_UNLOCK(this->formatLock);
+      return false;
+    }
 
-  // configure the texture
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      this->intFormat,
+      this->format.width,
+      this->format.height,
+      0,
+      this->vboFormat,
+      GL_UNSIGNED_BYTE,
+      (void*)0
+    );
+    if (check_gl_error("glTexImage2D"))
+    {
+      LG_UNLOCK(this->formatLock);
+      return false;
+    }
 
-  for (int i = 0; i < BUFFER_COUNT; ++i)
-  {
-    const float ts = (1.0f / BUFFER_COUNT) * i;
-    const float te = (1.0f / BUFFER_COUNT) + ts;
+    if (this->decoder->has_gl)
+    {
+      if (!this->decoder->init_gl_texture(
+        this->decoderData,
+        GL_TEXTURE_2D,
+        this->frames[i],
+        &this->decoderFrames[i]))
+      {
+        LG_UNLOCK(this->formatLock);
+        return false;
+      }
+    }
+    else
+    {
+      // configure the texture
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    }
 
     // create the display lists
     glNewList(this->texList + i, GL_COMPILE);
-      glBindTexture(GL_TEXTURE_2D, this->textures[FRAME_TEXTURE]);
+      glBindTexture(GL_TEXTURE_2D, this->frames[i]);
       glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
       glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, ts); glVertex2i(0                 , 0                  );
-        glTexCoord2f(1.0f, ts); glVertex2i(this->format.width, 0                  );
-        glTexCoord2f(0.0f, te); glVertex2i(0                 , this->format.height);
-        glTexCoord2f(1.0f, te); glVertex2i(this->format.width, this->format.height);
+        glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
+        glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
+        glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
+        glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
      glEnd();
     glEndList();
   }
@@ -753,9 +777,28 @@ static void deconfigure(struct Inst * this)
     this->hasTextures = false;
   }
 
+  if (this->hasFrames)
+  {
+    if (this->decoder->has_gl)
+    {
+      for(int i = 0; i < BUFFER_COUNT; ++i)
+      {
+        if (this->decoderFrames[i])
+          this->decoder->free_gl_texture(
+            this->decoderData,
+            this->decoderFrames[i]
+          );
+        this->decoderFrames[i] = NULL;
+      }
+    }
+
+    glDeleteTextures(BUFFER_COUNT, this->frames);
+    this->hasFrames = false;
+  }
+
   if (this->hasBuffers)
   {
-    glDeleteBuffers(1, this->vboID);
+    glDeleteBuffers(BUFFER_COUNT, this->vboID);
     this->hasBuffers = false;
   }
 
@@ -765,7 +808,7 @@ static void deconfigure(struct Inst * this)
     this->glContext = NULL;
   }
 
-  if (this->decoder)
+  if (this->decoderData)
   {
     this->decoder->destroy(this->decoderData);
     this->decoderData = NULL;
@@ -918,51 +961,76 @@ static bool draw_frame(struct Inst * this)
     return true;
   }
 
-  this->texIndex = this->wTexIndex;
-  if (++this->wTexIndex == BUFFER_COUNT)
-    this->wTexIndex = 0;
+  if (++this->texIndex == BUFFER_COUNT)
+    this->texIndex = 0;
+
   this->frameUpdate = false;
   LG_UNLOCK(this->syncLock);
 
   LG_LOCK(this->formatLock);
+  if (this->decoder->has_gl)
+  {
+    if (!this->decoder->update_gl_texture(
+      this->decoderData,
+      this->decoderFrames[this->texIndex]
+    ))
+    {
+      LG_UNLOCK(this->formatLock);
+      DEBUG_ERROR("Failed to update the texture from the decoder");
+      return false;
+    }
+  }
+  else
+  {
+    glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
 
-  // bind the texture and update it
-  glBindTexture(GL_TEXTURE_2D        , this->textures[FRAME_TEXTURE]);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[0]               );
-  glPixelStorei(GL_UNPACK_ALIGNMENT  , 4                            );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.stride          );
-
-  // copy the buffer to the texture
-  glFlushMappedBufferRange(
-    GL_PIXEL_UNPACK_BUFFER,
-    this->texSize * this->texIndex,
-    this->texSize
-  );
-
-  // update the texture
-  glTexSubImage2D(
-    GL_TEXTURE_2D,
-    0,
-    0,
-    this->texIndex * this->format.height,
-    this->format.width ,
-    this->format.height,
-    this->vboFormat,
-    GL_UNSIGNED_BYTE,
-    (void*)(this->texIndex * this->texSize)
-  );
-  if (check_gl_error("glTexSubImage2D"))
-    DEBUG_ERROR("texIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
-      this->texIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
+    glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH ,
+      this->decoder->get_frame_stride(this->decoderData)
     );
 
-  // unbind the buffer
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    if (!this->decoder->get_buffer(
+      this->decoderData,
+      this->texPixels[this->texIndex],
+      this->texSize
+    ))
+    {
+      LG_UNLOCK(this->formatLock);
+      DEBUG_ERROR("Failed to get the buffer from the decoder");
+      return false;
+    }
+
+    glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
+
+    // update the texture
+    glTexSubImage2D(
+      GL_TEXTURE_2D,
+      0,
+      0,
+      0,
+      this->format.width ,
+      this->format.height,
+      this->vboFormat,
+      GL_UNSIGNED_BYTE,
+      (void*)0
+    );
+    if (check_gl_error("glTexSubImage2D"))
+    {
+      DEBUG_ERROR("texIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
+        this->texIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
+      );
+    }
+
+    // unbind the buffer
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  }
 
   const bool mipmap = this->opt.mipmap && (
     (this->format.width  > this->destRect.w) ||
     (this->format.height > this->destRect.h));
 
+  glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
   if (mipmap)
   {
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -974,8 +1042,8 @@ static bool draw_frame(struct Inst * this)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   }
-
   glBindTexture(GL_TEXTURE_2D, 0);
+
   LG_UNLOCK(this->formatLock);
   return true;
 }

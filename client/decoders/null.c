@@ -27,16 +27,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct Inst
 {
-  LG_RendererFormat format;
+  LG_RendererFormat  format;
+  const uint8_t    * src;
 };
 
-static bool         lgd_null_create         (void ** opaque);
-static void         lgd_null_destroy        (void  * opaque);
-static bool         lgd_null_initialize     (void  * opaque, const LG_RendererFormat format);
-static void         lgd_null_deinitialize   (void  * opaque);
-static LG_OutFormat lgd_null_get_out_format (void  * opaque);
-static unsigned int lgd_null_get_frame_pitch(void  * opaque);
-static bool         lgd_null_decode         (void  * opaque, uint8_t * dst, size_t dstSize, const uint8_t * src, size_t srcSize);
+static bool         lgd_null_create          (void ** opaque);
+static void         lgd_null_destroy         (void  * opaque);
+static bool         lgd_null_initialize      (void  * opaque, const LG_RendererFormat format, SDL_Window * window);
+static void         lgd_null_deinitialize    (void  * opaque);
+static LG_OutFormat lgd_null_get_out_format  (void  * opaque);
+static unsigned int lgd_null_get_frame_pitch (void  * opaque);
+static unsigned int lgd_null_get_frame_stride(void  * opaque);
+static bool         lgd_null_decode          (void  * opaque, const uint8_t * src, size_t srcSize);
+static bool         lgd_null_get_buffer      (void  * opaque, uint8_t * dst, size_t dstSize);
 
 static bool lgd_null_create(void ** opaque)
 {
@@ -56,7 +59,7 @@ static void lgd_null_destroy(void * opaque)
   free(opaque);
 }
 
-static bool lgd_null_initialize(void * opaque, const LG_RendererFormat format)
+static bool lgd_null_initialize(void * opaque, const LG_RendererFormat format, SDL_Window * window)
 {
   struct Inst * this = (struct Inst *)opaque;
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
@@ -65,6 +68,8 @@ static bool lgd_null_initialize(void * opaque, const LG_RendererFormat format)
 
 static void lgd_null_deinitialize(void * opaque)
 {
+  struct Inst * this = (struct Inst *)opaque;
+  memset(this, 0, sizeof(struct Inst));
 }
 
 static LG_OutFormat lgd_null_get_out_format(void * opaque)
@@ -78,20 +83,39 @@ static unsigned int lgd_null_get_frame_pitch(void * opaque)
   return this->format.pitch;
 }
 
-static bool lgd_null_decode(void * opaque, uint8_t * dst, size_t dstSize, const uint8_t * src, size_t srcSize)
+static unsigned int lgd_null_get_frame_stride(void * opaque)
 {
-  memcpySSE(dst, src, dstSize);
+  struct Inst * this = (struct Inst *)opaque;
+  return this->format.stride;
+}
+
+static bool lgd_null_decode(void * opaque, const uint8_t * src, size_t srcSize)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  this->src = src;
+  return true;
+}
+
+static bool lgd_null_get_buffer(void  * opaque, uint8_t * dst, size_t dstSize)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this->src)
+    return false;
+
+  memcpySSE(dst, this->src, dstSize);
   return true;
 }
 
 const LG_Decoder LGD_NULL =
 {
-  .name            = "NULL",
-  .create          = lgd_null_create,
-  .destroy         = lgd_null_destroy,
-  .initialize      = lgd_null_initialize,
-  .deinitialize    = lgd_null_deinitialize,
-  .get_out_format  = lgd_null_get_out_format,
-  .get_frame_pitch = lgd_null_get_frame_pitch,
-  .decode          = lgd_null_decode
+  .name             = "NULL",
+  .create           = lgd_null_create,
+  .destroy          = lgd_null_destroy,
+  .initialize       = lgd_null_initialize,
+  .deinitialize     = lgd_null_deinitialize,
+  .get_out_format   = lgd_null_get_out_format,
+  .get_frame_pitch  = lgd_null_get_frame_pitch,
+  .get_frame_stride = lgd_null_get_frame_stride,
+  .decode           = lgd_null_decode,
+  .get_buffer       = lgd_null_get_buffer
 };

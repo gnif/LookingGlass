@@ -19,34 +19,53 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #pragma once
 
+#include "lg-renderer.h"
+
 #include <stdint.h>
 #include <stdbool.h>
+#include <SDL2/SDL.h>
 
-#include "lg-renderer.h"
+#include <GL/gl.h>
 
 typedef enum LG_OutFormat
 {
-  LG_OUTPUT_BGRA
+  LG_OUTPUT_BGRA,
+  LG_OUTPUT_YUV420
 }
 LG_OutFormat;
 
-typedef bool         (* LG_DecoderCreate       )(void ** opaque);
-typedef void         (* LG_DecoderDestroy      )(void  * opaque);
-typedef bool         (* LG_DecoderInitialize   )(void  * opaque, const LG_RendererFormat format);
-typedef void         (* LG_DecoderDeInitialize )(void  * opaque);
-typedef LG_OutFormat (* LG_DecoderGetOutFormat )(void  * opaque);
-typedef unsigned int (* LG_DecoderGetFramePitch)(void  * opaque);
-typedef bool         (* LG_DecoderDecode       )(void  * opaque, uint8_t * dst, size_t dstSize, const uint8_t * src, size_t srcSize);
+typedef bool         (* LG_DecoderCreate        )(void ** opaque);
+typedef void         (* LG_DecoderDestroy       )(void  * opaque);
+typedef bool         (* LG_DecoderInitialize    )(void  * opaque, const LG_RendererFormat format, SDL_Window * window);
+typedef void         (* LG_DecoderDeInitialize  )(void  * opaque);
+typedef LG_OutFormat (* LG_DecoderGetOutFormat  )(void  * opaque);
+typedef unsigned int (* LG_DecoderGetFramePitch )(void  * opaque);
+typedef unsigned int (* LG_DecoderGetFrameStride)(void  * opaque);
+typedef bool         (* LG_DecoderDecode        )(void  * opaque, const uint8_t * src, size_t srcSize);
+typedef bool         (* LG_DecoderGetBuffer     )(void  * opaque, uint8_t * dst, size_t dstSize);
+
+typedef bool (* LG_DecoderInitGLTexture  )(void * opaque, GLenum target, GLuint texture, void ** ref);
+typedef void (* LG_DecoderFreeGLTexture  )(void * opaque, void * ref);
+typedef bool (* LG_DecoderUpdateGLTexture)(void * opaque, void * ref);
 
 typedef struct LG_Decoder
 {
-  const char *            name;
-  LG_DecoderCreate        create;
-  LG_DecoderDestroy       destroy;
-  LG_DecoderInitialize    initialize;
-  LG_DecoderDeInitialize  deinitialize;
-  LG_DecoderGetOutFormat  get_out_format;
-  LG_DecoderGetFramePitch get_frame_pitch;
-  LG_DecoderDecode        decode;
+  // mandatory support
+  const char *             name;
+  LG_DecoderCreate         create;
+  LG_DecoderDestroy        destroy;
+  LG_DecoderInitialize     initialize;
+  LG_DecoderDeInitialize   deinitialize;
+  LG_DecoderGetOutFormat   get_out_format;
+  LG_DecoderGetFramePitch  get_frame_pitch;
+  LG_DecoderGetFrameStride get_frame_stride;
+  LG_DecoderDecode         decode;
+  LG_DecoderGetBuffer      get_buffer;
+
+  // optional support
+  const bool                has_gl;
+  LG_DecoderInitGLTexture   init_gl_texture;
+  LG_DecoderFreeGLTexture   free_gl_texture;
+  LG_DecoderUpdateGLTexture update_gl_texture;
 }
 LG_Decoder;
