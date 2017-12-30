@@ -249,8 +249,10 @@ bool DXGI::InitH264Capture()
 
   ID3D10MultithreadPtr mt(m_device);
   mt->SetMultithreadProtected(TRUE);
+  SafeRelease(&mt);
 
-  m_encodeEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+  m_encodeEvent   = CreateEvent(NULL, TRUE , FALSE, NULL);
+  m_shutdownEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
   InitializeCriticalSection(&m_encodeCS);
 
   typeInfo.guidMajorType = MFMediaType_Video;
@@ -285,14 +287,15 @@ bool DXGI::InitH264Capture()
     delete[] name;
   }
 
-  status = activationPointers[0]->ActivateObject(IID_PPV_ARGS(&m_mfTransform));
+  m_mfActivation = activationPointers[0];
+  CoTaskMemFree(activationPointers);
+
+  status = m_mfActivation->ActivateObject(IID_PPV_ARGS(&m_mfTransform));
   if (FAILED(status))
   {
-    CoTaskMemFree(activationPointers);
     DEBUG_WINERROR("Failed to create H264 encoder MFT", status);
     return false;
   }
-  CoTaskMemFree(activationPointers);
 
   IMFAttributesPtr attribs;
   m_mfTransform->GetAttributes(&attribs);
@@ -348,7 +351,7 @@ bool DXGI::InitH264Capture()
   outType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_H264);
   outType->SetUINT32(MF_MT_AVG_BITRATE            , 240000);
   outType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
-  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_444);
+  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_422);
   outType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
   MFSetAttributeSize (outType, MF_MT_FRAME_SIZE        , m_width, m_height);
@@ -356,6 +359,7 @@ bool DXGI::InitH264Capture()
   MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
 
   status = m_mfTransform->SetOutputType(0, outType, 0);
+  SafeRelease(&outType);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to set the output media type on the H264 encoder MFT", status);
@@ -375,6 +379,7 @@ bool DXGI::InitH264Capture()
   MFSetAttributeRatio(inType, MF_MT_PIXEL_ASPECT_RATIO, 1 , 1);
 
   status = m_mfTransform->SetInputType(0, inType, 0);
+  SafeRelease(&inType);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to set the input media type on the H264 encoder MFT", status);
@@ -408,6 +413,14 @@ bool DXGI::InitH264Capture()
 
 void DXGI::DeInitialize()
 {
+  if (m_mediaEventGen)
+  {
+    m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL);
+    m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL);
+    while (WaitForSingleObject(m_shutdownEvent, INFINITE) != WAIT_OBJECT_0) {}
+    m_mfTransform->DeleteInputStream(0);
+  }
+
   if (m_releaseFrame)
   {
     m_releaseFrame = false;
@@ -427,21 +440,30 @@ void DXGI::DeInitialize()
     m_surfaceMapped = false;
   }
 
+  SafeRelease(&m_mediaEventGen);
+  SafeRelease(&m_mfTransform);
+  SafeRelease(&m_mfDeviceManager);
+
   SafeRelease(&m_texture);
   SafeRelease(&m_dup);
   SafeRelease(&m_output);
   SafeRelease(&m_deviceContext);
   SafeRelease(&m_device);
   SafeRelease(&m_dxgiFactory);
-  SafeRelease(&m_mfTransform);
-  SafeRelease(&m_mfDeviceManager);
-  SafeRelease(&m_mediaEventGen);
 
   if (m_encodeEvent)
   {
-    CloseHandle(m_encodeEvent);
-    m_encodeEvent = NULL;
+    CloseHandle(m_encodeEvent  );
+    CloseHandle(m_shutdownEvent);
+    m_encodeEvent   = NULL;
+    m_shutdownEvent = NULL;
     DeleteCriticalSection(&m_encodeCS);
+  }
+
+  if (m_mfActivation)
+  {
+    m_mfActivation->ShutdownObject();
+    SafeRelease(&m_mfActivation);
   }
 
   m_initialized = false;
@@ -523,7 +545,9 @@ STDMETHODIMP Capture::DXGI::Invoke(IMFAsyncResult * pAsyncResult)
         DEBUG_WINERROR("MFT_MESSAGE_COMMAND_FLUSH", status);
         return status;
       }
-      break;
+
+      SetEvent(m_shutdownEvent);
+      return S_OK;
     }
 
     case MEError:
@@ -662,19 +686,19 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
 
         switch (shapeInfo.Type)
         {
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR: frame.cursor.type = CURSOR_TYPE_COLOR;        break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : frame.cursor.type = CURSOR_TYPE_COLOR;        break;
         case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: frame.cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME: frame.cursor.type = CURSOR_TYPE_MONOCHROME;   break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : frame.cursor.type = CURSOR_TYPE_MONOCHROME;   break;
         default:
           DEBUG_ERROR("Invalid cursor type");
           return GRAB_STATUS_ERROR;
         }
 
         frame.cursor.hasShape = true;
-        frame.cursor.shape = m_pointer;
-        frame.cursor.w = shapeInfo.Width;
-        frame.cursor.h = shapeInfo.Height;
-        frame.cursor.pitch = shapeInfo.Pitch;
+        frame.cursor.shape    = m_pointer;
+        frame.cursor.w        = shapeInfo.Width;
+        frame.cursor.h        = shapeInfo.Height;
+        frame.cursor.pitch    = shapeInfo.Pitch;
         frame.cursor.dataSize = m_pointerSize;
       }
 
@@ -815,6 +839,7 @@ GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
       status = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), src, 0, FALSE, &buffer);
       if (FAILED(status))
       {
+        SafeRelease(&src);
         DEBUG_WINERROR("Failed to create DXGI surface buffer from texture", status);
         return GRAB_STATUS_ERROR;
       }

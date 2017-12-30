@@ -143,11 +143,14 @@ namespace Capture
     bool                            m_surfaceMapped;
 
     HANDLE                          m_encodeEvent;
-    bool                            m_encodeNeedsData, m_encodeHasData;
+    HANDLE                          m_shutdownEvent;
+    bool                            m_encodeNeedsData;
+    bool                            m_encodeHasData;
     CRITICAL_SECTION                m_encodeCS;
 
     UINT                            m_resetToken;
     IMFDXGIDeviceManagerPtr         m_mfDeviceManager;
+    IMFActivatePtr                  m_mfActivation;
     IMFTransformPtr                 m_mfTransform;
     IMFMediaEventGeneratorPtr       m_mediaEventGen;
 
