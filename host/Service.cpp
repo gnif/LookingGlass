@@ -183,6 +183,19 @@ bool Service::Process()
     // check if the client has flagged a restart
     if (f & KVMFR_HEADER_FLAG_RESTART)
     {
+      DEBUG_INFO("Restart Requested");
+      if (!m_capture->ReInitialize())
+      {
+        DEBUG_ERROR("ReInitialize Failed");
+        return false;
+      }
+
+      if (m_capture->GetMaxFrameSize() > m_frameSize)
+      {
+        DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
+        return false;
+      }
+
       INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
       break;
     }
