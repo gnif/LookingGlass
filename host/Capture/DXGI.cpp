@@ -349,9 +349,9 @@ bool DXGI::InitH264Capture()
 
   outType->SetGUID  (MF_MT_MAJOR_TYPE             , MFMediaType_Video);
   outType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_H264);
-  outType->SetUINT32(MF_MT_AVG_BITRATE            , 240000);
+  outType->SetUINT32(MF_MT_AVG_BITRATE            , 384*1000);
   outType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
-  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_422);
+  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_Base);
   outType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
   MFSetAttributeSize (outType, MF_MT_FRAME_SIZE        , m_width, m_height);
@@ -583,11 +583,12 @@ void DXGI::WaitForDesktop()
   CloseDesktop(desktop);
 }
 
-GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture)
+GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout)
 {
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
+  timeout = false;
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
 
@@ -620,18 +621,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
       status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
       {
-        if (!m_surfaceMapped)
-          continue;
-        m_memcpy.Wake();
-
-        // send the last frame again if we timeout to prevent the client stalling on restart
-        frame.width = m_width;
-        frame.height = m_height;
-        frame.pitch = m_mapping.RowPitch;
-        frame.stride = m_mapping.RowPitch / 4;
-
-        unsigned int size = m_height * m_mapping.RowPitch;
-        m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+        timeout = true;
         return GRAB_STATUS_OK;
       }
 
@@ -752,9 +742,31 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 {
   GrabStatus result;
   ID3D11Texture2DPtr src;
-  result = GrabFrameTexture(frame, src);
-  if (result != GRAB_STATUS_OK)
-    return result;
+  bool timeout;
+
+  while(true)
+  {
+    result = GrabFrameTexture(frame, src, timeout);
+    if (result != GRAB_STATUS_OK)
+      return result;
+
+    if (timeout)
+    {
+      if (!m_surfaceMapped)
+        continue;
+      m_memcpy.Wake();
+
+      // send the last frame again if we timeout to prevent the client stalling on restart
+      frame.pitch  = m_mapping.RowPitch;
+      frame.stride = m_mapping.RowPitch / 4;
+
+      unsigned int size = m_height * m_mapping.RowPitch;
+      m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+      return GRAB_STATUS_OK;
+    }
+
+    break;
+  }
 
   m_deviceContext->CopyResource(m_texture, src);
   SafeRelease(&src);
@@ -824,10 +836,19 @@ GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
       LeaveCriticalSection(&m_encodeCS);
       GrabStatus result;
       ID3D11Texture2DPtr src;
-      result = GrabFrameTexture(frame, src);
-      if (result != GRAB_STATUS_OK)
+      bool timeout;
+
+      while(true)
       {
-        return result;
+        result = GrabFrameTexture(frame, src, timeout);
+        if (result != GRAB_STATUS_OK)
+        {
+          return result;
+        }
+
+        //FIXME: we should send the last frame again
+        if (!timeout)
+          break;
       }
 
       // cursor data may be returned, only turn off the flag if we have a frame
@@ -837,9 +858,9 @@ GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
 
       IMFMediaBufferPtr buffer;
       status = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), src, 0, FALSE, &buffer);
+      SafeRelease(&src);
       if (FAILED(status))
       {
-        SafeRelease(&src);
         DEBUG_WINERROR("Failed to create DXGI surface buffer from texture", status);
         return GRAB_STATUS_ERROR;
       }
