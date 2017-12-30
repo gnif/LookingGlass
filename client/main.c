@@ -234,7 +234,7 @@ int cursorThread(void * unused)
         break;
 
       // check the data position is sane
-      const uint64_t dataSize = header.detail.frame.height * header.detail.frame.pitch;
+      const uint64_t dataSize = header.detail.cursor.height * header.detail.cursor.pitch;
       if (header.detail.cursor.dataPos + dataSize > state.shmSize)
       {
         DEBUG_ERROR("The guest sent an invalid mouse dataPos");
