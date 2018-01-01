@@ -219,14 +219,27 @@ static bool lgd_h264_initialize(void * opaque, const LG_RendererFormat format, S
 
   VAConfigAttrib attrib;
   attrib.type = VAConfigAttribRTFormat;
-  vaGetConfigAttributes(this->vaDisplay, VAProfileH264Baseline, VAEntrypointVLD, &attrib, 1);
+  vaGetConfigAttributes(
+    this->vaDisplay,
+    VAProfileH264ConstrainedBaseline,
+    VAEntrypointVLD,
+    &attrib,
+    1);
+
   if (!(attrib.value & VA_RT_FORMAT_YUV420))
   {
     DEBUG_ERROR("Failed to find desired YUV420 RT format");
     return false;
   }
 
-  status = vaCreateConfig(this->vaDisplay, VAProfileH264Baseline, VAEntrypointVLD, &attrib, 1, &this->vaConfigID);
+  status = vaCreateConfig(
+    this->vaDisplay,
+    VAProfileH264ConstrainedBaseline,
+    VAEntrypointVLD,
+    &attrib,
+    1,
+    &this->vaConfigID);
+
   if (status != VA_STATUS_SUCCESS)
   {
     DEBUG_ERROR("vaCreateConfig");
