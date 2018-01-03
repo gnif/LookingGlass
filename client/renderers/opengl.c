@@ -305,7 +305,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
     return false;
 
   if (!configure(this, window))
-    return true;
+    return false;
 
   if (this->resizeWindow)
   {
