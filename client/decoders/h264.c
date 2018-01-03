@@ -196,7 +196,7 @@ static bool lgd_h264_initialize(void * opaque, const LG_RendererFormat format, S
 
   status = vaQueryConfigEntrypoints(
       this->vaDisplay,
-      VAProfileH264Baseline,
+      VAProfileH264High,
       entryPoints,
       &entryPointCount
   );
@@ -221,7 +221,7 @@ static bool lgd_h264_initialize(void * opaque, const LG_RendererFormat format, S
   attrib.type = VAConfigAttribRTFormat;
   vaGetConfigAttributes(
     this->vaDisplay,
-    VAProfileH264ConstrainedBaseline,
+    VAProfileH264High,
     VAEntrypointVLD,
     &attrib,
     1);
@@ -234,7 +234,7 @@ static bool lgd_h264_initialize(void * opaque, const LG_RendererFormat format, S
 
   status = vaCreateConfig(
     this->vaDisplay,
-    VAProfileH264ConstrainedBaseline,
+    VAProfileH264High,
     VAEntrypointVLD,
     &attrib,
     1,
