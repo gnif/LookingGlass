@@ -204,6 +204,9 @@ int cursorThread(void * unused)
     // poll until we have cursor data
     if(!(state.shm->flags & KVMFR_HEADER_FLAG_CURSOR))
     {
+      if (!state.running)
+        break;
+
       nsleep(100);
       continue;
     }
@@ -295,6 +298,9 @@ int frameThread(void * unused)
     // poll until we have a new frame
     if(!(state.shm->flags & KVMFR_HEADER_FLAG_FRAME))
     {
+      if (!state.running)
+        break;
+
       nsleep(100);
       continue;
     }
@@ -379,6 +385,7 @@ int frameThread(void * unused)
     }
   }
 
+  state.running = false;
   return 0;
 }
 
@@ -396,6 +403,7 @@ int spiceThread(void * arg)
     }
 
   spice_disconnect();
+  state.running = false;
   return 0;
 }
 
