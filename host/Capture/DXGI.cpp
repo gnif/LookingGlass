@@ -351,7 +351,7 @@ bool DXGI::InitH264Capture()
   outType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_H264);
   outType->SetUINT32(MF_MT_AVG_BITRATE            , 384*1000);
   outType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
-  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_Base);
+  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_High);
   outType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
   MFSetAttributeSize (outType, MF_MT_FRAME_SIZE        , m_width, m_height);
