@@ -50,6 +50,9 @@ struct NAL
   uint32_t          pps_slice_groups_size;
   uint32_t        * pps_slice_group_id;
   uint32_t          pps_slice_group_id_size;
+
+  bool              slice_valid;
+  NAL_SLICE         slice;
 };
 
 bool nal_initialize(NAL * ptr)
@@ -496,6 +499,68 @@ static bool parse_nal_pps(NAL this, const uint8_t * src, size_t size, size_t * c
   pps->constrained_intra_pred_flag            = get_bit(src, offset);
   pps->redundant_pic_cnt_present_flag         = get_bit(src, offset);
 
+  const bool extraData = get_bit(src, offset) == 0;
+  --*offset;
+
+  if (extraData)
+  {
+    pps->transform_8x8_mode_flag         = get_bit(src, offset);
+    pps->pic_scaling_matrix_present_flag = get_bit(src, offset);
+    if (pps->pic_scaling_matrix_present_flag)
+    {
+    }
+    pps->second_chroma_qp_index_offset = decode_s_golomb(src, offset);
+  }
+
+#ifdef DEBUG_NAL
+  DEBUG_INFO("PPS:\n"
+    "pic_parameter_set_id                  : %u\n"
+    "seq_parameter_set_id                  : %u\n"
+    "entropy_coding_mode_flag              : %u\n"
+    "pic_order_present_flag                : %u\n"
+    "num_slice_groups_minus1               : %u\n"
+    "slice_group_map_type                  : %u\n"
+    "slice_group_change_direction_flag     : %u\n"
+    "slice_group_change_rate_minus1        : %u\n"
+    "pic_size_in_map_units_minus1          : %u\n"
+    "num_ref_idx_l0_active_minus1          : %u\n"
+    "num_ref_idx_l1_active_minus1          : %u\n"
+    "weighted_pred_flag                    : %u\n"
+    "weighted_bipred_idc                   : %u\n"
+    "pic_init_qp_minus26                   : %d\n"
+    "pic_init_qs_minus26                   : %d\n"
+    "chroma_qp_index_offset                : %d\n"
+    "deblocking_filter_control_present_flag: %u\n"
+    "constrained_intra_pred_flag           : %u\n"
+    "redundant_pic_cnt_present_flag        : %u\n"
+    "transform_8x8_mode_flag               : %u\n"
+    "pic_scaling_matrix_present_flag       : %u\n"
+    "second_chroma_qp_index_offset         : %u",
+    pps->pic_parameter_set_id,
+    pps->seq_parameter_set_id,
+    pps->entropy_coding_mode_flag,
+    pps->pic_order_present_flag,
+    pps->num_slice_groups_minus1,
+    pps->slice_group_map_type,
+    pps->slice_group_change_direction_flag,
+    pps->slice_group_change_rate_minus1,
+    pps->pic_size_in_map_units_minus1,
+    pps->num_ref_idx_l0_active_minus1,
+    pps->num_ref_idx_l1_active_minus1,
+    pps->weighted_pred_flag,
+    pps->weighted_bipred_idc,
+    pps->pic_init_qp_minus26,
+    pps->pic_init_qs_minus26,
+    pps->chroma_qp_index_offset,
+    pps->deblocking_filter_control_present_flag,
+    pps->constrained_intra_pred_flag,
+    pps->redundant_pic_cnt_present_flag,
+    pps->transform_8x8_mode_flag,
+    pps->pic_scaling_matrix_present_flag,
+    pps->second_chroma_qp_index_offset
+  );
+#endif
+
   if (!parse_nal_trailing_bits(this, src, size, offset))
     return false;
 
@@ -503,23 +568,193 @@ static bool parse_nal_pps(NAL this, const uint8_t * src, size_t size, size_t * c
   return true;
 }
 
+static bool parse_nal_ref_pic_list_reordering(NAL this, const uint8_t * src, size_t size, size_t * const offset)
+{
+  //TODO
+  return false;
+}
+
+static bool parse_pred_weight_table(NAL this, const uint8_t * src, size_t size, size_t * const offset)
+{
+  //TODO
+  return false;
+}
+
+static bool parse_dec_ref_pic_marking(NAL this, const uint8_t * src, size_t size, size_t * const offset)
+{
+  //TODO
+  return false;
+}
+
+static bool parse_nal_coded_slice(
+  NAL this,
+  const uint8_t ref_idc,
+  const uint8_t ref_unit_type,
+  const uint8_t * src,
+  size_t size,
+  size_t * const offset
+)
+{
+  if (!this->sps_valid || !this->pps_valid)
+    return false;
+
+  NAL_SLICE * slice = &this->slice;
+  memset(slice, 0, sizeof(NAL_SLICE));
+
+  slice->first_mb_in_slice    = decode_u_golomb(src, offset);
+  slice->slice_type           = decode_u_golomb(src, offset);
+  slice->pic_parameter_set_id = decode_u_golomb(src, offset);
+  slice->frame_num            = get_bits(src, offset, this->sps.log2_max_frame_num_minus4 + 4);
+
+  if (!this->sps.frame_mbs_only_flag)
+  {
+    slice->field_pic_flag = get_bit(src, offset);
+    if (slice->field_pic_flag)
+      slice->bottom_field_flag = get_bit(src, offset);
+  }
+
+  if (ref_unit_type == 5)
+    slice->idr_pic_id = decode_u_golomb(src, offset);
+
+  if (this->sps.pic_order_cnt_type == 0)
+  {
+    slice->pic_order_cnt_lsb = get_bits(src, offset, this->sps.log2_max_pic_order_cnt_lsb_minus4 + 4);
+    if (this->pps.pic_order_present_flag && !slice->field_pic_flag)
+      slice->delta_pic_order_cnt_bottom = decode_s_golomb(src, offset);
+  }
+  else
+    if (this->sps.pic_order_cnt_type == 1 && !this->sps.delta_pic_order_always_zero_flag)
+    {
+      slice->delta_pic_order_cnt[0] = decode_s_golomb(src, offset);
+      if (this->pps.pic_order_present_flag && !slice->field_pic_flag)
+        slice->delta_pic_order_cnt[1] = decode_s_golomb(src, offset);
+    }
+
+  if (this->pps.redundant_pic_cnt_present_flag)
+    slice->redundant_pic_cnt = decode_u_golomb(src, offset);
+
+  if (slice->slice_type == NAL_SLICE_TYPE_B)
+    slice->direct_spatial_mv_pred_flag = get_bit(src, offset);
+
+  if (slice->slice_type == NAL_SLICE_TYPE_P  ||
+      slice->slice_type == NAL_SLICE_TYPE_SP ||
+      slice->slice_type == NAL_SLICE_TYPE_B)
+  {
+    slice->num_ref_idx_active_override_flag = get_bit(src, offset);
+    if (slice->num_ref_idx_active_override_flag)
+    {
+      slice->num_ref_idx_l0_active_minus1 = decode_u_golomb(src, offset);
+      if (slice->slice_type == NAL_SLICE_TYPE_B)
+        slice->num_ref_idx_l1_active_minus1 = decode_u_golomb(src, offset);
+    }
+  }
+
+  if (!parse_nal_ref_pic_list_reordering(this, src, size, offset))
+    return false;
+
+  if ((this->pps.weighted_pred_flag && (slice->slice_type == NAL_SLICE_TYPE_P || slice->slice_type == NAL_SLICE_TYPE_SP)) ||
+      (this->pps.weighted_bipred_idc == 1 && slice->slice_type == NAL_SLICE_TYPE_B))
+  {
+    if (!parse_pred_weight_table(this, src, size, offset))
+      return false;
+  }
+
+  if (ref_idc != 0)
+    if (!parse_dec_ref_pic_marking(this, src, size, offset))
+      return false;
+
+  if (this->pps.entropy_coding_mode_flag && slice->slice_type != NAL_SLICE_TYPE_I && slice->slice_type != NAL_SLICE_TYPE_SI)
+    slice->cabac_init_idc = decode_u_golomb(src, offset);
+
+  slice->slice_qp_delta = decode_s_golomb(src, offset);
+
+  if (slice->slice_type == NAL_SLICE_TYPE_SP || slice->slice_type == NAL_SLICE_TYPE_SI)
+  {
+    if (slice->slice_type == NAL_SLICE_TYPE_SP)
+      slice->sp_for_switch_flag = get_bit(src, offset);
+    slice->slice_qs_delta = decode_s_golomb(src, offset);
+  }
+
+  if (this->pps.deblocking_filter_control_present_flag)
+  {
+    slice->disable_deblocking_filter_idc = decode_u_golomb(src, offset);
+    if (slice->disable_deblocking_filter_idc != 1)
+    {
+      slice->slice_alpha_c0_offset_div2 = decode_s_golomb(src, offset);
+      slice->slice_beta_offset_div2     = decode_s_golomb(src, offset);
+    }
+  }
+
+  if (this->pps.num_slice_groups_minus1 > 0 && this->pps.slice_group_map_type >= 3 && this->pps.slice_group_map_type <= 5)
+    slice->slice_group_change_cycle = decode_u_golomb(src, offset);
+
+#ifdef DEBUG_NAL
+  DEBUG_INFO("SLICE:\n"
+    "first_mb_in_slice               : %u\n"
+    "slice_type                      : %u\n"
+    "pic_parameter_set_id            : %u\n"
+    "frame_num                       : %u\n"
+    "field_pic_flag                  : %u\n"
+    "bottom_field_flag               : %u\n"
+    "idr_pic_id                      : %u\n"
+    "pic_order_cnt_lsb               : %u\n"
+    "delta_pic_order_cnt_bottom      : %d\n"
+    "delta_pic_order_cnt[0]          : %d\n"
+    "delta_pic_order_cnt[1]          : %d\n"
+    "redundant_pic_cnt               : %u\n"
+    "direct_spatial_mv_pred_flag     : %u\n"
+    "num_ref_idx_active_override_flag: %u\n"
+    "num_ref_idx_l0_active_minus1    : %u\n"
+    "num_ref_idx_l1_active_minus1    : %u",
+    slice->first_mb_in_slice,
+    slice->slice_type,
+    slice->pic_parameter_set_id,
+    slice->frame_num,
+    slice->field_pic_flag,
+    slice->bottom_field_flag,
+    slice->idr_pic_id,
+    slice->pic_order_cnt_lsb,
+    slice->delta_pic_order_cnt_bottom,
+    slice->delta_pic_order_cnt[0],
+    slice->delta_pic_order_cnt[1],
+    slice->redundant_pic_cnt,
+    slice->direct_spatial_mv_pred_flag,
+    slice->num_ref_idx_active_override_flag,
+    slice->num_ref_idx_l0_active_minus1,
+    slice->num_ref_idx_l1_active_minus1
+  );
+#endif
+
+  if (!parse_nal_trailing_bits(this, src, size, offset))
+    return false;
+
+  this->slice_valid = true;
+  return true;
+}
+
 bool nal_parse(NAL this, const uint8_t * src, size_t size)
 {
+#ifdef DEBUG_NAL
   static FILE * fd = NULL;
   if (!fd)
     fd = fopen("/tmp/stream.h264", "w");
   fwrite(src, size, 1, fd);
+  fflush(fd);
+#endif
 
-  const size_t bits = size << 4;
-  size_t offset = 0;
-  while(offset < bits)
+  for(size_t i = 0; i < size - 4; ++i)
   {
-    // look for the start header
-    if (get_bits(src, &offset, 32) != 1)
-    {
-      offset -= 24;
+    if (src[i++] != 0 || src[i++] != 0)
       continue;
-    }
+
+    if (src[i] == 0)
+      ++i;
+
+    if (src[i++] != 1)
+      continue;
+
+    size_t offset = i << 3;
+    DEBUG_INFO("nal @ %lu (%lu)", i, offset);
 
     // ensure the forbidden zero bit is not set
     if (get_bit(src, &offset) != 0)
@@ -528,12 +763,19 @@ bool nal_parse(NAL this, const uint8_t * src, size_t size)
       return false;
     }
 
-    uint8_t nal_ref_idc       = get_bits(src, &offset, 2);
-    uint8_t nal_ref_unit_type = get_bits(src, &offset, 5);
-    DEBUG_INFO("ref idc: %d, ref unit type: %d", nal_ref_idc, nal_ref_unit_type);
+    uint8_t ref_idc       = get_bits(src, &offset, 2);
+    uint8_t ref_unit_type = get_bits(src, &offset, 5);
+    DEBUG_INFO("ref idc: %d, ref unit type: %d", ref_idc, ref_unit_type);
 
-    switch(nal_ref_unit_type)
+    switch(ref_unit_type)
     {
+      case NAL_TYPE_CODED_SLICE_IDR:
+      case NAL_TYPE_CODED_SLICE_NON_IDR:
+      case NAL_TYPE_CODED_SLICE_AUX:
+        if (!parse_nal_coded_slice(this, ref_idc, ref_unit_type, src, size, &offset))
+          return false;
+        break;
+
       case NAL_TYPE_AUD:
       {
         this->primary_pic_type       = get_bits(src, &offset, 3);
@@ -554,14 +796,14 @@ bool nal_parse(NAL this, const uint8_t * src, size_t size)
         break;
 
       default:
-        DEBUG_ERROR("Unknown NAL ref unit type: %d", nal_ref_unit_type);
+        DEBUG_ERROR("Unknown NAL ref unit type: %d", ref_unit_type);
         return false;
     }
 
-    // byte align
-    offset = (offset + 0x7) & ~0x7;
+    i = offset >> 3;
   }
 
+  DEBUG_INFO("return");
   return true;
 }
 
@@ -587,5 +829,14 @@ bool nal_get_pps(NAL this, const NAL_PPS ** pps)
     return false;
 
   *pps = &this->pps;
+  return true;
+}
+
+bool nal_get_slice(NAL this, const NAL_SLICE ** slice)
+{
+  if (!this->slice_valid)
+    return false;
+
+  *slice = &this->slice;
   return true;
 }

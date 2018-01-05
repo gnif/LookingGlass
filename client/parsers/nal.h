@@ -21,9 +21,17 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdlib.h>
 
-#define NAL_TYPE_SPS  7
-#define NAL_TYPE_PPS  8
-#define NAL_TYPE_AUD  9
+#define NAL_TYPE_CODED_SLICE_NON_IDR          1
+#define NAL_TYPE_CODED_SLICE_DATA_PARTITION_A 2
+#define NAL_TYPE_CODED_SLICE_DATA_PARTITION_B 3
+#define NAL_TYPE_CODED_SLICE_DATA_PARTITION_C 4
+#define NAL_TYPE_CODED_SLICE_IDR              5
+#define NAL_TYPE_SPS                          7
+#define NAL_TYPE_PPS                          8
+#define NAL_TYPE_AUD                          9
+#define NAL_TYPE_END_OF_SEQUENCE             10
+#define NAL_TYPE_END_OF_STREAM               11
+#define NAL_TYPE_CODED_SLICE_AUX             19
 
 #define IDC_PROFILE_BASELINE 66
 #define IDC_PROFILE_MAIN     77
@@ -44,6 +52,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define NAL_PICTURE_TYPE_I 0
 #define NAL_PICTURE_TYPE_P 1
 #define NAL_PICTURE_TYPE_B 2
+
+#define NAL_SLICE_TYPE_P  0
+#define NAL_SLICE_TYPE_B  1
+#define NAL_SLICE_TYPE_I  2
+#define NAL_SLICE_TYPE_SP 3
+#define NAL_SLICE_TYPE_SI 4
 
 typedef struct NAL_SPS
 {
@@ -186,8 +200,46 @@ typedef struct NAL_PPS
   uint8_t           deblocking_filter_control_present_flag;
   uint8_t           constrained_intra_pred_flag;
   uint8_t           redundant_pic_cnt_present_flag;
+
+  uint8_t           transform_8x8_mode_flag;
+  uint8_t           pic_scaling_matrix_present_flag;
+  uint8_t           pic_scaling_list_present_flag[6];
+  int32_t           scaling_list_4x4[6];
+  int32_t           scaling_list_8x8[2];
+  int32_t           second_chroma_qp_index_offset;
 }
 NAL_PPS;
+
+typedef struct NAL_SLICE
+{
+  uint32_t first_mb_in_slice;
+  uint32_t slice_type;
+  uint32_t pic_parameter_set_id;
+  uint32_t frame_num;
+  uint8_t  field_pic_flag;
+  uint8_t  bottom_field_flag;
+  uint32_t idr_pic_id;
+  uint32_t pic_order_cnt_lsb;
+  int32_t  delta_pic_order_cnt_bottom;
+  int32_t  delta_pic_order_cnt[2];
+  uint32_t redundant_pic_cnt;
+  uint8_t  direct_spatial_mv_pred_flag;
+  uint8_t  num_ref_idx_active_override_flag;
+  uint32_t num_ref_idx_l0_active_minus1;
+  uint32_t num_ref_idx_l1_active_minus1;
+  //ref_pic_list_reordering
+  //pred_weight_table
+  //dec_ref_pic_marking
+  uint32_t cabac_init_idc;
+  int32_t  slice_qp_delta;
+  uint8_t  sp_for_switch_flag;
+  int32_t  slice_qs_delta;
+  uint32_t disable_deblocking_filter_idc;
+  int32_t  slice_alpha_c0_offset_div2;
+  int32_t  slice_beta_offset_div2;
+  uint32_t slice_group_change_cycle;
+}
+NAL_SLICE;
 
 typedef struct NAL * NAL;
 
@@ -196,5 +248,6 @@ void nal_deinitialize(NAL this );
 bool nal_parse       (NAL this, const uint8_t * src, size_t size);
 
 bool nal_get_primary_picture_type(NAL this, uint8_t * pic_type);
-bool nal_get_sps(NAL this, const NAL_SPS ** sps);
-bool nal_get_pps(NAL this, const NAL_PPS ** pps);
+bool nal_get_sps  (NAL this, const NAL_SPS   ** sps  );
+bool nal_get_pps  (NAL this, const NAL_PPS   ** pps  );
+bool nal_get_slice(NAL this, const NAL_SLICE ** slice);
