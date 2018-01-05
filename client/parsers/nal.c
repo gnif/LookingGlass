@@ -972,7 +972,6 @@ bool nal_parse(NAL this, const uint8_t * src, size_t size)
     i = offset >> 3;
   }
 
-  DEBUG_INFO("return");
   return true;
 }
 
