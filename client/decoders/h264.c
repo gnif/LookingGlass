@@ -25,14 +25,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <SDL2/SDL_syswm.h>
 #include <va/va_glx.h>
 
 #define SURFACE_NUM 3
-
-#define SLICE_TYPE_P 0
-#define SLICE_TYPE_B 1
-#define SLICE_TYPE_I 2
 
 struct Inst
 {
@@ -441,7 +438,7 @@ static void set_slice_parameter_buffer_t2(VASliceParameterBufferH264 *p, const b
   p->RefPicList0[0].picture_id = 0xffffffff;
 }
 
-static bool setup_pic_buffer(struct Inst * this)
+static bool setup_pic_buffer(struct Inst * this, const NAL_SLICE * slice)
 {
   VAStatus status;
 
@@ -467,15 +464,54 @@ static bool setup_pic_buffer(struct Inst * this)
     return false;
   }
 
+  const NAL_PPS * pps;
+  if (!nal_get_pps(this->nal, &pps))
+  {
+    DEBUG_ERROR("nal_get_pps");
+    return false;
+  }
+
   memset(p, 0, sizeof(VAPictureParameterBufferH264));
   p->picture_width_in_mbs_minus1  = sps->pic_width_in_mbs_minus1;
   p->picture_height_in_mbs_minus1 = sps->pic_height_in_map_units_minus1;
   p->bit_depth_luma_minus8        = sps->bit_depth_luma_minus8;
   p->bit_depth_chroma_minus8      = sps->bit_depth_chroma_minus8;
   p->num_ref_frames               = sps->num_ref_frames;
-  p->seq_fields.value             = 145;
-  p->pic_fields.value             = 0x501;
-  p->frame_num                    = this->frameNum % 16;
+
+  p->seq_fields.value                                  = 0;
+  p->seq_fields.bits.chroma_format_idc                 = sps->chroma_format_idc;
+  p->seq_fields.bits.residual_colour_transform_flag    = sps->gaps_in_frame_num_value_allowed_flag;
+  p->seq_fields.bits.frame_mbs_only_flag               = sps->frame_mbs_only_flag;
+  p->seq_fields.bits.mb_adaptive_frame_field_flag      = sps->mb_adaptive_frame_field_flag;
+  p->seq_fields.bits.direct_8x8_inference_flag         = sps->direct_8x8_inference_flag;
+  p->seq_fields.bits.MinLumaBiPredSize8x8              = sps->level_idc >= 31;
+  p->seq_fields.bits.log2_max_frame_num_minus4         = sps->log2_max_frame_num_minus4;
+  p->seq_fields.bits.pic_order_cnt_type                = sps->pic_order_cnt_type;
+  p->seq_fields.bits.log2_max_pic_order_cnt_lsb_minus4 = sps->log2_max_pic_order_cnt_lsb_minus4;
+  p->seq_fields.bits.delta_pic_order_always_zero_flag  = sps->delta_pic_order_always_zero_flag;
+
+  p->num_slice_groups_minus1        = pps->num_slice_groups_minus1;
+  p->slice_group_map_type           = pps->slice_group_map_type;
+  p->slice_group_change_rate_minus1 = 0;
+  p->pic_init_qp_minus26            = pps->pic_init_qp_minus26;
+  p->pic_init_qs_minus26            = pps->pic_init_qs_minus26;
+  p->chroma_qp_index_offset         = pps->chroma_qp_index_offset;
+  p->second_chroma_qp_index_offset  = pps->second_chroma_qp_index_offset;
+
+  p->pic_fields.value = 0;
+  p->pic_fields.bits.entropy_coding_mode_flag               = pps->entropy_coding_mode_flag;
+  p->pic_fields.bits.weighted_pred_flag                     = pps->weighted_pred_flag;
+  p->pic_fields.bits.weighted_bipred_idc                    = pps->weighted_bipred_idc;
+  p->pic_fields.bits.transform_8x8_mode_flag                = pps->transform_8x8_mode_flag;
+  p->pic_fields.bits.field_pic_flag                         = slice->field_pic_flag;
+  p->pic_fields.bits.constrained_intra_pred_flag            = pps->constrained_intra_pred_flag;
+  p->pic_fields.bits.pic_order_present_flag                 = pps->pic_order_present_flag;
+  p->pic_fields.bits.deblocking_filter_control_present_flag = pps->deblocking_filter_control_present_flag;
+  p->pic_fields.bits.redundant_pic_cnt_present_flag         = pps->redundant_pic_cnt_present_flag;
+  p->pic_fields.bits.reference_pic_flag                     = slice->nal_ref_idc != 0;
+
+  p->frame_num = slice->frame_num;
+
   for(int i = 0; i < 16; ++i)
   {
     p->ReferenceFrames[i].flags      = VA_PICTURE_H264_INVALID;
@@ -616,34 +652,32 @@ static bool lgd_h264_decode(void * opaque, const uint8_t * src, size_t srcSize)
   VAStatus status;
   struct Inst * this = (struct Inst *)opaque;
 
-  if (!nal_parse(this->nal, src, srcSize))
+  size_t seek;
+  if (!nal_parse(this->nal, src, srcSize, &seek))
   {
     DEBUG_WARN("nal_parse, perhaps mid stream");
     return true;
   }
 
-  uint8_t pic_type;
-  if (!nal_get_primary_picture_type(this->nal, &pic_type))
+  const NAL_SLICE * slice;
+  if (!nal_get_slice(this->nal, &slice))
   {
-    DEBUG_ERROR("Missing primary picture type");
-    return false;
+    DEBUG_WARN("nal_get_slice failed");
+    return true;
   }
 
-  static const int pic_type_to_slice_type[3] =
-  {
-    SLICE_TYPE_I,
-    SLICE_TYPE_P,
-    SLICE_TYPE_B
-  };
+  assert(seek < srcSize);
+  src     += seek;
+  srcSize -= seek;
 
-  this->sliceType = pic_type_to_slice_type[pic_type];
+  this->sliceType = slice->slice_type;
 
   // don't start until we have an I-FRAME
-  if (this->frameNum == 0 && this->sliceType != SLICE_TYPE_I)
+  if (this->frameNum == 0 && this->sliceType != NAL_SLICE_TYPE_I)
     return true;
 
   {
-    if (!setup_pic_buffer(this)) return false;
+    if (!setup_pic_buffer(this, slice)) return false;
     if (!setup_mat_buffer(this)) return false;
 
     VABufferID bufferIDs[] =

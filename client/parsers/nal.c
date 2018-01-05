@@ -485,6 +485,7 @@ static bool parse_nal_pps(NAL this, const uint8_t * src, size_t size, size_t * c
             this->pps_slice_group_id      = realloc(this->pps_slice_group_id,
                 this->pps_slice_group_id_size * sizeof(uint32_t));
           }
+          pps->slice_group_id = this->pps_slice_group_id;
 
           for(uint32_t group = 0; group <= pps->pic_size_in_map_units_minus1; ++group)
             pps->slice_group_id[group] = get_bits(src, offset, bits);
@@ -770,6 +771,7 @@ static bool parse_nal_coded_slice(
   NAL_SLICE * slice = &this->slice;
   memset(slice, 0, sizeof(NAL_SLICE));
 
+  slice->nal_ref_idc          = ref_idc;
   slice->first_mb_in_slice    = decode_u_golomb(src, offset);
   slice->slice_type           = decode_u_golomb(src, offset);
   slice->pic_parameter_set_id = decode_u_golomb(src, offset);
@@ -901,7 +903,7 @@ static bool parse_nal_coded_slice(
   return true;
 }
 
-bool nal_parse(NAL this, const uint8_t * src, size_t size)
+bool nal_parse(NAL this, const uint8_t * src, size_t size, size_t * seek)
 {
 #ifdef DEBUG_NAL
   static FILE * fd = NULL;
@@ -911,19 +913,22 @@ bool nal_parse(NAL this, const uint8_t * src, size_t size)
   fflush(fd);
 #endif
 
+  *seek = 0;
   for(size_t i = 0; i < size - 4; ++i)
   {
     if (src[i++] != 0 || src[i++] != 0)
-      continue;
+      break;
 
     if (src[i] == 0)
       ++i;
 
     if (src[i++] != 1)
-      continue;
+      break;
 
     size_t offset = i << 3;
-    DEBUG_INFO("nal @ %lu (%lu)", i, offset);
+#ifdef DEBUG_NAL
+    DEBUG_INFO("nal @ %lu (%lu)", *seek, offset);
+#endif
 
     // ensure the forbidden zero bit is not set
     if (get_bit(src, &offset) != 0)
@@ -970,6 +975,7 @@ bool nal_parse(NAL this, const uint8_t * src, size_t size)
     }
 
     i = offset >> 3;
+    *seek = i;
   }
 
   return true;

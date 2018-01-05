@@ -263,6 +263,7 @@ NAL_RP_MARKING;
 
 typedef struct NAL_SLICE
 {
+  uint8_t         nal_ref_idc;
   uint32_t        first_mb_in_slice;
   uint32_t        slice_type;
   uint32_t        pic_parameter_set_id;
@@ -296,7 +297,7 @@ typedef struct NAL * NAL;
 
 bool nal_initialize  (NAL * ptr);
 void nal_deinitialize(NAL this );
-bool nal_parse       (NAL this, const uint8_t * src, size_t size);
+bool nal_parse       (NAL this, const uint8_t * src, size_t size, size_t * seek);
 
 bool nal_get_primary_picture_type(NAL this, uint8_t * pic_type);
 bool nal_get_sps  (NAL this, const NAL_SPS   ** sps  );
