@@ -618,8 +618,8 @@ static bool lgd_h264_decode(void * opaque, const uint8_t * src, size_t srcSize)
 
   if (!nal_parse(this->nal, src, srcSize))
   {
-    DEBUG_ERROR("Failed to parse required information");
-    return false;
+    DEBUG_WARN("nal_parse, perhaps mid stream");
+    return true;
   }
 
   uint8_t pic_type;
