@@ -490,9 +490,13 @@ static bool setup_pic_buffer(struct Inst * this, const NAL_SLICE * slice)
   p->seq_fields.bits.log2_max_pic_order_cnt_lsb_minus4 = sps->log2_max_pic_order_cnt_lsb_minus4;
   p->seq_fields.bits.delta_pic_order_always_zero_flag  = sps->delta_pic_order_always_zero_flag;
 
+#if 0
+  // these are deprecated, FMO is not supported
   p->num_slice_groups_minus1        = pps->num_slice_groups_minus1;
   p->slice_group_map_type           = pps->slice_group_map_type;
-  p->slice_group_change_rate_minus1 = 0;
+  p->slice_group_change_rate_minus1 = pps->slice_group_change_rate_minus1;
+#endif
+
   p->pic_init_qp_minus26            = pps->pic_init_qp_minus26;
   p->pic_init_qs_minus26            = pps->pic_init_qs_minus26;
   p->chroma_qp_index_offset         = pps->chroma_qp_index_offset;
