@@ -159,6 +159,7 @@ static bool lgd_h264_create(void ** opaque)
 static void lgd_h264_destroy(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
+  nal_deinitialize(this->nal);
   lgd_h264_deinitialize(this);
   free(this);
 }

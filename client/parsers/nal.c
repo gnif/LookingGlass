@@ -37,7 +37,15 @@ struct NAL
   int32_t    * sps_offset_for_ref_frame;
   uint32_t     sps_num_ref_frames_in_pic_order_cnt_cycle;
 
+  bool         vui_valid;
   NAL_VUI      vui;
+  NAL_CPB    * vui_nal_hrd_parameters_cpb;
+  uint32_t     vui_nal_hrd_parameters_cpb_size;
+  NAL_CPB    * vui_vcl_hrd_parameters_cpb;
+  uint32_t     vui_vcl_hrd_parameters_cpb_size;
+
+  bool         pps_valid;
+  NAL_PPS      pps;
 };
 
 bool nal_initialize(NAL * ptr)
@@ -50,38 +58,36 @@ bool nal_initialize(NAL * ptr)
 void nal_deinitialize(NAL this)
 {
   if (this->sps_offset_for_ref_frame)
-  {
     free(this->sps_offset_for_ref_frame);
-    this->sps_offset_for_ref_frame = NULL;
-  }
 
-  if (this->vui.nal_hrd_parameters.cpb)
-  {
-    free(this->vui.nal_hrd_parameters.cpb);
-    this->vui.nal_hrd_parameters.cpb = NULL;
-  }
+  if (this->vui_nal_hrd_parameters_cpb)
+    free(this->vui_nal_hrd_parameters_cpb);
 
-  if (this->vui.vcl_hrd_parameters.cpb)
-  {
-    free(this->vui.vcl_hrd_parameters.cpb);
-    this->vui.vcl_hrd_parameters.cpb = NULL;
-  }
+  if (this->vui_vcl_hrd_parameters_cpb)
+    free(this->vui_vcl_hrd_parameters_cpb);
 
   free(this);
 }
 
-static bool parse_nal_hrd(NAL_HRD * const hrd, const uint8_t * src, size_t size, size_t * const offset)
+static bool parse_nal_hrd(
+    NAL_HRD * const hrd,
+    NAL_CPB  ** cpb,
+    uint32_t *  cpb_size,
+    const uint8_t * src,
+    size_t size,
+    size_t * const offset)
 {
   hrd->cpb_cnt_minus1 = decode_u_golomb(src, offset);
   hrd->bit_rate_scale = get_bits(src, offset, 4);
   hrd->cpb_size_scale = get_bits(src, offset, 4);
 
-  if (hrd->cpb_size_count < hrd->cpb_size_scale)
+  if (*cpb_size < hrd->cpb_size_scale)
   {
-    hrd->cpb            = realloc(hrd->cpb, hrd->cpb_size_scale * sizeof(NAL_CPB));
-    hrd->cpb_size_count = hrd->cpb_size_scale;
+    *cpb      = realloc(*cpb, hrd->cpb_size_scale * sizeof(NAL_CPB));
+    *cpb_size = hrd->cpb_size_scale;
   }
 
+  hrd->cpb = *cpb;
   for(uint32_t i = 0; i < hrd->cpb_size_scale; ++i)
   {
     hrd->cpb[i].bit_rate_value_minus1 = decode_u_golomb(src, offset);
@@ -97,17 +103,10 @@ static bool parse_nal_hrd(NAL_HRD * const hrd, const uint8_t * src, size_t size,
   return true;
 }
 
-static bool parse_nal_vui(NAL_VUI * const vui, const uint8_t * src, size_t size, size_t * const offset)
+static bool parse_nal_vui(NAL this, const uint8_t * src, size_t size, size_t * const offset)
 {
-  NAL_CPB * nal_hrd_cpb   = vui->nal_hrd_parameters.cpb;
-  uint8_t   nal_hrd_count = vui->nal_hrd_parameters.cpb_size_count;
-  NAL_CPB * vcl_hrd_cpb   = vui->vcl_hrd_parameters.cpb;
-  uint8_t   vcl_hrd_count = vui->vcl_hrd_parameters.cpb_size_count;
+  NAL_VUI * vui = &this->vui;
   memset(vui, 0, sizeof(NAL_VUI));
-  vui->nal_hrd_parameters.cpb            = nal_hrd_cpb;
-  vui->nal_hrd_parameters.cpb_size_count = nal_hrd_count;
-  vui->vcl_hrd_parameters.cpb            = vcl_hrd_cpb;
-  vui->vcl_hrd_parameters.cpb_size_count = vcl_hrd_count;
 
   vui->aspect_ratio_info_present_flag = get_bit(src, offset);
   if (vui->aspect_ratio_info_present_flag)
@@ -155,12 +154,24 @@ static bool parse_nal_vui(NAL_VUI * const vui, const uint8_t * src, size_t size,
 
   vui->nal_hrd_parameters_present_flag = get_bit(src, offset);
   if (vui->nal_hrd_parameters_present_flag)
-    if (!parse_nal_hrd(&vui->nal_hrd_parameters, src, size, offset))
+    if (!parse_nal_hrd(
+        &vui->nal_hrd_parameters,
+        &this->vui_nal_hrd_parameters_cpb,
+        &this->vui_nal_hrd_parameters_cpb_size,
+        src,
+        size,
+        offset))
       return false;
 
   vui->vcl_hrd_parameters_present_flag = get_bit(src, offset);
   if (vui->vcl_hrd_parameters_present_flag)
-    if (!parse_nal_hrd(&vui->vcl_hrd_parameters, src, size, offset))
+    if (!parse_nal_hrd(
+        &vui->vcl_hrd_parameters,
+        &this->vui_vcl_hrd_parameters_cpb,
+        &this->vui_vcl_hrd_parameters_cpb_size,
+        src,
+        size,
+        offset))
       return false;
 
   if (vui->nal_hrd_parameters_present_flag || vui->vcl_hrd_parameters_present_flag)
@@ -366,14 +377,22 @@ static bool parse_nal_sps(NAL this, const uint8_t * src, size_t size, size_t * c
 #endif
 
   if (this->sps.vui_parameters_present_flag)
-    if (!parse_nal_vui(&this->vui, src, size, offset))
+  {
+    if (!parse_nal_vui(this, src, size, offset))
       return false;
+    this->vui_valid = true;
+  }
 
   if (!parse_nal_trailing_bits(this, src, size, offset))
     return false;
 
   this->sps_valid = true;
   return true;
+}
+
+static bool parse_nal_pps(NAL this, const uint8_t * src, size_t size, size_t * const offset)
+{
+  return false;
 }
 
 bool nal_parse(NAL this, const uint8_t * src, size_t size)
@@ -422,6 +441,8 @@ bool nal_parse(NAL this, const uint8_t * src, size_t size)
         break;
 
       case NAL_TYPE_PPS:
+        if (!parse_nal_pps(this, src, size, &offset))
+          return false;
         break;
 
       default:
@@ -449,5 +470,14 @@ bool nal_get_primary_picture_type(NAL this, uint8_t * pic_type)
   if (!this->primary_pic_type_valid)
     return false;
   *pic_type = this->primary_pic_type;
+  return true;
+}
+
+bool nal_get_pps(NAL this, const NAL_PPS ** pps)
+{
+  if (!this->pps_valid)
+    return false;
+
+  *pps = &this->pps;
   return true;
 }
