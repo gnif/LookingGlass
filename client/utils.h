@@ -61,3 +61,33 @@ static inline void nsleep(uint64_t ns)
   #define LG_UNLOCK(x)    SDL_UnlockMutex(x)
   #define LG_LOCK_FREE(x) SDL_DestroyMutex(x)
 #endif
+
+static inline uint32_t get_bit(const uint8_t * const base, size_t * const offset)
+{
+  uint32_t out = ((*(base + (*offset >> 0x3))) >> (0x7 - (*offset & 0x7))) & 0x1;
+  ++*offset;
+  return out;
+}
+
+static inline uint32_t get_bits(const uint8_t * const base, size_t * const offset, const uint8_t bits)
+{
+  uint32_t value = 0;
+  for (int i = 0; i < bits; ++i)
+    value |= (get_bit(base, offset) ? 1 : 0) << (bits - i - 1);
+  return value;
+}
+
+static inline uint32_t decode_u_golomb(const uint8_t * const base, size_t * const offset)
+{
+  uint32_t i = 0;
+  while(get_bit(base, offset) == 0)
+    ++i;
+
+  return ((1 << i) - 1 + get_bits(base, offset, i));
+}
+
+static inline int32_t decode_s_golomb(const uint8_t * const base, size_t * const offset)
+{
+  const uint32_t g = decode_u_golomb(base, offset);
+  return (g & 0x1) ? (g + 1) / 2 : -(g / 2);
+}

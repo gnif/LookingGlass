@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "debug.h"
 #include "memcpySSE.h"
+#include "parsers/nal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +30,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define SURFACE_NUM 3
 
-#define NALU_AUD     9
 #define SLICE_TYPE_P 0
 #define SLICE_TYPE_B 1
 #define SLICE_TYPE_I 2
@@ -55,6 +55,8 @@ struct Inst
   VABufferID          datBufferID[SURFACE_NUM];
   bool                t2First;
   int                 sliceType;
+
+  NAL                 nal;
 };
 
 static const unsigned char MatrixBufferH264[] = {
@@ -142,6 +144,13 @@ static bool lgd_h264_create(void ** opaque)
     this->matBufferID[i] =
 	  this->sliBufferID[i] =
     this->datBufferID[i] = VA_INVALID_ID;
+
+  if (!nal_initialize(&this->nal))
+  {
+    DEBUG_INFO("Failed to initialize NAL parser");
+    free(this);
+    return false;
+  }
 
   lgd_h264_deinitialize(this);
   return true;
@@ -450,13 +459,22 @@ static bool setup_pic_buffer(struct Inst * this)
     return false;
   }
 
+  const NAL_SPS * sps;
+  if (!nal_get_sps(this->nal, &sps))
+  {
+    DEBUG_ERROR("nal_get_sps");
+    return false;
+  }
+
   memset(p, 0, sizeof(VAPictureParameterBufferH264));
-  p->picture_width_in_mbs_minus1 = (this->format.width  + 15) / 16;
-  p->picture_width_in_mbs_minus1 = (this->format.height + 15) / 16;
-  p->num_ref_frames              = 1;
-  p->seq_fields.value            = 145;
-  p->pic_fields.value            = 0x501;
-  p->frame_num                   = this->frameNum % 16;
+  p->picture_width_in_mbs_minus1  = sps->pic_width_in_mbs_minus1;
+  p->picture_height_in_mbs_minus1 = sps->pic_height_in_map_units_minus1;
+  p->bit_depth_luma_minus8        = sps->bit_depth_luma_minus8;
+  p->bit_depth_chroma_minus8      = sps->bit_depth_chroma_minus8;
+  p->num_ref_frames               = sps->num_ref_frames;
+  p->seq_fields.value             = 145;
+  p->pic_fields.value             = 0x501;
+  p->frame_num                    = this->frameNum % 16;
   for(int i = 0; i < 16; ++i)
   {
     p->ReferenceFrames[i].flags      = VA_PICTURE_H264_INVALID;
@@ -592,54 +610,32 @@ static bool setup_dat_buffer(struct Inst * this, const uint8_t * src, size_t src
   return true;
 }
 
-static bool parse_nalu(struct Inst * this, const uint8_t * src, size_t size)
-{
-  static const uint8_t startCode[4] = {0x00, 0x00, 0x00, 0x01};
-
-  if (memcmp(src, startCode, sizeof(startCode)) != 0)
-  {
-    DEBUG_ERROR("Missing start code");
-    return false;
-  }
-  src += 4;
-
-  if (*src & 0x80)
-  {
-    DEBUG_ERROR("forbidden_zero_bit is set");
-    return false;
-  }
-
-//  uint8_t nal_ref_idc       = (*src & 0x60) >> 5;
-  uint8_t nal_ref_unit_type = (*src & 0x1F);
-  ++src;
-
-  if (nal_ref_unit_type == NALU_AUD)
-  {
-    static const int pic_type_to_slice_type[3] =
-    {
-      SLICE_TYPE_I,
-      SLICE_TYPE_P,
-      SLICE_TYPE_B
-    };
-
-    const uint8_t primary_pic_type = (*src & 0xE0) >> 5;
-    this->sliceType = pic_type_to_slice_type[primary_pic_type];
-    return true;
-  }
-
-  return false;
-}
-
 static bool lgd_h264_decode(void * opaque, const uint8_t * src, size_t srcSize)
 {
   VAStatus status;
   struct Inst * this = (struct Inst *)opaque;
 
-  if (!parse_nalu(this, src, srcSize))
+  if (!nal_parse(this->nal, src, srcSize))
   {
     DEBUG_ERROR("Failed to parse required information");
     return false;
   }
+
+  uint8_t pic_type;
+  if (!nal_get_primary_picture_type(this->nal, &pic_type))
+  {
+    DEBUG_ERROR("Missing primary picture type");
+    return false;
+  }
+
+  static const int pic_type_to_slice_type[3] =
+  {
+    SLICE_TYPE_I,
+    SLICE_TYPE_P,
+    SLICE_TYPE_B
+  };
+
+  this->sliceType = pic_type_to_slice_type[pic_type];
 
   // don't start until we have an I-FRAME
   if (this->frameNum == 0 && this->sliceType != SLICE_TYPE_I)
