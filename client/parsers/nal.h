@@ -210,34 +210,85 @@ typedef struct NAL_PPS
 }
 NAL_PPS;
 
+typedef struct NAL_RPL_REORDER_L
+{
+  bool     valid;
+  uint32_t reordering_of_pic_nums_idc;
+  uint32_t abs_diff_pic_num_minus1;
+  uint32_t long_term_pic_num;
+}
+NAL_RPL_REORDER_L;
+
+typedef struct NAL_RPL_REORDER
+{
+  uint8_t           ref_pic_list_reordering_flag_l0;
+  NAL_RPL_REORDER_L l0[3];
+  uint8_t           ref_pic_list_reordering_flag_l1;
+  NAL_RPL_REORDER_L l1[3];
+}
+NAL_RPL_REORDER;
+
+typedef struct NAL_PW_TABLE_L
+{
+  uint8_t luma_weight_flag;
+  int32_t luma_weight;
+  int32_t luma_offset;
+  uint8_t chroma_weight_flag;
+  int32_t chroma_weight[2];
+  int32_t chroma_offset[2];
+}
+NAL_PW_TABLE_L;
+
+typedef struct NAL_PW_TABLE
+{
+  uint32_t         luma_log2_weight_denom;
+  uint32_t         chroma_log2_weight_denom;
+  NAL_PW_TABLE_L * l0;
+  NAL_PW_TABLE_L * l1;
+}
+NAL_PW_TABLE;
+
+typedef struct NAL_RP_MARKING
+{
+  uint8_t  no_output_of_prior_pics_flag;
+  uint8_t  long_term_reference_flag;
+  uint8_t  adaptive_ref_pic_marking_mode_flag;
+  uint32_t memory_management_control_operation;
+  uint32_t difference_of_pic_nums_minus1;
+  uint32_t long_term_pic_num;
+  uint32_t long_term_frame_idx;
+  uint32_t max_long_term_frame_idx_plus1;
+}
+NAL_RP_MARKING;
+
 typedef struct NAL_SLICE
 {
-  uint32_t first_mb_in_slice;
-  uint32_t slice_type;
-  uint32_t pic_parameter_set_id;
-  uint32_t frame_num;
-  uint8_t  field_pic_flag;
-  uint8_t  bottom_field_flag;
-  uint32_t idr_pic_id;
-  uint32_t pic_order_cnt_lsb;
-  int32_t  delta_pic_order_cnt_bottom;
-  int32_t  delta_pic_order_cnt[2];
-  uint32_t redundant_pic_cnt;
-  uint8_t  direct_spatial_mv_pred_flag;
-  uint8_t  num_ref_idx_active_override_flag;
-  uint32_t num_ref_idx_l0_active_minus1;
-  uint32_t num_ref_idx_l1_active_minus1;
-  //ref_pic_list_reordering
-  //pred_weight_table
-  //dec_ref_pic_marking
-  uint32_t cabac_init_idc;
-  int32_t  slice_qp_delta;
-  uint8_t  sp_for_switch_flag;
-  int32_t  slice_qs_delta;
-  uint32_t disable_deblocking_filter_idc;
-  int32_t  slice_alpha_c0_offset_div2;
-  int32_t  slice_beta_offset_div2;
-  uint32_t slice_group_change_cycle;
+  uint32_t        first_mb_in_slice;
+  uint32_t        slice_type;
+  uint32_t        pic_parameter_set_id;
+  uint32_t        frame_num;
+  uint8_t         field_pic_flag;
+  uint8_t         bottom_field_flag;
+  uint32_t        idr_pic_id;
+  uint32_t        pic_order_cnt_lsb;
+  int32_t         delta_pic_order_cnt_bottom;
+  int32_t         delta_pic_order_cnt[2];
+  uint32_t        redundant_pic_cnt;
+  uint8_t         direct_spatial_mv_pred_flag;
+  uint8_t         num_ref_idx_active_override_flag;
+  uint32_t        num_ref_idx_l0_active_minus1;
+  uint32_t        num_ref_idx_l1_active_minus1;
+  NAL_RPL_REORDER ref_pic_list_reordering;
+  NAL_PW_TABLE    pred_weight_table;
+  NAL_RP_MARKING  dec_ref_pic_marking;
+  uint32_t        cabac_init_idc;
+  int32_t         slice_qp_delta;
+  uint8_t         sp_for_switch_flag;
+  int32_t         slice_qs_delta;
+  uint32_t        disable_deblocking_filter_idc;
+  int32_t         slice_alpha_c0_offset_div2;
+  int32_t         slice_beta_offset_div2;
+  uint32_t        slice_group_change_cycle;
 }
 NAL_SLICE;
 
