@@ -143,11 +143,23 @@ typedef struct NAL_VUI
 }
 NAL_VUI;
 
-typedef struct NAL_SLICE_GROUP
+typedef struct NAL_SLICE_GROUP_T0
 {
   uint32_t   run_length_minus1;
+}
+NAL_SLICE_GROUP_T0;
+
+typedef struct NAL_SLICE_GROUP_T2
+{
   uint32_t   top_left;
   uint32_t   bottom_right;
+}
+NAL_SLICE_GROUP_T2;
+
+typedef union NAL_SLICE_GROUP
+{
+  NAL_SLICE_GROUP_T0 t0;
+  NAL_SLICE_GROUP_T2 t2;
 }
 NAL_SLICE_GROUP;
 

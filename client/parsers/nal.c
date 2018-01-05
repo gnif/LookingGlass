@@ -29,23 +29,27 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct NAL
 {
-  uint8_t      primary_pic_type;
-  bool         primary_pic_type_valid;
+  uint8_t           primary_pic_type;
+  bool              primary_pic_type_valid;
 
-  bool         sps_valid;
-  NAL_SPS      sps;
-  int32_t    * sps_offset_for_ref_frame;
-  uint32_t     sps_num_ref_frames_in_pic_order_cnt_cycle;
+  bool              sps_valid;
+  NAL_SPS           sps;
+  int32_t         * sps_offset_for_ref_frame;
+  uint32_t          sps_num_ref_frames_in_pic_order_cnt_cycle;
 
-  bool         vui_valid;
-  NAL_VUI      vui;
-  NAL_CPB    * vui_nal_hrd_parameters_cpb;
-  uint32_t     vui_nal_hrd_parameters_cpb_size;
-  NAL_CPB    * vui_vcl_hrd_parameters_cpb;
-  uint32_t     vui_vcl_hrd_parameters_cpb_size;
+  bool              vui_valid;
+  NAL_VUI           vui;
+  NAL_CPB         * vui_nal_hrd_parameters_cpb;
+  uint32_t          vui_nal_hrd_parameters_cpb_size;
+  NAL_CPB         * vui_vcl_hrd_parameters_cpb;
+  uint32_t          vui_vcl_hrd_parameters_cpb_size;
 
-  bool         pps_valid;
-  NAL_PPS      pps;
+  bool              pps_valid;
+  NAL_PPS           pps;
+  NAL_SLICE_GROUP * pps_slice_groups;
+  uint32_t          pps_slice_groups_size;
+  uint32_t        * pps_slice_group_id;
+  uint32_t          pps_slice_group_id_size;
 };
 
 bool nal_initialize(NAL * ptr)
@@ -57,6 +61,12 @@ bool nal_initialize(NAL * ptr)
 
 void nal_deinitialize(NAL this)
 {
+  if (this->pps_slice_group_id)
+    free(this->pps_slice_group_id);
+
+  if (this->pps_slice_groups)
+    free(this->pps_slice_groups);
+
   if (this->sps_offset_for_ref_frame)
     free(this->sps_offset_for_ref_frame);
 
@@ -392,7 +402,105 @@ static bool parse_nal_sps(NAL this, const uint8_t * src, size_t size, size_t * c
 
 static bool parse_nal_pps(NAL this, const uint8_t * src, size_t size, size_t * const offset)
 {
-  return false;
+  NAL_PPS * pps = &this->pps;
+  this->pps_valid = false;
+  memset(pps, 0, sizeof(NAL_PPS));
+
+  pps->pic_parameter_set_id     = decode_u_golomb(src, offset);
+  pps->seq_parameter_set_id     = decode_u_golomb(src, offset);
+  pps->entropy_coding_mode_flag = get_bit(src, offset);
+  pps->pic_order_present_flag   = get_bit(src, offset);
+  pps->num_slice_groups_minus1  = decode_u_golomb(src, offset);
+
+  if (pps->num_slice_groups_minus1 > 0)
+  {
+    pps->slice_group_map_type = decode_u_golomb(src, offset);
+    if (pps->slice_group_map_type == 0 || pps->slice_group_map_type == 2)
+    {
+      if (this->pps_slice_groups_size < pps->num_slice_groups_minus1 + 1)
+      {
+        this->pps_slice_groups_size = pps->num_slice_groups_minus1 + 1;
+        this->pps_slice_groups      = (NAL_SLICE_GROUP *)realloc(
+            this->pps_slice_groups, this->pps_slice_groups_size * sizeof(NAL_SLICE_GROUP));
+      }
+      pps->slice_groups = this->pps_slice_groups;
+      memset(pps->slice_groups, 0, (pps->num_slice_groups_minus1 + 1) * sizeof(NAL_SLICE_GROUP));
+
+      if (pps->slice_group_map_type == 0)
+      {
+        for(uint32_t group = 0; group <= pps->num_slice_groups_minus1; ++group)
+          pps->slice_groups[group].t0.run_length_minus1 = decode_u_golomb(src, offset);
+      }
+      else
+      {
+        for(uint32_t group = 0; group < pps->num_slice_groups_minus1; ++group)
+        {
+          pps->slice_groups[group].t2.top_left     = decode_u_golomb(src, offset);
+          pps->slice_groups[group].t2.bottom_right = decode_u_golomb(src, offset);
+        }
+      }
+    }
+    else
+    {
+      if (pps->slice_group_map_type == 3 ||
+          pps->slice_group_map_type == 4 ||
+          pps->slice_group_map_type == 5)
+      {
+        pps->slice_group_change_direction_flag = get_bit(src, offset);
+        pps->slice_group_change_rate_minus1    = decode_u_golomb(src, offset);
+      }
+      else
+      {
+        if (pps->slice_group_map_type == 6)
+        {
+          pps->pic_size_in_map_units_minus1 = decode_u_golomb(src, offset);
+
+          uint32_t slice_groups = pps->pic_size_in_map_units_minus1 + 1;
+          uint32_t bits         = 0;
+          if ((slice_groups & (slice_groups - 1)) != 0)
+            ++slice_groups;
+
+          while(slice_groups > 0)
+          {
+            slice_groups >>= 1;
+            ++bits;
+          }
+
+          if (this->pps_slice_group_id_size < pps->pic_size_in_map_units_minus1 + 1)
+          {
+            this->pps_slice_group_id_size = pps->pic_size_in_map_units_minus1 + 1;
+            this->pps_slice_group_id      = realloc(this->pps_slice_group_id,
+                this->pps_slice_group_id_size * sizeof(uint32_t));
+          }
+
+          for(uint32_t group = 0; group <= pps->pic_size_in_map_units_minus1; ++group)
+            pps->slice_group_id[group] = get_bits(src, offset, bits);
+        }
+        else
+        {
+          DEBUG_ERROR("Invalid slice_group_map_type: %d", pps->slice_group_map_type);
+          return false;
+        }
+      }
+    }
+  }
+
+  pps->num_ref_idx_l0_active_minus1           = decode_u_golomb(src, offset);
+  pps->num_ref_idx_l1_active_minus1           = decode_u_golomb(src, offset);
+  pps->weighted_pred_flag                     = get_bit(src, offset);
+  pps->weighted_bipred_idc                    = get_bits(src, offset, 2);
+  pps->pic_init_qp_minus26                    = decode_s_golomb(src, offset);
+  pps->pic_init_qs_minus26                    = decode_s_golomb(src, offset);
+  pps->chroma_qp_index_offset                 = decode_s_golomb(src, offset);
+  pps->deblocking_filter_control_present_flag = get_bit(src, offset);
+  pps->constrained_intra_pred_flag            = get_bit(src, offset);
+  pps->redundant_pic_cnt_present_flag         = get_bit(src, offset);
+
+  if (!parse_nal_trailing_bits(this, src, size, offset))
+    return false;
+
+  this->pps_valid = true;
+  return true;
 }
 
 bool nal_parse(NAL this, const uint8_t * src, size_t size)
