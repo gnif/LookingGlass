@@ -379,65 +379,6 @@ static bool get_buffer(struct Inst * this, const VABufferType type, const unsign
   return true;
 }
 
-static void set_slice_parameter_buffer(VASliceParameterBufferH264 *p)
-{
-  memset(p, 0, sizeof(VASliceParameterBufferH264));
-  p->slice_data_size            = 0;
-  p->slice_data_bit_offset      = 64;
-  p->slice_alpha_c0_offset_div2 = 2;
-  p->slice_beta_offset_div2     = 2;
-  p->chroma_weight_l0_flag      = 1;
-  p->chroma_weight_l0[0][0]     = 1;
-  p->chroma_offset_l0[0][0]     = 0;
-  p->chroma_weight_l0[0][1]     = 1;
-  p->chroma_offset_l0[0][1]     = 0;
-  p->luma_weight_l1_flag        = 1;
-  p->chroma_weight_l1_flag      = 1;
-  p->luma_weight_l0[0]          = 0x01;
-
-  for (int i = 0; i < 32; i++)
-    p->RefPicList0[i].flags =
-    p->RefPicList1[i].flags = VA_PICTURE_H264_INVALID;
-
-  p->RefPicList1[0].picture_id = 0xffffffff;
-}
-
-static void set_slice_parameter_buffer_t2(VASliceParameterBufferH264 *p, const bool first)
-{
-  memset(p, 0, sizeof(VASliceParameterBufferH264));
-  p->slice_data_size            = 0;
-  p->slice_data_bit_offset      = 64;
-  p->slice_alpha_c0_offset_div2 = 2;
-  p->slice_beta_offset_div2     = 2;
-  p->slice_type                 = 2;
-
-  if (first)
-  {
-    p->luma_weight_l0_flag   = 1;
-    p->chroma_weight_l0_flag = 1;
-    p->luma_weight_l1_flag   = 1;
-    p->chroma_weight_l1_flag = 1;
-  }
-  else
-  {
-    p->chroma_weight_l0_flag  = 1;
-    p->chroma_weight_l0[0][0] = 1;
-    p->chroma_offset_l0[0][0] = 0;
-    p->chroma_weight_l0[0][1] = 1;
-    p->chroma_offset_l0[0][1] = 0;
-    p->luma_weight_l1_flag    = 1;
-    p->chroma_weight_l1_flag  = 1;
-    p->luma_weight_l0[0]      = 0x01;
-  }
-
-  for (int i = 0; i < 32; i++)
-    p->RefPicList0[i].flags =
-    p->RefPicList1[i].flags = VA_PICTURE_H264_INVALID;
-
-  p->RefPicList1[0].picture_id =
-  p->RefPicList0[0].picture_id = 0xffffffff;
-}
-
 static bool setup_pic_buffer(struct Inst * this, const NAL_SLICE * slice)
 {
   VAStatus status;
@@ -576,7 +517,52 @@ static bool setup_mat_buffer(struct Inst * this)
   return true;
 }
 
-static bool setup_sli_buffer(struct Inst * this, size_t srcSize)
+static void fill_pred_weight_table(
+  NAL_PW_TABLE_L * list,
+  uint32_t active,
+  uint32_t luma_log2_weight_denom,
+  uint8_t  luma_weight_flag,
+  short    luma_weight[32],
+  short    luma_offset[32],
+  uint32_t chroma_log2_weight_denom,
+  uint8_t  chroma_weight_flag,
+  short    chroma_weight[32][2],
+  short    chroma_offset[32][2]
+)
+{
+  assert(active < 32);
+
+  for(uint32_t i = 0; i <= active; ++i)
+  {
+    NAL_PW_TABLE_L * l = &list[i];
+    if (luma_weight_flag)
+    {
+      luma_weight[i] = l->luma_weight;
+      luma_offset[i] = l->luma_offset;
+    }
+    else
+    {
+      luma_weight[i] = 1 << luma_log2_weight_denom;
+      luma_weight[i] = 0;
+    }
+
+    for(int j = 0; j < 2; ++j)
+    {
+      if (chroma_weight_flag)
+      {
+        chroma_weight[i][j] = l->chroma_weight[j];
+        chroma_offset[i][j] = l->chroma_offset[j];
+      }
+      else
+      {
+        chroma_weight[i][j] = 1 << chroma_log2_weight_denom;
+        chroma_weight[i][j] = 0;
+      }
+    }
+  }
+}
+
+static bool setup_sli_buffer(struct Inst * this, size_t srcSize, const NAL_SLICE * slice, const size_t seek)
 {
   VAStatus status;
 
@@ -595,6 +581,58 @@ static bool setup_sli_buffer(struct Inst * this, size_t srcSize)
     return false;
   }
 
+  memset(s, 0, sizeof(VASliceParameterBufferH264));
+
+  s->slice_data_size               = srcSize;
+  s->slice_data_bit_offset         = seek << 3;
+  s->slice_data_flag               = VA_SLICE_DATA_FLAG_ALL;
+
+  s->first_mb_in_slice             = slice->first_mb_in_slice;
+  s->slice_type                    = slice->slice_type;
+  s->direct_spatial_mv_pred_flag   = slice->direct_spatial_mv_pred_flag;
+  s->num_ref_idx_l0_active_minus1  = slice->num_ref_idx_l0_active_minus1;
+  s->num_ref_idx_l1_active_minus1  = slice->num_ref_idx_l1_active_minus1;
+  s->cabac_init_idc                = slice->cabac_init_idc;
+  s->slice_qp_delta                = slice->slice_qp_delta;
+  s->disable_deblocking_filter_idc = slice->disable_deblocking_filter_idc;
+  s->slice_alpha_c0_offset_div2    = slice->slice_alpha_c0_offset_div2;
+  s->slice_beta_offset_div2        = slice->slice_beta_offset_div2;
+  s->luma_log2_weight_denom        = slice->pred_weight_table.luma_log2_weight_denom;
+  s->chroma_log2_weight_denom      = slice->pred_weight_table.chroma_log2_weight_denom;
+  s->luma_weight_l0_flag           = slice->pred_weight_table.luma_weight_flag  [0];
+  s->chroma_weight_l0_flag         = slice->pred_weight_table.chroma_weight_flag[0];
+  s->luma_weight_l1_flag           = slice->pred_weight_table.luma_weight_flag  [1];
+  s->chroma_weight_l1_flag         = slice->pred_weight_table.chroma_weight_flag[1];
+
+  //RefPicList0/1
+
+  fill_pred_weight_table(
+    slice->pred_weight_table.l0,
+    s->num_ref_idx_l0_active_minus1,
+    s->luma_log2_weight_denom,
+    s->luma_weight_l0_flag,
+    s->luma_weight_l0,
+    s->luma_offset_l0,
+    s->chroma_log2_weight_denom,
+    s->chroma_weight_l0_flag,
+    s->chroma_weight_l0,
+    s->chroma_weight_l0
+  );
+
+  fill_pred_weight_table(
+    slice->pred_weight_table.l1,
+    s->num_ref_idx_l1_active_minus1,
+    s->luma_log2_weight_denom,
+    s->luma_weight_l1_flag,
+    s->luma_weight_l1,
+    s->luma_offset_l1,
+    s->chroma_log2_weight_denom,
+    s->chroma_weight_l1_flag,
+    s->chroma_weight_l1,
+    s->chroma_weight_l1
+  );
+
+#if 0
   if (this->sliceType == 2)
   {
     set_slice_parameter_buffer_t2(s, this->t2First);
@@ -606,8 +644,7 @@ static bool setup_sli_buffer(struct Inst * this, size_t srcSize)
     memcpy(&s->RefPicList0[0], &this->oldPic, sizeof(VAPictureH264));
     s->RefPicList0[0].flags = 0;
   }
-  s->slice_data_bit_offset = 0;
-  s->slice_data_size       = srcSize;
+#endif
 
   status = vaUnmapBuffer(this->vaDisplay, *sliBufferID);
   if (status != VA_STATUS_SUCCESS)
@@ -671,9 +708,6 @@ static bool lgd_h264_decode(void * opaque, const uint8_t * src, size_t srcSize)
   }
 
   assert(seek < srcSize);
-  src     += seek;
-  srcSize -= seek;
-
   this->sliceType = slice->slice_type;
 
   // don't start until we have an I-FRAME
@@ -708,8 +742,8 @@ static bool lgd_h264_decode(void * opaque, const uint8_t * src, size_t srcSize)
   }
 
   {
-    if (!setup_sli_buffer(this, srcSize     )) return false;
-    if (!setup_dat_buffer(this, src, srcSize)) return false;
+    if (!setup_sli_buffer(this, srcSize, slice, seek)) return false;
+    if (!setup_dat_buffer(this, src, srcSize        )) return false;
     VABufferID bufferIDs[] =
     {
       this->sliBufferID[this->currentSID],
