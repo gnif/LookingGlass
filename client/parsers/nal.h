@@ -230,10 +230,8 @@ NAL_RPL_REORDER;
 
 typedef struct NAL_PW_TABLE_L
 {
-  uint8_t luma_weight_flag;
   int32_t luma_weight;
   int32_t luma_offset;
-  uint8_t chroma_weight_flag;
   int32_t chroma_weight[2];
   int32_t chroma_offset[2];
 }
@@ -243,6 +241,8 @@ typedef struct NAL_PW_TABLE
 {
   uint32_t         luma_log2_weight_denom;
   uint32_t         chroma_log2_weight_denom;
+  uint8_t          luma_weight_flag[2];
+  uint8_t          chroma_weight_flag[2];
   NAL_PW_TABLE_L * l0;
   NAL_PW_TABLE_L * l1;
 }

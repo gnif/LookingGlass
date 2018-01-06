@@ -663,29 +663,31 @@ static bool parse_pred_weight_table(NAL this, const uint8_t * src, size_t size, 
   NAL_SLICE    * slice = &this->slice;
   NAL_PW_TABLE * tbl   = &this->slice.pred_weight_table;
 
-  tbl->luma_log2_weight_denom   = decode_u_golomb(src, offset);
-  tbl->chroma_log2_weight_denom = decode_u_golomb(src, offset);
-  tbl->l0 = this->slice_pred_weight_table_l0;
-  tbl->l1 = this->slice_pred_weight_table_l1;
+  tbl->luma_log2_weight_denom = decode_u_golomb(src, offset);
+  if (this->sps.chroma_format_idc != 0)
+    tbl->chroma_log2_weight_denom = decode_u_golomb(src, offset);
 
   for(uint32_t i = 0; i <= this->pps.num_ref_idx_l0_active_minus1; ++i)
   {
     NAL_PW_TABLE_L * l = &tbl->l0[i];
 
-    l->luma_weight_flag = get_bit(src, offset);
-    if (l->luma_weight_flag)
+    tbl->luma_weight_flag[0] = get_bit(src, offset);
+    if (tbl->luma_weight_flag[0])
     {
       l->luma_weight = decode_s_golomb(src, offset);
       l->luma_offset = decode_s_golomb(src, offset);
     }
 
-    l->chroma_weight_flag = get_bit(src, offset);
-    if (l->chroma_weight_flag)
-      for(int j = 0; j < 2; ++j)
-      {
-        l->chroma_weight[j] = decode_s_golomb(src, offset);
-        l->chroma_offset[j] = decode_s_golomb(src, offset);
-      }
+    if (this->sps.chroma_format_idc != 0)
+    {
+      tbl->chroma_weight_flag[0] = get_bit(src, offset);
+      if (tbl->chroma_weight_flag[0])
+        for(int j = 0; j < 2; ++j)
+        {
+          l->chroma_weight[j] = decode_s_golomb(src, offset);
+          l->chroma_offset[j] = decode_s_golomb(src, offset);
+        }
+    }
   }
 
   if (slice->slice_type == NAL_SLICE_TYPE_B)
@@ -694,20 +696,23 @@ static bool parse_pred_weight_table(NAL this, const uint8_t * src, size_t size, 
     {
       NAL_PW_TABLE_L * l = &tbl->l1[i];
 
-      l->luma_weight_flag = get_bit(src, offset);
-      if (l->luma_weight_flag)
+      tbl->luma_weight_flag[1] = get_bit(src, offset);
+      if (tbl->luma_weight_flag[1])
       {
         l->luma_weight = decode_s_golomb(src, offset);
         l->luma_offset = decode_s_golomb(src, offset);
       }
 
-      l->chroma_weight_flag = get_bit(src, offset);
-      if (l->chroma_weight_flag)
-        for(int j = 0; j < 2; ++j)
-        {
-          l->chroma_weight[j] = decode_s_golomb(src, offset);
-          l->chroma_offset[j] = decode_s_golomb(src, offset);
-        }
+      if (this->sps.chroma_format_idc != 0)
+      {
+        tbl->chroma_weight_flag[1] = get_bit(src, offset);
+        if (tbl->chroma_weight_flag[1])
+          for(int j = 0; j < 2; ++j)
+          {
+            l->chroma_weight[j] = decode_s_golomb(src, offset);
+            l->chroma_offset[j] = decode_s_golomb(src, offset);
+          }
+      }
     }
   }
 
@@ -776,6 +781,8 @@ static bool parse_nal_coded_slice(
   slice->slice_type           = decode_u_golomb(src, offset);
   slice->pic_parameter_set_id = decode_u_golomb(src, offset);
   slice->frame_num            = get_bits(src, offset, this->sps.log2_max_frame_num_minus4 + 4);
+  slice->pred_weight_table.l0 = this->slice_pred_weight_table_l0;
+  slice->pred_weight_table.l1 = this->slice_pred_weight_table_l1;
 
   if (!this->sps.frame_mbs_only_flag)
   {
