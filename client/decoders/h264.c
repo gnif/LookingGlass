@@ -546,18 +546,19 @@ static void fill_pred_weight_table(
       luma_weight[i] = 0;
     }
 
-    for(int j = 0; j < 2; ++j)
+    if (chroma_weight_flag)
     {
-      if (chroma_weight_flag)
-      {
-        chroma_weight[i][j] = l->chroma_weight[j];
-        chroma_offset[i][j] = l->chroma_offset[j];
-      }
-      else
-      {
-        chroma_weight[i][j] = 1 << chroma_log2_weight_denom;
-        chroma_weight[i][j] = 0;
-      }
+      chroma_weight[i][0] = l->chroma_weight[0];
+      chroma_offset[i][0] = l->chroma_offset[0];
+      chroma_weight[i][1] = l->chroma_weight[1];
+      chroma_offset[i][1] = l->chroma_offset[1];
+    }
+    else
+    {
+      chroma_weight[i][0] = 1 << chroma_log2_weight_denom;
+      chroma_weight[i][0] = 0;
+      chroma_weight[i][1] = 1 << chroma_log2_weight_denom;
+      chroma_weight[i][1] = 0;
     }
   }
 }
