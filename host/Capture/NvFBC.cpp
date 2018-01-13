@@ -28,6 +28,8 @@ using namespace Capture;
 #include "common/memcpySSE.h"
 #include "Util.h"
 
+#include <windows.h>
+
 #ifdef _WIN64
 #define NVFBC_LIBRARY_NAME "NvFBC64.dll"
 #else
@@ -242,6 +244,13 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
         i = 0;
         continue;
       }
+      
+      POINT mousePos;
+      GetCursorPos(&mousePos);
+      frame.cursor.hasShape = false;
+      frame.cursor.hasPos = true;
+      frame.cursor.x = mousePos.x;
+      frame.cursor.y = mousePos.y;
 
       unsigned int dataWidth;
       unsigned int dataOffset;
