@@ -587,6 +587,9 @@ int eventThread(void * arg)
       }
 
       case SDL_MOUSEBUTTONDOWN:
+        // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
+        if (event.button.button > 3)
+          break;
         if (
           !spice_mouse_position(event.button.x, event.button.y) ||
           !spice_mouse_press(event.button.button)
@@ -598,6 +601,9 @@ int eventThread(void * arg)
         break;
 
       case SDL_MOUSEBUTTONUP:
+        // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
+        if (event.button.button > 3)
+          break;
         if (
           !spice_mouse_position(event.button.x, event.button.y) ||
           !spice_mouse_release(event.button.button)
