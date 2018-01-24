@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "spice.h"
+#include "utils.h"
 #include "debug.h"
 
 #include <string.h>
@@ -67,6 +68,7 @@ struct SpiceChannel
   uint32_t ackFrequency;
   uint32_t ackCount;
   uint32_t serial;
+  LG_Lock  lock;
 };
 
 struct SpiceKeyboard
@@ -74,7 +76,7 @@ struct SpiceKeyboard
   uint32_t modifiers;
 };
 
-#define SPICE_MOUSE_QUEUE_SIZE 32
+#define SPICE_MOUSE_QUEUE_SIZE 64
 
 struct SpiceMouse
 {
@@ -84,6 +86,7 @@ struct SpiceMouse
   SpiceMsgcMouseMotion queue[SPICE_MOUSE_QUEUE_SIZE];
   int                  rpos, wpos;
   int                  queueLen;
+  LG_Lock              lock;
 };
 
 struct Spice
@@ -136,6 +139,8 @@ bool spice_connect(const char * host, const short port, const char * password)
   spice.addr.sin_family = AF_INET;
   spice.addr.sin_port   = htons(port);
 
+  LG_LOCK_INIT(spice.mouse.lock);
+
   spice.channelID = 0;
   if (!spice_connect_channel(&spice.scMain))
   {
@@ -152,6 +157,8 @@ void spice_disconnect()
 {
   spice_disconnect_channel(&spice.scMain  );
   spice_disconnect_channel(&spice.scInputs);
+
+  LG_LOCK_FREE(spice.mouse.lock);
 
   spice.sessionID = 0;
 }
@@ -207,15 +214,14 @@ bool spice_process()
 
       if (spice.scInputs.connected && i == spice.scInputs.socket)
       {
-        if (spice_on_inputs_channel_read())
+        if (!spice_process_ack(&spice.scInputs))
         {
-          if (!spice_process_ack(&spice.scInputs))
-          {
-            DEBUG_ERROR("failed to process ack on inputs channel");
-            return false;
-          }
-          continue;
+          DEBUG_ERROR("failed to process ack on inputs channel");
+          return false;
         }
+
+        if (spice_on_inputs_channel_read())
+          continue;
         else
         {
           DEBUG_ERROR("failed to perform read on inputs channel");
@@ -460,6 +466,7 @@ bool spice_on_inputs_channel_read()
     {
       DEBUG_PROTO("SPICE_MSG_INPUTS_MOUSE_MOTION_ACK");
       int sent = 0;
+      LG_LOCK(spice.mouse.lock);
       while(spice.mouse.queueLen && sent < 4)
       {
         SpiceMsgcMouseMotion *msg = &spice.mouse.queue[spice.mouse.rpos];
@@ -467,6 +474,7 @@ bool spice_on_inputs_channel_read()
         {
           DEBUG_ERROR("failed to send post ack");
           spice.mouse.sentCount = sent;
+          LG_UNLOCK(spice.mouse.lock);
           return false;
         }
 
@@ -478,6 +486,7 @@ bool spice_on_inputs_channel_read()
       }
 
       spice.mouse.sentCount = sent;
+      LG_UNLOCK(spice.mouse.lock);
       return true;
     }
   }
@@ -495,6 +504,8 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
   channel->serial       = 0;
+
+  LG_LOCK_INIT(channel->lock);
 
   channel->socket = socket(AF_INET, SOCK_STREAM, 0);
   if (channel->socket == -1)
@@ -637,6 +648,7 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
   if (channel->connected)
     close(channel->socket);
   channel->connected = false;
+  LG_LOCK_FREE(channel->lock);
 }
 
 // ============================================================================
@@ -666,6 +678,8 @@ ssize_t spice_write(const struct SpiceChannel * channel, const void * buffer, co
 
 bool spice_write_msg(struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size)
 {
+  LG_LOCK(channel->lock);
+
   SpiceDataHeader header;
   header.serial   = channel->serial++;
   header.type     = type;
@@ -675,15 +689,18 @@ bool spice_write_msg(struct SpiceChannel * channel, uint32_t type, const void * 
   if (spice_write(channel, &header, sizeof(header)) != sizeof(header))
   {
     DEBUG_ERROR("failed to write message header");
+    LG_UNLOCK(channel->lock);
     return false;
   }
 
   if (spice_write(channel, buffer, size) != size)
   {
     DEBUG_ERROR("failed to write message body");
+    LG_UNLOCK(channel->lock);
     return false;
   }
 
+  LG_UNLOCK(channel->lock);
   return true;
 }
 
@@ -819,11 +836,13 @@ bool spice_mouse_motion(int32_t x, int32_t y)
     return false;
   }
 
+  LG_LOCK(spice.mouse.lock);
   if (spice.mouse.sentCount == 4)
   {
     if (spice.mouse.queueLen == SPICE_MOUSE_QUEUE_SIZE)
     {
       DEBUG_ERROR("mouse motion ringbuffer full!");
+      LG_UNLOCK(spice.mouse.lock);
       return false;
     }
 
@@ -837,6 +856,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
       spice.mouse.wpos = 0;
 
     ++spice.mouse.queueLen;
+    LG_UNLOCK(spice.mouse.lock);
     return true;
   }
 
@@ -846,6 +866,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
   msg.button_state = spice.mouse.buttonState;
 
   ++spice.mouse.sentCount;
+  LG_UNLOCK(spice.mouse.lock);
   return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_MOTION, &msg, sizeof(msg));
 }
 
