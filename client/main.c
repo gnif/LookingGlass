@@ -177,7 +177,7 @@ static inline void updatePositionInfo()
     state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
 }
 
-void mainThread()
+int renderThread(void * unused)
 {
   while(state.running)
   {
@@ -189,6 +189,8 @@ void mainThread()
     else
       usleep(1000);
   }
+
+  return 0;
 }
 
 int cursorThread(void * unused)
@@ -418,205 +420,191 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
   return ps2;
 }
 
-int eventThread(void * arg)
+struct eventState
 {
-  bool serverMode   = false;
-  bool realignGuest = true;
+  bool serverMode;
+  bool realignGuest;
   bool keyDown[SDL_NUM_SCANCODES];
+};
 
-  memset(keyDown, 0, sizeof(keyDown));
+int eventFilter(void * userdata, SDL_Event * event)
+{
+  static bool serverMode                 = false;
+  static bool realignGuest               = true;
+  static bool keyDown[SDL_NUM_SCANCODES] = {false};
 
-  // ensure mouse acceleration is identical in server mode
-  SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
-
-  while(state.running)
+  if (event->type == SDL_WINDOWEVENT)
   {
-    SDL_Event event;
-    if (!SDL_PollEvent(&event))
+    switch(event->window.event)
     {
-      usleep(1000);
-      continue;
+      case SDL_WINDOWEVENT_ENTER:
+        realignGuest = true;
+        break;
+
+      case SDL_WINDOWEVENT_SIZE_CHANGED:
+        updatePositionInfo();
+        realignGuest = true;
+        break;
+    }
+    return 0;
+  }
+
+  if (!params.useSpice)
+    return 1;
+
+  switch(event->type)
+  {
+    case SDL_MOUSEMOTION:
+    {
+      if (
+        !serverMode && (
+          event->motion.x < state.dstRect.x                   ||
+          event->motion.x > state.dstRect.x + state.dstRect.w ||
+          event->motion.y < state.dstRect.y                   ||
+          event->motion.y > state.dstRect.y + state.dstRect.h
+        )
+      )
+      {
+        realignGuest = true;
+        break;
+      }
+
+      int x = 0;
+      int y = 0;
+      if (realignGuest && state.haveCursorPos)
+      {
+        x = event->motion.x - state.dstRect.x;
+        y = event->motion.y - state.dstRect.y;
+        if (params.scaleMouseInput)
+        {
+          x = (float)x * state.scaleX;
+          y = (float)y * state.scaleY;
+        }
+        x -= state.cursor.x;
+        y -= state.cursor.y;
+        realignGuest = false;
+
+        if (!spice_mouse_motion(x, y))
+          DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+        break;
+      }
+
+      x = event->motion.xrel;
+      y = event->motion.yrel;
+      if (x != 0 || y != 0)
+      {
+        if (params.scaleMouseInput)
+        {
+          x = (float)x * state.scaleX;
+          y = (float)y * state.scaleY;
+        }
+        if (!spice_mouse_motion(x, y))
+        {
+          DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+          break;
+        }
+      }
+
+      break;
     }
 
-    switch(event.type)
+    case SDL_KEYDOWN:
     {
-      case SDL_QUIT:
-      if (!params.ignoreQuit)
-        state.running = false;
+      SDL_Scancode sc = event->key.keysym.scancode;
+      if (sc == SDL_SCANCODE_SCROLLLOCK)
+      {
+        if (event->key.repeat)
+          break;
+
+        serverMode = !serverMode;
+        spice_mouse_mode(serverMode);
+        SDL_SetRelativeMouseMode(serverMode);
+        DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
+
+        if (!serverMode)
+          realignGuest = true;
+        break;
+      }
+
+      uint32_t scancode = mapScancode(sc);
+      if (scancode == 0)
+        break;
+
+      if (spice_key_down(scancode))
+        keyDown[sc] = true;
+      else
+      {
+        DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
+        break;
+      }
+      break;
+    }
+
+    case SDL_KEYUP:
+    {
+      SDL_Scancode sc = event->key.keysym.scancode;
+      if (sc == SDL_SCANCODE_SCROLLLOCK)
+        break;
+
+      // avoid sending key up events when we didn't send a down
+      if (!keyDown[sc])
+        break;
+
+      uint32_t scancode = mapScancode(sc);
+      if (scancode == 0)
+        break;
+
+      if (spice_key_up(scancode))
+        keyDown[sc] = false;
+      else
+      {
+        DEBUG_ERROR("SDL_KEYUP: failed to send message");
+        break;
+      }
+      break;
+    }
+
+    case SDL_MOUSEWHEEL:
+      if (
+        !spice_mouse_press  (event->wheel.y == 1 ? 4 : 5) ||
+        !spice_mouse_release(event->wheel.y == 1 ? 4 : 5)
+        )
+      {
+        DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
+        break;
+      }
       break;
 
-      case SDL_WINDOWEVENT:
+    case SDL_MOUSEBUTTONDOWN:
+      // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
+      if (event->button.button > 3)
+        break;
+      if (
+        !spice_mouse_position(event->button.x, event->button.y) ||
+        !spice_mouse_press(event->button.button)
+      )
       {
-        switch(event.window.event)
-        {
-          case SDL_WINDOWEVENT_ENTER:
-            realignGuest = true;
-            break;
-
-          case SDL_WINDOWEVENT_SIZE_CHANGED:
-            updatePositionInfo();
-            realignGuest = true;
-            break;
-        }
+        DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
         break;
       }
-    }
+      break;
 
-    if (!params.useSpice)
-      continue;
-
-    switch(event.type)
-    {
-      case SDL_KEYDOWN:
+    case SDL_MOUSEBUTTONUP:
+      // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
+      if (event->button.button > 3)
+        break;
+      if (
+        !spice_mouse_position(event->button.x, event->button.y) ||
+        !spice_mouse_release(event->button.button)
+      )
       {
-        SDL_Scancode sc = event.key.keysym.scancode;
-        if (sc == SDL_SCANCODE_SCROLLLOCK)
-        {
-          if (event.key.repeat)
-            break;
-
-          serverMode = !serverMode;
-          spice_mouse_mode(serverMode);
-          SDL_SetRelativeMouseMode(serverMode);
-
-          if (!serverMode)
-            realignGuest = true;
-          break;
-        }
-
-        uint32_t scancode = mapScancode(sc);
-        if (scancode == 0)
-          break;
-
-        if (spice_key_down(scancode))
-          keyDown[sc] = true;
-        else
-        {
-          DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
-          break;
-        }
+        DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
         break;
       }
+      break;
 
-      case SDL_KEYUP:
-      {
-        SDL_Scancode sc = event.key.keysym.scancode;
-        if (sc == SDL_SCANCODE_SCROLLLOCK)
-          break;
-
-        // avoid sending key up events when we didn't send a down
-        if (!keyDown[sc])
-          break;
-
-        uint32_t scancode = mapScancode(sc);
-        if (scancode == 0)
-          break;
-
-        if (spice_key_up(scancode))
-          keyDown[sc] = false;
-        else
-        {
-          DEBUG_ERROR("SDL_KEYUP: failed to send message");
-          break;
-        }
-        break;
-      }
-
-      case SDL_MOUSEWHEEL:
-        if (
-          !spice_mouse_press  (event.wheel.y == 1 ? 4 : 5) ||
-          !spice_mouse_release(event.wheel.y == 1 ? 4 : 5)
-          )
-        {
-          DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
-          break;
-        }
-        break;
-
-      case SDL_MOUSEMOTION:
-      {
-        if (
-          !serverMode && (
-            event.motion.x < state.dstRect.x                   ||
-            event.motion.x > state.dstRect.x + state.dstRect.w ||
-            event.motion.y < state.dstRect.y                   ||
-            event.motion.y > state.dstRect.y + state.dstRect.h
-          )
-        )
-        {
-          realignGuest = true;
-          break;
-        }
-
-        int x = 0;
-        int y = 0;
-        if (realignGuest && state.haveCursorPos)
-        {
-          x = event.motion.x - state.dstRect.x;
-          y = event.motion.y - state.dstRect.y;
-          if (params.scaleMouseInput)
-          {
-            x = (float)x * state.scaleX;
-            y = (float)y * state.scaleY;
-          }
-          x -= state.cursor.x;
-          y -= state.cursor.y;
-          realignGuest = false;
-
-          if (!spice_mouse_motion(x, y))
-            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-          break;
-        }
-
-        x = event.motion.xrel;
-        y = event.motion.yrel;
-        if (x != 0 || y != 0)
-        {
-          if (params.scaleMouseInput)
-          {
-            x = (float)x * state.scaleX;
-            y = (float)y * state.scaleY;
-          }
-          if (!spice_mouse_motion(x, y))
-          {
-            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-            break;
-          }
-        }
-        break;
-      }
-
-      case SDL_MOUSEBUTTONDOWN:
-        // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
-        if (event.button.button > 3)
-          break;
-        if (
-          !spice_mouse_position(event.button.x, event.button.y) ||
-          !spice_mouse_press(event.button.button)
-        )
-        {
-          DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
-          break;
-        }
-        break;
-
-      case SDL_MOUSEBUTTONUP:
-        // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
-        if (event.button.button > 3)
-          break;
-        if (
-          !spice_mouse_position(event.button.x, event.button.y) ||
-          !spice_mouse_release(event.button.button)
-        )
-        {
-          DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
-          break;
-        }
-        break;
-
-      default:
-        break;
-    }
+    default:
+      return 1;
   }
 
   return 0;
@@ -851,7 +839,7 @@ int run()
   }
 
   SDL_Thread *t_spice   = NULL;
-  SDL_Thread *t_event   = NULL;
+  SDL_Thread *t_main   = NULL;
 
   while(1)
   {
@@ -885,12 +873,6 @@ int run()
       }
     }
 
-    if (!(t_event = SDL_CreateThread(eventThread, "eventThread", NULL)))
-    {
-      DEBUG_ERROR("event create thread failed");
-      break;
-    }
-
     // flag the host that we are starting up this is important so that
     // the host wakes up if it is waiting on an interrupt, the host will
     // also send us the current mouse shape since we won't know it yet
@@ -914,26 +896,48 @@ int run()
       break;
     }
 
-    if (!(t_event = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
+
+    if (!(t_main = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
     {
       DEBUG_ERROR("cursor create thread failed");
       break;
     }
 
-    if (!(t_event = SDL_CreateThread(frameThread, "frameThread", NULL)))
+    if (!(t_main = SDL_CreateThread(frameThread, "frameThread", NULL)))
     {
       DEBUG_ERROR("frame create thread failed");
       break;
     }
 
-    mainThread();
+    if (!(t_main = SDL_CreateThread(renderThread, "renderThread", NULL)))
+    {
+      DEBUG_ERROR("render create thread failed");
+      break;
+    }
+
+    // ensure mouse acceleration is identical in server mode
+    SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
+    SDL_SetEventFilter(eventFilter, NULL);
+
+    while(state.running)
+    {
+      SDL_Event event;
+      while(SDL_PollEvent(&event))
+        if (event.type == SDL_QUIT)
+        {
+          if (!params.ignoreQuit)
+            state.running = false;
+          break;
+        }
+    }
+
     break;
   }
 
   state.running = false;
 
-  if (t_event)
-    SDL_WaitThread(t_event, NULL);
+  if (t_main)
+    SDL_WaitThread(t_main, NULL);
 
   if (t_spice)
     SDL_WaitThread(t_spice, NULL);
@@ -1421,7 +1425,6 @@ int main(int argc, char * argv[])
       free(opts->argv[j].value);
     free(opts->argv);
   }
-
 
   return ret;
 }
