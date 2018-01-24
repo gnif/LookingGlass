@@ -26,7 +26,10 @@ OBJS	= main.o \
 
 BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))
 
-all: $(BIN)/$(BINARY)
+all: $(BIN)/$(BINARY) $(BIN)/xlib-shim.so
+
+$(BIN)/xlib-shim.so:
+	gcc -fPIC $(CFLAGS) -shared -o $@ xlib-shim.c
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
