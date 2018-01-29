@@ -927,8 +927,8 @@ int run()
             state.running = false;
           break;
         }
-        usleep(1000);
       }
+      usleep(1000);
     }
 
     break;
