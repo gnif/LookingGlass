@@ -28,15 +28,17 @@ BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))
 
 all: $(BIN)/$(BINARY) $(BIN)/xlib-shim.so
 
-$(BIN)/xlib-shim.so:
+$(BIN):
+	@mkdir -p $@
+
+$(BIN)/xlib-shim.so: $(BIN)
 	$(CC) -fPIC $(CFLAGS) -shared -o $@ xlib-shim.c
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-$(BIN)/$(BINARY): $(BUILD_OBJS)
-	@mkdir -p $(dir $@)
+$(BIN)/$(BINARY): $(BIN) $(BUILD_OBJS)
 	$(CC) -o $@ $(BUILD_OBJS) $(LDFLAGS)
 
 clean:
