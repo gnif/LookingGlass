@@ -923,12 +923,15 @@ int run()
     {
       SDL_Event event;
       while(SDL_PollEvent(&event))
+      {
         if (event.type == SDL_QUIT)
         {
           if (!params.ignoreQuit)
             state.running = false;
           break;
         }
+        usleep(1000);
+      }
     }
 
     break;
