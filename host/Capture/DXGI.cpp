@@ -761,7 +761,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
       frame.stride = m_mapping.RowPitch / 4;
 
       unsigned int size = m_height * m_mapping.RowPitch;
-      m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+      m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
       return GRAB_STATUS_OK;
     }
 
@@ -795,7 +795,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
   frame.stride = m_mapping.RowPitch >> 2;
 
   const unsigned int size = m_height * m_mapping.RowPitch;
-  m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+  m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
   TRACE_END;
 
   return GRAB_STATUS_OK;

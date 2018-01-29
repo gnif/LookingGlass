@@ -274,8 +274,8 @@ enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
         }
 
         // use the smaller or the two dimensions provided just to be sure we don't overflow the buffer
-        const unsigned int realHeight = min(m_grabInfo.dwHeight, screenHeight);
-        const unsigned int realWidth  = min(m_grabInfo.dwWidth , screenWidth );
+        const unsigned int realHeight = LG_MIN(m_grabInfo.dwHeight, screenHeight);
+        const unsigned int realWidth  = LG_MIN(m_grabInfo.dwWidth , screenWidth );
 
         // calculate the new data width and offset to the start of the data
         dataWidth  = realWidth * 4;
