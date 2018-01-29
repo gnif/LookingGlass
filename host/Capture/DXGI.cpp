@@ -386,9 +386,9 @@ bool DXGI::InitH264Capture()
     return false;
   }
 
-  m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH         , NULL);
-  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL);
-  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH         , 0);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
 
 #if 0  
   status = MFTRegisterLocalByCLSID(
@@ -415,8 +415,8 @@ void DXGI::DeInitialize()
 {
   if (m_mediaEventGen)
   {
-    m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL);
-    m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL);
+    m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+    m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0);
     while (WaitForSingleObject(m_shutdownEvent, INFINITE) != WAIT_OBJECT_0) {}
     m_mfTransform->DeleteInputStream(0);
   }

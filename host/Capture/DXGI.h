@@ -115,9 +115,9 @@ namespace Capture
     bool InitRawCapture();
     bool InitH264Capture();
 
-    GrabStatus DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout);
-    GrabStatus DXGI::GrabFrameRaw    (FrameInfo & frame);
-    GrabStatus DXGI::GrabFrameH264   (FrameInfo & frame);
+    GrabStatus GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout);
+    GrabStatus GrabFrameRaw    (FrameInfo & frame);
+    GrabStatus GrabFrameH264   (FrameInfo & frame);
 
     void WaitForDesktop();
 
