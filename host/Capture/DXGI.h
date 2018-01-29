@@ -86,13 +86,14 @@ namespace Capture
     */
     STDMETHODIMP QueryInterface(REFIID riid, void ** ppv)
     {
-      static const QITAB qit[] =
-      {
-        QITABENT(DXGI, IMFAsyncCallback),
-        { NULL }
-      };
-
-      return QISearch(this, qit, riid, ppv);
+      if (riid == __uuidof(IUnknown) || riid == __uuidof(IMFAsyncCallback)) {
+        *ppv = static_cast<IMFAsyncCallback*>(this);
+        AddRef();
+        return S_OK;
+      } else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+      }
     }
 
     STDMETHODIMP_(ULONG) AddRef()

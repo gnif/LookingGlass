@@ -28,7 +28,22 @@ using namespace Capture;
 #include <codecapi.h>
 #include <mferror.h>
 #include <evr.h>
+#include <mfapi.h>
+#include <mfidl.h>
 #include <mfreadwrite.h>
+
+#if __MINGW32__
+
+EXTERN_GUID(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 0xa634a91c, 0x822b, 0x41b9, 0xa4, 0x94, 0x4d, 0xe4, 0x64, 0x36, 0x12, 0xb0);
+EXTERN_GUID(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, 0xf81da2c, 0xb537, 0x4672, 0xa8, 0xb2, 0xa6, 0x81, 0xb1, 0x73, 0x7, 0xa3);
+EXTERN_GUID(MF_SA_D3D11_AWARE, 0x206b4fc8, 0xfcf9, 0x4c51, 0xaf, 0xe3, 0x97, 0x64, 0x36, 0x9e, 0x33, 0xa0);
+
+#define METransformUnknown 600
+#define METransformNeedInput 601
+#define METransformHaveOutput 602
+#define METransformDrainComplete 603
+#define METransformMarker 604
+#endif
 
 template <class T> void SafeRelease(T **ppT)
 {
