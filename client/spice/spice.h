@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 bool spice_connect(const char * host, const short port, const char * password);
+void spice_drain();
 void spice_disconnect();
 bool spice_process();
 bool spice_ready();

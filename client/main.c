@@ -49,6 +49,7 @@ struct AppState
 {
   bool                 running;
   bool                 started;
+  bool                 keyDown[SDL_NUM_SCANCODES];
 
   TTF_Font           * font;
   SDL_Point            srcSize;
@@ -404,7 +405,6 @@ int spiceThread(void * arg)
       break;
     }
 
-  spice_disconnect();
   state.running = false;
   return 0;
 }
@@ -420,18 +420,10 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
   return ps2;
 }
 
-struct eventState
-{
-  bool serverMode;
-  bool realignGuest;
-  bool keyDown[SDL_NUM_SCANCODES];
-};
-
 int eventFilter(void * userdata, SDL_Event * event)
 {
-  static bool serverMode                 = false;
-  static bool realignGuest               = true;
-  static bool keyDown[SDL_NUM_SCANCODES] = {false};
+  static bool serverMode   = false;
+  static bool realignGuest = true;
 
   if (event->type == SDL_WINDOWEVENT)
   {
@@ -530,12 +522,15 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (scancode == 0)
         break;
 
-      if (spice_key_down(scancode))
-        keyDown[sc] = true;
-      else
+      if (!state.keyDown[sc])
       {
-        DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
-        break;
+        if (spice_key_down(scancode))
+          state.keyDown[sc] = true;
+        else
+        {
+          DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
+          break;
+        }
       }
       break;
     }
@@ -547,7 +542,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
 
       // avoid sending key up events when we didn't send a down
-      if (!keyDown[sc])
+      if (!state.keyDown[sc])
         break;
 
       uint32_t scancode = mapScancode(sc);
@@ -555,7 +550,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
 
       if (spice_key_up(scancode))
-        keyDown[sc] = false;
+        state.keyDown[sc] = false;
       else
       {
         DEBUG_ERROR("SDL_KEYUP: failed to send message");
@@ -838,8 +833,10 @@ int run()
     SDL_ShowCursor(SDL_DISABLE);
   }
 
-  SDL_Thread *t_spice   = NULL;
+  SDL_Thread *t_spice  = NULL;
   SDL_Thread *t_main   = NULL;
+  SDL_Thread *t_frame  = NULL;
+  SDL_Thread *t_render = NULL;
 
   while(1)
   {
@@ -903,13 +900,13 @@ int run()
       break;
     }
 
-    if (!(t_main = SDL_CreateThread(frameThread, "frameThread", NULL)))
+    if (!(t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
     {
       DEBUG_ERROR("frame create thread failed");
       break;
     }
 
-    if (!(t_main = SDL_CreateThread(renderThread, "renderThread", NULL)))
+    if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
     {
       DEBUG_ERROR("render create thread failed");
       break;
@@ -939,11 +936,33 @@ int run()
 
   state.running = false;
 
+  if (t_render)
+    SDL_WaitThread(t_render, NULL);
+
+  if (t_frame)
+    SDL_WaitThread(t_frame, NULL);
+
   if (t_main)
     SDL_WaitThread(t_main, NULL);
 
-  if (t_spice)
-    SDL_WaitThread(t_spice, NULL);
+  // if spice is still connected send key up events for any pressed keys
+  if (params.useSpice && spice_ready())
+  {
+    for(int i = 0; i < SDL_NUM_SCANCODES; ++i)
+      if (state.keyDown[i])
+      {
+        uint32_t scancode = mapScancode(i);
+        if (scancode == 0)
+          continue;
+        state.keyDown[i] = false;
+        spice_key_up(scancode);
+      }
+
+    if (t_spice)
+      SDL_WaitThread(t_spice, NULL);
+
+    spice_disconnect();
+  }
 
   if (state.lgr)
     state.lgr->deinitialize(state.lgrData);

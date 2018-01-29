@@ -646,7 +646,17 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 void spice_disconnect_channel(struct SpiceChannel * channel)
 {
   if (channel->connected)
+  {
+    shutdown(channel->socket, SHUT_WR);
+
+    char buffer[1024];
+    ssize_t len = 0;
+    do
+      len = read(channel->socket, buffer, sizeof(buffer));
+    while(len > 0);
+
     close(channel->socket);
+  }
   channel->connected = false;
   LG_LOCK_FREE(channel->lock);
 }
