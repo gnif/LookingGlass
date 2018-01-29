@@ -922,7 +922,7 @@ int run()
     while(state.running)
     {
       SDL_Event event;
-      while(SDL_PollEvent(&event))
+      while(SDL_WaitEventTimeout(&event, 100))
         if (event.type == SDL_QUIT)
         {
           if (!params.ignoreQuit)
