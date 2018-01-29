@@ -54,6 +54,7 @@ static inline void nsleep(uint64_t ns)
   #define LG_UNLOCK(x)    __sync_lock_release(&x)
   #define LG_LOCK_FREE(x)
 #else
+  #include <SDL2/SDL.h>
   #define LG_LOCK_MODE    "Mutex"
   typedef SDL_mutex * LG_Lock;
   #define LG_LOCK_INIT(x) (x = SDL_CreateMutex())
