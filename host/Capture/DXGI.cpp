@@ -28,7 +28,22 @@ using namespace Capture;
 #include <codecapi.h>
 #include <mferror.h>
 #include <evr.h>
+#include <mfapi.h>
+#include <mfidl.h>
 #include <mfreadwrite.h>
+
+#if __MINGW32__
+
+EXTERN_GUID(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 0xa634a91c, 0x822b, 0x41b9, 0xa4, 0x94, 0x4d, 0xe4, 0x64, 0x36, 0x12, 0xb0);
+EXTERN_GUID(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, 0xf81da2c, 0xb537, 0x4672, 0xa8, 0xb2, 0xa6, 0x81, 0xb1, 0x73, 0x7, 0xa3);
+EXTERN_GUID(MF_SA_D3D11_AWARE, 0x206b4fc8, 0xfcf9, 0x4c51, 0xaf, 0xe3, 0x97, 0x64, 0x36, 0x9e, 0x33, 0xa0);
+
+#define METransformUnknown 600
+#define METransformNeedInput 601
+#define METransformHaveOutput 602
+#define METransformDrainComplete 603
+#define METransformMarker 604
+#endif
 
 template <class T> void SafeRelease(T **ppT)
 {
@@ -386,9 +401,9 @@ bool DXGI::InitH264Capture()
     return false;
   }
 
-  m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH         , NULL);
-  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL);
-  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH         , 0);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+  m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
 
 #if 0  
   status = MFTRegisterLocalByCLSID(
@@ -415,8 +430,8 @@ void DXGI::DeInitialize()
 {
   if (m_mediaEventGen)
   {
-    m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL);
-    m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL);
+    m_mfTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+    m_mfTransform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0);
     while (WaitForSingleObject(m_shutdownEvent, INFINITE) != WAIT_OBJECT_0) {}
     m_mfTransform->DeleteInputStream(0);
   }
@@ -761,7 +776,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
       frame.stride = m_mapping.RowPitch / 4;
 
       unsigned int size = m_height * m_mapping.RowPitch;
-      m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+      m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
       return GRAB_STATUS_OK;
     }
 
@@ -795,7 +810,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
   frame.stride = m_mapping.RowPitch >> 2;
 
   const unsigned int size = m_height * m_mapping.RowPitch;
-  m_memcpy.Copy(frame.buffer, m_mapping.pData, size < frame.bufferSize ? size : frame.bufferSize);
+  m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
   TRACE_END;
 
   return GRAB_STATUS_OK;

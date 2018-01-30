@@ -25,8 +25,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/debug.h"
 
-#if __MINGW32__
-#define min(a, b) ((a) < (b) ? (a) : (b))
+#if !defined(min)
+#define LG_MIN(a, b) ((a) < (b) ? (a) : (b))
+#else
+#define LG_MIN min
 #endif
 
 #if __MINGW32__
@@ -57,7 +59,7 @@ public:
       if (buffer[i] == '\n' || buffer[i] == '\r')
         buffer[i] = 0;
 
-    fprintf(stderr, "[E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", file, line, function, desc, status, buffer);
+    fprintf(stderr, "[E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", file, line, function, desc, (int)status, buffer);
     LocalFree(buffer);
   }
 

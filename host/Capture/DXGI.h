@@ -86,13 +86,14 @@ namespace Capture
     */
     STDMETHODIMP QueryInterface(REFIID riid, void ** ppv)
     {
-      static const QITAB qit[] =
-      {
-        QITABENT(DXGI, IMFAsyncCallback),
-        { NULL }
-      };
-
-      return QISearch(this, qit, riid, ppv);
+      if (riid == __uuidof(IUnknown) || riid == __uuidof(IMFAsyncCallback)) {
+        *ppv = static_cast<IMFAsyncCallback*>(this);
+        AddRef();
+        return S_OK;
+      } else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+      }
     }
 
     STDMETHODIMP_(ULONG) AddRef()
@@ -115,9 +116,9 @@ namespace Capture
     bool InitRawCapture();
     bool InitH264Capture();
 
-    GrabStatus DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout);
-    GrabStatus DXGI::GrabFrameRaw    (FrameInfo & frame);
-    GrabStatus DXGI::GrabFrameH264   (FrameInfo & frame);
+    GrabStatus GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout);
+    GrabStatus GrabFrameRaw    (FrameInfo & frame);
+    GrabStatus GrabFrameH264   (FrameInfo & frame);
 
     void WaitForDesktop();
 

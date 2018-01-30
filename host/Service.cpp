@@ -123,12 +123,12 @@ bool Service::InitPointers()
   m_dataOffset[0] = m_frame[0]   - m_memory;
   m_dataOffset[1] = m_frame[1]   - m_memory;
 
-  DEBUG_INFO("Total Available : %3I64u MB", m_ivshmem->GetSize() / 1024 / 1024);
-  DEBUG_INFO("Max Cursor Size : %3I64u MB", m_cursorDataSize / 1024 / 1024);
-  DEBUG_INFO("Max Frame Size  : %3I64u MB", m_frameSize / 1024 / 1024);
-  DEBUG_INFO("Cursor          : %p (0x%08I64x)", m_cursorData, m_cursorOffset );
-  DEBUG_INFO("Frame 1         : %p (0x%08I64x)", m_frame[0]  , m_dataOffset[0]);
-  DEBUG_INFO("Frame 2         : %p (0x%08I64x)", m_frame[1]  , m_dataOffset[1]);
+  DEBUG_INFO("Total Available : %3u MB", (unsigned int)(m_ivshmem->GetSize() / 1024 / 1024));
+  DEBUG_INFO("Max Cursor Size : %3u MB", (unsigned int)(m_cursorDataSize / 1024 / 1024));
+  DEBUG_INFO("Max Frame Size  : %3u MB", (unsigned int)(m_frameSize / 1024 / 1024));
+  DEBUG_INFO("Cursor          : %p (0x%08x)", m_cursorData, (int)m_cursorOffset );
+  DEBUG_INFO("Frame 1         : %p (0x%08x)", m_frame[0]  , (int)m_dataOffset[0]);
+  DEBUG_INFO("Frame 2         : %p (0x%08x)", m_frame[1]  , (int)m_dataOffset[1]);
 
   return true;
 }

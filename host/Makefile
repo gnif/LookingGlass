@@ -1,11 +1,12 @@
 BINARY  = looking-glass-host.exe
 CFLAGS  = -g -O3 -march=native -Wall -Werror -I./ -I../common # -DDEBUG
-LDFLAGS = -lshlwapi -ldxgi -ld3d11 -lsetupapi -luuid
+LDFLAGS = -lshlwapi -ldxgi -ld3d11 -lsetupapi -luuid -lole32 -lmfplat -lmfuuid
 
 CFLAGS  += -ffast-math
 CFLAGS  += -fdata-sections -ffunction-sections
 CFLAGS  += -I../ -I.
 LDFLAGS += -Wl,--gc-sections -mwindows
+CFLAGS  += -DWINVER=0x0602
 
 PREFIX ?= x86_64-w64-mingw32-
 STRIP  = $(PREFIX)strip
