@@ -787,9 +787,7 @@ int run()
   );
 
   if (params.ignoreQuit)
-  {
     SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, "1");
-  }
 
   if (params.fullscreen)
   {
