@@ -1107,15 +1107,15 @@ static bool load_config(const char * configFile)
       }
     }
 
-    if (config_setting_lookup_bool  (global, "scaleMouseInput", &itmp)) params.scaleMouseInput = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "hideMouse"      , &itmp)) params.hideMouse       = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "showFPS"        , &itmp)) params.showFPS         = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "autoResize"     , &itmp)) params.autoResize      = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "allowResize"    , &itmp)) params.allowResize     = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "keepAspect"     , &itmp)) params.keepAspect      = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "borderless"     , &itmp)) params.borderless      = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "fullScreen"     , &itmp)) params.fullscreen      = (itmp != 0);
-    if (config_setting_lookup_bool  (global, "ignoreQuit"     , &itmp)) params.ignoreQuit      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "scaleMouseInput", &itmp)) params.scaleMouseInput = (itmp != 0);
+    if (config_setting_lookup_bool(global, "hideMouse"      , &itmp)) params.hideMouse       = (itmp != 0);
+    if (config_setting_lookup_bool(global, "showFPS"        , &itmp)) params.showFPS         = (itmp != 0);
+    if (config_setting_lookup_bool(global, "autoResize"     , &itmp)) params.autoResize      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "allowResize"    , &itmp)) params.allowResize     = (itmp != 0);
+    if (config_setting_lookup_bool(global, "keepAspect"     , &itmp)) params.keepAspect      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "borderless"     , &itmp)) params.borderless      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "fullScreen"     , &itmp)) params.fullscreen      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "ignoreQuit"     , &itmp)) params.ignoreQuit      = (itmp != 0);
 
     if (config_setting_lookup_int(global, "x", &params.x)) params.center = false;
     if (config_setting_lookup_int(global, "y", &params.y)) params.center = false;
