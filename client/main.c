@@ -1143,6 +1143,30 @@ static bool load_config(const char * configFile)
     }
   }
 
+  config_setting_t * spice = config_lookup(&cfg, "spice");
+  if (spice)
+  {
+    if (config_setting_lookup_bool(spice, "use", &itmp))
+      params.useSpice = (itmp != 0);
+
+    if (config_setting_lookup_string(spice, "host", &stmp))
+    {
+      free(params.spiceHost);
+      params.spiceHost = strdup(stmp);
+    }
+
+    if (config_setting_lookup_int(spice, "port", &itmp))
+    {
+      if (itmp < 1)
+      {
+        DEBUG_ERROR("Invalid spice port");
+        config_destroy(&cfg);
+        return false;
+      }
+      params.spicePort = itmp;
+    }
+  }
+
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
   {
     const LG_Renderer * r     = LG_Renderers[i];
