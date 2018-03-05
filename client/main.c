@@ -484,7 +484,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
       int x = 0;
       int y = 0;
-      if (realignGuest && state.haveCursorPos)
+      if (realignGuest)
       {
         x = event->motion.x - state.dstRect.x;
         y = event->motion.y - state.dstRect.y;
@@ -493,8 +493,13 @@ int eventFilter(void * userdata, SDL_Event * event)
           x = (float)x * state.scaleX;
           y = (float)y * state.scaleY;
         }
-        x -= state.cursor.x;
-        y -= state.cursor.y;
+        if (state.haveCursorPos) { // if cursor position reported, use relative motion
+          x -= state.cursor.x;
+          y -= state.cursor.y;
+        } else { // move against edge to zero, then back to absolute position
+          if (!smart_mouse_motion(-state.srcSize.x, -state.srcSize.y))
+            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+        }
         realignGuest = false;
 
         if (!smart_mouse_motion(x, y))
