@@ -103,7 +103,7 @@ struct AppParams
   RendererOpts rendererOpts[LG_RENDERER_COUNT];
 };
 
-struct AppState  state; 
+struct AppState  state;
 struct AppParams params =
 {
   .configFile       = "/etc/looking-glass.conf",
@@ -1015,7 +1015,7 @@ void doHelp(char * app)
     "  -p PORT   Specify the spice port [current: %d]\n"
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
-    "  -m        No framethread (need scroll lock to use mouse) (lower latency)\n"
+    "  -m        No framethread (need scroll-lock to use mouse (will also disable video)) (lower latency)\n"
     "\n"
     "  -k        Enable FPS display\n"
     "  -g NAME   Force the use of a specific renderer\n"
