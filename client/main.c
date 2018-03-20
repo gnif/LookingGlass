@@ -95,6 +95,8 @@ struct AppParams
   bool         scaleMouseInput;
   bool         hideMouse;
   bool         ignoreQuit;
+  bool         noVideo;
+  bool         FrameThread;
 
   bool         forceRenderer;
   unsigned int forceRendererIndex;
@@ -123,7 +125,9 @@ struct AppParams params =
   .scaleMouseInput  = true,
   .hideMouse        = true,
   .ignoreQuit       = false,
-  .forceRenderer    = false
+  .forceRenderer    = false,
+  .noVideo          = false,
+  .FrameThread      = true,
 };
 
 static inline void updatePositionInfo()
@@ -894,24 +898,28 @@ int run()
       break;
     }
 
-
     if (!(t_main = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
     {
       DEBUG_ERROR("cursor create thread failed");
       break;
     }
-
+if(params.FrameThread)
+  {
     if (!(t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
     {
       DEBUG_ERROR("frame create thread failed");
       break;
     }
-
+  }
+if(!params.noVideo)
+{
+  // weird graphical effect on the opened windows, should add a black background to fix it
     if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
     {
       DEBUG_ERROR("render create thread failed");
       break;
     }
+}
 
     // ensure mouse acceleration is identical in server mode
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
@@ -1002,10 +1010,12 @@ void doHelp(char * app)
     "  -f PATH   Specify the path to the shared memory file [current: %s]\n"
     "\n"
     "  -s        Disable spice client\n"
+    "  -S        Disable Video (Use as spice client only (lower latency))\n"
     "  -c HOST   Specify the spice host [current: %s]\n"
     "  -p PORT   Specify the spice port [current: %d]\n"
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
+    "  -m        No framethread (I've seen it reduce latency on bench, but it also cause a spin lock on the windows host so unrecomanded)\n"
     "\n"
     "  -k        Enable FPS display\n"
     "  -g NAME   Force the use of a specific renderer\n"
@@ -1234,7 +1244,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
+    switch(getopt(argc, argv, "hC:f:sSmc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
     {
       case '?':
       case 'h':
@@ -1258,6 +1268,14 @@ int main(int argc, char * argv[])
 
       case 's':
         params.useSpice = false;
+        continue;
+
+      case 'S':
+        params.noVideo = true;
+        continue;
+      case 'm':
+        params.FrameThread = false;
+        params.noVideo = true;
         continue;
 
       case 'c':
