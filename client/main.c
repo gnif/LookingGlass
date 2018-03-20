@@ -1015,7 +1015,7 @@ void doHelp(char * app)
     "  -p PORT   Specify the spice port [current: %d]\n"
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
-    "  -m        No framethread (need scroll-lock to use mouse (will also disable video)) (lower latency)\n"
+    "  -m        No framethread (I've seen it reduce latency on bench, but it also cause a spin lock on the windows host so unrecomanded)\n"
     "\n"
     "  -k        Enable FPS display\n"
     "  -g NAME   Force the use of a specific renderer\n"
@@ -1275,6 +1275,7 @@ int main(int argc, char * argv[])
         continue;
       case 'm':
         params.FrameThread = false;
+        params.noVideo = true;
         continue;
 
       case 'c':
