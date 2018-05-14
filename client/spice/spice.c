@@ -133,7 +133,7 @@ bool    spice_discard  (const struct SpiceChannel * channel, ssize_t size);
 
 bool spice_connect(const char * host, const short port, const char * password)
 {
-  strncpy(spice.password, password, sizeof(spice.password));
+  strncpy(spice.password, password, sizeof(spice.password) - 1);
   memset(&spice.addr, 0, sizeof(struct sockaddr_in));
   inet_pton(AF_INET, host, &spice.addr.sin_addr);
   spice.addr.sin_family = AF_INET;
