@@ -54,7 +54,7 @@ static struct Options defaultOptions =
 {
   .mipmap        = true,
   .vsync         = true,
-  .preventBuffer = true,
+  .preventBuffer = false,
 };
 
 struct Inst
@@ -485,7 +485,7 @@ static LG_RendererOpt opengl_options[] =
   },
   {
     .name      = "preventBuffer",
-    .desc      = "Prevent the driver from buffering frames [default: enabled]",
+    .desc      = "Prevent the driver from buffering frames [default: disabled]",
     .validator = LG_RendererValidatorBool,
     .handler   = handle_opt_prevent_buffer
   }
