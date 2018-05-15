@@ -854,6 +854,10 @@ static void deconfigure(struct Inst * this)
   }
 
   if (this->amdPinnedMemSupport)
+  {
+    if (this->texPixels[0])
+      free(this->texPixels[0]);
+
     for(int i = 0; i < BUFFER_COUNT; ++i)
     {
       if (this->fences[i])
@@ -861,13 +865,9 @@ static void deconfigure(struct Inst * this)
         glDeleteSync(this->fences[i]);
         this->fences[i] = NULL;
       }
-
-      if (this->texPixels[i])
-      {
-        free(this->texPixels[i]);
-        this->texPixels[i] = NULL;
-      }
+      this->texPixels[i] = NULL;
     }
+  }
 
   if (this->glContext)
   {
