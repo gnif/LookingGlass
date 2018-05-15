@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <malloc.h>
 
 #include <SDL2/SDL_ttf.h>
 
@@ -62,6 +63,7 @@ struct Inst
   LG_RendererParams params;
   struct Options    opt;
 
+  bool              amdPinnedMemSupport;
   bool              configured;
   bool              reconfigure;
   SDL_GLContext     glContext;
@@ -92,6 +94,7 @@ struct Inst
 
   bool              hasTextures, hasFrames;
   GLuint            frames[BUFFER_COUNT];
+  GLsync            fences[BUFFER_COUNT];
   void            * decoderFrames[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
 
@@ -542,6 +545,20 @@ static bool configure(struct Inst * this, SDL_Window *window)
     DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
     DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
     DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+
+    GLint n;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+    for(GLint i = 0; i < n; ++i)
+    {
+      const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
+      this->amdPinnedMemSupport = (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0);
+      if (this->amdPinnedMemSupport)
+      {
+        DEBUG_INFO("Using GL_AMD_pinned_memory");
+        break;
+      }
+    }
+
     this->doneInfo = true;
   }
 
@@ -629,42 +646,73 @@ static bool configure(struct Inst * this, SDL_Window *window)
     }
     this->hasBuffers = true;
 
-    for(int i = 0; i < BUFFER_COUNT; ++i)
+    if (this->amdPinnedMemSupport)
     {
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
-      if (check_gl_error("glBindBuffer"))
+      const int pagesize = getpagesize();
+      for(int i = 0; i < BUFFER_COUNT; ++i)
       {
-        LG_UNLOCK(this->formatLock);
-        return false;
-      }
+        glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
+        if (check_gl_error("glBindBuffer"))
+        {
+          LG_UNLOCK(this->formatLock);
+          return false;
+        }
 
-      glBufferStorage(
-        GL_PIXEL_UNPACK_BUFFER,
-        this->texSize,
-        NULL,
-        GL_MAP_WRITE_BIT      |
-        GL_MAP_PERSISTENT_BIT
-      );
-      if (check_gl_error("glBufferStorage"))
+        this->texPixels[i] = memalign(pagesize, this->texSize);
+        glBufferData(
+          GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
+          this->texSize,
+          this->texPixels[i],
+          GL_STREAM_DRAW);
+
+        if (check_gl_error("glBufferData"))
+        {
+          LG_UNLOCK(this->formatLock);
+          return false;
+        }
+      }
+      glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
+    }
+    else
+    {
+      for(int i = 0; i < BUFFER_COUNT; ++i)
       {
-        LG_UNLOCK(this->formatLock);
-        return false;
-      }
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
+        if (check_gl_error("glBindBuffer"))
+        {
+          LG_UNLOCK(this->formatLock);
+          return false;
+        }
 
-      this->texPixels[i] = glMapBufferRange(
-        GL_PIXEL_UNPACK_BUFFER,
-        0,
-        this->texSize,
-        GL_MAP_WRITE_BIT         |
-        GL_MAP_PERSISTENT_BIT    |
-        GL_MAP_FLUSH_EXPLICIT_BIT
-      );
+        glBufferStorage(
+          GL_PIXEL_UNPACK_BUFFER,
+          this->texSize,
+          NULL,
+          GL_MAP_WRITE_BIT      |
+          GL_MAP_PERSISTENT_BIT
+        );
+        if (check_gl_error("glBufferStorage"))
+        {
+          LG_UNLOCK(this->formatLock);
+          return false;
+        }
 
-      if (check_gl_error("glMapBufferRange"))
-      {
-        LG_UNLOCK(this->formatLock);
-        return false;
+        this->texPixels[i] = glMapBufferRange(
+          GL_PIXEL_UNPACK_BUFFER,
+          0,
+          this->texSize,
+          GL_MAP_WRITE_BIT         |
+          GL_MAP_PERSISTENT_BIT    |
+          GL_MAP_FLUSH_EXPLICIT_BIT
+        );
+
+        if (check_gl_error("glMapBufferRange"))
+        {
+          LG_UNLOCK(this->formatLock);
+          return false;
+        }
       }
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     }
   }
 
@@ -801,6 +849,22 @@ static void deconfigure(struct Inst * this)
     glDeleteBuffers(BUFFER_COUNT, this->vboID);
     this->hasBuffers = false;
   }
+
+  if (this->amdPinnedMemSupport)
+    for(int i = 0; i < BUFFER_COUNT; ++i)
+    {
+      if (this->fences[i])
+      {
+        glDeleteSync(this->fences[i]);
+        this->fences[i] = NULL;
+      }
+
+      if (this->texPixels[i])
+      {
+        free(this->texPixels[i]);
+        this->texPixels[i] = NULL;
+      }
+    }
 
   if (this->glContext)
   {
@@ -982,13 +1046,29 @@ static bool draw_frame(struct Inst * this)
   }
   else
   {
-    glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
+    if (this->amdPinnedMemSupport && glIsSync(this->fences[this->texIndex]))
+    {
+      switch(glClientWaitSync(this->fences[this->texIndex], 0, GL_TIMEOUT_IGNORED))
+      {
+        case GL_ALREADY_SIGNALED:
+          break;
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH ,
-      this->decoder->get_frame_stride(this->decoderData)
-    );
+        case GL_CONDITION_SATISFIED:
+          DEBUG_WARN("Had to wait for the sync");
+          break;
+
+        case GL_TIMEOUT_EXPIRED:
+          DEBUG_WARN("Timeout expired, DMA transfers are too slow!");
+          break;
+
+        case GL_WAIT_FAILED:
+          DEBUG_ERROR("Wait failed %s", gluErrorString(glGetError()));
+          break;
+      }
+
+      glDeleteSync(this->fences[this->texIndex]);
+      this->fences[this->texIndex] = NULL;
+    }
 
     if (!this->decoder->get_buffer(
       this->decoderData,
@@ -1001,7 +1081,19 @@ static bool draw_frame(struct Inst * this)
       return false;
     }
 
-    glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
+    if (this->amdPinnedMemSupport)
+      this->fences[this->texIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+    glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, this->vboID[this->texIndex]);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH ,
+      this->decoder->get_frame_stride(this->decoderData)
+    );
+
+    if (!this->amdPinnedMemSupport)
+      glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
 
     // update the texture
     glTexSubImage2D(
@@ -1023,7 +1115,7 @@ static bool draw_frame(struct Inst * this)
     }
 
     // unbind the buffer
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
   }
 
   const bool mipmap = this->opt.mipmap && (
