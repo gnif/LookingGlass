@@ -35,7 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "utils.h"
 #include "lg-decoders.h"
 
-#define BUFFER_COUNT       2
+#define BUFFER_COUNT       4
 
 #define FPS_TEXTURE        0
 #define MOUSE_TEXTURE      1
@@ -649,6 +649,10 @@ static bool configure(struct Inst * this, SDL_Window *window)
     if (this->amdPinnedMemSupport)
     {
       const int pagesize = getpagesize();
+      this->texPixels[0] = memalign(pagesize, this->texSize * BUFFER_COUNT);
+      for(int i = 1; i < BUFFER_COUNT; ++i)
+        this->texPixels[i] = this->texPixels[0] + this->texSize;
+
       for(int i = 0; i < BUFFER_COUNT; ++i)
       {
         glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
@@ -658,7 +662,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
           return false;
         }
 
-        this->texPixels[i] = memalign(pagesize, this->texSize);
         glBufferData(
           GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
           this->texSize,
