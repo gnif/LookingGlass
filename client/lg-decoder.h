@@ -34,15 +34,15 @@ typedef enum LG_OutFormat
 }
 LG_OutFormat;
 
-typedef bool         (* LG_DecoderCreate        )(void ** opaque);
-typedef void         (* LG_DecoderDestroy       )(void  * opaque);
-typedef bool         (* LG_DecoderInitialize    )(void  * opaque, const LG_RendererFormat format, SDL_Window * window);
-typedef void         (* LG_DecoderDeInitialize  )(void  * opaque);
-typedef LG_OutFormat (* LG_DecoderGetOutFormat  )(void  * opaque);
-typedef unsigned int (* LG_DecoderGetFramePitch )(void  * opaque);
-typedef unsigned int (* LG_DecoderGetFrameStride)(void  * opaque);
-typedef bool         (* LG_DecoderDecode        )(void  * opaque, const uint8_t * src, size_t srcSize);
-typedef bool         (* LG_DecoderGetBuffer     )(void  * opaque, uint8_t * dst, size_t dstSize);
+typedef bool            (* LG_DecoderCreate        )(void ** opaque);
+typedef void            (* LG_DecoderDestroy       )(void  * opaque);
+typedef bool            (* LG_DecoderInitialize    )(void  * opaque, const LG_RendererFormat format, SDL_Window * window);
+typedef void            (* LG_DecoderDeInitialize  )(void  * opaque);
+typedef LG_OutFormat    (* LG_DecoderGetOutFormat  )(void  * opaque);
+typedef unsigned int    (* LG_DecoderGetFramePitch )(void  * opaque);
+typedef unsigned int    (* LG_DecoderGetFrameStride)(void  * opaque);
+typedef bool            (* LG_DecoderDecode        )(void  * opaque, const uint8_t * src, size_t srcSize);
+typedef const uint8_t * (* LG_DecoderGetBuffer     )(void  * opaque);
 
 typedef bool (* LG_DecoderInitGLTexture  )(void * opaque, GLenum target, GLuint texture, void ** ref);
 typedef void (* LG_DecoderFreeGLTexture  )(void * opaque, void * ref);

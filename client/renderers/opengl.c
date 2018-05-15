@@ -1070,16 +1070,15 @@ static bool draw_frame(struct Inst * this)
       this->fences[this->texIndex] = NULL;
     }
 
-    if (!this->decoder->get_buffer(
-      this->decoderData,
-      this->texPixels[this->texIndex],
-      this->texSize
-    ))
+    const uint8_t * data = this->decoder->get_buffer(this->decoderData);
+    if (!data)
     {
       LG_UNLOCK(this->formatLock);
       DEBUG_ERROR("Failed to get the buffer from the decoder");
       return false;
     }
+
+    memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
 
     if (this->amdPinnedMemSupport)
       this->fences[this->texIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);

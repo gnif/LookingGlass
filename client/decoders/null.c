@@ -31,15 +31,15 @@ struct Inst
   const uint8_t    * src;
 };
 
-static bool         lgd_null_create          (void ** opaque);
-static void         lgd_null_destroy         (void  * opaque);
-static bool         lgd_null_initialize      (void  * opaque, const LG_RendererFormat format, SDL_Window * window);
-static void         lgd_null_deinitialize    (void  * opaque);
-static LG_OutFormat lgd_null_get_out_format  (void  * opaque);
-static unsigned int lgd_null_get_frame_pitch (void  * opaque);
-static unsigned int lgd_null_get_frame_stride(void  * opaque);
-static bool         lgd_null_decode          (void  * opaque, const uint8_t * src, size_t srcSize);
-static bool         lgd_null_get_buffer      (void  * opaque, uint8_t * dst, size_t dstSize);
+static bool            lgd_null_create          (void ** opaque);
+static void            lgd_null_destroy         (void  * opaque);
+static bool            lgd_null_initialize      (void  * opaque, const LG_RendererFormat format, SDL_Window * window);
+static void            lgd_null_deinitialize    (void  * opaque);
+static LG_OutFormat    lgd_null_get_out_format  (void  * opaque);
+static unsigned int    lgd_null_get_frame_pitch (void  * opaque);
+static unsigned int    lgd_null_get_frame_stride(void  * opaque);
+static bool            lgd_null_decode          (void  * opaque, const uint8_t * src, size_t srcSize);
+static const uint8_t * lgd_null_get_buffer      (void  * opaque);
 
 static bool lgd_null_create(void ** opaque)
 {
@@ -96,14 +96,13 @@ static bool lgd_null_decode(void * opaque, const uint8_t * src, size_t srcSize)
   return true;
 }
 
-static bool lgd_null_get_buffer(void  * opaque, uint8_t * dst, size_t dstSize)
+static const uint8_t * lgd_null_get_buffer(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this->src)
-    return false;
+    return NULL;
 
-  memcpySSE(dst, this->src, dstSize);
-  return true;
+  return this->src;
 }
 
 const LG_Decoder LGD_NULL =
