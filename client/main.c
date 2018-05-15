@@ -420,6 +420,27 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
   return ps2;
 }
 
+// virtio mouse driver only works with move events within the range of a signed byte; in addition,
+// other mouse drivers are not used by spice when virtio mouse is present
+// however, virtio is currently far more stable than emulated PS/2 or USB
+#define VIRTIO_MAX_STEP 120
+bool smart_mouse_motion(int32_t x, int32_t y)
+{
+  int px = 0; int py = 0; // "parity" (sign) x/y (s was taken)
+  if (x != 0) { if (x < 0) px = -1; else px = 1; }
+  if (y != 0) { if (y < 0) py = -1; else py = 1; }
+  
+  while (x != 0 || y != 0) { // move mouse by maximum step at a time
+    int sx = x; int sy = y; // step x/y
+    if (sx * px >= VIRTIO_MAX_STEP) sx = VIRTIO_MAX_STEP * px; // cap X/Y to maximum step size
+    if (sy * py >= VIRTIO_MAX_STEP) sy = VIRTIO_MAX_STEP * py; // //
+    if (!spice_mouse_motion(sx, sy)) return false; // commit step
+    x -= sx; y -= sy; // and count down toward zero
+  }
+  // fix mouse jumping elsewhere on click; there may be a better way to do this
+  return spice_mouse_mode(false);
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
   static bool serverMode   = false;
@@ -463,7 +484,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
       int x = 0;
       int y = 0;
-      if (realignGuest && state.haveCursorPos)
+      if (realignGuest)
       {
         x = event->motion.x - state.dstRect.x;
         y = event->motion.y - state.dstRect.y;
@@ -472,11 +493,16 @@ int eventFilter(void * userdata, SDL_Event * event)
           x = (float)x * state.scaleX;
           y = (float)y * state.scaleY;
         }
-        x -= state.cursor.x;
-        y -= state.cursor.y;
+        if (state.haveCursorPos) { // if cursor position reported, use relative motion
+          x -= state.cursor.x;
+          y -= state.cursor.y;
+        } else { // move against edge to zero, then back to absolute position
+          if (!smart_mouse_motion(-state.srcSize.x, -state.srcSize.y))
+            DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
+        }
         realignGuest = false;
 
-        if (!spice_mouse_motion(x, y))
+        if (!smart_mouse_motion(x, y))
           DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
         break;
       }
@@ -490,7 +516,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           x = (float)x * state.scaleX;
           y = (float)y * state.scaleY;
         }
-        if (!spice_mouse_motion(x, y))
+        if (!smart_mouse_motion(x, y))
         {
           DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
           break;
