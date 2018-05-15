@@ -17,8 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#define PCI_LG_VENDOR_ID 0x1af4 //Red Hat Inc,
-#define PCI_LG_DEVICE_ID 0x1110 //Inter-VM shared memory
+#define PCI_KVMFR_VENDOR_ID 0x1af4 //Red Hat Inc,
+#define PCI_KVMFR_DEVICE_ID 0x1110 //Inter-VM shared memory
 
 #include <linux/device.h>
 #include <linux/module.h>
@@ -94,8 +94,8 @@ static void kvmfr_pci_remove(struct pci_dev *dev)
 static struct pci_device_id kvmfr_pci_ids[] =
 {
   {
-    .vendor    = PCI_LG_VENDOR_ID,
-    .device    = PCI_LG_DEVICE_ID,
+    .vendor    = PCI_KVMFR_VENDOR_ID,
+    .device    = PCI_KVMFR_DEVICE_ID,
     .subvendor = PCI_ANY_ID,
     .subdevice = PCI_ANY_ID
   },
