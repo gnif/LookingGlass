@@ -88,6 +88,7 @@ struct AppParams
   int          x, y;
   unsigned int w, h;
   char       * shmFile;
+  unsigned int shmSize;
   bool         showFPS;
   bool         useSpice;
   char       * spiceHost;
@@ -116,6 +117,7 @@ struct AppParams params =
   .w                = 1024,
   .h                = 768,
   .shmFile          = "/dev/shm/looking-glass",
+  .shmSize          = 0,
   .showFPS          = false,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
@@ -624,7 +626,7 @@ static void * map_memory()
     return NULL;
   }
 
-  state.shmSize = st.st_size;
+  state.shmSize = params.shmSize ? params.shmSize : st.st_size;
   state.shmFD   = open(params.shmFile, O_RDWR, (mode_t)0600);
   if (state.shmFD < 0)
   {
@@ -632,7 +634,7 @@ static void * map_memory()
     return NULL;
   }
 
-  void * map = mmap(0, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, state.shmFD, 0);
+  void * map = mmap(0, state.shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, state.shmFD, 0);
   if (map == MAP_FAILED)
   {
     DEBUG_ERROR("Failed to map the shared memory file: %s", params.shmFile);
@@ -1000,6 +1002,7 @@ void doHelp(char * app)
     "\n"
     "  -C PATH   Specify an additional configuration file to load\n"
     "  -f PATH   Specify the path to the shared memory file [current: %s]\n"
+    "  -L SIZE   Specify the size in MB of the shared memory file (0 = detect) [current: %d]\n"
     "\n"
     "  -s        Disable spice client\n"
     "  -c HOST   Specify the spice host [current: %s]\n"
@@ -1028,6 +1031,7 @@ void doHelp(char * app)
     app,
     app,
     params.shmFile,
+    params.shmSize,
     params.spiceHost,
     params.spicePort,
     params.center ? "center" : x,
@@ -1086,6 +1090,9 @@ static bool load_config(const char * configFile)
       free(params.shmFile);
       params.shmFile = strdup(stmp);
     }
+
+    if (config_setting_lookup_int(global, "shmSize", &itmp))
+      params.shmSize = itmp * 1024 * 1024;
 
     if (config_setting_lookup_string(global, "forceRenderer", &stmp))
     {
@@ -1234,7 +1241,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
+    switch(getopt(argc, argv, "hC:fL:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
     {
       case '?':
       case 'h':
@@ -1254,6 +1261,10 @@ int main(int argc, char * argv[])
       case 'f':
         free(params.shmFile);
         params.shmFile = strdup(optarg);
+        continue;
+
+      case 'L':
+        params.shmSize = atoi(optarg) * 1024 * 1024;
         continue;
 
       case 's':
