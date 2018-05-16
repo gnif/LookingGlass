@@ -20,9 +20,7 @@ OBJS	= main.o \
 	  spice/spice.o \
 	  parsers/nal.o \
 	  decoders/null.o \
-	  decoders/h264.o \
 	  renderers/opengl.o
-#	  renderers/opengl-basic.o
 
 BUILD_OBJS = $(foreach obj,$(OBJS),$(BUILD)/$(obj))
 
