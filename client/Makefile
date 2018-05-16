@@ -7,7 +7,7 @@ CFLAGS  += -fdata-sections -ffunction-sections
 LDFLAGS += -Wl,--gc-sections
 CFLAGS  += -Wfatal-errors
 
-LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig libva libva-glx
+LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig
 CFLAGS  += $(shell pkg-config --cflags $(LIBS))
 LDFLAGS += $(shell pkg-config --libs   $(LIBS))
 BUILD   ?= .build
