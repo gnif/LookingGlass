@@ -31,11 +31,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <GL/glx.h>
 
 #include "debug.h"
-#include "memcpySSE.h"
 #include "utils.h"
 #include "lg-decoders.h"
 
-#define BUFFER_COUNT       4
+#define BUFFER_COUNT       2
 
 #define FPS_TEXTURE        0
 #define MOUSE_TEXTURE      1
@@ -49,6 +48,7 @@ struct Options
   bool mipmap;
   bool vsync;
   bool preventBuffer;
+  bool amdPinnedMem;
 };
 
 static struct Options defaultOptions =
@@ -56,6 +56,7 @@ static struct Options defaultOptions =
   .mipmap        = true,
   .vsync         = true,
   .preventBuffer = false,
+  .amdPinnedMem  = true,
 };
 
 struct Inst
@@ -472,6 +473,16 @@ static void handle_opt_prevent_buffer(void * opaque, const char *value)
   this->opt.preventBuffer = LG_RendererValueToBool(value);
 }
 
+static void handle_opt_amd_pinned_mem(void * opaque, const char *value)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  this->opt.amdPinnedMem = LG_RendererValueToBool(value);
+}
+
+
 static LG_RendererOpt opengl_options[] =
 {
   {
@@ -491,6 +502,12 @@ static LG_RendererOpt opengl_options[] =
     .desc      = "Prevent the driver from buffering frames [default: disabled]",
     .validator = LG_RendererValidatorBool,
     .handler   = handle_opt_prevent_buffer
+  },
+  {
+    .name      = "amdPinnedMem",
+    .desc      = "Use GL_AMD_pinned_memory if it is available [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_amd_pinned_mem
   }
 };
 
@@ -551,10 +568,15 @@ static bool configure(struct Inst * this, SDL_Window *window)
     for(GLint i = 0; i < n; ++i)
     {
       const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
-      this->amdPinnedMemSupport = (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0);
-      if (this->amdPinnedMemSupport)
+      if (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0)
       {
-        DEBUG_INFO("Using GL_AMD_pinned_memory");
+        if (this->opt.amdPinnedMem)
+        {
+          this->amdPinnedMemSupport = true;
+          DEBUG_INFO("Using GL_AMD_pinned_memory");
+        }
+        else
+          DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
         break;
       }
     }
@@ -564,24 +586,10 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
 
-  // check if the GPU supports GL_ARB_buffer_storage first
-  // there is no advantage to this renderer if it is not present.
-  const GLubyte * extensions = glGetString(GL_EXTENSIONS);
-  if (!gluCheckExtension((const GLubyte *)"GL_ARB_buffer_storage", extensions))
-  {
-    DEBUG_INFO("The GPU doesn't support GL_ARB_buffer_storage");
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-
   switch(this->format.comp)
   {
     case LG_COMPRESSION_NONE:
       this->decoder = &LGD_NULL;
-      break;
-
-    case LG_COMPRESSION_H264:
-      this->decoder = &LGD_H264;
       break;
 
     default:
@@ -661,7 +669,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
           LG_UNLOCK(this->formatLock);
           return false;
         }
-
         glBufferData(
           GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
           this->texSize,
@@ -687,29 +694,13 @@ static bool configure(struct Inst * this, SDL_Window *window)
           return false;
         }
 
-        glBufferStorage(
+        glBufferData(
           GL_PIXEL_UNPACK_BUFFER,
           this->texSize,
           NULL,
-          GL_MAP_WRITE_BIT      |
-          GL_MAP_PERSISTENT_BIT
+          GL_STREAM_DRAW
         );
-        if (check_gl_error("glBufferStorage"))
-        {
-          LG_UNLOCK(this->formatLock);
-          return false;
-        }
-
-        this->texPixels[i] = glMapBufferRange(
-          GL_PIXEL_UNPACK_BUFFER,
-          0,
-          this->texSize,
-          GL_MAP_WRITE_BIT         |
-          GL_MAP_PERSISTENT_BIT    |
-          GL_MAP_FLUSH_EXPLICIT_BIT
-        );
-
-        if (check_gl_error("glMapBufferRange"))
+        if (check_gl_error("glBufferData"))
         {
           LG_UNLOCK(this->formatLock);
           return false;
@@ -1049,7 +1040,7 @@ static bool draw_frame(struct Inst * this)
   }
   else
   {
-    if (this->amdPinnedMemSupport && glIsSync(this->fences[this->texIndex]))
+    if (glIsSync(this->fences[this->texIndex]))
     {
       switch(glClientWaitSync(this->fences[this->texIndex], 0, GL_TIMEOUT_IGNORED))
       {
@@ -1081,21 +1072,22 @@ static bool draw_frame(struct Inst * this)
       return false;
     }
 
-    memcpySSE(this->texPixels[this->texIndex], data, this->texSize);
-
-    if (this->amdPinnedMemSupport)
-      this->fences[this->texIndex] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-
     glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, this->vboID[this->texIndex]);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
 
     glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
     glPixelStorei(GL_UNPACK_ROW_LENGTH ,
       this->decoder->get_frame_stride(this->decoderData)
     );
 
-    if (!this->amdPinnedMemSupport)
-      glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, this->texSize);
+    // update the buffer, this performs a DMA transfer if possible
+    glBufferSubData(
+      GL_PIXEL_UNPACK_BUFFER,
+      0,
+      this->texSize,
+      data
+    );
+    check_gl_error("glBufferSubData");
 
     // update the texture
     glTexSubImage2D(
@@ -1116,8 +1108,12 @@ static bool draw_frame(struct Inst * this)
       );
     }
 
+    // set a fence so we don't overwrite a buffer in use
+    this->fences[this->texIndex] =
+      glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
     // unbind the buffer
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
 
   const bool mipmap = this->opt.mipmap && (
