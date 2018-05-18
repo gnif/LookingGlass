@@ -26,98 +26,150 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "debug.h"
 
-#if defined(__GNUC___) || defined(__GNUG__)
+#if defined(__GNUC__) || defined(__GNUG__)
+
 #define OP(...) #__VA_ARGS__ "\n\t"
 
 inline static void memcpySSE(void *dst, const void * src, size_t length)
 {
-#if defined(__x86_64__) || defined(__i386__)
+#if !defined(NATIVE_MEMCPY) && (defined(__x86_64__) || defined(__i386__))
+  if (length == 0 || dst == src)
+    return;
+
+#ifdef __x86_64__
+  void * end = dst + (length & ~0xFF);
+  size_t off = (15 - ((length & 0xFF) >> 4));
+  off = (off < 8) ? off * 16 : 7 * 16 + (off - 7) * 10;
+#else
   void * end = dst + (length & ~0x7F);
-  size_t rem = (7 - ((length & 0x7F) >> 4)) * 10;
+  size_t off = (7 - ((length & 0x7F) >> 4)) * 10;
+#endif
 
   __asm__ __volatile__ (
-    // save the registers we intend to alter, failure to do so causes problems
-    // when gcc -O3 is used
-    OP(push %[dst])
-    OP(push %[src])
-    OP(push %[end])
+   "cmp         %[dst],%[end] \n\t"
+   "je          Remain_%= \n\t"
 
-    // perform 128 byte SIMD block copy
-    OP(cmp %[dst],%[end])
-    OP(je ramain_%=)
-    OP(loop_%=:)
-    OP(vmovaps  0x00(%[src]),%%xmm0)
-    OP(vmovaps  0x10(%[src]),%%xmm1)
-    OP(vmovaps  0x20(%[src]),%%xmm2)
-    OP(vmovaps  0x30(%[src]),%%xmm3)
-    OP(vmovaps  0x40(%[src]),%%xmm4)
-    OP(vmovaps  0x50(%[src]),%%xmm5)
-    OP(vmovaps  0x60(%[src]),%%xmm6)
-    OP(vmovaps  0x70(%[src]),%%xmm7)
-    OP(vmovntdq %%xmm0,0x00(%[dst]))
-    OP(vmovntdq %%xmm1,0x10(%[dst]))
-    OP(vmovntdq %%xmm2,0x20(%[dst]))
-    OP(vmovntdq %%xmm3,0x30(%[dst]))
-    OP(vmovntdq %%xmm4,0x40(%[dst]))
-    OP(vmovntdq %%xmm5,0x50(%[dst]))
-    OP(vmovntdq %%xmm6,0x60(%[dst]))
-    OP(vmovntdq %%xmm7,0x70(%[dst]))
-    OP(add      $0x80,%[dst])
-    OP(add      $0x80,%[src])
-    OP(cmp      %[dst],%[end])
-    OP(jne      loop_%=)
-
-    // copy any remaining 16 byte blocks
-    OP(remain_%=:)
+   // perform SIMD block copy
+   "loop_%=: \n\t"
+   "vmovaps     0x00(%[src]),%%xmm0  \n\t"
+   "vmovaps     0x10(%[src]),%%xmm1  \n\t"
+   "vmovaps     0x20(%[src]),%%xmm2  \n\t"
+   "vmovaps     0x30(%[src]),%%xmm3  \n\t"
+   "vmovaps     0x40(%[src]),%%xmm4  \n\t"
+   "vmovaps     0x50(%[src]),%%xmm5  \n\t"
+   "vmovaps     0x60(%[src]),%%xmm6  \n\t"
+   "vmovaps     0x70(%[src]),%%xmm7  \n\t"
 #ifdef __x86_64__
-    OP(leaq (%%rip), %[end])
-    OP(add  $10,%[end])
-#else
-    OP(call .+5)
-    OP(pop  %[end])
-    OP(add  $8,%[end])
+   "vmovaps     0x80(%[src]),%%xmm8  \n\t"
+   "vmovaps     0x90(%[src]),%%xmm9  \n\t"
+   "vmovaps     0xA0(%[src]),%%xmm10 \n\t"
+   "vmovaps     0xB0(%[src]),%%xmm11 \n\t"
+   "vmovaps     0xC0(%[src]),%%xmm12 \n\t"
+   "vmovaps     0xD0(%[src]),%%xmm13 \n\t"
+   "vmovaps     0xE0(%[src]),%%xmm14 \n\t"
+   "vmovaps     0xF0(%[src]),%%xmm15 \n\t"
 #endif
-    OP(add  %[rem],%[end])
-    OP(jmp  *%[end])
+   "vmovntdq    %%xmm0 ,0x00(%[dst]) \n\t"
+   "vmovntdq    %%xmm1 ,0x10(%[dst]) \n\t"
+   "vmovntdq    %%xmm2 ,0x20(%[dst]) \n\t"
+   "vmovntdq    %%xmm3 ,0x30(%[dst]) \n\t"
+   "vmovntdq    %%xmm4 ,0x40(%[dst]) \n\t"
+   "vmovntdq    %%xmm5 ,0x50(%[dst]) \n\t"
+   "vmovntdq    %%xmm6 ,0x60(%[dst]) \n\t"
+   "vmovntdq    %%xmm7 ,0x70(%[dst]) \n\t"
+#ifdef __x86_64__
+   "vmovntdq    %%xmm8 ,0x80(%[dst]) \n\t"
+   "vmovntdq    %%xmm9 ,0x90(%[dst]) \n\t"
+   "vmovntdq    %%xmm10,0xA0(%[dst]) \n\t"
+   "vmovntdq    %%xmm11,0xB0(%[dst]) \n\t"
+   "vmovntdq    %%xmm12,0xC0(%[dst]) \n\t"
+   "vmovntdq    %%xmm13,0xD0(%[dst]) \n\t"
+   "vmovntdq    %%xmm14,0xE0(%[dst]) \n\t"
+   "vmovntdq    %%xmm15,0xF0(%[dst]) \n\t"
 
-    // jump table
-    OP(vmovaps  0x60(%[src]),%%xmm0)
-    OP(vmovntdq %%xmm0,0x60(%[dst]))
-    OP(vmovaps  0x50(%[src]),%%xmm1)
-    OP(vmovntdq %%xmm1,0x50(%[dst]))
-    OP(vmovaps  0x40(%[src]),%%xmm2)
-    OP(vmovntdq %%xmm2,0x40(%[dst]))
-    OP(vmovaps  0x30(%[src]),%%xmm3)
-    OP(vmovntdq %%xmm3,0x30(%[dst]))
-    OP(vmovaps  0x20(%[src]),%%xmm4)
-    OP(vmovntdq %%xmm4,0x20(%[dst]))
-    OP(vmovaps  0x10(%[src]),%%xmm5)
-    OP(vmovntdq %%xmm5,0x10(%[dst]))
-    OP(vmovaps  0x00(%[src]),%%xmm6)
-    OP(vmovntdq %%xmm6,0x00(%[dst]))
+   "add         $0x100,%[dst] \n\t"
+   "add         $0x100,%[src] \n\t"
+#else
+   "add         $0x80,%[dst] \n\t"
+   "add         $0x80,%[src] \n\t"
+#endif
+   "cmp         %[dst],%[end] \n\t"
+   "jne         loop_%= \n\t"
 
-    // alignment as the previous two instructions are only 4 bytes
-    OP(nop)
-    OP(nop)
+   "Remain_%=: \n\t"
 
-    // restore the registers
-    OP(pop %[end])
-    OP(pop %[src])
-    OP(pop %[dst])
-    :
-    : [dst]"r" (dst),
-      [src]"r" (src),
-      [end]"c" (end),
-      [rem]"d" (rem)
-    : "xmm0",
-      "xmm1",
-      "xmm2",
-      "xmm3",
-      "xmm4",
-      "xmm5",
-      "xmm6",
-      "xmm7",
-      "memory"
+   // copy any remaining 16 byte blocks
+#ifdef __x86_64__
+   "leaq        (%%rip), %[end]\n\t"
+   "Offset_%=:\n\t"
+#else
+   "call        .+5 \n\t"
+   "Offset_%=:\n\t"
+   "pop         %[end] \n\t"
+#endif
+   "add         $(BlockTable_%= - Offset_%=), %[end]\n\t"
+   "add         %[off],%[end] \n\t"
+   "jmp         *%[end] \n\t"
+
+   "BlockTable_%=:\n\t"
+#ifdef __x86_64__
+   "vmovaps     0xE0(%[src]),%%xmm14 \n\t"
+   "vmovntdq    %%xmm14,0xE0(%[dst]) \n\t"
+   "vmovaps     0xD0(%[src]),%%xmm13 \n\t"
+   "vmovntdq    %%xmm13,0xD0(%[dst]) \n\t"
+   "vmovaps     0xC0(%[src]),%%xmm12 \n\t"
+   "vmovntdq    %%xmm12,0xC0(%[dst]) \n\t"
+   "vmovaps     0xB0(%[src]),%%xmm11 \n\t"
+   "vmovntdq    %%xmm11,0xB0(%[dst]) \n\t"
+   "vmovaps     0xA0(%[src]),%%xmm10 \n\t"
+   "vmovntdq    %%xmm10,0xA0(%[dst]) \n\t"
+   "vmovaps     0x90(%[src]),%%xmm9  \n\t"
+   "vmovntdq    %%xmm9 ,0x90(%[dst]) \n\t"
+   "vmovaps     0x80(%[src]),%%xmm8  \n\t"
+   "vmovntdq    %%xmm8 ,0x80(%[dst]) \n\t"
+   "vmovaps     0x70(%[src]),%%xmm7  \n\t"
+   "vmovntdq    %%xmm7 ,0x70(%[dst]) \n\t"
+#endif
+   "vmovaps     0x60(%[src]),%%xmm6  \n\t"
+   "vmovntdq    %%xmm6 ,0x60(%[dst]) \n\t"
+   "vmovaps     0x50(%[src]),%%xmm5  \n\t"
+   "vmovntdq    %%xmm5 ,0x50(%[dst]) \n\t"
+   "vmovaps     0x40(%[src]),%%xmm4  \n\t"
+   "vmovntdq    %%xmm4 ,0x40(%[dst]) \n\t"
+   "vmovaps     0x30(%[src]),%%xmm3  \n\t"
+   "vmovntdq    %%xmm3 ,0x30(%[dst]) \n\t"
+   "vmovaps     0x20(%[src]),%%xmm2  \n\t"
+   "vmovntdq    %%xmm2 ,0x20(%[dst]) \n\t"
+   "vmovaps     0x10(%[src]),%%xmm1  \n\t"
+   "vmovntdq    %%xmm1 ,0x10(%[dst]) \n\t"
+   "vmovaps     0x00(%[src]),%%xmm0  \n\t"
+   "vmovntdq    %%xmm0 ,0x00(%[dst]) \n\t"
+   "nop\n\t"
+   "nop\n\t"
+
+   : [dst]"+r" (dst),
+     [src]"+r" (src),
+     [end]"+r" (end)
+   : [off]"r"  (off)
+   : "xmm0",
+     "xmm1",
+     "xmm2",
+     "xmm3",
+     "xmm4",
+     "xmm5",
+     "xmm6",
+     "xmm7",
+#ifdef __x86_64__
+     "xmm8",
+     "xmm9",
+     "xmm10",
+     "xmm11",
+     "xmm12",
+     "xmm13",
+     "xmm14",
+     "xmm15",
+#endif
+     "memory"
   );
 
   //copy any remaining bytes
@@ -129,5 +181,5 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
 #endif
 }
 #else
-extern "C" void __fastcall memcpySSE(void *dst, const void * src, size_t length);
+extern "C" void memcpySSE(void *dst, const void * src, size_t length);
 #endif
