@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "debug.h"
 
+#if defined(__GNUC___) || defined(__GNUG__)
 #define OP(...) #__VA_ARGS__ "\n\t"
 
 inline static void memcpySSE(void *dst, const void * src, size_t length)
@@ -79,7 +80,7 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
     OP(add  %[rem],%[end])
     OP(jmp  *%[end])
 
-   // jump table
+    // jump table
     OP(vmovaps  0x60(%[src]),%%xmm0)
     OP(vmovntdq %%xmm0,0x60(%[dst]))
     OP(vmovaps  0x50(%[src]),%%xmm1)
@@ -95,28 +96,28 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
     OP(vmovaps  0x00(%[src]),%%xmm6)
     OP(vmovntdq %%xmm6,0x00(%[dst]))
 
-   // alignment as the previous two instructions are only 4 bytes
+    // alignment as the previous two instructions are only 4 bytes
     OP(nop)
     OP(nop)
 
-   // restore the registers
+    // restore the registers
     OP(pop %[end])
     OP(pop %[src])
     OP(pop %[dst])
-   :
-   : [dst]"r" (dst),
-     [src]"r" (src),
-     [end]"c" (end),
-     [rem]"d" (rem)
-   : "xmm0",
-     "xmm1",
-     "xmm2",
-     "xmm3",
-     "xmm4",
-     "xmm5",
-     "xmm6",
-     "xmm7",
-     "memory"
+    :
+    : [dst]"r" (dst),
+      [src]"r" (src),
+      [end]"c" (end),
+      [rem]"d" (rem)
+    : "xmm0",
+      "xmm1",
+      "xmm2",
+      "xmm3",
+      "xmm4",
+      "xmm5",
+      "xmm6",
+      "xmm7",
+      "memory"
   );
 
   //copy any remaining bytes
@@ -127,3 +128,6 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
   memcpy(dst, src, length);
 #endif
 }
+#else
+extern "C" void __fastcall memcpySSE(void *dst, const void * src, size_t length);
+#endif
