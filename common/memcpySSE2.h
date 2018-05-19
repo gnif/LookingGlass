@@ -28,7 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #if defined(NATIVE_MEMCPY)
   #define memcpySSE memcpy
-#elif defined(MSVC)
+#elif defined(_MSC_VER)
   extern "C" void memcpySSE(void *dst, const void * src, size_t length);
 #elif (defined(__GNUC__) || defined(__GNUG__)) && defined(__i386__)
   inline static void memcpySSE(void *dst, const void * src, size_t length)
