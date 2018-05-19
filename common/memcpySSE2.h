@@ -128,9 +128,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
     );
 
     //copy any remaining bytes
-    for(size_t i = (length & 0xF); i; --i)
-      ((uint8_t *)dst)[length - i] =
-        ((uint8_t *)src)[length - i];
+    memcpy(dst, src, length & 0xF);
   }
 #else
   #define memcpySSE memcpy
