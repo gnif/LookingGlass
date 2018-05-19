@@ -30,6 +30,15 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define OP(...) #__VA_ARGS__ "\n\t"
 
+#ifdef __i386__
+__asm__ (
+  ".global get_pc\n\t"
+  "get_pc:\n\t"
+  "mov (%esp), %eax \n\t"
+  "ret"
+);
+#endif
+
 inline static void memcpySSE(void *dst, const void * src, size_t length)
 {
 #if !defined(NATIVE_MEMCPY) && (defined(__x86_64__) || defined(__i386__))
@@ -37,12 +46,18 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
     return;
 
 #ifdef __x86_64__
-  void * end = dst + (length & ~0xFF);
+  const void * end = dst + (length & ~0xFF);
   size_t off = (15 - ((length & 0xFF) >> 4));
   off = (off < 8) ? off * 16 : 7 * 16 + (off - 7) * 10;
 #else
-  void * end = dst + (length & ~0x7F);
-  size_t off = (7 - ((length & 0x7F) >> 4)) * 10;
+  const void * end = dst + (length & ~0x7F);
+  const size_t off = (7 - ((length & 0x7F) >> 4)) * 10;
+#endif
+
+#ifdef __x86_64__
+  #define REG "rax"
+#else
+  #define REG "eax"
 #endif
 
   __asm__ __volatile__ (
@@ -100,16 +115,14 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
 
    // copy any remaining 16 byte blocks
 #ifdef __x86_64__
-   "leaq        (%%rip), %[end]\n\t"
-   "Offset_%=:\n\t"
+   "leaq        (%%rip), %%rax\n\t"
 #else
-   "call        .+5 \n\t"
-   "Offset_%=:\n\t"
-   "pop         %[end] \n\t"
+   "call        get_pc\n\t"
 #endif
-   "add         $(BlockTable_%= - Offset_%=), %[end]\n\t"
-   "add         %[off],%[end] \n\t"
-   "jmp         *%[end] \n\t"
+   "Offset_%=:\n\t"
+   "add         $(BlockTable_%= - Offset_%=), %%" REG "\n\t"
+   "add         %[off],%%" REG " \n\t"
+   "jmp         *%%" REG " \n\t"
 
    "BlockTable_%=:\n\t"
 #ifdef __x86_64__
@@ -148,10 +161,11 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
    "nop\n\t"
 
    : [dst]"+r" (dst),
-     [src]"+r" (src),
-     [end]"+r" (end)
-   : [off]"r"  (off)
-   : "xmm0",
+     [src]"+r" (src)
+   : [off]"r"  (off),
+     [end]"r"  (end)
+   : REG,
+     "xmm0",
      "xmm1",
      "xmm2",
      "xmm3",
@@ -168,9 +182,14 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
      "xmm13",
      "xmm14",
      "xmm15",
+     "rax",
+#else
+     "eax",
 #endif
      "memory"
   );
+
+#undef REG
 
   //copy any remaining bytes
   for(size_t i = (length & 0xF); i; --i)
