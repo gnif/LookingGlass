@@ -30,15 +30,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define OP(...) #__VA_ARGS__ "\n\t"
 
-#ifdef __i386__
-__asm__ (
-  ".global get_pc\n\t"
-  "get_pc:\n\t"
-  "mov (%esp), %eax \n\t"
-  "ret"
-);
-#endif
-
 inline static void memcpySSE(void *dst, const void * src, size_t length)
 {
 #if !defined(NATIVE_MEMCPY) && (defined(__x86_64__) || defined(__i386__))
@@ -117,12 +108,18 @@ inline static void memcpySSE(void *dst, const void * src, size_t length)
 #ifdef __x86_64__
    "leaq        (%%rip), %%rax\n\t"
 #else
-   "call        get_pc\n\t"
+   "call        GetPC_%=\n\t"
 #endif
    "Offset_%=:\n\t"
    "add         $(BlockTable_%= - Offset_%=), %%" REG "\n\t"
    "add         %[off],%%" REG " \n\t"
    "jmp         *%%" REG " \n\t"
+
+#ifdef __i386__
+  "GetPC_%=:\n\t"
+  "mov (%%esp), %%eax \n\t"
+  "ret \n\t"
+#endif
 
    "BlockTable_%=:\n\t"
 #ifdef __x86_64__
