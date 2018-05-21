@@ -27,10 +27,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <stdint.h>
 
-#include <openssl/rsa.h>
-#include <openssl/evp.h>
-#include <openssl/x509.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -42,6 +38,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <spice/error_codes.h>
 
 #include "messages.h"
+#include "rsa.h"
 
 #ifdef DEBUG_SPICE_MOUSE
   #define DEBUG_MOUSE(fmt, args...) DEBUG_PRINT("[M]", fmt, ##args)
@@ -584,44 +581,22 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   spice_read(channel, &capsCommon , sizeof(capsCommon ));
   spice_read(channel, &capsChannel, sizeof(capsChannel));
 
-  BIO *bioKey = BIO_new(BIO_s_mem());
-  if (!bioKey)
+  struct spice_password pass;
+  if (!spice_rsa_encrypt_password(reply.pub_key, spice.password, &pass))
   {
-    DEBUG_ERROR("failed to allocate bioKey");
     spice_disconnect_channel(channel);
     return false;
   }
 
-  BIO_write(bioKey, reply.pub_key, SPICE_TICKET_PUBKEY_BYTES);
-  EVP_PKEY *rsaKey = d2i_PUBKEY_bio(bioKey, NULL);
-  RSA *rsa = EVP_PKEY_get1_RSA(rsaKey);
-
-  char enc[RSA_size(rsa)];
-  if (RSA_public_encrypt(
-        strlen(spice.password) + 1,
-        (uint8_t*)spice.password,
-        (uint8_t*)enc,
-        rsa,
-        RSA_PKCS1_OAEP_PADDING
-  ) <= 0)
+  if (!spice_write(channel, pass.data, pass.size))
   {
-    DEBUG_ERROR("rsa public encrypt failed");
-    spice_disconnect_channel(channel);
-    EVP_PKEY_free(rsaKey);
-    BIO_free(bioKey);
-    return false;
-  }
-
-  ssize_t rsaSize = RSA_size(rsa);
-  EVP_PKEY_free(rsaKey);
-  BIO_free(bioKey);
-
-  if (!spice_write(channel, enc, rsaSize))
-  {
+    spice_rsa_free_password(&pass);
     DEBUG_ERROR("failed to write encrypted data");
     spice_disconnect_channel(channel);
     return false;
   }
+
+  spice_rsa_free_password(&pass);
 
   uint32_t linkResult;
   if (!spice_read(channel, &linkResult, sizeof(linkResult)))
