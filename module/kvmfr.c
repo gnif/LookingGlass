@@ -46,7 +46,10 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   if (!info->mem[0].addr)
     goto out_release;
 
-  info->mem[0].internal_addr = pci_iomap(dev, 2, 0);
+  info->mem[0].internal_addr = ioremap_wt(
+    pci_resource_start(dev, 2),
+    pci_resource_len  (dev, 2)
+  );
   if (!info->mem[0].internal_addr)
     goto out_release;
 
