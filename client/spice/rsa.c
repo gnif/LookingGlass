@@ -23,12 +23,26 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <spice/protocol.h>
 #include <string.h>
 
+#if defined(USE_OPENSSL) && defined(USE_GNUTLS)
+  #error "USE_OPENSSL and USE_GNUTLS are both defined"
+#elif !defined(USE_OPENSSL) && !defined(USE_GNUTLS)
+  #error "One of USE_OPENSSL or USE_GNUTLS must be defined"
+#endif
+
+#if defined(USE_OPENSSL)
 #include <openssl/rsa.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
+#endif
+
+#if defined(USE_GNUTLS)
+#include <gnutls/gnutls.h>
+#include <gnutls/abstract.h>
+#endif
 
 bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice_password * result)
 {
+#if defined(USE_OPENSSL)
   BIO *bioKey = BIO_new(BIO_s_mem());
   if (!bioKey)
   {
@@ -64,11 +78,61 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
   EVP_PKEY_free(rsaKey);
   BIO_free(bioKey);
   return true;
+#endif
+
+#if defined(USE_GNUTLS)
+  const gnutls_datum_t pubData =
+  {
+    .data = (void *)reply.pub_key,
+    .size = SPICE_TICKET_PUBKEY_BYTES
+  };
+
+  gnutls_pubkey_t pubkey;
+  if (gnutls_pubkey_init(&pubkey) < 0)
+  {
+    DEBUG_ERROR("gnutls_pubkey_init failed");
+    return false;
+  }
+
+  if (gnutls_pubkey_import(pubkey, &pubData, GNUTLS_X509_FMT_DER) < 0)
+  {
+    gnutls_pubkey_deinit(pubkey);
+    DEBUG_ERROR("gnutls_pubkey_import failed");
+    return false;
+  }
+
+  const gnutls_datum_t input =
+  {
+    .data = (void *)spice.password,
+    .size = strlen(spice.password) + 1
+  };
+
+  gnutls_datum_t out;
+  if (gnutls_pubkey_encrypt_data(pubkey, 0, &input, &out) < 0)
+  {
+    gnutls_pubkey_deinit(pubkey);
+    DEBUG_ERROR("gnutls_pubkey_encrypt_data failed");
+    return false;
+  }
+
+  result->size = out.size;
+  result->data = out.data;
+
+  gnutls_pubkey_deinit(pubkey);
+  return true;
+#endif
 }
 
 void spice_rsa_free_password(struct spice_password * pass)
 {
+#if defined(USE_OPENSSL)
   free(pass->data);
+#endif
+
+#if defined(USE_GNUTLS)
+  gnutls_free(pass->data);
+#endif
+
   pass->size = 0;
   pass->data = NULL;
 }

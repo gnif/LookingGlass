@@ -8,6 +8,13 @@ LDFLAGS += -Wl,--gc-sections
 CFLAGS  += -Wfatal-errors
 
 LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig
+
+#LIBS    += gnutls
+#CFLAGS  += -D USE_GNUTLS
+
+LIBS    += libssl openssl
+CFLAGS  += -D USE_OPENSSL
+
 CFLAGS  += $(shell pkg-config --cflags $(LIBS))
 LDFLAGS += $(shell pkg-config --libs   $(LIBS))
 BUILD   ?= .build
