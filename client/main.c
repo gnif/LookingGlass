@@ -1241,7 +1241,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:fL:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
+    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
     {
       case '?':
       case 'h':
