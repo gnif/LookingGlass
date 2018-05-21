@@ -40,9 +40,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define MOUSE_TEXTURE      1
 #define TEXTURE_COUNT      2
 
-static PFNGLXGETVIDEOSYNCSGIPROC  glXGetVideoSyncSGI  = NULL;
-static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
-
 struct Options
 {
   bool mipmap;
@@ -55,7 +52,7 @@ static struct Options defaultOptions =
 {
   .mipmap        = true,
   .vsync         = true,
-  .preventBuffer = false,
+  .preventBuffer = true,
   .amdPinnedMem  = true,
 };
 
@@ -99,7 +96,6 @@ struct Inst
   void            * decoderFrames[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
 
-  uint              gpuFrameCount;
   bool              fpsTexture;
   uint64_t          lastFrameTime;
   uint64_t          renderTime;
@@ -164,19 +160,6 @@ bool opengl_initialize(void * opaque, Uint32 * sdlFlags)
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
-
-  if (!glXGetVideoSyncSGI)
-  {
-    glXGetVideoSyncSGI  = (PFNGLXGETVIDEOSYNCSGIPROC )glXGetProcAddress((const GLubyte *)"glXGetVideoSyncSGI" );
-    glXWaitVideoSyncSGI = (PFNGLXWAITVIDEOSYNCSGIPROC)glXGetProcAddress((const GLubyte *)"glXWaitVideoSyncSGI");
-
-    if (!glXGetVideoSyncSGI || !glXWaitVideoSyncSGI)
-    {
-      glXGetVideoSyncSGI = NULL;
-      DEBUG_ERROR("Failed to get proc addresses");
-      return false;
-    }
-  }
 
   *sdlFlags = SDL_WINDOW_OPENGL;
   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -424,14 +407,8 @@ bool opengl_render(void * opaque, SDL_Window * window)
 
   if (this->opt.preventBuffer)
   {
-    unsigned int before, after;
-    glXGetVideoSyncSGI(&before);
     SDL_GL_SwapWindow(window);
-
-    // wait for the swap to happen to ensure we dont buffer frames
-    glXGetVideoSyncSGI(&after);
-    if (before == after)
-      glXWaitVideoSyncSGI(1, 0, &before);
+    glFinish();
   }
   else
     SDL_GL_SwapWindow(window);
@@ -799,7 +776,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   this->resizeWindow = true;
   this->drawStart    = nanotime();
-  glXGetVideoSyncSGI(&this->gpuFrameCount);
 
   this->configured  = true;
   this->reconfigure = false;
