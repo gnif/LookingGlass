@@ -1,9 +1,9 @@
-= Debugging the Looking Glass Client
+# Debugging the Looking Glass Client
 
 If you are asked to provide debugging information to resolve an issue please
 follow the following procedure.
 
-== If you're experiencing a crash:
+## If you're experiencing a crash:
 
 Run the program under the `gdb` debugger (you may need to install gdb), for
 example:
@@ -24,7 +24,7 @@ the following command:
 Once you have this information please pastebin the log from looking-glass as
 well as the information resulting from this command.
 
-== If you're experencing high CPU load and/or poor performance.
+## If you're experencing high CPU load and/or poor performance.
 
 The steps here are identical to the above, except instead of waiting for the
 program to crash, in the debugger press `CTRL+C` while the program is
