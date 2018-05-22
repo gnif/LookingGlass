@@ -43,8 +43,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <nettle/rsa.h>
 #include <gmp.h>
 
-
-#define KEY_SIZE      (1024 / 8)
 #define SHA1_HASH_LEN 20
 #endif
 
