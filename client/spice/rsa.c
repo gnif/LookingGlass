@@ -21,11 +21,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 
 #include <spice/protocol.h>
+#include <malloc.h>
 #include <string.h>
 
-#if defined(USE_OPENSSL) && defined(USE_GNUTLS)
+#if defined(USE_OPENSSL) && defined(USE_NETTLE)
   #error "USE_OPENSSL and USE_GNUTLS are both defined"
-#elif !defined(USE_OPENSSL) && !defined(USE_GNUTLS)
+#elif !defined(USE_OPENSSL) && !defined(USE_NETTLE)
   #error "One of USE_OPENSSL or USE_GNUTLS must be defined"
 #endif
 
@@ -35,13 +36,101 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <openssl/x509.h>
 #endif
 
-#if defined(USE_GNUTLS)
-#include <gnutls/gnutls.h>
-#include <gnutls/abstract.h>
+#if defined(USE_NETTLE)
+#include <stdlib.h>
+#include <nettle/asn1.h>
+#include <nettle/sha1.h>
+#include <nettle/rsa.h>
+#include <gmp.h>
+
+
+#define KEY_SIZE      (1024 / 8)
+#define SHA1_HASH_LEN 20
+#endif
+
+#if defined(USE_NETTLE)
+/* the below OAEP implementation is derived from the FreeTDS project */
+static void memxor(uint8_t * a, const uint8_t * b, const unsigned int len)
+{
+  for(unsigned int i = 0; i < len; ++i)
+    a[i] = a[i] ^ b[i];
+}
+
+static void sha1(uint8_t * hash, const uint8_t *data, unsigned int len)
+{
+  struct sha1_ctx ctx;
+
+  sha1_init(&ctx);
+  sha1_update(&ctx, len, data);
+  sha1_digest(&ctx, SHA1_HASH_LEN, hash);
+}
+
+static void oaep_mask(uint8_t * dest, size_t dest_len, const uint8_t * mask, size_t mask_len)
+{
+  uint8_t hash[SHA1_HASH_LEN];
+  uint8_t seed[mask_len + 4 ];
+  memcpy(seed, mask, mask_len);
+
+  for(unsigned int n = 0;; ++n)
+  {
+    (seed+mask_len)[0] = n >> 24;
+    (seed+mask_len)[1] = n >> 16;
+    (seed+mask_len)[2] = n >> 8;
+    (seed+mask_len)[3] = n >> 0;
+
+    sha1(hash, seed, sizeof(seed));
+    if (dest_len <= SHA1_HASH_LEN)
+    {
+      memxor(dest, hash, dest_len);
+      break;
+    }
+
+    memxor(dest, hash, SHA1_HASH_LEN);
+    dest     += SHA1_HASH_LEN;
+    dest_len -= SHA1_HASH_LEN;
+  }
+}
+
+static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, unsigned int len)
+{
+  if (len + SHA1_HASH_LEN * 2 + 2 > key_size)
+  {
+    DEBUG_ERROR("Message too long");
+    return false;
+  }
+
+  struct
+  {
+    uint8_t all[1];
+    uint8_t ros[SHA1_HASH_LEN];
+    uint8_t db [key_size - SHA1_HASH_LEN - 1];
+  } em;
+
+  memset(&em, 0, sizeof(em));
+  sha1(em.db, (uint8_t *)"", 0);
+  em.all[key_size - len - 1] = 0x1;
+  memcpy(em.all + (key_size - len), message, len);
+
+  /* we are not too worried about randomness since we are just making a local
+   * connection, should anyone use this code outside of LookingGlass please be
+   * sure to use something better such as `gnutls_rnd` */
+  for(int i = 0; i < SHA1_HASH_LEN; ++i)
+    em.ros[i] = rand() % 255;
+
+  const int db_len = key_size - SHA1_HASH_LEN - 1;
+  oaep_mask(em.db , db_len       , em.ros, SHA1_HASH_LEN);
+  oaep_mask(em.ros, SHA1_HASH_LEN, em.db , db_len       );
+
+  nettle_mpz_set_str_256_u(m, key_size, em.all);
+  return true;
+}
 #endif
 
 bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice_password * result)
 {
+  result->size = 0;
+  result->data = NULL;
+
 #if defined(USE_OPENSSL)
   BIO *bioKey = BIO_new(BIO_s_mem());
   if (!bioKey)
@@ -80,59 +169,60 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
   return true;
 #endif
 
-#if defined(USE_GNUTLS)
-  const gnutls_datum_t pubData =
-  {
-    .data = (void *)reply.pub_key,
-    .size = SPICE_TICKET_PUBKEY_BYTES
-  };
+#if defined(USE_NETTLE)
+  struct asn1_der_iterator der;
+  struct asn1_der_iterator j;
+  struct rsa_public_key    pub;
 
-  gnutls_pubkey_t pubkey;
-  if (gnutls_pubkey_init(&pubkey) < 0)
+  if (asn1_der_iterator_first(&der, SPICE_TICKET_PUBKEY_BYTES, pub_key) == ASN1_ITERATOR_CONSTRUCTED
+      && der.type == ASN1_SEQUENCE
+      && asn1_der_decode_constructed_last(&der) == ASN1_ITERATOR_CONSTRUCTED
+      && der.type == ASN1_SEQUENCE
+      && asn1_der_decode_constructed(&der, &j) == ASN1_ITERATOR_PRIMITIVE
+      && j.type == ASN1_IDENTIFIER
+      && asn1_der_iterator_next(&der) == ASN1_ITERATOR_PRIMITIVE
+      && der.type == ASN1_BITSTRING
+      && asn1_der_decode_bitstring_last(&der))
   {
-    DEBUG_ERROR("gnutls_pubkey_init failed");
-    return false;
+    if (j.length != 9)
+    {
+      DEBUG_ERROR("Invalid key, not RSA");
+      return false;
+    }
+
+    if (asn1_der_iterator_next(&j) == ASN1_ITERATOR_PRIMITIVE
+        && j.type == ASN1_NULL
+        && j.length == 0
+        && asn1_der_iterator_next(&j) == ASN1_ITERATOR_END)
+    {
+      rsa_public_key_init(&pub);
+      if (!rsa_public_key_from_der_iterator(&pub, 0, &der))
+      {
+        DEBUG_ERROR("Unable to load public key from DER iterator");
+        rsa_public_key_clear(&pub);
+        return false;
+      }
+    }
   }
 
-  if (gnutls_pubkey_import(pubkey, &pubData, GNUTLS_X509_FMT_DER) < 0)
-  {
-    gnutls_pubkey_deinit(pubkey);
-    DEBUG_ERROR("gnutls_pubkey_import failed");
-    return false;
-  }
+  mpz_t p;
+  mpz_init(p);
+  oaep_pad(p, pub.size, (uint8_t *)password, strlen(password)+1);
+  mpz_powm(p, p, pub.e, pub.n);
 
-  const gnutls_datum_t input =
-  {
-    .data = (void *)spice.password,
-    .size = strlen(spice.password) + 1
-  };
+  result->size = pub.size;
+  result->data = malloc(pub.size);
+  nettle_mpz_get_str_256(pub.size, (uint8_t *)result->data, p);
 
-  gnutls_datum_t out;
-  if (gnutls_pubkey_encrypt_data(pubkey, 0, &input, &out) < 0)
-  {
-    gnutls_pubkey_deinit(pubkey);
-    DEBUG_ERROR("gnutls_pubkey_encrypt_data failed");
-    return false;
-  }
-
-  result->size = out.size;
-  result->data = out.data;
-
-  gnutls_pubkey_deinit(pubkey);
+  rsa_public_key_clear(&pub);
+  mpz_clear(p);
   return true;
 #endif
 }
 
 void spice_rsa_free_password(struct spice_password * pass)
 {
-#if defined(USE_OPENSSL)
   free(pass->data);
-#endif
-
-#if defined(USE_GNUTLS)
-  gnutls_free(pass->data);
-#endif
-
   pass->size = 0;
   pass->data = NULL;
 }

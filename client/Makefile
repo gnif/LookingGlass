@@ -9,11 +9,12 @@ CFLAGS  += -Wfatal-errors
 
 LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig
 
-#LIBS    += gnutls
-#CFLAGS  += -D USE_GNUTLS
+LIBS    += nettle hogweed
+CFLAGS  += -D USE_NETTLE
+LDFLAGS += -lgmp
 
-LIBS    += libssl openssl
-CFLAGS  += -D USE_OPENSSL
+#LIBS    += libssl openssl
+#CFLAGS  += -D USE_OPENSSL
 
 CFLAGS  += $(shell pkg-config --cflags $(LIBS))
 LDFLAGS += $(shell pkg-config --libs   $(LIBS))
