@@ -651,7 +651,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
         if (
           m_lastMousePos.x != frameInfo.PointerPosition.Position.x ||
           m_lastMousePos.y != frameInfo.PointerPosition.Position.y
-          ) {
+        ) {
           cursorUpdate = true;
           frame.cursor.hasPos = true;
           frame.cursor.x = frameInfo.PointerPosition.Position.x;
@@ -761,7 +761,9 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 
   while(true)
   {
+    TRACE_START("GrabFrame");
     result = GrabFrameTexture(frame, src, timeout);
+    TRACE_END;
     if (result != GRAB_STATUS_OK)
       return result;
 
@@ -773,7 +775,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 
       // send the last frame again if we timeout to prevent the client stalling on restart
       frame.pitch  = m_mapping.RowPitch;
-      frame.stride = m_mapping.RowPitch / 4;
+      frame.stride = m_mapping.RowPitch >> 2;
 
       unsigned int size = m_height * m_mapping.RowPitch;
       m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));

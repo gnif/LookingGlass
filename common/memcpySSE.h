@@ -26,108 +26,110 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "debug.h"
 
-static inline void memcpySSE(void * dst, const void * src, size_t length)
-{
-  // check if we can't perform an aligned copy
-  if (((uintptr_t)src & 0xF) != ((uintptr_t)dst & 0xF))
+#if defined(NATIVE_MEMCPY)
+  #define memcpySSE memcpy
+#elif defined(_MSC_VER)
+  extern "C" void * memcpySSE(void *dst, const void * src, size_t length);
+#elif (defined(__GNUC__) || defined(__GNUG__)) && defined(__i386__)
+  inline static void * memcpySSE(void *dst, const void * src, size_t length)
   {
+    if (length == 0 || dst == src)
+      return;
 
-    static bool unalignedDstWarn = false;
-    if (!unalignedDstWarn)
+    // copies under 1MB are faster with the inlined memcpy
+    // tell the dev to use that instead
+    if (length < 1048576)
     {
-      DEBUG_WARN("Memcpy64 unable to perform aligned copy, performance will suffer");
-      unalignedDstWarn = true;
-    }
-
-    // fallback to system memcpy
-    memcpy(dst, src, length);
-    return;
-  }
-
-  // check if the source needs alignment
-  {
-    uint8_t * _src = (uint8_t *)src;
-    unsigned int count = (16 - ((uintptr_t)src & 0xF)) & 0xF;
-
-    static bool unalignedSrcWarn = false;
-    if (count > 0)
-    {
-      if (!unalignedSrcWarn)
+      static bool smallBufferWarn = false;
+      if (!smallBufferWarn)
       {
-        DEBUG_WARN("Memcpy64 unaligned source, performance will suffer");
-        unalignedSrcWarn = true;
+        DEBUG_WARN("Do not use memcpySSE for copies under 1MB in size!");
+        smallBufferWarn = true;
       }
-
-      uint8_t * _dst = (uint8_t *)dst;
-      for (unsigned int i = count; i > 0; --i)
-        *_dst++ = *_src++;
-      src = _src;
-      dst = _dst;
-      length -= count;
+      memcpy(dst, src, length);
+      return;
     }
+
+    const void * end = dst + (length & ~0x7F);
+    const size_t off = (7 - ((length & 0x7F) >> 4)) * 10;
+
+    __asm__ __volatile__ (
+      "cmp         %[dst],%[end] \n\t"
+      "je          Remain_%= \n\t"
+
+      // perform SIMD block copy
+      "loop_%=: \n\t"
+      "vmovaps     0x00(%[src]),%%xmm0  \n\t"
+      "vmovaps     0x10(%[src]),%%xmm1  \n\t"
+      "vmovaps     0x20(%[src]),%%xmm2  \n\t"
+      "vmovaps     0x30(%[src]),%%xmm3  \n\t"
+      "vmovaps     0x40(%[src]),%%xmm4  \n\t"
+      "vmovaps     0x50(%[src]),%%xmm5  \n\t"
+      "vmovaps     0x60(%[src]),%%xmm6  \n\t"
+      "vmovaps     0x70(%[src]),%%xmm7  \n\t"
+      "vmovntdq    %%xmm0 ,0x00(%[dst]) \n\t"
+      "vmovntdq    %%xmm1 ,0x10(%[dst]) \n\t"
+      "vmovntdq    %%xmm2 ,0x20(%[dst]) \n\t"
+      "vmovntdq    %%xmm3 ,0x30(%[dst]) \n\t"
+      "vmovntdq    %%xmm4 ,0x40(%[dst]) \n\t"
+      "vmovntdq    %%xmm5 ,0x50(%[dst]) \n\t"
+      "vmovntdq    %%xmm6 ,0x60(%[dst]) \n\t"
+      "vmovntdq    %%xmm7 ,0x70(%[dst]) \n\t"
+      "add         $0x80,%[dst] \n\t"
+      "add         $0x80,%[src] \n\t"
+      "cmp         %[dst],%[end] \n\t"
+      "jne         loop_%= \n\t"
+
+      "Remain_%=: \n\t"
+
+      // copy any remaining 16 byte blocks
+      "call        GetPC_%=\n\t"
+      "Offset_%=:\n\t"
+      "add         $(BlockTable_%= - Offset_%=), %%eax \n\t"
+      "add         %[off],%%eax \n\t"
+      "jmp         *%%eax \n\t"
+
+      "GetPC_%=:\n\t"
+      "mov (%%esp), %%eax \n\t"
+      "ret \n\t"
+
+      "BlockTable_%=:\n\t"
+      "vmovaps     0x60(%[src]),%%xmm6  \n\t"
+      "vmovntdq    %%xmm6 ,0x60(%[dst]) \n\t"
+      "vmovaps     0x50(%[src]),%%xmm5  \n\t"
+      "vmovntdq    %%xmm5 ,0x50(%[dst]) \n\t"
+      "vmovaps     0x40(%[src]),%%xmm4  \n\t"
+      "vmovntdq    %%xmm4 ,0x40(%[dst]) \n\t"
+      "vmovaps     0x30(%[src]),%%xmm3  \n\t"
+      "vmovntdq    %%xmm3 ,0x30(%[dst]) \n\t"
+      "vmovaps     0x20(%[src]),%%xmm2  \n\t"
+      "vmovntdq    %%xmm2 ,0x20(%[dst]) \n\t"
+      "vmovaps     0x10(%[src]),%%xmm1  \n\t"
+      "vmovntdq    %%xmm1 ,0x10(%[dst]) \n\t"
+      "vmovaps     0x00(%[src]),%%xmm0  \n\t"
+      "vmovntdq    %%xmm0 ,0x00(%[dst]) \n\t"
+      "nop\n\t"
+      "nop\n\t"
+
+      : [dst]"+r" (dst),
+        [src]"+r" (src)
+      : [off]"r"  (off),
+        [end]"r"  (end)
+      : "eax",
+        "xmm0",
+        "xmm1",
+        "xmm2",
+        "xmm3",
+        "xmm4",
+        "xmm5",
+        "xmm6",
+        "xmm7",
+        "memory"
+    );
+
+    //copy any remaining bytes
+    memcpy(dst, src, length & 0xF);
   }
-
-  __m128i * _src = (__m128i *)src;
-  __m128i * _dst = (__m128i *)dst;
-  __m128i v0, v1, v2, v3, v4, v5, v6, v7;
-
-  const size_t sselen = length & ~0x7F;
-  const __m128i * _end = (__m128i *)((uintptr_t)src + sselen);
-  for (; _src != _end; _src += 8, _dst += 8)
-  {
-    _mm_prefetch(((char *)(_src + 8 )), _MM_HINT_NTA);
-    _mm_prefetch(((char *)(_src + 9 )), _MM_HINT_NTA);
-    _mm_prefetch(((char *)(_src + 10)), _MM_HINT_NTA);
-    _mm_prefetch(((char *)(_src + 11)), _MM_HINT_NTA);
-
-    v0 = _mm_load_si128(_src + 0);
-    v1 = _mm_load_si128(_src + 1);
-    v2 = _mm_load_si128(_src + 2);
-    v3 = _mm_load_si128(_src + 3);
-    v4 = _mm_load_si128(_src + 4);
-    v5 = _mm_load_si128(_src + 5);
-    v6 = _mm_load_si128(_src + 6);
-    v7 = _mm_load_si128(_src + 7);
-
-    _mm_stream_si128(_dst + 0, v0);
-    _mm_stream_si128(_dst + 1, v1);
-    _mm_stream_si128(_dst + 2, v2);
-    _mm_stream_si128(_dst + 3, v3);
-    _mm_stream_si128(_dst + 4, v4);
-    _mm_stream_si128(_dst + 5, v5);
-    _mm_stream_si128(_dst + 6, v6);
-    _mm_stream_si128(_dst + 7, v7);
-  }
-
-  const size_t remain = length - sselen;
-  switch (remain & ~0xF)
-  {
-    case 112: v0 = _mm_load_si128(_src++);
-    case  96: v1 = _mm_load_si128(_src++);
-    case  80: v2 = _mm_load_si128(_src++);
-    case  64: v3 = _mm_load_si128(_src++);
-    case  48: v4 = _mm_load_si128(_src++);
-    case  32: v5 = _mm_load_si128(_src++);
-    case  16: v6 = _mm_load_si128(_src++);
-  }
-
-  switch (remain & ~0xF)
-  {
-    case 112: _mm_stream_si128(_dst++, v0);
-    case  96: _mm_stream_si128(_dst++, v1);
-    case  80: _mm_stream_si128(_dst++, v2);
-    case  64: _mm_stream_si128(_dst++, v3);
-    case  48: _mm_stream_si128(_dst++, v4);
-    case  32: _mm_stream_si128(_dst++, v5);
-    case  16: _mm_stream_si128(_dst++, v6);
-  }
-
-  // copy any remaining data
-  if (remain & 0xF)
-  {
-    uint8_t * rsrc = (uint8_t *)_src;
-    uint8_t * rdst = (uint8_t *)_dst;
-    for (size_t i = remain & 0xF; i > 0; --i)
-      *rdst++ = *rsrc++;
-  }
-}
+#else
+  #define memcpySSE memcpy
+#endif
