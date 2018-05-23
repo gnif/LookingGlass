@@ -29,6 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/select.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -86,10 +87,19 @@ struct SpiceMouse
   LG_Lock              lock;
 };
 
+union SpiceAddr
+{
+  struct sockaddr     addr;
+  struct sockaddr_in  in;
+  struct sockaddr_in6 in6;
+  struct sockaddr_un  un;
+};
+
 struct Spice
 {
-  char   password[32];
-  struct sockaddr_in addr;
+  char            password[32];
+  short           family;
+  union SpiceAddr addr;
 
   uint32_t sessionID;
   uint32_t channelID;
@@ -131,10 +141,23 @@ bool    spice_discard  (const struct SpiceChannel * channel, ssize_t size);
 bool spice_connect(const char * host, const short port, const char * password)
 {
   strncpy(spice.password, password, sizeof(spice.password) - 1);
-  memset(&spice.addr, 0, sizeof(struct sockaddr_in));
-  inet_pton(AF_INET, host, &spice.addr.sin_addr);
-  spice.addr.sin_family = AF_INET;
-  spice.addr.sin_port   = htons(port);
+  memset(&spice.addr, 0, sizeof(spice.addr));
+
+  if (port == 0)
+  {
+    spice.family = AF_UNIX;
+    spice.addr.un.sun_family = spice.family;
+    strncpy(spice.addr.un.sun_path, host, sizeof(spice.addr.un.sun_path) - 1);
+    DEBUG_INFO("Remote: %s", host);
+  }
+  else
+  {
+    spice.family = AF_INET;
+    inet_pton(spice.family, host, &spice.addr.in.sin_addr);
+    spice.addr.in.sin_family = spice.family;
+    spice.addr.in.sin_port   = htons(port);
+    DEBUG_INFO("Remote: %s:%d", host, port);
+  }
 
   LG_LOCK_INIT(spice.mouse.lock);
 
@@ -504,14 +527,37 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 
   LG_LOCK_INIT(channel->lock);
 
-  channel->socket = socket(AF_INET, SOCK_STREAM, 0);
+  size_t addrSize;
+  switch(spice.family)
+  {
+    case AF_UNIX:
+      addrSize = sizeof(spice.addr.un);
+      break;
+
+    case AF_INET:
+      addrSize = sizeof(spice.addr.in);
+      break;
+
+    case AF_INET6:
+      addrSize = sizeof(spice.addr.in6);
+      break;
+
+    default:
+      DEBUG_ERROR("Unsupported socket family");
+      return false;
+  }
+
+  channel->socket = socket(spice.family, SOCK_STREAM, 0);
   if (channel->socket == -1)
     return false;
 
-  int flag = 1;
-  setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+  if (spice.family != AF_UNIX)
+  {
+    int flag = 1;
+    setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+  }
 
-  if (connect(channel->socket, (const struct sockaddr *)&spice.addr, sizeof(spice.addr)) == -1)
+  if (connect(channel->socket, &spice.addr.addr, addrSize) == -1)
   {
     DEBUG_ERROR("socket connect failure");
     close(channel->socket);

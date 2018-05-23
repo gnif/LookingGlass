@@ -1005,8 +1005,8 @@ void doHelp(char * app)
     "  -L SIZE   Specify the size in MB of the shared memory file (0 = detect) [current: %d]\n"
     "\n"
     "  -s        Disable spice client\n"
-    "  -c HOST   Specify the spice host [current: %s]\n"
-    "  -p PORT   Specify the spice port [current: %d]\n"
+    "  -c HOST   Specify the spice host or UNIX socket [current: %s]\n"
+    "  -p PORT   Specify the spice port or 0 for UNIX socket [current: %d]\n"
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
     "\n"
@@ -1164,7 +1164,7 @@ static bool load_config(const char * configFile)
 
     if (config_setting_lookup_int(spice, "port", &itmp))
     {
-      if (itmp < 1)
+      if (itmp < 0 || itmp > 65535)
       {
         DEBUG_ERROR("Invalid spice port");
         config_destroy(&cfg);
