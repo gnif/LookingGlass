@@ -186,11 +186,17 @@ int renderThread(void * unused)
   {
     if (state.started)
     {
+      uint64_t start = microtime();
+
       if (!state.lgr->render(state.lgrData, state.window))
         break;
+
+      // put some breaks on (400fps) if we are rendering too fast
+      if (microtime() - start < (1000000/400))
+        usleep((1000000/400) - (microtime() - start));
     }
     else
-      usleep(1000);
+      usleep(1000000);
   }
 
   return 0;
@@ -198,36 +204,37 @@ int renderThread(void * unused)
 
 int cursorThread(void * unused)
 {
-  struct KVMFRHeader  header;
+  KVMFRCursor         header;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
   uint32_t            version        = 0;
 
-  memset(&header, 0, sizeof(struct KVMFRHeader));
+  memset(&header, 0, sizeof(KVMFRCursor));
 
   while(state.running)
   {
     // poll until we have cursor data
-    if(!(state.shm->flags & KVMFR_HEADER_FLAG_CURSOR))
+    if(!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
     {
       if (!state.running)
         break;
 
-      nsleep(100);
+      // cursor shape updates are not so critical
+      // only check for udpates once every 15ms
+      usleep(150000);
       continue;
     }
 
-    // we must take a copy of the header, both to let the guest advance and to
-    // prevent the contained arguments being abused to overflow buffers
-    memcpy(&header, (KVMFRHeader *)state.shm, sizeof(struct KVMFRHeader));
-    __sync_and_and_fetch(&state.shm->flags, ~KVMFR_HEADER_FLAG_CURSOR);
+    // we must take a copy of the header to prevent the contained arguments
+    // from being abused to overflow buffers.
+    memcpy(&header, &state.shm->cursor, sizeof(struct KVMFRCursor));
 
-    if (header.detail.cursor.flags & KVMFR_CURSOR_FLAG_SHAPE &&
-        header.detail.cursor.version != version)
+    if (header.flags & KVMFR_CURSOR_FLAG_SHAPE &&
+        header.version != version)
     {
-      version = header.detail.cursor.version;
+      version = header.version;
 
       bool bad = false;
-      switch(header.detail.cursor.type)
+      switch(header.type)
       {
         case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
         case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
@@ -242,20 +249,20 @@ int cursorThread(void * unused)
         break;
 
       // check the data position is sane
-      const uint64_t dataSize = header.detail.cursor.height * header.detail.cursor.pitch;
-      if (header.detail.cursor.dataPos + dataSize > state.shmSize)
+      const uint64_t dataSize = header.height * header.pitch;
+      if (header.dataPos + dataSize > state.shmSize)
       {
         DEBUG_ERROR("The guest sent an invalid mouse dataPos");
         break;
       }
 
-      const uint8_t * data = (const uint8_t *)state.shm + header.detail.cursor.dataPos;
+      const uint8_t * data = (const uint8_t *)state.shm + header.dataPos;
       if (!state.lgr->on_mouse_shape(
         state.lgrData,
         cursorType,
-        header.detail.cursor.width,
-        header.detail.cursor.height,
-        header.detail.cursor.pitch,
+        header.width,
+        header.height,
+        header.pitch,
         data)
       )
       {
@@ -264,11 +271,14 @@ int cursorThread(void * unused)
       }
     }
 
-    if (header.detail.cursor.flags & KVMFR_CURSOR_FLAG_POS)
+    // now we have taken the mouse data, we can flag to the host we are ready
+    __sync_and_and_fetch(&state.shm->cursor.flags, ~KVMFR_CURSOR_FLAG_UPDATE);
+
+    if (header.flags & KVMFR_CURSOR_FLAG_POS)
     {
-      state.cursor.x      = header.detail.cursor.x;
-      state.cursor.y      = header.detail.cursor.y;
-      state.cursorVisible = header.detail.cursor.flags & KVMFR_CURSOR_FLAG_VISIBLE;
+      state.cursor.x      = header.x;
+      state.cursor.y      = header.y;
+      state.cursorVisible = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
       state.haveCursorPos = true;
 
       state.lgr->on_mouse_event
@@ -279,13 +289,6 @@ int cursorThread(void * unused)
         state.cursor.y
       );
     }
-
-    // poll until we have cursor data
-    while(((state.shm->flags & KVMFR_HEADER_FLAG_CURSOR) == 0) && state.running)
-    {
-      usleep(1000);
-      continue;
-    }
   }
 
   return 0;
@@ -293,37 +296,42 @@ int cursorThread(void * unused)
 
 int frameThread(void * unused)
 {
-  bool                error = false;
-  struct KVMFRHeader  header;
+  bool       error = false;
+  KVMFRFrame header;
 
-  memset(&header, 0, sizeof(struct KVMFRHeader));
+  memset(&header, 0, sizeof(struct KVMFRFrame));
 
   while(state.running)
   {
     // poll until we have a new frame
-    if(!(state.shm->flags & KVMFR_HEADER_FLAG_FRAME))
+    if(!(state.shm->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
     {
       if (!state.running)
         break;
 
-      nsleep(100);
+      // allow for a maximum refresh of 200fps (1000/200 = 5ms), this should
+      // befreqent enough without chewing up too much CPU time
+      usleep(5000);
       continue;
     }
 
-    // we must take a copy of the header, both to let the guest advance and to
-    // prevent the contained arguments being abused to overflow buffers
-    memcpy(&header, (KVMFRHeader *)state.shm, sizeof(struct KVMFRHeader));
-    __sync_and_and_fetch(&state.shm->flags, ~KVMFR_HEADER_FLAG_FRAME);
+    // we must take a copy of the header to prevent the contained
+    // arguments from being abused to overflow buffers.
+    memcpy(&header, &state.shm->frame, sizeof(struct KVMFRFrame));
+
+    // tell the host to continue as the host buffers up to one frame
+    // we can be sure the data for this frame wont be touched
+    __sync_and_and_fetch(&state.shm->frame.flags, ~KVMFR_FRAME_FLAG_UPDATE);
 
     // sainty check of the frame format
     if (
-      header.detail.frame.type    >= FRAME_TYPE_MAX ||
-      header.detail.frame.width   == 0 ||
-      header.detail.frame.height  == 0 ||
-      header.detail.frame.pitch   == 0 ||
-      header.detail.frame.dataPos == 0 ||
-      header.detail.frame.dataPos > state.shmSize ||
-      header.detail.frame.pitch   < header.detail.frame.width
+      header.type    >= FRAME_TYPE_MAX ||
+      header.width   == 0 ||
+      header.height  == 0 ||
+      header.pitch   == 0 ||
+      header.dataPos == 0 ||
+      header.dataPos > state.shmSize ||
+      header.pitch   < header.width
     ){
       usleep(1000);
       continue;
@@ -331,13 +339,13 @@ int frameThread(void * unused)
 
     // setup the renderer format with the frame format details
     LG_RendererFormat lgrFormat;
-    lgrFormat.width  = header.detail.frame.width;
-    lgrFormat.height = header.detail.frame.height;
-    lgrFormat.stride = header.detail.frame.stride;
-    lgrFormat.pitch  = header.detail.frame.pitch;
+    lgrFormat.width  = header.width;
+    lgrFormat.height = header.height;
+    lgrFormat.stride = header.stride;
+    lgrFormat.pitch  = header.pitch;
 
     size_t dataSize;
-    switch(header.detail.frame.type)
+    switch(header.type)
     {
       case FRAME_TYPE_ARGB:
         dataSize       = lgrFormat.height * lgrFormat.pitch;
@@ -361,22 +369,22 @@ int frameThread(void * unused)
       break;
 
     // check the header's dataPos is sane
-    if (header.detail.frame.dataPos + dataSize > state.shmSize)
+    if (header.dataPos + dataSize > state.shmSize)
     {
       DEBUG_ERROR("The guest sent an invalid dataPos");
       break;
     }
 
-    if (header.detail.frame.width != state.srcSize.x || header.detail.frame.height != state.srcSize.y)
+    if (header.width != state.srcSize.x || header.height != state.srcSize.y)
     {
-      state.srcSize.x = header.detail.frame.width;
-      state.srcSize.y = header.detail.frame.height;
+      state.srcSize.x = header.width;
+      state.srcSize.y = header.height;
       if (params.autoResize)
-        SDL_SetWindowSize(state.window, header.detail.frame.width, header.detail.frame.height);
+        SDL_SetWindowSize(state.window, header.width, header.height);
       updatePositionInfo();
     }
 
-    const uint8_t * data = (const uint8_t *)state.shm + header.detail.frame.dataPos;
+    const uint8_t * data = (const uint8_t *)state.shm + header.dataPos;
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, data))
     {
       DEBUG_ERROR("renderer on frame event returned failure");
