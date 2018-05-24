@@ -278,14 +278,7 @@ bool Service::Process()
   if (cursor.hasPos || cursor.hasShape)
   {
     EnterCriticalSection(&m_cursorCS);
-
-//    bool hasPos   = m_cursorInfo.hasPos   || cursor.hasPos;
-//    bool hasShape = m_cursorInfo.hasShape || cursor.hasShape;
-
     memcpy(&m_cursorInfo, &cursor, sizeof(struct CursorInfo));
-//    m_cursorInfo.hasPos   = hasPos;
-//    m_cursorInfo.hasShape = hasShape;
-
     LeaveCriticalSection(&m_cursorCS);
     SetEvent(m_cursorEvent);
   }
