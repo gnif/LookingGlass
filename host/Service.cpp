@@ -213,8 +213,10 @@ bool Service::Process()
     Sleep(2);
   }
 
-  struct FrameInfo frame;
-  ZeroMemory(&frame, sizeof(FrameInfo));
+  struct FrameInfo  frame;
+  struct CursorInfo cursor;
+  ZeroMemory(&frame , sizeof(struct FrameInfo ));
+  ZeroMemory(&cursor, sizeof(struct CursorInfo));
   frame.buffer     = m_frame[m_frameIndex];
   frame.bufferSize = m_frameSize;
 
@@ -222,19 +224,8 @@ bool Service::Process()
   bool cursorOnly = false;
   for(int i = 0; i < 2; ++i)
   {
-    CursorInfo ci;
-    GrabStatus status = m_capture->GrabFrame(frame, ci);
-
-    if (ci.hasPos || ci.hasShape)
-    {
-      EnterCriticalSection(&m_cursorCS);
-      memcpy(&m_cursorInfo, &ci, sizeof(ci));
-      LeaveCriticalSection(&m_cursorCS);
-      SetEvent(m_cursorEvent);
-    }
-
     // capture a frame of data
-    switch (status)
+    switch (m_capture->GrabFrame(frame, cursor))
     {
       case GRAB_STATUS_OK:
         ok = true;
@@ -284,6 +275,21 @@ bool Service::Process()
     return false;
   }
 
+  if (cursor.hasPos || cursor.hasShape)
+  {
+    EnterCriticalSection(&m_cursorCS);
+
+//    bool hasPos   = m_cursorInfo.hasPos   || cursor.hasPos;
+//    bool hasShape = m_cursorInfo.hasShape || cursor.hasShape;
+
+    memcpy(&m_cursorInfo, &cursor, sizeof(struct CursorInfo));
+//    m_cursorInfo.hasPos   = hasPos;
+//    m_cursorInfo.hasShape = hasShape;
+
+    LeaveCriticalSection(&m_cursorCS);
+    SetEvent(m_cursorEvent);
+  }
+
   if (!cursorOnly)
   {
     KVMFRFrame * fi = &m_shmHeader->frame;
@@ -327,8 +333,6 @@ DWORD Service::CursorThread()
     EnterCriticalSection(&m_cursorCS);
     if (m_cursorInfo.hasPos)
     {
-      m_cursorInfo.hasPos = false;
-
       // tell the client where the cursor is
       cursor->flags |= KVMFR_CURSOR_FLAG_POS;
       cursor->x = m_cursorInfo.x;
@@ -342,8 +346,6 @@ DWORD Service::CursorThread()
 
     if (m_cursorInfo.hasShape)
     {
-      m_cursorInfo.hasShape = false;
-
       if (m_cursorInfo.dataSize > m_cursorDataSize)
         DEBUG_ERROR("Cursor size exceeds allocated space");
       else
