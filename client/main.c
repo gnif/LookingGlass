@@ -66,7 +66,7 @@ struct AppState
   int                  shmFD;
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
-  unsigned int         fpsSleep;
+  int64_t              fpsSleep;
 };
 
 typedef struct RenderOpts
@@ -199,7 +199,9 @@ int renderThread(void * unused)
       {
         usleep(state.fpsSleep - total);
         int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
-        state.fpsSleep += delta;
+        state.fpsSleep += delta / 16;
+        if (state.fpsSleep < 0)
+          state.fpsSleep = 0;
       }
     }
     else
