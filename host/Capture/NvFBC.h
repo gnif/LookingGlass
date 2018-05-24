@@ -47,7 +47,7 @@ namespace Capture
     }
     enum FrameType GetFrameType();
     size_t GetMaxFrameSize();
-    enum GrabStatus GrabFrame(struct FrameInfo & frame);
+    enum GrabStatus GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor);
 
   private:
     CaptureOptions * m_options;

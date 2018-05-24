@@ -598,7 +598,7 @@ void DXGI::WaitForDesktop()
   CloseDesktop(desktop);
 }
 
-GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout)
+GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout)
 {
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
@@ -653,9 +653,9 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
           m_lastMousePos.y != frameInfo.PointerPosition.Position.y
         ) {
           cursorUpdate = true;
-          frame.cursor.hasPos = true;
-          frame.cursor.x = frameInfo.PointerPosition.Position.x;
-          frame.cursor.y = frameInfo.PointerPosition.Position.y;
+          cursor.hasPos = true;
+          cursor.x = frameInfo.PointerPosition.Position.x;
+          cursor.y = frameInfo.PointerPosition.Position.y;
           m_lastMousePos.x = frameInfo.PointerPosition.Position.x;
           m_lastMousePos.y = frameInfo.PointerPosition.Position.y;
         }
@@ -666,7 +666,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
           m_lastMouseVis = frameInfo.PointerPosition.Visible;
         }
 
-        frame.cursor.visible = m_lastMouseVis == TRUE;
+        cursor.visible = m_lastMouseVis == TRUE;
       }
 
       // if the pointer shape has changed
@@ -691,22 +691,23 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
 
         switch (shapeInfo.Type)
         {
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : frame.cursor.type = CURSOR_TYPE_COLOR;        break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: frame.cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : frame.cursor.type = CURSOR_TYPE_MONOCHROME;   break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : cursor.type = CURSOR_TYPE_COLOR;        break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : cursor.type = CURSOR_TYPE_MONOCHROME;   break;
         default:
           DEBUG_ERROR("Invalid cursor type");
           return GRAB_STATUS_ERROR;
         }
 
-        frame.cursor.hasShape = true;
-        frame.cursor.shape    = m_pointer;
-        frame.cursor.w        = shapeInfo.Width;
-        frame.cursor.h        = shapeInfo.Height;
-        frame.cursor.pitch    = shapeInfo.Pitch;
-        frame.cursor.dataSize = m_pointerSize;
+        cursor.hasShape = true;
+        cursor.shape    = m_pointer;
+        cursor.w        = shapeInfo.Width;
+        cursor.h        = shapeInfo.Height;
+        cursor.pitch    = shapeInfo.Pitch;
+        cursor.dataSize = m_pointerSize;
       }
 
+      // if we also have frame data
       if (frameInfo.LastPresentTime.QuadPart != 0)
         break;
 
@@ -753,7 +754,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr
   return GRAB_STATUS_OK;
 }
 
-GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
+GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cursor)
 {
   GrabStatus result;
   ID3D11Texture2DPtr src;
@@ -762,7 +763,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
   while(true)
   {
     TRACE_START("GrabFrame");
-    result = GrabFrameTexture(frame, src, timeout);
+    result = GrabFrameTexture(frame, cursor, src, timeout);
     TRACE_END;
     if (result != GRAB_STATUS_OK)
       return result;
@@ -818,7 +819,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
   return GRAB_STATUS_OK;
 }
 
-GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
+GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorInfo & cursor)
 {
   while(true)
   {
@@ -857,7 +858,7 @@ GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
 
       while(true)
       {
-        result = GrabFrameTexture(frame, src, timeout);
+        result = GrabFrameTexture(frame, cursor, src, timeout);
         if (result != GRAB_STATUS_OK)
         {
           return result;
@@ -961,13 +962,13 @@ GrabStatus Capture::DXGI::GrabFrameH264(FrameInfo & frame)
   }
 }
 
-GrabStatus DXGI::GrabFrame(FrameInfo & frame)
+GrabStatus DXGI::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
 {
   frame.width  = m_width;
   frame.height = m_height;
 
   if (m_frameType == FRAME_TYPE_H264)
-    return GrabFrameH264(frame);
+    return GrabFrameH264(frame, cursor);
   else
-    return GrabFrameRaw(frame);
+    return GrabFrameRaw(frame, cursor);
 }

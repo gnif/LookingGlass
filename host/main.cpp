@@ -29,7 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "Service.h"
 
 #include <io.h>
-#include <fcntl.h>
+#include <fcntl.h> 
 #include <iostream>
 
 int parseArgs(struct StartupArgs & args);

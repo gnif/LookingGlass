@@ -215,7 +215,7 @@ size_t NvFBC::GetMaxFrameSize()
   return m_maxCaptureWidth * m_maxCaptureHeight * 4;
 }
 
-enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame)
+enum GrabStatus NvFBC::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
 {
   if (!m_initialized)
     return GRAB_STATUS_ERROR;

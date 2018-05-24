@@ -79,7 +79,7 @@ namespace Capture
 
     enum FrameType GetFrameType();
     size_t GetMaxFrameSize();
-    enum GrabStatus GrabFrame(struct FrameInfo & frame);
+    enum GrabStatus GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor);
 
     /*
     Junk needed for the horrid IMFAsyncCallback interface
@@ -116,9 +116,9 @@ namespace Capture
     bool InitRawCapture();
     bool InitH264Capture();
 
-    GrabStatus GrabFrameTexture(FrameInfo & frame, ID3D11Texture2DPtr & texture, bool & timeout);
-    GrabStatus GrabFrameRaw    (FrameInfo & frame);
-    GrabStatus GrabFrameH264   (FrameInfo & frame);
+    GrabStatus GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout);
+    GrabStatus GrabFrameRaw    (struct FrameInfo & frame, struct CursorInfo & cursor);
+    GrabStatus GrabFrameH264   (struct FrameInfo & frame, struct CursorInfo & cursor);
 
     void WaitForDesktop();
 
