@@ -66,6 +66,7 @@ struct AppState
   int                  shmFD;
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
+  unsigned int         fpsSleep;
 };
 
 typedef struct RenderOpts
@@ -89,6 +90,7 @@ struct AppParams
   unsigned int w, h;
   char       * shmFile;
   unsigned int shmSize;
+  unsigned int fpsLimit;
   bool         showFPS;
   bool         useSpice;
   char       * spiceHost;
@@ -118,6 +120,7 @@ struct AppParams params =
   .h                = 768,
   .shmFile          = "/dev/shm/looking-glass",
   .shmSize          = 0,
+  .fpsLimit         = 200,
   .showFPS          = false,
   .useSpice         = true,
   .spiceHost        = "127.0.0.1",
@@ -191,9 +194,12 @@ int renderThread(void * unused)
       if (!state.lgr->render(state.lgrData, state.window))
         break;
 
-      // put some breaks on (400fps) if we are rendering too fast
-      if (microtime() - start < (1000000/400))
-        usleep((1000000/400) - (microtime() - start));
+      if (microtime() - start < state.fpsSleep)
+      {
+        usleep(state.fpsSleep - (microtime() - start));
+        int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
+        state.fpsSleep += delta;
+      }
     }
     else
       usleep(1000000);
@@ -689,9 +695,10 @@ int run()
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
 
   memset(&state, 0, sizeof(state));
-  state.running = true;
-  state.scaleX  = 1.0f;
-  state.scaleY  = 1.0f;
+  state.running  = true;
+  state.scaleX   = 1.0f;
+  state.scaleY   = 1.0f;
+  state.fpsSleep = 1000000 / params.fpsLimit;
 
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
@@ -1016,6 +1023,7 @@ void doHelp(char * app)
     "  -j        Disable cursor position scaling\n"
     "  -M        Don't hide the host cursor\n"
     "\n"
+    "  -K        Set the FPS limit [current: %d]\n"
     "  -k        Enable FPS display\n"
     "  -g NAME   Force the use of a specific renderer\n"
     "  -o OPTION Specify a renderer option (ie: opengl:vsync=0)\n"
@@ -1040,6 +1048,7 @@ void doHelp(char * app)
     params.shmSize,
     params.spiceHost,
     params.spicePort,
+    params.fpsLimit,
     params.center ? "center" : x,
     params.center ? "center" : y,
     params.w,
@@ -1154,6 +1163,17 @@ static bool load_config(const char * configFile)
       }
       params.h = (unsigned int)itmp;
     }
+
+    if (config_setting_lookup_int(global, "fpsLimit", &itmp))
+    {
+      if (itmp < 1)
+      {
+        DEBUG_ERROR("Invalid FPS limit, must be greater then 0");
+        config_destroy(&cfg);
+        return false;
+      }
+      params.fpsLimit = (unsigned int)itmp;
+    }
   }
 
   config_setting_t * spice = config_lookup(&cfg, "spice");
@@ -1247,7 +1267,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvkg:o:anrdFx:y:w:b:Ql"))
+    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:Ql"))
     {
       case '?':
       case 'h':
@@ -1292,6 +1312,10 @@ int main(int argc, char * argv[])
 
       case 'M':
         params.hideMouse = false;
+        continue;
+
+      case 'K':
+        params.fpsLimit = atoi(optarg);
         continue;
 
       case 'k':
