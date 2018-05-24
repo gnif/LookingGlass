@@ -216,11 +216,9 @@ int cursorThread(void * unused)
     if(!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
     {
       if (!state.running)
-        break;
+        return 0;
 
-      // cursor shape updates are not so critical
-      // only check for udpates once every 15ms
-      usleep(150000);
+      usleep(1000);
       continue;
     }
 
@@ -272,7 +270,7 @@ int cursorThread(void * unused)
     }
 
     // now we have taken the mouse data, we can flag to the host we are ready
-    __sync_and_and_fetch(&state.shm->cursor.flags, ~KVMFR_CURSOR_FLAG_UPDATE);
+    state.shm->cursor.flags = 0;
 
     if (header.flags & KVMFR_CURSOR_FLAG_POS)
     {
@@ -309,9 +307,9 @@ int frameThread(void * unused)
       if (!state.running)
         break;
 
-      // allow for a maximum refresh of 200fps (1000/200 = 5ms), this should
+      // allow for a maximum refresh of 400fps (1000/400 = 2.5ms), this should
       // befreqent enough without chewing up too much CPU time
-      usleep(5000);
+      usleep(2500);
       continue;
     }
 
