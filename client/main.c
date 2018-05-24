@@ -189,14 +189,15 @@ int renderThread(void * unused)
   {
     if (state.started)
     {
-      uint64_t start = microtime();
+      const uint64_t start = microtime();
 
       if (!state.lgr->render(state.lgrData, state.window))
         break;
 
-      if (microtime() - start < state.fpsSleep)
+      const uint64_t total = microtime() - start;
+      if (total < state.fpsSleep)
       {
-        usleep(state.fpsSleep - (microtime() - start));
+        usleep(state.fpsSleep - total);
         int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
         state.fpsSleep += delta;
       }
