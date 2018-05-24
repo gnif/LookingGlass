@@ -97,6 +97,7 @@ bool Service::Initialize(ICapture * captureDevice)
   // Create the cursor thread
   m_cursorThread = CreateThread(NULL, 0, _CursorThread, this, 0, NULL);
   m_cursorEvent  = CreateEvent (NULL, FALSE, FALSE, L"CursorEvent");
+  InitializeCriticalSection(&m_cursorCS);
 
   // update everything except for the hostID
   memcpy(m_shmHeader->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
@@ -221,8 +222,19 @@ bool Service::Process()
   bool cursorOnly = false;
   for(int i = 0; i < 2; ++i)
   {
+    CursorInfo ci;
+    GrabStatus status = m_capture->GrabFrame(frame, ci);
+
+    if (ci.hasPos || ci.hasShape)
+    {
+      EnterCriticalSection(&m_cursorCS);
+      memcpy(&m_cursorInfo, &ci, sizeof(ci));
+      LeaveCriticalSection(&m_cursorCS);
+      SetEvent(m_cursorEvent);
+    }
+
     // capture a frame of data
-    switch (m_capture->GrabFrame(frame, m_cursorInfo))
+    switch (status)
     {
       case GRAB_STATUS_OK:
         ok = true;
@@ -272,9 +284,6 @@ bool Service::Process()
     return false;
   }
 
-  if (m_cursorInfo.hasPos || m_cursorInfo.hasShape)
-    SetEvent(m_cursorEvent);
-
   if (!cursorOnly)
   {
     KVMFRFrame * fi = &m_shmHeader->frame;
@@ -315,48 +324,44 @@ DWORD Service::CursorThread()
         return 0;
     }
 
-    struct CursorInfo ci;
-    memcpy(&ci, &m_cursorInfo, sizeof(ci));
-    ZeroMemory(&m_cursorInfo, sizeof(m_cursorInfo));
-
-    if (ci.hasPos)
+    EnterCriticalSection(&m_cursorCS);
+    if (m_cursorInfo.hasPos)
     {
-      ci.hasPos = false;
+      m_cursorInfo.hasPos = false;
 
       // tell the client where the cursor is
       cursor->flags |= KVMFR_CURSOR_FLAG_POS;
-      cursor->x = ci.x;
-      cursor->y = ci.y;
+      cursor->x = m_cursorInfo.x;
+      cursor->y = m_cursorInfo.y;
 
-      if (ci.visible)
+      if (m_cursorInfo.visible)
         cursor->flags |= KVMFR_CURSOR_FLAG_VISIBLE;
       else
         cursor->flags &= ~KVMFR_CURSOR_FLAG_VISIBLE;
     }
 
-    if (ci.hasShape)
+    if (m_cursorInfo.hasShape)
     {
-      ci.hasShape = false;
+      m_cursorInfo.hasShape = false;
 
-      if (ci.dataSize > m_cursorDataSize)
-      {
+      if (m_cursorInfo.dataSize > m_cursorDataSize)
         DEBUG_ERROR("Cursor size exceeds allocated space");
-        cursor->flags = 0;
-        continue;
+      else
+      {
+        // give the client the new cursor shape
+        cursor->flags |= KVMFR_CURSOR_FLAG_SHAPE;
+        ++cursor->version;
+
+        cursor->type    = m_cursorInfo.type;
+        cursor->width   = m_cursorInfo.w;
+        cursor->height  = m_cursorInfo.h;
+        cursor->pitch   = m_cursorInfo.pitch;
+        cursor->dataPos = m_cursorOffset;
+
+        memcpy(m_cursorData, m_cursorInfo.shape, m_cursorInfo.dataSize);
       }
-
-      // give the client the new cursor shape
-      cursor->flags |= KVMFR_CURSOR_FLAG_SHAPE;
-      ++cursor->version;
-
-      cursor->type    = ci.type;
-      cursor->width   = ci.w;
-      cursor->height  = ci.h;
-      cursor->pitch   = ci.pitch;
-      cursor->dataPos = m_cursorOffset;
-
-      memcpy(m_cursorData, ci.shape, ci.dataSize);
     }
+    LeaveCriticalSection(&m_cursorCS);
 
     cursor->flags |= KVMFR_CURSOR_FLAG_UPDATE;
   }
