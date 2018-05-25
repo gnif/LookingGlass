@@ -6,7 +6,7 @@ CFLAGS  += -ffast-math
 CFLAGS  += -fdata-sections -ffunction-sections
 CFLAGS  += -I../ -I.
 LDFLAGS += -Wl,--gc-sections -mwindows
-CFLAGS  += -DWINVER=0x0602
+CFLAGS  += -DWINVER=0x0602 -DUNICODE
 
 PREFIX ?= x86_64-w64-mingw32-
 STRIP  = $(PREFIX)strip
