@@ -1,7 +1,7 @@
 This kernel module implements a basic interface to the IVSHMEM device for
 LookingGlass when using LookingGlass in VM->VM mode.
 
-== Compiling ==
+## Compiling
 
 Make sure you have your kernel headers installed first, on Debian/Ubuntu use
 the following command.
@@ -10,7 +10,7 @@ the following command.
 
 Then simply run `make` and you're done.
 
-== Usage ==
+## Usage
 
 This module requires the `uio` module to be loaded first, loading it is as
 simple as:
@@ -30,7 +30,7 @@ and the size as LookingGlass can not determine the size by itself at this time.
 
     ./looking-glass-client -f /dev/uio0 -L 16
 
-== Note ==
+## Note
 
 This module is not strictly required, it is possible to access the device
 via the /sys interface directly, for example:
@@ -38,10 +38,4 @@ via the /sys interface directly, for example:
     ./looking-glass-client -f /sys/devices/pci0000:00/0000:00:03.0/resource2_wc
 
 Obviously adjusting the PCI device IDs as required. However while this is
-possible it is not recommended as access to the shared memory may be slower.
-
-== Issues ==
-
-At this time VM->VM access atleast in this authors configurtion is slow, barely
-exceeding 15fps at 1200p, it is still yet to be determined if this is an
-architecture problem with this authors AMD ThreadRipper platform.
+possible it is not recommended as access to the shared memory is much slower.
