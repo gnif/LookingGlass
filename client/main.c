@@ -526,6 +526,13 @@ int eventFilter(void * userdata, SDL_Event * event)
         SDL_SetRelativeMouseMode(serverMode);
         DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
 
+        if (state.lgr)
+          state.lgr->on_alert(
+            state.lgrData,
+            LG_ALERT_INFO,
+            serverMode ? "Capture Enabled" : "Capture Disabled"
+          );
+
         if (!serverMode)
           realignGuest = true;
         break;
