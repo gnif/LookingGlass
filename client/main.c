@@ -99,6 +99,7 @@ struct AppParams
   bool         scaleMouseInput;
   bool         hideMouse;
   bool         ignoreQuit;
+  bool         allowScreensaver;
 
   bool         forceRenderer;
   unsigned int forceRendererIndex;
@@ -129,6 +130,7 @@ struct AppParams params =
   .scaleMouseInput  = true,
   .hideMouse        = true,
   .ignoreQuit       = false,
+  .allowScreensaver = true,
   .forceRenderer    = false
 };
 
@@ -802,6 +804,9 @@ int run()
   if (params.fullscreen)
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
+  if (params.allowScreensaver)
+    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+
   // set the compositor hint to bypass for low latency
   SDL_SysWMinfo wminfo;
   SDL_VERSION(&wminfo.version);
@@ -1051,6 +1056,7 @@ void doHelp(char * app)
     "  -w WIDTH  Initial window width [current: %u]\n"
     "  -b HEIGHT Initial window height [current: %u]\n"
     "  -Q        Ignore requests to quit (ie: Alt+F4)\n"
+    "  -S        Disable the screensaver\n"
     "\n"
     "  -l        License information\n"
     "\n",
@@ -1141,15 +1147,16 @@ static bool load_config(const char * configFile)
       }
     }
 
-    if (config_setting_lookup_bool(global, "scaleMouseInput", &itmp)) params.scaleMouseInput = (itmp != 0);
-    if (config_setting_lookup_bool(global, "hideMouse"      , &itmp)) params.hideMouse       = (itmp != 0);
-    if (config_setting_lookup_bool(global, "showFPS"        , &itmp)) params.showFPS         = (itmp != 0);
-    if (config_setting_lookup_bool(global, "autoResize"     , &itmp)) params.autoResize      = (itmp != 0);
-    if (config_setting_lookup_bool(global, "allowResize"    , &itmp)) params.allowResize     = (itmp != 0);
-    if (config_setting_lookup_bool(global, "keepAspect"     , &itmp)) params.keepAspect      = (itmp != 0);
-    if (config_setting_lookup_bool(global, "borderless"     , &itmp)) params.borderless      = (itmp != 0);
-    if (config_setting_lookup_bool(global, "fullScreen"     , &itmp)) params.fullscreen      = (itmp != 0);
-    if (config_setting_lookup_bool(global, "ignoreQuit"     , &itmp)) params.ignoreQuit      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "scaleMouseInput" , &itmp)) params.scaleMouseInput  = (itmp != 0);
+    if (config_setting_lookup_bool(global, "hideMouse"       , &itmp)) params.hideMouse        = (itmp != 0);
+    if (config_setting_lookup_bool(global, "showFPS"         , &itmp)) params.showFPS          = (itmp != 0);
+    if (config_setting_lookup_bool(global, "autoResize"      , &itmp)) params.autoResize       = (itmp != 0);
+    if (config_setting_lookup_bool(global, "allowResize"     , &itmp)) params.allowResize      = (itmp != 0);
+    if (config_setting_lookup_bool(global, "keepAspect"      , &itmp)) params.keepAspect       = (itmp != 0);
+    if (config_setting_lookup_bool(global, "borderless"      , &itmp)) params.borderless       = (itmp != 0);
+    if (config_setting_lookup_bool(global, "fullScreen"      , &itmp)) params.fullscreen       = (itmp != 0);
+    if (config_setting_lookup_bool(global, "ignoreQuit"      , &itmp)) params.ignoreQuit       = (itmp != 0);
+    if (config_setting_lookup_bool(global, "allowScreensaver", &itmp)) params.allowScreensaver = (itmp != 0);
 
     if (config_setting_lookup_int(global, "x", &params.x)) params.center = false;
     if (config_setting_lookup_int(global, "y", &params.y)) params.center = false;
@@ -1279,7 +1286,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:Ql"))
+    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSl"))
     {
       case '?':
       case 'h':
@@ -1498,6 +1505,10 @@ int main(int argc, char * argv[])
 
       case 'Q':
         params.ignoreQuit = true;
+        continue;
+
+      case 'S':
+        params.allowScreensaver = false;
         continue;
 
       case 'l':
