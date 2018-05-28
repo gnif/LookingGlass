@@ -58,6 +58,7 @@ struct AppState
   bool                 cursorVisible;
   bool                 haveCursorPos;
   float                scaleX, scaleY;
+  float                accX, accY;
 
   const LG_Renderer  * lgr ;
   void               * lgrData;
@@ -487,6 +488,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         x -= state.cursor.x;
         y -= state.cursor.y;
         realignGuest = false;
+        state.accX = state.accY = 0;
 
         if (!spice_mouse_motion(x, y))
           DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
@@ -499,8 +501,12 @@ int eventFilter(void * userdata, SDL_Event * event)
       {
         if (params.scaleMouseInput)
         {
-          x = (float)x * state.scaleX;
-          y = (float)y * state.scaleY;
+          state.accX += (float)x * state.scaleX;
+          state.accY += (float)y * state.scaleY;
+          x = floor(state.accX);
+          y = floor(state.accY);
+          state.accX -= x;
+          state.accY -= y;
         }
         if (!spice_mouse_motion(x, y))
         {
