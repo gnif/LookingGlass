@@ -275,10 +275,28 @@ bool Service::Process()
     return false;
   }
 
-  if (cursor.hasPos || cursor.hasShape)
+  if (cursor.updated)
   {
     EnterCriticalSection(&m_cursorCS);
-    memcpy(&m_cursorInfo, &cursor, sizeof(struct CursorInfo));
+    if (cursor.hasPos)
+    {
+      m_cursorInfo.hasPos = true;
+      m_cursorInfo.x      = cursor.x;
+      m_cursorInfo.y      = cursor.y;
+    }
+
+    if (cursor.hasShape)
+    {
+      m_cursorInfo.hasShape = true;
+      m_cursorInfo.dataSize = cursor.dataSize;
+      m_cursorInfo.type     = cursor.type;
+      m_cursorInfo.w        = cursor.w;
+      m_cursorInfo.h        = cursor.h;
+      m_cursorInfo.pitch    = cursor.pitch;
+      m_cursorInfo.shape    = cursor.shape;
+    }
+
+    m_cursorInfo.visible = cursor.visible;
     LeaveCriticalSection(&m_cursorCS);
     SetEvent(m_cursorEvent);
   }
@@ -326,6 +344,8 @@ DWORD Service::CursorThread()
     EnterCriticalSection(&m_cursorCS);
     if (m_cursorInfo.hasPos)
     {
+      m_cursorInfo.hasPos = false;
+
       // tell the client where the cursor is
       cursor->flags |= KVMFR_CURSOR_FLAG_POS;
       cursor->x = m_cursorInfo.x;
@@ -339,6 +359,7 @@ DWORD Service::CursorThread()
 
     if (m_cursorInfo.hasShape)
     {
+      m_cursorInfo.hasShape = false;
       if (m_cursorInfo.dataSize > m_cursorDataSize)
         DEBUG_ERROR("Cursor size exceeds allocated space");
       else
@@ -356,8 +377,8 @@ DWORD Service::CursorThread()
         memcpy(m_cursorData, m_cursorInfo.shape, m_cursorInfo.dataSize);
       }
     }
-    LeaveCriticalSection(&m_cursorCS);
 
+    LeaveCriticalSection(&m_cursorCS);
     cursor->flags |= KVMFR_CURSOR_FLAG_UPDATE;
   }
 

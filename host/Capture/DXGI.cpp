@@ -608,7 +608,6 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
   IDXGIResourcePtr res;
 
   HRESULT status;
-  bool    cursorUpdate = false;
   for (int i = 0; i < 2; ++i)
   {
     while (true)
@@ -652,8 +651,8 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
           m_lastMousePos.x != frameInfo.PointerPosition.Position.x ||
           m_lastMousePos.y != frameInfo.PointerPosition.Position.y
         ) {
-          cursorUpdate = true;
-          cursor.hasPos = true;
+          cursor.updated = true;
+          cursor.hasPos  = true;
           cursor.x = frameInfo.PointerPosition.Position.x;
           cursor.y = frameInfo.PointerPosition.Position.y;
           m_lastMousePos.x = frameInfo.PointerPosition.Position.x;
@@ -662,7 +661,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
 
         if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
         {
-          cursorUpdate = true;
+          cursor.updated = true;
           m_lastMouseVis = frameInfo.PointerPosition.Visible;
         }
 
@@ -672,7 +671,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
       // if the pointer shape has changed
       if (frameInfo.PointerShapeBufferSize > 0)
       {
-        cursorUpdate = true;
+        cursor.updated = true;
         if (m_pointerBufSize < frameInfo.PointerShapeBufferSize)
         {
           if (m_pointer)
@@ -713,7 +712,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
 
       SafeRelease(&res);
 
-      if (cursorUpdate)
+      if (cursor.updated)
         return GRAB_STATUS_CURSOR;
     }
 
