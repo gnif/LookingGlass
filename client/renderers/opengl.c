@@ -867,9 +867,26 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
   const int               pitch  = this->mousePitch;
   const uint8_t *         data   = this->mouseData;
 
+  // tmp buffer for masked colour
+  uint32_t tmp[width * height];
+
   this->mouseType = cursor;
   switch(cursor)
   {
+    case LG_CURSOR_MASKED_COLOR:
+    {
+      for(int i = 0; i < width * height; ++i)
+      {
+        const uint32_t c = ((uint32_t *)data)[i];
+        tmp[i] = (c & ~0xFF000000) | (c & 0xFF000000 ? 0x0 : 0xFF000000);
+      }
+      data = (uint8_t *)tmp;
+      // fall through to LG_CURSOR_COLOR
+      //
+      // technically we should also create an XOR texture from the data but this
+      // usage seems very rare in modern software.
+    }
+
     case LG_CURSOR_COLOR:
     {
       glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
@@ -972,12 +989,6 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
         glEnd();
         glDisable(GL_COLOR_LOGIC_OP);
       glEndList();
-      break;
-    }
-
-    case LG_CURSOR_MASKED_COLOR:
-    {
-      //TODO
       break;
     }
   }

@@ -899,7 +899,19 @@ int run()
     DEBUG_INFO("Waiting for host to signal it's ready...");
     __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
     while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
+    {
+      SDL_Event event;
+      while(SDL_PollEvent(&event))
+      {
+        if (event.type == SDL_QUIT)
+        {
+          if (!params.ignoreQuit)
+            state.running = false;
+          break;
+        }
+      }
       usleep(1000);
+    }
     DEBUG_INFO("Host ready, starting session");
 
     // check the header's magic and version are valid
