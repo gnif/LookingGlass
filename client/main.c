@@ -888,18 +888,18 @@ int run()
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
     SDL_SetEventFilter(eventFilter, NULL);
 
-    // flag the host that we are starting up this is important so that
-    // the host wakes up if it is waiting on an interrupt, the host will
-    // also send us the current mouse shape since we won't know it yet
-    DEBUG_INFO("Waiting for host to signal it's ready...");
-    __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
-
     // start the renderThread so we don't just display junk
     if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
     {
       DEBUG_ERROR("render create thread failed");
       break;
     }
+
+    // flag the host that we are starting up this is important so that
+    // the host wakes up if it is waiting on an interrupt, the host will
+    // also send us the current mouse shape since we won't know it yet
+    DEBUG_INFO("Waiting for host to signal it's ready...");
+    __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
 
     while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
     {
