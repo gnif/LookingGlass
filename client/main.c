@@ -488,7 +488,8 @@ int eventFilter(void * userdata, SDL_Event * event)
         x -= state.cursor.x;
         y -= state.cursor.y;
         realignGuest = false;
-        state.accX = state.accY = 0;
+        state.accX = 0;
+        state.accY = 0;
 
         if (!spice_mouse_motion(x, y))
           DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
