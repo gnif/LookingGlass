@@ -100,6 +100,7 @@ struct AppParams
   bool         hideMouse;
   bool         ignoreQuit;
   bool         allowScreensaver;
+  SDL_Scancode captureKey;
 
   bool         forceRenderer;
   unsigned int forceRendererIndex;
@@ -131,6 +132,7 @@ struct AppParams params =
   .hideMouse        = true,
   .ignoreQuit       = false,
   .allowScreensaver = true,
+  .captureKey       = SDL_SCANCODE_SCROLLLOCK,
   .forceRenderer    = false
 };
 
@@ -514,7 +516,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (sc == SDL_SCANCODE_SCROLLLOCK)
+      if (sc == params.captureKey)
       {
         if (event->key.repeat)
           break;
@@ -549,7 +551,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_KEYUP:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (sc == SDL_SCANCODE_SCROLLLOCK)
+      if (sc == params.captureKey)
         break;
 
       // avoid sending key up events when we didn't send a down
@@ -1057,6 +1059,8 @@ void doHelp(char * app)
     "  -b HEIGHT Initial window height [current: %u]\n"
     "  -Q        Ignore requests to quit (ie: Alt+F4)\n"
     "  -S        Disable the screensaver\n"
+    "  -m CODE   Specify the capture key [current: %u (%s)]\n"
+    "            See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
     "\n"
     "  -l        License information\n"
     "\n",
@@ -1070,7 +1074,9 @@ void doHelp(char * app)
     params.center ? "center" : x,
     params.center ? "center" : y,
     params.w,
-    params.h
+    params.h,
+    params.captureKey,
+    SDL_GetScancodeName(params.captureKey)
   );
 }
 
@@ -1193,6 +1199,17 @@ static bool load_config(const char * configFile)
       }
       params.fpsLimit = (unsigned int)itmp;
     }
+
+    if (config_setting_lookup_int(global, "captureKey", &itmp))
+    {
+      if (itmp <= SDL_SCANCODE_UNKNOWN || itmp > SDL_SCANCODE_APP2)
+      {
+        DEBUG_ERROR("Invalid capture key value, see https://wiki.libsdl.org/SDLScancodeLookup");
+        config_destroy(&cfg);
+        return false;
+      }
+      params.captureKey = (SDL_Scancode)itmp;
+    }
   }
 
   config_setting_t * spice = config_lookup(&cfg, "spice");
@@ -1286,7 +1303,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSl"))
+    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSm:l"))
     {
       case '?':
       case 'h':
@@ -1509,6 +1526,10 @@ int main(int argc, char * argv[])
 
       case 'S':
         params.allowScreensaver = false;
+        continue;
+
+      case 'm':
+        params.captureKey = atoi(optarg);
         continue;
 
       case 'l':
