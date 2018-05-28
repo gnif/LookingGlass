@@ -62,10 +62,10 @@ struct Inst
   struct Options    opt;
 
   bool              amdPinnedMemSupport;
+  bool              preConfigured;
   bool              configured;
   bool              reconfigure;
   SDL_GLContext     glContext;
-  bool              doneInfo;
 
   SDL_Point         window;
   bool              resizeWindow;
@@ -84,6 +84,7 @@ struct Inst
   GLuint            vboID[BUFFER_COUNT];
   uint8_t         * texPixels[BUFFER_COUNT];
   LG_Lock           syncLock;
+  bool              texReady;
   int               texIndex;
   int               texList;
   int               fpsList;
@@ -123,10 +124,12 @@ static bool _check_gl_error(unsigned int line, const char * name);
 #define check_gl_error(name) _check_gl_error(__LINE__, name)
 
 static void deconfigure(struct Inst * this);
+static bool pre_configure(struct Inst * this, SDL_Window *window);
 static bool configure(struct Inst * this, SDL_Window *window);
 static void update_mouse_shape(struct Inst * this, bool * newShape);
 static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
+static void render_wait();
 
 const char * opengl_get_name()
 {
@@ -291,7 +294,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
   if (!this)
     return false;
 
-  if (!configure(this, window))
+  if (!pre_configure(this, window))
     return false;
 
   if (this->resizeWindow)
@@ -312,6 +315,23 @@ bool opengl_render(void * opaque, SDL_Window * window)
     );
 
     this->resizeWindow = false;
+  }
+
+  if (!configure(this, window))
+  {
+    render_wait();
+    SDL_GL_SwapWindow(window);
+    return true;
+  }
+
+  if (!draw_frame(this))
+    return false;
+
+  if (!this->texReady)
+  {
+    render_wait();
+    SDL_GL_SwapWindow(window);
+    return true;
   }
 
   if (this->params.showFPS && this->renderTime > 1e9)
@@ -392,14 +412,11 @@ bool opengl_render(void * opaque, SDL_Window * window)
     glEndList();
   }
 
-  if (!draw_frame(this))
-    return false;
-
   bool newShape;
   update_mouse_shape(this, &newShape);
 
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
-
   glCallList(this->texList + this->texIndex);
   draw_mouse(this);
   if (this->fpsTexture)
@@ -421,6 +438,12 @@ bool opengl_render(void * opaque, SDL_Window * window)
   this->mouseUpdate   = false;
   this->lastMouseDraw = t;
   return true;
+}
+
+static void render_wait()
+{
+  glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
 }
 
 static void handle_opt_mipmap(void * opaque, const char *value)
@@ -514,6 +537,45 @@ static bool _check_gl_error(unsigned int line, const char * name)
   return true;
 }
 
+static bool pre_configure(struct Inst * this, SDL_Window *window)
+{
+  if (this->preConfigured)
+    return true;
+
+  this->glContext = SDL_GL_CreateContext(window);
+  if (!this->glContext)
+  {
+    DEBUG_ERROR("Failed to create the OpenGL context");
+    return false;
+  }
+
+  DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
+  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
+  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+
+  GLint n;
+  glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+  for(GLint i = 0; i < n; ++i)
+  {
+    const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
+    if (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0)
+    {
+      if (this->opt.amdPinnedMem)
+      {
+        this->amdPinnedMemSupport = true;
+        DEBUG_INFO("Using GL_AMD_pinned_memory");
+      }
+      else
+        DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
+      break;
+    }
+  }
+
+  SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
+  this->preConfigured = true;
+  return true;
+}
+
 static bool configure(struct Inst * this, SDL_Window *window)
 {
   LG_LOCK(this->formatLock);
@@ -525,43 +587,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   if (this->configured)
     deconfigure(this);
-
-  this->glContext = SDL_GL_CreateContext(window);
-  if (!this->glContext)
-  {
-    DEBUG_ERROR("Failed to create the OpenGL context");
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-
-  if (!this->doneInfo)
-  {
-    DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
-    DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
-    DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
-
-    GLint n;
-    glGetIntegerv(GL_NUM_EXTENSIONS, &n);
-    for(GLint i = 0; i < n; ++i)
-    {
-      const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
-      if (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0)
-      {
-        if (this->opt.amdPinnedMem)
-        {
-          this->amdPinnedMemSupport = true;
-          DEBUG_INFO("Using GL_AMD_pinned_memory");
-        }
-        else
-          DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
-        break;
-      }
-    }
-
-    this->doneInfo = true;
-  }
-
-  SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
 
   switch(this->format.comp)
   {
@@ -635,12 +660,14 @@ static bool configure(struct Inst * this, SDL_Window *window)
     {
       const int pagesize = getpagesize();
       this->texPixels[0] = memalign(pagesize, this->texSize * BUFFER_COUNT);
+      memset(this->texPixels[0], 0, this->texSize * BUFFER_COUNT);
       for(int i = 1; i < BUFFER_COUNT; ++i)
         this->texPixels[i] = this->texPixels[0] + this->texSize;
 
       for(int i = 0; i < BUFFER_COUNT; ++i)
       {
         glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
+
         if (check_gl_error("glBindBuffer"))
         {
           LG_UNLOCK(this->formatLock);
@@ -1122,6 +1149,7 @@ static bool draw_frame(struct Inst * this)
   glBindTexture(GL_TEXTURE_2D, 0);
 
   LG_UNLOCK(this->formatLock);
+  this->texReady = true;
   return true;
 }
 

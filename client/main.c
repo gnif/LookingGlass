@@ -187,25 +187,20 @@ int renderThread(void * unused)
 {
   while(state.running)
   {
-    if (state.started)
+    const uint64_t start = microtime();
+
+    if (!state.lgr->render(state.lgrData, state.window))
+      break;
+
+    const uint64_t total = microtime() - start;
+    if (total < state.fpsSleep)
     {
-      const uint64_t start = microtime();
-
-      if (!state.lgr->render(state.lgrData, state.window))
-        break;
-
-      const uint64_t total = microtime() - start;
-      if (total < state.fpsSleep)
-      {
-        usleep(state.fpsSleep - total);
-        int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
-        state.fpsSleep += delta / 16;
-        if (state.fpsSleep < 0)
-          state.fpsSleep = 0;
-      }
+      usleep(state.fpsSleep - total);
+      int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
+      state.fpsSleep += delta / 16;
+      if (state.fpsSleep < 0)
+        state.fpsSleep = 0;
     }
-    else
-      usleep(1000000);
   }
 
   return 0;
@@ -898,6 +893,14 @@ int run()
     // also send us the current mouse shape since we won't know it yet
     DEBUG_INFO("Waiting for host to signal it's ready...");
     __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
+
+    // start the renderThread so we don't just display junk
+    if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
+    {
+      DEBUG_ERROR("render create thread failed");
+      break;
+    }
+
     while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
     {
       SDL_Event event;
@@ -905,13 +908,16 @@ int run()
       {
         if (event.type == SDL_QUIT)
         {
-          if (!params.ignoreQuit)
-            state.running = false;
+          state.running = false;
           break;
         }
       }
       usleep(1000);
     }
+
+    if (!state.running)
+      break;
+
     DEBUG_INFO("Host ready, starting session");
 
     // check the header's magic and version are valid
@@ -938,12 +944,6 @@ int run()
     if (!(t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
     {
       DEBUG_ERROR("frame create thread failed");
-      break;
-    }
-
-    if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
-    {
-      DEBUG_ERROR("render create thread failed");
       break;
     }
 
