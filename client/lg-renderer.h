@@ -32,6 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
    (x)->on_resize      && \
    (x)->on_mouse_shape && \
    (x)->on_mouse_event && \
+   (x)->on_alert       && \
    (x)->render)
 
 #define LGR_OPTION_COUNT(x) (sizeof(x) / sizeof(LG_RendererOpt))
@@ -98,6 +99,15 @@ typedef enum LG_RendererCursor
 }
 LG_RendererCursor;
 
+typedef enum LG_RendererOnAlert
+{
+  LG_ALERT_INFO   ,
+  LG_ALERT_SUCCESS,
+  LG_ALERT_WARNING,
+  LG_ALERT_ERROR
+}
+LG_RendererAlert;
+
 typedef const char * (* LG_RendererGetName     )();
 typedef bool         (* LG_RendererCreate      )(void ** opaque, const LG_RendererParams params);
 typedef bool         (* LG_RendererInitialize  )(void * opaque, Uint32 * sdlFlags);
@@ -106,6 +116,7 @@ typedef void         (* LG_RendererOnResize    )(void * opaque, const int width,
 typedef bool         (* LG_RendererOnMouseShape)(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent)(void * opaque, const bool visible , const int x, const int y);
 typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const uint8_t * data);
+typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_RendererAlert alert, const char * message);
 typedef bool         (* LG_RendererRender      )(void * opaque, SDL_Window *window);
 
 typedef struct LG_Renderer
@@ -120,6 +131,7 @@ typedef struct LG_Renderer
   LG_RendererOnMouseShape on_mouse_shape;
   LG_RendererOnMouseEvent on_mouse_event;
   LG_RendererOnFrameEvent on_frame_event;
+  LG_RendererOnAlert      on_alert;
   LG_RendererRender       render;
 }
 LG_Renderer;
