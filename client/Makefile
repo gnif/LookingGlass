@@ -7,7 +7,7 @@ CFLAGS  += -fdata-sections -ffunction-sections
 LDFLAGS += -Wl,--gc-sections
 CFLAGS  += -Wfatal-errors
 
-LIBS    = sdl2 SDL2_ttf gl glu libssl openssl spice-protocol fontconfig x11 libconfig
+LIBS    = sdl2 SDL2_ttf gl glu spice-protocol fontconfig x11 libconfig
 
 LIBS    += nettle hogweed
 CFLAGS  += -D USE_NETTLE
