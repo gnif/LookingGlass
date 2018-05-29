@@ -60,6 +60,7 @@ typedef LG_RendererOpt * LG_RendererOptions;
 typedef struct LG_RendererParams
 {
   TTF_Font * font;
+  TTF_Font * alertFont;
   bool       showFPS;
 }
 LG_RendererParams;
