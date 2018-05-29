@@ -33,12 +33,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "utils.h"
 #include "lg-decoders.h"
+#include "ll.h"
 
 #define BUFFER_COUNT       2
 
 #define FPS_TEXTURE        0
 #define MOUSE_TEXTURE      1
-#define TEXTURE_COUNT      2
+#define ALERT_TEXTURE      2
+#define TEXTURE_COUNT      3
 
 struct Options
 {
@@ -54,6 +56,13 @@ static struct Options defaultOptions =
   .vsync         = true,
   .preventBuffer = true,
   .amdPinnedMem  = true,
+};
+
+struct Alert
+{
+  SDL_Surface *text;
+  float        r, g, b, a;
+  uint64_t     timeout;
 };
 
 struct Inst
@@ -96,6 +105,8 @@ struct Inst
   GLsync            fences[BUFFER_COUNT];
   void            * decoderFrames[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
+  struct ll       * alerts;
+  int               alertList;
 
   bool              fpsTexture;
   uint64_t          lastFrameTime;
@@ -155,6 +166,7 @@ bool opengl_create(void ** opaque, const LG_RendererParams params)
   LG_LOCK_INIT(this->syncLock  );
   LG_LOCK_INIT(this->mouseLock );
 
+  this->alerts = ll_new();
   return true;
 }
 
@@ -182,6 +194,15 @@ void opengl_deinitialize(void * opaque)
   LG_LOCK_FREE(this->formatLock);
   LG_LOCK_FREE(this->syncLock  );
   LG_LOCK_FREE(this->mouseLock );
+
+  struct Alert * alert;
+  while(ll_shift(this->alerts, (void **)&alert))
+  {
+    if (alert->text)
+      SDL_FreeSurface(alert->text);
+    free(alert);
+  }
+  ll_free(this->alerts);
 
   free(this);
 }
@@ -288,6 +309,79 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   return true;
 }
 
+void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * message)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  struct Alert * a = malloc(sizeof(struct Alert));
+  memset(a, 0, sizeof(struct Alert));
+  const SDL_Color color = {0xff, 0xff, 0xff};
+
+  switch(alert)
+  {
+    case LG_ALERT_INFO:
+      a->r = 0.0f;
+      a->g = 0.0f;
+      a->b = 0.8f;
+      a->a = 0.8f;
+      break;
+
+    case LG_ALERT_SUCCESS:
+      a->r = 0.0f;
+      a->g = 0.8f;
+      a->b = 0.0f;
+      a->a = 0.8f;
+      break;
+
+    case LG_ALERT_WARNING:
+      a->r = 0.8f;
+      a->g = 0.5f;
+      a->b = 0.0f;
+      a->a = 0.8f;
+      break;
+
+    case LG_ALERT_ERROR:
+      a->r = 1.0f;
+      a->g = 0.0f;
+      a->b = 0.0f;
+      a->a = 0.8f;
+      break;
+  }
+
+  if (!(a->text = TTF_RenderText_Blended(this->params.alertFont, message, color)))
+  {
+    DEBUG_ERROR("Failed to render alert text: %s", TTF_GetError());
+    free(a);
+    return;
+  }
+
+  ll_push(this->alerts, a);
+}
+
+void surface_to_texture(SDL_Surface * surface, GLuint texture)
+{
+  glBindTexture(GL_TEXTURE_2D       , texture   );
+  glPixelStorei(GL_UNPACK_ALIGNMENT , 4         );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, surface->w);
+  glTexImage2D(
+    GL_TEXTURE_2D,
+    0,
+    surface->format->BytesPerPixel,
+    surface->w,
+    surface->h,
+    0,
+    GL_BGRA,
+    GL_UNSIGNED_BYTE,
+    surface->pixels
+  );
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 bool opengl_render(void * opaque, SDL_Window * window)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -340,36 +434,16 @@ bool opengl_render(void * opaque, SDL_Window * window)
     const float avgFPS    = 1000.0f / (((float)this->renderTime / this->frameCount ) / 1e6f);
     const float renderFPS = 1000.0f / (((float)this->renderTime / this->renderCount) / 1e6f);
     snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
-    SDL_Color color = {0xff, 0xff, 0xff};
+    const SDL_Color color = {0xff, 0xff, 0xff};
     SDL_Surface *textSurface = NULL;
     if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
     {
-      DEBUG_ERROR("Failed to render text");
+      DEBUG_ERROR("Failed to render text: %s", TTF_GetError());
       LG_UNLOCK(this->formatLock);
       return false;
     }
 
-    glBindTexture(GL_TEXTURE_2D       , this->textures[FPS_TEXTURE]);
-    glPixelStorei(GL_UNPACK_ALIGNMENT , 4                          );
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, textSurface->w             );
-    glTexImage2D(
-      GL_TEXTURE_2D,
-      0,
-      textSurface->format->BytesPerPixel,
-      textSurface->w,
-      textSurface->h,
-      0,
-      GL_BGRA,
-      GL_UNSIGNED_BYTE,
-      textSurface->pixels
-    );
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
+    surface_to_texture(textSurface, this->textures[FPS_TEXTURE]);
 
     this->fpsRect.x = 5;
     this->fpsRect.y = 5;
@@ -421,6 +495,60 @@ bool opengl_render(void * opaque, SDL_Window * window)
   draw_mouse(this);
   if (this->fpsTexture)
     glCallList(this->fpsList);
+
+  struct Alert * alert;
+  while(ll_peek_head(this->alerts, (void **)&alert))
+  {
+    if (alert->timeout == 0)
+    {
+      surface_to_texture(alert->text, this->textures[ALERT_TEXTURE]);
+
+      glNewList(this->alertList, GL_COMPILE);
+        const int p = 4;
+        const int w = alert->text->w + p * 2;
+        const int h = alert->text->h + p * 2;
+        glTranslatef(-(w / 2), -(h / 2), 0.0f);
+        glEnable(GL_BLEND);
+        glDisable(GL_TEXTURE_2D);
+        glColor4f(alert->r, alert->g, alert->b, alert->a);
+        glBegin(GL_TRIANGLE_STRIP);
+          glVertex2i(0, 0);
+          glVertex2i(w, 0);
+          glVertex2i(0, h);
+          glVertex2i(w, h);
+        glEnd();
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, this->textures[ALERT_TEXTURE]);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        glTranslatef(p, p, 0.0f);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0             , 0             );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(alert->text->w, 0             );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0             , alert->text->h);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(alert->text->w, alert->text->h);
+        glEnd();
+        glDisable(GL_BLEND);
+      glEndList();
+
+      alert->timeout = microtime() + 2*1000000;
+
+      SDL_FreeSurface(alert->text);
+      alert->text = NULL;
+    }
+    else if (alert->timeout < microtime())
+    {
+      free(alert);
+      ll_shift(this->alerts, NULL);
+      continue;
+    }
+
+    glPushMatrix();
+      glLoadIdentity();
+      glTranslatef(this->window.x / 2, this->window.y / 2, 0.0f);
+      glCallList(this->alertList);
+    glPopMatrix();
+    break;
+  }
 
   if (this->opt.preventBuffer)
   {
@@ -523,6 +651,7 @@ const LG_Renderer LGR_OpenGL =
   .on_mouse_shape = opengl_on_mouse_shape,
   .on_mouse_event = opengl_on_mouse_event,
   .on_frame_event = opengl_on_frame_event,
+  .on_alert       = opengl_on_alert,
   .render         = opengl_render
 };
 
@@ -644,6 +773,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   this->texList    = glGenLists(BUFFER_COUNT);
   this->fpsList    = glGenLists(1);
   this->mouseList  = glGenLists(1);
+  this->alertList  = glGenLists(1);
 
   // generate the pixel unpack buffers if the decoder isn't going to do it for us
   if (!this->decoder->has_gl)
