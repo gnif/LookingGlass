@@ -1,6 +1,6 @@
 BINARY  = looking-glass-client
 CFLAGS  = -g -O3 -std=gnu99 -march=native -Wall -Werror -I./ -I../common -DDEBUG -DATOMIC_LOCKING
-LDFLAGS = -lrt
+LDFLAGS = -lrt -lm
 
 CFLAGS  += -ffast-math
 CFLAGS  += -fdata-sections -ffunction-sections
