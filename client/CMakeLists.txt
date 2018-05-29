@@ -30,6 +30,7 @@ find_package(GMP)
 
 add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
 add_definitions(-D USE_NETTLE)
+add_definitions(-D ATOMIC_LOCKING)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}
