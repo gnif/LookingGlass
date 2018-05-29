@@ -475,7 +475,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       {
         x = event->motion.x - state.dstRect.x;
         y = event->motion.y - state.dstRect.y;
-        if (params.scaleMouseInput)
+        if (params.scaleMouseInput && !serverMode)
         {
           x = (float)x * state.scaleX;
           y = (float)y * state.scaleY;
@@ -495,7 +495,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       y = event->motion.yrel;
       if (x != 0 || y != 0)
       {
-        if (params.scaleMouseInput)
+        if (params.scaleMouseInput && !serverMode)
         {
           state.accX += (float)x * state.scaleX;
           state.accY += (float)y * state.scaleY;
@@ -504,6 +504,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           state.accX -= x;
           state.accY -= y;
         }
+
         if (!spice_mouse_motion(x, y))
         {
           DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
