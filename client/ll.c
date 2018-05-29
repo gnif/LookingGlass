@@ -1,0 +1,110 @@
+/*
+KVMGFX Client - A KVM Client for VGA Passthrough
+Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
+https://looking-glass.hostfission.com
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 2 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA 02111-1307 USA
+*/
+
+#include "ll.h"
+
+#include "utils.h"
+#include <stdlib.h>
+#include <assert.h>
+
+struct ll_item
+{
+  void           * data;
+  struct ll_item * next;
+};
+
+struct ll
+{
+  struct ll_item * head;
+  struct ll_item * tail;
+  LG_Lock lock;
+};
+
+struct ll * ll_new()
+{
+  struct ll * list = malloc(sizeof(struct ll));
+  list->head = NULL;
+  list->tail = NULL;
+  LG_LOCK_INIT(list->lock);
+  return list;
+}
+
+void ll_free(struct ll * list)
+{
+  // never free a list with items in it!
+  assert(!list->head);
+
+  LG_LOCK_FREE(list->lock);
+  free(list);
+}
+
+void ll_push(struct ll * list, void * data)
+{
+  struct ll_item * item = malloc(sizeof(struct ll_item));
+  item->data = data;
+  item->next = NULL;
+
+  LG_LOCK(list->lock);
+  if (!list->head)
+  {
+    list->head = item;
+    list->tail = item;
+    LG_UNLOCK(list->lock);
+    return;
+  }
+
+  list->tail->next = item;
+  list->tail       = item;
+  LG_UNLOCK(list->lock);
+}
+
+bool ll_shift(struct ll * list, void ** data)
+{
+  LG_LOCK(list->lock);
+  if (!list->head)
+  {
+    LG_UNLOCK(list->lock);
+    return false;
+  }
+
+  struct ll_item * item = list->head;
+  list->head = item->next;
+  LG_UNLOCK(list->lock);
+
+  if (data)
+    *data = item->data;
+
+  free(item);
+  return true;
+}
+
+bool ll_peek_head(struct ll * list, void ** data)
+{
+  LG_LOCK(list->lock);
+  if (!list->head)
+  {
+    LG_UNLOCK(list->lock);
+    return false;
+  }
+
+  *data = list->head->data;
+  LG_UNLOCK(list->lock);
+
+  return true;
+}

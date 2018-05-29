@@ -25,6 +25,7 @@ CFLAGS  += -DBUILD_VERSION='"$(shell git describe --always --long --dirty --abbr
 
 OBJS	= main.o \
 	  lg-renderer.o \
+	  ll.o \
 	  spice/rsa.o \
 	  spice/spice.o \
 	  parsers/nal.o \
