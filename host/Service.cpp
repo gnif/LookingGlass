@@ -262,6 +262,9 @@ bool Service::Process()
           DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
           return false;
         }
+
+        // re-init request should not count towards a failure to capture
+        --i;
         continue;
     }
 
