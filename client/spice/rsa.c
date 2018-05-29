@@ -41,6 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <nettle/asn1.h>
 #include <nettle/sha1.h>
 #include <nettle/rsa.h>
+#include <nettle/bignum.h>
 #include <gmp.h>
 
 #define SHA1_HASH_LEN 20
