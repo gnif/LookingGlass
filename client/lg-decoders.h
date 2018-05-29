@@ -20,13 +20,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 #include "lg-decoder.h"
 
-extern const LG_Decoder LGD_H264;
 extern const LG_Decoder LGD_NULL;
 
 const LG_Decoder * LG_Decoders[] =
 {
   &LGD_NULL,
-  &LGD_H264,
   NULL // end of array sentinal
 };
 
