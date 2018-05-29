@@ -21,7 +21,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using namespace Capture;
 
 #include "common/debug.h"
-#include "TraceUtil.h"
 
 #include <mfapi.h>
 #include <wmcodecdsp.h>
@@ -761,9 +760,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
 
   while(true)
   {
-    TRACE_START("GrabFrame");
     result = GrabFrameTexture(frame, cursor, src, timeout);
-    TRACE_END;
     if (result != GRAB_STATUS_OK)
       return result;
 
@@ -804,7 +801,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   }
   m_surfaceMapped = true;
 
-  TRACE_START("DXGI Memory Copy");
   // wake up the copy threads
   m_memcpy.Wake();
 
@@ -813,7 +809,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
 
   const unsigned int size = m_height * m_mapping.RowPitch;
   m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
-  TRACE_END;
 
   return GRAB_STATUS_OK;
 }
@@ -912,7 +907,6 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       LeaveCriticalSection(&m_encodeCS);
 
       // wake up the copy threads
-      TRACE_START("copy");
       m_memcpy.Wake();
 
       MFT_OUTPUT_STREAM_INFO streamInfo;
@@ -953,7 +947,6 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       frame.stride = 0;
       frame.pitch  = curLen;
 
-      TRACE_END;
       return GRAB_STATUS_OK;
     }
 
