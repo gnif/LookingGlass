@@ -25,9 +25,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 
 #if defined(USE_OPENSSL) && defined(USE_NETTLE)
-  #error "USE_OPENSSL and USE_GNUTLS are both defined"
+  #error "USE_OPENSSL and USE_NETTLE are both defined"
 #elif !defined(USE_OPENSSL) && !defined(USE_NETTLE)
-  #error "One of USE_OPENSSL or USE_GNUTLS must be defined"
+  #error "One of USE_OPENSSL or USE_NETTLE must be defined"
 #endif
 
 #if defined(USE_OPENSSL)
