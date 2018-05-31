@@ -183,10 +183,8 @@ bool Service::Process()
   // wait for the host to notify that is it is ready to proceed
   while (true)
   {
-    const uint8_t f = *flags;
-
     // check if the client has flagged a restart
-    if (f & KVMFR_HEADER_FLAG_RESTART)
+    if (*flags & KVMFR_HEADER_FLAG_RESTART)
     {
       DEBUG_INFO("Restart Requested");
       if (!m_capture->ReInitialize())

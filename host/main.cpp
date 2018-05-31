@@ -115,8 +115,10 @@ int run(struct StartupArgs & args)
     return -1;
 
   while (true)
+  {
     if (!svc->Process())
       break;
+  }
 
   svc->DeInitialize();
   return 0;

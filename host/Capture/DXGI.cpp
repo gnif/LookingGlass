@@ -614,7 +614,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
         return GRAB_STATUS_OK;
       }
 
-      if (!SUCCEEDED(status))
+      if (FAILED(status))
         break;
 
       m_releaseFrame = true;
@@ -657,7 +657,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
 
         DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
         status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &shapeInfo);
-        if (!SUCCEEDED(status))
+        if (FAILED(status))
         {
           DEBUG_WINERROR("Failed to get the new pointer shape", status);
           return GRAB_STATUS_ERROR;
@@ -681,14 +681,19 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
         cursor.dataSize = m_pointerSize;
       }
 
-      // if we also have frame data
+      // if we also have frame data, break out to process it
       if (frameInfo.LastPresentTime.QuadPart != 0)
         break;
 
+      // no frame data, clean up
       SafeRelease(&res);
+      ReleaseFrame();
 
+      // if the cursor has been updated
       if (cursor.updated)
         return GRAB_STATUS_CURSOR;
+
+      // otherwise just try again
     }
 
     if (SUCCEEDED(status))
@@ -762,12 +767,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   while(true)
   {
     result = GrabFrameTexture(frame, cursor, src, timeout);
-    if (result != GRAB_STATUS_OK)
-    {
-      ReleaseFrame();
-      return result;
-    }
-
     if (timeout)
     {
       if (!m_surfaceMapped)
@@ -786,10 +785,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
     break;
   }
 
-  m_deviceContext->CopyResource(m_texture, src);
-  SafeRelease(&src);
-
-  result = ReleaseFrame();
   if (result != GRAB_STATUS_OK)
     return result;
 
@@ -798,6 +793,13 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
     m_deviceContext->Unmap(m_texture, 0);
     m_surfaceMapped = false;
   }
+
+  m_deviceContext->CopyResource(m_texture, src);
+  SafeRelease(&src);
+
+  result = ReleaseFrame();
+  if (result != GRAB_STATUS_OK)
+    return result;
 
   HRESULT status;
   status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
