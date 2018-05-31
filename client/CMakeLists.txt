@@ -3,7 +3,8 @@ project(looking-glass-client C)
 
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
-SET(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -march=native -Wall -Werror -Wfatal-errors -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections")
+SET(CMAKE_C_FLAGS "-std=gnu99 -g -O3 -march=native -Wall -Werror -Wfatal-errors -ffast-math -fdata-sections -ffunction-sections")
+SET(CMAKE_EXE_LINKER_FLAGS "-Wl,--gc-sections")
 
 find_package(PkgConfig)
 pkg_check_modules(PKGCONFIG REQUIRED
