@@ -435,11 +435,7 @@ void DXGI::DeInitialize()
     m_mfTransform->DeleteInputStream(0);
   }
 
-  if (m_releaseFrame)
-  {
-    m_releaseFrame = false;
-    m_dup->ReleaseFrame();
-  }
+  ReleaseFrame();
 
   if (m_pointer)
   {
@@ -611,26 +607,6 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
   {
     while (true)
     {
-      if (m_releaseFrame)
-      {
-        m_releaseFrame = false;
-        status = m_dup->ReleaseFrame();
-
-        switch (status)
-        {
-        case S_OK:
-          break;
-
-        case DXGI_ERROR_INVALID_CALL:
-          DEBUG_ERROR("Frame was already released");
-          return GRAB_STATUS_ERROR;
-
-        case DXGI_ERROR_ACCESS_LOST:
-          WaitForDesktop();
-          return GRAB_STATUS_REINIT;
-        }
-      }
-
       status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
       {
@@ -745,8 +721,33 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
 
   if (!texture)
   {
+    ReleaseFrame();
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
     return GRAB_STATUS_ERROR;
+  }
+
+  return GRAB_STATUS_OK;
+}
+
+GrabStatus Capture::DXGI::ReleaseFrame()
+{
+  if (!m_releaseFrame)
+    return GRAB_STATUS_OK;
+
+  m_releaseFrame = false;
+  switch (m_dup->ReleaseFrame())
+  {
+  case S_OK:
+    break;
+
+  case DXGI_ERROR_INVALID_CALL:
+    DEBUG_ERROR("Frame was already released");
+    return GRAB_STATUS_ERROR;
+
+  case WAIT_ABANDONED:
+  case DXGI_ERROR_ACCESS_LOST:
+    WaitForDesktop();
+    return GRAB_STATUS_REINIT;
   }
 
   return GRAB_STATUS_OK;
@@ -762,7 +763,10 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   {
     result = GrabFrameTexture(frame, cursor, src, timeout);
     if (result != GRAB_STATUS_OK)
+    {
+      ReleaseFrame();
       return result;
+    }
 
     if (timeout)
     {
@@ -784,6 +788,10 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
 
   m_deviceContext->CopyResource(m_texture, src);
   SafeRelease(&src);
+
+  result = ReleaseFrame();
+  if (result != GRAB_STATUS_OK)
+    return result;
 
   if (m_surfaceMapped)
   {
@@ -855,6 +863,7 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
         result = GrabFrameTexture(frame, cursor, src, timeout);
         if (result != GRAB_STATUS_OK)
         {
+          ReleaseFrame();
           return result;
         }
 
@@ -898,6 +907,7 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       SafeRelease(&sample);
       SafeRelease(&buffer);
 
+      ReleaseFrame();
       EnterCriticalSection(&m_encodeCS);
     }
 

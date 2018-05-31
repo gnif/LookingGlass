@@ -157,6 +157,10 @@ void Service::DeInitialize()
   m_cursorDataSize = 0;
   m_frameSize      = 0;
 
+  WaitForSingleObject(m_cursorThread, INFINITE);
+  CloseHandle(m_cursorThread);
+  CloseHandle(m_cursorEvent);
+
   m_ivshmem->DeInitialize();
 
   if (m_capture)
@@ -164,10 +168,6 @@ void Service::DeInitialize()
     m_capture->DeInitialize();
     m_capture = NULL;
   }
-
-  WaitForSingleObject(m_cursorThread, INFINITE);
-  CloseHandle(m_cursorThread);
-  CloseHandle(m_cursorEvent );
 
   m_memory = NULL;
   m_initialized = false;
@@ -213,10 +213,8 @@ bool Service::Process()
     Sleep(2);
   }
 
-  struct FrameInfo  frame;
-  struct CursorInfo cursor;
-  ZeroMemory(&frame , sizeof(struct FrameInfo ));
-  ZeroMemory(&cursor, sizeof(struct CursorInfo));
+  struct FrameInfo  frame  = {0};
+  struct CursorInfo cursor = {0};
   frame.buffer     = m_frame[m_frameIndex];
   frame.bufferSize = m_frameSize;
 
@@ -323,8 +321,6 @@ bool Service::Process()
 
   // update the flags
   INTERLOCKED_AND8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
-//  _mm_sfence();
-
   return true;
 }
 

@@ -117,6 +117,7 @@ namespace Capture
     bool InitH264Capture();
 
     GrabStatus GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout);
+    GrabStatus ReleaseFrame();
     GrabStatus GrabFrameRaw    (struct FrameInfo & frame, struct CursorInfo & cursor);
     GrabStatus GrabFrameH264   (struct FrameInfo & frame, struct CursorInfo & cursor);
 
