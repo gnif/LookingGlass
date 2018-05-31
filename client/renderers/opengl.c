@@ -191,6 +191,12 @@ void opengl_deinitialize(void * opaque)
   if (this->mouseData)
     free(this->mouseData);
 
+  if (this->glContext)
+  {
+    SDL_GL_DeleteContext(this->glContext);
+    this->glContext = NULL;
+  }
+
   LG_LOCK_FREE(this->formatLock);
   LG_LOCK_FREE(this->syncLock  );
   LG_LOCK_FREE(this->mouseLock );
@@ -991,12 +997,6 @@ static void deconfigure(struct Inst * this)
       }
       this->texPixels[i] = NULL;
     }
-  }
-
-  if (this->glContext)
-  {
-    SDL_GL_DeleteContext(this->glContext);
-    this->glContext = NULL;
   }
 
   if (this->decoderData)
