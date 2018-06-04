@@ -101,6 +101,7 @@ struct AppParams
   bool         hideMouse;
   bool         ignoreQuit;
   bool         allowScreensaver;
+  bool         grabKeyboard;
   SDL_Scancode captureKey;
 
   bool         forceRenderer;
@@ -134,6 +135,7 @@ struct AppParams params =
   .ignoreQuit       = false,
   .allowScreensaver = true,
   .captureKey       = SDL_SCANCODE_SCROLLLOCK,
+  .grabKeyboard     = true,
   .forceRenderer    = false
 };
 
@@ -526,6 +528,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         serverMode = !serverMode;
         spice_mouse_mode(serverMode);
         SDL_SetRelativeMouseMode(serverMode);
+        SDL_SetWindowGrab(state.window, serverMode);
         DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
 
         if (state.lgr)
@@ -1070,6 +1073,7 @@ void doHelp(char * app)
     "  -b HEIGHT Initial window height [current: %u]\n"
     "  -Q        Ignore requests to quit (ie: Alt+F4)\n"
     "  -S        Disable the screensaver\n"
+    "  -G        Don't capture the keyboard in capture mode\n"
     "  -m CODE   Specify the capture key [current: %u (%s)]\n"
     "            See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
     "\n"
@@ -1314,7 +1318,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSm:l"))
+    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:l"))
     {
       case '?':
       case 'h':
@@ -1539,6 +1543,10 @@ int main(int argc, char * argv[])
         params.allowScreensaver = false;
         continue;
 
+      case 'G':
+        params.grabKeyboard = false;
+        continue;
+
       case 'm':
         params.captureKey = atoi(optarg);
         continue;
@@ -1555,6 +1563,11 @@ int main(int argc, char * argv[])
     fprintf(stderr, "A non option was supplied\n");
     doHelp(argv[0]);
     return -1;
+  }
+
+  if (params.grabKeyboard)
+  {
+    SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
   }
 
   const int ret = run();
