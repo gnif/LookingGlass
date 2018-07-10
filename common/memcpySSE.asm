@@ -25,22 +25,22 @@ memcpySSE proc
   add r10, r9
 
   @FullLoop:
-  vmovaps xmm0 , xmmword ptr [rdx + 000h]
-  vmovaps xmm1 , xmmword ptr [rdx + 010h]
-  vmovaps xmm2 , xmmword ptr [rdx + 020h]
-  vmovaps xmm3 , xmmword ptr [rdx + 030h]
-  vmovaps xmm4 , xmmword ptr [rdx + 040h]
-  vmovaps xmm5 , xmmword ptr [rdx + 050h]
-  vmovaps xmm6 , xmmword ptr [rdx + 060h]
-  vmovaps xmm7 , xmmword ptr [rdx + 070h]
-  vmovntdq xmmword ptr [rcx + 000h], xmm0
-  vmovntdq xmmword ptr [rcx + 010h], xmm1
-  vmovntdq xmmword ptr [rcx + 020h], xmm2
-  vmovntdq xmmword ptr [rcx + 030h], xmm3
-  vmovntdq xmmword ptr [rcx + 040h], xmm4
-  vmovntdq xmmword ptr [rcx + 050h], xmm5
-  vmovntdq xmmword ptr [rcx + 060h], xmm6
-  vmovntdq xmmword ptr [rcx + 070h], xmm7
+  movaps xmm0 , xmmword ptr [rdx + 000h]
+  movaps xmm1 , xmmword ptr [rdx + 010h]
+  movaps xmm2 , xmmword ptr [rdx + 020h]
+  movaps xmm3 , xmmword ptr [rdx + 030h]
+  movaps xmm4 , xmmword ptr [rdx + 040h]
+  movaps xmm5 , xmmword ptr [rdx + 050h]
+  movaps xmm6 , xmmword ptr [rdx + 060h]
+  movaps xmm7 , xmmword ptr [rdx + 070h]
+  movntdq xmmword ptr [rcx + 000h], xmm0
+  movntdq xmmword ptr [rcx + 010h], xmm1
+  movntdq xmmword ptr [rcx + 020h], xmm2
+  movntdq xmmword ptr [rcx + 030h], xmm3
+  movntdq xmmword ptr [rcx + 040h], xmm4
+  movntdq xmmword ptr [rcx + 050h], xmm5
+  movntdq xmmword ptr [rcx + 060h], xmm6
+  movntdq xmmword ptr [rcx + 070h], xmm7
   add rdx, 080h
   add rcx, 080h
   cmp rcx, r10
@@ -71,20 +71,20 @@ memcpySSE proc
   ret
 
   @FinalBlocks:
-  vmovaps  xmm6 , xmmword ptr [rdx + 060h]
-  vmovntdq xmmword ptr [rcx + 060h], xmm6
-  vmovaps  xmm5 , xmmword ptr [rdx + 050h]
-  vmovntdq xmmword ptr [rcx + 050h], xmm5
-  vmovaps  xmm4 , xmmword ptr [rdx + 040h]
-  vmovntdq xmmword ptr [rcx + 040h], xmm4
-  vmovaps  xmm3 , xmmword ptr [rdx + 030h]
-  vmovntdq xmmword ptr [rcx + 030h], xmm3
-  vmovaps  xmm2 , xmmword ptr [rdx + 020h]
-  vmovntdq xmmword ptr [rcx + 020h], xmm2
-  vmovaps  xmm1 , xmmword ptr [rdx + 010h]
-  vmovntdq xmmword ptr [rcx + 010h], xmm1
-  vmovaps  xmm0 , xmmword ptr [rdx + 000h]
-  vmovntdq xmmword ptr [rcx + 000h], xmm0
+  movaps  xmm6 , xmmword ptr [rdx + 060h]
+  movntdq xmmword ptr [rcx + 060h], xmm6
+  movaps  xmm5 , xmmword ptr [rdx + 050h]
+  movntdq xmmword ptr [rcx + 050h], xmm5
+  movaps  xmm4 , xmmword ptr [rdx + 040h]
+  movntdq xmmword ptr [rcx + 040h], xmm4
+  movaps  xmm3 , xmmword ptr [rdx + 030h]
+  movntdq xmmword ptr [rcx + 030h], xmm3
+  movaps  xmm2 , xmmword ptr [rdx + 020h]
+  movntdq xmmword ptr [rcx + 020h], xmm2
+  movaps  xmm1 , xmmword ptr [rdx + 010h]
+  movntdq xmmword ptr [rcx + 010h], xmm1
+  movaps  xmm0 , xmmword ptr [rdx + 000h]
+  movntdq xmmword ptr [rcx + 000h], xmm0
 
   movdqa xmm6 , oword ptr [rsp + 4*8 + 00]
   movdqa xmm7 , oword ptr [rsp + 4*8 + 16]
