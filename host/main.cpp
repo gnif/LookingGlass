@@ -40,6 +40,7 @@ void doLicense();
 
 bool consoleActive = false;
 void setupConsole();
+bool avxSupport();
 
 struct StartupArgs
 {
@@ -55,6 +56,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
   CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
   SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+  bool avx = avxSupport();
+  if (!avx)
+  {
+	  setupConsole();
+	  fprintf(stderr, "Warning: AVX appears to not be supported. Looking Glass may not run. Check CPU configuration.\n");
+  }
 
   struct StartupArgs args;
   args.foreground = false;
@@ -270,4 +277,21 @@ void setupConsole()
   std::cin.clear();
 
   consoleActive = true;
+}
+
+bool avxSupport() 
+{
+	int cpuInfo[4];
+	__cpuid(cpuInfo, 1);
+
+	bool osUsesXSAVE_XRSTORE = cpuInfo[2] & (1 << 27) || false;
+	bool cpuAVXSuport = cpuInfo[2] & (1 << 28) || false;
+
+	if (osUsesXSAVE_XRSTORE && cpuAVXSuport)
+	{
+		unsigned long long xcrFeatureMask = _xgetbv(_XCR_XFEATURE_ENABLED_MASK);
+		return (xcrFeatureMask & 0x6) == 0x6;
+	}
+
+	return false;
 }
