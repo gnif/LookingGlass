@@ -221,7 +221,9 @@ void opengl_on_resize(void * opaque, const int width, const int height, const LG
 
   this->window.x = width;
   this->window.y = height;
-  memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
+
+  if (destRect.valid)
+    memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
   this->resizeWindow = true;
 }
@@ -407,12 +409,16 @@ bool opengl_render(void * opaque, SDL_Window * window)
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
-    glScalef(
-      (float)this->destRect.w / (float)this->format.width,
-      (float)this->destRect.h / (float)this->format.height,
-      1.0f
-    );
+
+    if (this->destRect.valid)
+    {
+      glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+      glScalef(
+        (float)this->destRect.w / (float)this->format.width,
+        (float)this->destRect.h / (float)this->format.height,
+        1.0f
+      );
+    }
 
     this->resizeWindow = false;
   }

@@ -53,6 +53,7 @@ struct AppState
 
   TTF_Font           * font;
   TTF_Font           * alertFont;
+  bool                 haveSrcSize;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
   SDL_Point            cursor;
@@ -141,41 +142,42 @@ struct AppParams params =
 
 static inline void updatePositionInfo()
 {
-  if (!state.started)
-    return;
-
   int w, h;
   SDL_GetWindowSize(state.window, &w, &h);
 
-  if (params.keepAspect)
+  if (state.haveSrcSize)
   {
-    const float srcAspect = (float)state.srcSize.y / (float)state.srcSize.x;
-    const float wndAspect = (float)h / (float)w;
-    if (wndAspect < srcAspect)
+    if (params.keepAspect)
     {
-      state.dstRect.w = (float)h / srcAspect;
-      state.dstRect.h = h;
-      state.dstRect.x = (w >> 1) - (state.dstRect.w >> 1);
-      state.dstRect.y = 0;
+      const float srcAspect = (float)state.srcSize.y / (float)state.srcSize.x;
+      const float wndAspect = (float)h / (float)w;
+      if (wndAspect < srcAspect)
+      {
+        state.dstRect.w = (float)h / srcAspect;
+        state.dstRect.h = h;
+        state.dstRect.x = (w >> 1) - (state.dstRect.w >> 1);
+        state.dstRect.y = 0;
+      }
+      else
+      {
+        state.dstRect.w = w;
+        state.dstRect.h = (float)w * srcAspect;
+        state.dstRect.x = 0;
+        state.dstRect.y = (h >> 1) - (state.dstRect.h >> 1);
+      }
     }
     else
     {
-      state.dstRect.w = w;
-      state.dstRect.h = (float)w * srcAspect;
       state.dstRect.x = 0;
-      state.dstRect.y = (h >> 1) - (state.dstRect.h >> 1);
+      state.dstRect.y = 0;
+      state.dstRect.w = w;
+      state.dstRect.h = h;
     }
-  }
-  else
-  {
-    state.dstRect.x = 0;
-    state.dstRect.y = 0;
-    state.dstRect.w = w;
-    state.dstRect.h = h;
-  }
+    state.dstRect.valid = true;
 
-  state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
-  state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+    state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
+    state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+  }
 
   if (state.lgr)
     state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
@@ -379,6 +381,7 @@ int frameThread(void * unused)
     {
       state.srcSize.x = header.width;
       state.srcSize.y = header.height;
+      state.haveSrcSize = true;
       if (params.autoResize)
         SDL_SetWindowSize(state.window, header.width, header.height);
       updatePositionInfo();

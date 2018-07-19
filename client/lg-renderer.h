@@ -85,6 +85,7 @@ LG_RendererFormat;
 
 typedef struct LG_RendererRect
 {
+  bool         valid;
   int          x;
   int          y;
   unsigned int w;
