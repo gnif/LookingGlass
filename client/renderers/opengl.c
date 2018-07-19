@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <unistd.h>
 #include <malloc.h>
+#include <math.h>
 
 #include <SDL2/SDL_ttf.h>
 
@@ -140,7 +141,7 @@ static bool configure(struct Inst * this, SDL_Window *window);
 static void update_mouse_shape(struct Inst * this, bool * newShape);
 static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
-static void render_wait();
+static void render_wait(struct Inst * this);
 
 const char * opengl_get_name()
 {
@@ -427,7 +428,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
 
   if (!configure(this, window))
   {
-    render_wait();
+    render_wait(this);
     SDL_GL_SwapWindow(window);
     return true;
   }
@@ -437,7 +438,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
 
   if (!this->texReady)
   {
-    render_wait();
+    render_wait(this);
     SDL_GL_SwapWindow(window);
     return true;
   }
@@ -582,10 +583,66 @@ bool opengl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
-static void render_wait()
+
+void draw_torus(float x, float y, float inner, float outer, unsigned int pts)
 {
-  glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+  glBegin(GL_QUAD_STRIP);
+  for (unsigned int i = 0; i <= pts; ++i)
+  {
+    float angle = (i / (float)pts) * M_PI * 2.0f;
+    glVertex2f(x + (inner * cos(angle)), y + (inner * sin(angle)));
+    glVertex2f(x + (outer * cos(angle)), y + (outer * sin(angle)));
+  }
+  glEnd();
+}
+
+void draw_torus_arc(float x, float y, float inner, float outer, unsigned int pts, float s, float e)
+{
+  glBegin(GL_QUAD_STRIP);
+  for (unsigned int i = 0; i <= pts; ++i)
+  {
+    float angle = s + ((i / (float)pts) * e);
+    glVertex2f(x + (inner * cos(angle)), y + (inner * sin(angle)));
+    glVertex2f(x + (outer * cos(angle)), y + (outer * sin(angle)));
+  }
+  glEnd();
+}
+
+static void render_wait(struct Inst * this)
+{
+  glClearColor(0.234375f, 0.011718f, 0.425781f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
+
+  glPushMatrix();
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+  glTranslatef(this->window.x / 2.0f, this->window.y / 2.0f, 0.0f);
+//  glScalef(4.0f, 4.0f, 1.0f);
+
+  draw_torus    (  0,  0, 40, 42, 60);
+  draw_torus    (  0,  0, 32, 34, 60);
+  draw_torus    (-50, -3,  2,  4, 30);
+  draw_torus    ( 50, -3,  2,  4, 30);
+  draw_torus_arc(  0,  0, 51, 49, 60, 0.0f, M_PI);
+
+  glBegin(GL_QUADS);
+    glVertex2f(-1 , 50);
+    glVertex2f(-1 , 76);
+    glVertex2f( 1 , 76);
+    glVertex2f( 1 , 50);
+    glVertex2f(-14, 76);
+    glVertex2f(-14, 78);
+    glVertex2f( 14, 78);
+    glVertex2f( 14, 76);
+    glVertex2f(-21, 83);
+    glVertex2f(-21, 85);
+    glVertex2f( 21, 85);
+    glVertex2f( 21, 83);
+  glEnd();
+
+  draw_torus_arc(-14, 83, 5, 7, 10, M_PI       , M_PI / 2.0f);
+  draw_torus_arc( 14, 83, 5, 7, 10, M_PI * 1.5f, M_PI / 2.0f);
+
+  glPopMatrix();
 }
 
 static void handle_opt_mipmap(void * opaque, const char *value)
