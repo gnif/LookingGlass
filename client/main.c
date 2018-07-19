@@ -104,6 +104,7 @@ struct AppParams
   bool         allowScreensaver;
   bool         grabKeyboard;
   SDL_Scancode captureKey;
+  bool         disableAlerts;
 
   bool         forceRenderer;
   unsigned int forceRendererIndex;
@@ -135,8 +136,9 @@ struct AppParams params =
   .hideMouse        = true,
   .ignoreQuit       = false,
   .allowScreensaver = true,
-  .captureKey       = SDL_SCANCODE_SCROLLLOCK,
   .grabKeyboard     = true,
+  .captureKey       = SDL_SCANCODE_SCROLLLOCK,
+  .disableAlerts    = false,
   .forceRenderer    = false
 };
 
@@ -534,7 +536,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         SDL_SetWindowGrab(state.window, serverMode);
         DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
 
-        if (state.lgr)
+        if (state.lgr && !params.disableAlerts)
           state.lgr->on_alert(
             state.lgrData,
             serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
@@ -1079,6 +1081,7 @@ void doHelp(char * app)
     "  -G        Don't capture the keyboard in capture mode\n"
     "  -m CODE   Specify the capture key [current: %u (%s)]\n"
     "            See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
+    "  -q        Disable alert messages [current: %s]\n"
     "\n"
     "  -l        License information\n"
     "\n",
@@ -1094,6 +1097,7 @@ void doHelp(char * app)
     params.w,
     params.h,
     params.captureKey,
+    params.disableAlerts ? "disabled" : "enabled",
     SDL_GetScancodeName(params.captureKey)
   );
 }
@@ -1181,6 +1185,7 @@ static bool load_config(const char * configFile)
     if (config_setting_lookup_bool(global, "fullScreen"      , &itmp)) params.fullscreen       = (itmp != 0);
     if (config_setting_lookup_bool(global, "ignoreQuit"      , &itmp)) params.ignoreQuit       = (itmp != 0);
     if (config_setting_lookup_bool(global, "allowScreensaver", &itmp)) params.allowScreensaver = (itmp != 0);
+    if (config_setting_lookup_bool(global, "disableAlerts"   , &itmp)) params.disableAlerts    = (itmp != 0);
 
     if (config_setting_lookup_int(global, "x", &params.x)) params.center = false;
     if (config_setting_lookup_int(global, "y", &params.y)) params.center = false;
@@ -1321,7 +1326,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:l"))
+    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:lq"))
     {
       case '?':
       case 'h':
@@ -1552,6 +1557,10 @@ int main(int argc, char * argv[])
 
       case 'm':
         params.captureKey = atoi(optarg);
+        continue;
+
+      case 'q':
+        params.disableAlerts = true;
         continue;
 
       case 'l':
