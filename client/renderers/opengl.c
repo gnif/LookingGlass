@@ -583,7 +583,6 @@ bool opengl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
-
 void draw_torus(float x, float y, float inner, float outer, unsigned int pts)
 {
   glBegin(GL_QUAD_STRIP);
@@ -614,9 +613,23 @@ static void render_wait(struct Inst * this)
   glClear(GL_COLOR_BUFFER_BIT);
 
   glPushMatrix();
-  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
   glTranslatef(this->window.x / 2.0f, this->window.y / 2.0f, 0.0f);
-//  glScalef(4.0f, 4.0f, 1.0f);
+
+  //draw the background gradient
+  glBegin(GL_TRIANGLE_FAN);
+  glColor4f(0.234375f, 0.015625f, 0.425781f, 1.0f);
+  glVertex2f(0, 0);
+  glColor4f(0, 0, 0, 1);
+  for (unsigned int i = 0; i <= 100; ++i)
+  {
+    float angle = (i / (float)100) * M_PI * 2.0f;
+    glVertex2f(cos(angle) * this->window.x, sin(angle) * this->window.y);
+  }
+  glEnd();
+
+  // draw the logo
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+  glScalef (2.0f, 2.0f, 1.0f);
 
   draw_torus    (  0,  0, 40, 42, 60);
   draw_torus    (  0,  0, 32, 34, 60);
@@ -641,6 +654,8 @@ static void render_wait(struct Inst * this)
 
   draw_torus_arc(-14, 83, 5, 7, 10, M_PI       , M_PI / 2.0f);
   draw_torus_arc( 14, 83, 5, 7, 10, M_PI * 1.5f, M_PI / 2.0f);
+
+  //FIXME: draw the diagnoal marks on the circle
 
   glPopMatrix();
 }
