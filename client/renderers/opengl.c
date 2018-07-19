@@ -190,6 +190,12 @@ void opengl_deinitialize(void * opaque)
   if (!this)
     return;
 
+  if (this->preConfigured)
+  {
+    glDeleteLists(this->fpsList  , 1);
+    glDeleteLists(this->alertList, 1);
+  }
+
   deconfigure(this);
   if (this->mouseData)
     free(this->mouseData);
@@ -426,21 +432,22 @@ bool opengl_render(void * opaque, SDL_Window * window)
     this->resizeWindow = false;
   }
 
+  bool wait = false;
   if (!configure(this, window))
   {
     render_wait(this);
-    SDL_GL_SwapWindow(window);
-    return true;
+    wait = true;
   }
-
-  if (!draw_frame(this))
-    return false;
-
-  if (!this->texReady)
+  else
   {
-    render_wait(this);
-    SDL_GL_SwapWindow(window);
-    return true;
+    if (!draw_frame(this))
+      return false;
+
+    if (!this->texReady)
+    {
+      render_wait(this);
+      wait = true;
+    }
   }
 
   if (this->params.showFPS && this->renderTime > 1e9)
@@ -501,13 +508,17 @@ bool opengl_render(void * opaque, SDL_Window * window)
     glEndList();
   }
 
-  bool newShape;
-  update_mouse_shape(this, &newShape);
+  if (!wait)
+  {
+    bool newShape;
+    update_mouse_shape(this, &newShape);
 
-  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
-  glCallList(this->texList + this->texIndex);
-  draw_mouse(this);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glCallList(this->texList + this->texIndex);
+    draw_mouse(this);
+  }
+
   if (this->fpsTexture)
     glCallList(this->fpsList);
 
@@ -786,7 +797,23 @@ static bool pre_configure(struct Inst * this, SDL_Window *window)
     }
   }
 
+  glEnable(GL_TEXTURE_2D);
+  glEnable(GL_COLOR_MATERIAL);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendEquation(GL_FUNC_ADD);
   glEnable(GL_MULTISAMPLE);
+
+  this->fpsList   = glGenLists(1);
+  this->alertList = glGenLists(1);
+
+  // create the overlay textures
+  glGenTextures(TEXTURE_COUNT, this->textures);
+  if (check_gl_error("glGenTextures"))
+  {
+    LG_UNLOCK(this->formatLock);
+    return false;
+  }
+  this->hasTextures = true;
 
   SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
   this->preConfigured = true;
@@ -859,9 +886,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   // generate lists for drawing
   this->texList    = glGenLists(BUFFER_COUNT);
-  this->fpsList    = glGenLists(1);
   this->mouseList  = glGenLists(1);
-  this->alertList  = glGenLists(1);
 
   // generate the pixel unpack buffers if the decoder isn't going to do it for us
   if (!this->decoder->has_gl)
@@ -931,15 +956,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     }
   }
-
-  // create the overlay textures
-  glGenTextures(TEXTURE_COUNT, this->textures);
-  if (check_gl_error("glGenTextures"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-  this->hasTextures = true;
 
   // create the frame textures
   glGenTextures(BUFFER_COUNT, this->frames);
@@ -1013,11 +1029,6 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   glBindTexture(GL_TEXTURE_2D, 0);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-  glEnable(GL_TEXTURE_2D);
-  glEnable(GL_COLOR_MATERIAL);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glBlendEquation(GL_FUNC_ADD);
 
   this->resizeWindow = true;
   this->drawStart    = nanotime();
