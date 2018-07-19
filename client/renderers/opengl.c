@@ -177,7 +177,9 @@ bool opengl_initialize(void * opaque, Uint32 * sdlFlags)
     return false;
 
   *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER      , 1);
+  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
   return true;
 }
 
@@ -711,6 +713,8 @@ static bool pre_configure(struct Inst * this, SDL_Window *window)
       break;
     }
   }
+
+  glEnable(GL_MULTISAMPLE);
 
   SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
   this->preConfigured = true;
