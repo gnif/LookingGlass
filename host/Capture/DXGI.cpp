@@ -72,6 +72,16 @@ DXGI::~DXGI()
 {
 }
 
+bool DXGI::CanInitialize()
+{
+  HDESK desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
+  if (!desktop)
+    return false;
+
+  CloseDesktop(desktop);
+  return true;
+}
+
 bool DXGI::Initialize(CaptureOptions * options)
 {
   if (m_initialized)
@@ -580,20 +590,6 @@ STDMETHODIMP Capture::DXGI::Invoke(IMFAsyncResult * pAsyncResult)
   return status;
 }
 
-void DXGI::WaitForDesktop()
-{
-  HDESK desktop;
-  do
-  {
-    desktop = OpenInputDesktop(0, TRUE, GENERIC_READ);
-    if (desktop)
-      break;
-    Sleep(100);
-  }
-  while (!desktop);
-  CloseDesktop(desktop);
-}
-
 GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout)
 {
   if (!m_initialized)
@@ -705,7 +701,6 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
       // desktop switch, mode change, switch DWM on or off or Secure Desktop
     case DXGI_ERROR_ACCESS_LOST:
     case WAIT_ABANDONED:
-      WaitForDesktop();
       return GRAB_STATUS_REINIT;
 
     default:
@@ -752,7 +747,6 @@ GrabStatus Capture::DXGI::ReleaseFrame()
 
   case WAIT_ABANDONED:
   case DXGI_ERROR_ACCESS_LOST:
-    WaitForDesktop();
     return GRAB_STATUS_REINIT;
   }
 

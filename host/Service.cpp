@@ -238,14 +238,17 @@ bool Service::Process()
 
       case GRAB_STATUS_REINIT:
         DEBUG_INFO("ReInitialize Requested");
+
+        *flags |= KVMFR_HEADER_FLAG_PAUSED;
         if(WTSGetActiveConsoleSessionId() != m_consoleSessionID)
         {
           DEBUG_INFO("User switch detected, waiting to regain control");
-          *flags |= KVMFR_HEADER_FLAG_PAUSED;
           while (WTSGetActiveConsoleSessionId() != m_consoleSessionID)
             Sleep(100);
-          *flags &= ~KVMFR_HEADER_FLAG_PAUSED;
         }
+
+        while (!m_capture->CanInitialize())
+          Sleep(100);
 
         if (!m_capture->ReInitialize())
         {
@@ -258,6 +261,8 @@ bool Service::Process()
           DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
           return false;
         }
+
+        *flags &= ~KVMFR_HEADER_FLAG_PAUSED;
 
         // re-init request should not count towards a failure to capture
         --i;

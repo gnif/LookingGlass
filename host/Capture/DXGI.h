@@ -62,6 +62,7 @@ namespace Capture
 
     const char * GetName() { return "DXGI"; }
 
+    bool CanInitialize();
     bool Initialize(CaptureOptions * options);
 
     void DeInitialize();
@@ -119,9 +120,6 @@ namespace Capture
     GrabStatus ReleaseFrame();
     GrabStatus GrabFrameRaw    (struct FrameInfo & frame, struct CursorInfo & cursor);
     GrabStatus GrabFrameH264   (struct FrameInfo & frame, struct CursorInfo & cursor);
-
-    void WaitForDesktop();
-
 
     long             m_cRef;
     CaptureOptions * m_options;

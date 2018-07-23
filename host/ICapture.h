@@ -64,6 +64,7 @@ class ICapture
 public:
   virtual const char * GetName() = 0;
 
+  virtual bool CanInitialize() = 0;
   virtual bool Initialize(CaptureOptions * options) = 0;
   virtual void DeInitialize() = 0;
   virtual bool ReInitialize() = 0;
