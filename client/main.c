@@ -540,7 +540,8 @@ int eventFilter(void * userdata, SDL_Event * event)
           state.lgr->on_alert(
             state.lgrData,
             serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-            serverMode ? "Capture Enabled" : "Capture Disabled"
+            serverMode ? "Capture Enabled" : "Capture Disabled",
+            NULL
           );
 
         if (!serverMode)
@@ -970,6 +971,7 @@ int run()
       break;
     }
 
+    bool *closeAlert = NULL;
     while(state.running)
     {
       SDL_Event event;
@@ -982,6 +984,29 @@ int run()
           break;
         }
       }
+
+      if (closeAlert == NULL)
+      {
+        if (state.shm->flags & KVMFR_HEADER_FLAG_PAUSED)
+        {
+          if (state.lgr && !params.disableAlerts)
+            state.lgr->on_alert(
+              state.lgrData,
+              LG_ALERT_WARNING,
+              "Stream Paused",
+              &closeAlert
+            );
+        }
+      }
+      else
+      {
+        if (!(state.shm->flags & KVMFR_HEADER_FLAG_PAUSED))
+        {
+          *closeAlert = true;
+          closeAlert  = NULL;
+        }
+      }
+
       usleep(1000);
     }
 

@@ -118,7 +118,7 @@ typedef void         (* LG_RendererOnResize    )(void * opaque, const int width,
 typedef bool         (* LG_RendererOnMouseShape)(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent)(void * opaque, const bool visible , const int x, const int y);
 typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const uint8_t * data);
-typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_RendererAlert alert, const char * message);
+typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag);
 typedef bool         (* LG_RendererRender      )(void * opaque, SDL_Window *window);
 
 typedef struct LG_Renderer

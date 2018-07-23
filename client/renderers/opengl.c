@@ -43,6 +43,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define ALERT_TEXTURE      2
 #define TEXTURE_COUNT      3
 
+#define ALERT_TIMEOUT_FLAG ((uint64_t)-1)
+
 #define FADE_TIME 1000000
 
 struct Options
@@ -63,9 +65,13 @@ static struct Options defaultOptions =
 
 struct Alert
 {
+  bool         ready;
+  bool         useCloseFlag;
+
   SDL_Surface *text;
   float        r, g, b, a;
   uint64_t     timeout;
+  bool         closeFlag;
 };
 
 struct Inst
@@ -343,7 +349,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   return true;
 }
 
-void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * message)
+void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag)
 {
   struct Inst * this = (struct Inst *)opaque;
   struct Alert * a = malloc(sizeof(struct Alert));
@@ -386,6 +392,12 @@ void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * m
     DEBUG_ERROR("Failed to render alert text: %s", TTF_GetError());
     free(a);
     return;
+  }
+
+  if (closeFlag)
+  {
+    a->useCloseFlag = true;
+    *closeFlag = &a->closeFlag;
   }
 
   ll_push(this->alerts, a);
@@ -534,7 +546,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
   struct Alert * alert;
   while(ll_peek_head(this->alerts, (void **)&alert))
   {
-    if (alert->timeout == 0)
+    if (!alert->ready)
     {
       surface_to_texture(alert->text, this->textures[ALERT_TEXTURE]);
 
@@ -566,16 +578,28 @@ bool opengl_render(void * opaque, SDL_Window * window)
         glDisable(GL_BLEND);
       glEndList();
 
-      alert->timeout = microtime() + 2*1000000;
+      if (!alert->useCloseFlag)
+        alert->timeout = microtime() + 2*1000000;
+      alert->ready   = true;
 
       SDL_FreeSurface(alert->text);
-      alert->text = NULL;
+      alert->text  = NULL;
+      alert->ready = true;
     }
-    else if (alert->timeout < microtime())
+    else
     {
-      free(alert);
-      ll_shift(this->alerts, NULL);
-      continue;
+      bool close = false;
+      if (alert->useCloseFlag)
+        close = alert->closeFlag;
+      else if (alert->timeout < microtime())
+        close = true;
+
+      if (close)
+      {
+        free(alert);
+        ll_shift(this->alerts, NULL);
+        continue;
+      }
     }
 
     glPushMatrix();
