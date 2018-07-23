@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using namespace Capture;
 
 #include "common/debug.h"
+#include "common/memcpySSE.h"
 
 #include <mfapi.h>
 #include <wmcodecdsp.h>
@@ -771,14 +772,13 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
     {
       if (!m_surfaceMapped)
         continue;
-      m_memcpy.Wake();
 
       // send the last frame again if we timeout to prevent the client stalling on restart
       frame.pitch  = m_mapping.RowPitch;
       frame.stride = m_mapping.RowPitch >> 2;
 
       unsigned int size = m_height * m_mapping.RowPitch;
-      m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
+      memcpySSE(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
       return GRAB_STATUS_OK;
     }
 
@@ -811,14 +811,11 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   }
   m_surfaceMapped = true;
 
-  // wake up the copy threads
-  m_memcpy.Wake();
-
   frame.pitch  = m_mapping.RowPitch;
   frame.stride = m_mapping.RowPitch >> 2;
 
   const unsigned int size = m_height * m_mapping.RowPitch;
-  m_memcpy.Copy(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
+  memcpySSE(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
 
   return GRAB_STATUS_OK;
 }
@@ -918,9 +915,6 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       m_encodeHasData = false;
       LeaveCriticalSection(&m_encodeCS);
 
-      // wake up the copy threads
-      m_memcpy.Wake();
-
       MFT_OUTPUT_STREAM_INFO streamInfo;
       status = m_mfTransform->GetOutputStreamInfo(0, &streamInfo);
       if (FAILED(status))
@@ -952,7 +946,7 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       BYTE *pixels;
       DWORD maxLen, curLen;
       buffer->Lock(&pixels, &maxLen, &curLen);      
-      m_memcpy.Copy(frame.buffer, pixels, curLen);
+      memcpySSE(frame.buffer, pixels, curLen);
       buffer->Unlock();
       SafeRelease(&buffer);
 
