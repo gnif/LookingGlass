@@ -68,27 +68,13 @@ bool nal_initialize(NAL * ptr)
 
 void nal_deinitialize(NAL this)
 {
-  if (this->slice_pred_weight_table_l1)
-    free(this->slice_pred_weight_table_l1);
-
-  if (this->slice_pred_weight_table_l0)
-    free(this->slice_pred_weight_table_l0);
-
-  if (this->pps_slice_group_id)
-    free(this->pps_slice_group_id);
-
-  if (this->pps_slice_groups)
-    free(this->pps_slice_groups);
-
-  if (this->sps_offset_for_ref_frame)
-    free(this->sps_offset_for_ref_frame);
-
-  if (this->vui_nal_hrd_parameters_cpb)
-    free(this->vui_nal_hrd_parameters_cpb);
-
-  if (this->vui_vcl_hrd_parameters_cpb)
-    free(this->vui_vcl_hrd_parameters_cpb);
-
+  free(this->slice_pred_weight_table_l1);
+  free(this->slice_pred_weight_table_l0);
+  free(this->pps_slice_group_id);
+  free(this->pps_slice_groups);
+  free(this->sps_offset_for_ref_frame);
+  free(this->vui_nal_hrd_parameters_cpb);
+  free(this->vui_vcl_hrd_parameters_cpb);
   free(this);
 }
 
