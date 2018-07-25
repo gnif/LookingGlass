@@ -26,6 +26,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "IVSHMEM.h"
 #include "ICapture.h"
 
+#define MAX_FRAMES 2
+
 class Service
 {
 public:
@@ -57,9 +59,10 @@ private:
 
   KVMFRHeader * m_shmHeader;
 
-  uint8_t     * m_frame[2];
+  bool          m_haveFrame;
+  uint8_t     * m_frame[MAX_FRAMES];
   size_t        m_frameSize;
-  uint64_t      m_dataOffset[2];
+  uint64_t      m_dataOffset[MAX_FRAMES];
   int           m_frameIndex;
 
   static DWORD WINAPI _CursorThread(LPVOID lpParameter) { return ((Service *)lpParameter)->CursorThread(); }

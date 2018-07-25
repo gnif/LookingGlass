@@ -87,13 +87,6 @@ bool Service::Initialize(ICapture * captureDevice)
     return false;
   }
 
-  m_timer = CreateWaitableTimer(NULL, TRUE, NULL);
-  if (!m_timer)
-  {
-    DEBUG_ERROR("Failed to create waitable timer");
-    return false;
-  }
-
   // Create the cursor thread
   m_cursorThread = CreateThread(NULL, 0, _CursorThread, this, 0, NULL);
   m_cursorEvent  = CreateEvent (NULL, FALSE, FALSE, L"CursorEvent");
@@ -108,6 +101,7 @@ bool Service::Initialize(ICapture * captureDevice)
   ZeroMemory(&m_shmHeader->cursor, sizeof(KVMFRCursor));
   m_shmHeader->flags &= ~KVMFR_HEADER_FLAG_RESTART;
 
+  m_haveFrame   = false;
   m_initialized = true;
   return true;
 }
@@ -120,46 +114,44 @@ bool Service::InitPointers()
   m_shmHeader      = reinterpret_cast<KVMFRHeader *>(m_memory);
   m_cursorData     = (uint8_t *)ALIGN_UP(m_memory + sizeof(KVMFRHeader));
   m_cursorDataSize = 1048576; // 1MB fixed for cursor size, should be more then enough
-  m_frame[0]       = (uint8_t *)ALIGN_UP(m_cursorData + m_cursorDataSize);
-  m_frameSize      = ALIGN_DN((m_ivshmem->GetSize() - (m_frame[0] - m_memory)) >> 1);
-  m_frame[1]       = (uint8_t *)ALIGN_DN(m_frame[0] + m_frameSize);
+  m_cursorOffset   = m_cursorData - m_memory;
 
-
-  m_cursorOffset  = m_cursorData - m_memory;
-  m_dataOffset[0] = m_frame[0]   - m_memory;
-  m_dataOffset[1] = m_frame[1]   - m_memory;
+  uint8_t * m_frames = (uint8_t *)ALIGN_UP(m_cursorData + m_cursorDataSize);
+  m_frameSize = ALIGN_DN((m_ivshmem->GetSize() - (m_frames - m_memory)) / MAX_FRAMES);
 
   DEBUG_INFO("Total Available : %3u MB", (unsigned int)(m_ivshmem->GetSize() / 1024 / 1024));
   DEBUG_INFO("Max Cursor Size : %3u MB", (unsigned int)(m_cursorDataSize / 1024 / 1024));
   DEBUG_INFO("Max Frame Size  : %3u MB", (unsigned int)(m_frameSize / 1024 / 1024));
-  DEBUG_INFO("Cursor          : %p (0x%08x)", m_cursorData, (int)m_cursorOffset );
-  DEBUG_INFO("Frame 1         : %p (0x%08x)", m_frame[0]  , (int)m_dataOffset[0]);
-  DEBUG_INFO("Frame 2         : %p (0x%08x)", m_frame[1]  , (int)m_dataOffset[1]);
+  DEBUG_INFO("Cursor          : %p (0x%08x)", m_cursorData, (int)m_cursorOffset);
+
+  for (int i = 0; i < MAX_FRAMES; ++i)
+  {
+    m_frame[i] = m_frames + i * m_frameSize;
+    m_dataOffset[i] = m_frame[i] - m_memory;
+    DEBUG_INFO("Frame %d         : %p (0x%08x)", i, m_frame[i], (int)m_dataOffset[i]);
+  }
 
   return true;
 }
 
 void Service::DeInitialize()
 {
-  if (m_timer)
-  {
-    CloseHandle(m_timer);
-    m_timer = NULL;
-  }
-
-  m_shmHeader      = NULL;
-  m_cursorData     = NULL;
-  m_frame[0]       = NULL;
-  m_frame[1]       = NULL;
-  m_cursorOffset   = 0;
-  m_dataOffset[0]  = 0;
-  m_dataOffset[1]  = 0;
-  m_cursorDataSize = 0;
-  m_frameSize      = 0;
-
   WaitForSingleObject(m_cursorThread, INFINITE);
   CloseHandle(m_cursorThread);
   CloseHandle(m_cursorEvent);
+
+  m_shmHeader      = NULL;
+  m_cursorData     = NULL;
+  m_cursorDataSize = 0;
+  m_cursorOffset   = 0;
+  m_haveFrame      = false;
+
+  for(int i = 0; i < MAX_FRAMES; ++i)
+  {
+    m_frame     [i] = NULL;
+    m_dataOffset[i] = 0;
+  }
+  m_frameSize = 0;
 
   m_ivshmem->DeInitialize();
 
@@ -218,6 +210,7 @@ bool Service::Process()
 
   bool ok         = false;
   bool cursorOnly = false;
+  bool repeat     = false;
   for(int i = 0; i < 2; ++i)
   {
     // capture a frame of data
@@ -226,6 +219,20 @@ bool Service::Process()
       case GRAB_STATUS_OK:
         ok = true;
         break;
+
+      case GRAB_STATUS_TIMEOUT:
+        if (m_haveFrame)
+        {
+          ok = true;
+          repeat = true;
+          if (--m_frameIndex < 0)
+            m_frameIndex = MAX_FRAMES - 1;
+          break;
+        }
+
+        // capture timeouts are not errors
+        --i;
+        continue;
 
       case GRAB_STATUS_CURSOR:
         ok         = true;
@@ -309,14 +316,22 @@ bool Service::Process()
   {
     KVMFRFrame * fi = &m_shmHeader->frame;
 
-    fi->type    = m_capture->GetFrameType();
-    fi->width   = frame.width;
-    fi->height  = frame.height;
-    fi->stride  = frame.stride;
-    fi->pitch   = frame.pitch;
-    fi->dataPos = m_dataOffset[m_frameIndex];
-    if (++m_frameIndex == 2)
+    // only update the header if the frame is new
+    if (!repeat)
+    {
+      fi->type    = m_capture->GetFrameType();
+      fi->width   = frame.width;
+      fi->height  = frame.height;
+      fi->stride  = frame.stride;
+      fi->pitch   = frame.pitch;
+      fi->dataPos = m_dataOffset[m_frameIndex];
+    }
+
+    if (++m_frameIndex == MAX_FRAMES)
       m_frameIndex = 0;
+
+    // remember that we have a valid frame
+    m_haveFrame = true;
 
     // signal a frame update
     fi->flags |= KVMFR_FRAME_FLAG_UPDATE;
