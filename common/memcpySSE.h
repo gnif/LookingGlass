@@ -51,7 +51,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
     }
 
     const void * end = dst + (length & ~0x7F);
-    const size_t off = (7 - ((length & 0x7F) >> 4)) * 10;
+    const size_t off = (7 - ((length & 0x7F) >> 4)) * 9;
 
     __asm__ __volatile__ (
       "cmp         %[dst],%[end] \n\t"
