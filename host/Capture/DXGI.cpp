@@ -759,25 +759,9 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   ID3D11Texture2DPtr src;
   bool timeout;
 
-  while(true)
-  {
-    result = GrabFrameTexture(frame, cursor, src, timeout);
-    if (timeout)
-    {
-      if (!m_surfaceMapped)
-        continue;
-
-      // send the last frame again if we timeout to prevent the client stalling on restart
-      frame.pitch  = m_mapping.RowPitch;
-      frame.stride = m_mapping.RowPitch >> 2;
-
-      unsigned int size = m_height * m_mapping.RowPitch;
-      memcpySSE(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
-      return GRAB_STATUS_OK;
-    }
-
-    break;
-  }
+  result = GrabFrameTexture(frame, cursor, src, timeout);
+  if (timeout)
+    return GRAB_STATUS_TIMEOUT;
 
   if (result != GRAB_STATUS_OK)
     return result;
