@@ -336,6 +336,7 @@
     <ClCompile Include="CrashHandler.cpp" />
     <ClCompile Include="ivshmem.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="MFT\H264.cpp" />
     <ClCompile Include="Service.cpp" />
     <ClCompile Include="TraceUtil.cpp" />
   </ItemGroup>
@@ -343,9 +344,11 @@
     <ClInclude Include="CaptureFactory.h" />
     <ClInclude Include="Capture\DXGI.h" />
     <ClInclude Include="Capture\NvFBC.h" />
+    <ClInclude Include="Com.h" />
     <ClInclude Include="CrashHandler.h" />
     <ClInclude Include="ICapture.h" />
     <ClInclude Include="ivshmem.h" />
+    <ClInclude Include="MFT\H264.h" />
     <ClInclude Include="Service.h" />
     <ClInclude Include="TraceUtil.h" />
     <ClInclude Include="Util.h" />

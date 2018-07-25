@@ -19,6 +19,12 @@
     <Filter Include="Source Files\Capture">
       <UniqueIdentifier>{0a865d22-907e-44ea-a230-ad7ede7edeb0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\MFT">
+      <UniqueIdentifier>{bd9c6e76-f398-49eb-acfb-3f50cd99724c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\MFT">
+      <UniqueIdentifier>{fead4000-1954-4480-8ee7-b817d7042761}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ivshmem.cpp">
@@ -44,6 +50,9 @@
     </ClCompile>
     <ClCompile Include="TraceUtil.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MFT\H264.cpp">
+      <Filter>Source Files\MFT</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -72,6 +81,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TraceUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MFT\H264.h">
+      <Filter>Header Files\MFT</Filter>
+    </ClInclude>
+    <ClInclude Include="Com.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
