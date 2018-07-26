@@ -246,6 +246,12 @@ bool DXGI::InitH264Capture()
 
 void DXGI::DeInitialize()
 {
+  if (m_h264)
+  {
+    delete m_h264;
+    m_h264 = NULL;
+  }
+
   ReleaseFrame();
 
   if (m_pointer)
