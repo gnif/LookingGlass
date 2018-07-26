@@ -137,7 +137,7 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
   status = m_mfTransform.QueryInterface(IID_PPV_ARGS(&m_mediaEventGen));
   if (FAILED(status))
   {
-    DEBUG_WINERROR("Failed to obtain th emedia event generator interface", status);
+    DEBUG_WINERROR("Failed to obtain the media event generator interface", status);
     return false;
   }
 
@@ -169,15 +169,15 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
   IMFMediaTypePtr outType;
   MFCreateMediaType(&outType);
 
-  outType->SetGUID  (MF_MT_MAJOR_TYPE             , MFMediaType_Video);
-  outType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_H264);
-  outType->SetUINT32(MF_MT_AVG_BITRATE            , 384 * 1000);
+  outType->SetGUID  (MF_MT_MAJOR_TYPE             , MFMediaType_Video           );
+  outType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_H264          );
+  outType->SetUINT32(MF_MT_AVG_BITRATE            , 384 * 1000                  );
   outType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
-  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_High);
+  outType->SetUINT32(MF_MT_MPEG2_PROFILE          , eAVEncH264VProfile_High     );
   outType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
   MFSetAttributeSize (outType, MF_MT_FRAME_SIZE        , m_width, m_height);
-  MFSetAttributeRatio(outType, MF_MT_FRAME_RATE        , 30     , 1       );
+  MFSetAttributeRatio(outType, MF_MT_FRAME_RATE        , 60     , 1       );
   MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO, 1      , 1       );
 
   status = m_mfTransform->SetOutputType(0, outType, 0);
@@ -191,14 +191,14 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
   IMFMediaTypePtr inType;
   MFCreateMediaType(&inType);
 
-  inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-  inType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
-  inType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-  inType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+  inType->SetGUID  (MF_MT_MAJOR_TYPE             , MFMediaType_Video           );
+  inType->SetGUID  (MF_MT_SUBTYPE                , MFVideoFormat_NV12          );
+  inType->SetUINT32(MF_MT_INTERLACE_MODE         , MFVideoInterlace_Progressive);
+  inType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE                        );
 
-  MFSetAttributeSize(inType, MF_MT_FRAME_SIZE, m_width, m_height);
-  MFSetAttributeRatio(inType, MF_MT_FRAME_RATE, 30, 1);
-  MFSetAttributeRatio(inType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+  MFSetAttributeSize (inType, MF_MT_FRAME_SIZE        , m_width, m_height);
+  MFSetAttributeRatio(inType, MF_MT_FRAME_RATE        , 60     , 1       );
+  MFSetAttributeRatio(inType, MF_MT_PIXEL_ASPECT_RATIO, 1      , 1       );
 
   status = m_mfTransform->SetInputType(0, inType, 0);
   SafeRelease(&inType);
