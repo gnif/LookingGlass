@@ -57,7 +57,6 @@ private:
 
   ID3D11Texture2DPtr          m_targetTexture;
   ID3D11RenderTargetViewPtr   m_renderView;
-  ID3D11ShaderResourceViewPtr m_shaderView;
   ID3D11InputLayoutPtr        m_layout;
   ID3D11VertexShaderPtr       m_vertexShader;
   ID3D11PixelShaderPtr        m_pixelShader;

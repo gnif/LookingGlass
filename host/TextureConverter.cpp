@@ -126,19 +126,6 @@ bool TextureConverter::Initialize(
     return false;
   }
 
-  shaderDesc.Format                    = texDesc.Format;
-  shaderDesc.ViewDimension             = D3D11_SRV_DIMENSION_TEXTURE2D;
-  shaderDesc.Texture2D.MostDetailedMip = 0;
-  shaderDesc.Texture2D.MipLevels       = 1;
-
-  result = device->CreateShaderResourceView(m_targetTexture, &shaderDesc, &m_shaderView);
-  if (FAILED(result))
-  {
-    DeInitialize();
-    DEBUG_ERROR("Failed to create shader resource view");
-    return false;
-  }
-
   samplerDesc.Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
   samplerDesc.AddressU       = D3D11_TEXTURE_ADDRESS_CLAMP;
   samplerDesc.AddressV       = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -255,7 +242,6 @@ void TextureConverter::DeInitialize()
   SafeRelease(&m_samplerState );
   SafeRelease(&m_indexBuffer  );
   SafeRelease(&m_vertexBuffer );
-  SafeRelease(&m_shaderView   );
   SafeRelease(&m_renderView   );
   SafeRelease(&m_targetTexture);
   SafeRelease(&m_vertexShader );
