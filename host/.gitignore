@@ -9,6 +9,9 @@
 *.userosscache
 *.sln.docstates
 
+# compiled shader headers
+Shaders/*.h
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
