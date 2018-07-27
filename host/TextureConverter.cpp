@@ -21,7 +21,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common\debug.h"
 
 #include "Shaders\Vertex.h"
-#include "Shaders\BGRAtoNV12.h"
+#include "Shaders\Pixel.h"
+#include "Shaders\RGBtoYUV.h"
 
 TextureConverter::TextureConverter()
 {
@@ -37,12 +38,12 @@ bool TextureConverter::Initialize(
   ID3D11DevicePtr        device,
   const unsigned int     width,
   const unsigned int     height,
-  DXGI_FORMAT            format
+  FrameType              format
 )
 {
   HRESULT                         result;
   D3D11_TEXTURE2D_DESC            texDesc;
-  D3D11_RENDER_TARGET_VIEW_DESC   viewDesc;
+  D3D11_RENDER_TARGET_VIEW_DESC   targetDesc;
   D3D11_SHADER_RESOURCE_VIEW_DESC shaderDesc;
   D3D11_SAMPLER_DESC              samplerDesc;
 
@@ -52,10 +53,21 @@ bool TextureConverter::Initialize(
   m_height        = height;
   m_format        = format;
 
+  result = device->CreatePixelShader(g_Pixel, sizeof(g_Pixel), NULL, &m_psCopy);
+  if (FAILED(result))
+  {
+    DeInitialize();
+    DEBUG_ERROR("Failed to create the copy pixel shader");
+    return false;
+  }
+
   switch (format)
   {
-    case DXGI_FORMAT_NV12:
-      result = device->CreatePixelShader(g_BGRAtoNV12, sizeof(g_BGRAtoNV12), NULL, &m_pixelShader);
+    case FRAME_TYPE_YUV420:
+      result = device->CreatePixelShader(g_RGBtoYUV, sizeof(g_RGBtoYUV), NULL, &m_psConversion);
+      m_texFormats[0] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[0] = 1.0f;
+      m_texFormats[1] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[1] = 0.5f;
+      m_texFormats[2] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[2] = 0.5f;
       break;
 
     default:
@@ -93,7 +105,7 @@ bool TextureConverter::Initialize(
   }
 
   ZeroMemory(&texDesc    , sizeof(texDesc    ));
-  ZeroMemory(&viewDesc   , sizeof(viewDesc   ));
+  ZeroMemory(&targetDesc , sizeof(targetDesc ));
   ZeroMemory(&shaderDesc , sizeof(shaderDesc ));
   ZeroMemory(&samplerDesc, sizeof(samplerDesc));
 
@@ -105,25 +117,45 @@ bool TextureConverter::Initialize(
   texDesc.Usage            = D3D11_USAGE_DEFAULT;
   texDesc.CPUAccessFlags   = 0;
   texDesc.MiscFlags        = 0;
-  texDesc.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
   texDesc.BindFlags        = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-  result = device->CreateTexture2D(&texDesc, NULL, &m_targetTexture);
-  if (FAILED(result))
-  {
-    DeInitialize();
-    DEBUG_ERROR("Failed to create the render texture");
-    return false;
-  }
 
-  viewDesc.Format             = texDesc.Format;
-  viewDesc.ViewDimension      = D3D11_RTV_DIMENSION_TEXTURE2D;
-  viewDesc.Texture2D.MipSlice = 0;
-  result = device->CreateRenderTargetView(m_targetTexture, &viewDesc, &m_renderView);
-  if (FAILED(result))
+  targetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+
+  shaderDesc.ViewDimension       = D3D11_SRV_DIMENSION_TEXTURE2D;
+  shaderDesc.Texture2D.MipLevels = 1;
+
+  for(int i = 0; i < _countof(m_targetTexture); ++i)
   {
-    DeInitialize();
-    DEBUG_ERROR("Failed to create the render view");
-    return false;
+    if (m_texFormats[i] == DXGI_FORMAT_UNKNOWN)
+      continue;
+
+    texDesc   .Format   = m_texFormats[i];
+    targetDesc.Format   = m_texFormats[i];
+    shaderDesc.Format = m_texFormats[i];
+
+    result = device->CreateTexture2D(&texDesc, NULL, &m_targetTexture[i]);
+    if (FAILED(result))
+    {
+      DeInitialize();
+      DEBUG_ERROR("Failed to create the render texture");
+      return false;
+    }
+
+    result = device->CreateRenderTargetView(m_targetTexture[i], &targetDesc, &m_renderView[i]);
+    if (FAILED(result))
+    {
+      DeInitialize();
+      DEBUG_ERROR("Failed to create the render view");
+      return false;
+    }
+
+    result = device->CreateShaderResourceView(m_targetTexture[i], &shaderDesc, &m_shaderView[i]);
+    if (FAILED(result))
+    {
+      DeInitialize();
+      DEBUG_ERROR("Failed to create the resource view");
+      return false;
+    }
   }
 
   samplerDesc.Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -242,14 +274,21 @@ void TextureConverter::DeInitialize()
   SafeRelease(&m_samplerState );
   SafeRelease(&m_indexBuffer  );
   SafeRelease(&m_vertexBuffer );
-  SafeRelease(&m_renderView   );
-  SafeRelease(&m_targetTexture);
-  SafeRelease(&m_vertexShader );
-  SafeRelease(&m_pixelShader  );
-  SafeRelease(&m_layout       );
+
+  for(int i = 0; i < _countof(m_targetTexture); ++i)
+  {
+    SafeRelease(&m_shaderView   [i]);
+    SafeRelease(&m_renderView   [i]);
+    SafeRelease(&m_targetTexture[i]);
+  }
+
+  SafeRelease(&m_vertexShader);
+  SafeRelease(&m_psConversion);
+  SafeRelease(&m_layout      );
+  SafeRelease(&m_psCopy      );
 }
 
-bool TextureConverter::Convert(ID3D11Texture2DPtr &texture)
+bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
 {
   unsigned int stride;
   unsigned int offset;
@@ -257,35 +296,46 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr &texture)
 
   HRESULT                         result;
   D3D11_TEXTURE2D_DESC            texDesc;
-  D3D11_SHADER_RESOURCE_VIEW_DESC shaderDesc;
+  D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc;
   ID3D11ShaderResourceViewPtr     textureView;
   texture->GetDesc(&texDesc);
-  shaderDesc.Format                    = texDesc.Format;
-  shaderDesc.ViewDimension             = D3D11_SRV_DIMENSION_TEXTURE2D;
-  shaderDesc.Texture2D.MostDetailedMip = 0;
-  shaderDesc.Texture2D.MipLevels       = 1;
+  viewDesc.Format                    = texDesc.Format;
+  viewDesc.ViewDimension             = D3D11_SRV_DIMENSION_TEXTURE2D;
+  viewDesc.Texture2D.MostDetailedMip = 0;
+  viewDesc.Texture2D.MipLevels       = 1;
 
-  result = m_device->CreateShaderResourceView(texture, &shaderDesc, &textureView);
+  result = m_device->CreateShaderResourceView(texture, &viewDesc, &textureView);
   if (FAILED(result))
   {
     DeInitialize();
     DEBUG_ERROR("Failed to create shader resource view");
     return false;
   }
-
   
   ID3D11Buffer             *buffers      [] = { m_vertexBuffer.GetInterfacePtr() };
-  ID3D11RenderTargetView   *renderViews  [] = { m_renderView  .GetInterfacePtr() };
   ID3D11SamplerState       *samplerStates[] = { m_samplerState.GetInterfacePtr() };
   ID3D11ShaderResourceView *shaderViews  [] = { textureView   .GetInterfacePtr() };
   D3D11_VIEWPORT            viewPorts    [] = { {
-    0.0f, 0.0f,
+    0.0f          , 0.0f,
     (float)m_width, (float)m_height,
-    0.0f, 1.0f
+    0.0f          , 1.0f
   } };
 
-  m_deviceContext->OMSetRenderTargets(1, renderViews, NULL);
-  m_deviceContext->ClearRenderTargetView(m_renderView, color);
+  int targetCount = 0;
+  ID3D11RenderTargetView **renderViews = new ID3D11RenderTargetView*[_countof(m_renderView)];
+  for(int i = 0; i < _countof(m_renderView); ++i)
+  {
+    if (m_texFormats[i] == DXGI_FORMAT_UNKNOWN)
+      continue;
+
+    m_deviceContext->ClearRenderTargetView(m_renderView[i], color);
+    renderViews[i] = m_renderView[i].GetInterfacePtr();
+    ++targetCount;
+  }
+
+  m_deviceContext->PSSetShaderResources(0, _countof(shaderViews), shaderViews);
+  m_deviceContext->OMSetRenderTargets(targetCount, renderViews, NULL);
+  delete [] renderViews;
 
   stride = sizeof(VS_INPUT);
   offset = 0;
@@ -296,14 +346,67 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr &texture)
   m_deviceContext->IASetIndexBuffer      (m_indexBuffer, DXGI_FORMAT_R32_UINT, 0);
   m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
   m_deviceContext->VSSetShader           (m_vertexShader, NULL, 0);
+
   m_deviceContext->PSSetSamplers         (0, _countof(samplerStates), samplerStates);
-  m_deviceContext->PSSetShaderResources  (0, _countof(shaderViews  ), shaderViews  );
-  m_deviceContext->PSSetShader           (m_pixelShader , NULL, 0);
+  m_deviceContext->PSSetShader           (m_psConversion, NULL, 0);
 
   m_deviceContext->DrawIndexed(m_indexCount, 0, 0);
-
   SafeRelease(&textureView);
-  SafeRelease(&texture);
-  texture = m_targetTexture;
+
+  D3D11_RENDER_TARGET_VIEW_DESC targetDesc;
+  ZeroMemory(&targetDesc, sizeof(targetDesc));
+  targetDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+  m_deviceContext->PSSetShader(m_psCopy, NULL, 0);
+
+  renderViews = new ID3D11RenderTargetView*[1];
+  for (int i = 0; i < _countof(m_renderView); ++i)
+  {
+    if (m_texFormats[i] == DXGI_FORMAT_UNKNOWN)
+      continue;
+
+    ID3D11Texture2DPtr            src = m_targetTexture[i];
+    ID3D11Texture2DPtr            dest;
+    ID3D11RenderTargetViewPtr     view;
+    D3D11_TEXTURE2D_DESC          srcDesc;
+
+    src->GetDesc(&srcDesc);
+    srcDesc.Width      *= m_scaleFormats[i];
+    srcDesc.Height     *= m_scaleFormats[i];
+    viewPorts[0].Width  = srcDesc.Width;
+    viewPorts[0].Height = srcDesc.Height;
+
+    result = m_device->CreateTexture2D(&srcDesc, NULL, &dest);
+    if (FAILED(result))
+    {
+      delete[] renderViews;
+      DeInitialize();
+      DEBUG_ERROR("Failed to create the target texture");
+      return false;
+    }
+
+    targetDesc.Format = srcDesc.Format;
+    result = m_device->CreateRenderTargetView(dest, &targetDesc, &view);
+    if (FAILED(result))
+    {
+      SafeRelease(&dest);
+      delete[] renderViews;
+      DeInitialize();
+      DEBUG_ERROR("Failed to create the target view");
+      return false;
+    }
+
+    renderViews[0] = view.GetInterfacePtr();
+    shaderViews[0] = m_shaderView[i].GetInterfacePtr();
+
+    m_deviceContext->OMSetRenderTargets(1, renderViews, NULL);
+    m_deviceContext->RSSetViewports(_countof(viewPorts), viewPorts);
+    m_deviceContext->PSSetShaderResources(0, 1, shaderViews);
+    m_deviceContext->DrawIndexed(m_indexCount, 0, 0);
+
+    output.push_back(dest);
+    SafeRelease(&view);
+  }
+
+  delete[] renderViews;
   return true;
 }

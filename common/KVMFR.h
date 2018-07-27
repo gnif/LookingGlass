@@ -27,7 +27,7 @@ typedef enum FrameType
 {
   FRAME_TYPE_INVALID   ,
   FRAME_TYPE_ARGB      , // ABGR interleaved: A,R,G,B 32bpp
-  FRAME_TYPE_NV12      , // NV12
+  FRAME_TYPE_YUV420    , // YUV420
   FRAME_TYPE_H264      , // H264 compressed
   FRAME_TYPE_MAX       , // sentinel value
 }

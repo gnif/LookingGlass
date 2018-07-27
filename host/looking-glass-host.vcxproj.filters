@@ -105,11 +105,12 @@
     </MASM>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\BGRAtoNV12.hlsl">
-      <Filter>Source Files\Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="Shaders\Vertex.hlsl">
       <Filter>Source Files\Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\RGBtoYUV.hlsl">
+      <Filter>Source Files\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Pixel.hlsl" />
   </ItemGroup>
 </Project>

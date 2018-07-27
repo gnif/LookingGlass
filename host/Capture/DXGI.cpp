@@ -30,7 +30,6 @@ DXGI::DXGI() :
   m_device(),
   m_deviceContext(),
   m_dup(),
-  m_texture(),
   m_pointer(NULL)
 {
 }
@@ -152,8 +151,8 @@ bool DXGI::Initialize(CaptureOptions * options)
   m_frameType = FRAME_TYPE_ARGB;
   for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
   {
-    if (_stricmp(*it, "h264") == 0) m_frameType = FRAME_TYPE_H264;
-    if (_stricmp(*it, "nv12") == 0) m_frameType = FRAME_TYPE_NV12;
+    if (_stricmp(*it, "h264"  ) == 0) m_frameType = FRAME_TYPE_H264;
+    if (_stricmp(*it, "yuv420") == 0) m_frameType = FRAME_TYPE_YUV420;
   }
 
   if (m_frameType == FRAME_TYPE_H264)
@@ -162,9 +161,9 @@ bool DXGI::Initialize(CaptureOptions * options)
   bool ok = false;
   switch (m_frameType)
   {
-    case FRAME_TYPE_ARGB: ok = InitRawCapture (); break;
-    case FRAME_TYPE_NV12: ok = InitNV12Capture(); break;
-    case FRAME_TYPE_H264: ok = InitH264Capture(); break;
+    case FRAME_TYPE_ARGB  : ok = InitRawCapture   (); break;
+    case FRAME_TYPE_YUV420: ok = InitYUV420Capture(); break;
+    case FRAME_TYPE_H264  : ok = InitH264Capture  (); break;
   }
 
   if (!ok)
@@ -221,7 +220,7 @@ bool DXGI::InitRawCapture()
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
 
-  HRESULT status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture);
+  HRESULT status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture[0]);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create texture", status);
@@ -231,9 +230,11 @@ bool DXGI::InitRawCapture()
   return true;
 }
 
-bool DXGI::InitNV12Capture()
+bool DXGI::InitYUV420Capture()
 {
+  HRESULT status;
   D3D11_TEXTURE2D_DESC texDesc;
+
   ZeroMemory(&texDesc, sizeof(texDesc));
   texDesc.Width              = m_width;
   texDesc.Height             = m_height;
@@ -242,12 +243,29 @@ bool DXGI::InitNV12Capture()
   texDesc.SampleDesc.Count   = 1;
   texDesc.SampleDesc.Quality = 0;
   texDesc.Usage              = D3D11_USAGE_STAGING;
-  texDesc.Format             = DXGI_FORMAT_B8G8R8A8_UNORM;
+  texDesc.Format             = DXGI_FORMAT_R8_UNORM;
   texDesc.BindFlags          = 0;
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
 
-  HRESULT status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture);
+  status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture[0]);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create texture", status);
+    return false;
+  }
+
+  texDesc.Width  /= 2;
+  texDesc.Height /= 2;
+
+  status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture[1]);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create texture", status);
+    return false;
+  }
+
+  status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture[2]);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create texture", status);
@@ -255,7 +273,7 @@ bool DXGI::InitNV12Capture()
   }
 
   m_textureConverter = new TextureConverter();
-  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, DXGI_FORMAT_NV12))
+  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, FRAME_TYPE_YUV420))
     return false;
 
   return true;
@@ -264,7 +282,7 @@ bool DXGI::InitNV12Capture()
 bool DXGI::InitH264Capture()
 {
   m_textureConverter = new TextureConverter();
-  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, DXGI_FORMAT_NV12))
+  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, FRAME_TYPE_YUV420))
     return false;
 
   m_h264 = new MFT::H264();
@@ -297,13 +315,9 @@ void DXGI::DeInitialize()
     m_pointerBufSize = 0;
   }
 
-  if (m_surfaceMapped)
-  {
-    m_deviceContext->Unmap(m_texture, 0);
-    m_surfaceMapped = false;
-  }
-
-  SafeRelease(&m_texture);
+  SafeRelease(&m_texture[0]);
+  SafeRelease(&m_texture[1]);
+  SafeRelease(&m_texture[2]);
   SafeRelease(&m_dup);
   SafeRelease(&m_output);
   SafeRelease(&m_deviceContext);
@@ -493,54 +507,10 @@ GrabStatus Capture::DXGI::ReleaseFrame()
 
 GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cursor)
 {
-  GrabStatus result;
-  ID3D11Texture2DPtr src;
-  bool timeout;
-
-  result = GrabFrameTexture(frame, cursor, src, timeout);
-  if (timeout)
-    return GRAB_STATUS_TIMEOUT;
-
-  if (result != GRAB_STATUS_OK)
-    return result;
-
-  if (m_surfaceMapped)
-  {
-    m_deviceContext->Unmap(m_texture, 0);
-    m_surfaceMapped = false;
-  }
-
-  m_deviceContext->CopyResource(m_texture, src);
-  SafeRelease(&src);
-
-  result = ReleaseFrame();
-  if (result != GRAB_STATUS_OK)
-    return result;
-
-  HRESULT status;
-  status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to map the texture", status);
-    DeInitialize();
-    return GRAB_STATUS_ERROR;
-  }
-  m_surfaceMapped = true;
-
-  frame.pitch  = m_mapping.RowPitch;
-  frame.stride = m_mapping.RowPitch >> 2;
-
-  const unsigned int size = m_height * m_mapping.RowPitch;
-  memcpySSE(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
-
-  return GRAB_STATUS_OK;
-}
-
-GrabStatus Capture::DXGI::GrabFrameNV12(struct FrameInfo & frame, struct CursorInfo & cursor)
-{
-  GrabStatus result;
-  ID3D11Texture2DPtr texture;
-  bool timeout;
+  GrabStatus               result;
+  ID3D11Texture2DPtr       texture;
+  bool                     timeout;
+  D3D11_MAPPED_SUBRESOURCE mapping;
 
   result = GrabFrameTexture(frame, cursor, texture, timeout);
   if (timeout)
@@ -549,19 +519,7 @@ GrabStatus Capture::DXGI::GrabFrameNV12(struct FrameInfo & frame, struct CursorI
   if (result != GRAB_STATUS_OK)
     return result;
 
-  if (!m_textureConverter->Convert(texture))
-  {
-    SafeRelease(&texture);
-    return GRAB_STATUS_ERROR;
-  }
-
-  if (m_surfaceMapped)
-  {
-    m_deviceContext->Unmap(m_texture, 0);
-    m_surfaceMapped = false;
-  }
-
-  m_deviceContext->CopyResource(m_texture, texture);
+  m_deviceContext->CopyResource(m_texture[0], texture);
   SafeRelease(&texture);
 
   result = ReleaseFrame();
@@ -569,26 +527,94 @@ GrabStatus Capture::DXGI::GrabFrameNV12(struct FrameInfo & frame, struct CursorI
     return result;
 
   HRESULT status;
-  status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
+  status = m_deviceContext->Map(m_texture[0], 0, D3D11_MAP_READ, 0, &mapping);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to map the texture", status);
     DeInitialize();
     return GRAB_STATUS_ERROR;
   }
-  m_surfaceMapped = true;
 
-  frame.pitch = m_mapping.RowPitch;
-  frame.stride = m_mapping.RowPitch >> 2;
+  frame.pitch  = mapping.RowPitch;
+  frame.stride = mapping.RowPitch >> 2;
 
-  const unsigned int size = m_height * m_mapping.RowPitch;
-  memcpySSE(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
+  const unsigned int size = m_height * mapping.RowPitch;
+  memcpySSE(frame.buffer, mapping.pData, LG_MIN(size, frame.bufferSize));
+  m_deviceContext->Unmap(m_texture[0], 0);
 
+  return GRAB_STATUS_OK;
+}
+
+GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct CursorInfo & cursor)
+{
+  GrabStatus         result;
+  ID3D11Texture2DPtr texture;
+  bool               timeout;
+
+  result = GrabFrameTexture(frame, cursor, texture, timeout);
+  if (timeout)
+    return GRAB_STATUS_TIMEOUT;
+
+  if (result != GRAB_STATUS_OK)
+    return result;
+
+  TextureList planes;
+  if (!m_textureConverter->Convert(texture, planes))
+  {
+    SafeRelease(&texture);
+    return GRAB_STATUS_ERROR;
+  }
+  SafeRelease(&texture);
+
+  for(int i = 0; i < 3; ++i)
+  {
+    ID3D11Texture2DPtr t = planes.at(i);
+    m_deviceContext->CopyResource(m_texture[i], planes.at(i));
+    SafeRelease(&t);
+  }
+
+  result = ReleaseFrame();
+  if (result != GRAB_STATUS_OK)
+    return result;
+
+  uint8_t * data   = (uint8_t *)frame.buffer;
+  size_t    remain = frame.bufferSize;
+  for(int i = 0; i < 3; ++i)
+  {
+    HRESULT                  status;
+    D3D11_MAPPED_SUBRESOURCE mapping;
+
+    status = m_deviceContext->Map(m_texture[i], 0, D3D11_MAP_READ, 0, &mapping);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to map the texture", status);
+      DeInitialize();
+      return GRAB_STATUS_ERROR;
+    }
+
+    const unsigned int size = m_height * mapping.RowPitch;
+    if (size > remain)
+    {
+      m_deviceContext->Unmap(m_texture[i], 0);
+      DEBUG_ERROR("Too much data to fit in buffer");
+      return GRAB_STATUS_ERROR;
+    }
+
+    memcpySSE(data, mapping.pData, size);
+    data   += size;
+    remain -= size;
+    m_deviceContext->Unmap(m_texture[i], 0);
+  }
+
+  frame.pitch  = m_width;
+  frame.stride = m_width;
   return GRAB_STATUS_OK;
 }
 
 GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorInfo & cursor)
 {
+  return GRAB_STATUS_ERROR;
+  #if 0
   while(true)
   {
     unsigned int events = m_h264->Process();
@@ -631,6 +657,7 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       return GRAB_STATUS_OK;
     }
   }
+  #endif
 }
 
 GrabStatus DXGI::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
@@ -640,8 +667,8 @@ GrabStatus DXGI::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
 
   switch (m_frameType)
   {    
-    case FRAME_TYPE_NV12: return GrabFrameNV12(frame, cursor);
-    case FRAME_TYPE_H264: return GrabFrameH264(frame, cursor);
+    case FRAME_TYPE_YUV420: return GrabFrameYUV420(frame, cursor);
+    case FRAME_TYPE_H264  : return GrabFrameH264  (frame, cursor);
   }
 
   return GrabFrameRaw(frame, cursor);

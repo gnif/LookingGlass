@@ -20,8 +20,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include "Com.h"
+#include "common\KVMFR.h"
 
 #include <DirectXMath.h>
+#include <vector>
+
+typedef std::vector<ID3D11Texture2DPtr> TextureList;
 
 class TextureConverter
 {
@@ -34,12 +38,12 @@ public:
     ID3D11DevicePtr        device,
     const unsigned int     width,
     const unsigned int     height,
-    DXGI_FORMAT            format
+    FrameType              format
   );
 
   void DeInitialize();
 
-  bool Convert(ID3D11Texture2DPtr &texture);
+  bool Convert(ID3D11Texture2DPtr texture, TextureList & output);
 
 private:
   struct VS_INPUT
@@ -53,13 +57,19 @@ private:
   ID3D11DeviceContextPtr m_deviceContext;
   ID3D11DevicePtr        m_device;
   unsigned int           m_width, m_height;
-  DXGI_FORMAT            m_format;
+  FrameType              m_format;
 
-  ID3D11Texture2DPtr          m_targetTexture;
-  ID3D11RenderTargetViewPtr   m_renderView;
+  DXGI_FORMAT                 m_texFormats   [3];
+  float                       m_scaleFormats [3];
+
+  ID3D11Texture2DPtr          m_targetTexture[3];
+  ID3D11RenderTargetViewPtr   m_renderView   [3];
+  ID3D11ShaderResourceViewPtr m_shaderView   [3];
+
   ID3D11InputLayoutPtr        m_layout;
   ID3D11VertexShaderPtr       m_vertexShader;
-  ID3D11PixelShaderPtr        m_pixelShader;
+  ID3D11PixelShaderPtr        m_psCopy;
+  ID3D11PixelShaderPtr        m_psConversion;
   ID3D11SamplerStatePtr       m_samplerState;
 
   ID3D11BufferPtr             m_vertexBuffer;

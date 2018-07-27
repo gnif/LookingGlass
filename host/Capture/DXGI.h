@@ -60,13 +60,13 @@ namespace Capture
 
   private:
     bool InitRawCapture();
-    bool InitNV12Capture();
+    bool InitYUV420Capture();
     bool InitH264Capture();
 
     GrabStatus GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout);
     GrabStatus ReleaseFrame();
     GrabStatus GrabFrameRaw    (struct FrameInfo & frame, struct CursorInfo & cursor);
-    GrabStatus GrabFrameNV12   (struct FrameInfo & frame, struct CursorInfo & cursor);
+    GrabStatus GrabFrameYUV420   (struct FrameInfo & frame, struct CursorInfo & cursor);
     GrabStatus GrabFrameH264   (struct FrameInfo & frame, struct CursorInfo & cursor);
 
     CaptureOptions * m_options;
@@ -83,9 +83,7 @@ namespace Capture
     IDXGIOutput1Ptr                 m_output;
     IDXGIOutputDuplicationPtr       m_dup;
     bool                            m_releaseFrame;
-    ID3D11Texture2DPtr              m_texture;
-    D3D11_MAPPED_SUBRESOURCE        m_mapping;
-    bool                            m_surfaceMapped;
+    ID3D11Texture2DPtr              m_texture[3];
     TextureConverter              * m_textureConverter;
     MFT::H264                     * m_h264;
 
