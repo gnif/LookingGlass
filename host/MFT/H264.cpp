@@ -359,7 +359,7 @@ bool MFT::H264::GetFrame(void * buffer, const size_t bufferSize, unsigned int & 
   outDataBuffer.pSample->ConvertToContiguousBuffer(&mb);
 
   BYTE *pixels;
-  DWORD maxLen, curLen;
+  DWORD curLen;
   mb->Lock(&pixels, NULL, &curLen);
   memcpy(buffer, pixels, curLen);
   mb->Unlock();

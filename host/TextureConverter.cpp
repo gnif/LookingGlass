@@ -370,10 +370,10 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
     D3D11_TEXTURE2D_DESC          srcDesc;
 
     src->GetDesc(&srcDesc);
-    srcDesc.Width      *= m_scaleFormats[i];
-    srcDesc.Height     *= m_scaleFormats[i];
-    viewPorts[0].Width  = srcDesc.Width;
-    viewPorts[0].Height = srcDesc.Height;
+    viewPorts[0].Width  = srcDesc.Width  * m_scaleFormats[i];
+    viewPorts[0].Height = srcDesc.Height * m_scaleFormats[i];
+    srcDesc.Width       = (UINT)viewPorts[0].Width;
+    srcDesc.Height      = (UINT)viewPorts[0].Height;
 
     result = m_device->CreateTexture2D(&srcDesc, NULL, &dest);
     if (FAILED(result))
