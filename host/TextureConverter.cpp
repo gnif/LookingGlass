@@ -129,8 +129,8 @@ bool TextureConverter::Initialize(
     if (m_texFormats[i] == DXGI_FORMAT_UNKNOWN)
       continue;
 
-    texDesc   .Format   = m_texFormats[i];
-    targetDesc.Format   = m_texFormats[i];
+    texDesc   .Format = m_texFormats[i];
+    targetDesc.Format = m_texFormats[i];
     shaderDesc.Format = m_texFormats[i];
 
     result = device->CreateTexture2D(&texDesc, NULL, &m_targetTexture[i]);

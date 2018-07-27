@@ -594,7 +594,7 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct Curso
       return GRAB_STATUS_ERROR;
     }
 
-    const unsigned int size = desc.Height * mapping.RowPitch;
+    const unsigned int size = desc.Height * desc.Width;
     if (size > remain)
     {
       m_deviceContext->Unmap(m_texture[i], 0);
@@ -602,10 +602,15 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct Curso
       return GRAB_STATUS_ERROR;
     }
 
-    memcpySSE(data, mapping.pData, size);
-    data   += size;
-    remain -= size;
+    const uint8_t * src = (uint8_t *)mapping.pData;
+    for(unsigned int y = 0; y < desc.Height; ++y)
+    {
+      memcpySSE(data, src, desc.Width);
+      data += desc.Width;
+      src  += mapping.RowPitch;
+    }
     m_deviceContext->Unmap(m_texture[i], 0);
+    remain -= size;
   }
 
   frame.pitch  = m_width;
