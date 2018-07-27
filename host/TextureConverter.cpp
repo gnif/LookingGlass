@@ -105,27 +105,8 @@ bool TextureConverter::Initialize(
   texDesc.Usage            = D3D11_USAGE_DEFAULT;
   texDesc.CPUAccessFlags   = 0;
   texDesc.MiscFlags        = 0;
-
-  texDesc.Format    = DXGI_FORMAT_D24_UNORM_S8_UINT;
-  texDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-  result = device->CreateTexture2D(&texDesc, NULL, &m_depthTexture);
-  if (FAILED(result))
-  {
-    DeInitialize();
-    DEBUG_ERROR("Failed to create the depth/stencil texture");
-    return false;
-  }
-
-  result = device->CreateDepthStencilView(m_depthTexture, NULL, &m_depthView);
-  if (FAILED(result))
-  {
-    DeInitialize();
-    DEBUG_ERROR("Failed to create the depth stencil view");
-    return false;
-  }
-
-  texDesc.Format    = DXGI_FORMAT_B8G8R8A8_UNORM;
-  texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+  texDesc.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
+  texDesc.BindFlags        = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
   result = device->CreateTexture2D(&texDesc, NULL, &m_targetTexture);
   if (FAILED(result))
   {
@@ -276,7 +257,6 @@ void TextureConverter::DeInitialize()
   SafeRelease(&m_vertexBuffer );
   SafeRelease(&m_shaderView   );
   SafeRelease(&m_renderView   );
-  SafeRelease(&m_depthTexture );
   SafeRelease(&m_targetTexture);
   SafeRelease(&m_vertexShader );
   SafeRelease(&m_pixelShader  );
@@ -320,7 +300,6 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr &texture)
 
   m_deviceContext->OMSetRenderTargets(1, renderViews, NULL);
   m_deviceContext->ClearRenderTargetView(m_renderView, color);
-  m_deviceContext->ClearDepthStencilView(m_depthView , D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
   stride = sizeof(VS_INPUT);
   offset = 0;

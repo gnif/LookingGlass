@@ -56,8 +56,6 @@ private:
   DXGI_FORMAT            m_format;
 
   ID3D11Texture2DPtr          m_targetTexture;
-  ID3D11Texture2DPtr          m_depthTexture;
-  ID3D11DepthStencilViewPtr   m_depthView;
   ID3D11RenderTargetViewPtr   m_renderView;
   ID3D11ShaderResourceViewPtr m_shaderView;
   ID3D11InputLayoutPtr        m_layout;

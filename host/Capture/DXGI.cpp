@@ -639,9 +639,10 @@ GrabStatus DXGI::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
   frame.height = m_height;
 
   switch (m_frameType)
-  {
-    case FRAME_TYPE_ARGB: return GrabFrameRaw (frame, cursor);
+  {    
     case FRAME_TYPE_NV12: return GrabFrameNV12(frame, cursor);
     case FRAME_TYPE_H264: return GrabFrameH264(frame, cursor);
   }
+
+  return GrabFrameRaw(frame, cursor);
 }
