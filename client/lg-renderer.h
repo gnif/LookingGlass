@@ -24,6 +24,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
+#include "KVMFR.h"
+
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->get_name       && \
    (x)->create         && \
@@ -65,21 +67,14 @@ typedef struct LG_RendererParams
 }
 LG_RendererParams;
 
-typedef enum LG_RendererComp
-{
-  LG_COMPRESSION_NONE,
-  LG_COMPRESSION_H264
-}
-LG_RendererComp;
-
 typedef struct LG_RendererFormat
 {
-  LG_RendererComp comp;    // compression format
-  unsigned int    width;   // image width
-  unsigned int    height;  // image height
-  unsigned int    stride;  // scanline width (zero if compresed)
-  unsigned int    pitch;   // scanline bytes (or compressed size)
-  unsigned int    bpp;     // bits per pixel (zero if compressed)
+  FrameType    type;    // frame type
+  unsigned int width;   // image width
+  unsigned int height;  // image height
+  unsigned int stride;  // scanline width (zero if compresed)
+  unsigned int pitch;   // scanline bytes (or compressed size)
+  unsigned int bpp;     // bits per pixel (zero if compressed)
 }
 LG_RendererFormat;
 

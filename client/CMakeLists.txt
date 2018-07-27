@@ -53,6 +53,7 @@ set(SOURCES
 	spice/rsa.c
 	spice/spice.c
 	decoders/null.c
+	decoders/yuv420.c
 	renderers/opengl.c
 )
 

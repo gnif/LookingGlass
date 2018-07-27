@@ -21,10 +21,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "lg-decoder.h"
 
 extern const LG_Decoder LGD_NULL;
+extern const LG_Decoder LGD_YUV420;
 
 const LG_Decoder * LG_Decoders[] =
 {
   &LGD_NULL,
+  &LGD_YUV420,
   NULL // end of array sentinal
 };
 

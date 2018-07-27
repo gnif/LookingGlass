@@ -343,6 +343,7 @@ int frameThread(void * unused)
 
     // setup the renderer format with the frame format details
     LG_RendererFormat lgrFormat;
+    lgrFormat.type   = header.type;
     lgrFormat.width  = header.width;
     lgrFormat.height = header.height;
     lgrFormat.stride = header.stride;
@@ -353,14 +354,18 @@ int frameThread(void * unused)
     {
       case FRAME_TYPE_ARGB:
         dataSize       = lgrFormat.height * lgrFormat.pitch;
-        lgrFormat.comp = LG_COMPRESSION_NONE;
         lgrFormat.bpp  = 32;
         break;
 
+      case FRAME_TYPE_YUV420:
+        dataSize       = lgrFormat.height * lgrFormat.width;
+        dataSize      += (dataSize / 4) * 2;
+        lgrFormat.bpp  = 12;
+        break;
+
       case FRAME_TYPE_H264:
-        dataSize       = lgrFormat.pitch;
-        lgrFormat.comp = LG_COMPRESSION_H264;
-        lgrFormat.bpp  = 0;
+        dataSize      = lgrFormat.pitch;
+        lgrFormat.bpp = 0;
         break;
 
       default:

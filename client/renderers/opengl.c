@@ -315,7 +315,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   }
 
   if (!this->configured ||
-    this->format.comp   != format.comp   ||
+    this->format.type   != format.type   ||
     this->format.width  != format.width  ||
     this->format.height != format.height ||
     this->format.stride != format.stride ||
@@ -885,10 +885,14 @@ static bool configure(struct Inst * this, SDL_Window *window)
   if (this->configured)
     deconfigure(this);
 
-  switch(this->format.comp)
+  switch(this->format.type)
   {
-    case LG_COMPRESSION_NONE:
+    case FRAME_TYPE_ARGB:
       this->decoder = &LGD_NULL;
+      break;
+
+    case FRAME_TYPE_YUV420:
+      this->decoder = &LGD_YUV420;
       break;
 
     default:
