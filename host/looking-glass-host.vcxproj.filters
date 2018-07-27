@@ -111,6 +111,8 @@
     <FxCompile Include="Shaders\RGBtoYUV.hlsl">
       <Filter>Source Files\Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="Shaders\Pixel.hlsl" />
+    <FxCompile Include="Shaders\Pixel.hlsl">
+      <Filter>Source Files\Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

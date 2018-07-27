@@ -363,17 +363,50 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_Pixel</VariableName>
       <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Shaders\Pixel.h</HeaderFileOutput>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0_level_9_1</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">Pixel</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">4.0_level_9_1</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">g_Pixel</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">Shaders\Pixel.h</HeaderFileOutput>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">g_Pixel</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">Shaders\Pixel.h</HeaderFileOutput>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">g_Pixel</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Shaders\Pixel.h</HeaderFileOutput>
     </FxCompile>
     <FxCompile Include="Shaders\RGBtoYUV.hlsl">
       <FileType>HLSL</FileType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_RGBtoYUV</VariableName>
       <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Shaders\RGBtoYUV.h</HeaderFileOutput>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0_level_9_1</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">4.0_level_9_1</ShaderModel>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">g_RGBtoYUV</VariableName>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">g_RGBtoYUV</VariableName>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">g_RGBtoYUV</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">Shaders\RGBtoYUV.h</HeaderFileOutput>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">Shaders\RGBtoYUV.h</HeaderFileOutput>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Shaders\RGBtoYUV.h</HeaderFileOutput>
     </FxCompile>
     <FxCompile Include="Shaders\Vertex.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
       <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_Vertex</VariableName>
       <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Shaders\Vertex.h</HeaderFileOutput>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">g_Vertex</VariableName>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">g_Vertex</VariableName>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">g_Vertex</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">Shaders\Vertex.h</HeaderFileOutput>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">Shaders\Vertex.h</HeaderFileOutput>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Shaders\Vertex.h</HeaderFileOutput>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0_level_9_1</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">Vertex</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">4.0_level_9_1</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
