@@ -337,6 +337,7 @@
     <ClCompile Include="ivshmem.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MFT\H264.cpp" />
+    <ClCompile Include="TextureConverter.cpp" />
     <ClCompile Include="Service.cpp" />
     <ClCompile Include="TraceUtil.cpp" />
   </ItemGroup>
@@ -349,12 +350,26 @@
     <ClInclude Include="ICapture.h" />
     <ClInclude Include="ivshmem.h" />
     <ClInclude Include="MFT\H264.h" />
+    <ClInclude Include="TextureConverter.h" />
     <ClInclude Include="Service.h" />
     <ClInclude Include="TraceUtil.h" />
     <ClInclude Include="Util.h" />
   </ItemGroup>
   <ItemGroup>
     <MASM Include="..\common\memcpySSE.asm" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Shaders\BGRAtoNV12.hlsl">
+      <FileType>HLSL</FileType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_BGRAtoNV12</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Shaders\BGRAtoNV12.h</HeaderFileOutput>
+    </FxCompile>
+    <FxCompile Include="Shaders\Vertex.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_Vertex</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Shaders\Vertex.h</HeaderFileOutput>
+    </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -58,7 +58,6 @@ MFT::H264::~H264()
 bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned int height)
 {
   DeInitialize();
-
   HRESULT status;
 
   MFT_REGISTER_TYPE_INFO typeInfo;
@@ -348,12 +347,7 @@ bool MFT::H264::GetFrame(void * buffer, const size_t bufferSize, unsigned int & 
   }
 
   DWORD outStatus;
-  MFT_OUTPUT_DATA_BUFFER outDataBuffer;
-  outDataBuffer.dwStreamID = 0;
-  outDataBuffer.dwStatus   = 0;
-  outDataBuffer.pEvents    = NULL;
-  outDataBuffer.pSample    = NULL;
-
+  MFT_OUTPUT_DATA_BUFFER outDataBuffer = { 0 };
   status = m_mfTransform->ProcessOutput(0, 1, &outDataBuffer, &outStatus);
   if (FAILED(status))
   {
@@ -362,17 +356,17 @@ bool MFT::H264::GetFrame(void * buffer, const size_t bufferSize, unsigned int & 
   }
 
   IMFMediaBufferPtr mb;
-  MFCreateAlignedMemoryBuffer((DWORD)bufferSize, MF_128_BYTE_ALIGNMENT, &mb);
-  outDataBuffer.pSample->CopyToBuffer(mb);
-  SafeRelease(&outDataBuffer.pEvents);
-  SafeRelease(&outDataBuffer.pSample);
+  outDataBuffer.pSample->ConvertToContiguousBuffer(&mb);
 
   BYTE *pixels;
   DWORD maxLen, curLen;
-  mb->Lock(&pixels, &maxLen, &curLen);
-  memcpySSE(buffer, pixels, curLen);
+  mb->Lock(&pixels, NULL, &curLen);
+  memcpy(buffer, pixels, curLen);
   mb->Unlock();
+
   SafeRelease(&mb);
+  SafeRelease(&outDataBuffer.pSample);
+  SafeRelease(&outDataBuffer.pEvents);
 
   dataLen = curLen;
   return true;

@@ -25,6 +25,9 @@
     <Filter Include="Header Files\MFT">
       <UniqueIdentifier>{fead4000-1954-4480-8ee7-b817d7042761}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Shaders">
+      <UniqueIdentifier>{afb06b60-4959-4447-92ec-75cc07995a8f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ivshmem.cpp">
@@ -53,6 +56,9 @@
     </ClCompile>
     <ClCompile Include="MFT\H264.cpp">
       <Filter>Source Files\MFT</Filter>
+    </ClCompile>
+    <ClCompile Include="TextureConverter.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -89,10 +95,21 @@
     <ClInclude Include="Com.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TextureConverter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="..\common\memcpySSE.asm">
       <Filter>Source Files</Filter>
     </MASM>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Shaders\BGRAtoNV12.hlsl">
+      <Filter>Source Files\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Vertex.hlsl">
+      <Filter>Source Files\Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

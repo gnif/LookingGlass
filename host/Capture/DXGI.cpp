@@ -120,6 +120,7 @@ bool DXGI::Initialize(CaptureOptions * options)
     D3D_FEATURE_LEVEL_9_1
   };
 
+  #define DEBUG 1
   #if DEBUG
     #define CREATE_FLAGS (D3D11_CREATE_DEVICE_DEBUG)
   #else
@@ -147,30 +148,29 @@ bool DXGI::Initialize(CaptureOptions * options)
     return false;
   }
 
-  bool h264 = false;
+ 
+  m_frameType = FRAME_TYPE_ARGB;
   for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
   {
-    if (_stricmp(*it, "h264") == 0) h264 = true;
+    if (_stricmp(*it, "h264") == 0) m_frameType = FRAME_TYPE_H264;
+    if (_stricmp(*it, "nv12") == 0) m_frameType = FRAME_TYPE_NV12;
   }
 
-  if (h264)
-  {
+  if (m_frameType == FRAME_TYPE_H264)
     DEBUG_WARN("Enabling experimental H.264 compression");
-    m_frameType = FRAME_TYPE_H264;
-    if (!InitH264Capture())
-    {
-      DeInitialize();
-      return false;
-    }
-  }
-  else
+
+  bool ok = false;
+  switch (m_frameType)
   {
-    m_frameType = FRAME_TYPE_ARGB;
-    if (!InitRawCapture())
-    {
-      DeInitialize();
-      return false;
-    }
+    case FRAME_TYPE_ARGB: ok = InitRawCapture (); break;
+    case FRAME_TYPE_NV12: ok = InitNV12Capture(); break;
+    case FRAME_TYPE_H264: ok = InitH264Capture(); break;
+  }
+
+  if (!ok)
+  {
+    DeInitialize();
+    return false;
   }
 
   IDXGIDevicePtr dxgi;
@@ -231,15 +231,45 @@ bool DXGI::InitRawCapture()
   return true;
 }
 
-bool DXGI::InitH264Capture()
+bool DXGI::InitNV12Capture()
 {
-  m_h264 = new MFT::H264();
-  if (!m_h264->Initialize(m_device, m_width, m_height))
+  D3D11_TEXTURE2D_DESC texDesc;
+  ZeroMemory(&texDesc, sizeof(texDesc));
+  texDesc.Width              = m_width;
+  texDesc.Height             = m_height;
+  texDesc.MipLevels          = 1;
+  texDesc.ArraySize          = 1;
+  texDesc.SampleDesc.Count   = 1;
+  texDesc.SampleDesc.Quality = 0;
+  texDesc.Usage              = D3D11_USAGE_STAGING;
+  texDesc.Format             = DXGI_FORMAT_B8G8R8A8_UNORM;
+  texDesc.BindFlags          = 0;
+  texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
+  texDesc.MiscFlags          = 0;
+
+  HRESULT status = m_device->CreateTexture2D(&texDesc, NULL, &m_texture);
+  if (FAILED(status))
   {
-    delete m_h264;
-    m_h264 = NULL;
+    DEBUG_WINERROR("Failed to create texture", status);
     return false;
   }
+
+  m_textureConverter = new TextureConverter();
+  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, DXGI_FORMAT_NV12))
+    return false;
+
+  return true;
+}
+
+bool DXGI::InitH264Capture()
+{
+  m_textureConverter = new TextureConverter();
+  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, DXGI_FORMAT_NV12))
+    return false;
+
+  m_h264 = new MFT::H264();
+  if (!m_h264->Initialize(m_device, m_width, m_height))
+    return false;
   
   return true;
 }
@@ -250,6 +280,12 @@ void DXGI::DeInitialize()
   {
     delete m_h264;
     m_h264 = NULL;
+  }
+
+  if (m_textureConverter)
+  {
+    delete m_textureConverter;
+    m_textureConverter = NULL;
   }
 
   ReleaseFrame();
@@ -500,6 +536,57 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   return GRAB_STATUS_OK;
 }
 
+GrabStatus Capture::DXGI::GrabFrameNV12(struct FrameInfo & frame, struct CursorInfo & cursor)
+{
+  GrabStatus result;
+  ID3D11Texture2DPtr texture;
+  bool timeout;
+
+  result = GrabFrameTexture(frame, cursor, texture, timeout);
+  if (timeout)
+    return GRAB_STATUS_TIMEOUT;
+
+  if (result != GRAB_STATUS_OK)
+    return result;
+
+  if (!m_textureConverter->Convert(texture))
+  {
+    SafeRelease(&texture);
+    return GRAB_STATUS_ERROR;
+  }
+
+  if (m_surfaceMapped)
+  {
+    m_deviceContext->Unmap(m_texture, 0);
+    m_surfaceMapped = false;
+  }
+
+  m_deviceContext->CopyResource(m_texture, texture);
+  SafeRelease(&texture);
+
+  result = ReleaseFrame();
+  if (result != GRAB_STATUS_OK)
+    return result;
+
+  HRESULT status;
+  status = m_deviceContext->Map(m_texture, 0, D3D11_MAP_READ, 0, &m_mapping);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to map the texture", status);
+    DeInitialize();
+    return GRAB_STATUS_ERROR;
+  }
+  m_surfaceMapped = true;
+
+  frame.pitch = m_mapping.RowPitch;
+  frame.stride = m_mapping.RowPitch >> 2;
+
+  const unsigned int size = m_height * m_mapping.RowPitch;
+  memcpySSE(frame.buffer, m_mapping.pData, LG_MIN(size, frame.bufferSize));
+
+  return GRAB_STATUS_OK;
+}
+
 GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorInfo & cursor)
 {
   while(true)
@@ -515,22 +602,24 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
       bool timeout;
 
       result = GrabFrameTexture(frame, cursor, texture, timeout);
-      if (timeout)
-      {
-        // FIXME: this is wrong, we need to encode the last frame again
-        return GRAB_STATUS_TIMEOUT;
-      }
-
       if (result != GRAB_STATUS_OK)
       {
         ReleaseFrame();
-        return result;
+        continue;
+      }
+
+      if (!timeout)
+      {
+        if (!m_textureConverter->Convert(texture))
+        {
+          SafeRelease(&texture);
+          return GRAB_STATUS_ERROR;
+        }
       }
 
       if (!m_h264->ProvideFrame(texture))
         return GRAB_STATUS_ERROR;
 
-      SafeRelease(&texture);
       ReleaseFrame();
     }
 
@@ -549,8 +638,10 @@ GrabStatus DXGI::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
   frame.width  = m_width;
   frame.height = m_height;
 
-  if (m_frameType == FRAME_TYPE_H264)
-    return GrabFrameH264(frame, cursor);
-  else
-    return GrabFrameRaw(frame, cursor);
+  switch (m_frameType)
+  {
+    case FRAME_TYPE_ARGB: return GrabFrameRaw (frame, cursor);
+    case FRAME_TYPE_NV12: return GrabFrameNV12(frame, cursor);
+    case FRAME_TYPE_H264: return GrabFrameH264(frame, cursor);
+  }
 }

@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "ICapture.h"
 #include "Com.h"
+#include "TextureConverter.h"
 #include "MFT/H264.h"
 
 #define W32_LEAN_AND_MEAN
@@ -59,11 +60,13 @@ namespace Capture
 
   private:
     bool InitRawCapture();
+    bool InitNV12Capture();
     bool InitH264Capture();
 
     GrabStatus GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout);
     GrabStatus ReleaseFrame();
     GrabStatus GrabFrameRaw    (struct FrameInfo & frame, struct CursorInfo & cursor);
+    GrabStatus GrabFrameNV12   (struct FrameInfo & frame, struct CursorInfo & cursor);
     GrabStatus GrabFrameH264   (struct FrameInfo & frame, struct CursorInfo & cursor);
 
     CaptureOptions * m_options;
@@ -83,6 +86,7 @@ namespace Capture
     ID3D11Texture2DPtr              m_texture;
     D3D11_MAPPED_SUBRESOURCE        m_mapping;
     bool                            m_surfaceMapped;
+    TextureConverter              * m_textureConverter;
     MFT::H264                     * m_h264;
 
     BYTE *                          m_pointer;
