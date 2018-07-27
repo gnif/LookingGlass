@@ -583,7 +583,9 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct Curso
   {
     HRESULT                  status;
     D3D11_MAPPED_SUBRESOURCE mapping;
+    D3D11_TEXTURE2D_DESC     desc;
 
+    m_texture[i]->GetDesc(&desc);
     status = m_deviceContext->Map(m_texture[i], 0, D3D11_MAP_READ, 0, &mapping);
     if (FAILED(status))
     {
@@ -592,7 +594,7 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct Curso
       return GRAB_STATUS_ERROR;
     }
 
-    const unsigned int size = m_height * mapping.RowPitch;
+    const unsigned int size = desc.Height * mapping.RowPitch;
     if (size > remain)
     {
       m_deviceContext->Unmap(m_texture[i], 0);
