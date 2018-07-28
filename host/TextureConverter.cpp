@@ -65,9 +65,9 @@ bool TextureConverter::Initialize(
   {
     case FRAME_TYPE_YUV420:
       result = device->CreatePixelShader(g_RGBtoYUV, sizeof(g_RGBtoYUV), NULL, &m_psConversion);
-      m_texFormats[0] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[0] = 1.0f;
-      m_texFormats[1] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[1] = 0.5f;
-      m_texFormats[2] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[2] = 0.5f;
+      m_texFormats[0] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[0] = 1;
+      m_texFormats[1] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[1] = 2;
+      m_texFormats[2] = DXGI_FORMAT_R8_UNORM; m_scaleFormats[2] = 2;
       break;
 
     default:
@@ -369,9 +369,16 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
     ID3D11RenderTargetViewPtr     view;
     D3D11_TEXTURE2D_DESC          srcDesc;
 
+    // if there is no scaling
+    if (m_scaleFormats[i] == 1)
+    {
+      output.push_back(src);
+      continue;
+    }
+
     src->GetDesc(&srcDesc);
-    viewPorts[0].Width  = srcDesc.Width  * m_scaleFormats[i];
-    viewPorts[0].Height = srcDesc.Height * m_scaleFormats[i];
+    viewPorts[0].Width  = srcDesc.Width  / m_scaleFormats[i];
+    viewPorts[0].Height = srcDesc.Height / m_scaleFormats[i];
     srcDesc.Width       = (UINT)viewPorts[0].Width;
     srcDesc.Height      = (UINT)viewPorts[0].Height;
 

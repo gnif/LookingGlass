@@ -60,7 +60,7 @@ private:
   FrameType              m_format;
 
   DXGI_FORMAT                 m_texFormats   [3];
-  float                       m_scaleFormats [3];
+  unsigned int                m_scaleFormats [3];
 
   ID3D11Texture2DPtr          m_targetTexture[3];
   ID3D11RenderTargetViewPtr   m_renderView   [3];
