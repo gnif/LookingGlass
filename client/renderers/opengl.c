@@ -662,6 +662,7 @@ static void render_wait(struct Inst * this)
     uint64_t t = microtime();
     if (t > this->waitFadeTime)
     {
+      glDisable(GL_MULTISAMPLE);
       this->waitDone = true;
       return;
     }
