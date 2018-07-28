@@ -732,6 +732,17 @@ int run()
   state.scaleY   = 1.0f;
   state.fpsSleep = 1000000 / params.fpsLimit;
 
+  char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
+  if (strcmp(XDG_SESSION_TYPE, "wayland") == 0) {
+     DEBUG_INFO("Wayland detected");
+     int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
+     if (err < 0) {
+       DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", errno);
+       return -1;
+     }
+     DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
+  }
+
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
     DEBUG_ERROR("SDL_Init Failed");
@@ -838,6 +849,11 @@ int run()
     )
   );
 
+  if (state.window == NULL) {
+    DEBUG_ERROR("Could not create an SDL window: %s\n", SDL_GetError());
+    return 1;
+  }
+
   if (params.fullscreen)
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
@@ -868,6 +884,9 @@ int run()
         1
       );
     }
+  } else {
+    DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
+    return -1;
   }
 
   if (!state.window)
