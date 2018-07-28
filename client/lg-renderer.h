@@ -35,6 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
    (x)->on_mouse_shape && \
    (x)->on_mouse_event && \
    (x)->on_alert       && \
+   (x)->render_startup && \
    (x)->render)
 
 #define LGR_OPTION_COUNT(x) (sizeof(x) / sizeof(LG_RendererOpt))
@@ -129,6 +130,7 @@ typedef struct LG_Renderer
   LG_RendererOnMouseEvent on_mouse_event;
   LG_RendererOnFrameEvent on_frame_event;
   LG_RendererOnAlert      on_alert;
+  LG_RendererRender       render_startup;
   LG_RendererRender       render;
 }
 LG_Renderer;

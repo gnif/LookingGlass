@@ -80,13 +80,12 @@ struct Inst
   struct Options    opt;
 
   bool              amdPinnedMemSupport;
-  bool              preConfigured;
+  bool              renderStarted;
   bool              configured;
   bool              reconfigure;
   SDL_GLContext     glContext;
 
   SDL_Point         window;
-  bool              resizeWindow;
   bool              frameUpdate;
 
   LG_Lock           formatLock;
@@ -148,7 +147,6 @@ static bool _check_gl_error(unsigned int line, const char * name);
 #define check_gl_error(name) _check_gl_error(__LINE__, name)
 
 static void deconfigure(struct Inst * this);
-static bool pre_configure(struct Inst * this, SDL_Window *window);
 static bool configure(struct Inst * this, SDL_Window *window);
 static void update_mouse_shape(struct Inst * this, bool * newShape);
 static bool draw_frame(struct Inst * this);
@@ -205,7 +203,7 @@ void opengl_deinitialize(void * opaque)
   if (!this)
     return;
 
-  if (this->preConfigured)
+  if (this->renderStarted)
   {
     glDeleteLists(this->texList  , BUFFER_COUNT);
     glDeleteLists(this->mouseList, 1);
@@ -242,8 +240,6 @@ void opengl_deinitialize(void * opaque)
 void opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
 
   this->window.x = width;
   this->window.y = height;
@@ -251,7 +247,24 @@ void opengl_on_resize(void * opaque, const int width, const int height, const LG
   if (destRect.valid)
     memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
-  this->resizeWindow = true;
+  // setup the projection matrix
+  glViewport(0, 0, this->window.x, this->window.y);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  gluOrtho2D(0, this->window.x, this->window.y, 0);
+
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+
+  if (this->destRect.valid)
+  {
+    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+    glScalef(
+      (float)this->destRect.w / (float)this->format.width,
+      (float)this->destRect.h / (float)this->format.height,
+      1.0f
+    );
+  }
 }
 
 bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -428,38 +441,70 @@ void surface_to_texture(SDL_Surface * surface, GLuint texture)
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+bool opengl_render_startup(void * opaque, SDL_Window * window)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  this->glContext = SDL_GL_CreateContext(window);
+  if (!this->glContext)
+  {
+    DEBUG_ERROR("Failed to create the OpenGL context");
+    return false;
+  }
+
+  DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
+  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
+  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+
+  GLint n;
+  glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+  for(GLint i = 0; i < n; ++i)
+  {
+    const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
+    if (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0)
+    {
+      if (this->opt.amdPinnedMem)
+      {
+        this->amdPinnedMemSupport = true;
+        DEBUG_INFO("Using GL_AMD_pinned_memory");
+      }
+      else
+        DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
+      break;
+    }
+  }
+
+  glEnable(GL_TEXTURE_2D);
+  glEnable(GL_COLOR_MATERIAL);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendEquation(GL_FUNC_ADD);
+  glEnable(GL_MULTISAMPLE);
+
+  // generate lists for drawing
+  this->texList   = glGenLists(BUFFER_COUNT);
+  this->mouseList = glGenLists(1);
+  this->fpsList   = glGenLists(1);
+  this->alertList = glGenLists(1);
+
+  // create the overlay textures
+  glGenTextures(TEXTURE_COUNT, this->textures);
+  if (check_gl_error("glGenTextures"))
+  {
+    LG_UNLOCK(this->formatLock);
+    return false;
+  }
+  this->hasTextures = true;
+
+  SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
+  this->renderStarted = true;
+  return true;
+}
+
 bool opengl_render(void * opaque, SDL_Window * window)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
-
-  if (!pre_configure(this, window))
-    return false;
-
-  if (this->resizeWindow)
-  {
-    // setup the projection matrix
-    glViewport(0, 0, this->window.x, this->window.y);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(0, this->window.x, this->window.y, 0);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    if (this->destRect.valid)
-    {
-      glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
-      glScalef(
-        (float)this->destRect.w / (float)this->format.width,
-        (float)this->destRect.h / (float)this->format.height,
-        1.0f
-      );
-    }
-
-    this->resizeWindow = false;
-  }
 
   if (configure(this, window))
     if (!draw_frame(this))
@@ -800,6 +845,7 @@ const LG_Renderer LGR_OpenGL =
   .on_mouse_event = opengl_on_mouse_event,
   .on_frame_event = opengl_on_frame_event,
   .on_alert       = opengl_on_alert,
+  .render_startup = opengl_render_startup,
   .render         = opengl_render
 };
 
@@ -811,66 +857,6 @@ static bool _check_gl_error(unsigned int line, const char * name)
 
   const GLubyte * errStr = gluErrorString(error);
   DEBUG_ERROR("%d: %s = %d (%s)", line, name, error, errStr);
-  return true;
-}
-
-static bool pre_configure(struct Inst * this, SDL_Window *window)
-{
-  if (this->preConfigured)
-    return true;
-
-  this->glContext = SDL_GL_CreateContext(window);
-  if (!this->glContext)
-  {
-    DEBUG_ERROR("Failed to create the OpenGL context");
-    return false;
-  }
-
-  DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
-  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
-  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
-
-  GLint n;
-  glGetIntegerv(GL_NUM_EXTENSIONS, &n);
-  for(GLint i = 0; i < n; ++i)
-  {
-    const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
-    if (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0)
-    {
-      if (this->opt.amdPinnedMem)
-      {
-        this->amdPinnedMemSupport = true;
-        DEBUG_INFO("Using GL_AMD_pinned_memory");
-      }
-      else
-        DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
-      break;
-    }
-  }
-
-  glEnable(GL_TEXTURE_2D);
-  glEnable(GL_COLOR_MATERIAL);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glBlendEquation(GL_FUNC_ADD);
-  glEnable(GL_MULTISAMPLE);
-
-  // generate lists for drawing
-  this->texList   = glGenLists(BUFFER_COUNT);
-  this->mouseList = glGenLists(1);
-  this->fpsList   = glGenLists(1);
-  this->alertList = glGenLists(1);
-
-  // create the overlay textures
-  glGenTextures(TEXTURE_COUNT, this->textures);
-  if (check_gl_error("glGenTextures"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
-  this->hasTextures = true;
-
-  SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
-  this->preConfigured = true;
   return true;
 }
 
@@ -1085,9 +1071,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   glBindTexture(GL_TEXTURE_2D, 0);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-  this->resizeWindow = true;
-  this->drawStart    = nanotime();
-
+  this->drawStart   = nanotime();
   this->configured  = true;
   this->reconfigure = false;
 

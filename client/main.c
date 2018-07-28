@@ -54,6 +54,7 @@ struct AppState
   TTF_Font           * font;
   TTF_Font           * alertFont;
   bool                 haveSrcSize;
+  int                  windowW, windowH;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
   SDL_Point            cursor;
@@ -64,6 +65,7 @@ struct AppState
 
   const LG_Renderer  * lgr ;
   void               * lgrData;
+  bool                 lgrResize;
 
   SDL_Window         * window;
   int                  shmFD;
@@ -144,36 +146,35 @@ struct AppParams params =
 
 static inline void updatePositionInfo()
 {
-  int w, h;
-  SDL_GetWindowSize(state.window, &w, &h);
+  SDL_GetWindowSize(state.window, &state.windowW, &state.windowH);
 
   if (state.haveSrcSize)
   {
     if (params.keepAspect)
     {
       const float srcAspect = (float)state.srcSize.y / (float)state.srcSize.x;
-      const float wndAspect = (float)h / (float)w;
+      const float wndAspect = (float)state.windowH / (float)state.windowW;
       if (wndAspect < srcAspect)
       {
-        state.dstRect.w = (float)h / srcAspect;
-        state.dstRect.h = h;
-        state.dstRect.x = (w >> 1) - (state.dstRect.w >> 1);
+        state.dstRect.w = (float)state.windowH / srcAspect;
+        state.dstRect.h = state.windowH;
+        state.dstRect.x = (state.windowW >> 1) - (state.dstRect.w >> 1);
         state.dstRect.y = 0;
       }
       else
       {
-        state.dstRect.w = w;
-        state.dstRect.h = (float)w * srcAspect;
+        state.dstRect.w = state.windowW;
+        state.dstRect.h = (float)state.windowW * srcAspect;
         state.dstRect.x = 0;
-        state.dstRect.y = (h >> 1) - (state.dstRect.h >> 1);
+        state.dstRect.y = (state.windowH >> 1) - (state.dstRect.h >> 1);
       }
     }
     else
     {
       state.dstRect.x = 0;
       state.dstRect.y = 0;
-      state.dstRect.w = w;
-      state.dstRect.h = h;
+      state.dstRect.w = state.windowW;
+      state.dstRect.h = state.windowH;
     }
     state.dstRect.valid = true;
 
@@ -181,14 +182,23 @@ static inline void updatePositionInfo()
     state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
   }
 
-  if (state.lgr)
-    state.lgr->on_resize(state.lgrData, w, h, state.dstRect);
+  state.lgrResize = true;
 }
 
 int renderThread(void * unused)
 {
+  if (!state.lgr->render_startup(state.lgrData, state.window))
+    return 1;
+
   while(state.running)
   {
+    if (state.lgrResize)
+    {
+      if (state.lgr)
+        state.lgr->on_resize(state.lgrData, state.windowW, state.windowH, state.dstRect);
+      state.lgrResize = false;
+    }
+
     const uint64_t start = microtime();
 
     if (!state.lgr->render(state.lgrData, state.window))
