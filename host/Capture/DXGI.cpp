@@ -74,15 +74,13 @@ bool DXGI::Initialize(CaptureOptions * options)
       output->GetDesc(&outputDesc);
       if (!outputDesc.AttachedToDesktop)
       {
-        SafeRelease(&output);
+        output = NULL;
         continue;
       }
 
       m_output = output;
       if (!m_output)
       {
-        SafeRelease(&output);
-        SafeRelease(&adapter);
         DEBUG_ERROR("Failed to get IDXGIOutput1");
         DeInitialize();
         return false;
@@ -91,7 +89,6 @@ bool DXGI::Initialize(CaptureOptions * options)
       m_width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
       m_height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
 
-      SafeRelease(&output);
       done = true;
       break;
     }
@@ -99,7 +96,7 @@ bool DXGI::Initialize(CaptureOptions * options)
     if (done)
       break;
 
-    SafeRelease(&adapter);
+    adapter = NULL;
   }
 
   if (!done)
@@ -119,7 +116,6 @@ bool DXGI::Initialize(CaptureOptions * options)
     D3D_FEATURE_LEVEL_9_1
   };
 
-  #define DEBUG 1
   #if DEBUG
     #define CREATE_FLAGS (D3D11_CREATE_DEVICE_DEBUG)
   #else
@@ -137,7 +133,6 @@ bool DXGI::Initialize(CaptureOptions * options)
     &m_featureLevel,
     &m_deviceContext
   );
-  SafeRelease(&adapter);
   #undef CREATE_FLAGS  
 
   if (FAILED(status))
@@ -315,14 +310,14 @@ void DXGI::DeInitialize()
     m_pointerBufSize = 0;
   }
 
-  SafeRelease(&m_texture[0]);
-  SafeRelease(&m_texture[1]);
-  SafeRelease(&m_texture[2]);
-  SafeRelease(&m_dup);
-  SafeRelease(&m_output);
-  SafeRelease(&m_deviceContext);
-  SafeRelease(&m_device);
-  SafeRelease(&m_dxgiFactory);
+  for(int i = 0; i < _countof(m_texture); ++i)
+    m_texture[i] = NULL;
+
+  m_dup           = NULL;
+  m_output        = NULL;
+  m_deviceContext = NULL;
+  m_device        = NULL;
+  m_dxgiFactory   = NULL;
 
   m_initialized = false;
 }
@@ -435,7 +430,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
         break;
 
       // no frame data, clean up
-      SafeRelease(&res);
+      res = NULL;
       ReleaseFrame();
 
       // if the cursor has been updated
@@ -469,8 +464,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
     return GRAB_STATUS_ERROR;
   }
   
-  res.QueryInterface(IID_PPV_ARGS(&texture));
-  SafeRelease(&res);
+  res.QueryInterface(IID_PPV_ARGS(&texture));  
 
   if (!texture)
   {
@@ -520,7 +514,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
     return result;
 
   m_deviceContext->CopyResource(m_texture[0], texture);
-  SafeRelease(&texture);
 
   result = ReleaseFrame();
   if (result != GRAB_STATUS_OK)
@@ -560,17 +553,12 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct Curso
 
   TextureList planes;
   if (!m_textureConverter->Convert(texture, planes))
-  {
-    SafeRelease(&texture);
     return GRAB_STATUS_ERROR;
-  }
-  SafeRelease(&texture);
 
   for(int i = 0; i < 3; ++i)
   {
     ID3D11Texture2DPtr t = planes.at(i);
-    m_deviceContext->CopyResource(m_texture[i], planes.at(i));
-    SafeRelease(&t);
+    m_deviceContext->CopyResource(m_texture[i], t);
   }
 
   result = ReleaseFrame();

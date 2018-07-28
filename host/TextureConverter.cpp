@@ -271,21 +271,21 @@ bool TextureConverter::IntializeBuffers()
 
 void TextureConverter::DeInitialize()
 {
-  SafeRelease(&m_samplerState );
-  SafeRelease(&m_indexBuffer  );
-  SafeRelease(&m_vertexBuffer );
+  m_samplerState  = NULL;
+  m_indexBuffer   = NULL;
+  m_indexBuffer   = NULL;
 
   for(int i = 0; i < _countof(m_targetTexture); ++i)
   {
-    SafeRelease(&m_shaderView   [i]);
-    SafeRelease(&m_renderView   [i]);
-    SafeRelease(&m_targetTexture[i]);
+    m_shaderView   [i] = NULL;
+    m_renderView   [i] = NULL;
+    m_targetTexture[i] = NULL;
   }
 
-  SafeRelease(&m_vertexShader);
-  SafeRelease(&m_psConversion);
-  SafeRelease(&m_layout      );
-  SafeRelease(&m_psCopy      );
+  m_vertexShader = NULL;
+  m_psConversion = NULL;
+  m_layout       = NULL;
+  m_psCopy       = NULL;
 }
 
 bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
@@ -351,7 +351,7 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
   m_deviceContext->PSSetShader           (m_psConversion, NULL, 0);
 
   m_deviceContext->DrawIndexed(m_indexCount, 0, 0);
-  SafeRelease(&textureView);
+  textureView = NULL;
 
   D3D11_RENDER_TARGET_VIEW_DESC targetDesc;
   ZeroMemory(&targetDesc, sizeof(targetDesc));
@@ -395,7 +395,6 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
     result = m_device->CreateRenderTargetView(dest, &targetDesc, &view);
     if (FAILED(result))
     {
-      SafeRelease(&dest);
       delete[] renderViews;
       DeInitialize();
       DEBUG_ERROR("Failed to create the target view");
@@ -411,7 +410,7 @@ bool TextureConverter::Convert(ID3D11Texture2DPtr texture, TextureList & output)
     m_deviceContext->DrawIndexed(m_indexCount, 0, 0);
 
     output.push_back(dest);
-    SafeRelease(&view);
+    view = NULL;
   }
 
   delete[] renderViews;

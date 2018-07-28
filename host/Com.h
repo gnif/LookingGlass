@@ -39,6 +39,7 @@ _COM_SMARTPTR_TYPEDEF(IMFActivate             , __uuidof(IMFActivate            
 _COM_SMARTPTR_TYPEDEF(IMFAttributes           , __uuidof(IMFAttributes           ));
 _COM_SMARTPTR_TYPEDEF(IMFDXGIDeviceManager    , __uuidof(IMFDXGIDeviceManager    ));
 _COM_SMARTPTR_TYPEDEF(IMFTransform            , __uuidof(IMFTransform            ));
+_COM_SMARTPTR_TYPEDEF(IMFMediaEvent           , __uuidof(IMFMediaEvent           ));
 _COM_SMARTPTR_TYPEDEF(IMFMediaEventGenerator  , __uuidof(IMFMediaEventGenerator  ));
 _COM_SMARTPTR_TYPEDEF(IMFMediaType            , __uuidof(IMFMediaType            ));
 _COM_SMARTPTR_TYPEDEF(IMFSample               , __uuidof(IMFSample               ));
@@ -53,13 +54,3 @@ _COM_SMARTPTR_TYPEDEF(ID3D11VertexShader      , __uuidof(ID3D11VertexShader     
 _COM_SMARTPTR_TYPEDEF(ID3D11PixelShader       , __uuidof(ID3D11PixelShader       ));
 _COM_SMARTPTR_TYPEDEF(ID3D11SamplerState      , __uuidof(ID3D11SamplerState      ));
 _COM_SMARTPTR_TYPEDEF(ID3D11Buffer            , __uuidof(ID3D11Buffer            ));
-
-
-template <class T> void SafeRelease(T **ppT)
-{
-  if (*ppT)
-  {
-    (*ppT)->Release();
-    *ppT = NULL;
-  }
-}

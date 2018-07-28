@@ -74,7 +74,7 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
 
   ID3D10MultithreadPtr mt(m_device);
   mt->SetMultithreadProtected(TRUE);
-  SafeRelease(&mt);
+  mt = NULL;
 
   typeInfo.guidMajorType = MFMediaType_Video;
   typeInfo.guidSubtype   = MFVideoFormat_H264;
@@ -131,7 +131,7 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
   attribs->GetUINT32(MF_SA_D3D11_AWARE, &d3d11Aware);
   if (async)
     attribs->SetUINT32(MF_TRANSFORM_ASYNC_UNLOCK, TRUE);
-  SafeRelease(&attribs);
+  attribs = NULL;
 
   status = m_mfTransform.QueryInterface(IID_PPV_ARGS(&m_mediaEventGen));
   if (FAILED(status))
@@ -179,8 +179,8 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
   MFSetAttributeRatio(outType, MF_MT_FRAME_RATE        , 60     , 1       );
   MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO, 1      , 1       );
 
-  status = m_mfTransform->SetOutputType(0, outType, 0);
-  SafeRelease(&outType);
+  status  = m_mfTransform->SetOutputType(0, outType, 0);
+  outType = NULL;
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to set the output media type on the H264 encoder MFT", status);
@@ -200,7 +200,7 @@ bool MFT::H264::Initialize(ID3D11DevicePtr device, unsigned int width, unsigned 
   MFSetAttributeRatio(inType, MF_MT_PIXEL_ASPECT_RATIO, 1      , 1       );
 
   status = m_mfTransform->SetInputType(0, inType, 0);
-  SafeRelease(&inType);
+  inType = NULL;
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to set the input media type on the H264 encoder MFT", status);
@@ -224,9 +224,9 @@ void MFT::H264::DeInitialize()
     m_mfTransform->DeleteInputStream(0);
   }
 
-  SafeRelease(&m_mediaEventGen);
-  SafeRelease(&m_mfTransform);
-  SafeRelease(&m_mfDeviceManager);
+  m_mediaEventGen   = NULL;
+  m_mfTransform     = NULL;
+  m_mfDeviceManager = NULL;
 
   if (m_encodeEvent)
   {
@@ -240,7 +240,7 @@ void MFT::H264::DeInitialize()
   if (m_mfActivation)
   {
     m_mfActivation->ShutdownObject();
-    SafeRelease(&m_mfActivation);
+    m_mfActivation = NULL;
   }
 }
 
@@ -307,7 +307,6 @@ bool MFT::H264::ProvideFrame(ID3D11Texture2DPtr texture)
   DWORD length;
   imfBuffer->GetContiguousLength(&length);
   buffer->SetCurrentLength(length);
-  SafeRelease(&imfBuffer);
 
   IMFSamplePtr sample;
   MFCreateSample(&sample);
@@ -320,8 +319,6 @@ bool MFT::H264::ProvideFrame(ID3D11Texture2DPtr texture)
     return false;
   }
 
-  SafeRelease(&sample);
-  SafeRelease(&buffer);
   return true;
 }
 
@@ -364,9 +361,11 @@ bool MFT::H264::GetFrame(void * buffer, const size_t bufferSize, unsigned int & 
   memcpy(buffer, pixels, curLen);
   mb->Unlock();
 
-  SafeRelease(&mb);
-  SafeRelease(&outDataBuffer.pSample);
-  SafeRelease(&outDataBuffer.pEvents);
+  if (outDataBuffer.pSample)
+    outDataBuffer.pSample->Release();
+
+  if (outDataBuffer.pEvents)
+    outDataBuffer.pEvents->Release();
 
   dataLen = curLen;
   return true;
@@ -376,7 +375,7 @@ STDMETHODIMP MFT::H264::Invoke(IMFAsyncResult * pAsyncResult)
 {
   HRESULT status, evtStatus;
   MediaEventType meType = MEUnknown;
-  IMFMediaEvent *pEvent = NULL;
+  IMFMediaEventPtr pEvent = NULL;
 
   status = m_mediaEventGen->EndGetEvent(pAsyncResult, &pEvent);
   if (FAILED(status))
@@ -388,14 +387,12 @@ STDMETHODIMP MFT::H264::Invoke(IMFAsyncResult * pAsyncResult)
   status = pEvent->GetStatus(&evtStatus);
   if (FAILED(status))
   {
-    SafeRelease(&pEvent);
     DEBUG_WINERROR("GetStatus", status);
     return status;
   }
 
   if (FAILED(evtStatus))
   {
-    SafeRelease(&pEvent);
     DEBUG_WINERROR("evtStatus", evtStatus);
     return evtStatus;
   }
@@ -403,11 +400,9 @@ STDMETHODIMP MFT::H264::Invoke(IMFAsyncResult * pAsyncResult)
   status = pEvent->GetType(&meType);
   if (FAILED(status))
   {
-    SafeRelease(&pEvent);
     DEBUG_WINERROR("GetType", status);
     return status;
   }
-  SafeRelease(&pEvent);
 
   switch (meType)
   {
