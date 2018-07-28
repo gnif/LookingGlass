@@ -737,7 +737,7 @@ int run()
      DEBUG_INFO("Wayland detected");
      int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
      if (err < 0) {
-       DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", errno);
+       DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
        return -1;
      }
      DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
