@@ -733,6 +733,11 @@ int run()
   state.fpsSleep = 1000000 / params.fpsLimit;
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
+  
+  if (XDG_SESSION_TYPE == NULL) {
+    XDG_SESSION_TYPE = "unspecified";
+  }
+  
   if (strcmp(XDG_SESSION_TYPE, "wayland") == 0) {
      DEBUG_INFO("Wayland detected");
      int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
