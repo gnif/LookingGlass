@@ -25,13 +25,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "egl_model.h"
 #include "egl_shader.h"
+#include "egl_shader_progs.h"
 
 struct Options
 {
+  bool vsync;
 };
 
 static struct Options defaultOptions =
 {
+  .vsync = true
 };
 
 struct Models
@@ -226,14 +229,22 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     1.0f, 0.0f
   };
 
-  if (!egl_shader_init(&this->shaders.desktop)                     ) return false;
-  if (!egl_shader_load(this->shaders.desktop, "test.vs", "test.fs")) return false;
-  if (!egl_model_init(&this->models.desktop)                       ) return false;
+  if (!egl_shader_init(&this->shaders.desktop))
+    return false;
 
+  if (!egl_shader_compile(this->shaders.desktop,
+        egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic),
+        egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)
+      ))
+    return false;
+
+  if (!egl_model_init(&this->models.desktop))
+    return false;
   egl_model_set_verticies(this->models.desktop, desktop, sizeof(desktop) / sizeof(GLfloat));
   egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs    ) / sizeof(GLfloat));
   egl_model_set_shader   (this->models.desktop, this->shaders.desktop);
 
+  eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
   return true;
 }
 
@@ -269,8 +280,23 @@ bool egl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
+static void handle_opt_vsync(void * opaque, const char *value)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this)
+    return;
+
+  this->opt.vsync = LG_RendererValueToBool(value);
+}
+
 static LG_RendererOpt egl_options[] =
 {
+  {
+    .name      = "vsync",
+    .desc      ="Enable or disable vsync [default: enabled]",
+    .validator = LG_RendererValidatorBool,
+    .handler   = handle_opt_vsync
+  }
 };
 
 struct LG_Renderer LGR_EGL =

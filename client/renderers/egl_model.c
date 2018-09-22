@@ -42,7 +42,7 @@ struct EGL_Model
   bool   hasTexture;
   GLuint texture;
 
-  bool   hasPBO, pboUpdate;
+  bool   hasPBO;
   GLuint pbo[2];
   int    pboIndex;
   size_t pboWidth, pboHeight;
@@ -105,7 +105,7 @@ bool egl_model_init_streaming(EGL_Model * model, size_t width, size_t height, si
       GL_PIXEL_UNPACK_BUFFER,
       bufferSize,
       NULL,
-      GL_STREAM_DRAW
+      GL_DYNAMIC_DRAW
     );
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
@@ -124,24 +124,14 @@ bool egl_model_stream_buffer(EGL_Model * model, const uint8_t * buffer, size_t b
   if (++model->pboIndex == 2)
     model->pboIndex = 0;
 
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, model->pbo[model->pboIndex]);
-  glBufferData(GL_PIXEL_UNPACK_BUFFER, bufferSize, 0, GL_STREAM_DRAW);
-  GLubyte * ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
-  if (!ptr)
-  {
-    DEBUG_ERROR("Failed to map the buffer");
-    glBindTexture(GL_TEXTURE_2D, 0);
+  glBindTexture(GL_TEXTURE_2D, egl_model_get_texture_id(model));
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, model->pbo[model->pboIndex]);
+      glBufferData(GL_PIXEL_UNPACK_BUFFER, bufferSize, 0, GL_DYNAMIC_DRAW);
+      glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, bufferSize, buffer);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, model->pboWidth, model->pboHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    return false;
-  }
-
-  memcpy(ptr, buffer, bufferSize);
-
-  glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
   glBindTexture(GL_TEXTURE_2D, 0);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-  model->pboUpdate = true;
   return true;
 }
 
@@ -210,14 +200,6 @@ void egl_model_render(EGL_Model * model)
 
   if (model->shader)
     glUseProgram(0);
-
-  if (model->pboUpdate)
-  {
-    glBindTexture(GL_TEXTURE_2D, egl_model_get_texture_id(model));
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, model->pbo[model->pboIndex]);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, model->pboWidth, model->pboHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    model->pboUpdate = false;
-  }
 }
 
 void egl_model_set_shader(EGL_Model * model, EGL_Shader * shader)
