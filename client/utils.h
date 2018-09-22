@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <time.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 static inline uint64_t microtime()
 {
@@ -92,3 +93,7 @@ static inline int32_t decode_s_golomb(const uint8_t * const base, size_t * const
   const uint32_t g = decode_u_golomb(base, offset);
   return (g & 0x1) ? (g + 1) / 2 : -(g / 2);
 }
+
+// reads the specified file into a new buffer
+// the callee must free the buffer
+bool file_get_contents(const char * filename, char ** buffer, size_t * length);

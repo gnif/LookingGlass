@@ -12,6 +12,7 @@ pkg_check_modules(PKGCONFIG REQUIRED
 	SDL2_ttf
 	gl
 	glu
+	egl
 	spice-protocol
 	fontconfig
 	x11
@@ -50,11 +51,15 @@ set(SOURCES
 	main.c
 	lg-renderer.c
 	ll.c
+	utils.c
 	spice/rsa.c
 	spice/spice.c
 	decoders/null.c
 	decoders/yuv420.c
 	renderers/opengl.c
+	renderers/egl.c
+	renderers/egl_shader.c
+	renderers/egl_model.c
 )
 
 add_executable(looking-glass-client ${SOURCES})
