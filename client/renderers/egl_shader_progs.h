@@ -72,7 +72,7 @@ static const char egl_fragment_shader_yuv[] = "\
 #version 300 es\n\
 \
 in  highp vec2 uv;\
-out highp vec3 color;\
+out highp vec4 color;\
 \
 uniform sampler2D sampler1;\
 uniform sampler2D sampler2;\
@@ -93,11 +93,8 @@ void main()\
     1.0,  1.772,  0.0  , -0.886,\
     1.0,  1.0  ,  1.0  ,  1.0\
   );\
-  yuv = yuv * yuv_to_rgb;\
   \
-  color.r = yuv.r;\
-  color.g = yuv.g;\
-  color.b = yuv.b;\
+  color = yuv * yuv_to_rgb;\
 }\
 ";
 
