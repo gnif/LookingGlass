@@ -282,19 +282,17 @@ bool egl_render(void * opaque, SDL_Window * window)
     if (this->sourceChanged)
     {
       this->sourceChanged = false;
-      egl_texture_init_streaming(
+      if (!egl_texture_init_streaming(
         this->textures.desktop,
         this->format.width,
         this->format.height,
         this->frameSize
-      );
+      ))
+        return false;
     }
 
-    egl_texture_stream_buffer(
-      this->textures.desktop,
-      this->data,
-      this->frameSize
-    );
+    if (!egl_texture_stream_buffer(this->textures.desktop, this->data))
+      return false;
 
     this->update = false;
   }

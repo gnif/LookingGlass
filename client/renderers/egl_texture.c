@@ -30,10 +30,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct EGL_Texture
 {
   GLuint texture;
+  size_t width, height;
+
   bool   hasPBO;
   GLuint pbo[2];
   int    pboIndex;
-  size_t pboWidth, pboHeight;
   size_t pboBufferSize;
 };
 
@@ -68,8 +69,9 @@ void egl_texture_free(EGL_Texture ** texture)
 
 bool egl_texture_init_streaming(EGL_Texture * texture, size_t width, size_t height, size_t bufferSize)
 {
-  texture->pboWidth  = width;
-  texture->pboHeight = height;
+  texture->width      = width;
+  texture->height     = height;
+  texture->pboBufferSize = bufferSize;
 
   glBindTexture(GL_TEXTURE_2D, texture->texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -80,7 +82,10 @@ bool egl_texture_init_streaming(EGL_Texture * texture, size_t width, size_t heig
   glBindTexture(GL_TEXTURE_2D, 0);
 
   if (!texture->hasPBO)
+  {
     glGenBuffers(2, texture->pbo);
+    texture->hasPBO = true;
+  }
 
   for(int i = 0; i < 2; ++i)
   {
@@ -94,25 +99,19 @@ bool egl_texture_init_streaming(EGL_Texture * texture, size_t width, size_t heig
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
 
-  texture->hasPBO = true;
   return true;
 }
 
-bool egl_texture_is_streaming(EGL_Texture * texture)
-{
-  return texture->hasPBO;
-}
-
-bool egl_texture_stream_buffer(EGL_Texture * texture, const uint8_t * buffer, size_t bufferSize)
+bool egl_texture_stream_buffer(EGL_Texture * texture, const uint8_t * buffer)
 {
   if (++texture->pboIndex == 2)
     texture->pboIndex = 0;
 
   glBindTexture(GL_TEXTURE_2D, texture->texture);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
-      glBufferData(GL_PIXEL_UNPACK_BUFFER, bufferSize, 0, GL_DYNAMIC_DRAW);
-      glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, bufferSize, buffer);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->pboWidth, texture->pboHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+      glBufferData(GL_PIXEL_UNPACK_BUFFER, texture->pboBufferSize, 0, GL_DYNAMIC_DRAW);
+      glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
 
