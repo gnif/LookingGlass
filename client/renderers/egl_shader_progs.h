@@ -38,16 +38,16 @@ void main()\
 ";
 
 static const char egl_fragment_shader_rgba[] = "\
-#version 300 es\
+#version 300 es\n\
 \
 in  highp vec2 uv;\
 out highp vec3 color;\
 \
-uniform sampler2D sampler;\
+uniform sampler2D sampler1;\
  \
 void main()\
 {\
-  color = texture(sampler, uv).rgb;\
+  color = texture(sampler1, uv).rgb;\
 }\
 ";
 
@@ -57,14 +57,47 @@ static const char egl_fragment_shader_bgra[] = "\
 in  highp vec2 uv;\
 out highp vec3 color;\
 \
-uniform sampler2D sampler;\
+uniform sampler2D sampler1;\
 \
 void main()\
 {\
-  highp vec3 tmp = texture(sampler, uv).rgb;\
+  highp vec3 tmp = texture(sampler1, uv).rgb;\
   color.r = tmp.b;\
   color.g = tmp.g;\
   color.b = tmp.r;\
+}\
+";
+
+static const char egl_fragment_shader_yuv[] = "\
+#version 300 es\n\
+\
+in  highp vec2 uv;\
+out highp vec3 color;\
+\
+uniform sampler2D sampler1;\
+uniform sampler2D sampler2;\
+uniform sampler2D sampler3;\
+\
+void main()\
+{\
+  highp vec4 yuv = vec4(\
+    texture(sampler1, uv).r,\
+    texture(sampler2, uv).r,\
+    texture(sampler3, uv).r,\
+    1.0\
+  );\
+  \
+  highp mat4 yuv_to_rgb = mat4(\
+    1.0,  0.0  ,  1.402, -0.701,\
+    1.0, -0.344, -0.714,  0.529,\
+    1.0,  1.772,  0.0  , -0.886,\
+    1.0,  1.0  ,  1.0  ,  1.0\
+  );\
+  yuv = yuv * yuv_to_rgb;\
+  \
+  color.r = yuv.r;\
+  color.g = yuv.g;\
+  color.b = yuv.b;\
 }\
 ";
 

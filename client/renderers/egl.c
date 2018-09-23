@@ -44,7 +44,9 @@ struct Models
 
 struct Shaders
 {
-  struct EGL_Shader * desktop;
+  struct EGL_Shader * rgba;
+  struct EGL_Shader * bgra;
+  struct EGL_Shader * yuv;
 };
 
 struct Textures
@@ -68,11 +70,13 @@ struct Inst
   struct Shaders    shaders;
   struct Textures   textures;
 
-  LG_RendererFormat  format;
-  bool               sourceChanged;
-  size_t             frameSize;
-  const uint8_t    * data;
-  bool               update;
+  LG_RendererFormat    format;
+  enum EGL_PixelFormat pixFmt;
+  EGL_Shader         * shader;
+  bool                 sourceChanged;
+  size_t               frameSize;
+  const uint8_t      * data;
+  bool                 update;
 };
 
 const char * egl_get_name()
@@ -114,7 +118,9 @@ void egl_deinitialize(void * opaque)
   struct Inst * this = (struct Inst *)opaque;
 
   egl_model_free  (&this->models  .desktop);
-  egl_shader_free (&this->shaders .desktop);
+  egl_shader_free (&this->shaders .rgba   );
+  egl_shader_free (&this->shaders .bgra   );
+  egl_shader_free (&this->shaders .yuv    );
   egl_texture_free(&this->textures.desktop);
   free(this);
 }
@@ -137,8 +143,6 @@ bool egl_on_mouse_event(void * opaque, const bool visible , const int x, const i
 bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uint8_t * data)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (format.type != FRAME_TYPE_ARGB)
-    return false;
 
   this->sourceChanged = (
     this->sourceChanged ||
@@ -151,7 +155,24 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
   if (this->sourceChanged)
   {
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-    this->frameSize = format.height * format.pitch;
+
+    switch(format.type)
+    {
+      case FRAME_TYPE_ARGB:
+        this->pixFmt    = EGL_PF_RGBA;
+        this->shader    = this->shaders.rgba;
+        this->frameSize = format.height * format.pitch;
+        break;
+
+      case FRAME_TYPE_YUV420:
+        this->pixFmt    = EGL_PF_YUV420;
+        this->shader    = this->shaders.yuv;
+        this->frameSize = format.width * format.height * 3 / 2;
+        break;
+
+      default:
+        return false;
+    }
   }
 
   this->data   = data;
@@ -249,14 +270,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     1.0f, 0.0f
   };
 
-  if (!egl_shader_init(&this->shaders.desktop))
-    return false;
+  if (!egl_shader_init(&this->shaders.rgba)) return false;
+  if (!egl_shader_init(&this->shaders.bgra)) return false;
+  if (!egl_shader_init(&this->shaders.yuv )) return false;
 
-  if (!egl_shader_compile(this->shaders.desktop,
-        egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic),
-        egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)
-      ))
-    return false;
+  if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba))) return false;
+  if (!egl_shader_compile(this->shaders.bgra, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra))) return false;
+  if (!egl_shader_compile(this->shaders.yuv , egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_yuv , sizeof(egl_fragment_shader_yuv ))) return false;
 
   if (!egl_texture_init(&this->textures.desktop))
     return false;
@@ -266,7 +286,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
 
   egl_model_set_verticies(this->models.desktop, desktop, sizeof(desktop) / sizeof(GLfloat));
   egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs    ) / sizeof(GLfloat));
-  egl_model_set_shader   (this->models.desktop, this->shaders .desktop);
   egl_model_set_texture  (this->models.desktop, this->textures.desktop);
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
@@ -284,12 +303,15 @@ bool egl_render(void * opaque, SDL_Window * window)
       this->sourceChanged = false;
       if (!egl_texture_init_streaming(
         this->textures.desktop,
+        this->pixFmt,
         this->format.width,
         this->format.height,
         this->frameSize
       ))
         return false;
-    }
+
+      egl_model_set_shader(this->models.desktop, this->shader);
+   }
 
     if (!egl_texture_stream_buffer(this->textures.desktop, this->data))
       return false;

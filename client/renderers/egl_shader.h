@@ -32,3 +32,5 @@ void egl_shader_free(EGL_Shader ** shader);
 bool egl_shader_load   (EGL_Shader * model, const char * vertex_file, const char * fragment_file);
 bool egl_shader_compile(EGL_Shader * model, const char * vertex_code, size_t vertex_size, const char * fragment_code, size_t fragment_size);
 void egl_shader_use    (EGL_Shader * shader);
+
+void egl_shader_associate_textures(EGL_Shader * shader, const int count);

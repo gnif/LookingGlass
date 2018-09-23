@@ -194,3 +194,21 @@ void egl_shader_use(EGL_Shader * shader)
   else
     DEBUG_ERROR("Shader program has not been compiled");
 }
+
+void egl_shader_associate_textures(EGL_Shader * shader, const int count)
+{
+  char name[] = "sampler1";
+  glUseProgram(shader->shader);
+  for(int i = 0; i < count; ++i, name[7]++)
+  {
+    GLint loc = glGetUniformLocation(shader->shader, name);
+    if (loc == -1)
+    {
+      DEBUG_WARN("Shader uniform location `%s` not found", name);
+      continue;
+    }
+
+    glUniform1i(loc, i);
+  }
+  glUseProgram(0);
+}

@@ -27,9 +27,17 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef struct EGL_Texture EGL_Texture;
 
+enum EGL_PixelFormat
+{
+  EGL_PF_RGBA,
+  EGL_PF_BGRA,
+  EGL_PF_YUV420
+};
+
 bool egl_texture_init(EGL_Texture ** tex);
 void egl_texture_free(EGL_Texture ** tex);
 
-bool egl_texture_init_streaming(EGL_Texture * texture, size_t width, size_t height, size_t bufferSize);
+bool egl_texture_init_streaming(EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t bufferSize);
 bool egl_texture_stream_buffer (EGL_Texture * texture, const uint8_t * buffer);
 void egl_texture_bind          (EGL_Texture * texture);
+int  egl_texture_count         (EGL_Texture * texture);

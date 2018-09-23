@@ -43,6 +43,8 @@ struct EGL_Model
   EGL_Texture * texture;
 };
 
+void update_uniform_bindings(EGL_Model * model);
+
 bool egl_model_init(EGL_Model ** model)
 {
   *model = (EGL_Model *)malloc(sizeof(EGL_Model));
@@ -138,9 +140,20 @@ void egl_model_render(EGL_Model * model)
 void egl_model_set_shader(EGL_Model * model, EGL_Shader * shader)
 {
   model->shader = shader;
+  update_uniform_bindings(model);
 }
 
 void egl_model_set_texture(EGL_Model * model, EGL_Texture * texture)
 {
   model->texture = texture;
+  update_uniform_bindings(model);
+}
+
+void update_uniform_bindings(EGL_Model * model)
+{
+  if (!model->shader || !model->texture)
+    return;
+
+  const int count = egl_texture_count(model->texture);
+  egl_shader_associate_textures(model->shader, count);
 }
