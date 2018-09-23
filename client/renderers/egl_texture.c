@@ -107,13 +107,12 @@ bool egl_texture_stream_buffer(EGL_Texture * texture, const uint8_t * buffer)
   if (++texture->pboIndex == 2)
     texture->pboIndex = 0;
 
-  glBindTexture(GL_TEXTURE_2D, texture->texture);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
-      glBufferData(GL_PIXEL_UNPACK_BUFFER, texture->pboBufferSize, 0, GL_DYNAMIC_DRAW);
-      glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
+    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
+      glBindTexture(GL_TEXTURE_2D, texture->texture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+      glBindTexture(GL_TEXTURE_2D, 0);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   return true;
 }
