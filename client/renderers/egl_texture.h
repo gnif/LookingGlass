@@ -21,19 +21,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 #include "egl_shader.h"
-#include "egl_texture.h"
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 
-typedef struct EGL_Model EGL_Model;
+typedef struct EGL_Texture EGL_Texture;
 
-bool egl_model_init(EGL_Model ** model);
-void egl_model_free(EGL_Model ** model);
+bool egl_texture_init(EGL_Texture ** tex);
+void egl_texture_free(EGL_Texture ** tex);
 
-void   egl_model_set_verticies (EGL_Model * model, const GLfloat * verticies, const size_t count);
-void   egl_model_set_uvs       (EGL_Model * model, const GLfloat * uvs      , const size_t count);
-void   egl_model_set_shader    (EGL_Model * model, EGL_Shader  * shader);
-void   egl_model_set_texture   (EGL_Model * model, EGL_Texture * texture);
-
-void egl_model_render(EGL_Model * model);
+bool egl_texture_init_streaming(EGL_Texture * texture, size_t width, size_t height, size_t bufferSize);
+bool egl_texture_is_streaming  (EGL_Texture * texture);
+bool egl_texture_stream_buffer (EGL_Texture * texture, const uint8_t * buffer, size_t bufferSize);
+void egl_texture_bind          (EGL_Texture * texture);

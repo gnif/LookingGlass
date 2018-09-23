@@ -20,13 +20,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 #include "lg-renderer.h"
 
+extern const LG_Renderer LGR_EGL;
 extern const LG_Renderer LGR_OpenGL;
-//extern const LG_Renderer LGR_OpenGLBasic;
 
 const LG_Renderer * LG_Renderers[] =
 {
+  &LGR_EGL,
   &LGR_OpenGL,
-//  &LGR_OpenGLBasic,
   NULL // end of array sentinal
 };
 

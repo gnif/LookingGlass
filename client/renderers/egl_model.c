@@ -19,6 +19,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "egl_model.h"
 #include "egl_shader.h"
+#include "egl_texture.h"
+
 #include "debug.h"
 #include "utils.h"
 
@@ -37,15 +39,8 @@ struct EGL_Model
   bool   hasUVBuffer;
   GLuint uvBuffer;
 
-  EGL_Shader * shader;
-
-  bool   hasTexture;
-  GLuint texture;
-
-  bool   hasPBO;
-  GLuint pbo[2];
-  int    pboIndex;
-  size_t pboWidth, pboHeight;
+  EGL_Shader  * shader;
+  EGL_Texture * texture;
 };
 
 bool egl_model_init(EGL_Model ** model)
@@ -72,67 +67,8 @@ void egl_model_free(EGL_Model ** model)
   if ((*model)->hasUVBuffer)
     glDeleteBuffers(1, &(*model)->uvBuffer);
 
-  if ((*model)->hasTexture)
-    glDeleteTextures(1, &(*model)->texture);
-
-  if ((*model)->hasPBO)
-    glDeleteBuffers(2, (*model)->pbo);
-
   free(*model);
   *model = NULL;
-}
-
-bool egl_model_init_streaming(EGL_Model * model, size_t width, size_t height, size_t bufferSize)
-{
-  model->pboWidth  = width;
-  model->pboHeight = height;
-
-  glBindTexture(GL_TEXTURE_2D, egl_model_get_texture_id(model));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glBindTexture(GL_TEXTURE_2D, 0);
-
-  if (!model->hasPBO)
-    glGenBuffers(2, model->pbo);
-
-  for(int i = 0; i < 2; ++i)
-  {
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, model->pbo[i]);
-    glBufferData(
-      GL_PIXEL_UNPACK_BUFFER,
-      bufferSize,
-      NULL,
-      GL_DYNAMIC_DRAW
-    );
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  }
-
-  model->hasPBO = true;
-  return true;
-}
-
-bool egl_model_is_streaming(EGL_Model * model)
-{
-  return model->hasPBO;
-}
-
-bool egl_model_stream_buffer(EGL_Model * model, const uint8_t * buffer, size_t bufferSize)
-{
-  if (++model->pboIndex == 2)
-    model->pboIndex = 0;
-
-  glBindTexture(GL_TEXTURE_2D, egl_model_get_texture_id(model));
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, model->pbo[model->pboIndex]);
-      glBufferData(GL_PIXEL_UNPACK_BUFFER, bufferSize, 0, GL_DYNAMIC_DRAW);
-      glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, bufferSize, buffer);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, model->pboWidth, model->pboHeight, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glBindTexture(GL_TEXTURE_2D, 0);
-
-  return true;
 }
 
 void egl_model_set_verticies(EGL_Model * model, const GLfloat * verticies, const size_t count)
@@ -186,20 +122,17 @@ void egl_model_render(EGL_Model * model)
     glVertexAttribPointer(location, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
   }
 
-  if (model->hasTexture)
-    glBindTexture(GL_TEXTURE_2D, model->texture);
+  if (model->texture)
+    egl_texture_bind(model->texture);
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, model->vertexCount);
-
-  if (model->hasTexture)
-    glBindTexture(GL_TEXTURE_2D, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
 
   while(location > 0)
     glDisableVertexAttribArray(location--);
   glDisableVertexAttribArray(0);
 
-  if (model->shader)
-    glUseProgram(0);
+  glUseProgram(0);
 }
 
 void egl_model_set_shader(EGL_Model * model, EGL_Shader * shader)
@@ -207,13 +140,7 @@ void egl_model_set_shader(EGL_Model * model, EGL_Shader * shader)
   model->shader = shader;
 }
 
-GLuint egl_model_get_texture_id(EGL_Model * model)
+void egl_model_set_texture(EGL_Model * model, EGL_Texture * texture)
 {
-  if (model->hasTexture)
-    return model->texture;
-
-  glGenTextures(1, &model->texture);
-  model->hasTexture = true;
-
-  return model->texture;
+  model->texture = texture;
 }

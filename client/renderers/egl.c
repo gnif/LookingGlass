@@ -47,6 +47,11 @@ struct Shaders
   struct EGL_Shader * desktop;
 };
 
+struct Textures
+{
+  struct EGL_Texture * desktop;
+};
+
 struct Inst
 {
   LG_RendererParams params;
@@ -61,8 +66,10 @@ struct Inst
 
   struct Models     models;
   struct Shaders    shaders;
+  struct Textures   textures;
 
   LG_RendererFormat  format;
+  bool               sourceChanged;
   size_t             frameSize;
   const uint8_t    * data;
   bool               update;
@@ -106,8 +113,9 @@ void egl_deinitialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  egl_model_free (&this->models .desktop);
-  egl_shader_free(&this->shaders.desktop);
+  egl_model_free  (&this->models  .desktop);
+  egl_shader_free (&this->shaders .desktop);
+  egl_texture_free(&this->textures.desktop);
   free(this);
 }
 
@@ -132,10 +140,22 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
   if (format.type != FRAME_TYPE_ARGB)
     return false;
 
-  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-  this->frameSize = format.height * format.pitch;
-  this->data      = data;
-  this->update    = true;
+  this->sourceChanged = (
+    this->sourceChanged ||
+    this->format.type   != format.type   ||
+    this->format.width  != format.width  ||
+    this->format.height != format.height ||
+    this->format.pitch  != format.pitch
+  );
+
+  if (this->sourceChanged)
+  {
+    memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+    this->frameSize = format.height * format.pitch;
+  }
+
+  this->data   = data;
+  this->update = true;
 
   return true;
 }
@@ -238,11 +258,16 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
       ))
     return false;
 
+  if (!egl_texture_init(&this->textures.desktop))
+    return false;
+
   if (!egl_model_init(&this->models.desktop))
     return false;
+
   egl_model_set_verticies(this->models.desktop, desktop, sizeof(desktop) / sizeof(GLfloat));
   egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs    ) / sizeof(GLfloat));
-  egl_model_set_shader   (this->models.desktop, this->shaders.desktop);
+  egl_model_set_shader   (this->models.desktop, this->shaders .desktop);
+  egl_model_set_texture  (this->models.desktop, this->textures.desktop);
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
   return true;
@@ -254,16 +279,19 @@ bool egl_render(void * opaque, SDL_Window * window)
 
   if (this->update)
   {
-    if (!egl_model_is_streaming(this->models.desktop))
-      egl_model_init_streaming(
-        this->models.desktop,
+    if (this->sourceChanged)
+    {
+      this->sourceChanged = false;
+      egl_texture_init_streaming(
+        this->textures.desktop,
         this->format.width,
         this->format.height,
         this->frameSize
       );
+    }
 
-    egl_model_stream_buffer(
-      this->models.desktop,
+    egl_texture_stream_buffer(
+      this->textures.desktop,
       this->data,
       this->frameSize
     );

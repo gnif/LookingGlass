@@ -59,6 +59,7 @@ set(SOURCES
 	renderers/opengl.c
 	renderers/egl.c
 	renderers/egl_shader.c
+	renderers/egl_texture.c
 	renderers/egl_model.c
 )
 
