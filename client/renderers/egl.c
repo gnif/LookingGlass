@@ -83,7 +83,6 @@ struct Inst
   size_t               frameSize;
   const uint8_t      * data;
   bool                 update;
-  int                  screenW, screenH;
 
   bool         mouseVisible;
   float        mouseX, mouseY, mouseW, mouseH;
@@ -165,15 +164,12 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  this->screenW = width;
-  this->screenH = height;
-
   glViewport(0, 0, width, height);
-  this->mouseScaleX = 2.0f / width ;
-  this->mouseScaleY = 2.0f / height;
 
-  this->mouseW = this->mouseWidth  * (1.0f / this->screenW);
-  this->mouseH = this->mouseHeight * (1.0f / this->screenH);
+  this->mouseScaleX = 2.0f / this->format.width;
+  this->mouseScaleY = 2.0f / this->format.height;
+  this->mouseW = this->mouseWidth  * (1.0f / this->format.width );
+  this->mouseH = this->mouseHeight * (1.0f / this->format.height);
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -186,8 +182,8 @@ bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int
   this->mouseHeight = height;
   this->mousePitch  = pitch;
 
-  this->mouseW = this->mouseWidth  * (1.0f / this->screenW);
-  this->mouseH = this->mouseHeight * (1.0f / this->screenH);
+  this->mouseW = this->mouseWidth  * (1.0f / this->format.width );
+  this->mouseH = this->mouseHeight * (1.0f / this->format.height);
 
   const size_t size = height * pitch;
   if (size > this->mouseDataSize)
