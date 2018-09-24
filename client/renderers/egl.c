@@ -50,7 +50,7 @@ struct Shaders
   struct EGL_Shader * bgra;
   struct EGL_Shader * yuv;
 
-  struct EGL_Shader * mouse_bgra;
+  struct EGL_Shader * mouse_rgba;
   struct EGL_Shader * mouse_mask;
 };
 
@@ -149,7 +149,7 @@ void egl_deinitialize(void * opaque)
   egl_shader_free (&this->shaders .rgba      );
   egl_shader_free (&this->shaders .bgra      );
   egl_shader_free (&this->shaders .yuv       );
-  egl_shader_free (&this->shaders .mouse_bgra);
+  egl_shader_free (&this->shaders .mouse_rgba);
   egl_shader_free (&this->shaders .mouse_mask);
   egl_texture_free(&this->textures.desktop);
   egl_texture_free(&this->textures.mouse );
@@ -353,7 +353,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_init(&this->shaders.yuv))
     return false;
 
-  if (!egl_shader_init(&this->shaders.mouse_bgra))
+  if (!egl_shader_init(&this->shaders.mouse_rgba))
     return false;
 
   if (!egl_shader_init(&this->shaders.mouse_mask))
@@ -368,7 +368,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_compile(this->shaders.yuv, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_yuv , sizeof(egl_fragment_shader_yuv )))
     return false;
 
-  if (!egl_shader_compile(this->shaders.mouse_bgra, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)))
+  if (!egl_shader_compile(this->shaders.mouse_rgba, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
     return false;
 
   if (!egl_shader_compile(this->shaders.mouse_mask, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_mask, sizeof(egl_fragment_shader_mask)))
@@ -490,7 +490,7 @@ void update_mouse_shape(struct Inst * this)
         false
       );
 
-      this->mouseShader = this->shaders.mouse_bgra;
+      this->mouseShader = this->shaders.mouse_rgba;
       egl_texture_update(this->textures.mouse, data);
       egl_model_set_shader(this->models.mouse, this->mouseShader);
       this->mouseUniformLoc = egl_shader_get_uniform_location(this->mouseShader, "mouse");
