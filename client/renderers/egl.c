@@ -495,6 +495,7 @@ void update_mouse_shape(struct Inst * this)
 
     case LG_CURSOR_MONOCHROME:
     {
+      DEBUG_INFO("TODO: Monochrome cursors are not yet supported by EGL");
 #if 0
       const int hheight = height / 2;
       uint32_t d[width * height];
@@ -562,7 +563,6 @@ void update_mouse_shape(struct Inst * this)
     }
   }
 
-  this->mouseUpdate = true;
   LG_UNLOCK(this->mouseLock);
 }
 
