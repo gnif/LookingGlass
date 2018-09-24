@@ -37,17 +37,45 @@ void main()\
 }\
 ";
 
+static const char egl_vertex_shader_mouse[] = "\
+#version 300 es\n\
+\
+layout(location = 0) in vec3 vertexPosition_modelspace;\
+layout(location = 1) in vec2 vertexUV;\
+\
+uniform vec4 mouse;\
+\
+out highp vec2 uv;\
+\
+void main()\
+{\
+  gl_Position.xyz = vertexPosition_modelspace;\
+  gl_Position.w   = 1.0;\
+  \
+  gl_Position.x += 1.0f;\
+  gl_Position.y -= 1.0f;\
+  \
+  gl_Position.x *= mouse.z;\
+  gl_Position.y *= mouse.w;\
+  \
+  gl_Position.x += mouse.x;\
+  gl_Position.y -= mouse.y;\
+  \
+  uv = vertexUV;\
+}\
+";
+
 static const char egl_fragment_shader_rgba[] = "\
 #version 300 es\n\
 \
 in  highp vec2 uv;\
-out highp vec3 color;\
+out highp vec4 color;\
 \
 uniform sampler2D sampler1;\
  \
 void main()\
 {\
-  color = texture(sampler1, uv).rgb;\
+  color = texture(sampler1, uv);\
 }\
 ";
 
@@ -55,16 +83,17 @@ static const char egl_fragment_shader_bgra[] = "\
 #version 300 es\n\
 \
 in  highp vec2 uv;\
-out highp vec3 color;\
+out highp vec4 color;\
 \
 uniform sampler2D sampler1;\
 \
 void main()\
 {\
-  highp vec3 tmp = texture(sampler1, uv).rgb;\
+  highp vec4 tmp = texture(sampler1, uv);\
   color.r = tmp.b;\
   color.g = tmp.g;\
   color.b = tmp.r;\
+  color.a = tmp.a;\
 }\
 ";
 
@@ -95,6 +124,23 @@ void main()\
   );\
   \
   color = yuv * yuv_to_rgb;\
+}\
+";
+
+static const char egl_fragment_shader_mask[] = "\
+#version 300 es\n\
+\
+in  highp vec2 uv;\
+out highp vec3 color;\
+\
+uniform sampler2D sampler1;\
+\
+void main()\
+{\
+  highp vec3 tmp = texture(sampler1, uv).rgb;\
+  color.r = tmp.b;\
+  color.g = tmp.g;\
+  color.b = tmp.r;\
 }\
 ";
 

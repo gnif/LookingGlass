@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "lg-renderer.h"
 #include "debug.h"
+#include "utils.h"
 
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_egl.h>
@@ -40,6 +41,7 @@ static struct Options defaultOptions =
 struct Models
 {
   struct EGL_Model * desktop;
+  struct EGL_Model * mouse;
 };
 
 struct Shaders
@@ -47,11 +49,15 @@ struct Shaders
   struct EGL_Shader * rgba;
   struct EGL_Shader * bgra;
   struct EGL_Shader * yuv;
+
+  struct EGL_Shader * mouse_bgra;
+  struct EGL_Shader * mouse_mask;
 };
 
 struct Textures
 {
   struct EGL_Texture * desktop;
+  struct EGL_Texture * mouse;
 };
 
 struct Inst
@@ -77,7 +83,26 @@ struct Inst
   size_t               frameSize;
   const uint8_t      * data;
   bool                 update;
+  int                  screenW, screenH;
+
+  bool         mouseVisible;
+  float        mouseX, mouseY, mouseW, mouseH;
+  float        mouseScaleX, mouseScaleY;
+  EGL_Shader * mouseShader;
+  GLint        mouseUniformLoc;
+
+  LG_Lock           mouseLock;
+  LG_RendererCursor mouseCursor;
+  int               mouseWidth;
+  int               mouseHeight;
+  int               mousePitch;
+  uint8_t *         mouseData;
+  size_t            mouseDataSize;
+  bool              mouseUpdate;
 };
+
+
+void update_mouse_shape(struct Inst * this);
 
 const char * egl_get_name()
 {
@@ -100,6 +125,8 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   memcpy(&this->params, &params        , sizeof(LG_RendererParams));
   memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
 
+  LG_LOCK_INIT(this->mouseLock);
+
   return true;
 }
 
@@ -118,25 +145,72 @@ void egl_deinitialize(void * opaque)
   struct Inst * this = (struct Inst *)opaque;
 
   egl_model_free  (&this->models  .desktop);
-  egl_shader_free (&this->shaders .rgba   );
-  egl_shader_free (&this->shaders .bgra   );
-  egl_shader_free (&this->shaders .yuv    );
+  egl_model_free  (&this->models  .mouse     );
+  egl_shader_free (&this->shaders .rgba      );
+  egl_shader_free (&this->shaders .bgra      );
+  egl_shader_free (&this->shaders .yuv       );
+  egl_shader_free (&this->shaders .mouse_bgra);
+  egl_shader_free (&this->shaders .mouse_mask);
   egl_texture_free(&this->textures.desktop);
+  egl_texture_free(&this->textures.mouse );
+
+  LG_LOCK_FREE(this->mouseLock);
+  if (this->mouseData)
+    free(this->mouseData);
+
   free(this);
 }
 
 void egl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
+  struct Inst * this = (struct Inst *)opaque;
+
+  this->screenW = width;
+  this->screenH = height;
+
   glViewport(0, 0, width, height);
+  this->mouseScaleX = 2.0f / width ;
+  this->mouseScaleY = 2.0f / height;
+
+  this->mouseW = this->mouseWidth  * (1.0f / this->screenW);
+  this->mouseH = this->mouseHeight * (1.0f / this->screenH);
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
 {
+  struct Inst * this = (struct Inst *)opaque;
+
+  LG_LOCK(this->mouseLock);
+  this->mouseCursor = cursor;
+  this->mouseWidth  = width;
+  this->mouseHeight = height;
+  this->mousePitch  = pitch;
+
+  this->mouseW = this->mouseWidth  * (1.0f / this->screenW);
+  this->mouseH = this->mouseHeight * (1.0f / this->screenH);
+
+  const size_t size = height * pitch;
+  if (size > this->mouseDataSize)
+  {
+    if (this->mouseData)
+      free(this->mouseData);
+    this->mouseData     = (uint8_t *)malloc(size);
+    this->mouseDataSize = size;
+  }
+
+  memcpy(this->mouseData, data, size);
+  this->mouseUpdate = true;
+  LG_UNLOCK(this->mouseLock);
+
   return true;
 }
 
 bool egl_on_mouse_event(void * opaque, const bool visible , const int x, const int y)
 {
+  struct Inst * this = (struct Inst *)opaque;
+  this->mouseVisible = visible;
+  this->mouseX       = ((float)x * this->mouseScaleX) - 1.0f;
+  this->mouseY       = ((float)y * this->mouseScaleY) - 1.0f;
   return true;
 }
 
@@ -254,7 +328,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
   DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
 
-  static const GLfloat desktop[] =
+  static const GLfloat square[] =
   {
     -1.0f, -1.0f, 0.0f,
      1.0f, -1.0f, 0.0f,
@@ -270,25 +344,61 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     1.0f, 0.0f
   };
 
-  if (!egl_shader_init(&this->shaders.rgba)) return false;
-  if (!egl_shader_init(&this->shaders.bgra)) return false;
-  if (!egl_shader_init(&this->shaders.yuv )) return false;
+  if (!egl_shader_init(&this->shaders.rgba))
+    return false;
 
-  if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba))) return false;
-  if (!egl_shader_compile(this->shaders.bgra, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra))) return false;
-  if (!egl_shader_compile(this->shaders.yuv , egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_yuv , sizeof(egl_fragment_shader_yuv ))) return false;
+  if (!egl_shader_init(&this->shaders.bgra))
+    return false;
+
+  if (!egl_shader_init(&this->shaders.yuv))
+    return false;
+
+  if (!egl_shader_init(&this->shaders.mouse_bgra))
+    return false;
+
+  if (!egl_shader_init(&this->shaders.mouse_mask))
+    return false;
+
+  if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
+    return false;
+
+  if (!egl_shader_compile(this->shaders.bgra, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)))
+    return false;
+
+  if (!egl_shader_compile(this->shaders.yuv, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_yuv , sizeof(egl_fragment_shader_yuv )))
+    return false;
+
+  if (!egl_shader_compile(this->shaders.mouse_bgra, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)))
+    return false;
+
+  if (!egl_shader_compile(this->shaders.mouse_mask, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_mask, sizeof(egl_fragment_shader_mask)))
+    return false;
 
   if (!egl_texture_init(&this->textures.desktop))
+    return false;
+
+  if (!egl_texture_init(&this->textures.mouse))
     return false;
 
   if (!egl_model_init(&this->models.desktop))
     return false;
 
-  egl_model_set_verticies(this->models.desktop, desktop, sizeof(desktop) / sizeof(GLfloat));
-  egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs    ) / sizeof(GLfloat));
+  if (!egl_model_init(&this->models.mouse))
+    return false;
+
+  egl_model_set_verticies(this->models.desktop, square , sizeof(square) / sizeof(GLfloat));
+  egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
   egl_model_set_texture  (this->models.desktop, this->textures.desktop);
 
+  egl_model_set_verticies(this->models.mouse, square , sizeof(square) / sizeof(GLfloat));
+  egl_model_set_uvs      (this->models.mouse, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
+  egl_model_set_texture  (this->models.mouse, this->textures.mouse);
+
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
+
+  glEnable   (GL_BLEND);
+  glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+
   return true;
 }
 
@@ -301,31 +411,163 @@ bool egl_render(void * opaque, SDL_Window * window)
     if (this->sourceChanged)
     {
       this->sourceChanged = false;
-      if (!egl_texture_init_streaming(
+      if (!egl_texture_setup(
         this->textures.desktop,
         this->pixFmt,
         this->format.width,
         this->format.height,
-        this->frameSize
+        this->frameSize,
+        true
       ))
         return false;
 
       egl_model_set_shader(this->models.desktop, this->shader);
    }
 
-    if (!egl_texture_stream_buffer(this->textures.desktop, this->data))
+    if (!egl_texture_update(this->textures.desktop, this->data))
       return false;
 
     this->update = false;
   }
+
+  if (this->mouseUpdate)
+    update_mouse_shape(this);
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
   egl_model_render(this->models.desktop);
 
+  if (this->mouseVisible)
+  {
+    egl_shader_use(this->mouseShader);
+    glUniform4f(this->mouseUniformLoc, this->mouseX, this->mouseY, this->mouseW, this->mouseH);
+    egl_model_render(this->models.mouse);
+  }
+
   eglSwapBuffers(this->display, this->surface);
   return true;
+}
+
+void update_mouse_shape(struct Inst * this)
+{
+  LG_LOCK(this->mouseLock);
+  this->mouseUpdate = false;
+
+  const LG_RendererCursor cursor = this->mouseCursor;
+  const int               width  = this->mouseWidth;
+  const int               height = this->mouseHeight;
+  //const int               pitch  = this->mousePitch;
+  const uint8_t *         data   = this->mouseData;
+
+  // tmp buffer for masked colour
+  uint32_t tmp[width * height];
+
+  switch(cursor)
+  {
+    case LG_CURSOR_MASKED_COLOR:
+    {
+      for(int i = 0; i < width * height; ++i)
+      {
+        const uint32_t c = ((uint32_t *)data)[i];
+        tmp[i] = (c & ~0xFF000000) | (c & 0xFF000000 ? 0x0 : 0xFF000000);
+      }
+      data = (uint8_t *)tmp;
+      // fall through to LG_CURSOR_COLOR
+      //
+      // technically we should also create an XOR texture from the data but this
+      // usage seems very rare in modern software.
+    }
+
+    case LG_CURSOR_COLOR:
+    {
+      egl_texture_setup(
+        this->textures.mouse,
+        EGL_PF_BGRA,
+        width,
+        height,
+        width * height * 4,
+        false
+      );
+
+      this->mouseShader = this->shaders.mouse_bgra;
+      egl_texture_update(this->textures.mouse, data);
+      egl_model_set_shader(this->models.mouse, this->mouseShader);
+      this->mouseUniformLoc = egl_shader_get_uniform_location(this->mouseShader, "mouse");
+      break;
+    }
+
+    case LG_CURSOR_MONOCHROME:
+    {
+#if 0
+      const int hheight = height / 2;
+      uint32_t d[width * height];
+      for(int y = 0; y < hheight; ++y)
+        for(int x = 0; x < width; ++x)
+        {
+          const uint8_t  * srcAnd  = data + (pitch * y) + (x / 8);
+          const uint8_t  * srcXor  = srcAnd + pitch * hheight;
+          const uint8_t    mask    = 0x80 >> (x % 8);
+          const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
+          const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
+
+          d[y * width + x                  ] = andMask;
+          d[y * width + x + width * hheight] = xorMask;
+        }
+#endif
+
+/*TODO : convert this into a pixel shader
+      glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
+      glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+      glTexImage2D
+      (
+        GL_TEXTURE_2D,
+        0      ,
+        GL_RGBA,
+        width  ,
+        height ,
+        0      ,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        d
+      );
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glBindTexture(GL_TEXTURE_2D, 0);
+
+      this->mousePos.w = width;
+      this->mousePos.h = hheight;
+
+      glNewList(this->mouseList, GL_COMPILE);
+        glEnable(GL_COLOR_LOGIC_OP);
+        glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
+        glLogicOp(GL_AND);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0    , 0      );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(width, 0      );
+          glTexCoord2f(0.0f, 0.5f); glVertex2i(0    , hheight);
+          glTexCoord2f(1.0f, 0.5f); glVertex2i(width, hheight);
+        glEnd();
+        glLogicOp(GL_XOR);
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.5f); glVertex2i(0    , 0      );
+          glTexCoord2f(1.0f, 0.5f); glVertex2i(width, 0      );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0    , hheight);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(width, hheight);
+        glEnd();
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_COLOR_LOGIC_OP);
+      glEndList();
+*/
+      break;
+    }
+  }
+
+  this->mouseUpdate = true;
+  LG_UNLOCK(this->mouseLock);
 }
 
 static void handle_opt_vsync(void * opaque, const char *value)

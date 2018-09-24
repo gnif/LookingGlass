@@ -212,3 +212,8 @@ void egl_shader_associate_textures(EGL_Shader * shader, const int count)
   }
   glUseProgram(0);
 }
+
+GLint egl_shader_get_uniform_location(EGL_Shader * shader, const char * name)
+{
+  return glGetUniformLocation(shader->shader, name);
+}

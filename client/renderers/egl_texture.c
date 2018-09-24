@@ -31,6 +31,7 @@ struct EGL_Texture
 {
   enum   EGL_PixelFormat pixFmt;
   size_t width, height;
+  bool   streaming;
 
   int      textureCount;
   GLuint   textures[3];
@@ -77,24 +78,21 @@ void egl_texture_free(EGL_Texture ** texture)
   *texture = NULL;
 }
 
-bool egl_texture_init_streaming(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t bufferSize)
+bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t bufferSize, bool streaming)
 {
-  if (texture->textureCount > 0)
-  {
-    glDeleteTextures(texture->textureCount, texture->textures);
-    texture->textureCount = 0;
-  }
+  int textureCount;
 
   texture->pixFmt        = pixFmt;
   texture->width         = width;
   texture->height        = height;
   texture->pboBufferSize = bufferSize;
+  texture->streaming     = streaming;
 
   switch(pixFmt)
   {
     case EGL_PF_RGBA:
     case EGL_PF_BGRA:
-      texture->textureCount = 1;
+      textureCount          = 1;
       texture->format       = GL_BGRA;
       texture->planes[0][0] = width;
       texture->planes[0][1] = height;
@@ -102,7 +100,7 @@ bool egl_texture_init_streaming(EGL_Texture * texture, enum EGL_PixelFormat pixF
       break;
 
     case EGL_PF_YUV420:
-      texture->textureCount = 3;
+      textureCount          = 3;
       texture->format       = GL_RED;
       texture->planes[0][0] = width;
       texture->planes[0][1] = height;
@@ -120,9 +118,20 @@ bool egl_texture_init_streaming(EGL_Texture * texture, enum EGL_PixelFormat pixF
       return false;
   }
 
-  glGenTextures(texture->textureCount, texture->textures);
-  glGenSamplers(texture->textureCount, texture->samplers);
-  for(int i = 0; i < texture->textureCount; ++i)
+  if (textureCount > texture->textureCount)
+  {
+    if (texture->textureCount > 0)
+    {
+      glDeleteTextures(texture->textureCount, texture->textures);
+      glDeleteSamplers(texture->textureCount, texture->samplers);
+    }
+
+    texture->textureCount = textureCount;
+    glGenTextures(texture->textureCount, texture->textures);
+    glGenSamplers(texture->textureCount, texture->samplers);
+  }
+
+  for(int i = 0; i < textureCount; ++i)
   {
     glSamplerParameteri(texture->samplers[i], GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glSamplerParameteri(texture->samplers[i], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -132,45 +141,61 @@ bool egl_texture_init_streaming(EGL_Texture * texture, enum EGL_PixelFormat pixF
     glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
       glTexImage2D(GL_TEXTURE_2D, 0, texture->format, texture->planes[i][0], texture->planes[i][1],
           0, texture->format, GL_UNSIGNED_BYTE, NULL);
-    glBindTexture(GL_TEXTURE_2D, 0);
   }
+  glBindTexture(GL_TEXTURE_2D, 0);
 
-  if (!texture->hasPBO)
+  if (streaming)
   {
-    glGenBuffers(2, texture->pbo);
-    texture->hasPBO = true;
-  }
+    if (!texture->hasPBO)
+    {
+      glGenBuffers(2, texture->pbo);
+      texture->hasPBO = true;
+    }
 
-  for(int i = 0; i < 2; ++i)
-  {
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
-    glBufferData(
-      GL_PIXEL_UNPACK_BUFFER,
-      bufferSize,
-      NULL,
-      GL_DYNAMIC_DRAW
-    );
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    for(int i = 0; i < 2; ++i)
+    {
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
+      glBufferData(
+        GL_PIXEL_UNPACK_BUFFER,
+        bufferSize,
+        NULL,
+        GL_DYNAMIC_DRAW
+      );
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    }
   }
 
   return true;
 }
 
-bool egl_texture_stream_buffer(EGL_Texture * texture, const uint8_t * buffer)
+bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 {
-  if (++texture->pboIndex == 2)
-    texture->pboIndex = 0;
-
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
-  glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
-  for(int i = 0; i < texture->textureCount; ++i)
+  if (texture->streaming)
   {
-    glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-        texture->format, GL_UNSIGNED_BYTE, (const void *)texture->offsets[i]);
-  }
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    if (++texture->pboIndex == 2)
+      texture->pboIndex = 0;
 
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
+    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
+    for(int i = 0; i < texture->textureCount; ++i)
+    {
+      glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
+          texture->format, GL_UNSIGNED_BYTE, (const void *)texture->offsets[i]);
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  }
+  else
+  {
+    for(int i = 0; i < texture->textureCount; ++i)
+    {
+      glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
+          texture->format, GL_UNSIGNED_BYTE, buffer + texture->offsets[i]);
+    }
+  }
+
+  glBindTexture(GL_TEXTURE_2D, 0);
   return true;
 }
 

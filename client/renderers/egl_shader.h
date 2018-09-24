@@ -34,3 +34,4 @@ bool egl_shader_compile(EGL_Shader * model, const char * vertex_code, size_t ver
 void egl_shader_use    (EGL_Shader * shader);
 
 void egl_shader_associate_textures(EGL_Shader * shader, const int count);
+GLint egl_shader_get_uniform_location(EGL_Shader * shader, const char * name);
