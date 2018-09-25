@@ -42,7 +42,6 @@ struct Models
 {
   struct EGL_Model * desktop;
   struct EGL_Model * mouse;
-  struct EGL_Model * mouse_mono;
 };
 
 struct Shaders
@@ -146,7 +145,6 @@ void egl_deinitialize(void * opaque)
 
   egl_model_free  (&this->models  .desktop   );
   egl_model_free  (&this->models  .mouse     );
-  egl_model_free  (&this->models  .mouse_mono);
   egl_shader_free (&this->shaders .rgba      );
   egl_shader_free (&this->shaders .bgra      );
   egl_shader_free (&this->shaders .yuv       );
@@ -390,8 +388,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_model_init(&this->models.mouse))
     return false;
 
-  if (!egl_model_init(&this->models.mouse_mono))
-    return false;
 
   egl_model_set_verticies(this->models.desktop, square , sizeof(square) / sizeof(GLfloat));
   egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
@@ -399,8 +395,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
 
   egl_model_set_verticies(this->models.mouse     , square , sizeof(square) / sizeof(GLfloat));
   egl_model_set_uvs      (this->models.mouse     , uvs    , sizeof(uvs   ) / sizeof(GLfloat));
-  egl_model_set_verticies(this->models.mouse_mono, square , sizeof(square) / sizeof(GLfloat));
-  egl_model_set_uvs      (this->models.mouse_mono, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
@@ -456,7 +450,7 @@ bool egl_render(void * opaque, SDL_Window * window)
 
       egl_shader_use(this->shaders.mouse_mono);
       glUniform4f(this->uMousePosMono, this->mouseX, this->mouseY, this->mouseW, this->mouseH);
-      glBlendFunc(GL_ZERO, GL_ONE_MINUS_DST_COLOR);
+      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_model_set_texture(this->models.mouse, this->textures.mouse_mono);
       egl_model_render(this->models.mouse);
       glDisable(GL_BLEND);
