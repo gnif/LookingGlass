@@ -65,6 +65,23 @@ void main()\
 }\
 ";
 
+static const char egl_fragment_shader_mouse_mono[] = "\
+#version 300 es\n\
+\
+in  highp vec2 uv;\
+out highp vec4 color;\
+\
+uniform sampler2D sampler1;\
+ \
+void main()\
+{\
+  highp vec4 tmp = texture(sampler1, uv);\
+  if (tmp.rgb == vec3(0.0, 0.0, 0.0))\
+    discard;\
+  color = tmp;\
+}\
+";
+
 static const char egl_fragment_shader_rgba[] = "\
 #version 300 es\n\
 \
@@ -124,23 +141,6 @@ void main()\
   );\
   \
   color = yuv * yuv_to_rgb;\
-}\
-";
-
-static const char egl_fragment_shader_mask[] = "\
-#version 300 es\n\
-\
-in  highp vec2 uv;\
-out highp vec3 color;\
-\
-uniform sampler2D sampler1;\
-\
-void main()\
-{\
-  highp vec3 tmp = texture(sampler1, uv).rgb;\
-  color.r = tmp.b;\
-  color.g = tmp.g;\
-  color.b = tmp.r;\
 }\
 ";
 
