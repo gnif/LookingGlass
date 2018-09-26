@@ -86,8 +86,18 @@ bool DXGI::Initialize(CaptureOptions * options)
         return false;
       }
 
+      DXGI_ADAPTER_DESC1 adapterDesc;
+      adapter->GetDesc1(&adapterDesc);
+      DEBUG_INFO("Device Descripion: %ls"   , adapterDesc.Description);
+      DEBUG_INFO("Device Vendor ID : 0x%x"  , adapterDesc.VendorId);
+      DEBUG_INFO("Device Device ID : 0x%x"  , adapterDesc.DeviceId);
+      DEBUG_INFO("Device Video Mem : %5u MB", adapterDesc.DedicatedVideoMemory  / 1048576);
+      DEBUG_INFO("Device Sys Mem   : %5u MB", adapterDesc.DedicatedSystemMemory / 1048576);
+      DEBUG_INFO("Shared Sys Mem   : %5u MB", adapterDesc.SharedSystemMemory    / 1048576);
+
       m_width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
       m_height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
+      DEBUG_INFO("Capture Size     : %u x %u", m_width, m_height);
 
       done = true;
       break;
@@ -116,7 +126,7 @@ bool DXGI::Initialize(CaptureOptions * options)
     D3D_FEATURE_LEVEL_9_1
   };
 
-  #if DEBUG
+  #ifdef _DEBUG
     #define CREATE_FLAGS (D3D11_CREATE_DEVICE_DEBUG)
   #else
     #define CREATE_FLAGS (0)
@@ -142,6 +152,7 @@ bool DXGI::Initialize(CaptureOptions * options)
     return false;
   }
 
+  DEBUG_INFO("Feature Level    : 0x%x", m_featureLevel);
  
   m_frameType = FRAME_TYPE_ARGB;
   for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
@@ -342,6 +353,8 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
+  ReleaseFrame();
+
   timeout = false;
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
@@ -429,9 +442,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
       if (frameInfo.LastPresentTime.QuadPart != 0)
         break;
 
-      // no frame data, clean up
       res = NULL;
-      ReleaseFrame();
 
       // if the cursor has been updated
       if (cursor.updated)
@@ -527,12 +538,17 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
     DeInitialize();
     return GRAB_STATUS_ERROR;
   }
+  
+  frame.pitch  = m_width * 4;
+  frame.stride = m_width;
+  
+  for(unsigned int y = 0; y < m_height; ++y)
+    memcpySSE(
+      (uint32_t*)frame.buffer  + (m_width * y),
+      (uint8_t *)mapping.pData + (mapping.RowPitch * y),
+      m_width * 4
+    );
 
-  frame.pitch  = mapping.RowPitch;
-  frame.stride = mapping.RowPitch >> 2;
-
-  const unsigned int size = m_height * mapping.RowPitch;
-  memcpySSE(frame.buffer, mapping.pData, LG_MIN(size, frame.bufferSize));
   m_deviceContext->Unmap(m_texture[0], 0);
 
   return GRAB_STATUS_OK;

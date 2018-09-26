@@ -51,6 +51,7 @@ bool Service::Initialize(ICapture * captureDevice)
   if (m_initialized)
     DeInitialize();
 
+  m_tryTarget  = 0;
   m_capture = captureDevice;
   if (!m_ivshmem->Initialize())
   {
@@ -171,6 +172,7 @@ bool Service::Process()
     return false;
 
   volatile uint8_t *flags = &m_shmHeader->flags;
+  int tryCount = 0;
 
   // wait for the host to notify that is it is ready to proceed
   while (true)
@@ -187,7 +189,7 @@ bool Service::Process()
 
       if (m_capture->GetMaxFrameSize() > m_frameSize)
       {
-        DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
+        DEBUG_ERROR("Maximum frame size of %zd bytes exceeds maximum space available", m_capture->GetMaxFrameSize());
         return false;
       }
 
@@ -199,9 +201,19 @@ bool Service::Process()
     if (!(m_shmHeader->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
       break;
 
-    // wait for 2ms before polling again
-    Sleep(2);
+    // save CPU if the client has stopped polling for updates
+    if (++tryCount > m_tryTarget * 400)
+    {
+      m_tryTarget = 250;
+      Sleep(100);
+    }
   }
+
+  int diff = (tryCount - m_lastTryCount) / 200;
+  m_lastTryCount = tryCount;
+  m_tryTarget    += diff;
+  if (m_tryTarget < 250)
+    m_tryTarget = 250;
 
   struct FrameInfo  frame  = {0};
   struct CursorInfo cursor = {0};

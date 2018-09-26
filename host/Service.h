@@ -46,6 +46,8 @@ private:
   bool InitPointers();
 
   static Service * m_instance;
+  int m_tryTarget;
+  int m_lastTryCount;
 
   Service();
   ~Service();
