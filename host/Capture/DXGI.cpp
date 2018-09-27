@@ -353,8 +353,6 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
-  ReleaseFrame();
-
   timeout = false;
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
@@ -364,6 +362,10 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
   {
     while (true)
     {
+      GrabStatus ret = ReleaseFrame();
+      if (ret != GRAB_STATUS_OK)
+        return ret;
+
       status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
       {
