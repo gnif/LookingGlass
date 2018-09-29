@@ -348,12 +348,15 @@ size_t DXGI::GetMaxFrameSize()
   return (m_width * m_height * 4);
 }
 
-GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout)
+GrabStatus Capture::DXGI::Capture()
 {
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
-  timeout = false;
+  m_cursor.updated  = false;
+  m_cursor.hasPos   = false;
+  m_cursor.hasShape = false;
+
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
 
@@ -368,10 +371,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
 
       status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
       if (status == DXGI_ERROR_WAIT_TIMEOUT)
-      {
-        timeout = true;
-        return GRAB_STATUS_OK;
-      }
+        return GRAB_STATUS_TIMEOUT;
 
       if (FAILED(status))
         break;
@@ -385,27 +385,27 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
           m_lastMousePos.x != frameInfo.PointerPosition.Position.x ||
           m_lastMousePos.y != frameInfo.PointerPosition.Position.y
         ) {
-          cursor.updated = true;
-          cursor.hasPos  = true;
-          cursor.x = frameInfo.PointerPosition.Position.x;
-          cursor.y = frameInfo.PointerPosition.Position.y;
+          m_cursor.updated = true;
+          m_cursor.hasPos  = true;
+          m_cursor.x = frameInfo.PointerPosition.Position.x;
+          m_cursor.y = frameInfo.PointerPosition.Position.y;
           m_lastMousePos.x = frameInfo.PointerPosition.Position.x;
           m_lastMousePos.y = frameInfo.PointerPosition.Position.y;
         }
 
         if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
         {
-          cursor.updated = true;
+          m_cursor.updated = true;
           m_lastMouseVis = frameInfo.PointerPosition.Visible;
         }
 
-        cursor.visible = m_lastMouseVis == TRUE;
+        m_cursor.visible = m_lastMouseVis == TRUE;
       }
 
       // if the pointer shape has changed
       if (frameInfo.PointerShapeBufferSize > 0)
       {
-        cursor.updated = true;
+        m_cursor.updated = true;
         if (m_pointerBufSize < frameInfo.PointerShapeBufferSize)
         {
           if (m_pointer)
@@ -424,20 +424,20 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
 
         switch (shapeInfo.Type)
         {
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : cursor.type = CURSOR_TYPE_COLOR;        break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : cursor.type = CURSOR_TYPE_MONOCHROME;   break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : m_cursor.type = CURSOR_TYPE_COLOR;        break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: m_cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : m_cursor.type = CURSOR_TYPE_MONOCHROME;   break;
         default:
           DEBUG_ERROR("Invalid cursor type");
           return GRAB_STATUS_ERROR;
         }
 
-        cursor.hasShape = true;
-        cursor.shape    = m_pointer;
-        cursor.w        = shapeInfo.Width;
-        cursor.h        = shapeInfo.Height;
-        cursor.pitch    = shapeInfo.Pitch;
-        cursor.dataSize = m_pointerSize;
+        m_cursor.hasShape = true;
+        m_cursor.shape    = m_pointer;
+        m_cursor.w        = shapeInfo.Width;
+        m_cursor.h        = shapeInfo.Height;
+        m_cursor.pitch    = shapeInfo.Pitch;
+        m_cursor.dataSize = m_pointerSize;
       }
 
       // if we also have frame data, break out to process it
@@ -447,7 +447,7 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
       res = NULL;
 
       // if the cursor has been updated
-      if (cursor.updated)
+      if (m_cursor.updated)
         return GRAB_STATUS_CURSOR;
 
       // otherwise just try again
@@ -477,9 +477,9 @@ GrabStatus Capture::DXGI::GrabFrameTexture(struct FrameInfo & frame, struct Curs
     return GRAB_STATUS_ERROR;
   }
   
-  res.QueryInterface(IID_PPV_ARGS(&texture));  
+  res.QueryInterface(IID_PPV_ARGS(&m_ftexture));
 
-  if (!texture)
+  if (!m_ftexture)
   {
     ReleaseFrame();
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
@@ -495,6 +495,8 @@ GrabStatus Capture::DXGI::ReleaseFrame()
     return GRAB_STATUS_OK;
 
   m_releaseFrame = false;
+  m_ftexture     = NULL;
+
   switch (m_dup->ReleaseFrame())
   {
   case S_OK:
@@ -512,21 +514,17 @@ GrabStatus Capture::DXGI::ReleaseFrame()
   return GRAB_STATUS_OK;
 }
 
-GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cursor)
+GrabStatus Capture::DXGI::DiscardFrame()
+{
+  return ReleaseFrame();
+}
+
+GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 {
   GrabStatus               result;
-  ID3D11Texture2DPtr       texture;
-  bool                     timeout;
   D3D11_MAPPED_SUBRESOURCE mapping;
 
-  result = GrabFrameTexture(frame, cursor, texture, timeout);
-  if (timeout)
-    return GRAB_STATUS_TIMEOUT;
-
-  if (result != GRAB_STATUS_OK)
-    return result;
-
-  m_deviceContext->CopyResource(m_texture[0], texture);
+  m_deviceContext->CopyResource(m_texture[0], m_ftexture);
 
   result = ReleaseFrame();
   if (result != GRAB_STATUS_OK)
@@ -556,21 +554,12 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame, struct CursorInfo & cu
   return GRAB_STATUS_OK;
 }
 
-GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct CursorInfo & cursor)
+GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame)
 {
   GrabStatus         result;
-  ID3D11Texture2DPtr texture;
-  bool               timeout;
-
-  result = GrabFrameTexture(frame, cursor, texture, timeout);
-  if (timeout)
-    return GRAB_STATUS_TIMEOUT;
-
-  if (result != GRAB_STATUS_OK)
-    return result;
 
   TextureList planes;
-  if (!m_textureConverter->Convert(texture, planes))
+  if (!m_textureConverter->Convert(m_ftexture, planes))
     return GRAB_STATUS_ERROR;
 
   for(int i = 0; i < 3; ++i)
@@ -624,7 +613,7 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame, struct Curso
   return GRAB_STATUS_OK;
 }
 
-GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorInfo & cursor)
+GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame)
 {
   return GRAB_STATUS_ERROR;
   #if 0
@@ -673,16 +662,27 @@ GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame, struct CursorI
   #endif
 }
 
-GrabStatus DXGI::GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor)
+GrabStatus DXGI::GetFrame(struct FrameInfo & frame)
 {
+  if (!m_ftexture)
+  {
+    DEBUG_ERROR("A frame has not been captured");
+    return GRAB_STATUS_ERROR;
+  }
+
   frame.width  = m_width;
   frame.height = m_height;
 
   switch (m_frameType)
-  {    
-    case FRAME_TYPE_YUV420: return GrabFrameYUV420(frame, cursor);
-    case FRAME_TYPE_H264  : return GrabFrameH264  (frame, cursor);
+  {
+    case FRAME_TYPE_YUV420: return GrabFrameYUV420(frame);
+    case FRAME_TYPE_H264  : return GrabFrameH264  (frame);
   }
 
-  return GrabFrameRaw(frame, cursor);
+  return GrabFrameRaw(frame);
+}
+
+const CursorInfo & DXGI::GetCursor()
+{
+  return m_cursor;
 }

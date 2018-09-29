@@ -98,8 +98,8 @@ bool Service::Initialize(ICapture * captureDevice)
   m_shmHeader->version = KVMFR_HEADER_VERSION;
 
   // zero and tell the client we have restarted
-  ZeroMemory(&m_shmHeader->frame , sizeof(KVMFRFrame ));
-  ZeroMemory(&m_shmHeader->cursor, sizeof(KVMFRCursor));
+  ZeroMemory(&(m_shmHeader->frame ), sizeof(KVMFRFrame ));
+  ZeroMemory(&(m_shmHeader->cursor), sizeof(KVMFRCursor));
   m_shmHeader->flags &= ~KVMFR_HEADER_FLAG_RESTART;
 
   m_haveFrame   = false;
@@ -171,54 +171,28 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  volatile uint8_t *flags = &m_shmHeader->flags;
-  int tryCount = 0;
+  volatile uint8_t *flags = &(m_shmHeader->flags);
 
-  // wait for the host to notify that is it is ready to proceed
-  while (true)
+  // check if the client has flagged a restart
+  if (*flags & KVMFR_HEADER_FLAG_RESTART)
   {
-    // check if the client has flagged a restart
-    if (*flags & KVMFR_HEADER_FLAG_RESTART)
+    DEBUG_INFO("Restart Requested");
+    if (!m_capture->ReInitialize())
     {
-      DEBUG_INFO("Restart Requested");
-      if (!m_capture->ReInitialize())
-      {
-        DEBUG_ERROR("ReInitialize Failed");
-        return false;
-      }
-
-      if (m_capture->GetMaxFrameSize() > m_frameSize)
-      {
-        DEBUG_ERROR("Maximum frame size of %zd bytes exceeds maximum space available", m_capture->GetMaxFrameSize());
-        return false;
-      }
-
-      INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
-      break;
+      DEBUG_ERROR("ReInitialize Failed");
+      return false;
     }
 
-    // check if the client has flagged it's ready for a frame
-    if (!(m_shmHeader->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
-      break;
-
-    // save CPU if the client has stopped polling for updates
-    if (++tryCount > m_tryTarget * 400)
+    if (m_capture->GetMaxFrameSize() > m_frameSize)
     {
-      m_tryTarget = 250;
-      Sleep(100);
+      DEBUG_ERROR("Maximum frame size of %zd bytes exceeds maximum space available", m_capture->GetMaxFrameSize());
+      return false;
     }
+
+    INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
   }
 
-  int diff = (tryCount - m_lastTryCount) / 200;
-  m_lastTryCount = tryCount;
-  m_tryTarget    += diff;
-  if (m_tryTarget < 250)
-    m_tryTarget = 250;
-
-  struct FrameInfo  frame  = {0};
-  struct CursorInfo cursor = {0};
-  frame.buffer     = m_frame[m_frameIndex];
-  frame.bufferSize = m_frameSize;
+  GrabStatus result;
 
   bool ok         = false;
   bool cursorOnly = false;
@@ -226,7 +200,7 @@ bool Service::Process()
   for(int i = 0; i < 2; ++i)
   {
     // capture a frame of data
-    switch (m_capture->GrabFrame(frame, cursor))
+    switch (m_capture->Capture())
     {
       case GRAB_STATUS_OK:
         ok = true;
@@ -298,6 +272,8 @@ bool Service::Process()
     return false;
   }
 
+  const CursorInfo & cursor = m_capture->GetCursor();
+
   if (cursor.updated)
   {
     EnterCriticalSection(&m_cursorCS);
@@ -326,24 +302,48 @@ bool Service::Process()
 
   if (!cursorOnly)
   {
-    KVMFRFrame * fi = &m_shmHeader->frame;
-
+    volatile KVMFRFrame * fi = &(m_shmHeader->frame);
+ 
     // only update the header if the frame is new
     if (!repeat)
     {
+      FrameInfo frame  = { 0 };
+      frame.buffer     = m_frame[m_frameIndex];
+      frame.bufferSize = m_frameSize;
+
+      result = m_capture->GetFrame(frame);
+      if (result != GRAB_STATUS_OK)
+        return result;
+
+      /* don't touch the frame inforamtion until the client is done with it */
+      while (fi->flags & KVMFR_FRAME_FLAG_UPDATE)
+      {
+        if (*flags & KVMFR_HEADER_FLAG_RESTART)
+          break;
+      }
+
       fi->type    = m_capture->GetFrameType();
       fi->width   = frame.width;
       fi->height  = frame.height;
       fi->stride  = frame.stride;
       fi->pitch   = frame.pitch;
       fi->dataPos = m_dataOffset[m_frameIndex];
+
+      if (++m_frameIndex == MAX_FRAMES)
+        m_frameIndex = 0;
+
+      // remember that we have a valid frame
+      m_haveFrame = true;
     }
-
-    if (++m_frameIndex == MAX_FRAMES)
-      m_frameIndex = 0;
-
-    // remember that we have a valid frame
-    m_haveFrame = true;
+    else
+    {
+      /* don't touch the frame inforamtion until the client is done with it */
+      while (fi->flags & KVMFR_FRAME_FLAG_UPDATE)
+      {
+        if (*flags & KVMFR_HEADER_FLAG_RESTART)
+          break;
+      }
+    }
 
     // signal a frame update
     fi->flags |= KVMFR_FRAME_FLAG_UPDATE;
@@ -361,7 +361,7 @@ DWORD Service::CursorThread()
     if (WaitForSingleObject(m_cursorEvent, 1000) != WAIT_OBJECT_0)
       continue;
 
-    KVMFRCursor * cursor = &m_shmHeader->cursor;
+    volatile KVMFRCursor * cursor = &(m_shmHeader->cursor);
     // wait until the client is ready
     while (cursor->flags != 0)
     {

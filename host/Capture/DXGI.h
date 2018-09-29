@@ -56,18 +56,23 @@ namespace Capture
 
     enum FrameType GetFrameType();
     size_t GetMaxFrameSize();
-    enum GrabStatus GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor);
+    GrabStatus Capture();
+    GrabStatus GetFrame (struct FrameInfo  & frame );
+    const CursorInfo & GetCursor();
+    GrabStatus DiscardFrame();
 
   private:
     bool InitRawCapture();
     bool InitYUV420Capture();
     bool InitH264Capture();
 
-    GrabStatus GrabFrameTexture(struct FrameInfo & frame, struct CursorInfo & cursor, ID3D11Texture2DPtr & texture, bool & timeout);
+    struct CursorInfo  m_cursor;
+    ID3D11Texture2DPtr m_ftexture;
+
     GrabStatus ReleaseFrame();
-    GrabStatus GrabFrameRaw    (struct FrameInfo & frame, struct CursorInfo & cursor);
-    GrabStatus GrabFrameYUV420   (struct FrameInfo & frame, struct CursorInfo & cursor);
-    GrabStatus GrabFrameH264   (struct FrameInfo & frame, struct CursorInfo & cursor);
+    GrabStatus GrabFrameRaw    (struct FrameInfo & frame);
+    GrabStatus GrabFrameYUV420 (struct FrameInfo & frame);
+    GrabStatus GrabFrameH264   (struct FrameInfo & frame);
 
     CaptureOptions * m_options;
 

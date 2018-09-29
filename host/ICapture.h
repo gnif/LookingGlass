@@ -71,5 +71,8 @@ public:
   virtual bool ReInitialize() = 0;
   virtual enum FrameType GetFrameType() = 0;
   virtual size_t GetMaxFrameSize() = 0;
-  virtual enum GrabStatus GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor) = 0;
+  virtual enum GrabStatus Capture() = 0;
+  virtual enum GrabStatus GetFrame(struct FrameInfo & frame) = 0;
+  virtual const CursorInfo & GetCursor() = 0;
+  virtual enum GrabStatus DiscardFrame() = 0;
 };
