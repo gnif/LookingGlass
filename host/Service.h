@@ -72,7 +72,6 @@ private:
 
   HANDLE           m_cursorThread;
   HANDLE           m_cursorEvent;
-  CursorInfo       m_cursorInfo;
   CRITICAL_SECTION m_cursorCS;
   size_t           m_cursorDataSize;
   uint8_t        * m_cursorData;

@@ -29,9 +29,10 @@ DXGI::DXGI() :
   m_dxgiFactory(),
   m_device(),
   m_deviceContext(),
-  m_dup(),
-  m_pointer(NULL)
+  m_dup()
 {
+  InitializeCriticalSection(&m_cursorCS    );
+  InitializeCriticalSection(&m_cursorDataCS);
 }
 
 DXGI::~DXGI()
@@ -88,12 +89,12 @@ bool DXGI::Initialize(CaptureOptions * options)
 
       DXGI_ADAPTER_DESC1 adapterDesc;
       adapter->GetDesc1(&adapterDesc);
-      DEBUG_INFO("Device Descripion: %ls"   , adapterDesc.Description);
-      DEBUG_INFO("Device Vendor ID : 0x%x"  , adapterDesc.VendorId);
-      DEBUG_INFO("Device Device ID : 0x%x"  , adapterDesc.DeviceId);
-      DEBUG_INFO("Device Video Mem : %5u MB", adapterDesc.DedicatedVideoMemory  / 1048576);
-      DEBUG_INFO("Device Sys Mem   : %5u MB", adapterDesc.DedicatedSystemMemory / 1048576);
-      DEBUG_INFO("Shared Sys Mem   : %5u MB", adapterDesc.SharedSystemMemory    / 1048576);
+      DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
+      DEBUG_INFO("Device Vendor ID : 0x%x"   , adapterDesc.VendorId);
+      DEBUG_INFO("Device Device ID : 0x%x"   , adapterDesc.DeviceId);
+      DEBUG_INFO("Device Video Mem : %lld MB", adapterDesc.DedicatedVideoMemory  / 1048576);
+      DEBUG_INFO("Device Sys Mem   : %lld MB", adapterDesc.DedicatedSystemMemory / 1048576);
+      DEBUG_INFO("Shared Sys Mem   : %lld MB", adapterDesc.SharedSystemMemory    / 1048576);
 
       m_width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
       m_height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
@@ -314,11 +315,12 @@ void DXGI::DeInitialize()
 
   ReleaseFrame();
 
-  if (m_pointer)
+  while(m_cursorData.size())
   {
-    delete[] m_pointer;
-    m_pointer = NULL;
-    m_pointerBufSize = 0;
+    CursorBuffer * buf = m_cursorData.front();
+    delete[] buf->buffer;
+    delete buf;
+    m_cursorData.pop_front();
   }
 
   for(int i = 0; i < _countof(m_texture); ++i)
@@ -353,10 +355,8 @@ GrabStatus Capture::DXGI::Capture()
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
-  m_cursor.updated  = false;
-  m_cursor.hasPos   = false;
-  m_cursor.hasShape = false;
-
+  CursorInfo cursor = { 0 };
+  bool cursorUpdated = false;
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
 
@@ -382,40 +382,59 @@ GrabStatus Capture::DXGI::Capture()
       if (frameInfo.LastMouseUpdateTime.QuadPart)
       {
         if (
-          m_lastMousePos.x != frameInfo.PointerPosition.Position.x ||
-          m_lastMousePos.y != frameInfo.PointerPosition.Position.y
+          m_lastCursorX != frameInfo.PointerPosition.Position.x ||
+          m_lastCursorY != frameInfo.PointerPosition.Position.y
         ) {
-          m_cursor.updated = true;
-          m_cursor.hasPos  = true;
-          m_cursor.x = frameInfo.PointerPosition.Position.x;
-          m_cursor.y = frameInfo.PointerPosition.Position.y;
-          m_lastMousePos.x = frameInfo.PointerPosition.Position.x;
-          m_lastMousePos.y = frameInfo.PointerPosition.Position.y;
+          cursorUpdated = true;
+          cursor.hasPos = true;
+          cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
+          cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
         }
 
         if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
         {
-          m_cursor.updated = true;
+          cursorUpdated  = true;
           m_lastMouseVis = frameInfo.PointerPosition.Visible;
         }
 
-        m_cursor.visible = m_lastMouseVis == TRUE;
+        cursor.visible = m_lastMouseVis == TRUE;
       }
 
       // if the pointer shape has changed
       if (frameInfo.PointerShapeBufferSize > 0)
       {
-        m_cursor.updated = true;
-        if (m_pointerBufSize < frameInfo.PointerShapeBufferSize)
+        CursorBuffer * buf;
+
+        if (m_cursorData.size() == 0)
         {
-          if (m_pointer)
-            delete[] m_pointer;
-          m_pointer = new BYTE[frameInfo.PointerShapeBufferSize];
-          m_pointerBufSize = frameInfo.PointerShapeBufferSize;
+          // create a new buffer
+          buf = new CursorBuffer;
+          buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
+          buf->bufferSize = frameInfo.PointerShapeBufferSize;
+        }
+        else
+        {
+          // get an existing buffer from the pool
+          EnterCriticalSection(&m_cursorDataCS);
+          buf = m_cursorData.front();
+          m_cursorData.pop_front();
+          LeaveCriticalSection(&m_cursorDataCS);
+
+          // resize the buffer if required
+          if (buf->bufferSize < frameInfo.PointerShapeBufferSize)
+          {
+            delete[] buf->buffer;
+            buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
+            buf->bufferSize = frameInfo.PointerShapeBufferSize;
+          }
         }
 
+        buf->pointerSize = 0;
+        cursor.shape     = buf;
+        cursorUpdated    = true;
+
         DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
-        status = m_dup->GetFramePointerShape(m_pointerBufSize, m_pointer, &m_pointerSize, &shapeInfo);
+        status = m_dup->GetFramePointerShape(buf->bufferSize, buf->buffer, &buf->pointerSize, &shapeInfo);
         if (FAILED(status))
         {
           DEBUG_WINERROR("Failed to get the new pointer shape", status);
@@ -424,20 +443,25 @@ GrabStatus Capture::DXGI::Capture()
 
         switch (shapeInfo.Type)
         {
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : m_cursor.type = CURSOR_TYPE_COLOR;        break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: m_cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : m_cursor.type = CURSOR_TYPE_MONOCHROME;   break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : cursor.type = CURSOR_TYPE_COLOR;        break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : cursor.type = CURSOR_TYPE_MONOCHROME;   break;
         default:
           DEBUG_ERROR("Invalid cursor type");
           return GRAB_STATUS_ERROR;
         }
 
-        m_cursor.hasShape = true;
-        m_cursor.shape    = m_pointer;
-        m_cursor.w        = shapeInfo.Width;
-        m_cursor.h        = shapeInfo.Height;
-        m_cursor.pitch    = shapeInfo.Pitch;
-        m_cursor.dataSize = m_pointerSize;
+        cursor.w     = shapeInfo.Width;
+        cursor.h     = shapeInfo.Height;
+        cursor.pitch = shapeInfo.Pitch;
+      }
+
+      if (cursorUpdated)
+      {
+        // push the cursor update into the queue
+        EnterCriticalSection(&m_cursorCS);
+        m_cursorUpdates.push_back(cursor);
+        LeaveCriticalSection(&m_cursorCS);
       }
 
       // if we also have frame data, break out to process it
@@ -447,7 +471,7 @@ GrabStatus Capture::DXGI::Capture()
       res = NULL;
 
       // if the cursor has been updated
-      if (m_cursor.updated)
+      if (cursorUpdated)
         return GRAB_STATUS_CURSOR;
 
       // otherwise just try again
@@ -481,7 +505,6 @@ GrabStatus Capture::DXGI::Capture()
 
   if (!m_ftexture)
   {
-    ReleaseFrame();
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
     return GRAB_STATUS_ERROR;
   }
@@ -682,7 +705,25 @@ GrabStatus DXGI::GetFrame(struct FrameInfo & frame)
   return GrabFrameRaw(frame);
 }
 
-const CursorInfo & DXGI::GetCursor()
+bool DXGI::GetCursor(CursorInfo & cursor)
 {
-  return m_cursor;
+  if (!m_cursorUpdates.size())
+    return false;
+
+  EnterCriticalSection(&m_cursorCS);  
+  cursor = m_cursorUpdates.front();
+  m_cursorUpdates.pop_front();
+  LeaveCriticalSection(&m_cursorCS);
+  return true;
+}
+
+void DXGI::FreeCursor(CursorInfo & cursor)
+{
+  /* put the buffer back into the pool */
+  if (cursor.shape)
+  {
+    EnterCriticalSection(&m_cursorDataCS);
+    m_cursorData.push_front(cursor.shape);
+    LeaveCriticalSection(&m_cursorDataCS);
+  }
 }

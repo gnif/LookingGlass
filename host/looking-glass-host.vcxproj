@@ -165,8 +165,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -185,8 +184,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -205,8 +203,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -225,8 +222,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -249,9 +245,9 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -273,8 +269,7 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
@@ -297,9 +292,9 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -321,8 +316,7 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;shlwapi.lib;dxgi.lib;d3d11.lib;setupapi.lib;uuid.lib;wmcodecdspuuid.lib;mfplat.lib;mfuuid.lib;evr.lib;avrt.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Manifest>

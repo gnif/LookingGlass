@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "Service.h"
 #include "IVSHMEM.h"
+#include "TraceUtil.h"
 
 #include "common/debug.h"
 #include "common/KVMFR.h"
@@ -171,7 +172,7 @@ bool Service::Process()
   if (!m_initialized)
     return false;
 
-  volatile uint8_t *flags = &(m_shmHeader->flags);
+  volatile char * flags = (volatile char *)&(m_shmHeader->flags);
 
   // check if the client has flagged a restart
   if (*flags & KVMFR_HEADER_FLAG_RESTART)
@@ -189,7 +190,7 @@ bool Service::Process()
       return false;
     }
 
-    INTERLOCKED_AND8((volatile char *)flags, ~(KVMFR_HEADER_FLAG_RESTART));
+    INTERLOCKED_AND8(flags, ~(KVMFR_HEADER_FLAG_RESTART));
   }
 
   GrabStatus result;
@@ -209,10 +210,8 @@ bool Service::Process()
       case GRAB_STATUS_TIMEOUT:
         if (m_haveFrame)
         {
-          ok = true;
+          ok     = true;
           repeat = true;
-          if (--m_frameIndex < 0)
-            m_frameIndex = MAX_FRAMES - 1;
           break;
         }
 
@@ -232,7 +231,7 @@ bool Service::Process()
       case GRAB_STATUS_REINIT:
         DEBUG_INFO("ReInitialize Requested");
 
-        *flags |= KVMFR_HEADER_FLAG_PAUSED;
+        INTERLOCKED_OR8(flags, KVMFR_HEADER_FLAG_PAUSED);
         if(WTSGetActiveConsoleSessionId() != m_consoleSessionID)
         {
           DEBUG_INFO("User switch detected, waiting to regain control");
@@ -255,7 +254,7 @@ bool Service::Process()
           return false;
         }
 
-        *flags &= ~KVMFR_HEADER_FLAG_PAUSED;
+        INTERLOCKED_AND8(flags, ~KVMFR_HEADER_FLAG_PAUSED);
 
         // re-init request should not count towards a failure to capture
         --i;
@@ -272,33 +271,7 @@ bool Service::Process()
     return false;
   }
 
-  const CursorInfo & cursor = m_capture->GetCursor();
-
-  if (cursor.updated)
-  {
-    EnterCriticalSection(&m_cursorCS);
-    if (cursor.hasPos)
-    {
-      m_cursorInfo.hasPos = true;
-      m_cursorInfo.x      = cursor.x;
-      m_cursorInfo.y      = cursor.y;
-    }
-
-    if (cursor.hasShape)
-    {
-      m_cursorInfo.hasShape = true;
-      m_cursorInfo.dataSize = cursor.dataSize;
-      m_cursorInfo.type     = cursor.type;
-      m_cursorInfo.w        = cursor.w;
-      m_cursorInfo.h        = cursor.h;
-      m_cursorInfo.pitch    = cursor.pitch;
-      m_cursorInfo.shape    = cursor.shape;
-    }
-
-    m_cursorInfo.visible = cursor.visible;
-    LeaveCriticalSection(&m_cursorCS);
-    SetEvent(m_cursorEvent);
-  }
+  SetEvent(m_cursorEvent);
 
   if (!cursorOnly)
   {
@@ -313,11 +286,16 @@ bool Service::Process()
 
       result = m_capture->GetFrame(frame);
       if (result != GRAB_STATUS_OK)
-        return result;
+      {
+        DEBUG_INFO("GetFrame failed");
+        return false;
+      }
 
-      /* don't touch the frame inforamtion until the client is done with it */
+      /* don't touch the frame information until the client is done with it */
       while (fi->flags & KVMFR_FRAME_FLAG_UPDATE)
       {
+        /* this generally never occurs */
+        Sleep(1);
         if (*flags & KVMFR_HEADER_FLAG_RESTART)
           break;
       }
@@ -350,7 +328,7 @@ bool Service::Process()
   }
 
   // update the flags
-  INTERLOCKED_AND8((volatile char *)flags, KVMFR_HEADER_FLAG_RESTART);
+  INTERLOCKED_AND8(flags, KVMFR_HEADER_FLAG_RESTART);
   return true;
 }
 
@@ -361,54 +339,55 @@ DWORD Service::CursorThread()
     if (WaitForSingleObject(m_cursorEvent, 1000) != WAIT_OBJECT_0)
       continue;
 
-    volatile KVMFRCursor * cursor = &(m_shmHeader->cursor);
-    // wait until the client is ready
-    while (cursor->flags != 0)
+    CursorInfo ci;
+    while (m_capture->GetCursor(ci))
     {
-      Sleep(2);
-      if (!m_capture)
-        return 0;
-    }
-
-    EnterCriticalSection(&m_cursorCS);
-    if (m_cursorInfo.hasPos)
-    {
-      m_cursorInfo.hasPos = false;
-
-      // tell the client where the cursor is
-      cursor->flags |= KVMFR_CURSOR_FLAG_POS;
-      cursor->x = m_cursorInfo.x;
-      cursor->y = m_cursorInfo.y;
-
-      if (m_cursorInfo.visible)
-        cursor->flags |= KVMFR_CURSOR_FLAG_VISIBLE;
-      else
-        cursor->flags &= ~KVMFR_CURSOR_FLAG_VISIBLE;
-    }
-
-    if (m_cursorInfo.hasShape)
-    {
-      m_cursorInfo.hasShape = false;
-      if (m_cursorInfo.dataSize > m_cursorDataSize)
-        DEBUG_ERROR("Cursor size exceeds allocated space");
-      else
+      volatile KVMFRCursor * cursor = &(m_shmHeader->cursor);
+      // wait until the client is ready
+      while (cursor->flags != 0)
       {
-        // give the client the new cursor shape
-        cursor->flags |= KVMFR_CURSOR_FLAG_SHAPE;
-        ++cursor->version;
-
-        cursor->type    = m_cursorInfo.type;
-        cursor->width   = m_cursorInfo.w;
-        cursor->height  = m_cursorInfo.h;
-        cursor->pitch   = m_cursorInfo.pitch;
-        cursor->dataPos = m_cursorOffset;
-
-        memcpy(m_cursorData, m_cursorInfo.shape, m_cursorInfo.dataSize);
+        Sleep(1);
+        if (!m_capture)
+          return 0;
       }
-    }
 
-    LeaveCriticalSection(&m_cursorCS);
-    cursor->flags |= KVMFR_CURSOR_FLAG_UPDATE;
+      uint8_t flags = 0;
+
+      if (ci.hasPos)
+      {
+        // tell the client where the cursor is
+        flags |= KVMFR_CURSOR_FLAG_POS;
+        cursor->x = ci.x;
+        cursor->y = ci.y;
+
+        if (ci.visible)
+          flags |= KVMFR_CURSOR_FLAG_VISIBLE;
+      }
+
+      if (ci.shape)
+      {
+        if (ci.shape->pointerSize > m_cursorDataSize)
+          DEBUG_ERROR("Cursor size exceeds allocated space");
+        else
+        {
+          // give the client the new cursor shape
+          flags |= KVMFR_CURSOR_FLAG_SHAPE;
+          ++cursor->version;
+
+          cursor->type    = ci.type;
+          cursor->width   = ci.w;
+          cursor->height  = ci.h;
+          cursor->pitch   = ci.pitch;
+          cursor->dataPos = m_cursorOffset;
+
+          memcpy(m_cursorData, ci.shape->buffer, ci.shape->bufferSize);
+        }
+      }
+      flags |= KVMFR_CURSOR_FLAG_UPDATE;
+
+      cursor->flags = flags;
+      m_capture->FreeCursor(ci);
+    }
   }
 
   return 0;

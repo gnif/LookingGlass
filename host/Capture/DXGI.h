@@ -24,6 +24,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "TextureConverter.h"
 #include "MFT/H264.h"
 
+#include <list>
+
 #define W32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shlwapi.h>
@@ -58,15 +60,23 @@ namespace Capture
     size_t GetMaxFrameSize();
     GrabStatus Capture();
     GrabStatus GetFrame (struct FrameInfo  & frame );
-    const CursorInfo & GetCursor();
+    bool GetCursor(CursorInfo & cursor);
+    void FreeCursor(CursorInfo & cursor);
     GrabStatus DiscardFrame();
 
   private:
+    typedef std::list<CursorInfo    > CursorList;
+    typedef std::list<CursorBuffer *> CursorBufferPool;
+
     bool InitRawCapture();
     bool InitYUV420Capture();
     bool InitH264Capture();
 
-    struct CursorInfo  m_cursor;
+    CursorList         m_cursorUpdates;
+    CursorBufferPool   m_cursorData;
+    CRITICAL_SECTION   m_cursorCS;
+    CRITICAL_SECTION   m_cursorDataCS;
+
     ID3D11Texture2DPtr m_ftexture;
 
     GrabStatus ReleaseFrame();
@@ -92,10 +102,7 @@ namespace Capture
     TextureConverter              * m_textureConverter;
     MFT::H264                     * m_h264;
 
-    BYTE *                          m_pointer;
-    UINT                            m_pointerBufSize;
-    UINT                            m_pointerSize;
+    int                             m_lastCursorX, m_lastCursorY;
     BOOL                            m_lastMouseVis;
-    POINT                           m_lastMousePos;
   };
 };

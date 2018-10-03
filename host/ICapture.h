@@ -23,20 +23,23 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <vector>
 #include <windows.h>
 
+struct CursorBuffer
+{
+  unsigned int bufferSize;
+  char       * buffer;
+  unsigned int pointerSize;
+};
+
 struct CursorInfo
 {
-  bool            updated;
-
   bool            visible;
-  bool            hasShape;
   bool            hasPos;
   int             x, y;
 
   enum CursorType type;
   unsigned int    w, h;
   unsigned int    pitch;
-  void          * shape;
-  unsigned int    dataSize;
+  CursorBuffer  * shape;
 };
 
 struct FrameInfo
@@ -73,6 +76,7 @@ public:
   virtual size_t GetMaxFrameSize() = 0;
   virtual enum GrabStatus Capture() = 0;
   virtual enum GrabStatus GetFrame(struct FrameInfo & frame) = 0;
-  virtual const CursorInfo & GetCursor() = 0;
+  virtual bool GetCursor(CursorInfo & cursor) = 0;
+  virtual void FreeCursor(CursorInfo & cursor) = 0;
   virtual enum GrabStatus DiscardFrame() = 0;
 };
