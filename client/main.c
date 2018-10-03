@@ -234,7 +234,7 @@ int cursorThread(void * unused)
       if (!state.running)
         return 0;
 
-      usleep(1000);
+      usleep(1);
       continue;
     }
 
@@ -323,9 +323,7 @@ int frameThread(void * unused)
       if (!state.running)
         break;
 
-      // allow for a maximum refresh of 400fps (1000/400 = 2.5ms), this should
-      // befreqent enough without chewing up too much CPU time
-      usleep(2500);
+      usleep(1);
       continue;
     }
 
@@ -403,6 +401,13 @@ int frameThread(void * unused)
         SDL_SetWindowSize(state.window, header.width, header.height);
       updatePositionInfo();
     }
+
+    /*
+    uint64_t now = microtime();
+    static uint64_t last;
+    DEBUG_INFO("D: %f", (now - last) / 1000.0f);
+    last = microtime();
+    */
 
     const uint8_t * data = (const uint8_t *)state.shm + header.dataPos;
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, data))
@@ -733,11 +738,11 @@ int run()
   state.fpsSleep = 1000000 / params.fpsLimit;
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
-  
+
   if (XDG_SESSION_TYPE == NULL) {
     XDG_SESSION_TYPE = "unspecified";
   }
-  
+
   if (strcmp(XDG_SESSION_TYPE, "wayland") == 0) {
      DEBUG_INFO("Wayland detected");
      int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
@@ -864,6 +869,9 @@ int run()
 
   if (params.allowScreensaver)
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+
+  if (!params.center)
+    SDL_SetWindowPosition(state.window, params.x, params.y);
 
   // set the compositor hint to bypass for low latency
   SDL_SysWMinfo wminfo;
