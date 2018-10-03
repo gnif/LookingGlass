@@ -85,6 +85,10 @@ struct Inst
   const uint8_t      * data;
   bool                 update;
 
+  float translateX, translateY;
+  float scaleX    , scaleY;
+  GLint             uDesktopPos;
+
   bool         mouseVisible;
   float        mouseX, mouseY, mouseW, mouseH;
   float        mouseScaleX, mouseScaleY;
@@ -125,6 +129,10 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
 
   LG_LOCK_INIT(this->mouseLock);
+  this->translateX = 0;
+  this->translateY = 0;
+  this->scaleX     = 1.0f;
+  this->scaleY     = 1.0f;
 
   return true;
 }
@@ -167,10 +175,18 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
 
   glViewport(0, 0, width, height);
 
-  this->mouseScaleX = 2.0f / this->format.width;
+  if (destRect.valid)
+  {
+    this->translateX = 1.0f - (((destRect.w / 2) + destRect.x) * 2) / (float)width;
+    this->translateY = 1.0f - (((destRect.h / 2) + destRect.y) * 2) / (float)height;
+    this->scaleX     = (float)destRect.w / (float)width;
+    this->scaleY     = (float)destRect.h / (float)height;
+  }
+
+  this->mouseScaleX = 2.0f / this->format.width ;
   this->mouseScaleY = 2.0f / this->format.height;
-  this->mouseW = this->mouseWidth  * (1.0f / this->format.width );
-  this->mouseH = this->mouseHeight * (1.0f / this->format.height);
+  this->mouseW      = (this->mouseWidth  * (1.0f / this->format.width )) * this->scaleX;
+  this->mouseH      = (this->mouseHeight * (1.0f / this->format.height)) * this->scaleY;
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -183,8 +199,8 @@ bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int
   this->mouseHeight = (cursor == LG_CURSOR_MONOCHROME ? height / 2 : height);
   this->mousePitch  = pitch;
 
-  this->mouseW = this->mouseWidth  * (1.0f / this->format.width );
-  this->mouseH = this->mouseHeight * (1.0f / this->format.height);
+  this->mouseW = (this->mouseWidth  * (1.0f / this->format.width )) * this->scaleX;
+  this->mouseH = (this->mouseHeight * (1.0f / this->format.height)) * this->scaleY;
 
   const size_t size = height * pitch;
   if (size > this->mouseDataSize)
@@ -206,8 +222,8 @@ bool egl_on_mouse_event(void * opaque, const bool visible , const int x, const i
 {
   struct Inst * this = (struct Inst *)opaque;
   this->mouseVisible = visible;
-  this->mouseX       = ((float)x * this->mouseScaleX) - 1.0f;
-  this->mouseY       = ((float)y * this->mouseScaleY) - 1.0f;
+  this->mouseX       = (((float)x * this->mouseScaleX) - 1.0f) * this->scaleX;
+  this->mouseY       = (((float)y * this->mouseScaleY) - 1.0f) * this->scaleY;
   return true;
 }
 
@@ -355,13 +371,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_init(&this->shaders.mouse_mono))
     return false;
 
-  if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
+  if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
     return false;
 
-  if (!egl_shader_compile(this->shaders.bgra, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)))
+  if (!egl_shader_compile(this->shaders.bgra, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)))
     return false;
 
-  if (!egl_shader_compile(this->shaders.yuv, egl_vertex_shader_basic, sizeof(egl_vertex_shader_basic), egl_fragment_shader_yuv , sizeof(egl_fragment_shader_yuv )))
+  if (!egl_shader_compile(this->shaders.yuv, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_yuv, sizeof(egl_fragment_shader_yuv)))
     return false;
 
   if (!egl_shader_compile(this->shaders.mouse, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
@@ -411,7 +427,12 @@ bool egl_render(void * opaque, SDL_Window * window)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  egl_model_render(this->models.desktop);
+  if (this->shader)
+  {
+    egl_shader_use(this->shader);
+    glUniform4f(this->uDesktopPos, this->translateX, this->translateY, this->scaleX, this->scaleY);
+    egl_model_render(this->models.desktop);
+  }
 
   if (this->mouseVisible)
   {
