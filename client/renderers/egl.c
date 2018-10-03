@@ -35,7 +35,7 @@ struct Options
 
 static struct Options defaultOptions =
 {
-  .vsync = true
+  .vsync = false
 };
 
 struct Models
@@ -405,30 +405,6 @@ bool egl_render(void * opaque, SDL_Window * window)
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  if (this->update)
-  {
-    if (this->sourceChanged)
-    {
-      this->sourceChanged = false;
-      if (!egl_texture_setup(
-        this->textures.desktop,
-        this->pixFmt,
-        this->format.width,
-        this->format.height,
-        this->frameSize,
-        true
-      ))
-        return false;
-
-      egl_model_set_shader(this->models.desktop, this->shader);
-   }
-
-    if (!egl_texture_update(this->textures.desktop, this->data))
-      return false;
-
-    this->update = false;
-  }
-
   if (this->mouseUpdate)
     update_mouse_shape(this);
 
@@ -465,6 +441,32 @@ bool egl_render(void * opaque, SDL_Window * window)
   }
 
   eglSwapBuffers(this->display, this->surface);
+
+  // defer texture uploads until after the flip to avoid stalling
+  if (this->update)
+  {
+    if (this->sourceChanged)
+    {
+      this->sourceChanged = false;
+      if (!egl_texture_setup(
+        this->textures.desktop,
+        this->pixFmt,
+        this->format.width,
+        this->format.height,
+        this->frameSize,
+        true
+      ))
+        return false;
+
+      egl_model_set_shader(this->models.desktop, this->shader);
+    }
+
+    if (!egl_texture_update(this->textures.desktop, this->data))
+      return false;
+
+    this->update = false;
+  }
+
   return true;
 }
 

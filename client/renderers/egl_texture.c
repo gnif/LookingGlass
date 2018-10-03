@@ -43,6 +43,7 @@ struct EGL_Texture
   bool   hasPBO;
   GLuint pbo[2];
   int    pboIndex;
+  bool   needsUpdate;
   size_t pboBufferSize;
 };
 
@@ -172,18 +173,20 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 {
   if (texture->streaming)
   {
+    if (texture->needsUpdate)
+    {
+      DEBUG_ERROR("Previous frame was not consumed");
+      return false;
+    }
+
     if (++texture->pboIndex == 2)
       texture->pboIndex = 0;
 
+    /* initiate the data upload */
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
     glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
-    for(int i = 0; i < texture->textureCount; ++i)
-    {
-      glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-          texture->format, GL_UNSIGNED_BYTE, (const void *)texture->offsets[i]);
-    }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    texture->needsUpdate = true;
   }
   else
   {
@@ -193,14 +196,28 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
           texture->format, GL_UNSIGNED_BYTE, buffer + texture->offsets[i]);
     }
+    glBindTexture(GL_TEXTURE_2D, 0);
   }
-
-  glBindTexture(GL_TEXTURE_2D, 0);
   return true;
 }
 
 void egl_texture_bind(EGL_Texture * texture)
 {
+  if (texture->streaming && texture->needsUpdate)
+  {
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
+    for(int i = 0; i < texture->textureCount; ++i)
+    {
+      glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
+          texture->format, GL_UNSIGNED_BYTE, (const void *)texture->offsets[i]);
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    texture->needsUpdate = false;
+  }
+
   for(int i = 0; i < texture->textureCount; ++i)
   {
     glActiveTexture(GL_TEXTURE0 + i);
