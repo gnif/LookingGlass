@@ -144,10 +144,8 @@ struct AppParams params =
   .forceRenderer    = false
 };
 
-static inline void updatePositionInfo()
+static void updatePositionInfo()
 {
-  SDL_GetWindowSize(state.window, &state.windowW, &state.windowH);
-
   if (state.haveSrcSize)
   {
     if (params.keepAspect)
@@ -314,11 +312,12 @@ int frameThread(void * unused)
   KVMFRFrame header;
 
   memset(&header, 0, sizeof(struct KVMFRFrame));
+  SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
   while(state.running)
   {
     // poll until we have a new frame
-    if(!(state.shm->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
+    while(!(state.shm->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
     {
       if (!state.running)
         break;
@@ -345,6 +344,7 @@ int frameThread(void * unused)
       header.dataPos > state.shmSize ||
       header.pitch   < header.width
     ){
+      DEBUG_WARN("Bad header");
       usleep(1000);
       continue;
     }
@@ -402,13 +402,6 @@ int frameThread(void * unused)
       updatePositionInfo();
     }
 
-    /*
-    uint64_t now = microtime();
-    static uint64_t last;
-    DEBUG_INFO("D: %f", (now - last) / 1000.0f);
-    last = microtime();
-    */
-
     const uint8_t * data = (const uint8_t *)state.shm + header.dataPos;
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, data))
     {
@@ -460,20 +453,31 @@ int eventFilter(void * userdata, SDL_Event * event)
   static bool serverMode   = false;
   static bool realignGuest = true;
 
-  if (event->type == SDL_WINDOWEVENT)
+  switch(event->type)
   {
-    switch(event->window.event)
+    case SDL_QUIT:
     {
-      case SDL_WINDOWEVENT_ENTER:
-        realignGuest = true;
-        break;
-
-      case SDL_WINDOWEVENT_SIZE_CHANGED:
-        updatePositionInfo();
-        realignGuest = true;
-        break;
+      if (!params.ignoreQuit)
+        state.running = false;
+      return 0;
     }
-    return 0;
+
+    case SDL_WINDOWEVENT:
+    {
+      switch(event->window.event)
+      {
+        case SDL_WINDOWEVENT_ENTER:
+          realignGuest = true;
+          break;
+
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
+          SDL_GetWindowSize(state.window, &state.windowW, &state.windowH);
+          updatePositionInfo();
+          realignGuest = true;
+          break;
+      }
+      return 0;
+    }
   }
 
   if (!params.useSpice)
@@ -973,18 +977,7 @@ int run()
     __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
 
     while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
-    {
-      SDL_Event event;
-      while(SDL_PollEvent(&event))
-      {
-        if (event.type == SDL_QUIT)
-        {
-          state.running = false;
-          break;
-        }
-      }
-      usleep(1000);
-    }
+      SDL_WaitEventTimeout(NULL, 1000);
 
     if (!state.running)
       break;
@@ -1021,16 +1014,7 @@ int run()
     bool *closeAlert = NULL;
     while(state.running)
     {
-      SDL_Event event;
-      while(SDL_PollEvent(&event))
-      {
-        if (event.type == SDL_QUIT)
-        {
-          if (!params.ignoreQuit)
-            state.running = false;
-          break;
-        }
-      }
+      SDL_WaitEventTimeout(NULL, 1000);
 
       if (closeAlert == NULL)
       {
@@ -1053,8 +1037,6 @@ int run()
           closeAlert  = NULL;
         }
       }
-
-      usleep(1000);
     }
 
     break;
