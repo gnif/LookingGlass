@@ -361,148 +361,147 @@ GrabStatus Capture::DXGI::Capture()
   IDXGIResourcePtr res;
 
   HRESULT status;
-  for (int i = 0; i < 2; ++i)
+  for (int retryCount = 0; retryCount < 2; ++retryCount)
   {
-    while (true)
+    GrabStatus ret = ReleaseFrame();
+    if (ret != GRAB_STATUS_OK)
+      return ret;
+
+    status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
+
+    switch (status)
     {
-      GrabStatus ret = ReleaseFrame();
-      if (ret != GRAB_STATUS_OK)
-        return ret;
-
-      status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
-      if (status == DXGI_ERROR_WAIT_TIMEOUT)
-        return GRAB_STATUS_TIMEOUT;
-
-      if (FAILED(status))
+      case S_OK:
+        m_releaseFrame = true;
         break;
 
-      m_releaseFrame = true;
+      case DXGI_ERROR_WAIT_TIMEOUT:
+        return GRAB_STATUS_TIMEOUT;
 
-      // if we have a mouse update
-      if (frameInfo.LastMouseUpdateTime.QuadPart)
-      {
-        if (
-          m_lastCursorX != frameInfo.PointerPosition.Position.x ||
-          m_lastCursorY != frameInfo.PointerPosition.Position.y
-        ) {
-          cursorUpdated = true;
-          cursor.hasPos = true;
-          cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
-          cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
-        }
+      // desktop switch, mode change, switch DWM on or off or Secure Desktop
+      case DXGI_ERROR_ACCESS_LOST:
+      case WAIT_ABANDONED:
+        return GRAB_STATUS_REINIT;
 
-        if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
-        {
-          cursorUpdated  = true;
-          m_lastMouseVis = frameInfo.PointerPosition.Visible;
-        }
+      default:
+        // unknown failure
+        DEBUG_WINERROR("AcquireNextFrame failed", status);
+        return GRAB_STATUS_ERROR;
+    }
 
-        cursor.visible = m_lastMouseVis == TRUE;
+    // if we have a mouse update
+    if (frameInfo.LastMouseUpdateTime.QuadPart)
+    {
+      if (
+        m_lastCursorX != frameInfo.PointerPosition.Position.x ||
+        m_lastCursorY != frameInfo.PointerPosition.Position.y
+      ) {
+        cursorUpdated = true;
+        cursor.hasPos = true;
+        cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
+        cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
       }
 
-      // if the pointer shape has changed
-      if (frameInfo.PointerShapeBufferSize > 0)
+      if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
       {
-        CursorBuffer * buf;
+        cursorUpdated  = true;
+        m_lastMouseVis = frameInfo.PointerPosition.Visible;
+      }
 
-        if (m_cursorData.size() == 0)
+      cursor.visible = m_lastMouseVis == TRUE;
+    }
+
+    // if the pointer shape has changed
+    if (frameInfo.PointerShapeBufferSize > 0)
+    {
+      CursorBuffer * buf;
+
+      if (m_cursorData.size() == 0)
+      {
+        // create a new buffer
+        buf = new CursorBuffer;
+        buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
+        buf->bufferSize = frameInfo.PointerShapeBufferSize;
+      }
+      else
+      {
+        // get an existing buffer from the pool
+        EnterCriticalSection(&m_cursorDataCS);
+        buf = m_cursorData.front();
+        m_cursorData.pop_front();
+        LeaveCriticalSection(&m_cursorDataCS);
+
+        // resize the buffer if required
+        if (buf->bufferSize < frameInfo.PointerShapeBufferSize)
         {
-          // create a new buffer
-          buf = new CursorBuffer;
+          delete[] buf->buffer;
           buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
           buf->bufferSize = frameInfo.PointerShapeBufferSize;
         }
-        else
-        {
-          // get an existing buffer from the pool
-          EnterCriticalSection(&m_cursorDataCS);
-          buf = m_cursorData.front();
-          m_cursorData.pop_front();
-          LeaveCriticalSection(&m_cursorDataCS);
+      }
 
-          // resize the buffer if required
-          if (buf->bufferSize < frameInfo.PointerShapeBufferSize)
-          {
-            delete[] buf->buffer;
-            buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
-            buf->bufferSize = frameInfo.PointerShapeBufferSize;
-          }
-        }
+      buf->pointerSize = 0;
+      cursor.shape     = buf;
+      cursorUpdated    = true;
 
-        buf->pointerSize = 0;
-        cursor.shape     = buf;
-        cursorUpdated    = true;
+      DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
+      status = m_dup->GetFramePointerShape(buf->bufferSize, buf->buffer, &buf->pointerSize, &shapeInfo);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to get the new pointer shape", status);
+        return GRAB_STATUS_ERROR;
+      }
 
-        DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
-        status = m_dup->GetFramePointerShape(buf->bufferSize, buf->buffer, &buf->pointerSize, &shapeInfo);
-        if (FAILED(status))
-        {
-          DEBUG_WINERROR("Failed to get the new pointer shape", status);
-          return GRAB_STATUS_ERROR;
-        }
-
-        switch (shapeInfo.Type)
-        {
+      switch (shapeInfo.Type)
+      {
         case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : cursor.type = CURSOR_TYPE_COLOR;        break;
         case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: cursor.type = CURSOR_TYPE_MASKED_COLOR; break;
         case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : cursor.type = CURSOR_TYPE_MONOCHROME;   break;
         default:
           DEBUG_ERROR("Invalid cursor type");
           return GRAB_STATUS_ERROR;
-        }
-
-        cursor.w     = shapeInfo.Width;
-        cursor.h     = shapeInfo.Height;
-        cursor.pitch = shapeInfo.Pitch;
       }
 
-      if (cursorUpdated)
+      cursor.w     = shapeInfo.Width;
+      cursor.h     = shapeInfo.Height;
+      cursor.pitch = shapeInfo.Pitch;
+    }
+
+    if (cursorUpdated)
+    {
+      // push the cursor update into the queue
+      EnterCriticalSection(&m_cursorCS);
+      m_cursorUpdates.push_back(cursor);
+      LeaveCriticalSection(&m_cursorCS);
+    }
+
+    // if we don't have frame data
+    if (frameInfo.LastPresentTime.QuadPart == 0)
+    {
+      // if there is nothing to update, just start again
+      if (!cursorUpdated)
       {
-        // push the cursor update into the queue
-        EnterCriticalSection(&m_cursorCS);
-        m_cursorUpdates.push_back(cursor);
-        LeaveCriticalSection(&m_cursorCS);
+        --retryCount;
+        continue;
       }
-
-      // if we also have frame data, break out to process it
-      if (frameInfo.LastPresentTime.QuadPart != 0)
-        break;
 
       res = NULL;
-
-      // if the cursor has been updated
-      if (cursorUpdated)
-        return GRAB_STATUS_CURSOR;
-
-      // otherwise just try again
+      return GRAB_STATUS_CURSOR;
     }
 
-    if (SUCCEEDED(status))
-      break;
-
-    switch (status)
-    {
-      // desktop switch, mode change, switch DWM on or off or Secure Desktop
-    case DXGI_ERROR_ACCESS_LOST:
-    case WAIT_ABANDONED:
-      return GRAB_STATUS_REINIT;
-
-    default:
-      // unknown failure
-      DEBUG_WINERROR("AcquireNextFrame failed", status);
-      return GRAB_STATUS_ERROR;
-    }
+    // success, break out of the retry loop
+    break;
   }
 
-  // retry count exceeded
-  if (FAILED(status))
+  // ensure we have a frame
+  if (!m_releaseFrame)
   {
     DEBUG_WINERROR("Failed to acquire next frame", status);
     return GRAB_STATUS_ERROR;
   }
-  
-  res.QueryInterface(IID_PPV_ARGS(&m_ftexture));
 
+  // get the texture
+  res.QueryInterface(IID_PPV_ARGS(&m_ftexture));
   if (!m_ftexture)
   {
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
@@ -564,13 +563,16 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
   
   frame.pitch  = m_width * 4;
   frame.stride = m_width;
-  
-  for(unsigned int y = 0; y < m_height; ++y)
-    memcpySSE(
-      (uint32_t*)frame.buffer  + (m_width * y),
-      (uint8_t *)mapping.pData + (mapping.RowPitch * y),
-      m_width * 4
-    );
+
+  if (frame.pitch == mapping.RowPitch)
+    memcpySSE(frame.buffer, mapping.pData, frame.pitch * m_height);
+  else
+    for(unsigned int y = 0; y < m_height; ++y)
+      memcpySSE(
+        (uint8_t *)frame.buffer  + (frame.pitch      * y),
+        (uint8_t *)mapping.pData + (mapping.RowPitch * y),
+        frame.pitch
+      );
 
   m_deviceContext->Unmap(m_texture[0], 0);
 
