@@ -481,7 +481,7 @@ int eventFilter(void * userdata, SDL_Event * event)
   }
 
   if (!params.useSpice)
-    return 1;
+    return 0;
 
   switch(event->type)
   {
@@ -652,11 +652,9 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
       }
       break;
-
-    default:
-      return 1;
   }
 
+  // consume all events
   return 0;
 }
 
