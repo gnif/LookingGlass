@@ -286,13 +286,17 @@ int cursorThread(void * unused)
     // now we have taken the mouse data, we can flag to the host we are ready
     state.shm->cursor.flags = 0;
 
+    bool showCursor = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
     if (header.flags & KVMFR_CURSOR_FLAG_POS)
     {
       state.cursor.x      = header.x;
       state.cursor.y      = header.y;
-      state.cursorVisible = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
       state.haveCursorPos = true;
+    }
 
+    if (showCursor != state.cursorVisible || header.flags & KVMFR_CURSOR_FLAG_POS)
+    {
+      state.cursorVisible = showCursor;
       state.lgr->on_mouse_event
       (
         state.lgrData,
