@@ -389,47 +389,6 @@ unsigned int Capture::DXGI::Capture()
         return GRAB_STATUS_ERROR;
     }
 
-    // if we have a mouse update
-    if (frameInfo.LastMouseUpdateTime.QuadPart)
-    {
-      if (
-        m_lastCursorX != frameInfo.PointerPosition.Position.x ||
-        m_lastCursorY != frameInfo.PointerPosition.Position.y
-      ) {
-        ret |= GRAB_STATUS_CURSOR;
-        cursor.hasPos = true;
-        cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
-        cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
-      }
-
-      if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
-      {
-        ret |= GRAB_STATUS_CURSOR;
-        m_lastMouseVis = frameInfo.PointerPosition.Visible;
-      }
-
-      cursor.visible = m_lastMouseVis == TRUE;
-    }
-    else
-    {
-      // always report the mouse position to prevent the guest losing sync (ie: dragging windows)
-      POINT curPos;
-      if (GetCursorPos(&curPos))
-      {
-        curPos.x -= m_hotSpot.x;
-        curPos.y -= m_hotSpot.y;
-
-        if (curPos.x != m_lastCursorX || curPos.y != m_lastCursorY)
-        {
-          ret |= GRAB_STATUS_CURSOR;
-          cursor.hasPos  = true;
-          cursor.x       = m_lastCursorX = curPos.x;
-          cursor.y       = m_lastCursorY = curPos.y;
-          cursor.visible = m_lastMouseVis;
-        }
-      }
-    }
-
     // if the pointer shape has changed
     if (frameInfo.PointerShapeBufferSize > 0)
     {
@@ -487,6 +446,42 @@ unsigned int Capture::DXGI::Capture()
       m_hotSpot.x  = shapeInfo.HotSpot.x;
       m_hotSpot.y  = shapeInfo.HotSpot.y;
     }
+
+    // if we have a mouse update
+    if (frameInfo.LastMouseUpdateTime.QuadPart)
+    {
+      if (
+        m_lastCursorX != frameInfo.PointerPosition.Position.x ||
+        m_lastCursorY != frameInfo.PointerPosition.Position.y
+      ) {
+        ret |= GRAB_STATUS_CURSOR;
+        cursor.hasPos = true;
+        cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
+        cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
+      }
+    }
+    else
+    {
+      // always report the mouse position to prevent the guest losing sync (ie: dragging windows)
+      POINT curPos;
+      if (GetCursorPos(&curPos))
+      {
+        curPos.x -= m_hotSpot.x;
+        curPos.y -= m_hotSpot.y;
+
+        if (curPos.x != m_lastCursorX || curPos.y != m_lastCursorY)
+        {
+          ret |= GRAB_STATUS_CURSOR;
+          cursor.hasPos  = true;
+          cursor.x       = m_lastCursorX = curPos.x;
+          cursor.y       = m_lastCursorY = curPos.y;
+        }
+      }
+    }
+
+    if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
+      m_lastMouseVis = frameInfo.PointerPosition.Visible;
+    cursor.visible = m_lastMouseVis == TRUE;
 
     if (ret & GRAB_STATUS_CURSOR)
     {

@@ -360,9 +360,6 @@ DWORD Service::CursorThread()
         flags |= KVMFR_CURSOR_FLAG_POS;
         cursor->x = ci.x;
         cursor->y = ci.y;
-
-        if (ci.visible)
-          flags |= KVMFR_CURSOR_FLAG_VISIBLE;
       }
 
       if (ci.shape)
@@ -384,8 +381,11 @@ DWORD Service::CursorThread()
           memcpy(m_cursorData, ci.shape->buffer, ci.shape->bufferSize);
         }
       }
-      flags |= KVMFR_CURSOR_FLAG_UPDATE;
 
+      if (ci.visible)
+        flags |= KVMFR_CURSOR_FLAG_VISIBLE;
+
+      flags |= KVMFR_CURSOR_FLAG_UPDATE;
       cursor->flags = flags;
       m_capture->FreeCursor(ci);
     }
