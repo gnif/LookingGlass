@@ -350,20 +350,20 @@ size_t DXGI::GetMaxFrameSize()
   return (m_width * m_height * 4);
 }
 
-GrabStatus Capture::DXGI::Capture()
+unsigned int Capture::DXGI::Capture()
 {
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
   CursorInfo cursor = { 0 };
-  bool cursorUpdated = false;
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
+  unsigned int ret;
 
   HRESULT status;
   for (int retryCount = 0; retryCount < 2; ++retryCount)
   {
-    GrabStatus ret = ReleaseFrame();
+    ret = ReleaseFrame();
     if (ret != GRAB_STATUS_OK)
       return ret;
 
@@ -396,7 +396,7 @@ GrabStatus Capture::DXGI::Capture()
         m_lastCursorX != frameInfo.PointerPosition.Position.x ||
         m_lastCursorY != frameInfo.PointerPosition.Position.y
       ) {
-        cursorUpdated = true;
+        ret |= GRAB_STATUS_CURSOR;
         cursor.hasPos = true;
         cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
         cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
@@ -404,11 +404,23 @@ GrabStatus Capture::DXGI::Capture()
 
       if (m_lastMouseVis != frameInfo.PointerPosition.Visible)
       {
-        cursorUpdated  = true;
+        ret |= GRAB_STATUS_CURSOR;
         m_lastMouseVis = frameInfo.PointerPosition.Visible;
       }
 
       cursor.visible = m_lastMouseVis == TRUE;
+    }
+    else
+    {
+      // always report the mouse position to prevent the guest losing sync (ie: dragging windows)
+      POINT curPos;
+      if (GetCursorPos(&curPos) && (curPos.x != m_lastCursorX || curPos.y != m_lastCursorY))
+      {
+        ret |= GRAB_STATUS_CURSOR;
+        cursor.hasPos = true;
+        cursor.x = m_lastCursorX = curPos.x;
+        cursor.y = m_lastCursorY = curPos.y;
+      }
     }
 
     // if the pointer shape has changed
@@ -442,7 +454,7 @@ GrabStatus Capture::DXGI::Capture()
 
       buf->pointerSize = 0;
       cursor.shape     = buf;
-      cursorUpdated    = true;
+      ret             |= GRAB_STATUS_CURSOR;
 
       DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
       status = m_dup->GetFramePointerShape(buf->bufferSize, buf->buffer, &buf->pointerSize, &shapeInfo);
@@ -467,7 +479,7 @@ GrabStatus Capture::DXGI::Capture()
       cursor.pitch = shapeInfo.Pitch;
     }
 
-    if (cursorUpdated)
+    if (ret & GRAB_STATUS_CURSOR)
     {
       // push the cursor update into the queue
       EnterCriticalSection(&m_cursorCS);
@@ -479,19 +491,22 @@ GrabStatus Capture::DXGI::Capture()
     if (frameInfo.LastPresentTime.QuadPart == 0)
     {
       // if there is nothing to update, just start again
-      if (!cursorUpdated)
+      if (!ret)
       {
         --retryCount;
         continue;
       }
 
       res = NULL;
-      return GRAB_STATUS_CURSOR;
+      ret |= GRAB_STATUS_OK;
+      return ret;
     }
 
     // success, break out of the retry loop
     break;
   }
+
+  ret |= GRAB_STATUS_FRAME;
 
   // ensure we have a frame
   if (!m_releaseFrame)
@@ -508,7 +523,8 @@ GrabStatus Capture::DXGI::Capture()
     return GRAB_STATUS_ERROR;
   }
 
-  return GRAB_STATUS_OK;
+  ret |= GRAB_STATUS_OK;
+  return ret;
 }
 
 GrabStatus Capture::DXGI::ReleaseFrame()

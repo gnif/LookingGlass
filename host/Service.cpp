@@ -193,77 +193,77 @@ bool Service::Process()
     INTERLOCKED_AND8(flags, ~(KVMFR_HEADER_FLAG_RESTART));
   }
 
-  GrabStatus result;
-
+  unsigned int status;
   bool ok         = false;
-  bool cursorOnly = false;
   bool repeat     = false;
+
   for(int i = 0; i < 2; ++i)
   {
-    // capture a frame of data
-    switch (m_capture->Capture())
+    status = m_capture->Capture();
+    if (status & GRAB_STATUS_OK)
     {
-      case GRAB_STATUS_OK:
-        ok = true;
-        break;
-
-      case GRAB_STATUS_TIMEOUT:
-        if (m_haveFrame)
-        {
-          ok     = true;
-          repeat = true;
-          break;
-        }
-
-        // capture timeouts are not errors
-        --i;
-        continue;
-
-      case GRAB_STATUS_CURSOR:
-        ok         = true;
-        cursorOnly = true;
-        break;
-
-      case GRAB_STATUS_ERROR:
-        DEBUG_ERROR("Capture failed");
-        return false;
-
-      case GRAB_STATUS_REINIT:
-        DEBUG_INFO("ReInitialize Requested");
-
-        INTERLOCKED_OR8(flags, KVMFR_HEADER_FLAG_PAUSED);
-        if(WTSGetActiveConsoleSessionId() != m_consoleSessionID)
-        {
-          DEBUG_INFO("User switch detected, waiting to regain control");
-          while (WTSGetActiveConsoleSessionId() != m_consoleSessionID)
-            Sleep(100);
-        }
-
-        while (!m_capture->CanInitialize())
-          Sleep(100);
-
-        if (!m_capture->ReInitialize())
-        {
-          DEBUG_ERROR("ReInitialize Failed");
-          return false;
-        }
-
-        if (m_capture->GetMaxFrameSize() > m_frameSize)
-        {
-          DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
-          return false;
-        }
-
-        INTERLOCKED_AND8(flags, ~KVMFR_HEADER_FLAG_PAUSED);
-
-        // re-init request should not count towards a failure to capture
-        --i;
-        continue;
+      ok = true;
+      break;
     }
 
-    if (ok)
-      break;
+    if (status & GRAB_STATUS_TIMEOUT)
+    {
+      if (m_haveFrame)
+      {
+        ok     = true;
+        repeat = true;
+        break;
+      }
+
+      // timeouts should not count towards a failure to capture
+      --i;
+      continue;
+    }
+
+    if (status & GRAB_STATUS_ERROR)
+    {
+      DEBUG_ERROR("Capture failed, retrying");
+      continue;
+    }
+
+    if (status & GRAB_STATUS_REINIT)
+    {
+      DEBUG_INFO("ReInitialize Requested");
+
+      INTERLOCKED_OR8(flags, KVMFR_HEADER_FLAG_PAUSED);
+      if (WTSGetActiveConsoleSessionId() != m_consoleSessionID)
+      {
+        DEBUG_INFO("User switch detected, waiting to regain control");
+        while (WTSGetActiveConsoleSessionId() != m_consoleSessionID)
+          Sleep(100);
+      }
+
+      while (!m_capture->CanInitialize())
+        Sleep(100);
+
+      if (!m_capture->ReInitialize())
+      {
+        DEBUG_ERROR("ReInitialize Failed");
+        return false;
+      }
+
+      if (m_capture->GetMaxFrameSize() > m_frameSize)
+      {
+        DEBUG_ERROR("Maximum frame size of %zd bytes excceds maximum space available", m_capture->GetMaxFrameSize());
+        return false;
+      }
+
+      INTERLOCKED_AND8(flags, ~KVMFR_HEADER_FLAG_PAUSED);
+
+      // re-init request should not count towards a failure to capture
+      --i;
+      continue;
+    }
+
+    DEBUG_ERROR("Capture interface returned an unexpected result");
+    return false;
   }
+
 
   if (!ok)
   {
@@ -271,9 +271,10 @@ bool Service::Process()
     return false;
   }
 
-  SetEvent(m_cursorEvent);
+  if (status & GRAB_STATUS_CURSOR)
+    SetEvent(m_cursorEvent);
 
-  if (!cursorOnly)
+  if (status & GRAB_STATUS_FRAME)
   {
     volatile KVMFRFrame * fi = &(m_shmHeader->frame);
  
@@ -284,7 +285,7 @@ bool Service::Process()
       frame.buffer     = m_frame[m_frameIndex];
       frame.bufferSize = m_frameSize;
 
-      result = m_capture->GetFrame(frame);
+      GrabStatus result = m_capture->GetFrame(frame);
       if (result != GRAB_STATUS_OK)
       {
         DEBUG_INFO("GetFrame failed");

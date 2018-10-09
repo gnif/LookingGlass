@@ -58,7 +58,7 @@ namespace Capture
 
     enum FrameType GetFrameType();
     size_t GetMaxFrameSize();
-    GrabStatus Capture();
+    unsigned int Capture();
     GrabStatus GetFrame (struct FrameInfo  & frame );
     bool GetCursor(CursorInfo & cursor);
     void FreeCursor(CursorInfo & cursor);

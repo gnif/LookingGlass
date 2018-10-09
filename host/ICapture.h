@@ -54,11 +54,12 @@ struct FrameInfo
 
 enum GrabStatus
 {
-  GRAB_STATUS_OK,
-  GRAB_STATUS_TIMEOUT,
-  GRAB_STATUS_REINIT,
-  GRAB_STATUS_CURSOR,
-  GRAB_STATUS_ERROR
+  GRAB_STATUS_OK      = 1,
+  GRAB_STATUS_TIMEOUT = 2,
+  GRAB_STATUS_REINIT  = 4,
+  GRAB_STATUS_CURSOR  = 8,
+  GRAB_STATUS_FRAME   = 16,
+  GRAB_STATUS_ERROR   = 32
 };
 
 typedef std::vector<const char *> CaptureOptions;
@@ -74,7 +75,7 @@ public:
   virtual bool ReInitialize() = 0;
   virtual enum FrameType GetFrameType() = 0;
   virtual size_t GetMaxFrameSize() = 0;
-  virtual enum GrabStatus Capture() = 0;
+  virtual unsigned int Capture() = 0;
   virtual enum GrabStatus GetFrame(struct FrameInfo & frame) = 0;
   virtual bool GetCursor(CursorInfo & cursor) = 0;
   virtual void FreeCursor(CursorInfo & cursor) = 0;
