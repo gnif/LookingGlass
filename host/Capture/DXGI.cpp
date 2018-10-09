@@ -417,9 +417,10 @@ unsigned int Capture::DXGI::Capture()
       if (GetCursorPos(&curPos) && (curPos.x != m_lastCursorX || curPos.y != m_lastCursorY))
       {
         ret |= GRAB_STATUS_CURSOR;
-        cursor.hasPos = true;
-        cursor.x = m_lastCursorX = curPos.x;
-        cursor.y = m_lastCursorY = curPos.y;
+        cursor.hasPos  = true;
+        cursor.x       = m_lastCursorX = curPos.x;
+        cursor.y       = m_lastCursorY = curPos.y;
+        cursor.visible = m_lastMouseVis;
       }
     }
 
