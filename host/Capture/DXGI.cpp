@@ -55,11 +55,14 @@ bool DXGI::Initialize(CaptureOptions * options)
   m_options = options;
   HRESULT status;
 
+  m_cursorRPos = 0;
+  m_cursorWPos = 0;
   for (int i = 0; i < _countof(m_cursorRing); ++i)
   {
-    m_cursorRing[i].visible  = false;
-    m_cursorRing[i].hasPos   = false;
-    m_cursorRing[i].hasShape = false;
+    CursorInfo & cursor = m_cursorRing[i];
+    cursor.visible  = false;
+    cursor.hasPos   = false;
+    cursor.hasShape = false;
   }
 
   status = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)(&m_dxgiFactory));
@@ -324,7 +327,8 @@ void DXGI::DeInitialize()
   {
     if (m_cursorRing[i].shape.buffer)
       delete[] m_cursorRing[i].shape.buffer;
-    m_cursorRing[i].shape.buffer = NULL;
+    m_cursorRing[i].shape.buffer     = NULL;
+    m_cursorRing[i].shape.bufferSize = 0;
   }
 
   for(int i = 0; i < _countof(m_texture); ++i)
