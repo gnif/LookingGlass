@@ -105,6 +105,7 @@ bool Service::Initialize(ICapture * captureDevice)
 
   m_haveFrame   = false;
   m_initialized = true;
+  m_running     = true;
   return true;
 }
 
@@ -138,6 +139,8 @@ bool Service::InitPointers()
 
 void Service::DeInitialize()
 {
+  m_running = false;
+
   WaitForSingleObject(m_cursorThread, INFINITE);
   CloseHandle(m_cursorThread);
   CloseHandle(m_cursorEvent);
@@ -335,7 +338,7 @@ bool Service::Process()
 
 DWORD Service::CursorThread()
 {
-  while(m_capture)
+  while(m_running)
   {
     if (WaitForSingleObject(m_cursorEvent, 1000) != WAIT_OBJECT_0)
       continue;
