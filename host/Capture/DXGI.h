@@ -74,8 +74,6 @@ namespace Capture
 
     CursorInfo         m_cursorRing[DXGI_CURSOR_RING_SIZE];
     unsigned int       m_cursorRPos, m_cursorWPos;
-    CRITICAL_SECTION   m_cursorCS;
-    CRITICAL_SECTION   m_cursorDataCS;
 
     ID3D11Texture2DPtr m_ftexture;
 

@@ -31,8 +31,6 @@ DXGI::DXGI() :
   m_deviceContext(),
   m_dup()
 {
-  InitializeCriticalSection(&m_cursorCS    );
-  InitializeCriticalSection(&m_cursorDataCS);
 }
 
 DXGI::~DXGI()
