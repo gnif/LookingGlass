@@ -31,7 +31,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <shlwapi.h>
 #include <stdio.h>
 
-#define DXGI_CURSOR_RING_SIZE 2
+#define DXGI_CURSOR_RING_SIZE 3
 
 namespace Capture
 {
