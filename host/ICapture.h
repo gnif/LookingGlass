@@ -34,12 +34,13 @@ struct CursorInfo
 {
   bool            visible;
   bool            hasPos;
+  bool            hasShape;
   int             x, y;
 
   enum CursorType type;
   unsigned int    w, h;
   unsigned int    pitch;
-  CursorBuffer  * shape;
+  CursorBuffer    shape;
 };
 
 struct FrameInfo
@@ -78,6 +79,6 @@ public:
   virtual unsigned int Capture() = 0;
   virtual enum GrabStatus GetFrame(struct FrameInfo & frame) = 0;
   virtual bool GetCursor(CursorInfo & cursor) = 0;
-  virtual void FreeCursor(CursorInfo & cursor) = 0;
+  virtual void FreeCursor() = 0;
   virtual enum GrabStatus DiscardFrame() = 0;
 };

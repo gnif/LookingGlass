@@ -362,9 +362,9 @@ DWORD Service::CursorThread()
         cursor->y = ci.y;
       }
 
-      if (ci.shape)
+      if (ci.hasShape)
       {
-        if (ci.shape->pointerSize > m_cursorDataSize)
+        if (ci.shape.pointerSize > m_cursorDataSize)
           DEBUG_ERROR("Cursor size exceeds allocated space");
         else
         {
@@ -378,7 +378,7 @@ DWORD Service::CursorThread()
           cursor->pitch   = ci.pitch;
           cursor->dataPos = m_cursorOffset;
 
-          memcpy(m_cursorData, ci.shape->buffer, ci.shape->bufferSize);
+          memcpy(m_cursorData, ci.shape.buffer, ci.shape.bufferSize);
         }
       }
 
@@ -387,7 +387,7 @@ DWORD Service::CursorThread()
 
       flags |= KVMFR_CURSOR_FLAG_UPDATE;
       cursor->flags = flags;
-      m_capture->FreeCursor(ci);
+      m_capture->FreeCursor();
     }
   }
 

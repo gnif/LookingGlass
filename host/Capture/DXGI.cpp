@@ -57,6 +57,13 @@ bool DXGI::Initialize(CaptureOptions * options)
   m_options = options;
   HRESULT status;
 
+  for (int i = 0; i < _countof(m_cursorRing); ++i)
+  {
+    m_cursorRing[i].visible  = false;
+    m_cursorRing[i].hasPos   = false;
+    m_cursorRing[i].hasShape = false;
+  }
+
   status = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)(&m_dxgiFactory));
   if (FAILED(status))
   {
@@ -315,12 +322,11 @@ void DXGI::DeInitialize()
 
   ReleaseFrame();
 
-  while(m_cursorData.size())
+  for(int i = 0; i < _countof(m_cursorRing); ++i)
   {
-    CursorBuffer * buf = m_cursorData.front();
-    delete[] buf->buffer;
-    delete buf;
-    m_cursorData.pop_front();
+    if (m_cursorRing[i].shape.buffer)
+      delete[] m_cursorRing[i].shape.buffer;
+    m_cursorRing[i].shape.buffer = NULL;
   }
 
   for(int i = 0; i < _countof(m_texture); ++i)
@@ -355,7 +361,7 @@ unsigned int Capture::DXGI::Capture()
   if (!m_initialized)
     return GRAB_STATUS_ERROR;
 
-  CursorInfo cursor = { 0 };
+  CursorInfo & cursor = m_cursorRing[m_cursorWPos];
   DXGI_OUTDUPL_FRAME_INFO frameInfo;
   IDXGIResourcePtr res;
   unsigned int ret;
@@ -392,38 +398,19 @@ unsigned int Capture::DXGI::Capture()
     // if the pointer shape has changed
     if (frameInfo.PointerShapeBufferSize > 0)
     {
-      CursorBuffer * buf;
-
-      if (m_cursorData.size() == 0)
+      // resize the buffer if required
+      if (cursor.shape.bufferSize < frameInfo.PointerShapeBufferSize)
       {
-        // create a new buffer
-        buf = new CursorBuffer;
-        buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
-        buf->bufferSize = frameInfo.PointerShapeBufferSize;
-      }
-      else
-      {
-        // get an existing buffer from the pool
-        EnterCriticalSection(&m_cursorDataCS);
-        buf = m_cursorData.front();
-        m_cursorData.pop_front();
-        LeaveCriticalSection(&m_cursorDataCS);
-
-        // resize the buffer if required
-        if (buf->bufferSize < frameInfo.PointerShapeBufferSize)
-        {
-          delete[] buf->buffer;
-          buf->buffer     = new char[frameInfo.PointerShapeBufferSize];
-          buf->bufferSize = frameInfo.PointerShapeBufferSize;
-        }
+        delete[] cursor.shape.buffer;
+        cursor.shape.buffer     = new char[frameInfo.PointerShapeBufferSize];
+        cursor.shape.bufferSize = frameInfo.PointerShapeBufferSize;
       }
 
-      buf->pointerSize = 0;
-      cursor.shape     = buf;
-      ret             |= GRAB_STATUS_CURSOR;
+      cursor.shape.pointerSize = 0;
+      ret                     |= GRAB_STATUS_CURSOR;
 
       DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
-      status = m_dup->GetFramePointerShape(buf->bufferSize, buf->buffer, &buf->pointerSize, &shapeInfo);
+      status = m_dup->GetFramePointerShape(cursor.shape.bufferSize, cursor.shape.buffer, &cursor.shape.pointerSize, &shapeInfo);
       if (FAILED(status))
       {
         DEBUG_WINERROR("Failed to get the new pointer shape", status);
@@ -440,11 +427,12 @@ unsigned int Capture::DXGI::Capture()
           return GRAB_STATUS_ERROR;
       }
 
-      cursor.w     = shapeInfo.Width;
-      cursor.h     = shapeInfo.Height;
-      cursor.pitch = shapeInfo.Pitch;
-      m_hotSpot.x  = shapeInfo.HotSpot.x;
-      m_hotSpot.y  = shapeInfo.HotSpot.y;
+      cursor.hasShape = true;
+      cursor.w        = shapeInfo.Width;
+      cursor.h        = shapeInfo.Height;
+      cursor.pitch    = shapeInfo.Pitch;
+      m_hotSpot.x     = shapeInfo.HotSpot.x;
+      m_hotSpot.y     = shapeInfo.HotSpot.y;
     }
 
     // if we have a mouse update
@@ -483,12 +471,10 @@ unsigned int Capture::DXGI::Capture()
       m_lastMouseVis = frameInfo.PointerPosition.Visible;
     cursor.visible = m_lastMouseVis == TRUE;
 
-    if (ret & GRAB_STATUS_CURSOR)
+    if (ret & GRAB_STATUS_CURSOR && m_cursorWPos == m_cursorRPos)
     {
-      // push the cursor update into the queue
-      EnterCriticalSection(&m_cursorCS);
-      m_cursorUpdates.push_back(cursor);
-      LeaveCriticalSection(&m_cursorCS);
+      // atomic advance so we don't have to worry about locking
+      m_cursorWPos = (m_cursorWPos + 1 == DXGI_CURSOR_RING_SIZE) ? 0 : m_cursorWPos + 1;
     }
 
     // if we don't have frame data
@@ -729,23 +715,21 @@ GrabStatus DXGI::GetFrame(struct FrameInfo & frame)
 
 bool DXGI::GetCursor(CursorInfo & cursor)
 {
-  if (!m_cursorUpdates.size())
+  if (m_cursorRPos == m_cursorWPos)
     return false;
 
-  EnterCriticalSection(&m_cursorCS);  
-  cursor = m_cursorUpdates.front();
-  m_cursorUpdates.pop_front();
-  LeaveCriticalSection(&m_cursorCS);
+  cursor = m_cursorRing[m_cursorRPos];
   return true;
 }
 
-void DXGI::FreeCursor(CursorInfo & cursor)
+void DXGI::FreeCursor()
 {
-  /* put the buffer back into the pool */
-  if (cursor.shape)
-  {
-    EnterCriticalSection(&m_cursorDataCS);
-    m_cursorData.push_front(cursor.shape);
-    LeaveCriticalSection(&m_cursorDataCS);
-  }
+  assert(m_cursorRPos != m_cursorWPos);
+
+  CursorInfo & cursor = m_cursorRing[m_cursorRPos];
+  cursor.visible  = false;
+  cursor.hasPos   = false;
+  cursor.hasShape = false;
+
+  m_cursorRPos = (m_cursorRPos + 1 == DXGI_CURSOR_RING_SIZE) ? 0 : m_cursorRPos + 1;
 }

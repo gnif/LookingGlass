@@ -31,6 +31,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <shlwapi.h>
 #include <stdio.h>
 
+#define DXGI_CURSOR_RING_SIZE 2
+
 namespace Capture
 {
   class DXGI : public ICapture
@@ -59,21 +61,19 @@ namespace Capture
     enum FrameType GetFrameType();
     size_t GetMaxFrameSize();
     unsigned int Capture();
-    GrabStatus GetFrame (struct FrameInfo  & frame );
+    GrabStatus GetFrame (struct FrameInfo & frame );
     bool GetCursor(CursorInfo & cursor);
-    void FreeCursor(CursorInfo & cursor);
+    void FreeCursor();
     GrabStatus DiscardFrame();
 
   private:
-    typedef std::list<CursorInfo    > CursorList;
-    typedef std::list<CursorBuffer *> CursorBufferPool;
 
     bool InitRawCapture();
     bool InitYUV420Capture();
     bool InitH264Capture();
 
-    CursorList         m_cursorUpdates;
-    CursorBufferPool   m_cursorData;
+    CursorInfo         m_cursorRing[DXGI_CURSOR_RING_SIZE];
+    unsigned int       m_cursorRPos, m_cursorWPos;
     CRITICAL_SECTION   m_cursorCS;
     CRITICAL_SECTION   m_cursorDataCS;
 
