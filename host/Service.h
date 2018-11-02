@@ -28,6 +28,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define MAX_FRAMES 2
 
+enum ProcessStatus
+{
+  PROCESS_STATUS_OK,
+  PROCESS_STATUS_RETRY,
+  PROCESS_STATUS_ERROR
+};
+
 class Service
 {
 public:
@@ -40,7 +47,7 @@ public:
 
   bool Initialize(ICapture * captureDevice);
   void DeInitialize();
-  bool Process();
+  ProcessStatus Process();
 
 private:
   bool InitPointers();
@@ -51,6 +58,8 @@ private:
 
   Service();
   ~Service();
+
+  bool ReInit(volatile char * flags);
 
   bool       m_initialized;
   bool       m_running;

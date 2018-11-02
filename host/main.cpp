@@ -128,10 +128,28 @@ int run(struct StartupArgs & args)
   if (!svc->Initialize(captureDevice))
     return -1;
 
-  while (true)
+  int retry = 0;
+  bool running = true;
+  while (running)
   {
-    if (!svc->Process())
-      break;
+    switch (svc->Process())
+    {
+      case PROCESS_STATUS_OK:
+        retry = 0;
+        break;
+
+      case PROCESS_STATUS_RETRY:
+        if (retry++ == 3)
+        {
+          fprintf(stderr, "Too many consecutive retries, aborting");
+          running = false;
+        }
+        break;
+
+      case PROCESS_STATUS_ERROR:
+        fprintf(stderr, "Capture process returned error");
+        running = false;
+    }
   }
 
   svc->DeInitialize();
