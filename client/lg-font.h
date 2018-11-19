@@ -22,16 +22,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 typedef void * LG_FontObj;
-typedef void * LG_FontOut;
-
-typedef enum LG_FontMode
-{
-  LG_FONT_BITMAP,
-  LG_FONT_OPENGL,
-  LG_FONT_VULKAN
-}
-LG_FontMode;
-
 typedef struct LG_FontBitmap
 {
   void * reserved;
@@ -42,11 +32,10 @@ typedef struct LG_FontBitmap
 }
 LG_FontBitmap;
 
-typedef bool       (* LG_FontCreate      )(LG_FontObj * opaque, const char * font_name, unsigned int size);
-typedef void       (* LG_FontDestroy     )(LG_FontObj opaque);
-typedef bool       (* LG_FontSupports    )(LG_FontObj opaque, LG_FontMode mode);
-typedef LG_FontOut (* LG_FontRender      )(LG_FontObj opaque, LG_FontMode mode, unsigned int fg_color, const char * text);
-typedef void       (* LG_FontRelease     )(LG_FontObj opaque, LG_FontOut font);
+typedef bool            (* LG_FontCreate      )(LG_FontObj * opaque, const char * font_name, unsigned int size);
+typedef void            (* LG_FontDestroy     )(LG_FontObj opaque);
+typedef LG_FontBitmap * (* LG_FontRender      )(LG_FontObj opaque, unsigned int fg_color, const char * text);
+typedef void            (* LG_FontRelease     )(LG_FontObj opaque, LG_FontBitmap * bitmap);
 
 typedef struct LG_Font
 {
@@ -54,7 +43,6 @@ typedef struct LG_Font
   const char *        name;
   LG_FontCreate       create;
   LG_FontDestroy      destroy;
-  LG_FontSupports     supports;
   LG_FontRender       render;
   LG_FontRelease      release;
 }

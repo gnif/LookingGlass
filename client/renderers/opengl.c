@@ -414,7 +414,7 @@ void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * m
       break;
   }
 
-  if (!(a->text = this->font->render(this->alertFontObj, LG_FONT_BITMAP, 0xffffff00, message)))
+  if (!(a->text = this->font->render(this->alertFontObj, 0xffffff00, message)))
   {
     DEBUG_ERROR("Failed to render alert text: %s", TTF_GetError());
     free(a);
@@ -632,7 +632,7 @@ void opengl_update_fps(void * opaque, const float avgFPS, const float renderFPS)
   snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
 
   LG_FontBitmap *textSurface = NULL;
-  if (!(textSurface = this->font->render(this->fontObj, LG_FONT_BITMAP, 0xffffff00, str)))
+  if (!(textSurface = this->font->render(this->fontObj, 0xffffff00, str)))
     DEBUG_ERROR("Failed to render text");
 
   bitmap_to_texture(textSurface, this->textures[FPS_TEXTURE]);

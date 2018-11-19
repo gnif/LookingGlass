@@ -102,20 +102,9 @@ static void lgf_sdl_destroy(LG_FontObj opaque)
     TTF_Quit();
 }
 
-static bool lgf_sdl_supports(LG_FontObj opaque, LG_FontMode mode)
-{
-  return (mode == LG_FONT_BITMAP);
-}
-
-static LG_FontOut lgf_sdl_render(LG_FontObj opaque, LG_FontMode mode, unsigned int fg_color, const char * text)
+static LG_FontBitmap * lgf_sdl_render(LG_FontObj opaque, unsigned int fg_color, const char * text)
 {
   struct Inst * this = (struct Inst *)opaque;
-
-  if (mode != LG_FONT_BITMAP)
-  {
-    DEBUG_ERROR("Unsupported render mode");
-    return false;
-  }
 
   SDL_Surface * surface;
   SDL_Color     color;
@@ -144,13 +133,14 @@ static LG_FontOut lgf_sdl_render(LG_FontObj opaque, LG_FontMode mode, unsigned i
   out->bpp      = surface->format->BytesPerPixel;
   out->pixels   = surface->pixels;
 
-  return (LG_FontOut*)out;
+  return out;
 }
 
-static void lgf_sdl_release(LG_FontObj opaque, LG_FontOut font)
+static void lgf_sdl_release(LG_FontObj opaque, LG_FontBitmap * font)
 {
   LG_FontBitmap * bitmap = (LG_FontBitmap *)font;
   SDL_FreeSurface(bitmap->reserved);
+  free(bitmap);
 }
 
 struct LG_Font LGF_SDL =
@@ -158,7 +148,6 @@ struct LG_Font LGF_SDL =
   .name         = "SDL",
   .create       = lgf_sdl_create,
   .destroy      = lgf_sdl_destroy,
-  .supports     = lgf_sdl_supports,
   .render       = lgf_sdl_render,
   .release      = lgf_sdl_release
 };
