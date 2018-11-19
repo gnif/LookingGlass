@@ -18,8 +18,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "lg-renderer.h"
+
 #include "debug.h"
 #include "utils.h"
+#include "lg-fonts.h"
 
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_egl.h>
@@ -42,6 +44,7 @@ struct Models
 {
   struct EGL_Model * desktop;
   struct EGL_Model * mouse;
+  struct EGL_Model * fps;
 };
 
 struct Shaders
@@ -52,6 +55,8 @@ struct Shaders
 
   struct EGL_Shader * mouse;
   struct EGL_Shader * mouse_mono;
+
+  struct EGL_Shader * fps;
 };
 
 struct Textures
@@ -59,6 +64,7 @@ struct Textures
   struct EGL_Texture * desktop;
   struct EGL_Texture * mouse;
   struct EGL_Texture * mouse_mono;
+  struct EGL_Texture * fps;
 };
 
 struct Inst
@@ -85,6 +91,9 @@ struct Inst
   const uint8_t      * data;
   bool                 update;
 
+  int             width, height;
+  LG_RendererRect destRect;
+
   float translateX, translateY;
   float scaleX    , scaleY;
   GLint             uDesktopPos;
@@ -102,6 +111,13 @@ struct Inst
   uint8_t *         mouseData;
   size_t            mouseDataSize;
   bool              mouseUpdate;
+
+  const LG_Font     * font;
+  LG_FontObj        fontObj;
+
+  bool  fpsReady;
+  float fpsWidth, fpsHeight;
+  GLint uFPSScreen, uFPSSize;
 };
 
 
@@ -134,6 +150,13 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   this->scaleX     = 1.0f;
   this->scaleY     = 1.0f;
 
+  this->font = LG_Fonts[0];
+  if (!this->font->create(&this->fontObj, NULL, 14))
+  {
+    DEBUG_ERROR("Failed to create a font instance");
+    return false;
+  }
+
   return true;
 }
 
@@ -151,16 +174,22 @@ void egl_deinitialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
+  if (this->font && this->fontObj)
+    this->font->destroy(this->fontObj);
+
   egl_model_free  (&this->models  .desktop   );
   egl_model_free  (&this->models  .mouse     );
+  egl_model_free  (&this->models  .fps       );
   egl_shader_free (&this->shaders .rgba      );
   egl_shader_free (&this->shaders .bgra      );
   egl_shader_free (&this->shaders .yuv       );
   egl_shader_free (&this->shaders .mouse     );
   egl_shader_free (&this->shaders .mouse_mono);
+  egl_shader_free (&this->shaders .fps       );
   egl_texture_free(&this->textures.desktop   );
   egl_texture_free(&this->textures.mouse     );
   egl_texture_free(&this->textures.mouse_mono);
+  egl_texture_free(&this->textures.fps       );
 
   LG_LOCK_FREE(this->mouseLock);
   if (this->mouseData)
@@ -172,6 +201,10 @@ void egl_deinitialize(void * opaque)
 void egl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
   struct Inst * this = (struct Inst *)opaque;
+
+  this->width  = width;
+  this->height = height;
+  memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
   glViewport(0, 0, width, height);
 
@@ -260,6 +293,8 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
       default:
         return false;
     }
+
+    this->uDesktopPos = egl_shader_get_uniform_location(this->shader, "position");
   }
 
   this->data   = data;
@@ -371,6 +406,9 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_init(&this->shaders.mouse_mono))
     return false;
 
+  if (!egl_shader_init(&this->shaders.fps))
+    return false;
+
   if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
     return false;
 
@@ -386,8 +424,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_compile(this->shaders.mouse_mono, egl_vertex_shader_mouse, sizeof(egl_vertex_shader_mouse), egl_fragment_shader_mouse_mono, sizeof(egl_fragment_shader_mouse_mono)))
     return false;
 
-  this->uMousePos     = egl_shader_get_uniform_location(this->shaders.mouse     , "mouse");
-  this->uMousePosMono = egl_shader_get_uniform_location(this->shaders.mouse_mono, "mouse");
+  if (!egl_shader_compile(this->shaders.fps, egl_vertex_shader_fps, sizeof(egl_vertex_shader_fps), egl_fragment_shader_fps, sizeof(egl_fragment_shader_fps)))
+    return false;
+
+  this->uMousePos     = egl_shader_get_uniform_location(this->shaders.mouse     , "mouse"   );
+  this->uMousePosMono = egl_shader_get_uniform_location(this->shaders.mouse_mono, "mouse"   );
+  this->uFPSSize      = egl_shader_get_uniform_location(this->shaders.fps       , "size"    );
+  this->uFPSScreen    = egl_shader_get_uniform_location(this->shaders.fps       , "screen"  );
 
   if (!egl_texture_init(&this->textures.desktop))
     return false;
@@ -398,10 +441,16 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_texture_init(&this->textures.mouse_mono))
     return false;
 
+  if (!egl_texture_init(&this->textures.fps))
+    return false;
+
   if (!egl_model_init(&this->models.desktop))
     return false;
 
   if (!egl_model_init(&this->models.mouse))
+    return false;
+
+  if (!egl_model_init(&this->models.fps))
     return false;
 
 
@@ -409,8 +458,12 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
   egl_model_set_texture  (this->models.desktop, this->textures.desktop);
 
-  egl_model_set_verticies(this->models.mouse     , square , sizeof(square) / sizeof(GLfloat));
-  egl_model_set_uvs      (this->models.mouse     , uvs    , sizeof(uvs   ) / sizeof(GLfloat));
+  egl_model_set_verticies(this->models.mouse, square, sizeof(square) / sizeof(GLfloat));
+  egl_model_set_uvs      (this->models.mouse, uvs   , sizeof(uvs   ) / sizeof(GLfloat));
+
+  egl_model_set_verticies(this->models.fps, square, sizeof(square) / sizeof(GLfloat));
+  egl_model_set_uvs      (this->models.fps, uvs   , sizeof(uvs   ) / sizeof(GLfloat));
+  egl_model_set_texture  (this->models.fps, this->textures.fps);
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
@@ -461,6 +514,17 @@ bool egl_render(void * opaque, SDL_Window * window)
     }
   }
 
+  if (this->fpsReady)
+  {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    egl_shader_use(this->shaders.fps);
+    glUniform2f(this->uFPSScreen, this->width   , this->height   );
+    glUniform2f(this->uFPSSize  , this->fpsWidth, this->fpsHeight);
+    egl_model_render(this->models.fps);
+    glDisable(GL_BLEND);
+  }
+
   eglSwapBuffers(this->display, this->surface);
 
   // defer texture uploads until after the flip to avoid stalling
@@ -491,8 +555,42 @@ bool egl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
-void egl_update_fps(void * opaque, const float avgFps, const float renderFps)
+void egl_update_fps(void * opaque, const float avgFPS, const float renderFPS)
 {
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this->params.showFPS)
+    return;
+
+  char str[128];
+  snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
+
+  LG_FontBitmap * bmp = this->font->render(this->fontObj, 0xffffff00, str);
+  if (!bmp)
+  {
+    DEBUG_ERROR("Failed to render FPS text");
+    return;
+  }
+
+  egl_texture_setup(
+    this->textures.fps,
+    EGL_PF_BGRA,
+    bmp->width ,
+    bmp->height,
+    bmp->width * bmp->height * bmp->bpp,
+    false
+  );
+
+  egl_texture_update
+  (
+    this->textures.fps,
+    bmp->pixels
+  );
+
+  this->fpsWidth  = bmp->width;
+  this->fpsHeight = bmp->height;
+  this->fpsReady  = true;
+
+  this->font->release(this->fontObj, bmp);
 }
 
 void update_mouse_shape(struct Inst * this)

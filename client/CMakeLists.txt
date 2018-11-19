@@ -50,6 +50,7 @@ link_libraries(
 set(SOURCES
 	main.c
 	lg-renderer.c
+	lg-fonts.c
 	ll.c
 	utils.c
 	spice/rsa.c
@@ -60,7 +61,7 @@ set(SOURCES
 	renderers/egl.c
 	renderers/egl_shader.c
 	renderers/egl_texture.c
-	renderers/egl_model.c
+	renderers/egl_model.c	
 	fonts/sdl.c
 )
 

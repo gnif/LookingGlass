@@ -20,12 +20,4 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 #include "lg-font.h"
 
-extern const LG_Font LGF_SDL;
-
-const LG_Font * LG_Fonts[] =
-{
-  &LGF_SDL,
-  NULL // end of array sentinal
-};
-
-#define LG_FONT_COUNT ((sizeof(LG_Font) / sizeof(LG_Font *)) - 1)
+extern const LG_Font * LG_Fonts[];

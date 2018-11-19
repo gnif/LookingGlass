@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef void * LG_FontObj;
 typedef struct LG_FontBitmap

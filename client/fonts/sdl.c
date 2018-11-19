@@ -116,7 +116,7 @@ static LG_FontBitmap * lgf_sdl_render(LG_FontObj opaque, unsigned int fg_color, 
   if (!(surface = TTF_RenderText_Blended(this->font, text, color)))
   {
     DEBUG_ERROR("Failed to render text: %s", TTF_GetError());
-    return false;
+    return NULL;
   }
 
   LG_FontBitmap * out = malloc(sizeof(LG_FontBitmap));
@@ -124,7 +124,7 @@ static LG_FontBitmap * lgf_sdl_render(LG_FontObj opaque, unsigned int fg_color, 
   {
     SDL_FreeSurface(surface);
     DEBUG_ERROR("Failed to allocate memory for font bitmap");
-    return false;
+    return NULL;
   }
 
   out->reserved = surface;
