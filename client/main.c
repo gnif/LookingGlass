@@ -68,6 +68,11 @@ struct AppState
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
   int64_t              fpsSleep;
+
+  uint64_t          lastFrameTime;
+  uint64_t          renderTime;
+  uint64_t          frameCount;
+  uint64_t          renderCount;
 };
 
 typedef struct RenderOpts
@@ -197,6 +202,22 @@ int renderThread(void * unused)
 
     if (!state.lgr->render(state.lgrData, state.window))
       break;
+
+    const uint64_t t    = nanotime();
+    state.renderTime   += t - state.lastFrameTime;
+    state.lastFrameTime = t;
+    ++state.renderCount;
+
+    if (state.renderTime > 1e9)
+    {
+      const float avgFPS    = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
+      const float renderFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
+      state.renderTime  = 0;
+      state.frameCount  = 0;
+      state.renderCount = 0;
+
+      state.lgr->update_fps(state.lgrData, avgFPS, renderFPS);
+    }
 
     const uint64_t total = microtime() - start;
     if (total < state.fpsSleep)
@@ -409,6 +430,7 @@ int frameThread(void * unused)
       break;
     }
 
+    ++state.frameCount;
     if (!state.started)
     {
       state.started = true;

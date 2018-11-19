@@ -36,7 +36,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
    (x)->on_mouse_event && \
    (x)->on_alert       && \
    (x)->render_startup && \
-   (x)->render)
+   (x)->render         && \
+   (x)->update_fps)
 
 #define LGR_OPTION_COUNT(x) (sizeof(x) / sizeof(LG_RendererOpt))
 
@@ -116,6 +117,7 @@ typedef bool         (* LG_RendererOnMouseEvent)(void * opaque, const bool visib
 typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const uint8_t * data);
 typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag);
 typedef bool         (* LG_RendererRender      )(void * opaque, SDL_Window *window);
+typedef void         (* LG_RendererUpdateFPS   )(void * opaque, const float avgFPS, const float renderFPS);
 
 typedef struct LG_Renderer
 {
@@ -132,6 +134,7 @@ typedef struct LG_Renderer
   LG_RendererOnAlert      on_alert;
   LG_RendererRender       render_startup;
   LG_RendererRender       render;
+  LG_RendererUpdateFPS    update_fps;
 }
 LG_Renderer;
 

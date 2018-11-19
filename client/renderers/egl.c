@@ -491,6 +491,10 @@ bool egl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
+void egl_update_fps(void * opaque, const float avgFps, const float renderFps)
+{
+}
+
 void update_mouse_shape(struct Inst * this)
 {
   LG_LOCK(this->mouseLock);
@@ -591,5 +595,6 @@ struct LG_Renderer LGR_EGL =
   .on_frame_event = egl_on_frame_event,
   .on_alert       = egl_on_alert,
   .render_startup = egl_render_startup,
-  .render         = egl_render
+  .render         = egl_render,
+  .update_fps     = egl_update_fps
 };

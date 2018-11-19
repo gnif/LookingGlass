@@ -125,10 +125,6 @@ struct Inst
   bool              waitDone;
 
   bool              fpsTexture;
-  uint64_t          lastFrameTime;
-  uint64_t          renderTime;
-  uint64_t          frameCount;
-  uint64_t          renderCount;
   SDL_Rect          fpsRect;
 
   LG_Lock           mouseLock;
@@ -141,7 +137,6 @@ struct Inst
 
   bool              mouseUpdate;
   bool              newShape;
-  uint64_t          lastMouseDraw;
   LG_RendererCursor mouseType;
   bool              mouseVisible;
   SDL_Rect          mousePos;
@@ -379,7 +374,6 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
     this->waitFadeTime = microtime() + FADE_TIME;
   }
 
-  ++this->frameCount;
   return true;
 }
 
@@ -530,65 +524,6 @@ bool opengl_render(void * opaque, SDL_Window * window)
     if (!draw_frame(this))
       return false;
 
-  if (this->params.showFPS && this->renderTime > 1e9)
-  {
-    char str[128];
-    const float avgFPS    = 1000.0f / (((float)this->renderTime / this->frameCount ) / 1e6f);
-    const float renderFPS = 1000.0f / (((float)this->renderTime / this->renderCount) / 1e6f);
-    snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
-
-    LG_FontBitmap *textSurface = NULL;
-    if (!(textSurface = this->font->render(this->fontObj, LG_FONT_BITMAP, 0xffffff00, str)))
-    {
-      DEBUG_ERROR("Failed to render text");
-      LG_UNLOCK(this->formatLock);
-      return false;
-    }
-
-    bitmap_to_texture(textSurface, this->textures[FPS_TEXTURE]);
-
-    this->fpsRect.x = 5;
-    this->fpsRect.y = 5;
-    this->fpsRect.w = textSurface->width;
-    this->fpsRect.h = textSurface->height;
-
-    this->font->release(this->fontObj, textSurface);
-
-    this->renderTime  = 0;
-    this->frameCount  = 0;
-    this->renderCount = 0;
-    this->fpsTexture  = true;
-
-    glNewList(this->fpsList, GL_COMPILE);
-      glPushMatrix();
-      glLoadIdentity();
-
-      glEnable(GL_BLEND);
-      glDisable(GL_TEXTURE_2D);
-      glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-        glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-        glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-      glEnd();
-      glEnable(GL_TEXTURE_2D);
-
-      glBindTexture(GL_TEXTURE_2D, this->textures[FPS_TEXTURE]);
-      glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-        glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-        glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-        glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-      glEnd();
-      glBindTexture(GL_TEXTURE_2D, 0);
-      glDisable(GL_BLEND);
-
-      glPopMatrix();
-    glEndList();
-  }
-
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
@@ -683,14 +618,62 @@ bool opengl_render(void * opaque, SDL_Window * window)
   else
     SDL_GL_SwapWindow(window);
 
-  const uint64_t t    = nanotime();
-  this->renderTime   += t - this->lastFrameTime;
-  this->lastFrameTime = t;
-  ++this->renderCount;
-
-  this->mouseUpdate   = false;
-  this->lastMouseDraw = t;
+  this->mouseUpdate = false;
   return true;
+}
+
+void opengl_update_fps(void * opaque, const float avgFPS, const float renderFPS)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  if (!this->params.showFPS)
+    return;
+
+  char str[128];
+  snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
+
+  LG_FontBitmap *textSurface = NULL;
+  if (!(textSurface = this->font->render(this->fontObj, LG_FONT_BITMAP, 0xffffff00, str)))
+    DEBUG_ERROR("Failed to render text");
+
+  bitmap_to_texture(textSurface, this->textures[FPS_TEXTURE]);
+
+  this->fpsRect.x = 5;
+  this->fpsRect.y = 5;
+  this->fpsRect.w = textSurface->width;
+  this->fpsRect.h = textSurface->height;
+
+  this->font->release(this->fontObj, textSurface);
+
+  this->fpsTexture  = true;
+
+  glNewList(this->fpsList, GL_COMPILE);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glEnable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+    glBegin(GL_TRIANGLE_STRIP);
+      glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+      glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+      glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+      glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+    glEnd();
+    glEnable(GL_TEXTURE_2D);
+
+    glBindTexture(GL_TEXTURE_2D, this->textures[FPS_TEXTURE]);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_TRIANGLE_STRIP);
+      glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
+      glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
+      glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
+      glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
+    glEnd();
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glDisable(GL_BLEND);
+
+    glPopMatrix();
+  glEndList();
 }
 
 void draw_torus(float x, float y, float inner, float outer, unsigned int pts)
@@ -866,7 +849,8 @@ const LG_Renderer LGR_OpenGL =
   .on_frame_event = opengl_on_frame_event,
   .on_alert       = opengl_on_alert,
   .render_startup = opengl_render_startup,
-  .render         = opengl_render
+  .render         = opengl_render,
+  .update_fps     = opengl_update_fps
 };
 
 static bool _check_gl_error(unsigned int line, const char * name)
