@@ -61,6 +61,7 @@ set(SOURCES
 	renderers/egl_shader.c
 	renderers/egl_texture.c
 	renderers/egl_model.c
+	fonts/sdl.c
 )
 
 add_executable(looking-glass-client ${SOURCES})

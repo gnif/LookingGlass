@@ -34,6 +34,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "utils.h"
 #include "lg-decoders.h"
+#include "lg-fonts.h"
 #include "ll.h"
 
 #define BUFFER_COUNT       2
@@ -65,13 +66,13 @@ static struct Options defaultOptions =
 
 struct Alert
 {
-  bool         ready;
-  bool         useCloseFlag;
+  bool          ready;
+  bool          useCloseFlag;
 
-  SDL_Surface *text;
-  float        r, g, b, a;
-  uint64_t     timeout;
-  bool         closeFlag;
+  LG_FontBitmap *text;
+  float         r, g, b, a;
+  uint64_t      timeout;
+  bool          closeFlag;
 };
 
 struct Inst
@@ -87,6 +88,9 @@ struct Inst
 
   SDL_Point         window;
   bool              frameUpdate;
+
+  const LG_Font   * font;
+  LG_FontObj        fontObj, alertFontObj;
 
   LG_Lock           formatLock;
   LG_RendererFormat format;
@@ -177,7 +181,21 @@ bool opengl_create(void ** opaque, const LG_RendererParams params)
   LG_LOCK_INIT(this->syncLock  );
   LG_LOCK_INIT(this->mouseLock );
 
+  this->font = LG_Fonts[0];
+  if (!this->font->create(&this->fontObj, NULL, 14))
+  {
+    DEBUG_ERROR("Unable to create the font renderer");
+    return false;
+  }
+
+  if (!this->font->create(&this->alertFontObj, NULL, 18))
+  {
+    DEBUG_ERROR("Unable to create the font renderer");
+    return false;
+  }
+
   this->alerts = ll_new();
+
   return true;
 }
 
@@ -229,10 +247,13 @@ void opengl_deinitialize(void * opaque)
   while(ll_shift(this->alerts, (void **)&alert))
   {
     if (alert->text)
-      SDL_FreeSurface(alert->text);
+      this->font->release(this->alertFontObj, alert->text);
     free(alert);
   }
   ll_free(this->alerts);
+
+  if (this->font && this->fontObj)
+    this->font->destroy(this->fontObj);
 
   free(this);
 }
@@ -367,7 +388,6 @@ void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * m
   struct Inst * this = (struct Inst *)opaque;
   struct Alert * a = malloc(sizeof(struct Alert));
   memset(a, 0, sizeof(struct Alert));
-  const SDL_Color color = {0xff, 0xff, 0xff};
 
   switch(alert)
   {
@@ -400,7 +420,7 @@ void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * m
       break;
   }
 
-  if (!(a->text = TTF_RenderText_Blended(this->params.alertFont, message, color)))
+  if (!(a->text = this->font->render(this->alertFontObj, LG_FONT_BITMAP, 0xffffff00, message)))
   {
     DEBUG_ERROR("Failed to render alert text: %s", TTF_GetError());
     free(a);
@@ -416,21 +436,21 @@ void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * m
   ll_push(this->alerts, a);
 }
 
-void surface_to_texture(SDL_Surface * surface, GLuint texture)
+void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
 {
-  glBindTexture(GL_TEXTURE_2D       , texture   );
-  glPixelStorei(GL_UNPACK_ALIGNMENT , 4         );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, surface->w);
+  glBindTexture(GL_TEXTURE_2D       , texture      );
+  glPixelStorei(GL_UNPACK_ALIGNMENT , 4            );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, bitmap->width);
   glTexImage2D(
     GL_TEXTURE_2D,
     0,
-    surface->format->BytesPerPixel,
-    surface->w,
-    surface->h,
+    bitmap->bpp,
+    bitmap->width,
+    bitmap->height,
     0,
     GL_BGRA,
     GL_UNSIGNED_BYTE,
-    surface->pixels
+    bitmap->pixels
   );
 
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -516,23 +536,23 @@ bool opengl_render(void * opaque, SDL_Window * window)
     const float avgFPS    = 1000.0f / (((float)this->renderTime / this->frameCount ) / 1e6f);
     const float renderFPS = 1000.0f / (((float)this->renderTime / this->renderCount) / 1e6f);
     snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
-    const SDL_Color color = {0xff, 0xff, 0xff};
-    SDL_Surface *textSurface = NULL;
-    if (!(textSurface = TTF_RenderText_Blended(this->params.font, str, color)))
+
+    LG_FontBitmap *textSurface = NULL;
+    if (!(textSurface = this->font->render(this->fontObj, LG_FONT_BITMAP, 0xffffff00, str)))
     {
-      DEBUG_ERROR("Failed to render text: %s", TTF_GetError());
+      DEBUG_ERROR("Failed to render text");
       LG_UNLOCK(this->formatLock);
       return false;
     }
 
-    surface_to_texture(textSurface, this->textures[FPS_TEXTURE]);
+    bitmap_to_texture(textSurface, this->textures[FPS_TEXTURE]);
 
     this->fpsRect.x = 5;
     this->fpsRect.y = 5;
-    this->fpsRect.w = textSurface->w;
-    this->fpsRect.h = textSurface->h;
+    this->fpsRect.w = textSurface->width;
+    this->fpsRect.h = textSurface->height;
 
-    SDL_FreeSurface(textSurface);
+    this->font->release(this->fontObj, textSurface);
 
     this->renderTime  = 0;
     this->frameCount  = 0;
@@ -593,12 +613,12 @@ bool opengl_render(void * opaque, SDL_Window * window)
   {
     if (!alert->ready)
     {
-      surface_to_texture(alert->text, this->textures[ALERT_TEXTURE]);
+      bitmap_to_texture(alert->text, this->textures[ALERT_TEXTURE]);
 
       glNewList(this->alertList, GL_COMPILE);
         const int p = 4;
-        const int w = alert->text->w + p * 2;
-        const int h = alert->text->h + p * 2;
+        const int w = alert->text->width  + p * 2;
+        const int h = alert->text->height + p * 2;
         glTranslatef(-(w / 2), -(h / 2), 0.0f);
         glEnable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
@@ -614,10 +634,10 @@ bool opengl_render(void * opaque, SDL_Window * window)
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
         glTranslatef(p, p, 0.0f);
         glBegin(GL_TRIANGLE_STRIP);
-          glTexCoord2f(0.0f, 0.0f); glVertex2i(0             , 0             );
-          glTexCoord2f(1.0f, 0.0f); glVertex2i(alert->text->w, 0             );
-          glTexCoord2f(0.0f, 1.0f); glVertex2i(0             , alert->text->h);
-          glTexCoord2f(1.0f, 1.0f); glVertex2i(alert->text->w, alert->text->h);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(alert->text->width, 0                  );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , alert->text->height);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(alert->text->width, alert->text->height);
         glEnd();
         glBindTexture(GL_TEXTURE_2D, 0);
         glDisable(GL_BLEND);
@@ -627,7 +647,7 @@ bool opengl_render(void * opaque, SDL_Window * window)
         alert->timeout = microtime() + 2*1000000;
       alert->ready   = true;
 
-      SDL_FreeSurface(alert->text);
+      this->font->release(this->fontObj, alert->text);
       alert->text  = NULL;
       alert->ready = true;
     }

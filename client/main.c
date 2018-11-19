@@ -21,7 +21,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <signal.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
-#include <SDL2/SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pwd.h>
@@ -35,7 +34,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <assert.h>
 #include <libconfig.h>
-#include <fontconfig/fontconfig.h>
 
 #include "debug.h"
 #include "utils.h"
@@ -51,8 +49,6 @@ struct AppState
   bool                 started;
   bool                 keyDown[SDL_NUM_SCANCODES];
 
-  TTF_Font           * font;
-  TTF_Font           * alertFont;
   bool                 haveSrcSize;
   int                  windowW, windowH;
   SDL_Point            srcSize;
@@ -769,53 +765,8 @@ int run()
   // SIGINT and the user sending a close event, such as ALT+F4
   signal(SIGINT, intHandler);
 
-  if (TTF_Init() < 0)
-  {
-    DEBUG_ERROR("TTL_Init Failed");
-    return -1;
-  }
-
-  FcConfig  * config = FcInitLoadConfigAndFonts();
-  if (!config)
-  {
-    DEBUG_ERROR("FcInitLoadConfigAndFonts Failed");
-    return -1;
-  }
-
-  FcPattern * pat = FcNameParse((const FcChar8*)"FreeMono");
-  FcConfigSubstitute (config, pat, FcMatchPattern);
-  FcDefaultSubstitute(pat);
-  FcResult result;
-  FcChar8 * file = NULL;
-  FcPattern * font = FcFontMatch(config, pat, &result);
-
-  if (font && (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch))
-  {
-    state.font = TTF_OpenFont((char *)file, 14);
-    if (!state.font)
-    {
-      DEBUG_ERROR("TTL_OpenFont Failed");
-      return -1;
-    }
-
-    state.alertFont = TTF_OpenFont((char *)file, 18);
-    if (!state.alertFont)
-    {
-      DEBUG_ERROR("TTL_OpenFont Failed");
-      return -1;
-    }
-  }
-  else
-  {
-    DEBUG_ERROR("Failed to locate a font for text display");
-    return -1;
-  }
-  FcPatternDestroy(pat);
-
   LG_RendererParams lgrParams;
-  lgrParams.font      = state.font;
-  lgrParams.alertFont = state.alertFont;
-  lgrParams.showFPS   = params.showFPS;
+  lgrParams.showFPS = params.showFPS;
   Uint32 sdlFlags;
 
   if (params.forceRenderer)
@@ -1089,7 +1040,6 @@ int run()
     close(state.shmFD);
   }
 
-  TTF_Quit();
   SDL_Quit();
   return 0;
 }
