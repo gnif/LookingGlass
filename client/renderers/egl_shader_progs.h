@@ -188,20 +188,16 @@ uniform sampler2D sampler1;\
 void main()\
 {\
   highp vec4 tmp = texture(sampler1, uv);\
-  if (tmp.a == 0.0) \
-  { \
-    color.r = 0.0;\
-    color.g = 0.0;\
-    color.b = 1.0;\
-    color.a = 0.5;\
-  } \
-  else \
-  { \
-    color.r = tmp.b;\
-    color.g = tmp.g;\
-    color.b = tmp.r;\
-    color.a = tmp.a;\
-  } \
+  color.r = tmp.b; \
+  color.g = tmp.g; \
+  color.b = tmp.r; \
+  color.a = tmp.a; \
+  if (color.a == 0.0) \
+  {\
+    color.a = 0.5; \
+    color.r = 0.0; \
+    color.g = 0.0; \
+  }\
 }\
 ";
 
