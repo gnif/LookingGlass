@@ -85,15 +85,17 @@ namespace Capture
     CaptureOptions * m_options;
 
     bool           m_initialized;
+    bool           m_started;
     unsigned int   m_width;
     unsigned int   m_height;
+    DXGI_FORMAT    m_pixelFormat;
     enum FrameType m_frameType;
 
     IDXGIFactory1Ptr                m_dxgiFactory;
     ID3D11DevicePtr                 m_device;
     D3D_FEATURE_LEVEL               m_featureLevel;
     ID3D11DeviceContextPtr          m_deviceContext;
-    IDXGIOutput1Ptr                 m_output;
+    IDXGIOutput5Ptr                 m_output;
     IDXGIOutputDuplicationPtr       m_dup;
     bool                            m_releaseFrame;
     ID3D11Texture2DPtr              m_texture[3];

@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 #include <comdef.h>
 #include <dxgi1_2.h>
+#include <dxgi1_5.h>
 #include <d3d11.h>
 #include <mftransform.h>
 
@@ -28,6 +29,7 @@ _COM_SMARTPTR_TYPEDEF(ID3D11Device            , __uuidof(ID3D11Device           
 _COM_SMARTPTR_TYPEDEF(ID3D11DeviceContext     , __uuidof(ID3D11DeviceContext     ));
 _COM_SMARTPTR_TYPEDEF(IDXGIDevice             , __uuidof(IDXGIDevice             ));
 _COM_SMARTPTR_TYPEDEF(IDXGIOutput1            , __uuidof(IDXGIOutput1            ));
+_COM_SMARTPTR_TYPEDEF(IDXGIOutput5            , __uuidof(IDXGIOutput5            ));
 _COM_SMARTPTR_TYPEDEF(IDXGIOutput             , __uuidof(IDXGIOutput             ));
 _COM_SMARTPTR_TYPEDEF(IDXGIAdapter1           , __uuidof(IDXGIAdapter1           ));
 _COM_SMARTPTR_TYPEDEF(IDXGIOutputDuplication  , __uuidof(IDXGIOutputDuplication  ));

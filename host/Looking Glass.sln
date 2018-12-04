@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "looking-glass-host", "looki
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sync-test", "sync-test\sync-test.vcxproj", "{6CC4DA30-6FBD-4ACA-9BA6-2DE731032800}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{BE5778A4-4447-410B-B8E8-D86087F62CFD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug - NvFBC|x64 = Debug - NvFBC|x64

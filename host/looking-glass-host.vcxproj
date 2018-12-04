@@ -38,7 +38,7 @@
     <ProjectGuid>{D439DE3E-32FB-4599-8B5D-C92674D400D4}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>kvmivshmemhost</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
     <ProjectName>looking-glass-host</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -124,34 +124,42 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug - NvFBC|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release - NvFBC|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);;C:\Program Files %28x86%29\NVIDIA Corporation\NVIDIA Capture SDK\inc</IncludePath>
+    <ExecutablePath>C:\Program Files (x86)\Windows Kits\10\bin\$(TargetPlatformVersion)\$(PreferredToolArchitecture);$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>

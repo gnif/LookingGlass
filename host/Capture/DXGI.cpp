@@ -23,6 +23,138 @@ using namespace Capture;
 #include "common/debug.h"
 #include "common/memcpySSE.h"
 
+static const char * DXGI_FORMAT_STR[] = {
+  "DXGI_FORMAT_UNKNOWN",
+  "DXGI_FORMAT_R32G32B32A32_TYPELESS",
+  "DXGI_FORMAT_R32G32B32A32_FLOAT",
+  "DXGI_FORMAT_R32G32B32A32_UINT",
+  "DXGI_FORMAT_R32G32B32A32_SINT",
+  "DXGI_FORMAT_R32G32B32_TYPELESS",
+  "DXGI_FORMAT_R32G32B32_FLOAT",
+  "DXGI_FORMAT_R32G32B32_UINT",
+  "DXGI_FORMAT_R32G32B32_SINT",
+  "DXGI_FORMAT_R16G16B16A16_TYPELESS",
+  "DXGI_FORMAT_R16G16B16A16_FLOAT",
+  "DXGI_FORMAT_R16G16B16A16_UNORM",
+  "DXGI_FORMAT_R16G16B16A16_UINT",
+  "DXGI_FORMAT_R16G16B16A16_SNORM",
+  "DXGI_FORMAT_R16G16B16A16_SINT",
+  "DXGI_FORMAT_R32G32_TYPELESS",
+  "DXGI_FORMAT_R32G32_FLOAT",
+  "DXGI_FORMAT_R32G32_UINT",
+  "DXGI_FORMAT_R32G32_SINT",
+  "DXGI_FORMAT_R32G8X24_TYPELESS",
+  "DXGI_FORMAT_D32_FLOAT_S8X24_UINT",
+  "DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS",
+  "DXGI_FORMAT_X32_TYPELESS_G8X24_UINT",
+  "DXGI_FORMAT_R10G10B10A2_TYPELESS",
+  "DXGI_FORMAT_R10G10B10A2_UNORM",
+  "DXGI_FORMAT_R10G10B10A2_UINT",
+  "DXGI_FORMAT_R11G11B10_FLOAT",
+  "DXGI_FORMAT_R8G8B8A8_TYPELESS",
+  "DXGI_FORMAT_R8G8B8A8_UNORM",
+  "DXGI_FORMAT_R8G8B8A8_UNORM_SRGB",
+  "DXGI_FORMAT_R8G8B8A8_UINT",
+  "DXGI_FORMAT_R8G8B8A8_SNORM",
+  "DXGI_FORMAT_R8G8B8A8_SINT",
+  "DXGI_FORMAT_R16G16_TYPELESS",
+  "DXGI_FORMAT_R16G16_FLOAT",
+  "DXGI_FORMAT_R16G16_UNORM",
+  "DXGI_FORMAT_R16G16_UINT",
+  "DXGI_FORMAT_R16G16_SNORM",
+  "DXGI_FORMAT_R16G16_SINT",
+  "DXGI_FORMAT_R32_TYPELESS",
+  "DXGI_FORMAT_D32_FLOAT",
+  "DXGI_FORMAT_R32_FLOAT",
+  "DXGI_FORMAT_R32_UINT",
+  "DXGI_FORMAT_R32_SINT",
+  "DXGI_FORMAT_R24G8_TYPELESS",
+  "DXGI_FORMAT_D24_UNORM_S8_UINT",
+  "DXGI_FORMAT_R24_UNORM_X8_TYPELESS",
+  "DXGI_FORMAT_X24_TYPELESS_G8_UINT",
+  "DXGI_FORMAT_R8G8_TYPELESS",
+  "DXGI_FORMAT_R8G8_UNORM",
+  "DXGI_FORMAT_R8G8_UINT",
+  "DXGI_FORMAT_R8G8_SNORM",
+  "DXGI_FORMAT_R8G8_SINT",
+  "DXGI_FORMAT_R16_TYPELESS",
+  "DXGI_FORMAT_R16_FLOAT",
+  "DXGI_FORMAT_D16_UNORM",
+  "DXGI_FORMAT_R16_UNORM",
+  "DXGI_FORMAT_R16_UINT",
+  "DXGI_FORMAT_R16_SNORM",
+  "DXGI_FORMAT_R16_SINT",
+  "DXGI_FORMAT_R8_TYPELESS",
+  "DXGI_FORMAT_R8_UNORM",
+  "DXGI_FORMAT_R8_UINT",
+  "DXGI_FORMAT_R8_SNORM",
+  "DXGI_FORMAT_R8_SINT",
+  "DXGI_FORMAT_A8_UNORM",
+  "DXGI_FORMAT_R1_UNORM",
+  "DXGI_FORMAT_R9G9B9E5_SHAREDEXP",
+  "DXGI_FORMAT_R8G8_B8G8_UNORM",
+  "DXGI_FORMAT_G8R8_G8B8_UNORM",
+  "DXGI_FORMAT_BC1_TYPELESS",
+  "DXGI_FORMAT_BC1_UNORM",
+  "DXGI_FORMAT_BC1_UNORM_SRGB",
+  "DXGI_FORMAT_BC2_TYPELESS",
+  "DXGI_FORMAT_BC2_UNORM",
+  "DXGI_FORMAT_BC2_UNORM_SRGB",
+  "DXGI_FORMAT_BC3_TYPELESS",
+  "DXGI_FORMAT_BC3_UNORM",
+  "DXGI_FORMAT_BC3_UNORM_SRGB",
+  "DXGI_FORMAT_BC4_TYPELESS",
+  "DXGI_FORMAT_BC4_UNORM",
+  "DXGI_FORMAT_BC4_SNORM",
+  "DXGI_FORMAT_BC5_TYPELESS",
+  "DXGI_FORMAT_BC5_UNORM",
+  "DXGI_FORMAT_BC5_SNORM",
+  "DXGI_FORMAT_B5G6R5_UNORM",
+  "DXGI_FORMAT_B5G5R5A1_UNORM",
+  "DXGI_FORMAT_B8G8R8A8_UNORM",
+  "DXGI_FORMAT_B8G8R8X8_UNORM",
+  "DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM",
+  "DXGI_FORMAT_B8G8R8A8_TYPELESS",
+  "DXGI_FORMAT_B8G8R8A8_UNORM_SRGB",
+  "DXGI_FORMAT_B8G8R8X8_TYPELESS",
+  "DXGI_FORMAT_B8G8R8X8_UNORM_SRGB",
+  "DXGI_FORMAT_BC6H_TYPELESS",
+  "DXGI_FORMAT_BC6H_UF16",
+  "DXGI_FORMAT_BC6H_SF16",
+  "DXGI_FORMAT_BC7_TYPELESS",
+  "DXGI_FORMAT_BC7_UNORM",
+  "DXGI_FORMAT_BC7_UNORM_SRGB",
+  "DXGI_FORMAT_AYUV",
+  "DXGI_FORMAT_Y410",
+  "DXGI_FORMAT_Y416",
+  "DXGI_FORMAT_NV12",
+  "DXGI_FORMAT_P010",
+  "DXGI_FORMAT_P016",
+  "DXGI_FORMAT_420_OPAQUE",
+  "DXGI_FORMAT_YUY2",
+  "DXGI_FORMAT_Y210",
+  "DXGI_FORMAT_Y216",
+  "DXGI_FORMAT_NV11",
+  "DXGI_FORMAT_AI44",
+  "DXGI_FORMAT_IA44",
+  "DXGI_FORMAT_P8",
+  "DXGI_FORMAT_A8P8",
+  "DXGI_FORMAT_B4G4R4A4_UNORM",
+
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+
+  "DXGI_FORMAT_P208",
+  "DXGI_FORMAT_V208",
+  "DXGI_FORMAT_V408"
+};
+
+const char * GetDXGIFormatStr(DXGI_FORMAT format)
+{
+  if (format > _countof(DXGI_FORMAT_STR))
+    return DXGI_FORMAT_STR[0];
+  return DXGI_FORMAT_STR[format];
+}
+
 DXGI::DXGI() :
   m_options(NULL),
   m_initialized(false),
@@ -126,6 +258,8 @@ bool DXGI::Initialize(CaptureOptions * options)
   }
 
   static const D3D_FEATURE_LEVEL featureLevels[] = {
+    D3D_FEATURE_LEVEL_12_1,
+    D3D_FEATURE_LEVEL_12_0,
     D3D_FEATURE_LEVEL_11_1,
     D3D_FEATURE_LEVEL_11_0,
     D3D_FEATURE_LEVEL_10_1,
@@ -162,30 +296,6 @@ bool DXGI::Initialize(CaptureOptions * options)
   }
 
   DEBUG_INFO("Feature Level    : 0x%x", m_featureLevel);
- 
-  m_frameType = FRAME_TYPE_ARGB;
-  for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
-  {
-    if (_stricmp(*it, "h264"  ) == 0) m_frameType = FRAME_TYPE_H264;
-    if (_stricmp(*it, "yuv420") == 0) m_frameType = FRAME_TYPE_YUV420;
-  }
-
-  if (m_frameType == FRAME_TYPE_H264)
-    DEBUG_WARN("Enabling experimental H.264 compression");
-
-  bool ok = false;
-  switch (m_frameType)
-  {
-    case FRAME_TYPE_ARGB  : ok = InitRawCapture   (); break;
-    case FRAME_TYPE_YUV420: ok = InitYUV420Capture(); break;
-    case FRAME_TYPE_H264  : ok = InitH264Capture  (); break;
-  }
-
-  if (!ok)
-  {
-    DeInitialize();
-    return false;
-  }
 
   IDXGIDevicePtr dxgi;
   status = m_device->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi);
@@ -198,11 +308,16 @@ bool DXGI::Initialize(CaptureOptions * options)
 
   dxgi->SetGPUThreadPriority(7);
 
-  // we try this twice just incase we still get an error
-  // on re-initialization
-  for(int i = 0; i < 2; ++i)
+  // we try this twice in case we still get an error on re-initialization
+  for (int i = 0; i < 2; ++i)
   {
-    status = m_output->DuplicateOutput(m_device, &m_dup);
+    const DXGI_FORMAT supportedFormats[] = {
+      DXGI_FORMAT_B8G8R8A8_UNORM,
+      DXGI_FORMAT_R8G8B8A8_UNORM,
+      DXGI_FORMAT_R10G10B10A2_UNORM
+    };
+
+    status = m_output->DuplicateOutput1(m_device, 0, _countof(supportedFormats), supportedFormats, &m_dup);
     if (SUCCEEDED(status))
       break;
     Sleep(200);
@@ -210,11 +325,16 @@ bool DXGI::Initialize(CaptureOptions * options)
 
   if (FAILED(status))
   {
-    DEBUG_WINERROR("DuplicateOutput Failed", status);
+    DEBUG_WINERROR("DuplicateOutput1 Failed", status);
     DeInitialize();
     return false;
   }
 
+  DXGI_OUTDUPL_DESC dupDesc;
+  m_dup->GetDesc(&dupDesc);
+  DEBUG_INFO("Source Format    : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
+
+  m_started     = false;
   m_initialized = true;
   return true;
 }
@@ -230,7 +350,7 @@ bool DXGI::InitRawCapture()
   texDesc.SampleDesc.Count   = 1;
   texDesc.SampleDesc.Quality = 0;
   texDesc.Usage              = D3D11_USAGE_STAGING;
-  texDesc.Format             = DXGI_FORMAT_B8G8R8A8_UNORM;
+  texDesc.Format             = m_pixelFormat;
   texDesc.BindFlags          = 0;
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
@@ -376,7 +496,6 @@ unsigned int Capture::DXGI::Capture()
       return ret;
 
     status = m_dup->AcquireNextFrame(1000, &frameInfo, &res);
-
     switch (status)
     {
       case S_OK:
@@ -515,6 +634,60 @@ unsigned int Capture::DXGI::Capture()
     return GRAB_STATUS_ERROR;
   }
 
+  if (!m_started)
+  {
+    m_started = true;
+
+    // determine the native pixel format
+    D3D11_TEXTURE2D_DESC dupDesc;
+    ZeroMemory(&dupDesc, sizeof(dupDesc));
+    m_ftexture->GetDesc(&dupDesc);
+    m_pixelFormat = dupDesc.Format;
+
+    switch(m_pixelFormat)
+    {
+      case DXGI_FORMAT_R8G8B8A8_UNORM:
+        m_frameType = FRAME_TYPE_RGBA;
+        break;
+
+      case DXGI_FORMAT_B8G8R8A8_UNORM:
+        m_frameType = FRAME_TYPE_BGRA;
+        break;
+
+      case DXGI_FORMAT_R10G10B10A2_UNORM:
+        m_frameType = FRAME_TYPE_RGBA10;
+        break;
+
+      default:
+        DEBUG_WARN("Unsupported pixel format %s, enabling conversions", GetDXGIFormatStr(m_pixelFormat));
+        return GRAB_STATUS_ERROR;
+    }
+
+    DEBUG_INFO("Pixel Format     : %s", GetDXGIFormatStr(m_pixelFormat));
+
+    for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
+    {
+      if (_stricmp(*it, "h264"  ) == 0) m_frameType = FRAME_TYPE_H264;
+      if (_stricmp(*it, "yuv420") == 0) m_frameType = FRAME_TYPE_YUV420;
+    }
+
+    if (m_frameType == FRAME_TYPE_H264)
+      DEBUG_WARN("Enabling experimental H.264 compression");
+
+    bool ok = false;
+    switch (m_frameType)
+    {
+      case FRAME_TYPE_BGRA  :
+      case FRAME_TYPE_RGBA  :
+      case FRAME_TYPE_RGBA10: ok = InitRawCapture   (); break;
+      case FRAME_TYPE_YUV420: ok = InitYUV420Capture(); break;
+      case FRAME_TYPE_H264  : ok = InitH264Capture  (); break;
+    }
+
+    if (!ok)
+      return GRAB_STATUS_ERROR;
+  }
+
   ret |= GRAB_STATUS_OK;
   return ret;
 }
@@ -526,7 +699,7 @@ GrabStatus Capture::DXGI::ReleaseFrame()
 
   m_releaseFrame = false;
   m_ftexture     = NULL;
-
+  
   switch (m_dup->ReleaseFrame())
   {
   case S_OK:
@@ -556,9 +729,11 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 
   m_deviceContext->CopyResource(m_texture[0], m_ftexture);
 
+  /*
   result = ReleaseFrame();
   if (result != GRAB_STATUS_OK)
     return result;
+  */
 
   HRESULT status;
   status = m_deviceContext->Map(m_texture[0], 0, D3D11_MAP_READ, 0, &mapping);
