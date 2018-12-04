@@ -878,7 +878,8 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
   switch(this->format.type)
   {
-    case FRAME_TYPE_ARGB:
+    case FRAME_TYPE_BGRA:
+    case FRAME_TYPE_RGBA:
       this->decoder = &LGD_NULL;
       break;
 

@@ -21,12 +21,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 #define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 7
+#define KVMFR_HEADER_VERSION 8
 
 typedef enum FrameType
 {
   FRAME_TYPE_INVALID   ,
-  FRAME_TYPE_ARGB      , // ABGR interleaved: A,R,G,B 32bpp
+  FRAME_TYPE_BGRA      , // BGRA interleaved: B,G,R,A 32bpp
+  FRAME_TYPE_RGBA      , // RGBA interleaved: R,G,B,A 32bpp
+  FRAME_TYPE_RGBA10    , // RGBA interleaved: R,G,B,A 10,10,10,2 bpp
   FRAME_TYPE_YUV420    , // YUV420
   FRAME_TYPE_H264      , // H264 compressed
   FRAME_TYPE_MAX       , // sentinel value

@@ -38,7 +38,9 @@ struct EGL_Texture
   GLuint   samplers[3];
   size_t   planes[3][2];
   GLintptr offsets[3];
+  GLenum   intFormat;
   GLenum   format;
+  GLenum   dataType;
 
   bool   hasPBO;
   GLuint pbo[2];
@@ -91,13 +93,34 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
   switch(pixFmt)
   {
-    case EGL_PF_RGBA:
     case EGL_PF_BGRA:
       textureCount          = 1;
       texture->format       = GL_BGRA;
       texture->planes[0][0] = width;
       texture->planes[0][1] = height;
       texture->offsets[0]   = 0;
+      texture->intFormat    = GL_BGRA;
+      texture->dataType     = GL_UNSIGNED_BYTE;
+      break;
+
+    case EGL_PF_RGBA:
+      textureCount          = 1;
+      texture->format       = GL_RGBA;
+      texture->planes[0][0] = width;
+      texture->planes[0][1] = height;
+      texture->offsets[0]   = 0;
+      texture->intFormat    = GL_BGRA;
+      texture->dataType     = GL_UNSIGNED_BYTE;
+      break;
+
+    case EGL_PF_RGBA10:
+      textureCount          = 1;
+      texture->format       = GL_RGBA;
+      texture->planes[0][0] = width;
+      texture->planes[0][1] = height;
+      texture->offsets[0]   = 0;
+      texture->intFormat    = GL_RGB10_A2;
+      texture->dataType     = GL_UNSIGNED_INT_2_10_10_10_REV;
       break;
 
     case EGL_PF_YUV420:
@@ -112,6 +135,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->offsets[0]   = 0;
       texture->offsets[1]   = width * height;
       texture->offsets[2]   = texture->offsets[1] + (texture->offsets[1] / 4);
+      texture->dataType     = GL_UNSIGNED_BYTE;
       break;
 
     default:
@@ -140,8 +164,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     glSamplerParameteri(texture->samplers[i], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
 
     glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-      glTexImage2D(GL_TEXTURE_2D, 0, texture->format, texture->planes[i][0], texture->planes[i][1],
-          0, texture->format, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->planes[i][0], texture->planes[i][1],
+        0, texture->format, texture->dataType, NULL);
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -194,7 +218,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
     {
       glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-          texture->format, GL_UNSIGNED_BYTE, buffer + texture->offsets[i]);
+          texture->format, texture->dataType, buffer + texture->offsets[i]);
     }
     glBindTexture(GL_TEXTURE_2D, 0);
   }
@@ -210,7 +234,7 @@ void egl_texture_bind(EGL_Texture * texture)
     {
       glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-          texture->format, GL_UNSIGNED_BYTE, (const void *)texture->offsets[i]);
+          texture->format, texture->dataType, (const void *)texture->offsets[i]);
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);

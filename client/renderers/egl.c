@@ -278,8 +278,20 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
 
     switch(format.type)
     {
-      case FRAME_TYPE_ARGB:
+      case FRAME_TYPE_BGRA:
+        this->pixFmt    = EGL_PF_BGRA;
+        this->shader    = this->shaders.bgra;
+        this->frameSize = format.height * format.pitch;
+        break;
+
+      case FRAME_TYPE_RGBA:
         this->pixFmt    = EGL_PF_RGBA;
+        this->shader    = this->shaders.rgba;
+        this->frameSize = format.height * format.pitch;
+        break;
+
+      case FRAME_TYPE_RGBA10:
+        this->pixFmt    = EGL_PF_RGBA10;
         this->shader    = this->shaders.rgba;
         this->frameSize = format.height * format.pitch;
         break;
@@ -291,6 +303,7 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
         break;
 
       default:
+        DEBUG_ERROR("Unsupported frame format");
         return false;
     }
 

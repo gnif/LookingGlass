@@ -381,7 +381,9 @@ int frameThread(void * unused)
     size_t dataSize;
     switch(header.type)
     {
-      case FRAME_TYPE_ARGB:
+      case FRAME_TYPE_RGBA:
+      case FRAME_TYPE_BGRA:
+      case FRAME_TYPE_RGBA10:
         dataSize       = lgrFormat.height * lgrFormat.pitch;
         lgrFormat.bpp  = 32;
         break;

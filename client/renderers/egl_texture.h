@@ -31,6 +31,7 @@ enum EGL_PixelFormat
 {
   EGL_PF_RGBA,
   EGL_PF_BGRA,
+  EGL_PF_RGBA10,
   EGL_PF_YUV420
 };
 

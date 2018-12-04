@@ -112,11 +112,7 @@ uniform sampler2D sampler1;\
 \
 void main()\
 {\
-  highp vec4 tmp = texture(sampler1, uv);\
-  color.r = tmp.b;\
-  color.g = tmp.g;\
-  color.b = tmp.r;\
-  color.a = tmp.a;\
+  color = texture(sampler1, uv);\
 }\
 ";
 
