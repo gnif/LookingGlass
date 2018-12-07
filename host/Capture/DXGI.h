@@ -70,7 +70,6 @@ namespace Capture
 
     bool InitRawCapture();
     bool InitYUV420Capture();
-    bool InitH264Capture();
 
     CursorInfo         m_cursorRing[DXGI_CURSOR_RING_SIZE];
     unsigned int       m_cursorRPos, m_cursorWPos;
@@ -80,7 +79,6 @@ namespace Capture
     GrabStatus ReleaseFrame();
     GrabStatus GrabFrameRaw    (struct FrameInfo & frame);
     GrabStatus GrabFrameYUV420 (struct FrameInfo & frame);
-    GrabStatus GrabFrameH264   (struct FrameInfo & frame);
 
     CaptureOptions * m_options;
 

@@ -414,19 +414,6 @@ bool DXGI::InitYUV420Capture()
   return true;
 }
 
-bool DXGI::InitH264Capture()
-{
-  m_textureConverter = new TextureConverter();
-  if (!m_textureConverter->Initialize(m_deviceContext, m_device, m_width, m_height, FRAME_TYPE_YUV420))
-    return false;
-
-  m_h264 = new MFT::H264();
-  if (!m_h264->Initialize(m_device, m_width, m_height))
-    return false;
-  
-  return true;
-}
-
 void DXGI::DeInitialize()
 {
   if (m_h264)
@@ -667,12 +654,8 @@ unsigned int Capture::DXGI::Capture()
 
     for(CaptureOptions::const_iterator it = m_options->cbegin(); it != m_options->cend(); ++it)
     {
-      if (_stricmp(*it, "h264"  ) == 0) m_frameType = FRAME_TYPE_H264;
       if (_stricmp(*it, "yuv420") == 0) m_frameType = FRAME_TYPE_YUV420;
     }
-
-    if (m_frameType == FRAME_TYPE_H264)
-      DEBUG_WARN("Enabling experimental H.264 compression");
 
     bool ok = false;
     switch (m_frameType)
@@ -821,55 +804,6 @@ GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame)
   return GRAB_STATUS_OK;
 }
 
-GrabStatus Capture::DXGI::GrabFrameH264(struct FrameInfo & frame)
-{
-  return GRAB_STATUS_ERROR;
-  #if 0
-  while(true)
-  {
-    unsigned int events = m_h264->Process();
-    if (events & MFT::H264_EVENT_ERROR)
-      return GRAB_STATUS_ERROR;
-
-    if (events & MFT::H264_EVENT_NEEDS_DATA)
-    {
-      GrabStatus result;
-      ID3D11Texture2DPtr texture;
-      bool timeout;
-
-      result = GrabFrameTexture(frame, cursor, texture, timeout);
-      if (result != GRAB_STATUS_OK)
-      {
-        ReleaseFrame();
-        continue;
-      }
-
-      if (!timeout)
-      {
-        if (!m_textureConverter->Convert(texture))
-        {
-          SafeRelease(&texture);
-          return GRAB_STATUS_ERROR;
-        }
-      }
-
-      if (!m_h264->ProvideFrame(texture))
-        return GRAB_STATUS_ERROR;
-
-      ReleaseFrame();
-    }
-
-    if (events & MFT::H264_EVENT_HAS_DATA)
-    {
-      if (!m_h264->GetFrame(frame.buffer, frame.bufferSize, frame.pitch))
-        return GRAB_STATUS_ERROR;
-
-      return GRAB_STATUS_OK;
-    }
-  }
-  #endif
-}
-
 GrabStatus DXGI::GetFrame(struct FrameInfo & frame)
 {
   if (!m_ftexture)
@@ -881,11 +815,8 @@ GrabStatus DXGI::GetFrame(struct FrameInfo & frame)
   frame.width  = m_width;
   frame.height = m_height;
 
-  switch (m_frameType)
-  {
-    case FRAME_TYPE_YUV420: return GrabFrameYUV420(frame);
-    case FRAME_TYPE_H264  : return GrabFrameH264  (frame);
-  }
+  if (m_frameType == FRAME_TYPE_YUV420)
+    return GrabFrameYUV420(frame);
 
   return GrabFrameRaw(frame);
 }
