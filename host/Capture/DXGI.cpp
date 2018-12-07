@@ -615,6 +615,7 @@ unsigned int Capture::DXGI::Capture()
 
   // get the texture
   res.QueryInterface(IID_PPV_ARGS(&m_ftexture));
+  res = NULL;
   if (!m_ftexture)
   {
     DEBUG_ERROR("Failed to get src ID3D11Texture2D");
@@ -664,12 +665,27 @@ unsigned int Capture::DXGI::Capture()
       case FRAME_TYPE_RGBA  :
       case FRAME_TYPE_RGBA10: ok = InitRawCapture   (); break;
       case FRAME_TYPE_YUV420: ok = InitYUV420Capture(); break;
-      case FRAME_TYPE_H264  : ok = InitH264Capture  (); break;
     }
 
     if (!ok)
       return GRAB_STATUS_ERROR;
   }
+
+  // initiate the texture copy as early as possible
+  if (m_frameType == FRAME_TYPE_YUV420)
+  {
+    TextureList planes;
+    if (!m_textureConverter->Convert(m_ftexture, planes))
+      return GRAB_STATUS_ERROR;
+
+    for (int i = 0; i < 3; ++i)
+    {
+      ID3D11Texture2DPtr t = planes.at(i);
+      m_deviceContext->CopyResource(m_texture[i], t);
+    }
+  }
+  else
+    m_deviceContext->CopyResource(m_texture[0], m_ftexture);
 
   ret |= GRAB_STATUS_OK;
   return ret;
@@ -710,14 +726,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
   GrabStatus               result;
   D3D11_MAPPED_SUBRESOURCE mapping;
 
-  m_deviceContext->CopyResource(m_texture[0], m_ftexture);
-
-  /*
-  result = ReleaseFrame();
-  if (result != GRAB_STATUS_OK)
-    return result;
-  */
-
   HRESULT status;
   status = m_deviceContext->Map(m_texture[0], 0, D3D11_MAP_READ, 0, &mapping);
   if (FAILED(status))
@@ -747,21 +755,7 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 
 GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame)
 {
-  GrabStatus         result;
-
-  TextureList planes;
-  if (!m_textureConverter->Convert(m_ftexture, planes))
-    return GRAB_STATUS_ERROR;
-
-  for(int i = 0; i < 3; ++i)
-  {
-    ID3D11Texture2DPtr t = planes.at(i);
-    m_deviceContext->CopyResource(m_texture[i], t);
-  }
-
-  result = ReleaseFrame();
-  if (result != GRAB_STATUS_OK)
-    return result;
+  GrabStatus  result;
 
   uint8_t * data   = (uint8_t *)frame.buffer;
   size_t    remain = frame.bufferSize;
