@@ -29,7 +29,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef enum LG_OutFormat
 {
+  LG_OUTPUT_INVALID,
+
   LG_OUTPUT_BGRA,
+  LG_OUTPUT_RGBA,
+  LG_OUTPUT_RGBA10,
   LG_OUTPUT_YUV420
 }
 LG_OutFormat;

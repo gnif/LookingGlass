@@ -74,7 +74,17 @@ static void lgd_null_deinitialize(void * opaque)
 
 static LG_OutFormat lgd_null_get_out_format(void * opaque)
 {
-  return LG_OUTPUT_BGRA;
+  struct Inst * this = (struct Inst *)opaque;
+  switch(this->format.type)
+  {
+    case FRAME_TYPE_BGRA  : return LG_OUTPUT_BGRA;
+    case FRAME_TYPE_RGBA  : return LG_OUTPUT_RGBA;
+    case FRAME_TYPE_RGBA10: return LG_OUTPUT_RGBA10;
+
+    default:
+      DEBUG_ERROR("Unknown frame type");
+      return LG_OUTPUT_INVALID;
+  }
 }
 
 static unsigned int lgd_null_get_frame_pitch(void * opaque)

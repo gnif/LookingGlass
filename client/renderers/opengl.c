@@ -96,6 +96,7 @@ struct Inst
   LG_RendererFormat format;
   GLuint            intFormat;
   GLuint            vboFormat;
+  GLuint            dataFormat;
   size_t            texSize;
   const LG_Decoder* decoder;
   void            * decoderData;
@@ -880,6 +881,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   {
     case FRAME_TYPE_BGRA:
     case FRAME_TYPE_RGBA:
+    case FRAME_TYPE_RGBA10:
       this->decoder = &LGD_NULL;
       break;
 
@@ -912,14 +914,28 @@ static bool configure(struct Inst * this, SDL_Window *window)
   switch(this->decoder->get_out_format(this->decoderData))
   {
     case LG_OUTPUT_BGRA:
-      this->intFormat = GL_RGBA8;
-      this->vboFormat = GL_BGRA;
+      this->intFormat  = GL_RGBA8;
+      this->vboFormat  = GL_BGRA;
+      this->dataFormat = GL_UNSIGNED_BYTE;
+      break;
+
+    case LG_OUTPUT_RGBA:
+      this->intFormat  = GL_RGBA8;
+      this->vboFormat  = GL_RGBA;
+      this->dataFormat = GL_UNSIGNED_BYTE;
+      break;
+
+    case LG_OUTPUT_RGBA10:
+      this->intFormat  = GL_RGB10_A2;
+      this->vboFormat  = GL_RGBA;
+      this->dataFormat = GL_UNSIGNED_INT_2_10_10_10_REV;
       break;
 
     case LG_OUTPUT_YUV420:
       // fixme
-      this->intFormat = GL_RGBA8;
-      this->vboFormat = GL_BGRA;
+      this->intFormat  = GL_RGBA8;
+      this->vboFormat  = GL_BGRA;
+      this->dataFormat = GL_UNSIGNED_BYTE;
       break;
 
     default:
@@ -1029,7 +1045,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
       this->format.height,
       0,
       this->vboFormat,
-      GL_UNSIGNED_BYTE,
+      this->dataFormat,
       (void*)0
     );
     if (check_gl_error("glTexImage2D"))
@@ -1380,7 +1396,7 @@ static bool draw_frame(struct Inst * this)
       this->format.width ,
       this->format.height,
       this->vboFormat,
-      GL_UNSIGNED_BYTE,
+      this->dataFormat,
       (void*)0
     );
     if (check_gl_error("glTexSubImage2D"))
