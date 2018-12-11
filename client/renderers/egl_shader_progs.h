@@ -98,7 +98,7 @@ uniform sampler2D sampler1;\
  \
 void main()\
 {\
-  color = texture(sampler1, uv) * 1.1;\
+  color = texture(sampler1, uv);\
 }\
 ";
 
