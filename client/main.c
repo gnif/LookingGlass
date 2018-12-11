@@ -394,11 +394,6 @@ int frameThread(void * unused)
         lgrFormat.bpp  = 12;
         break;
 
-      case FRAME_TYPE_H264:
-        dataSize      = lgrFormat.pitch;
-        lgrFormat.bpp = 0;
-        break;
-
       default:
         DEBUG_ERROR("Unsupported frameType");
         error = true;
