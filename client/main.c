@@ -779,6 +779,14 @@ int run()
      DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
   }
 
+  // warn about using FPS display until we can fix the font rendering to prevent lag spikes
+  if (params.showFPS)
+  {
+    DEBUG_WARN("================================================================================");
+    DEBUG_WARN("WARNING: The FPS display causes microstutters, this is a known issue"            );
+    DEBUG_WARN("================================================================================");
+  }
+
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
     DEBUG_ERROR("SDL_Init Failed");
