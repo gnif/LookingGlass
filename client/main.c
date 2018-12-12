@@ -68,6 +68,7 @@ struct AppState
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
 
+  uint64_t          frameTime;
   uint64_t          lastFrameTime;
   uint64_t          renderTime;
   uint64_t          frameCount;
@@ -222,7 +223,7 @@ int renderThread(void * unused)
       }
     }
 
-    uint64_t nsec = time.tv_nsec + (1e9 / params.fpsLimit);
+    uint64_t nsec = time.tv_nsec + state.frameTime;
     if (nsec > 1e9)
     {
       time.tv_nsec = nsec - 1e9;
@@ -757,9 +758,10 @@ int run()
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
 
   memset(&state, 0, sizeof(state));
-  state.running  = true;
-  state.scaleX   = 1.0f;
-  state.scaleY   = 1.0f;
+  state.running   = true;
+  state.scaleX    = 1.0f;
+  state.scaleY    = 1.0f;
+  state.frameTime = 1e9 / params.fpsLimit;
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
 
