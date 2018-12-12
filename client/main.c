@@ -189,6 +189,9 @@ int renderThread(void * unused)
   if (!state.lgr->render_startup(state.lgrData, state.window))
     return 1;
 
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+
   while(state.running)
   {
     if (state.lgrResize)
@@ -197,8 +200,6 @@ int renderThread(void * unused)
         state.lgr->on_resize(state.lgrData, state.windowW, state.windowH, state.dstRect);
       state.lgrResize = false;
     }
-
-    const uint64_t start = microtime();
 
     if (!state.lgr->render(state.lgrData, state.window))
       break;
@@ -212,22 +213,23 @@ int renderThread(void * unused)
     {
       const float avgUPS = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
       const float avgFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
+      state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
+
       state.renderTime  = 0;
       state.frameCount  = 0;
       state.renderCount = 0;
-
-      state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
     }
 
-    const uint64_t total = microtime() - start;
-    if (total < state.fpsSleep)
+    uint64_t nsec = time.tv_nsec + (1e9 / params.fpsLimit);
+    if (nsec > 1e9)
     {
-      usleep(state.fpsSleep - total);
-      int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
-      state.fpsSleep += delta / 16;
-      if (state.fpsSleep < 0)
-        state.fpsSleep = 0;
+      time.tv_nsec = nsec - 1e9;
+      ++time.tv_sec;
     }
+    else
+      time.tv_nsec = nsec;
+
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
   }
 
   return 0;
