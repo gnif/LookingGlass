@@ -224,7 +224,7 @@ int renderThread(void * unused)
     {
       usleep(state.fpsSleep - total);
       int64_t delta   = (1000000 / params.fpsLimit) - (microtime() - start);
-      state.fpsSleep += delta / 16;
+      state.fpsSleep += delta;
       if (state.fpsSleep < 0)
         state.fpsSleep = 0;
     }
