@@ -316,27 +316,32 @@ void egl_cursor_render(EGL_Cursor * cursor)
     LG_UNLOCK(cursor->lock);
   }
 
-  egl_shader_use(cursor->shader);
-  glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
   if (cursor->type == LG_CURSOR_MONOCHROME)
   {
     glEnable(GL_BLEND);
+
+    egl_shader_use(cursor->shader);
+    glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
     glBlendFunc(GL_ZERO, GL_SRC_COLOR);
     egl_model_set_texture(cursor->model, cursor->texture);
     egl_model_render(cursor->model);
 
     egl_shader_use(cursor->shaderMono);
-    glUniform4f(cursor->uMousePosMono, cursor->x, cursor->y, cursor->w, cursor->h);
+    glUniform4f(cursor->uMousePosMono, cursor->x, cursor->y, cursor->w, cursor->h / 2);
     glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
     egl_model_set_texture(cursor->model, cursor->textureMono);
     egl_model_render(cursor->model);
+
     glDisable(GL_BLEND);
   }
   else
   {
     glEnable(GL_BLEND);
+
+    glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
     glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
     egl_model_render(cursor->model);
+
     glDisable(GL_BLEND);
   }
 }
