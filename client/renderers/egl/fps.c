@@ -138,25 +138,8 @@ bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj)
     return false;
   }
 
-  static const GLfloat square[] =
-  {
-    -1.0f, -1.0f, 0.0f,
-     1.0f, -1.0f, 0.0f,
-    -1.0f,  1.0f, 0.0f,
-     1.0f,  1.0f, 0.0f
-  };
-
-  static const GLfloat uvs[] =
-  {
-    0.0f, 1.0f,
-    1.0f, 1.0f,
-    0.0f, 0.0f,
-    1.0f, 0.0f
-  };
-
-  egl_model_set_verticies((*fps)->model, square, sizeof(square) / sizeof(GLfloat));
-  egl_model_set_uvs      ((*fps)->model, uvs   , sizeof(uvs   ) / sizeof(GLfloat));
-  egl_model_set_texture  ((*fps)->model, (*fps)->texture);
+  egl_model_set_default((*fps)->model);
+  egl_model_set_texture((*fps)->model, (*fps)->texture);
 
   return true;
 }

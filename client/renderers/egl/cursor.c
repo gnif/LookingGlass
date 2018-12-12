@@ -181,24 +181,7 @@ bool egl_cursor_init(EGL_Cursor ** cursor)
     return false;
   }
 
-  static const GLfloat square[] =
-  {
-    -1.0f, -1.0f, 0.0f,
-     1.0f, -1.0f, 0.0f,
-    -1.0f,  1.0f, 0.0f,
-     1.0f,  1.0f, 0.0f
-  };
-
-  static const GLfloat uvs[] =
-  {
-    0.0f, 1.0f,
-    1.0f, 1.0f,
-    0.0f, 0.0f,
-    1.0f, 0.0f
-  };
-
-  egl_model_set_verticies((*cursor)->model, square, sizeof(square) / sizeof(GLfloat));
-  egl_model_set_uvs      ((*cursor)->model, uvs   , sizeof(uvs   ) / sizeof(GLfloat));
+  egl_model_set_default((*cursor)->model);
   return true;
 }
 

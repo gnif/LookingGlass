@@ -356,22 +356,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
   DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
 
-  static const GLfloat square[] =
-  {
-    -1.0f, -1.0f, 0.0f,
-     1.0f, -1.0f, 0.0f,
-    -1.0f,  1.0f, 0.0f,
-     1.0f,  1.0f, 0.0f
-  };
-
-  static const GLfloat uvs[] =
-  {
-    0.0f, 1.0f,
-    1.0f, 1.0f,
-    0.0f, 0.0f,
-    1.0f, 0.0f
-  };
-
   if (!egl_shader_init(&this->shaders.rgba))
     return false;
 
@@ -396,9 +380,8 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_model_init(&this->models.desktop))
     return false;
 
-  egl_model_set_verticies(this->models.desktop, square , sizeof(square) / sizeof(GLfloat));
-  egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
-  egl_model_set_texture  (this->models.desktop, this->textures.desktop);
+  egl_model_set_default(this->models.desktop);
+  egl_model_set_texture(this->models.desktop, this->textures.desktop);
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 

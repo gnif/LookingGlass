@@ -73,6 +73,28 @@ void egl_model_free(EGL_Model ** model)
   *model = NULL;
 }
 
+void egl_model_set_default(EGL_Model * model)
+{
+  static const GLfloat square[] =
+  {
+    -1.0f, -1.0f, 0.0f,
+     1.0f, -1.0f, 0.0f,
+    -1.0f,  1.0f, 0.0f,
+     1.0f,  1.0f, 0.0f
+  };
+
+  static const GLfloat uvs[] =
+  {
+    0.0f, 1.0f,
+    1.0f, 1.0f,
+    0.0f, 0.0f,
+    1.0f, 0.0f
+  };
+
+  egl_model_set_verticies(model, square, sizeof(square) / sizeof(GLfloat));
+  egl_model_set_uvs      (model, uvs   , sizeof(uvs   ) / sizeof(GLfloat));
+}
+
 void egl_model_set_verticies(EGL_Model * model, const GLfloat * verticies, const size_t count)
 {
   if (model->hasVertexBuffer)
