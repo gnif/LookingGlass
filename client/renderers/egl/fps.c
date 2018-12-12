@@ -35,13 +35,15 @@ struct EGL_FPS
 
   EGL_Texture * texture;
   EGL_Shader  * shader;
+  EGL_Shader  * shaderBG;
   EGL_Model   * model;
 
   bool  ready;
   float width, height;
 
   // uniforms
-  GLint uScreen, uSize;
+  GLint uScreen  , uSize;
+  GLint uScreenBG, uSizeBG;
 };
 
 static const char vertex_shader[] = "\
@@ -81,19 +83,24 @@ uniform sampler2D sampler1;\
 \
 void main()\
 {\
-  highp vec4 tmp = texture(sampler1, uv);\
-  color.r = tmp.b; \
-  color.g = tmp.g; \
-  color.b = tmp.r; \
-  color.a = tmp.a; \
-  if (color.a == 0.0) \
-  {\
-    color.a = 0.5; \
-    color.r = 0.0; \
-    color.g = 0.0; \
-  }\
+  color = texture(sampler1, uv);\
 }\
 ";
+
+static const char frag_shaderBG[] = "\
+#version 300 es\n\
+\
+in  highp vec2 uv;\
+out highp vec4 color;\
+\
+uniform sampler2D sampler1;\
+\
+void main()\
+{\
+  color = vec4(0.0, 0.0, 1.0, 0.5);\
+}\
+";
+
 
 bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj)
 {
@@ -121,16 +128,34 @@ bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj)
     return false;
   }
 
+  if (!egl_shader_init(&(*fps)->shaderBG))
+  {
+    DEBUG_ERROR("Failed to initialize the fps bg shader");
+    return false;
+  }
+
+
   if (!egl_shader_compile((*fps)->shader,
         vertex_shader, sizeof(vertex_shader),
-        frag_shader, sizeof(frag_shader)))
+        frag_shader  , sizeof(frag_shader  )))
   {
     DEBUG_ERROR("Failed to compile the fps shader");
     return false;
   }
 
-  (*fps)->uSize   = egl_shader_get_uniform_location((*fps)->shader, "size"  );
-  (*fps)->uScreen = egl_shader_get_uniform_location((*fps)->shader, "screen");
+  if (!egl_shader_compile((*fps)->shaderBG,
+        vertex_shader, sizeof(vertex_shader),
+        frag_shaderBG, sizeof(frag_shaderBG)))
+  {
+    DEBUG_ERROR("Failed to compile the fps shader");
+    return false;
+  }
+
+
+  (*fps)->uSize     = egl_shader_get_uniform_location((*fps)->shader  , "size"  );
+  (*fps)->uScreen   = egl_shader_get_uniform_location((*fps)->shader  , "screen");
+  (*fps)->uSizeBG   = egl_shader_get_uniform_location((*fps)->shaderBG, "size"  );
+  (*fps)->uScreenBG = egl_shader_get_uniform_location((*fps)->shaderBG, "screen");
 
   if (!egl_model_init(&(*fps)->model))
   {
@@ -149,9 +174,10 @@ void egl_fps_free(EGL_FPS ** fps)
   if (!*fps)
     return;
 
-  egl_texture_free(&(*fps)->texture);
-  egl_shader_free (&(*fps)->shader );
-  egl_model_free  (&(*fps)->model  );
+  egl_texture_free(&(*fps)->texture );
+  egl_shader_free (&(*fps)->shader  );
+  egl_shader_free (&(*fps)->shaderBG);
+  egl_model_free  (&(*fps)->model   );
 
   free(*fps);
   *fps = NULL;
@@ -198,9 +224,18 @@ void egl_fps_render(EGL_FPS * fps, float screenWidth, float screenHeight)
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  // render the background first
+  egl_shader_use(fps->shaderBG);
+  glUniform2f(fps->uScreenBG, screenWidth, screenHeight);
+  glUniform2f(fps->uSizeBG  , fps->width , fps->height );
+  egl_model_render(fps->model);
+
+  // render the texture over the background
   egl_shader_use(fps->shader);
   glUniform2f(fps->uScreen, screenWidth, screenHeight);
   glUniform2f(fps->uSize  , fps->width , fps->height );
   egl_model_render(fps->model);
+
   glDisable(GL_BLEND);
 }
