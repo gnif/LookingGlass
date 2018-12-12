@@ -63,6 +63,7 @@ set(SOURCES
 	renderers/egl/shader.c
 	renderers/egl/texture.c
 	renderers/egl/model.c
+	renderers/egl/desktop.c
 	renderers/egl/cursor.c
 	renderers/egl/fps.c
 	fonts/sdl.c

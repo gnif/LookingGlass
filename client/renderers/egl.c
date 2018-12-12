@@ -28,7 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "egl/model.h"
 #include "egl/shader.h"
-#include "egl/progs.h"
+#include "egl/desktop.h"
 #include "egl/cursor.h"
 #include "egl/fps.h"
 
@@ -40,23 +40,6 @@ struct Options
 static struct Options defaultOptions =
 {
   .vsync = false
-};
-
-struct Models
-{
-  struct EGL_Model * desktop;
-};
-
-struct Shaders
-{
-  struct EGL_Shader * rgba;
-  struct EGL_Shader * bgra;
-  struct EGL_Shader * yuv;
-};
-
-struct Textures
-{
-  struct EGL_Texture * desktop;
 };
 
 struct Inst
@@ -71,27 +54,18 @@ struct Inst
   EGLSurface        surface;
   EGLContext        context;
 
-  EGL_Cursor      * cursor; // the mouse cursor
-  EGL_FPS         * fps;    // the fps display
-
-  struct Models     models;
-  struct Shaders    shaders;
-  struct Textures   textures;
+  EGL_Desktop     * desktop; // the desktop
+  EGL_Cursor      * cursor;  // the mouse cursor
+  EGL_FPS         * fps;     // the fps display
 
   LG_RendererFormat    format;
-  enum EGL_PixelFormat pixFmt;
-  EGL_Shader         * shader;
   bool                 sourceChanged;
-  size_t               frameSize;
-  const uint8_t      * data;
-  bool                 update;
 
   int             width, height;
   LG_RendererRect destRect;
 
   float translateX, translateY;
   float scaleX    , scaleY;
-  GLint             uDesktopPos;
 
   float        mouseWidth , mouseHeight;
   float        mouseScaleX, mouseScaleY;
@@ -157,14 +131,9 @@ void egl_deinitialize(void * opaque)
   if (this->font && this->fontObj)
     this->font->destroy(this->fontObj);
 
-  egl_cursor_free(&this->cursor);
-  egl_fps_free   (&this->fps   );
-
-  egl_model_free  (&this->models  .desktop   );
-  egl_shader_free (&this->shaders .rgba      );
-  egl_shader_free (&this->shaders .bgra      );
-  egl_shader_free (&this->shaders .yuv       );
-  egl_texture_free(&this->textures.desktop   );
+  egl_desktop_free(&this->desktop);
+  egl_cursor_free (&this->cursor);
+  egl_fps_free    (&this->fps   );
 
   free(this);
 }
@@ -231,7 +200,6 @@ bool egl_on_mouse_event(void * opaque, const bool visible , const int x, const i
 bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uint8_t * data)
 {
   struct Inst * this = (struct Inst *)opaque;
-
   this->sourceChanged = (
     this->sourceChanged ||
     this->format.type   != format.type   ||
@@ -241,45 +209,13 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
   );
 
   if (this->sourceChanged)
-  {
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
-    switch(format.type)
-    {
-      case FRAME_TYPE_BGRA:
-        this->pixFmt    = EGL_PF_BGRA;
-        this->shader    = this->shaders.bgra;
-        this->frameSize = format.height * format.pitch;
-        break;
-
-      case FRAME_TYPE_RGBA:
-        this->pixFmt    = EGL_PF_RGBA;
-        this->shader    = this->shaders.rgba;
-        this->frameSize = format.height * format.pitch;
-        break;
-
-      case FRAME_TYPE_RGBA10:
-        this->pixFmt    = EGL_PF_RGBA10;
-        this->shader    = this->shaders.rgba;
-        this->frameSize = format.height * format.pitch;
-        break;
-
-      case FRAME_TYPE_YUV420:
-        this->pixFmt    = EGL_PF_YUV420;
-        this->shader    = this->shaders.yuv;
-        this->frameSize = format.width * format.height * 3 / 2;
-        break;
-
-      default:
-        DEBUG_ERROR("Unsupported frame format");
-        return false;
-    }
-
-    this->uDesktopPos = egl_shader_get_uniform_location(this->shader, "position");
+  if (!egl_desktop_prepare_update(this->desktop, this->sourceChanged, format, data))
+  {
+    DEBUG_INFO("Failed to prepare to update the desktop");
+    return false;
   }
-
-  this->data   = data;
-  this->update = true;
 
   return true;
 }
@@ -356,34 +292,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
   DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
 
-  if (!egl_shader_init(&this->shaders.rgba))
-    return false;
-
-  if (!egl_shader_init(&this->shaders.bgra))
-    return false;
-
-  if (!egl_shader_init(&this->shaders.yuv))
-    return false;
-
-  if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
-    return false;
-
-  if (!egl_shader_compile(this->shaders.bgra, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_bgra, sizeof(egl_fragment_shader_bgra)))
-    return false;
-
-  if (!egl_shader_compile(this->shaders.yuv, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_yuv, sizeof(egl_fragment_shader_yuv)))
-    return false;
-
-  if (!egl_texture_init(&this->textures.desktop))
-    return false;
-
-  if (!egl_model_init(&this->models.desktop))
-    return false;
-
-  egl_model_set_default(this->models.desktop);
-  egl_model_set_texture(this->models.desktop, this->textures.desktop);
-
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
+
+  if (!egl_desktop_init(&this->desktop))
+  {
+    DEBUG_ERROR("Failed to initialize the desktop");
+    return false;
+  }
 
   if (!egl_cursor_init(&this->cursor))
   {
@@ -407,42 +322,19 @@ bool egl_render(void * opaque, SDL_Window * window)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  if (this->shader)
-  {
-    egl_shader_use(this->shader);
-    glUniform4f(this->uDesktopPos, this->translateX, this->translateY, this->scaleX, this->scaleY);
-    egl_model_render(this->models.desktop);
-  }
-
+  egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY);
   egl_cursor_render(this->cursor);
   egl_fps_render(this->fps, this->width, this->height);
 
   eglSwapBuffers(this->display, this->surface);
 
   // defer texture uploads until after the flip to avoid stalling
-  if (this->update)
+  if (!egl_desktop_perform_update(this->desktop, this->sourceChanged))
   {
-    if (this->sourceChanged)
-    {
-      this->sourceChanged = false;
-      if (!egl_texture_setup(
-        this->textures.desktop,
-        this->pixFmt,
-        this->format.width,
-        this->format.height,
-        this->frameSize,
-        true
-      ))
-        return false;
-
-      egl_model_set_shader(this->models.desktop, this->shader);
-    }
-
-    if (!egl_texture_update(this->textures.desktop, this->data))
-      return false;
-
-    this->update = false;
+    DEBUG_ERROR("Failed to perform the desktop update");
+    return false;
   }
+  this->sourceChanged = false;
 
   return true;
 }
