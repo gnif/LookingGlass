@@ -33,32 +33,32 @@ struct EGL_Shader
   GLuint shader;
 };
 
-bool egl_shader_init(EGL_Shader ** shader)
+bool egl_shader_init(EGL_Shader ** this)
 {
-  *shader = (EGL_Shader *)malloc(sizeof(EGL_Shader));
-  if (!*shader)
+  *this = (EGL_Shader *)malloc(sizeof(EGL_Shader));
+  if (!*this)
   {
     DEBUG_ERROR("Failed to malloc EGL_Shader");
     return false;
   }
 
-  memset(*shader, 0, sizeof(EGL_Shader));
+  memset(*this, 0, sizeof(EGL_Shader));
   return true;
 }
 
-void egl_shader_free(EGL_Shader ** shader)
+void egl_shader_free(EGL_Shader ** this)
 {
-  if (!*shader)
+  if (!*this)
     return;
 
-  if ((*shader)->hasShader)
-    glDeleteProgram((*shader)->shader);
+  if ((*this)->hasShader)
+    glDeleteProgram((*this)->shader);
 
-  free(*shader);
-  *shader = NULL;
+  free(*this);
+  *this = NULL;
 }
 
-bool egl_shader_load(EGL_Shader * shader, const char * vertex_file, const char * fragment_file)
+bool egl_shader_load(EGL_Shader * this, const char * vertex_file, const char * fragment_file)
 {
   char   * vertex_code, * fragment_code;
   size_t   vertex_size,   fragment_size;
@@ -80,18 +80,18 @@ bool egl_shader_load(EGL_Shader * shader, const char * vertex_file, const char *
 
   DEBUG_INFO("Loaded fragment shader: %s", fragment_file);
 
-  bool ret = egl_shader_compile(shader, vertex_code, vertex_size, fragment_code, fragment_size);
+  bool ret = egl_shader_compile(this, vertex_code, vertex_size, fragment_code, fragment_size);
   free(vertex_code);
   free(fragment_code);
   return ret;
 }
 
-bool egl_shader_compile(EGL_Shader * shader, const char * vertex_code, size_t vertex_size, const char * fragment_code, size_t fragment_size)
+bool egl_shader_compile(EGL_Shader * this, const char * vertex_code, size_t vertex_size, const char * fragment_code, size_t fragment_size)
 {
-  if (shader->hasShader)
+  if (this->hasShader)
   {
-    glDeleteProgram(shader->shader);
-    shader->hasShader = false;
+    glDeleteProgram(this->shader);
+    this->hasShader = false;
   }
 
   GLint  length;
@@ -149,59 +149,59 @@ bool egl_shader_compile(EGL_Shader * shader, const char * vertex_code, size_t ve
     return false;
   }
 
-  shader->shader = glCreateProgram();
-  glAttachShader(shader->shader, vertexShader  );
-  glAttachShader(shader->shader, fragmentShader);
-  glLinkProgram(shader->shader);
+  this->shader = glCreateProgram();
+  glAttachShader(this->shader, vertexShader  );
+  glAttachShader(this->shader, fragmentShader);
+  glLinkProgram(this->shader);
 
-  glGetProgramiv(shader->shader, GL_LINK_STATUS, &result);
+  glGetProgramiv(this->shader, GL_LINK_STATUS, &result);
   if (result == GL_FALSE)
   {
     DEBUG_ERROR("Failed to link shader program");
 
     int logLength;
-    glGetProgramiv(shader->shader, GL_INFO_LOG_LENGTH, &logLength);
+    glGetProgramiv(this->shader, GL_INFO_LOG_LENGTH, &logLength);
     if (logLength > 0)
     {
       char *log = malloc(logLength + 1);
-      glGetProgramInfoLog(shader->shader, logLength, NULL, log);
+      glGetProgramInfoLog(this->shader, logLength, NULL, log);
       log[logLength] = 0;
       DEBUG_ERROR("%s", log);
       free(log);
     }
 
-    glDetachShader(shader->shader, vertexShader  );
-    glDetachShader(shader->shader, fragmentShader);
+    glDetachShader(this->shader, vertexShader  );
+    glDetachShader(this->shader, fragmentShader);
     glDeleteShader(fragmentShader);
     glDeleteShader(vertexShader  );
-    glDeleteProgram(shader->shader );
+    glDeleteProgram(this->shader );
     return false;
   }
 
-  glDetachShader(shader->shader, vertexShader  );
-  glDetachShader(shader->shader, fragmentShader);
+  glDetachShader(this->shader, vertexShader  );
+  glDetachShader(this->shader, fragmentShader);
   glDeleteShader(fragmentShader);
   glDeleteShader(vertexShader  );
 
-  shader->hasShader = true;
+  this->hasShader = true;
   return true;
 }
 
-void egl_shader_use(EGL_Shader * shader)
+void egl_shader_use(EGL_Shader * this)
 {
-  if (shader->hasShader)
-    glUseProgram(shader->shader);
+  if (this->hasShader)
+    glUseProgram(this->shader);
   else
     DEBUG_ERROR("Shader program has not been compiled");
 }
 
-void egl_shader_associate_textures(EGL_Shader * shader, const int count)
+void egl_shader_associate_textures(EGL_Shader * this, const int count)
 {
   char name[] = "sampler1";
-  glUseProgram(shader->shader);
+  glUseProgram(this->shader);
   for(int i = 0; i < count; ++i, name[7]++)
   {
-    GLint loc = glGetUniformLocation(shader->shader, name);
+    GLint loc = glGetUniformLocation(this->shader, name);
     if (loc == -1)
     {
       DEBUG_WARN("Shader uniform location `%s` not found", name);
@@ -213,7 +213,7 @@ void egl_shader_associate_textures(EGL_Shader * shader, const int count)
   glUseProgram(0);
 }
 
-GLint egl_shader_get_uniform_location(EGL_Shader * shader, const char * name)
+GLint egl_shader_get_uniform_location(EGL_Shader * this, const char * name)
 {
-  return glGetUniformLocation(shader->shader, name);
+  return glGetUniformLocation(this->shader, name);
 }
