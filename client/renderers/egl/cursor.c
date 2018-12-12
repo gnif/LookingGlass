@@ -338,6 +338,7 @@ void egl_cursor_render(EGL_Cursor * cursor)
   {
     glEnable(GL_BLEND);
 
+    egl_shader_use(cursor->shader);
     glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
     glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
     egl_model_render(cursor->model);
