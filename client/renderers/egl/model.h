@@ -31,9 +31,9 @@ typedef struct EGL_Model EGL_Model;
 bool egl_model_init(EGL_Model ** model);
 void egl_model_free(EGL_Model ** model);
 
-void   egl_model_set_verticies (EGL_Model * model, const GLfloat * verticies, const size_t count);
-void   egl_model_set_uvs       (EGL_Model * model, const GLfloat * uvs      , const size_t count);
-void   egl_model_set_shader    (EGL_Model * model, EGL_Shader  * shader);
-void   egl_model_set_texture   (EGL_Model * model, EGL_Texture * texture);
+void egl_model_set_verticies (EGL_Model * model, const GLfloat * verticies, const size_t count);
+void egl_model_set_uvs       (EGL_Model * model, const GLfloat * uvs      , const size_t count);
+void egl_model_set_shader    (EGL_Model * model, EGL_Shader  * shader);
+void egl_model_set_texture   (EGL_Model * model, EGL_Texture * texture);
 
 void egl_model_render(EGL_Model * model);
