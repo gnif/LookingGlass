@@ -30,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "egl/shader.h"
 #include "egl/progs.h"
 #include "egl/cursor.h"
+#include "egl/fps.h"
 
 struct Options
 {
@@ -44,7 +45,6 @@ static struct Options defaultOptions =
 struct Models
 {
   struct EGL_Model * desktop;
-  struct EGL_Model * fps;
 };
 
 struct Shaders
@@ -52,13 +52,11 @@ struct Shaders
   struct EGL_Shader * rgba;
   struct EGL_Shader * bgra;
   struct EGL_Shader * yuv;
-  struct EGL_Shader * fps;
 };
 
 struct Textures
 {
   struct EGL_Texture * desktop;
-  struct EGL_Texture * fps;
 };
 
 struct Inst
@@ -74,6 +72,7 @@ struct Inst
   EGLContext        context;
 
   EGL_Cursor      * cursor; // the mouse cursor
+  EGL_FPS         * fps;    // the fps display
 
   struct Models     models;
   struct Shaders    shaders;
@@ -99,10 +98,6 @@ struct Inst
 
   const LG_Font     * font;
   LG_FontObj        fontObj;
-
-  bool  fpsReady;
-  float fpsWidth, fpsHeight;
-  GLint uFPSScreen, uFPSSize;
 };
 
 
@@ -163,15 +158,13 @@ void egl_deinitialize(void * opaque)
     this->font->destroy(this->fontObj);
 
   egl_cursor_free(&this->cursor);
+  egl_fps_free   (&this->fps   );
 
   egl_model_free  (&this->models  .desktop   );
-  egl_model_free  (&this->models  .fps       );
   egl_shader_free (&this->shaders .rgba      );
   egl_shader_free (&this->shaders .bgra      );
   egl_shader_free (&this->shaders .yuv       );
-  egl_shader_free (&this->shaders .fps       );
   egl_texture_free(&this->textures.desktop   );
-  egl_texture_free(&this->textures.fps       );
 
   free(this);
 }
@@ -388,9 +381,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_init(&this->shaders.yuv))
     return false;
 
-  if (!egl_shader_init(&this->shaders.fps))
-    return false;
-
   if (!egl_shader_compile(this->shaders.rgba, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_rgba, sizeof(egl_fragment_shader_rgba)))
     return false;
 
@@ -400,38 +390,27 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   if (!egl_shader_compile(this->shaders.yuv, egl_vertex_shader_desktop, sizeof(egl_vertex_shader_desktop), egl_fragment_shader_yuv, sizeof(egl_fragment_shader_yuv)))
     return false;
 
-  if (!egl_shader_compile(this->shaders.fps, egl_vertex_shader_fps, sizeof(egl_vertex_shader_fps), egl_fragment_shader_fps, sizeof(egl_fragment_shader_fps)))
-    return false;
-
-  this->uFPSSize      = egl_shader_get_uniform_location(this->shaders.fps       , "size"    );
-  this->uFPSScreen    = egl_shader_get_uniform_location(this->shaders.fps       , "screen"  );
-
   if (!egl_texture_init(&this->textures.desktop))
-    return false;
-
-  if (!egl_texture_init(&this->textures.fps))
     return false;
 
   if (!egl_model_init(&this->models.desktop))
     return false;
 
-  if (!egl_model_init(&this->models.fps))
-    return false;
-
-
   egl_model_set_verticies(this->models.desktop, square , sizeof(square) / sizeof(GLfloat));
   egl_model_set_uvs      (this->models.desktop, uvs    , sizeof(uvs   ) / sizeof(GLfloat));
   egl_model_set_texture  (this->models.desktop, this->textures.desktop);
-
-  egl_model_set_verticies(this->models.fps, square, sizeof(square) / sizeof(GLfloat));
-  egl_model_set_uvs      (this->models.fps, uvs   , sizeof(uvs   ) / sizeof(GLfloat));
-  egl_model_set_texture  (this->models.fps, this->textures.fps);
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
   if (!egl_cursor_init(&this->cursor))
   {
     DEBUG_ERROR("Failed to initialize the cursor");
+    return false;
+  }
+
+  if (!egl_fps_init(&this->fps, this->font, this->fontObj))
+  {
+    DEBUG_ERROR("Failed to initialize the FPS display");
     return false;
   }
 
@@ -453,17 +432,7 @@ bool egl_render(void * opaque, SDL_Window * window)
   }
 
   egl_cursor_render(this->cursor);
-
-  if (this->fpsReady)
-  {
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    egl_shader_use(this->shaders.fps);
-    glUniform2f(this->uFPSScreen, this->width   , this->height   );
-    glUniform2f(this->uFPSSize  , this->fpsWidth, this->fpsHeight);
-    egl_model_render(this->models.fps);
-    glDisable(GL_BLEND);
-  }
+  egl_fps_render(this->fps, this->width, this->height);
 
   eglSwapBuffers(this->display, this->surface);
 
@@ -501,36 +470,7 @@ void egl_update_fps(void * opaque, const float avgFPS, const float renderFPS)
   if (!this->params.showFPS)
     return;
 
-  char str[128];
-  snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
-
-  LG_FontBitmap * bmp = this->font->render(this->fontObj, 0xffffff00, str);
-  if (!bmp)
-  {
-    DEBUG_ERROR("Failed to render FPS text");
-    return;
-  }
-
-  egl_texture_setup(
-    this->textures.fps,
-    EGL_PF_BGRA,
-    bmp->width ,
-    bmp->height,
-    bmp->width * bmp->height * bmp->bpp,
-    false
-  );
-
-  egl_texture_update
-  (
-    this->textures.fps,
-    bmp->pixels
-  );
-
-  this->fpsWidth  = bmp->width;
-  this->fpsHeight = bmp->height;
-  this->fpsReady  = true;
-
-  this->font->release(this->fontObj, bmp);
+  egl_fps_update(this->fps, avgFPS, renderFPS);
 }
 
 static void handle_opt_vsync(void * opaque, const char *value)
