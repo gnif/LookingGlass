@@ -67,7 +67,6 @@ struct AppState
   int                  shmFD;
   struct KVMFRHeader * shm;
   unsigned int         shmSize;
-  int64_t              fpsSleep;
 
   uint64_t          lastFrameTime;
   uint64_t          renderTime;
@@ -204,20 +203,23 @@ int renderThread(void * unused)
     if (!state.lgr->render(state.lgrData, state.window))
       break;
 
-    const uint64_t t    = nanotime();
-    state.renderTime   += t - state.lastFrameTime;
-    state.lastFrameTime = t;
-    ++state.renderCount;
-
-    if (state.renderTime > 1e9)
+    if (params.showFPS)
     {
-      const float avgUPS = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
-      const float avgFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
-      state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
+      const uint64_t t    = nanotime();
+      state.renderTime   += t - state.lastFrameTime;
+      state.lastFrameTime = t;
+      ++state.renderCount;
 
-      state.renderTime  = 0;
-      state.frameCount  = 0;
-      state.renderCount = 0;
+      if (state.renderTime > 1e9)
+      {
+        const float avgUPS = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
+        const float avgFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
+        state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
+
+        state.renderTime  = 0;
+        state.frameCount  = 0;
+        state.renderCount = 0;
+      }
     }
 
     uint64_t nsec = time.tv_nsec + (1e9 / params.fpsLimit);
@@ -758,7 +760,6 @@ int run()
   state.running  = true;
   state.scaleX   = 1.0f;
   state.scaleY   = 1.0f;
-  state.fpsSleep = 1000000 / params.fpsLimit;
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
 
