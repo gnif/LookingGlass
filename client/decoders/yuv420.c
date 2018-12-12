@@ -26,10 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <assert.h>
 
-#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
-//#include <GL/glu.h>
-//#include <GL/glx.h>
 
 struct Pixel
 {

@@ -33,6 +33,7 @@ find_package(GMP)
 add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
 add_definitions(-D USE_NETTLE)
 add_definitions(-D ATOMIC_LOCKING)
+add_definitions(-D GL_GLEXT_PROTOTYPES)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}

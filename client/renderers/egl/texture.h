@@ -22,7 +22,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include "shader.h"
 
-#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 
 typedef struct EGL_Texture EGL_Texture;
