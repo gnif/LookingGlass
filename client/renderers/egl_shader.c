@@ -215,5 +215,11 @@ void egl_shader_associate_textures(EGL_Shader * this, const int count)
 
 GLint egl_shader_get_uniform_location(EGL_Shader * this, const char * name)
 {
+  if (!this->shader)
+  {
+    DEBUG_ERROR("Shader program has not been compiled");
+    return 0;
+  }
+
   return glGetUniformLocation(this->shader, name);
 }
