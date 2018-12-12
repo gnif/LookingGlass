@@ -26,9 +26,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_egl.h>
 
-#include "egl_model.h"
-#include "egl_shader.h"
-#include "egl_shader_progs.h"
+#include "egl/model.h"
+#include "egl/shader.h"
+#include "egl/progs.h"
 
 struct Options
 {

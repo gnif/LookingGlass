@@ -17,8 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _EGL_SHADER_PROGS_H
-#define _EGL_SHADER_PROGS_H
+#ifndef _EGL_PROGS_H
+#define _EGL_PROGS_H
 
 static const char egl_vertex_shader_desktop[] = "\
 #version 300 es\n\

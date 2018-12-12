@@ -20,8 +20,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdbool.h>
-#include "egl_shader.h"
-#include "egl_texture.h"
+#include "shader.h"
+#include "texture.h"
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>

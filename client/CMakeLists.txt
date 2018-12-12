@@ -59,9 +59,9 @@ set(SOURCES
 	decoders/yuv420.c
 	renderers/opengl.c
 	renderers/egl.c
-	renderers/egl_shader.c
-	renderers/egl_texture.c
-	renderers/egl_model.c	
+	renderers/egl/shader.c
+	renderers/egl/texture.c
+	renderers/egl/model.c	
 	fonts/sdl.c
 )
 

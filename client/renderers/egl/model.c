@@ -17,9 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "egl_model.h"
-#include "egl_shader.h"
-#include "egl_texture.h"
+#include "model.h"
+#include "shader.h"
+#include "texture.h"
 
 #include "debug.h"
 #include "utils.h"
