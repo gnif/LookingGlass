@@ -117,7 +117,7 @@ typedef bool         (* LG_RendererOnMouseEvent)(void * opaque, const bool visib
 typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const uint8_t * data);
 typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag);
 typedef bool         (* LG_RendererRender      )(void * opaque, SDL_Window *window);
-typedef void         (* LG_RendererUpdateFPS   )(void * opaque, const float avgFPS, const float renderFPS);
+typedef void         (* LG_RendererUpdateFPS   )(void * opaque, const float avgUPS, const float avgFPS);
 
 typedef struct LG_Renderer
 {

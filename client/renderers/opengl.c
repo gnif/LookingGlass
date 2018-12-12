@@ -622,14 +622,14 @@ bool opengl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
-void opengl_update_fps(void * opaque, const float avgFPS, const float renderFPS)
+void opengl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this->params.showFPS)
     return;
 
   char str[128];
-  snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
+  snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgUPS, avgFPS);
 
   LG_FontBitmap *textSurface = NULL;
   if (!(textSurface = this->font->render(this->fontObj, 0xffffff00, str)))

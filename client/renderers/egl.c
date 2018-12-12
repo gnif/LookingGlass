@@ -339,13 +339,13 @@ bool egl_render(void * opaque, SDL_Window * window)
   return true;
 }
 
-void egl_update_fps(void * opaque, const float avgFPS, const float renderFPS)
+void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this->params.showFPS)
     return;
 
-  egl_fps_update(this->fps, avgFPS, renderFPS);
+  egl_fps_update(this->fps, avgUPS, avgFPS);
 }
 
 static void handle_opt_vsync(void * opaque, const char *value)

@@ -28,5 +28,5 @@ typedef struct EGL_FPS EGL_FPS;
 bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj);
 void egl_fps_free(EGL_FPS ** fps);
 
-void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS);
+void egl_fps_update(EGL_FPS * fps, const float avgUPS, const float avgFPS);
 void egl_fps_render(EGL_FPS * fps, const float screenWidth, const float screenHeight);

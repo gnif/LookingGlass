@@ -210,13 +210,13 @@ int renderThread(void * unused)
 
     if (state.renderTime > 1e9)
     {
-      const float avgFPS    = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
-      const float renderFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
+      const float avgUPS = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
+      const float avgFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
       state.renderTime  = 0;
       state.frameCount  = 0;
       state.renderCount = 0;
 
-      state.lgr->update_fps(state.lgrData, avgFPS, renderFPS);
+      state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
     }
 
     const uint64_t total = microtime() - start;
