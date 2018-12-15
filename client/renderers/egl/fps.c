@@ -59,15 +59,13 @@ out highp vec2 uv;\
 \
 void main()\
 {\
-  highp vec2 pix  = (vec2(1.0, 1.0) / screen); \
   gl_Position.xyz = vertexPosition_modelspace; \
   gl_Position.w   = 1.0; \
-  gl_Position.x  *= pix.x * size.x; \
-  gl_Position.y  *= pix.y * size.y; \
-  gl_Position.x  -= 1.0 - (pix.x * size.x);\
-  gl_Position.y  += 1.0 - (pix.y * size.y);\
-  gl_Position.x  += pix.x * 10.0; \
-  gl_Position.y  -= pix.y * 10.0; \
+  gl_Position.xy *= screen.xy * size.xy; \
+  gl_Position.x  -= 1.0 - (screen.x * size.x);\
+  gl_Position.y  += 1.0 - (screen.y * size.y);\
+  gl_Position.x  += screen.x * 10.0; \
+  gl_Position.y  -= screen.y * 10.0; \
 \
   uv = vertexUV;\
 }\
@@ -90,10 +88,7 @@ void main()\
 static const char frag_shaderBG[] = "\
 #version 300 es\n\
 \
-in  highp vec2 uv;\
 out highp vec4 color;\
-\
-uniform sampler2D sampler1;\
 \
 void main()\
 {\
@@ -217,7 +212,7 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
   fps->font->release(fps->fontObj, bmp);
 }
 
-void egl_fps_render(EGL_FPS * fps, float screenWidth, float screenHeight)
+void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY)
 {
   if (!fps->ready)
     return;
@@ -227,14 +222,14 @@ void egl_fps_render(EGL_FPS * fps, float screenWidth, float screenHeight)
 
   // render the background first
   egl_shader_use(fps->shaderBG);
-  glUniform2f(fps->uScreenBG, screenWidth, screenHeight);
-  glUniform2f(fps->uSizeBG  , fps->width , fps->height );
+  glUniform2f(fps->uScreenBG, scaleX    , scaleY     );
+  glUniform2f(fps->uSizeBG  , fps->width, fps->height);
   egl_model_render(fps->model);
 
   // render the texture over the background
   egl_shader_use(fps->shader);
-  glUniform2f(fps->uScreen, screenWidth, screenHeight);
-  glUniform2f(fps->uSize  , fps->width , fps->height );
+  glUniform2f(fps->uScreen, scaleX    , scaleY     );
+  glUniform2f(fps->uSize  , fps->width, fps->height);
   egl_model_render(fps->model);
 
   glDisable(GL_BLEND);

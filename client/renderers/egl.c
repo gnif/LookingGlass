@@ -32,8 +32,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "egl/cursor.h"
 #include "egl/fps.h"
 #include "egl/splash.h"
+#include "egl/alert.h"
 
-#define FADE_TIME 1000000
+#define SPLASH_FADE_TIME 1000000
+#define ALERT_TIMEOUT    2000000
 
 struct Options
 {
@@ -61,18 +63,25 @@ struct Inst
   EGL_Cursor      * cursor;  // the mouse cursor
   EGL_FPS         * fps;     // the fps display
   EGL_Splash      * splash;  // the splash screen
+  EGL_Alert       * alert;   // the alert display
 
   LG_RendererFormat    format;
   bool                 sourceChanged;
   uint64_t             waitFadeTime;
   bool                 waitDone;
 
+  bool     showAlert;
+  uint64_t alertTimeout;
+  bool     useCloseFlag;
+  bool     closeFlag;
+
   int             width, height;
   LG_RendererRect destRect;
 
-  float translateX, translateY;
-  float scaleX    , scaleY;
-  float splashScaleY;
+  float translateX  , translateY;
+  float scaleX      , scaleY;
+  float splashRatio;
+  float screenScaleX, screenScaleY;
 
   float        mouseWidth , mouseHeight;
   float        mouseScaleX, mouseScaleY;
@@ -105,10 +114,12 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   memcpy(&this->params, &params        , sizeof(LG_RendererParams));
   memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
 
-  this->translateX = 0;
-  this->translateY = 0;
-  this->scaleX     = 1.0f;
-  this->scaleY     = 1.0f;
+  this->translateX   = 0;
+  this->translateY   = 0;
+  this->scaleX       = 1.0f;
+  this->scaleY       = 1.0f;
+  this->screenScaleX = 1.0f;
+  this->screenScaleY = 1.0f;
 
   this->font = LG_Fonts[0];
   if (!this->font->create(&this->fontObj, NULL, 14))
@@ -142,6 +153,7 @@ void egl_deinitialize(void * opaque)
   egl_cursor_free (&this->cursor);
   egl_fps_free    (&this->fps   );
   egl_splash_free (&this->splash);
+  egl_alert_free  (&this->alert );
 
   free(this);
 }
@@ -171,7 +183,9 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
     (this->mouseHeight * (1.0f / this->format.height)) * this->scaleY
   );
 
-  this->splashScaleY = (float)width / (float)height;
+  this->splashRatio  = (float)width / (float)height;
+  this->screenScaleX = 1.0f / width;
+  this->screenScaleY = 1.0f / height;
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -228,13 +242,44 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
   }
 
   if (!this->waitFadeTime)
-    this->waitFadeTime = microtime() + FADE_TIME;
+    this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
 
   return true;
 }
 
 void egl_on_alert(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag)
 {
+  struct Inst * this = (struct Inst *)opaque;
+
+  static const uint32_t colors[] =
+  {
+    0x0000CCCC, // LG_ALERT_INFO
+    0x00CC00CC, // LG_ALERT_SUCCESS
+    0xCC7F00CC, // LG_ALERT_WARNING
+    0xFF0000CC  // LG_ALERT_ERROR
+  };
+
+  if (alert > LG_ALERT_ERROR || alert < 0)
+  {
+    DEBUG_ERROR("Invalid alert value");
+    return;
+  }
+
+  egl_alert_set_color(this->alert, colors[alert]);
+  egl_alert_set_text (this->alert, message      );
+
+  if (closeFlag)
+  {
+    this->useCloseFlag = true;
+    *closeFlag = &this->closeFlag;
+  }
+  else
+  {
+    this->useCloseFlag = false;
+    this->alertTimeout = microtime() + ALERT_TIMEOUT;
+  }
+
+  this->showAlert = true;
 }
 
 bool egl_render_startup(void * opaque, SDL_Window * window)
@@ -333,6 +378,12 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
+  if (!egl_alert_init(&this->alert, this->font, this->fontObj))
+  {
+    DEBUG_ERROR("Failed to initialize the alert display");
+    return false;
+  }
+
   return true;
 }
 
@@ -359,13 +410,27 @@ bool egl_render(void * opaque, SDL_Window * window)
       else
       {
         uint64_t delta = this->waitFadeTime - t;
-        a = 1.0f / FADE_TIME * delta;
+        a = 1.0f / SPLASH_FADE_TIME * delta;
       }
     }
-    egl_splash_render(this->splash, a, this->splashScaleY);
+    egl_splash_render(this->splash, a, this->splashRatio);
   }
 
-  egl_fps_render(this->fps, this->width, this->height);
+  if (this->showAlert)
+  {
+    bool close = false;
+    if (this->useCloseFlag)
+      close = this->closeFlag;
+    else if (this->alertTimeout < microtime())
+      close = true;
+
+    if (close)
+      this->showAlert = false;
+    else
+      egl_alert_render(this->alert, this->screenScaleX, this->screenScaleY);
+  }
+
+  egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   eglSwapBuffers(this->display, this->surface);
 
   // defer texture uploads until after the flip to avoid stalling
