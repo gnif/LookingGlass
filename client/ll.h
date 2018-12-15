@@ -20,8 +20,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 struct ll;
 
-struct ll * ll_new();
-void        ll_free(struct ll * list);
-void        ll_push(struct ll * list, void * data);
-bool        ll_shift(struct ll * list, void ** data);
-bool        ll_peek_head(struct ll * list, void ** data);
+struct ll *  ll_new();
+void         ll_free     (struct ll * list);
+void         ll_push     (struct ll * list, void * data);
+bool         ll_shift    (struct ll * list, void ** data);
+bool         ll_peek_head(struct ll * list, void ** data);
+unsigned int ll_count    (struct ll * list);
+
+void         ll_reset    (struct ll * list);
+bool         ll_walk     (struct ll * list, void ** data);

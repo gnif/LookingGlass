@@ -31,6 +31,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "egl/desktop.h"
 #include "egl/cursor.h"
 #include "egl/fps.h"
+#include "egl/splash.h"
+
+#define FADE_TIME 1000000
 
 struct Options
 {
@@ -57,15 +60,19 @@ struct Inst
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
   EGL_FPS         * fps;     // the fps display
+  EGL_Splash      * splash;  // the splash screen
 
   LG_RendererFormat    format;
   bool                 sourceChanged;
+  uint64_t             waitFadeTime;
+  bool                 waitDone;
 
   int             width, height;
   LG_RendererRect destRect;
 
   float translateX, translateY;
   float scaleX    , scaleY;
+  float splashScaleY;
 
   float        mouseWidth , mouseHeight;
   float        mouseScaleX, mouseScaleY;
@@ -134,6 +141,7 @@ void egl_deinitialize(void * opaque)
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
   egl_fps_free    (&this->fps   );
+  egl_splash_free (&this->splash);
 
   free(this);
 }
@@ -162,6 +170,8 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
     (this->mouseWidth  * (1.0f / this->format.width )) * this->scaleX,
     (this->mouseHeight * (1.0f / this->format.height)) * this->scaleY
   );
+
+  this->splashScaleY = (float)width / (float)height;
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -217,6 +227,9 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
     return false;
   }
 
+  if (!this->waitFadeTime)
+    this->waitFadeTime = microtime() + FADE_TIME;
+
   return true;
 }
 
@@ -256,6 +269,8 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   {
     EGL_BUFFER_SIZE    , 16,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+    EGL_SAMPLE_BUFFERS , 1,
+    EGL_SAMPLES        , 8,
     EGL_NONE
   };
 
@@ -312,6 +327,12 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
+  if (!egl_splash_init(&this->splash))
+  {
+    DEBUG_ERROR("Failed to initialize the splash screen");
+    return false;
+  }
+
   return true;
 }
 
@@ -324,8 +345,27 @@ bool egl_render(void * opaque, SDL_Window * window)
 
   egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY);
   egl_cursor_render(this->cursor);
-  egl_fps_render(this->fps, this->width, this->height);
 
+  if (!this->waitDone)
+  {
+    float a;
+    if (!this->waitFadeTime)
+      a = 1.0f;
+    else
+    {
+      uint64_t t = microtime();
+      if (t > this->waitFadeTime)
+        this->waitDone = true;
+      else
+      {
+        uint64_t delta = this->waitFadeTime - t;
+        a = 1.0f / FADE_TIME * delta;
+      }
+    }
+    egl_splash_render(this->splash, a, this->splashScaleY);
+  }
+
+  egl_fps_render(this->fps, this->width, this->height);
   eglSwapBuffers(this->display, this->surface);
 
   // defer texture uploads until after the flip to avoid stalling

@@ -20,19 +20,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdbool.h>
-#include "shader.h"
-#include "texture.h"
 
-#include <GL/gl.h>
+#include "lg-fonts.h"
 
-typedef struct EGL_Model EGL_Model;
+typedef struct EGL_Splash EGL_Splash;
 
-bool egl_model_init(EGL_Model ** model);
-void egl_model_free(EGL_Model ** model);
+bool egl_splash_init(EGL_Splash ** splash);
+void egl_splash_free(EGL_Splash ** splash);
 
-void egl_model_set_default  (EGL_Model * model);
-void egl_model_add_verticies(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count);
-void egl_model_set_shader   (EGL_Model * model, EGL_Shader  * shader);
-void egl_model_set_texture  (EGL_Model * model, EGL_Texture * texture);
-
-void egl_model_render(EGL_Model * model);
+void egl_splash_render(EGL_Splash * splash, float alpha, float scaleY);

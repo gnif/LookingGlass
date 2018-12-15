@@ -66,6 +66,8 @@ set(SOURCES
 	renderers/egl/desktop.c
 	renderers/egl/cursor.c
 	renderers/egl/fps.c
+	renderers/egl/draw.c
+	renderers/egl/splash.c
 	fonts/sdl.c
 )
 
