@@ -173,8 +173,8 @@ bool egl_splash_init(EGL_Splash ** splash)
   /* build the splash model */
   #define P(x) ((1.0f/800.0f)*(float)(x))
   egl_draw_torus_arc((*splash)->logo, 30, P( 0  ), P(0), P(102), P(98), 0.0f, -M_PI);
-  egl_draw_torus    ((*splash)->logo, 30, P(-100), P(4), P(8  ), P(4 ));
-  egl_draw_torus    ((*splash)->logo, 30, P( 100), P(4), P(8  ), P(4 ));
+  egl_draw_torus    ((*splash)->logo, 30, P(-100), P(8), P(8  ), P(4 ));
+  egl_draw_torus    ((*splash)->logo, 30, P( 100), P(8), P(8  ), P(4 ));
 
   egl_draw_torus    ((*splash)->logo, 60, P(0), P(0), P(83), P(79));
   egl_draw_torus    ((*splash)->logo, 60, P(0), P(0), P(67), P(63));
