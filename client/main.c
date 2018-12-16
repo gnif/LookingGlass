@@ -921,6 +921,13 @@ int run()
       break;
     }
 
+    // start the renderThread so we don't just display junk
+    if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
+    {
+      DEBUG_ERROR("render create thread failed");
+      break;
+    }
+
     if (params.useSpice)
     {
       if (!spice_connect(params.spiceHost, params.spicePort, ""))
@@ -947,13 +954,6 @@ int run()
     // ensure mouse acceleration is identical in server mode
     SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
     SDL_SetEventFilter(eventFilter, NULL);
-
-    // start the renderThread so we don't just display junk
-    if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
-    {
-      DEBUG_ERROR("render create thread failed");
-      break;
-    }
 
     // flag the host that we are starting up this is important so that
     // the host wakes up if it is waiting on an interrupt, the host will
