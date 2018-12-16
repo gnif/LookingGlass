@@ -862,6 +862,9 @@ int run()
   if (!params.center)
     SDL_SetWindowPosition(state.window, params.x, params.y);
 
+  // ensure the initial window size is stored in the state
+  SDL_GetWindowSize(state.window, &state.windowW, &state.windowH);
+
   // set the compositor hint to bypass for low latency
   SDL_SysWMinfo wminfo;
   SDL_VERSION(&wminfo.version);
