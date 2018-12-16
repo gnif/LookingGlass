@@ -399,7 +399,7 @@ bool egl_render(void * opaque, SDL_Window * window)
 
   if (!this->waitDone)
   {
-    float a;
+    float a = 1.0f;
     if (!this->waitFadeTime)
       a = 1.0f;
     else
