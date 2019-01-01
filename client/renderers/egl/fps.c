@@ -195,7 +195,7 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
     EGL_PF_BGRA,
     bmp->width ,
     bmp->height,
-    bmp->width * bmp->height * bmp->bpp,
+    bmp->width * bmp->bpp,
     false
   );
 

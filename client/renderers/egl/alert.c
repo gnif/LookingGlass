@@ -219,7 +219,7 @@ void egl_alert_render(EGL_Alert * alert, const float scaleX, const float scaleY)
       EGL_PF_BGRA,
       alert->bmp->width ,
       alert->bmp->height,
-      alert->bmp->width * alert->bmp->height * alert->bmp->bpp,
+      alert->bmp->width * alert->bmp->bpp,
       false
     );
 

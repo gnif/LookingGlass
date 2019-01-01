@@ -37,7 +37,7 @@ enum EGL_PixelFormat
 bool egl_texture_init(EGL_Texture ** tex);
 void egl_texture_free(EGL_Texture ** tex);
 
-bool egl_texture_setup (EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t bufferSize, bool streaming);
+bool egl_texture_setup (EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t stride, bool streaming);
 bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer);
 void egl_texture_bind          (EGL_Texture * texture);
 int  egl_texture_count         (EGL_Texture * texture);

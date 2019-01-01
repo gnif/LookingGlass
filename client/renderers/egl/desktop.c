@@ -44,7 +44,7 @@ struct EGL_Desktop
   // internals
   enum EGL_PixelFormat pixFmt;
   unsigned int         width, height;
-  size_t               frameSize;
+  unsigned int         pitch;
   const uint8_t      * data;
   bool                 update;
 };
@@ -195,27 +195,23 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
     switch(format.type)
     {
       case FRAME_TYPE_BGRA:
-        desktop->pixFmt    = EGL_PF_BGRA;
-        desktop->shader    = desktop->shader_generic;
-        desktop->frameSize = format.height * format.pitch;
+        desktop->pixFmt = EGL_PF_BGRA;
+        desktop->shader = desktop->shader_generic;
         break;
 
       case FRAME_TYPE_RGBA:
-        desktop->pixFmt    = EGL_PF_RGBA;
-        desktop->shader    = desktop->shader_generic;
-        desktop->frameSize = format.height * format.pitch;
+        desktop->pixFmt = EGL_PF_RGBA;
+        desktop->shader = desktop->shader_generic;
         break;
 
       case FRAME_TYPE_RGBA10:
-        desktop->pixFmt    = EGL_PF_RGBA10;
-        desktop->shader    = desktop->shader_generic;
-        desktop->frameSize = format.height * format.pitch;
+        desktop->pixFmt = EGL_PF_RGBA10;
+        desktop->shader = desktop->shader_generic;
         break;
 
       case FRAME_TYPE_YUV420:
-        desktop->pixFmt    = EGL_PF_YUV420;
-        desktop->shader    = desktop->shader_yuv;
-        desktop->frameSize = format.width * format.height * 3 / 2;
+        desktop->pixFmt = EGL_PF_YUV420;
+        desktop->shader = desktop->shader_yuv;
         break;
 
       default:
@@ -225,6 +221,7 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
 
     desktop->width  = format.width;
     desktop->height = format.height;
+    desktop->pitch  = format.pitch;
   }
 
   desktop->data   = data;
@@ -245,7 +242,7 @@ bool egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
       desktop->pixFmt,
       desktop->width,
       desktop->height,
-      desktop->frameSize,
+      desktop->pitch,
       true // streaming texture
     ))
     {

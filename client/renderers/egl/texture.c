@@ -36,7 +36,7 @@ struct EGL_Texture
   int      textureCount;
   GLuint   textures[3];
   GLuint   samplers[3];
-  size_t   planes[3][2];
+  size_t   planes[3][3];
   GLintptr offsets[3];
   GLenum   intFormat;
   GLenum   format;
@@ -81,61 +81,70 @@ void egl_texture_free(EGL_Texture ** texture)
   *texture = NULL;
 }
 
-bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t bufferSize, bool streaming)
+bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t stride, bool streaming)
 {
   int textureCount;
 
   texture->pixFmt        = pixFmt;
   texture->width         = width;
   texture->height        = height;
-  texture->pboBufferSize = bufferSize;
   texture->streaming     = streaming;
 
   switch(pixFmt)
   {
     case EGL_PF_BGRA:
-      textureCount          = 1;
-      texture->format       = GL_BGRA;
-      texture->planes[0][0] = width;
-      texture->planes[0][1] = height;
-      texture->offsets[0]   = 0;
-      texture->intFormat    = GL_BGRA;
-      texture->dataType     = GL_UNSIGNED_BYTE;
+      textureCount           = 1;
+      texture->format        = GL_BGRA;
+      texture->planes[0][0]  = width;
+      texture->planes[0][1]  = height;
+      texture->planes[0][2]  = stride / 4;
+      texture->offsets[0]    = 0;
+      texture->intFormat     = GL_BGRA;
+      texture->dataType      = GL_UNSIGNED_BYTE;
+      texture->pboBufferSize = height * stride;
       break;
 
     case EGL_PF_RGBA:
-      textureCount          = 1;
-      texture->format       = GL_RGBA;
-      texture->planes[0][0] = width;
-      texture->planes[0][1] = height;
-      texture->offsets[0]   = 0;
-      texture->intFormat    = GL_BGRA;
-      texture->dataType     = GL_UNSIGNED_BYTE;
+      textureCount           = 1;
+      texture->format        = GL_RGBA;
+      texture->planes[0][0]  = width;
+      texture->planes[0][1]  = height;
+      texture->planes[0][2]  = stride / 4;
+      texture->offsets[0]    = 0;
+      texture->intFormat     = GL_BGRA;
+      texture->dataType      = GL_UNSIGNED_BYTE;
+      texture->pboBufferSize = height * stride;
       break;
 
     case EGL_PF_RGBA10:
-      textureCount          = 1;
-      texture->format       = GL_RGBA;
-      texture->planes[0][0] = width;
-      texture->planes[0][1] = height;
-      texture->offsets[0]   = 0;
-      texture->intFormat    = GL_RGB10_A2;
-      texture->dataType     = GL_UNSIGNED_INT_2_10_10_10_REV;
+      textureCount           = 1;
+      texture->format        = GL_RGBA;
+      texture->planes[0][0]  = width;
+      texture->planes[0][1]  = height;
+      texture->planes[0][2]  = stride / 4;
+      texture->offsets[0]    = 0;
+      texture->intFormat     = GL_RGB10_A2;
+      texture->dataType      = GL_UNSIGNED_INT_2_10_10_10_REV;
+      texture->pboBufferSize = height * stride;
       break;
 
     case EGL_PF_YUV420:
-      textureCount          = 3;
-      texture->format       = GL_RED;
-      texture->planes[0][0] = width;
-      texture->planes[0][1] = height;
-      texture->planes[1][0] = width  / 2;
-      texture->planes[1][1] = height / 2;
-      texture->planes[2][0] = width  / 2;
-      texture->planes[2][1] = height / 2;
-      texture->offsets[0]   = 0;
-      texture->offsets[1]   = width * height;
-      texture->offsets[2]   = texture->offsets[1] + (texture->offsets[1] / 4);
-      texture->dataType     = GL_UNSIGNED_BYTE;
+      textureCount           = 3;
+      texture->format        = GL_RED;
+      texture->planes[0][0]  = width;
+      texture->planes[0][1]  = height;
+      texture->planes[0][2]  = stride;
+      texture->planes[1][0]  = width  / 2;
+      texture->planes[1][1]  = height / 2;
+      texture->planes[1][2]  = stride / 2;
+      texture->planes[2][0]  = width  / 2;
+      texture->planes[2][1]  = height / 2;
+      texture->planes[2][2]  = stride / 2;
+      texture->offsets[0]    = 0;
+      texture->offsets[1]    = stride * height;
+      texture->offsets[2]    = texture->offsets[1] + (texture->offsets[1] / 4);
+      texture->dataType      = GL_UNSIGNED_BYTE;
+      texture->pboBufferSize = texture->offsets[2] + (texture->offsets[1] / 4);
       break;
 
     default:
@@ -182,7 +191,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
       glBufferData(
         GL_PIXEL_UNPACK_BUFFER,
-        bufferSize,
+        height * stride,
         NULL,
         GL_DYNAMIC_DRAW
       );
@@ -217,6 +226,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
     for(int i = 0; i < texture->textureCount; ++i)
     {
       glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[i][0]);
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
           texture->format, texture->dataType, buffer + texture->offsets[i]);
     }
@@ -233,6 +243,7 @@ void egl_texture_bind(EGL_Texture * texture)
     for(int i = 0; i < texture->textureCount; ++i)
     {
       glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[i][2]);
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
           texture->format, texture->dataType, (const void *)texture->offsets[i]);
     }

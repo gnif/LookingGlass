@@ -34,7 +34,7 @@ struct EGL_Cursor
   LG_RendererCursor type;
   int               width;
   int               height;
-  int               pitch;
+  int               stride;
   uint8_t *         data;
   size_t            dataSize;
   bool              update;
@@ -204,16 +204,16 @@ void egl_cursor_free(EGL_Cursor ** cursor)
   *cursor = NULL;
 }
 
-bool egl_cursor_set_shape(EGL_Cursor * cursor, const LG_RendererCursor type, const int width, const int height, const int pitch, const uint8_t * data)
+bool egl_cursor_set_shape(EGL_Cursor * cursor, const LG_RendererCursor type, const int width, const int height, const int stride, const uint8_t * data)
 {
   LG_LOCK(cursor->lock);
 
   cursor->type   = type;
   cursor->width  = width;
   cursor->height = (type == LG_CURSOR_MONOCHROME ? height / 2 : height);
-  cursor->pitch  = pitch;
+  cursor->stride  = stride;
 
-  const size_t size = height * pitch;
+  const size_t size = height * stride;
   if (size > cursor->dataSize)
   {
     if (cursor->data)
@@ -282,7 +282,7 @@ void egl_cursor_render(EGL_Cursor * cursor)
 
       case LG_CURSOR_COLOR:
       {
-        egl_texture_setup(cursor->texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * cursor->height * 4, false);
+        egl_texture_setup(cursor->texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->stride, false);
         egl_texture_update(cursor->texture, data);
         egl_model_set_texture(cursor->model, cursor->texture);
         break;
@@ -296,8 +296,8 @@ void egl_cursor_render(EGL_Cursor * cursor)
         for(int y = 0; y < cursor->height; ++y)
           for(int x = 0; x < cursor->width; ++x)
           {
-            const uint8_t  * srcAnd  = data + (cursor->pitch * y) + (x / 8);
-            const uint8_t  * srcXor  = srcAnd + cursor->pitch * cursor->height;
+            const uint8_t  * srcAnd  = data + (cursor->stride * y) + (x / 8);
+            const uint8_t  * srcXor  = srcAnd + cursor->stride * cursor->height;
             const uint8_t    mask    = 0x80 >> (x % 8);
             const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
             const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
@@ -306,8 +306,8 @@ void egl_cursor_render(EGL_Cursor * cursor)
             xor[y * cursor->width + x] = xorMask;
           }
 
-        egl_texture_setup (cursor->texture    , EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * cursor->height * 4, false);
-        egl_texture_setup (cursor->textureMono, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * cursor->height * 4, false);
+        egl_texture_setup (cursor->texture    , EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false);
+        egl_texture_setup (cursor->textureMono, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false);
         egl_texture_update(cursor->texture    , (uint8_t *)and);
         egl_texture_update(cursor->textureMono, (uint8_t *)xor);
         break;
