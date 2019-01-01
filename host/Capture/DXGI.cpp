@@ -735,19 +735,10 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
     return GRAB_STATUS_ERROR;
   }
   
-  frame.pitch  = m_width * 4;
-  frame.stride = m_width;
+  frame.pitch  = mapping.RowPitch;
+  frame.stride = mapping.RowPitch / 4;
 
-  if (frame.pitch == mapping.RowPitch)
-    memcpySSE(frame.buffer, mapping.pData, frame.pitch * m_height);
-  else
-    for(unsigned int y = 0; y < m_height; ++y)
-      memcpySSE(
-        (uint8_t *)frame.buffer  + (frame.pitch      * y),
-        (uint8_t *)mapping.pData + (mapping.RowPitch * y),
-        frame.pitch
-      );
-
+  memcpySSE(frame.buffer, mapping.pData, frame.pitch * m_height);
   m_deviceContext->Unmap(m_texture[0], 0);
 
   return GRAB_STATUS_OK;
