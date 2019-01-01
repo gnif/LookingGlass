@@ -434,7 +434,9 @@ bool egl_render(void * opaque, SDL_Window * window)
         a = 1.0f / SPLASH_FADE_TIME * delta;
       }
     }
-    egl_splash_render(this->splash, a, this->splashRatio);
+
+    if (!this->waitDone)
+      egl_splash_render(this->splash, a, this->splashRatio);
   }
 
   if (this->showAlert)
