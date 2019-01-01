@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_egl.h>
+#include <wayland-egl.h>
 
 #include "egl/model.h"
 #include "egl/shader.h"
@@ -52,12 +53,12 @@ struct Inst
   LG_RendererParams params;
   struct Options    opt;
 
-  Display         * xDisplay;
-  Window            xWindow;
-  EGLDisplay        display;
-  EGLConfig         configs;
-  EGLSurface        surface;
-  EGLContext        context;
+  EGLNativeDisplayType nativeDisp;
+  EGLNativeWindowType  nativeWind;
+  EGLDisplay           display;
+  EGLConfig            configs;
+  EGLSurface           surface;
+  EGLContext           context;
 
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
@@ -294,10 +295,30 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  this->xDisplay = wminfo.info.x11.display;
-  this->xWindow  = wminfo.info.x11.window;
+  switch(wminfo.subsystem)
+  {
+    case SDL_SYSWM_X11:
+    {
+      this->nativeDisp = (EGLNativeDisplayType)wminfo.info.x11.display;
+      this->nativeWind = (EGLNativeWindowType)wminfo.info.x11.window;
+      break;
+    }
 
-  this->display = eglGetDisplay((EGLNativeDisplayType)this->xDisplay);
+    case SDL_SYSWM_WAYLAND:
+    {
+      int width, height;
+      SDL_GetWindowSize(window, &width, &height);
+      this->nativeDisp = (EGLNativeDisplayType)wminfo.info.wl.display;
+      this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(wminfo.info.wl.surface, width, height);
+      break;
+    }
+
+    default:
+      DEBUG_ERROR("Unsupported subsystem");
+      return false;
+  }
+
+  this->display = eglGetDisplay(this->nativeDisp);
   if (this->display == EGL_NO_DISPLAY)
   {
     DEBUG_ERROR("eglGetDisplay failed");
@@ -326,7 +347,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  this->surface = eglCreateWindowSurface(this->display, this->configs, this->xWindow, NULL);
+  this->surface = eglCreateWindowSurface(this->display, this->configs, this->nativeWind, NULL);
   if (this->surface == EGL_NO_SURFACE)
   {
     DEBUG_ERROR("Failed to create EGL surface (eglError: 0x%x)", eglGetError());
