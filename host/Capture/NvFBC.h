@@ -37,7 +37,7 @@ namespace Capture
     ~NvFBC();
 
     const char * GetName() { return "NvFBC"; }
-
+    bool CanInitialize();
     bool Initialize(CaptureOptions * options);
     void DeInitialize();
     bool ReInitialize()
@@ -47,7 +47,11 @@ namespace Capture
     }
     enum FrameType GetFrameType();
     size_t GetMaxFrameSize();
-    enum GrabStatus GrabFrame(struct FrameInfo & frame, struct CursorInfo & cursor);
+    unsigned int Capture();
+    enum GrabStatus GetFrame(struct FrameInfo & frame);
+    bool GetCursor(CursorInfo & cursor);
+    void FreeCursor() ;
+    enum GrabStatus DiscardFrame();
 
   private:
     CaptureOptions * m_options;
