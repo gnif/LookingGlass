@@ -34,6 +34,8 @@ using namespace Capture;
 #define NVFBC_LIBRARY_NAME "NvFBC.dll"
 #endif
 
+#define MOPT "privData"
+
 NvFBC::NvFBC() :
   m_options(NULL),
   m_optNoCrop(false),
@@ -60,10 +62,36 @@ bool NvFBC::Initialize(CaptureOptions * options)
 
   m_options   = options;
   m_optNoCrop = false;
+
+  uint8_t * privData     = NULL;
+  NvU32     privDataSize = 0;
+
   for (CaptureOptions::const_iterator it = options->cbegin(); it != options->cend(); ++it)
   {
     if (_strcmpi(*it, "nocrop") == 0) { m_optNoCrop = false; continue; }
     if (_strcmpi(*it, "nowait") == 0) { m_optNoWait = true ; continue; }
+
+    if (_strnicmp(*it, MOPT " ", sizeof(MOPT)) == 0)
+    {
+      std::string value(*it);
+      value.erase(0, sizeof(MOPT));
+
+      if (value.empty() || value.length() & 1)
+        continue;
+
+      privDataSize = (NvU32)(value.length() / 2);
+      privData     = new uint8_t[privDataSize];
+      uint8_t *p   = privData;
+      for (int i = 0; i < value.length(); i += 2, ++p)
+      {
+        char hex[3];
+        #pragma warning(disable:4996)
+        value.copy(hex, 2, i);
+        #pragma warning(restore:4996)
+        hex[2] = 0;
+        *p = (uint8_t)strtoul(hex, NULL, 16);
+      }
+    }
   }
 
   std::string nvfbc = Util::GetSystemRoot() + "\\" + NVFBC_LIBRARY_NAME;
@@ -142,17 +170,25 @@ bool NvFBC::Initialize(CaptureOptions * options)
 
   NvFBCCreateParams params;
   ZeroMemory(&params, sizeof(NvFBCCreateParams));
-  params.dwVersion        = NVFBC_CREATE_PARAMS_VER;
-  params.dwInterfaceType  = NVFBC_TO_SYS;
-  params.pDevice          = NULL;
-  params.dwAdapterIdx     = 0;
+  params.dwVersion         = NVFBC_CREATE_PARAMS_VER;
+  params.dwInterfaceType   = NVFBC_TO_SYS;
+  params.pDevice           = NULL;
+  params.dwAdapterIdx      = 0;
+  params.dwPrivateDataSize = privDataSize;
+  params.pPrivateData      = privData;
 
   if (m_fnCreateEx(&params) != NVFBC_SUCCESS)
   {
+    if (privData)
+      delete [] privData;
+
     DEBUG_ERROR("Failed to create an instance of NvFBC");
     DeInitialize();
     return false;
   }
+
+  if (privData)
+    delete[] privData;
 
   m_maxCaptureWidth = params.dwMaxDisplayWidth;
   m_maxCaptureHeight = params.dwMaxDisplayHeight;
