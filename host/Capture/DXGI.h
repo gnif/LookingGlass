@@ -102,6 +102,5 @@ namespace Capture
 
     int                             m_lastCursorX, m_lastCursorY;
     BOOL                            m_lastMouseVis;
-    POINT                           m_hotSpot;
   };
 };

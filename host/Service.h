@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "IVSHMEM.h"
 #include "ICapture.h"
+#include "common/debug.h"
 
 #define MAX_FRAMES 2
 
@@ -38,11 +39,26 @@ enum ProcessStatus
 class Service
 {
 public:
-  static Service * Get()
+  static Service & Instance()
   {
-    if (!m_instance)
-      m_instance = new Service();
-    return m_instance;
+    static Service service;
+    return service;
+  }
+
+  static void InstallHook()
+  {
+    if (Instance().m_mouseHook)
+      RemoveHook();
+    Instance().m_mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _LowLevelMouseProc, NULL, 0);
+  }
+
+  static void RemoveHook()
+  {
+    if (Instance().m_mouseHook)
+    {
+      UnhookWindowsHookEx(Instance().m_mouseHook);
+      Instance().m_mouseHook = NULL;
+    }
   }
 
   bool Initialize(ICapture * captureDevice);
@@ -52,12 +68,15 @@ public:
 private:
   bool InitPointers();
 
-  static Service * m_instance;
   int m_tryTarget;
   int m_lastTryCount;
 
   Service();
   ~Service();
+
+  HHOOK m_mouseHook;
+  LRESULT LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam);
+  static LRESULT WINAPI _LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) { return Service::Instance().LowLevelMouseProc(nCode, wParam, lParam); }
 
   bool ReInit(volatile char * flags);
 
@@ -77,7 +96,7 @@ private:
   uint64_t      m_dataOffset[MAX_FRAMES];
   int           m_frameIndex;
 
-  static DWORD WINAPI _CursorThread(LPVOID lpParameter) { return ((Service *)lpParameter)->CursorThread(); }
+  static DWORD WINAPI _CursorThread(LPVOID lpParameter) { return Service::Instance().CursorThread(); }
   DWORD CursorThread();
 
   HANDLE           m_cursorThread;

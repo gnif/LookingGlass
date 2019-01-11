@@ -34,11 +34,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <iostream>
 
 int parseArgs(struct StartupArgs & args);
-int run(struct StartupArgs & args);
+static DWORD WINAPI CaptureThread(LPVOID lpParameter);
+int run();
 
 void doHelp();
 void doLicense();
 
+bool running = true;
 bool consoleActive = false;
 void setupConsole();
 
@@ -50,6 +52,7 @@ struct StartupArgs
   const char * captureDevice;
   CaptureOptions captureOptions;
 };
+struct StartupArgs args;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam, int iCmdShow)
 {
@@ -57,21 +60,41 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
   TraceUtil::Initialize();
   CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
-  struct StartupArgs args;
   args.foreground = false;
   args.captureDevice = NULL;
-
   int ret = parseArgs(args);
-  if (ret == 0)
+  if (ret != 0)
+    fprintf(stderr, "Failed to parse command line arguments\n");
+  else
   {
-    ret = run(args);
-    if (ret != 0)
+    if (args.foreground)
+      setupConsole();
+
+    Service::InstallHook();
+    HANDLE captureThread = CreateThread(NULL, 0, CaptureThread, NULL, 0, NULL);
+    while (running)
     {
-      if (!args.foreground)
+      MSG msg;
+      BOOL bRet = GetMessage(&msg, NULL, 0, 0);
+      if (bRet == -1 || bRet == 0)
       {
-        setupConsole();
-        fprintf(stderr, "An error occurred, re-run in forground mode (-f) for more information\n");
+        ret = msg.wParam;
+        break;
       }
+      DispatchMessage(&msg);
+    }
+    Service::RemoveHook();
+    running = false;
+    ret = WaitForSingleObject(captureThread, INFINITE);
+    CloseHandle(captureThread);
+  }
+
+  if (ret != 0)
+  {
+    if (!args.foreground)
+    {
+      setupConsole();
+      fprintf(stderr, "An error occurred, re-run in forground mode (-f) for more information\n");
     }
   }
 
@@ -85,11 +108,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdParam
   return ret;
 }
 
-int run(struct StartupArgs & args)
+static DWORD WINAPI CaptureThread(LPVOID lpParameter)
 {
-  if (args.foreground)
-    setupConsole();
+  int ret = 0;
+  while (running)
+  {
+    ret = run();
+    if (ret != 0)
+      break;
+  }
+  running = false;
+  return ret;
+}
 
+int run()
+{
   /* increase the system timer resolution */
   ULONG currentRes;
   NtSetTimerResolution(0, TRUE, &currentRes);
@@ -124,15 +157,15 @@ int run(struct StartupArgs & args)
     return -1;
   }
 
-  Service *svc = svc->Get();
-  if (!svc->Initialize(captureDevice))
+  Service &svc = Service::Instance();
+  if (!svc.Initialize(captureDevice))
     return -1;
 
   int retry = 0;
   bool running = true;
   while (running)
   {
-    switch (svc->Process())
+    switch (svc.Process())
     {
       case PROCESS_STATUS_OK:
         retry = 0;
@@ -152,7 +185,7 @@ int run(struct StartupArgs & args)
     }
   }
 
-  svc->DeInitialize();
+  svc.DeInitialize();
 
   if (task)
     AvRevertMmThreadCharacteristics(task);

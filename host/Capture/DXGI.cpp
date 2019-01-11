@@ -539,8 +539,6 @@ unsigned int Capture::DXGI::Capture()
       cursor.w        = shapeInfo.Width;
       cursor.h        = shapeInfo.Height;
       cursor.pitch    = shapeInfo.Pitch;
-      m_hotSpot.x     = shapeInfo.HotSpot.x;
-      m_hotSpot.y     = shapeInfo.HotSpot.y;
     }
 
     // if we have a mouse update
@@ -554,24 +552,6 @@ unsigned int Capture::DXGI::Capture()
         cursor.hasPos = true;
         cursor.x      = m_lastCursorX = frameInfo.PointerPosition.Position.x;
         cursor.y      = m_lastCursorY = frameInfo.PointerPosition.Position.y;
-      }
-    }
-    else
-    {
-      // always report the mouse position to prevent the guest losing sync (ie: dragging windows)
-      POINT curPos;
-      if (GetCursorPos(&curPos))
-      {
-        curPos.x -= m_hotSpot.x;
-        curPos.y -= m_hotSpot.y;
-
-        if (curPos.x != m_lastCursorX || curPos.y != m_lastCursorY)
-        {
-          ret |= GRAB_STATUS_CURSOR;
-          cursor.hasPos  = true;
-          cursor.x       = m_lastCursorX = curPos.x;
-          cursor.y       = m_lastCursorY = curPos.y;
-        }
       }
     }
 

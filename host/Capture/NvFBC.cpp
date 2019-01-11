@@ -41,6 +41,7 @@ NvFBC::NvFBC() :
   m_optNoCrop(false),
   m_optNoWait(false),
   m_initialized(false),
+  m_first(true),
   m_hDLL(NULL),
   m_nvFBC(NULL)
 {
@@ -60,6 +61,7 @@ bool NvFBC::Initialize(CaptureOptions * options)
   if (m_initialized)
     DeInitialize();
 
+  m_first     = true;
   m_options   = options;
   m_optNoCrop = false;
 
@@ -345,7 +347,11 @@ unsigned int Capture::NvFBC::Capture()
     return GRAB_STATUS_REINIT;
   }
 
-  return GRAB_STATUS_OK | GRAB_STATUS_FRAME;
+  // turn off the cursor on the first frame as NvFBC is drawing it
+  if (m_first)
+    return GRAB_STATUS_OK | GRAB_STATUS_FRAME | GRAB_STATUS_CURSOR;
+  else
+    return GRAB_STATUS_OK | GRAB_STATUS_FRAME;
 }
 
 bool Capture::NvFBC::GetCursor(CursorInfo & cursor)
@@ -353,6 +359,13 @@ bool Capture::NvFBC::GetCursor(CursorInfo & cursor)
   cursor.hasShape = false;
   cursor.hasPos   = false;
   cursor.visible  = false;
+
+  if (m_first)
+  {
+    m_first = false;
+    return true;
+  }
+
   return false;
 }
 

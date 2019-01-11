@@ -27,8 +27,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "Util.h"
 #include "CaptureFactory.h"
 
-Service * Service::m_instance = NULL;
-
 Service::Service() :
   m_initialized(false),
   m_memory(NULL),
@@ -41,10 +39,39 @@ Service::Service() :
 {
   m_consoleSessionID = WTSGetActiveConsoleSessionId();
   m_ivshmem = IVSHMEM::Get();
+
+  if (!m_ivshmem->Initialize())
+    throw "IVSHMEM failed to initalize";
+
+  if (m_ivshmem->GetSize() < sizeof(KVMFRHeader))
+    throw "Shared memory is not large enough for the KVMFRHeader";
+
+  m_memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
+  if (!m_memory)
+    throw "Failed to get IVSHMEM memory";
+
+  if (!InitPointers())
+    throw "Failed to initialize the shared memory pointers";
 }
 
 Service::~Service()
 {
+  DeInitialize();
+}
+
+LRESULT Service::LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+  if (nCode == HC_ACTION && wParam == WM_MOUSEMOVE)
+  {
+    MSLLHOOKSTRUCT *msg = (MSLLHOOKSTRUCT *)lParam;
+    volatile KVMFRCursor * cursor = &(m_shmHeader->cursor);
+    volatile char * flags = (volatile char *)&(cursor->flags);
+
+    cursor->x = msg->pt.x;
+    cursor->y = msg->pt.y;
+    INTERLOCKED_OR8(flags, KVMFR_CURSOR_FLAG_POS);
+  }
+  return CallNextHookEx(m_mouseHook, nCode, wParam, lParam);
 }
 
 bool Service::Initialize(ICapture * captureDevice)
@@ -52,35 +79,8 @@ bool Service::Initialize(ICapture * captureDevice)
   if (m_initialized)
     DeInitialize();
 
-  m_tryTarget  = 0;
-  m_capture = captureDevice;
-  if (!m_ivshmem->Initialize())
-  {
-    DEBUG_ERROR("IVSHMEM failed to initalize");
-    DeInitialize();
-    return false;
-  }
-
-  if (m_ivshmem->GetSize() < sizeof(KVMFRHeader))
-  {
-    DEBUG_ERROR("Shared memory is not large enough for the KVMFRHeader");
-    DeInitialize();
-    return false;
-  }
-
-  m_memory = static_cast<uint8_t*>(m_ivshmem->GetMemory());
-  if (!m_memory)
-  {
-    DEBUG_ERROR("Failed to get IVSHMEM memory");
-    DeInitialize();
-    return false;
-  }
-
-  if (!InitPointers())
-  {
-    DeInitialize();
-    return false;
-  }
+  m_tryTarget = 0;
+  m_capture   = captureDevice;
 
   if (m_capture->GetMaxFrameSize() > m_frameSize)
   {
@@ -90,7 +90,7 @@ bool Service::Initialize(ICapture * captureDevice)
   }
 
   // Create the cursor thread
-  m_cursorThread = CreateThread(NULL, 0, _CursorThread, this, 0, NULL);
+  m_cursorThread = CreateThread(NULL, 0, _CursorThread, NULL, 0, NULL);
   m_cursorEvent  = CreateEvent (NULL, FALSE, FALSE, L"CursorEvent");
   InitializeCriticalSection(&m_cursorCS);
 
@@ -340,21 +340,20 @@ DWORD Service::CursorThread()
     {
       volatile KVMFRCursor * cursor = &(m_shmHeader->cursor);
       // wait until the client is ready
-      while (cursor->flags != 0)
+      while ((cursor->flags & ~KVMFR_CURSOR_FLAG_POS) != 0)
       {
         Sleep(1);
         if (!m_capture)
           return 0;
       }
 
-      uint8_t flags = 0;
+      uint8_t flags = cursor->flags;
 
       if (ci.hasPos)
       {
-        // tell the client where the cursor is
-        flags |= KVMFR_CURSOR_FLAG_POS;
         cursor->x = ci.x;
         cursor->y = ci.y;
+        flags |= KVMFR_CURSOR_FLAG_POS;
       }
 
       if (ci.hasShape)

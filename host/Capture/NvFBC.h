@@ -59,6 +59,7 @@ namespace Capture
     bool m_optNoWait;
 
     bool m_initialized;
+    bool m_first;
     HMODULE  m_hDLL;
 
     NvFBC_CreateFunctionExType    m_fnCreateEx;
