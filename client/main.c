@@ -249,12 +249,39 @@ int cursorThread(void * unused)
   while(state.running)
   {
     // poll until we have cursor data
-    if(!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
+    if(!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE) &&
+        !(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_POS))
     {
       if (!state.running)
         return 0;
 
       usleep(1);
+      continue;
+    }
+
+    // if the cursor was moved
+    bool moved = false;
+    if (state.shm->cursor.flags & KVMFR_CURSOR_FLAG_POS)
+    {
+      state.cursor.x      = state.shm->cursor.x;
+      state.cursor.y      = state.shm->cursor.y;
+      state.haveCursorPos = true;
+      moved               = true;
+    }
+
+    // if this was only a move event
+    if (!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
+    {
+      // turn off the pos flag, trigger the event and continue
+      __sync_and_and_fetch(&state.shm->cursor.flags, ~KVMFR_CURSOR_FLAG_POS);
+
+      state.lgr->on_mouse_event
+      (
+        state.lgrData,
+        state.cursorVisible,
+        state.cursor.x,
+        state.cursor.y
+      );
       continue;
     }
 
@@ -309,14 +336,7 @@ int cursorThread(void * unused)
     state.shm->cursor.flags = 0;
 
     bool showCursor = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
-    if (header.flags & KVMFR_CURSOR_FLAG_POS)
-    {
-      state.cursor.x      = header.x;
-      state.cursor.y      = header.y;
-      state.haveCursorPos = true;
-    }
-
-    if (showCursor != state.cursorVisible || header.flags & KVMFR_CURSOR_FLAG_POS)
+    if (showCursor != state.cursorVisible || moved)
     {
       state.cursorVisible = showCursor;
       state.lgr->on_mouse_event
