@@ -490,6 +490,7 @@ bool spice_on_inputs_channel_read()
       while(spice.mouse.queueLen && sent < 4)
       {
         SpiceMsgcMouseMotion *msg = &spice.mouse.queue[spice.mouse.rpos];
+        msg->button_state = spice.mouse.buttonState;
         if (!spice_write_msg(channel, SPICE_MSGC_INPUTS_MOUSE_MOTION, msg, sizeof(SpiceMsgcMouseMotion)))
         {
           DEBUG_ERROR("failed to send post ack");
@@ -879,9 +880,8 @@ bool spice_mouse_motion(int32_t x, int32_t y)
 
     SpiceMsgcMouseMotion *msg =
       &spice.mouse.queue[spice.mouse.wpos++];
-    msg->x            = x;
-    msg->y            = y;
-    msg->button_state = spice.mouse.buttonState;
+    msg->x = x;
+    msg->y = y;
 
     if (spice.mouse.wpos == SPICE_MOUSE_QUEUE_SIZE)
       spice.mouse.wpos = 0;
