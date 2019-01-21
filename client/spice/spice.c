@@ -36,7 +36,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <arpa/inet.h>
 
 #include <spice/protocol.h>
-#include <spice/error_codes.h>
 
 #include "messages.h"
 #include "rsa.h"
@@ -616,7 +615,7 @@ bool spice_connect_channel(struct SpiceChannel * channel)
     return false;
   }
 
-  if (reply.error != SPICEC_ERROR_CODE_SUCCESS)
+  if (reply.error != SPICE_LINK_ERR_OK)
   {
     DEBUG_ERROR("server replied with error %u", reply.error);
     spice_disconnect_channel(channel);
