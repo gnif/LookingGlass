@@ -138,7 +138,7 @@ bool    spice_discard  (const struct SpiceChannel * channel, ssize_t size);
 
 // ============================================================================
 
-bool spice_connect(const char * host, const short port, const char * password)
+bool spice_connect(const char * host, const unsigned short port, const char * password)
 {
   strncpy(spice.password, password, sizeof(spice.password) - 1);
   memset(&spice.addr, 0, sizeof(spice.addr));
