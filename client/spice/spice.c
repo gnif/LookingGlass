@@ -156,7 +156,7 @@ bool spice_connect(const char * host, const unsigned short port, const char * pa
     inet_pton(spice.family, host, &spice.addr.in.sin_addr);
     spice.addr.in.sin_family = spice.family;
     spice.addr.in.sin_port   = htons(port);
-    DEBUG_INFO("Remote: %s:%d", host, port);
+    DEBUG_INFO("Remote: %s:%u", host, port);
   }
 
   LG_LOCK_INIT(spice.mouse.lock);
