@@ -723,7 +723,6 @@ GrabStatus Capture::DXGI::DiscardFrame()
 
 GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 {
-  GrabStatus               result;
   D3D11_MAPPED_SUBRESOURCE mapping;
 
   HRESULT status;
@@ -746,8 +745,6 @@ GrabStatus Capture::DXGI::GrabFrameRaw(FrameInfo & frame)
 
 GrabStatus Capture::DXGI::GrabFrameYUV420(struct FrameInfo & frame)
 {
-  GrabStatus  result;
-
   uint8_t * data   = (uint8_t *)frame.buffer;
   size_t    remain = frame.bufferSize;
   for(int i = 0; i < 3; ++i)

@@ -67,8 +67,8 @@ LRESULT Service::LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
     volatile KVMFRCursor * cursor = &(m_shmHeader->cursor);
     volatile char * flags = (volatile char *)&(cursor->flags);
 
-    cursor->x = msg->pt.x;
-    cursor->y = msg->pt.y;
+    cursor->x = (int16_t)msg->pt.x;
+    cursor->y = (int16_t)msg->pt.y;
     INTERLOCKED_OR8(flags, KVMFR_CURSOR_FLAG_POS);
   }
   return CallNextHookEx(m_mouseHook, nCode, wParam, lParam);
