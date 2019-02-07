@@ -332,21 +332,25 @@ bool DXGI::Initialize(CaptureOptions * options)
     IDXGIOutput1Ptr output1 = m_output;
     if (!output1)
     {
-      // we try this twice in case we still get an error on re-initialization
-      for (int i = 0; i < 2; ++i)
-      {
-        status = output1->DuplicateOutput(m_device, &m_dup);
-        if (SUCCEEDED(status))
-          break;
-        Sleep(200);
-      }
+      DEBUG_ERROR("Failed to get IDXGIOutput1");
+      DeInitialize();
+      return false;
+    }
 
-      if (FAILED(status))
-      {
-        DEBUG_WINERROR("DuplicateOutput Failed", status);
-        DeInitialize();
-        return false;
-      }
+    // we try this twice in case we still get an error on re-initialization
+    for (int i = 0; i < 2; ++i)
+    {
+      status = output1->DuplicateOutput(m_device, &m_dup);
+      if (SUCCEEDED(status))
+        break;
+      Sleep(200);
+    }
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("DuplicateOutput Failed", status);
+      DeInitialize();
+      return false;
     }
   }
 
