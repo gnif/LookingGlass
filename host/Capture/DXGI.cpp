@@ -208,23 +208,14 @@ bool DXGI::Initialize(CaptureOptions * options)
   IDXGIAdapter1Ptr adapter;
   for (int i = 0; m_dxgiFactory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; i++)
   {
-    IDXGIOutputPtr output;
-    for (int i = 0; adapter->EnumOutputs(i, &output) != DXGI_ERROR_NOT_FOUND; i++)
+    for (int i = 0; adapter->EnumOutputs(i, &m_output) != DXGI_ERROR_NOT_FOUND; i++)
     {
       DXGI_OUTPUT_DESC outputDesc;
-      output->GetDesc(&outputDesc);
+      m_output->GetDesc(&outputDesc);
       if (!outputDesc.AttachedToDesktop)
       {
-        output = NULL;
+        m_output = NULL;
         continue;
-      }
-
-      m_output = output;
-      if (!m_output)
-      {
-        DEBUG_ERROR("Failed to get IDXGIOutput1");
-        DeInitialize();
-        return false;
       }
 
       DXGI_ADAPTER_DESC1 adapterDesc;
@@ -308,26 +299,55 @@ bool DXGI::Initialize(CaptureOptions * options)
 
   dxgi->SetGPUThreadPriority(7);
 
-  // we try this twice in case we still get an error on re-initialization
-  for (int i = 0; i < 2; ++i)
+  // first try to use the newer API
+  IDXGIOutput5Ptr output5 = m_output;
+  if (output5)
   {
-    const DXGI_FORMAT supportedFormats[] = {
-      DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_FORMAT_R8G8B8A8_UNORM,
-      DXGI_FORMAT_R10G10B10A2_UNORM
-    };
+    // we try this twice in case we still get an error on re-initialization
+    for (int i = 0; i < 2; ++i)
+    {
+      const DXGI_FORMAT supportedFormats[] = {
+        DXGI_FORMAT_B8G8R8A8_UNORM,
+        DXGI_FORMAT_R8G8B8A8_UNORM,
+        DXGI_FORMAT_R10G10B10A2_UNORM
+      };
 
-    status = m_output->DuplicateOutput1(m_device, 0, _countof(supportedFormats), supportedFormats, &m_dup);
-    if (SUCCEEDED(status))
-      break;
-    Sleep(200);
+      status = output5->DuplicateOutput1(m_device, 0, _countof(supportedFormats), supportedFormats, &m_dup);
+      if (SUCCEEDED(status))
+        break;
+      Sleep(200);
+    }
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("DuplicateOutput1 Failed", status);
+      DeInitialize();
+      return false;
+    }
   }
-
-  if (FAILED(status))
+  else
   {
-    DEBUG_WINERROR("DuplicateOutput1 Failed", status);
-    DeInitialize();
-    return false;
+    DEBUG_WARN("IDXGIOutput5 is not available, please update windows for improved performance!");
+    DEBUG_WARN("Falling back to IDXIGOutput1");
+    IDXGIOutput1Ptr output1 = m_output;
+    if (!output1)
+    {
+      // we try this twice in case we still get an error on re-initialization
+      for (int i = 0; i < 2; ++i)
+      {
+        status = output1->DuplicateOutput(m_device, &m_dup);
+        if (SUCCEEDED(status))
+          break;
+        Sleep(200);
+      }
+
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("DuplicateOutput Failed", status);
+        DeInitialize();
+        return false;
+      }
+    }
   }
 
   DXGI_OUTDUPL_DESC dupDesc;

@@ -93,7 +93,7 @@ namespace Capture
     ID3D11DevicePtr                 m_device;
     D3D_FEATURE_LEVEL               m_featureLevel;
     ID3D11DeviceContextPtr          m_deviceContext;
-    IDXGIOutput5Ptr                 m_output;
+    IDXGIOutputPtr                  m_output;
     IDXGIOutputDuplicationPtr       m_dup;
     bool                            m_releaseFrame;
     ID3D11Texture2DPtr              m_texture[3];
