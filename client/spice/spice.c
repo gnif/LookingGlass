@@ -73,17 +73,12 @@ struct SpiceKeyboard
   uint32_t modifiers;
 };
 
-#define SPICE_MOUSE_QUEUE_SIZE 64
-
 struct SpiceMouse
 {
   uint32_t buttonState;
 
   int                  sentCount;
-  SpiceMsgcMouseMotion queue[SPICE_MOUSE_QUEUE_SIZE];
   int                  rpos, wpos;
-  int                  queueLen;
-  LG_Lock              lock;
 };
 
 union SpiceAddr
@@ -158,8 +153,6 @@ bool spice_connect(const char * host, const unsigned short port, const char * pa
     DEBUG_INFO("Remote: %s:%u", host, port);
   }
 
-  LG_LOCK_INIT(spice.mouse.lock);
-
   spice.channelID = 0;
   if (!spice_connect_channel(&spice.scMain))
   {
@@ -176,8 +169,6 @@ void spice_disconnect()
 {
   spice_disconnect_channel(&spice.scMain  );
   spice_disconnect_channel(&spice.scInputs);
-
-  LG_LOCK_FREE(spice.mouse.lock);
 
   spice.sessionID = 0;
 }
@@ -484,29 +475,12 @@ bool spice_on_inputs_channel_read()
     case SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
     {
       DEBUG_PROTO("SPICE_MSG_INPUTS_MOUSE_MOTION_ACK");
-      int sent = 0;
-      LG_LOCK(spice.mouse.lock);
-      while(spice.mouse.queueLen && sent < 4)
+      const int count = __sync_add_and_fetch(&spice.mouse.sentCount, SPICE_INPUT_MOTION_ACK_BUNCH);
+      if (count < 0)
       {
-        SpiceMsgcMouseMotion *msg = &spice.mouse.queue[spice.mouse.rpos];
-        msg->button_state = spice.mouse.buttonState;
-        if (!spice_write_msg(channel, SPICE_MSGC_INPUTS_MOUSE_MOTION, msg, sizeof(SpiceMsgcMouseMotion)))
-        {
-          DEBUG_ERROR("failed to send post ack");
-          spice.mouse.sentCount = sent;
-          LG_UNLOCK(spice.mouse.lock);
-          return false;
-        }
-
-        if (++spice.mouse.rpos == SPICE_MOUSE_QUEUE_SIZE)
-          spice.mouse.rpos = 0;
-
-        ++sent;
-        --spice.mouse.queueLen;
+        DEBUG_ERROR("comms failure, too many mouse motion ACKs recieved");
+        return false;
       }
-
-      spice.mouse.sentCount = sent;
-      LG_UNLOCK(spice.mouse.lock);
       return true;
     }
   }
@@ -853,6 +827,7 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
   msg.button_state = spice.mouse.buttonState;
   msg.display_id   = 0;
 
+  __sync_fetch_and_add(&spice.mouse.sentCount, 1);
   return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_POSITION, &msg, sizeof(msg));
 }
 
@@ -867,36 +842,12 @@ bool spice_mouse_motion(int32_t x, int32_t y)
     return false;
   }
 
-  LG_LOCK(spice.mouse.lock);
-  if (spice.mouse.sentCount == 4)
-  {
-    if (spice.mouse.queueLen == SPICE_MOUSE_QUEUE_SIZE)
-    {
-      DEBUG_ERROR("mouse motion ringbuffer full!");
-      LG_UNLOCK(spice.mouse.lock);
-      return false;
-    }
-
-    SpiceMsgcMouseMotion *msg =
-      &spice.mouse.queue[spice.mouse.wpos++];
-    msg->x = x;
-    msg->y = y;
-
-    if (spice.mouse.wpos == SPICE_MOUSE_QUEUE_SIZE)
-      spice.mouse.wpos = 0;
-
-    ++spice.mouse.queueLen;
-    LG_UNLOCK(spice.mouse.lock);
-    return true;
-  }
-
   SpiceMsgcMouseMotion msg;
   msg.x            = x;
   msg.y            = y;
   msg.button_state = spice.mouse.buttonState;
 
-  ++spice.mouse.sentCount;
-  LG_UNLOCK(spice.mouse.lock);
+  __sync_fetch_and_add(&spice.mouse.sentCount, 1);
   return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_MOTION, &msg, sizeof(msg));
 }
 
