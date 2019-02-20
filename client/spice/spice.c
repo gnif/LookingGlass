@@ -261,10 +261,10 @@ bool spice_process_ack(struct SpiceChannel * channel)
 
 bool spice_on_common_read(struct SpiceChannel * channel, SpiceDataHeader * header, bool * handled)
 {
+  *handled = false;
   if (!spice_read(channel, header, sizeof(SpiceDataHeader)))
   {
     DEBUG_ERROR("read failure");
-    *handled = false;
     return false;
   }
 
@@ -275,11 +275,8 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceDataHeader * heade
 #endif
 
   if (!channel->initDone)
-  {
-    *handled = false;
-
     return true;
-  }
+
   switch(header->type)
   {
     case SPICE_MSG_MIGRATE:
@@ -360,7 +357,6 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceDataHeader * heade
     }
   }
 
-  *handled = false;
   return true;
 }
 
@@ -402,16 +398,61 @@ bool spice_on_main_channel_read()
     }
 
     spice.sessionID = msg.session_id;
-    if (!spice_connect_channel(&spice.scInputs))
-    {
-      DEBUG_ERROR("failed to connect inputs channel");
-      return false;
-    }
-
     if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT && !spice_mouse_mode(false))
     {
       DEBUG_ERROR("failed to set mouse mode");
       return false;
+    }
+
+    if (!spice_write_msg(channel, SPICE_MSGC_MAIN_ATTACH_CHANNELS, NULL, 0))
+    {
+      spice_disconnect();
+      DEBUG_ERROR("failed to ask for channel list");
+      return false;
+    }
+
+    return true;
+  }
+
+  if (header.type == SPICE_MSG_MAIN_CHANNELS_LIST)
+  {
+    DEBUG_PROTO("SPICE_MSG_MAIN_CHANNELS_LIST");
+
+    SpiceMainChannelsList msg;
+    if (!spice_read(channel, &msg, sizeof(msg)))
+    {
+      DEBUG_ERROR("Failed to read channel list msg");
+      spice_disconnect();
+      return false;
+    }
+
+    // documentation doesn't state that the array is null terminated but it seems that it is
+    uint8_t channels[msg.num_of_channels+1];
+    if (!spice_read(channel, &channels, msg.num_of_channels+1))
+    {
+      DEBUG_ERROR("Failed to read channel list vector");
+      spice_disconnect();
+      return false;
+    }
+
+    for(int i = 0; i < msg.num_of_channels; ++i)
+    {
+      DEBUG_PROTO("channel %d = %u", i, channels[i]);
+      if (channels[i] == SPICE_CHANNEL_INPUTS)
+      {
+        if (spice.scInputs.connected)
+        {
+          DEBUG_ERROR("inputs channel already connected");
+          spice_disconnect();
+          return false;
+        }
+
+        if (!spice_connect_channel(&spice.scInputs))
+        {
+          DEBUG_ERROR("failed to connect inputs channel");
+          return false;
+        }
+      }
     }
 
     return true;
@@ -698,11 +739,14 @@ bool spice_write_msg(struct SpiceChannel * channel, uint32_t type, const void * 
     return false;
   }
 
-  if (spice_write(channel, buffer, size) != size)
+  if (buffer && size)
   {
-    DEBUG_ERROR("failed to write message body");
-    LG_UNLOCK(channel->lock);
-    return false;
+    if (spice_write(channel, buffer, size) != size)
+    {
+      DEBUG_ERROR("failed to write message body");
+      LG_UNLOCK(channel->lock);
+      return false;
+    }
   }
 
   LG_UNLOCK(channel->lock);
@@ -798,7 +842,7 @@ bool spice_key_up(uint32_t code)
 bool spice_mouse_mode(bool server)
 {
   DEBUG_MOUSE("%s", server ? "server" : "client");
-  if (!spice.scInputs.connected)
+  if (!spice.scMain.connected)
   {
     DEBUG_ERROR("not connected");
     return false;

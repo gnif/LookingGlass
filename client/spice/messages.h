@@ -40,6 +40,13 @@ typedef struct SpiceMsgMainInit
 }
 SpiceMsgMainInit;
 
+typedef struct SpiceMsgMainChannelsList
+{
+  uint32_t num_of_channels;
+  //uint8_t channels[num_of_channels]
+}
+SpiceMainChannelsList;
+
 typedef struct SpiceMsgcMainMouseModeRequest
 {
   uint16_t mouse_mode;
