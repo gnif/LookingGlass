@@ -862,7 +862,8 @@ int run()
     )
   );
 
-  if (state.window == NULL) {
+  if (state.window == NULL)
+  {
     DEBUG_ERROR("Could not create an SDL window: %s\n", SDL_GetError());
     return 1;
   }
