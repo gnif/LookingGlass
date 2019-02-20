@@ -40,10 +40,17 @@ typedef struct SpiceMsgMainInit
 }
 SpiceMsgMainInit;
 
+typedef struct SpiceChannelID
+{
+  uint8_t type;
+  uint8_t channel_id;
+}
+SpiceChannelID;
+
 typedef struct SpiceMsgMainChannelsList
 {
   uint32_t num_of_channels;
-  //uint8_t channels[num_of_channels]
+  //SpiceChannelID channels[num_of_channels]
 }
 SpiceMainChannelsList;
 

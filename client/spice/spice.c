@@ -442,8 +442,8 @@ bool spice_on_main_channel_read()
     }
 
     // documentation doesn't state that the array is null terminated but it seems that it is
-    uint8_t channels[msg.num_of_channels+1];
-    if (!spice_read(channel, &channels, msg.num_of_channels+1))
+    SpiceChannelID channels[msg.num_of_channels];
+    if (!spice_read(channel, &channels, msg.num_of_channels * sizeof(SpiceChannelID)))
     {
       DEBUG_ERROR("Failed to read channel list vector");
       spice_disconnect();
@@ -452,8 +452,8 @@ bool spice_on_main_channel_read()
 
     for(int i = 0; i < msg.num_of_channels; ++i)
     {
-      DEBUG_PROTO("channel %d = %u", i, channels[i]);
-      if (channels[i] == SPICE_CHANNEL_INPUTS)
+      DEBUG_PROTO("channel %d = %u", i, channels[i].type);
+      if (channels[i].type == SPICE_CHANNEL_INPUTS)
       {
         if (spice.scInputs.connected)
         {
