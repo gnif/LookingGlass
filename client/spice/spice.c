@@ -95,6 +95,8 @@ struct Spice
   short           family;
   union SpiceAddr addr;
 
+  bool     hasAgent;
+  uint32_t agentTokens;
   uint32_t sessionID;
   uint32_t channelID;
   struct   SpiceChannel scMain;
@@ -123,6 +125,9 @@ bool spice_process_ack(struct SpiceChannel * channel);
 bool spice_on_common_read        (struct SpiceChannel * channel, SpiceDataHeader * header, bool * handled);
 bool spice_on_main_channel_read  ();
 bool spice_on_inputs_channel_read();
+
+bool spice_agent_connect();
+void spice_agent_disconnect();
 
 bool    spice_read     (const struct SpiceChannel * channel,       void * buffer, const ssize_t size);
 ssize_t spice_write    (const struct SpiceChannel * channel, const void * buffer, const ssize_t size);
@@ -398,6 +403,16 @@ bool spice_on_main_channel_read()
     }
 
     spice.sessionID = msg.session_id;
+
+    spice.agentTokens = msg.agent_tokens;
+    if (msg.agent_connected)
+    {
+      spice.hasAgent = true;
+      spice_agent_connect();
+    }
+    else
+      spice.hasAgent = false;
+
     if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT && !spice_mouse_mode(false))
     {
       DEBUG_ERROR("failed to set mouse mode");
@@ -450,11 +465,35 @@ bool spice_on_main_channel_read()
         if (!spice_connect_channel(&spice.scInputs))
         {
           DEBUG_ERROR("failed to connect inputs channel");
+          spice_disconnect();
           return false;
         }
       }
     }
 
+    return true;
+  }
+
+  if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED)
+  {
+    spice.hasAgent = true;
+    spice_agent_connect();
+    return true;
+  }
+
+  if (header.type == SPICE_MSG_MAIN_AGENT_DISCONNECTED)
+  {
+    uint32_t error;
+    if (!spice_read(channel, &error, sizeof(error)))
+    {
+      DEBUG_ERROR("failed to read agent disconnect error code");
+      spice_disconnect();
+      return false;
+    }
+
+    DEBUG_INFO("Spice agent disconnected, error: %u", error);
+    spice.hasAgent = false;
+    spice_agent_disconnect();
     return true;
   }
 
@@ -695,6 +734,30 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
   }
   channel->connected = false;
   LG_LOCK_FREE(channel->lock);
+}
+
+// ============================================================================
+
+bool spice_agent_connect()
+{
+  DEBUG_INFO("Spice agent available, sending start");
+
+  if (!spice_write_msg(&spice.scMain, SPICE_MSGC_MAIN_AGENT_START, &spice.agentTokens, sizeof(spice.agentTokens)))
+  {
+    DEBUG_ERROR("failed to send agent start message");
+    return false;
+  }
+
+  //todo, agent setup
+
+  return true;
+}
+
+// ============================================================================
+
+void spice_agent_disconnect()
+{
+  //
 }
 
 // ============================================================================
