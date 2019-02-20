@@ -46,7 +46,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct AppState
 {
   bool                 running;
-  bool                 started;
   bool                 keyDown[SDL_NUM_SCANCODES];
 
   bool                 haveSrcSize;
@@ -453,11 +452,6 @@ int frameThread(void * unused)
     }
 
     ++state.frameCount;
-    if (!state.started)
-    {
-      state.started = true;
-      updatePositionInfo();
-    }
   }
 
   state.running = false;
@@ -884,6 +878,9 @@ int run()
 
   // ensure the initial window size is stored in the state
   SDL_GetWindowSize(state.window, &state.windowW, &state.windowH);
+
+  // ensure renderer viewport is aware of the current window size
+  updatePositionInfo();
 
   // set the compositor hint to bypass for low latency
   SDL_SysWMinfo wminfo;
