@@ -1188,11 +1188,19 @@ bool spice_read_nl(const struct SpiceChannel * channel, void * buffer, const ssi
     return false;
   }
 
-  ssize_t len = read(channel->socket, buffer, size);
-  if (len != size)
+  size_t    left = size;
+  uint8_t * buf  = (uint8_t *)buffer;
+  while(left)
   {
-    DEBUG_ERROR("incomplete write");
-    return false;
+    ssize_t len = read(channel->socket, buf, left);
+    if (len <= 0)
+    {
+      if (len == 0)
+        DEBUG_ERROR("remote end closd connection after %ld byte(s)", size - left);
+      return false;
+    }
+    left -= len;
+    buf  += len;
   }
 
   return true;
