@@ -59,7 +59,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define SPICE_AGENT_TOKENS_MAX 10
 
-
 // ============================================================================
 
 // internal structures
@@ -904,8 +903,6 @@ bool spice_agent_send_caps(bool request)
 
 bool spice_agent_write_msg(uint32_t type, const void * buffer, const ssize_t size)
 {
-  DEBUG_PROTO("agent_write: t=%d, b=%ld", type, size);
-
   VDAgentMessage msg;
   msg.protocol = VD_AGENT_PROTOCOL;
   msg.type     = type;
@@ -977,8 +974,6 @@ bool spice_write_msg_nl(struct SpiceChannel * channel, uint32_t type, const void
     return false;
   }
 
-  DEBUG_PROTO("write: t=%u, b=%ld", type, size);
-
   SpiceMiniDataHeader header;
   ++channel->serial;
   header.type     = type;
@@ -1044,7 +1039,6 @@ bool spice_discard_nl(const struct SpiceChannel * channel, ssize_t size)
       free(c);
       return false;
     }
-
     left -= len;
   }
 
