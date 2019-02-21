@@ -18,8 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 
-//#define DEBUG_SPICE
-
 #include "spice.h"
 #include "utils.h"
 #include "debug.h"
@@ -42,6 +40,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <spice/protocol.h>
 #include <spice/vd_agent.h>
 
+#include <SDL2/SDL.h>
+
 #include "messages.h"
 #include "rsa.h"
 
@@ -57,7 +57,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   #define DEBUG_KEYBOARD(fmt, args...) do {} while(0)
 #endif
 
-#define SPICE_AGENT_TOKENS_MAX 10
+// we don't really need flow control because we are all local
+// instead do what the spice-gtk library does and provide the largest
+// possible number
+#define SPICE_AGENT_TOKENS_MAX ~0
 
 // ============================================================================
 
@@ -103,7 +106,8 @@ struct Spice
   union SpiceAddr addr;
 
   bool     hasAgent;
-  uint32_t agentTokens;
+  uint32_t serverTokens;
+  uint32_t clientTokens;
   uint32_t sessionID;
   uint32_t channelID;
   struct   SpiceChannel scMain;
@@ -111,6 +115,9 @@ struct Spice
 
   struct SpiceKeyboard kb;
   struct SpiceMouse    mouse;
+
+  bool cbSupported;
+  bool cbSelection;
 };
 
 // globals
@@ -418,7 +425,7 @@ bool spice_on_main_channel_read()
 
     spice.sessionID = msg.session_id;
 
-    spice.agentTokens = msg.agent_tokens;
+    spice.serverTokens = msg.agent_tokens;
     spice.hasAgent    = msg.agent_connected;
     if (spice.hasAgent && !spice_agent_connect())
     {
@@ -515,7 +522,7 @@ bool spice_on_main_channel_read()
     }
 
     spice.hasAgent    = true;
-    spice.agentTokens = num_tokens;
+    spice.serverTokens = num_tokens;
     if (!spice_agent_connect())
     {
       DEBUG_ERROR("failed to connect to spice agent");
@@ -849,8 +856,8 @@ bool spice_agent_connect()
 {
   DEBUG_INFO("Spice agent available, sending start");
 
-  const uint32_t tokens = SPICE_AGENT_TOKENS_MAX;
-  if (!spice_write_msg(&spice.scMain, SPICE_MSGC_MAIN_AGENT_START, &tokens, sizeof(tokens)))
+  spice.clientTokens = SPICE_AGENT_TOKENS_MAX;
+  if (!spice_write_msg(&spice.scMain, SPICE_MSGC_MAIN_AGENT_START, &spice.clientTokens, sizeof(spice.clientTokens)))
   {
     DEBUG_ERROR("failed to send agent start message");
     return false;
@@ -868,6 +875,14 @@ bool spice_agent_process()
 {
   VDAgentMessage msg;
 
+  #pragma pack(push,1)
+  struct Selection
+  {
+    uint8_t selection;
+    uint8_t reserved[3];
+  };
+  #pragma pack(pop)
+
   if (!spice_read_nl(&spice.scMain, &msg, sizeof(msg)))
   {
     DEBUG_ERROR("failed to read spice agent message");
@@ -880,40 +895,157 @@ bool spice_agent_process()
     return false;
   }
 
-  if (msg.type == VD_AGENT_ANNOUNCE_CAPABILITIES)
+  switch(msg.type)
   {
-    VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)malloc(msg.size);
-    memset(caps, 0, msg.size);
-
-    if (!spice_read_nl(&spice.scMain, caps, msg.size))
+    case VD_AGENT_ANNOUNCE_CAPABILITIES:
     {
-      DEBUG_ERROR("failed to read agent message payload");
+      VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)malloc(msg.size);
+      memset(caps, 0, msg.size);
+
+      if (!spice_read_nl(&spice.scMain, caps, msg.size))
+      {
+        DEBUG_ERROR("failed to read agent message payload");
+        free(caps);
+        return false;
+      }
+
+      const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg.size);
+      spice.cbSupported  = VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) ||
+                           VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_SELECTION);
+      spice.cbSelection  = VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_SELECTION);
+
+      if (spice.cbSupported)
+        DEBUG_INFO("clipboard capability detected");
+
+      if (caps->request && !spice_agent_send_caps(false))
+      {
+        free(caps);
+        return false;
+      }
+
       free(caps);
-      return false;
+      return true;
     }
 
-    const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg.size);
-    if (VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND))
+    case VD_AGENT_CLIPBOARD:
+    case VD_AGENT_CLIPBOARD_REQUEST:
+    case VD_AGENT_CLIPBOARD_GRAB:
+    case VD_AGENT_CLIPBOARD_RELEASE:
     {
-      DEBUG_INFO("clipboard capability detected");
+      uint32_t remaining = msg.size;
+      if (spice.cbSelection)
+      {
+        struct Selection selection;
+        if (!spice_read_nl(&spice.scMain, &selection, sizeof(selection)))
+        {
+          DEBUG_ERROR("failed to read the clipboard selection");
+          return false;
+        }
+        remaining -= sizeof(selection);
+      }
+
+      if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
+      {
+        DEBUG_PROTO("VD_AGENT_CLIPBOARD_RELEASE");
+        return true;
+      }
+
+      if (msg.type == VD_AGENT_CLIPBOARD || msg.type == VD_AGENT_CLIPBOARD_REQUEST)
+      {
+        uint32_t type;
+        if (!spice_read_nl(&spice.scMain, &type, sizeof(type)))
+        {
+          DEBUG_ERROR("failed to read the clipboard data type");
+          return false;
+        }
+        remaining -= sizeof(type);
+
+        if (msg.type == VD_AGENT_CLIPBOARD)
+        {
+          DEBUG_PROTO("VD_AGENT_CLIPBOARD");
+          if (type != VD_AGENT_CLIPBOARD_UTF8_TEXT)
+          {
+            DEBUG_ERROR("for some reason we were sent a non text clipboard, this shouldn't happen");
+            return false;
+          }
+
+          char * text = malloc(remaining + 1);
+          if (!spice_read_nl(&spice.scMain, text, remaining))
+          {
+            DEBUG_ERROR("failed to read the clipboard data");
+            free(text);
+            return false;
+          }
+          text[remaining] = '\0';
+
+          // dos2unix
+          char * out = malloc(remaining + 1);
+          char * p   = out;
+          for(uint32_t i = 0; i < remaining; ++i)
+          {
+            char c = text[i];
+            if (c != '\r')
+              *p++ = c;
+          }
+          *p = '\0';
+          SDL_SetClipboardText(out);
+
+          free(text);
+          return true;
+        }
+        else
+        {
+          DEBUG_PROTO("VD_AGENT_CLIPBOARD_REQUEST");
+          return true;
+        }
+      }
+      else
+      {
+        DEBUG_PROTO("VD_AGENT_CLIPBOARD_GRAB");
+        if (remaining == 0)
+          return true;
+
+        uint32_t *types = malloc(remaining);
+        if (!spice_read_nl(&spice.scMain, types, remaining))
+        {
+          DEBUG_ERROR("failed to read the clipboard grab types");
+          return false;
+        }
+
+        // there is zero documentation on the types field, it might be a bitfield
+        // but for now we are going to assume it's not.
+
+        // for now we only support text
+        if (types[0] == VD_AGENT_CLIPBOARD_UTF8_TEXT)
+        {
+          if (spice.cbSelection)
+          {
+            // Windows doesnt support this, so until it's needed no point messing with it
+            DEBUG_ERROR("Fixme!");
+            return false;
+          }
+
+          VDAgentClipboardRequest req;
+          req.type = VD_AGENT_CLIPBOARD_UTF8_TEXT;
+
+          if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
+          {
+            DEBUG_ERROR("failed to request clipboard data");
+            free(types);
+            return false;
+          }
+
+          return true;
+        }
+
+        free(types);
+        return true;
+      }
     }
-    else
-      DEBUG_INFO("no clipboard capability detected");
-
-
-    if (caps->request && !spice_agent_send_caps(false))
-    {
-      free(caps);
-      return false;
-    }
-
-    free(caps);
-    return true;
   }
 
   DEBUG_WARN("unknown agent message type %d", msg.type);
   spice_discard_nl(&spice.scMain, msg.size);
-
   return true;
 }
 
