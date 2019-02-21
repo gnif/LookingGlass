@@ -651,6 +651,8 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   channel->connected = true;
 
   uint32_t supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
+  memset(supportCaps, 0, sizeof(supportCaps));
+
   COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
   COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
