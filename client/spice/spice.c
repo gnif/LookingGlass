@@ -991,6 +991,7 @@ bool spice_agent_process()
           SDL_SetClipboardText(out);
 
           free(text);
+          free(out);
           return true;
         }
         else
