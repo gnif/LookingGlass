@@ -146,7 +146,7 @@ bool spice_agent_write_msg (uint32_t type, const void * buffer, const ssize_t si
 bool    spice_read_nl     (const struct SpiceChannel * channel, void * buffer, const ssize_t size);
 ssize_t spice_write_nl    (const struct SpiceChannel * channel, const void * buffer, const ssize_t size);
 bool    spice_discard_nl  (const struct SpiceChannel * channel, ssize_t size);
-bool    spice_write_msg_nl(      struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size);
+bool    spice_write_msg_nl(      struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size, const ssize_t extra);
 
 // ============================================================================
 
@@ -913,7 +913,7 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, const ssize_t siz
   msg.size     = size;
 
   LG_LOCK(spice.scMain.lock);
-  if (!spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, &msg, sizeof(msg)))
+  if (!spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, &msg, sizeof(msg), size))
   {
     LG_UNLOCK(spice.scMain.lock);
     DEBUG_ERROR("failed to write agent data header");
@@ -961,7 +961,7 @@ inline bool spice_write_msg(struct SpiceChannel * channel, uint32_t type, const 
   bool result;
   LG_LOCK(channel->lock);
 
-  result = spice_write_msg_nl(channel, type, buffer, size);
+  result = spice_write_msg_nl(channel, type, buffer, size, 0);
 
   LG_UNLOCK(channel->lock);
   return result;
@@ -969,7 +969,7 @@ inline bool spice_write_msg(struct SpiceChannel * channel, uint32_t type, const 
 
 // ============================================================================
 
-bool spice_write_msg_nl(struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size)
+bool spice_write_msg_nl(struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size, const ssize_t extra)
 {
   if (!channel->ready)
   {
@@ -982,7 +982,7 @@ bool spice_write_msg_nl(struct SpiceChannel * channel, uint32_t type, const void
   SpiceMiniDataHeader header;
   ++channel->serial;
   header.type     = type;
-  header.size     = size;
+  header.size     = size + extra;
 
   if (spice_write_nl(channel, &header, sizeof(header)) != sizeof(header))
   {
