@@ -138,4 +138,9 @@ SpiceMsgcMouseRelease;
 #define COMMON_SET_CAPABILITY(caps, index) \
     { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
 
+#define MAIN_CAPS_BYTES (((SPICE_MAIN_CAP_SEAMLESS_MIGRATE + 32) / 8) & ~3)
+#define MAIN_SET_CAPABILITY(caps, index) \
+    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+
+
 #pragma pack(pop)

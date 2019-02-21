@@ -134,7 +134,7 @@ bool spice_on_main_channel_read  ();
 bool spice_on_inputs_channel_read();
 
 bool spice_agent_process  ();
-bool spice_agent_connect  (bool startup);
+bool spice_agent_connect  ();
 bool spice_agent_send_caps(bool request);
 
 // thread safe read/write methods
@@ -420,8 +420,7 @@ bool spice_on_main_channel_read()
 
     spice.agentTokens = msg.agent_tokens;
     spice.hasAgent    = msg.agent_connected;
-
-    if (spice.hasAgent && !spice_agent_connect(true))
+    if (spice.hasAgent && !spice_agent_connect())
     {
       spice_disconnect();
       DEBUG_ERROR("failed to connect to spice agent");
@@ -491,8 +490,33 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED)
   {
+    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_CONNECTED");
+
     spice.hasAgent = true;
-    if (!spice_agent_connect(false))
+    if (!spice_agent_connect())
+    {
+      DEBUG_ERROR("failed to connect to spice agent");
+      spice_disconnect();
+      return false;
+    }
+    return true;
+  }
+
+  if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS)
+  {
+    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS");
+
+    uint32_t num_tokens;
+    if (!spice_read_nl(channel, &num_tokens, sizeof(num_tokens)))
+    {
+      DEBUG_ERROR("failed to read agent tokens");
+      spice_disconnect();
+      return false;
+    }
+
+    spice.hasAgent    = true;
+    spice.agentTokens = num_tokens;
+    if (!spice_agent_connect())
     {
       DEBUG_ERROR("failed to connect to spice agent");
       spice_disconnect();
@@ -503,6 +527,8 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_DISCONNECTED)
   {
+    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_DISCONNECTED");
+
     uint32_t error;
     if (!spice_read_nl(channel, &error, sizeof(error)))
     {
@@ -516,8 +542,17 @@ bool spice_on_main_channel_read()
     return true;
   }
 
-  if (header.type == SPICE_MSG_MAIN_AGENT_DATA && spice.hasAgent)
+  if (header.type == SPICE_MSG_MAIN_AGENT_DATA)
   {
+    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_DATA");
+
+    if (!spice.hasAgent)
+    {
+      DEBUG_WARN("recieved agent data when the agent is yet to be started");
+      spice_discard_nl(channel, header.size);
+      return true;
+    }
+
     if (!spice_agent_process())
     {
       DEBUG_ERROR("failed to process spice agent message");
@@ -650,18 +685,26 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   channel->connected = true;
 
   uint32_t supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
+  uint32_t channelCaps[MAIN_CAPS_BYTES   / sizeof(uint32_t)];
   memset(supportCaps, 0, sizeof(supportCaps));
+  memset(channelCaps, 0, sizeof(channelCaps));
 
   COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
   COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
+
+  if (channel == &spice.scMain)
+    MAIN_SET_CAPABILITY(channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
 
   SpiceLinkHeader header =
   {
     .magic         = SPICE_MAGIC        ,
     .major_version = SPICE_VERSION_MAJOR,
     .minor_version = SPICE_VERSION_MINOR,
-    .size          = sizeof(SpiceLinkMess) + sizeof(supportCaps)
+    .size          =
+      sizeof(SpiceLinkMess) +
+      sizeof(supportCaps  ) +
+      sizeof(channelCaps  )
   };
 
   SpiceLinkMess message =
@@ -670,14 +713,15 @@ bool spice_connect_channel(struct SpiceChannel * channel)
     .channel_type     = channel->channelType,
     .channel_id       = spice.channelID,
     .num_common_caps  = sizeof(supportCaps) / sizeof(uint32_t),
-    .num_channel_caps = 0,
+    .num_channel_caps = sizeof(channelCaps) / sizeof(uint32_t),
     .caps_offset      = sizeof(SpiceLinkMess)
   };
 
   if (
       !spice_write_nl(channel, &header     , sizeof(header     )) ||
       !spice_write_nl(channel, &message    , sizeof(message    )) ||
-      !spice_write_nl(channel, &supportCaps, sizeof(supportCaps))
+      !spice_write_nl(channel, &supportCaps, sizeof(supportCaps)) ||
+      !spice_write_nl(channel, &channelCaps, sizeof(channelCaps))
      )
   {
     DEBUG_ERROR("failed to write the initial payload");
@@ -801,9 +845,8 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
 
 // ============================================================================
 
-bool spice_agent_connect(bool startup)
+bool spice_agent_connect()
 {
-  return true;
   DEBUG_INFO("Spice agent available, sending start");
 
   const uint32_t tokens = SPICE_AGENT_TOKENS_MAX;
@@ -813,10 +856,8 @@ bool spice_agent_connect(bool startup)
     return false;
   }
 
-  if (startup && !spice_agent_send_caps(startup))
+  if (!spice_agent_send_caps(true))
     return false;
-
-  //todo, agent setup
 
   return true;
 }
@@ -881,12 +922,13 @@ bool spice_agent_process()
 
 bool spice_agent_send_caps(bool request)
 {
-  const ssize_t capsSize = (sizeof(VDAgentAnnounceCapabilities) + VD_AGENT_CAPS_BYTES);
+  const ssize_t capsSize = sizeof(VDAgentAnnounceCapabilities) + VD_AGENT_CAPS_BYTES;
   VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)malloc(capsSize);
   memset(caps, 0, capsSize);
 
   caps->request = request ? 1 : 0;
   VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
+  VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
   if (!spice_agent_write_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, caps, capsSize))
   {
