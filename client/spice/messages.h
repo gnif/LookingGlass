@@ -132,4 +132,10 @@ typedef struct SpiceMsgcMousePress
 SpiceMsgcMousePress,
 SpiceMsgcMouseRelease;
 
+
+// spice is missing these defines, the offical reference library incorrectly uses the VD defines
+#define COMMON_CAPS_BYTES (((SPICE_COMMON_CAP_MINI_HEADER + 32) / 8) & ~3)
+#define COMMON_SET_CAPABILITY(caps, index) \
+    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+
 #pragma pack(pop)
