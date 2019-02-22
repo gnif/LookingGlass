@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -1189,7 +1189,7 @@ void doLicense()
   fprintf(stderr,
     "\n"
     "Looking Glass - KVM FrameRelay (KVMFR) Client\n"
-    "Copyright(C) 2017 Geoffrey McRae <geoff@hostfission.com>\n"
+    "Copyright(C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>\n"
     "https://looking-glass.hostfission.com\n"
     "\n"
     "This program is free software; you can redistribute it and / or modify it under\n"

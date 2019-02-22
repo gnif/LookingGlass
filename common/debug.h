@@ -1,6 +1,6 @@
 /*
 KVMGFX Client - A KVM Client for VGA Passthrough
-Copyright (C) 2017 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
