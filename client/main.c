@@ -42,6 +42,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "kb.h"
 
 #include "lg-renderers.h"
+#include "lg-clipboards.h"
 
 struct AppState
 {
@@ -58,9 +59,11 @@ struct AppState
   float                scaleX, scaleY;
   float                accX, accY;
 
-  const LG_Renderer  * lgr ;
+  const LG_Renderer  * lgr;
   void               * lgrData;
   bool                 lgrResize;
+
+  const LG_Clipboard * lgc;
 
   SDL_Window         * window;
   int                  shmFD;
@@ -857,7 +860,6 @@ int run()
       if (try_renderer(i, lgrParams, &sdlFlags))
       {
         state.lgr = LG_Renderers[i];
-        DEBUG_INFO("Using: %s", state.lgr->get_name());
         break;
       }
     }
@@ -888,6 +890,18 @@ int run()
   {
     DEBUG_ERROR("Could not create an SDL window: %s\n", SDL_GetError());
     return 1;
+  }
+
+  // choose a clipboard api
+  for(unsigned int i = 0; i < LG_CLIPBOARD_COUNT; ++i)
+  {
+    const LG_Clipboard * cb = LG_Clipboards[i];
+    if (cb->init())
+    {
+      state.lgc = cb;
+      DEBUG_INFO("Using Clipboard: %s", cb->getName());
+      break;
+    }
   }
 
   if (params.fullscreen)
@@ -1103,6 +1117,9 @@ int run()
 
   if (state.lgr)
     state.lgr->deinitialize(state.lgrData);
+
+  if (state.lgc)
+    state.lgc->free();
 
   if (state.window)
     SDL_DestroyWindow(state.window);

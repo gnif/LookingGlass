@@ -57,6 +57,7 @@ set(SOURCES
 	utils.c
 	spice/rsa.c
 	spice/spice.c
+	clipboard/x11.c
 	decoders/null.c
 	decoders/yuv420.c
 	renderers/opengl.c
