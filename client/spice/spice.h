@@ -27,7 +27,7 @@ typedef enum SpiceDataType
   SPICE_DATA_PNG,
   SPICE_DATA_BMP,
   SPICE_DATA_TIFF,
-  SPICE_DATA_JPG
+  SPICE_DATA_JPEG
 }
 SpiceDataType;
 

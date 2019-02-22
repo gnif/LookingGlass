@@ -1026,12 +1026,6 @@ bool spice_agent_process(uint32_t dataSize)
         if (msg.type == VD_AGENT_CLIPBOARD)
         {
           DEBUG_PROTO("VD_AGENT_CLIPBOARD");
-          if (type != VD_AGENT_CLIPBOARD_UTF8_TEXT)
-          {
-            DEBUG_ERROR("for some reason we were sent a non text clipboard, this shouldn't happen");
-            return false;
-          }
-
           if (spice.cbBuffer)
           {
             DEBUG_ERROR("cbBuffer was never freed");
@@ -1089,7 +1083,7 @@ bool spice_agent_process(uint32_t dataSize)
           case VD_AGENT_CLIPBOARD_IMAGE_PNG : spice.cbType = SPICE_DATA_PNG ; break;
           case VD_AGENT_CLIPBOARD_IMAGE_BMP : spice.cbType = SPICE_DATA_BMP ; break;
           case VD_AGENT_CLIPBOARD_IMAGE_TIFF: spice.cbType = SPICE_DATA_TIFF; break;
-          case VD_AGENT_CLIPBOARD_IMAGE_JPG : spice.cbType = SPICE_DATA_JPG ; break;
+          case VD_AGENT_CLIPBOARD_IMAGE_JPG : spice.cbType = SPICE_DATA_JPEG; break;
           default:
             DEBUG_WARN("Unknown clipboard data type: %u", types[0]);
             return true;
@@ -1483,7 +1477,7 @@ bool spice_clipboard_request(SpiceDataType type)
     case SPICE_DATA_PNG : req.type = VD_AGENT_CLIPBOARD_IMAGE_PNG ; break;
     case SPICE_DATA_BMP : req.type = VD_AGENT_CLIPBOARD_IMAGE_BMP ; break;
     case SPICE_DATA_TIFF: req.type = VD_AGENT_CLIPBOARD_IMAGE_TIFF; break;
-    case SPICE_DATA_JPG : req.type = VD_AGENT_CLIPBOARD_IMAGE_JPG ; break;
+    case SPICE_DATA_JPEG: req.type = VD_AGENT_CLIPBOARD_IMAGE_JPG ; break;
     default:
       DEBUG_ERROR("invalid clipboard data type requested");
       return false;

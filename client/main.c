@@ -64,6 +64,9 @@ struct AppState
   bool                 lgrResize;
 
   const LG_Clipboard * lgc;
+  SpiceDataType        cbType;
+  LG_ClipboardReplyFn  cbReplyFn;
+  void               * cbReplyData;
 
   SDL_Window         * window;
   int                  shmFD;
@@ -489,26 +492,50 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
   return ps2;
 }
 
+void clipboardRequestFn(const LG_ClipboardReplyFn replyFn, void * opaque)
+{
+  state.cbReplyData = opaque;
+  state.cbReplyFn   = replyFn;
+
+  spice_clipboard_request(state.cbType);
+}
 
 void spiceClipboardNotice(const SpiceDataType type)
 {
-  // we only support text data for now
-  if (type == SPICE_DATA_TEXT)
-    spice_clipboard_request(type);
+  if (!state.lgc || !state.lgc->notice)
+    return;
+
+  state.cbType = type;
+
+  LG_ClipboardData t;
+  switch(type)
+  {
+    case LG_CLIPBOARD_DATA_TEXT: t = SPICE_DATA_TEXT; break;
+    case LG_CLIPBOARD_DATA_PNG : t = SPICE_DATA_PNG ; break;
+    case LG_CLIPBOARD_DATA_BMP : t = SPICE_DATA_BMP ; break;
+    case LG_CLIPBOARD_DATA_TIFF: t = SPICE_DATA_TIFF; break;
+    case LG_CLIPBOARD_DATA_JPEG: t = SPICE_DATA_JPEG; break;
+  }
+
+  state.lgc->notice(clipboardRequestFn, t);
 }
 
 void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)
 {
-  // dos2unix
-  uint8_t * p = buffer;
-  for(uint32_t i = 0; i < size; ++i)
+  if (type == SPICE_DATA_TEXT)
   {
-    uint8_t c = buffer[i];
-    if (c != '\r')
-      *p++ = c;
+    // dos2unix
+    uint8_t * p = buffer;
+    for(uint32_t i = 0; i < size; ++i)
+    {
+      uint8_t c = buffer[i];
+      if (c != '\r')
+        *p++ = c;
+    }
+    *p = '\0';
   }
-  *p = '\0';
-  SDL_SetClipboardText((char *)buffer);
+
+  state.cbReplyFn(state.cbReplyData, type, buffer, size);
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -548,6 +575,13 @@ int eventFilter(void * userdata, SDL_Event * event)
 
   switch(event->type)
   {
+    case SDL_SYSWMEVENT:
+    {
+      if (state.lgc && state.lgc->wmevent)
+        state.lgc->wmevent(event->syswm.msg);
+      return 0;
+    }
+
     case SDL_MOUSEMOTION:
     {
       if (
@@ -893,18 +927,6 @@ int run()
     return 1;
   }
 
-  // choose a clipboard api
-  for(unsigned int i = 0; i < LG_CLIPBOARD_COUNT; ++i)
-  {
-    const LG_Clipboard * cb = LG_Clipboards[i];
-    if (cb->init())
-    {
-      state.lgc = cb;
-      DEBUG_INFO("Using Clipboard: %s", cb->getName());
-      break;
-    }
-  }
-
   if (params.fullscreen)
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
@@ -943,6 +965,8 @@ int run()
         (unsigned char *)&value,
         1
       );
+
+      state.lgc = &LGC_X11;
     }
   } else {
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
@@ -953,6 +977,16 @@ int run()
   {
     DEBUG_ERROR("failed to create window");
     return -1;
+  }
+
+  if (state.lgc)
+  {
+    DEBUG_INFO("Using Clipboard: %s", state.lgc->getName());
+    if (!state.lgc->init(&wminfo))
+    {
+      DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
+      state.lgc = NULL;
+    }
   }
 
   SDL_Cursor *cursor = NULL;
