@@ -39,8 +39,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <spice/protocol.h>
 #include <spice/vd_agent.h>
 
-#include <SDL2/SDL.h>
-
 #include "messages.h"
 #include "rsa.h"
 
@@ -118,9 +116,12 @@ struct Spice
   bool cbSupported;
   bool cbSelection;
 
-  char    *cbBuffer;
-  uint32_t cbRemain;
-  uint32_t cbSize;
+  SpiceDataType        cbType;
+  uint8_t *            cbBuffer;
+  uint32_t             cbRemain;
+  uint32_t             cbSize;
+  SpiceClipboardNotice cbNoticeFn;
+  SpiceClipboardData   cbDataFn;
 };
 
 // globals
@@ -146,7 +147,7 @@ bool spice_on_inputs_channel_read();
 bool spice_agent_process  (uint32_t dataSize);
 bool spice_agent_connect  ();
 bool spice_agent_send_caps(bool request);
-bool spice_agent_on_clipboard();
+void spice_agent_on_clipboard();
 
 // thread safe read/write methods
 bool spice_write_msg       (struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size);
@@ -199,6 +200,12 @@ void spice_disconnect()
   spice_disconnect_channel(&spice.scInputs);
 
   spice.sessionID = 0;
+
+  if (spice.cbBuffer)
+    free(spice.cbBuffer);
+  spice.cbBuffer = NULL;
+  spice.cbRemain = 0;
+  spice.cbSize   = 0;
 }
 
 // ============================================================================
@@ -919,7 +926,7 @@ bool spice_agent_process(uint32_t dataSize)
     spice.cbSize   += r;
 
     if (spice.cbRemain == 0)
-      return spice_agent_on_clipboard();
+      spice_agent_on_clipboard();
 
     return true;
   }
@@ -1031,7 +1038,7 @@ bool spice_agent_process(uint32_t dataSize)
 
           spice.cbSize     = 0;
           spice.cbRemain   = remaining;
-          spice.cbBuffer   = (char *)malloc(remaining);
+          spice.cbBuffer   = (uint8_t *)malloc(remaining);
           const uint32_t r = remaining > dataSize ? dataSize : remaining;
 
           if (!spice_read_nl(&spice.scMain, spice.cbBuffer, r))
@@ -1048,7 +1055,7 @@ bool spice_agent_process(uint32_t dataSize)
           spice.cbSize   += r;
 
           if (spice.cbRemain == 0)
-            return spice_agent_on_clipboard();
+            spice_agent_on_clipboard();
 
           return true;
         }
@@ -1074,8 +1081,19 @@ bool spice_agent_process(uint32_t dataSize)
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
 
-        // for now we only support text
-        if (types[0] == VD_AGENT_CLIPBOARD_UTF8_TEXT)
+        switch(types[0])
+        {
+          case VD_AGENT_CLIPBOARD_UTF8_TEXT : spice.cbType = SPICE_DATA_TEXT; break;
+          case VD_AGENT_CLIPBOARD_IMAGE_PNG : spice.cbType = SPICE_DATA_PNG ; break;
+          case VD_AGENT_CLIPBOARD_IMAGE_BMP : spice.cbType = SPICE_DATA_BMP ; break;
+          case VD_AGENT_CLIPBOARD_IMAGE_TIFF: spice.cbType = SPICE_DATA_TIFF; break;
+          case VD_AGENT_CLIPBOARD_IMAGE_JPG : spice.cbType = SPICE_DATA_JPG ; break;
+          default:
+            DEBUG_WARN("Unknown clipboard data type: %u", types[0]);
+            return true;
+        }
+
+        if (spice.cbNoticeFn && spice.cbNoticeFn(spice.cbType))
         {
           if (spice.cbSelection)
           {
@@ -1085,7 +1103,7 @@ bool spice_agent_process(uint32_t dataSize)
           }
 
           VDAgentClipboardRequest req;
-          req.type = VD_AGENT_CLIPBOARD_UTF8_TEXT;
+          req.type = types[0];
 
           if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
           {
@@ -1111,25 +1129,15 @@ bool spice_agent_process(uint32_t dataSize)
 
 // ============================================================================
 
-bool spice_agent_on_clipboard()
+void spice_agent_on_clipboard()
 {
-  // dos2unix
-  char * p = spice.cbBuffer;
-  for(uint32_t i = 0; i < spice.cbSize; ++i)
-  {
-    char c = spice.cbBuffer[i];
-    if (c != '\r')
-      *p++ = c;
-  }
-  *p = '\0';
-  SDL_SetClipboardText(spice.cbBuffer);
+  if (spice.cbDataFn)
+    spice.cbDataFn(spice.cbType, spice.cbBuffer, spice.cbSize);
 
   free(spice.cbBuffer);
   spice.cbBuffer = NULL;
   spice.cbSize   = 0;
   spice.cbRemain = 0;
-
-  return true;
 }
 
 // ============================================================================
@@ -1459,3 +1467,21 @@ bool spice_mouse_release(uint32_t button)
 
   return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_RELEASE, &msg, sizeof(msg));
 }
+
+// ============================================================================
+
+bool spice_set_on_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData cbDataFn)
+{
+  if ((cbNoticeFn && !cbDataFn) || (cbDataFn && !cbNoticeFn))
+  {
+    DEBUG_ERROR("Clipboard callback notice and data callbacks must be specified");
+    return false;
+  }
+
+  spice.cbNoticeFn = cbNoticeFn;
+  spice.cbDataFn   = cbDataFn;
+
+  return true;
+}
+
+// ============================================================================

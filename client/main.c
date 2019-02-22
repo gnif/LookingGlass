@@ -486,6 +486,27 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
   return ps2;
 }
 
+
+bool spiceClipboardNotice(const SpiceDataType type)
+{
+  // we only support text data for now
+  return (type == SPICE_DATA_TEXT);
+}
+
+void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)
+{
+  // dos2unix
+  uint8_t * p = buffer;
+  for(uint32_t i = 0; i < size; ++i)
+  {
+    uint8_t c = buffer[i];
+    if (c != '\r')
+      *p++ = c;
+  }
+  *p = '\0';
+  SDL_SetClipboardText((char *)buffer);
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
   static bool serverMode   = false;
@@ -951,6 +972,7 @@ int run()
 
     if (params.useSpice)
     {
+      spice_set_on_clipboard_cb(spiceClipboardNotice, spiceClipboardData);
       if (!spice_connect(params.spiceHost, params.spicePort, ""))
       {
         DEBUG_ERROR("Failed to connect to spice server");

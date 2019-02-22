@@ -21,10 +21,22 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef enum SpiceDataType
+{
+  SPICE_DATA_TEXT,
+  SPICE_DATA_PNG,
+  SPICE_DATA_BMP,
+  SPICE_DATA_TIFF,
+  SPICE_DATA_JPG
+}
+SpiceDataType;
+
+typedef bool (*SpiceClipboardNotice)(const SpiceDataType type);
+typedef void (*SpiceClipboardData  )(const SpiceDataType type, uint8_t * buffer, uint32_t size);
+
 bool spice_connect(const char * host, const unsigned short port, const char * password);
 void spice_disconnect();
 bool spice_process();
-bool spice_agent_process();
 bool spice_ready();
 
 bool spice_key_down      (uint32_t code);
@@ -34,3 +46,6 @@ bool spice_mouse_position(uint32_t x, uint32_t y);
 bool spice_mouse_motion  ( int32_t x,  int32_t y);
 bool spice_mouse_press   (uint32_t button);
 bool spice_mouse_release (uint32_t button);
+
+/* events */
+bool spice_set_on_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData cbDataFn);
