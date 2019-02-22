@@ -17,7 +17,6 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-
 #include "spice.h"
 #include "utils.h"
 #include "debug.h"
@@ -118,6 +117,10 @@ struct Spice
 
   bool cbSupported;
   bool cbSelection;
+
+  char    *cbBuffer;
+  uint32_t cbRemain;
+  uint32_t cbSize;
 };
 
 // globals
@@ -140,9 +143,10 @@ bool spice_on_common_read        (struct SpiceChannel * channel, SpiceMiniDataHe
 bool spice_on_main_channel_read  ();
 bool spice_on_inputs_channel_read();
 
-bool spice_agent_process  ();
+bool spice_agent_process  (uint32_t dataSize);
 bool spice_agent_connect  ();
 bool spice_agent_send_caps(bool request);
+bool spice_agent_on_clipboard();
 
 // thread safe read/write methods
 bool spice_write_msg       (struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size);
@@ -546,6 +550,15 @@ bool spice_on_main_channel_read()
 
     DEBUG_INFO("Spice agent disconnected, error: %u", error);
     spice.hasAgent = false;
+
+    if (spice.cbBuffer)
+    {
+      free(spice.cbBuffer);
+      spice.cbBuffer = NULL;
+      spice.cbSize   = 0;
+      spice.cbRemain = 0;
+    }
+
     return true;
   }
 
@@ -560,12 +573,28 @@ bool spice_on_main_channel_read()
       return true;
     }
 
-    if (!spice_agent_process())
+    if (!spice_agent_process(header.size))
     {
       DEBUG_ERROR("failed to process spice agent message");
       spice_disconnect();
       return false;
     }
+    return true;
+  }
+
+  if (header.type == SPICE_MSG_MAIN_AGENT_TOKEN)
+  {
+    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_TOKEN");
+
+    uint32_t num_tokens;
+    if (!spice_read_nl(channel, &num_tokens, sizeof(num_tokens)))
+    {
+      DEBUG_ERROR("failed to read agent tokens");
+      spice_disconnect();
+      return false;
+    }
+
+    spice.serverTokens = num_tokens;
     return true;
   }
 
@@ -871,8 +900,30 @@ bool spice_agent_connect()
 
 // ============================================================================
 
-bool spice_agent_process()
+bool spice_agent_process(uint32_t dataSize)
 {
+  if (spice.cbRemain)
+  {
+    const uint32_t r = spice.cbRemain > dataSize ? dataSize : spice.cbRemain;
+    if (!spice_read_nl(&spice.scMain, spice.cbBuffer + spice.cbSize, r))
+    {
+      DEBUG_ERROR("failed to read the clipboard data");
+      free(spice.cbBuffer);
+      spice.cbBuffer = NULL;
+      spice.cbRemain = 0;
+      spice.cbSize   = 0;
+      return false;
+    }
+
+    spice.cbRemain -= r;
+    spice.cbSize   += r;
+
+    if (spice.cbRemain == 0)
+      return spice_agent_on_clipboard();
+
+    return true;
+  }
+
   VDAgentMessage msg;
 
   #pragma pack(push,1)
@@ -888,6 +939,7 @@ bool spice_agent_process()
     DEBUG_ERROR("failed to read spice agent message");
     return false;
   }
+  dataSize -= sizeof(msg);
 
   if (msg.protocol != VD_AGENT_PROTOCOL)
   {
@@ -942,6 +994,7 @@ bool spice_agent_process()
           return false;
         }
         remaining -= sizeof(selection);
+        dataSize  -= sizeof(selection);
       }
 
       if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
@@ -959,6 +1012,7 @@ bool spice_agent_process()
           return false;
         }
         remaining -= sizeof(type);
+        dataSize  -= sizeof(type);
 
         if (msg.type == VD_AGENT_CLIPBOARD)
         {
@@ -969,29 +1023,33 @@ bool spice_agent_process()
             return false;
           }
 
-          char * text = malloc(remaining + 1);
-          if (!spice_read_nl(&spice.scMain, text, remaining))
+          if (spice.cbBuffer)
           {
-            DEBUG_ERROR("failed to read the clipboard data");
-            free(text);
+            DEBUG_ERROR("cbBuffer was never freed");
             return false;
           }
-          text[remaining] = '\0';
 
-          // dos2unix
-          char * out = malloc(remaining + 1);
-          char * p   = out;
-          for(uint32_t i = 0; i < remaining; ++i)
+          spice.cbSize     = 0;
+          spice.cbRemain   = remaining;
+          spice.cbBuffer   = (char *)malloc(remaining);
+          const uint32_t r = remaining > dataSize ? dataSize : remaining;
+
+          if (!spice_read_nl(&spice.scMain, spice.cbBuffer, r))
           {
-            char c = text[i];
-            if (c != '\r')
-              *p++ = c;
+            DEBUG_ERROR("failed to read the clipboard data");
+            free(spice.cbBuffer);
+            spice.cbBuffer = NULL;
+            spice.cbRemain = 0;
+            spice.cbSize   = 0;
+            return false;
           }
-          *p = '\0';
-          SDL_SetClipboardText(out);
 
-          free(text);
-          free(out);
+          spice.cbRemain -= r;
+          spice.cbSize   += r;
+
+          if (spice.cbRemain == 0)
+            return spice_agent_on_clipboard();
+
           return true;
         }
         else
@@ -1050,6 +1108,29 @@ bool spice_agent_process()
   return true;
 }
 
+
+// ============================================================================
+
+bool spice_agent_on_clipboard()
+{
+  // dos2unix
+  char * p = spice.cbBuffer;
+  for(uint32_t i = 0; i < spice.cbSize; ++i)
+  {
+    char c = spice.cbBuffer[i];
+    if (c != '\r')
+      *p++ = c;
+  }
+  *p = '\0';
+  SDL_SetClipboardText(spice.cbBuffer);
+
+  free(spice.cbBuffer);
+  spice.cbBuffer = NULL;
+  spice.cbSize   = 0;
+  spice.cbRemain = 0;
+
+  return true;
+}
 
 // ============================================================================
 
