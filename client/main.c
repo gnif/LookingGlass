@@ -804,14 +804,15 @@ int run()
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
 
-  if (XDG_SESSION_TYPE == NULL) {
+  if (XDG_SESSION_TYPE == NULL)
     XDG_SESSION_TYPE = "unspecified";
-  }
 
-  if (strcmp(XDG_SESSION_TYPE, "wayland") == 0) {
+  if (strcmp(XDG_SESSION_TYPE, "wayland") == 0)
+  {
      DEBUG_INFO("Wayland detected");
      int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
-     if (err < 0) {
+     if (err < 0)
+     {
        DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
        return -1;
      }
