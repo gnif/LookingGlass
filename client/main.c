@@ -487,10 +487,11 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
 }
 
 
-bool spiceClipboardNotice(const SpiceDataType type)
+void spiceClipboardNotice(const SpiceDataType type)
 {
   // we only support text data for now
-  return (type == SPICE_DATA_TEXT);
+  if (type == SPICE_DATA_TEXT)
+    spice_clipboard_request(type);
 }
 
 void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)

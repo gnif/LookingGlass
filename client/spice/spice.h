@@ -31,7 +31,7 @@ typedef enum SpiceDataType
 }
 SpiceDataType;
 
-typedef bool (*SpiceClipboardNotice)(const SpiceDataType type);
+typedef void (*SpiceClipboardNotice)(const SpiceDataType type);
 typedef void (*SpiceClipboardData  )(const SpiceDataType type, uint8_t * buffer, uint32_t size);
 
 bool spice_connect(const char * host, const unsigned short port, const char * password);
@@ -46,6 +46,8 @@ bool spice_mouse_position(uint32_t x, uint32_t y);
 bool spice_mouse_motion  ( int32_t x,  int32_t y);
 bool spice_mouse_press   (uint32_t button);
 bool spice_mouse_release (uint32_t button);
+
+bool spice_clipboard_request(SpiceDataType type);
 
 /* events */
 bool spice_set_on_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData cbDataFn);

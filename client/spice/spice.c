@@ -116,6 +116,7 @@ struct Spice
   bool cbSupported;
   bool cbSelection;
 
+  bool                 cbGrabbed;
   SpiceDataType        cbType;
   uint8_t *            cbBuffer;
   uint32_t             cbRemain;
@@ -1007,6 +1008,7 @@ bool spice_agent_process(uint32_t dataSize)
       if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
       {
         DEBUG_PROTO("VD_AGENT_CLIPBOARD_RELEASE");
+        spice.cbGrabbed = false;
         return true;
       }
 
@@ -1093,27 +1095,16 @@ bool spice_agent_process(uint32_t dataSize)
             return true;
         }
 
-        if (spice.cbNoticeFn && spice.cbNoticeFn(spice.cbType))
+        spice.cbGrabbed = true;
+        if (spice.cbSelection)
         {
-          if (spice.cbSelection)
-          {
-            // Windows doesnt support this, so until it's needed no point messing with it
-            DEBUG_ERROR("Fixme!");
-            return false;
-          }
-
-          VDAgentClipboardRequest req;
-          req.type = types[0];
-
-          if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
-          {
-            DEBUG_ERROR("failed to request clipboard data");
-            free(types);
-            return false;
-          }
-
-          return true;
+          // Windows doesnt support this, so until it's needed there is no point messing with it
+          DEBUG_ERROR("Fixme!");
+          return false;
         }
+
+        if (spice.cbNoticeFn)
+            spice.cbNoticeFn(spice.cbType);
 
         free(types);
         return true;
@@ -1466,6 +1457,45 @@ bool spice_mouse_release(uint32_t button)
   msg.button_state = spice.mouse.buttonState;
 
   return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_RELEASE, &msg, sizeof(msg));
+}
+
+// ============================================================================
+
+bool spice_clipboard_request(SpiceDataType type)
+{
+  VDAgentClipboardRequest req;
+
+  if (!spice.cbGrabbed)
+  {
+    DEBUG_ERROR("the agent has not grabbed any data yet");
+    return false;
+  }
+
+  if (type != spice.cbType)
+  {
+    DEBUG_ERROR("data type requested doesn't match reported data type");
+    return false;
+  }
+
+  switch(type)
+  {
+    case SPICE_DATA_TEXT: req.type = VD_AGENT_CLIPBOARD_UTF8_TEXT ; break;
+    case SPICE_DATA_PNG : req.type = VD_AGENT_CLIPBOARD_IMAGE_PNG ; break;
+    case SPICE_DATA_BMP : req.type = VD_AGENT_CLIPBOARD_IMAGE_BMP ; break;
+    case SPICE_DATA_TIFF: req.type = VD_AGENT_CLIPBOARD_IMAGE_TIFF; break;
+    case SPICE_DATA_JPG : req.type = VD_AGENT_CLIPBOARD_IMAGE_JPG ; break;
+    default:
+      DEBUG_ERROR("invalid clipboard data type requested");
+      return false;
+  }
+
+  if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
+  {
+    DEBUG_ERROR("failed to request clipboard data");
+    return false;
+  }
+
+  return true;
 }
 
 // ============================================================================
