@@ -123,7 +123,6 @@ struct Spice
   bool cbSelection;
 
   // clipboard variables
-  LG_Lock               cbLock;
   bool                  cbAgentGrabbed;
   bool                  cbClientGrabbed;
   SpiceDataType         cbType;
@@ -198,8 +197,6 @@ bool spice_connect(const char * host, const unsigned short port, const char * pa
     DEBUG_INFO("Remote: %s:%u", host, port);
   }
 
-  LG_LOCK_INIT(spice.cbLock);
-
   spice.channelID = 0;
   if (!spice_connect_channel(&spice.scMain))
   {
@@ -219,14 +216,11 @@ void spice_disconnect()
 
   spice.sessionID = 0;
 
-  LG_LOCK(spice.cbLock);
   if (spice.cbBuffer)
     free(spice.cbBuffer);
   spice.cbBuffer = NULL;
   spice.cbRemain = 0;
   spice.cbSize   = 0;
-  LG_UNLOCK(spice.cbLock);
-  LG_LOCK_FREE(spice.cbLock);
 
   spice.cbAgentGrabbed  = false;
   spice.cbClientGrabbed = false;
@@ -582,7 +576,6 @@ bool spice_on_main_channel_read()
     DEBUG_INFO("Spice agent disconnected, error: %u", error);
     spice.hasAgent = false;
 
-    LG_LOCK(spice.cbLock);
     if (spice.cbBuffer)
     {
       free(spice.cbBuffer);
@@ -590,7 +583,6 @@ bool spice_on_main_channel_read()
       spice.cbSize   = 0;
       spice.cbRemain = 0;
     }
-    LG_UNLOCK(spice.cbLock);
 
     return true;
   }
@@ -937,7 +929,6 @@ bool spice_agent_process(uint32_t dataSize)
 {
   if (spice.cbRemain)
   {
-    LG_LOCK(spice.cbLock);
     const uint32_t r = spice.cbRemain > dataSize ? dataSize : spice.cbRemain;
     if (!spice_read_nl(&spice.scMain, spice.cbBuffer + spice.cbSize, r))
     {
@@ -946,7 +937,6 @@ bool spice_agent_process(uint32_t dataSize)
       spice.cbBuffer = NULL;
       spice.cbRemain = 0;
       spice.cbSize   = 0;
-      LG_UNLOCK(spice.cbLock);
       return false;
     }
 
@@ -956,7 +946,6 @@ bool spice_agent_process(uint32_t dataSize)
     if (spice.cbRemain == 0)
       spice_agent_on_clipboard();
 
-    LG_UNLOCK(spice.cbLock);
     return true;
   }
 
@@ -1056,11 +1045,9 @@ bool spice_agent_process(uint32_t dataSize)
         if (msg.type == VD_AGENT_CLIPBOARD)
         {
           DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD");
-          LG_LOCK(spice.cbLock);
           if (spice.cbBuffer)
           {
             DEBUG_ERROR("cbBuffer was never freed");
-            LG_UNLOCK(spice.cbLock);
             return false;
           }
 
@@ -1076,7 +1063,6 @@ bool spice_agent_process(uint32_t dataSize)
             spice.cbBuffer = NULL;
             spice.cbRemain = 0;
             spice.cbSize   = 0;
-            LG_UNLOCK(spice.cbLock);
             return false;
           }
 
@@ -1086,7 +1072,6 @@ bool spice_agent_process(uint32_t dataSize)
           if (spice.cbRemain == 0)
             spice_agent_on_clipboard();
 
-          LG_UNLOCK(spice.cbLock);
           return true;
         }
         else
