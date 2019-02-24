@@ -217,7 +217,10 @@ static void x11_cb_wmevent(SDL_SysWMmsg * msg)
   }
 
   // if someone selected data
-  if (e.type == this->eventBase + XFixesSelectionNotify && (
+  if (
+      e.type == this->eventBase + XFixesSelectionNotify &&
+      ((XFixesSelectionNotifyEvent *)&e)->owner != this->window &&
+      (
         ((XFixesSelectionNotifyEvent *)&e)->selection == XA_PRIMARY ||
         ((XFixesSelectionNotifyEvent *)&e)->selection == this->aSelection)
      )
