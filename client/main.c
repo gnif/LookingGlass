@@ -525,8 +525,6 @@ static SpiceDataType clipboard_type_to_spice_type(const LG_ClipboardData type)
 void clipboardRelease()
 {
   spice_clipboard_release();
-
-  // another application just took the clipboard ownership
 }
 
 void clipboardNotify(const LG_ClipboardData type)
@@ -542,7 +540,26 @@ void clipboardNotify(const LG_ClipboardData type)
 
 void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
 {
-  spice_clipboard_data(clipboard_type_to_spice_type(type), data, (uint32_t)size);
+  uint8_t * buffer = data;
+
+  // unix2dos
+  if (type == LG_CLIPBOARD_DATA_TEXT)
+  {
+    // TODO: make this more memory efficent
+    buffer = malloc(size * 2);
+    uint8_t * p = buffer;
+    for(uint32_t i = 0; i < size; ++i)
+    {
+      uint8_t c = data[i];
+      if (c == '\n')
+        *p++ = '\r';
+      *p++ = c;
+    }
+  }
+
+  spice_clipboard_data(clipboard_type_to_spice_type(type), buffer, (uint32_t)size);
+  if (buffer != data)
+    free(buffer);
 }
 
 void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
@@ -574,7 +591,6 @@ void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t siz
       if (c != '\r')
         *p++ = c;
     }
-    *p = '\0';
   }
 
   state.cbReplyFn(state.cbReplyData, type, buffer, size);

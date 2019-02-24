@@ -110,8 +110,8 @@ static bool x11_cb_init(
     return false;
   }
 
-  XFixesSelectSelectionInput(this->display,DefaultRootWindow(this->display), XA_PRIMARY      , XFixesSetSelectionOwnerNotifyMask);
-  XFixesSelectSelectionInput(this->display,DefaultRootWindow(this->display), this->aSelection, XFixesSetSelectionOwnerNotifyMask);
+  XFixesSelectSelectionInput(this->display, this->window, XA_PRIMARY      , XFixesSetSelectionOwnerNotifyMask);
+  XFixesSelectSelectionInput(this->display, this->window, this->aSelection, XFixesSetSelectionOwnerNotifyMask);
 
   return true;
 }
@@ -217,20 +217,22 @@ static void x11_cb_wmevent(SDL_SysWMmsg * msg)
   }
 
   // if someone selected data
-  if (
-      e.type == this->eventBase + XFixesSelectionNotify &&
-      ((XFixesSelectionNotifyEvent *)&e)->owner != this->window &&
-      (
-        ((XFixesSelectionNotifyEvent *)&e)->selection == XA_PRIMARY ||
-        ((XFixesSelectionNotifyEvent *)&e)->selection == this->aSelection)
-     )
+  if (e.type == this->eventBase + XFixesSelectionNotify)
   {
-    // ask for the data type
     XFixesSelectionNotifyEvent * sne = (XFixesSelectionNotifyEvent *)&e;
+
+    // check if the selection is valid and it isn't ourself
+    if (
+        (sne->selection != XA_PRIMARY && sne->selection != this->aSelection) ||
+        sne->owner == this->window ||
+        sne->owner == 0
+       )
+    {
+      return;
+    }
 
     // remember which selection we are working with
     this->aCurSelection = sne->selection;
-
     XConvertSelection(
         this->display,
         sne->selection,
@@ -300,20 +302,19 @@ static void x11_cb_wmevent(SDL_SysWMmsg * msg)
     if (format == this->aIncr)
     {
       DEBUG_WARN("fixme: large paste buffers are not yet supported");
-    }
-    else
-    {
-      for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
-        if (this->aTypes[i] == type)
-        {
-          this->dataFn(i, data, itemCount);
-          XFree(data);
-          return;
-        }
-
-      DEBUG_WARN("clipboard data (%s) not in a supported format", XGetAtomName(this->display, type));
+      XFree(data);
+      return;
     }
 
+    for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+      if (this->aTypes[i] == type)
+      {
+        this->dataFn(i, data, itemCount);
+        XFree(data);
+        return;
+      }
+
+    DEBUG_WARN("clipboard data (%s) not in a supported format", XGetAtomName(this->display, type));
     XFree(data);
     return;
   }
