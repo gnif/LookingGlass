@@ -54,6 +54,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   #define DEBUG_KEYBOARD(fmt, args...) do {} while(0)
 #endif
 
+#ifdef DEBUG_SPICE_CLIPBOARD
+  #define DEBUG_CLIPBOARD(fmt, args...) DEBUG_PRINT("[C]", fmt, ##args)
+#else
+  #define DEBUG_CLIPBOARD(fmt, args...) do {} while(0)
+#endif
+
 // we don't really need flow control because we are all local
 // instead do what the spice-gtk library does and provide the largest
 // possible number
@@ -160,7 +166,7 @@ static SpiceDataType agent_type_to_spice_type(uint32_t type);
 
 // thread safe read/write methods
 bool spice_write_msg       (struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size);
-bool spice_agent_write_msg (uint32_t type, const void * buffer, const ssize_t size);
+bool spice_agent_write_msg (uint32_t type, const void * buffer, ssize_t size);
 
 // non thread safe read/write methods (nl = non-locking)
 bool    spice_read_nl     (const struct SpiceChannel * channel, void * buffer, const ssize_t size);
@@ -1018,7 +1024,7 @@ bool spice_agent_process(uint32_t dataSize)
 
       if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
       {
-        DEBUG_PROTO("VD_AGENT_CLIPBOARD_RELEASE");
+        DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD_RELEASE");
         spice.cbAgentGrabbed = false;
         if (spice.cbReleaseFn)
           spice.cbReleaseFn();
@@ -1038,7 +1044,7 @@ bool spice_agent_process(uint32_t dataSize)
 
         if (msg.type == VD_AGENT_CLIPBOARD)
         {
-          DEBUG_PROTO("VD_AGENT_CLIPBOARD");
+          DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD");
           if (spice.cbBuffer)
           {
             DEBUG_ERROR("cbBuffer was never freed");
@@ -1070,7 +1076,7 @@ bool spice_agent_process(uint32_t dataSize)
         }
         else
         {
-          DEBUG_PROTO("VD_AGENT_CLIPBOARD_REQUEST");
+          DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD_REQUEST");
           if (spice.cbRequestFn)
             spice.cbRequestFn(agent_type_to_spice_type(type));
           return true;
@@ -1078,7 +1084,7 @@ bool spice_agent_process(uint32_t dataSize)
       }
       else
       {
-        DEBUG_PROTO("VD_AGENT_CLIPBOARD_GRAB");
+        DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD_GRAB");
         if (remaining == 0)
           return true;
 
@@ -1092,8 +1098,9 @@ bool spice_agent_process(uint32_t dataSize)
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
 
-        spice.cbType         = agent_type_to_spice_type(types[0]);
-        spice.cbAgentGrabbed = true;
+        spice.cbType          = agent_type_to_spice_type(types[0]);
+        spice.cbAgentGrabbed  = true;
+        spice.cbClientGrabbed = false;
         if (spice.cbSelection)
         {
           // Windows doesnt support this, so until it's needed there is no point messing with it
@@ -1154,7 +1161,7 @@ bool spice_agent_send_caps(bool request)
 
 // ============================================================================
 
-bool spice_agent_write_msg(uint32_t type, const void * buffer, const ssize_t size)
+bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
 {
   VDAgentMessage msg;
   msg.protocol = VD_AGENT_PROTOCOL;
@@ -1163,21 +1170,40 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, const ssize_t siz
   msg.size     = size;
 
   LG_LOCK(spice.scMain.lock);
-  if (!spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, &msg, sizeof(msg), size))
+
+  uint8_t * buf   = (uint8_t *)buffer;
+  ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE - sizeof(msg) ? VD_AGENT_MAX_DATA_SIZE - sizeof(msg) : size;
+  if (!spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, &msg, sizeof(msg), toWrite))
   {
     LG_UNLOCK(spice.scMain.lock);
     DEBUG_ERROR("failed to write agent data header");
     return false;
   }
 
-  if (buffer && size)
+  bool first = true;
+  while(toWrite)
   {
-    if (spice_write_nl(&spice.scMain, buffer, size) != size)
+    bool ok = false;
+    if (first)
+    {
+      ok    = spice_write_nl(&spice.scMain, buf, toWrite) == toWrite;
+      first = false;
+    }
+    else
+    {
+      ok = spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, buf, toWrite, 0);
+    }
+
+    if (!ok)
     {
       LG_UNLOCK(spice.scMain.lock);
       DEBUG_ERROR("failed to write agent data payload");
       return false;
     }
+
+    size   -= toWrite;
+    buf    += toWrite;
+    toWrite = size > VD_AGENT_MAX_DATA_SIZE ? VD_AGENT_MAX_DATA_SIZE : size;
   }
 
   LG_UNLOCK(spice.scMain.lock);
@@ -1542,10 +1568,6 @@ bool spice_set_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData 
 
 bool spice_clipboard_grab(SpiceDataType type)
 {
-  // release first if we have grabbed previously
-  if (spice.cbClientGrabbed && !spice_clipboard_release())
-    return false;
-
   if (type == SPICE_DATA_NONE)
   {
     DEBUG_ERROR("grab type is invalid");
@@ -1614,7 +1636,7 @@ bool spice_clipboard_release()
 bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
 {
   uint8_t * buffer;
-  uint8_t bufSize;
+  size_t    bufSize;
 
   if (spice.cbSelection)
   {
