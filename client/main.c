@@ -40,6 +40,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "KVMFR.h"
 #include "spice/spice.h"
 #include "kb.h"
+#include "ll.h"
 
 #include "lg-renderers.h"
 #include "lg-clipboards.h"
@@ -65,8 +66,7 @@ struct AppState
 
   const LG_Clipboard * lgc;
   SpiceDataType        cbType;
-  LG_ClipboardReplyFn  cbReplyFn;
-  void               * cbReplyData;
+  struct ll          * cbRequestList;
 
   SDL_Window         * window;
   int                  shmFD;
@@ -148,6 +148,13 @@ struct AppParams params =
   .captureKey       = SDL_SCANCODE_SCROLLLOCK,
   .disableAlerts    = false,
   .forceRenderer    = false
+};
+
+struct CBRequest
+{
+  SpiceDataType       type;
+  LG_ClipboardReplyFn replyFn;
+  void              * opaque;
 };
 
 static void updatePositionInfo()
@@ -546,15 +553,21 @@ void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
   if (type == LG_CLIPBOARD_DATA_TEXT)
   {
     // TODO: make this more memory efficent
+    size_t newSize = 0;
     buffer = malloc(size * 2);
     uint8_t * p = buffer;
     for(uint32_t i = 0; i < size; ++i)
     {
       uint8_t c = data[i];
       if (c == '\n')
+      {
         *p++ = '\r';
+        ++newSize;
+      }
       *p++ = c;
+      ++newSize;
     }
+    size = newSize;
   }
 
   spice_clipboard_data(clipboard_type_to_spice_type(type), buffer, (uint32_t)size);
@@ -564,8 +577,12 @@ void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
 
 void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
 {
-  state.cbReplyData = opaque;
-  state.cbReplyFn   = replyFn;
+  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(struct CBRequest()));
+
+  cbr->type    = state.cbType;
+  cbr->replyFn = replyFn;
+  cbr->opaque  = opaque;
+  ll_push(state.cbRequestList, cbr);
 
   spice_clipboard_request(state.cbType);
 }
@@ -584,16 +601,27 @@ void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t siz
   if (type == SPICE_DATA_TEXT)
   {
     // dos2unix
-    uint8_t * p = buffer;
+    uint8_t  * p       = buffer;
+    uint32_t   newSize = size;
     for(uint32_t i = 0; i < size; ++i)
     {
       uint8_t c = buffer[i];
-      if (c != '\r')
-        *p++ = c;
+      if (c == '\r')
+      {
+        --newSize;
+        continue;
+      }
+      *p++ = c;
     }
+    size = newSize;
   }
 
-  state.cbReplyFn(state.cbReplyData, type, buffer, size);
+  struct CBRequest * cbr;
+  if (ll_shift(state.cbRequestList, (void **)&cbr))
+  {
+    cbr->replyFn(cbr->opaque, type, buffer, size);
+    free(cbr);
+  }
 }
 
 void spiceClipboardRelease()
@@ -1057,6 +1085,8 @@ int run()
       DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
       state.lgc = NULL;
     }
+
+    state.cbRequestList = ll_new();
   }
 
   SDL_Cursor *cursor = NULL;
@@ -1228,7 +1258,14 @@ int run()
     state.lgr->deinitialize(state.lgrData);
 
   if (state.lgc)
+  {
     state.lgc->free();
+
+    struct CBRequest *cbr;
+    while(ll_shift(state.cbRequestList, (void **)&cbr))
+      free(cbr);
+    ll_free(state.cbRequestList);
+  }
 
   if (state.window)
     SDL_DestroyWindow(state.window);
