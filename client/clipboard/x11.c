@@ -196,10 +196,6 @@ static void x11_cb_wmevent(SDL_SysWMmsg * msg)
         return;
       }
 
-    DEBUG_INFO("Unable to copy \"%s\" to \"%s\" type",
-        atomTypes[this->type],
-        XGetAtomName(this->display, e.xselectionrequest.target));
-
     // report no data
     s->xselection.property = None;
     XSendEvent(this->display, e.xselectionrequest.requestor, 0, 0, s);
