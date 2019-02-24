@@ -16,6 +16,7 @@ pkg_check_modules(PKGCONFIG REQUIRED
 	spice-protocol
 	fontconfig
 	x11
+	xfixes
 	wayland-egl
 	libconfig
 	nettle

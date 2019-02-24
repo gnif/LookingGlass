@@ -27,12 +27,16 @@ typedef enum SpiceDataType
   SPICE_DATA_PNG,
   SPICE_DATA_BMP,
   SPICE_DATA_TIFF,
-  SPICE_DATA_JPEG
+  SPICE_DATA_JPEG,
+
+  SPICE_DATA_NONE
 }
 SpiceDataType;
 
-typedef void (*SpiceClipboardNotice)(const SpiceDataType type);
-typedef void (*SpiceClipboardData  )(const SpiceDataType type, uint8_t * buffer, uint32_t size);
+typedef void (*SpiceClipboardNotice )(const SpiceDataType type);
+typedef void (*SpiceClipboardData   )(const SpiceDataType type, uint8_t * buffer, uint32_t size);
+typedef void (*SpiceClipboardRelease)();
+typedef void (*SpiceClipboardRequest)(const SpiceDataType type);
 
 bool spice_connect(const char * host, const unsigned short port, const char * password);
 void spice_disconnect();
@@ -48,6 +52,13 @@ bool spice_mouse_press   (uint32_t button);
 bool spice_mouse_release (uint32_t button);
 
 bool spice_clipboard_request(SpiceDataType type);
+bool spice_clipboard_grab   (SpiceDataType type);
+bool spice_clipboard_release();
+bool spice_clipboard_data   (SpiceDataType type, uint8_t * data, size_t size);
 
 /* events */
-bool spice_set_on_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData cbDataFn);
+bool spice_set_clipboard_cb(
+    SpiceClipboardNotice  cbNoticeFn,
+    SpiceClipboardData    cbDataFn,
+    SpiceClipboardRelease cbReleaseFn,
+    SpiceClipboardRequest cbRequestFn);

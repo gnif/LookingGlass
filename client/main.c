@@ -492,7 +492,60 @@ static inline const uint32_t mapScancode(SDL_Scancode scancode)
   return ps2;
 }
 
-void clipboardRequestFn(const LG_ClipboardReplyFn replyFn, void * opaque)
+static LG_ClipboardData spice_type_to_clipboard_type(const SpiceDataType type)
+{
+  switch(type)
+  {
+    case SPICE_DATA_TEXT: return LG_CLIPBOARD_DATA_TEXT; break;
+    case SPICE_DATA_PNG : return LG_CLIPBOARD_DATA_PNG ; break;
+    case SPICE_DATA_BMP : return LG_CLIPBOARD_DATA_BMP ; break;
+    case SPICE_DATA_TIFF: return LG_CLIPBOARD_DATA_TIFF; break;
+    case SPICE_DATA_JPEG: return LG_CLIPBOARD_DATA_JPEG; break;
+    default:
+      DEBUG_ERROR("invalid spice data type");
+      return LG_CLIPBOARD_DATA_NONE;
+  }
+}
+
+static SpiceDataType clipboard_type_to_spice_type(const LG_ClipboardData type)
+{
+  switch(type)
+  {
+    case LG_CLIPBOARD_DATA_TEXT: return SPICE_DATA_TEXT; break;
+    case LG_CLIPBOARD_DATA_PNG : return SPICE_DATA_PNG ; break;
+    case LG_CLIPBOARD_DATA_BMP : return SPICE_DATA_BMP ; break;
+    case LG_CLIPBOARD_DATA_TIFF: return SPICE_DATA_TIFF; break;
+    case LG_CLIPBOARD_DATA_JPEG: return SPICE_DATA_JPEG; break;
+    default:
+      DEBUG_ERROR("invalid clipboard data type");
+      return SPICE_DATA_NONE;
+  }
+}
+
+void clipboardRelease()
+{
+  spice_clipboard_release();
+
+  // another application just took the clipboard ownership
+}
+
+void clipboardNotify(const LG_ClipboardData type)
+{
+  if (type == LG_CLIPBOARD_DATA_NONE)
+  {
+    spice_clipboard_release();
+    return;
+  }
+
+  spice_clipboard_grab(clipboard_type_to_spice_type(type));
+}
+
+void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
+{
+  spice_clipboard_data(clipboard_type_to_spice_type(type), data, (uint32_t)size);
+}
+
+void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
 {
   state.cbReplyData = opaque;
   state.cbReplyFn   = replyFn;
@@ -506,18 +559,7 @@ void spiceClipboardNotice(const SpiceDataType type)
     return;
 
   state.cbType = type;
-
-  LG_ClipboardData t;
-  switch(type)
-  {
-    case LG_CLIPBOARD_DATA_TEXT: t = SPICE_DATA_TEXT; break;
-    case LG_CLIPBOARD_DATA_PNG : t = SPICE_DATA_PNG ; break;
-    case LG_CLIPBOARD_DATA_BMP : t = SPICE_DATA_BMP ; break;
-    case LG_CLIPBOARD_DATA_TIFF: t = SPICE_DATA_TIFF; break;
-    case LG_CLIPBOARD_DATA_JPEG: t = SPICE_DATA_JPEG; break;
-  }
-
-  state.lgc->notice(clipboardRequestFn, t);
+  state.lgc->notice(clipboardRequest, spice_type_to_clipboard_type(type));
 }
 
 void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)
@@ -536,6 +578,18 @@ void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t siz
   }
 
   state.cbReplyFn(state.cbReplyData, type, buffer, size);
+}
+
+void spiceClipboardRelease()
+{
+  if (state.lgc && state.lgc->release)
+    state.lgc->release();
+}
+
+void spiceClipboardRequest(const SpiceDataType type)
+{
+  if (state.lgc && state.lgc->request)
+    state.lgc->request(spice_type_to_clipboard_type(type));
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -982,7 +1036,7 @@ int run()
   if (state.lgc)
   {
     DEBUG_INFO("Using Clipboard: %s", state.lgc->getName());
-    if (!state.lgc->init(&wminfo))
+    if (!state.lgc->init(&wminfo, clipboardRelease, clipboardNotify, clipboardData))
     {
       DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
       state.lgc = NULL;
@@ -1022,7 +1076,11 @@ int run()
 
     if (params.useSpice)
     {
-      spice_set_on_clipboard_cb(spiceClipboardNotice, spiceClipboardData);
+      spice_set_clipboard_cb(
+          spiceClipboardNotice,
+          spiceClipboardData,
+          spiceClipboardRelease,
+          spiceClipboardRequest);
       if (!spice_connect(params.spiceHost, params.spicePort, ""))
       {
         DEBUG_ERROR("Failed to connect to spice server");

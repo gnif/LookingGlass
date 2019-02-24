@@ -31,18 +31,23 @@ typedef enum LG_ClipboardData
   LG_CLIPBOARD_DATA_TIFF,
   LG_CLIPBOARD_DATA_JPEG,
 
-  LG_CLIPBOARD_DATA_MAX // enum max, not a data type
+  LG_CLIPBOARD_DATA_NONE // enum max, not a data type
 }
 LG_ClipboardData;
 
-typedef void (* LG_ClipboardReplyFn  )(void * opaque, LG_ClipboardData type, uint8_t * data, uint32_t size);
+typedef void (* LG_ClipboardReplyFn  )(void * opaque, const LG_ClipboardData type, uint8_t * data, uint32_t size);
 typedef void (* LG_ClipboardRequestFn)(LG_ClipboardReplyFn replyFn, void * opaque);
+typedef void (* LG_ClipboardReleaseFn)();
+typedef void (* LG_ClipboardNotifyFn)(LG_ClipboardData type);
+typedef void (* LG_ClipboardDataFn  )(const LG_ClipboardData type, uint8_t * data, size_t size);
 
 typedef const char * (* LG_ClipboardGetName)();
-typedef bool         (* LG_ClipboardInit)(SDL_SysWMinfo * wminfo);
+typedef bool         (* LG_ClipboardInit)(SDL_SysWMinfo * wminfo, LG_ClipboardReleaseFn releaseFn, LG_ClipboardNotifyFn notifyFn, LG_ClipboardDataFn dataFn);
 typedef void         (* LG_ClipboardFree)();
 typedef void         (* LG_ClipboardWMEvent)(SDL_SysWMmsg * msg);
 typedef void         (* LG_ClipboardNotice)(LG_ClipboardRequestFn requestFn, LG_ClipboardData type);
+typedef void         (* LG_ClipboardRelease)();
+typedef void         (* LG_ClipboardRequest)(LG_ClipboardData type);
 
 typedef struct LG_Clipboard
 {
@@ -51,5 +56,7 @@ typedef struct LG_Clipboard
   LG_ClipboardFree    free;
   LG_ClipboardWMEvent wmevent;
   LG_ClipboardNotice  notice;
+  LG_ClipboardRelease release;
+  LG_ClipboardRequest request;
 }
 LG_Clipboard;
