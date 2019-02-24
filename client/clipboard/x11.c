@@ -269,7 +269,6 @@ static void x11_cb_wmevent(SDL_SysWMmsg * msg)
       // an array of padded 64-bit values
       if (!data || format != 32)
       {
-        this->notifyFn(LG_CLIPBOARD_DATA_NONE);
         if (data)
           XFree(data);
         return;
