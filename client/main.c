@@ -103,9 +103,12 @@ struct AppParams
   unsigned int shmSize;
   unsigned int fpsLimit;
   bool         showFPS;
-  bool         useSpice;
+  bool         useSpiceInput;
+  bool         useSpiceClipboard;
   char       * spiceHost;
   unsigned int spicePort;
+  bool         clipboardToVM;
+  bool         clipboardToLocal;
   bool         scaleMouseInput;
   bool         hideMouse;
   bool         ignoreQuit;
@@ -122,32 +125,35 @@ struct AppParams
 struct AppState  state;
 struct AppParams params =
 {
-  .configFile       = "/etc/looking-glass.conf",
-  .autoResize       = false,
-  .allowResize      = true,
-  .keepAspect       = true,
-  .borderless       = false,
-  .fullscreen       = false,
-  .center           = true,
-  .x                = 0,
-  .y                = 0,
-  .w                = 1024,
-  .h                = 768,
-  .shmFile          = "/dev/shm/looking-glass",
-  .shmSize          = 0,
-  .fpsLimit         = 200,
-  .showFPS          = false,
-  .useSpice         = true,
-  .spiceHost        = "127.0.0.1",
-  .spicePort        = 5900,
-  .scaleMouseInput  = true,
-  .hideMouse        = true,
-  .ignoreQuit       = false,
-  .allowScreensaver = true,
-  .grabKeyboard     = true,
-  .captureKey       = SDL_SCANCODE_SCROLLLOCK,
-  .disableAlerts    = false,
-  .forceRenderer    = false
+  .configFile        = "/etc/looking-glass.conf",
+  .autoResize        = false,
+  .allowResize       = true,
+  .keepAspect        = true,
+  .borderless        = false,
+  .fullscreen        = false,
+  .center            = true,
+  .x                 = 0,
+  .y                 = 0,
+  .w                 = 1024,
+  .h                 = 768,
+  .shmFile           = "/dev/shm/looking-glass",
+  .shmSize           = 0,
+  .fpsLimit          = 200,
+  .showFPS           = false,
+  .useSpiceInput     = true,
+  .useSpiceClipboard = true,
+  .spiceHost         = "127.0.0.1",
+  .spicePort         = 5900,
+  .clipboardToVM     = true,
+  .clipboardToLocal  = true,
+  .scaleMouseInput   = true,
+  .hideMouse         = true,
+  .ignoreQuit        = false,
+  .allowScreensaver  = true,
+  .grabKeyboard      = true,
+  .captureKey        = SDL_SCANCODE_SCROLLLOCK,
+  .disableAlerts     = false,
+  .forceRenderer     = false
 };
 
 struct CBRequest
@@ -531,11 +537,17 @@ static SpiceDataType clipboard_type_to_spice_type(const LG_ClipboardData type)
 
 void clipboardRelease()
 {
+  if (!params.clipboardToVM)
+    return;
+
   spice_clipboard_release();
 }
 
 void clipboardNotify(const LG_ClipboardData type)
 {
+  if (!params.clipboardToVM)
+    return;
+
   if (type == LG_CLIPBOARD_DATA_NONE)
   {
     spice_clipboard_release();
@@ -547,6 +559,9 @@ void clipboardNotify(const LG_ClipboardData type)
 
 void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
 {
+  if (!params.clipboardToVM)
+    return;
+
   uint8_t * buffer = data;
 
   // unix2dos
@@ -577,6 +592,9 @@ void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
 
 void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
 {
+  if (!params.clipboardToLocal)
+    return;
+
   struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(struct CBRequest()));
 
   cbr->type    = state.cbType;
@@ -589,6 +607,9 @@ void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
 
 void spiceClipboardNotice(const SpiceDataType type)
 {
+  if (!params.clipboardToLocal)
+    return;
+
   if (!state.lgc || !state.lgc->notice)
     return;
 
@@ -598,6 +619,9 @@ void spiceClipboardNotice(const SpiceDataType type)
 
 void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)
 {
+  if (!params.clipboardToLocal)
+    return;
+
   if (type == SPICE_DATA_TEXT)
   {
     // dos2unix
@@ -626,12 +650,18 @@ void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t siz
 
 void spiceClipboardRelease()
 {
+  if (!params.clipboardToLocal)
+    return;
+
   if (state.lgc && state.lgc->release)
     state.lgc->release();
 }
 
 void spiceClipboardRequest(const SpiceDataType type)
 {
+  if (!params.clipboardToVM)
+    return;
+
   if (state.lgc && state.lgc->request)
     state.lgc->request(spice_type_to_clipboard_type(type));
 }
@@ -666,20 +696,20 @@ int eventFilter(void * userdata, SDL_Event * event)
       }
       return 0;
     }
+
+    case SDL_SYSWMEVENT:
+    {
+      if (params.useSpiceClipboard && state.lgc && state.lgc->wmevent)
+        state.lgc->wmevent(event->syswm.msg);
+      return 0;
+    }
   }
 
-  if (!params.useSpice)
+  if (!params.useSpiceInput)
     return 0;
 
   switch(event->type)
   {
-    case SDL_SYSWMEVENT:
-    {
-      if (state.lgc && state.lgc->wmevent)
-        state.lgc->wmevent(event->syswm.msg);
-      return 0;
-    }
-
     case SDL_MOUSEMOTION:
     {
       if (
@@ -1120,13 +1150,14 @@ int run()
       break;
     }
 
-    if (params.useSpice)
+    if (params.useSpiceInput || params.useSpiceClipboard)
     {
       spice_set_clipboard_cb(
           spiceClipboardNotice,
           spiceClipboardData,
           spiceClipboardRelease,
           spiceClipboardRequest);
+
       if (!spice_connect(params.spiceHost, params.spicePort, ""))
       {
         DEBUG_ERROR("Failed to connect to spice server");
@@ -1236,7 +1267,7 @@ int run()
     SDL_WaitThread(t_main, NULL);
 
   // if spice is still connected send key up events for any pressed keys
-  if (params.useSpice && spice_ready())
+  if (params.useSpiceInput && spice_ready())
   {
     for(int i = 0; i < SDL_NUM_SCANCODES; ++i)
       if (state.keyDown[i])
@@ -1296,39 +1327,46 @@ void doHelp(char * app)
     "\n"
     "  -h        Print out this help\n"
     "\n"
-    "  -C PATH   Specify an additional configuration file to load\n"
-    "  -f PATH   Specify the path to the shared memory file [current: %s]\n"
-    "  -L SIZE   Specify the size in MB of the shared memory file (0 = detect) [current: %d]\n"
+    "  -C PATH    Specify an additional configuration file to load\n"
+    "  -f PATH    Specify the path to the shared memory file [current: %s]\n"
+    "  -L SIZE    Specify the size in MB of the shared memory file (0 = detect) [current: %d]\n"
     "\n"
-    "  -s        Disable spice client\n"
-    "  -c HOST   Specify the spice host or UNIX socket [current: %s]\n"
-    "  -p PORT   Specify the spice port or 0 for UNIX socket [current: %d]\n"
-    "  -j        Disable cursor position scaling\n"
-    "  -M        Don't hide the host cursor\n"
+    "  -s FEATURE Disable spice feature (specify multiple times for each feature)\n"
     "\n"
-    "  -K        Set the FPS limit [current: %d]\n"
-    "  -k        Enable FPS display\n"
-    "  -g NAME   Force the use of a specific renderer\n"
-    "  -o OPTION Specify a renderer option (ie: opengl:vsync=0)\n"
-    "            Alternatively specify \"list\" to list all renderers and their options\n"
+    "               ALL                Disable the spice client entirely\n"
+    "               INPUT              Disable spice keyboard & mouse input\n"
+    "               CIPBOARD           Disable spice clipboard support\n"
+    "               CLIPBOARD_TO_VM    Disable local clipboard to VM sync\n"
+    "               CLIPBOARD_TO_LOCAL Disable VM clipboard to local sync\n"
     "\n"
-    "  -a        Auto resize the window to the guest\n"
-    "  -n        Don't allow the window to be manually resized\n"
-    "  -r        Don't maintain the aspect ratio\n"
-    "  -d        Borderless mode\n"
-    "  -F        Borderless fullscreen mode\n"
-    "  -x XPOS   Initial window X position [current: %s]\n"
-    "  -y YPOS   Initial window Y position [current: %s]\n"
-    "  -w WIDTH  Initial window width [current: %u]\n"
-    "  -b HEIGHT Initial window height [current: %u]\n"
-    "  -Q        Ignore requests to quit (ie: Alt+F4)\n"
-    "  -S        Disable the screensaver\n"
-    "  -G        Don't capture the keyboard in capture mode\n"
-    "  -m CODE   Specify the capture key [current: %u (%s)]\n"
-    "            See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
-    "  -q        Disable alert messages [current: %s]\n"
+    "  -c HOST    Specify the spice host or UNIX socket [current: %s]\n"
+    "  -p PORT    Specify the spice port or 0 for UNIX socket [current: %d]\n"
+    "  -j         Disable cursor position scaling\n"
+    "  -M         Don't hide the host cursor\n"
     "\n"
-    "  -l        License information\n"
+    "  -K         Set the FPS limit [current: %d]\n"
+    "  -k         Enable FPS display\n"
+    "  -g NAME    Force the use of a specific renderer\n"
+    "  -o OPTION  Specify a renderer option (ie: opengl:vsync=0)\n"
+    "             Alternatively specify \"list\" to list all renderers and their options\n"
+    "\n"
+    "  -a         Auto resize the window to the guest\n"
+    "  -n         Don't allow the window to be manually resized\n"
+    "  -r         Don't maintain the aspect ratio\n"
+    "  -d         Borderless mode\n"
+    "  -F         Borderless fullscreen mode\n"
+    "  -x XPOS    Initial window X position [current: %s]\n"
+    "  -y YPOS    Initial window Y position [current: %s]\n"
+    "  -w WIDTH   Initial window width [current: %u]\n"
+    "  -b HEIGHT  Initial window height [current: %u]\n"
+    "  -Q         Ignore requests to quit (ie: Alt+F4)\n"
+    "  -S         Disable the screensaver\n"
+    "  -G         Don't capture the keyboard in capture mode\n"
+    "  -m CODE    Specify the capture key [current: %u (%s)]\n"
+    "             See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
+    "  -q         Disable alert messages [current: %s]\n"
+    "\n"
+    "  -l         License information\n"
     "\n",
     app,
     app,
@@ -1483,8 +1521,17 @@ static bool load_config(const char * configFile)
   config_setting_t * spice = config_lookup(&cfg, "spice");
   if (spice)
   {
-    if (config_setting_lookup_bool(spice, "use", &itmp))
-      params.useSpice = (itmp != 0);
+    if (config_setting_lookup_bool(spice, "useInput", &itmp))
+      params.useSpiceInput = (itmp != 0);
+
+    if (config_setting_lookup_bool(spice, "useClipboard", &itmp))
+      params.useSpiceClipboard = (itmp != 0);
+
+    if (config_setting_lookup_bool(spice, "clipboardToVM", &itmp))
+      params.clipboardToVM = (itmp != 0);
+
+    if (config_setting_lookup_bool(spice, "clipboardToLocal", &itmp))
+      params.clipboardToLocal = (itmp != 0);
 
     if (config_setting_lookup_string(spice, "host", &stmp))
     {
@@ -1571,7 +1618,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:sc:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:lq"))
+    switch(getopt(argc, argv, "hC:f:L:s:c:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:lq"))
     {
       case '?':
       case 'h':
@@ -1598,8 +1645,24 @@ int main(int argc, char * argv[])
         continue;
 
       case 's':
-        params.useSpice = false;
+      {
+        if (strcasecmp("ALL", optarg) == 0)
+        {
+          params.useSpiceInput     = false;
+          params.useSpiceClipboard = false;
+        }
+        else if (strcasecmp("INPUT"             , optarg) == 0) params.useSpiceInput     = false;
+        else if (strcasecmp("CLIPBOARD"         , optarg) == 0) params.useSpiceClipboard = false;
+        else if (strcasecmp("CLIPBOARD_TO_VM"   , optarg) == 0) params.clipboardToVM     = false;
+        else if (strcasecmp("CLIPBOARD_TO_LOCAL", optarg) == 0) params.clipboardToLocal  = false;
+        else
+        {
+          fprintf(stderr, "Invalid spice option %s\n", optarg);
+          doHelp(argv[0]);
+          return -1;
+        }
         continue;
+      }
 
       case 'c':
         free(params.spiceHost);
