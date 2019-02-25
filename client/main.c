@@ -1336,7 +1336,7 @@ void doHelp(char * app)
     "\n"
     "               ALL                Disable the spice client entirely\n"
     "               INPUT              Disable spice keyboard & mouse input\n"
-    "               CIPBOARD           Disable spice clipboard support\n"
+    "               CLIPBOARD          Disable spice clipboard support\n"
     "               CLIPBOARD_TO_VM    Disable local clipboard to VM sync\n"
     "               CLIPBOARD_TO_LOCAL Disable VM clipboard to local sync\n"
     "\n"
