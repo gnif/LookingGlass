@@ -1657,7 +1657,8 @@ int main(int argc, char * argv[])
         else if (strcasecmp("CLIPBOARD_TO_LOCAL", optarg) == 0) params.clipboardToLocal  = false;
         else
         {
-          fprintf(stderr, "Invalid spice option %s\n", optarg);
+          fprintf(stderr, "Invalid spice feature: %s\n", optarg);
+          fprintf(stderr, "Must be one of ALL, INPUT, CLIPBOARD, CLIPBOARD_TO_VM, CLIPBOARD_TO_LOCAL\n");
           doHelp(argv[0]);
           return -1;
         }
