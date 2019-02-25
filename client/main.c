@@ -1321,6 +1321,7 @@ void doHelp(char * app)
   snprintf(y, sizeof(y), "%d", params.y);
 
   fprintf(stderr,
+    "\n"
     "Looking Glass Client\n"
     "Usage: %s [OPTION]...\n"
     "Example: %s -h\n"
