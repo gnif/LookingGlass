@@ -4,8 +4,6 @@ CC=gcc.exe
 
 CFLAGS  = -std=gnu99 -Wall -Werror
 CFLAGS += -g -O0
-CFLAGS += -DCOBJMACROS
-CFLAGS += -DINITGUID
 CFLAGS += -I.
 CFLAGS += -I../common
 
@@ -17,9 +15,8 @@ ifdef OS
   OBJS += windebug.o
 
   ifeq ($(USE_DXGI), 1)
-    CFLAGS += -DUSE_DXGI
-    LIBS   += -ld3d11
-    LIBS   += -ldxgi
+    CFLAGS += -DUSE_DXGI -DCOBJMACROS -DINITGUID
+    LIBS   += -ld3d11 -ldxgi
     DLLS   += dll/libd3d11.a
     OBJS   += capture/dxgi.o
   endif
