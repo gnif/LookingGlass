@@ -65,5 +65,7 @@ int app_main()
 
   iface->deinit();
   iface->free();
+
+  os_shmemUnmap();
   return 0;
 }

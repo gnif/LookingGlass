@@ -25,7 +25,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "windebug.h"
 #include "ivshmem/Public.h"
 
-static HANDLE shmemHandle = INVALID_HANDLE_VALUE;
+static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;
+static bool         shmemOwned  = false;
+static IVSHMEM_MMAP shmemMap    = {0};
 
 int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
@@ -81,6 +83,7 @@ int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   int result = app_main();
 
+  os_shmemUnmap();
   CloseHandle(shmemHandle);
   return result;
 }
@@ -99,23 +102,36 @@ unsigned int os_shmemSize()
 
 bool os_shmemMmap(void **ptr)
 {
-  IVSHMEM_MMAP map = {0};
+  if (shmemOwned)
+  {
+    *ptr = shmemMap.ptr;
+    return true;
+  }
 
+  memset(&shmemMap, 0, sizeof(IVSHMEM_MMAP));
   if (!DeviceIoControl(
     shmemHandle,
     IOCTL_IVSHMEM_REQUEST_MMAP,
     NULL, 0,
-    &map, sizeof(IVSHMEM_MMAP),
+    &shmemMap, sizeof(IVSHMEM_MMAP),
     NULL, NULL))
   {
     DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
     return false;
   }
 
-  *ptr = map.ptr;
+  *ptr = shmemMap.ptr;
+  shmemOwned = true;
   return true;
 }
 
 void os_shmemUnmap()
 {
+  if (!shmemOwned)
+    return;
+
+  if (!DeviceIoControl(shmemHandle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
+    DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
+  else
+    shmemOwned = false;
 }
