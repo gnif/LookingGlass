@@ -20,7 +20,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app.h"
 
 #include <stdio.h>
-#include <windows.h>
 #include "debug.h"
 #include "capture/interfaces.h"
 
