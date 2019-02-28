@@ -17,41 +17,14 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include <stdio.h>
-#include <windows.h>
-#include "debug.h"
-#include "capture/interfaces.h"
+#pragma once
 
-int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-{
-  struct CaptureInterface * iface = NULL;
-  for(int i = 0; CaptureInterfaces[i]; ++i)
-  {
-    iface = CaptureInterfaces[i];
-    DEBUG_INFO("Trying           : %s", iface->getName());
-    if (!iface->create())
-      continue;
+#include <stdbool.h>
 
-    if (iface->init())
-      break;
+int app_main();
 
-    iface->free();
-    iface = NULL;
-  }
+// these must be implemented for each OS
 
-  if (!iface)
-  {
-    DEBUG_ERROR("Failed to find a supported capture interface");
-    return -1;
-  }
-
-  DEBUG_INFO("Using            : %s", iface->getName());
-
-  iface->capture();
-  iface->capture();
-  iface->capture();
-
-  iface->deinit();
-  iface->free();
-  return 0;
-}
+unsigned int os_shmemSize();
+bool         os_shmemMmap(void **ptr);
+void         os_shmemUnmap();

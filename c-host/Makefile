@@ -7,12 +7,15 @@ CFLAGS += -g -O0
 CFLAGS += -I.
 CFLAGS += -I../common
 
-OBJS  = main.o
+OBJS  = app.o
 
 # if windows
 ifdef OS
   LDFLAGS = -L./dll
-  OBJS += windebug.o
+  LIBS   += -lsetupapi
+  OBJS   += windows/platform.o
+  OBJS   += windows/windebug.o
+  CFLAGS += -I../vendor/kvm-guest-drivers-windows
 
   ifeq ($(USE_DXGI), 1)
     CFLAGS += -DUSE_DXGI -DCOBJMACROS -DINITGUID
