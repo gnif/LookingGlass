@@ -11,7 +11,7 @@ OBJS  = app.o
 
 # if windows
 ifdef OS
-  LDFLAGS = -L./dll
+  LDFLAGS = -L./windows/dll
   LIBS   += -lsetupapi
   OBJS   += windows/platform.o
   OBJS   += windows/windebug.o
@@ -20,7 +20,7 @@ ifdef OS
   ifeq ($(USE_DXGI), 1)
     CFLAGS += -DUSE_DXGI -DCOBJMACROS -DINITGUID
     LIBS   += -ld3d11 -ldxgi
-    DLLS   += dll/libd3d11.a
+    DLLS   += windows/dll/libd3d11.a
     OBJS   += capture/dxgi.o
   endif
 else
