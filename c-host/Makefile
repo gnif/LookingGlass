@@ -1,7 +1,5 @@
 USE_DXGI ?= 1
 
-CC=gcc.exe
-
 OUTPUT = looking-glass-host
 EXT    =
 
@@ -14,6 +12,7 @@ OBJS  = app.o
 
 # if windows
 ifdef OS
+  CC      = gcc.exe
   LDFLAGS = -L./windows/dll
   LIBS   += -lsetupapi
   OBJS   += windows/platform.o
@@ -28,6 +27,7 @@ ifdef OS
     OBJS   += windows/capture/dxgi.o
   endif
 else
+  CC    = gcc
   OBJS += linux/platform.o
 endif
 
