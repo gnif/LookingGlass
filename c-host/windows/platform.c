@@ -85,6 +85,18 @@ int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   os_shmemUnmap();
   CloseHandle(shmemHandle);
+
+  if (result != 0)
+  {
+    MessageBoxA(
+      NULL,
+      "The Looking Glass host has terminated due to an error.\r\n"
+      "\r\n"
+      "For more information run the application in a command prompt.",
+      "Looking Glass Host",
+      MB_ICONERROR);
+  }
+
   return result;
 }
 

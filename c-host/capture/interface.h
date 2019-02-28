@@ -33,10 +33,11 @@ CaptureResult;
 
 struct CaptureInterface
 {
-  const char *  (*getName)();
-  bool          (*create )();
-  bool          (*init   )();
-  bool          (*deinit )();
-  void          (*free   )();
-  CaptureResult (*capture)();
+  const char *  (*getName        )();
+  bool          (*create         )();
+  bool          (*init           )();
+  bool          (*deinit         )();
+  void          (*free           )();
+  unsigned int  (*getMaxFrameSize)();
+  CaptureResult (*capture        )();
 };

@@ -45,6 +45,8 @@ struct iface
 
   unsigned int width;
   unsigned int height;
+  unsigned int pitch;
+  unsigned int stride;
 };
 
 static bool           dpiDone = false;
@@ -184,9 +186,9 @@ static bool dxgi_init()
   DEBUG_INFO("Device Descripion: %ls"  , adapterDesc.Description);
   DEBUG_INFO("Device Vendor ID : 0x%x" , adapterDesc.VendorId);
   DEBUG_INFO("Device Device ID : 0x%x" , adapterDesc.DeviceId);
-  DEBUG_INFO("Device Video Mem : %u MB", (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
-  DEBUG_INFO("Device Sys Mem   : %u MB", (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
-  DEBUG_INFO("Shared Sys Mem   : %u MB", (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
+  DEBUG_INFO("Device Video Mem : %u MiB", (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
+  DEBUG_INFO("Device Sys Mem   : %u MiB", (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
+  DEBUG_INFO("Shared Sys Mem   : %u MiB", (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
   DEBUG_INFO("Feature Level    : 0x%x", this->featureLevel);
   DEBUG_INFO("Capture Size     : %u x %u", this->width, this->height);
 
@@ -294,6 +296,18 @@ static bool dxgi_init()
     goto fail_release_output;
   }
 
+  // map the texture simply to get the pitch and stride
+  D3D11_MAPPED_SUBRESOURCE mapping;
+  status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource *)this->texture, 0, D3D11_MAP_READ, 0, &mapping);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to map the texture", status);
+    goto fail_release_output;
+  }
+  this->pitch  = mapping.RowPitch;
+  this->stride = mapping.RowPitch / 4;
+  ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture, 0);
+
   this->factory     = factory;
   this->adapter     = adapter;
   this->output      = output;
@@ -368,6 +382,14 @@ static void dxgi_free()
 
   free(this);
   this = NULL;
+}
+
+static unsigned int dxgi_getMaxFrameSize()
+{
+  assert(this);
+  assert(this->initialized);
+
+  return this->height * this->pitch;
 }
 
 static CaptureResult dxgi_capture()
@@ -456,10 +478,11 @@ static CaptureResult dxgi_releaseFrame()
 
 struct CaptureInterface Capture_DXGI =
 {
-  .getName = dxgi_getName,
-  .create  = dxgi_create,
-  .init    = dxgi_init,
-  .deinit  = dxgi_deinit,
-  .free    = dxgi_free,
-  .capture = dxgi_capture
+  .getName         = dxgi_getName,
+  .create          = dxgi_create,
+  .init            = dxgi_init,
+  .deinit          = dxgi_deinit,
+  .free            = dxgi_free,
+  .getMaxFrameSize = dxgi_getMaxFrameSize,
+  .capture         = dxgi_capture
 };

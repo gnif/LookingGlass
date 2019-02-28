@@ -13,7 +13,7 @@ OBJS  = app.o
 # if windows
 ifdef OS
   CC      = gcc.exe
-  LDFLAGS = -L./windows/dll
+  LDFLAGS = -L./windows/dll -mwindows
   LIBS   += -lsetupapi
   OBJS   += windows/platform.o
   OBJS   += windows/windebug.o
