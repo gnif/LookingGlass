@@ -4,3 +4,6 @@ module/*.mod.c
 module/.*
 module/Module.symvers
 module/modules.order
+*.a
+*.o
+*.exe
