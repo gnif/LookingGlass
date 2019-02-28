@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "MFT/H264.h"
 
-#include "common/debug.h"
+#include "WinDebug.h"
 #include "common/memcpySSE.h"
 
 #include <mfapi.h>

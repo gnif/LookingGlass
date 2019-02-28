@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "Capture/DXGI.h"
 using namespace Capture;
 
-#include "common/debug.h"
+#include "WinDebug.h"
 #include "common/memcpySSE.h"
 
 static const char * DXGI_FORMAT_STR[] = {
