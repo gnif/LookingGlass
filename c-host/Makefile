@@ -23,6 +23,8 @@ ifdef OS
     DLLS   += dll/libd3d11.a
     OBJS   += capture/dxgi.o
   endif
+else
+  OBJS += linux/platform.o
 endif
 
 all: $(OBJS) $(DLLS)
