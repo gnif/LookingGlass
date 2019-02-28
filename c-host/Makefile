@@ -2,6 +2,9 @@ USE_DXGI ?= 1
 
 CC=gcc.exe
 
+OUTPUT = looking-glass-host
+EXT    =
+
 CFLAGS  = -std=gnu99 -Wall -Werror
 CFLAGS += -g -O0
 CFLAGS += -I.
@@ -16,22 +19,23 @@ ifdef OS
   OBJS   += windows/platform.o
   OBJS   += windows/windebug.o
   CFLAGS += -I../vendor/kvm-guest-drivers-windows
+  EXT     = .exe
 
   ifeq ($(USE_DXGI), 1)
     CFLAGS += -DUSE_DXGI -DCOBJMACROS -DINITGUID
     LIBS   += -ld3d11 -ldxgi
     DLLS   += windows/dll/libd3d11.a
-    OBJS   += capture/dxgi.o
+    OBJS   += windows/capture/dxgi.o
   endif
 else
   OBJS += linux/platform.o
 endif
 
 all: $(OBJS) $(DLLS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o looking-glass-host.exe $(OBJS) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $(OUTPUT)$(EXT) $(OBJS) $(LIBS)
 
 clean:
-	rm -v $(OBJS) $(DLLS) looking-glass-host.exe
+	rm -v $(OBJS) $(DLLS) $(OUTPUT)$(EXT)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
