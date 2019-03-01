@@ -19,8 +19,33 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "debug.h"
+#include <getopt.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
+
+struct app
+{
+  unsigned int  shmSize;
+  int           shmFD;
+  void        * shmMap;
+};
+
+struct params
+{
+  const char * shmDevice;
+};
+
+static struct app app;
+
+static struct params params =
+{
+  .shmDevice = "uio0"
+};
 
 struct osThreadHandle
 {
@@ -33,27 +58,103 @@ struct osThreadHandle
 
 int main(int argc, char * argv[])
 {
+  static struct option longOptions[] =
+  {
+    {"shmDevice", required_argument, 0, 'f'},
+    {0, 0, 0, 0}
+  };
+
+  int optionIndex = 0;
+  while(true)
+  {
+    int c = getopt_long(argc, argv, "f:", longOptions, &optionIndex);
+    if (c == -1)
+      break;
+
+    switch(c)
+    {
+      case 'f':
+        params.shmDevice = optarg;
+        break;
+    }
+  }
+
+  // get the device size
+  {
+    char file[100] = "/sys/class/uio/";
+    strncat(file, params.shmDevice , sizeof(file));
+    strncat(file, "/maps/map0/size", sizeof(file));
+
+    int fd = open(file, O_RDONLY);
+    if (fd < 0)
+    {
+      DEBUG_ERROR("Failed to open: %s", file);
+      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
+      return -1;
+    }
+
+    char size[32];
+    int  len = read(fd, size, sizeof(size));
+    if (len <= 0 || len == sizeof(size))
+    {
+      DEBUG_ERROR("Failed to read: %s", file);
+      close(fd);
+      return -1;
+    }
+    size[len] = '\0';
+
+    app.shmSize = strtoul(size, NULL, 16);
+  }
+
+  // open the device
+  {
+    char file[100] = "/dev/";
+    strncat(file, params.shmDevice, sizeof(file));
+    app.shmFD   = open(file, O_RDWR, (mode_t)0600);
+    app.shmMap  = MAP_FAILED;
+    if (app.shmFD < 0)
+    {
+      DEBUG_ERROR("Failed to open: %s", file);
+      return -1;
+    }
+  }
+
   bool termSig = false;
   int result = app_main(&termSig);
   os_shmemUnmap();
+  close(app.shmFD);
+
   return result;
 }
 
 unsigned int os_shmemSize()
 {
-  // TODO
-  return 0;
+  return app.shmSize;
 }
 
 bool os_shmemMmap(void **ptr)
 {
-  // TODO
-  return false;
+  if (app.shmMap == MAP_FAILED)
+  {
+    app.shmMap = mmap(0, app.shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, app.shmFD, 0);
+    if (app.shmMap == MAP_FAILED)
+    {
+      DEBUG_ERROR("Failed to map the shared memory device: %s", params.shmDevice);
+      return false;
+    }
+  }
+
+  *ptr = app.shmMap;
+  return true;
 }
 
 void os_shmemUnmap()
 {
-  // TODO
+  if (app.shmMap == MAP_FAILED)
+    return;
+
+  munmap(app.shmMap, app.shmSize);
+  app.shmMap = MAP_FAILED;
 }
 
 static void * threadWrapper(void * opaque)
