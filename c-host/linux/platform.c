@@ -79,6 +79,38 @@ int main(int argc, char * argv[])
     }
   }
 
+  // check the deice name
+  {
+    char file[100] = "/sys/class/uio/";
+    strncat(file, params.shmDevice, sizeof(file) - 1);
+    strncat(file, "/name"         , sizeof(file) - 1);
+
+    int fd = open(file, O_RDONLY);
+    if (fd < 0)
+    {
+      DEBUG_ERROR("Failed to open: %s", file);
+      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
+      return -1;
+    }
+
+    char name[32];
+    int len = read(fd, name, sizeof(name) - 1);
+    if (len <= 0)
+    {
+      DEBUG_ERROR("Failed to read: %s", file);
+      close(fd);
+      return -1;
+    }
+    name[len] = '\0';
+    close(fd);
+
+    if (strcmp(name, "KVMFR") != 0)
+    {
+      DEBUG_ERROR("Device is not a KVMFR device %s reports as %s", file, name);
+      return -1;
+    }
+  }
+
   // get the device size
   {
     char file[100] = "/sys/class/uio/";
@@ -89,7 +121,6 @@ int main(int argc, char * argv[])
     if (fd < 0)
     {
       DEBUG_ERROR("Failed to open: %s", file);
-      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
       return -1;
     }
 
@@ -102,6 +133,7 @@ int main(int argc, char * argv[])
       return -1;
     }
     size[len] = '\0';
+    close(fd);
 
     app.shmSize = strtoul(size, NULL, 16);
   }
