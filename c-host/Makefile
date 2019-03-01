@@ -29,6 +29,7 @@ ifdef OS
 else
   CC    = gcc
   OBJS += linux/platform.o
+  LIBS += -lpthread
 endif
 
 all: $(OBJS) $(DLLS)

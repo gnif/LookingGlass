@@ -19,6 +19,17 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "debug.h"
+#include <stdlib.h>
+#include <pthread.h>
+
+struct osThreadHandle
+{
+  const char       * name;
+  osThreadFunction   function;
+  void             * opaque;
+  pthread_t          handle;
+  int                resultCode;
+};
 
 int main(int argc, char * argv[])
 {
@@ -42,4 +53,44 @@ bool os_shmemMmap(void **ptr)
 void os_shmemUnmap()
 {
   // TODO
+}
+
+static void * threadWrapper(void * opaque)
+{
+  osThreadHandle * handle = (osThreadHandle *)opaque;
+  handle->resultCode = handle->function(handle->opaque);
+  return NULL;
+}
+
+bool os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle)
+{
+  *handle = (osThreadHandle*)malloc(sizeof(osThreadHandle));
+  (*handle)->name     = name;
+  (*handle)->function = function;
+  (*handle)->opaque   = opaque;
+
+  if (pthread_create(&(*handle)->handle, NULL, threadWrapper, *handle) != 0)
+  {
+    DEBUG_ERROR("pthread_create failed for thread: %s", name);
+    free(*handle);
+    *handle = NULL;
+    return false;
+  }
+  return true;
+}
+
+bool os_joinThread(osThreadHandle * handle, int * resultCode)
+{
+  if (pthread_join(handle->handle, NULL) != 0)
+  {
+    DEBUG_ERROR("pthread_join failed for thread: %s", handle->name);
+    free(handle);
+    return false;
+  }
+
+  if (resultCode)
+    *resultCode = handle->resultCode;
+
+  free(handle);
+  return true;
 }
