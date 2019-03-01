@@ -164,8 +164,12 @@ int app_main(bool * termSignal)
   {
     iface = CaptureInterfaces[i];
     DEBUG_INFO("Trying           : %s", iface->getName());
+
     if (!iface->create())
+    {
+      iface = NULL;
       continue;
+    }
 
     if (iface->init())
       break;
