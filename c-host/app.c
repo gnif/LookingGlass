@@ -111,6 +111,22 @@ bool stopThreads()
   return ok;
 }
 
+static bool captureStart(struct CaptureInterface * iface)
+{
+  DEBUG_INFO("Using            : %s", iface->getName());
+
+  const unsigned int maxFrameSize = iface->getMaxFrameSize();
+  if (maxFrameSize > app.frameSize)
+  {
+    DEBUG_ERROR("Maximum frame size of %d bytes excceds maximum space available", maxFrameSize);
+    return false;
+  }
+  DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
+
+  DEBUG_INFO("==== [ Capture  Start ] ====");
+  return startThreads();
+}
+
 int app_main(bool * termSignal)
 {
   unsigned int shmemSize = os_shmemSize();
@@ -165,23 +181,10 @@ int app_main(bool * termSignal)
     goto fail;
   }
 
-  DEBUG_INFO("Using            : %s", iface->getName());
-
-  const unsigned int maxFrameSize = iface->getMaxFrameSize();
-  if (maxFrameSize > app.frameSize)
+  if (!captureStart(iface))
   {
-    DEBUG_ERROR("Maximum frame size of %d bytes excceds maximum space available", maxFrameSize);
     exitcode = -1;
     goto exit;
-  }
-  DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
-
-  DEBUG_INFO("==== [ Capture  Start ] ====");
-
-  if (!startThreads())
-  {
-    exitcode = -1;
-    goto finish;
   }
 
   while(!*termSignal)
@@ -211,7 +214,7 @@ int app_main(bool * termSignal)
           goto finish;
         }
 
-        if (!startThreads())
+        if (!captureStart(iface))
         {
           exitcode = -1;
           goto finish;
