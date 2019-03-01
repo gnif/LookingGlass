@@ -33,7 +33,8 @@ struct osThreadHandle
 
 int main(int argc, char * argv[])
 {
-  int result = app_main();
+  bool termSig = false;
+  int result = app_main(&termSig);
   os_shmemUnmap();
   return result;
 }
