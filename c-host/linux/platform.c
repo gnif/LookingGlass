@@ -104,9 +104,15 @@ int main(int argc, char * argv[])
     name[len] = '\0';
     close(fd);
 
+    while(len > 0 && name[len-1] == '\n')
+    {
+      --len;
+      name[len] = '\0';
+    }
+
     if (strcmp(name, "KVMFR") != 0)
     {
-      DEBUG_ERROR("Device is not a KVMFR device %s reports as %s", file, name);
+      DEBUG_ERROR("Device is not a KVMFR device \"%s\" reports as: %s", file, name);
       return -1;
     }
   }
@@ -149,6 +155,8 @@ int main(int argc, char * argv[])
       DEBUG_ERROR("Failed to open: %s", file);
       return -1;
     }
+
+    DEBUG_INFO("KVMFR Device     : %s", file);
   }
 
   bool termSig = false;
