@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdio.h>
 #include <inttypes.h>
+#include <unistd.h>
 #include "debug.h"
 #include "capture/interfaces.h"
 #include "KVMFR.h"
@@ -40,9 +41,27 @@ struct app
   unsigned int  frameSize;
   uint8_t     * frame[MAX_FRAMES];
   unsigned int  frameOffset[MAX_FRAMES];
+
+  bool             running;
+  osThreadHandle * cursorThread;
+  osThreadHandle * frameThread;
 };
 
 static struct app app;
+
+static int cursorThread(void * opaque)
+{
+  while(app.running)
+    usleep(10000);
+  return 0;
+}
+
+static int frameThread(void * opaque)
+{
+  while(app.running)
+    usleep(10000);
+  return 0;
+}
 
 int app_main()
 {
@@ -109,10 +128,32 @@ int app_main()
   }
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
 
+  if (!os_createThread("CursorThread", cursorThread, NULL, &app.cursorThread))
+  {
+    DEBUG_ERROR("Failed to create the cursor thread");
+    exitcode = -1;
+    goto exit;
+  }
+
+  if (!os_createThread("FrameThread", frameThread, NULL, &app.frameThread))
+  {
+    DEBUG_ERROR("Failed to create the frame thread");
+    exitcode = -1;
+    goto exit_cursor_thread;
+  }
+
   iface->capture();
   iface->capture();
   iface->capture();
 
+//finish:
+  app.running = false;
+  if (!os_joinThread(app.frameThread, NULL))
+    DEBUG_WARN("Failed to join the cursor thread");
+exit_cursor_thread:
+  app.running = false;
+  if (!os_joinThread(app.cursorThread, NULL))
+    DEBUG_WARN("Failed to join the cursor thread");
 exit:
   iface->deinit();
   iface->free();
