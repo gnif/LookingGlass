@@ -82,8 +82,8 @@ int main(int argc, char * argv[])
   // get the device size
   {
     char file[100] = "/sys/class/uio/";
-    strncat(file, params.shmDevice , sizeof(file));
-    strncat(file, "/maps/map0/size", sizeof(file));
+    strncat(file, params.shmDevice , sizeof(file) - 1);
+    strncat(file, "/maps/map0/size", sizeof(file) - 1);
 
     int fd = open(file, O_RDONLY);
     if (fd < 0)
@@ -109,7 +109,7 @@ int main(int argc, char * argv[])
   // open the device
   {
     char file[100] = "/dev/";
-    strncat(file, params.shmDevice, sizeof(file));
+    strncat(file, params.shmDevice, sizeof(file) - 1);
     app.shmFD   = open(file, O_RDWR, (mode_t)0600);
     app.shmMap  = MAP_FAILED;
     if (app.shmFD < 0)
