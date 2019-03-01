@@ -125,8 +125,8 @@ int main(int argc, char * argv[])
     }
 
     char size[32];
-    int  len = read(fd, size, sizeof(size));
-    if (len <= 0 || len == sizeof(size))
+    int  len = read(fd, size, sizeof(size) - 1);
+    if (len <= 0)
     {
       DEBUG_ERROR("Failed to read: %s", file);
       close(fd);
