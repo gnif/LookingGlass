@@ -439,6 +439,9 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   ID3D11DeviceContext_CopyResource(this->deviceContext,
     (ID3D11Resource *)this->texture, (ID3D11Resource *)src);
 
+  ID3D11Texture2D_Release(src);
+  IDXGIResource_Release(res);
+
   *hasFrameUpdate = true;
 
   if (frameInfo.PointerShapeBufferSize > 0)
