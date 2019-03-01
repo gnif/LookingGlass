@@ -23,10 +23,17 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct CaptureInterface Capture_DXGI;
 #endif
 
+#if defined(USE_XCB)
+struct CaptureInterface Capture_XCB;
+#endif
+
 struct CaptureInterface * CaptureInterfaces[] =
 {
 #if defined(USE_DXGI)
   &Capture_DXGI,
+#endif
+#if defined(USE_XCB)
+  &Capture_XCB,
 #endif
   NULL
 };

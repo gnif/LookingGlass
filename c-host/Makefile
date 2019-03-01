@@ -1,4 +1,5 @@
 USE_DXGI ?= 1
+USE_XCB  ?= 1
 
 OUTPUT = looking-glass-host
 EXT    =
@@ -30,6 +31,11 @@ else
   CC    = gcc
   OBJS += linux/platform.o
   LIBS += -lpthread
+
+  ifeq ($(USE_XCB), 1)
+    CFLAGS += -DUSE_XCB
+    OBJS   += linux/capture/xcb.o
+  endif
 endif
 
 all: $(OBJS) $(DLLS)
