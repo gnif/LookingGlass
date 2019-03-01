@@ -28,3 +28,11 @@ int app_main();
 unsigned int os_shmemSize();
 bool         os_shmemMmap(void **ptr);
 void         os_shmemUnmap();
+
+// os specific thread functions
+
+typedef struct osThreadHandle osThreadHandle;
+typedef int (*osThreadFunction)(void * opaque);
+
+bool         os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle);
+bool         os_joinThread  (osThreadHandle * handle, int * resultCode);

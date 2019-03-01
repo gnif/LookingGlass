@@ -29,6 +29,16 @@ static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;
 static bool         shmemOwned  = false;
 static IVSHMEM_MMAP shmemMap    = {0};
 
+struct osThreadHandle
+{
+  const char       * name;
+  osThreadFunction   function;
+  void             * opaque;
+  HANDLE             handle;
+  DWORD              threadID;
+  int                resultCode;
+};
+
 int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
   HDEVINFO                         deviceInfoSet;
@@ -146,4 +156,60 @@ void os_shmemUnmap()
     DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
   else
     shmemOwned = false;
+}
+
+static DWORD WINAPI threadWrapper(LPVOID lpParameter)
+{
+  osThreadHandle * handle = (osThreadHandle *)lpParameter;
+  handle->resultCode = handle->function(handle->opaque);
+  return 0;
+}
+
+bool os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle)
+{
+  *handle           = (osThreadHandle *)malloc(sizeof(osThreadHandle));
+  (*handle)->name   = name;
+  (*handle)->opaque = opaque;
+  (*handle)->handle = CreateThread(NULL, 0, threadWrapper, *handle, 0, &(*handle)->threadID);
+
+  if (!(*handle)->handle)
+  {
+    free(*handle);
+    *handle = NULL;
+    DEBUG_WINERROR("CreateThread failed", GetLastError());
+    return false;
+  }
+
+  return true;
+}
+
+bool os_joinThread(osThreadHandle * handle, int * resultCode)
+{
+  while(true)
+  {
+    switch(WaitForSingleObject(handle->handle, INFINITE))
+    {
+      case WAIT_OBJECT_0:
+        if (resultCode)
+          *resultCode = handle->resultCode;
+        CloseHandle(handle->handle);
+        free(handle);
+        return true;
+
+      case WAIT_ABANDONED:
+      case WAIT_TIMEOUT:
+        continue;
+
+      case WAIT_FAILED:
+        DEBUG_WINERROR("Wait for thread failed", GetLastError());
+        CloseHandle(handle->handle);
+        free(handle);
+        return false;
+    }
+
+    break;
+  }
+
+  DEBUG_WINERROR("Unknown failure waiting for thread", GetLastError());
+  return false;
 }
