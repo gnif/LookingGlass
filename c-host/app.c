@@ -204,7 +204,7 @@ int app_main(bool * termSignal)
           goto finish;
         }
 
-        if (true || !iface->deinit() || !iface->init())
+        if (!iface->deinit() || !iface->init())
         {
           DEBUG_ERROR("Failed to reinitialize the capture device");
           exitcode = -1;
