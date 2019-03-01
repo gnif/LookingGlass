@@ -41,7 +41,6 @@ struct iface
   IDXGIOutputDuplication * dup;
   ID3D11Texture2D        * texture;
   bool                     hasFrame;
-  bool                     retryAcquire;
 
   unsigned int width;
   unsigned int height;
@@ -93,7 +92,7 @@ static bool dxgi_init()
     fn = (User32_SetProcessDpiAwarenessContext)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
     if (fn)
       fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    CloseHandle(user32);
+    FreeLibrary(user32);
     dpiDone = true;
   }
 
@@ -260,6 +259,10 @@ static bool dxgi_init()
       if (SUCCEEDED(status))
         break;
 
+      // if access is denied we just keep trying until it isn't
+      if (status == E_ACCESSDENIED)
+        --i;
+
       Sleep(200);
     }
 
@@ -392,7 +395,7 @@ static unsigned int dxgi_getMaxFrameSize()
   return this->height * this->pitch;
 }
 
-static CaptureResult dxgi_capture()
+static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
 {
   assert(this);
   assert(this->initialized);
@@ -418,14 +421,6 @@ static CaptureResult dxgi_capture()
 
     case WAIT_ABANDONED:
     case DXGI_ERROR_ACCESS_LOST:
-      if (this->retryAcquire)
-      {
-        DEBUG_WINERROR("Unable to acquire next frame, giving up", status);
-        this->retryAcquire = false;
-        return CAPTURE_RESULT_ERROR;
-      }
-
-      this->retryAcquire = true;
       return CAPTURE_RESULT_REINIT;
 
     default:
@@ -443,6 +438,11 @@ static CaptureResult dxgi_capture()
 
   ID3D11DeviceContext_CopyResource(this->deviceContext,
     (ID3D11Resource *)this->texture, (ID3D11Resource *)src);
+
+  *hasFrameUpdate = true;
+
+  if (frameInfo.PointerShapeBufferSize > 0)
+    *hasPointerUpdate = true;
 
   return CAPTURE_RESULT_OK;
 }
@@ -465,7 +465,10 @@ static CaptureResult dxgi_releaseFrame()
 
     case WAIT_ABANDONED:
     case DXGI_ERROR_ACCESS_LOST:
+    {
+      this->hasFrame = false;
       return CAPTURE_RESULT_REINIT;
+    }
 
     default:
       DEBUG_WINERROR("ReleaseFrame failed", status);

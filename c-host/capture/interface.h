@@ -39,5 +39,8 @@ struct CaptureInterface
   bool          (*deinit         )();
   void          (*free           )();
   unsigned int  (*getMaxFrameSize)();
-  CaptureResult (*capture        )();
+
+  CaptureResult (*capture)(
+    bool * hasFrameUpdate,
+    bool * hasPointerUpdate);
 };

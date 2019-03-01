@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
-int app_main();
+int app_main(bool * termSignal);
 
 // these must be implemented for each OS
 

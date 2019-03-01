@@ -51,19 +51,67 @@ static struct app app;
 
 static int cursorThread(void * opaque)
 {
+  DEBUG_INFO("Cursor thread started");
+
   while(app.running)
     usleep(10000);
+
+  DEBUG_INFO("Cursor thread stopped");
   return 0;
 }
 
 static int frameThread(void * opaque)
 {
+  DEBUG_INFO("Frame thread started");
+
   while(app.running)
     usleep(10000);
+
+  DEBUG_INFO("Frame thread stopped");
   return 0;
 }
 
-int app_main()
+bool startThreads()
+{
+  app.running = true;
+  if (!os_createThread("CursorThread", cursorThread, NULL, &app.cursorThread))
+  {
+    DEBUG_ERROR("Failed to create the cursor thread");
+    return false;
+  }
+
+  if (!os_createThread("FrameThread", frameThread, NULL, &app.frameThread))
+  {
+    DEBUG_ERROR("Failed to create the frame thread");
+    return false;
+  }
+
+  return true;
+}
+
+bool stopThreads()
+{
+  bool ok = true;
+
+  app.running = false;
+  if (app.frameThread && !os_joinThread(app.frameThread, NULL))
+  {
+    DEBUG_WARN("Failed to join the frame thread");
+    ok = false;
+  }
+  app.frameThread = NULL;
+
+  if (app.cursorThread && !os_joinThread(app.cursorThread, NULL))
+  {
+    DEBUG_WARN("Failed to join the cursor thread");
+    ok = false;
+  }
+  app.cursorThread = NULL;
+
+  return ok;
+}
+
+int app_main(bool * termSignal)
 {
   unsigned int shmemSize = os_shmemSize();
   uint8_t    * shmemMap  = NULL;
@@ -128,32 +176,57 @@ int app_main()
   }
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
 
-  if (!os_createThread("CursorThread", cursorThread, NULL, &app.cursorThread))
+  DEBUG_INFO("==== [ Capture  Start ] ====");
+
+  if (!startThreads())
   {
-    DEBUG_ERROR("Failed to create the cursor thread");
     exitcode = -1;
-    goto exit;
+    goto finish;
   }
 
-  if (!os_createThread("FrameThread", frameThread, NULL, &app.frameThread))
+  while(!*termSignal)
   {
-    DEBUG_ERROR("Failed to create the frame thread");
-    exitcode = -1;
-    goto exit_cursor_thread;
+    bool hasFrameUpdate   = false;
+    bool hasPointerUpdate = false;
+    switch(iface->capture(&hasFrameUpdate, &hasPointerUpdate))
+    {
+      case CAPTURE_RESULT_OK:
+        break;
+
+      case CAPTURE_RESULT_TIMEOUT:
+        continue;
+
+      case CAPTURE_RESULT_REINIT:
+        DEBUG_INFO("==== [ Capture Reinit ] ====");
+        if (!stopThreads())
+        {
+          exitcode = -1;
+          goto finish;
+        }
+
+        if (true || !iface->deinit() || !iface->init())
+        {
+          DEBUG_ERROR("Failed to reinitialize the capture device");
+          exitcode = -1;
+          goto finish;
+        }
+
+        if (!startThreads())
+        {
+          exitcode = -1;
+          goto finish;
+        }
+        break;
+
+      case CAPTURE_RESULT_ERROR:
+        DEBUG_ERROR("Capture interface reported a fatal error");
+        exitcode = -1;
+        goto finish;
+    }
   }
 
-  iface->capture();
-  iface->capture();
-  iface->capture();
-
-//finish:
-  app.running = false;
-  if (!os_joinThread(app.frameThread, NULL))
-    DEBUG_WARN("Failed to join the cursor thread");
-exit_cursor_thread:
-  app.running = false;
-  if (!os_joinThread(app.cursorThread, NULL))
-    DEBUG_WARN("Failed to join the cursor thread");
+finish:
+  stopThreads();
 exit:
   iface->deinit();
   iface->free();

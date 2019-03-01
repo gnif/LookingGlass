@@ -28,6 +28,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;
 static bool         shmemOwned  = false;
 static IVSHMEM_MMAP shmemMap    = {0};
+static bool         termSignal  = false;
+static HWND         messageWnd;
 
 struct osThreadHandle
 {
@@ -39,11 +41,53 @@ struct osThreadHandle
   int                resultCode;
 };
 
-int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+  switch(msg)
+  {
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      break;
+
+    case WM_DESTROY:
+      PostQuitMessage(0);
+      break;
+
+    default:
+      return DefWindowProc(hwnd, msg, wParam, lParam);
+  }
+  return 0;
+}
+
+static int appThread(void * opaque)
+{
+  int result = app_main(&termSignal);
+  SendMessage(messageWnd, WM_CLOSE, 0, 0);
+  return result;
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+  int                              result = 0;
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
+
+#if 0
+  // redirect stderr to a file
+  {
+    char tempPath[MAX_PATH+1];
+    GetTempPathA(sizeof(tempPath), tempPath);
+    int len = snprintf(NULL, 0, "%slooking-glass-host.txt", tempPath);
+    char * path = malloc(len + 1);
+    sprintf(path, "%slooking-glass-host.txt", tempPath);
+    freopen(path, "a", stderr);
+    free(path);
+  }
+#endif
+
+  // always flush stderr
+  setbuf(stderr, NULL);
 
   deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
   memset(&deviceInterfaceData, 0, sizeof(SP_DEVICE_INTERFACE_DATA));
@@ -55,11 +99,13 @@ int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (error == ERROR_NO_MORE_ITEMS)
     {
       DEBUG_WINERROR("Unable to enumerate the device, is it attached?", error);
-      return -1;
+      result = -1;
+      goto finish;
     }
 
     DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", error);
-    return -1;
+    result  = -1;
+    goto finish;
   }
 
   DWORD reqSize = 0;
@@ -67,7 +113,8 @@ int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   if (!reqSize)
   {
     DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
-    return -1;
+    result = -1;
+    goto finish;
   }
 
   infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(reqSize, 1);
@@ -76,7 +123,8 @@ int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   {
     free(infData);
     DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
-    return -1;
+    result = -1;
+    goto finish;
   }
 
   shmemHandle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
@@ -85,28 +133,66 @@ int WINAPI WinMain(HINSTANCE hInstnace, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
     free(infData);
     DEBUG_WINERROR("CreateFile returned INVALID_HANDLE_VALUE", GetLastError());
-    return -1;
+    result = -1;
+    goto finish;
   }
 
   free(infData);
   SetupDiDestroyDeviceInfoList(deviceInfoSet);
 
-  int result = app_main();
-
-  os_shmemUnmap();
-  CloseHandle(shmemHandle);
-
-  if (result != 0)
+  // create a message window so that our message pump works
+  WNDCLASSEX wx    = {};
+  wx.cbSize        = sizeof(WNDCLASSEX);
+  wx.lpfnWndProc   = DummyWndProc;
+  wx.hInstance     = hInstance;
+  wx.lpszClassName = "DUMMY_CLASS";
+  if (!RegisterClassEx(&wx))
   {
-    MessageBoxA(
-      NULL,
-      "The Looking Glass host has terminated due to an error.\r\n"
-      "\r\n"
-      "For more information run the application in a command prompt.",
-      "Looking Glass Host",
-      MB_ICONERROR);
+    DEBUG_ERROR("Failed to register message window class");
+    result = -1;
+    goto finish_shmem;
+  }
+  messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
+
+  osThreadHandle * thread;
+  if (!os_createThread("appThread", appThread, NULL, &thread))
+  {
+    DEBUG_ERROR("Failed to create the main application thread");
+    result = -1;
+    goto finish_shmem;
   }
 
+  while(!termSignal)
+  {
+    MSG  msg;
+    BOOL bRet = GetMessage(&msg, NULL, 0, 0);
+    if (bRet > 0)
+    {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+    else if (bRet < 0)
+    {
+      DEBUG_ERROR("Unknown error from GetMessage");
+      result = -1;
+      goto shutdown;
+    }
+
+    DEBUG_INFO("Platform shutdown");
+    break;
+  }
+
+shutdown:
+  termSignal = true;
+  if (!os_joinThread(thread, &result))
+  {
+    DEBUG_ERROR("Failed to join the main application thread");
+    result = -1;
+  }
+finish_shmem:
+  os_shmemUnmap();
+  CloseHandle(shmemHandle);
+finish:
   return result;
 }
 
