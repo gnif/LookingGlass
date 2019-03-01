@@ -167,10 +167,11 @@ static DWORD WINAPI threadWrapper(LPVOID lpParameter)
 
 bool os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle)
 {
-  *handle           = (osThreadHandle *)malloc(sizeof(osThreadHandle));
-  (*handle)->name   = name;
-  (*handle)->opaque = opaque;
-  (*handle)->handle = CreateThread(NULL, 0, threadWrapper, *handle, 0, &(*handle)->threadID);
+  *handle             = (osThreadHandle *)malloc(sizeof(osThreadHandle));
+  (*handle)->name     = name;
+  (*handle)->function = function;
+  (*handle)->opaque   = opaque;
+  (*handle)->handle   = CreateThread(NULL, 0, threadWrapper, *handle, 0, &(*handle)->threadID);
 
   if (!(*handle)->handle)
   {
