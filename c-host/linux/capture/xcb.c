@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "capture/interface.h"
 #include "debug.h"
+#include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <inttypes.h>
@@ -39,6 +40,7 @@ struct xcb
   unsigned int width;
   unsigned int height;
 
+  bool                                 hasFrame;
   xcb_shm_get_image_cookie_t           imgC;
   xcb_xfixes_get_cursor_image_cookie_t curC;
 };
@@ -157,19 +159,56 @@ static CaptureResult xcb_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
   assert(this);
   assert(this->initialized);
 
-  this->imgC = xcb_shm_get_image_unchecked(
-      this->xcb,
-      this->xcbScreen->root,
-      0, 0,
-      this->width,
-      this->height,
-      ~0,
-      XCB_IMAGE_FORMAT_Z_PIXMAP,
-      this->seg,
-      0);
+  if (!this->hasFrame)
+  {
+    this->imgC = xcb_shm_get_image_unchecked(
+        this->xcb,
+        this->xcbScreen->root,
+        0, 0,
+        this->width,
+        this->height,
+        ~0,
+        XCB_IMAGE_FORMAT_Z_PIXMAP,
+        this->seg,
+        0);
 
-  *hasFrameUpdate = true;
+    *hasFrameUpdate = true;
+    this->hasFrame  = true;
+  }
+
   return CAPTURE_RESULT_OK;
+}
+
+static bool xcb_getFrame(CaptureFrame * frame)
+{
+  assert(this);
+  assert(this->initialized);
+  assert(frame);
+  assert(frame->data);
+
+  if (!this->hasFrame)
+  {
+    DEBUG_ERROR("No frame to get");
+    return false;
+  }
+
+  xcb_shm_get_image_reply_t * img;
+  img = xcb_shm_get_image_reply(this->xcb, this->imgC, NULL);
+  if (!img)
+  {
+    DEBUG_ERROR("Failed to get image reply");
+    return false;
+  }
+
+  frame->width  = this->width;
+  frame->height = this->height;
+  frame->pitch  = this->width * 4;
+  frame->format = CAPTURE_FMT_BGRA;
+  memcpy(frame->data, this->data, this->width * this->height * 4);
+
+  free(img);
+  this->hasFrame = false;
+  return true;
 }
 
 struct CaptureInterface Capture_XCB =
@@ -180,5 +219,6 @@ struct CaptureInterface Capture_XCB =
   .deinit          = xcb_deinit,
   .free            = xcb_free,
   .getMaxFrameSize = xcb_getMaxFrameSize,
-  .capture         = xcb_capture
+  .capture         = xcb_capture,
+  .getFrame        = xcb_getFrame
 };
