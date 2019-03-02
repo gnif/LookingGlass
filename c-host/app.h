@@ -36,3 +36,12 @@ typedef int (*osThreadFunction)(void * opaque);
 
 bool         os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle);
 bool         os_joinThread  (osThreadHandle * handle, int * resultCode);
+
+// os specific event functions
+
+typedef struct osEventHandle osEventHandle;
+
+osEventHandle * os_createEvent();
+void            os_freeEvent  (osEventHandle * handle);
+bool            os_waitEvent  (osEventHandle * handle);
+bool            os_signalEvent(osEventHandle * handle);

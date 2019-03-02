@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "debug.h"
+#include <assert.h>
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -234,5 +235,104 @@ bool os_joinThread(osThreadHandle * handle, int * resultCode)
     *resultCode = handle->resultCode;
 
   free(handle);
+  return true;
+}
+
+struct osEventHandle
+{
+  pthread_mutex_t mutex;
+  pthread_cond_t  cond;
+  bool            flag;
+};
+
+osEventHandle * os_createEvent()
+{
+  osEventHandle * handle = (osEventHandle *)calloc(sizeof(osEventHandle), 1);
+  if (!handle)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return NULL;
+  }
+
+  if (pthread_mutex_init(&handle->mutex, NULL) != 0)
+  {
+    DEBUG_ERROR("Failed to create the mutex");
+    free(handle);
+    return NULL;
+  }
+
+  if (pthread_cond_init(&handle->cond, NULL) != 0)
+  {
+    pthread_mutex_destroy(&handle->mutex);
+    free(handle);
+    return NULL;
+  }
+
+  return handle;
+}
+
+void os_freeEvent(osEventHandle * handle)
+{
+  assert(handle);
+
+  pthread_cond_destroy (&handle->cond );
+  pthread_mutex_destroy(&handle->mutex);
+  free(handle);
+}
+
+bool os_waitEvent(osEventHandle * handle)
+{
+  assert(handle);
+
+  if (pthread_mutex_lock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to lock the mutex");
+    return false;
+  }
+
+  while(!handle->flag)
+  {
+    if (pthread_cond_wait(&handle->cond, &handle->mutex) != 0)
+    {
+      DEBUG_ERROR("Wait to wait on the condition");
+      return false;
+    }
+  }
+
+  handle->flag = false;
+
+  if (pthread_mutex_unlock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to unlock the mutex");
+    return false;
+  }
+
+  return true;
+}
+
+bool os_signalEvent(osEventHandle * handle)
+{
+  assert(handle);
+
+  if (pthread_mutex_lock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to lock the mutex");
+    return false;
+  }
+
+  handle->flag = true;
+
+  if (pthread_mutex_unlock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to unlock the mutex");
+    return false;
+  }
+
+  if (pthread_cond_signal(&handle->cond) != 0)
+  {
+    DEBUG_ERROR("Failed to signal the condition");
+    return false;
+  }
+
   return true;
 }
