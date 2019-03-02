@@ -127,7 +127,7 @@ static bool captureStart(struct CaptureInterface * iface)
   return startThreads();
 }
 
-int app_main(bool * termSignal)
+int app_main()
 {
   unsigned int shmemSize = os_shmemSize();
   uint8_t    * shmemMap  = NULL;
@@ -191,7 +191,7 @@ int app_main(bool * termSignal)
     goto exit;
   }
 
-  while(!*termSignal)
+  while(app.running)
   {
     bool hasFrameUpdate   = false;
     bool hasPointerUpdate = false;
@@ -240,4 +240,9 @@ exit:
 fail:
   os_shmemUnmap();
   return exitcode;
+}
+
+void app_quit()
+{
+  app.running = false;
 }

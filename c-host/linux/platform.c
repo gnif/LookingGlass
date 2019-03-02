@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <signal.h>
 
 struct app
 {
@@ -56,6 +57,12 @@ struct osThreadHandle
   pthread_t          handle;
   int                resultCode;
 };
+
+void sigHandler(int signo)
+{
+  DEBUG_INFO("SIGINT");
+  app_quit();
+}
 
 int main(int argc, char * argv[])
 {
@@ -160,8 +167,9 @@ int main(int argc, char * argv[])
     DEBUG_INFO("KVMFR Device     : %s", file);
   }
 
-  bool termSig = false;
-  int result = app_main(&termSig);
+  signal(SIGINT, sigHandler);
+
+  int result = app_main();
   os_shmemUnmap();
   close(app.shmFD);
 

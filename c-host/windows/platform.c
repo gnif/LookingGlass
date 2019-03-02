@@ -28,7 +28,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;
 static bool         shmemOwned  = false;
 static IVSHMEM_MMAP shmemMap    = {0};
-static bool         termSignal  = false;
 static HWND         messageWnd;
 
 struct osThreadHandle
@@ -61,7 +60,7 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 static int appThread(void * opaque)
 {
-  int result = app_main(&termSignal);
+  int result = app_main();
   SendMessage(messageWnd, WM_CLOSE, 0, 0);
   return result;
 }
@@ -162,7 +161,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     goto finish_shmem;
   }
 
-  while(!termSignal)
+  while(true)
   {
     MSG  msg;
     BOOL bRet = GetMessage(&msg, NULL, 0, 0);
@@ -183,7 +182,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   }
 
 shutdown:
-  termSignal = true;
+  app_quit();
   if (!os_joinThread(thread, &result))
   {
     DEBUG_ERROR("Failed to join the main application thread");
