@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <inttypes.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include "debug.h"
 #include "capture/interfaces.h"
 #include "KVMFR.h"
@@ -33,9 +34,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct app
 {
   KVMFRHeader * shmHeader;
-  uint8_t     * cursorData;
-  unsigned int  cursorDataSize;
-  unsigned int  cursorOffset;
+  uint8_t     * pointerData;
+  unsigned int  pointerDataSize;
+  unsigned int  pointerOffset;
+
+  CaptureInterface * iface;
 
   uint8_t     * frames;
   unsigned int  frameSize;
@@ -43,18 +46,32 @@ struct app
   unsigned int  frameOffset[MAX_FRAMES];
 
   bool             running;
-  osThreadHandle * cursorThread;
+  osEventHandle  * updateEvent;
+  osThreadHandle * pointerThread;
+  osEventHandle  * pointerEvent;
   osThreadHandle * frameThread;
+  osEventHandle  * frameEvent;
 };
 
 static struct app app;
 
-static int cursorThread(void * opaque)
+static int pointerThread(void * opaque)
 {
   DEBUG_INFO("Cursor thread started");
 
   while(app.running)
-    usleep(10000);
+  {
+    if (!os_waitEvent(app.pointerEvent) || !app.running)
+      break;
+
+#if 0
+    CapturePointer pointer;
+    pointer->data = app.pointerData;
+    if (!app.iface->getPointer(&pointer))
+      DEBUG_ERROR("Failed to get the pointer");
+    os_signalEvent(app.updateEvent);
+#endif
+  }
 
   DEBUG_INFO("Cursor thread stopped");
   return 0;
@@ -64,9 +81,21 @@ static int frameThread(void * opaque)
 {
   DEBUG_INFO("Frame thread started");
 
+  int frameIndex = 0;
   while(app.running)
-    usleep(10000);
+  {
+    if (!os_waitEvent(app.frameEvent) || !app.running)
+      break;
 
+    CaptureFrame frame;
+    frame.data = app.frame[frameIndex];
+    if (!app.iface->getFrame(&frame))
+      DEBUG_ERROR("Failed to get the frame");
+    os_signalEvent(app.updateEvent);
+
+    if (++frameIndex == MAX_FRAMES)
+      frameIndex = 0;
+  }
   DEBUG_INFO("Frame thread stopped");
   return 0;
 }
@@ -74,9 +103,9 @@ static int frameThread(void * opaque)
 bool startThreads()
 {
   app.running = true;
-  if (!os_createThread("CursorThread", cursorThread, NULL, &app.cursorThread))
+  if (!os_createThread("CursorThread", pointerThread, NULL, &app.pointerThread))
   {
-    DEBUG_ERROR("Failed to create the cursor thread");
+    DEBUG_ERROR("Failed to create the pointer thread");
     return false;
   }
 
@@ -94,6 +123,9 @@ bool stopThreads()
   bool ok = true;
 
   app.running = false;
+  os_signalEvent(app.frameEvent  );
+  os_signalEvent(app.pointerEvent);
+
   if (app.frameThread && !os_joinThread(app.frameThread, NULL))
   {
     DEBUG_WARN("Failed to join the frame thread");
@@ -101,21 +133,21 @@ bool stopThreads()
   }
   app.frameThread = NULL;
 
-  if (app.cursorThread && !os_joinThread(app.cursorThread, NULL))
+  if (app.pointerThread && !os_joinThread(app.pointerThread, NULL))
   {
-    DEBUG_WARN("Failed to join the cursor thread");
+    DEBUG_WARN("Failed to join the pointer thread");
     ok = false;
   }
-  app.cursorThread = NULL;
+  app.pointerThread = NULL;
 
   return ok;
 }
 
-static bool captureStart(struct CaptureInterface * iface)
+static bool captureStart()
 {
-  DEBUG_INFO("Using            : %s", iface->getName());
+  DEBUG_INFO("Using            : %s", app.iface->getName());
 
-  const unsigned int maxFrameSize = iface->getMaxFrameSize();
+  const unsigned int maxFrameSize = app.iface->getMaxFrameSize();
   if (maxFrameSize > app.frameSize)
   {
     DEBUG_ERROR("Maximum frame size of %d bytes excceds maximum space available", maxFrameSize);
@@ -142,15 +174,15 @@ int app_main()
   DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmemMap);
 
   app.shmHeader        = (KVMFRHeader *)shmemMap;
-  app.cursorData       = (uint8_t *)ALIGN_UP(shmemMap + sizeof(KVMFRHeader));
-  app.cursorDataSize   = 1048576; // 1MB fixed for cursor size, should be more then enough
-  app.cursorOffset     = app.cursorData - shmemMap;
-  app.frames           = (uint8_t *)ALIGN_UP(app.cursorData + app.cursorDataSize);
+  app.pointerData       = (uint8_t *)ALIGN_UP(shmemMap + sizeof(KVMFRHeader));
+  app.pointerDataSize   = 1048576; // 1MB fixed for pointer size, should be more then enough
+  app.pointerOffset     = app.pointerData - shmemMap;
+  app.frames           = (uint8_t *)ALIGN_UP(app.pointerData + app.pointerDataSize);
   app.frameSize        = ALIGN_DN((shmemSize - (app.frames - shmemMap)) / MAX_FRAMES);
 
-  DEBUG_INFO("Max Cursor Size  : %u MiB"     , app.cursorDataSize / 1048576);
+  DEBUG_INFO("Max Cursor Size  : %u MiB"     , app.pointerDataSize / 1048576);
   DEBUG_INFO("Max Frame Size   : %u MiB"     , app.frameSize      / 1048576);
-  DEBUG_INFO("Cursor           : 0x%" PRIXPTR " (0x%08x)", (uintptr_t)app.cursorData, app.cursorOffset);
+  DEBUG_INFO("Cursor           : 0x%" PRIXPTR " (0x%08x)", (uintptr_t)app.pointerData, app.pointerOffset);
 
   for (int i = 0; i < MAX_FRAMES; ++i)
   {
@@ -159,7 +191,7 @@ int app_main()
     DEBUG_INFO("Frame %d          : 0x%" PRIXPTR " (0x%08x)", i, (uintptr_t)app.frame[i], app.frameOffset[i]);
   }
 
-  struct CaptureInterface * iface = NULL;
+  CaptureInterface * iface = NULL;
   for(int i = 0; CaptureInterfaces[i]; ++i)
   {
     iface = CaptureInterfaces[i];
@@ -185,17 +217,50 @@ int app_main()
     goto fail;
   }
 
-  if (!captureStart(iface))
+  app.iface      = iface;
+  app.frameEvent = os_createEvent();
+  if (!app.frameEvent)
+  {
+    DEBUG_ERROR("Failed to create the frame event");
+    exitcode = -1;
+    goto exit;
+  }
+
+  app.updateEvent = os_createEvent();
+  if (!app.updateEvent)
+  {
+    DEBUG_ERROR("Failed to create the update event");
+    exitcode = -1;
+    goto exit;
+  }
+
+  app.pointerEvent = os_createEvent();
+  if (!app.pointerEvent)
+  {
+    DEBUG_ERROR("Failed to create the pointer event");
+    exitcode = -1;
+    goto exit;
+  }
+
+  if (!captureStart())
   {
     exitcode = -1;
     goto exit;
   }
 
+  // start signalled
+  os_signalEvent(app.updateEvent);
+
   while(app.running)
   {
-    bool hasFrameUpdate   = false;
-    bool hasPointerUpdate = false;
-    switch(iface->capture(&hasFrameUpdate, &hasPointerUpdate))
+    // wait for one of the threads to flag an update
+    if (!os_waitEvent(app.updateEvent) || !app.running)
+      break;
+
+    bool frameUpdate   = false;
+    bool pointerUpdate = false;
+
+    switch(iface->capture(&frameUpdate, &pointerUpdate))
     {
       case CAPTURE_RESULT_OK:
         break;
@@ -218,7 +283,7 @@ int app_main()
           goto finish;
         }
 
-        if (!captureStart(iface))
+        if (!captureStart())
         {
           exitcode = -1;
           goto finish;
@@ -230,11 +295,35 @@ int app_main()
         exitcode = -1;
         goto finish;
     }
+
+    if (frameUpdate && !os_signalEvent(app.frameEvent))
+    {
+      DEBUG_ERROR("Failed to signal the frame thread");
+      exitcode = -1;
+      goto finish;
+    }
+
+    if (pointerUpdate && !os_signalEvent(app.pointerEvent))
+    {
+      DEBUG_ERROR("Failed to signal the pointer thread");
+      exitcode = -1;
+      goto finish;
+    }
   }
 
 finish:
   stopThreads();
 exit:
+
+  if (app.pointerEvent)
+    os_freeEvent(app.pointerEvent);
+
+  if (app.frameEvent)
+    os_freeEvent(app.frameEvent);
+
+  if (app.updateEvent)
+    os_freeEvent(app.updateEvent);
+
   iface->deinit();
   iface->free();
 fail:
@@ -245,4 +334,5 @@ fail:
 void app_quit()
 {
   app.running = false;
+  os_signalEvent(app.updateEvent);
 }
