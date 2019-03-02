@@ -34,6 +34,7 @@ else
 
   ifeq ($(USE_XCB), 1)
     CFLAGS += -DUSE_XCB
+    LIBS   += -lxcb -lxcb-shm -lXfixes
     OBJS   += linux/capture/xcb.o
   endif
 endif
