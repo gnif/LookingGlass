@@ -42,10 +42,11 @@ struct iface
   ID3D11Texture2D        * texture;
   bool                     hasFrame;
 
-  unsigned int width;
-  unsigned int height;
-  unsigned int pitch;
-  unsigned int stride;
+  unsigned int  width;
+  unsigned int  height;
+  unsigned int  pitch;
+  unsigned int  stride;
+  CaptureFormat format;
 };
 
 static bool           dpiDone = false;
@@ -278,6 +279,16 @@ static bool dxgi_init()
   IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
   DEBUG_INFO("Source Format    : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
 
+  switch(dupDesc.ModeDesc.Format)
+  {
+    case DXGI_FORMAT_B8G8R8A8_UNORM   : this->format = CAPTURE_FMT_BGRA  ; break;
+    case DXGI_FORMAT_R8G8B8A8_UNORM   : this->format = CAPTURE_FMT_RGBA  ; break;
+    case DXGI_FORMAT_R10G10B10A2_UNORM: this->format = CAPTURE_FMT_RGBA10; break;
+    default:
+      DEBUG_ERROR("Unsupported source format");
+      goto fail_release_output;
+  }
+
   D3D11_TEXTURE2D_DESC texDesc;
   memset(&texDesc, 0, sizeof(texDesc));
   texDesc.Width              = this->width;
@@ -450,6 +461,31 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   return CAPTURE_RESULT_OK;
 }
 
+static bool dxgi_getFrame(CaptureFrame * frame)
+{
+  assert(this);
+  assert(this->initialized);
+
+  frame->width  = this->width;
+  frame->height = this->height;
+  frame->pitch  = this->pitch;
+  frame->format = this->format;
+
+  HRESULT status;
+  D3D11_MAPPED_SUBRESOURCE mapping;
+  status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)this->texture, 0, D3D11_MAP_READ, 0, &mapping);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to map the texture", status);
+    return false;
+  }
+
+  memcpy(frame->data, mapping.pData, this->pitch * this->height);
+
+  ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture, 0);
+  return true;
+}
+
 static CaptureResult dxgi_releaseFrame()
 {
   assert(this);
@@ -490,5 +526,6 @@ struct CaptureInterface Capture_DXGI =
   .deinit          = dxgi_deinit,
   .free            = dxgi_free,
   .getMaxFrameSize = dxgi_getMaxFrameSize,
-  .capture         = dxgi_capture
+  .capture         = dxgi_capture,
+  .getFrame        = dxgi_getFrame
 };
