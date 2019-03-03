@@ -86,6 +86,7 @@ static int frameThread(void * opaque)
   {
     if (!os_waitEvent(app.frameEvent) || !app.running)
       break;
+    DEBUG_INFO("Frame");
 
     CaptureFrame frame;
     frame.data = app.frame[frameIndex];
@@ -288,7 +289,10 @@ int app_main()
           exitcode = -1;
           goto finish;
         }
-        break;
+
+        // start signalled
+        os_signalEvent(app.updateEvent);
+        continue;
 
       case CAPTURE_RESULT_ERROR:
         DEBUG_ERROR("Capture interface reported a fatal error");
