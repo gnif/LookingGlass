@@ -5,7 +5,7 @@ OUTPUT = looking-glass-host
 EXT    =
 
 CFLAGS  = -std=gnu99 -Wall -Werror
-CFLAGS += -g -O0
+CFLAGS += -g -O3
 CFLAGS += -I.
 CFLAGS += -I../common
 

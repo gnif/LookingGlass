@@ -40,7 +40,7 @@ struct iface
   D3D_FEATURE_LEVEL        featureLevel;
   IDXGIOutputDuplication * dup;
   ID3D11Texture2D        * texture;
-  bool                     hasFrame;
+  bool                     needsRelease;
 
   unsigned int  width;
   unsigned int  height;
@@ -424,7 +424,7 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   switch(status)
   {
     case S_OK:
-      this->hasFrame = true;
+      this->needsRelease = true;
       break;
 
     case DXGI_ERROR_WAIT_TIMEOUT:
@@ -447,16 +447,19 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
     return CAPTURE_RESULT_ERROR;
   }
 
-  ID3D11DeviceContext_CopyResource(this->deviceContext,
-    (ID3D11Resource *)this->texture, (ID3D11Resource *)src);
+  if (frameInfo.LastPresentTime.QuadPart != 0)
+  {
+    ID3D11DeviceContext_CopyResource(this->deviceContext,
+      (ID3D11Resource *)this->texture, (ID3D11Resource *)src);
 
-  ID3D11Texture2D_Release(src);
-  IDXGIResource_Release(res);
-
-  *hasFrameUpdate = true;
+    ID3D11Texture2D_Release(src);
+    *hasFrameUpdate = true;
+  }
 
   if (frameInfo.PointerShapeBufferSize > 0)
     *hasPointerUpdate = true;
+
+  IDXGIResource_Release(res);
 
   return CAPTURE_RESULT_OK;
 }
@@ -490,7 +493,7 @@ static bool dxgi_getFrame(CaptureFrame * frame)
 static CaptureResult dxgi_releaseFrame()
 {
   assert(this);
-  if (!this->hasFrame)
+  if (!this->needsRelease)
     return CAPTURE_RESULT_OK;
 
   HRESULT status = IDXGIOutputDuplication_ReleaseFrame(this->dup);
@@ -506,7 +509,7 @@ static CaptureResult dxgi_releaseFrame()
     case WAIT_ABANDONED:
     case DXGI_ERROR_ACCESS_LOST:
     {
-      this->hasFrame = false;
+      this->needsRelease = false;
       return CAPTURE_RESULT_REINIT;
     }
 
@@ -515,7 +518,7 @@ static CaptureResult dxgi_releaseFrame()
       return CAPTURE_RESULT_ERROR;
   }
 
-  this->hasFrame = false;
+  this->needsRelease = false;
   return CAPTURE_RESULT_OK;
 }
 
