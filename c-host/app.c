@@ -71,8 +71,8 @@ static int pointerThread(void * opaque)
     pointer->data = app.pointerData;
     if (!app.iface->getPointer(&pointer))
       DEBUG_ERROR("Failed to get the pointer");
-    os_signalEvent(app.updateEvent);
 #endif
+    os_signalEvent(app.updateEvent);
   }
 
   DEBUG_INFO("Cursor thread stopped");
@@ -303,6 +303,7 @@ int app_main()
     bool frameUpdate   = false;
     bool pointerUpdate = false;
 
+retry_capture:
     switch(iface->capture(&frameUpdate, &pointerUpdate))
     {
       case CAPTURE_RESULT_OK:
@@ -341,6 +342,9 @@ int app_main()
         exitcode = -1;
         goto finish;
     }
+
+    if (!frameUpdate && !pointerUpdate)
+      goto retry_capture;
 
     if (frameUpdate && !os_signalEvent(app.frameEvent))
     {
