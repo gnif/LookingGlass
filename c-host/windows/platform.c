@@ -299,3 +299,42 @@ bool os_joinThread(osThreadHandle * handle, int * resultCode)
   DEBUG_WINERROR("Unknown failure waiting for thread", GetLastError());
   return false;
 }
+
+osEventHandle * os_createEvent()
+{
+  HANDLE event = CreateEvent(NULL, FALSE, FALSE, NULL);
+  return (osEventHandle*)event;
+}
+
+void os_freeEvent(osEventHandle * handle)
+{
+  CloseHandle((HANDLE)handle);
+}
+
+bool os_waitEvent(osEventHandle * handle)
+{
+  while(true)
+  {
+    switch(WaitForSingleObject((HANDLE)handle, INFINITE))
+    {
+      case WAIT_OBJECT_0:
+        return true;
+
+      case WAIT_ABANDONED:
+      case WAIT_TIMEOUT:
+        continue;
+
+      case WAIT_FAILED:
+        DEBUG_WINERROR("Wait for event failed", GetLastError());
+        return false;
+    }
+
+    DEBUG_ERROR("Unknown wait event return code");
+    return false;
+  }
+}
+
+bool os_signalEvent(osEventHandle * handle)
+{
+  return SetEvent((HANDLE)handle);
+}
