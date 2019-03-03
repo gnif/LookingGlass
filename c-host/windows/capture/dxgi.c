@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "capture/interface.h"
+#include "app.h"
 #include "debug.h"
 #include "windows/windebug.h"
 
@@ -41,6 +42,7 @@ struct iface
   IDXGIOutputDuplication * dup;
   ID3D11Texture2D        * texture;
   bool                     needsRelease;
+  osEventHandle          * copyEvent;
 
   unsigned int  width;
   unsigned int  height;
@@ -74,6 +76,14 @@ static bool dxgi_create()
     return false;
   }
 
+  this->copyEvent = os_createEvent();
+  if (!this->copyEvent)
+  {
+    DEBUG_ERROR("failed to create the copy event");
+    free(this);
+    return false;
+  }
+
   return true;
 }
 
@@ -96,6 +106,9 @@ static bool dxgi_init()
     FreeLibrary(user32);
     dpiDone = true;
   }
+
+  // pre-signal the copy event
+  os_signalEvent(this->copyEvent);
 
   HRESULT          status;
   IDXGIFactory1  * factory;
@@ -346,6 +359,8 @@ static bool dxgi_deinit()
 {
   assert(this);
 
+  os_signalEvent(this->copyEvent);
+
   if (this->texture)
   {
     ID3D11Texture2D_Release(this->texture);
@@ -393,6 +408,8 @@ static void dxgi_free()
 
   if (this->initialized)
     dxgi_deinit();
+
+  os_freeEvent(this->copyEvent);
 
   free(this);
   this = NULL;
@@ -444,11 +461,15 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to get the texture from the dxgi resource", status);
+    IDXGIResource_Release(res);
     return CAPTURE_RESULT_ERROR;
   }
 
   if (frameInfo.LastPresentTime.QuadPart != 0)
   {
+    // wait for the prior copy to finish in getFrame
+    os_waitEvent(this->copyEvent);
+
     ID3D11DeviceContext_CopyResource(this->deviceContext,
       (ID3D11Resource *)this->texture, (ID3D11Resource *)src);
 
@@ -460,7 +481,6 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
     *hasPointerUpdate = true;
 
   IDXGIResource_Release(res);
-
   return CAPTURE_RESULT_OK;
 }
 
@@ -487,6 +507,7 @@ static bool dxgi_getFrame(CaptureFrame * frame)
   memcpy(frame->data, mapping.pData, this->pitch * this->height);
 
   ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture, 0);
+  os_signalEvent(this->copyEvent);
   return true;
 }
 
