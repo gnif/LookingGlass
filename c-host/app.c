@@ -86,7 +86,6 @@ static int frameThread(void * opaque)
   {
     if (!os_waitEvent(app.frameEvent) || !app.running)
       break;
-    DEBUG_INFO("Frame");
 
     CaptureFrame frame;
     frame.data = app.frame[frameIndex];
