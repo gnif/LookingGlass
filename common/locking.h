@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 #pragma once
 
-#if __MINGW32__
+#if defined(__GCC__) || defined(__GNUC__)
 #define INTERLOCKED_AND8 __sync_and_and_fetch
 #define INTERLOCKED_OR8 __sync_or_and_fetch
 #else
