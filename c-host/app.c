@@ -24,6 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 #include <stdlib.h>
 #include "debug.h"
+#include "locking.h"
 #include "capture/interfaces.h"
 #include "KVMFR.h"
 
@@ -81,7 +82,9 @@ static int frameThread(void * opaque)
 {
   DEBUG_INFO("Frame thread started");
 
-  int frameIndex = 0;
+  int      frameIndex = 0;
+  volatile KVMFRFrame * fi = &(app.shmHeader->frame);
+
   while(app.running)
   {
     if (!os_waitEvent(app.frameEvent) || !app.running)
@@ -92,6 +95,32 @@ static int frameThread(void * opaque)
     if (!app.iface->getFrame(&frame))
       DEBUG_ERROR("Failed to get the frame");
     os_signalEvent(app.updateEvent);
+
+    // wait for the client to finish with the previous frame
+    while(fi->flags & KVMFR_FRAME_FLAG_UPDATE)
+    {
+      // this generally never happens
+      usleep(1000);
+    }
+
+    switch(frame.format)
+    {
+      case CAPTURE_FMT_BGRA  : fi->type = FRAME_TYPE_BGRA  ; break;
+      case CAPTURE_FMT_RGBA  : fi->type = FRAME_TYPE_RGBA  ; break;
+      case CAPTURE_FMT_RGBA10: fi->type = FRAME_TYPE_RGBA10; break;
+      case CAPTURE_FMT_YUV420: fi->type = FRAME_TYPE_YUV420; break;
+      default:
+        DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
+        continue;
+    }
+
+    fi->width   = frame.width;
+    fi->height  = frame.height;
+    fi->stride  = frame.stride;
+    fi->pitch   = frame.pitch;
+    fi->dataPos = app.frameOffset[frameIndex];
+
+    INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
 
     if (++frameIndex == MAX_FRAMES)
       frameIndex = 0;
@@ -174,9 +203,9 @@ int app_main()
   DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmemMap);
 
   app.shmHeader        = (KVMFRHeader *)shmemMap;
-  app.pointerData       = (uint8_t *)ALIGN_UP(shmemMap + sizeof(KVMFRHeader));
-  app.pointerDataSize   = 1048576; // 1MB fixed for pointer size, should be more then enough
-  app.pointerOffset     = app.pointerData - shmemMap;
+  app.pointerData      = (uint8_t *)ALIGN_UP(shmemMap + sizeof(KVMFRHeader));
+  app.pointerDataSize  = 1048576; // 1MB fixed for pointer size, should be more then enough
+  app.pointerOffset    = app.pointerData - shmemMap;
   app.frames           = (uint8_t *)ALIGN_UP(app.pointerData + app.pointerDataSize);
   app.frameSize        = ALIGN_DN((shmemSize - (app.frames - shmemMap)) / MAX_FRAMES);
 
@@ -242,6 +271,15 @@ int app_main()
     goto exit;
   }
 
+  // initialize the shared memory headers
+  memcpy(app.shmHeader->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
+  app.shmHeader->version = KVMFR_HEADER_VERSION;
+
+  // zero and notify the client we are starting
+  memset(&(app.shmHeader->frame ), 0, sizeof(KVMFRFrame ));
+  memset(&(app.shmHeader->cursor), 0, sizeof(KVMFRCursor));
+  app.shmHeader->flags &= ~KVMFR_HEADER_FLAG_RESTART;
+
   if (!captureStart())
   {
     exitcode = -1;
@@ -251,8 +289,12 @@ int app_main()
   // start signalled
   os_signalEvent(app.updateEvent);
 
+  volatile char * flags = (volatile char *)&(app.shmHeader->flags);
+
   while(app.running)
   {
+    INTERLOCKED_AND8(flags, ~(KVMFR_HEADER_FLAG_RESTART));
+
     // wait for one of the threads to flag an update
     if (!os_waitEvent(app.updateEvent) || !app.running)
       break;

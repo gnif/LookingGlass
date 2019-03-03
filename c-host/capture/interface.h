@@ -46,6 +46,7 @@ typedef struct CaptureFrame
   unsigned int   width;
   unsigned int   height;
   unsigned int   pitch;
+  unsigned int   stride;
   CaptureFormat  format;
   void         * data;
 }

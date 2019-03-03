@@ -469,6 +469,7 @@ static bool dxgi_getFrame(CaptureFrame * frame)
   frame->width  = this->width;
   frame->height = this->height;
   frame->pitch  = this->pitch;
+  frame->stride = this->stride;
   frame->format = this->format;
 
   HRESULT status;

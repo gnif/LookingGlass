@@ -203,6 +203,7 @@ static bool xcb_getFrame(CaptureFrame * frame)
   frame->width  = this->width;
   frame->height = this->height;
   frame->pitch  = this->width * 4;
+  frame->stride = this->width;
   frame->format = CAPTURE_FMT_BGRA;
   memcpy(frame->data, this->data, this->width * this->height * 4);
 
