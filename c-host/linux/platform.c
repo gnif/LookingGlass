@@ -29,6 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <pthread.h>
 #include <signal.h>
+#include <errno.h>
 
 struct app
 {
@@ -251,9 +252,10 @@ struct osEventHandle
   pthread_mutex_t mutex;
   pthread_cond_t  cond;
   bool            flag;
+  bool            autoReset;
 };
 
-osEventHandle * os_createEvent()
+osEventHandle * os_createEvent(bool autoReset)
 {
   osEventHandle * handle = (osEventHandle *)calloc(sizeof(osEventHandle), 1);
   if (!handle)
@@ -276,6 +278,8 @@ osEventHandle * os_createEvent()
     return NULL;
   }
 
+  handle->autoReset = autoReset;
+
   return handle;
 }
 
@@ -288,7 +292,7 @@ void os_freeEvent(osEventHandle * handle)
   free(handle);
 }
 
-bool os_waitEvent(osEventHandle * handle)
+bool os_waitEvent(osEventHandle * handle, unsigned int timeout)
 {
   assert(handle);
 
@@ -300,14 +304,33 @@ bool os_waitEvent(osEventHandle * handle)
 
   while(!handle->flag)
   {
-    if (pthread_cond_wait(&handle->cond, &handle->mutex) != 0)
+    if (timeout == TIMEOUT_INFINITE)
     {
-      DEBUG_ERROR("Wait to wait on the condition");
-      return false;
+      if (pthread_cond_wait(&handle->cond, &handle->mutex) != 0)
+      {
+        DEBUG_ERROR("Wait to wait on the condition");
+        return false;
+      }
+    }
+    else
+    {
+      struct timespec ts;
+      ts.tv_sec  = timeout / 1000;
+      ts.tv_nsec = (timeout % 1000) * 1000000;
+      switch(pthread_cond_timedwait(&handle->cond, &handle->mutex, &ts))
+      {
+        case ETIMEDOUT:
+          return false;
+
+        default:
+          DEBUG_ERROR("Timed wait failed");
+          return false;
+      }
     }
   }
 
-  handle->flag = false;
+  if (handle->autoReset)
+    handle->flag = false;
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
@@ -339,6 +362,27 @@ bool os_signalEvent(osEventHandle * handle)
   if (pthread_cond_signal(&handle->cond) != 0)
   {
     DEBUG_ERROR("Failed to signal the condition");
+    return false;
+  }
+
+  return true;
+}
+
+bool os_resetEvent(osEventHandle * handle)
+{
+  assert(handle);
+
+  if (pthread_mutex_lock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to lock the mutex");
+    return false;
+  }
+
+  handle->flag = false;
+
+  if (pthread_mutex_unlock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to unlock the mutex");
     return false;
   }
 

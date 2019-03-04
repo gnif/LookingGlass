@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "capture/interface.h"
 #include "debug.h"
+#include "app.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -36,6 +37,7 @@ struct xcb
   uint32_t           seg;
   int                shmID;
   void             * data;
+  osEventHandle    * frameEvent;
 
   unsigned int width;
   unsigned int height;
@@ -62,9 +64,18 @@ static const char * xcb_getName()
 static bool xcb_create()
 {
   assert(!this);
-  this        = (struct xcb *)calloc(sizeof(struct xcb), 1);
-  this->shmID = -1;
-  this->data  = (void *)-1;
+  this             = (struct xcb *)calloc(sizeof(struct xcb), 1);
+  this->shmID      = -1;
+  this->data       = (void *)-1;
+  this->frameEvent = os_createEvent(true);
+
+  if (!this->frameEvent)
+  {
+    DEBUG_ERROR("Failed to create the frame event");
+    free(this);
+    return false;
+  }
+
   return true;
 }
 
@@ -72,6 +83,8 @@ static bool xcb_init()
 {
   assert(this);
   assert(!this->initialized);
+
+  os_resetEvent(this->frameEvent);
 
   this->xcb = xcb_connect(NULL, NULL);
   if (!this->xcb || xcb_connection_has_error(this->xcb))
@@ -145,6 +158,7 @@ static bool xcb_deinit()
 
 static void xcb_free()
 {
+  os_freeEvent(this->frameEvent);
   free(this);
   this = NULL;
 }
@@ -174,6 +188,7 @@ static CaptureResult xcb_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
 
     *hasFrameUpdate = true;
     this->hasFrame  = true;
+    os_signalEvent(this->frameEvent);
   }
 
   return CAPTURE_RESULT_OK;
@@ -186,11 +201,7 @@ static bool xcb_getFrame(CaptureFrame * frame)
   assert(frame);
   assert(frame->data);
 
-  if (!this->hasFrame)
-  {
-    DEBUG_ERROR("No frame to get");
-    return false;
-  }
+  os_waitEvent(this->frameEvent, TIMEOUT_INFINITE);
 
   xcb_shm_get_image_reply_t * img;
   img = xcb_shm_get_image_reply(this->xcb, this->imgC, NULL);
@@ -206,8 +217,8 @@ static bool xcb_getFrame(CaptureFrame * frame)
   frame->stride = this->width;
   frame->format = CAPTURE_FMT_BGRA;
   memcpy(frame->data, this->data, this->width * this->height * 4);
-
   free(img);
+
   this->hasFrame = false;
   return true;
 }
