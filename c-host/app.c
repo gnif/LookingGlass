@@ -48,6 +48,7 @@ struct app
   unsigned int  frameOffset[MAX_FRAMES];
 
   bool             running;
+  bool             reinit;
   osEventHandle  * updateEvent;
   osThreadHandle * pointerThread;
   osEventHandle  * pointerEvent;
@@ -94,12 +95,19 @@ static int frameThread(void * opaque)
     CaptureFrame frame;
     frame.data = app.frame[frameIndex];
     if (!app.iface->getFrame(&frame))
+    {
       DEBUG_ERROR("Failed to get the frame");
+      app.reinit = true;
+      os_signalEvent(app.updateEvent);
+      break;
+    }
+
     os_signalEvent(app.updateEvent);
 
     // wait for the client to finish with the previous frame
     while(fi->flags & KVMFR_FRAME_FLAG_UPDATE)
     {
+      DEBUG_WARN("Waiting for the client");
       // this generally never happens
       usleep(1000);
     }
@@ -185,8 +193,29 @@ static bool captureStart()
   }
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
 
+  // start signalled
+  os_signalEvent(app.updateEvent);
+
   DEBUG_INFO("==== [ Capture  Start ] ====");
   return startThreads();
+}
+
+static bool captureRestart()
+{
+  DEBUG_INFO("==== [ Capture Restart ] ====");
+  if (!stopThreads())
+    return false;
+
+  if (!app.iface->deinit() || !app.iface->init())
+  {
+    DEBUG_ERROR("Failed to reinitialize the capture device");
+    return false;
+  }
+
+  if (!captureStart())
+    return false;
+
+  return true;
 }
 
 int app_main()
@@ -300,6 +329,13 @@ int app_main()
     if (!os_waitEvent(app.updateEvent) || !app.running)
       break;
 
+    if (app.reinit && !captureRestart())
+    {
+      exitcode = -1;
+      goto exit;
+    }
+    app.reinit = false;
+
     bool frameUpdate   = false;
     bool pointerUpdate = false;
 
@@ -313,28 +349,11 @@ retry_capture:
         continue;
 
       case CAPTURE_RESULT_REINIT:
-        DEBUG_INFO("==== [ Capture Reinit ] ====");
-        if (!stopThreads())
+        if (!captureRestart())
         {
           exitcode = -1;
-          goto finish;
+          goto exit;
         }
-
-        if (!iface->deinit() || !iface->init())
-        {
-          DEBUG_ERROR("Failed to reinitialize the capture device");
-          exitcode = -1;
-          goto finish;
-        }
-
-        if (!captureStart())
-        {
-          exitcode = -1;
-          goto finish;
-        }
-
-        // start signalled
-        os_signalEvent(app.updateEvent);
         continue;
 
       case CAPTURE_RESULT_ERROR:
