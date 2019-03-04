@@ -168,7 +168,7 @@ static unsigned int xcb_getMaxFrameSize()
   return this->width * this->height * 4;
 }
 
-static CaptureResult xcb_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
+static CaptureResult xcb_capture()
 {
   assert(this);
   assert(this->initialized);
@@ -186,7 +186,6 @@ static CaptureResult xcb_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
         this->seg,
         0);
 
-    *hasFrameUpdate = true;
     this->hasFrame  = true;
     os_signalEvent(this->frameEvent);
   }
@@ -223,6 +222,11 @@ static bool xcb_getFrame(CaptureFrame * frame)
   return true;
 }
 
+static bool xcb_getPointer(CapturePointer * pointer)
+{
+  return false;
+}
+
 struct CaptureInterface Capture_XCB =
 {
   .getName         = xcb_getName,
@@ -232,5 +236,6 @@ struct CaptureInterface Capture_XCB =
   .free            = xcb_free,
   .getMaxFrameSize = xcb_getMaxFrameSize,
   .capture         = xcb_capture,
-  .getFrame        = xcb_getFrame
+  .getFrame        = xcb_getFrame,
+  .getPointer      = xcb_getPointer
 };

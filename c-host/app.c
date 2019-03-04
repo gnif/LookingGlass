@@ -288,10 +288,7 @@ int app_main()
     }
     app.reinit = false;
 
-    bool frameUpdate   = false;
-    bool pointerUpdate = false;
-
-    switch(iface->capture(&frameUpdate, &pointerUpdate))
+    switch(iface->capture())
     {
       case CAPTURE_RESULT_OK:
         break;

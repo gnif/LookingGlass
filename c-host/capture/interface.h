@@ -33,10 +33,17 @@ CaptureResult;
 
 typedef enum CaptureFormat
 {
-  CAPTURE_FMT_BGRA,
-  CAPTURE_FMT_RGBA,
+  // frame formats
+  CAPTURE_FMT_BGRA  ,
+  CAPTURE_FMT_RGBA  ,
   CAPTURE_FMT_RGBA10,
   CAPTURE_FMT_YUV420,
+
+  // pointer formats
+  CAPTURE_FMT_COLOR ,
+  CAPTURE_FMT_MONO  ,
+  CAPTURE_FMT_MASKED,
+
   CAPTURE_FMT_MAX
 }
 CaptureFormat;
@@ -52,6 +59,16 @@ typedef struct CaptureFrame
 }
 CaptureFrame;
 
+typedef struct CapturePointer
+{
+  int           x, y;
+  CaptureFormat format;
+  unsigned int  width, height;
+  unsigned int  pitch;
+  void        * data;
+}
+CapturePointer;
+
 typedef struct CaptureInterface
 {
   const char *  (*getName        )();
@@ -61,10 +78,9 @@ typedef struct CaptureInterface
   void          (*free           )();
   unsigned int  (*getMaxFrameSize)();
 
-  CaptureResult (*capture)(
-    bool * hasFrameUpdate,
-    bool * hasPointerUpdate);
+  CaptureResult (*capture)();
 
-  bool (*getFrame)(CaptureFrame * frame);
+  bool (*getFrame  )(CaptureFrame   * frame  );
+  bool (*getPointer)(CapturePointer * pointer);
 }
 CaptureInterface;

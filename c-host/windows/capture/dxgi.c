@@ -472,7 +472,7 @@ static unsigned int dxgi_getMaxFrameSize()
   return this->height * this->pitch;
 }
 
-inline static CaptureResult dxgi_capture_int(bool * hasFrameUpdate, bool * hasPointerUpdate)
+inline static CaptureResult dxgi_capture_int()
 {
   assert(this);
   assert(this->initialized);
@@ -553,14 +553,12 @@ inline static CaptureResult dxgi_capture_int(bool * hasFrameUpdate, bool * hasPo
         this->texWIndex = 0;
 
       ID3D11Texture2D_Release(src);
-      *hasFrameUpdate = true;
     }
   }
 
   if (frameInfo.PointerShapeBufferSize > 0)
   {
     os_signalEvent(this->pointerEvent);
-    *hasPointerUpdate = true;
   }
 
   IDXGIResource_Release(res);
@@ -615,6 +613,11 @@ static bool dxgi_getFrame(CaptureFrame * frame)
   return true;
 }
 
+static bool dxgi_getPointer(CapturePointer * pointer)
+{
+  return false;
+}
+
 static CaptureResult dxgi_releaseFrame()
 {
   assert(this);
@@ -656,5 +659,6 @@ struct CaptureInterface Capture_DXGI =
   .free            = dxgi_free,
   .getMaxFrameSize = dxgi_getMaxFrameSize,
   .capture         = dxgi_capture,
-  .getFrame        = dxgi_getFrame
+  .getFrame        = dxgi_getFrame,
+  .getPointer      = dxgi_getPointer
 };
