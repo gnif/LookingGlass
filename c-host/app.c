@@ -86,12 +86,20 @@ static int frameThread(void * opaque)
 
   while(app.running)
   {
-    CaptureFrame frame;
+    CaptureResult result;
+    CaptureFrame  frame;
+
     frame.data = app.frame[frameIndex];
-    if (!app.iface->getFrame(&frame))
+    result = app.iface->getFrame(&frame);
+    if (result == CAPTURE_RESULT_REINIT)
+    {
+      app.reinit = true;
+      break;
+    }
+
+    if (result == CAPTURE_RESULT_ERROR)
     {
       DEBUG_ERROR("Failed to get the frame");
-      app.reinit = true;
       break;
     }
 

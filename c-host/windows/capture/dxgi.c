@@ -579,22 +579,22 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   return result;
 }
 
-static bool dxgi_getFrame(CaptureFrame * frame)
+static CaptureResult dxgi_getFrame(CaptureFrame * frame)
 {
   assert(this);
   assert(this->initialized);
 
   if (this->reinit)
-    return true;
+    return CAPTURE_RESULT_REINIT;
 
   if (!os_waitEvent(this->frameEvent, TIMEOUT_INFINITE))
   {
     DEBUG_ERROR("Failed to wait on the frame event");
-    return false;
+    return CAPTURE_RESULT_ERROR;
   }
 
   if (this->reinit)
-    return true;
+    return CAPTURE_RESULT_REINIT;
 
   Texture * tex = &this->texture[this->texRIndex];
 
@@ -610,12 +610,28 @@ static bool dxgi_getFrame(CaptureFrame * frame)
   if (++this->texRIndex == MAX_TEXTURES)
     this->texRIndex = 0;
 
-  return true;
+  return CAPTURE_RESULT_OK;
 }
 
-static bool dxgi_getPointer(CapturePointer * pointer)
+static CaptureResult dxgi_getPointer(CapturePointer * pointer)
 {
-  return false;
+  assert(this);
+  assert(this->initialized);
+
+  if (this->reinit)
+    return CAPTURE_RESULT_REINIT;
+
+  if (!os_waitEvent(this->pointerEvent, TIMEOUT_INFINITE))
+  {
+    DEBUG_ERROR("Failed to wait on the pointer event");
+    return CAPTURE_RESULT_ERROR;
+  }
+
+  if (this->reinit)
+    return CAPTURE_RESULT_REINIT;
+
+
+  return CAPTURE_RESULT_OK;
 }
 
 static CaptureResult dxgi_releaseFrame()

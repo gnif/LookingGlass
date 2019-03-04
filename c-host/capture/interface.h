@@ -24,8 +24,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef enum CaptureResult
 {
-  CAPTURE_RESULT_OK,
-  CAPTURE_RESULT_REINIT,
+  CAPTURE_RESULT_OK     ,
+  CAPTURE_RESULT_REINIT ,
   CAPTURE_RESULT_TIMEOUT,
   CAPTURE_RESULT_ERROR
 }
@@ -78,9 +78,8 @@ typedef struct CaptureInterface
   void          (*free           )();
   unsigned int  (*getMaxFrameSize)();
 
-  CaptureResult (*capture)();
-
-  bool (*getFrame  )(CaptureFrame   * frame  );
-  bool (*getPointer)(CapturePointer * pointer);
+  CaptureResult (*capture   )();
+  CaptureResult (*getFrame  )(CaptureFrame   * frame  );
+  CaptureResult (*getPointer)(CapturePointer * pointer);
 }
 CaptureInterface;
