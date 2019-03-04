@@ -300,9 +300,15 @@ bool os_joinThread(osThreadHandle * handle, int * resultCode)
   return false;
 }
 
-osEventHandle * os_createEvent()
+osEventHandle * os_createEvent(bool autoReset)
 {
-  HANDLE event = CreateEvent(NULL, FALSE, FALSE, NULL);
+  HANDLE event = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
+  if (!event)
+  {
+    DEBUG_WINERROR("Failed to create the event", GetLastError());
+    return NULL;
+  }
+
   return (osEventHandle*)event;
 }
 
@@ -337,4 +343,9 @@ bool os_waitEvent(osEventHandle * handle)
 bool os_signalEvent(osEventHandle * handle)
 {
   return SetEvent((HANDLE)handle);
+}
+
+bool os_resetEvent(osEventHandle * handle)
+{
+  return ResetEvent((HANDLE)handle);
 }

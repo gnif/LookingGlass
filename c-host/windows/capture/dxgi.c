@@ -76,7 +76,7 @@ static bool dxgi_create()
     return false;
   }
 
-  this->copyEvent = os_createEvent();
+  this->copyEvent = os_createEvent(true);
   if (!this->copyEvent)
   {
     DEBUG_ERROR("failed to create the copy event");

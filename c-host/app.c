@@ -62,11 +62,8 @@ static int pointerThread(void * opaque)
 {
   DEBUG_INFO("Cursor thread started");
 
-  while(app.running)
+  while(os_waitEvent(app.pointerEvent) && app.running)
   {
-    if (!os_waitEvent(app.pointerEvent) || !app.running)
-      break;
-
 #if 0
     CapturePointer pointer;
     pointer->data = app.pointerData;
@@ -87,11 +84,8 @@ static int frameThread(void * opaque)
   int      frameIndex = 0;
   volatile KVMFRFrame * fi = &(app.shmHeader->frame);
 
-  while(app.running)
+  while(os_waitEvent(app.frameEvent) && app.running)
   {
-    if (!os_waitEvent(app.frameEvent) || !app.running)
-      break;
-
     CaptureFrame frame;
     frame.data = app.frame[frameIndex];
     if (!app.iface->getFrame(&frame))
@@ -105,7 +99,7 @@ static int frameThread(void * opaque)
     os_signalEvent(app.updateEvent);
 
     // wait for the client to finish with the previous frame
-    while(fi->flags & KVMFR_FRAME_FLAG_UPDATE)
+    while(fi->flags & KVMFR_FRAME_FLAG_UPDATE && app.running)
     {
       DEBUG_WARN("Waiting for the client");
       // this generally never happens
@@ -277,7 +271,7 @@ int app_main()
   }
 
   app.iface      = iface;
-  app.frameEvent = os_createEvent();
+  app.frameEvent = os_createEvent(true);
   if (!app.frameEvent)
   {
     DEBUG_ERROR("Failed to create the frame event");
@@ -285,7 +279,7 @@ int app_main()
     goto exit;
   }
 
-  app.updateEvent = os_createEvent();
+  app.updateEvent = os_createEvent(false);
   if (!app.updateEvent)
   {
     DEBUG_ERROR("Failed to create the update event");
@@ -293,7 +287,7 @@ int app_main()
     goto exit;
   }
 
-  app.pointerEvent = os_createEvent();
+  app.pointerEvent = os_createEvent(true);
   if (!app.pointerEvent)
   {
     DEBUG_ERROR("Failed to create the pointer event");
@@ -365,6 +359,7 @@ retry_capture:
     if (!frameUpdate && !pointerUpdate)
       goto retry_capture;
 
+    os_resetEvent(app.updateEvent);
     if (frameUpdate && !os_signalEvent(app.frameEvent))
     {
       DEBUG_ERROR("Failed to signal the frame thread");

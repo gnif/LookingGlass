@@ -42,7 +42,8 @@ bool         os_joinThread  (osThreadHandle * handle, int * resultCode);
 
 typedef struct osEventHandle osEventHandle;
 
-osEventHandle * os_createEvent();
+osEventHandle * os_createEvent(bool autoReset);
 void            os_freeEvent  (osEventHandle * handle);
 bool            os_waitEvent  (osEventHandle * handle);
 bool            os_signalEvent(osEventHandle * handle);
+bool            os_resetEvent (osEventHandle * handle);
