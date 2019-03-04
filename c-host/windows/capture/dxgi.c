@@ -29,10 +29,21 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "dxgi_extra.h"
 
+#define MAX_TEXTURES 2
+
+typedef struct Texture
+{
+  ID3D11Texture2D          * tex;
+  D3D11_MAPPED_SUBRESOURCE   map;
+  osEventHandle            * evt;
+}
+Texture;
+
 // locals
 struct iface
 {
   bool                       initialized;
+  bool                       reinit;
   IDXGIFactory1            * factory;
   IDXGIAdapter1            * adapter;
   IDXGIOutput              * output;
@@ -40,10 +51,10 @@ struct iface
   ID3D11DeviceContext      * deviceContext;
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication   * dup;
-  ID3D11Texture2D          * texture;
-  D3D11_MAPPED_SUBRESOURCE   mapping;
+  Texture                    texture[MAX_TEXTURES];
+  int                        texRIndex;
+  int                        texWIndex;
   bool                       needsRelease;
-  osEventHandle            * copyEvent;
   osEventHandle            * frameEvent;
   osEventHandle            * pointerEvent;
 
@@ -79,19 +90,10 @@ static bool dxgi_create()
     return false;
   }
 
-  this->copyEvent = os_createEvent(true);
-  if (!this->copyEvent)
-  {
-    DEBUG_ERROR("failed to create the copy event");
-    free(this);
-    return false;
-  }
-
   this->frameEvent = os_createEvent(true);
   if (!this->frameEvent)
   {
     DEBUG_ERROR("failed to create the frame event");
-    os_freeEvent(this->copyEvent);
     free(this);
     return false;
   }
@@ -100,7 +102,6 @@ static bool dxgi_create()
   if (!this->pointerEvent)
   {
     DEBUG_ERROR("failed to create the pointer event");
-    os_freeEvent(this->copyEvent );
     os_freeEvent(this->frameEvent);
     free(this);
     return false;
@@ -129,11 +130,13 @@ static bool dxgi_init()
     dpiDone = true;
   }
 
-  // pre-signal the copy event
-  os_signalEvent(this->copyEvent);
-
   HRESULT          status;
   DXGI_OUTPUT_DESC outputDesc;
+
+  this->reinit    = false;
+  this->texRIndex = 0;
+  this->texWIndex = 0;
+  os_resetEvent(this->frameEvent);
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -334,16 +337,29 @@ static bool dxgi_init()
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
 
-  status = ID3D11Device_CreateTexture2D(this->device, &texDesc, NULL, &this->texture);
-  if (FAILED(status))
+  for(int i = 0; i < MAX_TEXTURES; ++i)
   {
-    DEBUG_WINERROR("Failed to create texture", status);
-    goto fail;
+    status = ID3D11Device_CreateTexture2D(this->device, &texDesc, NULL, &this->texture[i].tex);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create texture", status);
+      goto fail;
+    }
+
+    this->texture[i].evt = os_createEvent(true);
+    if (!this->texture[i].evt)
+    {
+      DEBUG_ERROR("Failed to create the texture event");
+      goto fail;
+    }
+
+    // pre-signal the events to flag as unused
+    os_signalEvent(this->texture[i].evt);
   }
 
   // map the texture simply to get the pitch and stride
   D3D11_MAPPED_SUBRESOURCE mapping;
-  status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource *)this->texture, 0, D3D11_MAP_READ, 0, &mapping);
+  status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0, D3D11_MAP_READ, 0, &mapping);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to map the texture", status);
@@ -351,7 +367,7 @@ static bool dxgi_init()
   }
   this->pitch  = mapping.RowPitch;
   this->stride = mapping.RowPitch / 4;
-  ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture, 0);
+  ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0);
 
   this->initialized = true;
   return true;
@@ -365,16 +381,26 @@ static bool dxgi_deinit()
 {
   assert(this);
 
-  if (this->mapping.pData)
+  for(int i = 0; i < MAX_TEXTURES; ++i)
   {
-    ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture, 0);
-    this->mapping.pData = NULL;
-  }
+    if (this->texture[i].map.pData)
+    {
+      ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture[i].tex, 0);
+      this->texture[i].map.pData = NULL;
+    }
 
-  if (this->texture)
-  {
-    ID3D11Texture2D_Release(this->texture);
-    this->texture = NULL;
+    if (this->texture[i].tex)
+    {
+      ID3D11Texture2D_Release(this->texture[i].tex);
+      this->texture[i].tex = NULL;
+    }
+
+    if (this->texture[i].evt)
+    {
+      os_signalEvent(this->texture[i].evt);
+      os_freeEvent(this->texture[i].evt);
+      this->texture[i].evt = NULL;
+    }
   }
 
   if (this->dup)
@@ -431,7 +457,6 @@ static void dxgi_free()
   if (this->initialized)
     dxgi_deinit();
 
-  os_freeEvent(this->copyEvent   );
   os_freeEvent(this->frameEvent  );
   os_freeEvent(this->pointerEvent);
 
@@ -447,7 +472,7 @@ static unsigned int dxgi_getMaxFrameSize()
   return this->height * this->pitch;
 }
 
-static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
+inline static CaptureResult dxgi_capture_int(bool * hasFrameUpdate, bool * hasPointerUpdate)
 {
   assert(this);
   assert(this->initialized);
@@ -482,41 +507,54 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
 
   if (frameInfo.LastPresentTime.QuadPart != 0)
   {
-    ID3D11Texture2D * src;
-    status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D, (void **)&src);
-    if (FAILED(status))
+    Texture * tex = &this->texture[this->texWIndex];
+
+    // check if the texture is free, if not skip the frame to keep up
+    if (!os_waitEvent(tex->evt, 0))
     {
-      DEBUG_WINERROR("Failed to get the texture from the dxgi resource", status);
-      IDXGIResource_Release(res);
-      return CAPTURE_RESULT_ERROR;
+      DEBUG_WARN("Frame skipped");
     }
-
-    // wait for the prior copy to finish in getFrame and unmap
-    os_waitEvent(this->copyEvent);
-    if (this->mapping.pData)
+    else
     {
-      ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture, 0);
-      this->mapping.pData = NULL;
+      ID3D11Texture2D * src;
+      status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D, (void **)&src);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to get the texture from the dxgi resource", status);
+        IDXGIResource_Release(res);
+        return CAPTURE_RESULT_ERROR;
+      }
+
+      // if the texture was mapped, unmap it
+      if (tex->map.pData)
+      {
+        ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);
+        tex->map.pData = NULL;
+      }
+
+      // issue the copy from GPU to CPU RAM
+      ID3D11DeviceContext_CopyResource(this->deviceContext,
+        (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
+
+      // map the resource (this must be done here as ID3D11DeviceContext is not thread safe)
+      status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0, &tex->map);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to map the texture", status);
+        IDXGIResource_Release(res);
+        return CAPTURE_RESULT_ERROR;
+      }
+
+      // signal that a frame is available
+      os_signalEvent(this->frameEvent);
+
+      // advance our write pointer
+      if (++this->texWIndex == MAX_TEXTURES)
+        this->texWIndex = 0;
+
+      ID3D11Texture2D_Release(src);
+      *hasFrameUpdate = true;
     }
-
-    // issue the copy from GPU to CPU RAM
-    ID3D11DeviceContext_CopyResource(this->deviceContext,
-      (ID3D11Resource *)this->texture, (ID3D11Resource *)src);
-
-    // map the resource (this must be done here as ID3D11DeviceContext is not thread safe)
-    status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)this->texture, 0, D3D11_MAP_READ, 0, &this->mapping);
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to map the texture", status);
-      IDXGIResource_Release(res);
-      return CAPTURE_RESULT_ERROR;
-    }
-
-    // signal that a frame is available
-    os_signalEvent(this->frameEvent);
-
-    ID3D11Texture2D_Release(src);
-    *hasFrameUpdate = true;
   }
 
   if (frameInfo.PointerShapeBufferSize > 0)
@@ -529,16 +567,38 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   return CAPTURE_RESULT_OK;
 }
 
+static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
+{
+  CaptureResult result = dxgi_capture_int(hasFrameUpdate, hasPointerUpdate);
+
+  // signal pending events if the result was any form of failure or reinit
+  if (result != CAPTURE_RESULT_OK && result != CAPTURE_RESULT_TIMEOUT)
+  {
+    this->reinit = true;
+    os_signalEvent(this->frameEvent);
+  }
+
+  return result;
+}
+
 static bool dxgi_getFrame(CaptureFrame * frame)
 {
   assert(this);
   assert(this->initialized);
 
-  if (!os_waitEvent(this->frameEvent))
+  if (this->reinit)
+    return true;
+
+  if (!os_waitEvent(this->frameEvent, TIMEOUT_INFINITE))
   {
     DEBUG_ERROR("Failed to wait on the frame event");
     return false;
   }
+
+  if (this->reinit)
+    return true;
+
+  Texture * tex = &this->texture[this->texRIndex];
 
   frame->width  = this->width;
   frame->height = this->height;
@@ -546,10 +606,12 @@ static bool dxgi_getFrame(CaptureFrame * frame)
   frame->stride = this->stride;
   frame->format = this->format;
 
+  memcpy(frame->data, tex->map.pData, this->pitch * this->height);
+  os_signalEvent(tex->evt);
 
-  memcpy(frame->data, this->mapping.pData, this->pitch * this->height);
+  if (++this->texRIndex == MAX_TEXTURES)
+    this->texRIndex = 0;
 
-  os_signalEvent(this->copyEvent);
   return true;
 }
 

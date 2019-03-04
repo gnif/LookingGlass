@@ -317,18 +317,24 @@ void os_freeEvent(osEventHandle * handle)
   CloseHandle((HANDLE)handle);
 }
 
-bool os_waitEvent(osEventHandle * handle)
+bool os_waitEvent(osEventHandle * handle, unsigned int timeout)
 {
+  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
   while(true)
   {
-    switch(WaitForSingleObject((HANDLE)handle, INFINITE))
+    switch(WaitForSingleObject((HANDLE)handle, to))
     {
       case WAIT_OBJECT_0:
         return true;
 
       case WAIT_ABANDONED:
-      case WAIT_TIMEOUT:
         continue;
+
+      case WAIT_TIMEOUT:
+        if (timeout == TIMEOUT_INFINITE)
+          continue;
+
+        return false;
 
       case WAIT_FAILED:
         DEBUG_WINERROR("Wait for event failed", GetLastError());

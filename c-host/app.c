@@ -97,11 +97,7 @@ static int frameThread(void * opaque)
 
     // wait for the client to finish with the previous frame
     while(fi->flags & KVMFR_FRAME_FLAG_UPDATE && app.running)
-    {
-      DEBUG_WARN("Waiting for the client");
-      // this generally never happens
       usleep(1000);
-    }
 
     switch(frame.format)
     {
