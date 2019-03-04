@@ -39,6 +39,18 @@ typedef struct Texture
 }
 Texture;
 
+typedef struct Pointer
+{
+  unsigned int  version;
+
+  unsigned int  x, y;
+  unsigned int  w, h;
+  bool          visible;
+  unsigned int  pitch;
+  CaptureFormat format;
+}
+Pointer;
+
 // locals
 struct iface
 {
@@ -63,6 +75,15 @@ struct iface
   unsigned int  pitch;
   unsigned int  stride;
   CaptureFormat format;
+
+  // pointer state
+  Pointer lastPointer;
+  Pointer pointer;
+
+  // pointer shape
+  void         * pointerShape;
+  unsigned int   pointerSize;
+  unsigned int   pointerUsed;
 };
 
 static bool           dpiDone = false;
@@ -110,7 +131,7 @@ static bool dxgi_create()
   return true;
 }
 
-static bool dxgi_init()
+static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
 {
   assert(this);
 
@@ -132,6 +153,10 @@ static bool dxgi_init()
 
   HRESULT          status;
   DXGI_OUTPUT_DESC outputDesc;
+
+  this->pointerShape = pointerShape;
+  this->pointerSize  = pointerSize;
+  this->pointerUsed  = 0;
 
   this->reinit    = false;
   this->texRIndex = 0;
@@ -556,12 +581,63 @@ inline static CaptureResult dxgi_capture_int()
     }
   }
 
-  if (frameInfo.PointerShapeBufferSize > 0)
+  IDXGIResource_Release(res);
+
+  // if the pointer has moved or changed state
+  bool signalPointer = false;
+  if (frameInfo.LastMouseUpdateTime.QuadPart)
   {
-    os_signalEvent(this->pointerEvent);
+    if (
+      frameInfo.PointerPosition.Position.x != this->lastPointer.x ||
+      frameInfo.PointerPosition.Position.y != this->lastPointer.y ||
+      frameInfo.PointerPosition.Visible    != this->lastPointer.visible
+      )
+    {
+      this->pointer.x       = frameInfo.PointerPosition.Position.x;
+      this->pointer.y       = frameInfo.PointerPosition.Position.y;
+      this->pointer.visible = frameInfo.PointerPosition.Visible;
+      signalPointer = true;
+    }
   }
 
-  IDXGIResource_Release(res);
+  // if the pointer shape has changed
+  if (frameInfo.PointerShapeBufferSize > 0)
+  {
+    // update the buffer
+    if (frameInfo.PointerShapeBufferSize > this->pointerSize)
+      DEBUG_WARN("The pointer shape is too large to fit in the buffer, ignoring the shape");
+    else
+    {
+      DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
+      status = IDXGIOutputDuplication_GetFramePointerShape(this->dup, this->pointerSize, this->pointerShape, &this->pointerUsed, &shapeInfo);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to get the new pointer shape", status);
+        return CAPTURE_RESULT_ERROR;
+      }
+
+      switch(shapeInfo.Type)
+      {
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : this->pointer.format = CAPTURE_FMT_COLOR ; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: this->pointer.format = CAPTURE_FMT_MASKED; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : this->pointer.format = CAPTURE_FMT_MONO  ; break;
+        default:
+          DEBUG_ERROR("Unsupported cursor format");
+          return CAPTURE_RESULT_ERROR;
+      }
+
+      this->pointer.w     = shapeInfo.Width;
+      this->pointer.h     = shapeInfo.Height;
+      this->pointer.pitch = shapeInfo.Pitch;
+      ++this->pointer.version;
+      signalPointer = true;
+    }
+  }
+
+  // signal about the pointer update
+  if (signalPointer)
+    os_signalEvent(this->pointerEvent);
+
   return CAPTURE_RESULT_OK;
 }
 
@@ -573,7 +649,8 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
   if (result != CAPTURE_RESULT_OK && result != CAPTURE_RESULT_TIMEOUT)
   {
     this->reinit = true;
-    os_signalEvent(this->frameEvent);
+    os_signalEvent(this->frameEvent  );
+    os_signalEvent(this->pointerEvent);
   }
 
   return result;
@@ -630,6 +707,19 @@ static CaptureResult dxgi_getPointer(CapturePointer * pointer)
   if (this->reinit)
     return CAPTURE_RESULT_REINIT;
 
+  Pointer p;
+  memcpy(&p, &this->pointer, sizeof(Pointer));
+
+  pointer->x           = p.x;
+  pointer->y           = p.y;
+  pointer->width       = p.w;
+  pointer->height      = p.h;
+  pointer->pitch       = p.pitch;
+  pointer->visible     = p.visible;
+  pointer->format      = p.format;
+  pointer->shapeUpdate = p.version > this->lastPointer.version;
+
+  memcpy(&this->lastPointer, &p, sizeof(Pointer));
 
   return CAPTURE_RESULT_OK;
 }
