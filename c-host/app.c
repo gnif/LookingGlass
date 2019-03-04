@@ -49,31 +49,31 @@ struct app
 
   bool             running;
   bool             reinit;
-  osEventHandle  * updateEvent;
   osThreadHandle * pointerThread;
-  osEventHandle  * pointerEvent;
   osThreadHandle * frameThread;
-  osEventHandle  * frameEvent;
 };
 
 static struct app app;
 
 static int pointerThread(void * opaque)
 {
-  DEBUG_INFO("Cursor thread started");
+  DEBUG_INFO("Pointer thread started");
 
-  while(os_waitEvent(app.pointerEvent) && app.running)
-  {
 #if 0
+  while(app.running)
+  {
     CapturePointer pointer;
     pointer->data = app.pointerData;
     if (!app.iface->getPointer(&pointer))
+    {
       DEBUG_ERROR("Failed to get the pointer");
-#endif
-    os_signalEvent(app.updateEvent);
+      app.reinit = true;
+      break;
+    }
   }
+#endif
 
-  DEBUG_INFO("Cursor thread stopped");
+  DEBUG_INFO("Pointer thread stopped");
   return 0;
 }
 
@@ -84,7 +84,7 @@ static int frameThread(void * opaque)
   int      frameIndex = 0;
   volatile KVMFRFrame * fi = &(app.shmHeader->frame);
 
-  while(os_waitEvent(app.frameEvent) && app.running)
+  while(app.running)
   {
     CaptureFrame frame;
     frame.data = app.frame[frameIndex];
@@ -92,11 +92,8 @@ static int frameThread(void * opaque)
     {
       DEBUG_ERROR("Failed to get the frame");
       app.reinit = true;
-      os_signalEvent(app.updateEvent);
       break;
     }
-
-    os_signalEvent(app.updateEvent);
 
     // wait for the client to finish with the previous frame
     while(fi->flags & KVMFR_FRAME_FLAG_UPDATE && app.running)
@@ -155,8 +152,6 @@ bool stopThreads()
   bool ok = true;
 
   app.running = false;
-  os_signalEvent(app.frameEvent  );
-  os_signalEvent(app.pointerEvent);
 
   if (app.frameThread && !os_joinThread(app.frameThread, NULL))
   {
@@ -186,9 +181,6 @@ static bool captureStart()
     return false;
   }
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
-
-  // start signalled
-  os_signalEvent(app.updateEvent);
 
   DEBUG_INFO("==== [ Capture  Start ] ====");
   return startThreads();
@@ -270,30 +262,7 @@ int app_main()
     goto fail;
   }
 
-  app.iface      = iface;
-  app.frameEvent = os_createEvent(true);
-  if (!app.frameEvent)
-  {
-    DEBUG_ERROR("Failed to create the frame event");
-    exitcode = -1;
-    goto exit;
-  }
-
-  app.updateEvent = os_createEvent(false);
-  if (!app.updateEvent)
-  {
-    DEBUG_ERROR("Failed to create the update event");
-    exitcode = -1;
-    goto exit;
-  }
-
-  app.pointerEvent = os_createEvent(true);
-  if (!app.pointerEvent)
-  {
-    DEBUG_ERROR("Failed to create the pointer event");
-    exitcode = -1;
-    goto exit;
-  }
+  app.iface = iface;
 
   // initialize the shared memory headers
   memcpy(app.shmHeader->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC));
@@ -310,18 +279,11 @@ int app_main()
     goto exit;
   }
 
-  // start signalled
-  os_signalEvent(app.updateEvent);
-
   volatile char * flags = (volatile char *)&(app.shmHeader->flags);
 
   while(app.running)
   {
     INTERLOCKED_AND8(flags, ~(KVMFR_HEADER_FLAG_RESTART));
-
-    // wait for one of the threads to flag an update
-    if (!os_waitEvent(app.updateEvent) || !app.running)
-      break;
 
     if (app.reinit && !captureRestart())
     {
@@ -333,7 +295,6 @@ int app_main()
     bool frameUpdate   = false;
     bool pointerUpdate = false;
 
-retry_capture:
     switch(iface->capture(&frameUpdate, &pointerUpdate))
     {
       case CAPTURE_RESULT_OK:
@@ -355,38 +316,11 @@ retry_capture:
         exitcode = -1;
         goto finish;
     }
-
-    if (!frameUpdate && !pointerUpdate)
-      goto retry_capture;
-
-    os_resetEvent(app.updateEvent);
-    if (frameUpdate && !os_signalEvent(app.frameEvent))
-    {
-      DEBUG_ERROR("Failed to signal the frame thread");
-      exitcode = -1;
-      goto finish;
-    }
-
-    if (pointerUpdate && !os_signalEvent(app.pointerEvent))
-    {
-      DEBUG_ERROR("Failed to signal the pointer thread");
-      exitcode = -1;
-      goto finish;
-    }
   }
 
 finish:
   stopThreads();
 exit:
-
-  if (app.pointerEvent)
-    os_freeEvent(app.pointerEvent);
-
-  if (app.frameEvent)
-    os_freeEvent(app.frameEvent);
-
-  if (app.updateEvent)
-    os_freeEvent(app.updateEvent);
 
   iface->deinit();
   iface->free();
@@ -398,5 +332,4 @@ fail:
 void app_quit()
 {
   app.running = false;
-  os_signalEvent(app.updateEvent);
 }
