@@ -134,41 +134,38 @@ static bool dxgi_init()
   os_signalEvent(this->copyEvent);
 
   HRESULT          status;
-  IDXGIFactory1  * factory;
-  IDXGIAdapter1  * adapter;
-  IDXGIOutput    * output;
   DXGI_OUTPUT_DESC outputDesc;
 
-  status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&factory);
+  status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create DXGIFactory1", status);
     goto fail;
   }
 
-  for(int i = 0; IDXGIFactory1_EnumAdapters1(factory, i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+  for(int i = 0; IDXGIFactory1_EnumAdapters1(this->factory, i, &this->adapter) != DXGI_ERROR_NOT_FOUND; ++i)
   {
-    for(int n = 0; IDXGIAdapter1_EnumOutputs(adapter, n, &output) != DXGI_ERROR_NOT_FOUND; ++n)
+    for(int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
     {
-      IDXGIOutput_GetDesc(output, &outputDesc);
+      IDXGIOutput_GetDesc(this->output, &outputDesc);
       if (outputDesc.AttachedToDesktop)
         break;
 
-      IDXGIOutput_Release(output);
-      output = NULL;
+      IDXGIOutput_Release(this->output);
+      this->output = NULL;
     }
 
-    if (output)
+    if (this->output)
       break;
 
-    IDXGIAdapter1_Release(adapter);
-    adapter = NULL;
+    IDXGIAdapter1_Release(this->adapter);
+    this->adapter = NULL;
   }
 
-  if (!output)
+  if (!this->output)
   {
     DEBUG_ERROR("Failed to locate a valid output device");
-    goto fail_release_factory;
+    goto fail;
   }
 
   static const D3D_FEATURE_LEVEL featureLevels[] =
@@ -185,11 +182,11 @@ static bool dxgi_init()
   };
 
   IDXGIAdapter * tmp;
-  status = IDXGIAdapter1_QueryInterface(adapter, &IID_IDXGIAdapter, (void **)&tmp);
+  status = IDXGIAdapter1_QueryInterface(this->adapter, &IID_IDXGIAdapter, (void **)&tmp);
   if (FAILED(status))
   {
     DEBUG_ERROR("Failed to query IDXGIAdapter interface");
-    goto fail_release;
+    goto fail;
   }
 
   status = D3D11CreateDevice(
@@ -208,11 +205,11 @@ static bool dxgi_init()
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create D3D11 device", status);
-    goto fail_release;
- }
+    goto fail;
+  }
 
   DXGI_ADAPTER_DESC1 adapterDesc;
-  IDXGIAdapter1_GetDesc1(adapter, &adapterDesc);
+  IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
   this->width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
   this->height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
 
@@ -232,7 +229,7 @@ static bool dxgi_init()
     if (FAILED(status))
     {
       DEBUG_WINERROR("failed to query DXGI interface from device", status);
-      goto fail_release_device;
+      goto fail;
     }
 
     IDXGIDevice_SetGPUThreadPriority(dxgi, 7);
@@ -240,18 +237,18 @@ static bool dxgi_init()
   }
 
   IDXGIOutput5 * output5 = NULL;
-  status = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutput5, (void **)&output5);
+  status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput5, (void **)&output5);
   if (FAILED(status))
   {
     DEBUG_WARN("IDXGIOutput5 is not available, please update windows for improved performance!");
     DEBUG_WARN("Falling back to IDXIGOutput1");
 
     IDXGIOutput1 * output1 = NULL;
-    status = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutput1, (void **)&output1);
+    status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput1, (void **)&output1);
     if (FAILED(status))
     {
       DEBUG_ERROR("Failed to query IDXGIOutput1 from the output");
-      goto fail_release_device;
+      goto fail;
     }
 
     // we try this twice in case we still get an error on re-initialization
@@ -267,7 +264,7 @@ static bool dxgi_init()
     {
       DEBUG_WINERROR("DuplicateOutput Failed", status);
       IDXGIOutput1_Release(output1);
-      goto fail_release_device;
+      goto fail;
     }
     IDXGIOutput1_Release(output1);
   }
@@ -305,7 +302,7 @@ static bool dxgi_init()
     {
       DEBUG_WINERROR("DuplicateOutput1 Failed", status);
       IDXGIOutput5_Release(output5);
-      goto fail_release_device;
+      goto fail;
     }
     IDXGIOutput5_Release(output5);
   }
@@ -321,7 +318,7 @@ static bool dxgi_init()
     case DXGI_FORMAT_R10G10B10A2_UNORM: this->format = CAPTURE_FMT_RGBA10; break;
     default:
       DEBUG_ERROR("Unsupported source format");
-      goto fail_release_output;
+      goto fail;
   }
 
   D3D11_TEXTURE2D_DESC texDesc;
@@ -342,7 +339,7 @@ static bool dxgi_init()
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create texture", status);
-    goto fail_release_output;
+    goto fail;
   }
 
   // map the texture simply to get the pitch and stride
@@ -351,35 +348,17 @@ static bool dxgi_init()
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to map the texture", status);
-    goto fail_release_texture;
+    goto fail;
   }
   this->pitch  = mapping.RowPitch;
   this->stride = mapping.RowPitch / 4;
   ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture, 0);
 
-  this->factory     = factory;
-  this->adapter     = adapter;
-  this->output      = output;
   this->initialized = true;
   return true;
 
-fail_release_texture:
-  ID3D11Texture2D_Release(this->texture);
-  this->texture = NULL;
-fail_release_output:
-  IDXGIOutputDuplication_Release(this->dup);
-  this->dup = NULL;
-fail_release_device:
-  ID3D11Device_Release       (this->device       );
-  ID3D11DeviceContext_Release(this->deviceContext);
-  this->device        = NULL;
-  this->deviceContext = NULL;
-fail_release:
-  IDXGIOutput_Release  (output );
-  IDXGIAdapter1_Release(adapter);
-fail_release_factory:
-  IDXGIFactory1_Release(factory);
 fail:
+  dxgi_deinit();
   return false;
 }
 
