@@ -128,14 +128,11 @@ static bool dxgi_init()
     for(int n = 0; IDXGIAdapter1_EnumOutputs(adapter, n, &output) != DXGI_ERROR_NOT_FOUND; ++n)
     {
       IDXGIOutput_GetDesc(output, &outputDesc);
-      if (!outputDesc.AttachedToDesktop)
-      {
-        IDXGIOutput_Release(output);
-        output = NULL;
-        continue;
-      }
+      if (outputDesc.AttachedToDesktop)
+        break;
 
-      break;
+      IDXGIOutput_Release(output);
+      output = NULL;
     }
 
     if (output)
@@ -148,7 +145,7 @@ static bool dxgi_init()
   if (!output)
   {
     DEBUG_ERROR("Failed to locate a valid output device");
-    goto fail;
+    goto fail_release_factory;
   }
 
   static const D3D_FEATURE_LEVEL featureLevels[] =
@@ -196,13 +193,13 @@ static bool dxgi_init()
   this->width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
   this->height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
 
-  DEBUG_INFO("Device Descripion: %ls"  , adapterDesc.Description);
-  DEBUG_INFO("Device Vendor ID : 0x%x" , adapterDesc.VendorId);
-  DEBUG_INFO("Device Device ID : 0x%x" , adapterDesc.DeviceId);
-  DEBUG_INFO("Device Video Mem : %u MiB", (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
-  DEBUG_INFO("Device Sys Mem   : %u MiB", (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
-  DEBUG_INFO("Shared Sys Mem   : %u MiB", (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
-  DEBUG_INFO("Feature Level    : 0x%x", this->featureLevel);
+  DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
+  DEBUG_INFO("Device Vendor ID : 0x%x"   , adapterDesc.VendorId);
+  DEBUG_INFO("Device Device ID : 0x%x"   , adapterDesc.DeviceId);
+  DEBUG_INFO("Device Video Mem : %u MiB" , (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
+  DEBUG_INFO("Device Sys Mem   : %u MiB" , (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
+  DEBUG_INFO("Shared Sys Mem   : %u MiB" , (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
+  DEBUG_INFO("Feature Level    : 0x%x"   , this->featureLevel);
   DEBUG_INFO("Capture Size     : %u x %u", this->width, this->height);
 
   // bump up our priority
@@ -249,6 +246,7 @@ static bool dxgi_init()
       IDXGIOutput1_Release(output1);
       goto fail_release_device;
     }
+    IDXGIOutput1_Release(output1);
   }
   else
   {
@@ -286,6 +284,7 @@ static bool dxgi_init()
       IDXGIOutput5_Release(output5);
       goto fail_release_device;
     }
+    IDXGIOutput5_Release(output5);
   }
 
   DXGI_OUTDUPL_DESC dupDesc;
@@ -329,7 +328,7 @@ static bool dxgi_init()
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to map the texture", status);
-    goto fail_release_output;
+    goto fail_release_texture;
   }
   this->pitch  = mapping.RowPitch;
   this->stride = mapping.RowPitch / 4;
@@ -341,15 +340,21 @@ static bool dxgi_init()
   this->initialized = true;
   return true;
 
+fail_release_texture:
+  ID3D11Texture2D_Release(this->texture);
+  this->texture = NULL;
 fail_release_output:
   IDXGIOutputDuplication_Release(this->dup);
   this->dup = NULL;
 fail_release_device:
-  ID3D11Device_Release(this->device);
-  this->device = NULL;
+  ID3D11Device_Release       (this->device       );
+  ID3D11DeviceContext_Release(this->deviceContext);
+  this->device        = NULL;
+  this->deviceContext = NULL;
 fail_release:
   IDXGIOutput_Release  (output );
   IDXGIAdapter1_Release(adapter);
+fail_release_factory:
   IDXGIFactory1_Release(factory);
 fail:
   return false;
@@ -358,8 +363,6 @@ fail:
 static bool dxgi_deinit()
 {
   assert(this);
-
-  os_signalEvent(this->copyEvent);
 
   if (this->texture)
   {
@@ -374,16 +377,22 @@ static bool dxgi_deinit()
     this->dup = NULL;
   }
 
-  if (this->device)
+  if (this->deviceContext)
   {
-    ID3D11Device_Release(this->device);
-    this->device = NULL;
+    ID3D11DeviceContext_Release(this->deviceContext);
+    this->deviceContext = NULL;
   }
 
   if (this->output)
   {
     IDXGIOutput_Release(this->output);
     this->output = NULL;
+  }
+
+  if (this->device)
+  {
+    ID3D11Device_Release(this->device);
+    this->device = NULL;
   }
 
   if (this->adapter)
@@ -394,8 +403,14 @@ static bool dxgi_deinit()
 
   if (this->factory)
   {
-    IDXGIFactory1_Release(this->factory);
+    // if this doesn't free we have a memory leak
+    DWORD count = IDXGIFactory1_Release(this->factory);
     this->factory = NULL;
+    if (count != 0)
+    {
+      DEBUG_ERROR("Factory release is %lu, there is a memory leak!", count);
+      return false;
+    }
   }
 
   this->initialized = false;
@@ -456,17 +471,17 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
       return CAPTURE_RESULT_ERROR;
   }
 
-  ID3D11Texture2D * src;
-  status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D, (void **)&src);
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to get the texture from the dxgi resource", status);
-    IDXGIResource_Release(res);
-    return CAPTURE_RESULT_ERROR;
-  }
-
   if (frameInfo.LastPresentTime.QuadPart != 0)
   {
+    ID3D11Texture2D * src;
+    status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D, (void **)&src);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to get the texture from the dxgi resource", status);
+      IDXGIResource_Release(res);
+      return CAPTURE_RESULT_ERROR;
+    }
+
     // wait for the prior copy to finish in getFrame
     os_waitEvent(this->copyEvent);
 
