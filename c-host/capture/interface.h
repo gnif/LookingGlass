@@ -62,10 +62,12 @@ CaptureFrame;
 typedef struct CapturePointer
 {
   int           x, y;
+  bool          visible;
+
+  bool          shapeUpdate;
   CaptureFormat format;
   unsigned int  width, height;
   unsigned int  pitch;
-  void        * data;
 }
 CapturePointer;
 
@@ -73,7 +75,7 @@ typedef struct CaptureInterface
 {
   const char *  (*getName        )();
   bool          (*create         )();
-  bool          (*init           )();
+  bool          (*init           )(void * pointerShape, const unsigned int pointerSize);
   bool          (*deinit         )();
   void          (*free           )();
   unsigned int  (*getMaxFrameSize)();

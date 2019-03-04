@@ -59,19 +59,62 @@ static int pointerThread(void * opaque)
 {
   DEBUG_INFO("Pointer thread started");
 
-#if 0
+  volatile KVMFRCursor * ci = &(app.shmHeader->cursor);
+  uint8_t flags;
+
   while(app.running)
   {
-    CapturePointer pointer;
-    pointer->data = app.pointerData;
-    if (!app.iface->getPointer(&pointer))
+    CaptureResult  result;
+    CapturePointer pointer = { 0 };
+
+    result = app.iface->getPointer(&pointer);
+    if (result == CAPTURE_RESULT_REINIT)
     {
-      DEBUG_ERROR("Failed to get the pointer");
       app.reinit = true;
       break;
     }
+
+    if (result == CAPTURE_RESULT_ERROR)
+    {
+      DEBUG_ERROR("Failed to get the pointer");
+      break;
+    }
+
+    // wait for the client to finish with the previous update
+    while((ci->flags & ~KVMFR_CURSOR_FLAG_UPDATE) != 0 && app.running)
+      usleep(1000);
+
+    flags  = KVMFR_CURSOR_FLAG_UPDATE;
+    ci->x  = pointer.x;
+    ci->y  = pointer.y;
+    flags |= KVMFR_CURSOR_FLAG_POS;
+    if (pointer.visible)
+      flags |= KVMFR_CURSOR_FLAG_VISIBLE;
+
+    // if we have shape data
+    if (pointer.shapeUpdate)
+    {
+      switch(pointer.format)
+      {
+        case CAPTURE_FMT_COLOR : ci->type = CURSOR_TYPE_COLOR       ; break;
+        case CAPTURE_FMT_MONO  : ci->type = CURSOR_TYPE_MONOCHROME  ; break;
+        case CAPTURE_FMT_MASKED: ci->type = CURSOR_TYPE_MASKED_COLOR; break;
+        default:
+          DEBUG_ERROR("Invalid pointer format: %d", pointer.format);
+          continue;
+      }
+
+      ci->width   = pointer.width;
+      ci->height  = pointer.height;
+      ci->pitch   = pointer.pitch;
+      ci->dataPos = app.pointerOffset;
+      ++ci->version;
+      flags |= KVMFR_CURSOR_FLAG_SHAPE;
+    }
+
+    // update the flags for the client
+    ci->flags = flags;
   }
-#endif
 
   DEBUG_INFO("Pointer thread stopped");
   return 0;
@@ -87,9 +130,11 @@ static int frameThread(void * opaque)
   while(app.running)
   {
     CaptureResult result;
-    CaptureFrame  frame;
+    CaptureFrame  frame =
+    {
+      .data = app.frame[frameIndex]
+    };
 
-    frame.data = app.frame[frameIndex];
     result = app.iface->getFrame(&frame);
     if (result == CAPTURE_RESULT_REINIT)
     {
@@ -196,7 +241,7 @@ static bool captureRestart()
   if (!stopThreads())
     return false;
 
-  if (!app.iface->deinit() || !app.iface->init())
+  if (!app.iface->deinit() || !app.iface->init(app.pointerData, app.pointerDataSize))
   {
     DEBUG_ERROR("Failed to reinitialize the capture device");
     return false;
@@ -252,7 +297,7 @@ int app_main()
       continue;
     }
 
-    if (iface->init())
+    if (iface->init(app.pointerData, app.pointerDataSize))
       break;
 
     iface->free();
