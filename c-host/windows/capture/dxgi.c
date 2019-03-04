@@ -43,7 +43,6 @@ struct iface
   ID3D11Texture2D          * texture;
   D3D11_MAPPED_SUBRESOURCE   mapping;
   bool                       needsRelease;
-  bool                       needsUnmap;
   osEventHandle            * copyEvent;
   osEventHandle            * frameEvent;
   osEventHandle            * pointerEvent;
@@ -366,10 +365,10 @@ static bool dxgi_deinit()
 {
   assert(this);
 
-  if (this->needsUnmap)
+  if (this->mapping.pData)
   {
     ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture, 0);
-    this->needsUnmap = false;
+    this->mapping.pData = NULL;
   }
 
   if (this->texture)
@@ -494,10 +493,10 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
 
     // wait for the prior copy to finish in getFrame and unmap
     os_waitEvent(this->copyEvent);
-    if (this->needsUnmap)
+    if (this->mapping.pData)
     {
       ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture, 0);
-      this->needsUnmap = false;
+      this->mapping.pData = NULL;
     }
 
     // issue the copy from GPU to CPU RAM
@@ -512,7 +511,6 @@ static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate
       IDXGIResource_Release(res);
       return CAPTURE_RESULT_ERROR;
     }
-    this->needsUnmap = true;
 
     // signal that a frame is available
     os_signalEvent(this->frameEvent);
