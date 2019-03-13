@@ -120,6 +120,8 @@ struct AppParams
   bool         forceRenderer;
   unsigned int forceRendererIndex;
   RendererOpts rendererOpts[LG_RENDERER_COUNT];
+
+  char       * windowTitle;
 };
 
 struct AppState  state;
@@ -153,7 +155,8 @@ struct AppParams params =
   .grabKeyboard      = true,
   .captureKey        = SDL_SCANCODE_SCROLLLOCK,
   .disableAlerts     = false,
-  .forceRenderer     = false
+  .forceRenderer     = false,
+  .windowTitle       = "Looking Glass (Client)"
 };
 
 struct CBRequest
@@ -1035,7 +1038,7 @@ int run()
   }
 
   state.window = SDL_CreateWindow(
-    "Looking Glass (Client)",
+    params.windowTitle,
     params.center ? SDL_WINDOWPOS_CENTERED : params.x,
     params.center ? SDL_WINDOWPOS_CENTERED : params.y,
     params.w,
@@ -1366,6 +1369,7 @@ void doHelp(char * app)
     "  -m CODE    Specify the capture key [current: %u (%s)]\n"
     "             See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
     "  -q         Disable alert messages [current: %s]\n"
+    "  -t TITLE   Use a custom title for the main window\n"
     "\n"
     "  -l         License information\n"
     "\n",
@@ -1517,6 +1521,13 @@ static bool load_config(const char * configFile)
       }
       params.captureKey = (SDL_Scancode)itmp;
     }
+
+    if (config_setting_lookup_string(global, "windowTitle", &stmp))
+    {
+      free(params.windowTitle);
+      params.windowTitle = strdup(stmp);
+    }
+
   }
 
   config_setting_t * spice = config_lookup(&cfg, "spice");
@@ -1619,7 +1630,7 @@ int main(int argc, char * argv[])
 
   for(;;)
   {
-    switch(getopt(argc, argv, "hC:f:L:s:c:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:lq"))
+    switch(getopt(argc, argv, "hC:f:L:s:c:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:lqt:"))
     {
       case '?':
       case 'h':
@@ -1871,6 +1882,10 @@ int main(int argc, char * argv[])
 
       case 'q':
         params.disableAlerts = true;
+        continue;
+
+      case 't':
+        params.windowTitle = strdup(optarg);
         continue;
 
       case 'l':
