@@ -1602,8 +1602,9 @@ static bool load_config(const char * configFile)
 
 int main(int argc, char * argv[])
 {
-  params.shmFile   = strdup(params.shmFile  );
+  params.shmFile   = strdup(params.shmFile);
   params.spiceHost = strdup(params.spiceHost);
+  params.windowTitle = strdup(params.windowTitle);
 
   {
     // load any global then local config options first
@@ -1885,6 +1886,7 @@ int main(int argc, char * argv[])
         continue;
 
       case 't':
+        free(params.windowTitle);
         params.windowTitle = strdup(optarg);
         continue;
 
