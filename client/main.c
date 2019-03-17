@@ -1602,8 +1602,8 @@ static bool load_config(const char * configFile)
 
 int main(int argc, char * argv[])
 {
-  params.shmFile   = strdup(params.shmFile);
-  params.spiceHost = strdup(params.spiceHost);
+  params.shmFile     = strdup(params.shmFile    );
+  params.spiceHost   = strdup(params.spiceHost  );
   params.windowTitle = strdup(params.windowTitle);
 
   {
