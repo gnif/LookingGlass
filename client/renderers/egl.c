@@ -25,7 +25,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_egl.h>
+
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
 #include <wayland-egl.h>
+#endif
 
 #include "egl/model.h"
 #include "egl/shader.h"
@@ -304,6 +307,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
       break;
     }
 
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
     case SDL_SYSWM_WAYLAND:
     {
       int width, height;
@@ -312,6 +316,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
       this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(wminfo.info.wl.surface, width, height);
       break;
     }
+#endif
 
     default:
       DEBUG_ERROR("Unsupported subsystem");
