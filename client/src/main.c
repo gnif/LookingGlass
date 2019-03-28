@@ -1962,7 +1962,6 @@ int main(int argc, char * argv[])
     SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
   }
 
-  register_key_binds();
   const int ret = run();
   release_key_binds();
 
