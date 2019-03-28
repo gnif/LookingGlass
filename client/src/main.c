@@ -83,6 +83,8 @@ struct AppState
   uint64_t          renderTime;
   uint64_t          frameCount;
   uint64_t          renderCount;
+
+  KeybindHandle kbFS;
 };
 
 typedef struct RenderOpts
@@ -1000,6 +1002,22 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
   return true;
 }
 
+void toggle_fullscreen(SDL_Scancode key, void * opaque)
+{
+  SDL_SetWindowFullscreen(state.window, params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+  params.fullscreen = !params.fullscreen;
+}
+
+static void register_key_binds()
+{
+  state.kbFS = app_register_keybind(SDL_SCANCODE_F, toggle_fullscreen, NULL);
+}
+
+static void release_key_binds()
+{
+  app_release_keybind(&state.kbFS);
+}
+
 int run()
 {
   DEBUG_INFO("Looking Glass (" BUILD_VERSION ")");
@@ -1116,6 +1134,8 @@ int run()
 
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
+
+  register_key_binds();
 
   // set the compositor hint to bypass for low latency
   SDL_SysWMinfo wminfo;
@@ -1942,7 +1962,9 @@ int main(int argc, char * argv[])
     SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
   }
 
+  register_key_binds();
   const int ret = run();
+  release_key_binds();
 
   free(params.shmFile);
   free(params.spiceHost);
