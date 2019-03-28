@@ -23,7 +23,7 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>   | Toggle cursor screen capture |
 | <kbd>ScrLk</kbd>+<kbd>F</kbd> | Full Screen toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd> | Spice keyboard & mouse enable toggle |
-| <kbd>ScrLk</kbd>+<kbd>N</kbd> | Cycle through 4 brigtness levels (EGL renderer only!) |
+| <kbd>ScrLk</kbd>+<kbd>N</kbd> | Cycle through 4 brightness levels (EGL renderer only!) |
 
 # Help and support
 
