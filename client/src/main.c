@@ -50,6 +50,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct AppState
 {
   bool                 running;
+  bool                 ignoreInput;
   bool                 escapeActive;
   SDL_Scancode         escapeAction;
   KeybindHandle        bindings[SDL_NUM_SCANCODES];
@@ -85,6 +86,7 @@ struct AppState
   uint64_t          renderCount;
 
   KeybindHandle kbFS;
+  KeybindHandle kbInput;
 };
 
 typedef struct RenderOpts
@@ -744,6 +746,9 @@ int eventFilter(void * userdata, SDL_Event * event)
   {
     case SDL_MOUSEMOTION:
     {
+      if (state.ignoreInput)
+        break;
+
       if (
         !serverMode && (
           event->motion.x < state.dstRect.x                   ||
@@ -819,6 +824,9 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
       }
 
+      if (state.ignoreInput)
+        break;
+
       uint32_t scancode = mapScancode(sc);
       if (scancode == 0)
         break;
@@ -870,6 +878,9 @@ int eventFilter(void * userdata, SDL_Event * event)
         state.escapeActive = false;
       }
 
+      if (state.ignoreInput)
+        break;
+
       // avoid sending key up events when we didn't send a down
       if (!state.keyDown[sc])
         break;
@@ -889,6 +900,9 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
+      if (state.ignoreInput)
+        break;
+
       if (
         !spice_mouse_press  (event->wheel.y == 1 ? 4 : 5) ||
         !spice_mouse_release(event->wheel.y == 1 ? 4 : 5)
@@ -900,6 +914,9 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONDOWN:
+      if (state.ignoreInput)
+        break;
+
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
       if (event->button.button > 3)
         break;
@@ -914,6 +931,9 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONUP:
+      if (state.ignoreInput)
+        break;
+
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
       if (event->button.button > 3)
         break;
@@ -1002,20 +1022,27 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
   return true;
 }
 
-void toggle_fullscreen(SDL_Scancode key, void * opaque)
+static void toggle_fullscreen(SDL_Scancode key, void * opaque)
 {
   SDL_SetWindowFullscreen(state.window, params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
   params.fullscreen = !params.fullscreen;
 }
 
+static void toggle_input(SDL_Scancode key, void * opaque)
+{
+  state.ignoreInput = !state.ignoreInput;
+}
+
 static void register_key_binds()
 {
-  state.kbFS = app_register_keybind(SDL_SCANCODE_F, toggle_fullscreen, NULL);
+  state.kbFS    = app_register_keybind(SDL_SCANCODE_F, toggle_fullscreen, NULL);
+  state.kbInput = app_register_keybind(SDL_SCANCODE_I, toggle_input     , NULL);
 }
 
 static void release_key_binds()
 {
   app_release_keybind(&state.kbFS);
+  app_release_keybind(&state.kbInput);
 }
 
 int run()
