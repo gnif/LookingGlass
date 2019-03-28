@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #pragma once
 
-#include "lg-renderer.h"
+#include "renderer.h"
 
 #include <stdint.h>
 #include <stdbool.h>

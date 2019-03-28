@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
-#include "lg-clipboard.h"
+#include "interface/clipboard.h"
 
 extern const LG_Clipboard LGC_X11;
 

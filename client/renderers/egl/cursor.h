@@ -20,7 +20,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdbool.h>
-#include "lg-renderer.h"
+
+#include "interface/renderer.h"
 
 typedef struct EGL_Cursor EGL_Cursor;
 

@@ -18,16 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #pragma once
-#include "lg-renderer.h"
+#include "interface/font.h"
 
-extern const LG_Renderer LGR_EGL;
-extern const LG_Renderer LGR_OpenGL;
-
-const LG_Renderer * LG_Renderers[] =
-{
-  &LGR_EGL,
-  &LGR_OpenGL,
-  NULL // end of array sentinal
-};
-
-#define LG_RENDERER_COUNT ((sizeof(LG_Renderers) / sizeof(LG_Renderer *)) - 1)
+extern const LG_Font * LG_Fonts[];

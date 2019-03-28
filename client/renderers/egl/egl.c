@@ -17,7 +17,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "lg-renderer.h"
+#include "interface/renderer.h"
 
 #include "debug.h"
 #include "utils.h"
@@ -30,13 +30,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <wayland-egl.h>
 #endif
 
-#include "egl/model.h"
-#include "egl/shader.h"
-#include "egl/desktop.h"
-#include "egl/cursor.h"
-#include "egl/fps.h"
-#include "egl/splash.h"
-#include "egl/alert.h"
+#include "model.h"
+#include "shader.h"
+#include "desktop.h"
+#include "cursor.h"
+#include "fps.h"
+#include "splash.h"
+#include "alert.h"
 
 #define SPLASH_FADE_TIME 1000000
 #define ALERT_TIMEOUT    2000000

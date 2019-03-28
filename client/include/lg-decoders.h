@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #pragma once
-#include "lg-decoder.h"
+#include "interface/decoder.h"
 
 extern const LG_Decoder LGD_NULL;
 extern const LG_Decoder LGD_YUV420;

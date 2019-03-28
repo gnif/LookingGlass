@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdlib.h>
 #include <stdbool.h>
 
-#include "lg-font.h"
+#include "interface/font.h"
 #include "debug.h"
 
 #include <SDL2/SDL_ttf.h>
