@@ -39,10 +39,5 @@ foreach(clipboard ${CLIPBOARDS})
 endforeach()
 file(APPEND ${CLIPBOARD_C} "  NULL\n};\n\n")
 
-add_library(clipboards STATIC
-	${CLIPBOARD_C}
-)
-
-target_link_libraries(clipboards
-	${CLIPBOARDS_LINK}
-)
+add_library(clipboards STATIC ${CLIPBOARD_C})
+target_link_libraries(clipboards ${CLIPBOARDS_LINK})

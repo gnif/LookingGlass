@@ -37,10 +37,5 @@ foreach(font ${FONTS})
 endforeach()
 file(APPEND ${FONT_C} "  NULL\n};\n\n")
 
-add_library(fonts STATIC
-	${FONT_C}
-)
-
-target_link_libraries(fonts
-	${FONTS_LINK}
-)
+add_library(fonts STATIC ${FONT_C})
+target_link_libraries(fonts ${FONTS_LINK})

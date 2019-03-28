@@ -42,11 +42,5 @@ foreach(renderer ${RENDERERS})
 endforeach()
 file(APPEND ${RENDERER_C} "  NULL\n};")
 
-
-add_library(renderers STATIC
-	${RENDERER_C}
-)
-
-target_link_libraries(renderers
-	${RENDERERS_LINK}
-)
+add_library(renderers STATIC ${RENDERER_C})
+target_link_libraries(renderers ${RENDERERS_LINK})
