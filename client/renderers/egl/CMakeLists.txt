@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.6)
+cmake_minimum_required(VERSION 3.0)
 project(renderer_egl LANGUAGES C)
 
 find_package(PkgConfig)
