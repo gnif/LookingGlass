@@ -14,6 +14,19 @@ make_object(
 	shader/desktop.vert
 	shader/desktop_rgb.frag
 	shader/desktop_yuv.frag
+	shader/cursor.vert
+	shader/cursor_rgb.frag
+	shader/cursor_mono.frag
+	shader/fps.vert
+	shader/fps.frag
+	shader/fps_bg.frag
+	shader/alert.vert
+	shader/alert.frag
+	shader/alert_bg.frag
+	shader/splash_bg.vert
+	shader/splash_bg.frag
+	shader/splash_logo.vert
+	shader/splash_logo.frag
 )
 
 add_library(renderer_egl STATIC
