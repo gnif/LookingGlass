@@ -10,8 +10,8 @@ file(APPEND ${CLIPBOARD_H} "extern LG_Clipboard * LG_Clipboards[];\n\n")
 file(WRITE  ${CLIPBOARD_C} "#include \"interface/clipboard.h\"\n\n")
 file(APPEND ${CLIPBOARD_C} "#include <stddef.h>\n\n")
 
-set(CLIPBOARDS)
-set(CLIPBOARDS_LINK)
+set(CLIPBOARDS "_")
+set(CLIPBOARDS_LINK "_")
 function(add_clipboard name)
   set(CLIPBOARDS      "${CLIPBOARDS};${name}" PARENT_SCOPE)
   set(CLIPBOARDS_LINK "${CLIPBOARDS_LINK};clipboard_${name}" PARENT_SCOPE)
@@ -19,7 +19,9 @@ function(add_clipboard name)
 endfunction()
 
 # Add/remove clipboards here!
-add_clipboard(X11)
+if (ENABLE_CB_X11)
+  add_clipboard(X11)
+endif()
 
 list(REMOVE_AT CLIPBOARDS      0)
 list(REMOVE_AT CLIPBOARDS_LINK 0)

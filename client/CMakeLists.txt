@@ -14,6 +14,10 @@ if(OPTIMIZE_FOR_NATIVE)
   endif()
 endif()
 
+option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
+option(ENABLE_EGL    "Enable the EGL renderer"          ON)
+option(ENABLE_CB_X11 "Enable X11 clipboard integration" ON)
+
 add_compile_options(
   "-Wall"
   "-Werror"
