@@ -45,9 +45,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "dynamic/renderers.h"
 #include "dynamic/clipboards.h"
 
+#include "interface/app.h"
+
 struct AppState
 {
   bool                 running;
+  bool                 escapeActive;
+  SDL_Scancode         escapeAction;
+  KeybindHandle        bindings[SDL_NUM_SCANCODES];
   bool                 keyDown[SDL_NUM_SCANCODES];
 
   bool                 haveSrcSize;
@@ -114,7 +119,7 @@ struct AppParams
   bool         ignoreQuit;
   bool         allowScreensaver;
   bool         grabKeyboard;
-  SDL_Scancode captureKey;
+  SDL_Scancode escapeKey;
   bool         disableAlerts;
 
   bool         forceRenderer;
@@ -153,7 +158,7 @@ struct AppParams params =
   .ignoreQuit        = false,
   .allowScreensaver  = true,
   .grabKeyboard      = true,
-  .captureKey        = SDL_SCANCODE_SCROLLLOCK,
+  .escapeKey        = SDL_SCANCODE_SCROLLLOCK,
   .disableAlerts     = false,
   .forceRenderer     = false,
   .windowTitle       = "Looking Glass (Client)"
@@ -164,6 +169,13 @@ struct CBRequest
   SpiceDataType       type;
   LG_ClipboardReplyFn replyFn;
   void              * opaque;
+};
+
+struct KeybindHandle
+{
+  SDL_Scancode   key;
+  SuperEventFn   callback;
+  void         * opaque;
 };
 
 // forwards
@@ -792,27 +804,16 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (sc == params.captureKey)
+      if (sc == params.escapeKey)
       {
-        if (event->key.repeat)
-          break;
+        state.escapeActive = true;
+        state.escapeAction = sc;
+        break;
+      }
 
-        serverMode = !serverMode;
-        spice_mouse_mode(serverMode);
-        SDL_SetRelativeMouseMode(serverMode);
-        SDL_SetWindowGrab(state.window, serverMode);
-        DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
-
-        if (state.lgr && !params.disableAlerts)
-          state.lgr->on_alert(
-            state.lgrData,
-            serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-            serverMode ? "Capture Enabled" : "Capture Disabled",
-            NULL
-          );
-
-        if (!serverMode)
-          realignGuest = true;
+      if (state.escapeActive)
+      {
+        state.escapeAction = sc;
         break;
       }
 
@@ -836,8 +837,36 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_KEYUP:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (sc == params.captureKey)
-        break;
+      if (state.escapeActive)
+      {
+        if (state.escapeAction == params.escapeKey)
+        {
+          serverMode = !serverMode;
+          spice_mouse_mode(serverMode);
+          SDL_SetRelativeMouseMode(serverMode);
+          SDL_SetWindowGrab(state.window, serverMode);
+          DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
+
+          if (state.lgr && !params.disableAlerts)
+            state.lgr->on_alert(
+              state.lgrData,
+              serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+              serverMode ? "Capture Enabled" : "Capture Disabled",
+              NULL
+            );
+
+          if (!serverMode)
+            realignGuest = true;
+        }
+        else
+        {
+          KeybindHandle handle = state.bindings[sc];
+          if (handle)
+            handle->callback(sc, handle->opaque);
+        }
+
+        state.escapeActive = false;
+      }
 
       // avoid sending key up events when we didn't send a down
       if (!state.keyDown[sc])
@@ -1370,7 +1399,7 @@ void doHelp(char * app)
     "  -Q         Ignore requests to quit (ie: Alt+F4)\n"
     "  -S         Disable the screensaver\n"
     "  -G         Don't capture the keyboard in capture mode\n"
-    "  -m CODE    Specify the capture key [current: %u (%s)]\n"
+    "  -m CODE    Specify the escape key [current: %u (%s)]\n"
     "             See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
     "  -q         Disable alert messages [current: %s]\n"
     "  -t TITLE   Use a custom title for the main window\n"
@@ -1388,9 +1417,9 @@ void doHelp(char * app)
     params.center ? "center" : y,
     params.w,
     params.h,
-    params.captureKey,
+    params.escapeKey,
     params.disableAlerts ? "disabled" : "enabled",
-    SDL_GetScancodeName(params.captureKey)
+    SDL_GetScancodeName(params.escapeKey)
   );
 }
 
@@ -1515,7 +1544,7 @@ static bool load_config(const char * configFile)
       params.fpsLimit = (unsigned int)itmp;
     }
 
-    if (config_setting_lookup_int(global, "captureKey", &itmp))
+    if (config_setting_lookup_int(global, "escapeKey", &itmp))
     {
       if (itmp <= SDL_SCANCODE_UNKNOWN || itmp > SDL_SCANCODE_APP2)
       {
@@ -1523,7 +1552,7 @@ static bool load_config(const char * configFile)
         config_destroy(&cfg);
         return false;
       }
-      params.captureKey = (SDL_Scancode)itmp;
+      params.escapeKey = (SDL_Scancode)itmp;
     }
 
     if (config_setting_lookup_string(global, "windowTitle", &stmp))
@@ -1882,7 +1911,7 @@ int main(int argc, char * argv[])
         continue;
 
       case 'm':
-        params.captureKey = atoi(optarg);
+        params.escapeKey = atoi(optarg);
         continue;
 
       case 'q':
@@ -1926,4 +1955,32 @@ int main(int argc, char * argv[])
   }
 
   return ret;
+}
+
+KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void * opaque)
+{
+  // don't allow duplicate binds
+  if (state.bindings[key])
+  {
+    DEBUG_INFO("Key already bound");
+    return NULL;
+  }
+
+  KeybindHandle handle = (KeybindHandle)malloc(sizeof(struct KeybindHandle));
+  handle->key      = key;
+  handle->callback = callback;
+  handle->opaque   = opaque;
+
+  state.bindings[key] = handle;
+  return handle;
+}
+
+void app_release_keybind(KeybindHandle * handle)
+{
+  if (!handle)
+    return;
+
+  state.bindings[(*handle)->key] = NULL;
+  free(*handle);
+  *handle = NULL;
 }
