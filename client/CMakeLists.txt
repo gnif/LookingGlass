@@ -29,10 +29,7 @@ set(CMAKE_C_STANDARD       11)
 find_package(PkgConfig)
 pkg_check_modules(PKGCONFIG REQUIRED
 	sdl2
-	SDL2_ttf
-	fontconfig
 	x11
-	xfixes
 	libconfig
 )
 
@@ -68,18 +65,19 @@ set(SOURCES
 	src/lg-fonts.c
 	src/ll.c
 	src/utils.c
-	clipboard/x11.c
-	decoders/null.c
-	decoders/yuv420.c
-	fonts/sdl.c
 )
 
 add_subdirectory(spice)
 add_subdirectory(renderers)
+add_subdirectory(clipboard)
+add_subdirectory(fonts)
+add_subdirectory(decoders)
 
 add_executable(looking-glass-client ${SOURCES})
 target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
 	spice
 	renderers
+	clipboard
+	fonts
 )

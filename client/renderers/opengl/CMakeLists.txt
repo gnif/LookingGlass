@@ -13,6 +13,7 @@ add_library(renderer_opengl STATIC
 
 target_link_libraries(renderer_opengl
 	${RENDERER_OPENGL_PKGCONFIG_LIBRARIES}
+	decoders
 )
 
 target_include_directories(renderer_opengl
