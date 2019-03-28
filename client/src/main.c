@@ -737,16 +737,10 @@ int eventFilter(void * userdata, SDL_Event * event)
         state.lgc->wmevent(event->syswm.msg);
       return 0;
     }
-  }
 
-  if (!params.useSpiceInput)
-    return 0;
-
-  switch(event->type)
-  {
     case SDL_MOUSEMOTION:
     {
-      if (state.ignoreInput)
+      if (state.ignoreInput || !params.useSpiceInput)
         break;
 
       if (
@@ -824,7 +818,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
       }
 
-      if (state.ignoreInput)
+      if (state.ignoreInput || !params.useSpiceInput)
         break;
 
       uint32_t scancode = mapScancode(sc);
@@ -851,22 +845,25 @@ int eventFilter(void * userdata, SDL_Event * event)
       {
         if (state.escapeAction == params.escapeKey)
         {
-          serverMode = !serverMode;
-          spice_mouse_mode(serverMode);
-          SDL_SetRelativeMouseMode(serverMode);
-          SDL_SetWindowGrab(state.window, serverMode);
-          DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
+          if (params.useSpiceInput)
+          {
+            serverMode = !serverMode;
+            spice_mouse_mode(serverMode);
+            SDL_SetRelativeMouseMode(serverMode);
+            SDL_SetWindowGrab(state.window, serverMode);
+            DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
 
-          if (state.lgr && !params.disableAlerts)
-            state.lgr->on_alert(
-              state.lgrData,
-              serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-              serverMode ? "Capture Enabled" : "Capture Disabled",
-              NULL
-            );
+            if (state.lgr && !params.disableAlerts)
+              state.lgr->on_alert(
+                state.lgrData,
+                serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+                serverMode ? "Capture Enabled" : "Capture Disabled",
+                NULL
+              );
 
-          if (!serverMode)
-            realignGuest = true;
+            if (!serverMode)
+              realignGuest = true;
+          }
         }
         else
         {
@@ -878,7 +875,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         state.escapeActive = false;
       }
 
-      if (state.ignoreInput)
+      if (state.ignoreInput || !params.useSpiceInput)
         break;
 
       // avoid sending key up events when we didn't send a down
@@ -900,7 +897,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
-      if (state.ignoreInput)
+      if (state.ignoreInput || !params.useSpiceInput)
         break;
 
       if (
@@ -914,7 +911,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONDOWN:
-      if (state.ignoreInput)
+      if (state.ignoreInput || !params.useSpiceInput)
         break;
 
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
@@ -931,7 +928,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONUP:
-      if (state.ignoreInput)
+      if (state.ignoreInput || !params.useSpiceInput)
         break;
 
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
