@@ -37,7 +37,7 @@ pkg_check_modules(PKGCONFIG REQUIRED
 )
 
 execute_process(
-	COMMAND			git describe --always --long --dirty --abbrev=10 --tags
+	COMMAND			cat ../VERSION
 	WORKING_DIRECTORY	${PROJECT_SOURCE_DIR}
 	OUTPUT_VARIABLE		BUILD_VERSION
 	OUTPUT_STRIP_TRAILING_WHITESPACE

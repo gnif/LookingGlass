@@ -1,0 +1,7 @@
+#!/bin/bash
+
+(
+  git describe --always --long --abbrev=10 --tags | tr -d '\n'
+  echo -n '+1'
+) > VERSION
+git add VERSION
