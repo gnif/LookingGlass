@@ -5,6 +5,7 @@ find_package(PkgConfig)
 pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
 	egl
 	wayland-egl
+	gl
 )
 
 add_library(renderer_egl STATIC
