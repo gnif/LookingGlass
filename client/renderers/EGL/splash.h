@@ -21,12 +21,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
-#include "lg-fonts.h"
+typedef struct EGL_Splash EGL_Splash;
 
-typedef struct EGL_FPS EGL_FPS;
+bool egl_splash_init(EGL_Splash ** splash);
+void egl_splash_free(EGL_Splash ** splash);
 
-bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj);
-void egl_fps_free(EGL_FPS ** fps);
-
-void egl_fps_update(EGL_FPS * fps, const float avgUPS, const float avgFPS);
-void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY);
+void egl_splash_render(EGL_Splash * splash, float alpha, float scaleY);

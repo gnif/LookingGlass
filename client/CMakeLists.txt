@@ -48,6 +48,7 @@ add_definitions(-D GL_GLEXT_PROTOTYPES)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
+	${CMAKE_BINARY_DIR}/include
 	${PROJECT_SOURCE_DIR}/../common
 	${PKGCONFIG_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
@@ -62,14 +63,13 @@ link_libraries(
 set(SOURCES
 	src/main.c
 	src/lg-renderer.c
-	src/lg-fonts.c
 	src/ll.c
 	src/utils.c
 )
 
 add_subdirectory(spice)
 add_subdirectory(renderers)
-add_subdirectory(clipboard)
+add_subdirectory(clipboards)
 add_subdirectory(fonts)
 add_subdirectory(decoders)
 
@@ -78,6 +78,6 @@ target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
 	spice
 	renderers
-	clipboard
+	clipboards
 	fonts
 )

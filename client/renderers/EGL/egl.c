@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "debug.h"
 #include "utils.h"
-#include "lg-fonts.h"
+#include "dynamic/fonts.h"
 
 #include <SDL2/SDL_syswm.h>
 #include <SDL2/SDL_egl.h>

@@ -21,13 +21,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
-#include "lg-fonts.h"
+#include "interface/font.h"
 
-typedef struct EGL_Alert EGL_Alert;
+typedef struct EGL_FPS EGL_FPS;
 
-bool egl_alert_init(EGL_Alert ** alert, const LG_Font * font, LG_FontObj fontObj);
-void egl_alert_free(EGL_Alert ** alert);
+bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj);
+void egl_fps_free(EGL_FPS ** fps);
 
-void egl_alert_set_color(EGL_Alert * alert, const uint32_t color);
-void egl_alert_set_text (EGL_Alert * alert, const char * str);
-void egl_alert_render   (EGL_Alert * alert, const float scaleX, const float scaleY);
+void egl_fps_update(EGL_FPS * fps, const float avgUPS, const float avgFPS);
+void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY);

@@ -42,8 +42,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "kb.h"
 #include "ll.h"
 
-#include "lg-renderers.h"
-#include "lg-clipboards.h"
+#include "dynamic/renderers.h"
+#include "dynamic/clipboards.h"
 
 struct AppState
 {
@@ -1097,7 +1097,7 @@ int run()
         1
       );
 
-      state.lgc = &LGC_X11;
+      state.lgc = LG_Clipboards[0];
     }
   } else {
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());

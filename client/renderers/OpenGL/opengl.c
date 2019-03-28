@@ -33,7 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "utils.h"
 #include "lg-decoders.h"
-#include "lg-fonts.h"
+#include "dynamic/fonts.h"
 #include "ll.h"
 
 #define BUFFER_COUNT       2

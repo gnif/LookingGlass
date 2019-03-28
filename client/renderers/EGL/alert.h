@@ -18,16 +18,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #pragma once
-#include "interface/renderer.h"
 
-extern const LG_Renderer LGR_EGL;
-extern const LG_Renderer LGR_OpenGL;
+#include <stdbool.h>
 
-const LG_Renderer * LG_Renderers[] =
-{
-  &LGR_EGL,
-  &LGR_OpenGL,
-  NULL // end of array sentinal
-};
+#include "interface/font.h"
 
-#define LG_RENDERER_COUNT ((sizeof(LG_Renderers) / sizeof(LG_Renderer *)) - 1)
+typedef struct EGL_Alert EGL_Alert;
+
+bool egl_alert_init(EGL_Alert ** alert, const LG_Font * font, LG_FontObj fontObj);
+void egl_alert_free(EGL_Alert ** alert);
+
+void egl_alert_set_color(EGL_Alert * alert, const uint32_t color);
+void egl_alert_set_text (EGL_Alert * alert, const char * str);
+void egl_alert_render   (EGL_Alert * alert, const float scaleX, const float scaleY);

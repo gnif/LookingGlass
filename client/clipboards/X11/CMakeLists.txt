@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(clipboard LANGUAGES C)
+project(clipboard_X11 LANGUAGES C)
 
 find_package(PkgConfig)
 pkg_check_modules(CLIPBOARD_PKGCONFIG REQUIRED
@@ -7,15 +7,15 @@ pkg_check_modules(CLIPBOARD_PKGCONFIG REQUIRED
 	xfixes
 )
 
-add_library(clipboard STATIC
+add_library(clipboard_X11 STATIC
 	src/x11.c
 )
 
-target_link_libraries(clipboard
+target_link_libraries(clipboard_X11
 	${CLIPBOARD_PKGCONFIG_LIBRARIES}
 )
 
-target_include_directories(clipboard
+target_include_directories(clipboard_X11
 	PUBLIC
 		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 		$<INSTALL_INTERFACE:include>

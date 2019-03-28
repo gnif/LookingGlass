@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(renderer_egl LANGUAGES C)
+project(renderer_EGL LANGUAGES C)
 
 find_package(PkgConfig)
 pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
@@ -29,7 +29,7 @@ make_object(
 	shader/splash_logo.frag
 )
 
-add_library(renderer_egl STATIC
+add_library(renderer_EGL STATIC
 	egl.c
 	shader.c
 	texture.c
@@ -43,11 +43,12 @@ add_library(renderer_egl STATIC
 	${EGL_SHADER_OBJS}
 )
 
-target_link_libraries(renderer_egl
+target_link_libraries(renderer_EGL
 	${RENDERER_EGL_PKGCONFIG_LIBRARIES}
+	fonts
 )
 
-target_include_directories(renderer_egl
+target_include_directories(renderer_EGL
 	PRIVATE
 		src
 		${EGL_SHADER_INCS}

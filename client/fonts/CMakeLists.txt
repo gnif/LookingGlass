@@ -1,25 +1,46 @@
 cmake_minimum_required(VERSION 3.0)
 project(fonts LANGUAGES C)
 
-find_package(PkgConfig)
-pkg_check_modules(FONTS_PKGCONFIG REQUIRED
-	SDL2_ttf
-	fontconfig
-)
+set(FONT_H "${CMAKE_BINARY_DIR}/include/dynamic/fonts.h")
+set(FONT_C "${CMAKE_BINARY_DIR}/src/fonts.c")
+
+file(WRITE  ${FONT_H} "#include \"interface/font.h\"\n\n")
+file(APPEND ${FONT_H} "extern LG_Font * LG_Fonts[];\n\n")
+
+file(WRITE  ${FONT_C} "#include \"interface/font.h\"\n\n")
+file(APPEND ${FONT_C} "#include <stddef.h>\n\n")
+
+set(FONTS)
+set(FONTS_LINK)
+function(add_font name)
+  set(FONTS      "${FONTS};${name}" PARENT_SCOPE)
+  set(FONTS_LINK "${FONTS_LINK};font_${name}" PARENT_SCOPE)
+  add_subdirectory(${name})
+endfunction()
+
+# Add/remove fonts here!
+add_font(SDL)
+
+list(REMOVE_AT FONTS      0)
+list(REMOVE_AT FONTS_LINK 0)
+
+list(LENGTH FONTS FONT_COUNT)
+file(APPEND ${FONT_H} "#define LG_FONT_COUNT ${FONT_COUNT}\n")
+
+foreach(font ${FONTS})
+  file(APPEND ${FONT_C} "extern LG_Font LGF_${font};\n")
+endforeach()
+
+file(APPEND ${FONT_C} "\nconst LG_Font * LG_Fonts[] =\n{\n")
+foreach(font ${FONTS})
+  file(APPEND ${FONT_C} "  &LGF_${font},\n")
+endforeach()
+file(APPEND ${FONT_C} "  NULL\n};\n\n")
 
 add_library(fonts STATIC
-	src/sdl.c
+	${FONT_C}
 )
 
 target_link_libraries(fonts
-	${FONTS_PKGCONFIG_LIBRARIES}
-)
-
-target_include_directories(fonts
-	PUBLIC
-		$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-		$<INSTALL_INTERFACE:include>
-	PRIVATE
-		src
-		${FONTS_PKGCONFIG_INCLUDE_DIRS}
+	${FONTS_LINK}
 )
