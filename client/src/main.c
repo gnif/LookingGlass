@@ -166,6 +166,11 @@ struct CBRequest
   void              * opaque;
 };
 
+// forwards
+static int cursorThread(void * unused);
+static int renderThread(void * unused);
+static int frameThread (void * unused);
+
 static void updatePositionInfo()
 {
   if (state.haveSrcSize)
@@ -205,10 +210,18 @@ static void updatePositionInfo()
   state.lgrResize = true;
 }
 
-int renderThread(void * unused)
+static int renderThread(void * unused)
 {
   if (!state.lgr->render_startup(state.lgrData, state.window))
     return 1;
+
+  // start the cursor thread after render startup to prevent a race condition
+  SDL_Thread *t_cursor = NULL;
+  if (!(t_cursor = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
+  {
+    DEBUG_ERROR("cursor create thread failed");
+    return 1;
+  }
 
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
@@ -256,10 +269,12 @@ int renderThread(void * unused)
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
   }
 
+  state.running = false;
+  SDL_WaitThread(t_cursor, NULL);
   return 0;
 }
 
-int cursorThread(void * unused)
+static int cursorThread(void * unused)
 {
   KVMFRCursor         header;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
@@ -373,7 +388,7 @@ int cursorThread(void * unused)
   return 0;
 }
 
-int frameThread(void * unused)
+static int frameThread(void * unused)
 {
   bool       error = false;
   KVMFRFrame header;
@@ -1133,7 +1148,6 @@ int run()
   }
 
   SDL_Thread *t_spice  = NULL;
-  SDL_Thread *t_main   = NULL;
   SDL_Thread *t_frame  = NULL;
   SDL_Thread *t_render = NULL;
 
@@ -1214,13 +1228,6 @@ int run()
       break;
     }
 
-
-    if (!(t_main = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
-    {
-      DEBUG_ERROR("cursor create thread failed");
-      break;
-    }
-
     if (!(t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
     {
       DEBUG_ERROR("frame create thread failed");
@@ -1265,9 +1272,6 @@ int run()
 
   if (t_frame)
     SDL_WaitThread(t_frame, NULL);
-
-  if (t_main)
-    SDL_WaitThread(t_main, NULL);
 
   // if spice is still connected send key up events for any pressed keys
   if (params.useSpiceInput && spice_ready())
