@@ -3,6 +3,9 @@
 in  highp vec2 uv;
 out highp vec4 color;
 
+uniform int nv;
+uniform highp float nvGain;
+
 uniform sampler2D sampler1;
 uniform sampler2D sampler2;
 uniform sampler2D sampler3;
@@ -24,4 +27,6 @@ void main()
   );
   
   color = yuv * yuv_to_rgb;
+  if (nv == 1)
+    color *= nvGain;
 }
