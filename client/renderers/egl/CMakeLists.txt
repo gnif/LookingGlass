@@ -1,15 +1,14 @@
 cmake_minimum_required(VERSION 3.6)
 project(renderer_egl LANGUAGES C)
 
-include(GNUInstallDirs)
-include(MakeObject)
-
+find_package(PkgConfig)
 pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
 	egl
 	wayland-egl
 	gl
 )
 
+include(MakeObject)
 make_object(
 	EGL_SHADER
 	shader/desktop.vert
