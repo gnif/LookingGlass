@@ -5,6 +5,7 @@ set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
+include(FeatureSummary)
 
 option(OPTIMIZE_FOR_NATIVE "Build with -march=native" ON)
 if(OPTIMIZE_FOR_NATIVE)
@@ -15,8 +16,13 @@ if(OPTIMIZE_FOR_NATIVE)
 endif()
 
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
+add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
+
 option(ENABLE_EGL    "Enable the EGL renderer"          ON)
+add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
+
 option(ENABLE_CB_X11 "Enable X11 clipboard integration" ON)
+add_feature_info(ENABLE_CB_X11 ENABLE_CB_X11 "X11 Clipboard Integration.")
 
 add_compile_options(
   "-Wall"
@@ -85,3 +91,5 @@ target_link_libraries(looking-glass-client
 	clipboards
 	fonts
 )
+
+feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
