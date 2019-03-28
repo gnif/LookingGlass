@@ -19,6 +19,7 @@ By default Looking Glass uses the `Scroll Lock` key as the escape key for comman
 Below are a list of current key bindings:
 
 | Command | Description |
+|-|-|
 | <kbd>ScrLk</kbd>   | Toggle cursor screen capture |
 | <kbd>ScrLk</kbd>+<kbd>F</kbd> | Full Screen toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd> | Spice keyboard & mouse enable toggle |
