@@ -1,11 +1,20 @@
 cmake_minimum_required(VERSION 3.6)
 project(renderer_egl LANGUAGES C)
 
-find_package(PkgConfig)
+include(GNUInstallDirs)
+include(MakeObject)
+
 pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
 	egl
 	wayland-egl
 	gl
+)
+
+make_object(
+	EGL_SHADER
+	shader/desktop.vert
+	shader/desktop_rgb.frag
+	shader/desktop_yuv.frag
 )
 
 add_library(renderer_egl STATIC
@@ -19,6 +28,7 @@ add_library(renderer_egl STATIC
 	draw.c
 	splash.c
 	alert.c
+	${EGL_SHADER_OBJS}
 )
 
 target_link_libraries(renderer_egl
@@ -28,5 +38,6 @@ target_link_libraries(renderer_egl
 target_include_directories(renderer_egl
 	PRIVATE
 		src
+		${EGL_SHADER_INCS}
 		${RENDERER_EGL_PKGCONFIG_INCLUDE_DIRS}
 )
