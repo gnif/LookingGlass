@@ -131,7 +131,9 @@ void egl_desktop_toggle_nv(SDL_Scancode key, void * opaque)
   if (++desktop->nvGain == 4)
     desktop->nvGain = 0;
 
-  app_alert(LG_ALERT_INFO, "Screen Gain +%d", desktop->nvGain);
+       if (desktop->nvGain == 0) app_alert(LG_ALERT_INFO, "NV Disabled");
+  else if (desktop->nvGain == 1) app_alert(LG_ALERT_INFO, "NV Enabled");
+  else app_alert(LG_ALERT_INFO, "NV Gain + %d", desktop->nvGain - 1);
 }
 
 void egl_desktop_free(EGL_Desktop ** desktop)
@@ -240,7 +242,7 @@ void egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, con
   if (desktop->nvGain)
   {
     glUniform1i(desktop->uNV, 1);
-    glUniform1f(desktop->uNVGain, (float)(desktop->nvGain+1));
+    glUniform1f(desktop->uNVGain, (float)desktop->nvGain);
   }
   else
     glUniform1i(desktop->uNV, 0);
