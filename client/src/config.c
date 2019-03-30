@@ -337,6 +337,21 @@ bool config_load(int argc, char * argv[])
   return true;
 }
 
+void config_free()
+{
+  free(params.shmFile    );
+  free(params.spiceHost  );
+  free(params.windowTitle);
+
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+  {
+    RendererOpts * opts = &params.rendererOpts[i];
+    for(unsigned int j = 0; j < opts->argc; ++j)
+      free(opts->argv[j].value);
+    free(opts->argv);
+  }
+}
+
 static bool load(const char * configFile)
 {
   config_t cfg;

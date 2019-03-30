@@ -1303,15 +1303,6 @@ int main(int argc, char * argv[])
   const int ret = run();
   release_key_binds();
 
-  free(params.shmFile);
-  free(params.spiceHost);
-  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-  {
-    RendererOpts * opts = &params.rendererOpts[i];
-    for(unsigned int j = 0; j < opts->argc; ++j)
-      free(opts->argv[j].value);
-    free(opts->argv);
-  }
-
+  config_free();
   return ret;
 }
