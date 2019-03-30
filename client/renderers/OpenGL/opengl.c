@@ -377,7 +377,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   return true;
 }
 
-void opengl_on_alert(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag)
+void opengl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag)
 {
   struct Inst * this = (struct Inst *)opaque;
   struct Alert * a = malloc(sizeof(struct Alert));

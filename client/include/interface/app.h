@@ -21,8 +21,25 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <SDL2/SDL.h>
 
+typedef enum LG_MsgAlert
+{
+  LG_ALERT_INFO   ,
+  LG_ALERT_SUCCESS,
+  LG_ALERT_WARNING,
+  LG_ALERT_ERROR
+}
+LG_MsgAlert;
+
 typedef struct KeybindHandle * KeybindHandle;
 typedef void (*SuperEventFn)(SDL_Scancode key, void * opaque);
+
+/**
+ * Show an alert on screen
+ * @param type The alert type
+ * param  fmt  The alert message format
+ @ param  ...  formatted message values
+ */
+void app_alert(LG_MsgAlert type, const char * fmt, ...);
 
 /**
  * Register a handler for the <super>+<key> combination

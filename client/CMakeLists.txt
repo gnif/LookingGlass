@@ -72,6 +72,7 @@ link_libraries(
 
 set(SOURCES
 	src/main.c
+	src/app.c
 	src/lg-renderer.c
 	src/ll.c
 	src/utils.c

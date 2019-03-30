@@ -130,6 +130,8 @@ void egl_desktop_toggle_nv(SDL_Scancode key, void * opaque)
   EGL_Desktop * desktop = (EGL_Desktop *)opaque;
   if (++desktop->nvGain == 4)
     desktop->nvGain = 0;
+
+  app_alert(LG_ALERT_INFO, "Screen Gain +%d", desktop->nvGain);
 }
 
 void egl_desktop_free(EGL_Desktop ** desktop)

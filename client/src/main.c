@@ -17,9 +17,10 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#include "main.h"
+
 #include <getopt.h>
 #include <signal.h>
-#include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,100 +39,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "utils.h"
 #include "KVMFR.h"
-#include "spice/spice.h"
 #include "kb.h"
 #include "ll.h"
 
-#include "dynamic/renderers.h"
-#include "dynamic/clipboards.h"
-
-#include "interface/app.h"
-
-struct AppState
-{
-  bool                 running;
-  bool                 ignoreInput;
-  bool                 escapeActive;
-  SDL_Scancode         escapeAction;
-  KeybindHandle        bindings[SDL_NUM_SCANCODES];
-  bool                 keyDown[SDL_NUM_SCANCODES];
-
-  bool                 haveSrcSize;
-  int                  windowW, windowH;
-  SDL_Point            srcSize;
-  LG_RendererRect      dstRect;
-  SDL_Point            cursor;
-  bool                 cursorVisible;
-  bool                 haveCursorPos;
-  float                scaleX, scaleY;
-  float                accX, accY;
-
-  const LG_Renderer  * lgr;
-  void               * lgrData;
-  bool                 lgrResize;
-
-  const LG_Clipboard * lgc;
-  SpiceDataType        cbType;
-  struct ll          * cbRequestList;
-
-  SDL_Window         * window;
-  int                  shmFD;
-  struct KVMFRHeader * shm;
-  unsigned int         shmSize;
-
-  uint64_t          frameTime;
-  uint64_t          lastFrameTime;
-  uint64_t          renderTime;
-  uint64_t          frameCount;
-  uint64_t          renderCount;
-
-  KeybindHandle kbFS;
-  KeybindHandle kbInput;
-};
-
-typedef struct RenderOpts
-{
-  unsigned int          size;
-  unsigned int          argc;
-  LG_RendererOptValue * argv;
-}
-RendererOpts;
-
-struct AppParams
-{
-  const char * configFile;
-  bool         autoResize;
-  bool         allowResize;
-  bool         keepAspect;
-  bool         borderless;
-  bool         fullscreen;
-  bool         center;
-  int          x, y;
-  unsigned int w, h;
-  char       * shmFile;
-  unsigned int shmSize;
-  unsigned int fpsLimit;
-  bool         showFPS;
-  bool         useSpiceInput;
-  bool         useSpiceClipboard;
-  char       * spiceHost;
-  unsigned int spicePort;
-  bool         clipboardToVM;
-  bool         clipboardToLocal;
-  bool         scaleMouseInput;
-  bool         hideMouse;
-  bool         ignoreQuit;
-  bool         allowScreensaver;
-  bool         grabKeyboard;
-  SDL_Scancode escapeKey;
-  bool         disableAlerts;
-
-  bool         forceRenderer;
-  unsigned int forceRendererIndex;
-  RendererOpts rendererOpts[LG_RENDERER_COUNT];
-
-  char       * windowTitle;
-};
+// forwards
+static int cursorThread(void * unused);
+static int renderThread(void * unused);
+static int frameThread (void * unused);
 
 struct AppState  state;
 struct AppParams params =
@@ -162,30 +76,11 @@ struct AppParams params =
   .ignoreQuit        = false,
   .allowScreensaver  = true,
   .grabKeyboard      = true,
-  .escapeKey        = SDL_SCANCODE_SCROLLLOCK,
+  .escapeKey         = SDL_SCANCODE_SCROLLLOCK,
   .disableAlerts     = false,
   .forceRenderer     = false,
   .windowTitle       = "Looking Glass (Client)"
 };
-
-struct CBRequest
-{
-  SpiceDataType       type;
-  LG_ClipboardReplyFn replyFn;
-  void              * opaque;
-};
-
-struct KeybindHandle
-{
-  SDL_Scancode   key;
-  SuperEventFn   callback;
-  void         * opaque;
-};
-
-// forwards
-static int cursorThread(void * unused);
-static int renderThread(void * unused);
-static int frameThread (void * unused);
 
 static void updatePositionInfo()
 {
@@ -853,13 +748,10 @@ int eventFilter(void * userdata, SDL_Event * event)
             SDL_SetWindowGrab(state.window, serverMode);
             DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
 
-            if (state.lgr && !params.disableAlerts)
-              state.lgr->on_alert(
-                state.lgrData,
-                serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-                serverMode ? "Capture Enabled" : "Capture Disabled",
-                NULL
-              );
+            app_alert(
+              serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+              serverMode ? "Capture Enabled" : "Capture Disabled"
+            );
 
             if (!serverMode)
               realignGuest = true;
@@ -1028,6 +920,10 @@ static void toggle_fullscreen(SDL_Scancode key, void * opaque)
 static void toggle_input(SDL_Scancode key, void * opaque)
 {
   state.ignoreInput = !state.ignoreInput;
+  app_alert(
+    LG_ALERT_INFO,
+    state.ignoreInput ? "Input Disabled" : "Input Enabled"
+  );
 }
 
 static void register_key_binds()
@@ -1462,8 +1358,8 @@ void doHelp(char * app)
     params.w,
     params.h,
     params.escapeKey,
-    params.disableAlerts ? "disabled" : "enabled",
-    SDL_GetScancodeName(params.escapeKey)
+    SDL_GetScancodeName(params.escapeKey),
+    params.disableAlerts ? "disabled" : "enabled"
   );
 }
 
@@ -2000,32 +1896,4 @@ int main(int argc, char * argv[])
   }
 
   return ret;
-}
-
-KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void * opaque)
-{
-  // don't allow duplicate binds
-  if (state.bindings[key])
-  {
-    DEBUG_INFO("Key already bound");
-    return NULL;
-  }
-
-  KeybindHandle handle = (KeybindHandle)malloc(sizeof(struct KeybindHandle));
-  handle->key      = key;
-  handle->callback = callback;
-  handle->opaque   = opaque;
-
-  state.bindings[key] = handle;
-  return handle;
-}
-
-void app_release_keybind(KeybindHandle * handle)
-{
-  if (!handle)
-    return;
-
-  state.bindings[(*handle)->key] = NULL;
-  free(*handle);
-  *handle = NULL;
 }

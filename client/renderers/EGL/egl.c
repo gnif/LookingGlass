@@ -251,7 +251,7 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
   return true;
 }
 
-void egl_on_alert(void * opaque, const LG_RendererAlert alert, const char * message, bool ** closeFlag)
+void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag)
 {
   struct Inst * this = (struct Inst *)opaque;
 
