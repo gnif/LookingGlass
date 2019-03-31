@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+# see FEATURE AREAS in dpkg-buildflags(1)
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --parallel --buildsystem=cmake
+
+override_dh_auto_test:
+	@echo "No tests available."

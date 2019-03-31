@@ -1,0 +1,22 @@
+Source: looking-glass-client
+Section: devel
+Priority: optional
+Maintainer: Łukasz Kostka <lukasz.kostka@netng.pl>
+Build-Depends:
+ cmake,
+ libsdl2-dev,
+ libsdl2-ttf-dev,
+ nettle-dev,
+ libspice-protocol-dev,
+ libfontconfig1-dev,
+ libx11-dev,
+ fonts-freefont-ttf,
+ libconfig-dev,
+Standards-Version: 3.9.6
+Homepage: https://looking-glass.hostfission.com
+
+Package: looking-glass-client
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Provides: looking-glass-client
+Description: An extremely low latency KVMFR (KVM FrameRelay) implementation for guests with VGA PCI Passthrough.
