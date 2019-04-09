@@ -260,6 +260,7 @@ int app_main()
   uint8_t    * shmemMap  = NULL;
   int          exitcode  = 0;
 
+  DEBUG_INFO("Looking Glass Host (" BUILD_VERSION ")");
   DEBUG_INFO("IVSHMEM Size     : %u MiB", shmemSize / 1048576);
   if (!os_shmemMmap((void **)&shmemMap) || !shmemMap)
   {
