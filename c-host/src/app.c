@@ -17,7 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "app.h"
+#include "interface/platform.h"
+#include "interface/capture.h"
+#include "dynamic/capture.h"
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -26,7 +28,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include "debug.h"
 #include "locking.h"
-#include "capture/interfaces.h"
 #include "KVMFR.h"
 
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)

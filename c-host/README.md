@@ -25,10 +25,20 @@ Yes, but only when it is feature complete.
 
 # Why doesn't this use CMake?
 
-Because win-builds doesn't distribute it, so to make it easy for everyone to compile we do not require it.
+It does now...
+~~Because win-builds doesn't distribute it, so to make it easy for everyone to compile we do not require it.~~
 
 # How do I build it?
 
 Don't ask if you can't figure it out, this code is the very definition of experiemental and incomplete and should not be in use yet.
+
+Hint:
+
+```
+mkdir build
+cd build
+cmake -G "MSYS Makefiles" ..
+make
+```
 
 _-Geoff_

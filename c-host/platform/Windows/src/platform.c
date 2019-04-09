@@ -20,9 +20,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 #include <setupapi.h>
 
-#include "app.h"
+#include "interface/platform.h"
 #include "debug.h"
-#include "windebug.h"
+#include "windows/windebug.h"
 #include "ivshmem/Public.h"
 
 static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;

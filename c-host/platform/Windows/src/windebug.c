@@ -17,23 +17,26 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "interface.h"
+#include "windows/windebug.h"
+#include <stdio.h>
 
-#if defined(USE_DXGI)
-struct CaptureInterface Capture_DXGI;
-#endif
-
-#if defined(USE_XCB)
-struct CaptureInterface Capture_XCB;
-#endif
-
-struct CaptureInterface * CaptureInterfaces[] =
+void DebugWinError(const char * file, const unsigned int line, const char * function, const char * desc, HRESULT status)
 {
-#if defined(USE_DXGI)
-  &Capture_DXGI,
-#endif
-#if defined(USE_XCB)
-  &Capture_XCB,
-#endif
-  NULL
-};
+  char *buffer;
+  FormatMessageA(
+    FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER,
+    NULL,
+    status,
+    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+    (char*)&buffer,
+    1024,
+    NULL
+  );
+
+  for(size_t i = strlen(buffer) - 1; i > 0; --i)
+    if (buffer[i] == '\n' || buffer[i] == '\r')
+      buffer[i] = 0;
+
+  fprintf(stderr, "[E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", file, line, function, desc, (int)status, buffer);
+  LocalFree(buffer);
+}
