@@ -23,8 +23,7 @@ add_compile_options(
   "-ffunction-sections"
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
-set(CMAKE_EXE_LINKER FLAGS "-Wl,--gc-sections")
-set(CMAKE_C_STANDARD       11)
+set(CMAKE_C_STANDARD  11)
 
 execute_process(
 	COMMAND			cat ../VERSION
@@ -53,11 +52,15 @@ set(SOURCES
 
 add_subdirectory(platform)
 
-add_executable(looking-glass-host ${SOURCES})
+if(WIN32)
+  add_executable(looking-glass-host WIN32 ${SOURCES})
+else()
+  add_executable(looking-glass-host ${SOURCES})
+endif()
 target_link_libraries(looking-glass-host
 	platform
 )
-
+set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
 install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-host DESTINATION bin/ COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)

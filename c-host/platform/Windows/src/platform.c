@@ -99,7 +99,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
 
-#if 0
   // redirect stderr to a file
   {
     char tempPath[MAX_PATH+1];
@@ -110,7 +109,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     freopen(path, "a", stderr);
     free(path);
   }
-#endif
 
   // always flush stderr
   setbuf(stderr, NULL);
