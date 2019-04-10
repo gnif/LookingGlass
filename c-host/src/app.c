@@ -202,6 +202,7 @@ bool stopThreads()
   bool ok = true;
 
   app.running = false;
+  app.iface->stop();
 
   if (app.frameThread && !os_joinThread(app.frameThread, NULL))
   {
@@ -368,7 +369,6 @@ int app_main()
   }
 
 finish:
-  iface->stop();
   stopThreads();
 exit:
 
