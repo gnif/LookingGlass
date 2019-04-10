@@ -98,7 +98,6 @@ bool NvFBCToSysCreate(
 
   if (nvapi.createEx(&params) != NVFBC_SUCCESS)
   {
-    DEBUG_ERROR("Failed to create an instance of NvFBCToSys");
     *handle = NULL;
     return false;
   }
