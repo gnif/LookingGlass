@@ -85,13 +85,35 @@ static bool nvfbc_create()
   if (!NvFBCInit())
     return false;
 
-  this = (struct iface *)calloc(sizeof(struct iface), 1);
+  int       bufferLen   = GetEnvironmentVariable("NVFBC_PRIV_DATA", NULL, 0);
+  uint8_t * privData    = NULL;
+  int       privDataLen = 0;
 
-  if (!NvFBCToSysCreate(NULL, 0, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+  if(bufferLen)
   {
+    char * buffer = malloc(bufferLen);
+    GetEnvironmentVariable("NVFBC_PRIV_DATA", buffer, bufferLen);
+
+    privDataLen = (bufferLen - 1) / 2;
+    privData    = (uint8_t *)malloc(privDataLen);
+    char hex[3] = {0};
+    for(int i = 0; i < privDataLen; ++i)
+    {
+      memcpy(hex, &buffer[i*2], 2);
+      privData[i] = (uint8_t)strtoul(hex, NULL, 16);
+    }
+
+    free(buffer);
+  }
+
+  this = (struct iface *)calloc(sizeof(struct iface), 1);
+  if (!NvFBCToSysCreate(privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+  {
+    free(privData);
     nvfbc_free();
     return false;
   }
+  free(privData);
 
   this->frameEvent = os_createEvent(true);
   if (!this->frameEvent)
