@@ -5,7 +5,7 @@ add_library(capture_DXGI STATIC
 	src/dxgi.c
 )
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCOBJMACROS -DINITGUID")
+add_definitions("-DCOBJMACROS -DINITGUID")
 
 FIND_PROGRAM(DLLTOOL_EXECUTABLE NAMES "dlltool.exe" DOC "dlltool executable")
 ADD_CUSTOM_COMMAND(TARGET capture_DXGI POST_BUILD
