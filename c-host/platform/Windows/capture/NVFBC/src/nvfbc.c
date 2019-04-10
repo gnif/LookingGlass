@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "interface/platform.h"
 #include "debug.h"
+#include "windows/windebug.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -29,20 +30,20 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct iface
 {
-  bool         reinit;
-  NvFBCToSys * nvfbc;
+  bool        reinit;
+  NvFBCHandle nvfbc;
 
   void       * pointerShape;
   unsigned int pointerSize;
-  unsigned int width, height;
+  unsigned int maxWidth, maxHeight;
+  unsigned int width   , height;
 
   uint8_t * frameBuffer;
-  uint8_t * diffMap;
 
   NvFBCFrameGrabInfo grabInfo;
 
   osEventHandle * frameEvent;
-  osEventHandle * pointerEvent;
+  HANDLE          cursorEvent;
 };
 
 static struct iface * this = NULL;
@@ -75,7 +76,7 @@ static bool nvfbc_create()
 
   this = (struct iface *)calloc(sizeof(struct iface), 1);
 
-  if (!NvFBCToSysCreate(NULL, 0, &this->nvfbc))
+  if (!NvFBCToSysCreate(NULL, 0, &this->nvfbc, &this->maxWidth, &this->maxHeight))
   {
     nvfbc_free();
     return false;
@@ -85,14 +86,6 @@ static bool nvfbc_create()
   if (!this->frameEvent)
   {
     DEBUG_ERROR("failed to create the frame event");
-    nvfbc_free();
-    return false;
-  }
-
-  this->pointerEvent = os_createEvent(true);
-  if (!this->pointerEvent)
-  {
-    DEBUG_ERROR("failed to create the pointer event");
     nvfbc_free();
     return false;
   }
@@ -108,23 +101,23 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
 
   getDesktopSize(&this->width, &this->height);
   os_resetEvent(this->frameEvent);
-  os_resetEvent(this->pointerEvent);
 
   if (!NvFBCToSysSetup(
     this->nvfbc,
-    BUFFER_FMT_ARGB,
+    BUFFER_FMT_ARGB10,
+    false,
     true,
-    true,
-    DIFFMAP_BLOCKSIZE_128X128,
+    false,
+    0,
     (void **)&this->frameBuffer,
-    (void **)&this->diffMap
+    NULL,
+    &this->cursorEvent
   ))
   {
     return false;
   }
 
   Sleep(100);
-
   return true;
 }
 
@@ -140,9 +133,6 @@ static void nvfbc_free()
   if (this->frameEvent)
     os_freeEvent(this->frameEvent);
 
-  if (this->pointerEvent)
-    os_freeEvent(this->pointerEvent);
-
   free(this);
   this = NULL;
   NvFBCFree();
@@ -150,26 +140,12 @@ static void nvfbc_free()
 
 static unsigned int nvfbc_getMaxFrameSize()
 {
-  return this->width * this->height * 4;
+  return this->maxWidth * this->maxHeight * 4;
 }
 
 static CaptureResult nvfbc_capture()
 {
-  // check if the resolution has changed, if it has we need to re-init to avoid capturing
-  // black areas as NvFBC doesn't tell us about the change.
-  unsigned int width, height;
-  getDesktopSize(&width, &height);
-  if (this->width != width || this->height != height)
-  {
-    DEBUG_INFO("Resolution change detected");
-
-    this->reinit = true;
-    os_signalEvent(this->frameEvent  );
-    os_signalEvent(this->pointerEvent);
-
-    return CAPTURE_RESULT_REINIT;
-  }
-
+  getDesktopSize(&this->width, &this->height);
   NvFBCFrameGrabInfo grabInfo;
   CaptureResult result = NvFBCToSysCapture(
     this->nvfbc,
@@ -182,23 +158,6 @@ static CaptureResult nvfbc_capture()
 
   if (result != CAPTURE_RESULT_OK)
     return result;
-
-  // NvFBC doesn't tell us when a timeout occurs, so check the diff map
-  // to see if anything actually changed
-
-  const int dw = (grabInfo.dwWidth  + 0x7F) >> 7;
-  const int dh = (grabInfo.dwHeight + 0x7F) >> 7;
-  bool diff = false;
-  for(int y = 0; y < dh && !diff; ++y)
-    for(int x = 0; x < dw; ++x)
-      if (this->diffMap[y * dw + x])
-      {
-        diff = true;
-        break;
-      }
-
-  if (!diff)
-    return CAPTURE_RESULT_TIMEOUT;
 
   memcpy(&this->grabInfo, &grabInfo, sizeof(grabInfo));
   os_signalEvent(this->frameEvent);
@@ -220,24 +179,53 @@ static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
   frame->height = this->grabInfo.dwHeight;
   frame->pitch  = this->grabInfo.dwBufferWidth * 4;
   frame->stride = this->grabInfo.dwBufferWidth;
-  frame->format = CAPTURE_FMT_BGRA;
 
+  // the bIsHDR check isn't reliable, if it's not set check a few pixels to see if
+  // the alpha channel has data in it. If not HDR the alpha channel should read zeros
+  this->grabInfo.bIsHDR =
+    this->grabInfo.bIsHDR ||
+    (this->frameBuffer[3] != 0)                                                                  || // top left
+    (this->frameBuffer[(((frame->height * frame->stride) / 2) + frame->width / 2) * 4 + 3] != 0) || // center
+    (this->frameBuffer[(((frame->height - 1) * frame->stride) + frame->width - 1) * 4 + 3] != 0);   // bottom right
+
+  frame->format = this->grabInfo.bIsHDR ? CAPTURE_FMT_RGBA10 : CAPTURE_FMT_BGRA;
   memcpy(frame->data, this->frameBuffer, frame->pitch * frame->height);
   return CAPTURE_RESULT_OK;
 }
 
 static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 {
-  if (!os_waitEvent(this->pointerEvent, TIMEOUT_INFINITE))
+  while(true)
   {
-    DEBUG_ERROR("Failed to wait on the pointer event");
+    bool sig = false;
+    switch(WaitForSingleObject((HANDLE)this->cursorEvent, INFINITE))
+    {
+      case WAIT_OBJECT_0:
+        sig = true;
+        break;
+
+      case WAIT_ABANDONED:
+        continue;
+
+      case WAIT_TIMEOUT:
+        continue;
+
+      case WAIT_FAILED:
+        DEBUG_WINERROR("Wait for cursor event failed", GetLastError());
+        return CAPTURE_RESULT_ERROR;
+    }
+
+    if (sig)
+      break;
+
+    DEBUG_ERROR("Unknown wait event return code");
     return CAPTURE_RESULT_ERROR;
   }
 
   if (this->reinit)
     return CAPTURE_RESULT_REINIT;
 
-  return CAPTURE_RESULT_ERROR;
+  return NvFBCToSysGetCursor(this->nvfbc, pointer, this->pointerShape, this->pointerSize);
 }
 
 struct CaptureInterface Capture_NVFBC =

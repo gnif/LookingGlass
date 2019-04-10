@@ -36,7 +36,6 @@ typedef enum CaptureFormat
   // frame formats
   CAPTURE_FMT_BGRA  ,
   CAPTURE_FMT_RGBA  ,
-  CAPTURE_FMT_ARGB  ,
   CAPTURE_FMT_RGBA10,
   CAPTURE_FMT_YUV420,
 

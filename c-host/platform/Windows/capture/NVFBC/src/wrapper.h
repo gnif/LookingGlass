@@ -20,17 +20,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <NvFBC/nvFBC.h>
 
-#ifndef __cplusplus
-typedef void * NvFBCToSys;
-#else
-#include <NvFBC/nvFBCToSys.h>
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include "interface/capture.h"
+
+typedef struct stNvFBCHandle * NvFBCHandle;
 
 enum BufferFormat
 {
@@ -54,28 +50,38 @@ enum DiffMapBlockSize
 bool NvFBCInit();
 void NvFBCFree();
 
-bool NvFBCToSysCreate(void * privData, unsigned int privDataSize, NvFBCToSys ** nvfbc);
-void NvFBCToSysRelease(NvFBCToSys ** nvfbc);
+bool NvFBCToSysCreate(
+  void         * privData,
+  unsigned int   privDataSize,
+  NvFBCHandle  * handle,
+  unsigned int * maxWidth,
+  unsigned int * maxHeight
+);
+void NvFBCToSysRelease(NvFBCHandle * handle);
 
 bool NvFBCToSysSetup(
-  NvFBCToSys          * nvfbc,
+  NvFBCHandle           handle,
   enum                  BufferFormat format,
   bool                  hwCursor,
+  bool                  seperateCursorCapture,
   bool                  useDiffMap,
   enum DiffMapBlockSize diffMapBlockSize,
-  void **               frameBuffer,
-  void **               diffMap
+  void               ** frameBuffer,
+  void               ** diffMap,
+  HANDLE              * cursorEvent
 );
 
 CaptureResult NvFBCToSysCapture(
-  NvFBCToSys * nvfbc,
-  const unsigned int waitTime,
-  const unsigned int x,
-  const unsigned int y,
-  const unsigned int width,
-  const unsigned int height,
+  NvFBCHandle          handle,
+  const unsigned int   waitTime,
+  const unsigned int   x,
+  const unsigned int   y,
+  const unsigned int   width,
+  const unsigned int   height,
   NvFBCFrameGrabInfo * grabInfo
 );
+
+CaptureResult NvFBCToSysGetCursor(NvFBCHandle handle, CapturePointer * pointer, void * buffer, unsigned int size);
 
 #ifdef __cplusplus
 }

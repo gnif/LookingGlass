@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include "windows/windebug.h"
 #include <windows.h>
+#include <NvFBC/nvFBCToSys.h>
 
 #ifdef _WIN64
 #define NVFBC_DLL "NvFBC64.dll"
@@ -37,6 +38,13 @@ struct NVAPI
   NvFBC_SetGlobalFlagsType      setGlobalFlags;
   NvFBC_GetStatusExFunctionType getStatusEx;
   NvFBC_EnableFunctionType      enable;
+};
+
+struct stNvFBCHandle
+{
+  NvFBCToSys * nvfbc;
+  HANDLE       cursorEvent;
+  int          retry;
 };
 
 static NVAPI nvapi;
@@ -71,7 +79,13 @@ void NvFBCFree()
   nvapi.initialized = false;
 }
 
-bool NvFBCToSysCreate(void * privData, unsigned int privDataSize, NvFBCToSys ** nvfbc)
+bool NvFBCToSysCreate(
+  void         * privData,
+  unsigned int   privDataSize,
+  NvFBCHandle  * handle,
+  unsigned int * maxWidth,
+  unsigned int * maxHeight
+)
 {
   NvFBCCreateParams params = {0};
 
@@ -85,31 +99,42 @@ bool NvFBCToSysCreate(void * privData, unsigned int privDataSize, NvFBCToSys ** 
   if (nvapi.createEx(&params) != NVFBC_SUCCESS)
   {
     DEBUG_ERROR("Failed to create an instance of NvFBCToSys");
-    *nvfbc = NULL;
+    *handle = NULL;
     return false;
   }
 
-  *nvfbc = static_cast<NvFBCToSys *>(params.pNvFBC);
+  *handle = (NvFBCHandle)calloc(sizeof(struct stNvFBCHandle), 1);
+  (*handle)->nvfbc = static_cast<NvFBCToSys *>(params.pNvFBC);
+
+  if (maxWidth)
+    *maxWidth = params.dwMaxDisplayWidth;
+
+  if (maxHeight)
+    *maxHeight = params.dwMaxDisplayHeight;
+
   return true;
 }
 
-void NvFBCToSysRelease(NvFBCToSys ** nvfbc)
+void NvFBCToSysRelease(NvFBCHandle * handle)
 {
-  if (!*nvfbc)
+  if (!*handle)
     return;
 
-  (*nvfbc)->NvFBCToSysRelease();
-  (*nvfbc) = NULL;
+  (*handle)->nvfbc->NvFBCToSysRelease();
+  free(*handle);
+  *handle = NULL;
 }
 
 bool NvFBCToSysSetup(
-  NvFBCToSys          * nvfbc,
+  NvFBCHandle           handle,
   enum                  BufferFormat format,
   bool                  hwCursor,
+  bool                  seperateCursorCapture,
   bool                  useDiffMap,
   enum DiffMapBlockSize diffMapBlockSize,
-  void **               frameBuffer,
-  void **               diffMap
+  void               ** frameBuffer,
+  void               ** diffMap,
+  HANDLE              * cursorEvent
 )
 {
   NVFBC_TOSYS_SETUP_PARAMS params = {0};
@@ -123,15 +148,19 @@ bool NvFBCToSysSetup(
     case BUFFER_FMT_RGB_PLANAR: params.eMode = NVFBC_TOSYS_RGB_PLANAR; break;
     case BUFFER_FMT_XOR       : params.eMode = NVFBC_TOSYS_XOR       ; break;
     case BUFFER_FMT_YUV444p   : params.eMode = NVFBC_TOSYS_YUV444p   ; break;
-    case BUFFER_FMT_ARGB10    : params.eMode = NVFBC_TOSYS_ARGB10    ; break;
+    case BUFFER_FMT_ARGB10    :
+      params.eMode       = NVFBC_TOSYS_ARGB10;
+      params.bHDRRequest = TRUE;
+      break;
 
     default:
       DEBUG_INFO("Invalid format");
       return false;
   }
 
-  params.bWithHWCursor = hwCursor   ? TRUE : FALSE;
-  params.bDiffMap      = useDiffMap ? TRUE : FALSE;
+  params.bWithHWCursor                = hwCursor              ? TRUE : FALSE;
+  params.bEnableSeparateCursorCapture = seperateCursorCapture ? TRUE : FALSE;
+  params.bDiffMap                     = useDiffMap            ? TRUE : FALSE;
 
   switch(diffMapBlockSize)
   {
@@ -148,16 +177,26 @@ bool NvFBCToSysSetup(
   params.ppBuffer  = frameBuffer;
   params.ppDiffMap = diffMap;
 
-  return nvfbc->NvFBCToSysSetUp(&params) == NVFBC_SUCCESS;
+  NVFBCRESULT status = handle->nvfbc->NvFBCToSysSetUp(&params);
+  if (status != NVFBC_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to setup NVFBCToSys");
+    return false;
+  }
+
+  if (cursorEvent)
+    *cursorEvent = params.hCursorCaptureEvent;
+
+  return true;
 }
 
 CaptureResult NvFBCToSysCapture(
-  NvFBCToSys * nvfbc,
-  const unsigned int waitTime,
-  const unsigned int x,
-  const unsigned int y,
-  const unsigned int width,
-  const unsigned int height,
+  NvFBCHandle          handle,
+  const unsigned int   waitTime,
+  const unsigned int   x,
+  const unsigned int   y,
+  const unsigned int   width,
+  const unsigned int   height,
   NvFBCFrameGrabInfo * grabInfo
 )
 {
@@ -173,11 +212,28 @@ CaptureResult NvFBCToSysCapture(
   params.dwTargetHeight      = height;
   params.pNvFBCFrameGrabInfo = grabInfo;
 
-  NVFBCRESULT status = nvfbc->NvFBCToSysGrabFrame(&params);
+  grabInfo->bMustRecreate = FALSE;
+  NVFBCRESULT status = handle->nvfbc->NvFBCToSysGrabFrame(&params);
+  if (grabInfo->bMustRecreate)
+  {
+    DEBUG_INFO("NvFBC reported recreation is required");
+    return CAPTURE_RESULT_REINIT;
+  }
+
   switch(status)
   {
     case NVFBC_SUCCESS:
+      handle->retry = 0;
       break;
+
+    case NVFBC_ERROR_INVALID_PARAM:
+      if (handle->retry < 2)
+      {
+        Sleep(100);
+        ++handle->retry;
+        return CAPTURE_RESULT_TIMEOUT;
+      }
+      return CAPTURE_RESULT_ERROR;
 
     case NVFBC_ERROR_DYNAMIC_DISABLE:
       DEBUG_ERROR("NvFBC was disabled by someone else");
@@ -192,5 +248,57 @@ CaptureResult NvFBCToSysCapture(
       return CAPTURE_RESULT_ERROR;
   }
 
+  return CAPTURE_RESULT_OK;
+}
+
+CaptureResult NvFBCToSysGetCursor(NvFBCHandle handle, CapturePointer * pointer, void * buffer, unsigned int size)
+{
+  NVFBC_CURSOR_CAPTURE_PARAMS params;
+  params.dwVersion = NVFBC_CURSOR_CAPTURE_PARAMS_VER;
+
+  if (handle->nvfbc->NvFBCToSysCursorCapture(&params) != NVFBC_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get the cursor");
+    return CAPTURE_RESULT_ERROR;
+  }
+
+  pointer->x           = params.dwXHotSpot;
+  pointer->y           = params.dwYHotSpot;
+  pointer->width       = params.dwWidth;
+  pointer->height      = params.dwHeight;
+  pointer->pitch       = params.dwPitch;
+  pointer->visible     = params.bIsHwCursor;
+  pointer->shapeUpdate = params.bIsHwCursor;
+
+  if (!params.bIsHwCursor)
+    return CAPTURE_RESULT_OK;
+
+  switch(params.dwPointerFlags & 0x7)
+  {
+    case 0x1:
+      pointer->format  = CAPTURE_FMT_MONO;
+      pointer->height *= 2;
+      break;
+
+    case 0x2:
+      pointer->format = CAPTURE_FMT_COLOR;
+      break;
+
+    case 0x4:
+      pointer->format = CAPTURE_FMT_MASKED;
+      break;
+
+    default:
+      DEBUG_ERROR("Invalid/unknown pointer data format");
+      return CAPTURE_RESULT_ERROR;
+  }
+
+  if (params.dwBufferSize > size)
+  {
+    DEBUG_WARN("Cursor data larger then provided buffer");
+    params.dwBufferSize = size;
+  }
+
+  memcpy(buffer, params.pBits, params.dwBufferSize);
   return CAPTURE_RESULT_OK;
 }
