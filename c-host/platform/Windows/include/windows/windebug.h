@@ -22,6 +22,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "debug.h"
 #include <windows.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void DebugWinError(const char * file, const unsigned int line, const char * function, const char * desc, HRESULT status);
 
 #define DEBUG_WINERROR(x, y) DebugWinError(STRIPPATH(__FILE__), __LINE__, __FUNCTION__, x, y)
+
+#ifdef __cplusplus
+}
+#endif

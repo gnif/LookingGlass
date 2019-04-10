@@ -3,7 +3,24 @@ project(capture LANGUAGES C)
 
 include("PreCapture")
 
-add_capture("DXGI")
+if(NOT DEFINED NVFBC_SDK)
+  set(NVFBC_SDK "C:\\Program Files (x86)\\NVIDIA Corporation\\NVIDIA Capture SDK")
+endif()
+  
+if(EXISTS "${NVFBC_SDK}\\inc" AND IS_DIRECTORY "${NVFBC_SDK}\\inc")
+  set(USE_NVFBC ON)
+endif()
+
+option(USE_NVFBC "Enable NVFBC Support" ${USE_NVFBC})
+option(USE_DXGI  "Enable DXGI Support" ON)
+
+if(USE_NVFBC)
+  add_capture("NVFBC")
+endif()
+
+if(USE_DXGI)
+  add_capture("DXGI")
+endif()
 
 include("PostCapture")
 
