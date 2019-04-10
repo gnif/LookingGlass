@@ -368,6 +368,7 @@ int app_main()
   }
 
 finish:
+  iface->stop();
   stopThreads();
 exit:
 

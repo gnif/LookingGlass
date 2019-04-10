@@ -12,3 +12,7 @@ target_include_directories(capture_NVFBC
 	PRIVATE
 		src
 )
+
+target_link_libraries(capture_NVFBC
+	platform_Windows
+)

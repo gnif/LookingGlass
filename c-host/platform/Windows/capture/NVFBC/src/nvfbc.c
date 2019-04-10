@@ -19,8 +19,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/capture.h"
 #include "interface/platform.h"
-#include "debug.h"
+#include "windows/platform.h"
 #include "windows/windebug.h"
+#include "windows/mousehook.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -30,7 +31,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct iface
 {
-  bool        reinit;
+  bool        stop;
   NvFBCHandle nvfbc;
 
   void       * pointerShape;
@@ -43,7 +44,10 @@ struct iface
   NvFBCFrameGrabInfo grabInfo;
 
   osEventHandle * frameEvent;
-  HANDLE          cursorEvent;
+  osEventHandle * cursorEvents[2];
+
+  int mouseX, mouseY, mouseHotX, mouseHotY;
+  bool mouseVisible;
 };
 
 static struct iface * this = NULL;
@@ -62,6 +66,13 @@ static void getDesktopSize(unsigned int * width, unsigned int * height)
 
   *width  = monitorInfo.rcMonitor.right  - monitorInfo.rcMonitor.left;
   *height = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+}
+
+static void on_mouseMove(int x, int y)
+{
+  this->mouseX = x;
+  this->mouseY = y;
+  os_signalEvent(this->cursorEvents[1]);
 }
 
 static const char * nvfbc_getName()
@@ -95,13 +106,14 @@ static bool nvfbc_create()
 
 static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
 {
-  this->reinit       = false;
+  this->stop     = false;
   this->pointerShape = pointerShape;
   this->pointerSize  = pointerSize;
 
   getDesktopSize(&this->width, &this->height);
   os_resetEvent(this->frameEvent);
 
+  HANDLE event;
   if (!NvFBCToSysSetup(
     this->nvfbc,
     BUFFER_FMT_ARGB10,
@@ -111,18 +123,30 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
     0,
     (void **)&this->frameBuffer,
     NULL,
-    &this->cursorEvent
+    &event
   ))
   {
     return false;
   }
 
+  this->cursorEvents[0] = os_wrapEvent(event);
+  this->cursorEvents[1] = os_createEvent(true);
+  mouseHook_install(on_mouseMove);
+
   Sleep(100);
   return true;
 }
 
+static void nvfbc_stop()
+{
+  this->stop = true;
+  os_signalEvent(this->cursorEvents[1]);
+  os_signalEvent(this->frameEvent);
+}
+
 static bool nvfbc_deinit()
 {
+  mouseHook_remove();
   return true;
 }
 
@@ -172,7 +196,7 @@ static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
     return CAPTURE_RESULT_ERROR;
   }
 
-  if (this->reinit)
+  if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
   frame->width  = this->grabInfo.dwWidth;
@@ -195,37 +219,33 @@ static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
 
 static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 {
-  while(true)
+  osEventHandle * events[2];
+  memcpy(&events, &this->cursorEvents, sizeof(osEventHandle *) * 2);
+  if (!os_waitEvents(events, 2, false, TIMEOUT_INFINITE))
   {
-    bool sig = false;
-    switch(WaitForSingleObject((HANDLE)this->cursorEvent, INFINITE))
-    {
-      case WAIT_OBJECT_0:
-        sig = true;
-        break;
-
-      case WAIT_ABANDONED:
-        continue;
-
-      case WAIT_TIMEOUT:
-        continue;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for cursor event failed", GetLastError());
-        return CAPTURE_RESULT_ERROR;
-    }
-
-    if (sig)
-      break;
-
-    DEBUG_ERROR("Unknown wait event return code");
+    DEBUG_ERROR("Failed to wait on the cursor events");
     return CAPTURE_RESULT_ERROR;
   }
 
-  if (this->reinit)
+  if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
-  return NvFBCToSysGetCursor(this->nvfbc, pointer, this->pointerShape, this->pointerSize);
+  CaptureResult result;
+  pointer->shapeUpdate = false;
+  if (events[0])
+  {
+    result = NvFBCToSysGetCursor(this->nvfbc, pointer, this->pointerShape, this->pointerSize);
+    this->mouseVisible = pointer->visible;
+    this->mouseHotX    = pointer->x;
+    this->mouseHotY    = pointer->y;
+    if (result != CAPTURE_RESULT_OK)
+      return result;
+  }
+
+  pointer->visible = this->mouseVisible;
+  pointer->x       = this->mouseX - this->mouseHotX;
+  pointer->y       = this->mouseY - this->mouseHotY;
+  return CAPTURE_RESULT_OK;
 }
 
 struct CaptureInterface Capture_NVFBC =
@@ -233,6 +253,7 @@ struct CaptureInterface Capture_NVFBC =
   .getName         = nvfbc_getName,
   .create          = nvfbc_create,
   .init            = nvfbc_init,
+  .stop            = nvfbc_stop,
   .deinit          = nvfbc_deinit,
   .free            = nvfbc_free,
   .getMaxFrameSize = nvfbc_getMaxFrameSize,

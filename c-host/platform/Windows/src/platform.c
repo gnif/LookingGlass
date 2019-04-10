@@ -17,6 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#include "platform.h"
+#include "windows/platform.h"
+#include "windows/mousehook.h"
 #include <windows.h>
 #include <setupapi.h>
 
@@ -37,6 +40,7 @@ struct osThreadHandle
   void             * opaque;
   HANDLE             handle;
   DWORD              threadID;
+
   int                resultCode;
 };
 
@@ -45,12 +49,19 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   switch(msg)
   {
     case WM_CLOSE:
+      mouseHook_remove();
       DestroyWindow(hwnd);
       break;
 
     case WM_DESTROY:
       PostQuitMessage(0);
       break;
+
+    case WM_CALL_FUNCTION:
+    {
+      struct MSG_CALL_FUNCTION * cf = (struct MSG_CALL_FUNCTION *)lParam;
+      return cf->fn(cf->wParam, cf->lParam);
+    }
 
     default:
       return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -63,6 +74,22 @@ static int appThread(void * opaque)
   int result = app_main();
   SendMessage(messageWnd, WM_CLOSE, 0, 0);
   return result;
+}
+
+LRESULT sendAppMessage(UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+  return SendMessage(messageWnd, Msg, wParam, lParam);
+}
+
+static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
+{
+  if (dwCtrlType == CTRL_C_EVENT)
+  {
+    SendMessage(messageWnd, WM_CLOSE, 0, 0);
+    return TRUE;
+  }
+
+  return FALSE;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
@@ -139,6 +166,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   free(infData);
   SetupDiDestroyDeviceInfoList(deviceInfoSet);
 
+  // setup a handler for ctrl+c
+  SetConsoleCtrlHandler(CtrlHandler, TRUE);
+
   // create a message window so that our message pump works
   WNDCLASSEX wx    = {};
   wx.cbSize        = sizeof(WNDCLASSEX);
@@ -169,6 +199,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
+      continue;
     }
     else if (bRet < 0)
     {
@@ -312,6 +343,11 @@ osEventHandle * os_createEvent(bool autoReset)
   return (osEventHandle*)event;
 }
 
+osEventHandle * os_wrapEvent(HANDLE event)
+{
+  return (osEventHandle*)event;
+}
+
 void os_freeEvent(osEventHandle * handle)
 {
   CloseHandle((HANDLE)handle);
@@ -330,6 +366,42 @@ bool os_waitEvent(osEventHandle * handle, unsigned int timeout)
       case WAIT_ABANDONED:
         continue;
 
+      case WAIT_TIMEOUT:
+        if (timeout == TIMEOUT_INFINITE)
+          continue;
+
+        return false;
+
+      case WAIT_FAILED:
+        DEBUG_WINERROR("Wait for event failed", GetLastError());
+        return false;
+    }
+
+    DEBUG_ERROR("Unknown wait event return code");
+    return false;
+  }
+}
+
+bool os_waitEvents(osEventHandle * handles[], int count, bool waitAll, unsigned int timeout)
+{
+  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
+  while(true)
+  {
+    DWORD result = WaitForMultipleObjects(count, (HANDLE*)handles, waitAll, to);
+    if (result >= WAIT_OBJECT_0 && result < count)
+    {
+      // null non signalled events from the handle list
+      for(int i = 0; i < count; ++i)
+        if (i != result && !os_waitEvent(handles[i], 0))
+          handles[i] = NULL;
+      return true;
+    }
+
+    if (result >= WAIT_ABANDONED_0 && result - WAIT_ABANDONED_0 < count)
+      continue;
+
+    switch(result)
+    {
       case WAIT_TIMEOUT:
         if (timeout == TIMEOUT_INFINITE)
           continue;

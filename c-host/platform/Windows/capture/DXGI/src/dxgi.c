@@ -55,7 +55,7 @@ Pointer;
 struct iface
 {
   bool                       initialized;
-  bool                       reinit;
+  bool                       stop;
   IDXGIFactory1            * factory;
   IDXGIAdapter1            * adapter;
   IDXGIOutput              * output;
@@ -158,7 +158,7 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->pointerSize  = pointerSize;
   this->pointerUsed  = 0;
 
-  this->reinit    = false;
+  this->stop      = false;
   this->texRIndex = 0;
   this->texWIndex = 0;
   os_resetEvent(this->frameEvent);
@@ -402,6 +402,13 @@ fail:
   return false;
 }
 
+static void dxgi_stop()
+{
+  this->stop = true;
+  os_signalEvent(this->frameEvent  );
+  os_signalEvent(this->pointerEvent);
+}
+
 static bool dxgi_deinit()
 {
   assert(this);
@@ -497,7 +504,7 @@ static unsigned int dxgi_getMaxFrameSize()
   return this->height * this->pitch;
 }
 
-inline static CaptureResult dxgi_capture_int()
+static CaptureResult dxgi_capture()
 {
   assert(this);
   assert(this->initialized);
@@ -641,28 +648,10 @@ inline static CaptureResult dxgi_capture_int()
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_capture(bool * hasFrameUpdate, bool * hasPointerUpdate)
-{
-  CaptureResult result = dxgi_capture_int(hasFrameUpdate, hasPointerUpdate);
-
-  // signal pending events if the result was any form of failure or reinit
-  if (result != CAPTURE_RESULT_OK && result != CAPTURE_RESULT_TIMEOUT)
-  {
-    this->reinit = true;
-    os_signalEvent(this->frameEvent  );
-    os_signalEvent(this->pointerEvent);
-  }
-
-  return result;
-}
-
 static CaptureResult dxgi_getFrame(CaptureFrame * frame)
 {
   assert(this);
   assert(this->initialized);
-
-  if (this->reinit)
-    return CAPTURE_RESULT_REINIT;
 
   if (!os_waitEvent(this->frameEvent, TIMEOUT_INFINITE))
   {
@@ -670,7 +659,7 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
     return CAPTURE_RESULT_ERROR;
   }
 
-  if (this->reinit)
+  if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
   Texture * tex = &this->texture[this->texRIndex];
@@ -695,16 +684,13 @@ static CaptureResult dxgi_getPointer(CapturePointer * pointer)
   assert(this);
   assert(this->initialized);
 
-  if (this->reinit)
-    return CAPTURE_RESULT_REINIT;
-
   if (!os_waitEvent(this->pointerEvent, TIMEOUT_INFINITE))
   {
     DEBUG_ERROR("Failed to wait on the pointer event");
     return CAPTURE_RESULT_ERROR;
   }
 
-  if (this->reinit)
+  if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
   Pointer p;
@@ -761,6 +747,7 @@ struct CaptureInterface Capture_DXGI =
   .getName         = dxgi_getName,
   .create          = dxgi_create,
   .init            = dxgi_init,
+  .stop            = dxgi_stop,
   .deinit          = dxgi_deinit,
   .free            = dxgi_free,
   .getMaxFrameSize = dxgi_getMaxFrameSize,

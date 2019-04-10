@@ -47,5 +47,6 @@ typedef struct osEventHandle osEventHandle;
 osEventHandle * os_createEvent(bool autoReset);
 void            os_freeEvent  (osEventHandle * handle);
 bool            os_waitEvent  (osEventHandle * handle, unsigned int timeout);
+bool            os_waitEvents (osEventHandle * handles[], int count, bool waitAll, unsigned int timeout);
 bool            os_signalEvent(osEventHandle * handle);
 bool            os_resetEvent (osEventHandle * handle);

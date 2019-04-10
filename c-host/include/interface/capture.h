@@ -76,6 +76,7 @@ typedef struct CaptureInterface
   const char *  (*getName        )();
   bool          (*create         )();
   bool          (*init           )(void * pointerShape, const unsigned int pointerSize);
+  void          (*stop           )();
   bool          (*deinit         )();
   void          (*free           )();
   unsigned int  (*getMaxFrameSize)();
