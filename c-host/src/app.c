@@ -357,6 +357,7 @@ int app_main()
           exitcode = -1;
           goto exit;
         }
+        app.reinit = false;
         continue;
 
       case CAPTURE_RESULT_ERROR:
