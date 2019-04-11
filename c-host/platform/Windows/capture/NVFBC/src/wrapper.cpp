@@ -18,8 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "wrapper.h"
-#include "debug.h"
-#include "windows/windebug.h"
+#include "windows/debug.h"
 #include <windows.h>
 #include <NvFBC/nvFBCToSys.h>
 

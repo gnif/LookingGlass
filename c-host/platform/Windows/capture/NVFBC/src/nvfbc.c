@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "interface/platform.h"
 #include "windows/platform.h"
-#include "windows/windebug.h"
+#include "windows/debug.h"
 #include "windows/mousehook.h"
 #include <assert.h>
 #include <stdlib.h>

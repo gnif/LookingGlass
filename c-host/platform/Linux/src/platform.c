@@ -33,6 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct app
 {
+  const char  * executable;
   unsigned int  shmSize;
   int           shmFD;
   void        * shmMap;
@@ -67,6 +68,8 @@ void sigHandler(int signo)
 
 int main(int argc, char * argv[])
 {
+  app.executable = argv[0];
+
   static struct option longOptions[] =
   {
     {"shmDevice", required_argument, 0, 'f'},
@@ -175,6 +178,11 @@ int main(int argc, char * argv[])
   close(app.shmFD);
 
   return result;
+}
+
+const char * os_getExecutable()
+{
+  return app.executable;
 }
 
 unsigned int os_shmemSize()

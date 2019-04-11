@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "windows/debug.h"
 #include "ivshmem/Public.h"
 
+static char         executable[MAX_PATH + 1];
 static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;
 static bool         shmemOwned  = false;
 static IVSHMEM_MMAP shmemMap    = {0};
@@ -98,6 +99,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
+
+  GetModuleFileName(NULL, executable, sizeof(executable));
 
   // redirect stderr to a file
   {
@@ -222,6 +225,11 @@ finish_shmem:
   CloseHandle(shmemHandle);
 finish:
   return result;
+}
+
+const char * os_getExecutable()
+{
+  return executable;
 }
 
 unsigned int os_shmemSize()

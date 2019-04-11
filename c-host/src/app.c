@@ -258,7 +258,7 @@ static bool captureRestart()
 
 int app_main()
 {
-  if (!installCrashHandler())
+  if (!installCrashHandler(os_getExecutable()))
     DEBUG_WARN("Failed to install the crash handler");
 
   unsigned int shmemSize = os_shmemSize();
