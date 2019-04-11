@@ -138,7 +138,7 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
   HANDLE event;
   if (!NvFBCToSysSetup(
     this->nvfbc,
-    BUFFER_FMT_ARGB10,
+    BUFFER_FMT_ARGB,
     false,
     true,
     false,
@@ -226,13 +226,21 @@ static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
   frame->pitch  = this->grabInfo.dwBufferWidth * 4;
   frame->stride = this->grabInfo.dwBufferWidth;
 
-  // the bIsHDR check isn't reliable, if it's not set check a few pixels to see if
-  // the alpha channel has data in it. If not HDR the alpha channel should read zeros
-  this->grabInfo.bIsHDR =
-    this->grabInfo.bIsHDR ||
-    (this->frameBuffer[3] != 0)                                                                  || // top left
-    (this->frameBuffer[(((frame->height * frame->stride) / 2) + frame->width / 2) * 4 + 3] != 0) || // center
-    (this->frameBuffer[(((frame->height - 1) * frame->stride) + frame->width - 1) * 4 + 3] != 0);   // bottom right
+#if 0
+  //NvFBC never sets bIsHDR so instead we check for any data in the alpha channel
+  //If there is data, it's HDR. This is clearly suboptimal
+  if (!this->grabInfo.bIsHDR)
+    for(int y = 0; y < frame->height; ++y)
+      for(int x = 0; x < frame->width; ++x)
+      {
+        int offset = (y * frame->pitch) + (x * 4);
+        if (this->frameBuffer[offset + 3])
+        {
+          this->grabInfo.bIsHDR = 1;
+          break;
+        }
+      }
+#endif
 
   frame->format = this->grabInfo.bIsHDR ? CAPTURE_FMT_RGBA10 : CAPTURE_FMT_BGRA;
   memcpy(frame->data, this->frameBuffer, frame->pitch * frame->height);
