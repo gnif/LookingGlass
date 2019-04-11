@@ -36,6 +36,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <assert.h>
 
 #include "common/debug.h"
+#include "common/crash.h"
 #include "common/KVMFR.h"
 #include "utils.h"
 #include "kb.h"
@@ -1295,6 +1296,9 @@ int run()
 
 int main(int argc, char * argv[])
 {
+  if (!installCrashHandler(argv[0]))
+    DEBUG_WARN("Failed to install the crash handler");
+
   if (!config_load(argc, argv))
     return -1;
 

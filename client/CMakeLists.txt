@@ -33,8 +33,9 @@ add_compile_options(
   "-ffunction-sections"
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
-set(CMAKE_EXE_LINKER FLAGS "-Wl,--gc-sections")
-set(CMAKE_C_STANDARD       11)
+
+set(EXE_FLAGS "-Wl,--gc-sections")
+set(CMAKE_C_STANDARD 11)
 
 find_package(PkgConfig)
 pkg_check_modules(PKGCONFIG REQUIRED
@@ -67,7 +68,8 @@ include_directories(
 link_libraries(
 	${PKGCONFIG_LIBRARIES}
 	${GMP_LIBRARIES}
-	rt m
+	rt
+	m
 )
 
 set(SOURCES
@@ -89,6 +91,7 @@ add_subdirectory(decoders)
 add_executable(looking-glass-client ${SOURCES})
 target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
+	${EXE_FLAGS}
 	lg_common
 	spice
 	renderers

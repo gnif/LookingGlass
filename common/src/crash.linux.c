@@ -17,6 +17,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#define _GNU_SOURCE
 #include "common/crash.h"
 #include "common/debug.h"
 
@@ -27,63 +28,187 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <ucontext.h>
 #include <unistd.h>
+#include <inttypes.h>
+#include <limits.h>
 
-/*
-  Large portions of this code comes from @jschmier @ https://stackoverflow.com/a/1925461/637874
-*/
+#include <link.h>
+#include <bfd.h>
 
-/* This structure mirrors the one found in /usr/include/asm/ucontext.h */
-typedef struct _sig_ucontext
+struct range
 {
-  unsigned long     uc_flags;
-  struct ucontext   *uc_link;
-  stack_t           uc_stack;
-  struct sigcontext uc_mcontext;
-  sigset_t          uc_sigmask;
+  intptr_t start, end;
+};
+
+struct crash
+{
+  char         * exe;
+  struct range * ranges;
+  int            rangeCount;
+  bfd          * fd;
+  asection     * section;
+  asymbol     ** syms;
+  long           symCount;
+};
+
+static struct crash crash = {0};
+
+static void load_symbols()
+{
+  bfd_init();
+  crash.fd = bfd_openr(crash.exe, NULL);
+  if (!crash.fd)
+  {
+    DEBUG_ERROR("failed to open '%s'", crash.exe);
+    return;
+  }
+
+  crash.fd->flags |= BFD_DECOMPRESS;
+
+  char **matching;
+  if (!bfd_check_format_matches(crash.fd, bfd_object, &matching))
+  {
+    DEBUG_ERROR("executable is not a bfd_object");
+    return;
+  }
+
+  crash.section = bfd_get_section_by_name(crash.fd, ".text");
+  if (!crash.section)
+  {
+    DEBUG_ERROR("failed to find .text section");
+    return;
+  }
+
+  if ((bfd_get_file_flags(crash.fd) & HAS_SYMS) == 0)
+  {
+    DEBUG_ERROR("executable '%s' has no symbols", crash.exe);
+    return;
+  }
+
+  long storage   = bfd_get_symtab_upper_bound(crash.fd);
+  crash.syms     = (asymbol **)malloc(storage);
+  crash.symCount = bfd_canonicalize_symtab(crash.fd, crash.syms);
+  if (crash.symCount < 0)
+  {
+    DEBUG_ERROR("failed to get the symbol count");
+    return;
+  }
 }
-sig_ucontext_t;
+
+static bool lookup_address(bfd_vma pc, const char ** filename, const char ** function, unsigned int * line, unsigned int * discriminator)
+{
+  if ((bfd_get_section_flags(crash.fd, crash.section) & SEC_ALLOC) == 0)
+    return false;
+
+  bfd_size_type size = bfd_get_section_size(crash.section);
+  if (pc >= size)
+    return false;
+
+  if (!bfd_find_nearest_line_discriminator(
+    crash.fd,
+    crash.section,
+    crash.syms,
+    pc,
+    filename,
+    function,
+    line,
+    discriminator
+  ))
+    return false;
+
+  if (!*filename)
+    return false;
+
+  return true;
+}
+
+static void cleanup()
+{
+  if (crash.syms)
+    free(crash.syms);
+
+  if (crash.fd)
+    bfd_close(crash.fd);
+
+  if (crash.ranges)
+    free(crash.ranges);
+
+  if (crash.exe)
+    free(crash.exe);
+}
+
+static int dl_iterate_phdr_callback(struct dl_phdr_info * info, size_t size, void * data)
+{
+  // we are not a module, and as such we don't have a name
+  if (strlen(info->dlpi_name) != 0)
+    return 0;
+
+  size_t ttl = 0;
+  for(int i = 0; i < info->dlpi_phnum; ++i)
+  {
+    const ElfW(Phdr) hdr = info->dlpi_phdr[i];
+    if (hdr.p_type == PT_LOAD && (hdr.p_flags & PF_X) == PF_X)
+      ttl += hdr.p_memsz;
+  }
+
+  crash.ranges = realloc(crash.ranges, sizeof(struct range) * (crash.rangeCount + 1));
+  crash.ranges[crash.rangeCount].start = info->dlpi_addr;
+  crash.ranges[crash.rangeCount].end   = info->dlpi_addr + ttl;
+  ++crash.rangeCount;
+
+  return 0;
+}
 
 static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
 {
   void *             array[50];
-  void *             caller_address;
   char **            messages;
   int                size, i;
-  sig_ucontext_t *   uc;
 
-  uc = (sig_ucontext_t *)ucontext;
+  dl_iterate_phdr(dl_iterate_phdr_callback, NULL);
+  load_symbols();
 
-  /* Get the address at the time the signal was raised */
-  #if defined(__i386__) // gcc specific
-   caller_address = (void *) uc->uc_mcontext.eip; // EIP: x86 specific
-  #elif defined(__x86_64__) // gcc specific
-   caller_address = (void *) uc->uc_mcontext.rip; // RIP: x86_64 specific
-  #else
-  #error Unsupported architecture. // TODO: Add support for other arch.
-  #endif
+  DEBUG_ERROR("==== FATAL CRASH (" BUILD_VERSION ") ====");
+  DEBUG_ERROR("signal %d (%s), address is %p", sig_num, strsignal(sig_num), info->si_addr);
 
-  DEBUG_ERROR("signal %d (%s), address is %p from %p", sig_num, strsignal(sig_num), info->si_addr, (void *)caller_address);
-
-  size = backtrace(array, 50);
-
-  /* overwrite sigaction with caller's address */
-  array[1] = caller_address;
-
+  size     = backtrace(array, 50);
   messages = backtrace_symbols(array, size);
 
-  /* skip first stack frame (points here) */
-  for (i = 1; i < size && messages != NULL; ++i)
-    DEBUG_ERROR("[bt]: (%d) %s", i, messages[i]);
+  for (i = 2; i < size && messages != NULL; ++i)
+  {
+    intptr_t base = -1;
+    for(int c = 0; c < crash.rangeCount; ++c)
+    {
+      if ((intptr_t)array[i] >= crash.ranges[c].start && (intptr_t)array[i] < crash.ranges[c].end)
+      {
+        base = crash.ranges[c].start + crash.section->vma;
+        break;
+      }
+    }
+
+    if (base != -1)
+    {
+      const char * filename, * function;
+      unsigned int line, discriminator;
+      if (lookup_address((intptr_t)array[i] - base, &filename, &function, &line, &discriminator))
+      {
+        DEBUG_ERROR("[trace]: (%d) %s:%u (%s)", i - 2, filename, line, function);
+        continue;
+      }
+    }
+
+    DEBUG_ERROR("[trace]: (%d) %s", i - 2, messages[i]);
+  }
 
   free(messages);
-
+  cleanup();
   exit(EXIT_FAILURE);
 }
 
-bool installCrashHandler()
+bool installCrashHandler(const char * exe)
 {
   struct sigaction sigact;
 
+  crash.exe = realpath(exe, NULL);
   sigact.sa_sigaction = crit_err_hdlr;
   sigact.sa_flags = SA_RESTART | SA_SIGINFO;
 

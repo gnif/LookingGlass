@@ -9,10 +9,8 @@ if(WIN32)
   add_library(lg_common STATIC src/crash.windows.c)
 else()
   add_library(lg_common STATIC src/crash.linux.c)
+  target_link_libraries(lg_common bfd)
 endif()
-
-#target_link_libraries(lg_common
-#)
 
 target_include_directories(lg_common
 	INTERFACE
