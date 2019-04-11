@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/locking.h"
 #include "common/KVMFR.h"
+#include "common/crash.h"
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -257,6 +258,9 @@ static bool captureRestart()
 
 int app_main()
 {
+  if (!installCrashHandler())
+    DEBUG_WARN("Failed to install the crash handler");
+
   unsigned int shmemSize = os_shmemSize();
   uint8_t    * shmemMap  = NULL;
   int          exitcode  = 0;

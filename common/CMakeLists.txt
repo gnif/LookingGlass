@@ -5,9 +5,11 @@ include_directories(
 	${PROJECT_SOURCE_DIR}/include
 )
 
-add_library(lg_common STATIC
-	src/debug.c
-)
+if(WIN32)
+  add_library(lg_common STATIC src/crash.windows.c)
+else()
+  add_library(lg_common STATIC src/crash.linux.c)
+endif()
 
 #target_link_libraries(lg_common
 #)
