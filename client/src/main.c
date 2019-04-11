@@ -35,9 +35,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <assert.h>
 
-#include "debug.h"
+#include "common/debug.h"
+#include "common/KVMFR.h"
 #include "utils.h"
-#include "KVMFR.h"
 #include "kb.h"
 #include "ll.h"
 
@@ -337,6 +337,10 @@ static int frameThread(void * unused)
       header.pitch   < header.width
     ){
       DEBUG_WARN("Bad header");
+      DEBUG_WARN("  width  : %u"     , header.width  );
+      DEBUG_WARN("  height : %u"     , header.height );
+      DEBUG_WARN("  pitch  : %u"     , header.pitch  );
+      DEBUG_WARN("  dataPos: 0x%08lx", header.dataPos);
       usleep(1000);
       continue;
     }

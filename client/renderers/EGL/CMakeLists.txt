@@ -45,6 +45,7 @@ add_library(renderer_EGL STATIC
 
 target_link_libraries(renderer_EGL
 	${RENDERER_EGL_PKGCONFIG_LIBRARIES}
+	lg_common
 	fonts
 )
 

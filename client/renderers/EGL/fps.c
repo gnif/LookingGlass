@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "fps.h"
-#include "debug.h"
+#include "common/debug.h"
 #include "utils.h"
 
 #include "texture.h"

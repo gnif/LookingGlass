@@ -11,6 +11,7 @@ add_library(decoders STATIC
 )
 
 target_link_libraries(decoders
+	lg_common
 	${DECODERS_PKGCONFIG_LIBRARIES}
 )
 

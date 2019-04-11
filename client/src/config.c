@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "main.h"
 #include "config.h"
-#include "debug.h"
+#include "common/debug.h"
 
 #include <sys/stat.h>
 #include <libconfig.h>

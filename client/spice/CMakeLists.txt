@@ -16,6 +16,7 @@ add_library(spice STATIC
 )
 
 target_link_libraries(spice
+	lg_common
 	${SPICE_PKGCONFIG_LIBRARIES}
 )
 

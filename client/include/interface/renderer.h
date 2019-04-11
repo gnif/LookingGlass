@@ -25,7 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL_ttf.h>
 
 #include "app.h"
-#include "KVMFR.h"
+#include "common/KVMFR.h"
 
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->get_name       && \

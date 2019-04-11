@@ -19,8 +19,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/decoder.h"
 
-#include "debug.h"
-#include "memcpySSE.h"
+#include "common/debug.h"
+#include "common/memcpySSE.h"
 
 #include <stdlib.h>
 #include <string.h>

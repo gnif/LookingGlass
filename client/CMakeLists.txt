@@ -55,11 +55,11 @@ find_package(GMP)
 add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
 add_definitions(-D ATOMIC_LOCKING)
 add_definitions(-D GL_GLEXT_PROTOTYPES)
+get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PROJECT_SOURCE_DIR}/../common
 	${PKGCONFIG_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )
@@ -79,6 +79,7 @@ set(SOURCES
 	src/utils.c
 )
 
+add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
 add_subdirectory(spice)
 add_subdirectory(renderers)
 add_subdirectory(clipboards)
@@ -88,6 +89,7 @@ add_subdirectory(decoders)
 add_executable(looking-glass-client ${SOURCES})
 target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
+	lg_common
 	spice
 	renderers
 	clipboards

@@ -13,6 +13,7 @@ add_library(clipboard_X11 STATIC
 
 target_link_libraries(clipboard_X11
 	${CLIPBOARD_PKGCONFIG_LIBRARIES}
+	lg_common
 )
 
 target_include_directories(clipboard_X11

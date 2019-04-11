@@ -30,7 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <GL/glu.h>
 #include <GL/glx.h>
 
-#include "debug.h"
+#include "common/debug.h"
 #include "utils.h"
 #include "lg-decoders.h"
 #include "dynamic/fonts.h"

@@ -13,6 +13,7 @@ add_library(font_SDL STATIC
 
 target_link_libraries(font_SDL
 	${FONT_SDL_PKGCONFIG_LIBRARIES}
+	lg_common
 )
 
 target_include_directories(font_SDL
