@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "windows/mousehook.h"
-#include "windows/windebug.h"
+#include "windows/debug.h"
 #include "platform.h"
 
 #include <windows.h>

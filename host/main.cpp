@@ -22,7 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <avrt.h>
 
 #include "common/debug.h"
-#include "vendor/getopt/getopt.h"
+#include "getopt/getopt.h"
 
 #include "CrashHandler.h"
 #include "TraceUtil.h"

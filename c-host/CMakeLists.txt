@@ -33,12 +33,12 @@ execute_process(
 )
 
 add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
+get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PROJECT_SOURCE_DIR}/../common
-        ${PROJECT_SOURCE_DIR}/../vendor/kvm-guest-drivers-windows
+        ${PROJECT_TOP}/vendor/kvm-guest-drivers-windows
 	${PKGCONFIG_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )
@@ -50,6 +50,7 @@ set(SOURCES
 	src/app.c
 )
 
+add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
 add_subdirectory(platform)
 
 if(WIN32)
@@ -58,6 +59,7 @@ else()
   add_executable(looking-glass-host ${SOURCES})
 endif()
 target_link_libraries(looking-glass-host
+	lg_common
 	platform
 )
 set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections")

@@ -20,15 +20,15 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "interface/capture.h"
 #include "dynamic/capture.h"
+#include "common/debug.h"
+#include "common/locking.h"
+#include "common/KVMFR.h"
 
 #include <stdio.h>
 #include <inttypes.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include "debug.h"
-#include "locking.h"
-#include "KVMFR.h"
 
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)

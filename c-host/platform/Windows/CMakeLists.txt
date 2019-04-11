@@ -22,6 +22,7 @@ ADD_CUSTOM_COMMAND(TARGET platform_Windows POST_BUILD
 
 target_link_libraries(platform_Windows
 	"${PROJECT_BINARY_DIR}/resource.o"
+	lg_common
 	capture
 	setupapi
 )

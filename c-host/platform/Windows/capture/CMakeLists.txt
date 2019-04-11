@@ -1,18 +1,19 @@
 cmake_minimum_required(VERSION 3.0)
 project(capture LANGUAGES C)
 
-include("PreCapture")
+include(PreCapture)
+
+option(USE_NVFBC "Enable NVFBC Support" OFF)
+option(USE_DXGI  "Enable DXGI Support" ON)
 
 if(NOT DEFINED NVFBC_SDK)
   set(NVFBC_SDK "C:\\Program Files (x86)\\NVIDIA Corporation\\NVIDIA Capture SDK")
 endif()
   
-if(EXISTS "${NVFBC_SDK}\\inc" AND IS_DIRECTORY "${NVFBC_SDK}\\inc")
-  set(USE_NVFBC ON)
+if(NOT EXISTS "${NVFBC_SDK}\\inc" OR NOT IS_DIRECTORY "${NVFBC_SDK}\\inc")
+  message("Disabling NVFBC support, can't find the SDK headers")
+  set(USE_NVFBC OFF)
 endif()
-
-option(USE_NVFBC "Enable NVFBC Support" ${USE_NVFBC})
-option(USE_DXGI  "Enable DXGI Support" ON)
 
 if(USE_NVFBC)
   add_capture("NVFBC")

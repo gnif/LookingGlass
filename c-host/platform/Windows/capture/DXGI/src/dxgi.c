@@ -19,8 +19,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/capture.h"
 #include "interface/platform.h"
-#include "debug.h"
-#include "windows/windebug.h"
+#include "common/debug.h"
+#include "windows/debug.h"
 
 #include <assert.h>
 #include <dxgi.h>

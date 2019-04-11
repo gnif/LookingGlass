@@ -100,11 +100,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="..\common\memcpySSE.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
-  </ItemGroup>
-  <ItemGroup>
     <FxCompile Include="Shaders\Vertex.hlsl">
       <Filter>Source Files\Shaders</Filter>
     </FxCompile>
@@ -114,5 +109,10 @@
     <FxCompile Include="Shaders\Pixel.hlsl">
       <Filter>Source Files\Shaders</Filter>
     </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="..\common\src\memcpySSE.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
   </ItemGroup>
 </Project>

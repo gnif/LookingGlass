@@ -15,6 +15,7 @@ ADD_CUSTOM_COMMAND(TARGET capture_DXGI POST_BUILD
 )
 
 target_link_libraries(capture_DXGI
+	lg_common
 	${PROJECT_BINARY_DIR}/libd3d11.dll
 	dxgi
 )

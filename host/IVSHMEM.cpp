@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <windows.h>
 #include <setupapi.h>
-#include "vendor/kvm-guest-drivers-windows/ivshmem/Public.h"
+#include "kvm-guest-drivers-windows/ivshmem/Public.h"
 #include "common/debug.h"
 
 IVSHMEM * IVSHMEM::m_instance = NULL;
