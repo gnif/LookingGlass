@@ -845,11 +845,13 @@ int eventFilter(void * userdata, SDL_Event * event)
   return 0;
 }
 
-void intHandler(int signal)
+void int_handler(int signal)
 {
   switch(signal)
   {
     case SIGINT:
+    case SIGTERM:
+      DEBUG_INFO("Caught signal, shutting down...");
       state.running = false;
       break;
   }
@@ -986,7 +988,8 @@ int run()
 
   // override SDL's SIGINIT handler so that we can tell the difference between
   // SIGINT and the user sending a close event, such as ALT+F4
-  signal(SIGINT, intHandler);
+  signal(SIGINT , int_handler);
+  signal(SIGTERM, int_handler);
 
   LG_RendererParams lgrParams;
   lgrParams.showFPS = params.showFPS;
