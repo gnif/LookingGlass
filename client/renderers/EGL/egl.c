@@ -86,6 +86,7 @@ struct Inst
   float scaleX      , scaleY;
   float splashRatio;
   float screenScaleX, screenScaleY;
+  bool  useNearest;
 
   float        mouseWidth , mouseHeight;
   float        mouseScaleX, mouseScaleY;
@@ -238,6 +239,8 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
 
   if (this->sourceChanged)
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+
+  this->useNearest = this->width < format.width || this->height < format.height;
 
   if (!egl_desktop_prepare_update(this->desktop, this->sourceChanged, format, data))
   {
@@ -420,7 +423,7 @@ bool egl_render(void * opaque, SDL_Window * window)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY);
+  egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY, this->useNearest);
   egl_cursor_render(this->cursor);
 
   if (!this->waitDone)

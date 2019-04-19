@@ -47,6 +47,8 @@ struct EGL_Desktop
 
   // uniforms
   GLint uDesktopPos;
+  GLint uDesktopSize;
+  GLint uNearest;
   GLint uNV, uNVGain;
 
   // internals
@@ -200,9 +202,11 @@ bool egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
   {
     if (desktop->shader)
     {
-      desktop->uDesktopPos = egl_shader_get_uniform_location(desktop->shader, "position");
-      desktop->uNV         = egl_shader_get_uniform_location(desktop->shader, "nv"      );
-      desktop->uNVGain     = egl_shader_get_uniform_location(desktop->shader, "nvGain"  );
+      desktop->uDesktopPos  = egl_shader_get_uniform_location(desktop->shader, "position");
+      desktop->uDesktopSize = egl_shader_get_uniform_location(desktop->shader, "size"    );
+      desktop->uNearest     = egl_shader_get_uniform_location(desktop->shader, "nearest" );
+      desktop->uNV          = egl_shader_get_uniform_location(desktop->shader, "nv"      );
+      desktop->uNVGain      = egl_shader_get_uniform_location(desktop->shader, "nvGain"  );
     }
 
     if (!egl_texture_setup(
@@ -232,13 +236,16 @@ bool egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
   return true;
 }
 
-void egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY)
+void egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest)
 {
   if (!desktop->shader)
     return;
 
   egl_shader_use(desktop->shader);
-  glUniform4f(desktop->uDesktopPos, x, y, scaleX, scaleY);
+  glUniform4f(desktop->uDesktopPos , x, y, scaleX, scaleY);
+  glUniform1i(desktop->uNearest    , nearest ? 1 : 0);
+  glUniform2f(desktop->uDesktopSize, desktop->width, desktop->height);
+
   if (desktop->nvGain)
   {
     glUniform1i(desktop->uNV, 1);

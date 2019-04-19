@@ -4,12 +4,19 @@ in  highp vec2 uv;
 out highp vec4 color;
 
 uniform sampler2D sampler1;
-uniform int nv;
+
+uniform       int   nearest;
+uniform highp vec2  size;
+
+uniform       int   nv;
 uniform highp float nvGain;
 
 void main()
 {
-  color = texture(sampler1, uv);
+  if(nearest == 1)
+    color = texture(sampler1, uv);
+  else
+    color = texelFetch(sampler1, ivec2(uv * size), 0);
 
   if (nv == 1)
   {
