@@ -233,7 +233,7 @@ struct OptionValue * option_get(const char * module, const char * name)
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = &state.options[i];
-    if ((strcmp(o->module, module) == 0) || (strcmp(o->name, name) == 0))
+    if ((strcmp(o->module, module) == 0) && (strcmp(o->name, name) == 0))
       return &o->value;
   }
   return NULL;
