@@ -128,6 +128,7 @@ static bool nvfbc_create()
 
 static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
 {
+  return false;
   this->stop     = false;
   this->pointerShape = pointerShape;
   this->pointerSize  = pointerSize;

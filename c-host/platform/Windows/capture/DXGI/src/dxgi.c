@@ -123,7 +123,7 @@ static void dxgi_initOptions()
       .description  = "The name of the adapter's output to capture",
       .value        = {
         .type       = OPTION_TYPE_STRING,
-        .v.x_string = 0
+        .v.x_string = NULL
       },
       .validator    = NULL,
       .printHelp    = NULL
