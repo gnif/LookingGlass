@@ -32,17 +32,17 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct AppState
 {
-  int    argc;
-  char * argv[];
+  int     argc;
+  char ** argv;
 
-  static char         executable[MAX_PATH + 1];
-  static HANDLE       shmemHandle;
-  static bool         shmemOwned;
-  static IVSHMEM_MMAP shmemMap;
-  static HWND         messageWnd;
+  char         executable[MAX_PATH + 1];
+  HANDLE       shmemHandle;
+  bool         shmemOwned;
+  IVSHMEM_MMAP shmemMap;
+  HWND         messageWnd;
 };
 
-static struct AppState state =
+static struct AppState app =
 {
   .shmemHandle = INVALID_HANDLE_VALUE,
   .shmemOwned  = false,
@@ -116,7 +116,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
 
   // convert the command line to the standard argc and argv
-  LPWSTR * wargv = CommandLineToArgvA(GetCommandLineW(), &app.argc);
+  LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
   app.argv = malloc(sizeof(char *) * app.argc);
   for(int i = 0; i < app.argc; ++i)
   {
