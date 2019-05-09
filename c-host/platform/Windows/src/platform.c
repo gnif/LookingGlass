@@ -110,6 +110,8 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+  int result = 0;
+
   // convert the command line to the standard argc and argv
   LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
   app.argv = malloc(sizeof(char *) * app.argc);
@@ -151,7 +153,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   {
     DEBUG_ERROR("Failed to register message window class");
     result = -1;
-    goto finish_shmem;
+    goto finish;
   }
   app.messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
 
@@ -161,7 +163,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   {
     DEBUG_ERROR("Failed to create the main application thread");
     result = -1;
-    goto finish_shmem;
+    goto finish;
   }
 
   while(true)
@@ -192,10 +194,12 @@ shutdown:
     DEBUG_ERROR("Failed to join the main application thread");
     result = -1;
   }
-finish_shmem:
-  os_shmemUnmap();
-  CloseHandle(app.shmemHandle);
+
 finish:
+  os_shmemUnmap();
+
+  if (app.shmemHandle != INVALID_HANDLE_VALUE)
+    CloseHandle(app.shmemHandle);
 
   for(int i = 0; i < app.argc; ++i)
     free(app.argv[i]);
@@ -206,7 +210,6 @@ finish:
 
 bool app_init()
 {
-  int                              result = 0;
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
