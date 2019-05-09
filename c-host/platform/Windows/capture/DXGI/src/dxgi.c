@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/option.h"
 #include "windows/debug.h"
 
 #include <assert.h>
@@ -101,6 +102,38 @@ static const char * dxgi_getName()
   return "DXGI";
 }
 
+static void dxgi_initOptions()
+{
+  struct Option options[] =
+  {
+    {
+      .module       = "dxgi",
+      .name         = "adapter",
+      .description  = "The name of the adapter to capture",
+      .value        = {
+        .type       = OPTION_TYPE_STRING,
+        .v.x_string = NULL
+      },
+      .validator    = NULL,
+      .printHelp    = NULL
+    },
+    {
+      .module       = "dxgi",
+      .name         = "output",
+      .description  = "The name of the adapter's output to capture",
+      .value        = {
+        .type       = OPTION_TYPE_STRING,
+        .v.x_string = 0
+      },
+      .validator    = NULL,
+      .printHelp    = NULL
+    },
+    {0}
+  };
+
+  option_register(options);
+}
+
 static bool dxgi_create()
 {
   assert(!this);
@@ -170,11 +203,58 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
     goto fail;
   }
 
+  const char * optAdapter = option_get_string("dxgi", "adapter");
+  const char * optOutput  = option_get_string("dxgi", "output" );
+
   for(int i = 0; IDXGIFactory1_EnumAdapters1(this->factory, i, &this->adapter) != DXGI_ERROR_NOT_FOUND; ++i)
   {
+    if (optAdapter)
+    {
+      DXGI_ADAPTER_DESC1 adapterDesc;
+      IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+
+      const size_t s = (wcslen(adapterDesc.Description)+1) * 2;
+      size_t unused;
+      char * desc = malloc(s);
+      wcstombs_s(&unused, desc, s, adapterDesc.Description, _TRUNCATE);
+
+      if (strstr(desc, optAdapter) == NULL)
+      {
+        DEBUG_INFO("Not using adapter: %ls", adapterDesc.Description);
+        free(desc);
+        IDXGIAdapter1_Release(this->adapter);
+        this->adapter = NULL;
+        continue;
+      }
+      free(desc);
+
+      DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
+    }
+
     for(int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
     {
       IDXGIOutput_GetDesc(this->output, &outputDesc);
+      if (optOutput)
+      {
+        const size_t s = (wcslen(outputDesc.DeviceName)+1) * 2;
+        size_t unused;
+        char * desc = malloc(s);
+        wcstombs_s(&unused, desc, s, outputDesc.DeviceName, _TRUNCATE);
+
+        if (strstr(desc, optOutput) == NULL)
+        {
+          DEBUG_INFO("Not using adapter output: %ls", outputDesc.DeviceName);
+          free(desc);
+          IDXGIOutput_Release(this->output);
+          this->output = NULL;
+          continue;
+        }
+
+        free(desc);
+
+        DEBUG_INFO("Adapter output matched, trying: %ls", outputDesc.DeviceName);
+      }
+
       if (outputDesc.AttachedToDesktop)
         break;
 
@@ -745,6 +825,7 @@ static CaptureResult dxgi_releaseFrame()
 struct CaptureInterface Capture_DXGI =
 {
   .getName         = dxgi_getName,
+  .initOptions     = dxgi_initOptions,
   .create          = dxgi_create,
   .init            = dxgi_init,
   .stop            = dxgi_stop,
