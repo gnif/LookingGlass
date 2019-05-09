@@ -196,6 +196,8 @@ bool option_parse(int argc, char * argv[])
         break;
     }
 
+    free(arg);
+
     if (o->validator)
       if (!o->validator(&o->value))
       {
