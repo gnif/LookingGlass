@@ -17,9 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "capture/interface.h"
-#include "debug.h"
-#include "app.h"
+#include "interface/capture.h"
+#include "interface/platform.h"
+#include "common/debug.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -193,7 +193,7 @@ static CaptureResult xcb_capture()
   return CAPTURE_RESULT_OK;
 }
 
-static bool xcb_getFrame(CaptureFrame * frame)
+static CaptureResult xcb_getFrame(CaptureFrame * frame)
 {
   assert(this);
   assert(this->initialized);
@@ -207,7 +207,7 @@ static bool xcb_getFrame(CaptureFrame * frame)
   if (!img)
   {
     DEBUG_ERROR("Failed to get image reply");
-    return false;
+    return CAPTURE_RESULT_ERROR;
   }
 
   frame->width  = this->width;
@@ -219,12 +219,13 @@ static bool xcb_getFrame(CaptureFrame * frame)
   free(img);
 
   this->hasFrame = false;
-  return true;
+  return CAPTURE_RESULT_OK;
 }
 
-static bool xcb_getPointer(CapturePointer * pointer)
+static CaptureResult xcb_getPointer(CapturePointer * pointer)
 {
-  return false;
+  memset(pointer, 0, sizeof(CapturePointer));
+  return CAPTURE_RESULT_OK;
 }
 
 struct CaptureInterface Capture_XCB =
