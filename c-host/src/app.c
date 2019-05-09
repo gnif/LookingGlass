@@ -256,7 +256,7 @@ static bool captureRestart()
   return true;
 }
 
-int app_main()
+int app_main(int argc, char * argv[])
 {
   if (!installCrashHandler(os_getExecutable()))
     DEBUG_WARN("Failed to install the crash handler");

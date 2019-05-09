@@ -174,7 +174,7 @@ int main(int argc, char * argv[])
 
   signal(SIGINT, sigHandler);
 
-  int result = app_main();
+  int result = app_main(argc, argv);
   os_shmemUnmap();
   close(app.shmFD);
 

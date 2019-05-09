@@ -20,19 +20,34 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "platform.h"
 #include "windows/platform.h"
 #include "windows/mousehook.h"
+
 #include <windows.h>
 #include <setupapi.h>
+#include <shellapi.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
 #include "windows/debug.h"
 #include "ivshmem/Public.h"
 
-static char         executable[MAX_PATH + 1];
-static HANDLE       shmemHandle = INVALID_HANDLE_VALUE;
-static bool         shmemOwned  = false;
-static IVSHMEM_MMAP shmemMap    = {0};
-static HWND         messageWnd;
+struct AppState
+{
+  int    argc;
+  char * argv[];
+
+  static char         executable[MAX_PATH + 1];
+  static HANDLE       shmemHandle;
+  static bool         shmemOwned;
+  static IVSHMEM_MMAP shmemMap;
+  static HWND         messageWnd;
+};
+
+static struct AppState state =
+{
+  .shmemHandle = INVALID_HANDLE_VALUE,
+  .shmemOwned  = false,
+  .shmemMap    = {0}
+};
 
 struct osThreadHandle
 {
@@ -72,21 +87,21 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 static int appThread(void * opaque)
 {
-  int result = app_main();
-  SendMessage(messageWnd, WM_CLOSE, 0, 0);
+  int result = app_main(app.argc, app.argv);
+  SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
   return result;
 }
 
 LRESULT sendAppMessage(UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-  return SendMessage(messageWnd, Msg, wParam, lParam);
+  return SendMessage(app.messageWnd, Msg, wParam, lParam);
 }
 
 static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 {
   if (dwCtrlType == CTRL_C_EVENT)
   {
-    SendMessage(messageWnd, WM_CLOSE, 0, 0);
+    SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
     return TRUE;
   }
 
@@ -100,7 +115,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
 
-  GetModuleFileName(NULL, executable, sizeof(executable));
+  // convert the command line to the standard argc and argv
+  LPWSTR * wargv = CommandLineToArgvA(GetCommandLineW(), &app.argc);
+  app.argv = malloc(sizeof(char *) * app.argc);
+  for(int i = 0; i < app.argc; ++i)
+  {
+    const size_t s = (wcslen(wargv[i])+1) * 2;
+    size_t unused;
+    app.argv[i] = malloc(s);
+    wcstombs_s(&unused, app.argv[i], s, wargv[i], _TRUNCATE);
+  }
+  LocalFree(wargv);
+
+  GetModuleFileName(NULL, app.executable, sizeof(app.executable));
 
   // redirect stderr to a file
   {
@@ -154,8 +181,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     goto finish;
   }
 
-  shmemHandle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
-  if (shmemHandle == INVALID_HANDLE_VALUE)
+  app.shmemHandle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
+  if (app.shmemHandle == INVALID_HANDLE_VALUE)
   {
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
     free(infData);
@@ -182,8 +209,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     result = -1;
     goto finish_shmem;
   }
-  messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
+  app.messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
 
+  // create the application thread
   osThreadHandle * thread;
   if (!os_createThread("appThread", appThread, NULL, &thread))
   {
@@ -222,20 +250,25 @@ shutdown:
   }
 finish_shmem:
   os_shmemUnmap();
-  CloseHandle(shmemHandle);
+  CloseHandle(app.shmemHandle);
 finish:
+
+  for(int i = 0; i < app.argc; ++i)
+    free(app.argv[i]);
+  free(app.argv);
+
   return result;
 }
 
 const char * os_getExecutable()
 {
-  return executable;
+  return app.executable;
 }
 
 unsigned int os_shmemSize()
 {
   IVSHMEM_SIZE size;
-  if (!DeviceIoControl(shmemHandle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
+  if (!DeviceIoControl(app.shmemHandle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
   {
     DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
     return 0;
@@ -246,38 +279,38 @@ unsigned int os_shmemSize()
 
 bool os_shmemMmap(void **ptr)
 {
-  if (shmemOwned)
+  if (app.shmemOwned)
   {
-    *ptr = shmemMap.ptr;
+    *ptr = app.shmemMap.ptr;
     return true;
   }
 
-  memset(&shmemMap, 0, sizeof(IVSHMEM_MMAP));
+  memset(&app.shmemMap, 0, sizeof(IVSHMEM_MMAP));
   if (!DeviceIoControl(
-    shmemHandle,
+    app.shmemHandle,
     IOCTL_IVSHMEM_REQUEST_MMAP,
     NULL, 0,
-    &shmemMap, sizeof(IVSHMEM_MMAP),
+    &app.shmemMap, sizeof(IVSHMEM_MMAP),
     NULL, NULL))
   {
     DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
     return false;
   }
 
-  *ptr = shmemMap.ptr;
-  shmemOwned = true;
+  *ptr = app.shmemMap.ptr;
+  app.shmemOwned = true;
   return true;
 }
 
 void os_shmemUnmap()
 {
-  if (!shmemOwned)
+  if (!app.shmemOwned)
     return;
 
-  if (!DeviceIoControl(shmemHandle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
+  if (!DeviceIoControl(app.shmemHandle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
     DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
   else
-    shmemOwned = false;
+    app.shmemOwned = false;
 }
 
 static DWORD WINAPI threadWrapper(LPVOID lpParameter)
