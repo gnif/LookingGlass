@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "dynamic/capture.h"
 #include "common/debug.h"
+#include "common/option.h"
 #include "common/locking.h"
 #include "common/KVMFR.h"
 #include "common/crash.h"
@@ -256,10 +257,28 @@ static bool captureRestart()
   return true;
 }
 
+// this is called from the platform specific startup routine
 int app_main(int argc, char * argv[])
 {
   if (!installCrashHandler(os_getExecutable()))
     DEBUG_WARN("Failed to install the crash handler");
+
+  // register capture interface options
+  for(int i = 0; CaptureInterfaces[i]; ++i)
+    if (CaptureInterfaces[i]->initOptions)
+      CaptureInterfaces[i]->initOptions();
+
+  // parse the command line arguments
+  if (!option_parse(argc, argv))
+  {
+    option_free();
+    DEBUG_ERROR("Failure to parse the command line");
+    return -1;
+  }
+
+  // perform platform specific initialization
+  if (!app_init())
+    return -1;
 
   unsigned int shmemSize = os_shmemSize();
   uint8_t    * shmemMap  = NULL;

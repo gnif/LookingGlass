@@ -110,11 +110,6 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-  int                              result = 0;
-  HDEVINFO                         deviceInfoSet;
-  PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
-  SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
-
   // convert the command line to the standard argc and argv
   LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
   app.argv = malloc(sizeof(char *) * app.argc);
@@ -142,57 +137,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   // always flush stderr
   setbuf(stderr, NULL);
-
-  deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
-  memset(&deviceInterfaceData, 0, sizeof(SP_DEVICE_INTERFACE_DATA));
-  deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-  if (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, 0, &deviceInterfaceData) == FALSE)
-  {
-    DWORD error = GetLastError();
-    if (error == ERROR_NO_MORE_ITEMS)
-    {
-      DEBUG_WINERROR("Unable to enumerate the device, is it attached?", error);
-      result = -1;
-      goto finish;
-    }
-
-    DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", error);
-    result  = -1;
-    goto finish;
-  }
-
-  DWORD reqSize = 0;
-  SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &reqSize, NULL);
-  if (!reqSize)
-  {
-    DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
-    result = -1;
-    goto finish;
-  }
-
-  infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(reqSize, 1);
-  infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-  if (!SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, infData, reqSize, NULL, NULL))
-  {
-    free(infData);
-    DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
-    result = -1;
-    goto finish;
-  }
-
-  app.shmemHandle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
-  if (app.shmemHandle == INVALID_HANDLE_VALUE)
-  {
-    SetupDiDestroyDeviceInfoList(deviceInfoSet);
-    free(infData);
-    DEBUG_WINERROR("CreateFile returned INVALID_HANDLE_VALUE", GetLastError());
-    result = -1;
-    goto finish;
-  }
-
-  free(infData);
-  SetupDiDestroyDeviceInfoList(deviceInfoSet);
 
   // setup a handler for ctrl+c
   SetConsoleCtrlHandler(CtrlHandler, TRUE);
@@ -258,6 +202,62 @@ finish:
   free(app.argv);
 
   return result;
+}
+
+bool app_init()
+{
+  int                              result = 0;
+  HDEVINFO                         deviceInfoSet;
+  PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
+  SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
+
+  deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
+  memset(&deviceInterfaceData, 0, sizeof(SP_DEVICE_INTERFACE_DATA));
+  deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+  if (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, 0, &deviceInterfaceData) == FALSE)
+  {
+    DWORD error = GetLastError();
+    if (error == ERROR_NO_MORE_ITEMS)
+    {
+      DEBUG_WINERROR("Unable to enumerate the device, is it attached?", error);
+      return false;
+    }
+
+    DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", error);
+    return false;
+  }
+
+  DWORD reqSize = 0;
+  SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &reqSize, NULL);
+  if (!reqSize)
+  {
+    DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
+    return false;
+  }
+
+  infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(reqSize, 1);
+  infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+  if (!SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, infData, reqSize, NULL, NULL))
+  {
+    free(infData);
+    DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
+    return false;
+  }
+
+  app.shmemHandle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
+  if (app.shmemHandle == INVALID_HANDLE_VALUE)
+  {
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    free(infData);
+    DEBUG_WINERROR("CreateFile returned INVALID_HANDLE_VALUE", GetLastError());
+    return false;
+  }
+
+  free(infData);
+  SetupDiDestroyDeviceInfoList(deviceInfoSet);
+
+  return true;
 }
 
 const char * os_getExecutable()

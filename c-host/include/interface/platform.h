@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 
 int  app_main(int argc, char * argv[]);
+bool app_init();
 void app_quit();
 
 // these must be implemented for each OS

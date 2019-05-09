@@ -5,10 +5,14 @@ include_directories(
 	${PROJECT_SOURCE_DIR}/include
 )
 
+set(SOURCES
+  src/option.c
+)
+
 if(WIN32)
-  add_library(lg_common STATIC src/crash.windows.c)
+  add_library(lg_common STATIC src/crash.windows.c ${SOURCES})
 else()
-  add_library(lg_common STATIC src/crash.linux.c)
+  add_library(lg_common STATIC src/crash.linux.c ${SOURCES})
   target_link_libraries(lg_common bfd)
 endif()
 

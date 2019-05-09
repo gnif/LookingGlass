@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/option.h"
 
 #include <assert.h>
 #include <getopt.h>
@@ -40,17 +41,7 @@ struct app
   void        * shmMap;
 };
 
-struct params
-{
-  const char * shmDevice;
-};
-
 static struct app app;
-
-static struct params params =
-{
-  .shmDevice = "uio0"
-};
 
 struct osThreadHandle
 {
@@ -71,39 +62,47 @@ int main(int argc, char * argv[])
 {
   app.executable = argv[0];
 
-  static struct option longOptions[] =
+  struct Option options[] =
   {
-    {"shmDevice", required_argument, 0, 'f'},
-    {0, 0, 0, 0}
+    {
+      .module      = "os",
+      .name        = "shmDevice",
+      .description = "The IVSHMEM device to use",
+      .value       = {
+        .type       = OPTION_TYPE_STRING,
+        .v.x_string = "uio0"
+      },
+      .validator   = NULL,
+      .printHelp   = NULL
+    },
+    {0}
   };
 
-  int optionIndex = 0;
-  while(true)
-  {
-    int c = getopt_long(argc, argv, "f:", longOptions, &optionIndex);
-    if (c == -1)
-      break;
+  option_register(options);
 
-    switch(c)
-    {
-      case 'f':
-        params.shmDevice = optarg;
-        break;
-    }
-  }
+  int result = app_main(argc, argv);
+  os_shmemUnmap();
+  close(app.shmFD);
+
+  return result;
+}
+
+bool app_init()
+{
+  const char * shmDevice = option_get_string("os", "shmDevice");
 
   // check the deice name
   {
     char file[100] = "/sys/class/uio/";
-    strncat(file, params.shmDevice, sizeof(file) - 1);
-    strncat(file, "/name"         , sizeof(file) - 1);
+    strncat(file, shmDevice, sizeof(file) - 1);
+    strncat(file, "/name"  , sizeof(file) - 1);
 
     int fd = open(file, O_RDONLY);
     if (fd < 0)
     {
       DEBUG_ERROR("Failed to open: %s", file);
       DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
-      return -1;
+      return false;
     }
 
     char name[32];
@@ -112,7 +111,7 @@ int main(int argc, char * argv[])
     {
       DEBUG_ERROR("Failed to read: %s", file);
       close(fd);
-      return -1;
+      return false;
     }
     name[len] = '\0';
     close(fd);
@@ -126,21 +125,21 @@ int main(int argc, char * argv[])
     if (strcmp(name, "KVMFR") != 0)
     {
       DEBUG_ERROR("Device is not a KVMFR device \"%s\" reports as: %s", file, name);
-      return -1;
+      return false;
     }
   }
 
   // get the device size
   {
     char file[100] = "/sys/class/uio/";
-    strncat(file, params.shmDevice , sizeof(file) - 1);
+    strncat(file, shmDevice        , sizeof(file) - 1);
     strncat(file, "/maps/map0/size", sizeof(file) - 1);
 
     int fd = open(file, O_RDONLY);
     if (fd < 0)
     {
       DEBUG_ERROR("Failed to open: %s", file);
-      return -1;
+      return false;
     }
 
     char size[32];
@@ -149,7 +148,7 @@ int main(int argc, char * argv[])
     {
       DEBUG_ERROR("Failed to read: %s", file);
       close(fd);
-      return -1;
+      return false;
     }
     size[len] = '\0';
     close(fd);
@@ -160,13 +159,13 @@ int main(int argc, char * argv[])
   // open the device
   {
     char file[100] = "/dev/";
-    strncat(file, params.shmDevice, sizeof(file) - 1);
+    strncat(file, shmDevice, sizeof(file) - 1);
     app.shmFD   = open(file, O_RDWR, (mode_t)0600);
     app.shmMap  = MAP_FAILED;
     if (app.shmFD < 0)
     {
       DEBUG_ERROR("Failed to open: %s", file);
-      return -1;
+      return false;
     }
 
     DEBUG_INFO("KVMFR Device     : %s", file);
@@ -174,11 +173,7 @@ int main(int argc, char * argv[])
 
   signal(SIGINT, sigHandler);
 
-  int result = app_main(argc, argv);
-  os_shmemUnmap();
-  close(app.shmFD);
-
-  return result;
+  return true;
 }
 
 const char * os_getExecutable()
@@ -198,7 +193,8 @@ bool os_shmemMmap(void **ptr)
     app.shmMap = mmap(0, app.shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, app.shmFD, 0);
     if (app.shmMap == MAP_FAILED)
     {
-      DEBUG_ERROR("Failed to map the shared memory device: %s", params.shmDevice);
+      const char * shmDevice = option_get_string("os", "shmDevice");
+      DEBUG_ERROR("Failed to map the shared memory device: %s", shmDevice);
       return false;
     }
   }
