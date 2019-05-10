@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/option.h"
 #include "windows/debug.h"
 #include "ivshmem/Public.h"
 
@@ -111,6 +112,24 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
   int result = 0;
+
+  struct Option options[] =
+  {
+    {
+      .module      = "os",
+      .name        = "shmDevice",
+      .description = "The IVSHMEM device to use",
+      .value       = {
+        .type      = OPTION_TYPE_INT,
+        .v.x_int   = 0,
+      },
+      .validator   = NULL,
+      .printHelp   = NULL
+    },
+    {0}
+  };
+
+  option_register(options);
 
   // convert the command line to the standard argc and argv
   LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
@@ -210,6 +229,8 @@ finish:
 
 bool app_init()
 {
+  int shmDevice = option_get_int("os", "shmDevice");
+
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
@@ -218,7 +239,7 @@ bool app_init()
   memset(&deviceInterfaceData, 0, sizeof(SP_DEVICE_INTERFACE_DATA));
   deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
-  if (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, 0, &deviceInterfaceData) == FALSE)
+  if (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, shmDevice, &deviceInterfaceData) == FALSE)
   {
     DWORD error = GetLastError();
     if (error == ERROR_NO_MORE_ITEMS)

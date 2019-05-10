@@ -196,7 +196,7 @@ int run()
 int parseArgs(struct StartupArgs & args)
 {
   int c;
-  while((c = getopt(__argc, __argv, "hc:o:fl")) != -1)
+  while((c = getopt(__argc, __argv, "hc:o:fld:")) != -1)
   {
     switch (c)
     {
@@ -253,6 +253,36 @@ int parseArgs(struct StartupArgs & args)
     case 'l':
       doLicense();
       return -1;
+
+    case 'd':
+      if (optarg == NULL || strlen(optarg) == 0)
+      {
+        setupConsole();
+        fprintf(stderr, "Device ID missing\n");
+        return -1;
+      }
+      else if (*optarg == '?')
+      {
+        setupConsole();
+        IVSHMEM::listDevices();
+        return -1;
+      }
+      else
+      {
+        PCI_DEVICE dev;
+        int cnt = sscanf_s(optarg, "%hhu,%hhu,%hhu", &dev.bus, &dev.addr, &dev.func);
+        if (cnt == 3)
+        {
+          Service::SetDevice(dev);
+        }
+        else
+        {
+          setupConsole();
+          fprintf(stderr, "Invalid Parameter\n");
+          return -1;
+        }
+      }
+      break;
     }
   }
 
@@ -271,7 +301,8 @@ void doHelp()
     "  -c  Specify the capture device to use or ? to list availble (device is probed if not specified)\n"
     "  -o  Option to pass to the capture device, may be specified multiple times for extra options\n"
     "  -f  Foreground mode\n"
-    "  -l  License information\n",
+    "  -l  License information\n"
+    "  -d  Specify the IVSHMEM device with \"<bus>,<slot>,<function>\" or ? to list available\n",
     app,
     app
   );
