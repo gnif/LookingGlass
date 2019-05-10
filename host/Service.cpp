@@ -27,6 +27,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "Util.h"
 #include "CaptureFactory.h"
 
+PCI_DEVICE Service::s_dev = {0x13, 0x01, 0x00};
+
 Service::Service() :
   m_initialized(false),
   m_memory(NULL),
@@ -40,7 +42,7 @@ Service::Service() :
   m_consoleSessionID = WTSGetActiveConsoleSessionId();
   m_ivshmem = IVSHMEM::Get();
 
-  if (!m_ivshmem->Initialize())
+  if (!m_ivshmem->Initialize(s_dev))
     throw "IVSHMEM failed to initalize";
 
   if (m_ivshmem->GetSize() < sizeof(KVMFRHeader))

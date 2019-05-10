@@ -23,6 +23,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 #include <stdbool.h>
 
+struct PCI_DEVICE {
+  BYTE bus, addr, func;
+};
+
 class IVSHMEM
 {
 public:
@@ -33,7 +37,9 @@ public:
     return m_instance;
   }
 
-  bool Initialize();
+  static void listDevices();
+
+  bool Initialize(PCI_DEVICE dev);
   void DeInitialize();
   bool IsInitialized();
 

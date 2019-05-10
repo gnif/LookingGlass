@@ -61,6 +61,11 @@ public:
     }
   }
 
+  static void SetDevice(PCI_DEVICE dev)
+  {
+    s_dev = dev;
+  }
+
   bool Initialize(ICapture * captureDevice);
   void DeInitialize();
   ProcessStatus Process();
@@ -95,6 +100,7 @@ private:
   size_t        m_frameSize;
   uint64_t      m_dataOffset[MAX_FRAMES];
   int           m_frameIndex;
+  static PCI_DEVICE  s_dev;
 
   static DWORD WINAPI _CursorThread(LPVOID lpParameter) { return Service::Instance().CursorThread(); }
   DWORD CursorThread();
