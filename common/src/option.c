@@ -52,10 +52,51 @@ static struct State state =
   .gCount  = 0
 };
 
+static bool int_parser(struct Option * opt, const char * str)
+{
+  opt->value.x_int = atol(str);
+  return true;
+}
+
+static bool bool_parser(struct Option * opt, const char * str)
+{
+  opt->value.x_bool =
+    strcmp(str, "1"   ) == 0 ||
+    strcmp(str, "on"  ) == 0 ||
+    strcmp(str, "yes" ) == 0 ||
+    strcmp(str, "true") == 0;
+  return true;
+}
+
+static bool string_parser(struct Option * opt, const char * str)
+{
+  free(opt->value.x_string);
+  opt->value.x_string = strdup(str);
+  return true;
+}
+
+static char * int_toString(struct Option * opt)
+{
+  int len = snprintf(NULL, 0, "%d", opt->value.x_int);
+  char * ret = malloc(len + 1);
+  sprintf(ret, "%d", opt->value.x_int);
+  return ret;
+}
+
+static char * bool_toString(struct Option * opt)
+{
+  return strdup(opt->value.x_bool ? "yes" : "no");
+}
+
+static char * string_toString(struct Option * opt)
+{
+  return strdup(opt->value.x_string);
+}
+
 bool option_register(struct Option options[])
 {
   int new = 0;
-  for(int i = 0; options[i].value.type != OPTION_TYPE_NONE; ++i)
+  for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
     ++new;
 
   state.options = realloc(
@@ -63,14 +104,58 @@ bool option_register(struct Option options[])
     sizeof(struct Option) * (state.oCount + new)
   );
 
-  for(int i = 0; options[i].value.type != OPTION_TYPE_NONE; ++i)
+  for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
   {
     struct Option * o = &state.options[state.oCount + i];
     memcpy(o, &options[i], sizeof(struct Option));
 
+    if (!o->parser)
+    {
+      switch(o->type)
+      {
+        case OPTION_TYPE_INT:
+          o->parser = int_parser;
+          break;
+
+        case OPTION_TYPE_STRING:
+          o->parser = string_parser;
+          break;
+
+        case OPTION_TYPE_BOOL:
+          o->parser = bool_parser;
+          break;
+
+        default:
+          DEBUG_ERROR("BUG: Non int/string/bool option types must have a parser");
+          continue;
+      }
+    }
+
+    if (!o->toString)
+    {
+      switch(o->type)
+      {
+        case OPTION_TYPE_INT:
+          o->toString = int_toString;
+          break;
+
+        case OPTION_TYPE_STRING:
+          o->toString = string_toString;
+          break;
+
+        case OPTION_TYPE_BOOL:
+          o->toString = bool_toString;
+          break;
+
+        default:
+          DEBUG_ERROR("BUG: Non int/string/bool option types must implement toString");
+          continue;
+      }
+    }
+
     // ensure the string is locally allocated
-    if (o->value.type == OPTION_TYPE_STRING)
-      o->value.v.x_string = strdup(o->value.v.x_string);
+    if (o->type == OPTION_TYPE_STRING)
+      o->value.x_string = strdup(o->value.x_string);
 
     // add the option to the correct group for help printout
     bool found = false;
@@ -121,8 +206,8 @@ void option_free()
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = &state.options[i];
-    if (o->value.type == OPTION_TYPE_STRING)
-      free(o->value.v.x_string);
+    if (o->type == OPTION_TYPE_STRING)
+      free(o->value.x_string);
   }
   free(state.options);
   state.options = NULL;
@@ -133,33 +218,9 @@ void option_free()
   state.gCount  = 0;
 }
 
-static bool option_set(struct OptionValue * v, const char * value)
+static bool option_set(struct Option * opt, const char * value)
 {
-  switch(v->type)
-  {
-    case OPTION_TYPE_INT:
-      v->v.x_int = atol(value);
-      break;
-
-    case OPTION_TYPE_STRING:
-      free(v->v.x_string);
-      v->v.x_string = strdup(value);
-      break;
-
-    case OPTION_TYPE_BOOL:
-      v->v.x_bool =
-        strcmp(value, "1"   ) == 0 ||
-        strcmp(value, "yes" ) == 0 ||
-        strcmp(value, "true") == 0 ||
-        strcmp(value, "on"  ) == 0;
-      break;
-
-    default:
-      DEBUG_ERROR("BUG: Invalid option type, this should never happen");
-      return false;
-  }
-
-  return true;
+  return opt->parser(opt, value);
 }
 
 bool option_parse(int argc, char * argv[])
@@ -203,7 +264,7 @@ bool option_parse(int argc, char * argv[])
       continue;
     }
 
-    if (!option_set(&o->value, value))
+    if (!option_set(o, value))
     {
       DEBUG_ERROR("Failed to set the option value");
       free(arg);
@@ -306,7 +367,7 @@ bool option_load(const char * filename)
       case '\n':
         if (name)
         {
-          struct OptionValue * o = option_get(module, name);
+          struct Option * o = option_get(module, name);
           if (!o)
             DEBUG_WARN("Ignored unknown option %s:%s", module, name);
           else
@@ -396,7 +457,7 @@ bool option_validate()
     struct Option * o = &state.options[i];
     const char * error = NULL;
     if (o->validator)
-      if (!o->validator(&o->value, &error))
+      if (!o->validator(o, &error))
       {
         printf("\nInvalid value provided to the option: %s:%s\n", o->module, o->name);
 
@@ -430,66 +491,48 @@ void option_print()
     for(int i = 0; i < state.groups[g].count; ++i)
     {
       struct Option * o = state.groups[g].options[i];
-      printf("  %s:%-*s - %s [", o->module, state.groups[g].pad, o->name, o->description);
-
-      switch(o->value.type)
-      {
-        case OPTION_TYPE_INT:
-          printf("%d]\n", o->value.v.x_int);
-          break;
-
-        case OPTION_TYPE_STRING:
-          printf("%s]\n", o->value.v.x_string);
-          break;
-
-        case OPTION_TYPE_BOOL:
-          printf("%s]\n", o->value.v.x_bool ? "yes" : "no");
-          break;
-
-        default:
-          DEBUG_ERROR("BUG: Invalid option type, this should never happen");
-          assert(false);
-          break;
-      }
+      char * value = o->toString(o);
+      printf("  %s:%-*s - %s [%s]\n", o->module, state.groups[g].pad, o->name, o->description, value);
+      free(value);
     }
     printf("\n");
   }
 }
 
-struct OptionValue * option_get(const char * module, const char * name)
+struct Option * option_get(const char * module, const char * name)
 {
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = &state.options[i];
     if ((strcmp(o->module, module) == 0) && (strcmp(o->name, name) == 0))
-      return &o->value;
+      return o;
   }
   return NULL;
 }
 
 int option_get_int(const char * module, const char * name)
 {
-  struct OptionValue * o = option_get(module, name);
+  struct Option * o = option_get(module, name);
   if (!o)
     return -1;
   assert(o->type == OPTION_TYPE_INT);
-  return o->v.x_int;
+  return o->value.x_int;
 }
 
 const char * option_get_string(const char * module, const char * name)
 {
-  struct OptionValue * o = option_get(module, name);
+  struct Option * o = option_get(module, name);
   if (!o)
     return NULL;
   assert(o->type == OPTION_TYPE_STRING);
-  return o->v.x_string;
+  return o->value.x_string;
 }
 
 bool option_get_bool(const char * module, const char * name)
 {
-  struct OptionValue * o = option_get(module, name);
+  struct Option * o = option_get(module, name);
   if (!o)
     return false;
   assert(o->type == OPTION_TYPE_BOOL);
-  return o->v.x_bool;
+  return o->value.x_bool;
 }

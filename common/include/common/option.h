@@ -25,45 +25,42 @@ enum OptionType
   OPTION_TYPE_NONE = 0,
   OPTION_TYPE_INT,
   OPTION_TYPE_STRING,
-  OPTION_TYPE_BOOL
+  OPTION_TYPE_BOOL,
+  OPTION_TYPE_CUSTOM
 };
 
-struct OptionState;
-
-struct OptionValue
-{
-  enum OptionType type;
-  union
-  {
-    int    x_int;
-    char * x_string;
-    bool   x_bool;
-  }
-  v;
-
-  // internal state
-  struct OptionState * state;
-};
+struct Option;
 
 struct Option
 {
   const char         * module;
   const char         * name;
   const char         * description;
-  struct OptionValue   value;
 
-  bool (*validator)(struct OptionValue * value, const char ** error);
-  void (*printHelp)();
+  enum OptionType type;
+  union
+  {
+    int    x_int;
+    char * x_string;
+    bool   x_bool;
+    void * x_custom;
+  }
+  value;
+
+  bool   (*parser   )(struct Option * opt, const char * str);
+  bool   (*validator)(struct Option * opt, const char ** error);
+  char * (*toString )(struct Option * opt);
+ void    (*printHelp)();
 };
 
 // register an NULL terminated array of options
 bool option_register(struct Option options[]);
 
 // lookup the value of an option
-struct OptionValue * option_get       (const char * module, const char * name);
-int                  option_get_int   (const char * module, const char * name);
-const char *         option_get_string(const char * module, const char * name);
-bool                 option_get_bool  (const char * module, const char * name);
+struct Option * option_get       (const char * module, const char * name);
+int             option_get_int   (const char * module, const char * name);
+const char *    option_get_string(const char * module, const char * name);
+bool            option_get_bool  (const char * module, const char * name);
 
 // called by the main application to parse the command line arguments
 bool option_parse(int argc, char * argv[]);
