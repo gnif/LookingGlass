@@ -253,7 +253,7 @@ void option_print()
     for(int i = 0; i < state.groups[g].count; ++i)
     {
       struct Option * o = state.groups[g].options[i];
-      printf("  Option: %s:%-*s - %s [", o->module, state.groups[g].pad, o->name, o->description);
+      printf("  %s:%-*s - %s [", o->module, state.groups[g].pad, o->name, o->description);
 
       switch(o->value.type)
       {
