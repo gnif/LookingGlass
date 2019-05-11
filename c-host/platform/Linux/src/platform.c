@@ -222,7 +222,7 @@ bool app_init()
 
   // get the device size
   {
-    int fd = uioOpenFile(shmDevice, "size");
+    int fd = uioOpenFile(shmDevice, "maps/map0/size");
     if (fd < 0)
     {
       DEBUG_ERROR("Failed to open %s/size", shmDevice);
