@@ -121,19 +121,19 @@ static int shmOpenDev(const char * shmDevice)
   return fd;
 }
 
-static bool shmDeviceValidator(struct OptionValue * value)
+static bool shmDeviceValidator(struct OptionValue * value, const char ** error)
 {
   char * name = uioGetName(value->v.x_string);
   if (!name)
   {
-    printf("Failed to get the uio device name for: %s\n", value->v.x_string);
+    *error = "Failed to get the uio device name";
     return false;
   }
 
   if (strcmp(name, "KVMFR") != 0)
   {
     free(name);
-    printf("Device is not a KVMFR device \"%s\" reports as: %s\n", value->v.x_string, name);
+    *error = "Device is not a KVMFR device";
     return false;
   }
 
@@ -143,7 +143,7 @@ static bool shmDeviceValidator(struct OptionValue * value)
 
 static void shmDevicePrintHelp()
 {
-  printf("Valid devices are:\n");
+  printf("Valid devices are:\n\n");
   DIR * d = opendir("/sys/class/uio");
   if (!d)
     return;
@@ -159,7 +159,7 @@ static void shmDevicePrintHelp()
       continue;
 
     if (strcmp(name, "KVMFR") == 0)
-      printf("  %s\n", dir->d_name);
+      printf("  * %s\n", dir->d_name);
 
     free(name);
   }

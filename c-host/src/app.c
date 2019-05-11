@@ -276,6 +276,12 @@ int app_main(int argc, char * argv[])
     return -1;
   }
 
+  if (!option_validate())
+  {
+    option_free();
+    return -1;
+  }
+
   // perform platform specific initialization
   if (!app_init())
     return -1;
