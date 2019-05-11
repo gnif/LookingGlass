@@ -199,22 +199,37 @@ bool option_parse(int argc, char * argv[])
     free(arg);
   }
 
+  return true;
+}
+
+bool option_validate()
+{
   // validate the option values
   bool ok = true;
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = &state.options[i];
+    const char * error = NULL;
     if (o->validator)
-      if (!o->validator(&o->value))
+      if (!o->validator(&o->value, &error))
       {
-        DEBUG_ERROR("Invalid value provided to option %s:%s", o->module, o->name);
+        printf("\nInvalid value provided to the option: %s:%s\n", o->module, o->name);
+
+        if (error)
+          printf("\n Error: %s\n", error);
 
         if (o->printHelp)
+        {
+          printf("\n");
           o->printHelp();
+        }
 
         ok = false;
       }
   }
+
+  if (!ok)
+    printf("\n");
 
   return ok;
 }
