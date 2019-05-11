@@ -268,6 +268,9 @@ int app_main(int argc, char * argv[])
     if (CaptureInterfaces[i]->initOptions)
       CaptureInterfaces[i]->initOptions();
 
+  // try load values from a config file
+  option_load("looking-glass-host.ini");
+
   // parse the command line arguments
   if (!option_parse(argc, argv))
   {
