@@ -68,6 +68,9 @@ bool                 option_get_bool  (const char * module, const char * name);
 // called by the main application to parse the command line arguments
 bool option_parse(int argc, char * argv[]);
 
+// called by the main application to load configuration from a file
+bool option_load(const char * filename);
+
 // called by the main application to validate the option values
 bool option_validate();
 

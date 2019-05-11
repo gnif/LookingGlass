@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
@@ -132,6 +133,35 @@ void option_free()
   state.gCount  = 0;
 }
 
+static bool option_set(struct OptionValue * v, const char * value)
+{
+  switch(v->type)
+  {
+    case OPTION_TYPE_INT:
+      v->v.x_int = atol(value);
+      break;
+
+    case OPTION_TYPE_STRING:
+      free(v->v.x_string);
+      v->v.x_string = strdup(value);
+      break;
+
+    case OPTION_TYPE_BOOL:
+      v->v.x_bool =
+        strcmp(value, "1"   ) == 0 ||
+        strcmp(value, "yes" ) == 0 ||
+        strcmp(value, "true") == 0 ||
+        strcmp(value, "on"  ) == 0;
+      break;
+
+    default:
+      DEBUG_ERROR("BUG: Invalid option type, this should never happen");
+      return false;
+  }
+
+  return true;
+}
+
 bool option_parse(int argc, char * argv[])
 {
   for(int a = 1; a < argc; ++a)
@@ -173,35 +203,182 @@ bool option_parse(int argc, char * argv[])
       continue;
     }
 
-    switch(o->value.type)
+    if (!option_set(&o->value, value))
     {
-      case OPTION_TYPE_INT:
-        o->value.v.x_int = atol(value);
-        break;
-
-      case OPTION_TYPE_STRING:
-        free(o->value.v.x_string);
-        o->value.v.x_string = strdup(value);
-        break;
-
-      case OPTION_TYPE_BOOL:
-        o->value.v.x_bool =
-          strcmp(value, "1"   ) == 0 ||
-          strcmp(value, "yes" ) == 0 ||
-          strcmp(value, "true") == 0 ||
-          strcmp(value, "on"  ) == 0;
-        break;
-
-      default:
-        DEBUG_ERROR("BUG: Invalid option type, this should never happen");
-        assert(false);
-        break;
+      DEBUG_ERROR("Failed to set the option value");
+      free(arg);
+      continue;
     }
 
     free(arg);
   }
 
   return true;
+}
+
+static char * file_parse_module(FILE * fp)
+{
+  char * module = NULL;
+  int    len    = 0;
+
+  for(int c = fgetc(fp); !feof(fp); c = fgetc(fp))
+  {
+    switch(c)
+    {
+      case ']':
+        if (module)
+          module[len] = '\0';
+        return module;
+
+      case '\r':
+      case '\n':
+        free(module);
+        return NULL;
+
+      default:
+        if (len % 32 == 0)
+          module = realloc(module, len + 32 + 1);
+        module[len++] = c;
+    }
+  }
+
+  if (module)
+    free(module);
+
+  return NULL;
+}
+
+bool option_load(const char * filename)
+{
+  FILE * fp = fopen(filename, "r");
+  if (!fp)
+    return false;
+
+  bool   result      = true;
+  int    lineno      = 1;
+  char * module      = NULL;
+  bool   line        = true;
+  bool   expectLine  = false;
+  bool   expectValue = false;
+  char * name        = NULL;
+  int    nameLen     = 0;
+  char * value       = NULL;
+  int    valueLen    = 0;
+
+  char ** p   = &name;
+  int  *  len = &nameLen;
+
+  for(int c = fgetc(fp); !feof(fp); c = fgetc(fp))
+  {
+    switch(c)
+    {
+      case '[':
+        if (expectLine)
+        {
+          DEBUG_ERROR("Syntax error on line %d, expected new line", lineno);
+          result = false;
+          goto exit;
+        }
+
+        if (line)
+        {
+          free(module);
+          module = file_parse_module(fp);
+          if (!module)
+          {
+            DEBUG_ERROR("Syntax error on line %d, failed to parse the module", lineno);
+            result = false;
+            goto exit;
+          }
+          line       = false;
+          expectLine = true;
+          continue;
+        }
+
+        if (*len % 32 == 0)
+          *p = realloc(*p, *len + 32 + 1);
+        (*p)[(*len)++] = c;
+        break;
+
+      case '\r':
+        continue;
+
+      case '\n':
+        if (name)
+        {
+          struct OptionValue * o = option_get(module, name);
+          if (!o)
+            DEBUG_WARN("Ignored unknown option %s:%s", module, name);
+          else
+          {
+            if (!option_set(o, value))
+              DEBUG_ERROR("Failed to set the option value");
+          }
+        }
+
+        line        = true;
+        expectLine  = false;
+        expectValue = false;
+        ++lineno;
+
+        p   = &name;
+        len = &nameLen;
+
+        free(name);
+        name     = NULL;
+        nameLen  = 0;
+        free(value);
+        value    = NULL;
+        valueLen = 0;
+        break;
+
+      case '=':
+        if (!expectValue)
+        {
+          if (!name)
+          {
+            DEBUG_ERROR("Syntax error on line %d, expected option name", lineno);
+            result = false;
+            goto exit;
+          }
+
+          name[nameLen] = '\0';
+          expectValue   = true;
+
+          p   = &value;
+          len = &valueLen;
+          continue;
+        }
+
+        if (*len % 32 == 0)
+          *p = realloc(*p, *len + 32 + 1);
+        (*p)[(*len)++] = c;
+        break;
+
+      default:
+        if (expectLine)
+        {
+          DEBUG_ERROR("Syntax error on line %d, expected new line", lineno);
+          result = false;
+          goto exit;
+        }
+        line = false;
+
+        if (*len % 32 == 0)
+          *p = realloc(*p, *len + 32 + 1);
+        (*p)[(*len)++] = c;
+        break;
+    }
+  }
+
+exit:
+  fclose(fp);
+
+  free(module);
+  free(name  );
+  free(value );
+
+  return result;
 }
 
 bool option_validate()
