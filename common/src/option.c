@@ -35,6 +35,7 @@ struct OptionGroup
 
 struct State
 {
+  bool                 doHelp;
   struct Option      * options;
   int                  oCount;
   struct OptionGroup * groups;
@@ -43,6 +44,7 @@ struct State
 
 struct State state =
 {
+  .doHelp  = false,
   .options = NULL,
   .oCount  = 0,
   .groups  = NULL,
@@ -136,8 +138,8 @@ bool option_parse(int argc, char * argv[])
   {
     if (strcmp(argv[a], "-h") == 0 || strcmp(argv[a], "--help") == 0)
     {
-      option_print();
-      return false;
+      state.doHelp = true;
+      continue;
     }
 
     char * arg    = strdup(argv[a]);
@@ -204,6 +206,12 @@ bool option_parse(int argc, char * argv[])
 
 bool option_validate()
 {
+  if (state.doHelp)
+  {
+    option_print();
+    return false;
+  }
+
   // validate the option values
   bool ok = true;
   for(int i = 0; i < state.oCount; ++i)
@@ -245,7 +253,27 @@ void option_print()
     for(int i = 0; i < state.groups[g].count; ++i)
     {
       struct Option * o = state.groups[g].options[i];
-      printf("  %s:%-*s - %s\n", o->module, state.groups[g].pad, o->name, o->description);
+      printf("  Option: %s:%-*s - %s [", o->module, state.groups[g].pad, o->name, o->description);
+
+      switch(o->value.type)
+      {
+        case OPTION_TYPE_INT:
+          printf("%d]\n", o->value.v.x_int);
+          break;
+
+        case OPTION_TYPE_STRING:
+          printf("%s]\n", o->value.v.x_string);
+          break;
+
+        case OPTION_TYPE_BOOL:
+          printf("%s]\n", o->value.v.x_bool ? "yes" : "no");
+          break;
+
+        default:
+          DEBUG_ERROR("BUG: Invalid option type, this should never happen");
+          assert(false);
+          break;
+      }
     }
     printf("\n");
   }
