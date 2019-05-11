@@ -43,7 +43,7 @@ struct State
   int                  gCount;
 };
 
-struct State state =
+static struct State state =
 {
   .doHelp  = false,
   .options = NULL,
