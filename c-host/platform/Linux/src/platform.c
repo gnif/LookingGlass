@@ -200,62 +200,37 @@ bool app_init()
 {
   const char * shmDevice = option_get_string("os", "shmDevice");
 
-  // check the deice name
-  {
-    char * name = uioGetName(shmDevice);
-    if (!name)
-    {
-      DEBUG_ERROR("Failed to read the shmDevice name for: %s", shmDevice);
-      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
-      return false;
-    }
-
-    if (strcmp(name, "KVMFR") != 0)
-    {
-      free(name);
-      DEBUG_ERROR("Device is not a KVMFR device \"%s\" reports as: %s", shmDevice, name);
-      return false;
-    }
-
-    free(name);
-  }
-
   // get the device size
+  int fd = uioOpenFile(shmDevice, "maps/map0/size");
+  if (fd < 0)
   {
-    int fd = uioOpenFile(shmDevice, "maps/map0/size");
-    if (fd < 0)
-    {
-      DEBUG_ERROR("Failed to open %s/size", shmDevice);
-      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
-      return false;
-    }
-
-    char size[32];
-    int  len = read(fd, size, sizeof(size) - 1);
-    if (len <= 0)
-    {
-      DEBUG_ERROR("Failed to read the device size");
-      close(fd);
-      return false;
-    }
-    size[len] = '\0';
-    close(fd);
-
-    app.shmSize = strtoul(size, NULL, 16);
+    DEBUG_ERROR("Failed to open %s/size", shmDevice);
+    DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
+    return false;
   }
+
+  char size[32];
+  int  len = read(fd, size, sizeof(size) - 1);
+  if (len <= 0)
+  {
+    DEBUG_ERROR("Failed to read the device size");
+    close(fd);
+    return false;
+  }
+  size[len] = '\0';
+  close(fd);
+
+  app.shmSize = strtoul(size, NULL, 16);
 
   // open the device
-  {
-    app.shmFD  = shmOpenDev(shmDevice);
-    app.shmMap = MAP_FAILED;
-    if (app.shmFD < 0)
-      return false;
+  app.shmFD  = shmOpenDev(shmDevice);
+  app.shmMap = MAP_FAILED;
+  if (app.shmFD < 0)
+    return false;
 
-    DEBUG_INFO("KVMFR Device     : %s", shmDevice);
-  }
+  DEBUG_INFO("KVMFR Device     : %s", shmDevice);
 
   signal(SIGINT, sigHandler);
-
   return true;
 }
 
