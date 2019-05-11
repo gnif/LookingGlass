@@ -121,9 +121,9 @@ static int shmOpenDev(const char * shmDevice)
   return fd;
 }
 
-static bool shmDeviceValidator(struct OptionValue * value, const char ** error)
+static bool shmDeviceValidator(struct Option * opt, const char ** error)
 {
-  char * name = uioGetName(value->v.x_string);
+  char * name = uioGetName(opt->value.x_string);
   if (!name)
   {
     *error = "Failed to get the uio device name";
@@ -174,15 +174,13 @@ int main(int argc, char * argv[])
   struct Option options[] =
   {
     {
-      .module      = "os",
-      .name        = "shmDevice",
-      .description = "The IVSHMEM device to use",
-      .value       = {
-        .type       = OPTION_TYPE_STRING,
-        .v.x_string = "uio0"
-      },
-      .validator   = shmDeviceValidator,
-      .printHelp   = shmDevicePrintHelp
+      .module         = "os",
+      .name           = "shmDevice",
+      .description    = "The IVSHMEM device to use",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = "uio0",
+      .validator      = shmDeviceValidator,
+      .printHelp      = shmDevicePrintHelp
     },
     {0}
   };

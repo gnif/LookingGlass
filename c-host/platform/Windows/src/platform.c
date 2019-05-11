@@ -119,12 +119,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
       .module      = "os",
       .name        = "shmDevice",
       .description = "The IVSHMEM device to use",
-      .value       = {
-        .type      = OPTION_TYPE_INT,
-        .v.x_int   = 0,
-      },
-      .validator   = NULL,
-      .printHelp   = NULL
+      .type        = OPTION_TYPE_INT,
+      .value.x_int = 0
     },
     {0}
   };
