@@ -197,20 +197,26 @@ bool option_parse(int argc, char * argv[])
     }
 
     free(arg);
+  }
 
+  // validate the option values
+  bool ok = true;
+  for(int i = 0; i < state.oCount; ++i)
+  {
+    struct Option * o = &state.options[i];
     if (o->validator)
       if (!o->validator(&o->value))
       {
-        DEBUG_ERROR("Invalid value provided to option: %s", argv[a]);
+        DEBUG_ERROR("Invalid value provided to option %s:%s", o->module, o->name);
 
         if (o->printHelp)
           o->printHelp();
 
-        return false;
+        ok = false;
       }
   }
 
-  return true;
+  return ok;
 }
 
 void option_print()
