@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -58,6 +59,114 @@ void sigHandler(int signo)
   app_quit();
 }
 
+static int uioOpenFile(const char * shmDevice, const char * file)
+{
+  int    len  = snprintf(NULL, 0, "/sys/class/uio/%s/%s", shmDevice, file);
+  char * path = malloc(len + 1);
+  sprintf(path, "/sys/class/uio/%s/%s", shmDevice, file);
+
+  int fd = open(path, O_RDONLY);
+  if (fd < 0)
+  {
+    free(path);
+    return -1;
+  }
+
+  free(path);
+  return fd;
+}
+
+static char * uioGetName(const char * shmDevice)
+{
+  int fd = uioOpenFile(shmDevice, "name");
+  if (fd < 0)
+    return NULL;
+
+  char * name = malloc(32);
+  int len = read(fd, name, 31);
+  if (len <= 0)
+  {
+    free(name);
+    close(fd);
+    return NULL;
+  }
+  name[len] = '\0';
+  close(fd);
+
+  while(len > 0 && name[len-1] == '\n')
+  {
+    --len;
+    name[len] = '\0';
+  }
+
+  return name;
+}
+
+static int shmOpenDev(const char * shmDevice)
+{
+  int    len  = snprintf(NULL, 0, "/dev/%s", shmDevice);
+  char * path = malloc(len + 1);
+  sprintf(path, "/dev/%s", shmDevice);
+
+  int fd = open(path, O_RDWR, (mode_t)0600);
+  if (fd < 0)
+  {
+    DEBUG_ERROR("Failed to open: %s", path);
+    DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
+    free(path);
+    return -1;
+  }
+
+  free(path);
+  return fd;
+}
+
+static bool shmDeviceValidator(struct OptionValue * value)
+{
+  char * name = uioGetName(value->v.x_string);
+  if (!name)
+  {
+    printf("Failed to get the uio device name for: %s\n", value->v.x_string);
+    return false;
+  }
+
+  if (strcmp(name, "KVMFR") != 0)
+  {
+    free(name);
+    printf("Device is not a KVMFR device \"%s\" reports as: %s\n", value->v.x_string, name);
+    return false;
+  }
+
+  free(name);
+  return true;
+}
+
+static void shmDevicePrintHelp()
+{
+  printf("Valid devices are:\n");
+  DIR * d = opendir("/sys/class/uio");
+  if (!d)
+    return;
+
+  struct dirent * dir;
+  while((dir = readdir(d)) != NULL)
+  {
+    if (dir->d_name[0] == '.')
+      continue;
+
+    char * name = uioGetName(dir->d_name);
+    if (!name)
+      continue;
+
+    if (strcmp(name, "KVMFR") == 0)
+      printf("  %s\n", dir->d_name);
+
+    free(name);
+  }
+
+  closedir(d);
+}
+
 int main(int argc, char * argv[])
 {
   app.executable = argv[0];
@@ -72,8 +181,8 @@ int main(int argc, char * argv[])
         .type       = OPTION_TYPE_STRING,
         .v.x_string = "uio0"
       },
-      .validator   = NULL,
-      .printHelp   = NULL
+      .validator   = shmDeviceValidator,
+      .printHelp   = shmDevicePrintHelp
     },
     {0}
   };
@@ -93,52 +202,31 @@ bool app_init()
 
   // check the deice name
   {
-    char file[100] = "/sys/class/uio/";
-    strncat(file, shmDevice, sizeof(file) - 1);
-    strncat(file, "/name"  , sizeof(file) - 1);
-
-    int fd = open(file, O_RDONLY);
-    if (fd < 0)
+    char * name = uioGetName(shmDevice);
+    if (!name)
     {
-      DEBUG_ERROR("Failed to open: %s", file);
+      DEBUG_ERROR("Failed to read the shmDevice name for: %s", shmDevice);
       DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
       return false;
     }
 
-    char name[32];
-    int len = read(fd, name, sizeof(name) - 1);
-    if (len <= 0)
-    {
-      DEBUG_ERROR("Failed to read: %s", file);
-      close(fd);
-      return false;
-    }
-    name[len] = '\0';
-    close(fd);
-
-    while(len > 0 && name[len-1] == '\n')
-    {
-      --len;
-      name[len] = '\0';
-    }
-
     if (strcmp(name, "KVMFR") != 0)
     {
-      DEBUG_ERROR("Device is not a KVMFR device \"%s\" reports as: %s", file, name);
+      free(name);
+      DEBUG_ERROR("Device is not a KVMFR device \"%s\" reports as: %s", shmDevice, name);
       return false;
     }
+
+    free(name);
   }
 
   // get the device size
   {
-    char file[100] = "/sys/class/uio/";
-    strncat(file, shmDevice        , sizeof(file) - 1);
-    strncat(file, "/maps/map0/size", sizeof(file) - 1);
-
-    int fd = open(file, O_RDONLY);
+    int fd = uioOpenFile(shmDevice, "size");
     if (fd < 0)
     {
-      DEBUG_ERROR("Failed to open: %s", file);
+      DEBUG_ERROR("Failed to open %s/size", shmDevice);
+      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
       return false;
     }
 
@@ -146,7 +234,7 @@ bool app_init()
     int  len = read(fd, size, sizeof(size) - 1);
     if (len <= 0)
     {
-      DEBUG_ERROR("Failed to read: %s", file);
+      DEBUG_ERROR("Failed to read the device size");
       close(fd);
       return false;
     }
@@ -158,17 +246,12 @@ bool app_init()
 
   // open the device
   {
-    char file[100] = "/dev/";
-    strncat(file, shmDevice, sizeof(file) - 1);
-    app.shmFD   = open(file, O_RDWR, (mode_t)0600);
-    app.shmMap  = MAP_FAILED;
+    app.shmFD  = shmOpenDev(shmDevice);
+    app.shmMap = MAP_FAILED;
     if (app.shmFD < 0)
-    {
-      DEBUG_ERROR("Failed to open: %s", file);
       return false;
-    }
 
-    DEBUG_INFO("KVMFR Device     : %s", file);
+    DEBUG_INFO("KVMFR Device     : %s", shmDevice);
   }
 
   signal(SIGINT, sigHandler);
