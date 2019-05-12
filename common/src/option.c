@@ -464,6 +464,15 @@ bool option_validate()
         if (error)
           printf("\n Error: %s\n", error);
 
+        if (o->getValues)
+        {
+          StringList values = o->getValues(o);
+          printf("\nValid values are:\n\n");
+          for(unsigned int v = 0; v < stringlist_count(values); ++v)
+            printf("  * %s\n", stringlist_at(values, v));
+          stringlist_free(&values);
+        }
+
         if (o->printHelp)
         {
           printf("\n");

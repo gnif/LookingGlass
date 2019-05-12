@@ -17,8 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include <stdint.h>
 #include <stdbool.h>
+#include "common/stringlist.h"
 
 enum OptionType
 {
@@ -33,9 +33,9 @@ struct Option;
 
 struct Option
 {
-  const char         * module;
-  const char         * name;
-  const char         * description;
+  const char * module;
+  const char * name;
+  const char * description;
 
   enum OptionType type;
   union
@@ -47,9 +47,10 @@ struct Option
   }
   value;
 
-  bool   (*parser   )(struct Option * opt, const char * str);
-  bool   (*validator)(struct Option * opt, const char ** error);
-  char * (*toString )(struct Option * opt);
+  bool         (*parser   )(struct Option * opt, const char * str);
+  bool         (*validator)(struct Option * opt, const char ** error);
+  char       * (*toString )(struct Option * opt);
+  StringList   (*getValues)(struct Option * opt);
  void    (*printHelp)();
 };
 
