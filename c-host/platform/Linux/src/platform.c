@@ -141,12 +141,13 @@ static bool shmDeviceValidator(struct Option * opt, const char ** error)
   return true;
 }
 
-static void shmDevicePrintHelp()
+static StringList shmDeviceGetValues(struct Option * option)
 {
-  printf("Valid devices are:\n\n");
+  StringList sl = stringlist_new(true);
+
   DIR * d = opendir("/sys/class/uio");
   if (!d)
-    return;
+    return sl;
 
   struct dirent * dir;
   while((dir = readdir(d)) != NULL)
@@ -159,12 +160,13 @@ static void shmDevicePrintHelp()
       continue;
 
     if (strcmp(name, "KVMFR") == 0)
-      printf("  * %s\n", dir->d_name);
+      stringlist_push(sl, strdup(dir->d_name));
 
     free(name);
   }
 
   closedir(d);
+  return sl;
 }
 
 int main(int argc, char * argv[])
@@ -180,7 +182,7 @@ int main(int argc, char * argv[])
       .type           = OPTION_TYPE_STRING,
       .value.x_string = "uio0",
       .validator      = shmDeviceValidator,
-      .printHelp      = shmDevicePrintHelp
+      .getValues      = shmDeviceGetValues
     },
     {0}
   };
