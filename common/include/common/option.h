@@ -51,7 +51,11 @@ struct Option
   bool         (*validator)(struct Option * opt, const char ** error);
   char       * (*toString )(struct Option * opt);
   StringList   (*getValues)(struct Option * opt);
- void    (*printHelp)();
+
+  void    (*printHelp)();
+
+  // internal use only
+  bool failed_set;
 };
 
 // register an NULL terminated array of options

@@ -220,7 +220,14 @@ void option_free()
 
 static bool option_set(struct Option * opt, const char * value)
 {
-  return opt->parser(opt, value);
+  if (!opt->parser(opt, value))
+  {
+    opt->failed_set = true;
+    return false;
+  }
+
+  opt->failed_set = false;
+  return true;
 }
 
 bool option_parse(int argc, char * argv[])
@@ -266,7 +273,6 @@ bool option_parse(int argc, char * argv[])
 
     if (!option_set(o, value))
     {
-      DEBUG_ERROR("Failed to set the option value");
       free(arg);
       continue;
     }
@@ -456,31 +462,35 @@ bool option_validate()
   {
     struct Option * o = &state.options[i];
     const char * error = NULL;
-    if (o->validator)
-      if (!o->validator(o, &error))
+    bool invalid = o->failed_set;
+
+    if (!invalid && o->validator)
+      invalid = !o->validator(o, &error);
+
+    if (invalid)
+    {
+      printf("\nInvalid value provided to the option: %s:%s\n", o->module, o->name);
+
+      if (error)
+        printf("\n Error: %s\n", error);
+
+      if (o->getValues)
       {
-        printf("\nInvalid value provided to the option: %s:%s\n", o->module, o->name);
-
-        if (error)
-          printf("\n Error: %s\n", error);
-
-        if (o->getValues)
-        {
-          StringList values = o->getValues(o);
-          printf("\nValid values are:\n\n");
-          for(unsigned int v = 0; v < stringlist_count(values); ++v)
-            printf("  * %s\n", stringlist_at(values, v));
-          stringlist_free(&values);
-        }
-
-        if (o->printHelp)
-        {
-          printf("\n");
-          o->printHelp();
-        }
-
-        ok = false;
+        StringList values = o->getValues(o);
+        printf("\nValid values are:\n\n");
+        for(unsigned int v = 0; v < stringlist_count(values); ++v)
+          printf("  * %s\n", stringlist_at(values, v));
+        stringlist_free(&values);
       }
+
+      if (o->printHelp)
+      {
+        printf("\n");
+        o->printHelp();
+      }
+
+      ok = false;
+    }
   }
 
   if (!ok)
