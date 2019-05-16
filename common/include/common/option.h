@@ -33,9 +33,9 @@ struct Option;
 
 struct Option
 {
-  const char * module;
-  const char * name;
-  const char * description;
+  char * module;
+  char * name;
+  char * description;
 
   enum OptionType type;
   union

@@ -37,7 +37,7 @@ struct OptionGroup
 struct State
 {
   bool                 doHelp;
-  struct Option      * options;
+  struct Option     ** options;
   int                  oCount;
   struct OptionGroup * groups;
   int                  gCount;
@@ -101,12 +101,13 @@ bool option_register(struct Option options[])
 
   state.options = realloc(
     state.options,
-    sizeof(struct Option) * (state.oCount + new)
+    sizeof(struct Option *) * (state.oCount + new)
   );
 
   for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
   {
-    struct Option * o = &state.options[state.oCount + i];
+    state.options[state.oCount + i] = (struct Option *)malloc(sizeof(struct Option));
+    struct Option * o = state.options[state.oCount + i];
     memcpy(o, &options[i], sizeof(struct Option));
 
     if (!o->parser)
@@ -177,6 +178,7 @@ bool option_register(struct Option options[])
         group->pad = len;
 
       ++group->count;
+      break;
     }
 
     if (!found)
@@ -205,9 +207,10 @@ void option_free()
 {
   for(int i = 0; i < state.oCount; ++i)
   {
-    struct Option * o = &state.options[i];
+    struct Option * o = state.options[i];
     if (o->type == OPTION_TYPE_STRING)
       free(o->value.x_string);
+    free(o);
   }
   free(state.options);
   state.options = NULL;
@@ -256,7 +259,7 @@ bool option_parse(int argc, char * argv[])
     struct Option * o;
     for(int i = 0; i < state.oCount; ++i)
     {
-      o = &state.options[i];
+      o = state.options[i];
       if ((strcmp(o->module, module) != 0) || (strcmp(o->name, name) != 0))
         continue;
 
@@ -460,7 +463,7 @@ bool option_validate()
   bool ok = true;
   for(int i = 0; i < state.oCount; ++i)
   {
-    struct Option * o = &state.options[i];
+    struct Option * o = state.options[i];
     const char * error = NULL;
     bool invalid = o->failed_set;
 
@@ -522,7 +525,7 @@ struct Option * option_get(const char * module, const char * name)
 {
   for(int i = 0; i < state.oCount; ++i)
   {
-    struct Option * o = &state.options[i];
+    struct Option * o = state.options[i];
     if ((strcmp(o->module, module) == 0) && (strcmp(o->name, name) == 0))
       return o;
   }
