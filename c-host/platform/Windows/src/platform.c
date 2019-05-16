@@ -113,19 +113,33 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 {
   int result = 0;
 
+  char tempPath[MAX_PATH+1];
+  GetTempPathA(sizeof(tempPath), tempPath);
+  int len = snprintf(NULL, 0, "%slooking-glass-host.txt", tempPath);
+  char * logFilePath = malloc(len + 1);
+  sprintf(logFilePath, "%slooking-glass-host.txt", tempPath);
+
   struct Option options[] =
   {
     {
-      .module      = "os",
-      .name        = "shmDevice",
-      .description = "The IVSHMEM device to use",
-      .type        = OPTION_TYPE_INT,
-      .value.x_int = 0
+      .module         = "os",
+      .name           = "shmDevice",
+      .description    = "The IVSHMEM device to use",
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 0
+    },
+    {
+      .module         = "os",
+      .name           = "logFile",
+      .description    = "The log file to write to",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = logFilePath
     },
     {0}
   };
 
   option_register(options);
+  free(logFilePath);
 
   // convert the command line to the standard argc and argv
   LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
@@ -140,20 +154,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   LocalFree(wargv);
 
   GetModuleFileName(NULL, app.executable, sizeof(app.executable));
-
-  // redirect stderr to a file
-  {
-    char tempPath[MAX_PATH+1];
-    GetTempPathA(sizeof(tempPath), tempPath);
-    int len = snprintf(NULL, 0, "%slooking-glass-host.txt", tempPath);
-    char * path = malloc(len + 1);
-    sprintf(path, "%slooking-glass-host.txt", tempPath);
-    freopen(path, "a", stderr);
-    free(path);
-  }
-
-  // always flush stderr
-  setbuf(stderr, NULL);
 
   // setup a handler for ctrl+c
   SetConsoleCtrlHandler(CtrlHandler, TRUE);
@@ -198,7 +198,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
       goto shutdown;
     }
 
-    DEBUG_INFO("Platform shutdown");
     break;
   }
 
@@ -225,7 +224,15 @@ finish:
 
 bool app_init()
 {
-  int shmDevice = option_get_int("os", "shmDevice");
+  const int    shmDevice = option_get_int   ("os", "shmDevice");
+  const char * logFile   = option_get_string("os", "logFile"  );
+
+  // redirect stderr to a file
+  if (logFile && strcmp(logFile, "stderr") != 0)
+    freopen(logFile, "a", stderr);
+
+  // always flush stderr
+  setbuf(stderr, NULL);
 
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
