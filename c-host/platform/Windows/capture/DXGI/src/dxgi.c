@@ -107,26 +107,18 @@ static void dxgi_initOptions()
   struct Option options[] =
   {
     {
-      .module       = "dxgi",
-      .name         = "adapter",
-      .description  = "The name of the adapter to capture",
-      .value        = {
-        .type       = OPTION_TYPE_STRING,
-        .v.x_string = NULL
-      },
-      .validator    = NULL,
-      .printHelp    = NULL
+      .module         = "dxgi",
+      .name           = "adapter",
+      .description    = "The name of the adapter to capture",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = NULL
     },
     {
-      .module       = "dxgi",
-      .name         = "output",
-      .description  = "The name of the adapter's output to capture",
-      .value        = {
-        .type       = OPTION_TYPE_STRING,
-        .v.x_string = NULL
-      },
-      .validator    = NULL,
-      .printHelp    = NULL
+      .module         = "dxgi",
+      .name           = "output",
+      .description    = "The name of the adapter's output to capture",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = NULL
     },
     {0}
   };
