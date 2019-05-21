@@ -31,8 +31,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "windows/debug.h"
 #include "ivshmem/Public.h"
 
+#define ID_MENU_OPEN_LOG 3000
+#define ID_MENU_EXIT     3001
+
 struct AppState
 {
+  HINSTANCE hInst;
+
   int     argc;
   char ** argv;
 
@@ -41,6 +46,7 @@ struct AppState
   bool         shmemOwned;
   IVSHMEM_MMAP shmemMap;
   HWND         messageWnd;
+  HMENU        trayMenu;
 };
 
 static struct AppState app =
@@ -65,11 +71,6 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
   switch(msg)
   {
-    case WM_CLOSE:
-      mouseHook_remove();
-      DestroyWindow(hwnd);
-      break;
-
     case WM_DESTROY:
       PostQuitMessage(0);
       break;
@@ -80,6 +81,36 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       return cf->fn(cf->wParam, cf->lParam);
     }
 
+    case WM_TRAYICON:
+    {
+      if (lParam == WM_RBUTTONDOWN)
+      {
+        POINT curPoint;
+        GetCursorPos(&curPoint);
+        SetForegroundWindow(hwnd);
+        UINT clicked = TrackPopupMenu(
+          app.trayMenu,
+          TPM_RETURNCMD | TPM_NONOTIFY,
+          curPoint.x,
+          curPoint.y,
+          0,
+          hwnd,
+          NULL
+        );
+
+             if (clicked == ID_MENU_EXIT    ) app_quit();
+        else if (clicked == ID_MENU_OPEN_LOG)
+        {
+          const char * logFile = option_get_string("os", "logFile");
+          if (strcmp(logFile, "stderr") == 0)
+            DEBUG_INFO("Ignoring request to open the logFile, logging to stderr");
+          else
+            ShellExecute(NULL, NULL, logFile, NULL, NULL, SW_SHOWNORMAL);
+        }
+      }
+      break;
+    }
+
     default:
       return DefWindowProc(hwnd, msg, wParam, lParam);
   }
@@ -88,8 +119,23 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 static int appThread(void * opaque)
 {
+  // register our TrayIcon
+  NOTIFYICONDATA iconData =
+  {
+    .cbSize           = sizeof(NOTIFYICONDATA),
+    .hWnd             = app.messageWnd,
+    .uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP,
+    .uCallbackMessage = WM_TRAYICON,
+    .szTip            = "Looking Glass (host)"
+  };
+  iconData.hIcon = LoadIcon(app.hInst, IDI_APPLICATION);
+  Shell_NotifyIcon(NIM_ADD, &iconData);
+
   int result = app_main(app.argc, app.argv);
-  SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
+
+  Shell_NotifyIcon(NIM_DELETE, &iconData);
+  mouseHook_remove();
+  SendMessage(app.messageWnd, WM_DESTROY, 0, 0);
   return result;
 }
 
@@ -112,6 +158,7 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
   int result = 0;
+  app.hInst = hInstance;
 
   char tempPath[MAX_PATH+1];
   GetTempPathA(sizeof(tempPath), tempPath);
@@ -164,6 +211,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   wx.lpfnWndProc   = DummyWndProc;
   wx.hInstance     = hInstance;
   wx.lpszClassName = "DUMMY_CLASS";
+  wx.hIcon         = LoadIcon(NULL, IDI_APPLICATION);
+  wx.hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
+  wx.hCursor       = LoadCursor(NULL, IDC_ARROW);
+  wx.hbrBackground = (HBRUSH)COLOR_APPWORKSPACE;
   if (!RegisterClassEx(&wx))
   {
     DEBUG_ERROR("Failed to register message window class");
@@ -171,6 +222,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     goto finish;
   }
   app.messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
+
+  app.trayMenu = CreatePopupMenu();
+  AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_OPEN_LOG, "Open Log File");
+  AppendMenu(app.trayMenu, MF_SEPARATOR, 0               , NULL           );
+  AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_EXIT    , "Exit"         );
 
   // create the application thread
   osThreadHandle * thread;
@@ -202,6 +258,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   }
 
 shutdown:
+  DestroyMenu(app.trayMenu);
   app_quit();
   if (!os_joinThread(thread, &result))
   {

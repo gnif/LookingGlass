@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 
 #define WM_CALL_FUNCTION (WM_USER+1)
+#define WM_TRAYICON      (WM_USER+2)
 
 typedef LRESULT (*CallFunction)(WPARAM wParam, LPARAM lParam);
 struct MSG_CALL_FUNCTION
