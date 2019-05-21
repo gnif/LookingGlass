@@ -81,7 +81,7 @@ static struct Option options[] =
   {
     .module         = "app",
     .name           = "license",
-    .description    = "Show the licence for this application and then terminate",
+    .description    = "Show the license for this application and then terminate",
     .shortopt       = 'l',
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false,
@@ -388,7 +388,7 @@ bool config_load(int argc, char * argv[])
 
 void config_free()
 {
-  option_free();
+  option_free()
 }
 
 static void doLicense()
