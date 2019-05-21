@@ -33,9 +33,10 @@ StringList stringlist_new(bool owns_strings)
 {
   StringList sl = malloc(sizeof(struct StringList));
 
-  sl->size  = 32;
-  sl->count = 0;
-  sl->list  = malloc(sizeof(char *) * sl->size);
+  sl->owns_strings = owns_strings;
+  sl->size         = 32;
+  sl->count        = 0;
+  sl->list         = malloc(sizeof(char *) * sl->size);
 
   return sl;
 }
