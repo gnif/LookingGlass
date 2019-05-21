@@ -301,7 +301,7 @@ bool option_parse(int argc, char * argv[])
     {
       if (o->type == OPTION_TYPE_BOOL)
       {
-        option_set(o, "yes");
+        o->value.x_bool = !o->value.x_bool;
         continue;
       }
       else if (o->type != OPTION_TYPE_CUSTOM)
