@@ -297,6 +297,13 @@ bool option_parse(int argc, char * argv[])
       free(arg);
     }
 
+    if (!o)
+    {
+      DEBUG_WARN("Ignored unknown argument: %s", argv[a]);
+      free(value);
+      continue;
+    }
+
     if (!value)
     {
       if (o->type == OPTION_TYPE_BOOL)
@@ -309,13 +316,6 @@ bool option_parse(int argc, char * argv[])
         DEBUG_WARN("Ignored invalid argument, missing value: %s", argv[a]);
         continue;
       }
-    }
-
-    if (!o)
-    {
-      DEBUG_WARN("Ignored unknown argument: %s", argv[a]);
-      free(value);
-      continue;
     }
 
     option_set(o, value);
