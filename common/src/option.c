@@ -415,6 +415,13 @@ bool option_load(const char * filename)
       case '\n':
         if (name)
         {
+          if (!module)
+          {
+            DEBUG_ERROR("Syntax error on line %d, module not specified for option", lineno);
+            result = false;
+            goto exit;
+          }
+
           struct Option * o = option_get(module, name);
           if (!o)
             DEBUG_WARN("Ignored unknown option %s:%s", module, name);
