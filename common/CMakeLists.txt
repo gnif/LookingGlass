@@ -6,6 +6,7 @@ include_directories(
 )
 
 set(SOURCES
+  src/stringutils.c
   src/stringlist.c
   src/option.c
 )
