@@ -388,7 +388,7 @@ bool config_load(int argc, char * argv[])
 
 void config_free()
 {
-  option_free()
+  option_free();
 }
 
 static void doLicense()
