@@ -458,6 +458,9 @@ bool option_load(const char * filename)
             goto exit;
           }
 
+          //rtrim
+          while(nameLen > 1 && (name[nameLen-1] == ' ' || name[nameLen-1] == '\t'))
+            --nameLen;
           name[nameLen] = '\0';
           expectValue   = true;
 
@@ -479,6 +482,10 @@ bool option_load(const char * filename)
           goto exit;
         }
         line = false;
+
+        //ltrim
+        if (*len == 0 && (c == ' ' || c == '\t'))
+          break;
 
         if (*len % 32 == 0)
           *p = realloc(*p, *len + 32 + 1);
