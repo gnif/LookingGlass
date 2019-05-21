@@ -267,14 +267,13 @@ bool option_parse(int argc, char * argv[])
         if (state.options[i]->shortopt == argv[a][1])
         {
           o = state.options[i];
+          if (o->type != OPTION_TYPE_BOOL && a < argc - 1)
+          {
+            ++a;
+            value = strdup(argv[a]);
+          }
           break;
         }
-      }
-
-      if (o->type != OPTION_TYPE_BOOL && a < argc - 1)
-      {
-        ++a;
-        value = strdup(argv[a]);
       }
     }
     else
