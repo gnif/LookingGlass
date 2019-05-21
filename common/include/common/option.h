@@ -36,6 +36,7 @@ struct Option
   char * module;
   char * name;
   char * description;
+  const char shortopt;
 
   enum OptionType type;
   union

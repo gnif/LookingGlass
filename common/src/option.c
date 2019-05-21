@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/option.h"
 #include "common/debug.h"
+#include "common/stringutils.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -90,6 +91,9 @@ static char * bool_toString(struct Option * opt)
 
 static char * string_toString(struct Option * opt)
 {
+  if (!opt->value.x_string)
+    return NULL;
+
   return strdup(opt->value.x_string);
 }
 
@@ -156,7 +160,10 @@ bool option_register(struct Option options[])
 
     // ensure the string is locally allocated
     if (o->type == OPTION_TYPE_STRING)
-      o->value.x_string = strdup(o->value.x_string);
+    {
+      if (o->value.x_string)
+        o->value.x_string = strdup(o->value.x_string);
+    }
 
     // add the option to the correct group for help printout
     bool found = false;
@@ -237,50 +244,83 @@ bool option_parse(int argc, char * argv[])
 {
   for(int a = 1; a < argc; ++a)
   {
-    if (strcmp(argv[a], "-h") == 0 || strcmp(argv[a], "--help") == 0)
-    {
-      state.doHelp = true;
-      continue;
-    }
+    struct Option * o = NULL;
+    char * value      = NULL;
 
-    char * arg    = strdup(argv[a]);
-    char * module = strtok(arg , ":");
-    char * name   = strtok(NULL, "=");
-    char * value  = strtok(NULL, "" );
-
-    if (!module || !name || !value)
+    // emulate getopt for backwards compatability
+    if (argv[a][0] == '-')
     {
-      DEBUG_WARN("Ignored invalid argument: %s", argv[a]);
-      free(arg);
-      continue;
-    }
-
-    bool found = false;
-    struct Option * o;
-    for(int i = 0; i < state.oCount; ++i)
-    {
-      o = state.options[i];
-      if ((strcmp(o->module, module) != 0) || (strcmp(o->name, name) != 0))
+      if (strcmp(argv[a], "-h") == 0 || strcmp(argv[a], "--help") == 0)
+      {
+        state.doHelp = true;
         continue;
+      }
 
-      found = true;
-      break;
+      if (strlen(argv[a]) != 2)
+      {
+        DEBUG_WARN("Ignored invalid argvument: %s", argv[a]);
+        continue;
+      }
+
+      for(int i = 0; i < state.oCount; ++i)
+      {
+        if (state.options[i]->shortopt == argv[a][1])
+        {
+          o = state.options[i];
+          break;
+        }
+      }
+
+      if (o->type != OPTION_TYPE_BOOL && a < argc - 1)
+      {
+        ++a;
+        value = strdup(argv[a]);
+      }
+    }
+    else
+    {
+      char * arg    = strdup(argv[a]);
+      char * module = strtok(arg , ":");
+      char * name   = strtok(NULL, "=");
+      value = strtok(NULL, "" );
+
+      if (!module || !name)
+      {
+        DEBUG_WARN("Ignored invalid argument: %s", argv[a]);
+        free(arg);
+        continue;
+      }
+
+      o = option_get(module, name);
+      if (value)
+        value = strdup(value);
+
+      free(arg);
     }
 
-    if (!found)
+    if (!value)
+    {
+      if (o->type == OPTION_TYPE_BOOL)
+      {
+        option_set(o, "yes");
+        continue;
+      }
+      else if (o->type != OPTION_TYPE_CUSTOM)
+      {
+        DEBUG_WARN("Ignored invalid argument, missing value: %s", argv[a]);
+        continue;
+      }
+    }
+
+    if (!o)
     {
       DEBUG_WARN("Ignored unknown argument: %s", argv[a]);
-      free(arg);
+      free(value);
       continue;
     }
 
-    if (!option_set(o, value))
-    {
-      free(arg);
-      continue;
-    }
-
-    free(arg);
+    option_set(o, value);
+    free(value);
   }
 
   return true;
@@ -510,13 +550,108 @@ void option_print()
 
   for(int g = 0; g < state.gCount; ++g)
   {
+    StringList lines  = stringlist_new(true);
+    StringList values = stringlist_new(true);
+    int len;
+    int maxLen;
+    int valueLen = 5;
+    char * line;
+
+    // ensure the pad length is atleast as wide as the heading
+    if (state.groups[g].pad < 4)
+      state.groups[g].pad = 4;
+
+    // get the values and the max value length
     for(int i = 0; i < state.groups[g].count; ++i)
     {
       struct Option * o = state.groups[g].options[i];
       char * value = o->toString(o);
-      printf("  %s:%-*s - %s [%s]\n", o->module, state.groups[g].pad, o->name, o->description, value);
-      free(value);
+      if (!value)
+      {
+        value = strdup("NULL");
+        len   = 4;
+      }
+      else
+        len = strlen(value);
+
+      if (len > valueLen)
+        valueLen = len;
+
+      stringlist_push(values, value);
     }
+
+    // add the heading
+    maxLen = alloc_sprintf(
+      &line,
+      "%-*s | Short | %-*s | Description",
+      state.groups[g].pad + 4,
+      "Long",
+      valueLen,
+      "Value"
+    );
+
+    assert(maxLen > 0);
+    stringlist_push(lines, line);
+
+    for(int i = 0; i < state.groups[g].count; ++i)
+    {
+      struct Option * o = state.groups[g].options[i];
+      char * value = stringlist_at(values, i);
+
+      len = alloc_sprintf(
+        &line,
+        "%s:%-*s | %c%c    | %-*s | %s",
+        o->module,
+        state.groups[g].pad,
+        o->name,
+        o->shortopt ? '-'         : ' ',
+        o->shortopt ? o->shortopt : ' ',
+        valueLen,
+        value,
+        o->description
+      );
+
+      assert(len > 0);
+      stringlist_push(lines, line);
+      if (len > maxLen)
+        maxLen = len;
+    }
+
+    stringlist_free(&values);
+
+    // print out the lines
+    for(int i = 0; i < stringlist_count(lines); ++i)
+    {
+      if (i == 0)
+      {
+        // print a horizontal rule
+        printf("  |");
+        for(int i = 0; i < maxLen + 2; ++i)
+          putc('-', stdout);
+        printf("|\n");
+      }
+
+      char * line = stringlist_at(lines, i);
+      printf("  | %-*s |\n", maxLen, line);
+
+      if (i == 0)
+      {
+        // print a horizontal rule
+        printf("  |");
+        for(int i = 0; i < maxLen + 2; ++i)
+          putc('-', stdout);
+        printf("|\n");
+      }
+    }
+
+    // print a horizontal rule
+    printf("  |");
+    for(int i = 0; i < maxLen + 2; ++i)
+      putc('-', stdout);
+    printf("|\n");
+
+    stringlist_free(&lines);
+
     printf("\n");
   }
 }
