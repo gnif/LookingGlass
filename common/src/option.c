@@ -684,7 +684,10 @@ int option_get_int(const char * module, const char * name)
 {
   struct Option * o = option_get(module, name);
   if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return -1;
+  }
   assert(o->type == OPTION_TYPE_INT);
   return o->value.x_int;
 }
@@ -693,7 +696,10 @@ const char * option_get_string(const char * module, const char * name)
 {
   struct Option * o = option_get(module, name);
   if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return NULL;
+  }
   assert(o->type == OPTION_TYPE_STRING);
   return o->value.x_string;
 }
@@ -702,7 +708,10 @@ bool option_get_bool(const char * module, const char * name)
 {
   struct Option * o = option_get(module, name);
   if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return false;
+  }
   assert(o->type == OPTION_TYPE_BOOL);
   return o->value.x_bool;
 }
