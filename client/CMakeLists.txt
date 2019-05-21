@@ -41,7 +41,6 @@ find_package(PkgConfig)
 pkg_check_modules(PKGCONFIG REQUIRED
 	sdl2
 	x11
-	libconfig
 )
 
 execute_process(

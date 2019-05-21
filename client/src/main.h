@@ -68,17 +68,8 @@ struct AppState
   KeybindHandle kbInput;
 };
 
-typedef struct RenderOpts
-{
-  unsigned int          size;
-  unsigned int          argc;
-  LG_RendererOptValue * argv;
-}
-RendererOpts;
-
 struct AppParams
 {
-  const char * configFile;
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
@@ -87,29 +78,28 @@ struct AppParams
   bool         center;
   int          x, y;
   unsigned int w, h;
-  char       * shmFile;
+  const char * shmFile;
   unsigned int shmSize;
   unsigned int fpsLimit;
   bool         showFPS;
   bool         useSpiceInput;
   bool         useSpiceClipboard;
-  char       * spiceHost;
+  const char * spiceHost;
   unsigned int spicePort;
   bool         clipboardToVM;
   bool         clipboardToLocal;
   bool         scaleMouseInput;
   bool         hideMouse;
   bool         ignoreQuit;
-  bool         allowScreensaver;
+  bool         noScreensaver;
   bool         grabKeyboard;
   SDL_Scancode escapeKey;
-  bool         disableAlerts;
+  bool         showAlerts;
 
   bool         forceRenderer;
   unsigned int forceRendererIndex;
-  RendererOpts rendererOpts[LG_RENDERER_COUNT];
 
-  char       * windowTitle;
+  const char * windowTitle;
 };
 
 struct CBRequest

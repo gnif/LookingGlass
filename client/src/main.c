@@ -48,39 +48,9 @@ static int renderThread(void * unused);
 static int frameThread (void * unused);
 
 struct AppState  state;
-struct AppParams params =
-{
-  .configFile        = "/etc/looking-glass.conf",
-  .autoResize        = false,
-  .allowResize       = true,
-  .keepAspect        = true,
-  .borderless        = false,
-  .fullscreen        = false,
-  .center            = true,
-  .x                 = 0,
-  .y                 = 0,
-  .w                 = 1024,
-  .h                 = 768,
-  .shmFile           = "/dev/shm/looking-glass",
-  .shmSize           = 0,
-  .fpsLimit          = 200,
-  .showFPS           = false,
-  .useSpiceInput     = true,
-  .useSpiceClipboard = true,
-  .spiceHost         = "127.0.0.1",
-  .spicePort         = 5900,
-  .clipboardToVM     = true,
-  .clipboardToLocal  = true,
-  .scaleMouseInput   = true,
-  .hideMouse         = true,
-  .ignoreQuit        = false,
-  .allowScreensaver  = true,
-  .grabKeyboard      = true,
-  .escapeKey         = SDL_SCANCODE_SCROLLLOCK,
-  .disableAlerts     = false,
-  .forceRenderer     = false,
-  .windowTitle       = "Looking Glass (Client)"
-};
+
+// this structure is initialized in config.c
+struct AppParams params = { 0 };
 
 static void updatePositionInfo()
 {
@@ -888,8 +858,7 @@ static void * map_memory()
 
 static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
 {
-  const LG_Renderer *r    = LG_Renderers[index];
-  RendererOpts      *opts = &params.rendererOpts[index];
+  const LG_Renderer *r = LG_Renderers[index];
 
   if (!IS_LG_RENDERER_VALID(r))
   {
@@ -901,10 +870,6 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
   state.lgrData = NULL;
   if (!r->create(&state.lgrData, lgrParams))
     return false;
-
-  // set it's options
-  for(unsigned int i = 0; i < opts->argc; ++i)
-    opts->argv[i].opt->handler(state.lgrData, opts->argv[i].value);
 
   // initialize the renderer
   if (!r->initialize(state.lgrData, sdlFlags))
@@ -1050,7 +1015,7 @@ int run()
   if (params.fullscreen)
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
-  if (params.allowScreensaver)
+  if (!params.noScreensaver)
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
 
   if (!params.center)
@@ -1219,7 +1184,7 @@ int run()
       {
         if (state.shm->flags & KVMFR_HEADER_FLAG_PAUSED)
         {
-          if (state.lgr && !params.disableAlerts)
+          if (state.lgr && params.showAlerts)
             state.lgr->on_alert(
               state.lgrData,
               LG_ALERT_WARNING,
@@ -1302,9 +1267,14 @@ int main(int argc, char * argv[])
   if (!installCrashHandler(argv[0]))
     DEBUG_WARN("Failed to install the crash handler");
 
+  config_init();
+
+  // early renderer setup for option registration
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+    LG_Renderers[i]->setup();
+
   if (!config_load(argc, argv))
     return -1;
-
 
   if (params.grabKeyboard)
   {

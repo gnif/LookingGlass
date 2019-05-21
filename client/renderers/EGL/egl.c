@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/renderer.h"
 
 #include "common/debug.h"
+#include "common/option.h"
 #include "utils.h"
 #include "dynamic/fonts.h"
 
@@ -44,11 +45,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct Options
 {
   bool vsync;
-};
-
-static struct Options defaultOptions =
-{
-  .vsync = false
 };
 
 struct Inst
@@ -96,11 +92,28 @@ struct Inst
 };
 
 
+static struct Option egl_options[] =
+{
+  {
+    .module       = "egl",
+    .name         = "vsync",
+    .description  = "Enable vsync",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = false
+  },
+  {0}
+};
+
 void update_mouse_shape(struct Inst * this);
 
 const char * egl_get_name()
 {
   return "EGL";
+}
+
+void egl_setup()
+{
+  option_register(egl_options);
 }
 
 bool egl_create(void ** opaque, const LG_RendererParams params)
@@ -116,8 +129,9 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
 
   // safe off parameteres and init our default option values
   struct Inst * this = (struct Inst *)*opaque;
-  memcpy(&this->params, &params        , sizeof(LG_RendererParams));
-  memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
+  memcpy(&this->params, &params, sizeof(LG_RendererParams));
+
+  this->opt.vsync = option_get_bool("egl", "vsync");
 
   this->translateX   = 0;
   this->translateY   = 0;
@@ -484,31 +498,11 @@ void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
   egl_fps_update(this->fps, avgUPS, avgFPS);
 }
 
-static void handle_opt_vsync(void * opaque, const char *value)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
-
-  this->opt.vsync = LG_RendererValueToBool(value);
-}
-
-static LG_RendererOpt egl_options[] =
-{
-  {
-    .name      = "vsync",
-    .desc      ="Enable or disable vsync [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_vsync
-  }
-};
-
 struct LG_Renderer LGR_EGL =
 {
-  .create         = egl_create,
   .get_name       = egl_get_name,
-  .options        = egl_options,
-  .option_count   = LGR_OPTION_COUNT(egl_options),
+  .setup          = egl_setup,
+  .create         = egl_create,
   .initialize     = egl_initialize,
   .deinitialize   = egl_deinitialize,
   .on_resize      = egl_on_resize,

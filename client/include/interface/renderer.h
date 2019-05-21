@@ -40,28 +40,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
    (x)->render         && \
    (x)->update_fps)
 
-#define LGR_OPTION_COUNT(x) (sizeof(x) / sizeof(LG_RendererOpt))
-
-typedef bool(* LG_RendererOptValidator)(const char * value);
-typedef void(* LG_RendererOptHandler  )(void * opaque, const char * value);
-
-typedef struct LG_RendererOpt
-{
-  const char              * name;
-  const char              * desc;
-  LG_RendererOptValidator   validator;
-  LG_RendererOptHandler     handler;
-}
-LG_RendererOpt;
-
-typedef struct LG_RendererOptValue
-{
-  const LG_RendererOpt * opt;
-  char                 * value;
-} LG_RendererOptValue;
-
-typedef LG_RendererOpt * LG_RendererOptions;
-
 typedef struct LG_RendererParams
 {
 //  TTF_Font * font;
@@ -99,7 +77,12 @@ typedef enum LG_RendererCursor
 }
 LG_RendererCursor;
 
-typedef const char * (* LG_RendererGetName     )();
+// returns the friendly name of the renderer
+typedef const char * (* LG_RendererGetName)();
+
+// called pre-creation to allow the renderer to register any options it might have
+typedef void         (* LG_RendererSetup)();
+
 typedef bool         (* LG_RendererCreate      )(void ** opaque, const LG_RendererParams params);
 typedef bool         (* LG_RendererInitialize  )(void * opaque, Uint32 * sdlFlags);
 typedef void         (* LG_RendererDeInitialize)(void * opaque);
@@ -113,10 +96,10 @@ typedef void         (* LG_RendererUpdateFPS   )(void * opaque, const float avgU
 
 typedef struct LG_Renderer
 {
-  LG_RendererCreate       create;
   LG_RendererGetName      get_name;
-  LG_RendererOptions      options;
-  unsigned int            option_count;
+  LG_RendererSetup        setup;
+
+  LG_RendererCreate       create;
   LG_RendererInitialize   initialize;
   LG_RendererDeInitialize deinitialize;
   LG_RendererOnResize     on_resize;
@@ -129,7 +112,3 @@ typedef struct LG_Renderer
   LG_RendererUpdateFPS    update_fps;
 }
 LG_Renderer;
-
-// generic option helpers
-bool LG_RendererValidatorBool(const char * value);
-bool LG_RendererValueToBool  (const char * value);

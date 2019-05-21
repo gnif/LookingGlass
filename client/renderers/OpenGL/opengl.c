@@ -31,6 +31,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <GL/glx.h>
 
 #include "common/debug.h"
+#include "common/option.h"
 #include "utils.h"
 #include "lg-decoders.h"
 #include "dynamic/fonts.h"
@@ -47,20 +48,44 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define FADE_TIME 1000000
 
-struct Options
+static struct Option opengl_options[] =
+{
+  {
+    .module       = "opengl",
+    .name         = "mipmap",
+    .description  = "Enable mipmapping",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  },
+  {
+    .module       = "opengl",
+    .name         = "vsync",
+    .description  = "Enable vsync",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  },
+  {
+    .module       = "opengl",
+    .name         = "preventBuffer",
+    .description  = "Prevent the driver from buffering frames",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  },
+  {
+    .module       = "opengl",
+    .name         = "amdPinnedMem",
+    .description  = "Use GL_AMD_pinned_memory if it is available",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  }
+};
+
+struct OpenGL_Options
 {
   bool mipmap;
   bool vsync;
   bool preventBuffer;
   bool amdPinnedMem;
-};
-
-static struct Options defaultOptions =
-{
-  .mipmap        = true,
-  .vsync         = true,
-  .preventBuffer = true,
-  .amdPinnedMem  = true,
 };
 
 struct Alert
@@ -76,8 +101,8 @@ struct Alert
 
 struct Inst
 {
-  LG_RendererParams params;
-  struct Options    opt;
+  LG_RendererParams     params;
+  struct OpenGL_Options opt;
 
   bool              amdPinnedMemSupport;
   bool              renderStarted;
@@ -157,6 +182,11 @@ const char * opengl_get_name()
   return "OpenGL";
 }
 
+static void opengl_setup()
+{
+  option_register(opengl_options);
+}
+
 bool opengl_create(void ** opaque, const LG_RendererParams params)
 {
   // create our local storage
@@ -169,8 +199,13 @@ bool opengl_create(void ** opaque, const LG_RendererParams params)
   memset(*opaque, 0, sizeof(struct Inst));
 
   struct Inst * this = (struct Inst *)*opaque;
-  memcpy(&this->params, &params        , sizeof(LG_RendererParams));
-  memcpy(&this->opt   , &defaultOptions, sizeof(struct Options   ));
+  memcpy(&this->params, &params, sizeof(LG_RendererParams));
+
+  this->opt.mipmap        = option_get_bool("opengl", "mipmap"       );
+  this->opt.vsync         = option_get_bool("opengl", "vsync"        );
+  this->opt.preventBuffer = option_get_bool("opengl", "preventBuffer");
+  this->opt.amdPinnedMem  = option_get_bool("opengl", "amdPinnedMem" );
+
 
   LG_LOCK_INIT(this->formatLock);
   LG_LOCK_INIT(this->syncLock  );
@@ -770,76 +805,11 @@ static void render_wait(struct Inst * this)
   glDisable(GL_BLEND);
 }
 
-static void handle_opt_mipmap(void * opaque, const char *value)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
-
-  this->opt.mipmap = LG_RendererValueToBool(value);
-}
-
-static void handle_opt_vsync(void * opaque, const char *value)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
-
-  this->opt.vsync = LG_RendererValueToBool(value);
-}
-
-static void handle_opt_prevent_buffer(void * opaque, const char *value)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
-
-  this->opt.preventBuffer = LG_RendererValueToBool(value);
-}
-
-static void handle_opt_amd_pinned_mem(void * opaque, const char *value)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
-
-  this->opt.amdPinnedMem = LG_RendererValueToBool(value);
-}
-
-
-static LG_RendererOpt opengl_options[] =
-{
-  {
-    .name      = "mipmap",
-    .desc      = "Enable or disable mipmapping [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_mipmap
-  },
-  {
-    .name      = "vsync",
-    .desc      ="Enable or disable vsync [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_vsync
-  },
-  {
-    .name      = "preventBuffer",
-    .desc      = "Prevent the driver from buffering frames [default: disabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_prevent_buffer
-  },
-  {
-    .name      = "amdPinnedMem",
-    .desc      = "Use GL_AMD_pinned_memory if it is available [default: enabled]",
-    .validator = LG_RendererValidatorBool,
-    .handler   = handle_opt_amd_pinned_mem
-  }
-};
-
 const LG_Renderer LGR_OpenGL =
 {
   .get_name       = opengl_get_name,
-  .options        = opengl_options,
-  .option_count   = LGR_OPTION_COUNT(opengl_options),
+  .setup          = opengl_setup,
+
   .create         = opengl_create,
   .initialize     = opengl_initialize,
   .deinitialize   = opengl_deinitialize,

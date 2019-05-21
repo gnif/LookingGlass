@@ -23,7 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 void app_alert(LG_MsgAlert type, const char * fmt, ...)
 {
-  if (!state.lgr || params.disableAlerts)
+  if (!state.lgr || !params.showAlerts)
     return;
 
   va_list args;

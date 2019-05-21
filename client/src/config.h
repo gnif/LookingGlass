@@ -19,5 +19,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
+void config_init();
 bool config_load(int argc, char * argv[]);
 void config_free();

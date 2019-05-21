@@ -19,319 +19,368 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "main.h"
 #include "config.h"
+#include "common/option.h"
 #include "common/debug.h"
+#include "common/stringutils.h"
 
 #include <sys/stat.h>
-#include <libconfig.h>
 #include <pwd.h>
 #include <unistd.h>
 
-static bool load(const char * configFile);
+// forwards
+static bool       optRendererParse       (struct Option * opt, const char * str);
+static StringList optRendererValues      (struct Option * opt);
+static char *     optRendererToString    (struct Option * opt);
+static bool       optPosParse            (struct Option * opt, const char * str);
+static StringList optPosValues           (struct Option * opt);
+static char *     optPosToString         (struct Option * opt);
+static bool       optSizeParse           (struct Option * opt, const char * str);
+static StringList optSizeValues          (struct Option * opt);
+static char *     optSizeToString        (struct Option * opt);
+static char *     optScancodeToString    (struct Option * opt);
+
 static void doLicense();
-static void doHelp(char * app);
+
+static struct Option options[] =
+{
+  // app options
+  {
+    .module         = "app",
+    .name           = "configFile",
+    .description    = "A file to read additional configuration from",
+    .shortopt       = 'C',
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = NULL,
+  },
+  {
+    .module         = "app",
+    .name           = "shmFile",
+    .description    = "The path to the shared memory file",
+    .shortopt       = 'f',
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "/dev/shm/looking-glass",
+  },
+  {
+    .module         = "app",
+    .name           = "shmSize",
+    .description    = "Specify the size in MB of the shared memory file (0 = detect)",
+    .shortopt       = 'L',
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 0,
+  },
+  {
+    .module        = "app",
+    .name          = "renderer",
+    .description   = "Specify the renderer to use",
+    .shortopt      = 'g',
+    .type          = OPTION_TYPE_CUSTOM,
+    .parser        = optRendererParse,
+    .getValues     = optRendererValues,
+    .toString      = optRendererToString
+  },
+  {
+    .module         = "app",
+    .name           = "license",
+    .description    = "Show the licence for this application and then terminate",
+    .shortopt       = 'l',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+
+  // window options
+  {
+    .module         = "win",
+    .name           = "title",
+    .description    = "The window title",
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "Looking Glass (client)"
+  },
+  {
+    .module         = "win",
+    .name           = "position",
+    .description    = "Initial window position at startup",
+    .type           = OPTION_TYPE_CUSTOM,
+    .parser         = optPosParse,
+    .getValues      = optPosValues,
+    .toString       = optPosToString
+  },
+  {
+    .module         = "win",
+    .name           = "size",
+    .description    = "Initial window size at startup",
+    .type           = OPTION_TYPE_CUSTOM,
+    .parser         = optSizeParse,
+    .getValues      = optSizeValues,
+    .toString       = optSizeToString
+  },
+  {
+    .module         = "win",
+    .name           = "autoResize",
+    .description    = "Auto resize the window to the guest",
+    .shortopt       = 'a',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "allowResize",
+    .description    = "Aallow the window to be manually resized",
+    .shortopt       = 'n',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "win",
+    .name           = "keepAspect",
+    .description    = "Maintain the correct aspect ratio",
+    .shortopt       = 'r',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "win",
+    .name           = "borderless",
+    .description    = "Borderless mode",
+    .shortopt       = 'd',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "fullScreen",
+    .description    = "Launch in fullscreen borderless mode",
+    .shortopt       = 'F',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "fpsLimit",
+    .description    = "Frame rate limit (0 = disable - not recommended)",
+    .shortopt       = 'K',
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 200,
+  },
+  {
+    .module         = "win",
+    .name           = "showFPS",
+    .description    = "Enable the FPS & UPS display",
+    .shortopt       = 'k',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "ignoreQuit",
+    .description    = "Ignore requests to quit (ie: Alt+F4)",
+    .shortopt       = 'Q',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "noScreensaver",
+    .description    = "Prevent the screensaver from starting",
+    .shortopt       = 'S',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "alerts",
+    .description    = "Show on screen alert messages",
+    .shortopt       = 'q',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+
+  // input options
+  {
+    .module         = "input",
+    .name           = "grabKeyboard",
+    .description    = "Grab the keyboard in capture mode",
+    .shortopt       = 'G',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "input",
+    .name           = "escapeKey",
+    .description    = "Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values",
+    .shortopt       = 'm',
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = SDL_SCANCODE_SCROLLLOCK,
+    .toString       = optScancodeToString
+  },
+  {
+    .module         = "input",
+    .name           = "hideCursor",
+    .description    = "Hide the local mouse cursor",
+    .shortopt       = 'M',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+
+  // spice options
+  {
+    .module         = "spice",
+    .name           = "enable",
+    .description    = "Enable the built in SPICE client for input and/or clipboard support",
+    .shortopt       = 's',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "spice",
+    .name           = "host",
+    .description    = "The SPICE server host or UNIX socket",
+    .shortopt       = 'c',
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "127.0.0.1"
+  },
+  {
+    .module         = "spice",
+    .name           = "port",
+    .description    = "The SPICE server port (0 = unix socket)",
+    .shortopt       = 'p',
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 5900
+  },
+  {
+    .module         = "spice",
+    .name           = "input",
+    .description    = "Use SPICE to send keyboard and mouse input events to the guest",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "spice",
+    .name           = "clipboard",
+    .description    = "Use SPICE to syncronize the clipboard contents with the guest",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "spice",
+    .name           = "clipboardToVM",
+    .description    = "Allow the clipboard to be syncronized TO the VM",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "spice",
+    .name           = "clipboardToLocal",
+    .description    = "Allow the clipboard to be syncronized FROM the VM",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "spice",
+    .name           = "scaleCursor",
+    .description    = "Scale cursor input position to screen size when up/down scaled",
+    .shortopt       = 'j',
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {0}
+};
+
+void config_init()
+{
+  params.center = true;
+  params.w      = 1024;
+  params.h      = 768;
+
+  option_register(options);
+}
 
 bool config_load(int argc, char * argv[])
 {
-  // duplicate the constants to avoid crashing out when trying to free
-  // these values. This is to allow the defaults to be overridden.
-  params.shmFile     = strdup(params.shmFile    );
-  params.spiceHost   = strdup(params.spiceHost  );
-  params.windowTitle = strdup(params.windowTitle);
-
-  // load any global then local config options first
+  // load any global options first
   struct stat st;
-  if (stat("/etc/looking-glass.conf", &st) >= 0)
+  if (stat("/etc/looking-glass-client.ini", &st) >= 0)
   {
-    DEBUG_INFO("Loading config from: /etc/looking-glass.conf");
-    if (!load("/etc/looking-glass.conf"))
+    DEBUG_INFO("Loading config from: /etc/looking-glass-client.ini");
+    if (!option_load("/etc/looking-glass-client.ini"))
       return false;
   }
 
+  // load user's local options
   struct passwd * pw = getpwuid(getuid());
-  const char pattern[] = "%s/.looking-glass.conf";
-  const size_t len = strlen(pw->pw_dir) + sizeof(pattern);
-  char buffer[len];
-  snprintf(buffer, len, pattern, pw->pw_dir);
-  if (stat(buffer, &st) >= 0)
+  char * localFile;
+  alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
+  if (stat(localFile, &st) >= 0)
   {
-    DEBUG_INFO("Loading config from: %s", buffer);
-    if (!load(buffer))
+    DEBUG_INFO("Loading config from: %s", localFile);
+    if (!option_load(localFile))
+    {
+      free(localFile);
+      return false;
+    }
+  }
+  free(localFile);
+
+  // parse the command line arguments
+  if (!option_parse(argc, argv))
+    return false;
+
+  // if a file was specified to also load, do it
+  const char * configFile = option_get_string("app", "configFile");
+  if (configFile)
+  {
+    DEBUG_INFO("Loading config from: %s", configFile);
+    if (!option_load(configFile))
       return false;
   }
 
-  for(;;)
+  // validate the values are sane
+  if (!option_validate())
+    return false;
+
+  if (option_get_bool("app", "license"))
   {
-    switch(getopt(argc, argv, "hC:f:L:s:c:p:jMvK:kg:o:anrdFx:y:w:b:QSGm:lqt:"))
-    {
-      case '?':
-      case 'h':
-      default :
-        doHelp(argv[0]);
-        return false;
-
-      case -1:
-        break;
-
-      case 'C':
-        params.configFile = optarg;
-        if (!load(optarg))
-          return false;
-        continue;
-
-      case 'f':
-        free(params.shmFile);
-        params.shmFile = strdup(optarg);
-        continue;
-
-      case 'L':
-        params.shmSize = atoi(optarg) * 1024 * 1024;
-        continue;
-
-      case 's':
-      {
-        if (strcasecmp("ALL", optarg) == 0)
-        {
-          params.useSpiceInput     = false;
-          params.useSpiceClipboard = false;
-        }
-        else if (strcasecmp("INPUT"             , optarg) == 0) params.useSpiceInput     = false;
-        else if (strcasecmp("CLIPBOARD"         , optarg) == 0) params.useSpiceClipboard = false;
-        else if (strcasecmp("CLIPBOARD_TO_VM"   , optarg) == 0) params.clipboardToVM     = false;
-        else if (strcasecmp("CLIPBOARD_TO_LOCAL", optarg) == 0) params.clipboardToLocal  = false;
-        else
-        {
-          fprintf(stderr, "Invalid spice feature: %s\n", optarg);
-          fprintf(stderr, "Must be one of ALL, INPUT, CLIPBOARD, CLIPBOARD_TO_VM, CLIPBOARD_TO_LOCAL\n");
-          doHelp(argv[0]);
-          return false;
-        }
-        continue;
-      }
-
-      case 'c':
-        free(params.spiceHost);
-        params.spiceHost = strdup(optarg);
-        continue;
-
-      case 'p':
-        params.spicePort = atoi(optarg);
-        continue;
-
-      case 'j':
-        params.scaleMouseInput = false;
-        continue;
-
-      case 'M':
-        params.hideMouse = false;
-        continue;
-
-      case 'K':
-        params.fpsLimit = atoi(optarg);
-        continue;
-
-      case 'k':
-        params.showFPS = true;
-        continue;
-
-      case 'g':
-      {
-        bool ok = false;
-        for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-          if (strcasecmp(LG_Renderers[i]->get_name(), optarg) == 0)
-          {
-            params.forceRenderer      = true;
-            params.forceRendererIndex = i;
-            ok = true;
-            break;
-          }
-
-        if (!ok)
-        {
-          fprintf(stderr, "No such renderer: %s\n", optarg);
-          fprintf(stderr, "Use '-o list' obtain a list of options\n");
-          doHelp(argv[0]);
-          return false;
-        }
-
-        continue;
-      }
-
-      case 'o':
-      {
-        if (strcasecmp(optarg, "list") == 0)
-        {
-          size_t maxLen = 0;
-          for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-          {
-            const LG_Renderer * r = LG_Renderers[i];
-            for(unsigned int j = 0; j < r->option_count; ++j)
-            {
-              const size_t len = strlen(r->options[j].name);
-              if (len > maxLen)
-                maxLen = len;
-            }
-          }
-
-          fprintf(stderr, "\nRenderer Option List\n");
-          for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-          {
-            const LG_Renderer * r = LG_Renderers[i];
-            fprintf(stderr, "\n%s\n", r->get_name());
-            for(unsigned int j = 0; j < r->option_count; ++j)
-            {
-              const size_t pad = maxLen - strlen(r->options[j].name);
-              for(int i = 0; i < pad; ++i)
-                fputc(' ', stderr);
-
-              fprintf(stderr, "  %s - %s\n", r->options[j].name, r->options[j].desc);
-            }
-          }
-          fprintf(stderr, "\n");
-          return false;
-        }
-
-        const LG_Renderer  * renderer = NULL;
-        RendererOpts       * opts     = NULL;
-
-        const size_t len  = strlen(optarg);
-        const char * name = strtok(optarg, ":");
-
-        for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-          if (strcasecmp(LG_Renderers[i]->get_name(), name) == 0)
-          {
-            renderer = LG_Renderers[i];
-            opts     = &params.rendererOpts[i];
-            break;
-          }
-
-        if (!renderer)
-        {
-          fprintf(stderr, "No such renderer: %s\n", name);
-          doHelp(argv[0]);
-          return false;
-        }
-
-        const char * option = strtok(NULL  , "=");
-        if (!option)
-        {
-          fprintf(stderr, "Renderer option name not specified\n");
-          doHelp(argv[0]);
-          return false;
-        }
-
-        const LG_RendererOpt * opt = NULL;
-        for(unsigned int i = 0; i < renderer->option_count; ++i)
-          if (strcasecmp(option, renderer->options[i].name) == 0)
-          {
-            opt = &renderer->options[i];
-            break;
-          }
-
-        if (!opt)
-        {
-          fprintf(stderr, "Renderer \"%s\" doesn't have the option: %s\n", renderer->get_name(), option);
-          doHelp(argv[0]);
-          return false;
-        }
-
-        const char * value = NULL;
-        if (len > strlen(name) + strlen(option) + 2)
-          value = option + strlen(option) + 1;
-
-        if (opt->validator && !opt->validator(value))
-        {
-          fprintf(stderr, "Renderer \"%s\" reported invalid value for option \"%s\"\n", renderer->get_name(), option);
-          doHelp(argv[0]);
-          return false;
-        }
-
-        if (opts->argc == opts->size)
-        {
-          opts->size += 5;
-          opts->argv  = realloc(opts->argv, sizeof(LG_RendererOptValue) * opts->size);
-        }
-
-        opts->argv[opts->argc].opt   = opt;
-        opts->argv[opts->argc].value = strdup(value);
-        ++opts->argc;
-        continue;
-      }
-
-      case 'a':
-        params.autoResize = true;
-        continue;
-
-      case 'n':
-        params.allowResize = false;
-        continue;
-
-      case 'r':
-        params.keepAspect = false;
-        continue;
-
-      case 'd':
-        params.borderless = true;
-        continue;
-
-      case 'F':
-        params.fullscreen = true;
-        continue;
-
-      case 'x':
-        params.center = false;
-        params.x = atoi(optarg);
-        continue;
-
-      case 'y':
-        params.center = false;
-        params.y = atoi(optarg);
-        continue;
-
-      case 'w':
-        params.w = atoi(optarg);
-        continue;
-
-      case 'b':
-        params.h = atoi(optarg);
-        continue;
-
-      case 'Q':
-        params.ignoreQuit = true;
-        continue;
-
-      case 'S':
-        params.allowScreensaver = false;
-        continue;
-
-      case 'G':
-        params.grabKeyboard = false;
-        continue;
-
-      case 'm':
-        params.escapeKey = atoi(optarg);
-        continue;
-
-      case 'q':
-        params.disableAlerts = true;
-        continue;
-
-      case 't':
-        free(params.windowTitle);
-        params.windowTitle = strdup(optarg);
-        continue;
-
-      case 'l':
-        doLicense();
-        return false;
-    }
-    break;
+    doLicense();
+    return false;
   }
 
-  if (optind != argc)
+  // setup the application params for the basic types
+  params.shmFile       = option_get_string("app", "shmFile");
+  params.shmSize       = option_get_int   ("app", "shmSize") * 1048576;
+
+  params.windowTitle   = option_get_string("win", "title"        );
+  params.autoResize    = option_get_bool  ("win", "autoResize"   );
+  params.allowResize   = option_get_bool  ("win", "allowResize"  );
+  params.keepAspect    = option_get_bool  ("win", "keepAspect"   );
+  params.borderless    = option_get_bool  ("win", "borderless"   );
+  params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
+  params.fpsLimit      = option_get_int   ("win", "fpsLimit"     );
+  params.showFPS       = option_get_bool  ("win", "showFPS"      );
+  params.ignoreQuit    = option_get_bool  ("win", "ignoreQuit"   );
+  params.noScreensaver = option_get_bool  ("win", "noScreensaver");
+  params.showAlerts    = option_get_bool  ("win", "alerts"       );
+
+  params.grabKeyboard  = option_get_bool  ("input", "grabKeyboard");
+  params.escapeKey     = option_get_int   ("input", "escapeKey"   );
+  params.hideMouse     = option_get_bool  ("input", "hideCursor"  );
+
+  if (option_get_bool("spice", "enable"))
   {
-    fprintf(stderr, "A non option was supplied\n");
-    doHelp(argv[0]);
-    return false;
+    params.spiceHost         = option_get_string("spice", "host");
+    params.spicePort         = option_get_int   ("spice", "port");
+
+    params.useSpiceInput     = option_get_bool("spice", "input"    );
+    params.useSpiceClipboard = option_get_bool("spice", "clipboard");
+
+    if (params.useSpiceClipboard)
+    {
+      params.clipboardToVM    = option_get_bool("spice", "clipboardToVM"   );
+      params.clipboardToLocal = option_get_bool("spice", "clipboardToLocal");
+
+      if (!params.clipboardToVM && !params.clipboardToLocal)
+        params.useSpiceClipboard = false;
+    }
+
+    params.scaleMouseInput = option_get_bool("spice", "scaleCursor");
   }
 
   return true;
@@ -339,276 +388,7 @@ bool config_load(int argc, char * argv[])
 
 void config_free()
 {
-  free(params.shmFile    );
-  free(params.spiceHost  );
-  free(params.windowTitle);
-
-  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-  {
-    RendererOpts * opts = &params.rendererOpts[i];
-    for(unsigned int j = 0; j < opts->argc; ++j)
-      free(opts->argv[j].value);
-    free(opts->argv);
-  }
-}
-
-static bool load(const char * configFile)
-{
-  config_t cfg;
-  int itmp;
-  const char *stmp;
-
-  config_init(&cfg);
-  if (!config_read_file(&cfg, configFile))
-  {
-    DEBUG_ERROR("Config file error %s:%d - %s",
-      config_error_file(&cfg),
-      config_error_line(&cfg),
-      config_error_text(&cfg)
-    );
-    return false;
-  }
-
-  config_setting_t * global = config_lookup(&cfg, "global");
-  if (global)
-  {
-    if (config_setting_lookup_string(global, "shmFile", &stmp))
-    {
-      free(params.shmFile);
-      params.shmFile = strdup(stmp);
-    }
-
-    if (config_setting_lookup_int(global, "shmSize", &itmp))
-      params.shmSize = itmp * 1024 * 1024;
-
-    if (config_setting_lookup_string(global, "forceRenderer", &stmp))
-    {
-      bool ok = false;
-      for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-        if (strcasecmp(LG_Renderers[i]->get_name(), stmp) == 0)
-        {
-          params.forceRenderer      = true;
-          params.forceRendererIndex = i;
-          ok = true;
-          break;
-        }
-
-      if (!ok)
-      {
-        DEBUG_ERROR("No such renderer: %s", stmp);
-        config_destroy(&cfg);
-        return false;
-      }
-    }
-
-    if (config_setting_lookup_bool(global, "scaleMouseInput" , &itmp)) params.scaleMouseInput  = (itmp != 0);
-    if (config_setting_lookup_bool(global, "hideMouse"       , &itmp)) params.hideMouse        = (itmp != 0);
-    if (config_setting_lookup_bool(global, "showFPS"         , &itmp)) params.showFPS          = (itmp != 0);
-    if (config_setting_lookup_bool(global, "autoResize"      , &itmp)) params.autoResize       = (itmp != 0);
-    if (config_setting_lookup_bool(global, "allowResize"     , &itmp)) params.allowResize      = (itmp != 0);
-    if (config_setting_lookup_bool(global, "keepAspect"      , &itmp)) params.keepAspect       = (itmp != 0);
-    if (config_setting_lookup_bool(global, "borderless"      , &itmp)) params.borderless       = (itmp != 0);
-    if (config_setting_lookup_bool(global, "fullScreen"      , &itmp)) params.fullscreen       = (itmp != 0);
-    if (config_setting_lookup_bool(global, "ignoreQuit"      , &itmp)) params.ignoreQuit       = (itmp != 0);
-    if (config_setting_lookup_bool(global, "allowScreensaver", &itmp)) params.allowScreensaver = (itmp != 0);
-    if (config_setting_lookup_bool(global, "disableAlerts"   , &itmp)) params.disableAlerts    = (itmp != 0);
-
-    if (config_setting_lookup_int(global, "x", &params.x)) params.center = false;
-    if (config_setting_lookup_int(global, "y", &params.y)) params.center = false;
-
-    if (config_setting_lookup_int(global, "w", &itmp))
-    {
-      if (itmp < 1)
-      {
-        DEBUG_ERROR("Invalid window width, must be greater then 1px");
-        config_destroy(&cfg);
-        return false;
-      }
-      params.w = (unsigned int)itmp;
-    }
-
-    if (config_setting_lookup_int(global, "h", &itmp))
-    {
-      if (itmp < 1)
-      {
-        DEBUG_ERROR("Invalid window height, must be greater then 1px");
-        config_destroy(&cfg);
-        return false;
-      }
-      params.h = (unsigned int)itmp;
-    }
-
-    if (config_setting_lookup_int(global, "fpsLimit", &itmp))
-    {
-      if (itmp < 1)
-      {
-        DEBUG_ERROR("Invalid FPS limit, must be greater then 0");
-        config_destroy(&cfg);
-        return false;
-      }
-      params.fpsLimit = (unsigned int)itmp;
-    }
-
-    if (config_setting_lookup_int(global, "escapeKey", &itmp))
-    {
-      if (itmp <= SDL_SCANCODE_UNKNOWN || itmp > SDL_SCANCODE_APP2)
-      {
-        DEBUG_ERROR("Invalid capture key value, see https://wiki.libsdl.org/SDLScancodeLookup");
-        config_destroy(&cfg);
-        return false;
-      }
-      params.escapeKey = (SDL_Scancode)itmp;
-    }
-
-    if (config_setting_lookup_string(global, "windowTitle", &stmp))
-    {
-      free(params.windowTitle);
-      params.windowTitle = strdup(stmp);
-    }
-
-  }
-
-  config_setting_t * spice = config_lookup(&cfg, "spice");
-  if (spice)
-  {
-    if (config_setting_lookup_bool(spice, "useInput", &itmp))
-      params.useSpiceInput = (itmp != 0);
-
-    if (config_setting_lookup_bool(spice, "useClipboard", &itmp))
-      params.useSpiceClipboard = (itmp != 0);
-
-    if (config_setting_lookup_bool(spice, "clipboardToVM", &itmp))
-      params.clipboardToVM = (itmp != 0);
-
-    if (config_setting_lookup_bool(spice, "clipboardToLocal", &itmp))
-      params.clipboardToLocal = (itmp != 0);
-
-    if (config_setting_lookup_string(spice, "host", &stmp))
-    {
-      free(params.spiceHost);
-      params.spiceHost = strdup(stmp);
-    }
-
-    if (config_setting_lookup_int(spice, "port", &itmp))
-    {
-      if (itmp < 0 || itmp > 65535)
-      {
-        DEBUG_ERROR("Invalid spice port");
-        config_destroy(&cfg);
-        return false;
-      }
-      params.spicePort = itmp;
-    }
-  }
-
-  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-  {
-    const LG_Renderer * r     = LG_Renderers[i];
-    RendererOpts      * opts  = &params.rendererOpts[i];
-    config_setting_t  * group = config_lookup(&cfg, r->get_name());
-    if (!group)
-      continue;
-
-    for(unsigned int j = 0; j < r->option_count; ++j)
-    {
-      const char * name = r->options[j].name;
-      if (!config_setting_lookup_string(group, name, &stmp))
-        continue;
-
-      if (r->options[j].validator && !r->options[j].validator(stmp))
-      {
-        DEBUG_ERROR("Renderer \"%s\" reported invalid value for option \"%s\"", r->get_name(), name);
-        config_destroy(&cfg);
-        return false;
-      }
-
-      if (opts->argc == opts->size)
-      {
-        opts->size += 5;
-        opts->argv  = realloc(opts->argv, sizeof(LG_RendererOptValue) * opts->size);
-      }
-
-      opts->argv[opts->argc].opt   = &r->options[j];
-      opts->argv[opts->argc].value = strdup(stmp);
-      ++opts->argc;
-    }
-  }
-
-  config_destroy(&cfg);
-  return true;
-}
-
-static void doHelp(char * app)
-{
-  char x[8], y[8];
-  snprintf(x, sizeof(x), "%d", params.x);
-  snprintf(y, sizeof(y), "%d", params.y);
-
-  fprintf(stderr,
-    "\n"
-    "Looking Glass Client\n"
-    "Usage: %s [OPTION]...\n"
-    "Example: %s -h\n"
-    "\n"
-    "  -h        Print out this help\n"
-    "\n"
-    "  -C PATH    Specify an additional configuration file to load\n"
-    "  -f PATH    Specify the path to the shared memory file [current: %s]\n"
-    "  -L SIZE    Specify the size in MB of the shared memory file (0 = detect) [current: %d]\n"
-    "\n"
-    "  -s FEATURE Disable spice feature (specify multiple times for each feature)\n"
-    "\n"
-    "               ALL                Disable the spice client entirely\n"
-    "               INPUT              Disable spice keyboard & mouse input\n"
-    "               CLIPBOARD          Disable spice clipboard support\n"
-    "               CLIPBOARD_TO_VM    Disable local clipboard to VM sync\n"
-    "               CLIPBOARD_TO_LOCAL Disable VM clipboard to local sync\n"
-    "\n"
-    "  -c HOST    Specify the spice host or UNIX socket [current: %s]\n"
-    "  -p PORT    Specify the spice port or 0 for UNIX socket [current: %d]\n"
-    "  -j         Disable cursor position scaling\n"
-    "  -M         Don't hide the host cursor\n"
-    "\n"
-    "  -K         Set the FPS limit [current: %d]\n"
-    "  -k         Enable FPS display\n"
-    "  -g NAME    Force the use of a specific renderer\n"
-    "  -o OPTION  Specify a renderer option (ie: opengl:vsync=0)\n"
-    "             Alternatively specify \"list\" to list all renderers and their options\n"
-    "\n"
-    "  -a         Auto resize the window to the guest\n"
-    "  -n         Don't allow the window to be manually resized\n"
-    "  -r         Don't maintain the aspect ratio\n"
-    "  -d         Borderless mode\n"
-    "  -F         Borderless fullscreen mode\n"
-    "  -x XPOS    Initial window X position [current: %s]\n"
-    "  -y YPOS    Initial window Y position [current: %s]\n"
-    "  -w WIDTH   Initial window width [current: %u]\n"
-    "  -b HEIGHT  Initial window height [current: %u]\n"
-    "  -Q         Ignore requests to quit (ie: Alt+F4)\n"
-    "  -S         Disable the screensaver\n"
-    "  -G         Don't capture the keyboard in capture mode\n"
-    "  -m CODE    Specify the escape key [current: %u (%s)]\n"
-    "             See https://wiki.libsdl.org/SDLScancodeLookup for valid values\n"
-    "  -q         Disable alert messages [current: %s]\n"
-    "  -t TITLE   Use a custom title for the main window\n"
-    "\n"
-    "  -l         License information\n"
-    "\n",
-    app,
-    app,
-    params.shmFile,
-    params.shmSize,
-    params.spiceHost,
-    params.spicePort,
-    params.fpsLimit,
-    params.center ? "center" : x,
-    params.center ? "center" : y,
-    params.w,
-    params.h,
-    params.escapeKey,
-    SDL_GetScancodeName(params.escapeKey),
-    params.disableAlerts ? "disabled" : "enabled"
-  );
+  option_free();
 }
 
 static void doLicense()
@@ -633,4 +413,117 @@ static void doLicense()
     "Place, Suite 330, Boston, MA 02111 - 1307 USA\n"
     "\n"
   );
+}
+
+static bool optRendererParse(struct Option * opt, const char * str)
+{
+  if (strcasecmp(str, "auto") == 0)
+  {
+    params.forceRenderer = false;
+    return true;
+  }
+
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+    if (strcasecmp(str, LG_Renderers[i]->get_name()) == 0)
+    {
+      params.forceRenderer      = true;
+      params.forceRendererIndex = i;
+      return true;
+    }
+
+  return false;
+}
+
+static StringList optRendererValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+
+  // this typecast is safe as the stringlist doesn't own the values
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+    stringlist_push(sl, (char *)LG_Renderers[i]->get_name());
+
+  return sl;
+}
+
+static char * optRendererToString(struct Option * opt)
+{
+  if (!params.forceRenderer)
+    return strdup("auto");
+
+  if (params.forceRendererIndex >= LG_RENDERER_COUNT)
+    return NULL;
+
+  return strdup(LG_Renderers[params.forceRendererIndex]->get_name());
+}
+
+static bool optPosParse(struct Option * opt, const char * str)
+{
+  if (strcmp(str, "center") == 0)
+  {
+    params.center = true;
+    return true;
+  }
+
+  if (sscanf(str, "%dx%d", &params.x, &params.y) == 2)
+  {
+    params.center = false;
+    return true;
+  }
+
+  return false;
+}
+
+static StringList optPosValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+  stringlist_push(sl, "center");
+  stringlist_push(sl, "<left>x<top>, ie: 100x100");
+  return sl;
+}
+
+static char * optPosToString(struct Option * opt)
+{
+  if (params.center)
+    return strdup("center");
+
+  int len = snprintf(NULL, 0, "%dx%d", params.x, params.y);
+  char * str = malloc(len + 1);
+  sprintf(str, "%dx%d", params.x, params.y);
+
+  return str;
+}
+
+static bool optSizeParse(struct Option * opt, const char * str)
+{
+  if (sscanf(str, "%dx%d", &params.w, &params.h) == 2)
+  {
+    if (params.w < 1 || params.h < 1)
+      return false;
+    return true;
+  }
+
+  return false;
+}
+
+static StringList optSizeValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+  stringlist_push(sl, "<left>x<top>, ie: 100x100");
+  return sl;
+}
+
+static char * optSizeToString(struct Option * opt)
+{
+  int len = snprintf(NULL, 0, "%dx%d", params.w, params.h);
+  char * str = malloc(len + 1);
+  sprintf(str, "%dx%d", params.w, params.h);
+
+  return str;
+}
+
+static char * optScancodeToString(struct Option * opt)
+{
+  char * str;
+  alloc_sprintf(&str, "%d = %s", opt->value.x_int, SDL_GetScancodeName(opt->value.x_int));
+  return str;
 }
