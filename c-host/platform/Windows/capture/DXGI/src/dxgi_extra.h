@@ -26,8 +26,10 @@ HRESULT __stdcall CreateDXGIFactory1(REFIID riid, void **factory);
 #define D3D_FEATURE_LEVEL_12_0 0xc000
 #define D3D_FEATURE_LEVEL_12_1 0xc100
 
+#ifndef __dxgicommon_h__
 #define DXGI_ERROR_ACCESS_LOST           _HRESULT_TYPEDEF_(0x887A0026L)
 #define DXGI_ERROR_WAIT_TIMEOUT          _HRESULT_TYPEDEF_(0x887A0027L)
+#endif
 
 enum DXGI_OUTDUPL_POINTER_SHAPE_TYPE {
   DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME = 1,
@@ -188,6 +190,7 @@ typedef struct DXGI_MODE_DESC1
 }
 DXGI_MODE_DESC1;
 
+#ifndef __dxgicommon_h__
 typedef enum DXGI_COLOR_SPACE_TYPE {
     DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709             = 0,
     DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709             = 1,
@@ -216,6 +219,7 @@ typedef enum DXGI_COLOR_SPACE_TYPE {
     DXGI_COLOR_SPACE_YCBCR_STUDIO_G24_TOPLEFT_P2020     = 24,
     DXGI_COLOR_SPACE_CUSTOM                             = 0xFFFFFFFF
 } DXGI_COLOR_SPACE_TYPE;
+#endif
 
 DEFINE_GUID(IID_IDXGIOutput1, 0x00cddea8, 0x939b, 0x4b83, 0xa3,0x40,0xa6,0x85,0x22,0x66,0x66,0xcc);
 

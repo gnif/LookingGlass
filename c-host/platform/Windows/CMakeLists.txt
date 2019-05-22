@@ -13,7 +13,7 @@ add_library(platform_Windows STATIC
 
 add_subdirectory("capture")
 
-FIND_PROGRAM(WINDRES_EXECUTABLE NAMES "windres.exe" DOC "windres executable")
+FIND_PROGRAM(WINDRES_EXECUTABLE NAMES "x86_64-w64-mingw32-windres" "windres.exe" DOC "windres executable")
 ADD_CUSTOM_COMMAND(TARGET platform_Windows POST_BUILD
 	WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
 	COMMAND ${WINDRES_EXECUTABLE} -i resource.rc -o "${PROJECT_BINARY_DIR}/resource.o"

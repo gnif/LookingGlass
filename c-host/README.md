@@ -36,10 +36,30 @@ Don't ask if you can't figure it out, this code is the very definition of experi
 
 Hint:
 
+### For Windows on Windows
+
 ```
 mkdir build
 cd build
 cmake -G "MSYS Makefiles" ..
+make
+```
+
+### For Linux on Linux
+
+```
+mkdir build
+cd build
+cmake ..
+make
+```
+
+### For Windows cross compiling on Linux
+
+```
+mkdir build
+cd build
+cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
 make
 ```
 

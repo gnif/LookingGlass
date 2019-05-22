@@ -7,10 +7,12 @@ option(USE_NVFBC "Enable NVFBC Support" OFF)
 option(USE_DXGI  "Enable DXGI Support" ON)
 
 if(NOT DEFINED NVFBC_SDK)
-  set(NVFBC_SDK "C:\\Program Files (x86)\\NVIDIA Corporation\\NVIDIA Capture SDK")
+  set(NVFBC_SDK "C:/Program Files (x86)/NVIDIA Corporation/NVIDIA Capture SDK")
 endif()
-  
-if(NOT EXISTS "${NVFBC_SDK}\\inc" OR NOT IS_DIRECTORY "${NVFBC_SDK}\\inc")
+
+file(TO_CMAKE_PATH "${NVFBC_SDK}" nvfbc_sdk)
+
+if(NOT EXISTS "${nvfbc_sdk}/inc" OR NOT IS_DIRECTORY "${nvfbc_sdk}/inc")
   message("Disabling NVFBC support, can't find the SDK headers")
   set(USE_NVFBC OFF)
 endif()
