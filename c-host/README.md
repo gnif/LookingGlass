@@ -13,13 +13,9 @@ Several reasons:
 3. The host is a jumbled mess of code from all the experimentation going on
 4. I would eventually like to be able to port this to run on Linux guests
 
-## Why C and not C++ (or some other language)
-
-Beacuse I like C and for this project believe that C++ is overkill
-
 ## When will it be ready?
 
-No idea
+Soon :)
 
 ## Will it replace the C++ host?
 
@@ -32,11 +28,7 @@ It does now...
 
 ## How do I build it?
 
-Don't ask if you can't figure it out, this code is the very definition of experiemental and incomplete and should not be in use yet.
-
-Hint:
-
-### For Windows on Windows
+#### For Windows on Windows
 
 ```
 mkdir build
@@ -45,7 +37,7 @@ cmake -G "MSYS Makefiles" ..
 make
 ```
 
-### For Linux on Linux
+#### For Linux on Linux
 
 ```
 mkdir build
@@ -54,7 +46,7 @@ cmake ..
 make
 ```
 
-### For Windows cross compiling on Linux
+#### For Windows cross compiling on Linux
 
 ```
 mkdir build
@@ -72,6 +64,8 @@ It is in your user's temp directory:
 For example:
 
     C:\Users\YourUser\AppData\Local\Temp\looking-glass-host.txt
+
+You can also open it by simply right clicking the tray icon and selecting "Open Log File"
 
 ## Why does this version require Administrator privileges
 
