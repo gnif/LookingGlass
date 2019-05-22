@@ -26,8 +26,11 @@ HRESULT __stdcall CreateDXGIFactory1(REFIID riid, void **factory);
 #define D3D_FEATURE_LEVEL_12_0 0xc000
 #define D3D_FEATURE_LEVEL_12_1 0xc100
 
-#ifndef __dxgicommon_h__
+#ifndef DXGI_ERROR_ACCESS_LOST
 #define DXGI_ERROR_ACCESS_LOST           _HRESULT_TYPEDEF_(0x887A0026L)
+#endif
+
+#ifndef DXGI_ERROR_WAIT_TIMEOUT
 #define DXGI_ERROR_WAIT_TIMEOUT          _HRESULT_TYPEDEF_(0x887A0027L)
 #endif
 
