@@ -35,21 +35,24 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "desktop_rgb.frag.h"
 #include "desktop_yuv.frag.h"
 
-struct EGL_Desktop
+struct DesktopShader
 {
-  EGL_Texture * texture;
-  EGL_Shader  * shader; // the active shader
-  EGL_Model   * model;
-
-  // shader instances
-  EGL_Shader * shader_generic;
-  EGL_Shader * shader_yuv;
-
-  // uniforms
+  EGL_Shader * shader;
   GLint uDesktopPos;
   GLint uDesktopSize;
   GLint uNearest;
   GLint uNV, uNVGain;
+};
+
+struct EGL_Desktop
+{
+  EGL_Texture          * texture;
+  struct DesktopShader * shader; // the active shader
+  EGL_Model            * model;
+
+  // shader instances
+  struct DesktopShader shader_generic;
+  struct DesktopShader shader_yuv;
 
   // internals
   enum EGL_PixelFormat pixFmt;
@@ -66,6 +69,31 @@ struct EGL_Desktop
 
 // forwards
 void egl_desktop_toggle_nv(SDL_Scancode key, void * opaque);
+
+static bool egl_init_desktop_shader(
+  struct DesktopShader * shader,
+  const char * vertex_code  , size_t vertex_size,
+  const char * fragment_code, size_t fragment_size
+)
+{
+  if (!egl_shader_init(&shader->shader))
+    return false;
+
+  if (!egl_shader_compile(shader->shader,
+        vertex_code  , vertex_size,
+        fragment_code, fragment_size))
+  {
+    return false;
+  }
+
+  shader->uDesktopPos  = egl_shader_get_uniform_location(shader->shader, "position");
+  shader->uDesktopSize = egl_shader_get_uniform_location(shader->shader, "size"    );
+  shader->uNearest     = egl_shader_get_uniform_location(shader->shader, "nearest" );
+  shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"      );
+  shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"  );
+
+  return true;
+}
 
 bool egl_desktop_init(EGL_Desktop ** desktop)
 {
@@ -84,31 +112,21 @@ bool egl_desktop_init(EGL_Desktop ** desktop)
     return false;
   }
 
-  if (!egl_shader_init(&(*desktop)->shader_generic))
+  if (!egl_init_desktop_shader(
+    &(*desktop)->shader_generic,
+    b_shader_desktop_vert    , b_shader_desktop_vert_size,
+    b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size))
   {
     DEBUG_ERROR("Failed to initialize the generic desktop shader");
     return false;
   }
 
-  if (!egl_shader_init(&(*desktop)->shader_yuv))
+  if (!egl_init_desktop_shader(
+    &(*desktop)->shader_yuv,
+    b_shader_desktop_vert    , b_shader_desktop_vert_size,
+    b_shader_desktop_yuv_frag, b_shader_desktop_yuv_frag_size))
   {
     DEBUG_ERROR("Failed to initialize the yuv desktop shader");
-    return false;
-  }
-
-  if (!egl_shader_compile((*desktop)->shader_generic,
-        b_shader_desktop_vert    , b_shader_desktop_vert_size,
-        b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size))
-  {
-    DEBUG_ERROR("Failed to compile the generic desktop shader");
-    return false;
-  }
-
-  if (!egl_shader_compile((*desktop)->shader_yuv,
-        b_shader_desktop_vert    , b_shader_desktop_vert_size,
-        b_shader_desktop_yuv_frag, b_shader_desktop_yuv_frag_size))
-  {
-    DEBUG_ERROR("Failed to compile the yuv desktop shader");
     return false;
   }
 
@@ -143,10 +161,10 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   if (!*desktop)
     return;
 
-  egl_texture_free(&(*desktop)->texture       );
-  egl_shader_free (&(*desktop)->shader_generic);
-  egl_shader_free (&(*desktop)->shader_yuv    );
-  egl_model_free  (&(*desktop)->model         );
+  egl_texture_free(&(*desktop)->texture              );
+  egl_shader_free (&(*desktop)->shader_generic.shader);
+  egl_shader_free (&(*desktop)->shader_yuv.shader    );
+  egl_model_free  (&(*desktop)->model                );
 
   app_release_keybind(&(*desktop)->kbNV);
 
@@ -162,22 +180,22 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
     {
       case FRAME_TYPE_BGRA:
         desktop->pixFmt = EGL_PF_BGRA;
-        desktop->shader = desktop->shader_generic;
+        desktop->shader = &desktop->shader_generic;
         break;
 
       case FRAME_TYPE_RGBA:
         desktop->pixFmt = EGL_PF_RGBA;
-        desktop->shader = desktop->shader_generic;
+        desktop->shader = &desktop->shader_generic;
         break;
 
       case FRAME_TYPE_RGBA10:
         desktop->pixFmt = EGL_PF_RGBA10;
-        desktop->shader = desktop->shader_generic;
+        desktop->shader = &desktop->shader_generic;
         break;
 
       case FRAME_TYPE_YUV420:
         desktop->pixFmt = EGL_PF_YUV420;
-        desktop->shader = desktop->shader_yuv;
+        desktop->shader = &desktop->shader_yuv;
         break;
 
       default:
@@ -200,15 +218,6 @@ bool egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
 {
   if (sourceChanged)
   {
-    if (desktop->shader)
-    {
-      desktop->uDesktopPos  = egl_shader_get_uniform_location(desktop->shader, "position");
-      desktop->uDesktopSize = egl_shader_get_uniform_location(desktop->shader, "size"    );
-      desktop->uNearest     = egl_shader_get_uniform_location(desktop->shader, "nearest" );
-      desktop->uNV          = egl_shader_get_uniform_location(desktop->shader, "nv"      );
-      desktop->uNVGain      = egl_shader_get_uniform_location(desktop->shader, "nvGain"  );
-    }
-
     if (!egl_texture_setup(
       desktop->texture,
       desktop->pixFmt,
@@ -241,18 +250,19 @@ void egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, con
   if (!desktop->shader)
     return;
 
-  egl_shader_use(desktop->shader);
-  glUniform4f(desktop->uDesktopPos , x, y, scaleX, scaleY);
-  glUniform1i(desktop->uNearest    , nearest ? 1 : 0);
-  glUniform2f(desktop->uDesktopSize, desktop->width, desktop->height);
+  const struct DesktopShader * shader = desktop->shader;
+  egl_shader_use(shader->shader);
+  glUniform4f(shader->uDesktopPos , x, y, scaleX, scaleY);
+  glUniform1i(shader->uNearest    , nearest ? 1 : 0);
+  glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
 
   if (desktop->nvGain)
   {
-    glUniform1i(desktop->uNV, 1);
-    glUniform1f(desktop->uNVGain, (float)desktop->nvGain);
+    glUniform1i(shader->uNV, 1);
+    glUniform1f(shader->uNVGain, (float)desktop->nvGain);
   }
   else
-    glUniform1i(desktop->uNV, 0);
+    glUniform1i(shader->uNV, 0);
 
   egl_model_render(desktop->model);
 }
