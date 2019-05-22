@@ -189,19 +189,26 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
   if (streaming)
   {
-    if (!texture->hasPBO)
+    if (texture->hasPBO)
     {
-      glGenBuffers(2, texture->pbo);
-      texture->hasPBO = true;
+      // release old PBOs and delete the buffers
+      for(int i = 0; i < 2; ++i)
+      {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
+        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+      }
+      glDeleteBuffers(2, texture->pbo);
     }
 
+    glGenBuffers(2, texture->pbo);
+    texture->hasPBO = true;
     for(int i = 0; i < 2; ++i)
     {
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
       glBufferStorage(
         GL_PIXEL_UNPACK_BUFFER,
         texture->pboBufferSize,
-        0,
+        NULL,
         GL_MAP_PERSISTENT_BIT |
         GL_MAP_WRITE_BIT      |
         GL_MAP_COHERENT_BIT
