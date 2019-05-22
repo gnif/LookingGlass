@@ -47,6 +47,7 @@ struct EGL_Texture
   int    pboIndex;
   bool   needsUpdate;
   size_t pboBufferSize;
+  void * pboMap[2];
 };
 
 bool egl_texture_init(EGL_Texture ** texture)
@@ -75,7 +76,15 @@ void egl_texture_free(EGL_Texture ** texture)
   }
 
   if ((*texture)->hasPBO)
+  {
+    for(int i = 0; i < 2; ++i)
+    {
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (*texture)->pbo[i]);
+      glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glDeleteBuffers(2, (*texture)->pbo);
+  }
 
   free(*texture);
   *texture = NULL;
@@ -189,14 +198,26 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     for(int i = 0; i < 2; ++i)
     {
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
-      glBufferData(
+      glBufferStorage(
         GL_PIXEL_UNPACK_BUFFER,
-        height * stride,
-        NULL,
-        GL_DYNAMIC_DRAW
+        texture->pboBufferSize,
+        0,
+        GL_MAP_PERSISTENT_BIT |
+        GL_MAP_WRITE_BIT      |
+        GL_MAP_COHERENT_BIT
       );
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+      texture->pboMap[i] = glMapBufferRange(
+        GL_PIXEL_UNPACK_BUFFER,
+        0,
+        texture->pboBufferSize,
+        GL_MAP_PERSISTENT_BIT        |
+        GL_MAP_WRITE_BIT             |
+        GL_MAP_UNSYNCHRONIZED_BIT    |
+        GL_MAP_INVALIDATE_BUFFER_BIT
+      );
     }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
 
   return true;
@@ -215,10 +236,9 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
     if (++texture->pboIndex == 2)
       texture->pboIndex = 0;
 
-    /* initiate the data upload */
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
-    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize, buffer);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    /* update the GPU buffer */
+    memcpy(texture->pboMap[texture->pboIndex], buffer, texture->pboBufferSize);
+
     texture->needsUpdate = true;
   }
   else
