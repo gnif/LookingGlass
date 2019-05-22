@@ -171,8 +171,7 @@ static int cursorThread(void * unused)
     {
       if (!state.running)
         return 0;
-
-      usleep(1);
+      usleep(params.cursorPollInterval);
       continue;
     }
 
@@ -285,7 +284,7 @@ static int frameThread(void * unused)
       if (!state.running)
         break;
 
-      usleep(1);
+      usleep(params.framePollInterval);
       continue;
     }
 

@@ -96,6 +96,9 @@ struct AppParams
   SDL_Scancode escapeKey;
   bool         showAlerts;
 
+  unsigned int cursorPollInterval;
+  unsigned int framePollInterval;
+
   bool         forceRenderer;
   unsigned int forceRendererIndex;
 

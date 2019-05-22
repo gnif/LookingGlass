@@ -86,6 +86,20 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false,
   },
+  {
+    .module        = "app",
+    .name          = "cursorPollInterval",
+    .description   = "How often to check for a cursor update in microseconds",
+    .type          = OPTION_TYPE_INT,
+    .value.x_int   = 1000
+  },
+  {
+    .module        = "app",
+    .name          = "framePollInterval",
+    .description   = "How often to check for a frame update in microseconds",
+    .type          = OPTION_TYPE_INT,
+    .value.x_int   = 1000
+  },
 
   // window options
   {
@@ -344,8 +358,10 @@ bool config_load(int argc, char * argv[])
   }
 
   // setup the application params for the basic types
-  params.shmFile       = option_get_string("app", "shmFile");
-  params.shmSize       = option_get_int   ("app", "shmSize") * 1048576;
+  params.shmFile            = option_get_string("app", "shmFile"           );
+  params.shmSize            = option_get_int   ("app", "shmSize"           ) * 1048576;
+  params.cursorPollInterval = option_get_int   ("app", "cursorPollInterval");
+  params.framePollInterval  = option_get_int   ("app", "framePollInterval" );
 
   params.windowTitle   = option_get_string("win", "title"        );
   params.autoResize    = option_get_bool  ("win", "autoResize"   );
