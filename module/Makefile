@@ -12,4 +12,3 @@ test:	all
 	grep -q '^kvmfr' /proc/modules && sudo rmmod kvmfr || true
 	sudo insmod ./kvmfr.ko
 	sudo chown $(USER) /dev/uio0
-	../client/bin/looking-glass-client -f /dev/uio0 -L 128
