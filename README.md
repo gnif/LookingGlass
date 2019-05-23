@@ -1,4 +1,5 @@
-# LookingGlass
+# Looking Glass
+
 An extremely low latency KVMFR (KVM FrameRelay) implementation for guests with VGA PCI Passthrough.
 
 * Project Website: https://looking-glass.hostfission.com

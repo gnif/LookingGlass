@@ -1,8 +1,12 @@
-#Looking Glass Client
+# Looking Glass Client
 
 This is the Looking Glass client application that is designed to work in tandem with the Looking Glass Host application
 
-## Build Dependencies
+---
+
+## Building the Application
+
+### Build Dependencies
 
 * binutils-dev
 * cmake
@@ -14,18 +18,24 @@ This is the Looking Glass client application that is designed to work in tandem 
 * libx11-dev
 * nettle-dev
 
-### Debian (and maybe Ubuntu)
+#### Debian (and maybe Ubuntu)
 
     apt-get install binutils-dev cmake fonts-freefont-ttf libsdl2-dev libsdl2-ttf-dev libspice-protocol-dev libfontconfig1-dev libx11-dev nettle-dev
 
-## Building
+### Building
 
-    mkdir client/build
-    cd client/build
+    mkdir build
+    cd build
     cmake ../
     make
 
-## Key Bindings
+    Should this all go well you should be left with the file `looking-glass-client`
+
+---
+
+## Usage Tips
+
+### Key Bindings
 
 By default Looking Glass uses the `Scroll Lock` key as the escape key for commands as well as the input capture mode toggle, this can be changed using the `-m` switch if you desire a different key.
 Below are a list of current key bindings:
@@ -37,13 +47,13 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>+<kbd>I</kbd> | Spice keyboard & mouse enable toggle |
 | <kbd>ScrLk</kbd>+<kbd>N</kbd> | Toggle night vision mode (EGL renderer only!) |
 
-## Setting options via command line arguments
+### Setting options via command line arguments
 
 The syntax is simple: `module:name=value`, for example:
 
     ./looking-glass-host win:fullScreen=yes egl:nvGain=1
 
-## Setting options via configuration files
+### Setting options via configuration files
 
 By default the application will look for and load the config files in the following locations
 
@@ -60,7 +70,7 @@ The format of this file is the commonly known INI format, for example:
 
 Command line arguments will override any options loaded from the config files.
 
-## Supported options
+### Supported options
 
 ```
 |------------------------------------------------------------------------------------------------------------|
