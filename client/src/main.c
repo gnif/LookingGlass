@@ -595,6 +595,11 @@ int eventFilter(void * userdata, SDL_Event * event)
           updatePositionInfo();
           realignGuest = true;
           break;
+
+        // allow a window close event to close the application even if ignoreQuit is set
+        case SDL_WINDOWEVENT_CLOSE:
+          state.running = false;
+          break;
       }
       return 0;
     }
