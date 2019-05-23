@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/sysinfo.h"
 #include "utils.h"
 #include "dynamic/fonts.h"
 
@@ -168,9 +169,17 @@ bool egl_initialize(void * opaque, Uint32 * sdlFlags)
 {
   *sdlFlags = SDL_WINDOW_OPENGL;
   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER        , 1);
-  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS  , 1);
-  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES  , 4);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+  int maxSamples = sysinfo_gfx_max_multisample();
+  if (maxSamples > 1)
+  {
+    if (maxSamples > 4)
+      maxSamples = 4;
+
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, maxSamples);
+  }
 
   return true;
 }
