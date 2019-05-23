@@ -38,6 +38,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/crash.h"
 #include "common/KVMFR.h"
+#include "common/stringutils.h"
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
@@ -643,8 +644,10 @@ int eventFilter(void * userdata, SDL_Event * event)
         x -= state.cursor.x;
         y -= state.cursor.y;
         realignGuest = false;
-        state.accX = 0;
-        state.accY = 0;
+        state.accX  = 0;
+        state.accY  = 0;
+        state.sensX = 0;
+        state.sensY = 0;
 
         if (!spice_mouse_motion(x, y))
           DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
@@ -663,6 +666,16 @@ int eventFilter(void * userdata, SDL_Event * event)
           y = floor(state.accY);
           state.accX -= x;
           state.accY -= y;
+        }
+
+        if (serverMode && state.mouseSens != 0)
+        {
+          state.sensX += ((float)x / 10.0f) * (state.mouseSens + 10);
+          state.sensY += ((float)y / 10.0f) * (state.mouseSens + 10);
+          x = floor(state.sensX);
+          y = floor(state.sensY);
+          state.sensX -= x;
+          state.sensY -= y;
         }
 
         if (!spice_mouse_motion(x, y))
@@ -902,10 +915,41 @@ static void toggle_input(SDL_Scancode key, void * opaque)
   );
 }
 
+static void mouse_sens_inc(SDL_Scancode key, void * opaque)
+{
+  char * msg;
+  if (state.mouseSens < 9)
+    ++state.mouseSens;
+
+  alloc_sprintf(&msg, "Sensitivity: %d", state.mouseSens);
+  app_alert(
+    LG_ALERT_INFO,
+    msg
+  );
+  free(msg);
+}
+
+static void mouse_sens_dec(SDL_Scancode key, void * opaque)
+{
+  char * msg;
+
+  if (state.mouseSens > -9)
+    --state.mouseSens;
+
+  alloc_sprintf(&msg, "Sensitivity: %d", state.mouseSens);
+  app_alert(
+    LG_ALERT_INFO,
+    msg
+  );
+  free(msg);
+}
+
 static void register_key_binds()
 {
-  state.kbFS    = app_register_keybind(SDL_SCANCODE_F, toggle_fullscreen, NULL);
-  state.kbInput = app_register_keybind(SDL_SCANCODE_I, toggle_input     , NULL);
+  state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
+  state.kbInput        = app_register_keybind(SDL_SCANCODE_I     , toggle_input     , NULL);
+  state.kbMouseSensInc = app_register_keybind(SDL_SCANCODE_INSERT, mouse_sens_inc   , NULL);
+  state.kbMouseSensDec = app_register_keybind(SDL_SCANCODE_DELETE, mouse_sens_dec   , NULL);
 }
 
 static void release_key_binds()
@@ -924,6 +968,10 @@ int run()
   state.scaleX    = 1.0f;
   state.scaleY    = 1.0f;
   state.frameTime = 1e9 / params.fpsLimit;
+
+  state.mouseSens = params.mouseSens;
+       if (state.mouseSens < -9) state.mouseSens = -9;
+  else if (state.mouseSens >  9) state.mouseSens =  9;
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
 
@@ -1282,9 +1330,7 @@ int main(int argc, char * argv[])
     return -1;
 
   if (params.grabKeyboard)
-  {
     SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
-  }
 
   const int ret = run();
   release_key_binds();

@@ -66,6 +66,11 @@ struct AppState
 
   KeybindHandle kbFS;
   KeybindHandle kbInput;
+  KeybindHandle kbMouseSensInc;
+  KeybindHandle kbMouseSensDec;
+
+  int   mouseSens;
+  float sensX, sensY;
 };
 
 struct AppParams
@@ -103,6 +108,7 @@ struct AppParams
   unsigned int forceRendererIndex;
 
   const char * windowTitle;
+  int          mouseSens;
 };
 
 struct CBRequest

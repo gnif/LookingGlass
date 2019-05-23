@@ -234,6 +234,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },
+  {
+    .module         = "input",
+    .name           = "mouseSens",
+    .description    = "Initial mouse sensitivity when in caputre mode (-9 to 9)",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 0,
+  },
 
   // spice options
   {
@@ -378,6 +385,7 @@ bool config_load(int argc, char * argv[])
   params.grabKeyboard  = option_get_bool  ("input", "grabKeyboard");
   params.escapeKey     = option_get_int   ("input", "escapeKey"   );
   params.hideMouse     = option_get_bool  ("input", "hideCursor"  );
+  params.mouseSens     = option_get_int   ("input", "mouseSens"   );
 
   if (option_get_bool("spice", "enable"))
   {
