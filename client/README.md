@@ -46,8 +46,8 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>+<kbd>F</kbd>      | Full Screen toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd>      | Spice keyboard & mouse enable toggle |
 | <kbd>ScrLk</kbd>+<kbd>N</kbd>      | Toggle night vision mode (EGL renderer only!) |
-| <kbd>ScrLk</kbd>+<kbd>Insert</kbd> | Increase mouse sensitivity (in caputre mode only) |
-| <kbd>ScrLk</kbd>+<kbd>Del</kbd>    | Decrease mouse sensitivity (in caputre mode only) |
+| <kbd>ScrLk</kbd>+<kbd>Insert</kbd> | Increase mouse sensitivity (in capture mode only) |
+| <kbd>ScrLk</kbd>+<kbd>Del</kbd>    | Decrease mouse sensitivity (in capture mode only) |
 
 ### Setting options via command line arguments
 
@@ -111,7 +111,7 @@ Command line arguments will override any options loaded from the config files.
 | input:grabKeyboard | -G    | yes             | Grab the keyboard in capture mode                                                      |
 | input:escapeKey    | -m    | 71 = ScrollLock | Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values |
 | input:hideCursor   | -M    | yes             | Hide the local mouse cursor                                                            |
-| input:mouseSens    |       | 0               | Initial mouse sensitivity when in caputre mode (-9 to 9)                               |
+| input:mouseSens    |       | 0               | Initial mouse sensitivity when in capture mode (-9 to 9)                               |
 |---------------------------------------------------------------------------------------------------------------------------------------|
 
 |------------------------------------------------------------------------------------------------------------------|

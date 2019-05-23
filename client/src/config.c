@@ -237,7 +237,7 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "mouseSens",
-    .description    = "Initial mouse sensitivity when in caputre mode (-9 to 9)",
+    .description    = "Initial mouse sensitivity when in capture mode (-9 to 9)",
     .type           = OPTION_TYPE_INT,
     .value.x_int    = 0,
   },
