@@ -29,7 +29,7 @@ This is the Looking Glass client application that is designed to work in tandem 
     cmake ../
     make
 
-    Should this all go well you should be left with the file `looking-glass-client`
+Should this all go well you should be left with the file `looking-glass-client`
 
 ---
 
