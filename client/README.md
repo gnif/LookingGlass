@@ -73,17 +73,17 @@ Command line arguments will override any options loaded from the config files.
 ### Supported options
 
 ```
-|------------------------------------------------------------------------------------------------------------|
-| Long                   | Short | Value     | Description                                                   |
-|------------------------------------------------------------------------------------------------------------|
-| app:configFile         | -C    | NULL      | A file to read additional configuration from                  |
-| app:shmFile            | -f    | /dev/uio0 | The path to the shared memory file                            |
-| app:shmSize            | -L    | 128       | Specify the size in MB of the shared memory file (0 = detect) |
-| app:renderer           | -g    | auto      | Specify the renderer to use                                   |
-| app:license            | -l    | no        | Show the license for this application and then terminate      |
-| app:cursorPollInterval |       | 1000      | How often to check for a cursor update in microseconds        |
-| app:framePollInterval  |       | 1000      | How often to check for a frame update in microseconds         |
-|------------------------------------------------------------------------------------------------------------|
+|-------------------------------------------------------------------------------------------------------------------------|
+| Long                   | Short | Value                  | Description                                                   |
+|-------------------------------------------------------------------------------------------------------------------------|
+| app:configFile         | -C    | NULL                   | A file to read additional configuration from                  |
+| app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file                            |
+| app:shmSize            | -L    | 0                      | Specify the size in MB of the shared memory file (0 = detect) |
+| app:renderer           | -g    | auto                   | Specify the renderer to use                                   |
+| app:license            | -l    | no                     | Show the license for this application and then terminate      |
+| app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds        |
+| app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds         |
+|-------------------------------------------------------------------------------------------------------------------------|
 
 |-------------------------------------------------------------------------------------------------------|
 | Long              | Short | Value                  | Description                                      |
@@ -96,7 +96,7 @@ Command line arguments will override any options loaded from the config files.
 | win:keepAspect    | -r    | yes                    | Maintain the correct aspect ratio                |
 | win:borderless    | -d    | no                     | Borderless mode                                  |
 | win:fullScreen    | -F    | no                     | Launch in fullscreen borderless mode             |
-| win:fpsLimit      | -K    | 120                    | Frame rate limit (0 = disable - not recommended) |
+| win:fpsLimit      | -K    | 200                    | Frame rate limit (0 = disable - not recommended) |
 | win:showFPS       | -k    | no                     | Enable the FPS & UPS display                     |
 | win:ignoreQuit    | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)             |
 | win:noScreensaver | -S    | no                     | Prevent the screensaver from starting            |
@@ -111,18 +111,18 @@ Command line arguments will override any options loaded from the config files.
 | input:hideCursor   | -M    | yes             | Hide the local mouse cursor                                                            |
 |---------------------------------------------------------------------------------------------------------------------------------------|
 
-|----------------------------------------------------------------------------------------------------------------------|
-| Long                   | Short | Value         | Description                                                         |
-|----------------------------------------------------------------------------------------------------------------------|
-| spice:enable           | -s    | yes           | Enable the built in SPICE client for input and/or clipboard support |
-| spice:host             | -c    | 192.168.10.50 | The SPICE server host or UNIX socket                                |
-| spice:port             | -p    | 5900          | The SPICE server port (0 = unix socket)                             |
-| spice:input            |       | yes           | Use SPICE to send keyboard and mouse input events to the guest      |
-| spice:clipboard        |       | yes           | Use SPICE to syncronize the clipboard contents with the guest       |
-| spice:clipboardToVM    |       | yes           | Allow the clipboard to be syncronized TO the VM                     |
-| spice:clipboardToLocal |       | yes           | Allow the clipboard to be syncronized FROM the VM                   |
-| spice:scaleCursor      | -j    | yes           | Scale cursor input position to screen size when up/down scaled      |
-|----------------------------------------------------------------------------------------------------------------------|
+|------------------------------------------------------------------------------------------------------------------|
+| Long                   | Short | Value     | Description                                                         |
+|------------------------------------------------------------------------------------------------------------------|
+| spice:enable           | -s    | yes       | Enable the built in SPICE client for input and/or clipboard support |
+| spice:host             | -c    | 127.0.0.1 | The SPICE server host or UNIX socket                                |
+| spice:port             | -p    | 5900      | The SPICE server port (0 = unix socket)                             |
+| spice:input            |       | yes       | Use SPICE to send keyboard and mouse input events to the guest      |
+| spice:clipboard        |       | yes       | Use SPICE to syncronize the clipboard contents with the guest       |
+| spice:clipboardToVM    |       | yes       | Allow the clipboard to be syncronized TO the VM                     |
+| spice:clipboardToLocal |       | yes       | Allow the clipboard to be syncronized FROM the VM                   |
+| spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
+|------------------------------------------------------------------------------------------------------------------|
 
 |--------------------------------------------------------------------------|
 | Long          | Short | Value | Description                              |
@@ -136,7 +136,7 @@ Command line arguments will override any options loaded from the config files.
 | Long                 | Short | Value | Description                                 |
 |------------------------------------------------------------------------------------|
 | opengl:mipmap        |       | yes   | Enable mipmapping                           |
-| opengl:vsync         |       | no    | Enable vsync                                |
+| opengl:vsync         |       | yes   | Enable vsync                                |
 | opengl:preventBuffer |       | yes   | Prevent the driver from buffering frames    |
 | opengl:amdPinnedMem  |       | yes   | Use GL_AMD_pinned_memory if it is available |
 |------------------------------------------------------------------------------------|
