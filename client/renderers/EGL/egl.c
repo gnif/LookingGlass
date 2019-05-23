@@ -101,6 +101,20 @@ static struct Option egl_options[] =
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = false
   },
+  {
+    .module       = "egl",
+    .name         = "nvGainMax",
+    .description  = "The maximum night vision gain",
+    .type         = OPTION_TYPE_INT,
+    .value.x_int  = 1
+  },
+  {
+    .module       = "egl",
+    .name         = "nvGain",
+    .description  = "The initial night vision gain at startup",
+    .type         = OPTION_TYPE_INT,
+    .value.x_int  = 0
+  },
   {0}
 };
 

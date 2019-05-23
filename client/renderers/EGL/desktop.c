@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "desktop.h"
 #include "common/debug.h"
+#include "common/option.h"
 #include "utils.h"
 
 #include "texture.h"
@@ -63,7 +64,7 @@ struct EGL_Desktop
 
   // night vision
   KeybindHandle kbNV;
-  bool  nv;
+  int   nvMax;
   int   nvGain;
 };
 
@@ -141,6 +142,9 @@ bool egl_desktop_init(EGL_Desktop ** desktop)
 
   (*desktop)->kbNV = app_register_keybind(SDL_SCANCODE_N, egl_desktop_toggle_nv, *desktop);
 
+  (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
+  (*desktop)->nvGain = option_get_int("egl", "nvGain"   );
+
   return true;
 }
 
@@ -148,7 +152,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop)
 void egl_desktop_toggle_nv(SDL_Scancode key, void * opaque)
 {
   EGL_Desktop * desktop = (EGL_Desktop *)opaque;
-  if (++desktop->nvGain == 4)
+  if (desktop->nvGain++ == desktop->nvMax)
     desktop->nvGain = 0;
 
        if (desktop->nvGain == 0) app_alert(LG_ALERT_INFO, "NV Disabled");
