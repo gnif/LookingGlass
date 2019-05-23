@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "windows/platform.h"
 #include "windows/debug.h"
 #include "windows/mousehook.h"
+#include "common/option.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -34,6 +35,7 @@ struct iface
   bool        stop;
   NvFBCHandle nvfbc;
 
+  bool         seperateCursor;
   void       * pointerShape;
   unsigned int pointerSize;
   unsigned int maxWidth, maxHeight;
@@ -72,13 +74,30 @@ static void on_mouseMove(int x, int y)
 {
   this->mouseX = x;
   this->mouseY = y;
-  os_signalEvent(this->cursorEvents[1]);
+  os_signalEvent(this->cursorEvents[0]);
 }
 
 static const char * nvfbc_getName()
 {
   return "NVFBC (NVidia Frame Buffer Capture)";
 };
+
+static void nvfbc_initOptions()
+{
+  struct Option options[] =
+  {
+    {
+      .module         = "nvfbc",
+      .name           = "decoupleCursor",
+      .description    = "Capture the cursor seperately",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
+    {0}
+  };
+
+  option_register(options);
+}
 
 static bool nvfbc_create()
 {
@@ -123,24 +142,27 @@ static bool nvfbc_create()
     return false;
   }
 
+  this->seperateCursor = option_get_bool("nvfbc", "decoupleCursor");
+
   return true;
 }
 
 static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
 {
-  this->stop     = false;
+  this->stop         = false;
   this->pointerShape = pointerShape;
   this->pointerSize  = pointerSize;
 
   getDesktopSize(&this->width, &this->height);
   os_resetEvent(this->frameEvent);
 
+
   HANDLE event;
   if (!NvFBCToSysSetup(
     this->nvfbc,
     BUFFER_FMT_ARGB,
-    false,
-    true,
+    !this->seperateCursor,
+    this->seperateCursor,
     false,
     0,
     (void **)&this->frameBuffer,
@@ -151,9 +173,13 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
     return false;
   }
 
-  this->cursorEvents[0] = os_wrapEvent(event);
-  this->cursorEvents[1] = os_createEvent(true);
+  this->cursorEvents[0] = os_createEvent(true);
   mouseHook_install(on_mouseMove);
+
+  if (this->seperateCursor)
+    this->cursorEvents[1] = os_wrapEvent(event);
+
+  DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
   Sleep(100);
   return true;
@@ -162,7 +188,7 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
 static void nvfbc_stop()
 {
   this->stop = true;
-  os_signalEvent(this->cursorEvents[1]);
+  os_signalEvent(this->cursorEvents[0]);
   os_signalEvent(this->frameEvent);
 }
 
@@ -251,7 +277,7 @@ static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 {
   osEventHandle * events[2];
   memcpy(&events, &this->cursorEvents, sizeof(osEventHandle *) * 2);
-  if (!os_waitEvents(events, 2, false, TIMEOUT_INFINITE))
+  if (!os_waitEvents(events, this->seperateCursor ? 2 : 1, false, TIMEOUT_INFINITE))
   {
     DEBUG_ERROR("Failed to wait on the cursor events");
     return CAPTURE_RESULT_ERROR;
@@ -262,7 +288,7 @@ static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 
   CaptureResult result;
   pointer->shapeUpdate = false;
-  if (events[0])
+  if (this->seperateCursor && events[1])
   {
     result = NvFBCToSysGetCursor(this->nvfbc, pointer, this->pointerShape, this->pointerSize);
     this->mouseVisible = pointer->visible;
@@ -281,6 +307,8 @@ static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 struct CaptureInterface Capture_NVFBC =
 {
   .getName         = nvfbc_getName,
+  .initOptions     = nvfbc_initOptions,
+
   .create          = nvfbc_create,
   .init            = nvfbc_init,
   .stop            = nvfbc_stop,
