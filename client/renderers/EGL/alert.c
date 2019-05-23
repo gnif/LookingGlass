@@ -48,7 +48,8 @@ struct EGL_Alert
   LG_FontBitmap * bmp;
 
   bool     ready;
-  float    width, height;
+  float    width  , height  ;
+  float    bgWidth, bgHeight;
   float    r, g, b, a;
 
   // uniforms
@@ -179,8 +180,13 @@ void egl_alert_render(EGL_Alert * alert, const float scaleX, const float scaleY)
 
     egl_texture_update(alert->texture, alert->bmp->pixels);
 
-    alert->width  = alert->bmp->width;
-    alert->height = alert->bmp->height;
+    alert->width  = alert->bgWidth  = alert->bmp->width;
+    alert->height = alert->bgHeight = alert->bmp->height;
+
+    if (alert->bgWidth < 200)
+      alert->bgWidth = 200;
+    alert->bgHeight += 4;
+
     alert->ready  = true;
 
     alert->font->release(alert->fontObj, alert->bmp);
@@ -197,15 +203,15 @@ void egl_alert_render(EGL_Alert * alert, const float scaleX, const float scaleY)
 
   // render the background first
   egl_shader_use(alert->shaderBG);
-  glUniform2f(alert->uScreenBG, scaleX      , scaleY       );
-  glUniform2f(alert->uSizeBG  , alert->width, alert->height);
+  glUniform2f(alert->uScreenBG, scaleX        , scaleY         );
+  glUniform2i(alert->uSizeBG  , alert->bgWidth, alert->bgHeight);
   glUniform4f(alert->uColorBG , alert->r, alert->g, alert->b, alert->a);
   egl_model_render(alert->model);
 
   // render the texture over the background
   egl_shader_use(alert->shader);
   glUniform2f(alert->uScreen, scaleX      , scaleY       );
-  glUniform2f(alert->uSize  , alert->width, alert->height);
+  glUniform2i(alert->uSize  , alert->width, alert->height);
   egl_model_render(alert->model);
 
   glDisable(GL_BLEND);

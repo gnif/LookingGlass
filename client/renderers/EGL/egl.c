@@ -156,7 +156,7 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   this->screenScaleY = 1.0f;
 
   this->font = LG_Fonts[0];
-  if (!this->font->create(&this->fontObj, NULL, 14))
+  if (!this->font->create(&this->fontObj, NULL, 16))
   {
     DEBUG_ERROR("Failed to create a font instance");
     return false;
