@@ -921,7 +921,7 @@ static void mouse_sens_inc(SDL_Scancode key, void * opaque)
   if (state.mouseSens < 9)
     ++state.mouseSens;
 
-  alloc_sprintf(&msg, "Sensitivity: %d", state.mouseSens);
+  alloc_sprintf(&msg, "Sensitivity: %s%d", state.mouseSens > 0 ? "+" : "", state.mouseSens);
   app_alert(
     LG_ALERT_INFO,
     msg
@@ -936,7 +936,7 @@ static void mouse_sens_dec(SDL_Scancode key, void * opaque)
   if (state.mouseSens > -9)
     --state.mouseSens;
 
-  alloc_sprintf(&msg, "Sensitivity: %d", state.mouseSens);
+  alloc_sprintf(&msg, "Sensitivity: %s%d", state.mouseSens > 0 ? "+" : "", state.mouseSens);
   app_alert(
     LG_ALERT_INFO,
     msg
