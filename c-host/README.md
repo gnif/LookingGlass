@@ -75,20 +75,28 @@ This is intentional for several reasons.
 2. NvFBC requires administrator level access to enable the interface in the first place. (WIP)
 3. DXGI performance can be improved if we have this. (WIP)
 
-# NvFBC (NVIDIA Frame Buffer Capture)
+## NvFBC (NVIDIA Frame Buffer Capture)
 
-## Why isn't there a build with NvFBC support available.
+### Why isn't there a build with NvFBC support available.
 
-Because NVIDIA have decided to put restrictions on the NvFBC API that simply make it incompatible with the GPL/2 licence. Providing a pre-built binary with NvFBC support would violate the EULA I have agreed to in order to access the NVidia Capture SDK.
+~~Because NVIDIA have decided to put restrictions on the NvFBC API that simply make it incompatible with the GPL/2 licence. Providing a pre-built binary with NvFBC support would violate the EULA I have agreed to in order to access the NVidia Capture SDK.~~
 
-## Why can't I compile NvFBC support into the host
+Either I miss-read the License Agreement or it has been updated, it is now viable to produce a "derived work" from the capture SDK.
 
-You must download and install the NVidia Capture SDK. Please note that by doing so you will be agreeing to NVIDIA's SDK License agreement and the binary you produce can not be distributed.
+> 1.1 License Grant. Subject to the terms of this Agreement, NVIDIA hereby grants you a nonexclusive, non-transferable, worldwide,
+revocable, limited, royalty-free, fully paid-up license during the term of this Agreement to:
+> (i) install, use and reproduce the Licensed Software delivered by NVIDIA plus make modifications and create derivative
+works of the source code and header files delivered by NVIDIA, provided that the software is executed only in hardware products as
+specified by NVIDIA in the accompanying documentation (such as release notes) as supported, to develop, test and service your
+products (each, a “Customer Product”) that are interoperable with supported hardware products. If the NVIDIA documentation is
+silent, the supported hardware consists of certain NVIDIA GPUs; and
 
-## Can't you just re-write the NvFBC headers?
+To be safe we are still not including the NVIDIA headers in the repository, but I am now providing pre-built binaries with NvFBC support included.
 
-Technically yes, but since I have already agreed to the SDK License Agreement and seen the headers, I am tainted.
+See: https://looking-glass.hostfission.com/downloads
 
-Until someone is able to reverse engineer these headers without prior knowleadge obtained from the SDK, and without agreeing to the NVIDIA SDK License, we can not legally include the headers or release a binary with NvFBC support built in.
+### Why can't I compile NvFBC support into the host
+
+You must download and install the NVidia Capture SDK. Please note that by doing so you will be agreeing to NVIDIA's SDK License agreement.
 
 _-Geoff_
