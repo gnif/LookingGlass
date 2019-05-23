@@ -2,7 +2,6 @@
 An extremely low latency KVMFR (KVM FrameRelay) implementation for guests with VGA PCI Passthrough.
 
 * Project Website: https://looking-glass.hostfission.com
-* Support Forum: https://forum.level1techs.com/t/looking-glass-triage/130952
 
 ## Donations
 
@@ -32,7 +31,7 @@ Below are a list of current key bindings:
 
 | Command | Description |
 |-|-|
-| <kbd>ScrLk</kbd>   | Toggle cursor screen capture |
+| <kbd>ScrLk</kbd>              | Toggle cursor screen capture |
 | <kbd>ScrLk</kbd>+<kbd>F</kbd> | Full Screen toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd> | Spice keyboard & mouse enable toggle |
 | <kbd>ScrLk</kbd>+<kbd>N</kbd> | Cycle through 4 brightness levels (EGL renderer only!) |
@@ -51,6 +50,6 @@ https://discord.gg/4ahCn4c
 
 Join us in the #LookingGlass channel on the FreeNode network
 
-# Trello
+## Trello
 
 * https://trello.com/b/tI1Xbwsg/looking-glass
