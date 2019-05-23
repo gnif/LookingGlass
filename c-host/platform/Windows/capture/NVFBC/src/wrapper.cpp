@@ -33,10 +33,11 @@ struct NVAPI
   bool initialized;
   HMODULE dll;
 
-  NvFBC_CreateFunctionExType    createEx;
-  NvFBC_SetGlobalFlagsType      setGlobalFlags;
-  NvFBC_GetStatusExFunctionType getStatusEx;
-  NvFBC_EnableFunctionType      enable;
+  NvFBC_CreateFunctionExType      createEx;
+  NvFBC_SetGlobalFlagsType        setGlobalFlags;
+  NvFBC_GetStatusExFunctionType   getStatusEx;
+  NvFBC_EnableFunctionType        enable;
+  NvFBC_GetSDKVersionFunctionType getVersion;
 };
 
 struct stNvFBCHandle
@@ -60,10 +61,37 @@ bool NvFBCInit()
     return false;
   }
 
-  nvapi.createEx       = (NvFBC_CreateFunctionExType   )GetProcAddress(nvapi.dll, "NvFBC_CreateEx"      );
-  nvapi.setGlobalFlags = (NvFBC_SetGlobalFlagsType     )GetProcAddress(nvapi.dll, "NvFBC_SetGlobalFlags");
-  nvapi.getStatusEx    = (NvFBC_GetStatusExFunctionType)GetProcAddress(nvapi.dll, "NvFBC_GetStatusEx"   );
-  nvapi.enable         = (NvFBC_EnableFunctionType     )GetProcAddress(nvapi.dll, "NvFBC_Enable"        );
+  nvapi.createEx       = (NvFBC_CreateFunctionExType     )GetProcAddress(nvapi.dll, "NvFBC_CreateEx"      );
+  nvapi.setGlobalFlags = (NvFBC_SetGlobalFlagsType       )GetProcAddress(nvapi.dll, "NvFBC_SetGlobalFlags");
+  nvapi.getStatusEx    = (NvFBC_GetStatusExFunctionType  )GetProcAddress(nvapi.dll, "NvFBC_GetStatusEx"   );
+  nvapi.enable         = (NvFBC_EnableFunctionType       )GetProcAddress(nvapi.dll, "NvFBC_Enable"        );
+  nvapi.getVersion     = (NvFBC_GetSDKVersionFunctionType)GetProcAddress(nvapi.dll, "NvFBC_GetSDKVersion" );
+
+  if (
+    !nvapi.createEx       ||
+    !nvapi.setGlobalFlags ||
+    !nvapi.getStatusEx    ||
+    !nvapi.enable         ||
+    !nvapi.getVersion)
+  {
+    DEBUG_ERROR("Failed to get the required proc addresses");
+    return false;
+  }
+
+  NvU32 version;
+  if (nvapi.getVersion(&version) != NVFBC_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get the NvFBC SDK version");
+    return false;
+  }
+
+  DEBUG_INFO("NvFBC SDK Version: %lu", version);
+
+  if (nvapi.enable(NVFBC_STATE_ENABLE) != NVFBC_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to enable the NvFBC interface");
+    return false;
+  }
 
   nvapi.initialized = true;
   return true;
