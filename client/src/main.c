@@ -681,7 +681,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (sc == params.escapeKey)
       {
         state.escapeActive = true;
-        state.escapeAction = sc;
+        state.escapeAction = -1;
         break;
       }
 
@@ -716,7 +716,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       SDL_Scancode sc = event->key.keysym.scancode;
       if (state.escapeActive)
       {
-        if (state.escapeAction == params.escapeKey)
+        if (state.escapeAction == -1)
         {
           if (params.useSpiceInput)
           {
@@ -742,7 +742,8 @@ int eventFilter(void * userdata, SDL_Event * event)
             handle->callback(sc, handle->opaque);
         }
 
-        state.escapeActive = false;
+        if (sc == params.escapeKey)
+          state.escapeActive = false;
       }
 
       if (state.ignoreInput || !params.useSpiceInput)
