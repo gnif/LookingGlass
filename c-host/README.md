@@ -2,7 +2,7 @@
 
 ## What is this?
 
-This is an experimental rewrite of the host application in pure C using the MinGW toolchain.
+This is a rewrite of the host application in pure C using the MinGW toolchain.
 
 ## Why make this?
 
