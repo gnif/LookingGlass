@@ -53,7 +53,7 @@ Below are a list of current key bindings:
 
 The syntax is simple: `module:name=value`, for example:
 
-    ./looking-glass-host win:fullScreen=yes egl:nvGain=1
+    ./looking-glass-client win:fullScreen=yes egl:nvGain=1
 
 ### Setting options via configuration files
 
