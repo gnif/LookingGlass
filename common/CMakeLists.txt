@@ -16,7 +16,7 @@ set(LINUX_SOURCES
   src/sysinfo.linux.c
 )
 
-set(WINOWS_SOURCES
+set(WINDOWS_SOURCES
   src/crash.windows.c
   src/sysinfo.windows.c
 )
