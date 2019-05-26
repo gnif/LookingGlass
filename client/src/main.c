@@ -1318,7 +1318,7 @@ int run()
 
 int main(int argc, char * argv[])
 {
-  if (!installCrashHandler(argv[0]))
+  if (!installCrashHandler("/proc/self/exe"))
     DEBUG_WARN("Failed to install the crash handler");
 
   config_init();
