@@ -80,6 +80,7 @@ struct AppParams
   bool         keepAspect;
   bool         borderless;
   bool         fullscreen;
+  bool         maximize;
   bool         center;
   int          x, y;
   unsigned int w, h;
