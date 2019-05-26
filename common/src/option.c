@@ -427,6 +427,9 @@ bool option_load(const char * filename)
             DEBUG_WARN("Ignored unknown option %s:%s", module, name);
           else
           {
+            if (value)
+              value[valueLen] = '\0';
+
             if (!option_set(o, value))
               DEBUG_ERROR("Failed to set the option value");
           }
