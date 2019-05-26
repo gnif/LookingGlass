@@ -206,7 +206,7 @@ static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
 
 bool installCrashHandler(const char * exe)
 {
-  struct sigaction sigact;
+  struct sigaction sigact = { 0 };
 
   crash.exe = realpath(exe, NULL);
   sigact.sa_sigaction = crit_err_hdlr;
