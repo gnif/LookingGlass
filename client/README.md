@@ -98,6 +98,7 @@ Command line arguments will override any options loaded from the config files.
 | win:keepAspect    | -r    | yes                    | Maintain the correct aspect ratio                |
 | win:borderless    | -d    | no                     | Borderless mode                                  |
 | win:fullScreen    | -F    | no                     | Launch in fullscreen borderless mode             |
+| win:maximize      | -T    | no                     | Launch window maximized                          |
 | win:fpsLimit      | -K    | 200                    | Frame rate limit (0 = disable - not recommended) |
 | win:showFPS       | -k    | no                     | Enable the FPS & UPS display                     |
 | win:ignoreQuit    | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)             |

@@ -1055,6 +1055,7 @@ int run()
       (params.fullscreen  ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) |
       (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
       (params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
+      (params.maximize    ? SDL_WINDOW_MAXIMIZED  : 0) |
       sdlFlags
     )
   );
