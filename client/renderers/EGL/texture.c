@@ -223,6 +223,12 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
         GL_MAP_UNSYNCHRONIZED_BIT    |
         GL_MAP_INVALIDATE_BUFFER_BIT
       );
+
+      if (!texture->pboMap[i])
+      {
+        DEBUG_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
+        return false;
+      }
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
