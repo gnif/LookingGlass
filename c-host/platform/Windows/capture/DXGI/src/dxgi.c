@@ -30,10 +30,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "dxgi_extra.h"
 
-#define MAX_TEXTURES 2
+enum TextureState
+{
+  TEXTURE_STATE_UNUSED,
+  TEXTURE_STATE_PENDING_MAP,
+  TEXTURE_STATE_MAPPED
+};
 
 typedef struct Texture
 {
+  enum TextureState          state;
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
   osEventHandle            * evt;
@@ -64,7 +70,8 @@ struct iface
   ID3D11DeviceContext      * deviceContext;
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication   * dup;
-  Texture                    texture[MAX_TEXTURES];
+  int                        maxTextures;
+  Texture                  * texture;
   int                        texRIndex;
   int                        texWIndex;
   bool                       needsRelease;
@@ -120,6 +127,13 @@ static void dxgi_initOptions()
       .type           = OPTION_TYPE_STRING,
       .value.x_string = NULL
     },
+    {
+      .module         = "dxgi",
+      .name           = "maxTextures",
+      .description    = "The maximum number of frames to buffer before skipping",
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 1
+    },
     {0}
   };
 
@@ -153,6 +167,11 @@ static bool dxgi_create()
     return false;
   }
 
+  this->maxTextures = option_get_int("dxgi", "maxTextures");
+  if (this->maxTextures <= 0)
+    this->maxTextures = 1;
+
+  this->texture = calloc(sizeof(struct Texture), this->maxTextures);
   return true;
 }
 
@@ -434,7 +453,7 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
 
-  for(int i = 0; i < MAX_TEXTURES; ++i)
+  for(int i = 0; i < this->maxTextures; ++i)
   {
     status = ID3D11Device_CreateTexture2D(this->device, &texDesc, NULL, &this->texture[i].tex);
     if (FAILED(status))
@@ -485,8 +504,10 @@ static bool dxgi_deinit()
 {
   assert(this);
 
-  for(int i = 0; i < MAX_TEXTURES; ++i)
+  for(int i = 0; i < this->maxTextures; ++i)
   {
+    this->texture[i].state = TEXTURE_STATE_UNUSED;
+
     if (this->texture[i].map.pData)
     {
       ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture[i].tex, 0);
@@ -563,6 +584,7 @@ static void dxgi_free()
 
   os_freeEvent(this->frameEvent  );
   os_freeEvent(this->pointerEvent);
+  free(this->texture);
 
   free(this);
   this = NULL;
@@ -586,11 +608,35 @@ static CaptureResult dxgi_capture()
   DXGI_OUTDUPL_FRAME_INFO   frameInfo;
   IDXGIResource           * res;
 
+  // if the read texture is pending a mapping
+  if (this->texture[this->texRIndex].state == TEXTURE_STATE_PENDING_MAP)
+  {
+    Texture * tex = &this->texture[this->texRIndex];
+
+    // try to map the resource, but don't wait for it
+    status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0x100000L, &tex->map);
+
+    if (status != DXGI_ERROR_WAS_STILL_DRAWING)
+    {
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to map the texture", status);
+        IDXGIResource_Release(res);
+        return CAPTURE_RESULT_ERROR;
+      }
+
+      // successful map, set the state and signal that there is a frame available
+      tex->state = TEXTURE_STATE_MAPPED;
+      os_signalEvent(this->frameEvent);
+    }
+  }
+
+  // release the prior frame
   result = dxgi_releaseFrame();
   if (result != CAPTURE_RESULT_OK)
     return result;
 
-  status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1000, &frameInfo, &res);
+  status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1, &frameInfo, &res);
   switch(status)
   {
     case S_OK:
@@ -616,7 +662,12 @@ static CaptureResult dxgi_capture()
     // check if the texture is free, if not skip the frame to keep up
     if (!os_waitEvent(tex->evt, 0))
     {
-      DEBUG_WARN("Frame skipped");
+      /*
+      NOTE: This is only informational for when debugging, skipping frames is
+      OK as we are likely getting frames faster then the client can render
+      them (ie, vsync off in a title)
+      */
+      //DEBUG_WARN("Frame skipped");
     }
     else
     {
@@ -630,33 +681,23 @@ static CaptureResult dxgi_capture()
       }
 
       // if the texture was mapped, unmap it
-      if (tex->map.pData)
+      if (tex->state == TEXTURE_STATE_MAPPED)
       {
         ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);
         tex->map.pData = NULL;
       }
 
-      // issue the copy from GPU to CPU RAM
+      // issue the copy from GPU to CPU RAM and release the src
       ID3D11DeviceContext_CopyResource(this->deviceContext,
         (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
+      ID3D11Texture2D_Release(src);
 
-      // map the resource (this must be done here as ID3D11DeviceContext is not thread safe)
-      status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0, &tex->map);
-      if (FAILED(status))
-      {
-        DEBUG_WINERROR("Failed to map the texture", status);
-        IDXGIResource_Release(res);
-        return CAPTURE_RESULT_ERROR;
-      }
-
-      // signal that a frame is available
-      os_signalEvent(this->frameEvent);
+      // pending map
+      tex->state = TEXTURE_STATE_PENDING_MAP;
 
       // advance our write pointer
-      if (++this->texWIndex == MAX_TEXTURES)
+      if (++this->texWIndex == this->maxTextures)
         this->texWIndex = 0;
-
-      ID3D11Texture2D_Release(src);
     }
   }
 
@@ -745,7 +786,7 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
   memcpy(frame->data, tex->map.pData, this->pitch * this->height);
   os_signalEvent(tex->evt);
 
-  if (++this->texRIndex == MAX_TEXTURES)
+  if (++this->texRIndex == this->maxTextures)
     this->texRIndex = 0;
 
   return CAPTURE_RESULT_OK;
