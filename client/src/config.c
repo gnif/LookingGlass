@@ -138,7 +138,7 @@ static struct Option options[] =
   {
     .module         = "win",
     .name           = "allowResize",
-    .description    = "Aallow the window to be manually resized",
+    .description    = "Allow the window to be manually resized",
     .shortopt       = 'n',
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
