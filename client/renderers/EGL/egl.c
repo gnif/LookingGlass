@@ -104,6 +104,20 @@ static struct Option egl_options[] =
   },
   {
     .module       = "egl",
+    .name         = "doubleBuffer",
+    .description  = "Enable double buffering",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  },
+  {
+    .module       = "egl",
+    .name         = "multisample",
+    .description  = "Enable Multisampling",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  },
+  {
+    .module       = "egl",
     .name         = "nvGainMax",
     .description  = "The maximum night vision gain",
     .type         = OPTION_TYPE_INT,
@@ -167,18 +181,25 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
 
 bool egl_initialize(void * opaque, Uint32 * sdlFlags)
 {
+  const bool doubleBuffer = option_get_bool("egl", "doubleBuffer");
+  DEBUG_INFO("Double buffering is %s", doubleBuffer ? "on" : "off");
+
   *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER        , 1);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER        , doubleBuffer ? 1 : 0);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
-  int maxSamples = sysinfo_gfx_max_multisample();
-  if (maxSamples > 1)
+  if (option_get_bool("egl", "multisample"))
   {
-    if (maxSamples > 4)
-      maxSamples = 4;
+    int maxSamples = sysinfo_gfx_max_multisample();
+    if (maxSamples > 1)
+    {
+      if (maxSamples > 4)
+        maxSamples = 4;
 
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, maxSamples);
+      DEBUG_INFO("Multsampling enabled, max samples: %d", maxSamples);
+      SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+      SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, maxSamples);
+    }
   }
 
   return true;
@@ -378,10 +399,10 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
 
   EGLint attr[] =
   {
-    EGL_BUFFER_SIZE    , 16,
+    EGL_BUFFER_SIZE    , 32,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
     EGL_SAMPLE_BUFFERS , 1,
-    EGL_SAMPLES        , 8,
+    EGL_SAMPLES        , 4,
     EGL_NONE
   };
 
@@ -411,6 +432,10 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     DEBUG_ERROR("Failed to create EGL context (eglError: 0x%x)", eglGetError());
     return false;
   }
+
+  EGLint value;
+  eglQueryContext(this->display, this->context, EGL_RENDER_BUFFER, &value);
+  DEBUG_INFO("%x", value);
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
 
