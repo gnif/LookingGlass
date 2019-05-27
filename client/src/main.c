@@ -95,7 +95,10 @@ static void updatePositionInfo()
 static int renderThread(void * unused)
 {
   if (!state.lgr->render_startup(state.lgrData, state.window))
+  {
+    state.running = false;
     return 1;
+  }
 
   // start the cursor thread after render startup to prevent a race condition
   SDL_Thread *t_cursor = NULL;
