@@ -433,10 +433,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  EGLint value;
-  eglQueryContext(this->display, this->context, EGL_RENDER_BUFFER, &value);
-  DEBUG_INFO("%x", value);
-
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
 
   DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
