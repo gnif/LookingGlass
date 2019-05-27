@@ -42,7 +42,8 @@ typedef struct Texture
   enum TextureState          state;
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
-  osEventHandle            * evt;
+  osEventHandle            * mapped;
+  osEventHandle            * free;
 }
 Texture;
 
@@ -75,7 +76,6 @@ struct iface
   int                        texRIndex;
   int                        texWIndex;
   bool                       needsRelease;
-  osEventHandle            * frameEvent;
   osEventHandle            * pointerEvent;
 
   unsigned int  width;
@@ -132,7 +132,7 @@ static void dxgi_initOptions()
       .name           = "maxTextures",
       .description    = "The maximum number of frames to buffer before skipping",
       .type           = OPTION_TYPE_INT,
-      .value.x_int    = 1
+      .value.x_int    = 3
     },
     {0}
   };
@@ -150,19 +150,10 @@ static bool dxgi_create()
     return false;
   }
 
-  this->frameEvent = os_createEvent(true);
-  if (!this->frameEvent)
-  {
-    DEBUG_ERROR("failed to create the frame event");
-    free(this);
-    return false;
-  }
-
   this->pointerEvent = os_createEvent(true);
   if (!this->pointerEvent)
   {
     DEBUG_ERROR("failed to create the pointer event");
-    os_freeEvent(this->frameEvent);
     free(this);
     return false;
   }
@@ -205,7 +196,6 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->stop      = false;
   this->texRIndex = 0;
   this->texWIndex = 0;
-  os_resetEvent(this->frameEvent);
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -462,15 +452,22 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
       goto fail;
     }
 
-    this->texture[i].evt = os_createEvent(true);
-    if (!this->texture[i].evt)
+    this->texture[i].free = os_createEvent(true);
+    if (!this->texture[i].free)
     {
-      DEBUG_ERROR("Failed to create the texture event");
+      DEBUG_ERROR("Failed to create the texture free event");
       goto fail;
     }
 
-    // pre-signal the events to flag as unused
-    os_signalEvent(this->texture[i].evt);
+    // pre-signal the free events to flag as unused
+    os_signalEvent(this->texture[i].free);
+
+    this->texture[i].mapped = os_createEvent(false);
+    if (!this->texture[i].mapped)
+    {
+      DEBUG_ERROR("Failed to create the texture mapped event");
+      goto fail;
+    }
   }
 
   // map the texture simply to get the pitch and stride
@@ -496,7 +493,8 @@ fail:
 static void dxgi_stop()
 {
   this->stop = true;
-  os_signalEvent(this->frameEvent  );
+
+  os_signalEvent(this->texture[this->texRIndex].mapped);
   os_signalEvent(this->pointerEvent);
 }
 
@@ -520,11 +518,18 @@ static bool dxgi_deinit()
       this->texture[i].tex = NULL;
     }
 
-    if (this->texture[i].evt)
+    if (this->texture[i].free)
     {
-      os_signalEvent(this->texture[i].evt);
-      os_freeEvent(this->texture[i].evt);
-      this->texture[i].evt = NULL;
+      os_signalEvent(this->texture[i].free);
+      os_freeEvent(this->texture[i].free);
+      this->texture[i].free = NULL;
+    }
+
+    if (this->texture[i].mapped)
+    {
+      os_signalEvent(this->texture[i].mapped);
+      os_freeEvent(this->texture[i].mapped);
+      this->texture[i].mapped = NULL;
     }
   }
 
@@ -582,7 +587,6 @@ static void dxgi_free()
   if (this->initialized)
     dxgi_deinit();
 
-  os_freeEvent(this->frameEvent  );
   os_freeEvent(this->pointerEvent);
   free(this->texture);
 
@@ -609,9 +613,12 @@ static CaptureResult dxgi_capture()
   IDXGIResource           * res;
 
   // if the read texture is pending a mapping
-  if (this->texture[this->texRIndex].state == TEXTURE_STATE_PENDING_MAP)
+  for(int i = 0; i < this->maxTextures; ++i)
   {
-    Texture * tex = &this->texture[this->texRIndex];
+    if (this->texture[i].state != TEXTURE_STATE_PENDING_MAP)
+      continue;
+
+    Texture * tex = &this->texture[i];
 
     // try to map the resource, but don't wait for it
     status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0x100000L, &tex->map);
@@ -627,7 +634,7 @@ static CaptureResult dxgi_capture()
 
       // successful map, set the state and signal that there is a frame available
       tex->state = TEXTURE_STATE_MAPPED;
-      os_signalEvent(this->frameEvent);
+      os_signalEvent(tex->mapped);
     }
   }
 
@@ -660,7 +667,7 @@ static CaptureResult dxgi_capture()
     Texture * tex = &this->texture[this->texWIndex];
 
     // check if the texture is free, if not skip the frame to keep up
-    if (!os_waitEvent(tex->evt, 0))
+    if (!os_waitEvent(tex->free, 0))
     {
       /*
       NOTE: This is only informational for when debugging, skipping frames is
@@ -766,16 +773,18 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
   assert(this);
   assert(this->initialized);
 
-  if (!os_waitEvent(this->frameEvent, TIMEOUT_INFINITE))
+  Texture * tex = &this->texture[this->texRIndex];
+  if (!os_waitEvent(tex->mapped, TIMEOUT_INFINITE))
   {
-    DEBUG_ERROR("Failed to wait on the frame event");
+    DEBUG_ERROR("Failed to wait on the texture map event");
     return CAPTURE_RESULT_ERROR;
   }
 
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
-  Texture * tex = &this->texture[this->texRIndex];
+  // only reset the event if we used the texture
+  os_resetEvent(tex->mapped);
 
   frame->width  = this->width;
   frame->height = this->height;
@@ -784,7 +793,7 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
   frame->format = this->format;
 
   memcpy(frame->data, tex->map.pData, this->pitch * this->height);
-  os_signalEvent(tex->evt);
+  os_signalEvent(tex->free);
 
   if (++this->texRIndex == this->maxTextures)
     this->texRIndex = 0;
