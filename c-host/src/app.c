@@ -75,6 +75,9 @@ static int pointerThread(void * opaque)
   while(app.running)
   {
     bool resend = false;
+
+    pointer.shapeUpdate = false;
+
     switch(app.iface->getPointer(&pointer))
     {
       case CAPTURE_RESULT_OK:
