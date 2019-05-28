@@ -29,7 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/option.h"
 #include "windows/debug.h"
-#include "ivshmem/Public.h"
+#include "ivshmem.h"
 
 #define ID_MENU_OPEN_LOG 3000
 #define ID_MENU_EXIT     3001
