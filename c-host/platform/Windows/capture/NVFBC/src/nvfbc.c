@@ -277,11 +277,8 @@ static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 {
   osEventHandle * events[2];
   memcpy(&events, &this->cursorEvents, sizeof(osEventHandle *) * 2);
-  if (!os_waitEvents(events, this->seperateCursor ? 2 : 1, false, TIMEOUT_INFINITE))
-  {
-    DEBUG_ERROR("Failed to wait on the cursor events");
-    return CAPTURE_RESULT_ERROR;
-  }
+  if (!os_waitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
+    return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)
     return CAPTURE_RESULT_REINIT;

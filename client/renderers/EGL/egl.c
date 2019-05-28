@@ -85,6 +85,8 @@ struct Inst
   float screenScaleX, screenScaleY;
   bool  useNearest;
 
+  bool         cursorVisible;
+  int          cursorX    , cursorY;
   float        mouseWidth , mouseHeight;
   float        mouseScaleX, mouseScaleY;
 
@@ -249,6 +251,13 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
   this->splashRatio  = (float)width / (float)height;
   this->screenScaleX = 1.0f / width;
   this->screenScaleY = 1.0f / height;
+
+  egl_cursor_set_state(
+    this->cursor,
+    this->cursorVisible,
+    (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
+    (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleY
+  );
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
@@ -270,15 +279,18 @@ bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int
   return true;
 }
 
-bool egl_on_mouse_event(void * opaque, const bool visible , const int x, const int y)
+bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
 {
   struct Inst * this = (struct Inst *)opaque;
+  this->cursorVisible = visible;
+  this->cursorX       = x;
+  this->cursorY       = y;
 
   egl_cursor_set_state(
     this->cursor,
-    visible,
-    (((float)x * this->mouseScaleX) - 1.0f) * this->scaleX,
-    (((float)y * this->mouseScaleY) - 1.0f) * this->scaleY
+    this->cursorVisible,
+    (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
+    (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleY
   );
 
   return true;

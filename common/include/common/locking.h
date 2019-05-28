@@ -19,8 +19,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #if defined(__GCC__) || defined(__GNUC__)
-#define INTERLOCKED_AND8 __sync_and_and_fetch
-#define INTERLOCKED_OR8 __sync_or_and_fetch
+#define INTERLOCKED_AND8 __sync_fetch_and_and
+#define INTERLOCKED_OR8 __sync_fetch_and_or
 #else
 #define INTERLOCKED_OR8 InterlockedOr8
 #define INTERLOCKED_AND8 InterlockedAnd8

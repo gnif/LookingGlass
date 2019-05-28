@@ -38,6 +38,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct app
 {
+  unsigned int clientInstance;
+
   KVMFRHeader * shmHeader;
   uint8_t     * pointerData;
   unsigned int  pointerDataSize;
@@ -63,25 +65,50 @@ static int pointerThread(void * opaque)
   DEBUG_INFO("Pointer thread started");
 
   volatile KVMFRCursor * ci = &(app.shmHeader->cursor);
-  uint8_t flags;
+
+  uint8_t        flags;
+  bool           pointerValid   = false;
+  bool           shapeValid     = false;
+  unsigned int   clientInstance = 0;
+  CapturePointer pointer        = { 0 };
 
   while(app.running)
   {
-    CaptureResult  result;
-    CapturePointer pointer = { 0 };
-
-    result = app.iface->getPointer(&pointer);
-    if (result == CAPTURE_RESULT_REINIT)
+    bool resend = false;
+    switch(app.iface->getPointer(&pointer))
     {
-      app.reinit = true;
-      break;
+      case CAPTURE_RESULT_OK:
+      {
+        pointerValid = true;
+        break;
+      }
+
+      case CAPTURE_RESULT_REINIT:
+      {
+        app.reinit = true;
+        break;
+      }
+
+      case CAPTURE_RESULT_ERROR:
+      {
+        DEBUG_ERROR("Failed to get the pointer");
+        break;
+      }
+
+      case CAPTURE_RESULT_TIMEOUT:
+      {
+        // if the pointer is valid and the client has restarted, send it
+        if (pointerValid && clientInstance != app.clientInstance)
+        {
+          resend = true;
+          break;
+        }
+
+        continue;
+      }
     }
 
-    if (result == CAPTURE_RESULT_ERROR)
-    {
-      DEBUG_ERROR("Failed to get the pointer");
-      break;
-    }
+    clientInstance = app.clientInstance;
 
     // wait for the client to finish with the previous update
     while((ci->flags & ~KVMFR_CURSOR_FLAG_UPDATE) != 0 && app.running)
@@ -95,7 +122,7 @@ static int pointerThread(void * opaque)
       flags |= KVMFR_CURSOR_FLAG_VISIBLE;
 
     // if we have shape data
-    if (pointer.shapeUpdate)
+    if (pointer.shapeUpdate || (shapeValid && resend))
     {
       switch(pointer.format)
       {
@@ -112,6 +139,7 @@ static int pointerThread(void * opaque)
       ci->pitch   = pointer.pitch;
       ci->dataPos = app.pointerOffset;
       ++ci->version;
+      shapeValid = true;
       flags |= KVMFR_CURSOR_FLAG_SHAPE;
     }
 
@@ -367,7 +395,11 @@ int app_main(int argc, char * argv[])
 
   while(app.running)
   {
-    INTERLOCKED_AND8(flags, ~(KVMFR_HEADER_FLAG_RESTART));
+    if (INTERLOCKED_AND8(flags, ~(KVMFR_HEADER_FLAG_RESTART)) & KVMFR_HEADER_FLAG_RESTART)
+    {
+      DEBUG_INFO("Client restarted");
+      ++app.clientInstance;
+    }
 
     if (app.reinit && !captureRestart())
     {

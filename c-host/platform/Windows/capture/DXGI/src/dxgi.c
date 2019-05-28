@@ -806,11 +806,8 @@ static CaptureResult dxgi_getPointer(CapturePointer * pointer)
   assert(this);
   assert(this->initialized);
 
-  if (!os_waitEvent(this->pointerEvent, TIMEOUT_INFINITE))
-  {
-    DEBUG_ERROR("Failed to wait on the pointer event");
-    return CAPTURE_RESULT_ERROR;
-  }
+  if (!os_waitEvent(this->pointerEvent, 1000))
+    return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
