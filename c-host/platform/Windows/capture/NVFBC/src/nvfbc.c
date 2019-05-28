@@ -238,11 +238,8 @@ static CaptureResult nvfbc_capture()
 
 static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
 {
-  if (!os_waitEvent(this->frameEvent, TIMEOUT_INFINITE))
-  {
-    DEBUG_ERROR("Failed to wait on the frame event");
-    return CAPTURE_RESULT_ERROR;
-  }
+  if (!os_waitEvent(this->frameEvent, 1000))
+    return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)
     return CAPTURE_RESULT_REINIT;

@@ -774,11 +774,8 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
   assert(this->initialized);
 
   Texture * tex = &this->texture[this->texRIndex];
-  if (!os_waitEvent(tex->mapped, TIMEOUT_INFINITE))
-  {
-    DEBUG_ERROR("Failed to wait on the texture map event");
-    return CAPTURE_RESULT_ERROR;
-  }
+  if (!os_waitEvent(tex->mapped, 1000))
+    return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)
     return CAPTURE_RESULT_REINIT;

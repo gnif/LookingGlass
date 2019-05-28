@@ -86,13 +86,14 @@ static int pointerThread(void * opaque)
       case CAPTURE_RESULT_REINIT:
       {
         app.reinit = true;
-        break;
+        DEBUG_INFO("Pointer thread reinit");
+        return 0;
       }
 
       case CAPTURE_RESULT_ERROR:
       {
         DEBUG_ERROR("Failed to get the pointer");
-        break;
+        return 0;
       }
 
       case CAPTURE_RESULT_TIMEOUT:
@@ -155,29 +156,50 @@ static int frameThread(void * opaque)
 {
   DEBUG_INFO("Frame thread started");
 
-  int      frameIndex = 0;
   volatile KVMFRFrame * fi = &(app.shmHeader->frame);
+
+  bool         frameValid     = false;
+  int          frameIndex     = 0;
+  unsigned int clientInstance = 0;
+  CaptureFrame frame          = { 0 };
 
   while(app.running)
   {
-    CaptureResult result;
-    CaptureFrame  frame =
-    {
-      .data = app.frame[frameIndex]
-    };
+    frame.data = app.frame[frameIndex];
 
-    result = app.iface->getFrame(&frame);
-    if (result == CAPTURE_RESULT_REINIT)
+    switch(app.iface->getFrame(&frame))
     {
-      app.reinit = true;
-      break;
+      case CAPTURE_RESULT_OK:
+        break;
+
+      case CAPTURE_RESULT_REINIT:
+      {
+        app.reinit = true;
+        DEBUG_INFO("Frame thread reinit");
+        return 0;
+      }
+
+      case CAPTURE_RESULT_ERROR:
+      {
+        DEBUG_ERROR("Failed to get the frame");
+        return 0;
+      }
+
+      case CAPTURE_RESULT_TIMEOUT:
+      {
+        if (frameValid && clientInstance != app.clientInstance)
+        {
+          // resend the last frame
+          if (--frameIndex < 0)
+            frameIndex = MAX_FRAMES - 1;
+          break;
+        }
+
+        continue;
+      }
     }
 
-    if (result == CAPTURE_RESULT_ERROR)
-    {
-      DEBUG_ERROR("Failed to get the frame");
-      break;
-    }
+    clientInstance = app.clientInstance;
 
     // wait for the client to finish with the previous frame
     while(fi->flags & KVMFR_FRAME_FLAG_UPDATE && app.running)
@@ -199,6 +221,7 @@ static int frameThread(void * opaque)
     fi->stride  = frame.stride;
     fi->pitch   = frame.pitch;
     fi->dataPos = app.frameOffset[frameIndex];
+    frameValid  = true;
 
     INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
 
