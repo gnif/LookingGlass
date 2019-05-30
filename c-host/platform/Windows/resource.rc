@@ -1,4 +1,4 @@
 #include "winuser.h"
 
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
-IDI_APPLICATION ICON "icon.ico"
+IDI_APPLICATION ICON "../../../resources/icon.ico"
