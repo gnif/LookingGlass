@@ -66,7 +66,7 @@ KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void
 
 void app_release_keybind(KeybindHandle * handle)
 {
-  if (!handle)
+  if (!*handle)
     return;
 
   state.bindings[(*handle)->key] = NULL;
