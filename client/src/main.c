@@ -1073,7 +1073,10 @@ int run()
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
   if (!params.noScreensaver)
+  {
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+    SDL_EnableScreenSaver();
+  }
 
   if (!params.center)
     SDL_SetWindowPosition(state.window, params.x, params.y);
