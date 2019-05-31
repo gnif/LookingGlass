@@ -48,18 +48,19 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>+<kbd>N</kbd>      | Toggle night vision mode (EGL renderer only!) |
 | <kbd>ScrLk</kbd>+<kbd>Insert</kbd> | Increase mouse sensitivity (in capture mode only) |
 | <kbd>ScrLk</kbd>+<kbd>Del</kbd>    | Decrease mouse sensitivity (in capture mode only) |
-| <kbd>ScrLk</kbd>+<kbd>F1</kbd>     | Send Ctrl+Alt+F1 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F2</kbd>     | Send Ctrl+Alt+F2 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F3</kbd>     | Send Ctrl+Alt+F3 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F4</kbd>     | Send Ctrl+Alt+F4 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F5</kbd>     | Send Ctrl+Alt+F5 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F6</kbd>     | Send Ctrl+Alt+F6 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F7</kbd>     | Send Ctrl+Alt+F7 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F8</kbd>     | Send Ctrl+Alt+F8 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F9</kbd>     | Send Ctrl+Alt+F9 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F10</kbd>    | Send Ctrl+Alt+F10 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F11</kbd>    | Send Ctrl+Alt+F11 to the guest |
-| <kbd>ScrLk</kbd>+<kbd>F12</kbd>    | Send Ctrl+Alt+F12 to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F1</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F2</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F2</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F3</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F3</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F4</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F4</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F5</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F6</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F6</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F7</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F7</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F8</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F8</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F9</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F9</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F10</kbd>    | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F10</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F11</kbd>    | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>F12</kbd>    | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> to the guest |
+
 
 
 ### Setting options via command line arguments
