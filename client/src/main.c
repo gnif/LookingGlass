@@ -947,18 +947,48 @@ static void mouse_sens_dec(SDL_Scancode key, void * opaque)
   free(msg);
 }
 
+static void ctrl_alt_fn(SDL_Scancode key, void * opaque)
+{
+  const uint32_t ctrl = mapScancode(SDL_SCANCODE_LCTRL);
+  const uint32_t alt  = mapScancode(SDL_SCANCODE_LALT );
+  const uint32_t fn   = mapScancode(key);
+
+  spice_key_down(ctrl);
+  spice_key_down(alt );
+  spice_key_down(fn  );
+
+  spice_key_up(ctrl);
+  spice_key_up(alt );
+  spice_key_up(fn  );
+}
+
 static void register_key_binds()
 {
   state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
   state.kbInput        = app_register_keybind(SDL_SCANCODE_I     , toggle_input     , NULL);
   state.kbMouseSensInc = app_register_keybind(SDL_SCANCODE_INSERT, mouse_sens_inc   , NULL);
   state.kbMouseSensDec = app_register_keybind(SDL_SCANCODE_DELETE, mouse_sens_dec   , NULL);
+
+  state.kbCtrlAltFn[0 ] = app_register_keybind(SDL_SCANCODE_F1 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[1 ] = app_register_keybind(SDL_SCANCODE_F2 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[2 ] = app_register_keybind(SDL_SCANCODE_F3 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[3 ] = app_register_keybind(SDL_SCANCODE_F4 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[4 ] = app_register_keybind(SDL_SCANCODE_F5 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[5 ] = app_register_keybind(SDL_SCANCODE_F6 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[6 ] = app_register_keybind(SDL_SCANCODE_F7 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[7 ] = app_register_keybind(SDL_SCANCODE_F8 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[8 ] = app_register_keybind(SDL_SCANCODE_F9 , ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[9 ] = app_register_keybind(SDL_SCANCODE_F10, ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[10] = app_register_keybind(SDL_SCANCODE_F11, ctrl_alt_fn, NULL);
+  state.kbCtrlAltFn[11] = app_register_keybind(SDL_SCANCODE_F12, ctrl_alt_fn, NULL);
 }
 
 static void release_key_binds()
 {
   app_release_keybind(&state.kbFS);
   app_release_keybind(&state.kbInput);
+  for(int i = 0; i < 12; ++i)
+    app_release_keybind(&state.kbCtrlAltFn[i]);
 }
 
 int run()

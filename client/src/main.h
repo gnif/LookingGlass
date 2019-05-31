@@ -68,6 +68,7 @@ struct AppState
   KeybindHandle kbInput;
   KeybindHandle kbMouseSensInc;
   KeybindHandle kbMouseSensDec;
+  KeybindHandle kbCtrlAltFn[12];
 
   int   mouseSens;
   float sensX, sensY;
