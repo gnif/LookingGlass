@@ -215,9 +215,8 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
       IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
 
       const size_t s = (wcslen(adapterDesc.Description)+1) * 2;
-      size_t unused;
       char * desc = malloc(s);
-      wcstombs_s(&unused, desc, s, adapterDesc.Description, _TRUNCATE);
+      wcstombs(desc, adapterDesc.Description, s);
 
       if (strstr(desc, optAdapter) == NULL)
       {
@@ -238,9 +237,8 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
       if (optOutput)
       {
         const size_t s = (wcslen(outputDesc.DeviceName)+1) * 2;
-        size_t unused;
         char * desc = malloc(s);
-        wcstombs_s(&unused, desc, s, outputDesc.DeviceName, _TRUNCATE);
+        wcstombs(desc, outputDesc.DeviceName, s);
 
         if (strstr(desc, optOutput) == NULL)
         {

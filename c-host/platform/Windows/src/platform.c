@@ -194,9 +194,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   for(int i = 0; i < app.argc; ++i)
   {
     const size_t s = (wcslen(wargv[i])+1) * 2;
-    size_t unused;
     app.argv[i] = malloc(s);
-    wcstombs_s(&unused, app.argv[i], s, wargv[i], _TRUNCATE);
+    wcstombs(app.argv[i], wargv[i], s);
   }
   LocalFree(wargv);
 
