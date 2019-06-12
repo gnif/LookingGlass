@@ -318,9 +318,6 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
     return false;
   }
 
-  if (!this->waitFadeTime)
-    this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
-
   return true;
 }
 
@@ -493,8 +490,12 @@ bool egl_render(void * opaque, SDL_Window * window)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY, this->useNearest);
-  egl_cursor_render(this->cursor);
+  if (egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY, this->useNearest))
+  {
+    if (!this->waitFadeTime)
+      this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
+    egl_cursor_render(this->cursor);
+  }
 
   if (!this->waitDone)
   {
@@ -535,13 +536,9 @@ bool egl_render(void * opaque, SDL_Window * window)
   eglSwapBuffers(this->display, this->surface);
 
   // defer texture uploads until after the flip to avoid stalling
-  if (!egl_desktop_perform_update(this->desktop, this->sourceChanged))
-  {
-    DEBUG_ERROR("Failed to perform the desktop update");
-    return false;
-  }
-  this->sourceChanged = false;
+  egl_desktop_perform_update(this->desktop, this->sourceChanged);
 
+  this->sourceChanged = false;
   return true;
 }
 

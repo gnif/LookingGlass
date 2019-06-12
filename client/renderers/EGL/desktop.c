@@ -56,6 +56,7 @@ struct EGL_Desktop
   struct DesktopShader shader_yuv;
 
   // internals
+  LG_Lock              updateLock;
   enum EGL_PixelFormat pixFmt;
   unsigned int         width, height;
   unsigned int         pitch;
@@ -140,6 +141,8 @@ bool egl_desktop_init(EGL_Desktop ** desktop)
   egl_model_set_default((*desktop)->model);
   egl_model_set_texture((*desktop)->model, (*desktop)->texture);
 
+  LG_LOCK_INIT((*desktop)->updateLock);
+
   (*desktop)->kbNV = app_register_keybind(SDL_SCANCODE_N, egl_desktop_toggle_nv, *desktop);
 
   (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
@@ -165,6 +168,8 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   if (!*desktop)
     return;
 
+  LG_LOCK_FREE((*desktop)->updateLock);
+
   egl_texture_free(&(*desktop)->texture              );
   egl_shader_free (&(*desktop)->shader_generic.shader);
   egl_shader_free (&(*desktop)->shader_yuv.shader    );
@@ -180,6 +185,7 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
 {
   if (sourceChanged)
   {
+    LG_LOCK(desktop->updateLock);
     switch(format.type)
     {
       case FRAME_TYPE_BGRA:
@@ -204,24 +210,30 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
 
       default:
         DEBUG_ERROR("Unsupported frame format");
+        LG_UNLOCK(desktop->updateLock);
         return false;
     }
 
     desktop->width  = format.width;
     desktop->height = format.height;
     desktop->pitch  = format.pitch;
+    desktop->data   = data;
+    desktop->update = true;
+
+    /* defer the actual update as the format has changed and we need to issue GL commands first */
+    LG_UNLOCK(desktop->updateLock);
+    return true;
   }
 
-  desktop->data   = data;
-  desktop->update = true;
-
-  return true;
+  /* update the texture now */
+  return egl_texture_update(desktop->texture, data);
 }
 
-bool egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
+void egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
 {
   if (sourceChanged)
   {
+    LG_LOCK(desktop->updateLock);
     if (!egl_texture_setup(
       desktop->texture,
       desktop->pixFmt,
@@ -232,27 +244,26 @@ bool egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
     ))
     {
       DEBUG_ERROR("Failed to setup the desktop texture");
-      return false;
+      LG_UNLOCK(desktop->updateLock);
+      return;
     }
+    LG_UNLOCK(desktop->updateLock);
   }
 
-  if (!desktop->update)
-    return true;
-
-  if (!egl_texture_update(desktop->texture, desktop->data))
+  if (desktop->update)
   {
-    DEBUG_ERROR("Failed to update the desktop texture");
-    return false;
+    desktop->update = false;
+    egl_texture_update(desktop->texture, desktop->data);
   }
-
-  desktop->update = false;
-  return true;
 }
 
-void egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest)
+bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest)
 {
   if (!desktop->shader)
-    return;
+    return false;
+
+  if (egl_texture_process(desktop->texture) != EGL_TEX_STATUS_OK)
+    return false;
 
   const struct DesktopShader * shader = desktop->shader;
   egl_shader_use(shader->shader);
@@ -269,4 +280,5 @@ void egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, con
     glUniform1i(shader->uNV, 0);
 
   egl_model_render(desktop->model);
+  return true;
 }

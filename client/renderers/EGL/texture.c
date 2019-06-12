@@ -32,6 +32,7 @@ struct EGL_Texture
   enum   EGL_PixelFormat pixFmt;
   size_t width, height;
   bool   streaming;
+  bool   ready;
 
   int      textureCount;
   GLuint   textures[3];
@@ -44,10 +45,12 @@ struct EGL_Texture
 
   bool   hasPBO;
   GLuint pbo[2];
-  int    pboIndex;
-  bool   needsUpdate;
+  int    pboRIndex;
+  int    pboWIndex;
+  int    pboCount;
   size_t pboBufferSize;
   void * pboMap[2];
+  GLsync pboSync[2];
 };
 
 bool egl_texture_init(EGL_Texture ** texture)
@@ -81,6 +84,9 @@ void egl_texture_free(EGL_Texture ** texture)
     {
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (*texture)->pbo[i]);
       glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+      if ((*texture)->pboSync[i])
+        glDeleteSync((*texture)->pboSync[i]);
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glDeleteBuffers(2, (*texture)->pbo);
@@ -98,6 +104,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   texture->width         = width;
   texture->height        = height;
   texture->streaming     = streaming;
+  texture->ready         = false;
 
   switch(pixFmt)
   {
@@ -210,8 +217,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
         texture->pboBufferSize,
         NULL,
         GL_MAP_PERSISTENT_BIT |
-        GL_MAP_WRITE_BIT      |
-        GL_MAP_COHERENT_BIT
+        GL_MAP_WRITE_BIT
       );
 
       texture->pboMap[i] = glMapBufferRange(
@@ -221,7 +227,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
         GL_MAP_PERSISTENT_BIT        |
         GL_MAP_WRITE_BIT             |
         GL_MAP_UNSYNCHRONIZED_BIT    |
-        GL_MAP_INVALIDATE_BUFFER_BIT
+        GL_MAP_INVALIDATE_BUFFER_BIT |
+        GL_MAP_FLUSH_EXPLICIT_BIT
       );
 
       if (!texture->pboMap[i])
@@ -240,22 +247,23 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 {
   if (texture->streaming)
   {
-    if (texture->needsUpdate)
-    {
-      DEBUG_ERROR("Previous frame was not consumed");
-      return false;
-    }
+    /* NOTE: DO NOT use any gl commands here as streaming must be thread safe */
 
-    if (++texture->pboIndex == 2)
-      texture->pboIndex = 0;
+    if (texture->pboCount == 2)
+      return true;
 
     /* update the GPU buffer */
-    memcpy(texture->pboMap[texture->pboIndex], buffer, texture->pboBufferSize);
+    memcpy(texture->pboMap[texture->pboWIndex], buffer, texture->pboBufferSize);
+    texture->pboSync[texture->pboWIndex] = 0;
 
-    texture->needsUpdate = true;
+    if (++texture->pboWIndex == 2)
+      texture->pboWIndex = 0;
+    ++texture->pboCount;
   }
   else
   {
+    /* Non streaming, this is NOT thread safe */
+
     for(int i = 0; i < texture->textureCount; ++i)
     {
       glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
@@ -268,23 +276,78 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   return true;
 }
 
-void egl_texture_bind(EGL_Texture * texture)
+enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
 {
-  if (texture->streaming && texture->needsUpdate)
-  {
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[texture->pboIndex]);
-    for(int i = 0; i < texture->textureCount; ++i)
-    {
-      glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[i][2]);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-          texture->format, texture->dataType, (const void *)texture->offsets[i]);
-    }
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+  if (!texture->streaming)
+    return EGL_TEX_STATUS_OK;
 
-    texture->needsUpdate = false;
+  if (texture->pboCount == 0)
+    return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
+
+  /* process any buffers that have not yet been flushed */
+  int pos = texture->pboRIndex;
+  for(int i = 0; i < texture->pboCount; ++i)
+  {
+    if (texture->pboSync[pos] == 0)
+    {
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[pos]);
+      glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize);
+      texture->pboSync[pos] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    }
+
+    if (++pos == 2)
+      pos = 0;
   }
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+  /* wait for the buffer to be ready */
+  pos = texture->pboRIndex;
+  switch(glClientWaitSync(texture->pboSync[pos], GL_SYNC_FLUSH_COMMANDS_BIT, 0))
+  {
+    case GL_ALREADY_SIGNALED:
+    case GL_CONDITION_SATISFIED:
+      break;
+
+    case GL_TIMEOUT_EXPIRED:
+      return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
+
+    case GL_WAIT_FAILED:
+      glDeleteSync(texture->pboSync[pos]);
+      DEBUG_ERROR("glClientWaitSync failed");
+      return EGL_TEX_STATUS_ERROR;
+  }
+
+  /* delete the sync and bind the buffer */
+  glDeleteSync(texture->pboSync[pos]);
+  texture->pboSync[pos] = 0;
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[pos]);
+
+  /* update the textures */
+  for(int i = 0; i < texture->textureCount; ++i)
+  {
+    glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[i][2]);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
+        texture->format, texture->dataType, (const void *)texture->offsets[i]);
+  }
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  /* advance the read index */
+  if (++texture->pboRIndex == 2)
+    texture->pboRIndex = 0;
+  --texture->pboCount;
+
+  texture->ready = true;
+
+  return EGL_TEX_STATUS_OK;
+}
+
+enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
+{
+  /* if there are no new buffers ready, then just bind the textures */
+  if (texture->streaming && !texture->ready)
+    return EGL_TEX_STATUS_NOTREADY;
 
   for(int i = 0; i < texture->textureCount; ++i)
   {
@@ -292,6 +355,8 @@ void egl_texture_bind(EGL_Texture * texture)
     glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
     glBindSampler(i, texture->samplers[i]);
   }
+
+  return EGL_TEX_STATUS_OK;
 }
 
 int egl_texture_count(EGL_Texture * texture)

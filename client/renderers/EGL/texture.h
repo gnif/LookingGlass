@@ -34,10 +34,18 @@ enum EGL_PixelFormat
   EGL_PF_YUV420
 };
 
+enum EGL_TexStatus
+{
+  EGL_TEX_STATUS_NOTREADY,
+  EGL_TEX_STATUS_OK,
+  EGL_TEX_STATUS_ERROR
+};
+
 bool egl_texture_init(EGL_Texture ** tex);
 void egl_texture_free(EGL_Texture ** tex);
 
-bool egl_texture_setup (EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t stride, bool streaming);
-bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer);
-void egl_texture_bind          (EGL_Texture * texture);
-int  egl_texture_count         (EGL_Texture * texture);
+bool               egl_texture_setup  (EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t stride, bool streaming);
+bool               egl_texture_update (EGL_Texture * texture, const uint8_t * buffer);
+enum EGL_TexStatus egl_texture_process(EGL_Texture * texture);
+enum EGL_TexStatus egl_texture_bind          (EGL_Texture * texture);
+int                egl_texture_count         (EGL_Texture * texture);
