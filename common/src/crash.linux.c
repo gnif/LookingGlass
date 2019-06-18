@@ -21,6 +21,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/crash.h"
 #include "common/debug.h"
 
+#if defined(ENABLE_BACKTRACE)
+
 #include <execinfo.h>
 #include <signal.h>
 #include <stdio.h>
@@ -220,3 +222,12 @@ bool installCrashHandler(const char * exe)
 
   return true;
 }
+
+#else //ENABLE_BACKTRACE
+
+bool installCrashHandler(const char * exe)
+{
+  return true;
+}
+
+#endif

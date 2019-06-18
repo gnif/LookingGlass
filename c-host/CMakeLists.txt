@@ -14,6 +14,9 @@ if(OPTIMIZE_FOR_NATIVE)
   endif()
 endif()
 
+option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
+add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
+
 add_compile_options(
   "-Wall"
   "-Werror"
