@@ -1014,13 +1014,16 @@ int run()
   if (strcmp(XDG_SESSION_TYPE, "wayland") == 0)
   {
      DEBUG_INFO("Wayland detected");
-     int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
-     if (err < 0)
+     if (getenv("SDL_VIDEO_DRIVER") == NULL)
      {
-       DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
-       return -1;
+       int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
+       if (err < 0)
+       {
+         DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
+         return -1;
+       }
+       DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
      }
-     DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
   }
 
   // warn about using FPS display until we can fix the font rendering to prevent lag spikes
