@@ -1014,7 +1014,7 @@ int run()
   if (strcmp(XDG_SESSION_TYPE, "wayland") == 0)
   {
      DEBUG_INFO("Wayland detected");
-     if (getenv("SDL_VIDEO_DRIVER") == NULL)
+     if (getenv("SDL_VIDEODRIVER") == NULL)
      {
        int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
        if (err < 0)
