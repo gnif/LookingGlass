@@ -99,6 +99,10 @@ target_link_libraries(looking-glass-client
 	renderers
 	clipboards
 	fonts
+    -lbfd
+    -ldl
+    -lz
+    /usr/lib64/libiberty.a
 )
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-client DESTINATION bin/ COMPONENT binary)
