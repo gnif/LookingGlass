@@ -82,6 +82,7 @@ struct AppParams
   bool         borderless;
   bool         fullscreen;
   bool         maximize;
+  bool         minimizeOnFocusLoss;
   bool         center;
   int          x, y;
   unsigned int w, h;
