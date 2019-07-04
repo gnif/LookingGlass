@@ -6,6 +6,10 @@ add_library(capture_NVFBC STATIC
 	src/wrapper.cpp
 )
 
+if(NOT IS_ABSOLUTE ${NVFBC_SDK})
+  set(NVFBC_SDK "../../../${NVFBC_SDK}")
+endif()
+
 file(TO_CMAKE_PATH "${NVFBC_SDK}" nvfbc_sdk)
 include_directories(file, "${nvfbc_sdk}/inc")
 
