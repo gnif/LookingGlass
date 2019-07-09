@@ -185,10 +185,10 @@ static struct Option options[] =
   {
     .module         = "win",
     .name           = "fpsLimit",
-    .description    = "Frame rate limit (0 = disable - not recommended)",
+    .description    = "Frame rate limit (0 = disable - not recommended, -1 = auto detect)",
     .shortopt       = 'K',
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = 200,
+    .value.x_int    = -1,
   },
   {
     .module         = "win",
