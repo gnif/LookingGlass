@@ -1000,7 +1000,6 @@ int run()
   state.running   = true;
   state.scaleX    = 1.0f;
   state.scaleY    = 1.0f;
-  state.frameTime = 1e9 / params.fpsLimit;
 
   state.mouseSens = params.mouseSens;
        if (state.mouseSens < -9) state.mouseSens = -9;
@@ -1120,6 +1119,26 @@ int run()
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
 
+  //Auto detect active monitor refresh rate for FPS Limit if no FPS Limit was passed.
+  if (params.fpsLimit == -1)
+  {
+      SDL_DisplayMode current;
+      if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(state.window), &current) == 0)
+      {
+          state.frameTime = 1e9 / (current.refresh_rate * 2);
+      }
+      else 
+      {
+          DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS Limit: 200");
+          state.frameTime = 1e9 / 200;
+      }
+  }
+  else 
+  {
+      DEBUG_INFO("Using the FPS Limit from args: %d", params.fpsLimit);
+      state.frameTime = 1e9 / params.fpsLimit;
+  }
+  
   register_key_binds();
 
   // set the compositor hint to bypass for low latency
