@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "texture.h"
 #include "common/debug.h"
+#include "debug.h"
 #include "utils.h"
 
 #include <stdlib.h>
@@ -233,7 +234,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
       if (!texture->pboMap[i])
       {
-        DEBUG_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
+        EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
         return false;
       }
     }
@@ -313,7 +314,7 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
 
     case GL_WAIT_FAILED:
       glDeleteSync(texture->pboSync[pos]);
-      DEBUG_ERROR("glClientWaitSync failed");
+      EGL_ERROR("glClientWaitSync failed");
       return EGL_TEX_STATUS_ERROR;
   }
 
