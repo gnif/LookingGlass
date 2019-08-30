@@ -156,6 +156,9 @@ static int renderThread(void * unused)
 
   state.running = false;
   SDL_WaitThread(t_cursor, NULL);
+
+  state.lgr->deinitialize(state.lgrData);
+  state.lgr = NULL;
   return 0;
 }
 
@@ -1127,18 +1130,18 @@ int run()
       {
           state.frameTime = 1e9 / (current.refresh_rate * 2);
       }
-      else 
+      else
       {
           DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS Limit: 200");
           state.frameTime = 1e9 / 200;
       }
   }
-  else 
+  else
   {
       DEBUG_INFO("Using the FPS Limit from args: %d", params.fpsLimit);
       state.frameTime = 1e9 / params.fpsLimit;
   }
-  
+
   register_key_binds();
 
   // set the compositor hint to bypass for low latency
@@ -1344,9 +1347,6 @@ int run()
 
     spice_disconnect();
   }
-
-  if (state.lgr)
-    state.lgr->deinitialize(state.lgrData);
 
   if (state.lgc)
   {
