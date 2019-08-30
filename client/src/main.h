@@ -49,6 +49,8 @@ struct AppState
   void               * lgrData;
   bool                 lgrResize;
 
+  SDL_Thread         * t_frame;
+
   const LG_Clipboard * lgc;
   SpiceDataType        cbType;
   struct ll          * cbRequestList;

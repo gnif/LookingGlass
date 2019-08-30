@@ -155,7 +155,12 @@ static int renderThread(void * unused)
   }
 
   state.running = false;
-  SDL_WaitThread(t_cursor, NULL);
+
+  if (t_cursor)
+    SDL_WaitThread(t_cursor, NULL);
+
+  if (state.t_frame)
+    SDL_WaitThread(state.t_frame, NULL);
 
   state.lgr->deinitialize(state.lgrData);
   state.lgr = NULL;
@@ -1204,7 +1209,6 @@ int run()
   }
 
   SDL_Thread *t_spice  = NULL;
-  SDL_Thread *t_frame  = NULL;
   SDL_Thread *t_render = NULL;
 
   while(1)
@@ -1284,7 +1288,7 @@ int run()
       break;
     }
 
-    if (!(t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
+    if (!(state.t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
     {
       DEBUG_ERROR("frame create thread failed");
       break;
@@ -1325,9 +1329,6 @@ int run()
 
   if (t_render)
     SDL_WaitThread(t_render, NULL);
-
-  if (t_frame)
-    SDL_WaitThread(t_frame, NULL);
 
   // if spice is still connected send key up events for any pressed keys
   if (params.useSpiceInput && spice_ready())
