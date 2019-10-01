@@ -13,6 +13,7 @@ set(COMMON_SOURCES
   src/stringutils.c
   src/stringlist.c
   src/option.c
+  src/framebuffer.c
 )
 
 set(LINUX_SOURCES

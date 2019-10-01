@@ -296,7 +296,7 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uint8_t * data)
+bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer frame)
 {
   struct Inst * this = (struct Inst *)opaque;
   this->sourceChanged = (
@@ -312,7 +312,7 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const uin
 
   this->useNearest = this->width < format.width || this->height < format.height;
 
-  if (!egl_desktop_prepare_update(this->desktop, this->sourceChanged, format, data))
+  if (!egl_desktop_prepare_update(this->desktop, this->sourceChanged, format, frame))
   {
     DEBUG_INFO("Failed to prepare to update the desktop");
     return false;

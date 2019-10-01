@@ -60,7 +60,7 @@ struct EGL_Desktop
   enum EGL_PixelFormat pixFmt;
   unsigned int         width, height;
   unsigned int         pitch;
-  const uint8_t      * data;
+  FrameBuffer          frame;
   bool                 update;
 
   // night vision
@@ -181,7 +181,7 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   *desktop = NULL;
 }
 
-bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const uint8_t * data)
+bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer frame)
 {
   if (sourceChanged)
   {
@@ -217,7 +217,7 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
     desktop->width  = format.width;
     desktop->height = format.height;
     desktop->pitch  = format.pitch;
-    desktop->data   = data;
+    desktop->frame  = frame;
     desktop->update = true;
 
     /* defer the actual update as the format has changed and we need to issue GL commands first */
@@ -226,7 +226,7 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
   }
 
   /* update the texture now */
-  return egl_texture_update(desktop->texture, data);
+  return egl_texture_update_from_frame(desktop->texture, frame);
 }
 
 void egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
@@ -253,7 +253,7 @@ void egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
   if (desktop->update)
   {
     desktop->update = false;
-    egl_texture_update(desktop->texture, desktop->data);
+    egl_texture_update_from_frame(desktop->texture, desktop->frame);
   }
 }
 

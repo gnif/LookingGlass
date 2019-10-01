@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "texture.h"
 #include "common/debug.h"
 #include "common/locking.h"
+#include "common/framebuffer.h"
 #include "debug.h"
 #include "utils.h"
 
@@ -275,6 +276,24 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
     }
     glBindTexture(GL_TEXTURE_2D, 0);
   }
+  return true;
+}
+
+bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer frame)
+{
+  if (!texture->streaming)
+    return false;
+
+  if (texture->pboCount == 2)
+    return true;
+
+  framebuffer_read(frame, texture->pboMap[texture->pboWIndex], texture->pboBufferSize);
+  texture->pboSync[texture->pboWIndex] = 0;
+
+  if (++texture->pboWIndex == 2)
+    texture->pboWIndex = 0;
+  INTERLOCKED_INC(&texture->pboCount);
+
   return true;
 }
 

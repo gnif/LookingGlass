@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "common/framebuffer.h"
 
 typedef enum CaptureResult
 {
@@ -55,7 +56,6 @@ typedef struct CaptureFrame
   unsigned int   pitch;
   unsigned int   stride;
   CaptureFormat  format;
-  void         * data;
 }
 CaptureFrame;
 
@@ -84,7 +84,8 @@ typedef struct CaptureInterface
   unsigned int  (*getMaxFrameSize)();
 
   CaptureResult (*capture   )();
-  CaptureResult (*getFrame  )(CaptureFrame   * frame  );
+  CaptureResult (*waitFrame )(CaptureFrame   * frame  );
+  CaptureResult (*getFrame  )(FrameBuffer      frame  );
   CaptureResult (*getPointer)(CapturePointer * pointer);
 }
 CaptureInterface;

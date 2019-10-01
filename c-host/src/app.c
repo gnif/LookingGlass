@@ -49,7 +49,7 @@ struct app
 
   uint8_t     * frames;
   unsigned int  frameSize;
-  uint8_t     * frame[MAX_FRAMES];
+  FrameBuffer   frame[MAX_FRAMES];
   unsigned int  frameOffset[MAX_FRAMES];
 
   bool             running;
@@ -168,9 +168,7 @@ static int frameThread(void * opaque)
 
   while(app.running)
   {
-    frame.data = app.frame[frameIndex];
-
-    switch(app.iface->getFrame(&frame))
+    switch(app.iface->waitFrame(&frame))
     {
       case CAPTURE_RESULT_OK:
         break;
@@ -226,7 +224,9 @@ static int frameThread(void * opaque)
     fi->dataPos = app.frameOffset[frameIndex];
     frameValid  = true;
 
+    framebuffer_prepare(app.frame[frameIndex]);
     INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
+    app.iface->getFrame(app.frame[frameIndex]);
 
     if (++frameIndex == MAX_FRAMES)
       frameIndex = 0;
@@ -369,8 +369,8 @@ int app_main(int argc, char * argv[])
 
   for (int i = 0; i < MAX_FRAMES; ++i)
   {
-    app.frame      [i] = app.frames + i * app.frameSize;
-    app.frameOffset[i] = app.frame[i] - shmemMap;
+    app.frame      [i] = (FrameBuffer)(app.frames + i * app.frameSize);
+    app.frameOffset[i] = (uint8_t *)app.frame[i] - shmemMap;
     DEBUG_INFO("Frame %d          : 0x%" PRIXPTR " (0x%08x)", i, (uintptr_t)app.frame[i], app.frameOffset[i]);
   }
 

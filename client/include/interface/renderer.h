@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "common/KVMFR.h"
+#include "common/framebuffer.h"
 
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->get_name       && \
@@ -89,7 +90,7 @@ typedef void         (* LG_RendererDeInitialize)(void * opaque);
 typedef void         (* LG_RendererOnResize    )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
 typedef bool         (* LG_RendererOnMouseShape)(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent)(void * opaque, const bool visible , const int x, const int y);
-typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const uint8_t * data);
+typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const FrameBuffer frame);
 typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
 typedef bool         (* LG_RendererRender      )(void * opaque, SDL_Window *window);
 typedef void         (* LG_RendererUpdateFPS   )(void * opaque, const float avgUPS, const float avgFPS);

@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "windows/debug.h"
 #include "windows/mousehook.h"
 #include "common/option.h"
+#include "common/framebuffer.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -236,7 +237,7 @@ static CaptureResult nvfbc_capture()
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
+static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
 {
   if (!os_waitEvent(this->frameEvent, 1000))
     return CAPTURE_RESULT_TIMEOUT;
@@ -266,7 +267,16 @@ static CaptureResult nvfbc_getFrame(CaptureFrame * frame)
 #endif
 
   frame->format = this->grabInfo.bIsHDR ? CAPTURE_FMT_RGBA10 : CAPTURE_FMT_BGRA;
-  memcpy(frame->data, this->frameBuffer, frame->pitch * frame->height);
+  return CAPTURE_RESULT_OK;
+}
+
+static CaptureResult nvfbc_getFrame(FrameBuffer frame)
+{
+  framebuffer_write(
+    frame,
+    this->frameBuffer,
+    this->grabInfo.dwHeight * this->grabInfo.dwBufferWidth * 4
+  );
   return CAPTURE_RESULT_OK;
 }
 
@@ -310,6 +320,7 @@ struct CaptureInterface Capture_NVFBC =
   .free            = nvfbc_free,
   .getMaxFrameSize = nvfbc_getMaxFrameSize,
   .capture         = nvfbc_capture,
+  .waitFrame       = nvfbc_waitFrame,
   .getFrame        = nvfbc_getFrame,
   .getPointer      = nvfbc_getPointer
 };

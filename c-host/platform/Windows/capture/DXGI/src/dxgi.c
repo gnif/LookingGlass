@@ -766,7 +766,7 @@ static CaptureResult dxgi_capture()
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_getFrame(CaptureFrame * frame)
+static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
 {
   assert(this);
   assert(this->initialized);
@@ -778,7 +778,6 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
-  // only reset the event if we used the texture
   os_resetEvent(tex->mapped);
 
   frame->width  = this->width;
@@ -787,7 +786,16 @@ static CaptureResult dxgi_getFrame(CaptureFrame * frame)
   frame->stride = this->stride;
   frame->format = this->format;
 
-  memcpy(frame->data, tex->map.pData, this->pitch * this->height);
+  return CAPTURE_RESULT_OK;
+}
+
+static CaptureResult dxgi_getFrame(FrameBuffer frame)
+{
+  assert(this);
+  assert(this->initialized);
+
+  Texture * tex = &this->texture[this->texRIndex];
+  framebuffer_write(frame, tex->map.pData, this->pitch * this->height);
   os_signalEvent(tex->free);
 
   if (++this->texRIndex == this->maxTextures)
@@ -867,6 +875,7 @@ struct CaptureInterface Capture_DXGI =
   .free            = dxgi_free,
   .getMaxFrameSize = dxgi_getMaxFrameSize,
   .capture         = dxgi_capture,
+  .waitFrame       = dxgi_waitFrame,
   .getFrame        = dxgi_getFrame,
   .getPointer      = dxgi_getPointer
 };

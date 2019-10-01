@@ -32,8 +32,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/framebuffer.h"
 #include "utils.h"
-#include "lg-decoders.h"
 #include "dynamic/fonts.h"
 #include "ll.h"
 
@@ -122,8 +122,8 @@ struct Inst
   GLuint            vboFormat;
   GLuint            dataFormat;
   size_t            texSize;
-  const LG_Decoder* decoder;
-  void            * decoderData;
+  size_t            texPos;
+  FrameBuffer       frame;
 
   uint64_t          drawStart;
   bool              hasBuffers;
@@ -140,7 +140,6 @@ struct Inst
   bool              hasTextures, hasFrames;
   GLuint            frames[BUFFER_COUNT];
   GLsync            fences[BUFFER_COUNT];
-  void            * decoderFrames[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
   struct ll       * alerts;
   int               alertList;
@@ -362,7 +361,7 @@ bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const
   return false;
 }
 
-bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const uint8_t * data)
+bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer frame)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
@@ -394,12 +393,7 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
   LG_UNLOCK(this->formatLock);
 
   LG_LOCK(this->syncLock);
-  if (!this->decoder->decode(this->decoderData, data, format.pitch))
-  {
-    DEBUG_ERROR("decode returned failure");
-    LG_UNLOCK(this->syncLock);
-    return false;
-  }
+  this->frame       = frame;
   this->frameUpdate = true;
   LG_UNLOCK(this->syncLock);
 
@@ -849,13 +843,21 @@ static bool configure(struct Inst * this, SDL_Window *window)
   switch(this->format.type)
   {
     case FRAME_TYPE_BGRA:
-    case FRAME_TYPE_RGBA:
-    case FRAME_TYPE_RGBA10:
-      this->decoder = &LGD_NULL;
+      this->intFormat  = GL_RGBA8;
+      this->vboFormat  = GL_BGRA;
+      this->dataFormat = GL_UNSIGNED_BYTE;
       break;
 
-    case FRAME_TYPE_YUV420:
-      this->decoder = &LGD_YUV420;
+    case FRAME_TYPE_RGBA:
+      this->intFormat  = GL_RGBA8;
+      this->vboFormat  = GL_RGBA;
+      this->dataFormat = GL_UNSIGNED_BYTE;
+      break;
+
+    case FRAME_TYPE_RGBA10:
+      this->intFormat  = GL_RGB10_A2;
+      this->vboFormat  = GL_RGBA;
+      this->dataFormat = GL_UNSIGNED_INT_2_10_10_10_REV;
       break;
 
     default:
@@ -863,128 +865,73 @@ static bool configure(struct Inst * this, SDL_Window *window)
       return false;
   }
 
-  DEBUG_INFO("Using decoder: %s", this->decoder->name);
-
-  if (!this->decoder->create(&this->decoderData))
-  {
-    DEBUG_ERROR("Failed to create the decoder");
-    return false;
-  }
-
-  if (!this->decoder->initialize(
-    this->decoderData,
-    this->format,
-    window))
-  {
-    DEBUG_ERROR("Failed to initialize decoder");
-    return false;
-  }
-
-  switch(this->decoder->get_out_format(this->decoderData))
-  {
-    case LG_OUTPUT_BGRA:
-      this->intFormat  = GL_RGBA8;
-      this->vboFormat  = GL_BGRA;
-      this->dataFormat = GL_UNSIGNED_BYTE;
-      break;
-
-    case LG_OUTPUT_RGBA:
-      this->intFormat  = GL_RGBA8;
-      this->vboFormat  = GL_RGBA;
-      this->dataFormat = GL_UNSIGNED_BYTE;
-      break;
-
-    case LG_OUTPUT_RGBA10:
-      this->intFormat  = GL_RGB10_A2;
-      this->vboFormat  = GL_RGBA;
-      this->dataFormat = GL_UNSIGNED_INT_2_10_10_10_REV;
-      break;
-
-    case LG_OUTPUT_YUV420:
-      // fixme
-      this->intFormat  = GL_RGBA8;
-      this->vboFormat  = GL_BGRA;
-      this->dataFormat = GL_UNSIGNED_BYTE;
-      break;
-
-    default:
-      DEBUG_ERROR("Format not supported");
-      LG_UNLOCK(this->formatLock);
-      return false;
-  }
-
   // calculate the texture size in bytes
-  this->texSize =
-    this->format.height *
-    this->decoder->get_frame_pitch(this->decoderData);
+  this->texSize = this->format.height * this->format.pitch;
+  this->texPos  = 0;
 
-  // generate the pixel unpack buffers if the decoder isn't going to do it for us
-  if (!this->decoder->has_gl)
+  glGenBuffers(BUFFER_COUNT, this->vboID);
+  if (check_gl_error("glGenBuffers"))
   {
-    glGenBuffers(BUFFER_COUNT, this->vboID);
-    if (check_gl_error("glGenBuffers"))
-    {
-      LG_UNLOCK(this->formatLock);
-      return false;
-    }
-    this->hasBuffers = true;
+    LG_UNLOCK(this->formatLock);
+    return false;
+  }
+  this->hasBuffers = true;
 
-    if (this->amdPinnedMemSupport)
-    {
-      const int pagesize = getpagesize();
-      this->texPixels[0] = memalign(pagesize, this->texSize * BUFFER_COUNT);
-      memset(this->texPixels[0], 0, this->texSize * BUFFER_COUNT);
-      for(int i = 1; i < BUFFER_COUNT; ++i)
-        this->texPixels[i] = this->texPixels[0] + this->texSize;
+  if (this->amdPinnedMemSupport)
+  {
+    const int pagesize = getpagesize();
+    this->texPixels[0] = memalign(pagesize, this->texSize * BUFFER_COUNT);
+    memset(this->texPixels[0], 0, this->texSize * BUFFER_COUNT);
+    for(int i = 1; i < BUFFER_COUNT; ++i)
+      this->texPixels[i] = this->texPixels[0] + this->texSize;
 
-      for(int i = 0; i < BUFFER_COUNT; ++i)
+    for(int i = 0; i < BUFFER_COUNT; ++i)
+    {
+      glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
+
+      if (check_gl_error("glBindBuffer"))
       {
-        glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
-
-        if (check_gl_error("glBindBuffer"))
-        {
-          LG_UNLOCK(this->formatLock);
-          return false;
-        }
-        glBufferData(
-          GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
-          this->texSize,
-          this->texPixels[i],
-          GL_STREAM_DRAW);
-
-        if (check_gl_error("glBufferData"))
-        {
-          LG_UNLOCK(this->formatLock);
-          return false;
-        }
+        LG_UNLOCK(this->formatLock);
+        return false;
       }
-      glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
-    }
-    else
-    {
-      for(int i = 0; i < BUFFER_COUNT; ++i)
+      glBufferData(
+        GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
+        this->texSize,
+        this->texPixels[i],
+        GL_STREAM_DRAW);
+
+      if (check_gl_error("glBufferData"))
       {
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
-        if (check_gl_error("glBindBuffer"))
-        {
-          LG_UNLOCK(this->formatLock);
-          return false;
-        }
-
-        glBufferData(
-          GL_PIXEL_UNPACK_BUFFER,
-          this->texSize,
-          NULL,
-          GL_STREAM_DRAW
-        );
-        if (check_gl_error("glBufferData"))
-        {
-          LG_UNLOCK(this->formatLock);
-          return false;
-        }
+        LG_UNLOCK(this->formatLock);
+        return false;
       }
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     }
+    glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
+  }
+  else
+  {
+    for(int i = 0; i < BUFFER_COUNT; ++i)
+    {
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
+      if (check_gl_error("glBindBuffer"))
+      {
+        LG_UNLOCK(this->formatLock);
+        return false;
+      }
+
+      glBufferData(
+        GL_PIXEL_UNPACK_BUFFER,
+        this->texSize,
+        NULL,
+        GL_STREAM_DRAW
+      );
+      if (check_gl_error("glBufferData"))
+      {
+        LG_UNLOCK(this->formatLock);
+        return false;
+      }
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
 
   // create the frame textures
@@ -1023,26 +970,11 @@ static bool configure(struct Inst * this, SDL_Window *window)
       return false;
     }
 
-    if (this->decoder->has_gl)
-    {
-      if (!this->decoder->init_gl_texture(
-        this->decoderData,
-        GL_TEXTURE_2D,
-        this->frames[i],
-        &this->decoderFrames[i]))
-      {
-        LG_UNLOCK(this->formatLock);
-        return false;
-      }
-    }
-    else
-    {
-      // configure the texture
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    }
+    // configure the texture
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
     // create the display lists
     glNewList(this->texList + i, GL_COMPILE);
@@ -1082,19 +1014,6 @@ static void deconfigure(struct Inst * this)
 
   if (this->hasFrames)
   {
-    if (this->decoder->has_gl)
-    {
-      for(int i = 0; i < BUFFER_COUNT; ++i)
-      {
-        if (this->decoderFrames[i])
-          this->decoder->free_gl_texture(
-            this->decoderData,
-            this->decoderFrames[i]
-          );
-        this->decoderFrames[i] = NULL;
-      }
-    }
-
     glDeleteTextures(BUFFER_COUNT, this->frames);
     this->hasFrames = false;
   }
@@ -1119,12 +1038,6 @@ static void deconfigure(struct Inst * this)
       }
       this->texPixels[i] = NULL;
     }
-  }
-
-  if (this->decoderData)
-  {
-    this->decoder->destroy(this->decoderData);
-    this->decoderData = NULL;
   }
 
   this->configured = false;
@@ -1277,6 +1190,23 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
   LG_UNLOCK(this->mouseLock);
 }
 
+static bool opengl_buffer_fn(void * opaque, const void * data, size_t size)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  // update the buffer, this performs a DMA transfer if possible
+  glBufferSubData(
+    GL_PIXEL_UNPACK_BUFFER,
+    this->texPos,
+    size,
+    data
+  );
+  check_gl_error("glBufferSubData");
+
+  this->texPos += size;
+  return true;
+}
+
 static bool draw_frame(struct Inst * this)
 {
   LG_LOCK(this->syncLock);
@@ -1293,95 +1223,69 @@ static bool draw_frame(struct Inst * this)
   LG_UNLOCK(this->syncLock);
 
   LG_LOCK(this->formatLock);
-  if (this->decoder->has_gl)
+  if (glIsSync(this->fences[this->texIndex]))
   {
-    if (!this->decoder->update_gl_texture(
-      this->decoderData,
-      this->decoderFrames[this->texIndex]
-    ))
+    switch(glClientWaitSync(this->fences[this->texIndex], 0, GL_TIMEOUT_IGNORED))
     {
-      LG_UNLOCK(this->formatLock);
-      DEBUG_ERROR("Failed to update the texture from the decoder");
-      return false;
+      case GL_ALREADY_SIGNALED:
+        break;
+
+      case GL_CONDITION_SATISFIED:
+        DEBUG_WARN("Had to wait for the sync");
+        break;
+
+      case GL_TIMEOUT_EXPIRED:
+        DEBUG_WARN("Timeout expired, DMA transfers are too slow!");
+        break;
+
+      case GL_WAIT_FAILED:
+        DEBUG_ERROR("Wait failed %s", gluErrorString(glGetError()));
+        break;
     }
+
+    glDeleteSync(this->fences[this->texIndex]);
+    this->fences[this->texIndex] = NULL;
   }
-  else
+
+  glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
+
+  glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.stride);
+
+  this->texPos = 0;
+  framebuffer_read_fn(
+    this->frame,
+    opengl_buffer_fn,
+    this->format.height * this->format.stride,
+    this
+  );
+
+  // update the texture
+  glTexSubImage2D(
+    GL_TEXTURE_2D,
+    0,
+    0,
+    0,
+    this->format.width ,
+    this->format.height,
+    this->vboFormat,
+    this->dataFormat,
+    (void*)0
+  );
+  if (check_gl_error("glTexSubImage2D"))
   {
-    if (glIsSync(this->fences[this->texIndex]))
-    {
-      switch(glClientWaitSync(this->fences[this->texIndex], 0, GL_TIMEOUT_IGNORED))
-      {
-        case GL_ALREADY_SIGNALED:
-          break;
-
-        case GL_CONDITION_SATISFIED:
-          DEBUG_WARN("Had to wait for the sync");
-          break;
-
-        case GL_TIMEOUT_EXPIRED:
-          DEBUG_WARN("Timeout expired, DMA transfers are too slow!");
-          break;
-
-        case GL_WAIT_FAILED:
-          DEBUG_ERROR("Wait failed %s", gluErrorString(glGetError()));
-          break;
-      }
-
-      glDeleteSync(this->fences[this->texIndex]);
-      this->fences[this->texIndex] = NULL;
-    }
-
-    const uint8_t * data = this->decoder->get_buffer(this->decoderData);
-    if (!data)
-    {
-      LG_UNLOCK(this->formatLock);
-      DEBUG_ERROR("Failed to get the buffer from the decoder");
-      return false;
-    }
-
-    glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
-
-    glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH ,
-      this->decoder->get_frame_stride(this->decoderData)
+    DEBUG_ERROR("texIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
+      this->texIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
     );
-
-    // update the buffer, this performs a DMA transfer if possible
-    glBufferSubData(
-      GL_PIXEL_UNPACK_BUFFER,
-      0,
-      this->texSize,
-      data
-    );
-    check_gl_error("glBufferSubData");
-
-    // update the texture
-    glTexSubImage2D(
-      GL_TEXTURE_2D,
-      0,
-      0,
-      0,
-      this->format.width ,
-      this->format.height,
-      this->vboFormat,
-      this->dataFormat,
-      (void*)0
-    );
-    if (check_gl_error("glTexSubImage2D"))
-    {
-      DEBUG_ERROR("texIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
-        this->texIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
-      );
-    }
-
-    // set a fence so we don't overwrite a buffer in use
-    this->fences[this->texIndex] =
-      glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-
-    // unbind the buffer
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
+
+  // set a fence so we don't overwrite a buffer in use
+  this->fences[this->texIndex] =
+    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+  // unbind the buffer
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   const bool mipmap = this->opt.mipmap && (
     (this->format.width  > this->destRect.w) ||

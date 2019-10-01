@@ -1,5 +1,5 @@
 /*
-Looking Glass - KVM FrameRelay (KVMFR) Client
+KVMGFX Client - A KVM Client for VGA Passthrough
 Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
@@ -19,15 +19,30 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #pragma once
 
+#include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
-#include "interface/renderer.h"
+typedef struct stFrameBuffer * FrameBuffer;
 
-typedef struct EGL_Desktop EGL_Desktop;
+typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 
-bool egl_desktop_init(EGL_Desktop ** desktop);
-void egl_desktop_free(EGL_Desktop ** desktop);
+/**
+ * Read data from the KVMFRFrame into the dst buffer
+ */
+bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size);
 
-bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer frame);
-void egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged);
-bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest);
+/**
+ * Read data from the KVMFRFrame using a callback
+ */
+bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t size, void * opaque);
+
+/**
+ * Prepare the framebuffer for writing
+ */
+void framebuffer_prepare(const FrameBuffer frame);
+
+/**
+ * Write data from the src buffer into the KVMFRFrame
+ */
+bool framebuffer_write(const FrameBuffer frame, const void * src, size_t size);
