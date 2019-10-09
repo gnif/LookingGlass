@@ -207,24 +207,10 @@ void egl_cursor_render(EGL_Cursor * cursor)
 
     uint8_t * data = cursor->data;
 
-    // tmp buffer for masked colour
-    uint32_t  tmp[cursor->width * cursor->height];
-
     switch(cursor->type)
     {
       case LG_CURSOR_MASKED_COLOR:
-      {
-        for(int i = 0; i < cursor->width * cursor->height; ++i)
-        {
-          const uint32_t c = ((uint32_t *)data)[i];
-          tmp[i] = (c & ~0xFF000000) | (c & 0xFF000000 ? 0x0 : 0xFF000000);
-        }
-        data = (uint8_t *)tmp;
-        // fall through to LG_CURSOR_COLOR
-        //
-        // technically we should also create an XOR texture from the data but this
-        // usage seems very rare in modern software.
-      }
+        // fall through
 
       case LG_CURSOR_COLOR:
       {
@@ -262,33 +248,42 @@ void egl_cursor_render(EGL_Cursor * cursor)
     LG_UNLOCK(cursor->lock);
   }
 
-  if (cursor->type == LG_CURSOR_MONOCHROME)
+  glEnable(GL_BLEND);
+  switch(cursor->type)
   {
-    glEnable(GL_BLEND);
+    case LG_CURSOR_MONOCHROME:
+    {
+      egl_shader_use(cursor->shader);
+      glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
+      glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+      egl_model_set_texture(cursor->model, cursor->texture);
+      egl_model_render(cursor->model);
 
-    egl_shader_use(cursor->shader);
-    glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
-    glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-    egl_model_set_texture(cursor->model, cursor->texture);
-    egl_model_render(cursor->model);
+      egl_shader_use(cursor->shaderMono);
+      glUniform4f(cursor->uMousePosMono, cursor->x, cursor->y, cursor->w, cursor->h / 2);
+      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+      egl_model_set_texture(cursor->model, cursor->textureMono);
+      egl_model_render(cursor->model);
+      break;
+    }
 
-    egl_shader_use(cursor->shaderMono);
-    glUniform4f(cursor->uMousePosMono, cursor->x, cursor->y, cursor->w, cursor->h / 2);
-    glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-    egl_model_set_texture(cursor->model, cursor->textureMono);
-    egl_model_render(cursor->model);
+    case LG_CURSOR_COLOR:
+    {
+      egl_shader_use(cursor->shader);
+      glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
+      glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+      egl_model_render(cursor->model);
+      break;
+    }
 
-    glDisable(GL_BLEND);
+    case LG_CURSOR_MASKED_COLOR:
+    {
+      egl_shader_use(cursor->shaderMono);
+      glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
+      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+      egl_model_render(cursor->model);
+      break;
+    }
   }
-  else
-  {
-    glEnable(GL_BLEND);
-
-    egl_shader_use(cursor->shader);
-    glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
-    glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-    egl_model_render(cursor->model);
-
-    glDisable(GL_BLEND);
-  }
+  glDisable(GL_BLEND);
 }
