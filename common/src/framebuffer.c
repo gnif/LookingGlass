@@ -31,6 +31,7 @@ struct stFrameBuffer
 
 bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size)
 {
+  uint8_t *d  = (uint8_t*)dst;
   uint64_t rp = 0;
   while(rp < size)
   {
@@ -39,8 +40,9 @@ bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size)
 
     /* copy what we can */
     uint64_t avail = frame->wp - rp;
-    memcpy(dst, frame->data + rp, avail);
+    memcpy(d, frame->data + rp, avail);
     rp += avail;
+    d  += avail;
   }
   return true;
 }
