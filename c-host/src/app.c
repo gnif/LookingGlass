@@ -363,8 +363,8 @@ int app_main(int argc, char * argv[])
   app.frames           = (uint8_t *)ALIGN_UP(app.pointerData + app.pointerDataSize);
   app.frameSize        = ALIGN_DN((shmemSize - (app.frames - shmemMap)) / MAX_FRAMES);
 
-  DEBUG_INFO("Max Cursor Size  : %u MiB"     , app.pointerDataSize / 1048576);
-  DEBUG_INFO("Max Frame Size   : %u MiB"     , app.frameSize      / 1048576);
+  DEBUG_INFO("Max Cursor Size  : %u MiB", app.pointerDataSize / 1048576);
+  DEBUG_INFO("Max Frame Size   : %u MiB", app.frameSize       / 1048576);
   DEBUG_INFO("Cursor           : 0x%" PRIXPTR " (0x%08x)", (uintptr_t)app.pointerData, app.pointerOffset);
 
   for (int i = 0; i < MAX_FRAMES; ++i)
