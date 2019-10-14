@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 #define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 8
+#define KVMFR_HEADER_VERSION 9
 
 typedef enum FrameType
 {

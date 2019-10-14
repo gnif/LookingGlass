@@ -376,7 +376,6 @@ static int frameThread(void * unused)
         SDL_SetWindowSize(state.window, header.width, header.height);
       updatePositionInfo();
     }
-
     FrameBuffer frame = (FrameBuffer)((uint8_t *)state.shm + header.dataPos);
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, frame))
     {
