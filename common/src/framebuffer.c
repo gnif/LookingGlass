@@ -40,9 +40,13 @@ bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size)
 
     /* copy what we can */
     uint64_t avail = frame->wp - rp;
+    avail = avail > size ? size : avail;
+
     memcpy(d, frame->data + rp, avail);
-    rp += avail;
-    d  += avail;
+
+    rp   += avail;
+    d    += avail;
+    size -= avail;
   }
   return true;
 }
@@ -57,9 +61,13 @@ bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t s
 
     /* copy what we can */
     uint64_t avail = frame->wp - rp;
+    avail = avail > size ? size : avail;
+
     if (!fn(opaque, frame->data + rp, avail))
       return false;
-    rp += avail;
+
+    rp   += avail;
+    size -= avail;
   }
 
   return true;
