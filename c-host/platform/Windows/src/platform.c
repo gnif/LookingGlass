@@ -368,11 +368,16 @@ bool os_shmemMmap(void **ptr)
     return true;
   }
 
+  IVSHMEM_MMAP_CONFIG config =
+  {
+    .cacheMode = IVSHMEM_CACHE_WRITECOMBINED
+  };
+
   memset(&app.shmemMap, 0, sizeof(IVSHMEM_MMAP));
   if (!DeviceIoControl(
     app.shmemHandle,
     IOCTL_IVSHMEM_REQUEST_MMAP,
-    NULL, 0,
+    &config, sizeof(IVSHMEM_MMAP_CONFIG),
     &app.shmemMap, sizeof(IVSHMEM_MMAP),
     NULL, NULL))
   {

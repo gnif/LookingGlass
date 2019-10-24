@@ -7,6 +7,19 @@ DEFINE_GUID (GUID_DEVINTERFACE_IVSHMEM,
 typedef UINT16 IVSHMEM_PEERID;
 typedef UINT64 IVSHMEM_SIZE;
 
+#define IVSHMEM_CACHE_NONCACHED     0
+#define IVSHMEM_CACHE_CACHED        1
+#define IVSHMEM_CACHE_WRITECOMBINED 2
+
+/*
+    This structure is for use with the IOCTL_IVSHMEM_REQUEST_MMAP IOCTL
+*/
+typedef struct IVSHMEM_MMAP_CONFIG
+{
+    UINT8 cacheMode; // the caching mode of the mapping, see IVSHMEM_CACHE_* for options
+}
+IVSHMEM_MMAP_CONFIG, *PIVSHMEM_MMAP_CONFIG;
+
 /*
     This structure is for use with the IOCTL_IVSHMEM_REQUEST_MMAP IOCTL
 */
