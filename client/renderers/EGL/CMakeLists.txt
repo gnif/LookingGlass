@@ -4,8 +4,11 @@ project(renderer_EGL LANGUAGES C)
 find_package(PkgConfig)
 pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
 	egl
-	wayland-egl
 	gl
+)
+
+pkg_check_modules(RENDERER_EGL_OPT_PKGCONFIG
+	wayland-egl
 )
 
 include(MakeObject)
@@ -46,6 +49,7 @@ add_library(renderer_EGL STATIC
 
 target_link_libraries(renderer_EGL
 	${RENDERER_EGL_PKGCONFIG_LIBRARIES}
+	${RENDERER_EGL_OPT_PKGCONFIG_LIBRARIES}
 	lg_common
 	fonts
 )
@@ -55,4 +59,5 @@ target_include_directories(renderer_EGL
 		src
 		${EGL_SHADER_INCS}
 		${RENDERER_EGL_PKGCONFIG_INCLUDE_DIRS}
+		${RENDERER_EGL_OPT_PKGCONFIG_INCLUDE_DIRS}
 )
