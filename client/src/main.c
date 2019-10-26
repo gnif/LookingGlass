@@ -1237,7 +1237,7 @@ int run()
       if (!spice_connect(params.spiceHost, params.spicePort, ""))
       {
         DEBUG_ERROR("Failed to connect to spice server");
-        return 0;
+        break;
       }
 
       while(state.running && !spice_ready())
