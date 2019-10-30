@@ -130,13 +130,13 @@ bool porthole_dev_share(PortholeDev handle, const uint32_t type, void *buffer, s
 {
   DWORD returned;
 
-	PortholeMsg msg = {
+  PortholeMsg msg = {
     .type = type,
     .addr = buffer,
     .size = size
   };
 
-	if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_SEND_MSG, &msg, sizeof(PortholeMsg), NULL, 0, &returned, NULL))
+  if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_SEND_MSG, &msg, sizeof(PortholeMsg), NULL, 0, &returned, NULL))
     return false;
 
   return true;
@@ -146,12 +146,12 @@ bool porthole_dev_unlock(PortholeDev handle, void *buffer, size_t size)
 {
   DWORD returned;
 
-	PortholeLockMsg msg = {
+  PortholeLockMsg msg = {
     .addr = buffer,
     .size = size
   };
 
-	if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_UNLOCK_BUFFER, &msg , sizeof(PortholeLockMsg), NULL, 0, &returned, NULL))
+  if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_UNLOCK_BUFFER, &msg , sizeof(PortholeLockMsg), NULL, 0, &returned, NULL))
     return false;
 
   return true;
