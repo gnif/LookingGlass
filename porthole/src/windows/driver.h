@@ -7,9 +7,9 @@ DEFINE_GUID (GUID_DEVINTERFACE_PORTHOLE,
 
 typedef struct _PortholeMsg
 {
-	UINT32 type;
-	PVOID  addr;
-	UINT32 size;
+  UINT32 type;
+  PVOID  addr;
+  UINT32 size;
 }
 PortholeMsg, *PPortholeMsg;
 
