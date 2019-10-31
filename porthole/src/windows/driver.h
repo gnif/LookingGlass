@@ -7,18 +7,13 @@ DEFINE_GUID (GUID_DEVINTERFACE_PORTHOLE,
 
 typedef struct _PortholeMsg
 {
-  UINT32 type;
-  PVOID  addr;
-  UINT32 size;
+	UINT32 type;
+	PVOID  addr;
+	UINT32 size;
 }
 PortholeMsg, *PPortholeMsg;
 
-typedef struct _PortholeLockMsg
-{
-  PVOID  addr;
-  UINT32 size;
-}
-PortholeLockMsg, *PPortholeLockMsg;
+typedef int PortholeMapID, *PPortholeMapID;
 
 #define IOCTL_PORTHOLE_SEND_MSG      CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_PORTHOLE_UNLOCK_BUFFER CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)

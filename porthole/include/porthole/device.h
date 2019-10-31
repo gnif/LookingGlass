@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 
 typedef struct PortholeDev *PortholeDev;
+typedef int    PortholeID;
 
 /**
  * Open the porthole device
@@ -49,7 +50,7 @@ void porthole_dev_close(PortholeDev *handle);
  * @param   type   The type
  * @param   buffer The buffer to share
  * @param   size   The size of the buffer
- * @returns true on success
+ * @returns the porthole mapping ID, or -1 on failure
  *
  * This function locks the supplied buffer in RAM via the porthole device
  * driver and is then shared with the device for use outside the guest.
@@ -63,23 +64,27 @@ void porthole_dev_close(PortholeDev *handle);
  * This is an expensive operation, the idea is that you allocate fixed buffers
  * and share them with the host at initialization.
  *
- * @note the driver is hard limited to 32 shares.
+ * @note the device & driver are hard limited to 32 shares.
  */
-bool porthole_dev_share(PortholeDev handle, const uint32_t type, void *buffer, size_t size);
+PortholeID porthole_dev_map(PortholeDev handle, const uint32_t type, void *buffer, size_t size);
 
 /**
- * Unlock a previously shared buffer
+ * Unmap a previously shared buffer
  *
  * @param handle The porthole device
- * @param buffer The buffer to unlock
- * @param size   The size of the buffer
+ * @param id     The porthole map id returned by porthole_dev_share
  * @returns true on success
  *
- * Unlocks a previously shared buffer. Once this has been done the buffer can
+ * Unmaps a previously shared buffer. Once this has been done the buffer can
  * be freed or re-used. The client application should no longer attempt to
  * access this buffer as it may be paged out of RAM.
  *
  * Note that this is not strictly required as closing the device will cause
  * the driver to cleanup any prior locked buffers.
+ *
+ * The client application will be notified that the mapping is about to become
+ * invalid and is expected to clean up and notify when it is done. If your
+ * application hangs calling this method the issue is very likely with your
+ * client application.
  */
-bool porthole_dev_unlock(PortholeDev handle, void *buffer, size_t size);
+bool porthole_dev_unmap(PortholeDev handle, PortholeID id);

@@ -24,6 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <windows.h>
 #include <setupapi.h>
+#include <assert.h>
 
 struct PortholeDev
 {
@@ -37,11 +38,7 @@ bool porthole_dev_open(PortholeDev *handle, const uint32_t vendor_id)
   SP_DEVICE_INTERFACE_DATA         devInfData = {0};
   HANDLE                           dev;
 
-  if (!handle)
-  {
-    DEBUG_ERROR("Invalid buffer provided");
-    return false;
-  }
+  assert(handle);
 
   devInfo = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
   devInfData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
@@ -121,13 +118,17 @@ bool porthole_dev_open(PortholeDev *handle, const uint32_t vendor_id)
 
 void porthole_dev_close(PortholeDev *handle)
 {
+  assert(handle && *handle);
+
   CloseHandle((*handle)->dev);
   free(*handle);
   *handle = NULL;
 }
 
-bool porthole_dev_share(PortholeDev handle, const uint32_t type, void *buffer, size_t size)
+PortholeID porthole_dev_map(PortholeDev handle, const uint32_t type, void *buffer, size_t size)
 {
+  assert(handle);
+
   DWORD returned;
 
   PortholeMsg msg = {
@@ -136,22 +137,23 @@ bool porthole_dev_share(PortholeDev handle, const uint32_t type, void *buffer, s
     .size = size
   };
 
-  if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_SEND_MSG, &msg, sizeof(PortholeMsg), NULL, 0, &returned, NULL))
-    return false;
+  PortholeMapID out;
 
-  return true;
+  if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_SEND_MSG, &msg, sizeof(PortholeMsg), &out, sizeof(PortholeMapID), &returned, NULL))
+    return -1;
+
+  PortholeID ret = out;
+  return ret;
 }
 
-bool porthole_dev_unlock(PortholeDev handle, void *buffer, size_t size)
+bool porthole_dev_unmap(PortholeDev handle, PortholeID id)
 {
+  assert(handle);
+
   DWORD returned;
 
-  PortholeLockMsg msg = {
-    .addr = buffer,
-    .size = size
-  };
-
-  if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_UNLOCK_BUFFER, &msg , sizeof(PortholeLockMsg), NULL, 0, &returned, NULL))
+  PortholeMapID msg = id;
+  if (!DeviceIoControl(handle->dev, IOCTL_PORTHOLE_UNLOCK_BUFFER, &msg, sizeof(PortholeMapID), NULL, 0, &returned, NULL))
     return false;
 
   return true;
