@@ -52,7 +52,7 @@ void objectlist_free(ObjectList * ol)
   *ol = NULL;
 }
 
-int objectlist_push (ObjectList ol, char * str)
+int objectlist_push(ObjectList ol, void * object)
 {
   if (ol->count == ol->size)
   {
@@ -61,7 +61,7 @@ int objectlist_push (ObjectList ol, char * str)
   }
 
   unsigned int index = ol->count;
-  ol->list[ol->count++] = str;
+  ol->list[ol->count++] = object;
   return index;
 }
 

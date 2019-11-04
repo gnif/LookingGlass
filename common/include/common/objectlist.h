@@ -25,7 +25,7 @@ typedef void (*ObjectFreeFn)(void * object);
 
 ObjectList   objectlist_new  (ObjectFreeFn free_fn);
 void         objectlist_free (ObjectList * sl);
-int          objectlist_push (ObjectList sl, char * str);
+int          objectlist_push (ObjectList sl, void * object);
 unsigned int objectlist_count(ObjectList sl);
 char *       objectlist_at   (ObjectList sl, unsigned int index);
 
