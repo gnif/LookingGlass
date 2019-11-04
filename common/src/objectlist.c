@@ -26,7 +26,7 @@ struct ObjectList
   ObjectFreeFn    free_fn;
   unsigned int    size;
   unsigned int    count;
-  char         ** list;
+  void         ** list;
 };
 
 ObjectList objectlist_new(ObjectFreeFn free_fn)
