@@ -17,26 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include <stdbool.h>
-#include <stdint.h>
+#include "types.h"
 
 typedef struct PortholeClient *PortholeClient;
-
-typedef struct
-{
-  unsigned int   size;
-  void         * data;
-}
-PortholeSegment;
-
-typedef struct
-{
-  uint32_t        id;
-  unsigned int    size;
-  unsigned int    num_segments;
-  PortholeSegment segments[0];
-}
-PortholeMap;
 
 /**
  * Memory map event callback.

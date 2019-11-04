@@ -7,6 +7,7 @@ include_directories(
 
 add_library(porthole STATIC
   src/porthole.c
+  src/util.c
 )
 
 if(WIN32)
