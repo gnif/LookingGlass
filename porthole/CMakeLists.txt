@@ -11,11 +11,17 @@ add_library(porthole STATIC
 
 if(WIN32)
   add_subdirectory(src/windows)
-  target_link_libraries(porthole PRIVATE porthole-windows)
+  set(PLATFORM "windows")
 else()
   add_subdirectory(src/linux)
-  target_link_libraries(porthole PRIVATE porthole-linux)
+  set(PLATFORM "linux")
 endif()
+
+target_link_libraries(porthole
+	PRIVATE
+		porthole-${PLATFORM}
+		lg_common
+)
 
 target_include_directories(porthole
 	INTERFACE
