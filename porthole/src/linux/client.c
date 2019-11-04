@@ -268,7 +268,6 @@ static void * porthole_socket_thread(void * opaque)
             break;
           }
         }
-        break;
 
         // reply to the guest to allow it to continue
         uint32_t reply = PH_MSG_UNMAP;
@@ -278,10 +277,12 @@ static void * porthole_socket_thread(void * opaque)
         if (sendmsg(handle->socket, &msghdr, 0) < 0)
         {
           DEBUG_ERROR("Failed to respond to the guest");
+          handle->running = false;
           if (handle->discon_cb)
             handle->discon_cb();
-          break;
         }
+
+        break;
       }
     }
   }
