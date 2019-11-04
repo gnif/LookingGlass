@@ -21,6 +21,7 @@ target_link_libraries(porthole
 	PRIVATE
 		porthole-${PLATFORM}
 		lg_common
+		pthread
 )
 
 target_include_directories(porthole
