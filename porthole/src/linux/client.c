@@ -112,7 +112,7 @@ bool porthole_client_open(
     return false;
   }
 
-  *handle = (PortholeClient)calloc(sizeof(PortholeClient), 1);
+  *handle = (PortholeClient)calloc(sizeof(struct PortholeClient), 1);
 
   (*handle)->socket    = fd;
   (*handle)->map_cb    = map_cb;
@@ -389,8 +389,10 @@ static void porthole_do_map(PortholeClient handle, Mapping * map, const uint32_t
   const unsigned int count = objectlist_count(map->segments);
 
   PortholeMap *m = calloc(sizeof(PortholeMap) + sizeof(PortholeSegment) * count, 1);
-  m->id          = map->id;
-  m->size        = map->size;
+
+  m->id           = map->id;
+  m->size         = map->size;
+  m->num_segments = count;
 
   for(unsigned int i = 0; i < count; ++i)
   {
