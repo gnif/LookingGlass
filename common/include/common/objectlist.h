@@ -23,11 +23,13 @@ typedef struct ObjectList * ObjectList;
 
 typedef void (*ObjectFreeFn)(void * object);
 
-ObjectList   objectlist_new  (ObjectFreeFn free_fn);
-void         objectlist_free (ObjectList * sl);
-int          objectlist_push (ObjectList sl, void * object);
-unsigned int objectlist_count(ObjectList sl);
-char *       objectlist_at   (ObjectList sl, unsigned int index);
+ObjectList   objectlist_new   (ObjectFreeFn free_fn);
+void         objectlist_free  (ObjectList * ol);
+int          objectlist_push  (ObjectList ol, void * object);
+void *       objectlist_pop   (ObjectList ol);
+bool         objectlist_remove(ObjectList ol, unsigned int index);
+unsigned int objectlist_count (ObjectList ol);
+void *       objectlist_at    (ObjectList ol, unsigned int index);
 
 // generic free method
 void objectlist_free_item(void *object);

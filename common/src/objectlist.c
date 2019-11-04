@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/objectlist.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 struct ObjectList
 {
@@ -57,7 +58,7 @@ int objectlist_push(ObjectList ol, void * object)
   if (ol->count == ol->size)
   {
     ol->size += 32;
-    ol->list  = realloc(ol->list, sizeof(char *) * ol->size);
+    ol->list  = realloc(ol->list, sizeof(void *) * ol->size);
   }
 
   unsigned int index = ol->count;
@@ -65,12 +66,39 @@ int objectlist_push(ObjectList ol, void * object)
   return index;
 }
 
+void * objectlist_pop(ObjectList ol)
+{
+  if (ol->count == 0)
+    return NULL;
+
+  return ol->list[--ol->count];
+}
+
+bool objectlist_remove(ObjectList ol, unsigned int index)
+{
+  if (index >= ol->count)
+    return false;
+
+  if (ol->free_fn)
+    ol->free_fn(ol->list[index]);
+
+  void ** newlist = malloc(sizeof(void *) * ol->size);
+
+  --ol->count;
+  memcpy(&newlist[0], &ol->list[0], index * sizeof(void *));
+  memcpy(&newlist[index], &ol->list[index + 1], (ol->count - index) * sizeof(void *));
+
+  free(ol->list);
+  ol->list = newlist;
+  return true;
+}
+
 unsigned int objectlist_count(ObjectList ol)
 {
   return ol->count;
 }
 
-char * objectlist_at(ObjectList ol, unsigned int index)
+void * objectlist_at(ObjectList ol, unsigned int index)
 {
   if (index >= ol->count)
     return NULL;
