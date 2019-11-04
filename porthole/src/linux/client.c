@@ -234,9 +234,48 @@ static void * porthole_socket_thread(void * opaque)
         break;
 
       case PH_MSG_UNMAP:
-        /* TODO: remove the object from intmaps and maps */
+      {
+        // notify the application of the unmap
         handle->unmap_cb(msg.u.unmap.id);
+
+        // remove the PortholeMap object
+        unsigned int count = objectlist_count(handle->maps);
+        for(unsigned int i = 0; i < count; ++i)
+        {
+          PortholeMap *m = (PortholeMap *)objectlist_at(handle->maps, i);
+          if (m->id == msg.u.unmap.id)
+          {
+            objectlist_remove(handle->maps, i);
+            break;
+          }
+        }
+
+        // remove the internal mapping object
+        count = objectlist_count(handle->intmaps);
+        for(unsigned int i = 0; i < count; ++i)
+        {
+          Mapping *m = (Mapping *)objectlist_at(handle->intmaps, i);
+          if (m->id == msg.u.unmap.id)
+          {
+            objectlist_remove(handle->intmaps, i);
+            break;
+          }
+        }
         break;
+
+        // reply to the guest to allow it to continue
+        uint32_t reply = PH_MSG_UNMAP;
+        msghdr.msg_controllen = 0;
+        io.iov_base = &reply;
+        io.iov_len  = sizeof(reply);
+        if (sendmsg(handle->socket, &msghdr, 0) < 0)
+        {
+          DEBUG_ERROR("Failed to respond to the guest");
+          if (handle->discon_cb)
+            handle->discon_cb();
+          break;
+        }
+      }
     }
   }
 
