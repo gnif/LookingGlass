@@ -31,6 +31,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#include <errno.h>
 
 typedef struct
 {
@@ -101,6 +102,9 @@ bool porthole_client_open(
     DEBUG_ERROR("Failed to create a unix socket");
     return false;
   }
+
+  struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
 
   struct sockaddr_un addr = { .sun_family = AF_UNIX };
   strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path)-1);
@@ -182,6 +186,9 @@ static void * porthole_socket_thread(void * opaque)
 
     if (recvmsg(handle->socket, &msghdr, 0) < 0)
     {
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        continue;
+
       DEBUG_ERROR("Failed to recieve the message");
       if (handle->discon_cb)
         handle->discon_cb();
