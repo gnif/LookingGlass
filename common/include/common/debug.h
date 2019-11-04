@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #if defined(_WIN32) && !defined(__GNUC__)
   #define DIRECTORY_SEPARATOR '\\'
