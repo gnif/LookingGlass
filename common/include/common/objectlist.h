@@ -17,31 +17,17 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "objectlist.h"
+#include <stdbool.h>
 
-typedef ObjectList StringList;
+typedef struct ObjectList * ObjectList;
 
-inline static StringList stringlist_new(bool owns_strings)
-{
-  return objectlist_new(owns_strings ? objectlist_free_item : 0);
-}
+typedef void (*ObjectFreeFn)(void * object);
 
-inline static void stringlist_free(StringList * sl)
-{
-  return objectlist_free(sl);
-}
+ObjectList   objectlist_new  (ObjectFreeFn free_fn);
+void         objectlist_free (ObjectList * sl);
+int          objectlist_push (ObjectList sl, char * str);
+unsigned int objectlist_count(ObjectList sl);
+char *       objectlist_at   (ObjectList sl, unsigned int index);
 
-inline static int stringlist_push (StringList sl, char * str)
-{
-  return objectlist_push(sl, str);
-}
-
-inline static unsigned int stringlist_count(StringList sl)
-{
-  return objectlist_count(sl);
-}
-
-inline static char * stringlist_at(StringList sl, unsigned int index)
-{
-  return objectlist_at(sl, index);
-}
+// generic free method
+void objectlist_free_item(void *object);

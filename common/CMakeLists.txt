@@ -10,8 +10,8 @@ if(ENABLE_BACKTRACE)
 endif()
 
 set(COMMON_SOURCES
+  src/objectlist.c
   src/stringutils.c
-  src/stringlist.c
   src/option.c
   src/framebuffer.c
 )
