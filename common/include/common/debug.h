@@ -53,6 +53,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define DEBUG_WARN(fmt, ...) DEBUG_PRINT("[W]", fmt, ##__VA_ARGS__)
 #define DEBUG_ERROR(fmt, ...) DEBUG_PRINT("[E]", fmt, ##__VA_ARGS__)
 #define DEBUG_FIXME(fmt, ...) DEBUG_PRINT("[F]", fmt, ##__VA_ARGS__)
+#define DEBUG_FATAL(fmt, ...) do {DEBUG_PRINT("[C]", fmt, ##__VA_ARGS__); abort();} while (0)
 
 #if defined(DEBUG_SPICE) | defined(DEBUG_IVSHMEM)
   #define DEBUG_PROTO(fmt, args...) DEBUG_PRINT("[P]", fmt, ##args)
