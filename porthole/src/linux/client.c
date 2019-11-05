@@ -62,6 +62,9 @@ Mapping;
 struct PortholeClient
 {
   int                 socket;
+  char                rxbuf[1024];
+  int                 rxbuf_len;
+
   PortholeMapEvent    map_cb;
   PortholeUnmapEvent  unmap_cb;
   PortholeDisconEvent discon_cb;
@@ -168,24 +171,26 @@ static void * porthole_socket_thread(void * opaque)
 
   while(handle->running)
   {
-    PHMsg msg;
     struct iovec io =
     {
-      .iov_base = &msg,
-      .iov_len  = sizeof(msg)
+      .iov_base = &handle->rxbuf[handle->rxbuf_len],
+      .iov_len  = sizeof(handle->rxbuf) - handle->rxbuf_len
     };
 
-    char buffer[256] = {0};
+    char cbuffer[256] = {0};
     struct msghdr msghdr =
     {
-      .msg_iov       = &io,
-      .msg_iovlen    = 1,
-      .msg_control    = &buffer,
-      .msg_controllen = sizeof(buffer)
+      .msg_iov        = &io,
+      .msg_iovlen     = 1,
+      .msg_control    = &cbuffer,
+      .msg_controllen = sizeof(cbuffer)
     };
 
-    if (recvmsg(handle->socket, &msghdr, 0) < 0)
+    handle->rxbuf_len = recvmsg(handle->socket, &msghdr, 0);
+    if (handle->rxbuf_len < 0)
     {
+      handle->rxbuf_len = 0;
+
       if (errno == EAGAIN || errno == EWOULDBLOCK)
         continue;
 
@@ -195,96 +200,114 @@ static void * porthole_socket_thread(void * opaque)
       break;
     }
 
-    switch(msg.msg)
+    int pos = 0;
+    while(pos != handle->rxbuf_len)
     {
-      case PH_MSG_MAP:
-        if (handle->current)
-        {
-          DEBUG_WARN("Started a new map before finishing the last one");
-          porthole_free_map(handle->current);
-        }
+      PHMsg *msg = (PHMsg *)&handle->rxbuf[pos];
 
-        handle->current = porthole_intmap_new();
+      // check for an incomplete message
+      if (pos + msg->len > handle->rxbuf_len)
         break;
 
-      case PH_MSG_FD:
+      assert(msg->len >= PH_MSG_BASE_SIZE);
+      pos += msg->len;
+
+      /* process the message */
+      switch(msg->msg)
       {
-        struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msghdr);
-        int            * fds  = (int *)CMSG_DATA(cmsg);
-        porthole_sharedfd_new(handle, msg.u.fd.id, fds[0]);
-        break;
-      }
-
-      case PH_MSG_SEGMENT:
-      {
-        if (!handle->current)
-          DEBUG_FATAL("Segment sent before map, this is a bug in the guest porthole device or driver");
-
-        porthole_segment_new(
-          handle->fds,
-          handle->current,
-          msg.u.segment.fd_id,
-          msg.u.segment.addr,
-          msg.u.segment.size
-        );
-        break;
-      }
-
-      case PH_MSG_FINISH:
-        if (!handle->current)
-          DEBUG_FATAL("Finished map before starting one");
-
-        handle->current->id = msg.u.finish.id;
-        objectlist_push(handle->intmaps, handle->current);
-        porthole_do_map(handle, handle->current, msg.u.finish.type);
-        handle->current = NULL;
-        break;
-
-      case PH_MSG_UNMAP:
-      {
-        // notify the application of the unmap
-        handle->unmap_cb(msg.u.unmap.id);
-
-        // remove the PortholeMap object
-        unsigned int count = objectlist_count(handle->maps);
-        for(unsigned int i = 0; i < count; ++i)
-        {
-          PortholeMap *m = (PortholeMap *)objectlist_at(handle->maps, i);
-          if (m->id == msg.u.unmap.id)
+        case PH_MSG_MAP:
+          if (handle->current)
           {
-            objectlist_remove(handle->maps, i);
-            break;
+            DEBUG_WARN("Started a new map before finishing the last one");
+            porthole_free_map(handle->current);
           }
+
+          handle->current = porthole_intmap_new();
+          break;
+
+        case PH_MSG_FD:
+        {
+          struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msghdr);
+          int            * fds  = (int *)CMSG_DATA(cmsg);
+          porthole_sharedfd_new(handle, msg->u.fd.id, fds[0]);
+          break;
         }
 
-        // remove the internal mapping object
-        count = objectlist_count(handle->intmaps);
-        for(unsigned int i = 0; i < count; ++i)
+        case PH_MSG_SEGMENT:
         {
-          Mapping *m = (Mapping *)objectlist_at(handle->intmaps, i);
-          if (m->id == msg.u.unmap.id)
+          if (!handle->current)
+            DEBUG_FATAL("Segment sent before map, this is a bug in the guest porthole device or driver");
+
+          porthole_segment_new(
+            handle->fds,
+            handle->current,
+            msg->u.segment.fd_id,
+            msg->u.segment.addr,
+            msg->u.segment.size
+          );
+          break;
+        }
+
+        case PH_MSG_FINISH:
+          if (!handle->current)
+            DEBUG_FATAL("Finished map before starting one");
+
+          handle->current->id = msg->u.finish.id;
+          objectlist_push(handle->intmaps, handle->current);
+          porthole_do_map(handle, handle->current, msg->u.finish.type);
+          handle->current = NULL;
+          break;
+
+        case PH_MSG_UNMAP:
+        {
+          // notify the application of the unmap
+          handle->unmap_cb(msg->u.unmap.id);
+
+          // remove the PortholeMap object
+          unsigned int count = objectlist_count(handle->maps);
+          for(unsigned int i = 0; i < count; ++i)
           {
-            objectlist_remove(handle->intmaps, i);
-            break;
+            PortholeMap *m = (PortholeMap *)objectlist_at(handle->maps, i);
+            if (m->id == msg->u.unmap.id)
+            {
+              objectlist_remove(handle->maps, i);
+              break;
+            }
           }
-        }
 
-        // reply to the guest to allow it to continue
-        uint32_t reply = PH_MSG_UNMAP;
-        msghdr.msg_controllen = 0;
-        io.iov_base = &reply;
-        io.iov_len  = sizeof(reply);
-        if (sendmsg(handle->socket, &msghdr, 0) < 0)
-        {
-          DEBUG_ERROR("Failed to respond to the guest");
-          handle->running = false;
-          if (handle->discon_cb)
-            handle->discon_cb();
-        }
+          // remove the internal mapping object
+          count = objectlist_count(handle->intmaps);
+          for(unsigned int i = 0; i < count; ++i)
+          {
+            Mapping *m = (Mapping *)objectlist_at(handle->intmaps, i);
+            if (m->id == msg->u.unmap.id)
+            {
+              objectlist_remove(handle->intmaps, i);
+              break;
+            }
+          }
 
-        break;
+          // reply to the guest to allow it to continue
+          uint32_t reply = PH_MSG_UNMAP;
+          msghdr.msg_controllen = 0;
+          io.iov_base = &reply;
+          io.iov_len  = sizeof(reply);
+          if (sendmsg(handle->socket, &msghdr, 0) < 0)
+          {
+            DEBUG_ERROR("Failed to respond to the guest");
+            handle->running = false;
+            if (handle->discon_cb)
+              handle->discon_cb();
+          }
+
+          break;
+        }
       }
     }
+
+    // save any remaining bytes for the next recv
+    handle->rxbuf_len -= pos;
+    memmove(handle->rxbuf, &handle->rxbuf[pos], handle->rxbuf_len);
   }
 
   handle->running = false;
