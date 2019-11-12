@@ -52,3 +52,11 @@ void porthole_copy_map_to_mem(PortholeMap * src, void * dst, size_t len, off_t o
  * @param dst_off The offset into the dst PortholeMap
  */
 void porthole_copy_map_to_map(PortholeMap * src, PortholeMap * dst, size_t len, off_t src_off, off_t dst_off);
+
+/**
+ * Get the pointer to the base of a PortholeMap
+ *
+ * @param  map The map to get the pointer for
+ * @return The base address of the mapping, or NULL if the mapping is not contiguous
+ */
+void * porthole_get_map_ptr(PortholeMap *map);

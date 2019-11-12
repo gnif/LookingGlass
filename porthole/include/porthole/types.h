@@ -24,16 +24,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef struct
 {
-  unsigned int   size;
-  void         * data;
-}
-PortholeSegment;
-
-typedef struct
-{
   uint32_t        id;
   unsigned int    size;
   unsigned int    num_segments;
-  PortholeSegment segments[0];
 }
 PortholeMap;

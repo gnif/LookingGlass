@@ -17,6 +17,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#include "types.h"
 #include "porthole/util.h"
 #include "common/debug.h"
 
@@ -28,7 +29,7 @@ void porthole_copy_mem_to_map(void * src, PortholeMap * dst, size_t len, off_t o
     DEBUG_FATAL("Attempt to write beyond the length of destination mapping");
 
   /* find the start segment */
-  PortholeSegment * seg = &dst->segments[0];
+  PortholeSegment * seg = PH_SEGMENTS(dst);
   while(off)
   {
     if (seg->size > off)
@@ -62,7 +63,7 @@ void porthole_copy_map_to_mem(PortholeMap * src, void * dst, size_t len, off_t o
     DEBUG_FATAL("Attempt to read beyond the length of the source mapping");
 
   /* find the start segment */
-  PortholeSegment * seg = &src->segments[0];
+  PortholeSegment * seg = PH_SEGMENTS(src);
   while(off)
   {
     if (seg->size > off)
@@ -99,7 +100,7 @@ void porthole_copy_map_to_map(PortholeMap * src, PortholeMap * dst, size_t len, 
     DEBUG_FATAL("Attempt to write beyond the length of the destination mapping");
 
   /* find the start segments */
-  PortholeSegment * src_seg = &src->segments[0];
+  PortholeSegment * src_seg = PH_SEGMENTS(src);
   while(src_off)
   {
     if (src_seg->size > src_off)
@@ -109,7 +110,7 @@ void porthole_copy_map_to_map(PortholeMap * src, PortholeMap * dst, size_t len, 
     ++src_seg;
   }
 
-  PortholeSegment * dst_seg = &dst->segments[0];
+  PortholeSegment * dst_seg = PH_SEGMENTS(dst);
   while(dst_off)
   {
     if (dst_seg->size > dst_off)
@@ -149,4 +150,12 @@ void porthole_copy_map_to_map(PortholeMap * src, PortholeMap * dst, size_t len, 
 
     len -= avail;
   }
+}
+
+void * porthole_get_map_ptr(PortholeMap *map)
+{
+  if (map->num_segments != 1)
+    return NULL;
+
+  return PH_SEGMENTS(map)[0].data;
 }
