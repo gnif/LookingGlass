@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/objectlist.h"
 #include "common/debug.h"
 
+#include "../types.h"
 #include "../phmsg.h"
 
 #include <assert.h>
