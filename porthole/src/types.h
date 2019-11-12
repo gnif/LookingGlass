@@ -28,4 +28,4 @@ typedef struct
 }
 PortholeSegment;
 
-#define PH_SEGMENTS(map) ((PortholeSegment *)((&map)+1))
+#define PH_SEGMENTS(map) ((PortholeSegment *)((map)+1))
