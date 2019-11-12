@@ -429,8 +429,8 @@ static void porthole_do_map(PortholeClient handle, Mapping * map, const uint32_t
   for(unsigned int i = 0; i < count; ++i)
   {
     Segment * seg = (Segment *)objectlist_at(map->segments, i);
-    m->segments[i].size = seg->size;
-    m->segments[i].data = seg->sfd->map + seg->addr;
+    PH_SEGMENTS(m)[i].size = seg->size;
+    PH_SEGMENTS(m)[i].data = seg->sfd->map + seg->addr;
   }
 
   objectlist_push(handle->maps, m);
