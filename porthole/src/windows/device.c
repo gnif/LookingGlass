@@ -28,7 +28,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct PortholeDev
 {
-  HANDLE dev;
+  HANDLE         dev;
+  bool           connected;
+  PortholeEvents events;
 };
 
 bool porthole_dev_open(PortholeDev *handle, const uint32_t vendor_id)
@@ -113,6 +115,22 @@ bool porthole_dev_open(PortholeDev *handle, const uint32_t vendor_id)
 
   (*handle)->dev = dev;
 
+  /* create the events and register them */
+  (*handle)->events.connect    = CreateEvent(NULL, FALSE, FALSE, NULL);
+  (*handle)->events.disconnect = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+  DWORD returned;
+  if (!DeviceIoControl(dev, IOCTL_PORTHOLE_REGISTER_EVENTS, &(*handle)->events, sizeof(PortholeEvents), NULL, 0, &returned, NULL))
+  {
+    DEBUG_ERROR("Failed to register the events");
+    CloseHandle((*handle)->events.connect   );
+    CloseHandle((*handle)->events.disconnect);
+    CloseHandle(dev);
+    free(*handle);
+    *handle = NULL;
+    return false;
+  }
+
   return true;
 }
 
@@ -120,9 +138,87 @@ void porthole_dev_close(PortholeDev *handle)
 {
   assert(handle && *handle);
 
+  CloseHandle((*handle)->events.connect   );
+  CloseHandle((*handle)->events.disconnect);
   CloseHandle((*handle)->dev);
   free(*handle);
   *handle = NULL;
+}
+
+static PortholeState get_state(PortholeDev handle, unsigned int timeout)
+{
+  if (handle->connected)
+  {
+    switch(WaitForSingleObject(handle->events.disconnect, timeout))
+    {
+      case WAIT_OBJECT_0:
+        handle->connected = false;
+        return PH_STATE_DISCONNECTED;
+
+      case WAIT_TIMEOUT:
+        return PH_STATE_CONNECTED;
+
+      default:
+        DEBUG_FATAL("Error waiting on disconnect event");
+        break;
+    }
+  }
+
+  switch(WaitForSingleObject(handle->events.connect, timeout))
+  {
+    case WAIT_OBJECT_0:
+      handle->connected = true;
+      return PH_STATE_NEW_SESSION;
+
+    case WAIT_TIMEOUT:
+      return PH_STATE_DISCONNECTED;
+
+    default:
+      DEBUG_FATAL("Error waiting on connection event");
+      break;
+  }
+}
+
+PortholeState porthole_dev_get_state(PortholeDev handle)
+{
+  return get_state(handle, 0);
+}
+
+bool porthole_dev_wait_state(PortholeDev handle, const PortholeState state, const unsigned int timeout)
+{
+  const DWORD to = (timeout == 0) ? INFINITE : timeout;
+  PortholeState lastState = get_state(handle, 0);
+
+  if (state == lastState)
+    return true;
+
+  while(true)
+  {
+    PortholeState nextState;
+    switch(lastState)
+    {
+      case PH_STATE_DISCONNECTED:
+        nextState = PH_STATE_NEW_SESSION;
+        break;
+
+      case PH_STATE_NEW_SESSION:
+        nextState = PH_STATE_CONNECTED;
+        break;
+
+      case PH_STATE_CONNECTED:
+        nextState = PH_STATE_DISCONNECTED;
+        break;
+    }
+
+    PortholeState newState = get_state(handle, to);
+    if (newState == lastState || newState != nextState)
+      return false;
+
+    if (newState == state)
+      return true;
+
+    lastState = newState;
+  }
 }
 
 PortholeID porthole_dev_map(PortholeDev handle, const uint32_t type, void *buffer, size_t size)
