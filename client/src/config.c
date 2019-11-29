@@ -184,6 +184,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "enableCompositorOnFocusLoss",
+    .description    = "Reenable compositor on focus loss",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
     .name           = "fpsLimit",
     .description    = "Frame rate limit (0 = disable - not recommended, -1 = auto detect)",
     .shortopt       = 'K',
@@ -404,6 +411,7 @@ bool config_load(int argc, char * argv[])
   params.mouseSens     = option_get_int   ("input", "mouseSens"   );
 
   params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
+  params.enableCompositorOnFocusLoss = option_get_bool("win", "enableCompositorOnFocusLoss");
 
   if (option_get_bool("spice", "enable"))
   {

@@ -101,25 +101,26 @@ Command line arguments will override any options loaded from the config files.
 | app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds         |
 |-------------------------------------------------------------------------------------------------------------------------|
 
-|-------------------------------------------------------------------------------------------------------------|
-| Long                    | Short | Value                  | Description                                      |
-|-------------------------------------------------------------------------------------------------------------|
-| win:title               |       | Looking Glass (client) | The window title                                 |
-| win:position            |       | center                 | Initial window position at startup               |
-| win:size                |       | 1024x768               | Initial window size at startup                   |
-| win:autoResize          | -a    | no                     | Auto resize the window to the guest              |
-| win:allowResize         | -n    | yes                    | Aallow the window to be manually resized         |
-| win:keepAspect          | -r    | yes                    | Maintain the correct aspect ratio                |
-| win:borderless          | -d    | no                     | Borderless mode                                  |
-| win:fullScreen          | -F    | no                     | Launch in fullscreen borderless mode             |
-| win:maximize            | -T    | no                     | Launch window maximized                          |
-| win:minimizeOnFocusLoss |       | yes                    | Minimize window on focus loss                    |
-| win:fpsLimit            | -K    | 200                    | Frame rate limit (0 = disable - not recommended) |
-| win:showFPS             | -k    | no                     | Enable the FPS & UPS display                     |
-| win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)             |
-| win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting            |
-| win:alerts              | -q    | yes                    | Show on screen alert messages                    |
-|-------------------------------------------------------------------------------------------------------------|
+|---------------------------------------------------------------------------------------------------------------------|
+| Long                            | Short | Value                  | Description                                      |
+|---------------------------------------------------------------------------------------------------------------------|
+| win:title                       |       | Looking Glass (client) | The window title                                 |
+| win:position                    |       | center                 | Initial window position at startup               |
+| win:size                        |       | 1024x768               | Initial window size at startup                   |
+| win:autoResize                  | -a    | no                     | Auto resize the window to the guest              |
+| win:allowResize                 | -n    | yes                    | Aallow the window to be manually resized         |
+| win:keepAspect                  | -r    | yes                    | Maintain the correct aspect ratio                |
+| win:borderless                  | -d    | no                     | Borderless mode                                  |
+| win:fullScreen                  | -F    | no                     | Launch in fullscreen borderless mode             |
+| win:maximize                    | -T    | no                     | Launch window maximized                          |
+| win:minimizeOnFocusLoss         |       | yes                    | Minimize window on focus loss                    |
+| win:enableCompositorOnFocusLoss |       | no                     | Reenable compositor on focus loss                |
+| win:fpsLimit                    | -K    | 200                    | Frame rate limit (0 = disable - not recommended) |
+| win:showFPS                     | -k    | no                     | Enable the FPS & UPS display                     |
+| win:ignoreQuit                  | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)             |
+| win:noScreensaver               | -S    | no                     | Prevent the screensaver from starting            |
+| win:alerts                      | -q    | yes                    | Show on screen alert messages                    |
+|---------------------------------------------------------------------------------------------------------------------|
 
 |---------------------------------------------------------------------------------------------------------------------------------------|
 | Long               | Short | Value           | Description                                                                            |
