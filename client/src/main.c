@@ -583,6 +583,30 @@ void spiceClipboardRequest(const SpiceDataType type)
     state.lgc->request(spice_type_to_clipboard_type(type));
 }
 
+// set the compositor hint to bypass for low latency
+void bypassCompositor(unsigned long value)
+{
+  if (state.wminfo.subsystem != SDL_SYSWM_X11)
+  {
+    return;
+  }
+  Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
+    state.wminfo.info.x11.display,
+    "_NET_WM_BYPASS_COMPOSITOR",
+    False
+  );
+  XChangeProperty(
+    state.wminfo.info.x11.display,
+    state.wminfo.info.x11.window,
+    NETWM_BYPASS_COMPOSITOR,
+    XA_CARDINAL,
+    32,
+    PropModeReplace,
+    (unsigned char *)&value,
+    1
+  );
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
   static bool serverMode   = false;
@@ -617,6 +641,14 @@ int eventFilter(void * userdata, SDL_Event * event)
         // allow a window close event to close the application even if ignoreQuit is set
         case SDL_WINDOWEVENT_CLOSE:
           state.running = false;
+          break;
+
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+          bypassCompositor(0);
+          break;
+
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+          bypassCompositor(1);
           break;
       }
       return 0;
@@ -1192,41 +1224,21 @@ static int lg_run()
 
   register_key_binds();
 
-  // set the compositor hint to bypass for low latency
-  SDL_SysWMinfo wminfo;
-  SDL_VERSION(&wminfo.version);
-  if (SDL_GetWindowWMInfo(state.window, &wminfo))
+  SDL_VERSION(&state.wminfo.version);
+  if (!SDL_GetWindowWMInfo(state.window, &state.wminfo))
   {
-    if (wminfo.subsystem == SDL_SYSWM_X11)
-    {
-      Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
-        wminfo.info.x11.display,
-        "NETWM_BYPASS_COMPOSITOR",
-        False);
-
-      unsigned long value = 1;
-      XChangeProperty(
-        wminfo.info.x11.display,
-        wminfo.info.x11.window,
-        NETWM_BYPASS_COMPOSITOR,
-        XA_CARDINAL,
-        32,
-        PropModeReplace,
-        (unsigned char *)&value,
-        1
-      );
-
-      state.lgc = LG_Clipboards[0];
-    }
-  } else {
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
     return -1;
+  }
+  if (state.wminfo.subsystem == SDL_SYSWM_X11)
+  {
+    state.lgc = LG_Clipboards[0];
   }
 
   if (state.lgc)
   {
     DEBUG_INFO("Using Clipboard: %s", state.lgc->getName());
-    if (!state.lgc->init(&wminfo, clipboardRelease, clipboardNotify, clipboardData))
+    if (!state.lgc->init(&state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
     {
       DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
       state.lgc = NULL;
