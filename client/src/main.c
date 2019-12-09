@@ -48,8 +48,13 @@ static int cursorThread(void * unused);
 static int renderThread(void * unused);
 static int frameThread (void * unused);
 
+static bool       b_startup = false;
+static SDL_mutex *m_startup;
+static SDL_cond  *c_startup;
+
 static SDL_Thread *t_spice  = NULL;
 static SDL_Thread *t_render = NULL;
+static SDL_Thread *t_cursor = NULL;
 static SDL_Cursor *cursor   = NULL;
 
 struct AppState state;
@@ -101,16 +106,21 @@ static int renderThread(void * unused)
   if (!state.lgr->render_startup(state.lgrData, state.window))
   {
     state.running = false;
+
+    /* unblock threads waiting on the condition */
+    SDL_LockMutex(m_startup);
+    b_startup = true;
+    SDL_CondSignal(c_startup);
+    SDL_UnlockMutex(m_startup);
+
     return 1;
   }
 
-  // start the cursor thread after render startup to prevent a race condition
-  SDL_Thread *t_cursor = NULL;
-  if (!(t_cursor = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
-  {
-    DEBUG_ERROR("cursor create thread failed");
-    return 1;
-  }
+  /* signal to other threads that the renderer is ready */
+  SDL_LockMutex(m_startup);
+  b_startup = true;
+  SDL_CondSignal(c_startup);
+  SDL_UnlockMutex(m_startup);
 
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
@@ -178,6 +188,11 @@ static int cursorThread(void * unused)
   uint32_t            version        = 0;
 
   memset(&header, 0, sizeof(KVMFRCursor));
+
+  SDL_LockMutex(m_startup);
+  while(!b_startup)
+    SDL_CondWait(c_startup, m_startup);
+  SDL_UnlockMutex(m_startup);
 
   while(state.running)
   {
@@ -291,6 +306,11 @@ static int frameThread(void * unused)
 
   memset(&header, 0, sizeof(struct KVMFRFrame));
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
+
+  SDL_LockMutex(m_startup);
+  while(!b_startup)
+    SDL_CondWait(c_startup, m_startup);
+  SDL_UnlockMutex(m_startup);
 
   while(state.running)
   {
@@ -1244,6 +1264,11 @@ static int lg_run()
     SDL_ShowCursor(SDL_DISABLE);
   }
 
+  // setup the startup condition
+  b_startup = false;
+  m_startup = SDL_CreateMutex();
+  c_startup = SDL_CreateCond();
+
   // start the renderThread so we don't just display junk
   if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
   {
@@ -1281,6 +1306,12 @@ static int lg_run()
     DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.shm->version);
     DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
     return -1;
+  }
+
+  if (!(t_cursor = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
+  {
+    DEBUG_ERROR("cursor create thread failed");
+    return 1;
   }
 
   if (!(state.t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
@@ -1326,6 +1357,12 @@ static void lg_shutdown()
 
   if (t_render)
     SDL_WaitThread(t_render, NULL);
+
+  if (m_startup)
+  {
+    SDL_DestroyCond (c_startup);
+    SDL_DestroyMutex(m_startup);
+  }
 
   // if spice is still connected send key up events for any pressed keys
   if (params.useSpiceInput && spice_ready())
