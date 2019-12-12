@@ -1257,7 +1257,7 @@ static bool draw_frame(struct Inst * this)
   framebuffer_read_fn(
     this->frame,
     opengl_buffer_fn,
-    this->format.height * this->format.stride,
+    this->format.height * this->format.stride * 4,
     this
   );
 
