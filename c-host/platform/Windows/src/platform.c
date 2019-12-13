@@ -24,6 +24,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 #include <setupapi.h>
 #include <shellapi.h>
+#include <fcntl.h>
+#include <io.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -157,6 +159,21 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+  /* this is a bit of a hack but without this --help will produce no output in a windows command prompt */
+  if (AttachConsole(ATTACH_PARENT_PROCESS))
+  {
+    HANDLE std_err = GetStdHandle(STD_ERROR_HANDLE);
+    HANDLE std_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    int std_err_fd = _open_osfhandle((intptr_t)std_err, _O_TEXT);
+    int std_out_fd = _open_osfhandle((intptr_t)std_out, _O_TEXT);
+
+    if (std_err_fd > 0)
+      *stderr = *_fdopen(std_err_fd, "w");
+
+    if  (std_out_fd > 0)
+      *stdout = *_fdopen(std_out_fd, "w");
+  }
+
   int result = 0;
   app.hInst = hInstance;
 
