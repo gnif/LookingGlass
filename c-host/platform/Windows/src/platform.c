@@ -160,7 +160,7 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
   /* this is a bit of a hack but without this --help will produce no output in a windows command prompt */
-  if (AttachConsole(ATTACH_PARENT_PROCESS))
+  if (!IsDebuggerPresent() && AttachConsole(ATTACH_PARENT_PROCESS))
   {
     HANDLE std_err = GetStdHandle(STD_ERROR_HANDLE);
     HANDLE std_out = GetStdHandle(STD_OUTPUT_HANDLE);
