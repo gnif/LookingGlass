@@ -30,6 +30,16 @@ It does now...
 
 #### For Windows on Windows
 
+First setup the build environment:
+
+1. get and install: https://osdn.net/projects/mingw/downloads/68260/mingw-get-setup.exe/
+2. select: mingw32-base-bin, mingw32-gcc-g++-bin, msys-base-bin
+3. add "C:\MinGW\msys\1.0\bin" and "C:\MinGW\bin" to the system path
+4. obtain and install CMake for windows
+5. obtain and install GitBash for windows
+
+Using GitBash checkout the project and use the following commands to compile
+
 ```
 mkdir build
 cd build
