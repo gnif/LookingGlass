@@ -69,6 +69,10 @@ struct osThreadHandle
   int                resultCode;
 };
 
+// undocumented API to adjust the system timer resolution (yes, its a nasty hack)
+typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, BOOLEAN Set, PULONG ActualResolution);
+static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
+
 LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
   switch(msg)
@@ -306,6 +310,15 @@ bool app_init()
 
   // always flush stderr
   setbuf(stderr, NULL);
+
+  // Increase the timer resolution
+  ZwSetTimerResolution = (ZwSetTimerResolution_t)GetProcAddress(GetModuleHandle("ntdll.dll"), "ZwSetTimerResolution");
+  if (ZwSetTimerResolution)
+  {
+    ULONG actualResolution;
+    ZwSetTimerResolution(1, true, &actualResolution);
+    DEBUG_INFO("System timer resolution: %.2f ns", (float)actualResolution / 100.0f);
+  }
 
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;

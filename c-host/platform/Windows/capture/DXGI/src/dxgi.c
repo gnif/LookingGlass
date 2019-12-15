@@ -21,7 +21,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/locking.h"
 #include "windows/debug.h"
+#include "windows/platform.h"
 
 #include <assert.h>
 #include <dxgi.h>
@@ -43,7 +45,7 @@ typedef struct Texture
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
   osEventHandle            * mapped;
-  osEventHandle            * free;
+  volatile int               free;
 }
 Texture;
 
@@ -63,6 +65,8 @@ Pointer;
 struct iface
 {
   bool                       initialized;
+  LARGE_INTEGER              perfFreq;
+  LARGE_INTEGER              frameTime;
   bool                       stop;
   IDXGIFactory1            * factory;
   IDXGIAdapter1            * adapter;
@@ -73,7 +77,8 @@ struct iface
   IDXGIOutputDuplication   * dup;
   int                        maxTextures;
   Texture                  * texture;
-  int                        texRIndex;
+  int                        texPending;
+  volatile int               texRIndex;
   int                        texWIndex;
   bool                       needsRelease;
   osEventHandle            * pointerEvent;
@@ -193,9 +198,10 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->pointerSize  = pointerSize;
   this->pointerUsed  = 0;
 
-  this->stop      = false;
-  this->texRIndex = 0;
-  this->texWIndex = 0;
+  this->stop       = false;
+  this->texPending = 0;
+  this->texRIndex  = 0;
+  this->texWIndex  = 0;
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -342,6 +348,20 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
     IDXGIDevice_Release(dxgi);
   }
 
+  // try to reduce the latency
+  {
+    IDXGIDevice1 * dxgi;
+    status = ID3D11Device_QueryInterface(this->device, &IID_IDXGIDevice1, (void **)&dxgi);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("failed to query DXGI interface from device", status);
+      goto fail;
+    }
+
+    IDXGIDevice1_SetMaximumFrameLatency(dxgi, 1);
+    IDXGIDevice1_Release(dxgi);
+  }
+
   IDXGIOutput5 * output5 = NULL;
   status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput5, (void **)&output5);
   if (FAILED(status))
@@ -450,16 +470,7 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
       goto fail;
     }
 
-    this->texture[i].free = os_createEvent(true);
-    if (!this->texture[i].free)
-    {
-      DEBUG_ERROR("Failed to create the texture free event");
-      goto fail;
-    }
-
-    // pre-signal the free events to flag as unused
-    os_signalEvent(this->texture[i].free);
-
+    this->texture[i].free   = 1;
     this->texture[i].mapped = os_createEvent(false);
     if (!this->texture[i].mapped)
     {
@@ -480,6 +491,8 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->stride = mapping.RowPitch / 4;
   ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0);
 
+  QueryPerformanceFrequency(&this->perfFreq) ;
+  QueryPerformanceCounter  (&this->frameTime);
   this->initialized = true;
   return true;
 
@@ -514,13 +527,6 @@ static bool dxgi_deinit()
     {
       ID3D11Texture2D_Release(this->texture[i].tex);
       this->texture[i].tex = NULL;
-    }
-
-    if (this->texture[i].free)
-    {
-      os_signalEvent(this->texture[i].free);
-      os_freeEvent(this->texture[i].free);
-      this->texture[i].free = NULL;
     }
 
     if (this->texture[i].mapped)
@@ -605,35 +611,59 @@ static CaptureResult dxgi_capture()
   assert(this);
   assert(this->initialized);
 
+  LARGE_INTEGER             now;
+  uint64_t                  diffNs;
+  Texture                 * tex;
   CaptureResult             result;
   HRESULT                   status;
   DXGI_OUTDUPL_FRAME_INFO   frameInfo;
   IDXGIResource           * res;
 
-  // if the read texture is pending a mapping
-  for(int i = 0; i < this->maxTextures; ++i)
+  // try to map the current texture if it's pending still
+  while(true)
   {
-    if (this->texture[i].state != TEXTURE_STATE_PENDING_MAP)
-      continue;
-
-    Texture * tex = &this->texture[i];
-
-    // try to map the resource, but don't wait for it
-    status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0x100000L, &tex->map);
-
-    if (status != DXGI_ERROR_WAS_STILL_DRAWING)
+    int index = INTERLOCKED_GET(&this->texRIndex);
+    for(int i = 0; i < this->maxTextures && this->texPending > 0; ++i)
     {
-      if (FAILED(status))
+      tex = &this->texture[index];
+
+      if (tex->state == TEXTURE_STATE_PENDING_MAP)
       {
-        DEBUG_WINERROR("Failed to map the texture", status);
-        IDXGIResource_Release(res);
-        return CAPTURE_RESULT_ERROR;
+        // try to map the resource, but don't wait for it
+        status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0x100000L, &tex->map);
+        if (status != DXGI_ERROR_WAS_STILL_DRAWING)
+        {
+          if (FAILED(status))
+          {
+            DEBUG_WINERROR("Failed to map the texture", status);
+            IDXGIResource_Release(res);
+            return CAPTURE_RESULT_ERROR;
+          }
+
+          // successful map, set the state and signal that there is a frame available
+          tex->state = TEXTURE_STATE_MAPPED;
+          os_signalEvent(tex->mapped);
+          --this->texPending;
+        }
+
+        // only try to map one texture per delay loop
+        break;
       }
 
-      // successful map, set the state and signal that there is a frame available
-      tex->state = TEXTURE_STATE_MAPPED;
-      os_signalEvent(tex->mapped);
+      if (++index == this->maxTextures)
+        index = 0;
     }
+
+    /* spend a minimum of 4ms since the last capture to reduce GPU load with an early release */
+    QueryPerformanceCounter(&now);
+    diffNs = ((now.QuadPart - this->frameTime.QuadPart) * 1000000) / this->perfFreq.QuadPart;
+    if (diffNs < 4000)
+    {
+      Sleep(1);
+      continue;
+    }
+
+    break;
   }
 
   // release the prior frame
@@ -641,7 +671,7 @@ static CaptureResult dxgi_capture()
   if (result != CAPTURE_RESULT_OK)
     return result;
 
-  status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1, &frameInfo, &res);
+  status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 0, &frameInfo, &res);
   switch(status)
   {
     case S_OK:
@@ -649,6 +679,8 @@ static CaptureResult dxgi_capture()
       break;
 
     case DXGI_ERROR_WAIT_TIMEOUT:
+      // we sleep instead of letting dxgi do it as it's resolution sucks
+      Sleep(1);
       return CAPTURE_RESULT_TIMEOUT;
 
     case WAIT_ABANDONED:
@@ -662,19 +694,10 @@ static CaptureResult dxgi_capture()
 
   if (frameInfo.LastPresentTime.QuadPart != 0)
   {
-    Texture * tex = &this->texture[this->texWIndex];
+    tex = &this->texture[this->texWIndex];
 
     // check if the texture is free, if not skip the frame to keep up
-    if (!os_waitEvent(tex->free, 0))
-    {
-      /*
-      NOTE: This is only informational for when debugging, skipping frames is
-      OK as we are likely getting frames faster then the client can render
-      them (ie, vsync off in a title)
-      */
-      //DEBUG_WARN("Frame skipped");
-    }
-    else
+    if (INTERLOCKED_GET(&tex->free))
     {
       ID3D11Texture2D * src;
       status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D, (void **)&src);
@@ -685,24 +708,26 @@ static CaptureResult dxgi_capture()
         return CAPTURE_RESULT_ERROR;
       }
 
-      // if the texture was mapped, unmap it
+      // unmap the texture if it is still mapped
       if (tex->state == TEXTURE_STATE_MAPPED)
-      {
         ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);
-        tex->map.pData = NULL;
-      }
 
       // issue the copy from GPU to CPU RAM and release the src
       ID3D11DeviceContext_CopyResource(this->deviceContext,
         (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
       ID3D11Texture2D_Release(src);
 
-      // pending map
+      // set the state
+      INTERLOCKED_DEC(&tex->free);
       tex->state = TEXTURE_STATE_PENDING_MAP;
+      ++this->texPending;
 
       // advance our write pointer
       if (++this->texWIndex == this->maxTextures)
         this->texWIndex = 0;
+
+      // update the last frame time
+      this->frameTime.QuadPart = frameInfo.LastPresentTime.QuadPart;
     }
   }
 
@@ -771,7 +796,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   assert(this);
   assert(this->initialized);
 
-  Texture * tex = &this->texture[this->texRIndex];
+  Texture * tex = &this->texture[INTERLOCKED_GET(&this->texRIndex)];
   if (!os_waitEvent(tex->mapped, 1000))
     return CAPTURE_RESULT_TIMEOUT;
 
@@ -794,12 +819,12 @@ static CaptureResult dxgi_getFrame(FrameBuffer frame)
   assert(this);
   assert(this->initialized);
 
-  Texture * tex = &this->texture[this->texRIndex];
+  Texture * tex = &this->texture[INTERLOCKED_GET(&this->texRIndex)];
   framebuffer_write(frame, tex->map.pData, this->pitch * this->height);
-  os_signalEvent(tex->free);
 
-  if (++this->texRIndex == this->maxTextures)
-    this->texRIndex = 0;
+  INTERLOCKED_INC(&tex->free);
+  INTERLOCKED_INC(&this->texRIndex);
+  INTERLOCKED_CE (&this->texRIndex, this->maxTextures, 0);
 
   return CAPTURE_RESULT_OK;
 }
