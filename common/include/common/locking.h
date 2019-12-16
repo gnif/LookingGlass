@@ -29,7 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define INTERLOCKED_SECTION(lock, x) \
   while(__sync_lock_test_and_set(&(lock), 1)) while((lock)); \
   x\
-  __sync_lock_release(&this->deviceContextLock);
+  __sync_lock_release(&(lock));
 
 #else
 #define INTERLOCKED_OR8         InterlockedOr8
