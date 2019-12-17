@@ -1286,7 +1286,7 @@ bool spice_read_nl(const struct SpiceChannel * channel, void * buffer, const ssi
   if (!channel->connected)
   {
     DEBUG_ERROR("not connected");
-    return -1;
+    return false;
   }
 
   if (!buffer)
