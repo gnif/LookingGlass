@@ -135,7 +135,7 @@ static bool nvfbc_create()
   }
   free(privData);
 
-  this->frameEvent = os_createEvent(true);
+  this->frameEvent = os_createEvent(true, 17);
   if (!this->frameEvent)
   {
     DEBUG_ERROR("failed to create the frame event");
