@@ -174,7 +174,7 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
     return false;
   }
 
-  this->cursorEvents[0] = os_createEvent(true);
+  this->cursorEvents[0] = os_createEvent(true, 10);
   mouseHook_install(on_mouseMove);
 
   if (this->seperateCursor)
