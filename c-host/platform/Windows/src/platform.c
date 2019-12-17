@@ -30,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/locking.h"
 #include "windows/debug.h"
 #include "ivshmem.h"
 
@@ -72,6 +73,7 @@ struct osThreadHandle
 
 struct osEventHandle
 {
+  volatile int  lock;
   bool          reset;
   HANDLE        handle;
   bool          wrapped;
@@ -510,10 +512,13 @@ osEventHandle * os_createEvent(bool autoReset, unsigned int msSpinTime)
     return NULL;
   }
 
+  event->lock       = 0;
   event->reset      = autoReset;
+  event->handle     = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
   event->wrapped    = false;
   event->msSpinTime = msSpinTime;
-  event->handle     = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
+  event->signaled   = false;
+
   if (!event->handle)
   {
     DEBUG_WINERROR("Failed to create the event", GetLastError());
@@ -533,10 +538,12 @@ osEventHandle * os_wrapEvent(HANDLE handle)
     return NULL;
   }
 
+  event->lock       = 0;
   event->reset      = false;
   event->handle     = event;
   event->wrapped    = true;
   event->msSpinTime = 0;
+  event->signaled   = false;
   return event;
 }
 
@@ -551,10 +558,19 @@ bool os_waitEvent(osEventHandle * event, unsigned int timeout)
   if (!event->wrapped)
   {
     if (event->signaled)
+    {
+      if (event->reset)
+        event->signaled = false;
       return true;
+    }
 
     if (timeout == 0)
-      return event->signaled;
+    {
+      bool ret = event->signaled;
+      if (event->reset)
+        event->signaled = false;
+      return ret;
+    }
 
     if (event->msSpinTime)
     {
@@ -581,7 +597,11 @@ bool os_waitEvent(osEventHandle * event, unsigned int timeout)
       }
 
       if (event->signaled)
+      {
+        if (event->reset)
+          event->signaled = false;
         return true;
+      }
     }
   }
 

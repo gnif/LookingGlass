@@ -46,7 +46,6 @@ typedef struct Texture
   enum TextureState          state;
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
-  osEventHandle            * readyEvent;
 }
 Texture;
 
@@ -80,10 +79,12 @@ struct iface
   IDXGIOutputDuplication   * dup;
   int                        maxTextures;
   Texture                  * texture;
-  volatile int               texRIndex;
+  int                        texRIndex;
   int                        texWIndex;
+  volatile int               texReady;
   bool                       needsRelease;
   osEventHandle            * pointerEvent;
+  osEventHandle            * frameEvent;
 
   unsigned int  width;
   unsigned int  height;
@@ -172,27 +173,20 @@ static bool dxgi_create()
     return false;
   }
 
+  this->frameEvent = os_createEvent(true, 17); // 60Hz = 16.7ms
+  if (!this->frameEvent)
+  {
+    DEBUG_ERROR("failed to create the frame event");
+    free(this);
+    return false;
+  }
+
   this->maxTextures = option_get_int("dxgi", "maxTextures");
   if (this->maxTextures <= 0)
     this->maxTextures = 1;
 
-  this->texture = calloc(sizeof(struct Texture), this->maxTextures);
-  for(int i = 0; i < this->maxTextures; ++i)
-  {
-    this->texture[i].readyEvent = os_createEvent(false, 30);
-    if (!this->texture[i].readyEvent)
-    {
-      DEBUG_ERROR("failed to create the texture event");
-
-      for(int x = 0; x < i; ++x)
-        os_freeEvent(this->texture[x].readyEvent);
-
-      free(this->texture);
-      free(this);
-    }
-  }
-
   this->useAcquireLock = option_get_bool("dxgi", "useAcquireLock");
+  this->texture        = calloc(sizeof(struct Texture), this->maxTextures);
   return true;
 }
 
@@ -226,6 +220,7 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->stop       = false;
   this->texRIndex  = 0;
   this->texWIndex  = 0;
+  this->texReady   = 0;
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -682,11 +677,12 @@ static CaptureResult dxgi_capture()
 
       ID3D11Texture2D_Release(src);
 
-      // set the state and signal
+      // set the state, and signal
       tex->state = TEXTURE_STATE_PENDING_MAP;
-      os_signalEvent(tex->readyEvent);
+      INTERLOCKED_INC(&this->texReady);
+      os_signalEvent(this->frameEvent);
 
-      // advance our write pointer
+      // advance the write index
       if (++this->texWIndex == this->maxTextures)
         this->texWIndex = 0;
 
@@ -760,9 +756,17 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   assert(this);
   assert(this->initialized);
 
-  Texture * tex = &this->texture[INTERLOCKED_GET(&this->texRIndex)];
-  if (!os_waitEvent(tex->readyEvent, 1000))
-    return CAPTURE_RESULT_TIMEOUT;
+  // NOTE: the event may be signaled when there are no frames available
+  if(this->texReady == 0)
+  {
+    if (!os_waitEvent(this->frameEvent, 1000))
+      return CAPTURE_RESULT_TIMEOUT;
+
+    if (this->texReady == 0)
+      return CAPTURE_RESULT_TIMEOUT;
+  }
+
+  Texture * tex = &this->texture[this->texRIndex];
 
   // try to map the resource, but don't wait for it
   HRESULT status;
@@ -784,7 +788,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   frame->stride = this->stride;
   frame->format = this->format;
 
-  os_resetEvent(tex->readyEvent);
+  INTERLOCKED_DEC(&this->texReady);
   return CAPTURE_RESULT_OK;
 }
 
@@ -793,14 +797,14 @@ static CaptureResult dxgi_getFrame(FrameBuffer frame)
   assert(this);
   assert(this->initialized);
 
-  Texture * tex = &this->texture[INTERLOCKED_GET(&this->texRIndex)];
+  Texture * tex = &this->texture[this->texRIndex];
 
   framebuffer_write(frame, tex->map.pData, this->pitch * this->height);
   LOCKED({ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);});
   tex->state = TEXTURE_STATE_UNUSED;
 
-  INTERLOCKED_INC(&this->texRIndex);
-  INTERLOCKED_CE (&this->texRIndex, this->maxTextures, 0);
+  if (++this->texRIndex == this->maxTextures)
+    this->texRIndex = 0;
 
   return CAPTURE_RESULT_OK;
 }
