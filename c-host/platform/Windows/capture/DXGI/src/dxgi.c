@@ -75,6 +75,7 @@ struct iface
   ID3D11Device             * device;
   ID3D11DeviceContext      * deviceContext;
   volatile int               deviceContextLock;
+  bool                       useAcquireLock;
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication   * dup;
   int                        maxTextures;
@@ -141,6 +142,13 @@ static void dxgi_initOptions()
       .type           = OPTION_TYPE_INT,
       .value.x_int    = 3
     },
+    {
+      .module         = "dxgi",
+      .name           = "useAcquireLock",
+      .description    = "Enable locking around `AcquireFrame` (use if freezing, may lower performance)",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
+    },
     {0}
   };
 
@@ -170,6 +178,8 @@ static bool dxgi_create()
     this->maxTextures = 1;
 
   this->texture = calloc(sizeof(struct Texture), this->maxTextures);
+
+  this->useAcquireLock = option_get_bool("dxgi", "useAcquireLock");
   return true;
 }
 
@@ -336,6 +346,7 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   DEBUG_INFO("Shared Sys Mem   : %u MiB" , (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
   DEBUG_INFO("Feature Level    : 0x%x"   , this->featureLevel);
   DEBUG_INFO("Capture Size     : %u x %u", this->width, this->height);
+  DEBUG_INFO("AcquireLock      : %s"     , this->useAcquireLock ? "enabled" : "disabled");
 
   // bump up our priority
   {
@@ -610,7 +621,15 @@ static CaptureResult dxgi_capture()
   if (result != CAPTURE_RESULT_OK)
     return result;
 
-  status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1000, &frameInfo, &res);
+  if (this->useAcquireLock)
+  {
+    LOCKED({
+        status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1, &frameInfo, &res);
+    });
+  }
+  else
+    status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1000, &frameInfo, &res);
+
   switch(status)
   {
     case S_OK:
