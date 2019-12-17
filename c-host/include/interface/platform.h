@@ -46,7 +46,7 @@ bool         os_joinThread  (osThreadHandle * handle, int * resultCode);
 
 typedef struct osEventHandle osEventHandle;
 
-osEventHandle * os_createEvent(bool autoReset);
+osEventHandle * os_createEvent(bool autoReset, unsigned int msSpinTime);
 void            os_freeEvent  (osEventHandle * handle);
 bool            os_waitEvent  (osEventHandle * handle, unsigned int timeout);
 bool            os_waitEvents (osEventHandle * handles[], int count, bool waitAll, unsigned int timeout);
