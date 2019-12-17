@@ -86,7 +86,6 @@ struct AppParams
   bool         fullscreen;
   bool         maximize;
   bool         minimizeOnFocusLoss;
-  bool         enableCompositorOnFocusLoss;
   bool         center;
   int          x, y;
   unsigned int w, h;
@@ -116,6 +115,8 @@ struct AppParams
 
   const char * windowTitle;
   int          mouseSens;
+
+  LG_AllowCompositor allowCompositor;
 };
 
 struct CBRequest

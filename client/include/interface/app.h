@@ -30,6 +30,14 @@ typedef enum LG_MsgAlert
 }
 LG_MsgAlert;
 
+typedef enum LG_AllowCompositor
+{
+  LG_ALLOW_COMPOSITOR_NO = 0,
+  LG_ALLOW_COMPOSITOR_YES,
+  LG_ALLOW_COMPOSITOR_ON_FOCUS_LOST
+}
+LG_AllowCompositor;
+
 typedef struct KeybindHandle * KeybindHandle;
 typedef void (*SuperEventFn)(SDL_Scancode key, void * opaque);
 

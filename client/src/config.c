@@ -184,10 +184,10 @@ static struct Option options[] =
   },
   {
     .module         = "win",
-    .name           = "enableCompositorOnFocusLoss",
-    .description    = "Reenable compositor on focus loss",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = false,
+    .name           = "allowCompositor",
+    .description    = "Allow compositor (0 = no, 1 = yes, 2 = only when focus is lost)",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 0,
   },
   {
     .module         = "win",
@@ -411,7 +411,7 @@ bool config_load(int argc, char * argv[])
   params.mouseSens     = option_get_int   ("input", "mouseSens"   );
 
   params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
-  params.enableCompositorOnFocusLoss = option_get_bool("win", "enableCompositorOnFocusLoss");
+  params.allowCompositor = (LG_AllowCompositor)option_get_int("win", "allowCompositor");
 
   if (option_get_bool("spice", "enable"))
   {

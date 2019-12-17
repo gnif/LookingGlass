@@ -584,12 +584,11 @@ void spiceClipboardRequest(const SpiceDataType type)
 }
 
 // set the compositor hint to bypass for low latency
-void bypassCompositor(unsigned long value)
+static void bypassCompositor(unsigned long value)
 {
   if (state.wminfo.subsystem != SDL_SYSWM_X11)
-  {
     return;
-  }
+
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
     state.wminfo.info.x11.display,
     "_NET_WM_BYPASS_COMPOSITOR",
@@ -644,14 +643,13 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         case SDL_WINDOWEVENT_FOCUS_LOST:
-          if (params.enableCompositorOnFocusLoss)
-          {
+          if (params.allowCompositor == LG_ALLOW_COMPOSITOR_ON_FOCUS_LOST)
             bypassCompositor(0);
-          }
           break;
 
         case SDL_WINDOWEVENT_FOCUS_GAINED:
-          bypassCompositor(1);
+          if (params.allowCompositor == LG_ALLOW_COMPOSITOR_ON_FOCUS_LOST)
+            bypassCompositor(1);
           break;
       }
       return 0;
@@ -1233,10 +1231,9 @@ static int lg_run()
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
     return -1;
   }
+
   if (state.wminfo.subsystem == SDL_SYSWM_X11)
-  {
     state.lgc = LG_Clipboards[0];
-  }
 
   if (state.lgc)
   {
@@ -1281,6 +1278,13 @@ static int lg_run()
 
   if (!state.running)
     return -1;
+
+  // setting _NET_WM_BYPASS_COMPOSITOR (see bypassCompositor) is only working
+  // after SDL_WaitEventTimeout
+  if (params.allowCompositor == LG_ALLOW_COMPOSITOR_YES)
+    bypassCompositor(0);
+  else if (params.allowCompositor == LG_ALLOW_COMPOSITOR_NO)
+    bypassCompositor(1);
 
   DEBUG_INFO("Host ready, starting session");
 
