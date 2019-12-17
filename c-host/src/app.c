@@ -162,6 +162,7 @@ static int frameThread(void * opaque)
   volatile KVMFRFrame * fi = &(app.shmHeader->frame);
 
   bool         frameValid     = false;
+  bool         repeatFrame    = false;
   int          frameIndex     = 0;
   unsigned int clientInstance = 0;
   CaptureFrame frame          = { 0 };
@@ -171,6 +172,7 @@ static int frameThread(void * opaque)
     switch(app.iface->waitFrame(&frame))
     {
       case CAPTURE_RESULT_OK:
+        repeatFrame = false;
         break;
 
       case CAPTURE_RESULT_REINIT:
@@ -191,8 +193,7 @@ static int frameThread(void * opaque)
         if (frameValid && clientInstance != app.clientInstance)
         {
           // resend the last frame
-          if (--frameIndex < 0)
-            frameIndex = MAX_FRAMES - 1;
+          repeatFrame = true;
           break;
         }
 
@@ -206,27 +207,32 @@ static int frameThread(void * opaque)
     while(fi->flags & KVMFR_FRAME_FLAG_UPDATE && app.running)
       usleep(1000);
 
-    switch(frame.format)
+    if (repeatFrame)
+      INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
+    else
     {
-      case CAPTURE_FMT_BGRA  : fi->type = FRAME_TYPE_BGRA  ; break;
-      case CAPTURE_FMT_RGBA  : fi->type = FRAME_TYPE_RGBA  ; break;
-      case CAPTURE_FMT_RGBA10: fi->type = FRAME_TYPE_RGBA10; break;
-      case CAPTURE_FMT_YUV420: fi->type = FRAME_TYPE_YUV420; break;
-      default:
-        DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
-        continue;
+      switch(frame.format)
+      {
+        case CAPTURE_FMT_BGRA  : fi->type = FRAME_TYPE_BGRA  ; break;
+        case CAPTURE_FMT_RGBA  : fi->type = FRAME_TYPE_RGBA  ; break;
+        case CAPTURE_FMT_RGBA10: fi->type = FRAME_TYPE_RGBA10; break;
+        case CAPTURE_FMT_YUV420: fi->type = FRAME_TYPE_YUV420; break;
+        default:
+          DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
+          continue;
+      }
+
+      fi->width   = frame.width;
+      fi->height  = frame.height;
+      fi->stride  = frame.stride;
+      fi->pitch   = frame.pitch;
+      fi->dataPos = app.frameOffset[frameIndex];
+      frameValid  = true;
+
+      framebuffer_prepare(app.frame[frameIndex]);
+      INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
+      app.iface->getFrame(app.frame[frameIndex]);
     }
-
-    fi->width   = frame.width;
-    fi->height  = frame.height;
-    fi->stride  = frame.stride;
-    fi->pitch   = frame.pitch;
-    fi->dataPos = app.frameOffset[frameIndex];
-    frameValid  = true;
-
-    framebuffer_prepare(app.frame[frameIndex]);
-    INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
-    app.iface->getFrame(app.frame[frameIndex]);
 
     if (++frameIndex == MAX_FRAMES)
       frameIndex = 0;

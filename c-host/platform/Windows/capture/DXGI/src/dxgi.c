@@ -222,6 +222,9 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->texWIndex  = 0;
   this->texReady   = 0;
 
+  os_resetEvent(this->frameEvent  );
+  os_resetEvent(this->pointerEvent);
+
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
   {
