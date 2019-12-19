@@ -540,7 +540,7 @@ osEventHandle * os_wrapEvent(HANDLE handle)
 
   event->lock       = 0;
   event->reset      = false;
-  event->handle     = event;
+  event->handle     = handle;
   event->wrapped    = true;
   event->msSpinTime = 0;
   event->signaled   = false;
