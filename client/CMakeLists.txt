@@ -70,6 +70,7 @@ include_directories(
 link_libraries(
 	${PKGCONFIG_LIBRARIES}
 	${GMP_LIBRARIES}
+	${CMAKE_DL_LIBS}
 	rt
 	m
 )
