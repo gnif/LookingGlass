@@ -40,6 +40,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/KVMFR.h"
 #include "common/stringutils.h"
 #include "common/thread.h"
+#include "common/event.h"
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
@@ -49,15 +50,12 @@ static int cursorThread(void * unused);
 static int renderThread(void * unused);
 static int frameThread (void * unused);
 
-static bool       b_startup = false;
-static SDL_mutex *m_startup;
-static SDL_cond  *c_startup;
-
-static LGThread *t_spice  = NULL;
-static LGThread *t_render = NULL;
-static LGThread *t_cursor = NULL;
-static LGThread *t_frame  = NULL;
-static SDL_Cursor *cursor = NULL;
+static LGEvent  *e_startup = NULL;
+static LGThread *t_spice   = NULL;
+static LGThread *t_render  = NULL;
+static LGThread *t_cursor  = NULL;
+static LGThread *t_frame   = NULL;
+static SDL_Cursor *cursor  = NULL;
 
 struct AppState state;
 
@@ -110,19 +108,12 @@ static int renderThread(void * unused)
     state.running = false;
 
     /* unblock threads waiting on the condition */
-    SDL_LockMutex(m_startup);
-    b_startup = true;
-    SDL_CondSignal(c_startup);
-    SDL_UnlockMutex(m_startup);
-
+    lgSignalEvent(e_startup);
     return 1;
   }
 
   /* signal to other threads that the renderer is ready */
-  SDL_LockMutex(m_startup);
-  b_startup = true;
-  SDL_CondSignal(c_startup);
-  SDL_UnlockMutex(m_startup);
+  lgSignalEvent(e_startup);
 
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
@@ -191,11 +182,7 @@ static int cursorThread(void * unused)
 
   memset(&header, 0, sizeof(KVMFRCursor));
 
-  SDL_LockMutex(m_startup);
-  while(!b_startup)
-    SDL_CondWait(c_startup, m_startup);
-  SDL_UnlockMutex(m_startup);
-
+  lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   while(state.running)
   {
     // poll until we have cursor data
@@ -309,11 +296,7 @@ static int frameThread(void * unused)
   memset(&header, 0, sizeof(struct KVMFRFrame));
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
-  SDL_LockMutex(m_startup);
-  while(!b_startup)
-    SDL_CondWait(c_startup, m_startup);
-  SDL_UnlockMutex(m_startup);
-
+  lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   while(state.running)
   {
     // poll until we have a new frame
@@ -1268,9 +1251,11 @@ static int lg_run()
   }
 
   // setup the startup condition
-  b_startup = false;
-  m_startup = SDL_CreateMutex();
-  c_startup = SDL_CreateCond();
+  if (!(e_startup = lgCreateEvent(false, 0)))
+  {
+    DEBUG_ERROR("failed to create the startup event");
+    return -1;
+  }
 
   // start the renderThread so we don't just display junk
   if (!lgCreateThread("renderThread", renderThread, NULL, &t_render))
@@ -1361,10 +1346,10 @@ static void lg_shutdown()
   if (t_render)
     lgJoinThread(t_render, NULL);
 
-  if (m_startup)
+  if (e_startup)
   {
-    SDL_DestroyCond (c_startup);
-    SDL_DestroyMutex(m_startup);
+    lgFreeEvent(e_startup);
+    e_startup = NULL;
   }
 
   // if spice is still connected send key up events for any pressed keys
