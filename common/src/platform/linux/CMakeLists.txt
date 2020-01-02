@@ -15,3 +15,5 @@ add_library(lg_common_platform_code STATIC
 if(ENABLE_BACKTRACE)
   target_link_libraries(lg_common_platform_code bfd)
 endif()
+
+target_link_libraries(lg_common_platform_code pthread)

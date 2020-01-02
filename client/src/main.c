@@ -39,6 +39,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/crash.h"
 #include "common/KVMFR.h"
 #include "common/stringutils.h"
+#include "common/thread.h"
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
@@ -52,10 +53,11 @@ static bool       b_startup = false;
 static SDL_mutex *m_startup;
 static SDL_cond  *c_startup;
 
-static SDL_Thread *t_spice  = NULL;
-static SDL_Thread *t_render = NULL;
-static SDL_Thread *t_cursor = NULL;
-static SDL_Cursor *cursor   = NULL;
+static LGThread *t_spice  = NULL;
+static LGThread *t_render = NULL;
+static LGThread *t_cursor = NULL;
+static LGThread *t_frame  = NULL;
+static SDL_Cursor *cursor = NULL;
 
 struct AppState state;
 
@@ -171,10 +173,10 @@ static int renderThread(void * unused)
   state.running = false;
 
   if (t_cursor)
-    SDL_WaitThread(t_cursor, NULL);
+    lgJoinThread(t_cursor, NULL);
 
-  if (state.t_frame)
-    SDL_WaitThread(state.t_frame, NULL);
+  if (t_frame)
+    lgJoinThread(t_frame, NULL);
 
   state.lgr->deinitialize(state.lgrData);
   state.lgr = NULL;
@@ -1107,7 +1109,7 @@ static int lg_run()
         return -1;
       }
 
-    if (!(t_spice = SDL_CreateThread(spiceThread, "spiceThread", NULL)))
+    if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
     {
       DEBUG_ERROR("spice create thread failed");
       return -1;
@@ -1271,7 +1273,7 @@ static int lg_run()
   c_startup = SDL_CreateCond();
 
   // start the renderThread so we don't just display junk
-  if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
+  if (!lgCreateThread("renderThread", renderThread, NULL, &t_render))
   {
     DEBUG_ERROR("render create thread failed");
     return -1;
@@ -1309,13 +1311,13 @@ static int lg_run()
     return -1;
   }
 
-  if (!(t_cursor = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
+  if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
   {
     DEBUG_ERROR("cursor create thread failed");
     return 1;
   }
 
-  if (!(state.t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
+  if (!lgCreateThread("frameThread", frameThread, NULL, &t_frame))
   {
     DEBUG_ERROR("frame create thread failed");
     return -1;
@@ -1357,7 +1359,7 @@ static void lg_shutdown()
   state.running = false;
 
   if (t_render)
-    SDL_WaitThread(t_render, NULL);
+    lgJoinThread(t_render, NULL);
 
   if (m_startup)
   {
@@ -1379,7 +1381,7 @@ static void lg_shutdown()
       }
 
     if (t_spice)
-      SDL_WaitThread(t_spice, NULL);
+      lgJoinThread(t_spice, NULL);
 
     spice_disconnect();
   }
