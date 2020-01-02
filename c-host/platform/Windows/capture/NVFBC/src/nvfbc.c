@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -19,11 +19,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/capture.h"
 #include "interface/platform.h"
-#include "windows/platform.h"
-#include "windows/debug.h"
+#include "common/windebug.h"
 #include "windows/mousehook.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
+#include "common/event.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -46,8 +46,8 @@ struct iface
 
   NvFBCFrameGrabInfo grabInfo;
 
-  osEventHandle * frameEvent;
-  osEventHandle * cursorEvents[2];
+  LGEvent * frameEvent;
+  LGEvent * cursorEvents[2];
 
   int mouseX, mouseY, mouseHotX, mouseHotY;
   bool mouseVisible;
@@ -75,7 +75,7 @@ static void on_mouseMove(int x, int y)
 {
   this->mouseX = x;
   this->mouseY = y;
-  os_signalEvent(this->cursorEvents[0]);
+  lgSignalEvent(this->cursorEvents[0]);
 }
 
 static const char * nvfbc_getName()
@@ -135,7 +135,7 @@ static bool nvfbc_create()
   }
   free(privData);
 
-  this->frameEvent = os_createEvent(true, 17);
+  this->frameEvent = lgCreateEvent(true, 17);
   if (!this->frameEvent)
   {
     DEBUG_ERROR("failed to create the frame event");
@@ -155,7 +155,7 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
   this->pointerSize  = pointerSize;
 
   getDesktopSize(&this->width, &this->height);
-  os_resetEvent(this->frameEvent);
+  lgResetEvent(this->frameEvent);
 
 
   HANDLE event;
@@ -174,11 +174,11 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
     return false;
   }
 
-  this->cursorEvents[0] = os_createEvent(true, 10);
+  this->cursorEvents[0] = lgCreateEvent(true, 10);
   mouseHook_install(on_mouseMove);
 
   if (this->seperateCursor)
-    this->cursorEvents[1] = os_wrapEvent(event);
+    this->cursorEvents[1] = lgWrapEvent(event);
 
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
@@ -189,8 +189,8 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
 static void nvfbc_stop()
 {
   this->stop = true;
-  os_signalEvent(this->cursorEvents[0]);
-  os_signalEvent(this->frameEvent);
+  lgSignalEvent(this->cursorEvents[0]);
+  lgSignalEvent(this->frameEvent);
 }
 
 static bool nvfbc_deinit()
@@ -204,7 +204,7 @@ static void nvfbc_free()
   NvFBCToSysRelease(&this->nvfbc);
 
   if (this->frameEvent)
-    os_freeEvent(this->frameEvent);
+    lgFreeEvent(this->frameEvent);
 
   free(this);
   this = NULL;
@@ -233,13 +233,13 @@ static CaptureResult nvfbc_capture()
     return result;
 
   memcpy(&this->grabInfo, &grabInfo, sizeof(grabInfo));
-  os_signalEvent(this->frameEvent);
+  lgSignalEvent(this->frameEvent);
   return CAPTURE_RESULT_OK;
 }
 
 static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
 {
-  if (!os_waitEvent(this->frameEvent, 1000))
+  if (!lgWaitEvent(this->frameEvent, 1000))
     return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)
@@ -282,9 +282,9 @@ static CaptureResult nvfbc_getFrame(FrameBuffer frame)
 
 static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
 {
-  osEventHandle * events[2];
-  memcpy(&events, &this->cursorEvents, sizeof(osEventHandle *) * 2);
-  if (!os_waitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
+  LGEvent * events[2];
+  memcpy(&events, &this->cursorEvents, sizeof(LGEvent *) * 2);
+  if (!lgWaitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
     return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)

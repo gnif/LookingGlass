@@ -20,10 +20,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/windebug.h"
 #include "common/option.h"
 #include "common/locking.h"
-#include "windows/debug.h"
-#include "windows/platform.h"
+#include "common/event.h"
 
 #include <assert.h>
 #include <dxgi.h>
@@ -83,8 +83,8 @@ struct iface
   int                        texWIndex;
   volatile int               texReady;
   bool                       needsRelease;
-  osEventHandle            * pointerEvent;
-  osEventHandle            * frameEvent;
+  LGEvent                  * pointerEvent;
+  LGEvent                  * frameEvent;
 
   unsigned int  width;
   unsigned int  height;
@@ -165,7 +165,7 @@ static bool dxgi_create()
     return false;
   }
 
-  this->pointerEvent = os_createEvent(true, 10);
+  this->pointerEvent = lgCreateEvent(true, 10);
   if (!this->pointerEvent)
   {
     DEBUG_ERROR("failed to create the pointer event");
@@ -173,7 +173,7 @@ static bool dxgi_create()
     return false;
   }
 
-  this->frameEvent = os_createEvent(true, 17); // 60Hz = 16.7ms
+  this->frameEvent = lgCreateEvent(true, 17); // 60Hz = 16.7ms
   if (!this->frameEvent)
   {
     DEBUG_ERROR("failed to create the frame event");
@@ -222,8 +222,8 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   this->texWIndex  = 0;
   this->texReady   = 0;
 
-  os_resetEvent(this->frameEvent  );
-  os_resetEvent(this->pointerEvent);
+  lgResetEvent(this->frameEvent  );
+  lgResetEvent(this->pointerEvent);
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -520,7 +520,7 @@ fail:
 static void dxgi_stop()
 {
   this->stop = true;
-  os_signalEvent(this->pointerEvent);
+  lgSignalEvent(this->pointerEvent);
 }
 
 static bool dxgi_deinit()
@@ -598,7 +598,7 @@ static void dxgi_free()
   if (this->initialized)
     dxgi_deinit();
 
-  os_freeEvent(this->pointerEvent);
+  lgFreeEvent(this->pointerEvent);
   free(this->texture);
 
   free(this);
@@ -683,7 +683,7 @@ static CaptureResult dxgi_capture()
       // set the state, and signal
       tex->state = TEXTURE_STATE_PENDING_MAP;
       INTERLOCKED_INC(&this->texReady);
-      os_signalEvent(this->frameEvent);
+      lgSignalEvent(this->frameEvent);
 
       // advance the write index
       if (++this->texWIndex == this->maxTextures)
@@ -749,7 +749,7 @@ static CaptureResult dxgi_capture()
 
   // signal about the pointer update
   if (signalPointer)
-    os_signalEvent(this->pointerEvent);
+    lgSignalEvent(this->pointerEvent);
 
   return CAPTURE_RESULT_OK;
 }
@@ -762,7 +762,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   // NOTE: the event may be signaled when there are no frames available
   if(this->texReady == 0)
   {
-    if (!os_waitEvent(this->frameEvent, 1000))
+    if (!lgWaitEvent(this->frameEvent, 1000))
       return CAPTURE_RESULT_TIMEOUT;
 
     if (this->texReady == 0)
@@ -817,7 +817,7 @@ static CaptureResult dxgi_getPointer(CapturePointer * pointer)
   assert(this);
   assert(this->initialized);
 
-  if (!os_waitEvent(this->pointerEvent, 1000))
+  if (!lgWaitEvent(this->pointerEvent, 1000))
     return CAPTURE_RESULT_TIMEOUT;
 
   if (this->stop)

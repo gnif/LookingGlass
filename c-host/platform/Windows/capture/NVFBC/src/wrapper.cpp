@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "wrapper.h"
-#include "windows/debug.h"
+#include "common/windebug.h"
 #include <windows.h>
 #include <NvFBC/nvFBCToSys.h>
 

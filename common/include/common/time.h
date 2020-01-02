@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -16,16 +16,30 @@ You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
+
 #pragma once
 
-#define INTERLOCKED_AND8        __sync_fetch_and_and
-#define INTERLOCKED_OR8         __sync_fetch_and_or
-#define INTERLOCKED_INC(x)      __sync_fetch_and_add((x), 1)
-#define INTERLOCKED_DEC(x)      __sync_fetch_and_sub((x), 1)
-#define INTERLOCKED_GET(x)      __sync_fetch_and_add((x), 0)
-#define INTERLOCKED_CE(x, c, v) __sync_val_compare_and_swap((x), (c), (v))
+#include <stdint.h>
 
-#define INTERLOCKED_SECTION(lock, x) \
-  while(__sync_lock_test_and_set(&(lock), 1)) while((lock)); \
-  x\
-  __sync_lock_release(&(lock));
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
+static inline uint64_t getMicrotime()
+{
+#if defined(_WIN32)
+  static LARGE_INTEGER freq = { 0 };
+  if (!freq.QuadPart)
+    QueryPerformanceFrequency(&freq);
+
+  LARGE_INTEGER time;
+  QueryPerformanceCounter(&time);
+  return time.QuadPart / (freq.QuadPart / 1000000LL);
+#else
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+  return (uint64_t)time.tv_sec * 1000000LL + time.tv_nsec / 1000LL;
+#endif
+}

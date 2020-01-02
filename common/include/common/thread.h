@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -19,17 +19,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #pragma once
 
-#include "common/debug.h"
-#include <windows.h>
+#include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+typedef struct LGThread LGThread;
+typedef int (*LGThreadFunction)(void * opaque);
 
-void DebugWinError(const char * file, const unsigned int line, const char * function, const char * desc, HRESULT status);
-
-#define DEBUG_WINERROR(x, y) DebugWinError(STRIPPATH(__FILE__), __LINE__, __FUNCTION__, x, y)
-
-#ifdef __cplusplus
-}
-#endif
+bool lgCreateThread(const char * name, LGThreadFunction function, void * opaque, LGThread ** handle);
+bool lgJoinThread  (LGThread * handle, int * resultCode);

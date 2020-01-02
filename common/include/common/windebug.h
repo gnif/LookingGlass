@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -16,16 +16,20 @@ You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
+
 #pragma once
 
-#define INTERLOCKED_AND8        __sync_fetch_and_and
-#define INTERLOCKED_OR8         __sync_fetch_and_or
-#define INTERLOCKED_INC(x)      __sync_fetch_and_add((x), 1)
-#define INTERLOCKED_DEC(x)      __sync_fetch_and_sub((x), 1)
-#define INTERLOCKED_GET(x)      __sync_fetch_and_add((x), 0)
-#define INTERLOCKED_CE(x, c, v) __sync_val_compare_and_swap((x), (c), (v))
+#include "debug.h"
+#include <windows.h>
 
-#define INTERLOCKED_SECTION(lock, x) \
-  while(__sync_lock_test_and_set(&(lock), 1)) while((lock)); \
-  x\
-  __sync_lock_release(&(lock));
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void DebugWinError(const char * file, const unsigned int line, const char * function, const char * desc, HRESULT status);
+
+#define DEBUG_WINERROR(x, y) DebugWinError(STRIPPATH(__FILE__), __LINE__, __FUNCTION__, x, y)
+
+#ifdef __cplusplus
+}
+#endif

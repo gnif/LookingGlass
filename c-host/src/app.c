@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/locking.h"
 #include "common/KVMFR.h"
 #include "common/crash.h"
+#include "common/thread.h"
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -52,10 +53,10 @@ struct app
   FrameBuffer   frame[MAX_FRAMES];
   unsigned int  frameOffset[MAX_FRAMES];
 
-  bool             running;
-  bool             reinit;
-  osThreadHandle * pointerThread;
-  osThreadHandle * frameThread;
+  bool       running;
+  bool       reinit;
+  LGThread * pointerThread;
+  LGThread * frameThread;
 };
 
 static struct app app;
@@ -244,13 +245,13 @@ static int frameThread(void * opaque)
 bool startThreads()
 {
   app.running = true;
-  if (!os_createThread("CursorThread", pointerThread, NULL, &app.pointerThread))
+  if (!lgCreateThread("CursorThread", pointerThread, NULL, &app.pointerThread))
   {
     DEBUG_ERROR("Failed to create the pointer thread");
     return false;
   }
 
-  if (!os_createThread("FrameThread", frameThread, NULL, &app.frameThread))
+  if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
   {
     DEBUG_ERROR("Failed to create the frame thread");
     return false;
@@ -266,14 +267,14 @@ bool stopThreads()
   app.running = false;
   app.iface->stop();
 
-  if (app.frameThread && !os_joinThread(app.frameThread, NULL))
+  if (app.frameThread && !lgJoinThread(app.frameThread, NULL))
   {
     DEBUG_WARN("Failed to join the frame thread");
     ok = false;
   }
   app.frameThread = NULL;
 
-  if (app.pointerThread && !os_joinThread(app.pointerThread, NULL))
+  if (app.pointerThread && !lgJoinThread(app.pointerThread, NULL))
   {
     DEBUG_WARN("Failed to join the pointer thread");
     ok = false;

@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -18,7 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "platform.h"
-#include "windows/platform.h"
 #include "windows/mousehook.h"
 
 #include <windows.h>
@@ -29,9 +28,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/windebug.h"
 #include "common/option.h"
 #include "common/locking.h"
-#include "windows/debug.h"
+#include "common/thread.h"
 #include "ivshmem.h"
 
 #define ID_MENU_OPEN_LOG 3000
@@ -58,27 +58,6 @@ static struct AppState app =
   .shmemHandle = INVALID_HANDLE_VALUE,
   .shmemOwned  = false,
   .shmemMap    = {0}
-};
-
-struct osThreadHandle
-{
-  const char       * name;
-  osThreadFunction   function;
-  void             * opaque;
-  HANDLE             handle;
-  DWORD              threadID;
-
-  int                resultCode;
-};
-
-struct osEventHandle
-{
-  volatile int  lock;
-  bool          reset;
-  HANDLE        handle;
-  bool          wrapped;
-  unsigned int  msSpinTime;
-  volatile bool signaled;
 };
 
 // undocumented API to adjust the system timer resolution (yes, its a nasty hack)
@@ -261,8 +240,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_EXIT    , "Exit"         );
 
   // create the application thread
-  osThreadHandle * thread;
-  if (!os_createThread("appThread", appThread, NULL, &thread))
+  LGThread * thread;
+  if (!lgCreateThread("appThread", appThread, NULL, &thread))
   {
     DEBUG_ERROR("Failed to create the main application thread");
     result = -1;
@@ -292,7 +271,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 shutdown:
   DestroyMenu(app.trayMenu);
   app_quit();
-  if (!os_joinThread(thread, &result))
+  if (!lgJoinThread(thread, &result))
   {
     DEBUG_ERROR("Failed to join the main application thread");
     result = -1;
@@ -444,249 +423,4 @@ void os_shmemUnmap()
     DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
   else
     app.shmemOwned = false;
-}
-
-static DWORD WINAPI threadWrapper(LPVOID lpParameter)
-{
-  osThreadHandle * handle = (osThreadHandle *)lpParameter;
-  handle->resultCode = handle->function(handle->opaque);
-  return 0;
-}
-
-bool os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle)
-{
-  *handle             = (osThreadHandle *)malloc(sizeof(osThreadHandle));
-  (*handle)->name     = name;
-  (*handle)->function = function;
-  (*handle)->opaque   = opaque;
-  (*handle)->handle   = CreateThread(NULL, 0, threadWrapper, *handle, 0, &(*handle)->threadID);
-
-  if (!(*handle)->handle)
-  {
-    free(*handle);
-    *handle = NULL;
-    DEBUG_WINERROR("CreateThread failed", GetLastError());
-    return false;
-  }
-
-  return true;
-}
-
-bool os_joinThread(osThreadHandle * handle, int * resultCode)
-{
-  while(true)
-  {
-    switch(WaitForSingleObject(handle->handle, INFINITE))
-    {
-      case WAIT_OBJECT_0:
-        if (resultCode)
-          *resultCode = handle->resultCode;
-        CloseHandle(handle->handle);
-        free(handle);
-        return true;
-
-      case WAIT_ABANDONED:
-      case WAIT_TIMEOUT:
-        continue;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for thread failed", GetLastError());
-        CloseHandle(handle->handle);
-        free(handle);
-        return false;
-    }
-
-    break;
-  }
-
-  DEBUG_WINERROR("Unknown failure waiting for thread", GetLastError());
-  return false;
-}
-
-osEventHandle * os_createEvent(bool autoReset, unsigned int msSpinTime)
-{
-  osEventHandle * event = (osEventHandle *)malloc(sizeof(osEventHandle));
-  if (!event)
-  {
-    DEBUG_ERROR("out of ram");
-    return NULL;
-  }
-
-  event->lock       = 0;
-  event->reset      = autoReset;
-  event->handle     = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
-  event->wrapped    = false;
-  event->msSpinTime = msSpinTime;
-  event->signaled   = false;
-
-  if (!event->handle)
-  {
-    DEBUG_WINERROR("Failed to create the event", GetLastError());
-    free(event);
-    return NULL;
-  }
-
-  return event;
-}
-
-osEventHandle * os_wrapEvent(HANDLE handle)
-{
-  osEventHandle * event = (osEventHandle *)malloc(sizeof(osEventHandle));
-  if (!event)
-  {
-    DEBUG_ERROR("out of ram");
-    return NULL;
-  }
-
-  event->lock       = 0;
-  event->reset      = false;
-  event->handle     = handle;
-  event->wrapped    = true;
-  event->msSpinTime = 0;
-  event->signaled   = false;
-  return event;
-}
-
-void os_freeEvent(osEventHandle * event)
-{
-  CloseHandle(event->handle);
-}
-
-bool os_waitEvent(osEventHandle * event, unsigned int timeout)
-{
-  // wrapped events can't be enahnced
-  if (!event->wrapped)
-  {
-    if (event->signaled)
-    {
-      if (event->reset)
-        event->signaled = false;
-      return true;
-    }
-
-    if (timeout == 0)
-    {
-      bool ret = event->signaled;
-      if (event->reset)
-        event->signaled = false;
-      return ret;
-    }
-
-    if (event->msSpinTime)
-    {
-      unsigned int spinTime = event->msSpinTime;
-      if (timeout != TIMEOUT_INFINITE)
-      {
-        if (timeout > event->msSpinTime)
-          timeout -= event->msSpinTime;
-        else
-        {
-          spinTime -= timeout;
-          timeout   = 0;
-        }
-      }
-
-      LARGE_INTEGER end, now;
-      QueryPerformanceCounter(&end);
-      end.QuadPart += (app.perfFreq.QuadPart / 1000) * spinTime;
-      while(!event->signaled)
-      {
-        QueryPerformanceCounter(&now);
-        if (now.QuadPart >= end.QuadPart)
-          break;
-      }
-
-      if (event->signaled)
-      {
-        if (event->reset)
-          event->signaled = false;
-        return true;
-      }
-    }
-  }
-
-  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
-  while(true)
-  {
-    switch(WaitForSingleObject(event->handle, to))
-    {
-      case WAIT_OBJECT_0:
-        if (!event->reset)
-          event->signaled = true;
-        return true;
-
-      case WAIT_ABANDONED:
-        continue;
-
-      case WAIT_TIMEOUT:
-        if (timeout == TIMEOUT_INFINITE)
-          continue;
-
-        return false;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for event failed", GetLastError());
-        return false;
-    }
-
-    DEBUG_ERROR("Unknown wait event return code");
-    return false;
-  }
-}
-
-bool os_waitEvents(osEventHandle * events[], int count, bool waitAll, unsigned int timeout)
-{
-  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
-
-  HANDLE * handles = (HANDLE *)malloc(sizeof(HANDLE) * count);
-  for(int i = 0; i < count; ++i)
-    handles[i] = events[i]->handle;
-
-  while(true)
-  {
-    DWORD result = WaitForMultipleObjects(count, handles, waitAll, to);
-    if (result >= WAIT_OBJECT_0 && result < count)
-    {
-      // null non signaled events from the handle list
-      for(int i = 0; i < count; ++i)
-        if (i != result && !os_waitEvent(events[i], 0))
-          handles[i] = NULL;
-      free(handles);
-      return true;
-    }
-
-    if (result >= WAIT_ABANDONED_0 && result - WAIT_ABANDONED_0 < count)
-      continue;
-
-    switch(result)
-    {
-      case WAIT_TIMEOUT:
-        if (timeout == TIMEOUT_INFINITE)
-          continue;
-
-        free(handles);
-        return false;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for event failed", GetLastError());
-        free(handles);
-        return false;
-    }
-
-    DEBUG_ERROR("Unknown wait event return code");
-    free(handles);
-    return false;
-  }
-}
-
-bool os_signalEvent(osEventHandle * event)
-{
-  event->signaled = true;
-  return SetEvent(event->handle);
-}
-
-bool os_resetEvent(osEventHandle * event)
-{
-  event->signaled = false;
-  return ResetEvent(event->handle);
 }
