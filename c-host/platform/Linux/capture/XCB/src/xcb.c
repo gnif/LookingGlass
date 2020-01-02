@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/event.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -37,7 +38,7 @@ struct xcb
   uint32_t           seg;
   int                shmID;
   void             * data;
-  osEventHandle    * frameEvent;
+  LGEvent          * frameEvent;
 
   unsigned int width;
   unsigned int height;
@@ -67,7 +68,7 @@ static bool xcb_create()
   this             = (struct xcb *)calloc(sizeof(struct xcb), 1);
   this->shmID      = -1;
   this->data       = (void *)-1;
-  this->frameEvent = os_createEvent(true);
+  this->frameEvent = lgCreateEvent(true, 20);
 
   if (!this->frameEvent)
   {
@@ -84,7 +85,7 @@ static bool xcb_init()
   assert(this);
   assert(!this->initialized);
 
-  os_resetEvent(this->frameEvent);
+  lgResetEvent(this->frameEvent);
 
   this->xcb = xcb_connect(NULL, NULL);
   if (!this->xcb || xcb_connection_has_error(this->xcb))
@@ -158,7 +159,7 @@ static bool xcb_deinit()
 
 static void xcb_free()
 {
-  os_freeEvent(this->frameEvent);
+  lgFreeEvent(this->frameEvent);
   free(this);
   this = NULL;
 }
@@ -187,20 +188,29 @@ static CaptureResult xcb_capture()
         0);
 
     this->hasFrame  = true;
-    os_signalEvent(this->frameEvent);
+    lgSignalEvent(this->frameEvent);
   }
 
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_getFrame(CaptureFrame * frame)
+static CaptureResult xcb_waitFrame(CaptureFrame * frame)
+{
+  lgWaitEvent(this->frameEvent, TIMEOUT_INFINITE);
+
+  frame->width  = this->width;
+  frame->height = this->height;
+  frame->pitch  = this->width * 4;
+  frame->stride = this->width;
+  frame->format = CAPTURE_FMT_BGRA;
+
+  return CAPTURE_RESULT_OK;
+}
+
+static CaptureResult xcb_getFrame(FrameBuffer frame)
 {
   assert(this);
   assert(this->initialized);
-  assert(frame);
-  assert(frame->data);
-
-  os_waitEvent(this->frameEvent, TIMEOUT_INFINITE);
 
   xcb_shm_get_image_reply_t * img;
   img = xcb_shm_get_image_reply(this->xcb, this->imgC, NULL);
@@ -210,12 +220,7 @@ static CaptureResult xcb_getFrame(CaptureFrame * frame)
     return CAPTURE_RESULT_ERROR;
   }
 
-  frame->width  = this->width;
-  frame->height = this->height;
-  frame->pitch  = this->width * 4;
-  frame->stride = this->width;
-  frame->format = CAPTURE_FMT_BGRA;
-  memcpy(frame->data, this->data, this->width * this->height * 4);
+  framebuffer_write(frame, this->data, this->width * this->height * 4);
   free(img);
 
   this->hasFrame = false;
@@ -237,6 +242,7 @@ struct CaptureInterface Capture_XCB =
   .free            = xcb_free,
   .getMaxFrameSize = xcb_getMaxFrameSize,
   .capture         = xcb_capture,
+  .waitFrame       = xcb_waitFrame,
   .getFrame        = xcb_getFrame,
   .getPointer      = xcb_getPointer
 };
