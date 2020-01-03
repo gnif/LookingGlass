@@ -617,7 +617,8 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
-          SDL_GetWindowSize(state.window, &state.windowW, &state.windowH);
+          state.windowW = event->window.data1;
+          state.windowH = event->window.data2;
           updatePositionInfo();
           realignGuest = true;
           break;
