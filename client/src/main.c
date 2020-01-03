@@ -41,6 +41,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/stringutils.h"
 #include "common/thread.h"
 #include "common/event.h"
+#include "common/ivshmem.h"
+
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
@@ -186,8 +188,8 @@ static int cursorThread(void * unused)
   while(state.running)
   {
     // poll until we have cursor data
-    if(!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE) &&
-        !(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_POS))
+    if(!(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE) &&
+        !(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_POS))
     {
       if (!state.running)
         return 0;
@@ -197,19 +199,19 @@ static int cursorThread(void * unused)
 
     // if the cursor was moved
     bool moved = false;
-    if (state.shm->cursor.flags & KVMFR_CURSOR_FLAG_POS)
+    if (state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_POS)
     {
-      state.cursor.x      = state.shm->cursor.x;
-      state.cursor.y      = state.shm->cursor.y;
+      state.cursor.x      = state.kvmfr->cursor.x;
+      state.cursor.y      = state.kvmfr->cursor.y;
       state.haveCursorPos = true;
       moved               = true;
     }
 
     // if this was only a move event
-    if (!(state.shm->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
+    if (!(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
     {
       // turn off the pos flag, trigger the event and continue
-      __sync_and_and_fetch(&state.shm->cursor.flags, ~KVMFR_CURSOR_FLAG_POS);
+      __sync_and_and_fetch(&state.kvmfr->cursor.flags, ~KVMFR_CURSOR_FLAG_POS);
 
       state.lgr->on_mouse_event
       (
@@ -223,7 +225,7 @@ static int cursorThread(void * unused)
 
     // we must take a copy of the header to prevent the contained arguments
     // from being abused to overflow buffers.
-    memcpy(&header, &state.shm->cursor, sizeof(struct KVMFRCursor));
+    memcpy(&header, &state.kvmfr->cursor, sizeof(struct KVMFRCursor));
 
     if (header.flags & KVMFR_CURSOR_FLAG_SHAPE &&
         header.version != version)
@@ -247,13 +249,13 @@ static int cursorThread(void * unused)
 
       // check the data position is sane
       const uint64_t dataSize = header.height * header.pitch;
-      if (header.dataPos + dataSize > state.shmSize)
+      if (header.dataPos + dataSize > state.shm.size)
       {
         DEBUG_ERROR("The guest sent an invalid mouse dataPos");
         break;
       }
 
-      const uint8_t * data = (const uint8_t *)state.shm + header.dataPos;
+      const uint8_t * data = (const uint8_t *)state.kvmfr + header.dataPos;
       if (!state.lgr->on_mouse_shape(
         state.lgrData,
         cursorType,
@@ -269,7 +271,7 @@ static int cursorThread(void * unused)
     }
 
     // now we have taken the mouse data, we can flag to the host we are ready
-    state.shm->cursor.flags = 0;
+    state.kvmfr->cursor.flags = 0;
 
     bool showCursor = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
     if (showCursor != state.cursorVisible || moved)
@@ -300,7 +302,7 @@ static int frameThread(void * unused)
   while(state.running)
   {
     // poll until we have a new frame
-    while(!(state.shm->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
+    while(!(state.kvmfr->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
     {
       if (!state.running)
         break;
@@ -311,11 +313,11 @@ static int frameThread(void * unused)
 
     // we must take a copy of the header to prevent the contained
     // arguments from being abused to overflow buffers.
-    memcpy(&header, &state.shm->frame, sizeof(struct KVMFRFrame));
+    memcpy(&header, &state.kvmfr->frame, sizeof(struct KVMFRFrame));
 
     // tell the host to continue as the host buffers up to one frame
     // we can be sure the data for this frame wont be touched
-    __sync_and_and_fetch(&state.shm->frame.flags, ~KVMFR_FRAME_FLAG_UPDATE);
+    __sync_and_and_fetch(&state.kvmfr->frame.flags, ~KVMFR_FRAME_FLAG_UPDATE);
 
     // sainty check of the frame format
     if (
@@ -324,7 +326,7 @@ static int frameThread(void * unused)
       header.height  == 0 ||
       header.pitch   == 0 ||
       header.dataPos == 0 ||
-      header.dataPos > state.shmSize ||
+      header.dataPos > state.shm.size ||
       header.pitch   < header.width
     ){
       DEBUG_WARN("Bad header");
@@ -370,7 +372,7 @@ static int frameThread(void * unused)
       break;
 
     // check the header's dataPos is sane
-    if (header.dataPos + dataSize > state.shmSize)
+    if (header.dataPos + dataSize > state.shm.size)
     {
       DEBUG_ERROR("The guest sent an invalid dataPos");
       break;
@@ -385,7 +387,7 @@ static int frameThread(void * unused)
         SDL_SetWindowSize(state.window, header.width, header.height);
       updatePositionInfo();
     }
-    FrameBuffer frame = (FrameBuffer)((uint8_t *)state.shm + header.dataPos);
+    FrameBuffer frame = (FrameBuffer)((uint8_t *)state.kvmfr + header.dataPos);
 
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, frame))
     {
@@ -868,35 +870,6 @@ void int_handler(int signal)
   }
 }
 
-static void * map_memory()
-{
-  struct stat st;
-  if (stat(params.shmFile, &st) < 0)
-  {
-    DEBUG_ERROR("Failed to stat the shared memory file: %s", params.shmFile);
-    return NULL;
-  }
-
-  state.shmSize = params.shmSize ? params.shmSize : st.st_size;
-  state.shmFD   = open(params.shmFile, O_RDWR, (mode_t)0600);
-  if (state.shmFD < 0)
-  {
-    DEBUG_ERROR("Failed to open the shared memory file: %s", params.shmFile);
-    return NULL;
-  }
-
-  void * map = mmap(0, state.shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, state.shmFD, 0);
-  if (map == MAP_FAILED)
-  {
-    DEBUG_ERROR("Failed to map the shared memory file: %s", params.shmFile);
-    close(state.shmFD);
-    state.shmFD = 0;
-    return NULL;
-  }
-
-  return map;
-}
-
 static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
 {
   const LG_Renderer *r = LG_Renderers[index];
@@ -1062,12 +1035,13 @@ static int lg_run()
   signal(SIGTERM, int_handler);
 
   // try map the shared memory
-  state.shm = (struct KVMFRHeader *)map_memory();
-  if (!state.shm)
+  if (!ivshmemOpen(&state.shm))
   {
     DEBUG_ERROR("Failed to map memory");
     return -1;
   }
+
+  state.kvmfr = (struct KVMFRHeader*)state.shm.mem;
 
   // try to connect to the spice server
   if (params.useSpiceInput || params.useSpiceClipboard)
@@ -1272,9 +1246,9 @@ static int lg_run()
   // the host wakes up if it is waiting on an interrupt, the host will
   // also send us the current mouse shape since we won't know it yet
   DEBUG_INFO("Waiting for host to signal it's ready...");
-  __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
+  __sync_or_and_fetch(&state.kvmfr->flags, KVMFR_HEADER_FLAG_RESTART);
 
-  while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
+  while(state.running && (state.kvmfr->flags & KVMFR_HEADER_FLAG_RESTART))
     SDL_WaitEventTimeout(NULL, 1000);
 
   if (!state.running)
@@ -1283,15 +1257,15 @@ static int lg_run()
   DEBUG_INFO("Host ready, starting session");
 
   // check the header's magic and version are valid
-  if (memcmp(state.shm->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
+  if (memcmp(state.kvmfr->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
   {
     DEBUG_ERROR("Invalid header magic, is the host running?");
     return -1;
   }
 
-  if (state.shm->version != KVMFR_HEADER_VERSION)
+  if (state.kvmfr->version != KVMFR_HEADER_VERSION)
   {
-    DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.shm->version);
+    DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.kvmfr->version);
     DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
     return -1;
   }
@@ -1315,7 +1289,7 @@ static int lg_run()
 
     if (closeAlert == NULL)
     {
-      if (state.shm->flags & KVMFR_HEADER_FLAG_PAUSED)
+      if (state.kvmfr->flags & KVMFR_HEADER_FLAG_PAUSED)
       {
         if (state.lgr && params.showAlerts)
           state.lgr->on_alert(
@@ -1328,7 +1302,7 @@ static int lg_run()
     }
     else
     {
-      if (!(state.shm->flags & KVMFR_HEADER_FLAG_PAUSED))
+      if (!(state.kvmfr->flags & KVMFR_HEADER_FLAG_PAUSED))
       {
         *closeAlert = true;
         closeAlert  = NULL;
@@ -1387,11 +1361,7 @@ static void lg_shutdown()
   if (cursor)
     SDL_FreeCursor(cursor);
 
-  if (state.shm)
-  {
-    munmap(state.shm, state.shmSize);
-    close(state.shmFD);
-  }
+  ivshmemClose(&state.shm);
 
   release_key_binds();
   SDL_Quit();
@@ -1406,6 +1376,7 @@ int main(int argc, char * argv[])
     DEBUG_WARN("Failed to install the crash handler");
 
   config_init();
+  ivshmemOptionsInit();
 
   // early renderer setup for option registration
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)

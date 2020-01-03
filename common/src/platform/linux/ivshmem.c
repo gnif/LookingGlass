@@ -210,7 +210,7 @@ bool ivshmemOpen(struct IVSHMEM * dev)
   dev->opaque = info;
   dev->size   = devSize;
   dev->mem    = map;
-  return false;
+  return true;
 }
 
 void ivshmemClose(struct IVSHMEM * dev)

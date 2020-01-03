@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/app.h"
 #include "dynamic/renderers.h"
 #include "dynamic/clipboards.h"
+#include "common/ivshmem.h"
 
 #include "spice/spice.h"
 
@@ -54,9 +55,9 @@ struct AppState
   struct ll          * cbRequestList;
 
   SDL_Window         * window;
-  int                  shmFD;
-  struct KVMFRHeader * shm;
-  unsigned int         shmSize;
+
+  struct IVSHMEM       shm;
+  struct KVMFRHeader * kvmfr;
 
   uint64_t          frameTime;
   uint64_t          lastFrameTime;
