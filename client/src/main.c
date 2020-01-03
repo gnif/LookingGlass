@@ -1169,6 +1169,14 @@ static int lg_run()
     return -1;
   }
 
+  // if compositor should be allowed, prevent compositor from being disabled in
+  // the first place, otherwise kwin will take various seconds reactivate itself
+  if (params.allowCompositor == LG_ALLOW_COMPOSITOR_YES)
+  {
+    if (SDL_VERSION_ATLEAST(2, 0, 8))
+      SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+  }
+
   // all our ducks are in a line, create the window
   state.window = SDL_CreateWindow(
     params.windowTitle,
@@ -1242,6 +1250,11 @@ static int lg_run()
   if (state.wminfo.subsystem == SDL_SYSWM_X11)
     state.lgc = LG_Clipboards[0];
 
+  if (params.allowCompositor == LG_ALLOW_COMPOSITOR_YES)
+    bypassCompositor(false);
+  else if (params.allowCompositor == LG_ALLOW_COMPOSITOR_NO)
+    bypassCompositor(true);
+
   if (state.lgc)
   {
     DEBUG_INFO("Using Clipboard: %s", state.lgc->getName());
@@ -1292,13 +1305,6 @@ static int lg_run()
 
   if (!state.running)
     return -1;
-
-  // setting _NET_WM_BYPASS_COMPOSITOR (see bypassCompositor) is only working
-  // after SDL_WaitEventTimeout
-  if (params.allowCompositor == LG_ALLOW_COMPOSITOR_YES)
-    bypassCompositor(false);
-  else if (params.allowCompositor == LG_ALLOW_COMPOSITOR_NO)
-    bypassCompositor(true);
 
   DEBUG_INFO("Host ready, starting session");
 
