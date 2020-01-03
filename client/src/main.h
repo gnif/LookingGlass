@@ -54,6 +54,7 @@ struct AppState
   SpiceDataType        cbType;
   struct ll          * cbRequestList;
 
+  SDL_SysWMinfo        wminfo;
   SDL_Window         * window;
 
   struct IVSHMEM       shm;

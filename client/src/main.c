@@ -636,10 +636,14 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
-          state.windowW = event->window.data1;
-          state.windowH = event->window.data2;
-          updatePositionInfo();
-          realignGuest = true;
+        case SDL_WINDOWEVENT_RESIZED:
+          if (state.wminfo.subsystem != SDL_SYSWM_X11)
+          {
+            state.windowW = event->window.data1;
+            state.windowH = event->window.data2;
+            updatePositionInfo();
+            realignGuest = true;
+          }
           break;
 
         // allow a window close event to close the application even if ignoreQuit is set
@@ -652,6 +656,23 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_SYSWMEVENT:
     {
+      // When the window manager forces the window size after calling SDL_SetWindowSize, SDL
+      // ignores this update and caches the incorrect window size.
+      if (state.wminfo.subsystem == SDL_SYSWM_X11)
+      {
+        XEvent xe = event->syswm.msg->msg.x11.event;
+        if (xe.type == ConfigureNotify)
+        {
+          if (state.windowW != xe.xconfigure.width || state.windowH != xe.xconfigure.height)
+          {
+            state.windowW = xe.xconfigure.width;
+            state.windowH = xe.xconfigure.height;
+            updatePositionInfo();
+            realignGuest = true;
+          }
+        }
+      }
+
       if (params.useSpiceClipboard && state.lgc && state.lgc->wmevent)
         state.lgc->wmevent(event->syswm.msg);
       return 0;
@@ -1194,21 +1215,20 @@ static int lg_run()
   register_key_binds();
 
   // set the compositor hint to bypass for low latency
-  SDL_SysWMinfo wminfo;
-  SDL_VERSION(&wminfo.version);
-  if (SDL_GetWindowWMInfo(state.window, &wminfo))
+  SDL_VERSION(&state.wminfo.version);
+  if (SDL_GetWindowWMInfo(state.window, &state.wminfo))
   {
-    if (wminfo.subsystem == SDL_SYSWM_X11)
+    if (state.wminfo.subsystem == SDL_SYSWM_X11)
     {
       Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
-        wminfo.info.x11.display,
+        state.wminfo.info.x11.display,
         "NETWM_BYPASS_COMPOSITOR",
         False);
 
       unsigned long value = 1;
       XChangeProperty(
-        wminfo.info.x11.display,
-        wminfo.info.x11.window,
+        state.wminfo.info.x11.display,
+        state.wminfo.info.x11.window,
         NETWM_BYPASS_COMPOSITOR,
         XA_CARDINAL,
         32,
@@ -1227,7 +1247,7 @@ static int lg_run()
   if (state.lgc)
   {
     DEBUG_INFO("Using Clipboard: %s", state.lgc->getName());
-    if (!state.lgc->init(&wminfo, clipboardRelease, clipboardNotify, clipboardData))
+    if (!state.lgc->init(&state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
     {
       DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
       state.lgc = NULL;
