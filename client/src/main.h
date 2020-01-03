@@ -65,6 +65,10 @@ struct AppState
   uint64_t          frameCount;
   uint64_t          renderCount;
 
+
+  uint64_t resizeTimeout;
+  bool     resizeDone;
+
   KeybindHandle kbFS;
   KeybindHandle kbInput;
   KeybindHandle kbMouseSensInc;
@@ -80,6 +84,7 @@ struct AppParams
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
+  bool         forceAspect;
   bool         borderless;
   bool         fullscreen;
   bool         maximize;

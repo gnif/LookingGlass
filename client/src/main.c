@@ -42,10 +42,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/thread.h"
 #include "common/event.h"
 #include "common/ivshmem.h"
+#include "common/time.h"
 
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
+
+#define RESIZE_TIMEOUT (10 * 1000) // 10ms
 
 // forwards
 static int cursorThread(void * unused);
@@ -98,6 +101,12 @@ static void updatePositionInfo()
 
     state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
     state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+
+    if (params.forceAspect)
+    {
+      state.resizeTimeout = getMicrotime() + RESIZE_TIMEOUT;
+      state.resizeDone    = false;
+    }
   }
 
   state.lgrResize = true;
@@ -161,6 +170,16 @@ static int renderThread(void * unused)
       time.tv_nsec = nsec;
 
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
+
+    if (!state.resizeDone && state.resizeTimeout < getMicrotime())
+    {
+      SDL_SetWindowSize(
+        state.window,
+        state.dstRect.w,
+        state.dstRect.h
+      );
+      state.resizeDone = true;
+    }
   }
 
   state.running = false;
@@ -988,9 +1007,10 @@ static void release_key_binds()
 static int lg_run()
 {
   memset(&state, 0, sizeof(state));
-  state.running   = true;
-  state.scaleX    = 1.0f;
-  state.scaleY    = 1.0f;
+  state.running    = true;
+  state.scaleX     = 1.0f;
+  state.scaleY     = 1.0f;
+  state.resizeDone = true;
 
   state.mouseSens = params.mouseSens;
        if (state.mouseSens < -9) state.mouseSens = -9;

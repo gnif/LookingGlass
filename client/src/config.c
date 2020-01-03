@@ -153,6 +153,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "forceAspect",
+    .description    = "Force the window to maintain the aspect ratio",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "win",
     .name           = "borderless",
     .description    = "Borderless mode",
     .shortopt       = 'd',
@@ -389,6 +396,7 @@ bool config_load(int argc, char * argv[])
   params.autoResize    = option_get_bool  ("win", "autoResize"   );
   params.allowResize   = option_get_bool  ("win", "allowResize"  );
   params.keepAspect    = option_get_bool  ("win", "keepAspect"   );
+  params.forceAspect   = option_get_bool  ("win", "forceAspect"  );
   params.borderless    = option_get_bool  ("win", "borderless"   );
   params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
   params.maximize      = option_get_bool  ("win", "maximize"     );
