@@ -29,10 +29,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct app
 {
-  const char  * executable;
+  const char * executable;
 };
 
-struct app app;
+struct app app = { 0 };
 
 int main(int argc, char * argv[])
 {
