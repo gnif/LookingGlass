@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/KVMFR.h"
 #include "common/crash.h"
 #include "common/thread.h"
+#include "common/ivshmem.h"
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -324,6 +325,8 @@ int app_main(int argc, char * argv[])
   if (!installCrashHandler(os_getExecutable()))
     DEBUG_WARN("Failed to install the crash handler");
 
+  ivshmemOptionsInit();
+
   // register capture interface options
   for(int i = 0; CaptureInterfaces[i]; ++i)
     if (CaptureInterfaces[i]->initOptions)
@@ -350,25 +353,25 @@ int app_main(int argc, char * argv[])
   if (!app_init())
     return -1;
 
-  unsigned int shmemSize = os_shmemSize();
-  uint8_t    * shmemMap  = NULL;
-  int          exitcode  = 0;
-
   DEBUG_INFO("Looking Glass Host (" BUILD_VERSION ")");
-  DEBUG_INFO("IVSHMEM Size     : %u MiB", shmemSize / 1048576);
-  if (!os_shmemMmap((void **)&shmemMap) || !shmemMap)
+
+  struct IVSHMEM shmDev;
+  if (!ivshmemOpen(&shmDev))
   {
-    DEBUG_ERROR("Failed to map the shared memory");
+    DEBUG_ERROR("Failed to open the IVSHMEM device");
     return -1;
   }
-  DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmemMap);
 
-  app.shmHeader        = (KVMFRHeader *)shmemMap;
-  app.pointerData      = (uint8_t *)ALIGN_UP(shmemMap + sizeof(KVMFRHeader));
+  int exitcode  = 0;
+  DEBUG_INFO("IVSHMEM Size     : %u MiB", shmDev.size / 1048576);
+  DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmDev.mem);
+
+  app.shmHeader        = (KVMFRHeader *)shmDev.mem;
+  app.pointerData      = (uint8_t *)ALIGN_UP(shmDev.mem + sizeof(KVMFRHeader));
   app.pointerDataSize  = 1048576; // 1MB fixed for pointer size, should be more then enough
-  app.pointerOffset    = app.pointerData - shmemMap;
+  app.pointerOffset    = app.pointerData - (uint8_t*)shmDev.mem;
   app.frames           = (uint8_t *)ALIGN_UP(app.pointerData + app.pointerDataSize);
-  app.frameSize        = ALIGN_DN((shmemSize - (app.frames - shmemMap)) / MAX_FRAMES);
+  app.frameSize        = ALIGN_DN((shmDev.size - (app.frames - (uint8_t*)shmDev.mem)) / MAX_FRAMES);
 
   DEBUG_INFO("Max Cursor Size  : %u MiB", app.pointerDataSize / 1048576);
   DEBUG_INFO("Max Frame Size   : %u MiB", app.frameSize       / 1048576);
@@ -377,7 +380,7 @@ int app_main(int argc, char * argv[])
   for (int i = 0; i < MAX_FRAMES; ++i)
   {
     app.frame      [i] = (FrameBuffer)(app.frames + i * app.frameSize);
-    app.frameOffset[i] = (uint8_t *)app.frame[i] - shmemMap;
+    app.frameOffset[i] = (uint8_t *)app.frame[i] - (uint8_t*)shmDev.mem;
     DEBUG_INFO("Frame %d          : 0x%" PRIXPTR " (0x%08x)", i, (uintptr_t)app.frame[i], app.frameOffset[i]);
   }
 
@@ -472,7 +475,7 @@ exit:
   iface->deinit();
   iface->free();
 fail:
-  os_shmemUnmap();
+  ivshmemClose(&shmDev);
   return exitcode;
 }
 

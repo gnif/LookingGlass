@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,43 +17,19 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "interface/platform.h"
-#include "common/debug.h"
-#include "common/option.h"
-#include "common/thread.h"
+#pragma once
 
-#include <stdlib.h>
-#include <string.h>
-#include <signal.h>
-#include <errno.h>
+#include <stdbool.h>
 
-struct app
+struct IVSHMEM
 {
-  const char  * executable;
+  unsigned int   size;
+  void         * mem;
+
+  // internal use
+  void * opaque;
 };
 
-struct app app;
-
-int main(int argc, char * argv[])
-{
-  app.executable = argv[0];
-  int result = app_main(argc, argv);
-  return result;
-}
-
-void sigHandler(int signo)
-{
-  DEBUG_INFO("SIGINT");
-  app_quit();
-}
-
-bool app_init()
-{
-  signal(SIGINT, sigHandler);
-  return true;
-}
-
-const char * os_getExecutable()
-{
-  return app.executable;
-}
+void ivshmemOptionsInit();
+bool ivshmemOpen(struct IVSHMEM * dev);
+void ivshmemClose(struct IVSHMEM * dev);

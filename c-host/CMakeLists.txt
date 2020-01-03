@@ -41,7 +41,6 @@ get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-        ${PROJECT_TOP}/vendor/ivshmem
 	${PKGCONFIG_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )

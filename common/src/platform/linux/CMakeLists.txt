@@ -10,6 +10,7 @@ add_library(lg_common_platform_code STATIC
     sysinfo.c
     thread.c
     event.c
+    ivshmem.c
 )
 
 if(ENABLE_BACKTRACE)

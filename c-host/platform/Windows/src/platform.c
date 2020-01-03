@@ -21,10 +21,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "windows/mousehook.h"
 
 #include <windows.h>
-#include <setupapi.h>
 #include <shellapi.h>
 #include <fcntl.h>
-#include <io.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -32,7 +30,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/option.h"
 #include "common/locking.h"
 #include "common/thread.h"
-#include "ivshmem.h"
 
 #define ID_MENU_OPEN_LOG 3000
 #define ID_MENU_EXIT     3001
@@ -46,19 +43,11 @@ struct AppState
   char ** argv;
 
   char         executable[MAX_PATH + 1];
-  HANDLE       shmemHandle;
-  bool         shmemOwned;
-  IVSHMEM_MMAP shmemMap;
   HWND         messageWnd;
   HMENU        trayMenu;
 };
 
-static struct AppState app =
-{
-  .shmemHandle = INVALID_HANDLE_VALUE,
-  .shmemOwned  = false,
-  .shmemMap    = {0}
-};
+static struct AppState app = {0};
 
 // undocumented API to adjust the system timer resolution (yes, its a nasty hack)
 typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, BOOLEAN Set, PULONG ActualResolution);
@@ -182,13 +171,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   {
     {
       .module         = "os",
-      .name           = "shmDevice",
-      .description    = "The IVSHMEM device to use",
-      .type           = OPTION_TYPE_INT,
-      .value.x_int    = 0
-    },
-    {
-      .module         = "os",
       .name           = "logFile",
       .description    = "The log file to write to",
       .type           = OPTION_TYPE_STRING,
@@ -278,10 +260,6 @@ shutdown:
   }
 
 finish:
-  os_shmemUnmap();
-
-  if (app.shmemHandle != INVALID_HANDLE_VALUE)
-    CloseHandle(app.shmemHandle);
 
   for(int i = 0; i < app.argc; ++i)
     free(app.argv[i]);
@@ -292,7 +270,6 @@ finish:
 
 bool app_init()
 {
-  const int    shmDevice = option_get_int   ("os", "shmDevice");
   const char * logFile   = option_get_string("os", "logFile"  );
 
   // redirect stderr to a file
@@ -314,113 +291,10 @@ bool app_init()
   // get the performance frequency for spinlocks
   QueryPerformanceFrequency(&app.perfFreq);
 
-  HDEVINFO                         deviceInfoSet;
-  PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
-  SP_DEVICE_INTERFACE_DATA         deviceInterfaceData;
-
-  deviceInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
-  memset(&deviceInterfaceData, 0, sizeof(SP_DEVICE_INTERFACE_DATA));
-  deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-  if (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, shmDevice, &deviceInterfaceData) == FALSE)
-  {
-    DWORD error = GetLastError();
-    if (error == ERROR_NO_MORE_ITEMS)
-    {
-      DEBUG_WINERROR("Unable to enumerate the device, is it attached?", error);
-      return false;
-    }
-
-    DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", error);
-    return false;
-  }
-
-  DWORD reqSize = 0;
-  SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, NULL, 0, &reqSize, NULL);
-  if (!reqSize)
-  {
-    DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
-    return false;
-  }
-
-  infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(reqSize, 1);
-  infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-  if (!SetupDiGetDeviceInterfaceDetail(deviceInfoSet, &deviceInterfaceData, infData, reqSize, NULL, NULL))
-  {
-    free(infData);
-    DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
-    return false;
-  }
-
-  app.shmemHandle = CreateFile(infData->DevicePath, 0, 0, NULL, OPEN_EXISTING, 0, 0);
-  if (app.shmemHandle == INVALID_HANDLE_VALUE)
-  {
-    SetupDiDestroyDeviceInfoList(deviceInfoSet);
-    free(infData);
-    DEBUG_WINERROR("CreateFile returned INVALID_HANDLE_VALUE", GetLastError());
-    return false;
-  }
-
-  free(infData);
-  SetupDiDestroyDeviceInfoList(deviceInfoSet);
-
   return true;
 }
 
 const char * os_getExecutable()
 {
   return app.executable;
-}
-
-unsigned int os_shmemSize()
-{
-  IVSHMEM_SIZE size;
-  if (!DeviceIoControl(app.shmemHandle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
-  {
-    DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
-    return 0;
-  }
-
-  return (unsigned int)size;
-}
-
-bool os_shmemMmap(void **ptr)
-{
-  if (app.shmemOwned)
-  {
-    *ptr = app.shmemMap.ptr;
-    return true;
-  }
-
-  IVSHMEM_MMAP_CONFIG config =
-  {
-    .cacheMode = IVSHMEM_CACHE_WRITECOMBINED
-  };
-
-  memset(&app.shmemMap, 0, sizeof(IVSHMEM_MMAP));
-  if (!DeviceIoControl(
-    app.shmemHandle,
-    IOCTL_IVSHMEM_REQUEST_MMAP,
-    &config, sizeof(IVSHMEM_MMAP_CONFIG),
-    &app.shmemMap, sizeof(IVSHMEM_MMAP),
-    NULL, NULL))
-  {
-    DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
-    return false;
-  }
-
-  *ptr = app.shmemMap.ptr;
-  app.shmemOwned = true;
-  return true;
-}
-
-void os_shmemUnmap()
-{
-  if (!app.shmemOwned)
-    return;
-
-  if (!DeviceIoControl(app.shmemHandle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
-    DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
-  else
-    app.shmemOwned = false;
 }

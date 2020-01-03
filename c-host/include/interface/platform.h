@@ -27,7 +27,3 @@ void app_quit();
 
 // these must be implemented for each OS
 const char * os_getExecutable();
-
-unsigned int os_shmemSize();
-bool         os_shmemMmap(void **ptr);
-void         os_shmemUnmap();
