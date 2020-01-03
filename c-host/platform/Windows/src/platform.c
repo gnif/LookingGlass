@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -18,17 +18,20 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "platform.h"
-#include "windows/platform.h"
 #include "windows/mousehook.h"
 
 #include <windows.h>
 #include <setupapi.h>
 #include <shellapi.h>
+#include <fcntl.h>
+#include <io.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
+#include "common/windebug.h"
 #include "common/option.h"
-#include "windows/debug.h"
+#include "common/locking.h"
+#include "common/thread.h"
 #include "ivshmem.h"
 
 #define ID_MENU_OPEN_LOG 3000
@@ -36,6 +39,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct AppState
 {
+  LARGE_INTEGER perfFreq;
   HINSTANCE hInst;
 
   int     argc;
@@ -56,16 +60,9 @@ static struct AppState app =
   .shmemMap    = {0}
 };
 
-struct osThreadHandle
-{
-  const char       * name;
-  osThreadFunction   function;
-  void             * opaque;
-  HANDLE             handle;
-  DWORD              threadID;
-
-  int                resultCode;
-};
+// undocumented API to adjust the system timer resolution (yes, its a nasty hack)
+typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, BOOLEAN Set, PULONG ActualResolution);
+static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
 
 LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -157,6 +154,21 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+  /* this is a bit of a hack but without this --help will produce no output in a windows command prompt */
+  if (!IsDebuggerPresent() && AttachConsole(ATTACH_PARENT_PROCESS))
+  {
+    HANDLE std_err = GetStdHandle(STD_ERROR_HANDLE);
+    HANDLE std_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    int std_err_fd = _open_osfhandle((intptr_t)std_err, _O_TEXT);
+    int std_out_fd = _open_osfhandle((intptr_t)std_out, _O_TEXT);
+
+    if (std_err_fd > 0)
+      *stderr = *_fdopen(std_err_fd, "w");
+
+    if  (std_out_fd > 0)
+      *stdout = *_fdopen(std_out_fd, "w");
+  }
+
   int result = 0;
   app.hInst = hInstance;
 
@@ -228,8 +240,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_EXIT    , "Exit"         );
 
   // create the application thread
-  osThreadHandle * thread;
-  if (!os_createThread("appThread", appThread, NULL, &thread))
+  LGThread * thread;
+  if (!lgCreateThread("appThread", appThread, NULL, &thread))
   {
     DEBUG_ERROR("Failed to create the main application thread");
     result = -1;
@@ -259,7 +271,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 shutdown:
   DestroyMenu(app.trayMenu);
   app_quit();
-  if (!os_joinThread(thread, &result))
+  if (!lgJoinThread(thread, &result))
   {
     DEBUG_ERROR("Failed to join the main application thread");
     result = -1;
@@ -289,6 +301,18 @@ bool app_init()
 
   // always flush stderr
   setbuf(stderr, NULL);
+
+  // Increase the timer resolution
+  ZwSetTimerResolution = (ZwSetTimerResolution_t)GetProcAddress(GetModuleHandle("ntdll.dll"), "ZwSetTimerResolution");
+  if (ZwSetTimerResolution)
+  {
+    ULONG actualResolution;
+    ZwSetTimerResolution(1, true, &actualResolution);
+    DEBUG_INFO("System timer resolution: %.2f ns", (float)actualResolution / 100.0f);
+  }
+
+  // get the performance frequency for spinlocks
+  QueryPerformanceFrequency(&app.perfFreq);
 
   HDEVINFO                         deviceInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
@@ -399,158 +423,4 @@ void os_shmemUnmap()
     DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
   else
     app.shmemOwned = false;
-}
-
-static DWORD WINAPI threadWrapper(LPVOID lpParameter)
-{
-  osThreadHandle * handle = (osThreadHandle *)lpParameter;
-  handle->resultCode = handle->function(handle->opaque);
-  return 0;
-}
-
-bool os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle)
-{
-  *handle             = (osThreadHandle *)malloc(sizeof(osThreadHandle));
-  (*handle)->name     = name;
-  (*handle)->function = function;
-  (*handle)->opaque   = opaque;
-  (*handle)->handle   = CreateThread(NULL, 0, threadWrapper, *handle, 0, &(*handle)->threadID);
-
-  if (!(*handle)->handle)
-  {
-    free(*handle);
-    *handle = NULL;
-    DEBUG_WINERROR("CreateThread failed", GetLastError());
-    return false;
-  }
-
-  return true;
-}
-
-bool os_joinThread(osThreadHandle * handle, int * resultCode)
-{
-  while(true)
-  {
-    switch(WaitForSingleObject(handle->handle, INFINITE))
-    {
-      case WAIT_OBJECT_0:
-        if (resultCode)
-          *resultCode = handle->resultCode;
-        CloseHandle(handle->handle);
-        free(handle);
-        return true;
-
-      case WAIT_ABANDONED:
-      case WAIT_TIMEOUT:
-        continue;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for thread failed", GetLastError());
-        CloseHandle(handle->handle);
-        free(handle);
-        return false;
-    }
-
-    break;
-  }
-
-  DEBUG_WINERROR("Unknown failure waiting for thread", GetLastError());
-  return false;
-}
-
-osEventHandle * os_createEvent(bool autoReset)
-{
-  HANDLE event = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
-  if (!event)
-  {
-    DEBUG_WINERROR("Failed to create the event", GetLastError());
-    return NULL;
-  }
-
-  return (osEventHandle*)event;
-}
-
-osEventHandle * os_wrapEvent(HANDLE event)
-{
-  return (osEventHandle*)event;
-}
-
-void os_freeEvent(osEventHandle * handle)
-{
-  CloseHandle((HANDLE)handle);
-}
-
-bool os_waitEvent(osEventHandle * handle, unsigned int timeout)
-{
-  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
-  while(true)
-  {
-    switch(WaitForSingleObject((HANDLE)handle, to))
-    {
-      case WAIT_OBJECT_0:
-        return true;
-
-      case WAIT_ABANDONED:
-        continue;
-
-      case WAIT_TIMEOUT:
-        if (timeout == TIMEOUT_INFINITE)
-          continue;
-
-        return false;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for event failed", GetLastError());
-        return false;
-    }
-
-    DEBUG_ERROR("Unknown wait event return code");
-    return false;
-  }
-}
-
-bool os_waitEvents(osEventHandle * handles[], int count, bool waitAll, unsigned int timeout)
-{
-  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
-  while(true)
-  {
-    DWORD result = WaitForMultipleObjects(count, (HANDLE*)handles, waitAll, to);
-    if (result >= WAIT_OBJECT_0 && result < count)
-    {
-      // null non signalled events from the handle list
-      for(int i = 0; i < count; ++i)
-        if (i != result && !os_waitEvent(handles[i], 0))
-          handles[i] = NULL;
-      return true;
-    }
-
-    if (result >= WAIT_ABANDONED_0 && result - WAIT_ABANDONED_0 < count)
-      continue;
-
-    switch(result)
-    {
-      case WAIT_TIMEOUT:
-        if (timeout == TIMEOUT_INFINITE)
-          continue;
-
-        return false;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for event failed", GetLastError());
-        return false;
-    }
-
-    DEBUG_ERROR("Unknown wait event return code");
-    return false;
-  }
-}
-
-bool os_signalEvent(osEventHandle * handle)
-{
-  return SetEvent((HANDLE)handle);
-}
-
-bool os_resetEvent(osEventHandle * handle)
-{
-  return ResetEvent((HANDLE)handle);
 }

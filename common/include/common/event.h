@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,7 +17,21 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "interface/platform.h"
-#include <windows.h>
+#pragma once
 
-osEventHandle * os_wrapEvent(HANDLE event);
+#include <stdbool.h>
+
+#define TIMEOUT_INFINITE ((unsigned int)~0)
+
+typedef struct LGEvent LGEvent;
+
+LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime);
+void      lgFreeEvent  (LGEvent * handle);
+bool      lgWaitEvent  (LGEvent * handle, unsigned int timeout);
+bool      lgWaitEvents (LGEvent * handles[], int count, bool waitAll, unsigned int timeout);
+bool      lgSignalEvent(LGEvent * handle);
+bool      lgResetEvent (LGEvent * handle);
+
+// os specific method to wrap/convert a native event into a LGEvent
+// for windows this is an event HANDLE
+LGEvent * lgWrapEvent(void * handle);

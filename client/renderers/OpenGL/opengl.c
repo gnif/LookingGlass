@@ -169,8 +169,15 @@ struct Inst
 static bool _check_gl_error(unsigned int line, const char * name);
 #define check_gl_error(name) _check_gl_error(__LINE__, name)
 
+enum ConfigStatus
+{
+  CONFIG_STATUS_OK,
+  CONFIG_STATUS_ERROR,
+  CONFIG_STATUS_NOOP
+};
+
 static void deconfigure(struct Inst * this);
-static bool configure(struct Inst * this, SDL_Window *window);
+static enum ConfigStatus configure(struct Inst * this, SDL_Window *window);
 static void update_mouse_shape(struct Inst * this, bool * newShape);
 static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
@@ -549,9 +556,19 @@ bool opengl_render(void * opaque, SDL_Window * window)
   if (!this)
     return false;
 
-  if (configure(this, window))
-    if (!draw_frame(this))
+  switch(configure(this, window))
+  {
+    case CONFIG_STATUS_ERROR:
+      DEBUG_ERROR("configure failed");
       return false;
+
+    case CONFIG_STATUS_NOOP :
+      break;
+
+    case CONFIG_STATUS_OK   :
+     if (!draw_frame(this))
+       return false;
+  }
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -828,13 +845,13 @@ static bool _check_gl_error(unsigned int line, const char * name)
   return true;
 }
 
-static bool configure(struct Inst * this, SDL_Window *window)
+static enum ConfigStatus configure(struct Inst * this, SDL_Window *window)
 {
   LG_LOCK(this->formatLock);
   if (!this->reconfigure)
   {
     LG_UNLOCK(this->formatLock);
-    return this->configured;
+    return CONFIG_STATUS_NOOP;
   }
 
   if (this->configured)
@@ -862,7 +879,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
 
     default:
       DEBUG_ERROR("Unknown/unsupported compression type");
-      return false;
+      return CONFIG_STATUS_ERROR;
   }
 
   // calculate the texture size in bytes
@@ -880,30 +897,36 @@ static bool configure(struct Inst * this, SDL_Window *window)
   if (this->amdPinnedMemSupport)
   {
     const int pagesize = getpagesize();
-    this->texPixels[0] = memalign(pagesize, this->texSize * BUFFER_COUNT);
-    memset(this->texPixels[0], 0, this->texSize * BUFFER_COUNT);
-    for(int i = 1; i < BUFFER_COUNT; ++i)
-      this->texPixels[i] = this->texPixels[0] + this->texSize;
 
     for(int i = 0; i < BUFFER_COUNT; ++i)
     {
-      glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
+      this->texPixels[i] = aligned_alloc(pagesize, this->texSize);
+      if (!this->texPixels[i])
+      {
+        DEBUG_ERROR("Failed to allocate memory for texture");
+        return CONFIG_STATUS_ERROR;
+      }
 
+      memset(this->texPixels[i], 0, this->texSize);
+
+      glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
       if (check_gl_error("glBindBuffer"))
       {
         LG_UNLOCK(this->formatLock);
-        return false;
+        return CONFIG_STATUS_ERROR;
       }
+
       glBufferData(
         GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
         this->texSize,
         this->texPixels[i],
-        GL_STREAM_DRAW);
+        GL_STREAM_DRAW
+      );
 
       if (check_gl_error("glBufferData"))
       {
         LG_UNLOCK(this->formatLock);
-        return false;
+        return CONFIG_STATUS_ERROR;
       }
     }
     glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
@@ -916,7 +939,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
       if (check_gl_error("glBindBuffer"))
       {
         LG_UNLOCK(this->formatLock);
-        return false;
+        return CONFIG_STATUS_ERROR;
       }
 
       glBufferData(
@@ -928,7 +951,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
       if (check_gl_error("glBufferData"))
       {
         LG_UNLOCK(this->formatLock);
-        return false;
+        return CONFIG_STATUS_ERROR;
       }
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -939,7 +962,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   if (check_gl_error("glGenTextures"))
   {
     LG_UNLOCK(this->formatLock);
-    return false;
+    return CONFIG_STATUS_ERROR;
   }
   this->hasFrames = true;
 
@@ -950,7 +973,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
     if (check_gl_error("glBindTexture"))
     {
       LG_UNLOCK(this->formatLock);
-      return false;
+      return CONFIG_STATUS_ERROR;
     }
 
     glTexImage2D(
@@ -967,7 +990,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
     if (check_gl_error("glTexImage2D"))
     {
       LG_UNLOCK(this->formatLock);
-      return false;
+      return CONFIG_STATUS_ERROR;
     }
 
     // configure the texture
@@ -998,7 +1021,7 @@ static bool configure(struct Inst * this, SDL_Window *window)
   this->reconfigure = false;
 
   LG_UNLOCK(this->formatLock);
-  return true;
+  return CONFIG_STATUS_OK;
 }
 
 static void deconfigure(struct Inst * this)
@@ -1026,9 +1049,6 @@ static void deconfigure(struct Inst * this)
 
   if (this->amdPinnedMemSupport)
   {
-    if (this->texPixels[0])
-      free(this->texPixels[0]);
-
     for(int i = 0; i < BUFFER_COUNT; ++i)
     {
       if (this->fences[i])
@@ -1036,7 +1056,12 @@ static void deconfigure(struct Inst * this)
         glDeleteSync(this->fences[i]);
         this->fences[i] = NULL;
       }
-      this->texPixels[i] = NULL;
+
+      if (this->texPixels[i])
+      {
+        free(this->texPixels[i]);
+        this->texPixels[i] = NULL;
+      }
     }
   }
 
@@ -1257,7 +1282,7 @@ static bool draw_frame(struct Inst * this)
   framebuffer_read_fn(
     this->frame,
     opengl_buffer_fn,
-    this->format.height * this->format.stride,
+    this->format.height * this->format.stride * 4,
     this
   );
 

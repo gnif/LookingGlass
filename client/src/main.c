@@ -39,6 +39,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/crash.h"
 #include "common/KVMFR.h"
 #include "common/stringutils.h"
+#include "common/thread.h"
+#include "common/event.h"
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
@@ -48,9 +50,12 @@ static int cursorThread(void * unused);
 static int renderThread(void * unused);
 static int frameThread (void * unused);
 
-static SDL_Thread *t_spice  = NULL;
-static SDL_Thread *t_render = NULL;
-static SDL_Cursor *cursor   = NULL;
+static LGEvent  *e_startup = NULL;
+static LGThread *t_spice   = NULL;
+static LGThread *t_render  = NULL;
+static LGThread *t_cursor  = NULL;
+static LGThread *t_frame   = NULL;
+static SDL_Cursor *cursor  = NULL;
 
 struct AppState state;
 
@@ -101,16 +106,14 @@ static int renderThread(void * unused)
   if (!state.lgr->render_startup(state.lgrData, state.window))
   {
     state.running = false;
+
+    /* unblock threads waiting on the condition */
+    lgSignalEvent(e_startup);
     return 1;
   }
 
-  // start the cursor thread after render startup to prevent a race condition
-  SDL_Thread *t_cursor = NULL;
-  if (!(t_cursor = SDL_CreateThread(cursorThread, "cursorThread", NULL)))
-  {
-    DEBUG_ERROR("cursor create thread failed");
-    return 1;
-  }
+  /* signal to other threads that the renderer is ready */
+  lgSignalEvent(e_startup);
 
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
@@ -161,10 +164,10 @@ static int renderThread(void * unused)
   state.running = false;
 
   if (t_cursor)
-    SDL_WaitThread(t_cursor, NULL);
+    lgJoinThread(t_cursor, NULL);
 
-  if (state.t_frame)
-    SDL_WaitThread(state.t_frame, NULL);
+  if (t_frame)
+    lgJoinThread(t_frame, NULL);
 
   state.lgr->deinitialize(state.lgrData);
   state.lgr = NULL;
@@ -179,6 +182,7 @@ static int cursorThread(void * unused)
 
   memset(&header, 0, sizeof(KVMFRCursor));
 
+  lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   while(state.running)
   {
     // poll until we have cursor data
@@ -292,6 +296,7 @@ static int frameThread(void * unused)
   memset(&header, 0, sizeof(struct KVMFRFrame));
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 
+  lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   while(state.running)
   {
     // poll until we have a new frame
@@ -381,6 +386,7 @@ static int frameThread(void * unused)
       updatePositionInfo();
     }
     FrameBuffer frame = (FrameBuffer)((uint8_t *)state.shm + header.dataPos);
+
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, frame))
     {
       DEBUG_ERROR("renderer on frame event returned failure");
@@ -1120,7 +1126,7 @@ static int lg_run()
         return -1;
       }
 
-    if (!(t_spice = SDL_CreateThread(spiceThread, "spiceThread", NULL)))
+    if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
     {
       DEBUG_ERROR("spice create thread failed");
       return -1;
@@ -1257,8 +1263,15 @@ static int lg_run()
     SDL_ShowCursor(SDL_DISABLE);
   }
 
+  // setup the startup condition
+  if (!(e_startup = lgCreateEvent(false, 0)))
+  {
+    DEBUG_ERROR("failed to create the startup event");
+    return -1;
+  }
+
   // start the renderThread so we don't just display junk
-  if (!(t_render = SDL_CreateThread(renderThread, "renderThread", NULL)))
+  if (!lgCreateThread("renderThread", renderThread, NULL, &t_render))
   {
     DEBUG_ERROR("render create thread failed");
     return -1;
@@ -1303,7 +1316,13 @@ static int lg_run()
     return -1;
   }
 
-  if (!(state.t_frame = SDL_CreateThread(frameThread, "frameThread", NULL)))
+  if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
+  {
+    DEBUG_ERROR("cursor create thread failed");
+    return 1;
+  }
+
+  if (!lgCreateThread("frameThread", frameThread, NULL, &t_frame))
   {
     DEBUG_ERROR("frame create thread failed");
     return -1;
@@ -1345,7 +1364,13 @@ static void lg_shutdown()
   state.running = false;
 
   if (t_render)
-    SDL_WaitThread(t_render, NULL);
+    lgJoinThread(t_render, NULL);
+
+  if (e_startup)
+  {
+    lgFreeEvent(e_startup);
+    e_startup = NULL;
+  }
 
   // if spice is still connected send key up events for any pressed keys
   if (params.useSpiceInput && spice_ready())
@@ -1361,7 +1386,7 @@ static void lg_shutdown()
       }
 
     if (t_spice)
-      SDL_WaitThread(t_spice, NULL);
+      lgJoinThread(t_spice, NULL);
 
     spice_disconnect();
   }

@@ -7,7 +7,6 @@ include_directories(
 
 add_library(platform_Windows STATIC
 	src/platform.c
-	src/windebug.c
 	src/mousehook.c
 )
 

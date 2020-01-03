@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/locking.h"
 #include "common/KVMFR.h"
 #include "common/crash.h"
+#include "common/thread.h"
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -52,10 +53,10 @@ struct app
   FrameBuffer   frame[MAX_FRAMES];
   unsigned int  frameOffset[MAX_FRAMES];
 
-  bool             running;
-  bool             reinit;
-  osThreadHandle * pointerThread;
-  osThreadHandle * frameThread;
+  bool       running;
+  bool       reinit;
+  LGThread * pointerThread;
+  LGThread * frameThread;
 };
 
 static struct app app;
@@ -162,6 +163,7 @@ static int frameThread(void * opaque)
   volatile KVMFRFrame * fi = &(app.shmHeader->frame);
 
   bool         frameValid     = false;
+  bool         repeatFrame    = false;
   int          frameIndex     = 0;
   unsigned int clientInstance = 0;
   CaptureFrame frame          = { 0 };
@@ -171,6 +173,7 @@ static int frameThread(void * opaque)
     switch(app.iface->waitFrame(&frame))
     {
       case CAPTURE_RESULT_OK:
+        repeatFrame = false;
         break;
 
       case CAPTURE_RESULT_REINIT:
@@ -191,8 +194,7 @@ static int frameThread(void * opaque)
         if (frameValid && clientInstance != app.clientInstance)
         {
           // resend the last frame
-          if (--frameIndex < 0)
-            frameIndex = MAX_FRAMES - 1;
+          repeatFrame = true;
           break;
         }
 
@@ -206,27 +208,32 @@ static int frameThread(void * opaque)
     while(fi->flags & KVMFR_FRAME_FLAG_UPDATE && app.running)
       usleep(1000);
 
-    switch(frame.format)
+    if (repeatFrame)
+      INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
+    else
     {
-      case CAPTURE_FMT_BGRA  : fi->type = FRAME_TYPE_BGRA  ; break;
-      case CAPTURE_FMT_RGBA  : fi->type = FRAME_TYPE_RGBA  ; break;
-      case CAPTURE_FMT_RGBA10: fi->type = FRAME_TYPE_RGBA10; break;
-      case CAPTURE_FMT_YUV420: fi->type = FRAME_TYPE_YUV420; break;
-      default:
-        DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
-        continue;
+      switch(frame.format)
+      {
+        case CAPTURE_FMT_BGRA  : fi->type = FRAME_TYPE_BGRA  ; break;
+        case CAPTURE_FMT_RGBA  : fi->type = FRAME_TYPE_RGBA  ; break;
+        case CAPTURE_FMT_RGBA10: fi->type = FRAME_TYPE_RGBA10; break;
+        case CAPTURE_FMT_YUV420: fi->type = FRAME_TYPE_YUV420; break;
+        default:
+          DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
+          continue;
+      }
+
+      fi->width   = frame.width;
+      fi->height  = frame.height;
+      fi->stride  = frame.stride;
+      fi->pitch   = frame.pitch;
+      fi->dataPos = app.frameOffset[frameIndex];
+      frameValid  = true;
+
+      framebuffer_prepare(app.frame[frameIndex]);
+      INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
+      app.iface->getFrame(app.frame[frameIndex]);
     }
-
-    fi->width   = frame.width;
-    fi->height  = frame.height;
-    fi->stride  = frame.stride;
-    fi->pitch   = frame.pitch;
-    fi->dataPos = app.frameOffset[frameIndex];
-    frameValid  = true;
-
-    framebuffer_prepare(app.frame[frameIndex]);
-    INTERLOCKED_OR8(&fi->flags, KVMFR_FRAME_FLAG_UPDATE);
-    app.iface->getFrame(app.frame[frameIndex]);
 
     if (++frameIndex == MAX_FRAMES)
       frameIndex = 0;
@@ -238,13 +245,13 @@ static int frameThread(void * opaque)
 bool startThreads()
 {
   app.running = true;
-  if (!os_createThread("CursorThread", pointerThread, NULL, &app.pointerThread))
+  if (!lgCreateThread("CursorThread", pointerThread, NULL, &app.pointerThread))
   {
     DEBUG_ERROR("Failed to create the pointer thread");
     return false;
   }
 
-  if (!os_createThread("FrameThread", frameThread, NULL, &app.frameThread))
+  if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
   {
     DEBUG_ERROR("Failed to create the frame thread");
     return false;
@@ -260,14 +267,14 @@ bool stopThreads()
   app.running = false;
   app.iface->stop();
 
-  if (app.frameThread && !os_joinThread(app.frameThread, NULL))
+  if (app.frameThread && !lgJoinThread(app.frameThread, NULL))
   {
     DEBUG_WARN("Failed to join the frame thread");
     ok = false;
   }
   app.frameThread = NULL;
 
-  if (app.pointerThread && !os_joinThread(app.pointerThread, NULL))
+  if (app.pointerThread && !lgJoinThread(app.pointerThread, NULL))
   {
     DEBUG_WARN("Failed to join the pointer thread");
     ok = false;

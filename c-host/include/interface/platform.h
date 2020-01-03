@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -31,24 +31,3 @@ const char * os_getExecutable();
 unsigned int os_shmemSize();
 bool         os_shmemMmap(void **ptr);
 void         os_shmemUnmap();
-
-// os specific thread functions
-
-typedef struct osThreadHandle osThreadHandle;
-typedef int (*osThreadFunction)(void * opaque);
-
-bool         os_createThread(const char * name, osThreadFunction function, void * opaque, osThreadHandle ** handle);
-bool         os_joinThread  (osThreadHandle * handle, int * resultCode);
-
-// os specific event functions
-
-#define TIMEOUT_INFINITE ((unsigned int)~0)
-
-typedef struct osEventHandle osEventHandle;
-
-osEventHandle * os_createEvent(bool autoReset);
-void            os_freeEvent  (osEventHandle * handle);
-bool            os_waitEvent  (osEventHandle * handle, unsigned int timeout);
-bool            os_waitEvents (osEventHandle * handles[], int count, bool waitAll, unsigned int timeout);
-bool            os_signalEvent(osEventHandle * handle);
-bool            os_resetEvent (osEventHandle * handle);

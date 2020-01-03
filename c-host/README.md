@@ -2,37 +2,26 @@
 
 ## What is this?
 
-This is a rewrite of the host application in pure C using the MinGW toolchain.
+The Looking Glass Host application for the Guest Virtual Machine.
 
-## Why make this?
+## What platforms does this support?
 
-Several reasons:
-
-1. The client is written in C and I would like to unify the project's language
-2. The host is currently hard to build using MinGW and is very Windows specific
-3. The host is a jumbled mess of code from all the experimentation going on
-4. I would eventually like to be able to port this to run on Linux guests
-
-## When will it be ready?
-
-Soon :)
-
-## Will it replace the C++ host?
-
-Yes, but only when it is feature complete.
-
-## Why doesn't this use CMake?
-
-It does now...
-~~Because win-builds doesn't distribute it, so to make it easy for everyone to compile we do not require it.~~
+Currently only Windows is supported however there is some initial support for Linux at this time.
 
 ## How do I build it?
 
 #### For Windows on Windows
 
+1. download and install msys2 x86_64 from http://www.msys2.org/ following the setup instructions provided
+3. execute `pacman -Fy` and then `pacman -Sy git make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake`
+4. run "C:\msys64\mingw64.exe"
+5. checkout the project
+  `git clone https://github.com/gnif/LookingGlass.git`
+6. configure the project and build it
+
 ```
-mkdir build
-cd build
+mkdir LookingGlass/c-host/build
+cd LookingGlass/c-host/build
 cmake -G "MSYS Makefiles" ..
 make
 ```
