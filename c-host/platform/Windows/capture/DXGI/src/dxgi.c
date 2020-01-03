@@ -240,7 +240,12 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
     if (optAdapter)
     {
       DXGI_ADAPTER_DESC1 adapterDesc;
-      IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+      status = IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to get the device description", status);
+        goto fail;
+      }
 
       const size_t s = (wcslen(adapterDesc.Description)+1) * 2;
       char * desc = malloc(s);
