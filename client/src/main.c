@@ -75,6 +75,17 @@ static void updatePositionInfo()
     {
       const float srcAspect = (float)state.srcSize.y / (float)state.srcSize.x;
       const float wndAspect = (float)state.windowH / (float)state.windowW;
+      bool force = true;
+
+      if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
+      {
+        force           = false;
+        state.dstRect.w = state.windowW;
+        state.dstRect.h = state.windowH;
+        state.dstRect.x = 0;
+        state.dstRect.y = 0;
+      }
+      else
       if (wndAspect < srcAspect)
       {
         state.dstRect.w = (float)state.windowH / srcAspect;
@@ -89,6 +100,12 @@ static void updatePositionInfo()
         state.dstRect.x = 0;
         state.dstRect.y = (state.windowH >> 1) - (state.dstRect.h >> 1);
       }
+
+      if (force && params.forceAspect)
+      {
+        state.resizeTimeout = getMicrotime() + RESIZE_TIMEOUT;
+        state.resizeDone    = false;
+      }
     }
     else
     {
@@ -101,12 +118,6 @@ static void updatePositionInfo()
 
     state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
     state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
-
-    if (params.forceAspect)
-    {
-      state.resizeTimeout = getMicrotime() + RESIZE_TIMEOUT;
-      state.resizeDone    = false;
-    }
   }
 
   state.lgrResize = true;
