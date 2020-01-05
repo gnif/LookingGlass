@@ -82,6 +82,18 @@ static char * uioGetName(const char * shmDevice)
 
 static bool ivshmemDeviceValidator(struct Option * opt, const char ** error)
 {
+  // if it's not a uio device, it must be a file on disk
+  if (strlen(opt->value.x_string) > 3 && memcmp(opt->value.x_string, "uio", 3) != 0)
+  {
+    struct stat st;
+    if (stat(opt->value.x_string, &st) != 0)
+    {
+      *error = "Invalid path to the ivshmem file specified";
+      return false;
+    }
+    return true;
+  }
+
   char * name = uioGetName(opt->value.x_string);
   if (!name)
   {
@@ -133,11 +145,12 @@ void ivshmemOptionsInit()
   struct Option options[] =
   {
     {
-      .module         = "os",
-      .name           = "shmDevice",
-      .description    = "The IVSHMEM device to use",
+      .module         = "app",
+      .name           = "shmFile",
+      .shortopt       = 'f',
+      .description    = "The path to the shared memory file, or the name of the uio device to use, ie: uio0",
       .type           = OPTION_TYPE_STRING,
-      .value.x_string = "uio0",
+      .value.x_string = "/dev/shm/looking-glass",
       .validator      = ivshmemDeviceValidator,
       .getValues      = ivshmemDeviceGetValues
     },
@@ -151,12 +164,15 @@ bool ivshmemOpen(struct IVSHMEM * dev)
 {
   assert(dev);
 
-  const char * shmDevice = option_get_string("os", "shmDevice");
+  const char * shmDevice = option_get_string("app", "shmFile");
   unsigned int devSize;
   int devFD;
 
+  dev->opaque = NULL;
+
   DEBUG_INFO("KVMFR Device     : %s", shmDevice);
 
+  if (strlen(shmDevice) > 3 && memcmp(shmDevice, "uio", 3) == 0)
   {
     // get the device size
     int fd = uioOpenFile(shmDevice, "maps/map0/size");
@@ -178,9 +194,7 @@ bool ivshmemOpen(struct IVSHMEM * dev)
     size[len] = '\0';
     close(fd);
     devSize = strtoul(size, NULL, 16);
-  }
 
-  {
     char * path;
     alloc_sprintf(&path, "/dev/%s", shmDevice);
     devFD = open(path, O_RDWR, (mode_t)0600);
@@ -193,11 +207,27 @@ bool ivshmemOpen(struct IVSHMEM * dev)
     }
     free(path);
   }
+  else
+  {
+    struct stat st;
+    if (stat(shmDevice, &st) != 0)
+    {
+      DEBUG_ERROR("Failed to stat: %s", shmDevice);
+      return false;
+    }
+
+    devSize = st.st_size;
+    devFD   = open(shmDevice, O_RDWR, (mode_t)0600);
+    if (devFD < 0)
+    {
+      DEBUG_ERROR("Failed to open: %s", shmDevice);
+      return false;
+    }
+  }
 
   void * map = mmap(0, devSize, PROT_READ | PROT_WRITE, MAP_SHARED, devFD, 0);
   if (map == MAP_FAILED)
   {
-    const char * shmDevice = option_get_string("os", "shmDevice");
     DEBUG_ERROR("Failed to map the shared memory device: %s", shmDevice);
     return false;
   }
@@ -217,6 +247,9 @@ void ivshmemClose(struct IVSHMEM * dev)
 {
   assert(dev);
 
+  if (!dev->opaque)
+    return;
+
   struct IVSHMEMInfo * info =
     (struct IVSHMEMInfo *)dev->opaque;
 
@@ -224,4 +257,5 @@ void ivshmemClose(struct IVSHMEM * dev)
   close(info->fd);
 
   free(info);
+  dev->opaque = NULL;
 }

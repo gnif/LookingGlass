@@ -93,8 +93,6 @@ struct AppParams
   bool         center;
   int          x, y;
   unsigned int w, h;
-  const char * shmFile;
-  unsigned int shmSize;
   unsigned int fpsLimit;
   bool         showFPS;
   bool         useSpiceInput;

@@ -53,22 +53,6 @@ static struct Option options[] =
     .value.x_string = NULL,
   },
   {
-    .module         = "app",
-    .name           = "shmFile",
-    .description    = "The path to the shared memory file",
-    .shortopt       = 'f',
-    .type           = OPTION_TYPE_STRING,
-    .value.x_string = "/dev/shm/looking-glass",
-  },
-  {
-    .module         = "app",
-    .name           = "shmSize",
-    .description    = "Specify the size in MB of the shared memory file (0 = detect)",
-    .shortopt       = 'L',
-    .type           = OPTION_TYPE_INT,
-    .value.x_int    = 0,
-  },
-  {
     .module        = "app",
     .name          = "renderer",
     .description   = "Specify the renderer to use",
@@ -387,8 +371,6 @@ bool config_load(int argc, char * argv[])
   }
 
   // setup the application params for the basic types
-  params.shmFile            = option_get_string("app", "shmFile"           );
-  params.shmSize            = option_get_int   ("app", "shmSize"           ) * 1048576;
   params.cursorPollInterval = option_get_int   ("app", "cursorPollInterval");
   params.framePollInterval  = option_get_int   ("app", "framePollInterval" );
 
