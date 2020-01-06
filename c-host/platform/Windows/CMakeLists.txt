@@ -23,7 +23,6 @@ target_link_libraries(platform_Windows
 	"${PROJECT_BINARY_DIR}/resource.o"
 	lg_common
 	capture
-	setupapi
 )
 
 target_include_directories(platform_Windows
