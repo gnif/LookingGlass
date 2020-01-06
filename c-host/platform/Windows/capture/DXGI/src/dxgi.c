@@ -307,7 +307,18 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
     goto fail;
   }
 
-  static const D3D_FEATURE_LEVEL featureLevels[] =
+  static const D3D_FEATURE_LEVEL win8[] =
+  {
+    D3D_FEATURE_LEVEL_11_1,
+    D3D_FEATURE_LEVEL_11_0,
+    D3D_FEATURE_LEVEL_10_1,
+    D3D_FEATURE_LEVEL_10_0,
+    D3D_FEATURE_LEVEL_9_3,
+    D3D_FEATURE_LEVEL_9_2,
+    D3D_FEATURE_LEVEL_9_1
+  };
+
+  static const D3D_FEATURE_LEVEL win10[] =
   {
     D3D_FEATURE_LEVEL_12_1,
     D3D_FEATURE_LEVEL_12_0,
@@ -319,6 +330,19 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
     D3D_FEATURE_LEVEL_9_2,
     D3D_FEATURE_LEVEL_9_1
   };
+
+  const D3D_FEATURE_LEVEL * featureLevels;
+  unsigned int featureLevelCount;
+  if (IsWindows8())
+  {
+    featureLevels     = win8;
+    featureLevelCount = sizeof(win8) / sizeof(D3D_FEATURE_LEVEL);
+  }
+  else
+  {
+    featureLevels     = win10;
+    featureLevelCount = sizeof(win10) / sizeof(D3D_FEATURE_LEVEL);
+  }
 
   IDXGIAdapter * tmp;
   status = IDXGIAdapter1_QueryInterface(this->adapter, &IID_IDXGIAdapter, (void **)&tmp);
@@ -333,7 +357,7 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
     D3D_DRIVER_TYPE_UNKNOWN,
     NULL,
     D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-    featureLevels, sizeof(featureLevels) / sizeof(D3D_FEATURE_LEVEL),
+    featureLevels, featureLevelCount,
     D3D11_SDK_VERSION,
     &this->device,
     &this->featureLevel,
