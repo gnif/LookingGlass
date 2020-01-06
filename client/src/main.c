@@ -137,11 +137,39 @@ static int renderThread(void * unused)
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
+  unsigned int resyncCheck = 0;
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
 
   while(state.running)
   {
+    // if our clock is too far out of sync, resync it
+    // this can happen when switching to/from a TTY, or due to clock drift
+    // we only check this once every 100 frames
+    if (++resyncCheck == 100)
+    {
+      resyncCheck = 0;
+
+      struct timespec tmp;
+      clock_gettime(CLOCK_MONOTONIC, &tmp);
+      if (tmp.tv_nsec - time.tv_nsec < 0)
+      {
+        tmp.tv_sec -= time.tv_sec - 1;
+        tmp.tv_nsec = 1000000000 + tmp.tv_nsec - time.tv_nsec;
+      }
+      else
+      {
+        tmp.tv_sec  -= time.tv_sec;
+        tmp.tv_nsec -= time.tv_nsec;
+      }
+      const unsigned long diff = tmp.tv_sec * 1000000000 + tmp.tv_nsec;
+      if (diff > state.frameTime)
+      {
+        DEBUG_INFO("Timer drift detected, %lu is > %lu", diff, state.frameTime);
+        clock_gettime(CLOCK_MONOTONIC, &time);
+      }
+    }
+
     if (state.lgrResize)
     {
       if (state.lgr)
