@@ -60,5 +60,7 @@ inline static BOOL CompareWindowsVersion(DWORD dwMajorVersion, DWORD dwMinorVers
 
 bool IsWindows8()
 {
-  return CompareWindowsVersion(6, 3) == TRUE;
+  return
+    (CompareWindowsVersion(6, 3) == TRUE) ||
+    (CompareWindowsVersion(6, 2) == TRUE);
 }
