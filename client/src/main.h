@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/ivshmem.h"
 
 #include "spice/spice.h"
+#include <lgmp/client.h>
 
 struct AppState
 {
@@ -58,7 +59,9 @@ struct AppState
   SDL_Window         * window;
 
   struct IVSHMEM       shm;
-  struct KVMFRHeader * kvmfr;
+  PLGMPClient          lgmp;
+  PLGMPCQueue          frameQueue;
+  PLGMPCQueue          pointerQueue;
 
   uint64_t          frameTime;
   uint64_t          lastFrameTime;

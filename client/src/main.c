@@ -236,41 +236,54 @@ static int renderThread(void * unused)
 
 static int cursorThread(void * unused)
 {
-  KVMFRCursor         header;
+  LGMP_STATUS         status;
+  PLGMPCQueue         queue;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
-  uint32_t            version        = 0;
-
-  memset(&header, 0, sizeof(KVMFRCursor));
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
+
+  // subscribe to the pointer queue
   while(state.running)
   {
-    // poll until we have cursor data
-    if(!(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE) &&
-        !(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_POS))
+    status = lgmpClientSubscribe(state.lgmp, LGMP_Q_POINTER, &queue);
+    if (status == LGMP_OK)
+      break;
+
+    if (status == LGMP_ERR_NO_SUCH_QUEUE)
     {
-      if (!state.running)
-        return 0;
-      usleep(params.cursorPollInterval);
+      usleep(1000);
       continue;
     }
 
-    // if the cursor was moved
-    bool moved = false;
-    if (state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_POS)
+    DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
+    state.running = false;
+    break;
+  }
+
+  while(state.running)
+  {
+    LGMPMessage msg;
+    if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
     {
-      state.cursor.x      = state.kvmfr->cursor.x;
-      state.cursor.y      = state.kvmfr->cursor.y;
-      state.haveCursorPos = true;
-      moved               = true;
+      if (status == LGMP_ERR_QUEUE_EMPTY)
+      {
+        usleep(params.cursorPollInterval);
+        continue;
+      }
+
+      DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
+      state.running = false;
+      break;
     }
 
-    // if this was only a move event
-    if (!(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
-    {
-      // turn off the pos flag, trigger the event and continue
-      __sync_and_and_fetch(&state.kvmfr->cursor.flags, ~KVMFR_CURSOR_FLAG_POS);
+    KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
+    state.cursor.x      = cursor->x;
+    state.cursor.y      = cursor->y;
+    state.haveCursorPos = true;
 
+    // if this was only a move event
+    if (msg.udata == 0)
+    {
       state.lgr->on_mouse_event
       (
         state.lgrData,
@@ -278,61 +291,40 @@ static int cursorThread(void * unused)
         state.cursor.x,
         state.cursor.y
       );
+      lgmpClientMessageDone(queue);
       continue;
     }
 
-    // we must take a copy of the header to prevent the contained arguments
-    // from being abused to overflow buffers.
-    memcpy(&header, &state.kvmfr->cursor, sizeof(struct KVMFRCursor));
-
-    if (header.flags & KVMFR_CURSOR_FLAG_SHAPE &&
-        header.version != version)
+    switch(cursor->type)
     {
-      version = header.version;
-
-      bool bad = false;
-      switch(header.type)
-      {
-        case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
-        case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
-        case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
-        default:
-          DEBUG_ERROR("Invalid cursor type");
-          bad = true;
-          break;
-      }
-
-      if (bad)
-        break;
-
-      // check the data position is sane
-      const uint64_t dataSize = header.height * header.pitch;
-      if (header.dataPos + dataSize > state.shm.size)
-      {
-        DEBUG_ERROR("The guest sent an invalid mouse dataPos");
-        break;
-      }
-
-      const uint8_t * data = (const uint8_t *)state.kvmfr + header.dataPos;
-      if (!state.lgr->on_mouse_shape(
-        state.lgrData,
-        cursorType,
-        header.width,
-        header.height,
-        header.pitch,
-        data)
-      )
-      {
-        DEBUG_ERROR("Failed to update mouse shape");
-        break;
-      }
+      case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
+      case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
+      case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
+      default:
+        DEBUG_ERROR("Invalid cursor type");
+        lgmpClientMessageDone(queue);
+        continue;
     }
 
-    // now we have taken the mouse data, we can flag to the host we are ready
-    state.kvmfr->cursor.flags = 0;
+    const uint8_t * data = (const uint8_t *)(cursor + 1);
+    if (!state.lgr->on_mouse_shape(
+      state.lgrData,
+      cursorType,
+      cursor->width,
+      cursor->height,
+      cursor->pitch,
+      data)
+    )
+    {
+      DEBUG_ERROR("Failed to update mouse shape");
+      lgmpClientMessageDone(queue);
+      continue;
+    }
 
-    bool showCursor = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
-    if (showCursor != state.cursorVisible || moved)
+    bool showCursor = cursor->visible;
+    lgmpClientMessageDone(queue);
+
+    if (showCursor != state.cursorVisible)
     {
       state.cursorVisible = showCursor;
       state.lgr->on_mouse_event
@@ -345,67 +337,65 @@ static int cursorThread(void * unused)
     }
   }
 
+  lgmpClientUnsubscribe(&queue);
+  state.running = false;
   return 0;
 }
 
 static int frameThread(void * unused)
 {
-  bool       error = false;
-  KVMFRFrame header;
+  LGMP_STATUS status;
+  PLGMPCQueue queue;
 
-  memset(&header, 0, sizeof(struct KVMFRFrame));
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
-
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
+
+  // subscribe to the frame queue
   while(state.running)
   {
-    // poll until we have a new frame
-    while(!(state.kvmfr->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
+    status = lgmpClientSubscribe(state.lgmp, LGMP_Q_FRAME, &queue);
+    if (status == LGMP_OK)
+      break;
+
+    if (status == LGMP_ERR_NO_SUCH_QUEUE)
     {
-      if (!state.running)
-        break;
-
-      usleep(params.framePollInterval);
-      continue;
-    }
-
-    // we must take a copy of the header to prevent the contained
-    // arguments from being abused to overflow buffers.
-    memcpy(&header, &state.kvmfr->frame, sizeof(struct KVMFRFrame));
-
-    // tell the host to continue as the host buffers up to one frame
-    // we can be sure the data for this frame wont be touched
-    __sync_and_and_fetch(&state.kvmfr->frame.flags, ~KVMFR_FRAME_FLAG_UPDATE);
-
-    // sainty check of the frame format
-    if (
-      header.type    >= FRAME_TYPE_MAX ||
-      header.width   == 0 ||
-      header.height  == 0 ||
-      header.pitch   == 0 ||
-      header.dataPos == 0 ||
-      header.dataPos > state.shm.size ||
-      header.pitch   < header.width
-    ){
-      DEBUG_WARN("Bad header");
-      DEBUG_WARN("  width  : %u"     , header.width  );
-      DEBUG_WARN("  height : %u"     , header.height );
-      DEBUG_WARN("  pitch  : %u"     , header.pitch  );
-      DEBUG_WARN("  dataPos: 0x%08lx", header.dataPos);
       usleep(1000);
       continue;
     }
 
+    DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
+    state.running = false;
+    break;
+  }
+
+  while(state.running)
+  {
+    LGMPMessage msg;
+    if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
+    {
+      if (status == LGMP_ERR_QUEUE_EMPTY)
+      {
+        usleep(params.framePollInterval);
+        continue;
+      }
+
+      DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
+      break;
+    }
+
+    KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+
     // setup the renderer format with the frame format details
     LG_RendererFormat lgrFormat;
-    lgrFormat.type   = header.type;
-    lgrFormat.width  = header.width;
-    lgrFormat.height = header.height;
-    lgrFormat.stride = header.stride;
-    lgrFormat.pitch  = header.pitch;
+    lgrFormat.type   = frame->type;
+    lgrFormat.width  = frame->width;
+    lgrFormat.height = frame->height;
+    lgrFormat.stride = frame->stride;
+    lgrFormat.pitch  = frame->pitch;
 
     size_t dataSize;
-    switch(header.type)
+    bool   error = false;
+    switch(frame->type)
     {
       case FRAME_TYPE_RGBA:
       case FRAME_TYPE_BGRA:
@@ -427,35 +417,32 @@ static int frameThread(void * unused)
     }
 
     if (error)
-      break;
-
-    // check the header's dataPos is sane
-    if (header.dataPos + dataSize > state.shm.size)
     {
-      DEBUG_ERROR("The guest sent an invalid dataPos");
+      lgmpClientMessageDone(queue);
       break;
     }
 
-    if (header.width != state.srcSize.x || header.height != state.srcSize.y)
+    if (frame->width != state.srcSize.x || frame->height != state.srcSize.y)
     {
-      state.srcSize.x = header.width;
-      state.srcSize.y = header.height;
+      state.srcSize.x = frame->width;
+      state.srcSize.y = frame->height;
       state.haveSrcSize = true;
       if (params.autoResize)
-        SDL_SetWindowSize(state.window, header.width, header.height);
+        SDL_SetWindowSize(state.window, frame->width, frame->height);
       updatePositionInfo();
     }
-    FrameBuffer frame = (FrameBuffer)((uint8_t *)state.kvmfr + header.dataPos);
 
-    if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, frame))
+    FrameBuffer fb = (FrameBuffer)(frame + 1);
+    if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, fb))
     {
       DEBUG_ERROR("renderer on frame event returned failure");
       break;
     }
-
+    lgmpClientMessageDone(queue);
     ++state.frameCount;
   }
 
+  lgmpClientUnsubscribe(&queue);
   state.running = false;
   return 0;
 }
@@ -1122,8 +1109,6 @@ static int lg_run()
     return -1;
   }
 
-  state.kvmfr = (struct KVMFRHeader*)state.shm.mem;
-
   // try to connect to the spice server
   if (params.useSpiceInput || params.useSpiceClipboard)
   {
@@ -1322,33 +1307,26 @@ static int lg_run()
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
   SDL_SetEventFilter(eventFilter, NULL);
 
-  // flag the host that we are starting up this is important so that
-  // the host wakes up if it is waiting on an interrupt, the host will
-  // also send us the current mouse shape since we won't know it yet
-  DEBUG_INFO("Waiting for host to signal it's ready...");
-  __sync_or_and_fetch(&state.kvmfr->flags, KVMFR_HEADER_FLAG_RESTART);
+  LGMP_STATUS status;
+  while(true)
+  {
+    if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
+      break;
 
-  while(state.running && (state.kvmfr->flags & KVMFR_HEADER_FLAG_RESTART))
-    SDL_WaitEventTimeout(NULL, 1000);
+    if (status == LGMP_ERR_INVALID_SESSION)
+    {
+      SDL_WaitEventTimeout(NULL, 1000);
+      continue;
+    }
+
+    DEBUG_ERROR("lgmpClientInit Failed: %s", lgmpStatusString(status));
+    return -1;
+  }
 
   if (!state.running)
     return -1;
 
   DEBUG_INFO("Host ready, starting session");
-
-  // check the header's magic and version are valid
-  if (memcmp(state.kvmfr->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
-  {
-    DEBUG_ERROR("Invalid header magic, is the host running?");
-    return -1;
-  }
-
-  if (state.kvmfr->version != KVMFR_HEADER_VERSION)
-  {
-    DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.kvmfr->version);
-    DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
-    return -1;
-  }
 
   if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
   {
@@ -1367,6 +1345,14 @@ static int lg_run()
   {
     SDL_WaitEventTimeout(NULL, 1000);
 
+    if (!lgmpClientSessionValid(state.lgmp))
+    {
+      DEBUG_WARN("Session is invalid, has the host shutdown?");
+      break;
+    }
+
+    (void)closeAlert;
+    /*
     if (closeAlert == NULL)
     {
       if (state.kvmfr->flags & KVMFR_HEADER_FLAG_PAUSED)
@@ -1388,6 +1374,7 @@ static int lg_run()
         closeAlert  = NULL;
       }
     }
+    */
   }
 
   return 0;
@@ -1399,6 +1386,8 @@ static void lg_shutdown()
 
   if (t_render)
     lgJoinThread(t_render, NULL);
+
+  lgmpClientFree(&state.lgmp);
 
   if (e_startup)
   {
