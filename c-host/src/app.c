@@ -261,6 +261,7 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
   // spin until there is room
   while(lgmpHostQueuePending(app.pointerQueue) == LGMP_Q_POINTER_LEN)
   {
+    DEBUG_INFO("pending");
     if (!app.running)
       return false;
   }
@@ -273,19 +274,12 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
 
 void capturePostPointerBuffer(CapturePointer pointer)
 {
-  // spin until there is room
-  while(lgmpHostQueuePending(app.pointerQueue) == LGMP_Q_POINTER_LEN)
-  {
-    if (!app.running)
-      return;
-  }
-
   PLGMPMemory mem;
   const bool newClient = lgmpHostNewSubCount(app.pointerQueue) > 0;
 
   if (pointer.shapeUpdate || newClient)
   {
-    if (!newClient)
+    if (pointer.shapeUpdate)
     {
       // swap the latest shape buffer out of rotation
       PLGMPMemory tmp  = app.pointerShape;
@@ -297,7 +291,11 @@ void capturePostPointerBuffer(CapturePointer pointer)
     mem = app.pointerShape;
   }
   else
+  {
     mem = app.pointerMemory[app.pointerIndex];
+    if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
+      app.pointerIndex = 0;
+  }
 
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
   cursor->x       = pointer.x;
@@ -324,17 +322,18 @@ void capturePostPointerBuffer(CapturePointer pointer)
     app.pointerShapeValid = true;
   }
 
-  const bool sendShape = (pointer.shapeUpdate || newClient) && app.pointerShapeValid;
+  const uint32_t sendShape =
+    ((pointer.shapeUpdate || newClient) && app.pointerShapeValid) ? 1 : 0;
 
   LGMP_STATUS status;
-  if ((status = lgmpHostPost(app.pointerQueue, sendShape ? 1 : 0, mem)) != LGMP_OK)
+  while ((status = lgmpHostPost(app.pointerQueue, sendShape, mem)) != LGMP_OK)
   {
+    if (status == LGMP_ERR_QUEUE_FULL)
+      continue;
+
     DEBUG_ERROR("lgmpHostPost Failed (Pointer): %s", lgmpStatusString(status));
     return;
   }
-
-  if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
-    app.pointerIndex = 0;
 }
 
 // this is called from the platform specific startup routine

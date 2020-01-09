@@ -699,7 +699,7 @@ static CaptureResult dxgi_capture()
   // if the pointer has moved or changed state
   bool           postPointer      = false;
   CapturePointer pointer          = { 0 };
-  void  *        pointerShape     = NULL;
+  void *         pointerShape     = NULL;
   UINT           pointerShapeSize = 0;
 
   if (frameInfo.LastMouseUpdateTime.QuadPart)
