@@ -710,9 +710,9 @@ static CaptureResult dxgi_capture()
       frameInfo.PointerPosition.Visible    != this->lastPointerVisible
       )
     {
-      this->lastPointerX       = pointer.x       = frameInfo.PointerPosition.Position.x;
-      this->lastPointerY       = pointer.y       = frameInfo.PointerPosition.Position.y;
-      this->lastPointerVisible = pointer.visible = frameInfo.PointerPosition.Visible;
+      this->lastPointerX       = frameInfo.PointerPosition.Position.x;
+      this->lastPointerY       = frameInfo.PointerPosition.Position.y;
+      this->lastPointerVisible = frameInfo.PointerPosition.Visible;
       postPointer = true;
     }
   }
@@ -754,7 +754,12 @@ static CaptureResult dxgi_capture()
 
   // post back the pointer information
   if (postPointer)
+  {
+    pointer.x       = this->lastPointerX;
+    pointer.y       = this->lastPointerY;
+    pointer.visible = this->lastPointerVisible;
     this->postPointerBufferFn(pointer);
+  }
 
   return CAPTURE_RESULT_OK;
 }
