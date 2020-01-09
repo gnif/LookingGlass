@@ -279,62 +279,46 @@ static int cursorThread(void * unused)
     KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
     state.cursor.x      = cursor->x;
     state.cursor.y      = cursor->y;
+    state.cursorVisible = cursor->visible;
     state.haveCursorPos = true;
 
-    // if this was only a move event
-    if (msg.udata == 0)
+    if (msg.udata == 1)
     {
-      state.lgr->on_mouse_event
-      (
-        state.lgrData,
-        state.cursorVisible,
-        state.cursor.x,
-        state.cursor.y
-      );
-      lgmpClientMessageDone(queue);
-      continue;
-    }
+      switch(cursor->type)
+      {
+        case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
+        case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
+        case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
+        default:
+          DEBUG_ERROR("Invalid cursor type");
+          lgmpClientMessageDone(queue);
+          continue;
+      }
 
-    switch(cursor->type)
-    {
-      case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
-      case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
-      case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
-      default:
-        DEBUG_ERROR("Invalid cursor type");
+      const uint8_t * data = (const uint8_t *)(cursor + 1);
+      if (!state.lgr->on_mouse_shape(
+        state.lgrData,
+        cursorType,
+        cursor->width,
+        cursor->height,
+        cursor->pitch,
+        data)
+      )
+      {
+        DEBUG_ERROR("Failed to update mouse shape");
         lgmpClientMessageDone(queue);
         continue;
+      }
     }
 
-    const uint8_t * data = (const uint8_t *)(cursor + 1);
-    if (!state.lgr->on_mouse_shape(
-      state.lgrData,
-      cursorType,
-      cursor->width,
-      cursor->height,
-      cursor->pitch,
-      data)
-    )
-    {
-      DEBUG_ERROR("Failed to update mouse shape");
-      lgmpClientMessageDone(queue);
-      continue;
-    }
-
-    bool showCursor = cursor->visible;
     lgmpClientMessageDone(queue);
-
-    if (showCursor != state.cursorVisible)
-    {
-      state.cursorVisible = showCursor;
-      state.lgr->on_mouse_event
-      (
-        state.lgrData,
-        state.cursorVisible,
-        state.cursor.x,
-        state.cursor.y
-      );
-    }
+    state.lgr->on_mouse_event
+    (
+      state.lgrData,
+      state.cursorVisible,
+      state.cursor.x,
+      state.cursor.y
+    );
   }
 
   lgmpClientUnsubscribe(&queue);
