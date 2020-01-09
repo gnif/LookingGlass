@@ -710,10 +710,10 @@ static CaptureResult dxgi_capture()
       frameInfo.PointerPosition.Visible    != this->lastPointerVisible
       )
     {
-      pointer.x       = frameInfo.PointerPosition.Position.x;
-      pointer.y       = frameInfo.PointerPosition.Position.y;
-      pointer.visible = frameInfo.PointerPosition.Visible;
-      postPointer   = true;
+      this->lastPointerX       = pointer.x       = frameInfo.PointerPosition.Position.x;
+      this->lastPointerY       = pointer.y       = frameInfo.PointerPosition.Position.y;
+      this->lastPointerVisible = pointer.visible = frameInfo.PointerPosition.Visible;
+      postPointer = true;
     }
   }
 
@@ -744,10 +744,11 @@ static CaptureResult dxgi_capture()
           return CAPTURE_RESULT_ERROR;
       }
 
-      pointer.width  = shapeInfo.Width;
-      pointer.height = shapeInfo.Height;
-      pointer.pitch  = shapeInfo.Pitch;
-      postPointer    = true;
+      pointer.shapeUpdate = true;
+      pointer.width       = shapeInfo.Width;
+      pointer.height      = shapeInfo.Height;
+      pointer.pitch       = shapeInfo.Pitch;
+      postPointer         = true;
     }
   }
 
