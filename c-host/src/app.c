@@ -39,10 +39,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
 
-#define LGMP_Q_POINTER     1
 #define LGMP_Q_POINTER_LEN 10
-#define LGMP_Q_FRAME      2
-#define LGMP_Q_FRAME_LEN  2
+#define LGMP_Q_FRAME_LEN   2
 
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (128 * 128 * 4))
 
@@ -301,7 +299,7 @@ void capturePostPointerBuffer(CapturePointer pointer)
     return;
   }
 
-  if (app.pointerIndex++ == LGMP_Q_POINTER_LEN)
+  if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
     app.pointerIndex = 0;
 }
 
@@ -390,7 +388,7 @@ int app_main(int argc, char * argv[])
     }
   }
 
-  DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE);
+  DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
   DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
 
   CaptureInterface * iface = NULL;
