@@ -52,7 +52,8 @@ set(SOURCES
 	src/app.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/common"    "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 add_subdirectory(platform)
 
 if(WIN32)
@@ -63,6 +64,7 @@ endif()
 target_link_libraries(looking-glass-host
 	lg_common
 	platform
+	lgmp
 )
 set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
 install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-host DESTINATION bin/ COMPONENT binary)
