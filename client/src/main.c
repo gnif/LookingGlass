@@ -644,15 +644,35 @@ void spiceClipboardRequest(const SpiceDataType type)
 
 static void handleMouseMoveEvent(int ex, int ey)
 {
+  static bool wrapping = false;
+  static int  wrapX, wrapY;
+
   if (state.ignoreInput || !params.useSpiceInput)
     return;
 
   if (state.serverMode)
   {
-    /* get the screen center as SDL sees it */
-    SDL_GetWindowSize(state.window, &lastX, &lastY);
-    lastX /= 2;
-    lastY /= 2;
+    if (wrapping)
+    {
+      if (ex == state.windowW / 2 && ey == state.windowH / 2)
+      {
+        lastX += (state.windowW / 2) - wrapX;
+        lastY += (state.windowH / 2) - wrapY;
+        wrapping = false;
+      }
+    }
+    else
+    {
+      if (
+          ex < 100 || ex > state.windowW - 100 ||
+          ey < 100 || ey > state.windowH - 100)
+      {
+        wrapping = true;
+        wrapX    = ex;
+        wrapY    = ey;
+        SDL_WarpMouseInWindow(state.window, state.windowW / 2, state.windowH / 2);
+      }
+    }
   }
   else
   {
@@ -814,7 +834,6 @@ int eventFilter(void * userdata, SDL_Event * event)
           {
             state.serverMode = !state.serverMode;
             spice_mouse_mode(state.serverMode);
-            SDL_SetRelativeMouseMode(state.serverMode);
             SDL_SetWindowGrab(state.window, state.serverMode);
             DEBUG_INFO("Server Mode: %s", state.serverMode ? "on" : "off");
 
