@@ -271,6 +271,18 @@ static int cursorThread(void * unused)
     {
       if (status == LGMP_ERR_QUEUE_EMPTY)
       {
+        if (state.updateCursor)
+        {
+          state.updateCursor = false;
+          state.lgr->on_mouse_event
+          (
+            state.lgrData,
+            state.cursorVisible && state.drawCursor,
+            state.cursor.x,
+            state.cursor.y
+          );
+        }
+
         usleep(params.cursorPollInterval);
         continue;
       }
@@ -284,11 +296,12 @@ static int cursorThread(void * unused)
     state.cursor.x      = cursor->x;
     state.cursor.y      = cursor->y;
     state.cursorVisible = cursor->visible;
+    state.haveCursorPos = true;
 
-    if (!state.haveCursorPos)
+    if (!state.haveAligned && state.haveSrcSize && state.haveCurLocal)
     {
-      state.haveCursorPos = true;
       alignMouseWithHost();
+      state.haveAligned = true;
     }
 
     if (msg.udata == 1)
@@ -321,10 +334,11 @@ static int cursorThread(void * unused)
     }
 
     lgmpClientMessageDone(queue);
+    state.updateCursor = false;
     state.lgr->on_mouse_event
     (
       state.lgrData,
-      state.cursorVisible,
+      state.cursorVisible && state.drawCursor,
       state.cursor.x,
       state.cursor.y
     );
@@ -424,7 +438,6 @@ static int frameThread(void * unused)
         SDL_SetWindowSize(state.window, frame->width, frame->height);
 
       updatePositionInfo();
-      alignMouseWithGuest();
     }
 
     FrameBuffer fb = (FrameBuffer)(frame + 1);
@@ -636,11 +649,12 @@ static void handleMouseMoveEvent(int ex, int ey)
   static bool wrapping = false;
   static int  wrapX, wrapY;
 
+  state.curLocalX    = ex;
+  state.curLocalY    = ey;
+  state.haveCurLocal = true;
+
   if (state.ignoreInput || !params.useSpiceInput)
     return;
-
-  state.curlocalX = ex;
-  state.curlocalY = ey;
 
   if (state.serverMode)
   {
@@ -727,17 +741,36 @@ static void alignMouseWithHost()
 
   state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
   state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
-  handleMouseMoveEvent(state.curlocalX, state.curlocalY);
+  handleMouseMoveEvent(state.curLocalX, state.curLocalY);
 }
 
 static void handleResizeEvent(unsigned int w, unsigned int h)
 {
-  if (state.windowW == w || state.windowH == w)
+  if (state.windowW == w && state.windowH == h)
     return;
 
   state.windowW = w;
   state.windowH = h;
   updatePositionInfo();
+}
+
+static void handleWindowLeave()
+{
+  if (!params.useSpiceInput)
+    return;
+
+  state.drawCursor   = false;
+  state.updateCursor = true;
+}
+
+static void handleWindowEnter()
+{
+  if (!params.useSpiceInput)
+    return;
+
+  alignMouseWithHost();
+  state.drawCursor   = true;
+  state.updateCursor = true;
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -759,7 +792,13 @@ int eventFilter(void * userdata, SDL_Event * event)
       switch(event->window.event)
       {
         case SDL_WINDOWEVENT_ENTER:
-          alignMouseWithHost();
+          if (state.wminfo.subsystem != SDL_SYSWM_X11)
+            handleWindowEnter();
+          break;
+
+        case SDL_WINDOWEVENT_LEAVE:
+          if (state.wminfo.subsystem != SDL_SYSWM_X11)
+            handleWindowLeave();
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
@@ -792,6 +831,14 @@ int eventFilter(void * userdata, SDL_Event * event)
 
           case MotionNotify:
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
+            break;
+
+          case EnterNotify:
+            handleWindowEnter();
+            break;
+
+          case LeaveNotify:
+            handleWindowLeave();
             break;
         }
       }
@@ -1083,6 +1130,7 @@ static int lg_run()
   state.scaleX     = 1.0f;
   state.scaleY     = 1.0f;
   state.resizeDone = true;
+  state.drawCursor = true;
 
   state.mouseSens = params.mouseSens;
        if (state.mouseSens < -9) state.mouseSens = -9;

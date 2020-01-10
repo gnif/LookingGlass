@@ -46,12 +46,16 @@ struct AppState
 
   bool  serverMode;
   bool  haveCursorPos;
+  bool  drawCursor;
+  bool  updateCursor;
   float scaleX, scaleY;
   float accX, accY;
   int   curLastX;
   int   curLastY;
-  int   curlocalX;
-  int   curlocalY;
+  bool  haveCurLocal;
+  int   curLocalX;
+  int   curLocalY;
+  bool  haveAligned;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
