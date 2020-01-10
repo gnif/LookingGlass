@@ -1297,7 +1297,7 @@ static int lg_run()
     if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
       break;
 
-    if (status == LGMP_ERR_INVALID_SESSION)
+    if (status == LGMP_ERR_INVALID_SESSION || status == LGMP_ERR_INVALID_MAGIC)
     {
       SDL_WaitEventTimeout(NULL, 1000);
       continue;
