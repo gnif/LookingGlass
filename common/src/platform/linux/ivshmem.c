@@ -42,7 +42,6 @@ static int uioOpenFile(const char * shmDevice, const char * file)
 {
   char * path;
   alloc_sprintf(&path, "/sys/class/uio/%s/%s", shmDevice, file);
-
   int fd = open(path, O_RDONLY);
   if (fd < 0)
   {
@@ -162,9 +161,13 @@ void ivshmemOptionsInit()
 
 bool ivshmemOpen(struct IVSHMEM * dev)
 {
+  return ivshmemOpenDev(dev, option_get_string("app", "shmFile"));
+}
+
+bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
+{
   assert(dev);
 
-  const char * shmDevice = option_get_string("app", "shmFile");
   unsigned int devSize;
   int devFD;
 
@@ -257,5 +260,7 @@ void ivshmemClose(struct IVSHMEM * dev)
   close(info->fd);
 
   free(info);
+  dev->mem    = NULL;
+  dev->size   = 0;
   dev->opaque = NULL;
 }
