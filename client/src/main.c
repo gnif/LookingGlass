@@ -237,7 +237,7 @@ static int renderThread(void * unused)
 static int cursorThread(void * unused)
 {
   LGMP_STATUS         status;
-  PLGMPCQueue         queue;
+  PLGMPClientQueue    queue;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
@@ -328,8 +328,8 @@ static int cursorThread(void * unused)
 
 static int frameThread(void * unused)
 {
-  LGMP_STATUS status;
-  PLGMPCQueue queue;
+  LGMP_STATUS      status;
+  PLGMPClientQueue queue;
 
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);

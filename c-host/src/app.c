@@ -48,16 +48,16 @@ struct app
 {
   PLGMPHost     lgmp;
 
-  PLGMPHQueue   pointerQueue;
-  PLGMPMemory   pointerMemory[LGMP_Q_POINTER_LEN];
-  PLGMPMemory   pointerShape;
-  bool          pointerShapeValid;
-  unsigned int  pointerIndex;
+  PLGMPHostQueue pointerQueue;
+  PLGMPMemory    pointerMemory[LGMP_Q_POINTER_LEN];
+  PLGMPMemory    pointerShape;
+  bool           pointerShapeValid;
+  unsigned int   pointerIndex;
 
-  size_t        maxFrameSize;
-  PLGMPHQueue   frameQueue;
-  PLGMPMemory   frameMemory[LGMP_Q_FRAME_LEN];
-  unsigned int  frameIndex;
+  size_t         maxFrameSize;
+  PLGMPHostQueue frameQueue;
+  PLGMPMemory    frameMemory[LGMP_Q_FRAME_LEN];
+  unsigned int   frameIndex;
 
   CaptureInterface * iface;
 
@@ -121,7 +121,7 @@ static int frameThread(void * opaque)
 
       case CAPTURE_RESULT_TIMEOUT:
       {
-        if (frameValid && lgmpHostNewSubCount(app.frameQueue) > 0)
+        if (frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
         {
           // resend the last frame
           repeatFrame = true;
@@ -142,7 +142,7 @@ static int frameThread(void * opaque)
     // if we are repeating a frame just send the last frame again
     if (repeatFrame)
     {
-      lgmpHostPost(app.frameQueue, 0, app.frameMemory[app.frameIndex]);
+      lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex]);
       continue;
     }
 
@@ -173,7 +173,7 @@ static int frameThread(void * opaque)
     framebuffer_prepare(fb);
 
     /* we post and then get the frame, this is intentional! */
-    lgmpHostPost(app.frameQueue, 0, app.frameMemory[app.frameIndex]);
+    lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex]);
     app.iface->getFrame(fb);
   }
   DEBUG_INFO("Frame thread stopped");
@@ -275,7 +275,7 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
 void capturePostPointerBuffer(CapturePointer pointer)
 {
   PLGMPMemory mem;
-  const bool newClient = lgmpHostNewSubCount(app.pointerQueue) > 0;
+  const bool newClient = lgmpHostQueueNewSubs(app.pointerQueue) > 0;
 
   if (pointer.shapeUpdate || newClient)
   {
@@ -326,12 +326,12 @@ void capturePostPointerBuffer(CapturePointer pointer)
     ((pointer.shapeUpdate || newClient) && app.pointerShapeValid) ? 1 : 0;
 
   LGMP_STATUS status;
-  while ((status = lgmpHostPost(app.pointerQueue, sendShape, mem)) != LGMP_OK)
+  while ((status = lgmpHostQueuePost(app.pointerQueue, sendShape, mem)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_FULL)
       continue;
 
-    DEBUG_ERROR("lgmpHostPost Failed (Pointer): %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
     return;
   }
 }
@@ -390,15 +390,15 @@ int app_main(int argc, char * argv[])
     goto fail;
   }
 
-  if ((status = lgmpHostAddQueue(app.lgmp, LGMP_Q_FRAME, LGMP_Q_FRAME_LEN, &app.frameQueue)) != LGMP_OK)
+  if ((status = lgmpHostQueueNew(app.lgmp, LGMP_Q_FRAME, LGMP_Q_FRAME_LEN, &app.frameQueue)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
     goto fail;
   }
 
-  if ((status = lgmpHostAddQueue(app.lgmp, LGMP_Q_POINTER, LGMP_Q_POINTER_LEN, &app.pointerQueue)) != LGMP_OK)
+  if ((status = lgmpHostQueueNew(app.lgmp, LGMP_Q_POINTER, LGMP_Q_POINTER_LEN, &app.pointerQueue)) != LGMP_OK)
   {
-    DEBUG_ERROR("lgmpHostAddQueue Failed (Pointer): %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostQueueNew Failed (Pointer): %s", lgmpStatusString(status));
     goto fail;
   }
 

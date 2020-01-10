@@ -60,8 +60,8 @@ struct AppState
 
   struct IVSHMEM       shm;
   PLGMPClient          lgmp;
-  PLGMPCQueue          frameQueue;
-  PLGMPCQueue          pointerQueue;
+  PLGMPClientQueue     frameQueue;
+  PLGMPClientQueue     pointerQueue;
 
   uint64_t          frameTime;
   uint64_t          lastFrameTime;
