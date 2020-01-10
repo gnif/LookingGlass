@@ -43,10 +43,15 @@ struct AppState
   LG_RendererRect      dstRect;
   SDL_Point            cursor;
   bool                 cursorVisible;
-  bool                 haveCursorPos;
-  float                scaleX, scaleY;
-  float                accX, accY;
-  bool                 serverMode;
+
+  bool  serverMode;
+  bool  haveCursorPos;
+  float scaleX, scaleY;
+  float accX, accY;
+  int   curLastX;
+  int   curLastY;
+  int   curlocalX;
+  int   curlocalY;
 
   const LG_Renderer  * lgr;
   void               * lgrData;

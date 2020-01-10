@@ -67,17 +67,9 @@ struct AppState state;
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
 
-static int lastX = 0;
-static int lastY = 0;
-static void alignMouseWithGuest()
-{
-  if (state.ignoreInput || !params.useSpiceInput)
-    return;
-
-  lastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
-  lastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
-  SDL_WarpMouseInWindow(state.window, lastX, lastY);
-}
+static void handleMouseMoveEvent(int ex, int ey);
+static void alignMouseWithGuest();
+static void alignMouseWithHost();
 
 static void updatePositionInfo()
 {
@@ -292,7 +284,12 @@ static int cursorThread(void * unused)
     state.cursor.x      = cursor->x;
     state.cursor.y      = cursor->y;
     state.cursorVisible = cursor->visible;
-    state.haveCursorPos = true;
+
+    if (!state.haveCursorPos)
+    {
+      state.haveCursorPos = true;
+      alignMouseWithHost();
+    }
 
     if (msg.udata == 1)
     {
@@ -331,14 +328,6 @@ static int cursorThread(void * unused)
       state.cursor.x,
       state.cursor.y
     );
-
-    const uint64_t now = microtime();
-    static uint64_t nextAlign = 0;
-    if (!state.serverMode && now > nextAlign)
-    {
-      nextAlign = now + 100000;
-      alignMouseWithGuest();
-    }
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -650,14 +639,17 @@ static void handleMouseMoveEvent(int ex, int ey)
   if (state.ignoreInput || !params.useSpiceInput)
     return;
 
+  state.curlocalX = ex;
+  state.curlocalY = ey;
+
   if (state.serverMode)
   {
     if (wrapping)
     {
       if (ex == state.windowW / 2 && ey == state.windowH / 2)
       {
-        lastX += (state.windowW / 2) - wrapX;
-        lastY += (state.windowH / 2) - wrapY;
+        state.curLastX += (state.windowW / 2) - wrapX;
+        state.curLastY += (state.windowH / 2) - wrapY;
         wrapping = false;
       }
     }
@@ -683,10 +675,10 @@ static void handleMouseMoveEvent(int ex, int ey)
       return;
   }
 
-  int rx = ex - lastX;
-  int ry = ey - lastY;
-  lastX = ex;
-  lastY = ey;
+  int rx = ex - state.curLastX;
+  int ry = ey - state.curLastY;
+  state.curLastX = ex;
+  state.curLastY = ey;
 
   if (rx == 0 && ry == 0)
     return;
@@ -713,6 +705,29 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   if (!spice_mouse_motion(rx, ry))
     DEBUG_ERROR("failed to send mouse motion message");
+}
+
+static void alignMouseWithGuest()
+{
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
+  state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  SDL_WarpMouseInWindow(state.window, state.curLastX, state.curLastY);
+}
+
+static void alignMouseWithHost()
+{
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  if (!state.haveCursorPos || state.serverMode)
+    return;
+
+  state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
+  state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  handleMouseMoveEvent(state.curlocalX, state.curlocalY);
 }
 
 static void handleResizeEvent(unsigned int w, unsigned int h)
@@ -743,6 +758,10 @@ int eventFilter(void * userdata, SDL_Event * event)
     {
       switch(event->window.event)
       {
+        case SDL_WINDOWEVENT_ENTER:
+          alignMouseWithHost();
+          break;
+
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
           if (state.wminfo.subsystem != SDL_SYSWM_X11)
