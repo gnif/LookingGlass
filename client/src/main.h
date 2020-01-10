@@ -91,6 +91,7 @@ struct AppParams
   bool         maximize;
   bool         minimizeOnFocusLoss;
   bool         center;
+  bool         r180;
   int          x, y;
   unsigned int w, h;
   unsigned int fpsLimit;

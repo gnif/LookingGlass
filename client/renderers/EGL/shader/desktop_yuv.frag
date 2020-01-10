@@ -5,7 +5,8 @@ out highp vec4 color;
 
 uniform       int   nearest;
 uniform highp vec2  size;
-
+uniform       int  flipx;
+uniform       int  flipy;
 uniform       int   nv;
 uniform highp float nvGain;
 
@@ -15,19 +16,20 @@ uniform sampler2D sampler3;
 
 void main()
 {
+  highp vec2 uvfliped = vec2(bool(flipx) ?  -uv.x + 1.0 : uv.x, bool(flipy) ?  -uv.y + 1.0 : uv.y);
   highp vec4 yuv;
   if(nearest == 1)
   {
     yuv = vec4(
-      texture(sampler1, uv).r,
-      texture(sampler2, uv).r,
-      texture(sampler3, uv).r,
+      texture(sampler1, uvfliped).r,
+      texture(sampler2, uvfliped).r,
+      texture(sampler3, uvfliped).r,
       1.0
     );
   }
   else
   {
-    highp ivec2 px = ivec2(uv * size);
+    highp ivec2 px = ivec2(uvfliped * size);
     yuv = vec4(
       texelFetch(sampler1, px, 0).r,
       texelFetch(sampler2, px, 0).r,

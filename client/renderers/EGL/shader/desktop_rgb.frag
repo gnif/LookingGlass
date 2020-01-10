@@ -7,16 +7,18 @@ uniform sampler2D sampler1;
 
 uniform       int   nearest;
 uniform highp vec2  size;
-
+uniform       int  flipx;
+uniform       int  flipy;
 uniform       int   nv;
 uniform highp float nvGain;
 
 void main()
 {
+  highp vec2 uvfliped = vec2(bool(flipx) ?  -uv.x + 1.0 : uv.x, bool(flipy) ?  -uv.y + 1.0 : uv.y);
   if(nearest == 1)
-    color = texture(sampler1, uv);
+    color = texture(sampler1, uvfliped);
   else
-    color = texelFetch(sampler1, ivec2(uv * size), 0);
+    color = texelFetch(sampler1, ivec2(uvfliped * size), 0);
 
   if (nv == 1)
   {
