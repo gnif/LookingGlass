@@ -403,7 +403,8 @@ static int frameThread(void * unused)
     lgrFormat.height = header.height;
     lgrFormat.stride = header.stride;
     lgrFormat.pitch  = header.pitch;
-
+    lgrFormat.r180  = params.r180;
+    
     size_t dataSize;
     switch(header.type)
     {

@@ -41,6 +41,8 @@ struct DesktopShader
   EGL_Shader * shader;
   GLint uDesktopPos;
   GLint uDesktopSize;
+  GLint uFlipx;
+  GLint uFlipy;
   GLint uNearest;
   GLint uNV, uNVGain;
 };
@@ -59,6 +61,8 @@ struct EGL_Desktop
   LG_Lock              updateLock;
   enum EGL_PixelFormat pixFmt;
   unsigned int         width, height;
+  bool                 flipx;
+  bool                 flipy;
   unsigned int         pitch;
   FrameBuffer          frame;
   bool                 update;
@@ -90,6 +94,8 @@ static bool egl_init_desktop_shader(
 
   shader->uDesktopPos  = egl_shader_get_uniform_location(shader->shader, "position");
   shader->uDesktopSize = egl_shader_get_uniform_location(shader->shader, "size"    );
+  shader->uFlipx       = egl_shader_get_uniform_location(shader->shader, "flipx"   );
+  shader->uFlipy       = egl_shader_get_uniform_location(shader->shader, "flipy"   );
   shader->uNearest     = egl_shader_get_uniform_location(shader->shader, "nearest" );
   shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"      );
   shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"  );
@@ -219,6 +225,8 @@ bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged,
     desktop->pitch  = format.pitch;
     desktop->frame  = frame;
     desktop->update = true;
+    desktop->flipx = format.r180;
+    desktop->flipy = format.r180;
 
     /* defer the actual update as the format has changed and we need to issue GL commands first */
     LG_UNLOCK(desktop->updateLock);
@@ -268,7 +276,9 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, con
   const struct DesktopShader * shader = desktop->shader;
   egl_shader_use(shader->shader);
   glUniform4f(shader->uDesktopPos , x, y, scaleX, scaleY);
-  glUniform1i(shader->uNearest    , nearest ? 1 : 0);
+  glUniform1i(shader->uFlipx, desktop->flipx);
+  glUniform1i(shader->uFlipy, desktop->flipy);
+  glUniform1i(shader->uNearest, nearest ? 1 : 0);
   glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
 
   if (desktop->nvGain)

@@ -144,6 +144,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "r180",
+    .description    = "Rotate the displayed image 180 degrees",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
     .name           = "borderless",
     .description    = "Borderless mode",
     .shortopt       = 'd',
@@ -381,6 +388,8 @@ bool config_load(int argc, char * argv[])
   params.forceAspect   = option_get_bool  ("win", "forceAspect"  );
   params.borderless    = option_get_bool  ("win", "borderless"   );
   params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
+  params.r180          = option_get_bool  ("win", "r180"        );
+
   params.maximize      = option_get_bool  ("win", "maximize"     );
   params.fpsLimit      = option_get_int   ("win", "fpsLimit"     );
   params.showFPS       = option_get_bool  ("win", "showFPS"      );

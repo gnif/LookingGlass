@@ -57,6 +57,7 @@ typedef struct LG_RendererFormat
   unsigned int stride;  // scanline width (zero if compresed)
   unsigned int pitch;   // scanline bytes (or compressed size)
   unsigned int bpp;     // bits per pixel (zero if compressed)
+  bool         r180;   // is display rotated 180 degrees?
 }
 LG_RendererFormat;
 

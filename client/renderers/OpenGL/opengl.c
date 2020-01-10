@@ -1003,13 +1003,22 @@ static enum ConfigStatus configure(struct Inst * this, SDL_Window *window)
     glNewList(this->texList + i, GL_COMPILE);
       glBindTexture(GL_TEXTURE_2D, this->frames[i]);
       glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-      glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
-        glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
-        glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
-        glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
-     glEnd();
-     glBindTexture(GL_TEXTURE_2D, 0);
+      if(this->format.r180){
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(0                 , 0                  );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(this->format.width, 0                  );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(0                 , this->format.height);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(this->format.width, this->format.height);
+       glEnd();
+      } else {
+        glBegin(GL_TRIANGLE_STRIP);
+          glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
+          glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
+          glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
+          glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
+        glEnd();
+      }
+      glBindTexture(GL_TEXTURE_2D, 0);
     glEndList();
   }
 
