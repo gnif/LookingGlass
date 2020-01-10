@@ -39,8 +39,22 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
 
-#define LGMP_Q_POINTER_LEN 20
 #define LGMP_Q_FRAME_LEN   2
+#define LGMP_Q_POINTER_LEN 20
+
+static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
+{
+  .queueID     = LGMP_Q_FRAME,
+  .numMessages = LGMP_Q_FRAME_LEN,
+  .subTimeout  = 1000
+};
+
+static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
+{
+  .queueID     = LGMP_Q_POINTER,
+  .numMessages = LGMP_Q_POINTER_LEN,
+  .subTimeout  = 1000
+};
 
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (128 * 128 * 4))
 
@@ -390,13 +404,13 @@ int app_main(int argc, char * argv[])
     goto fail;
   }
 
-  if ((status = lgmpHostQueueNew(app.lgmp, LGMP_Q_FRAME, LGMP_Q_FRAME_LEN, &app.frameQueue)) != LGMP_OK)
+  if ((status = lgmpHostQueueNew(app.lgmp, FRAME_QUEUE_CONFIG, &app.frameQueue)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
     goto fail;
   }
 
-  if ((status = lgmpHostQueueNew(app.lgmp, LGMP_Q_POINTER, LGMP_Q_POINTER_LEN, &app.pointerQueue)) != LGMP_OK)
+  if ((status = lgmpHostQueueNew(app.lgmp, POINTER_QUEUE_CONFIG, &app.pointerQueue)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostQueueNew Failed (Pointer): %s", lgmpStatusString(status));
     goto fail;
