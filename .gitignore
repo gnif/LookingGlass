@@ -7,3 +7,4 @@ module/modules.order
 *.a
 *.o
 *.exe
+*/build
