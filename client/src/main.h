@@ -46,6 +46,7 @@ struct AppState
   bool                 haveCursorPos;
   float                scaleX, scaleY;
   float                accX, accY;
+  bool                 serverMode;
 
   const LG_Renderer  * lgr;
   void               * lgrData;

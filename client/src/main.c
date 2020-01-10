@@ -67,6 +67,18 @@ struct AppState state;
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
 
+static int lastX = 0;
+static int lastY = 0;
+static void alignMouseWithGuest()
+{
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  lastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
+  lastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  SDL_WarpMouseInWindow(state.window, lastX, lastY);
+}
+
 static void updatePositionInfo()
 {
   if (state.haveSrcSize)
@@ -319,6 +331,14 @@ static int cursorThread(void * unused)
       state.cursor.x,
       state.cursor.y
     );
+
+    const uint64_t now = microtime();
+    static uint64_t nextAlign = 0;
+    if (!state.serverMode && now > nextAlign)
+    {
+      nextAlign = now + 100000;
+      alignMouseWithGuest();
+    }
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -413,7 +433,9 @@ static int frameThread(void * unused)
       state.haveSrcSize = true;
       if (params.autoResize)
         SDL_SetWindowSize(state.window, frame->width, frame->height);
+
       updatePositionInfo();
+      alignMouseWithGuest();
     }
 
     FrameBuffer fb = (FrameBuffer)(frame + 1);
@@ -620,11 +642,71 @@ void spiceClipboardRequest(const SpiceDataType type)
     state.lgc->request(spice_type_to_clipboard_type(type));
 }
 
+static void handleMouseMoveEvent(int ex, int ey)
+{
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  if (state.serverMode)
+  {
+    /* get the screen center as SDL sees it */
+    SDL_GetWindowSize(state.window, &lastX, &lastY);
+    lastX /= 2;
+    lastY /= 2;
+  }
+  else
+  {
+    if (ex < state.dstRect.x                   ||
+        ex > state.dstRect.x + state.dstRect.w ||
+        ey < state.dstRect.y                   ||
+        ey > state.dstRect.y + state.dstRect.h)
+      return;
+  }
+
+  int rx = ex - lastX;
+  int ry = ey - lastY;
+  lastX = ex;
+  lastY = ey;
+
+  if (rx == 0 && ry == 0)
+    return;
+
+  if (params.scaleMouseInput && !state.serverMode)
+  {
+    state.accX += (float)rx * state.scaleX;
+    state.accY += (float)ry * state.scaleY;
+    rx = floor(state.accX);
+    ry = floor(state.accY);
+    state.accX -= rx;
+    state.accY -= ry;
+  }
+
+  if (state.serverMode && state.mouseSens != 0)
+  {
+    state.sensX += ((float)rx / 10.0f) * (state.mouseSens + 10);
+    state.sensY += ((float)ry / 10.0f) * (state.mouseSens + 10);
+    rx = floor(state.sensX);
+    ry = floor(state.sensY);
+    state.sensX -= rx;
+    state.sensY -= ry;
+  }
+
+  if (!spice_mouse_motion(rx, ry))
+    DEBUG_ERROR("failed to send mouse motion message");
+}
+
+static void handleResizeEvent(unsigned int w, unsigned int h)
+{
+  if (state.windowW == w || state.windowH == w)
+    return;
+
+  state.windowW = w;
+  state.windowH = h;
+  updatePositionInfo();
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
-  static bool serverMode   = false;
-  static bool realignGuest = true;
-
   switch(event->type)
   {
     case SDL_QUIT:
@@ -641,19 +723,10 @@ int eventFilter(void * userdata, SDL_Event * event)
     {
       switch(event->window.event)
       {
-        case SDL_WINDOWEVENT_ENTER:
-          realignGuest = true;
-          break;
-
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
           if (state.wminfo.subsystem != SDL_SYSWM_X11)
-          {
-            state.windowW = event->window.data1;
-            state.windowH = event->window.data2;
-            updatePositionInfo();
-            realignGuest = true;
-          }
+            handleResizeEvent(event->window.data1, event->window.data2);
           break;
 
         // allow a window close event to close the application even if ignoreQuit is set
@@ -667,19 +740,20 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_SYSWMEVENT:
     {
       // When the window manager forces the window size after calling SDL_SetWindowSize, SDL
-      // ignores this update and caches the incorrect window size.
+      // ignores this update and caches the incorrect window size. As such all related details
+      // are incorect including mouse movement information as it clips to the old window size.
       if (state.wminfo.subsystem == SDL_SYSWM_X11)
       {
         XEvent xe = event->syswm.msg->msg.x11.event;
-        if (xe.type == ConfigureNotify)
+        switch(xe.type)
         {
-          if (state.windowW != xe.xconfigure.width || state.windowH != xe.xconfigure.height)
-          {
-            state.windowW = xe.xconfigure.width;
-            state.windowH = xe.xconfigure.height;
-            updatePositionInfo();
-            realignGuest = true;
-          }
+          case ConfigureNotify:
+            handleResizeEvent(xe.xconfigure.width, xe.xconfigure.height);
+            break;
+
+          case MotionNotify:
+            handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
+            break;
         }
       }
 
@@ -689,80 +763,9 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEMOTION:
-    {
-      if (state.ignoreInput || !params.useSpiceInput)
-        break;
-
-      if (
-        !serverMode && (
-          event->motion.x < state.dstRect.x                   ||
-          event->motion.x > state.dstRect.x + state.dstRect.w ||
-          event->motion.y < state.dstRect.y                   ||
-          event->motion.y > state.dstRect.y + state.dstRect.h
-        )
-      )
-      {
-        realignGuest = true;
-        break;
-      }
-
-      int x = 0;
-      int y = 0;
-      if (realignGuest && state.haveCursorPos)
-      {
-        x = event->motion.x - state.dstRect.x;
-        y = event->motion.y - state.dstRect.y;
-        if (params.scaleMouseInput && !serverMode)
-        {
-          x = (float)x * state.scaleX;
-          y = (float)y * state.scaleY;
-        }
-        x -= state.cursor.x;
-        y -= state.cursor.y;
-        realignGuest = false;
-        state.accX  = 0;
-        state.accY  = 0;
-        state.sensX = 0;
-        state.sensY = 0;
-
-        if (!spice_mouse_motion(x, y))
-          DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-        break;
-      }
-
-      x = event->motion.xrel;
-      y = event->motion.yrel;
-      if (x != 0 || y != 0)
-      {
-        if (params.scaleMouseInput && !serverMode)
-        {
-          state.accX += (float)x * state.scaleX;
-          state.accY += (float)y * state.scaleY;
-          x = floor(state.accX);
-          y = floor(state.accY);
-          state.accX -= x;
-          state.accY -= y;
-        }
-
-        if (serverMode && state.mouseSens != 0)
-        {
-          state.sensX += ((float)x / 10.0f) * (state.mouseSens + 10);
-          state.sensY += ((float)y / 10.0f) * (state.mouseSens + 10);
-          x = floor(state.sensX);
-          y = floor(state.sensY);
-          state.sensX -= x;
-          state.sensY -= y;
-        }
-
-        if (!spice_mouse_motion(x, y))
-        {
-          DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-          break;
-        }
-      }
-
+      if (state.wminfo.subsystem != SDL_SYSWM_X11)
+        handleMouseMoveEvent(event->motion.x, event->motion.y);
       break;
-    }
 
     case SDL_KEYDOWN:
     {
@@ -809,19 +812,19 @@ int eventFilter(void * userdata, SDL_Event * event)
         {
           if (params.useSpiceInput)
           {
-            serverMode = !serverMode;
-            spice_mouse_mode(serverMode);
-            SDL_SetRelativeMouseMode(serverMode);
-            SDL_SetWindowGrab(state.window, serverMode);
-            DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
+            state.serverMode = !state.serverMode;
+            spice_mouse_mode(state.serverMode);
+            SDL_SetRelativeMouseMode(state.serverMode);
+            SDL_SetWindowGrab(state.window, state.serverMode);
+            DEBUG_INFO("Server Mode: %s", state.serverMode ? "on" : "off");
 
             app_alert(
-              serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-              serverMode ? "Capture Enabled" : "Capture Disabled"
+              state.serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+              state.serverMode ? "Capture Enabled" : "Capture Disabled"
             );
 
-            if (!serverMode)
-              realignGuest = true;
+            if (!state.serverMode)
+              alignMouseWithGuest();
           }
         }
         else
