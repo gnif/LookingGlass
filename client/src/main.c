@@ -277,7 +277,7 @@ static int cursorThread(void * unused)
           state.lgr->on_mouse_event
           (
             state.lgrData,
-            state.cursorVisible && state.drawCursor,
+            state.cursorVisible && state.drawCursor && state.cursorInView,
             state.cursor.x,
             state.cursor.y
           );
@@ -686,7 +686,17 @@ static void handleMouseMoveEvent(int ex, int ey)
         ex > state.dstRect.x + state.dstRect.w ||
         ey < state.dstRect.y                   ||
         ey > state.dstRect.y + state.dstRect.h)
+    {
+      state.cursorInView = false;
+      state.updateCursor = true;
       return;
+    }
+  }
+
+  if (!state.cursorInView)
+  {
+    state.cursorInView = true;
+    state.updateCursor = true;
   }
 
   int rx = ex - state.curLastX;
@@ -760,6 +770,7 @@ static void handleWindowLeave()
     return;
 
   state.drawCursor   = false;
+  state.cursorInView = false;
   state.updateCursor = true;
 }
 

@@ -47,6 +47,7 @@ struct AppState
   bool  serverMode;
   bool  haveCursorPos;
   bool  drawCursor;
+  bool  cursorInView;
   bool  updateCursor;
   float scaleX, scaleY;
   float accX, accY;
