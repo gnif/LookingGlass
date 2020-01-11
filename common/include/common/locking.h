@@ -25,6 +25,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define INTERLOCKED_GET(x)      __sync_fetch_and_add((x), 0)
 #define INTERLOCKED_CE(x, c, v) __sync_val_compare_and_swap((x), (c), (v))
 
+#define INTERLOCKED_ENTER(lock) \
+  while(__sync_lock_test_and_set(&(lock), 1)) while((lock));
+
+#define INTERLOCKED_EXIT(lock) \
+  __sync_lock_release(&(lock));
+
 #define INTERLOCKED_SECTION(lock, x) \
   while(__sync_lock_test_and_set(&(lock), 1)) while((lock)); \
   x\

@@ -49,6 +49,7 @@ struct AppState
   bool  drawCursor;
   bool  cursorInView;
   bool  updateCursor;
+  bool  initialCursorSync;
   float scaleX, scaleY;
   float accX, accY;
   int   curLastX;
