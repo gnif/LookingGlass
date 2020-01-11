@@ -104,7 +104,9 @@ static void nvfbc_initOptions()
   option_register(options);
 }
 
-static bool nvfbc_create()
+static bool nvfbc_create(
+    CaptureGetPointerBuffer  getPointerBufferFn,
+    CapturePostPointerBuffer postPointerBufferFn)
 {
   if (!NvFBCInit())
     return false;
@@ -147,22 +149,18 @@ static bool nvfbc_create()
     return false;
   }
 
-  this->seperateCursor = option_get_bool("nvfbc", "decoupleCursor");
+  this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
+  this->getPointerBufferFn  = getPointerBufferFn;
+  this->postPointerBufferFn = postPointerBufferFn;
 
   return true;
 }
 
-static bool nvfbc_init(
-    CaptureGetPointerBuffer getPointerBufferFn,
-    CapturePostPointerBuffer postPointerBufferFn)
+static bool nvfbc_init()
 {
-  this->stop                = false;
-  this->getPointerBufferFn  = getPointerBufferFn;
-  this->postPointerBufferFn = postPointerBufferFn;
-
+  this->stop = false;
   getDesktopSize(&this->width, &this->height);
   lgResetEvent(this->frameEvent);
-
 
   HANDLE event;
   if (!NvFBCToSysSetup(
