@@ -956,7 +956,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
-      if (state.ignoreInput || !params.useSpiceInput)
+      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
       if (
@@ -970,7 +970,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONDOWN:
-      if (state.ignoreInput || !params.useSpiceInput)
+      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
@@ -987,7 +987,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONUP:
-      if (state.ignoreInput || !params.useSpiceInput)
+      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
