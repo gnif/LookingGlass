@@ -17,4 +17,7 @@ if(ENABLE_BACKTRACE)
   target_link_libraries(lg_common_platform_code bfd)
 endif()
 
-target_link_libraries(lg_common_platform_code pthread)
+target_link_libraries(lg_common_platform_code
+	lg_common
+	pthread
+)

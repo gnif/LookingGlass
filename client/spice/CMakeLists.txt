@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 project(spice LANGUAGES C)
+set(CMAKE_C_STANDARD 11)
 
 find_package(PkgConfig)
 pkg_check_modules(SPICE_PKGCONFIG REQUIRED

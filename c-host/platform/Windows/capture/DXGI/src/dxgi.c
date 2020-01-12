@@ -49,18 +49,6 @@ typedef struct Texture
 }
 Texture;
 
-typedef struct Pointer
-{
-  unsigned int  version;
-
-  unsigned int  x, y;
-  unsigned int  w, h;
-  bool          visible;
-  unsigned int  pitch;
-  CaptureFormat format;
-}
-Pointer;
-
 // locals
 struct iface
 {
@@ -83,7 +71,9 @@ struct iface
   int                        texWIndex;
   volatile int               texReady;
   bool                       needsRelease;
-  LGEvent                  * pointerEvent;
+
+  CaptureGetPointerBuffer    getPointerBufferFn;
+  CapturePostPointerBuffer   postPointerBufferFn;
   LGEvent                  * frameEvent;
 
   unsigned int  width;
@@ -92,14 +82,8 @@ struct iface
   unsigned int  stride;
   CaptureFormat format;
 
-  // pointer state
-  Pointer lastPointer;
-  Pointer pointer;
-
-  // pointer shape
-  void         * pointerShape;
-  unsigned int   pointerSize;
-  unsigned int   pointerUsed;
+  int  lastPointerX, lastPointerY;
+  bool lastPointerVisible;
 };
 
 static bool           dpiDone = false;
@@ -155,21 +139,13 @@ static void dxgi_initOptions()
   option_register(options);
 }
 
-static bool dxgi_create()
+static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
   assert(!this);
   this = calloc(sizeof(struct iface), 1);
   if (!this)
   {
     DEBUG_ERROR("failed to allocate iface struct");
-    return false;
-  }
-
-  this->pointerEvent = lgCreateEvent(true, 10);
-  if (!this->pointerEvent)
-  {
-    DEBUG_ERROR("failed to create the pointer event");
-    free(this);
     return false;
   }
 
@@ -185,12 +161,14 @@ static bool dxgi_create()
   if (this->maxTextures <= 0)
     this->maxTextures = 1;
 
-  this->useAcquireLock = option_get_bool("dxgi", "useAcquireLock");
-  this->texture        = calloc(sizeof(struct Texture), this->maxTextures);
+  this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
+  this->texture             = calloc(sizeof(struct Texture), this->maxTextures);
+  this->getPointerBufferFn  = getPointerBufferFn;
+  this->postPointerBufferFn = postPointerBufferFn;
   return true;
 }
 
-static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
+static bool dxgi_init()
 {
   assert(this);
 
@@ -213,17 +191,12 @@ static bool dxgi_init(void * pointerShape, const unsigned int pointerSize)
   HRESULT          status;
   DXGI_OUTPUT_DESC outputDesc;
 
-  this->pointerShape = pointerShape;
-  this->pointerSize  = pointerSize;
-  this->pointerUsed  = 0;
-
   this->stop       = false;
   this->texRIndex  = 0;
   this->texWIndex  = 0;
   this->texReady   = 0;
 
   lgResetEvent(this->frameEvent  );
-  lgResetEvent(this->pointerEvent);
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -549,7 +522,6 @@ fail:
 static void dxgi_stop()
 {
   this->stop = true;
-  lgSignalEvent(this->pointerEvent);
 }
 
 static bool dxgi_deinit()
@@ -627,7 +599,6 @@ static void dxgi_free()
   if (this->initialized)
     dxgi_deinit();
 
-  lgFreeEvent(this->pointerEvent);
   free(this->texture);
 
   free(this);
@@ -726,32 +697,37 @@ static CaptureResult dxgi_capture()
   IDXGIResource_Release(res);
 
   // if the pointer has moved or changed state
-  bool signalPointer = false;
+  bool           postPointer      = false;
+  CapturePointer pointer          = { 0 };
+  void *         pointerShape     = NULL;
+  UINT           pointerShapeSize = 0;
+
   if (frameInfo.LastMouseUpdateTime.QuadPart)
   {
     if (
-      frameInfo.PointerPosition.Position.x != this->lastPointer.x ||
-      frameInfo.PointerPosition.Position.y != this->lastPointer.y ||
-      frameInfo.PointerPosition.Visible    != this->lastPointer.visible
+      frameInfo.PointerPosition.Position.x != this->lastPointerX ||
+      frameInfo.PointerPosition.Position.y != this->lastPointerY ||
+      frameInfo.PointerPosition.Visible    != this->lastPointerVisible
       )
     {
-      this->pointer.x       = frameInfo.PointerPosition.Position.x;
-      this->pointer.y       = frameInfo.PointerPosition.Position.y;
-      this->pointer.visible = frameInfo.PointerPosition.Visible;
-      signalPointer = true;
+      this->lastPointerX       = frameInfo.PointerPosition.Position.x;
+      this->lastPointerY       = frameInfo.PointerPosition.Position.y;
+      this->lastPointerVisible = frameInfo.PointerPosition.Visible;
+      postPointer = true;
     }
   }
 
   // if the pointer shape has changed
   if (frameInfo.PointerShapeBufferSize > 0)
   {
-    // update the buffer
-    if (frameInfo.PointerShapeBufferSize > this->pointerSize)
-      DEBUG_WARN("The pointer shape is too large to fit in the buffer, ignoring the shape");
+    uint32_t bufferSize;
+    if(!this->getPointerBufferFn(&pointerShape, &bufferSize))
+      DEBUG_WARN("Failed to obtain a buffer for the pointer shape");
     else
     {
       DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
-      LOCKED({status = IDXGIOutputDuplication_GetFramePointerShape(this->dup, this->pointerSize, this->pointerShape, &this->pointerUsed, &shapeInfo);});
+
+      LOCKED({status = IDXGIOutputDuplication_GetFramePointerShape(this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);});
       if (FAILED(status))
       {
         DEBUG_WINERROR("Failed to get the new pointer shape", status);
@@ -760,25 +736,30 @@ static CaptureResult dxgi_capture()
 
       switch(shapeInfo.Type)
       {
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : this->pointer.format = CAPTURE_FMT_COLOR ; break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: this->pointer.format = CAPTURE_FMT_MASKED; break;
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : this->pointer.format = CAPTURE_FMT_MONO  ; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR       : pointer.format = CAPTURE_FMT_COLOR ; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: pointer.format = CAPTURE_FMT_MASKED; break;
+        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : pointer.format = CAPTURE_FMT_MONO  ; break;
         default:
           DEBUG_ERROR("Unsupported cursor format");
           return CAPTURE_RESULT_ERROR;
       }
 
-      this->pointer.w     = shapeInfo.Width;
-      this->pointer.h     = shapeInfo.Height;
-      this->pointer.pitch = shapeInfo.Pitch;
-      ++this->pointer.version;
-      signalPointer = true;
+      pointer.shapeUpdate = true;
+      pointer.width       = shapeInfo.Width;
+      pointer.height      = shapeInfo.Height;
+      pointer.pitch       = shapeInfo.Pitch;
+      postPointer         = true;
     }
   }
 
-  // signal about the pointer update
-  if (signalPointer)
-    lgSignalEvent(this->pointerEvent);
+  // post back the pointer information
+  if (postPointer)
+  {
+    pointer.x       = this->lastPointerX;
+    pointer.y       = this->lastPointerY;
+    pointer.visible = this->lastPointerVisible;
+    this->postPointerBufferFn(pointer);
+  }
 
   return CAPTURE_RESULT_OK;
 }
@@ -841,34 +822,6 @@ static CaptureResult dxgi_getFrame(FrameBuffer frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_getPointer(CapturePointer * pointer)
-{
-  assert(this);
-  assert(this->initialized);
-
-  if (!lgWaitEvent(this->pointerEvent, 1000))
-    return CAPTURE_RESULT_TIMEOUT;
-
-  if (this->stop)
-    return CAPTURE_RESULT_REINIT;
-
-  Pointer p;
-  memcpy(&p, &this->pointer, sizeof(Pointer));
-
-  pointer->x           = p.x;
-  pointer->y           = p.y;
-  pointer->width       = p.w;
-  pointer->height      = p.h;
-  pointer->pitch       = p.pitch;
-  pointer->visible     = p.visible;
-  pointer->format      = p.format;
-  pointer->shapeUpdate = p.version > this->lastPointer.version;
-
-  memcpy(&this->lastPointer, &p, sizeof(Pointer));
-
-  return CAPTURE_RESULT_OK;
-}
-
 static CaptureResult dxgi_releaseFrame()
 {
   assert(this);
@@ -914,6 +867,5 @@ struct CaptureInterface Capture_DXGI =
   .getMaxFrameSize = dxgi_getMaxFrameSize,
   .capture         = dxgi_capture,
   .waitFrame       = dxgi_waitFrame,
-  .getFrame        = dxgi_getFrame,
-  .getPointer      = dxgi_getPointer
+  .getFrame        = dxgi_getFrame
 };

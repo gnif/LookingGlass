@@ -67,6 +67,10 @@ struct AppState state;
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
 
+static void handleMouseMoveEvent(int ex, int ey);
+static void alignMouseWithGuest();
+static void alignMouseWithHost();
+
 static void updatePositionInfo()
 {
   if (state.haveSrcSize)
@@ -236,177 +240,170 @@ static int renderThread(void * unused)
 
 static int cursorThread(void * unused)
 {
-  KVMFRCursor         header;
+  LGMP_STATUS         status;
+  PLGMPClientQueue    queue;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
-  uint32_t            version        = 0;
-
-  memset(&header, 0, sizeof(KVMFRCursor));
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
+
+  // subscribe to the pointer queue
   while(state.running)
   {
-    // poll until we have cursor data
-    if(!(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE) &&
-        !(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_POS))
+    status = lgmpClientSubscribe(state.lgmp, LGMP_Q_POINTER, &queue);
+    if (status == LGMP_OK)
+      break;
+
+    if (status == LGMP_ERR_NO_SUCH_QUEUE)
     {
-      if (!state.running)
-        return 0;
-      usleep(params.cursorPollInterval);
+      usleep(1000);
       continue;
     }
 
-    // if the cursor was moved
-    bool moved = false;
-    if (state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_POS)
+    DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
+    state.running = false;
+    break;
+  }
+
+  while(state.running)
+  {
+    LGMPMessage msg;
+    if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
     {
-      state.cursor.x      = state.kvmfr->cursor.x;
-      state.cursor.y      = state.kvmfr->cursor.y;
-      state.haveCursorPos = true;
-      moved               = true;
+      if (status == LGMP_ERR_QUEUE_EMPTY)
+      {
+        if (state.updateCursor)
+        {
+          state.updateCursor = false;
+          state.lgr->on_mouse_event
+          (
+            state.lgrData,
+            state.cursorVisible && state.drawCursor && state.cursorInView,
+            state.cursor.x,
+            state.cursor.y
+          );
+        }
+
+        usleep(params.cursorPollInterval);
+        continue;
+      }
+
+      DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
+      state.running = false;
+      break;
     }
 
-    // if this was only a move event
-    if (!(state.kvmfr->cursor.flags & KVMFR_CURSOR_FLAG_UPDATE))
-    {
-      // turn off the pos flag, trigger the event and continue
-      __sync_and_and_fetch(&state.kvmfr->cursor.flags, ~KVMFR_CURSOR_FLAG_POS);
+    KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
+    state.cursor.x      = cursor->x;
+    state.cursor.y      = cursor->y;
+    state.cursorVisible = cursor->visible;
+    state.haveCursorPos = true;
 
-      state.lgr->on_mouse_event
-      (
-        state.lgrData,
-        state.cursorVisible,
-        state.cursor.x,
-        state.cursor.y
-      );
-      continue;
+    if (!state.haveAligned && state.haveSrcSize && state.haveCurLocal)
+    {
+      alignMouseWithHost();
+      state.haveAligned = true;
     }
 
-    // we must take a copy of the header to prevent the contained arguments
-    // from being abused to overflow buffers.
-    memcpy(&header, &state.kvmfr->cursor, sizeof(struct KVMFRCursor));
-
-    if (header.flags & KVMFR_CURSOR_FLAG_SHAPE &&
-        header.version != version)
+    if (msg.udata == 1)
     {
-      version = header.version;
-
-      bool bad = false;
-      switch(header.type)
+      switch(cursor->type)
       {
         case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
         case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
           DEBUG_ERROR("Invalid cursor type");
-          bad = true;
-          break;
+          lgmpClientMessageDone(queue);
+          continue;
       }
 
-      if (bad)
-        break;
-
-      // check the data position is sane
-      const uint64_t dataSize = header.height * header.pitch;
-      if (header.dataPos + dataSize > state.shm.size)
-      {
-        DEBUG_ERROR("The guest sent an invalid mouse dataPos");
-        break;
-      }
-
-      const uint8_t * data = (const uint8_t *)state.kvmfr + header.dataPos;
+      const uint8_t * data = (const uint8_t *)(cursor + 1);
       if (!state.lgr->on_mouse_shape(
         state.lgrData,
         cursorType,
-        header.width,
-        header.height,
-        header.pitch,
+        cursor->width,
+        cursor->height,
+        cursor->pitch,
         data)
       )
       {
         DEBUG_ERROR("Failed to update mouse shape");
-        break;
+        lgmpClientMessageDone(queue);
+        continue;
       }
     }
 
-    // now we have taken the mouse data, we can flag to the host we are ready
-    state.kvmfr->cursor.flags = 0;
-
-    bool showCursor = header.flags & KVMFR_CURSOR_FLAG_VISIBLE;
-    if (showCursor != state.cursorVisible || moved)
-    {
-      state.cursorVisible = showCursor;
-      state.lgr->on_mouse_event
-      (
-        state.lgrData,
-        state.cursorVisible,
-        state.cursor.x,
-        state.cursor.y
-      );
-    }
+    lgmpClientMessageDone(queue);
+    state.updateCursor = false;
+    state.lgr->on_mouse_event
+    (
+      state.lgrData,
+      state.cursorVisible && state.drawCursor,
+      state.cursor.x,
+      state.cursor.y
+    );
   }
 
+  lgmpClientUnsubscribe(&queue);
+  state.running = false;
   return 0;
 }
 
 static int frameThread(void * unused)
 {
-  bool       error = false;
-  KVMFRFrame header;
+  LGMP_STATUS      status;
+  PLGMPClientQueue queue;
 
-  memset(&header, 0, sizeof(struct KVMFRFrame));
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
-
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
+
+  // subscribe to the frame queue
   while(state.running)
   {
-    // poll until we have a new frame
-    while(!(state.kvmfr->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
+    status = lgmpClientSubscribe(state.lgmp, LGMP_Q_FRAME, &queue);
+    if (status == LGMP_OK)
+      break;
+
+    if (status == LGMP_ERR_NO_SUCH_QUEUE)
     {
-      if (!state.running)
-        break;
-
-      usleep(params.framePollInterval);
-      continue;
-    }
-
-    // we must take a copy of the header to prevent the contained
-    // arguments from being abused to overflow buffers.
-    memcpy(&header, &state.kvmfr->frame, sizeof(struct KVMFRFrame));
-
-    // tell the host to continue as the host buffers up to one frame
-    // we can be sure the data for this frame wont be touched
-    __sync_and_and_fetch(&state.kvmfr->frame.flags, ~KVMFR_FRAME_FLAG_UPDATE);
-
-    // sainty check of the frame format
-    if (
-      header.type    >= FRAME_TYPE_MAX ||
-      header.width   == 0 ||
-      header.height  == 0 ||
-      header.pitch   == 0 ||
-      header.dataPos == 0 ||
-      header.dataPos > state.shm.size ||
-      header.pitch   < header.width
-    ){
-      DEBUG_WARN("Bad header");
-      DEBUG_WARN("  width  : %u"     , header.width  );
-      DEBUG_WARN("  height : %u"     , header.height );
-      DEBUG_WARN("  pitch  : %u"     , header.pitch  );
-      DEBUG_WARN("  dataPos: 0x%08lx", header.dataPos);
       usleep(1000);
       continue;
     }
 
+    DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
+    state.running = false;
+    break;
+  }
+
+  while(state.running)
+  {
+    LGMPMessage msg;
+    if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
+    {
+      if (status == LGMP_ERR_QUEUE_EMPTY)
+      {
+        usleep(params.framePollInterval);
+        continue;
+      }
+
+      DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
+      break;
+    }
+
+    KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+
     // setup the renderer format with the frame format details
     LG_RendererFormat lgrFormat;
-    lgrFormat.type   = header.type;
-    lgrFormat.width  = header.width;
-    lgrFormat.height = header.height;
-    lgrFormat.stride = header.stride;
-    lgrFormat.pitch  = header.pitch;
-    lgrFormat.r180  = params.r180;
-    
+    lgrFormat.type   = frame->type;
+    lgrFormat.width  = frame->width;
+    lgrFormat.height = frame->height;
+    lgrFormat.stride = frame->stride;
+    lgrFormat.pitch  = frame->pitch;
+    lgrFormat.r180   = params.r180;
+
     size_t dataSize;
-    switch(header.type)
+    bool   error = false;
+    switch(frame->type)
     {
       case FRAME_TYPE_RGBA:
       case FRAME_TYPE_BGRA:
@@ -428,35 +425,33 @@ static int frameThread(void * unused)
     }
 
     if (error)
-      break;
-
-    // check the header's dataPos is sane
-    if (header.dataPos + dataSize > state.shm.size)
     {
-      DEBUG_ERROR("The guest sent an invalid dataPos");
+      lgmpClientMessageDone(queue);
       break;
     }
 
-    if (header.width != state.srcSize.x || header.height != state.srcSize.y)
+    if (frame->width != state.srcSize.x || frame->height != state.srcSize.y)
     {
-      state.srcSize.x = header.width;
-      state.srcSize.y = header.height;
+      state.srcSize.x = frame->width;
+      state.srcSize.y = frame->height;
       state.haveSrcSize = true;
       if (params.autoResize)
-        SDL_SetWindowSize(state.window, header.width, header.height);
+        SDL_SetWindowSize(state.window, frame->width, frame->height);
+
       updatePositionInfo();
     }
-    FrameBuffer frame = (FrameBuffer)((uint8_t *)state.kvmfr + header.dataPos);
 
-    if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, frame))
+    FrameBuffer fb = (FrameBuffer)(frame + 1);
+    if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, fb))
     {
       DEBUG_ERROR("renderer on frame event returned failure");
       break;
     }
-
+    lgmpClientMessageDone(queue);
     ++state.frameCount;
   }
 
+  lgmpClientUnsubscribe(&queue);
   state.running = false;
   return 0;
 }
@@ -650,11 +645,148 @@ void spiceClipboardRequest(const SpiceDataType type)
     state.lgc->request(spice_type_to_clipboard_type(type));
 }
 
+static void handleMouseMoveEvent(int ex, int ey)
+{
+  static bool wrapping = false;
+  static int  wrapX, wrapY;
+
+  state.curLocalX    = ex;
+  state.curLocalY    = ey;
+  state.haveCurLocal = true;
+
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  if (state.serverMode)
+  {
+    if (wrapping)
+    {
+      if (ex == state.windowW / 2 && ey == state.windowH / 2)
+      {
+        state.curLastX += (state.windowW / 2) - wrapX;
+        state.curLastY += (state.windowH / 2) - wrapY;
+        wrapping = false;
+      }
+    }
+    else
+    {
+      if (
+          ex < 100 || ex > state.windowW - 100 ||
+          ey < 100 || ey > state.windowH - 100)
+      {
+        wrapping = true;
+        wrapX    = ex;
+        wrapY    = ey;
+        SDL_WarpMouseInWindow(state.window, state.windowW / 2, state.windowH / 2);
+      }
+    }
+  }
+  else
+  {
+    if (ex < state.dstRect.x                   ||
+        ex > state.dstRect.x + state.dstRect.w ||
+        ey < state.dstRect.y                   ||
+        ey > state.dstRect.y + state.dstRect.h)
+    {
+      state.cursorInView = false;
+      state.updateCursor = true;
+      return;
+    }
+  }
+
+  if (!state.cursorInView)
+  {
+    state.cursorInView = true;
+    state.updateCursor = true;
+  }
+
+  int rx = ex - state.curLastX;
+  int ry = ey - state.curLastY;
+  state.curLastX = ex;
+  state.curLastY = ey;
+
+  if (rx == 0 && ry == 0)
+    return;
+
+  if (params.scaleMouseInput && !state.serverMode)
+  {
+    state.accX += (float)rx * state.scaleX;
+    state.accY += (float)ry * state.scaleY;
+    rx = floor(state.accX);
+    ry = floor(state.accY);
+    state.accX -= rx;
+    state.accY -= ry;
+  }
+
+  if (state.serverMode && state.mouseSens != 0)
+  {
+    state.sensX += ((float)rx / 10.0f) * (state.mouseSens + 10);
+    state.sensY += ((float)ry / 10.0f) * (state.mouseSens + 10);
+    rx = floor(state.sensX);
+    ry = floor(state.sensY);
+    state.sensX -= rx;
+    state.sensY -= ry;
+  }
+
+  if (!spice_mouse_motion(rx, ry))
+    DEBUG_ERROR("failed to send mouse motion message");
+}
+
+static void alignMouseWithGuest()
+{
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
+  state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  SDL_WarpMouseInWindow(state.window, state.curLastX, state.curLastY);
+}
+
+static void alignMouseWithHost()
+{
+  if (state.ignoreInput || !params.useSpiceInput)
+    return;
+
+  if (!state.haveCursorPos || state.serverMode)
+    return;
+
+  state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
+  state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  handleMouseMoveEvent(state.curLocalX, state.curLocalY);
+}
+
+static void handleResizeEvent(unsigned int w, unsigned int h)
+{
+  if (state.windowW == w && state.windowH == h)
+    return;
+
+  state.windowW = w;
+  state.windowH = h;
+  updatePositionInfo();
+}
+
+static void handleWindowLeave()
+{
+  if (!params.useSpiceInput)
+    return;
+
+  state.drawCursor   = false;
+  state.cursorInView = false;
+  state.updateCursor = true;
+}
+
+static void handleWindowEnter()
+{
+  if (!params.useSpiceInput)
+    return;
+
+  alignMouseWithHost();
+  state.drawCursor   = true;
+  state.updateCursor = true;
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
-  static bool serverMode   = false;
-  static bool realignGuest = true;
-
   switch(event->type)
   {
     case SDL_QUIT:
@@ -672,18 +804,19 @@ int eventFilter(void * userdata, SDL_Event * event)
       switch(event->window.event)
       {
         case SDL_WINDOWEVENT_ENTER:
-          realignGuest = true;
+          if (state.wminfo.subsystem != SDL_SYSWM_X11)
+            handleWindowEnter();
+          break;
+
+        case SDL_WINDOWEVENT_LEAVE:
+          if (state.wminfo.subsystem != SDL_SYSWM_X11)
+            handleWindowLeave();
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
           if (state.wminfo.subsystem != SDL_SYSWM_X11)
-          {
-            state.windowW = event->window.data1;
-            state.windowH = event->window.data2;
-            updatePositionInfo();
-            realignGuest = true;
-          }
+            handleResizeEvent(event->window.data1, event->window.data2);
           break;
 
         // allow a window close event to close the application even if ignoreQuit is set
@@ -697,19 +830,28 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_SYSWMEVENT:
     {
       // When the window manager forces the window size after calling SDL_SetWindowSize, SDL
-      // ignores this update and caches the incorrect window size.
+      // ignores this update and caches the incorrect window size. As such all related details
+      // are incorect including mouse movement information as it clips to the old window size.
       if (state.wminfo.subsystem == SDL_SYSWM_X11)
       {
         XEvent xe = event->syswm.msg->msg.x11.event;
-        if (xe.type == ConfigureNotify)
+        switch(xe.type)
         {
-          if (state.windowW != xe.xconfigure.width || state.windowH != xe.xconfigure.height)
-          {
-            state.windowW = xe.xconfigure.width;
-            state.windowH = xe.xconfigure.height;
-            updatePositionInfo();
-            realignGuest = true;
-          }
+          case ConfigureNotify:
+            handleResizeEvent(xe.xconfigure.width, xe.xconfigure.height);
+            break;
+
+          case MotionNotify:
+            handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
+            break;
+
+          case EnterNotify:
+            handleWindowEnter();
+            break;
+
+          case LeaveNotify:
+            handleWindowLeave();
+            break;
         }
       }
 
@@ -719,80 +861,9 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEMOTION:
-    {
-      if (state.ignoreInput || !params.useSpiceInput)
-        break;
-
-      if (
-        !serverMode && (
-          event->motion.x < state.dstRect.x                   ||
-          event->motion.x > state.dstRect.x + state.dstRect.w ||
-          event->motion.y < state.dstRect.y                   ||
-          event->motion.y > state.dstRect.y + state.dstRect.h
-        )
-      )
-      {
-        realignGuest = true;
-        break;
-      }
-
-      int x = 0;
-      int y = 0;
-      if (realignGuest && state.haveCursorPos)
-      {
-        x = event->motion.x - state.dstRect.x;
-        y = event->motion.y - state.dstRect.y;
-        if (params.scaleMouseInput && !serverMode)
-        {
-          x = (float)x * state.scaleX;
-          y = (float)y * state.scaleY;
-        }
-        x -= state.cursor.x;
-        y -= state.cursor.y;
-        realignGuest = false;
-        state.accX  = 0;
-        state.accY  = 0;
-        state.sensX = 0;
-        state.sensY = 0;
-
-        if (!spice_mouse_motion(x, y))
-          DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-        break;
-      }
-
-      x = event->motion.xrel;
-      y = event->motion.yrel;
-      if (x != 0 || y != 0)
-      {
-        if (params.scaleMouseInput && !serverMode)
-        {
-          state.accX += (float)x * state.scaleX;
-          state.accY += (float)y * state.scaleY;
-          x = floor(state.accX);
-          y = floor(state.accY);
-          state.accX -= x;
-          state.accY -= y;
-        }
-
-        if (serverMode && state.mouseSens != 0)
-        {
-          state.sensX += ((float)x / 10.0f) * (state.mouseSens + 10);
-          state.sensY += ((float)y / 10.0f) * (state.mouseSens + 10);
-          x = floor(state.sensX);
-          y = floor(state.sensY);
-          state.sensX -= x;
-          state.sensY -= y;
-        }
-
-        if (!spice_mouse_motion(x, y))
-        {
-          DEBUG_ERROR("SDL_MOUSEMOTION: failed to send message");
-          break;
-        }
-      }
-
+      if (state.wminfo.subsystem != SDL_SYSWM_X11)
+        handleMouseMoveEvent(event->motion.x, event->motion.y);
       break;
-    }
 
     case SDL_KEYDOWN:
     {
@@ -839,19 +910,18 @@ int eventFilter(void * userdata, SDL_Event * event)
         {
           if (params.useSpiceInput)
           {
-            serverMode = !serverMode;
-            spice_mouse_mode(serverMode);
-            SDL_SetRelativeMouseMode(serverMode);
-            SDL_SetWindowGrab(state.window, serverMode);
-            DEBUG_INFO("Server Mode: %s", serverMode ? "on" : "off");
+            state.serverMode = !state.serverMode;
+            spice_mouse_mode(state.serverMode);
+            SDL_SetWindowGrab(state.window, state.serverMode);
+            DEBUG_INFO("Server Mode: %s", state.serverMode ? "on" : "off");
 
             app_alert(
-              serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-              serverMode ? "Capture Enabled" : "Capture Disabled"
+              state.serverMode ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+              state.serverMode ? "Capture Enabled" : "Capture Disabled"
             );
 
-            if (!serverMode)
-              realignGuest = true;
+            if (!state.serverMode)
+              alignMouseWithGuest();
           }
         }
         else
@@ -887,7 +957,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
-      if (state.ignoreInput || !params.useSpiceInput)
+      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
       if (
@@ -901,7 +971,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONDOWN:
-      if (state.ignoreInput || !params.useSpiceInput)
+      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
@@ -918,7 +988,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONUP:
-      if (state.ignoreInput || !params.useSpiceInput)
+      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
       // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
@@ -1072,6 +1142,7 @@ static int lg_run()
   state.scaleX     = 1.0f;
   state.scaleY     = 1.0f;
   state.resizeDone = true;
+  state.drawCursor = true;
 
   state.mouseSens = params.mouseSens;
        if (state.mouseSens < -9) state.mouseSens = -9;
@@ -1122,8 +1193,6 @@ static int lg_run()
     DEBUG_ERROR("Failed to map memory");
     return -1;
   }
-
-  state.kvmfr = (struct KVMFRHeader*)state.shm.mem;
 
   // try to connect to the spice server
   if (params.useSpiceInput || params.useSpiceClipboard)
@@ -1323,33 +1392,26 @@ static int lg_run()
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
   SDL_SetEventFilter(eventFilter, NULL);
 
-  // flag the host that we are starting up this is important so that
-  // the host wakes up if it is waiting on an interrupt, the host will
-  // also send us the current mouse shape since we won't know it yet
-  DEBUG_INFO("Waiting for host to signal it's ready...");
-  __sync_or_and_fetch(&state.kvmfr->flags, KVMFR_HEADER_FLAG_RESTART);
+  LGMP_STATUS status;
+  while(true)
+  {
+    if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
+      break;
 
-  while(state.running && (state.kvmfr->flags & KVMFR_HEADER_FLAG_RESTART))
-    SDL_WaitEventTimeout(NULL, 1000);
+    if (status == LGMP_ERR_INVALID_SESSION || status == LGMP_ERR_INVALID_MAGIC)
+    {
+      SDL_WaitEventTimeout(NULL, 1000);
+      continue;
+    }
+
+    DEBUG_ERROR("lgmpClientInit Failed: %s", lgmpStatusString(status));
+    return -1;
+  }
 
   if (!state.running)
     return -1;
 
   DEBUG_INFO("Host ready, starting session");
-
-  // check the header's magic and version are valid
-  if (memcmp(state.kvmfr->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
-  {
-    DEBUG_ERROR("Invalid header magic, is the host running?");
-    return -1;
-  }
-
-  if (state.kvmfr->version != KVMFR_HEADER_VERSION)
-  {
-    DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.kvmfr->version);
-    DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
-    return -1;
-  }
 
   if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
   {
@@ -1368,6 +1430,14 @@ static int lg_run()
   {
     SDL_WaitEventTimeout(NULL, 1000);
 
+    if (!lgmpClientSessionValid(state.lgmp))
+    {
+      DEBUG_WARN("Session is invalid, has the host shutdown?");
+      break;
+    }
+
+    (void)closeAlert;
+    /*
     if (closeAlert == NULL)
     {
       if (state.kvmfr->flags & KVMFR_HEADER_FLAG_PAUSED)
@@ -1389,6 +1459,7 @@ static int lg_run()
         closeAlert  = NULL;
       }
     }
+    */
   }
 
   return 0;
@@ -1400,6 +1471,8 @@ static void lg_shutdown()
 
   if (t_render)
     lgJoinThread(t_render, NULL);
+
+  lgmpClientFree(&state.lgmp);
 
   if (e_startup)
   {

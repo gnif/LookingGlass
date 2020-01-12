@@ -733,8 +733,9 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 
   if (spice.family != AF_UNIX)
   {
-    int flag = 1;
-    setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+    const int flag = 1;
+    setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY , &flag, sizeof(int));
+    setsockopt(channel->socket, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(int));
   }
 
   if (connect(channel->socket, &spice.addr.addr, addrSize) == -1)

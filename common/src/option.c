@@ -600,7 +600,7 @@ void option_print()
     maxLen = alloc_sprintf(
       &line,
       "%-*s | Short | %-*s | Description",
-      strlen(state.groups[g].module) + state.groups[g].pad + 1,
+      (int)(strlen(state.groups[g].module) + state.groups[g].pad + 1),
       "Long",
       valueLen,
       "Value"

@@ -24,6 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/event.h"
+#include "common/thread.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -36,9 +37,11 @@ struct iface
   bool        stop;
   NvFBCHandle nvfbc;
 
-  bool         seperateCursor;
-  void       * pointerShape;
-  unsigned int pointerSize;
+  bool                       seperateCursor;
+  CaptureGetPointerBuffer    getPointerBufferFn;
+  CapturePostPointerBuffer   postPointerBufferFn;
+  LGThread                 * pointerThread;
+
   unsigned int maxWidth, maxHeight;
   unsigned int width   , height;
 
@@ -56,6 +59,7 @@ struct iface
 static struct iface * this = NULL;
 
 static void nvfbc_free();
+static int pointerThread(void * unused);
 
 static void getDesktopSize(unsigned int * width, unsigned int * height)
 {
@@ -100,7 +104,9 @@ static void nvfbc_initOptions()
   option_register(options);
 }
 
-static bool nvfbc_create()
+static bool nvfbc_create(
+    CaptureGetPointerBuffer  getPointerBufferFn,
+    CapturePostPointerBuffer postPointerBufferFn)
 {
   if (!NvFBCInit())
     return false;
@@ -143,20 +149,18 @@ static bool nvfbc_create()
     return false;
   }
 
-  this->seperateCursor = option_get_bool("nvfbc", "decoupleCursor");
+  this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
+  this->getPointerBufferFn  = getPointerBufferFn;
+  this->postPointerBufferFn = postPointerBufferFn;
 
   return true;
 }
 
-static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
+static bool nvfbc_init()
 {
-  this->stop         = false;
-  this->pointerShape = pointerShape;
-  this->pointerSize  = pointerSize;
-
+  this->stop = false;
   getDesktopSize(&this->width, &this->height);
   lgResetEvent(this->frameEvent);
-
 
   HANDLE event;
   if (!NvFBCToSysSetup(
@@ -183,6 +187,13 @@ static bool nvfbc_init(void * pointerShape, const unsigned int pointerSize)
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
   Sleep(100);
+
+  if (!lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
+  {
+    DEBUG_ERROR("Failed to create the NvFBCPointer thread");
+    return false;
+  }
+
   return true;
 }
 
@@ -191,11 +202,24 @@ static void nvfbc_stop()
   this->stop = true;
   lgSignalEvent(this->cursorEvents[0]);
   lgSignalEvent(this->frameEvent);
+
+  if (this->pointerThread)
+  {
+    lgJoinThread(this->pointerThread, NULL);
+    this->pointerThread = NULL;
+  }
 }
 
 static bool nvfbc_deinit()
 {
   mouseHook_remove();
+
+  if (this->cursorEvents[0])
+  {
+    lgFreeEvent(this->cursorEvents[0]);
+    this->cursorEvents[0] = NULL;
+  }
+
   return true;
 }
 
@@ -280,32 +304,51 @@ static CaptureResult nvfbc_getFrame(FrameBuffer frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_getPointer(CapturePointer * pointer)
+static int pointerThread(void * unused)
 {
-  LGEvent * events[2];
-  memcpy(&events, &this->cursorEvents, sizeof(LGEvent *) * 2);
-  if (!lgWaitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
-    return CAPTURE_RESULT_TIMEOUT;
-
-  if (this->stop)
-    return CAPTURE_RESULT_REINIT;
-
-  CaptureResult result;
-  pointer->shapeUpdate = false;
-  if (this->seperateCursor && events[1])
+  while(!this->stop)
   {
-    result = NvFBCToSysGetCursor(this->nvfbc, pointer, this->pointerShape, this->pointerSize);
-    this->mouseVisible = pointer->visible;
-    this->mouseHotX    = pointer->x;
-    this->mouseHotY    = pointer->y;
-    if (result != CAPTURE_RESULT_OK)
-      return result;
+    LGEvent * events[2];
+    memcpy(&events, &this->cursorEvents, sizeof(LGEvent *) * 2);
+    if (!lgWaitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
+      continue;
+
+    if (this->stop)
+      break;
+
+    CaptureResult result;
+    CapturePointer pointer = { 0 };
+    pointer.shapeUpdate = false;
+    if (this->seperateCursor && events[1])
+    {
+      void * data;
+      uint32_t size;
+      if (!this->getPointerBufferFn(&data, &size))
+      {
+        DEBUG_WARN("failed to get a pointer buffer");
+        continue;
+      }
+
+      result = NvFBCToSysGetCursor(this->nvfbc, &pointer, data, size);
+      if (result != CAPTURE_RESULT_OK)
+      {
+        DEBUG_WARN("NvFBCToSysGetCursor failed");
+        continue;
+      }
+
+      this->mouseVisible = pointer.visible;
+      this->mouseHotX    = pointer.x;
+      this->mouseHotY    = pointer.y;
+    }
+
+    pointer.visible = this->mouseVisible;
+    pointer.x       = this->mouseX - this->mouseHotX;
+    pointer.y       = this->mouseY - this->mouseHotY;
+
+    this->postPointerBufferFn(pointer);
   }
 
-  pointer->visible = this->mouseVisible;
-  pointer->x       = this->mouseX - this->mouseHotX;
-  pointer->y       = this->mouseY - this->mouseHotY;
-  return CAPTURE_RESULT_OK;
+  return 0;
 }
 
 struct CaptureInterface Capture_NVFBC =
@@ -321,6 +364,5 @@ struct CaptureInterface Capture_NVFBC =
   .getMaxFrameSize = nvfbc_getMaxFrameSize,
   .capture         = nvfbc_capture,
   .waitFrame       = nvfbc_waitFrame,
-  .getFrame        = nvfbc_getFrame,
-  .getPointer      = nvfbc_getPointer
+  .getFrame        = nvfbc_getFrame
 };

@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.0)
-project(looking-glass-host C)
+project(looking-glass-obs C)
 
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
+include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
 
@@ -24,9 +25,12 @@ add_compile_options(
   "-ffast-math"
   "-fdata-sections"
   "-ffunction-sections"
+  "-fpic"
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
-set(CMAKE_C_STANDARD  11)
+
+set(EXE_FLAGS "-Wl,--gc-sections")
+set(CMAKE_C_STANDARD 11)
 
 execute_process(
 	COMMAND			cat ../VERSION
@@ -36,37 +40,33 @@ execute_process(
 )
 
 add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
+add_definitions(-D ATOMIC_LOCKING)
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PKGCONFIG_INCLUDE_DIRS}
-	${GMP_INCLUDE_DIR}
 )
 
-#link_libraries(
-#)
+link_libraries(
+	${CMAKE_DL_LIBS}
+	rt
+	m
+)
 
 set(SOURCES
-	src/app.c
+	main.c
+	lg.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common"    "${CMAKE_BINARY_DIR}/common")
-add_subdirectory("${PROJECT_TOP}/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
-add_subdirectory(platform)
+add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp")
 
-if(WIN32)
-  add_executable(looking-glass-host WIN32 ${SOURCES})
-else()
-  add_executable(looking-glass-host ${SOURCES})
-endif()
-target_link_libraries(looking-glass-host
+add_library(looking-glass-obs SHARED ${SOURCES})
+target_link_libraries(looking-glass-obs
+	${EXE_FLAGS}
 	lg_common
-	platform
 	lgmp
 )
-set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
-install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-host DESTINATION bin/ COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)

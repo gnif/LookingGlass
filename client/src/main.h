@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/ivshmem.h"
 
 #include "spice/spice.h"
+#include <lgmp/client.h>
 
 struct AppState
 {
@@ -42,9 +43,21 @@ struct AppState
   LG_RendererRect      dstRect;
   SDL_Point            cursor;
   bool                 cursorVisible;
-  bool                 haveCursorPos;
-  float                scaleX, scaleY;
-  float                accX, accY;
+
+  bool  serverMode;
+  bool  haveCursorPos;
+  bool  drawCursor;
+  bool  cursorInView;
+  bool  updateCursor;
+  bool  initialCursorSync;
+  float scaleX, scaleY;
+  float accX, accY;
+  int   curLastX;
+  int   curLastY;
+  bool  haveCurLocal;
+  int   curLocalX;
+  int   curLocalY;
+  bool  haveAligned;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
@@ -58,7 +71,9 @@ struct AppState
   SDL_Window         * window;
 
   struct IVSHMEM       shm;
-  struct KVMFRHeader * kvmfr;
+  PLGMPClient          lgmp;
+  PLGMPClientQueue     frameQueue;
+  PLGMPClientQueue     pointerQueue;
 
   uint64_t          frameTime;
   uint64_t          lastFrameTime;

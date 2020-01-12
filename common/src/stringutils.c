@@ -21,26 +21,24 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdlib.h>
 #include <stdarg.h>
 
-int alloc_sprintf(char ** str, const char * format, ...)
+static int valloc_sprintf(char ** str, const char * format, va_list ap)
 {
   if (!str)
     return -1;
 
   *str = NULL;
-  va_list ap;
-  va_start(ap, format);
-  int len = vsnprintf(NULL, 0, format, ap);
-  va_end(ap);
+
+  va_list ap1;
+  va_copy(ap1, ap);
+  int len = vsnprintf(NULL, 0, format, ap1);
+  va_end(ap1);
 
   if (len < 0)
     return len;
 
   *str = malloc(len+1);
 
-  va_start(ap, format);
   int ret = vsnprintf(*str, len + 1, format, ap);
-  va_end(ap);
-
   if (ret < 0)
   {
     free(*str);
@@ -48,5 +46,14 @@ int alloc_sprintf(char ** str, const char * format, ...)
     return ret;
   }
 
+  return ret;
+}
+
+int alloc_sprintf(char ** str, const char * format, ...)
+{
+  va_list ap;
+  va_start(ap, format);
+  int ret = valloc_sprintf(str, format, ap);
+  va_end(ap);
   return ret;
 }

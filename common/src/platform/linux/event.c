@@ -25,12 +25,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <pthread.h>
 #include <assert.h>
 #include <errno.h>
+#include <stdatomic.h>
+#include <stdint.h>
 
 struct LGEvent
 {
   pthread_mutex_t mutex;
   pthread_cond_t  cond;
-  bool            flag;
+  uint32_t        flag;
   bool            autoReset;
 };
 
@@ -58,7 +60,6 @@ LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
   }
 
   handle->autoReset = autoReset;
-
   return handle;
 }
 
@@ -81,7 +82,7 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
     return false;
   }
 
-  while(!handle->flag)
+  while(!atomic_load(&handle->flag))
   {
     if (timeout == TIMEOUT_INFINITE)
     {
@@ -109,7 +110,7 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
   }
 
   if (handle->autoReset)
-    handle->flag = false;
+    atomic_store(&handle->flag, 0);
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
@@ -130,7 +131,7 @@ bool lgSignalEvent(LGEvent * handle)
     return false;
   }
 
-  handle->flag = true;
+  atomic_store(&handle->flag, 1);
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
@@ -157,7 +158,7 @@ bool lgResetEvent(LGEvent * handle)
     return false;
   }
 
-  handle->flag = false;
+  atomic_store(&handle->flag, 0);
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {

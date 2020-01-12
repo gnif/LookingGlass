@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/KVMFR.h"
 #include "common/locking.h"
 #include "common/stringutils.h"
+#include "common/ivshmem.h"
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -33,16 +34,15 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <time.h>
 
+#include <lgmp/client.h>
+
 #define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
 #define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
 
 struct state
 {
-  int                  shmSize;
-  int                  shmFD;
-  struct KVMFRHeader * shm;
-
-  bool running;
+  bool           running;
+  struct IVSHMEM shmDev;
 };
 
 struct state state;
@@ -56,22 +56,6 @@ static struct Option options[] =
     .shortopt       = 'C',
     .type           = OPTION_TYPE_STRING,
     .value.x_string = NULL
-  },
-  {
-    .module         = "app",
-    .name           = "shmFile",
-    .description    = "The path to the shared memory file",
-    .shortopt       = 'f',
-    .type           = OPTION_TYPE_STRING,
-    .value.x_string = "/dev/shm/looking-glass"
-  },
-  {
-    .module         = "app",
-    .name           = "shmSize",
-    .description    = "Specify the size in MB of the shared memory file (0 = detect)",
-    .shortopt       = 'L',
-    .type           = OPTION_TYPE_INT,
-    .value.x_int    = 0
   },
   {0}
 };
@@ -120,53 +104,6 @@ static bool config_load(int argc, char * argv[])
   return true;
 }
 
-static bool map_memory()
-{
-  const char * shmFile = option_get_string("app", "shmFile");
-  int          shmSize = option_get_int   ("app", "shmSize");
-
-  struct stat st;
-  if (stat(shmFile, &st) < 0)
-  {
-    DEBUG_ERROR("Failed to stat the shared memory file: %s", shmFile);
-    return false;
-  }
-
-  state.shmSize = shmSize ? shmSize : st.st_size;
-  state.shmFD   = open(shmFile, O_RDWR, (mode_t)0600);
-  if (state.shmFD < 0)
-  {
-    DEBUG_ERROR("Failed to open the shared memory file: %s", shmFile);
-    return false;
-  }
-
-  state.shm = (struct KVMFRHeader *)mmap(0, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, state.shmFD, 0);
-  if (state.shm == MAP_FAILED)
-  {
-    DEBUG_ERROR("Failed to map the shared memory file: %s", shmFile);
-    state.shm = NULL;
-    return false;
-  }
-
-  DEBUG_INFO("Shared memory mapped @ 0x%p", state.shm);
-  return true;
-}
-
-static void unmap_memory()
-{
-  if (state.shmFD > -1)
-  {
-    if (state.shm)
-    {
-      munmap(state.shm, state.shmSize);
-      state.shm = NULL;
-    }
-
-    close(state.shmFD);
-    state.shmFD = -1;
-  }
-}
-
 static inline uint64_t nanotime()
 {
   struct timespec time;
@@ -176,29 +113,19 @@ static inline uint64_t nanotime()
 
 static int run()
 {
-  DEBUG_INFO("Waiting for host to signal it's ready...");
-  __sync_or_and_fetch(&state.shm->flags, KVMFR_HEADER_FLAG_RESTART);
+  PLGMPClient      lgmp;
+  PLGMPClientQueue frameQueue;
 
-  while(state.running && (state.shm->flags & KVMFR_HEADER_FLAG_RESTART))
-    usleep(1e6);
-
-  if (!state.running)
-    return -1;
-
-  DEBUG_INFO("Host ready, starting session");
-
-  // check the header's magic and version are valid
-  if (memcmp(state.shm->magic, KVMFR_HEADER_MAGIC, sizeof(KVMFR_HEADER_MAGIC)) != 0)
+  LGMP_STATUS status;
+  if ((status = lgmpClientInit(state.shmDev.mem, state.shmDev.size, &lgmp)) != LGMP_OK)
   {
-    DEBUG_ERROR("Invalid header magic, is the host running?");
+    DEBUG_ERROR("lgmpClientInit: %s", lgmpStatusString(status));
     return -1;
   }
 
-  DEBUG_INFO("KVMFR Version: %u", state.shm->version);
-  if (state.shm->version != KVMFR_HEADER_VERSION)
+  if ((status = lgmpClientSubscribe(lgmp, LGMP_Q_FRAME, &frameQueue) != LGMP_OK))
   {
-    DEBUG_ERROR("KVMFR version missmatch, expected %u but got %u", KVMFR_HEADER_VERSION, state.shm->version);
-    DEBUG_ERROR("This is not a bug, ensure you have the right version of looking-glass-host.exe on the guest");
+    DEBUG_ERROR("lgmpClientSubscribe: %s", lgmpStatusString(status));
     return -1;
   }
 
@@ -218,18 +145,19 @@ static int run()
   // start accepting frames
   while(state.running)
   {
-    // we don't sleep in this loop as we are profiling the host application
-    while(!(state.shm->frame.flags & KVMFR_FRAME_FLAG_UPDATE))
+    LGMPMessage msg;
+    if ((status = lgmpClientProcess(frameQueue, &msg)) != LGMP_OK)
     {
-      if (!state.running)
-        break;
+      if (status == LGMP_ERR_QUEUE_EMPTY)
+        continue;
+
+      DEBUG_ERROR("lgmpClientProcess: %s", lgmpStatusString(status));
+      return -1;
     }
 
+    lgmpClientMessageDone(frameQueue);
+
     uint64_t frameTime = nanotime();
-
-    // tell the host that it can continue
-    __sync_and_and_fetch(&state.shm->frame.flags, ~KVMFR_FRAME_FLAG_UPDATE);
-
     uint64_t diff = frameTime - lastFrameTime;
 
     if (frameCount++ == 0)
@@ -281,6 +209,7 @@ int main(int argc, char * argv[])
     DEBUG_WARN("Failed to install the crash handler");
 
   option_register(options);
+  ivshmemOptionsInit();
 
   if (!config_load(argc, argv))
   {
@@ -289,15 +218,13 @@ int main(int argc, char * argv[])
   }
 
   // init the global state vars
-  state.shmFD   = -1;
-  state.shm     = NULL;
   state.running = true;
 
   int ret = -1;
-  if (map_memory())
+  if (ivshmemOpen(&state.shmDev))
     ret = run();
 
-  unmap_memory();
+  ivshmemClose(&state.shmDev);
   option_free();
   return ret;
 }

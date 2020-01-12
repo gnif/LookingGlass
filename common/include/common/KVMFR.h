@@ -20,8 +20,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdint.h>
 
-#define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 9
+#define LGMP_Q_POINTER     1
+#define LGMP_Q_FRAME       2
 
 typedef enum FrameType
 {
@@ -42,49 +42,23 @@ typedef enum CursorType
 }
 CursorType;
 
-#define KVMFR_CURSOR_FLAG_UPDATE  1 // cursor update available
-#define KVMFR_CURSOR_FLAG_VISIBLE 2 // cursor is visible
-#define KVMFR_CURSOR_FLAG_SHAPE   4 // shape updated
-#define KVMFR_CURSOR_FLAG_POS     8 // position updated
-
 typedef struct KVMFRCursor
 {
-  volatile uint8_t flags; // KVMFR_CURSOR_FLAGS
   int16_t    x, y;        // cursor x & y position
-
-  uint32_t   version;     // shape version
+  bool       visible;     // cursor visible
   CursorType type;        // shape buffer data type
   uint32_t   width;       // width of the shape
   uint32_t   height;      // height of the shape
   uint32_t   pitch;       // row length in bytes of the shape
-  uint64_t   dataPos;     // offset to the shape data
 }
 KVMFRCursor;
 
-#define KVMFR_FRAME_FLAG_UPDATE 1 // frame update available
-
 typedef struct KVMFRFrame
 {
-  volatile uint8_t flags;  // KVMFR_FRAME_FLAGS
   FrameType   type;        // the frame data type
   uint32_t    width;       // the width
   uint32_t    height;      // the height
   uint32_t    stride;      // the row stride (zero if compressed data)
   uint32_t    pitch;       // the row pitch  (stride in bytes or the compressed frame size)
-  uint64_t    dataPos;     // offset to the frame
 }
 KVMFRFrame;
-
-#define KVMFR_HEADER_FLAG_RESTART 1 // restart signal from client
-#define KVMFR_HEADER_FLAG_READY   2 // ready signal from client
-#define KVMFR_HEADER_FLAG_PAUSED  4 // capture has been paused by the host
-
-typedef struct KVMFRHeader
-{
-  char        magic[sizeof(KVMFR_HEADER_MAGIC)];
-  uint32_t    version;     // version of this structure
-  volatile uint8_t flags;  // KVMFR_HEADER_FLAGS
-  KVMFRFrame  frame;       // the frame information
-  KVMFRCursor cursor;      // the cursor information
-}
-KVMFRHeader;
