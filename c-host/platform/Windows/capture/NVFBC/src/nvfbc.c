@@ -213,6 +213,13 @@ static void nvfbc_stop()
 static bool nvfbc_deinit()
 {
   mouseHook_remove();
+
+  if (this->cursorEvents[0])
+  {
+    lgFreeEvent(this->cursorEvents[0]);
+    this->cursorEvents[0] = NULL;
+  }
+
   return true;
 }
 
