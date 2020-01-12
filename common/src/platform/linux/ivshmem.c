@@ -130,7 +130,11 @@ static StringList ivshmemDeviceGetValues(struct Option * option)
       continue;
 
     if (strcmp(name, "KVMFR") == 0)
-      stringlist_push(sl, strdup(dir->d_name));
+    {
+      char * devName;
+      alloc_sprintf(&devName, "/dev/%s", dir->d_name);
+      stringlist_push(sl, devName);
+    }
 
     free(name);
   }
@@ -175,14 +179,15 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
   DEBUG_INFO("KVMFR Device     : %s", shmDevice);
 
-  if (strlen(shmDevice) > 3 && memcmp(shmDevice, "uio", 3) == 0)
+  if (strlen(shmDevice) > 8 && memcmp(shmDevice, "/dev/uio", 8) == 0)
   {
+    const char * uioDev = shmDevice + 5;
+
     // get the device size
-    int fd = uioOpenFile(shmDevice, "maps/map0/size");
+    int fd = uioOpenFile(uioDev, "maps/map0/size");
     if (fd < 0)
     {
-      DEBUG_ERROR("Failed to open %s/size", shmDevice);
-      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
+      DEBUG_ERROR("Failed to open %s/size", uioDev);
       return false;
     }
 
@@ -198,17 +203,13 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     close(fd);
     devSize = strtoul(size, NULL, 16);
 
-    char * path;
-    alloc_sprintf(&path, "/dev/%s", shmDevice);
-    devFD = open(path, O_RDWR, (mode_t)0600);
+    devFD = open(shmDevice, O_RDWR, (mode_t)0600);
     if (devFD < 0)
     {
-      DEBUG_ERROR("Failed to open: %s", path);
-      DEBUG_ERROR("Did you remmeber to modprobe the kvmfr module?");
-      free(path);
+      DEBUG_ERROR("Failed to open: %s", shmDevice);
+      DEBUG_ERROR("Do you have permission to access the device?");
       return false;
     }
-    free(path);
   }
   else
   {
