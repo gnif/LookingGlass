@@ -51,19 +51,19 @@ static struct kvmfr_info *kvmfr;
 
 struct kvmfr_dev
 {
-  struct pci_dev  * dev;
-  struct uio_info   uio;
-  int               minor;
-  dev_t             devNo;
-  struct device   * pDev;
-  void            * addr;
+  unsigned long        size;
+  struct uio_info      uio;
+  int                  minor;
+  dev_t                devNo;
+  struct device      * pDev;
+  struct dev_pagemap   pgmap;
+  void               * addr;
 };
 
 struct kvmfrbuf
 {
   struct kvmfr_dev    * kdev;
   pgoff_t               pagecount;
-  struct dev_pagemap  * pgmap;
   struct page        ** pages;
 };
 
@@ -127,8 +127,6 @@ static void release_kvmfrbuf(struct dma_buf * buf)
   for (pg = 0; pg < kbuf->pagecount; pg++)
     put_page(kbuf->pages[pg]);
 
-  devm_memunmap_pages(&kbuf->kdev->dev->dev, kbuf->pgmap);
-  kfree(kbuf->pgmap);
   kfree(kbuf->pages);
   kfree(kbuf);
 }
@@ -174,7 +172,6 @@ inline static unsigned long get_min_align(void)
 
 static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, unsigned long arg)
 {
-  const unsigned long min_align = get_min_align();
   struct kvmfr_dmabuf_create create;
   DEFINE_DMA_BUF_EXPORT_INFO(exp_kdev);
   struct kvmfrbuf * kbuf;
@@ -187,14 +184,14 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
         sizeof(create)))
       return -EFAULT;
 
-  if (!IS_ALIGNED(create.offset, min_align) ||
-      !IS_ALIGNED(create.size  , min_align))
+  if (!IS_ALIGNED(create.offset, PAGE_SIZE) ||
+      !IS_ALIGNED(create.size  , PAGE_SIZE))
   {
-    printk("kvmfr: buffer not aligned to 0x%lx bytes", min_align << PAGE_SHIFT);
+    printk("kvmfr: buffer not aligned to 0x%lx bytes", PAGE_SIZE);
     return -EINVAL;
   }
 
-  if (create.offset + create.size > pci_resource_len(kdev->dev, 2))
+  if (create.offset + create.size > kdev->size)
     return -EINVAL;
 
   kbuf = kzalloc(sizeof(struct kvmfrbuf), GFP_KERNEL);
@@ -203,34 +200,14 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
 
   kbuf->kdev      = kdev;
   kbuf->pagecount = (create.size - create.offset) >> PAGE_SHIFT;
-
-  kbuf->pgmap = kzalloc(sizeof(*kbuf->pgmap), GFP_KERNEL);
-  if (!kbuf->pgmap)
-  {
-    ret = -ENOMEM;
-    goto err;
-  }
-
-  kbuf->pgmap->res.start = pci_resource_start(kdev->dev, 2)  + create.offset;
-  kbuf->pgmap->res.end   = kbuf->pgmap->res.start + create.size - 1;
-  kbuf->pgmap->res.flags = pci_resource_flags(kdev->dev, 2);
-  kbuf->pgmap->type      = MEMORY_DEVICE_DEVDAX;
-
-  kdev->addr = devm_memremap_pages(&kdev->dev->dev, kbuf->pgmap);
-  if (IS_ERR(kdev->addr))
-  {
-    ret = PTR_ERR(kdev->addr);
-    goto err;
-  }
-
-  kbuf->pages = kmalloc_array(kbuf->pagecount, sizeof(*kbuf->pages), GFP_KERNEL);
+  kbuf->pages     = kmalloc_array(kbuf->pagecount, sizeof(*kbuf->pages), GFP_KERNEL);
   if (!kbuf->pages)
   {
     ret = -ENOMEM;
-    goto err_unmap;
+    goto err;
   }
 
-  p = kdev->addr;
+  p = ((u8*)kdev->addr) + create.offset;
   for(i = 0; i < kbuf->pagecount; ++i)
   {
     kbuf->pages[i] = virt_to_page(p);
@@ -252,10 +229,7 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
   printk("kvmfr_dmabuf_create: offset: %llu, size: %llu\n", create.offset, create.size);
   return dma_buf_fd(buf, create.flags & KVMFR_DMABUF_FLAG_CLOEXEC ? O_CLOEXEC : 0);
 
-err_unmap:
-  devm_memunmap_pages(&kdev->dev->dev, kbuf->pgmap);
 err:
-  kfree(kbuf->pgmap);
   kfree(kbuf->pages);
   kfree(kbuf);
   return ret;
@@ -276,12 +250,8 @@ static long device_ioctl(struct file * filp, unsigned int ioctl, unsigned long a
       ret = kvmfr_dmabuf_create(kdev, filp, arg);
       break;
 
-    case KVMFR_DMABUF_GETALIGN:
-      ret = get_min_align() << PAGE_SHIFT;
-      break;
-
     case KVMFR_DMABUF_GETSIZE:
-      ret = pci_resource_len(kdev->dev, 2);
+      ret = kdev->size;
       break;
 
     default:
@@ -305,8 +275,6 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   if (!kdev)
     return -ENOMEM;
 
-  kdev->dev = dev;
-
   if (pci_enable_device(dev))
     goto out_free;
 
@@ -324,6 +292,8 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
   if (!kdev->uio.mem[0].internal_addr)
     goto out_release;
+
+  kdev->size = pci_resource_len(dev, 2);
 
   kdev->uio.mem[0].size    = pci_resource_len(dev, 2);
   kdev->uio.mem[0].memtype = UIO_MEM_PHYS;
@@ -350,9 +320,20 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   if (IS_ERR(kdev->pDev))
     goto out_unminor;
 
+  kdev->pgmap.res.start = pci_resource_start(dev, 2);
+  kdev->pgmap.res.end   = pci_resource_end  (dev, 2);
+  kdev->pgmap.res.flags = pci_resource_flags(dev, 2);
+  kdev->pgmap.type      = MEMORY_DEVICE_DEVDAX;
+
+  kdev->addr = devm_memremap_pages(&dev->dev, &kdev->pgmap);
+  if (IS_ERR(kdev->addr))
+    goto out_destroy;
+
   pci_set_drvdata(dev, kdev);
   return 0;
 
+out_destroy:
+  device_destroy(kvmfr->pClass, kdev->devNo);
 out_unminor:
   mutex_lock(&minor_lock);
   idr_remove(&kvmfr_idr, kdev->minor);
@@ -374,6 +355,7 @@ static void kvmfr_pci_remove(struct pci_dev *dev)
 {
   struct kvmfr_dev *kdev = pci_get_drvdata(dev);
 
+  devm_memunmap_pages(&dev->dev, &kdev->pgmap);
   device_destroy(kvmfr->pClass, kdev->devNo);
 
   mutex_lock(&minor_lock);

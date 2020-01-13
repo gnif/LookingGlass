@@ -21,9 +21,7 @@ int main()
   }
 
   unsigned long size      = ioctl(fd, KVMFR_DMABUF_GETSIZE , 0);
-  unsigned long alignment = ioctl(fd, KVMFR_DMABUF_GETALIGN, 0);
-
-  printf("Size: %lu MiB, Alignment: %lu MiB\n", size / 1024 / 1024, alignment / 1024 / 1024);
+  printf("Size: %lu MiB\n", size / 1024 / 1024);
 
   struct kvmfr_dmabuf_create create =
   {
