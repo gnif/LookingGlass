@@ -46,6 +46,10 @@ pkg_check_modules(PKGCONFIG REQUIRED
 	x11
 )
 
+pkg_check_modules(PKGCONFIG_OPT
+	xi
+)
+
 execute_process(
 	COMMAND			cat ../VERSION
 	WORKING_DIRECTORY	${PROJECT_SOURCE_DIR}
@@ -63,12 +67,12 @@ get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PKGCONFIG_INCLUDE_DIRS}
+	${PKGCONFIG_INCLUDE_DIRS} ${PKGCONFIG_OPT_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )
 
 link_libraries(
-	${PKGCONFIG_LIBRARIES}
+	${PKGCONFIG_LIBRARIES} ${PKGCONFIG_OPT_LIBRARIES}
 	${GMP_LIBRARIES}
 	${CMAKE_DL_LIBS}
 	rt
@@ -94,7 +98,7 @@ add_subdirectory(fonts)
 add_subdirectory(decoders)
 
 add_executable(looking-glass-client ${SOURCES})
-target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
+target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER} ${PKGCONFIG_OPT_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	lg_common

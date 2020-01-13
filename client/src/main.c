@@ -35,6 +35,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <assert.h>
 
+#if SDL_VIDEO_DRIVER_X11_XINPUT2
+// because SDL2 sucks and we need to turn it off
+#include <X11/extensions/XInput2.h>
+#endif
+
 #include "common/debug.h"
 #include "common/crash.h"
 #include "common/KVMFR.h"
@@ -1330,6 +1335,25 @@ static int lg_run()
     {
       // enable X11 events to work around SDL2 bugs
       SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+
+#if SDL_VIDEO_DRIVER_X11_XINPUT2
+      // SDL2 bug, using xinput2 disables all motion notify events
+      // we really don't care about touch, so turn it off and go back
+      // to the default behaiovur.
+      XIEventMask xinputmask =
+      {
+        .deviceid = XIAllMasterDevices,
+        .mask     = 0,
+        .mask_len = 0
+      };
+
+      XISelectEvents(
+        state.wminfo.info.x11.display,
+        state.wminfo.info.x11.window,
+        &xinputmask,
+        1
+      );
+#endif
 
       Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
         state.wminfo.info.x11.display,
