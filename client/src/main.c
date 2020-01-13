@@ -440,7 +440,7 @@ static int frameThread(void * unused)
       updatePositionInfo();
     }
 
-    FrameBuffer fb = (FrameBuffer)(frame + 1);
+    FrameBuffer fb = (FrameBuffer)(((uint8_t*)frame) + frame->offset);
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, fb))
     {
       DEBUG_ERROR("renderer on frame event returned failure");

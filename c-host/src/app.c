@@ -109,6 +109,7 @@ static int frameThread(void * opaque)
   bool         repeatFrame    = false;
   int          frameIndex     = 0;
   CaptureFrame frame          = { 0 };
+  const long   pageSize       = sysinfo_getPageSize();
 
   (void)frameIndex;
   (void)repeatFrame;
@@ -182,9 +183,12 @@ static int frameThread(void * opaque)
     fi->height  = frame.height;
     fi->stride  = frame.stride;
     fi->pitch   = frame.pitch;
+    fi->offset  = pageSize - sizeof(FrameBuffer);
     frameValid  = true;
 
-    FrameBuffer fb = (FrameBuffer)(fi + 1);
+    // put the framebuffer on the border of the next page
+    // this is to allow for aligned DMA transfers by the receiver
+    FrameBuffer fb = (FrameBuffer)(((uint8_t*)fi) + fi->offset);
     framebuffer_prepare(fb);
 
     /* we post and then get the frame, this is intentional! */
