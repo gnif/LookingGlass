@@ -1328,6 +1328,9 @@ static int lg_run()
   {
     if (state.wminfo.subsystem == SDL_SYSWM_X11)
     {
+      // enable X11 events to work around SDL2 bugs
+      SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+
       Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
         state.wminfo.info.x11.display,
         "NETWM_BYPASS_COMPOSITOR",
