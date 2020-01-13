@@ -19,3 +19,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 // returns the maximum number of multisamples supported by the system
 int sysinfo_gfx_max_multisample();
+
+// returns the page size
+long sysinfo_getPageSize();
