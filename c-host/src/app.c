@@ -397,6 +397,7 @@ int app_main(int argc, char * argv[])
   int exitcode  = 0;
   DEBUG_INFO("IVSHMEM Size     : %u MiB", shmDev.size / 1048576);
   DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmDev.mem);
+  DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
 
   LGMP_STATUS status;
   if ((status = lgmpHostInit(shmDev.mem, shmDev.size, &app.lgmp)) != LGMP_OK)
@@ -433,19 +434,20 @@ int app_main(int argc, char * argv[])
     goto fail;
   }
 
-  app.maxFrameSize = ALIGN_DN(lgmpHostMemAvail(app.lgmp) / LGMP_Q_FRAME_LEN);
+  const long sz = sysinfo_getPageSize();
+  app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
+  app.maxFrameSize = (app.maxFrameSize - (sz - 1)) & ~(sz - 1);
+  app.maxFrameSize /= LGMP_Q_FRAME_LEN;
+  DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
+
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    const long sz = sysinfo_getPageSize();
     if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize, sz, &app.frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
       goto fail;
     }
   }
-
-  DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
-  DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
 
   CaptureInterface * iface = NULL;
   for(int i = 0; CaptureInterfaces[i]; ++i)
