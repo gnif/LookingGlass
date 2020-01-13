@@ -23,26 +23,33 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct stFrameBuffer * FrameBuffer;
+
+typedef struct stFrameBuffer
+{
+  uint64_t  wp;
+  uint8_t   data[0];
+}
+FrameBuffer;
+
 
 typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 
 /**
  * Read data from the KVMFRFrame into the dst buffer
  */
-bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size);
+bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t size);
 
 /**
  * Read data from the KVMFRFrame using a callback
  */
-bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t size, void * opaque);
+bool framebuffer_read_fn(const FrameBuffer * frame, FrameBufferReadFn fn, size_t size, void * opaque);
 
 /**
  * Prepare the framebuffer for writing
  */
-void framebuffer_prepare(const FrameBuffer frame);
+void framebuffer_prepare(FrameBuffer * frame);
 
 /**
  * Write data from the src buffer into the KVMFRFrame
  */
-bool framebuffer_write(const FrameBuffer frame, const void * src, size_t size);
+bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size);

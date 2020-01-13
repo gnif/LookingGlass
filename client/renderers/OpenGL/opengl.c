@@ -116,14 +116,14 @@ struct Inst
   const LG_Font   * font;
   LG_FontObj        fontObj, alertFontObj;
 
-  LG_Lock           formatLock;
-  LG_RendererFormat format;
-  GLuint            intFormat;
-  GLuint            vboFormat;
-  GLuint            dataFormat;
-  size_t            texSize;
-  size_t            texPos;
-  FrameBuffer       frame;
+  LG_Lock             formatLock;
+  LG_RendererFormat   format;
+  GLuint              intFormat;
+  GLuint              vboFormat;
+  GLuint              dataFormat;
+  size_t              texSize;
+  size_t              texPos;
+  const FrameBuffer * frame;
 
   uint64_t          drawStart;
   bool              hasBuffers;
@@ -368,7 +368,7 @@ bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const
   return false;
 }
 
-bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer frame)
+bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)

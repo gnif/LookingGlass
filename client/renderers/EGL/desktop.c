@@ -60,7 +60,7 @@ struct EGL_Desktop
   enum EGL_PixelFormat pixFmt;
   unsigned int         width, height;
   unsigned int         pitch;
-  FrameBuffer          frame;
+  const FrameBuffer  * frame;
   bool                 update;
 
   // night vision
@@ -181,7 +181,7 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   *desktop = NULL;
 }
 
-bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer frame)
+bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer * frame)
 {
   if (sourceChanged)
   {

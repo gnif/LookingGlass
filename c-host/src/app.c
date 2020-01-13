@@ -188,7 +188,7 @@ static int frameThread(void * opaque)
 
     // put the framebuffer on the border of the next page
     // this is to allow for aligned DMA transfers by the receiver
-    FrameBuffer fb = (FrameBuffer)(((uint8_t*)fi) + fi->offset);
+    FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
     framebuffer_prepare(fb);
 
     /* we post and then get the frame, this is intentional! */

@@ -164,7 +164,7 @@ static void lgVideoTick(void * data, float seconds)
     }
   }
 
-  FrameBuffer fb = (FrameBuffer)(((uint8_t*)frame) + frame->offset);
+  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
 
   uint8_t *texData;
   uint32_t linesize;

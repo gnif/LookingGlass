@@ -23,13 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #define FB_CHUNK_SIZE 1024
 
-struct stFrameBuffer
-{
-  uint64_t  wp;
-  uint8_t   data[0];
-};
-
-bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size)
+bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t size)
 {
   uint8_t *d  = (uint8_t*)dst;
   uint64_t rp = 0;
@@ -51,7 +45,7 @@ bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size)
   return true;
 }
 
-bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t size, void * opaque)
+bool framebuffer_read_fn(const FrameBuffer * frame, FrameBufferReadFn fn, size_t size, void * opaque)
 {
   uint64_t rp = 0;
   while(rp < size)
@@ -76,12 +70,12 @@ bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t s
 /**
  * Prepare the framebuffer for writing
  */
-void framebuffer_prepare(const FrameBuffer frame)
+void framebuffer_prepare(FrameBuffer * frame)
 {
   frame->wp = 0;
 }
 
-bool framebuffer_write(FrameBuffer frame, const void * src, size_t size)
+bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
 {
   /* copy in chunks */
   while(size)

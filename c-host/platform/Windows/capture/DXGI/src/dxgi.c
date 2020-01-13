@@ -805,7 +805,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_getFrame(FrameBuffer frame)
+static CaptureResult dxgi_getFrame(FrameBuffer * frame)
 {
   assert(this);
   assert(this->initialized);

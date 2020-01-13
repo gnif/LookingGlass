@@ -279,7 +279,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   return true;
 }
 
-bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer frame)
+bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * frame)
 {
   if (!texture->streaming)
     return false;

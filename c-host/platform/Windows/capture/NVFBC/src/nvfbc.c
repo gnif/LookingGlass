@@ -294,7 +294,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_getFrame(FrameBuffer frame)
+static CaptureResult nvfbc_getFrame(FrameBuffer * frame)
 {
   framebuffer_write(
     frame,

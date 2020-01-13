@@ -295,7 +295,7 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer frame)
+bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame)
 {
   struct Inst * this = (struct Inst *)opaque;
   this->sourceChanged = (
