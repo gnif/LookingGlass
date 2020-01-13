@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/crash.h"
 #include "common/thread.h"
 #include "common/ivshmem.h"
+#include "common/sysinfo.h"
 
 #include <lgmp/host.h>
 
@@ -435,7 +436,8 @@ int app_main(int argc, char * argv[])
   app.maxFrameSize = ALIGN_DN(lgmpHostMemAvail(app.lgmp) / LGMP_Q_FRAME_LEN);
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    if ((status = lgmpHostMemAlloc(app.lgmp, app.maxFrameSize, &app.frameMemory[i])) != LGMP_OK)
+    const long sz = sysinfo_getPageSize();
+    if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize, sz, &app.frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
       goto fail;
