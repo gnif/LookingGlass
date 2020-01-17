@@ -25,9 +25,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <windows.h>
 #else
 #include <time.h>
+#include <stdint.h>
 #endif
 
-static inline uint64_t getMicrotime()
+static inline uint64_t microtime()
 {
 #if defined(_WIN32)
   static LARGE_INTEGER freq = { 0 };
@@ -43,3 +44,23 @@ static inline uint64_t getMicrotime()
   return (uint64_t)time.tv_sec * 1000000LL + time.tv_nsec / 1000LL;
 #endif
 }
+
+#if !defined(_WIN32)
+//FIXME: make win32 versions
+static inline uint64_t nanotime()
+{
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &time);
+  return ((uint64_t)time.tv_sec * 1e9) + time.tv_nsec;
+}
+
+static inline void nsleep(uint64_t ns)
+{
+  const struct timespec ts =
+  {
+    .tv_sec  = ns / 1e9,
+    .tv_nsec = ns - ((ns / 1e9) * 1e9)
+  };
+  nanosleep(&ts, NULL);
+}
+#endif

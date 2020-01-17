@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/sysinfo.h"
+#include "common/time.h"
 #include "utils.h"
 #include "dynamic/fonts.h"
 

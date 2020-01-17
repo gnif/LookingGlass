@@ -33,7 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
-#include "utils.h"
+#include "common/locking.h"
 #include "dynamic/fonts.h"
 #include "ll.h"
 

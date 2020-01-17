@@ -18,6 +18,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 #pragma once
 
+#include "time.h"
+
 #define INTERLOCKED_AND8        __sync_fetch_and_and
 #define INTERLOCKED_OR8         __sync_fetch_and_or
 #define INTERLOCKED_INC(x)      __sync_fetch_and_add((x), 1)
@@ -35,3 +37,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   while(__sync_lock_test_and_set(&(lock), 1)) while((lock)); \
   x\
   __sync_lock_release(&(lock));
+
+#define LG_LOCK_MODE    "Atomic"
+typedef volatile int LG_Lock;
+#define LG_LOCK_INIT(x) (x) = 0
+#define LG_LOCK(x)      while(__sync_lock_test_and_set(&(x), 1)) {nsleep(100);}
+#define LG_UNLOCK(x)    __sync_lock_release(&x)
+#define LG_LOCK_FREE(x)

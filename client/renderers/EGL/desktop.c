@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "desktop.h"
 #include "common/debug.h"
 #include "common/option.h"
-#include "utils.h"
+#include "common/locking.h"
 
 #include "texture.h"
 #include "shader.h"

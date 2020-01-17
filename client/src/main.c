@@ -45,6 +45,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/KVMFR.h"
 #include "common/stringutils.h"
 #include "common/thread.h"
+#include "common/locking.h"
 #include "common/event.h"
 #include "common/ivshmem.h"
 #include "common/time.h"
@@ -112,7 +113,7 @@ static void updatePositionInfo()
 
       if (force && params.forceAspect)
       {
-        state.resizeTimeout = getMicrotime() + RESIZE_TIMEOUT;
+        state.resizeTimeout = microtime() + RESIZE_TIMEOUT;
         state.resizeDone    = false;
       }
     }
@@ -219,7 +220,7 @@ static int renderThread(void * unused)
 
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
 
-    if (!state.resizeDone && state.resizeTimeout < getMicrotime())
+    if (!state.resizeDone && state.resizeTimeout < microtime())
     {
       SDL_SetWindowSize(
         state.window,

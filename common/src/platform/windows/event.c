@@ -116,11 +116,11 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
         }
       }
 
-      uint64_t now = getMicrotime();
+      uint64_t now = microtime();
       uint64_t end = now + spinTime * 1000;
       while(!event->signaled)
       {
-        now = getMicrotime();
+        now = microtime();
         if (now >= end)
           break;
       }
