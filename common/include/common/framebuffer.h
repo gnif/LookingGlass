@@ -35,6 +35,14 @@ FrameBuffer;
 typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 
 /**
+ * Wait for the framebuffer to fill to the specified size
+ */
+static inline void framebuffer_wait(const FrameBuffer * frame, size_t size)
+{
+  while(frame->wp != size) {}
+}
+
+/**
  * Read data from the KVMFRFrame into the dst buffer
  */
 bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t size);

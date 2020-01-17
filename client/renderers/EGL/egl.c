@@ -367,11 +367,26 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
+  const char *client_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+  DEBUG_INFO("Supported extensions: %s", client_exts);
+
+  bool useNative = false;
+  if (strstr(client_exts, "EGL_KHR_platform_base") != NULL)
+    useNative = true;
+
+  DEBUG_INFO("use native: %s", useNative ? "true" : "false");
+
   switch(wminfo.subsystem)
   {
     case SDL_SYSWM_X11:
     {
-      this->display = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, wminfo.info.x11.display, NULL);
+      if (!useNative)
+        this->display = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, wminfo.info.x11.display, NULL);
+      else
+      {
+        EGLNativeDisplayType native = (EGLNativeDisplayType)wminfo.info.x11.display;
+        this->display = eglGetDisplay(native);
+      }
       this->nativeWind = (EGLNativeWindowType)wminfo.info.x11.window;
       break;
     }
@@ -381,7 +396,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     {
       int width, height;
       SDL_GetWindowSize(window, &width, &height);
-      this->display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wminfo.info.wl.display, NULL);
+      if (!useNative)
+        this->display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wminfo.info.wl.display, NULL);
+      else
+      {
+        EGLNativeDisplayType native = (EGLNativeDisplayType)wminfo.info.wl.display;
+        this->display = eglGetDisplay(native);
+      }
       this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(wminfo.info.wl.surface, width, height);
       break;
     }
