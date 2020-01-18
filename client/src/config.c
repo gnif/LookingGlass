@@ -28,16 +28,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 
 // forwards
-static bool       optRendererParse       (struct Option * opt, const char * str);
-static StringList optRendererValues      (struct Option * opt);
-static char *     optRendererToString    (struct Option * opt);
-static bool       optPosParse            (struct Option * opt, const char * str);
-static StringList optPosValues           (struct Option * opt);
-static char *     optPosToString         (struct Option * opt);
-static bool       optSizeParse           (struct Option * opt, const char * str);
-static StringList optSizeValues          (struct Option * opt);
-static char *     optSizeToString        (struct Option * opt);
-static char *     optScancodeToString    (struct Option * opt);
+static bool       optRendererParse   (struct Option * opt, const char * str);
+static StringList optRendererValues  (struct Option * opt);
+static char *     optRendererToString(struct Option * opt);
+static bool       optPosParse        (struct Option * opt, const char * str);
+static StringList optPosValues       (struct Option * opt);
+static char *     optPosToString     (struct Option * opt);
+static bool       optSizeParse       (struct Option * opt, const char * str);
+static StringList optSizeValues      (struct Option * opt);
+static char *     optSizeToString    (struct Option * opt);
+static char *     optScancodeToString(struct Option * opt);
 
 static void doLicense();
 
