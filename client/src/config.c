@@ -449,6 +449,9 @@ static void doLicense()
 
 static bool optRendererParse(struct Option * opt, const char * str)
 {
+  if (!str)
+    return false;
+
   if (strcasecmp(str, "auto") == 0)
   {
     params.forceRenderer = false;
@@ -490,6 +493,9 @@ static char * optRendererToString(struct Option * opt)
 
 static bool optPosParse(struct Option * opt, const char * str)
 {
+  if (!str)
+    return false;
+
   if (strcmp(str, "center") == 0)
   {
     params.center = true;
@@ -527,6 +533,9 @@ static char * optPosToString(struct Option * opt)
 
 static bool optSizeParse(struct Option * opt, const char * str)
 {
+  if (!str)
+    return false;
+
   if (sscanf(str, "%dx%d", &params.w, &params.h) == 2)
   {
     if (params.w < 1 || params.h < 1)
