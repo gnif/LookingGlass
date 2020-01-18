@@ -40,7 +40,7 @@ typedef void (*SpiceClipboardRequest)(const SpiceDataType type);
 
 bool spice_connect(const char * host, const unsigned short port, const char * password);
 void spice_disconnect();
-bool spice_process();
+bool spice_process(int timeout);
 bool spice_ready();
 
 bool spice_key_down      (uint32_t code);

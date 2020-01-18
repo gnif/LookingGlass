@@ -464,7 +464,7 @@ static int frameThread(void * unused)
 int spiceThread(void * arg)
 {
   while(state.running)
-    if (!spice_process())
+    if (!spice_process(1000))
     {
       if (state.running)
       {
@@ -1215,7 +1215,7 @@ static int lg_run()
     }
 
     while(state.running && !spice_ready())
-      if (!spice_process())
+      if (!spice_process(1000))
       {
         state.running = false;
         DEBUG_ERROR("Failed to process spice messages");

@@ -236,18 +236,18 @@ bool spice_ready()
 
 // ============================================================================
 
-bool spice_process()
+bool spice_process(int timeout)
 {
   fd_set readSet;
   FD_ZERO(&readSet);
   FD_SET(spice.scMain.socket  , &readSet);
   FD_SET(spice.scInputs.socket, &readSet);
 
-  struct timeval timeout;
-  timeout.tv_sec  = 1;
-  timeout.tv_usec = 0;
+  struct timeval tv;
+  tv.tv_sec  = timeout / 1000;
+  tv.tv_usec = (timeout % 1000) * 1000;
 
-  int rc = select(FD_SETSIZE, &readSet, NULL, NULL, &timeout);
+  int rc = select(FD_SETSIZE, &readSet, NULL, NULL, &tv);
   if (rc < 0)
   {
     DEBUG_ERROR("select failure");
