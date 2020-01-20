@@ -47,14 +47,14 @@ static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_FRAME,
   .numMessages = LGMP_Q_FRAME_LEN,
-  .subTimeout  = 1000
+  .subTimeout  = 5000
 };
 
 static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_POINTER,
   .numMessages = LGMP_Q_POINTER_LEN,
-  .subTimeout  = 1000
+  .subTimeout  = 5000
 };
 
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (128 * 128 * 4))
