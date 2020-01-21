@@ -382,6 +382,7 @@ bool option_load(const char * filename)
   {
     if (comment && c != '\n')
       continue;
+    comment = false;
 
     switch(c)
     {
