@@ -160,7 +160,7 @@ static int frameThread(void * opaque)
 
     // we increment the index first so that if we need to repeat a frame
     // the index still points to the latest valid frame
-    if (app.frameIndex++ == LGMP_Q_FRAME_LEN)
+    if (++app.frameIndex == LGMP_Q_FRAME_LEN)
       app.frameIndex = 0;
 
     KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
