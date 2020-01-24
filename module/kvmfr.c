@@ -199,7 +199,7 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
     return -ENOMEM;
 
   kbuf->kdev      = kdev;
-  kbuf->pagecount = (create.size - create.offset) >> PAGE_SHIFT;
+  kbuf->pagecount = create.size >> PAGE_SHIFT;
   kbuf->pages     = kmalloc_array(kbuf->pagecount, sizeof(*kbuf->pages), GFP_KERNEL);
   if (!kbuf->pages)
   {
