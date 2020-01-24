@@ -107,12 +107,8 @@ static int frameThread(void * opaque)
 
   bool         frameValid     = false;
   bool         repeatFrame    = false;
-  int          frameIndex     = 0;
   CaptureFrame frame          = { 0 };
   const long   pageSize       = sysinfo_getPageSize();
-
-  (void)frameIndex;
-  (void)repeatFrame;
 
   while(app.running)
   {
@@ -164,8 +160,8 @@ static int frameThread(void * opaque)
 
     // we increment the index first so that if we need to repeat a frame
     // the index still points to the latest valid frame
-    if (frameIndex++ == LGMP_Q_FRAME_LEN)
-      frameIndex = 0;
+    if (app.frameIndex++ == LGMP_Q_FRAME_LEN)
+      app.frameIndex = 0;
 
     KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
     switch(frame.format)
