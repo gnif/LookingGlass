@@ -299,18 +299,22 @@ static int cursorThread(void * unused)
     }
 
     KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
-    state.cursor.x      = cursor->x;
-    state.cursor.y      = cursor->y;
-    state.cursorVisible = cursor->visible;
-    state.haveCursorPos = true;
 
-    if (!state.haveAligned && state.haveSrcSize && state.haveCurLocal)
+    if (msg.udata & CURSOR_FLAG_POSITION)
     {
-      alignMouseWithHost();
-      state.haveAligned = true;
+      state.cursor.x      = cursor->x;
+      state.cursor.y      = cursor->y;
+      state.cursorVisible = cursor->visible;
+      state.haveCursorPos = true;
+
+      if (!state.haveAligned && state.haveSrcSize && state.haveCurLocal)
+      {
+        alignMouseWithHost();
+        state.haveAligned = true;
+      }
     }
 
-    if (msg.udata == 1)
+    if (msg.udata & CURSOR_FLAG_SHAPE)
     {
       switch(cursor->type)
       {
@@ -341,13 +345,17 @@ static int cursorThread(void * unused)
 
     lgmpClientMessageDone(queue);
     state.updateCursor = false;
-    state.lgr->on_mouse_event
-    (
-      state.lgrData,
-      state.cursorVisible && state.drawCursor,
-      state.cursor.x,
-      state.cursor.y
-    );
+
+    if (msg.udata & CURSOR_FLAG_POSITION)
+    {
+      state.lgr->on_mouse_event
+      (
+        state.lgrData,
+        state.cursorVisible && state.drawCursor,
+        state.cursor.x,
+        state.cursor.y
+      );
+    }
   }
 
   lgmpClientUnsubscribe(&queue);
