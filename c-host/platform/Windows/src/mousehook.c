@@ -29,6 +29,7 @@ struct mouseHook
   bool        installed;
   HHOOK       hook;
   MouseHookFn callback;
+  int         x, y;
 };
 
 static struct mouseHook mouseHook = { 0 };
@@ -92,7 +93,12 @@ static LRESULT WINAPI mouseHook_hook(int nCode, WPARAM wParam, LPARAM lParam)
   if (nCode == HC_ACTION && wParam == WM_MOUSEMOVE)
   {
     MSLLHOOKSTRUCT *msg = (MSLLHOOKSTRUCT *)lParam;
-    mouseHook.callback(msg->pt.x, msg->pt.y);
+    if (mouseHook.x != msg->pt.x || mouseHook.y != msg->pt.y)
+    {
+      mouseHook.x = msg->pt.x;
+      mouseHook.y = msg->pt.y;
+      mouseHook.callback(msg->pt.x, msg->pt.y);
+    }
   }
   return CallNextHookEx(mouseHook.hook, nCode, wParam, lParam);
 }
