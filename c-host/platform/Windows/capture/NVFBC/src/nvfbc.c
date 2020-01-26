@@ -316,9 +316,9 @@ static int pointerThread(void * unused)
     if (this->stop)
       break;
 
-    CaptureResult result;
+    CaptureResult  result;
     CapturePointer pointer = { 0 };
-    pointer.shapeUpdate = false;
+
     if (this->seperateCursor && events[1])
     {
       void * data;
@@ -341,9 +341,13 @@ static int pointerThread(void * unused)
       this->mouseHotY    = pointer.y;
     }
 
-    pointer.visible = this->mouseVisible;
-    pointer.x       = this->mouseX - this->mouseHotX;
-    pointer.y       = this->mouseY - this->mouseHotY;
+    if (events[0])
+    {
+      pointer.positionUpdate = true;
+      pointer.visible        = this->mouseVisible;
+      pointer.x              = this->mouseX - this->mouseHotX;
+      pointer.y              = this->mouseY - this->mouseHotY;
+    }
 
     this->postPointerBufferFn(pointer);
   }

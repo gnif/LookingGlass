@@ -312,10 +312,16 @@ void capturePostPointerBuffer(CapturePointer pointer)
       app.pointerIndex = 0;
   }
 
+  uint32_t flags = 0;
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
-  cursor->x       = pointer.x;
-  cursor->y       = pointer.y;
-  cursor->visible = pointer.visible;
+
+  if (pointer.positionUpdate)
+  {
+    flags |= CURSOR_FLAG_POSITION;
+    cursor->x       = pointer.x;
+    cursor->y       = pointer.y;
+    cursor->visible = pointer.visible;
+  }
 
   if (pointer.shapeUpdate)
   {
@@ -337,11 +343,11 @@ void capturePostPointerBuffer(CapturePointer pointer)
     app.pointerShapeValid = true;
   }
 
-  const uint32_t sendShape =
-    ((pointer.shapeUpdate || newClient) && app.pointerShapeValid) ? 1 : 0;
+  if ((pointer.shapeUpdate || newClient) && app.pointerShapeValid)
+    flags |= CURSOR_FLAG_SHAPE;
 
   LGMP_STATUS status;
-  while ((status = lgmpHostQueuePost(app.pointerQueue, sendShape, mem)) != LGMP_OK)
+  while ((status = lgmpHostQueuePost(app.pointerQueue, flags, mem)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_FULL)
       continue;

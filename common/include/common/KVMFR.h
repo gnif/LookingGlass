@@ -34,6 +34,13 @@ typedef enum FrameType
 }
 FrameType;
 
+enum
+{
+  CURSOR_FLAG_POSITION = 0x1,
+  CURSOR_FLAG_SHAPE    = 0x2
+};
+typedef uint32_t KVMFRCursorFlags;
+
 typedef enum CursorType
 {
   CURSOR_TYPE_COLOR       ,
@@ -55,11 +62,11 @@ KVMFRCursor;
 
 typedef struct KVMFRFrame
 {
-  FrameType   type;        // the frame data type
-  uint32_t    width;       // the width
-  uint32_t    height;      // the height
-  uint32_t    stride;      // the row stride (zero if compressed data)
-  uint32_t    pitch;       // the row pitch  (stride in bytes or the compressed frame size)
-  uint32_t    offset;      // offset from the start of this header to the FrameBuffer header
+  FrameType type;        // the frame data type
+  uint32_t  width;       // the width
+  uint32_t  height;      // the height
+  uint32_t  stride;      // the row stride (zero if compressed data)
+  uint32_t  pitch;       // the row pitch  (stride in bytes or the compressed frame size)
+  uint32_t  offset;      // offset from the start of this header to the FrameBuffer header
 }
 KVMFRFrame;

@@ -61,6 +61,7 @@ CaptureFrame;
 
 typedef struct CapturePointer
 {
+  bool          positionUpdate;
   int           x, y;
   bool          visible;
 
