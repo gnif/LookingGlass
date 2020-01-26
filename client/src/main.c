@@ -300,11 +300,13 @@ static int cursorThread(void * unused)
 
     KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
 
+    state.cursorVisible =
+      msg.udata & CURSOR_FLAG_VISIBLE;
+
     if (msg.udata & CURSOR_FLAG_POSITION)
     {
       state.cursor.x      = cursor->x;
       state.cursor.y      = cursor->y;
-      state.cursorVisible = cursor->visible;
       state.haveCursorPos = true;
 
       if (!state.haveAligned && state.haveSrcSize && state.haveCurLocal)

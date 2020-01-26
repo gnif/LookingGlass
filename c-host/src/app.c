@@ -325,10 +325,12 @@ void capturePostPointerBuffer(CapturePointer pointer)
   if (pointer.positionUpdate)
   {
     flags |= CURSOR_FLAG_POSITION;
-    cursor->x       = pointer.x;
-    cursor->y       = pointer.y;
-    cursor->visible = pointer.visible;
+    cursor->x = pointer.x;
+    cursor->y = pointer.y;
   }
+
+  if (pointer.visible)
+    flags |= CURSOR_FLAG_VISIBLE;
 
   if (pointer.shapeUpdate)
   {

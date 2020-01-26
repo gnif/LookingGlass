@@ -710,19 +710,21 @@ static CaptureResult dxgi_capture()
       frameInfo.PointerPosition.Visible    != this->lastPointerVisible
       )
     {
-      pointer.positionUpdate = true;
-
       /* the pointer position is invalid if the pointer is not visible */
       if (frameInfo.PointerPosition.Visible)
       {
-        this->lastPointerX = frameInfo.PointerPosition.Position.x;
-        this->lastPointerY = frameInfo.PointerPosition.Position.y;
+        pointer.positionUpdate = true;
+        pointer.x =
+          this->lastPointerX =
+          frameInfo.PointerPosition.Position.x;
+        pointer.y =
+          this->lastPointerY =
+          frameInfo.PointerPosition.Position.y;
       }
-      this->lastPointerVisible = frameInfo.PointerPosition.Visible;
 
-      pointer.x       = this->lastPointerX;
-      pointer.y       = this->lastPointerY;
-      pointer.visible = this->lastPointerVisible;
+      pointer.visible =
+        this->lastPointerVisible =
+        frameInfo.PointerPosition.Visible;
       postPointer = true;
     }
   }

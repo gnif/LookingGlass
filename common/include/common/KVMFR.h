@@ -37,7 +37,8 @@ FrameType;
 enum
 {
   CURSOR_FLAG_POSITION = 0x1,
-  CURSOR_FLAG_SHAPE    = 0x2
+  CURSOR_FLAG_VISIBLE  = 0x2,
+  CURSOR_FLAG_SHAPE    = 0x4
 };
 typedef uint32_t KVMFRCursorFlags;
 
@@ -52,7 +53,6 @@ CursorType;
 typedef struct KVMFRCursor
 {
   int16_t    x, y;        // cursor x & y position
-  bool       visible;     // cursor visible
   CursorType type;        // shape buffer data type
   uint32_t   width;       // width of the shape
   uint32_t   height;      // height of the shape
