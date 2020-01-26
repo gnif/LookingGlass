@@ -348,16 +348,13 @@ static int cursorThread(void * unused)
     lgmpClientMessageDone(queue);
     state.updateCursor = false;
 
-    if (msg.udata & CURSOR_FLAG_POSITION)
-    {
-      state.lgr->on_mouse_event
-      (
-        state.lgrData,
-        state.cursorVisible && state.drawCursor,
-        state.cursor.x,
-        state.cursor.y
-      );
-    }
+    state.lgr->on_mouse_event
+    (
+      state.lgrData,
+      state.cursorVisible && state.drawCursor,
+      state.cursor.x,
+      state.cursor.y
+    );
   }
 
   lgmpClientUnsubscribe(&queue);
