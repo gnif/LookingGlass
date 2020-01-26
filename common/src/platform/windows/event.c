@@ -179,7 +179,7 @@ bool lgWaitEvents(LGEvent * events[], int count, bool waitAll, unsigned int time
       // null non signaled events from the handle list
       for(int i = 0; i < count; ++i)
         if (i != result && !lgWaitEvent(events[i], 0))
-          handles[i] = NULL;
+          events[i] = NULL;
       free(handles);
       return true;
     }
