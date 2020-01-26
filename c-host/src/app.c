@@ -94,7 +94,14 @@ static int lgmpThread(void * opaque)
       DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
       break;
     }
-    usleep(10000);
+
+    /*
+    2ms should be good for up to 500FPS, do not lower this value as excessive
+    polling of io memory at this time causes QEMU/KVM stalls due to an unknown
+    fault.
+    See: https://lists.gnu.org/archive/html/qemu-devel/2020-01/msg06331.html
+    */
+    usleep(2000);
   }
 
   app.running = false;
