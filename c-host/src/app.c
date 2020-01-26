@@ -94,7 +94,7 @@ static int lgmpThread(void * opaque)
       DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
       break;
     }
-    usleep(10);
+    usleep(10000);
   }
 
   app.running = false;
