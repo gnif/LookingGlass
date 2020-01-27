@@ -139,7 +139,7 @@ bool lgSignalEvent(LGEvent * handle)
     return false;
   }
 
-  if (pthread_cond_signal(&handle->cond) != 0)
+  if (pthread_cond_broadcast(&handle->cond) != 0)
   {
     DEBUG_ERROR("Failed to signal the condition");
     return false;
