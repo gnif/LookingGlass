@@ -258,9 +258,11 @@ static CaptureResult nvfbc_capture()
     return result;
 
   bool changed = false;
-  for(unsigned int y = 0; y < this->height / 128; ++y)
-    for(unsigned int x = 0; x < this->width / 128; ++x)
-      if (this->diffMap[x*y])
+  const unsigned int h = (this->height + 127) / 128;
+  const unsigned int w = (this->width  + 127) / 128;
+  for(unsigned int y = 0; y < h; ++y)
+    for(unsigned int x = 0; x < w; ++x)
+      if (this->diffMap[(y*w)+x])
       {
         changed = true;
         break;
