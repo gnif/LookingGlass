@@ -369,6 +369,8 @@ static int frameThread(void * unused)
 
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
+  if (!state.running)
+    return 0;
 
   // subscribe to the frame queue
   while(state.running)
@@ -1504,7 +1506,10 @@ static void lg_shutdown()
   state.running = false;
 
   if (t_render)
+  {
+    lgSignalEvent(e_startup);
     lgJoinThread(t_render, NULL);
+  }
 
   lgmpClientFree(&state.lgmp);
 
