@@ -24,6 +24,7 @@ This is the Looking Glass client application that is designed to work in tandem 
 
 ### Building
 
+    git clone --recurse-submodules https://github.com/gnif/LookingGlass
     mkdir build
     cd build
     cmake ../
