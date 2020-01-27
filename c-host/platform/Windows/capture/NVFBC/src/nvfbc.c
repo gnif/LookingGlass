@@ -46,6 +46,7 @@ struct iface
   unsigned int width   , height;
 
   uint8_t * frameBuffer;
+  uint8_t * diffMap;
 
   NvFBCFrameGrabInfo grabInfo;
 
@@ -168,10 +169,10 @@ static bool nvfbc_init()
     BUFFER_FMT_ARGB,
     !this->seperateCursor,
     this->seperateCursor,
-    false,
-    0,
+    true,
+    DIFFMAP_BLOCKSIZE_128X128,
     (void **)&this->frameBuffer,
-    NULL,
+    (void **)&this->diffMap,
     &event
   ))
   {
@@ -255,6 +256,18 @@ static CaptureResult nvfbc_capture()
 
   if (result != CAPTURE_RESULT_OK)
     return result;
+
+  bool changed = false;
+  for(unsigned int y = 0; y < this->height / 128; ++y)
+    for(unsigned int x = 0; x < this->width / 128; ++x)
+      if (this->diffMap[x*y])
+      {
+        changed = true;
+        break;
+      }
+
+  if (!changed)
+    return CAPTURE_RESULT_TIMEOUT;
 
   memcpy(&this->grabInfo, &grabInfo, sizeof(grabInfo));
   lgSignalEvent(this->frameEvent);
