@@ -197,7 +197,10 @@ static int frameThread(void * opaque)
 
     /* we post and then get the frame, this is intentional! */
     if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+    {
       DEBUG_ERROR("%s", lgmpStatusString(status));
+      continue;
+    }
     app.iface->getFrame(fb);
   }
   DEBUG_INFO("Frame thread stopped");
