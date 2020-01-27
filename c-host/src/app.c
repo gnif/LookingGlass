@@ -47,14 +47,14 @@ static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_FRAME,
   .numMessages = LGMP_Q_FRAME_LEN,
-  .subTimeout  = 5000
+  .subTimeout  = 1000
 };
 
 static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_POINTER,
   .numMessages = LGMP_Q_POINTER_LEN,
-  .subTimeout  = 5000
+  .subTimeout  = 1000
 };
 
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (128 * 128 * 4))
@@ -96,12 +96,10 @@ static int lgmpThread(void * opaque)
     }
 
     /*
-    2ms should be good for up to 500FPS, do not lower this value as excessive
-    polling of io memory at this time causes QEMU/KVM stalls due to an unknown
-    fault.
-    See: https://lists.gnu.org/archive/html/qemu-devel/2020-01/msg06331.html
-    */
-    usleep(2000);
+     * do not decrease this value too far, see:
+     * https://lists.gnu.org/archive/html/qemu-devel/2020-01/msg06331.html
+     */
+    usleep(100 * 1000);
   }
 
   app.running = false;
@@ -158,10 +156,13 @@ static int frameThread(void * opaque)
         break;
     }
 
+    LGMP_STATUS status;
+
     // if we are repeating a frame just send the last frame again
     if (repeatFrame)
     {
-      lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex]);
+      if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+        DEBUG_ERROR("%s", lgmpStatusString(status));
       continue;
     }
 
@@ -195,7 +196,8 @@ static int frameThread(void * opaque)
     framebuffer_prepare(fb);
 
     /* we post and then get the frame, this is intentional! */
-    lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex]);
+    if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+      DEBUG_ERROR("%s", lgmpStatusString(status));
     app.iface->getFrame(fb);
   }
   DEBUG_INFO("Frame thread stopped");
