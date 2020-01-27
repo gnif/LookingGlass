@@ -117,6 +117,13 @@ static int frameThread(void * opaque)
 
   while(app.running)
   {
+    //wait until there is room in the queue
+    if(lgmpHostQueuePending(app.frameQueue) == LGMP_Q_FRAME_LEN)
+    {
+      usleep(1);
+      continue;
+    }
+
     switch(app.iface->waitFrame(&frame))
     {
       case CAPTURE_RESULT_OK:
@@ -147,13 +154,6 @@ static int frameThread(void * opaque)
 
         continue;
       }
-    }
-
-    //wait until there is room in the queue
-    if (lgmpHostQueuePending(app.frameQueue) == LGMP_Q_FRAME_LEN)
-    {
-      if (!app.running)
-        break;
     }
 
     LGMP_STATUS status;
@@ -364,7 +364,10 @@ void capturePostPointerBuffer(CapturePointer pointer)
   while ((status = lgmpHostQueuePost(app.pointerQueue, flags, mem)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_FULL)
+    {
+      usleep(1);
       continue;
+    }
 
     DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
     return;
