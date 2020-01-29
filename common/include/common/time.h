@@ -51,7 +51,7 @@ static inline uint64_t nanotime()
 {
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);
-  return ((uint64_t)time.tv_sec * 1e9) + time.tv_nsec;
+  return ((uint64_t)time.tv_sec * 1000000000LL) + time.tv_nsec;
 }
 
 static inline void nsleep(uint64_t ns)
