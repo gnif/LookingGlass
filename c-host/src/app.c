@@ -63,6 +63,7 @@ struct app
 {
   PLGMPHost     lgmp;
 
+  LG_Lock        pointerPostLock;
   PLGMPHostQueue pointerQueue;
   PLGMPMemory    pointerMemory[LGMP_Q_POINTER_LEN];
   PLGMPMemory    pointerShape;
@@ -300,6 +301,8 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
 
 void capturePostPointerBuffer(CapturePointer pointer)
 {
+  LG_LOCK(app.pointerPostLock);
+
   PLGMPMemory mem;
   const bool newClient = lgmpHostQueueNewSubs(app.pointerQueue) > 0;
 
@@ -350,6 +353,7 @@ void capturePostPointerBuffer(CapturePointer pointer)
 
       default:
         DEBUG_ERROR("Invalid pointer type");
+        LG_UNLOCK(app.pointerPostLock);
         return;
     }
 
@@ -358,6 +362,8 @@ void capturePostPointerBuffer(CapturePointer pointer)
 
   if ((pointer.shapeUpdate || newClient) && app.pointerShapeValid)
     flags |= CURSOR_FLAG_SHAPE;
+
+  LG_UNLOCK(app.pointerPostLock);
 
   LGMP_STATUS status;
   while ((status = lgmpHostQueuePost(app.pointerQueue, flags, mem)) != LGMP_OK)
@@ -415,6 +421,8 @@ int app_main(int argc, char * argv[])
     DEBUG_ERROR("Failed to open the IVSHMEM device");
     return -1;
   }
+
+  LG_LOCK_INIT(app.pointerPostLock);
 
   int exitcode  = 0;
   DEBUG_INFO("IVSHMEM Size     : %u MiB", shmDev.size / 1048576);
@@ -554,6 +562,7 @@ fail:
   lgmpHostFree(&app.lgmp);
 
   ivshmemClose(&shmDev);
+  LG_LOCK_FREE(app.pointerPostLock);
   return exitcode;
 }
 
