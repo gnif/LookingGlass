@@ -41,7 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
 
 #define LGMP_Q_FRAME_LEN   2
-#define LGMP_Q_POINTER_LEN 20
+#define LGMP_Q_POINTER_LEN 40
 
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
@@ -288,7 +288,6 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
   // spin until there is room
   while(lgmpHostQueuePending(app.pointerQueue) == LGMP_Q_POINTER_LEN)
   {
-    DEBUG_INFO("pending");
     if (!app.running)
       return false;
   }
