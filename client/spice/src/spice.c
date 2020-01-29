@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -65,6 +66,39 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 // possible number
 #define SPICE_AGENT_TOKENS_MAX ~0
 
+#define SPICE_PACKET(htype, payloadType, extraData) \
+({ \
+  uint8_t packet[sizeof(ssize_t) + sizeof(SpiceMiniDataHeader) + sizeof(payloadType)]; \
+  ssize_t             * sz     = (ssize_t*)packet; \
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(packet + sizeof(ssize_t)); \
+  *sz          = sizeof(SpiceMiniDataHeader) + sizeof(payloadType); \
+  header->type = (htype); \
+  header->size = sizeof(payloadType) + extraData; \
+  (payloadType *)(header + 1); \
+})
+
+/* only the main channel requires locking due to the agent needing to send
+ * multiple packets, all other channels are atomic */
+#define SPICE_SEND_PACKET_LOCKED(channel, packet) \
+({ \
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
+      sizeof(SpiceMiniDataHeader)); \
+  ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
+  LG_LOCK((channel)->lock); \
+  const ssize_t wrote = spice_write_nl((channel), header, *sz); \
+  LG_UNLOCK((channel)->lock); \
+  wrote == *sz; \
+})
+
+#define SPICE_SEND_PACKET(channel, packet) \
+({ \
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
+      sizeof(SpiceMiniDataHeader)); \
+  ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
+  const ssize_t wrote = spice_write_nl((channel), header, *sz); \
+  wrote == *sz; \
+})
+
 // ============================================================================
 
 // internal structures
@@ -77,7 +111,6 @@ struct SpiceChannel
   int      socket;
   uint32_t ackFrequency;
   uint32_t ackCount;
-  uint32_t serial;
   LG_Lock  lock;
 };
 
@@ -110,7 +143,6 @@ struct Spice
 
   bool     hasAgent;
   uint32_t serverTokens;
-  uint32_t clientTokens;
   uint32_t sessionID;
   uint32_t channelID;
   struct   SpiceChannel scMain;
@@ -165,14 +197,12 @@ static uint32_t spice_type_to_agent_type(SpiceDataType type);
 static SpiceDataType agent_type_to_spice_type(uint32_t type);
 
 // thread safe read/write methods
-bool spice_write_msg       (struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size);
 bool spice_agent_write_msg (uint32_t type, const void * buffer, ssize_t size);
 
 // non thread safe read/write methods (nl = non-locking)
-bool    spice_read_nl     (const struct SpiceChannel * channel, void * buffer, const ssize_t size);
-ssize_t spice_write_nl    (const struct SpiceChannel * channel, const void * buffer, const ssize_t size);
-bool    spice_discard_nl  (const struct SpiceChannel * channel, ssize_t size);
-bool    spice_write_msg_nl(      struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size, const ssize_t extra);
+bool    spice_read_nl   (const struct SpiceChannel * channel, void * buffer, const ssize_t size);
+ssize_t spice_write_nl  (const struct SpiceChannel * channel, const void * buffer, const ssize_t size);
+bool    spice_discard_nl(const struct SpiceChannel * channel, ssize_t size);
 
 // ============================================================================
 
@@ -307,7 +337,10 @@ bool spice_process_ack(struct SpiceChannel * channel)
     return true;
 
   channel->ackCount = 0;
-  return spice_write_msg(channel, SPICE_MSGC_ACK, "\0", 1);
+
+  char * ack = SPICE_PACKET(SPICE_MSGC_ACK, char, 0);
+  *ack = 0;
+  return SPICE_SEND_PACKET(channel, ack);
 }
 
 // ============================================================================
@@ -352,12 +385,11 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
 
       channel->ackFrequency = in.window;
 
-      SpiceMsgcAckSync out;
-      out.generation = in.generation;
-      if (!spice_write_msg(channel, SPICE_MSGC_ACK_SYNC, &out, sizeof(out)))
-        return false;
+      SpiceMsgcAckSync * out =
+        SPICE_PACKET(SPICE_MSGC_ACK_SYNC, SpiceMsgcAckSync, 0);
 
-      return true;
+      out->generation = in.generation;
+      return SPICE_SEND_PACKET_LOCKED(channel, out);
     }
 
     case SPICE_MSG_PING:
@@ -378,13 +410,12 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
       else
         DEBUG_PROTO("discard %d", discard);
 
-      SpiceMsgcPong out;
-      out.id        = in.id;
-      out.timestamp = in.timestamp;
-      if (!spice_write_msg(channel, SPICE_MSGC_PONG, &out, sizeof(out)))
-        return false;
+      SpiceMsgcPong * out =
+        SPICE_PACKET(SPICE_MSGC_PONG, SpiceMsgcPong, 0);
 
-      return true;
+      out->id        = in.id;
+      out->timestamp = in.timestamp;
+      return SPICE_SEND_PACKET_LOCKED(channel, out);
     }
 
     case SPICE_MSG_WAIT_FOR_CHANNELS:
@@ -455,7 +486,7 @@ bool spice_on_main_channel_read()
     spice.sessionID = msg.session_id;
 
     spice.serverTokens = msg.agent_tokens;
-    spice.hasAgent    = msg.agent_connected;
+    spice.hasAgent     = msg.agent_connected;
     if (spice.hasAgent && !spice_agent_connect())
     {
       spice_disconnect();
@@ -469,7 +500,8 @@ bool spice_on_main_channel_read()
       return false;
     }
 
-    if (!spice_write_msg(channel, SPICE_MSGC_MAIN_ATTACH_CHANNELS, NULL, 0))
+    void * packet = SPICE_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, void, 0);
+    if (!SPICE_SEND_PACKET_LOCKED(channel, packet))
     {
       spice_disconnect();
       DEBUG_ERROR("failed to ask for channel list");
@@ -703,7 +735,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   channel->initDone     = false;
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
-  channel->serial       = 0;
 
   LG_LOCK_INIT(channel->lock);
 
@@ -908,8 +939,9 @@ bool spice_agent_connect()
 {
   DEBUG_INFO("Spice agent available, sending start");
 
-  spice.clientTokens = SPICE_AGENT_TOKENS_MAX;
-  if (!spice_write_msg(&spice.scMain, SPICE_MSGC_MAIN_AGENT_START, &spice.clientTokens, sizeof(spice.clientTokens)))
+  uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
+  *packet = SPICE_AGENT_TOKENS_MAX;
+  if (!SPICE_SEND_PACKET_LOCKED(&spice.scMain, packet))
   {
     DEBUG_ERROR("failed to send agent start message");
     return false;
@@ -1161,17 +1193,21 @@ bool spice_agent_send_caps(bool request)
 
 bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
 {
-  VDAgentMessage msg;
-  msg.protocol = VD_AGENT_PROTOCOL;
-  msg.type     = type;
-  msg.opaque   = 0;
-  msg.size     = size;
+  uint8_t * buf   = (uint8_t *)buffer;
+  ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE - sizeof(VDAgentMessage) ?
+    VD_AGENT_MAX_DATA_SIZE - sizeof(VDAgentMessage) : size;
+
+  VDAgentMessage * msg =
+    SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, toWrite);
+
+  msg->protocol = VD_AGENT_PROTOCOL;
+  msg->type     = type;
+  msg->opaque   = 0;
+  msg->size     = size;
 
   LG_LOCK(spice.scMain.lock);
 
-  uint8_t * buf   = (uint8_t *)buffer;
-  ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE - sizeof(msg) ? VD_AGENT_MAX_DATA_SIZE - sizeof(msg) : size;
-  if (!spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, &msg, sizeof(msg), toWrite))
+  if (!SPICE_SEND_PACKET(&spice.scMain, msg))
   {
     LG_UNLOCK(spice.scMain.lock);
     DEBUG_ERROR("failed to write agent data header");
@@ -1189,7 +1225,8 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
     }
     else
     {
-      ok = spice_write_msg_nl(&spice.scMain, SPICE_MSGC_MAIN_AGENT_DATA, buf, toWrite, 0);
+      void * cont = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, void, toWrite);
+      ok = SPICE_SEND_PACKET(&spice.scMain, cont);
     }
 
     if (!ok)
@@ -1229,52 +1266,6 @@ ssize_t spice_write_nl(const struct SpiceChannel * channel, const void * buffer,
     DEBUG_WARN("incomplete write");
 
   return len;
-}
-
-// ============================================================================
-
-inline bool spice_write_msg(struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size)
-{
-  bool result;
-  LG_LOCK(channel->lock);
-
-  result = spice_write_msg_nl(channel, type, buffer, size, 0);
-
-  LG_UNLOCK(channel->lock);
-  return result;
-}
-
-// ============================================================================
-
-bool spice_write_msg_nl(struct SpiceChannel * channel, uint32_t type, const void * buffer, const ssize_t size, const ssize_t extra)
-{
-  if (!channel->ready)
-  {
-    DEBUG_ERROR("channel not ready");
-    return false;
-  }
-
-  SpiceMiniDataHeader header;
-  ++channel->serial;
-  header.type     = type;
-  header.size     = size + extra;
-
-  if (spice_write_nl(channel, &header, sizeof(header)) != sizeof(header))
-  {
-    DEBUG_ERROR("failed to write message header");
-    return false;
-  }
-
-  if (buffer && size)
-  {
-    if (spice_write_nl(channel, buffer, size) != size)
-    {
-      DEBUG_ERROR("failed to write message body");
-      return false;
-    }
-  }
-
-  return true;
 }
 
 // ============================================================================
@@ -1348,10 +1339,10 @@ bool spice_key_down(uint32_t code)
   if (code > 0x100)
     code = 0xe0 | ((code - 0x100) << 8);
 
-  SpiceMsgcKeyDown msg;
-  msg.code = code;
-
-  return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_KEY_DOWN, &msg, sizeof(msg));
+  SpiceMsgcKeyDown * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_KEY_DOWN, SpiceMsgcKeyDown, 0);
+  msg->code = code;
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
 // ============================================================================
@@ -1370,10 +1361,10 @@ bool spice_key_up(uint32_t code)
   else
     code = 0x80e0 | ((code - 0x100) << 8);
 
-  SpiceMsgcKeyDown msg;
-  msg.code = code;
-
-  return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_KEY_UP, &msg, sizeof(msg));
+  SpiceMsgcKeyUp * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_KEY_UP, SpiceMsgcKeyUp, 0);
+  msg->code = code;
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
 // ============================================================================
@@ -1387,10 +1378,12 @@ bool spice_mouse_mode(bool server)
     return false;
   }
 
-  SpiceMsgcMainMouseModeRequest msg;
-  msg.mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
+  SpiceMsgcMainMouseModeRequest * msg = SPICE_PACKET(
+    SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST,
+    SpiceMsgcMainMouseModeRequest, 0);
 
-  return spice_write_msg(&spice.scMain, SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST, &msg, sizeof(msg));
+  msg->mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
+  return SPICE_SEND_PACKET_LOCKED(&spice.scMain, msg);
 }
 
 // ============================================================================
@@ -1404,14 +1397,16 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
     return false;
   }
 
-  SpiceMsgcMousePosition msg;
-  msg.x            = x;
-  msg.y            = y;
-  msg.button_state = spice.mouse.buttonState;
-  msg.display_id   = 0;
+  SpiceMsgcMousePosition * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_POSITION, SpiceMsgcMousePosition, 0);
+
+  msg->x            = x;
+  msg->y            = y;
+  msg->button_state = spice.mouse.buttonState;
+  msg->display_id   = 0;
 
   __sync_fetch_and_add(&spice.mouse.sentCount, 1);
-  return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_POSITION, &msg, sizeof(msg));
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
 // ============================================================================
@@ -1425,13 +1420,15 @@ bool spice_mouse_motion(int32_t x, int32_t y)
     return false;
   }
 
-  SpiceMsgcMouseMotion msg;
-  msg.x            = x;
-  msg.y            = y;
-  msg.button_state = spice.mouse.buttonState;
+  SpiceMsgcMouseMotion * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_MOTION, SpiceMsgcMouseMotion, 0);
+
+  msg->x            = x;
+  msg->y            = y;
+  msg->button_state = spice.mouse.buttonState;
 
   __sync_fetch_and_add(&spice.mouse.sentCount, 1);
-  return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_MOTION, &msg, sizeof(msg));
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
 // ============================================================================
@@ -1452,11 +1449,13 @@ bool spice_mouse_press(uint32_t button)
     case SPICE_MOUSE_BUTTON_RIGHT : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_RIGHT ; break;
   }
 
-  SpiceMsgcMousePress msg;
-  msg.button       = button;
-  msg.button_state = spice.mouse.buttonState;
+  SpiceMsgcMousePress * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_PRESS, SpiceMsgcMousePress, 0);
 
-  return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_PRESS, &msg, sizeof(msg));
+  msg->button       = button;
+  msg->button_state = spice.mouse.buttonState;
+
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
 // ============================================================================
@@ -1477,11 +1476,13 @@ bool spice_mouse_release(uint32_t button)
     case SPICE_MOUSE_BUTTON_RIGHT : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_RIGHT ; break;
   }
 
-  SpiceMsgcMouseRelease msg;
-  msg.button       = button;
-  msg.button_state = spice.mouse.buttonState;
+  SpiceMsgcMouseRelease * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_RELEASE, SpiceMsgcMouseRelease, 0);
 
-  return spice_write_msg(&spice.scInputs, SPICE_MSGC_INPUTS_MOUSE_RELEASE, &msg, sizeof(msg));
+  msg->button       = button;
+  msg->button_state = spice.mouse.buttonState;
+
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
 // ============================================================================
