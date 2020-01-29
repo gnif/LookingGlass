@@ -746,66 +746,63 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   }
   channel->connected = true;
 
-  uint32_t supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
-  uint32_t channelCaps[MAIN_CAPS_BYTES   / sizeof(uint32_t)];
-  memset(supportCaps, 0, sizeof(supportCaps));
-  memset(channelCaps, 0, sizeof(channelCaps));
+  typedef struct
+  {
+    SpiceLinkHeader header;
+    SpiceLinkMess   message;
+    uint32_t        supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
+    uint32_t        channelCaps[MAIN_CAPS_BYTES   / sizeof(uint32_t)];
+  }
+  __attribute__((packed)) ConnectPacket;
 
-  COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
-  COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
-  COMMON_SET_CAPABILITY(supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
+  ConnectPacket p =
+  {
+    .header = {
+      .magic         = SPICE_MAGIC        ,
+      .major_version = SPICE_VERSION_MAJOR,
+      .minor_version = SPICE_VERSION_MINOR,
+      .size          = sizeof(ConnectPacket) - sizeof(SpiceLinkHeader)
+    },
+    .message = {
+      .connection_id    = spice.sessionID,
+      .channel_type     = channel->channelType,
+      .channel_id       = spice.channelID,
+      .num_common_caps  = COMMON_CAPS_BYTES / sizeof(uint32_t),
+      .num_channel_caps = MAIN_CAPS_BYTES   / sizeof(uint32_t),
+      .caps_offset      = sizeof(SpiceLinkMess)
+    }
+  };
+
+  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
+  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
+  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
   if (channel == &spice.scMain)
-    MAIN_SET_CAPABILITY(channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
+    MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
 
-  SpiceLinkHeader header =
-  {
-    .magic         = SPICE_MAGIC        ,
-    .major_version = SPICE_VERSION_MAJOR,
-    .minor_version = SPICE_VERSION_MINOR,
-    .size          =
-      sizeof(SpiceLinkMess) +
-      sizeof(supportCaps  ) +
-      sizeof(channelCaps  )
-  };
-
-  SpiceLinkMess message =
-  {
-    .connection_id    = spice.sessionID,
-    .channel_type     = channel->channelType,
-    .channel_id       = spice.channelID,
-    .num_common_caps  = sizeof(supportCaps) / sizeof(uint32_t),
-    .num_channel_caps = sizeof(channelCaps) / sizeof(uint32_t),
-    .caps_offset      = sizeof(SpiceLinkMess)
-  };
-
-  if (
-      !spice_write_nl(channel, &header     , sizeof(header     )) ||
-      !spice_write_nl(channel, &message    , sizeof(message    )) ||
-      !spice_write_nl(channel, &supportCaps, sizeof(supportCaps)) ||
-      !spice_write_nl(channel, &channelCaps, sizeof(channelCaps))
-     )
+  if (!spice_write_nl(channel, &p, sizeof(p)))
   {
     DEBUG_ERROR("failed to write the initial payload");
     spice_disconnect_channel(channel);
     return false;
   }
 
-  if (!spice_read_nl(channel, &header, sizeof(header)))
+  if (!spice_read_nl(channel, &p.header, sizeof(p.header)))
   {
     DEBUG_ERROR("failed to read SpiceLinkHeader");
     spice_disconnect_channel(channel);
     return false;
   }
 
-  if (header.magic != SPICE_MAGIC || header.major_version != SPICE_VERSION_MAJOR)
+  if (p.header.magic         != SPICE_MAGIC ||
+      p.header.major_version != SPICE_VERSION_MAJOR)
   {
     DEBUG_ERROR("invalid or unsupported protocol version");
     spice_disconnect_channel(channel);
     return false;
   }
 
-  if (header.size < sizeof(SpiceLinkReply))
+  if (p.header.size < sizeof(SpiceLinkReply))
   {
     DEBUG_ERROR("reported data size too small");
     spice_disconnect_channel(channel);
