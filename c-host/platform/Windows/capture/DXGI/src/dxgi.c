@@ -61,7 +61,7 @@ struct iface
   IDXGIOutput              * output;
   ID3D11Device             * device;
   ID3D11DeviceContext      * deviceContext;
-  volatile int               deviceContextLock;
+  LG_Lock                    deviceContextLock;
   bool                       useAcquireLock;
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication   * dup;
@@ -335,7 +335,8 @@ static bool dxgi_init()
     &this->device,
     &this->featureLevel,
     &this->deviceContext);
-  this->deviceContextLock = 0;
+
+  LG_LOCK_INIT(this->deviceContextLock);
 
   IDXGIAdapter_Release(tmp);
 
@@ -588,6 +589,7 @@ static bool dxgi_deinit()
     }
   }
 
+  LG_LOCK_FREE(this->deviceContextLock);
   this->initialized = false;
   return true;
 }

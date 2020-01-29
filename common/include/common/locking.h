@@ -20,27 +20,21 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "time.h"
 
-#define INTERLOCKED_AND8        __sync_fetch_and_and
-#define INTERLOCKED_OR8         __sync_fetch_and_or
-#define INTERLOCKED_INC(x)      __sync_fetch_and_add((x), 1)
-#define INTERLOCKED_DEC(x)      __sync_fetch_and_sub((x), 1)
-#define INTERLOCKED_GET(x)      __sync_fetch_and_add((x), 0)
-#define INTERLOCKED_CE(x, c, v) __sync_val_compare_and_swap((x), (c), (v))
+#include <stdatomic.h>
 
-#define INTERLOCKED_ENTER(lock) \
-  while(__sync_lock_test_and_set(&(lock), 1)) while((lock));
+#define LG_LOCK_MODE "Atomic"
+typedef atomic_flag LG_Lock;
+#define LG_LOCK_INIT(x) atomic_flag_clear(&(x))
+#define LG_LOCK(x) \
+  while(atomic_flag_test_and_set_explicit(&(x), memory_order_acquire)) { ; }
+#define LG_UNLOCK(x) \
+  atomic_flag_clear_explicit(&(x), memory_order_release);
+#define LG_LOCK_FREE(x)
 
-#define INTERLOCKED_EXIT(lock) \
-  __sync_lock_release(&(lock));
+#define INTERLOCKED_INC(x) atomic_fetch_add((x), 1)
+#define INTERLOCKED_DEC(x) atomic_fetch_sub((x), 1)
 
 #define INTERLOCKED_SECTION(lock, x) \
-  while(__sync_lock_test_and_set(&(lock), 1)) while((lock)); \
-  x\
-  __sync_lock_release(&(lock));
-
-#define LG_LOCK_MODE    "Atomic"
-typedef volatile int LG_Lock;
-#define LG_LOCK_INIT(x) (x) = 0
-#define LG_LOCK(x)      while(__sync_lock_test_and_set(&(x), 1)) {nsleep(100);}
-#define LG_UNLOCK(x)    __sync_lock_release(&x)
-#define LG_LOCK_FREE(x)
+  LG_LOCK(lock) \
+  x \
+  LG_UNLOCK(lock)
