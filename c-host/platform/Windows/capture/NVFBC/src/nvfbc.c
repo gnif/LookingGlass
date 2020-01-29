@@ -20,14 +20,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/capture.h"
 #include "interface/platform.h"
 #include "common/windebug.h"
-#include "windows/mousehook.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/event.h"
 #include "common/thread.h"
+#include "common/locking.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
+
+#include "windows/mousehook.h"
 
 #include <NvFBC/nvFBC.h>
 #include "wrapper.h"
@@ -51,8 +53,9 @@ struct iface
   NvFBCFrameGrabInfo grabInfo;
 
   LGEvent * frameEvent;
-  LGEvent * cursorEvents[2];
+  LGEvent * cursorEvent;
 
+  LG_Lock cursorLock;
   int mouseX, mouseY, mouseHotX, mouseHotY;
   bool mouseVisible;
 };
@@ -78,9 +81,20 @@ static void getDesktopSize(unsigned int * width, unsigned int * height)
 
 static void on_mouseMove(int x, int y)
 {
+  LG_LOCK(this->cursorLock);
   this->mouseX = x;
   this->mouseY = y;
-  lgSignalEvent(this->cursorEvents[0]);
+
+  CapturePointer pointer =
+  {
+    .positionUpdate = true,
+    .visible        = this->mouseVisible,
+    .x              = this->mouseX - this->mouseHotX,
+    .y              = this->mouseY - this->mouseHotY
+  };
+
+  this->postPointerBufferFn(pointer);
+  LG_UNLOCK(this->cursorLock);
 }
 
 static const char * nvfbc_getName()
@@ -94,7 +108,7 @@ static void nvfbc_initOptions()
   {
     {
       .module         = "nvfbc",
-      .name           = "decoupleCursor",
+      .name           = "decouplePointer",
       .description    = "Capture the cursor seperately",
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = true
@@ -150,9 +164,11 @@ static bool nvfbc_create(
     return false;
   }
 
-  this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
+  this->seperateCursor      = option_get_bool("nvfbc", "decouplePointer");
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
+
+  LG_LOCK_INIT(this->cursorLock);
 
   return true;
 }
@@ -179,11 +195,10 @@ static bool nvfbc_init()
     return false;
   }
 
-  this->cursorEvents[0] = lgCreateEvent(true, 10);
   mouseHook_install(on_mouseMove);
 
   if (this->seperateCursor)
-    this->cursorEvents[1] = lgWrapEvent(event);
+    this->cursorEvent = lgWrapEvent(event);
 
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
@@ -201,7 +216,6 @@ static bool nvfbc_init()
 static void nvfbc_stop()
 {
   this->stop = true;
-  lgSignalEvent(this->cursorEvents[0]);
   lgSignalEvent(this->frameEvent);
 
   if (this->pointerThread)
@@ -214,13 +228,6 @@ static void nvfbc_stop()
 static bool nvfbc_deinit()
 {
   mouseHook_remove();
-
-  if (this->cursorEvents[0])
-  {
-    lgFreeEvent(this->cursorEvents[0]);
-    this->cursorEvents[0] = NULL;
-  }
-
   return true;
 }
 
@@ -231,6 +238,7 @@ static void nvfbc_free()
   if (this->frameEvent)
     lgFreeEvent(this->frameEvent);
 
+  LG_LOCK_FREE(this->cursorLock);
   free(this);
   this = NULL;
   NvFBCFree();
@@ -323,48 +331,41 @@ static int pointerThread(void * unused)
 {
   while(!this->stop)
   {
-    LGEvent * events[2];
-    memcpy(&events, &this->cursorEvents, sizeof(LGEvent *) * 2);
-    if (!lgWaitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
+    if (!lgWaitEvent(this->cursorEvent, 1000))
       continue;
 
     if (this->stop)
       break;
 
     CaptureResult  result;
+
+    void * data;
+    uint32_t size;
+    if (!this->getPointerBufferFn(&data, &size))
+    {
+      DEBUG_WARN("failed to get a pointer buffer");
+      continue;
+    }
+
     CapturePointer pointer = { 0 };
-
-    if (this->seperateCursor && events[1])
+    result = NvFBCToSysGetCursor(this->nvfbc, &pointer, data, size);
+    if (result != CAPTURE_RESULT_OK)
     {
-      void * data;
-      uint32_t size;
-      if (!this->getPointerBufferFn(&data, &size))
-      {
-        DEBUG_WARN("failed to get a pointer buffer");
-        continue;
-      }
-
-      result = NvFBCToSysGetCursor(this->nvfbc, &pointer, data, size);
-      if (result != CAPTURE_RESULT_OK)
-      {
-        DEBUG_WARN("NvFBCToSysGetCursor failed");
-        continue;
-      }
-
-      this->mouseVisible = pointer.visible;
-      this->mouseHotX    = pointer.x;
-      this->mouseHotY    = pointer.y;
+      DEBUG_WARN("NvFBCToSysGetCursor failed");
+      continue;
     }
 
-    if (events[0])
-    {
-      pointer.positionUpdate = true;
-      pointer.visible        = this->mouseVisible;
-      pointer.x              = this->mouseX - this->mouseHotX;
-      pointer.y              = this->mouseY - this->mouseHotY;
-    }
+    LG_LOCK(this->cursorLock);
+    this->mouseVisible = pointer.visible;
+    this->mouseHotX    = pointer.x;
+    this->mouseHotY    = pointer.y;
+
+    pointer.positionUpdate = true;
+    pointer.x = this->mouseX - this->mouseHotX;
+    pointer.y = this->mouseY - this->mouseHotY;
 
     this->postPointerBufferFn(pointer);
+    LG_UNLOCK(this->cursorLock);
   }
 
   return 0;
