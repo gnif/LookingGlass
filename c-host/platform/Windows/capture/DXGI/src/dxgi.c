@@ -25,8 +25,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/locking.h"
 #include "common/event.h"
 
-#include "windows/mousehook.h"
-
 #include <assert.h>
 #include <dxgi.h>
 #include <d3d11.h>
@@ -84,9 +82,6 @@ struct iface
   unsigned int  stride;
   CaptureFormat format;
 
-  LG_Lock pointerLock;
-  bool decouplePointer;
-  int  hotspotX    , hotspotY;
   int  lastPointerX, lastPointerY;
   bool lastPointerVisible;
 };
@@ -100,27 +95,6 @@ static bool          dxgi_deinit();
 static CaptureResult dxgi_releaseFrame();
 
 // implementation
-
-static void on_mouseMove(int x, int y)
-{
-  LG_LOCK(this->pointerLock);
-
-  x -= this->hotspotX;
-  y -= this->hotspotY;
-
-  this->lastPointerX = x;
-  this->lastPointerY = y;
-
-  CapturePointer pointer =
-  {
-    .positionUpdate = true,
-    .visible        = this->lastPointerVisible,
-    .x              = x,
-    .y              = y
-  };
-  LG_UNLOCK(this->pointerLock);
-  this->postPointerBufferFn(pointer);
-}
 
 static const char * dxgi_getName()
 {
@@ -159,14 +133,6 @@ static void dxgi_initOptions()
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
     },
-    {
-      .module         = "dxgi",
-      .name           = "decouplePointer",
-      .description    = "Use a low level hook to obtain cursor position information",
-      .type           = OPTION_TYPE_BOOL,
-      .value.x_bool   = true
-    },
-
     {0}
   };
 
@@ -195,18 +161,10 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   if (this->maxTextures <= 0)
     this->maxTextures = 1;
 
-  this->useAcquireLock  = option_get_bool("dxgi", "useAcquireLock" );
-  this->decouplePointer = option_get_bool("dxgi", "decouplePointer");
-
+  this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
   this->texture             = calloc(sizeof(struct Texture), this->maxTextures);
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
-
-  LG_LOCK_INIT(this->pointerLock);
-
-  if (this->decouplePointer)
-    mouseHook_install(on_mouseMove);
-
   return true;
 }
 
@@ -571,8 +529,6 @@ static bool dxgi_deinit()
 {
   assert(this);
 
-  mouseHook_remove();
-
   for(int i = 0; i < this->maxTextures; ++i)
   {
     this->texture[i].state = TEXTURE_STATE_UNUSED;
@@ -756,20 +712,22 @@ static CaptureResult dxgi_capture()
       frameInfo.PointerPosition.Visible    != this->lastPointerVisible
       )
     {
-      LG_LOCK(this->pointerLock);
-
       /* the pointer position is invalid if the pointer is not visible */
-      if (!this->decouplePointer && frameInfo.PointerPosition.Visible)
+      if (frameInfo.PointerPosition.Visible)
       {
         pointer.positionUpdate = true;
-        this->lastPointerX = frameInfo.PointerPosition.Position.x;
-        this->lastPointerY = frameInfo.PointerPosition.Position.y;
+        pointer.x =
+          this->lastPointerX =
+          frameInfo.PointerPosition.Position.x;
+        pointer.y =
+          this->lastPointerY =
+          frameInfo.PointerPosition.Position.y;
       }
 
-      this->lastPointerVisible = frameInfo.PointerPosition.Visible;
+      pointer.visible =
+        this->lastPointerVisible =
+        frameInfo.PointerPosition.Visible;
       postPointer = true;
-
-      LG_UNLOCK(this->pointerLock);
     }
   }
 
@@ -800,12 +758,6 @@ static CaptureResult dxgi_capture()
           return CAPTURE_RESULT_ERROR;
       }
 
-      // needed in decouple mode
-      LG_LOCK(this->pointerLock);
-      this->hotspotX = shapeInfo.HotSpot.x;
-      this->hotspotY = shapeInfo.HotSpot.y;
-      LG_UNLOCK(this->pointerLock);
-
       pointer.shapeUpdate = true;
       pointer.width       = shapeInfo.Width;
       pointer.height      = shapeInfo.Height;
@@ -816,12 +768,7 @@ static CaptureResult dxgi_capture()
 
   // post back the pointer information
   if (postPointer)
-  {
-    LG_LOCK(this->pointerLock);
-    pointer.visible = this->lastPointerVisible;
-    LG_UNLOCK(this->pointerLock);
     this->postPointerBufferFn(pointer);
-  }
 
   return CAPTURE_RESULT_OK;
 }
