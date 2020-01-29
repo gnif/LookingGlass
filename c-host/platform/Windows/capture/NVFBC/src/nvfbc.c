@@ -93,8 +93,8 @@ static void on_mouseMove(int x, int y)
     .y              = this->mouseY - this->mouseHotY
   };
 
-  this->postPointerBufferFn(pointer);
   LG_UNLOCK(this->cursorLock);
+  this->postPointerBufferFn(pointer);
 }
 
 static const char * nvfbc_getName()
@@ -364,8 +364,8 @@ static int pointerThread(void * unused)
     pointer.x = this->mouseX - this->mouseHotX;
     pointer.y = this->mouseY - this->mouseHotY;
 
-    this->postPointerBufferFn(pointer);
     LG_UNLOCK(this->cursorLock);
+    this->postPointerBufferFn(pointer);
   }
 
   return 0;

@@ -118,9 +118,8 @@ static void on_mouseMove(int x, int y)
     .x              = x,
     .y              = y
   };
-  this->postPointerBufferFn(pointer);
-
   LG_UNLOCK(this->pointerLock);
+  this->postPointerBufferFn(pointer);
 }
 
 static const char * dxgi_getName()
@@ -820,8 +819,8 @@ static CaptureResult dxgi_capture()
   {
     LG_LOCK(this->pointerLock);
     pointer.visible = this->lastPointerVisible;
-    this->postPointerBufferFn(pointer);
     LG_UNLOCK(this->pointerLock);
+    this->postPointerBufferFn(pointer);
   }
 
   return CAPTURE_RESULT_OK;
