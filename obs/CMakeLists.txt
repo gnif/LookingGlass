@@ -59,8 +59,8 @@ set(SOURCES
 	lg.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
-add_subdirectory("${PROJECT_TOP}/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp")
+add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 
 add_library(looking-glass-obs SHARED ${SOURCES})
 target_link_libraries(looking-glass-obs

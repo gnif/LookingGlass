@@ -88,10 +88,10 @@ set(SOURCES
 	src/utils.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
-add_subdirectory("${PROJECT_TOP}/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
+add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
+add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
+add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
 
-add_subdirectory(spice)
 add_subdirectory(renderers)
 add_subdirectory(clipboards)
 add_subdirectory(fonts)
@@ -103,7 +103,7 @@ target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	lg_common
 	lgmp
-	spice
+	purespice
 	renderers
 	clipboards
 	fonts
