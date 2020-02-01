@@ -1532,10 +1532,9 @@ static void lg_shutdown()
         spice_key_up(scancode);
       }
 
+    spice_disconnect();
     if (t_spice)
       lgJoinThread(t_spice, NULL);
-
-    spice_disconnect();
   }
 
   if (state.lgc)
