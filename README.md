@@ -13,6 +13,7 @@ invested thousands of hours of development time into it.
 If you like this project and find it useful and would like to help out you can
 support me directly using the following platforms.
 
+* [GitHub](https://github.com/sponsors/gnif)
 * [Ko-Fi](https://ko-fi.com/lookingglass)
 * [Patreon](https://www.patreon.com/gnif)
 * [Paypal](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ESQ72XUPGKXRY)
