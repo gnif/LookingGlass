@@ -706,24 +706,23 @@ static CaptureResult dxgi_capture()
 
   if (frameInfo.LastMouseUpdateTime.QuadPart)
   {
-    if (
-      frameInfo.PointerPosition.Position.x != this->lastPointerX ||
-      frameInfo.PointerPosition.Position.y != this->lastPointerY ||
-      frameInfo.PointerPosition.Visible    != this->lastPointerVisible
-      )
+    /* the pointer position is only valid if the pointer is visible */
+    if (frameInfo.PointerPosition.Visible &&
+      (frameInfo.PointerPosition.Position.x != this->lastPointerX ||
+       frameInfo.PointerPosition.Position.y != this->lastPointerY))
     {
-      /* the pointer position is invalid if the pointer is not visible */
-      if (frameInfo.PointerPosition.Visible)
-      {
-        pointer.positionUpdate = true;
-        pointer.x =
-          this->lastPointerX =
-          frameInfo.PointerPosition.Position.x;
-        pointer.y =
-          this->lastPointerY =
-          frameInfo.PointerPosition.Position.y;
-      }
+      pointer.positionUpdate = true;
+      pointer.x =
+        this->lastPointerX =
+        frameInfo.PointerPosition.Position.x;
+      pointer.y =
+        this->lastPointerY =
+        frameInfo.PointerPosition.Position.y;
+      postPointer = true;
+    }
 
+    if (this->lastPointerVisible != frameInfo.PointerPosition.Visible)
+    {
       this->lastPointerVisible = frameInfo.PointerPosition.Visible;
       postPointer = true;
     }
