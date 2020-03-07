@@ -7,6 +7,10 @@ Make sure you have your kernel headers installed first, on Debian/Ubuntu use
 the following command.
 
     apt-get install linux-headers-$(uname -r)
+    
+On Fedora please use:
+
+    dnf install kernel-devel -y
 
 Then simply run `make` and you're done.
 
