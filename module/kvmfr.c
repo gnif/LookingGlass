@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <linux/fs.h>
 #include <linux/dma-buf.h>
 #include <linux/highmem.h>
+#include <linux/version.h>
 
 #include <asm/io.h>
 
@@ -122,25 +123,8 @@ static void unmap_kvmfrbuf(struct dma_buf_attachment * at, struct sg_table * sg,
 static void release_kvmfrbuf(struct dma_buf * buf)
 {
   struct kvmfrbuf *kbuf = (struct kvmfrbuf *)buf->priv;
-  pgoff_t pg;
-
-  for (pg = 0; pg < kbuf->pagecount; pg++)
-    put_page(kbuf->pages[pg]);
-
   kfree(kbuf->pages);
   kfree(kbuf);
-}
-
-static void * kmap_kvmfrbuf(struct dma_buf * buf, unsigned long page_num)
-{
-  struct kvmfrbuf * kbuf = (struct kvmfrbuf *)buf->priv;
-  struct page     * page = kbuf->pages[page_num];
-  return kmap(page);
-}
-
-static void kunmap_kvmfrbuf(struct dma_buf * buf, unsigned long page_num, void * vaddr)
-{
-  kunmap(vaddr);
 }
 
 static int mmap_kvmfrbuf(struct dma_buf * buf, struct vm_area_struct * vma)
@@ -157,8 +141,6 @@ static const struct dma_buf_ops kvmfrbuf_ops =
   .map_dma_buf   = map_kvmfrbuf,
   .unmap_dma_buf = unmap_kvmfrbuf,
   .release       = release_kvmfrbuf,
-  .map           = kmap_kvmfrbuf,
-  .unmap         = kunmap_kvmfrbuf,
   .mmap          = mmap_kvmfrbuf
 };
 
