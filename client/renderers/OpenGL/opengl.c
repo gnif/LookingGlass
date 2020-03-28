@@ -77,7 +77,8 @@ static struct Option opengl_options[] =
     .description  = "Use GL_AMD_pinned_memory if it is available",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = true
-  }
+  },
+  {0}
 };
 
 struct OpenGL_Options
