@@ -22,7 +22,7 @@ support me directly using the following platforms.
 ## Documentation
 
 ** IMPORTANT **
-This project contains submodules that must be checked out if building from the
+This project contains submodules that must be checked out by "git clone --recurse-submodules" if building from the
 git repository!
 
 Please also be sure to see the following files for more information
