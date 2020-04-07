@@ -860,10 +860,16 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case EnterNotify:
+            state.curLocalX    = xe.xcrossing.x;
+            state.curLocalY    = xe.xcrossing.y;
+            state.haveCurLocal = true;
             handleWindowEnter();
             break;
 
           case LeaveNotify:
+            state.curLocalX    = xe.xcrossing.x;
+            state.curLocalY    = xe.xcrossing.y;
+            state.haveCurLocal = true;
             handleWindowLeave();
             break;
         }
