@@ -95,7 +95,7 @@ bool framebuffer_read_fn(const FrameBuffer * frame, FrameBufferReadFn fn, size_t
  */
 void framebuffer_prepare(FrameBuffer * frame)
 {
-  frame->wp = 0;
+  atomic_store(&frame->wp, 0);
 }
 
 bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
