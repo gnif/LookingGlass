@@ -56,6 +56,7 @@ struct iface
   LARGE_INTEGER              perfFreq;
   LARGE_INTEGER              frameTime;
   bool                       stop;
+  HDESK                      desktop;
   IDXGIFactory1            * factory;
   IDXGIAdapter1            * adapter;
   IDXGIOutput              * output;
@@ -171,6 +172,27 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
 static bool dxgi_init()
 {
   assert(this);
+
+  this->desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
+  if (!this->desktop)
+    DEBUG_WINERROR("Failed to open the desktop", GetLastError());
+  else
+  {
+    if (!SetThreadDesktop(this->desktop))
+    {
+      DEBUG_WINERROR("Failed to set thread desktop", GetLastError());
+      CloseDesktop(this->desktop);
+      this->desktop = NULL;
+    }
+  }
+
+  if (!this->desktop)
+  {
+    DEBUG_INFO("The above error(s) will prevent LG from being able to capture the secure desktop (UAC dialogs)");
+    DEBUG_INFO("This is not a failure, please do not report this as an issue.");
+    DEBUG_INFO("To fix this run LG using the PsExec SysInternals tool from Microsoft.");
+    DEBUG_INFO("https://docs.microsoft.com/en-us/sysinternals/downloads/psexec");
+  }
 
   // this is required for DXGI 1.5 support to function
   if (!dpiDone)
