@@ -21,7 +21,22 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 
 #include <string.h>
+#include <stdatomic.h>
+
 #define FB_CHUNK_SIZE 1024
+
+struct stFrameBuffer
+{
+  atomic_uint_least32_t wp;
+  uint8_t               data[0];
+};
+
+const size_t FrameBufferStructSize = sizeof(FrameBuffer);
+
+void framebuffer_wait(const FrameBuffer * frame, size_t size)
+{
+  while(atomic_load_explicit(&frame->wp, memory_order_relaxed) != size) {}
+}
 
 bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t size)
 {
@@ -29,11 +44,15 @@ bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t size)
   uint64_t rp = 0;
   while(rp < size)
   {
+    uint_least32_t wp;
+
     /* spinlock */
-    while(rp == frame->wp) { }
+    do
+      wp = atomic_load_explicit(&frame->wp, memory_order_relaxed);
+    while(rp == wp);
 
     /* copy what we can */
-    uint64_t avail = frame->wp - rp;
+    uint64_t avail = wp - rp;
     avail = avail > size ? size : avail;
 
     memcpy(d, frame->data + rp, avail);
@@ -50,11 +69,15 @@ bool framebuffer_read_fn(const FrameBuffer * frame, FrameBufferReadFn fn, size_t
   uint64_t rp = 0;
   while(rp < size)
   {
+    uint_least32_t wp;
+
     /* spinlock */
-    while(rp == frame->wp) { }
+    do
+      wp = atomic_load_explicit(&frame->wp, memory_order_relaxed);
+    while(rp == wp);
 
     /* copy what we can */
-    uint64_t avail = frame->wp - rp;
+    uint64_t avail = wp - rp;
     avail = avail > size ? size : avail;
 
     if (!fn(opaque, frame->data + rp, avail))
@@ -82,7 +105,7 @@ bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
   {
     size_t copy = size < FB_CHUNK_SIZE ? FB_CHUNK_SIZE : size;
     memcpy(frame->data + frame->wp, src, copy);
-    __sync_fetch_and_add(&frame->wp, copy);
+    atomic_fetch_add(&frame->wp, copy);
     size -= copy;
   }
   return true;

@@ -187,7 +187,7 @@ static int frameThread(void * opaque)
     fi->height  = frame.height;
     fi->stride  = frame.stride;
     fi->pitch   = frame.pitch;
-    fi->offset  = pageSize - sizeof(FrameBuffer);
+    fi->offset  = pageSize - FrameBufferStructSize;
     frameValid  = true;
 
     // put the framebuffer on the border of the next page

@@ -23,24 +23,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdint.h>
 
-
-typedef struct stFrameBuffer
-{
-  uint64_t  wp;
-  uint8_t   data[0];
-}
-FrameBuffer;
-
+typedef struct stFrameBuffer FrameBuffer;
 
 typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 
 /**
+ * The size of the FrameBuffer struct
+ */
+extern const size_t FrameBufferStructSize;
+
+/**
  * Wait for the framebuffer to fill to the specified size
  */
-static inline void framebuffer_wait(const FrameBuffer * frame, size_t size)
-{
-  while(frame->wp != size) {}
-}
+void framebuffer_wait(const FrameBuffer * frame, size_t size);
 
 /**
  * Read data from the KVMFRFrame into the dst buffer
