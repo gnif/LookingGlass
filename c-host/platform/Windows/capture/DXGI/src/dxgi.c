@@ -644,6 +644,25 @@ static unsigned int dxgi_getMaxFrameSize()
   return this->height * this->pitch;
 }
 
+static CaptureResult dxgi_hResultToCaptureResult(const HRESULT status)
+{
+  switch(status)
+  {
+    case S_OK:
+      return CAPTURE_RESULT_OK;
+
+    case DXGI_ERROR_WAIT_TIMEOUT:
+      return CAPTURE_RESULT_TIMEOUT;
+
+    case WAIT_ABANDONED:
+    case DXGI_ERROR_ACCESS_LOST:
+      return CAPTURE_RESULT_REINIT;
+
+    default:
+      return CAPTURE_RESULT_ERROR;
+  }
+}
+
 static CaptureResult dxgi_capture()
 {
   assert(this);
@@ -669,23 +688,15 @@ static CaptureResult dxgi_capture()
   else
     status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1000, &frameInfo, &res);
 
-  switch(status)
+  result = dxgi_hResultToCaptureResult(status);
+  if (result != CAPTURE_RESULT_OK)
   {
-    case S_OK:
-      this->needsRelease = true;
-      break;
-
-    case DXGI_ERROR_WAIT_TIMEOUT:
-      return CAPTURE_RESULT_TIMEOUT;
-
-    case WAIT_ABANDONED:
-    case DXGI_ERROR_ACCESS_LOST:
-      return CAPTURE_RESULT_REINIT;
-
-    default:
+    if (result == CAPTURE_RESULT_ERROR)
       DEBUG_WINERROR("AcquireNextFrame failed", status);
-      return CAPTURE_RESULT_ERROR;
+    return result;
   }
+
+  this->needsRelease = true;
 
   if (frameInfo.LastPresentTime.QuadPart != 0)
   {
@@ -768,10 +779,12 @@ static CaptureResult dxgi_capture()
       DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
 
       LOCKED({status = IDXGIOutputDuplication_GetFramePointerShape(this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);});
-      if (FAILED(status))
+      result = dxgi_hResultToCaptureResult(status);
+      if (result != CAPTURE_RESULT_OK)
       {
-        DEBUG_WINERROR("Failed to get the new pointer shape", status);
-        return CAPTURE_RESULT_ERROR;
+        if (result == CAPTURE_RESULT_ERROR)
+          DEBUG_WINERROR("Failed to get the new pointer shape", status);
+        return result;
       }
 
       switch(shapeInfo.Type)
