@@ -1475,7 +1475,7 @@ static int lg_run()
     if (!lgmpClientSessionValid(state.lgmp))
     {
       DEBUG_WARN("Session is invalid, has the host shutdown?");
-      break;
+ //     break;
     }
 
     (void)closeAlert;

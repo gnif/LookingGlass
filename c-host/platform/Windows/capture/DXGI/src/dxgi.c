@@ -612,6 +612,13 @@ static bool dxgi_deinit()
   }
 
   LG_LOCK_FREE(this->deviceContextLock);
+
+  if (this->desktop)
+  {
+    CloseDesktop(this->desktop);
+    this->desktop = NULL;
+  }
+
   this->initialized = false;
   return true;
 }
