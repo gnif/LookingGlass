@@ -564,8 +564,6 @@ bool opengl_render(void * opaque, SDL_Window * window)
       return false;
 
     case CONFIG_STATUS_NOOP :
-      break;
-
     case CONFIG_STATUS_OK   :
      if (!draw_frame(this))
        return false;
