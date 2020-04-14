@@ -1274,14 +1274,19 @@ static bool draw_frame(struct Inst * this)
   glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
 
-  glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.stride);
+  const int bpp = this->format.bpp / 8;
+  glPixelStorei(GL_UNPACK_ALIGNMENT , bpp);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.width);
 
   this->texPos = 0;
+
   framebuffer_read_fn(
     this->frame,
+    this->format.height,
+    this->format.width,
+    bpp,
+    this->format.pitch,
     opengl_buffer_fn,
-    this->format.height * this->format.stride * 4,
     this
   );
 

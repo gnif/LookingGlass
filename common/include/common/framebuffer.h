@@ -40,12 +40,14 @@ void framebuffer_wait(const FrameBuffer * frame, size_t size);
 /**
  * Read data from the KVMFRFrame into the dst buffer
  */
-bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t size);
+bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
+    size_t height, size_t width, size_t bpp, size_t pitch);
 
 /**
  * Read data from the KVMFRFrame using a callback
  */
-bool framebuffer_read_fn(const FrameBuffer * frame, FrameBufferReadFn fn, size_t size, void * opaque);
+bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
+    size_t bpp, size_t pitch, FrameBufferReadFn fn, void * opaque);
 
 /**
  * Prepare the framebuffer for writing

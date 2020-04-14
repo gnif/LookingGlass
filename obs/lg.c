@@ -169,8 +169,16 @@ static void lgVideoTick(void * data, float seconds)
   uint8_t *texData;
   uint32_t linesize;
   gs_texture_map(this->texture, &texData, &linesize);
-  if (linesize == frame->pitch)
-    framebuffer_read(fb, texData, frame->height * frame->pitch);
+
+  framebuffer_read(
+      fb,
+      texData,          // dst
+      linesize,         // dstpitch
+      frame->height,    // height
+      frame->width,     // width
+      4,                // bpp
+      frame->pitch      // linepitch
+  );
   gs_texture_unmap(this->texture);
 
 //  gs_texture_set_image(this->texture, frameData, frame->pitch, false);

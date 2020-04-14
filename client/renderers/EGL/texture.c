@@ -33,7 +33,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct EGL_Texture
 {
   enum   EGL_PixelFormat pixFmt;
-  size_t width, height;
+  size_t width, height, stride;
+  size_t bpp;
   bool   streaming;
   bool   ready;
 
@@ -106,6 +107,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   texture->pixFmt        = pixFmt;
   texture->width         = width;
   texture->height        = height;
+  texture->stride        = stride;
   texture->streaming     = streaming;
   texture->ready         = false;
 
@@ -113,6 +115,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   {
     case EGL_PF_BGRA:
       textureCount           = 1;
+      texture->bpp           = 4;
       texture->format        = GL_BGRA;
       texture->planes[0][0]  = width;
       texture->planes[0][1]  = height;
@@ -125,6 +128,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
     case EGL_PF_RGBA:
       textureCount           = 1;
+      texture->bpp           = 4;
       texture->format        = GL_RGBA;
       texture->planes[0][0]  = width;
       texture->planes[0][1]  = height;
@@ -137,6 +141,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
     case EGL_PF_RGBA10:
       textureCount           = 1;
+      texture->bpp           = 4;
       texture->format        = GL_RGBA;
       texture->planes[0][0]  = width;
       texture->planes[0][1]  = height;
@@ -149,6 +154,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
     case EGL_PF_YUV420:
       textureCount           = 3;
+      texture->bpp           = 4;
       texture->format        = GL_RED;
       texture->planes[0][0]  = width;
       texture->planes[0][1]  = height;
@@ -287,7 +293,16 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   if (texture->pboCount == 2)
     return true;
 
-  framebuffer_read(frame, texture->pboMap[texture->pboWIndex], texture->pboBufferSize);
+  framebuffer_read(
+    frame,
+    texture->pboMap[texture->pboWIndex],
+    texture->stride,
+    texture->height,
+    texture->width,
+    texture->bpp,
+    texture->stride
+  );
+
   texture->pboSync[texture->pboWIndex] = 0;
 
   if (++texture->pboWIndex == 2)
