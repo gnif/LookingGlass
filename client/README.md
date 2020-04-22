@@ -46,6 +46,7 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>+<kbd>F</kbd>      | Full Screen toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd>      | Spice keyboard & mouse enable toggle |
 | <kbd>ScrLk</kbd>+<kbd>N</kbd>      | Toggle night vision mode (EGL renderer only!) |
+| <kbd>ScrLk</kbd>+<kbd>Q</kbd>      | Quit |
 | <kbd>ScrLk</kbd>+<kbd>Insert</kbd> | Increase mouse sensitivity (in capture mode only) |
 | <kbd>ScrLk</kbd>+<kbd>Del</kbd>    | Decrease mouse sensitivity (in capture mode only) |
 | <kbd>ScrLk</kbd>+<kbd>F1</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd> to the guest |

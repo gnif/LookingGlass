@@ -1082,6 +1082,11 @@ static void toggle_input(SDL_Scancode key, void * opaque)
   );
 }
 
+static void quit(SDL_Scancode key, void * opaque)
+{
+  state.running = false;
+}
+
 static void mouse_sens_inc(SDL_Scancode key, void * opaque)
 {
   char * msg;
@@ -1130,6 +1135,7 @@ static void register_key_binds()
 {
   state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
   state.kbInput        = app_register_keybind(SDL_SCANCODE_I     , toggle_input     , NULL);
+  state.kbQuit         = app_register_keybind(SDL_SCANCODE_Q     , quit             , NULL);
   state.kbMouseSensInc = app_register_keybind(SDL_SCANCODE_INSERT, mouse_sens_inc   , NULL);
   state.kbMouseSensDec = app_register_keybind(SDL_SCANCODE_DELETE, mouse_sens_dec   , NULL);
 
@@ -1151,6 +1157,7 @@ static void release_key_binds()
 {
   app_release_keybind(&state.kbFS);
   app_release_keybind(&state.kbInput);
+  app_release_keybind(&state.kbQuit);
   for(int i = 0; i < 12; ++i)
     app_release_keybind(&state.kbCtrlAltFn[i]);
 }
