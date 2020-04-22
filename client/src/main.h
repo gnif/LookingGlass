@@ -66,6 +66,7 @@ struct AppState
 
   KeybindHandle kbFS;
   KeybindHandle kbInput;
+  KeybindHandle kbQuit;
   KeybindHandle kbMouseSensInc;
   KeybindHandle kbMouseSensDec;
   KeybindHandle kbCtrlAltFn[12];
