@@ -198,7 +198,7 @@ bool egl_initialize(void * opaque, Uint32 * sdlFlags)
       if (maxSamples > 4)
         maxSamples = 4;
 
-      DEBUG_INFO("Multsampling enabled, max samples: %d", maxSamples);
+      DEBUG_INFO("Multisampling enabled, max samples: %d", maxSamples);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, maxSamples);
     }
