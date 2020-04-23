@@ -1158,6 +1158,8 @@ static void release_key_binds()
   app_release_keybind(&state.kbFS);
   app_release_keybind(&state.kbInput);
   app_release_keybind(&state.kbQuit);
+  app_release_keybind(&state.kbMouseSensInc);
+  app_release_keybind(&state.kbMouseSensDec);
   for(int i = 0; i < 12; ++i)
     app_release_keybind(&state.kbCtrlAltFn[i]);
 }
