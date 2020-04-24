@@ -229,6 +229,7 @@ static void lgVideoTick(void * data, float seconds)
       case FRAME_TYPE_RGBA10: format = GS_R10G10B10A2; break;
       default:
         printf("invalid type %d\n", this->type);
+        os_sem_post(this->frameSem);
         obs_leave_graphics();
         return;
     }
@@ -239,6 +240,7 @@ static void lgVideoTick(void * data, float seconds)
     if (!this->texture)
     {
       printf("create texture failed\n");
+      os_sem_post(this->frameSem);
       obs_leave_graphics();
       return;
     }
