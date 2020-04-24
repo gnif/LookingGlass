@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -27,6 +28,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <time.h>
 #include <stdint.h>
 #endif
+
+typedef struct LGTimer LGTimer;
 
 static inline uint64_t microtime()
 {
@@ -64,3 +67,10 @@ static inline void nsleep(uint64_t ns)
   nanosleep(&ts, NULL);
 }
 #endif
+
+typedef bool (*LGTimerFn)(void * udata);
+
+bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
+    void * udata, LGTimer ** result);
+
+void lgTimerDestroy(LGTimer * timer);

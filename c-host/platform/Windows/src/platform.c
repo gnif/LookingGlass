@@ -48,6 +48,7 @@ struct AppState
 };
 
 static struct AppState app = {0};
+HWND MessageHWND;
 
 // undocumented API to adjust the system timer resolution (yes, its a nasty hack)
 typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, BOOLEAN Set, PULONG ActualResolution);
@@ -216,6 +217,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   }
   app.messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
 
+  // set the global
+  MessageHWND = app.messageWnd;
+
   app.trayMenu = CreatePopupMenu();
   AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_OPEN_LOG, "Open Log File");
   AppendMenu(app.trayMenu, MF_SEPARATOR, 0               , NULL           );
@@ -297,4 +301,9 @@ bool app_init()
 const char * os_getExecutable()
 {
   return app.executable;
+}
+
+HWND os_getMessageWnd()
+{
+  return app.messageWnd;
 }

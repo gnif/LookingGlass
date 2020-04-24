@@ -12,6 +12,7 @@ add_library(lg_common_platform_code STATIC
     event.c
     windebug.c
     ivshmem.c
+    time.c
 )
 
 target_link_libraries(lg_common_platform_code

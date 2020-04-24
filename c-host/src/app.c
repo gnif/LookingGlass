@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/thread.h"
 #include "common/ivshmem.h"
 #include "common/sysinfo.h"
+#include "common/time.h"
 
 #include <lgmp/host.h>
 
@@ -47,14 +48,14 @@ static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_FRAME,
   .numMessages = LGMP_Q_FRAME_LEN,
-  .subTimeout  = 10000
+  .subTimeout  = 1000
 };
 
 static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_POINTER,
   .numMessages = LGMP_Q_POINTER_LEN,
-  .subTimeout  = 10000
+  .subTimeout  = 1000
 };
 
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (128 * 128 * 4))
@@ -78,32 +79,23 @@ struct app
 
   bool       running;
   bool       reinit;
-  LGThread * lgmpThread;
+  LGTimer  * lgmpTimer;
   LGThread * frameThread;
 };
 
 static struct app app;
 
-static int lgmpThread(void * opaque)
+static bool lgmpTimer(void * opaque)
 {
   LGMP_STATUS status;
-  while(app.running)
+  if ((status = lgmpHostProcess(app.lgmp)) != LGMP_OK)
   {
-    if ((status = lgmpHostProcess(app.lgmp)) != LGMP_OK)
-    {
-      DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
-      break;
-    }
-
-    /*
-     * do not decrease this value too far, see:
-     * https://lists.gnu.org/archive/html/qemu-devel/2020-01/msg06331.html
-     */
-    usleep(100 * 1000);
+    DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
+    app.running = false;
+    return false;
   }
 
-  app.running = false;
-  return 0;
+  return true;
 }
 
 static int frameThread(void * opaque)
@@ -210,9 +202,9 @@ static int frameThread(void * opaque)
 bool startThreads()
 {
   app.running = true;
-  if (!lgCreateThread("LGMPThread", lgmpThread, NULL, &app.lgmpThread))
+  if (!lgCreateTimer(100, lgmpTimer, NULL, &app.lgmpTimer))
   {
-    DEBUG_ERROR("Failed to create the LGMP thread");
+    DEBUG_ERROR("Failed to create the LGMP timer");
     return false;
   }
 
@@ -239,12 +231,11 @@ bool stopThreads()
   }
   app.frameThread = NULL;
 
-  if (app.lgmpThread && !lgJoinThread(app.lgmpThread, NULL))
+  if (app.lgmpTimer)
   {
-    DEBUG_WARN("Failed to join the LGMP thread");
-    ok = false;
+    lgTimerDestroy(app.lgmpTimer);
+    app.lgmpTimer = NULL;
   }
-  app.lgmpThread = NULL;
 
   return ok;
 }
