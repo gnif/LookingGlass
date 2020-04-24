@@ -1,4 +1,5 @@
 #include <obs/obs-module.h>
+#include <obs/util/threading.h>
 
 #include <common/ivshmem.h>
 #include <common/KVMFR.h>
@@ -6,11 +7,22 @@
 #include <lgmp/client.h>
 
 #include <stdio.h>
+#include <unistd.h>
+
+typedef enum
+{
+  STATE_STOPPED,
+  STATE_OPEN,
+  STATE_STARTING,
+  STATE_RUNNING,
+  STATE_STOPPING
+}
+LGState;
 
 typedef struct
 {
   obs_source_t    * context;
-  bool              valid;
+  LGState           state;
   char            * shmFile;
   uint32_t          width, height;
   FrameType         type;
@@ -18,6 +30,9 @@ typedef struct
   PLGMPClient       lgmp;
   PLGMPClientQueue  frameQueue;
   gs_texture_t    * texture;
+
+  pthread_t         frameThread;
+  os_sem_t        * frameSem;
 }
 LGPlugin;
 
@@ -32,13 +47,37 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
 {
   LGPlugin * this = bzalloc(sizeof(LGPlugin));
   this->context = context;
+  os_sem_init(&this->frameSem, 0);
+
   lgUpdate(this, settings);
   return this;
 }
 
 static void deinit(LGPlugin * this)
 {
-  lgmpClientFree(&this->lgmp);
+  switch(this->state)
+  {
+    case STATE_STARTING:
+      /* wait for startup to finish */
+      while(this->state == STATE_STARTING)
+        usleep(1);
+      /* fallthrough */
+
+    case STATE_RUNNING:
+    case STATE_STOPPING:
+      this->state = STATE_STOPPING;
+      pthread_join(this->frameThread, NULL);
+      this->state = STATE_STOPPED;
+      /* fallthrough */
+
+    case STATE_OPEN:
+      lgmpClientFree(&this->lgmp);
+      ivshmemClose(&this->shmDev);
+      break;
+
+    case STATE_STOPPED:
+      break;
+  }
 
   if (this->shmFile)
   {
@@ -46,16 +85,22 @@ static void deinit(LGPlugin * this)
     this->shmFile = NULL;
   }
 
-  if (this->shmDev.mem)
-    ivshmemClose(&this->shmDev);
+  if (this->texture)
+  {
+    obs_enter_graphics();
+    gs_texture_destroy(this->texture);
+    this->texture = NULL;
+    obs_leave_graphics();
+  }
 
-  this->valid = false;
+  this->state = STATE_STOPPED;
 }
 
 static void lgDestroy(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
   deinit(this);
+  os_sem_destroy(this->frameSem);
   bfree(this);
 }
 
@@ -73,6 +118,43 @@ static obs_properties_t * lgGetProperties(void * data)
   return props;
 }
 
+static void * frameThread(void * data)
+{
+  LGPlugin * this = (LGPlugin *)data;
+
+  if (lgmpClientSubscribe(this->lgmp, LGMP_Q_FRAME, &this->frameQueue) != LGMP_OK)
+  {
+    this->state = STATE_STOPPING;
+    return NULL;
+  }
+
+  this->state = STATE_RUNNING;
+  os_sem_post(this->frameSem);
+
+  while(this->state == STATE_RUNNING)
+  {
+    LGMP_STATUS status;
+
+    os_sem_wait(this->frameSem);
+    if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
+    {
+      if (status != LGMP_ERR_QUEUE_EMPTY)
+      {
+        printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
+        os_sem_post(this->frameSem);
+        break;
+      }
+    }
+    os_sem_post(this->frameSem);
+    usleep(100);
+  }
+
+  printf("unsubscribe\n");
+  lgmpClientUnsubscribe(&this->frameQueue);
+  this->state = STATE_STOPPING;
+  return NULL;
+}
+
 static void lgUpdate(void * data, obs_data_t * settings)
 {
   LGPlugin * this = (LGPlugin *)data;
@@ -82,42 +164,42 @@ static void lgUpdate(void * data, obs_data_t * settings)
   if (!ivshmemOpenDev(&this->shmDev, this->shmFile))
     return;
 
+  this->state = STATE_OPEN;
+
   if (lgmpClientInit(this->shmDev.mem, this->shmDev.size, &this->lgmp) != LGMP_OK)
     return;
 
-  if (lgmpClientSubscribe(this->lgmp, LGMP_Q_FRAME, &this->frameQueue) != LGMP_OK)
-    return;
-
-  this->valid = true;
+  this->state = STATE_STARTING;
+  pthread_create(&this->frameThread, NULL, frameThread, this);
 }
 
 static void lgVideoTick(void * data, float seconds)
 {
   LGPlugin * this = (LGPlugin *)data;
 
-  if (!this->valid)
+  if (this->state != STATE_RUNNING)
     return;
 
   LGMP_STATUS status;
   LGMPMessage msg;
 
-  if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
+  os_sem_wait(this->frameSem);
+  if (this->state != STATE_RUNNING)
   {
-    if (status == LGMP_ERR_QUEUE_EMPTY)
-      return;
-
-    printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
-    this->valid = false;
+    os_sem_post(this->frameSem);
     return;
   }
 
   if ((status = lgmpClientProcess(this->frameQueue, &msg)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_EMPTY)
+    {
+      os_sem_post(this->frameSem);
       return;
+    }
 
     printf("lgmpClientProcess: %s\n", lgmpStatusString(status));
-    this->valid = false;
+    this->state = STATE_STOPPING;
     return;
   }
 
@@ -147,7 +229,6 @@ static void lgVideoTick(void * data, float seconds)
       case FRAME_TYPE_RGBA10: format = GS_R10G10B10A2; break;
       default:
         printf("invalid type %d\n", this->type);
-        this->valid = false;
         obs_leave_graphics();
         return;
     }
@@ -158,7 +239,6 @@ static void lgVideoTick(void * data, float seconds)
     if (!this->texture)
     {
       printf("create texture failed\n");
-      this->valid = false;
       obs_leave_graphics();
       return;
     }
@@ -183,6 +263,7 @@ static void lgVideoTick(void * data, float seconds)
 
 //  gs_texture_set_image(this->texture, frameData, frame->pitch, false);
   lgmpClientMessageDone(this->frameQueue);
+  os_sem_post(this->frameSem);
 
   obs_leave_graphics();
 }
@@ -205,18 +286,12 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
 static uint32_t lgGetWidth(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
-  if (!this->valid)
-    return 0;
-
   return this->width;
 }
 
 static uint32_t lgGetHeight(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
-  if (!this->valid)
-    return 0;
-
   return this->height;
 }
 
