@@ -149,7 +149,6 @@ static void * frameThread(void * data)
     usleep(100);
   }
 
-  printf("unsubscribe\n");
   lgmpClientUnsubscribe(&this->frameQueue);
   this->state = STATE_STOPPING;
   return NULL;
