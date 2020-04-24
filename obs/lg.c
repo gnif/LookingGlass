@@ -199,6 +199,7 @@ static void lgVideoTick(void * data, float seconds)
 
     printf("lgmpClientProcess: %s\n", lgmpStatusString(status));
     this->state = STATE_STOPPING;
+    os_sem_post(this->frameSem);
     return;
   }
 
