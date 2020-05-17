@@ -165,8 +165,22 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   this->state = STATE_OPEN;
 
-  if (lgmpClientInit(this->shmDev.mem, this->shmDev.size, &this->lgmp) != LGMP_OK)
+  uint32_t udataSize;
+  KVMFR * udata;
+
+  if (lgmpClientInit(this->shmDev.mem, this->shmDev.size, &this->lgmp,
+        &udataSize, (uint8_t **)&udata) != LGMP_OK)
     return;
+
+  if (udataSize != sizeof(KVMFR) ||
+      memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
+      udata->version != KVMFR_VERSION)
+  {
+    printf("The host application is not compatible with this client\n");
+    printf("Expected KVMFR version %d\n", KVMFR_VERSION);
+    printf("This is not a Looking Glass error, do not report this\n");
+    return;
+  }
 
   this->state = STATE_STARTING;
   pthread_create(&this->frameThread, NULL, frameThread, this);
