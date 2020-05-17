@@ -1446,13 +1446,27 @@ static int lg_run()
   LGMP_STATUS status;
   while(true)
   {
-    if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
+    uint32_t udataSize;
+    KVMFR *udata;
+
+    if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp,
+            &udataSize, (uint8_t **)&udata)) == LGMP_OK)
       break;
 
     if (status == LGMP_ERR_INVALID_SESSION || status == LGMP_ERR_INVALID_MAGIC)
     {
       SDL_WaitEventTimeout(NULL, 1000);
       continue;
+    }
+
+    if (udataSize != sizeof(KVMFR) ||
+        memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
+        udata->version != KVMFR_VERSION)
+    {
+      DEBUG_ERROR("The host application is not compatible with this client");
+      DEBUG_ERROR("Expected KVMFR version %d\n", KVMFR_VERSION);
+      DEBUG_ERROR("This is not a Looking Glass error, do not report this");
+      return -1;
     }
 
     DEBUG_ERROR("lgmpClientInit Failed: %s", lgmpStatusString(status));

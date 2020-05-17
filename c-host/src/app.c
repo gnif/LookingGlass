@@ -413,8 +413,14 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmDev.mem);
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
 
+  KVMFR udata = {
+    .magic   = KVMFR_MAGIC,
+    .version = KVMFR_VERSION
+  };
+
   LGMP_STATUS status;
-  if ((status = lgmpHostInit(shmDev.mem, shmDev.size, &app.lgmp)) != LGMP_OK)
+  if ((status = lgmpHostInit(shmDev.mem, shmDev.size, &app.lgmp,
+          sizeof(udata), (uint8_t *)&udata)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
     goto fail;

@@ -50,6 +50,16 @@ typedef enum CursorType
 }
 CursorType;
 
+#define KVMFR_MAGIC   "KVMFR---"
+#define KVMFR_VERSION 1
+
+typedef struct KVMFR
+{
+  char     magic[8];
+  uint32_t version;
+}
+KVMFR;
+
 typedef struct KVMFRCursor
 {
   int16_t    x, y;        // cursor x & y position
