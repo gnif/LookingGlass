@@ -1448,31 +1448,37 @@ static int lg_run()
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   LGMP_STATUS status;
-  while(true)
-  {
-    uint32_t udataSize;
-    KVMFR *udata;
+  uint32_t udataSize;
+  KVMFR *udata;
+  int waitCount = 0;
 
+  while(state.running)
+  {
     if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp,
             &udataSize, (uint8_t **)&udata)) == LGMP_OK)
       break;
 
     if (status == LGMP_ERR_INVALID_SESSION || status == LGMP_ERR_INVALID_MAGIC)
     {
-      SDL_WaitEventTimeout(NULL, 1000);
-      continue;
-    }
+      if (waitCount++ == 0)
+      {
+        DEBUG_BREAK();
+        DEBUG_INFO("The host application seems to not be running");
+        DEBUG_INFO("Waiting for the host application to start...");
+      }
 
-    if (udataSize != sizeof(KVMFR) ||
-        memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
-        udata->version != KVMFR_VERSION)
-    {
-      DEBUG_BREAK();
-      DEBUG_ERROR("The host application is not compatible with this client");
-      DEBUG_ERROR("Expected KVMFR version %d", KVMFR_VERSION);
-      DEBUG_ERROR("This is not a Looking Glass error, do not report this");
-      DEBUG_BREAK();
-      return -1;
+      if (waitCount == 30)
+      {
+        DEBUG_BREAK();
+        DEBUG_INFO("Please check the host application is running and is the correct version");
+        DEBUG_INFO("Check the host log in your guest at %%TEMP%%\\looking-glass-host.txt");
+        DEBUG_INFO("Continuing to wait...");
+      }
+
+      if (status == LGMP_ERR_INVALID_SESSION)
+        SDL_WaitEventTimeout(NULL, 1000);
+
+      continue;
     }
 
     DEBUG_ERROR("lgmpClientInit Failed: %s", lgmpStatusString(status));
@@ -1481,6 +1487,18 @@ static int lg_run()
 
   if (!state.running)
     return -1;
+
+  if (udataSize != sizeof(KVMFR) ||
+      memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
+      udata->version != KVMFR_VERSION)
+  {
+    DEBUG_BREAK();
+    DEBUG_ERROR("The host application is not compatible with this client");
+    DEBUG_ERROR("Expected KVMFR version %d", KVMFR_VERSION);
+    DEBUG_ERROR("This is not a Looking Glass error, do not report this");
+    DEBUG_BREAK();
+    return -1;
+  }
 
   DEBUG_INFO("Host ready, starting session");
 
@@ -1496,7 +1514,6 @@ static int lg_run()
     return -1;
   }
 
-  bool *closeAlert = NULL;
   while(state.running)
   {
     SDL_WaitEventTimeout(NULL, 1000);
@@ -1506,31 +1523,6 @@ static int lg_run()
       DEBUG_WARN("Session is invalid, has the host shutdown?");
       break;
     }
-
-    (void)closeAlert;
-    /*
-    if (closeAlert == NULL)
-    {
-      if (state.kvmfr->flags & KVMFR_HEADER_FLAG_PAUSED)
-      {
-        if (state.lgr && params.showAlerts)
-          state.lgr->on_alert(
-            state.lgrData,
-            LG_ALERT_WARNING,
-            "Stream Paused",
-            &closeAlert
-          );
-      }
-    }
-    else
-    {
-      if (!(state.kvmfr->flags & KVMFR_HEADER_FLAG_PAUSED))
-      {
-        *closeAlert = true;
-        closeAlert  = NULL;
-      }
-    }
-    */
   }
 
   return 0;
