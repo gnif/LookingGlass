@@ -55,6 +55,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define DEBUG_PRINT(type, fmt, ...) do {fprintf(stderr, "%" PRId64 " " type " %20s:%-4u | %-30s | " fmt "\n", microtime(), STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
 
+#define DEBUG_BREAK() DEBUG_PRINT("[ ]", "%s", "================================================================================")
 #define DEBUG_INFO(fmt, ...) DEBUG_PRINT("[I]", fmt, ##__VA_ARGS__)
 #define DEBUG_WARN(fmt, ...) DEBUG_PRINT("[W]", fmt, ##__VA_ARGS__)
 #define DEBUG_ERROR(fmt, ...) DEBUG_PRINT("[E]", fmt, ##__VA_ARGS__)

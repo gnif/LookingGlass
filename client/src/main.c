@@ -1200,9 +1200,9 @@ static int lg_run()
   // warn about using FPS display until we can fix the font rendering to prevent lag spikes
   if (params.showFPS)
   {
-    DEBUG_WARN("================================================================================");
+    DEBUG_BREAK();
     DEBUG_WARN("WARNING: The FPS display causes microstutters, this is a known issue"            );
-    DEBUG_WARN("================================================================================");
+    DEBUG_BREAK();
   }
 
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -1443,6 +1443,10 @@ static int lg_run()
   SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
   SDL_SetEventFilter(eventFilter, NULL);
 
+  // wait for startup to complete so that any error messages below are output at
+  // the end of the output
+  lgWaitEvent(e_startup, TIMEOUT_INFINITE);
+
   LGMP_STATUS status;
   while(true)
   {
@@ -1463,9 +1467,11 @@ static int lg_run()
         memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
         udata->version != KVMFR_VERSION)
     {
+      DEBUG_BREAK();
       DEBUG_ERROR("The host application is not compatible with this client");
-      DEBUG_ERROR("Expected KVMFR version %d\n", KVMFR_VERSION);
+      DEBUG_ERROR("Expected KVMFR version %d", KVMFR_VERSION);
       DEBUG_ERROR("This is not a Looking Glass error, do not report this");
+      DEBUG_BREAK();
       return -1;
     }
 
