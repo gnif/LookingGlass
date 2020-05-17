@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
 
 #include <SDL2/SDL_egl.h>
 
@@ -51,7 +52,7 @@ struct EGL_Texture
   GLuint       pbo[2];
   int          pboRIndex;
   int          pboWIndex;
-  volatile int pboCount;
+  _Atomic(int) pboCount;
   size_t       pboBufferSize;
   void *       pboMap[2];
   GLsync       pboSync[2];
@@ -258,7 +259,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   {
     /* NOTE: DO NOT use any gl commands here as streaming must be thread safe */
 
-    if (texture->pboCount == 2)
+    if (atomic_load_explicit(&texture->pboCount, memory_order_acquire) == 2)
       return true;
 
     /* update the GPU buffer */
@@ -267,7 +268,8 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 
     if (++texture->pboWIndex == 2)
       texture->pboWIndex = 0;
-    INTERLOCKED_INC(&texture->pboCount);
+
+    atomic_fetch_add_explicit(&texture->pboCount, 1, memory_order_release);
   }
   else
   {
@@ -290,7 +292,7 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   if (!texture->streaming)
     return false;
 
-  if (texture->pboCount == 2)
+  if (atomic_load_explicit(&texture->pboCount, memory_order_acquire) == 2)
     return true;
 
   framebuffer_read(
@@ -307,8 +309,8 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
 
   if (++texture->pboWIndex == 2)
     texture->pboWIndex = 0;
-  INTERLOCKED_INC(&texture->pboCount);
 
+  atomic_fetch_add_explicit(&texture->pboCount, 1, memory_order_release);
   return true;
 }
 
@@ -317,12 +319,13 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   if (!texture->streaming)
     return EGL_TEX_STATUS_OK;
 
-  if (texture->pboCount == 0)
+  int pboCount = atomic_load_explicit(&texture->pboCount, memory_order_acquire);
+  if (pboCount == 0)
     return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
 
   /* process any buffers that have not yet been flushed */
   int pos = texture->pboRIndex;
-  for(int i = 0; i < texture->pboCount; ++i)
+  for(int i = 0; i < pboCount; ++i)
   {
     if (texture->pboSync[pos] == 0)
     {
@@ -356,6 +359,7 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   /* delete the sync and bind the buffer */
   glDeleteSync(texture->pboSync[pos]);
   texture->pboSync[pos] = 0;
+
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[pos]);
 
   /* update the textures */
@@ -372,8 +376,8 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   /* advance the read index */
   if (++texture->pboRIndex == 2)
     texture->pboRIndex = 0;
-  INTERLOCKED_DEC(&texture->pboCount);
 
+  atomic_fetch_sub_explicit(&texture->pboCount, 1, memory_order_release);
   texture->ready = true;
 
   return EGL_TEX_STATUS_OK;
