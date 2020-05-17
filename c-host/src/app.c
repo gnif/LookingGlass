@@ -412,6 +412,7 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("IVSHMEM Size     : %u MiB", shmDev.size / 1048576);
   DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmDev.mem);
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
+  DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);
 
   KVMFR udata = {
     .magic   = KVMFR_MAGIC,
