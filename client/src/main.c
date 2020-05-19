@@ -156,7 +156,7 @@ static int renderThread(void * unused)
     // if our clock is too far out of sync, resync it
     // this can happen when switching to/from a TTY, or due to clock drift
     // we only check this once every 100 frames
-    if (++resyncCheck == 100)
+    if (state.frameTime > 0 && ++resyncCheck == 100)
     {
       resyncCheck = 0;
 
@@ -209,17 +209,6 @@ static int renderThread(void * unused)
       }
     }
 
-    uint64_t nsec = time.tv_nsec + state.frameTime;
-    if (nsec > 1e9)
-    {
-      time.tv_nsec = nsec - 1e9;
-      ++time.tv_sec;
-    }
-    else
-      time.tv_nsec = nsec;
-
-    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
-
     if (!state.resizeDone && state.resizeTimeout < microtime())
     {
       SDL_SetWindowSize(
@@ -228,6 +217,20 @@ static int renderThread(void * unused)
         state.dstRect.h
       );
       state.resizeDone = true;
+    }
+
+    if (state.frameTime > 0)
+    {
+      uint64_t nsec = time.tv_nsec + state.frameTime;
+      if (nsec > 1e9)
+      {
+        time.tv_nsec = nsec - 1e9;
+        ++time.tv_sec;
+      }
+      else
+        time.tv_nsec = nsec;
+
+      clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
     }
   }
 

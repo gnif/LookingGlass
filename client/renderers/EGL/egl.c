@@ -109,7 +109,7 @@ static struct Option egl_options[] =
     .name         = "doubleBuffer",
     .description  = "Enable double buffering",
     .type         = OPTION_TYPE_BOOL,
-    .value.x_bool = true
+    .value.x_bool = false
   },
   {
     .module       = "egl",

@@ -31,6 +31,32 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <SDL2/SDL_egl.h>
 
+#define TEXTURE_COUNT 4
+
+struct Tex
+{
+  GLuint t[3];
+  bool   hasPBO;
+  GLuint pbo;
+  void * map;
+  GLsync sync;
+};
+
+union TexState
+{
+  uint32_t v;
+  struct
+  {
+    /*
+     * w = write
+     * u = upload
+     * s = schedule
+     * d = display
+     */
+    uint8_t w, u, s, d;
+  };
+};
+
 struct EGL_Texture
 {
   enum   EGL_PixelFormat pixFmt;
@@ -39,23 +65,18 @@ struct EGL_Texture
   bool   streaming;
   bool   ready;
 
-  int      textureCount;
-  GLuint   textures[3];
+  int      planeCount;
   GLuint   samplers[3];
-  size_t   planes[3][3];
-  GLintptr offsets[3];
+  size_t   planes  [3][3];
+  GLintptr offsets [3];
   GLenum   intFormat;
   GLenum   format;
   GLenum   dataType;
+  size_t   pboBufferSize;
 
-  bool         hasPBO;
-  GLuint       pbo[2];
-  int          pboRIndex;
-  int          pboWIndex;
-  _Atomic(int) pboCount;
-  size_t       pboBufferSize;
-  void *       pboMap[2];
-  GLsync       pboSync[2];
+  LG_Lock        lock;
+  union TexState state;
+  struct Tex     tex[TEXTURE_COUNT];
 };
 
 bool egl_texture_init(EGL_Texture ** texture)
@@ -68,7 +89,7 @@ bool egl_texture_init(EGL_Texture ** texture)
   }
 
   memset(*texture, 0, sizeof(EGL_Texture));
-
+  LG_LOCK_INIT((*texture)->lock);
   return true;
 }
 
@@ -77,45 +98,47 @@ void egl_texture_free(EGL_Texture ** texture)
   if (!*texture)
     return;
 
-  if ((*texture)->textureCount > 0)
-  {
-    glDeleteTextures((*texture)->textureCount, (*texture)->textures);
-    glDeleteSamplers((*texture)->textureCount, (*texture)->samplers);
-  }
+  if ((*texture)->planeCount > 0)
+    glDeleteSamplers((*texture)->planeCount, (*texture)->samplers);
 
-  if ((*texture)->hasPBO)
+  for(int i = 0; i < ((*texture)->streaming ? TEXTURE_COUNT : 1); ++i)
   {
-    for(int i = 0; i < 2; ++i)
+    struct Tex * t = &(*texture)->tex[i];
+    if (t->hasPBO)
     {
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (*texture)->pbo[i]);
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, t->pbo);
       glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-
-      if ((*texture)->pboSync[i])
-        glDeleteSync((*texture)->pboSync[i]);
+      glDeleteBuffers(1, &t->pbo);
+      if (t->sync)
+        glDeleteSync(t->sync);
     }
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    glDeleteBuffers(2, (*texture)->pbo);
-  }
 
+   if ((*texture)->planeCount > 0)
+     glDeleteTextures((*texture)->planeCount, t->t);
+  }
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+  LG_LOCK_FREE((*texture)->lock);
   free(*texture);
   *texture = NULL;
 }
 
 bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t stride, bool streaming)
 {
-  int textureCount;
+  int planeCount;
 
-  texture->pixFmt        = pixFmt;
-  texture->width         = width;
-  texture->height        = height;
-  texture->stride        = stride;
-  texture->streaming     = streaming;
-  texture->ready         = false;
+  texture->pixFmt    = pixFmt;
+  texture->width     = width;
+  texture->height    = height;
+  texture->stride    = stride;
+  texture->streaming = streaming;
+  texture->ready     = false;
+  texture->state.v   = 0;
 
   switch(pixFmt)
   {
     case EGL_PF_BGRA:
-      textureCount           = 1;
+      planeCount             = 1;
       texture->bpp           = 4;
       texture->format        = GL_BGRA;
       texture->planes[0][0]  = width;
@@ -128,7 +151,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       break;
 
     case EGL_PF_RGBA:
-      textureCount           = 1;
+      planeCount             = 1;
       texture->bpp           = 4;
       texture->format        = GL_RGBA;
       texture->planes[0][0]  = width;
@@ -141,7 +164,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       break;
 
     case EGL_PF_RGBA10:
-      textureCount           = 1;
+      planeCount             = 1;
       texture->bpp           = 4;
       texture->format        = GL_RGBA;
       texture->planes[0][0]  = width;
@@ -154,7 +177,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       break;
 
     case EGL_PF_YUV420:
-      textureCount           = 3;
+      planeCount             = 3;
       texture->bpp           = 4;
       texture->format        = GL_RED;
       texture->planes[0][0]  = width;
@@ -178,50 +201,57 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       return false;
   }
 
-  if (textureCount > texture->textureCount)
+  if (planeCount > texture->planeCount)
   {
-    if (texture->textureCount > 0)
+    if (texture->planeCount > 0)
+      glDeleteSamplers(texture->planeCount, texture->samplers);
+
+    for(int i = 0; i < TEXTURE_COUNT; ++i)
     {
-      glDeleteTextures(texture->textureCount, texture->textures);
-      glDeleteSamplers(texture->textureCount, texture->samplers);
+      if (texture->planeCount > 0)
+        glDeleteTextures(texture->planeCount, texture->tex[i].t);
+      glGenTextures(planeCount, texture->tex[i].t);
     }
 
-    texture->textureCount = textureCount;
-    glGenTextures(texture->textureCount, texture->textures);
-    glGenSamplers(texture->textureCount, texture->samplers);
+    glGenSamplers(planeCount, texture->samplers);
+    for(int p = 0; p < planeCount; ++p)
+    {
+      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+    }
+
+    texture->planeCount = planeCount;
   }
 
-  for(int i = 0; i < textureCount; ++i)
+  for(int i = 0; i < (streaming ? TEXTURE_COUNT : 1); ++i)
   {
-    glSamplerParameteri(texture->samplers[i], GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glSamplerParameteri(texture->samplers[i], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glSamplerParameteri(texture->samplers[i], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-    glSamplerParameteri(texture->samplers[i], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-
-    glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-    glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->planes[i][0], texture->planes[i][1],
-        0, texture->format, texture->dataType, NULL);
+    for(int p = 0; p < planeCount; ++p)
+    {
+      glBindTexture(GL_TEXTURE_2D, texture->tex[i].t[p]);
+      glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->planes[p][0],
+        texture->planes[p][1], 0, texture->format, texture->dataType, NULL);
+    }
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
   if (streaming)
   {
-    if (texture->hasPBO)
+    // release old PBOs and delete and re-create the buffers
+    for(int i = 0; i < TEXTURE_COUNT; ++i)
     {
-      // release old PBOs and delete the buffers
-      for(int i = 0; i < 2; ++i)
+      if (texture->tex[i].hasPBO)
       {
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
         glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        glDeleteBuffers(1, &texture->tex[i].pbo);
       }
-      glDeleteBuffers(2, texture->pbo);
-    }
 
-    glGenBuffers(2, texture->pbo);
-    texture->hasPBO = true;
-    for(int i = 0; i < 2; ++i)
-    {
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[i]);
+      glGenBuffers(1, &texture->tex[i].pbo);
+      texture->tex[i].hasPBO = true;
+
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
       glBufferStorage(
         GL_PIXEL_UNPACK_BUFFER,
         texture->pboBufferSize,
@@ -230,18 +260,17 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
         GL_MAP_WRITE_BIT
       );
 
-      texture->pboMap[i] = glMapBufferRange(
+      texture->tex[i].map = glMapBufferRange(
         GL_PIXEL_UNPACK_BUFFER,
         0,
         texture->pboBufferSize,
         GL_MAP_PERSISTENT_BIT        |
         GL_MAP_WRITE_BIT             |
         GL_MAP_UNSYNCHRONIZED_BIT    |
-        GL_MAP_INVALIDATE_BUFFER_BIT |
-        GL_MAP_FLUSH_EXPLICIT_BIT
+        GL_MAP_INVALIDATE_BUFFER_BIT
       );
 
-      if (!texture->pboMap[i])
+      if (!texture->tex[i].map)
       {
         EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
         return false;
@@ -259,28 +288,31 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   {
     /* NOTE: DO NOT use any gl commands here as streaming must be thread safe */
 
-    if (atomic_load_explicit(&texture->pboCount, memory_order_acquire) == 2)
+    union TexState s;
+    LG_LOCK(texture->lock);
+    s.v = texture->state.v;
+    LG_UNLOCK(texture->lock);
+
+    const uint8_t next = (s.w + 1) % TEXTURE_COUNT;
+    if (next == s.u)
       return true;
 
-    /* update the GPU buffer */
-    memcpy(texture->pboMap[texture->pboWIndex], buffer, texture->pboBufferSize);
-    texture->pboSync[texture->pboWIndex] = 0;
+    memcpy(texture->tex[s.w].map, buffer, texture->pboBufferSize);
 
-    if (++texture->pboWIndex == 2)
-      texture->pboWIndex = 0;
-
-    atomic_fetch_add_explicit(&texture->pboCount, 1, memory_order_release);
+    LG_LOCK(texture->lock);
+    texture->state.w = next;
+    LG_UNLOCK(texture->lock);
   }
   else
   {
     /* Non streaming, this is NOT thread safe */
 
-    for(int i = 0; i < texture->textureCount; ++i)
+    for(int p = 0; p < texture->planeCount; ++p)
     {
-      glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[i][0]);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-          texture->format, texture->dataType, buffer + texture->offsets[i]);
+      glBindTexture(GL_TEXTURE_2D, texture->tex[0].t[p]);
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][0]);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[p][0], texture->planes[p][1],
+          texture->format, texture->dataType, buffer + texture->offsets[p]);
     }
     glBindTexture(GL_TEXTURE_2D, 0);
   }
@@ -292,12 +324,18 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   if (!texture->streaming)
     return false;
 
-  if (atomic_load_explicit(&texture->pboCount, memory_order_acquire) == 2)
+  union TexState s;
+  LG_LOCK(texture->lock);
+  s.v = texture->state.v;
+  LG_UNLOCK(texture->lock);
+
+  const uint8_t next = (s.w + 1) % TEXTURE_COUNT;
+  if (next == s.u)
     return true;
 
   framebuffer_read(
     frame,
-    texture->pboMap[texture->pboWIndex],
+    texture->tex[s.w].map,
     texture->stride,
     texture->height,
     texture->width,
@@ -305,12 +343,10 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
     texture->stride
   );
 
-  texture->pboSync[texture->pboWIndex] = 0;
+  LG_LOCK(texture->lock);
+  texture->state.w = next;
+  LG_UNLOCK(texture->lock);
 
-  if (++texture->pboWIndex == 2)
-    texture->pboWIndex = 0;
-
-  atomic_fetch_add_explicit(&texture->pboCount, 1, memory_order_release);
   return true;
 }
 
@@ -319,65 +355,35 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   if (!texture->streaming)
     return EGL_TEX_STATUS_OK;
 
-  int pboCount = atomic_load_explicit(&texture->pboCount, memory_order_acquire);
-  if (pboCount == 0)
+  union TexState s;
+  LG_LOCK(texture->lock);
+  s.v = texture->state.v;
+  LG_UNLOCK(texture->lock);
+
+  const uint8_t nextu = (s.u + 1) % TEXTURE_COUNT;
+  if (s.u == s.w || nextu == s.s || nextu == s.d)
     return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
 
-  /* process any buffers that have not yet been flushed */
-  int pos = texture->pboRIndex;
-  for(int i = 0; i < pboCount; ++i)
+  /* update the texture */
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[s.u].pbo);
+  for(int p = 0; p < texture->planeCount; ++p)
   {
-    if (texture->pboSync[pos] == 0)
-    {
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[pos]);
-      glFlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, texture->pboBufferSize);
-      texture->pboSync[pos] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    }
+    glBindTexture(GL_TEXTURE_2D, texture->tex[s.u].t[p]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][2]);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[p][0], texture->planes[p][1],
+        texture->format, texture->dataType, (const void *)texture->offsets[p]);
 
-    if (++pos == 2)
-      pos = 0;
   }
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-  /* wait for the buffer to be ready */
-  pos = texture->pboRIndex;
-  switch(glClientWaitSync(texture->pboSync[pos], 0, 0))
-  {
-    case GL_ALREADY_SIGNALED:
-    case GL_CONDITION_SATISFIED:
-      break;
+  /* create a fence to prevent usage before the update is complete */
+  texture->tex[s.u].sync =
+    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
-    case GL_TIMEOUT_EXPIRED:
-      return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
+  LG_LOCK(texture->lock);
+  texture->state.u = nextu;
+  LG_UNLOCK(texture->lock);
 
-    case GL_WAIT_FAILED:
-      glDeleteSync(texture->pboSync[pos]);
-      EGL_ERROR("glClientWaitSync failed");
-      return EGL_TEX_STATUS_ERROR;
-  }
-
-  /* delete the sync and bind the buffer */
-  glDeleteSync(texture->pboSync[pos]);
-  texture->pboSync[pos] = 0;
-
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->pbo[pos]);
-
-  /* update the textures */
-  for(int i = 0; i < texture->textureCount; ++i)
-  {
-    glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[i][2]);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[i][0], texture->planes[i][1],
-        texture->format, texture->dataType, (const void *)texture->offsets[i]);
-  }
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glBindTexture(GL_TEXTURE_2D, 0);
-
-  /* advance the read index */
-  if (++texture->pboRIndex == 2)
-    texture->pboRIndex = 0;
-
-  atomic_fetch_sub_explicit(&texture->pboCount, 1, memory_order_release);
   texture->ready = true;
 
   return EGL_TEX_STATUS_OK;
@@ -385,14 +391,47 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
 
 enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 {
-  /* if there are no new buffers ready, then just bind the textures */
-  if (texture->streaming && !texture->ready)
-    return EGL_TEX_STATUS_NOTREADY;
+  union TexState s;
+  LG_LOCK(texture->lock);
+  s.v = texture->state.v;
+  LG_UNLOCK(texture->lock);
 
-  for(int i = 0; i < texture->textureCount; ++i)
+  if (texture->streaming)
+  {
+    if (!texture->ready)
+      return EGL_TEX_STATUS_NOTREADY;
+
+    if (texture->tex[s.s].sync != 0)
+    {
+      switch(glClientWaitSync(texture->tex[s.s].sync, 0, 0))
+      {
+        case GL_ALREADY_SIGNALED:
+        case GL_CONDITION_SATISFIED:
+          glDeleteSync(texture->tex[s.s].sync);
+          texture->tex[s.s].sync = 0;
+
+          LG_LOCK(texture->lock);
+          texture->state.d = texture->state.s;
+          texture->state.s = (s.s + 1) % TEXTURE_COUNT;
+          LG_UNLOCK(texture->lock);
+          break;
+
+        case GL_TIMEOUT_EXPIRED:
+          break;
+
+        case GL_WAIT_FAILED:
+          glDeleteSync(texture->tex[s.s].sync);
+          texture->tex[s.s].sync = 0;
+          EGL_ERROR("glClientWaitSync failed");
+          return EGL_TEX_STATUS_ERROR;
+      }
+    }
+  }
+
+  for(int i = 0; i < texture->planeCount; ++i)
   {
     glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, texture->textures[i]);
+    glBindTexture(GL_TEXTURE_2D, texture->tex[s.d].t[i]);
     glBindSampler(i, texture->samplers[i]);
   }
 
@@ -401,5 +440,5 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 
 int egl_texture_count(EGL_Texture * texture)
 {
-  return texture->textureCount;
+  return texture->planeCount;
 }
