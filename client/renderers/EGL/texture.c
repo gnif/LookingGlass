@@ -31,7 +31,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <SDL2/SDL_egl.h>
 
-#define TEXTURE_COUNT 4
+#define TEXTURE_COUNT 3
 
 struct Tex
 {
@@ -53,7 +53,7 @@ union TexState
      * s = schedule
      * d = display
      */
-    uint8_t w, u, s, d;
+    int8_t w, u, s, d;
   };
 };
 
@@ -282,6 +282,19 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   return true;
 }
 
+static void egl_warn_slow()
+{
+  static bool warnDone = false;
+  if (!warnDone)
+  {
+    warnDone = true;
+    DEBUG_BREAK();
+    DEBUG_WARN("The guest is providing updates faster then we are consuming them");
+    DEBUG_WARN("Please increase the client FPS to avoid frame skipping");
+    DEBUG_BREAK();
+  }
+}
+
 bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 {
   if (texture->streaming)
@@ -295,7 +308,10 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 
     const uint8_t next = (s.w + 1) % TEXTURE_COUNT;
     if (next == s.u)
+    {
+      egl_warn_slow();
       return true;
+    }
 
     memcpy(texture->tex[s.w].map, buffer, texture->pboBufferSize);
 
@@ -331,7 +347,10 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
 
   const uint8_t next = (s.w + 1) % TEXTURE_COUNT;
   if (next == s.u)
+  {
+    egl_warn_slow();
     return true;
+  }
 
   framebuffer_read(
     frame,
@@ -411,7 +430,6 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
           texture->tex[s.s].sync = 0;
 
           LG_LOCK(texture->lock);
-          texture->state.d = texture->state.s;
           texture->state.s = (s.s + 1) % TEXTURE_COUNT;
           LG_UNLOCK(texture->lock);
           break;
@@ -426,6 +444,12 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
           return EGL_TEX_STATUS_ERROR;
       }
     }
+
+    LG_LOCK(texture->lock);
+    const int8_t nextd = (texture->state.d + 1) % TEXTURE_COUNT;
+    if (texture->state.d != texture->state.s && nextd != texture->state.s)
+      texture->state.d = nextd;
+    LG_UNLOCK(texture->lock);
   }
 
   for(int i = 0; i < texture->planeCount; ++i)
