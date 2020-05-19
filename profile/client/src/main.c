@@ -104,22 +104,30 @@ static bool config_load(int argc, char * argv[])
   return true;
 }
 
-static inline uint64_t nanotime()
-{
-  struct timespec time;
-  clock_gettime(CLOCK_MONOTONIC_RAW, &time);
-  return ((uint64_t)time.tv_sec * 1e9) + time.tv_nsec;
-}
-
 static int run()
 {
   PLGMPClient      lgmp;
   PLGMPClientQueue frameQueue;
 
+  uint32_t udataSize;
+  KVMFR *udata;
+
   LGMP_STATUS status;
-  if ((status = lgmpClientInit(state.shmDev.mem, state.shmDev.size, &lgmp)) != LGMP_OK)
+  if ((status = lgmpClientInit(state.shmDev.mem, state.shmDev.size, &lgmp,
+          &udataSize, (uint8_t **)&udata)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpClientInit: %s", lgmpStatusString(status));
+    return -1;
+  }
+
+  if (udataSize != sizeof(KVMFR) ||
+      memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
+      udata->version != KVMFR_VERSION)
+  {
+    DEBUG_BREAK();
+    DEBUG_ERROR("The host application is not compatible with this client");
+    DEBUG_ERROR("Expected KVMFR version %d", KVMFR_VERSION);
+    DEBUG_BREAK();
     return -1;
   }
 

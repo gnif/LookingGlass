@@ -52,8 +52,8 @@ set(SOURCES
 	src/main.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common"    "${CMAKE_BINARY_DIR}/common")
-add_subdirectory("${PROJECT_TOP}/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
+add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 
 add_executable(profiler-client ${SOURCES})
 target_compile_options(profiler-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
