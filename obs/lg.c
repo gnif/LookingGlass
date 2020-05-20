@@ -30,6 +30,8 @@ typedef struct
   PLGMPClient       lgmp;
   PLGMPClientQueue  frameQueue;
   gs_texture_t    * texture;
+  uint8_t         * texData;
+  uint32_t          linesize;
 
   pthread_t         frameThread;
   os_sem_t        * frameSem;
@@ -89,8 +91,9 @@ static void deinit(LGPlugin * this)
   {
     obs_enter_graphics();
     gs_texture_destroy(this->texture);
-    this->texture = NULL;
+    gs_texture_unmap(this->texture);
     obs_leave_graphics();
+    this->texture = NULL;
   }
 
   this->state = STATE_STOPPED;
@@ -140,13 +143,13 @@ static void * frameThread(void * data)
     {
       if (status != LGMP_ERR_QUEUE_EMPTY)
       {
-        printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
         os_sem_post(this->frameSem);
+        printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
         break;
       }
     }
     os_sem_post(this->frameSem);
-    usleep(100);
+    usleep(1000);
   }
 
   lgmpClientUnsubscribe(&this->frameQueue);
@@ -203,6 +206,16 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
+  if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
+  {
+    if (status != LGMP_ERR_QUEUE_EMPTY)
+    {
+      os_sem_post(this->frameSem);
+      printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
+      return;
+    }
+  }
+
   if ((status = lgmpClientProcess(this->frameQueue, &msg)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_EMPTY)
@@ -217,24 +230,28 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
-  obs_enter_graphics();
-
+  bool updateTexture = false;
   KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
   if (this->width  != frame->width  ||
       this->height != frame->height ||
       this->type   != frame->type)
   {
-    if (this->texture)
-      gs_texture_destroy(this->texture);
-    this->texture = NULL;
-
+    updateTexture = true;
     this->width   = frame->width;
     this->height  = frame->height;
     this->type    = frame->type;
   }
 
-  if (!this->texture)
+  if (!this->texture || updateTexture)
   {
+    obs_enter_graphics();
+    if (this->texture)
+    {
+      gs_texture_unmap(this->texture);
+      gs_texture_destroy(this->texture);
+    }
+    this->texture = NULL;
+
     enum gs_color_format format;
     switch(this->type)
     {
@@ -258,29 +275,28 @@ static void lgVideoTick(void * data, float seconds)
       obs_leave_graphics();
       return;
     }
+
+    gs_texture_map(this->texture, &this->texData, &this->linesize);
+    obs_leave_graphics();
   }
 
   FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-
-  uint8_t *texData;
-  uint32_t linesize;
-  gs_texture_map(this->texture, &texData, &linesize);
-
   framebuffer_read(
       fb,
-      texData,          // dst
-      linesize,         // dstpitch
+      this->texData,    // dst
+      this->linesize,   // dstpitch
       frame->height,    // height
       frame->width,     // width
       4,                // bpp
       frame->pitch      // linepitch
   );
-  gs_texture_unmap(this->texture);
 
-//  gs_texture_set_image(this->texture, frameData, frame->pitch, false);
   lgmpClientMessageDone(this->frameQueue);
   os_sem_post(this->frameSem);
 
+  obs_enter_graphics();
+  gs_texture_unmap(this->texture);
+  gs_texture_map(this->texture, &this->texData, &this->linesize);
   obs_leave_graphics();
 }
 
