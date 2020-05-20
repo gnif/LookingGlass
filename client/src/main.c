@@ -1451,41 +1451,47 @@ static int lg_run()
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   LGMP_STATUS status;
-  uint32_t udataSize;
-  KVMFR *udata;
-  int waitCount = 0;
 
   while(state.running)
   {
-    if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp,
-            &udataSize, (uint8_t **)&udata)) == LGMP_OK)
+    if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
       break;
-
-    if (status == LGMP_ERR_INVALID_SESSION || status == LGMP_ERR_INVALID_MAGIC)
-    {
-      if (waitCount++ == 0)
-      {
-        DEBUG_BREAK();
-        DEBUG_INFO("The host application seems to not be running");
-        DEBUG_INFO("Waiting for the host application to start...");
-      }
-
-      if (waitCount == 30)
-      {
-        DEBUG_BREAK();
-        DEBUG_INFO("Please check the host application is running and is the correct version");
-        DEBUG_INFO("Check the host log in your guest at %%TEMP%%\\looking-glass-host.txt");
-        DEBUG_INFO("Continuing to wait...");
-      }
-
-      if (status == LGMP_ERR_INVALID_SESSION)
-        SDL_WaitEventTimeout(NULL, 1000);
-
-      continue;
-    }
 
     DEBUG_ERROR("lgmpClientInit Failed: %s", lgmpStatusString(status));
     return -1;
+  }
+
+  uint32_t udataSize;
+  KVMFR *udata;
+
+  int waitCount = 0;
+  while(state.running)
+  {
+    if ((status = lgmpClientSessionInit(state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
+      break;
+
+    if (status != LGMP_ERR_INVALID_SESSION && status != LGMP_ERR_INVALID_MAGIC)
+    {
+      DEBUG_ERROR("lgmpClientSessionInit Failed: %s", lgmpStatusString(status));
+      return -1;
+    }
+
+    if (waitCount++ == 0)
+    {
+      DEBUG_BREAK();
+      DEBUG_INFO("The host application seems to not be running");
+      DEBUG_INFO("Waiting for the host application to start...");
+    }
+
+    if (waitCount == 30)
+    {
+      DEBUG_BREAK();
+      DEBUG_INFO("Please check the host application is running and is the correct version");
+      DEBUG_INFO("Check the host log in your guest at %%TEMP%%\\looking-glass-host.txt");
+      DEBUG_INFO("Continuing to wait...");
+    }
+
+    SDL_WaitEventTimeout(NULL, 1000);
   }
 
   if (!state.running)
@@ -1519,13 +1525,12 @@ static int lg_run()
 
   while(state.running)
   {
-    SDL_WaitEventTimeout(NULL, 1000);
-
     if (!lgmpClientSessionValid(state.lgmp))
     {
       DEBUG_WARN("Session is invalid, has the host shutdown?");
       break;
     }
+    SDL_WaitEventTimeout(NULL, 1000);
   }
 
   return 0;

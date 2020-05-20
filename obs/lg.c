@@ -171,8 +171,12 @@ static void lgUpdate(void * data, obs_data_t * settings)
   uint32_t udataSize;
   KVMFR * udata;
 
-  if (lgmpClientInit(this->shmDev.mem, this->shmDev.size, &this->lgmp,
-        &udataSize, (uint8_t **)&udata) != LGMP_OK)
+  if (lgmpClientInit(this->shmDev.mem, this->shmDev.size, &this->lgmp)
+      != LGMP_OK)
+    return;
+
+   if (lgmpClientSessionInit(this->lgmp, &udataSize, (uint8_t **)&udata)
+       != LGMP_OK)
     return;
 
   if (udataSize != sizeof(KVMFR) ||
