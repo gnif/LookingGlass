@@ -1461,6 +1461,10 @@ static int lg_run()
     return -1;
   }
 
+  /* this short timeout is to allow the LGMP host to update the timestamp before
+   * we start checking for a valid session */
+  SDL_WaitEventTimeout(NULL, 200);
+
   uint32_t udataSize;
   KVMFR *udata;
 
