@@ -300,20 +300,6 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-void egl_lock(void * opaque)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  LG_LOCK(this->lock);
-  eglMakeCurrent(this->display, this->surface, this->surface, this->frameContext);
-}
-
-void egl_unlock(void * opaque)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  LG_UNLOCK(this->lock);
-}
-
 bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -328,20 +314,6 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const Fra
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
   this->useNearest = this->width < format.width || this->height < format.height;
-
-  if (!this->frameContext)
-  {
-    static EGLint attrs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 2,
-      EGL_NONE
-    };
-
-    if (!(this->frameContext = eglCreateContext(this->display, this->configs, this->context, attrs)))
-    {
-      DEBUG_ERROR("Failed to create the frame context");
-      return false;
-    }
-  }
 
   if (!egl_desktop_update(this->desktop, sourceChanged, format, frame))
   {
@@ -532,6 +504,32 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   }
 
   return true;
+}
+
+void egl_lock(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  if (!this->frameContext)
+  {
+    static EGLint attrs[] = {
+      EGL_CONTEXT_CLIENT_VERSION, 2,
+      EGL_NONE
+    };
+
+    if (!(this->frameContext = eglCreateContext(this->display, this->configs, this->context, attrs)))
+      DEBUG_ERROR("Failed to create the frame context");
+  }
+
+  LG_LOCK(this->lock);
+  eglMakeCurrent(this->display, this->surface, this->surface, this->frameContext);
+}
+
+void egl_unlock(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  LG_UNLOCK(this->lock);
 }
 
 bool egl_render_begin(void * opaque, SDL_Window * window)
