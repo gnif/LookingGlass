@@ -1332,12 +1332,12 @@ static int lg_run()
       SDL_DisplayMode current;
       if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(state.window), &current) == 0)
       {
-          state.frameTime = 1e9 / (current.refresh_rate * 2);
+          state.frameTime = 1e9 / current.refresh_rate;
       }
       else
       {
-          DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS Limit: 200");
-          state.frameTime = 1e9 / 200;
+          DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS Limit: 60");
+          state.frameTime = 1e9 / 60;
       }
   }
   else
