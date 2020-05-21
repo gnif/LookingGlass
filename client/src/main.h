@@ -124,6 +124,7 @@ struct AppParams
   bool         grabKeyboard;
   SDL_Scancode escapeKey;
   bool         showAlerts;
+  bool         captureOnStart;
 
   unsigned int cursorPollInterval;
   unsigned int framePollInterval;
