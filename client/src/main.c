@@ -1201,14 +1201,6 @@ static int lg_run()
      }
   }
 
-  // warn about using FPS display until we can fix the font rendering to prevent lag spikes
-  if (params.showFPS)
-  {
-    DEBUG_BREAK();
-    DEBUG_WARN("WARNING: The FPS display causes microstutters, this is a known issue"            );
-    DEBUG_BREAK();
-  }
-
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
     DEBUG_ERROR("SDL_Init Failed");
