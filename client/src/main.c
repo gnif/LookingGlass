@@ -62,6 +62,7 @@ static int renderThread(void * unused);
 static int frameThread (void * unused);
 
 static LGEvent  *e_startup = NULL;
+static LGEvent  *e_frame   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
@@ -149,7 +150,7 @@ static int renderThread(void * unused)
 
   unsigned int resyncCheck = 0;
   struct timespec time;
-  clock_gettime(CLOCK_MONOTONIC, &time);
+  clock_gettime(CLOCK_REALTIME, &time);
 
   while(state.running)
   {
@@ -161,7 +162,7 @@ static int renderThread(void * unused)
       resyncCheck = 0;
 
       struct timespec tmp;
-      clock_gettime(CLOCK_MONOTONIC, &tmp);
+      clock_gettime(CLOCK_REALTIME, &tmp);
       if (tmp.tv_nsec - time.tv_nsec < 0)
       {
         tmp.tv_sec -= time.tv_sec - 1;
@@ -171,12 +172,6 @@ static int renderThread(void * unused)
       {
         tmp.tv_sec  -= time.tv_sec;
         tmp.tv_nsec -= time.tv_nsec;
-      }
-      const unsigned long diff = tmp.tv_sec * 1000000000 + tmp.tv_nsec;
-      if (diff > state.frameTime)
-      {
-        DEBUG_INFO("Timer drift detected, %lu is > %lu", diff, state.frameTime);
-        clock_gettime(CLOCK_MONOTONIC, &time);
       }
     }
 
@@ -227,19 +222,16 @@ static int renderThread(void * unused)
       state.resizeDone = true;
     }
 
-    if (state.frameTime > 0)
+    uint64_t nsec = time.tv_nsec + state.frameTime;
+    if(nsec > 1e9)
     {
-      uint64_t nsec = time.tv_nsec + state.frameTime;
-      if (nsec > 1e9)
-      {
-        time.tv_nsec = nsec - 1e9;
-        ++time.tv_sec;
-      }
-      else
-        time.tv_nsec = nsec;
-
-      clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
+      time.tv_nsec = nsec - 1e9;
+      ++time.tv_sec;
     }
+    else
+      time.tv_nsec = nsec;
+
+    lgWaitEventAbs(e_frame, &time);
   }
 
   state.running = false;
@@ -474,6 +466,7 @@ static int frameThread(void * unused)
     }
     lgmpClientMessageDone(queue);
     ++state.frameCount;
+    lgSignalEvent(e_frame);
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -1443,6 +1436,13 @@ static int lg_run()
     return -1;
   }
 
+  // setup the new frame event
+  if (!(e_frame = lgCreateEvent(true, 0)))
+  {
+    DEBUG_ERROR("failed to create the frame event");
+    return -1;
+  }
+
   // start the renderThread so we don't just display junk
   if (!lgCreateThread("renderThread", renderThread, NULL, &t_render))
   {
@@ -1555,10 +1555,17 @@ static void lg_shutdown()
   if (t_render)
   {
     lgSignalEvent(e_startup);
+    lgSignalEvent(e_frame);
     lgJoinThread(t_render, NULL);
   }
 
   lgmpClientFree(&state.lgmp);
+
+  if (e_frame)
+  {
+    lgFreeEvent(e_frame);
+    e_frame = NULL;
+  }
 
   if (e_startup)
   {

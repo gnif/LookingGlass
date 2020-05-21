@@ -421,7 +421,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 
     if (texture->tex[s.s].sync != 0)
     {
-      switch(glClientWaitSync(texture->tex[s.s].sync, 0, 0))
+      switch(glClientWaitSync(texture->tex[s.s].sync, 0, 20000000))
       {
         case GL_ALREADY_SIGNALED:
         case GL_CONDITION_SATISFIED:

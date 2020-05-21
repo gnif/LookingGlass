@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdbool.h>
+#include <time.h>
 
 #define TIMEOUT_INFINITE ((unsigned int)~0)
 
@@ -35,3 +36,7 @@ bool      lgResetEvent (LGEvent * handle);
 // os specific method to wrap/convert a native event into a LGEvent
 // for windows this is an event HANDLE
 LGEvent * lgWrapEvent(void * handle);
+
+// Posix specific, not implmented/possible in windows
+bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts);
+bool lgWaitEventNS (LGEvent * handle, unsigned int timeout);

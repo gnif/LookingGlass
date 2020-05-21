@@ -72,7 +72,7 @@ void lgFreeEvent(LGEvent * handle)
   free(handle);
 }
 
-bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
+bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 {
   assert(handle);
 
@@ -82,29 +82,32 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
     return false;
   }
 
-  while(!atomic_load(&handle->flag))
+  bool ret = true;
+  while(ret && !atomic_load(&handle->flag))
   {
-    if (timeout == TIMEOUT_INFINITE)
+    if (!ts)
     {
       if (pthread_cond_wait(&handle->cond, &handle->mutex) != 0)
       {
         DEBUG_ERROR("Wait to wait on the condition");
-        return false;
+        ret = false;
       }
     }
     else
     {
-      struct timespec ts;
-      ts.tv_sec  = timeout / 1000;
-      ts.tv_nsec = (timeout % 1000) * 1000000;
-      switch(pthread_cond_timedwait(&handle->cond, &handle->mutex, &ts))
+      switch(pthread_cond_timedwait(&handle->cond, &handle->mutex, ts))
       {
+        case 0:
+          break;
+
         case ETIMEDOUT:
-          return false;
+          ret = false;
+          break;
 
         default:
+          ret = false;
           DEBUG_ERROR("Timed wait failed");
-          return false;
+          break;
       }
     }
   }
@@ -118,7 +121,31 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
     return false;
   }
 
-  return true;
+  return ret;
+}
+
+bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
+{
+  if (timeout == TIMEOUT_INFINITE)
+    return lgWaitEventAbs(handle, NULL);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  uint64_t nsec = ts.tv_nsec + timeout;
+  if(nsec > 1e9)
+  {
+    ts.tv_nsec = nsec - 1e9;
+    ++ts.tv_sec;
+  }
+  else
+    ts.tv_nsec = nsec;
+
+  return lgWaitEventAbs(handle, &ts);
+}
+
+bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
+{
+  return lgWaitEventNS(handle, timeout * 1000000);
 }
 
 bool lgSignalEvent(LGEvent * handle)
