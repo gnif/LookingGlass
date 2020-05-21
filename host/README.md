@@ -12,6 +12,8 @@ Currently only Windows is supported however there is some initial support for Li
 
 #### For Windows on Windows
 
+##### MSYS2
+
 1. download and install msys2 x86_64 from http://www.msys2.org/ following the setup instructions provided
 3. execute `pacman -Fy` and then `pacman -Sy git make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake`
 4. run "C:\msys64\mingw64.exe"
@@ -23,6 +25,20 @@ Currently only Windows is supported however there is some initial support for Li
 mkdir LookingGlass/c-host/build
 cd LookingGlass/c-host/build
 cmake -G "MSYS Makefiles" ..
+make
+```
+
+##### WSL
+
+1. Install WSL, and setup the Debian or Ubuntu package from the Windows store
+2. Install dependencies `sudo apt install make cmake git mingw-64` for Debian WSL
+3. Checkout the project `git clone https://github.com/gnif/LookingGlass.git` 
+4. Setup modules `cd LookingGlass && git submodule init && git submodule update`
+5. Build
+```
+mkdir c-host/build
+cd c-host/build
+cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
 make
 ```
 
