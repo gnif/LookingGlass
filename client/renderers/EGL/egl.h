@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -23,10 +23,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/renderer.h"
 
-typedef struct EGL_Desktop EGL_Desktop;
-
-bool egl_desktop_init(void * egl, EGL_Desktop ** desktop);
-void egl_desktop_free(EGL_Desktop ** desktop);
-
-bool egl_desktop_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer * frame);
-bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest);
+/* helpers to lock and make current the secondary context for the desktop */
+void egl_lock(void * opaque);
+void egl_unlock(void * opaque);

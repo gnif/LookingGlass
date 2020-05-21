@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "desktop.h"
+#include "egl.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -47,21 +48,18 @@ struct DesktopShader
 
 struct EGL_Desktop
 {
+  void * egl;
+
   EGL_Texture          * texture;
   struct DesktopShader * shader; // the active shader
   EGL_Model            * model;
 
+  // internals
+  int width, height;
+
   // shader instances
   struct DesktopShader shader_generic;
   struct DesktopShader shader_yuv;
-
-  // internals
-  LG_Lock              updateLock;
-  enum EGL_PixelFormat pixFmt;
-  unsigned int         width, height;
-  unsigned int         pitch;
-  const FrameBuffer  * frame;
-  bool                 update;
 
   // night vision
   KeybindHandle kbNV;
@@ -97,7 +95,7 @@ static bool egl_init_desktop_shader(
   return true;
 }
 
-bool egl_desktop_init(EGL_Desktop ** desktop)
+bool egl_desktop_init(void * egl, EGL_Desktop ** desktop)
 {
   *desktop = (EGL_Desktop *)malloc(sizeof(EGL_Desktop));
   if (!*desktop)
@@ -141,8 +139,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop)
   egl_model_set_default((*desktop)->model);
   egl_model_set_texture((*desktop)->model, (*desktop)->texture);
 
-  LG_LOCK_INIT((*desktop)->updateLock);
-
+  (*desktop)->egl  = egl;
   (*desktop)->kbNV = app_register_keybind(SDL_SCANCODE_N, egl_desktop_toggle_nv, *desktop);
 
   (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
@@ -168,8 +165,6 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   if (!*desktop)
     return;
 
-  LG_LOCK_FREE((*desktop)->updateLock);
-
   egl_texture_free(&(*desktop)->texture              );
   egl_shader_free (&(*desktop)->shader_generic.shader);
   egl_shader_free (&(*desktop)->shader_yuv.shader    );
@@ -181,88 +176,79 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   *desktop = NULL;
 }
 
-bool egl_desktop_prepare_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer * frame)
+bool egl_desktop_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer * frame)
 {
   if (sourceChanged)
   {
-    LG_LOCK(desktop->updateLock);
+    enum EGL_PixelFormat pixFmt;
     switch(format.type)
     {
       case FRAME_TYPE_BGRA:
-        desktop->pixFmt = EGL_PF_BGRA;
+        pixFmt = EGL_PF_BGRA;
         desktop->shader = &desktop->shader_generic;
         break;
 
       case FRAME_TYPE_RGBA:
-        desktop->pixFmt = EGL_PF_RGBA;
+        pixFmt = EGL_PF_RGBA;
         desktop->shader = &desktop->shader_generic;
         break;
 
       case FRAME_TYPE_RGBA10:
-        desktop->pixFmt = EGL_PF_RGBA10;
+        pixFmt = EGL_PF_RGBA10;
         desktop->shader = &desktop->shader_generic;
         break;
 
       case FRAME_TYPE_YUV420:
-        desktop->pixFmt = EGL_PF_YUV420;
+        pixFmt = EGL_PF_YUV420;
         desktop->shader = &desktop->shader_yuv;
         break;
 
       default:
         DEBUG_ERROR("Unsupported frame format");
-        LG_UNLOCK(desktop->updateLock);
         return false;
     }
 
     desktop->width  = format.width;
     desktop->height = format.height;
-    desktop->pitch  = format.pitch;
-    desktop->frame  = frame;
-    desktop->update = true;
 
-    /* defer the actual update as the format has changed and we need to issue GL commands first */
-    LG_UNLOCK(desktop->updateLock);
-    return true;
-  }
-
-  /* update the texture now */
-  return egl_texture_update_from_frame(desktop->texture, frame);
-}
-
-void egl_desktop_perform_update(EGL_Desktop * desktop, const bool sourceChanged)
-{
-  if (sourceChanged)
-  {
-    LG_LOCK(desktop->updateLock);
+    egl_lock(desktop->egl);
     if (!egl_texture_setup(
       desktop->texture,
-      desktop->pixFmt,
-      desktop->width,
-      desktop->height,
-      desktop->pitch,
+      pixFmt,
+      format.width,
+      format.height,
+      format.pitch,
       true // streaming texture
     ))
     {
+      egl_unlock(desktop->egl);
       DEBUG_ERROR("Failed to setup the desktop texture");
-      LG_UNLOCK(desktop->updateLock);
-      return;
+      return false;
     }
-    LG_UNLOCK(desktop->updateLock);
+    egl_unlock(desktop->egl);
   }
 
-  if (desktop->update)
+  if (!egl_texture_update_from_frame(desktop->texture, frame))
+    return false;
+
+  egl_lock(desktop->egl);
+  enum EGL_TexStatus status;
+  if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)
   {
-    desktop->update = false;
-    egl_texture_update_from_frame(desktop->texture, desktop->frame);
+    if (status != EGL_TEX_STATUS_NOTREADY)
+    {
+      DEBUG_ERROR("Failed to process the desktop texture");
+      egl_unlock(desktop->egl);
+    }
   }
+  egl_unlock(desktop->egl);
+
+  return true;
 }
 
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest)
 {
   if (!desktop->shader)
-    return false;
-
-  if (egl_texture_process(desktop->texture) != EGL_TEX_STATUS_OK)
     return false;
 
   const struct DesktopShader * shader = desktop->shader;

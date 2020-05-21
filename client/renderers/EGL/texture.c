@@ -119,6 +119,41 @@ void egl_texture_free(EGL_Texture ** texture)
   *texture = NULL;
 }
 
+static bool egl_texture_map(EGL_Texture * texture)
+{
+  // release old PBOs and delete and re-create the buffers
+  for(int i = 0; i < TEXTURE_COUNT; ++i)
+  {
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
+    texture->tex[i].map = glMapBufferRange(
+      GL_PIXEL_UNPACK_BUFFER,
+      0,
+      texture->pboBufferSize,
+      GL_MAP_WRITE_BIT             |
+      GL_MAP_UNSYNCHRONIZED_BIT    |
+      GL_MAP_INVALIDATE_BUFFER_BIT
+    );
+
+    if (!texture->tex[i].map)
+    {
+      EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
+      return false;
+    }
+  }
+
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  return true;
+}
+
+static void egl_texture_unmap(EGL_Texture * texture)
+{
+  for(int i = 0; i < TEXTURE_COUNT; ++i)
+  {
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
+    glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+  }
+}
+
 bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t stride, bool streaming)
 {
   int planeCount;
@@ -232,48 +267,32 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  if (streaming)
+  egl_texture_unmap(texture);
+
+  // release old PBOs and delete and re-create the buffers
+  for(int i = 0; i < TEXTURE_COUNT; ++i)
   {
-    // release old PBOs and delete and re-create the buffers
-    for(int i = 0; i < TEXTURE_COUNT; ++i)
+    if (texture->tex[i].hasPBO)
     {
-      if (texture->tex[i].hasPBO)
-      {
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
-        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-        glDeleteBuffers(1, &texture->tex[i].pbo);
-      }
-
-      glGenBuffers(1, &texture->tex[i].pbo);
-      texture->tex[i].hasPBO = true;
-
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
-      glBufferStorage(
-        GL_PIXEL_UNPACK_BUFFER,
-        texture->pboBufferSize,
-        NULL,
-        GL_MAP_PERSISTENT_BIT |
-        GL_MAP_WRITE_BIT
-      );
-
-      texture->tex[i].map = glMapBufferRange(
-        GL_PIXEL_UNPACK_BUFFER,
-        0,
-        texture->pboBufferSize,
-        GL_MAP_PERSISTENT_BIT        |
-        GL_MAP_WRITE_BIT             |
-        GL_MAP_UNSYNCHRONIZED_BIT    |
-        GL_MAP_INVALIDATE_BUFFER_BIT
-      );
-
-      if (!texture->tex[i].map)
-      {
-        EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
-        return false;
-      }
+      glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+      glDeleteBuffers(1, &texture->tex[i].pbo);
     }
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    glGenBuffers(1, &texture->tex[i].pbo);
+    texture->tex[i].hasPBO = true;
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
+    glBufferStorage(
+      GL_PIXEL_UNPACK_BUFFER,
+      texture->pboBufferSize,
+      NULL,
+      GL_MAP_WRITE_BIT
+    );
   }
+
+  if (!egl_texture_map(texture))
+    return false;
 
   return true;
 }
@@ -295,8 +314,6 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 {
   if (texture->streaming)
   {
-    /* NOTE: DO NOT use any gl commands here as streaming must be thread safe */
-
     union TexState s;
     s.v = atomic_load_explicit(&texture->state.v, memory_order_acquire);
 
@@ -368,6 +385,7 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
     return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
 
   /* update the texture */
+  egl_texture_unmap(texture);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[s.u].pbo);
   for(int p = 0; p < texture->planeCount; ++p)
   {
@@ -377,13 +395,15 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
         texture->format, texture->dataType, (const void *)texture->offsets[p]);
 
   }
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   /* create a fence to prevent usage before the update is complete */
   texture->tex[s.u].sync =
     glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
   atomic_store_explicit(&texture->state.u, nextu, memory_order_release);
+
+  /* remap the for the next update */
+  egl_texture_map(texture);
 
   texture->ready = true;
   return EGL_TEX_STATUS_OK;

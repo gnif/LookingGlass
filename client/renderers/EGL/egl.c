@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/option.h"
 #include "common/sysinfo.h"
 #include "common/time.h"
+#include "common/locking.h"
 #include "utils.h"
 #include "dynamic/fonts.h"
 
@@ -58,7 +59,8 @@ struct Inst
   EGLDisplay           display;
   EGLConfig            configs;
   EGLSurface           surface;
-  EGLContext           context;
+  LG_Lock              lock;
+  EGLContext           context, frameContext;
 
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
@@ -67,7 +69,6 @@ struct Inst
   EGL_Alert       * alert;   // the alert display
 
   LG_RendererFormat    format;
-  bool                 sourceChanged;
   uint64_t             waitFadeTime;
   bool                 waitDone;
 
@@ -170,6 +171,7 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   this->scaleY       = 1.0f;
   this->screenScaleX = 1.0f;
   this->screenScaleY = 1.0f;
+  LG_LOCK_INIT(this->lock);
 
   this->font = LG_Fonts[0];
   if (!this->font->create(&this->fontObj, NULL, 16))
@@ -219,6 +221,8 @@ void egl_deinitialize(void * opaque)
   egl_fps_free    (&this->fps   );
   egl_splash_free (&this->splash);
   egl_alert_free  (&this->alert );
+
+  LG_LOCK_FREE(this->lock);
 
   free(this);
 }
@@ -296,25 +300,52 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
+void egl_lock(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  LG_LOCK(this->lock);
+  eglMakeCurrent(this->display, this->surface, this->surface, this->frameContext);
+}
+
+void egl_unlock(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  LG_UNLOCK(this->lock);
+}
+
 bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame)
 {
   struct Inst * this = (struct Inst *)opaque;
-  this->sourceChanged = (
-    this->sourceChanged ||
+  const bool sourceChanged = (
     this->format.type   != format.type   ||
     this->format.width  != format.width  ||
     this->format.height != format.height ||
     this->format.pitch  != format.pitch
   );
 
-  if (this->sourceChanged)
+  if (sourceChanged)
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
   this->useNearest = this->width < format.width || this->height < format.height;
 
-  if (!egl_desktop_prepare_update(this->desktop, this->sourceChanged, format, frame))
+  if (!this->frameContext)
   {
-    DEBUG_INFO("Failed to prepare to update the desktop");
+    static EGLint attrs[] = {
+      EGL_CONTEXT_CLIENT_VERSION, 2,
+      EGL_NONE
+    };
+
+    if (!(this->frameContext = eglCreateContext(this->display, this->configs, this->context, attrs)))
+    {
+      DEBUG_ERROR("Failed to create the frame context");
+      return false;
+    }
+  }
+
+  if (!egl_desktop_update(this->desktop, sourceChanged, format, frame))
+  {
+    DEBUG_INFO("Failed to to update the desktop");
     return false;
   }
 
@@ -470,7 +501,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(&this->desktop))
+  if (!egl_desktop_init(this, &this->desktop))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
@@ -501,6 +532,21 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   }
 
   return true;
+}
+
+bool egl_render_begin(void * opaque, SDL_Window * window)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  LG_LOCK(this->lock);
+  return eglMakeCurrent(this->display, this->surface, this->surface, this->context);
+}
+
+bool egl_render_end(void * opaque, SDL_Window * window)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  bool ret = eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  LG_UNLOCK(this->lock);
+  return ret;
 }
 
 bool egl_render(void * opaque, SDL_Window * window)
@@ -554,11 +600,6 @@ bool egl_render(void * opaque, SDL_Window * window)
 
   egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   eglSwapBuffers(this->display, this->surface);
-
-  // defer texture uploads until after the flip to avoid stalling
-  egl_desktop_perform_update(this->desktop, this->sourceChanged);
-
-  this->sourceChanged = false;
   return true;
 }
 
@@ -584,6 +625,8 @@ struct LG_Renderer LGR_EGL =
   .on_frame_event = egl_on_frame_event,
   .on_alert       = egl_on_alert,
   .render_startup = egl_render_startup,
+  .render_begin   = egl_render_begin,
+  .render_end     = egl_render_end,
   .render         = egl_render,
   .update_fps     = egl_update_fps
 };

@@ -109,6 +109,8 @@ typedef struct LG_Renderer
   LG_RendererOnFrameEvent on_frame_event;
   LG_RendererOnAlert      on_alert;
   LG_RendererRender       render_startup;
+  LG_RendererRender       render_begin;
+  LG_RendererRender       render_end;
   LG_RendererRender       render;
   LG_RendererUpdateFPS    update_fps;
 }
