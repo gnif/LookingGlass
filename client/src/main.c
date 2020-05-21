@@ -1394,6 +1394,14 @@ static int lg_run()
     SDL_ShowCursor(SDL_DISABLE);
   }
 
+  if (params.captureOnStart)
+  {
+    state.serverMode = true;
+    spice_mouse_mode(state.serverMode);
+    SDL_SetWindowGrab(state.window, state.serverMode);
+    DEBUG_INFO("Server Mode: %s", state.serverMode ? "on" : "off");
+  }
+
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
   {
