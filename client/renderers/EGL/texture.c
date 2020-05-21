@@ -304,8 +304,8 @@ static void egl_warn_slow()
   {
     warnDone = true;
     DEBUG_BREAK();
-    DEBUG_WARN("The guest is providing updates faster then we are consuming them");
-    DEBUG_WARN("Please increase the client FPS to avoid frame skipping");
+    DEBUG_WARN("The guest is providing updates faster then your computer can display them");
+    DEBUG_WARN("This is a hardware limitation, expect microstutters & frame skips");
     DEBUG_BREAK();
   }
 }
