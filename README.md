@@ -33,7 +33,7 @@ Please also be sure to see the following files for more information
 
 ## Obtaining and using Looking Glass
 
-Please see https://looking-glass.hostfission.com/quickstart
+Please see https://looking-glass.hostfission.com/wiki/
 
 ## Latest Version
 
