@@ -148,10 +148,36 @@ static int renderThread(void * unused)
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
+  int resyncCheck = 0;
   struct timespec time;
+  clock_gettime(CLOCK_REALTIME, &time);
 
   while(state.running)
   {
+    // if our clock is too far out of sync, resync it
+    // this can happen when switching to/from a TTY, or due to clock drift
+    // we only check this once every 100 frames
+    if (state.frameTime > 0 && ++resyncCheck == 100)
+    {
+      resyncCheck = 0;
+
+      struct timespec tmp;
+      clock_gettime(CLOCK_REALTIME, &tmp);
+      if (tmp.tv_nsec - time.tv_nsec < 0)
+      {
+        tmp.tv_sec -= time.tv_sec - 1;
+        tmp.tv_nsec = 1000000000 + tmp.tv_nsec - time.tv_nsec;
+      }
+      else
+      {
+        tmp.tv_sec  -= time.tv_sec;
+        tmp.tv_nsec -= time.tv_nsec;
+      }
+
+      if (tmp.tv_sec > 1)
+        clock_gettime(CLOCK_REALTIME, &time);
+    }
+
     if (state.lgrResize)
     {
       if (state.lgr)
@@ -193,7 +219,6 @@ static int renderThread(void * unused)
 
     if (state.frameTime > 0)
     {
-      clock_gettime(CLOCK_REALTIME, &time);
       uint64_t nsec = time.tv_nsec + state.frameTime;
       if(nsec > 1e9)
       {
@@ -1300,20 +1325,9 @@ static int lg_run()
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
 
-  //Auto detect active monitor refresh rate for FPS Limit if no FPS Limit was passed.
+  // use a default of 60FPS now that frame updates are host update triggered
   if (params.fpsMin == -1)
-  {
-      SDL_DisplayMode current;
-      if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(state.window), &current) == 0)
-      {
-          state.frameTime = 1e9 / current.refresh_rate;
-      }
-      else
-      {
-          DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS minimum of 60");
-          state.frameTime = 1e9 / 60;
-      }
-  }
+    state.frameTime = 1e9 / 60;
   else
   {
       DEBUG_INFO("Using the FPS minimum from args: %d", params.fpsMin);
