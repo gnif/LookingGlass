@@ -154,28 +154,23 @@ static int renderThread(void * unused)
 
   while(state.running)
   {
-    // if our clock is too far out of sync, resync it
-    // this can happen when switching to/from a TTY, or due to clock drift
-    // we only check this once every 100 frames
-    if (state.frameTime > 0 && ++resyncCheck == 100)
+    if (state.frameTime > 0)
     {
-      resyncCheck = 0;
+      tsAdd(&time, state.frameTime);
 
-      struct timespec tmp;
-      clock_gettime(CLOCK_REALTIME, &tmp);
-      if (tmp.tv_nsec - time.tv_nsec < 0)
+      // if our clock is too far out of sync, resync it
+      // this can happen when switching to/from a TTY, or due to clock drift
+      // we only check this once every 100 frames
+      if (++resyncCheck == 100)
       {
-        tmp.tv_sec -= time.tv_sec - 1;
-        tmp.tv_nsec = 1000000000 + tmp.tv_nsec - time.tv_nsec;
-      }
-      else
-      {
-        tmp.tv_sec  -= time.tv_sec;
-        tmp.tv_nsec -= time.tv_nsec;
-      }
+        resyncCheck = 0;
 
-      if (tmp.tv_sec > 1)
-        clock_gettime(CLOCK_REALTIME, &time);
+        struct timespec end, diff;
+        clock_gettime(CLOCK_REALTIME, &end);
+        tsDiff(&diff, &time, &end);
+        if (diff.tv_sec > 0 || diff.tv_nsec > 1000000000) // 100ms
+          clock_gettime(CLOCK_REALTIME, &time);
+      }
     }
 
     if (state.lgrResize)
@@ -218,18 +213,7 @@ static int renderThread(void * unused)
     }
 
     if (state.frameTime > 0)
-    {
-      uint64_t nsec = time.tv_nsec + state.frameTime;
-      if(nsec > 1e9)
-      {
-        time.tv_nsec = nsec - 1e9;
-        ++time.tv_sec;
-      }
-      else
-        time.tv_nsec = nsec;
-
       lgWaitEventAbs(e_frame, &time);
-    }
   }
 
   state.running = false;
