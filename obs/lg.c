@@ -212,16 +212,6 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
-  if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
-  {
-    if (status != LGMP_ERR_QUEUE_EMPTY)
-    {
-      os_sem_post(this->frameSem);
-      printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
-      return;
-    }
-  }
-
   if ((status = lgmpClientProcess(this->frameQueue, &msg)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_EMPTY)
