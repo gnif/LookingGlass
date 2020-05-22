@@ -328,8 +328,6 @@ static int cursorThread(void * unused)
       state.cursor.x,
       state.cursor.y
     );
-
-    lgSignalEvent(e_frame);
   }
 
   lgmpClientUnsubscribe(&queue);
