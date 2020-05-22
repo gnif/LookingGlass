@@ -191,17 +191,20 @@ static int renderThread(void * unused)
       state.resizeDone = true;
     }
 
-    clock_gettime(CLOCK_REALTIME, &time);
-    uint64_t nsec = time.tv_nsec + state.frameTime;
-    if(nsec > 1e9)
+    if (state.frameTime > 0)
     {
-      time.tv_nsec = nsec - 1e9;
-      ++time.tv_sec;
-    }
-    else
-      time.tv_nsec = nsec;
+      clock_gettime(CLOCK_REALTIME, &time);
+      uint64_t nsec = time.tv_nsec + state.frameTime;
+      if(nsec > 1e9)
+      {
+        time.tv_nsec = nsec - 1e9;
+        ++time.tv_sec;
+      }
+      else
+        time.tv_nsec = nsec;
 
-    lgWaitEventAbs(e_frame, &time);
+      lgWaitEventAbs(e_frame, &time);
+    }
   }
 
   state.running = false;
