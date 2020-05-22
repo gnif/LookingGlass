@@ -175,10 +175,6 @@ static int renderThread(void * unused)
       }
     }
 
-    if (state.lgr->render_begin && !state.lgr->render_begin(state.lgrData,
-          state.window))
-      break;
-
     if (state.lgrResize)
     {
       if (state.lgr)
@@ -207,10 +203,6 @@ static int renderThread(void * unused)
         state.renderCount = 0;
       }
     }
-
-    if (state.lgr->render_end && !state.lgr->render_end(state.lgrData,
-          state.window))
-      break;
 
     if (!state.resizeDone && state.resizeTimeout < microtime())
     {

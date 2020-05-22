@@ -18,7 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "desktop.h"
-#include "egl.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -211,7 +210,6 @@ bool egl_desktop_update(EGL_Desktop * desktop, const bool sourceChanged, const L
     desktop->width  = format.width;
     desktop->height = format.height;
 
-    egl_lock(desktop->egl);
     if (!egl_texture_setup(
       desktop->texture,
       pixFmt,
@@ -221,27 +219,20 @@ bool egl_desktop_update(EGL_Desktop * desktop, const bool sourceChanged, const L
       true // streaming texture
     ))
     {
-      egl_unlock(desktop->egl);
       DEBUG_ERROR("Failed to setup the desktop texture");
       return false;
     }
-    egl_unlock(desktop->egl);
   }
 
   if (!egl_texture_update_from_frame(desktop->texture, frame))
     return false;
 
-  egl_lock(desktop->egl);
   enum EGL_TexStatus status;
   if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)
   {
     if (status != EGL_TEX_STATUS_NOTREADY)
-    {
       DEBUG_ERROR("Failed to process the desktop texture");
-      egl_unlock(desktop->egl);
-    }
   }
-  egl_unlock(desktop->egl);
 
   return true;
 }

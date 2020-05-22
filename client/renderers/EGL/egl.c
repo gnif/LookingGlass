@@ -59,7 +59,6 @@ struct Inst
   EGLDisplay           display;
   EGLConfig            configs;
   EGLSurface           surface;
-  LG_Lock              lock;
   EGLContext           context, frameContext;
 
   EGL_Desktop     * desktop; // the desktop
@@ -171,7 +170,6 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   this->scaleY       = 1.0f;
   this->screenScaleX = 1.0f;
   this->screenScaleY = 1.0f;
-  LG_LOCK_INIT(this->lock);
 
   this->font = LG_Fonts[0];
   if (!this->font->create(&this->fontObj, NULL, 16))
@@ -314,6 +312,27 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const Fra
     memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
   this->useNearest = this->width < format.width || this->height < format.height;
+
+  /* this event runs in a second thread so we need to init it here */
+  if (!this->frameContext)
+  {
+    static EGLint attrs[] = {
+      EGL_CONTEXT_CLIENT_VERSION, 2,
+      EGL_NONE
+    };
+
+    if (!(this->frameContext = eglCreateContext(this->display, this->configs, this->context, attrs)))
+    {
+      DEBUG_ERROR("Failed to create the frame context");
+      return false;
+    }
+
+    if (!eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->frameContext))
+    {
+      DEBUG_ERROR("Failed to make the frame context current");
+      return false;
+    }
+  }
 
   if (!egl_desktop_update(this->desktop, sourceChanged, format, frame))
   {
@@ -506,47 +525,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   return true;
 }
 
-void egl_lock(void * opaque)
-{
-  struct Inst * this = (struct Inst *)opaque;
-
-  if (!this->frameContext)
-  {
-    static EGLint attrs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 2,
-      EGL_NONE
-    };
-
-    if (!(this->frameContext = eglCreateContext(this->display, this->configs, this->context, attrs)))
-      DEBUG_ERROR("Failed to create the frame context");
-  }
-
-  LG_LOCK(this->lock);
-  eglMakeCurrent(this->display, this->surface, this->surface, this->frameContext);
-}
-
-void egl_unlock(void * opaque)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  LG_UNLOCK(this->lock);
-}
-
-bool egl_render_begin(void * opaque, SDL_Window * window)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  LG_LOCK(this->lock);
-  return eglMakeCurrent(this->display, this->surface, this->surface, this->context);
-}
-
-bool egl_render_end(void * opaque, SDL_Window * window)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  bool ret = eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  LG_UNLOCK(this->lock);
-  return ret;
-}
-
 bool egl_render(void * opaque, SDL_Window * window)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -623,8 +601,6 @@ struct LG_Renderer LGR_EGL =
   .on_frame_event = egl_on_frame_event,
   .on_alert       = egl_on_alert,
   .render_startup = egl_render_startup,
-  .render_begin   = egl_render_begin,
-  .render_end     = egl_render_end,
   .render         = egl_render,
   .update_fps     = egl_update_fps
 };

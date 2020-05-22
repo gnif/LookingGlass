@@ -104,7 +104,11 @@ void egl_texture_free(EGL_Texture ** texture)
     if (t->hasPBO)
     {
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, t->pbo);
-      glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+      if ((*texture)->tex[i].map)
+      {
+        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        (*texture)->tex[i].map = NULL;
+      }
       glDeleteBuffers(1, &t->pbo);
       if (t->sync)
         glDeleteSync(t->sync);
@@ -149,8 +153,12 @@ static void egl_texture_unmap(EGL_Texture * texture)
 {
   for(int i = 0; i < TEXTURE_COUNT; ++i)
   {
+    if (!texture->tex[i].map)
+      continue;
+
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
     glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+    texture->tex[i].map = NULL;
   }
 }
 
@@ -273,11 +281,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   for(int i = 0; i < TEXTURE_COUNT; ++i)
   {
     if (texture->tex[i].hasPBO)
-    {
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
-      glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
       glDeleteBuffers(1, &texture->tex[i].pbo);
-    }
 
     glGenBuffers(1, &texture->tex[i].pbo);
     texture->tex[i].hasPBO = true;
@@ -400,6 +404,9 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   texture->tex[s.u].sync =
     glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
+  /* we must flush to ensure the sync is in the command buffer */
+  glFlush();
+
   atomic_store_explicit(&texture->state.u, nextu, memory_order_release);
 
   /* remap the for the next update */
@@ -421,7 +428,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 
     if (texture->tex[s.s].sync != 0)
     {
-      switch(glClientWaitSync(texture->tex[s.s].sync, 0, 20000000))
+      switch(glClientWaitSync(texture->tex[s.s].sync, 0, 20000000)) // 20ms
       {
         case GL_ALREADY_SIGNALED:
         case GL_CONDITION_SATISFIED:
@@ -436,6 +443,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
           break;
 
         case GL_WAIT_FAILED:
+        case GL_INVALID_VALUE:
           glDeleteSync(texture->tex[s.s].sync);
           texture->tex[s.s].sync = 0;
           EGL_ERROR("glClientWaitSync failed");
