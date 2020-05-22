@@ -350,6 +350,8 @@ static int cursorThread(void * unused)
       state.cursor.x,
       state.cursor.y
     );
+
+    lgSignalEvent(e_frame);
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -458,6 +460,7 @@ static int frameThread(void * unused)
     }
     lgmpClientMessageDone(queue);
     ++state.frameCount;
+
     lgSignalEvent(e_frame);
   }
 
