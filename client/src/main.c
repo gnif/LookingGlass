@@ -168,7 +168,8 @@ static int renderThread(void * unused)
         struct timespec end, diff;
         clock_gettime(CLOCK_REALTIME, &end);
         tsDiff(&diff, &time, &end);
-        if (diff.tv_sec > 0 || diff.tv_nsec > 1000000000) // 100ms
+        if (diff.tv_sec > 0 || diff.tv_nsec > 1000000000 || // 100ms
+            diff.tv_sec < 0 || diff.tv_nsec < 0)            // underflow
           clock_gettime(CLOCK_REALTIME, &time);
       }
     }
