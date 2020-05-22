@@ -175,8 +175,8 @@ static struct Option options[] =
   },
   {
     .module         = "win",
-    .name           = "fpsLimit",
-    .description    = "Frame rate limit (0 = disable - not recommended, -1 = auto detect)",
+    .name           = "fpsMinimum",
+    .description    = "Frame rate minimum (0 = disable - not recommended, -1 = auto detect)",
     .shortopt       = 'K',
     .type           = OPTION_TYPE_INT,
     .value.x_int    = -1,
@@ -382,7 +382,7 @@ bool config_load(int argc, char * argv[])
   params.borderless    = option_get_bool  ("win", "borderless"   );
   params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
   params.maximize      = option_get_bool  ("win", "maximize"     );
-  params.fpsLimit      = option_get_int   ("win", "fpsLimit"     );
+  params.fpsMin        = option_get_int   ("win", "fpsMin"       );
   params.showFPS       = option_get_bool  ("win", "showFPS"      );
   params.ignoreQuit    = option_get_bool  ("win", "ignoreQuit"   );
   params.noScreensaver = option_get_bool  ("win", "noScreensaver");

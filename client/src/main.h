@@ -109,7 +109,7 @@ struct AppParams
   bool         center;
   int          x, y;
   unsigned int w, h;
-  unsigned int fpsLimit;
+  unsigned int fpsMin;
   bool         showFPS;
   bool         useSpiceInput;
   bool         useSpiceClipboard;

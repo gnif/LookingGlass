@@ -152,8 +152,6 @@ static int renderThread(void * unused)
 
   while(state.running)
   {
-    clock_gettime(CLOCK_REALTIME, &time);
-
     if (state.lgrResize)
     {
       if (state.lgr)
@@ -193,6 +191,7 @@ static int renderThread(void * unused)
       state.resizeDone = true;
     }
 
+    clock_gettime(CLOCK_REALTIME, &time);
     uint64_t nsec = time.tv_nsec + state.frameTime;
     if(nsec > 1e9)
     {
@@ -1301,7 +1300,7 @@ static int lg_run()
   updatePositionInfo();
 
   //Auto detect active monitor refresh rate for FPS Limit if no FPS Limit was passed.
-  if (params.fpsLimit == -1)
+  if (params.fpsMin == -1)
   {
       SDL_DisplayMode current;
       if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(state.window), &current) == 0)
@@ -1310,14 +1309,14 @@ static int lg_run()
       }
       else
       {
-          DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS Limit: 60");
+          DEBUG_WARN("Unable to capture monitor refresh rate using the default FPS minimum of 60");
           state.frameTime = 1e9 / 60;
       }
   }
   else
   {
-      DEBUG_INFO("Using the FPS Limit from args: %d", params.fpsLimit);
-      state.frameTime = 1e9 / params.fpsLimit;
+      DEBUG_INFO("Using the FPS minimum from args: %d", params.fpsMin);
+      state.frameTime = 1e9 / params.fpsMin;
   }
 
   register_key_binds();
