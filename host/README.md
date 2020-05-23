@@ -44,6 +44,12 @@ cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
 make
 ```
 
+## Building the installer
+
+Install NSIS compiler
+Build the host program, see above sections.
+Build installer with `makensis c-host/installer/installer.nsi`
+
 ## Where is the log?
 
 It is in your user's temp directory:
