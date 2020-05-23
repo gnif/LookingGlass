@@ -40,15 +40,64 @@ InstallDir "$PROGRAMFILES64\Looking-Glass"
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_LICENSE "..\..\LICENSE"
+!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+
+Function ShowHelpMessage
+	!define line1 "Command line options:$\r$\n$\r$\n"
+	!define line2 "/S - silent install (must be uppercase)$\r$\n"
+	!define line3 "/D=path\to\install\folder - Change install directory$\r$\n"
+	!define line4 "   (Must be uppercase, the last option given and no quotes)$\r$\n$\r$\n"
+	!define line5 "/startmenu - create start menu shortcut$\r$\n"
+	!define line6 "/desktop - create desktop shortcut"
+	MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}${line6}"
+	Abort
+FunctionEnd
+
+Function .onInit
+
+    var /GLOBAL cmdLineParams
+    Push $R0
+    ${GetParameters} $cmdLineParams
+    ClearErrors
+	
+    ${GetOptions} $cmdLineParams '/?' $R0
+    IfErrors +2 0
+    Call ShowHelpMessage
+	
+	${GetOptions} $cmdLineParams '/H' $R0
+    IfErrors +2 0
+    Call ShowHelpMessage
+	
+    Pop $R0
+
+
+    Var /GLOBAL option_startMenu
+    Var /GLOBAL option_desktop
+    StrCpy $option_startMenu     0
+	StrCpy $option_desktop       0
+
+    Push $R0
+		
+	${GetOptions} $cmdLineParams '/startmenu' $R0
+    IfErrors +2 0
+	StrCpy $option_startMenu 1
+
+    ${GetOptions} $cmdLineParams '/desktop' $R0
+    IfErrors +2 0
+    StrCpy $option_desktop 1
+        
+    Pop $R0
+
+FunctionEnd
+
 ;Install 
-Section "Install" Section1
-  SectionIn RO
+Section "-Install" Section1
 
   SetOutPath $INSTDIR
   File ..\build\looking-glass-host.exe
@@ -83,32 +132,42 @@ SectionEnd
 Section "Auto Start Looking-Glass" Section2
 
   nsExec::Exec 'SCHTASKS /Delete /F /TN "Looking Glass"'
-  nsExec::Exec 'SCHTASKS /Create /TN "Looking Glass" /SC  ONLOGON /RL HIGHEST /TR "C:\Program Files\Looking-Glass\looking-glass-host.exe"'
+  nsExec::Exec 'SCHTASKS /Create /TN "Looking Glass" /SC  ONLOGON /RL HIGHEST /TR "$INSTDIR\looking-glass-host.exe"'
 
 SectionEnd
 
 Section /o "Desktop Shortcut" Section3
-  SetShellVarContext all
-  CreateShortCut $DESKTOP\Looking-Glass-Host.lnk $INSTDIR\looking-glass-host.exe
+  StrCpy $option_desktop 1
 SectionEnd
 
 Section /o "Start Menu Shortcut" Section4
-  SetShellVarContext all
-  CreateShortCut $STARTMENU\Looking-Glass-Host.lnk $INSTDIR\looking-glass-host.exe
+  StrCpy $option_startMenu 1
 SectionEnd
 
+Section "-Hidden Start Menu" Section5
+  SetShellVarContext all
+  
+  ${If} $option_startMenu == 1
+    CreateShortCut $SMPROGRAMS\Looking-Glass-Host.lnk $INSTDIR\looking-glass-host.exe
+  ${EndIf}
 
-Section "Uninstall" Section5
+  ${If} $option_desktop == 1
+    CreateShortCut $DESKTOP\Looking-Glass-Host.lnk $INSTDIR\looking-glass-host.exe
+  ${EndIf}
+  
+SectionEnd
+
+Section "Uninstall" Section6
   SetShellVarContext all
 
   nsExec::Exec 'SCHTASKS /Delete /F /TN "Looking Glass"'
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking-Glass"
-  Delete $STARTMENU\Looking-Glass-Host.lnk
+  Delete $SMPROGRAMS\Looking-Glass-Host.lnk
   Delete $DESKTOP\Looking-Glass-Host.lnk
   Delete $INSTDIR\uninstaller.exe
   Delete $INSTDIR\looking-glass-host.exe
-  Delete $INSTDIR\LICENSE
+  Delete $INSTDIR\LICENSE.txt
 
   RMDir $INSTDIR
 
