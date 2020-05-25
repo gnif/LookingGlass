@@ -28,7 +28,7 @@ git repository!
 Please also be sure to see the following files for more information
 
 * [client/README.md](client/README.md)
-* [c-host/README.md](c-host/README.md)
+* [host/README.md](host/README.md)
 * [module/README.md](module/README.md)
 
 ## Obtaining and using Looking Glass
