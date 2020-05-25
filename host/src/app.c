@@ -66,6 +66,8 @@ struct app
 
   PLGMPHostQueue pointerQueue;
   PLGMPMemory    pointerMemory[LGMP_Q_POINTER_LEN];
+  LG_Lock        pointerLock;
+  CapturePointer pointerInfo;
   PLGMPMemory    pointerShape;
   bool           pointerShapeValid;
   unsigned int   pointerIndex;
@@ -279,7 +281,7 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
   // spin until there is room
   while(lgmpHostQueuePending(app.pointerQueue) == LGMP_Q_POINTER_LEN)
   {
-    DEBUG_INFO("pending");
+    usleep(1);
     if (!app.running)
       return false;
   }
@@ -290,14 +292,13 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
   return true;
 }
 
-void capturePostPointerBuffer(CapturePointer pointer)
+static void sendPointer(bool newClient)
 {
   PLGMPMemory mem;
-  const bool newClient = lgmpHostQueueNewSubs(app.pointerQueue) > 0;
 
-  if (pointer.shapeUpdate || newClient)
+  if (app.pointerInfo.shapeUpdate || newClient)
   {
-    if (pointer.shapeUpdate)
+    if (app.pointerInfo.shapeUpdate)
     {
       // swap the latest shape buffer out of rotation
       PLGMPMemory tmp  = app.pointerShape;
@@ -309,32 +310,31 @@ void capturePostPointerBuffer(CapturePointer pointer)
     mem = app.pointerShape;
   }
   else
-  {
     mem = app.pointerMemory[app.pointerIndex];
-    if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
-      app.pointerIndex = 0;
-  }
+
+  if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
+    app.pointerIndex = 0;
 
   uint32_t flags = 0;
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
 
-  if (pointer.positionUpdate)
+  if (app.pointerInfo.positionUpdate || newClient)
   {
     flags |= CURSOR_FLAG_POSITION;
-    cursor->x = pointer.x;
-    cursor->y = pointer.y;
+    cursor->x = app.pointerInfo.x;
+    cursor->y = app.pointerInfo.y;
   }
 
-  if (pointer.visible)
+  if (app.pointerInfo.visible)
     flags |= CURSOR_FLAG_VISIBLE;
 
-  if (pointer.shapeUpdate)
+  if (app.pointerInfo.shapeUpdate)
   {
     // remember which slot has the latest shape
-    cursor->width  = pointer.width;
-    cursor->height = pointer.height;
-    cursor->pitch  = pointer.pitch;
-    switch(pointer.format)
+    cursor->width  = app.pointerInfo.width;
+    cursor->height = app.pointerInfo.height;
+    cursor->pitch  = app.pointerInfo.pitch;
+    switch(app.pointerInfo.format)
     {
       case CAPTURE_FMT_COLOR : cursor->type = CURSOR_TYPE_COLOR       ; break;
       case CAPTURE_FMT_MONO  : cursor->type = CURSOR_TYPE_MONOCHROME  ; break;
@@ -348,7 +348,7 @@ void capturePostPointerBuffer(CapturePointer pointer)
     app.pointerShapeValid = true;
   }
 
-  if ((pointer.shapeUpdate || newClient) && app.pointerShapeValid)
+  if ((app.pointerInfo.shapeUpdate || newClient) && app.pointerShapeValid)
     flags |= CURSOR_FLAG_SHAPE;
 
   LGMP_STATUS status;
@@ -361,8 +361,29 @@ void capturePostPointerBuffer(CapturePointer pointer)
     }
 
     DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
-    return;
+    break;
   }
+}
+
+void capturePostPointerBuffer(CapturePointer pointer)
+{
+  LG_LOCK(app.pointerLock);
+
+  int x = app.pointerInfo.x;
+  int y = app.pointerInfo.y;
+
+  memcpy(&app.pointerInfo, &pointer, sizeof(CapturePointer));
+
+  /* if there was not a position update, restore the x & y */
+  if (!pointer.positionUpdate)
+  {
+    app.pointerInfo.x = x;
+    app.pointerInfo.y = y;
+  }
+
+  sendPointer(false);
+
+  LG_UNLOCK(app.pointerLock);
 }
 
 // this is called from the platform specific startup routine
@@ -498,6 +519,8 @@ int app_main(int argc, char * argv[])
 
   app.iface = iface;
 
+  LG_LOCK_INIT(app.pointerLock);
+
   if (!captureStart())
   {
     exitcode = -1;
@@ -512,6 +535,13 @@ int app_main(int argc, char * argv[])
       goto exit;
     }
     app.reinit = false;
+
+    if (lgmpHostQueueNewSubs(app.pointerQueue) > 0)
+    {
+      LG_LOCK(app.pointerLock);
+      sendPointer(true);
+      LG_UNLOCK(app.pointerLock);
+    }
 
     switch(iface->capture())
     {
@@ -540,6 +570,8 @@ int app_main(int argc, char * argv[])
 finish:
   stopThreads();
 exit:
+
+  LG_LOCK_FREE(app.pointerLock);
 
   iface->deinit();
   iface->free();
