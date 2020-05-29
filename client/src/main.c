@@ -1483,7 +1483,11 @@ static int lg_run()
     DEBUG_ERROR("Please install the matching host application for this client");
 
     if (magicMatches)
+    {
       DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
+      if (udata->version >= 2)
+        DEBUG_ERROR("Host version: %s", udata->hostver);
+    }
     else
       DEBUG_ERROR("Invalid KVMFR magic");
 
