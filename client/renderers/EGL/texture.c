@@ -74,6 +74,7 @@ struct EGL_Texture
   size_t   pboBufferSize;
 
   union TexState state;
+  int            textureCount;
   struct Tex     tex[TEXTURE_COUNT];
 };
 
@@ -98,7 +99,7 @@ void egl_texture_free(EGL_Texture ** texture)
   if ((*texture)->planeCount > 0)
     glDeleteSamplers((*texture)->planeCount, (*texture)->samplers);
 
-  for(int i = 0; i < ((*texture)->streaming ? TEXTURE_COUNT : 1); ++i)
+  for(int i = 0; i < (*texture)->textureCount; ++i)
   {
     struct Tex * t = &(*texture)->tex[i];
     if (t->hasPBO)
@@ -134,6 +135,7 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
     GL_MAP_UNSYNCHRONIZED_BIT    |
     GL_MAP_INVALIDATE_BUFFER_BIT
   );
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   if (!texture->tex[i].map)
   {
@@ -144,17 +146,6 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
   return true;
 }
 
-static bool egl_texture_map_all(EGL_Texture * texture)
-{
-  // release old PBOs and delete and re-create the buffers
-  for(int i = 0; i < TEXTURE_COUNT; ++i)
-    if (!egl_texture_map(texture, i))
-      return false;
-
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  return true;
-}
-
 static void egl_texture_unmap(EGL_Texture * texture, uint8_t i)
 {
   if (!texture->tex[i].map)
@@ -162,25 +153,35 @@ static void egl_texture_unmap(EGL_Texture * texture, uint8_t i)
 
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[i].pbo);
   glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   texture->tex[i].map = NULL;
-}
-
-static void egl_texture_unmap_all(EGL_Texture * texture)
-{
-  for(int i = 0; i < TEXTURE_COUNT; ++i)
-    egl_texture_unmap(texture, i);
 }
 
 bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t stride, bool streaming)
 {
   int planeCount;
 
-  texture->pixFmt    = pixFmt;
-  texture->width     = width;
-  texture->height    = height;
-  texture->stride    = stride;
-  texture->streaming = streaming;
-  texture->ready     = false;
+  if (texture->streaming)
+  {
+    for(int i = 0; i < texture->textureCount; ++i)
+    {
+      egl_texture_unmap(texture, i);
+      if (texture->tex[i].hasPBO)
+      {
+        glDeleteBuffers(1, &texture->tex[i].pbo);
+        texture->tex[i].hasPBO = false;
+      }
+    }
+  }
+
+  texture->pixFmt       = pixFmt;
+  texture->width        = width;
+  texture->height       = height;
+  texture->stride       = stride;
+  texture->streaming    = streaming;
+  texture->textureCount = streaming ? TEXTURE_COUNT : 1;
+  texture->ready        = false;
+
   atomic_store_explicit(&texture->state.v, 0, memory_order_relaxed);
 
   switch(pixFmt)
@@ -254,7 +255,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     if (texture->planeCount > 0)
       glDeleteSamplers(texture->planeCount, texture->samplers);
 
-    for(int i = 0; i < TEXTURE_COUNT; ++i)
+    for(int i = 0; i < texture->textureCount; ++i)
     {
       if (texture->planeCount > 0)
         glDeleteTextures(texture->planeCount, texture->tex[i].t);
@@ -273,7 +274,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     texture->planeCount = planeCount;
   }
 
-  for(int i = 0; i < (streaming ? TEXTURE_COUNT : 1); ++i)
+  for(int i = 0; i < texture->textureCount; ++i)
   {
     for(int p = 0; p < planeCount; ++p)
     {
@@ -284,14 +285,11 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  egl_texture_unmap_all(texture);
+  if (!streaming)
+    return true;
 
-  // release old PBOs and delete and re-create the buffers
-  for(int i = 0; i < TEXTURE_COUNT; ++i)
+  for(int i = 0; i < texture->textureCount; ++i)
   {
-    if (texture->tex[i].hasPBO)
-      glDeleteBuffers(1, &texture->tex[i].pbo);
-
     glGenBuffers(1, &texture->tex[i].pbo);
     texture->tex[i].hasPBO = true;
 
@@ -302,10 +300,10 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       NULL,
       GL_MAP_WRITE_BIT
     );
-  }
 
-  if (!egl_texture_map_all(texture))
-    return false;
+    if (!egl_texture_map(texture, i))
+      return false;
+  }
 
   return true;
 }
@@ -343,7 +341,6 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   else
   {
     /* Non streaming, this is NOT thread safe */
-
     for(int p = 0; p < texture->planeCount; ++p)
     {
       glBindTexture(GL_TEXTURE_2D, texture->tex[0].t[p]);
@@ -408,6 +405,7 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
         texture->format, texture->dataType, (const void *)texture->offsets[p]);
 
   }
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   /* create a fence to prevent usage before the update is complete */
   texture->tex[s.u].sync =
@@ -419,8 +417,8 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   texture->ready = true;
   atomic_store_explicit(&texture->state.u, nextu, memory_order_release);
 
-  /* remap the for the next update */
-  egl_texture_map(texture, s.u);
+  if (!egl_texture_map(texture, s.u))
+    return EGL_TEX_STATUS_ERROR;
 
   return EGL_TEX_STATUS_OK;
 }
