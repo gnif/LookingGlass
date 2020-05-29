@@ -1586,6 +1586,12 @@ static void lg_shutdown()
 
 int main(int argc, char * argv[])
 {
+  if (getuid() == 0)
+  {
+    DEBUG_ERROR("Do not run looking glass as root!");
+    return -1;
+  }
+
   DEBUG_INFO("Looking Glass (" BUILD_VERSION ")");
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
 
