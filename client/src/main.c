@@ -1474,19 +1474,25 @@ static int lg_run()
   if (!state.running)
     return -1;
 
-  if (udataSize != sizeof(KVMFR) ||
-      memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
-      udata->version != KVMFR_VERSION)
+  const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
+  if (udataSize != sizeof(KVMFR) || !magicMatches || udata->version != KVMFR_VERSION)
   {
     DEBUG_BREAK();
     DEBUG_ERROR("The host application is not compatible with this client");
-    DEBUG_ERROR("Expected KVMFR version %d", KVMFR_VERSION);
     DEBUG_ERROR("This is not a Looking Glass error, do not report this");
+    DEBUG_ERROR("Please install the matching host application for this client");
+
+    if (magicMatches)
+      DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
+    else
+      DEBUG_ERROR("Invalid KVMFR magic");
+
     DEBUG_BREAK();
     return -1;
   }
 
-  DEBUG_INFO("Host ready, starting session");
+  DEBUG_INFO("Host ready, reported version: %s", udata->hostver);
+  DEBUG_INFO("Starting session");
 
   if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
   {

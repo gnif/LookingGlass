@@ -51,12 +51,13 @@ typedef enum CursorType
 CursorType;
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 1
+#define KVMFR_VERSION 2
 
 typedef struct KVMFR
 {
   char     magic[8];
   uint32_t version;
+  char     hostver[32];
 }
 KVMFR;
 

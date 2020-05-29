@@ -435,9 +435,10 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
   DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);
 
-  KVMFR udata = {
+  const KVMFR udata = {
     .magic   = KVMFR_MAGIC,
-    .version = KVMFR_VERSION
+    .version = KVMFR_VERSION,
+    .hostver = BUILD_VERSION
   };
 
   LGMP_STATUS status;
