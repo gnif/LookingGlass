@@ -300,9 +300,6 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       NULL,
       GL_MAP_WRITE_BIT
     );
-
-    if (!egl_texture_map(texture, i))
-      return false;
   }
 
   return true;
@@ -335,12 +332,15 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
       return true;
     }
 
+    if (!egl_texture_map(texture, s.w))
+      return EGL_TEX_STATUS_ERROR;
+
     memcpy(texture->tex[s.w].map, buffer, texture->pboBufferSize);
     atomic_store_explicit(&texture->state.w, next, memory_order_release);
+    egl_texture_unmap(texture, s.w);
   }
   else
   {
-    /* Non streaming, this is NOT thread safe */
     for(int p = 0; p < texture->planeCount; ++p)
     {
       glBindTexture(GL_TEXTURE_2D, texture->tex[0].t[p]);
@@ -368,6 +368,9 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
     return true;
   }
 
+  if (!egl_texture_map(texture, s.w))
+    return EGL_TEX_STATUS_ERROR;
+
   framebuffer_read(
     frame,
     texture->tex[s.w].map,
@@ -379,6 +382,8 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   );
 
   atomic_store_explicit(&texture->state.w, next, memory_order_release);
+  egl_texture_unmap(texture, s.w);
+
   return true;
 }
 
@@ -395,7 +400,6 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
     return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
 
   /* update the texture */
-  egl_texture_unmap(texture, s.u);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[s.u].pbo);
   for(int p = 0; p < texture->planeCount; ++p)
   {
@@ -416,9 +420,6 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
 
   texture->ready = true;
   atomic_store_explicit(&texture->state.u, nextu, memory_order_release);
-
-  if (!egl_texture_map(texture, s.u))
-    return EGL_TEX_STATUS_ERROR;
 
   return EGL_TEX_STATUS_OK;
 }
