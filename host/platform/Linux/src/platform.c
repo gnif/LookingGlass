@@ -30,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct app
 {
   const char * executable;
+  char * dataPath;
 };
 
 struct app app = { 0 };
@@ -37,7 +38,13 @@ struct app app = { 0 };
 int main(int argc, char * argv[])
 {
   app.executable = argv[0];
+
+  struct passwd * pw = getpwuid(getuid());
+  alloc_sprintf(&app.dataPath, "%s/", pw->pw_dir);
+
   int result = app_main(argc, argv);
+
+  free(app.dataPath);
   return result;
 }
 
@@ -56,4 +63,9 @@ bool app_init()
 const char * os_getExecutable()
 {
   return app.executable;
+}
+
+const char * os_getDataPath()
+{
+  return app.dataPath;
 }

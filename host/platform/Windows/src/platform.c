@@ -303,6 +303,24 @@ const char * os_getExecutable()
   return app.executable;
 }
 
+const char * os_getDataPath()
+{
+  static char path[MAX_PATH] = { 0 };
+  if (!path[0])
+  {
+    if (!GetModuleFileName(NULL, path, MAX_PATH))
+      return NULL;
+
+    char *p = strrchr(path, '\\');
+    if (!p)
+      return NULL;
+
+    ++p;
+    *p = '\0';
+  }
+  return path;
+}
+
 HWND os_getMessageWnd()
 {
   return app.messageWnd;

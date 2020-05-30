@@ -38,6 +38,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdlib.h>
 #include <string.h>
 
+#define CONFIG_FILE "looking-glass-host.ini"
+
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
 
@@ -400,7 +402,22 @@ int app_main(int argc, char * argv[])
       CaptureInterfaces[i]->initOptions();
 
   // try load values from a config file
-  option_load("looking-glass-host.ini");
+  const char * dataPath = os_getDataPath();
+  if (!dataPath)
+  {
+    option_free();
+    DEBUG_ERROR("Failed to get the application's data path");
+    return -1;
+  }
+
+  const size_t len = strlen(dataPath) + sizeof(CONFIG_FILE) + 1;
+  char configFile[len];
+  snprintf(configFile, sizeof(configFile), "%s%s", dataPath, CONFIG_FILE);
+  DEBUG_INFO("Looking for configuration file at: %s", configFile);
+  if (option_load(configFile))
+    DEBUG_INFO("Configuration file loaded");
+  else
+    DEBUG_INFO("Configuration file not found or invalid");
 
   // parse the command line arguments
   if (!option_parse(argc, argv))
