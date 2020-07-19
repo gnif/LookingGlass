@@ -213,6 +213,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },
+  {
+    .module         = "win",
+    .name           = "quickSplash",
+    .description    = "Skip fading out the splash screen when a connection is established",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
 
   // input options
   {
@@ -401,6 +408,7 @@ bool config_load(int argc, char * argv[])
   params.ignoreQuit    = option_get_bool  ("win", "ignoreQuit"   );
   params.noScreensaver = option_get_bool  ("win", "noScreensaver");
   params.showAlerts    = option_get_bool  ("win", "alerts"       );
+  params.quickSplash   = option_get_bool  ("win", "quickSplash"  );
 
   params.grabKeyboard  = option_get_bool  ("input", "grabKeyboard");
   params.escapeKey     = option_get_int   ("input", "escapeKey"   );
