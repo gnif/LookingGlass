@@ -549,7 +549,12 @@ bool egl_render(void * opaque, SDL_Window * window)
         this->useNearest))
   {
     if (!this->waitFadeTime)
-      this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
+    {
+      if (!this->params.quickSplash)
+        this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
+      else
+        this->waitDone = true;
+    }
     egl_cursor_render(this->cursor);
   }
 

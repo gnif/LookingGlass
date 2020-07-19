@@ -1284,7 +1284,8 @@ static int lg_run()
 
   // select and init a renderer
   LG_RendererParams lgrParams;
-  lgrParams.showFPS = params.showFPS;
+  lgrParams.showFPS     = params.showFPS;
+  lgrParams.quickSplash = params.quickSplash;
   Uint32 sdlFlags;
 
   if (params.forceRenderer)

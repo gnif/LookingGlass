@@ -413,8 +413,14 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
 
   if (this->waiting)
   {
-    this->waiting      = false;
-    this->waitFadeTime = microtime() + FADE_TIME;
+    this->waiting = false;
+    if (!this->params.quickSplash)
+      this->waitFadeTime = microtime() + FADE_TIME;
+    else
+    {
+      glDisable(GL_MULTISAMPLE);
+      this->waitDone = true;
+    }
   }
 
   return true;
