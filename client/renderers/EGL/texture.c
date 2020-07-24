@@ -30,7 +30,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <SDL2/SDL_egl.h>
 
-#define TEXTURE_COUNT 3
+/* this must be a multiple of 2 */
+#define TEXTURE_COUNT 2
 
 struct Tex
 {
@@ -41,19 +42,9 @@ struct Tex
   GLsync sync;
 };
 
-union TexState
+struct TexState
 {
-  _Atomic(uint32_t) v;
-  struct
-  {
-    /*
-     * w = write
-     * u = upload
-     * s = schedule
-     * d = display
-     */
-    _Atomic(int8_t) w, u, s, d;
-  };
+  _Atomic(uint8_t) w, u, s, d;
 };
 
 struct EGL_Texture
@@ -73,9 +64,9 @@ struct EGL_Texture
   GLenum   dataType;
   size_t   pboBufferSize;
 
-  union TexState state;
-  int            textureCount;
-  struct Tex     tex[TEXTURE_COUNT];
+  struct TexState state;
+  int             textureCount;
+  struct Tex      tex[TEXTURE_COUNT];
 };
 
 bool egl_texture_init(EGL_Texture ** texture)
@@ -182,7 +173,10 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   texture->textureCount = streaming ? TEXTURE_COUNT : 1;
   texture->ready        = false;
 
-  atomic_store_explicit(&texture->state.v, 0, memory_order_relaxed);
+  atomic_store_explicit(&texture->state.w, 0, memory_order_relaxed);
+  atomic_store_explicit(&texture->state.u, 0, memory_order_relaxed);
+  atomic_store_explicit(&texture->state.s, 0, memory_order_relaxed);
+  atomic_store_explicit(&texture->state.d, 0, memory_order_relaxed);
 
   switch(pixFmt)
   {
@@ -322,22 +316,22 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 {
   if (texture->streaming)
   {
-    union TexState s;
-    s.v = atomic_load_explicit(&texture->state.v, memory_order_acquire);
+    const uint8_t sw =
+      atomic_load_explicit(&texture->state.w, memory_order_acquire);
 
-    const uint8_t next = (s.w + 1) % TEXTURE_COUNT;
-    if (next == s.u)
+    if (atomic_load_explicit(&texture->state.u, memory_order_acquire) == sw + 1)
     {
       egl_warn_slow();
       return true;
     }
 
-    if (!egl_texture_map(texture, s.w))
+    const uint8_t t = sw % TEXTURE_COUNT;
+    if (!egl_texture_map(texture, t))
       return EGL_TEX_STATUS_ERROR;
 
-    memcpy(texture->tex[s.w].map, buffer, texture->pboBufferSize);
-    atomic_store_explicit(&texture->state.w, next, memory_order_release);
-    egl_texture_unmap(texture, s.w);
+    memcpy(texture->tex[t].map, buffer, texture->pboBufferSize);
+    atomic_fetch_add_explicit(&texture->state.w, 1, memory_order_release);
+    egl_texture_unmap(texture, t);
   }
   else
   {
@@ -358,22 +352,22 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   if (!texture->streaming)
     return false;
 
-  union TexState s;
-  s.v = atomic_load_explicit(&texture->state.v, memory_order_acquire);
+  const uint8_t sw =
+    atomic_load_explicit(&texture->state.w, memory_order_acquire);
 
-  const uint8_t next = (s.w + 1) % TEXTURE_COUNT;
-  if (next == s.u)
+  if (atomic_load_explicit(&texture->state.u, memory_order_acquire) == sw + 1)
   {
     egl_warn_slow();
     return true;
   }
 
-  if (!egl_texture_map(texture, s.w))
+  const uint8_t t = sw % TEXTURE_COUNT;
+  if (!egl_texture_map(texture, t))
     return EGL_TEX_STATUS_ERROR;
 
   framebuffer_read(
     frame,
-    texture->tex[s.w].map,
+    texture->tex[t].map,
     texture->stride,
     texture->height,
     texture->width,
@@ -381,8 +375,8 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
     texture->stride
   );
 
-  atomic_store_explicit(&texture->state.w, next, memory_order_release);
-  egl_texture_unmap(texture, s.w);
+  atomic_fetch_add_explicit(&texture->state.w, 1, memory_order_release);
+  egl_texture_unmap(texture, t);
 
   return true;
 }
@@ -392,18 +386,22 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   if (!texture->streaming)
     return EGL_TEX_STATUS_OK;
 
-  union TexState s;
-  s.v = atomic_load_explicit(&texture->state.v, memory_order_acquire);
+  const uint8_t su =
+    atomic_load_explicit(&texture->state.u, memory_order_acquire);
 
-  const uint8_t nextu = (s.u + 1) % TEXTURE_COUNT;
-  if (s.u == s.w || nextu == s.s || nextu == s.d)
+  const uint8_t nextu = su + 1;
+  if (
+      su    == atomic_load_explicit(&texture->state.w, memory_order_acquire) ||
+      nextu == atomic_load_explicit(&texture->state.s, memory_order_acquire) ||
+      nextu == atomic_load_explicit(&texture->state.d, memory_order_acquire))
     return texture->ready ? EGL_TEX_STATUS_OK : EGL_TEX_STATUS_NOTREADY;
 
   /* update the texture */
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[s.u].pbo);
+  const uint8_t t = su % TEXTURE_COUNT;
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[t].pbo);
   for(int p = 0; p < texture->planeCount; ++p)
   {
-    glBindTexture(GL_TEXTURE_2D, texture->tex[s.u].t[p]);
+    glBindTexture(GL_TEXTURE_2D, texture->tex[t].t[p]);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][2]);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[p][0], texture->planes[p][1],
         texture->format, texture->dataType, (const void *)texture->offsets[p]);
@@ -412,39 +410,39 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   /* create a fence to prevent usage before the update is complete */
-  texture->tex[s.u].sync =
-    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  texture->tex[t].sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
   /* we must flush to ensure the sync is in the command buffer */
   glFlush();
 
   texture->ready = true;
-  atomic_store_explicit(&texture->state.u, nextu, memory_order_release);
+  atomic_fetch_add_explicit(&texture->state.u, 1, memory_order_release);
 
   return EGL_TEX_STATUS_OK;
 }
 
 enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 {
-  union TexState s;
-  s.v = atomic_load_explicit(&texture->state.v, memory_order_acquire);
+  uint8_t ss = atomic_load_explicit(&texture->state.s, memory_order_acquire);
+  uint8_t sd = atomic_load_explicit(&texture->state.d, memory_order_acquire);
 
   if (texture->streaming)
   {
     if (!texture->ready)
       return EGL_TEX_STATUS_NOTREADY;
 
-    if (texture->tex[s.s].sync != 0)
+    const uint8_t t = ss % TEXTURE_COUNT;
+    if (texture->tex[t].sync != 0)
     {
-      switch(glClientWaitSync(texture->tex[s.s].sync, 0, 20000000)) // 20ms
+      switch(glClientWaitSync(texture->tex[t].sync, 0, 20000000)) // 20ms
       {
         case GL_ALREADY_SIGNALED:
         case GL_CONDITION_SATISFIED:
-          glDeleteSync(texture->tex[s.s].sync);
-          texture->tex[s.s].sync = 0;
+          glDeleteSync(texture->tex[t].sync);
+          texture->tex[t].sync = 0;
 
-          s.s = (s.s + 1) % TEXTURE_COUNT;
-          atomic_store_explicit(&texture->state.s, s.s, memory_order_release);
+          ss = atomic_fetch_add_explicit(&texture->state.s, 1,
+              memory_order_release) + 1;
           break;
 
         case GL_TIMEOUT_EXPIRED:
@@ -452,25 +450,23 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 
         case GL_WAIT_FAILED:
         case GL_INVALID_VALUE:
-          glDeleteSync(texture->tex[s.s].sync);
-          texture->tex[s.s].sync = 0;
+          glDeleteSync(texture->tex[t].sync);
+          texture->tex[t].sync = 0;
           EGL_ERROR("glClientWaitSync failed");
           return EGL_TEX_STATUS_ERROR;
       }
     }
 
-    const int8_t nextd = (s.d + 1) % TEXTURE_COUNT;
-    if (s.d != s.s && nextd != s.s)
-    {
-      s.d = nextd;
-      atomic_store_explicit(&texture->state.d, nextd, memory_order_release);
-    }
+    if (ss != sd && ss != sd+1)
+      sd = atomic_fetch_add_explicit(&texture->state.d, 1,
+          memory_order_release) + 1;
   }
 
+  const uint8_t t = sd % TEXTURE_COUNT;
   for(int i = 0; i < texture->planeCount; ++i)
   {
     glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, texture->tex[s.d].t[i]);
+    glBindTexture(GL_TEXTURE_2D, texture->tex[t].t[i]);
     glBindSampler(i, texture->samplers[i]);
   }
 
