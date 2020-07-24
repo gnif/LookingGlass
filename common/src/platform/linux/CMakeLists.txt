@@ -11,6 +11,7 @@ add_library(lg_common_platform_code STATIC
     thread.c
     event.c
     ivshmem.c
+    time.c
 )
 
 if(ENABLE_BACKTRACE)
@@ -20,4 +21,5 @@ endif()
 target_link_libraries(lg_common_platform_code
 	lg_common
 	pthread
+	rt
 )
