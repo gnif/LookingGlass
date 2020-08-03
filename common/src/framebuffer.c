@@ -61,7 +61,7 @@ bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
 
     __m128i * s = (__m128i *)(frame->data + rp);
     for(int i = 0; i < blocks; ++i, ++s, d += 16)
-      _mm_stream_si128((__m128i *)d, _mm_load_si128(s));
+      _mm_stream_si128((__m128i *)d, _mm_stream_load_si128(s));
 
     if (left)
       memcpy(d, frame->data + rp + blocks * 16, left);
@@ -116,7 +116,7 @@ bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
   /* copy in chunks */
   while(size > 15)
   {
-    _mm_stream_si128((__m128i *)(frame->data + wp), _mm_loadu_si128(s++));
+    _mm_stream_si128((__m128i *)(frame->data + wp), _mm_stream_load_si128(s++));
     size -= 16;
     wp   += 16;
 
