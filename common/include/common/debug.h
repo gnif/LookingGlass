@@ -53,7 +53,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   sizeof(s) > 20 && (s)[sizeof(s)-21] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 20 : \
   sizeof(s) > 21 && (s)[sizeof(s)-22] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 21 : (s))
 
-#define DEBUG_PRINT(type, fmt, ...) do {fprintf(stderr, "%" PRId64 " " type " %20s:%-4u | %-30s | " fmt "\n", microtime(), STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
+#define DEBUG_PRINT(type, fmt, ...) do {fprintf(stderr, "%12" PRId64 " " type " %20s:%-4u | %-30s | " fmt "\n", microtime(), STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
 
 #define DEBUG_BREAK() DEBUG_PRINT("[ ]", "%s", "================================================================================")
 #define DEBUG_INFO(fmt, ...) DEBUG_PRINT("[I]", fmt, ##__VA_ARGS__)

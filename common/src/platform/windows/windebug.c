@@ -37,7 +37,7 @@ void DebugWinError(const char * file, const unsigned int line, const char * func
     if (buffer[i] == '\n' || buffer[i] == '\r')
       buffer[i] = 0;
 
-  fprintf(stderr, "[E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", file, line, function, desc, (int)status, buffer);
+  fprintf(stderr, "%12" PRId64 " [E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", microtime(), file, line, function, desc, (int)status, buffer);
   LocalFree(buffer);
 }
 
