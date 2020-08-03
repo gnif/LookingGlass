@@ -25,7 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <emmintrin.h>
 #include <smmintrin.h>
 
-#define FB_CHUNK_SIZE 1024
+#define FB_CHUNK_SIZE 1048576
 
 struct stFrameBuffer
 {
@@ -112,22 +112,50 @@ void framebuffer_prepare(FrameBuffer * frame)
 bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
 {
   __m128i * s = (__m128i *)src;
+  __m128i * d = (__m128i *)frame->data;
   size_t wp     = 0;
 
   /* copy in chunks */
-  while(size > 15)
+  while(size > 63)
   {
-    _mm_stream_si128((__m128i *)(frame->data + wp), _mm_stream_load_si128(s++));
-    size -= 16;
-    wp   += 16;
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    size -= 64;
+    wp   += 64;
 
     if (wp % FB_CHUNK_SIZE == 0)
       atomic_store_explicit(&frame->wp, wp, memory_order_release);
   }
 
+  if (size > 47)
+  {
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    size -= 48;
+    wp   += 48;
+  }
+
+  if (size > 31)
+  {
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    size -= 32;
+    wp   += 32;
+  }
+
+  if (size > 15)
+  {
+    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    size -= 16;
+    wp   += 16;
+  }
+
   if(size)
   {
-    memcpy(frame->data + frame->wp, s, size);
+    memcpy(frame->data + wp, s, size);
     wp += size;
   }
 
