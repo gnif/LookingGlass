@@ -111,21 +111,25 @@ void framebuffer_prepare(FrameBuffer * frame)
 bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
 {
   __m128i * s = (__m128i *)src;
+  size_t wp     = 0;
 
   /* copy in chunks */
   while(size > 15)
   {
-    _mm_stream_si128((__m128i *)(frame->data + frame->wp), _mm_load_si128(s));
-    atomic_fetch_add_explicit(&frame->wp, 16, memory_order_release);
-    ++s;
+    _mm_stream_si128((__m128i *)(frame->data + wp), _mm_loadu_si128(s++));
     size -= 16;
+    wp   += 16;
+
+    if (wp % FB_CHUNK_SIZE == 0)
+      atomic_store_explicit(&frame->wp, wp, memory_order_release);
   }
 
   if(size)
   {
     memcpy(frame->data + frame->wp, s, size);
-    atomic_fetch_add_explicit(&frame->wp, size, memory_order_release);
+    wp += size;
   }
 
+  atomic_store_explicit(&frame->wp, wp, memory_order_release);
   return true;
 }
