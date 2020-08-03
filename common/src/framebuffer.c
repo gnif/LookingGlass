@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <string.h>
 #include <stdatomic.h>
+#include <emmintrin.h>
 
 #define FB_CHUNK_SIZE 1024
 
@@ -35,7 +36,7 @@ const size_t FrameBufferStructSize = sizeof(FrameBuffer);
 
 void framebuffer_wait(const FrameBuffer * frame, size_t size)
 {
-  while(atomic_load_explicit(&frame->wp, memory_order_relaxed) != size) {}
+  while(atomic_load_explicit(&frame->wp, memory_order_acquire) != size) {}
 }
 
 
@@ -46,6 +47,8 @@ bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
   uint_least32_t rp        = 0;
   size_t         y         = 0;
   const size_t   linewidth = width * bpp;
+  const size_t   blocks    = linewidth / 16;
+  const size_t   left      = linewidth % 16;
 
   while(y < height)
   {
@@ -53,13 +56,18 @@ bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
 
     /* spinlock */
     do
-      wp = atomic_load_explicit(&frame->wp, memory_order_relaxed);
+      wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
     while(wp - rp < pitch);
 
-    memcpy(d, frame->data + rp, linewidth);
+    __m128i * s = (__m128i *)(frame->data + rp);
+    for(int i = 0; i < blocks; ++i, ++s, d += 16)
+      _mm_stream_si128((__m128i *)d, _mm_load_si128(s));
+
+    if (left)
+      memcpy(d, frame->data + rp + blocks * 16, left);
 
     rp += pitch;
-    d  += dstpitch;
+    d  += dstpitch - blocks * 16;
     ++y;
   }
 
@@ -79,7 +87,7 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
 
     /* spinlock */
     do
-      wp = atomic_load_explicit(&frame->wp, memory_order_relaxed);
+      wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
     while(wp - rp < pitch);
 
     if (!fn(opaque, frame->data + rp, linewidth))
@@ -97,18 +105,27 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
  */
 void framebuffer_prepare(FrameBuffer * frame)
 {
-  atomic_store(&frame->wp, 0);
+  atomic_store_explicit(&frame->wp, 0, memory_order_release);
 }
 
 bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
 {
+  __m128i * s = (__m128i *)src;
+
   /* copy in chunks */
-  while(size)
+  while(size > 15)
   {
-    size_t copy = size < FB_CHUNK_SIZE ? FB_CHUNK_SIZE : size;
-    memcpy(frame->data + frame->wp, src, copy);
-    atomic_fetch_add(&frame->wp, copy);
-    size -= copy;
+    _mm_stream_si128((__m128i *)(frame->data + frame->wp), _mm_load_si128(s));
+    atomic_fetch_add_explicit(&frame->wp, 16, memory_order_release);
+    ++s;
+    size -= 16;
   }
+
+  if(size)
+  {
+    memcpy(frame->data + frame->wp, s, size);
+    atomic_fetch_add_explicit(&frame->wp, size, memory_order_release);
+  }
+
   return true;
 }
