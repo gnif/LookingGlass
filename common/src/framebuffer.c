@@ -41,15 +41,15 @@ void framebuffer_wait(const FrameBuffer * frame, size_t size)
 }
 
 
-bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
-    size_t height, size_t width, size_t bpp, size_t pitch)
+bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
 {
-  uint8_t       *d         = (uint8_t*)dst;
+  uint8_t * restrict d     = (uint8_t*)dst;
   uint_least32_t rp        = 0;
   size_t         y         = 0;
   const size_t   linewidth = width * bpp;
-  const size_t   blocks    = linewidth / 16;
-  const size_t   left      = linewidth % 16;
+  const size_t   blocks    = linewidth / 64;
+  const size_t   left      = linewidth % 64;
 
   while(y < height)
   {
@@ -60,15 +60,34 @@ bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
       wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
     while(wp - rp < pitch);
 
-    __m128i * s = (__m128i *)(frame->data + rp);
-    for(int i = 0; i < blocks; ++i, ++s, d += 16)
-      _mm_stream_si128((__m128i *)d, _mm_stream_load_si128(s));
+    _mm_mfence();
+    __m128i * restrict s = (__m128i *)(frame->data + rp);
+    for(int i = 0; i < blocks; ++i)
+    {
+      __m128i *_d = (__m128i *)d;
+      __m128i *_s = (__m128i *)s;
+      __m128i v1 = _mm_stream_load_si128(_s + 0);
+      __m128i v2 = _mm_stream_load_si128(_s + 1);
+      __m128i v3 = _mm_stream_load_si128(_s + 2);
+      __m128i v4 = _mm_stream_load_si128(_s + 3);
+
+      _mm_storeu_si128(_d + 0, v1);
+      _mm_storeu_si128(_d + 1, v2);
+      _mm_storeu_si128(_d + 2, v3);
+      _mm_storeu_si128(_d + 3, v4);
+
+      d += 64;
+      s += 4;
+    }
 
     if (left)
-      memcpy(d, frame->data + rp + blocks * 16, left);
+    {
+      memcpy(d, s, left);
+      d += left;
+    }
 
     rp += pitch;
-    d  += dstpitch - blocks * 16;
+    d  += dstpitch - linewidth;
     ++y;
   }
 
@@ -109,59 +128,36 @@ void framebuffer_prepare(FrameBuffer * frame)
   atomic_store_explicit(&frame->wp, 0, memory_order_release);
 }
 
-bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
+bool framebuffer_write(FrameBuffer * frame, const void * restrict src, size_t size)
 {
-  __m128i * s = (__m128i *)src;
-  __m128i * d = (__m128i *)frame->data;
-  size_t wp     = 0;
+  __m128i * restrict s = (__m128i *)src;
+  __m128i * restrict d = (__m128i *)frame->data;
+  size_t wp = 0;
+
+  _mm_mfence();
 
   /* copy in chunks */
   while(size > 63)
   {
-    const __m128i v1 = _mm_stream_load_si128(s++);
-    const __m128i v2 = _mm_stream_load_si128(s++);
-    const __m128i v3 = _mm_stream_load_si128(s++);
-    const __m128i v4 = _mm_stream_load_si128(s++);
-    _mm_stream_si128(d++, v1);
-    _mm_stream_si128(d++, v2);
-    _mm_stream_si128(d++, v3);
-    _mm_stream_si128(d++, v4);
+    __m128i *_d = (__m128i *)d;
+    __m128i *_s = (__m128i *)s;
+    __m128i v1 = _mm_stream_load_si128(_s + 0);
+    __m128i v2 = _mm_stream_load_si128(_s + 1);
+    __m128i v3 = _mm_stream_load_si128(_s + 2);
+    __m128i v4 = _mm_stream_load_si128(_s + 3);
 
+    _mm_store_si128(_d + 0, v1);
+    _mm_store_si128(_d + 1, v2);
+    _mm_store_si128(_d + 2, v3);
+    _mm_store_si128(_d + 3, v4);
+
+    s    += 4;
+    d    += 4;
     size -= 64;
     wp   += 64;
 
     if (wp % FB_CHUNK_SIZE == 0)
       atomic_store_explicit(&frame->wp, wp, memory_order_release);
-  }
-
-  if (size > 47)
-  {
-    const __m128i v1 = _mm_stream_load_si128(s++);
-    const __m128i v2 = _mm_stream_load_si128(s++);
-    const __m128i v3 = _mm_stream_load_si128(s++);
-    _mm_stream_si128(d++, v1);
-    _mm_stream_si128(d++, v2);
-    _mm_stream_si128(d++, v3);
-    size -= 48;
-    wp   += 48;
-  }
-
-  if (size > 31)
-  {
-    const __m128i v1 = _mm_stream_load_si128(s++);
-    const __m128i v2 = _mm_stream_load_si128(s++);
-    _mm_stream_si128(d++, v1);
-    _mm_stream_si128(d++, v2);
-    size -= 32;
-    wp   += 32;
-  }
-
-  if (size > 15)
-  {
-    const __m128i v1 = _mm_stream_load_si128(s++);
-    _mm_stream_si128(d++, v1);
-    size -= 16;
-    wp   += 16;
   }
 
   if(size)
