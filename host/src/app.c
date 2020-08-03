@@ -206,12 +206,6 @@ static int frameThread(void * opaque)
 bool startThreads()
 {
   app.running = true;
-  if (!lgCreateTimer(100, lgmpTimer, NULL, &app.lgmpTimer))
-  {
-    DEBUG_ERROR("Failed to create the LGMP timer");
-    return false;
-  }
-
   if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
   {
     DEBUG_ERROR("Failed to create the frame thread");
@@ -234,12 +228,6 @@ bool stopThreads()
     ok = false;
   }
   app.frameThread = NULL;
-
-  if (app.lgmpTimer)
-  {
-    lgTimerDestroy(app.lgmpTimer);
-    app.lgmpTimer = NULL;
-  }
 
   return ok;
 }
@@ -539,6 +527,12 @@ int app_main(int argc, char * argv[])
 
   LG_LOCK_INIT(app.pointerLock);
 
+  if (!lgCreateTimer(100, lgmpTimer, NULL, &app.lgmpTimer))
+  {
+    DEBUG_ERROR("Failed to create the LGMP timer");
+    goto fail;
+  }
+
   if (!captureStart())
   {
     exitcode = -1;
@@ -587,8 +581,9 @@ int app_main(int argc, char * argv[])
 
 finish:
   stopThreads();
-exit:
 
+exit:
+  lgTimerDestroy(app.lgmpTimer);
   LG_LOCK_FREE(app.pointerLock);
 
   iface->deinit();
