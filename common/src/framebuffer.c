@@ -118,10 +118,15 @@ bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
   /* copy in chunks */
   while(size > 63)
   {
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    const __m128i v1 = _mm_stream_load_si128(s++);
+    const __m128i v2 = _mm_stream_load_si128(s++);
+    const __m128i v3 = _mm_stream_load_si128(s++);
+    const __m128i v4 = _mm_stream_load_si128(s++);
+    _mm_stream_si128(d++, v1);
+    _mm_stream_si128(d++, v2);
+    _mm_stream_si128(d++, v3);
+    _mm_stream_si128(d++, v4);
+
     size -= 64;
     wp   += 64;
 
@@ -131,24 +136,30 @@ bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size)
 
   if (size > 47)
   {
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    const __m128i v1 = _mm_stream_load_si128(s++);
+    const __m128i v2 = _mm_stream_load_si128(s++);
+    const __m128i v3 = _mm_stream_load_si128(s++);
+    _mm_stream_si128(d++, v1);
+    _mm_stream_si128(d++, v2);
+    _mm_stream_si128(d++, v3);
     size -= 48;
     wp   += 48;
   }
 
   if (size > 31)
   {
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    const __m128i v1 = _mm_stream_load_si128(s++);
+    const __m128i v2 = _mm_stream_load_si128(s++);
+    _mm_stream_si128(d++, v1);
+    _mm_stream_si128(d++, v2);
     size -= 32;
     wp   += 32;
   }
 
   if (size > 15)
   {
-    _mm_stream_si128(d++, _mm_stream_load_si128(s++));
+    const __m128i v1 = _mm_stream_load_si128(s++);
+    _mm_stream_si128(d++, v1);
     size -= 16;
     wp   += 16;
   }
