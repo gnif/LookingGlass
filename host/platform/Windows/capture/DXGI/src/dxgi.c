@@ -142,9 +142,9 @@ static void dxgi_initOptions()
     {
       .module         = "dxgi",
       .name           = "useAcquireLock",
-      .description    = "Enable locking around `AcquireFrame` (use if freezing, may lower performance)",
+      .description    = "Enable locking around `AcquireFrame` (EXPERIMENTAL, leave enabled if you're not sure!)",
       .type           = OPTION_TYPE_BOOL,
-      .value.x_bool   = false
+      .value.x_bool   = true
     },
     {0}
   };
