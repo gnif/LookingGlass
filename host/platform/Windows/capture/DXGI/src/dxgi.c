@@ -32,6 +32,18 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "dxgi_extra.h"
 
+typedef enum _D3DKMT_SCHEDULINGPRIORITYCLASS
+{
+  D3DKMT_SCHEDULINGPRIORITYCLASS_IDLE,
+  D3DKMT_SCHEDULINGPRIORITYCLASS_BELOW_NORMAL,
+  D3DKMT_SCHEDULINGPRIORITYCLASS_NORMAL,
+  D3DKMT_SCHEDULINGPRIORITYCLASS_ABOVE_NORMAL,
+  D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH,
+  D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME
+}
+D3DKMT_SCHEDULINGPRIORITYCLASS;
+typedef NTSTATUS WINAPI (*PD3DKMTSetProcessSchedulingPriorityClass)(HANDLE, D3DKMT_SCHEDULINGPRIORITYCLASS);
+
 #define LOCKED(x) INTERLOCKED_SECTION(this->deviceContextLock, x)
 
 enum TextureState
@@ -385,6 +397,24 @@ static bool dxgi_init()
 
   // bump up our priority
   {
+    HMODULE gdi32 = GetModuleHandleA("GDI32");
+    if (gdi32)
+    {
+      PD3DKMTSetProcessSchedulingPriorityClass fn =
+        (PD3DKMTSetProcessSchedulingPriorityClass)GetProcAddress(gdi32, "D3DKMTSetProcessSchedulingPriorityClass");
+
+      if (fn)
+      {
+        status = fn(GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME);
+        if (FAILED(status))
+        {
+          DEBUG_INFO("Failed to set realtime GPU priority, this is not an error!");
+          DEBUG_INFO("To fix this run LG using the PsExec SysInternals tool from Microsoft.");
+          DEBUG_INFO("https://docs.microsoft.com/en-us/sysinternals/downloads/psexec");
+        }
+      }
+    }
+
     IDXGIDevice * dxgi;
     status = ID3D11Device_QueryInterface(this->device, &IID_IDXGIDevice, (void **)&dxgi);
     if (FAILED(status))
