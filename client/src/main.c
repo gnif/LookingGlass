@@ -34,6 +34,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <stdatomic.h>
 
 #if SDL_VIDEO_DRIVER_X11_XINPUT2
 // because SDL2 sucks and we need to turn it off
@@ -68,6 +69,8 @@ static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
 static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
+
+static atomic_uint a_framesPending = 0;
 
 struct AppState state;
 
@@ -193,12 +196,12 @@ static int renderThread(void * unused)
 
       if (state.renderTime > 1e9)
       {
-        const float avgUPS = 1000.0f / (((float)state.renderTime / state.frameCount ) / 1e6f);
+        const float avgUPS = 1000.0f / (((float)state.renderTime / atomic_load_explicit(&state.frameCount, memory_order_acquire)) / 1e6f);
         const float avgFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
         state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
 
+        atomic_store_explicit(&state.frameCount, 0, memory_order_release);
         state.renderTime  = 0;
-        state.frameCount  = 0;
         state.renderCount = 0;
       }
     }
@@ -214,7 +217,14 @@ static int renderThread(void * unused)
     }
 
     if (state.frameTime > 0)
+    {
+      /* if there are frames pending already, don't wait on the event */
+      if (atomic_load_explicit(&a_framesPending, memory_order_acquire) > 0)
+        if (atomic_fetch_sub_explicit(&a_framesPending, 1, memory_order_release) > 1)
+          continue;
+
       lgWaitEventAbs(e_frame, &time);
+    }
   }
 
   state.running = false;
@@ -447,10 +457,12 @@ static int frameThread(void * unused)
       DEBUG_ERROR("renderer on frame event returned failure");
       break;
     }
-    lgmpClientMessageDone(queue);
-    ++state.frameCount;
 
-    lgSignalEvent(e_frame);
+    atomic_fetch_add_explicit(&state.frameCount, 1, memory_order_relaxed);
+    if (atomic_fetch_add_explicit(&a_framesPending, 1, memory_order_relaxed) == 0)
+      lgSignalEvent(e_frame);
+
+    lgmpClientMessageDone(queue);
   }
 
   lgmpClientUnsubscribe(&queue);

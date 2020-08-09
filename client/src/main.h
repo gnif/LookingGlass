@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <SDL2/SDL.h>
 
 #include "interface/app.h"
@@ -75,11 +76,11 @@ struct AppState
   PLGMPClientQueue     frameQueue;
   PLGMPClientQueue     pointerQueue;
 
-  uint64_t          frameTime;
-  uint64_t          lastFrameTime;
-  uint64_t          renderTime;
-  uint64_t          frameCount;
-  uint64_t          renderCount;
+  atomic_uint_least64_t frameTime;
+  uint64_t              lastFrameTime;
+  uint64_t              renderTime;
+  uint64_t              frameCount;
+  uint64_t              renderCount;
 
 
   uint64_t resizeTimeout;
