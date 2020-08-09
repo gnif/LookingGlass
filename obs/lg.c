@@ -225,7 +225,6 @@ static void lgVideoTick(void * data, float seconds)
     }
   }
 
-
   if ((status = lgmpClientProcess(this->frameQueue, &msg)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_EMPTY)
