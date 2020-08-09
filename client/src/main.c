@@ -213,7 +213,15 @@ static int renderThread(void * unused)
         if (atomic_fetch_sub_explicit(&a_framesPending, 1, memory_order_release) > 1)
           continue;
 
-      lgWaitEventAbs(e_frame, &time);
+      if (lgWaitEventAbs(e_frame, &time))
+      {
+        if (state.frameTime > 0)
+        {
+          resyncCheck = 0;
+          clock_gettime(CLOCK_REALTIME, &time);
+          tsAdd(&time, state.frameTime);
+        }
+      }
     }
   }
 
