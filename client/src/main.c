@@ -929,7 +929,6 @@ int eventFilter(void * userdata, SDL_Event * event)
           if (params.useSpiceInput)
           {
             state.serverMode = !state.serverMode;
-            spice_mouse_mode(state.serverMode);
             SDL_SetWindowGrab(state.window, state.serverMode);
             DEBUG_INFO("Server Mode: %s", state.serverMode ? "on" : "off");
 
@@ -1236,6 +1235,7 @@ static int lg_run()
         return -1;
       }
 
+    spice_mouse_mode(true);
     if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
     {
       DEBUG_ERROR("spice create thread failed");
@@ -1407,7 +1407,6 @@ static int lg_run()
   if (params.captureOnStart)
   {
     state.serverMode = true;
-    spice_mouse_mode(state.serverMode);
     SDL_SetWindowGrab(state.window, state.serverMode);
     DEBUG_INFO("Server Mode: %s", state.serverMode ? "on" : "off");
   }
