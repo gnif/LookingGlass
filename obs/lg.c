@@ -1,3 +1,5 @@
+#define _GNU_SOURCE //needed for pthread_setname_np
+
 #include <obs/obs-module.h>
 #include <obs/util/threading.h>
 
@@ -193,6 +195,7 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   this->state = STATE_STARTING;
   pthread_create(&this->frameThread, NULL, frameThread, this);
+  pthread_setname_np(this->frameThread, "LGFrameThread");
 }
 
 static void lgVideoTick(void * data, float seconds)
@@ -211,6 +214,17 @@ static void lgVideoTick(void * data, float seconds)
     os_sem_post(this->frameSem);
     return;
   }
+
+  if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
+  {
+    if (status != LGMP_ERR_QUEUE_EMPTY)
+    {
+      os_sem_post(this->frameSem);
+      printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
+      return;
+    }
+  }
+
 
   if ((status = lgmpClientProcess(this->frameQueue, &msg)) != LGMP_OK)
   {
