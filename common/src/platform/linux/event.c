@@ -32,7 +32,7 @@ struct LGEvent
 {
   pthread_mutex_t mutex;
   pthread_cond_t  cond;
-  uint32_t        flag;
+  atomic_int      signaled;
   bool            autoReset;
 };
 
@@ -76,6 +76,13 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 {
   assert(handle);
 
+  if (atomic_load(&handle->signaled))
+  {
+    if (handle->autoReset)
+      atomic_fetch_sub(&handle->signaled, 1);
+    return true;
+  }
+
   if (pthread_mutex_lock(&handle->mutex) != 0)
   {
     DEBUG_ERROR("Failed to lock the mutex");
@@ -83,7 +90,7 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   }
 
   bool ret = true;
-  while(ret && !atomic_load(&handle->flag))
+  while(ret && !atomic_load(&handle->signaled))
   {
     if (!ts)
     {
@@ -92,12 +99,17 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
         DEBUG_ERROR("Wait to wait on the condition");
         ret = false;
       }
+
+      if (handle->autoReset)
+        atomic_fetch_sub(&handle->signaled, 1);
     }
     else
     {
       switch(pthread_cond_timedwait(&handle->cond, &handle->mutex, ts))
       {
         case 0:
+          if (handle->autoReset)
+            atomic_fetch_sub(&handle->signaled, 1);
           break;
 
         case ETIMEDOUT:
@@ -112,9 +124,6 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
     }
   }
 
-  if (handle->autoReset)
-    atomic_store(&handle->flag, 0);
-
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
     DEBUG_ERROR("Failed to unlock the mutex");
@@ -126,6 +135,13 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 
 bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
 {
+  if (atomic_load(&handle->signaled))
+  {
+    if (handle->autoReset)
+      atomic_fetch_sub(&handle->signaled, 1);
+    return true;
+  }
+
   if (timeout == TIMEOUT_INFINITE)
     return lgWaitEventAbs(handle, NULL);
 
@@ -145,6 +161,13 @@ bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
 
 bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
 {
+  if (atomic_load(&handle->signaled))
+  {
+    if (handle->autoReset)
+      atomic_fetch_sub(&handle->signaled, 1);
+    return true;
+  }
+
   return lgWaitEventNS(handle, timeout * 1000000);
 }
 
@@ -152,24 +175,13 @@ bool lgSignalEvent(LGEvent * handle)
 {
   assert(handle);
 
-  if (pthread_mutex_lock(&handle->mutex) != 0)
+  if (atomic_fetch_add(&handle->signaled, 1) == 0)
   {
-    DEBUG_ERROR("Failed to lock the mutex");
-    return false;
-  }
-
-  atomic_store(&handle->flag, 1);
-
-  if (pthread_mutex_unlock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to unlock the mutex");
-    return false;
-  }
-
-  if (pthread_cond_broadcast(&handle->cond) != 0)
-  {
-    DEBUG_ERROR("Failed to signal the condition");
-    return false;
+    if (pthread_cond_broadcast(&handle->cond) != 0)
+    {
+      DEBUG_ERROR("Failed to signal the condition");
+      return false;
+    }
   }
 
   return true;
@@ -178,20 +190,7 @@ bool lgSignalEvent(LGEvent * handle)
 bool lgResetEvent(LGEvent * handle)
 {
   assert(handle);
-
-  if (pthread_mutex_lock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to lock the mutex");
-    return false;
-  }
-
-  atomic_store(&handle->flag, 0);
-
-  if (pthread_mutex_unlock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to unlock the mutex");
-    return false;
-  }
-
+  if (atomic_load(&handle->signaled))
+    atomic_fetch_sub(&handle->signaled, 1);
   return true;
 }
