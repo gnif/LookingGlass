@@ -24,8 +24,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdatomic.h>
 #include <emmintrin.h>
 #include <smmintrin.h>
+#include <unistd.h>
 
-#define FB_CHUNK_SIZE 1048576
+#define FB_CHUNK_SIZE 1048576 // 1MB
+#define FB_SPIN_LIMIT 10000   // 10ms
 
 struct stFrameBuffer
 {
@@ -40,7 +42,6 @@ void framebuffer_wait(const FrameBuffer * frame, size_t size)
   while(atomic_load_explicit(&frame->wp, memory_order_acquire) != size) {}
 }
 
-
 bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
     size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
 {
@@ -54,11 +55,18 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
   while(y < height)
   {
     uint_least32_t wp;
+    int spinCount = 0;
 
     /* spinlock */
-    do
+    wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+    while(wp - rp < linewidth)
+    {
+      if (++spinCount == FB_SPIN_LIMIT)
+        return false;
+
+      usleep(1);
       wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
-    while(wp - rp < pitch);
+    }
 
     _mm_mfence();
     __m128i * restrict s = (__m128i *)(frame->data + rp);
@@ -104,11 +112,18 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
   while(y < height)
   {
     uint_least32_t wp;
+    int spinCount = 0;
 
     /* spinlock */
-    do
+    wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+    while(wp - rp < linewidth)
+    {
+      if (++spinCount == FB_SPIN_LIMIT)
+        return false;
+
+      usleep(1);
       wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
-    while(wp - rp < pitch);
+    }
 
     if (!fn(opaque, frame->data + rp, linewidth))
       return false;
