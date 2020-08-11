@@ -54,8 +54,9 @@ Function ShowHelpMessage
 	!define line3 "/D=path\to\install\folder - Change install directory$\r$\n"
 	!define line4 "   (Must be uppercase, the last option given and no quotes)$\r$\n$\r$\n"
 	!define line5 "/startmenu - create start menu shortcut$\r$\n"
-	!define line6 "/desktop - create desktop shortcut"
-	MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}${line6}"
+	!define line6 "/desktop - create desktop shortcut$\r$\n"
+    !define line7 "/noservice - do not create a service to auto start and elevate the host"
+	MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}${line6}${line7}"
 	Abort
 FunctionEnd
 
@@ -79,8 +80,10 @@ Function .onInit
 
     Var /GLOBAL option_startMenu
     Var /GLOBAL option_desktop
+    Var /GlOBAL option_noservice
     StrCpy $option_startMenu     0
 	StrCpy $option_desktop       0
+    StrCpy $option_noservice     0
 
     Push $R0
 		
@@ -91,7 +94,11 @@ Function .onInit
     ${GetOptions} $cmdLineParams '/desktop' $R0
     IfErrors +2 0
     StrCpy $option_desktop 1
-        
+    
+    ${GetOptions} $cmdLineParams '/noservice' $R0
+    IfErrors +2 0
+    StrCpy $option_noservice 1
+    
     Pop $R0
 
 FunctionEnd
@@ -129,10 +136,12 @@ Section "-Install" Section1
 
 SectionEnd
 
-Section "Auto Start Looking-Glass" Section2
+Section "Looking-Glass Service" Section2
 
-  nsExec::Exec 'SCHTASKS /Delete /F /TN "Looking Glass"'
-  nsExec::Exec 'SCHTASKS /Create /TN "Looking Glass" /SC  ONLOGON /RL HIGHEST /TR "$INSTDIR\looking-glass-host.exe"'
+  ${If} $option_noservice == 0
+    nsExec::Exec '"$INSTDIR\looking-glass-host.exe" UninstallService'
+    nsExec::Exec '"$INSTDIR\looking-glass-host.exe" InstallService'
+  ${EndIf}
 
 SectionEnd
 
@@ -160,7 +169,7 @@ SectionEnd
 Section "Uninstall" Section6
   SetShellVarContext all
 
-  nsExec::Exec 'SCHTASKS /Delete /F /TN "Looking Glass"'
+  nsExec::Exec '"$INSTDIR\looking-glass-host.exe" UninstallService'
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking-Glass"
   Delete $SMPROGRAMS\Looking-Glass-Host.lnk
@@ -175,7 +184,7 @@ SectionEnd
 
 ;Description text for selection of install items
 LangString DESC_Section1 ${LANG_ENGLISH} "Install Files into $INSTDIR"
-LangString DESC_Section2 ${LANG_ENGLISH} "Create scheduled task to automatically start Looking-Glass."
+LangString DESC_Section2 ${LANG_ENGLISH} "Create service to automatically start Looking-Glass."
 LangString DESC_Section3 ${LANG_ENGLISH} "Create desktop shortcut icon."
 LangString DESC_Section4 ${LANG_ENGLISH} "Create start menu shortcut."
 
