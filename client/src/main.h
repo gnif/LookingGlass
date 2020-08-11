@@ -32,6 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct AppState
 {
   bool                 running;
+  bool                 restart;
   bool                 ignoreInput;
   bool                 escapeActive;
   SDL_Scancode         escapeAction;

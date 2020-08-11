@@ -295,6 +295,12 @@ void opengl_deinitialize(void * opaque)
   free(this);
 }
 
+void opengl_on_restart(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  this->waiting = true;
+}
+
 void opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -823,6 +829,7 @@ const LG_Renderer LGR_OpenGL =
   .create         = opengl_create,
   .initialize     = opengl_initialize,
   .deinitialize   = opengl_deinitialize,
+  .on_restart     = opengl_on_restart,
   .on_resize      = opengl_on_resize,
   .on_mouse_shape = opengl_on_mouse_shape,
   .on_mouse_event = opengl_on_mouse_event,

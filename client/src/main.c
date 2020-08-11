@@ -155,7 +155,7 @@ static int renderThread(void * unused)
   struct timespec time;
   clock_gettime(CLOCK_REALTIME, &time);
 
-  while(state.running)
+  while(state.running || state.restart)
   {
     if (state.frameTime > 0)
     {
@@ -287,6 +287,9 @@ static int cursorThread(void * unused)
         continue;
       }
 
+      if (status == LGMP_ERR_INVALID_SESSION)
+        state.restart = true;
+
       DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
       state.running = false;
       break;
@@ -394,6 +397,9 @@ static int frameThread(void * unused)
         usleep(params.framePollInterval);
         continue;
       }
+
+      if (status == LGMP_ERR_INVALID_SESSION)
+        state.restart = true;
 
       DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
       break;
@@ -1442,6 +1448,8 @@ static int lg_run()
 
   LGMP_STATUS status;
 
+restart:
+
   while(state.running)
   {
     if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
@@ -1457,8 +1465,9 @@ static int lg_run()
 
   uint32_t udataSize;
   KVMFR *udata;
+  int waitCount;
 
-  int waitCount = 0;
+  waitCount = 0;
   while(state.running)
   {
     if ((status = lgmpClientSessionInit(state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
@@ -1531,10 +1540,28 @@ static int lg_run()
   {
     if (!lgmpClientSessionValid(state.lgmp))
     {
+      state.restart = true;
       DEBUG_WARN("Session is invalid, has the host shutdown?");
       break;
     }
     SDL_WaitEventTimeout(NULL, 1000);
+  }
+
+  if (state.restart)
+  {
+    state.running = false;
+    lgSignalEvent(e_startup);
+    lgSignalEvent(e_frame);
+    lgJoinThread(t_frame , NULL);
+    lgJoinThread(t_cursor, NULL);
+    state.running = true;
+    state.restart = false;
+
+    state.lgr->on_restart(state.lgrData);
+
+    lgmpClientFree(&state.lgmp);
+    DEBUG_INFO("Waiting for the host to restart...");
+    goto restart;
   }
 
   return 0;

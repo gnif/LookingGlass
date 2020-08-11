@@ -225,6 +225,16 @@ void egl_deinitialize(void * opaque)
   free(this);
 }
 
+void egl_on_restart(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  eglDestroyContext(this->display, this->frameContext);
+  this->frameContext = NULL;
+  this->waitFadeTime = 0;
+  this->waitDone     = false;
+}
+
 void egl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -595,6 +605,7 @@ struct LG_Renderer LGR_EGL =
   .create         = egl_create,
   .initialize     = egl_initialize,
   .deinitialize   = egl_deinitialize,
+  .on_restart     = egl_on_restart,
   .on_resize      = egl_on_resize,
   .on_mouse_shape = egl_on_mouse_shape,
   .on_mouse_event = egl_on_mouse_event,
