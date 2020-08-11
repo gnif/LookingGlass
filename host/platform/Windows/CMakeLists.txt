@@ -27,6 +27,7 @@ target_link_libraries(platform_Windows
 
 	userenv
 	wtsapi32
+	psapi
 )
 
 target_include_directories(platform_Windows
