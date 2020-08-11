@@ -233,8 +233,6 @@ void egl_on_restart(void * opaque)
   eglDestroyContext(this->display, this->frameContext);
   this->frameContext = NULL;
   this->start        = false;
-  this->waitFadeTime = 0;
-  this->waitDone     = false;
 }
 
 void egl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
@@ -574,6 +572,11 @@ bool egl_render(void * opaque, SDL_Window * window)
 
     if (!this->waitDone)
       egl_splash_render(this->splash, a, this->splashRatio);
+  }
+  else
+  {
+    if (!this->start)
+      egl_splash_render(this->splash, 1.0f, this->splashRatio);
   }
 
   if (this->showAlert)
