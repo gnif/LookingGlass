@@ -496,23 +496,24 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   }
 
   setupLogging();
-  HANDLE m = CreateMutex(NULL, FALSE, INSTANCE_MUTEX_NAME);
 
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
   while(1)
   {
     /* check if the app is running by trying to take the lock */
     bool running = true;
+    HANDLE m = CreateMutex(NULL, FALSE, INSTANCE_MUTEX_NAME);
     if (WaitForSingleObject(m, 0) == WAIT_OBJECT_0)
     {
       running = false;
       ReleaseMutex(m);
     }
+    CloseHandle(m);
 
     if (!running && GetInteractiveSessionID() != 0)
       Launch();
 
-    if (WaitForSingleObject(ghSvcStopEvent, 100) == WAIT_OBJECT_0)
+    if (WaitForSingleObject(ghSvcStopEvent, 1000) == WAIT_OBJECT_0)
       break;
   }
 
