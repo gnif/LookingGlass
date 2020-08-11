@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "platform.h"
+#include "service.h"
 #include "windows/mousehook.h"
 
 #include <windows.h>
@@ -42,9 +43,11 @@ struct AppState
   int     argc;
   char ** argv;
 
-  char         executable[MAX_PATH + 1];
-  HWND         messageWnd;
-  HMENU        trayMenu;
+  char           executable[MAX_PATH + 1];
+  HWND           messageWnd;
+  NOTIFYICONDATA iconData;
+  UINT           trayRestartMsg;
+  HMENU          trayMenu;
 };
 
 static struct AppState app = {0};
@@ -53,6 +56,21 @@ HWND MessageHWND;
 // undocumented API to adjust the system timer resolution (yes, its a nasty hack)
 typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, BOOLEAN Set, PULONG ActualResolution);
 static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
+
+static void RegisterTrayIcon()
+{
+  // register our TrayIcon
+  if (!app.iconData.cbSize)
+  {
+    app.iconData.cbSize           = sizeof(NOTIFYICONDATA);
+    app.iconData.hWnd             = app.messageWnd;
+    app.iconData.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    app.iconData.uCallbackMessage = WM_TRAYICON;
+    strncpy(app.iconData.szTip, "Looking Glass (host)", sizeof(app.iconData.szTip));
+    app.iconData.hIcon            = LoadIcon(app.hInst, IDI_APPLICATION);
+  }
+  Shell_NotifyIcon(NIM_ADD, &app.iconData);
+}
 
 LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -99,28 +117,20 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
 
     default:
-      return DefWindowProc(hwnd, msg, wParam, lParam);
+      if (msg == app.trayRestartMsg)
+        RegisterTrayIcon();
+      break;
   }
-  return 0;
+
+  return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 static int appThread(void * opaque)
 {
-  // register our TrayIcon
-  NOTIFYICONDATA iconData =
-  {
-    .cbSize           = sizeof(NOTIFYICONDATA),
-    .hWnd             = app.messageWnd,
-    .uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP,
-    .uCallbackMessage = WM_TRAYICON,
-    .szTip            = "Looking Glass (host)"
-  };
-  iconData.hIcon = LoadIcon(app.hInst, IDI_APPLICATION);
-  Shell_NotifyIcon(NIM_ADD, &iconData);
-
+  RegisterTrayIcon();
   int result = app_main(app.argc, app.argv);
 
-  Shell_NotifyIcon(NIM_DELETE, &iconData);
+  Shell_NotifyIcon(NIM_DELETE, &app.iconData);
   mouseHook_remove();
   SendMessage(app.messageWnd, WM_DESTROY, 0, 0);
   return result;
@@ -144,6 +154,21 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+  // convert the command line to the standard argc and argv
+  LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
+  app.argv = malloc(sizeof(char *) * app.argc);
+  for(int i = 0; i < app.argc; ++i)
+  {
+    const size_t s = (wcslen(wargv[i])+1) * 2;
+    app.argv[i] = malloc(s);
+    wcstombs(app.argv[i], wargv[i], s);
+  }
+  LocalFree(wargv);
+
+  GetModuleFileName(NULL, app.executable, sizeof(app.executable));
+  if (HandleService(app.argc, app.argv))
+    return 0;
+
   /* this is a bit of a hack but without this --help will produce no output in a windows command prompt */
   if (!IsDebuggerPresent() && AttachConsole(ATTACH_PARENT_PROCESS))
   {
@@ -183,19 +208,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   option_register(options);
   free(logFilePath);
 
-  // convert the command line to the standard argc and argv
-  LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
-  app.argv = malloc(sizeof(char *) * app.argc);
-  for(int i = 0; i < app.argc; ++i)
-  {
-    const size_t s = (wcslen(wargv[i])+1) * 2;
-    app.argv[i] = malloc(s);
-    wcstombs(app.argv[i], wargv[i], s);
-  }
-  LocalFree(wargv);
-
-  GetModuleFileName(NULL, app.executable, sizeof(app.executable));
-
   // setup a handler for ctrl+c
   SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
@@ -209,13 +221,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   wx.hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
   wx.hCursor       = LoadCursor(NULL, IDC_ARROW);
   wx.hbrBackground = (HBRUSH)COLOR_APPWORKSPACE;
-  if (!RegisterClassEx(&wx))
+  ATOM class;
+  if (!(class = RegisterClassEx(&wx)))
   {
     DEBUG_ERROR("Failed to register message window class");
     result = -1;
     goto finish;
   }
-  app.messageWnd = CreateWindowEx(0, "DUMMY_CLASS", "DUMMY_NAME", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
+
+  app.trayRestartMsg = RegisterWindowMessage("TaskbarCreated");
+
+  app.messageWnd = CreateWindowEx(0, MAKEINTATOM(class), NULL, 0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
+  ChangeWindowMessageFilterEx(app.messageWnd, app.trayRestartMsg, MSGFLT_ALLOW, NULL);
 
   // set the global
   MessageHWND = app.messageWnd;
