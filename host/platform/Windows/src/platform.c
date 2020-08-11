@@ -58,7 +58,12 @@ typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, 
 static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
 
 // linux mingw64 is missing this
-typedef WINBOOL WINAPI (*PChangeWindowMessageFilterEx)(HWND hwnd, UINT message, DWORD action, PCHANGEFILTERSTRUCT pChangeFilterStruct);
+#ifndef MSGFLT_RESET
+  #define MSGFLT_RESET (0)
+  #define MSGFLT_ALLOW (1)
+  #define MSGFLT_DISALLOW (2)
+#endif
+typedef WINBOOL WINAPI (*PChangeWindowMessageFilterEx)(HWND hwnd, UINT message, DWORD action, void * pChangeFilterStruct);
 PChangeWindowMessageFilterEx _ChangeWindowMessageFilterEx = NULL;
 
 static void RegisterTrayIcon()
