@@ -31,7 +31,7 @@ Unicode true
 RequestExecutionLevel admin
 ShowInstDetails "show"
 ShowUninstDetails "show"
-InstallDir "$PROGRAMFILES64\Looking-Glass"
+InstallDir "$PROGRAMFILES64\Looking Glass"
 
 !define MUI_ICON "..\..\resources\icon.ico"
 !define MUI_UNICON "..\..\resources\icon.ico"
