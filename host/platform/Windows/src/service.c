@@ -266,7 +266,7 @@ void Launch()
   if (!enablePriv(SE_INCREASE_QUOTA_NAME))
     goto fail_token;
 
-  DWORD flags = CREATE_NEW_CONSOLE;
+  DWORD flags = CREATE_NEW_CONSOLE | HIGH_PRIORITY_CLASS;
   if (!pEnvironment)
     flags |= CREATE_UNICODE_ENVIRONMENT;
 
