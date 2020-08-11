@@ -285,10 +285,9 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
 static void sendPointer(bool newClient)
 {
   PLGMPMemory mem;
-
   if (app.pointerInfo.shapeUpdate || newClient)
   {
-    if (app.pointerInfo.shapeUpdate)
+    if (!newClient)
     {
       // swap the latest shape buffer out of rotation
       PLGMPMemory tmp  = app.pointerShape;
