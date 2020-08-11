@@ -29,10 +29,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "spice/spice.h"
 #include <lgmp/client.h>
 
+enum RunState
+{
+  APP_STATE_RUNNING,
+  APP_STATE_RESTART,
+  APP_STATE_SHUTDOWN
+};
+
 struct AppState
 {
-  bool                 running;
-  bool                 restart;
+  enum RunState        state;
   bool                 ignoreInput;
   bool                 escapeActive;
   SDL_Scancode         escapeAction;

@@ -141,7 +141,7 @@ static int renderThread(void * unused)
 {
   if (!state.lgr->render_startup(state.lgrData, state.window))
   {
-    state.running = false;
+    state.state = APP_STATE_SHUTDOWN;
 
     /* unblock threads waiting on the condition */
     lgSignalEvent(e_startup);
@@ -155,7 +155,7 @@ static int renderThread(void * unused)
   struct timespec time;
   clock_gettime(CLOCK_REALTIME, &time);
 
-  while(state.running || state.restart)
+  while(state.state != APP_STATE_SHUTDOWN)
   {
     if (state.frameTime > 0)
     {
@@ -225,7 +225,7 @@ static int renderThread(void * unused)
     }
   }
 
-  state.running = false;
+  state.state = APP_STATE_SHUTDOWN;
 
   if (t_cursor)
     lgJoinThread(t_cursor, NULL);
@@ -247,7 +247,7 @@ static int cursorThread(void * unused)
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   // subscribe to the pointer queue
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     status = lgmpClientSubscribe(state.lgmp, LGMP_Q_POINTER, &queue);
     if (status == LGMP_OK)
@@ -260,11 +260,11 @@ static int cursorThread(void * unused)
     }
 
     DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
-    state.running = false;
+    state.state = APP_STATE_SHUTDOWN;
     break;
   }
 
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     LGMPMessage msg;
     if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
@@ -288,11 +288,12 @@ static int cursorThread(void * unused)
       }
 
       if (status == LGMP_ERR_INVALID_SESSION)
-        state.restart = true;
+        state.state = APP_STATE_RESTART;
       else
+      {
         DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
-
-      state.running = false;
+        state.state = APP_STATE_SHUTDOWN;
+      }
       break;
     }
 
@@ -356,7 +357,6 @@ static int cursorThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&queue);
-  state.running = false;
   return 0;
 }
 
@@ -367,11 +367,11 @@ static int frameThread(void * unused)
 
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
-  if (!state.running)
+  if (state.state != APP_STATE_RUNNING)
     return 0;
 
   // subscribe to the frame queue
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     status = lgmpClientSubscribe(state.lgmp, LGMP_Q_FRAME, &queue);
     if (status == LGMP_OK)
@@ -384,11 +384,11 @@ static int frameThread(void * unused)
     }
 
     DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
-    state.running = false;
+    state.state = APP_STATE_SHUTDOWN;
     break;
   }
 
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     LGMPMessage msg;
     if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
@@ -400,10 +400,12 @@ static int frameThread(void * unused)
       }
 
       if (status == LGMP_ERR_INVALID_SESSION)
-        state.restart = true;
+        state.state = APP_STATE_RESTART;
       else
+      {
         DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
-
+        state.state = APP_STATE_SHUTDOWN;
+      }
       break;
     }
 
@@ -443,6 +445,7 @@ static int frameThread(void * unused)
     if (error)
     {
       lgmpClientMessageDone(queue);
+      state.state = APP_STATE_SHUTDOWN;
       break;
     }
 
@@ -461,6 +464,7 @@ static int frameThread(void * unused)
     if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, fb))
     {
       DEBUG_ERROR("renderer on frame event returned failure");
+      state.state = APP_STATE_SHUTDOWN;
       break;
     }
 
@@ -472,24 +476,23 @@ static int frameThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&queue);
-  state.running = false;
   return 0;
 }
 
 int spiceThread(void * arg)
 {
-  while(state.running)
+  while(state.state != APP_STATE_SHUTDOWN)
     if (!spice_process(1000))
     {
-      if (state.running)
+      if (state.state != APP_STATE_SHUTDOWN)
       {
-        state.running = false;
+        state.state = APP_STATE_SHUTDOWN;
         DEBUG_ERROR("failed to process spice messages");
       }
       break;
     }
 
-  state.running = false;
+  state.state = APP_STATE_SHUTDOWN;
   return 0;
 }
 
@@ -814,7 +817,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (!params.ignoreQuit)
       {
         DEBUG_INFO("Quit event received, exiting...");
-        state.running = false;
+        state.state = APP_STATE_SHUTDOWN;
       }
       return 0;
     }
@@ -841,7 +844,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
         // allow a window close event to close the application even if ignoreQuit is set
         case SDL_WINDOWEVENT_CLOSE:
-          state.running = false;
+          state.state = APP_STATE_SHUTDOWN;
           break;
       }
       return 0;
@@ -1041,7 +1044,7 @@ void int_handler(int signal)
     case SIGINT:
     case SIGTERM:
       DEBUG_INFO("Caught signal, shutting down...");
-      state.running = false;
+      state.state = APP_STATE_SHUTDOWN;
       break;
   }
 }
@@ -1089,7 +1092,7 @@ static void toggle_input(SDL_Scancode key, void * opaque)
 
 static void quit(SDL_Scancode key, void * opaque)
 {
-  state.running = false;
+  state.state = APP_STATE_SHUTDOWN;
 }
 
 static void mouse_sens_inc(SDL_Scancode key, void * opaque)
@@ -1172,7 +1175,7 @@ static void release_key_binds()
 static int lg_run()
 {
   memset(&state, 0, sizeof(state));
-  state.running    = true;
+  state.state      = APP_STATE_RUNNING;
   state.scaleX     = 1.0f;
   state.scaleY     = 1.0f;
   state.resizeDone = true;
@@ -1235,10 +1238,10 @@ static int lg_run()
       return -1;
     }
 
-    while(state.running && !spice_ready())
+    while(state.state != APP_STATE_SHUTDOWN && !spice_ready())
       if (!spice_process(1000))
       {
-        state.running = false;
+        state.state = APP_STATE_SHUTDOWN;
         DEBUG_ERROR("Failed to process spice messages");
         return -1;
       }
@@ -1450,7 +1453,7 @@ static int lg_run()
 
   LGMP_STATUS status;
 
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
       break;
@@ -1468,7 +1471,7 @@ static int lg_run()
   int waitCount = 0;
 
 restart:
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     if ((status = lgmpClientSessionInit(state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
       break;
@@ -1497,7 +1500,7 @@ restart:
     SDL_WaitEventTimeout(NULL, 1000);
   }
 
-  if (!state.running)
+  if (state.state != APP_STATE_RUNNING)
     return -1;
 
   // dont show warnings again after the first startup
@@ -1539,20 +1542,18 @@ restart:
     return -1;
   }
 
-  while(state.running)
+  while(state.state == APP_STATE_RUNNING)
   {
     if (!lgmpClientSessionValid(state.lgmp))
     {
-      state.restart = true;
+      state.state = APP_STATE_RESTART;
       break;
     }
     SDL_WaitEventTimeout(NULL, 100);
   }
 
-  if (state.restart)
+  if (state.state == APP_STATE_RESTART)
   {
-    state.running = false;
-
     lgSignalEvent(e_startup);
     lgSignalEvent(e_frame);
     lgJoinThread(t_frame , NULL);
@@ -1560,9 +1561,7 @@ restart:
     t_frame  = NULL;
     t_cursor = NULL;
 
-    state.running = true;
-    state.restart = false;
-
+    state.state = APP_STATE_RUNNING;
     state.lgr->on_restart(state.lgrData);
 
     DEBUG_INFO("Waiting for the host to restart...");
@@ -1574,8 +1573,7 @@ restart:
 
 static void lg_shutdown()
 {
-  state.running = false;
-
+  state.state = APP_STATE_SHUTDOWN;
   if (t_render)
   {
     lgSignalEvent(e_startup);
