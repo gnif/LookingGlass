@@ -26,7 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 ;Settings
 Name "Looking Glass Host"
-OutFile "..\build\Looking-Glass-Host-Setup.exe" 
+OutFile "..\build\looking-glass-host-setup.exe" 
 Unicode true
 RequestExecutionLevel admin
 ShowInstDetails "show"
@@ -148,11 +148,11 @@ Section "-Hidden Start Menu" Section5
   SetShellVarContext all
   
   ${If} $option_startMenu == 1
-    CreateShortCut $SMPROGRAMS\Looking-Glass-Host.lnk $INSTDIR\looking-glass-host.exe
+    CreateShortCut $SMPROGRAMS\Looking Glass (host).lnk $INSTDIR\looking-glass-host.exe
   ${EndIf}
 
   ${If} $option_desktop == 1
-    CreateShortCut $DESKTOP\Looking-Glass-Host.lnk $INSTDIR\looking-glass-host.exe
+    CreateShortCut $DESKTOP\Looking Glass (host).lnk $INSTDIR\looking-glass-host.exe
   ${EndIf}
   
 SectionEnd
