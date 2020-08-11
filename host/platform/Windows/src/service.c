@@ -511,9 +511,13 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
     CloseHandle(m);
 
     if (!running && GetInteractiveSessionID() != 0)
+    {
       Launch();
+      /* avoid being overly agressive in restarting */
+      Sleep(1);
+    }
 
-    if (WaitForSingleObject(ghSvcStopEvent, 1000) == WAIT_OBJECT_0)
+    if (WaitForSingleObject(ghSvcStopEvent, 100) == WAIT_OBJECT_0)
       break;
   }
 
