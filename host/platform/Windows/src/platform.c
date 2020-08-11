@@ -119,7 +119,13 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
           if (strcmp(logFile, "stderr") == 0)
             DEBUG_INFO("Ignoring request to open the logFile, logging to stderr");
           else
-            ShellExecute(NULL, NULL, logFile, NULL, NULL, SW_SHOWNORMAL);
+          {
+            /* If LG is running as SYSTEM, ShellExecute would launch a process
+             * as the SYSTEM user also, for security we will just show the file
+             * location instead */
+            //ShellExecute(NULL, NULL, logFile, NULL, NULL, SW_SHOWNORMAL);
+            MessageBoxA(hwnd, logFile, "Log File Location", MB_OK | MB_ICONINFORMATION);
+          }
         }
       }
       break;
