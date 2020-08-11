@@ -1500,6 +1500,9 @@ restart:
   if (!state.running)
     return -1;
 
+  // dont show warnings again after the first startup
+  waitCount = 100;
+
   const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
   if (udataSize != sizeof(KVMFR) || !magicMatches || udata->version != KVMFR_VERSION)
   {
@@ -1541,10 +1544,9 @@ restart:
     if (!lgmpClientSessionValid(state.lgmp))
     {
       state.restart = true;
-      DEBUG_WARN("Session is invalid, has the host shutdown?");
       break;
     }
-    SDL_WaitEventTimeout(NULL, 1000);
+    SDL_WaitEventTimeout(NULL, 100);
   }
 
   if (state.restart)
