@@ -289,8 +289,9 @@ static int cursorThread(void * unused)
 
       if (status == LGMP_ERR_INVALID_SESSION)
         state.restart = true;
+      else
+        DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
 
-      DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
       state.running = false;
       break;
     }
@@ -400,8 +401,9 @@ static int frameThread(void * unused)
 
       if (status == LGMP_ERR_INVALID_SESSION)
         state.restart = true;
+      else
+        DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
 
-      DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
       break;
     }
 
@@ -1448,8 +1450,6 @@ static int lg_run()
 
   LGMP_STATUS status;
 
-restart:
-
   while(state.running)
   {
     if ((status = lgmpClientInit(state.shm.mem, state.shm.size, &state.lgmp)) == LGMP_OK)
@@ -1465,9 +1465,9 @@ restart:
 
   uint32_t udataSize;
   KVMFR *udata;
-  int waitCount;
+  int waitCount = 0;
 
-  waitCount = 0;
+restart:
   while(state.running)
   {
     if ((status = lgmpClientSessionInit(state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
@@ -1550,16 +1550,19 @@ restart:
   if (state.restart)
   {
     state.running = false;
+
     lgSignalEvent(e_startup);
     lgSignalEvent(e_frame);
     lgJoinThread(t_frame , NULL);
     lgJoinThread(t_cursor, NULL);
+    t_frame  = NULL;
+    t_cursor = NULL;
+
     state.running = true;
     state.restart = false;
 
     state.lgr->on_restart(state.lgrData);
 
-    lgmpClientFree(&state.lgmp);
     DEBUG_INFO("Waiting for the host to restart...");
     goto restart;
   }
