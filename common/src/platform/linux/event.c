@@ -83,19 +83,20 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   }
 
   bool ret = true;
+  int  res;
   while(ret && !atomic_load(&handle->flag))
   {
     if (!ts)
     {
-      if (pthread_cond_wait(&handle->cond, &handle->mutex) != 0)
+      if ((res = pthread_cond_wait(&handle->cond, &handle->mutex)) != 0)
       {
-        DEBUG_ERROR("Wait to wait on the condition");
+        DEBUG_ERROR("Failed to wait on the condition (err: %d)", res);
         ret = false;
       }
     }
     else
     {
-      switch(pthread_cond_timedwait(&handle->cond, &handle->mutex, ts))
+      switch((res = pthread_cond_timedwait(&handle->cond, &handle->mutex, ts)))
       {
         case 0:
           break;
@@ -106,7 +107,7 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 
         default:
           ret = false;
-          DEBUG_ERROR("Timed wait failed");
+          DEBUG_ERROR("Timed wait failed (err: %d)", res);
           break;
       }
     }
@@ -145,6 +146,9 @@ bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
 
 bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
 {
+  if (timeout == TIMEOUT_INFINITE)
+    return lgWaitEventAbs(handle, NULL);
+
   return lgWaitEventNS(handle, timeout * 1000000);
 }
 
