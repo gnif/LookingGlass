@@ -565,7 +565,7 @@ int app_main(int argc, char * argv[])
     }
     else
     {
-      usleep(100);
+      usleep(100000);
       continue;
     }
 
