@@ -68,6 +68,7 @@ struct Inst
   EGL_Alert       * alert;   // the alert display
 
   LG_RendererFormat    format;
+  bool                 start;
   uint64_t             waitFadeTime;
   bool                 waitDone;
 
@@ -231,6 +232,7 @@ void egl_on_restart(void * opaque)
 
   eglDestroyContext(this->display, this->frameContext);
   this->frameContext = NULL;
+  this->start        = false;
   this->waitFadeTime = 0;
   this->waitDone     = false;
 }
@@ -350,6 +352,7 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const Fra
     return false;
   }
 
+  this->start = true;
   return true;
 }
 
@@ -542,7 +545,10 @@ bool egl_render(void * opaque, SDL_Window * window)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  if (egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY, this->useNearest))
+  if (this->start && egl_desktop_render(this->desktop,
+        this->translateX, this->translateY,
+        this->scaleX    , this->scaleY    ,
+        this->useNearest))
   {
     if (!this->waitFadeTime)
       this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
