@@ -40,6 +40,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct Service
 {
   FILE * logFile;
+  bool  running;
+  DWORD processId;
 };
 
 struct Service service = { 0 };
@@ -294,10 +296,14 @@ void Launch()
       &pi
     ))
   {
+    service.running = false;
     doLog("failed to launch\n");
     winerr();
     goto fail_exe;
   }
+
+  service.processId = pi.dwProcessId;
+  service.running   = true;
 
 fail_exe:
   free(exe);
@@ -387,6 +393,46 @@ void Install()
   else
     doLog("Service installed successfully\n");
 
+  // Start the service
+  doLog("Starting the service\n");
+  StartService(schService, 0, NULL);
+
+  SERVICE_STATUS_PROCESS ssp;
+  DWORD dwBytesNeeded;
+  if (!QueryServiceStatusEx(schService, SC_STATUS_PROCESS_INFO,
+        (LPBYTE)&ssp, sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded))
+  {
+    doLog("QueryServiceStatusEx failed (0x%lx)\n", GetLastError());
+    CloseServiceHandle(schService);
+    CloseServiceHandle(schSCManager);
+    return;
+  }
+
+  while (ssp.dwCurrentState == SERVICE_START_PENDING)
+  {
+    DWORD dwWaitTime = ssp.dwWaitHint / 10;
+    if(dwWaitTime < 1000)
+      dwWaitTime = 1000;
+    else if (dwWaitTime > 10000)
+      dwWaitTime = 10000;
+
+    Sleep(dwWaitTime);
+
+    if (!QueryServiceStatusEx(schService, SC_STATUS_PROCESS_INFO,
+          (LPBYTE)&ssp, sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded))
+    {
+      doLog("QueryServiceStatusEx failed (0x%lx)\n", GetLastError());
+      CloseServiceHandle(schService);
+      CloseServiceHandle(schSCManager);
+      return;
+    }
+  }
+
+  if (ssp.dwCurrentState != SERVICE_RUNNING)
+    doLog("Failed to start the service.\n");
+  else
+    doLog("Service started.\n");
+
   CloseServiceHandle(schService);
   CloseServiceHandle(schSCManager);
 }
@@ -407,7 +453,9 @@ void Uninstall()
     return;
   }
 
-  schService = OpenService(schSCManager, SVCNAME, DELETE);
+  schService = OpenService(schSCManager, SVCNAME,
+      SERVICE_STOP | SERVICE_QUERY_STATUS | DELETE);
+
   if (!schService)
   {
     doLog("OpenService failed (0x%lx)\n", GetLastError());
@@ -415,21 +463,74 @@ void Uninstall()
     return;
   }
 
-  SERVICE_STATUS status;
-  if (ControlService(schService, SERVICE_CONTROL_STOP, &status))
-    while(status.dwCurrentState != SERVICE_STOPPED)
-    {
-      Sleep(1);
-      QueryServiceStatus(schService, &status);
-    }
-
-  if (!DeleteService(schService))
+  SERVICE_STATUS_PROCESS ssp;
+  DWORD dwBytesNeeded;
+  if (!QueryServiceStatusEx(schService, SC_STATUS_PROCESS_INFO,
+        (LPBYTE)&ssp, sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded))
   {
-    doLog("DeleteService failed (0x%lx)\n", GetLastError());
+    doLog("QueryServiceStatusEx failed (0x%lx)\n", GetLastError());
+    CloseServiceHandle(schService);
     CloseServiceHandle(schSCManager);
     return;
   }
 
+  bool stop = false;
+  if (ssp.dwCurrentState == SERVICE_RUNNING)
+  {
+    stop = true;
+    doLog("Stopping the service...\n");
+    SERVICE_STATUS status;
+    if (!ControlService(schService, SERVICE_CONTROL_STOP, &status))
+    {
+      doLog("ControlService failed (%0xlx)\n", GetLastError());
+      CloseServiceHandle(schService);
+      CloseServiceHandle(schSCManager);
+      return;
+    }
+
+    ssp.dwCurrentState = SERVICE_STOP_PENDING;
+  }
+
+  while(ssp.dwCurrentState == SERVICE_STOP_PENDING)
+  {
+    DWORD dwWaitTime = ssp.dwWaitHint / 10;
+    if(dwWaitTime < 1000)
+      dwWaitTime = 1000;
+    else if (dwWaitTime > 10000)
+      dwWaitTime = 10000;
+
+    Sleep(dwWaitTime);
+
+    if (!QueryServiceStatusEx(schService, SC_STATUS_PROCESS_INFO,
+          (LPBYTE)&ssp, sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded))
+    {
+      doLog("QueryServiceStatusEx failed (0x%lx)\n", GetLastError());
+      CloseServiceHandle(schService);
+      CloseServiceHandle(schSCManager);
+      return;
+    }
+  }
+
+  if (ssp.dwCurrentState != SERVICE_STOPPED)
+  {
+      doLog("Failed to stop the service");
+      CloseServiceHandle(schService);
+      CloseServiceHandle(schSCManager);
+      return;
+  }
+
+  if (stop)
+    doLog("Service stopped.\n");
+
+  if (!DeleteService(schService))
+  {
+    doLog("DeleteService failed (0x%lx)\n", GetLastError());
+    CloseServiceHandle(schService);
+    CloseServiceHandle(schSCManager);
+    return;
+  }
+
+  doLog("Service removed.\n");
   CloseServiceHandle(schService);
   CloseServiceHandle(schSCManager);
 }
@@ -506,6 +607,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
     if (WaitForSingleObject(m, 0) == WAIT_OBJECT_0)
     {
       running = false;
+      service.running = false;
       ReleaseMutex(m);
     }
     CloseHandle(m);
@@ -519,6 +621,28 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
     if (WaitForSingleObject(ghSvcStopEvent, 100) == WAIT_OBJECT_0)
       break;
+  }
+
+  if (service.running)
+  {
+    doLog("Terminating the host application\n");
+    HANDLE proc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, TRUE,
+        service.processId);
+    if (proc)
+    {
+      if (TerminateProcess(proc, 0))
+      {
+        while(WaitForSingleObject(proc, INFINITE) != WAIT_OBJECT_0) {}
+        doLog("Host application terminated\n");
+      }
+      else
+        doLog("Failed to terminate the host application\n");
+      CloseHandle(proc);
+    }
+    else
+    {
+      doLog("OpenProcess failed (%0xlx)\n", GetLastError());
+    }
   }
 
   ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
