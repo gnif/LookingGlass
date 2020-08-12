@@ -34,7 +34,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <userenv.h>
 #include <wtsapi32.h>
 
-#define SVCNAME   "Looking Glass Host"
+#define SVCNAME   "Looking Glass (host)"
 #define SVC_ERROR ((DWORD)0xC0020001L)
 
 struct Service

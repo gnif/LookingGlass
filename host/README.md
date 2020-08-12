@@ -44,11 +44,13 @@ cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
 make
 ```
 
-## Building the installer
+## Building the Windows installer
 
 Install NSIS compiler
 Build the host program, see above sections.
-Build installer with `makensis c-host/installer/installer.nsi`
+Build installer with `makensis platform/Windows/installer.nsi`
+The resulting installer will be at
+`platform/Windows/looking-glass-host-setup.exe`
 
 ## Where is the log?
 
