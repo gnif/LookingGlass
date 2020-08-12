@@ -118,7 +118,7 @@ Section "-Install" Section1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
   "EstimatedSize" "$0"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
-  "DisplayName" "Looking Glass"
+  "DisplayName" "Looking Glass (host)"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
   "UninstallString" "$\"$INSTDIR\uninstaller.exe$\""
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
