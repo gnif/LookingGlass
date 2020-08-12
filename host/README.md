@@ -58,11 +58,12 @@ It is in your user's temp directory:
 
     %TEMP%\looking-glass-host.txt
 
-For example:
+Or if running as a system service it will be located in:
 
-    C:\Users\YourUser\AppData\Local\Temp\looking-glass-host.txt
+    C:\Windows\Temp\looking-glass-host.txt
 
-You can also open it by simply right clicking the tray icon and selecting "Open Log File"
+You can find out where the file is by right clicking on the tray icon and
+selecting "Log File Location"
 
 ## Why does this version require Administrator privileges
 
