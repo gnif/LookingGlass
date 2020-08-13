@@ -35,23 +35,6 @@ Should this all go well you should be left with the file `looking-glass-client`
 
 ## Usage Tips
 
-### High priority capture using DXGI and Secure Desktop (UAC) capture support
-
-By default Windows gives priority to the foreground application for any GPU
-work which causes issues with capture if the foreground application is consuming
-100% of the available GPU resources. The looking glass host application is able
-to increase the kernel GPU thread to realtime priority which fixes this, but in
-order to do so it must run as the `SYSTEM` user account. To do this, please use
-`PsExec` from SysInternals (Microsoft), for example:
-
-    PsExec64.exe -s -i -d looking-glass-host.exe
-
-This will also enable the host application to capture the secure desktop which
-includes things like the lock screen and UAC prompts.
-
-A future update (likely Beta 3) will include a service launcher for the Looking
-Glass host which will remove the need for `PsExec`.
-
 ### Key Bindings
 
 By default Looking Glass uses the `Scroll Lock` key as the escape key for commands as well as the input capture mode toggle, this can be changed using the `-m` switch if you desire a different key.

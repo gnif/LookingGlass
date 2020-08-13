@@ -202,8 +202,8 @@ static bool dxgi_init()
   {
     DEBUG_INFO("The above error(s) will prevent LG from being able to capture the secure desktop (UAC dialogs)");
     DEBUG_INFO("This is not a failure, please do not report this as an issue.");
-    DEBUG_INFO("To fix this run LG using the PsExec SysInternals tool from Microsoft.");
-    DEBUG_INFO("https://docs.microsoft.com/en-us/sysinternals/downloads/psexec");
+    DEBUG_INFO("To fix this, install and run the Looking Glass host as a service.");
+    DEBUG_INFO("looking-glass-host.exe InstallService");
   }
 
   // this is required for DXGI 1.5 support to function
@@ -408,9 +408,10 @@ static bool dxgi_init()
         status = fn(GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME);
         if (FAILED(status))
         {
-          DEBUG_INFO("Failed to set realtime GPU priority, this is not an error!");
-          DEBUG_INFO("To fix this run LG using the PsExec SysInternals tool from Microsoft.");
-          DEBUG_INFO("https://docs.microsoft.com/en-us/sysinternals/downloads/psexec");
+          DEBUG_WARN("Failed to set realtime GPU priority.");
+          DEBUG_INFO("This is not a failure, please do not report this as an issue.");
+          DEBUG_INFO("To fix this, install and run the Looking Glass host as a service.");
+          DEBUG_INFO("looking-glass-host.exe InstallService");
         }
       }
     }
