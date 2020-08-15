@@ -319,7 +319,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
     const uint8_t sw =
       atomic_load_explicit(&texture->state.w, memory_order_acquire);
 
-    if (atomic_load_explicit(&texture->state.u, memory_order_acquire) == sw + 1)
+    if (atomic_load_explicit(&texture->state.u, memory_order_acquire) == (uint8_t)(sw + 1))
     {
       egl_warn_slow();
       return true;
@@ -355,7 +355,7 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   const uint8_t sw =
     atomic_load_explicit(&texture->state.w, memory_order_acquire);
 
-  if (atomic_load_explicit(&texture->state.u, memory_order_acquire) == sw + 1)
+  if (atomic_load_explicit(&texture->state.u, memory_order_acquire) == (uint8_t)(sw + 1))
   {
     egl_warn_slow();
     return true;
@@ -457,7 +457,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
       }
     }
 
-    if (ss != sd && ss != sd+1)
+    if (ss != sd && ss != (uint8_t)(sd + 1))
       sd = atomic_fetch_add_explicit(&texture->state.d, 1,
           memory_order_release) + 1;
   }
