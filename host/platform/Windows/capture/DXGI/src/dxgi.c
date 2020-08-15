@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/event.h"
 
 #include <assert.h>
+#include <stdatomic.h>
 #include <dxgi.h>
 #include <d3d11.h>
 #include <d3dcommon.h>
@@ -82,7 +83,7 @@ struct iface
   Texture                  * texture;
   int                        texRIndex;
   int                        texWIndex;
-  volatile int               texReady;
+  atomic_int                 texReady;
   bool                       needsRelease;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
@@ -228,9 +229,9 @@ static bool dxgi_init()
   this->stop       = false;
   this->texRIndex  = 0;
   this->texWIndex  = 0;
-  this->texReady   = 0;
+  atomic_store(&this->texReady, 0);
 
-  lgResetEvent(this->frameEvent  );
+  lgResetEvent(this->frameEvent);
 
   status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
@@ -755,8 +756,8 @@ static CaptureResult dxgi_capture()
 
       // set the state, and signal
       tex->state = TEXTURE_STATE_PENDING_MAP;
-      INTERLOCKED_INC(&this->texReady);
-      lgSignalEvent(this->frameEvent);
+      if (atomic_fetch_add_explicit(&this->texReady, 1, memory_order_relaxed) == 0)
+        lgSignalEvent(this->frameEvent);
 
       // advance the write index
       if (++this->texWIndex == this->maxTextures)
@@ -852,12 +853,13 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   assert(this->initialized);
 
   // NOTE: the event may be signaled when there are no frames available
-  if(this->texReady == 0)
+  if(atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
   {
     if (!lgWaitEvent(this->frameEvent, 1000))
       return CAPTURE_RESULT_TIMEOUT;
 
-    if (this->texReady == 0)
+    // the count will still be zero if we are stopping
+    if(atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
       return CAPTURE_RESULT_TIMEOUT;
   }
 
@@ -883,7 +885,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   frame->stride = this->stride;
   frame->format = this->format;
 
-  INTERLOCKED_DEC(&this->texReady);
+  atomic_fetch_sub_explicit(&this->texReady, 1, memory_order_release);
   return CAPTURE_RESULT_OK;
 }
 
