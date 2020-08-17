@@ -20,8 +20,8 @@ Currently only Windows is supported however there is some initial support for Li
 6. configure the project and build it
 
 ```
-mkdir LookingGlass/c-host/build
-cd LookingGlass/c-host/build
+mkdir LookingGlass/host/build
+cd LookingGlass/host/build
 cmake -G "MSYS Makefiles" ..
 make
 ```
