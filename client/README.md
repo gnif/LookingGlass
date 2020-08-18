@@ -142,6 +142,7 @@ Command line arguments will override any options loaded from the config files.
 | spice:clipboardToVM    |       | yes       | Allow the clipboard to be syncronized TO the VM                     |
 | spice:clipboardToLocal |       | yes       | Allow the clipboard to be syncronized FROM the VM                   |
 | spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
+| spice:captureOnStart   |       | no        | Capture mouse and keyboard on start                                 |
 |------------------------------------------------------------------------------------------------------------------|
 
 |--------------------------------------------------------------------------|
