@@ -42,6 +42,14 @@ struct CursorInfo
   int hx, hy;
 };
 
+enum WarpState
+{
+  WARP_STATE_ARMED,
+  WARP_STATE_ON,
+  WARP_STATE_ACTIVE,
+  WARP_STATE_OFF
+};
+
 struct AppState
 {
   enum RunState        state;
@@ -72,6 +80,10 @@ struct AppState
   int   curLocalX;
   int   curLocalY;
   bool  haveAligned;
+
+  enum WarpState   warpState;
+  int   warpFromX, warpFromY;
+  int   warpToX  , warpToY;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
