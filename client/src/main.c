@@ -285,6 +285,8 @@ static int cursorThread(void * unused)
             state.cursor.x,
             state.cursor.y
           );
+
+          lgSignalEvent(e_frame);
         }
 
         usleep(params.cursorPollInterval);
@@ -354,7 +356,7 @@ static int cursorThread(void * unused)
     state.lgr->on_mouse_event
     (
       state.lgrData,
-      state.cursorVisible && state.drawCursor,
+      state.cursorVisible && state.drawCursor && state.cursorInView,
       state.cursor.x,
       state.cursor.y
     );
