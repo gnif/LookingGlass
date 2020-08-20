@@ -827,7 +827,26 @@ static CaptureResult dxgi_capture()
           return CAPTURE_RESULT_ERROR;
       }
 
+      CURSORINFO ci = { .cbSize = sizeof(CURSORINFO) };
+      if (!GetCursorInfo(&ci))
+      {
+        DEBUG_ERROR("GetCursorInfo failed");
+        return CAPTURE_RESULT_ERROR;
+      }
+
+      ICONINFO ii;
+      if (!GetIconInfo(ci.hCursor, &ii))
+      {
+        DEBUG_ERROR("GetIconInfo failed");
+        return CAPTURE_RESULT_ERROR;
+      }
+
+      DeleteObject(ii.hbmMask);
+      DeleteObject(ii.hbmColor);
+
       pointer.shapeUpdate = true;
+      pointer.hx          = ii.xHotspot;
+      pointer.hy          = ii.yHotspot;
       pointer.width       = shapeInfo.Width;
       pointer.height      = shapeInfo.Height;
       pointer.pitch       = shapeInfo.Pitch;

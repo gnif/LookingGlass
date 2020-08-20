@@ -36,6 +36,12 @@ enum RunState
   APP_STATE_SHUTDOWN
 };
 
+struct CursorInfo
+{
+  int x , y;
+  int hx, hy;
+};
+
 struct AppState
 {
   enum RunState        state;
@@ -49,7 +55,7 @@ struct AppState
   int                  windowW, windowH;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
-  SDL_Point            cursor;
+  struct CursorInfo    cursor;
   bool                 cursorVisible;
 
   bool  serverMode;

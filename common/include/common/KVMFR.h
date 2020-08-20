@@ -51,7 +51,7 @@ typedef enum CursorType
 CursorType;
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 2
+#define KVMFR_VERSION 3
 
 typedef struct KVMFR
 {
@@ -65,6 +65,7 @@ typedef struct KVMFRCursor
 {
   int16_t    x, y;        // cursor x & y position
   CursorType type;        // shape buffer data type
+  int8_t     hx, hy;      // shape hotspot x & y
   uint32_t   width;       // width of the shape
   uint32_t   height;      // height of the shape
   uint32_t   pitch;       // row length in bytes of the shape

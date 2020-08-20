@@ -352,8 +352,8 @@ static int pointerThread(void * unused)
       }
 
       this->mouseVisible = pointer.visible;
-      this->mouseHotX    = pointer.x;
-      this->mouseHotY    = pointer.y;
+      this->mouseHotX    = pointer.hx;
+      this->mouseHotY    = pointer.hy;
     }
 
     if (events[0])

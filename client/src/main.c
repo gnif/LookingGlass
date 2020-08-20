@@ -328,6 +328,9 @@ static int cursorThread(void * unused)
           continue;
       }
 
+      state.cursor.hx = cursor->hx;
+      state.cursor.hy = cursor->hy;
+
       const uint8_t * data = (const uint8_t *)(cursor + 1);
       if (!state.lgr->on_mouse_shape(
         state.lgrData,
@@ -760,8 +763,8 @@ static void alignMouseWithGuest()
   if (state.ignoreInput || !params.useSpiceInput)
     return;
 
-  state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
-  state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  state.curLastX = (int)round((float)(state.cursor.x + state.cursor.hx) / state.scaleX) + state.dstRect.x;
+  state.curLastY = (int)round((float)(state.cursor.y + state.cursor.hy) / state.scaleY) + state.dstRect.y;
   SDL_WarpMouseInWindow(state.window, state.curLastX, state.curLastY);
 }
 
@@ -773,8 +776,8 @@ static void alignMouseWithHost()
   if (!state.haveCursorPos || state.serverMode)
     return;
 
-  state.curLastX = (int)round((float)state.cursor.x / state.scaleX) + state.dstRect.x;
-  state.curLastY = (int)round((float)state.cursor.y / state.scaleY) + state.dstRect.y;
+  state.curLastX = (int)round((float)(state.cursor.x + state.cursor.hx) / state.scaleX) + state.dstRect.x;
+  state.curLastY = (int)round((float)(state.cursor.y + state.cursor.hy) / state.scaleY) + state.dstRect.y;
   handleMouseMoveEvent(state.curLocalX, state.curLocalY);
 }
 

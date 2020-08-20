@@ -288,8 +288,8 @@ CaptureResult NvFBCToSysGetCursor(NvFBCHandle handle, CapturePointer * pointer, 
     return CAPTURE_RESULT_ERROR;
   }
 
-  pointer->x           = params.dwXHotSpot;
-  pointer->y           = params.dwYHotSpot;
+  pointer->hx          = params.dwXHotSpot;
+  pointer->hy          = params.dwYHotSpot;
   pointer->width       = params.dwWidth;
   pointer->height      = params.dwHeight;
   pointer->pitch       = params.dwPitch;

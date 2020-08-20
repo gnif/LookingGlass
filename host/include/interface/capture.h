@@ -67,6 +67,7 @@ typedef struct CapturePointer
 
   bool          shapeUpdate;
   CaptureFormat format;
+  unsigned int  hx, hy;
   unsigned int  width, height;
   unsigned int  pitch;
 }

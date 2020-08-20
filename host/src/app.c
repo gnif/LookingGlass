@@ -336,7 +336,8 @@ static void sendPointer(bool newClient)
 
   if (app.pointerInfo.shapeUpdate)
   {
-    // remember which slot has the latest shape
+    cursor->hx     = app.pointerInfo.hx;
+    cursor->hy     = app.pointerInfo.hy;
     cursor->width  = app.pointerInfo.width;
     cursor->height = app.pointerInfo.height;
     cursor->pitch  = app.pointerInfo.pitch;
@@ -489,6 +490,7 @@ int app_main(int argc, char * argv[])
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
       goto fail;
     }
+    memset(lgmpHostMemPtr(app.pointerMemory[i]), 0, MAX_POINTER_SIZE);
   }
 
   app.pointerShapeValid = false;
