@@ -160,6 +160,7 @@ struct AppParams
 
   const char * windowTitle;
   int          mouseSens;
+  bool         mouseRedraw;
 };
 
 struct CBRequest

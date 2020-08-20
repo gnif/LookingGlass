@@ -358,6 +358,9 @@ static int cursorThread(void * unused)
       state.cursor.x,
       state.cursor.y
     );
+
+    if (params.mouseRedraw)
+      lgSignalEvent(e_frame);
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -1349,13 +1352,15 @@ static int lg_run()
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
 
-  // use a default of 60FPS now that frame updates are host update triggered
   if (params.fpsMin == -1)
-    state.frameTime = 1e9 / 60;
+  {
+      // minimum 60fps to keep interactivity decent
+      state.frameTime = 1000000000ULL / 60ULL;
+  }
   else
   {
       DEBUG_INFO("Using the FPS minimum from args: %d", params.fpsMin);
-      state.frameTime = 1e9 / params.fpsMin;
+      state.frameTime = 1000000000ULL / (unsigned long long)params.fpsMin;
   }
 
   register_key_binds();
