@@ -213,12 +213,16 @@ static int renderThread(void * unused)
         if (atomic_fetch_sub_explicit(&a_framesPending, 1, memory_order_release) > 1)
           continue;
 
-      if (lgWaitEventAbs(e_frame, &time))
+      if (lgWaitEventAbs(e_frame, &time) && state.frameTime > 0)
       {
-        if (state.frameTime > 0)
+        /* only resync the timer if we got an early frame */
+        struct timespec now, diff;
+        clock_gettime(CLOCK_REALTIME, &now);
+        tsDiff(&diff, &now, &time);
+        if (diff.tv_sec == 0 && diff.tv_nsec < state.frameTime)
         {
           resyncCheck = 0;
-          clock_gettime(CLOCK_REALTIME, &time);
+          memcpy(&time, &now, sizeof(struct timespec));
           tsAdd(&time, state.frameTime);
         }
       }
