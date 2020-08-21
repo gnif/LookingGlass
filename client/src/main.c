@@ -281,7 +281,7 @@ static int cursorThread(void * unused)
           state.lgr->on_mouse_event
           (
             state.lgrData,
-            state.cursorVisible && state.drawCursor && state.cursorInView,
+            state.cursorVisible && state.drawCursor,
             state.cursor.x,
             state.cursor.y
           );
@@ -356,7 +356,7 @@ static int cursorThread(void * unused)
     state.lgr->on_mouse_event
     (
       state.lgrData,
-      state.cursorVisible && state.drawCursor && state.cursorInView,
+      state.cursorVisible && state.drawCursor,
       state.cursor.x,
       state.cursor.y
     );
@@ -730,6 +730,9 @@ static void handleMouseMoveEvent(int ex, int ey)
       state.cursorInView = false;
       state.updateCursor = true;
       state.warpState    = WARP_STATE_OFF;
+
+      if (params.useSpiceInput)
+        state.drawCursor = false;
       return;
     }
   }
@@ -738,6 +741,7 @@ static void handleMouseMoveEvent(int ex, int ey)
   {
     state.cursorInView = true;
     state.updateCursor = true;
+    state.drawCursor   = true;
     if (state.warpState == WARP_STATE_ARMED)
       state.warpState = WARP_STATE_ON;
   }
