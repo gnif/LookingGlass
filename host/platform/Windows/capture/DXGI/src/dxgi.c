@@ -758,6 +758,8 @@ static CaptureResult dxgi_capture()
     }
   }
 
+  IDXGIResource_Release(res);
+
   // if the pointer shape has changed
   uint32_t bufferSize;
   if (frameInfo.PointerShapeBufferSize > 0)
@@ -853,8 +855,6 @@ static CaptureResult dxgi_capture()
       postPointer         = true;
     }
   }
-
-  IDXGIResource_Release(res);
 
   if (frameInfo.LastMouseUpdateTime.QuadPart)
   {
