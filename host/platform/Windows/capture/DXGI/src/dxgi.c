@@ -832,23 +832,32 @@ static CaptureResult dxgi_capture()
       CURSORINFO ci = { .cbSize = sizeof(CURSORINFO) };
       if (!GetCursorInfo(&ci))
       {
-        DEBUG_ERROR("GetCursorInfo failed");
+        DEBUG_WINERROR("GetCursorInfo failed", GetLastError());
         return CAPTURE_RESULT_ERROR;
       }
 
-      ICONINFO ii;
-      if (!GetIconInfo(ci.hCursor, &ii))
+      if (ci.hCursor)
       {
-        DEBUG_ERROR("GetIconInfo failed");
-        return CAPTURE_RESULT_ERROR;
-      }
+        ICONINFO ii;
+        if (!GetIconInfo(ci.hCursor, &ii))
+        {
+          DEBUG_WINERROR("GetIconInfo failed", GetLastError());
+          return CAPTURE_RESULT_ERROR;
+        }
 
-      DeleteObject(ii.hbmMask);
-      DeleteObject(ii.hbmColor);
+        DeleteObject(ii.hbmMask);
+        DeleteObject(ii.hbmColor);
+
+        pointer.hx = ii.xHotspot;
+        pointer.hy = ii.yHotspot;
+      }
+      else
+      {
+        pointer.hx = 0;
+        pointer.hy = 0;
+      }
 
       pointer.shapeUpdate = true;
-      pointer.hx          = ii.xHotspot;
-      pointer.hy          = ii.yHotspot;
       pointer.width       = shapeInfo.Width;
       pointer.height      = shapeInfo.Height;
       pointer.pitch       = shapeInfo.Pitch;
