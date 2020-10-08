@@ -50,19 +50,18 @@ pkg_check_modules(PKGCONFIG_OPT
 	xi
 )
 
-execute_process(
-	COMMAND			cat ../VERSION
-	WORKING_DIRECTORY	${PROJECT_SOURCE_DIR}
-	OUTPUT_VARIABLE		BUILD_VERSION
-	OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
 find_package(GMP)
 
-add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
 add_definitions(-D ATOMIC_LOCKING)
 add_definitions(-D GL_GLEXT_PROTOTYPES)
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+
+add_custom_command(
+	OUTPUT	${CMAKE_BINARY_DIR}/version.c
+		${CMAKE_BINARY_DIR}/_version.c
+	COMMAND	${CMAKE_COMMAND} -P
+		${PROJECT_TOP}/version.cmake
+)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
@@ -80,6 +79,7 @@ link_libraries(
 )
 
 set(SOURCES
+	${CMAKE_BINARY_DIR}/version.c
 	src/main.c
 	src/app.c
 	src/config.c

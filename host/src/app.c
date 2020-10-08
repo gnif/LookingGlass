@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "interface/capture.h"
 #include "dynamic/capture.h"
+#include "common/version.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -442,7 +443,7 @@ int app_main(int argc, char * argv[])
   if (!app_init())
     return -1;
 
-  DEBUG_INFO("Looking Glass Host (" BUILD_VERSION ")");
+  DEBUG_INFO("Looking Glass Host (%s)", BUILD_VERSION);
 
   struct IVSHMEM shmDev;
   if (!ivshmemOpen(&shmDev))
@@ -457,11 +458,11 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
   DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);
 
-  const KVMFR udata = {
+  KVMFR udata = {
     .magic   = KVMFR_MAGIC,
     .version = KVMFR_VERSION,
-    .hostver = BUILD_VERSION
   };
+  strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver));
 
   LGMP_STATUS status;
   if ((status = lgmpHostInit(shmDev.mem, shmDev.size, &app.lgmp,

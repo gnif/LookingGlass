@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/crash.h"
 #include "common/debug.h"
+#include "common/version.h"
 
 #if defined(ENABLE_BACKTRACE)
 
@@ -176,7 +177,7 @@ static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
   dl_iterate_phdr(dl_iterate_phdr_callback, NULL);
   load_symbols();
 
-  DEBUG_ERROR("==== FATAL CRASH (" BUILD_VERSION ") ====");
+  DEBUG_ERROR("==== FATAL CRASH (%s) ====", BUILD_VERSION);
   DEBUG_ERROR("signal %d (%s), address is %p", sig_num, strsignal(sig_num), info->si_addr);
 
   size     = backtrace(array, 50);

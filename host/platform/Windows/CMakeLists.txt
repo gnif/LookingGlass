@@ -38,5 +38,5 @@ target_include_directories(platform_Windows
 # these are for the nsis installer generator
 configure_file("${PROJECT_SOURCE_DIR}/installer.nsi" "${PROJECT_BINARY_DIR}/installer.nsi" COPYONLY)
 configure_file("${PROJECT_TOP}/resources/icon.ico"   "${PROJECT_BINARY_DIR}/icon.ico"      COPYONLY)
-configure_file("${PROJECT_TOP}/VERSION"              "${PROJECT_BINARY_DIR}/VERSION"       COPYONLY)
+configure_file("${CMAKE_BINARY_DIR}/VERSION"         "${PROJECT_BINARY_DIR}/VERSION"       COPYONLY)
 configure_file("${PROJECT_TOP}/LICENSE"              "${PROJECT_BINARY_DIR}/LICENSE.txt"   COPYONLY)
