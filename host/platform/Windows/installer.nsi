@@ -36,7 +36,7 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 !define MUI_ICON "icon.ico"
 !define MUI_UNICON "icon.ico"
 !define MUI_LICENSEPAGE_BUTTON "Agree"
-!define /file VERSION "VERSION"
+!define /file VERSION "../../VERSION"
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
