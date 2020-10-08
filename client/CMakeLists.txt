@@ -59,7 +59,7 @@ get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 add_custom_command(
 	OUTPUT	${CMAKE_BINARY_DIR}/version.c
 		${CMAKE_BINARY_DIR}/_version.c
-	COMMAND	${CMAKE_COMMAND} -P
+	COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
 		${PROJECT_TOP}/version.cmake
 )
 

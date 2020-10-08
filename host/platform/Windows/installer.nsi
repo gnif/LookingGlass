@@ -134,7 +134,7 @@ Section "-Install" Section1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
   "NoModify" "1"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
-    "DisplayVersion" ${VERSION}
+  "DisplayVersion" ${VERSION}
 
 SectionEnd
 
