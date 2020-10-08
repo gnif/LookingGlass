@@ -1,17 +1,14 @@
-execute_process(COMMAND git describe --always --long --abbrev=10 --tags
-	            OUTPUT_VARIABLE GIT_REV
-	            ERROR_QUIET)
+execute_process(
+	COMMAND git describe --always --long --abbrev=10 --tags
+	WORKING_DIRECTORY "${PROJECT_TOP}"
+        OUTPUT_VARIABLE GIT_REV
+        ERROR_QUIET)
 
 if (NOT "${GIT_REV}" STREQUAL "")
 	execute_process(
 		COMMAND bash -c "git diff --quiet --exit-code || echo +"
+		WORKING_DIRECTORY "${PROJECT_TOP}"
 		OUTPUT_VARIABLE GIT_DIFF)
-	execute_process(
-		COMMAND git describe --exact-match --tags
-		OUTPUT_VARIABLE GIT_TAG ERROR_QUIET)
-	execute_process(
-		COMMAND git rev-parse --abbrev-ref HEAD
-		OUTPUT_VARIABLE GIT_BRANCH)
 
 	string(STRIP "${GIT_REV}" GIT_REV)
 endif()
