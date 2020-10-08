@@ -9,23 +9,27 @@ if (NOT "${GIT_REV}" STREQUAL "")
 		COMMAND bash -c "git diff --quiet --exit-code || echo +"
 		WORKING_DIRECTORY "${PROJECT_TOP}"
 		OUTPUT_VARIABLE GIT_DIFF)
-
-	string(STRIP "${GIT_REV}" GIT_REV)
-endif()
-
-set(GIT_VERSION "const char * BUILD_VERSION = \"${GIT_REV}\";")
-
-if(EXISTS ${CMAKE_BINARY_DIR}/version.c)
-	file(READ ${CMAKE_BINARY_DIR}/version.c GIT_VERSION_)
 else()
 	if (EXISTS ${PROJECT_TOP}/VERSION)
-		file(READ ${PROJECT_TOP}/VERSION GIT_VERSION_)
+		file(READ ${PROJECT_TOP}/VERSION GIT_REV)
 	else()
-		set(GIT_VERSION_ "UNKNOWN")
+		set(GIT_REV "UNKNOWN")
+		set(GIT_DIFF "")
 	endif()
 endif()
 
-if (NOT "${GIT_VERSION}" STREQUAL "${GIT_VERSION_}")
-	file(WRITE ${CMAKE_BINARY_DIR}/version.c "${GIT_VERSION}")
-	file(WRITE ${CMAKE_BINARY_DIR}/VERSION   "${GIT_REV}")
+string(STRIP "${GIT_REV}" GIT_REV)
+string(STRIP "${GIT_DIFF}" GIT_DIFF)
+set(GIT_VERSION "${GIT_REV}${GIT_DIFF}")
+set(BUILD_VERSION "const char * BUILD_VERSION = \"${GIT_VERSION}\";")
+
+if(EXISTS "${CMAKE_BINARY_DIR}/version.c")
+	file(READ ${CMAKE_BINARY_DIR}/version.c BUILD_VERSION_)
+else()
+	set(BUILD_VERSION_ "")
+endif()
+
+if (NOT "${BUILD_VERSION}" STREQUAL "${BUILD_VERSION_}")
+	file(WRITE ${CMAKE_BINARY_DIR}/version.c "${BUILD_VERSION}")
+	file(WRITE ${CMAKE_BINARY_DIR}/VERSION   "${GIT_VERSION}")
 endif()
