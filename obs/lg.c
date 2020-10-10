@@ -247,6 +247,15 @@ static void * pointerThread(void * data)
 
       memcpy(this->cursorData, data, dataSize);
 
+      if (cursor->type == CURSOR_TYPE_MASKED_COLOR)
+      {
+        for(int i = 0; i < dataSize; ++i)
+        {
+          const uint32_t c = ((uint32_t *)this->cursorData)[i];
+          ((uint32_t *)this->cursorData)[i] = (c & ~0xFF000000) | (c & 0xFF000000 ? 0x0 : 0xFF000000);
+        }
+      }
+
       this->cursor.width  = cursor->width;
       this->cursor.height = cursor->height;
       this->cursor.hx     = cursor->hx;
@@ -348,6 +357,9 @@ static void lgVideoTick(void * data, float seconds)
 
     switch(this->cursor.type)
     {
+      case CURSOR_TYPE_MASKED_COLOR:
+        /* fallthrough */
+
       case CURSOR_TYPE_COLOR:
         this->cursorTex =
           gs_texture_create(
