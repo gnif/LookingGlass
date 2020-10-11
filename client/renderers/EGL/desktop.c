@@ -197,6 +197,11 @@ bool egl_desktop_update(EGL_Desktop * desktop, const bool sourceChanged, const L
         desktop->shader = &desktop->shader_generic;
         break;
 
+      case FRAME_TYPE_RGBA16F:
+        pixFmt = EGL_PF_RGBA16F;
+        desktop->shader = &desktop->shader_generic;
+        break;
+
       case FRAME_TYPE_YUV420:
         pixFmt = EGL_PF_YUV420;
         desktop->shader = &desktop->shader_yuv;

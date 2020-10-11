@@ -29,6 +29,7 @@ typedef enum FrameType
   FRAME_TYPE_BGRA      , // BGRA interleaved: B,G,R,A 32bpp
   FRAME_TYPE_RGBA      , // RGBA interleaved: R,G,B,A 32bpp
   FRAME_TYPE_RGBA10    , // RGBA interleaved: R,G,B,A 10,10,10,2 bpp
+  FRAME_TYPE_RGBA16F   , // RGBA interleaved: R,G,B,A 16,16,16,16 bpp float
   FRAME_TYPE_YUV420    , // YUV420
   FRAME_TYPE_MAX       , // sentinel value
 }
@@ -51,7 +52,7 @@ typedef enum CursorType
 CursorType;
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 3
+#define KVMFR_VERSION 4
 
 typedef struct KVMFR
 {

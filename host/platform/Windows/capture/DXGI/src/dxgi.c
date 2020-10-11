@@ -519,11 +519,18 @@ static bool dxgi_init()
   IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
   DEBUG_INFO("Source Format    : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
 
+  uint8_t bpp = 8;
   switch(dupDesc.ModeDesc.Format)
   {
-    case DXGI_FORMAT_B8G8R8A8_UNORM   : this->format = CAPTURE_FMT_BGRA  ; break;
-    case DXGI_FORMAT_R8G8B8A8_UNORM   : this->format = CAPTURE_FMT_RGBA  ; break;
-    case DXGI_FORMAT_R10G10B10A2_UNORM: this->format = CAPTURE_FMT_RGBA10; break;
+    case DXGI_FORMAT_B8G8R8A8_UNORM    : this->format = CAPTURE_FMT_BGRA   ; break;
+    case DXGI_FORMAT_R8G8B8A8_UNORM    : this->format = CAPTURE_FMT_RGBA   ; break;
+    case DXGI_FORMAT_R10G10B10A2_UNORM : this->format = CAPTURE_FMT_RGBA10 ; break;
+
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+      this->format = CAPTURE_FMT_RGBA16F;
+      bpp = 16;
+      break;
+
     default:
       DEBUG_ERROR("Unsupported source format");
       goto fail;
@@ -562,7 +569,7 @@ static bool dxgi_init()
     goto fail;
   }
   this->pitch  = mapping.RowPitch;
-  this->stride = mapping.RowPitch / 4;
+  this->stride = mapping.RowPitch / bpp;
   ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0);
 
   QueryPerformanceFrequency(&this->perfFreq) ;

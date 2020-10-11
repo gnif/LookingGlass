@@ -440,6 +440,11 @@ static int frameThread(void * unused)
         lgrFormat.bpp  = 32;
         break;
 
+      case FRAME_TYPE_RGBA16F:
+        dataSize       = lgrFormat.height * lgrFormat.pitch;
+        lgrFormat.bpp  = 64;
+        break;
+
       case FRAME_TYPE_YUV420:
         dataSize       = lgrFormat.height * lgrFormat.width;
         dataSize      += (dataSize / 4) * 2;

@@ -219,6 +219,19 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->pboBufferSize = height * stride;
       break;
 
+    case EGL_PF_RGBA16F:
+      planeCount             = 1;
+      texture->bpp           = 8;
+      texture->format        = GL_RGBA;
+      texture->planes[0][0]  = width;
+      texture->planes[0][1]  = height;
+      texture->planes[0][2]  = stride / 8;
+      texture->offsets[0]    = 0;
+      texture->intFormat     = GL_RGB16;
+      texture->dataType      = GL_FLOAT;
+      texture->pboBufferSize = height * stride;
+      break;
+
     case EGL_PF_YUV420:
       planeCount             = 3;
       texture->bpp           = 4;
