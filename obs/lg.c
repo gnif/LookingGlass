@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdatomic.h>
+#include <GL/gl.h>
 
 typedef enum
 {
@@ -40,14 +41,17 @@ typedef struct
   pthread_t         frameThread, pointerThread;
   os_sem_t        * frameSem;
 
+  bool                 cursorMono;
   gs_texture_t       * cursorTex;
+  struct gs_rect       cursorRect;
+
   bool                 cursorVisible;
-  volatile KVMFRCursor cursor;
+  KVMFRCursor          cursor;
   os_sem_t           * cursorSem;
   atomic_uint          cursorVer;
   unsigned int         cursorCurVer;
   uint32_t             cursorSize;
-  void               * cursorData;
+  uint32_t           * cursorData;
 }
 LGPlugin;
 
@@ -182,6 +186,16 @@ static void * frameThread(void * data)
   return NULL;
 }
 
+inline static void allocCursorData(LGPlugin * this, const unsigned int size)
+{
+  if (this->cursorSize >= size)
+    return;
+
+  bfree(this->cursorData);
+  this->cursorSize = size;
+  this->cursorData = bmalloc(size);
+}
+
 static void * pointerThread(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
@@ -209,57 +223,69 @@ static void * pointerThread(void * data)
       continue;
     }
 
-    KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
+    const KVMFRCursor * const cursor = (const KVMFRCursor * const)msg.mem;
     this->cursorVisible =
       msg.udata & CURSOR_FLAG_VISIBLE;
 
     if (msg.udata & CURSOR_FLAG_SHAPE)
     {
       os_sem_wait(this->cursorSem);
-      const uint8_t * data = (const uint8_t *)(cursor + 1);
+      const uint8_t * const data = (const uint8_t * const)(cursor + 1);
       unsigned int dataSize = 0;
 
-      this->cursor.type = cursor->type;
       switch(cursor->type)
       {
         case CURSOR_TYPE_MASKED_COLOR:
-          // fall through
+        {
+          dataSize = cursor->height * cursor->pitch;
+          allocCursorData(this, dataSize);
+
+          const uint32_t * s = (const uint32_t *)data;
+          uint32_t * d       = this->cursorData;
+          for(int i = 0; i < dataSize; ++i, ++s, ++d)
+            *d = (*s & ~0xFF000000) | (*s & 0xFF000000 ? 0x0 : 0xFF000000);
+          break;
+        }
 
         case CURSOR_TYPE_COLOR:
+        {
           dataSize = cursor->height * cursor->pitch;
+          allocCursorData(this, dataSize);
+          memcpy(this->cursorData, data, dataSize);
           break;
+        }
 
         case CURSOR_TYPE_MONOCHROME:
-          dataSize = cursor->width * cursor->height;
+        {
+          dataSize = cursor->height * sizeof(uint32_t);
+          allocCursorData(this, dataSize);
+
+          const int hheight = cursor->height / 2;
+          uint32_t * d = this->cursorData;
+          for(int y = 0; y < hheight; ++y)
+            for(int x = 0; x < cursor->width; ++x)
+            {
+              const uint8_t  * srcAnd  = data   + (cursor->pitch * y) + (x / 8);
+              const uint8_t  * srcXor  = srcAnd + cursor->pitch * hheight;
+              const uint8_t    mask    = 0x80 >> (x % 8);
+              const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
+              const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
+
+              d[y * cursor->width + x                          ] = andMask;
+              d[y * cursor->width + x + cursor->width * hheight] = xorMask;
+            }
+
           break;
+        }
 
         default:
           printf("Invalid cursor type\n");
           break;
       }
 
-      if (this->cursorSize < dataSize)
-      {
-        free(this->cursorData);
-        this->cursorSize = dataSize;
-        this->cursorData = bmalloc(dataSize);
-      }
-
-      memcpy(this->cursorData, data, dataSize);
-
-      if (cursor->type == CURSOR_TYPE_MASKED_COLOR)
-      {
-        for(int i = 0; i < dataSize; ++i)
-        {
-          const uint32_t c = ((uint32_t *)this->cursorData)[i];
-          ((uint32_t *)this->cursorData)[i] = (c & ~0xFF000000) | (c & 0xFF000000 ? 0x0 : 0xFF000000);
-        }
-      }
-
+      this->cursor.type   = cursor->type;
       this->cursor.width  = cursor->width;
       this->cursor.height = cursor->height;
-      this->cursor.hx     = cursor->hx;
-      this->cursor.hy     = cursor->hy;
 
       atomic_fetch_add_explicit(&this->cursorVer, 1, memory_order_relaxed);
       os_sem_post(this->cursorSem);
@@ -342,6 +368,9 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
+  this->cursorRect.x = this->cursor.x;
+  this->cursorRect.y = this->cursor.y;
+
   /* update the cursor texture */
   unsigned int cursorVer = atomic_load(&this->cursorVer);
   if (cursorVer != this->cursorCurVer)
@@ -361,23 +390,39 @@ static void lgVideoTick(void * data, float seconds)
         /* fallthrough */
 
       case CURSOR_TYPE_COLOR:
-        this->cursorTex =
+        this->cursorMono  = false;
+        this->cursorTex   =
           gs_texture_create(
               this->cursor.width,
               this->cursor.height,
               GS_BGRA,
               1,
-              (const uint8_t**)&this->cursorData,
+              (const uint8_t **)&this->cursorData,
+              GS_DYNAMIC);
+        break;
+
+      case CURSOR_TYPE_MONOCHROME:
+        this->cursorMono = true;
+        this->cursorTex  =
+          gs_texture_create(
+              this->cursor.width,
+              this->cursor.height,
+              GS_RGBA,
+              1,
+              (const uint8_t **)&this->cursorData,
               GS_DYNAMIC);
         break;
 
       default:
-        printf("only rgb cursors supported at this time\n");
         break;
     }
 
     obs_leave_graphics();
-    this->cursorCurVer = cursorVer;
+
+    this->cursorCurVer  = cursorVer;
+    this->cursorRect.cx = this->cursor.width;
+    this->cursorRect.cy = this->cursor.height;
+
     os_sem_post(this->cursorSem);
   }
 
@@ -483,17 +528,6 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
   if (!this->texture)
     return;
 
-  struct matrix4 m4;
-  gs_matrix_get(&m4);
-  struct gs_rect r =
-  {
-    .x  = m4.t.x,
-    .y  = m4.t.y,
-    .cx = (double)this->width  * m4.x.x,
-    .cy = (double)this->height * m4.y.y
-  };
-  gs_set_scissor_rect(&r);
-
   effect = obs_get_base_effect(OBS_EFFECT_OPAQUE);
   gs_eparam_t *image = gs_effect_get_param_by_name(effect, "image");
   gs_effect_set_texture(image, this->texture);
@@ -503,19 +537,54 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
 
   if (this->cursorVisible && this->cursorTex)
   {
+    struct matrix4 m4;
+    gs_matrix_get(&m4);
+    struct gs_rect r =
+    {
+      .x  = m4.t.x,
+      .y  = m4.t.y,
+      .cx = (double)this->width  * m4.x.x,
+      .cy = (double)this->height * m4.y.y
+    };
+    gs_set_scissor_rect(&r);
+
     effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
     image  = gs_effect_get_param_by_name(effect, "image");
     gs_effect_set_texture(image, this->cursorTex);
-    while (gs_effect_loop(effect, "Draw"))
-    {
-      gs_matrix_push();
-      gs_matrix_translate3f(this->cursor.x, this->cursor.y, 0.0f);
-      gs_draw_sprite(this->cursorTex, 0, 0, 0);
-      gs_matrix_pop();
-    }
-  }
 
-  gs_set_scissor_rect(NULL);
+    gs_matrix_push();
+    gs_matrix_translate3f(this->cursorRect.x, this->cursorRect.y, 0.0f);
+
+    if (!this->cursorMono)
+    {
+      while (gs_effect_loop(effect, "Draw"))
+        gs_draw_sprite(this->cursorTex, 0, 0, 0);
+    }
+    else
+    {
+      while (gs_effect_loop(effect, "Draw"))
+      {
+        glEnable(GL_COLOR_LOGIC_OP);
+
+        glLogicOp(GL_AND);
+        gs_draw_sprite_subregion(
+            this->cursorTex    , 0,
+            0                  , 0,
+            this->cursorRect.cx, this->cursorRect.cy / 2 - 1);
+
+        glLogicOp(GL_XOR);
+        gs_draw_sprite_subregion(
+            this->cursorTex    , 0,
+            0                  , this->cursorRect.cy / 2 + 1,
+            this->cursorRect.cx, this->cursorRect.cy / 2);
+
+        glDisable(GL_COLOR_LOGIC_OP);
+      }
+    }
+
+    gs_matrix_pop();
+    gs_set_scissor_rect(NULL);
+  }
 }
 
 static uint32_t lgGetWidth(void * data)
