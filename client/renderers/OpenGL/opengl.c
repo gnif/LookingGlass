@@ -889,6 +889,12 @@ static enum ConfigStatus configure(struct Inst * this, SDL_Window *window)
       this->dataFormat = GL_UNSIGNED_INT_2_10_10_10_REV;
       break;
 
+    case FRAME_TYPE_RGBA16F:
+      this->intFormat  = GL_RGB16F;
+      this->vboFormat  = GL_RGBA;
+      this->dataFormat = GL_HALF_FLOAT;
+      break;
+
     default:
       DEBUG_ERROR("Unknown/unsupported compression type");
       return CONFIG_STATUS_ERROR;
