@@ -351,7 +351,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
     for(int p = 0; p < texture->planeCount; ++p)
     {
       glBindTexture(GL_TEXTURE_2D, texture->tex[0].t[p]);
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][0]);
+      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][2]);
       glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[p][0], texture->planes[p][1],
           texture->format, texture->dataType, buffer + texture->offsets[p]);
     }
