@@ -31,6 +31,7 @@ typedef struct
   char            * shmFile;
   uint32_t          width, height;
   FrameType         type;
+  int               bpp;
   struct IVSHMEM    shmDev;
   PLGMPClient       lgmp;
   PLGMPClientQueue  frameQueue, pointerQueue;
@@ -474,11 +475,18 @@ static void lgVideoTick(void * data, float seconds)
     }
 
     enum gs_color_format format;
+    this->bpp = 4;
     switch(this->type)
     {
-      case FRAME_TYPE_BGRA  : format = GS_BGRA       ; break;
-      case FRAME_TYPE_RGBA  : format = GS_RGBA       ; break;
-      case FRAME_TYPE_RGBA10: format = GS_R10G10B10A2; break;
+      case FRAME_TYPE_BGRA   : format = GS_BGRA       ; break;
+      case FRAME_TYPE_RGBA   : format = GS_RGBA       ; break;
+      case FRAME_TYPE_RGBA10 : format = GS_R10G10B10A2; break;
+
+      case FRAME_TYPE_RGBA16F:
+        this->bpp = 8;
+        format    = GS_RGBA16F;
+        break;
+
       default:
         printf("invalid type %d\n", this->type);
         os_sem_post(this->frameSem);
@@ -508,7 +516,7 @@ static void lgVideoTick(void * data, float seconds)
       this->linesize,   // dstpitch
       frame->height,    // height
       frame->width,     // width
-      4,                // bpp
+      this->bpp,        // bpp
       frame->pitch      // linepitch
   );
 
