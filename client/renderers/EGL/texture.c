@@ -227,7 +227,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->planes[0][1]  = height;
       texture->planes[0][2]  = stride / 8;
       texture->offsets[0]    = 0;
-      texture->intFormat     = GL_RGB16;
+      texture->intFormat     = GL_RGBA16F;
       texture->dataType      = GL_FLOAT;
       texture->pboBufferSize = height * stride;
       break;
