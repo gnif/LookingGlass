@@ -86,34 +86,36 @@ typedef const char * (* LG_RendererGetName)();
 // called pre-creation to allow the renderer to register any options it might have
 typedef void         (* LG_RendererSetup)();
 
-typedef bool         (* LG_RendererCreate      )(void ** opaque, const LG_RendererParams params);
-typedef bool         (* LG_RendererInitialize  )(void * opaque, Uint32 * sdlFlags);
-typedef void         (* LG_RendererDeInitialize)(void * opaque);
-typedef void         (* LG_RendererOnRestart   )(void * opaque);
-typedef void         (* LG_RendererOnResize    )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
-typedef bool         (* LG_RendererOnMouseShape)(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
-typedef bool         (* LG_RendererOnMouseEvent)(void * opaque, const bool visible , const int x, const int y);
-typedef bool         (* LG_RendererOnFrameEvent)(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame);
-typedef void         (* LG_RendererOnAlert     )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
-typedef bool         (* LG_RendererRender      )(void * opaque, SDL_Window *window);
-typedef void         (* LG_RendererUpdateFPS   )(void * opaque, const float avgUPS, const float avgFPS);
+typedef bool         (* LG_RendererCreate       )(void ** opaque, const LG_RendererParams params);
+typedef bool         (* LG_RendererInitialize   )(void * opaque, Uint32 * sdlFlags);
+typedef void         (* LG_RendererDeInitialize )(void * opaque);
+typedef void         (* LG_RendererOnRestart    )(void * opaque);
+typedef void         (* LG_RendererOnResize     )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
+typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
+typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visible , const int x, const int y);
+typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format);
+typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame);
+typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
+typedef bool         (* LG_RendererRender       )(void * opaque, SDL_Window *window);
+typedef void         (* LG_RendererUpdateFPS    )(void * opaque, const float avgUPS, const float avgFPS);
 
 typedef struct LG_Renderer
 {
   LG_RendererGetName      get_name;
   LG_RendererSetup        setup;
 
-  LG_RendererCreate       create;
-  LG_RendererInitialize   initialize;
-  LG_RendererDeInitialize deinitialize;
-  LG_RendererOnRestart    on_restart;
-  LG_RendererOnResize     on_resize;
-  LG_RendererOnMouseShape on_mouse_shape;
-  LG_RendererOnMouseEvent on_mouse_event;
-  LG_RendererOnFrameEvent on_frame_event;
-  LG_RendererOnAlert      on_alert;
-  LG_RendererRender       render_startup;
-  LG_RendererRender       render;
-  LG_RendererUpdateFPS    update_fps;
+  LG_RendererCreate         create;
+  LG_RendererInitialize     initialize;
+  LG_RendererDeInitialize   deinitialize;
+  LG_RendererOnRestart      on_restart;
+  LG_RendererOnResize       on_resize;
+  LG_RendererOnMouseShape   on_mouse_shape;
+  LG_RendererOnMouseEvent   on_mouse_event;
+  LG_RendererOnFrameFormat  on_frame_format;
+  LG_RendererOnFrame        on_frame;
+  LG_RendererOnAlert        on_alert;
+  LG_RendererRender         render_startup;
+  LG_RendererRender         render;
+  LG_RendererUpdateFPS      update_fps;
 }
 LG_Renderer;

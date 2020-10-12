@@ -308,20 +308,10 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame)
+bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
 {
   struct Inst * this = (struct Inst *)opaque;
-  const bool sourceChanged = (
-    this->format.type   != format.type   ||
-    this->format.width  != format.width  ||
-    this->format.height != format.height ||
-    this->format.pitch  != format.pitch
-  );
-
-  if (sourceChanged)
-    memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-
-  this->useNearest = this->width < format.width || this->height < format.height;
+  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
   /* this event runs in a second thread so we need to init it here */
   if (!this->frameContext)
@@ -344,7 +334,15 @@ bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const Fra
     }
   }
 
-  if (!egl_desktop_update(this->desktop, sourceChanged, format, frame))
+  this->useNearest = this->width < format.width || this->height < format.height;
+  return egl_desktop_setup(this->desktop, format);
+}
+
+bool egl_on_frame(void * opaque, const FrameBuffer * frame)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  if (!egl_desktop_update(this->desktop, frame))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
@@ -614,18 +612,19 @@ void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 
 struct LG_Renderer LGR_EGL =
 {
-  .get_name       = egl_get_name,
-  .setup          = egl_setup,
-  .create         = egl_create,
-  .initialize     = egl_initialize,
-  .deinitialize   = egl_deinitialize,
-  .on_restart     = egl_on_restart,
-  .on_resize      = egl_on_resize,
-  .on_mouse_shape = egl_on_mouse_shape,
-  .on_mouse_event = egl_on_mouse_event,
-  .on_frame_event = egl_on_frame_event,
-  .on_alert       = egl_on_alert,
-  .render_startup = egl_render_startup,
-  .render         = egl_render,
-  .update_fps     = egl_update_fps
+  .get_name        = egl_get_name,
+  .setup           = egl_setup,
+  .create          = egl_create,
+  .initialize      = egl_initialize,
+  .deinitialize    = egl_deinitialize,
+  .on_restart      = egl_on_restart,
+  .on_resize       = egl_on_resize,
+  .on_mouse_shape  = egl_on_mouse_shape,
+  .on_mouse_event  = egl_on_mouse_event,
+  .on_frame_format = egl_on_frame_format,
+  .on_frame        = egl_on_frame,
+  .on_alert        = egl_on_alert,
+  .render_startup  = egl_render_startup,
+  .render          = egl_render,
+  .update_fps      = egl_update_fps
 };

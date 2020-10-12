@@ -375,36 +375,20 @@ bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const
   return false;
 }
 
-bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer * frame)
+bool opengl_on_frame_format(void * opaque, const LG_RendererFormat format)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-  {
-    DEBUG_ERROR("Invalid opaque pointer");
-    return false;
-  }
 
   LG_LOCK(this->formatLock);
-  if (this->reconfigure)
-  {
-    LG_UNLOCK(this->formatLock);
-    return true;
-  }
-
-  if (!this->configured ||
-    this->format.type   != format.type   ||
-    this->format.width  != format.width  ||
-    this->format.height != format.height ||
-    this->format.stride != format.stride ||
-    this->format.bpp    != format.bpp
-  )
-  {
-    memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-    this->reconfigure = true;
-    LG_UNLOCK(this->formatLock);
-    return true;
-  }
+  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+  this->reconfigure = true;
   LG_UNLOCK(this->formatLock);
+  return true;
+}
+
+bool opengl_on_frame(void * opaque, const FrameBuffer * frame)
+{
+  struct Inst * this = (struct Inst *)opaque;
 
   LG_LOCK(this->syncLock);
   this->frame       = frame;
@@ -829,21 +813,22 @@ static void render_wait(struct Inst * this)
 
 const LG_Renderer LGR_OpenGL =
 {
-  .get_name       = opengl_get_name,
-  .setup          = opengl_setup,
+  .get_name        = opengl_get_name,
+  .setup           = opengl_setup,
 
-  .create         = opengl_create,
-  .initialize     = opengl_initialize,
-  .deinitialize   = opengl_deinitialize,
-  .on_restart     = opengl_on_restart,
-  .on_resize      = opengl_on_resize,
-  .on_mouse_shape = opengl_on_mouse_shape,
-  .on_mouse_event = opengl_on_mouse_event,
-  .on_frame_event = opengl_on_frame_event,
-  .on_alert       = opengl_on_alert,
-  .render_startup = opengl_render_startup,
-  .render         = opengl_render,
-  .update_fps     = opengl_update_fps
+  .create          = opengl_create,
+  .initialize      = opengl_initialize,
+  .deinitialize    = opengl_deinitialize,
+  .on_restart      = opengl_on_restart,
+  .on_resize       = opengl_on_resize,
+  .on_mouse_shape  = opengl_on_mouse_shape,
+  .on_mouse_event  = opengl_on_mouse_event,
+  .on_frame_format = opengl_on_frame_format,
+  .on_frame        = opengl_on_frame,
+  .on_alert        = opengl_on_alert,
+  .render_startup  = opengl_render_startup,
+  .render          = opengl_render,
+  .update_fps      = opengl_update_fps
 };
 
 static bool _check_gl_error(unsigned int line, const char * name)

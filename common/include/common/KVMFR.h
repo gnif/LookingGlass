@@ -35,6 +35,8 @@ typedef enum FrameType
 }
 FrameType;
 
+extern const char * FrameTypeStr[FRAME_TYPE_MAX];
+
 enum
 {
   CURSOR_FLAG_POSITION = 0x1,

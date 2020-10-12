@@ -471,6 +471,18 @@ static int frameThread(void * unused)
 
       formatValid = true;
       formatVer   = frame->formatVer;
+
+      DEBUG_INFO("Format: %s %ux%u %u %u",
+          FrameTypeStr[frame->type],
+          frame->width, frame->height,
+          frame->stride, frame->pitch);
+
+      if (!state.lgr->on_frame_format(state.lgrData, lgrFormat))
+      {
+        DEBUG_ERROR("renderer failed to configure format");
+        state.state = APP_STATE_SHUTDOWN;
+        break;
+      }
     }
 
     if (lgrFormat.width != state.srcSize.x || lgrFormat.height != state.srcSize.y)
@@ -485,9 +497,10 @@ static int frameThread(void * unused)
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!state.lgr->on_frame_event(state.lgrData, lgrFormat, fb))
+    if (!state.lgr->on_frame(state.lgrData, fb))
     {
-      DEBUG_ERROR("renderer on frame event returned failure");
+      lgmpClientMessageDone(queue);
+      DEBUG_ERROR("renderer on frame returned failure");
       state.state = APP_STATE_SHUTDOWN;
       break;
     }

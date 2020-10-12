@@ -175,60 +175,62 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   *desktop = NULL;
 }
 
-bool egl_desktop_update(EGL_Desktop * desktop, const bool sourceChanged, const LG_RendererFormat format, const FrameBuffer * frame)
+bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
 {
-  if (sourceChanged)
+  enum EGL_PixelFormat pixFmt;
+  switch(format.type)
   {
-    enum EGL_PixelFormat pixFmt;
-    switch(format.type)
-    {
-      case FRAME_TYPE_BGRA:
-        pixFmt = EGL_PF_BGRA;
-        desktop->shader = &desktop->shader_generic;
-        break;
+    case FRAME_TYPE_BGRA:
+      pixFmt = EGL_PF_BGRA;
+      desktop->shader = &desktop->shader_generic;
+      break;
 
-      case FRAME_TYPE_RGBA:
-        pixFmt = EGL_PF_RGBA;
-        desktop->shader = &desktop->shader_generic;
-        break;
+    case FRAME_TYPE_RGBA:
+      pixFmt = EGL_PF_RGBA;
+      desktop->shader = &desktop->shader_generic;
+      break;
 
-      case FRAME_TYPE_RGBA10:
-        pixFmt = EGL_PF_RGBA10;
-        desktop->shader = &desktop->shader_generic;
-        break;
+    case FRAME_TYPE_RGBA10:
+      pixFmt = EGL_PF_RGBA10;
+      desktop->shader = &desktop->shader_generic;
+      break;
 
-      case FRAME_TYPE_RGBA16F:
-        pixFmt = EGL_PF_RGBA16F;
-        desktop->shader = &desktop->shader_generic;
-        break;
+    case FRAME_TYPE_RGBA16F:
+      pixFmt = EGL_PF_RGBA16F;
+      desktop->shader = &desktop->shader_generic;
+      break;
 
-      case FRAME_TYPE_YUV420:
-        pixFmt = EGL_PF_YUV420;
-        desktop->shader = &desktop->shader_yuv;
-        break;
+    case FRAME_TYPE_YUV420:
+      pixFmt = EGL_PF_YUV420;
+      desktop->shader = &desktop->shader_yuv;
+      break;
 
-      default:
-        DEBUG_ERROR("Unsupported frame format");
-        return false;
-    }
-
-    desktop->width  = format.width;
-    desktop->height = format.height;
-
-    if (!egl_texture_setup(
-      desktop->texture,
-      pixFmt,
-      format.width,
-      format.height,
-      format.pitch,
-      true // streaming texture
-    ))
-    {
-      DEBUG_ERROR("Failed to setup the desktop texture");
+    default:
+      DEBUG_ERROR("Unsupported frame format");
       return false;
-    }
   }
 
+  desktop->width  = format.width;
+  desktop->height = format.height;
+
+  if (!egl_texture_setup(
+    desktop->texture,
+    pixFmt,
+    format.width,
+    format.height,
+    format.pitch,
+    true // streaming texture
+  ))
+  {
+    DEBUG_ERROR("Failed to setup the desktop texture");
+    return false;
+  }
+
+  return true;
+}
+
+bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame)
+{
   if (!egl_texture_update_from_frame(desktop->texture, frame))
     return false;
 

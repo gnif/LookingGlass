@@ -1,6 +1,6 @@
 /*
-Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+KVMGFX Client - A KVM Client for VGA Passthrough
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,17 +17,14 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
+#include "common/KVMFR.h"
 
-#include <stdbool.h>
-
-#include "interface/renderer.h"
-
-typedef struct EGL_Desktop EGL_Desktop;
-
-bool egl_desktop_init(void * egl, EGL_Desktop ** desktop);
-void egl_desktop_free(EGL_Desktop ** desktop);
-
-bool egl_desktop_setup (EGL_Desktop * desktop, const LG_RendererFormat format);
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame);
-bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest);
+const char * FrameTypeStr[FRAME_TYPE_MAX] =
+{
+  "FRAME_TYPE_INVALID",
+  "FRAME_TYPE_BGRA",
+  "FRAME_TYPE_RGBA",
+  "FRAME_TYPE_RGBA10",
+  "FRAME_TYPE_RGBA16F",
+  "FRAME_TYPE_YUV420"
+};
