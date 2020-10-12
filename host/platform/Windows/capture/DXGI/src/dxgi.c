@@ -57,6 +57,7 @@ enum TextureState
 
 typedef struct Texture
 {
+  unsigned int               formatVer;
   volatile enum TextureState state;
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
@@ -91,6 +92,7 @@ struct iface
   CapturePostPointerBuffer   postPointerBufferFn;
   LGEvent                  * frameEvent;
 
+  unsigned int  formatVer;
   unsigned int  width;
   unsigned int  height;
   unsigned int  pitch;
@@ -227,9 +229,10 @@ static bool dxgi_init()
   HRESULT          status;
   DXGI_OUTPUT_DESC outputDesc;
 
-  this->stop       = false;
-  this->texRIndex  = 0;
-  this->texWIndex  = 0;
+  this->stop      = false;
+  this->texRIndex = 0;
+  this->texWIndex = 0;
+  this->formatVer = 0;
   atomic_store(&this->texReady, 0);
 
   lgResetEvent(this->frameEvent);
@@ -386,6 +389,7 @@ static bool dxgi_init()
   IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
   this->width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
   this->height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
+  ++this->formatVer;
 
   DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
   DEBUG_INFO("Device Vendor ID : 0x%x"   , adapterDesc.VendorId);
@@ -805,7 +809,8 @@ static CaptureResult dxgi_capture()
       ID3D11Texture2D_Release(src);
 
       // set the state, and signal
-      tex->state = TEXTURE_STATE_PENDING_MAP;
+      tex->state     = TEXTURE_STATE_PENDING_MAP;
+      tex->formatVer = this->formatVer;
       if (atomic_fetch_add_explicit(&this->texReady, 1, memory_order_relaxed) == 0)
         lgSignalEvent(this->frameEvent);
 
@@ -950,11 +955,12 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
 
   tex->state = TEXTURE_STATE_MAPPED;
 
-  frame->width  = this->width;
-  frame->height = this->height;
-  frame->pitch  = this->pitch;
-  frame->stride = this->stride;
-  frame->format = this->format;
+  frame->formatVer = tex->formatVer;
+  frame->width     = this->width;
+  frame->height    = this->height;
+  frame->pitch     = this->pitch;
+  frame->stride    = this->stride;
+  frame->format    = this->format;
 
   atomic_fetch_sub_explicit(&this->texReady, 1, memory_order_release);
   return CAPTURE_RESULT_OK;

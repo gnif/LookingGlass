@@ -42,8 +42,11 @@ struct iface
   CapturePostPointerBuffer   postPointerBufferFn;
   LGThread                 * pointerThread;
 
-  unsigned int maxWidth, maxHeight;
-  unsigned int width   , height;
+  unsigned int maxWidth , maxHeight;
+  unsigned int width    , height;
+
+  unsigned int formatVer;
+  unsigned int grabWidth, grabHeight, grabStride;
 
   uint8_t * frameBuffer;
   uint8_t * diffMap;
@@ -195,6 +198,7 @@ static bool nvfbc_init()
     return false;
   }
 
+  ++this->formatVer;
   return true;
 }
 
@@ -284,10 +288,22 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
-  frame->width  = this->grabInfo.dwWidth;
-  frame->height = this->grabInfo.dwHeight;
-  frame->pitch  = this->grabInfo.dwBufferWidth * 4;
-  frame->stride = this->grabInfo.dwBufferWidth;
+  if (
+    this->grabInfo.dwWidth       != this->grabWidth  ||
+    this->grabInfo.dwHeight      != this->grabHeight ||
+    this->grabInfo.dwBufferWidth != this->grabStride)
+  {
+    this->grabWidth  = this->grabInfo.dwWidth;
+    this->grabHeight = this->grabInfo.dwHeight;
+    this->grabStride = this->grabInfo.dwBufferWidth;
+    ++this->formatVer;
+  }
+
+  frame->formatVer = this->formatVer;
+  frame->width     = this->grabWidth;
+  frame->height    = this->grabHeight;
+  frame->pitch     = this->grabStride * 4;
+  frame->stride    = this->grabStride;
 
 #if 0
   //NvFBC never sets bIsHDR so instead we check for any data in the alpha channel

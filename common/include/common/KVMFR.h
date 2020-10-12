@@ -52,7 +52,7 @@ typedef enum CursorType
 CursorType;
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 4
+#define KVMFR_VERSION 5
 
 typedef struct KVMFR
 {
@@ -75,6 +75,7 @@ KVMFRCursor;
 
 typedef struct KVMFRFrame
 {
+  uint32_t  formatVer;   // the frame format version number
   FrameType type;        // the frame data type
   uint32_t  width;       // the width
   uint32_t  height;      // the height

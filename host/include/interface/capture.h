@@ -52,6 +52,7 @@ CaptureFormat;
 
 typedef struct CaptureFrame
 {
+  unsigned int   formatVer;
   unsigned int   width;
   unsigned int   height;
   unsigned int   pitch;

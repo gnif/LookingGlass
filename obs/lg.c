@@ -29,6 +29,7 @@ typedef struct
   obs_source_t    * context;
   LGState           state;
   char            * shmFile;
+  uint32_t          formatVer;
   uint32_t          width, height;
   FrameType         type;
   int               bpp;
@@ -452,20 +453,14 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
-  bool updateTexture = false;
   KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
-  if (this->width  != frame->width  ||
-      this->height != frame->height ||
-      this->type   != frame->type)
+  if (!this->texture || this->formatVer != frame->formatVer)
   {
-    updateTexture = true;
-    this->width   = frame->width;
-    this->height  = frame->height;
-    this->type    = frame->type;
-  }
+    this->formatVer = frame->formatVer;
+    this->width     = frame->width;
+    this->height    = frame->height;
+    this->type      = frame->type;
 
-  if (!this->texture || updateTexture)
-  {
     obs_enter_graphics();
     if (this->texture)
     {
@@ -509,24 +504,32 @@ static void lgVideoTick(void * data, float seconds)
     obs_leave_graphics();
   }
 
-  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-  framebuffer_read(
-      fb,
-      this->texData,    // dst
-      this->linesize,   // dstpitch
-      frame->height,    // height
-      frame->width,     // width
-      this->bpp,        // bpp
-      frame->pitch      // linepitch
-  );
+  if (this->texture)
+  {
+    FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
+    framebuffer_read(
+        fb,
+        this->texData,    // dst
+        this->linesize,   // dstpitch
+        frame->height,    // height
+        frame->width,     // width
+        this->bpp,        // bpp
+        frame->pitch      // linepitch
+    );
 
-  lgmpClientMessageDone(this->frameQueue);
-  os_sem_post(this->frameSem);
+    lgmpClientMessageDone(this->frameQueue);
+    os_sem_post(this->frameSem);
 
-  obs_enter_graphics();
-  gs_texture_unmap(this->texture);
-  gs_texture_map(this->texture, &this->texData, &this->linesize);
-  obs_leave_graphics();
+    obs_enter_graphics();
+    gs_texture_unmap(this->texture);
+    gs_texture_map(this->texture, &this->texData, &this->linesize);
+    obs_leave_graphics();
+  }
+  else
+  {
+    lgmpClientMessageDone(this->frameQueue);
+    os_sem_post(this->frameSem);
+  }
 }
 
 static void lgVideoRender(void * data, gs_effect_t * effect)
