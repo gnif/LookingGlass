@@ -144,6 +144,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "dontUpscale",
+    .description    = "Never try to upscale the window",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
     .name           = "borderless",
     .description    = "Borderless mode",
     .shortopt       = 'd',
@@ -400,6 +407,7 @@ bool config_load(int argc, char * argv[])
   params.allowResize   = option_get_bool  ("win", "allowResize"  );
   params.keepAspect    = option_get_bool  ("win", "keepAspect"   );
   params.forceAspect   = option_get_bool  ("win", "forceAspect"  );
+  params.dontUpscale   = option_get_bool  ("win", "dontUpscale"  );
   params.borderless    = option_get_bool  ("win", "borderless"   );
   params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
   params.maximize      = option_get_bool  ("win", "maximize"     );

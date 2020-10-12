@@ -92,6 +92,17 @@ static void updatePositionInfo()
       const float wndAspect = (float)state.windowH / (float)state.windowW;
       bool force = true;
 
+      if (params.dontUpscale &&
+          state.srcSize.x <= state.windowW &&
+          state.srcSize.y <= state.windowH)
+      {
+        force = false;
+        state.dstRect.w = state.srcSize.x;
+        state.dstRect.h = state.srcSize.y;
+        state.dstRect.x = state.windowW / 2 - state.srcSize.x / 2;
+        state.dstRect.y = state.windowH / 2 - state.srcSize.y / 2;
+      }
+      else
       if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
       {
         force           = false;
