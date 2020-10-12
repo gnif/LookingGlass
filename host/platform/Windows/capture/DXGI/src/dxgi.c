@@ -232,7 +232,6 @@ static bool dxgi_init()
   this->stop      = false;
   this->texRIndex = 0;
   this->texWIndex = 0;
-  this->formatVer = 0;
   atomic_store(&this->texReady, 0);
 
   lgResetEvent(this->frameEvent);
