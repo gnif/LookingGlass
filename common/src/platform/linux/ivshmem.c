@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "common/debug.h"
 #include "common/option.h"
@@ -196,6 +197,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     if (len <= 0)
     {
       DEBUG_ERROR("Failed to read the device size");
+      DEBUG_ERROR("%s", strerror(errno));
       close(fd);
       return false;
     }
@@ -207,7 +209,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     if (devFD < 0)
     {
       DEBUG_ERROR("Failed to open: %s", shmDevice);
-      DEBUG_ERROR("Do you have permission to access the device?");
+      DEBUG_ERROR("%s", strerror(errno));
       return false;
     }
   }
@@ -217,6 +219,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     if (stat(shmDevice, &st) != 0)
     {
       DEBUG_ERROR("Failed to stat: %s", shmDevice);
+      DEBUG_ERROR("%s", strerror(errno));
       return false;
     }
 
@@ -225,6 +228,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     if (devFD < 0)
     {
       DEBUG_ERROR("Failed to open: %s", shmDevice);
+      DEBUG_ERROR("%s", strerror(errno));
       return false;
     }
   }
@@ -233,6 +237,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
   if (map == MAP_FAILED)
   {
     DEBUG_ERROR("Failed to map the shared memory device: %s", shmDevice);
+    DEBUG_ERROR("%s", strerror(errno));
     return false;
   }
 
