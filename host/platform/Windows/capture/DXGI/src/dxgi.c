@@ -523,7 +523,7 @@ static bool dxgi_init()
   IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
   DEBUG_INFO("Source Format    : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
 
-  uint8_t bpp = 8;
+  uint8_t bpp = 4;
   switch(dupDesc.ModeDesc.Format)
   {
     case DXGI_FORMAT_B8G8R8A8_UNORM    : this->format = CAPTURE_FMT_BGRA   ; break;
@@ -532,7 +532,7 @@ static bool dxgi_init()
 
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
       this->format = CAPTURE_FMT_RGBA16F;
-      bpp = 16;
+      bpp = 8;
       break;
 
     default:
