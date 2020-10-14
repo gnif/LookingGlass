@@ -53,6 +53,7 @@ enum WarpState
 struct AppState
 {
   enum RunState        state;
+  bool                 stopVideo;
   bool                 ignoreInput;
   bool                 escapeActive;
   SDL_Scancode         escapeAction;
@@ -112,6 +113,7 @@ struct AppState
   bool     resizeDone;
 
   KeybindHandle kbFS;
+  KeybindHandle kbVideo;
   KeybindHandle kbInput;
   KeybindHandle kbQuit;
   KeybindHandle kbMouseSensInc;

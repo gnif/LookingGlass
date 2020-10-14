@@ -413,7 +413,7 @@ static int frameThread(void * unused)
     break;
   }
 
-  while(state.state == APP_STATE_RUNNING)
+  while(state.state == APP_STATE_RUNNING && !state.stopVideo)
   {
     LGMPMessage msg;
     if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
@@ -1147,6 +1147,29 @@ static void toggle_fullscreen(SDL_Scancode key, void * opaque)
   params.fullscreen = !params.fullscreen;
 }
 
+static void toggle_video(SDL_Scancode key, void * opaque)
+{
+  state.stopVideo = !state.stopVideo;
+  app_alert(
+    LG_ALERT_INFO,
+    state.stopVideo ? "Video Stream Disabled" : "Video Stream Enabled"
+  );
+
+  if (state.stopVideo)
+    state.lgr->on_restart(state.lgrData);
+  else
+  {
+    if (t_frame)
+    {
+      lgJoinThread(t_frame, NULL);
+      t_frame = NULL;
+    }
+
+    if (!lgCreateThread("frameThread", frameThread, NULL, &t_frame))
+      DEBUG_ERROR("frame create thread failed");
+  }
+}
+
 static void toggle_input(SDL_Scancode key, void * opaque)
 {
   state.ignoreInput = !state.ignoreInput;
@@ -1208,6 +1231,7 @@ static void ctrl_alt_fn(SDL_Scancode key, void * opaque)
 static void register_key_binds()
 {
   state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
+  state.kbVideo        = app_register_keybind(SDL_SCANCODE_V     , toggle_video     , NULL);
   state.kbInput        = app_register_keybind(SDL_SCANCODE_I     , toggle_input     , NULL);
   state.kbQuit         = app_register_keybind(SDL_SCANCODE_Q     , quit             , NULL);
   state.kbMouseSensInc = app_register_keybind(SDL_SCANCODE_INSERT, mouse_sens_inc   , NULL);
@@ -1229,9 +1253,10 @@ static void register_key_binds()
 
 static void release_key_binds()
 {
-  app_release_keybind(&state.kbFS);
+  app_release_keybind(&state.kbFS   );
+  app_release_keybind(&state.kbVideo);
   app_release_keybind(&state.kbInput);
-  app_release_keybind(&state.kbQuit);
+  app_release_keybind(&state.kbQuit );
   app_release_keybind(&state.kbMouseSensInc);
   app_release_keybind(&state.kbMouseSensDec);
   for(int i = 0; i < 12; ++i)
