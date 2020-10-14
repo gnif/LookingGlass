@@ -524,6 +524,8 @@ static int frameThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&queue);
+  state.lgr->on_restart(state.lgrData);
+
   return 0;
 }
 
@@ -1155,9 +1157,7 @@ static void toggle_video(SDL_Scancode key, void * opaque)
     state.stopVideo ? "Video Stream Disabled" : "Video Stream Enabled"
   );
 
-  if (state.stopVideo)
-    state.lgr->on_restart(state.lgrData);
-  else
+  if (!state.stopVideo)
   {
     if (t_frame)
     {
