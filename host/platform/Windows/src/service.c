@@ -601,6 +601,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
   /* check if the ivshmem device exists */
   struct IVSHMEM shmDev = { 0 };
+  ivshmemOptionsInit();
   if (!ivshmemInit(&shmDev))
   {
     doLog("Unable to find the IVSHMEM device, terminating the service\n");
