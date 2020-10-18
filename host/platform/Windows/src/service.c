@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define INSTANCE_MUTEX_NAME "Global\\6f1a5eec-af3f-4a65-99dd-ebe0e4ecea55"
 
 #include "interface/platform.h"
+#include "common/ivshmem.h"
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -598,6 +599,15 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
   setupLogging();
 
+  /* check if the ivshmem device exists */
+  struct IVSHMEM shmDev = { 0 };
+  if (!ivshmemInit(&shmDev))
+  {
+    doLog("Unable to find the IVSHMEM device, terminating the service\n");
+    goto shutdown;
+  }
+  ivshmemFree(&shmDev);
+
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
   while(1)
   {
@@ -645,6 +655,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
     }
   }
 
+shutdown:
   ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
   CloseHandle(ghSvcStopEvent);
   finishLogging();

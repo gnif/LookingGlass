@@ -31,6 +31,8 @@ struct IVSHMEM
 };
 
 void ivshmemOptionsInit();
+bool ivshmemInit(struct IVSHMEM * dev);
 bool ivshmemOpen(struct IVSHMEM * dev);
 bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDev);
 void ivshmemClose(struct IVSHMEM * dev);
+void ivshmemFree(struct IVSHMEM * dev);

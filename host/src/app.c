@@ -447,7 +447,13 @@ int app_main(int argc, char * argv[])
 
   DEBUG_INFO("Looking Glass Host (%s)", BUILD_VERSION);
 
-  struct IVSHMEM shmDev;
+  struct IVSHMEM shmDev = { 0 };
+  if (!ivshmemInit(&shmDev))
+  {
+    DEBUG_ERROR("Failed to find the IVSHMEM device");
+    return -1;
+  }
+
   if (!ivshmemOpen(&shmDev))
   {
     DEBUG_ERROR("Failed to open the IVSHMEM device");
@@ -638,6 +644,7 @@ fail:
   lgmpHostFree(&app.lgmp);
 
   ivshmemClose(&shmDev);
+  ivshmemFree(&shmDev);
   return exitcode;
 }
 
