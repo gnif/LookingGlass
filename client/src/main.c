@@ -726,7 +726,7 @@ static void bypassCompositor(bool bypass)
 
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
     state.wminfo.info.x11.display,
-    "NETWM_BYPASS_COMPOSITOR",
+    "_NET_WM_BYPASS_COMPOSITOR",
     False
   );
   unsigned long value = bypass ? 1 : 0;
