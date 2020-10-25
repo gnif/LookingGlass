@@ -726,7 +726,7 @@ static void bypassCompositor(bool bypass)
 
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
     state.wminfo.info.x11.display,
-    "_NET_WM_BYPASS_COMPOSITOR",
+    "NETWM_BYPASS_COMPOSITOR",
     False
   );
   unsigned long value = bypass ? 1 : 0;
@@ -1480,58 +1480,38 @@ static int lg_run()
 
   // set the compositor hint to bypass for low latency
   SDL_VERSION(&state.wminfo.version);
-  if (SDL_GetWindowWMInfo(state.window, &state.wminfo))
+  if (!SDL_GetWindowWMInfo(state.window, &state.wminfo))
   {
-    if (state.wminfo.subsystem == SDL_SYSWM_X11)
-    {
-      // enable X11 events to work around SDL2 bugs
-      SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
-
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
-      // SDL2 bug, using xinput2 disables all motion notify events
-      // we really don't care about touch, so turn it off and go back
-      // to the default behaiovur.
-      XIEventMask xinputmask =
-      {
-        .deviceid = XIAllMasterDevices,
-        .mask     = 0,
-        .mask_len = 0
-      };
-
-      XISelectEvents(
-        state.wminfo.info.x11.display,
-        state.wminfo.info.x11.window,
-        &xinputmask,
-        1
-      );
-#endif
-
-      Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
-        state.wminfo.info.x11.display,
-        "NETWM_BYPASS_COMPOSITOR",
-        False);
-
-      unsigned long value = 1;
-      XChangeProperty(
-        state.wminfo.info.x11.display,
-        state.wminfo.info.x11.window,
-        NETWM_BYPASS_COMPOSITOR,
-        XA_CARDINAL,
-        32,
-        PropModeReplace,
-        (unsigned char *)&value,
-        1
-      );
-
-      state.lgc = LG_Clipboards[0];
-    }
-  } else {
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
     return -1;
   }
 
   if (state.wminfo.subsystem == SDL_SYSWM_X11)
+  {
+    // enable X11 events to work around SDL2 bugs
+    SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+
+#if SDL_VIDEO_DRIVER_X11_XINPUT2
+    // SDL2 bug, using xinput2 disables all motion notify events
+    // we really don't care about touch, so turn it off and go back
+    // to the default behaiovur.
+    XIEventMask xinputmask =
+    {
+      .deviceid = XIAllMasterDevices,
+      .mask     = 0,
+      .mask_len = 0
+    };
+
+    XISelectEvents(
+      state.wminfo.info.x11.display,
+      state.wminfo.info.x11.window,
+      &xinputmask,
+      1
+    );
+#endif
+
     state.lgc = LG_Clipboards[0];
+  }
 
   if (params.allowCompositor == LG_ALLOW_COMPOSITOR_YES)
     bypassCompositor(false);
