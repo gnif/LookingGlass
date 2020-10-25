@@ -44,8 +44,10 @@ Below are a list of current key bindings:
 |-|-|
 | <kbd>ScrLk</kbd>                   | Toggle cursor screen capture |
 | <kbd>ScrLk</kbd>+<kbd>F</kbd>      | Full Screen toggle |
+| <kbd>ScrLk</kbd>+<kbd>V</kbd>      | Video stream toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd>      | Spice keyboard & mouse enable toggle |
 | <kbd>ScrLk</kbd>+<kbd>N</kbd>      | Toggle night vision mode (EGL renderer only!) |
+| <kbd>ScrLk</kbd>+<kbd>Q</kbd>      | Quit |
 | <kbd>ScrLk</kbd>+<kbd>Insert</kbd> | Increase mouse sensitivity (in capture mode only) |
 | <kbd>ScrLk</kbd>+<kbd>Del</kbd>    | Decrease mouse sensitivity (in capture mode only) |
 | <kbd>ScrLk</kbd>+<kbd>F1</kbd>     | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd> to the guest |
@@ -142,6 +144,7 @@ Command line arguments will override any options loaded from the config files.
 | spice:clipboardToVM    |       | yes       | Allow the clipboard to be syncronized TO the VM                     |
 | spice:clipboardToLocal |       | yes       | Allow the clipboard to be syncronized FROM the VM                   |
 | spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
+| spice:captureOnStart   |       | no        | Capture mouse and keyboard on start                                 |
 |------------------------------------------------------------------------------------------------------------------|
 
 |--------------------------------------------------------------------------|

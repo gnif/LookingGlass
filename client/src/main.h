@@ -18,17 +18,42 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <SDL2/SDL.h>
 
 #include "interface/app.h"
 #include "dynamic/renderers.h"
 #include "dynamic/clipboards.h"
+#include "common/ivshmem.h"
 
 #include "spice/spice.h"
+#include <lgmp/client.h>
+
+enum RunState
+{
+  APP_STATE_RUNNING,
+  APP_STATE_RESTART,
+  APP_STATE_SHUTDOWN
+};
+
+struct CursorInfo
+{
+  int x , y;
+  int hx, hy;
+};
+
+enum WarpState
+{
+  WARP_STATE_ARMED,
+  WARP_STATE_ON,
+  WARP_STATE_ACTIVE,
+  WARP_STATE_OFF
+};
 
 struct AppState
 {
-  bool                 running;
+  enum RunState        state;
+  bool                 stopVideo;
   bool                 ignoreInput;
   bool                 escapeActive;
   SDL_Scancode         escapeAction;
@@ -39,11 +64,27 @@ struct AppState
   int                  windowW, windowH;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
-  SDL_Point            cursor;
+  struct CursorInfo    cursor;
   bool                 cursorVisible;
-  bool                 haveCursorPos;
-  float                scaleX, scaleY;
-  float                accX, accY;
+
+  bool  serverMode;
+  bool  haveCursorPos;
+  bool  drawCursor;
+  bool  cursorInView;
+  bool  updateCursor;
+  bool  initialCursorSync;
+  float scaleX, scaleY;
+  float accX, accY;
+  int   curLastX;
+  int   curLastY;
+  bool  haveCurLocal;
+  int   curLocalX;
+  int   curLocalY;
+  bool  haveAligned;
+
+  enum WarpState   warpState;
+  int   warpFromX, warpFromY;
+  int   warpToX  , warpToY;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
@@ -53,20 +94,28 @@ struct AppState
   SpiceDataType        cbType;
   struct ll          * cbRequestList;
 
-  SDL_Window         * window;
   SDL_SysWMinfo        wminfo;
-  int                  shmFD;
-  struct KVMFRHeader * shm;
-  unsigned int         shmSize;
+  SDL_Window         * window;
 
-  uint64_t          frameTime;
-  uint64_t          lastFrameTime;
-  uint64_t          renderTime;
-  uint64_t          frameCount;
-  uint64_t          renderCount;
+  struct IVSHMEM       shm;
+  PLGMPClient          lgmp;
+  PLGMPClientQueue     frameQueue;
+  PLGMPClientQueue     pointerQueue;
+
+  atomic_uint_least64_t frameTime;
+  uint64_t              lastFrameTime;
+  uint64_t              renderTime;
+  uint64_t              frameCount;
+  uint64_t              renderCount;
+
+
+  uint64_t resizeTimeout;
+  bool     resizeDone;
 
   KeybindHandle kbFS;
+  KeybindHandle kbVideo;
   KeybindHandle kbInput;
+  KeybindHandle kbQuit;
   KeybindHandle kbMouseSensInc;
   KeybindHandle kbMouseSensDec;
   KeybindHandle kbCtrlAltFn[12];
@@ -80,6 +129,8 @@ struct AppParams
   bool         autoResize;
   bool         allowResize;
   bool         keepAspect;
+  bool         forceAspect;
+  bool         dontUpscale;
   bool         borderless;
   bool         fullscreen;
   bool         maximize;
@@ -87,9 +138,7 @@ struct AppParams
   bool         center;
   int          x, y;
   unsigned int w, h;
-  const char * shmFile;
-  unsigned int shmSize;
-  unsigned int fpsLimit;
+  unsigned int fpsMin;
   bool         showFPS;
   bool         useSpiceInput;
   bool         useSpiceClipboard;
@@ -104,6 +153,8 @@ struct AppParams
   bool         grabKeyboard;
   SDL_Scancode escapeKey;
   bool         showAlerts;
+  bool         captureOnStart;
+  bool         quickSplash;
 
   unsigned int cursorPollInterval;
   unsigned int framePollInterval;
@@ -113,6 +164,7 @@ struct AppParams
 
   const char * windowTitle;
   int          mouseSens;
+  bool         mouseRedraw;
 
   LG_AllowCompositor allowCompositor;
 };

@@ -18,4 +18,5 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 // sprintf but with buffer allocation
-int alloc_sprintf(char ** str, const char * format, ...);
+int alloc_sprintf(char ** str, const char * format, ...)
+  __attribute__ ((format (printf, 2, 3)));

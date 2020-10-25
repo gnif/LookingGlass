@@ -5,6 +5,8 @@ include_directories(
 	${PROJECT_SOURCE_DIR}/include
 )
 
+add_definitions(-D_GNU_SOURCE)
+
 if(ENABLE_BACKTRACE)
   add_definitions(-DENABLE_BACKTRACE)
 endif()
@@ -16,6 +18,7 @@ set(COMMON_SOURCES
   src/stringlist.c
   src/option.c
   src/framebuffer.c
+  src/KVMFR.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})

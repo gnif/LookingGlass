@@ -54,6 +54,8 @@ bool lgCreateThread(const char * name, LGThreadFunction function, void * opaque,
     *handle = NULL;
     return false;
   }
+
+  pthread_setname_np((*handle)->handle, name);
   return true;
 }
 

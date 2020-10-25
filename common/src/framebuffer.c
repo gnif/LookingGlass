@@ -21,53 +21,115 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 
 #include <string.h>
-#define FB_CHUNK_SIZE 1024
+#include <stdatomic.h>
+#include <emmintrin.h>
+#include <smmintrin.h>
+#include <unistd.h>
+
+#define FB_CHUNK_SIZE 1048576 // 1MB
+#define FB_SPIN_LIMIT 10000   // 10ms
 
 struct stFrameBuffer
 {
-  uint64_t  wp;
-  uint8_t   data[0];
+  atomic_uint_least32_t wp;
+  uint8_t               data[0];
 };
 
-bool framebuffer_read(const FrameBuffer frame, void * dst, size_t size)
+const size_t FrameBufferStructSize = sizeof(FrameBuffer);
+
+void framebuffer_wait(const FrameBuffer * frame, size_t size)
 {
-  uint8_t *d  = (uint8_t*)dst;
-  uint64_t rp = 0;
-  while(rp < size)
+  while(atomic_load_explicit(&frame->wp, memory_order_acquire) != size) {}
+}
+
+bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
+{
+  uint8_t * restrict d     = (uint8_t*)dst;
+  uint_least32_t rp        = 0;
+  size_t         y         = 0;
+  const size_t   linewidth = width * bpp;
+  const size_t   blocks    = linewidth / 64;
+  const size_t   left      = linewidth % 64;
+
+  while(y < height)
   {
+    uint_least32_t wp;
+    int spinCount = 0;
+
     /* spinlock */
-    while(rp == frame->wp) { }
+    wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+    while(wp - rp < linewidth)
+    {
+      if (++spinCount == FB_SPIN_LIMIT)
+        return false;
 
-    /* copy what we can */
-    uint64_t avail = frame->wp - rp;
-    avail = avail > size ? size : avail;
+      usleep(1);
+      wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+    }
 
-    memcpy(d, frame->data + rp, avail);
+    _mm_mfence();
+    __m128i * restrict s = (__m128i *)(frame->data + rp);
+    for(int i = 0; i < blocks; ++i)
+    {
+      __m128i *_d = (__m128i *)d;
+      __m128i *_s = (__m128i *)s;
+      __m128i v1 = _mm_stream_load_si128(_s + 0);
+      __m128i v2 = _mm_stream_load_si128(_s + 1);
+      __m128i v3 = _mm_stream_load_si128(_s + 2);
+      __m128i v4 = _mm_stream_load_si128(_s + 3);
 
-    rp   += avail;
-    d    += avail;
-    size -= avail;
+      _mm_storeu_si128(_d + 0, v1);
+      _mm_storeu_si128(_d + 1, v2);
+      _mm_storeu_si128(_d + 2, v3);
+      _mm_storeu_si128(_d + 3, v4);
+
+      d += 64;
+      s += 4;
+    }
+
+    if (left)
+    {
+      memcpy(d, s, left);
+      d += left;
+    }
+
+    rp += pitch;
+    d  += dstpitch - linewidth;
+    ++y;
   }
+
   return true;
 }
 
-bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t size, void * opaque)
+bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
+    size_t bpp, size_t pitch, FrameBufferReadFn fn, void * opaque)
 {
-  uint64_t rp = 0;
-  while(rp < size)
+  uint_least32_t rp        = 0;
+  size_t         y         = 0;
+  const size_t   linewidth = width * bpp;
+
+  while(y < height)
   {
+    uint_least32_t wp;
+    int spinCount = 0;
+
     /* spinlock */
-    while(rp == frame->wp) { }
+    wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+    while(wp - rp < linewidth)
+    {
+      if (++spinCount == FB_SPIN_LIMIT)
+        return false;
 
-    /* copy what we can */
-    uint64_t avail = frame->wp - rp;
-    avail = avail > size ? size : avail;
+      usleep(1);
+      wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+    }
 
-    if (!fn(opaque, frame->data + rp, avail))
+    if (!fn(opaque, frame->data + rp, linewidth))
       return false;
 
-    rp   += avail;
-    size -= avail;
+    rp += pitch;
+    ++y;
   }
 
   return true;
@@ -76,20 +138,49 @@ bool framebuffer_read_fn(const FrameBuffer frame, FrameBufferReadFn fn, size_t s
 /**
  * Prepare the framebuffer for writing
  */
-void framebuffer_prepare(const FrameBuffer frame)
+void framebuffer_prepare(FrameBuffer * frame)
 {
-  frame->wp = 0;
+  atomic_store_explicit(&frame->wp, 0, memory_order_release);
 }
 
-bool framebuffer_write(FrameBuffer frame, const void * src, size_t size)
+bool framebuffer_write(FrameBuffer * frame, const void * restrict src, size_t size)
 {
+  __m128i * restrict s = (__m128i *)src;
+  __m128i * restrict d = (__m128i *)frame->data;
+  size_t wp = 0;
+
+  _mm_mfence();
+
   /* copy in chunks */
-  while(size)
+  while(size > 63)
   {
-    size_t copy = size < FB_CHUNK_SIZE ? FB_CHUNK_SIZE : size;
-    memcpy(frame->data + frame->wp, src, copy);
-    __sync_fetch_and_add(&frame->wp, copy);
-    size -= copy;
+    __m128i *_d = (__m128i *)d;
+    __m128i *_s = (__m128i *)s;
+    __m128i v1 = _mm_stream_load_si128(_s + 0);
+    __m128i v2 = _mm_stream_load_si128(_s + 1);
+    __m128i v3 = _mm_stream_load_si128(_s + 2);
+    __m128i v4 = _mm_stream_load_si128(_s + 3);
+
+    _mm_store_si128(_d + 0, v1);
+    _mm_store_si128(_d + 1, v2);
+    _mm_store_si128(_d + 2, v3);
+    _mm_store_si128(_d + 3, v4);
+
+    s    += 4;
+    d    += 4;
+    size -= 64;
+    wp   += 64;
+
+    if (wp % FB_CHUNK_SIZE == 0)
+      atomic_store_explicit(&frame->wp, wp, memory_order_release);
   }
+
+  if(size)
+  {
+    memcpy(frame->data + wp, s, size);
+    wp += size;
+  }
+
+  atomic_store_explicit(&frame->wp, wp, memory_order_release);
   return true;
 }

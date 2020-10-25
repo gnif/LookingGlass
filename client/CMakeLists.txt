@@ -46,29 +46,32 @@ pkg_check_modules(PKGCONFIG REQUIRED
 	x11
 )
 
-execute_process(
-	COMMAND			cat ../VERSION
-	WORKING_DIRECTORY	${PROJECT_SOURCE_DIR}
-	OUTPUT_VARIABLE		BUILD_VERSION
-	OUTPUT_STRIP_TRAILING_WHITESPACE
+pkg_check_modules(PKGCONFIG_OPT
+	xi
 )
 
 find_package(GMP)
 
-add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
 add_definitions(-D ATOMIC_LOCKING)
 add_definitions(-D GL_GLEXT_PROTOTYPES)
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
+add_custom_command(
+	OUTPUT	${CMAKE_BINARY_DIR}/version.c
+		${CMAKE_BINARY_DIR}/_version.c
+	COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
+		${PROJECT_TOP}/version.cmake
+)
+
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PKGCONFIG_INCLUDE_DIRS}
+	${PKGCONFIG_INCLUDE_DIRS} ${PKGCONFIG_OPT_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )
 
 link_libraries(
-	${PKGCONFIG_LIBRARIES}
+	${PKGCONFIG_LIBRARIES} ${PKGCONFIG_OPT_LIBRARIES}
 	${GMP_LIBRARIES}
 	${CMAKE_DL_LIBS}
 	rt
@@ -76,6 +79,7 @@ link_libraries(
 )
 
 set(SOURCES
+	${CMAKE_BINARY_DIR}/version.c
 	src/main.c
 	src/app.c
 	src/config.c
@@ -84,19 +88,22 @@ set(SOURCES
 	src/utils.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
-add_subdirectory(spice)
+add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
+add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
+add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
+
 add_subdirectory(renderers)
 add_subdirectory(clipboards)
 add_subdirectory(fonts)
 add_subdirectory(decoders)
 
 add_executable(looking-glass-client ${SOURCES})
-target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
+target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER} ${PKGCONFIG_OPT_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	lg_common
-	spice
+	lgmp
+	purespice
 	renderers
 	clipboards
 	fonts

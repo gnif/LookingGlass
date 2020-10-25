@@ -17,9 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#define _GNU_SOURCE
 #include "common/crash.h"
 #include "common/debug.h"
+#include "common/version.h"
 
 #if defined(ENABLE_BACKTRACE)
 
@@ -98,10 +98,18 @@ static void load_symbols()
 
 static bool lookup_address(bfd_vma pc, const char ** filename, const char ** function, unsigned int * line, unsigned int * discriminator)
 {
+#ifdef bfd_get_section_flags
   if ((bfd_get_section_flags(crash.fd, crash.section) & SEC_ALLOC) == 0)
+#else
+  if ((bfd_section_flags(crash.section) & SEC_ALLOC) == 0)
+#endif
     return false;
 
+#ifdef bfd_get_section_size
   bfd_size_type size = bfd_get_section_size(crash.section);
+#else
+  bfd_size_type size = bfd_section_size(crash.section);
+#endif
   if (pc >= size)
     return false;
 
@@ -169,7 +177,7 @@ static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
   dl_iterate_phdr(dl_iterate_phdr_callback, NULL);
   load_symbols();
 
-  DEBUG_ERROR("==== FATAL CRASH (" BUILD_VERSION ") ====");
+  DEBUG_ERROR("==== FATAL CRASH (%s) ====", BUILD_VERSION);
   DEBUG_ERROR("signal %d (%s), address is %p", sig_num, strsignal(sig_num), info->si_addr);
 
   size     = backtrace(array, 50);

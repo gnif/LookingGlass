@@ -20,8 +20,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdint.h>
 
-#define KVMFR_HEADER_MAGIC   "[[KVMFR]]"
-#define KVMFR_HEADER_VERSION 9
+#define LGMP_Q_POINTER     1
+#define LGMP_Q_FRAME       2
 
 typedef enum FrameType
 {
@@ -29,10 +29,21 @@ typedef enum FrameType
   FRAME_TYPE_BGRA      , // BGRA interleaved: B,G,R,A 32bpp
   FRAME_TYPE_RGBA      , // RGBA interleaved: R,G,B,A 32bpp
   FRAME_TYPE_RGBA10    , // RGBA interleaved: R,G,B,A 10,10,10,2 bpp
+  FRAME_TYPE_RGBA16F   , // RGBA interleaved: R,G,B,A 16,16,16,16 bpp float
   FRAME_TYPE_YUV420    , // YUV420
   FRAME_TYPE_MAX       , // sentinel value
 }
 FrameType;
+
+extern const char * FrameTypeStr[FRAME_TYPE_MAX];
+
+enum
+{
+  CURSOR_FLAG_POSITION = 0x1,
+  CURSOR_FLAG_VISIBLE  = 0x2,
+  CURSOR_FLAG_SHAPE    = 0x4
+};
+typedef uint32_t KVMFRCursorFlags;
 
 typedef enum CursorType
 {
@@ -42,49 +53,36 @@ typedef enum CursorType
 }
 CursorType;
 
-#define KVMFR_CURSOR_FLAG_UPDATE  1 // cursor update available
-#define KVMFR_CURSOR_FLAG_VISIBLE 2 // cursor is visible
-#define KVMFR_CURSOR_FLAG_SHAPE   4 // shape updated
-#define KVMFR_CURSOR_FLAG_POS     8 // position updated
+#define KVMFR_MAGIC   "KVMFR---"
+#define KVMFR_VERSION 5
+
+typedef struct KVMFR
+{
+  char     magic[8];
+  uint32_t version;
+  char     hostver[32];
+}
+KVMFR;
 
 typedef struct KVMFRCursor
 {
-  volatile uint8_t flags; // KVMFR_CURSOR_FLAGS
   int16_t    x, y;        // cursor x & y position
-
-  uint32_t   version;     // shape version
   CursorType type;        // shape buffer data type
+  int8_t     hx, hy;      // shape hotspot x & y
   uint32_t   width;       // width of the shape
   uint32_t   height;      // height of the shape
   uint32_t   pitch;       // row length in bytes of the shape
-  uint64_t   dataPos;     // offset to the shape data
 }
 KVMFRCursor;
 
-#define KVMFR_FRAME_FLAG_UPDATE 1 // frame update available
-
 typedef struct KVMFRFrame
 {
-  volatile uint8_t flags;  // KVMFR_FRAME_FLAGS
-  FrameType   type;        // the frame data type
-  uint32_t    width;       // the width
-  uint32_t    height;      // the height
-  uint32_t    stride;      // the row stride (zero if compressed data)
-  uint32_t    pitch;       // the row pitch  (stride in bytes or the compressed frame size)
-  uint64_t    dataPos;     // offset to the frame
+  uint32_t  formatVer;   // the frame format version number
+  FrameType type;        // the frame data type
+  uint32_t  width;       // the width
+  uint32_t  height;      // the height
+  uint32_t  stride;      // the row stride (zero if compressed data)
+  uint32_t  pitch;       // the row pitch  (stride in bytes or the compressed frame size)
+  uint32_t  offset;      // offset from the start of this header to the FrameBuffer header
 }
 KVMFRFrame;
-
-#define KVMFR_HEADER_FLAG_RESTART 1 // restart signal from client
-#define KVMFR_HEADER_FLAG_READY   2 // ready signal from client
-#define KVMFR_HEADER_FLAG_PAUSED  4 // capture has been paused by the host
-
-typedef struct KVMFRHeader
-{
-  char        magic[sizeof(KVMFR_HEADER_MAGIC)];
-  uint32_t    version;     // version of this structure
-  volatile uint8_t flags;  // KVMFR_HEADER_FLAGS
-  KVMFRFrame  frame;       // the frame information
-  KVMFRCursor cursor;      // the cursor information
-}
-KVMFRHeader;

@@ -116,11 +116,11 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
         }
       }
 
-      uint64_t now = getMicrotime();
+      uint64_t now = microtime();
       uint64_t end = now + spinTime * 1000;
       while(!event->signaled)
       {
-        now = getMicrotime();
+        now = microtime();
         if (now >= end)
           break;
       }
@@ -179,7 +179,7 @@ bool lgWaitEvents(LGEvent * events[], int count, bool waitAll, unsigned int time
       // null non signaled events from the handle list
       for(int i = 0; i < count; ++i)
         if (i != result && !lgWaitEvent(events[i], 0))
-          handles[i] = NULL;
+          events[i] = NULL;
       free(handles);
       return true;
     }

@@ -367,6 +367,7 @@ bool option_load(const char * filename)
   int    lineno      = 1;
   char * module      = NULL;
   bool   line        = true;
+  bool   comment     = false;
   bool   expectLine  = false;
   bool   expectValue = false;
   char * name        = NULL;
@@ -379,6 +380,10 @@ bool option_load(const char * filename)
 
   for(int c = fgetc(fp); !feof(fp); c = fgetc(fp))
   {
+    if (comment && c != '\n')
+      continue;
+    comment = false;
+
     switch(c)
     {
       case '[':
@@ -476,6 +481,14 @@ bool option_load(const char * filename)
           *p = realloc(*p, *len + 32 + 1);
         (*p)[(*len)++] = c;
         break;
+
+      case ';':
+        if (line)
+        {
+          comment = true;
+          break;
+        }
+        // fallthrough
 
       default:
         if (expectLine)
@@ -600,7 +613,7 @@ void option_print()
     maxLen = alloc_sprintf(
       &line,
       "%-*s | Short | %-*s | Description",
-      strlen(state.groups[g].module) + state.groups[g].pad + 1,
+      (int)(strlen(state.groups[g].module) + state.groups[g].pad + 1),
       "Long",
       valueLen,
       "Value"

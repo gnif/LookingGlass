@@ -1,0 +1,6 @@
+[submodule "LGMP"]
+	path = repos/LGMP
+	url = https://github.com/gnif/LGMP.git
+[submodule "repos/PureSpice"]
+	path = repos/PureSpice
+	url = https://github.com/gnif/PureSpice
