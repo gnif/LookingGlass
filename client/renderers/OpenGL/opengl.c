@@ -33,7 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
-#include "utils.h"
+#include "common/locking.h"
 #include "dynamic/fonts.h"
 #include "ll.h"
 
@@ -77,7 +77,8 @@ static struct Option opengl_options[] =
     .description  = "Use GL_AMD_pinned_memory if it is available",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = true
-  }
+  },
+  {0}
 };
 
 struct OpenGL_Options
@@ -116,14 +117,14 @@ struct Inst
   const LG_Font   * font;
   LG_FontObj        fontObj, alertFontObj;
 
-  LG_Lock           formatLock;
-  LG_RendererFormat format;
-  GLuint            intFormat;
-  GLuint            vboFormat;
-  GLuint            dataFormat;
-  size_t            texSize;
-  size_t            texPos;
-  FrameBuffer       frame;
+  LG_Lock             formatLock;
+  LG_RendererFormat   format;
+  GLuint              intFormat;
+  GLuint              vboFormat;
+  GLuint              dataFormat;
+  size_t              texSize;
+  size_t              texPos;
+  const FrameBuffer * frame;
 
   uint64_t          drawStart;
   bool              hasBuffers;
@@ -294,6 +295,12 @@ void opengl_deinitialize(void * opaque)
   free(this);
 }
 
+void opengl_on_restart(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  this->waiting = true;
+}
+
 void opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -368,36 +375,20 @@ bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const
   return false;
 }
 
-bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer frame)
+bool opengl_on_frame_format(void * opaque, const LG_RendererFormat format)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-  {
-    DEBUG_ERROR("Invalid opaque pointer");
-    return false;
-  }
 
   LG_LOCK(this->formatLock);
-  if (this->reconfigure)
-  {
-    LG_UNLOCK(this->formatLock);
-    return true;
-  }
-
-  if (!this->configured ||
-    this->format.type   != format.type   ||
-    this->format.width  != format.width  ||
-    this->format.height != format.height ||
-    this->format.stride != format.stride ||
-    this->format.bpp    != format.bpp
-  )
-  {
-    memcpy(&this->format, &format, sizeof(LG_RendererFormat));
-    this->reconfigure = true;
-    LG_UNLOCK(this->formatLock);
-    return true;
-  }
+  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+  this->reconfigure = true;
   LG_UNLOCK(this->formatLock);
+  return true;
+}
+
+bool opengl_on_frame(void * opaque, const FrameBuffer * frame)
+{
+  struct Inst * this = (struct Inst *)opaque;
 
   LG_LOCK(this->syncLock);
   this->frame       = frame;
@@ -406,8 +397,14 @@ bool opengl_on_frame_event(void * opaque, const LG_RendererFormat format, const 
 
   if (this->waiting)
   {
-    this->waiting      = false;
-    this->waitFadeTime = microtime() + FADE_TIME;
+    this->waiting = false;
+    if (!this->params.quickSplash)
+      this->waitFadeTime = microtime() + FADE_TIME;
+    else
+    {
+      glDisable(GL_MULTISAMPLE);
+      this->waitDone = true;
+    }
   }
 
   return true;
@@ -563,8 +560,6 @@ bool opengl_render(void * opaque, SDL_Window * window)
       return false;
 
     case CONFIG_STATUS_NOOP :
-      break;
-
     case CONFIG_STATUS_OK   :
      if (!draw_frame(this))
        return false;
@@ -818,20 +813,22 @@ static void render_wait(struct Inst * this)
 
 const LG_Renderer LGR_OpenGL =
 {
-  .get_name       = opengl_get_name,
-  .setup          = opengl_setup,
+  .get_name        = opengl_get_name,
+  .setup           = opengl_setup,
 
-  .create         = opengl_create,
-  .initialize     = opengl_initialize,
-  .deinitialize   = opengl_deinitialize,
-  .on_resize      = opengl_on_resize,
-  .on_mouse_shape = opengl_on_mouse_shape,
-  .on_mouse_event = opengl_on_mouse_event,
-  .on_frame_event = opengl_on_frame_event,
-  .on_alert       = opengl_on_alert,
-  .render_startup = opengl_render_startup,
-  .render         = opengl_render,
-  .update_fps     = opengl_update_fps
+  .create          = opengl_create,
+  .initialize      = opengl_initialize,
+  .deinitialize    = opengl_deinitialize,
+  .on_restart      = opengl_on_restart,
+  .on_resize       = opengl_on_resize,
+  .on_mouse_shape  = opengl_on_mouse_shape,
+  .on_mouse_event  = opengl_on_mouse_event,
+  .on_frame_format = opengl_on_frame_format,
+  .on_frame        = opengl_on_frame,
+  .on_alert        = opengl_on_alert,
+  .render_startup  = opengl_render_startup,
+  .render          = opengl_render,
+  .update_fps      = opengl_update_fps
 };
 
 static bool _check_gl_error(unsigned int line, const char * name)
@@ -875,6 +872,12 @@ static enum ConfigStatus configure(struct Inst * this, SDL_Window *window)
       this->intFormat  = GL_RGB10_A2;
       this->vboFormat  = GL_RGBA;
       this->dataFormat = GL_UNSIGNED_INT_2_10_10_10_REV;
+      break;
+
+    case FRAME_TYPE_RGBA16F:
+      this->intFormat  = GL_RGB16F;
+      this->vboFormat  = GL_RGBA;
+      this->dataFormat = GL_HALF_FLOAT;
       break;
 
     default:
@@ -1275,14 +1278,19 @@ static bool draw_frame(struct Inst * this)
   glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
 
-  glPixelStorei(GL_UNPACK_ALIGNMENT  , 4);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH , this->format.stride);
+  const int bpp = this->format.bpp / 8;
+  glPixelStorei(GL_UNPACK_ALIGNMENT , bpp);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.width);
 
   this->texPos = 0;
+
   framebuffer_read_fn(
     this->frame,
+    this->format.height,
+    this->format.width,
+    bpp,
+    this->format.pitch,
     opengl_buffer_fn,
-    this->format.height * this->format.stride * 4,
     this
   );
 

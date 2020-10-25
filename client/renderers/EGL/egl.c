@@ -22,6 +22,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/sysinfo.h"
+#include "common/time.h"
+#include "common/locking.h"
 #include "utils.h"
 #include "dynamic/fonts.h"
 
@@ -57,7 +59,7 @@ struct Inst
   EGLDisplay           display;
   EGLConfig            configs;
   EGLSurface           surface;
-  EGLContext           context;
+  EGLContext           context, frameContext;
 
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
@@ -66,7 +68,7 @@ struct Inst
   EGL_Alert       * alert;   // the alert display
 
   LG_RendererFormat    format;
-  bool                 sourceChanged;
+  bool                 start;
   uint64_t             waitFadeTime;
   bool                 waitDone;
 
@@ -108,7 +110,7 @@ static struct Option egl_options[] =
     .name         = "doubleBuffer",
     .description  = "Enable double buffering",
     .type         = OPTION_TYPE_BOOL,
-    .value.x_bool = true
+    .value.x_bool = false
   },
   {
     .module       = "egl",
@@ -197,7 +199,7 @@ bool egl_initialize(void * opaque, Uint32 * sdlFlags)
       if (maxSamples > 4)
         maxSamples = 4;
 
-      DEBUG_INFO("Multsampling enabled, max samples: %d", maxSamples);
+      DEBUG_INFO("Multisampling enabled, max samples: %d", maxSamples);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, maxSamples);
     }
@@ -219,7 +221,18 @@ void egl_deinitialize(void * opaque)
   egl_splash_free (&this->splash);
   egl_alert_free  (&this->alert );
 
+  LG_LOCK_FREE(this->lock);
+
   free(this);
+}
+
+void egl_on_restart(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  eglDestroyContext(this->display, this->frameContext);
+  this->frameContext = NULL;
+  this->start        = false;
 }
 
 void egl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
@@ -295,28 +308,47 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-bool egl_on_frame_event(void * opaque, const LG_RendererFormat format, const FrameBuffer frame)
+bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
 {
   struct Inst * this = (struct Inst *)opaque;
-  this->sourceChanged = (
-    this->sourceChanged ||
-    this->format.type   != format.type   ||
-    this->format.width  != format.width  ||
-    this->format.height != format.height ||
-    this->format.pitch  != format.pitch
-  );
+  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
-  if (this->sourceChanged)
-    memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+  /* this event runs in a second thread so we need to init it here */
+  if (!this->frameContext)
+  {
+    static EGLint attrs[] = {
+      EGL_CONTEXT_CLIENT_VERSION, 2,
+      EGL_NONE
+    };
+
+    if (!(this->frameContext = eglCreateContext(this->display, this->configs, this->context, attrs)))
+    {
+      DEBUG_ERROR("Failed to create the frame context");
+      return false;
+    }
+
+    if (!eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->frameContext))
+    {
+      DEBUG_ERROR("Failed to make the frame context current");
+      return false;
+    }
+  }
 
   this->useNearest = this->width < format.width || this->height < format.height;
+  return egl_desktop_setup(this->desktop, format);
+}
 
-  if (!egl_desktop_prepare_update(this->desktop, this->sourceChanged, format, frame))
+bool egl_on_frame(void * opaque, const FrameBuffer * frame)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  if (!egl_desktop_update(this->desktop, frame))
   {
-    DEBUG_INFO("Failed to prepare to update the desktop");
+    DEBUG_INFO("Failed to to update the desktop");
     return false;
   }
 
+  this->start = true;
   return true;
 }
 
@@ -367,11 +399,26 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
+  const char *client_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+  DEBUG_INFO("Supported extensions: %s", client_exts);
+
+  bool useNative = false;
+  if (strstr(client_exts, "EGL_KHR_platform_base") != NULL)
+    useNative = true;
+
+  DEBUG_INFO("use native: %s", useNative ? "true" : "false");
+
   switch(wminfo.subsystem)
   {
     case SDL_SYSWM_X11:
     {
-      this->display = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, wminfo.info.x11.display, NULL);
+      if (!useNative)
+        this->display = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, wminfo.info.x11.display, NULL);
+      else
+      {
+        EGLNativeDisplayType native = (EGLNativeDisplayType)wminfo.info.x11.display;
+        this->display = eglGetDisplay(native);
+      }
       this->nativeWind = (EGLNativeWindowType)wminfo.info.x11.window;
       break;
     }
@@ -381,7 +428,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     {
       int width, height;
       SDL_GetWindowSize(window, &width, &height);
-      this->display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wminfo.info.wl.display, NULL);
+      if (!useNative)
+        this->display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wminfo.info.wl.display, NULL);
+      else
+      {
+        EGLNativeDisplayType native = (EGLNativeDisplayType)wminfo.info.wl.display;
+        this->display = eglGetDisplay(native);
+      }
       this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(wminfo.info.wl.surface, width, height);
       break;
     }
@@ -448,7 +501,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(&this->desktop))
+  if (!egl_desktop_init(this, &this->desktop))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
@@ -488,10 +541,18 @@ bool egl_render(void * opaque, SDL_Window * window)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  if (egl_desktop_render(this->desktop, this->translateX, this->translateY, this->scaleX, this->scaleY, this->useNearest))
+  if (this->start && egl_desktop_render(this->desktop,
+        this->translateX, this->translateY,
+        this->scaleX    , this->scaleY    ,
+        this->useNearest))
   {
     if (!this->waitFadeTime)
-      this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
+    {
+      if (!this->params.quickSplash)
+        this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
+      else
+        this->waitDone = true;
+    }
     egl_cursor_render(this->cursor);
   }
 
@@ -515,6 +576,11 @@ bool egl_render(void * opaque, SDL_Window * window)
     if (!this->waitDone)
       egl_splash_render(this->splash, a, this->splashRatio);
   }
+  else
+  {
+    if (!this->start)
+      egl_splash_render(this->splash, 1.0f, this->splashRatio);
+  }
 
   if (this->showAlert)
   {
@@ -532,11 +598,6 @@ bool egl_render(void * opaque, SDL_Window * window)
 
   egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   eglSwapBuffers(this->display, this->surface);
-
-  // defer texture uploads until after the flip to avoid stalling
-  egl_desktop_perform_update(this->desktop, this->sourceChanged);
-
-  this->sourceChanged = false;
   return true;
 }
 
@@ -551,17 +612,19 @@ void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 
 struct LG_Renderer LGR_EGL =
 {
-  .get_name       = egl_get_name,
-  .setup          = egl_setup,
-  .create         = egl_create,
-  .initialize     = egl_initialize,
-  .deinitialize   = egl_deinitialize,
-  .on_resize      = egl_on_resize,
-  .on_mouse_shape = egl_on_mouse_shape,
-  .on_mouse_event = egl_on_mouse_event,
-  .on_frame_event = egl_on_frame_event,
-  .on_alert       = egl_on_alert,
-  .render_startup = egl_render_startup,
-  .render         = egl_render,
-  .update_fps     = egl_update_fps
+  .get_name        = egl_get_name,
+  .setup           = egl_setup,
+  .create          = egl_create,
+  .initialize      = egl_initialize,
+  .deinitialize    = egl_deinitialize,
+  .on_restart      = egl_on_restart,
+  .on_resize       = egl_on_resize,
+  .on_mouse_shape  = egl_on_mouse_shape,
+  .on_mouse_event  = egl_on_mouse_event,
+  .on_frame_format = egl_on_frame_format,
+  .on_frame        = egl_on_frame,
+  .on_alert        = egl_on_alert,
+  .render_startup  = egl_render_startup,
+  .render          = egl_render,
+  .update_fps      = egl_update_fps
 };

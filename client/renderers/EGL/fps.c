@@ -44,6 +44,7 @@ struct EGL_FPS
   EGL_Model   * model;
 
   bool  ready;
+  int   iwidth, iheight;
   float width, height;
 
   // uniforms
@@ -144,14 +145,22 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
     return;
   }
 
-  egl_texture_setup(
-    fps->texture,
-    EGL_PF_BGRA,
-    bmp->width ,
-    bmp->height,
-    bmp->width * bmp->bpp,
-    false
-  );
+  if (fps->iwidth != bmp->width || fps->iheight != bmp->height)
+  {
+    fps->iwidth  = bmp->width;
+    fps->iheight = bmp->height;
+    fps->width   = (float)bmp->width;
+    fps->height  = (float)bmp->height;
+
+    egl_texture_setup(
+      fps->texture,
+      EGL_PF_BGRA,
+      bmp->width ,
+      bmp->height,
+      bmp->width * bmp->bpp,
+      false
+    );
+  }
 
   egl_texture_update
   (
@@ -159,10 +168,7 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
     bmp->pixels
   );
 
-  fps->width  = bmp->width;
-  fps->height = bmp->height;
   fps->ready  = true;
-
   fps->font->release(fps->fontObj, bmp);
 }
 

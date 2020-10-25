@@ -25,12 +25,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <pthread.h>
 #include <assert.h>
 #include <errno.h>
+#include <stdatomic.h>
+#include <stdint.h>
 
 struct LGEvent
 {
   pthread_mutex_t mutex;
   pthread_cond_t  cond;
-  bool            flag;
+  uint32_t        flag;
   bool            autoReset;
 };
 
@@ -58,7 +60,6 @@ LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
   }
 
   handle->autoReset = autoReset;
-
   return handle;
 }
 
@@ -71,7 +72,7 @@ void lgFreeEvent(LGEvent * handle)
   free(handle);
 }
 
-bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
+bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 {
   assert(handle);
 
@@ -81,35 +82,39 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
     return false;
   }
 
-  while(!handle->flag)
+  bool ret = true;
+  int  res;
+  while(ret && !atomic_load(&handle->flag))
   {
-    if (timeout == TIMEOUT_INFINITE)
+    if (!ts)
     {
-      if (pthread_cond_wait(&handle->cond, &handle->mutex) != 0)
+      if ((res = pthread_cond_wait(&handle->cond, &handle->mutex)) != 0)
       {
-        DEBUG_ERROR("Wait to wait on the condition");
-        return false;
+        DEBUG_ERROR("Failed to wait on the condition (err: %d)", res);
+        ret = false;
       }
     }
     else
     {
-      struct timespec ts;
-      ts.tv_sec  = timeout / 1000;
-      ts.tv_nsec = (timeout % 1000) * 1000000;
-      switch(pthread_cond_timedwait(&handle->cond, &handle->mutex, &ts))
+      switch((res = pthread_cond_timedwait(&handle->cond, &handle->mutex, ts)))
       {
+        case 0:
+          break;
+
         case ETIMEDOUT:
-          return false;
+          ret = false;
+          break;
 
         default:
-          DEBUG_ERROR("Timed wait failed");
-          return false;
+          ret = false;
+          DEBUG_ERROR("Timed wait failed (err: %d)", res);
+          break;
       }
     }
   }
 
   if (handle->autoReset)
-    handle->flag = false;
+    atomic_store(&handle->flag, 0);
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
@@ -117,7 +122,34 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
     return false;
   }
 
-  return true;
+  return ret;
+}
+
+bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
+{
+  if (timeout == TIMEOUT_INFINITE)
+    return lgWaitEventAbs(handle, NULL);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  uint64_t nsec = ts.tv_nsec + timeout;
+  if(nsec > 1e9)
+  {
+    ts.tv_nsec = nsec - 1e9;
+    ++ts.tv_sec;
+  }
+  else
+    ts.tv_nsec = nsec;
+
+  return lgWaitEventAbs(handle, &ts);
+}
+
+bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
+{
+  if (timeout == TIMEOUT_INFINITE)
+    return lgWaitEventAbs(handle, NULL);
+
+  return lgWaitEventNS(handle, timeout * 1000000);
 }
 
 bool lgSignalEvent(LGEvent * handle)
@@ -130,7 +162,7 @@ bool lgSignalEvent(LGEvent * handle)
     return false;
   }
 
-  handle->flag = true;
+  atomic_store(&handle->flag, 1);
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
@@ -138,7 +170,7 @@ bool lgSignalEvent(LGEvent * handle)
     return false;
   }
 
-  if (pthread_cond_signal(&handle->cond) != 0)
+  if (pthread_cond_broadcast(&handle->cond) != 0)
   {
     DEBUG_ERROR("Failed to signal the condition");
     return false;
@@ -157,7 +189,7 @@ bool lgResetEvent(LGEvent * handle)
     return false;
   }
 
-  handle->flag = false;
+  atomic_store(&handle->flag, 0);
 
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {

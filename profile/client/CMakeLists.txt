@@ -52,13 +52,15 @@ set(SOURCES
 	src/main.c
 )
 
-add_subdirectory("${PROJECT_TOP}/common" "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common")
+add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 
 add_executable(profiler-client ${SOURCES})
 target_compile_options(profiler-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER})
 target_link_libraries(profiler-client
 	${EXE_FLAGS}
 	lg_common
+	lgmp
 )
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
