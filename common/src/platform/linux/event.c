@@ -32,7 +32,7 @@ struct LGEvent
 {
   pthread_mutex_t mutex;
   pthread_cond_t  cond;
-  uint32_t        flag;
+  atomic_uint     count;
   bool            autoReset;
 };
 
@@ -52,7 +52,18 @@ LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
     return NULL;
   }
 
-  if (pthread_cond_init(&handle->cond, NULL) != 0)
+  pthread_condattr_t cattr;
+  pthread_condattr_init(&cattr);
+
+  if (pthread_condattr_setclock(&cattr, CLOCK_MONOTONIC) != 0)
+  {
+    DEBUG_ERROR("Failed to set the condition clock to realtime");
+    pthread_mutex_destroy(&handle->mutex);
+    free(handle);
+    return NULL;
+  }
+
+  if (pthread_cond_init(&handle->cond, &cattr) != 0)
   {
     pthread_mutex_destroy(&handle->mutex);
     free(handle);
@@ -76,16 +87,17 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 {
   assert(handle);
 
-  if (pthread_mutex_lock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to lock the mutex");
-    return false;
-  }
-
   bool ret = true;
   int  res;
-  while(ret && !atomic_load(&handle->flag))
+
+  while(ret && atomic_load(&handle->count) == 0)
   {
+    if (pthread_mutex_lock(&handle->mutex) != 0)
+    {
+      DEBUG_ERROR("Failed to lock the mutex");
+      return false;
+    }
+
     if (!ts)
     {
       if ((res = pthread_cond_wait(&handle->cond, &handle->mutex)) != 0)
@@ -111,16 +123,16 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
           break;
       }
     }
+
+    if (pthread_mutex_unlock(&handle->mutex) != 0)
+    {
+      DEBUG_ERROR("Failed to unlock the mutex");
+      return false;
+    }
   }
 
-  if (handle->autoReset)
-    atomic_store(&handle->flag, 0);
-
-  if (pthread_mutex_unlock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to unlock the mutex");
-    return false;
-  }
+  if (ret && handle->autoReset)
+    atomic_fetch_sub(&handle->count, 1);
 
   return ret;
 }
@@ -131,11 +143,11 @@ bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
     return lgWaitEventAbs(handle, NULL);
 
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
+  clock_gettime(CLOCK_MONOTONIC, &ts);
   uint64_t nsec = ts.tv_nsec + timeout;
-  if(nsec > 1e9)
+  if(nsec > 1000000000UL)
   {
-    ts.tv_nsec = nsec - 1e9;
+    ts.tv_nsec = nsec - 1000000000UL;
     ++ts.tv_sec;
   }
   else
@@ -149,26 +161,18 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
   if (timeout == TIMEOUT_INFINITE)
     return lgWaitEventAbs(handle, NULL);
 
-  return lgWaitEventNS(handle, timeout * 1000000);
+  return lgWaitEventNS(handle, timeout * 1000000U);
 }
 
 bool lgSignalEvent(LGEvent * handle)
 {
   assert(handle);
 
-  if (pthread_mutex_lock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to lock the mutex");
-    return false;
-  }
+  const bool signalled = atomic_fetch_add_explicit(&handle->count, 1,
+      memory_order_acquire) > 0;
 
-  atomic_store(&handle->flag, 1);
-
-  if (pthread_mutex_unlock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to unlock the mutex");
-    return false;
-  }
+  if (signalled)
+    return true;
 
   if (pthread_cond_broadcast(&handle->cond) != 0)
   {
@@ -182,20 +186,6 @@ bool lgSignalEvent(LGEvent * handle)
 bool lgResetEvent(LGEvent * handle)
 {
   assert(handle);
-
-  if (pthread_mutex_lock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to lock the mutex");
-    return false;
-  }
-
-  atomic_store(&handle->flag, 0);
-
-  if (pthread_mutex_unlock(&handle->mutex) != 0)
-  {
-    DEBUG_ERROR("Failed to unlock the mutex");
-    return false;
-  }
-
+  atomic_store(&handle->count, 0);
   return true;
 }

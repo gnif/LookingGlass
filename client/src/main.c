@@ -71,8 +71,6 @@ static LGThread *t_cursor  = NULL;
 static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
-static atomic_uint a_framesPending = 0;
-
 struct AppState state;
 
 // this structure is initialized in config.c
@@ -163,19 +161,13 @@ static int renderThread(void * unused)
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
-  int resyncCheck = 0;
   struct timespec time;
-  clock_gettime(CLOCK_REALTIME, &time);
-
   while(state.state != APP_STATE_SHUTDOWN)
   {
     if (state.frameTime > 0)
     {
-      if (++resyncCheck == 100)
-      {
-        resyncCheck = 0;
-        clock_gettime(CLOCK_REALTIME, &time);
-      }
+      lgWaitEventAbs(e_frame, &time);
+      clock_gettime(CLOCK_MONOTONIC, &time);
       tsAdd(&time, state.frameTime);
     }
 
@@ -198,11 +190,16 @@ static int renderThread(void * unused)
 
       if (state.renderTime > 1e9)
       {
-        const float avgUPS = 1000.0f / (((float)state.renderTime / atomic_load_explicit(&state.frameCount, memory_order_acquire)) / 1e6f);
-        const float avgFPS = 1000.0f / (((float)state.renderTime / state.renderCount) / 1e6f);
+        const float avgUPS = 1000.0f / (((float)state.renderTime /
+          atomic_exchange_explicit(&state.frameCount, 0, memory_order_acquire)) /
+          1e6f);
+
+        const float avgFPS = 1000.0f / (((float)state.renderTime /
+          state.renderCount) /
+          1e6f);
+
         state.lgr->update_fps(state.lgrData, avgUPS, avgFPS);
 
-        atomic_store_explicit(&state.frameCount, 0, memory_order_release);
         state.renderTime  = 0;
         state.renderCount = 0;
       }
@@ -216,28 +213,6 @@ static int renderThread(void * unused)
         state.dstRect.h
       );
       state.resizeDone = true;
-    }
-
-    if (state.frameTime > 0)
-    {
-      /* if there are frames pending already, don't wait on the event */
-      if (atomic_load_explicit(&a_framesPending, memory_order_acquire) > 0)
-        if (atomic_fetch_sub_explicit(&a_framesPending, 1, memory_order_release) > 1)
-          continue;
-
-      if (lgWaitEventAbs(e_frame, &time) && state.frameTime > 0)
-      {
-        /* only resync the timer if we got an early frame */
-        struct timespec now, diff;
-        clock_gettime(CLOCK_REALTIME, &now);
-        tsDiff(&diff, &time, &now);
-        if (diff.tv_sec == 0 && diff.tv_nsec < state.frameTime)
-        {
-          resyncCheck = 0;
-          memcpy(&time, &now, sizeof(struct timespec));
-          tsAdd(&time, state.frameTime);
-        }
-      }
     }
   }
 
@@ -517,8 +492,7 @@ static int frameThread(void * unused)
     }
 
     atomic_fetch_add_explicit(&state.frameCount, 1, memory_order_relaxed);
-    if (atomic_fetch_add_explicit(&a_framesPending, 1, memory_order_relaxed) == 0)
-      lgSignalEvent(e_frame);
+    lgSignalEvent(e_frame);
 
     lgmpClientMessageDone(queue);
   }
@@ -1425,13 +1399,13 @@ static int lg_run()
 
   if (params.fpsMin == -1)
   {
-      // minimum 60fps to keep interactivity decent
-      state.frameTime = 1000000000ULL / 60ULL;
+    // default 30 fps
+    state.frameTime = 1000000000ULL / 30ULL;
   }
   else
   {
-      DEBUG_INFO("Using the FPS minimum from args: %d", params.fpsMin);
-      state.frameTime = 1000000000ULL / (unsigned long long)params.fpsMin;
+    DEBUG_INFO("Using the FPS minimum from args: %d", params.fpsMin);
+    state.frameTime = 1000000000ULL / (unsigned long long)params.fpsMin;
   }
 
   register_key_binds();
