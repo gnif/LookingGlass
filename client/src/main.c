@@ -230,7 +230,7 @@ static int renderThread(void * unused)
         /* only resync the timer if we got an early frame */
         struct timespec now, diff;
         clock_gettime(CLOCK_REALTIME, &now);
-        tsDiff(&diff, &now, &time);
+        tsDiff(&diff, &time, &now);
         if (diff.tv_sec == 0 && diff.tv_nsec < state.frameTime)
         {
           resyncCheck = 0;
