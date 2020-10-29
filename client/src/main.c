@@ -669,7 +669,7 @@ void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t siz
   struct CBRequest * cbr;
   if (ll_shift(state.cbRequestList, (void **)&cbr))
   {
-    cbr->replyFn(cbr->opaque, type, buffer, size);
+    cbr->replyFn(cbr->opaque, spice_type_to_clipboard_type(type), buffer, size);
     free(cbr);
   }
 }
