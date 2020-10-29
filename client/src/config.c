@@ -84,6 +84,13 @@ static struct Option options[] =
     .type          = OPTION_TYPE_INT,
     .value.x_int   = 1000
   },
+  {
+    .module        = "app",
+    .name          = "allowDMA",
+    .description   = "Allow direct DMA transfers if possible (VM-VM only for now)",
+    .type          = OPTION_TYPE_BOOL,
+    .value.x_bool  = true
+  },
 
   // window options
   {
@@ -401,6 +408,7 @@ bool config_load(int argc, char * argv[])
   // setup the application params for the basic types
   params.cursorPollInterval = option_get_int   ("app", "cursorPollInterval");
   params.framePollInterval  = option_get_int   ("app", "framePollInterval" );
+  params.allowDMA           = option_get_bool  ("app", "allowDMA"          );
 
   params.windowTitle   = option_get_string("win", "title"        );
   params.autoResize    = option_get_bool  ("win", "autoResize"   );

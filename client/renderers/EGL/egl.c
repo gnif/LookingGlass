@@ -52,6 +52,7 @@ struct Options
 
 struct Inst
 {
+  bool dmaSupport;
   LG_RendererParams params;
   struct Options    opt;
 
@@ -188,8 +189,8 @@ bool egl_initialize(void * opaque, Uint32 * sdlFlags)
   DEBUG_INFO("Double buffering is %s", doubleBuffer ? "on" : "off");
 
   *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER        , doubleBuffer ? 1 : 0);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER         , doubleBuffer ? 1 : 0);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK , SDL_GL_CONTEXT_PROFILE_CORE);
 
   if (option_get_bool("egl", "multisample"))
   {
@@ -224,6 +225,20 @@ void egl_deinitialize(void * opaque)
   LG_LOCK_FREE(this->lock);
 
   free(this);
+}
+
+bool egl_supports(void * opaque, LG_RendererSupport flag)
+{
+  struct Inst * this = (struct Inst *)opaque;
+
+  switch(flag)
+  {
+    case LG_SUPPORTS_DMABUF:
+      return this->dmaSupport;
+
+    default:
+      return false;
+  }
 }
 
 void egl_on_restart(void * opaque)
@@ -308,7 +323,7 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
+bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool useDMA)
 {
   struct Inst * this = (struct Inst *)opaque;
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
@@ -335,14 +350,14 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
   }
 
   this->useNearest = this->width < format.width || this->height < format.height;
-  return egl_desktop_setup(this->desktop, format);
+  return egl_desktop_setup(this->desktop, format, useDMA);
 }
 
 bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd)
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  if (!egl_desktop_update(this->desktop, frame))
+  if (!egl_desktop_update(this->desktop, frame, dmaFd))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
@@ -399,12 +414,12 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  const char *client_exts = eglQueryString(NULL, EGL_EXTENSIONS);
-  DEBUG_INFO("Supported extensions: %s", client_exts);
-
   bool useNative = false;
-  if (strstr(client_exts, "EGL_KHR_platform_base") != NULL)
-    useNative = true;
+  {
+    const char *client_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+    if (strstr(client_exts, "EGL_KHR_platform_base") != NULL)
+      useNative = true;
+  }
 
   DEBUG_INFO("use native: %s", useNative ? "true" : "false");
 
@@ -451,7 +466,8 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  if (!eglInitialize(this->display, NULL, NULL))
+  int maj, min;
+  if (!eglInitialize(this->display, &maj, &min))
   {
     DEBUG_ERROR("Unable to initialize EGL");
     return false;
@@ -494,14 +510,21 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   }
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
+  const char *client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
 
-  DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
-  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
-  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+  DEBUG_INFO("EGL       : %d.%d", maj, min);
+  DEBUG_INFO("Vendor    : %s", glGetString(GL_VENDOR  ));
+  DEBUG_INFO("Renderer  : %s", glGetString(GL_RENDERER));
+  DEBUG_INFO("Version   : %s", glGetString(GL_VERSION ));
+  DEBUG_INFO("EGL APIs  : %s", eglQueryString(this->display, EGL_CLIENT_APIS));
+  DEBUG_INFO("Extensions: %s", client_exts);
+
+  if (strstr(client_exts, "EGL_EXT_image_dma_buf_import") != NULL)
+    this->dmaSupport = true;
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(this, &this->desktop))
+  if (!egl_desktop_init(&this->desktop, this->display))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
@@ -617,6 +640,7 @@ struct LG_Renderer LGR_EGL =
   .create          = egl_create,
   .initialize      = egl_initialize,
   .deinitialize    = egl_deinitialize,
+  .supports        = egl_supports,
   .on_restart      = egl_on_restart,
   .on_resize       = egl_on_resize,
   .on_mouse_shape  = egl_on_mouse_shape,

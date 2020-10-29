@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "shader.h"
 #include "common/framebuffer.h"
 
+#include <SDL2/SDL_egl.h>
 #include <GL/gl.h>
 
 typedef struct EGL_Texture EGL_Texture;
@@ -43,12 +44,13 @@ enum EGL_TexStatus
   EGL_TEX_STATUS_ERROR
 };
 
-bool egl_texture_init(EGL_Texture ** tex);
+bool egl_texture_init(EGL_Texture ** texture, EGLDisplay * display);
 void egl_texture_free(EGL_Texture ** tex);
 
-bool               egl_texture_setup  (EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t stride, bool streaming);
+bool               egl_texture_setup  (EGL_Texture * texture, enum EGL_PixelFormat pixfmt, size_t width, size_t height, size_t stride, bool streaming, bool useDMA);
 bool               egl_texture_update (EGL_Texture * texture, const uint8_t * buffer);
 bool               egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * frame);
+bool               egl_texture_update_from_dma  (EGL_Texture * texture, const FrameBuffer * frmame, const int dmaFd);
 enum EGL_TexStatus egl_texture_process(EGL_Texture * texture);
 enum EGL_TexStatus egl_texture_bind          (EGL_Texture * texture);
 int                egl_texture_count         (EGL_Texture * texture);

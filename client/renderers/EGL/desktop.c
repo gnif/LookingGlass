@@ -47,7 +47,7 @@ struct DesktopShader
 
 struct EGL_Desktop
 {
-  void * egl;
+  EGLDisplay * display;
 
   EGL_Texture          * texture;
   struct DesktopShader * shader; // the active shader
@@ -94,7 +94,7 @@ static bool egl_init_desktop_shader(
   return true;
 }
 
-bool egl_desktop_init(void * egl, EGL_Desktop ** desktop)
+bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
 {
   *desktop = (EGL_Desktop *)malloc(sizeof(EGL_Desktop));
   if (!*desktop)
@@ -104,8 +104,9 @@ bool egl_desktop_init(void * egl, EGL_Desktop ** desktop)
   }
 
   memset(*desktop, 0, sizeof(EGL_Desktop));
+  (*desktop)->display = display;
 
-  if (!egl_texture_init(&(*desktop)->texture))
+  if (!egl_texture_init(&(*desktop)->texture, display))
   {
     DEBUG_ERROR("Failed to initialize the desktop texture");
     return false;
@@ -138,7 +139,6 @@ bool egl_desktop_init(void * egl, EGL_Desktop ** desktop)
   egl_model_set_default((*desktop)->model);
   egl_model_set_texture((*desktop)->model, (*desktop)->texture);
 
-  (*desktop)->egl  = egl;
   (*desktop)->kbNV = app_register_keybind(SDL_SCANCODE_N, egl_desktop_toggle_nv, *desktop);
 
   (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
@@ -175,7 +175,7 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   *desktop = NULL;
 }
 
-bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
+bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bool useDMA)
 {
   enum EGL_PixelFormat pixFmt;
   switch(format.type)
@@ -219,7 +219,8 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
     format.width,
     format.height,
     format.pitch,
-    true // streaming texture
+    true, // streaming texture
+    useDMA
   ))
   {
     DEBUG_ERROR("Failed to setup the desktop texture");
@@ -229,10 +230,18 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
   return true;
 }
 
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame)
+bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd)
 {
-  if (!egl_texture_update_from_frame(desktop->texture, frame))
-    return false;
+  if (dmaFd >= 0)
+  {
+    if (!egl_texture_update_from_dma(desktop->texture, frame, dmaFd))
+      return false;
+  }
+  else
+  {
+    if (!egl_texture_update_from_frame(desktop->texture, frame))
+      return false;
+  }
 
   enum EGL_TexStatus status;
   if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)

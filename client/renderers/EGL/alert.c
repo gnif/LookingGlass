@@ -72,7 +72,7 @@ bool egl_alert_init(EGL_Alert ** alert, const LG_Font * font, LG_FontObj fontObj
   (*alert)->fontObj = fontObj;
   LG_LOCK_INIT((*alert)->lock);
 
-  if (!egl_texture_init(&(*alert)->texture))
+  if (!egl_texture_init(&(*alert)->texture, NULL))
   {
     DEBUG_ERROR("Failed to initialize the alert texture");
     return false;
@@ -175,6 +175,7 @@ void egl_alert_render(EGL_Alert * alert, const float scaleX, const float scaleY)
       alert->bmp->width ,
       alert->bmp->height,
       alert->bmp->width * alert->bmp->bpp,
+      false,
       false
     );
 

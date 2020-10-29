@@ -66,7 +66,7 @@ bool egl_fps_init(EGL_FPS ** fps, const LG_Font * font, LG_FontObj fontObj)
   (*fps)->font    = font;
   (*fps)->fontObj = fontObj;
 
-  if (!egl_texture_init(&(*fps)->texture))
+  if (!egl_texture_init(&(*fps)->texture, NULL))
   {
     DEBUG_ERROR("Failed to initialize the fps texture");
     return false;
@@ -158,6 +158,7 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
       bmp->width ,
       bmp->height,
       bmp->width * bmp->bpp,
+      false,
       false
     );
   }

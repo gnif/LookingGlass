@@ -158,6 +158,7 @@ struct AppParams
 
   unsigned int cursorPollInterval;
   unsigned int framePollInterval;
+  bool         allowDMA;
 
   bool         forceRenderer;
   unsigned int forceRendererIndex;

@@ -375,7 +375,10 @@ static int frameThread(void * unused)
 
   //FIXME: Should use LGMP_Q_FRAME_LEN
   struct DMAFrameInfo dmaInfo[2] = {0};
-  const bool useDMA = ivshmemHasDMA(&state.shm) && state.lgr->supports &&
+  const bool useDMA =
+    params.allowDMA &&
+    ivshmemHasDMA(&state.shm) &&
+    state.lgr->supports &&
     state.lgr->supports(state.lgrData, LG_SUPPORTS_DMABUF);
 
   if (useDMA)
@@ -479,7 +482,7 @@ static int frameThread(void * unused)
           frame->width, frame->height,
           frame->stride, frame->pitch);
 
-      if (!state.lgr->on_frame_format(state.lgrData, lgrFormat))
+      if (!state.lgr->on_frame_format(state.lgrData, lgrFormat, useDMA))
       {
         DEBUG_ERROR("renderer failed to configure format");
         state.state = APP_STATE_SHUTDOWN;
@@ -557,7 +560,6 @@ static int frameThread(void * unused)
 
     atomic_fetch_add_explicit(&state.frameCount, 1, memory_order_relaxed);
     lgSignalEvent(e_frame);
-
     lgmpClientMessageDone(queue);
   }
 
