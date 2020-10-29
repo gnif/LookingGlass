@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 struct IVSHMEM
 {
@@ -36,3 +37,7 @@ bool ivshmemOpen(struct IVSHMEM * dev);
 bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDev);
 void ivshmemClose(struct IVSHMEM * dev);
 void ivshmemFree(struct IVSHMEM * dev);
+
+/* Linux KVMFR support only for now (VM->VM) */
+bool ivshmemHasDMA   (struct IVSHMEM * dev);
+int  ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size);

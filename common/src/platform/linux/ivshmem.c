@@ -213,3 +213,39 @@ void ivshmemClose(struct IVSHMEM * dev)
   dev->size   = 0;
   dev->opaque = NULL;
 }
+
+bool ivshmemHasDMA(struct IVSHMEM * dev)
+{
+  assert(dev && dev->opaque);
+
+  struct IVSHMEMInfo * info =
+    (struct IVSHMEMInfo *)dev->opaque;
+
+  return info->dmaFd >= 0;
+}
+
+int ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size)
+{
+  assert(ivshmemHasDMA(dev));
+  assert(dev && dev->opaque);
+  assert(offset + size <= dev->size);
+
+  struct IVSHMEMInfo * info =
+    (struct IVSHMEMInfo *)dev->opaque;
+
+  // align to the page size
+  size = (size & ~(0x1000-1)) + 0x1000;
+
+  const struct kvmfr_dmabuf_create create =
+  {
+    .flags  = KVMFR_DMABUF_FLAG_CLOEXEC,
+    .offset = offset,
+    .size   = size
+  };
+
+  int fd = ioctl(info->devFd, KVMFR_DMABUF_CREATE, &create);
+  if (fd < 0)
+    DEBUG_ERROR("Failed to create the dma buffer");
+
+  return fd;
+}
