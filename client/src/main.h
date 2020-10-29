@@ -105,7 +105,7 @@ struct AppState
   atomic_uint_least64_t frameTime;
   uint64_t              lastFrameTime;
   uint64_t              renderTime;
-  uint64_t              frameCount;
+  atomic_uint_least64_t frameCount;
   uint64_t              renderCount;
 
 
