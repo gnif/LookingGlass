@@ -162,6 +162,8 @@ static int renderThread(void * unused)
   lgSignalEvent(e_startup);
 
   struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+
   while(state.state != APP_STATE_SHUTDOWN)
   {
     if (state.frameTime > 0)
