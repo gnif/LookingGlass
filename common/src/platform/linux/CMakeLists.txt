@@ -3,6 +3,7 @@ project(lg_common_platform_code LANGUAGES C)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
+	${PROJECT_TOP}
 )
 
 add_library(lg_common_platform_code STATIC

@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -32,58 +33,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/stringutils.h"
+#include "module/kvmfr.h"
 
 struct IVSHMEMInfo
 {
-  int fd;
+  int devFd;
+  int dmaFd;
   int size;
 };
 
-static int uioOpenFile(const char * shmDevice, const char * file)
-{
-  char * path;
-  alloc_sprintf(&path, "/sys/class/uio/%s/%s", shmDevice, file);
-  int fd = open(path, O_RDONLY);
-  if (fd < 0)
-  {
-    free(path);
-    return -1;
-  }
-
-  free(path);
-  return fd;
-}
-
-static char * uioGetName(const char * shmDevice)
-{
-  int fd = uioOpenFile(shmDevice, "name");
-  if (fd < 0)
-    return NULL;
-
-  char * name = malloc(32);
-  int len = read(fd, name, 31);
-  if (len <= 0)
-  {
-    free(name);
-    close(fd);
-    return NULL;
-  }
-  name[len] = '\0';
-  close(fd);
-
-  while(len > 0 && name[len-1] == '\n')
-  {
-    --len;
-    name[len] = '\0';
-  }
-
-  return name;
-}
-
 static bool ivshmemDeviceValidator(struct Option * opt, const char ** error)
 {
-  // if it's not a uio device, it must be a file on disk
-  if (strlen(opt->value.x_string) > 3 && memcmp(opt->value.x_string, "uio", 3) != 0)
+  // if it's not a kvmfr device, it must be a file on disk
+  if (strlen(opt->value.x_string) > 3 && memcmp(opt->value.x_string, "kvmfr", 5) != 0)
   {
     struct stat st;
     if (stat(opt->value.x_string, &st) != 0)
@@ -94,21 +56,6 @@ static bool ivshmemDeviceValidator(struct Option * opt, const char ** error)
     return true;
   }
 
-  char * name = uioGetName(opt->value.x_string);
-  if (!name)
-  {
-    *error = "Failed to get the uio device name";
-    return false;
-  }
-
-  if (strcmp(name, "KVMFR") != 0)
-  {
-    free(name);
-    *error = "Device is not a KVMFR device";
-    return false;
-  }
-
-  free(name);
   return true;
 }
 
@@ -116,7 +63,7 @@ static StringList ivshmemDeviceGetValues(struct Option * option)
 {
   StringList sl = stringlist_new(true);
 
-  DIR * d = opendir("/sys/class/uio");
+  DIR * d = opendir("/sys/class/kvmfr");
   if (!d)
     return sl;
 
@@ -126,18 +73,9 @@ static StringList ivshmemDeviceGetValues(struct Option * option)
     if (dir->d_name[0] == '.')
       continue;
 
-    char * name = uioGetName(dir->d_name);
-    if (!name)
-      continue;
-
-    if (strcmp(name, "KVMFR") == 0)
-    {
-      char * devName;
-      alloc_sprintf(&devName, "/dev/%s", dir->d_name);
-      stringlist_push(sl, devName);
-    }
-
-    free(name);
+    char * devName;
+    alloc_sprintf(&devName, "/dev/%s", dir->d_name);
+    stringlist_push(sl, devName);
   }
 
   closedir(d);
@@ -152,7 +90,7 @@ void ivshmemOptionsInit()
       .module         = "app",
       .name           = "shmFile",
       .shortopt       = 'f',
-      .description    = "The path to the shared memory file, or the name of the uio device to use, ie: uio0",
+      .description    = "The path to the shared memory file, or the name of the kvmfr device to use, ie: kvmfr0",
       .type           = OPTION_TYPE_STRING,
       .value.x_string = "/dev/shm/looking-glass",
       .validator      = ivshmemDeviceValidator,
@@ -174,44 +112,42 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
   assert(dev);
 
   unsigned int devSize;
-  int devFD;
+  int devFd = -1;
+  int dmaFd = -1;
+  int mapFd = -1;
 
   dev->opaque = NULL;
 
   DEBUG_INFO("KVMFR Device     : %s", shmDevice);
 
-  if (strlen(shmDevice) > 8 && memcmp(shmDevice, "/dev/uio", 8) == 0)
+  if (strlen(shmDevice) > 8 && memcmp(shmDevice, "/dev/kvmfr", 10) == 0)
   {
-    const char * uioDev = shmDevice + 5;
-
-    // get the device size
-    int fd = uioOpenFile(uioDev, "maps/map0/size");
-    if (fd < 0)
-    {
-      DEBUG_ERROR("Failed to open %s/size", uioDev);
-      return false;
-    }
-
-    char size[32];
-    int  len = read(fd, size, sizeof(size) - 1);
-    if (len <= 0)
-    {
-      DEBUG_ERROR("Failed to read the device size");
-      DEBUG_ERROR("%s", strerror(errno));
-      close(fd);
-      return false;
-    }
-    size[len] = '\0';
-    close(fd);
-    devSize = strtoul(size, NULL, 16);
-
-    devFD = open(shmDevice, O_RDWR, (mode_t)0600);
-    if (devFD < 0)
+    devFd = open(shmDevice, O_RDWR, (mode_t)0600);
+    if (devFd < 0)
     {
       DEBUG_ERROR("Failed to open: %s", shmDevice);
       DEBUG_ERROR("%s", strerror(errno));
       return false;
     }
+
+    // get the device size
+    devSize = ioctl(devFd, KVMFR_DMABUF_GETSIZE, 0);
+    const struct kvmfr_dmabuf_create create =
+    {
+      .flags  = KVMFR_DMABUF_FLAG_CLOEXEC,
+      .offset = 0x0,
+      .size   = devSize
+    };
+
+    dmaFd = ioctl(devFd, KVMFR_DMABUF_CREATE, &create);
+    if (dmaFd < 0)
+    {
+      DEBUG_ERROR("Failed to create the dma buffer");
+      close(devFd);
+      return false;
+    }
+
+    mapFd = dmaFd;
   }
   else
   {
@@ -224,16 +160,18 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     }
 
     devSize = st.st_size;
-    devFD   = open(shmDevice, O_RDWR, (mode_t)0600);
-    if (devFD < 0)
+    devFd   = open(shmDevice, O_RDWR, (mode_t)0600);
+    if (devFd < 0)
     {
       DEBUG_ERROR("Failed to open: %s", shmDevice);
       DEBUG_ERROR("%s", strerror(errno));
       return false;
     }
+
+    mapFd = devFd;
   }
 
-  void * map = mmap(0, devSize, PROT_READ | PROT_WRITE, MAP_SHARED, devFD, 0);
+  void * map = mmap(0, devSize, PROT_READ | PROT_WRITE, MAP_SHARED, mapFd, 0);
   if (map == MAP_FAILED)
   {
     DEBUG_ERROR("Failed to map the shared memory device: %s", shmDevice);
@@ -243,8 +181,9 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
   struct IVSHMEMInfo * info =
     (struct IVSHMEMInfo *)malloc(sizeof(struct IVSHMEMInfo));
-  info->size = devSize;
-  info->fd   = devFD;
+  info->size  = devSize;
+  info->devFd = devFd;
+  info->dmaFd = dmaFd;
 
   dev->opaque = info;
   dev->size   = devSize;
@@ -263,7 +202,11 @@ void ivshmemClose(struct IVSHMEM * dev)
     (struct IVSHMEMInfo *)dev->opaque;
 
   munmap(dev->mem, info->size);
-  close(info->fd);
+
+  if (info->dmaFd >= 0)
+    close(info->dmaFd);
+
+  close(info->devFd);
 
   free(info);
   dev->mem    = NULL;
