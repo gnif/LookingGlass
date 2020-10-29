@@ -338,7 +338,7 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
   return egl_desktop_setup(this->desktop, format);
 }
 
-bool egl_on_frame(void * opaque, const FrameBuffer * frame)
+bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd)
 {
   struct Inst * this = (struct Inst *)opaque;
 

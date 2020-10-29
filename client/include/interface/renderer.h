@@ -51,6 +51,12 @@ typedef struct LG_RendererParams
 }
 LG_RendererParams;
 
+typedef enum LG_RendererSupport
+{
+  LG_SUPPORTS_DMABUF
+}
+LG_RendererSupport;
+
 typedef struct LG_RendererFormat
 {
   FrameType    type;    // frame type
@@ -89,12 +95,13 @@ typedef void         (* LG_RendererSetup)();
 typedef bool         (* LG_RendererCreate       )(void ** opaque, const LG_RendererParams params);
 typedef bool         (* LG_RendererInitialize   )(void * opaque, Uint32 * sdlFlags);
 typedef void         (* LG_RendererDeInitialize )(void * opaque);
+typedef bool         (* LG_RendererSupports     )(void * opaque, LG_RendererSupport support);
 typedef void         (* LG_RendererOnRestart    )(void * opaque);
 typedef void         (* LG_RendererOnResize     )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
 typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visible , const int x, const int y);
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format);
-typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame);
+typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD);
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
 typedef bool         (* LG_RendererRender       )(void * opaque, SDL_Window *window);
 typedef void         (* LG_RendererUpdateFPS    )(void * opaque, const float avgUPS, const float avgFPS);
@@ -107,6 +114,7 @@ typedef struct LG_Renderer
   LG_RendererCreate         create;
   LG_RendererInitialize     initialize;
   LG_RendererDeInitialize   deinitialize;
+  LG_RendererSupports       supports;
   LG_RendererOnRestart      on_restart;
   LG_RendererOnResize       on_resize;
   LG_RendererOnMouseShape   on_mouse_shape;

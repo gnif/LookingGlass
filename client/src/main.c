@@ -358,12 +358,28 @@ static int cursorThread(void * unused)
 
 static int frameThread(void * unused)
 {
+  struct DMAFrameInfo
+  {
+    KVMFRFrame * frame;
+    size_t       dataSize;
+    int          fd;
+  };
+
   LGMP_STATUS      status;
   PLGMPClientQueue queue;
 
   uint32_t          formatVer = 0;
   bool              formatValid = false;
+  size_t            dataSize;
   LG_RendererFormat lgrFormat;
+
+  //FIXME: Should use LGMP_Q_FRAME_LEN
+  struct DMAFrameInfo dmaInfo[2] = {0};
+  const bool useDMA = ivshmemHasDMA(&state.shm) && state.lgr->supports &&
+    state.lgr->supports(state.lgrData, LG_SUPPORTS_DMABUF);
+
+  if (useDMA)
+    DEBUG_INFO("Using DMA buffer support");
 
   SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
@@ -409,7 +425,8 @@ static int frameThread(void * unused)
       break;
     }
 
-    KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+    KVMFRFrame * frame       = (KVMFRFrame *)msg.mem;
+    struct DMAFrameInfo *dma = NULL;
 
     if (!formatValid || frame->formatVer != formatVer)
     {
@@ -420,8 +437,7 @@ static int frameThread(void * unused)
       lgrFormat.stride = frame->stride;
       lgrFormat.pitch  = frame->pitch;
 
-      size_t dataSize;
-      bool   error = false;
+      bool error = false;
       switch(frame->type)
       {
         case FRAME_TYPE_RGBA:
@@ -471,6 +487,54 @@ static int frameThread(void * unused)
       }
     }
 
+    if (useDMA)
+    {
+      /* find the existing dma buffer if it exists */
+      for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
+      {
+        if (dmaInfo[i].frame == frame)
+        {
+          dma = &dmaInfo[i];
+          /* if it's too small close it */
+          if (dma->dataSize < dataSize)
+          {
+            close(dma->fd);
+            dma->fd = -1;
+          }
+          break;
+        }
+      }
+
+      /* otherwise find a free buffer for use */
+      if (!dma)
+        for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
+        {
+          if (!dmaInfo[i].frame)
+          {
+            dma = &dmaInfo[i];
+            dma->frame = frame;
+            dma->fd    = -1;
+            break;
+          }
+        }
+
+      /* open the buffer */
+      if (dma->fd == -1)
+      {
+        const uintptr_t pos    = (uintptr_t)msg.mem - (uintptr_t)state.shm.mem;
+        const uintptr_t offset = (uintptr_t)frame->offset + FrameBufferStructSize;
+
+        dma->dataSize = dataSize;
+        dma->fd       = ivshmemGetDMABuf(&state.shm, pos + offset, dataSize);
+        if (dma->fd < 0)
+        {
+          DEBUG_ERROR("Failed to get the DMA buffer for the frame");
+          state.state = APP_STATE_SHUTDOWN;
+          break;
+        }
+      }
+    }
+
     if (lgrFormat.width != state.srcSize.x || lgrFormat.height != state.srcSize.y)
     {
       state.srcSize.x = lgrFormat.width;
@@ -483,7 +547,7 @@ static int frameThread(void * unused)
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!state.lgr->on_frame(state.lgrData, fb))
+    if (!state.lgr->on_frame(state.lgrData, fb, useDMA ? dma->fd : -1))
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");
@@ -499,6 +563,14 @@ static int frameThread(void * unused)
 
   lgmpClientUnsubscribe(&queue);
   state.lgr->on_restart(state.lgrData);
+
+  if (useDMA)
+  {
+    for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
+      if (dmaInfo[i].fd >= 0)
+        close(dmaInfo[i].fd);
+  }
+
 
   return 0;
 }
