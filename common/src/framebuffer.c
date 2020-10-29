@@ -39,9 +39,14 @@ const size_t FrameBufferStructSize = sizeof(FrameBuffer);
 
 void framebuffer_wait(const FrameBuffer * frame, size_t size)
 {
-  while(atomic_load_explicit(&frame->wp, memory_order_acquire) < size) {
+  while(atomic_load_explicit(&frame->wp, memory_order_acquire) < size)
+  {
+    int spinCount = 0;
     while(frame->wp < size)
     {
+      if (++spinCount == FB_SPIN_LIMIT)
+        return;
+      usleep(1);
     }
   }
 }
