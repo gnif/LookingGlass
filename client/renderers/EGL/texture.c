@@ -241,6 +241,9 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     glSamplerParameteri(texture->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
   }
 
+  if (useDMA)
+    return true;
+
   for(int i = 0; i < texture->textureCount; ++i)
   {
     glBindTexture(GL_TEXTURE_2D, texture->tex[i].t);
@@ -249,7 +252,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  if (!streaming || useDMA)
+  if (!streaming)
     return true;
 
   for(int i = 0; i < texture->textureCount; ++i)
