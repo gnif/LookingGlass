@@ -1,6 +1,6 @@
 /*
-UIO KVMFR Driver
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+KVMFR IVSHMEM DMA Buffer Driver
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -392,4 +392,4 @@ module_exit(kvmfr_module_exit);
 
 MODULE_DEVICE_TABLE(pci, kvmfr_pci_ids);
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Geoffrey McRae");
+MODULE_AUTHOR("Geoffrey McRae <geoff@hostfission.com>");
