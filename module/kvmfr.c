@@ -37,7 +37,7 @@ DEFINE_MUTEX(minor_lock);
 DEFINE_IDR(kvmfr_idr);
 
 #define KVMFR_UIO_NAME    "KVMFR"
-#define KVMFR_UIO_VER     "0.0.3"
+#define KVMFR_UIO_VER     "0.0.4"
 #define KVMFR_DEV_NAME    "kvmfr"
 #define KVMFR_MAX_DEVICES 10
 
@@ -171,7 +171,7 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
     return -EINVAL;
   }
 
-  if (create.offset + create.size > kdev->size)
+  if ((create.offset + create.size > kdev->size) || (create.offset + create.size < create.offset))
     return -EINVAL;
 
   kbuf = kzalloc(sizeof(struct kvmfrbuf), GFP_KERNEL);
