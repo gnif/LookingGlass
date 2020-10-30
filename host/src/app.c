@@ -44,9 +44,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
 
-#define LGMP_Q_FRAME_LEN   2
-#define LGMP_Q_POINTER_LEN 20
-
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_FRAME,

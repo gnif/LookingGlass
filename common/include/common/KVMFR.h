@@ -23,6 +23,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define LGMP_Q_POINTER     1
 #define LGMP_Q_FRAME       2
 
+#define LGMP_Q_FRAME_LEN   2
+#define LGMP_Q_POINTER_LEN 20
+
 typedef enum FrameType
 {
   FRAME_TYPE_INVALID   ,

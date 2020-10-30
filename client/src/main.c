@@ -375,8 +375,7 @@ static int frameThread(void * unused)
   size_t            dataSize;
   LG_RendererFormat lgrFormat;
 
-  //FIXME: Should use LGMP_Q_FRAME_LEN
-  struct DMAFrameInfo dmaInfo[2] = {0};
+  struct DMAFrameInfo dmaInfo[LGMP_Q_FRAME_LEN] = {0};
   const bool useDMA =
     params.allowDMA &&
     ivshmemHasDMA(&state.shm) &&
