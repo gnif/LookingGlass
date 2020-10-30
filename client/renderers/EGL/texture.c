@@ -36,7 +36,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct Tex
 {
-  GLuint   t[3];
+  GLuint   t;
   bool     hasPBO;
   GLuint   pbo;
   void *   map;
@@ -53,16 +53,13 @@ struct EGL_Texture
   EGLDisplay * display;
 
   enum   EGL_PixelFormat pixFmt;
-  size_t width, height, stride;
   size_t bpp;
   bool   streaming;
   bool   dma;
   bool   ready;
 
-  int          planeCount;
-  GLuint       samplers[3];
-  size_t       planes  [3][3];
-  GLintptr     offsets [3];
+  GLuint       sampler;
+  size_t       width, height, stride, pitch;
   GLenum       intFormat;
   GLenum       format;
   GLenum       dataType;
@@ -93,8 +90,7 @@ void egl_texture_free(EGL_Texture ** texture)
   if (!*texture)
     return;
 
-  if ((*texture)->planeCount > 0)
-    glDeleteSamplers((*texture)->planeCount, (*texture)->samplers);
+  glDeleteSamplers(1, &(*texture)->sampler);
 
   for(int i = 0; i < (*texture)->textureCount; ++i)
   {
@@ -112,8 +108,7 @@ void egl_texture_free(EGL_Texture ** texture)
         glDeleteSync(t->sync);
     }
 
-    if ((*texture)->planeCount > 0)
-      glDeleteTextures((*texture)->planeCount, t->t);
+    glDeleteTextures(1, &t->t);
   }
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
@@ -156,8 +151,6 @@ static void egl_texture_unmap(EGL_Texture * texture, uint8_t i)
 
 bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t stride, bool streaming, bool useDMA)
 {
-  int planeCount;
-
   if (texture->streaming)
   {
     for(int i = 0; i < texture->textureCount; ++i)
@@ -190,13 +183,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   switch(pixFmt)
   {
     case EGL_PF_BGRA:
-      planeCount             = 1;
       texture->bpp           = 4;
       texture->format        = GL_BGRA;
-      texture->planes[0][0]  = width;
-      texture->planes[0][1]  = height;
-      texture->planes[0][2]  = stride / 4;
-      texture->offsets[0]    = 0;
       texture->intFormat     = GL_BGRA;
       texture->dataType      = GL_UNSIGNED_BYTE;
       texture->fourcc        = DRM_FORMAT_ARGB8888;
@@ -204,13 +192,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       break;
 
     case EGL_PF_RGBA:
-      planeCount             = 1;
       texture->bpp           = 4;
       texture->format        = GL_RGBA;
-      texture->planes[0][0]  = width;
-      texture->planes[0][1]  = height;
-      texture->planes[0][2]  = stride / 4;
-      texture->offsets[0]    = 0;
       texture->intFormat     = GL_BGRA;
       texture->dataType      = GL_UNSIGNED_BYTE;
       texture->fourcc        = DRM_FORMAT_ABGR8888;
@@ -218,13 +201,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       break;
 
     case EGL_PF_RGBA10:
-      planeCount             = 1;
       texture->bpp           = 4;
       texture->format        = GL_RGBA;
-      texture->planes[0][0]  = width;
-      texture->planes[0][1]  = height;
-      texture->planes[0][2]  = stride / 4;
-      texture->offsets[0]    = 0;
       texture->intFormat     = GL_RGB10_A2;
       texture->dataType      = GL_UNSIGNED_INT_2_10_10_10_REV;
       texture->fourcc        = DRM_FORMAT_BGRA1010102;
@@ -232,38 +210,12 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       break;
 
     case EGL_PF_RGBA16F:
-      planeCount             = 1;
       texture->bpp           = 8;
       texture->format        = GL_RGBA;
-      texture->planes[0][0]  = width;
-      texture->planes[0][1]  = height;
-      texture->planes[0][2]  = stride / 8;
-      texture->offsets[0]    = 0;
       texture->intFormat     = GL_RGBA16F;
       texture->dataType      = GL_HALF_FLOAT;
       texture->fourcc        = DRM_FORMAT_ABGR16161616F;
       texture->pboBufferSize = height * stride;
-      break;
-
-    case EGL_PF_YUV420:
-      planeCount             = 3;
-      texture->bpp           = 4;
-      texture->format        = GL_RED;
-      texture->planes[0][0]  = width;
-      texture->planes[0][1]  = height;
-      texture->planes[0][2]  = stride;
-      texture->planes[1][0]  = width  / 2;
-      texture->planes[1][1]  = height / 2;
-      texture->planes[1][2]  = stride / 2;
-      texture->planes[2][0]  = width  / 2;
-      texture->planes[2][1]  = height / 2;
-      texture->planes[2][2]  = stride / 2;
-      texture->offsets[0]    = 0;
-      texture->offsets[1]    = stride * height;
-      texture->offsets[2]    = texture->offsets[1] + (texture->offsets[1] / 4);
-      texture->dataType      = GL_UNSIGNED_BYTE;
-      texture->fourcc        = DRM_FORMAT_YUV420_8BIT;
-      texture->pboBufferSize = texture->offsets[2] + (texture->offsets[1] / 4);
       break;
 
     default:
@@ -271,38 +223,29 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       return false;
   }
 
-  if (planeCount > texture->planeCount)
+  texture->pitch = stride / texture->bpp;
+
+  for(int i = 0; i < texture->textureCount; ++i)
   {
-    if (texture->planeCount > 0)
-      glDeleteSamplers(texture->planeCount, texture->samplers);
+    if (texture->tex[0].t)
+      glDeleteTextures(1, &texture->tex[i].t);
+    glGenTextures(1, &texture->tex[i].t);
+  }
 
-    for(int i = 0; i < texture->textureCount; ++i)
-    {
-      if (texture->planeCount > 0)
-        glDeleteTextures(texture->planeCount, texture->tex[i].t);
-      glGenTextures(planeCount, texture->tex[i].t);
-    }
-
-    glGenSamplers(planeCount, texture->samplers);
-    for(int p = 0; p < planeCount; ++p)
-    {
-      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-      glSamplerParameteri(texture->samplers[p], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-    }
-
-    texture->planeCount = planeCount;
+  if (!texture->sampler)
+  {
+    glGenSamplers(1, &texture->sampler);
+    glSamplerParameteri(texture->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glSamplerParameteri(texture->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glSamplerParameteri(texture->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(texture->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
   }
 
   for(int i = 0; i < texture->textureCount; ++i)
   {
-    for(int p = 0; p < planeCount; ++p)
-    {
-      glBindTexture(GL_TEXTURE_2D, texture->tex[i].t[p]);
-      glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->planes[p][0],
-        texture->planes[p][1], 0, texture->format, texture->dataType, NULL);
-    }
+    glBindTexture(GL_TEXTURE_2D, texture->tex[i].t);
+    glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->width,
+      texture->height, 0, texture->format, texture->dataType, NULL);
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -362,13 +305,10 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   }
   else
   {
-    for(int p = 0; p < texture->planeCount; ++p)
-    {
-      glBindTexture(GL_TEXTURE_2D, texture->tex[0].t[p]);
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][2]);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[p][0], texture->planes[p][1],
-          texture->format, texture->dataType, buffer + texture->offsets[p]);
-    }
+    glBindTexture(GL_TEXTURE_2D, texture->tex[0].t);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->pitch);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height,
+        texture->format, texture->dataType, buffer);
     glBindTexture(GL_TEXTURE_2D, 0);
   }
   return true;
@@ -444,7 +384,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
   );
 
   /* bind the texture and initiate the transfer */
-  glBindTexture(GL_TEXTURE_2D, texture->tex[t].t[0]);
+  glBindTexture(GL_TEXTURE_2D, texture->tex[t].t);
   glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
 
   /* wait for completion */
@@ -478,14 +418,10 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   if (!texture->dma)
   {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->tex[t].pbo);
-    for(int p = 0; p < texture->planeCount; ++p)
-    {
-      glBindTexture(GL_TEXTURE_2D, texture->tex[t].t[p]);
-      glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->planes[p][2]);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->planes[p][0], texture->planes[p][1],
-          texture->format, texture->dataType, (const void *)texture->offsets[p]);
-
-    }
+    glBindTexture(GL_TEXTURE_2D, texture->tex[t].t);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->pitch);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height,
+        texture->format, texture->dataType, (const void *)0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     /* create a fence to prevent usage before the update is complete */
@@ -548,17 +484,14 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
   }
 
   const uint8_t t = sd % TEXTURE_COUNT;
-  for(int i = 0; i < texture->planeCount; ++i)
-  {
-    glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, texture->tex[t].t[i]);
-    glBindSampler(i, texture->samplers[i]);
-  }
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture->tex[t].t);
+  glBindSampler(0, texture->sampler);
 
   return EGL_TEX_STATUS_OK;
 }
 
 int egl_texture_count(EGL_Texture * texture)
 {
-  return texture->planeCount;
+  return 1;
 }
