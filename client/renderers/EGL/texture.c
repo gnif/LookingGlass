@@ -59,14 +59,15 @@ struct EGL_Texture
   bool   dma;
   bool   ready;
 
-  int      planeCount;
-  GLuint   samplers[3];
-  size_t   planes  [3][3];
-  GLintptr offsets [3];
-  GLenum   intFormat;
-  GLenum   format;
-  GLenum   dataType;
-  size_t   pboBufferSize;
+  int          planeCount;
+  GLuint       samplers[3];
+  size_t       planes  [3][3];
+  GLintptr     offsets [3];
+  GLenum       intFormat;
+  GLenum       format;
+  GLenum       dataType;
+  unsigned int fourcc;
+  size_t       pboBufferSize;
 
   struct TexState state;
   int             textureCount;
@@ -198,6 +199,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->offsets[0]    = 0;
       texture->intFormat     = GL_BGRA;
       texture->dataType      = GL_UNSIGNED_BYTE;
+      texture->fourcc        = DRM_FORMAT_ARGB8888;
       texture->pboBufferSize = height * stride;
       break;
 
@@ -211,6 +213,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->offsets[0]    = 0;
       texture->intFormat     = GL_BGRA;
       texture->dataType      = GL_UNSIGNED_BYTE;
+      texture->fourcc        = DRM_FORMAT_ABGR8888;
       texture->pboBufferSize = height * stride;
       break;
 
@@ -224,6 +227,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->offsets[0]    = 0;
       texture->intFormat     = GL_RGB10_A2;
       texture->dataType      = GL_UNSIGNED_INT_2_10_10_10_REV;
+      texture->fourcc        = DRM_FORMAT_BGRA1010102;
       texture->pboBufferSize = height * stride;
       break;
 
@@ -237,6 +241,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->offsets[0]    = 0;
       texture->intFormat     = GL_RGBA16F;
       texture->dataType      = GL_HALF_FLOAT;
+      texture->fourcc        = DRM_FORMAT_ABGR16161616F;
       texture->pboBufferSize = height * stride;
       break;
 
@@ -257,6 +262,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       texture->offsets[1]    = stride * height;
       texture->offsets[2]    = texture->offsets[1] + (texture->offsets[1] / 4);
       texture->dataType      = GL_UNSIGNED_BYTE;
+      texture->fourcc        = DRM_FORMAT_YUV420_8BIT;
       texture->pboBufferSize = texture->offsets[2] + (texture->offsets[1] / 4);
       break;
 
@@ -421,7 +427,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
   {
     EGL_WIDTH                    , texture->width,
     EGL_HEIGHT                   , texture->height,
-    EGL_LINUX_DRM_FOURCC_EXT     , DRM_FORMAT_ARGB8888,
+    EGL_LINUX_DRM_FOURCC_EXT     , texture->fourcc,
     EGL_DMA_BUF_PLANE0_FD_EXT    , dmaFd,
     EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
     EGL_DMA_BUF_PLANE0_PITCH_EXT , texture->stride,
