@@ -37,7 +37,7 @@ DEFINE_MUTEX(minor_lock);
 DEFINE_IDR(kvmfr_idr);
 
 #define KVMFR_UIO_NAME    "KVMFR"
-#define KVMFR_UIO_VER     "0.0.2"
+#define KVMFR_UIO_VER     "0.0.3"
 #define KVMFR_DEV_NAME    "kvmfr"
 #define KVMFR_MAX_DEVICES 10
 
@@ -280,7 +280,12 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   kdev->pgmap.res.start = pci_resource_start(dev, 2);
   kdev->pgmap.res.end   = pci_resource_end  (dev, 2);
   kdev->pgmap.res.flags = pci_resource_flags(dev, 2);
-  kdev->pgmap.type      = MEMORY_DEVICE_DEVDAX;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
+  kdev->pgmap.type = MEMORY_DEVICE_DEVDAX;
+#else
+  kdev->pgmap.type = MEMORY_DEVICE_GENERIC;
+#endif
 
   kdev->addr = devm_memremap_pages(&dev->dev, &kdev->pgmap);
   if (IS_ERR(kdev->addr))
