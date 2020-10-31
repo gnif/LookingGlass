@@ -842,21 +842,9 @@ static CaptureResult dxgi_capture()
       }
 
       CURSORINFO ci = { .cbSize = sizeof(CURSORINFO) };
-      if (!GetCursorInfo(&ci))
+      ICONINFO ii;
+      if (GetCursorInfo(&ci) && ci.hCursor && GetIconInfo(ci.hCursor, &ii))
       {
-        DEBUG_WINERROR("GetCursorInfo failed", GetLastError());
-        return CAPTURE_RESULT_ERROR;
-      }
-
-      if (ci.hCursor)
-      {
-        ICONINFO ii;
-        if (!GetIconInfo(ci.hCursor, &ii))
-        {
-          DEBUG_WINERROR("GetIconInfo failed", GetLastError());
-          return CAPTURE_RESULT_ERROR;
-        }
-
         DeleteObject(ii.hbmMask);
         DeleteObject(ii.hbmColor);
 
