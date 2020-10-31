@@ -58,7 +58,7 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
   .subTimeout  = 1000
 };
 
-#define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (128 * 128 * 4))
+#define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (512 * 512 * 4))
 
 enum AppState
 {
