@@ -166,7 +166,7 @@ static int renderThread(void * unused)
 
   while(state.state != APP_STATE_SHUTDOWN)
   {
-    if (state.frameTime > 0)
+    if (params.fpsMin != 0)
     {
       lgWaitEventAbs(e_frame, &time);
       clock_gettime(CLOCK_MONOTONIC, &time);
@@ -1472,7 +1472,7 @@ static int lg_run()
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
 
-  if (params.fpsMin == -1)
+  if (params.fpsMin <= 0)
   {
     // default 30 fps
     state.frameTime = 1000000000ULL / 30ULL;
