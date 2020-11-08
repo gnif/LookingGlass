@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "cursor.h"
 #include "common/debug.h"
 #include "common/locking.h"
+#include "common/option.h"
 
 #include "texture.h"
 #include "shader.h"
@@ -47,6 +48,7 @@ struct EGL_Cursor
   // cursor state
   bool              visible;
   float             x, y, w, h;
+  int               cbMode;
 
   // textures
   struct EGL_Texture * texture;
@@ -59,6 +61,7 @@ struct EGL_Cursor
   // uniforms
   GLuint uMousePos;
   GLuint uMousePosMono;
+  GLuint uCBMode;
 
   // model
   struct EGL_Model   * model;
@@ -118,8 +121,10 @@ bool egl_cursor_init(EGL_Cursor ** cursor)
     return false;
   }
 
-  (*cursor)->uMousePos     = egl_shader_get_uniform_location((*cursor)->shader    , "mouse");
-  (*cursor)->uMousePosMono = egl_shader_get_uniform_location((*cursor)->shaderMono, "mouse");
+  (*cursor)->uMousePos     = egl_shader_get_uniform_location((*cursor)->shader    , "mouse" );
+  (*cursor)->uCBMode       = egl_shader_get_uniform_location((*cursor)->shader    , "cbMode");
+
+  (*cursor)->uMousePosMono = egl_shader_get_uniform_location((*cursor)->shaderMono, "mouse" );
 
   if (!egl_model_init(&(*cursor)->model))
   {
@@ -128,6 +133,9 @@ bool egl_cursor_init(EGL_Cursor ** cursor)
   }
 
   egl_model_set_default((*cursor)->model);
+
+  (*cursor)->cbMode = option_get_int("egl", "cbMode");
+
   return true;
 }
 
@@ -255,6 +263,7 @@ void egl_cursor_render(EGL_Cursor * cursor)
     {
       egl_shader_use(cursor->shader);
       glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
+      glUniform1i(cursor->uCBMode  , cursor->cbMode);
       glBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_model_set_texture(cursor->model, cursor->texture);
       egl_model_render(cursor->model);
@@ -271,6 +280,7 @@ void egl_cursor_render(EGL_Cursor * cursor)
     {
       egl_shader_use(cursor->shader);
       glUniform4f(cursor->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
+      glUniform1i(cursor->uCBMode  , cursor->cbMode);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_model_render(cursor->model);
       break;

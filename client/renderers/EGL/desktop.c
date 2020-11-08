@@ -43,6 +43,7 @@ struct DesktopShader
   GLint uDesktopSize;
   GLint uNearest;
   GLint uNV, uNVGain;
+  GLint uCBMode;
 };
 
 struct EGL_Desktop
@@ -64,6 +65,9 @@ struct EGL_Desktop
   KeybindHandle kbNV;
   int   nvMax;
   int   nvGain;
+
+  // colorblind mode
+  int   cbMode;
 };
 
 // forwards
@@ -90,6 +94,7 @@ static bool egl_init_desktop_shader(
   shader->uNearest     = egl_shader_get_uniform_location(shader->shader, "nearest" );
   shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"      );
   shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"  );
+  shader->uCBMode      = egl_shader_get_uniform_location(shader->shader, "cbMode"  );
 
   return true;
 }
@@ -143,6 +148,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
 
   (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
   (*desktop)->nvGain = option_get_int("egl", "nvGain"   );
+  (*desktop)->cbMode = option_get_int("egl", "cbMode"   );
 
   return true;
 }
@@ -272,6 +278,7 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, con
   else
     glUniform1i(shader->uNV, 0);
 
+  glUniform1i(shader->uCBMode, desktop->cbMode);
   egl_model_render(desktop->model);
   return true;
 }
