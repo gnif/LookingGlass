@@ -137,7 +137,7 @@ static struct Option egl_options[] =
   {
     .module       = "egl",
     .name         = "cbMode",
-    .description  = "Colorblind Mode (0 = Off, 1 = Protanope, 2 = Deuteranope, 3 = Tritanope)",
+    .description  = "Color Blind Mode (0 = Off, 1 = Protanope, 2 = Deuteranope, 3 = Tritanope)",
     .type         = OPTION_TYPE_INT,
     .value.x_int  = 0
   },
