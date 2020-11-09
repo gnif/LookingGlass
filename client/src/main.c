@@ -797,7 +797,7 @@ static void handleMouseMoveEvent(int ex, int ey)
     {
       state.curLastX += state.warpToX - state.warpFromX;
       state.curLastY += state.warpToY - state.warpFromY;
-      state.warpState = WARP_STATE_ON;
+      state.warpState = state.serverMode ? WARP_STATE_ON : WARP_STATE_ARMED;
     }
   }
 
