@@ -40,6 +40,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 
 #define CONFIG_FILE "looking-glass-host.ini"
+#define POINTER_SHAPE_BUFFERS 3
 
 #define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
 #define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
@@ -73,7 +74,7 @@ struct app
   PLGMPHost     lgmp;
 
   PLGMPHostQueue pointerQueue;
-  PLGMPMemory    pointerMemory[LGMP_Q_POINTER_LEN];
+  PLGMPMemory    pointerMemory[POINTER_SHAPE_BUFFERS];
   LG_Lock        pointerLock;
   CapturePointer pointerInfo;
   PLGMPMemory    pointerShape;
@@ -285,14 +286,6 @@ static bool captureRestart()
 
 bool captureGetPointerBuffer(void ** data, uint32_t * size)
 {
-  // spin until there is room
-  while(lgmpHostQueuePending(app.pointerQueue) == LGMP_Q_POINTER_LEN)
-  {
-    usleep(1);
-    if (app.state == APP_STATE_RUNNING)
-      return false;
-  }
-
   PLGMPMemory mem = app.pointerMemory[app.pointerIndex];
   *data = ((uint8_t*)lgmpHostMemPtr(mem)) + sizeof(KVMFRCursor);
   *size = MAX_POINTER_SIZE - sizeof(KVMFRCursor);
@@ -318,7 +311,7 @@ static void sendPointer(bool newClient)
   else
     mem = app.pointerMemory[app.pointerIndex];
 
-  if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
+  if (++app.pointerIndex == POINTER_SHAPE_BUFFERS)
     app.pointerIndex = 0;
 
   uint32_t flags = 0;
@@ -489,7 +482,7 @@ int app_main(int argc, char * argv[])
     goto fail;
   }
 
-  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
   {
     if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerMemory[i])) != LGMP_OK)
     {
