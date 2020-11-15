@@ -344,6 +344,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
+  {
+    .module         = "spice",
+    .name           = "alwaysShowCursor",
+    .description    = "Always show host cursor",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
   {0}
 };
 
@@ -453,6 +460,7 @@ bool config_load(int argc, char * argv[])
 
     params.scaleMouseInput = option_get_bool("spice", "scaleCursor");
     params.captureOnStart  = option_get_bool("spice", "captureOnStart");
+    params.alwaysShowCursor  = option_get_bool("spice", "alwaysShowCursor");
   }
 
   return true;
