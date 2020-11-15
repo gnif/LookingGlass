@@ -155,6 +155,7 @@ struct AppParams
   bool         showAlerts;
   bool         captureOnStart;
   bool         quickSplash;
+  bool         alwaysShowCursor;
 
   unsigned int cursorPollInterval;
   unsigned int framePollInterval;
