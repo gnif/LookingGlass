@@ -925,6 +925,30 @@ static void handleWindowEnter()
   state.warpState    = WARP_STATE_ARMED;
 }
 
+// only called for X11
+static void keyboardGrab()
+{
+  // grab the keyboard so we can intercept WM keys
+  XGrabKeyboard(
+    state.wminfo.info.x11.display,
+    state.wminfo.info.x11.window,
+    true,
+    GrabModeAsync,
+    GrabModeAsync,
+    CurrentTime
+  );
+}
+
+// only called for X11
+static void keyboardUngrab()
+{
+  // ungrab the keyboard
+  XUngrabKeyboard(
+    state.wminfo.info.x11.display,
+    CurrentTime
+  );
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
   switch(event->type)
@@ -997,6 +1021,18 @@ int eventFilter(void * userdata, SDL_Event * event)
             state.curLocalY    = xe.xcrossing.y;
             state.haveCurLocal = true;
             handleWindowLeave();
+            break;
+
+          case FocusIn:
+            if (xe.xfocus.mode == NotifyNormal ||
+                xe.xfocus.mode == NotifyUngrab)
+              keyboardGrab();
+            break;
+
+          case FocusOut:
+            if (xe.xfocus.mode == NotifyNormal ||
+                xe.xfocus.mode == NotifyWhileGrabbed)
+              keyboardUngrab();
             break;
         }
       }
