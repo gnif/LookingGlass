@@ -1478,7 +1478,6 @@ static int lg_run()
     params.h,
     (
       SDL_WINDOW_SHOWN |
-      (params.fullscreen  ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) |
       (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
       (params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
       (params.maximize    ? SDL_WINDOW_MAXIMIZED  : 0) |
@@ -1494,6 +1493,9 @@ static int lg_run()
 
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
       params.minimizeOnFocusLoss ? "1" : "0");
+
+  if (params.fullscreen)
+    SDL_SetWindowFullscreen(state.window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 
   if (!params.noScreensaver)
   {
