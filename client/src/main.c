@@ -928,6 +928,9 @@ static void handleWindowEnter()
 // only called for X11
 static void keyboardGrab()
 {
+  if (!params.grabKeyboardOnFocus)
+    return;
+
   // grab the keyboard so we can intercept WM keys
   XGrabKeyboard(
     state.wminfo.info.x11.display,
@@ -942,6 +945,9 @@ static void keyboardGrab()
 // only called for X11
 static void keyboardUngrab()
 {
+  if (!params.grabKeyboardOnFocus)
+    return;
+
   // ungrab the keyboard
   XUngrabKeyboard(
     state.wminfo.info.x11.display,

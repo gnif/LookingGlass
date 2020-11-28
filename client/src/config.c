@@ -246,6 +246,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "grabKeyboardOnFocus",
+    .description    = "Grab the keyboard when focused",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "input",
     .name           = "escapeKey",
     .description    = "Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values",
     .shortopt       = 'm',
@@ -433,11 +440,12 @@ bool config_load(int argc, char * argv[])
   params.showAlerts    = option_get_bool  ("win", "alerts"       );
   params.quickSplash   = option_get_bool  ("win", "quickSplash"  );
 
-  params.grabKeyboard  = option_get_bool  ("input", "grabKeyboard");
-  params.escapeKey     = option_get_int   ("input", "escapeKey"   );
-  params.hideMouse     = option_get_bool  ("input", "hideCursor"  );
-  params.mouseSens     = option_get_int   ("input", "mouseSens"   );
-  params.mouseRedraw   = option_get_bool  ("input", "mouseRedraw" );
+  params.grabKeyboard        = option_get_bool  ("input", "grabKeyboard"       );
+  params.grabKeyboardOnFocus = option_get_bool  ("input", "grabKeyboardOnFocus");
+  params.escapeKey           = option_get_int   ("input", "escapeKey"          );
+  params.hideMouse           = option_get_bool  ("input", "hideCursor"         );
+  params.mouseSens           = option_get_int   ("input", "mouseSens"          );
+  params.mouseRedraw         = option_get_bool  ("input", "mouseRedraw"        );
 
   params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 

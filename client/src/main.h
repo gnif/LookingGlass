@@ -151,6 +151,7 @@ struct AppParams
   bool         ignoreQuit;
   bool         noScreensaver;
   bool         grabKeyboard;
+  bool         grabKeyboardOnFocus;
   SDL_Scancode escapeKey;
   bool         showAlerts;
   bool         captureOnStart;
