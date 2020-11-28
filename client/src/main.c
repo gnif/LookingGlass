@@ -1154,38 +1154,44 @@ int eventFilter(void * userdata, SDL_Event * event)
       break;
 
     case SDL_MOUSEBUTTONDOWN:
+    {
       if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
-      // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
-      if (event->button.button > 3)
-        break;
+      int button = event->button.button;
+      if (button > 3)
+        button += 2;
+
       if (
         !spice_mouse_position(event->button.x, event->button.y) ||
-        !spice_mouse_press(event->button.button)
+        !spice_mouse_press(button)
       )
       {
         DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
         break;
       }
       break;
+    }
 
     case SDL_MOUSEBUTTONUP:
+    {
       if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
         break;
 
-      // The SPICE protocol doesn't support more than a standard PS/2 3 button mouse
-      if (event->button.button > 3)
-        break;
+      int button = event->button.button;
+      if (button > 3)
+        button += 2;
+
       if (
         !spice_mouse_position(event->button.x, event->button.y) ||
-        !spice_mouse_release(event->button.button)
+        !spice_mouse_release(button)
       )
       {
         DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
         break;
       }
       break;
+    }
   }
 
   // consume all events
