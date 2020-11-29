@@ -158,6 +158,10 @@ void egl_setup()
 
 bool egl_create(void ** opaque, const LG_RendererParams params)
 {
+  // check if EGL is even available
+  if (!eglQueryString(EGL_NO_DISPLAY, EGL_VERSION))
+    return false;
+
   // create our local storage
   *opaque = malloc(sizeof(struct Inst));
   if (!*opaque)
