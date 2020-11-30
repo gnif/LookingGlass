@@ -1030,12 +1030,18 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case FocusIn:
+            if (!params.useSpiceInput)
+              break;
+
             if (xe.xfocus.mode == NotifyNormal ||
                 xe.xfocus.mode == NotifyUngrab)
               keyboardGrab();
             break;
 
           case FocusOut:
+            if (!params.useSpiceInput)
+              break;
+
             if (xe.xfocus.mode == NotifyNormal ||
                 xe.xfocus.mode == NotifyWhileGrabbed)
               keyboardUngrab();
@@ -1854,7 +1860,7 @@ int main(int argc, char * argv[])
   if (!config_load(argc, argv))
     return -1;
 
-  if (params.grabKeyboard)
+  if (params.useSpiceInput && params.grabKeyboard)
     SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
 
   const int ret = lg_run();
