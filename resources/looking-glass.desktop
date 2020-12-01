@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Looking Glass
+Exec=/usr/bin/looking-glass-client
+Icon=looking-glass
+Terminal=false
+Type=Application
