@@ -270,7 +270,6 @@ static void x11_cb_selection_notify(const XSelectionEvent e)
       for(int n = 0; n < LG_CLIPBOARD_DATA_NONE; ++n)
         if (this->aTypes[n] == targets[i])
         {
-          DEBUG_INFO("%s", atomTypes[n]);
           // we have a match, so send the notification
           this->notifyFn(n);
           goto out;
