@@ -248,9 +248,10 @@ static void x11_cb_selection_notify(const XSelectionEvent e)
       &after,
       &data);
 
-  if (format == this->aIncr)
+  if (type == this->aIncr)
   {
     DEBUG_WARN("fixme: large paste buffers are not yet supported");
+    this->notifyFn(LG_CLIPBOARD_DATA_NONE);
     goto out;
   }
 
