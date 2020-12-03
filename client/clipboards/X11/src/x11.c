@@ -38,6 +38,9 @@ struct state
   LG_ClipboardDataFn    dataFn;
   LG_ClipboardData      type;
 
+  bool         incrStart;
+  unsigned int lowerBound;
+
   // XFixes vars
   int eventBase;
   int errorBase;
@@ -77,10 +80,10 @@ static bool x11_cb_init(
 
   this->display       = wminfo->info.x11.display;
   this->window        = wminfo->info.x11.window;
-  this->aSelection    = XInternAtom(this->display, "CLIPBOARD", False);
-  this->aTargets      = XInternAtom(this->display, "TARGETS"  , False);
-  this->aSelData      = XInternAtom(this->display, "SEL_DATA" , False);
-  this->aIncr         = XInternAtom(this->display, "INCR"     , False);
+  this->aSelection    = XInternAtom(this->display, "CLIPBOARD"  , False);
+  this->aTargets      = XInternAtom(this->display, "TARGETS"    , False);
+  this->aSelData      = XInternAtom(this->display, "SEL_DATA"   , False);
+  this->aIncr         = XInternAtom(this->display, "INCR"       , False);
   this->aCurSelection = BadValue;
   this->releaseFn     = releaseFn;
   this->notifyFn      = notifyFn;
@@ -225,6 +228,81 @@ static void x11_cb_xfixes_selection_notify(const XFixesSelectionNotifyEvent e)
   return;
 }
 
+static void x11_cb_selection_incr(const XPropertyEvent e)
+{
+  Atom type;
+  int format;
+  unsigned long itemCount, after;
+  unsigned char *data;
+
+  if (XGetWindowProperty(
+      e.display,
+      e.window,
+      e.atom,
+      0, ~0L, // start and length
+      True,   // delete the property
+      this->aIncr,
+      &type,
+      &format,
+      &itemCount,
+      &after,
+      &data) != Success)
+  {
+    DEBUG_INFO("GetProp Failed");
+    this->notifyFn(LG_CLIPBOARD_DATA_NONE, 0);
+    goto out;
+  }
+
+  LG_ClipboardData dataType;
+  for(dataType = 0; dataType < LG_CLIPBOARD_DATA_NONE; ++dataType)
+    if (this->aTypes[dataType] == type)
+      break;
+
+  if (dataType == LG_CLIPBOARD_DATA_NONE)
+  {
+    DEBUG_WARN("clipboard data (%s) not in a supported format",
+        XGetAtomName(this->display, type));
+
+    this->lowerBound = 0;
+    this->notifyFn(LG_CLIPBOARD_DATA_NONE, 0);
+    goto out;
+  }
+
+  if (this->incrStart)
+  {
+    this->notifyFn(dataType, this->lowerBound);
+    this->incrStart = false;
+  }
+
+  XFree(data);
+  data = NULL;
+
+  if (XGetWindowProperty(
+      e.display,
+      e.window,
+      e.atom,
+      0, ~0L, // start and length
+      True,   // delete the property
+      type,
+      &type,
+      &format,
+      &itemCount,
+      &after,
+      &data) != Success)
+  {
+    DEBUG_ERROR("XGetWindowProperty Failed");
+    this->notifyFn(LG_CLIPBOARD_DATA_NONE, 0);
+    goto out;
+  }
+
+  this->dataFn(dataType, data, itemCount);
+  this->lowerBound -= itemCount;
+
+out:
+  if (data)
+    XFree(data);
+}
+
 static void x11_cb_selection_notify(const XSelectionEvent e)
 {
   if (e.property == None)
@@ -235,9 +313,9 @@ static void x11_cb_selection_notify(const XSelectionEvent e)
   unsigned long itemCount, after;
   unsigned char *data;
 
-  XGetWindowProperty(
-      this->display,
-      this->window,
+  if (XGetWindowProperty(
+      e.display,
+      e.requestor,
       e.property,
       0, ~0L, // start and length
       True  , // delete the property
@@ -246,12 +324,16 @@ static void x11_cb_selection_notify(const XSelectionEvent e)
       &format,
       &itemCount,
       &after,
-      &data);
+      &data) != Success)
+  {
+    this->notifyFn(LG_CLIPBOARD_DATA_NONE, 0);
+    goto out;
+  }
 
   if (type == this->aIncr)
   {
-    DEBUG_WARN("fixme: large paste buffers are not yet supported");
-    this->notifyFn(LG_CLIPBOARD_DATA_NONE);
+    this->incrStart  = true;
+    this->lowerBound = *(unsigned int *)data;
     goto out;
   }
 
@@ -272,26 +354,31 @@ static void x11_cb_selection_notify(const XSelectionEvent e)
         if (this->aTypes[n] == targets[i])
         {
           // we have a match, so send the notification
-          this->notifyFn(n);
+          this->notifyFn(n, 0);
           goto out;
         }
     }
 
     // no matches
-    this->notifyFn(LG_CLIPBOARD_DATA_NONE);
+    this->notifyFn(LG_CLIPBOARD_DATA_NONE, 0);
     goto out;
   }
 
   if (e.property == this->aSelData)
   {
-    for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
-      if (this->aTypes[i] == type)
-      {
-        this->dataFn(i, data, itemCount);
-        goto out;
-      }
+    LG_ClipboardData dataType;
+    for(dataType = 0; dataType < LG_CLIPBOARD_DATA_NONE; ++dataType)
+      if (this->aTypes[dataType] == type)
+        break;
 
-    DEBUG_WARN("clipboard data (%s) not in a supported format", XGetAtomName(this->display, type));
+    if (dataType == LG_CLIPBOARD_DATA_NONE)
+    {
+      DEBUG_WARN("clipboard data (%s) not in a supported format",
+          XGetAtomName(this->display, type));
+      goto out;
+    }
+
+    this->dataFn(dataType, data, itemCount);
     goto out;
   }
 
@@ -316,6 +403,17 @@ static void x11_cb_wmevent(SDL_SysWMmsg * msg)
 
     case SelectionNotify:
       x11_cb_selection_notify(e.xselection);
+      break;
+
+    case PropertyNotify:
+      if (e.xproperty.display != this->display    ||
+          e.xproperty.window  != this->window     ||
+          e.xproperty.atom    != this->aSelData   ||
+          e.xproperty.state   != PropertyNewValue ||
+          this->lowerBound    == 0)
+        break;
+
+      x11_cb_selection_incr(e.xproperty);
       break;
 
     default:

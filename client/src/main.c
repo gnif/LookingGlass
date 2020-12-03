@@ -644,7 +644,7 @@ void clipboardRelease()
   spice_clipboard_release();
 }
 
-void clipboardNotify(const LG_ClipboardData type)
+void clipboardNotify(const LG_ClipboardData type, size_t size)
 {
   if (!params.clipboardToVM)
     return;
@@ -655,7 +655,14 @@ void clipboardNotify(const LG_ClipboardData type)
     return;
   }
 
-  spice_clipboard_grab(clipboard_type_to_spice_type(type));
+  state.cbType    = clipboard_type_to_spice_type(type);
+  state.cbChunked = size > 0;
+  state.cbXfer    = size;
+
+  spice_clipboard_grab(state.cbType);
+
+  if (size)
+    spice_clipboard_data_start(state.cbType, size);
 }
 
 void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
@@ -663,32 +670,17 @@ void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
   if (!params.clipboardToVM)
     return;
 
-  uint8_t * buffer = data;
-
-  // unix2dos
-  if (type == LG_CLIPBOARD_DATA_TEXT)
+  if (state.cbChunked && size > state.cbXfer)
   {
-    // TODO: make this more memory efficent
-    size_t newSize = 0;
-    buffer = malloc(size * 2);
-    uint8_t * p = buffer;
-    for(uint32_t i = 0; i < size; ++i)
-    {
-      uint8_t c = data[i];
-      if (c == '\n')
-      {
-        *p++ = '\r';
-        ++newSize;
-      }
-      *p++ = c;
-      ++newSize;
-    }
-    size = newSize;
+    DEBUG_ERROR("refusing to send more then cbXfer bytes for chunked xfer");
+    size = state.cbXfer;
   }
 
-  spice_clipboard_data(clipboard_type_to_spice_type(type), buffer, (uint32_t)size);
-  if (buffer != data)
-    free(buffer);
+  if (!state.cbChunked)
+    spice_clipboard_data_start(state.cbType, size);
+
+  spice_clipboard_data(state.cbType, data, (uint32_t)size);
+  state.cbXfer -= size;
 }
 
 void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)

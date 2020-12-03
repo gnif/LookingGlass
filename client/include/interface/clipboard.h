@@ -38,7 +38,7 @@ LG_ClipboardData;
 typedef void (* LG_ClipboardReplyFn  )(void * opaque, const LG_ClipboardData type, uint8_t * data, uint32_t size);
 typedef void (* LG_ClipboardRequestFn)(LG_ClipboardReplyFn replyFn, void * opaque);
 typedef void (* LG_ClipboardReleaseFn)();
-typedef void (* LG_ClipboardNotifyFn)(LG_ClipboardData type);
+typedef void (* LG_ClipboardNotifyFn)(LG_ClipboardData type, size_t size);
 typedef void (* LG_ClipboardDataFn  )(const LG_ClipboardData type, uint8_t * data, size_t size);
 
 typedef const char * (* LG_ClipboardGetName)();

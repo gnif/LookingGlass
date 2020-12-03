@@ -92,6 +92,8 @@ struct AppState
 
   const LG_Clipboard * lgc;
   SpiceDataType        cbType;
+  bool                 cbChunked;
+  size_t               cbXfer;
   struct ll          * cbRequestList;
 
   SDL_SysWMinfo        wminfo;
