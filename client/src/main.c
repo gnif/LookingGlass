@@ -795,16 +795,6 @@ static void warpMouse(int x, int y)
 
 static void handleMouseMoveEvent(int ex, int ey)
 {
-  if (!state.cursorInWindow)
-    return;
-
-  if (state.ignoreInput || !params.useSpiceInput)
-    return;
-
-  state.curLocalX    = ex;
-  state.curLocalY    = ey;
-  state.haveCurLocal = true;
-
   SDL_Point delta = {
     .x = ex - state.curLastX,
     .y = ey - state.curLastY
@@ -813,8 +803,9 @@ static void handleMouseMoveEvent(int ex, int ey)
   if (delta.x == 0 && delta.y == 0)
     return;
 
-  state.curLastX = ex;
-  state.curLastY = ey;
+  state.curLastX = state.curLocalX = ex;
+  state.curLastY = state.curLocalX = ey;
+  state.haveCurLocal = true;
 
   if (state.warpState == WARP_STATE_ACTIVE &&
       ex == state.warpToX && ey == state.warpToY)
@@ -823,21 +814,20 @@ static void handleMouseMoveEvent(int ex, int ey)
     return;
   }
 
-  if (!state.cursorInWindow)
+  if (!state.cursorInWindow || state.ignoreInput || !params.useSpiceInput)
     return;
-
-  if ((state.haveCursorPos || state.grabMouse) &&
-      (ex < 100 || ex > state.windowW - 100 ||
-       ey < 100 || ey > state.windowH - 100))
-  {
-    warpMouse(state.windowW / 2, state.windowH / 2);
-    return;
-  }
 
   /* if we don't have the current cursor pos just send cursor movements */
   if (!state.haveCursorPos)
   {
+    state.cursorInView = true;
     spice_mouse_motion(delta.x, delta.y);
+    if ((state.haveCursorPos || state.grabMouse) &&
+        (ex < 100 || ex > state.windowW - 100 ||
+         ey < 100 || ey > state.windowH - 100))
+    {
+      warpMouse(state.windowW / 2, state.windowH / 2);
+    }
     return;
   }
 
@@ -851,7 +841,6 @@ static void handleMouseMoveEvent(int ex, int ey)
 
     if (params.useSpiceInput && !params.alwaysShowCursor)
       state.drawCursor = false;
-    return;
   }
 
   if (!state.cursorInView)
@@ -879,6 +868,14 @@ static void handleMouseMoveEvent(int ex, int ey)
     delta.y = floor(state.sensY);
     state.sensX -= delta.x;
     state.sensY -= delta.y;
+  }
+
+  if ((state.haveCursorPos || state.grabMouse) &&
+      (ex < 100 || ex > state.windowW - 100 ||
+       ey < 100 || ey > state.windowH - 100))
+  {
+    warpMouse(state.windowW / 2, state.windowH / 2);
+    return;
   }
 
   if (!state.grabMouse && state.warpState == WARP_STATE_ON)
