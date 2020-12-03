@@ -82,6 +82,7 @@ static void alignMouseWithHost();
 static void lgInit()
 {
   state.state         = APP_STATE_RUNNING;
+  state.scale         = false;
   state.scaleX        = 1.0f;
   state.scaleY        = 1.0f;
   state.resizeDone    = true;
@@ -150,6 +151,10 @@ static void updatePositionInfo()
       state.dstRect.h = state.windowH;
     }
     state.dstRect.valid = true;
+
+    state.scale = (
+        state.srcSize.y != state.dstRect.h ||
+        state.srcSize.x != state.dstRect.w);
 
     state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
     state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
@@ -856,7 +861,7 @@ static void handleMouseMoveEvent(int ex, int ey)
     state.drawCursor   = true;
   }
 
-  if (params.scaleMouseInput && !state.grabMouse)
+  if (state.scale && params.scaleMouseInput && !state.grabMouse)
   {
     state.accX += (float)delta.x * state.scaleX;
     state.accY += (float)delta.y * state.scaleY;
@@ -931,8 +936,12 @@ static void alignMouseWithHost()
   if (!state.haveCursorPos)
     return;
 
-  const int dx = round((state.curLocalX - state.dstRect.x) * state.scaleX) - state.cursor.x;
-  const int dy = round((state.curLocalY - state.dstRect.y) * state.scaleY) - state.cursor.y;
+  const int dx = round((state.curLocalX - state.dstRect.x) * state.scaleX) -
+    state.cursor.x;
+
+  const int dy = round((state.curLocalY - state.dstRect.y) * state.scaleY) -
+    state.cursor.y;
+
   spice_mouse_motion(dx, dy);
 }
 

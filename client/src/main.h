@@ -74,6 +74,7 @@ struct AppState
   bool  cursorInView;
   bool  updateCursor;
   bool  initialCursorSync;
+  bool  scale;
   float scaleX, scaleY;
   float accX, accY;
   int   curLastX;
