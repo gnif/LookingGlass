@@ -44,9 +44,9 @@ struct CursorInfo
 
 enum WarpState
 {
-  WARP_STATE_ARMED,
   WARP_STATE_ON,
   WARP_STATE_ACTIVE,
+  WARP_STATE_WIN_EXIT,
   WARP_STATE_OFF
 };
 
@@ -66,8 +66,9 @@ struct AppState
   LG_RendererRect      dstRect;
   struct CursorInfo    cursor;
   bool                 cursorVisible;
+  bool                 cursorInWindow;
 
-  bool  serverMode;
+  bool  grabMouse;
   bool  haveCursorPos;
   bool  drawCursor;
   bool  cursorInView;
@@ -83,7 +84,6 @@ struct AppState
   bool  haveAligned;
 
   enum WarpState   warpState;
-  int   warpFromX, warpFromY;
   int   warpToX  , warpToY;
 
   const LG_Renderer  * lgr;
