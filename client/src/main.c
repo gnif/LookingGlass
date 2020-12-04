@@ -905,9 +905,9 @@ static void handleMouseMoveEvent(int ex, int ey)
     };
 
     /* check if the movement would exit the window */
-    if (isValidCursorLocation(pos.x, pos.y) &&
-        (newPos.x < 0 || newPos.x >= state.dstRect.w ||
-         newPos.y < 0 || newPos.y >= state.dstRect.h))
+    if ((newPos.x < 0 || newPos.x >= state.dstRect.w ||
+         newPos.y < 0 || newPos.y >= state.dstRect.h) &&
+        isValidCursorLocation(pos.x, pos.y))
     {
       /* determine where to move the cursor to taking into account any borders
        * if the aspect ratio is not being forced */
