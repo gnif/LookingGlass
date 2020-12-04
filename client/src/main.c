@@ -912,6 +912,11 @@ static void handleMouseMoveEvent(int ex, int ey)
         nx = newPos.x + state.dstRect.x;
         ny = newPos.y + state.dstRect.y * 2;
       }
+      else
+      {
+        nx = newPos.x;
+        ny = newPos.y;
+      }
 
       /* put the mouse where it should be and disable warp */
       state.warpState = WARP_STATE_WIN_EXIT;
