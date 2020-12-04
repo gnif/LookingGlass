@@ -899,15 +899,9 @@ static void handleMouseMoveEvent(int ex, int ey)
       .y = (float)(state.cursor.y + delta.y) / state.scaleY
     };
 
-    const SDL_Point pos = {
-      .x = state.windowPos.x + state.border.x + newPos.x,
-      .y = state.windowPos.y + state.border.y + newPos.y
-    };
-
     /* check if the movement would exit the window */
-    if ((newPos.x < 0 || newPos.x >= state.dstRect.w ||
-         newPos.y < 0 || newPos.y >= state.dstRect.h) &&
-        isValidCursorLocation(pos.x, pos.y))
+    if (newPos.x < 0 || newPos.x >= state.dstRect.w ||
+        newPos.y < 0 || newPos.y >= state.dstRect.h)
     {
       /* determine where to move the cursor to taking into account any borders
        * if the aspect ratio is not being forced */
@@ -934,10 +928,15 @@ static void handleMouseMoveEvent(int ex, int ey)
         ny = newPos.y + state.dstRect.y * 2;
       }
 
-      /* put the mouse where it should be and disable warp */
-      state.warpState = WARP_STATE_WIN_EXIT;
-      warpMouse(nx, ny);
-      return;
+      if (isValidCursorLocation(
+            state.windowPos.x + state.border.x + nx,
+            state.windowPos.y + state.border.y + ny))
+      {
+        /* put the mouse where it should be and disable warp */
+        state.warpState = WARP_STATE_WIN_EXIT;
+        warpMouse(nx, ny);
+        return;
+      }
     }
   }
 
