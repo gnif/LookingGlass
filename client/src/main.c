@@ -793,6 +793,20 @@ static void warpMouse(int x, int y)
   }
 }
 
+static bool isValidCursorLocation(int x, int y)
+{
+  const int displays = SDL_GetNumVideoDisplays();
+  for(int i = 0; i < displays; ++i)
+  {
+    SDL_Rect r;
+    SDL_GetDisplayBounds(i, &r);
+    if ((x >= r.x && x < r.x + r.w) &&
+        (y >= r.y && y < r.y + r.h))
+      return true;
+  }
+  return false;
+}
+
 static void handleMouseMoveEvent(int ex, int ey)
 {
   SDL_Point delta = {
@@ -880,18 +894,25 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   if (!state.grabMouse && state.warpState == WARP_STATE_ON)
   {
-    /* check if the movement would exit the window */
     const SDL_Point newPos = {
       .x = (float)(state.cursor.x + delta.x) / state.scaleX,
       .y = (float)(state.cursor.y + delta.y) / state.scaleY
     };
 
-    if (newPos.x < 0 || newPos.x >= state.dstRect.w ||
-        newPos.y < 0 || newPos.y >= state.dstRect.h)
+    const SDL_Point pos = {
+      .x = state.windowPos.x + state.border.x + newPos.x,
+      .y = state.windowPos.y + state.border.y + newPos.y
+    };
+
+    /* check if the movement would exit the window */
+    if (isValidCursorLocation(pos.x, pos.y) &&
+        (newPos.x < 0 || newPos.x >= state.dstRect.w ||
+         newPos.y < 0 || newPos.y >= state.dstRect.h))
     {
       /* determine where to move the cursor to taking into account any borders
        * if the aspect ratio is not being forced */
-      int nx, ny;
+      int nx = 0, ny = 0;
+
       if (newPos.x < 0)
       {
         nx = newPos.x;
@@ -946,6 +967,13 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
 {
   if (state.windowW == w && state.windowH == h)
     return;
+
+  SDL_GetWindowBordersSize(state.window,
+    &state.border.y,
+    &state.border.x,
+    &state.border.h,
+    &state.border.w
+  );
 
   state.windowW = w;
   state.windowH = h;
@@ -1045,6 +1073,11 @@ int eventFilter(void * userdata, SDL_Event * event)
         case SDL_WINDOWEVENT_RESIZED:
           if (state.wminfo.subsystem != SDL_SYSWM_X11)
             handleResizeEvent(event->window.data1, event->window.data2);
+          break;
+
+        case SDL_WINDOWEVENT_MOVED:
+          state.windowPos.x = event->window.data1;
+          state.windowPos.y = event->window.data2;
           break;
 
         // allow a window close event to close the application even if ignoreQuit is set

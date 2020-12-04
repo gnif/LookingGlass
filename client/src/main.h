@@ -61,7 +61,9 @@ struct AppState
   bool                 keyDown[SDL_NUM_SCANCODES];
 
   bool                 haveSrcSize;
+  SDL_Point            windowPos;
   int                  windowW, windowH;
+  SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
   struct CursorInfo    cursor;
