@@ -850,18 +850,26 @@ static void handleMouseMoveEvent(int ex, int ey)
       ey < state.dstRect.y                   ||
       ey > state.dstRect.y + state.dstRect.h)
   {
+    SDL_ShowCursor(SDL_ENABLE);
     state.cursorInView = false;
     state.updateCursor = true;
 
     if (params.useSpiceInput && !params.alwaysShowCursor)
       state.drawCursor = false;
+    return;
   }
 
   if (!state.cursorInView)
   {
+    if (params.hideMouse)
+      SDL_ShowCursor(SDL_DISABLE);
+
     state.cursorInView = true;
     state.updateCursor = true;
     state.drawCursor   = true;
+
+    if (state.warpState == WARP_STATE_OFF)
+      state.warpState = WARP_STATE_ON;
   }
 
   if (state.scale && params.scaleMouseInput && !state.grabMouse)
@@ -903,38 +911,14 @@ static void handleMouseMoveEvent(int ex, int ey)
     if (newPos.x < 0 || newPos.x >= state.dstRect.w ||
         newPos.y < 0 || newPos.y >= state.dstRect.h)
     {
-      /* determine where to move the cursor to taking into account any borders
-       * if the aspect ratio is not being forced */
-      int nx = 0, ny = 0;
-
-      if (newPos.x < 0)
-      {
-        nx = newPos.x;
-        ny = newPos.y + state.dstRect.y;
-      }
-      else if(newPos.x >= state.dstRect.w)
-      {
-        nx = newPos.x + state.dstRect.x * 2;
-        ny = newPos.y + state.dstRect.y;
-      }
-      else if (newPos.y < 0)
-      {
-        nx = newPos.x + state.dstRect.x;
-        ny = newPos.y;
-      }
-      else if (newPos.y >= state.dstRect.h)
-      {
-        nx = newPos.x + state.dstRect.x;
-        ny = newPos.y + state.dstRect.y * 2;
-      }
-
-      if (isValidCursorLocation(
-            state.windowPos.x + state.border.x + nx,
-            state.windowPos.y + state.border.y + ny))
+      const int nx = state.windowPos.x + state.border.x + newPos.x;
+      const int ny = state.windowPos.y + state.border.y + newPos.y;
+      if (isValidCursorLocation(nx, ny))
       {
         /* put the mouse where it should be and disable warp */
         state.warpState = WARP_STATE_WIN_EXIT;
-        warpMouse(nx, ny);
+        warpMouse(state.dstRect.x + newPos.x, state.dstRect.y + newPos.y);
+        SDL_ShowCursor(SDL_ENABLE);
         return;
       }
     }
@@ -1446,6 +1430,14 @@ static void release_key_binds()
     app_release_keybind(&state.kbCtrlAltFn[i]);
 }
 
+static void initSDLCursor()
+{
+  const uint8_t data[4] = {0xf, 0x9, 0x9, 0xf};
+  const uint8_t mask[4] = {0xf, 0xf, 0xf, 0xf};
+  cursor = SDL_CreateCursor(data, mask, 4, 4, 1, 1);
+  SDL_SetCursor(cursor);
+}
+
 static int lg_run()
 {
   memset(&state, 0, sizeof(state));
@@ -1681,14 +1673,9 @@ static int lg_run()
     state.cbRequestList = ll_new();
   }
 
+  initSDLCursor();
   if (params.hideMouse)
-  {
-    // work around SDL_ShowCursor being non functional
-    int32_t cursorData[2] = {0, 0};
-    cursor = SDL_CreateCursor((uint8_t*)cursorData, (uint8_t*)cursorData, 8, 8, 4, 4);
-    SDL_SetCursor(cursor);
     SDL_ShowCursor(SDL_DISABLE);
-  }
 
   if (params.captureOnStart)
   {
