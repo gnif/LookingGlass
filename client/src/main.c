@@ -77,7 +77,6 @@ struct AppState state;
 struct AppParams params = { 0 };
 
 static void handleMouseMoveEvent(int ex, int ey);
-static void alignMouseWithHost();
 
 static void lgInit()
 {
@@ -818,7 +817,7 @@ static void handleMouseMoveEvent(int ex, int ey)
     return;
 
   state.curLastX = state.curLocalX = ex;
-  state.curLastY = state.curLocalX = ey;
+  state.curLastY = state.curLocalY = ey;
   state.haveCurLocal = true;
 
   if (state.warpState == WARP_STATE_ACTIVE &&
@@ -834,42 +833,61 @@ static void handleMouseMoveEvent(int ex, int ey)
   /* if we don't have the current cursor pos just send cursor movements */
   if (!state.haveCursorPos)
   {
-    state.cursorInView = true;
-    spice_mouse_motion(delta.x, delta.y);
-    if ((state.haveCursorPos || state.grabMouse) &&
-        (ex < 100 || ex > state.windowW - 100 ||
-         ey < 100 || ey > state.windowH - 100))
+    if (state.grabMouse)
     {
-      warpMouse(state.windowW / 2, state.windowH / 2);
+      state.cursorInView = true;
+      spice_mouse_motion(delta.x, delta.y);
+      if (ex < 100 || ex > state.windowW - 100 ||
+          ey < 100 || ey > state.windowH - 100)
+        warpMouse(state.windowW / 2, state.windowH / 2);
     }
+
     return;
   }
 
-  if (ex < state.dstRect.x                   ||
-      ex > state.dstRect.x + state.dstRect.w ||
-      ey < state.dstRect.y                   ||
-      ey > state.dstRect.y + state.dstRect.h)
-  {
-    SDL_ShowCursor(SDL_ENABLE);
-    state.cursorInView = false;
-    state.updateCursor = true;
+  const bool inView = !(
+      ex <  state.dstRect.x                   ||
+      ex >= state.dstRect.x + state.dstRect.w ||
+      ey <  state.dstRect.y                   ||
+      ey >= state.dstRect.y + state.dstRect.h);
 
-    if (params.useSpiceInput && !params.alwaysShowCursor)
-      state.drawCursor = false;
-    return;
+  /* if the cursor is to move in/outside the display area */
+  if (state.cursorInView != inView)
+  {
+    state.cursorInView = inView;
+
+    if (inView)
+    {
+      /* cursor moved in */
+      if (params.hideMouse)
+        SDL_ShowCursor(SDL_DISABLE);
+
+      state.updateCursor = true;
+      state.drawCursor   = true;
+
+      if (state.warpState == WARP_STATE_OFF)
+        state.warpState = WARP_STATE_ON;
+
+      /* convert guest to local and calculate the delta */
+      const int lx = (state.cursor.x / state.scaleX) + state.dstRect.x;
+      const int ly = (state.cursor.y / state.scaleY) + state.dstRect.y;
+      delta.x = ex - lx;
+      delta.y = ey - ly;
+    }
+    else
+    {
+      /* cursor moved out */
+      SDL_ShowCursor(SDL_ENABLE);
+      state.updateCursor = true;
+      if (params.useSpiceInput && !params.alwaysShowCursor)
+        state.drawCursor = false;
+    }
   }
-
-  if (!state.cursorInView)
+  else if (inView)
   {
-    if (params.hideMouse)
-      SDL_ShowCursor(SDL_DISABLE);
-
-    state.cursorInView = true;
-    state.updateCursor = true;
-    state.drawCursor   = true;
-
-    if (state.warpState == WARP_STATE_OFF)
-      state.warpState = WARP_STATE_ON;
+    if (ex < 100 || ex > state.windowW - 100 ||
+        ey < 100 || ey > state.windowH - 100)
+      warpMouse(state.windowW / 2, state.windowH / 2);
   }
 
   if (state.scale && params.scaleMouseInput && !state.grabMouse)
@@ -890,14 +908,6 @@ static void handleMouseMoveEvent(int ex, int ey)
     delta.y = floor(state.sensY);
     state.sensX -= delta.x;
     state.sensY -= delta.y;
-  }
-
-  if ((state.haveCursorPos || state.grabMouse) &&
-      (ex < 100 || ex > state.windowW - 100 ||
-       ey < 100 || ey > state.windowH - 100))
-  {
-    warpMouse(state.windowW / 2, state.windowH / 2);
-    return;
   }
 
   if (!state.grabMouse && state.warpState == WARP_STATE_ON)
@@ -927,23 +937,6 @@ static void handleMouseMoveEvent(int ex, int ey)
   /* send the movement to the guest */
   if (!spice_mouse_motion(delta.x, delta.y))
     DEBUG_ERROR("failed to send mouse motion message");
-}
-
-static void alignMouseWithHost()
-{
-  if (state.ignoreInput || !params.useSpiceInput)
-    return;
-
-  if (!state.haveCursorPos)
-    return;
-
-  const int dx = round((state.curLocalX - state.dstRect.x) * state.scaleX) -
-    state.cursor.x;
-
-  const int dy = round((state.curLocalY - state.dstRect.y) * state.scaleY) -
-    state.cursor.y;
-
-  spice_mouse_motion(dx, dy);
 }
 
 static void handleResizeEvent(unsigned int w, unsigned int h)
@@ -980,6 +973,8 @@ static void handleWindowLeave()
 static void handleWindowEnter()
 {
   state.cursorInWindow = true;
+  return;
+
   if (state.warpState == WARP_STATE_OFF)
     state.warpState = WARP_STATE_ON;
 
@@ -989,7 +984,6 @@ static void handleWindowEnter()
   if (!state.haveCursorPos)
     return;
 
-  alignMouseWithHost();
   state.drawCursor   = true;
   state.updateCursor = true;
 }
