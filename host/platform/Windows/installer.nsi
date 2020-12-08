@@ -103,10 +103,23 @@ Function .onInit
 
 FunctionEnd
 
+!macro StopLookingGlassService
+  ;Attempt to stop existing LG service only if it exists
+
+  nsExec::Exec 'sc.exe query "Looking Glass (host)"'
+  Pop $0 ; SC.exe error level
+
+  ${If} $0 == 0 ; If error level is 0, service exists
+    DetailPrint "Stopping service: Looking Glass (host)"
+    nsExec::ExecToLog 'net.exe STOP "Looking Glass (host)"'
+  ${EndIf}
+
+!macroend
+
 ;Install 
 Section "-Install" Section1
 
-  nsExec::Exec 'net.exe STOP "Looking Glass (host)"'
+  !insertmacro StopLookingGlassService
 
   SetOutPath $INSTDIR
   File ..\..\looking-glass-host.exe
@@ -141,8 +154,9 @@ SectionEnd
 Section "Looking Glass (host) Service" Section2
 
   ${If} $option_noservice == 0
+    DetailPrint "Install service: Looking Glass (host)"
     nsExec::Exec '"$INSTDIR\looking-glass-host.exe" UninstallService'
-    nsExec::Exec '"$INSTDIR\looking-glass-host.exe" InstallService'
+    nsExec::ExecToLog '"$INSTDIR\looking-glass-host.exe" InstallService'
   ${EndIf}
 
 SectionEnd
@@ -171,8 +185,10 @@ SectionEnd
 Section "Uninstall" Section6
   SetShellVarContext all
 
-  nsExec::Exec 'net.exe STOP "Looking Glass (host)"'
-  nsExec::Exec '"$INSTDIR\looking-glass-host.exe" UninstallService'
+  !insertmacro StopLookingGlassService
+
+  DetailPrint "Uninstall service: Looking Glass (host)"
+  nsExec::ExecToLog '"$INSTDIR\looking-glass-host.exe" UninstallService'
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)"
   Delete "$SMPROGRAMS\Looking Glass (host).lnk"
