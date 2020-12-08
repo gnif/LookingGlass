@@ -41,7 +41,7 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${NSISDIR}\Contrib\Graphics\Wizard\nsis3-grey.bmp"
 !define /file VERSION "../../VERSION"
 
-!define MUI_WELCOMEPAGE_TEXT "You are about to install $(^Name) version ${VERSION}.$\r$\n$\r$\nYou don't need to close your Looking Glass client before installation, but after installation you should install the ${VERSION} client.$\r$\n$\r$\nPress Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "You are about to install $(^Name) version ${VERSION}.$\r$\n$\r$\nWhen upgrading, you don't need to close your Looking Glass client, but should install the ${VERSION} client after installation is complete.$\r$\n$\r$\nPress Next to continue."
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_WELCOME
