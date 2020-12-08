@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 
-;Include  
+;Include
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
@@ -38,7 +38,10 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 !define MUI_LICENSEPAGE_BUTTON "Agree"
 !define /file VERSION "../../VERSION"
 
+!define MUI_WELCOMEPAGE_TEXT "You are about to install $(^Name) version ${VERSION}.$\r$\n$\r$\nYou don't need to close your Looking Glass client before installation, but after installation you should install the ${VERSION} client.$\r$\n$\r$\nPress Next to continue."
+
 ;Install and uninstall pages
+!insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
