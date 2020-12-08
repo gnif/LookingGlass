@@ -6,7 +6,7 @@ execute_process(
 
 if (NOT "${GIT_REV}" STREQUAL "")
 	execute_process(
-		COMMAND bash -c "git diff --quiet --exit-code || echo +"
+		COMMAND bash -c "git diff --quiet --exit-code && git diff --cached --quiet --exit-code || echo +"
 		WORKING_DIRECTORY "${PROJECT_TOP}"
 		OUTPUT_VARIABLE GIT_DIFF)
 else()
