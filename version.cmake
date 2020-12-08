@@ -1,5 +1,5 @@
 execute_process(
-	COMMAND git describe --always --long --abbrev=10 --dirty=+ --tags
+	COMMAND git describe --always --abbrev=10 --dirty=+ --tags
 	WORKING_DIRECTORY "${PROJECT_TOP}"
         OUTPUT_VARIABLE GIT_REV
         ERROR_QUIET)
