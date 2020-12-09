@@ -116,7 +116,7 @@ FunctionEnd
   Pop $0 ; SC.exe error level
 
   ${If} $0 == 0 ; If error level is 0, service exists
-    DetailPrint "Stopping service: Looking Glass (host)"
+    DetailPrint "Stop service: Looking Glass (host)"
     nsExec::ExecToLog 'net.exe STOP "Looking Glass (host)"'
   ${EndIf}
 
