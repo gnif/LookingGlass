@@ -956,37 +956,6 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   updatePositionInfo();
 }
 
-static void handleWindowLeave()
-{
-  state.cursorInWindow = false;
-
-  if (!params.useSpiceInput)
-    return;
-
-  if (!params.alwaysShowCursor)
-    state.drawCursor = false;
-
-  state.cursorInView = false;
-  state.updateCursor = true;
-}
-
-static void handleWindowEnter()
-{
-  state.cursorInWindow = true;
-  return;
-
-  if (state.warpState == WARP_STATE_OFF)
-    state.warpState = WARP_STATE_ON;
-
-  if (!params.useSpiceInput)
-    return;
-
-  if (!state.haveCursorPos)
-    return;
-
-  state.drawCursor   = true;
-  state.updateCursor = true;
-}
 
 // only called for X11
 static void keyboardGrab()
@@ -1016,6 +985,47 @@ static void keyboardUngrab()
     state.wminfo.info.x11.display,
     CurrentTime
   );
+}
+
+
+static void handleWindowLeave()
+{
+  state.cursorInWindow = false;
+
+  if (!params.useSpiceInput)
+    return;
+
+   keyboardUngrab();
+
+  if (!params.alwaysShowCursor)
+    state.drawCursor = false;
+
+  state.cursorInView = false;
+  state.updateCursor = true;
+}
+
+static void handleWindowEnter()
+{
+  state.cursorInWindow = true;
+
+  if (!params.useSpiceInput)
+    return;
+
+  keyboardGrab();
+
+  return;
+
+  if (state.warpState == WARP_STATE_OFF)
+    state.warpState = WARP_STATE_ON;
+
+  if (!params.useSpiceInput)
+    return;
+
+  if (!state.haveCursorPos)
+    return;
+
+  state.drawCursor   = true;
+  state.updateCursor = true;
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -1098,21 +1108,9 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case FocusIn:
-            if (!params.useSpiceInput)
-              break;
-
-            if (xe.xfocus.mode == NotifyNormal ||
-                xe.xfocus.mode == NotifyUngrab)
-              keyboardGrab();
             break;
 
           case FocusOut:
-            if (!params.useSpiceInput)
-              break;
-
-            if (xe.xfocus.mode == NotifyNormal ||
-                xe.xfocus.mode == NotifyWhileGrabbed)
-              keyboardUngrab();
             break;
         }
       }
