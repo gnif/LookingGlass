@@ -3,8 +3,8 @@
 An extremely low latency KVMFR (KVM FrameRelay) implementation for guests with
 VGA PCI Passthrough.
 
-* Project Website: https://looking-glass.hostfission.com
-* Getting Started: https://looking-glass.hostfission.com/wiki/Installation
+* Project Website: https://looking-glass.io
+* Getting Started: https://looking-glass.io/wiki/Installation
 
 ## Donations
 
@@ -27,11 +27,11 @@ This project contains submodules that must be checked out if building from the
 git repository! If you are not a developer and just want to compile Looking
 Glass please download the source archive from the website instead:
 
-https://looking-glass.hostfission.com/downloads
+https://looking-glass.io/downloads
 
 Please also be sure to see the following files for more information
 Note: The `README.md` files are slowly being deprecated from this project in
-favor of the wiki at https://looking-glass.hostfission.com/wiki, and as such the
+favor of the wiki at https://looking-glass.io/wiki, and as such the
 information in these files may be dated.
 
 * [client/README.md](client/README.md)
@@ -45,7 +45,7 @@ be aware there will be no support at this time.
 
 Latest bleeding edge builds of the Windows host application can be obtained from:
 
-https://looking-glass.hostfission.com/downloads
+https://looking-glass.io/downloads
 
 # Help and support
 
