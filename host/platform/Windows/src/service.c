@@ -38,6 +38,24 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define SVCNAME   "Looking Glass (host)"
 #define SVC_ERROR ((DWORD)0xC0020001L)
 
+/*
+ * Windows 10 provides this API via kernel32.dll as well as advapi32.dll and
+ * mingw opts for linking against the kernel32.dll version which is fine
+ * provided you don't intend to run this on earlier versions of windows. As such
+ * we need to lookup this method at runtime. */
+typedef WINBOOL WINAPI (*CreateProcessAsUserA_t)(HANDLE hToken,
+    LPCSTR lpApplicationName,
+    LPSTR lpCommandLine,
+    LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    WINBOOL bInheritHandles,
+    DWORD dwCreationFlags,
+    LPVOID lpEnvironment,
+    LPCSTR lpCurrentDirectory,
+    LPSTARTUPINFOA lpStartupInfo,
+    LPPROCESS_INFORMATION lpProcessInformation);
+static CreateProcessAsUserA_t f_CreateProcessAsUserA = NULL;
+
 struct Service
 {
   FILE * logFile;
@@ -53,6 +71,32 @@ void doLog(const char * fmt, ...)
   va_start(args, fmt);
   vfprintf(service.logFile, fmt, args);
   va_end(args);
+}
+
+static bool setupAPI()
+{
+  /* first look in kernel32.dll */
+  HMODULE mod;
+
+  mod = GetModuleHandleA("kernel32.dll");
+  if (mod)
+  {
+    f_CreateProcessAsUserA = (CreateProcessAsUserA_t)
+      GetProcAddress(mod, "CreateProcessAsUserA");
+    if (f_CreateProcessAsUserA)
+      return true;
+  }
+
+  mod = GetModuleHandleA("advapi32.dll");
+  if (mod)
+  {
+    f_CreateProcessAsUserA = (CreateProcessAsUserA_t)
+      GetProcAddress(mod, "CreateProcessAsUserA");
+    if (f_CreateProcessAsUserA)
+      return true;
+  }
+
+  return false;
 }
 
 static void setupLogging()
@@ -216,6 +260,12 @@ DWORD GetInteractiveSessionID()
 
 void Launch()
 {
+  if (!setupAPI())
+  {
+    doLog("setupAPI failed\n");
+    return;
+  }
+
   if (!enablePriv(SE_DEBUG_NAME))
     return;
 
@@ -283,7 +333,7 @@ void Launch()
   };
 
   char * exe = strdup(os_getExecutable());
-  if (!CreateProcessAsUserA(
+  if (!f_CreateProcessAsUserA(
       hToken,
       NULL,
       exe,
