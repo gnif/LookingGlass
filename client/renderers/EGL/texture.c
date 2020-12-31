@@ -32,7 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL_egl.h>
 
 /* this must be a multiple of 2 */
-#define BUFFER_COUNT 2
+#define BUFFER_COUNT 4
 
 struct Buffer
 {

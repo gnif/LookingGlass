@@ -48,6 +48,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct Options
 {
   bool vsync;
+  bool doubleBuffer;
 };
 
 struct Inst
@@ -175,7 +176,8 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   struct Inst * this = (struct Inst *)*opaque;
   memcpy(&this->params, &params, sizeof(LG_RendererParams));
 
-  this->opt.vsync = option_get_bool("egl", "vsync");
+  this->opt.vsync        = option_get_bool("egl", "vsync");
+  this->opt.doubleBuffer = option_get_bool("egl", "doubleBuffer");
 
   this->translateX   = 0;
   this->translateY   = 0;
@@ -196,11 +198,11 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
 
 bool egl_initialize(void * opaque, Uint32 * sdlFlags)
 {
-  const bool doubleBuffer = option_get_bool("egl", "doubleBuffer");
-  DEBUG_INFO("Double buffering is %s", doubleBuffer ? "on" : "off");
+  struct Inst * this = (struct Inst *)opaque;
+  DEBUG_INFO("Double buffering is %s", this->opt.doubleBuffer ? "on" : "off");
 
   *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER         , doubleBuffer ? 1 : 0);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER         , this->opt.doubleBuffer ? 1 : 0);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK , SDL_GL_CONTEXT_PROFILE_CORE);
 
   if (option_get_bool("egl", "multisample"))
@@ -500,7 +502,13 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  this->surface = eglCreateWindowSurface(this->display, this->configs, this->nativeWind, NULL);
+  const EGLint surfattr[] =
+  {
+    EGL_RENDER_BUFFER, this->opt.doubleBuffer ? EGL_BACK_BUFFER : EGL_SINGLE_BUFFER,
+    EGL_NONE
+  };
+
+  this->surface = eglCreateWindowSurface(this->display, this->configs, this->nativeWind, surfattr);
   if (this->surface == EGL_NO_SURFACE)
   {
     DEBUG_ERROR("Failed to create EGL surface (eglError: 0x%x)", eglGetError());
@@ -518,6 +526,23 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   {
     DEBUG_ERROR("Failed to create EGL context (eglError: 0x%x)", eglGetError());
     return false;
+  }
+
+  EGLint rb = 0;
+  eglQuerySurface(this->display, this->surface, EGL_RENDER_BUFFER, &rb);
+  switch(rb)
+  {
+    case EGL_SINGLE_BUFFER:
+      DEBUG_INFO("Single buffer mode");
+      break;
+
+    case EGL_BACK_BUFFER:
+      DEBUG_INFO("Back buffer mode");
+      break;
+
+    default:
+      DEBUG_WARN("Unknown render buffer mode: %d", rb);
+      break;
   }
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
