@@ -151,18 +151,15 @@ static void egl_texture_unmap(EGL_Texture * texture, uint8_t i)
 
 bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_t width, size_t height, size_t stride, bool streaming, bool useDMA)
 {
-  if (texture->streaming)
+  if (texture->streaming && !useDMA)
   {
     for(int i = 0; i < texture->textureCount; ++i)
     {
-      if (!useDMA)
+      egl_texture_unmap(texture, i);
+      if (texture->tex[i].hasPBO)
       {
-        egl_texture_unmap(texture, i);
-        if (texture->tex[i].hasPBO)
-        {
-          glDeleteBuffers(1, &texture->tex[i].pbo);
-          texture->tex[i].hasPBO = false;
-        }
+        glDeleteBuffers(1, &texture->tex[i].pbo);
+        texture->tex[i].hasPBO = false;
       }
     }
   }
