@@ -383,6 +383,12 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
     attribs
   );
 
+  if (image == EGL_NO_IMAGE)
+  {
+    DEBUG_ERROR("failed to create ELGImage for DMA transfer");
+    return false;
+  }
+
   /* bind the texture and initiate the transfer */
   glBindTexture(GL_TEXTURE_2D, texture->tex[t].t);
   glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
