@@ -33,15 +33,15 @@ Simply modprobe the module:
 
 ## Usage
 
-This will create the `/dev/uio0` node that represents the KVMFR interface.
+This will create the `/dev/kvmfr0` node that represents the KVMFR interface.
 To use the interface you need permission to access it by either creating a
 udev rule to ensure your user can read and write to it, or simply change it's
 ownership manually, ie:
 
-    sudo chown user:user /dev/uid0
+    sudo chown user:user /dev/kvmfr0
 
 Usage with looking glass is simple, you only need to specify the path to the
 device node, for example:
 
-    ./looking-glass-client -f /dev/uio0 -L 16
+    ./looking-glass-client -f /dev/kvmfr0
 
