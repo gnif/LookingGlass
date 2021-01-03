@@ -837,8 +837,8 @@ static void handleMouseMoveEvent(int ex, int ey)
     {
       state.cursorInView = true;
       spice_mouse_motion(delta.x, delta.y);
-      if (ex < 100 || ex > state.windowW - 100 ||
-          ey < 100 || ey > state.windowH - 100)
+      if (ex < 50 || ex > state.windowW - 50 ||
+          ey < 50 || ey > state.windowH - 50)
         warpMouse(state.windowW / 2, state.windowH / 2);
     }
 
@@ -885,8 +885,8 @@ static void handleMouseMoveEvent(int ex, int ey)
   }
   else if (inView)
   {
-    if (ex < 100 || ex > state.windowW - 100 ||
-        ey < 100 || ey > state.windowH - 100)
+    if (ex < state.dstRect.x + 50 || ex > state.dstRect.w - 50 ||
+        ey < state.dstRect.y + 50 || ey > state.dstRect.h - 50)
       warpMouse(state.windowW / 2, state.windowH / 2);
   }
 
@@ -927,8 +927,11 @@ static void handleMouseMoveEvent(int ex, int ey)
     if (newPos.x < 0 || newPos.x >= state.dstRect.w ||
         newPos.y < 0 || newPos.y >= state.dstRect.h)
     {
-      const int nx = state.windowPos.x + state.border.x + newPos.x;
-      const int ny = state.windowPos.y + state.border.y + newPos.y;
+      const int nx = state.windowPos.x + state.border.x +
+        state.dstRect.x + newPos.x;
+      const int ny = state.windowPos.y + state.border.y +
+        state.dstRect.y + newPos.y;
+
       if (isValidCursorLocation(nx, ny))
       {
         /* put the mouse where it should be and disable warp */
