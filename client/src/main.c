@@ -890,6 +890,12 @@ static void handleMouseMoveEvent(int ex, int ey)
       warpMouse(state.windowW / 2, state.windowH / 2);
   }
 
+  if (!inView)
+  {
+    /* cursor outside of the bounds, don't do anything */
+    return;
+  }
+
   if (state.scale && params.scaleMouseInput && !state.grabMouse)
   {
     state.accX += (float)delta.x * state.scaleX;
