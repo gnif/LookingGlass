@@ -1448,7 +1448,7 @@ static void initSDLCursor()
 {
   const uint8_t data[4] = {0xf, 0x9, 0x9, 0xf};
   const uint8_t mask[4] = {0xf, 0xf, 0xf, 0xf};
-  cursor = SDL_CreateCursor(data, mask, 4, 4, 1, 1);
+  cursor = SDL_CreateCursor(data, mask, 8, 4, 4, 0);
   SDL_SetCursor(cursor);
 }
 
