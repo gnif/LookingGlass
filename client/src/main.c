@@ -1102,7 +1102,7 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case EnterNotify:
-            if (xe.xcrossing.detail != NotifyNonlinear)
+            if (xe.xcrossing.mode != NotifyNormal)
               break;
 
             state.curLastX = xe.xcrossing.x;
@@ -1112,7 +1112,7 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case LeaveNotify:
-            if (xe.xcrossing.detail != NotifyNonlinear)
+            if (xe.xcrossing.mode != NotifyNormal)
               break;
 
             state.curLastX = xe.xcrossing.x;
