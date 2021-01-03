@@ -816,8 +816,8 @@ static void handleMouseMoveEvent(int ex, int ey)
   if (delta.x == 0 && delta.y == 0)
     return;
 
-  state.curLastX = state.curLocalX = ex;
-  state.curLastY = state.curLocalY = ey;
+  state.curLastX = ex;
+  state.curLastY = ey;
   state.haveCurLocal = true;
 
   if (state.warpState == WARP_STATE_ACTIVE &&
@@ -992,7 +992,6 @@ static void handleWindowLeave()
 static void handleWindowEnter()
 {
   state.cursorInWindow = true;
-  return;
 
   if (state.warpState == WARP_STATE_OFF)
     state.warpState = WARP_STATE_ON;
@@ -1103,15 +1102,21 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case EnterNotify:
-            state.curLocalX    = xe.xcrossing.x;
-            state.curLocalY    = xe.xcrossing.y;
+            if (xe.xcrossing.detail != NotifyNonlinear)
+              break;
+
+            state.curLastX = xe.xcrossing.x;
+            state.curLastY = xe.xcrossing.y;
             state.haveCurLocal = true;
             handleWindowEnter();
             break;
 
           case LeaveNotify:
-            state.curLocalX    = xe.xcrossing.x;
-            state.curLocalY    = xe.xcrossing.y;
+            if (xe.xcrossing.detail != NotifyNonlinear)
+              break;
+
+            state.curLastX = xe.xcrossing.x;
+            state.curLastY = xe.xcrossing.y;
             state.haveCurLocal = true;
             handleWindowLeave();
             break;

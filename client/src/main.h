@@ -82,8 +82,6 @@ struct AppState
   int   curLastX;
   int   curLastY;
   bool  haveCurLocal;
-  int   curLocalX;
-  int   curLocalY;
   bool  haveAligned;
 
   enum WarpState   warpState;
