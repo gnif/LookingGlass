@@ -284,6 +284,7 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 #else
   kdev->pgmap.range.start = pci_resource_start(dev, 2);
   kdev->pgmap.range.end   = pci_resource_end  (dev, 2);
+  kdev->pgmap.nr_range    = 1;
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
