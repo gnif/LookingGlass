@@ -869,8 +869,8 @@ static void handleMouseMoveEvent(int ex, int ey)
         state.warpState = WARP_STATE_ON;
 
       /* convert guest to local and calculate the delta */
-      const int lx = (state.cursor.x / state.scaleX) + state.dstRect.x;
-      const int ly = (state.cursor.y / state.scaleY) + state.dstRect.y;
+      const int lx = ((state.cursor.x + state.cursor.hx) / state.scaleX) + state.dstRect.x;
+      const int ly = ((state.cursor.y + state.cursor.hy) / state.scaleY) + state.dstRect.y;
       delta.x = ex - lx;
       delta.y = ey - ly;
     }
@@ -913,8 +913,8 @@ static void handleMouseMoveEvent(int ex, int ey)
   if (!state.grabMouse && state.warpState == WARP_STATE_ON)
   {
     const SDL_Point newPos = {
-      .x = (float)(state.cursor.x + delta.x) / state.scaleX,
-      .y = (float)(state.cursor.y + delta.y) / state.scaleY
+      .x = (float)(state.cursor.x + state.cursor.hx + delta.x) / state.scaleX,
+      .y = (float)(state.cursor.y + state.cursor.hy + delta.y) / state.scaleY
     };
 
     /* check if the movement would exit the window */
