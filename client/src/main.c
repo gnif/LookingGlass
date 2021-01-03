@@ -1173,7 +1173,8 @@ int eventFilter(void * userdata, SDL_Event * event)
           if (params.useSpiceInput)
           {
             state.grabMouse = !state.grabMouse;
-            SDL_SetWindowGrab(state.window, state.grabMouse);
+            if (state.wminfo.subsystem != SDL_SYSWM_X11)
+              SDL_SetWindowGrab(state.window, state.grabMouse);
 
             app_alert(
               state.grabMouse ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
@@ -1674,7 +1675,8 @@ static int lg_run()
   if (params.captureOnStart)
   {
     state.grabMouse = true;
-    SDL_SetWindowGrab(state.window, true);
+    if (state.wminfo.subsystem != SDL_SYSWM_X11)
+      SDL_SetWindowGrab(state.window, true);
   }
 
   // setup the startup condition
