@@ -837,9 +837,9 @@ static void handleMouseMoveEvent(int ex, int ey)
     {
       g_cursor.inView = true;
       spice_mouse_motion(delta.x, delta.y);
-      if (ex < 50 || ex > g_state.windowW - 50 ||
-          ey < 50 || ey > g_state.windowH - 50)
-        warpMouse(g_state.windowW / 2, g_state.windowH / 2);
+      if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
+          ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
+        warpMouse(g_state.windowCX, g_state.windowCY);
     }
 
     return;
@@ -887,9 +887,9 @@ static void handleMouseMoveEvent(int ex, int ey)
   }
   else if (inView)
   {
-    if (ex < g_state.dstRect.x + 50 || ex > g_state.dstRect.w - 50 ||
-        ey < g_state.dstRect.y + 50 || ey > g_state.dstRect.h - 50)
-      warpMouse(g_state.windowW / 2, g_state.windowH / 2);
+    if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
+        ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
+      warpMouse(g_state.windowCX, g_state.windowCY);
   }
 
   if (!inView)
@@ -970,8 +970,10 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
     &g_state.border.w
   );
 
-  g_state.windowW = w;
-  g_state.windowH = h;
+  g_state.windowW  = w;
+  g_state.windowH  = h;
+  g_state.windowCX = w / 2;
+  g_state.windowCY = h / 2;
   updatePositionInfo();
 }
 

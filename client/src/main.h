@@ -49,6 +49,7 @@ struct AppState
   bool                 haveSrcSize;
   SDL_Point            windowPos;
   int                  windowW, windowH;
+  int                  windowCX, windowCY;
   SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
