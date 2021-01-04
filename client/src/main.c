@@ -1213,7 +1213,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (sc == params.escapeKey)
+      if (sc == params.escapeKey && !g_state.escapeActive)
       {
         g_state.escapeActive = true;
         g_state.escapeAction = -1;
@@ -1228,6 +1228,11 @@ int eventFilter(void * userdata, SDL_Event * event)
 
       if (g_state.ignoreInput || !params.useSpiceInput)
         break;
+
+      if (params.ignoreWindowsKeys &&
+          (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
+        break;
+
 
       uint32_t scancode = mapScancode(sc);
       if (scancode == 0)
@@ -1299,7 +1304,10 @@ int eventFilter(void * userdata, SDL_Event * event)
         {
           KeybindHandle handle = g_state.bindings[sc];
           if (handle)
+          {
             handle->callback(sc, handle->opaque);
+            break;
+          }
         }
 
         if (sc == params.escapeKey)
@@ -1311,6 +1319,10 @@ int eventFilter(void * userdata, SDL_Event * event)
 
       // avoid sending key up events when we didn't send a down
       if (!g_state.keyDown[sc])
+        break;
+
+      if (params.ignoreWindowsKeys &&
+          (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
         break;
 
       uint32_t scancode = mapScancode(sc);

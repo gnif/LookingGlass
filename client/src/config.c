@@ -262,6 +262,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "ignoreWindowsKeys",
+    .description    = "Do not pass events for the windows keys to the guest",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+  {
+    .module         = "input",
     .name           = "hideCursor",
     .description    = "Hide the local mouse cursor",
     .shortopt       = 'M',
@@ -443,6 +450,7 @@ bool config_load(int argc, char * argv[])
   params.grabKeyboard        = option_get_bool  ("input", "grabKeyboard"       );
   params.grabKeyboardOnFocus = option_get_bool  ("input", "grabKeyboardOnFocus");
   params.escapeKey           = option_get_int   ("input", "escapeKey"          );
+  params.ignoreWindowsKeys   = option_get_bool  ("input", "ignoreWindowsKeys"  );
   params.hideMouse           = option_get_bool  ("input", "hideCursor"         );
   params.mouseSens           = option_get_int   ("input", "mouseSens"          );
   params.mouseRedraw         = option_get_bool  ("input", "mouseRedraw"        );

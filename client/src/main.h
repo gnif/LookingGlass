@@ -121,6 +121,7 @@ struct AppParams
   bool         grabKeyboard;
   bool         grabKeyboardOnFocus;
   SDL_Scancode escapeKey;
+  bool         ignoreWindowsKeys;
   bool         showAlerts;
   bool         captureOnStart;
   bool         quickSplash;
