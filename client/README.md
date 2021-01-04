@@ -159,7 +159,7 @@ Command line arguments will override any options loaded from the config files.
 | Long                 | Short | Value | Description                                 |
 |------------------------------------------------------------------------------------|
 | opengl:mipmap        |       | yes   | Enable mipmapping                           |
-| opengl:vsync         |       | yes   | Enable vsync                                |
+| opengl:vsync         |       | no    | Enable vsync                                |
 | opengl:preventBuffer |       | yes   | Prevent the driver from buffering frames    |
 | opengl:amdPinnedMem  |       | yes   | Use GL_AMD_pinned_memory if it is available |
 |------------------------------------------------------------------------------------|
