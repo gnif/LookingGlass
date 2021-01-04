@@ -109,8 +109,8 @@ static void updatePositionInfo()
         force = false;
         g_state.dstRect.w = g_state.srcSize.x;
         g_state.dstRect.h = g_state.srcSize.y;
-        g_state.dstRect.x = g_state.windowW / 2 - g_state.srcSize.x / 2;
-        g_state.dstRect.y = g_state.windowH / 2 - g_state.srcSize.y / 2;
+        g_state.dstRect.x = g_state.windowCX - g_state.srcSize.x / 2;
+        g_state.dstRect.y = g_state.windowCY - g_state.srcSize.y / 2;
       }
       else
       if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
@@ -160,7 +160,7 @@ static void updatePositionInfo()
     g_cursor.scaleY = (float)g_state.srcSize.x / (float)g_state.dstRect.w;
   }
 
-  g_state.lgrResize = true;
+  atomic_fetch_add(&g_state.lgrResize, 1);
 }
 
 static int renderThread(void * unused)
@@ -189,11 +189,12 @@ static int renderThread(void * unused)
       tsAdd(&time, g_state.frameTime);
     }
 
-    if (g_state.lgrResize)
+    int resize = atomic_load(&g_state.lgrResize);
+    if (resize)
     {
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH, g_state.dstRect);
-      g_state.lgrResize = false;
+      atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
     if (!g_state.lgr->render(g_state.lgrData, g_state.window))

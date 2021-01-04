@@ -56,7 +56,7 @@ struct AppState
 
   const LG_Renderer  * lgr;
   void               * lgrData;
-  bool                 lgrResize;
+  atomic_int           lgrResize;
 
   const LG_Clipboard * lgc;
   SpiceDataType        cbType;
