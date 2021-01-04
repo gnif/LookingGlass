@@ -1211,8 +1211,29 @@ int eventFilter(void * userdata, SDL_Event * event)
           if (params.useSpiceInput)
           {
             g_cursor.grab = !g_cursor.grab;
+
             if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
               SDL_SetWindowGrab(g_state.window, g_cursor.grab);
+            else
+            {
+              if (g_cursor.grab)
+              {
+                XGrabPointer(g_state.wminfo.info.x11.display,
+                    g_state.wminfo.info.x11.window,
+                    true,
+                    None,
+                    GrabModeAsync,
+                    GrabModeAsync,
+                    g_state.wminfo.info.x11.window,
+                    None,
+                    CurrentTime);
+              }
+              else
+              {
+                XUngrabPointer(g_state.wminfo.info.x11.display,
+                    CurrentTime);
+              }
+            }
 
             app_alert(
               g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
