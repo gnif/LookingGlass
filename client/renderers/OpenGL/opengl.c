@@ -62,7 +62,7 @@ static struct Option opengl_options[] =
     .name         = "vsync",
     .description  = "Enable vsync",
     .type         = OPTION_TYPE_BOOL,
-    .value.x_bool = true
+    .value.x_bool = false
   },
   {
     .module       = "opengl",
