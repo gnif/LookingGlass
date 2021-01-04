@@ -1264,15 +1264,15 @@ int eventFilter(void * userdata, SDL_Event * event)
               if (g_cursor.grab)
               {
                 XGrabPointer(
-                    g_state.wminfo.info.x11.display,
-                    g_state.wminfo.info.x11.window,
-                    true,
-                    None,
-                    GrabModeAsync,
-                    GrabModeAsync,
-                    g_state.wminfo.info.x11.window,
-                    None,
-                    CurrentTime);
+                  g_state.wminfo.info.x11.display,
+                  g_state.wminfo.info.x11.window,
+                  true,
+                  None,
+                  GrabModeAsync,
+                  GrabModeAsync,
+                  g_state.wminfo.info.x11.window,
+                  None,
+                  CurrentTime);
 
                 XGrabKeyboard(
                   g_state.wminfo.info.x11.display,
