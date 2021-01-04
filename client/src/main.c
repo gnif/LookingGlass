@@ -87,8 +87,8 @@ static void lgInit()
   g_cursor.scale         = false;
   g_cursor.scaleX        = 1.0f;
   g_cursor.scaleY        = 1.0f;
-  g_cursor.draw    = true;
-  g_cursor.inView  = true;
+  g_cursor.draw          = true;
+  g_cursor.inView        = false;
   g_cursor.guest.valid   = false;
 }
 
@@ -810,6 +810,23 @@ static bool isValidCursorLocation(int x, int y)
 
 static void handleMouseMoveEvent(int ex, int ey)
 {
+  if (!params.useSpiceInput)
+    return;
+
+  /* check if there is a warp in progress, and if it was completed */
+  if (g_cursor.warpState == WARP_STATE_ACTIVE &&
+      ex == g_cursor.warpTo.x && ey == g_cursor.warpTo.y)
+  {
+    g_cursor.last.x    = ex;
+    g_cursor.last.y    = ey;
+    g_cursor.warpState = WARP_STATE_ON;
+    return;
+  }
+
+  if (!g_cursor.inWindow || g_state.ignoreInput)
+    return;
+
+  /* calculate the relative movement */
   SDL_Point delta = {
     .x = ex - g_cursor.last.x,
     .y = ey - g_cursor.last.y
@@ -820,16 +837,6 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   g_cursor.last.x = ex;
   g_cursor.last.y = ey;
-
-  if (g_cursor.warpState == WARP_STATE_ACTIVE &&
-      ex == g_cursor.warpTo.x && ey == g_cursor.warpTo.y)
-  {
-    g_cursor.warpState = WARP_STATE_ON;
-    return;
-  }
-
-  if (!g_cursor.inWindow || g_state.ignoreInput || !params.useSpiceInput)
-    return;
 
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
@@ -846,13 +853,14 @@ static void handleMouseMoveEvent(int ex, int ey)
     return;
   }
 
-  const bool inView = !(
-      ex <  g_state.dstRect.x                   ||
-      ex >= g_state.dstRect.x + g_state.dstRect.w ||
-      ey <  g_state.dstRect.y                   ||
-      ey >= g_state.dstRect.y + g_state.dstRect.h);
+  /* check if the cursor is in the guests viewport */
+  const bool inView =
+    ex >= g_state.dstRect.x                     &&
+    ex <  g_state.dstRect.x + g_state.dstRect.w &&
+    ey >= g_state.dstRect.y                     &&
+    ey <  g_state.dstRect.y + g_state.dstRect.h;
 
-  /* if the cursor is to move in/outside the display area */
+  /* if the cursor has moved in/outside the display area */
   if (g_cursor.inView != inView)
   {
     g_cursor.inView = inView;
@@ -869,8 +877,6 @@ static void handleMouseMoveEvent(int ex, int ey)
       if (g_cursor.warpState == WARP_STATE_OFF)
         g_cursor.warpState = WARP_STATE_ON;
 
-      warpMouse(g_state.windowW / 2, g_state.windowH / 2);
-
       /* convert guest to local and calculate the delta */
       const int lx = ((g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scaleX) + g_state.dstRect.x;
       const int ly = ((g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scaleY) + g_state.dstRect.y;
@@ -886,14 +892,15 @@ static void handleMouseMoveEvent(int ex, int ey)
         g_cursor.draw = false;
     }
   }
-  else if (inView)
+
+  if (inView)
   {
+    /* stop the mouse from runing into the edges of the window */
     if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
         ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
       warpMouse(g_state.windowCX, g_state.windowCY);
   }
-
-  if (!inView)
+  else
   {
     /* cursor outside of the bounds, don't do anything */
     return;
@@ -919,6 +926,9 @@ static void handleMouseMoveEvent(int ex, int ey)
     g_cursor.sensY -= delta.y;
   }
 
+  /* if the cursor is not grabbed and warp is possible, check if the translated
+   * guest cursor movement would live the window, and if so move the host cursor
+   * to the exit location and enable it, but only if the target is valid */
   if (!g_cursor.grab && g_cursor.warpState == WARP_STATE_ON)
   {
     const float fx = (float)(g_cursor.guest.x + g_cursor.guest.hx + delta.x) /
