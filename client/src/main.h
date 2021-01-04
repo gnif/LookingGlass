@@ -53,6 +53,8 @@ struct AppState
   SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
+  float                mouseScale;
+  uint32_t             mouseScalePercent;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
