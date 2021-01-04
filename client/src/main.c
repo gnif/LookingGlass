@@ -1071,8 +1071,11 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         case SDL_WINDOWEVENT_MOVED:
-          g_state.windowPos.x = event->window.data1;
-          g_state.windowPos.y = event->window.data2;
+          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+          {
+            g_state.windowPos.x = event->window.data1;
+            g_state.windowPos.y = event->window.data2;
+          }
           break;
 
         // allow a window close event to close the application even if ignoreQuit is set
@@ -1094,8 +1097,19 @@ int eventFilter(void * userdata, SDL_Event * event)
         switch(xe.type)
         {
           case ConfigureNotify:
+          {
+            /* the window may have been re-parented so we need to translate to
+             * ensure we get the screen top left position of the window */
+            Window child;
+            XTranslateCoordinates(g_state.wminfo.info.x11.display,
+                g_state.wminfo.info.x11.window,
+                DefaultRootWindow(g_state.wminfo.info.x11.display),
+                0, 0, &g_state.windowPos.x, &g_state.windowPos.y,
+                &child);
+
             handleResizeEvent(xe.xconfigure.width, xe.xconfigure.height);
             break;
+          }
 
           case MotionNotify:
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
