@@ -1503,6 +1503,13 @@ static void ctrl_alt_fn(SDL_Scancode key, void * opaque)
   spice_key_up(fn  );
 }
 
+static void key_passthrough(SDL_Scancode key, void * opaque)
+{
+  const uint32_t sc = mapScancode(key);
+  spice_key_down(sc);
+  spice_key_up  (sc);
+}
+
 static void register_key_binds()
 {
   g_state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
@@ -1524,6 +1531,9 @@ static void register_key_binds()
   g_state.kbCtrlAltFn[9 ] = app_register_keybind(SDL_SCANCODE_F10, ctrl_alt_fn, NULL);
   g_state.kbCtrlAltFn[10] = app_register_keybind(SDL_SCANCODE_F11, ctrl_alt_fn, NULL);
   g_state.kbCtrlAltFn[11] = app_register_keybind(SDL_SCANCODE_F12, ctrl_alt_fn, NULL);
+
+  g_state.kbPass[0] = app_register_keybind(SDL_SCANCODE_LGUI, key_passthrough, NULL);
+  g_state.kbPass[1] = app_register_keybind(SDL_SCANCODE_RGUI, key_passthrough, NULL);
 }
 
 static void release_key_binds()
@@ -1536,6 +1546,8 @@ static void release_key_binds()
   app_release_keybind(&g_state.kbMouseSensDec);
   for(int i = 0; i < 12; ++i)
     app_release_keybind(&g_state.kbCtrlAltFn[i]);
+  for(int i = 0; i < 2; ++i)
+    app_release_keybind(&g_state.kbPass[i]);
 }
 
 static void initSDLCursor()

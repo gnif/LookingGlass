@@ -89,6 +89,7 @@ struct AppState
   KeybindHandle kbMouseSensInc;
   KeybindHandle kbMouseSensDec;
   KeybindHandle kbCtrlAltFn[12];
+  KeybindHandle kbPass[2];
 };
 
 struct AppParams
