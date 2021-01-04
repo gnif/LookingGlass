@@ -1218,7 +1218,8 @@ int eventFilter(void * userdata, SDL_Event * event)
             {
               if (g_cursor.grab)
               {
-                XGrabPointer(g_state.wminfo.info.x11.display,
+                XGrabPointer(
+                    g_state.wminfo.info.x11.display,
                     g_state.wminfo.info.x11.window,
                     true,
                     None,
@@ -1227,11 +1228,19 @@ int eventFilter(void * userdata, SDL_Event * event)
                     g_state.wminfo.info.x11.window,
                     None,
                     CurrentTime);
+
+                XGrabKeyboard(
+                  g_state.wminfo.info.x11.display,
+                  g_state.wminfo.info.x11.window,
+                  true,
+                  GrabModeAsync,
+                  GrabModeAsync,
+                  CurrentTime);
               }
               else
               {
-                XUngrabPointer(g_state.wminfo.info.x11.display,
-                    CurrentTime);
+                XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+                XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
               }
             }
 
