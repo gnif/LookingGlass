@@ -72,6 +72,7 @@ static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
 struct AppState state;
+struct CursorState g_cursor;
 
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
@@ -81,14 +82,14 @@ static void handleMouseMoveEvent(int ex, int ey);
 static void lgInit()
 {
   state.state         = APP_STATE_RUNNING;
-  state.scale         = false;
-  state.scaleX        = 1.0f;
-  state.scaleY        = 1.0f;
   state.resizeDone    = true;
-  state.drawCursor    = true;
 
-  state.haveCursorPos = false;
-  state.cursorInView  = true;
+  g_cursor.scale         = false;
+  g_cursor.scaleX        = 1.0f;
+  g_cursor.scaleY        = 1.0f;
+  g_cursor.draw    = true;
+  g_cursor.inView  = true;
+  g_cursor.guest.valid   = false;
 }
 
 static void updatePositionInfo()
@@ -151,12 +152,12 @@ static void updatePositionInfo()
     }
     state.dstRect.valid = true;
 
-    state.scale = (
+    g_cursor.scale = (
         state.srcSize.y != state.dstRect.h ||
         state.srcSize.x != state.dstRect.w);
 
-    state.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
-    state.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
+    g_cursor.scaleX = (float)state.srcSize.y / (float)state.dstRect.h;
+    g_cursor.scaleY = (float)state.srcSize.x / (float)state.dstRect.w;
   }
 
   state.lgrResize = true;
@@ -279,15 +280,15 @@ static int cursorThread(void * unused)
     {
       if (status == LGMP_ERR_QUEUE_EMPTY)
       {
-        if (state.updateCursor)
+        if (g_cursor.redraw)
         {
-          state.updateCursor = false;
+          g_cursor.redraw = false;
           state.lgr->on_mouse_event
           (
             state.lgrData,
-            state.cursorVisible && state.drawCursor,
-            state.cursor.x,
-            state.cursor.y
+            g_cursor.guest.visible && g_cursor.draw,
+            g_cursor.guest.x,
+            g_cursor.guest.y
           );
 
           lgSignalEvent(e_frame);
@@ -309,7 +310,7 @@ static int cursorThread(void * unused)
 
     KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
 
-    state.cursorVisible =
+    g_cursor.guest.visible =
       msg.udata & CURSOR_FLAG_VISIBLE;
 
     if (msg.udata & CURSOR_FLAG_SHAPE)
@@ -325,8 +326,8 @@ static int cursorThread(void * unused)
           continue;
       }
 
-      state.cursor.hx = cursor->hx;
-      state.cursor.hy = cursor->hy;
+      g_cursor.guest.hx = cursor->hx;
+      g_cursor.guest.hy = cursor->hy;
 
       const uint8_t * data = (const uint8_t *)(cursor + 1);
       if (!state.lgr->on_mouse_shape(
@@ -346,20 +347,20 @@ static int cursorThread(void * unused)
 
     if (msg.udata & CURSOR_FLAG_POSITION)
     {
-      state.cursor.x      = cursor->x;
-      state.cursor.y      = cursor->y;
-      state.haveCursorPos = true;
+      g_cursor.guest.x       = cursor->x;
+      g_cursor.guest.y       = cursor->y;
+      g_cursor.guest.valid = true;
     }
 
     lgmpClientMessageDone(queue);
-    state.updateCursor = false;
+    g_cursor.redraw = false;
 
     state.lgr->on_mouse_event
     (
       state.lgrData,
-      state.cursorVisible && state.drawCursor,
-      state.cursor.x,
-      state.cursor.y
+      g_cursor.guest.visible && g_cursor.draw,
+      g_cursor.guest.x,
+      g_cursor.guest.y
     );
 
     if (params.mouseRedraw)
@@ -773,21 +774,21 @@ void spiceClipboardRequest(const SpiceDataType type)
 
 static void warpMouse(int x, int y)
 {
-  if (!state.cursorInWindow)
+  if (!g_cursor.inWindow)
     return;
 
-  if (state.warpState == WARP_STATE_WIN_EXIT)
+  if (g_cursor.warpState == WARP_STATE_WIN_EXIT)
   {
     SDL_WarpMouseInWindow(state.window, x, y);
-    state.warpState = WARP_STATE_OFF;
+    g_cursor.warpState = WARP_STATE_OFF;
     return;
   }
 
-  if (state.warpState == WARP_STATE_ON)
+  if (g_cursor.warpState == WARP_STATE_ON)
   {
-    state.warpToX   = x;
-    state.warpToY   = y;
-    state.warpState = WARP_STATE_ACTIVE;
+    g_cursor.warpTo.x   = x;
+    g_cursor.warpTo.y   = y;
+    g_cursor.warpState = WARP_STATE_ACTIVE;
     SDL_WarpMouseInWindow(state.window, x, y);
   }
 }
@@ -809,33 +810,32 @@ static bool isValidCursorLocation(int x, int y)
 static void handleMouseMoveEvent(int ex, int ey)
 {
   SDL_Point delta = {
-    .x = ex - state.curLastX,
-    .y = ey - state.curLastY
+    .x = ex - g_cursor.last.x,
+    .y = ey - g_cursor.last.y
   };
 
   if (delta.x == 0 && delta.y == 0)
     return;
 
-  state.curLastX = ex;
-  state.curLastY = ey;
-  state.haveCurLocal = true;
+  g_cursor.last.x = ex;
+  g_cursor.last.y = ey;
 
-  if (state.warpState == WARP_STATE_ACTIVE &&
-      ex == state.warpToX && ey == state.warpToY)
+  if (g_cursor.warpState == WARP_STATE_ACTIVE &&
+      ex == g_cursor.warpTo.x && ey == g_cursor.warpTo.y)
   {
-    state.warpState = WARP_STATE_ON;
+    g_cursor.warpState = WARP_STATE_ON;
     return;
   }
 
-  if (!state.cursorInWindow || state.ignoreInput || !params.useSpiceInput)
+  if (!g_cursor.inWindow || state.ignoreInput || !params.useSpiceInput)
     return;
 
   /* if we don't have the current cursor pos just send cursor movements */
-  if (!state.haveCursorPos)
+  if (!g_cursor.guest.valid)
   {
-    if (state.grabMouse)
+    if (g_cursor.grab)
     {
-      state.cursorInView = true;
+      g_cursor.inView = true;
       spice_mouse_motion(delta.x, delta.y);
       if (ex < 50 || ex > state.windowW - 50 ||
           ey < 50 || ey > state.windowH - 50)
@@ -852,9 +852,9 @@ static void handleMouseMoveEvent(int ex, int ey)
       ey >= state.dstRect.y + state.dstRect.h);
 
   /* if the cursor is to move in/outside the display area */
-  if (state.cursorInView != inView)
+  if (g_cursor.inView != inView)
   {
-    state.cursorInView = inView;
+    g_cursor.inView = inView;
 
     if (inView)
     {
@@ -862,17 +862,17 @@ static void handleMouseMoveEvent(int ex, int ey)
       if (params.hideMouse)
         SDL_ShowCursor(SDL_DISABLE);
 
-      state.updateCursor = true;
-      state.drawCursor   = true;
+      g_cursor.redraw = true;
+      g_cursor.draw   = true;
 
-      if (state.warpState == WARP_STATE_OFF)
-        state.warpState = WARP_STATE_ON;
+      if (g_cursor.warpState == WARP_STATE_OFF)
+        g_cursor.warpState = WARP_STATE_ON;
 
       warpMouse(state.windowW / 2, state.windowH / 2);
 
       /* convert guest to local and calculate the delta */
-      const int lx = ((state.cursor.x + state.cursor.hx) / state.scaleX) + state.dstRect.x;
-      const int ly = ((state.cursor.y + state.cursor.hy) / state.scaleY) + state.dstRect.y;
+      const int lx = ((g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scaleX) + state.dstRect.x;
+      const int ly = ((g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scaleY) + state.dstRect.y;
       delta.x = ex - lx;
       delta.y = ey - ly;
     }
@@ -880,9 +880,9 @@ static void handleMouseMoveEvent(int ex, int ey)
     {
       /* cursor moved out */
       SDL_ShowCursor(SDL_ENABLE);
-      state.updateCursor = true;
+      g_cursor.redraw = true;
       if (params.useSpiceInput && !params.alwaysShowCursor)
-        state.drawCursor = false;
+        g_cursor.draw = false;
     }
   }
   else if (inView)
@@ -898,32 +898,32 @@ static void handleMouseMoveEvent(int ex, int ey)
     return;
   }
 
-  if (state.scale && params.scaleMouseInput && !state.grabMouse)
+  if (g_cursor.scale && params.scaleMouseInput && !g_cursor.grab)
   {
-    state.accX += (float)delta.x * state.scaleX;
-    state.accY += (float)delta.y * state.scaleY;
-    delta.x = floor(state.accX);
-    delta.y = floor(state.accY);
-    state.accX -= delta.x;
-    state.accY -= delta.y;
+    g_cursor.accX += (float)delta.x * g_cursor.scaleX;
+    g_cursor.accY += (float)delta.y * g_cursor.scaleY;
+    delta.x = floor(g_cursor.accX);
+    delta.y = floor(g_cursor.accY);
+    g_cursor.accX -= delta.x;
+    g_cursor.accY -= delta.y;
   }
 
-  if (state.grabMouse && state.mouseSens != 0)
+  if (g_cursor.grab && g_cursor.sens != 0)
   {
-    state.sensX += ((float)delta.x / 10.0f) * (state.mouseSens + 10);
-    state.sensY += ((float)delta.y / 10.0f) * (state.mouseSens + 10);
-    delta.x = floor(state.sensX);
-    delta.y = floor(state.sensY);
-    state.sensX -= delta.x;
-    state.sensY -= delta.y;
+    g_cursor.sensX += ((float)delta.x / 10.0f) * (g_cursor.sens + 10);
+    g_cursor.sensY += ((float)delta.y / 10.0f) * (g_cursor.sens + 10);
+    delta.x = floor(g_cursor.sensX);
+    delta.y = floor(g_cursor.sensY);
+    g_cursor.sensX -= delta.x;
+    g_cursor.sensY -= delta.y;
   }
 
-  if (!state.grabMouse && state.warpState == WARP_STATE_ON)
+  if (!g_cursor.grab && g_cursor.warpState == WARP_STATE_ON)
   {
-    const float fx = (float)(state.cursor.x + state.cursor.hx + delta.x) /
-      state.scaleX;
-    const float fy = (float)(state.cursor.y + state.cursor.hy + delta.y) /
-      state.scaleY;
+    const float fx = (float)(g_cursor.guest.x + g_cursor.guest.hx + delta.x) /
+      g_cursor.scaleX;
+    const float fy = (float)(g_cursor.guest.y + g_cursor.guest.hy + delta.y) /
+      g_cursor.scaleY;
     const SDL_Point newPos =
     {
       .x = fx < 0.0f ? floor(fx) : (fx >= state.dstRect.w ? ceil(fx) : round(fx)),
@@ -942,7 +942,7 @@ static void handleMouseMoveEvent(int ex, int ey)
       if (isValidCursorLocation(nx, ny))
       {
         /* put the mouse where it should be and disable warp */
-        state.warpState = WARP_STATE_WIN_EXIT;
+        g_cursor.warpState = WARP_STATE_WIN_EXIT;
         warpMouse(
           state.dstRect.x + newPos.x,
           state.dstRect.y + newPos.y
@@ -977,33 +977,33 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
 
 static void handleWindowLeave()
 {
-  state.cursorInWindow = false;
+  g_cursor.inWindow = false;
 
   if (!params.useSpiceInput)
     return;
 
   if (!params.alwaysShowCursor)
-    state.drawCursor = false;
+    g_cursor.draw = false;
 
-  state.cursorInView = false;
-  state.updateCursor = true;
+  g_cursor.inView = false;
+  g_cursor.redraw = true;
 }
 
 static void handleWindowEnter()
 {
-  state.cursorInWindow = true;
+  g_cursor.inWindow = true;
 
-  if (state.warpState == WARP_STATE_OFF)
-    state.warpState = WARP_STATE_ON;
+  if (g_cursor.warpState == WARP_STATE_OFF)
+    g_cursor.warpState = WARP_STATE_ON;
 
   if (!params.useSpiceInput)
     return;
 
-  if (!state.haveCursorPos)
+  if (!g_cursor.guest.valid)
     return;
 
-  state.drawCursor   = true;
-  state.updateCursor = true;
+  g_cursor.draw   = true;
+  g_cursor.redraw = true;
 }
 
 // only called for X11
@@ -1105,9 +1105,8 @@ int eventFilter(void * userdata, SDL_Event * event)
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
-            state.curLastX = xe.xcrossing.x;
-            state.curLastY = xe.xcrossing.y;
-            state.haveCurLocal = true;
+            g_cursor.last.x = xe.xcrossing.x;
+            g_cursor.last.y = xe.xcrossing.y;
             handleWindowEnter();
             break;
 
@@ -1115,9 +1114,8 @@ int eventFilter(void * userdata, SDL_Event * event)
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
-            state.curLastX = xe.xcrossing.x;
-            state.curLastY = xe.xcrossing.y;
-            state.haveCurLocal = true;
+            g_cursor.last.x = xe.xcrossing.x;
+            g_cursor.last.y = xe.xcrossing.y;
             handleWindowLeave();
             break;
 
@@ -1196,13 +1194,13 @@ int eventFilter(void * userdata, SDL_Event * event)
         {
           if (params.useSpiceInput)
           {
-            state.grabMouse = !state.grabMouse;
+            g_cursor.grab = !g_cursor.grab;
             if (state.wminfo.subsystem != SDL_SYSWM_X11)
-              SDL_SetWindowGrab(state.window, state.grabMouse);
+              SDL_SetWindowGrab(state.window, g_cursor.grab);
 
             app_alert(
-              state.grabMouse ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-              state.grabMouse ? "Capture Enabled" : "Capture Disabled"
+              g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+              g_cursor.grab ? "Capture Enabled" : "Capture Disabled"
             );
           }
         }
@@ -1239,7 +1237,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
-      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
+      if (state.ignoreInput || !params.useSpiceInput || !g_cursor.inView)
         break;
 
       if (
@@ -1254,7 +1252,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONDOWN:
     {
-      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
+      if (state.ignoreInput || !params.useSpiceInput || !g_cursor.inView)
         break;
 
       int button = event->button.button;
@@ -1271,7 +1269,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONUP:
     {
-      if (state.ignoreInput || !params.useSpiceInput || !state.cursorInView)
+      if (state.ignoreInput || !params.useSpiceInput || !g_cursor.inView)
         break;
 
       int button = event->button.button;
@@ -1373,10 +1371,10 @@ static void quit(SDL_Scancode key, void * opaque)
 static void mouse_sens_inc(SDL_Scancode key, void * opaque)
 {
   char * msg;
-  if (state.mouseSens < 9)
-    ++state.mouseSens;
+  if (g_cursor.sens < 9)
+    ++g_cursor.sens;
 
-  alloc_sprintf(&msg, "Sensitivity: %s%d", state.mouseSens > 0 ? "+" : "", state.mouseSens);
+  alloc_sprintf(&msg, "Sensitivity: %s%d", g_cursor.sens > 0 ? "+" : "", g_cursor.sens);
   app_alert(
     LG_ALERT_INFO,
     msg
@@ -1388,10 +1386,10 @@ static void mouse_sens_dec(SDL_Scancode key, void * opaque)
 {
   char * msg;
 
-  if (state.mouseSens > -9)
-    --state.mouseSens;
+  if (g_cursor.sens > -9)
+    --g_cursor.sens;
 
-  alloc_sprintf(&msg, "Sensitivity: %s%d", state.mouseSens > 0 ? "+" : "", state.mouseSens);
+  alloc_sprintf(&msg, "Sensitivity: %s%d", g_cursor.sens > 0 ? "+" : "", g_cursor.sens);
   app_alert(
     LG_ALERT_INFO,
     msg
@@ -1462,9 +1460,9 @@ static int lg_run()
   memset(&state, 0, sizeof(state));
   lgInit();
 
-  state.mouseSens = params.mouseSens;
-       if (state.mouseSens < -9) state.mouseSens = -9;
-  else if (state.mouseSens >  9) state.mouseSens =  9;
+  g_cursor.sens = params.mouseSens;
+       if (g_cursor.sens < -9) g_cursor.sens = -9;
+  else if (g_cursor.sens >  9) g_cursor.sens =  9;
 
   char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
 
@@ -1698,7 +1696,7 @@ static int lg_run()
 
   if (params.captureOnStart)
   {
-    state.grabMouse = true;
+    g_cursor.grab = true;
     if (state.wminfo.subsystem != SDL_SYSWM_X11)
       SDL_SetWindowGrab(state.window, true);
   }

@@ -36,20 +36,6 @@ enum RunState
   APP_STATE_SHUTDOWN
 };
 
-struct CursorInfo
-{
-  int x , y;
-  int hx, hy;
-};
-
-enum WarpState
-{
-  WARP_STATE_ON,
-  WARP_STATE_ACTIVE,
-  WARP_STATE_WIN_EXIT,
-  WARP_STATE_OFF
-};
-
 struct AppState
 {
   enum RunState        state;
@@ -66,26 +52,6 @@ struct AppState
   SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
-  struct CursorInfo    cursor;
-  bool                 cursorVisible;
-  bool                 cursorInWindow;
-
-  bool  grabMouse;
-  bool  haveCursorPos;
-  bool  drawCursor;
-  bool  cursorInView;
-  bool  updateCursor;
-  bool  initialCursorSync;
-  bool  scale;
-  float scaleX, scaleY;
-  float accX, accY;
-  int   curLastX;
-  int   curLastY;
-  bool  haveCurLocal;
-  bool  haveAligned;
-
-  enum WarpState   warpState;
-  int   warpToX  , warpToY;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
@@ -122,9 +88,6 @@ struct AppState
   KeybindHandle kbMouseSensInc;
   KeybindHandle kbMouseSensDec;
   KeybindHandle kbCtrlAltFn[12];
-
-  int   mouseSens;
-  float sensX, sensY;
 };
 
 struct AppParams
@@ -169,8 +132,8 @@ struct AppParams
   unsigned int forceRendererIndex;
 
   const char * windowTitle;
-  int          mouseSens;
   bool         mouseRedraw;
+  int          mouseSens;
 };
 
 struct CBRequest
@@ -185,6 +148,70 @@ struct KeybindHandle
   SDL_Scancode   key;
   SuperEventFn   callback;
   void         * opaque;
+};
+
+enum WarpState
+{
+  WARP_STATE_ON,
+  WARP_STATE_ACTIVE,
+  WARP_STATE_WIN_EXIT,
+  WARP_STATE_OFF
+};
+
+struct CursorInfo
+{
+  /* x & y postiion */
+  int  x , y;
+
+  /* pointer hotspot offsets */
+  int  hx, hy;
+
+  /* true if the pointer is visible on the guest */
+  bool visible;
+
+  /* true if the details in this struct are valid */
+  bool valid;
+};
+
+struct CursorState
+{
+  /* cursor is in grab mode */
+  bool  grab;
+
+  /* true if we are to draw the cursor on screen */
+  bool  draw;
+
+  /* true if the cursor is currently in our window */
+  bool  inWindow;
+
+  /* true if the cursor is currently in the guest view area */
+  bool  inView;
+
+  /* true if the cursor needs re-drawing/updating */
+  bool  redraw;
+
+  /* true if the cursor movements should be scaled */
+  bool  scale;
+
+  /* the amount to scale the X & Y movements by */
+  float scaleX, scaleY;
+
+  /* the error accumulators */
+  float accX, accY;
+
+  /* the last local X & Y positions */
+  SDL_Point last;
+
+  /* the scale factors for the mouse sensitiviy */
+  int   sens;
+  float sensX, sensY;
+
+  /* the mouse warp state and target */
+  enum WarpState warpState;
+  SDL_Point warpTo;
+
+  /* the guest's cursor position */
+  struct CursorInfo guest;
 };
 
 // forwards
