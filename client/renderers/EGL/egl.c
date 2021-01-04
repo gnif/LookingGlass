@@ -170,6 +170,13 @@ void egl_setup()
 
 bool egl_create(void ** opaque, const LG_RendererParams params)
 {
+  // Fail if running on Wayland so that OpenGL is used instead. Wayland-EGL
+  // is broken (https://github.com/gnif/LookingGlass/issues/306) and isn't
+  // fixable until SDL is dropped entirely. Until then, the OpenGL renderer
+  // "mostly works".
+  if (getenv("WAYLAND_DISPLAY"))
+    return false;
+
   // check if EGL is even available
   if (!eglQueryString(EGL_NO_DISPLAY, EGL_VERSION))
     return false;
