@@ -209,6 +209,7 @@ struct CursorState
 
   /* the mouse warp state and target */
   enum WarpState warpState;
+  unsigned long warpSerial;
   SDL_Point warpTo;
 
   /* the guest's cursor position */

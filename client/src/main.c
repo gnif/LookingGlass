@@ -775,22 +775,49 @@ void spiceClipboardRequest(const SpiceDataType type)
 
 static void warpMouse(int x, int y)
 {
-  if (!g_cursor.inWindow)
+  if (g_cursor.warpState == WARP_STATE_OFF)
     return;
 
   if (g_cursor.warpState == WARP_STATE_WIN_EXIT)
   {
-    SDL_WarpMouseInWindow(g_state.window, x, y);
+    if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
+    {
+      XWarpPointer(
+          g_state.wminfo.info.x11.display,
+          None,
+          g_state.wminfo.info.x11.window,
+          0, 0, 0, 0,
+          x, y);
+    }
+    else
+      SDL_WarpMouseInWindow(g_state.window, x, y);
+
     g_cursor.warpState = WARP_STATE_OFF;
     return;
   }
 
   if (g_cursor.warpState == WARP_STATE_ON)
   {
-    g_cursor.warpTo.x   = x;
-    g_cursor.warpTo.y   = y;
     g_cursor.warpState = WARP_STATE_ACTIVE;
-    SDL_WarpMouseInWindow(g_state.window, x, y);
+    if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
+    {
+      /* with X11 we can be far more elegent and use the warp serial number to
+       * determine when the warp is complete instead of trying to match the
+        * target x/y coordinates */
+      g_cursor.warpSerial = NextRequest(g_state.wminfo.info.x11.display);
+      XWarpPointer(
+          g_state.wminfo.info.x11.display,
+          None,
+          g_state.wminfo.info.x11.window,
+          0, 0, 0, 0,
+          x, y);
+    }
+    else
+    {
+      g_cursor.warpTo.x  = x;
+      g_cursor.warpTo.y  = y;
+      SDL_WarpMouseInWindow(g_state.window, x, y);
+    }
   }
 }
 
@@ -1125,6 +1152,16 @@ int eventFilter(void * userdata, SDL_Event * event)
           }
 
           case MotionNotify:
+            /* detect and filter out the warp event */
+            if (g_cursor.warpState == WARP_STATE_ACTIVE &&
+                xe.xmotion.serial == g_cursor.warpSerial)
+            {
+              g_cursor.warpState = WARP_STATE_ON;
+              g_cursor.last.x    = xe.xmotion.x;
+              g_cursor.last.y    = xe.xmotion.y;
+              break;
+            }
+
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
             break;
 
