@@ -1906,8 +1906,9 @@ restart:
     if (magicMatches)
     {
       DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
+      DEBUG_ERROR("Client version: %s", BUILD_VERSION);
       if (udata->version >= 2)
-        DEBUG_ERROR("Host version: %s", udata->hostver);
+        DEBUG_ERROR("  Host version: %s", udata->hostver);
     }
     else
       DEBUG_ERROR("Invalid KVMFR magic");
