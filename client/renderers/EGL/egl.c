@@ -97,6 +97,16 @@ struct Inst
   LG_FontObj        fontObj;
 };
 
+static bool egl_vsync_option_validator(struct Option * opt, const char ** error)
+{
+  if (opt->value.x_bool && getenv("WAYLAND_DISPLAY"))
+  {
+    DEBUG_WARN("Cannot disable vsync on Wayland, forcing egl:vsync=off");
+    opt->value.x_bool = false;
+  }
+
+  return true;
+}
 
 static struct Option egl_options[] =
 {
@@ -105,7 +115,8 @@ static struct Option egl_options[] =
     .name         = "vsync",
     .description  = "Enable vsync",
     .type         = OPTION_TYPE_BOOL,
-    .value.x_bool = false
+    .value.x_bool = false,
+    .validator    = &vsync_option_validator
   },
   {
     .module       = "egl",
