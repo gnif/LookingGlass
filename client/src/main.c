@@ -1913,7 +1913,20 @@ restart:
       DEBUG_ERROR("Invalid KVMFR magic");
 
     DEBUG_BREAK();
-    return -1;
+
+    if (magicMatches)
+    {
+      DEBUG_INFO("Waiting for you to upgrade the host application");
+      while (g_state.state == APP_STATE_RUNNING && udata->version != KVMFR_VERSION)
+        SDL_WaitEventTimeout(NULL, 1000);
+
+      if (g_state.state != APP_STATE_RUNNING)
+        return -1;
+
+      goto restart;
+    }
+    else
+      return -1;
   }
 
   DEBUG_INFO("Host ready, reported version: %s", udata->hostver);
