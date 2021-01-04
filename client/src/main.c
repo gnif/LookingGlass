@@ -503,6 +503,14 @@ static int frameThread(void * unused)
         g_state.state = APP_STATE_SHUTDOWN;
         break;
       }
+
+      g_state.srcSize.x = lgrFormat.width;
+      g_state.srcSize.y = lgrFormat.height;
+      g_state.haveSrcSize = true;
+      if (params.autoResize)
+        SDL_SetWindowSize(g_state.window, lgrFormat.width, lgrFormat.height);
+
+      updatePositionInfo();
     }
 
     if (useDMA)
@@ -551,17 +559,6 @@ static int frameThread(void * unused)
           break;
         }
       }
-    }
-
-    if (lgrFormat.width != g_state.srcSize.x || lgrFormat.height != g_state.srcSize.y)
-    {
-      g_state.srcSize.x = lgrFormat.width;
-      g_state.srcSize.y = lgrFormat.height;
-      g_state.haveSrcSize = true;
-      if (params.autoResize)
-        SDL_SetWindowSize(g_state.window, lgrFormat.width, lgrFormat.height);
-
-      updatePositionInfo();
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
