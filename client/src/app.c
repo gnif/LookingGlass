@@ -23,7 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 void app_alert(LG_MsgAlert type, const char * fmt, ...)
 {
-  if (!state.lgr || !params.showAlerts)
+  if (!g_state.lgr || !params.showAlerts)
     return;
 
   va_list args;
@@ -36,8 +36,8 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   vsnprintf(buffer, length + 1, fmt, args);
   va_end(args);
 
-  state.lgr->on_alert(
-    state.lgrData,
+  g_state.lgr->on_alert(
+    g_state.lgrData,
     type,
     buffer,
     NULL
@@ -49,7 +49,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
 KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void * opaque)
 {
   // don't allow duplicate binds
-  if (state.bindings[key])
+  if (g_state.bindings[key])
   {
     DEBUG_INFO("Key already bound");
     return NULL;
@@ -60,7 +60,7 @@ KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void
   handle->callback = callback;
   handle->opaque   = opaque;
 
-  state.bindings[key] = handle;
+  g_state.bindings[key] = handle;
   return handle;
 }
 
@@ -69,7 +69,7 @@ void app_release_keybind(KeybindHandle * handle)
   if (!*handle)
     return;
 
-  state.bindings[(*handle)->key] = NULL;
+  g_state.bindings[(*handle)->key] = NULL;
   free(*handle);
   *handle = NULL;
 }
