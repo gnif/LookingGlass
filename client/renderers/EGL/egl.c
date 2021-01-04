@@ -116,7 +116,7 @@ static struct Option egl_options[] =
     .description  = "Enable vsync",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = false,
-    .validator    = &vsync_option_validator
+    .validator    = &egl_vsync_option_validator
   },
   {
     .module       = "egl",
