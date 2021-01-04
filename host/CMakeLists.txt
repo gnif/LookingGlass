@@ -66,7 +66,13 @@ target_link_libraries(looking-glass-host
 	platform
 	lgmp
 )
-set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
+
+if(WIN32)
+  set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections -Wl,--nxcompat")
+else()
+  set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections -z noexecstack")
+endif()
+
 install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-host DESTINATION bin/ COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)

@@ -37,7 +37,7 @@ add_compile_options(
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
 
-set(EXE_FLAGS "-Wl,--gc-sections")
+set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
 
 find_package(PkgConfig)
