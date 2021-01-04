@@ -153,13 +153,13 @@ static void updatePositionInfo()
     g_state.dstRect.valid = true;
 
     g_cursor.scale = (
-        g_state.srcSize.y != g_state.dstRect.h ||
-        g_state.srcSize.x != g_state.dstRect.w ||
-        g_state.mouseScalePercent != 100);
+        g_state.srcSize.y       != g_state.dstRect.h ||
+        g_state.srcSize.x       != g_state.dstRect.w ||
+        g_cursor.guest.dpiScale != 100);
 
-    g_cursor.scaleX = (float)g_state.srcSize.y / (float)g_state.dstRect.h;
-    g_cursor.scaleY = (float)g_state.srcSize.x / (float)g_state.dstRect.w;
-    g_state.mouseScale = g_state.mouseScalePercent / 100.0f;
+    g_cursor.scaleX   = (float)g_state.srcSize.y / (float)g_state.dstRect.h;
+    g_cursor.scaleY   = (float)g_state.srcSize.x / (float)g_state.dstRect.w;
+    g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
   }
 
   atomic_fetch_add(&g_state.lgrResize, 1);
@@ -512,7 +512,7 @@ static int frameThread(void * unused)
       if (params.autoResize)
         SDL_SetWindowSize(g_state.window, lgrFormat.width, lgrFormat.height);
 
-      g_state.mouseScalePercent = frame->mouseScalePercent;
+      g_cursor.guest.dpiScale = frame->mouseScalePercent;
       updatePositionInfo();
     }
 
@@ -936,8 +936,8 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   if (g_cursor.scale && params.scaleMouseInput && !g_cursor.grab)
   {
-    g_cursor.accX += (float)delta.x * g_cursor.scaleX / g_state.mouseScale;
-    g_cursor.accY += (float)delta.y * g_cursor.scaleY / g_state.mouseScale;
+    g_cursor.accX += (float)delta.x * g_cursor.scaleX / g_cursor.dpiScale;
+    g_cursor.accY += (float)delta.y * g_cursor.scaleY / g_cursor.dpiScale;
     delta.x = floor(g_cursor.accX);
     delta.y = floor(g_cursor.accY);
     g_cursor.accX -= delta.x;

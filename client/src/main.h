@@ -53,8 +53,6 @@ struct AppState
   SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
-  float                mouseScale;
-  uint32_t             mouseScalePercent;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
@@ -176,6 +174,9 @@ struct CursorInfo
 
   /* true if the details in this struct are valid */
   bool valid;
+
+  /* the DPI scaling of the guest */
+  uint32_t dpiScale;
 };
 
 struct CursorState
@@ -201,6 +202,9 @@ struct CursorState
   /* the amount to scale the X & Y movements by */
   float scaleX, scaleY;
 
+  /* the dpi scale factor from the guest as a fraction */
+  float dpiScale;
+
   /* the error accumulators */
   float accX, accY;
 
@@ -213,6 +217,7 @@ struct CursorState
 
   /* the mouse warp state and target */
   enum WarpState warpState;
+  bool warpExit;
   unsigned long warpSerial;
   SDL_Point warpTo;
 
