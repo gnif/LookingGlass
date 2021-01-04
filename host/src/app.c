@@ -186,13 +186,14 @@ static int frameThread(void * opaque)
         continue;
     }
 
-    fi->formatVer = frame.formatVer;
-    fi->width     = frame.width;
-    fi->height    = frame.height;
-    fi->stride    = frame.stride;
-    fi->pitch     = frame.pitch;
-    fi->offset    = pageSize - FrameBufferStructSize;
-    frameValid    = true;
+    fi->formatVer         = frame.formatVer;
+    fi->width             = frame.width;
+    fi->height            = frame.height;
+    fi->stride            = frame.stride;
+    fi->pitch             = frame.pitch;
+    fi->offset            = pageSize - FrameBufferStructSize;
+    fi->mouseScalePercent = app.iface->getMouseScale();
+    frameValid            = true;
 
     // put the framebuffer on the border of the next page
     // this is to allow for aligned DMA transfers by the receiver

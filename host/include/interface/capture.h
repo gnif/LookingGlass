@@ -93,6 +93,7 @@ typedef struct CaptureInterface
   bool          (*deinit         )();
   void          (*free           )();
   unsigned int  (*getMaxFrameSize)();
+  unsigned int  (*getMouseScale  )();
 
   CaptureResult (*capture   )();
   CaptureResult (*waitFrame )(CaptureFrame * frame);

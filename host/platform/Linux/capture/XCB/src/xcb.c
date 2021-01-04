@@ -169,6 +169,11 @@ static unsigned int xcb_getMaxFrameSize()
   return this->width * this->height * 4;
 }
 
+static unsigned int xcb_getMouseScale()
+{
+  return 100;
+}
+
 static CaptureResult xcb_capture()
 {
   assert(this);
@@ -241,6 +246,7 @@ struct CaptureInterface Capture_XCB =
   .deinit          = xcb_deinit,
   .free            = xcb_free,
   .getMaxFrameSize = xcb_getMaxFrameSize,
+  .getMouseScale   = xcb_getMouseScale,
   .capture         = xcb_capture,
   .waitFrame       = xcb_waitFrame,
   .getFrame        = xcb_getFrame,

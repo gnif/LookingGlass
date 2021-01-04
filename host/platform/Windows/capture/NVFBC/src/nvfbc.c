@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/framebuffer.h"
 #include "common/event.h"
 #include "common/thread.h"
+#include "common/dpi.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -44,6 +45,7 @@ struct iface
 
   unsigned int maxWidth , maxHeight;
   unsigned int width    , height;
+  unsigned int dpi;
 
   unsigned int formatVer;
   unsigned int grabWidth, grabHeight, grabStride;
@@ -65,7 +67,7 @@ static struct iface * this = NULL;
 static void nvfbc_free();
 static int pointerThread(void * unused);
 
-static void getDesktopSize(unsigned int * width, unsigned int * height)
+static void getDesktopSize(unsigned int * width, unsigned int * height, unsigned int * dpi)
 {
   HMONITOR    monitor     = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
   MONITORINFO monitorInfo = {
@@ -73,6 +75,7 @@ static void getDesktopSize(unsigned int * width, unsigned int * height)
   };
 
   GetMonitorInfo(monitor, &monitorInfo);
+  *dpi = monitor_dpi(monitor);
   CloseHandle(monitor);
 
   *width  = monitorInfo.rcMonitor.right  - monitorInfo.rcMonitor.left;
@@ -163,7 +166,7 @@ static bool nvfbc_create(
 static bool nvfbc_init()
 {
   this->stop = false;
-  getDesktopSize(&this->width, &this->height);
+  getDesktopSize(&this->width, &this->height, &this->dpi);
   lgResetEvent(this->frameEvent);
 
   HANDLE event;
@@ -245,9 +248,14 @@ static unsigned int nvfbc_getMaxFrameSize()
   return this->maxWidth * this->maxHeight * 4;
 }
 
+static unsigned int nvfbc_getMouseScale()
+{
+  return this->dpi * 100 / DPI_100_PERCENT;
+}
+
 static CaptureResult nvfbc_capture()
 {
-  getDesktopSize(&this->width, &this->height);
+  getDesktopSize(&this->width, &this->height, &this->dpi);
   NvFBCFrameGrabInfo grabInfo;
   CaptureResult result = NvFBCToSysCapture(
     this->nvfbc,
@@ -397,6 +405,7 @@ struct CaptureInterface Capture_NVFBC =
   .deinit          = nvfbc_deinit,
   .free            = nvfbc_free,
   .getMaxFrameSize = nvfbc_getMaxFrameSize,
+  .getMouseScale   = nvfbc_getMouseScale,
   .capture         = nvfbc_capture,
   .waitFrame       = nvfbc_waitFrame,
   .getFrame        = nvfbc_getFrame
