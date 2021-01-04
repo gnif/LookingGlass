@@ -1119,9 +1119,6 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case EnterNotify:
-            if (xe.xcrossing.mode != NotifyNormal)
-              break;
-
             g_cursor.last.x = xe.xcrossing.x;
             g_cursor.last.y = xe.xcrossing.y;
             handleWindowEnter();
