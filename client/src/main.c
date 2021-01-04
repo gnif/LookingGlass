@@ -1287,8 +1287,8 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
 
       if (
-        !spice_mouse_press  (event->wheel.y == 1 ? 4 : 5) ||
-        !spice_mouse_release(event->wheel.y == 1 ? 4 : 5)
+        !spice_mouse_press  (event->wheel.y > 0 ? 4 : 5) ||
+        !spice_mouse_release(event->wheel.y > 0 ? 4 : 5)
         )
       {
         DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
