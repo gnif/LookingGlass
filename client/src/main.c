@@ -877,6 +877,7 @@ static void handleMouseMoveEvent(int ex, int ey)
     return;
   }
 
+
   /* check if the cursor is in the guests viewport */
   const bool inView =
     ex >= g_state.dstRect.x                     &&
@@ -950,10 +951,12 @@ static void handleMouseMoveEvent(int ex, int ey)
     g_cursor.sensY -= delta.y;
   }
 
-  /* if the cursor is not grabbed and warp is possible, check if the translated
-   * guest cursor movement would live the window, and if so move the host cursor
-   * to the exit location and enable it, but only if the target is valid */
-  if (!g_cursor.grab && g_cursor.warpState == WARP_STATE_ON)
+  /* if the cursor is not grabbed and warp is possible, and the cursor is
+   * visible check if the translated guest cursor movement would live the window,
+   * and if so move the host cursor to the exit location and enable it, but only
+   * if the target is valid */
+  if (!g_cursor.grab && g_cursor.warpState == WARP_STATE_ON &&
+      g_cursor.guest.visible) // invisible cursors don't get position updates
   {
     const float fx = (float)(g_cursor.guest.x + g_cursor.guest.hx + delta.x) /
       g_cursor.scaleX;
@@ -995,9 +998,6 @@ static void handleMouseMoveEvent(int ex, int ey)
 
 static void handleResizeEvent(unsigned int w, unsigned int h)
 {
-  if (g_state.windowW == w && g_state.windowH == h)
-    return;
-
   SDL_GetWindowBordersSize(g_state.window,
     &g_state.border.y,
     &g_state.border.x,
