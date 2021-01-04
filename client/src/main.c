@@ -1508,12 +1508,7 @@ static int lg_run()
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
 
-  char* XDG_SESSION_TYPE = getenv("XDG_SESSION_TYPE");
-
-  if (XDG_SESSION_TYPE == NULL)
-    XDG_SESSION_TYPE = "unspecified";
-
-  if (strcmp(XDG_SESSION_TYPE, "wayland") == 0)
+  if (getenv("WAYLAND_DISPLAY"))
   {
      DEBUG_INFO("Wayland detected");
      if (getenv("SDL_VIDEODRIVER") == NULL)
