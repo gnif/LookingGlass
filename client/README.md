@@ -62,6 +62,8 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>+<kbd>F10</kbd>    | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F10</kbd> to the guest |
 | <kbd>ScrLk</kbd>+<kbd>F11</kbd>    | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F11</kbd> to the guest |
 | <kbd>ScrLk</kbd>+<kbd>F12</kbd>    | Send <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F12</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>LWin</kbd>   | Send <kbd>LWin</kbd> to the guest |
+| <kbd>ScrLk</kbd>+<kbd>RWin</kbd>   | Send <kbd>RWin</kbd> to the guest |
 
 
 
@@ -91,46 +93,52 @@ Command line arguments will override any options loaded from the config files.
 ### Supported options
 
 ```
-|-------------------------------------------------------------------------------------------------------------------------|
-| Long                   | Short | Value                  | Description                                                   |
-|-------------------------------------------------------------------------------------------------------------------------|
-| app:configFile         | -C    | NULL                   | A file to read additional configuration from                  |
-| app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file                            |
-| app:shmSize            | -L    | 0                      | Specify the size in MB of the shared memory file (0 = detect) |
-| app:renderer           | -g    | auto                   | Specify the renderer to use                                   |
-| app:license            | -l    | no                     | Show the license for this application and then terminate      |
-| app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds        |
-| app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds         |
-|-------------------------------------------------------------------------------------------------------------------------|
+|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| Long                   | Short | Value                  | Description                                                                            |
+|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| app:configFile         | -C    | NULL                   | A file to read additional configuration from                                           |
+| app:renderer           | -g    | auto                   | Specify the renderer to use                                                            |
+| app:license            | -l    | no                     | Show the license for this application and then terminate                               |
+| app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds                                 |
+| app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds                                  |
+| app:allowDMA           |       | yes                    | Allow direct DMA transfers if possible (VM-VM only for now)                            |
+| app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file, or the name of the kvmfr device to use, ie: kvmfr0 |
+|--------------------------------------------------------------------------------------------------------------------------------------------------|
 
-|-------------------------------------------------------------------------------------------------------------|
-| Long                    | Short | Value                  | Description                                      |
-|-------------------------------------------------------------------------------------------------------------|
-| win:title               |       | Looking Glass (client) | The window title                                 |
-| win:position            |       | center                 | Initial window position at startup               |
-| win:size                |       | 1024x768               | Initial window size at startup                   |
-| win:autoResize          | -a    | no                     | Auto resize the window to the guest              |
-| win:allowResize         | -n    | yes                    | Aallow the window to be manually resized         |
-| win:keepAspect          | -r    | yes                    | Maintain the correct aspect ratio                |
-| win:borderless          | -d    | no                     | Borderless mode                                  |
-| win:fullScreen          | -F    | no                     | Launch in fullscreen borderless mode             |
-| win:maximize            | -T    | no                     | Launch window maximized                          |
-| win:minimizeOnFocusLoss |       | yes                    | Minimize window on focus loss                    |
-| win:fpsLimit            | -K    | 200                    | Frame rate limit (0 = disable - not recommended) |
-| win:showFPS             | -k    | no                     | Enable the FPS & UPS display                     |
-| win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)             |
-| win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting            |
-| win:alerts              | -q    | yes                    | Show on screen alert messages                    |
-|-------------------------------------------------------------------------------------------------------------|
+|---------------------------------------------------------------------------------------------------------------------------------|
+| Long                    | Short | Value                  | Description                                                          |
+|---------------------------------------------------------------------------------------------------------------------------------|
+| win:title               |       | Looking Glass (client) | The window title                                                     |
+| win:position            |       | center                 | Initial window position at startup                                   |
+| win:size                |       | 1024x768               | Initial window size at startup                                       |
+| win:autoResize          | -a    | no                     | Auto resize the window to the guest                                  |
+| win:allowResize         | -n    | yes                    | Allow the window to be manually resized                              |
+| win:keepAspect          | -r    | yes                    | Maintain the correct aspect ratio                                    |
+| win:forceAspect         |       | yes                    | Force the window to maintain the aspect ratio                        |
+| win:dontUpscale         |       | no                     | Never try to upscale the window                                      |
+| win:borderless          | -d    | no                     | Borderless mode                                                      |
+| win:fullScreen          | -F    | no                     | Launch in fullscreen borderless mode                                 |
+| win:maximize            | -T    | no                     | Launch window maximized                                              |
+| win:minimizeOnFocusLoss |       | yes                    | Minimize window on focus loss                                        |
+| win:fpsMin              | -K    | -1                     | Frame rate minimum (0 = disable - not recommended, -1 = auto detect) |
+| win:showFPS             | -k    | no                     | Enable the FPS & UPS display                                         |
+| win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)                                 |
+| win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting                                |
+| win:alerts              | -q    | yes                    | Show on screen alert messages                                        |
+| win:quickSplash         |       | no                     | Skip fading out the splash screen when a connection is established   |
+|---------------------------------------------------------------------------------------------------------------------------------|
 
-|---------------------------------------------------------------------------------------------------------------------------------------|
-| Long               | Short | Value           | Description                                                                            |
-|---------------------------------------------------------------------------------------------------------------------------------------|
-| input:grabKeyboard | -G    | yes             | Grab the keyboard in capture mode                                                      |
-| input:escapeKey    | -m    | 71 = ScrollLock | Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values |
-| input:hideCursor   | -M    | yes             | Hide the local mouse cursor                                                            |
-| input:mouseSens    |       | 0               | Initial mouse sensitivity when in capture mode (-9 to 9)                               |
-|---------------------------------------------------------------------------------------------------------------------------------------|
+|----------------------------------------------------------------------------------------------------------------------------------------------|
+| Long                      | Short | Value           | Description                                                                            |
+|----------------------------------------------------------------------------------------------------------------------------------------------|
+| input:grabKeyboard        | -G    | yes             | Grab the keyboard in capture mode                                                      |
+| input:grabKeyboardOnFocus |       | yes             | Grab the keyboard when focused                                                         |
+| input:escapeKey           | -m    | 71 = ScrollLock | Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values |
+| input:ignoreWindowsKeys   |       | no              | Do not pass events for the windows keys to the guest                                   |
+| input:hideCursor          | -M    | yes             | Hide the local mouse cursor                                                            |
+| input:mouseSens           |       | 0               | Initial mouse sensitivity when in capture mode (-9 to 9)                               |
+| input:mouseRedraw         |       | yes             | Mouse movements trigger redraws (ignores FPS minimum)                                  |
+|----------------------------------------------------------------------------------------------------------------------------------------------|
 
 |------------------------------------------------------------------------------------------------------------------|
 | Long                   | Short | Value     | Description                                                         |
@@ -147,13 +155,16 @@ Command line arguments will override any options loaded from the config files.
 | spice:alwaysShowCursor |       | no        | Always show host cursor                                             |
 |------------------------------------------------------------------------------------------------------------------|
 
-|--------------------------------------------------------------------------|
-| Long          | Short | Value | Description                              |
-|--------------------------------------------------------------------------|
-| egl:vsync     |       | no    | Enable vsync                             |
-| egl:nvGainMax |       | 1     | The maximum night vision gain            |
-| egl:nvGain    |       | 0     | The initial night vision gain at startup |
-|--------------------------------------------------------------------------|
+|--------------------------------------------------------------------------------------------------------------|
+| Long             | Short | Value | Description                                                               |
+|--------------------------------------------------------------------------------------------------------------|
+| egl:vsync        |       | no    | Enable vsync                                                              |
+| egl:doubleBuffer |       | no    | Enable double buffering                                                   |
+| egl:multisample  |       | yes   | Enable Multisampling                                                      |
+| egl:nvGainMax    |       | 1     | The maximum night vision gain                                             |
+| egl:nvGain       |       | 0     | The initial night vision gain at startup                                  |
+| egl:cbMode       |       | 0     | Color Blind Mode (0 = Off, 1 = Protanope, 2 = Deuteranope, 3 = Tritanope) |
+|--------------------------------------------------------------------------------------------------------------|
 
 |------------------------------------------------------------------------------------|
 | Long                 | Short | Value | Description                                 |
