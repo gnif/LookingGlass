@@ -226,6 +226,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   // setup a handler for ctrl+c
   SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
+  // enable high DPI awareness
+  // this is required for DXGI 1.5 support to function and also capturing desktops with high DPI
+  DECLARE_HANDLE(DPI_AWARENESS_CONTEXT);
+  #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2  ((DPI_AWARENESS_CONTEXT)-4)
+  typedef BOOL (*User32_SetProcessDpiAwarenessContext)(DPI_AWARENESS_CONTEXT value);
+
+  HMODULE user32 = GetModuleHandle("user32.dll");
+  User32_SetProcessDpiAwarenessContext fn;
+  fn = (User32_SetProcessDpiAwarenessContext)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
+  if (fn)
+    fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   // create a message window so that our message pump works
   WNDCLASSEX wx    = {};
   wx.cbSize        = sizeof(WNDCLASSEX);
@@ -249,7 +261,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   app.messageWnd = CreateWindowEx(0, MAKEINTATOM(class), NULL, 0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
 
   // this is needed so that unprivileged processes can send us this message
-  HMODULE user32 = GetModuleHandle("user32.dll");
   _ChangeWindowMessageFilterEx = (PChangeWindowMessageFilterEx)GetProcAddress(user32, "ChangeWindowMessageFilterEx");
   if (_ChangeWindowMessageFilterEx)
     _ChangeWindowMessageFilterEx(app.messageWnd, app.trayRestartMsg, MSGFLT_ALLOW, NULL);
