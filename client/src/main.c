@@ -1099,9 +1099,9 @@ int eventFilter(void * userdata, SDL_Event * event)
           }
           break;
 
-        // allow a window close event to close the application even if ignoreQuit is set
         case SDL_WINDOWEVENT_CLOSE:
-          g_state.state = APP_STATE_SHUTDOWN;
+          if (!params.ignoreQuit || !g_cursor.inView)
+            g_state.state = APP_STATE_SHUTDOWN;
           break;
       }
       return 0;
