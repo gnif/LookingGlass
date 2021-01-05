@@ -866,10 +866,11 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   /* check if the cursor is in the guests viewport */
   const bool inView =
+    g_cursor.grab || (
     ex >= g_state.dstRect.x                     &&
     ex <  g_state.dstRect.x + g_state.dstRect.w &&
     ey >= g_state.dstRect.y                     &&
-    ey <  g_state.dstRect.y + g_state.dstRect.h;
+    ey <  g_state.dstRect.y + g_state.dstRect.h);
 
   /* if the cursor has moved in/outside the display area */
   if (g_cursor.inView != inView)
