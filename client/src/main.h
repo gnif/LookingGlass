@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "dynamic/renderers.h"
 #include "dynamic/clipboards.h"
 #include "common/ivshmem.h"
+#include "ll.h"
 
 #include "spice/spice.h"
 #include <lgmp/client.h>
@@ -156,8 +157,6 @@ struct KeybindHandle
 enum WarpState
 {
   WARP_STATE_ON,
-  WARP_STATE_ACTIVE,
-  WARP_STATE_WIN_EXIT,
   WARP_STATE_OFF
 };
 
@@ -215,11 +214,9 @@ struct CursorState
   int   sens;
   float sensX, sensY;
 
-  /* the mouse warp state and target */
+  /* the mouse warp state and queue */
   enum WarpState warpState;
-  bool warpExit;
-  unsigned long warpSerial;
-  SDL_Point warpTo;
+  struct ll * warpList;
 
   /* the guest's cursor position */
   struct CursorInfo guest;

@@ -37,7 +37,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdatomic.h>
 
 #if SDL_VIDEO_DRIVER_X11_XINPUT2
-// because SDL2 sucks and we need to turn it off
 #include <X11/extensions/XInput2.h>
 #endif
 
@@ -71,11 +70,19 @@ static LGThread *t_cursor  = NULL;
 static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
+static int g_XInputOp; // XInput Opcode
+
 struct AppState g_state;
 struct CursorState g_cursor;
 
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
+
+union WarpInfo
+{
+  unsigned long serial;
+  SDL_Point p;
+};
 
 static void handleMouseMoveEvent(int ex, int ey);
 
@@ -773,51 +780,36 @@ void spiceClipboardRequest(const SpiceDataType type)
     g_state.lgc->request(spice_type_to_clipboard_type(type));
 }
 
-static void warpMouse(int x, int y)
+static void warpMouse(int x, int y, bool disable)
 {
   if (g_cursor.warpState == WARP_STATE_OFF)
     return;
 
-  if (g_cursor.warpState == WARP_STATE_WIN_EXIT)
-  {
-    if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
-    {
-      XWarpPointer(
-          g_state.wminfo.info.x11.display,
-          None,
-          g_state.wminfo.info.x11.window,
-          0, 0, 0, 0,
-          x, y);
-    }
-    else
-      SDL_WarpMouseInWindow(g_state.window, x, y);
-
-    g_cursor.warpState = WARP_STATE_OFF;
+  if (ll_count(g_cursor.warpList) > 0 && !disable)
     return;
-  }
 
-  if (g_cursor.warpState == WARP_STATE_ON)
+  if (disable)
+    g_cursor.warpState = WARP_STATE_OFF;
+
+  union WarpInfo * warp = malloc(sizeof(union WarpInfo));
+
+  if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
   {
-    g_cursor.warpState = WARP_STATE_ACTIVE;
-    if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
-    {
-      /* with X11 we can be far more elegent and use the warp serial number to
-       * determine when the warp is complete instead of trying to match the
-        * target x/y coordinates */
-      g_cursor.warpSerial = NextRequest(g_state.wminfo.info.x11.display);
-      XWarpPointer(
-          g_state.wminfo.info.x11.display,
-          None,
-          g_state.wminfo.info.x11.window,
-          0, 0, 0, 0,
-          x, y);
-    }
-    else
-    {
-      g_cursor.warpTo.x  = x;
-      g_cursor.warpTo.y  = y;
-      SDL_WarpMouseInWindow(g_state.window, x, y);
-    }
+    warp->serial = NextRequest(g_state.wminfo.info.x11.display);
+    ll_push(g_cursor.warpList, warp);
+    XWarpPointer(
+        g_state.wminfo.info.x11.display,
+        None,
+        g_state.wminfo.info.x11.window,
+        0, 0, 0, 0,
+        x, y);
+  }
+  else
+  {
+    warp->p.x = x;
+    warp->p.y = y;
+    ll_push(g_cursor.warpList, warp);
+    SDL_WarpMouseInWindow(g_state.window, x, y);
   }
 }
 
@@ -839,16 +831,6 @@ static void handleMouseMoveEvent(int ex, int ey)
 {
   if (!params.useSpiceInput)
     return;
-
-  /* check if there is a warp in progress, and if it was completed */
-  if (g_cursor.warpState == WARP_STATE_ACTIVE &&
-      ex == g_cursor.warpTo.x && ey == g_cursor.warpTo.y)
-  {
-    g_cursor.last.x    = ex;
-    g_cursor.last.y    = ey;
-    g_cursor.warpState = WARP_STATE_ON;
-    return;
-  }
 
   if (!g_cursor.inWindow || g_state.ignoreInput)
     return;
@@ -874,7 +856,7 @@ static void handleMouseMoveEvent(int ex, int ey)
       spice_mouse_motion(delta.x, delta.y);
       if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
           ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
-        warpMouse(g_state.windowCX, g_state.windowCY);
+        warpMouse(g_state.windowCX, g_state.windowCY, false);
     }
 
     return;
@@ -926,7 +908,7 @@ static void handleMouseMoveEvent(int ex, int ey)
     /* stop the mouse from runing into the edges of the window */
     if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
         ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
-      warpMouse(g_state.windowCX, g_state.windowCY);
+      warpMouse(g_state.windowCX, g_state.windowCY, false);
   }
   else
   {
@@ -983,10 +965,10 @@ static void handleMouseMoveEvent(int ex, int ey)
       if (isValidCursorLocation(nx, ny))
       {
         /* put the mouse where it should be and disable warp */
-        g_cursor.warpState = WARP_STATE_WIN_EXIT;
         warpMouse(
           g_state.dstRect.x + newPos.x,
-          g_state.dstRect.y + newPos.y
+          g_state.dstRect.y + newPos.y,
+          true
         );
         SDL_ShowCursor(SDL_ENABLE);
         return;
@@ -1033,9 +1015,7 @@ static void handleWindowEnter()
 {
   g_cursor.inWindow = true;
 
-  if (g_cursor.warpState == WARP_STATE_OFF)
-    g_cursor.warpState = WARP_STATE_ON;
-
+  g_cursor.warpState = WARP_STATE_ON;
   if (!params.useSpiceInput)
     return;
 
@@ -1134,6 +1114,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
       {
         XEvent xe = event->syswm.msg->msg.x11.event;
+
         switch(xe.type)
         {
           case ConfigureNotify:
@@ -1151,27 +1132,86 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
           }
 
-          case MotionNotify:
-            /* detect and filter out the warp event */
-            if (g_cursor.warpState == WARP_STATE_ACTIVE &&
-                xe.xmotion.serial == g_cursor.warpSerial)
+#if SDL_VIDEO_DRIVER_X11_XINPUT2
+          /* support movements via XInput2 */
+          case GenericEvent:
+          {
+            XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
+            if (cookie->extension != g_XInputOp)
+              break;
+
+            XIDeviceEvent *device = cookie->data;
+            if (device->evtype != XI_Motion)
+              break;
+
+            const int x = round(device->event_x);
+            const int y = round(device->event_y);
+
+            /* detect and filter out warp events */
+            union WarpInfo * warp;
+            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+                xe.xany.serial == warp->serial)
             {
-              g_cursor.warpState = WARP_STATE_ON;
-              g_cursor.last.x    = xe.xmotion.x;
-              g_cursor.last.y    = xe.xmotion.y;
+              ll_shift(g_cursor.warpList, NULL);
+              free(warp);
+
+              g_cursor.last.x = x;
+              g_cursor.last.y = y;
+              break;
+            }
+
+            handleMouseMoveEvent(x, y);
+            break;
+          }
+#endif
+
+          /* even if using XInput2 we still need this otherwise we dont get
+           * motion events when a button is held */
+          case MotionNotify:
+          {
+            /* detect and filter out warp events */
+            union WarpInfo * warp;
+            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+                xe.xany.serial == warp->serial)
+            {
+              ll_shift(g_cursor.warpList, NULL);
+              free(warp);
+
+              g_cursor.last.x = xe.xmotion.x;
+              g_cursor.last.y = xe.xmotion.y;
               break;
             }
 
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
             break;
+          }
 
           case EnterNotify:
+          {
+            union WarpInfo * warp;
+            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+                xe.xany.serial == warp->serial)
+            {
+              ll_shift(g_cursor.warpList, NULL);
+              free(warp);
+            }
+
             g_cursor.last.x = xe.xcrossing.x;
             g_cursor.last.y = xe.xcrossing.y;
             handleWindowEnter();
             break;
+          }
 
           case LeaveNotify:
+          {
+            union WarpInfo * warp;
+            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+                xe.xany.serial == warp->serial)
+            {
+              ll_shift(g_cursor.warpList, NULL);
+              free(warp);
+            }
+
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
@@ -1179,6 +1219,7 @@ int eventFilter(void * userdata, SDL_Event * event)
             g_cursor.last.y = xe.xcrossing.y;
             handleWindowLeave();
             break;
+          }
 
           case FocusIn:
             if (!params.useSpiceInput)
@@ -1197,6 +1238,18 @@ int eventFilter(void * userdata, SDL_Event * event)
                 xe.xfocus.mode == NotifyWhileGrabbed)
               keyboardUngrab();
             break;
+
+          default:
+          {
+            union WarpInfo * warp;
+            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+                xe.xany.serial == warp->serial)
+            {
+              DEBUG_INFO("bug: %d", xe.type);
+              ll_shift(g_cursor.warpList, NULL);
+              free(warp);
+            }
+          }
         }
       }
 
@@ -1206,9 +1259,27 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEMOTION:
-      if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-        handleMouseMoveEvent(event->motion.x, event->motion.y);
+    {
+      if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
+        break;
+
+      /* detect and filter out warp events */
+      union WarpInfo * warp;
+      if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+        warp->p.x == event->motion.x &&
+        warp->p.y == event->motion.y)
+      {
+        ll_shift(g_cursor.warpList, NULL);
+        free(warp);
+
+        g_cursor.last.x = event->motion.x;
+        g_cursor.last.y = event->motion.y;
+        break;
+      }
+
+      handleMouseMoveEvent(event->motion.x, event->motion.y);
       break;
+    }
 
     case SDL_KEYDOWN:
     {
@@ -1573,6 +1644,8 @@ static void initSDLCursor()
 static int lg_run()
 {
   memset(&g_state, 0, sizeof(g_state));
+  g_cursor.warpList = ll_new();
+
   lgInit();
 
   g_cursor.sens = params.mouseSens;
@@ -1742,27 +1815,13 @@ static int lg_run()
   {
     if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
     {
+      int event, error;
+
       // enable X11 events to work around SDL2 bugs
       SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
 
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
-      // SDL2 bug, using xinput2 disables all motion notify events
-      // we really don't care about touch, so turn it off and go back
-      // to the default behaiovur.
-      XIEventMask xinputmask =
-      {
-        .deviceid = XIAllMasterDevices,
-        .mask     = 0,
-        .mask_len = 0
-      };
-
-      XISelectEvents(
-        g_state.wminfo.info.x11.display,
-        g_state.wminfo.info.x11.window,
-        &xinputmask,
-        1
-      );
-#endif
+      XQueryExtension(g_state.wminfo.info.x11.display, "XInputExtension",
+          &g_XInputOp, &event, &error);
 
       Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
         g_state.wminfo.info.x11.display,
@@ -2036,6 +2095,15 @@ static void lg_shutdown()
   ivshmemClose(&g_state.shm);
 
   release_key_binds();
+
+  if (g_cursor.warpList)
+  {
+    union WarpInfo * warp;
+    while(ll_shift(g_cursor.warpList, (void **)&warp))
+      free(warp);
+    ll_free(g_cursor.warpList);
+  }
+
   SDL_Quit();
 }
 
