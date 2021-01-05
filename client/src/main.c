@@ -889,8 +889,10 @@ static void handleMouseMoveEvent(int ex, int ey)
         g_cursor.warpState = WARP_STATE_ON;
 
       /* convert guest to local and calculate the delta */
-      const int lx = ((g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scaleX) + g_state.dstRect.x;
-      const int ly = ((g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scaleY) + g_state.dstRect.y;
+      const int lx = (int)round(((g_cursor.guest.x + g_cursor.guest.hx) /
+            g_cursor.scaleX)) + g_state.dstRect.x;
+      const int ly = (int)round(((g_cursor.guest.y + g_cursor.guest.hy) /
+            g_cursor.scaleY)) + g_state.dstRect.y;
       delta.x = ex - lx;
       delta.y = ey - ly;
     }
