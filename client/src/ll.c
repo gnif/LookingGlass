@@ -41,9 +41,10 @@ struct ll
 struct ll * ll_new()
 {
   struct ll * list = malloc(sizeof(struct ll));
-  list->head = NULL;
-  list->tail = NULL;
-  list->pos  = NULL;
+  list->head  = NULL;
+  list->tail  = NULL;
+  list->pos   = NULL;
+  list->count = 0;
   LG_LOCK_INIT(list->lock);
   return list;
 }
@@ -64,6 +65,8 @@ void ll_push(struct ll * list, void * data)
   item->next = NULL;
 
   LG_LOCK(list->lock);
+  ++list->count;
+
   if (!list->head)
   {
     list->head = item;
@@ -72,7 +75,6 @@ void ll_push(struct ll * list, void * data)
     return;
   }
 
-  ++list->count;
   list->tail->next = item;
   list->tail       = item;
   LG_UNLOCK(list->lock);
