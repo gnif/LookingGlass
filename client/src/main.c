@@ -803,6 +803,7 @@ static void warpMouse(int x, int y, bool disable)
         g_state.wminfo.info.x11.window,
         0, 0, 0, 0,
         x, y);
+    XFlush(g_state.wminfo.info.x11.display);
   }
   else
   {
