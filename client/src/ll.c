@@ -92,8 +92,10 @@ bool ll_shift(struct ll * list, void ** data)
   --list->count;
   struct ll_item * item = list->head;
   list->head = item->next;
+  list->pos  = NULL;
+  if (list->tail == item)
+    list->tail = NULL;
 
-  list->pos = NULL;
   LG_UNLOCK(list->lock);
 
   if (data)
@@ -113,6 +115,21 @@ bool ll_peek_head(struct ll * list, void ** data)
   }
 
   *data = list->head->data;
+  LG_UNLOCK(list->lock);
+
+  return true;
+}
+
+bool ll_peek_tail(struct ll * list, void ** data)
+{
+  LG_LOCK(list->lock);
+  if (!list->tail)
+  {
+    LG_UNLOCK(list->lock);
+    return false;
+  }
+
+  *data = list->tail->data;
   LG_UNLOCK(list->lock);
 
   return true;

@@ -25,6 +25,7 @@ void         ll_free     (struct ll * list);
 void         ll_push     (struct ll * list, void * data);
 bool         ll_shift    (struct ll * list, void ** data);
 bool         ll_peek_head(struct ll * list, void ** data);
+bool         ll_peek_tail(struct ll * list, void ** data);
 unsigned int ll_count    (struct ll * list);
 
 void         ll_reset    (struct ll * list);
