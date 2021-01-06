@@ -792,17 +792,9 @@ static void warpMouse(int x, int y, bool disable)
   if (disable)
     g_cursor.warpState = WARP_STATE_OFF;
 
-  struct WarpInfo * last;
   struct WarpInfo * warp = malloc(sizeof(struct WarpInfo));
   warp->x = g_cursor.last.x;
   warp->y = g_cursor.last.y;
-
-  /* if there is a queued warp still, adjust for it */
-  if (ll_peek_tail(g_cursor.warpList, (void **)&last))
-  {
-    warp->x += x - last->x;
-    warp->y += y - last->y;
-  }
 
   if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
   {
@@ -1087,8 +1079,8 @@ static void processWarp(int x, int y)
 
   ll_shift(g_cursor.warpList, NULL);
 
-  g_cursor.last.x = x + (g_cursor.last.x - warp->x);
-  g_cursor.last.y = y + (g_cursor.last.y - warp->y);
+  g_cursor.last.x = x + (warp->x - g_cursor.last.x);
+  g_cursor.last.y = y + (warp->y - g_cursor.last.y);
   free(warp);
 
   if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
@@ -1104,8 +1096,8 @@ static void processXWarp(const XEvent xe, int x, int y)
 
   ll_shift(g_cursor.warpList, NULL);
 
-  g_cursor.last.x = x + (g_cursor.last.x - warp->x);
-  g_cursor.last.y = y + (g_cursor.last.y - warp->y);
+  g_cursor.last.x = x + (warp->x - g_cursor.last.x);
+  g_cursor.last.y = y + (warp->y - g_cursor.last.y);
   free(warp);
 
   if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
