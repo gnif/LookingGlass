@@ -78,10 +78,14 @@ struct CursorState g_cursor;
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
 
-union WarpInfo
+struct WarpInfo
 {
-  unsigned long serial;
-  SDL_Point p;
+  int x, y;
+  union
+  {
+    unsigned long serial;
+    SDL_Point     p;
+  };
 };
 
 static void handleMouseMoveEvent(int ex, int ey);
@@ -785,13 +789,20 @@ static void warpMouse(int x, int y, bool disable)
   if (g_cursor.warpState == WARP_STATE_OFF)
     return;
 
-  if (ll_count(g_cursor.warpList) > 0 && !disable)
-    return;
-
   if (disable)
     g_cursor.warpState = WARP_STATE_OFF;
 
-  union WarpInfo * warp = malloc(sizeof(union WarpInfo));
+  struct WarpInfo * last;
+  struct WarpInfo * warp = malloc(sizeof(struct WarpInfo));
+  warp->x = g_cursor.last.x;
+  warp->y = g_cursor.last.y;
+
+  /* if there is a queued warp still, adjust for it */
+  if (ll_peek_tail(g_cursor.warpList, (void **)&last))
+  {
+    warp->x += x - last->x;
+    warp->y += y - last->y;
+  }
 
   if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
   {
@@ -845,8 +856,10 @@ static void handleMouseMoveEvent(int ex, int ey)
   if (delta.x == 0 && delta.y == 0)
     return;
 
-  g_cursor.last.x = ex;
-  g_cursor.last.y = ey;
+  g_cursor.delta.x += delta.x;
+  g_cursor.delta.y += delta.y;
+  g_cursor.last.x   = ex;
+  g_cursor.last.y   = ey;
 
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
@@ -855,9 +868,12 @@ static void handleMouseMoveEvent(int ex, int ey)
     {
       g_cursor.inView = true;
       spice_mouse_motion(delta.x, delta.y);
-      if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
-          ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
+      if (abs(g_cursor.delta.x) >= 50 || abs(g_cursor.delta.y) >= 50)
+      {
         warpMouse(g_state.windowCX, g_state.windowCY, false);
+        g_cursor.delta.x = 0;
+        g_cursor.delta.y = 0;
+      }
     }
 
     return;
@@ -886,9 +902,6 @@ static void handleMouseMoveEvent(int ex, int ey)
       g_cursor.redraw = true;
       g_cursor.draw   = true;
 
-      if (g_cursor.warpState == WARP_STATE_OFF)
-        g_cursor.warpState = WARP_STATE_ON;
-
       /* convert guest to local and calculate the delta */
       const int lx = (int)round(((g_cursor.guest.x + g_cursor.guest.hx) /
             g_cursor.scaleX)) + g_state.dstRect.x;
@@ -910,9 +923,12 @@ static void handleMouseMoveEvent(int ex, int ey)
   if (inView)
   {
     /* stop the mouse from runing into the edges of the window */
-    if (ex < g_state.windowCX - 25 || ex > g_state.windowCX + 25 ||
-        ey < g_state.windowCY - 25 || ey > g_state.windowCY + 25)
+    if (abs(g_cursor.delta.x) >= 50 || abs(g_cursor.delta.y) >= 50)
+    {
       warpMouse(g_state.windowCX, g_state.windowCY, false);
+      g_cursor.delta.x = 0;
+      g_cursor.delta.y = 0;
+    }
   }
   else
   {
@@ -1018,10 +1034,12 @@ static void handleWindowLeave()
 static void handleWindowEnter()
 {
   g_cursor.inWindow = true;
-
-  g_cursor.warpState = WARP_STATE_ON;
   if (!params.useSpiceInput)
     return;
+
+  /* set large values to force a warp to center */
+  g_cursor.delta.x = 0xFFFF;
+  g_cursor.delta.y = 0xFFFF;
 
   if (!g_cursor.guest.valid)
     return;
@@ -1060,21 +1078,38 @@ static void keyboardUngrab()
   );
 }
 
-static bool processXWarp(const XEvent xe, int x, int y)
+static void processWarp(int x, int y)
 {
-  union WarpInfo * warp;
-  if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-      xe.xany.serial == warp->serial)
-  {
-    ll_shift(g_cursor.warpList, NULL);
-    free(warp);
+  struct WarpInfo * warp;
+  if (!ll_peek_head(g_cursor.warpList, (void **)&warp) ||
+      warp->p.x != x || warp->p.y != y)
+    return;
 
-    g_cursor.last.x = x;
-    g_cursor.last.y = y;
-    return true;
-  }
+  ll_shift(g_cursor.warpList, NULL);
 
-  return false;
+  g_cursor.last.x = x + (g_cursor.last.x - warp->x);
+  g_cursor.last.y = y + (g_cursor.last.y - warp->y);
+  free(warp);
+
+  if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
+    g_cursor.warpState = WARP_STATE_ON;
+}
+
+static void processXWarp(const XEvent xe, int x, int y)
+{
+  struct WarpInfo * warp;
+  if (!ll_peek_head(g_cursor.warpList, (void **)&warp) ||
+      xe.xany.serial != warp->serial)
+    return;
+
+  ll_shift(g_cursor.warpList, NULL);
+
+  g_cursor.last.x = x + (g_cursor.last.x - warp->x);
+  g_cursor.last.y = y + (g_cursor.last.y - warp->y);
+  free(warp);
+
+  if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
+    g_cursor.warpState = WARP_STATE_ON;
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -1168,10 +1203,7 @@ int eventFilter(void * userdata, SDL_Event * event)
             const int x = round(device->event_x);
             const int y = round(device->event_y);
 
-            /* detect and filter out warp events */
-            if (processXWarp(xe, x, y))
-              break;
-
+            processXWarp(xe, x, y);
             handleMouseMoveEvent(x, y);
             break;
           }
@@ -1181,10 +1213,7 @@ int eventFilter(void * userdata, SDL_Event * event)
            * motion events when a button is held */
           case MotionNotify:
           {
-            /* detect and filter out warp events */
-            if (processXWarp(xe, xe.xmotion.x, xe.xmotion.y))
-              break;
-
+            processXWarp(xe, xe.xmotion.x, xe.xmotion.y);
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
             break;
           }
@@ -1203,8 +1232,8 @@ int eventFilter(void * userdata, SDL_Event * event)
 
           case EnterNotify:
           {
-            processXWarp(xe, xe.xcrossing.x, xe.xcrossing.y);
             handleWindowEnter();
+            processXWarp(xe, xe.xcrossing.x, xe.xcrossing.y);
             break;
           }
 
@@ -1239,7 +1268,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
           default:
           {
-            union WarpInfo * warp;
+            struct WarpInfo * warp;
             if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
                 xe.xany.serial == warp->serial)
             {
@@ -1262,19 +1291,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
 
       /* detect and filter out warp events */
-      union WarpInfo * warp;
-      if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-        warp->p.x == event->motion.x &&
-        warp->p.y == event->motion.y)
-      {
-        ll_shift(g_cursor.warpList, NULL);
-        free(warp);
-
-        g_cursor.last.x = event->motion.x;
-        g_cursor.last.y = event->motion.y;
-        break;
-      }
-
+      processWarp(event->motion.x, event->motion.y);
       handleMouseMoveEvent(event->motion.x, event->motion.y);
       break;
     }
@@ -2096,7 +2113,7 @@ static void lg_shutdown()
 
   if (g_cursor.warpList)
   {
-    union WarpInfo * warp;
+    struct WarpInfo * warp;
     while(ll_shift(g_cursor.warpList, (void **)&warp))
       free(warp);
     ll_free(g_cursor.warpList);

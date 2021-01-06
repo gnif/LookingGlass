@@ -210,6 +210,9 @@ struct CursorState
   /* the last local X & Y positions */
   SDL_Point last;
 
+  /* the delta since the last warp to CX/CY */
+  SDL_Point delta;
+
   /* the scale factors for the mouse sensitiviy */
   int   sens;
   float sensX, sensY;
