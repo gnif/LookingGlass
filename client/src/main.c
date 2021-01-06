@@ -1060,6 +1060,23 @@ static void keyboardUngrab()
   );
 }
 
+static bool processXWarp(const XEvent xe, int x, int y)
+{
+  union WarpInfo * warp;
+  if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
+      xe.xany.serial == warp->serial)
+  {
+    ll_shift(g_cursor.warpList, NULL);
+    free(warp);
+
+    g_cursor.last.x = x;
+    g_cursor.last.y = y;
+    return true;
+  }
+
+  return false;
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
   switch(event->type)
@@ -1152,17 +1169,8 @@ int eventFilter(void * userdata, SDL_Event * event)
             const int y = round(device->event_y);
 
             /* detect and filter out warp events */
-            union WarpInfo * warp;
-            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-                xe.xany.serial == warp->serial)
-            {
-              ll_shift(g_cursor.warpList, NULL);
-              free(warp);
-
-              g_cursor.last.x = x;
-              g_cursor.last.y = y;
+            if (processXWarp(xe, x, y))
               break;
-            }
 
             handleMouseMoveEvent(x, y);
             break;
@@ -1174,53 +1182,38 @@ int eventFilter(void * userdata, SDL_Event * event)
           case MotionNotify:
           {
             /* detect and filter out warp events */
-            union WarpInfo * warp;
-            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-                xe.xany.serial == warp->serial)
-            {
-              ll_shift(g_cursor.warpList, NULL);
-              free(warp);
-
-              g_cursor.last.x = xe.xmotion.x;
-              g_cursor.last.y = xe.xmotion.y;
+            if (processXWarp(xe, xe.xmotion.x, xe.xmotion.y))
               break;
-            }
 
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
             break;
           }
 
+          /* key press/release events can be the end of a warp also */
+          case KeyPress:
+          case KeyRelease:
+            processXWarp(xe, xe.xkey.x, xe.xkey.y);
+            break;
+
+          /* button press/release events can be the end of a warp also */
+          case ButtonPress:
+          case ButtonRelease:
+            processXWarp(xe, xe.xbutton.x, xe.xbutton.y);
+            break;
+
           case EnterNotify:
           {
-            union WarpInfo * warp;
-            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-                xe.xany.serial == warp->serial)
-            {
-              ll_shift(g_cursor.warpList, NULL);
-              free(warp);
-            }
-
-            g_cursor.last.x = xe.xcrossing.x;
-            g_cursor.last.y = xe.xcrossing.y;
+            processXWarp(xe, xe.xcrossing.x, xe.xcrossing.y);
             handleWindowEnter();
             break;
           }
 
           case LeaveNotify:
           {
-            union WarpInfo * warp;
-            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-                xe.xany.serial == warp->serial)
-            {
-              ll_shift(g_cursor.warpList, NULL);
-              free(warp);
-            }
-
+            processXWarp(xe, xe.xcrossing.x, xe.xcrossing.y);
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
-            g_cursor.last.x = xe.xcrossing.x;
-            g_cursor.last.y = xe.xcrossing.y;
             handleWindowLeave();
             break;
           }
@@ -1242,6 +1235,7 @@ int eventFilter(void * userdata, SDL_Event * event)
                 xe.xfocus.mode == NotifyWhileGrabbed)
               keyboardUngrab();
             break;
+
 
           default:
           {
