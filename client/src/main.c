@@ -793,8 +793,8 @@ static void warpMouse(int x, int y, bool disable)
     g_cursor.warpState = WARP_STATE_OFF;
 
   struct WarpInfo * warp = malloc(sizeof(struct WarpInfo));
-  warp->x = g_cursor.last.x;
-  warp->y = g_cursor.last.y;
+  warp->x = g_cursor.pos.x;
+  warp->y = g_cursor.pos.y;
 
   if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
   {
@@ -841,8 +841,8 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   /* calculate the relative movement */
   SDL_Point delta = {
-    .x = ex - g_cursor.last.x,
-    .y = ey - g_cursor.last.y
+    .x = ex - g_cursor.pos.x,
+    .y = ey - g_cursor.pos.y
   };
 
   if (delta.x == 0 && delta.y == 0)
@@ -850,8 +850,8 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   g_cursor.delta.x += delta.x;
   g_cursor.delta.y += delta.y;
-  g_cursor.last.x   = ex;
-  g_cursor.last.y   = ey;
+  g_cursor.pos.x   = ex;
+  g_cursor.pos.y   = ey;
 
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
@@ -1079,8 +1079,8 @@ static void processWarp(int x, int y)
 
   ll_shift(g_cursor.warpList, NULL);
 
-  g_cursor.last.x = x + (warp->x - g_cursor.last.x);
-  g_cursor.last.y = y + (warp->y - g_cursor.last.y);
+  g_cursor.pos.x = x + (warp->x - g_cursor.pos.x);
+  g_cursor.pos.y = y + (warp->y - g_cursor.pos.y);
   free(warp);
 
   if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
@@ -1096,8 +1096,8 @@ static void processXWarp(const XEvent xe, int x, int y)
 
   ll_shift(g_cursor.warpList, NULL);
 
-  g_cursor.last.x = x + (warp->x - g_cursor.last.x);
-  g_cursor.last.y = y + (warp->y - g_cursor.last.y);
+  g_cursor.pos.x = x + (warp->x - g_cursor.pos.x);
+  g_cursor.pos.y = y + (warp->y - g_cursor.pos.y);
   free(warp);
 
   if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)

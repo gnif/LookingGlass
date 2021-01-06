@@ -207,8 +207,8 @@ struct CursorState
   /* the error accumulators */
   float accX, accY;
 
-  /* the last local X & Y positions */
-  SDL_Point last;
+  /* the local X & Y position */
+  SDL_Point pos;
 
   /* the delta since the last warp to CX/CY */
   SDL_Point delta;
