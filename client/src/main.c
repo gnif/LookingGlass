@@ -1147,6 +1147,9 @@ static void setGrab(bool enable)
     }
   }
 
+  if (g_cursor.grab)
+    g_cursor.inView = true;
+
   /* if exiting grab move the pointer back to the center of the window */
   if (!g_cursor.grab && g_cursor.inWindow)
   {
