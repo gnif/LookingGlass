@@ -85,6 +85,7 @@ struct WarpInfo
 };
 
 static void handleMouseMoveEvent(int ex, int ey);
+static void handleMouseRawEvent(int ex, int ey);
 
 static void lgInit()
 {
@@ -828,6 +829,12 @@ static bool isValidCursorLocation(int x, int y)
   return false;
 }
 
+static void handleMouseRawEvent(int ex, int ey)
+{
+  if (!spice_mouse_motion(ex, ey))
+    DEBUG_ERROR("failed to send mouse motion message");
+}
+
 static void handleMouseMoveEvent(int ex, int ey)
 {
   if (!params.useSpiceInput)
@@ -847,8 +854,8 @@ static void handleMouseMoveEvent(int ex, int ey)
 
   g_cursor.delta.x += delta.x;
   g_cursor.delta.y += delta.y;
-  g_cursor.pos.x   = ex;
-  g_cursor.pos.y   = ey;
+  g_cursor.pos.x    = ex;
+  g_cursor.pos.y    = ey;
 
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
@@ -1084,6 +1091,59 @@ static void processWarp(int serial, int x, int y)
     g_cursor.warpState = WARP_STATE_ON;
 }
 
+static void setGrab(bool enable)
+{
+  if (g_cursor.grab == enable)
+    return;
+
+  g_cursor.grab = enable;
+
+  if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+    SDL_SetWindowGrab(g_state.window, g_cursor.grab);
+  else
+  {
+    if (g_cursor.grab)
+    {
+      XGrabPointer(
+        g_state.wminfo.info.x11.display,
+        g_state.wminfo.info.x11.window,
+        true,
+        None,
+        GrabModeAsync,
+        GrabModeAsync,
+        g_state.wminfo.info.x11.window,
+        None,
+        CurrentTime);
+
+      XGrabKeyboard(
+        g_state.wminfo.info.x11.display,
+        g_state.wminfo.info.x11.window,
+        true,
+        GrabModeAsync,
+        GrabModeAsync,
+        CurrentTime);
+    }
+    else
+    {
+      XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+      XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
+    }
+  }
+
+  /* if exiting grab move the pointer back to the center of the window */
+  if (!g_cursor.grab && g_cursor.inWindow)
+  {
+    warpMouse(g_state.windowCX, g_state.windowCY, false);
+    g_cursor.delta.x = 0;
+    g_cursor.delta.y = 0;
+  }
+
+  app_alert(
+    g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+    g_cursor.grab ? "Capture Enabled" : "Capture Disabled"
+  );
+}
+
 int eventFilter(void * userdata, SDL_Event * event)
 {
   switch(event->type)
@@ -1169,14 +1229,28 @@ int eventFilter(void * userdata, SDL_Event * event)
               break;
 
             XIDeviceEvent *device = cookie->data;
-            if (device->evtype != XI_Motion)
-              break;
 
-            const int x = round(device->event_x);
-            const int y = round(device->event_y);
+            if (g_cursor.grab)
+            {
+              if (device->evtype != XI_RawMotion)
+                break;
 
-            processWarp(xe.xany.serial, x, y);
-            handleMouseMoveEvent(x, y);
+              XIRawEvent *raw = cookie->data;
+              const int x = raw->raw_values[0];
+              const int y = raw->raw_values[1];
+              handleMouseRawEvent(x, y);
+            }
+            else
+            {
+              if (device->evtype != XI_Motion)
+                break;
+
+              const int x = round(device->event_x);
+              const int y = round(device->event_y);
+
+              processWarp(xe.xany.serial, x, y);
+              handleMouseMoveEvent(x, y);
+            }
             break;
           }
 #endif
@@ -1234,7 +1308,12 @@ int eventFilter(void * userdata, SDL_Event * event)
 
             if (xe.xfocus.mode == NotifyNormal ||
                 xe.xfocus.mode == NotifyWhileGrabbed)
-              keyboardUngrab();
+            {
+              if (g_cursor.grab)
+                setGrab(false);
+              else
+                keyboardUngrab();
+            }
             break;
 
 
@@ -1316,46 +1395,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         if (g_state.escapeAction == -1)
         {
           if (params.useSpiceInput)
-          {
-            g_cursor.grab = !g_cursor.grab;
-
-            if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-              SDL_SetWindowGrab(g_state.window, g_cursor.grab);
-            else
-            {
-              if (g_cursor.grab)
-              {
-                XGrabPointer(
-                  g_state.wminfo.info.x11.display,
-                  g_state.wminfo.info.x11.window,
-                  true,
-                  None,
-                  GrabModeAsync,
-                  GrabModeAsync,
-                  g_state.wminfo.info.x11.window,
-                  None,
-                  CurrentTime);
-
-                XGrabKeyboard(
-                  g_state.wminfo.info.x11.display,
-                  g_state.wminfo.info.x11.window,
-                  true,
-                  GrabModeAsync,
-                  GrabModeAsync,
-                  CurrentTime);
-              }
-              else
-              {
-                XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
-                XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
-              }
-            }
-
-            app_alert(
-              g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-              g_cursor.grab ? "Capture Enabled" : "Capture Disabled"
-            );
-          }
+            setGrab(!g_cursor.grab);
         }
         else
         {
