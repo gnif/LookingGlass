@@ -85,7 +85,7 @@ struct WarpInfo
 };
 
 static void handleMouseMoveEvent(int ex, int ey);
-static void handleMouseRawEvent(int ex, int ey);
+static void handleMouseRawEvent(double ex, double ey);
 
 static void lgInit()
 {
@@ -829,17 +829,24 @@ static bool isValidCursorLocation(int x, int y)
   return false;
 }
 
-static void handleMouseRawEvent(int ex, int ey)
+static void handleMouseRawEvent(double ex, double ey)
 {
   if (g_cursor.sens != 0)
   {
-    g_cursor.sensX += ((float)ex / 10.0f) * (g_cursor.sens + 10);
-    g_cursor.sensY += ((float)ey / 10.0f) * (g_cursor.sens + 10);
+    g_cursor.sensX += (ex / 10.0) * (g_cursor.sens + 10);
+    g_cursor.sensY += (ey / 10.0) * (g_cursor.sens + 10);
     ex = floor(g_cursor.sensX);
     ey = floor(g_cursor.sensY);
     g_cursor.sensX -= ex;
     g_cursor.sensY -= ey;
   }
+
+  g_cursor.accX += ex;
+  g_cursor.accY += ey;
+  ex = floor(g_cursor.accX);
+  ey = floor(g_cursor.accY);
+  g_cursor.accX -= ex;
+  g_cursor.accY -= ey;
 
   if (!spice_mouse_motion(ex, ey))
     DEBUG_ERROR("failed to send mouse motion message");
@@ -847,10 +854,7 @@ static void handleMouseRawEvent(int ex, int ey)
 
 static void handleMouseMoveEvent(int ex, int ey)
 {
-  if (!params.useSpiceInput)
-    return;
-
-  if (!g_cursor.inWindow || g_state.ignoreInput)
+  if (!params.useSpiceInput || !g_cursor.inWindow)
     return;
 
   /* calculate the relative movement */
@@ -1245,10 +1249,34 @@ int eventFilter(void * userdata, SDL_Event * event)
               if (device->evtype != XI_RawMotion)
                 break;
 
+              if (g_state.ignoreInput)
+                break;
+
               XIRawEvent *raw = cookie->data;
-              const int x = raw->raw_values[0];
-              const int y = raw->raw_values[1];
+#if 0
+              /* true RAW mode, however the UX is pretty poor with it, perhaps
+               * make this an option later? */
+              const double x = raw->raw_values[0];
+              const double y = raw->raw_values[1];
               handleMouseRawEvent(x, y);
+#else
+              /* select the active validators for the X & Y axis */
+              double *valuator = raw->valuators.values;
+              int    count     = 0;
+              double axis[2];
+              for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
+              {
+                if (XIMaskIsSet(raw->valuators.mask, i))
+                {
+                  axis[count++] = *valuator;
+                  if (count == 2)
+                    break;
+                  ++valuator;
+                }
+              }
+
+              handleMouseRawEvent(axis[0], axis[1]);
+#endif
             }
             else
             {
@@ -1259,7 +1287,8 @@ int eventFilter(void * userdata, SDL_Event * event)
               const int y = round(device->event_y);
 
               processWarp(xe.xany.serial, x, y);
-              handleMouseMoveEvent(x, y);
+              if (!g_state.ignoreInput)
+                handleMouseMoveEvent(device->event_x, device->event_y);
             }
             break;
           }
@@ -1269,8 +1298,12 @@ int eventFilter(void * userdata, SDL_Event * event)
            * motion events when a button is held */
           case MotionNotify:
           {
-            processWarp(xe.xany.serial, xe.xmotion.x, xe.xmotion.y);
-            handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
+            if (!g_cursor.grab)
+            {
+              processWarp(xe.xany.serial, xe.xmotion.x, xe.xmotion.y);
+              if (!g_state.ignoreInput)
+                handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
+            }
             break;
           }
 
