@@ -831,6 +831,16 @@ static bool isValidCursorLocation(int x, int y)
 
 static void handleMouseRawEvent(int ex, int ey)
 {
+  if (g_cursor.sens != 0)
+  {
+    g_cursor.sensX += ((float)ex / 10.0f) * (g_cursor.sens + 10);
+    g_cursor.sensY += ((float)ey / 10.0f) * (g_cursor.sens + 10);
+    ex = floor(g_cursor.sensX);
+    ey = floor(g_cursor.sensY);
+    g_cursor.sensX -= ex;
+    g_cursor.sensY -= ey;
+  }
+
   if (!spice_mouse_motion(ex, ey))
     DEBUG_ERROR("failed to send mouse motion message");
 }
