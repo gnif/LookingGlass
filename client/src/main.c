@@ -843,12 +843,15 @@ static void handleMouseRawEvent(double ex, double ey)
 
   g_cursor.accX += ex;
   g_cursor.accY += ey;
-  ex = floor(g_cursor.accX);
-  ey = floor(g_cursor.accY);
-  g_cursor.accX -= ex;
-  g_cursor.accY -= ey;
+  int x = floor(g_cursor.accX);
+  int y = floor(g_cursor.accY);
+  g_cursor.accX -= x;
+  g_cursor.accY -= y;
 
-  if (!spice_mouse_motion(ex, ey))
+  if (x == 0 && y == 0)
+    return;
+
+  if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
@@ -1242,17 +1245,16 @@ int eventFilter(void * userdata, SDL_Event * event)
             if (cookie->extension != g_XInputOp)
               break;
 
-            XIDeviceEvent *device = cookie->data;
-
             if (g_cursor.grab)
             {
-              if (device->evtype != XI_RawMotion)
+              if (cookie->evtype != XI_RawMotion)
                 break;
 
               if (g_state.ignoreInput)
                 break;
 
               XIRawEvent *raw = cookie->data;
+
 #if 0
               /* true RAW mode, however the UX is pretty poor with it, perhaps
                * make this an option later? */
@@ -1262,6 +1264,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 #else
               /* select the active validators for the X & Y axis */
               double *valuator = raw->valuators.values;
+              double *value    = raw->raw_values;
               int    count     = 0;
               double axis[2];
               for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
@@ -1272,17 +1275,29 @@ int eventFilter(void * userdata, SDL_Event * event)
                   if (count == 2)
                     break;
                   ++valuator;
+                  ++value;
                 }
               }
+
+              /* filter out duplicate events */
+              static Time   prev_time    = 0;
+              static double prev_axis[2] = {0};
+              if (raw->time == prev_time && axis[0] == prev_axis[0] && axis[1] == prev_axis[1])
+                break;
+              prev_time = raw->time;
+              prev_axis[0] = axis[0];
+              prev_axis[1] = axis[1];
+
 
               handleMouseRawEvent(axis[0], axis[1]);
 #endif
             }
             else
             {
-              if (device->evtype != XI_Motion)
+              if (cookie->evtype != XI_Motion)
                 break;
 
+              XIDeviceEvent *device = cookie->data;
               const int x = round(device->event_x);
               const int y = round(device->event_y);
 
