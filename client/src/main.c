@@ -80,12 +80,8 @@ struct AppParams params = { 0 };
 
 struct WarpInfo
 {
-  int x, y;
-  union
-  {
-    unsigned long serial;
-    SDL_Point     p;
-  };
+  SDL_Point     from, to;
+  unsigned long serial;
 };
 
 static void handleMouseMoveEvent(int ex, int ey);
@@ -793,8 +789,10 @@ static void warpMouse(int x, int y, bool disable)
     g_cursor.warpState = WARP_STATE_OFF;
 
   struct WarpInfo * warp = malloc(sizeof(struct WarpInfo));
-  warp->x = g_cursor.pos.x;
-  warp->y = g_cursor.pos.y;
+  warp->from.x = g_cursor.pos.x;
+  warp->from.y = g_cursor.pos.y;
+  warp->to.x   = x;
+  warp->to.y   = y;
 
   if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
   {
@@ -810,8 +808,7 @@ static void warpMouse(int x, int y, bool disable)
   }
   else
   {
-    warp->p.x = x;
-    warp->p.y = y;
+    warp->serial = 0;
     ll_push(g_cursor.warpList, warp);
     SDL_WarpMouseInWindow(g_state.window, x, y);
   }
@@ -1070,34 +1067,17 @@ static void keyboardUngrab()
   );
 }
 
-static void processWarp(int x, int y)
+static void processWarp(int serial, int x, int y)
 {
   struct WarpInfo * warp;
   if (!ll_peek_head(g_cursor.warpList, (void **)&warp) ||
-      warp->p.x != x || warp->p.y != y)
+      serial < warp->serial || warp->to.x != x || warp->to.y != y)
     return;
 
   ll_shift(g_cursor.warpList, NULL);
 
-  g_cursor.pos.x = x + (warp->x - g_cursor.pos.x);
-  g_cursor.pos.y = y + (warp->y - g_cursor.pos.y);
-  free(warp);
-
-  if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
-    g_cursor.warpState = WARP_STATE_ON;
-}
-
-static void processXWarp(const XEvent xe, int x, int y)
-{
-  struct WarpInfo * warp;
-  if (!ll_peek_head(g_cursor.warpList, (void **)&warp) ||
-      xe.xany.serial != warp->serial)
-    return;
-
-  ll_shift(g_cursor.warpList, NULL);
-
-  g_cursor.pos.x = x + (warp->x - g_cursor.pos.x);
-  g_cursor.pos.y = y + (warp->y - g_cursor.pos.y);
+  g_cursor.pos.x = x + (warp->from.x - g_cursor.pos.x);
+  g_cursor.pos.y = y + (warp->from.y - g_cursor.pos.y);
   free(warp);
 
   if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
@@ -1195,7 +1175,7 @@ int eventFilter(void * userdata, SDL_Event * event)
             const int x = round(device->event_x);
             const int y = round(device->event_y);
 
-            processXWarp(xe, x, y);
+            processWarp(xe.xany.serial, x, y);
             handleMouseMoveEvent(x, y);
             break;
           }
@@ -1205,7 +1185,7 @@ int eventFilter(void * userdata, SDL_Event * event)
            * motion events when a button is held */
           case MotionNotify:
           {
-            processXWarp(xe, xe.xmotion.x, xe.xmotion.y);
+            processWarp(xe.xany.serial, xe.xmotion.x, xe.xmotion.y);
             handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
             break;
           }
@@ -1213,25 +1193,25 @@ int eventFilter(void * userdata, SDL_Event * event)
           /* key press/release events can be the end of a warp also */
           case KeyPress:
           case KeyRelease:
-            processXWarp(xe, xe.xkey.x, xe.xkey.y);
+            processWarp(xe.xany.serial, xe.xkey.x, xe.xkey.y);
             break;
 
           /* button press/release events can be the end of a warp also */
           case ButtonPress:
           case ButtonRelease:
-            processXWarp(xe, xe.xbutton.x, xe.xbutton.y);
+            processWarp(xe.xany.serial, xe.xbutton.x, xe.xbutton.y);
             break;
 
           case EnterNotify:
           {
             handleWindowEnter();
-            processXWarp(xe, xe.xcrossing.x, xe.xcrossing.y);
+            processWarp(xe.xany.serial, xe.xcrossing.x, xe.xcrossing.y);
             break;
           }
 
           case LeaveNotify:
           {
-            processXWarp(xe, xe.xcrossing.x, xe.xcrossing.y);
+            processWarp(xe.xany.serial, xe.xcrossing.x, xe.xcrossing.y);
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
@@ -1282,8 +1262,7 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
         break;
 
-      /* detect and filter out warp events */
-      processWarp(event->motion.x, event->motion.y);
+      processWarp(0, event->motion.x, event->motion.y);
       handleMouseMoveEvent(event->motion.x, event->motion.y);
       break;
     }
