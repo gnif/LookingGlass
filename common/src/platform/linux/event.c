@@ -87,10 +87,11 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 {
   assert(handle);
 
-  bool ret = true;
+  bool ret   = true;
+  int  count = 0;
   int  res;
 
-  while(ret && atomic_load(&handle->count) == 0)
+  while(ret && (count = atomic_load(&handle->count)) == 0)
   {
     if (pthread_mutex_lock(&handle->mutex) != 0)
     {
@@ -132,7 +133,7 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   }
 
   if (ret && handle->autoReset)
-    atomic_fetch_sub(&handle->count, 1);
+    atomic_fetch_sub(&handle->count, count);
 
   return ret;
 }
