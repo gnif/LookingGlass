@@ -284,6 +284,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "rawMouse",
+    .description    = "Use RAW mouse input when in capture mode (good for gaming)",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "input",
     .name           = "mouseRedraw",
     .description    = "Mouse movements trigger redraws (ignores FPS minimum)",
     .type           = OPTION_TYPE_BOOL,
@@ -447,13 +454,14 @@ bool config_load(int argc, char * argv[])
   params.showAlerts    = option_get_bool  ("win", "alerts"       );
   params.quickSplash   = option_get_bool  ("win", "quickSplash"  );
 
-  params.grabKeyboard        = option_get_bool  ("input", "grabKeyboard"       );
-  params.grabKeyboardOnFocus = option_get_bool  ("input", "grabKeyboardOnFocus");
-  params.escapeKey           = option_get_int   ("input", "escapeKey"          );
-  params.ignoreWindowsKeys   = option_get_bool  ("input", "ignoreWindowsKeys"  );
-  params.hideMouse           = option_get_bool  ("input", "hideCursor"         );
-  params.mouseSens           = option_get_int   ("input", "mouseSens"          );
-  params.mouseRedraw         = option_get_bool  ("input", "mouseRedraw"        );
+  params.grabKeyboard        = option_get_bool("input", "grabKeyboard"       );
+  params.grabKeyboardOnFocus = option_get_bool("input", "grabKeyboardOnFocus");
+  params.escapeKey           = option_get_int ("input", "escapeKey"          );
+  params.ignoreWindowsKeys   = option_get_bool("input", "ignoreWindowsKeys"  );
+  params.hideMouse           = option_get_bool("input", "hideCursor"         );
+  params.mouseSens           = option_get_int ("input", "mouseSens"          );
+  params.rawMouse            = option_get_bool("input", "rawMouse"           );
+  params.mouseRedraw         = option_get_bool("input", "mouseRedraw"        );
 
   params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 

@@ -1254,24 +1254,21 @@ int eventFilter(void * userdata, SDL_Event * event)
                 break;
 
               XIRawEvent *raw = cookie->data;
+              double axis[2];
 
-#if 0
-              /* true RAW mode, however the UX is pretty poor with it, perhaps
-               * make this an option later? */
-              const double x = raw->raw_values[0];
-              const double y = raw->raw_values[1];
-              handleMouseRawEvent(x, y);
-#else
               /* select the active validators for the X & Y axis */
               double *valuator = raw->valuators.values;
               double *value    = raw->raw_values;
               int    count     = 0;
-              double axis[2];
               for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
               {
                 if (XIMaskIsSet(raw->valuators.mask, i))
                 {
-                  axis[count++] = *valuator;
+                  if (params.rawMouse)
+                    axis[count++] = *value;
+                  else
+                    axis[count++] = *valuator;
+
                   if (count == 2)
                     break;
                   ++valuator;
@@ -1282,15 +1279,16 @@ int eventFilter(void * userdata, SDL_Event * event)
               /* filter out duplicate events */
               static Time   prev_time    = 0;
               static double prev_axis[2] = {0};
-              if (raw->time == prev_time && axis[0] == prev_axis[0] && axis[1] == prev_axis[1])
+              if (raw->time == prev_time &&
+                  axis[0] == prev_axis[0] &&
+                  axis[1] == prev_axis[1])
                 break;
+
               prev_time = raw->time;
               prev_axis[0] = axis[0];
               prev_axis[1] = axis[1];
 
-
               handleMouseRawEvent(axis[0], axis[1]);
-#endif
             }
             else
             {
