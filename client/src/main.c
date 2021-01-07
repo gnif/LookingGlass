@@ -1305,6 +1305,10 @@ int eventFilter(void * userdata, SDL_Event * event)
                 }
               }
 
+              /* filter out scroll wheel and other events */
+              if (count < 2)
+                break;
+
               /* filter out duplicate events */
               static Time   prev_time    = 0;
               static double prev_axis[2] = {0};
