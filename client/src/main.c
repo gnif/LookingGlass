@@ -1104,17 +1104,20 @@ static void setGrab(bool enable)
         None,
         CurrentTime);
 
-      XGrabKeyboard(
-        g_state.wminfo.info.x11.display,
-        g_state.wminfo.info.x11.window,
-        true,
-        GrabModeAsync,
-        GrabModeAsync,
-        CurrentTime);
+      if (params.grabKeyboard)
+        XGrabKeyboard(
+          g_state.wminfo.info.x11.display,
+          g_state.wminfo.info.x11.window,
+          true,
+          GrabModeAsync,
+          GrabModeAsync,
+          CurrentTime);
     }
     else
     {
-      XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+      if (params.grabKeyboard)
+        XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+
       XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
     }
   }
