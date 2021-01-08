@@ -285,7 +285,7 @@ static int cursorThread(void * unused)
     {
       if (status == LGMP_ERR_QUEUE_EMPTY)
       {
-        if (g_cursor.redraw)
+        if (g_cursor.redraw && g_cursor.guest.valid)
         {
           g_cursor.redraw = false;
           g_state.lgr->on_mouse_event
@@ -899,10 +899,16 @@ static void handleMouseNormal(double ex, double ey)
 
     if (inView)
     {
+      if (params.hideMouse)
+        SDL_ShowCursor(SDL_DISABLE);
+
       if (g_state.focused)
       {
         /* the cursor moved in, enable grab mode */
         g_cursor.inView = true;
+        g_cursor.draw   = true;
+        g_cursor.redraw = true;
+
         g_cursor.warpState = WARP_STATE_ON;
 
         XGrabPointer(
@@ -968,7 +974,15 @@ static void handleMouseNormal(double ex, double ey)
           g_state.windowPos.x + g_state.border.x + tx,
           g_state.windowPos.y + g_state.border.y + ty))
     {
+      if (params.hideMouse)
+        SDL_ShowCursor(SDL_ENABLE);
+
       g_cursor.inView = false;
+
+      if(!params.alwaysShowCursor)
+        g_cursor.draw = false;
+
+      g_cursor.redraw = true;
 
       /* pre-empt the window leave flag if the warp will leave our window */
       if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
@@ -1048,9 +1062,6 @@ static void handleWindowEnter()
 {
   g_cursor.inWindow = true;
   if (!params.useSpiceInput)
-    return;
-
-  if (!g_cursor.guest.valid)
     return;
 
   g_cursor.draw   = true;
