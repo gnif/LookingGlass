@@ -78,14 +78,8 @@ struct CursorState g_cursor;
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
 
-struct WarpInfo
-{
-  SDL_Point     from, to;
-  unsigned long serial;
-};
-
-static void handleMouseMoveEvent(int ex, int ey);
-static void handleMouseRawEvent(double ex, double ey);
+static void handleMouseGrabbed(double ex, double ey);
+static void handleMouseNormal(double ex, double ey);
 
 static void lgInit()
 {
@@ -815,30 +809,21 @@ static void warpMouse(int x, int y, bool disable)
   if (disable)
     g_cursor.warpState = WARP_STATE_OFF;
 
-  struct WarpInfo * warp = malloc(sizeof(struct WarpInfo));
-  warp->from.x = g_cursor.pos.x;
-  warp->from.y = g_cursor.pos.y;
-  warp->to.x   = x;
-  warp->to.y   = y;
+  if (g_cursor.pos.x == x && g_cursor.pos.y == y)
+    return;
 
   if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
   {
-    warp->serial = NextRequest(g_state.wminfo.info.x11.display);
-    ll_push(g_cursor.warpList, warp);
     XWarpPointer(
         g_state.wminfo.info.x11.display,
         None,
         g_state.wminfo.info.x11.window,
         0, 0, 0, 0,
         x, y);
-    XFlush(g_state.wminfo.info.x11.display);
+    XSync(g_state.wminfo.info.x11.display, False);
   }
   else
-  {
-    warp->serial = 0;
-    ll_push(g_cursor.warpList, warp);
     SDL_WarpMouseInWindow(g_state.window, x, y);
-  }
 }
 
 static bool isValidCursorLocation(int x, int y)
@@ -855,25 +840,28 @@ static bool isValidCursorLocation(int x, int y)
   return false;
 }
 
-static void handleMouseRawEvent(double ex, double ey)
+static void cursorToInt(double ex, double ey, int *x, int *y)
 {
-  if (g_cursor.sens != 0)
-  {
-    g_cursor.sensX += (ex / 10.0) * (g_cursor.sens + 10);
-    g_cursor.sensY += (ey / 10.0) * (g_cursor.sens + 10);
-    ex = floor(g_cursor.sensX);
-    ey = floor(g_cursor.sensY);
-    g_cursor.sensX -= ex;
-    g_cursor.sensY -= ey;
-  }
-
+  /* convert to int accumulating the fractional error */
   g_cursor.accX += ex;
   g_cursor.accY += ey;
-  int x = floor(g_cursor.accX);
-  int y = floor(g_cursor.accY);
-  g_cursor.accX -= x;
-  g_cursor.accY -= y;
+  *x = floor(g_cursor.accX);
+  *y = floor(g_cursor.accY);
+  g_cursor.accX -= *x;
+  g_cursor.accY -= *y;
+}
 
+static void handleMouseGrabbed(double ex, double ey)
+{
+  /* apply sensitivity */
+  if (g_cursor.sens != 0)
+  {
+    ex = (ex / 10.0) * (g_cursor.sens + 10);
+    ey = (ey / 10.0) * (g_cursor.sens + 10);
+  }
+
+  int x, y;
+  cursorToInt(ex, ey, &x, &y);
   if (x == 0 && y == 0)
     return;
 
@@ -881,162 +869,123 @@ static void handleMouseRawEvent(double ex, double ey)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
-static void handleMouseMoveEvent(int ex, int ey)
+static void handleMouseNormal(double ex, double ey)
 {
-  if (!params.useSpiceInput || !g_cursor.inWindow)
-    return;
-
-  /* calculate the relative movement */
-  SDL_Point delta = {
-    .x = ex - g_cursor.pos.x,
-    .y = ey - g_cursor.pos.y
-  };
-
-  if (delta.x == 0 && delta.y == 0)
-    return;
-
-  g_cursor.delta.x += delta.x;
-  g_cursor.delta.y += delta.y;
-  g_cursor.pos.x    = ex;
-  g_cursor.pos.y    = ey;
-
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
   {
     if (g_cursor.grab)
-    {
-      g_cursor.inView = true;
-      spice_mouse_motion(delta.x, delta.y);
-      if (abs(g_cursor.delta.x) >= 50 || abs(g_cursor.delta.y) >= 50)
-      {
-        warpMouse(g_state.windowCX, g_state.windowCY, false);
-        g_cursor.delta.x = 0;
-        g_cursor.delta.y = 0;
-      }
-    }
-
+      handleMouseGrabbed(ex, ey);
     return;
   }
 
-
-  /* check if the cursor is in the guests viewport */
-  const bool inView =
-    g_cursor.grab || (
-    ex >= g_state.dstRect.x                     &&
-    ex <  g_state.dstRect.x + g_state.dstRect.w &&
-    ey >= g_state.dstRect.y                     &&
-    ey <  g_state.dstRect.y + g_state.dstRect.h);
-
-  /* if the cursor has moved in/outside the display area */
-  if (g_cursor.inView != inView)
+  /* scale the movement to the guest */
+  if (g_cursor.scale && params.scaleMouseInput)
   {
-    g_cursor.inView = inView;
+    ex *= g_cursor.scaleX / g_cursor.dpiScale;
+    ey *= g_cursor.scaleY / g_cursor.dpiScale;
+  }
+
+  bool enter = false;
+
+  /* if the cursor was outside the viewport, check if it moved in */
+  if (!g_cursor.inView)
+  {
+    const bool inView =
+      g_cursor.pos.x >= g_state.dstRect.x                     &&
+      g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
+      g_cursor.pos.y >= g_state.dstRect.y                     &&
+      g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 
     if (inView)
     {
-      /* cursor moved in */
-      if (params.hideMouse)
-        SDL_ShowCursor(SDL_DISABLE);
+      /* the cursor moved in, enable grab mode */
+      g_cursor.inView = true;
+      g_cursor.warpState = WARP_STATE_ON;
 
-      g_cursor.redraw = true;
-      g_cursor.draw   = true;
+      XGrabPointer(
+        g_state.wminfo.info.x11.display,
+        g_state.wminfo.info.x11.window,
+        true,
+        None,
+        GrabModeAsync,
+        GrabModeAsync,
+        g_state.wminfo.info.x11.window,
+        None,
+        CurrentTime);
 
-      /* convert guest to local and calculate the delta */
-      const int lx = (int)round(((g_cursor.guest.x + g_cursor.guest.hx) /
-            g_cursor.scaleX)) + g_state.dstRect.x;
-      const int ly = (int)round(((g_cursor.guest.y + g_cursor.guest.hy) /
-            g_cursor.scaleY)) + g_state.dstRect.y;
-      delta.x = ex - lx;
-      delta.y = ey - ly;
+      struct DoublePoint guest =
+      {
+        .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scaleX * g_cursor.dpiScale,
+        .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scaleY * g_cursor.dpiScale
+      };
+
+      /* add the difference to the offset */
+      ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
+      ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+
+      /* stop the below code from looking for an exit */
+      enter = true;
     }
     else
     {
-      /* cursor moved out */
-      SDL_ShowCursor(SDL_ENABLE);
-      g_cursor.redraw = true;
-      if (params.useSpiceInput && !params.alwaysShowCursor)
-        g_cursor.draw = false;
+      /* nothing to do if the cursor is not in the guest window */
+      return;
     }
   }
 
-  if (inView)
+  /* translate the guests position to our coordinate space */
+  struct DoublePoint local =
   {
-    /* stop the mouse from runing into the edges of the window */
-    if (abs(g_cursor.delta.x) >= 50 || abs(g_cursor.delta.y) >= 50)
+    .x = (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scaleX,
+    .y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scaleY
+  };
+
+  /* check if the move would push the cursor outside the guest's viewport */
+  if (!enter && (
+      local.x + ex <  0.0 ||
+      local.y + ey <  0.0 ||
+      local.x + ex >= g_state.dstRect.w ||
+      local.y + ey >= g_state.dstRect.h))
+  {
+    local.x += ex;
+    local.y += ey;
+    const int tx = ((local.x <= 0.0) ? floor(local.x) : ceil(local.x)) +
+      g_state.dstRect.x;
+    const int ty = ((local.y <= 0.0) ? floor(local.y) : ceil(local.y)) +
+      g_state.dstRect.y;
+
+    if (isValidCursorLocation(
+          g_state.windowPos.x + g_state.border.x + tx,
+          g_state.windowPos.y + g_state.border.y + ty))
     {
-      warpMouse(g_state.windowCX, g_state.windowCY, false);
-      g_cursor.delta.x = 0;
-      g_cursor.delta.y = 0;
+      g_cursor.inView   = false;
+
+      /* pre-empt the window leave flag if the warp will leave our window */
+      if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
+      {
+        g_cursor.inWindow = false;
+      }
+
+      /* ungrab the pointer and move the local cursor to the exit point */
+      XUngrabPointer(g_state.wminfo.info.x11.display, CurrentTime);
+      warpMouse(tx, ty, true);
     }
-  }
-  else
-  {
-    /* cursor outside of the bounds, don't do anything */
     return;
   }
 
-  if (g_cursor.scale && params.scaleMouseInput && !g_cursor.grab)
-  {
-    g_cursor.accX += (float)delta.x * g_cursor.scaleX / g_cursor.dpiScale;
-    g_cursor.accY += (float)delta.y * g_cursor.scaleY / g_cursor.dpiScale;
-    delta.x = floor(g_cursor.accX);
-    delta.y = floor(g_cursor.accY);
-    g_cursor.accX -= delta.x;
-    g_cursor.accY -= delta.y;
-  }
+  int x, y;
+  cursorToInt(ex, ey, &x, &y);
+  if (x == 0 && y == 0)
+    return;
 
-  if (g_cursor.grab && g_cursor.sens != 0)
-  {
-    g_cursor.sensX += ((float)delta.x / 10.0f) * (g_cursor.sens + 10);
-    g_cursor.sensY += ((float)delta.y / 10.0f) * (g_cursor.sens + 10);
-    delta.x = floor(g_cursor.sensX);
-    delta.y = floor(g_cursor.sensY);
-    g_cursor.sensX -= delta.x;
-    g_cursor.sensY -= delta.y;
-  }
+  /* assume the mouse will move to the location we attempt to move it to so we
+   * avoid warp out of window issues. The cursorThread will correct this if
+   * wrong after the movement has ocurred on the guest */
+  g_cursor.guest.x += x;
+  g_cursor.guest.y += y;
 
-  /* if the cursor is not grabbed and warp is possible, and the cursor is
-   * visible check if the translated guest cursor movement would live the window,
-   * and if so move the host cursor to the exit location and enable it, but only
-   * if the target is valid */
-  if (!g_cursor.grab && g_cursor.warpState == WARP_STATE_ON &&
-      g_cursor.guest.visible) // invisible cursors don't get position updates
-  {
-    const float fx = (float)(g_cursor.guest.x + g_cursor.guest.hx + delta.x) /
-      g_cursor.scaleX;
-    const float fy = (float)(g_cursor.guest.y + g_cursor.guest.hy + delta.y) /
-      g_cursor.scaleY;
-    const SDL_Point newPos =
-    {
-      .x = fx < 0.0f ? floor(fx) : (fx >= g_state.dstRect.w ? ceil(fx) : round(fx)),
-      .y = fy < 0.0f ? floor(fy) : (fy >= g_state.dstRect.h ? ceil(fy) : round(fy))
-    };
-
-    /* check if the movement would exit the window */
-    if (newPos.x < 0 || newPos.x >= g_state.dstRect.w ||
-        newPos.y < 0 || newPos.y >= g_state.dstRect.h)
-    {
-      const int nx = g_state.windowPos.x + g_state.border.x +
-        g_state.dstRect.x + newPos.x;
-      const int ny = g_state.windowPos.y + g_state.border.y +
-        g_state.dstRect.y + newPos.y;
-
-      if (isValidCursorLocation(nx, ny))
-      {
-        /* put the mouse where it should be and disable warp */
-        warpMouse(
-          g_state.dstRect.x + newPos.x,
-          g_state.dstRect.y + newPos.y,
-          true
-        );
-        SDL_ShowCursor(SDL_ENABLE);
-        return;
-      }
-    }
-  }
-
-  /* send the movement to the guest */
-  if (!spice_mouse_motion(delta.x, delta.y))
+  if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
@@ -1059,6 +1008,7 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
 static void handleWindowLeave()
 {
   g_cursor.inWindow = false;
+  g_cursor.inView   = false;
 
   if (!params.useSpiceInput)
     return;
@@ -1066,7 +1016,6 @@ static void handleWindowLeave()
   if (!params.alwaysShowCursor)
     g_cursor.draw = false;
 
-  g_cursor.inView = false;
   g_cursor.redraw = true;
 }
 
@@ -1075,10 +1024,6 @@ static void handleWindowEnter()
   g_cursor.inWindow = true;
   if (!params.useSpiceInput)
     return;
-
-  /* set large values to force a warp to center */
-  g_cursor.delta.x = 0xFFFF;
-  g_cursor.delta.y = 0xFFFF;
 
   if (!g_cursor.guest.valid)
     return;
@@ -1115,23 +1060,6 @@ static void keyboardUngrab()
     g_state.wminfo.info.x11.display,
     CurrentTime
   );
-}
-
-static void processWarp(int serial, int x, int y)
-{
-  struct WarpInfo * warp;
-  if (!ll_peek_head(g_cursor.warpList, (void **)&warp) ||
-      serial < warp->serial || warp->to.x != x || warp->to.y != y)
-    return;
-
-  ll_shift(g_cursor.warpList, NULL);
-
-  g_cursor.pos.x = x + (warp->from.x - g_cursor.pos.x);
-  g_cursor.pos.y = y + (warp->from.y - g_cursor.pos.y);
-  free(warp);
-
-  if (ll_count(g_cursor.warpList) == 0 && g_cursor.inWindow)
-    g_cursor.warpState = WARP_STATE_ON;
 }
 
 static void setGrab(bool enable)
@@ -1175,14 +1103,6 @@ static void setGrab(bool enable)
 
   if (g_cursor.grab)
     g_cursor.inView = true;
-
-  /* if exiting grab move the pointer back to the center of the window */
-  if (!g_cursor.grab && g_cursor.inWindow)
-  {
-    warpMouse(g_state.windowCX, g_state.windowCY, false);
-    g_cursor.delta.x = 0;
-    g_cursor.delta.y = 0;
-  }
 
   app_alert(
     g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
@@ -1270,114 +1190,104 @@ int eventFilter(void * userdata, SDL_Event * event)
           /* support movements via XInput2 */
           case GenericEvent:
           {
+            if (!params.useSpiceInput || g_state.ignoreInput)
+              break;
+
             XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
             if (cookie->extension != g_XInputOp)
               break;
 
-            if (g_cursor.grab)
+            switch(cookie->evtype)
             {
-              if (cookie->evtype != XI_RawMotion)
-                break;
-
-              if (g_state.ignoreInput)
-                break;
-
-              XIRawEvent *raw = cookie->data;
-              double axis[2];
-
-              /* select the active validators for the X & Y axis */
-              double *valuator = raw->valuators.values;
-              double *value    = raw->raw_values;
-              int    count     = 0;
-              for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
+              case XI_Motion:
               {
-                if (XIMaskIsSet(raw->valuators.mask, i))
-                {
-                  if (params.rawMouse)
-                    axis[count++] = *value;
-                  else
-                    axis[count++] = *valuator;
+                if (!g_cursor.inWindow)
+                  break;
 
-                  if (count == 2)
-                    break;
-                  ++valuator;
-                  ++value;
-                }
+                XIDeviceEvent *device = cookie->data;
+                g_cursor.pos.x = device->event_x;
+                g_cursor.pos.y = device->event_y;
+                break;
               }
 
-              /* filter out scroll wheel and other events */
-              if (count < 2)
+              case XI_RawMotion:
+              {
+                if (!g_cursor.inWindow)
+                  break;
+
+                XIRawEvent *raw = cookie->data;
+                double raw_axis[2];
+                double axis[2];
+
+                /* select the active validators for the X & Y axis */
+                double *valuator = raw->valuators.values;
+                double *r_value  = raw->raw_values;
+                int    count     = 0;
+                for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
+                {
+                  if (XIMaskIsSet(raw->valuators.mask, i))
+                  {
+                    raw_axis[count] = *r_value;
+                    axis    [count] = *valuator;
+                    ++count;
+
+                    if (count == 2)
+                      break;
+
+                    ++valuator;
+                    ++r_value;
+                  }
+                }
+
+                /* filter out scroll wheel and other events */
+                if (count < 2)
+                  break;
+
+                /* filter out duplicate events */
+                static Time   prev_time    = 0;
+                static double prev_axis[2] = {0};
+                if (raw->time == prev_time &&
+                    axis[0] == prev_axis[0] &&
+                    axis[1] == prev_axis[1])
+                  break;
+
+                prev_time = raw->time;
+                prev_axis[0] = axis[0];
+                prev_axis[1] = axis[1];
+
+                if (g_cursor.grab)
+                {
+                  if (params.rawMouse)
+                    handleMouseGrabbed(raw_axis[0], raw_axis[1]);
+                  else
+                    handleMouseGrabbed(axis[0], axis[1]);
+                }
+                else
+                  if (g_cursor.inWindow)
+                    handleMouseNormal(axis[0], axis[1]);
                 break;
-
-              /* filter out duplicate events */
-              static Time   prev_time    = 0;
-              static double prev_axis[2] = {0};
-              if (raw->time == prev_time &&
-                  axis[0] == prev_axis[0] &&
-                  axis[1] == prev_axis[1])
-                break;
-
-              prev_time = raw->time;
-              prev_axis[0] = axis[0];
-              prev_axis[1] = axis[1];
-
-              handleMouseRawEvent(axis[0], axis[1]);
+              }
             }
-            else
-            {
-              if (cookie->evtype != XI_Motion)
-                break;
 
-              XIDeviceEvent *device = cookie->data;
-              const int x = round(device->event_x);
-              const int y = round(device->event_y);
-
-              processWarp(xe.xany.serial, x, y);
-              if (!g_state.ignoreInput)
-                handleMouseMoveEvent(device->event_x, device->event_y);
-            }
             break;
           }
 #endif
 
-          /* even if using XInput2 we still need this otherwise we dont get
-           * motion events when a button is held */
-          case MotionNotify:
-          {
-            if (!g_cursor.grab)
-            {
-              processWarp(xe.xany.serial, xe.xmotion.x, xe.xmotion.y);
-              if (!g_state.ignoreInput)
-                handleMouseMoveEvent(xe.xmotion.x, xe.xmotion.y);
-            }
-            break;
-          }
-
-          /* key press/release events can be the end of a warp also */
-          case KeyPress:
-          case KeyRelease:
-            processWarp(xe.xany.serial, xe.xkey.x, xe.xkey.y);
-            break;
-
-          /* button press/release events can be the end of a warp also */
-          case ButtonPress:
-          case ButtonRelease:
-            processWarp(xe.xany.serial, xe.xbutton.x, xe.xbutton.y);
-            break;
-
           case EnterNotify:
           {
+            g_cursor.pos.x = xe.xcrossing.x;
+            g_cursor.pos.y = xe.xcrossing.y;
             handleWindowEnter();
-            processWarp(xe.xany.serial, xe.xcrossing.x, xe.xcrossing.y);
             break;
           }
 
           case LeaveNotify:
           {
-            processWarp(xe.xany.serial, xe.xcrossing.x, xe.xcrossing.y);
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
+            g_cursor.pos.x = xe.xcrossing.x;
+            g_cursor.pos.y = xe.xcrossing.y;
             handleWindowLeave();
             break;
           }
@@ -1404,19 +1314,6 @@ int eventFilter(void * userdata, SDL_Event * event)
                 keyboardUngrab();
             }
             break;
-
-
-          default:
-          {
-            struct WarpInfo * warp;
-            if (ll_peek_head(g_cursor.warpList, (void **)&warp) &&
-                xe.xany.serial == warp->serial)
-            {
-              DEBUG_INFO("bug: %d", xe.type);
-              ll_shift(g_cursor.warpList, NULL);
-              free(warp);
-            }
-          }
         }
       }
 
@@ -1430,8 +1327,10 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
         break;
 
-      processWarp(0, event->motion.x, event->motion.y);
-      handleMouseMoveEvent(event->motion.x, event->motion.y);
+      if (g_cursor.grab)
+        handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+      else
+        handleMouseNormal(event->motion.xrel, event->motion.yrel);
       break;
     }
 
@@ -1759,7 +1658,6 @@ static void initSDLCursor()
 static int lg_run()
 {
   memset(&g_state, 0, sizeof(g_state));
-  g_cursor.warpList = ll_new();
 
   lgInit();
 
@@ -2210,14 +2108,6 @@ static void lg_shutdown()
   ivshmemClose(&g_state.shm);
 
   release_key_binds();
-
-  if (g_cursor.warpList)
-  {
-    struct WarpInfo * warp;
-    while(ll_shift(g_cursor.warpList, (void **)&warp))
-      free(warp);
-    ll_free(g_cursor.warpList);
-  }
 
   SDL_Quit();
 }

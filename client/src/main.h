@@ -25,7 +25,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "dynamic/renderers.h"
 #include "dynamic/clipboards.h"
 #include "common/ivshmem.h"
-#include "ll.h"
 
 #include "spice/spice.h"
 #include <lgmp/client.h>
@@ -179,6 +178,11 @@ struct CursorInfo
   uint32_t dpiScale;
 };
 
+struct DoublePoint
+{
+  double x, y;
+};
+
 struct CursorState
 {
   /* cursor is in grab mode */
@@ -200,27 +204,22 @@ struct CursorState
   bool  scale;
 
   /* the amount to scale the X & Y movements by */
-  float scaleX, scaleY;
+  double scaleX, scaleY;
 
   /* the dpi scale factor from the guest as a fraction */
-  float dpiScale;
+  double dpiScale;
 
   /* the error accumulators */
-  float accX, accY;
+  double accX, accY;
 
   /* the local X & Y position */
-  SDL_Point pos;
+  struct DoublePoint pos;
 
-  /* the delta since the last warp to CX/CY */
-  SDL_Point delta;
+  /* the scale factor for the mouse sensitiviy */
+  int sens;
 
-  /* the scale factors for the mouse sensitiviy */
-  int   sens;
-  float sensX, sensY;
-
-  /* the mouse warp state and queue */
+  /* the mouse warp state */
   enum WarpState warpState;
-  struct ll * warpList;
 
   /* the guest's cursor position */
   struct CursorInfo guest;
