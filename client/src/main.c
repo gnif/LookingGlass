@@ -1162,7 +1162,10 @@ static void setGrab(bool enable)
     else
     {
       if (params.grabKeyboard)
-        XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+      {
+        if (!g_state.focused || !params.grabKeyboardOnFocus)
+          XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+      }
 
       XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
     }
