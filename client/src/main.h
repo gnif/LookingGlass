@@ -50,6 +50,7 @@ struct AppState
   SDL_Point            windowPos;
   int                  windowW, windowH;
   int                  windowCX, windowCY;
+  bool                 focused;
   SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;

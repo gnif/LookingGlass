@@ -899,20 +899,23 @@ static void handleMouseNormal(double ex, double ey)
 
     if (inView)
     {
-      /* the cursor moved in, enable grab mode */
-      g_cursor.inView = true;
-      g_cursor.warpState = WARP_STATE_ON;
+      if (g_state.focused)
+      {
+        /* the cursor moved in, enable grab mode */
+        g_cursor.inView = true;
+        g_cursor.warpState = WARP_STATE_ON;
 
-      XGrabPointer(
-        g_state.wminfo.info.x11.display,
-        g_state.wminfo.info.x11.window,
-        true,
-        None,
-        GrabModeAsync,
-        GrabModeAsync,
-        g_state.wminfo.info.x11.window,
-        None,
-        CurrentTime);
+        XGrabPointer(
+          g_state.wminfo.info.x11.display,
+          g_state.wminfo.info.x11.window,
+          true,
+          None,
+          GrabModeAsync,
+          GrabModeAsync,
+          g_state.wminfo.info.x11.window,
+          None,
+          CurrentTime);
+      }
 
       struct DoublePoint guest =
       {
@@ -1314,6 +1317,8 @@ int eventFilter(void * userdata, SDL_Event * event)
           }
 
           case FocusIn:
+            g_state.focused = true;
+
             if (!params.useSpiceInput)
               break;
 
@@ -1323,6 +1328,8 @@ int eventFilter(void * userdata, SDL_Event * event)
             break;
 
           case FocusOut:
+            g_state.focused = false;
+
             if (!params.useSpiceInput)
               break;
 
