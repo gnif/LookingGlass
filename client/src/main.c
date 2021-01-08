@@ -365,8 +365,8 @@ static int cursorThread(void * unused)
 
     if (msg.udata & CURSOR_FLAG_POSITION)
     {
-      g_cursor.guest.x       = cursor->x;
-      g_cursor.guest.y       = cursor->y;
+      g_cursor.guest.x     = cursor->x;
+      g_cursor.guest.y     = cursor->y;
       g_cursor.guest.valid = true;
     }
 
@@ -979,11 +979,29 @@ static void handleMouseNormal(double ex, double ey)
   if (x == 0 && y == 0)
     return;
 
-  /* assume the mouse will move to the location we attempt to move it to so we
-   * avoid warp out of window issues. The cursorThread will correct this if
-   * wrong after the movement has ocurred on the guest */
-  g_cursor.guest.x += x;
-  g_cursor.guest.y += y;
+  if (params.autoCapture)
+  {
+    g_cursor.delta.x += x;
+    g_cursor.delta.y += y;
+
+    if (abs(g_cursor.delta.x) > 50 || abs(g_cursor.delta.y) > 50)
+    {
+      g_cursor.delta.x = 0;
+      g_cursor.delta.y = 0;
+      warpMouse(g_state.windowCX, g_state.windowCY, false);
+    }
+
+    g_cursor.guest.x = g_state.srcSize.x / 2;
+    g_cursor.guest.y = g_state.srcSize.y / 2;
+  }
+  else
+  {
+    /* assume the mouse will move to the location we attempt to move it to so we
+     * avoid warp out of window issues. The cursorThread will correct this if
+     * wrong after the movement has ocurred on the guest */
+    g_cursor.guest.x += x;
+    g_cursor.guest.y += y;
+  }
 
   if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");

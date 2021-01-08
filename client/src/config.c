@@ -296,6 +296,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },
+  {
+    .module         = "input",
+    .name           = "autoCapture",
+    .description    = "Try to keep the mouse captured when needed",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
 
   // spice options
   {
@@ -462,6 +469,7 @@ bool config_load(int argc, char * argv[])
   params.mouseSens           = option_get_int ("input", "mouseSens"          );
   params.rawMouse            = option_get_bool("input", "rawMouse"           );
   params.mouseRedraw         = option_get_bool("input", "mouseRedraw"        );
+  params.autoCapture         = option_get_bool("input", "autoCapture"        );
 
   params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 

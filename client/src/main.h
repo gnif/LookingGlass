@@ -138,6 +138,7 @@ struct AppParams
   bool         mouseRedraw;
   int          mouseSens;
   bool         rawMouse;
+  bool         autoCapture;
 };
 
 struct CBRequest
@@ -214,6 +215,9 @@ struct CursorState
 
   /* the local X & Y position */
   struct DoublePoint pos;
+
+  /* the delta since last warp when in auto capture mode */
+  struct DoublePoint delta;
 
   /* the scale factor for the mouse sensitiviy */
   int sens;
