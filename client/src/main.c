@@ -886,7 +886,7 @@ static void handleMouseNormal(double ex, double ey)
     ey *= g_cursor.scale.y / g_cursor.dpiScale;
   }
 
-  bool enter = false;
+  bool testExit = true;
 
   /* if the cursor was outside the viewport, check if it moved in */
   if (!g_cursor.inView)
@@ -927,8 +927,9 @@ static void handleMouseNormal(double ex, double ey)
       ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
       ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
 
-      /* stop the below code from looking for an exit */
-      enter = true;
+      /* don't test for an exit as we just entered, we can get into a enter/exit
+       * loop otherwise */
+      testExit = false;
     }
     else
     {
@@ -936,6 +937,11 @@ static void handleMouseNormal(double ex, double ey)
       return;
     }
   }
+
+  /* if we are in "autoCapture" and the delta was large don't test for exit */
+  if (params.autoCapture &&
+      (abs(ex) > 100.0 / g_cursor.scale.x || abs(ey) > 100.0 / g_cursor.scale.y))
+    testExit = false;
 
   /* translate the guests position to our coordinate space */
   struct DoublePoint local =
@@ -945,7 +951,7 @@ static void handleMouseNormal(double ex, double ey)
   };
 
   /* check if the move would push the cursor outside the guest's viewport */
-  if (!enter && (
+  if (testExit && (
       local.x + ex <  0.0 ||
       local.y + ey <  0.0 ||
       local.x + ex >= g_state.dstRect.w ||
