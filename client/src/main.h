@@ -188,33 +188,33 @@ struct DoublePoint
 struct CursorState
 {
   /* cursor is in grab mode */
-  bool  grab;
+  bool grab;
 
   /* true if we are to draw the cursor on screen */
-  bool  draw;
+  bool draw;
 
   /* true if the cursor is currently in our window */
-  bool  inWindow;
+  bool inWindow;
 
   /* true if the cursor is currently in the guest view area */
-  bool  inView;
+  bool inView;
 
   /* true if the cursor needs re-drawing/updating */
-  bool  redraw;
+  bool redraw;
 
   /* true if the cursor movements should be scaled */
-  bool  scale;
+  bool useScale;
 
   /* the amount to scale the X & Y movements by */
-  double scaleX, scaleY;
+  struct DoublePoint scale;
 
   /* the dpi scale factor from the guest as a fraction */
   double dpiScale;
 
-  /* the error accumulators */
-  double accX, accY;
+  /* the error accumulator */
+  struct DoublePoint acc;
 
-  /* the local X & Y position */
+  /* the local position */
   struct DoublePoint pos;
 
   /* the delta since last warp when in auto capture mode */

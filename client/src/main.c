@@ -86,9 +86,9 @@ static void lgInit()
   g_state.state         = APP_STATE_RUNNING;
   g_state.resizeDone    = true;
 
-  g_cursor.scale         = false;
-  g_cursor.scaleX        = 1.0f;
-  g_cursor.scaleY        = 1.0f;
+  g_cursor.useScale      = false;
+  g_cursor.scale.x       = 1.0;
+  g_cursor.scale.y       = 1.0;
   g_cursor.draw          = true;
   g_cursor.inView        = false;
   g_cursor.guest.valid   = false;
@@ -154,13 +154,13 @@ static void updatePositionInfo()
     }
     g_state.dstRect.valid = true;
 
-    g_cursor.scale = (
+    g_cursor.useScale = (
         g_state.srcSize.y       != g_state.dstRect.h ||
         g_state.srcSize.x       != g_state.dstRect.w ||
         g_cursor.guest.dpiScale != 100);
 
-    g_cursor.scaleX   = (float)g_state.srcSize.y / (float)g_state.dstRect.h;
-    g_cursor.scaleY   = (float)g_state.srcSize.x / (float)g_state.dstRect.w;
+    g_cursor.scale.x  = (float)g_state.srcSize.y / (float)g_state.dstRect.h;
+    g_cursor.scale.y  = (float)g_state.srcSize.x / (float)g_state.dstRect.w;
     g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
   }
 
@@ -843,12 +843,12 @@ static bool isValidCursorLocation(int x, int y)
 static void cursorToInt(double ex, double ey, int *x, int *y)
 {
   /* convert to int accumulating the fractional error */
-  g_cursor.accX += ex;
-  g_cursor.accY += ey;
-  *x = floor(g_cursor.accX);
-  *y = floor(g_cursor.accY);
-  g_cursor.accX -= *x;
-  g_cursor.accY -= *y;
+  g_cursor.acc.x += ex;
+  g_cursor.acc.y += ey;
+  *x = floor(g_cursor.acc.x);
+  *y = floor(g_cursor.acc.y);
+  g_cursor.acc.x -= *x;
+  g_cursor.acc.y -= *y;
 }
 
 static void handleMouseGrabbed(double ex, double ey)
@@ -880,10 +880,10 @@ static void handleMouseNormal(double ex, double ey)
   }
 
   /* scale the movement to the guest */
-  if (g_cursor.scale && params.scaleMouseInput)
+  if (g_cursor.useScale && params.scaleMouseInput)
   {
-    ex *= g_cursor.scaleX / g_cursor.dpiScale;
-    ey *= g_cursor.scaleY / g_cursor.dpiScale;
+    ex *= g_cursor.scale.x / g_cursor.dpiScale;
+    ey *= g_cursor.scale.y / g_cursor.dpiScale;
   }
 
   bool enter = false;
@@ -919,8 +919,8 @@ static void handleMouseNormal(double ex, double ey)
 
       struct DoublePoint guest =
       {
-        .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scaleX * g_cursor.dpiScale,
-        .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scaleY * g_cursor.dpiScale
+        .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scale.x * g_cursor.dpiScale,
+        .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scale.y * g_cursor.dpiScale
       };
 
       /* add the difference to the offset */
@@ -940,8 +940,8 @@ static void handleMouseNormal(double ex, double ey)
   /* translate the guests position to our coordinate space */
   struct DoublePoint local =
   {
-    .x = (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scaleX,
-    .y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scaleY
+    .x = (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scale.x,
+    .y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y
   };
 
   /* check if the move would push the cursor outside the guest's viewport */
