@@ -70,7 +70,13 @@ static LGThread *t_cursor  = NULL;
 static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
-static int g_XInputOp; // XInput Opcode
+static int    g_XInputOp; // XInput Opcode
+static Uint32 e_SDLEvent; // our SDL event
+
+enum
+{
+  LG_EVENT_ALIGN_TO_GUEST
+};
 
 struct AppState g_state;
 struct CursorState g_cursor;
@@ -92,6 +98,20 @@ static void lgInit()
   g_cursor.draw          = true;
   g_cursor.inView        = false;
   g_cursor.guest.valid   = false;
+}
+
+static void alignToGuest()
+{
+  if (!params.useSpiceInput || g_cursor.grab ||
+      SDL_HasEvent(e_SDLEvent))
+    return;
+
+  SDL_Event event;
+  SDL_memset(&event, 0, sizeof(event));
+  event.type      = e_SDLEvent;
+  event.user.code = LG_EVENT_ALIGN_TO_GUEST;
+
+  SDL_PushEvent(&event);
 }
 
 static void updatePositionInfo()
@@ -365,9 +385,13 @@ static int cursorThread(void * unused)
 
     if (msg.udata & CURSOR_FLAG_POSITION)
     {
+      bool valid = g_cursor.guest.valid;
       g_cursor.guest.x     = cursor->x;
       g_cursor.guest.y     = cursor->y;
       g_cursor.guest.valid = true;
+
+      if (valid != true)
+        alignToGuest();
     }
 
     lgmpClientMessageDone(queue);
@@ -869,6 +893,12 @@ static void handleMouseGrabbed(double ex, double ey)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
+static void guestCurToLocal(struct DoublePoint *local)
+{
+  local->x = (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scale.x;
+  local->y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y;
+}
+
 static void handleMouseNormal(double ex, double ey)
 {
   /* if we don't have the current cursor pos just send cursor movements */
@@ -950,11 +980,8 @@ static void handleMouseNormal(double ex, double ey)
     testExit = false;
 
   /* translate the guests position to our coordinate space */
-  struct DoublePoint local =
-  {
-    .x = (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scale.x,
-    .y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y
-  };
+  struct DoublePoint local;
+  guestCurToLocal(&local);
 
   /* check if the move would push the cursor outside the guest's viewport */
   if (testExit && (
@@ -1042,6 +1069,7 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   g_state.windowCX = w / 2;
   g_state.windowCY = h / 2;
   updatePositionInfo();
+  alignToGuest();
 }
 
 static void handleWindowLeave()
@@ -1151,6 +1179,24 @@ static void setGrab(bool enable)
 
 int eventFilter(void * userdata, SDL_Event * event)
 {
+  if (event->type == e_SDLEvent)
+  {
+    switch(event->user.code)
+    {
+      case LG_EVENT_ALIGN_TO_GUEST:
+      {
+        if (!g_cursor.guest.valid || !g_state.focused)
+          break;
+
+        struct DoublePoint local;
+        guestCurToLocal(&local);
+        warpMouse(round(local.x), round(local.y), false);
+        break;
+      }
+    }
+    return 0;
+  }
+
   switch(event->type)
   {
     case SDL_QUIT:
@@ -1314,8 +1360,17 @@ int eventFilter(void * userdata, SDL_Event * event)
 
           case EnterNotify:
           {
-            g_cursor.pos.x = xe.xcrossing.x;
-            g_cursor.pos.y = xe.xcrossing.y;
+            int x, y;
+            Window child;
+            XTranslateCoordinates(g_state.wminfo.info.x11.display,
+                DefaultRootWindow(g_state.wminfo.info.x11.display),
+                g_state.wminfo.info.x11.window,
+                xe.xcrossing.x_root, xe.xcrossing.y_root,
+                &x, &y,
+                &child);
+
+            g_cursor.pos.x = x;
+            g_cursor.pos.y = y;
             handleWindowEnter();
             break;
           }
@@ -1325,8 +1380,17 @@ int eventFilter(void * userdata, SDL_Event * event)
             if (xe.xcrossing.mode != NotifyNormal)
               break;
 
-            g_cursor.pos.x = xe.xcrossing.x;
-            g_cursor.pos.y = xe.xcrossing.y;
+            int x, y;
+            Window child;
+            XTranslateCoordinates(g_state.wminfo.info.x11.display,
+                DefaultRootWindow(g_state.wminfo.info.x11.display),
+                g_state.wminfo.info.x11.window,
+                xe.xcrossing.x_root, xe.xcrossing.y_root,
+                &x, &y,
+                &child);
+
+            g_cursor.pos.x = x;
+            g_cursor.pos.y = y;
             handleWindowLeave();
             break;
           }
@@ -1863,6 +1927,9 @@ static int lg_run()
     g_state.frameTime = 1000000000ULL / (unsigned long long)params.fpsMin;
   }
 
+  // create our custom event
+  e_SDLEvent = SDL_RegisterEvents(1);
+
   register_key_binds();
 
   // set the compositor hint to bypass for low latency
@@ -1919,13 +1986,6 @@ static int lg_run()
   if (params.hideMouse)
     SDL_ShowCursor(SDL_DISABLE);
 
-  if (params.captureOnStart)
-  {
-    g_cursor.grab = true;
-    if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-      SDL_SetWindowGrab(g_state.window, true);
-  }
-
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
   {
@@ -1969,6 +2029,9 @@ static int lg_run()
   /* this short timeout is to allow the LGMP host to update the timestamp before
    * we start checking for a valid session */
   SDL_WaitEventTimeout(NULL, 200);
+
+  if (params.captureOnStart)
+    setGrab(true);
 
   uint32_t udataSize;
   KVMFR *udata;
