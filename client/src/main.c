@@ -962,19 +962,17 @@ static void handleMouseNormal(double ex, double ey)
           g_state.windowPos.x + g_state.border.x + tx,
           g_state.windowPos.y + g_state.border.y + ty))
     {
-      g_cursor.inView   = false;
+      g_cursor.inView = false;
 
       /* pre-empt the window leave flag if the warp will leave our window */
       if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
-      {
         g_cursor.inWindow = false;
-      }
 
       /* ungrab the pointer and move the local cursor to the exit point */
       XUngrabPointer(g_state.wminfo.info.x11.display, CurrentTime);
       warpMouse(tx, ty, true);
+      return;
     }
-    return;
   }
 
   int x, y;
