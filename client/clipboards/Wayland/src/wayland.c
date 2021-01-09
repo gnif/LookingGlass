@@ -200,7 +200,19 @@ static const struct wl_keyboard_listener keyboard_listener = {
 static void seat_capabilities_handler(void * data, struct wl_seat * seat,
     uint32_t capabilities)
 {
-    this->capabilities = capabilities;
+  this->capabilities = capabilities;
+
+  bool has_keyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
+  if (!has_keyboard && this->keyboard)
+  {
+    wl_keyboard_destroy(this->keyboard);
+    this->keyboard = NULL;
+  }
+  else if (has_keyboard && !this->keyboard)
+  {
+    this->keyboard = wl_seat_get_keyboard(this->seat);
+    wl_keyboard_add_listener(this->keyboard, &keyboard_listener, NULL);
+  }
 }
 
 static void seat_name_handler(void * data, struct wl_seat * seat,
@@ -375,15 +387,6 @@ static bool wayland_cb_init(
   // Wait for the compositor to let us know of capabilities.
   wl_seat_add_listener(this->seat, &seat_listener, NULL);
   wl_display_roundtrip(this->display);
-  if (!(this->capabilities & WL_SEAT_CAPABILITY_KEYBOARD))
-  {
-    // TODO: keyboard hotplug support.
-    DEBUG_ERROR("no keyboard");
-    return false;
-  }
-
-  this->keyboard = wl_seat_get_keyboard(this->seat);
-  wl_keyboard_add_listener(this->keyboard, &keyboard_listener, NULL);
   return true;
 }
 
@@ -465,6 +468,10 @@ static void wayland_cb_notice(LG_ClipboardRequestFn requestFn, LG_ClipboardData 
   this->type      = type;
 
   if (!this->requestFn)
+    return;
+
+  // Won't have a keyboard enter serial if we don't have the keyboard capability.
+  if (!this->keyboard)
     return;
 
   this->requestFn(wayland_cb_reply_fn, NULL);
