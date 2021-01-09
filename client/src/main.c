@@ -1133,36 +1133,6 @@ static void handleWindowEnter()
   g_cursor.redraw = true;
 }
 
-// only called for X11
-static void keyboardGrab()
-{
-  if (!params.grabKeyboardOnFocus)
-    return;
-
-  // grab the keyboard so we can intercept WM keys
-  XGrabKeyboard(
-    g_state.wminfo.info.x11.display,
-    g_state.wminfo.info.x11.window,
-    true,
-    GrabModeAsync,
-    GrabModeAsync,
-    CurrentTime
-  );
-}
-
-// only called for X11
-static void keyboardUngrab()
-{
-  if (!params.grabKeyboardOnFocus)
-    return;
-
-  // ungrab the keyboard
-  XUngrabKeyboard(
-    g_state.wminfo.info.x11.display,
-    CurrentTime
-  );
-}
-
 static void setGrab(bool enable)
 {
   setGrabQuiet(enable);
@@ -1227,7 +1197,10 @@ static void setGrabQuiet(bool enable)
     alignToGuest();
 
   if (g_cursor.grab)
+  {
     g_cursor.inView = true;
+    g_cursor.draw = true;
+  }
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -1445,34 +1418,45 @@ int eventFilter(void * userdata, SDL_Event * event)
             g_cursor.pos.x = x;
             g_cursor.pos.y = y;
             handleWindowLeave();
+
+            /* ungrab to avoid bad behaviour */
+            if (g_cursor.grab)
+              setGrab(false);
+            else
+              XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+
             break;
           }
 
           case FocusIn:
-            g_state.focused = true;
-
-            if (!inputEnabled())
+            if (xe.xfocus.mode == NotifyGrab)
               break;
 
-            if (xe.xfocus.mode == NotifyNormal ||
-                xe.xfocus.mode == NotifyUngrab)
-              keyboardGrab();
+            g_state.focused = true;
+
+            if (params.grabKeyboardOnFocus)
+              XGrabKeyboard(
+                g_state.wminfo.info.x11.display,
+                g_state.wminfo.info.x11.window,
+                true,
+                GrabModeAsync,
+                GrabModeAsync,
+                CurrentTime
+              );
+
             break;
 
           case FocusOut:
             g_state.focused = false;
-
-            if (!inputEnabled())
+            if (xe.xfocus.mode != NotifyNormal)
               break;
 
-            if (xe.xfocus.mode == NotifyNormal ||
-                xe.xfocus.mode == NotifyWhileGrabbed)
-            {
-              if (g_cursor.grab)
-                setGrab(false);
-              else
-                keyboardUngrab();
-            }
+            /* ungrab to avoid bad behaviour */
+            if (g_cursor.grab)
+              setGrab(false);
+            else
+              XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+
             break;
         }
       }
@@ -1677,6 +1661,8 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
 
 static void toggle_fullscreen(SDL_Scancode key, void * opaque)
 {
+  /* first move the local mouse to the screen center so that we don't get a
+   * leave event breaking focus */
   SDL_SetWindowFullscreen(g_state.window, params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
   params.fullscreen = !params.fullscreen;
 }
