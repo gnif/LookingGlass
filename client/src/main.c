@@ -979,8 +979,8 @@ static void handleMouseNormal(double ex, double ey)
 
       struct DoublePoint guest =
       {
-        .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scale.x * g_cursor.dpiScale,
-        .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scale.y * g_cursor.dpiScale
+        .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scale.x,
+        .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scale.y
       };
 
       /* add the difference to the offset */
