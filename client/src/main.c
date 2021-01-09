@@ -84,6 +84,9 @@ struct CursorState g_cursor;
 // this structure is initialized in config.c
 struct AppParams params = { 0 };
 
+static void setGrab(bool enable);
+static void setGrabQuiet(bool enable);
+
 static void handleMouseGrabbed(double ex, double ey);
 static void handleMouseNormal(double ex, double ey);
 
@@ -1093,7 +1096,17 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   updatePositionInfo();
 
   if (inputEnabled())
+  {
+    /* if the window is moved/resized causing a loss of focus while grabbed, it
+     * makes it impossible to re-focus the window, so we quietly re-enter
+     * capture if we were already in it */
+    if (g_cursor.grab)
+    {
+      setGrabQuiet(false);
+      setGrabQuiet(true);
+    }
     alignToGuest();
+  }
 }
 
 static void handleWindowLeave()
@@ -1152,6 +1165,16 @@ static void keyboardUngrab()
 
 static void setGrab(bool enable)
 {
+  setGrabQuiet(enable);
+
+  app_alert(
+    g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
+    g_cursor.grab ? "Capture Enabled" : "Capture Disabled"
+  );
+}
+
+static void setGrabQuiet(bool enable)
+{
   /* we always do this so that at init the cursor is in the right state */
   if (params.captureInputOnly && params.hideMouse)
     SDL_ShowCursor(enable ? SDL_DISABLE : SDL_ENABLE);
@@ -1205,11 +1228,6 @@ static void setGrab(bool enable)
 
   if (g_cursor.grab)
     g_cursor.inView = true;
-
-  app_alert(
-    g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-    g_cursor.grab ? "Capture Enabled" : "Capture Disabled"
-  );
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
