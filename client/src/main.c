@@ -877,15 +877,21 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
 
 static void handleMouseGrabbed(double ex, double ey)
 {
+  int x, y;
+
   /* apply sensitivity */
   if (g_cursor.sens != 0)
   {
     ex = (ex / 10.0) * (g_cursor.sens + 10);
     ey = (ey / 10.0) * (g_cursor.sens + 10);
+    cursorToInt(ex, ey, &x, &y);
+  }
+  else
+  {
+    x = floor(ex);
+    y = floor(ey);
   }
 
-  int x, y;
-  cursorToInt(ex, ey, &x, &y);
   if (x == 0 && y == 0)
     return;
 
@@ -1023,7 +1029,16 @@ static void handleMouseNormal(double ex, double ey)
   }
 
   int x, y;
-  cursorToInt(ex, ey, &x, &y);
+  if (params.mouseSmoothing)
+  {
+    static struct DoublePoint last = { 0 };
+    last.x = (last.x + ex) / 2.0;
+    last.y = (last.y + ey) / 2.0;
+    cursorToInt(last.x, last.y, &x, &y);
+  }
+  else
+    cursorToInt(ex, ey, &x, &y);
+
   if (x == 0 && y == 0)
     return;
 

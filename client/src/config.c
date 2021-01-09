@@ -284,6 +284,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "mouseSmoothing",
+    .description    = "Apply simple mouse smoothing when not in capture mode (helps reduce aliasing)",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "input",
     .name           = "rawMouse",
     .description    = "Use RAW mouse input when in capture mode (good for gaming)",
     .type           = OPTION_TYPE_BOOL,
@@ -467,6 +474,7 @@ bool config_load(int argc, char * argv[])
   params.ignoreWindowsKeys   = option_get_bool("input", "ignoreWindowsKeys"  );
   params.hideMouse           = option_get_bool("input", "hideCursor"         );
   params.mouseSens           = option_get_int ("input", "mouseSens"          );
+  params.mouseSmoothing      = option_get_bool("input", "mouseSmoothing"     );
   params.rawMouse            = option_get_bool("input", "rawMouse"           );
   params.mouseRedraw         = option_get_bool("input", "mouseRedraw"        );
   params.autoCapture         = option_get_bool("input", "autoCapture"        );
