@@ -24,6 +24,9 @@ add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
 option(ENABLE_CB_X11 "Enable X11 clipboard integration" ON)
 add_feature_info(ENABLE_CB_X11 ENABLE_CB_X11 "X11 Clipboard Integration.")
 
+option(ENABLE_CB_WAYLAND "Enable Wayland clipboard integration" ON)
+add_feature_info(ENABLE_CB_WAYLAND ENABLE_CB_WAYLAND "Wayland Clipboard Integration.")
+
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 
