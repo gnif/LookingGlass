@@ -23,6 +23,10 @@ if (ENABLE_CB_X11)
   add_clipboard(X11)
 endif()
 
+if (ENABLE_CB_WAYLAND)
+  add_clipboard(Wayland)
+endif()
+
 list(REMOVE_AT CLIPBOARDS      0)
 list(REMOVE_AT CLIPBOARDS_LINK 0)
 
