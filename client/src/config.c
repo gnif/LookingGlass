@@ -285,7 +285,7 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "mouseSmoothing",
-    .description    = "Apply simple mouse smoothing when not in capture mode (helps reduce aliasing)",
+    .description    = "Apply simple mouse smoothing when rawMouse is not in use (helps reduce aliasing)",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },

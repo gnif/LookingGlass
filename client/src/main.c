@@ -866,6 +866,14 @@ static bool isValidCursorLocation(int x, int y)
 
 static void cursorToInt(double ex, double ey, int *x, int *y)
 {
+  /* only smooth if enabled and not using raw mode */
+  if (params.mouseSmoothing && !(g_cursor.grab && params.rawMouse))
+  {
+    static struct DoublePoint last = { 0 };
+    ex = last.x = (last.x + ex) / 2.0;
+    ey = last.y = (last.y + ey) / 2.0;
+  }
+
   /* convert to int accumulating the fractional error */
   g_cursor.acc.x += ex;
   g_cursor.acc.y += ey;
@@ -879,17 +887,18 @@ static void handleMouseGrabbed(double ex, double ey)
 {
   int x, y;
 
-  /* apply sensitivity */
-  if (g_cursor.sens != 0)
+  if (params.rawMouse && !g_cursor.useScale)
   {
-    ex = (ex / 10.0) * (g_cursor.sens + 10);
-    ey = (ey / 10.0) * (g_cursor.sens + 10);
-    cursorToInt(ex, ey, &x, &y);
+    /* raw unscaled input are always round numbers */
+    x = floor(ex);
+    y = floor(ey);
   }
   else
   {
-    x = floor(ex);
-    y = floor(ey);
+    /* apply sensitivity */
+    ex = (ex / 10.0) * (g_cursor.sens + 10);
+    ey = (ey / 10.0) * (g_cursor.sens + 10);
+    cursorToInt(ex, ey, &x, &y);
   }
 
   if (x == 0 && y == 0)
@@ -1029,15 +1038,7 @@ static void handleMouseNormal(double ex, double ey)
   }
 
   int x, y;
-  if (params.mouseSmoothing)
-  {
-    static struct DoublePoint last = { 0 };
-    last.x = (last.x + ex) / 2.0;
-    last.y = (last.y + ey) / 2.0;
-    cursorToInt(last.x, last.y, &x, &y);
-  }
-  else
-    cursorToInt(ex, ey, &x, &y);
+  cursorToInt(ex, ey, &x, &y);
 
   if (x == 0 && y == 0)
     return;
