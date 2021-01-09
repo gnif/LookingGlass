@@ -1487,6 +1487,9 @@ int eventFilter(void * userdata, SDL_Event * event)
       if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
         break;
 
+      g_cursor.pos.x = event->motion.x;
+      g_cursor.pos.y = event->motion.y;
+
       if (g_cursor.grab)
         handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
       else
