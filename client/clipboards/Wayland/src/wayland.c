@@ -125,9 +125,40 @@ static bool contains_mimetype(const char ** mimetypes,
   return false;
 }
 
-static enum LG_ClipboardData mimetype_to_cb_type(const char * mimetype)
+static bool mimetype_endswith(const char * mimetype, const char * what)
+{
+  size_t mimetype_len = strlen(mimetype);
+  size_t what_len = strlen(what);
+
+  if (mimetype_len < what_len)
+    return false;
+
+  return !strcmp(mimetype + mimetype_len - what_len, what);
+}
+
+static bool is_text_mimetype(const char * mimetype)
 {
   if (contains_mimetype(text_mimetypes, mimetype))
+    return true;
+
+  char * text = "text/";
+  if (!strncmp(mimetype, text, strlen(text)))
+    return true;
+
+  if (mimetype_endswith(mimetype, "script") ||
+      mimetype_endswith(mimetype, "xml") ||
+      mimetype_endswith(mimetype, "yaml"))
+    return true;
+
+  if (strstr(mimetype, "json"))
+    return true;
+
+  return false;
+}
+
+static enum LG_ClipboardData mimetype_to_cb_type(const char * mimetype)
+{
+  if (is_text_mimetype(mimetype))
     return LG_CLIPBOARD_DATA_TEXT;
 
   if (contains_mimetype(png_mimetypes, mimetype))
@@ -256,7 +287,11 @@ static void wl_data_handle_offer(void * data, struct wl_data_offer * offer,
     const char * mimetype)
 {
   enum LG_ClipboardData type = mimetype_to_cb_type(mimetype);
-  if (type != LG_CLIPBOARD_DATA_NONE)
+  // Oftentimes we'll get text/html alongside text/png, but would prefer to send
+  // image/png. In general, prefer images over text content.
+  if (type != LG_CLIPBOARD_DATA_NONE &&
+      (this->stashed_type == LG_CLIPBOARD_DATA_NONE ||
+       this->stashed_type == LG_CLIPBOARD_DATA_TEXT))
   {
     this->stashed_type = type;
     if (this->stashed_mimetype)
