@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 struct transfer {
   void * data;
   size_t size;
+  const char ** mimetypes;
 };
 
 struct state
@@ -58,7 +59,55 @@ static const char * text_mimetypes[] =
   "TEXT",
   "STRING",
   "UTF8_STRING",
+  NULL,
 };
+
+static const char * png_mimetypes[] =
+{
+  "image/png",
+  NULL,
+};
+
+static const char * bmp_mimetypes[] =
+{
+  "image/bmp",
+  "image/x-bmp",
+  "image/x-MS-bmp",
+  "image/x-win-bitmap",
+  NULL,
+};
+
+static const char * tiff_mimetypes[] =
+{
+  "image/tiff",
+  NULL,
+};
+
+static const char * jpeg_mimetypes[] =
+{
+  "image/jpeg",
+  NULL,
+};
+
+static const char ** cb_type_to_mimetypes(enum LG_ClipboardData type)
+{
+  switch (type)
+  {
+    case LG_CLIPBOARD_DATA_TEXT:
+      return text_mimetypes;
+    case LG_CLIPBOARD_DATA_PNG:
+      return png_mimetypes;
+    case LG_CLIPBOARD_DATA_BMP:
+      return bmp_mimetypes;
+    case LG_CLIPBOARD_DATA_TIFF:
+      return tiff_mimetypes;
+    case LG_CLIPBOARD_DATA_JPEG:
+      return jpeg_mimetypes;
+    default:
+      DEBUG_ERROR("invalid clipboard type");
+      abort();
+  }
+}
 
 static const char * wayland_cb_getName()
 {
@@ -208,19 +257,20 @@ static void wayland_cb_wmevent(SDL_SysWMmsg * msg)
 {
 }
 
-static bool is_text_mimetype(const char * mime_type)
+static bool is_valid_mimetype(struct transfer * transfer,
+    const char * needle)
 {
-  for (int i = 0; i < sizeof(text_mimetypes)/sizeof(char *); i++)
-    if (!strcmp(mime_type, text_mimetypes[i]))
+  for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
+    if (!strcmp(needle, *mimetype))
       return true;
 
   return false;
 }
 
 static void data_source_handle_send(void * data, struct wl_data_source * source,
-    const char * mime_type, int fd) {
-  struct transfer * transfer = (struct transfer *) data;
-  if (is_text_mimetype(mime_type))
+    const char * mimetype, int fd) {
+  struct transfer *transfer = (struct transfer *) data;
+  if (is_valid_mimetype(transfer, mimetype))
   {
     // Consider making this do non-blocking sends to not stall the Wayland
     // event loop if it becomes a problem. This is "fine" in the sense that
@@ -263,16 +313,17 @@ static void wayland_cb_reply_fn(void * opaque, LG_ClipboardData type, uint8_t * 
   struct transfer * transfer = malloc(sizeof(struct transfer));
   void * data_copy = malloc(size);
   memcpy(data_copy, data, size);
-  transfer->data = data_copy;
-  transfer->size = size;
+  *transfer = (struct transfer) {
+    .data = data_copy,
+    .size = size,
+    .mimetypes = cb_type_to_mimetypes(type),
+  };
 
-  struct wl_data_source *source =
+  struct wl_data_source * source =
     wl_data_device_manager_create_data_source(this->data_device_manager);
   wl_data_source_add_listener(source, &data_source_listener, transfer);
-  for (int i = 0; i < sizeof(text_mimetypes)/sizeof(*text_mimetypes); i++)
-  {
-    wl_data_source_offer(source, text_mimetypes[i]);
-  }
+  for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
+    wl_data_source_offer(source, *mimetype);
 
   wl_data_device_set_selection(this->data_device, source,
     this->keyboard_enter_serial);
@@ -280,12 +331,6 @@ static void wayland_cb_reply_fn(void * opaque, LG_ClipboardData type, uint8_t * 
 
 static void wayland_cb_notice(LG_ClipboardRequestFn requestFn, LG_ClipboardData type)
 {
-  if (type != LG_CLIPBOARD_DATA_TEXT)
-  {
-    DEBUG_ERROR("Only text selection currently supported");
-    return;
-  }
-
   this->requestFn = requestFn;
   this->type      = type;
 
