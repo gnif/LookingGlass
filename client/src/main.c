@@ -2069,7 +2069,8 @@ static int lg_run()
    * we start checking for a valid session */
   SDL_WaitEventTimeout(NULL, 200);
 
-  setGrab(params.captureOnStart);
+  if (params.captureOnStart)
+    setGrab(true);
 
   uint32_t udataSize;
   KVMFR *udata;
