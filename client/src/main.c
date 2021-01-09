@@ -965,16 +965,19 @@ static void handleMouseNormal(double ex, double ey)
 
         g_cursor.warpState = WARP_STATE_ON;
 
-        XGrabPointer(
-          g_state.wminfo.info.x11.display,
-          g_state.wminfo.info.x11.window,
-          true,
-          None,
-          GrabModeAsync,
-          GrabModeAsync,
-          g_state.wminfo.info.x11.window,
-          None,
-          CurrentTime);
+        if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
+        {
+          XGrabPointer(
+            g_state.wminfo.info.x11.display,
+            g_state.wminfo.info.x11.window,
+            true,
+            None,
+            GrabModeAsync,
+            GrabModeAsync,
+            g_state.wminfo.info.x11.window,
+            None,
+            CurrentTime);
+        }
       }
 
       struct DoublePoint guest =
@@ -1040,7 +1043,8 @@ static void handleMouseNormal(double ex, double ey)
         g_cursor.inWindow = false;
 
       /* ungrab the pointer and move the local cursor to the exit point */
-      XUngrabPointer(g_state.wminfo.info.x11.display, CurrentTime);
+      if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
+        XUngrabPointer(g_state.wminfo.info.x11.display, CurrentTime);
       warpMouse(tx, ty, true);
       return;
     }
@@ -1274,6 +1278,16 @@ int eventFilter(void * userdata, SDL_Event * event)
         case SDL_WINDOWEVENT_LEAVE:
           if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
             handleWindowLeave();
+          break;
+
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+            g_state.focused = true;
+          break;
+
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+            g_state.focused = false;
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
