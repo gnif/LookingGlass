@@ -100,10 +100,15 @@ static void lgInit()
   g_cursor.guest.valid   = false;
 }
 
+static bool inputEnabled()
+{
+  return params.useSpiceInput && !g_state.ignoreInput &&
+    ((g_cursor.grab && params.captureInputOnly) || !params.captureInputOnly);
+}
+
 static void alignToGuest()
 {
-  if (!params.useSpiceInput || g_cursor.grab ||
-      SDL_HasEvent(e_SDLEvent))
+  if (SDL_HasEvent(e_SDLEvent))
     return;
 
   SDL_Event event;
@@ -390,7 +395,8 @@ static int cursorThread(void * unused)
       g_cursor.guest.y     = cursor->y;
       g_cursor.guest.valid = true;
 
-      if (valid != true)
+      // if the state just became valid
+      if (valid != true && inputEnabled())
         alignToGuest();
     }
 
@@ -1085,7 +1091,9 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   g_state.windowCX = w / 2;
   g_state.windowCY = h / 2;
   updatePositionInfo();
-  alignToGuest();
+
+  if (inputEnabled())
+    alignToGuest();
 }
 
 static void handleWindowLeave()
@@ -1093,7 +1101,7 @@ static void handleWindowLeave()
   g_cursor.inWindow = false;
   g_cursor.inView   = false;
 
-  if (!params.useSpiceInput)
+  if (!inputEnabled())
     return;
 
   if (!params.alwaysShowCursor)
@@ -1105,7 +1113,7 @@ static void handleWindowLeave()
 static void handleWindowEnter()
 {
   g_cursor.inWindow = true;
-  if (!params.useSpiceInput)
+  if (!inputEnabled())
     return;
 
   g_cursor.draw   = true;
@@ -1144,16 +1152,20 @@ static void keyboardUngrab()
 
 static void setGrab(bool enable)
 {
+  /* we always do this so that at init the cursor is in the right state */
+  if (params.captureInputOnly && params.hideMouse)
+    SDL_ShowCursor(enable ? SDL_DISABLE : SDL_ENABLE);
+
   if (g_cursor.grab == enable)
     return;
 
   g_cursor.grab = enable;
 
   if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-    SDL_SetWindowGrab(g_state.window, g_cursor.grab);
+    SDL_SetWindowGrab(g_state.window, enable);
   else
   {
-    if (g_cursor.grab)
+    if (enable)
     {
       XGrabPointer(
         g_state.wminfo.info.x11.display,
@@ -1186,6 +1198,10 @@ static void setGrab(bool enable)
       XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
     }
   }
+
+  // if exiting capture when input on capture only, we want to show the cursor
+  if (!enable && (params.captureInputOnly || !params.hideMouse))
+    alignToGuest();
 
   if (g_cursor.grab)
     g_cursor.inView = true;
@@ -1294,7 +1310,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           /* support movements via XInput2 */
           case GenericEvent:
           {
-            if (!params.useSpiceInput || g_state.ignoreInput)
+            if (!inputEnabled())
               break;
 
             XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
@@ -1417,7 +1433,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           case FocusIn:
             g_state.focused = true;
 
-            if (!params.useSpiceInput)
+            if (!inputEnabled())
               break;
 
             if (xe.xfocus.mode == NotifyNormal ||
@@ -1428,7 +1444,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           case FocusOut:
             g_state.focused = false;
 
-            if (!params.useSpiceInput)
+            if (!inputEnabled())
               break;
 
             if (xe.xfocus.mode == NotifyNormal ||
@@ -1476,7 +1492,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
       }
 
-      if (g_state.ignoreInput || !params.useSpiceInput)
+      if (!inputEnabled())
         break;
 
       if (params.ignoreWindowsKeys &&
@@ -1525,7 +1541,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           g_state.escapeActive = false;
       }
 
-      if (g_state.ignoreInput || !params.useSpiceInput)
+      if (!inputEnabled())
         break;
 
       // avoid sending key up events when we didn't send a down
@@ -1551,7 +1567,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
-      if (g_state.ignoreInput || !params.useSpiceInput || !g_cursor.inView)
+      if (!inputEnabled() || !g_cursor.inView)
         break;
 
       if (
@@ -1566,7 +1582,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONDOWN:
     {
-      if (g_state.ignoreInput || !params.useSpiceInput || !g_cursor.inView)
+      if (!inputEnabled() || !g_cursor.inView)
         break;
 
       int button = event->button.button;
@@ -1583,7 +1599,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONUP:
     {
-      if (g_state.ignoreInput || !params.useSpiceInput || !g_cursor.inView)
+      if (!inputEnabled() || !g_cursor.inView)
         break;
 
       int button = event->button.button;
@@ -2049,8 +2065,7 @@ static int lg_run()
    * we start checking for a valid session */
   SDL_WaitEventTimeout(NULL, 200);
 
-  if (params.captureOnStart)
-    setGrab(true);
+  setGrab(params.captureOnStart);
 
   uint32_t udataSize;
   KVMFR *udata;

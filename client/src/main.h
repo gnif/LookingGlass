@@ -141,6 +141,7 @@ struct AppParams
   bool         mouseSmoothing;
   bool         rawMouse;
   bool         autoCapture;
+  bool         captureInputOnly;
 };
 
 struct CBRequest

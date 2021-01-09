@@ -141,6 +141,7 @@ Command line arguments will override any options loaded from the config files.
 | input:rawMouse            |       | no              | Use RAW mouse input when in capture mode (good for gaming)                             |
 | input:mouseRedraw         |       | yes             | Mouse movements trigger redraws (ignores FPS minimum)                                  |
 | input:autoCapture         |       | no              | Try to keep the mouse captured when needed                                             |
+| input:captureOnly         |       | no              | Only enable input via SPICE if in capture mode                                         |
 |----------------------------------------------------------------------------------------------------------------------------------------------|
 
 |------------------------------------------------------------------------------------------------------------------|
