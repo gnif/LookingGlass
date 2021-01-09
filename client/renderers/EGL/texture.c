@@ -170,6 +170,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   texture->stride      = stride;
   texture->streaming   = streaming;
   texture->bufferCount = streaming ? BUFFER_COUNT : 1;
+  texture->dma         = useDMA;
   texture->ready       = false;
 
   atomic_store_explicit(&texture->state.w, 0, memory_order_relaxed);
