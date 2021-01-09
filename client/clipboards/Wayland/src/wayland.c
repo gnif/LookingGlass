@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/clipboard.h"
 #include "common/debug.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -38,6 +39,11 @@ struct state
   struct wl_data_device_manager * data_device_manager;
   struct wl_seat * seat;
   struct wl_data_device * data_device;
+
+  enum LG_ClipboardData stashed_type;
+  char * stashed_mimetype;
+  uint8_t * stashed_contents;
+  ssize_t stashed_size;
 
   struct wl_keyboard * keyboard;
   uint32_t keyboard_enter_serial;
@@ -107,6 +113,36 @@ static const char ** cb_type_to_mimetypes(enum LG_ClipboardData type)
       DEBUG_ERROR("invalid clipboard type");
       abort();
   }
+}
+
+static bool contains_mimetype(const char ** mimetypes,
+    const char * needle)
+{
+  for (const char ** mimetype = mimetypes; *mimetype; mimetype++)
+    if (!strcmp(needle, *mimetype))
+      return true;
+
+  return false;
+}
+
+static enum LG_ClipboardData mimetype_to_cb_type(const char * mimetype)
+{
+  if (contains_mimetype(text_mimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_TEXT;
+
+  if (contains_mimetype(png_mimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_PNG;
+
+  if (contains_mimetype(bmp_mimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_BMP;
+
+  if (contains_mimetype(tiff_mimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_TIFF;
+
+  if (contains_mimetype(jpeg_mimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_JPEG;
+
+  return LG_CLIPBOARD_DATA_NONE;
 }
 
 static const char * wayland_cb_getName()
@@ -202,6 +238,109 @@ static const struct wl_registry_listener registry_listener = {
   .global_remove = registry_global_remove_handler,
 };
 
+// Destination client handlers.
+
+static void wl_data_handle_offer(void * data, struct wl_data_offer * offer,
+    const char * mimetype)
+{
+  enum LG_ClipboardData type = mimetype_to_cb_type(mimetype);
+  if (type != LG_CLIPBOARD_DATA_NONE)
+  {
+    this->stashed_type = type;
+    if (this->stashed_mimetype)
+      free(this->stashed_mimetype);
+    this->stashed_mimetype = strdup(mimetype);
+  }
+}
+
+static const struct wl_data_offer_listener data_offer_listener = {
+  .offer = wl_data_handle_offer,
+};
+
+static void wl_data_device_handle_data_offer(void * data,
+    struct wl_data_device * data_device, struct wl_data_offer * offer)
+{
+  wl_data_offer_add_listener(offer, &data_offer_listener, NULL);
+}
+
+static void wl_data_device_handle_selection(void * data,
+    struct wl_data_device * data_device, struct wl_data_offer * offer)
+{
+  if (this->stashed_type == LG_CLIPBOARD_DATA_NONE || !offer)
+    return;
+
+  int fds[2];
+  if (pipe(fds) < 0)
+  {
+    DEBUG_ERROR("Failed to get a clipboard pipe: %s", strerror(errno));
+    abort();
+  }
+
+  wl_data_offer_receive(offer, this->stashed_mimetype, fds[1]);
+  close(fds[1]);
+  free(this->stashed_mimetype);
+  this->stashed_mimetype = NULL;
+
+  wl_display_roundtrip(this->display);
+
+  if (this->stashed_contents)
+  {
+    free(this->stashed_contents);
+    this->stashed_contents = NULL;
+  }
+
+  size_t size = 4096, num_read = 0;
+  uint8_t * buf = (uint8_t *) malloc(size);
+  while (true)
+  {
+    ssize_t result = read(fds[0], buf + num_read, size - num_read);
+    if (result < 0)
+    {
+      DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
+      abort();
+    }
+
+    if (result == 0)
+    {
+      buf[num_read] = 0;
+      break;
+    }
+
+    num_read += result;
+    if (num_read >= size)
+    {
+      size *= 2;
+      void * nbuf = realloc(buf, size);
+      if (!nbuf) {
+        DEBUG_ERROR("Failed to realloc clipboard buffer: %s", strerror(errno));
+        abort();
+      }
+
+      buf = nbuf;
+    }
+  }
+
+  this->stashed_size = num_read;
+  this->stashed_contents = buf;
+
+  close(fds[0]);
+  wl_data_offer_destroy(offer);
+
+  this->notifyFn(this->stashed_type, 0);
+}
+
+static void wayland_cb_request(LG_ClipboardData type)
+{
+  // We only notified once, so it must be this.
+  assert(type == this->stashed_type);
+  this->dataFn(this->stashed_type, this->stashed_contents, this->stashed_size);
+}
+
+static const struct wl_data_device_listener data_device_listener = {
+  .data_offer = wl_data_device_handle_data_offer,
+  .selection = wl_data_device_handle_selection,
+};
+
 // End of Wayland handlers.
 
 static bool wayland_cb_init(
@@ -231,6 +370,7 @@ static bool wayland_cb_init(
 
   this->data_device = wl_data_device_manager_get_data_device(
       this->data_device_manager, this->seat);
+  wl_data_device_add_listener(this->data_device, &data_device_listener, NULL);
 
   // Wait for the compositor to let us know of capabilities.
   wl_seat_add_listener(this->seat, &seat_listener, NULL);
@@ -257,20 +397,10 @@ static void wayland_cb_wmevent(SDL_SysWMmsg * msg)
 {
 }
 
-static bool is_valid_mimetype(struct transfer * transfer,
-    const char * needle)
-{
-  for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
-    if (!strcmp(needle, *mimetype))
-      return true;
-
-  return false;
-}
-
 static void data_source_handle_send(void * data, struct wl_data_source * source,
     const char * mimetype, int fd) {
-  struct transfer *transfer = (struct transfer *) data;
-  if (is_valid_mimetype(transfer, mimetype))
+  struct transfer * transfer = (struct transfer *) data;
+  if (contains_mimetype(transfer->mimetypes, mimetype))
   {
     // Consider making this do non-blocking sends to not stall the Wayland
     // event loop if it becomes a problem. This is "fine" in the sense that
@@ -343,10 +473,6 @@ static void wayland_cb_notice(LG_ClipboardRequestFn requestFn, LG_ClipboardData 
 static void wayland_cb_release()
 {
   this->requestFn = NULL;
-}
-
-static void wayland_cb_request(LG_ClipboardData type)
-{
 }
 
 const LG_Clipboard LGC_Wayland =
