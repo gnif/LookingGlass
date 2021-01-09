@@ -2015,6 +2015,10 @@ static int lg_run()
 
       g_state.lgc = LG_Clipboards[0];
     }
+    else if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
+    {
+      g_state.lgc = LG_Clipboards[1];
+    }
   } else {
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
     return -1;
