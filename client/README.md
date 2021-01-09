@@ -137,7 +137,7 @@ Command line arguments will override any options loaded from the config files.
 | input:ignoreWindowsKeys   |       | no              | Do not pass events for the windows keys to the guest                                   |
 | input:hideCursor          | -M    | yes             | Hide the local mouse cursor                                                            |
 | input:mouseSens           |       | 0               | Initial mouse sensitivity when in capture mode (-9 to 9)                               |
-| input:mouseSmoothing      |       | yes             | Apply simple mouse smoothing when not in capture mode (helps reduce aliasing)          |
+| input:mouseSmoothing      |       | yes             | Apply simple mouse smoothing when rawMouse is not in use (helps reduce aliasing)       |
 | input:rawMouse            |       | no              | Use RAW mouse input when in capture mode (good for gaming)                             |
 | input:mouseRedraw         |       | yes             | Mouse movements trigger redraws (ignores FPS minimum)                                  |
 | input:autoCapture         |       | no              | Try to keep the mouse captured when needed                                             |
