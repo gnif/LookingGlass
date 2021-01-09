@@ -1840,6 +1840,9 @@ static int lg_run()
      }
   }
 
+  if (!params.noScreensaver)
+    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
     DEBUG_ERROR("SDL_Init Failed");
@@ -1953,12 +1956,6 @@ static int lg_run()
 
   if (params.fullscreen)
     SDL_SetWindowFullscreen(g_state.window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-
-  if (!params.noScreensaver)
-  {
-    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
-    SDL_EnableScreenSaver();
-  }
 
   if (!params.center)
     SDL_SetWindowPosition(g_state.window, params.x, params.y);
