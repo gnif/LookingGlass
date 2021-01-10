@@ -67,7 +67,7 @@ void wmUngrabPointer()
       break;
 
     default:
-      SDL_SetWindowGrab(g_state.window, SDL_TRUE);
+      SDL_SetWindowGrab(g_state.window, SDL_FALSE);
       break;
   }
 
