@@ -1124,26 +1124,6 @@ static void handleWindowEnter()
   g_cursor.redraw = true;
 }
 
-// only called for X11
-static void keyboardGrab()
-{
-  if (!params.grabKeyboardOnFocus)
-    return;
-
-  // grab the keyboard so we can intercept WM keys
-  wmGrabKeyboard();
-}
-
-// only called for X11
-static void keyboardUngrab()
-{
-  if (!params.grabKeyboardOnFocus)
-    return;
-
-  // ungrab the keyboard
-  wmUngrabKeyboard();
-}
-
 static void setGrab(bool enable)
 {
   setGrabQuiet(enable);
@@ -1417,7 +1397,10 @@ int eventFilter(void * userdata, SDL_Event * event)
 
             if (xe.xfocus.mode == NotifyNormal ||
                 xe.xfocus.mode == NotifyUngrab)
-              keyboardGrab();
+            {
+              if (params.grabKeyboardOnFocus)
+                wmGrabKeyboard();
+            }
             break;
 
           case FocusOut:
@@ -1432,7 +1415,10 @@ int eventFilter(void * userdata, SDL_Event * event)
               if (g_cursor.grab)
                 setGrab(false);
               else
-                keyboardUngrab();
+              {
+                if (params.grabKeyboardOnFocus)
+                  wmUngrabKeyboard();
+              }
             }
             break;
         }
