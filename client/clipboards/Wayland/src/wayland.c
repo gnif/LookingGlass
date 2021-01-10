@@ -26,27 +26,28 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 #include <wayland-client.h>
 
-struct transfer {
+struct WCBTransfer
+{
   void * data;
   size_t size;
   const char ** mimetypes;
 };
 
-struct state
+struct WCBState
 {
   struct wl_display * display;
   struct wl_registry * registry;
-  struct wl_data_device_manager * data_device_manager;
+  struct wl_data_device_manager * dataDeviceManager;
   struct wl_seat * seat;
-  struct wl_data_device * data_device;
+  struct wl_data_device * dataDevice;
 
-  enum LG_ClipboardData stashed_type;
-  char * stashed_mimetype;
-  uint8_t * stashed_contents;
-  ssize_t stashed_size;
+  enum LG_ClipboardData stashedType;
+  char * stashedMimetype;
+  uint8_t * stashedContents;
+  ssize_t stashedSize;
 
   struct wl_keyboard * keyboard;
-  uint32_t keyboard_enter_serial;
+  uint32_t keyboardEnterSerial;
   uint32_t capabilities;
 
   LG_ClipboardReleaseFn releaseFn;
@@ -56,9 +57,9 @@ struct state
   LG_ClipboardData      type;
 };
 
-static struct state * this = NULL;
+static struct WCBState * this = NULL;
 
-static const char * text_mimetypes[] =
+static const char * textMimetypes[] =
 {
   "text/plain",
   "text/plain;charset=utf-8",
@@ -68,13 +69,13 @@ static const char * text_mimetypes[] =
   NULL,
 };
 
-static const char * png_mimetypes[] =
+static const char * pngMimetypes[] =
 {
   "image/png",
   NULL,
 };
 
-static const char * bmp_mimetypes[] =
+static const char * bmpMimetypes[] =
 {
   "image/bmp",
   "image/x-bmp",
@@ -83,39 +84,39 @@ static const char * bmp_mimetypes[] =
   NULL,
 };
 
-static const char * tiff_mimetypes[] =
+static const char * tiffMimetypes[] =
 {
   "image/tiff",
   NULL,
 };
 
-static const char * jpeg_mimetypes[] =
+static const char * jpegMimetypes[] =
 {
   "image/jpeg",
   NULL,
 };
 
-static const char ** cb_type_to_mimetypes(enum LG_ClipboardData type)
+static const char ** cbTypeToMimetypes(enum LG_ClipboardData type)
 {
   switch (type)
   {
     case LG_CLIPBOARD_DATA_TEXT:
-      return text_mimetypes;
+      return textMimetypes;
     case LG_CLIPBOARD_DATA_PNG:
-      return png_mimetypes;
+      return pngMimetypes;
     case LG_CLIPBOARD_DATA_BMP:
-      return bmp_mimetypes;
+      return bmpMimetypes;
     case LG_CLIPBOARD_DATA_TIFF:
-      return tiff_mimetypes;
+      return tiffMimetypes;
     case LG_CLIPBOARD_DATA_JPEG:
-      return jpeg_mimetypes;
+      return jpegMimetypes;
     default:
       DEBUG_ERROR("invalid clipboard type");
       abort();
   }
 }
 
-static bool contains_mimetype(const char ** mimetypes,
+static bool containsMimetype(const char ** mimetypes,
     const char * needle)
 {
   for (const char ** mimetype = mimetypes; *mimetype; mimetype++)
@@ -125,29 +126,29 @@ static bool contains_mimetype(const char ** mimetypes,
   return false;
 }
 
-static bool mimetype_endswith(const char * mimetype, const char * what)
+static bool mimetypeEndswith(const char * mimetype, const char * what)
 {
-  size_t mimetype_len = strlen(mimetype);
-  size_t what_len = strlen(what);
+  size_t mimetypeLen = strlen(mimetype);
+  size_t whatLen = strlen(what);
 
-  if (mimetype_len < what_len)
+  if (mimetypeLen < whatLen)
     return false;
 
-  return !strcmp(mimetype + mimetype_len - what_len, what);
+  return !strcmp(mimetype + mimetypeLen - whatLen, what);
 }
 
-static bool is_text_mimetype(const char * mimetype)
+static bool isTextMimetype(const char * mimetype)
 {
-  if (contains_mimetype(text_mimetypes, mimetype))
+  if (containsMimetype(textMimetypes, mimetype))
     return true;
 
   char * text = "text/";
   if (!strncmp(mimetype, text, strlen(text)))
     return true;
 
-  if (mimetype_endswith(mimetype, "script") ||
-      mimetype_endswith(mimetype, "xml") ||
-      mimetype_endswith(mimetype, "yaml"))
+  if (mimetypeEndswith(mimetype, "script") ||
+      mimetypeEndswith(mimetype, "xml") ||
+      mimetypeEndswith(mimetype, "yaml"))
     return true;
 
   if (strstr(mimetype, "json"))
@@ -156,21 +157,21 @@ static bool is_text_mimetype(const char * mimetype)
   return false;
 }
 
-static enum LG_ClipboardData mimetype_to_cb_type(const char * mimetype)
+static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
 {
-  if (is_text_mimetype(mimetype))
+  if (isTextMimetype(mimetype))
     return LG_CLIPBOARD_DATA_TEXT;
 
-  if (contains_mimetype(png_mimetypes, mimetype))
+  if (containsMimetype(pngMimetypes, mimetype))
     return LG_CLIPBOARD_DATA_PNG;
 
-  if (contains_mimetype(bmp_mimetypes, mimetype))
+  if (containsMimetype(bmpMimetypes, mimetype))
     return LG_CLIPBOARD_DATA_BMP;
 
-  if (contains_mimetype(tiff_mimetypes, mimetype))
+  if (containsMimetype(tiffMimetypes, mimetype))
     return LG_CLIPBOARD_DATA_TIFF;
 
-  if (contains_mimetype(jpeg_mimetypes, mimetype))
+  if (containsMimetype(jpegMimetypes, mimetype))
     return LG_CLIPBOARD_DATA_JPEG;
 
   return LG_CLIPBOARD_DATA_NONE;
@@ -183,87 +184,84 @@ static const char * wayland_cb_getName()
 
 // Keyboard-handling listeners.
 
-static void keyboard_keymap_handler(
-    void * data,
-    struct wl_keyboard * keyboard,
-    uint32_t format,
-    int fd,
-    uint32_t size
-) {
-    close(fd);
+static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t format, int fd, uint32_t size)
+{
+  close(fd);
 }
 
-static void keyboard_enter_handler(void * data, struct wl_keyboard * keyboard,
+static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {
-  this->keyboard_enter_serial = serial;
+  this->keyboardEnterSerial = serial;
 }
 
-static void keyboard_leave_handler(void * data, struct wl_keyboard * keyboard,
+static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
   // Do nothing.
 }
 
-static void keyboard_key_handler(void * data, struct wl_keyboard * keyboard,
+static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
   // Do nothing.
 }
 
-static void keyboard_modifiers_handler(void * data,
-    struct wl_keyboard * keyboard, uint32_t serial, uint32_t mods_depressed,
-    uint32_t mods_latched, uint32_t mods_locked, uint32_t group)
+static void keyboardModifiersHandler(void * data,
+    struct wl_keyboard * keyboard, uint32_t serial, uint32_t modsDepressed,
+    uint32_t modsLatched, uint32_t modsLocked, uint32_t group)
 {
   // Do nothing.
 }
 
-static const struct wl_keyboard_listener keyboard_listener = {
-    .keymap = keyboard_keymap_handler,
-    .enter = keyboard_enter_handler,
-    .leave = keyboard_leave_handler,
-    .key = keyboard_key_handler,
-    .modifiers = keyboard_modifiers_handler,
+static const struct wl_keyboard_listener keyboardListener = {
+  .keymap = keyboardKeymapHandler,
+  .enter = keyboardEnterHandler,
+  .leave = keyboardLeaveHandler,
+  .key = keyboardKeyHandler,
+  .modifiers = keyboardModifiersHandler,
 };
 
 // Seat-handling listeners.
 
-static void seat_capabilities_handler(void * data, struct wl_seat * seat,
+static void seatCapabilitiesHandler(void * data, struct wl_seat * seat,
     uint32_t capabilities)
 {
   this->capabilities = capabilities;
 
-  bool has_keyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
-  if (!has_keyboard && this->keyboard)
+  bool hasKeyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
+  if (!hasKeyboard && this->keyboard)
   {
     wl_keyboard_destroy(this->keyboard);
     this->keyboard = NULL;
   }
-  else if (has_keyboard && !this->keyboard)
+  else if (hasKeyboard && !this->keyboard)
   {
     this->keyboard = wl_seat_get_keyboard(this->seat);
-    wl_keyboard_add_listener(this->keyboard, &keyboard_listener, NULL);
+    wl_keyboard_add_listener(this->keyboard, &keyboardListener, NULL);
   }
 }
 
-static void seat_name_handler(void * data, struct wl_seat * seat,
+static void seatNameHandler(void * data, struct wl_seat * seat,
     const char * name)
 {
   // Do nothing.
 }
 
-static const struct wl_seat_listener seat_listener = {
-    .capabilities = seat_capabilities_handler,
-    .name = seat_name_handler
+static const struct wl_seat_listener seatListener = {
+    .capabilities = seatCapabilitiesHandler,
+    .name = seatNameHandler
 };
 
 // Registry-handling listeners.
 
-static void registry_global_handler(void * data,
-    struct wl_registry * wl_registry, uint32_t name, const char * interface,
-    uint32_t version) {
+static void registryGlobalHandler(void * data,
+    struct wl_registry * registry, uint32_t name, const char * interface,
+    uint32_t version)
+{
   if (!strcmp(interface, wl_data_device_manager_interface.name))
-    this->data_device_manager = wl_registry_bind(this->registry, name,
+    this->dataDeviceManager = wl_registry_bind(this->registry, name,
         &wl_data_device_manager_interface, 3);
   else if (!strcmp(interface, wl_seat_interface.name) && !this->seat)
     // TODO: multi-seat support.
@@ -271,49 +269,50 @@ static void registry_global_handler(void * data,
         &wl_seat_interface, 1);
 }
 
-static void registry_global_remove_handler(void * data,
-    struct wl_registry * wl_registry, uint32_t name) {
+static void registryGlobalRemoveHandler(void * data,
+    struct wl_registry * registry, uint32_t name)
+{
   // Do nothing.
 }
 
-static const struct wl_registry_listener registry_listener = {
-  .global = registry_global_handler,
-  .global_remove = registry_global_remove_handler,
+static const struct wl_registry_listener registryListener = {
+  .global = registryGlobalHandler,
+  .global_remove = registryGlobalRemoveHandler,
 };
 
 // Destination client handlers.
 
-static void wl_data_handle_offer(void * data, struct wl_data_offer * offer,
+static void dataHandleOffer(void * data, struct wl_data_offer * offer,
     const char * mimetype)
 {
-  enum LG_ClipboardData type = mimetype_to_cb_type(mimetype);
+  enum LG_ClipboardData type = mimetypeToCbType(mimetype);
   // Oftentimes we'll get text/html alongside text/png, but would prefer to send
   // image/png. In general, prefer images over text content.
   if (type != LG_CLIPBOARD_DATA_NONE &&
-      (this->stashed_type == LG_CLIPBOARD_DATA_NONE ||
-       this->stashed_type == LG_CLIPBOARD_DATA_TEXT))
+      (this->stashedType == LG_CLIPBOARD_DATA_NONE ||
+       this->stashedType == LG_CLIPBOARD_DATA_TEXT))
   {
-    this->stashed_type = type;
-    if (this->stashed_mimetype)
-      free(this->stashed_mimetype);
-    this->stashed_mimetype = strdup(mimetype);
+    this->stashedType = type;
+    if (this->stashedMimetype)
+      free(this->stashedMimetype);
+    this->stashedMimetype = strdup(mimetype);
   }
 }
 
-static const struct wl_data_offer_listener data_offer_listener = {
-  .offer = wl_data_handle_offer,
+static const struct wl_data_offer_listener dataOfferListener = {
+  .offer = dataHandleOffer,
 };
 
-static void wl_data_device_handle_data_offer(void * data,
-    struct wl_data_device * data_device, struct wl_data_offer * offer)
+static void dataDeviceHandleDataOffer(void * data,
+    struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  wl_data_offer_add_listener(offer, &data_offer_listener, NULL);
+  wl_data_offer_add_listener(offer, &dataOfferListener, NULL);
 }
 
-static void wl_data_device_handle_selection(void * data,
-    struct wl_data_device * data_device, struct wl_data_offer * offer)
+static void dataDeviceHandleSelection(void * data,
+    struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  if (this->stashed_type == LG_CLIPBOARD_DATA_NONE || !offer)
+  if (this->stashedType == LG_CLIPBOARD_DATA_NONE || !offer)
     return;
 
   int fds[2];
@@ -323,24 +322,24 @@ static void wl_data_device_handle_selection(void * data,
     abort();
   }
 
-  wl_data_offer_receive(offer, this->stashed_mimetype, fds[1]);
+  wl_data_offer_receive(offer, this->stashedMimetype, fds[1]);
   close(fds[1]);
-  free(this->stashed_mimetype);
-  this->stashed_mimetype = NULL;
+  free(this->stashedMimetype);
+  this->stashedMimetype = NULL;
 
   wl_display_roundtrip(this->display);
 
-  if (this->stashed_contents)
+  if (this->stashedContents)
   {
-    free(this->stashed_contents);
-    this->stashed_contents = NULL;
+    free(this->stashedContents);
+    this->stashedContents = NULL;
   }
 
-  size_t size = 4096, num_read = 0;
+  size_t size = 4096, numRead = 0;
   uint8_t * buf = (uint8_t *) malloc(size);
   while (true)
   {
-    ssize_t result = read(fds[0], buf + num_read, size - num_read);
+    ssize_t result = read(fds[0], buf + numRead, size - numRead);
     if (result < 0)
     {
       DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
@@ -349,12 +348,12 @@ static void wl_data_device_handle_selection(void * data,
 
     if (result == 0)
     {
-      buf[num_read] = 0;
+      buf[numRead] = 0;
       break;
     }
 
-    num_read += result;
-    if (num_read >= size)
+    numRead += result;
+    if (numRead >= size)
     {
       size *= 2;
       void * nbuf = realloc(buf, size);
@@ -367,26 +366,26 @@ static void wl_data_device_handle_selection(void * data,
     }
   }
 
-  this->stashed_size = num_read;
-  this->stashed_contents = buf;
+  this->stashedSize = numRead;
+  this->stashedContents = buf;
 
   close(fds[0]);
   wl_data_offer_destroy(offer);
 
-  this->notifyFn(this->stashed_type, 0);
+  this->notifyFn(this->stashedType, 0);
 }
+
+static const struct wl_data_device_listener dataDeviceListener = {
+  .data_offer = dataDeviceHandleDataOffer,
+  .selection = dataDeviceHandleSelection,
+};
 
 static void wayland_cb_request(LG_ClipboardData type)
 {
   // We only notified once, so it must be this.
-  assert(type == this->stashed_type);
-  this->dataFn(this->stashed_type, this->stashed_contents, this->stashed_size);
+  assert(type == this->stashedType);
+  this->dataFn(this->stashedType, this->stashedContents, this->stashedSize);
 }
-
-static const struct wl_data_device_listener data_device_listener = {
-  .data_offer = wl_data_device_handle_data_offer,
-  .selection = wl_data_device_handle_selection,
-};
 
 // End of Wayland handlers.
 
@@ -397,30 +396,28 @@ static bool wayland_cb_init(
     LG_ClipboardDataFn      dataFn)
 {
   if (wminfo->subsystem != SDL_SYSWM_WAYLAND)
-  {
     return false;
-  }
 
-  this = (struct state *)malloc(sizeof(struct state));
-  memset(this, 0, sizeof(struct state));
+  this = (struct WCBState *)malloc(sizeof(struct WCBState));
+  memset(this, 0, sizeof(struct WCBState));
 
   this->releaseFn = releaseFn;
   this->notifyFn  = notifyFn;
   this->dataFn    = dataFn;
   this->display   = wminfo->info.wl.display;
   this->registry  = wl_display_get_registry(this->display);
-  this->stashed_type = LG_CLIPBOARD_DATA_NONE;
+  this->stashedType = LG_CLIPBOARD_DATA_NONE;
 
   // Wait for the initial set of globals to appear.
-  wl_registry_add_listener(this->registry, &registry_listener, NULL);
+  wl_registry_add_listener(this->registry, &registryListener, NULL);
   wl_display_roundtrip(this->display);
 
-  this->data_device = wl_data_device_manager_get_data_device(
-      this->data_device_manager, this->seat);
-  wl_data_device_add_listener(this->data_device, &data_device_listener, NULL);
+  this->dataDevice = wl_data_device_manager_get_data_device(
+      this->dataDeviceManager, this->seat);
+  wl_data_device_add_listener(this->dataDevice, &dataDeviceListener, NULL);
 
   // Wait for the compositor to let us know of capabilities.
-  wl_seat_add_listener(this->seat, &seat_listener, NULL);
+  wl_seat_add_listener(this->seat, &seatListener, NULL);
   wl_display_roundtrip(this->display);
   return true;
 }
@@ -435,10 +432,11 @@ static void wayland_cb_wmevent(SDL_SysWMmsg * msg)
 {
 }
 
-static void data_source_handle_send(void * data, struct wl_data_source * source,
-    const char * mimetype, int fd) {
-  struct transfer * transfer = (struct transfer *) data;
-  if (contains_mimetype(transfer->mimetypes, mimetype))
+static void dataSourceHandleSend(void * data, struct wl_data_source * source,
+    const char * mimetype, int fd)
+{
+  struct WCBTransfer * transfer = (struct WCBTransfer *) data;
+  if (containsMimetype(transfer->mimetypes, mimetype))
   {
     // Consider making this do non-blocking sends to not stall the Wayland
     // event loop if it becomes a problem. This is "fine" in the sense that
@@ -464,41 +462,44 @@ error:
   close(fd);
 }
 
-static void data_source_handle_cancelled(void * data,
-    struct wl_data_source * source) {
-  struct transfer * transfer = (struct transfer *) data;
+static void dataSourceHandleCancelled(void * data,
+    struct wl_data_source * source)
+{
+  struct WCBTransfer * transfer = (struct WCBTransfer *) data;
   free(transfer->data);
   free(transfer);
   wl_data_source_destroy(source);
 }
 
-static const struct wl_data_source_listener data_source_listener = {
-  .send = data_source_handle_send,
-  .cancelled = data_source_handle_cancelled,
+static const struct wl_data_source_listener dataSourceListener = {
+  .send = dataSourceHandleSend,
+  .cancelled = dataSourceHandleCancelled,
 };
 
-static void wayland_cb_reply_fn(void * opaque, LG_ClipboardData type, uint8_t * data, uint32_t size)
+static void wayland_cb_reply_fn(void * opaque, LG_ClipboardData type,
+   	uint8_t * data, uint32_t size)
 {
-  struct transfer * transfer = malloc(sizeof(struct transfer));
-  void * data_copy = malloc(size);
-  memcpy(data_copy, data, size);
-  *transfer = (struct transfer) {
-    .data = data_copy,
+  struct WCBTransfer * transfer = malloc(sizeof(struct WCBTransfer));
+  void * dataCopy = malloc(size);
+  memcpy(dataCopy, data, size);
+  *transfer = (struct WCBTransfer) {
+    .data = dataCopy,
     .size = size,
-    .mimetypes = cb_type_to_mimetypes(type),
+    .mimetypes = cbTypeToMimetypes(type),
   };
 
   struct wl_data_source * source =
-    wl_data_device_manager_create_data_source(this->data_device_manager);
-  wl_data_source_add_listener(source, &data_source_listener, transfer);
+    wl_data_device_manager_create_data_source(this->dataDeviceManager);
+  wl_data_source_add_listener(source, &dataSourceListener, transfer);
   for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
     wl_data_source_offer(source, *mimetype);
 
-  wl_data_device_set_selection(this->data_device, source,
-    this->keyboard_enter_serial);
+  wl_data_device_set_selection(this->dataDevice, source,
+    this->keyboardEnterSerial);
 }
 
-static void wayland_cb_notice(LG_ClipboardRequestFn requestFn, LG_ClipboardData type)
+static void wayland_cb_notice(LG_ClipboardRequestFn requestFn,
+    LG_ClipboardData type)
 {
   this->requestFn = requestFn;
   this->type      = type;
@@ -506,7 +507,8 @@ static void wayland_cb_notice(LG_ClipboardRequestFn requestFn, LG_ClipboardData 
   if (!this->requestFn)
     return;
 
-  // Won't have a keyboard enter serial if we don't have the keyboard capability.
+  // Won't have a keyboard enter serial if we don't have the keyboard
+  // capability.
   if (!this->keyboard)
     return;
 
@@ -526,5 +528,5 @@ const LG_Clipboard LGC_Wayland =
   .wmevent = wayland_cb_wmevent,
   .notice  = wayland_cb_notice,
   .release = wayland_cb_release,
-  .request = wayland_cb_request
+  .request = wayland_cb_request,
 };

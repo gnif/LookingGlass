@@ -70,9 +70,7 @@ static bool x11_cb_init(
 {
   // final sanity check
   if (wminfo->subsystem != SDL_SYSWM_X11)
-  {
     return false;
-  }
 
   this = (struct state *)malloc(sizeof(struct state));
   memset(this, 0, sizeof(struct state));
