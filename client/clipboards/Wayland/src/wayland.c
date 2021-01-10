@@ -398,7 +398,6 @@ static bool wayland_cb_init(
 {
   if (wminfo->subsystem != SDL_SYSWM_WAYLAND)
   {
-    DEBUG_ERROR("wrong subsystem");
     return false;
   }
 

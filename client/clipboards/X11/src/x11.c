@@ -71,7 +71,6 @@ static bool x11_cb_init(
   // final sanity check
   if (wminfo->subsystem != SDL_SYSWM_X11)
   {
-    DEBUG_ERROR("wrong subsystem");
     return false;
   }
 

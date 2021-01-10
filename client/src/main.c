@@ -2025,29 +2025,26 @@ static int lg_run()
         (unsigned char *)&value,
         1
       );
-
-      g_state.lgc = LG_Clipboards[0];
-    }
-    else if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
-    {
-      g_state.lgc = LG_Clipboards[1];
     }
   } else {
     DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
     return -1;
   }
 
+  for (LG_Clipboard ** clipboard = LG_Clipboards; *clipboard; clipboard++)
+    if ((*clipboard)->init(&g_state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
+    {
+      g_state.lgc = *clipboard;
+      break;
+    }
+
   if (g_state.lgc)
   {
     DEBUG_INFO("Using Clipboard: %s", g_state.lgc->getName());
-    if (!g_state.lgc->init(&g_state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
-    {
-      DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
-      g_state.lgc = NULL;
-    }
-
     g_state.cbRequestList = ll_new();
   }
+  else
+    DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
 
   initSDLCursor();
   if (params.hideMouse)
