@@ -54,6 +54,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
+#include "wm.h"
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
 
@@ -964,17 +965,7 @@ static void handleMouseNormal(double ex, double ey)
         g_cursor.redraw = true;
 
         g_cursor.warpState = WARP_STATE_ON;
-
-        XGrabPointer(
-          g_state.wminfo.info.x11.display,
-          g_state.wminfo.info.x11.window,
-          true,
-          None,
-          GrabModeAsync,
-          GrabModeAsync,
-          g_state.wminfo.info.x11.window,
-          None,
-          CurrentTime);
+        wmGrabPointer();
       }
 
       struct DoublePoint guest =
@@ -1040,7 +1031,7 @@ static void handleMouseNormal(double ex, double ey)
         g_cursor.inWindow = false;
 
       /* ungrab the pointer and move the local cursor to the exit point */
-      XUngrabPointer(g_state.wminfo.info.x11.display, CurrentTime);
+      wmUngrabPointer();
       warpMouse(tx, ty, true);
       return;
     }
@@ -1140,14 +1131,7 @@ static void keyboardGrab()
     return;
 
   // grab the keyboard so we can intercept WM keys
-  XGrabKeyboard(
-    g_state.wminfo.info.x11.display,
-    g_state.wminfo.info.x11.window,
-    true,
-    GrabModeAsync,
-    GrabModeAsync,
-    CurrentTime
-  );
+  wmGrabKeyboard();
 }
 
 // only called for X11
@@ -1157,10 +1141,7 @@ static void keyboardUngrab()
     return;
 
   // ungrab the keyboard
-  XUngrabKeyboard(
-    g_state.wminfo.info.x11.display,
-    CurrentTime
-  );
+  wmUngrabKeyboard();
 }
 
 static void setGrab(bool enable)
@@ -1184,42 +1165,22 @@ static void setGrabQuiet(bool enable)
 
   g_cursor.grab = enable;
 
-  if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-    SDL_SetWindowGrab(g_state.window, enable);
+  if (enable)
+  {
+    wmGrabPointer();
+
+    if (params.grabKeyboard)
+      wmGrabKeyboard();
+  }
   else
   {
-    if (enable)
+    if (params.grabKeyboard)
     {
-      XGrabPointer(
-        g_state.wminfo.info.x11.display,
-        g_state.wminfo.info.x11.window,
-        true,
-        None,
-        GrabModeAsync,
-        GrabModeAsync,
-        g_state.wminfo.info.x11.window,
-        None,
-        CurrentTime);
-
-      if (params.grabKeyboard)
-        XGrabKeyboard(
-          g_state.wminfo.info.x11.display,
-          g_state.wminfo.info.x11.window,
-          true,
-          GrabModeAsync,
-          GrabModeAsync,
-          CurrentTime);
+      if (!g_state.focused || !params.grabKeyboardOnFocus)
+        wmUngrabKeyboard();
     }
-    else
-    {
-      if (params.grabKeyboard)
-      {
-        if (!g_state.focused || !params.grabKeyboardOnFocus)
-          XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
-      }
 
-      XUngrabPointer(g_state.wminfo.info.x11.display,  CurrentTime);
-    }
+    wmUngrabPointer();
   }
 
   // if exiting capture when input on capture only, we want to show the cursor

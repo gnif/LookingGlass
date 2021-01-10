@@ -94,6 +94,7 @@ set(SOURCES
 	src/lg-renderer.c
 	src/ll.c
 	src/utils.c
+	src/wm.c
 )
 
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
