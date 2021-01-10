@@ -763,7 +763,7 @@ void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
   if (!params.clipboardToLocal)
     return;
 
-  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(struct CBRequest()));
+  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(struct CBRequest));
 
   cbr->type    = g_state.cbType;
   cbr->replyFn = replyFn;
