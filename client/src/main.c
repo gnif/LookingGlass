@@ -913,6 +913,25 @@ static void guestCurToLocal(struct DoublePoint *local)
   local->y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y;
 }
 
+// On Wayland, our normal cursor logic does not work due to the lack of cursor
+// warp support. Instead, we attempt a best-effort emulation which works with a
+// 1:1 mouse movement patch applied in the guest. For anything fancy, use
+// capture mode.
+static void handleMouseWayland()
+{
+  double ex = (g_cursor.pos.x - g_cursor.guest.x) / g_cursor.dpiScale;
+  double ey = (g_cursor.pos.y - g_cursor.guest.y) / g_cursor.dpiScale;
+
+  int x, y;
+  cursorToInt(ex, ey, &x, &y);
+
+  g_cursor.delta.x += x;
+  g_cursor.delta.y += y;
+
+  if (!spice_mouse_motion(x, y))
+    DEBUG_ERROR("failed to send mouse motion message");
+}
+
 static void handleMouseNormal(double ex, double ey)
 {
   /* if we don't have the current cursor pos just send cursor movements */
@@ -920,6 +939,12 @@ static void handleMouseNormal(double ex, double ey)
   {
     if (g_cursor.grab)
       handleMouseGrabbed(ex, ey);
+    return;
+  }
+
+  if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
+  {
+    handleMouseWayland();
     return;
   }
 
@@ -1197,11 +1222,15 @@ int eventFilter(void * userdata, SDL_Event * event)
       switch(event->window.event)
       {
         case SDL_WINDOWEVENT_ENTER:
+          if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
+            g_cursor.inView = true;
           if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
             handleWindowEnter();
           break;
 
         case SDL_WINDOWEVENT_LEAVE:
+          if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
+            g_cursor.inView = false;
           if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
             handleWindowLeave();
           break;
