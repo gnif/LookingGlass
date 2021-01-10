@@ -410,6 +410,7 @@ static bool wayland_cb_init(
   this->dataFn    = dataFn;
   this->display   = wminfo->info.wl.display;
   this->registry  = wl_display_get_registry(this->display);
+  this->stashed_type = LG_CLIPBOARD_DATA_NONE;
 
   // Wait for the initial set of globals to appear.
   wl_registry_add_listener(this->registry, &registry_listener, NULL);
@@ -451,7 +452,8 @@ static void data_source_handle_send(void * data, struct wl_data_source * source,
       ssize_t written = write(fd, transfer->data + pos, transfer->size - pos);
       if (written < 0)
       {
-        DEBUG_ERROR("Failed to write clipboard data: %s", strerror(errno));
+        if (errno != EPIPE)
+          DEBUG_ERROR("Failed to write clipboard data: %s", strerror(errno));
         goto error;
       }
 

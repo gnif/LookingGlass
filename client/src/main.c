@@ -1861,6 +1861,12 @@ static int lg_run()
   signal(SIGINT , int_handler);
   signal(SIGTERM, int_handler);
 
+  // Request to receive EPIPE instead of SIGPIPE when one end of a pipe
+  // disconnects while a write is pending. This is useful to the Wayland
+  // clipboard backend, where an arbitrary application is on the other end of
+  // that pipe.
+  signal(SIGPIPE, SIG_IGN);
+
   // try map the shared memory
   if (!ivshmemOpen(&g_state.shm))
   {
