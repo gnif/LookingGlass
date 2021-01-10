@@ -135,3 +135,23 @@ void wmUngrabAll()
   wmUngrabPointer();
   wmUngrabKeyboard();
 }
+
+void wmWarpMouse(int x, int y)
+{
+  switch(g_state.wminfo.subsystem)
+  {
+    case SDL_SYSWM_X11:
+      XWarpPointer(
+          g_state.wminfo.info.x11.display,
+          None,
+          g_state.wminfo.info.x11.window,
+          0, 0, 0, 0,
+          x, y);
+      XSync(g_state.wminfo.info.x11.display, False);
+      break;
+
+    default:
+      SDL_WarpMouseInWindow(g_state.window, x, y);
+      break;
+  }
+}

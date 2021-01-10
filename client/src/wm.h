@@ -23,3 +23,4 @@ void wmGrabKeyboard();
 void wmUngrabKeyboard();
 void wmGrabAll();
 void wmUngrabAll();
+void wmWarpMouse(int x, int y);

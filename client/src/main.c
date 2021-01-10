@@ -846,18 +846,7 @@ static void warpMouse(int x, int y, bool disable)
   if (g_cursor.pos.x == x && g_cursor.pos.y == y)
     return;
 
-  if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
-  {
-    XWarpPointer(
-        g_state.wminfo.info.x11.display,
-        None,
-        g_state.wminfo.info.x11.window,
-        0, 0, 0, 0,
-        x, y);
-    XSync(g_state.wminfo.info.x11.display, False);
-  }
-  else
-    SDL_WarpMouseInWindow(g_state.window, x, y);
+  wmWarpMouse(x, y);
 }
 
 static bool isValidCursorLocation(int x, int y)
