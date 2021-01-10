@@ -2228,9 +2228,6 @@ int main(int argc, char * argv[])
   if (!config_load(argc, argv))
     return -1;
 
-  if (params.useSpiceInput && params.grabKeyboard)
-    SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
-
   const int ret = lg_run();
   lg_shutdown();
 
