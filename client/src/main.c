@@ -1206,6 +1206,16 @@ int eventFilter(void * userdata, SDL_Event * event)
             handleWindowLeave();
           break;
 
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+            g_state.focused = true;
+          break;
+
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+            g_state.focused = false;
+          break;
+
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
           if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
@@ -1422,6 +1432,9 @@ int eventFilter(void * userdata, SDL_Event * event)
     {
       if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
         break;
+
+      g_cursor.pos.x = event->motion.x;
+      g_cursor.pos.y = event->motion.y;
 
       if (g_cursor.grab)
         handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
