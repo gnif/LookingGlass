@@ -27,6 +27,9 @@ add_feature_info(ENABLE_CB_X11 ENABLE_CB_X11 "X11 Clipboard Integration.")
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 
+option(ENABLE_ASAN "Build with AddressSanitizer" OFF)
+add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
+
 add_compile_options(
   "-Wall"
   "-Werror"
@@ -39,6 +42,11 @@ add_compile_options(
 
 set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
+
+if(ENABLE_ASAN)
+  add_compile_options("-fno-omit-frame-pointer" "-fsanitize=address")
+  set(EXE_FLAGS "${EXE_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+endif()
 
 find_package(PkgConfig)
 pkg_check_modules(PKGCONFIG REQUIRED
