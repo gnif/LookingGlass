@@ -88,7 +88,7 @@ struct AppParams params = { 0 };
 static void setGrab(bool enable);
 static void setGrabQuiet(bool enable);
 
-static void handleMouseGrabbed(double ex, double ey);
+void handleMouseGrabbed(double ex, double ey);
 static void handleMouseNormal(double ex, double ey);
 
 static void lgInit()
@@ -883,7 +883,7 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   *y = (int)ey;
 }
 
-static void handleMouseGrabbed(double ex, double ey)
+void handleMouseGrabbed(double ex, double ey)
 {
   int x, y;
 
@@ -1469,7 +1469,12 @@ int eventFilter(void * userdata, SDL_Event * event)
       g_cursor.pos.y = event->motion.y;
 
       if (g_cursor.grab)
-        handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+      {
+        // On Wayland, wm.c calls handleMouseGrabbed, bypassing the SDL event
+        // loop.
+        if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
+          handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+      }
       else
         handleMouseNormal(event->motion.xrel, event->motion.yrel);
       break;
@@ -2046,6 +2051,8 @@ static int lg_run()
   // the end of the output
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
+  wmInit();
+
   LGMP_STATUS status;
 
   while(g_state.state == APP_STATE_RUNNING)
@@ -2237,7 +2244,10 @@ static void lg_shutdown()
   }
 
   if (g_state.window)
+  {
+    wmFree();
     SDL_DestroyWindow(g_state.window);
+  }
 
   if (cursor)
     SDL_FreeCursor(cursor);
