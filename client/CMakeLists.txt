@@ -30,6 +30,9 @@ add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 option(ENABLE_ASAN "Build with AddressSanitizer" OFF)
 add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
 
+option(ENABLE_WAYLAND "Build with Wayland support" ON)
+add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
+
 add_compile_options(
   "-Wall"
   "-Werror"
@@ -119,5 +122,32 @@ target_link_libraries(looking-glass-client
 )
 
 install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-client DESTINATION bin/ COMPONENT binary)
+
+if(ENABLE_WAYLAND)
+  find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+  pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.15)
+  pkg_get_variable(WAYLAND_PROTOCOLS_BASE wayland-protocols pkgdatadir)
+
+  macro(wayland_generate protocol_file output_file)
+      add_custom_command(OUTPUT "${output_file}.h"
+          COMMAND "${WAYLAND_SCANNER_EXECUTABLE}" client-header "${protocol_file}" "${output_file}.h"
+          DEPENDS "${protocol_file}"
+          VERBATIM)
+
+      add_custom_command(OUTPUT "${output_file}.c"
+          COMMAND "${WAYLAND_SCANNER_EXECUTABLE}" private-code "${protocol_file}" "${output_file}.c"
+          DEPENDS "${protocol_file}"
+          VERBATIM)
+
+      target_sources(looking-glass-client PRIVATE "${output_file}.h" "${output_file}.c")
+  endmacro()
+
+  wayland_generate(
+      "${WAYLAND_PROTOCOLS_BASE}/unstable/relative-pointer/relative-pointer-unstable-v1.xml"
+      "${PROJECT_TOP}/client/src/wayland-relative-pointer-unstable-v1-client-protocol")
+  wayland_generate(
+      "${WAYLAND_PROTOCOLS_BASE}/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml"
+      "${PROJECT_TOP}/client/src/wayland-pointer-constraints-unstable-v1-client-protocol")
+endif()
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
