@@ -242,6 +242,51 @@ static const struct wl_registry_listener registryListener = {
   .global_remove = registryGlobalRemoveHandler,
 };
 
+// Mouse-handling listeners.
+
+static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
+    uint32_t serial, wl_fixed_t sxW, wl_fixed_t syW)
+{
+  int sx = wl_fixed_to_int(sxW);
+  int sy = wl_fixed_to_int(syW);
+  handleMouseNormal(sx, sy);
+}
+
+static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
+    uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW,
+    wl_fixed_t syW)
+{
+  int sx = wl_fixed_to_int(sxW);
+  int sy = wl_fixed_to_int(syW);
+  handleMouseNormal(sx, sy);
+}
+
+static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
+    uint32_t serial, struct wl_surface * surface)
+{
+  // Do nothing.
+}
+
+static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
+  uint32_t serial, uint32_t axis, wl_fixed_t value)
+{
+  // Do nothing.
+}
+
+static void pointerButtonHandler(void *data, struct wl_pointer *pointer, 
+    uint32_t serial, uint32_t time, uint32_t button, uint32_t stateW)
+{
+  // Do nothing.
+}
+
+static const struct wl_pointer_listener pointerListener = {
+  .enter = pointerEnterHandler,
+  .leave = pointerLeaveHandler,
+  .motion = pointerMotionHandler,
+  .button = pointerButtonHandler,
+  .axis = pointerAxisHandler,
+};
+
 // Keyboard-handling listeners.
 
 static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
@@ -296,7 +341,10 @@ static void handlePointerCapability(struct WMDataWayland * wm,
     wm->pointer = NULL;
   }
   else if (hasPointer && !wm->pointer)
+  {
     wm->pointer = wl_seat_get_pointer(wm->seat);
+    wl_pointer_add_listener(wm->pointer, &pointerListener, wm);
+  }
 }
 
 static void handleKeyboardCapability(struct WMDataWayland * wm,

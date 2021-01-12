@@ -237,3 +237,4 @@ extern struct AppState  g_state;
 extern struct AppParams params;
 
 void handleMouseGrabbed(double, double);
+void handleMouseNormal(double, double);

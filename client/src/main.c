@@ -88,9 +88,6 @@ struct AppParams params = { 0 };
 static void setGrab(bool enable);
 static void setGrabQuiet(bool enable);
 
-void handleMouseGrabbed(double ex, double ey);
-static void handleMouseNormal(double ex, double ey);
-
 static void lgInit()
 {
   g_state.state         = APP_STATE_RUNNING;
@@ -940,7 +937,7 @@ static void handleMouseWayland()
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
-static void handleMouseNormal(double ex, double ey)
+void handleMouseNormal(double ex, double ey)
 {
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
@@ -1489,15 +1486,17 @@ int eventFilter(void * userdata, SDL_Event * event)
       g_cursor.pos.x = event->motion.x;
       g_cursor.pos.y = event->motion.y;
 
-      if (g_cursor.grab)
+      if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
       {
-        // On Wayland, wm.c calls handleMouseGrabbed, bypassing the SDL event
-        // loop.
-        if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
-          handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+        // On Wayland, wm.c calls these functions, bypassing the SDL event loop.
+        if (g_cursor.grab)
+        {
+          if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
+            handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+        }
+        else
+          handleMouseNormal(event->motion.xrel, event->motion.yrel);
       }
-      else
-        handleMouseNormal(event->motion.xrel, event->motion.yrel);
       break;
     }
 
