@@ -14,7 +14,6 @@ add_library(renderer_OpenGL STATIC
 target_link_libraries(renderer_OpenGL
 	${RENDERER_OPENGL_PKGCONFIG_LIBRARIES}
 	lg_common
-	decoders
 	fonts
 )
 

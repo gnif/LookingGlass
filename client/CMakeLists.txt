@@ -107,7 +107,6 @@ add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice
 add_subdirectory(renderers)
 add_subdirectory(clipboards)
 add_subdirectory(fonts)
-add_subdirectory(decoders)
 
 add_executable(looking-glass-client ${SOURCES})
 target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER} ${PKGCONFIG_OPT_CFLAGS_OTHER})
