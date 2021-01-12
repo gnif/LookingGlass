@@ -147,6 +147,9 @@ if(ENABLE_WAYLAND)
   wayland_generate(
       "${WAYLAND_PROTOCOLS_BASE}/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml"
       "${PROJECT_TOP}/client/src/wayland-pointer-constraints-unstable-v1-client-protocol")
+  wayland_generate(
+      "${WAYLAND_PROTOCOLS_BASE}/unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml"
+      "${PROJECT_TOP}/client/src/wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol")
 endif()
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)

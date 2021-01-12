@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "common/debug.h"
 
+#include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
 
@@ -42,6 +43,8 @@ static struct WMState g_wmState;
 
 static void wmWaylandInit();
 static void wmWaylandFree();
+static void wmWaylandGrabKeyboard();
+static void wmWaylandUngrabKeyboard();
 static void wmWaylandGrabPointer();
 static void wmWaylandUngrabPointer();
 
@@ -135,6 +138,7 @@ void wmGrabKeyboard()
       break;
 
     case SDL_SYSWM_WAYLAND:
+      wmWaylandGrabKeyboard();
       break;
 
     default:
@@ -163,6 +167,7 @@ void wmUngrabKeyboard()
       break;
 
     case SDL_SYSWM_WAYLAND:
+      wmWaylandUngrabKeyboard();
       break;
 
     default:
@@ -224,6 +229,8 @@ struct WMDataWayland
   struct zwp_pointer_constraints_v1 * pointerConstraints;
   struct zwp_relative_pointer_v1 * relativePointer;
   struct zwp_confined_pointer_v1 * confinedPointer;
+  struct zwp_keyboard_shortcuts_inhibit_manager_v1 * keyboardInhibitManager;
+  struct zwp_keyboard_shortcuts_inhibitor_v1 * keyboardInhibitor;
 };
 
 // Registry-handling listeners.
@@ -241,6 +248,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, zwp_pointer_constraints_v1_interface.name))
     wm->pointerConstraints = wl_registry_bind(wm->registry, name,
         &zwp_pointer_constraints_v1_interface, 1);
+  else if (!strcmp(interface, zwp_keyboard_shortcuts_inhibit_manager_v1_interface.name))
+    wm->keyboardInhibitManager = wl_registry_bind(wm->registry, name,
+        &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1);
 }
 
 static void registryGlobalRemoveHandler(void * data,
@@ -355,6 +365,28 @@ static void wmWaylandUngrabPointer()
   {
     zwp_confined_pointer_v1_destroy(wm->confinedPointer);
     wm->confinedPointer = NULL;
+  }
+}
+
+static void wmWaylandGrabKeyboard()
+{
+  struct WMDataWayland * wm = g_wmState.opaque;
+
+  if (wm->keyboardInhibitManager)
+  {
+    wm->keyboardInhibitor = zwp_keyboard_shortcuts_inhibit_manager_v1_inhibit_shortcuts(
+        wm->keyboardInhibitManager, wm->surface, wm->seat);
+  }
+}
+
+static void wmWaylandUngrabKeyboard()
+{
+  struct WMDataWayland * wm = g_wmState.opaque;
+
+  if (wm->keyboardInhibitor)
+  {
+    zwp_keyboard_shortcuts_inhibitor_v1_destroy(wm->keyboardInhibitor);
+    wm->keyboardInhibitor = NULL;
   }
 }
 
