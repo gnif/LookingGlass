@@ -926,8 +926,8 @@ static void handleMouseWayland()
   int x, y;
   cursorToInt(ex, ey, &x, &y);
 
-  g_cursor.delta.x += x;
-  g_cursor.delta.y += y;
+  g_cursor.guest.x += x;
+  g_cursor.guest.y += y;
 
   if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
