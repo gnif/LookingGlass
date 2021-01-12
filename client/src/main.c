@@ -920,6 +920,9 @@ static void guestCurToLocal(struct DoublePoint *local)
 // capture mode.
 static void handleMouseWayland()
 {
+  if (g_cursor.guest.dpiScale == 0)
+    return;
+
   double ex = (g_cursor.pos.x - g_cursor.guest.x) / g_cursor.dpiScale;
   double ey = (g_cursor.pos.y - g_cursor.guest.y) / g_cursor.dpiScale;
 
