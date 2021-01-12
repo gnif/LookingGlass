@@ -88,6 +88,9 @@ void wmGrabKeyboard()
         CurrentTime);
       break;
 
+    case SDL_SYSWM_WAYLAND:
+      break;
+
     default:
       if (g_wmState.pointerGrabbed)
         SDL_SetWindowGrab(g_state.window, SDL_FALSE);
@@ -111,6 +114,9 @@ void wmUngrabKeyboard()
   {
     case SDL_SYSWM_X11:
       XUngrabKeyboard(g_state.wminfo.info.x11.display, CurrentTime);
+      break;
+
+    case SDL_SYSWM_WAYLAND:
       break;
 
     default:
