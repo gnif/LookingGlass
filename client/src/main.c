@@ -1159,6 +1159,8 @@ static void setGrabQuiet(bool enable)
     return;
 
   g_cursor.grab = enable;
+  g_cursor.acc.x = 0.0;
+  g_cursor.acc.y = 0.0;
 
   if (enable)
   {
