@@ -920,6 +920,9 @@ static void guestCurToLocal(struct DoublePoint *local)
 // capture mode.
 static void handleMouseWayland()
 {
+  if (g_cursor.guest.dpiScale == 0)
+    return;
+
   /* translate the guests position to our coordinate space */
   struct DoublePoint local;
   guestCurToLocal(&local);
