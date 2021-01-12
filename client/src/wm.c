@@ -21,8 +21,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "main.h"
 
 #include <stdbool.h>
-#include <SDL2/SDL.h>
+#include <unistd.h>
 
+#include <SDL2/SDL.h>
 #include <wayland-client.h>
 
 #include "common/debug.h"
@@ -31,15 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
 
-struct WMState
-{
-  bool pointerGrabbed;
-  bool keyboardGrabbed;
-
-  void * opaque;
-};
-
-static struct WMState g_wmState;
+struct WMState g_wmState;
 
 static void wmWaylandInit();
 static void wmWaylandFree();
@@ -215,24 +208,6 @@ void wmWarpMouse(int x, int y)
 
 // Wayland support.
 
-struct WMDataWayland
-{
-  struct wl_display * display;
-  struct wl_surface * surface;
-  struct wl_registry * registry;
-  struct wl_seat * seat;
-
-  uint32_t capabilities;
-
-  struct wl_pointer * pointer;
-  struct zwp_relative_pointer_manager_v1 * relativePointerManager;
-  struct zwp_pointer_constraints_v1 * pointerConstraints;
-  struct zwp_relative_pointer_v1 * relativePointer;
-  struct zwp_confined_pointer_v1 * confinedPointer;
-  struct zwp_keyboard_shortcuts_inhibit_manager_v1 * keyboardInhibitManager;
-  struct zwp_keyboard_shortcuts_inhibitor_v1 * keyboardInhibitor;
-};
-
 // Registry-handling listeners.
 
 static void registryGlobalHandler(void * data, struct wl_registry * registry,
@@ -251,6 +226,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, zwp_keyboard_shortcuts_inhibit_manager_v1_interface.name))
     wm->keyboardInhibitManager = wl_registry_bind(wm->registry, name,
         &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1);
+  else if (!strcmp(interface, wl_data_device_manager_interface.name))
+    wm->dataDeviceManager = wl_registry_bind(wm->registry, name,
+        &wl_data_device_manager_interface, 3);
 }
 
 static void registryGlobalRemoveHandler(void * data,
@@ -262,6 +240,48 @@ static void registryGlobalRemoveHandler(void * data,
 static const struct wl_registry_listener registryListener = {
   .global = registryGlobalHandler,
   .global_remove = registryGlobalRemoveHandler,
+};
+
+// Keyboard-handling listeners.
+
+static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t format, int fd, uint32_t size)
+{
+  close(fd);
+}
+
+static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
+{
+  struct WMDataWayland * wm = data;
+  wm->keyboardEnterSerial = serial;
+}
+
+static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t serial, struct wl_surface * surface)
+{
+  // Do nothing.
+}
+
+static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
+{
+  // Do nothing.
+}
+
+static void keyboardModifiersHandler(void * data,
+    struct wl_keyboard * keyboard, uint32_t serial, uint32_t modsDepressed,
+    uint32_t modsLatched, uint32_t modsLocked, uint32_t group)
+{
+  // Do nothing.
+}
+
+static const struct wl_keyboard_listener keyboardListener = {
+  .keymap = keyboardKeymapHandler,
+  .enter = keyboardEnterHandler,
+  .leave = keyboardLeaveHandler,
+  .key = keyboardKeyHandler,
+  .modifiers = keyboardModifiersHandler,
 };
 
 // Seat-handling listeners.
@@ -279,12 +299,29 @@ static void handlePointerCapability(struct WMDataWayland * wm,
     wm->pointer = wl_seat_get_pointer(wm->seat);
 }
 
+static void handleKeyboardCapability(struct WMDataWayland * wm,
+    uint32_t capabilities)
+{
+  bool hasKeyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
+  if (!hasKeyboard && wm->keyboard)
+  {
+    wl_keyboard_destroy(wm->keyboard);
+    wm->keyboard = NULL;
+  }
+  else if (hasKeyboard && !wm->keyboard)
+  {
+    wm->keyboard = wl_seat_get_keyboard(wm->seat);
+    wl_keyboard_add_listener(wm->keyboard, &keyboardListener, wm);
+  }
+}
+
 static void seatCapabilitiesHandler(void * data, struct wl_seat * seat,
     uint32_t capabilities)
 {
   struct WMDataWayland * wm = data;
   wm->capabilities = capabilities;
   handlePointerCapability(wm, capabilities);
+  handleKeyboardCapability(wm, capabilities);
 }
 
 static void seatNameHandler(void * data, struct wl_seat * seat,
@@ -312,6 +349,9 @@ void wmWaylandInit()
 
   wl_seat_add_listener(wm->seat, &seatListener, wm);
   wl_display_roundtrip(wm->display);
+
+  wm->dataDevice = wl_data_device_manager_get_data_device(
+      wm->dataDeviceManager, wm->seat);
 
   g_wmState.opaque = wm;
 }

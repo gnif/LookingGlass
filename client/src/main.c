@@ -2031,21 +2031,6 @@ static int lg_run()
     return -1;
   }
 
-  for (LG_Clipboard ** clipboard = LG_Clipboards; *clipboard; clipboard++)
-    if ((*clipboard)->init(&g_state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
-    {
-      g_state.lgc = *clipboard;
-      break;
-    }
-
-  if (g_state.lgc)
-  {
-    DEBUG_INFO("Using Clipboard: %s", g_state.lgc->getName());
-    g_state.cbRequestList = ll_new();
-  }
-  else
-    DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
-
   initSDLCursor();
   if (params.hideMouse)
     SDL_ShowCursor(SDL_DISABLE);
@@ -2080,6 +2065,21 @@ static int lg_run()
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   wmInit();
+
+  for (LG_Clipboard ** clipboard = LG_Clipboards; *clipboard; clipboard++)
+    if ((*clipboard)->init(&g_state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
+    {
+      g_state.lgc = *clipboard;
+      break;
+    }
+
+  if (g_state.lgc)
+  {
+    DEBUG_INFO("Using Clipboard: %s", g_state.lgc->getName());
+    g_state.cbRequestList = ll_new();
+  }
+  else
+    DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
 
   LGMP_STATUS status;
 
