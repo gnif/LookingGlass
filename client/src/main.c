@@ -1240,12 +1240,26 @@ int eventFilter(void * userdata, SDL_Event * event)
 
         case SDL_WINDOWEVENT_FOCUS_GAINED:
           if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+          {
             g_state.focused = true;
+
+            if (!inputEnabled())
+              break;
+            if (params.grabKeyboardOnFocus)
+              wmGrabKeyboard();
+          }
           break;
 
         case SDL_WINDOWEVENT_FOCUS_LOST:
           if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
+          {
             g_state.focused = false;
+
+            if (!inputEnabled())
+              break;
+            if (params.grabKeyboardOnFocus)
+              wmUngrabKeyboard();
+          }
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
