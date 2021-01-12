@@ -874,12 +874,13 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   }
 
   /* convert to int accumulating the fractional error */
-  g_cursor.acc.x += ex;
-  g_cursor.acc.y += ey;
-  *x = floor(g_cursor.acc.x);
-  *y = floor(g_cursor.acc.y);
-  g_cursor.acc.x -= *x;
-  g_cursor.acc.y -= *y;
+  ex += g_cursor.acc.x;
+  ey += g_cursor.acc.y;
+  g_cursor.acc.x = modf(ex, &ex);
+  g_cursor.acc.y = modf(ey, &ey);
+
+  *x = (int)ex;
+  *y = (int)ey;
 }
 
 static void handleMouseGrabbed(double ex, double ey)
