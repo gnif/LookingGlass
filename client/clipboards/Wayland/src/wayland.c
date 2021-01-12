@@ -20,6 +20,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/clipboard.h"
 #include "common/debug.h"
 
+#include "../../client/src/wm.h"
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -35,20 +37,10 @@ struct WCBTransfer
 
 struct WCBState
 {
-  struct wl_display * display;
-  struct wl_registry * registry;
-  struct wl_data_device_manager * dataDeviceManager;
-  struct wl_seat * seat;
-  struct wl_data_device * dataDevice;
-
   enum LG_ClipboardData stashedType;
   char * stashedMimetype;
   uint8_t * stashedContents;
   ssize_t stashedSize;
-
-  struct wl_keyboard * keyboard;
-  uint32_t keyboardEnterSerial;
-  uint32_t capabilities;
 
   LG_ClipboardReleaseFn releaseFn;
   LG_ClipboardRequestFn requestFn;
@@ -182,104 +174,6 @@ static const char * wayland_cb_getName()
   return "Wayland";
 }
 
-// Keyboard-handling listeners.
-
-static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
-    uint32_t format, int fd, uint32_t size)
-{
-  close(fd);
-}
-
-static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
-    uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
-{
-  this->keyboardEnterSerial = serial;
-}
-
-static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
-    uint32_t serial, struct wl_surface * surface)
-{
-  // Do nothing.
-}
-
-static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
-    uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
-{
-  // Do nothing.
-}
-
-static void keyboardModifiersHandler(void * data,
-    struct wl_keyboard * keyboard, uint32_t serial, uint32_t modsDepressed,
-    uint32_t modsLatched, uint32_t modsLocked, uint32_t group)
-{
-  // Do nothing.
-}
-
-static const struct wl_keyboard_listener keyboardListener = {
-  .keymap = keyboardKeymapHandler,
-  .enter = keyboardEnterHandler,
-  .leave = keyboardLeaveHandler,
-  .key = keyboardKeyHandler,
-  .modifiers = keyboardModifiersHandler,
-};
-
-// Seat-handling listeners.
-
-static void seatCapabilitiesHandler(void * data, struct wl_seat * seat,
-    uint32_t capabilities)
-{
-  this->capabilities = capabilities;
-
-  bool hasKeyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
-  if (!hasKeyboard && this->keyboard)
-  {
-    wl_keyboard_destroy(this->keyboard);
-    this->keyboard = NULL;
-  }
-  else if (hasKeyboard && !this->keyboard)
-  {
-    this->keyboard = wl_seat_get_keyboard(this->seat);
-    wl_keyboard_add_listener(this->keyboard, &keyboardListener, NULL);
-  }
-}
-
-static void seatNameHandler(void * data, struct wl_seat * seat,
-    const char * name)
-{
-  // Do nothing.
-}
-
-static const struct wl_seat_listener seatListener = {
-    .capabilities = seatCapabilitiesHandler,
-    .name = seatNameHandler
-};
-
-// Registry-handling listeners.
-
-static void registryGlobalHandler(void * data,
-    struct wl_registry * registry, uint32_t name, const char * interface,
-    uint32_t version)
-{
-  if (!strcmp(interface, wl_data_device_manager_interface.name))
-    this->dataDeviceManager = wl_registry_bind(this->registry, name,
-        &wl_data_device_manager_interface, 3);
-  else if (!strcmp(interface, wl_seat_interface.name) && !this->seat)
-    // TODO: multi-seat support.
-    this->seat = wl_registry_bind(this->registry, name,
-        &wl_seat_interface, 1);
-}
-
-static void registryGlobalRemoveHandler(void * data,
-    struct wl_registry * registry, uint32_t name)
-{
-  // Do nothing.
-}
-
-static const struct wl_registry_listener registryListener = {
-  .global = registryGlobalHandler,
-  .global_remove = registryGlobalRemoveHandler,
-};
-
 // Destination client handlers.
 
 static void dataHandleOffer(void * data, struct wl_data_offer * offer,
@@ -327,7 +221,8 @@ static void dataDeviceHandleSelection(void * data,
   free(this->stashedMimetype);
   this->stashedMimetype = NULL;
 
-  wl_display_roundtrip(this->display);
+  struct WMDataWayland * wm = g_wmState.opaque;
+  wl_display_roundtrip(wm->display);
 
   if (this->stashedContents)
   {
@@ -404,21 +299,10 @@ static bool wayland_cb_init(
   this->releaseFn = releaseFn;
   this->notifyFn  = notifyFn;
   this->dataFn    = dataFn;
-  this->display   = wminfo->info.wl.display;
-  this->registry  = wl_display_get_registry(this->display);
   this->stashedType = LG_CLIPBOARD_DATA_NONE;
 
-  // Wait for the initial set of globals to appear.
-  wl_registry_add_listener(this->registry, &registryListener, NULL);
-  wl_display_roundtrip(this->display);
-
-  this->dataDevice = wl_data_device_manager_get_data_device(
-      this->dataDeviceManager, this->seat);
-  wl_data_device_add_listener(this->dataDevice, &dataDeviceListener, NULL);
-
-  // Wait for the compositor to let us know of capabilities.
-  wl_seat_add_listener(this->seat, &seatListener, NULL);
-  wl_display_roundtrip(this->display);
+  struct WMDataWayland * wm = g_wmState.opaque;
+  wl_data_device_add_listener(wm->dataDevice, &dataDeviceListener, NULL);
   return true;
 }
 
@@ -479,6 +363,8 @@ static const struct wl_data_source_listener dataSourceListener = {
 static void wayland_cb_reply_fn(void * opaque, LG_ClipboardData type,
    	uint8_t * data, uint32_t size)
 {
+  struct WMDataWayland * wm = g_wmState.opaque;
+
   struct WCBTransfer * transfer = malloc(sizeof(struct WCBTransfer));
   void * dataCopy = malloc(size);
   memcpy(dataCopy, data, size);
@@ -489,13 +375,13 @@ static void wayland_cb_reply_fn(void * opaque, LG_ClipboardData type,
   };
 
   struct wl_data_source * source =
-    wl_data_device_manager_create_data_source(this->dataDeviceManager);
+    wl_data_device_manager_create_data_source(wm->dataDeviceManager);
   wl_data_source_add_listener(source, &dataSourceListener, transfer);
   for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
     wl_data_source_offer(source, *mimetype);
 
-  wl_data_device_set_selection(this->dataDevice, source,
-    this->keyboardEnterSerial);
+  wl_data_device_set_selection(wm->dataDevice, source,
+    wm->keyboardEnterSerial);
 }
 
 static void wayland_cb_notice(LG_ClipboardRequestFn requestFn,
@@ -509,7 +395,8 @@ static void wayland_cb_notice(LG_ClipboardRequestFn requestFn,
 
   // Won't have a keyboard enter serial if we don't have the keyboard
   // capability.
-  if (!this->keyboard)
+  struct WMDataWayland * wm = g_wmState.opaque;
+  if (!wm->keyboard)
     return;
 
   this->requestFn(wayland_cb_reply_fn, NULL);
