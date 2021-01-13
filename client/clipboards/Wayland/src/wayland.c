@@ -41,6 +41,8 @@ struct WCBState
   char * stashedMimetype;
   uint8_t * stashedContents;
   ssize_t stashedSize;
+  bool isReceiving;
+  bool isSelfCopy;
 
   LG_ClipboardReleaseFn releaseFn;
   LG_ClipboardRequestFn requestFn;
@@ -217,6 +219,8 @@ static void dataDeviceHandleSelection(void * data,
     abort();
   }
 
+  this->isReceiving = true;
+  this->isSelfCopy = false;
   wl_data_offer_receive(offer, this->stashedMimetype, fds[1]);
   close(fds[1]);
   free(this->stashedMimetype);
@@ -264,11 +268,13 @@ static void dataDeviceHandleSelection(void * data,
 
   this->stashedSize = numRead;
   this->stashedContents = buf;
+  this->isReceiving = false;
 
   close(fds[0]);
   wl_data_offer_destroy(offer);
 
-  this->notifyFn(this->stashedType, 0);
+  if (!this->isSelfCopy)
+    this->notifyFn(this->stashedType, 0);
 }
 
 static const struct wl_data_device_listener dataDeviceListener = {
@@ -321,7 +327,9 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     const char * mimetype, int fd)
 {
   struct WCBTransfer * transfer = (struct WCBTransfer *) data;
-  if (containsMimetype(transfer->mimetypes, mimetype))
+  if (this->isReceiving)
+    this->isSelfCopy = true;
+  else if (containsMimetype(transfer->mimetypes, mimetype))
   {
     // Consider making this do non-blocking sends to not stall the Wayland
     // event loop if it becomes a problem. This is "fine" in the sense that
