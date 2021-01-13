@@ -460,7 +460,7 @@ static void wmWaylandGrabKeyboard()
 {
   struct WMDataWayland * wm = g_wmState.opaque;
 
-  if (wm->keyboardInhibitManager)
+  if (wm->keyboardInhibitManager && !wm->keyboardInhibitor)
   {
     wm->keyboardInhibitor = zwp_keyboard_shortcuts_inhibit_manager_v1_inhibit_shortcuts(
         wm->keyboardInhibitManager, wm->surface, wm->seat);
