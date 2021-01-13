@@ -200,6 +200,7 @@ static const struct wl_data_offer_listener dataOfferListener = {
 static void dataDeviceHandleDataOffer(void * data,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
+  this->stashedType = LG_CLIPBOARD_DATA_NONE;
   wl_data_offer_add_listener(offer, &dataOfferListener, NULL);
 }
 
