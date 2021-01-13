@@ -273,7 +273,7 @@ static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   // Do nothing.
 }
 
-static void pointerButtonHandler(void *data, struct wl_pointer *pointer, 
+static void pointerButtonHandler(void *data, struct wl_pointer *pointer,
     uint32_t serial, uint32_t time, uint32_t button, uint32_t stateW)
 {
   // Do nothing.

@@ -52,7 +52,7 @@ struct WMDataWayland
   struct zwp_confined_pointer_v1 * confinedPointer;
 };
 
-struct WMState g_wmState;
+extern struct WMState g_wmState;
 
 void wmInit();
 void wmFree();
