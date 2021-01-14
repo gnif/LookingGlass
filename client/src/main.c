@@ -1010,7 +1010,7 @@ void handleMouseNormal(double ex, double ey)
 
   /* if we are in "autoCapture" and the delta was large don't test for exit */
   if (params.autoCapture &&
-      (abs(ex) > 100.0 / g_cursor.scale.x || abs(ey) > 100.0 / g_cursor.scale.y))
+      (fabs(ex) > 100.0 / g_cursor.scale.x || fabs(ey) > 100.0 / g_cursor.scale.y))
     testExit = false;
 
   /* translate the guests position to our coordinate space */
@@ -1067,7 +1067,7 @@ void handleMouseNormal(double ex, double ey)
     g_cursor.delta.x += x;
     g_cursor.delta.y += y;
 
-    if (abs(g_cursor.delta.x) > 50 || abs(g_cursor.delta.y) > 50)
+    if (fabs(g_cursor.delta.x) > 50 || fabs(g_cursor.delta.y) > 50)
     {
       g_cursor.delta.x = 0;
       g_cursor.delta.y = 0;
