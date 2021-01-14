@@ -33,6 +33,9 @@ add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 option(ENABLE_ASAN "Build with AddressSanitizer" OFF)
 add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
 
+option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
+add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
+
 option(ENABLE_WAYLAND "Build with Wayland support" ON)
 add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
 
@@ -52,6 +55,11 @@ set(CMAKE_C_STANDARD 11)
 if(ENABLE_ASAN)
   add_compile_options("-fno-omit-frame-pointer" "-fsanitize=address")
   set(EXE_FLAGS "${EXE_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+endif()
+
+if(ENABLE_UBSAN)
+  add_compile_options("-fsanitize=undefined")
+  set(EXE_FLAGS "${EXE_FLAGS} -fsanitize=undefined")
 endif()
 
 find_package(PkgConfig)
