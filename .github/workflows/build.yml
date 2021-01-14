@@ -51,3 +51,26 @@ jobs:
       run: |
         cd host/build
         make -j$(nproc)
+
+  host-windows:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Install Windows host dependencies
+      run: |
+        sudo apt-get install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nsis
+    - name: Configure Windows host
+      run: |
+        mkdir host/build
+        cd host/build
+        cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
+    - name: Build Windows host
+      run: |
+        cd host/build
+        make -j$(nproc)
+    - name: Build Windows host installer
+      run: |
+        cd host/build
+        makensis platform/Windows/installer.nsi
