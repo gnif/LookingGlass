@@ -32,3 +32,22 @@ jobs:
       run: |
         cd module
         make
+
+  host-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Install Linux host dependencies
+      run: |
+        sudo apt-get install binutils-dev libgl1-mesa-dev
+    - name: Configure Linux host
+      run: |
+        mkdir host/build
+        cd host/build
+        cmake ..
+    - name: Build Linux host
+      run: |
+        cd host/build
+        make -j$(nproc)
