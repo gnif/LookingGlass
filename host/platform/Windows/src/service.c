@@ -17,8 +17,6 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#define INSTANCE_MUTEX_NAME "Global\\6f1a5eec-af3f-4a65-99dd-ebe0e4ecea55"
-
 #include "interface/platform.h"
 #include "common/ivshmem.h"
 
@@ -59,8 +57,8 @@ static CreateProcessAsUserA_t f_CreateProcessAsUserA = NULL;
 struct Service
 {
   FILE * logFile;
-  bool  running;
-  DWORD processId;
+  bool   running;
+  HANDLE process;
 };
 
 struct Service service = { 0 };
@@ -260,6 +258,12 @@ DWORD GetInteractiveSessionID(void)
 
 void Launch(void)
 {
+  if (service.process)
+  {
+    CloseHandle(service.process);
+    service.process = NULL;
+  }
+
   if (!setupAPI())
   {
     doLog("setupAPI failed\n");
@@ -353,10 +357,9 @@ void Launch(void)
     goto fail_exe;
   }
 
-  CloseHandle(pi.hProcess);
   CloseHandle(pi.hThread);
-  service.processId = pi.dwProcessId;
-  service.running   = true;
+  service.process = pi.hProcess;
+  service.running = true;
 
 fail_exe:
   free(exe);
@@ -664,48 +667,60 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
   while(1)
   {
-    /* check if the app is running by trying to take the lock */
-    bool running = true;
-    HANDLE m = CreateMutex(NULL, FALSE, INSTANCE_MUTEX_NAME);
-    if (WaitForSingleObject(m, 0) == WAIT_OBJECT_0)
-    {
-      running = false;
-      service.running = false;
-      ReleaseMutex(m);
-    }
-    CloseHandle(m);
+    ULONGLONG launchTime;
 
-    if (!running && GetInteractiveSessionID() != 0)
+    if (GetInteractiveSessionID() != 0)
     {
       Launch();
-      /* avoid being overly agressive in restarting */
-      Sleep(1);
+      launchTime = GetTickCount64();
     }
 
-    if (WaitForSingleObject(ghSvcStopEvent, 100) == WAIT_OBJECT_0)
-      break;
+    HANDLE waitOn[] = { ghSvcStopEvent, service.process };
+    DWORD count = 2;
+    DWORD duration = INFINITE;
+
+    if (!service.running)
+    {
+      // If the service is running, wait only on ghSvcStopEvent and prepare to restart in one second.
+      count = 1;
+      duration = 1000;
+    }
+
+    switch (WaitForMultipleObjects(count, waitOn, FALSE, duration))
+    {
+      case WAIT_OBJECT_0:
+        goto stopped;
+      case WAIT_OBJECT_0 + 1:
+      {
+        DWORD code;
+        if (GetExitCodeProcess(service.process, &code))
+          doLog("Host application exited with code 0x%lx\n", code);
+        else
+          doLog("Failed to GetExitCodeProcess (0x%lx)\n", GetLastError());
+
+        // avoid restarting too often
+        if (GetTickCount64() - launchTime < 1000)
+          Sleep(1);
+        break;
+      }
+      case WAIT_FAILED:
+        doLog("Failed to WaitForMultipleObjects (0x%lx)\n", GetLastError());
+    }
   }
 
+  stopped:
   if (service.running)
   {
     doLog("Terminating the host application\n");
-    HANDLE proc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, TRUE,
-        service.processId);
-    if (proc)
+    if (TerminateProcess(service.process, 0))
     {
-      if (TerminateProcess(proc, 0))
-      {
-        while(WaitForSingleObject(proc, INFINITE) != WAIT_OBJECT_0) {}
-        doLog("Host application terminated\n");
-      }
-      else
-        doLog("Failed to terminate the host application\n");
-      CloseHandle(proc);
+      while(WaitForSingleObject(service.process, INFINITE) != WAIT_OBJECT_0) {}
+      doLog("Host application terminated\n");
     }
     else
-    {
-      doLog("OpenProcess failed (%0xlx)\n", GetLastError());
-    }
+      doLog("Failed to terminate the host application\n");
+    CloseHandle(service.process);
+    service.process = NULL;
   }
 
 shutdown:
@@ -739,14 +754,6 @@ bool HandleService(int argc, char * argv[])
 
   if (StartServiceCtrlDispatcher(DispatchTable))
     return true;
-
-  /* only allow one instance to run */
-  HANDLE m = CreateMutex(NULL, FALSE, INSTANCE_MUTEX_NAME);
-  if (WaitForSingleObject(m, 0) != WAIT_OBJECT_0)
-  {
-    CloseHandle(m);
-    return true;
-  }
 
   return false;
 }

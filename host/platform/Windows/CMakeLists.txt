@@ -11,6 +11,9 @@ add_library(platform_Windows STATIC
 	src/mousehook.c
 )
 
+# allow use of functions for Windows Vista or later
+add_definitions(-D _WIN32_WINNT=0x6000)
+
 add_subdirectory("capture")
 
 FIND_PROGRAM(WINDRES_EXECUTABLE NAMES "x86_64-w64-mingw32-windres" "windres.exe" DOC "windres executable")
