@@ -41,6 +41,10 @@ add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
 
 add_compile_options(
   "-Wall"
+  "-Wextra"
+  "-Wno-sign-compare"
+  "-Wno-unused-parameter"
+  "$<$<C_COMPILER_ID:GNU>:-Wimplicit-fallthrough=2>"
   "-Werror"
   "-Wfatal-errors"
   "-ffast-math"
