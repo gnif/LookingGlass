@@ -353,6 +353,8 @@ void Launch(void)
     goto fail_exe;
   }
 
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
   service.processId = pi.dwProcessId;
   service.running   = true;
 
