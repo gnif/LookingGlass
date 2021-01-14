@@ -14,6 +14,8 @@ add_subdirectory("capture")
 target_link_libraries(platform_Linux
 	capture
 	pthread
+	X11
+	GL
 )
 
 target_include_directories(platform_Linux
