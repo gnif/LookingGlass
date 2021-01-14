@@ -102,6 +102,12 @@ void ivshmemOptionsInit(void)
   option_register(options);
 }
 
+bool ivshmemInit(struct IVSHMEM * dev)
+{
+  // FIXME: split code from ivshmemOpen
+  return true;
+}
+
 bool ivshmemOpen(struct IVSHMEM * dev)
 {
   return ivshmemOpenDev(dev, option_get_string("app", "shmFile"));
@@ -212,6 +218,11 @@ void ivshmemClose(struct IVSHMEM * dev)
   dev->mem    = NULL;
   dev->size   = 0;
   dev->opaque = NULL;
+}
+
+void ivshmemFree(struct IVSHMEM * dev)
+{
+  // FIXME: split code from ivshmemClose
 }
 
 bool ivshmemHasDMA(struct IVSHMEM * dev)
