@@ -74,3 +74,22 @@ jobs:
       run: |
         cd host/build
         makensis platform/Windows/installer.nsi
+
+  obs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Install obs plugin dependencies
+      run: |
+        sudo apt-get install binutils-dev libobs-dev libgl1-mesa-dev
+    - name: Configure obs plugin
+      run: |
+        mkdir obs/build
+        cd obs/build
+        cmake ..
+    - name: Build obs plugin
+      run: |
+        cd obs/build
+        make -j$(nproc)
