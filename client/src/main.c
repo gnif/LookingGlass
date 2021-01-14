@@ -1067,7 +1067,7 @@ void handleMouseNormal(double ex, double ey)
     g_cursor.delta.x += x;
     g_cursor.delta.y += y;
 
-    if (fabs(g_cursor.delta.x) > 50 || fabs(g_cursor.delta.y) > 50)
+    if (fabs(g_cursor.delta.x) > 50.0 || fabs(g_cursor.delta.y) > 50.0)
     {
       g_cursor.delta.x = 0;
       g_cursor.delta.y = 0;
