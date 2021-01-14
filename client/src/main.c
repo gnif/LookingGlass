@@ -668,7 +668,7 @@ int spiceThread(void * arg)
   return 0;
 }
 
-static inline const uint32_t mapScancode(SDL_Scancode scancode)
+static inline uint32_t mapScancode(SDL_Scancode scancode)
 {
   uint32_t ps2;
   if (scancode > (sizeof(usb_to_ps2) / sizeof(uint32_t)) || (ps2 = usb_to_ps2[scancode]) == 0)
