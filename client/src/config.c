@@ -396,7 +396,7 @@ static struct Option options[] =
   {0}
 };
 
-void config_init()
+void config_init(void)
 {
   params.center = true;
   params.w      = 1024;
@@ -514,12 +514,12 @@ bool config_load(int argc, char * argv[])
   return true;
 }
 
-void config_free()
+void config_free(void)
 {
   option_free();
 }
 
-static void doLicense()
+static void doLicense(void)
 {
   fprintf(stderr,
     "\n"

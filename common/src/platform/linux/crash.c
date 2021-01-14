@@ -54,7 +54,7 @@ struct crash
 
 static struct crash crash = {0};
 
-static void load_symbols()
+static void load_symbols(void)
 {
   bfd_init();
   crash.fd = bfd_openr(crash.exe, NULL);
@@ -131,7 +131,7 @@ static bool lookup_address(bfd_vma pc, const char ** filename, const char ** fun
   return true;
 }
 
-static void cleanup()
+static void cleanup(void)
 {
   if (crash.syms)
     free(crash.syms);

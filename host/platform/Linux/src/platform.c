@@ -54,18 +54,18 @@ void sigHandler(int signo)
   app_quit();
 }
 
-bool app_init()
+bool app_init(void)
 {
   signal(SIGINT, sigHandler);
   return true;
 }
 
-const char * os_getExecutable()
+const char * os_getExecutable(void)
 {
   return app.executable;
 }
 
-const char * os_getDataPath()
+const char * os_getDataPath(void)
 {
   return app.dataPath;
 }

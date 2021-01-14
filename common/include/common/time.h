@@ -31,7 +31,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef struct LGTimer LGTimer;
 
-static inline uint64_t microtime()
+static inline uint64_t microtime(void)
 {
 #if defined(_WIN32)
   static LARGE_INTEGER freq = { 0 };
@@ -50,7 +50,7 @@ static inline uint64_t microtime()
 
 #if !defined(_WIN32)
 //FIXME: make win32 versions
-static inline uint64_t nanotime()
+static inline uint64_t nanotime(void)
 {
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);

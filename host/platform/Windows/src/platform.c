@@ -66,7 +66,7 @@ static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
 typedef WINBOOL WINAPI (*PChangeWindowMessageFilterEx)(HWND hwnd, UINT message, DWORD action, void * pChangeFilterStruct);
 PChangeWindowMessageFilterEx _ChangeWindowMessageFilterEx = NULL;
 
-static void RegisterTrayIcon()
+static void RegisterTrayIcon(void)
 {
   // register our TrayIcon
   if (!app.iconData.cbSize)
@@ -320,7 +320,7 @@ finish:
   return result;
 }
 
-bool app_init()
+bool app_init(void)
 {
   const char * logFile   = option_get_string("os", "logFile"  );
 
@@ -346,12 +346,12 @@ bool app_init()
   return true;
 }
 
-const char * os_getExecutable()
+const char * os_getExecutable(void)
 {
   return app.executable;
 }
 
-const char * os_getDataPath()
+const char * os_getDataPath(void)
 {
   static char path[MAX_PATH] = { 0 };
   if (!path[0])
@@ -369,7 +369,7 @@ const char * os_getDataPath()
   return path;
 }
 
-HWND os_getMessageWnd()
+HWND os_getMessageWnd(void)
 {
   return app.messageWnd;
 }

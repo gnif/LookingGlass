@@ -57,7 +57,7 @@ static const char * atomTypes[] =
   "image/jpeg"
 };
 
-static const char * x11_cb_getName()
+static const char * x11_cb_getName(void)
 {
   return "X11";
 }
@@ -116,7 +116,7 @@ static bool x11_cb_init(
   return true;
 }
 
-static void x11_cb_free()
+static void x11_cb_free(void)
 {
   free(this);
   this = NULL;
@@ -432,7 +432,7 @@ static void x11_cb_notice(LG_ClipboardRequestFn requestFn, LG_ClipboardData type
   XFlush(this->display);
 }
 
-static void x11_cb_release()
+static void x11_cb_release(void)
 {
   this->requestFn = NULL;
   XSetSelectionOwner(this->display, XA_PRIMARY      , None, CurrentTime);

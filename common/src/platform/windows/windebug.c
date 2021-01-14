@@ -58,7 +58,7 @@ inline static BOOL CompareWindowsVersion(DWORD dwMajorVersion, DWORD dwMinorVers
   return VerifyVersionInfo(&ver, VER_MAJORVERSION | VER_MINORVERSION, dwlConditionMask);
 }
 
-bool IsWindows8()
+bool IsWindows8(void)
 {
   return
     (CompareWindowsVersion(6, 3) == TRUE) ||

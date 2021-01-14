@@ -268,7 +268,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   return true;
 }
 
-static void egl_warn_slow()
+static void egl_warn_slow(void)
 {
   static bool warnDone = false;
   if (!warnDone)

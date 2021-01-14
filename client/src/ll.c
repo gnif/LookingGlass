@@ -38,7 +38,7 @@ struct ll
   LG_Lock lock;
 };
 
-struct ll * ll_new()
+struct ll * ll_new(void)
 {
   struct ll * list = malloc(sizeof(struct ll));
   list->head  = NULL;
