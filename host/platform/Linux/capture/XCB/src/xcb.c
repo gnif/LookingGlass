@@ -62,7 +62,7 @@ static const char * xcb_getName(void)
   return "XCB";
 }
 
-static bool xcb_create(void)
+static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
   assert(!this);
   this             = (struct xcb *)calloc(sizeof(struct xcb), 1);
