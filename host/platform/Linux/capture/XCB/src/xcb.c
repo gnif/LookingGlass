@@ -232,12 +232,6 @@ static CaptureResult xcb_getFrame(FrameBuffer * frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_getPointer(CapturePointer * pointer)
-{
-  memset(pointer, 0, sizeof(CapturePointer));
-  return CAPTURE_RESULT_OK;
-}
-
 struct CaptureInterface Capture_XCB =
 {
   .getName         = xcb_getName,
@@ -249,6 +243,5 @@ struct CaptureInterface Capture_XCB =
   .getMouseScale   = xcb_getMouseScale,
   .capture         = xcb_capture,
   .waitFrame       = xcb_waitFrame,
-  .getFrame        = xcb_getFrame,
-  .getPointer      = xcb_getPointer
+  .getFrame        = xcb_getFrame
 };
