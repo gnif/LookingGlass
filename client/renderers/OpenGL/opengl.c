@@ -1109,7 +1109,6 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
   switch(cursor)
   {
     case LG_CURSOR_MASKED_COLOR:
-    {
       for(int i = 0; i < width * height; ++i)
       {
         const uint32_t c = ((uint32_t *)data)[i];
@@ -1120,7 +1119,6 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
       //
       // technically we should also create an XOR texture from the data but this
       // usage seems very rare in modern software.
-    }
 
     case LG_CURSOR_COLOR:
     {
