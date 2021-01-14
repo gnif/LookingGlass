@@ -212,7 +212,7 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_getFrame(FrameBuffer frame)
+static CaptureResult xcb_getFrame(FrameBuffer * frame)
 {
   assert(this);
   assert(this->initialized);
