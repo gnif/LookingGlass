@@ -1,0 +1,23 @@
+name: build
+on: [push, pull_request]
+jobs:
+  client:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Install client dependencies
+      run: |
+        sudo apt-get install \
+          binutils-dev libdrm-dev libsdl2-dev libsdl2-ttf-dev \
+          libspice-protocol-dev nettle-dev wayland-protocols
+    - name: Configure client
+      run: |
+        mkdir client/build
+        cd client/build
+        cmake ..
+    - name: Build client
+      run: |
+        cd client/build
+        make -j$(nproc)
