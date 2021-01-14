@@ -21,3 +21,14 @@ jobs:
       run: |
         cd client/build
         make -j$(nproc)
+
+  module:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Build kernel module
+      run: |
+        cd module
+        make
