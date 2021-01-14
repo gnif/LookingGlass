@@ -33,7 +33,7 @@ struct IVSHMEMInfo
   HANDLE handle;
 };
 
-void ivshmemOptionsInit()
+void ivshmemOptionsInit(void)
 {
   static struct Option options[] = {
     {

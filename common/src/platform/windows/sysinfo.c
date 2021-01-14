@@ -19,13 +19,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <windows.h>
 
-int sysinfo_gfx_max_multisample()
+int sysinfo_gfx_max_multisample(void)
 {
   //FIXME: Implement this
   return 4;
 }
 
-long sysinfo_getPageSize()
+long sysinfo_getPageSize(void)
 {
   SYSTEM_INFO si;
   GetSystemInfo(&si);

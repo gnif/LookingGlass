@@ -171,7 +171,7 @@ static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
   return LG_CLIPBOARD_DATA_NONE;
 }
 
-static const char * wayland_cb_getName()
+static const char * wayland_cb_getName(void)
 {
   return "Wayland";
 }
@@ -313,7 +313,7 @@ static bool wayland_cb_init(
   return true;
 }
 
-static void wayland_cb_free()
+static void wayland_cb_free(void)
 {
   free(this);
   this = NULL;
@@ -411,7 +411,7 @@ static void wayland_cb_notice(LG_ClipboardRequestFn requestFn,
   this->requestFn(wayland_cb_reply_fn, NULL);
 }
 
-static void wayland_cb_release()
+static void wayland_cb_release(void)
 {
   this->requestFn = NULL;
 }

@@ -88,7 +88,7 @@ struct AppParams params = { 0 };
 static void setGrab(bool enable);
 static void setGrabQuiet(bool enable);
 
-static void lgInit()
+static void lgInit(void)
 {
   g_state.state         = APP_STATE_RUNNING;
   g_state.resizeDone    = true;
@@ -101,13 +101,13 @@ static void lgInit()
   g_cursor.guest.valid   = false;
 }
 
-static bool inputEnabled()
+static bool inputEnabled(void)
 {
   return params.useSpiceInput && !g_state.ignoreInput &&
     ((g_cursor.grab && params.captureInputOnly) || !params.captureInputOnly);
 }
 
-static void alignToGuest()
+static void alignToGuest(void)
 {
   if (SDL_HasEvent(e_SDLEvent))
     return;
@@ -120,7 +120,7 @@ static void alignToGuest()
   SDL_PushEvent(&event);
 }
 
-static void updatePositionInfo()
+static void updatePositionInfo(void)
 {
   if (g_state.haveSrcSize)
   {
@@ -709,7 +709,7 @@ static SpiceDataType clipboard_type_to_spice_type(const LG_ClipboardData type)
   }
 }
 
-void clipboardRelease()
+void clipboardRelease(void)
 {
   if (!params.clipboardToVM)
     return;
@@ -814,7 +814,7 @@ void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t siz
   }
 }
 
-void spiceClipboardRelease()
+void spiceClipboardRelease(void)
 {
   if (!params.clipboardToLocal)
     return;
@@ -915,7 +915,7 @@ static void guestCurToLocal(struct DoublePoint *local)
 // warp support. Instead, we attempt a best-effort emulation which works with a
 // 1:1 mouse movement patch applied in the guest. For anything fancy, use
 // capture mode.
-static void handleMouseWayland()
+static void handleMouseWayland(void)
 {
   if (g_cursor.guest.dpiScale == 0)
     return;
@@ -1119,7 +1119,7 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   }
 }
 
-static void handleWindowLeave()
+static void handleWindowLeave(void)
 {
   g_cursor.inWindow = false;
   g_cursor.inView   = false;
@@ -1133,7 +1133,7 @@ static void handleWindowLeave()
   g_cursor.redraw = true;
 }
 
-static void handleWindowEnter()
+static void handleWindowEnter(void)
 {
   g_cursor.inWindow = true;
   if (!inputEnabled())
@@ -1773,7 +1773,7 @@ static void key_passthrough(SDL_Scancode key, void * opaque)
   spice_key_up  (sc);
 }
 
-static void register_key_binds()
+static void register_key_binds(void)
 {
   g_state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
   g_state.kbVideo        = app_register_keybind(SDL_SCANCODE_V     , toggle_video     , NULL);
@@ -1799,7 +1799,7 @@ static void register_key_binds()
   g_state.kbPass[1] = app_register_keybind(SDL_SCANCODE_RGUI, key_passthrough, NULL);
 }
 
-static void release_key_binds()
+static void release_key_binds(void)
 {
   app_release_keybind(&g_state.kbFS   );
   app_release_keybind(&g_state.kbVideo);
@@ -1813,7 +1813,7 @@ static void release_key_binds()
     app_release_keybind(&g_state.kbPass[i]);
 }
 
-static void initSDLCursor()
+static void initSDLCursor(void)
 {
   const uint8_t data[4] = {0xf, 0x9, 0x9, 0xf};
   const uint8_t mask[4] = {0xf, 0xf, 0xf, 0xf};
@@ -1821,7 +1821,7 @@ static void initSDLCursor()
   SDL_SetCursor(cursor);
 }
 
-static int lg_run()
+static int lg_run(void)
 {
   memset(&g_state, 0, sizeof(g_state));
 
@@ -2218,7 +2218,7 @@ restart:
   return 0;
 }
 
-static void lg_shutdown()
+static void lg_shutdown(void)
 {
   g_state.state = APP_STATE_SHUTDOWN;
   if (t_render)

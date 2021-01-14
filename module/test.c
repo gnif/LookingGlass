@@ -11,7 +11,7 @@
 
 #include "kvmfr.h"
 
-int main()
+int main(void)
 {
   int fd = open("/dev/kvmfr0", O_RDWR);
   if (fd < 0)

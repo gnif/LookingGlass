@@ -57,12 +57,12 @@ static unsigned int xcb_getMaxFrameSize();
 
 // implementation
 
-static const char * xcb_getName()
+static const char * xcb_getName(void)
 {
   return "XCB";
 }
 
-static bool xcb_create()
+static bool xcb_create(void)
 {
   assert(!this);
   this             = (struct xcb *)calloc(sizeof(struct xcb), 1);
@@ -80,7 +80,7 @@ static bool xcb_create()
   return true;
 }
 
-static bool xcb_init()
+static bool xcb_init(void)
 {
   assert(this);
   assert(!this->initialized);
@@ -131,7 +131,7 @@ fail:
   return false;
 }
 
-static bool xcb_deinit()
+static bool xcb_deinit(void)
 {
   assert(this);
 
@@ -157,24 +157,24 @@ static bool xcb_deinit()
   return false;
 }
 
-static void xcb_free()
+static void xcb_free(void)
 {
   lgFreeEvent(this->frameEvent);
   free(this);
   this = NULL;
 }
 
-static unsigned int xcb_getMaxFrameSize()
+static unsigned int xcb_getMaxFrameSize(void)
 {
   return this->width * this->height * 4;
 }
 
-static unsigned int xcb_getMouseScale()
+static unsigned int xcb_getMouseScale(void)
 {
   return 100;
 }
 
-static CaptureResult xcb_capture()
+static CaptureResult xcb_capture(void)
 {
   assert(this);
   assert(this->initialized);

@@ -114,12 +114,12 @@ static CaptureResult dxgi_releaseFrame();
 
 // implementation
 
-static const char * dxgi_getName()
+static const char * dxgi_getName(void)
 {
   return "DXGI";
 }
 
-static void dxgi_initOptions()
+static void dxgi_initOptions(void)
 {
   struct Option options[] =
   {
@@ -186,7 +186,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   return true;
 }
 
-static bool dxgi_init()
+static bool dxgi_init(void)
 {
   assert(this);
 
@@ -572,12 +572,12 @@ fail:
   return false;
 }
 
-static void dxgi_stop()
+static void dxgi_stop(void)
 {
   this->stop = true;
 }
 
-static bool dxgi_deinit()
+static bool dxgi_deinit(void)
 {
   assert(this);
 
@@ -653,7 +653,7 @@ static bool dxgi_deinit()
   return true;
 }
 
-static void dxgi_free()
+static void dxgi_free(void)
 {
   assert(this);
 
@@ -666,7 +666,7 @@ static void dxgi_free()
   this = NULL;
 }
 
-static unsigned int dxgi_getMaxFrameSize()
+static unsigned int dxgi_getMaxFrameSize(void)
 {
   assert(this);
   assert(this->initialized);
@@ -674,7 +674,7 @@ static unsigned int dxgi_getMaxFrameSize()
   return this->height * this->pitch;
 }
 
-static unsigned int dxgi_getMouseScale()
+static unsigned int dxgi_getMouseScale(void)
 {
   assert(this);
   assert(this->initialized);
@@ -701,7 +701,7 @@ static CaptureResult dxgi_hResultToCaptureResult(const HRESULT status)
   }
 }
 
-static CaptureResult dxgi_capture()
+static CaptureResult dxgi_capture(void)
 {
   assert(this);
   assert(this->initialized);
@@ -950,7 +950,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_releaseFrame()
+static CaptureResult dxgi_releaseFrame(void)
 {
   assert(this);
   if (!this->needsRelease)

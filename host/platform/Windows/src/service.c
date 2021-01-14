@@ -73,7 +73,7 @@ void doLog(const char * fmt, ...)
   va_end(args);
 }
 
-static bool setupAPI()
+static bool setupAPI(void)
 {
   /* first look in kernel32.dll */
   HMODULE mod;
@@ -99,7 +99,7 @@ static bool setupAPI()
   return false;
 }
 
-static void setupLogging()
+static void setupLogging(void)
 {
   char tempPath[MAX_PATH+1];
   GetTempPathA(sizeof(tempPath), tempPath);
@@ -110,13 +110,13 @@ static void setupLogging()
   doLog("Startup\n");
 }
 
-static void finishLogging()
+static void finishLogging(void)
 {
   doLog("Finished\n");
   fclose(service.logFile);
 }
 
-void winerr()
+void winerr(void)
 {
   char buf[256];
   FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -172,7 +172,7 @@ fail:
   return false;
 }
 
-HANDLE dupeSystemProcessToken()
+HANDLE dupeSystemProcessToken(void)
 {
   DWORD count = 0;
   DWORD returned;
@@ -235,7 +235,7 @@ err_proc:
   return NULL;
 }
 
-DWORD GetInteractiveSessionID()
+DWORD GetInteractiveSessionID(void)
 {
   PWTS_SESSION_INFO pSessionInfo;
   DWORD count;
@@ -258,7 +258,7 @@ DWORD GetInteractiveSessionID()
   return ret;
 }
 
-void Launch()
+void Launch(void)
 {
   if (!setupAPI())
   {
@@ -392,7 +392,7 @@ VOID SvcReportEvent(LPTSTR szFunction)
   }
 }
 
-void Install()
+void Install(void)
 {
   TCHAR szPath[MAX_PATH];
 
@@ -488,7 +488,7 @@ void Install()
   CloseServiceHandle(schSCManager);
 }
 
-void Uninstall()
+void Uninstall(void)
 {
   SC_HANDLE schSCManager;
   SC_HANDLE schService;

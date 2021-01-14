@@ -212,7 +212,7 @@ static int frameThread(void * opaque)
   return 0;
 }
 
-bool startThreads()
+bool startThreads(void)
 {
   app.state = APP_STATE_RUNNING;
   if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
@@ -224,7 +224,7 @@ bool startThreads()
   return true;
 }
 
-bool stopThreads()
+bool stopThreads(void)
 {
   bool ok = true;
 
@@ -242,7 +242,7 @@ bool stopThreads()
   return ok;
 }
 
-static bool captureStart()
+static bool captureStart(void)
 {
   if (app.state == APP_STATE_IDLE)
   {
@@ -265,7 +265,7 @@ static bool captureStart()
   return startThreads();
 }
 
-static bool captureStop()
+static bool captureStop(void)
 {
   DEBUG_INFO("==== [ Capture Stop ] ====");
   if (!stopThreads())
@@ -280,7 +280,7 @@ static bool captureStop()
   return true;
 }
 
-static bool captureRestart()
+static bool captureRestart(void)
 {
   return captureStop() && captureStart();
 }
@@ -639,7 +639,7 @@ fail:
   return exitcode;
 }
 
-void app_quit()
+void app_quit(void)
 {
   app.state = APP_STATE_SHUTDOWN;
 }

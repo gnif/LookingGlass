@@ -89,12 +89,12 @@ static void on_mouseMove(int x, int y)
   lgSignalEvent(this->cursorEvents[0]);
 }
 
-static const char * nvfbc_getName()
+static const char * nvfbc_getName(void)
 {
   return "NVFBC (NVidia Frame Buffer Capture)";
 };
 
-static void nvfbc_initOptions()
+static void nvfbc_initOptions(void)
 {
   struct Option options[] =
   {
@@ -163,7 +163,7 @@ static bool nvfbc_create(
   return true;
 }
 
-static bool nvfbc_init()
+static bool nvfbc_init(void)
 {
   this->stop = false;
   getDesktopSize(&this->width, &this->height, &this->dpi);
@@ -205,7 +205,7 @@ static bool nvfbc_init()
   return true;
 }
 
-static void nvfbc_stop()
+static void nvfbc_stop(void)
 {
   this->stop = true;
   lgSignalEvent(this->cursorEvents[0]);
@@ -218,7 +218,7 @@ static void nvfbc_stop()
   }
 }
 
-static bool nvfbc_deinit()
+static bool nvfbc_deinit(void)
 {
   mouseHook_remove();
 
@@ -231,7 +231,7 @@ static bool nvfbc_deinit()
   return true;
 }
 
-static void nvfbc_free()
+static void nvfbc_free(void)
 {
   NvFBCToSysRelease(&this->nvfbc);
 
@@ -243,17 +243,17 @@ static void nvfbc_free()
   NvFBCFree();
 }
 
-static unsigned int nvfbc_getMaxFrameSize()
+static unsigned int nvfbc_getMaxFrameSize(void)
 {
   return this->maxWidth * this->maxHeight * 4;
 }
 
-static unsigned int nvfbc_getMouseScale()
+static unsigned int nvfbc_getMouseScale(void)
 {
   return this->dpi * 100 / DPI_100_PERCENT;
 }
 
-static CaptureResult nvfbc_capture()
+static CaptureResult nvfbc_capture(void)
 {
   getDesktopSize(&this->width, &this->height, &this->dpi);
   NvFBCFrameGrabInfo grabInfo;

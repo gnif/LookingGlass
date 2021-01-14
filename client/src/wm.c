@@ -41,7 +41,7 @@ static void wmWaylandUngrabKeyboard();
 static void wmWaylandGrabPointer();
 static void wmWaylandUngrabPointer();
 
-void wmInit()
+void wmInit(void)
 {
   switch (g_state.wminfo.subsystem)
   {
@@ -54,7 +54,7 @@ void wmInit()
   }
 }
 
-void wmFree()
+void wmFree(void)
 {
   switch (g_state.wminfo.subsystem)
   {
@@ -67,7 +67,7 @@ void wmFree()
   }
 }
 
-void wmGrabPointer()
+void wmGrabPointer(void)
 {
   switch(g_state.wminfo.subsystem)
   {
@@ -96,7 +96,7 @@ void wmGrabPointer()
   g_wmState.pointerGrabbed = true;
 }
 
-void wmUngrabPointer()
+void wmUngrabPointer(void)
 {
   switch(g_state.wminfo.subsystem)
   {
@@ -116,7 +116,7 @@ void wmUngrabPointer()
   g_wmState.pointerGrabbed = false;
 }
 
-void wmGrabKeyboard()
+void wmGrabKeyboard(void)
 {
   switch(g_state.wminfo.subsystem)
   {
@@ -151,7 +151,7 @@ void wmGrabKeyboard()
   g_wmState.keyboardGrabbed = true;
 }
 
-void wmUngrabKeyboard()
+void wmUngrabKeyboard(void)
 {
   switch(g_state.wminfo.subsystem)
   {
@@ -174,13 +174,13 @@ void wmUngrabKeyboard()
   g_wmState.keyboardGrabbed = false;
 }
 
-void wmGrabAll()
+void wmGrabAll(void)
 {
   wmGrabPointer();
   wmGrabKeyboard();
 }
 
-void wmUngrabAll()
+void wmUngrabAll(void)
 {
   wmUngrabPointer();
   wmUngrabKeyboard();
@@ -383,7 +383,7 @@ static const struct wl_seat_listener seatListener = {
     .name = seatNameHandler,
 };
 
-void wmWaylandInit()
+void wmWaylandInit(void)
 {
   struct WMDataWayland * wm = malloc(sizeof(struct WMDataWayland));
   memset(wm, 0, sizeof(struct WMDataWayland));
@@ -418,7 +418,7 @@ static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
     .relative_motion = relativePointerMotionHandler,
 };
 
-static void wmWaylandGrabPointer()
+static void wmWaylandGrabPointer(void)
 {
   struct WMDataWayland * wm = g_wmState.opaque;
 
@@ -439,7 +439,7 @@ static void wmWaylandGrabPointer()
   }
 }
 
-static void wmWaylandUngrabPointer()
+static void wmWaylandUngrabPointer(void)
 {
   struct WMDataWayland * wm = g_wmState.opaque;
 
@@ -456,7 +456,7 @@ static void wmWaylandUngrabPointer()
   }
 }
 
-static void wmWaylandGrabKeyboard()
+static void wmWaylandGrabKeyboard(void)
 {
   struct WMDataWayland * wm = g_wmState.opaque;
 
@@ -467,7 +467,7 @@ static void wmWaylandGrabKeyboard()
   }
 }
 
-static void wmWaylandUngrabKeyboard()
+static void wmWaylandUngrabKeyboard(void)
 {
   struct WMDataWayland * wm = g_wmState.opaque;
 
@@ -478,7 +478,7 @@ static void wmWaylandUngrabKeyboard()
   }
 }
 
-static void wmWaylandFree()
+static void wmWaylandFree(void)
 {
   struct WMDataWayland * wm = g_wmState.opaque;
 

@@ -104,7 +104,7 @@ static bool config_load(int argc, char * argv[])
   return true;
 }
 
-static int run()
+static int run(void)
 {
   PLGMPClient      lgmp;
   PLGMPClientQueue frameQueue;

@@ -196,12 +196,12 @@ static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
 static void render_wait(struct Inst * this);
 
-const char * opengl_get_name()
+const char * opengl_get_name(void)
 {
   return "OpenGL";
 }
 
-static void opengl_setup()
+static void opengl_setup(void)
 {
   option_register(opengl_options);
 }

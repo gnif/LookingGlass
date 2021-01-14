@@ -47,7 +47,7 @@ void mouseHook_install(MouseHookFn callback)
   sendAppMessage(WM_CALL_FUNCTION, 0, (LPARAM)&cf);
 }
 
-void mouseHook_remove()
+void mouseHook_remove(void)
 {
   struct MSG_CALL_FUNCTION cf;
   cf.fn     = msg_callback;

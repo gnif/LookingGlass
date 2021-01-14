@@ -158,12 +158,12 @@ static struct Option egl_options[] =
 
 void update_mouse_shape(struct Inst * this);
 
-const char * egl_get_name()
+const char * egl_get_name(void)
 {
   return "EGL";
 }
 
-void egl_setup()
+void egl_setup(void)
 {
   option_register(egl_options);
 }

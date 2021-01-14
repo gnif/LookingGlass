@@ -82,7 +82,7 @@ static StringList ivshmemDeviceGetValues(struct Option * option)
   return sl;
 }
 
-void ivshmemOptionsInit()
+void ivshmemOptionsInit(void)
 {
   struct Option options[] =
   {
