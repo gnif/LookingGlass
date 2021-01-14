@@ -178,7 +178,7 @@ static const char * wayland_cb_getName()
 
 // Destination client handlers.
 
-static void dataHandleOffer(void * data, struct wl_data_offer * offer,
+static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
     const char * mimetype)
 {
   enum LG_ClipboardData type = mimetypeToCbType(mimetype);
@@ -195,8 +195,22 @@ static void dataHandleOffer(void * data, struct wl_data_offer * offer,
   }
 }
 
+static void dataOfferHandleSourceActions(void * data,
+    struct wl_data_offer * offer, uint32_t sourceActions)
+{
+  // Do nothing.
+}
+
+static void dataOfferHandleAction(void * data, struct wl_data_offer * offer,
+    uint32_t dndAction)
+{
+  // Do nothing.
+}
+
 static const struct wl_data_offer_listener dataOfferListener = {
-  .offer = dataHandleOffer,
+  .offer = dataOfferHandleOffer,
+  .source_actions = dataOfferHandleSourceActions,
+  .action = dataOfferHandleAction,
 };
 
 static void dataDeviceHandleDataOffer(void * data,
