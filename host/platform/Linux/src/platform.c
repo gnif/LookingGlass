@@ -20,12 +20,15 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/stringutils.h"
 #include "common/thread.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
+#include <pwd.h>
+#include <unistd.h>
 
 struct app
 {
