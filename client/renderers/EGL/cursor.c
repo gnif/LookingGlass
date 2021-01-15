@@ -97,48 +97,15 @@ static bool egl_cursor_tex_init(struct CursorTex * t,
 
 static inline void egl_cursor_tex_uniforms(EGL_Cursor * cursor, struct CursorTex * t, bool mono)
 {
-  float x, y, w, h;
-
-  switch(cursor->rotate)
-  {
-    case LG_ROTATE_UP:
-      x =  cursor->x;
-      y =  cursor->y;
-      w =  cursor->w;
-      h =  cursor->h;
-      break;
-
-    case LG_ROTATE_DOWN:
-      x = -cursor->x;
-      y = -cursor->y;
-      w =  cursor->w;
-      h =  cursor->h;
-      break;
-
-    case LG_ROTATE_LEFT:
-      x =  cursor->y;
-      y = -cursor->x;
-      w =  cursor->h;
-      h =  cursor->w;
-      break;
-
-    case LG_ROTATE_RIGHT:
-      x = -cursor->y;
-      y =  cursor->x;
-      w =  cursor->h;
-      h =  cursor->w;
-      break;
-  }
-
   if (mono)
   {
-    glUniform4f(t->uMousePos, x, y, w, h / 2);
+    glUniform4f(t->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
     glUniform1i(t->uRotate  , cursor->rotate);
     glUniform1i(t->uCBMode  , cursor->cbMode);
   }
   else
   {
-    glUniform4f(t->uMousePos, x, y, w, h);
+    glUniform4f(t->uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
     glUniform1i(t->uRotate  , cursor->rotate);
     glUniform1i(t->uCBMode  , cursor->cbMode);
   }
