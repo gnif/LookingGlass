@@ -126,15 +126,6 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
     return false;
   }
 
-  if (!egl_init_desktop_shader(
-    &(*desktop)->shader_yuv,
-    b_shader_desktop_vert    , b_shader_desktop_vert_size,
-    b_shader_desktop_yuv_frag, b_shader_desktop_yuv_frag_size))
-  {
-    DEBUG_ERROR("Failed to initialize the yuv desktop shader");
-    return false;
-  }
-
   if (!egl_model_init(&(*desktop)->model))
   {
     DEBUG_ERROR("Failed to initialize the desktop model");
@@ -172,7 +163,6 @@ void egl_desktop_free(EGL_Desktop ** desktop)
 
   egl_texture_free(&(*desktop)->texture              );
   egl_shader_free (&(*desktop)->shader_generic.shader);
-  egl_shader_free (&(*desktop)->shader_yuv.shader    );
   egl_model_free  (&(*desktop)->model                );
 
   app_release_keybind(&(*desktop)->kbNV);
@@ -204,11 +194,6 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bo
     case FRAME_TYPE_RGBA16F:
       pixFmt = EGL_PF_RGBA16F;
       desktop->shader = &desktop->shader_generic;
-      break;
-
-    case FRAME_TYPE_YUV420:
-      pixFmt = EGL_PF_YUV420;
-      desktop->shader = &desktop->shader_yuv;
       break;
 
     default:

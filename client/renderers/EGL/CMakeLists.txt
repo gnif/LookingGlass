@@ -16,7 +16,6 @@ make_object(
 	EGL_SHADER
 	shader/desktop.vert
 	shader/desktop_rgb.frag
-	shader/desktop_yuv.frag
 	shader/cursor.vert
 	shader/cursor_rgb.frag
 	shader/cursor_mono.frag
