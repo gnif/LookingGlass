@@ -22,8 +22,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 
 #include "interface/app.h"
+#include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
-#include "dynamic/clipboards.h"
 #include "common/ivshmem.h"
 
 #include "spice/spice.h"
@@ -38,7 +38,10 @@ enum RunState
 
 struct AppState
 {
-  enum RunState        state;
+  enum RunState state;
+
+  struct LG_DisplayServerOps * ds;
+
   bool                 stopVideo;
   bool                 ignoreInput;
   bool                 escapeActive;
@@ -59,7 +62,7 @@ struct AppState
   void               * lgrData;
   atomic_int           lgrResize;
 
-  const LG_Clipboard * lgc;
+  bool                 cbAvailable;
   SpiceDataType        cbType;
   bool                 cbChunked;
   size_t               cbXfer;
@@ -236,6 +239,3 @@ struct CursorState
 // forwards
 extern struct AppState  g_state;
 extern struct AppParams params;
-
-void handleMouseGrabbed(double, double);
-void handleMouseNormal(double, double);

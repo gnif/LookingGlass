@@ -36,10 +36,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <assert.h>
 #include <stdatomic.h>
 
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
-#include <X11/extensions/XInput2.h>
-#endif
-
 #include "common/debug.h"
 #include "common/crash.h"
 #include "common/KVMFR.h"
@@ -54,7 +50,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
-#include "wm.h"
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
 
@@ -71,7 +66,6 @@ static LGThread *t_cursor  = NULL;
 static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
-static int    g_XInputOp; // XInput Opcode
 static Uint32 e_SDLEvent; // our SDL event
 
 enum
@@ -101,10 +95,41 @@ static void lgInit(void)
   g_cursor.guest.valid   = false;
 }
 
-static bool inputEnabled(void)
+bool app_getProp(LG_DSProperty prop, void * ret)
+{
+  return g_state.ds->getProp(prop, ret);
+}
+
+SDL_Window * app_getWindow(void)
+{
+  return g_state.window;
+}
+
+bool app_inputEnabled(void)
 {
   return params.useSpiceInput && !g_state.ignoreInput &&
     ((g_cursor.grab && params.captureInputOnly) || !params.captureInputOnly);
+}
+
+bool app_cursorInWindow(void)
+{
+  return g_cursor.inWindow;
+}
+
+bool app_cursorIsGrabbed(void)
+{
+  return g_cursor.grab;
+}
+
+bool app_cursorWantsRaw(void)
+{
+  return params.rawMouse;
+}
+
+void app_updateCursorPos(double x, double y)
+{
+  g_cursor.pos.x = x;
+  g_cursor.pos.y = y;
 }
 
 static void alignToGuest(void)
@@ -398,7 +423,7 @@ static int cursorThread(void * unused)
       g_cursor.guest.valid = true;
 
       // if the state just became valid
-      if (valid != true && inputEnabled())
+      if (valid != true && app_inputEnabled())
         alignToGuest();
     }
 
@@ -712,7 +737,7 @@ static SpiceDataType clipboard_type_to_spice_type(const LG_ClipboardData type)
   }
 }
 
-void clipboardRelease(void)
+void app_clipboardRelease(void)
 {
   if (!params.clipboardToVM)
     return;
@@ -720,7 +745,7 @@ void clipboardRelease(void)
   spice_clipboard_release();
 }
 
-void clipboardNotify(const LG_ClipboardData type, size_t size)
+void app_clipboardNotify(const LG_ClipboardData type, size_t size)
 {
   if (!params.clipboardToVM)
     return;
@@ -741,7 +766,7 @@ void clipboardNotify(const LG_ClipboardData type, size_t size)
     spice_clipboard_data_start(g_state.cbType, size);
 }
 
-void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
+void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
 {
   if (!params.clipboardToVM)
     return;
@@ -759,7 +784,7 @@ void clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
   g_state.cbXfer -= size;
 }
 
-void clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
+void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
 {
   if (!params.clipboardToLocal)
     return;
@@ -779,11 +804,11 @@ void spiceClipboardNotice(const SpiceDataType type)
   if (!params.clipboardToLocal)
     return;
 
-  if (!g_state.lgc || !g_state.lgc->notice)
+  if (!g_state.cbAvailable)
     return;
 
   g_state.cbType = type;
-  g_state.lgc->notice(clipboardRequest, spice_type_to_clipboard_type(type));
+  g_state.ds->cbNotice(spice_type_to_clipboard_type(type));
 }
 
 void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)
@@ -822,8 +847,8 @@ void spiceClipboardRelease(void)
   if (!params.clipboardToLocal)
     return;
 
-  if (g_state.lgc && g_state.lgc->release)
-    g_state.lgc->release();
+  if (g_state.cbAvailable)
+    g_state.ds->cbRelease();
 }
 
 void spiceClipboardRequest(const SpiceDataType type)
@@ -831,22 +856,22 @@ void spiceClipboardRequest(const SpiceDataType type)
   if (!params.clipboardToVM)
     return;
 
-  if (g_state.lgc && g_state.lgc->request)
-    g_state.lgc->request(spice_type_to_clipboard_type(type));
+  if (g_state.cbAvailable)
+    g_state.ds->cbRequest(spice_type_to_clipboard_type(type));
 }
 
-static void warpMouse(int x, int y, bool disable)
+static void warpMouse(int x, int y, bool exiting)
 {
   if (g_cursor.warpState == WARP_STATE_OFF)
     return;
 
-  if (disable)
+  if (exiting)
     g_cursor.warpState = WARP_STATE_OFF;
 
   if (g_cursor.pos.x == x && g_cursor.pos.y == y)
     return;
 
-  wmWarpMouse(x, y);
+  g_state.ds->warpMouse(x, y, exiting);
 }
 
 static bool isValidCursorLocation(int x, int y)
@@ -883,7 +908,7 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   *y = (int)ey;
 }
 
-void handleMouseGrabbed(double ex, double ey)
+void app_handleMouseGrabbed(double ex, double ey)
 {
   int x, y;
 
@@ -918,7 +943,7 @@ static void guestCurToLocal(struct DoublePoint *local)
 // warp support. Instead, we attempt a best-effort emulation which works with a
 // 1:1 mouse movement patch applied in the guest. For anything fancy, use
 // capture mode.
-static void handleMouseWayland(void)
+static void app_handleMouseWayland(void)
 {
   if (g_cursor.guest.dpiScale == 0)
     return;
@@ -940,19 +965,19 @@ static void handleMouseWayland(void)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
-void handleMouseNormal(double ex, double ey)
+void app_handleMouseNormal(double ex, double ey)
 {
   /* if we don't have the current cursor pos just send cursor movements */
   if (!g_cursor.guest.valid)
   {
     if (g_cursor.grab)
-      handleMouseGrabbed(ex, ey);
+      app_handleMouseGrabbed(ex, ey);
     return;
   }
 
   if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
   {
-    handleMouseWayland();
+    app_handleMouseWayland();
     return;
   }
 
@@ -987,7 +1012,7 @@ void handleMouseNormal(double ex, double ey)
         g_cursor.redraw = true;
 
         g_cursor.warpState = WARP_STATE_ON;
-        wmGrabPointer();
+        g_state.ds->grabPointer();
       }
 
       struct DoublePoint guest =
@@ -1053,7 +1078,7 @@ void handleMouseNormal(double ex, double ey)
         g_cursor.inWindow = false;
 
       /* ungrab the pointer and move the local cursor to the exit point */
-      wmUngrabPointer();
+      g_state.ds->ungrabPointer();
       warpMouse(tx, ty, true);
       return;
     }
@@ -1093,7 +1118,13 @@ void handleMouseNormal(double ex, double ey)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
-static void handleResizeEvent(unsigned int w, unsigned int h)
+void app_updateWindowPos(int x, int y)
+{
+  g_state.windowPos.x = x;
+  g_state.windowPos.y = y;
+}
+
+void app_handleResizeEvent(int w, int h)
 {
   SDL_GetWindowBordersSize(g_state.window,
     &g_state.border.y,
@@ -1108,7 +1139,7 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   g_state.windowCY = h / 2;
   updatePositionInfo();
 
-  if (inputEnabled())
+  if (app_inputEnabled())
   {
     /* if the window is moved/resized causing a loss of focus while grabbed, it
      * makes it impossible to re-focus the window, so we quietly re-enter
@@ -1122,12 +1153,12 @@ static void handleResizeEvent(unsigned int w, unsigned int h)
   }
 }
 
-static void handleWindowLeave(void)
+void app_handleWindowLeave(void)
 {
   g_cursor.inWindow = false;
   g_cursor.inView   = false;
 
-  if (!inputEnabled())
+  if (!app_inputEnabled())
     return;
 
   if (!params.alwaysShowCursor)
@@ -1136,10 +1167,10 @@ static void handleWindowLeave(void)
   g_cursor.redraw = true;
 }
 
-static void handleWindowEnter(void)
+void app_handleWindowEnter(void)
 {
   g_cursor.inWindow = true;
-  if (!inputEnabled())
+  if (!app_inputEnabled())
     return;
 
   g_cursor.draw   = true;
@@ -1171,20 +1202,20 @@ static void setGrabQuiet(bool enable)
 
   if (enable)
   {
-    wmGrabPointer();
+    g_state.ds->grabPointer();
 
     if (params.grabKeyboard)
-      wmGrabKeyboard();
+      g_state.ds->grabKeyboard();
   }
   else
   {
     if (params.grabKeyboard)
     {
       if (!g_state.focused || !params.grabKeyboardOnFocus)
-        wmUngrabKeyboard();
+        g_state.ds->ungrabKeyboard();
     }
 
-    wmUngrabPointer();
+    g_state.ds->ungrabPointer();
   }
 
   // if exiting capture when input on capture only, we want to show the cursor
@@ -1197,6 +1228,9 @@ static void setGrabQuiet(bool enable)
 
 int eventFilter(void * userdata, SDL_Event * event)
 {
+  if (g_state.ds->eventFilter(event))
+    return 0;
+
   if (event->type == e_SDLEvent)
   {
     switch(event->user.code)
@@ -1232,55 +1266,38 @@ int eventFilter(void * userdata, SDL_Event * event)
       switch(event->window.event)
       {
         case SDL_WINDOWEVENT_ENTER:
-          if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
-            g_cursor.inView = true;
-          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-            handleWindowEnter();
+          app_handleWindowEnter();
           break;
 
         case SDL_WINDOWEVENT_LEAVE:
-          if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
-            g_cursor.inView = false;
-          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-            handleWindowLeave();
+          app_handleWindowLeave();
           break;
 
         case SDL_WINDOWEVENT_FOCUS_GAINED:
-          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-          {
-            g_state.focused = true;
+          g_state.focused = true;
 
-            if (!inputEnabled())
-              break;
-            if (params.grabKeyboardOnFocus)
-              wmGrabKeyboard();
-          }
+          if (!app_inputEnabled())
+            break;
+          if (params.grabKeyboardOnFocus)
+            g_state.ds->grabKeyboard();
           break;
 
         case SDL_WINDOWEVENT_FOCUS_LOST:
-          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-          {
-            g_state.focused = false;
+          g_state.focused = false;
 
-            if (!inputEnabled())
-              break;
-            if (params.grabKeyboardOnFocus)
-              wmUngrabKeyboard();
-          }
+          if (!app_inputEnabled())
+            break;
+          if (params.grabKeyboardOnFocus)
+            g_state.ds->ungrabKeyboard();
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
-          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-            handleResizeEvent(event->window.data1, event->window.data2);
+          app_handleResizeEvent(event->window.data1, event->window.data2);
           break;
 
         case SDL_WINDOWEVENT_MOVED:
-          if (g_state.wminfo.subsystem != SDL_SYSWM_X11)
-          {
-            g_state.windowPos.x = event->window.data1;
-            g_state.windowPos.y = event->window.data2;
-          }
+          app_updateWindowPos(event->window.data1, event->window.data2);
           break;
 
         case SDL_WINDOWEVENT_CLOSE:
@@ -1291,201 +1308,8 @@ int eventFilter(void * userdata, SDL_Event * event)
       return 0;
     }
 
-    case SDL_SYSWMEVENT:
-    {
-      // When the window manager forces the window size after calling SDL_SetWindowSize, SDL
-      // ignores this update and caches the incorrect window size. As such all related details
-      // are incorect including mouse movement information as it clips to the old window size.
-      if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
-      {
-        XEvent xe = event->syswm.msg->msg.x11.event;
-
-        switch(xe.type)
-        {
-          case ConfigureNotify:
-          {
-            /* the window may have been re-parented so we need to translate to
-             * ensure we get the screen top left position of the window */
-            Window child;
-            XTranslateCoordinates(g_state.wminfo.info.x11.display,
-                g_state.wminfo.info.x11.window,
-                DefaultRootWindow(g_state.wminfo.info.x11.display),
-                0, 0, &g_state.windowPos.x, &g_state.windowPos.y,
-                &child);
-
-            handleResizeEvent(xe.xconfigure.width, xe.xconfigure.height);
-            break;
-          }
-
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
-          /* support movements via XInput2 */
-          case GenericEvent:
-          {
-            if (!inputEnabled())
-              break;
-
-            XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
-            if (cookie->extension != g_XInputOp)
-              break;
-
-            switch(cookie->evtype)
-            {
-              case XI_Motion:
-              {
-                if (!g_cursor.inWindow)
-                  break;
-
-                XIDeviceEvent *device = cookie->data;
-                g_cursor.pos.x = device->event_x;
-                g_cursor.pos.y = device->event_y;
-                break;
-              }
-
-              case XI_RawMotion:
-              {
-                if (!g_cursor.inWindow)
-                  break;
-
-                XIRawEvent *raw = cookie->data;
-                double raw_axis[2];
-                double axis[2];
-
-                /* select the active validators for the X & Y axis */
-                double *valuator = raw->valuators.values;
-                double *r_value  = raw->raw_values;
-                int    count     = 0;
-                for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
-                {
-                  if (XIMaskIsSet(raw->valuators.mask, i))
-                  {
-                    raw_axis[count] = *r_value;
-                    axis    [count] = *valuator;
-                    ++count;
-
-                    if (count == 2)
-                      break;
-
-                    ++valuator;
-                    ++r_value;
-                  }
-                }
-
-                /* filter out scroll wheel and other events */
-                if (count < 2)
-                  break;
-
-                /* filter out duplicate events */
-                static Time   prev_time    = 0;
-                static double prev_axis[2] = {0};
-                if (raw->time == prev_time &&
-                    axis[0] == prev_axis[0] &&
-                    axis[1] == prev_axis[1])
-                  break;
-
-                prev_time = raw->time;
-                prev_axis[0] = axis[0];
-                prev_axis[1] = axis[1];
-
-                if (g_cursor.grab)
-                {
-                  if (params.rawMouse)
-                    handleMouseGrabbed(raw_axis[0], raw_axis[1]);
-                  else
-                    handleMouseGrabbed(axis[0], axis[1]);
-                }
-                else
-                  if (g_cursor.inWindow)
-                    handleMouseNormal(axis[0], axis[1]);
-                break;
-              }
-            }
-
-            break;
-          }
-#endif
-
-          case EnterNotify:
-          {
-            int x, y;
-            Window child;
-            XTranslateCoordinates(g_state.wminfo.info.x11.display,
-                DefaultRootWindow(g_state.wminfo.info.x11.display),
-                g_state.wminfo.info.x11.window,
-                xe.xcrossing.x_root, xe.xcrossing.y_root,
-                &x, &y,
-                &child);
-
-            g_cursor.pos.x = x;
-            g_cursor.pos.y = y;
-            handleWindowEnter();
-            break;
-          }
-
-          case LeaveNotify:
-          {
-            if (xe.xcrossing.mode != NotifyNormal)
-              break;
-
-            int x, y;
-            Window child;
-            XTranslateCoordinates(g_state.wminfo.info.x11.display,
-                DefaultRootWindow(g_state.wminfo.info.x11.display),
-                g_state.wminfo.info.x11.window,
-                xe.xcrossing.x_root, xe.xcrossing.y_root,
-                &x, &y,
-                &child);
-
-            g_cursor.pos.x = x;
-            g_cursor.pos.y = y;
-            handleWindowLeave();
-            break;
-          }
-
-          case FocusIn:
-            g_state.focused = true;
-
-            if (!inputEnabled())
-              break;
-
-            if (xe.xfocus.mode == NotifyNormal ||
-                xe.xfocus.mode == NotifyUngrab)
-            {
-              if (params.grabKeyboardOnFocus)
-                wmGrabKeyboard();
-            }
-            break;
-
-          case FocusOut:
-            g_state.focused = false;
-
-            if (!inputEnabled())
-              break;
-
-            if (xe.xfocus.mode == NotifyNormal ||
-                xe.xfocus.mode == NotifyWhileGrabbed)
-            {
-              if (g_cursor.grab)
-                setGrab(false);
-              else
-              {
-                if (params.grabKeyboardOnFocus)
-                  wmUngrabKeyboard();
-              }
-            }
-            break;
-        }
-      }
-
-      if (params.useSpiceClipboard && g_state.lgc && g_state.lgc->wmevent)
-        g_state.lgc->wmevent(event->syswm.msg);
-      return 0;
-    }
-
     case SDL_MOUSEMOTION:
     {
-      if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
-        break;
-
       g_cursor.pos.x = event->motion.x;
       g_cursor.pos.y = event->motion.y;
 
@@ -1495,10 +1319,10 @@ int eventFilter(void * userdata, SDL_Event * event)
         if (g_cursor.grab)
         {
           if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
-            handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+            app_handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
         }
         else
-          handleMouseNormal(event->motion.xrel, event->motion.yrel);
+          app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
       }
       break;
     }
@@ -1519,7 +1343,7 @@ int eventFilter(void * userdata, SDL_Event * event)
         break;
       }
 
-      if (!inputEnabled())
+      if (!app_inputEnabled())
         break;
 
       if (params.ignoreWindowsKeys &&
@@ -1568,7 +1392,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           g_state.escapeActive = false;
       }
 
-      if (!inputEnabled())
+      if (!app_inputEnabled())
         break;
 
       // avoid sending key up events when we didn't send a down
@@ -1594,7 +1418,7 @@ int eventFilter(void * userdata, SDL_Event * event)
     }
 
     case SDL_MOUSEWHEEL:
-      if (!inputEnabled() || !g_cursor.inView)
+      if (!app_inputEnabled() || !g_cursor.inView)
         break;
 
       if (
@@ -1609,7 +1433,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONDOWN:
     {
-      if (!inputEnabled() || !g_cursor.inView)
+      if (!app_inputEnabled() || !g_cursor.inView)
         break;
 
       int button = event->button.button;
@@ -1626,7 +1450,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONUP:
     {
-      if (!inputEnabled() || !g_cursor.inView)
+      if (!app_inputEnabled() || !g_cursor.inView)
         break;
 
       int button = event->button.button;
@@ -1966,6 +1790,45 @@ static int lg_run(void)
     return 1;
   }
 
+  SDL_VERSION(&g_state.wminfo.version);
+  if (!SDL_GetWindowWMInfo(g_state.window, &g_state.wminfo))
+  {
+    DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
+    return -1;
+  }
+
+  // search for the best displayserver ops to use
+  for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
+    if (LG_DisplayServers[i]->subsystem == g_state.wminfo.subsystem)
+    {
+      g_state.ds = LG_DisplayServers[i];
+      break;
+    }
+
+  if (!g_state.ds)
+    g_state.ds = LG_DisplayServers[0];
+
+  // set any null methods to the fallback
+#define SET_FALLBACK(x) \
+  if (!g_state.ds->x) g_state.ds->x = LG_DisplayServers[0]->x;
+  SET_FALLBACK(getProp);
+  SET_FALLBACK(init);
+  SET_FALLBACK(startup);
+  SET_FALLBACK(shutdown);
+  SET_FALLBACK(free);
+  SET_FALLBACK(eventFilter);
+  SET_FALLBACK(grabPointer);
+  SET_FALLBACK(ungrabKeyboard);
+  SET_FALLBACK(warpMouse);
+  SET_FALLBACK(cbInit);
+  SET_FALLBACK(cbNotice);
+  SET_FALLBACK(cbRelease);
+  SET_FALLBACK(cbRequest);
+#undef SET_FALLBACK
+
+  // init the subsystem
+  g_state.ds->init(&g_state.wminfo);
+
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
       params.minimizeOnFocusLoss ? "1" : "0");
 
@@ -1996,42 +1859,6 @@ static int lg_run(void)
   e_SDLEvent = SDL_RegisterEvents(1);
 
   register_key_binds();
-
-  // set the compositor hint to bypass for low latency
-  SDL_VERSION(&g_state.wminfo.version);
-  if (SDL_GetWindowWMInfo(g_state.window, &g_state.wminfo))
-  {
-    if (g_state.wminfo.subsystem == SDL_SYSWM_X11)
-    {
-      int event, error;
-
-      // enable X11 events to work around SDL2 bugs
-      SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
-
-      XQueryExtension(g_state.wminfo.info.x11.display, "XInputExtension",
-          &g_XInputOp, &event, &error);
-
-      Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(
-        g_state.wminfo.info.x11.display,
-        "NETWM_BYPASS_COMPOSITOR",
-        False);
-
-      unsigned long value = 1;
-      XChangeProperty(
-        g_state.wminfo.info.x11.display,
-        g_state.wminfo.info.x11.window,
-        NETWM_BYPASS_COMPOSITOR,
-        XA_CARDINAL,
-        32,
-        PropModeReplace,
-        (unsigned char *)&value,
-        1
-      );
-    }
-  } else {
-    DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
-    return -1;
-  }
 
   initSDLCursor();
   if (params.hideMouse)
@@ -2066,22 +1893,10 @@ static int lg_run(void)
   // the end of the output
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
-  wmInit();
-
-  for (LG_Clipboard ** clipboard = LG_Clipboards; *clipboard; clipboard++)
-    if ((*clipboard)->init(&g_state.wminfo, clipboardRelease, clipboardNotify, clipboardData))
-    {
-      g_state.lgc = *clipboard;
-      break;
-    }
-
-  if (g_state.lgc)
-  {
-    DEBUG_INFO("Using Clipboard: %s", g_state.lgc->getName());
+  g_state.ds->startup();
+  g_state.cbAvailable = g_state.ds->cbInit && g_state.ds->cbInit();
+  if (g_state.cbAvailable)
     g_state.cbRequestList = ll_new();
-  }
-  else
-    DEBUG_WARN("Failed to initialize the clipboard interface, continuing anyway");
 
   LGMP_STATUS status;
 
@@ -2263,19 +2078,18 @@ static void lg_shutdown(void)
       lgJoinThread(t_spice, NULL);
   }
 
-  if (g_state.lgc)
-  {
-    g_state.lgc->free();
+  if (g_state.ds)
+    g_state.ds->shutdown();
 
-    struct CBRequest *cbr;
-    while(ll_shift(g_state.cbRequestList, (void **)&cbr))
-      free(cbr);
+  if (g_state.cbRequestList)
+  {
     ll_free(g_state.cbRequestList);
+    g_state.cbRequestList = NULL;
   }
 
   if (g_state.window)
   {
-    wmFree();
+    g_state.ds->free();
     SDL_DestroyWindow(g_state.window);
   }
 

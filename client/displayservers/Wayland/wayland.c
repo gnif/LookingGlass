@@ -1,0 +1,715 @@
+/*
+Looking Glass - KVM FrameRelay (KVMFR) Client
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
+https://looking-glass.hostfission.com
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 2 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA 02111-1307 USA
+*/
+
+#include <stdbool.h>
+#include <unistd.h>
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+
+#include <SDL2/SDL.h>
+#include <wayland-client.h>
+
+#include "app.h"
+#include "common/debug.h"
+
+#include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
+#include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
+#include "wayland-relative-pointer-unstable-v1-client-protocol.h"
+
+struct WaylandDSState
+{
+  bool pointerGrabbed;
+  bool keyboardGrabbed;
+
+  struct wl_display * display;
+  struct wl_surface * surface;
+  struct wl_registry * registry;
+  struct wl_seat * seat;
+
+  struct wl_data_device_manager * dataDeviceManager;
+  struct wl_data_device * dataDevice;
+
+  uint32_t capabilities;
+
+  struct wl_keyboard * keyboard;
+  struct zwp_keyboard_shortcuts_inhibit_manager_v1 * keyboardInhibitManager;
+  struct zwp_keyboard_shortcuts_inhibitor_v1 * keyboardInhibitor;
+  uint32_t keyboardEnterSerial;
+
+  struct wl_pointer * pointer;
+  struct zwp_relative_pointer_manager_v1 * relativePointerManager;
+  struct zwp_pointer_constraints_v1 * pointerConstraints;
+  struct zwp_relative_pointer_v1 * relativePointer;
+  struct zwp_confined_pointer_v1 * confinedPointer;
+};
+
+struct WCBTransfer
+{
+  void * data;
+  size_t size;
+  const char ** mimetypes;
+};
+
+struct WCBState
+{
+  enum LG_ClipboardData stashedType;
+  char * stashedMimetype;
+  uint8_t * stashedContents;
+  ssize_t stashedSize;
+  bool isReceiving;
+  bool isSelfCopy;
+
+  bool haveRequest;
+  LG_ClipboardData      type;
+};
+
+static struct WaylandDSState wm;
+static struct WCBState       wcb;
+
+// Wayland support.
+
+// Registry-handling listeners.
+
+static void registryGlobalHandler(void * data, struct wl_registry * registry,
+    uint32_t name, const char * interface, uint32_t version)
+{
+  if (!strcmp(interface, wl_seat_interface.name) && !wm.seat)
+    wm.seat = wl_registry_bind(wm.registry, name, &wl_seat_interface, 1);
+  else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name))
+    wm.relativePointerManager = wl_registry_bind(wm.registry, name,
+        &zwp_relative_pointer_manager_v1_interface, 1);
+  else if (!strcmp(interface, zwp_pointer_constraints_v1_interface.name))
+    wm.pointerConstraints = wl_registry_bind(wm.registry, name,
+        &zwp_pointer_constraints_v1_interface, 1);
+  else if (!strcmp(interface, zwp_keyboard_shortcuts_inhibit_manager_v1_interface.name))
+    wm.keyboardInhibitManager = wl_registry_bind(wm.registry, name,
+        &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1);
+  else if (!strcmp(interface, wl_data_device_manager_interface.name))
+    wm.dataDeviceManager = wl_registry_bind(wm.registry, name,
+        &wl_data_device_manager_interface, 3);
+}
+
+static void registryGlobalRemoveHandler(void * data,
+    struct wl_registry * registry, uint32_t name)
+{
+  // Do nothing.
+}
+
+static const struct wl_registry_listener registryListener = {
+  .global = registryGlobalHandler,
+  .global_remove = registryGlobalRemoveHandler,
+};
+
+// Mouse-handling listeners.
+
+static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
+    uint32_t serial, wl_fixed_t sxW, wl_fixed_t syW)
+{
+  int sx = wl_fixed_to_int(sxW);
+  int sy = wl_fixed_to_int(syW);
+  app_handleMouseNormal(sx, sy);
+}
+
+static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
+    uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW,
+    wl_fixed_t syW)
+{
+  int sx = wl_fixed_to_int(sxW);
+  int sy = wl_fixed_to_int(syW);
+  app_handleMouseNormal(sx, sy);
+}
+
+static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
+    uint32_t serial, struct wl_surface * surface)
+{
+  // Do nothing.
+}
+
+static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
+  uint32_t serial, uint32_t axis, wl_fixed_t value)
+{
+  // Do nothing.
+}
+
+static void pointerButtonHandler(void *data, struct wl_pointer *pointer,
+    uint32_t serial, uint32_t time, uint32_t button, uint32_t stateW)
+{
+  // Do nothing.
+}
+
+static const struct wl_pointer_listener pointerListener = {
+  .enter = pointerEnterHandler,
+  .leave = pointerLeaveHandler,
+  .motion = pointerMotionHandler,
+  .button = pointerButtonHandler,
+  .axis = pointerAxisHandler,
+};
+
+// Keyboard-handling listeners.
+
+static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t format, int fd, uint32_t size)
+{
+  close(fd);
+}
+
+static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
+{
+  wm.keyboardEnterSerial = serial;
+}
+
+static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t serial, struct wl_surface * surface)
+{
+  // Do nothing.
+}
+
+static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
+    uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
+{
+  // Do nothing.
+}
+
+static void keyboardModifiersHandler(void * data,
+    struct wl_keyboard * keyboard, uint32_t serial, uint32_t modsDepressed,
+    uint32_t modsLatched, uint32_t modsLocked, uint32_t group)
+{
+  // Do nothing.
+}
+
+static const struct wl_keyboard_listener keyboardListener = {
+  .keymap = keyboardKeymapHandler,
+  .enter = keyboardEnterHandler,
+  .leave = keyboardLeaveHandler,
+  .key = keyboardKeyHandler,
+  .modifiers = keyboardModifiersHandler,
+};
+
+// Seat-handling listeners.
+
+static void handlePointerCapability(uint32_t capabilities)
+{
+  bool hasPointer = capabilities & WL_SEAT_CAPABILITY_POINTER;
+  if (!hasPointer && wm.pointer)
+  {
+    wl_pointer_destroy(wm.pointer);
+    wm.pointer = NULL;
+  }
+  else if (hasPointer && !wm.pointer)
+  {
+    wm.pointer = wl_seat_get_pointer(wm.seat);
+    wl_pointer_add_listener(wm.pointer, &pointerListener, NULL);
+  }
+}
+
+static void handleKeyboardCapability(uint32_t capabilities)
+{
+  bool hasKeyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
+  if (!hasKeyboard && wm.keyboard)
+  {
+    wl_keyboard_destroy(wm.keyboard);
+    wm.keyboard = NULL;
+  }
+  else if (hasKeyboard && !wm.keyboard)
+  {
+    wm.keyboard = wl_seat_get_keyboard(wm.seat);
+    wl_keyboard_add_listener(wm.keyboard, &keyboardListener, NULL);
+  }
+}
+
+static void seatCapabilitiesHandler(void * data, struct wl_seat * seat,
+    uint32_t capabilities)
+{
+  wm.capabilities = capabilities;
+  handlePointerCapability(capabilities);
+  handleKeyboardCapability(capabilities);
+}
+
+static void seatNameHandler(void * data, struct wl_seat * seat,
+    const char * name)
+{
+  // Do nothing.
+}
+
+static const struct wl_seat_listener seatListener = {
+    .capabilities = seatCapabilitiesHandler,
+    .name = seatNameHandler,
+};
+
+static void waylandInit(SDL_SysWMinfo * info)
+{
+  memset(&wm, 0, sizeof(wm));
+
+  wm.display = info->info.wl.display;
+  wm.surface = info->info.wl.surface;
+  wm.registry = wl_display_get_registry(wm.display);
+
+  wl_registry_add_listener(wm.registry, &registryListener, NULL);
+  wl_display_roundtrip(wm.display);
+
+  wl_seat_add_listener(wm.seat, &seatListener, NULL);
+  wl_display_roundtrip(wm.display);
+
+  wm.dataDevice = wl_data_device_manager_get_data_device(
+      wm.dataDeviceManager, wm.seat);
+}
+
+static void waylandStartup(void)
+{
+}
+
+static void relativePointerMotionHandler(void * data,
+    struct zwp_relative_pointer_v1 *pointer, uint32_t timeHi, uint32_t timeLo,
+    wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
+    wl_fixed_t dyUnaccelW)
+{
+  double dxUnaccel = wl_fixed_to_double(dxUnaccelW);
+  double dyUnaccel = wl_fixed_to_double(dyUnaccelW);
+  app_handleMouseGrabbed(dxUnaccel, dyUnaccel);
+}
+
+static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
+    .relative_motion = relativePointerMotionHandler,
+};
+
+static void waylandGrabPointer(void)
+{
+  if (!wm.relativePointer)
+  {
+    wm.relativePointer =
+      zwp_relative_pointer_manager_v1_get_relative_pointer(
+        wm.relativePointerManager, wm.pointer);
+    zwp_relative_pointer_v1_add_listener(wm.relativePointer,
+      &relativePointerListener, NULL);
+  }
+
+  if (!wm.confinedPointer)
+  {
+    wm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
+        wm.pointerConstraints, wm.surface, wm.pointer, NULL,
+        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  }
+}
+
+static void waylandUngrabPointer(void)
+{
+  if (wm.relativePointer)
+  {
+    zwp_relative_pointer_v1_destroy(wm.relativePointer);
+    wm.relativePointer = NULL;
+  }
+
+  if (wm.confinedPointer)
+  {
+    zwp_confined_pointer_v1_destroy(wm.confinedPointer);
+    wm.confinedPointer = NULL;
+  }
+}
+
+static void waylandGrabKeyboard(void)
+{
+  if (wm.keyboardInhibitManager && !wm.keyboardInhibitor)
+  {
+    wm.keyboardInhibitor = zwp_keyboard_shortcuts_inhibit_manager_v1_inhibit_shortcuts(
+        wm.keyboardInhibitManager, wm.surface, wm.seat);
+  }
+}
+
+static void waylandUngrabKeyboard(void)
+{
+  if (wm.keyboardInhibitor)
+  {
+    zwp_keyboard_shortcuts_inhibitor_v1_destroy(wm.keyboardInhibitor);
+    wm.keyboardInhibitor = NULL;
+  }
+}
+
+static void waylandFree(void)
+{
+  waylandUngrabPointer();
+
+  // TODO: these also need to be freed, but are currently owned by SDL.
+  // wl_display_destroy(wm.display);
+  // wl_surface_destroy(wm.surface);
+  wl_pointer_destroy(wm.pointer);
+  wl_seat_destroy(wm.seat);
+  wl_registry_destroy(wm.registry);
+}
+
+static bool waylandEventFilter(SDL_Event * event)
+{
+  return false;
+}
+
+//asdasd
+
+static const char * textMimetypes[] =
+{
+  "text/plain",
+  "text/plain;charset=utf-8",
+  "TEXT",
+  "STRING",
+  "UTF8_STRING",
+  NULL,
+};
+
+static const char * pngMimetypes[] =
+{
+  "image/png",
+  NULL,
+};
+
+static const char * bmpMimetypes[] =
+{
+  "image/bmp",
+  "image/x-bmp",
+  "image/x-MS-bmp",
+  "image/x-win-bitmap",
+  NULL,
+};
+
+static const char * tiffMimetypes[] =
+{
+  "image/tiff",
+  NULL,
+};
+
+static const char * jpegMimetypes[] =
+{
+  "image/jpeg",
+  NULL,
+};
+
+static const char ** cbTypeToMimetypes(enum LG_ClipboardData type)
+{
+  switch (type)
+  {
+    case LG_CLIPBOARD_DATA_TEXT:
+      return textMimetypes;
+    case LG_CLIPBOARD_DATA_PNG:
+      return pngMimetypes;
+    case LG_CLIPBOARD_DATA_BMP:
+      return bmpMimetypes;
+    case LG_CLIPBOARD_DATA_TIFF:
+      return tiffMimetypes;
+    case LG_CLIPBOARD_DATA_JPEG:
+      return jpegMimetypes;
+    default:
+      DEBUG_ERROR("invalid clipboard type");
+      abort();
+  }
+}
+
+static bool containsMimetype(const char ** mimetypes,
+    const char * needle)
+{
+  for (const char ** mimetype = mimetypes; *mimetype; mimetype++)
+    if (!strcmp(needle, *mimetype))
+      return true;
+
+  return false;
+}
+
+static bool mimetypeEndswith(const char * mimetype, const char * what)
+{
+  size_t mimetypeLen = strlen(mimetype);
+  size_t whatLen = strlen(what);
+
+  if (mimetypeLen < whatLen)
+    return false;
+
+  return !strcmp(mimetype + mimetypeLen - whatLen, what);
+}
+
+static bool isTextMimetype(const char * mimetype)
+{
+  if (containsMimetype(textMimetypes, mimetype))
+    return true;
+
+  char * text = "text/";
+  if (!strncmp(mimetype, text, strlen(text)))
+    return true;
+
+  if (mimetypeEndswith(mimetype, "script") ||
+      mimetypeEndswith(mimetype, "xml") ||
+      mimetypeEndswith(mimetype, "yaml"))
+    return true;
+
+  if (strstr(mimetype, "json"))
+    return true;
+
+  return false;
+}
+
+static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
+{
+  if (isTextMimetype(mimetype))
+    return LG_CLIPBOARD_DATA_TEXT;
+
+  if (containsMimetype(pngMimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_PNG;
+
+  if (containsMimetype(bmpMimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_BMP;
+
+  if (containsMimetype(tiffMimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_TIFF;
+
+  if (containsMimetype(jpegMimetypes, mimetype))
+    return LG_CLIPBOARD_DATA_JPEG;
+
+  return LG_CLIPBOARD_DATA_NONE;
+}
+
+// Destination client handlers.
+
+static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
+    const char * mimetype)
+{
+  enum LG_ClipboardData type = mimetypeToCbType(mimetype);
+  // Oftentimes we'll get text/html alongside text/png, but would prefer to send
+  // image/png. In general, prefer images over text content.
+  if (type != LG_CLIPBOARD_DATA_NONE &&
+      (wcb.stashedType == LG_CLIPBOARD_DATA_NONE ||
+       wcb.stashedType == LG_CLIPBOARD_DATA_TEXT))
+  {
+    wcb.stashedType = type;
+    if (wcb.stashedMimetype)
+      free(wcb.stashedMimetype);
+    wcb.stashedMimetype = strdup(mimetype);
+  }
+}
+
+static void dataOfferHandleSourceActions(void * data,
+    struct wl_data_offer * offer, uint32_t sourceActions)
+{
+  // Do nothing.
+}
+
+static void dataOfferHandleAction(void * data, struct wl_data_offer * offer,
+    uint32_t dndAction)
+{
+  // Do nothing.
+}
+
+static const struct wl_data_offer_listener dataOfferListener = {
+  .offer = dataOfferHandleOffer,
+  .source_actions = dataOfferHandleSourceActions,
+  .action = dataOfferHandleAction,
+};
+
+static void dataDeviceHandleDataOffer(void * data,
+    struct wl_data_device * dataDevice, struct wl_data_offer * offer)
+{
+  wcb.stashedType = LG_CLIPBOARD_DATA_NONE;
+  wl_data_offer_add_listener(offer, &dataOfferListener, NULL);
+}
+
+static void dataDeviceHandleSelection(void * data,
+    struct wl_data_device * dataDevice, struct wl_data_offer * offer)
+{
+  if (wcb.stashedType == LG_CLIPBOARD_DATA_NONE || !offer)
+    return;
+
+  int fds[2];
+  if (pipe(fds) < 0)
+  {
+    DEBUG_ERROR("Failed to get a clipboard pipe: %s", strerror(errno));
+    abort();
+  }
+
+  wcb.isReceiving = true;
+  wcb.isSelfCopy = false;
+  wl_data_offer_receive(offer, wcb.stashedMimetype, fds[1]);
+  close(fds[1]);
+  free(wcb.stashedMimetype);
+  wcb.stashedMimetype = NULL;
+
+  wl_display_roundtrip(wm.display);
+
+  if (wcb.stashedContents)
+  {
+    free(wcb.stashedContents);
+    wcb.stashedContents = NULL;
+  }
+
+  size_t size = 4096, numRead = 0;
+  uint8_t * buf = (uint8_t *) malloc(size);
+  while (true)
+  {
+    ssize_t result = read(fds[0], buf + numRead, size - numRead);
+    if (result < 0)
+    {
+      DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
+      abort();
+    }
+
+    if (result == 0)
+    {
+      buf[numRead] = 0;
+      break;
+    }
+
+    numRead += result;
+    if (numRead >= size)
+    {
+      size *= 2;
+      void * nbuf = realloc(buf, size);
+      if (!nbuf) {
+        DEBUG_ERROR("Failed to realloc clipboard buffer: %s", strerror(errno));
+        abort();
+      }
+
+      buf = nbuf;
+    }
+  }
+
+  wcb.stashedSize = numRead;
+  wcb.stashedContents = buf;
+  wcb.isReceiving = false;
+
+  close(fds[0]);
+  wl_data_offer_destroy(offer);
+
+  if (!wcb.isSelfCopy)
+    app_clipboardNotify(wcb.stashedType, 0);
+}
+
+static const struct wl_data_device_listener dataDeviceListener = {
+  .data_offer = dataDeviceHandleDataOffer,
+  .selection = dataDeviceHandleSelection,
+};
+
+static void waylandCBRequest(LG_ClipboardData type)
+{
+  // We only notified once, so it must be this.
+  assert(type == wcb.stashedType);
+  app_clipboardData(wcb.stashedType, wcb.stashedContents, wcb.stashedSize);
+}
+
+static bool waylandCBInit(void)
+{
+  memset(&wcb, 0, sizeof(wcb));
+
+  wcb.stashedType = LG_CLIPBOARD_DATA_NONE;
+  wl_data_device_add_listener(wm.dataDevice, &dataDeviceListener, NULL);
+
+  return true;
+}
+
+static void dataSourceHandleSend(void * data, struct wl_data_source * source,
+    const char * mimetype, int fd)
+{
+  struct WCBTransfer * transfer = (struct WCBTransfer *) data;
+  if (wcb.isReceiving)
+    wcb.isSelfCopy = true;
+  else if (containsMimetype(transfer->mimetypes, mimetype))
+  {
+    // Consider making this do non-blocking sends to not stall the Wayland
+    // event loop if it becomes a problem. This is "fine" in the sense that
+    // wl-copy also stalls like this, but it's not necessary.
+    fcntl(fd, F_SETFL, 0);
+
+    size_t pos = 0;
+    while (pos < transfer->size)
+    {
+      ssize_t written = write(fd, transfer->data + pos, transfer->size - pos);
+      if (written < 0)
+      {
+        if (errno != EPIPE)
+          DEBUG_ERROR("Failed to write clipboard data: %s", strerror(errno));
+        goto error;
+      }
+
+      pos += written;
+    }
+  }
+
+error:
+  close(fd);
+}
+
+static void dataSourceHandleCancelled(void * data,
+    struct wl_data_source * source)
+{
+  struct WCBTransfer * transfer = (struct WCBTransfer *) data;
+  free(transfer->data);
+  free(transfer);
+  wl_data_source_destroy(source);
+}
+
+static const struct wl_data_source_listener dataSourceListener = {
+  .send = dataSourceHandleSend,
+  .cancelled = dataSourceHandleCancelled,
+};
+
+static void waylandCBReplyFn(void * opaque, LG_ClipboardData type,
+   	uint8_t * data, uint32_t size)
+{
+  struct WCBTransfer * transfer = malloc(sizeof(struct WCBTransfer));
+  void * dataCopy = malloc(size);
+  memcpy(dataCopy, data, size);
+  *transfer = (struct WCBTransfer) {
+    .data = dataCopy,
+    .size = size,
+    .mimetypes = cbTypeToMimetypes(type),
+  };
+
+  struct wl_data_source * source =
+    wl_data_device_manager_create_data_source(wm.dataDeviceManager);
+  wl_data_source_add_listener(source, &dataSourceListener, transfer);
+  for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
+    wl_data_source_offer(source, *mimetype);
+
+  wl_data_device_set_selection(wm.dataDevice, source,
+    wm.keyboardEnterSerial);
+}
+
+static void waylandCBNotice(LG_ClipboardData type)
+{
+  wcb.haveRequest = true;
+  wcb.type        = type;
+  app_clipboardRequest(waylandCBReplyFn, NULL);
+}
+
+static void waylandCBRelease(void)
+{
+  wcb.haveRequest = false;
+}
+
+struct LG_DisplayServerOps LGDS_Wayland =
+{
+  .subsystem      = SDL_SYSWM_WAYLAND,
+  .init           = waylandInit,
+  .startup        = waylandStartup,
+  .free           = waylandFree,
+  .eventFilter    = waylandEventFilter,
+  .grabPointer    = waylandGrabPointer,
+  .ungrabPointer  = waylandUngrabPointer,
+  .grabKeyboard   = waylandGrabKeyboard,
+  .ungrabKeyboard = waylandUngrabKeyboard,
+  .warpMouse      = NULL,             // fallback to SDL
+
+  .cbInit    = waylandCBInit,
+  .cbNotice  = waylandCBNotice,
+  .cbRelease = waylandCBRelease,
+  .cbRequest = waylandCBRequest
+};
