@@ -3,6 +3,9 @@ on: [push, pull_request]
 jobs:
   client:
     runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        cc: [gcc, clang]
     steps:
     - uses: actions/checkout@v1
       with:
@@ -16,7 +19,7 @@ jobs:
       run: |
         mkdir client/build
         cd client/build
-        cmake ..
+        CC=/usr/bin/${{ matrix.cc }} cmake ..
     - name: Build client
       run: |
         cd client/build
