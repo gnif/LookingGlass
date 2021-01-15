@@ -308,16 +308,6 @@ void Launch(void)
     goto fail_token;
   }
 
-  if (!enablePriv(SE_IMPERSONATE_NAME))
-    goto fail_token;
-
-  if (!ImpersonateLoggedOnUser(hToken))
-  {
-    doLog("fail_tokened to impersonate\n");
-    winerr();
-    goto fail_token;
-  }
-
   if (!enablePriv(SE_ASSIGNPRIMARYTOKEN_NAME))
     goto fail_token;
 
