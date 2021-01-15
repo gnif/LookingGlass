@@ -176,6 +176,7 @@ bool enablePriv(const char * name)
     goto fail;
   }
 
+  CloseHandle(hToken);
   return true;
 
 fail:
