@@ -945,6 +945,17 @@ static void guestCurToLocal(struct DoublePoint *local)
 // capture mode.
 static void app_handleMouseWayland(void)
 {
+  const bool inView =
+    g_cursor.pos.x >= g_state.dstRect.x                     &&
+    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
+    g_cursor.pos.y >= g_state.dstRect.y                     &&
+    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
+
+  if (params.hideMouse && inView != g_cursor.inView)
+      SDL_ShowCursor(inView ? SDL_DISABLE : SDL_ENABLE);
+
+  g_cursor.inView = inView;
+
   if (g_cursor.guest.dpiScale == 0)
     return;
 
