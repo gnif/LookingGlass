@@ -7,6 +7,7 @@ uniform sampler2D sampler1;
 
 uniform       int   nearest;
 uniform highp vec2  size;
+uniform       int   rotate;
 
 uniform       int   nv;
 uniform highp float nvGain;
@@ -14,10 +15,31 @@ uniform       int   cbMode;
 
 void main()
 {
+  highp vec2 ruv;
+  if (rotate == 0) // up
+  {
+    ruv = uv;
+  }
+  else if (rotate == 1) // down
+  {
+    ruv.x = -uv.x + 1.0f;
+    ruv.y = -uv.y + 1.0f;
+  }
+  else if (rotate == 2) // left
+  {
+    ruv.x = -uv.y + 1.0f;
+    ruv.y =  uv.x;
+  }
+  else if (rotate == 3) // right
+  {
+    ruv.x =  uv.y;
+    ruv.y = -uv.x + 1.0f;
+  }
+
   if(nearest == 1)
-    color = texture(sampler1, uv);
+    color = texture(sampler1, ruv);
   else
-    color = texelFetch(sampler1, ivec2(uv * size), 0);
+    color = texelFetch(sampler1, ivec2(ruv * size), 0);
 
   if (cbMode > 0)
   {

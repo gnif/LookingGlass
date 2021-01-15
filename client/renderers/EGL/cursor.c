@@ -39,6 +39,7 @@ struct CursorTex
   struct EGL_Texture * texture;
   struct EGL_Shader  * shader;
   GLuint uMousePos;
+  GLuint uRotate;
   GLuint uCBMode;
 };
 
@@ -56,6 +57,7 @@ struct EGL_Cursor
   // cursor state
   bool              visible;
   float             x, y, w, h;
+  int               rotate;
   int               cbMode;
 
   struct CursorTex norm;
@@ -87,9 +89,59 @@ static bool egl_cursor_tex_init(struct CursorTex * t,
   }
 
   t->uMousePos = egl_shader_get_uniform_location(t->shader, "mouse" );
+  t->uRotate   = egl_shader_get_uniform_location(t->shader, "rotate");
   t->uCBMode   = egl_shader_get_uniform_location(t->shader, "cbMode");
 
   return true;
+}
+
+static inline void egl_cursor_tex_uniforms(EGL_Cursor * cursor, struct CursorTex * t, bool mono)
+{
+  float x, y, w, h;
+
+  switch(cursor->rotate)
+  {
+    case LG_ROTATE_UP:
+      x =  cursor->x;
+      y =  cursor->y;
+      w =  cursor->w;
+      h =  cursor->h;
+      break;
+
+    case LG_ROTATE_DOWN:
+      x = -cursor->x;
+      y = -cursor->y;
+      w =  cursor->w;
+      h =  cursor->h;
+      break;
+
+    case LG_ROTATE_LEFT:
+      x =  cursor->y;
+      y = -cursor->x;
+      w =  cursor->h;
+      h =  cursor->w;
+      break;
+
+    case LG_ROTATE_RIGHT:
+      x = -cursor->y;
+      y =  cursor->x;
+      w =  cursor->h;
+      h =  cursor->w;
+      break;
+  }
+
+  if (mono)
+  {
+    glUniform4f(t->uMousePos, x, y, w, h / 2);
+    glUniform1i(t->uRotate  , cursor->rotate);
+    glUniform1i(t->uCBMode  , cursor->cbMode);
+  }
+  else
+  {
+    glUniform4f(t->uMousePos, x, y, w, h);
+    glUniform1i(t->uRotate  , cursor->rotate);
+    glUniform1i(t->uCBMode  , cursor->cbMode);
+  }
 }
 
 static void egl_cursor_tex_free(struct CursorTex * t)
@@ -150,14 +202,17 @@ void egl_cursor_free(EGL_Cursor ** cursor)
   *cursor = NULL;
 }
 
-bool egl_cursor_set_shape(EGL_Cursor * cursor, const LG_RendererCursor type, const int width, const int height, const int stride, const uint8_t * data)
+bool egl_cursor_set_shape(EGL_Cursor * cursor, const LG_RendererCursor type,
+    const int width, const int height, const LG_RendererRotate rotate,
+    const int stride, const uint8_t * data)
 {
   LG_LOCK(cursor->lock);
 
   cursor->type   = type;
   cursor->width  = width;
   cursor->height = (type == LG_CURSOR_MONOCHROME ? height / 2 : height);
-  cursor->stride  = stride;
+  cursor->stride = stride;
+  cursor->rotate = rotate;
 
   const size_t size = height * stride;
   if (size > cursor->dataSize)
@@ -238,9 +293,9 @@ void egl_cursor_render(EGL_Cursor * cursor)
             xor[y * cursor->width + x] = xorMask;
           }
 
-        egl_texture_setup (cursor->norm.texture    , EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false, false);
+        egl_texture_setup (cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false, false);
         egl_texture_setup (cursor->mono.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false, false);
-        egl_texture_update(cursor->norm.texture    , (uint8_t *)and);
+        egl_texture_update(cursor->norm.texture, (uint8_t *)and);
         egl_texture_update(cursor->mono.texture, (uint8_t *)xor);
         break;
       }
@@ -254,14 +309,13 @@ void egl_cursor_render(EGL_Cursor * cursor)
     case LG_CURSOR_MONOCHROME:
     {
       egl_shader_use(cursor->norm.shader);
-      glUniform4f(cursor->norm.uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
-      glUniform1i(cursor->norm.uCBMode  , cursor->cbMode);
+      egl_cursor_tex_uniforms(cursor, &cursor->norm, true);;
       glBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_model_set_texture(cursor->model, cursor->norm.texture);
       egl_model_render(cursor->model);
 
       egl_shader_use(cursor->mono.shader);
-      glUniform4f(cursor->mono.uMousePos, cursor->x, cursor->y, cursor->w, cursor->h / 2);
+      egl_cursor_tex_uniforms(cursor, &cursor->mono, true);;
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_model_set_texture(cursor->model, cursor->mono.texture);
       egl_model_render(cursor->model);
@@ -271,8 +325,7 @@ void egl_cursor_render(EGL_Cursor * cursor)
     case LG_CURSOR_COLOR:
     {
       egl_shader_use(cursor->norm.shader);
-      glUniform4f(cursor->norm.uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
-      glUniform1i(cursor->norm.uCBMode  , cursor->cbMode);
+      egl_cursor_tex_uniforms(cursor, &cursor->norm, false);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_model_render(cursor->model);
       break;
@@ -281,7 +334,7 @@ void egl_cursor_render(EGL_Cursor * cursor)
     case LG_CURSOR_MASKED_COLOR:
     {
       egl_shader_use(cursor->mono.shader);
-      glUniform4f(cursor->mono.uMousePos, cursor->x, cursor->y, cursor->w, cursor->h);
+      egl_cursor_tex_uniforms(cursor, &cursor->mono, false);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_model_render(cursor->model);
       break;

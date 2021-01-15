@@ -318,10 +318,12 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
   );
 }
 
-bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
+bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
+    const int width, const int height, const LG_RendererRotate rotate,
+    const int pitch, const uint8_t * data)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!egl_cursor_set_shape(this->cursor, cursor, width, height, pitch, data))
+  if (!egl_cursor_set_shape(this->cursor, cursor, width, height, rotate, pitch, data))
   {
     DEBUG_ERROR("Failed to update the cursor shape");
     return false;

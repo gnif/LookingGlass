@@ -2,6 +2,7 @@
 
 in  highp vec2 uv;
 out highp vec4 color;
+uniform int rotate;
 
 uniform sampler2D sampler1;
 
@@ -9,7 +10,28 @@ uniform int cbMode;
 
 void main()
 {
-  color = texture(sampler1, uv);
+  highp vec2 ruv;
+  if (rotate == 0) // up
+  {
+    ruv = uv;
+  }
+  else if (rotate == 1) // down
+  {
+    ruv.x = -uv.x + 1.0f;
+    ruv.y = -uv.y + 1.0f;
+  }
+  else if (rotate == 2) // left
+  {
+    ruv.x = -uv.y + 1.0f;
+    ruv.y =  uv.x;
+  }
+  else if (rotate == 3) // right
+  {
+    ruv.x =  uv.y;
+    ruv.y = -uv.x + 1.0f;
+  }
+
+  color = texture(sampler1, ruv);
 
   if (cbMode > 0)
   {

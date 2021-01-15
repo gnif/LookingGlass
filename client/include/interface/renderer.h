@@ -57,14 +57,24 @@ typedef enum LG_RendererSupport
 }
 LG_RendererSupport;
 
+typedef enum LG_RendererRotate
+{
+  LG_ROTATE_UP,
+  LG_ROTATE_DOWN,
+  LG_ROTATE_LEFT,
+  LG_ROTATE_RIGHT
+}
+LG_RendererRotate;
+
 typedef struct LG_RendererFormat
 {
-  FrameType    type;    // frame type
-  unsigned int width;   // image width
-  unsigned int height;  // image height
-  unsigned int stride;  // scanline width (zero if compresed)
-  unsigned int pitch;   // scanline bytes (or compressed size)
-  unsigned int bpp;     // bits per pixel (zero if compressed)
+  FrameType         type;    // frame type
+  unsigned int      width;   // image width
+  unsigned int      height;  // image height
+  unsigned int      stride;  // scanline width (zero if compresed)
+  unsigned int      pitch;   // scanline bytes (or compressed size)
+  unsigned int      bpp;     // bits per pixel (zero if compressed)
+  LG_RendererRotate rotate;  // output rotation
 }
 LG_RendererFormat;
 
@@ -98,7 +108,7 @@ typedef void         (* LG_RendererDeInitialize )(void * opaque);
 typedef bool         (* LG_RendererSupports     )(void * opaque, LG_RendererSupport support);
 typedef void         (* LG_RendererOnRestart    )(void * opaque);
 typedef void         (* LG_RendererOnResize     )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
-typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
+typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const LG_RendererRotate rotate, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visible , const int x, const int y);
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD);

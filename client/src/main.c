@@ -379,6 +379,7 @@ static int cursorThread(void * unused)
         cursorType,
         cursor->width,
         cursor->height,
+        params.winRotate,
         cursor->pitch,
         data)
       )
@@ -557,6 +558,8 @@ static int frameThread(void * unused)
           FrameTypeStr[frame->type],
           frame->width, frame->height,
           frame->stride, frame->pitch);
+
+      lgrFormat.rotate = params.winRotate;
 
       if (!g_state.lgr->on_frame_format(g_state.lgrData, lgrFormat, useDMA))
       {

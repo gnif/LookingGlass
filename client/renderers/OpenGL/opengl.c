@@ -346,7 +346,7 @@ void opengl_on_resize(void * opaque, const int width, const int height, const LG
   }
 }
 
-bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data)
+bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const LG_RendererRotate rotate, const int pitch, const uint8_t * data)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)

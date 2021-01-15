@@ -95,53 +95,54 @@ struct AppState
 
 struct AppParams
 {
-  bool         autoResize;
-  bool         allowResize;
-  bool         keepAspect;
-  bool         forceAspect;
-  bool         dontUpscale;
-  bool         borderless;
-  bool         fullscreen;
-  bool         maximize;
-  bool         minimizeOnFocusLoss;
-  bool         center;
-  int          x, y;
-  unsigned int w, h;
-  int          fpsMin;
-  bool         showFPS;
-  bool         useSpiceInput;
-  bool         useSpiceClipboard;
-  const char * spiceHost;
-  unsigned int spicePort;
-  bool         clipboardToVM;
-  bool         clipboardToLocal;
-  bool         scaleMouseInput;
-  bool         hideMouse;
-  bool         ignoreQuit;
-  bool         noScreensaver;
-  bool         grabKeyboard;
-  bool         grabKeyboardOnFocus;
-  SDL_Scancode escapeKey;
-  bool         ignoreWindowsKeys;
-  bool         showAlerts;
-  bool         captureOnStart;
-  bool         quickSplash;
-  bool         alwaysShowCursor;
+  bool              autoResize;
+  bool              allowResize;
+  bool              keepAspect;
+  bool              forceAspect;
+  bool              dontUpscale;
+  bool              borderless;
+  bool              fullscreen;
+  bool              maximize;
+  bool              minimizeOnFocusLoss;
+  bool              center;
+  int               x, y;
+  unsigned int      w, h;
+  int               fpsMin;
+  bool              showFPS;
+  LG_RendererRotate winRotate;
+  bool              useSpiceInput;
+  bool              useSpiceClipboard;
+  const char *      spiceHost;
+  unsigned int      spicePort;
+  bool              clipboardToVM;
+  bool              clipboardToLocal;
+  bool              scaleMouseInput;
+  bool              hideMouse;
+  bool              ignoreQuit;
+  bool              noScreensaver;
+  bool              grabKeyboard;
+  bool              grabKeyboardOnFocus;
+  SDL_Scancode      escapeKey;
+  bool              ignoreWindowsKeys;
+  bool              showAlerts;
+  bool              captureOnStart;
+  bool              quickSplash;
+  bool              alwaysShowCursor;
 
-  unsigned int cursorPollInterval;
-  unsigned int framePollInterval;
-  bool         allowDMA;
+  unsigned int      cursorPollInterval;
+  unsigned int      framePollInterval;
+  bool              allowDMA;
 
-  bool         forceRenderer;
-  unsigned int forceRendererIndex;
+  bool              forceRenderer;
+  unsigned int      forceRendererIndex;
 
-  const char * windowTitle;
-  bool         mouseRedraw;
-  int          mouseSens;
-  bool         mouseSmoothing;
-  bool         rawMouse;
-  bool         autoCapture;
-  bool         captureInputOnly;
+  const char *      windowTitle;
+  bool              mouseRedraw;
+  int               mouseSens;
+  bool              mouseSmoothing;
+  bool              rawMouse;
+  bool              autoCapture;
+  bool              captureInputOnly;
 };
 
 struct CBRequest

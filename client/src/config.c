@@ -38,6 +38,9 @@ static bool       optSizeParse       (struct Option * opt, const char * str);
 static StringList optSizeValues      (struct Option * opt);
 static char *     optSizeToString    (struct Option * opt);
 static char *     optScancodeToString(struct Option * opt);
+static bool       optRotateParse     (struct Option * opt, const char * str);
+static StringList optRotateValues    (struct Option * opt);
+static char *     optRotateToString  (struct Option * opt);
 
 static void doLicense();
 
@@ -233,6 +236,15 @@ static struct Option options[] =
     .description    = "Skip fading out the splash screen when a connection is established",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
+    .name           = "rotate",
+    .description    = "Rotate the displayed image",
+    .type           = OPTION_TYPE_CUSTOM,
+    .parser         = optRotateParse,
+    .getValues      = optRotateValues,
+    .toString       = optRotateToString
   },
 
   // input options
@@ -663,4 +675,47 @@ static char * optScancodeToString(struct Option * opt)
   char * str;
   alloc_sprintf(&str, "%d = %s", opt->value.x_int, SDL_GetScancodeName(opt->value.x_int));
   return str;
+}
+
+static bool optRotateParse(struct Option * opt, const char * str)
+{
+  if (!str)
+    return false;
+
+       if (strcasecmp(str, "up"   ) == 0) params.winRotate = LG_ROTATE_UP;
+  else if (strcasecmp(str, "down" ) == 0) params.winRotate = LG_ROTATE_DOWN;
+  else if (strcasecmp(str, "left" ) == 0) params.winRotate = LG_ROTATE_LEFT;
+  else if (strcasecmp(str, "right") == 0) params.winRotate = LG_ROTATE_RIGHT;
+  else
+    return false;
+
+  return true;
+}
+
+static StringList optRotateValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+
+  stringlist_push(sl, "UP"   );
+  stringlist_push(sl, "DOWN" );
+  stringlist_push(sl, "LEFT" );
+  stringlist_push(sl, "RIGHT");
+
+  return sl;
+}
+
+static char * optRotateToString(struct Option * opt)
+{
+  const char * str;
+  switch(params.winRotate)
+  {
+    case LG_ROTATE_UP   : str = "UP"   ; break;
+    case LG_ROTATE_DOWN : str = "DOWN" ; break;
+    case LG_ROTATE_LEFT : str = "LEFT" ; break;
+    case LG_ROTATE_RIGHT: str = "RIGHT"; break;
+    default:
+      return NULL;
+  }
+
+  return strdup(str);
 }
