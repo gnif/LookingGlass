@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdarg.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <time.h>
 
 #include <windows.h>
 #include <winsvc.h>
@@ -64,13 +65,24 @@ struct Service
 
 struct Service service = { 0 };
 
-void doLog(const char * fmt, ...)
+char logTime[100];
+
+char * currentTime()
+{
+  time_t t = time(NULL);
+  strftime(logTime, sizeof logTime, "%Y-%m-%d %H:%M:%S", localtime(&t));
+  return logTime;
+}
+
+void doLogReal(const char * fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
   vfprintf(service.logFile, fmt, args);
   va_end(args);
 }
+
+#define doLog(fmt, ...) doLogReal("[%s] " fmt, currentTime(), ##__VA_ARGS__)
 
 static bool setupAPI(void)
 {
