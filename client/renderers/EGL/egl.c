@@ -34,6 +34,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <wayland-egl.h>
 #endif
 
+#include "app.h"
 #include "model.h"
 #include "shader.h"
 #include "desktop.h"
@@ -218,25 +219,6 @@ bool egl_initialize(void * opaque, Uint32 * sdlFlags)
 {
   struct Inst * this = (struct Inst *)opaque;
   DEBUG_INFO("Double buffering is %s", this->opt.doubleBuffer ? "on" : "off");
-
-  *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER         , this->opt.doubleBuffer ? 1 : 0);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK , SDL_GL_CONTEXT_PROFILE_CORE);
-
-  if (option_get_bool("egl", "multisample"))
-  {
-    int maxSamples = sysinfo_gfx_max_multisample();
-    if (maxSamples > 1)
-    {
-      if (maxSamples > 4)
-        maxSamples = 4;
-
-      DEBUG_INFO("Multisampling enabled, max samples: %d", maxSamples);
-      SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-      SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, maxSamples);
-    }
-  }
-
   return true;
 }
 
@@ -506,12 +488,24 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
+  int maxSamples = 1;
+  if (option_get_bool("egl", "multisample"))
+  {
+    if (app_getProp(LG_DS_MAX_MULTISAMPLE, &maxSamples) && maxSamples > 1)
+    {
+      if (maxSamples > 4)
+        maxSamples = 4;
+
+      DEBUG_INFO("Multisampling enabled, max samples: %d", maxSamples);
+    }
+  }
+
   EGLint attr[] =
   {
     EGL_BUFFER_SIZE    , 32,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-    EGL_SAMPLE_BUFFERS , 1,
-    EGL_SAMPLES        , 4,
+    EGL_SAMPLE_BUFFERS , maxSamples > 0 ? 1 : 0,
+    EGL_SAMPLES        , maxSamples,
     EGL_NONE
   };
 
