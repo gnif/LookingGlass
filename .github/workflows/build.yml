@@ -80,6 +80,9 @@ jobs:
 
   obs:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cc: [gcc, clang]
     steps:
     - uses: actions/checkout@v1
       with:
@@ -91,7 +94,7 @@ jobs:
       run: |
         mkdir obs/build
         cd obs/build
-        cmake ..
+        CC=/usr/bin/${{ matrix.cc }} cmake ..
     - name: Build obs plugin
       run: |
         cd obs/build
