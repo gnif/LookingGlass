@@ -340,11 +340,10 @@ void Launch(void)
     .lpDesktop   = "WinSta0\\Default"
   };
 
-  char * exe = strdup(os_getExecutable());
   if (!f_CreateProcessAsUserA(
       hToken,
+      os_getExecutable(),
       NULL,
-      exe,
       NULL,
       NULL,
       TRUE,
@@ -358,15 +357,12 @@ void Launch(void)
     service.running = false;
     doLog("failed to launch\n");
     winerr();
-    goto fail_exe;
+    goto fail_token;
   }
 
   CloseHandle(pi.hThread);
   service.process = pi.hProcess;
   service.running = true;
-
-fail_exe:
-  free(exe);
 
 fail_token:
   CloseHandle(hToken);
