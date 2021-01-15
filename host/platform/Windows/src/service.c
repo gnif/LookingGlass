@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/platform.h"
 #include "common/ivshmem.h"
+#include "service.h"
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -690,19 +691,47 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
     {
       case WAIT_OBJECT_0:
         goto stopped;
+
       case WAIT_OBJECT_0 + 1:
       {
+        service.running = false;
+
         DWORD code;
-        if (GetExitCodeProcess(service.process, &code))
-          doLog("Host application exited with code 0x%lx\n", code);
-        else
+        if (!GetExitCodeProcess(service.process, &code))
           doLog("Failed to GetExitCodeProcess (0x%lx)\n", GetLastError());
+        else
+        {
+          doLog("Host application exited with code 0x%lx\n", code);
+          switch (code)
+          {
+            case LG_HOST_EXIT_USER:
+              doLog("Host application exited due to user action\n");
+              goto stopped;
+
+            case LG_HOST_EXIT_CAPTURE:
+              doLog("Host application exited due to capture error; restarting\n");
+              break;
+
+            case LG_HOST_EXIT_KILLED:
+              doLog("Host application was killed; restarting\n");
+              break;
+
+            case LG_HOST_EXIT_FAILED:
+              doLog("Host application failed to start; will not restart\n");
+              goto stopped;
+
+            default:
+              doLog("Host application failed due to unknown error; restarting\n");
+              break;
+          }
+        }
 
         // avoid restarting too often
         if (GetTickCount64() - launchTime < 1000)
           Sleep(1);
         break;
       }
+
       case WAIT_FAILED:
         doLog("Failed to WaitForMultipleObjects (0x%lx)\n", GetLastError());
     }
@@ -712,7 +741,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   if (service.running)
   {
     doLog("Terminating the host application\n");
-    if (TerminateProcess(service.process, 0))
+    if (TerminateProcess(service.process, LG_HOST_EXIT_KILLED))
     {
       while(WaitForSingleObject(service.process, INFINITE) != WAIT_OBJECT_0) {}
       doLog("Host application terminated\n");
