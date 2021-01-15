@@ -52,21 +52,21 @@ jobs:
         cd host/build
         make -j$(nproc)
 
-  host-windows:
+  host-windows-cross:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
-    - name: Install Windows host dependencies
+    - name: Install Windows host cross-compile dependencies
       run: |
         sudo apt-get install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nsis
-    - name: Configure Windows host
+    - name: Configure Windows host for cross-compile
       run: |
         mkdir host/build
         cd host/build
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
-    - name: Build Windows host
+    - name: Cross-compile Windows host
       run: |
         cd host/build
         make -j$(nproc)
@@ -74,6 +74,26 @@ jobs:
       run: |
         cd host/build
         makensis platform/Windows/installer.nsi
+
+  host-windows-native:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Configure Windows host for native MinGW-w64
+      run: |
+        mkdir host\build
+        cd host\build
+        cmake -G "MinGW Makefiles" ..
+    - name: Build Windows host on native MinGW-w64
+      run: |
+        cd host\build
+        mingw32-make "-j$([Environment]::ProcessorCount)"
+    - name: Build Windows host installer
+      run: |
+        cd host\build
+        makensis platform\Windows\installer.nsi
 
   obs:
     runs-on: ubuntu-latest
