@@ -247,29 +247,6 @@ err_proc:
   return NULL;
 }
 
-DWORD GetInteractiveSessionID(void)
-{
-  PWTS_SESSION_INFO pSessionInfo;
-  DWORD count;
-  DWORD ret = 0;
-
-  if (!WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessionInfo,
-        &count))
-    return 0;
-
-  for(DWORD i = 0; i < count; ++i)
-  {
-    if (pSessionInfo[i].State == WTSActive)
-    {
-      ret = pSessionInfo[i].SessionId;
-      break;
-    }
-  }
-
-  WTSFreeMemory(pSessionInfo);
-  return ret;
-}
-
 void Launch(void)
 {
   if (service.process)
@@ -301,7 +278,7 @@ void Launch(void)
   if (!enablePriv(SE_TCB_NAME))
     goto fail_token;
 
-  targetSessionID = GetInteractiveSessionID();
+  targetSessionID = WTSGetActiveConsoleSessionId();
   if (origSessionID != targetSessionID)
   {
     if (!SetTokenInformation(hToken, TokenSessionId,
@@ -669,7 +646,8 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   {
     ULONGLONG launchTime;
 
-    if (GetInteractiveSessionID() != 0)
+    DWORD interactiveSession = WTSGetActiveConsoleSessionId();
+    if (interactiveSession != 0 && interactiveSession != 0xFFFFFFFF)
     {
       Launch();
       launchTime = GetTickCount64();
