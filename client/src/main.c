@@ -1174,7 +1174,6 @@ void app_handleWindowLeave(void)
 
   if (!params.alwaysShowCursor)
     g_cursor.draw = false;
-
   g_cursor.redraw = true;
 }
 
@@ -1183,9 +1182,6 @@ void app_handleWindowEnter(void)
   g_cursor.inWindow = true;
   if (!app_inputEnabled())
     return;
-
-  g_cursor.draw   = true;
-  g_cursor.redraw = true;
 }
 
 static void setGrab(bool enable)
