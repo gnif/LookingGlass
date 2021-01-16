@@ -84,8 +84,6 @@ struct WCBState
 static struct WaylandDSState wm;
 static struct WCBState       wcb;
 
-// Wayland support.
-
 // Registry-handling listeners.
 
 static void registryGlobalHandler(void * data, struct wl_registry * registry,
@@ -279,7 +277,7 @@ static bool waylandEarlyInit(void)
   return true;
 }
 
-static void waylandInit(SDL_SysWMinfo * info)
+static bool waylandInit(SDL_SysWMinfo * info)
 {
   memset(&wm, 0, sizeof(wm));
 
@@ -290,11 +288,29 @@ static void waylandInit(SDL_SysWMinfo * info)
   wl_registry_add_listener(wm.registry, &registryListener, NULL);
   wl_display_roundtrip(wm.display);
 
+  if (!wm.seat || !wm.dataDeviceManager)
+  {
+    DEBUG_ERROR("Compositor missing a required interface, will not proceed");
+    return false;
+  }
+
+  if (!wm.relativePointerManager)
+    DEBUG_WARN("zwp_relative_pointer_manager_v1 not exported by compositor, "
+               "mouse will not be captured");
+  if (!wm.pointerConstraints)
+    DEBUG_WARN("zwp_pointer_constraints_v1 not exported by compositor, mouse "
+               "will not be captured");
+  if (!wm.keyboardInhibitManager)
+    DEBUG_WARN("zwp_keyboard_shortcuts_inhibit_manager_v1 not exported by "
+               "compositor, keyboard will not be grabbed");
+
   wl_seat_add_listener(wm.seat, &seatListener, NULL);
   wl_display_roundtrip(wm.display);
 
   wm.dataDevice = wl_data_device_manager_get_data_device(
       wm.dataDeviceManager, wm.seat);
+
+  return true;
 }
 
 static void waylandStartup(void)
@@ -317,6 +333,9 @@ static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
 
 static void waylandGrabPointer(void)
 {
+  if (!wm.relativePointerManager || !wm.pointerConstraints)
+    return;
+
   if (!wm.relativePointer)
   {
     wm.relativePointer =
@@ -401,8 +420,6 @@ static bool waylandEventFilter(SDL_Event * event)
 
   return false;
 }
-
-//asdasd
 
 static const char * textMimetypes[] =
 {

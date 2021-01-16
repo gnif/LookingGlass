@@ -65,7 +65,7 @@ struct LG_DisplayServerOps
   bool (*earlyInit)(void);
 
   /* called after SDL has been initialized */
-  void (*init)(SDL_SysWMinfo * info);
+  bool (*init)(SDL_SysWMinfo * info);
 
   /* called at startup after window creation, renderer and/or SPICE is ready */
   void (*startup)();
