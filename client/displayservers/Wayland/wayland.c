@@ -377,6 +377,17 @@ static void waylandFree(void)
   wl_registry_destroy(wm.registry);
 }
 
+static bool waylandGetProp(LG_DSProperty prop, void * ret)
+{
+  if (prop == LG_DS_WARP_SUPPORT)
+  {
+    *(bool*)ret = false;
+    return true;
+  }
+
+  return false;
+}
+
 static bool waylandEventFilter(SDL_Event * event)
 {
   /* prevent the default processing for the following events */
@@ -738,6 +749,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .init           = waylandInit,
   .startup        = waylandStartup,
   .free           = waylandFree,
+  .getProp        = waylandGetProp,
   .eventFilter    = waylandEventFilter,
   .grabPointer    = waylandGrabPointer,
   .ungrabPointer  = waylandUngrabPointer,
