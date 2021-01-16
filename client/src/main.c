@@ -958,6 +958,10 @@ void app_handleMouseGrabbed(double ex, double ey)
 {
   int x, y;
 
+  /* do not pass mouse events to the guest if we do not have focus */
+  if (!g_state.focused)
+    return;
+
   if (params.rawMouse && !g_cursor.useScale)
   {
     /* raw unscaled input are always round numbers */
@@ -987,6 +991,10 @@ static void guestCurToLocal(struct DoublePoint *local)
 
 void app_handleMouseNormal(double ex, double ey)
 {
+  /* do not pass mouse events to the guest if we do not have focus */
+  if (!g_state.focused)
+    return;
+
   // prevent cursor handling outside of capture if the position is not known
   if (!g_cursor.guest.valid)
     return;
@@ -1115,6 +1123,10 @@ void app_handleMouseNormal(double ex, double ey)
 // capture mode.
 void app_handleMouseBasic()
 {
+  /* do not pass mouse events to the guest if we do not have focus */
+  if (!g_state.focused)
+    return;
+
   const bool inView =
     g_cursor.pos.x >= g_state.dstRect.x                     &&
     g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
