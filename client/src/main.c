@@ -919,10 +919,16 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   *y = (int)ey;
 }
 
-static void setCursorInView(bool enable)
+static void setCursorInView(bool inView)
 {
-  // if we don't have focus don't do anything
-  if (enable && !g_state.focused)
+  SDL_ShowCursor(params.hideMouse && inView ? SDL_DISABLE : SDL_ENABLE);
+
+  g_cursor.inView = inView;
+  g_cursor.draw   = params.alwaysShowCursor ? true : inView;
+  g_cursor.redraw = true;
+
+  // if we don't have focus don't try to warp the cursor
+  if (inView && !g_state.focused)
     return;
 
   /* if the display server does not support warp, then we can not operate in
@@ -930,26 +936,13 @@ static void setCursorInView(bool enable)
   bool warpSupport = true;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
 
-  g_cursor.inView = enable;
-  g_cursor.draw   = params.alwaysShowCursor ? true : enable;
-  g_cursor.redraw = true;
+  g_cursor.warpState = inView ? WARP_STATE_ON : WARP_STATE_OFF;
 
-  g_cursor.warpState = enable ? WARP_STATE_ON : WARP_STATE_OFF;
-
-  if (enable)
+  if (warpSupport)
   {
-    if (params.hideMouse)
-      SDL_ShowCursor(SDL_DISABLE);
-
-    if (warpSupport)
+    if (inView)
       g_state.ds->grabPointer();
-  }
-  else
-  {
-    if (params.hideMouse)
-      SDL_ShowCursor(SDL_ENABLE);
-
-    if (warpSupport)
+    else
       g_state.ds->ungrabPointer();
   }
 }
