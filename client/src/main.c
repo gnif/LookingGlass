@@ -81,7 +81,7 @@ struct AppParams params = { 0 };
 
 static void setGrab(bool enable);
 static void setGrabQuiet(bool enable);
-static void setCursorInView(void);
+static void setCursorInView(bool enable);
 
 static void lgInit(void)
 {
@@ -909,14 +909,32 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   *y = (int)ey;
 }
 
-static void setCursorInView(void)
+static void setCursorInView(bool enable)
 {
-  g_cursor.inView = true;
-  g_cursor.draw   = true;
+  // if we don't have focus don't do anything
+  if (enable && !g_state.focused)
+    return;
+
+  g_cursor.inView = enable;
+  g_cursor.draw   = params.alwaysShowCursor ? true : enable;
   g_cursor.redraw = true;
 
-  g_cursor.warpState = WARP_STATE_ON;
-  g_state.ds->grabPointer();
+  g_cursor.warpState = enable ? WARP_STATE_ON : WARP_STATE_OFF;
+
+  if (enable)
+  {
+    if (params.hideMouse)
+      SDL_ShowCursor(SDL_DISABLE);
+
+    g_state.ds->grabPointer();
+  }
+  else
+  {
+    if (params.hideMouse)
+      SDL_ShowCursor(SDL_ENABLE);
+
+    g_state.ds->ungrabPointer();
+  }
 }
 
 void app_handleMouseGrabbed(double ex, double ey)
@@ -980,14 +998,7 @@ void app_handleMouseNormal(double ex, double ey)
 
     if (inView)
     {
-      if (params.hideMouse)
-        SDL_ShowCursor(SDL_DISABLE);
-
-      if (g_state.focused)
-      {
-        /* the cursor moved in, enable grab mode */
-        setCursorInView();
-      }
+      setCursorInView(true);
 
       struct DoublePoint guest =
       {
@@ -1037,17 +1048,9 @@ void app_handleMouseNormal(double ex, double ey)
           g_state.windowPos.x + g_state.border.x + tx,
           g_state.windowPos.y + g_state.border.y + ty))
     {
-      if (params.hideMouse)
-        SDL_ShowCursor(SDL_ENABLE);
+      setCursorInView(false);
 
-      g_cursor.inView = false;
-
-      if(!params.alwaysShowCursor)
-        g_cursor.draw = false;
-
-      g_cursor.redraw = true;
-
-      /* pre-empt the window leave flag if the warp will leave our window */
+      /* preempt the window leave flag if the warp will leave our window */
       if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
         g_cursor.inWindow = false;
 
@@ -1114,9 +1117,12 @@ void app_handleMouseBasic(double ex, double ey)
     g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 
   if (params.hideMouse && inView != g_cursor.inView)
-      SDL_ShowCursor(inView ? SDL_DISABLE : SDL_ENABLE);
 
-  g_cursor.inView = inView;
+  if (inView != g_cursor.inView)
+  {
+    g_cursor.inView = inView;
+    setCursorInView(inView);
+  }
 
   if (g_cursor.guest.dpiScale == 0)
     return;
@@ -1219,7 +1225,7 @@ static void setGrabQuiet(bool enable)
   if (enable)
   {
     if (!g_cursor.inView)
-      setCursorInView();
+      setCursorInView(true);
 
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
