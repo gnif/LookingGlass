@@ -1213,8 +1213,6 @@ static void setGrabQuiet(bool enable)
 
   if (enable)
   {
-    g_state.ds->grabPointer();
-
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
   }
@@ -1225,8 +1223,6 @@ static void setGrabQuiet(bool enable)
       if (!g_state.focused || !params.grabKeyboardOnFocus)
         g_state.ds->ungrabKeyboard();
     }
-
-    g_state.ds->ungrabPointer();
   }
 
   // if exiting capture when input on capture only, we want to show the cursor
