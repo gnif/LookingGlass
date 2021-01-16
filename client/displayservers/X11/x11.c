@@ -433,7 +433,7 @@ static void x11UngrabKeyboard(void)
   x11.keyboardGrabbed = false;
 }
 
-static void x11WarpMouse(int x, int y, bool exiting)
+static void x11WarpPointer(int x, int y, bool exiting)
 {
   XWarpPointer(
       x11.display,
@@ -785,7 +785,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabPointer  = x11UngrabPointer,
   .grabKeyboard   = x11GrabKeyboard,
   .ungrabKeyboard = x11UngrabKeyboard,
-  .warpMouse      = x11WarpMouse,
+  .warpPointer    = x11WarpPointer,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,

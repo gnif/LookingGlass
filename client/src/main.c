@@ -861,7 +861,7 @@ void spiceClipboardRequest(const SpiceDataType type)
     g_state.ds->cbRequest(spice_type_to_clipboard_type(type));
 }
 
-static void warpMouse(int x, int y, bool exiting)
+static void warpPointer(int x, int y, bool exiting)
 {
   if (g_cursor.warpState == WARP_STATE_OFF)
     return;
@@ -872,7 +872,7 @@ static void warpMouse(int x, int y, bool exiting)
   if (g_cursor.pos.x == x && g_cursor.pos.y == y)
     return;
 
-  g_state.ds->warpMouse(x, y, exiting);
+  g_state.ds->warpPointer(x, y, exiting);
 }
 
 static bool isValidCursorLocation(int x, int y)
@@ -1069,7 +1069,7 @@ void app_handleMouseNormal(double ex, double ey)
 
       /* ungrab the pointer and move the local cursor to the exit point */
       g_state.ds->ungrabPointer();
-      warpMouse(tx, ty, true);
+      warpPointer(tx, ty, true);
       return;
     }
   }
@@ -1089,7 +1089,7 @@ void app_handleMouseNormal(double ex, double ey)
     {
       g_cursor.delta.x = 0;
       g_cursor.delta.y = 0;
-      warpMouse(g_state.windowCX, g_state.windowCY, false);
+      warpPointer(g_state.windowCX, g_state.windowCY, false);
     }
 
     g_cursor.guest.x = g_state.srcSize.x / 2;
@@ -1280,7 +1280,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
         struct DoublePoint local;
         guestCurToLocal(&local);
-        warpMouse(round(local.x), round(local.y), false);
+        warpPointer(round(local.x), round(local.y), false);
         break;
       }
     }
@@ -1707,7 +1707,7 @@ static int lg_run(void)
   SET_FALLBACK(eventFilter);
   SET_FALLBACK(grabPointer);
   SET_FALLBACK(ungrabKeyboard);
-  SET_FALLBACK(warpMouse);
+  SET_FALLBACK(warpPointer);
   SET_FALLBACK(cbInit);
   SET_FALLBACK(cbNotice);
   SET_FALLBACK(cbRelease);

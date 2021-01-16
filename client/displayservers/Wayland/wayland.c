@@ -386,7 +386,7 @@ static void waylandUngrabKeyboard(void)
   }
 }
 
-static void waylandWarpMouse(int x, int y, bool exiting)
+static void waylandWarpPointer(int x, int y, bool exiting)
 {
   // This is an unsupported operation on Wayland.
 }
@@ -773,7 +773,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .ungrabPointer  = waylandUngrabPointer,
   .grabKeyboard   = waylandGrabKeyboard,
   .ungrabKeyboard = waylandUngrabKeyboard,
-  .warpMouse      = waylandWarpMouse,
+  .warpPointer    = waylandWarpPointer,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,

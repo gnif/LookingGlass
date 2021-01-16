@@ -93,7 +93,7 @@ struct LG_DisplayServerOps
   void (*ungrabKeyboard)();
 
   //exiting = true if the warp is to leave the window
-  void (*warpMouse)(int x, int y, bool exiting);
+  void (*warpPointer)(int x, int y, bool exiting);
 
   /* clipboard support */
   bool (* cbInit)(void);
