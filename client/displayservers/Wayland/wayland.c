@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #include <SDL2/SDL.h>
 #include <wayland-client.h>
@@ -253,6 +254,28 @@ static const struct wl_seat_listener seatListener = {
     .capabilities = seatCapabilitiesHandler,
     .name = seatNameHandler,
 };
+
+static bool waylandEarlyInit(void)
+{
+  if (getenv("SDL_VIDEODRIVER") != NULL)
+    return true;
+
+  int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
+  if (err < 0)
+  {
+    DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
+    return false;
+  }
+  DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
+
+  // Request to receive EPIPE instead of SIGPIPE when one end of a pipe
+  // disconnects while a write is pending. This is useful to the Wayland
+  // clipboard backend, where an arbitrary application is on the other end of
+  // that pipe.
+  signal(SIGPIPE, SIG_IGN);
+
+  return true;
+}
 
 static void waylandInit(SDL_SysWMinfo * info)
 {
@@ -711,6 +734,7 @@ static void waylandCBRelease(void)
 struct LG_DisplayServerOps LGDS_Wayland =
 {
   .subsystem      = SDL_SYSWM_WAYLAND,
+  .earlyInit      = waylandEarlyInit,
   .init           = waylandInit,
   .startup        = waylandStartup,
   .free           = waylandFree,
