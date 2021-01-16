@@ -1464,7 +1464,7 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONUP:
     {
-      if (!app_inputEnabled() || !g_cursor.inView)
+      if (!app_inputEnabled())
         break;
 
       int button = event->button.button;
