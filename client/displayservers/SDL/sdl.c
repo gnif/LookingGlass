@@ -131,7 +131,7 @@ static void sdlUngrabKeyboard(void)
   sdl.keyboardGrabbed = false;
 }
 
-static void sdlWarpMouse(int x, int y, bool exiting)
+static void sdlWarpPointer(int x, int y, bool exiting)
 {
   if (sdl.exiting)
     return;
@@ -160,7 +160,7 @@ struct LG_DisplayServerOps LGDS_SDL =
   .ungrabPointer  = sdlUngrabPointer,
   .grabKeyboard   = sdlGrabKeyboard,
   .ungrabKeyboard = sdlUngrabKeyboard,
-  .warpMouse      = sdlWarpMouse,
+  .warpPointer    = sdlWarpPointer,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,
