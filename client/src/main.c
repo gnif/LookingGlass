@@ -977,13 +977,9 @@ static void guestCurToLocal(struct DoublePoint *local)
 
 void app_handleMouseNormal(double ex, double ey)
 {
-  /* if we don't have the current cursor pos just send cursor movements */
+  // prevent cursor handling outside of capture if the position is not known
   if (!g_cursor.guest.valid)
-  {
-    if (g_cursor.grab)
-      app_handleMouseGrabbed(ex, ey);
     return;
-  }
 
   /* scale the movement to the guest */
   if (g_cursor.useScale && params.scaleMouseInput)
