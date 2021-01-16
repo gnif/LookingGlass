@@ -49,7 +49,10 @@ struct LG_DisplayServerOps
 {
   const SDL_SYSWM_TYPE subsystem;
 
-  /* early initialization */
+  /* called before SDL has been initialized */
+  bool (*earlyInit)(void);
+
+  /* called after SDL has been initialized */
   void (*init)(SDL_SysWMinfo * info);
 
   /* called at startup after window creation, renderer and/or SPICE is ready */

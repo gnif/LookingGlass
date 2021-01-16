@@ -1654,19 +1654,48 @@ static int lg_run(void)
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
 
-  if (getenv("WAYLAND_DISPLAY"))
+
+  // try to early detect the platform
+  SDL_SYSWM_TYPE subsystem = SDL_SYSWM_UNKNOWN;
+       if (getenv("WAYLAND_DISPLAY")) subsystem = SDL_SYSWM_WAYLAND;
+  else if (getenv("DISPLAY"        )) subsystem = SDL_SYSWM_X11;
+  else
+    DEBUG_WARN("Unknown subsystem, falling back to SDL default");
+
+  // search for the best displayserver ops to use
+  for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
+    if (LG_DisplayServers[i]->subsystem == subsystem)
+    {
+      g_state.ds = LG_DisplayServers[i];
+      break;
+    }
+
+  assert(g_state.ds);
+
+  // set any null methods to the fallback
+#define SET_FALLBACK(x) \
+  if (!g_state.ds->x) g_state.ds->x = LG_DisplayServers[0]->x;
+  SET_FALLBACK(earlyInit);
+  SET_FALLBACK(getProp);
+  SET_FALLBACK(init);
+  SET_FALLBACK(startup);
+  SET_FALLBACK(shutdown);
+  SET_FALLBACK(free);
+  SET_FALLBACK(eventFilter);
+  SET_FALLBACK(grabPointer);
+  SET_FALLBACK(ungrabKeyboard);
+  SET_FALLBACK(warpMouse);
+  SET_FALLBACK(cbInit);
+  SET_FALLBACK(cbNotice);
+  SET_FALLBACK(cbRelease);
+  SET_FALLBACK(cbRequest);
+#undef SET_FALLBACK
+
+  // init the subsystem
+  if (!g_state.ds->earlyInit())
   {
-     DEBUG_INFO("Wayland detected");
-     if (getenv("SDL_VIDEODRIVER") == NULL)
-     {
-       int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
-       if (err < 0)
-       {
-         DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
-         return -1;
-       }
-       DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
-     }
+    DEBUG_ERROR("Subsystem early init failed");
+    return -1;
   }
 
   if (!params.noScreensaver)
@@ -1793,36 +1822,6 @@ static int lg_run(void)
     return -1;
   }
 
-  // search for the best displayserver ops to use
-  for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
-    if (LG_DisplayServers[i]->subsystem == g_state.wminfo.subsystem)
-    {
-      g_state.ds = LG_DisplayServers[i];
-      break;
-    }
-
-  if (!g_state.ds)
-    g_state.ds = LG_DisplayServers[0];
-
-  // set any null methods to the fallback
-#define SET_FALLBACK(x) \
-  if (!g_state.ds->x) g_state.ds->x = LG_DisplayServers[0]->x;
-  SET_FALLBACK(getProp);
-  SET_FALLBACK(init);
-  SET_FALLBACK(startup);
-  SET_FALLBACK(shutdown);
-  SET_FALLBACK(free);
-  SET_FALLBACK(eventFilter);
-  SET_FALLBACK(grabPointer);
-  SET_FALLBACK(ungrabKeyboard);
-  SET_FALLBACK(warpMouse);
-  SET_FALLBACK(cbInit);
-  SET_FALLBACK(cbNotice);
-  SET_FALLBACK(cbRelease);
-  SET_FALLBACK(cbRequest);
-#undef SET_FALLBACK
-
-  // init the subsystem
   g_state.ds->init(&g_state.wminfo);
 
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,

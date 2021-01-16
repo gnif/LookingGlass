@@ -33,6 +33,11 @@ struct SDLDSState
 
 static struct SDLDSState sdl;
 
+static bool sdlEarlyInit(void)
+{
+  return true;
+}
+
 static void sdlInit(SDL_SysWMinfo * info)
 {
   memset(&sdl, 0, sizeof(sdl));
@@ -143,6 +148,7 @@ static void sdlWarpMouse(int x, int y, bool exiting)
 struct LG_DisplayServerOps LGDS_SDL =
 {
   .subsystem      = SDL_SYSWM_UNKNOWN,
+  .earlyInit      = sdlEarlyInit,
   .init           = sdlInit,
   .startup        = sdlStartup,
   .shutdown       = sdlShutdown,
