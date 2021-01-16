@@ -1229,6 +1229,11 @@ static void setGrabQuiet(bool enable)
   g_cursor.acc.x = 0.0;
   g_cursor.acc.y = 0.0;
 
+  /* if the display server does not support warp we need to grab the pointer
+   * here instead of in the move handler */
+  bool warpSupport = true;
+  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+
   if (enable)
   {
     if (!g_cursor.inView)
@@ -1236,6 +1241,10 @@ static void setGrabQuiet(bool enable)
 
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
+
+    if (!warpSupport)
+      g_state.ds->grabPointer();
+
   }
   else
   {
@@ -1244,6 +1253,9 @@ static void setGrabQuiet(bool enable)
       if (!g_state.focused || !params.grabKeyboardOnFocus)
         g_state.ds->ungrabKeyboard();
     }
+
+    if (!warpSupport)
+      g_state.ds->ungrabPointer();
   }
 
   // if exiting capture when input on capture only, we want to show the cursor
