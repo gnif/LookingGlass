@@ -356,6 +356,19 @@ static void waylandFree(void)
 
 static bool waylandEventFilter(SDL_Event * event)
 {
+  /* prevent the default processing for the following events */
+  switch(event->type)
+  {
+    case SDL_MOUSEMOTION:
+    {
+      app_updateCursorPos(event->motion.x, event->motion.y);
+
+      // we must use the basic handler as Wayland has no warp support
+      app_handleMouseBasic(event->motion.x, event->motion.y);
+      return true;
+    }
+  }
+
   return false;
 }
 

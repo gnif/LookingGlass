@@ -63,6 +63,12 @@ static bool sdlEventFilter(SDL_Event * event)
       // stop motion events during the warp out of the window
       if (sdl.exiting)
         return true;
+
+      app_updateCursorPos(event->motion.x, event->motion.y);
+      if (app_cursorIsGrabbed())
+        app_handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
+      else
+        app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
       break;
 
     case SDL_WINDOWEVENT:

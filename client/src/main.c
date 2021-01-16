@@ -950,43 +950,6 @@ static void guestCurToLocal(struct DoublePoint *local)
   local->y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y;
 }
 
-// On Wayland, our normal cursor logic does not work due to the lack of cursor
-// warp support. Instead, we attempt a best-effort emulation which works with a
-// 1:1 mouse movement patch applied in the guest. For anything fancy, use
-// capture mode.
-static void app_handleMouseWayland(void)
-{
-  const bool inView =
-    g_cursor.pos.x >= g_state.dstRect.x                     &&
-    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-    g_cursor.pos.y >= g_state.dstRect.y                     &&
-    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
-
-  if (params.hideMouse && inView != g_cursor.inView)
-      SDL_ShowCursor(inView ? SDL_DISABLE : SDL_ENABLE);
-
-  g_cursor.inView = inView;
-
-  if (g_cursor.guest.dpiScale == 0)
-    return;
-
-  /* translate the guests position to our coordinate space */
-  struct DoublePoint local;
-  guestCurToLocal(&local);
-
-  double ex = (g_cursor.pos.x - local.x) / g_cursor.dpiScale;
-  double ey = (g_cursor.pos.y - local.y) / g_cursor.dpiScale;
-
-  int x, y;
-  cursorToInt(ex, ey, &x, &y);
-
-  g_cursor.guest.x += x;
-  g_cursor.guest.y += y;
-
-  if (!spice_mouse_motion(x, y))
-    DEBUG_ERROR("failed to send mouse motion message");
-}
-
 void app_handleMouseNormal(double ex, double ey)
 {
   /* if we don't have the current cursor pos just send cursor movements */
@@ -994,12 +957,6 @@ void app_handleMouseNormal(double ex, double ey)
   {
     if (g_cursor.grab)
       app_handleMouseGrabbed(ex, ey);
-    return;
-  }
-
-  if (g_state.wminfo.subsystem == SDL_SYSWM_WAYLAND)
-  {
-    app_handleMouseWayland();
     return;
   }
 
@@ -1130,6 +1087,52 @@ void app_handleMouseNormal(double ex, double ey)
     g_cursor.guest.x += x;
     g_cursor.guest.y += y;
   }
+
+  if (!spice_mouse_motion(x, y))
+    DEBUG_ERROR("failed to send mouse motion message");
+}
+
+
+// On some display servers normal cursor logic does not work due to the lack of
+// cursor warp support. Instead, we attempt a best-effort emulation which works
+// with a 1:1 mouse movement patch applied in the guest. For anything fancy, use
+// capture mode.
+void app_handleMouseBasic(double ex, double ey)
+{
+  /* if we don't have the current cursor pos just send cursor movements */
+  if (!g_cursor.guest.valid)
+  {
+    if (g_cursor.grab)
+      app_handleMouseGrabbed(ex, ey);
+    return;
+  }
+
+  const bool inView =
+    g_cursor.pos.x >= g_state.dstRect.x                     &&
+    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
+    g_cursor.pos.y >= g_state.dstRect.y                     &&
+    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
+
+  if (params.hideMouse && inView != g_cursor.inView)
+      SDL_ShowCursor(inView ? SDL_DISABLE : SDL_ENABLE);
+
+  g_cursor.inView = inView;
+
+  if (g_cursor.guest.dpiScale == 0)
+    return;
+
+  /* translate the guests position to our coordinate space */
+  struct DoublePoint local;
+  guestCurToLocal(&local);
+
+  double lx = (g_cursor.pos.x - local.x) / g_cursor.dpiScale;
+  double ly = (g_cursor.pos.y - local.y) / g_cursor.dpiScale;
+
+  int x, y;
+  cursorToInt(lx, ly, &x, &y);
+
+  g_cursor.guest.x += x;
+  g_cursor.guest.y += y;
 
   if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
@@ -1318,25 +1321,6 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
       }
       return 0;
-    }
-
-    case SDL_MOUSEMOTION:
-    {
-      g_cursor.pos.x = event->motion.x;
-      g_cursor.pos.y = event->motion.y;
-
-      if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
-      {
-        // On Wayland, wm.c calls these functions, bypassing the SDL event loop.
-        if (g_cursor.grab)
-        {
-          if (g_state.wminfo.subsystem != SDL_SYSWM_WAYLAND)
-            app_handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
-        }
-        else
-          app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
-      }
-      break;
     }
 
     case SDL_KEYDOWN:
