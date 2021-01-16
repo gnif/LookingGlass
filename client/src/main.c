@@ -1121,13 +1121,8 @@ void app_handleMouseBasic()
     g_cursor.pos.y >= g_state.dstRect.y                     &&
     g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 
-  if (params.hideMouse && inView != g_cursor.inView)
-
   if (inView != g_cursor.inView)
-  {
-    g_cursor.inView = inView;
     setCursorInView(inView);
-  }
 
   if (g_cursor.guest.dpiScale == 0)
     return;
