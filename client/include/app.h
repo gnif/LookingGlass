@@ -34,9 +34,9 @@ void app_updateWindowPos(int x, int y);
 void app_handleResizeEvent(int w, int h);
 void app_handleMouseGrabbed(double ex, double ey);
 void app_handleMouseNormal(double ex, double ey);
-void app_handleMouseBasic(double ex, double ey);
-void app_handleWindowEnter();
-void app_handleWindowLeave();
+void app_handleMouseBasic(void);
+void app_handleWindowEnter(void);
+void app_handleWindowLeave(void);
 
 void app_clipboardRelease(void);
 void app_clipboardNotify(const LG_ClipboardData type, size_t size);

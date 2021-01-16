@@ -1107,16 +1107,8 @@ void app_handleMouseNormal(double ex, double ey)
 // cursor warp support. Instead, we attempt a best-effort emulation which works
 // with a 1:1 mouse movement patch applied in the guest. For anything fancy, use
 // capture mode.
-void app_handleMouseBasic(double ex, double ey)
+void app_handleMouseBasic()
 {
-  /* if we don't have the current cursor pos just send cursor movements */
-  if (!g_cursor.guest.valid)
-  {
-    if (g_cursor.grab)
-      app_handleMouseGrabbed(ex, ey);
-    return;
-  }
-
   const bool inView =
     g_cursor.pos.x >= g_state.dstRect.x                     &&
     g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
