@@ -257,16 +257,16 @@ static const struct wl_seat_listener seatListener = {
 
 static bool waylandEarlyInit(void)
 {
-  if (getenv("SDL_VIDEODRIVER") != NULL)
-    return true;
-
-  int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
-  if (err < 0)
+  if (!getenv("SDL_VIDEODRIVER"))
   {
-    DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
-    return false;
+    int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
+    if (err < 0)
+    {
+      DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
+      return false;
+    }
+    DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
   }
-  DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
 
   // Request to receive EPIPE instead of SIGPIPE when one end of a pipe
   // disconnects while a write is pending. This is useful to the Wayland
