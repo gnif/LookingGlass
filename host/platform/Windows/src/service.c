@@ -705,7 +705,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
         // avoid restarting too often
         if (GetTickCount64() - launchTime < 1000)
-          Sleep(1);
+          Sleep(1000);
         break;
       }
 
