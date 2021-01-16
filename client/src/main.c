@@ -895,8 +895,18 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   if (params.mouseSmoothing && !(g_cursor.grab && params.rawMouse))
   {
     static struct DoublePoint last = { 0 };
-    ex = last.x = (last.x + ex) / 2.0;
-    ey = last.y = (last.y + ey) / 2.0;
+
+    /* only apply smoothing to small deltas */
+    if (fabs(ex - last.x) < 5.0 && fabs(ey - last.y) < 5.0)
+    {
+      ex = last.x = (last.x + ex) / 2.0;
+      ey = last.y = (last.y + ey) / 2.0;
+    }
+    else
+    {
+      last.x = ex;
+      last.y = ey;
+    }
   }
 
   /* convert to int accumulating the fractional error */
