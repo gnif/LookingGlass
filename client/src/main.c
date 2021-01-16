@@ -81,6 +81,7 @@ struct AppParams params = { 0 };
 
 static void setGrab(bool enable);
 static void setGrabQuiet(bool enable);
+static void setCursorInView(void);
 
 static void lgInit(void)
 {
@@ -908,6 +909,16 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
   *y = (int)ey;
 }
 
+static void setCursorInView(void)
+{
+  g_cursor.inView = true;
+  g_cursor.draw   = true;
+  g_cursor.redraw = true;
+
+  g_cursor.warpState = WARP_STATE_ON;
+  g_state.ds->grabPointer();
+}
+
 void app_handleMouseGrabbed(double ex, double ey)
 {
   int x, y;
@@ -1018,12 +1029,7 @@ void app_handleMouseNormal(double ex, double ey)
       if (g_state.focused)
       {
         /* the cursor moved in, enable grab mode */
-        g_cursor.inView = true;
-        g_cursor.draw   = true;
-        g_cursor.redraw = true;
-
-        g_cursor.warpState = WARP_STATE_ON;
-        g_state.ds->grabPointer();
+        setCursorInView();
       }
 
       struct DoublePoint guest =
@@ -1209,6 +1215,9 @@ static void setGrabQuiet(bool enable)
 
   if (enable)
   {
+    if (!g_cursor.inView)
+      setCursorInView();
+
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
   }
