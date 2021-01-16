@@ -125,7 +125,8 @@ static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
 {
   int sx = wl_fixed_to_int(sxW);
   int sy = wl_fixed_to_int(syW);
-  app_handleMouseNormal(sx, sy);
+  app_updateCursorPos(sx, sy);
+  app_handleMouseBasic();
 }
 
 static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
@@ -134,7 +135,8 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
 {
   int sx = wl_fixed_to_int(sxW);
   int sy = wl_fixed_to_int(syW);
-  app_handleMouseNormal(sx, sy);
+  app_updateCursorPos(sx, sy);
+  app_handleMouseBasic();
 }
 
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
@@ -394,13 +396,7 @@ static bool waylandEventFilter(SDL_Event * event)
   switch(event->type)
   {
     case SDL_MOUSEMOTION:
-    {
-      app_updateCursorPos(event->motion.x, event->motion.y);
-
-      // we must use the basic handler as Wayland has no warp support
-      app_handleMouseBasic(event->motion.x, event->motion.y);
       return true;
-    }
   }
 
   return false;
