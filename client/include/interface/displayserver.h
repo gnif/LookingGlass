@@ -38,7 +38,19 @@ LG_ClipboardData;
 
 typedef enum LG_DSProperty
 {
-  LG_DS_MAX_MULTISAMPLE // data type is `int`
+  /**
+   * returns the maximum number of samples supported
+   * if not implemented LG assumes no multisample support
+   * return data type: int
+   */
+  LG_DS_MAX_MULTISAMPLE,
+
+  /**
+   * returns if the platform is warp capable
+   * if not implemented LG assumes that the platform is warp capable
+   * return data type: bool
+   */
+  LG_DS_WARP_SUPPORT,
 }
 LG_DSProperty;
 
@@ -64,7 +76,11 @@ struct LG_DisplayServerOps
   /* final free */
   void (*free)();
 
-  /* return a system specific property, returns false if unsupported or failure */
+  /*
+   * return a system specific property, returns false if unsupported or failure
+   * if the platform does not support/implement the requested property the value
+   * of `ret` must not be altered.
+   */
   bool (*getProp)(LG_DSProperty prop, void * ret);
 
   /* event filter, return true if the event has been handled */

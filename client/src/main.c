@@ -915,6 +915,11 @@ static void setCursorInView(bool enable)
   if (enable && !g_state.focused)
     return;
 
+  /* if the display server does not support warp, then we can not operate in
+   * always relative mode and we should not grab the pointer */
+  bool warpSupport = true;
+  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+
   g_cursor.inView = enable;
   g_cursor.draw   = params.alwaysShowCursor ? true : enable;
   g_cursor.redraw = true;
@@ -926,14 +931,16 @@ static void setCursorInView(bool enable)
     if (params.hideMouse)
       SDL_ShowCursor(SDL_DISABLE);
 
-    g_state.ds->grabPointer();
+    if (warpSupport)
+      g_state.ds->grabPointer();
   }
   else
   {
     if (params.hideMouse)
       SDL_ShowCursor(SDL_ENABLE);
 
-    g_state.ds->ungrabPointer();
+    if (warpSupport)
+      g_state.ds->ungrabPointer();
   }
 }
 
