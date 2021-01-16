@@ -81,7 +81,7 @@ static void x11CBSelectionIncr(const XPropertyEvent e);
 static void x11CBSelectionNotify(const XSelectionEvent e);
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e);
 
-static void x11Init(SDL_SysWMinfo * info)
+static bool x11Init(SDL_SysWMinfo * info)
 {
   memset(&x11, 0, sizeof(x11));
   x11.display = info->info.x11.display;
@@ -110,6 +110,8 @@ static void x11Init(SDL_SysWMinfo * info)
     (unsigned char *)&value,
     1
   );
+
+  return true;
 }
 
 static void x11Startup(void)

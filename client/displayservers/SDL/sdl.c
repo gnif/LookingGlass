@@ -38,9 +38,10 @@ static bool sdlEarlyInit(void)
   return true;
 }
 
-static void sdlInit(SDL_SysWMinfo * info)
+static bool sdlInit(SDL_SysWMinfo * info)
 {
   memset(&sdl, 0, sizeof(sdl));
+  return true;
 }
 
 static void sdlStartup(void)
