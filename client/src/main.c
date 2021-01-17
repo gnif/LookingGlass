@@ -1307,6 +1307,11 @@ int eventFilter(void * userdata, SDL_Event * event)
   if (g_state.ds->eventFilter(event))
     return 0;
 
+  // always include the default handler (SDL) for any unhandled events
+  if (g_state.ds != LG_DisplayServers[0])
+    if (LG_DisplayServers[0]->eventFilter(event))
+      return 0;
+
   if (event->type == e_SDLEvent)
   {
     switch(event->user.code)
