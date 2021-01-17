@@ -147,7 +147,11 @@ static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
 static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   uint32_t serial, uint32_t axis, wl_fixed_t value)
 {
-  // Do nothing.
+  int button = value > 0 ?
+    5 /* SPICE_MOUSE_BUTTON_DOWN */ :
+    4 /* SPICE_MOUSE_BUTTON_UP */;
+  app_handleButtonPress(button);
+  app_handleButtonRelease(button);
 }
 
 static int mapWaylandToSpiceButton(uint32_t button)
@@ -452,6 +456,7 @@ static bool waylandEventFilter(SDL_Event * event)
     case SDL_MOUSEMOTION:
     case SDL_MOUSEBUTTONDOWN:
     case SDL_MOUSEBUTTONUP:
+    case SDL_MOUSEWHEEL:
       return true;
   }
 
