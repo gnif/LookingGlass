@@ -30,62 +30,125 @@ struct mouseHook
   HHOOK       hook;
   MouseHookFn callback;
   int         x, y;
+  HANDLE      event;
+  HANDLE      thread;
 };
 
 static struct mouseHook mouseHook = { 0 };
 
 // forwards
 static LRESULT WINAPI mouseHook_hook(int nCode, WPARAM wParam, LPARAM lParam);
-static LRESULT msg_callback(WPARAM wParam, LPARAM lParam);
+
+static bool switchDesktopAndHook(void)
+{
+  HDESK desk = OpenInputDesktop(0, FALSE, GENERIC_ALL);
+  if (!desk)
+  {
+    DEBUG_WINERROR("Failed to OpenInputDesktop", GetLastError());
+    return false;
+  }
+
+  if (!SetThreadDesktop(desk))
+  {
+    DEBUG_WINERROR("Failed to SetThreadDesktop", GetLastError());
+    CloseDesktop(desk);
+    return false;
+  }
+  CloseDesktop(desk);
+
+  mouseHook.hook = SetWindowsHookEx(WH_MOUSE_LL, mouseHook_hook, NULL, 0);
+  if (!mouseHook.hook)
+  {
+    DEBUG_WINERROR("Failed to install the mouse hook", GetLastError());
+    return false;
+  }
+  return true;
+}
+
+static VOID WINAPI winEventProc(HWINEVENTHOOK hWinEventHook, DWORD event,
+    HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime)
+{
+  switch (event)
+  {
+    case EVENT_SYSTEM_DESKTOPSWITCH:
+      UnhookWindowsHookEx(mouseHook.hook);
+      switchDesktopAndHook();
+      break;
+  }
+}
+
+static DWORD WINAPI threadProc(LPVOID lParam) {
+  if (mouseHook.installed)
+  {
+    DEBUG_WARN("Mouse hook already installed");
+    return 0;
+  }
+
+  if (!switchDesktopAndHook())
+    return 0;
+
+  mouseHook.installed = true;
+  mouseHook.callback  = (MouseHookFn)lParam;
+
+  HWINEVENTHOOK eventHook = SetWinEventHook(
+      EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_DESKTOPSWITCH, NULL,
+      winEventProc, 0, 0, WINEVENT_OUTOFCONTEXT
+  );
+  if (!eventHook)
+  {
+    DEBUG_WINERROR("Failed to SetWinEventHook", GetLastError());
+    goto exit;
+  }
+
+  MSG msg;
+  while (true) {
+    switch (MsgWaitForMultipleObjects(1, &mouseHook.event, FALSE, INFINITE, QS_ALLINPUT)) {
+      case WAIT_OBJECT_0:
+        DEBUG_INFO("Mouse hook thread received quit request");
+        PostQuitMessage(0);
+        break;
+      case WAIT_OBJECT_0 + 1:
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        {
+          if (msg.message == WM_QUIT)
+            goto exit;
+          TranslateMessage(&msg);
+          DispatchMessage(&msg);
+        }
+        break;
+      default:
+        goto exit;
+    }
+  }
+
+  exit:
+  if (eventHook) UnhookWinEvent(eventHook);
+  UnhookWindowsHookEx(mouseHook.hook);
+  mouseHook.installed = false;
+  return 0;
+}
 
 void mouseHook_install(MouseHookFn callback)
 {
-  struct MSG_CALL_FUNCTION cf;
-  cf.fn     = msg_callback;
-  cf.wParam = 1;
-  cf.lParam = (LPARAM)callback;
-  sendAppMessage(WM_CALL_FUNCTION, 0, (LPARAM)&cf);
+  if (!mouseHook.event)
+  {
+    mouseHook.event = CreateEventA(NULL, FALSE, FALSE, NULL);
+    if (!mouseHook.event)
+    {
+      DEBUG_WINERROR("Failed to create mouse hook uninstall event", GetLastError());
+      return;
+    }
+  }
+  mouseHook.thread = CreateThread(NULL, 0, threadProc, callback, 0, NULL);
 }
 
 void mouseHook_remove(void)
 {
-  struct MSG_CALL_FUNCTION cf;
-  cf.fn     = msg_callback;
-  cf.wParam = 0;
-  cf.lParam = 0;
-  sendAppMessage(WM_CALL_FUNCTION, 0, (LPARAM)&cf);
-}
-
-static LRESULT msg_callback(WPARAM wParam, LPARAM lParam)
-{
-  if (wParam)
-  {
-    if (mouseHook.installed)
-    {
-      DEBUG_WARN("Mouse hook already installed");
-      return 0;
-    }
-
-    mouseHook.hook = SetWindowsHookEx(WH_MOUSE_LL, mouseHook_hook, NULL, 0);
-    if (!mouseHook.hook)
-    {
-      DEBUG_WINERROR("Failed to install the mouse hook", GetLastError());
-      return 0;
-    }
-
-    mouseHook.installed = true;
-    mouseHook.callback  = (MouseHookFn)lParam;
-  }
-  else
-  {
-    if (!mouseHook.installed)
-      return 0;
-
-    UnhookWindowsHookEx(mouseHook.hook);
-    mouseHook.installed = false;
-  }
-
-  return 0;
+  if (!mouseHook.event)
+    return;
+  SetEvent(mouseHook.event);
+  WaitForSingleObject(mouseHook.thread, INFINITE);
+  CloseHandle(mouseHook.thread);
 }
 
 static LRESULT WINAPI mouseHook_hook(int nCode, WPARAM wParam, LPARAM lParam)
