@@ -209,6 +209,9 @@ static bool x11EventFilter(SDL_Event * event)
 
 #if SDL_VIDEO_DRIVER_X11_XINPUT2
     case SDL_MOUSEMOTION:
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+    case SDL_MOUSEWHEEL:
       return true;
 #endif
   }
