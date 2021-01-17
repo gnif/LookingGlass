@@ -38,6 +38,7 @@ void app_handleMouseBasic(void);
 void app_handleWindowEnter(void);
 void app_handleWindowLeave(void);
 void app_handleFocusEvent(bool focused);
+void app_handleCloseEvent(void);
 
 void app_clipboardRelease(void);
 void app_clipboardNotify(const LG_ClipboardData type, size_t size);

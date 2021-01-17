@@ -151,6 +151,12 @@ void app_handleFocusEvent(bool focused)
   g_state.ds->realignPointer();
 }
 
+void app_handleCloseEvent(void)
+{
+  if (!params.ignoreQuit || !g_cursor.inView)
+    g_state.state = APP_STATE_SHUTDOWN;
+}
+
 static void alignToGuest(void)
 {
   if (SDL_HasEvent(e_SDLEvent))
@@ -1372,8 +1378,7 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         case SDL_WINDOWEVENT_CLOSE:
-          if (!params.ignoreQuit || !g_cursor.inView)
-            g_state.state = APP_STATE_SHUTDOWN;
+          app_handleCloseEvent();
           break;
       }
       return 0;
