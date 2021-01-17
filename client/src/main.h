@@ -226,6 +226,9 @@ struct CursorState
   /* the local position */
   struct DoublePoint pos;
 
+  /* the button state */
+  unsigned int buttons;
+
   /* the delta since last warp when in auto capture mode */
   struct DoublePoint delta;
 

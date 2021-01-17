@@ -1020,6 +1020,8 @@ void app_handleButtonPress(int button)
   if (!app_inputEnabled() || !g_cursor.inView)
     return;
 
+  g_cursor.buttons |= (1U << button);
+
   if (!spice_mouse_press(button))
     DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
 }
@@ -1028,6 +1030,8 @@ void app_handleButtonRelease(int button)
 {
   if (!app_inputEnabled())
     return;
+
+  g_cursor.buttons &= ~(1U << button);
 
   if (!spice_mouse_release(button))
     DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
@@ -1106,6 +1110,10 @@ void app_handleMouseNormal(double ex, double ey)
   /* translate the guests position to our coordinate space */
   struct DoublePoint local;
   guestCurToLocal(&local);
+
+  /* if any buttons are held we should not allow exit to happen */
+  if (g_cursor.buttons)
+    testExit = false;
 
   /* check if the move would push the cursor outside the guest's viewport */
   if (testExit && (
