@@ -1338,52 +1338,6 @@ int eventFilter(void * userdata, SDL_Event * event)
 
   switch(event->type)
   {
-    case SDL_QUIT:
-    {
-      if (!params.ignoreQuit)
-      {
-        DEBUG_INFO("Quit event received, exiting...");
-        g_state.state = APP_STATE_SHUTDOWN;
-      }
-      return 0;
-    }
-
-    case SDL_WINDOWEVENT:
-    {
-      switch(event->window.event)
-      {
-        case SDL_WINDOWEVENT_ENTER:
-          app_handleWindowEnter();
-          break;
-
-        case SDL_WINDOWEVENT_LEAVE:
-          app_handleWindowLeave();
-          break;
-
-        case SDL_WINDOWEVENT_FOCUS_GAINED:
-          app_handleFocusEvent(true);
-          break;
-
-        case SDL_WINDOWEVENT_FOCUS_LOST:
-          app_handleFocusEvent(false);
-          break;
-
-        case SDL_WINDOWEVENT_SIZE_CHANGED:
-        case SDL_WINDOWEVENT_RESIZED:
-          app_handleResizeEvent(event->window.data1, event->window.data2);
-          break;
-
-        case SDL_WINDOWEVENT_MOVED:
-          app_updateWindowPos(event->window.data1, event->window.data2);
-          break;
-
-        case SDL_WINDOWEVENT_CLOSE:
-          app_handleCloseEvent();
-          break;
-      }
-      return 0;
-    }
-
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;

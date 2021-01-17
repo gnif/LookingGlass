@@ -65,6 +65,10 @@ static bool sdlEventFilter(SDL_Event * event)
 {
   switch(event->type)
   {
+    case SDL_QUIT:
+      app_handleCloseEvent();
+      return true;
+
     case SDL_MOUSEMOTION:
       // stop motion events during the warp out of the window
       if (sdl.exiting)
@@ -75,19 +79,42 @@ static bool sdlEventFilter(SDL_Event * event)
         app_handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
       else
         app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
-      break;
+      return true;
 
     case SDL_WINDOWEVENT:
-    {
       switch(event->window.event)
       {
-        /* after leave re-enable warp and cursor processing */
+        case SDL_WINDOWEVENT_ENTER:
+          app_handleWindowEnter();
+          return true;
+
         case SDL_WINDOWEVENT_LEAVE:
           sdl.exiting = false;
-          return false;
+          app_handleWindowLeave();
+          return true;
+
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+          app_handleFocusEvent(true);
+          return true;
+
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+          app_handleFocusEvent(false);
+          return true;
+
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
+        case SDL_WINDOWEVENT_RESIZED:
+          app_handleResizeEvent(event->window.data1, event->window.data2);
+          return true;
+
+        case SDL_WINDOWEVENT_MOVED:
+          app_updateWindowPos(event->window.data1, event->window.data2);
+          return true;
+
+        case SDL_WINDOWEVENT_CLOSE:
+          app_handleCloseEvent();
+          return true;
       }
       break;
-    }
   }
 
   return false;
