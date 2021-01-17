@@ -94,6 +94,24 @@ static bool x11Init(SDL_SysWMinfo * info)
 
 #if SDL_VIDEO_DRIVER_X11_XINPUT2
   XQueryExtension(x11.display, "XInputExtension", &x11.xinputOp, &event, &error);
+
+  int num_masks;
+  XIEventMask * mask = XIGetSelectedEvents(x11.display, x11.window, &num_masks);
+  if (!mask)
+  {
+    DEBUG_ERROR("Failed to get the XInput event mask");
+    return false;
+  }
+
+  for(int i = 0; i < num_masks; ++i)
+  {
+    XISetMask(mask[i].mask, XI_ButtonPress  );
+    XISetMask(mask[i].mask, XI_ButtonRelease);
+    XISetMask(mask[i].mask, XI_Motion       );
+  }
+
+  XISelectEvents(x11.display, x11.window, mask, num_masks);
+  XFree(mask);
 #endif
 
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(x11.display,
@@ -271,6 +289,26 @@ static bool x11EventFilter(SDL_Event * event)
 
       switch(cookie->evtype)
       {
+        case XI_ButtonPress:
+        {
+          XIDeviceEvent *device = cookie->data;
+          app_updateCursorPos(device->event_x, device->event_y);
+
+          app_handleButtonPress(
+              device->detail > 5 ? device->detail - 2 : device->detail);
+          return true;
+        }
+
+        case XI_ButtonRelease:
+        {
+          XIDeviceEvent *device = cookie->data;
+          app_updateCursorPos(device->event_x, device->event_y);
+
+          app_handleButtonRelease(
+              device->detail > 5 ? device->detail - 2 : device->detail);
+          return true;
+        }
+
         case XI_Motion:
         {
           if (!app_cursorInWindow())
