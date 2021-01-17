@@ -17,12 +17,13 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include <stdbool.h>
-#include <unistd.h>
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <linux/input.h>
 
 #include <SDL2/SDL.h>
 #include <wayland-client.h>
@@ -149,10 +150,34 @@ static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   // Do nothing.
 }
 
+static int mapWaylandToSpiceButton(uint32_t button)
+{
+  switch (button)
+  {
+    case BTN_LEFT:
+      return 1;  // SPICE_MOUSE_BUTTON_LEFT
+    case BTN_MIDDLE:
+      return 2;  // SPICE_MOUSE_BUTTON_MIDDLE
+    case BTN_RIGHT:
+      return 3;  // SPICE_MOUSE_BUTTON_RIGHT
+    case BTN_SIDE:
+      return 6;  // SPICE_MOUSE_BUTTON_SIDE
+    case BTN_EXTRA:
+      return 7;  // SPICE_MOUSE_BUTTON_EXTRA
+  }
+
+  return 0;  // SPICE_MOUSE_BUTTON_INVALID
+}
+
 static void pointerButtonHandler(void *data, struct wl_pointer *pointer,
     uint32_t serial, uint32_t time, uint32_t button, uint32_t stateW)
 {
-  // Do nothing.
+  button = mapWaylandToSpiceButton(button);
+
+  if (stateW == WL_POINTER_BUTTON_STATE_PRESSED)
+    app_handleButtonPress(button);
+  else
+    app_handleButtonRelease(button);
 }
 
 static const struct wl_pointer_listener pointerListener = {
@@ -425,6 +450,8 @@ static bool waylandEventFilter(SDL_Event * event)
   switch(event->type)
   {
     case SDL_MOUSEMOTION:
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
       return true;
   }
 
