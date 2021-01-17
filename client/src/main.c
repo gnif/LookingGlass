@@ -1445,40 +1445,6 @@ int eventFilter(void * userdata, SDL_Event * event)
       }
       break;
     }
-
-    case SDL_MOUSEWHEEL:
-      if (!app_inputEnabled() || !g_cursor.inView)
-        break;
-
-      if (
-        !spice_mouse_press  (event->wheel.y > 0 ? 4 : 5) ||
-        !spice_mouse_release(event->wheel.y > 0 ? 4 : 5)
-        )
-      {
-        DEBUG_ERROR("SDL_MOUSEWHEEL: failed to send messages");
-        break;
-      }
-      break;
-
-    case SDL_MOUSEBUTTONDOWN:
-    {
-      int button = event->button.button;
-      if (button > 3)
-        button += 2;
-
-      app_handleButtonPress(button);
-      break;
-    }
-
-    case SDL_MOUSEBUTTONUP:
-    {
-      int button = event->button.button;
-      if (button > 3)
-        button += 2;
-
-      app_handleButtonRelease(button);
-      break;
-    }
   }
 
   // consume all events

@@ -81,6 +81,34 @@ static bool sdlEventFilter(SDL_Event * event)
         app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
       return true;
 
+    case SDL_MOUSEBUTTONDOWN:
+    {
+      int button = event->button.button;
+      if (button > 3)
+        button += 2;
+
+      app_handleButtonPress(button);
+      return true;
+    }
+
+    case SDL_MOUSEBUTTONUP:
+    {
+      int button = event->button.button;
+      if (button > 3)
+        button += 2;
+
+      app_handleButtonRelease(button);
+      return true;
+    }
+
+    case SDL_MOUSEWHEEL:
+    {
+      int button = event->wheel.y > 0 ? 4 : 5;
+      app_handleButtonPress(button);
+      app_handleButtonRelease(button);
+      return true;
+    }
+
     case SDL_WINDOWEVENT:
       switch(event->window.event)
       {
