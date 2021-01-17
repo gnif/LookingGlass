@@ -391,6 +391,11 @@ static void waylandWarpPointer(int x, int y, bool exiting)
   // This is an unsupported operation on Wayland.
 }
 
+static void waylandRealignPointer(void)
+{
+  app_handleMouseBasic();
+}
+
 static void waylandFree(void)
 {
   waylandUngrabPointer();
@@ -774,6 +779,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .grabKeyboard   = waylandGrabKeyboard,
   .ungrabKeyboard = waylandUngrabKeyboard,
   .warpPointer    = waylandWarpPointer,
+  .realignPointer = waylandRealignPointer,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,

@@ -146,6 +146,12 @@ static void sdlWarpPointer(int x, int y, bool exiting)
   SDL_WarpMouseInWindow(app_getWindow(), x, y);
 }
 
+static void sdlRealignPointer(void)
+{
+  // no need to care about grab, realign only happens in normal mode
+  app_handleMouseNormal(0, 0);
+}
+
 struct LG_DisplayServerOps LGDS_SDL =
 {
   .subsystem      = SDL_SYSWM_UNKNOWN,
@@ -161,6 +167,7 @@ struct LG_DisplayServerOps LGDS_SDL =
   .grabKeyboard   = sdlGrabKeyboard,
   .ungrabKeyboard = sdlUngrabKeyboard,
   .warpPointer    = sdlWarpPointer,
+  .realignPointer = sdlRealignPointer,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,

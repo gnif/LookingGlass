@@ -92,8 +92,13 @@ struct LG_DisplayServerOps
   void (*grabKeyboard)();
   void (*ungrabKeyboard)();
 
-  //exiting = true if the warp is to leave the window
+  /* exiting = true if the warp is to leave the window */
   void (*warpPointer)(int x, int y, bool exiting);
+
+  /* called when the client needs to realign the pointer. This should simply
+   * call the appropriate app_handleMouse* method for the platform with zero
+   * deltas */
+  void (*realignPointer)();
 
   /* clipboard support */
   bool (* cbInit)(void);

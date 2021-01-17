@@ -133,6 +133,24 @@ void app_updateCursorPos(double x, double y)
   g_cursor.pos.y = y;
 }
 
+void app_handleFocusEvent(bool focused)
+{
+  if (!app_inputEnabled())
+    return;
+
+  if (params.grabKeyboardOnFocus)
+  {
+    if (focused)
+      g_state.ds->grabKeyboard();
+    else
+      g_state.ds->ungrabKeyboard();
+  }
+
+  g_state.focused  = focused;
+  g_cursor.realign = true;
+  g_state.ds->realignPointer();
+}
+
 static void alignToGuest(void)
 {
   if (SDL_HasEvent(e_SDLEvent))
@@ -921,18 +939,21 @@ static void cursorToInt(double ex, double ey, int *x, int *y)
 
 static void setCursorInView(bool enable)
 {
-  // if we don't have focus don't do anything
+  // if the state has not changed, don't do anything else
+  if (g_cursor.inView == enable)
+    return;
+
   if (enable && !g_state.focused)
     return;
+
+  g_cursor.inView = enable;
+  g_cursor.draw   = params.alwaysShowCursor ? true : enable;
+  g_cursor.redraw = true;
 
   /* if the display server does not support warp, then we can not operate in
    * always relative mode and we should not grab the pointer */
   bool warpSupport = true;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
-
-  g_cursor.inView = enable;
-  g_cursor.draw   = params.alwaysShowCursor ? true : enable;
-  g_cursor.redraw = true;
 
   g_cursor.warpState = enable ? WARP_STATE_ON : WARP_STATE_OFF;
 
@@ -951,7 +972,12 @@ static void setCursorInView(bool enable)
 
     if (warpSupport)
       g_state.ds->ungrabPointer();
+
+    if (!g_cursor.grab)
+      g_cursor.realign = true;
   }
+
+  g_cursor.warpState = WARP_STATE_ON;
 }
 
 void app_handleMouseGrabbed(double ex, double ey)
@@ -985,16 +1011,14 @@ void app_handleMouseGrabbed(double ex, double ey)
 
 static void guestCurToLocal(struct DoublePoint *local)
 {
-  local->x = (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scale.x;
-  local->y = (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y;
+  local->x = g_state.dstRect.x +
+    (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scale.x;
+  local->y = g_state.dstRect.y +
+    (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y;
 }
 
 void app_handleMouseNormal(double ex, double ey)
 {
-  /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_state.focused)
-    return;
-
   // prevent cursor handling outside of capture if the position is not known
   if (!g_cursor.guest.valid)
     return;
@@ -1007,8 +1031,6 @@ void app_handleMouseNormal(double ex, double ey)
   }
 
   bool testExit = true;
-
-  /* if the cursor was outside the viewport, check if it moved in */
   if (!g_cursor.inView)
   {
     const bool inView =
@@ -1017,32 +1039,42 @@ void app_handleMouseNormal(double ex, double ey)
       g_cursor.pos.y >= g_state.dstRect.y                     &&
       g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 
-    if (inView)
-    {
-      setCursorInView(true);
-
-      struct DoublePoint guest =
-      {
-        .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scale.x,
-        .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scale.y
-      };
-
-      /* add the difference to the offset */
-      ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
-      ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
-
-      /* don't test for an exit as we just entered, we can get into a enter/exit
-       * loop otherwise */
-      testExit = false;
-    }
-    else
-    {
-      /* nothing to do if the cursor is not in the guest window */
-      return;
-    }
+    setCursorInView(inView);
   }
 
-  /* if we are in "autoCapture" and the delta was large don't test for exit */
+  /* nothing to do if we are outside the viewport */
+  if (!g_cursor.inView)
+    return;
+
+  /*
+   * do not pass mouse events to the guest if we do not have focus, this must be
+   * done after the inView test has been performed so that when focus is gained
+   * we know if we should be drawing the cursor.
+   */
+  if (!g_state.focused)
+    return;
+
+  /* if we have been instructed to realign */
+  if (g_cursor.realign)
+  {
+    g_cursor.realign = false;
+
+    struct DoublePoint guest =
+    {
+      .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scale.x,
+      .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scale.y
+    };
+
+    /* add the difference to the offset */
+    ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
+    ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+
+    /* don't test for an exit as we just entered, we can get into a enter/exit
+     * loop otherwise */
+    testExit = false;
+  }
+
+ /* if we are in "autoCapture" and the delta was large don't test for exit */
   if (params.autoCapture &&
       (fabs(ex) > 100.0 / g_cursor.scale.x || fabs(ey) > 100.0 / g_cursor.scale.y))
     testExit = false;
@@ -1053,17 +1085,15 @@ void app_handleMouseNormal(double ex, double ey)
 
   /* check if the move would push the cursor outside the guest's viewport */
   if (testExit && (
-      local.x + ex <  0.0 ||
-      local.y + ey <  0.0 ||
-      local.x + ex >= g_state.dstRect.w ||
-      local.y + ey >= g_state.dstRect.h))
+      local.x + ex <  g_state.dstRect.x ||
+      local.y + ey <  g_state.dstRect.y ||
+      local.x + ex >= g_state.dstRect.x + g_state.dstRect.w ||
+      local.y + ey >= g_state.dstRect.y + g_state.dstRect.h))
   {
     local.x += ex;
     local.y += ey;
-    const int tx = ((local.x <= 0.0) ? floor(local.x) : ceil(local.x)) +
-      g_state.dstRect.x;
-    const int ty = ((local.y <= 0.0) ? floor(local.y) : ceil(local.y)) +
-      g_state.dstRect.y;
+    const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
+    const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
 
     if (isValidCursorLocation(
           g_state.windowPos.x + g_state.border.x + tx,
@@ -1077,6 +1107,7 @@ void app_handleMouseNormal(double ex, double ey)
 
       /* ungrab the pointer and move the local cursor to the exit point */
       g_state.ds->ungrabPointer();
+
       warpPointer(tx, ty, true);
       return;
     }
@@ -1133,8 +1164,7 @@ void app_handleMouseBasic()
     g_cursor.pos.y >= g_state.dstRect.y                     &&
     g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 
-  if (inView != g_cursor.inView)
-    setCursorInView(inView);
+  setCursorInView(inView);
 
   if (g_cursor.guest.dpiScale == 0)
     return;
@@ -1194,7 +1224,7 @@ void app_handleResizeEvent(int w, int h)
 void app_handleWindowLeave(void)
 {
   g_cursor.inWindow = false;
-  g_cursor.inView   = false;
+  setCursorInView(false);
 
   if (!app_inputEnabled())
     return;
@@ -1209,6 +1239,8 @@ void app_handleWindowEnter(void)
   g_cursor.inWindow = true;
   if (!app_inputEnabled())
     return;
+
+  g_cursor.realign = true;
 }
 
 static void setGrab(bool enable)
@@ -1241,8 +1273,7 @@ static void setGrabQuiet(bool enable)
 
   if (enable)
   {
-    if (!g_cursor.inView)
-      setCursorInView(true);
+    setCursorInView(true);
 
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
@@ -1268,7 +1299,7 @@ static void setGrabQuiet(bool enable)
     alignToGuest();
 
   if (g_cursor.grab)
-    g_cursor.inView = true;
+    setCursorInView(true);
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -1319,21 +1350,11 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         case SDL_WINDOWEVENT_FOCUS_GAINED:
-          g_state.focused = true;
-
-          if (!app_inputEnabled())
-            break;
-          if (params.grabKeyboardOnFocus)
-            g_state.ds->grabKeyboard();
+          app_handleFocusEvent(true);
           break;
 
         case SDL_WINDOWEVENT_FOCUS_LOST:
-          g_state.focused = false;
-
-          if (!app_inputEnabled())
-            break;
-          if (params.grabKeyboardOnFocus)
-            g_state.ds->ungrabKeyboard();
+          app_handleFocusEvent(false);
           break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
@@ -1715,6 +1736,7 @@ static int lg_run(void)
   SET_FALLBACK(grabPointer);
   SET_FALLBACK(ungrabKeyboard);
   SET_FALLBACK(warpPointer);
+  SET_FALLBACK(realignPointer);
   SET_FALLBACK(cbInit);
   SET_FALLBACK(cbNotice);
   SET_FALLBACK(cbRelease);
