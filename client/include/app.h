@@ -35,6 +35,8 @@ void app_handleResizeEvent(int w, int h);
 void app_handleMouseGrabbed(double ex, double ey);
 void app_handleMouseNormal(double ex, double ey);
 void app_handleMouseBasic(void);
+void app_handleButtonPress(int button);
+void app_handleButtonRelease(int button);
 void app_handleWindowEnter(void);
 void app_handleWindowLeave(void);
 void app_handleFocusEvent(bool focused);

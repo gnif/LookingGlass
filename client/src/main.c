@@ -1015,6 +1015,24 @@ void app_handleMouseGrabbed(double ex, double ey)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
+void app_handleButtonPress(int button)
+{
+  if (!app_inputEnabled() || !g_cursor.inView)
+    return;
+
+  if (!spice_mouse_press(button))
+    DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
+}
+
+void app_handleButtonRelease(int button)
+{
+  if (!app_inputEnabled())
+    return;
+
+  if (!spice_mouse_release(button))
+    DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
+}
+
 static void guestCurToLocal(struct DoublePoint *local)
 {
   local->x = g_state.dstRect.x +
@@ -1444,35 +1462,21 @@ int eventFilter(void * userdata, SDL_Event * event)
 
     case SDL_MOUSEBUTTONDOWN:
     {
-      if (!app_inputEnabled() || !g_cursor.inView)
-        break;
-
       int button = event->button.button;
       if (button > 3)
         button += 2;
 
-      if (!spice_mouse_press(button))
-      {
-        DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
-        break;
-      }
+      app_handleButtonPress(button);
       break;
     }
 
     case SDL_MOUSEBUTTONUP:
     {
-      if (!app_inputEnabled())
-        break;
-
       int button = event->button.button;
       if (button > 3)
         button += 2;
 
-      if (!spice_mouse_release(button))
-      {
-        DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
-        break;
-      }
+      app_handleButtonRelease(button);
       break;
     }
   }
