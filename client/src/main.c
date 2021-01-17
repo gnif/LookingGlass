@@ -1201,12 +1201,25 @@ void app_handleMouseBasic()
   if (g_cursor.guest.dpiScale == 0)
     return;
 
+  double px = g_cursor.pos.x;
+  double py = g_cursor.pos.y;
+
+  if (px < g_state.dstRect.x)
+    px = g_state.dstRect.x;
+  else if (px > g_state.dstRect.x + g_state.dstRect.w)
+    px = g_state.dstRect.x + g_state.dstRect.w;
+
+  if (py < g_state.dstRect.y)
+    py = g_state.dstRect.y;
+  else if (py > g_state.dstRect.y + g_state.dstRect.h)
+    py = g_state.dstRect.y + g_state.dstRect.h;
+
   /* translate the guests position to our coordinate space */
   struct DoublePoint local;
   guestCurToLocal(&local);
 
-  double lx = (g_cursor.pos.x - local.x) / g_cursor.dpiScale;
-  double ly = (g_cursor.pos.y - local.y) / g_cursor.dpiScale;
+  double lx = (px - local.x) / g_cursor.dpiScale;
+  double ly = (py - local.y) / g_cursor.dpiScale;
 
   int x, y;
   cursorToInt(lx, ly, &x, &y);
