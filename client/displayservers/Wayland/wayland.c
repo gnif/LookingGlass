@@ -35,6 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
+#include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
 
 struct WaylandDSState
 {
@@ -61,6 +62,9 @@ struct WaylandDSState
   struct zwp_pointer_constraints_v1 * pointerConstraints;
   struct zwp_relative_pointer_v1 * relativePointer;
   struct zwp_confined_pointer_v1 * confinedPointer;
+
+  struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
+  struct zwp_idle_inhibitor_v1 * idleInhibitor;
 };
 
 struct WCBTransfer
@@ -105,6 +109,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, wl_data_device_manager_interface.name))
     wm.dataDeviceManager = wl_registry_bind(wm.registry, name,
         &wl_data_device_manager_interface, 3);
+  else if (!strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name))
+    wm.idleInhibitManager = wl_registry_bind(wm.registry, name,
+        &zwp_idle_inhibit_manager_v1_interface, 1);
 }
 
 static void registryGlobalRemoveHandler(void * data,
@@ -199,6 +206,22 @@ static const struct wl_pointer_listener pointerListener = {
   .axis = pointerAxisHandler,
 };
 
+static void inhibitIdle(void)
+{
+  if (wm.idleInhibitManager && !wm.idleInhibitor)
+    wm.idleInhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
+        wm.idleInhibitManager, wm.surface);
+}
+
+static void uninhibitIdle(void)
+{
+  if (wm.idleInhibitor)
+  {
+    zwp_idle_inhibitor_v1_destroy(wm.idleInhibitor);
+    wm.idleInhibitor = NULL;
+  }
+}
+
 // Keyboard-handling listeners.
 
 static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
@@ -215,12 +238,14 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
   uint32_t * key;
   wl_array_for_each(key, keys)
     app_handleKeyPress(*key);
+
+  inhibitIdle();
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
-  // Do nothing.
+  uninhibitIdle();
 }
 
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
@@ -346,6 +371,9 @@ static bool waylandInit(SDL_SysWMinfo * info)
   if (!wm.keyboardInhibitManager)
     DEBUG_WARN("zwp_keyboard_shortcuts_inhibit_manager_v1 not exported by "
                "compositor, keyboard will not be grabbed");
+  if (!wm.idleInhibitManager)
+    DEBUG_WARN("zwp_idle_inhibit_manager_v1 not exported by compositor, will "
+               "not be able to suppress idle states");
 
   wl_seat_add_listener(wm.seat, &seatListener, NULL);
   wl_display_roundtrip(wm.display);
@@ -442,6 +470,12 @@ static void waylandRealignPointer(void)
 static void waylandFree(void)
 {
   waylandUngrabPointer();
+
+  if (wm.idleInhibitManager)
+  {
+    uninhibitIdle();
+    zwp_idle_inhibit_manager_v1_destroy(wm.idleInhibitManager);
+  }
 
   // TODO: these also need to be freed, but are currently owned by SDL.
   // wl_display_destroy(wm.display);
