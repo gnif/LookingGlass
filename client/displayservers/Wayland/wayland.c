@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <linux/input.h>
 
@@ -204,6 +205,10 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {
   wm.keyboardEnterSerial = serial;
+
+  uint32_t * key;
+  wl_array_for_each(key, keys)
+    app_handleKeyPress(*key);
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
@@ -215,7 +220,10 @@ static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
-  // Do nothing.
+  if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
+    app_handleKeyPress(key);
+  else
+    app_handleKeyRelease(key);
 }
 
 static void keyboardModifiersHandler(void * data,
@@ -457,6 +465,8 @@ static bool waylandEventFilter(SDL_Event * event)
     case SDL_MOUSEBUTTONDOWN:
     case SDL_MOUSEBUTTONUP:
     case SDL_MOUSEWHEEL:
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
       return true;
   }
 
