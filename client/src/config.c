@@ -27,6 +27,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <pwd.h>
 #include <unistd.h>
 
+//FIXME: this should really not be included here and is an ugly hack to retain
+//backwards compatibility with the escape key scancode
+extern uint32_t sdl_to_xfree86[];
+
 // forwards
 static bool       optRendererParse   (struct Option * opt, const char * str);
 static StringList optRendererValues  (struct Option * opt);
@@ -528,6 +532,9 @@ bool config_load(int argc, char * argv[])
     params.alwaysShowCursor  = option_get_bool("spice", "alwaysShowCursor");
   }
 
+  //FIXME, this should be using linux keycodes
+  params.escapeKey = sdl_to_xfree86[params.escapeKey];
+
   return true;
 }
 
@@ -678,7 +685,8 @@ static char * optSizeToString(struct Option * opt)
 static char * optScancodeToString(struct Option * opt)
 {
   char * str;
-  alloc_sprintf(&str, "%d = %s", opt->value.x_int, SDL_GetScancodeName(opt->value.x_int));
+  alloc_sprintf(&str, "%d = %s", opt->value.x_int,
+      SDL_GetScancodeName(opt->value.x_int));
   return str;
 }
 

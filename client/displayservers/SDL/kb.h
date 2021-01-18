@@ -20,7 +20,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <linux/input.h>
 #include <SDL2/SDL.h>
 
-static uint32_t sdl_to_xfree86[SDL_NUM_SCANCODES] =
+//FIXME: this should be made static once config.c is no longer using SDL
+//scancodes
+uint32_t sdl_to_xfree86[SDL_NUM_SCANCODES] =
 {
   [SDL_SCANCODE_UNKNOWN]             /* = USB   0 */ = KEY_RESERVED,
   [SDL_SCANCODE_A]                   /* = USB   4 */ = KEY_A,
