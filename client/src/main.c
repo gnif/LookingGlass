@@ -1630,6 +1630,15 @@ static void toggle_video(uint32_t scancode, void * opaque)
   }
 }
 
+static void toggle_rotate(uint32_t scancode, void * opaque)
+{
+  if (params.winRotate == LG_ROTATE_MAX-1)
+    params.winRotate = 0;
+  else
+    ++params.winRotate;
+  updatePositionInfo();
+}
+
 static void toggle_input(uint32_t scancode, void * opaque)
 {
   g_state.ignoreInput = !g_state.ignoreInput;
@@ -1698,6 +1707,7 @@ static void register_key_binds(void)
 {
   g_state.kbFS           = app_register_keybind(KEY_F     , toggle_fullscreen, NULL);
   g_state.kbVideo        = app_register_keybind(KEY_V     , toggle_video     , NULL);
+  g_state.kbRotate       = app_register_keybind(KEY_R     , toggle_rotate    , NULL);
   g_state.kbInput        = app_register_keybind(KEY_I     , toggle_input     , NULL);
   g_state.kbQuit         = app_register_keybind(KEY_Q     , quit             , NULL);
   g_state.kbMouseSensInc = app_register_keybind(KEY_INSERT, mouse_sens_inc   , NULL);

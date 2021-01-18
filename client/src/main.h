@@ -90,6 +90,7 @@ struct AppState
 
   KeybindHandle kbFS;
   KeybindHandle kbVideo;
+  KeybindHandle kbRotate;
   KeybindHandle kbInput;
   KeybindHandle kbQuit;
   KeybindHandle kbMouseSensInc;
