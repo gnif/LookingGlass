@@ -394,7 +394,7 @@ static bool dxgi_init(void)
   switch(outputDesc.Rotation)
   {
     case DXGI_MODE_ROTATION_ROTATE90:
-      this->rotation = CAPTURE_ROT_90;
+      this->rotation = CAPTURE_ROT_270;
       break;
 
     case DXGI_MODE_ROTATION_ROTATE180:
@@ -402,8 +402,7 @@ static bool dxgi_init(void)
       break;
 
     case DXGI_MODE_ROTATION_ROTATE270:
-      this->rotation = CAPTURE_ROT_270;
-
+      this->rotation = CAPTURE_ROT_90;
       break;
 
     default:
