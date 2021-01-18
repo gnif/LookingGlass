@@ -222,6 +222,16 @@ static void sdlRealignPointer(void)
   app_handleMouseNormal(0, 0);
 }
 
+static void sdlInhibitIdle(void)
+{
+  SDL_DisableScreenSaver();
+}
+
+static void sdlUninhibitIdle(void)
+{
+  SDL_EnableScreenSaver();
+}
+
 struct LG_DisplayServerOps LGDS_SDL =
 {
   .subsystem      = SDL_SYSWM_UNKNOWN,
@@ -238,6 +248,8 @@ struct LG_DisplayServerOps LGDS_SDL =
   .ungrabKeyboard = sdlUngrabKeyboard,
   .warpPointer    = sdlWarpPointer,
   .realignPointer = sdlRealignPointer,
+  .inhibitIdle    = sdlInhibitIdle,
+  .uninhibitIdle  = sdlUninhibitIdle,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,

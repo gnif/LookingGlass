@@ -206,14 +206,14 @@ static const struct wl_pointer_listener pointerListener = {
   .axis = pointerAxisHandler,
 };
 
-static void inhibitIdle(void)
+static void waylandInhibitIdle(void)
 {
   if (wm.idleInhibitManager && !wm.idleInhibitor)
     wm.idleInhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
         wm.idleInhibitManager, wm.surface);
 }
 
-static void uninhibitIdle(void)
+static void waylandUninhibitIdle(void)
 {
   if (wm.idleInhibitor)
   {
@@ -238,14 +238,12 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
   uint32_t * key;
   wl_array_for_each(key, keys)
     app_handleKeyPress(*key);
-
-  inhibitIdle();
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
-  uninhibitIdle();
+  // Do nothing.
 }
 
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
@@ -473,7 +471,7 @@ static void waylandFree(void)
 
   if (wm.idleInhibitManager)
   {
-    uninhibitIdle();
+    waylandUninhibitIdle();
     zwp_idle_inhibit_manager_v1_destroy(wm.idleInhibitManager);
   }
 
@@ -862,6 +860,8 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .ungrabKeyboard = waylandUngrabKeyboard,
   .warpPointer    = waylandWarpPointer,
   .realignPointer = waylandRealignPointer,
+  .inhibitIdle    = waylandInhibitIdle,
+  .uninhibitIdle  = waylandUninhibitIdle,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,
