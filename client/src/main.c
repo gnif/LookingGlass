@@ -1930,6 +1930,9 @@ static int lg_run(void)
     return -1;
   }
 
+  // enable WM events
+  SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+
   g_state.ds->init(&g_state.wminfo);
 
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,

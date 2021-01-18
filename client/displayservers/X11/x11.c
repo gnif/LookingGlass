@@ -26,12 +26,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <unistd.h>
 
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
 #include <X11/extensions/XInput2.h>
-#endif
-
 #include <X11/extensions/Xfixes.h>
-
 
 #include "app.h"
 #include "common/debug.h"
@@ -89,10 +85,16 @@ static bool x11Init(SDL_SysWMinfo * info)
 
   int event, error;
 
-  // enable X11 events to work around SDL2 bugs
-  SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+  int major = 2;
+  int minor = 3;
+  if (XIQueryVersion(x11.display, &major, &minor) != Success)
+  {
+    DEBUG_ERROR("Failed to query the XInput version");
+    return false;
+  }
 
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
+  DEBUG_INFO("X11 XInput %d.%d in use", major, minor);
+
   XQueryExtension(x11.display, "XInputExtension", &x11.xinputOp, &event, &error);
 
   int num_masks;
@@ -112,9 +114,14 @@ static bool x11Init(SDL_SysWMinfo * info)
     XISetMask(mask[i].mask, XI_KeyRelease   );
   }
 
-  XISelectEvents(x11.display, x11.window, mask, num_masks);
+  if (XISelectEvents(x11.display, x11.window, mask, num_masks) != Success)
+  {
+    XFree(mask);
+    DEBUG_ERROR("Failed to select the xinput events");
+    return false;
+  }
+
   XFree(mask);
-#endif
 
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(x11.display,
       "NETWM_BYPASS_COMPOSITOR", False);
@@ -283,8 +290,6 @@ static bool x11EventFilter(SDL_Event * event)
       return true;
     }
 
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
-    /* support movements via XInput2 */
     case GenericEvent:
     {
       XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
@@ -402,7 +407,6 @@ static bool x11EventFilter(SDL_Event * event)
 
       return false;
     }
-#endif
 
     // clipboard events
     case SelectionRequest:
