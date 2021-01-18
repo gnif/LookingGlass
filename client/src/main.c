@@ -35,6 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <assert.h>
 #include <stdatomic.h>
+#include <linux/input.h>
 
 #include "common/debug.h"
 #include "common/crash.h"
@@ -48,7 +49,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/version.h"
 
 #include "utils.h"
-#include "kb.h"
 #include "ll.h"
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
@@ -715,17 +715,6 @@ int spiceThread(void * arg)
   return 0;
 }
 
-static inline uint32_t mapScancode(SDL_Scancode scancode)
-{
-  uint32_t ps2;
-  if (scancode > (sizeof(usb_to_ps2) / sizeof(uint32_t)) || (ps2 = usb_to_ps2[scancode]) == 0)
-  {
-    DEBUG_WARN("Unable to map USB scan code: %x\n", scancode);
-    return 0;
-  }
-  return ps2;
-}
-
 static LG_ClipboardData spice_type_to_clipboard_type(const SpiceDataType type)
 {
   switch(type)
@@ -1049,18 +1038,12 @@ void app_handleKeyPress(int sc)
   if (!app_inputEnabled())
     return;
 
-  if (params.ignoreWindowsKeys &&
-      (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
-    return;
-
-
-  uint32_t scancode = mapScancode(sc);
-  if (scancode == 0)
+  if (params.ignoreWindowsKeys && (sc == KEY_END || sc == KEY_DOWN))
     return;
 
   if (!g_state.keyDown[sc])
   {
-    if (spice_key_down(scancode))
+    if (spice_key_down(sc))
       g_state.keyDown[sc] = true;
     else
     {
@@ -1100,15 +1083,10 @@ void app_handleKeyRelease(int sc)
   if (!g_state.keyDown[sc])
     return;
 
-  if (params.ignoreWindowsKeys &&
-      (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
+  if (params.ignoreWindowsKeys && (sc == KEY_END || sc == KEY_DOWN))
     return;
 
-  uint32_t scancode = mapScancode(sc);
-  if (scancode == 0)
-    return;
-
-  if (spice_key_up(scancode))
+  if (spice_key_up(sc))
     g_state.keyDown[sc] = false;
   else
   {
@@ -1497,13 +1475,13 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
   return true;
 }
 
-static void toggle_fullscreen(SDL_Scancode key, void * opaque)
+static void toggle_fullscreen(uint32_t scancode, void * opaque)
 {
   SDL_SetWindowFullscreen(g_state.window, params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
   params.fullscreen = !params.fullscreen;
 }
 
-static void toggle_video(SDL_Scancode key, void * opaque)
+static void toggle_video(uint32_t scancode, void * opaque)
 {
   g_state.stopVideo = !g_state.stopVideo;
   app_alert(
@@ -1524,7 +1502,7 @@ static void toggle_video(SDL_Scancode key, void * opaque)
   }
 }
 
-static void toggle_input(SDL_Scancode key, void * opaque)
+static void toggle_input(uint32_t scancode, void * opaque)
 {
   g_state.ignoreInput = !g_state.ignoreInput;
   app_alert(
@@ -1533,12 +1511,12 @@ static void toggle_input(SDL_Scancode key, void * opaque)
   );
 }
 
-static void quit(SDL_Scancode key, void * opaque)
+static void quit(uint32_t scancode, void * opaque)
 {
   g_state.state = APP_STATE_SHUTDOWN;
 }
 
-static void mouse_sens_inc(SDL_Scancode key, void * opaque)
+static void mouse_sens_inc(uint32_t scancode, void * opaque)
 {
   char * msg;
   if (g_cursor.sens < 9)
@@ -1552,7 +1530,7 @@ static void mouse_sens_inc(SDL_Scancode key, void * opaque)
   free(msg);
 }
 
-static void mouse_sens_dec(SDL_Scancode key, void * opaque)
+static void mouse_sens_dec(uint32_t scancode, void * opaque)
 {
   char * msg;
 
@@ -1567,52 +1545,47 @@ static void mouse_sens_dec(SDL_Scancode key, void * opaque)
   free(msg);
 }
 
-static void ctrl_alt_fn(SDL_Scancode key, void * opaque)
+static void ctrl_alt_fn(uint32_t fn, void * opaque)
 {
-  const uint32_t ctrl = mapScancode(SDL_SCANCODE_LCTRL);
-  const uint32_t alt  = mapScancode(SDL_SCANCODE_LALT );
-  const uint32_t fn   = mapScancode(key);
-
-  spice_key_down(ctrl);
-  spice_key_down(alt );
+  spice_key_down(KEY_LEFTCTRL);
+  spice_key_down(KEY_LEFTALT );
   spice_key_down(fn  );
 
-  spice_key_up(ctrl);
-  spice_key_up(alt );
+  spice_key_up(KEY_LEFTCTRL);
+  spice_key_up(KEY_LEFTALT );
   spice_key_up(fn  );
 }
 
-static void key_passthrough(SDL_Scancode key, void * opaque)
+static void key_passthrough(uint32_t sc, void * opaque)
 {
-  const uint32_t sc = mapScancode(key);
   spice_key_down(sc);
   spice_key_up  (sc);
 }
 
 static void register_key_binds(void)
 {
-  g_state.kbFS           = app_register_keybind(SDL_SCANCODE_F     , toggle_fullscreen, NULL);
-  g_state.kbVideo        = app_register_keybind(SDL_SCANCODE_V     , toggle_video     , NULL);
-  g_state.kbInput        = app_register_keybind(SDL_SCANCODE_I     , toggle_input     , NULL);
-  g_state.kbQuit         = app_register_keybind(SDL_SCANCODE_Q     , quit             , NULL);
-  g_state.kbMouseSensInc = app_register_keybind(SDL_SCANCODE_INSERT, mouse_sens_inc   , NULL);
-  g_state.kbMouseSensDec = app_register_keybind(SDL_SCANCODE_DELETE, mouse_sens_dec   , NULL);
+  g_state.kbFS           = app_register_keybind(KEY_F     , toggle_fullscreen, NULL);
+  g_state.kbVideo        = app_register_keybind(KEY_V     , toggle_video     , NULL);
+  g_state.kbInput        = app_register_keybind(KEY_I     , toggle_input     , NULL);
+  g_state.kbQuit         = app_register_keybind(KEY_Q     , quit             , NULL);
+  g_state.kbMouseSensInc = app_register_keybind(KEY_INSERT, mouse_sens_inc   , NULL);
+  g_state.kbMouseSensDec = app_register_keybind(KEY_DELETE, mouse_sens_dec   , NULL);
 
-  g_state.kbCtrlAltFn[0 ] = app_register_keybind(SDL_SCANCODE_F1 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[1 ] = app_register_keybind(SDL_SCANCODE_F2 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[2 ] = app_register_keybind(SDL_SCANCODE_F3 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[3 ] = app_register_keybind(SDL_SCANCODE_F4 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[4 ] = app_register_keybind(SDL_SCANCODE_F5 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[5 ] = app_register_keybind(SDL_SCANCODE_F6 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[6 ] = app_register_keybind(SDL_SCANCODE_F7 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[7 ] = app_register_keybind(SDL_SCANCODE_F8 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[8 ] = app_register_keybind(SDL_SCANCODE_F9 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[9 ] = app_register_keybind(SDL_SCANCODE_F10, ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[10] = app_register_keybind(SDL_SCANCODE_F11, ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[11] = app_register_keybind(SDL_SCANCODE_F12, ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[0 ] = app_register_keybind(KEY_F1 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[1 ] = app_register_keybind(KEY_F2 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[2 ] = app_register_keybind(KEY_F3 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[3 ] = app_register_keybind(KEY_F4 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[4 ] = app_register_keybind(KEY_F5 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[5 ] = app_register_keybind(KEY_F6 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[6 ] = app_register_keybind(KEY_F7 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[7 ] = app_register_keybind(KEY_F8 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[8 ] = app_register_keybind(KEY_F9 , ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[9 ] = app_register_keybind(KEY_F10, ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[10] = app_register_keybind(KEY_F11, ctrl_alt_fn, NULL);
+  g_state.kbCtrlAltFn[11] = app_register_keybind(KEY_F12, ctrl_alt_fn, NULL);
 
-  g_state.kbPass[0] = app_register_keybind(SDL_SCANCODE_LGUI, key_passthrough, NULL);
-  g_state.kbPass[1] = app_register_keybind(SDL_SCANCODE_RGUI, key_passthrough, NULL);
+  g_state.kbPass[0] = app_register_keybind(KEY_END, key_passthrough, NULL);
+  g_state.kbPass[1] = app_register_keybind(KEY_DOWN, key_passthrough, NULL);
 }
 
 static void release_key_binds(void)
@@ -2046,13 +2019,10 @@ static void lg_shutdown(void)
   // if spice is still connected send key up events for any pressed keys
   if (params.useSpiceInput && spice_ready())
   {
-    for(int i = 0; i < SDL_NUM_SCANCODES; ++i)
-      if (g_state.keyDown[i])
+    for(uint32_t scancode = 0; scancode < KEY_MAX; ++scancode)
+      if (g_state.keyDown[scancode])
       {
-        uint32_t scancode = mapScancode(i);
-        if (scancode == 0)
-          continue;
-        g_state.keyDown[i] = false;
+        g_state.keyDown[scancode] = false;
         spice_key_up(scancode);
       }
 
