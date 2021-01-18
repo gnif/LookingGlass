@@ -132,6 +132,7 @@ void app_updateCursorPos(double x, double y)
 {
   g_cursor.pos.x = x;
   g_cursor.pos.y = y;
+  g_cursor.valid = true;
 }
 
 void app_handleFocusEvent(bool focused)
@@ -257,6 +258,12 @@ static void updatePositionInfo(void)
   g_cursor.scale.x  = (float)srcH / (float)g_state.dstRect.h;
   g_cursor.scale.y  = (float)srcW / (float)g_state.dstRect.w;
   g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
+
+  if (!g_state.posInfoValid)
+  {
+    g_state.posInfoValid = true;
+    alignToGuest();
+  }
 
 done:
   atomic_fetch_add(&g_state.lgrResize, 1);
@@ -1166,8 +1173,11 @@ static void rotatePoint(struct DoublePoint *point)
   }
 }
 
-static void guestCurToLocal(struct DoublePoint *local)
+static bool guestCurToLocal(struct DoublePoint *local)
 {
+  if (!g_cursor.guest.valid || !g_state.posInfoValid)
+    return false;
+
   const struct DoublePoint point =
   {
     .x = g_cursor.guest.x + g_cursor.guest.hx,
@@ -1200,6 +1210,8 @@ static void guestCurToLocal(struct DoublePoint *local)
         point.x / g_cursor.scale.x;
       break;
   }
+
+  return true;
 }
 
 inline static void localCurToGuest(struct DoublePoint *guest)
@@ -1561,8 +1573,8 @@ int eventFilter(void * userdata, SDL_Event * event)
           break;
 
         struct DoublePoint local;
-        guestCurToLocal(&local);
-        warpPointer(round(local.x), round(local.y), false);
+        if (guestCurToLocal(&local))
+          warpPointer(round(local.x), round(local.y), false);
         break;
       }
     }

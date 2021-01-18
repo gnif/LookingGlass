@@ -59,6 +59,8 @@ struct AppState
   SDL_Rect             border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
+  bool                 posInfoValid;
+  bool                 alignToGuest;
 
   const LG_Renderer  * lgr;
   void               * lgrData;
@@ -228,6 +230,9 @@ struct CursorState
 
   /* the local position */
   struct DoublePoint pos;
+
+  /* true if the position is valid */
+  bool valid;
 
   /* the button state */
   unsigned int buttons;
