@@ -55,4 +55,7 @@ wayland_generate(
 wayland_generate(
     "${WAYLAND_PROTOCOLS_BASE}/unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml"
     "${CMAKE_BINARY_DIR}/wayland/wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol")
+wayland_generate(
+    "${WAYLAND_PROTOCOLS_BASE}/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml"
+    "${CMAKE_BINARY_DIR}/wayland/wayland-idle-inhibit-unstable-v1-client-protocol")
 
