@@ -62,17 +62,6 @@ static bool sdlGetProp(LG_DSProperty prop, void * ret)
   return false;
 }
 
-static inline uint32_t mapScancode(SDL_Scancode scancode)
-{
-  uint32_t ps2;
-  if (scancode > (sizeof(usb_to_ps2) / sizeof(uint32_t)) || (ps2 = usb_to_ps2[scancode]) == 0)
-  {
-    DEBUG_WARN("Unable to map USB scan code: %x\n", scancode);
-    return 0;
-  }
-  return ps2;
-}
-
 static bool sdlEventFilter(SDL_Event * event)
 {
   switch(event->type)
@@ -124,14 +113,14 @@ static bool sdlEventFilter(SDL_Event * event)
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      app_handleKeyPress(mapScancode(sc));
+      app_handleKeyPress(sdl_to_xfree86[sc]);
       break;
     }
 
     case SDL_KEYUP:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      app_handleKeyRelease(mapScancode(sc));
+      app_handleKeyRelease(sdl_to_xfree86[sc]);
       break;
     }
 
