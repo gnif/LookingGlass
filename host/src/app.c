@@ -180,7 +180,6 @@ static int frameThread(void * opaque)
       case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
       case CAPTURE_FMT_RGBA10 : fi->type = FRAME_TYPE_RGBA10 ; break;
       case CAPTURE_FMT_RGBA16F: fi->type = FRAME_TYPE_RGBA16F; break;
-      case CAPTURE_FMT_YUV420 : fi->type = FRAME_TYPE_YUV420 ; break;
       default:
         DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
         continue;
