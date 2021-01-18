@@ -57,7 +57,7 @@ struct EGL_Cursor
   // cursor state
   bool              visible;
   float             x, y, w, h;
-  int               rotate;
+  LG_RendererRotate rotate;
   int               cbMode;
 
   struct CursorTex norm;
@@ -170,8 +170,7 @@ void egl_cursor_free(EGL_Cursor ** cursor)
 }
 
 bool egl_cursor_set_shape(EGL_Cursor * cursor, const LG_RendererCursor type,
-    const int width, const int height, const LG_RendererRotate rotate,
-    const int stride, const uint8_t * data)
+    const int width, const int height, const int stride, const uint8_t * data)
 {
   LG_LOCK(cursor->lock);
 
@@ -179,7 +178,6 @@ bool egl_cursor_set_shape(EGL_Cursor * cursor, const LG_RendererCursor type,
   cursor->width  = width;
   cursor->height = (type == LG_CURSOR_MONOCHROME ? height / 2 : height);
   cursor->stride = stride;
-  cursor->rotate = rotate;
 
   const size_t size = height * stride;
   if (size > cursor->dataSize)
@@ -217,7 +215,7 @@ void egl_cursor_set_state(EGL_Cursor * cursor, const bool visible, const float x
   cursor->y       = y;
 }
 
-void egl_cursor_render(EGL_Cursor * cursor)
+void egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rotate)
 {
   if (!cursor->visible)
     return;
@@ -269,6 +267,8 @@ void egl_cursor_render(EGL_Cursor * cursor)
     }
     LG_UNLOCK(cursor->lock);
   }
+
+  cursor->rotate = rotate;
 
   glEnable(GL_BLEND);
   switch(cursor->type)

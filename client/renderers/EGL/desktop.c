@@ -204,7 +204,6 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bo
 
   desktop->width  = format.width;
   desktop->height = format.height;
-  desktop->rotate = format.rotate;
 
   if (!egl_texture_setup(
     desktop->texture,
@@ -246,7 +245,9 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
   return true;
 }
 
-bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, const float scaleX, const float scaleY, const bool nearest)
+bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
+    const float scaleX, const float scaleY, const bool nearest,
+    LG_RendererRotate rotate)
 {
   if (!desktop->shader)
     return false;
@@ -254,7 +255,7 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y, con
   const struct DesktopShader * shader = desktop->shader;
   egl_shader_use(shader->shader);
   glUniform4f(shader->uDesktopPos , x, y, scaleX, scaleY);
-  glUniform1i(shader->uRotate     , desktop->rotate);
+  glUniform1i(shader->uRotate     , rotate);
   glUniform1i(shader->uNearest    , nearest ? 1 : 0);
   glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
 

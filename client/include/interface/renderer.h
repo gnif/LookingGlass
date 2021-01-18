@@ -66,6 +66,10 @@ typedef enum LG_RendererRotate
 }
 LG_RendererRotate;
 
+// kept out of the enum so gcc doesn't warn when it's missing from a switch
+// statement.
+#define LG_ROTATE_MAX (LG_ROTATE_270+1)
+
 typedef struct LG_RendererFormat
 {
   FrameType         type;    // frame type
@@ -74,7 +78,7 @@ typedef struct LG_RendererFormat
   unsigned int      stride;  // scanline width (zero if compresed)
   unsigned int      pitch;   // scanline bytes (or compressed size)
   unsigned int      bpp;     // bits per pixel (zero if compressed)
-  LG_RendererRotate rotate;  // output rotation
+  LG_RendererRotate rotate;  // guest rotation
 }
 LG_RendererFormat;
 
@@ -107,13 +111,14 @@ typedef bool         (* LG_RendererInitialize   )(void * opaque, Uint32 * sdlFla
 typedef void         (* LG_RendererDeInitialize )(void * opaque);
 typedef bool         (* LG_RendererSupports     )(void * opaque, LG_RendererSupport support);
 typedef void         (* LG_RendererOnRestart    )(void * opaque);
-typedef void         (* LG_RendererOnResize     )(void * opaque, const int width, const int height, const LG_RendererRect destRect);
-typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const LG_RendererRotate rotate, const int pitch, const uint8_t * data);
+typedef void         (* LG_RendererOnResize     )(void * opaque, const int width, const int height, const LG_RendererRect destRect, LG_RendererRotate rotate);
+typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visible , const int x, const int y);
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD);
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
-typedef bool         (* LG_RendererRender       )(void * opaque, SDL_Window *window);
+typedef bool         (* LG_RendererRenderStartup)(void * opaque, SDL_Window *window);
+typedef bool         (* LG_RendererRender       )(void * opaque, SDL_Window *window, LG_RendererRotate rotate);
 typedef void         (* LG_RendererUpdateFPS    )(void * opaque, const float avgUPS, const float avgFPS);
 
 typedef struct LG_Renderer
@@ -132,7 +137,7 @@ typedef struct LG_Renderer
   LG_RendererOnFrameFormat  on_frame_format;
   LG_RendererOnFrame        on_frame;
   LG_RendererOnAlert        on_alert;
-  LG_RendererRender         render_startup;
+  LG_RendererRenderStartup  render_startup;
   LG_RendererRender         render;
   LG_RendererUpdateFPS      update_fps;
 }

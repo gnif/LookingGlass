@@ -33,10 +33,12 @@ bool egl_cursor_set_shape(
     const LG_RendererCursor type,
     const int width,
     const int height,
-    const LG_RendererRotate rotate,
     const int stride,
     const uint8_t * data);
 
-void egl_cursor_set_size (EGL_Cursor * cursor, const float x, const float y);
-void egl_cursor_set_state(EGL_Cursor * cursor, const bool visible, const float x, const float y);
-void egl_cursor_render   (EGL_Cursor * cursor);
+void egl_cursor_set_size(EGL_Cursor * cursor, const float x, const float y);
+
+void egl_cursor_set_state(EGL_Cursor * cursor, const bool visible,
+    const float x, const float y);
+
+void egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rotate);

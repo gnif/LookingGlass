@@ -80,8 +80,9 @@ struct Inst
   bool     useCloseFlag;
   bool     closeFlag;
 
-  int             width, height;
-  LG_RendererRect destRect;
+  int               width, height;
+  LG_RendererRect   destRect;
+  LG_RendererRotate rotate; //client side rotation
 
   float translateX  , translateY;
   float scaleX      , scaleY;
@@ -263,12 +264,83 @@ void egl_on_restart(void * opaque)
   this->start        = false;
 }
 
-void egl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
+static void egl_calc_mouse_size(struct Inst * this)
+{
+  int w, h;
+  switch(this->format.rotate)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      this->mouseScaleX = 2.0f / this->format.width;
+      this->mouseScaleY = 2.0f / this->format.height;
+      w = this->format.width;
+      h = this->format.height;
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      this->mouseScaleX = 2.0f / this->format.height;
+      this->mouseScaleY = 2.0f / this->format.width;
+      w = this->format.height;
+      h = this->format.width;
+      break;
+  }
+
+  switch((this->format.rotate + this->rotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      egl_cursor_set_size(this->cursor,
+        (this->mouseWidth  * (1.0f / w)) * this->scaleX,
+        (this->mouseHeight * (1.0f / h)) * this->scaleY
+      );
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      egl_cursor_set_size(this->cursor,
+        (this->mouseWidth  * (1.0f / w)) * this->scaleY,
+        (this->mouseHeight * (1.0f / h)) * this->scaleX
+      );
+      break;
+  }
+}
+
+static void egl_calc_mouse_state(struct Inst * this)
+{
+  switch((this->format.rotate + this->rotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      egl_cursor_set_state(
+        this->cursor,
+        this->cursorVisible,
+        (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
+        (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleY
+      );
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      egl_cursor_set_state(
+        this->cursor,
+        this->cursorVisible,
+        (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleY,
+        (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleX
+      );
+      break;
+  }
+}
+
+void egl_on_resize(void * opaque, const int width, const int height,
+    const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
 
   this->width  = width;
   this->height = height;
+  this->rotate = rotate;
+
   memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
 
   glViewport(0, 0, width, height);
@@ -281,31 +353,22 @@ void egl_on_resize(void * opaque, const int width, const int height, const LG_Re
     this->scaleY     = (float)destRect.h / (float)height;
   }
 
-  this->mouseScaleX = 2.0f / this->format.width ;
-  this->mouseScaleY = 2.0f / this->format.height;
-  egl_cursor_set_size(this->cursor,
-    (this->mouseWidth  * (1.0f / this->format.width )) * this->scaleX,
-    (this->mouseHeight * (1.0f / this->format.height)) * this->scaleY
-  );
+  egl_calc_mouse_size(this);
 
   this->splashRatio  = (float)width / (float)height;
   this->screenScaleX = 1.0f / width;
   this->screenScaleY = 1.0f / height;
 
-  egl_cursor_set_state(
-    this->cursor,
-    this->cursorVisible,
-    (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
-    (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleY
-  );
+  egl_calc_mouse_state(this);
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
-    const int width, const int height, const LG_RendererRotate rotate,
+    const int width, const int height,
     const int pitch, const uint8_t * data)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!egl_cursor_set_shape(this->cursor, cursor, width, height, rotate, pitch, data))
+
+  if (!egl_cursor_set_shape(this->cursor, cursor, width, height, pitch, data))
   {
     DEBUG_ERROR("Failed to update the cursor shape");
     return false;
@@ -313,10 +376,7 @@ bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
 
   this->mouseWidth  = width;
   this->mouseHeight = height;
-  egl_cursor_set_size(this->cursor,
-    (this->mouseWidth  * (1.0f / this->format.width )) * this->scaleX,
-    (this->mouseHeight * (1.0f / this->format.height)) * this->scaleY
-  );
+  egl_calc_mouse_size(this);
 
   return true;
 }
@@ -327,14 +387,7 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   this->cursorVisible = visible;
   this->cursorX       = x;
   this->cursorY       = y;
-
-  egl_cursor_set_state(
-    this->cursor,
-    this->cursorVisible,
-    (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
-    (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleY
-  );
-
+  egl_calc_mouse_state(this);
   return true;
 }
 
@@ -621,7 +674,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   return true;
 }
 
-bool egl_render(void * opaque, SDL_Window * window)
+bool egl_render(void * opaque, SDL_Window * window, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -631,7 +684,8 @@ bool egl_render(void * opaque, SDL_Window * window)
   if (this->start && egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
-        this->useNearest))
+        this->useNearest,
+        rotate))
   {
     if (!this->waitFadeTime)
     {
@@ -640,7 +694,9 @@ bool egl_render(void * opaque, SDL_Window * window)
       else
         this->waitDone = true;
     }
-    egl_cursor_render(this->cursor);
+
+    egl_cursor_render(this->cursor,
+        (this->format.rotate + rotate) % LG_ROTATE_MAX);
   }
 
   if (!this->waitDone)

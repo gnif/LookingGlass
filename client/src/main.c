@@ -173,74 +173,92 @@ static void alignToGuest(void)
 
 static void updatePositionInfo(void)
 {
-  if (g_state.haveSrcSize)
+  if (!g_state.haveSrcSize)
+    goto done;
+
+  float srcW;
+  float srcH;
+  switch(params.winRotate)
   {
-    if (params.keepAspect)
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      srcW = g_state.srcSize.x;
+      srcH = g_state.srcSize.y;
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      srcW = g_state.srcSize.y;
+      srcH = g_state.srcSize.x;
+      break;
+  }
+
+  if (params.keepAspect)
+  {
+    const float srcAspect = srcH / srcW;
+    const float wndAspect = (float)g_state.windowH / (float)g_state.windowW;
+    bool force = true;
+
+    if (params.dontUpscale &&
+        srcW <= g_state.windowW &&
+        srcH <= g_state.windowH)
     {
-      const float srcAspect = (float)g_state.srcSize.y / (float)g_state.srcSize.x;
-      const float wndAspect = (float)g_state.windowH / (float)g_state.windowW;
-      bool force = true;
-
-      if (params.dontUpscale &&
-          g_state.srcSize.x <= g_state.windowW &&
-          g_state.srcSize.y <= g_state.windowH)
-      {
-        force = false;
-        g_state.dstRect.w = g_state.srcSize.x;
-        g_state.dstRect.h = g_state.srcSize.y;
-        g_state.dstRect.x = g_state.windowCX - g_state.srcSize.x / 2;
-        g_state.dstRect.y = g_state.windowCY - g_state.srcSize.y / 2;
-      }
-      else
-      if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
-      {
-        force           = false;
-        g_state.dstRect.w = g_state.windowW;
-        g_state.dstRect.h = g_state.windowH;
-        g_state.dstRect.x = 0;
-        g_state.dstRect.y = 0;
-      }
-      else
-      if (wndAspect < srcAspect)
-      {
-        g_state.dstRect.w = (float)g_state.windowH / srcAspect;
-        g_state.dstRect.h = g_state.windowH;
-        g_state.dstRect.x = (g_state.windowW >> 1) - (g_state.dstRect.w >> 1);
-        g_state.dstRect.y = 0;
-      }
-      else
-      {
-        g_state.dstRect.w = g_state.windowW;
-        g_state.dstRect.h = (float)g_state.windowW * srcAspect;
-        g_state.dstRect.x = 0;
-        g_state.dstRect.y = (g_state.windowH >> 1) - (g_state.dstRect.h >> 1);
-      }
-
-      if (force && params.forceAspect)
-      {
-        g_state.resizeTimeout = microtime() + RESIZE_TIMEOUT;
-        g_state.resizeDone    = false;
-      }
+      force = false;
+      g_state.dstRect.w = srcW;
+      g_state.dstRect.h = srcH;
+      g_state.dstRect.x = g_state.windowCX - srcW / 2;
+      g_state.dstRect.y = g_state.windowCY - srcH / 2;
+    }
+    else
+    if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
+    {
+      force           = false;
+      g_state.dstRect.w = g_state.windowW;
+      g_state.dstRect.h = g_state.windowH;
+      g_state.dstRect.x = 0;
+      g_state.dstRect.y = 0;
+    }
+    else
+    if (wndAspect < srcAspect)
+    {
+      g_state.dstRect.w = (float)g_state.windowH / srcAspect;
+      g_state.dstRect.h = g_state.windowH;
+      g_state.dstRect.x = (g_state.windowW >> 1) - (g_state.dstRect.w >> 1);
+      g_state.dstRect.y = 0;
     }
     else
     {
-      g_state.dstRect.x = 0;
-      g_state.dstRect.y = 0;
       g_state.dstRect.w = g_state.windowW;
-      g_state.dstRect.h = g_state.windowH;
+      g_state.dstRect.h = (float)g_state.windowW * srcAspect;
+      g_state.dstRect.x = 0;
+      g_state.dstRect.y = (g_state.windowH >> 1) - (g_state.dstRect.h >> 1);
     }
-    g_state.dstRect.valid = true;
 
-    g_cursor.useScale = (
-        g_state.srcSize.y       != g_state.dstRect.h ||
-        g_state.srcSize.x       != g_state.dstRect.w ||
-        g_cursor.guest.dpiScale != 100);
-
-    g_cursor.scale.x  = (float)g_state.srcSize.y / (float)g_state.dstRect.h;
-    g_cursor.scale.y  = (float)g_state.srcSize.x / (float)g_state.dstRect.w;
-    g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
+    if (force && params.forceAspect)
+    {
+      g_state.resizeTimeout = microtime() + RESIZE_TIMEOUT;
+      g_state.resizeDone    = false;
+    }
   }
+  else
+  {
+    g_state.dstRect.x = 0;
+    g_state.dstRect.y = 0;
+    g_state.dstRect.w = g_state.windowW;
+    g_state.dstRect.h = g_state.windowH;
+  }
+  g_state.dstRect.valid = true;
 
+  g_cursor.useScale = (
+      srcH       != g_state.dstRect.h ||
+      srcW       != g_state.dstRect.w ||
+      g_cursor.guest.dpiScale != 100);
+
+  g_cursor.scale.x  = (float)srcH / (float)g_state.dstRect.h;
+  g_cursor.scale.y  = (float)srcW / (float)g_state.dstRect.w;
+  g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
+
+done:
   atomic_fetch_add(&g_state.lgrResize, 1);
 }
 
@@ -274,11 +292,12 @@ static int renderThread(void * unused)
     if (resize)
     {
       if (g_state.lgr)
-        g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH, g_state.dstRect);
+        g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
+            g_state.dstRect, params.winRotate);
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    if (!g_state.lgr->render(g_state.lgrData, g_state.window))
+    if (!g_state.lgr->render(g_state.lgrData, g_state.window, params.winRotate))
       break;
 
     if (params.showFPS)
@@ -430,7 +449,6 @@ static int cursorThread(void * unused)
         cursorType,
         cursor->width,
         cursor->height,
-        params.winRotate,
         cursor->pitch,
         data)
       )
@@ -568,6 +586,15 @@ static int frameThread(void * unused)
       lgrFormat.stride = frame->stride;
       lgrFormat.pitch  = frame->pitch;
 
+      switch(frame->rotation)
+      {
+        case FRAME_ROT_0  : lgrFormat.rotate = LG_ROTATE_0  ; break;
+        case FRAME_ROT_90 : lgrFormat.rotate = LG_ROTATE_90 ; break;
+        case FRAME_ROT_180: lgrFormat.rotate = LG_ROTATE_180; break;
+        case FRAME_ROT_270: lgrFormat.rotate = LG_ROTATE_270; break;
+      }
+      g_state.rotate = lgrFormat.rotate;
+
       bool error = false;
       switch(frame->type)
       {
@@ -599,12 +626,11 @@ static int frameThread(void * unused)
       formatValid = true;
       formatVer   = frame->formatVer;
 
-      DEBUG_INFO("Format: %s %ux%u %u %u",
+      DEBUG_INFO("Format: %s %ux%u stride:%u pitch:%u rotation:%d",
           FrameTypeStr[frame->type],
           frame->width, frame->height,
-          frame->stride, frame->pitch);
-
-      lgrFormat.rotate = params.winRotate;
+          frame->stride, frame->pitch,
+          frame->rotation);
 
       if (!g_state.lgr->on_frame_format(g_state.lgrData, lgrFormat, useDMA))
       {
@@ -1104,12 +1130,101 @@ void app_handleKeyRelease(int sc)
   }
 }
 
+static void rotatePoint(struct DoublePoint *point)
+{
+  double temp;
+
+  switch((g_state.rotate + params.winRotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+      break;
+
+    case LG_ROTATE_90:
+      temp = point->x;
+      point->x =  point->y;
+      point->y = -temp;
+      break;
+
+    case LG_ROTATE_180:
+      point->x = -point->x;
+      point->y = -point->y;
+      break;
+
+    case LG_ROTATE_270:
+      temp = point->x;
+      point->x = -point->y;
+      point->y =  temp;
+      break;
+  }
+}
+
 static void guestCurToLocal(struct DoublePoint *local)
 {
-  local->x = g_state.dstRect.x +
-    (g_cursor.guest.x + g_cursor.guest.hx) / g_cursor.scale.x;
-  local->y = g_state.dstRect.y +
-    (g_cursor.guest.y + g_cursor.guest.hy) / g_cursor.scale.y;
+  const struct DoublePoint point =
+  {
+    .x = g_cursor.guest.x + g_cursor.guest.hx,
+    .y = g_cursor.guest.y + g_cursor.guest.hy
+  };
+
+  switch((g_state.rotate + params.winRotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+      local->x = (point.x / g_cursor.scale.x) + g_state.dstRect.x;
+      local->y = (point.y / g_cursor.scale.y) + g_state.dstRect.y;;
+      break;
+
+    case LG_ROTATE_90:
+      local->x = (g_state.dstRect.x + g_state.dstRect.w) -
+        point.y / g_cursor.scale.y;
+      local->y = (point.x / g_cursor.scale.x) + g_state.dstRect.y;
+      break;
+
+    case LG_ROTATE_180:
+      local->x = (g_state.dstRect.x + g_state.dstRect.w) -
+        point.x / g_cursor.scale.x;
+      local->y = (g_state.dstRect.y + g_state.dstRect.h) -
+        point.y / g_cursor.scale.y;
+      break;
+
+    case LG_ROTATE_270:
+      local->x = (point.y / g_cursor.scale.y) + g_state.dstRect.x;
+      local->y = (g_state.dstRect.y + g_state.dstRect.h) -
+        point.x / g_cursor.scale.x;
+      break;
+  }
+}
+
+inline static void localCurToGuest(struct DoublePoint *guest)
+{
+  const struct DoublePoint point =
+    g_cursor.pos;
+
+  switch((g_state.rotate - params.winRotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+      guest->x = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
+      guest->y = (point.y - g_state.dstRect.y) * g_cursor.scale.y;
+      break;
+
+    case LG_ROTATE_90:
+      guest->x = (point.y - g_state.dstRect.y) * g_cursor.scale.y;
+      guest->y = (g_state.dstRect.w - point.x + g_state.dstRect.x)
+        * g_cursor.scale.x;
+      break;
+
+    case LG_ROTATE_180:
+      guest->x = (g_state.dstRect.w - point.x + g_state.dstRect.x)
+        * g_cursor.scale.x;
+      guest->y = (g_state.dstRect.h - point.y + g_state.dstRect.y)
+        * g_cursor.scale.y;
+      break;
+
+    case LG_ROTATE_270:
+      guest->x = (g_state.dstRect.h - point.y + g_state.dstRect.y)
+        * g_cursor.scale.y;
+      guest->y = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
+      break;
+  }
 }
 
 void app_handleMouseNormal(double ex, double ey)
@@ -1154,11 +1269,8 @@ void app_handleMouseNormal(double ex, double ey)
   {
     g_cursor.realign = false;
 
-    struct DoublePoint guest =
-    {
-      .x = (g_cursor.pos.x - g_state.dstRect.x) * g_cursor.scale.x,
-      .y = (g_cursor.pos.y - g_state.dstRect.y) * g_cursor.scale.y
-    };
+    struct DoublePoint guest;
+    localCurToGuest(&guest);
 
     /* add the difference to the offset */
     ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
@@ -1174,41 +1286,48 @@ void app_handleMouseNormal(double ex, double ey)
       (fabs(ex) > 100.0 / g_cursor.scale.x || fabs(ey) > 100.0 / g_cursor.scale.y))
     testExit = false;
 
-  /* translate the guests position to our coordinate space */
-  struct DoublePoint local;
-  guestCurToLocal(&local);
-
   /* if any buttons are held we should not allow exit to happen */
   if (g_cursor.buttons)
     testExit = false;
 
-  /* check if the move would push the cursor outside the guest's viewport */
-  if (testExit && (
-      local.x + ex <  g_state.dstRect.x ||
-      local.y + ey <  g_state.dstRect.y ||
-      local.x + ex >= g_state.dstRect.x + g_state.dstRect.w ||
-      local.y + ey >= g_state.dstRect.y + g_state.dstRect.h))
+  if (testExit)
   {
-    local.x += ex;
-    local.y += ey;
-    const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
-    const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
+    /* translate the move to the guests orientation */
+    struct DoublePoint move = {.x = ex, .y = ey};
+    rotatePoint(&move);
 
-    if (isValidCursorLocation(
-          g_state.windowPos.x + g_state.border.x + tx,
-          g_state.windowPos.y + g_state.border.y + ty))
+    /* translate the guests position to our coordinate space */
+    struct DoublePoint local;
+    guestCurToLocal(&local);
+
+    /* check if the move would push the cursor outside the guest's viewport */
+    if (
+        local.x + move.x <  g_state.dstRect.x ||
+        local.y + move.y <  g_state.dstRect.y ||
+        local.x + move.x >= g_state.dstRect.x + g_state.dstRect.w ||
+        local.y + move.y >= g_state.dstRect.y + g_state.dstRect.h)
     {
-      setCursorInView(false);
+      local.x += move.x;
+      local.y += move.y;
+      const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
+      const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
 
-      /* preempt the window leave flag if the warp will leave our window */
-      if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
-        g_cursor.inWindow = false;
+      if (isValidCursorLocation(
+            g_state.windowPos.x + g_state.border.x + tx,
+            g_state.windowPos.y + g_state.border.y + ty))
+      {
+        setCursorInView(false);
 
-      /* ungrab the pointer and move the local cursor to the exit point */
-      g_state.ds->ungrabPointer();
+        /* preempt the window leave flag if the warp will leave our window */
+        if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
+          g_cursor.inWindow = false;
 
-      warpPointer(tx, ty, true);
-      return;
+        /* ungrab the pointer and move the local cursor to the exit point */
+        g_state.ds->ungrabPointer();
+
+        warpPointer(tx, ty, true);
+        return;
+      }
     }
   }
 

@@ -54,6 +54,7 @@ struct AppState
   SDL_Point            windowPos;
   int                  windowW, windowH;
   int                  windowCX, windowCY;
+  LG_RendererRotate    rotate;
   bool                 focused;
   SDL_Rect             border;
   SDL_Point            srcSize;

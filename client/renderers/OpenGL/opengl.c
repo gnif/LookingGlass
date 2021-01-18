@@ -316,7 +316,8 @@ void opengl_on_restart(void * opaque)
   this->waiting = true;
 }
 
-void opengl_on_resize(void * opaque, const int width, const int height, const LG_RendererRect destRect)
+void opengl_on_resize(void * opaque, const int width, const int height,
+    const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -346,7 +347,8 @@ void opengl_on_resize(void * opaque, const int width, const int height, const LG
   }
 }
 
-bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const LG_RendererRotate rotate, const int pitch, const uint8_t * data)
+bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
+    const int width, const int height, const int pitch, const uint8_t * data)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
@@ -562,7 +564,7 @@ bool opengl_render_startup(void * opaque, SDL_Window * window)
   return true;
 }
 
-bool opengl_render(void * opaque, SDL_Window * window)
+bool opengl_render(void * opaque, SDL_Window * window, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
