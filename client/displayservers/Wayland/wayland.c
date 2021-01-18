@@ -123,6 +123,9 @@ static const struct wl_registry_listener registryListener = {
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, wl_fixed_t sxW, wl_fixed_t syW)
 {
+  if (wm.relativePointer)
+    return;
+
   int sx = wl_fixed_to_int(sxW);
   int sy = wl_fixed_to_int(syW);
   app_updateCursorPos(sx, sy);
@@ -133,6 +136,9 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW,
     wl_fixed_t syW)
 {
+  if (wm.relativePointer)
+    return;
+
   int sx = wl_fixed_to_int(sxW);
   int sy = wl_fixed_to_int(syW);
   app_updateCursorPos(sx, sy);
