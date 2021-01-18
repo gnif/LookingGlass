@@ -38,9 +38,7 @@ static bool       optSizeParse       (struct Option * opt, const char * str);
 static StringList optSizeValues      (struct Option * opt);
 static char *     optSizeToString    (struct Option * opt);
 static char *     optScancodeToString(struct Option * opt);
-static bool       optRotateParse     (struct Option * opt, const char * str);
-static StringList optRotateValues    (struct Option * opt);
-static char *     optRotateToString  (struct Option * opt);
+static bool       optRotateValidate  (struct Option * opt, const char ** error);
 
 static void doLicense();
 
@@ -241,10 +239,9 @@ static struct Option options[] =
     .module         = "win",
     .name           = "rotate",
     .description    = "Rotate the displayed image",
-    .type           = OPTION_TYPE_CUSTOM,
-    .parser         = optRotateParse,
-    .getValues      = optRotateValues,
-    .toString       = optRotateToString
+    .type           = OPTION_TYPE_INT,
+    .validator      = optRotateValidate,
+    .value.x_int    = 0,
   },
 
   // input options
@@ -487,6 +484,14 @@ bool config_load(int argc, char * argv[])
   params.showAlerts    = option_get_bool  ("win", "alerts"       );
   params.quickSplash   = option_get_bool  ("win", "quickSplash"  );
 
+  switch(option_get_int("win", "rotate"))
+  {
+    case 0  : params.winRotate = LG_ROTATE_0  ; break;
+    case 90 : params.winRotate = LG_ROTATE_90 ; break;
+    case 180: params.winRotate = LG_ROTATE_180; break;
+    case 270: params.winRotate = LG_ROTATE_270; break;
+  }
+
   params.grabKeyboard        = option_get_bool("input", "grabKeyboard"       );
   params.grabKeyboardOnFocus = option_get_bool("input", "grabKeyboardOnFocus");
   params.escapeKey           = option_get_int ("input", "escapeKey"          );
@@ -677,45 +682,17 @@ static char * optScancodeToString(struct Option * opt)
   return str;
 }
 
-static bool optRotateParse(struct Option * opt, const char * str)
+static bool optRotateValidate(struct Option * opt, const char ** error)
 {
-  if (!str)
-    return false;
-
-       if (strcasecmp(str, "up"   ) == 0) params.winRotate = LG_ROTATE_UP;
-  else if (strcasecmp(str, "down" ) == 0) params.winRotate = LG_ROTATE_DOWN;
-  else if (strcasecmp(str, "left" ) == 0) params.winRotate = LG_ROTATE_LEFT;
-  else if (strcasecmp(str, "right") == 0) params.winRotate = LG_ROTATE_RIGHT;
-  else
-    return false;
-
-  return true;
-}
-
-static StringList optRotateValues(struct Option * opt)
-{
-  StringList sl = stringlist_new(false);
-
-  stringlist_push(sl, "UP"   );
-  stringlist_push(sl, "DOWN" );
-  stringlist_push(sl, "LEFT" );
-  stringlist_push(sl, "RIGHT");
-
-  return sl;
-}
-
-static char * optRotateToString(struct Option * opt)
-{
-  const char * str;
-  switch(params.winRotate)
+  switch(opt->value.x_int)
   {
-    case LG_ROTATE_UP   : str = "UP"   ; break;
-    case LG_ROTATE_DOWN : str = "DOWN" ; break;
-    case LG_ROTATE_LEFT : str = "LEFT" ; break;
-    case LG_ROTATE_RIGHT: str = "RIGHT"; break;
-    default:
-      return NULL;
+    case   0:
+    case  90:
+    case 180:
+    case 270:
+      return true;
   }
 
-  return strdup(str);
+  *error = "Rotation angle must be one of 0, 90, 180 or 270";
+  return false;
 }

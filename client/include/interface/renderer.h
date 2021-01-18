@@ -59,10 +59,10 @@ LG_RendererSupport;
 
 typedef enum LG_RendererRotate
 {
-  LG_ROTATE_UP,
-  LG_ROTATE_DOWN,
-  LG_ROTATE_LEFT,
-  LG_ROTATE_RIGHT
+  LG_ROTATE_0,
+  LG_ROTATE_90,
+  LG_ROTATE_180,
+  LG_ROTATE_270
 }
 LG_RendererRotate;
 

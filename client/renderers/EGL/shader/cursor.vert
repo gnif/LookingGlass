@@ -18,24 +18,24 @@ void main()
   muv.x += mouse.x;
   muv.y -= mouse.y;
 
-  if (rotate == 0) // up
+  if (rotate == 0) // 0
   {
     gl_Position.xy = muv;
   }
-  else if (rotate == 1) // down
+  else if (rotate == 1) // 90
+  {
+    gl_Position.x =  muv.y;
+    gl_Position.y = -muv.x;
+  }
+  else if (rotate == 2) // 180
   {
     gl_Position.x = -muv.x;
     gl_Position.y = -muv.y;
   }
-  else if (rotate == 2) // left
+  else if (rotate == 3) // 270
   {
     gl_Position.x = -muv.y;
     gl_Position.y =  muv.x;
-  }
-  else if (rotate == 3) // right
-  {
-    gl_Position.x =  muv.y;
-    gl_Position.y = -muv.x;
   }
 
   gl_Position.w = 1.0;
