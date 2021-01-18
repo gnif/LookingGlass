@@ -252,11 +252,27 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
   if (!desktop->shader)
     return false;
 
+  bool useNearest = nearest;
+  if (!nearest)
+  {
+    switch(rotate)
+    {
+      case LG_ROTATE_90:
+      case LG_ROTATE_270:
+        if (scaleX < 1.0f || scaleY < 1.0f)
+          useNearest = true;
+        break;
+
+      default:
+        break;
+    }
+  }
+
   const struct DesktopShader * shader = desktop->shader;
   egl_shader_use(shader->shader);
   glUniform4f(shader->uDesktopPos , x, y, scaleX, scaleY);
   glUniform1i(shader->uRotate     , rotate);
-  glUniform1i(shader->uNearest    , nearest ? 1 : 0);
+  glUniform1i(shader->uNearest    , useNearest ? 1 : 0);
   glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
 
   if (desktop->nvGain)
