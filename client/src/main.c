@@ -962,6 +962,11 @@ static void setCursorInView(bool enable)
   if (enable && !g_state.focused)
     return;
 
+  // do not allow the view to become active if any mouse buttons are being held,
+  // this fixes issues with meta window resizing.
+  if (enable && g_cursor.buttons)
+    return;
+
   g_cursor.inView = enable;
   g_cursor.draw   = params.alwaysShowCursor ? true : enable;
   g_cursor.redraw = true;
