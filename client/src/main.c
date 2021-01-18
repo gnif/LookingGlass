@@ -1037,6 +1037,92 @@ void app_handleButtonRelease(int button)
     DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
 }
 
+void app_handleKeyPress(int sc)
+{
+  if (sc == params.escapeKey && !g_state.escapeActive)
+  {
+    g_state.escapeActive = true;
+    g_state.escapeAction = -1;
+    return;
+  }
+
+  if (g_state.escapeActive)
+  {
+    g_state.escapeAction = sc;
+    return;
+  }
+
+  if (!app_inputEnabled())
+    return;
+
+  if (params.ignoreWindowsKeys &&
+      (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
+    return;
+
+
+  uint32_t scancode = mapScancode(sc);
+  if (scancode == 0)
+    return;
+
+  if (!g_state.keyDown[sc])
+  {
+    if (spice_key_down(scancode))
+      g_state.keyDown[sc] = true;
+    else
+    {
+      DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
+      return;
+    }
+  }
+}
+
+void app_handleKeyRelease(int sc)
+{
+  if (g_state.escapeActive)
+  {
+    if (g_state.escapeAction == -1)
+    {
+      if (params.useSpiceInput)
+        setGrab(!g_cursor.grab);
+    }
+    else
+    {
+      KeybindHandle handle = g_state.bindings[sc];
+      if (handle)
+      {
+        handle->callback(sc, handle->opaque);
+        return;
+      }
+    }
+
+    if (sc == params.escapeKey)
+      g_state.escapeActive = false;
+  }
+
+  if (!app_inputEnabled())
+    return;
+
+  // avoid sending key up events when we didn't send a down
+  if (!g_state.keyDown[sc])
+    return;
+
+  if (params.ignoreWindowsKeys &&
+      (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
+    return;
+
+  uint32_t scancode = mapScancode(sc);
+  if (scancode == 0)
+    return;
+
+  if (spice_key_up(scancode))
+    g_state.keyDown[sc] = false;
+  else
+  {
+    DEBUG_ERROR("SDL_KEYUP: failed to send message");
+    return;
+  }
+}
+
 static void guestCurToLocal(struct DoublePoint *local)
 {
   local->x = g_state.dstRect.x +
@@ -1380,90 +1466,14 @@ int eventFilter(void * userdata, SDL_Event * event)
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (sc == params.escapeKey && !g_state.escapeActive)
-      {
-        g_state.escapeActive = true;
-        g_state.escapeAction = -1;
-        break;
-      }
-
-      if (g_state.escapeActive)
-      {
-        g_state.escapeAction = sc;
-        break;
-      }
-
-      if (!app_inputEnabled())
-        break;
-
-      if (params.ignoreWindowsKeys &&
-          (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
-        break;
-
-
-      uint32_t scancode = mapScancode(sc);
-      if (scancode == 0)
-        break;
-
-      if (!g_state.keyDown[sc])
-      {
-        if (spice_key_down(scancode))
-          g_state.keyDown[sc] = true;
-        else
-        {
-          DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
-          break;
-        }
-      }
+      app_handleKeyPress(sc);
       break;
     }
 
     case SDL_KEYUP:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      if (g_state.escapeActive)
-      {
-        if (g_state.escapeAction == -1)
-        {
-          if (params.useSpiceInput)
-            setGrab(!g_cursor.grab);
-        }
-        else
-        {
-          KeybindHandle handle = g_state.bindings[sc];
-          if (handle)
-          {
-            handle->callback(sc, handle->opaque);
-            break;
-          }
-        }
-
-        if (sc == params.escapeKey)
-          g_state.escapeActive = false;
-      }
-
-      if (!app_inputEnabled())
-        break;
-
-      // avoid sending key up events when we didn't send a down
-      if (!g_state.keyDown[sc])
-        break;
-
-      if (params.ignoreWindowsKeys &&
-          (sc == SDL_SCANCODE_LGUI || sc == SDL_SCANCODE_RGUI))
-        break;
-
-      uint32_t scancode = mapScancode(sc);
-      if (scancode == 0)
-        break;
-
-      if (spice_key_up(scancode))
-        g_state.keyDown[sc] = false;
-      else
-      {
-        DEBUG_ERROR("SDL_KEYUP: failed to send message");
-        break;
-      }
+      app_handleKeyRelease(sc);
       break;
     }
   }
