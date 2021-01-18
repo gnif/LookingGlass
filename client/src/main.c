@@ -1816,6 +1816,8 @@ static int lg_run(void)
   SET_FALLBACK(ungrabKeyboard);
   SET_FALLBACK(warpPointer);
   SET_FALLBACK(realignPointer);
+  SET_FALLBACK(inhibitIdle);
+  SET_FALLBACK(uninhibitIdle);
   SET_FALLBACK(cbInit);
   SET_FALLBACK(cbNotice);
   SET_FALLBACK(cbRelease);
@@ -1829,8 +1831,8 @@ static int lg_run(void)
     return -1;
   }
 
-  if (!params.noScreensaver)
-    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+  // Allow screensavers for now: we will enable and disable as needed.
+  SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
 
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
@@ -1960,6 +1962,9 @@ static int lg_run(void)
 
   if (!params.center)
     SDL_SetWindowPosition(g_state.window, params.x, params.y);
+
+  if (!params.noScreensaver)
+    g_state.ds->inhibitIdle();
 
   // ensure the initial window size is stored in the state
   SDL_GetWindowSize(g_state.window, &g_state.windowW, &g_state.windowH);

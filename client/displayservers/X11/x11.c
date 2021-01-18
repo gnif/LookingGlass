@@ -850,6 +850,10 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabKeyboard = x11UngrabKeyboard,
   .warpPointer    = x11WarpPointer,
 
+  /* Use SDL implementation for now */
+  .inhibitIdle    = NULL,
+  .uninhibitIdle  = NULL,
+
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,
   .cbRelease = x11CBRelease,

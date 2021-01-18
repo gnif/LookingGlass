@@ -100,6 +100,10 @@ struct LG_DisplayServerOps
    * deltas */
   void (*realignPointer)();
 
+  /* called to disable/enable the screensaver */
+  void (*inhibitIdle)();
+  void (*uninhibitIdle)();
+
   /* clipboard support */
   bool (* cbInit)(void);
   void (* cbNotice)(LG_ClipboardData type);
