@@ -1199,7 +1199,7 @@ inline static void localCurToGuest(struct DoublePoint *guest)
   const struct DoublePoint point =
     g_cursor.pos;
 
-  switch((g_state.rotate - params.winRotate) % LG_ROTATE_MAX)
+  switch((g_state.rotate + params.winRotate) % LG_ROTATE_MAX)
   {
     case LG_ROTATE_0:
       guest->x = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
