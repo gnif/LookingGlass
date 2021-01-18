@@ -203,11 +203,12 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame)
 {
   lgWaitEvent(this->frameEvent, TIMEOUT_INFINITE);
 
-  frame->width  = this->width;
-  frame->height = this->height;
-  frame->pitch  = this->width * 4;
-  frame->stride = this->width;
-  frame->format = CAPTURE_FMT_BGRA;
+  frame->width    = this->width;
+  frame->height   = this->height;
+  frame->pitch    = this->width * 4;
+  frame->stride   = this->width;
+  frame->format   = CAPTURE_FMT_BGRA;
+  frame->rotation = CAPTURE_ROT_0;
 
   return CAPTURE_RESULT_OK;
 }

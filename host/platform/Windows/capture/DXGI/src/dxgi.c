@@ -93,13 +93,14 @@ struct iface
   CapturePostPointerBuffer   postPointerBufferFn;
   LGEvent                  * frameEvent;
 
-  unsigned int  formatVer;
-  unsigned int  width;
-  unsigned int  height;
-  unsigned int  pitch;
-  unsigned int  stride;
-  CaptureFormat format;
-  unsigned int  dpi;
+  unsigned int    formatVer;
+  unsigned int    width;
+  unsigned int    height;
+  unsigned int    pitch;
+  unsigned int    stride;
+  CaptureFormat   format;
+  CaptureRotation rotation;
+  unsigned int    dpi;
 
   int  lastPointerX, lastPointerY;
   bool lastPointerVisible;
@@ -371,9 +372,46 @@ static bool dxgi_init(void)
 
   DXGI_ADAPTER_DESC1 adapterDesc;
   IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
-  this->width  = outputDesc.DesktopCoordinates.right  - outputDesc.DesktopCoordinates.left;
-  this->height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
-  this->dpi    = monitor_dpi(outputDesc.Monitor);
+
+  switch(outputDesc.Rotation)
+  {
+    case DXGI_MODE_ROTATION_ROTATE90:
+    case DXGI_MODE_ROTATION_ROTATE270:
+      this->width    = outputDesc.DesktopCoordinates.bottom -
+                       outputDesc.DesktopCoordinates.top;
+      this->height   = outputDesc.DesktopCoordinates.right -
+                       outputDesc.DesktopCoordinates.left;
+      break;
+
+    default:
+      this->width    = outputDesc.DesktopCoordinates.right  -
+                       outputDesc.DesktopCoordinates.left;
+      this->height   = outputDesc.DesktopCoordinates.bottom -
+                       outputDesc.DesktopCoordinates.top;
+      break;
+  }
+
+  switch(outputDesc.Rotation)
+  {
+    case DXGI_MODE_ROTATION_ROTATE90:
+      this->rotation = CAPTURE_ROT_90;
+      break;
+
+    case DXGI_MODE_ROTATION_ROTATE180:
+      this->rotation = CAPTURE_ROT_180;
+      break;
+
+    case DXGI_MODE_ROTATION_ROTATE270:
+      this->rotation = CAPTURE_ROT_270;
+
+      break;
+
+    default:
+      this->rotation = CAPTURE_ROT_0;
+      break;
+  }
+
+  this->dpi = monitor_dpi(outputDesc.Monitor);
   ++this->formatVer;
 
   DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
@@ -928,6 +966,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
   frame->pitch     = this->pitch;
   frame->stride    = this->stride;
   frame->format    = this->format;
+  frame->rotation  = this->rotation;
 
   atomic_fetch_sub_explicit(&this->texReady, 1, memory_order_release);
   return CAPTURE_RESULT_OK;

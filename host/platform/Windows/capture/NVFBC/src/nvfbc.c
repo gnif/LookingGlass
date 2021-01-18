@@ -312,6 +312,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
   frame->height    = this->grabHeight;
   frame->pitch     = this->grabStride * 4;
   frame->stride    = this->grabStride;
+  frame->rotation  = CAPTURE_ROT_0;
 
 #if 0
   //NvFBC never sets bIsHDR so instead we check for any data in the alpha channel

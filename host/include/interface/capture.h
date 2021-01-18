@@ -50,14 +50,24 @@ typedef enum CaptureFormat
 }
 CaptureFormat;
 
+typedef enum CaptureRotation
+{
+  CAPTURE_ROT_0,
+  CAPTURE_ROT_90,
+  CAPTURE_ROT_180,
+  CAPTURE_ROT_270
+}
+CaptureRotation;
+
 typedef struct CaptureFrame
 {
-  unsigned int   formatVer;
-  unsigned int   width;
-  unsigned int   height;
-  unsigned int   pitch;
-  unsigned int   stride;
-  CaptureFormat  format;
+  unsigned int    formatVer;
+  unsigned int    width;
+  unsigned int    height;
+  unsigned int    pitch;
+  unsigned int    stride;
+  CaptureFormat   format;
+  CaptureRotation rotation;
 }
 CaptureFrame;
 

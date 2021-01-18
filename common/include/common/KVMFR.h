@@ -38,6 +38,15 @@ typedef enum FrameType
 }
 FrameType;
 
+typedef enum FrameRotation
+{
+  FRAME_ROT_0,
+  FRAME_ROT_90,
+  FRAME_ROT_180,
+  FRAME_ROT_270
+}
+FrameRotation;
+
 extern const char * FrameTypeStr[FRAME_TYPE_MAX];
 
 enum
@@ -57,7 +66,7 @@ typedef enum CursorType
 CursorType;
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 6
+#define KVMFR_VERSION 7
 
 typedef struct KVMFR
 {
@@ -80,13 +89,14 @@ KVMFRCursor;
 
 typedef struct KVMFRFrame
 {
-  uint32_t  formatVer;         // the frame format version number
-  FrameType type;              // the frame data type
-  uint32_t  width;             // the width
-  uint32_t  height;            // the height
-  uint32_t  stride;            // the row stride (zero if compressed data)
-  uint32_t  pitch;             // the row pitch  (stride in bytes or the compressed frame size)
-  uint32_t  offset;            // offset from the start of this header to the FrameBuffer header
-  uint32_t  mouseScalePercent; // movement scale factor of the mouse (relates to DPI of display, 100 = no scale)
+  uint32_t      formatVer;         // the frame format version number
+  FrameType     type;              // the frame data type
+  uint32_t      width;             // the width
+  uint32_t      height;            // the height
+  FrameRotation rotation;          // the frame rotation
+  uint32_t      stride;            // the row stride (zero if compressed data)
+  uint32_t      pitch;             // the row pitch  (stride in bytes or the compressed frame size)
+  uint32_t      offset;            // offset from the start of this header to the FrameBuffer header
+  uint32_t      mouseScalePercent; // movement scale factor of the mouse (relates to DPI of display, 100 = no scale)
 }
 KVMFRFrame;

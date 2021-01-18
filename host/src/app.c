@@ -186,6 +186,18 @@ static int frameThread(void * opaque)
         continue;
     }
 
+    switch(frame.rotation)
+    {
+      case CAPTURE_ROT_0  : fi->rotation = FRAME_ROT_0  ; break;
+      case CAPTURE_ROT_90 : fi->rotation = FRAME_ROT_90 ; break;
+      case CAPTURE_ROT_180: fi->rotation = FRAME_ROT_180; break;
+      case CAPTURE_ROT_270: fi->rotation = FRAME_ROT_270; break;
+      default:
+        DEBUG_WARN("Unsupported frame rotation %d", frame.rotation);
+        fi->rotation = FRAME_ROT_0;
+        break;
+    }
+
     fi->formatVer         = frame.formatVer;
     fi->width             = frame.width;
     fi->height            = frame.height;
