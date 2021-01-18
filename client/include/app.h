@@ -37,6 +37,8 @@ void app_handleMouseNormal(double ex, double ey);
 void app_handleMouseBasic(void);
 void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
+void app_handleKeyPress(int scancode);
+void app_handleKeyRelease(int scancode);
 void app_handleWindowEnter(void);
 void app_handleWindowLeave(void);
 void app_handleFocusEvent(bool focused);
