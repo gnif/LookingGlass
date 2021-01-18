@@ -92,7 +92,7 @@ static void lgInit(void)
   g_cursor.useScale      = false;
   g_cursor.scale.x       = 1.0;
   g_cursor.scale.y       = 1.0;
-  g_cursor.draw          = true;
+  g_cursor.draw          = false;
   g_cursor.inView        = false;
   g_cursor.guest.valid   = false;
 }
@@ -902,21 +902,22 @@ void spiceClipboardRequest(const SpiceDataType type)
     g_state.ds->cbRequest(spice_type_to_clipboard_type(type));
 }
 
-static void warpPointer(int x, int y, bool exiting)
+static bool warpPointer(int x, int y, bool exiting)
 {
   if (!g_cursor.inWindow)
-    return;
+    return false;
 
   if (g_cursor.warpState == WARP_STATE_OFF)
-    return;
+    return false;
 
   if (exiting)
     g_cursor.warpState = WARP_STATE_OFF;
 
   if (g_cursor.pos.x == x && g_cursor.pos.y == y)
-    return;
+    return true;
 
   g_state.ds->warpPointer(x, y, exiting);
+  return true;
 }
 
 static bool isValidCursorLocation(int x, int y)
@@ -1574,7 +1575,8 @@ int eventFilter(void * userdata, SDL_Event * event)
 
         struct DoublePoint local;
         if (guestCurToLocal(&local))
-          warpPointer(round(local.x), round(local.y), false);
+          if (warpPointer(round(local.x), round(local.y), false))
+            setCursorInView(true);
         break;
       }
     }
