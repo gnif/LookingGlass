@@ -1455,23 +1455,6 @@ int eventFilter(void * userdata, SDL_Event * event)
     return 0;
   }
 
-  switch(event->type)
-  {
-    case SDL_KEYDOWN:
-    {
-      SDL_Scancode sc = event->key.keysym.scancode;
-      app_handleKeyPress(sc);
-      break;
-    }
-
-    case SDL_KEYUP:
-    {
-      SDL_Scancode sc = event->key.keysym.scancode;
-      app_handleKeyRelease(sc);
-      break;
-    }
-  }
-
   // consume all events
   return 0;
 }

@@ -109,6 +109,20 @@ static bool sdlEventFilter(SDL_Event * event)
       return true;
     }
 
+    case SDL_KEYDOWN:
+    {
+      SDL_Scancode sc = event->key.keysym.scancode;
+      app_handleKeyPress(sc);
+      break;
+    }
+
+    case SDL_KEYUP:
+    {
+      SDL_Scancode sc = event->key.keysym.scancode;
+      app_handleKeyRelease(sc);
+      break;
+    }
+
     case SDL_WINDOWEVENT:
       switch(event->window.event)
       {
