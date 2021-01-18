@@ -582,12 +582,6 @@ static int frameThread(void * unused)
           lgrFormat.bpp  = 64;
           break;
 
-        case FRAME_TYPE_YUV420:
-          dataSize       = lgrFormat.height * lgrFormat.width;
-          dataSize      += (dataSize / 4) * 2;
-          lgrFormat.bpp  = 12;
-          break;
-
         default:
           DEBUG_ERROR("Unsupported frameType");
           error = true;
