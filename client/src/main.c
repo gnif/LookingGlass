@@ -49,6 +49,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/version.h"
 
 #include "utils.h"
+#include "kb.h"
 #include "ll.h"
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
@@ -1038,12 +1039,16 @@ void app_handleKeyPress(int sc)
   if (!app_inputEnabled())
     return;
 
-  if (params.ignoreWindowsKeys && (sc == KEY_END || sc == KEY_DOWN))
+  if (params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
     return;
 
   if (!g_state.keyDown[sc])
   {
-    if (spice_key_down(sc))
+    uint32_t ps2 = xfree86_to_ps2[sc];
+    if (!ps2)
+      return;
+
+    if (spice_key_down(ps2))
       g_state.keyDown[sc] = true;
     else
     {
@@ -1083,10 +1088,14 @@ void app_handleKeyRelease(int sc)
   if (!g_state.keyDown[sc])
     return;
 
-  if (params.ignoreWindowsKeys && (sc == KEY_END || sc == KEY_DOWN))
+  if (params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
     return;
 
-  if (spice_key_up(sc))
+  uint32_t ps2 = xfree86_to_ps2[sc];
+  if (!ps2)
+    return;
+
+  if (spice_key_up(ps2))
     g_state.keyDown[sc] = false;
   else
   {
@@ -1545,19 +1554,23 @@ static void mouse_sens_dec(uint32_t scancode, void * opaque)
   free(msg);
 }
 
-static void ctrl_alt_fn(uint32_t fn, void * opaque)
+static void ctrl_alt_fn(uint32_t key, void * opaque)
 {
-  spice_key_down(KEY_LEFTCTRL);
-  spice_key_down(KEY_LEFTALT );
+  const uint32_t ctrl = xfree86_to_ps2[KEY_LEFTCTRL];
+  const uint32_t alt  = xfree86_to_ps2[KEY_LEFTALT ];
+  const uint32_t fn   = xfree86_to_ps2[key];
+  spice_key_down(ctrl);
+  spice_key_down(alt );
   spice_key_down(fn  );
 
-  spice_key_up(KEY_LEFTCTRL);
-  spice_key_up(KEY_LEFTALT );
+  spice_key_up(ctrl);
+  spice_key_up(alt );
   spice_key_up(fn  );
 }
 
 static void key_passthrough(uint32_t sc, void * opaque)
 {
+  sc = xfree86_to_ps2[sc];
   spice_key_down(sc);
   spice_key_up  (sc);
 }
@@ -1584,8 +1597,8 @@ static void register_key_binds(void)
   g_state.kbCtrlAltFn[10] = app_register_keybind(KEY_F11, ctrl_alt_fn, NULL);
   g_state.kbCtrlAltFn[11] = app_register_keybind(KEY_F12, ctrl_alt_fn, NULL);
 
-  g_state.kbPass[0] = app_register_keybind(KEY_END, key_passthrough, NULL);
-  g_state.kbPass[1] = app_register_keybind(KEY_DOWN, key_passthrough, NULL);
+  g_state.kbPass[0] = app_register_keybind(KEY_LEFTMETA , key_passthrough, NULL);
+  g_state.kbPass[1] = app_register_keybind(KEY_RIGHTMETA, key_passthrough, NULL);
 }
 
 static void release_key_binds(void)
