@@ -108,6 +108,8 @@ static bool x11Init(SDL_SysWMinfo * info)
     XISetMask(mask[i].mask, XI_ButtonPress  );
     XISetMask(mask[i].mask, XI_ButtonRelease);
     XISetMask(mask[i].mask, XI_Motion       );
+    XISetMask(mask[i].mask, XI_KeyPress     );
+    XISetMask(mask[i].mask, XI_KeyRelease   );
   }
 
   XISelectEvents(x11.display, x11.window, mask, num_masks);
@@ -208,6 +210,8 @@ static bool x11EventFilter(SDL_Event * event)
       return false;
 
 #if SDL_VIDEO_DRIVER_X11_XINPUT2
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
     case SDL_MOUSEMOTION:
     case SDL_MOUSEBUTTONDOWN:
     case SDL_MOUSEBUTTONUP:
@@ -292,6 +296,20 @@ static bool x11EventFilter(SDL_Event * event)
 
       switch(cookie->evtype)
       {
+        case XI_KeyPress:
+        {
+          XIDeviceEvent *device = cookie->data;
+          app_handleKeyPress(device->detail - 8);
+          return true;
+        }
+
+        case XI_KeyRelease:
+        {
+          XIDeviceEvent *device = cookie->data;
+          app_handleKeyRelease(device->detail - 8);
+          return true;
+        }
+
         case XI_ButtonPress:
         {
           XIDeviceEvent *device = cookie->data;
