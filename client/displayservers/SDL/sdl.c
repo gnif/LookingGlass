@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 
 #include "app.h"
+#include "kb.h"
 #include "common/debug.h"
 
 struct SDLDSState
@@ -59,6 +60,17 @@ static void sdlFree(void)
 static bool sdlGetProp(LG_DSProperty prop, void * ret)
 {
   return false;
+}
+
+static inline uint32_t mapScancode(SDL_Scancode scancode)
+{
+  uint32_t ps2;
+  if (scancode > (sizeof(usb_to_ps2) / sizeof(uint32_t)) || (ps2 = usb_to_ps2[scancode]) == 0)
+  {
+    DEBUG_WARN("Unable to map USB scan code: %x\n", scancode);
+    return 0;
+  }
+  return ps2;
 }
 
 static bool sdlEventFilter(SDL_Event * event)
@@ -112,14 +124,14 @@ static bool sdlEventFilter(SDL_Event * event)
     case SDL_KEYDOWN:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      app_handleKeyPress(sc);
+      app_handleKeyPress(mapScancode(sc));
       break;
     }
 
     case SDL_KEYUP:
     {
       SDL_Scancode sc = event->key.keysym.scancode;
-      app_handleKeyRelease(sc);
+      app_handleKeyRelease(mapScancode(sc));
       break;
     }
 

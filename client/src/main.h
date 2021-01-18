@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdatomic.h>
 #include <SDL2/SDL.h>
+#include <linux/input.h>
 
 #include "interface/app.h"
 #include "dynamic/displayservers.h"
@@ -46,8 +47,8 @@ struct AppState
   bool                 ignoreInput;
   bool                 escapeActive;
   SDL_Scancode         escapeAction;
-  KeybindHandle        bindings[SDL_NUM_SCANCODES];
-  bool                 keyDown[SDL_NUM_SCANCODES];
+  KeybindHandle        bindings[KEY_MAX];
+  bool                 keyDown[KEY_MAX];
 
   bool                 haveSrcSize;
   SDL_Point            windowPos;
