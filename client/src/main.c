@@ -1013,10 +1013,6 @@ static void setCursorInView(bool enable)
 
 void app_handleMouseGrabbed(double ex, double ey)
 {
-  /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_state.focused)
-    return;
-
   if (!app_inputEnabled())
     return;
 
