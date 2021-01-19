@@ -322,8 +322,8 @@ static bool x11EventFilter(SDL_Event * event)
           if (!x11.focused)
             return true;
 
-          XIRawEvent *device = cookie->data;
-          app_handleKeyPress(device->detail - 8);
+          XIRawEvent *raw = cookie->data;
+          app_handleKeyPress(raw->detail - 8);
           return true;
         }
 
@@ -332,8 +332,8 @@ static bool x11EventFilter(SDL_Event * event)
           if (!x11.focused)
             return true;
 
-          XIRawEvent *device = cookie->data;
-          app_handleKeyRelease(device->detail - 8);
+          XIRawEvent *raw = cookie->data;
+          app_handleKeyRelease(raw->detail - 8);
           return true;
         }
 
@@ -342,9 +342,9 @@ static bool x11EventFilter(SDL_Event * event)
           if (!x11.focused || !x11.entered)
             return true;
 
-          XIRawEvent *device = cookie->data;
+          XIRawEvent *raw = cookie->data;
           app_handleButtonPress(
-              device->detail > 5 ? device->detail - 2 : device->detail);
+              raw->detail > 5 ? raw->detail - 2 : raw->detail);
           return true;
         }
 
@@ -353,9 +353,9 @@ static bool x11EventFilter(SDL_Event * event)
           if (!x11.focused || !x11.entered)
             return true;
 
-          XIRawEvent *device = cookie->data;
+          XIRawEvent *raw = cookie->data;
           app_handleButtonRelease(
-              device->detail > 5 ? device->detail - 2 : device->detail);
+              raw->detail > 5 ? raw->detail - 2 : raw->detail);
           return true;
         }
 
