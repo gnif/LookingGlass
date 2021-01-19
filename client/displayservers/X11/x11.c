@@ -259,11 +259,17 @@ static bool x11EventFilter(SDL_Event * event)
     }
 
     case FocusIn:
+      if (xe.xfocus.mode != NotifyNormal)
+        return true;
+
       x11.focused = true;
       app_handleFocusEvent(true);
       return true;
 
     case FocusOut:
+      if (xe.xfocus.mode != NotifyNormal)
+        return true;
+
       x11.focused = false;
       app_handleFocusEvent(false);
       return true;
