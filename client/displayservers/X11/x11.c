@@ -312,9 +312,6 @@ static bool x11EventFilter(SDL_Event * event)
       if (cookie->extension != x11.xinputOp)
         return false;
 
-      if (!app_inputEnabled())
-        return true;
-
       switch(cookie->evtype)
       {
         case XI_RawKeyPress:

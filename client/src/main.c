@@ -1005,8 +1005,7 @@ static void setCursorInView(bool enable)
     if (warpSupport)
       g_state.ds->ungrabPointer();
 
-    if (!g_cursor.grab)
-      g_cursor.realign = true;
+    setGrabQuiet(false);
   }
 
   g_cursor.warpState = WARP_STATE_ON;
@@ -1014,12 +1013,14 @@ static void setCursorInView(bool enable)
 
 void app_handleMouseGrabbed(double ex, double ey)
 {
-  int x, y;
-
   /* do not pass mouse events to the guest if we do not have focus */
   if (!g_state.focused)
     return;
 
+  if (!app_inputEnabled())
+    return;
+
+  int x, y;
   if (params.rawMouse && !g_cursor.useScale)
   {
     /* raw unscaled input are always round numbers */
@@ -1254,6 +1255,9 @@ void app_handleMouseNormal(double ex, double ey)
   if (!g_cursor.guest.valid)
     return;
 
+  if (!app_inputEnabled())
+    return;
+
   /* scale the movement to the guest */
   if (g_cursor.useScale && params.scaleMouseInput)
   {
@@ -1397,6 +1401,9 @@ void app_handleMouseBasic()
   if (!g_state.focused)
     return;
 
+  if (!app_inputEnabled())
+    return;
+
   const bool inView =
     g_cursor.pos.x >= g_state.dstRect.x                     &&
     g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
@@ -1530,6 +1537,7 @@ static void setGrabQuiet(bool enable)
   if (enable)
   {
     setCursorInView(true);
+    g_state.ignoreInput = false;
 
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
@@ -1548,14 +1556,11 @@ static void setGrabQuiet(bool enable)
 
     if (!warpSupport)
       g_state.ds->ungrabPointer();
+
+    // if exiting capture when input on capture only, we want to show the cursor
+    if (params.captureInputOnly || !params.hideMouse)
+      alignToGuest();
   }
-
-  // if exiting capture when input on capture only, we want to show the cursor
-  if (!enable && (params.captureInputOnly || !params.hideMouse))
-    alignToGuest();
-
-  if (g_cursor.grab)
-    setCursorInView(true);
 }
 
 int eventFilter(void * userdata, SDL_Event * event)
@@ -1668,6 +1673,10 @@ static void toggle_rotate(uint32_t scancode, void * opaque)
 static void toggle_input(uint32_t scancode, void * opaque)
 {
   g_state.ignoreInput = !g_state.ignoreInput;
+
+  if (g_state.ignoreInput)
+    setCursorInView(false);
+
   app_alert(
     LG_ALERT_INFO,
     g_state.ignoreInput ? "Input Disabled" : "Input Enabled"
