@@ -222,7 +222,6 @@ static bool x11EventFilter(SDL_Event * event)
       }
       return false;
 
-#if SDL_VIDEO_DRIVER_X11_XINPUT2
     case SDL_KEYDOWN:
     case SDL_KEYUP:
     case SDL_MOUSEMOTION:
@@ -230,7 +229,6 @@ static bool x11EventFilter(SDL_Event * event)
     case SDL_MOUSEBUTTONUP:
     case SDL_MOUSEWHEEL:
       return true;
-#endif
   }
 
   if (event->type != SDL_SYSWMEVENT)
