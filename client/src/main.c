@@ -1951,7 +1951,7 @@ static int lg_run(void)
     params.w,
     params.h,
     (
-      SDL_WINDOW_SHOWN |
+      SDL_WINDOW_HIDDEN |
       (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
       (params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
       (params.maximize    ? SDL_WINDOW_MAXIMIZED  : 0) |
@@ -1976,6 +1976,10 @@ static int lg_run(void)
   SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
 
   g_state.ds->init(&g_state.wminfo);
+
+  // now init has been done we can show the window, doing this before init for
+  // X11 causes us to miss the first focus event
+  SDL_ShowWindow(g_state.window);
 
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
       params.minimizeOnFocusLoss ? "1" : "0");

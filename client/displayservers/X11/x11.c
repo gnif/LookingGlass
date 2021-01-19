@@ -38,6 +38,9 @@ struct X11DSState
   Window    window;
   int       xinputOp;
 
+  int pointerDev;
+  int keyboardDev;
+
   bool pointerGrabbed;
   bool keyboardGrabbed;
   bool entered;
@@ -81,11 +84,13 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e);
 
 static bool x11Init(SDL_SysWMinfo * info)
 {
+  XIDeviceInfo *devinfo;
+  int count;
+  int event, error;
+
   memset(&x11, 0, sizeof(x11));
   x11.display = info->info.x11.display;
   x11.window  = info->info.x11.window;
-
-  int event, error;
 
   int major = 2;
   int minor = 3;
@@ -100,8 +105,7 @@ static bool x11Init(SDL_SysWMinfo * info)
   XQueryExtension(x11.display, "XInputExtension", &x11.xinputOp, &event, &error);
 
   int num_masks;
-  XIEventMask * mask = XIGetSelectedEvents(x11.display,
-      DefaultRootWindow(x11.display), &num_masks);
+  XIEventMask * mask = XIGetSelectedEvents(x11.display, x11.window, &num_masks);
   if (!mask)
   {
     DEBUG_ERROR("Failed to get the XInput event mask");
@@ -110,15 +114,16 @@ static bool x11Init(SDL_SysWMinfo * info)
 
   for(int i = 0; i < num_masks; ++i)
   {
-    XISetMask(mask[i].mask, XI_RawButtonPress  );
-    XISetMask(mask[i].mask, XI_RawButtonRelease);
-    XISetMask(mask[i].mask, XI_RawMotion       );
-    XISetMask(mask[i].mask, XI_RawKeyPress     );
-    XISetMask(mask[i].mask, XI_RawKeyRelease   );
+    XISetMask(mask[i].mask, XI_Motion    );
+    XISetMask(mask[i].mask, XI_FocusIn   );
+    XISetMask(mask[i].mask, XI_FocusOut  );
+    XISetMask(mask[i].mask, XI_Enter     );
+    XISetMask(mask[i].mask, XI_Leave     );
+    XISetMask(mask[i].mask, XI_KeyPress  );
+    XISetMask(mask[i].mask, XI_KeyRelease);
   }
 
-  if (XISelectEvents(x11.display, DefaultRootWindow(x11.display),
-        mask, num_masks) != Success)
+  if (XISelectEvents(x11.display, x11.window, mask, num_masks) != Success)
   {
     XFree(mask);
     DEBUG_ERROR("Failed to select the xinput events");
@@ -126,6 +131,62 @@ static bool x11Init(SDL_SysWMinfo * info)
   }
 
   XFree(mask);
+
+  devinfo = XIQueryDevice(x11.display, XIAllDevices, &count);
+  if (!devinfo)
+  {
+    DEBUG_ERROR("XIQueryDevice failed");
+    return false;
+  }
+
+  bool havePointer  = false;
+  bool haveKeyboard = false;
+  for(int i = 0; i < count; ++i)
+  {
+    /* look for the master pointing device */
+    if (!havePointer && devinfo[i].use == XIMasterPointer)
+      for(int j = 0; j < devinfo[i].num_classes; ++j)
+      {
+        XIAnyClassInfo *cdevinfo =
+          (XIAnyClassInfo *)(devinfo[i].classes[j]);
+        if (cdevinfo->type == XIValuatorClass)
+        {
+          havePointer = true;
+          x11.pointerDev = devinfo[i].deviceid;
+          break;
+        }
+      }
+
+    /* look for the master keyboard device */
+    if (!haveKeyboard && devinfo[i].use == XIMasterKeyboard)
+      for(int j = 0; j < devinfo[i].num_classes; ++j)
+      {
+        XIAnyClassInfo *cdevinfo =
+          (XIAnyClassInfo *)(devinfo[i].classes[j]);
+        if (cdevinfo->type == XIKeyClass)
+        {
+          haveKeyboard = true;
+          x11.keyboardDev = devinfo[i].deviceid;
+          break;
+        }
+      }
+  }
+
+  if (!havePointer)
+  {
+    DEBUG_ERROR("Failed to find the master pointing device");
+    XIFreeDeviceInfo(devinfo);
+    return false;
+  }
+
+  if (!haveKeyboard)
+  {
+    DEBUG_ERROR("Failed to find the master keyboard device");
+    XIFreeDeviceInfo(devinfo);
+    return false;
+  }
+
+  XIFreeDeviceInfo(devinfo);
 
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(x11.display,
       "NETWM_BYPASS_COMPOSITOR", False);
@@ -218,6 +279,8 @@ static bool x11EventFilter(SDL_Event * event)
         case SDL_WINDOWEVENT_CLOSE:
         case SDL_WINDOWEVENT_FOCUS_GAINED:
         case SDL_WINDOWEVENT_FOCUS_LOST:
+        case SDL_WINDOWEVENT_ENTER:
+        case SDL_WINDOWEVENT_LEAVE:
           return true;
       }
       return false;
@@ -258,60 +321,6 @@ static bool x11EventFilter(SDL_Event * event)
       return true;
     }
 
-    case FocusIn:
-      if (xe.xfocus.mode != NotifyNormal)
-        return true;
-
-      x11.focused = true;
-      app_handleFocusEvent(true);
-      return true;
-
-    case FocusOut:
-      if (xe.xfocus.mode != NotifyNormal)
-        return true;
-
-      x11.focused = false;
-      app_handleFocusEvent(false);
-      return true;
-
-    case EnterNotify:
-    {
-      int x, y;
-      Window child;
-      XTranslateCoordinates(
-          x11.display,
-          DefaultRootWindow(x11.display),
-          x11.window,
-          xe.xcrossing.x_root, xe.xcrossing.y_root,
-          &x, &y,
-          &child);
-
-      app_updateCursorPos(x, y);
-      app_handleWindowEnter();
-      x11.entered = true;
-      return true;
-    }
-
-    case LeaveNotify:
-    {
-      if (xe.xcrossing.mode != NotifyNormal)
-        return true;
-
-      int x, y;
-      Window child;
-      XTranslateCoordinates(x11.display,
-          DefaultRootWindow(x11.display),
-          x11.window,
-          xe.xcrossing.x_root, xe.xcrossing.y_root,
-          &x, &y,
-          &child);
-
-      app_updateCursorPos(x, y);
-      app_handleWindowLeave();
-      x11.entered = false;
-      return true;
-    }
-
     case GenericEvent:
     {
       XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
@@ -320,6 +329,77 @@ static bool x11EventFilter(SDL_Event * event)
 
       switch(cookie->evtype)
       {
+        case XI_FocusIn:
+        {
+          if (x11.focused)
+            return true;
+
+          XIFocusOutEvent *xie = cookie->data;
+          if (xie->mode != NotifyNormal)
+            return true;
+
+          app_updateCursorPos(xie->event_x, xie->event_y);
+          app_handleFocusEvent(true);
+          x11.focused = true;
+          return true;
+        }
+
+        case XI_FocusOut:
+        {
+          if (!x11.focused)
+            return true;
+
+          XIFocusOutEvent *xie = cookie->data;
+          app_updateCursorPos(xie->event_x, xie->event_y);
+          app_handleFocusEvent(false);
+          x11.focused = false;
+          return true;
+        }
+
+        case XI_Enter:
+        {
+          if (x11.entered)
+            return true;
+
+          XIEnterEvent *xie = cookie->data;
+          app_updateCursorPos(xie->event_x, xie->event_y);
+          app_handleWindowEnter();
+          x11.entered = true;
+          return true;
+        }
+
+        case XI_Leave:
+        {
+          if (!x11.entered)
+            return true;
+
+          XILeaveEvent *xie = cookie->data;
+          app_updateCursorPos(xie->event_x, xie->event_y);
+          app_handleWindowLeave();
+          x11.entered = false;
+          return true;
+        }
+
+        case XI_KeyPress:
+        {
+          if (!x11.focused || x11.keyboardGrabbed)
+            return true;
+
+          XIDeviceEvent *device = cookie->data;
+          app_handleKeyPress(device->detail - 8);
+          return true;
+        }
+
+        case XI_KeyRelease:
+        {
+          if (!x11.focused || x11.keyboardGrabbed)
+            return true;
+
+          XIDeviceEvent *device = cookie->data;
+          app_handleKeyRelease(device->detail - 8);
+          return true;
+        }
+
         case XI_RawKeyPress:
         {
           if (!x11.focused)
@@ -495,16 +575,28 @@ static void x11GrabPointer(void)
   if (x11.pointerGrabbed)
     return;
 
-  XGrabPointer(
-    x11.display,
-    x11.window,
-    true,
-    None,
-    GrabModeAsync,
-    GrabModeAsync,
-    x11.window,
-    None,
-    CurrentTime);
+  unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+  XIEventMask mask = {
+    XIAllMasterDevices,
+    sizeof(mask_bits),
+    mask_bits
+  };
+
+  XISetMask(mask.mask, XI_RawButtonPress  );
+  XISetMask(mask.mask, XI_RawButtonRelease);
+  XISetMask(mask.mask, XI_RawMotion       );
+
+  XIGrabDevice(
+      x11.display,
+      x11.pointerDev,
+      x11.window,
+      CurrentTime,
+      None,
+      GrabModeAsync,
+      GrabModeAsync,
+      false,
+      &mask);
+  XSync(x11.display, False);
 
   x11.pointerGrabbed = true;
 }
@@ -514,7 +606,9 @@ static void x11UngrabPointer(void)
   if (!x11.pointerGrabbed)
     return;
 
-  XUngrabPointer(x11.display, CurrentTime);
+  XIUngrabDevice(x11.display, x11.pointerDev, CurrentTime);
+  XSync(x11.display, False);
+
   x11.pointerGrabbed = false;
 }
 
@@ -523,13 +617,28 @@ static void x11GrabKeyboard(void)
   if (x11.keyboardGrabbed)
     return;
 
-  XGrabKeyboard(
-    x11.display,
-    x11.window,
-    true,
-    GrabModeAsync,
-    GrabModeAsync,
-    CurrentTime);
+  unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+  XIEventMask mask = {
+    XIAllMasterDevices,
+    sizeof(mask_bits),
+    mask_bits
+  };
+
+  XISetMask(mask.mask, XI_RawKeyPress  );
+  XISetMask(mask.mask, XI_RawKeyRelease);
+
+  XIGrabDevice(
+      x11.display,
+      x11.keyboardDev,
+      x11.window,
+      CurrentTime,
+      None,
+      GrabModeAsync,
+      GrabModeAsync,
+      false,
+      &mask);
+
+  XSync(x11.display, False);
 
   x11.keyboardGrabbed = true;
 }
@@ -539,14 +648,17 @@ static void x11UngrabKeyboard(void)
   if (!x11.keyboardGrabbed)
     return;
 
-  XUngrabKeyboard(x11.display, CurrentTime);
+  XIUngrabDevice(x11.display, x11.keyboardDev, CurrentTime);
+  XSync(x11.display, False);
+
   x11.keyboardGrabbed = false;
 }
 
 static void x11WarpPointer(int x, int y, bool exiting)
 {
-  XWarpPointer(
+  XIWarpPointer(
       x11.display,
+      x11.pointerDev,
       None,
       x11.window,
       0, 0, 0, 0,
