@@ -34,6 +34,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <wayland-egl.h>
 #endif
 
+#include <assert.h>
+
 #include "app.h"
 #include "model.h"
 #include "shader.h"
@@ -288,6 +290,9 @@ static void egl_calc_mouse_size(struct Inst * this)
       w = this->format.height;
       h = this->format.width;
       break;
+
+    default:
+      assert(!"unreachable");
   }
 
   switch((this->format.rotate + this->rotate) % LG_ROTATE_MAX)
