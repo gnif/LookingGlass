@@ -467,9 +467,6 @@ static bool x11EventFilter(SDL_Event * event)
 
         case XI_Motion:
         {
-          if (!x11.focused || !x11.entered)
-            return true;
-
           XIDeviceEvent *device = cookie->data;
           app_updateCursorPos(device->event_x, device->event_y);
           return true;
@@ -588,6 +585,7 @@ static void x11GrabPointer(void)
   XISetMask(mask.mask, XI_RawButtonPress  );
   XISetMask(mask.mask, XI_RawButtonRelease);
   XISetMask(mask.mask, XI_RawMotion       );
+  XISetMask(mask.mask, XI_Motion          );
 
   XIGrabDevice(
       x11.display,
@@ -599,6 +597,7 @@ static void x11GrabPointer(void)
       GrabModeAsync,
       false,
       &mask);
+
   XSync(x11.display, False);
 
   x11.pointerGrabbed = true;

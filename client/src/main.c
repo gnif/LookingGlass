@@ -1356,7 +1356,6 @@ void app_handleMouseNormal(double ex, double ey)
 
         /* ungrab the pointer and move the local cursor to the exit point */
         g_state.ds->ungrabPointer();
-
         warpPointer(tx, ty, true);
         return;
       }
