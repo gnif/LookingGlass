@@ -245,7 +245,9 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
-  // Do nothing.
+  for (int key = 0; key < KEY_MAX; key++)
+    if (wm.keyPressCount[key] && !--wm.keyPressCount[key])
+      app_handleKeyRelease(key);
 }
 
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
