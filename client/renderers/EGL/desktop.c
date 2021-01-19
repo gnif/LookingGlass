@@ -136,7 +136,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
   egl_model_set_default((*desktop)->model);
   egl_model_set_texture((*desktop)->model, (*desktop)->texture);
 
-  (*desktop)->kbNV = app_register_keybind(SDL_SCANCODE_N, egl_desktop_toggle_nv, *desktop);
+  (*desktop)->kbNV = app_register_keybind(KEY_N, egl_desktop_toggle_nv, *desktop);
 
   (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
   (*desktop)->nvGain = option_get_int("egl", "nvGain"   );

@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <SDL2/SDL.h>
+#include <linux/input.h>
 
 typedef enum LG_MsgAlert
 {
@@ -31,7 +32,7 @@ typedef enum LG_MsgAlert
 LG_MsgAlert;
 
 typedef struct KeybindHandle * KeybindHandle;
-typedef void (*SuperEventFn)(SDL_Scancode key, void * opaque);
+typedef void (*SuperEventFn)(uint32_t sc, void * opaque);
 
 /**
  * Show an alert on screen
@@ -43,13 +44,13 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...);
 
 /**
  * Register a handler for the <super>+<key> combination
- * @param key      The scancode to register
+ * @param sc       The scancode to register
  * @param callback The function to be called when the combination is pressed
  * @param opaque   A pointer to be passed to the callback, may be NULL
  * @retval A handle for the binding or NULL on failure.
  *         The caller is required to release the handle via `app_release_keybind` when it is no longer required
  */
-KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void * opaque);
+KeybindHandle app_register_keybind(uint32_t sc, SuperEventFn callback, void * opaque);
 
 /**
  * Release an existing key binding
