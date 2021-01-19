@@ -40,6 +40,8 @@ struct X11DSState
 
   bool pointerGrabbed;
   bool keyboardGrabbed;
+  bool entered;
+  bool focused;
 
   // clipboard members
   Atom             aSelection;
@@ -98,7 +100,8 @@ static bool x11Init(SDL_SysWMinfo * info)
   XQueryExtension(x11.display, "XInputExtension", &x11.xinputOp, &event, &error);
 
   int num_masks;
-  XIEventMask * mask = XIGetSelectedEvents(x11.display, x11.window, &num_masks);
+  XIEventMask * mask = XIGetSelectedEvents(x11.display,
+      DefaultRootWindow(x11.display), &num_masks);
   if (!mask)
   {
     DEBUG_ERROR("Failed to get the XInput event mask");
@@ -107,14 +110,15 @@ static bool x11Init(SDL_SysWMinfo * info)
 
   for(int i = 0; i < num_masks; ++i)
   {
-    XISetMask(mask[i].mask, XI_ButtonPress  );
-    XISetMask(mask[i].mask, XI_ButtonRelease);
-    XISetMask(mask[i].mask, XI_Motion       );
-    XISetMask(mask[i].mask, XI_KeyPress     );
-    XISetMask(mask[i].mask, XI_KeyRelease   );
+    XISetMask(mask[i].mask, XI_RawButtonPress  );
+    XISetMask(mask[i].mask, XI_RawButtonRelease);
+    XISetMask(mask[i].mask, XI_RawMotion       );
+    XISetMask(mask[i].mask, XI_RawKeyPress     );
+    XISetMask(mask[i].mask, XI_RawKeyRelease   );
   }
 
-  if (XISelectEvents(x11.display, x11.window, mask, num_masks) != Success)
+  if (XISelectEvents(x11.display, DefaultRootWindow(x11.display),
+        mask, num_masks) != Success)
   {
     XFree(mask);
     DEBUG_ERROR("Failed to select the xinput events");
@@ -212,6 +216,8 @@ static bool x11EventFilter(SDL_Event * event)
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
         case SDL_WINDOWEVENT_CLOSE:
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+        case SDL_WINDOWEVENT_FOCUS_LOST:
           return true;
       }
       return false;
@@ -254,6 +260,16 @@ static bool x11EventFilter(SDL_Event * event)
       return true;
     }
 
+    case FocusIn:
+      x11.focused = true;
+      app_handleFocusEvent(true);
+      return true;
+
+    case FocusOut:
+      x11.focused = false;
+      app_handleFocusEvent(false);
+      return true;
+
     case EnterNotify:
     {
       int x, y;
@@ -268,6 +284,7 @@ static bool x11EventFilter(SDL_Event * event)
 
       app_updateCursorPos(x, y);
       app_handleWindowEnter();
+      x11.entered = true;
       return true;
     }
 
@@ -287,6 +304,7 @@ static bool x11EventFilter(SDL_Event * event)
 
       app_updateCursorPos(x, y);
       app_handleWindowLeave();
+      x11.entered = false;
       return true;
     }
 
@@ -301,53 +319,51 @@ static bool x11EventFilter(SDL_Event * event)
 
       switch(cookie->evtype)
       {
-        case XI_KeyPress:
+        case XI_RawKeyPress:
         {
-          XIDeviceEvent *device = cookie->data;
+          if (!x11.focused)
+            return true;
+
+          XIRawEvent *device = cookie->data;
           app_handleKeyPress(device->detail - 8);
           return true;
         }
 
-        case XI_KeyRelease:
+        case XI_RawKeyRelease:
         {
-          XIDeviceEvent *device = cookie->data;
+          if (!x11.focused)
+            return true;
+
+          XIRawEvent *device = cookie->data;
           app_handleKeyRelease(device->detail - 8);
           return true;
         }
 
-        case XI_ButtonPress:
+        case XI_RawButtonPress:
         {
-          XIDeviceEvent *device = cookie->data;
-          app_updateCursorPos(device->event_x, device->event_y);
+          if (!x11.focused || !x11.entered)
+            return true;
 
+          XIRawEvent *device = cookie->data;
           app_handleButtonPress(
               device->detail > 5 ? device->detail - 2 : device->detail);
           return true;
         }
 
-        case XI_ButtonRelease:
+        case XI_RawButtonRelease:
         {
-          XIDeviceEvent *device = cookie->data;
-          app_updateCursorPos(device->event_x, device->event_y);
+          if (!x11.focused || !x11.entered)
+            return true;
 
+          XIRawEvent *device = cookie->data;
           app_handleButtonRelease(
               device->detail > 5 ? device->detail - 2 : device->detail);
           return true;
         }
 
-        case XI_Motion:
-        {
-          if (!app_cursorInWindow())
-            return true;
-
-          XIDeviceEvent *device = cookie->data;
-          app_updateCursorPos(device->event_x, device->event_y);
-          return true;
-        }
-
         case XI_RawMotion:
         {
-          if (!app_cursorInWindow())
+          if (!x11.focused || !x11.entered)
             return true;
 
           XIRawEvent *raw = cookie->data;

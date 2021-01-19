@@ -71,6 +71,7 @@ struct Inst
   EGL_Alert       * alert;   // the alert display
 
   LG_RendererFormat    format;
+  bool                 formatValid;
   bool                 start;
   uint64_t             waitFadeTime;
   bool                 waitDone;
@@ -266,6 +267,9 @@ void egl_on_restart(void * opaque)
 
 static void egl_calc_mouse_size(struct Inst * this)
 {
+  if (!this->formatValid)
+    return;
+
   int w, h;
   switch(this->format.rotate)
   {
@@ -308,6 +312,9 @@ static void egl_calc_mouse_size(struct Inst * this)
 
 static void egl_calc_mouse_state(struct Inst * this)
 {
+  if (!this->formatValid)
+    return;
+
   switch((this->format.rotate + this->rotate) % LG_ROTATE_MAX)
   {
     case LG_ROTATE_0:
@@ -395,6 +402,7 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool use
 {
   struct Inst * this = (struct Inst *)opaque;
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+  this->formatValid = true;
 
   /* this event runs in a second thread so we need to init it here */
   if (!this->frameContext)
