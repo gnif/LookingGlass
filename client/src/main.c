@@ -1453,6 +1453,10 @@ void app_handleResizeEvent(int w, int h)
     &g_state.border.w
   );
 
+  /* don't do anything else if the window dimensions have not changed */
+  if (g_state.windowW == w && g_state.windowH == h)
+    return;
+
   g_state.windowW  = w;
   g_state.windowH  = h;
   g_state.windowCX = w / 2;
