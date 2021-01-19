@@ -335,7 +335,7 @@ static bool x11EventFilter(SDL_Event * event)
             return true;
 
           XIFocusOutEvent *xie = cookie->data;
-          if (xie->mode != NotifyNormal)
+          if (xie->mode != NotifyNormal && xie->mode != XINotifyWhileGrabbed)
             return true;
 
           app_updateCursorPos(xie->event_x, xie->event_y);
@@ -350,6 +350,9 @@ static bool x11EventFilter(SDL_Event * event)
             return true;
 
           XIFocusOutEvent *xie = cookie->data;
+          if (xie->mode != NotifyNormal && xie->mode != XINotifyWhileGrabbed)
+            return true;
+
           app_updateCursorPos(xie->event_x, xie->event_y);
           app_handleFocusEvent(false);
           x11.focused = false;
