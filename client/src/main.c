@@ -258,8 +258,8 @@ static void updatePositionInfo(void)
       srcW       != g_state.dstRect.w ||
       g_cursor.guest.dpiScale != 100);
 
-  g_cursor.scale.x  = (float)srcH / (float)g_state.dstRect.h;
-  g_cursor.scale.y  = (float)srcW / (float)g_state.dstRect.w;
+  g_cursor.scale.x  = (float)srcW / (float)g_state.dstRect.w;
+  g_cursor.scale.y  = (float)srcH / (float)g_state.dstRect.h;
   g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
 
   if (!g_state.posInfoValid)
