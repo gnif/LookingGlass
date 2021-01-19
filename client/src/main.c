@@ -192,6 +192,9 @@ static void updatePositionInfo(void)
       srcW = g_state.srcSize.y;
       srcH = g_state.srcSize.x;
       break;
+
+    default:
+      assert(!"unreachable");
   }
 
   if (params.keepAspect)
@@ -1246,6 +1249,9 @@ inline static void localCurToGuest(struct DoublePoint *guest)
         * g_cursor.scale.y;
       guest->y = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
       break;
+
+    default:
+      assert(!"unreachable");
   }
 }
 
