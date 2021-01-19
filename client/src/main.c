@@ -1275,6 +1275,8 @@ void app_handleMouseNormal(double ex, double ey)
       g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 
     setCursorInView(inView);
+    if (inView)
+      g_cursor.realign = true;
   }
 
   /* nothing to do if we are outside the viewport */
