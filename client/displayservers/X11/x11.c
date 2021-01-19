@@ -343,6 +343,16 @@ static bool x11EventFilter(SDL_Event * event)
             return true;
 
           XIRawEvent *raw = cookie->data;
+
+          /* filter out duplicate events */
+          static Time         prev_time   = 0;
+          static unsigned int prev_detail = 0;
+          if (raw->time == prev_time && raw->detail == prev_detail)
+            return true;
+
+          prev_time   = raw->time;
+          prev_detail = raw->detail;
+
           app_handleButtonPress(
               raw->detail > 5 ? raw->detail - 2 : raw->detail);
           return true;
@@ -354,6 +364,16 @@ static bool x11EventFilter(SDL_Event * event)
             return true;
 
           XIRawEvent *raw = cookie->data;
+
+          /* filter out duplicate events */
+          static Time         prev_time   = 0;
+          static unsigned int prev_detail = 0;
+          if (raw->time == prev_time && raw->detail == prev_detail)
+            return true;
+
+          prev_time   = raw->time;
+          prev_detail = raw->detail;
+
           app_handleButtonRelease(
               raw->detail > 5 ? raw->detail - 2 : raw->detail);
           return true;
