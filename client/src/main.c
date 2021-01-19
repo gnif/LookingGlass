@@ -2010,8 +2010,6 @@ static int lg_run(void)
   register_key_binds();
 
   initSDLCursor();
-  if (params.hideMouse)
-    SDL_ShowCursor(SDL_DISABLE);
 
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
