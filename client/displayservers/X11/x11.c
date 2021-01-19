@@ -359,6 +359,16 @@ static bool x11EventFilter(SDL_Event * event)
           return true;
         }
 
+        case XI_Motion:
+        {
+          if (!x11.focused || !x11.entered)
+            return true;
+
+          XIDeviceEvent *device = cookie->data;
+          app_updateCursorPos(device->event_x, device->event_y);
+          return true;
+        }
+
         case XI_RawMotion:
         {
           if (!x11.focused || !x11.entered)
