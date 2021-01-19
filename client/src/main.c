@@ -394,7 +394,7 @@ static int cursorThread(void * unused)
           g_state.lgr->on_mouse_event
           (
             g_state.lgrData,
-            g_cursor.guest.visible && g_cursor.draw,
+            g_cursor.guest.visible && (g_cursor.draw || !params.useSpiceInput),
             g_cursor.guest.x,
             g_cursor.guest.y
           );
@@ -484,7 +484,7 @@ static int cursorThread(void * unused)
     g_state.lgr->on_mouse_event
     (
       g_state.lgrData,
-      g_cursor.guest.visible && g_cursor.draw,
+      g_cursor.guest.visible && (g_cursor.draw || !params.useSpiceInput),
       g_cursor.guest.x,
       g_cursor.guest.y
     );
@@ -1743,26 +1743,30 @@ static void register_key_binds(void)
   g_state.kbFS           = app_register_keybind(KEY_F     , toggle_fullscreen, NULL);
   g_state.kbVideo        = app_register_keybind(KEY_V     , toggle_video     , NULL);
   g_state.kbRotate       = app_register_keybind(KEY_R     , toggle_rotate    , NULL);
-  g_state.kbInput        = app_register_keybind(KEY_I     , toggle_input     , NULL);
   g_state.kbQuit         = app_register_keybind(KEY_Q     , quit             , NULL);
-  g_state.kbMouseSensInc = app_register_keybind(KEY_INSERT, mouse_sens_inc   , NULL);
-  g_state.kbMouseSensDec = app_register_keybind(KEY_DELETE, mouse_sens_dec   , NULL);
 
-  g_state.kbCtrlAltFn[0 ] = app_register_keybind(KEY_F1 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[1 ] = app_register_keybind(KEY_F2 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[2 ] = app_register_keybind(KEY_F3 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[3 ] = app_register_keybind(KEY_F4 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[4 ] = app_register_keybind(KEY_F5 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[5 ] = app_register_keybind(KEY_F6 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[6 ] = app_register_keybind(KEY_F7 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[7 ] = app_register_keybind(KEY_F8 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[8 ] = app_register_keybind(KEY_F9 , ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[9 ] = app_register_keybind(KEY_F10, ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[10] = app_register_keybind(KEY_F11, ctrl_alt_fn, NULL);
-  g_state.kbCtrlAltFn[11] = app_register_keybind(KEY_F12, ctrl_alt_fn, NULL);
+  if (params.useSpiceInput)
+  {
+    g_state.kbInput        = app_register_keybind(KEY_I     , toggle_input     , NULL);
+    g_state.kbMouseSensInc = app_register_keybind(KEY_INSERT, mouse_sens_inc   , NULL);
+    g_state.kbMouseSensDec = app_register_keybind(KEY_DELETE, mouse_sens_dec   , NULL);
 
-  g_state.kbPass[0] = app_register_keybind(KEY_LEFTMETA , key_passthrough, NULL);
-  g_state.kbPass[1] = app_register_keybind(KEY_RIGHTMETA, key_passthrough, NULL);
+    g_state.kbCtrlAltFn[0 ] = app_register_keybind(KEY_F1 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[1 ] = app_register_keybind(KEY_F2 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[2 ] = app_register_keybind(KEY_F3 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[3 ] = app_register_keybind(KEY_F4 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[4 ] = app_register_keybind(KEY_F5 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[5 ] = app_register_keybind(KEY_F6 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[6 ] = app_register_keybind(KEY_F7 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[7 ] = app_register_keybind(KEY_F8 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[8 ] = app_register_keybind(KEY_F9 , ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[9 ] = app_register_keybind(KEY_F10, ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[10] = app_register_keybind(KEY_F11, ctrl_alt_fn, NULL);
+    g_state.kbCtrlAltFn[11] = app_register_keybind(KEY_F12, ctrl_alt_fn, NULL);
+
+    g_state.kbPass[0] = app_register_keybind(KEY_LEFTMETA , key_passthrough, NULL);
+    g_state.kbPass[1] = app_register_keybind(KEY_RIGHTMETA, key_passthrough, NULL);
+  }
 }
 
 static void release_key_binds(void)
