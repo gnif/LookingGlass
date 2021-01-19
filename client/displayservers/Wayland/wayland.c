@@ -56,6 +56,7 @@ struct WaylandDSState
   struct zwp_keyboard_shortcuts_inhibit_manager_v1 * keyboardInhibitManager;
   struct zwp_keyboard_shortcuts_inhibitor_v1 * keyboardInhibitor;
   uint32_t keyboardEnterSerial;
+  uint32_t keyPressCount[KEY_MAX];
 
   struct wl_pointer * pointer;
   struct zwp_relative_pointer_manager_v1 * relativePointerManager;
@@ -237,7 +238,8 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
 
   uint32_t * key;
   wl_array_for_each(key, keys)
-    app_handleKeyPress(*key);
+    if (!wm.keyPressCount[*key]++)
+      app_handleKeyPress(*key);
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
@@ -250,9 +252,22 @@ static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
-    app_handleKeyPress(key);
+  {
+    // This handler may be associated with multiple keyboard instances, if the
+    // user has multiple keyboards plugged in. Only send events for the first
+    // key press per key, and a release once all are released.
+    if (!wm.keyPressCount[key]++)
+      app_handleKeyPress(key);
+  }
   else
-    app_handleKeyRelease(key);
+  {
+    // Would underflow if this is 0, but a compositor should never put us in
+    // this state.
+    assert(wm.keyPressCount[key]);
+
+    if (!--wm.keyPressCount[key])
+      app_handleKeyRelease(key);
+  }
 }
 
 static void keyboardModifiersHandler(void * data,
