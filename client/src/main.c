@@ -148,6 +148,9 @@ void app_handleFocusEvent(bool focused)
       g_state.ds->ungrabKeyboard();
   }
 
+  if (!focused)
+    setCursorInView(false);
+
   g_state.focused  = focused;
   g_cursor.realign = true;
   g_state.ds->realignPointer();
