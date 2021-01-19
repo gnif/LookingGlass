@@ -1676,6 +1676,8 @@ static void toggle_input(uint32_t scancode, void * opaque)
 
   if (g_state.ignoreInput)
     setCursorInView(false);
+  else
+    g_state.ds->realignPointer();
 
   app_alert(
     LG_ALERT_INFO,
