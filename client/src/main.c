@@ -904,7 +904,7 @@ void spiceClipboardRequest(const SpiceDataType type)
 
 static bool warpPointer(int x, int y, bool exiting)
 {
-  if (!g_cursor.inWindow)
+  if (!g_cursor.inWindow && !exiting)
     return false;
 
   if (g_cursor.warpState == WARP_STATE_OFF)
