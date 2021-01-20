@@ -62,6 +62,7 @@ Below are a list of current key bindings:
 | <kbd>ScrLk</kbd>+<kbd>V</kbd>      | Video stream toggle |
 | <kbd>ScrLk</kbd>+<kbd>I</kbd>      | Spice keyboard & mouse enable toggle |
 | <kbd>ScrLk</kbd>+<kbd>N</kbd>      | Toggle night vision mode (EGL renderer only!) |
+| <kbd>ScrLk</kbd>+<kbd>R</kbd>      | Rotate the output clockwise by 90 degree increments |
 | <kbd>ScrLk</kbd>+<kbd>Q</kbd>      | Quit |
 | <kbd>ScrLk</kbd>+<kbd>Insert</kbd> | Increase mouse sensitivity (in capture mode only) |
 | <kbd>ScrLk</kbd>+<kbd>Del</kbd>    | Decrease mouse sensitivity (in capture mode only) |
@@ -141,6 +142,7 @@ Command line arguments will override any options loaded from the config files.
 | win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting                                |
 | win:alerts              | -q    | yes                    | Show on screen alert messages                                        |
 | win:quickSplash         |       | no                     | Skip fading out the splash screen when a connection is established   |
+| win:rotate              |       | 0                      | Rotate the displayed image (0, 90, 180, 270)                         |
 |---------------------------------------------------------------------------------------------------------------------------------|
 
 |----------------------------------------------------------------------------------------------------------------------------------------------|
