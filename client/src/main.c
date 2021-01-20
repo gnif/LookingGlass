@@ -1987,7 +1987,7 @@ static int lg_run(void)
   if (!params.center)
     SDL_SetWindowPosition(g_state.window, params.x, params.y);
 
-  if (!params.noScreensaver)
+  if (params.noScreensaver)
     g_state.ds->inhibitIdle();
 
   // ensure the initial window size is stored in the state
