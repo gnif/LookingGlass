@@ -137,6 +137,7 @@ void app_updateCursorPos(double x, double y)
 
 void app_handleFocusEvent(bool focused)
 {
+  g_state.focused = focused;
   if (!app_inputEnabled())
     return;
 
@@ -151,7 +152,6 @@ void app_handleFocusEvent(bool focused)
   if (!focused)
     setCursorInView(false);
 
-  g_state.focused  = focused;
   g_cursor.realign = true;
   g_state.ds->realignPointer();
 }
@@ -1560,7 +1560,7 @@ static void setGrabQuiet(bool enable)
         g_state.ds->ungrabKeyboard();
     }
 
-    if (!warpSupport)
+    if (!warpSupport || params.captureInputOnly)
       g_state.ds->ungrabPointer();
 
     // if exiting capture when input on capture only, we want to show the cursor
