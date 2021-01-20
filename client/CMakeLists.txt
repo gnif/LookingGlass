@@ -31,7 +31,7 @@ option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
 
 option(ENABLE_X11 "Build with X11 support" ON)
-add_feature_info(ENABLE_WAYLAND ENABLE_X11 "X11 support.")
+add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
 
 option(ENABLE_WAYLAND "Build with Wayland support" ON)
 add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
