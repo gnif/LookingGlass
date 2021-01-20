@@ -5,6 +5,7 @@ find_package(PkgConfig)
 pkg_check_modules(DISPLAYSERVER_X11_PKGCONFIG REQUIRED
 	x11
 	xfixes
+	xscrnsaver
 )
 
 pkg_check_modules(DISPLAYSERVER_X11_OPT_PKGCONFIG

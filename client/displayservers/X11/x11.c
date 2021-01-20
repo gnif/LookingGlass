@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 
 #include <X11/extensions/XInput2.h>
+#include <X11/extensions/scrnsaver.h>
 #include <X11/extensions/Xfixes.h>
 
 #include "app.h"
@@ -669,6 +670,16 @@ static void x11WarpPointer(int x, int y, bool exiting)
   XSync(x11.display, False);
 }
 
+static void x11InhibitIdle(void)
+{
+  XScreenSaverSuspend(x11.display, true);
+}
+
+static void x11UninhibitIdle(void)
+{
+  XScreenSaverSuspend(x11.display, false);
+}
+
 static bool x11CBInit()
 {
   x11.aSelection    = XInternAtom(x11.display, "CLIPBOARD"  , False);
@@ -1011,9 +1022,8 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabKeyboard = x11UngrabKeyboard,
   .warpPointer    = x11WarpPointer,
 
-  /* Use SDL implementation for now */
-  .inhibitIdle    = NULL,
-  .uninhibitIdle  = NULL,
+  .inhibitIdle   = x11InhibitIdle,
+  .uninhibitIdle = x11UninhibitIdle,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,
