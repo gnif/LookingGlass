@@ -58,8 +58,6 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
   uint_least32_t rp        = 0;
   size_t         y         = 0;
   const size_t   linewidth = width * bpp;
-  const size_t   blocks    = linewidth / 64;
-  const size_t   left      = linewidth % 64;
 
   while(y < height)
   {
@@ -77,8 +75,21 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
       wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
     }
 
+    /* copy any unaligned bytes */
+    const uint8_t * src = frame->data + rp;
+    const size_t unaligned = (uintptr_t)src & 0xF;
+    if (unaligned)
+    {
+      memcpy(d, src, unaligned);
+      src += unaligned;
+      d   += unaligned;
+    }
+
+    const size_t blocks = (linewidth - unaligned) / 64;
+    const size_t left   = (linewidth - unaligned) % 64;
+
     _mm_mfence();
-    __m128i * restrict s = (__m128i *)(frame->data + rp);
+    __m128i * restrict s = (__m128i *)src;
     for(int i = 0; i < blocks; ++i)
     {
       __m128i *_d = (__m128i *)d;
