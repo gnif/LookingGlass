@@ -1000,7 +1000,7 @@ static void setCursorInView(bool enable)
     if (params.hideMouse)
       SDL_ShowCursor(SDL_DISABLE);
 
-    if (warpSupport)
+    if (warpSupport && !params.captureInputOnly)
       g_state.ds->grabPointer();
   }
   else
