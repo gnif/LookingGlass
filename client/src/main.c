@@ -268,7 +268,7 @@ static void updatePositionInfo(void)
   if (!g_state.posInfoValid)
   {
     g_state.posInfoValid = true;
-    alignToGuest();
+    g_state.ds->realignPointer();
   }
 
 done:
@@ -1535,7 +1535,7 @@ static void setGrabQuiet(bool enable)
   g_cursor.acc.x = 0.0;
   g_cursor.acc.y = 0.0;
 
-  /* if the display server does not support warp we need to grab the pointer
+  /* if the display server does not support warp we need to ungrab the pointer
    * here instead of in the move handler */
   bool warpSupport = true;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
@@ -1548,9 +1548,7 @@ static void setGrabQuiet(bool enable)
     if (params.grabKeyboard)
       g_state.ds->grabKeyboard();
 
-    if (!warpSupport)
-      g_state.ds->grabPointer();
-
+    g_state.ds->grabPointer();
   }
   else
   {
