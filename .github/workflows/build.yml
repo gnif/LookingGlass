@@ -10,11 +10,17 @@ jobs:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
+    - name: Update apt
+      run: |
+        sudo apt-get update
     - name: Install client dependencies
       run: |
         sudo apt-get install \
-          binutils-dev libdrm-dev libsdl2-dev libsdl2-ttf-dev \
-          libspice-protocol-dev nettle-dev wayland-protocols
+          binutils-dev \
+          libsdl2-dev libsdl2-ttf-dev \
+          libspice-protocol-dev nettle-dev \
+          libx11-dev libxss-dev libxi-dev \
+          wayland-protocols
     - name: Configure client
       run: |
         mkdir client/build
@@ -42,6 +48,9 @@ jobs:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
+    - name: Update apt
+      run: |
+        sudo apt-get update
     - name: Install Linux host dependencies
       run: |
         sudo apt-get install binutils-dev libgl1-mesa-dev
@@ -61,6 +70,9 @@ jobs:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
+    - name: Update apt
+      run: |
+        sudo apt-get update
     - name: Install Windows host cross-compile dependencies
       run: |
         sudo apt-get install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nsis
@@ -107,6 +119,9 @@ jobs:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
+    - name: Update apt
+      run: |
+        sudo apt-get update
     - name: Install obs plugin dependencies
       run: |
         sudo apt-get install binutils-dev libobs-dev libgl1-mesa-dev
