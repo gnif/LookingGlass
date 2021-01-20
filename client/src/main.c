@@ -1438,11 +1438,8 @@ void app_handleMouseBasic()
   struct DoublePoint local;
   guestCurToLocal(&local);
 
-  double lx = (px - local.x) / g_cursor.dpiScale;
-  double ly = (py - local.y) / g_cursor.dpiScale;
-
-  int x, y;
-  cursorToInt(lx, ly, &x, &y);
+  int x = (int) round((px - local.x) / g_cursor.dpiScale);
+  int y = (int) round((py - local.y) / g_cursor.dpiScale);
 
   g_cursor.guest.x += x;
   g_cursor.guest.y += y;
