@@ -21,6 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "common/windebug.h"
 #include "windows/mousehook.h"
+#include "windows/force_compose.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/event.h"
@@ -191,6 +192,8 @@ static bool nvfbc_init(void)
   if (this->seperateCursor)
     this->cursorEvents[1] = lgWrapEvent(event);
 
+  dwmForceComposition();
+
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
   Sleep(100);
@@ -221,6 +224,7 @@ static void nvfbc_stop(void)
 static bool nvfbc_deinit(void)
 {
   mouseHook_remove();
+  dwmUnforceComposition();
 
   if (this->cursorEvents[0])
   {
