@@ -242,7 +242,7 @@ static struct Option options[] =
   {
     .module         = "win",
     .name           = "rotate",
-    .description    = "Rotate the displayed image",
+    .description    = "Rotate the displayed image (0, 90, 180, 270)",
     .type           = OPTION_TYPE_INT,
     .validator      = optRotateValidate,
     .value.x_int    = 0,
