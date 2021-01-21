@@ -652,7 +652,7 @@ fail_timer:
 fail_lgmp:
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     lgmpHostMemFree(&app.frameMemory[i]);
-  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
     lgmpHostMemFree(&app.pointerMemory[i]);
   lgmpHostMemFree(&app.pointerShape);
   lgmpHostFree(&app.lgmp);
