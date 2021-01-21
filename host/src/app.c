@@ -599,7 +599,8 @@ int app_main(int argc, char * argv[])
         if (!captureRestart())
         {
           exitcode = LG_HOST_EXIT_FAILED;
-          goto finish;
+          stopThreads();
+          goto fail_capture;
         }
         app.state = APP_STATE_RUNNING;
       }
@@ -626,19 +627,17 @@ int app_main(int argc, char * argv[])
         case CAPTURE_RESULT_ERROR:
           DEBUG_ERROR("Capture interface reported a fatal error");
           exitcode = LG_HOST_EXIT_FAILED;
-          goto finish;
+          goto fail_capture;
       }
     }
 
     if (app.state != APP_STATE_SHUTDOWN)
       DEBUG_INFO("No subscribers, going to sleep...");
+
     captureStop();
   }
 
   exitcode = app.exitcode;
-
-finish:
-  stopThreads();
 
 fail_capture:
   lgTimerDestroy(app.lgmpTimer);
