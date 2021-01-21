@@ -230,13 +230,11 @@ static const struct wl_registry_listener registryListener = {
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, wl_fixed_t sxW, wl_fixed_t syW)
 {
-  if (wm.relativePointer)
-    return;
-
   int sx = wl_fixed_to_int(sxW);
   int sy = wl_fixed_to_int(syW);
   app_updateCursorPos(sx, sy);
-  app_handleMouseBasic();
+  if (!wm.relativePointer)
+    app_handleMouseBasic();
 }
 
 static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
@@ -253,8 +251,10 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
 
   int sx = wl_fixed_to_int(sxW);
   int sy = wl_fixed_to_int(syW);
+  app_resyncMouseBasic();
   app_updateCursorPos(sx, sy);
-  app_handleMouseBasic();
+  if (!wm.relativePointer)
+    app_handleMouseBasic();
 }
 
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
@@ -810,6 +810,9 @@ static void waylandUngrabPointer(void)
     zwp_confined_pointer_v1_destroy(wm.confinedPointer);
     wm.confinedPointer = NULL;
   }
+
+  app_resyncMouseBasic();
+  app_handleMouseBasic();
 }
 
 static void waylandGrabKeyboard(void)
@@ -837,7 +840,7 @@ static void waylandWarpPointer(int x, int y, bool exiting)
 
 static void waylandRealignPointer(void)
 {
-  app_handleMouseBasic();
+  app_resyncMouseBasic();
 }
 
 static bool waylandIsValidPointerPos(int x, int y)

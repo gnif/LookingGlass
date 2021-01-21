@@ -461,6 +461,12 @@ void app_handleMouseNormal(double ex, double ey)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
+static inline double clamp(double x, double min, double max)
+{
+  if (x < min) return min;
+  if (x > max) return max;
+  return x;
+}
 
 // On some display servers normal cursor logic does not work due to the lack of
 // cursor warp support. Instead, we attempt a best-effort emulation which works
@@ -469,7 +475,7 @@ void app_handleMouseNormal(double ex, double ey)
 void app_handleMouseBasic()
 {
   /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_state.focused)
+  if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused)
     return;
 
   if (!app_inputEnabled())
@@ -483,34 +489,26 @@ void app_handleMouseBasic()
 
   core_setCursorInView(inView);
 
-  if (g_cursor.guest.dpiScale == 0)
-    return;
+  /* translate the current position to guest coordinate space */
+  struct DoublePoint guest;
+  util_localCurToGuest(&guest);
 
-  double px = g_cursor.pos.x;
-  double py = g_cursor.pos.y;
+  int x = (int) round(clamp(guest.x, 0, g_state.srcSize.x) - g_cursor.projected.x);
+  int y = (int) round(clamp(guest.y, 0, g_state.srcSize.y) - g_cursor.projected.y);
 
-  if (px < g_state.dstRect.x)
-    px = g_state.dstRect.x;
-  else if (px > g_state.dstRect.x + g_state.dstRect.w)
-    px = g_state.dstRect.x + g_state.dstRect.w;
-
-  if (py < g_state.dstRect.y)
-    py = g_state.dstRect.y;
-  else if (py > g_state.dstRect.y + g_state.dstRect.h)
-    py = g_state.dstRect.y + g_state.dstRect.h;
-
-  /* translate the guests position to our coordinate space */
-  struct DoublePoint local;
-  util_guestCurToLocal(&local);
-
-  int x = (int) round((px - local.x) / g_cursor.dpiScale);
-  int y = (int) round((py - local.y) / g_cursor.dpiScale);
-
-  g_cursor.guest.x += x;
-  g_cursor.guest.y += y;
+  g_cursor.projected.x += x;
+  g_cursor.projected.y += y;
 
   if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
+}
+
+void app_resyncMouseBasic()
+{
+  if (!g_cursor.guest.valid)
+    return;
+  g_cursor.projected.x = g_cursor.guest.x + g_cursor.guest.hx;
+  g_cursor.projected.y = g_cursor.guest.y + g_cursor.guest.hy;
 }
 
 void app_updateWindowPos(int x, int y)
