@@ -1561,7 +1561,8 @@ static void setGrabQuiet(bool enable)
   {
     if (params.grabKeyboard)
     {
-      if (!g_state.focused || !params.grabKeyboardOnFocus)
+      if (!g_state.focused || !params.grabKeyboardOnFocus ||
+          params.captureInputOnly)
         g_state.ds->ungrabKeyboard();
     }
 
