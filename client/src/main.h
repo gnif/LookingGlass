@@ -234,6 +234,9 @@ struct CursorState
 
   /* the guest's cursor position */
   struct CursorInfo guest;
+
+  /* the projected position after move, for app_handleMouseBasic only */
+  struct Point projected;
 };
 
 // forwards
