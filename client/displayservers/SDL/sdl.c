@@ -36,9 +36,6 @@ static struct SDLDSState sdl;
 
 static bool sdlEarlyInit(void)
 {
-  // Allow screensavers for now: we will enable and disable as needed.
-  SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
-
   return true;
 }
 
