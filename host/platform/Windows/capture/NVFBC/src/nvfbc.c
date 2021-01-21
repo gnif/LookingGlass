@@ -77,7 +77,6 @@ static void getDesktopSize(unsigned int * width, unsigned int * height, unsigned
 
   GetMonitorInfo(monitor, &monitorInfo);
   *dpi = monitor_dpi(monitor);
-  CloseHandle(monitor);
 
   *width  = monitorInfo.rcMonitor.right  - monitorInfo.rcMonitor.left;
   *height = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
