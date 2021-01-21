@@ -1851,9 +1851,6 @@ static int lg_run(void)
     return -1;
   }
 
-  // Allow screensavers for now: we will enable and disable as needed.
-  SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
-
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
     DEBUG_ERROR("SDL_Init Failed");
