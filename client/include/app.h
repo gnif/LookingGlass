@@ -46,6 +46,7 @@ void app_handleResizeEvent(int w, int h, const struct Border border);
 void app_handleMouseGrabbed(double ex, double ey);
 void app_handleMouseNormal(double ex, double ey);
 void app_handleMouseBasic(void);
+void app_resyncMouseBasic(void);
 void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
 void app_handleKeyPress(int scancode);

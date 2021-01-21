@@ -297,7 +297,10 @@ static int cursorThread(void * unused)
 
       // if the state just became valid
       if (valid != true && app_inputEnabled())
+      {
         core_alignToGuest();
+        app_resyncMouseBasic();
+      }
     }
 
     lgmpClientMessageDone(queue);
