@@ -182,7 +182,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   GetModuleFileName(NULL, app.executable, sizeof(app.executable));
   if (HandleService(app.argc, app.argv))
-    return 0;
+    return LG_HOST_EXIT_FAILED;
 
   /* this is a bit of a hack but without this --help will produce no output in a windows command prompt */
   if (!IsDebuggerPresent() && AttachConsole(ATTACH_PARENT_PROCESS))
@@ -252,7 +252,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   if (!(class = RegisterClassEx(&wx)))
   {
     DEBUG_ERROR("Failed to register message window class");
-    result = -1;
+    result = LG_HOST_EXIT_FAILED;
     goto finish;
   }
 
@@ -278,7 +278,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   if (!lgCreateThread("appThread", appThread, NULL, &thread))
   {
     DEBUG_ERROR("Failed to create the main application thread");
-    result = -1;
+    result = LG_HOST_EXIT_FAILED;
     goto finish;
   }
 
@@ -295,7 +295,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     else if (bRet < 0)
     {
       DEBUG_ERROR("Unknown error from GetMessage");
-      result = -1;
+      result = LG_HOST_EXIT_FAILED;
       goto shutdown;
     }
 
