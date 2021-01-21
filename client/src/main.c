@@ -995,7 +995,8 @@ static void setCursorInView(bool enable)
     return;
 
   g_cursor.inView = enable;
-  g_cursor.draw   = params.alwaysShowCursor ? true : enable;
+  g_cursor.draw   = (params.alwaysShowCursor || params.captureInputOnly)
+    ? true : enable;
   g_cursor.redraw = true;
 
   /* if the display server does not support warp, then we can not operate in
