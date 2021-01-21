@@ -672,7 +672,7 @@ static int frameThread(void * unused)
       updatePositionInfo();
     }
 
-    if (useDMA)
+    if (g_state.formatValid && useDMA)
     {
       /* find the existing dma buffer if it exists */
       for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
