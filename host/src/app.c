@@ -663,8 +663,13 @@ fail_ivshmem:
   return exitcode;
 }
 
+void app_shutdown(void)
+{
+  app.state = APP_STATE_SHUTDOWN;
+}
+
 void app_quit(void)
 {
   app.exitcode = LG_HOST_EXIT_USER;
-  app.state = APP_STATE_SHUTDOWN;
+  app_shutdown();
 }

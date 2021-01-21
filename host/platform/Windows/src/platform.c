@@ -304,11 +304,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 shutdown:
   DestroyMenu(app.trayMenu);
-  app_quit();
+  app_shutdown();
   if (!lgJoinThread(thread, &result))
   {
     DEBUG_ERROR("Failed to join the main application thread");
-    result = -1;
+    result = LG_HOST_EXIT_FAILED;
   }
 
 finish:
