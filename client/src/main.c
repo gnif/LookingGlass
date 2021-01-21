@@ -527,7 +527,7 @@ static int frameThread(void * unused)
   PLGMPClientQueue queue;
 
   uint32_t          formatVer = 0;
-  size_t            dataSize;
+  size_t            dataSize  = 0;
   LG_RendererFormat lgrFormat;
 
   struct DMAFrameInfo dmaInfo[LGMP_Q_FRAME_LEN] = {0};
@@ -672,7 +672,7 @@ static int frameThread(void * unused)
       updatePositionInfo();
     }
 
-    if (g_state.formatValid && useDMA)
+    if (useDMA)
     {
       /* find the existing dma buffer if it exists */
       for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
