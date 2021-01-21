@@ -1993,6 +1993,10 @@ static int lg_run(void)
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
 
+  // if spice is not in use, hide the local cursor
+  if (!app_inputEnabled() && params.hideMouse)
+    SDL_ShowCursor(SDL_DISABLE);
+
   if (params.fpsMin <= 0)
   {
     // default 30 fps
