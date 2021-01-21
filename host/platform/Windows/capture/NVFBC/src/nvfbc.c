@@ -210,8 +210,18 @@ static bool nvfbc_init(void)
 static void nvfbc_stop(void)
 {
   this->stop = true;
-  lgSignalEvent(this->cursorEvents[0]);
-  lgSignalEvent(this->frameEvent);
+
+  if (this->cursorEvents[0])
+  {
+    lgSignalEvent(this->cursorEvents[0]);
+    this->cursorEvents[0] = NULL;
+  }
+
+  if (this->frameEvent)
+  {
+    lgSignalEvent(this->frameEvent);
+    this->frameEvent = NULL;
+  }
 
   if (this->pointerThread)
   {
