@@ -80,6 +80,7 @@ struct AppState
   PLGMPClientQueue     frameQueue;
   PLGMPClientQueue     pointerQueue;
 
+  bool                  formatValid;
   atomic_uint_least64_t frameTime;
   uint64_t              lastFrameTime;
   uint64_t              renderTime;

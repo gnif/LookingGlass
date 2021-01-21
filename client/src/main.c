@@ -48,6 +48,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/time.h"
 #include "common/version.h"
 
+#include "app.h"
 #include "utils.h"
 #include "kb.h"
 #include "ll.h"
@@ -87,7 +88,11 @@ static void setCursorInView(bool enable);
 static void lgInit(void)
 {
   g_state.state         = APP_STATE_RUNNING;
+  g_state.formatValid   = false;
   g_state.resizeDone    = true;
+
+  if (g_cursor.grab)
+    setGrab(false);
 
   g_cursor.useScale      = false;
   g_cursor.scale.x       = 1.0;
@@ -95,6 +100,12 @@ static void lgInit(void)
   g_cursor.draw          = false;
   g_cursor.inView        = false;
   g_cursor.guest.valid   = false;
+
+  // if spice is not in use, hide the local cursor
+  if (!app_inputEnabled() && params.hideMouse)
+    SDL_ShowCursor(SDL_DISABLE);
+  else
+    SDL_ShowCursor(SDL_ENABLE);
 }
 
 bool app_getProp(LG_DSProperty prop, void * ret)
@@ -516,7 +527,6 @@ static int frameThread(void * unused)
   PLGMPClientQueue queue;
 
   uint32_t          formatVer = 0;
-  bool              formatValid = false;
   size_t            dataSize;
   LG_RendererFormat lgrFormat;
 
@@ -590,7 +600,7 @@ static int frameThread(void * unused)
     KVMFRFrame * frame       = (KVMFRFrame *)msg.mem;
     struct DMAFrameInfo *dma = NULL;
 
-    if (!formatValid || frame->formatVer != formatVer)
+    if (!g_state.formatValid || frame->formatVer != formatVer)
     {
       // setup the renderer format with the frame format details
       lgrFormat.type   = frame->type;
@@ -636,8 +646,8 @@ static int frameThread(void * unused)
         break;
       }
 
-      formatValid = true;
-      formatVer   = frame->formatVer;
+      g_state.formatValid = true;
+      formatVer = frame->formatVer;
 
       DEBUG_INFO("Format: %s %ux%u stride:%u pitch:%u rotation:%d",
           FrameTypeStr[frame->type],
@@ -1555,7 +1565,7 @@ static void setGrabQuiet(bool enable)
         g_state.ds->ungrabKeyboard();
     }
 
-    if (!warpSupport || params.captureInputOnly)
+    if (!warpSupport || params.captureInputOnly || !g_state.formatValid)
       g_state.ds->ungrabPointer();
 
     // if exiting capture when input on capture only, we want to show the cursor
@@ -1798,12 +1808,9 @@ static int lg_run(void)
 {
   memset(&g_state, 0, sizeof(g_state));
 
-  lgInit();
-
   g_cursor.sens = params.mouseSens;
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
-
 
   // try to early detect the platform
   SDL_SYSWM_TYPE subsystem = SDL_SYSWM_UNKNOWN;
@@ -1993,10 +2000,6 @@ static int lg_run(void)
   // ensure renderer viewport is aware of the current window size
   updatePositionInfo();
 
-  // if spice is not in use, hide the local cursor
-  if (!app_inputEnabled() && params.hideMouse)
-    SDL_ShowCursor(SDL_DISABLE);
-
   if (params.fpsMin <= 0)
   {
     // default 30 fps
@@ -2070,6 +2073,8 @@ static int lg_run(void)
   uint32_t udataSize;
   KVMFR *udata;
   int waitCount = 0;
+
+  lgInit();
 
 restart:
   while(g_state.state == APP_STATE_RUNNING)
