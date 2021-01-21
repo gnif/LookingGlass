@@ -146,7 +146,6 @@ static int appThread(void * opaque)
   int result = app_main(app.argc, app.argv);
 
   Shell_NotifyIcon(NIM_DELETE, &app.iconData);
-  mouseHook_remove();
   SendMessage(app.messageWnd, WM_DESTROY, 0, 0);
   return result;
 }

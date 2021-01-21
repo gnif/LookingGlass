@@ -146,6 +146,7 @@ void mouseHook_remove(void)
 {
   if (!mouseHook.event)
     return;
+
   SetEvent(mouseHook.event);
   WaitForSingleObject(mouseHook.thread, INFINITE);
   CloseHandle(mouseHook.thread);

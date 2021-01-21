@@ -275,14 +275,12 @@ static bool captureStart(void)
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
 
   DEBUG_INFO("==== [ Capture  Start ] ====");
-  return startThreads();
+  return true;
 }
 
 static bool captureStop(void)
 {
   DEBUG_INFO("==== [ Capture Stop ] ====");
-  if (!stopThreads())
-    return false;
 
   if (!app.iface->deinit())
   {
@@ -291,11 +289,6 @@ static bool captureStop(void)
   }
 
   return true;
-}
-
-static bool captureRestart(void)
-{
-  return captureStop() && captureStart();
 }
 
 bool captureGetPointerBuffer(void ** data, uint32_t * size)
@@ -570,6 +563,10 @@ int app_main(int argc, char * argv[])
   if (!lgCreateTimer(100, lgmpTimer, NULL, &app.lgmpTimer))
   {
     DEBUG_ERROR("Failed to create the LGMP timer");
+
+    iface->deinit();
+    iface->free();
+
     goto fail_timer;
   }
 
@@ -582,6 +579,12 @@ int app_main(int argc, char * argv[])
       {
         exitcode = LG_HOST_EXIT_FAILED;
         goto fail_capture;
+      }
+
+      if (!startThreads())
+      {
+        exitcode = LG_HOST_EXIT_FAILED;
+        goto fail_threads;
       }
     }
     else
@@ -596,12 +599,30 @@ int app_main(int argc, char * argv[])
     {
       if (app.state == APP_STATE_RESTART)
       {
-        if (!captureRestart())
+        if (!stopThreads())
         {
           exitcode = LG_HOST_EXIT_FAILED;
-          stopThreads();
+          goto fail_threads;
+        }
+
+        if (!captureStop())
+        {
+          exitcode = LG_HOST_EXIT_FAILED;
           goto fail_capture;
         }
+
+        if (!captureStart())
+        {
+          exitcode = LG_HOST_EXIT_FAILED;
+          goto fail_capture;
+        }
+
+        if (!startThreads())
+        {
+          exitcode = LG_HOST_EXIT_FAILED;
+          goto fail_threads;
+        }
+
         app.state = APP_STATE_RUNNING;
       }
 
@@ -632,21 +653,38 @@ int app_main(int argc, char * argv[])
     }
 
     if (app.state != APP_STATE_SHUTDOWN)
+    {
       DEBUG_INFO("No subscribers, going to sleep...");
 
-    captureStop();
+      if (!stopThreads())
+      {
+        exitcode = LG_HOST_EXIT_FAILED;
+        goto fail_threads;
+      }
+
+      if (!captureStop())
+      {
+        exitcode = LG_HOST_EXIT_FAILED;
+        goto fail_capture;
+      }
+
+      continue;
+    }
+
+    break;
   }
 
   exitcode = app.exitcode;
+  stopThreads();
+
+fail_threads:
+  captureStop();
 
 fail_capture:
   lgTimerDestroy(app.lgmpTimer);
 
 fail_timer:
   LG_LOCK_FREE(app.pointerLock);
-
-  iface->deinit();
-  iface->free();
 
 fail_lgmp:
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
