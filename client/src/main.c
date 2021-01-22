@@ -464,6 +464,12 @@ static int cursorThread(void * unused)
           continue;
       }
 
+      if (!(msg.udata & CURSOR_FLAG_POSITION))
+      {
+        g_cursor.guest.x += g_cursor.guest.hx - cursor->hx;
+        g_cursor.guest.y += g_cursor.guest.hy - cursor->hy;
+      }
+
       g_cursor.guest.hx = cursor->hx;
       g_cursor.guest.hy = cursor->hy;
 
