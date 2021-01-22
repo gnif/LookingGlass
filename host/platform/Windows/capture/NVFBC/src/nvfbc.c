@@ -60,7 +60,7 @@ struct iface
   LGEvent * cursorEvents[2];
 
   int mouseX, mouseY, mouseHotX, mouseHotY;
-  bool mouseVisible;
+  bool mouseVisible, hasMousePosition;
 };
 
 static struct iface * this = NULL;
@@ -84,8 +84,9 @@ static void getDesktopSize(unsigned int * width, unsigned int * height, unsigned
 
 static void on_mouseMove(int x, int y)
 {
-  this->mouseX = x;
-  this->mouseY = y;
+  this->hasMousePosition = true;
+  this->mouseX           = x;
+  this->mouseY           = y;
   lgSignalEvent(this->cursorEvents[0]);
 }
 
@@ -362,6 +363,7 @@ static int pointerThread(void * unused)
 
     CaptureResult  result;
     CapturePointer pointer = { 0 };
+    bool           hotspotUpdated = false;
 
     if (this->seperateCursor && events[1])
     {
@@ -383,9 +385,10 @@ static int pointerThread(void * unused)
       this->mouseVisible = pointer.visible;
       this->mouseHotX    = pointer.hx;
       this->mouseHotY    = pointer.hy;
+      hotspotUpdated     = true;
     }
 
-    if (events[0])
+    if (events[0] || (hotspotUpdated && this->hasMousePosition))
     {
       pointer.positionUpdate = true;
       pointer.visible        = this->mouseVisible;
