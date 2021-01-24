@@ -654,30 +654,30 @@ void option_print(void)
       if (i == 0)
       {
         // print a horizontal rule
-        printf("  |");
+        printf("  ┌");
         for(int i = 0; i < maxLen + 2; ++i)
-          putc('-', stdout);
-        printf("|\n");
+          fputs("─", stdout);
+        printf("┐\n");
       }
 
       char * line = stringlist_at(lines, i);
-      printf("  | %-*s |\n", maxLen, line);
+      printf("  │ %-*s │\n", maxLen, line);
 
       if (i == 0)
       {
         // print a horizontal rule
-        printf("  |");
+        printf("  ├");
         for(int i = 0; i < maxLen + 2; ++i)
-          putc('-', stdout);
-        printf("|\n");
+          fputs("─", stdout);
+        printf("┤\n");
       }
     }
 
     // print a horizontal rule
-    printf("  |");
+    printf("  └");
     for(int i = 0; i < maxLen + 2; ++i)
-      putc('-', stdout);
-    printf("|\n");
+      fputs("─", stdout);
+    printf("┘\n");
 
     stringlist_free(&lines);
 
