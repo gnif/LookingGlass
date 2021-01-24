@@ -118,6 +118,7 @@ static void setupLogging(void)
   char * logFilePath = malloc(len + 1);
   sprintf(logFilePath, "%slooking-glass-host-service.txt", tempPath);
   service.logFile = fopen(logFilePath, "a+");
+  setbuf(service.logFile, NULL);
   doLog("Startup\n");
 }
 
