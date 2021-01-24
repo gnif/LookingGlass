@@ -154,7 +154,11 @@ void egl_splash_free(EGL_Splash ** splash)
   if (!*splash)
     return;
 
+  egl_model_free(&(*splash)->bg  );
   egl_model_free(&(*splash)->logo);
+
+  egl_shader_free(&(*splash)->bgShader  );
+  egl_shader_free(&(*splash)->logoShader);
 
   free(*splash);
   *splash = NULL;

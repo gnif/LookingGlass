@@ -242,6 +242,16 @@ void egl_deinitialize(void * opaque)
 
   LG_LOCK_FREE(this->lock);
 
+  eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+
+  if (this->frameContext)
+    eglDestroyContext(this->display, this->frameContext);
+
+  if (this->context)
+    eglDestroyContext(this->display, this->context);
+
+  eglTerminate(this->display);
+
   free(this);
 }
 

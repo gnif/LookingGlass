@@ -36,19 +36,21 @@ struct Inst
 
 static bool lgf_sdl_create(LG_FontObj * opaque, const char * font_name, unsigned int size)
 {
-  if (g_initCount++ == 0)
+  bool ret = false;
+
+  if (g_initCount == 0)
   {
     if (TTF_Init() < 0)
     {
       DEBUG_ERROR("TTF_Init Failed");
-      return false;
+      goto fail;
     }
 
     g_fontConfig = FcInitLoadConfigAndFonts();
     if (!g_fontConfig)
     {
       DEBUG_ERROR("FcInitLoadConfigAndFonts Failed");
-      return false;
+      goto fail_init;
     }
   }
 
@@ -56,50 +58,95 @@ static bool lgf_sdl_create(LG_FontObj * opaque, const char * font_name, unsigned
   if (!*opaque)
   {
     DEBUG_INFO("Failed to allocate %lu bytes", sizeof(struct Inst));
-    return false;
+    goto fail_config;
   }
-  memset(*opaque, 0, sizeof(struct Inst));
 
+  memset(*opaque, 0, sizeof(struct Inst));
   struct Inst * this = (struct Inst *)*opaque;
 
- if (!font_name)
+  if (!font_name)
     font_name = "FreeMono";
 
   FcPattern * pat = FcNameParse((const FcChar8*)font_name);
-  FcConfigSubstitute (g_fontConfig, pat, FcMatchPattern);
+  if (!pat)
+  {
+    DEBUG_ERROR("FCNameParse failed");
+    goto fail_opaque;
+  }
+
+  FcConfigSubstitute(g_fontConfig, pat, FcMatchPattern);
   FcDefaultSubstitute(pat);
   FcResult result;
   FcChar8 * file = NULL;
-  FcPattern * font = FcFontMatch(g_fontConfig, pat, &result);
+  FcPattern * match = FcFontMatch(g_fontConfig, pat, &result);
 
-  if (font && (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch))
+  if (!match)
+  {
+    DEBUG_ERROR("FcFontMatch Failed");
+    goto fail_parse;
+  }
+
+  if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch)
   {
     this->font = TTF_OpenFont((char *)file, size);
     if (!this->font)
     {
       DEBUG_ERROR("TTL_OpenFont Failed");
-      return false;
+      goto fail_match;
     }
   }
   else
   {
     DEBUG_ERROR("Failed to locate the requested font: %s", font_name);
-    return false;
+    goto fail_match;
   }
+
+  ++g_initCount;
+  ret = true;
+
+fail_match:
+  FcPatternDestroy(match);
+
+fail_parse:
   FcPatternDestroy(pat);
 
-  return true;
+  if (ret)
+    return true;
+
+fail_opaque:
+  free(this);
+  *opaque = NULL;
+
+fail_config:
+  if (g_initCount == 0)
+  {
+    FcConfigDestroy(g_fontConfig);
+    g_fontConfig = NULL;
+  }
+
+fail_init:
+  if (g_initCount == 0)
+    TTF_Quit();
+
+fail:
+  return false;
 }
 
 static void lgf_sdl_destroy(LG_FontObj opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
+
   if (this->font)
     TTF_CloseFont(this->font);
   free(this);
 
   if (--g_initCount == 0)
+  {
+    FcConfigDestroy(g_fontConfig);
+    g_fontConfig = NULL;
+
     TTF_Quit();
+  }
 }
 
 static LG_FontBitmap * lgf_sdl_render(LG_FontObj opaque, unsigned int fg_color, const char * text)

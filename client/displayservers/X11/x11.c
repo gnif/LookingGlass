@@ -261,6 +261,7 @@ static bool x11GetProp(LG_DSProperty prop, void *ret)
       maxSamples = samples;
   }
 
+  XFree(visuals);
   XCloseDisplay(dpy);
 
   *(int*)ret = maxSamples;

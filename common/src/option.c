@@ -223,6 +223,12 @@ void option_free(void)
   state.options = NULL;
   state.oCount  = 0;
 
+  for(int g = 0; g < state.gCount; ++g)
+  {
+    struct OptionGroup * group = &state.groups[g];
+    if (group->options)
+      free(group->options);
+  }
   free(state.groups);
   state.groups  = NULL;
   state.gCount  = 0;
