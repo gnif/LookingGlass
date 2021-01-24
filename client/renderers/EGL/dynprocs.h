@@ -29,4 +29,4 @@ struct EGLDynProcs
 
 extern struct EGLDynProcs g_dynprocs;
 
-void egl_DynProcsInit(void);
+void egl_dynProcsInit(void);

@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct EGLDynProcs g_dynprocs = {0};
 
-void egl_DynProcsInit(void)
+void egl_dynProcsInit(void)
 {
   g_dynprocs.glEGLImageTargetTexture2DOES = (glEGLImageTargetTexture2DOES_t)
     eglGetProcAddress("glEGLImageTargetTexture2DOES");

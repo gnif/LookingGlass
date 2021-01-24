@@ -630,7 +630,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   const char *client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
   const char *vendor      = (const char *)glGetString(GL_VENDOR);
 
-  egl_DynProcsInit();
+  egl_dynProcsInit();
 
   DEBUG_INFO("EGL       : %d.%d", maj, min);
   DEBUG_INFO("Vendor    : %s", vendor);
