@@ -1609,14 +1609,23 @@ int eventFilter(void * userdata, SDL_Event * event)
   return 0;
 }
 
-void int_handler(int signal)
+void int_handler(int sig)
 {
-  switch(signal)
+  switch(sig)
   {
     case SIGINT:
     case SIGTERM:
-      DEBUG_INFO("Caught signal, shutting down...");
-      g_state.state = APP_STATE_SHUTDOWN;
+      if (g_state.state != APP_STATE_SHUTDOWN)
+      {
+        DEBUG_INFO("Caught signal, shutting down...");
+        g_state.state = APP_STATE_SHUTDOWN;
+      }
+      else
+      {
+        DEBUG_INFO("Caught second signal, force quitting...");
+        signal(sig, SIG_DFL);
+        raise(sig);
+      }
       break;
   }
 }
