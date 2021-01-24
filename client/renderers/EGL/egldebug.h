@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,11 +17,13 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
 
-#include <common/debug.h>
+#include "common/debug.h"
 
-#define EGL_DEBUG_PRINT(type, fmt, ...) do {egl_debug_printf(type " %20s:%-4u | %-30s | " fmt, STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);} while (0)
-#define EGL_ERROR(fmt, ...) EGL_DEBUG_PRINT("[E]", fmt, ##__VA_ARGS__)
+const char * egl_getErrorStr(void);
 
-void egl_debug_printf(char * format, ...);
+#define DEBUG_EGL_WARN(fmt, ...) \
+  DEBUG_WARN(fmt " (%s)", ##__VA_ARGS__, egl_getErrorStr())
+
+#define DEBUG_EGL_ERROR(fmt, ...) \
+  DEBUG_ERROR(fmt " (%s)", ##__VA_ARGS__, egl_getErrorStr())

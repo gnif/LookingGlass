@@ -651,9 +651,9 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
        *
        * ref: https://forums.developer.nvidia.com/t/egl-ext-image-dma-buf-import-broken-egl-bad-alloc-with-tons-of-free-ram/165552
        */
-      if (strstr(vendor, "NVIDIA") != NULL)
-        DEBUG_WARN("NVIDIA driver detected, ignoring broken DMA support");
-      else
+//      if (strstr(vendor, "NVIDIA") != NULL)
+//        DEBUG_WARN("NVIDIA driver detected, ignoring broken DMA support");
+  //    else
         this->dmaSupport = true;
     }
   }

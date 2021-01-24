@@ -20,9 +20,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "texture.h"
 #include "common/debug.h"
 #include "common/framebuffer.h"
-#include "debug.h"
 #include "dynprocs.h"
 #include "utils.h"
+#include "egldebug.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -142,7 +142,8 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
 
   if (!texture->buf[i].map)
   {
-    EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i, texture->pboBufferSize);
+    DEBUG_EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i,
+        texture->pboBufferSize);
     return false;
   }
 
@@ -387,7 +388,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
 
   if (image == EGL_NO_IMAGE)
   {
-    DEBUG_ERROR("failed to create ELGImage for DMA transfer");
+    DEBUG_EGL_ERROR("Failed to create ELGImage for DMA transfer");
     return false;
   }
 
@@ -481,7 +482,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
         case GL_INVALID_VALUE:
           glDeleteSync(texture->buf[b].sync);
           texture->buf[b].sync = 0;
-          EGL_ERROR("glClientWaitSync failed");
+          DEBUG_EGL_ERROR("glClientWaitSync failed");
           return EGL_TEX_STATUS_ERROR;
       }
     }
