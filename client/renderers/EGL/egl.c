@@ -37,6 +37,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <assert.h>
 
 #include "app.h"
+#include "dynprocs.h"
 #include "model.h"
 #include "shader.h"
 #include "desktop.h"
@@ -629,6 +630,8 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   const char *client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
   const char *vendor      = (const char *)glGetString(GL_VENDOR);
 
+  egl_DynProcsInit();
+
   DEBUG_INFO("EGL       : %d.%d", maj, min);
   DEBUG_INFO("Vendor    : %s", vendor);
   DEBUG_INFO("Renderer  : %s", glGetString(GL_RENDERER));
@@ -636,20 +639,27 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   DEBUG_INFO("EGL APIs  : %s", eglQueryString(this->display, EGL_CLIENT_APIS));
   DEBUG_INFO("Extensions: %s", client_exts);
 
-  if (strstr(client_exts, "EGL_EXT_image_dma_buf_import") != NULL)
+  if (g_dynprocs.glEGLImageTargetTexture2DOES)
   {
-    /*
-     * As of version 455.45.01 NVidia started advertising support for this
-     * feature, however even on the latest version 460.27.04 this is still
-     * broken and does not work, until this is fixed and we have way to detect
-     * this early just disable dma for all NVIDIA devices.
-     *
-     * ref: https://forums.developer.nvidia.com/t/egl-ext-image-dma-buf-import-broken-egl-bad-alloc-with-tons-of-free-ram/165552
-     */
-    if (strstr(vendor, "NVIDIA") != NULL)
-      DEBUG_WARN("NVIDIA driver detected, ignoring broken DMA support");
-    else
-      this->dmaSupport = true;
+    if (strstr(client_exts, "EGL_EXT_image_dma_buf_import") != NULL)
+    {
+      /*
+       * As of version 455.45.01 NVidia started advertising support for this
+       * feature, however even on the latest version 460.27.04 this is still
+       * broken and does not work, until this is fixed and we have way to detect
+       * this early just disable dma for all NVIDIA devices.
+       *
+       * ref: https://forums.developer.nvidia.com/t/egl-ext-image-dma-buf-import-broken-egl-bad-alloc-with-tons-of-free-ram/165552
+       */
+      if (strstr(vendor, "NVIDIA") != NULL)
+        DEBUG_WARN("NVIDIA driver detected, ignoring broken DMA support");
+      else
+        this->dmaSupport = true;
+    }
+  }
+  else
+  {
+    DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
   }
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
