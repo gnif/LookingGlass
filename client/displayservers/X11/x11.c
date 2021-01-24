@@ -337,12 +337,14 @@ static bool x11EventFilter(SDL_Event * event)
             return true;
 
           XIFocusOutEvent *xie = cookie->data;
-          if (xie->mode != NotifyNormal && xie->mode != XINotifyWhileGrabbed)
+          if (xie->mode != XINotifyNormal &&
+              xie->mode != XINotifyWhileGrabbed &&
+              xie->mode != XINotifyUngrab)
             return true;
 
+          x11.focused = true;
           app_updateCursorPos(xie->event_x, xie->event_y);
           app_handleFocusEvent(true);
-          x11.focused = true;
           return true;
         }
 
@@ -352,7 +354,9 @@ static bool x11EventFilter(SDL_Event * event)
             return true;
 
           XIFocusOutEvent *xie = cookie->data;
-          if (xie->mode != NotifyNormal && xie->mode != XINotifyWhileGrabbed)
+          if (xie->mode != XINotifyNormal &&
+              xie->mode != XINotifyWhileGrabbed &&
+              xie->mode != XINotifyGrab)
             return true;
 
           app_updateCursorPos(xie->event_x, xie->event_y);
@@ -471,6 +475,9 @@ static bool x11EventFilter(SDL_Event * event)
         {
           XIDeviceEvent *device = cookie->data;
           app_updateCursorPos(device->event_x, device->event_y);
+
+          if (!x11.pointerGrabbed)
+            app_handleMouseNormal(0.0, 0.0);
           return true;
         }
 
@@ -614,9 +621,9 @@ static void x11GrabPointer(void)
       x11.window,
       CurrentTime,
       None,
-      GrabModeAsync,
-      GrabModeAsync,
-      false,
+      XIGrabModeAsync,
+      XIGrabModeAsync,
+      XINoOwnerEvents,
       &mask);
 
   if (ret != Success)
@@ -624,8 +631,6 @@ static void x11GrabPointer(void)
     x11PrintGrabError("pointer", x11.pointerDev, ret);
     return;
   }
-
-  XSync(x11.display, False);
 
   x11.pointerGrabbed = true;
 }
@@ -662,9 +667,9 @@ static void x11GrabKeyboard(void)
       x11.window,
       CurrentTime,
       None,
-      GrabModeAsync,
-      GrabModeAsync,
-      false,
+      XIGrabModeAsync,
+      XIGrabModeAsync,
+      XINoOwnerEvents,
       &mask);
 
   if (ret != Success)
@@ -672,8 +677,6 @@ static void x11GrabKeyboard(void)
     x11PrintGrabError("keyboard", x11.keyboardDev, ret);
     return;
   }
-
-  XSync(x11.display, False);
 
   x11.keyboardGrabbed = true;
 }
