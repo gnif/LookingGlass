@@ -572,6 +572,25 @@ static bool x11EventFilter(SDL_Event * event)
   }
 }
 
+static void x11PrintGrabError(const char * type, int dev, Status ret)
+{
+  const char * errStr;
+  switch(ret)
+  {
+    case AlreadyGrabbed : errStr = "AlreadyGrabbed" ; break;
+    case GrabNotViewable: errStr = "GrabNotViewable"; break;
+    case GrabFrozen     : errStr = "GrabFrozen"     ; break;
+    case GrabInvalidTime: errStr = "GrabInvalidTime"; break;
+    default:
+      errStr = "Unknown";
+      break;
+  }
+
+  DEBUG_ERROR("XIGrabDevice failed for %s dev %d with 0x%x (%s)",
+      type, dev, ret, errStr);
+
+}
+
 static void x11GrabPointer(void)
 {
   if (x11.pointerGrabbed)
@@ -589,7 +608,7 @@ static void x11GrabPointer(void)
   XISetMask(mask.mask, XI_RawMotion       );
   XISetMask(mask.mask, XI_Motion          );
 
-  XIGrabDevice(
+  Status ret = XIGrabDevice(
       x11.display,
       x11.pointerDev,
       x11.window,
@@ -599,6 +618,12 @@ static void x11GrabPointer(void)
       GrabModeAsync,
       false,
       &mask);
+
+  if (ret != Success)
+  {
+    x11PrintGrabError("pointer", x11.pointerDev, ret);
+    return;
+  }
 
   XSync(x11.display, False);
 
@@ -631,7 +656,7 @@ static void x11GrabKeyboard(void)
   XISetMask(mask.mask, XI_RawKeyPress  );
   XISetMask(mask.mask, XI_RawKeyRelease);
 
-  XIGrabDevice(
+  Status ret = XIGrabDevice(
       x11.display,
       x11.keyboardDev,
       x11.window,
@@ -641,6 +666,12 @@ static void x11GrabKeyboard(void)
       GrabModeAsync,
       false,
       &mask);
+
+  if (ret != Success)
+  {
+    x11PrintGrabError("keyboard", x11.keyboardDev, ret);
+    return;
+  }
 
   XSync(x11.display, False);
 
