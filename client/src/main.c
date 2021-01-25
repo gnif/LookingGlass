@@ -1231,6 +1231,7 @@ static void lg_shutdown(void)
 
   ivshmemClose(&g_state.shm);
 
+  // this must run last to ensure that we don't free any pointers still in use
   app_releaseAllKeybinds();
 
   SDL_Quit();
