@@ -17,17 +17,21 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
-#include "interface/decoder.h"
+#ifndef _H_LG_UTIL_
+#define _H_LG_UTIL_
 
-extern const LG_Decoder LGD_NULL;
-extern const LG_Decoder LGD_YUV420;
+#include <stdlib.h>
+#include <stdbool.h>
+#include "common/types.h"
 
-const LG_Decoder * LG_Decoders[] =
-{
-  &LGD_NULL,
-  &LGD_YUV420,
-  NULL // end of array sentinal
-};
+// reads the specified file into a new buffer
+// the callee must free the buffer
+bool util_fileGetContents(const char * filename, char ** buffer, size_t * length);
 
-#define LG_DECODER_COUNT ((sizeof(LG_Decoders) / sizeof(LG_Decoder *)) - 1)
+void util_cursorToInt(double ex, double ey, int *x, int *y);
+bool util_guestCurToLocal(struct DoublePoint *local);
+void util_localCurToGuest(struct DoublePoint *guest);
+void util_rotatePoint(struct DoublePoint *point);
+bool util_isValidCursorLocation(int x, int y);
+
+#endif

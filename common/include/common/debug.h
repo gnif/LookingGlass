@@ -17,6 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _H_LG_COMMON_DEBUG_
+#define _H_LG_COMMON_DEBUG_
+
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
@@ -81,4 +84,6 @@ void printBacktrace(void);
   #define DEBUG_PROTO(fmt, args...) DEBUG_PRINT("[P]", fmt, ##args)
 #else
   #define DEBUG_PROTO(fmt, ...) do {} while(0)
+#endif
+
 #endif

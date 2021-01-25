@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,11 +17,13 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
+#include "spice/spice.h"
+#include "interface/displayserver.h"
 
-#include <stdlib.h>
-#include <stdbool.h>
+LG_ClipboardData cb_spiceTypeToLGType(const SpiceDataType type);
+SpiceDataType cb_lgTypeToSpiceType(const LG_ClipboardData type);
 
-// reads the specified file into a new buffer
-// the callee must free the buffer
-bool file_get_contents(const char * filename, char ** buffer, size_t * length);
+void cb_spiceNotice(const SpiceDataType type);
+void cb_spiceData(const SpiceDataType type, uint8_t * buffer, uint32_t size);
+void cb_spiceRelease(void);
+void cb_spiceRequest(const SpiceDataType type);

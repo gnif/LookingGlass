@@ -21,7 +21,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/framebuffer.h"
 #include "dynprocs.h"
-#include "utils.h"
 #include "egldebug.h"
 
 #include <stdlib.h>

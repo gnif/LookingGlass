@@ -1,6 +1,6 @@
 /*
 KVMGFX Client - A KVM Client for VGA Passthrough
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,7 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
+#ifndef _H_LG_COMMON_FRAMEBUFFER_
+#define _H_LG_COMMON_FRAMEBUFFER_
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -58,3 +59,5 @@ void framebuffer_prepare(FrameBuffer * frame);
  * Write data from the src buffer into the KVMFRFrame
  */
 bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size);
+
+#endif
