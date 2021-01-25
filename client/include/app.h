@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,10 +17,24 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _H_LG_APP_
+#define _H_LG_APP_
+
 #include <stdbool.h>
+#include <linux/input.h>
 
 #include "common/types.h"
 #include "interface/displayserver.h"
+
+typedef enum LG_MsgAlert
+{
+  LG_ALERT_INFO   ,
+  LG_ALERT_SUCCESS,
+  LG_ALERT_WARNING,
+  LG_ALERT_ERROR
+}
+LG_MsgAlert;
+
 
 SDL_Window * app_getWindow(void);
 
@@ -47,3 +61,37 @@ void app_clipboardRelease(void);
 void app_clipboardNotify(const LG_ClipboardData type, size_t size);
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size);
 void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque);
+
+typedef struct KeybindHandle * KeybindHandle;
+typedef void (*SuperEventFn)(uint32_t sc, void * opaque);
+
+/**
+ * Show an alert on screen
+ * @param type The alert type
+ * param  fmt  The alert message format
+ @ param  ...  formatted message values
+ */
+void app_alert(LG_MsgAlert type, const char * fmt, ...);
+
+/**
+ * Register a handler for the <super>+<key> combination
+ * @param sc       The scancode to register
+ * @param callback The function to be called when the combination is pressed
+ * @param opaque   A pointer to be passed to the callback, may be NULL
+ * @retval A handle for the binding or NULL on failure.
+ *         The caller is required to release the handle via `app_releaseKeybind` when it is no longer required
+ */
+KeybindHandle app_registerKeybind(uint32_t sc, SuperEventFn callback, void * opaque);
+
+/**
+ * Release an existing key binding
+ * @param handle A pointer to the keybind handle to release, may be NULL
+ */
+void app_releaseKeybind(KeybindHandle * handle);
+
+/**
+ * Release all keybindings
+ */
+void app_releaseAllKeybinds(void);
+
+#endif
