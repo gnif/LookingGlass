@@ -154,9 +154,9 @@ struct CBRequest
 
 struct KeybindHandle
 {
-  int            sc;
-  SuperEventFn   callback;
-  void         * opaque;
+  int       sc;
+  KeybindFn callback;
+  void    * opaque;
 };
 
 enum WarpState
