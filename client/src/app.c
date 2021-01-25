@@ -55,7 +55,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   free(buffer);
 }
 
-KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void * opaque)
+KeybindHandle app_registerKeybind(SDL_Scancode key, SuperEventFn callback, void * opaque)
 {
   // don't allow duplicate binds
   if (g_state.bindings[key])
@@ -73,7 +73,7 @@ KeybindHandle app_register_keybind(SDL_Scancode key, SuperEventFn callback, void
   return handle;
 }
 
-void app_release_keybind(KeybindHandle * handle)
+void app_releaseKeybind(KeybindHandle * handle)
 {
   if (!*handle)
     return;
@@ -81,6 +81,16 @@ void app_release_keybind(KeybindHandle * handle)
   g_state.bindings[(*handle)->key] = NULL;
   free(*handle);
   *handle = NULL;
+}
+
+void app_releaseAllKeybinds(void)
+{
+  for(int i = 0; i < KEY_MAX; ++i)
+    if (g_state.bindings[i])
+    {
+      free(g_state.bindings[i]);
+      g_state.bindings[i] = NULL;
+    }
 }
 
 bool app_getProp(LG_DSProperty prop, void * ret)
