@@ -25,6 +25,16 @@ struct DoublePoint
   double x, y;
 };
 
+struct Rect
+{
+  int x, y, w, h;
+};
+
+struct Border
+{
+  int left, top, right, bottom;
+};
+
 typedef enum FrameType
 {
   FRAME_TYPE_INVALID   ,
