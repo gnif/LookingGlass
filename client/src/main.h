@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
 
+#include "common/thread.h"
 #include "common/types.h"
 #include "common/ivshmem.h"
 
@@ -81,6 +82,7 @@ struct AppState
   PLGMPClientQueue     frameQueue;
   PLGMPClientQueue     pointerQueue;
 
+  LGThread            * frameThread;
   bool                  formatValid;
   atomic_uint_least64_t frameTime;
   uint64_t              lastFrameTime;
@@ -241,3 +243,5 @@ struct CursorState
 extern struct AppState    g_state;
 extern struct CursorState g_cursor;
 extern struct AppParams   g_params;
+
+int main_frameThread(void * unused);
