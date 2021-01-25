@@ -463,8 +463,8 @@ void app_handleMouseNormal(double ex, double ey)
       const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
 
       if (core_isValidPointerPos(
-            g_state.windowPos.x + g_state.border.x + tx,
-            g_state.windowPos.y + g_state.border.y + ty))
+            g_state.windowPos.x + g_state.border.left + tx,
+            g_state.windowPos.y + g_state.border.top  + ty))
       {
         core_setCursorInView(false);
 
@@ -572,14 +572,9 @@ void app_updateWindowPos(int x, int y)
   g_state.windowPos.y = y;
 }
 
-void app_handleResizeEvent(int w, int h)
+void app_handleResizeEvent(int w, int h, const struct Border border)
 {
-  SDL_GetWindowBordersSize(g_state.window,
-    &g_state.border.y,
-    &g_state.border.x,
-    &g_state.border.h,
-    &g_state.border.w
-  );
+  memcpy(&g_state.border, &border, sizeof(border));
 
   /* don't do anything else if the window dimensions have not changed */
   if (g_state.windowW == w && g_state.windowH == h)
