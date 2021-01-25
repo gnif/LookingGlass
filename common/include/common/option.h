@@ -17,6 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _H_COMMON_OPTION_
+#define _H_COMMON_OPTION_
+
 #include <stdbool.h>
 #include "common/stringlist.h"
 
@@ -53,7 +56,7 @@ struct Option
   char       * (*toString )(struct Option * opt);
   StringList   (*getValues)(struct Option * opt);
 
-  void    (*printHelp)();
+  void    (*printHelp)(void);
 
   // internal use only
   bool failed_set;
@@ -75,10 +78,12 @@ bool option_parse(int argc, char * argv[]);
 bool option_load(const char * filename);
 
 // called by the main application to validate the option values
-bool option_validate();
+bool option_validate(void);
 
 // print out the options, help, and their current values
-void option_print();
+void option_print(void);
 
 // final cleanup
-void option_free();
+void option_free(void);
+
+#endif

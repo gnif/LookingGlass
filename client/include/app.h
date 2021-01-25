@@ -21,7 +21,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/displayserver.h"
 
-
 SDL_Window * app_getWindow(void);
 
 bool app_getProp(LG_DSProperty prop, void * ret);
@@ -39,8 +38,7 @@ void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
 void app_handleKeyPress(int scancode);
 void app_handleKeyRelease(int scancode);
-void app_handleWindowEnter(void);
-void app_handleWindowLeave(void);
+void app_handleEnterEvent(bool entered);
 void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
 
