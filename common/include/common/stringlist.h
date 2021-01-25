@@ -17,6 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _H_LG_COMMON_STRINGLIST_
+#define _H_LG_COMMON_STRINGLIST_
+
 #include <stdbool.h>
 
 typedef struct StringList * StringList;
@@ -26,3 +29,5 @@ void         stringlist_free (StringList * sl);
 int          stringlist_push (StringList sl, char * str);
 unsigned int stringlist_count(StringList sl);
 char *       stringlist_at   (StringList sl, unsigned int index);
+
+#endif

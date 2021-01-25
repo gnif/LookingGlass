@@ -48,12 +48,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/time.h"
 #include "common/version.h"
 
+#include "core.h"
 #include "app.h"
-#include "utils.h"
-#include "kb.h"
+#include "util.h"
+#include "clipboard.h"
 #include "ll.h"
-
-#define RESIZE_TIMEOUT (10 * 1000) // 10ms
+#include "kb.h"
 
 // forwards
 static int cursorThread(void * unused);
@@ -68,22 +68,11 @@ static LGThread *t_cursor  = NULL;
 static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
-static Uint32 e_SDLEvent; // our SDL event
-
-enum
-{
-  LG_EVENT_ALIGN_TO_GUEST
-};
-
 struct AppState g_state;
 struct CursorState g_cursor;
 
 // this structure is initialized in config.c
-struct AppParams params = { 0 };
-
-static void setGrab(bool enable);
-static void setGrabQuiet(bool enable);
-static void setCursorInView(bool enable);
+struct AppParams g_params = { 0 };
 
 static void lgInit(void)
 {
@@ -92,7 +81,7 @@ static void lgInit(void)
   g_state.resizeDone    = true;
 
   if (g_cursor.grab)
-    setGrab(false);
+    core_setGrab(false);
 
   g_cursor.useScale      = false;
   g_cursor.scale.x       = 1.0;
@@ -102,183 +91,10 @@ static void lgInit(void)
   g_cursor.guest.valid   = false;
 
   // if spice is not in use, hide the local cursor
-  if (!app_inputEnabled() && params.hideMouse)
+  if (!app_inputEnabled() && g_params.hideMouse)
     SDL_ShowCursor(SDL_DISABLE);
   else
     SDL_ShowCursor(SDL_ENABLE);
-}
-
-bool app_getProp(LG_DSProperty prop, void * ret)
-{
-  return g_state.ds->getProp(prop, ret);
-}
-
-SDL_Window * app_getWindow(void)
-{
-  return g_state.window;
-}
-
-bool app_inputEnabled(void)
-{
-  return params.useSpiceInput && !g_state.ignoreInput &&
-    ((g_cursor.grab && params.captureInputOnly) || !params.captureInputOnly);
-}
-
-bool app_cursorInWindow(void)
-{
-  return g_cursor.inWindow;
-}
-
-bool app_cursorIsGrabbed(void)
-{
-  return g_cursor.grab;
-}
-
-bool app_cursorWantsRaw(void)
-{
-  return params.rawMouse;
-}
-
-void app_updateCursorPos(double x, double y)
-{
-  g_cursor.pos.x = x;
-  g_cursor.pos.y = y;
-  g_cursor.valid = true;
-}
-
-void app_handleFocusEvent(bool focused)
-{
-  g_state.focused = focused;
-  if (!app_inputEnabled())
-    return;
-
-  if (!focused)
-  {
-    setGrabQuiet(false);
-    setCursorInView(false);
-  }
-
-  g_cursor.realign = true;
-  g_state.ds->realignPointer();
-}
-
-void app_handleCloseEvent(void)
-{
-  if (!params.ignoreQuit || !g_cursor.inView)
-    g_state.state = APP_STATE_SHUTDOWN;
-}
-
-static void alignToGuest(void)
-{
-  if (SDL_HasEvent(e_SDLEvent))
-    return;
-
-  SDL_Event event;
-  SDL_memset(&event, 0, sizeof(event));
-  event.type      = e_SDLEvent;
-  event.user.code = LG_EVENT_ALIGN_TO_GUEST;
-
-  SDL_PushEvent(&event);
-}
-
-static void updatePositionInfo(void)
-{
-  if (!g_state.haveSrcSize)
-    goto done;
-
-  float srcW;
-  float srcH;
-  switch(params.winRotate)
-  {
-    case LG_ROTATE_0:
-    case LG_ROTATE_180:
-      srcW = g_state.srcSize.x;
-      srcH = g_state.srcSize.y;
-      break;
-
-    case LG_ROTATE_90:
-    case LG_ROTATE_270:
-      srcW = g_state.srcSize.y;
-      srcH = g_state.srcSize.x;
-      break;
-
-    default:
-      assert(!"unreachable");
-  }
-
-  if (params.keepAspect)
-  {
-    const float srcAspect = srcH / srcW;
-    const float wndAspect = (float)g_state.windowH / (float)g_state.windowW;
-    bool force = true;
-
-    if (params.dontUpscale &&
-        srcW <= g_state.windowW &&
-        srcH <= g_state.windowH)
-    {
-      force = false;
-      g_state.dstRect.w = srcW;
-      g_state.dstRect.h = srcH;
-      g_state.dstRect.x = g_state.windowCX - srcW / 2;
-      g_state.dstRect.y = g_state.windowCY - srcH / 2;
-    }
-    else
-    if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
-    {
-      force           = false;
-      g_state.dstRect.w = g_state.windowW;
-      g_state.dstRect.h = g_state.windowH;
-      g_state.dstRect.x = 0;
-      g_state.dstRect.y = 0;
-    }
-    else
-    if (wndAspect < srcAspect)
-    {
-      g_state.dstRect.w = (float)g_state.windowH / srcAspect;
-      g_state.dstRect.h = g_state.windowH;
-      g_state.dstRect.x = (g_state.windowW >> 1) - (g_state.dstRect.w >> 1);
-      g_state.dstRect.y = 0;
-    }
-    else
-    {
-      g_state.dstRect.w = g_state.windowW;
-      g_state.dstRect.h = (float)g_state.windowW * srcAspect;
-      g_state.dstRect.x = 0;
-      g_state.dstRect.y = (g_state.windowH >> 1) - (g_state.dstRect.h >> 1);
-    }
-
-    if (force && params.forceAspect)
-    {
-      g_state.resizeTimeout = microtime() + RESIZE_TIMEOUT;
-      g_state.resizeDone    = false;
-    }
-  }
-  else
-  {
-    g_state.dstRect.x = 0;
-    g_state.dstRect.y = 0;
-    g_state.dstRect.w = g_state.windowW;
-    g_state.dstRect.h = g_state.windowH;
-  }
-  g_state.dstRect.valid = true;
-
-  g_cursor.useScale = (
-      srcH       != g_state.dstRect.h ||
-      srcW       != g_state.dstRect.w ||
-      g_cursor.guest.dpiScale != 100);
-
-  g_cursor.scale.x  = (float)srcW / (float)g_state.dstRect.w;
-  g_cursor.scale.y  = (float)srcH / (float)g_state.dstRect.h;
-  g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
-
-  if (!g_state.posInfoValid)
-  {
-    g_state.posInfoValid = true;
-    g_state.ds->realignPointer();
-  }
-
-done:
-  atomic_fetch_add(&g_state.lgrResize, 1);
 }
 
 static int renderThread(void * unused)
@@ -300,7 +116,7 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
-    if (params.fpsMin != 0)
+    if (g_params.fpsMin != 0)
     {
       lgWaitEventAbs(e_frame, &time);
       clock_gettime(CLOCK_MONOTONIC, &time);
@@ -312,14 +128,14 @@ static int renderThread(void * unused)
     {
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
-            g_state.dstRect, params.winRotate);
+            g_state.dstRect, g_params.winRotate);
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    if (!g_state.lgr->render(g_state.lgrData, g_state.window, params.winRotate))
+    if (!g_state.lgr->render(g_state.lgrData, g_state.window, g_params.winRotate))
       break;
 
-    if (params.showFPS)
+    if (g_params.showFPS)
     {
       const uint64_t t    = nanotime();
       g_state.renderTime   += t - g_state.lastFrameTime;
@@ -406,7 +222,7 @@ static int cursorThread(void * unused)
           g_state.lgr->on_mouse_event
           (
             g_state.lgrData,
-            g_cursor.guest.visible && (g_cursor.draw || !params.useSpiceInput),
+            g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
             g_cursor.guest.x,
             g_cursor.guest.y
           );
@@ -417,7 +233,7 @@ static int cursorThread(void * unused)
         const struct timespec req =
         {
           .tv_sec  = 0,
-          .tv_nsec = params.cursorPollInterval * 1000L
+          .tv_nsec = g_params.cursorPollInterval * 1000L
         };
 
         struct timespec rem;
@@ -487,7 +303,7 @@ static int cursorThread(void * unused)
 
       // if the state just became valid
       if (valid != true && app_inputEnabled())
-        alignToGuest();
+        core_alignToGuest();
     }
 
     lgmpClientMessageDone(queue);
@@ -496,12 +312,12 @@ static int cursorThread(void * unused)
     g_state.lgr->on_mouse_event
     (
       g_state.lgrData,
-      g_cursor.guest.visible && (g_cursor.draw || !params.useSpiceInput),
+      g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
       g_cursor.guest.x,
       g_cursor.guest.y
     );
 
-    if (params.mouseRedraw && g_cursor.guest.visible)
+    if (g_params.mouseRedraw && g_cursor.guest.visible)
       lgSignalEvent(e_frame);
   }
 
@@ -527,7 +343,7 @@ static int frameThread(void * unused)
 
   struct DMAFrameInfo dmaInfo[LGMP_Q_FRAME_LEN] = {0};
   const bool useDMA =
-    params.allowDMA &&
+    g_params.allowDMA &&
     ivshmemHasDMA(&g_state.shm) &&
     g_state.lgr->supports &&
     g_state.lgr->supports(g_state.lgrData, LG_SUPPORTS_DMABUF);
@@ -568,7 +384,7 @@ static int frameThread(void * unused)
         const struct timespec req =
         {
           .tv_sec  = 0,
-          .tv_nsec = params.framePollInterval * 1000L
+          .tv_nsec = g_params.framePollInterval * 1000L
         };
 
         struct timespec rem;
@@ -660,11 +476,11 @@ static int frameThread(void * unused)
       g_state.srcSize.x = lgrFormat.width;
       g_state.srcSize.y = lgrFormat.height;
       g_state.haveSrcSize = true;
-      if (params.autoResize)
+      if (g_params.autoResize)
         SDL_SetWindowSize(g_state.window, lgrFormat.width, lgrFormat.height);
 
       g_cursor.guest.dpiScale = frame->mouseScalePercent;
-      updatePositionInfo();
+      core_updatePositionInfo();
     }
 
     if (useDMA)
@@ -760,822 +576,6 @@ int spiceThread(void * arg)
   return 0;
 }
 
-static LG_ClipboardData spice_type_to_clipboard_type(const SpiceDataType type)
-{
-  switch(type)
-  {
-    case SPICE_DATA_TEXT: return LG_CLIPBOARD_DATA_TEXT; break;
-    case SPICE_DATA_PNG : return LG_CLIPBOARD_DATA_PNG ; break;
-    case SPICE_DATA_BMP : return LG_CLIPBOARD_DATA_BMP ; break;
-    case SPICE_DATA_TIFF: return LG_CLIPBOARD_DATA_TIFF; break;
-    case SPICE_DATA_JPEG: return LG_CLIPBOARD_DATA_JPEG; break;
-    default:
-      DEBUG_ERROR("invalid spice data type");
-      return LG_CLIPBOARD_DATA_NONE;
-  }
-}
-
-static SpiceDataType clipboard_type_to_spice_type(const LG_ClipboardData type)
-{
-  switch(type)
-  {
-    case LG_CLIPBOARD_DATA_TEXT: return SPICE_DATA_TEXT; break;
-    case LG_CLIPBOARD_DATA_PNG : return SPICE_DATA_PNG ; break;
-    case LG_CLIPBOARD_DATA_BMP : return SPICE_DATA_BMP ; break;
-    case LG_CLIPBOARD_DATA_TIFF: return SPICE_DATA_TIFF; break;
-    case LG_CLIPBOARD_DATA_JPEG: return SPICE_DATA_JPEG; break;
-    default:
-      DEBUG_ERROR("invalid clipboard data type");
-      return SPICE_DATA_NONE;
-  }
-}
-
-void app_clipboardRelease(void)
-{
-  if (!params.clipboardToVM)
-    return;
-
-  spice_clipboard_release();
-}
-
-void app_clipboardNotify(const LG_ClipboardData type, size_t size)
-{
-  if (!params.clipboardToVM)
-    return;
-
-  if (type == LG_CLIPBOARD_DATA_NONE)
-  {
-    spice_clipboard_release();
-    return;
-  }
-
-  g_state.cbType    = clipboard_type_to_spice_type(type);
-  g_state.cbChunked = size > 0;
-  g_state.cbXfer    = size;
-
-  spice_clipboard_grab(g_state.cbType);
-
-  if (size)
-    spice_clipboard_data_start(g_state.cbType, size);
-}
-
-void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
-{
-  if (!params.clipboardToVM)
-    return;
-
-  if (g_state.cbChunked && size > g_state.cbXfer)
-  {
-    DEBUG_ERROR("refusing to send more then cbXfer bytes for chunked xfer");
-    size = g_state.cbXfer;
-  }
-
-  if (!g_state.cbChunked)
-    spice_clipboard_data_start(g_state.cbType, size);
-
-  spice_clipboard_data(g_state.cbType, data, (uint32_t)size);
-  g_state.cbXfer -= size;
-}
-
-void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
-{
-  if (!params.clipboardToLocal)
-    return;
-
-  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(struct CBRequest));
-
-  cbr->type    = g_state.cbType;
-  cbr->replyFn = replyFn;
-  cbr->opaque  = opaque;
-  ll_push(g_state.cbRequestList, cbr);
-
-  spice_clipboard_request(g_state.cbType);
-}
-
-void spiceClipboardNotice(const SpiceDataType type)
-{
-  if (!params.clipboardToLocal)
-    return;
-
-  if (!g_state.cbAvailable)
-    return;
-
-  g_state.cbType = type;
-  g_state.ds->cbNotice(spice_type_to_clipboard_type(type));
-}
-
-void spiceClipboardData(const SpiceDataType type, uint8_t * buffer, uint32_t size)
-{
-  if (!params.clipboardToLocal)
-    return;
-
-  if (type == SPICE_DATA_TEXT)
-  {
-    // dos2unix
-    uint8_t  * p       = buffer;
-    uint32_t   newSize = size;
-    for(uint32_t i = 0; i < size; ++i)
-    {
-      uint8_t c = buffer[i];
-      if (c == '\r')
-      {
-        --newSize;
-        continue;
-      }
-      *p++ = c;
-    }
-    size = newSize;
-  }
-
-  struct CBRequest * cbr;
-  if (ll_shift(g_state.cbRequestList, (void **)&cbr))
-  {
-    cbr->replyFn(cbr->opaque, spice_type_to_clipboard_type(type), buffer, size);
-    free(cbr);
-  }
-}
-
-void spiceClipboardRelease(void)
-{
-  if (!params.clipboardToLocal)
-    return;
-
-  if (g_state.cbAvailable)
-    g_state.ds->cbRelease();
-}
-
-void spiceClipboardRequest(const SpiceDataType type)
-{
-  if (!params.clipboardToVM)
-    return;
-
-  if (g_state.cbAvailable)
-    g_state.ds->cbRequest(spice_type_to_clipboard_type(type));
-}
-
-static bool warpPointer(int x, int y, bool exiting)
-{
-  if (!g_cursor.inWindow && !exiting)
-    return false;
-
-  if (g_cursor.warpState == WARP_STATE_OFF)
-    return false;
-
-  if (exiting)
-    g_cursor.warpState = WARP_STATE_OFF;
-
-  if (g_cursor.pos.x == x && g_cursor.pos.y == y)
-    return true;
-
-  g_state.ds->warpPointer(x, y, exiting);
-  return true;
-}
-
-static bool isValidCursorLocation(int x, int y)
-{
-  const int displays = SDL_GetNumVideoDisplays();
-  for(int i = 0; i < displays; ++i)
-  {
-    SDL_Rect r;
-    SDL_GetDisplayBounds(i, &r);
-    if ((x >= r.x && x < r.x + r.w) &&
-        (y >= r.y && y < r.y + r.h))
-      return true;
-  }
-  return false;
-}
-
-static void cursorToInt(double ex, double ey, int *x, int *y)
-{
-  /* only smooth if enabled and not using raw mode */
-  if (params.mouseSmoothing && !(g_cursor.grab && params.rawMouse))
-  {
-    static struct DoublePoint last = { 0 };
-
-    /* only apply smoothing to small deltas */
-    if (fabs(ex - last.x) < 5.0 && fabs(ey - last.y) < 5.0)
-    {
-      ex = last.x = (last.x + ex) / 2.0;
-      ey = last.y = (last.y + ey) / 2.0;
-    }
-    else
-    {
-      last.x = ex;
-      last.y = ey;
-    }
-  }
-
-  /* convert to int accumulating the fractional error */
-  ex += g_cursor.acc.x;
-  ey += g_cursor.acc.y;
-  g_cursor.acc.x = modf(ex, &ex);
-  g_cursor.acc.y = modf(ey, &ey);
-
-  *x = (int)ex;
-  *y = (int)ey;
-}
-
-static void setCursorInView(bool enable)
-{
-  // if the state has not changed, don't do anything else
-  if (g_cursor.inView == enable)
-    return;
-
-  if (enable && !g_state.focused)
-    return;
-
-  // do not allow the view to become active if any mouse buttons are being held,
-  // this fixes issues with meta window resizing.
-  if (enable && g_cursor.buttons)
-    return;
-
-  g_cursor.inView = enable;
-  g_cursor.draw   = (params.alwaysShowCursor || params.captureInputOnly)
-    ? true : enable;
-  g_cursor.redraw = true;
-
-  /* if the display server does not support warp, then we can not operate in
-   * always relative mode and we should not grab the pointer */
-  bool warpSupport = true;
-  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
-
-  g_cursor.warpState = enable ? WARP_STATE_ON : WARP_STATE_OFF;
-
-  if (enable)
-  {
-    if (params.hideMouse)
-      SDL_ShowCursor(SDL_DISABLE);
-
-    if (warpSupport && !params.captureInputOnly)
-      g_state.ds->grabPointer();
-
-    if (params.grabKeyboardOnFocus)
-      g_state.ds->grabKeyboard();
-  }
-  else
-  {
-    if (params.hideMouse)
-      SDL_ShowCursor(SDL_ENABLE);
-
-    if (warpSupport)
-      g_state.ds->ungrabPointer();
-
-    g_state.ds->ungrabKeyboard();
-  }
-
-  g_cursor.warpState = WARP_STATE_ON;
-}
-
-void app_handleMouseGrabbed(double ex, double ey)
-{
-  if (!app_inputEnabled())
-    return;
-
-  int x, y;
-  if (params.rawMouse && !g_cursor.useScale)
-  {
-    /* raw unscaled input are always round numbers */
-    x = floor(ex);
-    y = floor(ey);
-  }
-  else
-  {
-    /* apply sensitivity */
-    ex = (ex / 10.0) * (g_cursor.sens + 10);
-    ey = (ey / 10.0) * (g_cursor.sens + 10);
-    cursorToInt(ex, ey, &x, &y);
-  }
-
-  if (x == 0 && y == 0)
-    return;
-
-  if (!spice_mouse_motion(x, y))
-    DEBUG_ERROR("failed to send mouse motion message");
-}
-
-void app_handleButtonPress(int button)
-{
-  if (!app_inputEnabled() || !g_cursor.inView)
-    return;
-
-  g_cursor.buttons |= (1U << button);
-
-  if (!spice_mouse_press(button))
-    DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
-}
-
-void app_handleButtonRelease(int button)
-{
-  if (!app_inputEnabled())
-    return;
-
-  g_cursor.buttons &= ~(1U << button);
-
-  if (!spice_mouse_release(button))
-    DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
-}
-
-void app_handleKeyPress(int sc)
-{
-  if (sc == params.escapeKey && !g_state.escapeActive)
-  {
-    g_state.escapeActive = true;
-    g_state.escapeAction = -1;
-    return;
-  }
-
-  if (g_state.escapeActive)
-  {
-    g_state.escapeAction = sc;
-    return;
-  }
-
-  if (!app_inputEnabled())
-    return;
-
-  if (params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
-    return;
-
-  if (!g_state.keyDown[sc])
-  {
-    uint32_t ps2 = xfree86_to_ps2[sc];
-    if (!ps2)
-      return;
-
-    if (spice_key_down(ps2))
-      g_state.keyDown[sc] = true;
-    else
-    {
-      DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
-      return;
-    }
-  }
-}
-
-void app_handleKeyRelease(int sc)
-{
-  if (g_state.escapeActive)
-  {
-    if (g_state.escapeAction == -1)
-    {
-      if (params.useSpiceInput)
-        setGrab(!g_cursor.grab);
-    }
-    else
-    {
-      KeybindHandle handle = g_state.bindings[sc];
-      if (handle)
-      {
-        handle->callback(sc, handle->opaque);
-        return;
-      }
-    }
-
-    if (sc == params.escapeKey)
-      g_state.escapeActive = false;
-  }
-
-  if (!app_inputEnabled())
-    return;
-
-  // avoid sending key up events when we didn't send a down
-  if (!g_state.keyDown[sc])
-    return;
-
-  if (params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
-    return;
-
-  uint32_t ps2 = xfree86_to_ps2[sc];
-  if (!ps2)
-    return;
-
-  if (spice_key_up(ps2))
-    g_state.keyDown[sc] = false;
-  else
-  {
-    DEBUG_ERROR("SDL_KEYUP: failed to send message");
-    return;
-  }
-}
-
-static void rotatePoint(struct DoublePoint *point)
-{
-  double temp;
-
-  switch((g_state.rotate + params.winRotate) % LG_ROTATE_MAX)
-  {
-    case LG_ROTATE_0:
-      break;
-
-    case LG_ROTATE_90:
-      temp = point->x;
-      point->x =  point->y;
-      point->y = -temp;
-      break;
-
-    case LG_ROTATE_180:
-      point->x = -point->x;
-      point->y = -point->y;
-      break;
-
-    case LG_ROTATE_270:
-      temp = point->x;
-      point->x = -point->y;
-      point->y =  temp;
-      break;
-  }
-}
-
-static bool guestCurToLocal(struct DoublePoint *local)
-{
-  if (!g_cursor.guest.valid || !g_state.posInfoValid)
-    return false;
-
-  const struct DoublePoint point =
-  {
-    .x = g_cursor.guest.x + g_cursor.guest.hx,
-    .y = g_cursor.guest.y + g_cursor.guest.hy
-  };
-
-  switch((g_state.rotate + params.winRotate) % LG_ROTATE_MAX)
-  {
-    case LG_ROTATE_0:
-      local->x = (point.x / g_cursor.scale.x) + g_state.dstRect.x;
-      local->y = (point.y / g_cursor.scale.y) + g_state.dstRect.y;;
-      break;
-
-    case LG_ROTATE_90:
-      local->x = (g_state.dstRect.x + g_state.dstRect.w) -
-        point.y / g_cursor.scale.y;
-      local->y = (point.x / g_cursor.scale.x) + g_state.dstRect.y;
-      break;
-
-    case LG_ROTATE_180:
-      local->x = (g_state.dstRect.x + g_state.dstRect.w) -
-        point.x / g_cursor.scale.x;
-      local->y = (g_state.dstRect.y + g_state.dstRect.h) -
-        point.y / g_cursor.scale.y;
-      break;
-
-    case LG_ROTATE_270:
-      local->x = (point.y / g_cursor.scale.y) + g_state.dstRect.x;
-      local->y = (g_state.dstRect.y + g_state.dstRect.h) -
-        point.x / g_cursor.scale.x;
-      break;
-  }
-
-  return true;
-}
-
-inline static void localCurToGuest(struct DoublePoint *guest)
-{
-  const struct DoublePoint point =
-    g_cursor.pos;
-
-  switch((g_state.rotate + params.winRotate) % LG_ROTATE_MAX)
-  {
-    case LG_ROTATE_0:
-      guest->x = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
-      guest->y = (point.y - g_state.dstRect.y) * g_cursor.scale.y;
-      break;
-
-    case LG_ROTATE_90:
-      guest->x = (point.y - g_state.dstRect.y) * g_cursor.scale.y;
-      guest->y = (g_state.dstRect.w - point.x + g_state.dstRect.x)
-        * g_cursor.scale.x;
-      break;
-
-    case LG_ROTATE_180:
-      guest->x = (g_state.dstRect.w - point.x + g_state.dstRect.x)
-        * g_cursor.scale.x;
-      guest->y = (g_state.dstRect.h - point.y + g_state.dstRect.y)
-        * g_cursor.scale.y;
-      break;
-
-    case LG_ROTATE_270:
-      guest->x = (g_state.dstRect.h - point.y + g_state.dstRect.y)
-        * g_cursor.scale.y;
-      guest->y = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
-      break;
-
-    default:
-      assert(!"unreachable");
-  }
-}
-
-void app_handleMouseNormal(double ex, double ey)
-{
-  // prevent cursor handling outside of capture if the position is not known
-  if (!g_cursor.guest.valid)
-    return;
-
-  if (!app_inputEnabled())
-    return;
-
-  /* scale the movement to the guest */
-  if (g_cursor.useScale && params.scaleMouseInput)
-  {
-    ex *= g_cursor.scale.x / g_cursor.dpiScale;
-    ey *= g_cursor.scale.y / g_cursor.dpiScale;
-  }
-
-  bool testExit = true;
-  if (!g_cursor.inView)
-  {
-    const bool inView =
-      g_cursor.pos.x >= g_state.dstRect.x                     &&
-      g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-      g_cursor.pos.y >= g_state.dstRect.y                     &&
-      g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
-
-    setCursorInView(inView);
-    if (inView)
-      g_cursor.realign = true;
-  }
-
-  /* nothing to do if we are outside the viewport */
-  if (!g_cursor.inView)
-    return;
-
-  /*
-   * do not pass mouse events to the guest if we do not have focus, this must be
-   * done after the inView test has been performed so that when focus is gained
-   * we know if we should be drawing the cursor.
-   */
-  if (!g_state.focused)
-    return;
-
-  /* if we have been instructed to realign */
-  if (g_cursor.realign)
-  {
-    g_cursor.realign = false;
-
-    struct DoublePoint guest;
-    localCurToGuest(&guest);
-
-    /* add the difference to the offset */
-    ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
-    ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
-
-    /* don't test for an exit as we just entered, we can get into a enter/exit
-     * loop otherwise */
-    testExit = false;
-  }
-
- /* if we are in "autoCapture" and the delta was large don't test for exit */
-  if (params.autoCapture &&
-      (fabs(ex) > 100.0 / g_cursor.scale.x || fabs(ey) > 100.0 / g_cursor.scale.y))
-    testExit = false;
-
-  /* if any buttons are held we should not allow exit to happen */
-  if (g_cursor.buttons)
-    testExit = false;
-
-  if (testExit)
-  {
-    /* translate the move to the guests orientation */
-    struct DoublePoint move = {.x = ex, .y = ey};
-    rotatePoint(&move);
-
-    /* translate the guests position to our coordinate space */
-    struct DoublePoint local;
-    guestCurToLocal(&local);
-
-    /* check if the move would push the cursor outside the guest's viewport */
-    if (
-        local.x + move.x <  g_state.dstRect.x ||
-        local.y + move.y <  g_state.dstRect.y ||
-        local.x + move.x >= g_state.dstRect.x + g_state.dstRect.w ||
-        local.y + move.y >= g_state.dstRect.y + g_state.dstRect.h)
-    {
-      local.x += move.x;
-      local.y += move.y;
-      const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
-      const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
-
-      if (isValidCursorLocation(
-            g_state.windowPos.x + g_state.border.x + tx,
-            g_state.windowPos.y + g_state.border.y + ty))
-      {
-        setCursorInView(false);
-
-        /* preempt the window leave flag if the warp will leave our window */
-        if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
-          g_cursor.inWindow = false;
-
-        /* ungrab the pointer and move the local cursor to the exit point */
-        g_state.ds->ungrabPointer();
-        warpPointer(tx, ty, true);
-        return;
-      }
-    }
-  }
-
-  int x, y;
-  cursorToInt(ex, ey, &x, &y);
-
-  if (x == 0 && y == 0)
-    return;
-
-  if (params.autoCapture)
-  {
-    g_cursor.delta.x += x;
-    g_cursor.delta.y += y;
-
-    if (fabs(g_cursor.delta.x) > 50.0 || fabs(g_cursor.delta.y) > 50.0)
-    {
-      g_cursor.delta.x = 0;
-      g_cursor.delta.y = 0;
-      warpPointer(g_state.windowCX, g_state.windowCY, false);
-    }
-
-    g_cursor.guest.x = g_state.srcSize.x / 2;
-    g_cursor.guest.y = g_state.srcSize.y / 2;
-  }
-  else
-  {
-    /* assume the mouse will move to the location we attempt to move it to so we
-     * avoid warp out of window issues. The cursorThread will correct this if
-     * wrong after the movement has ocurred on the guest */
-    g_cursor.guest.x += x;
-    g_cursor.guest.y += y;
-  }
-
-  if (!spice_mouse_motion(x, y))
-    DEBUG_ERROR("failed to send mouse motion message");
-}
-
-
-// On some display servers normal cursor logic does not work due to the lack of
-// cursor warp support. Instead, we attempt a best-effort emulation which works
-// with a 1:1 mouse movement patch applied in the guest. For anything fancy, use
-// capture mode.
-void app_handleMouseBasic()
-{
-  /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_state.focused)
-    return;
-
-  if (!app_inputEnabled())
-    return;
-
-  const bool inView =
-    g_cursor.pos.x >= g_state.dstRect.x                     &&
-    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-    g_cursor.pos.y >= g_state.dstRect.y                     &&
-    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
-
-  setCursorInView(inView);
-
-  if (g_cursor.guest.dpiScale == 0)
-    return;
-
-  double px = g_cursor.pos.x;
-  double py = g_cursor.pos.y;
-
-  if (px < g_state.dstRect.x)
-    px = g_state.dstRect.x;
-  else if (px > g_state.dstRect.x + g_state.dstRect.w)
-    px = g_state.dstRect.x + g_state.dstRect.w;
-
-  if (py < g_state.dstRect.y)
-    py = g_state.dstRect.y;
-  else if (py > g_state.dstRect.y + g_state.dstRect.h)
-    py = g_state.dstRect.y + g_state.dstRect.h;
-
-  /* translate the guests position to our coordinate space */
-  struct DoublePoint local;
-  guestCurToLocal(&local);
-
-  int x = (int) round((px - local.x) / g_cursor.dpiScale);
-  int y = (int) round((py - local.y) / g_cursor.dpiScale);
-
-  if (!x && !y)
-    return;
-
-  g_cursor.guest.x += x;
-  g_cursor.guest.y += y;
-
-  if (!spice_mouse_motion(x, y))
-    DEBUG_ERROR("failed to send mouse motion message");
-}
-
-void app_updateWindowPos(int x, int y)
-{
-  g_state.windowPos.x = x;
-  g_state.windowPos.y = y;
-}
-
-void app_handleResizeEvent(int w, int h)
-{
-  SDL_GetWindowBordersSize(g_state.window,
-    &g_state.border.y,
-    &g_state.border.x,
-    &g_state.border.h,
-    &g_state.border.w
-  );
-
-  /* don't do anything else if the window dimensions have not changed */
-  if (g_state.windowW == w && g_state.windowH == h)
-    return;
-
-  g_state.windowW  = w;
-  g_state.windowH  = h;
-  g_state.windowCX = w / 2;
-  g_state.windowCY = h / 2;
-  updatePositionInfo();
-
-  if (app_inputEnabled())
-  {
-    /* if the window is moved/resized causing a loss of focus while grabbed, it
-     * makes it impossible to re-focus the window, so we quietly re-enter
-     * capture if we were already in it */
-    if (g_cursor.grab)
-    {
-      setGrabQuiet(false);
-      setGrabQuiet(true);
-    }
-    alignToGuest();
-  }
-}
-
-void app_handleWindowLeave(void)
-{
-  g_cursor.inWindow = false;
-  setCursorInView(false);
-
-  if (!app_inputEnabled())
-    return;
-
-  if (!params.alwaysShowCursor)
-    g_cursor.draw = false;
-  g_cursor.redraw = true;
-}
-
-void app_handleWindowEnter(void)
-{
-  g_cursor.inWindow = true;
-  if (!app_inputEnabled())
-    return;
-
-  g_cursor.realign = true;
-}
-
-static void setGrab(bool enable)
-{
-  setGrabQuiet(enable);
-
-  app_alert(
-    g_cursor.grab ? LG_ALERT_SUCCESS  : LG_ALERT_WARNING,
-    g_cursor.grab ? "Capture Enabled" : "Capture Disabled"
-  );
-}
-
-static void setGrabQuiet(bool enable)
-{
-  /* we always do this so that at init the cursor is in the right state */
-  if (params.captureInputOnly && params.hideMouse)
-    SDL_ShowCursor(enable ? SDL_DISABLE : SDL_ENABLE);
-
-  if (g_cursor.grab == enable)
-    return;
-
-  g_cursor.grab = enable;
-  g_cursor.acc.x = 0.0;
-  g_cursor.acc.y = 0.0;
-
-  /* if the display server does not support warp we need to ungrab the pointer
-   * here instead of in the move handler */
-  bool warpSupport = true;
-  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
-
-  if (enable)
-  {
-    setCursorInView(true);
-    g_state.ignoreInput = false;
-
-    if (params.grabKeyboard)
-      g_state.ds->grabKeyboard();
-
-    g_state.ds->grabPointer();
-  }
-  else
-  {
-    if (params.grabKeyboard)
-    {
-      if (!g_state.focused || params.captureInputOnly)
-        g_state.ds->ungrabKeyboard();
-    }
-
-    if (!warpSupport || params.captureInputOnly || !g_state.formatValid)
-      g_state.ds->ungrabPointer();
-
-    // if exiting capture when input on capture only, we want to show the cursor
-    if (params.captureInputOnly || !params.hideMouse)
-      alignToGuest();
-  }
-}
-
 int eventFilter(void * userdata, SDL_Event * event)
 {
   if (g_state.ds->eventFilter(event))
@@ -1585,25 +585,6 @@ int eventFilter(void * userdata, SDL_Event * event)
   if (g_state.ds != LG_DisplayServers[0])
     if (LG_DisplayServers[0]->eventFilter(event))
       return 0;
-
-  if (event->type == e_SDLEvent)
-  {
-    switch(event->user.code)
-    {
-      case LG_EVENT_ALIGN_TO_GUEST:
-      {
-        if (!g_cursor.guest.valid || !g_state.focused)
-          break;
-
-        struct DoublePoint local;
-        if (guestCurToLocal(&local))
-          if (warpPointer(round(local.x), round(local.y), false))
-            setCursorInView(true);
-        break;
-      }
-    }
-    return 0;
-  }
 
   // consume all events
   return 0;
@@ -1658,8 +639,8 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
 
 static void toggle_fullscreen(uint32_t scancode, void * opaque)
 {
-  SDL_SetWindowFullscreen(g_state.window, params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-  params.fullscreen = !params.fullscreen;
+  SDL_SetWindowFullscreen(g_state.window, g_params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+  g_params.fullscreen = !g_params.fullscreen;
 }
 
 static void toggle_video(uint32_t scancode, void * opaque)
@@ -1685,11 +666,11 @@ static void toggle_video(uint32_t scancode, void * opaque)
 
 static void toggle_rotate(uint32_t scancode, void * opaque)
 {
-  if (params.winRotate == LG_ROTATE_MAX-1)
-    params.winRotate = 0;
+  if (g_params.winRotate == LG_ROTATE_MAX-1)
+    g_params.winRotate = 0;
   else
-    ++params.winRotate;
-  updatePositionInfo();
+    ++g_params.winRotate;
+  core_updatePositionInfo();
 }
 
 static void toggle_input(uint32_t scancode, void * opaque)
@@ -1697,7 +678,7 @@ static void toggle_input(uint32_t scancode, void * opaque)
   g_state.ignoreInput = !g_state.ignoreInput;
 
   if (g_state.ignoreInput)
-    setCursorInView(false);
+    core_setCursorInView(false);
   else
     g_state.ds->realignPointer();
 
@@ -1769,7 +750,7 @@ static void register_key_binds(void)
   g_state.kbRotate       = app_register_keybind(KEY_R     , toggle_rotate    , NULL);
   g_state.kbQuit         = app_register_keybind(KEY_Q     , quit             , NULL);
 
-  if (params.useSpiceInput)
+  if (g_params.useSpiceInput)
   {
     g_state.kbInput        = app_register_keybind(KEY_I     , toggle_input     , NULL);
     g_state.kbMouseSensInc = app_register_keybind(KEY_INSERT, mouse_sens_inc   , NULL);
@@ -1819,7 +800,7 @@ static int lg_run(void)
 {
   memset(&g_state, 0, sizeof(g_state));
 
-  g_cursor.sens = params.mouseSens;
+  g_cursor.sens = g_params.mouseSens;
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
 
@@ -1891,15 +872,15 @@ static int lg_run(void)
   }
 
   // try to connect to the spice server
-  if (params.useSpiceInput || params.useSpiceClipboard)
+  if (g_params.useSpiceInput || g_params.useSpiceClipboard)
   {
     spice_set_clipboard_cb(
-        spiceClipboardNotice,
-        spiceClipboardData,
-        spiceClipboardRelease,
-        spiceClipboardRequest);
+        cb_spiceNotice,
+        cb_spiceData,
+        cb_spiceRelease,
+        cb_spiceRequest);
 
-    if (!spice_connect(params.spiceHost, params.spicePort, ""))
+    if (!spice_connect(g_params.spiceHost, g_params.spicePort, ""))
     {
       DEBUG_ERROR("Failed to connect to spice server");
       return -1;
@@ -1923,20 +904,20 @@ static int lg_run(void)
 
   // select and init a renderer
   LG_RendererParams lgrParams;
-  lgrParams.showFPS     = params.showFPS;
-  lgrParams.quickSplash = params.quickSplash;
+  lgrParams.showFPS     = g_params.showFPS;
+  lgrParams.quickSplash = g_params.quickSplash;
   Uint32 sdlFlags;
 
-  if (params.forceRenderer)
+  if (g_params.forceRenderer)
   {
     DEBUG_INFO("Trying forced renderer");
     sdlFlags = 0;
-    if (!try_renderer(params.forceRendererIndex, lgrParams, &sdlFlags))
+    if (!try_renderer(g_params.forceRendererIndex, lgrParams, &sdlFlags))
     {
       DEBUG_ERROR("Forced renderer failed to iniailize");
       return -1;
     }
-    g_state.lgr = LG_Renderers[params.forceRendererIndex];
+    g_state.lgr = LG_Renderers[g_params.forceRendererIndex];
   }
   else
   {
@@ -1960,16 +941,16 @@ static int lg_run(void)
 
   // all our ducks are in a line, create the window
   g_state.window = SDL_CreateWindow(
-    params.windowTitle,
-    params.center ? SDL_WINDOWPOS_CENTERED : params.x,
-    params.center ? SDL_WINDOWPOS_CENTERED : params.y,
-    params.w,
-    params.h,
+    g_params.windowTitle,
+    g_params.center ? SDL_WINDOWPOS_CENTERED : g_params.x,
+    g_params.center ? SDL_WINDOWPOS_CENTERED : g_params.y,
+    g_params.w,
+    g_params.h,
     (
       SDL_WINDOW_HIDDEN |
-      (params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
-      (params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
-      (params.maximize    ? SDL_WINDOW_MAXIMIZED  : 0) |
+      (g_params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
+      (g_params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
+      (g_params.maximize    ? SDL_WINDOW_MAXIMIZED  : 0) |
       sdlFlags
     )
   );
@@ -1997,36 +978,33 @@ static int lg_run(void)
   SDL_ShowWindow(g_state.window);
 
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
-      params.minimizeOnFocusLoss ? "1" : "0");
+      g_params.minimizeOnFocusLoss ? "1" : "0");
 
-  if (params.fullscreen)
+  if (g_params.fullscreen)
     SDL_SetWindowFullscreen(g_state.window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 
-  if (!params.center)
-    SDL_SetWindowPosition(g_state.window, params.x, params.y);
+  if (!g_params.center)
+    SDL_SetWindowPosition(g_state.window, g_params.x, g_params.y);
 
-  if (params.noScreensaver)
+  if (g_params.noScreensaver)
     g_state.ds->inhibitIdle();
 
   // ensure the initial window size is stored in the state
   SDL_GetWindowSize(g_state.window, &g_state.windowW, &g_state.windowH);
 
   // ensure renderer viewport is aware of the current window size
-  updatePositionInfo();
+  core_updatePositionInfo();
 
-  if (params.fpsMin <= 0)
+  if (g_params.fpsMin <= 0)
   {
     // default 30 fps
     g_state.frameTime = 1000000000ULL / 30ULL;
   }
   else
   {
-    DEBUG_INFO("Using the FPS minimum from args: %d", params.fpsMin);
-    g_state.frameTime = 1000000000ULL / (unsigned long long)params.fpsMin;
+    DEBUG_INFO("Using the FPS minimum from args: %d", g_params.fpsMin);
+    g_state.frameTime = 1000000000ULL / (unsigned long long)g_params.fpsMin;
   }
-
-  // create our custom event
-  e_SDLEvent = SDL_RegisterEvents(1);
 
   register_key_binds();
 
@@ -2083,8 +1061,8 @@ static int lg_run(void)
    * we start checking for a valid session */
   SDL_WaitEventTimeout(NULL, 200);
 
-  if (params.captureOnStart)
-    setGrab(true);
+  if (g_params.captureOnStart)
+    core_setGrab(true);
 
   uint32_t udataSize;
   KVMFR *udata;
@@ -2113,8 +1091,7 @@ restart:
     {
       DEBUG_BREAK();
       DEBUG_INFO("Please check the host application is running and is the correct version");
-      DEBUG_INFO("Check the host log in your guest at: "
-        "%%ProgramData%%\\Looking Glass (host)\\looking-glass-host.txt");
+      DEBUG_INFO("Check the host log in your guest at %%TEMP%%\\looking-glass-host.txt");
       DEBUG_INFO("Continuing to wait...");
     }
 
@@ -2232,7 +1209,7 @@ static void lg_shutdown(void)
   }
 
   // if spice is still connected send key up events for any pressed keys
-  if (params.useSpiceInput && spice_ready())
+  if (g_params.useSpiceInput && spice_ready())
   {
     for(uint32_t scancode = 0; scancode < KEY_MAX; ++scancode)
       if (g_state.keyDown[scancode])

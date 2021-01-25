@@ -128,12 +128,12 @@ static bool sdlEventFilter(SDL_Event * event)
       switch(event->window.event)
       {
         case SDL_WINDOWEVENT_ENTER:
-          app_handleWindowEnter();
+          app_handleEnterEvent(true);
           return true;
 
         case SDL_WINDOWEVENT_LEAVE:
           sdl.exiting = false;
-          app_handleWindowLeave();
+          app_handleEnterEvent(false);
           return true;
 
         case SDL_WINDOWEVENT_FOCUS_GAINED:

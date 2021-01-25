@@ -22,7 +22,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "texture.h"
 
 #include "common/debug.h"
-#include "utils.h"
 #include "ll.h"
 
 #include <stdlib.h>

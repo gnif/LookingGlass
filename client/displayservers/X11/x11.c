@@ -372,7 +372,7 @@ static bool x11EventFilter(SDL_Event * event)
 
           XIEnterEvent *xie = cookie->data;
           app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleWindowEnter();
+          app_handleEnterEvent(true);
           x11.entered = true;
           return true;
         }
@@ -384,7 +384,7 @@ static bool x11EventFilter(SDL_Event * event)
 
           XILeaveEvent *xie = cookie->data;
           app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleWindowLeave();
+          app_handleEnterEvent(false);
           x11.entered = false;
           return true;
         }

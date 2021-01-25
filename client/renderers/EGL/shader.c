@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "shader.h"
 #include "common/debug.h"
-#include "utils.h"
+#include "util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -63,7 +63,7 @@ bool egl_shader_load(EGL_Shader * this, const char * vertex_file, const char * f
   char   * vertex_code, * fragment_code;
   size_t   vertex_size,   fragment_size;
 
-  if (!file_get_contents(vertex_file, &vertex_code, &vertex_size))
+  if (!util_fileGetContents(vertex_file, &vertex_code, &vertex_size))
   {
     DEBUG_ERROR("Failed to read vertex shader");
     return false;
@@ -71,7 +71,7 @@ bool egl_shader_load(EGL_Shader * this, const char * vertex_file, const char * f
 
   DEBUG_INFO("Loaded vertex shader: %s", vertex_file);
 
-  if (!file_get_contents(fragment_file, &fragment_code, &fragment_size))
+  if (!util_fileGetContents(fragment_file, &fragment_code, &fragment_size))
   {
     DEBUG_ERROR("Failed to read fragment shader");
     free(vertex_code);
