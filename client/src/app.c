@@ -55,7 +55,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   free(buffer);
 }
 
-KeybindHandle app_registerKeybind(int sc, SuperEventFn callback, void * opaque)
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque)
 {
   // don't allow duplicate binds
   if (g_state.bindings[sc])
