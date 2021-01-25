@@ -24,7 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/sysinfo.h"
 #include "common/time.h"
 #include "common/locking.h"
-#include "utils.h"
+#include "util.h"
 #include "dynamic/fonts.h"
 
 #include <SDL2/SDL_syswm.h>

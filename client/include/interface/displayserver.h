@@ -105,10 +105,10 @@ struct LG_DisplayServerOps
   void (*uninhibitIdle)();
 
   /* clipboard support */
-  bool (* cbInit)(void);
-  void (* cbNotice)(LG_ClipboardData type);
-  void (* cbRelease)(void);
-  void (* cbRequest)(LG_ClipboardData type);
+  bool (*cbInit)(void);
+  void (*cbNotice)(LG_ClipboardData type);
+  void (*cbRelease)(void);
+  void (*cbRequest)(LG_ClipboardData type);
 };
 
 #endif

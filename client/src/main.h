@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -25,6 +25,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/app.h"
 #include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
+
+#include "common/types.h"
 #include "common/ivshmem.h"
 
 #include "spice/spice.h"
@@ -192,11 +194,6 @@ struct CursorInfo
   uint32_t dpiScale;
 };
 
-struct DoublePoint
-{
-  double x, y;
-};
-
 struct CursorState
 {
   /* cursor is in grab mode */
@@ -252,5 +249,6 @@ struct CursorState
 };
 
 // forwards
-extern struct AppState  g_state;
-extern struct AppParams params;
+extern struct AppState    g_state;
+extern struct CursorState g_cursor;
+extern struct AppParams   g_params;
