@@ -154,7 +154,7 @@ struct CBRequest
 
 struct KeybindHandle
 {
-  SDL_Scancode   key;
+  int            sc;
   SuperEventFn   callback;
   void         * opaque;
 };
