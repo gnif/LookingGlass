@@ -35,7 +35,6 @@ typedef enum LG_MsgAlert
 }
 LG_MsgAlert;
 
-
 SDL_Window * app_getWindow(void);
 
 bool app_getProp(LG_DSProperty prop, void * ret);
@@ -81,7 +80,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...);
  * @retval A handle for the binding or NULL on failure.
  *         The caller is required to release the handle via `app_releaseKeybind` when it is no longer required
  */
-KeybindHandle app_registerKeybind(uint32_t sc, SuperEventFn callback, void * opaque);
+KeybindHandle app_registerKeybind(int sc, SuperEventFn callback, void * opaque);
 
 /**
  * Release an existing key binding
