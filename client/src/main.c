@@ -831,10 +831,12 @@ static int lg_run(void)
   SET_FALLBACK(shutdown);
   SET_FALLBACK(free);
   SET_FALLBACK(eventFilter);
+  SET_FALLBACK(showPointer);
   SET_FALLBACK(grabPointer);
   SET_FALLBACK(ungrabKeyboard);
   SET_FALLBACK(warpPointer);
   SET_FALLBACK(realignPointer);
+  SET_FALLBACK(isValidPointerPos);
   SET_FALLBACK(inhibitIdle);
   SET_FALLBACK(uninhibitIdle);
   SET_FALLBACK(cbInit);
