@@ -87,6 +87,7 @@ struct LG_DisplayServerOps
   bool (*eventFilter)(SDL_Event * event);
 
   /* dm specific cursor implementations */
+  void (*showPointer)(bool show);
   void (*grabPointer)();
   void (*ungrabPointer)();
   void (*grabKeyboard)();
@@ -99,6 +100,9 @@ struct LG_DisplayServerOps
    * call the appropriate app_handleMouse* method for the platform with zero
    * deltas */
   void (*realignPointer)();
+
+  /* returns true if the position specified is actually valid */
+  bool (*isValidPointerPos)(int x, int y);
 
   /* called to disable/enable the screensaver */
   void (*inhibitIdle)();

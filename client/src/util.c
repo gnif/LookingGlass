@@ -206,17 +206,3 @@ void util_rotatePoint(struct DoublePoint *point)
       break;
   }
 }
-
-bool util_isValidCursorLocation(int x, int y)
-{
-  const int displays = SDL_GetNumVideoDisplays();
-  for(int i = 0; i < displays; ++i)
-  {
-    SDL_Rect r;
-    SDL_GetDisplayBounds(i, &r);
-    if ((x >= r.x && x < r.x + r.w) &&
-        (y >= r.y && y < r.y + r.h))
-      return true;
-  }
-  return false;
-}
