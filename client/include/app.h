@@ -61,9 +61,6 @@ void app_clipboardNotify(const LG_ClipboardData type, size_t size);
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size);
 void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque);
 
-typedef struct KeybindHandle * KeybindHandle;
-typedef void (*SuperEventFn)(uint32_t sc, void * opaque);
-
 /**
  * Show an alert on screen
  * @param type The alert type
@@ -71,6 +68,9 @@ typedef void (*SuperEventFn)(uint32_t sc, void * opaque);
  @ param  ...  formatted message values
  */
 void app_alert(LG_MsgAlert type, const char * fmt, ...);
+
+typedef struct KeybindHandle * KeybindHandle;
+typedef void (*KeybindFn)(int sc, void * opaque);
 
 /**
  * Register a handler for the <super>+<key> combination
@@ -80,7 +80,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...);
  * @retval A handle for the binding or NULL on failure.
  *         The caller is required to release the handle via `app_releaseKeybind` when it is no longer required
  */
-KeybindHandle app_registerKeybind(int sc, SuperEventFn callback, void * opaque);
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque);
 
 /**
  * Release an existing key binding

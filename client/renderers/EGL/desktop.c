@@ -69,7 +69,7 @@ struct EGL_Desktop
 };
 
 // forwards
-void egl_desktop_toggle_nv(SDL_Scancode key, void * opaque);
+void egl_desktop_toggle_nv(int key, void * opaque);
 
 static bool egl_init_desktop_shader(
   struct DesktopShader * shader,
@@ -143,8 +143,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
   return true;
 }
 
-
-void egl_desktop_toggle_nv(SDL_Scancode key, void * opaque)
+void egl_desktop_toggle_nv(int key, void * opaque)
 {
   EGL_Desktop * desktop = (EGL_Desktop *)opaque;
   if (desktop->nvGain++ == desktop->nvMax)

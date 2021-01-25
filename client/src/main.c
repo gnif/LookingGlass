@@ -637,13 +637,13 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
   return true;
 }
 
-static void toggle_fullscreen(uint32_t scancode, void * opaque)
+static void keybind_fullscreen(int sc, void * opaque)
 {
   SDL_SetWindowFullscreen(g_state.window, g_params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
   g_params.fullscreen = !g_params.fullscreen;
 }
 
-static void toggle_video(uint32_t scancode, void * opaque)
+static void keybind_video(int sc, void * opaque)
 {
   g_state.stopVideo = !g_state.stopVideo;
   app_alert(
@@ -664,7 +664,7 @@ static void toggle_video(uint32_t scancode, void * opaque)
   }
 }
 
-static void toggle_rotate(uint32_t scancode, void * opaque)
+static void keybind_rotate(int sc, void * opaque)
 {
   if (g_params.winRotate == LG_ROTATE_MAX-1)
     g_params.winRotate = 0;
@@ -673,7 +673,7 @@ static void toggle_rotate(uint32_t scancode, void * opaque)
   core_updatePositionInfo();
 }
 
-static void toggle_input(uint32_t scancode, void * opaque)
+static void toggle_input(int sc, void * opaque)
 {
   g_state.ignoreInput = !g_state.ignoreInput;
 
@@ -688,12 +688,12 @@ static void toggle_input(uint32_t scancode, void * opaque)
   );
 }
 
-static void quit(uint32_t scancode, void * opaque)
+static void keybind_quit(int sc, void * opaque)
 {
   g_state.state = APP_STATE_SHUTDOWN;
 }
 
-static void mouse_sens_inc(uint32_t scancode, void * opaque)
+static void mouse_sens_inc(int sc, void * opaque)
 {
   char * msg;
   if (g_cursor.sens < 9)
@@ -707,7 +707,7 @@ static void mouse_sens_inc(uint32_t scancode, void * opaque)
   free(msg);
 }
 
-static void mouse_sens_dec(uint32_t scancode, void * opaque)
+static void mouse_sens_dec(int sc, void * opaque)
 {
   char * msg;
 
@@ -722,11 +722,11 @@ static void mouse_sens_dec(uint32_t scancode, void * opaque)
   free(msg);
 }
 
-static void ctrl_alt_fn(uint32_t key, void * opaque)
+static void keybind_ctrlAltFn(int sc, void * opaque)
 {
   const uint32_t ctrl = xfree86_to_ps2[KEY_LEFTCTRL];
   const uint32_t alt  = xfree86_to_ps2[KEY_LEFTALT ];
-  const uint32_t fn   = xfree86_to_ps2[key];
+  const uint32_t fn   = xfree86_to_ps2[sc];
   spice_key_down(ctrl);
   spice_key_down(alt );
   spice_key_down(fn  );
@@ -736,7 +736,7 @@ static void ctrl_alt_fn(uint32_t key, void * opaque)
   spice_key_up(fn  );
 }
 
-static void key_passthrough(uint32_t sc, void * opaque)
+static void keybind_passthrough(int sc, void * opaque)
 {
   sc = xfree86_to_ps2[sc];
   spice_key_down(sc);
@@ -745,10 +745,10 @@ static void key_passthrough(uint32_t sc, void * opaque)
 
 static void register_key_binds(void)
 {
-  app_registerKeybind(KEY_F, toggle_fullscreen, NULL);
-  app_registerKeybind(KEY_V, toggle_video     , NULL);
-  app_registerKeybind(KEY_R, toggle_rotate    , NULL);
-  app_registerKeybind(KEY_Q, quit             , NULL);
+  app_registerKeybind(KEY_F, keybind_fullscreen, NULL);
+  app_registerKeybind(KEY_V, keybind_video     , NULL);
+  app_registerKeybind(KEY_R, keybind_rotate    , NULL);
+  app_registerKeybind(KEY_Q, keybind_quit      , NULL);
 
   if (g_params.useSpiceInput)
   {
@@ -756,21 +756,21 @@ static void register_key_binds(void)
     app_registerKeybind(KEY_INSERT, mouse_sens_inc   , NULL);
     app_registerKeybind(KEY_DELETE, mouse_sens_dec   , NULL);
 
-    app_registerKeybind(KEY_F1 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F2 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F3 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F4 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F5 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F6 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F7 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F8 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F9 , ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F10, ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F11, ctrl_alt_fn, NULL);
-    app_registerKeybind(KEY_F12, ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F1 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F2 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F3 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F4 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F5 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F6 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F7 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F8 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F9 , keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F10, keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F11, keybind_ctrlAltFn, NULL);
+    app_registerKeybind(KEY_F12, keybind_ctrlAltFn, NULL);
 
-    app_registerKeybind(KEY_LEFTMETA , key_passthrough, NULL);
-    app_registerKeybind(KEY_RIGHTMETA, key_passthrough, NULL);
+    app_registerKeybind(KEY_LEFTMETA , keybind_passthrough, NULL);
+    app_registerKeybind(KEY_RIGHTMETA, keybind_passthrough, NULL);
   }
 }
 
@@ -1199,7 +1199,7 @@ static void lg_shutdown(void)
   // if spice is still connected send key up events for any pressed keys
   if (g_params.useSpiceInput && spice_ready())
   {
-    for(uint32_t scancode = 0; scancode < KEY_MAX; ++scancode)
+    for(int scancode = 0; scancode < KEY_MAX; ++scancode)
       if (g_state.keyDown[scancode])
       {
         g_state.keyDown[scancode] = false;
