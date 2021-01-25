@@ -55,21 +55,21 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   free(buffer);
 }
 
-KeybindHandle app_registerKeybind(SDL_Scancode key, SuperEventFn callback, void * opaque)
+KeybindHandle app_registerKeybind(int sc, SuperEventFn callback, void * opaque)
 {
   // don't allow duplicate binds
-  if (g_state.bindings[key])
+  if (g_state.bindings[sc])
   {
     DEBUG_INFO("Key already bound");
     return NULL;
   }
 
   KeybindHandle handle = (KeybindHandle)malloc(sizeof(struct KeybindHandle));
-  handle->key      = key;
+  handle->sc       = sc;
   handle->callback = callback;
   handle->opaque   = opaque;
 
-  g_state.bindings[key] = handle;
+  g_state.bindings[sc] = handle;
   return handle;
 }
 
@@ -78,7 +78,7 @@ void app_releaseKeybind(KeybindHandle * handle)
   if (!*handle)
     return;
 
-  g_state.bindings[(*handle)->key] = NULL;
+  g_state.bindings[(*handle)->sc] = NULL;
   free(*handle);
   *handle = NULL;
 }
