@@ -46,6 +46,11 @@ struct X11DSState
   bool keyboardGrabbed;
   bool entered;
   bool focused;
+  struct Rect   rect;
+  struct Border border;
+
+  Atom aNetReqFrameExtents;
+  Atom aNetFrameExtents;
 
   // clipboard members
   Atom             aSelection;
@@ -92,6 +97,25 @@ static bool x11Init(SDL_SysWMinfo * info)
   memset(&x11, 0, sizeof(x11));
   x11.display = info->info.x11.display;
   x11.window  = info->info.x11.window;
+
+  x11.aNetReqFrameExtents =
+    XInternAtom(x11.display, "_NET_REQUEST_FRAME_EXTENTS", True);
+  x11.aNetFrameExtents =
+    XInternAtom(x11.display, "_NET_FRAME_EXTENTS", True);
+
+  if (x11.aNetReqFrameExtents)
+  {
+    XEvent reqevent =
+    {
+      .type                 = ClientMessage,
+      .xclient.window       = x11.window,
+      .xclient.format       = 32,
+      .xclient.message_type = x11.aNetReqFrameExtents
+    };
+
+    XSendEvent(x11.display, DefaultRootWindow(x11.display), False,
+        SubstructureNotifyMask | SubstructureRedirectMask, &reqevent);
+  }
 
   int major = 2;
   int minor = 3;
@@ -318,8 +342,13 @@ static bool x11EventFilter(SDL_Event * event)
           &y,
           &child);
 
+      x11.rect.x = x;
+      x11.rect.y = y;
+      x11.rect.w = xe.xconfigure.width;
+      x11.rect.h = xe.xconfigure.height;
+
       app_updateWindowPos(x, y);
-      app_handleResizeEvent(xe.xconfigure.width, xe.xconfigure.height);
+      app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
       return true;
     }
 
@@ -558,14 +587,45 @@ static bool x11EventFilter(SDL_Event * event)
       return true;
 
     case PropertyNotify:
-      if (xe.xproperty.display != x11.display    ||
-          xe.xproperty.window  != x11.window     ||
-          xe.xproperty.atom    != x11.aSelData   ||
-          xe.xproperty.state   != PropertyNewValue ||
-          x11.lowerBound    == 0)
+      if (xe.xproperty.display != x11.display      ||
+          xe.xproperty.window  != x11.window       ||
+          xe.xproperty.state   != PropertyNewValue)
         return false;
 
-      x11CBSelectionIncr(xe.xproperty);
+      if (xe.xproperty.atom == x11.aNetFrameExtents)
+      {
+        Atom type;
+        int fmt;
+        unsigned long num, bytes;
+        unsigned char *data;
+
+        if (XGetWindowProperty(x11.display, x11.window,
+              x11.aNetFrameExtents, 0, 4, False, AnyPropertyType,
+              &type, &fmt, &num, &bytes, &data) != Success)
+            return true;
+
+        if (num >= 4)
+        {
+          long *cardinal = (long *)data;
+          x11.border.left   = cardinal[0];
+          x11.border.right  = cardinal[1];
+          x11.border.top    = cardinal[2];
+          x11.border.bottom = cardinal[3];
+          app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
+        }
+
+        XFree(data);
+        return true;
+      }
+
+      if (xe.xproperty.atom == x11.aSelData)
+      {
+        if (x11.lowerBound == 0)
+          return false;
+        x11CBSelectionIncr(xe.xproperty);
+        return true;
+      }
+
       return true;
 
     default:
