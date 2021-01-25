@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -50,22 +50,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "core.h"
 #include "app.h"
-#include "util.h"
+#include "keybind.h"
 #include "clipboard.h"
 #include "ll.h"
-#include "kb.h"
 
 // forwards
 static int cursorThread(void * unused);
 static int renderThread(void * unused);
-static int frameThread (void * unused);
 
 static LGEvent  *e_startup = NULL;
 static LGEvent  *e_frame   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
-static LGThread *t_frame   = NULL;
 static SDL_Cursor *cursor  = NULL;
 
 struct AppState g_state;
@@ -175,8 +172,7 @@ static int renderThread(void * unused)
   if (t_cursor)
     lgJoinThread(t_cursor, NULL);
 
-  if (t_frame)
-    lgJoinThread(t_frame, NULL);
+  core_stopFrameThread();
 
   g_state.lgr->deinitialize(g_state.lgrData);
   g_state.lgr = NULL;
@@ -325,7 +321,7 @@ static int cursorThread(void * unused)
   return 0;
 }
 
-static int frameThread(void * unused)
+int main_frameThread(void * unused)
 {
   struct DMAFrameInfo
   {
@@ -590,7 +586,7 @@ int eventFilter(void * userdata, SDL_Event * event)
   return 0;
 }
 
-void int_handler(int sig)
+void intHandler(int sig)
 {
   switch(sig)
   {
@@ -611,7 +607,7 @@ void int_handler(int sig)
   }
 }
 
-static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
+static bool tryRenderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
 {
   const LG_Renderer *r = LG_Renderers[index];
 
@@ -635,143 +631,6 @@ static bool try_renderer(const int index, const LG_RendererParams lgrParams, Uin
 
   DEBUG_INFO("Using Renderer: %s", r->get_name());
   return true;
-}
-
-static void keybind_fullscreen(int sc, void * opaque)
-{
-  SDL_SetWindowFullscreen(g_state.window, g_params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-  g_params.fullscreen = !g_params.fullscreen;
-}
-
-static void keybind_video(int sc, void * opaque)
-{
-  g_state.stopVideo = !g_state.stopVideo;
-  app_alert(
-    LG_ALERT_INFO,
-    g_state.stopVideo ? "Video Stream Disabled" : "Video Stream Enabled"
-  );
-
-  if (!g_state.stopVideo)
-  {
-    if (t_frame)
-    {
-      lgJoinThread(t_frame, NULL);
-      t_frame = NULL;
-    }
-
-    if (!lgCreateThread("frameThread", frameThread, NULL, &t_frame))
-      DEBUG_ERROR("frame create thread failed");
-  }
-}
-
-static void keybind_rotate(int sc, void * opaque)
-{
-  if (g_params.winRotate == LG_ROTATE_MAX-1)
-    g_params.winRotate = 0;
-  else
-    ++g_params.winRotate;
-  core_updatePositionInfo();
-}
-
-static void toggle_input(int sc, void * opaque)
-{
-  g_state.ignoreInput = !g_state.ignoreInput;
-
-  if (g_state.ignoreInput)
-    core_setCursorInView(false);
-  else
-    g_state.ds->realignPointer();
-
-  app_alert(
-    LG_ALERT_INFO,
-    g_state.ignoreInput ? "Input Disabled" : "Input Enabled"
-  );
-}
-
-static void keybind_quit(int sc, void * opaque)
-{
-  g_state.state = APP_STATE_SHUTDOWN;
-}
-
-static void mouse_sens_inc(int sc, void * opaque)
-{
-  char * msg;
-  if (g_cursor.sens < 9)
-    ++g_cursor.sens;
-
-  alloc_sprintf(&msg, "Sensitivity: %s%d", g_cursor.sens > 0 ? "+" : "", g_cursor.sens);
-  app_alert(
-    LG_ALERT_INFO,
-    msg
-  );
-  free(msg);
-}
-
-static void mouse_sens_dec(int sc, void * opaque)
-{
-  char * msg;
-
-  if (g_cursor.sens > -9)
-    --g_cursor.sens;
-
-  alloc_sprintf(&msg, "Sensitivity: %s%d", g_cursor.sens > 0 ? "+" : "", g_cursor.sens);
-  app_alert(
-    LG_ALERT_INFO,
-    msg
-  );
-  free(msg);
-}
-
-static void keybind_ctrlAltFn(int sc, void * opaque)
-{
-  const uint32_t ctrl = xfree86_to_ps2[KEY_LEFTCTRL];
-  const uint32_t alt  = xfree86_to_ps2[KEY_LEFTALT ];
-  const uint32_t fn   = xfree86_to_ps2[sc];
-  spice_key_down(ctrl);
-  spice_key_down(alt );
-  spice_key_down(fn  );
-
-  spice_key_up(ctrl);
-  spice_key_up(alt );
-  spice_key_up(fn  );
-}
-
-static void keybind_passthrough(int sc, void * opaque)
-{
-  sc = xfree86_to_ps2[sc];
-  spice_key_down(sc);
-  spice_key_up  (sc);
-}
-
-static void register_key_binds(void)
-{
-  app_registerKeybind(KEY_F, keybind_fullscreen, NULL);
-  app_registerKeybind(KEY_V, keybind_video     , NULL);
-  app_registerKeybind(KEY_R, keybind_rotate    , NULL);
-  app_registerKeybind(KEY_Q, keybind_quit      , NULL);
-
-  if (g_params.useSpiceInput)
-  {
-    app_registerKeybind(KEY_I     , toggle_input     , NULL);
-    app_registerKeybind(KEY_INSERT, mouse_sens_inc   , NULL);
-    app_registerKeybind(KEY_DELETE, mouse_sens_dec   , NULL);
-
-    app_registerKeybind(KEY_F1 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F2 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F3 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F4 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F5 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F6 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F7 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F8 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F9 , keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F10, keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F11, keybind_ctrlAltFn, NULL);
-    app_registerKeybind(KEY_F12, keybind_ctrlAltFn, NULL);
-
-    app_registerKeybind(KEY_LEFTMETA , keybind_passthrough, NULL);
-    app_registerKeybind(KEY_RIGHTMETA, keybind_passthrough, NULL);
-  }
 }
 
 static void initSDLCursor(void)
@@ -849,8 +708,8 @@ static int lg_run(void)
 
   // override SDL's SIGINIT handler so that we can tell the difference between
   // SIGINT and the user sending a close event, such as ALT+F4
-  signal(SIGINT , int_handler);
-  signal(SIGTERM, int_handler);
+  signal(SIGINT , intHandler);
+  signal(SIGTERM, intHandler);
 
   // try map the shared memory
   if (!ivshmemOpen(&g_state.shm))
@@ -900,7 +759,7 @@ static int lg_run(void)
   {
     DEBUG_INFO("Trying forced renderer");
     sdlFlags = 0;
-    if (!try_renderer(g_params.forceRendererIndex, lgrParams, &sdlFlags))
+    if (!tryRenderer(g_params.forceRendererIndex, lgrParams, &sdlFlags))
     {
       DEBUG_ERROR("Forced renderer failed to iniailize");
       return -1;
@@ -913,7 +772,7 @@ static int lg_run(void)
     for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
     {
       sdlFlags = 0;
-      if (try_renderer(i, lgrParams, &sdlFlags))
+      if (tryRenderer(i, lgrParams, &sdlFlags))
       {
         g_state.lgr = LG_Renderers[i];
         break;
@@ -994,7 +853,7 @@ static int lg_run(void)
     g_state.frameTime = 1000000000ULL / (unsigned long long)g_params.fpsMin;
   }
 
-  register_key_binds();
+  keybind_register();
 
   initSDLCursor();
 
@@ -1136,11 +995,8 @@ restart:
     return 1;
   }
 
-  if (!lgCreateThread("frameThread", frameThread, NULL, &t_frame))
-  {
-    DEBUG_ERROR("frame create thread failed");
+  if (!core_startFrameThread())
     return -1;
-  }
 
   while(g_state.state == APP_STATE_RUNNING)
   {
@@ -1156,9 +1012,10 @@ restart:
   {
     lgSignalEvent(e_startup);
     lgSignalEvent(e_frame);
-    lgJoinThread(t_frame , NULL);
+
+    core_stopFrameThread();
+
     lgJoinThread(t_cursor, NULL);
-    t_frame  = NULL;
     t_cursor = NULL;
 
     lgInit();

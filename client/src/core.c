@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "util.h"
 
 #include "common/time.h"
+#include "common/debug.h"
 
 #include <assert.h>
 
@@ -264,4 +265,28 @@ void core_alignToGuest(void)
 bool core_isValidPointerPos(int x, int y)
 {
   return g_state.ds->isValidPointerPos(x, y);
+}
+
+bool core_startFrameThread(void)
+{
+  if (g_state.frameThread)
+    return true;
+
+  g_state.stopVideo = false;
+  if (!lgCreateThread("frameThread", main_frameThread, NULL,
+        &g_state.frameThread))
+  {
+    DEBUG_ERROR("frame create thread failed");
+    return false;
+  }
+  return true;
+}
+
+void core_stopFrameThread(void)
+{
+  g_state.stopVideo = true;
+  if (g_state.frameThread)
+    lgJoinThread(g_state.frameThread, NULL);
+
+  g_state.frameThread = NULL;
 }
