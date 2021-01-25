@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "kb.h"
+#include "common/types.h"
 #include "common/debug.h"
 
 struct SDLDSState
@@ -146,8 +147,20 @@ static bool sdlEventFilter(SDL_Event * event)
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
-          app_handleResizeEvent(event->window.data1, event->window.data2);
+        {
+          struct Border border;
+          SDL_GetWindowBordersSize(
+            app_getWindow(),
+            &border.top,
+            &border.left,
+            &border.bottom,
+            &border.right
+          );
+
+          app_handleResizeEvent(event->window.data1, event->window.data2,
+              border);
           return true;
+        }
 
         case SDL_WINDOWEVENT_MOVED:
           app_updateWindowPos(event->window.data1, event->window.data2);

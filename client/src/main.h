@@ -58,7 +58,7 @@ struct AppState
   int                  windowCX, windowCY;
   LG_RendererRotate    rotate;
   bool                 focused;
-  SDL_Rect             border;
+  struct Border        border;
   SDL_Point            srcSize;
   LG_RendererRect      dstRect;
   bool                 posInfoValid;

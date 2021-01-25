@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
+#include "common/types.h"
 #include "interface/displayserver.h"
 
 SDL_Window * app_getWindow(void);
@@ -30,7 +31,7 @@ bool app_cursorWantsRaw(void);
 bool app_cursorInWindow(void);
 void app_updateCursorPos(double x, double y);
 void app_updateWindowPos(int x, int y);
-void app_handleResizeEvent(int w, int h);
+void app_handleResizeEvent(int w, int h, const struct Border border);
 void app_handleMouseGrabbed(double ex, double ey);
 void app_handleMouseNormal(double ex, double ey);
 void app_handleMouseBasic(void);
