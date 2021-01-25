@@ -17,19 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _H_LG_CORE_
-#define _H_LG_CORE_
+#ifndef _H_LG_KEYBIND_
+#define _H_LG_KEYBIND_
 
-#include <stdbool.h>
-
-void core_setCursorInView(bool enable);
-void core_setGrab(bool enable);
-void core_setGrabQuiet(bool enable);
-bool core_warpPointer(int x, int y, bool exiting);
-void core_updatePositionInfo(void);
-void core_alignToGuest(void);
-bool core_isValidPointerPos(int x, int y);
-bool core_startFrameThread(void);
-void core_stopFrameThread(void);
+void keybind_register(void);
 
 #endif
