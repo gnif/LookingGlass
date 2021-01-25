@@ -107,10 +107,13 @@ static bool x11Init(SDL_SysWMinfo * info)
   {
     XEvent reqevent =
     {
-      .type                 = ClientMessage,
-      .xclient.window       = x11.window,
-      .xclient.format       = 32,
-      .xclient.message_type = x11.aNetReqFrameExtents
+      .xclient =
+      {
+        .type         = ClientMessage,
+        .window       = x11.window,
+        .format       = 32,
+        .message_type = x11.aNetReqFrameExtents
+      }
     };
 
     XSendEvent(x11.display, DefaultRootWindow(x11.display), False,
