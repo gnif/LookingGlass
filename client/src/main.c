@@ -745,47 +745,33 @@ static void key_passthrough(uint32_t sc, void * opaque)
 
 static void register_key_binds(void)
 {
-  g_state.kbFS           = app_register_keybind(KEY_F     , toggle_fullscreen, NULL);
-  g_state.kbVideo        = app_register_keybind(KEY_V     , toggle_video     , NULL);
-  g_state.kbRotate       = app_register_keybind(KEY_R     , toggle_rotate    , NULL);
-  g_state.kbQuit         = app_register_keybind(KEY_Q     , quit             , NULL);
+  app_registerKeybind(KEY_F, toggle_fullscreen, NULL);
+  app_registerKeybind(KEY_V, toggle_video     , NULL);
+  app_registerKeybind(KEY_R, toggle_rotate    , NULL);
+  app_registerKeybind(KEY_Q, quit             , NULL);
 
   if (g_params.useSpiceInput)
   {
-    g_state.kbInput        = app_register_keybind(KEY_I     , toggle_input     , NULL);
-    g_state.kbMouseSensInc = app_register_keybind(KEY_INSERT, mouse_sens_inc   , NULL);
-    g_state.kbMouseSensDec = app_register_keybind(KEY_DELETE, mouse_sens_dec   , NULL);
+    app_registerKeybind(KEY_I     , toggle_input     , NULL);
+    app_registerKeybind(KEY_INSERT, mouse_sens_inc   , NULL);
+    app_registerKeybind(KEY_DELETE, mouse_sens_dec   , NULL);
 
-    g_state.kbCtrlAltFn[0 ] = app_register_keybind(KEY_F1 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[1 ] = app_register_keybind(KEY_F2 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[2 ] = app_register_keybind(KEY_F3 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[3 ] = app_register_keybind(KEY_F4 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[4 ] = app_register_keybind(KEY_F5 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[5 ] = app_register_keybind(KEY_F6 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[6 ] = app_register_keybind(KEY_F7 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[7 ] = app_register_keybind(KEY_F8 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[8 ] = app_register_keybind(KEY_F9 , ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[9 ] = app_register_keybind(KEY_F10, ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[10] = app_register_keybind(KEY_F11, ctrl_alt_fn, NULL);
-    g_state.kbCtrlAltFn[11] = app_register_keybind(KEY_F12, ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F1 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F2 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F3 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F4 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F5 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F6 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F7 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F8 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F9 , ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F10, ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F11, ctrl_alt_fn, NULL);
+    app_registerKeybind(KEY_F12, ctrl_alt_fn, NULL);
 
-    g_state.kbPass[0] = app_register_keybind(KEY_LEFTMETA , key_passthrough, NULL);
-    g_state.kbPass[1] = app_register_keybind(KEY_RIGHTMETA, key_passthrough, NULL);
+    app_registerKeybind(KEY_LEFTMETA , key_passthrough, NULL);
+    app_registerKeybind(KEY_RIGHTMETA, key_passthrough, NULL);
   }
-}
-
-static void release_key_binds(void)
-{
-  app_release_keybind(&g_state.kbFS   );
-  app_release_keybind(&g_state.kbVideo);
-  app_release_keybind(&g_state.kbInput);
-  app_release_keybind(&g_state.kbQuit );
-  app_release_keybind(&g_state.kbMouseSensInc);
-  app_release_keybind(&g_state.kbMouseSensDec);
-  for(int i = 0; i < 12; ++i)
-    app_release_keybind(&g_state.kbCtrlAltFn[i]);
-  for(int i = 0; i < 2; ++i)
-    app_release_keybind(&g_state.kbPass[i]);
 }
 
 static void initSDLCursor(void)
@@ -1245,7 +1231,7 @@ static void lg_shutdown(void)
 
   ivshmemClose(&g_state.shm);
 
-  release_key_binds();
+  app_releaseAllKeybinds();
 
   SDL_Quit();
 }
