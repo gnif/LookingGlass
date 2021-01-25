@@ -163,6 +163,11 @@ static bool sdlEventFilter(SDL_Event * event)
   return false;
 }
 
+static void sdlShowPointer(bool show)
+{
+  SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
+}
+
 static void sdlGrabPointer(void)
 {
   SDL_SetWindowGrab(app_getWindow(), SDL_TRUE);
@@ -222,6 +227,20 @@ static void sdlRealignPointer(void)
   app_handleMouseNormal(0, 0);
 }
 
+static bool sdlIsValidPointerPos(int x, int y)
+{
+  const int displays = SDL_GetNumVideoDisplays();
+  for(int i = 0; i < displays; ++i)
+  {
+    SDL_Rect r;
+    SDL_GetDisplayBounds(i, &r);
+    if ((x >= r.x && x < r.x + r.w) &&
+        (y >= r.y && y < r.y + r.h))
+      return true;
+  }
+  return false;
+}
+
 static void sdlInhibitIdle(void)
 {
   SDL_DisableScreenSaver();
@@ -234,22 +253,24 @@ static void sdlUninhibitIdle(void)
 
 struct LG_DisplayServerOps LGDS_SDL =
 {
-  .subsystem      = SDL_SYSWM_UNKNOWN,
-  .earlyInit      = sdlEarlyInit,
-  .init           = sdlInit,
-  .startup        = sdlStartup,
-  .shutdown       = sdlShutdown,
-  .free           = sdlFree,
-  .getProp        = sdlGetProp,
-  .eventFilter    = sdlEventFilter,
-  .grabPointer    = sdlGrabPointer,
-  .ungrabPointer  = sdlUngrabPointer,
-  .grabKeyboard   = sdlGrabKeyboard,
-  .ungrabKeyboard = sdlUngrabKeyboard,
-  .warpPointer    = sdlWarpPointer,
-  .realignPointer = sdlRealignPointer,
-  .inhibitIdle    = sdlInhibitIdle,
-  .uninhibitIdle  = sdlUninhibitIdle,
+  .subsystem         = SDL_SYSWM_UNKNOWN,
+  .earlyInit         = sdlEarlyInit,
+  .init              = sdlInit,
+  .startup           = sdlStartup,
+  .shutdown          = sdlShutdown,
+  .free              = sdlFree,
+  .getProp           = sdlGetProp,
+  .eventFilter       = sdlEventFilter,
+  .showPointer       = sdlShowPointer,
+  .grabPointer       = sdlGrabPointer,
+  .ungrabPointer     = sdlUngrabPointer,
+  .grabKeyboard      = sdlGrabKeyboard,
+  .ungrabKeyboard    = sdlUngrabKeyboard,
+  .warpPointer       = sdlWarpPointer,
+  .realignPointer    = sdlRealignPointer,
+  .isValidPointerPos = sdlIsValidPointerPos,
+  .inhibitIdle       = sdlInhibitIdle,
+  .uninhibitIdle     = sdlUninhibitIdle,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,

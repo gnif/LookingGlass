@@ -57,7 +57,7 @@ void core_setCursorInView(bool enable)
   if (enable)
   {
     if (g_params.hideMouse)
-      SDL_ShowCursor(SDL_DISABLE);
+      g_state.ds->showPointer(false);
 
     if (warpSupport && !g_params.captureInputOnly)
       g_state.ds->grabPointer();
@@ -65,7 +65,7 @@ void core_setCursorInView(bool enable)
   else
   {
     if (g_params.hideMouse)
-      SDL_ShowCursor(SDL_ENABLE);
+      g_state.ds->showPointer(true);
 
     if (warpSupport)
       g_state.ds->ungrabPointer();
@@ -90,7 +90,7 @@ void core_setGrabQuiet(bool enable)
 {
   /* we always do this so that at init the cursor is in the right state */
   if (g_params.captureInputOnly && g_params.hideMouse)
-    SDL_ShowCursor(enable ? SDL_DISABLE : SDL_ENABLE);
+    g_state.ds->showPointer(!enable);
 
   if (g_cursor.grab == enable)
     return;
@@ -259,4 +259,9 @@ void core_alignToGuest(void)
   if (util_guestCurToLocal(&local))
     if (core_warpPointer(round(local.x), round(local.y), false))
       core_setCursorInView(true);
+}
+
+bool core_isValidPointerPos(int x, int y)
+{
+  return g_state.ds->isValidPointerPos(x, y);
 }

@@ -32,6 +32,5 @@ void util_cursorToInt(double ex, double ey, int *x, int *y);
 bool util_guestCurToLocal(struct DoublePoint *local);
 void util_localCurToGuest(struct DoublePoint *guest);
 void util_rotatePoint(struct DoublePoint *point);
-bool util_isValidCursorLocation(int x, int y);
 
 #endif
