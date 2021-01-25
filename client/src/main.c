@@ -2299,6 +2299,7 @@ int main(int argc, char * argv[])
   lg_shutdown();
 
   config_free();
-  return ret;
 
+  cleanupCrashHandler();
+  return ret;
 }
