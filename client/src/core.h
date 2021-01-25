@@ -1,5 +1,5 @@
 /*
-KVMGFX Client - A KVM Client for VGA Passthrough
+Looking Glass - KVM FrameRelay (KVMFR) Client
 Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
@@ -17,10 +17,16 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _H_LG_COMMON_SYSUTILS
-#define _H_LG_COMMON_SYSUTILS
+#ifndef _H_LG_CORE_
+#define _H_LG_CORE_
 
-// returns the page size
-long sysinfo_getPageSize();
+#include <stdbool.h>
+
+void core_setCursorInView(bool enable);
+void core_setGrab(bool enable);
+void core_setGrabQuiet(bool enable);
+bool core_warpPointer(int x, int y, bool exiting);
+void core_updatePositionInfo(void);
+void core_alignToGuest(void);
 
 #endif

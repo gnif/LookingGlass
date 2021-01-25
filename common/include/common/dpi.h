@@ -17,9 +17,14 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _H_LG_COMMON_DPI_
+#define _H_LG_COMMON_DPI_
+
 #include <windows.h>
 
 // At 100% scaling, Windows reports 96 DPI.
 #define DPI_100_PERCENT 96
 
 UINT monitor_dpi(HMONITOR hMonitor);
+
+#endif

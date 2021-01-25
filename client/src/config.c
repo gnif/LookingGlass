@@ -411,9 +411,9 @@ static struct Option options[] =
 
 void config_init(void)
 {
-  params.center = true;
-  params.w      = 1024;
-  params.h      = 768;
+  g_params.center = true;
+  g_params.w      = 1024;
+  g_params.h      = 768;
 
   option_register(options);
 }
@@ -468,72 +468,72 @@ bool config_load(int argc, char * argv[])
   }
 
   // setup the application params for the basic types
-  params.cursorPollInterval = option_get_int   ("app", "cursorPollInterval");
-  params.framePollInterval  = option_get_int   ("app", "framePollInterval" );
-  params.allowDMA           = option_get_bool  ("app", "allowDMA"          );
+  g_params.cursorPollInterval = option_get_int   ("app", "cursorPollInterval");
+  g_params.framePollInterval  = option_get_int   ("app", "framePollInterval" );
+  g_params.allowDMA           = option_get_bool  ("app", "allowDMA"          );
 
-  params.windowTitle   = option_get_string("win", "title"        );
-  params.autoResize    = option_get_bool  ("win", "autoResize"   );
-  params.allowResize   = option_get_bool  ("win", "allowResize"  );
-  params.keepAspect    = option_get_bool  ("win", "keepAspect"   );
-  params.forceAspect   = option_get_bool  ("win", "forceAspect"  );
-  params.dontUpscale   = option_get_bool  ("win", "dontUpscale"  );
-  params.borderless    = option_get_bool  ("win", "borderless"   );
-  params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
-  params.maximize      = option_get_bool  ("win", "maximize"     );
-  params.fpsMin        = option_get_int   ("win", "fpsMin"       );
-  params.showFPS       = option_get_bool  ("win", "showFPS"      );
-  params.ignoreQuit    = option_get_bool  ("win", "ignoreQuit"   );
-  params.noScreensaver = option_get_bool  ("win", "noScreensaver");
-  params.showAlerts    = option_get_bool  ("win", "alerts"       );
-  params.quickSplash   = option_get_bool  ("win", "quickSplash"  );
+  g_params.windowTitle   = option_get_string("win", "title"        );
+  g_params.autoResize    = option_get_bool  ("win", "autoResize"   );
+  g_params.allowResize   = option_get_bool  ("win", "allowResize"  );
+  g_params.keepAspect    = option_get_bool  ("win", "keepAspect"   );
+  g_params.forceAspect   = option_get_bool  ("win", "forceAspect"  );
+  g_params.dontUpscale   = option_get_bool  ("win", "dontUpscale"  );
+  g_params.borderless    = option_get_bool  ("win", "borderless"   );
+  g_params.fullscreen    = option_get_bool  ("win", "fullScreen"   );
+  g_params.maximize      = option_get_bool  ("win", "maximize"     );
+  g_params.fpsMin        = option_get_int   ("win", "fpsMin"       );
+  g_params.showFPS       = option_get_bool  ("win", "showFPS"      );
+  g_params.ignoreQuit    = option_get_bool  ("win", "ignoreQuit"   );
+  g_params.noScreensaver = option_get_bool  ("win", "noScreensaver");
+  g_params.showAlerts    = option_get_bool  ("win", "alerts"       );
+  g_params.quickSplash   = option_get_bool  ("win", "quickSplash"  );
 
   switch(option_get_int("win", "rotate"))
   {
-    case 0  : params.winRotate = LG_ROTATE_0  ; break;
-    case 90 : params.winRotate = LG_ROTATE_90 ; break;
-    case 180: params.winRotate = LG_ROTATE_180; break;
-    case 270: params.winRotate = LG_ROTATE_270; break;
+    case 0  : g_params.winRotate = LG_ROTATE_0  ; break;
+    case 90 : g_params.winRotate = LG_ROTATE_90 ; break;
+    case 180: g_params.winRotate = LG_ROTATE_180; break;
+    case 270: g_params.winRotate = LG_ROTATE_270; break;
   }
 
-  params.grabKeyboard        = option_get_bool("input", "grabKeyboard"       );
-  params.grabKeyboardOnFocus = option_get_bool("input", "grabKeyboardOnFocus");
-  params.escapeKey           = option_get_int ("input", "escapeKey"          );
-  params.ignoreWindowsKeys   = option_get_bool("input", "ignoreWindowsKeys"  );
-  params.hideMouse           = option_get_bool("input", "hideCursor"         );
-  params.mouseSens           = option_get_int ("input", "mouseSens"          );
-  params.mouseSmoothing      = option_get_bool("input", "mouseSmoothing"     );
-  params.rawMouse            = option_get_bool("input", "rawMouse"           );
-  params.mouseRedraw         = option_get_bool("input", "mouseRedraw"        );
-  params.autoCapture         = option_get_bool("input", "autoCapture"        );
-  params.captureInputOnly    = option_get_bool("input", "captureOnly"        );
+  g_params.grabKeyboard        = option_get_bool("input", "grabKeyboard"       );
+  g_params.grabKeyboardOnFocus = option_get_bool("input", "grabKeyboardOnFocus");
+  g_params.escapeKey           = option_get_int ("input", "escapeKey"          );
+  g_params.ignoreWindowsKeys   = option_get_bool("input", "ignoreWindowsKeys"  );
+  g_params.hideMouse           = option_get_bool("input", "hideCursor"         );
+  g_params.mouseSens           = option_get_int ("input", "mouseSens"          );
+  g_params.mouseSmoothing      = option_get_bool("input", "mouseSmoothing"     );
+  g_params.rawMouse            = option_get_bool("input", "rawMouse"           );
+  g_params.mouseRedraw         = option_get_bool("input", "mouseRedraw"        );
+  g_params.autoCapture         = option_get_bool("input", "autoCapture"        );
+  g_params.captureInputOnly    = option_get_bool("input", "captureOnly"        );
 
-  params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
+  g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 
   if (option_get_bool("spice", "enable"))
   {
-    params.spiceHost         = option_get_string("spice", "host");
-    params.spicePort         = option_get_int   ("spice", "port");
+    g_params.spiceHost         = option_get_string("spice", "host");
+    g_params.spicePort         = option_get_int   ("spice", "port");
 
-    params.useSpiceInput     = option_get_bool("spice", "input"    );
-    params.useSpiceClipboard = option_get_bool("spice", "clipboard");
+    g_params.useSpiceInput     = option_get_bool("spice", "input"    );
+    g_params.useSpiceClipboard = option_get_bool("spice", "clipboard");
 
-    if (params.useSpiceClipboard)
+    if (g_params.useSpiceClipboard)
     {
-      params.clipboardToVM    = option_get_bool("spice", "clipboardToVM"   );
-      params.clipboardToLocal = option_get_bool("spice", "clipboardToLocal");
+      g_params.clipboardToVM    = option_get_bool("spice", "clipboardToVM"   );
+      g_params.clipboardToLocal = option_get_bool("spice", "clipboardToLocal");
 
-      if (!params.clipboardToVM && !params.clipboardToLocal)
-        params.useSpiceClipboard = false;
+      if (!g_params.clipboardToVM && !g_params.clipboardToLocal)
+        g_params.useSpiceClipboard = false;
     }
 
-    params.scaleMouseInput = option_get_bool("spice", "scaleCursor");
-    params.captureOnStart  = option_get_bool("spice", "captureOnStart");
-    params.alwaysShowCursor  = option_get_bool("spice", "alwaysShowCursor");
+    g_params.scaleMouseInput = option_get_bool("spice", "scaleCursor");
+    g_params.captureOnStart  = option_get_bool("spice", "captureOnStart");
+    g_params.alwaysShowCursor  = option_get_bool("spice", "alwaysShowCursor");
   }
 
   //FIXME, this should be using linux keycodes
-  params.escapeKey = sdl_to_xfree86[params.escapeKey];
+  g_params.escapeKey = sdl_to_xfree86[g_params.escapeKey];
 
   return true;
 }
@@ -574,15 +574,15 @@ static bool optRendererParse(struct Option * opt, const char * str)
 
   if (strcasecmp(str, "auto") == 0)
   {
-    params.forceRenderer = false;
+    g_params.forceRenderer = false;
     return true;
   }
 
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
     if (strcasecmp(str, LG_Renderers[i]->get_name()) == 0)
     {
-      params.forceRenderer      = true;
-      params.forceRendererIndex = i;
+      g_params.forceRenderer      = true;
+      g_params.forceRendererIndex = i;
       return true;
     }
 
@@ -602,13 +602,13 @@ static StringList optRendererValues(struct Option * opt)
 
 static char * optRendererToString(struct Option * opt)
 {
-  if (!params.forceRenderer)
+  if (!g_params.forceRenderer)
     return strdup("auto");
 
-  if (params.forceRendererIndex >= LG_RENDERER_COUNT)
+  if (g_params.forceRendererIndex >= LG_RENDERER_COUNT)
     return NULL;
 
-  return strdup(LG_Renderers[params.forceRendererIndex]->get_name());
+  return strdup(LG_Renderers[g_params.forceRendererIndex]->get_name());
 }
 
 static bool optPosParse(struct Option * opt, const char * str)
@@ -618,13 +618,13 @@ static bool optPosParse(struct Option * opt, const char * str)
 
   if (strcmp(str, "center") == 0)
   {
-    params.center = true;
+    g_params.center = true;
     return true;
   }
 
-  if (sscanf(str, "%dx%d", &params.x, &params.y) == 2)
+  if (sscanf(str, "%dx%d", &g_params.x, &g_params.y) == 2)
   {
-    params.center = false;
+    g_params.center = false;
     return true;
   }
 
@@ -641,12 +641,12 @@ static StringList optPosValues(struct Option * opt)
 
 static char * optPosToString(struct Option * opt)
 {
-  if (params.center)
+  if (g_params.center)
     return strdup("center");
 
-  int len = snprintf(NULL, 0, "%dx%d", params.x, params.y);
+  int len = snprintf(NULL, 0, "%dx%d", g_params.x, g_params.y);
   char * str = malloc(len + 1);
-  sprintf(str, "%dx%d", params.x, params.y);
+  sprintf(str, "%dx%d", g_params.x, g_params.y);
 
   return str;
 }
@@ -656,9 +656,9 @@ static bool optSizeParse(struct Option * opt, const char * str)
   if (!str)
     return false;
 
-  if (sscanf(str, "%dx%d", &params.w, &params.h) == 2)
+  if (sscanf(str, "%dx%d", &g_params.w, &g_params.h) == 2)
   {
-    if (params.w < 1 || params.h < 1)
+    if (g_params.w < 1 || g_params.h < 1)
       return false;
     return true;
   }
@@ -675,9 +675,9 @@ static StringList optSizeValues(struct Option * opt)
 
 static char * optSizeToString(struct Option * opt)
 {
-  int len = snprintf(NULL, 0, "%dx%d", params.w, params.h);
+  int len = snprintf(NULL, 0, "%dx%d", g_params.w, g_params.h);
   char * str = malloc(len + 1);
-  sprintf(str, "%dx%d", params.w, params.h);
+  sprintf(str, "%dx%d", g_params.w, g_params.h);
 
   return str;
 }

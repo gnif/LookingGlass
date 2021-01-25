@@ -1,6 +1,6 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -17,7 +17,8 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#pragma once
+#ifndef _H_LG_COMMON_IVSHMEM_
+#define _H_LG_COMMON_IVSHMEM_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,3 +42,5 @@ void ivshmemFree(struct IVSHMEM * dev);
 /* Linux KVMFR support only for now (VM->VM) */
 bool ivshmemHasDMA   (struct IVSHMEM * dev);
 int  ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size);
+
+#endif
