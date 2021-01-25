@@ -462,7 +462,7 @@ void app_handleMouseNormal(double ex, double ey)
       const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
       const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
 
-      if (util_isValidCursorLocation(
+      if (core_isValidPointerPos(
             g_state.windowPos.x + g_state.border.x + tx,
             g_state.windowPos.y + g_state.border.y + ty))
       {
