@@ -2046,6 +2046,8 @@ static int lg_run(void)
     return -1;
   }
 
+  lgInit();
+
   // start the renderThread so we don't just display junk
   if (!lgCreateThread("renderThread", renderThread, NULL, &t_render))
   {
@@ -2087,8 +2089,6 @@ static int lg_run(void)
   uint32_t udataSize;
   KVMFR *udata;
   int waitCount = 0;
-
-  lgInit();
 
 restart:
   while(g_state.state == APP_STATE_RUNNING)
