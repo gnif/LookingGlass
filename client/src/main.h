@@ -22,7 +22,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 #include <linux/input.h>
 
-#include "interface/app.h"
 #include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
 
@@ -92,16 +91,6 @@ struct AppState
 
   uint64_t resizeTimeout;
   bool     resizeDone;
-
-  KeybindHandle kbFS;
-  KeybindHandle kbVideo;
-  KeybindHandle kbRotate;
-  KeybindHandle kbInput;
-  KeybindHandle kbQuit;
-  KeybindHandle kbMouseSensInc;
-  KeybindHandle kbMouseSensDec;
-  KeybindHandle kbCtrlAltFn[12];
-  KeybindHandle kbPass[2];
 };
 
 struct AppParams
