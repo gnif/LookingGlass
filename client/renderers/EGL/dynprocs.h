@@ -20,10 +20,15 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL_egl.h>
 #include <GL/gl.h>
 
-typedef void (*glEGLImageTargetTexture2DOES_t)(GLenum target, GLeglImageOES image);
+typedef EGLDisplay (*eglGetPlatformDisplayEXT_t)(EGLenum platform,
+    void *native_display, const EGLint *attrib_list);
+typedef void (*glEGLImageTargetTexture2DOES_t)(GLenum target,
+    GLeglImageOES image);
 
 struct EGLDynProcs
 {
+  eglGetPlatformDisplayEXT_t     eglGetPlatformDisplay;
+  eglGetPlatformDisplayEXT_t     eglGetPlatformDisplayEXT;
   glEGLImageTargetTexture2DOES_t glEGLImageTargetTexture2DOES;
 };
 

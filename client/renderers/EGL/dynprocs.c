@@ -23,6 +23,10 @@ struct EGLDynProcs g_dynprocs = {0};
 
 void egl_dynProcsInit(void)
 {
+  g_dynprocs.eglGetPlatformDisplay = (eglGetPlatformDisplayEXT_t)
+    eglGetProcAddress("eglGetPlatformDisplay");
+  g_dynprocs.eglGetPlatformDisplayEXT = (eglGetPlatformDisplayEXT_t)
+    eglGetProcAddress("eglGetPlatformDisplayEXT");
   g_dynprocs.glEGLImageTargetTexture2DOES = (glEGLImageTargetTexture2DOES_t)
     eglGetProcAddress("glEGLImageTargetTexture2DOES");
 };

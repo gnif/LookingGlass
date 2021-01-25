@@ -506,43 +506,28 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     return false;
   }
 
-  bool useNative = false;
-  {
-    const char *client_exts = eglQueryString(NULL, EGL_EXTENSIONS);
-    if (strstr(client_exts, "EGL_KHR_platform_base") != NULL)
-      useNative = true;
-  }
+  egl_dynProcsInit();
 
-  DEBUG_INFO("use native: %s", useNative ? "true" : "false");
+  EGLNativeDisplayType native;
+  EGLenum platform;
 
   switch(wminfo.subsystem)
   {
     case SDL_SYSWM_X11:
-    {
-      if (!useNative)
-        this->display = eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, wminfo.info.x11.display, NULL);
-      else
-      {
-        EGLNativeDisplayType native = (EGLNativeDisplayType)wminfo.info.x11.display;
-        this->display = eglGetDisplay(native);
-      }
+      native           = (EGLNativeDisplayType)wminfo.info.x11.display;
+      platform         = EGL_PLATFORM_X11_KHR;
       this->nativeWind = (EGLNativeWindowType)wminfo.info.x11.window;
       break;
-    }
 
 #if defined(SDL_VIDEO_DRIVER_WAYLAND)
     case SDL_SYSWM_WAYLAND:
     {
       int width, height;
       SDL_GetWindowSize(window, &width, &height);
-      if (!useNative)
-        this->display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wminfo.info.wl.display, NULL);
-      else
-      {
-        EGLNativeDisplayType native = (EGLNativeDisplayType)wminfo.info.wl.display;
-        this->display = eglGetDisplay(native);
-      }
-      this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(wminfo.info.wl.surface, width, height);
+      native           = (EGLNativeDisplayType)wminfo.info.wl.display;
+      platform         = EGL_PLATFORM_WAYLAND_KHR;
+      this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(
+          wminfo.info.wl.surface, width, height);
       break;
     }
 #endif
@@ -550,6 +535,25 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
     default:
       DEBUG_ERROR("Unsupported subsystem");
       return false;
+  }
+
+  const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
+      g_dynprocs.eglGetPlatformDisplay)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplay");
+    this->display = g_dynprocs.eglGetPlatformDisplay(platform, native, NULL);
+  }
+  else if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
+      g_dynprocs.eglGetPlatformDisplayEXT)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplayEXT");
+    this->display = g_dynprocs.eglGetPlatformDisplayEXT(platform, native, NULL);
+  }
+  else
+  {
+    DEBUG_INFO("Using eglGetDisplay");
+    this->display = eglGetDisplay(native);
   }
 
   if (this->display == EGL_NO_DISPLAY)
@@ -639,8 +643,6 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
   const char *client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
   const char *vendor      = (const char *)glGetString(GL_VENDOR);
-
-  egl_dynProcsInit();
 
   DEBUG_INFO("EGL       : %d.%d", maj, min);
   DEBUG_INFO("Vendor    : %s", vendor);
