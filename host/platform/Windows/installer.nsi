@@ -129,6 +129,7 @@ Section "-Install" Section1
 
   SetOutPath $INSTDIR
   File ..\..\looking-glass-host.exe
+  File /nonfatal ..\..\looking-glass-host.pdb
   File LICENSE.txt
   WriteUninstaller $INSTDIR\uninstaller.exe
 
