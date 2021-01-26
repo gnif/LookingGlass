@@ -814,6 +814,11 @@ static EGLNativeWindowType x11GetEGLNativeWindow(void)
 {
   return (EGLNativeWindowType)x11.window;
 }
+
+static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface)
+{
+  eglSwapBuffers(display, surface);
+}
 #endif
 
 static void x11GLSwapBuffers(void)
@@ -1370,6 +1375,7 @@ struct LG_DisplayServerOps LGDS_X11 =
 #ifdef ENABLE_EGL
   .getEGLDisplay      = x11GetEGLDisplay,
   .getEGLNativeWindow = x11GetEGLNativeWindow,
+  .eglSwapBuffers     = x11EGLSwapBuffers,
 #endif
   .glSwapBuffers      = x11GLSwapBuffers,
   .showPointer        = x11ShowPointer,
