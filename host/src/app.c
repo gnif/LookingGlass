@@ -467,7 +467,7 @@ int app_main(int argc, char * argv[])
     .magic   = KVMFR_MAGIC,
     .version = KVMFR_VERSION,
   };
-  strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver));
+  strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver)-1);
 
   LGMP_STATUS status;
   if ((status = lgmpHostInit(shmDev.mem, shmDev.size, &app.lgmp,
