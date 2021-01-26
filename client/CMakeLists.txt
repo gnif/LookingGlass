@@ -53,6 +53,10 @@ add_compile_options(
 set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
 
+if (ENABLE_EGL)
+  add_definitions(-D ENABLE_EGL)
+endif()
+
 if(ENABLE_ASAN)
   add_compile_options("-fno-omit-frame-pointer" "-fsanitize=address")
   set(EXE_FLAGS "${EXE_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
@@ -108,6 +112,7 @@ set(SOURCES
 	src/util.c
 	src/clipboard.c
 	src/kb.c
+	src/egl_dynprocs.c
 )
 
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )

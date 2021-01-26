@@ -26,10 +26,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "spice/spice.h"
 
+#include <stdio.h>
+
 static void bind_fullscreen(int sc, void * opaque)
 {
-  SDL_SetWindowFullscreen(g_state.window, g_params.fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
   g_params.fullscreen = !g_params.fullscreen;
+  app_setFullscreen(g_params.fullscreen);
 }
 
 static void bind_video(int sc, void * opaque)

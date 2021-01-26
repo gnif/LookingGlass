@@ -27,17 +27,17 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "util.h"
 #include "dynamic/fonts.h"
 
-#include <SDL2/SDL_syswm.h>
-#include <SDL2/SDL_egl.h>
+#include <EGL/egl.h>
 
 #if defined(SDL_VIDEO_DRIVER_WAYLAND)
 #include <wayland-egl.h>
 #endif
 
 #include <assert.h>
+#include <string.h>
 
 #include "app.h"
-#include "dynprocs.h"
+#include "egl_dynprocs.h"
 #include "model.h"
 #include "shader.h"
 #include "desktop.h"
@@ -220,7 +220,7 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
   return true;
 }
 
-bool egl_initialize(void * opaque, Uint32 * sdlFlags)
+bool egl_initialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
   DEBUG_INFO("Double buffering is %s", this->opt.doubleBuffer ? "on" : "off");
@@ -494,73 +494,17 @@ void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, 
   this->showAlert = true;
 }
 
-bool egl_render_startup(void * opaque, SDL_Window * window)
+bool egl_render_startup(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  SDL_SysWMinfo wminfo;
-  SDL_VERSION(&wminfo.version);
-  if (!SDL_GetWindowWMInfo(window, &wminfo))
-  {
-    DEBUG_ERROR("SDL_GetWindowWMInfo failed");
+  this->nativeWind = app_getEGLNativeWindow();
+  if (!this->nativeWind)
     return false;
-  }
 
-  egl_dynProcsInit();
-
-  EGLNativeDisplayType native;
-  EGLenum platform;
-
-  switch(wminfo.subsystem)
-  {
-    case SDL_SYSWM_X11:
-      native           = (EGLNativeDisplayType)wminfo.info.x11.display;
-      platform         = EGL_PLATFORM_X11_KHR;
-      this->nativeWind = (EGLNativeWindowType)wminfo.info.x11.window;
-      break;
-
-#if defined(SDL_VIDEO_DRIVER_WAYLAND)
-    case SDL_SYSWM_WAYLAND:
-    {
-      int width, height;
-      SDL_GetWindowSize(window, &width, &height);
-      native           = (EGLNativeDisplayType)wminfo.info.wl.display;
-      platform         = EGL_PLATFORM_WAYLAND_KHR;
-      this->nativeWind = (EGLNativeWindowType)wl_egl_window_create(
-          wminfo.info.wl.surface, width, height);
-      break;
-    }
-#endif
-
-    default:
-      DEBUG_ERROR("Unsupported subsystem");
-      return false;
-  }
-
-  const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
-  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
-      g_dynprocs.eglGetPlatformDisplay)
-  {
-    DEBUG_INFO("Using eglGetPlatformDisplay");
-    this->display = g_dynprocs.eglGetPlatformDisplay(platform, native, NULL);
-  }
-  else if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
-      g_dynprocs.eglGetPlatformDisplayEXT)
-  {
-    DEBUG_INFO("Using eglGetPlatformDisplayEXT");
-    this->display = g_dynprocs.eglGetPlatformDisplayEXT(platform, native, NULL);
-  }
-  else
-  {
-    DEBUG_INFO("Using eglGetDisplay");
-    this->display = eglGetDisplay(native);
-  }
-
+  this->display = app_getEGLDisplay();
   if (this->display == EGL_NO_DISPLAY)
-  {
-    DEBUG_ERROR("eglGetDisplay failed");
     return false;
-  }
 
   int maj, min;
   if (!eglInitialize(this->display, &maj, &min))
@@ -651,7 +595,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   DEBUG_INFO("EGL APIs  : %s", eglQueryString(this->display, EGL_CLIENT_APIS));
   DEBUG_INFO("Extensions: %s", client_exts);
 
-  if (g_dynprocs.glEGLImageTargetTexture2DOES)
+  if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
     if (strstr(client_exts, "EGL_EXT_image_dma_buf_import") != NULL)
     {
@@ -709,7 +653,7 @@ bool egl_render_startup(void * opaque, SDL_Window * window)
   return true;
 }
 
-bool egl_render(void * opaque, SDL_Window * window, LG_RendererRotate rotate)
+bool egl_render(void * opaque, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
 
