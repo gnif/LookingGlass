@@ -18,9 +18,6 @@ function(add_displayserver name)
   add_subdirectory(${name})
 endfunction()
 
-# SDL must be first as it's the default implementation!
-add_displayserver(SDL)
-
 # Add/remove displayservers here!
 if (ENABLE_X11)
   add_displayserver(X11)
@@ -29,6 +26,9 @@ endif()
 if (ENABLE_WAYLAND)
   add_displayserver(Wayland)
 endif()
+
+# SDL must be last as it's the fallback implemntation
+add_displayserver(SDL)
 
 list(REMOVE_AT DISPLAYSERVERS      0)
 list(REMOVE_AT DISPLAYSERVERS_LINK 0)
