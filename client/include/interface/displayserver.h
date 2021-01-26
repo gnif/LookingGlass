@@ -21,8 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define _H_I_DISPLAYSERVER_
 
 #include <stdbool.h>
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_syswm.h>
+#include <EGL/egl.h>
 
 typedef enum LG_ClipboardData
 {
@@ -54,20 +53,34 @@ typedef enum LG_DSProperty
 }
 LG_DSProperty;
 
+typedef struct LG_DSInitParams
+{
+  const char * title;
+  int  x, y, w, h;
+  bool center;
+  bool fullscreen;
+  bool resizable;
+  bool borderless;
+  bool maximize;
+  bool minimizeOnFocusLoss;
+}
+LG_DSInitParams;
+
 typedef void (* LG_ClipboardReplyFn)(void * opaque, const LG_ClipboardData type,
     uint8_t * data, uint32_t size);
 
 struct LG_DisplayServerOps
 {
-  const SDL_SYSWM_TYPE subsystem;
+  /* return true if the selected ds is valid for the current platform */
+  bool (*probe)(void);
 
-  /* called before SDL has been initialized */
+  /* called before anything has been initialized */
   bool (*earlyInit)(void);
 
-  /* called after SDL has been initialized */
-  bool (*init)(SDL_SysWMinfo * info);
+  /* called when it's time to create and show the application window */
+  bool (*init)(const LG_DSInitParams params);
 
-  /* called at startup after window creation, renderer and/or SPICE is ready */
+  /* called at startup after window creation, renderer and SPICE is ready */
   void (*startup)();
 
   /* called just before final window destruction, before final free */
@@ -83,8 +96,14 @@ struct LG_DisplayServerOps
    */
   bool (*getProp)(LG_DSProperty prop, void * ret);
 
-  /* event filter, return true if the event has been handled */
-  bool (*eventFilter)(SDL_Event * event);
+#ifdef ENABLE_EGL
+  /* EGL support */
+  EGLDisplay (*getEGLDisplay)(void);
+  EGLNativeWindowType (*getEGLNativeWindow)(void);
+#endif
+
+  /* opengl platform specific methods */
+  void (*glSwapBuffers)(void);
 
   /* dm specific cursor implementations */
   void (*showPointer)(bool show);
@@ -107,6 +126,13 @@ struct LG_DisplayServerOps
   /* called to disable/enable the screensaver */
   void (*inhibitIdle)();
   void (*uninhibitIdle)();
+
+  /* wait for the specified time without blocking UI processing/event loops */
+  void (*wait)(unsigned int time);
+
+  /* set the window dimensions */
+  void (*setWindowSize)(int x, int y);
+  void (*setFullscreen)(bool fs);
 
   /* clipboard support */
   bool (*cbInit)(void);

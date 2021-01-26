@@ -343,7 +343,12 @@ static bool waylandEarlyInit(void)
   return true;
 }
 
-static bool waylandInit(SDL_SysWMinfo * info)
+static bool waylandProbe(void)
+{
+  return getenv("WAYLAND_DISPLAY") != NULL;
+}
+
+static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wm, 0, sizeof(wm));
 
@@ -857,7 +862,7 @@ static void waylandCBRelease(void)
 
 struct LG_DisplayServerOps LGDS_Wayland =
 {
-  .subsystem      = SDL_SYSWM_WAYLAND,
+  .probe          = waylandProbe,
   .earlyInit      = waylandEarlyInit,
   .init           = waylandInit,
   .startup        = waylandStartup,

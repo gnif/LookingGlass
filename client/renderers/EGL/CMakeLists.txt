@@ -33,7 +33,6 @@ make_object(
 
 add_library(renderer_EGL STATIC
 	egl.c
-	dynprocs.c
 	egldebug.c
 	shader.c
 	texture.c

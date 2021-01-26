@@ -20,14 +20,27 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/displayserver.h"
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_syswm.h>
+
+#include <EGL/eglext.h>
+
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+#include <wayland-egl.h>
+#endif
 
 #include "app.h"
 #include "kb.h"
+#include "egl_dynprocs.h"
 #include "common/types.h"
 #include "common/debug.h"
 
 struct SDLDSState
 {
+  SDL_Window * window;
+  SDL_Cursor * cursor;
+
+  EGLNativeWindowType wlDisplay;
+
   bool keyboardGrabbed;
   bool pointerGrabbed;
   bool exiting;
@@ -35,14 +48,72 @@ struct SDLDSState
 
 static struct SDLDSState sdl;
 
-static bool sdlEarlyInit(void)
+/* forwards */
+static int sdlEventFilter(void * userdata, SDL_Event * event);
+
+static bool sdlProbe(void)
 {
   return true;
 }
 
-static bool sdlInit(SDL_SysWMinfo * info)
+static bool sdlEarlyInit(void)
+{
+  // Allow screensavers for now: we will enable and disable as needed.
+  SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+
+  if (SDL_Init(SDL_INIT_VIDEO) < 0)
+  {
+    DEBUG_ERROR("SDL_Init Failed");
+    return false;
+  }
+
+  return true;
+}
+
+static bool sdlInit(const LG_DSInitParams params)
 {
   memset(&sdl, 0, sizeof(sdl));
+
+  sdl.window = SDL_CreateWindow(
+    params.title,
+    params.center ? SDL_WINDOWPOS_CENTERED : params.x,
+    params.center ? SDL_WINDOWPOS_CENTERED : params.y,
+    params.w,
+    params.h,
+    (
+      SDL_WINDOW_HIDDEN |
+      (params.resizable  ? SDL_WINDOW_RESIZABLE  : 0) |
+      (params.borderless ? SDL_WINDOW_BORDERLESS : 0) |
+      (params.maximize   ? SDL_WINDOW_MAXIMIZED  : 0)
+    )
+  );
+
+  if (sdl.window == NULL)
+  {
+    DEBUG_ERROR("Could not create an SDL window: %s\n", SDL_GetError());
+    return 1;
+  }
+
+  const uint8_t data[4] = {0xf, 0x9, 0x9, 0xf};
+  const uint8_t mask[4] = {0xf, 0xf, 0xf, 0xf};
+  sdl.cursor = SDL_CreateCursor(data, mask, 8, 4, 4, 0);
+  SDL_SetCursor(sdl.cursor);
+
+  SDL_ShowWindow(sdl.window);
+
+  SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
+      params.minimizeOnFocusLoss ? "1" : "0");
+
+  if (params.fullscreen)
+    SDL_SetWindowFullscreen(sdl.window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+
+  if (!params.center)
+    SDL_SetWindowPosition(sdl.window, params.x, params.y);
+
+  // ensure mouse acceleration is identical in server mode
+  SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
+
+  SDL_SetEventFilter(sdlEventFilter, NULL);
   return true;
 }
 
@@ -52,10 +123,17 @@ static void sdlStartup(void)
 
 static void sdlShutdown(void)
 {
+  SDL_DestroyWindow(sdl.window);
 }
 
 static void sdlFree(void)
 {
+  if (sdl.cursor)
+    SDL_FreeCursor(sdl.cursor);
+
+  if (sdl.window)
+    SDL_DestroyWindow(sdl.window);
+  SDL_Quit();
 }
 
 static bool sdlGetProp(LG_DSProperty prop, void * ret)
@@ -63,25 +141,120 @@ static bool sdlGetProp(LG_DSProperty prop, void * ret)
   return false;
 }
 
-static bool sdlEventFilter(SDL_Event * event)
+#ifdef ENABLE_EGL
+static EGLDisplay sdlGetEGLDisplay(void)
+{
+  SDL_SysWMinfo wminfo;
+  SDL_VERSION(&wminfo.version);
+  if (!SDL_GetWindowWMInfo(sdl.window, &wminfo))
+  {
+    DEBUG_ERROR("SDL_GetWindowWMInfo failed");
+    return EGL_NO_DISPLAY;
+  }
+
+  EGLNativeDisplayType native;
+  EGLenum platform;
+
+  switch(wminfo.subsystem)
+  {
+    case SDL_SYSWM_X11:
+      native   = (EGLNativeDisplayType)wminfo.info.x11.display;
+      platform = EGL_PLATFORM_X11_KHR;
+      break;
+
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+    case SDL_SYSWM_WAYLAND:
+      native   = (EGLNativeDisplayType)wminfo.info.wl.display;
+      platform = EGL_PLATFORM_WAYLAND_KHR;
+      break;
+#endif
+
+    default:
+      DEBUG_ERROR("Unsupported subsystem");
+      return EGL_NO_DISPLAY;
+  }
+
+  const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+
+  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
+      g_egl_dynProcs.eglGetPlatformDisplay)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplay");
+    return g_egl_dynProcs.eglGetPlatformDisplay(platform, native, NULL);
+  }
+
+  if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
+      g_egl_dynProcs.eglGetPlatformDisplayEXT)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplayEXT");
+    return g_egl_dynProcs.eglGetPlatformDisplayEXT(platform, native, NULL);
+  }
+
+  DEBUG_INFO("Using eglGetDisplay");
+  return eglGetDisplay(native);
+}
+
+static EGLNativeWindowType sdlGetEGLNativeWindow(void)
+{
+  SDL_SysWMinfo wminfo;
+  SDL_VERSION(&wminfo.version);
+  if (!SDL_GetWindowWMInfo(sdl.window, &wminfo))
+  {
+    DEBUG_ERROR("SDL_GetWindowWMInfo failed");
+    return 0;
+  }
+
+  switch(wminfo.subsystem)
+  {
+    case SDL_SYSWM_X11:
+      return (EGLNativeWindowType)wminfo.info.x11.window;
+
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+    case SDL_SYSWM_WAYLAND:
+    {
+      if (sdl.wlDisplay)
+        return sdl.wlDisplay;
+
+      int width, height;
+      SDL_GetWindowSize(sdl.window, &width, &height);
+      sdl.wlDisplay = (EGLNativeWindowType)wl_egl_window_create(
+          wminfo.info.wl.surface, width, height);
+
+      return sdl.wlDisplay;
+    }
+#endif
+
+    default:
+      DEBUG_ERROR("Unsupported subsystem");
+      return 0;
+  }
+}
+#endif
+
+static void sdlSwapBuffers(void)
+{
+  SDL_GL_SwapWindow(sdl.window);
+}
+
+static int sdlEventFilter(void * userdata, SDL_Event * event)
 {
   switch(event->type)
   {
     case SDL_QUIT:
       app_handleCloseEvent();
-      return true;
+      break;
 
     case SDL_MOUSEMOTION:
       // stop motion events during the warp out of the window
       if (sdl.exiting)
-        return true;
+        break;
 
       app_updateCursorPos(event->motion.x, event->motion.y);
       if (app_cursorIsGrabbed())
         app_handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
       else
         app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
-      return true;
+      break;
 
     case SDL_MOUSEBUTTONDOWN:
     {
@@ -90,7 +263,7 @@ static bool sdlEventFilter(SDL_Event * event)
         button += 2;
 
       app_handleButtonPress(button);
-      return true;
+      break;
     }
 
     case SDL_MOUSEBUTTONUP:
@@ -100,7 +273,7 @@ static bool sdlEventFilter(SDL_Event * event)
         button += 2;
 
       app_handleButtonRelease(button);
-      return true;
+      break;
     }
 
     case SDL_MOUSEWHEEL:
@@ -108,7 +281,7 @@ static bool sdlEventFilter(SDL_Event * event)
       int button = event->wheel.y > 0 ? 4 : 5;
       app_handleButtonPress(button);
       app_handleButtonRelease(button);
-      return true;
+      break;
     }
 
     case SDL_KEYDOWN:
@@ -130,27 +303,27 @@ static bool sdlEventFilter(SDL_Event * event)
       {
         case SDL_WINDOWEVENT_ENTER:
           app_handleEnterEvent(true);
-          return true;
+          break;
 
         case SDL_WINDOWEVENT_LEAVE:
           sdl.exiting = false;
           app_handleEnterEvent(false);
-          return true;
+          break;
 
         case SDL_WINDOWEVENT_FOCUS_GAINED:
           app_handleFocusEvent(true);
-          return true;
+          break;
 
         case SDL_WINDOWEVENT_FOCUS_LOST:
           app_handleFocusEvent(false);
-          return true;
+          break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
         {
           struct Border border;
           SDL_GetWindowBordersSize(
-            app_getWindow(),
+            sdl.window,
             &border.top,
             &border.left,
             &border.bottom,
@@ -159,21 +332,21 @@ static bool sdlEventFilter(SDL_Event * event)
 
           app_handleResizeEvent(event->window.data1, event->window.data2,
               border);
-          return true;
+          break;
         }
 
         case SDL_WINDOWEVENT_MOVED:
           app_updateWindowPos(event->window.data1, event->window.data2);
-          return true;
+          break;
 
         case SDL_WINDOWEVENT_CLOSE:
           app_handleCloseEvent();
-          return true;
+          break;
       }
       break;
   }
 
-  return false;
+  return 0;
 }
 
 static void sdlShowPointer(bool show)
@@ -183,14 +356,14 @@ static void sdlShowPointer(bool show)
 
 static void sdlGrabPointer(void)
 {
-  SDL_SetWindowGrab(app_getWindow(), SDL_TRUE);
+  SDL_SetWindowGrab(sdl.window, SDL_TRUE);
   SDL_SetRelativeMouseMode(SDL_TRUE);
   sdl.pointerGrabbed = true;
 }
 
 static void sdlUngrabPointer(void)
 {
-  SDL_SetWindowGrab(app_getWindow(), SDL_FALSE);
+  SDL_SetWindowGrab(sdl.window, SDL_FALSE);
   SDL_SetRelativeMouseMode(SDL_FALSE);
   sdl.pointerGrabbed = false;
 }
@@ -198,7 +371,7 @@ static void sdlUngrabPointer(void)
 static void sdlGrabKeyboard(void)
 {
   if (sdl.pointerGrabbed)
-    SDL_SetWindowGrab(app_getWindow(), SDL_FALSE);
+    SDL_SetWindowGrab(sdl.window, SDL_FALSE);
   else
   {
     DEBUG_WARN("SDL does not support grabbing only the keyboard, grabbing all");
@@ -206,16 +379,16 @@ static void sdlGrabKeyboard(void)
   }
 
   SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
-  SDL_SetWindowGrab(app_getWindow(), SDL_TRUE);
+  SDL_SetWindowGrab(sdl.window, SDL_TRUE);
   sdl.keyboardGrabbed = true;
 }
 
 static void sdlUngrabKeyboard(void)
 {
   SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "0");
-  SDL_SetWindowGrab(app_getWindow(), SDL_FALSE);
+  SDL_SetWindowGrab(sdl.window, SDL_FALSE);
   if (sdl.pointerGrabbed)
-    SDL_SetWindowGrab(app_getWindow(), SDL_TRUE);
+    SDL_SetWindowGrab(sdl.window, SDL_TRUE);
   sdl.keyboardGrabbed = false;
 }
 
@@ -231,7 +404,7 @@ static void sdlWarpPointer(int x, int y, bool exiting)
     SDL_SetRelativeMouseMode(SDL_FALSE);
 
   // issue the warp
-  SDL_WarpMouseInWindow(app_getWindow(), x, y);
+  SDL_WarpMouseInWindow(sdl.window, x, y);
 }
 
 static void sdlRealignPointer(void)
@@ -264,26 +437,51 @@ static void sdlUninhibitIdle(void)
   SDL_EnableScreenSaver();
 }
 
+static void sdlWait(unsigned int time)
+{
+  SDL_WaitEventTimeout(NULL, time);
+}
+
+static void sdlSetWindowSize(int x, int y)
+{
+  SDL_SetWindowSize(sdl.window, x, y);
+}
+
+static void sdlSetFullscreen(bool fs)
+{
+  SDL_SetWindowFullscreen(sdl.window, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
+
 struct LG_DisplayServerOps LGDS_SDL =
 {
-  .subsystem         = SDL_SYSWM_UNKNOWN,
-  .earlyInit         = sdlEarlyInit,
-  .init              = sdlInit,
-  .startup           = sdlStartup,
-  .shutdown          = sdlShutdown,
-  .free              = sdlFree,
-  .getProp           = sdlGetProp,
-  .eventFilter       = sdlEventFilter,
-  .showPointer       = sdlShowPointer,
-  .grabPointer       = sdlGrabPointer,
-  .ungrabPointer     = sdlUngrabPointer,
-  .grabKeyboard      = sdlGrabKeyboard,
-  .ungrabKeyboard    = sdlUngrabKeyboard,
-  .warpPointer       = sdlWarpPointer,
-  .realignPointer    = sdlRealignPointer,
-  .isValidPointerPos = sdlIsValidPointerPos,
-  .inhibitIdle       = sdlInhibitIdle,
-  .uninhibitIdle     = sdlUninhibitIdle,
+  .probe               = sdlProbe,
+  .earlyInit           = sdlEarlyInit,
+  .init                = sdlInit,
+  .startup             = sdlStartup,
+  .shutdown            = sdlShutdown,
+  .free                = sdlFree,
+  .getProp             = sdlGetProp,
+
+#ifdef ENABLE_EGL
+  .getEGLDisplay       = sdlGetEGLDisplay,
+  .getEGLNativeWindow  = sdlGetEGLNativeWindow,
+#endif
+
+  .glSwapBuffers       = sdlSwapBuffers,
+
+  .showPointer         = sdlShowPointer,
+  .grabPointer         = sdlGrabPointer,
+  .ungrabPointer       = sdlUngrabPointer,
+  .grabKeyboard        = sdlGrabKeyboard,
+  .ungrabKeyboard      = sdlUngrabKeyboard,
+  .warpPointer         = sdlWarpPointer,
+  .realignPointer      = sdlRealignPointer,
+  .isValidPointerPos   = sdlIsValidPointerPos,
+  .inhibitIdle         = sdlInhibitIdle,
+  .uninhibitIdle       = sdlUninhibitIdle,
+  .wait                = sdlWait,
+  .setWindowSize       = sdlSetWindowSize,
+  .setFullscreen       = sdlSetFullscreen,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,

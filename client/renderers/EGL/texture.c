@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "texture.h"
 #include "common/debug.h"
 #include "common/framebuffer.h"
-#include "dynprocs.h"
+#include "egl_dynprocs.h"
 #include "egldebug.h"
 
 #include <stdlib.h>
@@ -393,7 +393,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
 
   /* bind the texture and initiate the transfer */
   glBindTexture(GL_TEXTURE_2D, texture->tex);
-  g_dynprocs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+  g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
 
   /* wait for completion */
   framebuffer_wait(frame, texture->height * texture->stride);

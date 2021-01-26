@@ -21,9 +21,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 #include <stdbool.h>
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-
 #include "app.h"
 #include "common/KVMFR.h"
 #include "common/framebuffer.h"
@@ -107,7 +104,7 @@ typedef const char * (* LG_RendererGetName)();
 typedef void         (* LG_RendererSetup)();
 
 typedef bool         (* LG_RendererCreate       )(void ** opaque, const LG_RendererParams params);
-typedef bool         (* LG_RendererInitialize   )(void * opaque, Uint32 * sdlFlags);
+typedef bool         (* LG_RendererInitialize   )(void * opaque);
 typedef void         (* LG_RendererDeInitialize )(void * opaque);
 typedef bool         (* LG_RendererSupports     )(void * opaque, LG_RendererSupport support);
 typedef void         (* LG_RendererOnRestart    )(void * opaque);
@@ -117,8 +114,8 @@ typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visi
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD);
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
-typedef bool         (* LG_RendererRenderStartup)(void * opaque, SDL_Window *window);
-typedef bool         (* LG_RendererRender       )(void * opaque, SDL_Window *window, LG_RendererRotate rotate);
+typedef bool         (* LG_RendererRenderStartup)(void * opaque);
+typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate);
 typedef void         (* LG_RendererUpdateFPS    )(void * opaque, const float avgUPS, const float avgFPS);
 
 typedef struct LG_Renderer

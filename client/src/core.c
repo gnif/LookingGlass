@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 
 #include <assert.h>
+#include <math.h>
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
 
