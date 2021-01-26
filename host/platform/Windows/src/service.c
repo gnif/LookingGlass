@@ -645,7 +645,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
   while(1)
   {
-    ULONGLONG launchTime;
+    ULONGLONG launchTime = 0ULL;
 
     DWORD interactiveSession = WTSGetActiveConsoleSessionId();
     if (interactiveSession != 0 && interactiveSession != 0xFFFFFFFF)
