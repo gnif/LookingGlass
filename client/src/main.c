@@ -22,7 +22,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <getopt.h>
 #include <signal.h>
-#include <SDL2/SDL_syswm.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -53,6 +52,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "keybind.h"
 #include "clipboard.h"
 #include "ll.h"
+#include "egl_dynprocs.h"
 
 // forwards
 static int cursorThread(void * unused);
@@ -63,7 +63,6 @@ static LGEvent  *e_frame   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
-static SDL_Cursor *cursor  = NULL;
 
 struct AppState g_state;
 struct CursorState g_cursor;
@@ -89,14 +88,14 @@ static void lgInit(void)
 
   // if spice is not in use, hide the local cursor
   if (!app_inputEnabled() && g_params.hideMouse)
-    SDL_ShowCursor(SDL_DISABLE);
+    g_state.ds->showPointer(false);
   else
-    SDL_ShowCursor(SDL_ENABLE);
+    g_state.ds->showPointer(true);
 }
 
 static int renderThread(void * unused)
 {
-  if (!g_state.lgr->render_startup(g_state.lgrData, g_state.window))
+  if (!g_state.lgr->render_startup(g_state.lgrData))
   {
     g_state.state = APP_STATE_SHUTDOWN;
 
@@ -129,7 +128,7 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    if (!g_state.lgr->render(g_state.lgrData, g_state.window, g_params.winRotate))
+    if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate))
       break;
 
     if (g_params.showFPS)
@@ -158,8 +157,7 @@ static int renderThread(void * unused)
 
     if (!g_state.resizeDone && g_state.resizeTimeout < microtime())
     {
-      SDL_SetWindowSize(
-        g_state.window,
+      g_state.ds->setWindowSize(
         g_state.dstRect.w,
         g_state.dstRect.h
       );
@@ -347,7 +345,6 @@ int main_frameThread(void * unused)
   if (useDMA)
     DEBUG_INFO("Using DMA buffer support");
 
-  SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   if (g_state.state != APP_STATE_RUNNING)
     return 0;
@@ -404,7 +401,7 @@ int main_frameThread(void * unused)
       break;
     }
 
-    KVMFRFrame * frame       = (KVMFRFrame *)msg.mem;
+    KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
     struct DMAFrameInfo *dma = NULL;
 
     if (!g_state.formatValid || frame->formatVer != formatVer)
@@ -473,7 +470,7 @@ int main_frameThread(void * unused)
       g_state.srcSize.y = lgrFormat.height;
       g_state.haveSrcSize = true;
       if (g_params.autoResize)
-        SDL_SetWindowSize(g_state.window, lgrFormat.width, lgrFormat.height);
+        g_state.ds->setWindowSize(lgrFormat.width, lgrFormat.height);
 
       g_cursor.guest.dpiScale = frame->mouseScalePercent;
       core_updatePositionInfo();
@@ -572,20 +569,6 @@ int spiceThread(void * arg)
   return 0;
 }
 
-int eventFilter(void * userdata, SDL_Event * event)
-{
-  if (g_state.ds->eventFilter(event))
-    return 0;
-
-  // always include the default handler (SDL) for any unhandled events
-  if (g_state.ds != LG_DisplayServers[0])
-    if (LG_DisplayServers[0]->eventFilter(event))
-      return 0;
-
-  // consume all events
-  return 0;
-}
-
 void intHandler(int sig)
 {
   switch(sig)
@@ -607,7 +590,7 @@ void intHandler(int sig)
   }
 }
 
-static bool tryRenderer(const int index, const LG_RendererParams lgrParams, Uint32 * sdlFlags)
+static bool tryRenderer(const int index, const LG_RendererParams lgrParams)
 {
   const LG_Renderer *r = LG_Renderers[index];
 
@@ -623,7 +606,7 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams, Uint
     return false;
 
   // initialize the renderer
-  if (!r->initialize(g_state.lgrData, sdlFlags))
+  if (!r->initialize(g_state.lgrData))
   {
     r->deinitialize(g_state.lgrData);
     return false;
@@ -631,14 +614,6 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams, Uint
 
   DEBUG_INFO("Using Renderer: %s", r->get_name());
   return true;
-}
-
-static void initSDLCursor(void)
-{
-  const uint8_t data[4] = {0xf, 0x9, 0x9, 0xf};
-  const uint8_t mask[4] = {0xf, 0xf, 0xf, 0xf};
-  cursor = SDL_CreateCursor(data, mask, 8, 4, 4, 0);
-  SDL_SetCursor(cursor);
 }
 
 static int lg_run(void)
@@ -649,46 +624,15 @@ static int lg_run(void)
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
 
-  // try to early detect the platform
-  SDL_SYSWM_TYPE subsystem = SDL_SYSWM_UNKNOWN;
-       if (getenv("WAYLAND_DISPLAY")) subsystem = SDL_SYSWM_WAYLAND;
-  else if (getenv("DISPLAY"        )) subsystem = SDL_SYSWM_X11;
-  else
-    DEBUG_WARN("Unknown subsystem, falling back to SDL default");
-
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
-    if (LG_DisplayServers[i]->subsystem == subsystem)
+    if (LG_DisplayServers[i]->probe())
     {
       g_state.ds = LG_DisplayServers[i];
       break;
     }
 
   assert(g_state.ds);
-
-  // set any null methods to the fallback
-#define SET_FALLBACK(x) \
-  if (!g_state.ds->x) g_state.ds->x = LG_DisplayServers[0]->x;
-  SET_FALLBACK(earlyInit);
-  SET_FALLBACK(getProp);
-  SET_FALLBACK(init);
-  SET_FALLBACK(startup);
-  SET_FALLBACK(shutdown);
-  SET_FALLBACK(free);
-  SET_FALLBACK(eventFilter);
-  SET_FALLBACK(showPointer);
-  SET_FALLBACK(grabPointer);
-  SET_FALLBACK(ungrabKeyboard);
-  SET_FALLBACK(warpPointer);
-  SET_FALLBACK(realignPointer);
-  SET_FALLBACK(isValidPointerPos);
-  SET_FALLBACK(inhibitIdle);
-  SET_FALLBACK(uninhibitIdle);
-  SET_FALLBACK(cbInit);
-  SET_FALLBACK(cbNotice);
-  SET_FALLBACK(cbRelease);
-  SET_FALLBACK(cbRequest);
-#undef SET_FALLBACK
 
   // init the subsystem
   if (!g_state.ds->earlyInit())
@@ -697,16 +641,7 @@ static int lg_run(void)
     return -1;
   }
 
-  // Allow screensavers for now: we will enable and disable as needed.
-  SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
-
-  if (SDL_Init(SDL_INIT_VIDEO) < 0)
-  {
-    DEBUG_ERROR("SDL_Init Failed");
-    return -1;
-  }
-
-  // override SDL's SIGINIT handler so that we can tell the difference between
+  // override the SIGINIT handler so that we can tell the difference between
   // SIGINT and the user sending a close event, such as ALT+F4
   signal(SIGINT , intHandler);
   signal(SIGTERM, intHandler);
@@ -753,13 +688,11 @@ static int lg_run(void)
   LG_RendererParams lgrParams;
   lgrParams.showFPS     = g_params.showFPS;
   lgrParams.quickSplash = g_params.quickSplash;
-  Uint32 sdlFlags;
 
   if (g_params.forceRenderer)
   {
     DEBUG_INFO("Trying forced renderer");
-    sdlFlags = 0;
-    if (!tryRenderer(g_params.forceRendererIndex, lgrParams, &sdlFlags))
+    if (!tryRenderer(g_params.forceRendererIndex, lgrParams))
     {
       DEBUG_ERROR("Forced renderer failed to iniailize");
       return -1;
@@ -771,8 +704,7 @@ static int lg_run(void)
     // probe for a a suitable renderer
     for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
     {
-      sdlFlags = 0;
-      if (tryRenderer(i, lgrParams, &sdlFlags))
+      if (tryRenderer(i, lgrParams))
       {
         g_state.lgr = LG_Renderers[i];
         break;
@@ -786,58 +718,25 @@ static int lg_run(void)
     return -1;
   }
 
-  // all our ducks are in a line, create the window
-  g_state.window = SDL_CreateWindow(
-    g_params.windowTitle,
-    g_params.center ? SDL_WINDOWPOS_CENTERED : g_params.x,
-    g_params.center ? SDL_WINDOWPOS_CENTERED : g_params.y,
-    g_params.w,
-    g_params.h,
-    (
-      SDL_WINDOW_HIDDEN |
-      (g_params.allowResize ? SDL_WINDOW_RESIZABLE  : 0) |
-      (g_params.borderless  ? SDL_WINDOW_BORDERLESS : 0) |
-      (g_params.maximize    ? SDL_WINDOW_MAXIMIZED  : 0) |
-      sdlFlags
-    )
-  );
-
-  if (g_state.window == NULL)
+  const LG_DSInitParams params =
   {
-    DEBUG_ERROR("Could not create an SDL window: %s\n", SDL_GetError());
-    return 1;
-  }
+    .title               = g_params.windowTitle,
+    .x                   = g_params.x,
+    .y                   = g_params.y,
+    .w                   = g_params.w,
+    .h                   = g_params.h,
+    .center              = g_params.center,
+    .fullscreen          = g_params.fullscreen,
+    .resizable           = g_params.allowResize,
+    .borderless          = g_params.borderless,
+    .maximize            = g_params.maximize,
+    .minimizeOnFocusLoss = g_params.minimizeOnFocusLoss
+  };
 
-  SDL_VERSION(&g_state.wminfo.version);
-  if (!SDL_GetWindowWMInfo(g_state.window, &g_state.wminfo))
-  {
-    DEBUG_ERROR("Could not get SDL window information %s", SDL_GetError());
-    return -1;
-  }
-
-  // enable WM events
-  SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
-
-  g_state.ds->init(&g_state.wminfo);
-
-  // now init has been done we can show the window, doing this before init for
-  // X11 causes us to miss the first focus event
-  SDL_ShowWindow(g_state.window);
-
-  SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
-      g_params.minimizeOnFocusLoss ? "1" : "0");
-
-  if (g_params.fullscreen)
-    SDL_SetWindowFullscreen(g_state.window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-
-  if (!g_params.center)
-    SDL_SetWindowPosition(g_state.window, g_params.x, g_params.y);
+  g_state.ds->init(params);
 
   if (g_params.noScreensaver)
     g_state.ds->inhibitIdle();
-
-  // ensure the initial window size is stored in the state
-  SDL_GetWindowSize(g_state.window, &g_state.windowW, &g_state.windowH);
 
   // ensure renderer viewport is aware of the current window size
   core_updatePositionInfo();
@@ -854,8 +753,6 @@ static int lg_run(void)
   }
 
   keybind_register();
-
-  initSDLCursor();
 
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
@@ -880,10 +777,6 @@ static int lg_run(void)
     return -1;
   }
 
-  // ensure mouse acceleration is identical in server mode
-  SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
-  SDL_SetEventFilter(eventFilter, NULL);
-
   // wait for startup to complete so that any error messages below are output at
   // the end of the output
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
@@ -906,7 +799,7 @@ static int lg_run(void)
 
   /* this short timeout is to allow the LGMP host to update the timestamp before
    * we start checking for a valid session */
-  SDL_WaitEventTimeout(NULL, 200);
+  g_state.ds->wait(200);
 
   if (g_params.captureOnStart)
     core_setGrab(true);
@@ -942,7 +835,7 @@ restart:
       DEBUG_INFO("Continuing to wait...");
     }
 
-    SDL_WaitEventTimeout(NULL, 1000);
+    g_state.ds->wait(1000);
   }
 
   if (g_state.state != APP_STATE_RUNNING)
@@ -975,7 +868,7 @@ restart:
     {
       DEBUG_INFO("Waiting for you to upgrade the host application");
       while (g_state.state == APP_STATE_RUNNING && udata->version != KVMFR_VERSION)
-        SDL_WaitEventTimeout(NULL, 1000);
+        g_state.ds->wait(1000);
 
       if (g_state.state != APP_STATE_RUNNING)
         return -1;
@@ -1005,7 +898,7 @@ restart:
       g_state.state = APP_STATE_RESTART;
       break;
     }
-    SDL_WaitEventTimeout(NULL, 100);
+    g_state.ds->wait(100);
   }
 
   if (g_state.state == APP_STATE_RESTART)
@@ -1077,21 +970,9 @@ static void lg_shutdown(void)
     g_state.cbRequestList = NULL;
   }
 
-  if (g_state.window)
-  {
-    g_state.ds->free();
-    SDL_DestroyWindow(g_state.window);
-  }
-
-  if (cursor)
-    SDL_FreeCursor(cursor);
-
-  ivshmemClose(&g_state.shm);
-
-  // this must run last to ensure that we don't free any pointers still in use
   app_releaseAllKeybinds();
-
-  SDL_Quit();
+  g_state.ds->free();
+  ivshmemClose(&g_state.shm);
 }
 
 int main(int argc, char * argv[])
@@ -1110,6 +991,7 @@ int main(int argc, char * argv[])
 
   config_init();
   ivshmemOptionsInit();
+  egl_dynProcsInit();
 
   // early renderer setup for option registration
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)

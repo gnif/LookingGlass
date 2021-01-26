@@ -20,6 +20,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #ifndef _LG_TYPES_H_
 #define _LG_TYPES_H_
 
+struct Point
+{
+  int x, y;
+};
+
 struct DoublePoint
 {
   double x, y;

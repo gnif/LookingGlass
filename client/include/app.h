@@ -35,9 +35,11 @@ typedef enum LG_MsgAlert
 }
 LG_MsgAlert;
 
-SDL_Window * app_getWindow(void);
-
 bool app_getProp(LG_DSProperty prop, void * ret);
+
+EGLNativeWindowType app_getEGLNativeWindow(void);
+EGLDisplay app_getEGLDisplay(void);
+
 bool app_inputEnabled(void);
 bool app_cursorIsGrabbed(void);
 bool app_cursorWantsRaw(void);
@@ -55,6 +57,10 @@ void app_handleKeyRelease(int scancode);
 void app_handleEnterEvent(bool entered);
 void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
+
+void app_setFullscreen(bool fs);
+
+void app_glSwapBuffers(void);
 
 void app_clipboardRelease(void);
 void app_clipboardNotify(const LG_ClipboardData type, size_t size);
@@ -92,5 +98,6 @@ void app_releaseKeybind(KeybindHandle * handle);
  * Release all keybindings
  */
 void app_releaseAllKeybinds(void);
+
 
 #endif
