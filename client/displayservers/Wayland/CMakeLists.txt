@@ -47,6 +47,9 @@ endmacro()
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/wayland")
 include_directories("${CMAKE_BINARY_DIR}/wayland")
 wayland_generate(
+    "${WAYLAND_PROTOCOLS_BASE}/stable/xdg-shell/xdg-shell.xml"
+    "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-shell-client-protocol")
+wayland_generate(
     "${WAYLAND_PROTOCOLS_BASE}/unstable/relative-pointer/relative-pointer-unstable-v1.xml"
     "${CMAKE_BINARY_DIR}/wayland/wayland-relative-pointer-unstable-v1-client-protocol")
 wayland_generate(
