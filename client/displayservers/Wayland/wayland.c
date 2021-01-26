@@ -25,13 +25,21 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/mman.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <poll.h>
 
 #include <SDL2/SDL.h>
 #include <wayland-client.h>
 
+#ifdef ENABLE_EGL
+# include <wayland-egl.h>
+# include "egl_dynprocs.h"
+# include <EGL/eglext.h>
+#endif
+
 #include "app.h"
 #include "common/debug.h"
 
+#include "wayland-xdg-shell-client-protocol.h"
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
@@ -46,6 +54,19 @@ struct WaylandDSState
   struct wl_surface * surface;
   struct wl_registry * registry;
   struct wl_seat * seat;
+  struct wl_compositor * compositor;
+
+  int32_t width, height;
+  uint32_t resizeSerial;
+  bool configured;
+
+#ifdef ENABLE_EGL
+  struct wl_egl_window * eglWindow;
+#endif
+
+  struct xdg_wm_base * xdgWmBase;
+  struct xdg_surface * xdgSurface;
+  struct xdg_toplevel * xdgToplevel;
 
   struct wl_data_device_manager * dataDeviceManager;
   struct wl_data_device * dataDevice;
@@ -90,6 +111,17 @@ struct WCBState
 static struct WaylandDSState wm;
 static struct WCBState       wcb;
 
+// XDG WM base listeners.
+
+static void xdgWmBasePing(void * data, struct xdg_wm_base * xdgWmBase, uint32_t serial)
+{
+  xdg_wm_base_pong(xdgWmBase, serial);
+}
+
+static const struct xdg_wm_base_listener xdgWmBaseListener = {
+  .ping = xdgWmBasePing,
+};
+
 // Registry-handling listeners.
 
 static void registryGlobalHandler(void * data, struct wl_registry * registry,
@@ -97,6 +129,10 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
 {
   if (!strcmp(interface, wl_seat_interface.name) && !wm.seat)
     wm.seat = wl_registry_bind(wm.registry, name, &wl_seat_interface, 1);
+  else if (!strcmp(interface, wl_compositor_interface.name))
+    wm.compositor = wl_registry_bind(wm.registry, name, &wl_compositor_interface, 4);
+  else if (!strcmp(interface, xdg_wm_base_interface.name))
+    wm.xdgWmBase = wl_registry_bind(wm.registry, name, &xdg_wm_base_interface, 1);
   else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name))
     wm.relativePointerManager = wl_registry_bind(wm.registry, name,
         &zwp_relative_pointer_manager_v1_interface, 1);
@@ -321,19 +357,37 @@ static const struct wl_seat_listener seatListener = {
     .name = seatNameHandler,
 };
 
+// Surface-handling listeners.
+
+static void xdgSurfaceConfigure(void * data, struct xdg_surface * xdgSurface,
+    uint32_t serial)
+{
+  if (wm.configured)
+    wm.resizeSerial = serial;
+  else
+  {
+    xdg_surface_ack_configure(xdgSurface, serial);
+    wm.configured = true;
+  }
+}
+
+static const struct xdg_surface_listener xdgSurfaceListener = {
+  .configure = xdgSurfaceConfigure,
+};
+
+static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
+    int32_t width, int32_t height, struct wl_array * states)
+{
+  wm.width = width;
+  wm.height = height;
+}
+
+static const struct xdg_toplevel_listener xdgToplevelListener = {
+  .configure = xdgToplevelConfigure,
+};
+
 static bool waylandEarlyInit(void)
 {
-  if (!getenv("SDL_VIDEODRIVER"))
-  {
-    int err = setenv("SDL_VIDEODRIVER", "wayland", 1);
-    if (err < 0)
-    {
-      DEBUG_ERROR("Unable to set the env variable SDL_VIDEODRIVER: %d", err);
-      return false;
-    }
-    DEBUG_INFO("SDL_VIDEODRIVER has been set to wayland");
-  }
-
   // Request to receive EPIPE instead of SIGPIPE when one end of a pipe
   // disconnects while a write is pending. This is useful to the Wayland
   // clipboard backend, where an arbitrary application is on the other end of
@@ -352,14 +406,13 @@ static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wm, 0, sizeof(wm));
 
-  wm.display = info->info.wl.display;
-  wm.surface = info->info.wl.surface;
+  wm.display = wl_display_connect(NULL);
   wm.registry = wl_display_get_registry(wm.display);
 
   wl_registry_add_listener(wm.registry, &registryListener, NULL);
   wl_display_roundtrip(wm.display);
 
-  if (!wm.seat || !wm.dataDeviceManager)
+  if (!wm.seat || !wm.dataDeviceManager || !wm.compositor || !wm.xdgWmBase)
   {
     DEBUG_ERROR("Compositor missing a required interface, will not proceed");
     return false;
@@ -379,16 +432,138 @@ static bool waylandInit(const LG_DSInitParams params)
                "not be able to suppress idle states");
 
   wl_seat_add_listener(wm.seat, &seatListener, NULL);
+  xdg_wm_base_add_listener(wm.xdgWmBase, &xdgWmBaseListener, NULL);
   wl_display_roundtrip(wm.display);
 
   wm.dataDevice = wl_data_device_manager_get_data_device(
       wm.dataDeviceManager, wm.seat);
+
+  wm.surface = wl_compositor_create_surface(wm.compositor);
+  wm.eglWindow = wl_egl_window_create(wm.surface, params.w, params.h);
+  wm.xdgSurface = xdg_wm_base_get_xdg_surface(wm.xdgWmBase, wm.surface);
+  xdg_surface_add_listener(wm.xdgSurface, &xdgSurfaceListener, NULL);
+
+  wm.xdgToplevel = xdg_surface_get_toplevel(wm.xdgSurface);
+  xdg_toplevel_add_listener(wm.xdgToplevel, &xdgToplevelListener, NULL);
+  xdg_toplevel_set_title(wm.xdgToplevel, params.title);
+  xdg_toplevel_set_app_id(wm.xdgToplevel, "looking-glass-client");
+
+  if (params.fullscreen)
+    xdg_toplevel_set_fullscreen(wm.xdgToplevel, NULL);
+
+  wl_surface_commit(wm.surface);
+
+  wm.width = params.w;
+  wm.height = params.h;
 
   return true;
 }
 
 static void waylandStartup(void)
 {
+}
+
+static void waylandShutdown(void)
+{
+}
+
+#ifdef ENABLE_EGL
+static EGLDisplay waylandGetEGLDisplay(void)
+{
+  EGLNativeDisplayType native = (EGLNativeDisplayType) wm.display;
+
+  const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+
+  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
+      g_egl_dynProcs.eglGetPlatformDisplay)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplay");
+    return g_egl_dynProcs.eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, native, NULL);
+  }
+
+  if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
+      g_egl_dynProcs.eglGetPlatformDisplayEXT)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplayEXT");
+    return g_egl_dynProcs.eglGetPlatformDisplayEXT(EGL_PLATFORM_WAYLAND_EXT, native, NULL);
+  }
+
+  DEBUG_INFO("Using eglGetDisplay");
+  return eglGetDisplay(native);
+}
+
+static EGLNativeWindowType waylandGetEGLNativeWindow(void)
+{
+  return (EGLNativeWindowType) wm.eglWindow;
+}
+
+static void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
+{
+  eglSwapBuffers(display, surface);
+
+  if (wm.resizeSerial)
+  {
+    wl_egl_window_resize(wm.eglWindow, wm.width, wm.height, 0, 0);
+
+    struct wl_region * region = wl_compositor_create_region(wm.compositor);
+    wl_region_add(region, 0, 0, wm.width, wm.height);
+    wl_surface_set_opaque_region(wm.surface, region);
+    wl_region_destroy(region);
+
+    app_handleResizeEvent(wm.width, wm.height, (struct Border) {0, 0, 0, 0});
+    xdg_surface_ack_configure(wm.xdgSurface, wm.resizeSerial);
+    wm.resizeSerial = 0;
+  }
+}
+#endif
+
+static void waylandGLSwapBuffers(void)
+{
+  // FIXME: implement.
+}
+
+static void waylandShowPointer(bool show)
+{
+  // FIXME: implement.
+}
+
+static void waylandWait(unsigned int time)
+{
+  while (wl_display_prepare_read(wm.display))
+    wl_display_dispatch_pending(wm.display);
+  wl_display_flush(wm.display);
+
+  struct pollfd pollfd = {
+    .fd     = wl_display_get_fd(wm.display),
+    .events = POLLIN,
+  };
+
+  if (poll(&pollfd, 1, time) == -1 || pollfd.revents & POLLERR)
+  {
+    if (errno != EINTR)
+      DEBUG_INFO("Poll failed: %d\n", errno);
+    wl_display_cancel_read(wm.display);
+  }
+  else
+    wl_display_read_events(wm.display);
+
+  wl_display_dispatch_pending(wm.display);
+}
+
+static void waylandSetWindowSize(int x, int y)
+{
+  // FIXME: implement.
+}
+
+static void waylandSetFullscreen(bool fs)
+{
+  // FIXME: implement.
+}
+
+static bool waylandGetFullscreen(void)
+{
+  // FIXME: implement.
+  return false;
 }
 
 static void relativePointerMotionHandler(void * data,
@@ -479,6 +654,11 @@ static void waylandRealignPointer(void)
   app_handleMouseBasic();
 }
 
+static bool waylandIsValidPointerPos(int x, int y)
+{
+  return x >= 0 && x < wm.width && y >= 0 && y < wm.height;
+}
+
 static void waylandFree(void)
 {
   waylandUngrabPointer();
@@ -503,23 +683,6 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
   {
     *(bool*)ret = false;
     return true;
-  }
-
-  return false;
-}
-
-static bool waylandEventFilter(SDL_Event * event)
-{
-  /* prevent the default processing for the following events */
-  switch(event->type)
-  {
-    case SDL_MOUSEMOTION:
-    case SDL_MOUSEBUTTONDOWN:
-    case SDL_MOUSEBUTTONUP:
-    case SDL_MOUSEWHEEL:
-    case SDL_KEYDOWN:
-    case SDL_KEYUP:
-      return true;
   }
 
   return false;
@@ -862,21 +1025,36 @@ static void waylandCBRelease(void)
 
 struct LG_DisplayServerOps LGDS_Wayland =
 {
-  .probe          = waylandProbe,
-  .earlyInit      = waylandEarlyInit,
-  .init           = waylandInit,
-  .startup        = waylandStartup,
-  .free           = waylandFree,
-  .getProp        = waylandGetProp,
-  .eventFilter    = waylandEventFilter,
-  .grabPointer    = waylandGrabPointer,
-  .ungrabPointer  = waylandUngrabPointer,
-  .grabKeyboard   = waylandGrabKeyboard,
-  .ungrabKeyboard = waylandUngrabKeyboard,
-  .warpPointer    = waylandWarpPointer,
-  .realignPointer = waylandRealignPointer,
-  .inhibitIdle    = waylandInhibitIdle,
-  .uninhibitIdle  = waylandUninhibitIdle,
+  .probe              = waylandProbe,
+  .earlyInit          = waylandEarlyInit,
+  .init               = waylandInit,
+  .startup            = waylandStartup,
+  .shutdown           = waylandShutdown,
+  .free               = waylandFree,
+  .getProp            = waylandGetProp,
+
+#ifdef ENABLE_EGL
+  .getEGLDisplay      = waylandGetEGLDisplay,
+  .getEGLNativeWindow = waylandGetEGLNativeWindow,
+  .eglSwapBuffers     = waylandEGLSwapBuffers,
+#endif
+
+  .glSwapBuffers      = waylandGLSwapBuffers,
+
+  .showPointer        = waylandShowPointer,
+  .grabPointer        = waylandGrabPointer,
+  .ungrabPointer      = waylandUngrabPointer,
+  .grabKeyboard       = waylandGrabKeyboard,
+  .ungrabKeyboard     = waylandUngrabKeyboard,
+  .warpPointer        = waylandWarpPointer,
+  .realignPointer     = waylandRealignPointer,
+  .isValidPointerPos  = waylandIsValidPointerPos,
+  .inhibitIdle        = waylandInhibitIdle,
+  .uninhibitIdle      = waylandUninhibitIdle,
+  .wait               = waylandWait,
+  .setWindowSize      = waylandSetWindowSize,
+  .setFullscreen      = waylandSetFullscreen,
+  .getFullscreen      = waylandGetFullscreen,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,
