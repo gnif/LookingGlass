@@ -20,3 +20,7 @@ target_link_libraries(lg_common_platform_code
 	lg_common
 	setupapi
 )
+
+if (ENABLE_BACKTRACE)
+    target_link_libraries(lg_common_platform_code dbghelp)
+endif()
