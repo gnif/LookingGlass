@@ -190,7 +190,7 @@ enum ConfigStatus
 };
 
 static void deconfigure(struct Inst * this);
-static enum ConfigStatus configure(struct Inst * this, SDL_Window *window);
+static enum ConfigStatus configure(struct Inst * this);
 static void update_mouse_shape(struct Inst * this, bool * newShape);
 static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
@@ -248,8 +248,11 @@ bool opengl_create(void ** opaque, const LG_RendererParams params)
   return true;
 }
 
-bool opengl_initialize(void * opaque, Uint32 * sdlFlags)
+bool opengl_initialize(void * opaque)
 {
+  //FIXME
+  return false;
+#if 0
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
@@ -265,6 +268,7 @@ bool opengl_initialize(void * opaque, Uint32 * sdlFlags)
   SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE        , 8);
   SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE         , 8);
   return true;
+#endif
 }
 
 void opengl_deinitialize(void * opaque)
@@ -505,16 +509,17 @@ void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-bool opengl_render_startup(void * opaque, SDL_Window * window)
+bool opengl_render_startup(void * opaque)
 {
+  //FIXME
+  return false;
+#if 0
+
   struct Inst * this = (struct Inst *)opaque;
 
-  this->glContext = SDL_GL_CreateContext(window);
+  this->glContext = app_getGLContext();
   if (!this->glContext)
-  {
-    DEBUG_ERROR("Failed to create the OpenGL context");
     return false;
-  }
 
   DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
@@ -562,15 +567,16 @@ bool opengl_render_startup(void * opaque, SDL_Window * window)
   SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
   this->renderStarted = true;
   return true;
+#endif
 }
 
-bool opengl_render(void * opaque, SDL_Window * window, LG_RendererRotate rotate)
+bool opengl_render(void * opaque, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
 
-  switch(configure(this, window))
+  switch(configure(this))
   {
     case CONFIG_STATUS_ERROR:
       DEBUG_ERROR("configure failed");
@@ -670,11 +676,11 @@ bool opengl_render(void * opaque, SDL_Window * window, LG_RendererRotate rotate)
 
   if (this->opt.preventBuffer)
   {
-    SDL_GL_SwapWindow(window);
+    app_glSwapBuffers();
     glFinish();
   }
   else
-    SDL_GL_SwapWindow(window);
+    app_glSwapBuffers();
 
   this->mouseUpdate = false;
   return true;
@@ -859,7 +865,7 @@ static bool _check_gl_error(unsigned int line, const char * name)
   return true;
 }
 
-static enum ConfigStatus configure(struct Inst * this, SDL_Window *window)
+static enum ConfigStatus configure(struct Inst * this)
 {
   LG_LOCK(this->formatLock);
   if (!this->reconfigure)

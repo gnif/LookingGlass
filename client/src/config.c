@@ -19,6 +19,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "main.h"
 #include "config.h"
+#include "kb.h"
+
 #include "common/option.h"
 #include "common/debug.h"
 #include "common/stringutils.h"
@@ -26,10 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/stat.h>
 #include <pwd.h>
 #include <unistd.h>
-
-//FIXME: this should really not be included here and is an ugly hack to retain
-//backwards compatibility with the escape key scancode
-extern uint32_t sdl_to_xfree86[];
+#include <string.h>
 
 // forwards
 static bool       optRendererParse   (struct Option * opt, const char * str);
@@ -41,6 +40,7 @@ static char *     optPosToString     (struct Option * opt);
 static bool       optSizeParse       (struct Option * opt, const char * str);
 static StringList optSizeValues      (struct Option * opt);
 static char *     optSizeToString    (struct Option * opt);
+static bool       optScancodeValidate(struct Option * opt, const char ** error);
 static char *     optScancodeToString(struct Option * opt);
 static bool       optRotateValidate  (struct Option * opt, const char ** error);
 
@@ -267,11 +267,12 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "escapeKey",
-    .description    = "Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values",
+    .description    = "Specify the escape key, see <linux/input-event-codes.h> for valid values",
     .shortopt       = 'm',
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = SDL_SCANCODE_SCROLLLOCK,
-    .toString       = optScancodeToString
+    .value.x_int    = KEY_SCROLLLOCK,
+    .validator      = optScancodeValidate,
+    .toString       = optScancodeToString,
   },
   {
     .module         = "input",
@@ -532,9 +533,6 @@ bool config_load(int argc, char * argv[])
     g_params.alwaysShowCursor  = option_get_bool("spice", "alwaysShowCursor");
   }
 
-  //FIXME, this should be using linux keycodes
-  g_params.escapeKey = sdl_to_xfree86[g_params.escapeKey];
-
   return true;
 }
 
@@ -682,11 +680,20 @@ static char * optSizeToString(struct Option * opt)
   return str;
 }
 
+static bool optScancodeValidate(struct Option * opt, const char ** error)
+{
+  if (opt->value.x_int >= 0 && opt->value.x_int < KEY_MAX)
+    return true;
+
+  *error = "Out of range";
+  return false;
+}
+
 static char * optScancodeToString(struct Option * opt)
 {
   char * str;
   alloc_sprintf(&str, "%d = %s", opt->value.x_int,
-      SDL_GetScancodeName(opt->value.x_int));
+      xfree86_to_str[opt->value.x_int]);
   return str;
 }
 
