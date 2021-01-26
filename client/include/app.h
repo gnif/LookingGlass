@@ -35,11 +35,7 @@ typedef enum LG_MsgAlert
 }
 LG_MsgAlert;
 
-bool app_getProp(LG_DSProperty prop, void * ret);
-
-EGLNativeWindowType app_getEGLNativeWindow(void);
-EGLDisplay app_getEGLDisplay(void);
-
+bool app_isRunning(void);
 bool app_inputEnabled(void);
 bool app_cursorIsGrabbed(void);
 bool app_cursorWantsRaw(void);
@@ -59,7 +55,10 @@ void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
 
 void app_setFullscreen(bool fs);
+bool app_getProp(LG_DSProperty prop, void * ret);
 
+EGLDisplay app_getEGLDisplay(void);
+EGLNativeWindowType app_getEGLNativeWindow(void);
 void app_glSwapBuffers(void);
 
 void app_clipboardRelease(void);
