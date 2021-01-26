@@ -19,25 +19,36 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/displayserver.h"
 
-#include <SDL2/SDL.h>
-#include <X11/Xlib.h>
-#include <GL/glx.h>
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/scrnsaver.h>
 #include <X11/extensions/Xfixes.h>
+#include <X11/extensions/Xinerama.h>
+
+#include <GL/glx.h>
+#include <EGL/eglext.h>
 
 #include "app.h"
+#include "egl_dynprocs.h"
 #include "common/debug.h"
+#include "common/thread.h"
+
+#define _NET_WM_STATE_REMOVE 0
+#define _NET_WM_STATE_ADD    1
+#define _NET_WM_STATE_TOGGLE 2
 
 struct X11DSState
 {
   Display * display;
   Window    window;
   int       xinputOp;
+
+  LGThread * eventThread;
 
   int pointerDev;
   int keyboardDev;
@@ -49,8 +60,13 @@ struct X11DSState
   struct Rect   rect;
   struct Border border;
 
+  Cursor blankCursor;
+  Cursor squareCursor;
+
   Atom aNetReqFrameExtents;
   Atom aNetFrameExtents;
+  Atom aNetWMState;
+  Atom aNetWMStateFullscreen;
 
   // clipboard members
   Atom             aSelection;
@@ -88,9 +104,19 @@ static void x11CBSelectionIncr(const XPropertyEvent e);
 static void x11CBSelectionNotify(const XSelectionEvent e);
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e);
 
+static void x11SetFullscreen(bool fs);
+static int  x11EventThread(void * unused);
+static void x11GenericEvent(XGenericEventCookie *cookie);
+
 static bool x11Probe(void)
 {
   return getenv("DISPLAY") != NULL;
+}
+
+static bool x11EarlyInit(void)
+{
+  XInitThreads();
+  return true;
 }
 
 static bool x11Init(const LG_DSInitParams params)
@@ -100,13 +126,39 @@ static bool x11Init(const LG_DSInitParams params)
   int event, error;
 
   memset(&x11, 0, sizeof(x11));
-  x11.display = info->info.x11.display;
-  x11.window  = info->info.x11.window;
+  x11.display = XOpenDisplay(NULL);
+
+  XSetWindowAttributes swa =
+  {
+    .event_mask =
+      StructureNotifyMask |
+      PropertyChangeMask |
+      ExposureMask
+  };
+
+  x11.window = XCreateWindow(
+      x11.display,
+      XDefaultRootWindow(x11.display),
+      params.x, params.y,
+      params.w, params.h,
+      0,
+      CopyFromParent, InputOutput,
+      CopyFromParent, CWEventMask,
+      &swa);
+
+  XStoreName(x11.display, x11.window, params.title);
 
   x11.aNetReqFrameExtents =
     XInternAtom(x11.display, "_NET_REQUEST_FRAME_EXTENTS", True);
   x11.aNetFrameExtents =
     XInternAtom(x11.display, "_NET_FRAME_EXTENTS", True);
+  x11.aNetWMState =
+    XInternAtom(x11.display, "_NET_WM_STATE", True);
+  x11.aNetWMStateFullscreen =
+    XInternAtom(x11.display, "_NET_WM_STATE_FULLSCREEN", True);
+
+  if (params.fullscreen)
+    x11SetFullscreen(true);
 
   if (x11.aNetReqFrameExtents)
   {
@@ -126,7 +178,7 @@ static bool x11Init(const LG_DSInitParams params)
   }
 
   int major = 2;
-  int minor = 3;
+  int minor = 0;
   if (XIQueryVersion(x11.display, &major, &minor) != Success)
   {
     DEBUG_ERROR("Failed to query the XInput version");
@@ -134,36 +186,6 @@ static bool x11Init(const LG_DSInitParams params)
   }
 
   DEBUG_INFO("X11 XInput %d.%d in use", major, minor);
-
-  XQueryExtension(x11.display, "XInputExtension", &x11.xinputOp, &event, &error);
-
-  int num_masks;
-  XIEventMask * mask = XIGetSelectedEvents(x11.display, x11.window, &num_masks);
-  if (!mask)
-  {
-    DEBUG_ERROR("Failed to get the XInput event mask");
-    return false;
-  }
-
-  for(int i = 0; i < num_masks; ++i)
-  {
-    XISetMask(mask[i].mask, XI_Motion    );
-    XISetMask(mask[i].mask, XI_FocusIn   );
-    XISetMask(mask[i].mask, XI_FocusOut  );
-    XISetMask(mask[i].mask, XI_Enter     );
-    XISetMask(mask[i].mask, XI_Leave     );
-    XISetMask(mask[i].mask, XI_KeyPress  );
-    XISetMask(mask[i].mask, XI_KeyRelease);
-  }
-
-  if (XISelectEvents(x11.display, x11.window, mask, num_masks) != Success)
-  {
-    XFree(mask);
-    DEBUG_ERROR("Failed to select the xinput events");
-    return false;
-  }
-
-  XFree(mask);
 
   devinfo = XIQueryDevice(x11.display, XIAllDevices, &count);
   if (!devinfo)
@@ -221,6 +243,29 @@ static bool x11Init(const LG_DSInitParams params)
 
   XIFreeDeviceInfo(devinfo);
 
+  XQueryExtension(x11.display, "XInputExtension", &x11.xinputOp, &event, &error);
+  XIEventMask eventmask;
+  unsigned char mask[XIMaskLen(XI_LASTEVENT)] = { 0 };
+
+  eventmask.deviceid = XIAllMasterDevices;
+  eventmask.mask_len = sizeof(mask);
+  eventmask.mask     = mask;
+
+  XISetMask(mask, XI_FocusIn   );
+  XISetMask(mask, XI_FocusOut  );
+  XISetMask(mask, XI_Enter     );
+  XISetMask(mask, XI_Leave     );
+  XISetMask(mask, XI_Motion    );
+  XISetMask(mask, XI_KeyPress  );
+  XISetMask(mask, XI_KeyRelease);
+
+  if (XISelectEvents(x11.display, x11.window, &eventmask, 1) != Success)
+  {
+    XFree(mask);
+    DEBUG_ERROR("Failed to select the xinput events");
+    return false;
+  }
+
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(x11.display,
       "NETWM_BYPASS_COMPOSITOR", False);
 
@@ -236,6 +281,52 @@ static bool x11Init(const LG_DSInitParams params)
     1
   );
 
+  /* create the blank cursor */
+  {
+    static char data[] = { 0x00 };
+    XColor dummy;
+    Pixmap temp = XCreateBitmapFromData(x11.display, x11.window, data, 1, 1);
+    x11.blankCursor = XCreatePixmapCursor(x11.display, temp, temp,
+        &dummy, &dummy, 0, 0);
+    XFreePixmap(x11.display, temp);
+  }
+
+  /* create the square cursor */
+  {
+    static char data[] = { 0x07, 0x05, 0x07 };
+    static char mask[] = { 0xff, 0xff, 0xff };
+
+    Colormap cmap = DefaultColormap(x11.display, DefaultScreen(x11.display));
+    XColor colors[2] =
+    {
+      { .pixel = BlackPixelOfScreen(DefaultScreenOfDisplay(x11.display)) },
+      { .pixel = WhitePixelOfScreen(DefaultScreenOfDisplay(x11.display)) }
+    };
+
+    XQueryColors(x11.display, cmap, colors, 2);
+
+    Pixmap img = XCreateBitmapFromData(x11.display, x11.window, data, 3, 3);
+    Pixmap msk = XCreateBitmapFromData(x11.display, x11.window, mask, 3, 3);
+
+    x11.squareCursor = XCreatePixmapCursor(x11.display, img, msk,
+        &colors[0], &colors[1], 1, 1);
+
+    XFreePixmap(x11.display, img);
+    XFreePixmap(x11.display, msk);
+  }
+
+  /* default to the square cursor */
+  XDefineCursor(x11.display, x11.window, x11.squareCursor);
+
+  XMapWindow(x11.display, x11.window);
+  XFlush(x11.display);
+
+  if (!lgCreateThread("X11EventThread", x11EventThread, NULL, &x11.eventThread))
+  {
+    DEBUG_ERROR("Failed to create the x11 event thread");
+    return false;
+  }
+
   return true;
 }
 
@@ -249,6 +340,12 @@ static void x11Shutdown(void)
 
 static void x11Free(void)
 {
+  lgJoinThread(x11.eventThread, NULL);
+
+  XDestroyWindow(x11.display, x11.window);
+  XFreeCursor(x11.display, x11.squareCursor);
+  XFreeCursor(x11.display, x11.blankCursor);
+  XCloseDisplay(x11.display);
 }
 
 static bool x11GetProp(LG_DSProperty prop, void *ret)
@@ -274,7 +371,8 @@ static bool x11GetProp(LG_DSProperty prop, void *ret)
 
     int res, supportsGL;
     // Some GLX visuals do not use GL, and these must be ignored in our search.
-    if ((res = glXGetConfig(dpy, visual, GLX_USE_GL, &supportsGL)) != 0 || !supportsGL)
+    if ((res = glXGetConfig(dpy, visual, GLX_USE_GL, &supportsGL)) != 0 ||
+        !supportsGL)
       continue;
 
     int sampleBuffers, samples;
@@ -300,351 +398,401 @@ static bool x11GetProp(LG_DSProperty prop, void *ret)
   return true;
 }
 
-static bool x11EventFilter(SDL_Event * event)
+static int x11EventThread(void * unused)
 {
-  /* prevent the default processing for the following events */
-  switch(event->type)
+  fd_set in_fds;
+  const int fd = ConnectionNumber(x11.display);
+
+  while(app_isRunning())
   {
-    case SDL_WINDOWEVENT:
-      switch(event->window.event)
-      {
-        case SDL_WINDOWEVENT_SIZE_CHANGED:
-        case SDL_WINDOWEVENT_RESIZED:
-        case SDL_WINDOWEVENT_CLOSE:
-        case SDL_WINDOWEVENT_FOCUS_GAINED:
-        case SDL_WINDOWEVENT_FOCUS_LOST:
-        case SDL_WINDOWEVENT_ENTER:
-        case SDL_WINDOWEVENT_LEAVE:
-          return true;
-      }
-      return false;
-
-    case SDL_KEYDOWN:
-    case SDL_KEYUP:
-    case SDL_MOUSEMOTION:
-    case SDL_MOUSEBUTTONDOWN:
-    case SDL_MOUSEBUTTONUP:
-    case SDL_MOUSEWHEEL:
-      return true;
-  }
-
-  if (event->type != SDL_SYSWMEVENT)
-    return false;
-
-  XEvent xe = event->syswm.msg->msg.x11.event;
-  switch(xe.type)
-  {
-    case ConfigureNotify:
+    if (!XPending(x11.display))
     {
-      int x, y;
+      FD_ZERO(&in_fds);
+      FD_SET(fd, &in_fds);
+      struct timeval tv =
+      {
+        .tv_usec = 250000,
+        .tv_sec  = 0
+      };
 
-      /* the window may have been re-parented so we need to translate to
-       * ensure we get the screen top left position of the window */
-      Window child;
-      XTranslateCoordinates(
-          x11.display,
-          x11.window,
-          DefaultRootWindow(x11.display),
-          0, 0,
-          &x,
-          &y,
-          &child);
-
-      x11.rect.x = x;
-      x11.rect.y = y;
-      x11.rect.w = xe.xconfigure.width;
-      x11.rect.h = xe.xconfigure.height;
-
-      app_updateWindowPos(x, y);
-      app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
-      return true;
+      int ret = select(fd + 1, &in_fds, NULL, NULL, &tv);
+      if (ret == 0 || !XPending(x11.display))
+        continue;
     }
 
-    case GenericEvent:
+    XEvent xe;
+    XNextEvent(x11.display, &xe);
+
+    switch(xe.type)
     {
-      XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
-      if (cookie->extension != x11.xinputOp)
-        return false;
-
-      switch(cookie->evtype)
+      case ConfigureNotify:
       {
-        case XI_FocusIn:
-        {
-          if (x11.focused)
-            return true;
+        int x, y;
 
-          XIFocusOutEvent *xie = cookie->data;
-          if (xie->mode != XINotifyNormal &&
-              xie->mode != XINotifyWhileGrabbed &&
-              xie->mode != XINotifyUngrab)
-            return true;
+        /* the window may have been re-parented so we need to translate to
+         * ensure we get the screen top left position of the window */
+        Window child;
+        XTranslateCoordinates(
+            x11.display,
+            x11.window,
+            DefaultRootWindow(x11.display),
+            0, 0,
+            &x,
+            &y,
+            &child);
 
-          x11.focused = true;
-          app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleFocusEvent(true);
-          return true;
-        }
+        x11.rect.x = x;
+        x11.rect.y = y;
+        x11.rect.w = xe.xconfigure.width;
+        x11.rect.h = xe.xconfigure.height;
 
-        case XI_FocusOut:
-        {
-          if (!x11.focused)
-            return true;
-
-          XIFocusOutEvent *xie = cookie->data;
-          if (xie->mode != XINotifyNormal &&
-              xie->mode != XINotifyWhileGrabbed &&
-              xie->mode != XINotifyGrab)
-            return true;
-
-          app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleFocusEvent(false);
-          x11.focused = false;
-          return true;
-        }
-
-        case XI_Enter:
-        {
-          if (x11.entered)
-            return true;
-
-          XIEnterEvent *xie = cookie->data;
-          app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleEnterEvent(true);
-          x11.entered = true;
-          return true;
-        }
-
-        case XI_Leave:
-        {
-          if (!x11.entered)
-            return true;
-
-          XILeaveEvent *xie = cookie->data;
-          app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleEnterEvent(false);
-          x11.entered = false;
-          return true;
-        }
-
-        case XI_KeyPress:
-        {
-          if (!x11.focused || x11.keyboardGrabbed)
-            return true;
-
-          XIDeviceEvent *device = cookie->data;
-          app_handleKeyPress(device->detail - 8);
-          return true;
-        }
-
-        case XI_KeyRelease:
-        {
-          if (!x11.focused || x11.keyboardGrabbed)
-            return true;
-
-          XIDeviceEvent *device = cookie->data;
-          app_handleKeyRelease(device->detail - 8);
-          return true;
-        }
-
-        case XI_RawKeyPress:
-        {
-          if (!x11.focused)
-            return true;
-
-          XIRawEvent *raw = cookie->data;
-          app_handleKeyPress(raw->detail - 8);
-          return true;
-        }
-
-        case XI_RawKeyRelease:
-        {
-          if (!x11.focused)
-            return true;
-
-          XIRawEvent *raw = cookie->data;
-          app_handleKeyRelease(raw->detail - 8);
-          return true;
-        }
-
-        case XI_RawButtonPress:
-        {
-          if (!x11.focused || !x11.entered)
-            return true;
-
-          XIRawEvent *raw = cookie->data;
-
-          /* filter out duplicate events */
-          static Time         prev_time   = 0;
-          static unsigned int prev_detail = 0;
-          if (raw->time == prev_time && raw->detail == prev_detail)
-            return true;
-
-          prev_time   = raw->time;
-          prev_detail = raw->detail;
-
-          app_handleButtonPress(
-              raw->detail > 5 ? raw->detail - 2 : raw->detail);
-          return true;
-        }
-
-        case XI_RawButtonRelease:
-        {
-          if (!x11.focused || !x11.entered)
-            return true;
-
-          XIRawEvent *raw = cookie->data;
-
-          /* filter out duplicate events */
-          static Time         prev_time   = 0;
-          static unsigned int prev_detail = 0;
-          if (raw->time == prev_time && raw->detail == prev_detail)
-            return true;
-
-          prev_time   = raw->time;
-          prev_detail = raw->detail;
-
-          app_handleButtonRelease(
-              raw->detail > 5 ? raw->detail - 2 : raw->detail);
-          return true;
-        }
-
-        case XI_Motion:
-        {
-          XIDeviceEvent *device = cookie->data;
-          app_updateCursorPos(device->event_x, device->event_y);
-
-          if (!x11.pointerGrabbed)
-            app_handleMouseNormal(0.0, 0.0);
-          return true;
-        }
-
-        case XI_RawMotion:
-        {
-          if (!x11.focused || !x11.entered)
-            return true;
-
-          XIRawEvent *raw = cookie->data;
-          double raw_axis[2];
-          double axis[2];
-
-          /* select the active validators for the X & Y axis */
-          double *valuator = raw->valuators.values;
-          double *r_value  = raw->raw_values;
-          int    count     = 0;
-          for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
-          {
-            if (XIMaskIsSet(raw->valuators.mask, i))
-            {
-              raw_axis[count] = *r_value;
-              axis    [count] = *valuator;
-              ++count;
-
-              if (count == 2)
-                break;
-
-              ++valuator;
-              ++r_value;
-            }
-          }
-
-          /* filter out scroll wheel and other events */
-          if (count < 2)
-            return true;
-
-          /* filter out duplicate events */
-          static Time   prev_time    = 0;
-          static double prev_axis[2] = {0};
-          if (raw->time == prev_time &&
-              axis[0] == prev_axis[0] &&
-              axis[1] == prev_axis[1])
-            return true;
-
-          prev_time = raw->time;
-          prev_axis[0] = axis[0];
-          prev_axis[1] = axis[1];
-
-          if (app_cursorIsGrabbed())
-          {
-            if (app_cursorWantsRaw())
-              app_handleMouseGrabbed(raw_axis[0], raw_axis[1]);
-            else
-              app_handleMouseGrabbed(axis[0], axis[1]);
-          }
-          else
-            if (app_cursorInWindow())
-              app_handleMouseNormal(axis[0], axis[1]);
-
-          return true;
-        }
+        app_updateWindowPos(x, y);
+        app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
+        break;
       }
 
-      return false;
+      case GenericEvent:
+      {
+        XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
+        XGetEventData(x11.display, cookie);
+        x11GenericEvent(cookie);
+        XFreeEventData(x11.display, cookie);
+        break;
+      }
+
+      // clipboard events
+      case SelectionRequest:
+        x11CBSelectionRequest(xe.xselectionrequest);
+        break;
+
+      case SelectionClear:
+        x11CBSelectionClear(xe.xselectionclear);
+        break;
+
+      case SelectionNotify:
+        x11CBSelectionNotify(xe.xselection);
+        break;
+
+      case PropertyNotify:
+        if (xe.xproperty.display != x11.display      ||
+            xe.xproperty.window  != x11.window       ||
+            xe.xproperty.state   != PropertyNewValue)
+          break;
+
+        if (xe.xproperty.atom == x11.aNetFrameExtents)
+        {
+          Atom type;
+          int fmt;
+          unsigned long num, bytes;
+          unsigned char *data;
+
+          if (XGetWindowProperty(x11.display, x11.window,
+                x11.aNetFrameExtents, 0, 4, False, AnyPropertyType,
+                &type, &fmt, &num, &bytes, &data) != Success)
+              break;
+
+          if (num >= 4)
+          {
+            long *cardinal = (long *)data;
+            x11.border.left   = cardinal[0];
+            x11.border.right  = cardinal[1];
+            x11.border.top    = cardinal[2];
+            x11.border.bottom = cardinal[3];
+            app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
+          }
+
+          XFree(data);
+          break;
+        }
+
+        if (xe.xproperty.atom == x11.aSelData)
+        {
+          if (x11.lowerBound == 0)
+            break;
+
+          x11CBSelectionIncr(xe.xproperty);
+          break;
+        }
+
+        break;
+
+      default:
+        if (xe.type == x11.eventBase + XFixesSelectionNotify)
+        {
+          XFixesSelectionNotifyEvent * sne = (XFixesSelectionNotifyEvent *)&xe;
+          x11CBXFixesSelectionNotify(*sne);
+        }
+        break;
+    }
+  }
+
+  return 0;
+}
+
+static void x11GenericEvent(XGenericEventCookie *cookie)
+{
+  if (cookie->extension != x11.xinputOp)
+    return;
+
+  switch(cookie->evtype)
+  {
+    case XI_FocusIn:
+    {
+      if (x11.focused)
+        return;
+
+      XIFocusOutEvent *xie = cookie->data;
+      if (xie->mode != XINotifyNormal &&
+          xie->mode != XINotifyWhileGrabbed &&
+          xie->mode != XINotifyUngrab)
+        return;
+
+      x11.focused = true;
+      app_updateCursorPos(xie->event_x, xie->event_y);
+      app_handleFocusEvent(true);
+      return;
     }
 
-    // clipboard events
-    case SelectionRequest:
-      x11CBSelectionRequest(xe.xselectionrequest);
-      return true;
+    case XI_FocusOut:
+    {
+      if (!x11.focused)
+        return;
 
-    case SelectionClear:
-      x11CBSelectionClear(xe.xselectionclear);
-      return true;
+      XIFocusOutEvent *xie = cookie->data;
+      if (xie->mode != XINotifyNormal &&
+          xie->mode != XINotifyWhileGrabbed &&
+          xie->mode != XINotifyGrab)
+        return;
 
-    case SelectionNotify:
-      x11CBSelectionNotify(xe.xselection);
-      return true;
+      app_updateCursorPos(xie->event_x, xie->event_y);
+      app_handleFocusEvent(false);
+      x11.focused = false;
+      return;
+    }
 
-    case PropertyNotify:
-      if (xe.xproperty.display != x11.display      ||
-          xe.xproperty.window  != x11.window       ||
-          xe.xproperty.state   != PropertyNewValue)
-        return false;
+    case XI_Enter:
+    {
+      if (x11.entered)
+        return;
 
-      if (xe.xproperty.atom == x11.aNetFrameExtents)
+      XIEnterEvent *xie = cookie->data;
+      app_updateCursorPos(xie->event_x, xie->event_y);
+      app_handleEnterEvent(true);
+      x11.entered = true;
+      return;
+    }
+
+    case XI_Leave:
+    {
+      if (!x11.entered)
+        return;
+
+      XILeaveEvent *xie = cookie->data;
+      app_updateCursorPos(xie->event_x, xie->event_y);
+      app_handleEnterEvent(false);
+      x11.entered = false;
+      return;
+    }
+
+    case XI_KeyPress:
+    {
+      if (!x11.focused || x11.keyboardGrabbed)
+        return;
+
+      XIDeviceEvent *device = cookie->data;
+      app_handleKeyPress(device->detail - 8);
+      return;
+    }
+
+    case XI_KeyRelease:
+    {
+      if (!x11.focused || x11.keyboardGrabbed)
+        return;
+
+      XIDeviceEvent *device = cookie->data;
+      app_handleKeyRelease(device->detail - 8);
+      return;
+    }
+
+    case XI_RawKeyPress:
+    {
+      if (!x11.focused)
+        return;
+
+      XIRawEvent *raw = cookie->data;
+      app_handleKeyPress(raw->detail - 8);
+      return;
+    }
+
+    case XI_RawKeyRelease:
+    {
+      if (!x11.focused)
+        return;
+
+      XIRawEvent *raw = cookie->data;
+      app_handleKeyRelease(raw->detail - 8);
+      return;
+    }
+
+    case XI_RawButtonPress:
+    {
+      if (!x11.focused || !x11.entered)
+        return;
+
+      XIRawEvent *raw = cookie->data;
+
+      /* filter out duplicate events */
+      static Time         prev_time   = 0;
+      static unsigned int prev_detail = 0;
+      if (raw->time == prev_time && raw->detail == prev_detail)
+        return;
+
+      prev_time   = raw->time;
+      prev_detail = raw->detail;
+
+      app_handleButtonPress(
+          raw->detail > 5 ? raw->detail - 2 : raw->detail);
+      return;
+    }
+
+    case XI_RawButtonRelease:
+    {
+      if (!x11.focused || !x11.entered)
+        return;
+
+      XIRawEvent *raw = cookie->data;
+
+      /* filter out duplicate events */
+      static Time         prev_time   = 0;
+      static unsigned int prev_detail = 0;
+      if (raw->time == prev_time && raw->detail == prev_detail)
+        return;
+
+      prev_time   = raw->time;
+      prev_detail = raw->detail;
+
+      app_handleButtonRelease(
+          raw->detail > 5 ? raw->detail - 2 : raw->detail);
+      return;
+    }
+
+    case XI_Motion:
+    {
+      XIDeviceEvent *device = cookie->data;
+      app_updateCursorPos(device->event_x, device->event_y);
+
+      if (!x11.pointerGrabbed)
+        app_handleMouseNormal(0.0, 0.0);
+      return;
+    }
+
+    case XI_RawMotion:
+    {
+      if (!x11.focused || !x11.entered)
+        return;
+
+      XIRawEvent *raw = cookie->data;
+      double raw_axis[2];
+      double axis[2];
+
+      /* select the active validators for the X & Y axis */
+      double *valuator = raw->valuators.values;
+      double *r_value  = raw->raw_values;
+      int    count     = 0;
+      for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
       {
-        Atom type;
-        int fmt;
-        unsigned long num, bytes;
-        unsigned char *data;
-
-        if (XGetWindowProperty(x11.display, x11.window,
-              x11.aNetFrameExtents, 0, 4, False, AnyPropertyType,
-              &type, &fmt, &num, &bytes, &data) != Success)
-            return true;
-
-        if (num >= 4)
+        if (XIMaskIsSet(raw->valuators.mask, i))
         {
-          long *cardinal = (long *)data;
-          x11.border.left   = cardinal[0];
-          x11.border.right  = cardinal[1];
-          x11.border.top    = cardinal[2];
-          x11.border.bottom = cardinal[3];
-          app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
+          raw_axis[count] = *r_value;
+          axis    [count] = *valuator;
+          ++count;
+
+          if (count == 2)
+            break;
+
+          ++valuator;
+          ++r_value;
         }
-
-        XFree(data);
-        return true;
       }
 
-      if (xe.xproperty.atom == x11.aSelData)
+      /* filter out scroll wheel and other events */
+      if (count < 2)
+        return;
+
+      /* filter out duplicate events */
+      static Time   prev_time    = 0;
+      static double prev_axis[2] = {0};
+      if (raw->time == prev_time &&
+          axis[0] == prev_axis[0] &&
+          axis[1] == prev_axis[1])
+        return;
+
+      prev_time = raw->time;
+      prev_axis[0] = axis[0];
+      prev_axis[1] = axis[1];
+
+      if (app_cursorIsGrabbed())
       {
-        if (x11.lowerBound == 0)
-          return false;
-        x11CBSelectionIncr(xe.xproperty);
-        return true;
+        if (app_cursorWantsRaw())
+          app_handleMouseGrabbed(raw_axis[0], raw_axis[1]);
+        else
+          app_handleMouseGrabbed(axis[0], axis[1]);
       }
+      else
+        if (app_cursorInWindow())
+          app_handleMouseNormal(axis[0], axis[1]);
 
-      return true;
-
-    default:
-      if (xe.type == x11.eventBase + XFixesSelectionNotify)
-      {
-        XFixesSelectionNotifyEvent * sne = (XFixesSelectionNotifyEvent *)&xe;
-        x11CBXFixesSelectionNotify(*sne);
-        return true;
-      }
-      return false;
+      return;
+    }
   }
+}
+
+#ifdef ENABLE_EGL
+static EGLDisplay x11GetEGLDisplay(void)
+{
+  EGLDisplay ret;
+  const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
+
+  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
+      g_egl_dynProcs.eglGetPlatformDisplay)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplay");
+    ret = g_egl_dynProcs.eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR,
+        x11.display, NULL);
+  }
+  else if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
+      g_egl_dynProcs.eglGetPlatformDisplayEXT)
+  {
+    DEBUG_INFO("Using eglGetPlatformDisplayEXT");
+    ret = g_egl_dynProcs.eglGetPlatformDisplayEXT(EGL_PLATFORM_X11_KHR,
+        x11.display, NULL);
+  }
+  else
+  {
+    DEBUG_INFO("Using eglGetDisplay");
+    ret = eglGetDisplay(x11.display);
+  }
+
+  return ret;
+}
+
+static EGLNativeWindowType x11GetEGLNativeWindow(void)
+{
+  return (EGLNativeWindowType)x11.window;
+}
+#endif
+
+static void x11GLSwapBuffers(void)
+{
+  glXSwapBuffers(x11.display, x11.window);
+}
+
+static void x11ShowPointer(bool show)
+{
+  if (show)
+    XDefineCursor(x11.display, x11.window, x11.squareCursor);
+  else
+    XDefineCursor(x11.display, x11.window, x11.blankCursor);
 }
 
 static void x11PrintGrabError(const char * type, int dev, Status ret)
@@ -671,9 +819,9 @@ static void x11GrabPointer(void)
   if (x11.pointerGrabbed)
     return;
 
-  unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+  unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)] = { 0 };
   XIEventMask mask = {
-    XIAllMasterDevices,
+    x11.pointerDev,
     sizeof(mask_bits),
     mask_bits
   };
@@ -721,7 +869,7 @@ static void x11GrabKeyboard(void)
 
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
   XIEventMask mask = {
-    XIAllMasterDevices,
+    x11.keyboardDev,
     sizeof(mask_bits),
     mask_bits
   };
@@ -773,6 +921,32 @@ static void x11WarpPointer(int x, int y, bool exiting)
   XSync(x11.display, False);
 }
 
+static void x11RealignPointer(void)
+{
+  app_handleMouseNormal(0, 0);
+}
+
+static bool x11IsValidPointerPos(int x, int y)
+{
+  int screens;
+  XineramaScreenInfo *xinerama = XineramaQueryScreens(x11.display, &screens);
+
+  if(!xinerama)
+    return true;
+
+  bool ret = false;
+  for(int i = 0; i < screens; ++i)
+    if (x >= xinerama[i].x_org && x < xinerama[i].x_org + xinerama[i].width &&
+        y >= xinerama[i].y_org && y < xinerama[i].y_org + xinerama[i].height)
+    {
+      ret = true;
+      break;
+    }
+
+  XFree(xinerama);
+  return ret;
+}
+
 static void x11InhibitIdle(void)
 {
   XScreenSaverSuspend(x11.display, true);
@@ -781,6 +955,38 @@ static void x11InhibitIdle(void)
 static void x11UninhibitIdle(void)
 {
   XScreenSaverSuspend(x11.display, false);
+}
+
+static void x11Wait(unsigned int time)
+{
+  usleep(time * 1000U);
+}
+
+static void x11SetWindowSize(int w, int h)
+{
+  XResizeWindow(x11.display, x11.window, w, h);
+}
+
+static void x11SetFullscreen(bool fs)
+{
+  XEvent e =
+  {
+    .xclient = {
+      .type         = ClientMessage,
+      .send_event   = true,
+      .message_type = x11.aNetWMState,
+      .format       = 32,
+      .window       = x11.window,
+      .data.l       = {
+        fs ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
+        x11.aNetWMStateFullscreen,
+        0
+      }
+    }
+  };
+
+  XSendEvent(x11.display, DefaultRootWindow(x11.display), False,
+      SubstructureNotifyMask | SubstructureRedirectMask, &e);
 }
 
 static bool x11CBInit()
@@ -1112,21 +1318,31 @@ static void x11CBRequest(LG_ClipboardData type)
 
 struct LG_DisplayServerOps LGDS_X11 =
 {
-  .probe          = x11Probe,
-  .init           = x11Init,
-  .startup        = x11Startup,
-  .shutdown       = x11Shutdown,
-  .free           = x11Free,
-  .getProp        = x11GetProp,
-  .eventFilter    = x11EventFilter,
-  .grabPointer    = x11GrabPointer,
-  .ungrabPointer  = x11UngrabPointer,
-  .grabKeyboard   = x11GrabKeyboard,
-  .ungrabKeyboard = x11UngrabKeyboard,
-  .warpPointer    = x11WarpPointer,
-
-  .inhibitIdle   = x11InhibitIdle,
-  .uninhibitIdle = x11UninhibitIdle,
+  .probe              = x11Probe,
+  .earlyInit          = x11EarlyInit,
+  .init               = x11Init,
+  .startup            = x11Startup,
+  .shutdown           = x11Shutdown,
+  .free               = x11Free,
+  .getProp            = x11GetProp,
+#ifdef ENABLE_EGL
+  .getEGLDisplay      = x11GetEGLDisplay,
+  .getEGLNativeWindow = x11GetEGLNativeWindow,
+#endif
+  .glSwapBuffers      = x11GLSwapBuffers,
+  .showPointer        = x11ShowPointer,
+  .grabPointer        = x11GrabPointer,
+  .ungrabPointer      = x11UngrabPointer,
+  .grabKeyboard       = x11GrabKeyboard,
+  .ungrabKeyboard     = x11UngrabKeyboard,
+  .warpPointer        = x11WarpPointer,
+  .realignPointer     = x11RealignPointer,
+  .isValidPointerPos  = x11IsValidPointerPos,
+  .inhibitIdle        = x11InhibitIdle,
+  .uninhibitIdle      = x11UninhibitIdle,
+  .wait               = x11Wait,
+  .setWindowSize      = x11SetWindowSize,
+  .setFullscreen      = x11SetFullscreen,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,
