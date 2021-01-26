@@ -19,7 +19,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 #include <stdatomic.h>
-#include <SDL2/SDL.h>
 #include <linux/input.h>
 
 #include "dynamic/displayservers.h"
@@ -48,18 +47,18 @@ struct AppState
   bool                 stopVideo;
   bool                 ignoreInput;
   bool                 escapeActive;
-  SDL_Scancode         escapeAction;
+  int                  escapeAction;
   KeybindHandle        bindings[KEY_MAX];
   bool                 keyDown[KEY_MAX];
 
   bool                 haveSrcSize;
-  SDL_Point            windowPos;
+  struct Point         windowPos;
   int                  windowW, windowH;
   int                  windowCX, windowCY;
   LG_RendererRotate    rotate;
   bool                 focused;
   struct Border        border;
-  SDL_Point            srcSize;
+  struct Point         srcSize;
   LG_RendererRect      dstRect;
   bool                 posInfoValid;
   bool                 alignToGuest;
@@ -73,9 +72,6 @@ struct AppState
   bool                 cbChunked;
   size_t               cbXfer;
   struct ll          * cbRequestList;
-
-  SDL_SysWMinfo        wminfo;
-  SDL_Window         * window;
 
   struct IVSHMEM       shm;
   PLGMPClient          lgmp;
@@ -124,7 +120,7 @@ struct AppParams
   bool              noScreensaver;
   bool              grabKeyboard;
   bool              grabKeyboardOnFocus;
-  SDL_Scancode      escapeKey;
+  int               escapeKey;
   bool              ignoreWindowsKeys;
   bool              showAlerts;
   bool              captureOnStart;

@@ -88,7 +88,12 @@ static void x11CBSelectionIncr(const XPropertyEvent e);
 static void x11CBSelectionNotify(const XSelectionEvent e);
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e);
 
-static bool x11Init(SDL_SysWMinfo * info)
+static bool x11Probe(void)
+{
+  return getenv("DISPLAY") != NULL;
+}
+
+static bool x11Init(const LG_DSInitParams params)
 {
   XIDeviceInfo *devinfo;
   int count;
@@ -1107,7 +1112,7 @@ static void x11CBRequest(LG_ClipboardData type)
 
 struct LG_DisplayServerOps LGDS_X11 =
 {
-  .subsystem      = SDL_SYSWM_X11,
+  .probe          = x11Probe,
   .init           = x11Init,
   .startup        = x11Startup,
   .shutdown       = x11Shutdown,

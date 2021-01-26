@@ -28,7 +28,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "kb.h"
 
 #include "common/debug.h"
+
 #include <stdarg.h>
+#include <math.h>
+#include <string.h>
 
 void app_alert(LG_MsgAlert type, const char * fmt, ...)
 {
@@ -98,9 +101,14 @@ bool app_getProp(LG_DSProperty prop, void * ret)
   return g_state.ds->getProp(prop, ret);
 }
 
-SDL_Window * app_getWindow(void)
+EGLNativeWindowType app_getEGLNativeWindow(void)
 {
-  return g_state.window;
+  return g_state.ds->getEGLNativeWindow();
+}
+
+EGLDisplay app_getEGLDisplay(void)
+{
+  return g_state.ds->getEGLDisplay();
 }
 
 bool app_inputEnabled(void)
@@ -280,7 +288,7 @@ void app_handleButtonPress(int button)
   g_cursor.buttons |= (1U << button);
 
   if (!spice_mouse_press(button))
-    DEBUG_ERROR("SDL_MOUSEBUTTONDOWN: failed to send message");
+    DEBUG_ERROR("app_handleButtonPress: failed to send message");
 }
 
 void app_handleButtonRelease(int button)
@@ -291,7 +299,7 @@ void app_handleButtonRelease(int button)
   g_cursor.buttons &= ~(1U << button);
 
   if (!spice_mouse_release(button))
-    DEBUG_ERROR("SDL_MOUSEBUTTONUP: failed to send message");
+    DEBUG_ERROR("app_handleButtonRelease: failed to send message");
 }
 
 void app_handleKeyPress(int sc)
@@ -325,7 +333,7 @@ void app_handleKeyPress(int sc)
       g_state.keyDown[sc] = true;
     else
     {
-      DEBUG_ERROR("SDL_KEYDOWN: failed to send message");
+      DEBUG_ERROR("app_handleKeyPress: failed to send message");
       return;
     }
   }
@@ -372,7 +380,7 @@ void app_handleKeyRelease(int sc)
     g_state.keyDown[sc] = false;
   else
   {
-    DEBUG_ERROR("SDL_KEYUP: failed to send message");
+    DEBUG_ERROR("app_handleKeyRelease: failed to send message");
     return;
   }
 }
@@ -612,4 +620,14 @@ void app_handleCloseEvent(void)
 {
   if (!g_params.ignoreQuit || !g_cursor.inView)
     g_state.state = APP_STATE_SHUTDOWN;
+}
+
+void app_setFullscreen(bool fs)
+{
+  g_state.ds->setFullscreen(fs);
+}
+
+void app_glSwapBuffers(void)
+{
+  g_state.ds->glSwapBuffers();
 }

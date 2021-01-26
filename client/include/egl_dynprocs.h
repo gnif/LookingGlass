@@ -17,16 +17,27 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#include "dynprocs.h"
+#ifdef ENABLE_EGL
 
-struct EGLDynProcs g_dynprocs = {0};
+#include <EGL/egl.h>
+#include <GL/gl.h>
 
-void egl_dynProcsInit(void)
+typedef EGLDisplay (*eglGetPlatformDisplayEXT_t)(EGLenum platform,
+    void *native_display, const EGLint *attrib_list);
+typedef void (*glEGLImageTargetTexture2DOES_t)(GLenum target,
+    GLeglImageOES image);
+
+struct EGLDynProcs
 {
-  g_dynprocs.eglGetPlatformDisplay = (eglGetPlatformDisplayEXT_t)
-    eglGetProcAddress("eglGetPlatformDisplay");
-  g_dynprocs.eglGetPlatformDisplayEXT = (eglGetPlatformDisplayEXT_t)
-    eglGetProcAddress("eglGetPlatformDisplayEXT");
-  g_dynprocs.glEGLImageTargetTexture2DOES = (glEGLImageTargetTexture2DOES_t)
-    eglGetProcAddress("glEGLImageTargetTexture2DOES");
+  eglGetPlatformDisplayEXT_t     eglGetPlatformDisplay;
+  eglGetPlatformDisplayEXT_t     eglGetPlatformDisplayEXT;
+  glEGLImageTargetTexture2DOES_t glEGLImageTargetTexture2DOES;
 };
+
+extern struct EGLDynProcs g_egl_dynProcs;
+
+void egl_dynProcsInit(void);
+
+#else
+  #define egl_dynProcsInit(...)
+#endif
