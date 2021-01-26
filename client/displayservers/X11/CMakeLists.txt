@@ -7,6 +7,7 @@ pkg_check_modules(DISPLAYSERVER_X11_PKGCONFIG REQUIRED
 	xi
 	xfixes
 	xscrnsaver
+	xinerama
 )
 
 add_library(displayserver_X11 STATIC
