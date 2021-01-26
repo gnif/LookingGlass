@@ -743,7 +743,7 @@ static CaptureResult dxgi_capture(void)
   assert(this);
   assert(this->initialized);
 
-  Texture                 * tex;
+  Texture                 * tex = NULL;
   CaptureResult             result;
   HRESULT                   status;
   DXGI_OUTDUPL_FRAME_INFO   frameInfo;
