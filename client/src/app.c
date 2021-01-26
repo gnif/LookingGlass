@@ -33,82 +33,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <math.h>
 #include <string.h>
 
-void app_alert(LG_MsgAlert type, const char * fmt, ...)
+bool app_isRunning(void)
 {
-  if (!g_state.lgr || !g_params.showAlerts)
-    return;
-
-  va_list args;
-  va_start(args, fmt);
-  const int length = vsnprintf(NULL, 0, fmt, args);
-  va_end(args);
-
-  char *buffer = malloc(length + 1);
-  va_start(args, fmt);
-  vsnprintf(buffer, length + 1, fmt, args);
-  va_end(args);
-
-  g_state.lgr->on_alert(
-    g_state.lgrData,
-    type,
-    buffer,
-    NULL
-  );
-
-  free(buffer);
-}
-
-KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque)
-{
-  // don't allow duplicate binds
-  if (g_state.bindings[sc])
-  {
-    DEBUG_INFO("Key already bound");
-    return NULL;
-  }
-
-  KeybindHandle handle = (KeybindHandle)malloc(sizeof(struct KeybindHandle));
-  handle->sc       = sc;
-  handle->callback = callback;
-  handle->opaque   = opaque;
-
-  g_state.bindings[sc] = handle;
-  return handle;
-}
-
-void app_releaseKeybind(KeybindHandle * handle)
-{
-  if (!*handle)
-    return;
-
-  g_state.bindings[(*handle)->sc] = NULL;
-  free(*handle);
-  *handle = NULL;
-}
-
-void app_releaseAllKeybinds(void)
-{
-  for(int i = 0; i < KEY_MAX; ++i)
-    if (g_state.bindings[i])
-    {
-      free(g_state.bindings[i]);
-      g_state.bindings[i] = NULL;
-    }
-}
-
-bool app_getProp(LG_DSProperty prop, void * ret)
-{
-  return g_state.ds->getProp(prop, ret);
-}
-
-EGLNativeWindowType app_getEGLNativeWindow(void)
-{
-  return g_state.ds->getEGLNativeWindow();
-}
-
-EGLDisplay app_getEGLDisplay(void)
-{
-  return g_state.ds->getEGLDisplay();
+  return
+    g_state.state == APP_STATE_RUNNING ||
+    g_state.state == APP_STATE_RESTART;
 }
 
 bool app_inputEnabled(void)
@@ -624,7 +553,85 @@ void app_setFullscreen(bool fs)
   g_state.ds->setFullscreen(fs);
 }
 
+bool app_getProp(LG_DSProperty prop, void * ret)
+{
+  return g_state.ds->getProp(prop, ret);
+}
+
+EGLDisplay app_getEGLDisplay(void)
+{
+  return g_state.ds->getEGLDisplay();
+}
+
+EGLNativeWindowType app_getEGLNativeWindow(void)
+{
+  return g_state.ds->getEGLNativeWindow();
+}
+
 void app_glSwapBuffers(void)
 {
   g_state.ds->glSwapBuffers();
+}
+
+void app_alert(LG_MsgAlert type, const char * fmt, ...)
+{
+  if (!g_state.lgr || !g_params.showAlerts)
+    return;
+
+  va_list args;
+  va_start(args, fmt);
+  const int length = vsnprintf(NULL, 0, fmt, args);
+  va_end(args);
+
+  char *buffer = malloc(length + 1);
+  va_start(args, fmt);
+  vsnprintf(buffer, length + 1, fmt, args);
+  va_end(args);
+
+  g_state.lgr->on_alert(
+    g_state.lgrData,
+    type,
+    buffer,
+    NULL
+  );
+
+  free(buffer);
+}
+
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque)
+{
+  // don't allow duplicate binds
+  if (g_state.bindings[sc])
+  {
+    DEBUG_INFO("Key already bound");
+    return NULL;
+  }
+
+  KeybindHandle handle = (KeybindHandle)malloc(sizeof(struct KeybindHandle));
+  handle->sc       = sc;
+  handle->callback = callback;
+  handle->opaque   = opaque;
+
+  g_state.bindings[sc] = handle;
+  return handle;
+}
+
+void app_releaseKeybind(KeybindHandle * handle)
+{
+  if (!*handle)
+    return;
+
+  g_state.bindings[(*handle)->sc] = NULL;
+  free(*handle);
+  *handle = NULL;
+}
+
+void app_releaseAllKeybinds(void)
+{
+  for(int i = 0; i < KEY_MAX; ++i)
+    if (g_state.bindings[i])
+    {
+      free(g_state.bindings[i]);
+      g_state.bindings[i] = NULL;
+    }
 }
