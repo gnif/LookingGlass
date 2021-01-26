@@ -141,4 +141,26 @@ struct LG_DisplayServerOps
   void (*cbRequest)(LG_ClipboardData type);
 };
 
+#define IS_LG_DS_VALID(x) \
+  ((x)->probe              && \
+   (x)->earlyInit          && \
+   (x)->init               && \
+   (x)->startup            && \
+   (x)->shutdown           && \
+   (x)->free               && \
+   (x)->getProp            && \
+   (x)->getEGLDisplay      && \
+   (x)->getEGLNativeWindow && \
+   (x)->glSwapBuffers      && \
+   (x)->showPointer        && \
+   (x)->grabPointer        && \
+   (x)->ungrabPointer      && \
+   (x)->warpPointer        && \
+   (x)->realignPointer     && \
+   (x)->isValidPointerPos  && \
+   (x)->inhibitIdle        && \
+   (x)->uninhibitIdle      && \
+   (x)->wait               && \
+   (x)->setWindowSize      && \
+   (x)->setFullscreen)
 #endif
