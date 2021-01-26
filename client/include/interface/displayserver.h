@@ -100,6 +100,7 @@ struct LG_DisplayServerOps
   /* EGL support */
   EGLDisplay (*getEGLDisplay)(void);
   EGLNativeWindowType (*getEGLNativeWindow)(void);
+  void (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface);
 #endif
 
   /* opengl platform specific methods */
@@ -152,6 +153,7 @@ struct LG_DisplayServerOps
    (x)->getProp            && \
    (x)->getEGLDisplay      && \
    (x)->getEGLNativeWindow && \
+   (x)->eglSwapBuffers     && \
    (x)->glSwapBuffers      && \
    (x)->showPointer        && \
    (x)->grabPointer        && \
