@@ -60,6 +60,7 @@ bool app_getProp(LG_DSProperty prop, void * ret);
 
 EGLDisplay app_getEGLDisplay(void);
 EGLNativeWindowType app_getEGLNativeWindow(void);
+void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface);
 void app_glSwapBuffers(void);
 
 void app_clipboardRelease(void);

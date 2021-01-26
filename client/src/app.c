@@ -573,6 +573,11 @@ EGLNativeWindowType app_getEGLNativeWindow(void)
   return g_state.ds->getEGLNativeWindow();
 }
 
+void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
+{
+  g_state.ds->eglSwapBuffers(display, surface);
+}
+
 void app_glSwapBuffers(void)
 {
   g_state.ds->glSwapBuffers();

@@ -229,6 +229,11 @@ static EGLNativeWindowType sdlGetEGLNativeWindow(void)
       return 0;
   }
 }
+
+static void sdlEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
+{
+  eglSwapBuffers(display, surface);
+}
 #endif
 
 static void sdlSwapBuffers(void)
@@ -470,6 +475,7 @@ struct LG_DisplayServerOps LGDS_SDL =
 #ifdef ENABLE_EGL
   .getEGLDisplay       = sdlGetEGLDisplay,
   .getEGLNativeWindow  = sdlGetEGLNativeWindow,
+  .eglSwapBuffers      = sdlEGLSwapBuffers,
 #endif
 
   .glSwapBuffers       = sdlSwapBuffers,
