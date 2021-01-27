@@ -448,8 +448,14 @@ static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
   }
 }
 
+static void xdgToplevelClose(void * data, struct xdg_toplevel * xdgToplevel)
+{
+  app_handleCloseEvent();
+}
+
 static const struct xdg_toplevel_listener xdgToplevelListener = {
   .configure = xdgToplevelConfigure,
+  .close     = xdgToplevelClose,
 };
 
 static bool waylandEarlyInit(void)
