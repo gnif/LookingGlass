@@ -43,6 +43,7 @@ struct AppState
   enum RunState state;
 
   struct LG_DisplayServerOps * ds;
+  bool                         dsInitialized;
 
   bool                 stopVideo;
   bool                 ignoreInput;
