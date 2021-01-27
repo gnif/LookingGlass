@@ -523,6 +523,9 @@ static bool waylandInit(const LG_DSInitParams params)
   if (params.fullscreen)
     xdg_toplevel_set_fullscreen(wm.xdgToplevel, NULL);
 
+  if (params.maximize)
+    xdg_toplevel_set_maximized(wm.xdgToplevel);
+
   wl_surface_commit(wm.surface);
 
   struct wl_buffer * cursorBuffer = createCursorBuffer();
