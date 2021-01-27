@@ -30,8 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 static void bind_fullscreen(int sc, void * opaque)
 {
-  g_params.fullscreen = !g_params.fullscreen;
-  app_setFullscreen(g_params.fullscreen);
+  app_setFullscreen(!app_getFullscreen());
 }
 
 static void bind_video(int sc, void * opaque)
