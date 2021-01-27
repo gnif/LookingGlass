@@ -76,6 +76,7 @@ static bool sdlInit(const LG_DSInitParams params)
     return false;
   }
 
+#ifdef ENABLE_OPENGL
   if (params.opengl)
   {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER      , 1);
@@ -85,6 +86,7 @@ static bool sdlInit(const LG_DSInitParams params)
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE        , 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE         , 8);
   }
+#endif
 
   sdl.window = SDL_CreateWindow(
     params.title,
@@ -254,6 +256,7 @@ static void sdlEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 }
 #endif //ENABLE_EGL
 
+#ifdef ENABLE_OPENGL
 static LG_DSGLContext sdlGLCreateContext(void)
 {
   return (LG_DSGLContext)SDL_GL_CreateContext(sdl.window);
@@ -278,6 +281,7 @@ static void sdlGLSwapBuffers(void)
 {
   SDL_GL_SwapWindow(sdl.window);
 }
+#endif //ENABLE_OPENGL
 
 static int sdlEventFilter(void * userdata, SDL_Event * event)
 {
@@ -517,11 +521,13 @@ struct LG_DisplayServerOps LGDS_SDL =
   .eglSwapBuffers      = sdlEGLSwapBuffers,
 #endif
 
+#ifdef ENABLE_OPENGL
   .glCreateContext     = sdlGLCreateContext,
   .glDeleteContext     = sdlGLDeleteContext,
   .glMakeCurrent       = sdlGLMakeCurrent,
   .glSetSwapInterval   = sdlGLSetSwapInterval,
   .glSwapBuffers       = sdlGLSwapBuffers,
+#endif
 
   .showPointer         = sdlShowPointer,
   .grabPointer         = sdlGrabPointer,

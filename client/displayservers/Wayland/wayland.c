@@ -31,9 +31,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 #include <wayland-client.h>
 
-#include <wayland-egl.h>
-#include "egl_dynprocs.h"
-#include <EGL/eglext.h>
+#if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
+# include <wayland-egl.h>
+# include "egl_dynprocs.h"
+# include <EGL/eglext.h>
+#endif
 
 #include "app.h"
 #include "common/debug.h"
@@ -66,9 +68,11 @@ struct WaylandDSState
   struct wl_egl_window * eglWindow;
 #endif
 
+#ifdef ENABLE_OPENGL
   EGLDisplay glDisplay;
   EGLConfig glConfig;
   EGLSurface glSurface;
+#endif
 
   struct xdg_wm_base * xdgWmBase;
   struct xdg_surface * xdgSurface;
@@ -559,6 +563,7 @@ static bool waylandInit(const LG_DSInitParams params)
     wl_surface_commit(wm.cursor);
   }
 
+#ifdef ENABLE_OPENGL
   if (params.opengl)
   {
     EGLint attr[] =
@@ -604,6 +609,7 @@ static bool waylandInit(const LG_DSInitParams params)
       return false;
     }
   }
+#endif
 
   wm.width = params.w;
   wm.height = params.h;
@@ -619,6 +625,14 @@ static void waylandShutdown(void)
 {
 }
 
+#ifdef ENABLE_EGL
+static EGLNativeWindowType waylandGetEGLNativeWindow(void)
+{
+  return (EGLNativeWindowType) wm.eglWindow;
+}
+#endif
+
+#if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
 static EGLDisplay waylandGetEGLDisplay(void)
 {
   EGLNativeDisplayType native = (EGLNativeDisplayType) wm.display;
@@ -643,13 +657,6 @@ static EGLDisplay waylandGetEGLDisplay(void)
   return eglGetDisplay(native);
 }
 
-#ifdef ENABLE_EGL
-static EGLNativeWindowType waylandGetEGLNativeWindow(void)
-{
-  return (EGLNativeWindowType) wm.eglWindow;
-}
-#endif
-
 static void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 {
   eglSwapBuffers(display, surface);
@@ -668,6 +675,9 @@ static void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
     wm.resizeSerial = 0;
   }
 }
+#endif
+
+#ifdef ENABLE_OPENGL
 static LG_DSGLContext waylandGLCreateContext(void)
 {
   eglBindAPI(EGL_OPENGL_API);
@@ -693,6 +703,7 @@ static void waylandGLSwapBuffers(void)
 {
   waylandEGLSwapBuffers(wm.glDisplay, wm.glSurface);
 }
+#endif
 
 static void waylandShowPointer(bool show)
 {
@@ -1214,11 +1225,13 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .eglSwapBuffers     = waylandEGLSwapBuffers,
 #endif
 
+#ifdef ENABLE_OPENGL
   .glCreateContext    = waylandGLCreateContext,
   .glDeleteContext    = waylandGLDeleteContext,
   .glMakeCurrent      = waylandGLMakeCurrent,
   .glSetSwapInterval  = waylandGLSetSwapInterval,
   .glSwapBuffers      = waylandGLSwapBuffers,
+#endif
 
   .showPointer        = waylandShowPointer,
   .grabPointer        = waylandGrabPointer,
