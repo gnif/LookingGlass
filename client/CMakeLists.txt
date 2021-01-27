@@ -53,6 +53,10 @@ add_compile_options(
 set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
 
+if (ENABLE_OPENGL)
+  add_definitions(-D ENABLE_OPENGL)
+endif()
+
 if (ENABLE_EGL)
   add_definitions(-D ENABLE_EGL)
 endif()
