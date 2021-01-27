@@ -84,4 +84,6 @@ void main()
     color *= 1.0 + lumi;
     color *= nvGain;
   }
+
+  color.a = 1.0;
 }
