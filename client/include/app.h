@@ -64,11 +64,13 @@ EGLNativeWindowType app_getEGLNativeWindow(void);
 void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface);
 #endif
 
+#ifdef ENABLE_OPENGL
 LG_DSGLContext app_glCreateContext(void);
 void app_glDeleteContext(LG_DSGLContext context);
 void app_glMakeCurrent(LG_DSGLContext context);
 void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
+#endif
 
 void app_clipboardRelease(void);
 void app_clipboardNotify(const LG_ClipboardData type, size_t size);
