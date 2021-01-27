@@ -41,6 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
+#include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
@@ -70,6 +71,8 @@ struct WaylandDSState
   struct xdg_wm_base * xdgWmBase;
   struct xdg_surface * xdgSurface;
   struct xdg_toplevel * xdgToplevel;
+  struct zxdg_decoration_manager_v1 * xdgDecorationManager;
+  struct zxdg_toplevel_decoration_v1 * xdgToplevelDecoration;
 
   struct wl_surface * cursor;
 
@@ -185,6 +188,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
     wm.compositor = wl_registry_bind(wm.registry, name, &wl_compositor_interface, 4);
   else if (!strcmp(interface, xdg_wm_base_interface.name))
     wm.xdgWmBase = wl_registry_bind(wm.registry, name, &xdg_wm_base_interface, 1);
+  else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
+    wm.xdgDecorationManager = wl_registry_bind(wm.registry, name,
+        &zxdg_decoration_manager_v1_interface, 1);
   else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name))
     wm.relativePointerManager = wl_registry_bind(wm.registry, name,
         &zwp_relative_pointer_manager_v1_interface, 1);
@@ -527,6 +533,19 @@ static bool waylandInit(const LG_DSInitParams params)
     xdg_toplevel_set_maximized(wm.xdgToplevel);
 
   wl_surface_commit(wm.surface);
+
+  if (wm.xdgDecorationManager)
+  {
+    wm.xdgToplevelDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
+        wm.xdgDecorationManager, wm.xdgToplevel);
+    if (wm.xdgToplevelDecoration)
+    {
+      zxdg_toplevel_decoration_v1_set_mode(wm.xdgToplevelDecoration,
+          params.borderless ?
+            ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE :
+            ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+    }
+  }
 
   struct wl_buffer * cursorBuffer = createCursorBuffer();
   if (cursorBuffer)
