@@ -179,6 +179,8 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW,
     wl_fixed_t syW)
 {
+  app_handleEnterEvent(true);
+
   if (wm.relativePointer)
     return;
 
@@ -191,7 +193,7 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface)
 {
-  // Do nothing.
+  app_handleEnterEvent(false);
 }
 
 static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
@@ -269,6 +271,7 @@ static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
 static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {
+  app_handleFocusEvent(true);
   wm.keyboardEnterSerial = serial;
 
   uint32_t * key;
@@ -279,7 +282,7 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
-  // Do nothing.
+  app_handleFocusEvent(false);
 }
 
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
