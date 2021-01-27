@@ -619,6 +619,26 @@ static void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 }
 #endif
 
+static LG_DSGLContext waylandGLCreateContext(void)
+{
+  return NULL;
+}
+
+static void waylandGLDeleteContext(LG_DSGLContext context)
+{
+  // FIXME: implement.
+}
+
+static void waylandGLMakeCurrent(LG_DSGLContext context)
+{
+  // FIXME: implement.
+}
+
+static void waylandGLSetSwapInterval(int interval)
+{
+  // FIXME: implement.
+}
+
 static void waylandGLSwapBuffers(void)
 {
   // FIXME: implement.
@@ -1144,6 +1164,10 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .eglSwapBuffers     = waylandEGLSwapBuffers,
 #endif
 
+  .glCreateContext    = waylandGLCreateContext,
+  .glDeleteContext    = waylandGLDeleteContext,
+  .glMakeCurrent      = waylandGLMakeCurrent,
+  .glSetSwapInterval  = waylandGLSetSwapInterval,
   .glSwapBuffers      = waylandGLSwapBuffers,
 
   .showPointer        = waylandShowPointer,
