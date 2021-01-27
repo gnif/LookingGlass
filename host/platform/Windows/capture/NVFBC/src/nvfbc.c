@@ -351,6 +351,8 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame)
 
 static int pointerThread(void * unused)
 {
+  lgSignalEvent(this->cursorEvents[1]);
+
   while(!this->stop)
   {
     LGEvent * events[2];
