@@ -148,6 +148,12 @@ static bool x11Init(const LG_DSInitParams params)
       CopyFromParent, CWEventMask,
       &swa);
 
+  if (!x11.window)
+  {
+    DEBUG_ERROR("XCreateWindow failed");
+    goto fail_display;
+  }
+
   XStoreName(x11.display, x11.window, params.title);
 
   x11.aNetReqFrameExtents =
@@ -193,7 +199,7 @@ static bool x11Init(const LG_DSInitParams params)
   if (!devinfo)
   {
     DEBUG_ERROR("XIQueryDevice failed");
-    return false;
+    goto fail_window;
   }
 
   bool havePointer  = false;
@@ -233,14 +239,14 @@ static bool x11Init(const LG_DSInitParams params)
   {
     DEBUG_ERROR("Failed to find the master pointing device");
     XIFreeDeviceInfo(devinfo);
-    return false;
+    goto fail_window;
   }
 
   if (!haveKeyboard)
   {
     DEBUG_ERROR("Failed to find the master keyboard device");
     XIFreeDeviceInfo(devinfo);
-    return false;
+    goto fail_window;
   }
 
   XIFreeDeviceInfo(devinfo);
@@ -265,7 +271,7 @@ static bool x11Init(const LG_DSInitParams params)
   {
     XFree(mask);
     DEBUG_ERROR("Failed to select the xinput events");
-    return false;
+    goto fail_window;
   }
 
   Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(x11.display,
@@ -330,6 +336,14 @@ static bool x11Init(const LG_DSInitParams params)
   }
 
   return true;
+
+fail_window:
+  XDestroyWindow(x11.display, x11.window);
+
+fail_display:
+  XCloseDisplay(x11.display);
+
+  return false;
 }
 
 static void x11Startup(void)
