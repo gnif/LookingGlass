@@ -109,12 +109,14 @@ struct LG_DisplayServerOps
   void (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface);
 #endif
 
+#ifdef ENABLE_OPENGL
   /* opengl platform specific methods */
   LG_DSGLContext (*glCreateContext)(void);
   void (*glDeleteContext)(LG_DSGLContext context);
   void (*glMakeCurrent)(LG_DSGLContext context);
   void (*glSetSwapInterval)(int interval);
   void (*glSwapBuffers)(void);
+#endif
 
   /* dm specific cursor implementations */
   void (*showPointer)(bool show);
@@ -159,6 +161,12 @@ struct LG_DisplayServerOps
   #define ASSERT_EGL_FN(x)
 #endif
 
+#ifdef ENABLE_OPENGL
+  #define ASSERT_OPENGL_FN(x) assert(x)
+#else
+  #define ASSERT_OPENGL_FN(x)
+#endif
+
 #define ASSERT_LG_DS_VALID(x) \
   assert((x)->probe              ); \
   assert((x)->earlyInit          ); \
@@ -170,11 +178,11 @@ struct LG_DisplayServerOps
   ASSERT_EGL_FN((x)->getEGLDisplay      ); \
   ASSERT_EGL_FN((x)->getEGLNativeWindow ); \
   ASSERT_EGL_FN((x)->eglSwapBuffers     ); \
-  assert((x)->glCreateContext    ); \
-  assert((x)->glDeleteContext    ); \
-  assert((x)->glMakeCurrent      ); \
-  assert((x)->glSetSwapInterval  ); \
-  assert((x)->glSwapBuffers      ); \
+  ASSERT_OPENGL_FN((x)->glCreateContext  ); \
+  ASSERT_OPENGL_FN((x)->glDeleteContext  ); \
+  ASSERT_OPENGL_FN((x)->glMakeCurrent    ); \
+  ASSERT_OPENGL_FN((x)->glSetSwapInterval); \
+  ASSERT_OPENGL_FN((x)->glSwapBuffers    ); \
   assert((x)->showPointer        ); \
   assert((x)->grabPointer        ); \
   assert((x)->ungrabPointer      ); \
