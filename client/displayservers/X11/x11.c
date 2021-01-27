@@ -31,10 +31,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <X11/extensions/Xinerama.h>
 
 #include <GL/glx.h>
+#include <GL/glxext.h>
+
+#ifdef ENABLE_EGL
 #include <EGL/eglext.h>
+#include "egl_dynprocs.h"
+#endif
 
 #include "app.h"
-#include "egl_dynprocs.h"
 #include "common/debug.h"
 #include "common/thread.h"
 
@@ -44,9 +48,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct X11DSState
 {
-  Display * display;
-  Window    window;
-  int       xinputOp;
+  Display *     display;
+  Window        window;
+  XVisualInfo * visual;
+  int        xinputOp;
 
   LGThread * eventThread;
 
@@ -137,6 +142,36 @@ static bool x11Init(const LG_DSInitParams params)
       PropertyChangeMask |
       ExposureMask
   };
+  unsigned long swaMask = CWEventMask;
+
+  if (params.opengl)
+  {
+    GLint glXAttribs[] =
+    {
+      GLX_RGBA,
+      GLX_DEPTH_SIZE    , 24,
+      GLX_STENCIL_SIZE  , 0,
+      GLX_RED_SIZE      , 8,
+      GLX_GREEN_SIZE    , 8,
+      GLX_BLUE_SIZE     , 8,
+      GLX_SAMPLE_BUFFERS, 0,
+      GLX_SAMPLES       , 0,
+      None
+    };
+
+    x11.visual = glXChooseVisual(x11.display,
+        XDefaultScreen(x11.display), glXAttribs);
+
+    if (!x11.visual)
+    {
+      DEBUG_ERROR("glXChooseVisual failed");
+      goto fail_display;
+    }
+
+    swa.colormap = XCreateColormap(x11.display, XDefaultRootWindow(x11.display),
+        x11.visual->visual, AllocNone);
+    swaMask |= CWColormap;
+  }
 
   x11.window = XCreateWindow(
       x11.display,
@@ -144,8 +179,10 @@ static bool x11Init(const LG_DSInitParams params)
       params.x, params.y,
       params.w, params.h,
       0,
-      CopyFromParent, InputOutput,
-      CopyFromParent, CWEventMask,
+      x11.visual ? x11.visual->depth  : CopyFromParent,
+      InputOutput,
+      x11.visual ? x11.visual->visual : CopyFromParent,
+      swaMask,
       &swa);
 
   if (!x11.window)
@@ -835,6 +872,27 @@ static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 }
 #endif
 
+static LG_DSGLContext x11GLCreateContext(void)
+{
+  return (LG_DSGLContext)
+    glXCreateContext(x11.display, x11.visual, NULL, GL_TRUE);
+}
+
+static void x11GLDeleteContext(LG_DSGLContext context)
+{
+  glXDestroyContext(x11.display, (GLXContext)context);
+}
+
+static void x11GLMakeCurrent(LG_DSGLContext context)
+{
+  glXMakeCurrent(x11.display, x11.window, (GLXContext)context);
+}
+
+static void x11GLSetSwapInterval(int interval)
+{
+  glXSwapIntervalEXT(x11.display, x11.window, interval);
+}
+
 static void x11GLSwapBuffers(void)
 {
   glXSwapBuffers(x11.display, x11.window);
@@ -1391,6 +1449,10 @@ struct LG_DisplayServerOps LGDS_X11 =
   .getEGLNativeWindow = x11GetEGLNativeWindow,
   .eglSwapBuffers     = x11EGLSwapBuffers,
 #endif
+  .glCreateContext    = x11GLCreateContext,
+  .glDeleteContext    = x11GLDeleteContext,
+  .glMakeCurrent      = x11GLMakeCurrent,
+  .glSetSwapInterval  = x11GLSetSwapInterval,
   .glSwapBuffers      = x11GLSwapBuffers,
   .showPointer        = x11ShowPointer,
   .grabPointer        = x11GrabPointer,

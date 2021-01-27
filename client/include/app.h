@@ -64,6 +64,10 @@ EGLNativeWindowType app_getEGLNativeWindow(void);
 void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface);
 #endif
 
+LG_DSGLContext app_glCreateContext(void);
+void app_glDeleteContext(LG_DSGLContext context);
+void app_glMakeCurrent(LG_DSGLContext context);
+void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
 
 void app_clipboardRelease(void);

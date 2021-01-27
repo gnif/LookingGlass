@@ -108,7 +108,7 @@ struct Inst
   bool              renderStarted;
   bool              configured;
   bool              reconfigure;
-  SDL_GLContext     glContext;
+  LG_DSGLContext    glContext;
 
   SDL_Point         window;
   bool              frameUpdate;
@@ -246,17 +246,6 @@ bool opengl_initialize(void * opaque)
   this->waiting  = true;
   this->waitDone = false;
   return true;
-
-#if 0
-  *sdlFlags = SDL_WINDOW_OPENGL;
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER      , 1);
-  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-  SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
-  SDL_GL_SetAttribute(SDL_GL_RED_SIZE          , 8);
-  SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE        , 8);
-  SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE         , 8);
-  return true;
-#endif
 }
 
 void opengl_deinitialize(void * opaque)
@@ -279,7 +268,7 @@ void opengl_deinitialize(void * opaque)
 
   if (this->glContext)
   {
-    SDL_GL_DeleteContext(this->glContext);
+    app_glDeleteContext(this->glContext);
     this->glContext = NULL;
   }
 
@@ -499,15 +488,13 @@ void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
 
 bool opengl_render_startup(void * opaque)
 {
-  //FIXME
-  return false;
-#if 0
-
   struct Inst * this = (struct Inst *)opaque;
 
-  this->glContext = app_getGLContext();
+  this->glContext = app_glCreateContext();
   if (!this->glContext)
     return false;
+
+  app_glMakeCurrent(this->glContext);
 
   DEBUG_INFO("Vendor  : %s", glGetString(GL_VENDOR  ));
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
@@ -552,10 +539,9 @@ bool opengl_render_startup(void * opaque)
   }
   this->hasTextures = true;
 
-  SDL_GL_SetSwapInterval(this->opt.vsync ? 1 : 0);
+  app_glSetSwapInterval(this->opt.vsync ? 1 : 0);
   this->renderStarted = true;
   return true;
-#endif
 }
 
 bool opengl_render(void * opaque, LG_RendererRotate rotate)
