@@ -585,6 +585,26 @@ void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
 }
 #endif
 
+LG_DSGLContext app_glCreateContext(void)
+{
+  return g_state.ds->glCreateContext();
+}
+
+void app_glDeleteContext(LG_DSGLContext context)
+{
+  g_state.ds->glDeleteContext(context);
+}
+
+void app_glMakeCurrent(LG_DSGLContext context)
+{
+  g_state.ds->glMakeCurrent(context);
+}
+
+void app_glSetSwapInterval(int interval)
+{
+  g_state.ds->glSetSwapInterval(interval);
+}
+
 void app_glSwapBuffers(void)
 {
   g_state.ds->glSwapBuffers();

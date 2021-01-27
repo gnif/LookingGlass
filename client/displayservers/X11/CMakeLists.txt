@@ -14,6 +14,8 @@ add_library(displayserver_X11 STATIC
 	x11.c
 )
 
+add_definitions(-D GLX_GLXEXT_PROTOTYPES)
+
 target_link_libraries(displayserver_X11
 	${DISPLAYSERVER_X11_PKGCONFIG_LIBRARIES}
 	lg_common

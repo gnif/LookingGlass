@@ -72,6 +72,9 @@ LG_DSInitParams;
 typedef void (* LG_ClipboardReplyFn)(void * opaque, const LG_ClipboardData type,
     uint8_t * data, uint32_t size);
 
+typedef struct LG_DSGLContext
+  * LG_DSGLContext;
+
 struct LG_DisplayServerOps
 {
   /* return true if the selected ds is valid for the current platform */
@@ -107,6 +110,10 @@ struct LG_DisplayServerOps
 #endif
 
   /* opengl platform specific methods */
+  LG_DSGLContext (*glCreateContext)(void);
+  void (*glDeleteContext)(LG_DSGLContext context);
+  void (*glMakeCurrent)(LG_DSGLContext context);
+  void (*glSetSwapInterval)(int interval);
   void (*glSwapBuffers)(void);
 
   /* dm specific cursor implementations */
@@ -163,6 +170,10 @@ struct LG_DisplayServerOps
   ASSERT_EGL_FN((x)->getEGLDisplay      ); \
   ASSERT_EGL_FN((x)->getEGLNativeWindow ); \
   ASSERT_EGL_FN((x)->eglSwapBuffers     ); \
+  assert((x)->glCreateContext    ); \
+  assert((x)->glDeleteContext    ); \
+  assert((x)->glMakeCurrent      ); \
+  assert((x)->glSetSwapInterval  ); \
   assert((x)->glSwapBuffers      ); \
   assert((x)->showPointer        ); \
   assert((x)->grabPointer        ); \

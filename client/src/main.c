@@ -722,6 +722,13 @@ static int lg_run(void)
     return -1;
   }
 
+  // initialize the window dimensions at init for renderers
+  g_state.windowW  = g_params.w;
+  g_state.windowH  = g_params.h;
+  g_state.windowCX = g_params.w / 2;
+  g_state.windowCY = g_params.h / 2;
+  core_updatePositionInfo();
+
   const LG_DSInitParams params =
   {
     .title               = g_params.windowTitle,
