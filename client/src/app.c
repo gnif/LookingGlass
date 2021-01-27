@@ -563,6 +563,7 @@ bool app_getProp(LG_DSProperty prop, void * ret)
   return g_state.ds->getProp(prop, ret);
 }
 
+#ifdef ENABLE_EGL
 EGLDisplay app_getEGLDisplay(void)
 {
   return g_state.ds->getEGLDisplay();
@@ -577,6 +578,7 @@ void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
 {
   g_state.ds->eglSwapBuffers(display, surface);
 }
+#endif
 
 void app_glSwapBuffers(void)
 {
