@@ -57,6 +57,8 @@ struct X11DSState
   bool keyboardGrabbed;
   bool entered;
   bool focused;
+  bool fullscreen;
+
   struct Rect   rect;
   struct Border border;
 
@@ -447,7 +449,14 @@ static int x11EventThread(void * unused)
         x11.rect.h = xe.xconfigure.height;
 
         app_updateWindowPos(x, y);
-        app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
+
+        if (x11.fullscreen)
+        {
+          struct Border border = {0};
+          app_handleResizeEvent(x11.rect.w, x11.rect.h, border);
+        }
+        else
+          app_handleResizeEvent(x11.rect.w, x11.rect.h, x11.border);
         break;
       }
 
@@ -478,6 +487,31 @@ static int x11EventThread(void * unused)
             xe.xproperty.window  != x11.window       ||
             xe.xproperty.state   != PropertyNewValue)
           break;
+
+        if (xe.xproperty.atom == x11.aNetWMState)
+        {
+          Atom type;
+          int fmt;
+          unsigned long num, bytes;
+          unsigned char *data;
+
+          if (XGetWindowProperty(x11.display, x11.window,
+              x11.aNetWMState, 0, ~0L, False, AnyPropertyType,
+              &type, &fmt, &num, &bytes, &data) != Success)
+            break;
+
+          bool fullscreen = false;
+          for(int i = 0; i < num; ++i)
+          {
+            Atom prop = ((Atom *)data)[i];
+            if (prop == x11.aNetWMStateFullscreen)
+              fullscreen = true;
+          }
+
+          x11.fullscreen = fullscreen;
+          XFree(data);
+          break;
+        }
 
         if (xe.xproperty.atom == x11.aNetFrameExtents)
         {
@@ -969,6 +1003,9 @@ static void x11SetWindowSize(int w, int h)
 
 static void x11SetFullscreen(bool fs)
 {
+  if (x11.fullscreen == fs)
+    return;
+
   XEvent e =
   {
     .xclient = {
