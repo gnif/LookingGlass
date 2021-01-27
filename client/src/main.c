@@ -590,7 +590,8 @@ void intHandler(int sig)
   }
 }
 
-static bool tryRenderer(const int index, const LG_RendererParams lgrParams)
+static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
+    bool * needsOpenGL)
 {
   const LG_Renderer *r = LG_Renderers[index];
 
@@ -602,7 +603,8 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams)
 
   // create the renderer
   g_state.lgrData = NULL;
-  if (!r->create(&g_state.lgrData, lgrParams))
+  *needsOpenGL    = false;
+  if (!r->create(&g_state.lgrData, lgrParams, needsOpenGL))
     return false;
 
   // initialize the renderer
@@ -686,6 +688,7 @@ static int lg_run(void)
   }
 
   // select and init a renderer
+  bool needsOpenGL;
   LG_RendererParams lgrParams;
   lgrParams.showFPS     = g_params.showFPS;
   lgrParams.quickSplash = g_params.quickSplash;
@@ -693,7 +696,7 @@ static int lg_run(void)
   if (g_params.forceRenderer)
   {
     DEBUG_INFO("Trying forced renderer");
-    if (!tryRenderer(g_params.forceRendererIndex, lgrParams))
+    if (!tryRenderer(g_params.forceRendererIndex, lgrParams, &needsOpenGL))
     {
       DEBUG_ERROR("Forced renderer failed to iniailize");
       return -1;
@@ -705,7 +708,7 @@ static int lg_run(void)
     // probe for a a suitable renderer
     for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
     {
-      if (tryRenderer(i, lgrParams))
+      if (tryRenderer(i, lgrParams, &needsOpenGL))
       {
         g_state.lgr = LG_Renderers[i];
         break;
@@ -731,7 +734,8 @@ static int lg_run(void)
     .resizable           = g_params.allowResize,
     .borderless          = g_params.borderless,
     .maximize            = g_params.maximize,
-    .minimizeOnFocusLoss = g_params.minimizeOnFocusLoss
+    .minimizeOnFocusLoss = g_params.minimizeOnFocusLoss,
+    .opengl              = needsOpenGL
   };
 
   g_state.dsInitialized = g_state.ds->init(params);
