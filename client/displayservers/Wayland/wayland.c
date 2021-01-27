@@ -31,11 +31,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 #include <wayland-client.h>
 
-#ifdef ENABLE_EGL
-# include <wayland-egl.h>
-# include "egl_dynprocs.h"
-# include <EGL/eglext.h>
-#endif
+#include <wayland-egl.h>
+#include "egl_dynprocs.h"
+#include <EGL/eglext.h>
 
 #include "app.h"
 #include "common/debug.h"
@@ -67,6 +65,10 @@ struct WaylandDSState
 #ifdef ENABLE_EGL
   struct wl_egl_window * eglWindow;
 #endif
+
+  EGLDisplay glDisplay;
+  EGLConfig glConfig;
+  EGLSurface glSurface;
 
   struct xdg_wm_base * xdgWmBase;
   struct xdg_surface * xdgSurface;
@@ -480,6 +482,8 @@ static bool waylandProbe(void)
   return getenv("WAYLAND_DISPLAY") != NULL;
 }
 
+static EGLDisplay waylandGetEGLDisplay(void);
+
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wm, 0, sizeof(wm));
@@ -555,6 +559,52 @@ static bool waylandInit(const LG_DSInitParams params)
     wl_surface_commit(wm.cursor);
   }
 
+  if (params.opengl)
+  {
+    EGLint attr[] =
+    {
+      EGL_BUFFER_SIZE      , 24,
+      EGL_CONFORMANT       , EGL_OPENGL_BIT,
+      EGL_RENDERABLE_TYPE  , EGL_OPENGL_BIT,
+      EGL_COLOR_BUFFER_TYPE, EGL_RGB_BUFFER,
+      EGL_RED_SIZE         , 8,
+      EGL_GREEN_SIZE       , 8,
+      EGL_BLUE_SIZE        , 8,
+      EGL_SAMPLE_BUFFERS   , 0,
+      EGL_SAMPLES          , 0,
+      EGL_NONE
+    };
+
+    wm.glDisplay = waylandGetEGLDisplay();
+
+    int maj, min;
+    if (!eglInitialize(wm.glDisplay, &maj, &min))
+    {
+      DEBUG_ERROR("Unable to initialize EGL");
+      return false;
+    }
+
+    if (wm.glDisplay == EGL_NO_DISPLAY)
+    {
+      DEBUG_ERROR("Failed to get EGL display (eglError: 0x%x)", eglGetError());
+      return false;
+    }
+
+    EGLint num_config;
+    if (!eglChooseConfig(wm.glDisplay, attr, &wm.glConfig, 1, &num_config))
+    {
+      DEBUG_ERROR("Failed to choose config (eglError: 0x%x)", eglGetError());
+      return false;
+    }
+
+    wm.glSurface = eglCreateWindowSurface(wm.glDisplay, wm.glConfig, wm.eglWindow, NULL);
+    if (wm.glSurface == EGL_NO_SURFACE)
+    {
+      DEBUG_ERROR("Failed to create EGL surface (eglError: 0x%x)", eglGetError());
+      return false;
+    }
+  }
+
   wm.width = params.w;
   wm.height = params.h;
 
@@ -569,7 +619,6 @@ static void waylandShutdown(void)
 {
 }
 
-#ifdef ENABLE_EGL
 static EGLDisplay waylandGetEGLDisplay(void)
 {
   EGLNativeDisplayType native = (EGLNativeDisplayType) wm.display;
@@ -594,10 +643,12 @@ static EGLDisplay waylandGetEGLDisplay(void)
   return eglGetDisplay(native);
 }
 
+#ifdef ENABLE_EGL
 static EGLNativeWindowType waylandGetEGLNativeWindow(void)
 {
   return (EGLNativeWindowType) wm.eglWindow;
 }
+#endif
 
 static void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 {
@@ -617,31 +668,30 @@ static void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
     wm.resizeSerial = 0;
   }
 }
-#endif
-
 static LG_DSGLContext waylandGLCreateContext(void)
 {
-  return NULL;
+  eglBindAPI(EGL_OPENGL_API);
+  return eglCreateContext(wm.glDisplay, wm.glConfig, EGL_NO_CONTEXT, NULL);
 }
 
 static void waylandGLDeleteContext(LG_DSGLContext context)
 {
-  // FIXME: implement.
+  eglDestroyContext(wm.glDisplay, context);
 }
 
 static void waylandGLMakeCurrent(LG_DSGLContext context)
 {
-  // FIXME: implement.
+  eglMakeCurrent(wm.glDisplay, wm.glSurface, wm.glSurface, context);
 }
 
 static void waylandGLSetSwapInterval(int interval)
 {
-  // FIXME: implement.
+  eglSwapInterval(wm.glDisplay, interval);
 }
 
 static void waylandGLSwapBuffers(void)
 {
-  // FIXME: implement.
+  waylandEGLSwapBuffers(wm.glDisplay, wm.glSurface);
 }
 
 static void waylandShowPointer(bool show)
