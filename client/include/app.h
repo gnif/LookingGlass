@@ -58,9 +58,12 @@ void app_setFullscreen(bool fs);
 bool app_getFullscreen(void);
 bool app_getProp(LG_DSProperty prop, void * ret);
 
+#ifdef ENABLE_EGL
 EGLDisplay app_getEGLDisplay(void);
 EGLNativeWindowType app_getEGLNativeWindow(void);
 void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface);
+#endif
+
 void app_glSwapBuffers(void);
 
 void app_clipboardRelease(void);
