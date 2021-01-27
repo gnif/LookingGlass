@@ -162,7 +162,7 @@ void egl_setup(void)
   option_register(egl_options);
 }
 
-bool egl_create(void ** opaque, const LG_RendererParams params)
+bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
   if (!eglQueryString(EGL_NO_DISPLAY, EGL_VERSION))
@@ -198,6 +198,7 @@ bool egl_create(void ** opaque, const LG_RendererParams params)
     return false;
   }
 
+  *needsOpenGL = false;
   return true;
 }
 

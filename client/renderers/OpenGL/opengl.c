@@ -193,7 +193,8 @@ static void opengl_setup(void)
   option_register(opengl_options);
 }
 
-bool opengl_create(void ** opaque, const LG_RendererParams params)
+bool opengl_create(void ** opaque, const LG_RendererParams params,
+    bool * needsOpenGL)
 {
   // create our local storage
   *opaque = malloc(sizeof(struct Inst));
@@ -232,21 +233,21 @@ bool opengl_create(void ** opaque, const LG_RendererParams params)
 
   this->alerts = ll_new();
 
+  *needsOpenGL = true;
   return true;
 }
 
 bool opengl_initialize(void * opaque)
 {
-  //FIXME
-  return false;
-#if 0
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
     return false;
 
   this->waiting  = true;
   this->waitDone = false;
+  return true;
 
+#if 0
   *sdlFlags = SDL_WINDOW_OPENGL;
   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER      , 1);
   SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
