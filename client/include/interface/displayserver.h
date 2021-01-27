@@ -130,8 +130,9 @@ struct LG_DisplayServerOps
   /* wait for the specified time without blocking UI processing/event loops */
   void (*wait)(unsigned int time);
 
-  /* set the window dimensions */
+  /* get/set the window dimensions */
   void (*setWindowSize)(int x, int y);
+  bool (*getFullscreen)(void);
   void (*setFullscreen)(bool fs);
 
   /* clipboard support */
@@ -162,5 +163,6 @@ struct LG_DisplayServerOps
    (x)->uninhibitIdle      && \
    (x)->wait               && \
    (x)->setWindowSize      && \
-   (x)->setFullscreen)
+   (x)->setFullscreen      && \
+   (x)->getFullscreen)
 #endif
