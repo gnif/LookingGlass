@@ -55,6 +55,7 @@ void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
 
 void app_setFullscreen(bool fs);
+bool app_getFullscreen(void);
 bool app_getProp(LG_DSProperty prop, void * ret);
 
 EGLDisplay app_getEGLDisplay(void);
