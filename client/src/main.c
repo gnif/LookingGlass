@@ -734,7 +734,12 @@ static int lg_run(void)
     .minimizeOnFocusLoss = g_params.minimizeOnFocusLoss
   };
 
-  g_state.ds->init(params);
+  g_state.dsInitialized = g_state.ds->init(params);
+  if (g_state.dsInitialized)
+  {
+    DEBUG_ERROR("Failed to initialize the displayserver backend");
+    return -1;
+  }
 
   if (g_params.noScreensaver)
     g_state.ds->inhibitIdle();
@@ -972,7 +977,10 @@ static void lg_shutdown(void)
   }
 
   app_releaseAllKeybinds();
-  g_state.ds->free();
+
+  if (g_state.dsInitialized)
+    g_state.ds->free();
+
   ivshmemClose(&g_state.shm);
 }
 
