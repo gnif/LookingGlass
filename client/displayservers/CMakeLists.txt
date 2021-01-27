@@ -19,12 +19,12 @@ function(add_displayserver name)
 endfunction()
 
 # Add/remove displayservers here!
-if (ENABLE_X11)
-  add_displayserver(X11)
-endif()
-
 if (ENABLE_WAYLAND)
   add_displayserver(Wayland)
+endif()
+
+if (ENABLE_X11)
+  add_displayserver(X11)
 endif()
 
 # SDL must be last as it's the fallback implemntation
