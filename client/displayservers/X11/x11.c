@@ -74,6 +74,8 @@ struct X11DSState
   Atom aNetFrameExtents;
   Atom aNetWMState;
   Atom aNetWMStateFullscreen;
+  Atom aNetWMWindowType;
+  Atom aNetWMWindowTypeNormal;
 
   // clipboard members
   Atom             aSelection;
@@ -201,9 +203,35 @@ static bool x11Init(const LG_DSInitParams params)
     XInternAtom(x11.display, "_NET_WM_STATE", True);
   x11.aNetWMStateFullscreen =
     XInternAtom(x11.display, "_NET_WM_STATE_FULLSCREEN", True);
+  x11.aNetWMWindowType =
+    XInternAtom(x11.display, "_NET_WM_WINDOW_TYPE", True);
+  x11.aNetWMWindowTypeNormal =
+    XInternAtom(x11.display, "_NET_WM_WINDOW_TYPE_NORMAL", True);
+
+    XChangeProperty(
+      x11.display,
+      x11.window,
+      x11.aNetWMWindowType,
+      XA_CARDINAL,
+      32,
+      PropModeReplace,
+      (unsigned char *)&x11.aNetWMWindowTypeNormal,
+      1
+    );
 
   if (params.fullscreen)
-    x11SetFullscreen(true);
+  {
+    XChangeProperty(
+      x11.display,
+      x11.window,
+      x11.aNetWMState,
+      XA_CARDINAL,
+      32,
+      PropModeReplace,
+      (unsigned char *)&x11.aNetWMStateFullscreen,
+      1
+    );
+  }
 
   if (x11.aNetReqFrameExtents)
   {
@@ -395,7 +423,9 @@ static void x11Free(void)
 {
   lgJoinThread(x11.eventThread, NULL);
 
-  XDestroyWindow(x11.display, x11.window);
+  if (x11.window)
+    XDestroyWindow(x11.display, x11.window);
+
   XFreeCursor(x11.display, x11.squareCursor);
   XFreeCursor(x11.display, x11.blankCursor);
   XCloseDisplay(x11.display);
@@ -478,6 +508,15 @@ static int x11EventThread(void * unused)
 
     switch(xe.type)
     {
+      case DestroyNotify:
+        if (xe.xdestroywindow.display == x11.display &&
+            xe.xdestroywindow.window == x11.window)
+        {
+          x11.window = 0;
+          app_handleCloseEvent();
+        }
+        break;
+
       case ConfigureNotify:
       {
         int x, y;
