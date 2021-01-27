@@ -558,6 +558,11 @@ void app_setFullscreen(bool fs)
   g_state.ds->setFullscreen(fs);
 }
 
+bool app_getFullscreen(void)
+{
+  return g_state.ds->getFullscreen();
+}
+
 bool app_getProp(LG_DSProperty prop, void * ret)
 {
   return g_state.ds->getProp(prop, ret);
