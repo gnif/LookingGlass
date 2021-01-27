@@ -452,6 +452,11 @@ static void sdlSetFullscreen(bool fs)
   SDL_SetWindowFullscreen(sdl.window, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 }
 
+static bool sdlGetFullscreen(void)
+{
+  return (SDL_GetWindowFlags(sdl.window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+}
+
 struct LG_DisplayServerOps LGDS_SDL =
 {
   .probe               = sdlProbe,
@@ -482,6 +487,7 @@ struct LG_DisplayServerOps LGDS_SDL =
   .wait                = sdlWait,
   .setWindowSize       = sdlSetWindowSize,
   .setFullscreen       = sdlSetFullscreen,
+  .getFullscreen       = sdlGetFullscreen,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,

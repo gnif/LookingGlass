@@ -1026,6 +1026,11 @@ static void x11SetFullscreen(bool fs)
       SubstructureNotifyMask | SubstructureRedirectMask, &e);
 }
 
+static bool x11GetFullscreen(void)
+{
+  return x11.fullscreen;
+}
+
 static bool x11CBInit()
 {
   x11.aSelection    = XInternAtom(x11.display, "CLIPBOARD"  , False);
@@ -1380,6 +1385,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .wait               = x11Wait,
   .setWindowSize      = x11SetWindowSize,
   .setFullscreen      = x11SetFullscreen,
+  .getFullscreen      = x11GetFullscreen,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,
