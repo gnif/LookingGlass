@@ -136,35 +136,42 @@ struct LG_DisplayServerOps
   bool (*getFullscreen)(void);
   void (*setFullscreen)(bool fs);
 
-  /* clipboard support */
+  /* clipboard support, optional, if not supported set to NULL */
   bool (*cbInit)(void);
   void (*cbNotice)(LG_ClipboardData type);
   void (*cbRelease)(void);
   void (*cbRequest)(LG_ClipboardData type);
 };
 
-#define IS_LG_DS_VALID(x) \
-  ((x)->probe              && \
-   (x)->earlyInit          && \
-   (x)->init               && \
-   (x)->startup            && \
-   (x)->shutdown           && \
-   (x)->free               && \
-   (x)->getProp            && \
-   (x)->getEGLDisplay      && \
-   (x)->getEGLNativeWindow && \
-   (x)->eglSwapBuffers     && \
-   (x)->glSwapBuffers      && \
-   (x)->showPointer        && \
-   (x)->grabPointer        && \
-   (x)->ungrabPointer      && \
-   (x)->warpPointer        && \
-   (x)->realignPointer     && \
-   (x)->isValidPointerPos  && \
-   (x)->inhibitIdle        && \
-   (x)->uninhibitIdle      && \
-   (x)->wait               && \
-   (x)->setWindowSize      && \
-   (x)->setFullscreen      && \
-   (x)->getFullscreen)
+#ifdef ENABLE_EGL
+  #define ASSERT_EGL_FN(x) assert(x);
+#else
+  #define ASSERT_EGL_FN(x)
+#endif
+
+#define ASSERT_LG_DS_VALID(x) \
+  assert((x)->probe              ); \
+  assert((x)->earlyInit          ); \
+  assert((x)->init               ); \
+  assert((x)->startup            ); \
+  assert((x)->shutdown           ); \
+  assert((x)->free               ); \
+  assert((x)->getProp            ); \
+  ASSERT_EGL_FN((x)->getEGLDisplay      ); \
+  ASSERT_EGL_FN((x)->getEGLNativeWindow ); \
+  ASSERT_EGL_FN((x)->eglSwapBuffers     ); \
+  assert((x)->glSwapBuffers      ); \
+  assert((x)->showPointer        ); \
+  assert((x)->grabPointer        ); \
+  assert((x)->ungrabPointer      ); \
+  assert((x)->warpPointer        ); \
+  assert((x)->realignPointer     ); \
+  assert((x)->isValidPointerPos  ); \
+  assert((x)->inhibitIdle        ); \
+  assert((x)->uninhibitIdle      ); \
+  assert((x)->wait               ); \
+  assert((x)->setWindowSize      ); \
+  assert((x)->setFullscreen      ); \
+  assert((x)->getFullscreen      );
+
 #endif

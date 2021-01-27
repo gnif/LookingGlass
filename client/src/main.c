@@ -633,7 +633,7 @@ static int lg_run(void)
     }
 
   assert(g_state.ds);
-  assert(IS_LG_DS_VALID(g_state.ds));
+  ASSERT_LG_DS_VALID(g_state.ds);
 
   // init the subsystem
   if (!g_state.ds->earlyInit())
