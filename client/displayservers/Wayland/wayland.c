@@ -17,6 +17,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -54,6 +55,7 @@ struct WaylandDSState
   struct wl_surface * surface;
   struct wl_registry * registry;
   struct wl_seat * seat;
+  struct wl_shm * shm;
   struct wl_compositor * compositor;
 
   int32_t width, height;
@@ -67,6 +69,8 @@ struct WaylandDSState
   struct xdg_wm_base * xdgWmBase;
   struct xdg_surface * xdgSurface;
   struct xdg_toplevel * xdgToplevel;
+
+  struct wl_surface * cursor;
 
   struct wl_data_device_manager * dataDeviceManager;
   struct wl_data_device * dataDevice;
@@ -83,6 +87,8 @@ struct WaylandDSState
   struct zwp_pointer_constraints_v1 * pointerConstraints;
   struct zwp_relative_pointer_v1 * relativePointer;
   struct zwp_confined_pointer_v1 * confinedPointer;
+  bool showPointer;
+  uint32_t pointerEnterSerial;
 
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
@@ -111,6 +117,49 @@ struct WCBState
 static struct WaylandDSState wm;
 static struct WCBState       wcb;
 
+static const uint32_t cursorBitmap[] = {
+  0x000000, 0x000000, 0x000000, 0x000000,
+  0x000000, 0xFFFFFF, 0xFFFFFF, 0x000000,
+  0x000000, 0xFFFFFF, 0xFFFFFF, 0x000000,
+  0x000000, 0x000000, 0x000000, 0x000000,
+};
+
+static struct wl_buffer * createCursorBuffer(void)
+{
+  int fd = memfd_create("lg-cursor", 0);
+  if (fd < 0)
+  {
+    DEBUG_ERROR("Failed to create cursor shared memory: %d", errno);
+    return NULL;
+  }
+
+  struct wl_buffer * result = NULL;
+
+  if (ftruncate(fd, sizeof cursorBitmap) < 0)
+  {
+    DEBUG_ERROR("Failed to ftruncate cursor shared memory: %d", errno);
+    goto fail;
+  }
+
+  void * shm_data = mmap(NULL, sizeof cursorBitmap, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (shm_data == MAP_FAILED)
+  {
+    DEBUG_ERROR("Failed to map memory for cursor: %d", errno);
+    goto fail;
+  }
+
+  struct wl_shm_pool * pool = wl_shm_create_pool(wm.shm, fd, sizeof cursorBitmap);
+  result = wl_shm_pool_create_buffer(pool, 0, 4, 4, 16, WL_SHM_FORMAT_XRGB8888);
+  wl_shm_pool_destroy(pool);
+
+  memcpy(shm_data, cursorBitmap, sizeof cursorBitmap);
+  munmap(shm_data, sizeof cursorBitmap);
+
+fail:
+  close(fd);
+  return result;
+}
+
 // XDG WM base listeners.
 
 static void xdgWmBasePing(void * data, struct xdg_wm_base * xdgWmBase, uint32_t serial)
@@ -129,6 +178,8 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
 {
   if (!strcmp(interface, wl_seat_interface.name) && !wm.seat)
     wm.seat = wl_registry_bind(wm.registry, name, &wl_seat_interface, 1);
+  else if (!strcmp(interface, wl_shm_interface.name))
+    wm.shm = wl_registry_bind(wm.registry, name, &wl_shm_interface, 1);
   else if (!strcmp(interface, wl_compositor_interface.name))
     wm.compositor = wl_registry_bind(wm.registry, name, &wl_compositor_interface, 4);
   else if (!strcmp(interface, xdg_wm_base_interface.name))
@@ -180,6 +231,9 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
     wl_fixed_t syW)
 {
   app_handleEnterEvent(true);
+
+  wl_pointer_set_cursor(pointer, serial, wm.showPointer ? wm.cursor : NULL, 0, 0);
+  wm.pointerEnterSerial = serial;
 
   if (wm.relativePointer)
     return;
@@ -456,6 +510,14 @@ static bool waylandInit(const LG_DSInitParams params)
 
   wl_surface_commit(wm.surface);
 
+  struct wl_buffer * cursorBuffer = createCursorBuffer();
+  if (cursorBuffer)
+  {
+    wm.cursor = wl_compositor_create_surface(wm.compositor);
+    wl_surface_attach(wm.cursor, cursorBuffer, 0, 0);
+    wl_surface_commit(wm.cursor);
+  }
+
   wm.width = params.w;
   wm.height = params.h;
 
@@ -527,7 +589,8 @@ static void waylandGLSwapBuffers(void)
 
 static void waylandShowPointer(bool show)
 {
-  // FIXME: implement.
+  wm.showPointer = show;
+  wl_pointer_set_cursor(wm.pointer, wm.pointerEnterSerial, show ? wm.cursor : NULL, 0, 0);
 }
 
 static void waylandWait(unsigned int time)
