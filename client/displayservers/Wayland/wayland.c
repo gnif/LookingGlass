@@ -59,6 +59,7 @@ struct WaylandDSState
   struct wl_compositor * compositor;
 
   int32_t width, height;
+  bool fullscreen;
   uint32_t resizeSerial;
   bool configured;
 
@@ -437,6 +438,14 @@ static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
 {
   wm.width = width;
   wm.height = height;
+  wm.fullscreen = false;
+
+  enum xdg_toplevel_state * state;
+  wl_array_for_each(state, states)
+  {
+    if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN)
+      wm.fullscreen = true;
+  }
 }
 
 static const struct xdg_toplevel_listener xdgToplevelListener = {
@@ -623,13 +632,15 @@ static void waylandSetWindowSize(int x, int y)
 
 static void waylandSetFullscreen(bool fs)
 {
-  // FIXME: implement.
+  if (fs)
+    xdg_toplevel_set_fullscreen(wm.xdgToplevel, NULL);
+  else
+    xdg_toplevel_unset_fullscreen(wm.xdgToplevel);
 }
 
 static bool waylandGetFullscreen(void)
 {
-  // FIXME: implement.
-  return false;
+  return wm.fullscreen;
 }
 
 static void relativePointerMotionHandler(void * data,
