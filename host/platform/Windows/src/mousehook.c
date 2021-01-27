@@ -56,6 +56,13 @@ static bool switchDesktopAndHook(void)
   }
   CloseDesktop(desk);
 
+  POINT position;
+  GetCursorPos(&position);
+
+  mouseHook.x = position.x;
+  mouseHook.y = position.y;
+  mouseHook.callback(position.x, position.y);
+
   mouseHook.hook = SetWindowsHookEx(WH_MOUSE_LL, mouseHook_hook, NULL, 0);
   if (!mouseHook.hook)
   {
@@ -84,11 +91,11 @@ static DWORD WINAPI threadProc(LPVOID lParam) {
     return 0;
   }
 
+  mouseHook.callback = (MouseHookFn)lParam;
   if (!switchDesktopAndHook())
     return 0;
 
   mouseHook.installed = true;
-  mouseHook.callback  = (MouseHookFn)lParam;
 
   HWINEVENTHOOK eventHook = SetWinEventHook(
       EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_DESKTOPSWITCH, NULL,
