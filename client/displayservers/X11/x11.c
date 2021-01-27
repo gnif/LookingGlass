@@ -146,6 +146,7 @@ static bool x11Init(const LG_DSInitParams params)
   };
   unsigned long swaMask = CWEventMask;
 
+#ifdef ENABLE_OPENGL
   if (params.opengl)
   {
     GLint glXAttribs[] =
@@ -174,6 +175,7 @@ static bool x11Init(const LG_DSInitParams params)
         x11.visual->visual, AllocNone);
     swaMask |= CWColormap;
   }
+#endif
 
   x11.window = XCreateWindow(
       x11.display,
@@ -911,6 +913,7 @@ static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 }
 #endif
 
+#ifdef ENABLE_OPENGL
 static LG_DSGLContext x11GLCreateContext(void)
 {
   return (LG_DSGLContext)
@@ -936,6 +939,7 @@ static void x11GLSwapBuffers(void)
 {
   glXSwapBuffers(x11.display, x11.window);
 }
+#endif
 
 static void x11ShowPointer(bool show)
 {
@@ -1488,11 +1492,13 @@ struct LG_DisplayServerOps LGDS_X11 =
   .getEGLNativeWindow = x11GetEGLNativeWindow,
   .eglSwapBuffers     = x11EGLSwapBuffers,
 #endif
+#ifdef ENABLE_OPENGL
   .glCreateContext    = x11GLCreateContext,
   .glDeleteContext    = x11GLDeleteContext,
   .glMakeCurrent      = x11GLMakeCurrent,
   .glSetSwapInterval  = x11GLSetSwapInterval,
   .glSwapBuffers      = x11GLSwapBuffers,
+#endif
   .showPointer        = x11ShowPointer,
   .grabPointer        = x11GrabPointer,
   .ungrabPointer      = x11UngrabPointer,

@@ -583,6 +583,7 @@ void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
 }
 #endif
 
+#ifdef ENABLE_OPENGL
 LG_DSGLContext app_glCreateContext(void)
 {
   return g_state.ds->glCreateContext();
@@ -607,6 +608,7 @@ void app_glSwapBuffers(void)
 {
   g_state.ds->glSwapBuffers();
 }
+#endif
 
 void app_alert(LG_MsgAlert type, const char * fmt, ...)
 {
