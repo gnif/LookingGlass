@@ -63,6 +63,9 @@ typedef struct LG_DSInitParams
   bool borderless;
   bool maximize;
   bool minimizeOnFocusLoss;
+
+  // if true the renderer requires an OpenGL context
+  bool opengl;
 }
 LG_DSInitParams;
 

@@ -103,7 +103,7 @@ typedef const char * (* LG_RendererGetName)();
 // called pre-creation to allow the renderer to register any options it might have
 typedef void         (* LG_RendererSetup)();
 
-typedef bool         (* LG_RendererCreate       )(void ** opaque, const LG_RendererParams params);
+typedef bool         (* LG_RendererCreate       )(void ** opaque, const LG_RendererParams params, bool * needsOpenGL);
 typedef bool         (* LG_RendererInitialize   )(void * opaque);
 typedef void         (* LG_RendererDeInitialize )(void * opaque);
 typedef bool         (* LG_RendererSupports     )(void * opaque, LG_RendererSupport support);
