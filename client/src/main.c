@@ -506,7 +506,7 @@ static int cursorThread(void * unused)
       g_cursor.guest.y
     );
 
-    if (g_params.mouseRedraw && g_cursor.guest.visible)
+    if (params.mouseRedraw && g_cursor.guest.visible)
       lgSignalEvent(e_frame);
   }
 
