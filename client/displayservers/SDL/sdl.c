@@ -22,7 +22,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 
+#ifdef ENABLE_EGL
 #include <EGL/eglext.h>
+#endif
 
 #if defined(SDL_VIDEO_DRIVER_WAYLAND)
 #include <wayland-egl.h>
@@ -58,6 +60,13 @@ static bool sdlProbe(void)
 
 static bool sdlEarlyInit(void)
 {
+  return true;
+}
+
+static bool sdlInit(const LG_DSInitParams params)
+{
+  memset(&sdl, 0, sizeof(sdl));
+
   // Allow screensavers for now: we will enable and disable as needed.
   SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
 
@@ -67,12 +76,15 @@ static bool sdlEarlyInit(void)
     return false;
   }
 
-  return true;
-}
-
-static bool sdlInit(const LG_DSInitParams params)
-{
-  memset(&sdl, 0, sizeof(sdl));
+  if (params.opengl)
+  {
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER      , 1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+    SDL_GL_SetAttribute(SDL_GL_RED_SIZE          , 8);
+    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE        , 8);
+    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE         , 8);
+  }
 
   sdl.window = SDL_CreateWindow(
     params.title,
@@ -84,14 +96,15 @@ static bool sdlInit(const LG_DSInitParams params)
       SDL_WINDOW_HIDDEN |
       (params.resizable  ? SDL_WINDOW_RESIZABLE  : 0) |
       (params.borderless ? SDL_WINDOW_BORDERLESS : 0) |
-      (params.maximize   ? SDL_WINDOW_MAXIMIZED  : 0)
+      (params.maximize   ? SDL_WINDOW_MAXIMIZED  : 0) |
+      (params.opengl     ? SDL_WINDOW_OPENGL     : 0)
     )
   );
 
   if (sdl.window == NULL)
   {
     DEBUG_ERROR("Could not create an SDL window: %s\n", SDL_GetError());
-    return 1;
+    goto fail_init;
   }
 
   const uint8_t data[4] = {0xf, 0x9, 0x9, 0xf};
@@ -115,6 +128,10 @@ static bool sdlInit(const LG_DSInitParams params)
 
   SDL_SetEventFilter(sdlEventFilter, NULL);
   return true;
+
+fail_init:
+  SDL_Quit();
+  return false;
 }
 
 static void sdlStartup(void)
@@ -123,11 +140,12 @@ static void sdlStartup(void)
 
 static void sdlShutdown(void)
 {
-  SDL_DestroyWindow(sdl.window);
 }
 
 static void sdlFree(void)
 {
+  SDL_DestroyWindow(sdl.window);
+
   if (sdl.cursor)
     SDL_FreeCursor(sdl.cursor);
 
@@ -234,9 +252,29 @@ static void sdlEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 {
   eglSwapBuffers(display, surface);
 }
-#endif
+#endif //ENABLE_EGL
 
-static void sdlSwapBuffers(void)
+static LG_DSGLContext sdlGLCreateContext(void)
+{
+  return (LG_DSGLContext)SDL_GL_CreateContext(sdl.window);
+}
+
+static void sdlGLDeleteContext(LG_DSGLContext context)
+{
+  SDL_GL_DeleteContext((SDL_GLContext)context);
+}
+
+static void sdlGLMakeCurrent(LG_DSGLContext context)
+{
+  SDL_GL_MakeCurrent(sdl.window, (SDL_GLContext)context);
+}
+
+static void sdlGLSetSwapInterval(int interval)
+{
+  SDL_GL_SetSwapInterval(interval);
+}
+
+static void sdlGLSwapBuffers(void)
 {
   SDL_GL_SwapWindow(sdl.window);
 }
@@ -334,8 +372,9 @@ static int sdlEventFilter(void * userdata, SDL_Event * event)
             &border.bottom,
             &border.right
           );
-
-          app_handleResizeEvent(event->window.data1, event->window.data2,
+          app_handleResizeEvent(
+              event->window.data1,
+              event->window.data2,
               border);
           break;
         }
@@ -478,7 +517,11 @@ struct LG_DisplayServerOps LGDS_SDL =
   .eglSwapBuffers      = sdlEGLSwapBuffers,
 #endif
 
-  .glSwapBuffers       = sdlSwapBuffers,
+  .glCreateContext     = sdlGLCreateContext,
+  .glDeleteContext     = sdlGLDeleteContext,
+  .glMakeCurrent       = sdlGLMakeCurrent,
+  .glSetSwapInterval   = sdlGLSetSwapInterval,
+  .glSwapBuffers       = sdlGLSwapBuffers,
 
   .showPointer         = sdlShowPointer,
   .grabPointer         = sdlGrabPointer,
