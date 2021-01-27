@@ -735,7 +735,7 @@ static int lg_run(void)
   };
 
   g_state.dsInitialized = g_state.ds->init(params);
-  if (g_state.dsInitialized)
+  if (!g_state.dsInitialized)
   {
     DEBUG_ERROR("Failed to initialize the displayserver backend");
     return -1;
