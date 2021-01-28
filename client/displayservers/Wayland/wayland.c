@@ -757,18 +757,11 @@ static void relativePointerMotionHandler(void * data,
     wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
     wl_fixed_t dyUnaccelW)
 {
-  double dx, dy;
-  if (app_cursorWantsRaw())
-  {
-    dx = wl_fixed_to_double(dxUnaccelW);
-    dy = wl_fixed_to_double(dyUnaccelW);
-  }
-  else
-  {
-    dx = wl_fixed_to_double(dxW);
-    dy = wl_fixed_to_double(dyW);
-  }
-  app_handleMouseGrabbed(dx, dy);
+  app_handleMouseRelitive(
+      wl_fixed_to_double(dxW),
+      wl_fixed_to_double(dyW),
+      wl_fixed_to_double(dxUnaccelW),
+      wl_fixed_to_double(dyUnaccelW));
 }
 
 static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
