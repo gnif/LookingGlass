@@ -37,16 +37,16 @@ LG_MsgAlert;
 
 bool app_isRunning(void);
 bool app_inputEnabled(void);
-bool app_cursorIsGrabbed(void);
-bool app_cursorWantsRaw(void);
-bool app_cursorInWindow(void);
 void app_updateCursorPos(double x, double y);
 void app_updateWindowPos(int x, int y);
 void app_handleResizeEvent(int w, int h, const struct Border border);
-void app_handleMouseGrabbed(double ex, double ey);
-void app_handleMouseNormal(double ex, double ey);
+
+void app_handleMouseRelitive(double normx, double normy,
+    double rawx, double rawy);
+
 void app_handleMouseBasic(void);
 void app_resyncMouseBasic(void);
+
 void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
 void app_handleKeyPress(int scancode);

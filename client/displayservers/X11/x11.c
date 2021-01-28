@@ -808,7 +808,7 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
       app_updateCursorPos(device->event_x, device->event_y);
 
       if (!x11.pointerGrabbed)
-        app_handleMouseNormal(0.0, 0.0);
+        app_handleMouseRelitive(0.0, 0.0, 0.0, 0.0);
       return;
     }
 
@@ -857,17 +857,7 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
       prev_axis[0] = axis[0];
       prev_axis[1] = axis[1];
 
-      if (app_cursorIsGrabbed())
-      {
-        if (app_cursorWantsRaw())
-          app_handleMouseGrabbed(raw_axis[0], raw_axis[1]);
-        else
-          app_handleMouseGrabbed(axis[0], axis[1]);
-      }
-      else
-        if (app_cursorInWindow())
-          app_handleMouseNormal(axis[0], axis[1]);
-
+      app_handleMouseRelitive(axis[0], axis[1], raw_axis[0], raw_axis[1]);
       return;
     }
   }
@@ -1077,7 +1067,7 @@ static void x11WarpPointer(int x, int y, bool exiting)
 
 static void x11RealignPointer(void)
 {
-  app_handleMouseNormal(0, 0);
+  app_handleMouseRelitive(0.0, 0.0, 0.0, 0.0);
 }
 
 static bool x11IsValidPointerPos(int x, int y)

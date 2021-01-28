@@ -87,7 +87,7 @@ static void lgInit(void)
   g_cursor.guest.valid   = false;
 
   // if spice is not in use, hide the local cursor
-  if (!app_inputEnabled() && g_params.hideMouse)
+  if (!core_inputEnabled() && g_params.hideMouse)
     g_state.ds->showPointer(false);
   else
     g_state.ds->showPointer(true);
@@ -296,7 +296,7 @@ static int cursorThread(void * unused)
       g_cursor.guest.valid = true;
 
       // if the state just became valid
-      if (valid != true && app_inputEnabled())
+      if (valid != true && core_inputEnabled())
       {
         core_alignToGuest();
         app_resyncMouseBasic();
