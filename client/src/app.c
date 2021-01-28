@@ -188,7 +188,7 @@ void app_handleMouseGrabbed(double ex, double ey)
     return;
 
   int x, y;
-  if (g_params.rawMouse && !g_cursor.useScale)
+  if (g_params.rawMouse && !g_cursor.sens)
   {
     /* raw unscaled input are always round numbers */
     x = floor(ex);
