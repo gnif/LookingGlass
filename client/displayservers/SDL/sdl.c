@@ -297,10 +297,8 @@ static int sdlEventFilter(void * userdata, SDL_Event * event)
         break;
 
       app_updateCursorPos(event->motion.x, event->motion.y);
-      if (app_cursorIsGrabbed())
-        app_handleMouseGrabbed(event->motion.xrel, event->motion.yrel);
-      else
-        app_handleMouseNormal(event->motion.xrel, event->motion.yrel);
+      app_handleMouseRelitive(event->motion.xrel, event->motion.yrel,
+          event->motion.xrel, event->motion.yrel);
       break;
 
     case SDL_MOUSEBUTTONDOWN:
@@ -457,8 +455,7 @@ static void sdlWarpPointer(int x, int y, bool exiting)
 
 static void sdlRealignPointer(void)
 {
-  // no need to care about grab, realign only happens in normal mode
-  app_handleMouseNormal(0, 0);
+  app_handleMouseRelitive(0.0, 0.0, 0.0, 0.0);
 }
 
 static bool sdlIsValidPointerPos(int x, int y)

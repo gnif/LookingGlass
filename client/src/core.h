@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 
+bool core_inputEnabled(void);
 void core_setCursorInView(bool enable);
 void core_setGrab(bool enable);
 void core_setGrabQuiet(bool enable);
@@ -31,5 +32,8 @@ void core_alignToGuest(void);
 bool core_isValidPointerPos(int x, int y);
 bool core_startFrameThread(void);
 void core_stopFrameThread(void);
+void core_handleMouseGrabbed(double ex, double ey);
+void core_handleMouseNormal(double ex, double ey);
+
 
 #endif
