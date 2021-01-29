@@ -5,8 +5,8 @@ If you are looking for help or support please use one of the following methods
 Create a New Topic on the Level1Tech's forum under the Looking Glass category:
 * https://forum.level1techs.com/c/software/lookingGlass/142
 
-Ask for help in #looking-glass in the VFIO discord server
-* https://discord.gg/4ahCn4c
+Ask for help in the Looking Glass discord server
+* https://discord.gg/52SMupxkvt
 
 *Issues that are not bug reports or feature requests will be closed & ignored*
 
@@ -53,7 +53,7 @@ pertinent information.
 PASTE HOST LOG FILE CONTENTS HERE
 ```
 
-If the client is unexpetedly exiting without a backtrace, please provide one via
+If the client is unexpectedly exiting without a backtrace, please provide one via
 gdb with the command `thread apply all bt`. If you are unsure how to do this
 please watch the video below on how to perform a Debug build and generate this
 backtrace.
