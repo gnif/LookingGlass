@@ -266,7 +266,7 @@ void app_handleKeyRelease(int sc)
   }
 }
 
-void app_handleMouseRelitive(double normx, double normy,
+void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
   if (g_cursor.grab)

@@ -757,7 +757,7 @@ static void relativePointerMotionHandler(void * data,
     wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
     wl_fixed_t dyUnaccelW)
 {
-  app_handleMouseRelitive(
+  app_handleMouseRelative(
       wl_fixed_to_double(dxW),
       wl_fixed_to_double(dyW),
       wl_fixed_to_double(dxUnaccelW),
