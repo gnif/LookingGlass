@@ -172,7 +172,7 @@ Section /o "Desktop Shortcut" Section3
   StrCpy $option_desktop 1
 SectionEnd
 
-Section /o "Start Menu Shortcut" Section4
+Section "Start Menu Shortcut" Section4
   StrCpy $option_startMenu 1
 SectionEnd
 
@@ -180,7 +180,10 @@ Section "-Hidden Start Menu" Section5
   SetShellVarContext all
   
   ${If} $option_startMenu == 1
-    CreateShortCut "$SMPROGRAMS\Looking Glass (host).lnk" $INSTDIR\looking-glass-host.exe
+    CreateDirectory "$APPDATA\Looking Glass (host)"
+    CreateDirectory "$SMPROGRAMS\Looking Glass (host)"
+    CreateShortCut "$SMPROGRAMS\Looking Glass (host)\Looking Glass (host).lnk" $INSTDIR\looking-glass-host.exe
+    CreateShortCut "$SMPROGRAMS\Looking Glass (host)\Looking Glass Logs.lnk" "$APPDATA\Looking Glass (host)"
   ${EndIf}
 
   ${If} $option_desktop == 1
