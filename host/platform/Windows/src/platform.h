@@ -30,4 +30,5 @@ struct MSG_CALL_FUNCTION
   LPARAM       lParam;
 };
 
+const char *getSystemLogDirectory(void);
 LRESULT sendAppMessage(UINT Msg, WPARAM wParam, LPARAM lParam);

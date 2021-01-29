@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <windows.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <fcntl.h>
 
 #include "interface/platform.h"
@@ -34,6 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_EXIT     3001
+#define LOG_NAME         "looking-glass-host.txt"
 
 struct AppState
 {
@@ -44,6 +46,7 @@ struct AppState
   char ** argv;
 
   char           executable[MAX_PATH + 1];
+  char           systemLogDir[MAX_PATH];
   HWND           messageWnd;
   NOTIFYICONDATA iconData;
   UINT           trayRestartMsg;
@@ -166,6 +169,29 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
   return FALSE;
 }
 
+const char *getSystemLogDirectory(void)
+{
+  return app.systemLogDir;
+}
+
+static void populateSystemLogDirectory()
+{
+  char programData[MAX_PATH];
+  if (GetEnvironmentVariableA("ProgramData", programData, sizeof(programData)) &&
+      PathIsDirectoryA(programData))
+  {
+    if (!PathCombineA(app.systemLogDir, programData, "Looking Glass (host)"))
+      goto fail;
+
+    if (!PathIsDirectoryA(app.systemLogDir) && !CreateDirectoryA(app.systemLogDir, NULL))
+      goto fail;
+
+    return;
+  }
+fail:
+  strcpy(app.systemLogDir, "");
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
   // convert the command line to the standard argc and argv
@@ -180,6 +206,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   LocalFree(wargv);
 
   GetModuleFileName(NULL, app.executable, sizeof(app.executable));
+  populateSystemLogDirectory();
+
   if (HandleService(app.argc, app.argv))
     return LG_HOST_EXIT_FAILED;
 
@@ -201,11 +229,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   int result = 0;
   app.hInst = hInstance;
 
-  char tempPath[MAX_PATH+1];
-  GetTempPathA(sizeof(tempPath), tempPath);
-  int len = snprintf(NULL, 0, "%slooking-glass-host.txt", tempPath);
-  char * logFilePath = malloc(len + 1);
-  sprintf(logFilePath, "%slooking-glass-host.txt", tempPath);
+  char logFilePath[MAX_PATH];
+  if (!PathCombineA(logFilePath, app.systemLogDir, LOG_NAME))
+    strcpy(logFilePath, LOG_NAME);
 
   struct Option options[] =
   {
@@ -220,7 +246,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   };
 
   option_register(options);
-  free(logFilePath);
 
   // setup a handler for ctrl+c
   SetConsoleCtrlHandler(CtrlHandler, TRUE);
