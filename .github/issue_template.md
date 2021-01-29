@@ -40,12 +40,9 @@ PASTE CLIENT OUTPUT HERE
 ```
 
 The entire (not truncated) log file from the host application (if applicable).
-To obtain this locate the log file on your system, it will be in one of the
-following two locations depending on how you are launching the Looking Glass Host
-application:
+Normally, this is found on the guest system at:
 
-  * C:\Windows\Temp\looking-glass.txt
-  * C:\Users\YOUR_USER\AppData\Local\Temp\looking-glass.txt
+    %ProgramData%\Looking Glass (host)\looking-glass-host.txt
 
 This log may be quite long, please delete the file first and then proceed to
 launch the host and reproduce the issue so that the log only contains the
