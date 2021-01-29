@@ -54,16 +54,19 @@ The resulting installer will be at
 
 ## Where is the log?
 
-It is in your user's temp directory:
+The log file for the host application is located at:
 
-    %TEMP%\looking-glass-host.txt
+    %ProgramData%\Looking Glass (host)\looking-glass-host.txt
 
-Or if running as a system service it will be located in:
+You can also find out where the file is by right clicking on the tray icon and
+selecting "Log File Location".
 
-    C:\Windows\Temp\looking-glass-host.txt
+The log file for the looking glass service is located at:
 
-You can find out where the file is by right clicking on the tray icon and
-selecting "Log File Location"
+	%ProgramData%\Looking Glass (host)\looking-glass-host-service.txt
+
+This is useful for troubleshooting errors related to the host application not
+starting.
 
 ### High priority capture using DXGI and Secure Desktop (UAC) capture support
 
