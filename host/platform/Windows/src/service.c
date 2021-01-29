@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/platform.h"
 #include "common/ivshmem.h"
 #include "service.h"
+#include "platform.h"
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -29,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <time.h>
 
 #include <windows.h>
+#include <shlwapi.h>
 #include <winsvc.h>
 #include <psapi.h>
 #include <sddl.h>
@@ -37,6 +39,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define SVCNAME   "Looking Glass (host)"
 #define SVC_ERROR ((DWORD)0xC0020001L)
+#define LOG_NAME  "looking-glass-host-service.txt"
 
 /*
  * Windows 10 provides this API via kernel32.dll as well as advapi32.dll and
@@ -112,11 +115,9 @@ static bool setupAPI(void)
 
 static void setupLogging(void)
 {
-  char tempPath[MAX_PATH+1];
-  GetTempPathA(sizeof(tempPath), tempPath);
-  int len = snprintf(NULL, 0, "%slooking-glass-host-service.txt", tempPath);
-  char * logFilePath = malloc(len + 1);
-  sprintf(logFilePath, "%slooking-glass-host-service.txt", tempPath);
+  char logFilePath[MAX_PATH];
+  if (!PathCombineA(logFilePath, getSystemLogDirectory(), LOG_NAME))
+    strcpy(logFilePath, LOG_NAME);
   service.logFile = fopen(logFilePath, "a+");
   setbuf(service.logFile, NULL);
   doLog("Startup\n");
