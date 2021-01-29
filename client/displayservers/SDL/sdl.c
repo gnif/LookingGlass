@@ -297,7 +297,7 @@ static int sdlEventFilter(void * userdata, SDL_Event * event)
         break;
 
       app_updateCursorPos(event->motion.x, event->motion.y);
-      app_handleMouseRelitive(event->motion.xrel, event->motion.yrel,
+      app_handleMouseRelative(event->motion.xrel, event->motion.yrel,
           event->motion.xrel, event->motion.yrel);
       break;
 
@@ -455,7 +455,7 @@ static void sdlWarpPointer(int x, int y, bool exiting)
 
 static void sdlRealignPointer(void)
 {
-  app_handleMouseRelitive(0.0, 0.0, 0.0, 0.0);
+  app_handleMouseRelative(0.0, 0.0, 0.0, 0.0);
 }
 
 static bool sdlIsValidPointerPos(int x, int y)
