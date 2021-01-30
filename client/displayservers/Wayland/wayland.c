@@ -644,11 +644,12 @@ static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
     const char * mimetype)
 {
   enum LG_ClipboardData type = mimetypeToCbType(mimetype);
-  // Oftentimes we'll get text/html alongside text/png, but would prefer to send
-  // image/png. In general, prefer images over text content.
+  // We almost never prefer text/html, as that's used to represent rich text.
+  // Since we can't copy or paste rich text, we should instead prefer actual
+  // images or plain text.
   if (type != LG_CLIPBOARD_DATA_NONE &&
       (wcb.stashedType == LG_CLIPBOARD_DATA_NONE ||
-       wcb.stashedType == LG_CLIPBOARD_DATA_TEXT))
+       strstr(wcb.stashedMimetype, "html")))
   {
     wcb.stashedType = type;
     if (wcb.stashedMimetype)
