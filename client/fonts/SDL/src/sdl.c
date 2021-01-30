@@ -149,6 +149,47 @@ static void lgf_sdl_destroy(LG_FontObj opaque)
   }
 }
 
+static int lgf_sdl_multiline_width(TTF_Font * font, const char * text)
+{
+  int w, maxW = 0;
+  const char * ptr = text;
+  char * buf = NULL;
+  size_t size = 0;
+
+  while (*ptr)
+  {
+    const char * newLine = strchr(ptr, '\n');
+    size_t line = newLine ? newLine - ptr : strlen(ptr);
+    if (line > size)
+    {
+      size = line * 2 + 1;
+      void * new = realloc(buf, size);
+      if (!new)
+      {
+        DEBUG_ERROR("Failed to allocate memory");
+        free(buf);
+        return -1;
+      }
+      buf = new;
+    }
+    memcpy(buf, ptr, line);
+    buf[line] = '\0';
+
+    if (TTF_SizeUTF8(font, buf, &w, NULL) < 0)
+    {
+      free(buf);
+      DEBUG_ERROR("Failed to measure text: %s", TTF_GetError());
+      return -1;
+    }
+
+    if (w > maxW)
+      maxW = w;
+    ptr += line + 1;
+  }
+  free(buf);
+  return maxW;
+}
+
 static LG_FontBitmap * lgf_sdl_render(LG_FontObj opaque, unsigned int fg_color, const char * text)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -160,7 +201,17 @@ static LG_FontBitmap * lgf_sdl_render(LG_FontObj opaque, unsigned int fg_color, 
   color.b = (fg_color & 0x0000ff00) >>  8;
   color.a = (fg_color & 0x000000ff) >>  0;
 
-  if (!(surface = TTF_RenderText_Blended(this->font, text, color)))
+  if (strchr(text, '\n'))
+  {
+    int width = lgf_sdl_multiline_width(this->font, text);
+    if (width < 1)
+      return NULL;
+    surface = TTF_RenderUTF8_Blended_Wrapped(this->font, text, color, width);
+  }
+  else
+    surface = TTF_RenderUTF8_Blended(this->font, text, color);
+
+  if (!surface)
   {
     DEBUG_ERROR("Failed to render text: %s", TTF_GetError());
     return NULL;
