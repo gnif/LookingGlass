@@ -110,5 +110,9 @@ void app_releaseKeybind(KeybindHandle * handle);
  */
 void app_releaseAllKeybinds(void);
 
+/**
+ * Changes whether the help message is displayed or not.
+ */
+void app_showHelp(bool show);
 
 #endif
