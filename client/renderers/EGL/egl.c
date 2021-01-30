@@ -45,6 +45,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "fps.h"
 #include "splash.h"
 #include "alert.h"
+#include "help.h"
 
 #define SPLASH_FADE_TIME 1000000
 #define ALERT_TIMEOUT    2000000
@@ -72,6 +73,7 @@ struct Inst
   EGL_FPS         * fps;     // the fps display
   EGL_Splash      * splash;  // the splash screen
   EGL_Alert       * alert;   // the alert display
+  EGL_Help        * help;    // the help display
 
   LG_RendererFormat    format;
   bool                 formatValid;
@@ -233,6 +235,7 @@ void egl_deinitialize(void * opaque)
   egl_fps_free    (&this->fps   );
   egl_splash_free (&this->splash);
   egl_alert_free  (&this->alert );
+  egl_help_free   (&this->help);
 
   LG_LOCK_FREE(this->lock);
 
@@ -490,7 +493,8 @@ void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, 
 
 void egl_on_help(void * opaque, const char * message)
 {
-  // TODO: Implement this.
+  struct Inst * this = (struct Inst *)opaque;
+  egl_help_set_text(this->help, message);
 }
 
 bool egl_render_startup(void * opaque)
@@ -649,6 +653,12 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
+  if (!egl_help_init(&this->help, this->font, this->fontObj))
+  {
+    DEBUG_ERROR("Failed to initialize the alert display");
+    return false;
+  }
+
   return true;
 }
 
@@ -718,6 +728,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
   }
 
   egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
+  egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
   app_eglSwapBuffers(this->display, this->surface);
   return true;
 }
