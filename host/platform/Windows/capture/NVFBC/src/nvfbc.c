@@ -201,6 +201,8 @@ static bool nvfbc_init(void)
   if (!lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
   {
     DEBUG_ERROR("Failed to create the NvFBCPointer thread");
+    mouseHook_remove();
+    dwmUnforceComposition();
     return false;
   }
 
