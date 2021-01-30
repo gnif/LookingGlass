@@ -488,6 +488,11 @@ void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, 
   this->showAlert = true;
 }
 
+void egl_on_help(void * opaque, const char * message)
+{
+  // TODO: Implement this.
+}
+
 bool egl_render_startup(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -741,6 +746,7 @@ struct LG_Renderer LGR_EGL =
   .on_frame_format = egl_on_frame_format,
   .on_frame        = egl_on_frame,
   .on_alert        = egl_on_alert,
+  .on_help         = egl_on_help,
   .render_startup  = egl_render_startup,
   .render          = egl_render,
   .update_fps      = egl_update_fps
