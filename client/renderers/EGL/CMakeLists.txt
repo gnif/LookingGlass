@@ -22,6 +22,9 @@ make_object(
 	shader/fps.vert
 	shader/fps.frag
 	shader/fps_bg.frag
+	shader/help.vert
+	shader/help.frag
+	shader/help_bg.frag
 	shader/alert.vert
 	shader/alert.frag
 	shader/alert_bg.frag
@@ -40,6 +43,7 @@ add_library(renderer_EGL STATIC
 	desktop.c
 	cursor.c
 	fps.c
+	help.c
 	draw.c
 	splash.c
 	alert.c
