@@ -243,7 +243,7 @@ CaptureResult NvFBCToSysCapture(
   if (grabInfo->bMustRecreate)
   {
     DEBUG_INFO("NvFBC reported recreation is required");
-    return CAPTURE_RESULT_REINIT;
+    return CAPTURE_RESULT_RECREATE;
   }
 
   switch(status)

@@ -91,6 +91,7 @@ struct app
   CaptureInterface * iface;
 
   enum AppState state;
+  bool needsRecreate;
   LGTimer  * lgmpTimer;
   LGThread * frameThread;
 };
@@ -133,6 +134,14 @@ static int frameThread(void * opaque)
       case CAPTURE_RESULT_OK:
         repeatFrame = false;
         break;
+
+      case CAPTURE_RESULT_RECREATE:
+      {
+        app.state = APP_STATE_RESTART;
+        app.needsRecreate = true;
+        DEBUG_INFO("Capture interface requires recreation");
+        return 0;
+      }
 
       case CAPTURE_RESULT_REINIT:
       {
@@ -611,6 +620,20 @@ int app_main(int argc, char * argv[])
           goto fail_capture;
         }
 
+        if (app.needsRecreate)
+        {
+          iface->free();
+
+          if (!iface->create(captureGetPointerBuffer, capturePostPointerBuffer))
+          {
+            DEBUG_ERROR("Failed to recreate capture interface");
+            exitcode = LG_HOST_EXIT_CAPTURE;
+            goto fail_capture;
+          }
+
+          app.needsRecreate = false;
+        }
+
         if (!captureStart())
         {
           exitcode = LG_HOST_EXIT_FAILED;
@@ -639,6 +662,12 @@ int app_main(int argc, char * argv[])
           break;
 
         case CAPTURE_RESULT_TIMEOUT:
+          continue;
+
+        case CAPTURE_RESULT_RECREATE:
+          app.state = APP_STATE_RESTART;
+          app.needsRecreate = true;
+          DEBUG_INFO("Capture interface requires recreation");
           continue;
 
         case CAPTURE_RESULT_REINIT:
