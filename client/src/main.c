@@ -152,16 +152,11 @@ void app_handleFocusEvent(bool focused)
   if (!app_inputEnabled())
     return;
 
-  if (params.grabKeyboardOnFocus)
-  {
-    if (focused)
-      g_state.ds->grabKeyboard();
-    else
-      g_state.ds->ungrabKeyboard();
-  }
-
   if (!focused)
+  {
+    setGrabQuiet(false);
     setCursorInView(false);
+  }
 
   g_cursor.realign = true;
   g_state.ds->realignPointer();
@@ -1013,6 +1008,9 @@ static void setCursorInView(bool enable)
 
     if (warpSupport && !params.captureInputOnly)
       g_state.ds->grabPointer();
+
+    if (params.grabKeyboardOnFocus)
+      g_state.ds->grabKeyboard();
   }
   else
   {
@@ -1022,7 +1020,7 @@ static void setCursorInView(bool enable)
     if (warpSupport)
       g_state.ds->ungrabPointer();
 
-    setGrabQuiet(false);
+    g_state.ds->ungrabKeyboard();
   }
 
   g_cursor.warpState = WARP_STATE_ON;
@@ -1562,8 +1560,7 @@ static void setGrabQuiet(bool enable)
   {
     if (params.grabKeyboard)
     {
-      if (!g_state.focused || !params.grabKeyboardOnFocus ||
-          params.captureInputOnly)
+      if (!g_state.focused || params.captureInputOnly)
         g_state.ds->ungrabKeyboard();
     }
 
