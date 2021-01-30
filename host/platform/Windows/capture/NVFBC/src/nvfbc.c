@@ -119,36 +119,7 @@ static bool nvfbc_create(
   if (!NvFBCInit())
     return false;
 
-  int       bufferLen   = GetEnvironmentVariable("NVFBC_PRIV_DATA", NULL, 0);
-  uint8_t * privData    = NULL;
-  int       privDataLen = 0;
-
-  if(bufferLen)
-  {
-    char * buffer = malloc(bufferLen);
-    GetEnvironmentVariable("NVFBC_PRIV_DATA", buffer, bufferLen);
-
-    privDataLen = (bufferLen - 1) / 2;
-    privData    = (uint8_t *)malloc(privDataLen);
-    char hex[3] = {0};
-    for(int i = 0; i < privDataLen; ++i)
-    {
-      memcpy(hex, &buffer[i*2], 2);
-      privData[i] = (uint8_t)strtoul(hex, NULL, 16);
-    }
-
-    free(buffer);
-  }
-
   this = (struct iface *)calloc(sizeof(struct iface), 1);
-  if (!NvFBCToSysCreate(privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
-  {
-    free(privData);
-    nvfbc_free();
-    return false;
-  }
-  free(privData);
-
   this->frameEvent = lgCreateEvent(true, 17);
   if (!this->frameEvent)
   {
@@ -167,6 +138,35 @@ static bool nvfbc_create(
 static bool nvfbc_init(void)
 {
   this->stop = false;
+
+  int       bufferLen   = GetEnvironmentVariable("NVFBC_PRIV_DATA", NULL, 0);
+  uint8_t * privData    = NULL;
+  int       privDataLen = 0;
+
+  if (bufferLen)
+  {
+    char * buffer = malloc(bufferLen);
+    GetEnvironmentVariable("NVFBC_PRIV_DATA", buffer, bufferLen);
+
+    privDataLen = (bufferLen - 1) / 2;
+    privData    = (uint8_t *)malloc(privDataLen);
+    char hex[3] = {0};
+    for(int i = 0; i < privDataLen; ++i)
+    {
+      memcpy(hex, &buffer[i*2], 2);
+      privData[i] = (uint8_t)strtoul(hex, NULL, 16);
+    }
+
+    free(buffer);
+  }
+
+  if (!NvFBCToSysCreate(privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+  {
+    free(privData);
+    return false;
+  }
+  free(privData);
+
   getDesktopSize(&this->width, &this->height, &this->dpi);
   lgResetEvent(this->frameEvent);
 
@@ -235,13 +235,17 @@ static bool nvfbc_deinit(void)
     this->cursorEvents[0] = NULL;
   }
 
+  if (this->nvfbc)
+  {
+    NvFBCToSysRelease(&this->nvfbc);
+    this->nvfbc = NULL;
+  }
+
   return true;
 }
 
 static void nvfbc_free(void)
 {
-  NvFBCToSysRelease(&this->nvfbc);
-
   if (this->frameEvent)
     lgFreeEvent(this->frameEvent);
 
