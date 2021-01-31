@@ -178,7 +178,7 @@ void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY)
     return;
 
   glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
   // render the background first
   egl_shader_use(fps->shaderBG);
