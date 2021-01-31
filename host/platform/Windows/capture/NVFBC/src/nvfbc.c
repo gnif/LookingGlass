@@ -61,6 +61,9 @@ struct iface
 
   int mouseX, mouseY, mouseHotX, mouseHotY;
   bool mouseVisible, hasMousePosition;
+
+  bool mouseHookCreated;
+  bool forceCompositionCreated;
 };
 
 static struct iface * this = NULL;
@@ -188,12 +191,21 @@ static bool nvfbc_init(void)
   }
 
   this->cursorEvents[0] = lgCreateEvent(true, 10);
-  mouseHook_install(on_mouseMove);
 
   if (this->seperateCursor)
     this->cursorEvents[1] = lgWrapEvent(event);
 
-  dwmForceComposition();
+  if (!this->mouseHookCreated)
+  {
+    mouseHook_install(on_mouseMove);
+    this->mouseHookCreated = true;
+  }
+
+  if (!this->forceCompositionCreated)
+  {
+    dwmForceComposition();
+    this->forceCompositionCreated = true;
+  }
 
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
@@ -226,9 +238,6 @@ static void nvfbc_stop(void)
 
 static bool nvfbc_deinit(void)
 {
-  mouseHook_remove();
-  dwmUnforceComposition();
-
   if (this->cursorEvents[0])
   {
     lgFreeEvent(this->cursorEvents[0]);
@@ -248,6 +257,12 @@ static void nvfbc_free(void)
 {
   if (this->frameEvent)
     lgFreeEvent(this->frameEvent);
+
+  if (this->mouseHookCreated)
+    mouseHook_remove();
+
+  if (this->forceCompositionCreated)
+    dwmUnforceComposition();
 
   free(this);
   this = NULL;
