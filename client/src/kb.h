@@ -22,3 +22,4 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 extern const uint32_t xfree86_to_ps2[KEY_MAX];
 extern const char *   xfree86_to_str[KEY_MAX];
+extern const char *   xfree86_to_display[KEY_MAX];
