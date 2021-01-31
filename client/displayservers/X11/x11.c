@@ -76,6 +76,7 @@ struct X11DSState
   Atom aNetWMStateFullscreen;
   Atom aNetWMWindowType;
   Atom aNetWMWindowTypeNormal;
+  Atom aWMDeleteWindow;
 
   // clipboard members
   Atom             aSelection;
@@ -209,17 +210,21 @@ static bool x11Init(const LG_DSInitParams params)
     XInternAtom(x11.display, "_NET_WM_WINDOW_TYPE", True);
   x11.aNetWMWindowTypeNormal =
     XInternAtom(x11.display, "_NET_WM_WINDOW_TYPE_NORMAL", True);
+  x11.aWMDeleteWindow =
+    XInternAtom(x11.display, "WM_DELETE_WINDOW", True);
 
-    XChangeProperty(
-      x11.display,
-      x11.window,
-      x11.aNetWMWindowType,
-      XA_CARDINAL,
-      32,
-      PropModeReplace,
-      (unsigned char *)&x11.aNetWMWindowTypeNormal,
-      1
-    );
+  XSetWMProtocols(x11.display, x11.window, &x11.aWMDeleteWindow, 1);
+
+  XChangeProperty(
+    x11.display,
+    x11.window,
+    x11.aNetWMWindowType,
+    XA_CARDINAL,
+    32,
+    PropModeReplace,
+    (unsigned char *)&x11.aNetWMWindowTypeNormal,
+    1
+  );
 
   if (params.fullscreen)
   {
@@ -510,13 +515,9 @@ static int x11EventThread(void * unused)
 
     switch(xe.type)
     {
-      case DestroyNotify:
-        if (xe.xdestroywindow.display == x11.display &&
-            xe.xdestroywindow.window == x11.window)
-        {
-          x11.window = 0;
+      case ClientMessage:
+        if (xe.xclient.data.l[0] == x11.aWMDeleteWindow)
           app_handleCloseEvent();
-        }
         break;
 
       case ConfigureNotify:
