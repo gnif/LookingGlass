@@ -455,7 +455,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   free(buffer);
 }
 
-KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque)
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
 {
   // don't allow duplicate binds
   if (g_state.bindings[sc])
@@ -470,6 +470,7 @@ KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque)
   handle->opaque   = opaque;
 
   g_state.bindings[sc] = handle;
+  g_state.keyDescription[sc] = description;
   return handle;
 }
 

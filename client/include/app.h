@@ -97,7 +97,7 @@ typedef void (*KeybindFn)(int sc, void * opaque);
  * @retval A handle for the binding or NULL on failure.
  *         The caller is required to release the handle via `app_releaseKeybind` when it is no longer required
  */
-KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque);
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description);
 
 /**
  * Release an existing key binding
