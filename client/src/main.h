@@ -50,6 +50,7 @@ struct AppState
   bool                 escapeActive;
   int                  escapeAction;
   KeybindHandle        bindings[KEY_MAX];
+  const char *         keyDescription[KEY_MAX];
   bool                 keyDown[KEY_MAX];
 
   bool                 haveSrcSize;
