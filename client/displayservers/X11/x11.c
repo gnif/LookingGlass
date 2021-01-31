@@ -198,6 +198,15 @@ static bool x11Init(const LG_DSInitParams params)
 
   XStoreName(x11.display, x11.window, params.title);
 
+  XClassHint hint =
+  {
+    .res_name  = strdup(params.title),
+    .res_class = strdup("looking-glass-client")
+  };
+  XSetClassHint(x11.display, x11.window, &hint);
+  free(hint.res_name);
+  free(hint.res_class);
+
   x11.aNetReqFrameExtents =
     XInternAtom(x11.display, "_NET_REQUEST_FRAME_EXTENTS", True);
   x11.aNetFrameExtents =
