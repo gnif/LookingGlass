@@ -530,7 +530,7 @@ bool egl_render_startup(void * opaque)
 
   EGLint attr[] =
   {
-    EGL_BUFFER_SIZE    , 32,
+    EGL_BUFFER_SIZE    , 24,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
     EGL_SAMPLE_BUFFERS , maxSamples > 0 ? 1 : 0,
     EGL_SAMPLES        , maxSamples,
