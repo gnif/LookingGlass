@@ -103,6 +103,7 @@ struct Inst
 
   const LG_Font     * font;
   LG_FontObj        fontObj;
+  LG_FontObj        helpFontObj;
 };
 
 static struct Option egl_options[] =
@@ -200,6 +201,12 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
     return false;
   }
 
+  if (!this->font->create(&this->helpFontObj, NULL, 14))
+  {
+    DEBUG_ERROR("Failed to create a font instance");
+    return false;
+  }
+
   *needsOpenGL = false;
   return true;
 }
@@ -215,8 +222,15 @@ void egl_deinitialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  if (this->font && this->fontObj)
-    this->font->destroy(this->fontObj);
+  if (this->font)
+  {
+    if (this->fontObj)
+      this->font->destroy(this->fontObj);
+
+    if (this->helpFontObj)
+      this->font->destroy(this->helpFontObj);
+  }
+
 
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
@@ -641,7 +655,7 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
-  if (!egl_help_init(&this->help, this->font, this->fontObj))
+  if (!egl_help_init(&this->help, this->font, this->helpFontObj))
   {
     DEBUG_ERROR("Failed to initialize the alert display");
     return false;
