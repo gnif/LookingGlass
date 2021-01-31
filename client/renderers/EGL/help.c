@@ -24,6 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "shader.h"
 #include "model.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,11 +38,12 @@ struct EGL_Help
   const LG_Font * font;
   LG_FontObj      fontObj;
 
-  EGL_Texture   * texture;
-  EGL_Shader    * shader;
-  EGL_Shader    * shaderBG;
-  EGL_Model     * model;
-  LG_FontBitmap * bmp;
+  EGL_Texture * texture;
+  EGL_Shader  * shader;
+  EGL_Shader  * shaderBG;
+  EGL_Model   * model;
+
+  _Atomic(LG_FontBitmap *) bmp;
 
   bool  shouldRender;
   int   iwidth, iheight;
@@ -101,7 +103,6 @@ bool egl_help_init(EGL_Help ** help, const LG_Font * font, LG_FontObj fontObj)
     return false;
   }
 
-
   (*help)->uSize     = egl_shader_get_uniform_location((*help)->shader  , "size"  );
   (*help)->uScreen   = egl_shader_get_uniform_location((*help)->shader  , "screen");
   (*help)->uSizeBG   = egl_shader_get_uniform_location((*help)->shaderBG, "size"  );
@@ -115,6 +116,8 @@ bool egl_help_init(EGL_Help ** help, const LG_Font * font, LG_FontObj fontObj)
 
   egl_model_set_default((*help)->model);
   egl_model_set_texture((*help)->model, (*help)->texture);
+
+  atomic_init(&(*help)->bmp, NULL);
 
   return true;
 }
@@ -135,37 +138,40 @@ void egl_help_free(EGL_Help ** help)
 
 void egl_help_set_text(EGL_Help * help, const char * help_text)
 {
-  if (!help_text)
+  LG_FontBitmap * bmp = NULL;
+  if (help_text)
   {
+    bmp = help->font->render(help->fontObj, 0xffffff00, help_text);
+    if (!bmp)
+      DEBUG_ERROR("Failed to render help text");
+  } else
     help->shouldRender = false;
-    return;
-  }
 
-  help->bmp = help->font->render(help->fontObj, 0xffffff00, help_text);
-  if (!help->bmp)
+  bmp = atomic_exchange(&help->bmp, bmp);
+  if (bmp)
   {
-    DEBUG_ERROR("Failed to render help text");
-    return;
+    help->font->release(help->fontObj, bmp);
   }
 }
 
 void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
 {
-  if (help->bmp)
+  LG_FontBitmap * bmp = atomic_exchange(&help->bmp, NULL);
+  if (bmp)
   {
-    if (help->iwidth != help->bmp->width || help->iheight != help->bmp->height)
+    if (help->iwidth != bmp->width || help->iheight != bmp->height)
     {
-      help->iwidth  = help->bmp->width;
-      help->iheight = help->bmp->height;
-      help->width   = (float)help->bmp->width;
-      help->height  = (float)help->bmp->height;
+      help->iwidth  = bmp->width;
+      help->iheight = bmp->height;
+      help->width   = (float)bmp->width;
+      help->height  = (float)bmp->height;
 
       egl_texture_setup(
         help->texture,
         EGL_PF_BGRA,
-        help->bmp->width ,
-        help->bmp->height,
-        help->bmp->width * help->bmp->bpp,
+        bmp->width ,
+        bmp->height,
+        bmp->width * bmp->bpp,
         false,
         false
       );
@@ -174,12 +180,11 @@ void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
     egl_texture_update
     (
       help->texture,
-      help->bmp->pixels
+      bmp->pixels
     );
 
     help->shouldRender = true;
-    help->font->release(help->fontObj, help->bmp);
-    help->bmp = NULL;
+    help->font->release(help->fontObj, bmp);
   }
 
   if (!help->shouldRender)
