@@ -65,7 +65,8 @@ struct iface
 
 static struct iface * this = NULL;
 
-static void nvfbc_free();
+static bool nvfbc_deinit(void);
+static void nvfbc_free(void);
 static int pointerThread(void * unused);
 
 static void getDesktopSize(unsigned int * width, unsigned int * height, unsigned int * dpi)
@@ -201,8 +202,7 @@ static bool nvfbc_init(void)
   if (!lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
   {
     DEBUG_ERROR("Failed to create the NvFBCPointer thread");
-    mouseHook_remove();
-    dwmUnforceComposition();
+    nvfbc_deinit();
     return false;
   }
 
