@@ -186,16 +186,13 @@ void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
     return;
 
   glEnable(GL_BLEND);
-  glBlendColor(0, 0, 0, 0.5);
-  glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   // render the background first
   egl_shader_use(help->shaderBG);
   glUniform2f(help->uScreenBG, scaleX     , scaleY      );
   glUniform2f(help->uSizeBG  , help->width, help->height);
   egl_model_render(help->model);
-
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   // render the texture over the background
   egl_shader_use(help->shader);
