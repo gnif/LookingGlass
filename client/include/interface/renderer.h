@@ -36,6 +36,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
    (x)->on_mouse_event && \
    (x)->on_alert       && \
    (x)->on_help        && \
+   (x)->on_show_fps    && \
    (x)->render_startup && \
    (x)->render         && \
    (x)->update_fps)
@@ -44,7 +45,6 @@ typedef struct LG_RendererParams
 {
 //  TTF_Font * font;
 //  TTF_Font * alertFont;
-  bool       showFPS;
   bool       quickSplash;
 }
 LG_RendererParams;
@@ -116,6 +116,7 @@ typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_Render
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD);
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
 typedef void         (* LG_RendererOnHelp       )(void * opaque, const char * message);
+typedef void         (* LG_RendererOnShowFPS    )(void * opaque, bool showFPS);
 typedef bool         (* LG_RendererRenderStartup)(void * opaque);
 typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate);
 typedef void         (* LG_RendererUpdateFPS    )(void * opaque, const float avgUPS, const float avgFPS);
@@ -137,6 +138,7 @@ typedef struct LG_Renderer
   LG_RendererOnFrame        on_frame;
   LG_RendererOnAlert        on_alert;
   LG_RendererOnHelp         on_help;
+  LG_RendererOnShowFPS      on_show_fps;
   LG_RendererRenderStartup  render_startup;
   LG_RendererRender         render;
   LG_RendererUpdateFPS      update_fps;

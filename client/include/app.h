@@ -115,4 +115,9 @@ void app_releaseAllKeybinds(void);
  */
 void app_showHelp(bool show);
 
+/**
+ * Changes whether the FPS is displayed or not.
+ */
+void app_showFPS(bool showFPS);
+
 #endif

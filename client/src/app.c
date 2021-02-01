@@ -552,3 +552,11 @@ void app_showHelp(bool show)
   g_state.lgr->on_help(g_state.lgrData, help);
   free(help);
 }
+
+void app_showFPS(bool showFPS)
+{
+  if (!g_state.lgr)
+    return;
+
+  g_state.lgr->on_show_fps(g_state.lgrData, showFPS);
+}
