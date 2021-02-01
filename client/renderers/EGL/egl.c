@@ -511,6 +511,12 @@ void egl_on_help(void * opaque, const char * message)
   egl_help_set_text(this->help, message);
 }
 
+void egl_on_show_fps(void * opaque, bool showFPS)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  egl_fps_set_display(this->fps, showFPS);
+}
+
 bool egl_render_startup(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -750,9 +756,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
 void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!this->params.showFPS)
-    return;
-
   egl_fps_update(this->fps, avgUPS, avgFPS);
 }
 
@@ -772,6 +775,7 @@ struct LG_Renderer LGR_EGL =
   .on_frame        = egl_on_frame,
   .on_alert        = egl_on_alert,
   .on_help         = egl_on_help,
+  .on_show_fps     = egl_on_show_fps,
   .render_startup  = egl_render_startup,
   .render          = egl_render,
   .update_fps      = egl_update_fps
