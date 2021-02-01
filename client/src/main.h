@@ -47,6 +47,7 @@ struct AppState
 
   bool                 stopVideo;
   bool                 ignoreInput;
+  bool                 showFPS;
   bool                 escapeActive;
   int                  escapeAction;
   KeybindHandle        bindings[KEY_MAX];

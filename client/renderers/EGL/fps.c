@@ -42,6 +42,7 @@ struct EGL_FPS
   EGL_Shader  * shaderBG;
   EGL_Model   * model;
 
+  bool  display;
   bool  ready;
   int   iwidth, iheight;
   float width, height;
@@ -132,8 +133,16 @@ void egl_fps_free(EGL_FPS ** fps)
   *fps = NULL;
 }
 
+void egl_fps_set_display(EGL_FPS * fps, bool display)
+{
+  fps->display = display;
+}
+
 void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
 {
+  if (!fps->display)
+    return;
+
   char str[128];
   snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgFPS, renderFPS);
 
@@ -174,7 +183,7 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
 
 void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY)
 {
-  if (!fps->ready)
+  if (!fps->display || !fps->ready)
     return;
 
   glEnable(GL_BLEND);

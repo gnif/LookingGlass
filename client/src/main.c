@@ -104,6 +104,8 @@ static int renderThread(void * unused)
     return 1;
   }
 
+  g_state.lgr->on_show_fps(g_state.lgrData, g_state.showFPS);
+
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
@@ -131,7 +133,7 @@ static int renderThread(void * unused)
     if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate))
       break;
 
-    if (g_params.showFPS)
+    if (g_state.showFPS)
     {
       const uint64_t t    = nanotime();
       g_state.renderTime   += t - g_state.lastFrameTime;
@@ -629,6 +631,8 @@ static int lg_run(void)
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
 
+  g_state.showFPS = g_params.showFPS;
+
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
     if (LG_DisplayServers[i]->probe())
@@ -693,7 +697,6 @@ static int lg_run(void)
   // select and init a renderer
   bool needsOpenGL;
   LG_RendererParams lgrParams;
-  lgrParams.showFPS     = g_params.showFPS;
   lgrParams.quickSplash = g_params.quickSplash;
 
   if (g_params.forceRenderer)

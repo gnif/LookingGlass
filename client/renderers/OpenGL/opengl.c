@@ -148,6 +148,7 @@ struct Inst
   uint64_t          waitFadeTime;
   bool              waitDone;
 
+  bool              showFPS;
   bool              fpsTexture;
   SDL_Rect          fpsRect;
 
@@ -466,6 +467,12 @@ void opengl_on_help(void * opaque, const char * message)
   // TODO: Implement this.
 }
 
+void opengl_on_show_fps(void * opaque, bool showFPS)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  this->showFPS = showFPS;
+}
+
 void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
 {
   glBindTexture(GL_TEXTURE_2D       , texture      );
@@ -583,7 +590,7 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
       render_wait(this);
   }
 
-  if (this->fpsTexture)
+  if (this->showFPS && this->fpsTexture)
     glCallList(this->fpsList);
 
   struct Alert * alert;
@@ -668,7 +675,7 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
 void opengl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 {
   struct Inst * this = (struct Inst *)opaque;
-  if (!this->params.showFPS)
+  if (!this->showFPS)
     return;
 
   char str[128];
@@ -829,6 +836,7 @@ const LG_Renderer LGR_OpenGL =
   .on_frame        = opengl_on_frame,
   .on_alert        = opengl_on_alert,
   .on_help         = opengl_on_help,
+  .on_show_fps     = opengl_on_show_fps,
   .render_startup  = opengl_render_startup,
   .render          = opengl_render,
   .update_fps      = opengl_update_fps
