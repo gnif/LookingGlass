@@ -69,6 +69,9 @@ void core_setCursorInView(bool enable)
 
     if (warpSupport && !g_params.captureInputOnly)
       g_state.ds->grabPointer();
+
+    if (g_params.grabKeyboardOnFocus)
+      g_state.ds->grabKeyboard();
   }
   else
   {
