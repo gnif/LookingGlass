@@ -163,10 +163,10 @@ void spiceClipboardNotice(const SpiceDataType type)
 
 void app_handleButtonPress(int button)
 {
+  g_cursor.buttons |= (1U << button);
+
   if (!core_inputEnabled() || !g_cursor.inView)
     return;
-
-  g_cursor.buttons |= (1U << button);
 
   if (!spice_mouse_press(button))
     DEBUG_ERROR("app_handleButtonPress: failed to send message");
@@ -174,10 +174,10 @@ void app_handleButtonPress(int button)
 
 void app_handleButtonRelease(int button)
 {
+  g_cursor.buttons &= ~(1U << button);
+
   if (!core_inputEnabled())
     return;
-
-  g_cursor.buttons &= ~(1U << button);
 
   if (!spice_mouse_release(button))
     DEBUG_ERROR("app_handleButtonRelease: failed to send message");
