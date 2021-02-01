@@ -1450,6 +1450,9 @@ void app_handleMouseBasic()
   int x = (int) round((px - local.x) / g_cursor.dpiScale);
   int y = (int) round((py - local.y) / g_cursor.dpiScale);
 
+  if (!x && !y)
+    return;
+
   g_cursor.guest.x += x;
   g_cursor.guest.y += y;
 
