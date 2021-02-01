@@ -53,10 +53,17 @@ void app_handleFocusEvent(bool focused)
   if (!core_inputEnabled())
     return;
 
-  if (!focused)
+  if (focused)
+  {
+    if (g_params.grabKeyboardOnFocus)
+      g_state.ds->grabKeyboard();
+  }
+  else
   {
     core_setGrabQuiet(false);
     core_setCursorInView(false);
+    if (g_params.grabKeyboardOnFocus)
+      g_state.ds->ungrabKeyboard();
   }
 
   g_cursor.realign = true;

@@ -77,8 +77,6 @@ void core_setCursorInView(bool enable)
 
     if (warpSupport)
       g_state.ds->ungrabPointer();
-
-    g_state.ds->ungrabKeyboard();
   }
 
   g_cursor.warpState = WARP_STATE_ON;
@@ -126,7 +124,7 @@ void core_setGrabQuiet(bool enable)
   {
     if (g_params.grabKeyboard)
     {
-      if (!g_state.focused || g_params.captureInputOnly)
+      if (!g_params.grabKeyboardOnFocus || !g_state.focused || g_params.captureInputOnly)
         g_state.ds->ungrabKeyboard();
     }
 
