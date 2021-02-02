@@ -31,7 +31,7 @@ https://looking-glass.io/downloads
 
 Please also be sure to see the following files for more information
 Note: The `README.md` files are slowly being deprecated from this project in
-favor of the wiki at https://looking-glass.io/wiki, and as such the
+favor of the wiki at https://looking-glass.io/wiki/, and as such the
 information in these files may be dated.
 
 * [client/README.md](client/README.md)
