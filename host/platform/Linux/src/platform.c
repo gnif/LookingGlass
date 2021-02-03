@@ -72,3 +72,8 @@ const char * os_getDataPath(void)
 {
   return app.dataPath;
 }
+
+bool os_blockScreensaver()
+{
+  return false;
+}

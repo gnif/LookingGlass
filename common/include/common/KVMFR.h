@@ -23,10 +23,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 8
+#define KVMFR_VERSION 9
 
 #define LGMP_Q_POINTER     1
 #define LGMP_Q_FRAME       2
@@ -73,6 +74,7 @@ typedef struct KVMFRFrame
   uint32_t      pitch;             // the row pitch  (stride in bytes or the compressed frame size)
   uint32_t      offset;            // offset from the start of this header to the FrameBuffer header
   uint32_t      mouseScalePercent; // movement scale factor of the mouse (relates to DPI of display, 100 = no scale)
+  bool          blockScreensaver;  // whether the guest has requested to block screensavers
 }
 KVMFRFrame;
 
