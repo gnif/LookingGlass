@@ -538,6 +538,15 @@ int main_frameThread(void * unused)
       break;
     }
 
+    if (g_params.autoScreensaver && g_state.autoIdleInhibitState != frame->blockScreensaver)
+    {
+      if (frame->blockScreensaver)
+        g_state.ds->inhibitIdle();
+      else
+        g_state.ds->uninhibitIdle();
+      g_state.autoIdleInhibitState = frame->blockScreensaver;
+    }
+
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
     lgSignalEvent(e_frame);
     lgmpClientMessageDone(queue);

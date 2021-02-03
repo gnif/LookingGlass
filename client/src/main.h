@@ -92,6 +92,8 @@ struct AppState
 
   uint64_t resizeTimeout;
   bool     resizeDone;
+
+  bool     autoIdleInhibitState;
 };
 
 struct AppParams
@@ -121,6 +123,7 @@ struct AppParams
   bool              hideMouse;
   bool              ignoreQuit;
   bool              noScreensaver;
+  bool              autoScreensaver;
   bool              grabKeyboard;
   bool              grabKeyboardOnFocus;
   int               escapeKey;
