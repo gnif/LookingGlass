@@ -851,12 +851,11 @@ static void waylandFree(void)
     zwp_idle_inhibit_manager_v1_destroy(wm.idleInhibitManager);
   }
 
-  // TODO: these also need to be freed, but are currently owned by SDL.
-  // wl_display_destroy(wm.display);
-  // wl_surface_destroy(wm.surface);
+  wl_surface_destroy(wm.surface);
   wl_pointer_destroy(wm.pointer);
   wl_seat_destroy(wm.seat);
   wl_registry_destroy(wm.registry);
+  wl_display_disconnect(wm.display);
 }
 
 static bool waylandGetProp(LG_DSProperty prop, void * ret)
