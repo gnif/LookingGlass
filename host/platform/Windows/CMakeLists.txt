@@ -33,6 +33,7 @@ target_link_libraries(platform_Windows
 	wtsapi32
 	psapi
 	shlwapi
+	powrprof
 )
 
 target_include_directories(platform_Windows

@@ -25,6 +25,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <fcntl.h>
+#include <powrprof.h>
+#include <ntstatus.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -396,4 +398,25 @@ const char * os_getDataPath(void)
 HWND os_getMessageWnd(void)
 {
   return app.messageWnd;
+}
+
+bool os_blockScreensaver()
+{
+  static bool      lastResult = false;
+  static ULONGLONG lastCheck  = 0;
+
+  ULONGLONG now = GetTickCount64();
+  if (now - lastCheck >= 1000)
+  {
+    ULONG executionState;
+    NTSTATUS status = CallNtPowerInformation(SystemExecutionState, NULL, 0,
+      &executionState, sizeof executionState);
+
+    if (status == STATUS_SUCCESS)
+      lastResult = executionState & ES_DISPLAY_REQUIRED;
+    else
+      DEBUG_ERROR("Failed to call CallNtPowerInformation(SystemExecutionState): %ld", status);
+    lastCheck = now;
+  }
+  return lastResult;
 }
