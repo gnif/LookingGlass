@@ -206,6 +206,7 @@ static int frameThread(void * opaque)
     fi->pitch             = frame.pitch;
     fi->offset            = pageSize - FrameBufferStructSize;
     fi->mouseScalePercent = app.iface->getMouseScale();
+    fi->blockScreensaver  = os_blockScreensaver();
     frameValid            = true;
 
     // put the framebuffer on the border of the next page
