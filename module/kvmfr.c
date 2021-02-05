@@ -41,6 +41,11 @@ DEFINE_IDR(kvmfr_idr);
 #define KVMFR_DEV_NAME    "kvmfr"
 #define KVMFR_MAX_DEVICES 10
 
+static int static_size_mb[KVMFR_MAX_DEVICES];
+static int static_count;
+module_param_array(static_size_mb, int, &static_count, 0000);
+MODULE_PARM_DESC(static_size_mb, "List of static devices to create in MiB");
+
 struct kvmfr_info
 {
   int             major;
@@ -48,6 +53,12 @@ struct kvmfr_info
 };
 
 static struct kvmfr_info *kvmfr;
+
+enum kvmfr_type
+{
+  KVMFR_TYPE_PCI,
+  KVMFR_TYPE_STATIC,
+};
 
 struct kvmfr_dev
 {
@@ -57,6 +68,7 @@ struct kvmfr_dev
   struct device      * pDev;
   struct dev_pagemap   pgmap;
   void               * addr;
+  enum kvmfr_type      type;
 };
 
 struct kvmfrbuf
@@ -142,14 +154,6 @@ static const struct dma_buf_ops kvmfrbuf_ops =
   .mmap          = mmap_kvmfrbuf
 };
 
-inline static unsigned long get_min_align(void)
-{
-  if (IS_ENABLED(CONFIG_SPARSEMEM_VMEMMAP))
-    return PAGES_PER_SUBSECTION;
-  else
-    return PAGES_PER_SECTION;
-}
-
 static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, unsigned long arg)
 {
   struct kvmfr_dmabuf_create create;
@@ -188,10 +192,24 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
   }
 
   p = ((u8*)kdev->addr) + create.offset;
-  for(i = 0; i < kbuf->pagecount; ++i)
+
+  switch (kdev->type)
   {
-    kbuf->pages[i] = virt_to_page(p);
-    p += PAGE_SIZE;
+    case KVMFR_TYPE_PCI:
+      for (i = 0; i < kbuf->pagecount; ++i)
+      {
+        kbuf->pages[i] = virt_to_page(p);
+        p += PAGE_SIZE;
+      }
+      break;
+
+    case KVMFR_TYPE_STATIC:
+      for (i = 0; i < kbuf->pagecount; ++i)
+      {
+        kbuf->pages[i] = vmalloc_to_page(p);
+        p += PAGE_SIZE;
+      }
+      break;
   }
 
   exp_kdev.ops   = &kvmfrbuf_ops;
@@ -241,10 +259,36 @@ static long device_ioctl(struct file * filp, unsigned int ioctl, unsigned long a
   return ret;
 }
 
+static int device_mmap(struct file * filp, struct vm_area_struct * vma)
+{
+  struct kvmfr_dev * kdev;
+  unsigned long size = vma->vm_end - vma->vm_start;
+  unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+
+  kdev = (struct kvmfr_dev *)idr_find(&kvmfr_idr, iminor(filp->f_inode));
+  if (!kdev)
+    return -EINVAL;
+
+  if ((offset + size > kdev->size) || (offset + size < offset))
+    return -EINVAL;
+
+  printk(KERN_INFO "mmap kvmfr%d: %lx-%lx with size %lu offset %lu\n",
+      kdev->minor, vma->vm_start, vma->vm_end, size, offset);
+
+  switch (kdev->type)
+  {
+    case KVMFR_TYPE_STATIC:
+      return remap_vmalloc_range(vma, kdev->addr, vma->vm_pgoff);
+    default:
+      return -ENODEV;
+  }
+}
+
 static struct file_operations fops =
 {
   .owner          = THIS_MODULE,
-  .unlocked_ioctl = device_ioctl
+  .unlocked_ioctl = device_ioctl,
+  .mmap           = device_mmap,
 };
 
 static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
@@ -262,6 +306,7 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
     goto out_disable;
 
   kdev->size = pci_resource_len(dev, 2);
+  kdev->type = KVMFR_TYPE_PCI;
 
   mutex_lock(&minor_lock);
   kdev->minor = idr_alloc(&kvmfr_idr, kdev, 0, KVMFR_MAX_DEVICES, GFP_KERNEL);
@@ -351,6 +396,84 @@ static struct pci_driver kvmfr_pci_driver =
   .remove   = kvmfr_pci_remove
 };
 
+static int create_static_device_unlocked(int size_mb)
+{
+  struct kvmfr_dev * kdev;
+  int ret = -ENODEV;
+
+  kdev = kzalloc(sizeof(struct kvmfr_dev), GFP_KERNEL);
+  if (!kdev)
+    return -ENOMEM;
+
+  kdev->size = size_mb * 1024 * 1024;
+  kdev->type = KVMFR_TYPE_STATIC;
+  kdev->addr = vmalloc_user(kdev->size);
+  if (!kdev->addr)
+  {
+    printk(KERN_ERR "kvmfr: failed to allocate memory for static device: %d MiB\n", size_mb);
+    ret = -ENOMEM;
+    goto out_free;
+  }
+
+  kdev->minor = idr_alloc(&kvmfr_idr, kdev, 0, KVMFR_MAX_DEVICES, GFP_KERNEL);
+  if (kdev->minor < 0)
+    goto out_release;
+
+  kdev->devNo = MKDEV(kvmfr->major, kdev->minor);
+  kdev->pDev  = device_create(kvmfr->pClass, NULL, kdev->devNo, NULL, KVMFR_DEV_NAME "%d", kdev->minor);
+  if (IS_ERR(kdev->pDev))
+    goto out_unminor;
+
+  return 0;
+
+out_unminor:
+  idr_remove(&kvmfr_idr, kdev->minor);
+out_release:
+  vfree(kdev->addr);
+out_free:
+  kfree(kdev);
+  return ret;
+}
+
+static void free_static_device_unlocked(struct kvmfr_dev * kdev)
+{
+  device_destroy(kvmfr->pClass, kdev->devNo);
+  idr_remove(&kvmfr_idr, kdev->minor);
+  vfree(kdev->addr);
+  kfree(kdev);
+}
+
+static void free_static_devices(void)
+{
+  int id;
+  struct kvmfr_dev * kdev;
+
+  mutex_lock(&minor_lock);
+  idr_for_each_entry(&kvmfr_idr, kdev, id)
+    free_static_device_unlocked(kdev);
+  mutex_unlock(&minor_lock);
+}
+
+static int create_static_devices(void)
+{
+  int i;
+  int ret = 0;
+
+  mutex_lock(&minor_lock);
+  printk(KERN_INFO "kvmfr: creating %d static devices\n", static_count);
+  for (i = 0; i < static_count; ++i)
+  {
+    ret = create_static_device_unlocked(static_size_mb[i]);
+    if (ret < 0)
+      break;
+  }
+  mutex_unlock(&minor_lock);
+
+  if (ret < 0)
+    free_static_devices();
+  return ret;
+}
+
 static int __init kvmfr_module_init(void)
 {
   int ret;
@@ -367,12 +490,18 @@ static int __init kvmfr_module_init(void)
   if (IS_ERR(kvmfr->pClass))
     goto out_unreg;
 
-  ret = pci_register_driver(&kvmfr_pci_driver);
+  ret = create_static_devices();
   if (ret < 0)
     goto out_class_destroy;
 
+  ret = pci_register_driver(&kvmfr_pci_driver);
+  if (ret < 0)
+    goto out_free_static;
+
   return 0;
 
+out_free_static:
+  free_static_devices();
 out_class_destroy:
   class_destroy(kvmfr->pClass);
 out_unreg:
@@ -387,6 +516,7 @@ out_free:
 static void __exit kvmfr_module_exit(void)
 {
   pci_unregister_driver(&kvmfr_pci_driver);
+  free_static_devices();
   class_destroy(kvmfr->pClass);
   unregister_chrdev(kvmfr->major, KVMFR_DEV_NAME);
   kfree(kvmfr);
