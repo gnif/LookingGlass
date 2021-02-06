@@ -79,6 +79,9 @@ struct EGL_Texture
   int             bufferCount;
   GLuint          tex;
   struct Buffer   buf[BUFFER_COUNT];
+
+  int      dmaFd;
+  EGLImage dmaImage;
 };
 
 bool egl_texture_init(EGL_Texture ** texture, EGLDisplay * display)
@@ -92,6 +95,7 @@ bool egl_texture_init(EGL_Texture ** texture, EGLDisplay * display)
 
   memset(*texture, 0, sizeof(EGL_Texture));
   (*texture)->display = display;
+  (*texture)->dmaFd   = -1;
   return true;
 }
 
@@ -365,41 +369,41 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
     return true;
   }
 
-  EGLAttrib const attribs[] =
+  if (texture->dmaFd != dmaFd)
   {
-    EGL_WIDTH                    , texture->width,
-    EGL_HEIGHT                   , texture->height,
-    EGL_LINUX_DRM_FOURCC_EXT     , texture->fourcc,
-    EGL_DMA_BUF_PLANE0_FD_EXT    , dmaFd,
-    EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-    EGL_DMA_BUF_PLANE0_PITCH_EXT , texture->stride,
-    EGL_NONE                     , EGL_NONE
-  };
+    EGLAttrib const attribs[] =
+    {
+      EGL_WIDTH                    , texture->width,
+      EGL_HEIGHT                   , texture->height,
+      EGL_LINUX_DRM_FOURCC_EXT     , texture->fourcc,
+      EGL_DMA_BUF_PLANE0_FD_EXT    , dmaFd,
+      EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+      EGL_DMA_BUF_PLANE0_PITCH_EXT , texture->stride,
+      EGL_NONE                     , EGL_NONE
+    };
 
-  /* create the image backed by the dma buffer */
-  EGLImage image = eglCreateImage(
-    texture->display,
-    EGL_NO_CONTEXT,
-    EGL_LINUX_DMA_BUF_EXT,
-    (EGLClientBuffer)NULL,
-    attribs
-  );
+    /* create the image backed by the dma buffer */
+    texture->dmaImage = eglCreateImage(
+      texture->display,
+      EGL_NO_CONTEXT,
+      EGL_LINUX_DMA_BUF_EXT,
+      (EGLClientBuffer)NULL,
+      attribs
+    );
 
-  if (image == EGL_NO_IMAGE)
-  {
-    DEBUG_EGL_ERROR("Failed to create ELGImage for DMA transfer");
-    return false;
+    if (texture->dmaImage == EGL_NO_IMAGE)
+    {
+      DEBUG_EGL_ERROR("Failed to create ELGImage for DMA transfer");
+      return false;
+    }
   }
 
   /* bind the texture and initiate the transfer */
   glBindTexture(GL_TEXTURE_2D, texture->tex);
-  g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+  g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, texture->dmaImage);
 
   /* wait for completion */
   framebuffer_wait(frame, texture->height * texture->stride);
-
-  /* destroy the image to prevent future writes corrupting the display image */
-  eglDestroyImage(texture->display, image);
 
   atomic_fetch_add_explicit(&texture->state.w, 1, memory_order_release);
   return true;

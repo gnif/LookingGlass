@@ -45,6 +45,11 @@ struct DesktopShader
   GLint uCBMode;
 };
 
+struct DMAState {
+  int fd;
+  EGL_Texture * texture;
+};
+
 struct EGL_Desktop
 {
   EGLDisplay * display;
@@ -54,8 +59,9 @@ struct EGL_Desktop
   EGL_Model            * model;
 
   // internals
-  int               width, height;
-  LG_RendererRotate rotate;
+  int                  width, height, pitch;
+  LG_RendererRotate    rotate;
+  enum EGL_PixelFormat pixFmt;
 
   // shader instances
   struct DesktopShader shader_generic;
@@ -66,6 +72,12 @@ struct EGL_Desktop
 
   // colorblind mode
   int cbMode;
+
+  size_t            dmaTextureCount;
+  size_t            dmaTextureUsed;
+  struct DMAState * dmaTextures;
+  EGL_Texture     * textureCurrent;
+  EGL_Texture     * textureModel;
 };
 
 // forwards
@@ -163,6 +175,10 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   egl_shader_free (&(*desktop)->shader_generic.shader);
   egl_model_free  (&(*desktop)->model                );
 
+  for (int i = 0; i < (*desktop)->dmaTextureUsed; ++i)
+    egl_texture_free(&(*desktop)->dmaTextures[i].texture);
+  free((*desktop)->dmaTextures);
+
   free(*desktop);
   *desktop = NULL;
 }
@@ -197,8 +213,10 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bo
       return false;
   }
 
+  desktop->pixFmt = pixFmt;
   desktop->width  = format.width;
   desktop->height = format.height;
+  desktop->pitch  = format.pitch;
 
   if (!egl_texture_setup(
     desktop->texture,
@@ -214,28 +232,78 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bo
     return false;
   }
 
+  for (int i = 0; i < desktop->dmaTextureUsed; ++i)
+    if (!egl_texture_setup(desktop->dmaTextures[i].texture, pixFmt,
+        format.width, format.height, format.pitch, true, true))
+      DEBUG_ERROR("Failed to setup DMA texture");
+
   return true;
 }
 
 bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd)
 {
+  EGL_Texture * texture;
+
   if (dmaFd >= 0)
   {
-    if (!egl_texture_update_from_dma(desktop->texture, frame, dmaFd))
+    struct DMAState * state = NULL;
+    for (int i = 0; i < desktop->dmaTextureUsed; ++i)
+      if (desktop->dmaTextures[i].fd == dmaFd)
+        state = desktop->dmaTextures + i;
+
+    if (!state)
+    {
+      if (desktop->dmaTextureUsed == desktop->dmaTextureCount)
+      {
+        size_t newCount = desktop->dmaTextureCount * 2 + 2;
+        void * new = realloc(desktop->dmaTextures, newCount * sizeof(struct DMAState));
+        if (!new)
+        {
+          DEBUG_ERROR("Failed to allocate memory");
+          return false;
+        }
+        desktop->dmaTextureCount = newCount;
+        desktop->dmaTextures     = new;
+      }
+
+      state = desktop->dmaTextures + desktop->dmaTextureUsed++;
+      state->fd = dmaFd;
+
+      if (!egl_texture_init(&state->texture, desktop->display))
+      {
+        DEBUG_ERROR("Failed to initialize the desktop texture");
+        return false;
+      }
+
+      if (!egl_texture_setup(state->texture, desktop->pixFmt, desktop->width,
+          desktop->height, desktop->pitch, true, true))
+      {
+        DEBUG_ERROR("Failed to setup DMA texture");
+        return false;
+      }
+    }
+
+    if (!egl_texture_update_from_dma(state->texture, frame, dmaFd))
       return false;
+
+    texture = state->texture;
   }
   else
   {
     if (!egl_texture_update_from_frame(desktop->texture, frame))
       return false;
+
+    texture = desktop->texture;
   }
 
   enum EGL_TexStatus status;
-  if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)
+  if ((status = egl_texture_process(texture)) != EGL_TEX_STATUS_OK)
   {
     if (status != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to process the desktop texture");
   }
+
+  desktop->textureCurrent = texture;
 
   return true;
 }
@@ -279,6 +347,12 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     glUniform1i(shader->uNV, 0);
 
   glUniform1i(shader->uCBMode, desktop->cbMode);
+
+  if (desktop->textureModel != desktop->textureCurrent)
+  {
+    egl_model_set_texture(desktop->model, desktop->textureCurrent);
+    desktop->textureModel = desktop->textureCurrent;
+  }
   egl_model_render(desktop->model);
   return true;
 }
