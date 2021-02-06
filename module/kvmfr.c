@@ -75,6 +75,7 @@ struct kvmfrbuf
 {
   struct kvmfr_dev    * kdev;
   pgoff_t               pagecount;
+  unsigned long         offset;
   struct page        ** pages;
 };
 
@@ -139,11 +140,29 @@ static void release_kvmfrbuf(struct dma_buf * buf)
 
 static int mmap_kvmfrbuf(struct dma_buf * buf, struct vm_area_struct * vma)
 {
+  struct kvmfrbuf * kbuf = (struct kvmfrbuf *)buf->priv;
+  unsigned long size = vma->vm_end - vma->vm_start;
+  unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+
+  if ((offset + size > (kbuf->pagecount << PAGE_SHIFT)) || (offset + size < offset))
+    return -EINVAL;
+
   if ((vma->vm_flags & (VM_SHARED | VM_MAYSHARE)) == 0)
     return -EINVAL;
-  vma->vm_ops          = &kvmfr_vm_ops;
-  vma->vm_private_data = buf->priv;
-  return 0;
+
+  switch (kbuf->kdev->type)
+  {
+    case KVMFR_TYPE_PCI:
+      vma->vm_ops          = &kvmfr_vm_ops;
+      vma->vm_private_data = buf->priv;
+      return 0;
+
+    case KVMFR_TYPE_STATIC:
+      return remap_vmalloc_range(vma, kbuf->kdev->addr + kbuf->offset, vma->vm_pgoff);
+
+    default:
+      return -EINVAL;
+  }
 }
 
 static const struct dma_buf_ops kvmfrbuf_ops =
@@ -184,6 +203,7 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
 
   kbuf->kdev      = kdev;
   kbuf->pagecount = create.size >> PAGE_SHIFT;
+  kbuf->offset    = create.offset;
   kbuf->pages     = kmalloc_array(kbuf->pagecount, sizeof(*kbuf->pages), GFP_KERNEL);
   if (!kbuf->pages)
   {
@@ -279,6 +299,7 @@ static int device_mmap(struct file * filp, struct vm_area_struct * vma)
   {
     case KVMFR_TYPE_STATIC:
       return remap_vmalloc_range(vma, kdev->addr, vma->vm_pgoff);
+
     default:
       return -ENODEV;
   }
