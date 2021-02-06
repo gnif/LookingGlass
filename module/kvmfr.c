@@ -79,21 +79,6 @@ struct kvmfrbuf
   struct page        ** pages;
 };
 
-static vm_fault_t kvmfr_vm_fault(struct vm_fault *vmf)
-{
-  struct vm_area_struct *vma = vmf->vma;
-  struct kvmfrbuf *kbuf = (struct kvmfrbuf *)vma->vm_private_data;
-
-  vmf->page = kbuf->pages[vmf->pgoff];
-  get_page(vmf->page);
-  return 0;
-}
-
-static const struct vm_operations_struct kvmfr_vm_ops =
-{
-  .fault = kvmfr_vm_fault
-};
-
 static struct sg_table * map_kvmfrbuf(struct dma_buf_attachment *at,
     enum dma_data_direction direction)
 {
@@ -153,9 +138,10 @@ static int mmap_kvmfrbuf(struct dma_buf * buf, struct vm_area_struct * vma)
   switch (kbuf->kdev->type)
   {
     case KVMFR_TYPE_PCI:
-      vma->vm_ops          = &kvmfr_vm_ops;
-      vma->vm_private_data = buf->priv;
-      return 0;
+    {
+      unsigned long pfn = virt_to_phys(kbuf->kdev->addr + kbuf->offset + offset) >> PAGE_SHIFT;
+      return remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot);
+    }
 
     case KVMFR_TYPE_STATIC:
       return remap_vmalloc_range(vma, kbuf->kdev->addr + kbuf->offset, vma->vm_pgoff);
@@ -297,6 +283,12 @@ static int device_mmap(struct file * filp, struct vm_area_struct * vma)
 
   switch (kdev->type)
   {
+    case KVMFR_TYPE_PCI:
+    {
+      unsigned long pfn = virt_to_phys(kdev->addr + offset) >> PAGE_SHIFT;
+      return remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot);
+    }
+
     case KVMFR_TYPE_STATIC:
       return remap_vmalloc_range(vma, kdev->addr, vma->vm_pgoff);
 
