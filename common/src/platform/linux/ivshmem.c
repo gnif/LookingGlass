@@ -37,9 +37,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct IVSHMEMInfo
 {
-  int devFd;
-  int dmaFd;
-  int size;
+  int  devFd;
+  int  size;
+  bool hasDMA;
 };
 
 static bool ivshmemDeviceValidator(struct Option * opt, const char ** error)
@@ -119,8 +119,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
   unsigned int devSize;
   int devFd = -1;
-  int dmaFd = -1;
-  int mapFd = -1;
+  bool hasDMA;
 
   dev->opaque = NULL;
 
@@ -138,22 +137,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
     // get the device size
     devSize = ioctl(devFd, KVMFR_DMABUF_GETSIZE, 0);
-    const struct kvmfr_dmabuf_create create =
-    {
-      .flags  = KVMFR_DMABUF_FLAG_CLOEXEC,
-      .offset = 0x0,
-      .size   = devSize
-    };
-
-    dmaFd = ioctl(devFd, KVMFR_DMABUF_CREATE, &create);
-    if (dmaFd < 0)
-    {
-      DEBUG_ERROR("Failed to create the dma buffer");
-      close(devFd);
-      return false;
-    }
-
-    mapFd = dmaFd;
+    hasDMA = true;
   }
   else
   {
@@ -174,10 +158,10 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
       return false;
     }
 
-    mapFd = devFd;
+    hasDMA = false;
   }
 
-  void * map = mmap(0, devSize, PROT_READ | PROT_WRITE, MAP_SHARED, mapFd, 0);
+  void * map = mmap(0, devSize, PROT_READ | PROT_WRITE, MAP_SHARED, devFd, 0);
   if (map == MAP_FAILED)
   {
     DEBUG_ERROR("Failed to map the shared memory device: %s", shmDevice);
@@ -187,9 +171,9 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
   struct IVSHMEMInfo * info =
     (struct IVSHMEMInfo *)malloc(sizeof(struct IVSHMEMInfo));
-  info->size  = devSize;
-  info->devFd = devFd;
-  info->dmaFd = dmaFd;
+  info->size   = devSize;
+  info->devFd  = devFd;
+  info->hasDMA = hasDMA;
 
   dev->opaque = info;
   dev->size   = devSize;
@@ -208,10 +192,6 @@ void ivshmemClose(struct IVSHMEM * dev)
     (struct IVSHMEMInfo *)dev->opaque;
 
   munmap(dev->mem, info->size);
-
-  if (info->dmaFd >= 0)
-    close(info->dmaFd);
-
   close(info->devFd);
 
   free(info);
@@ -232,7 +212,7 @@ bool ivshmemHasDMA(struct IVSHMEM * dev)
   struct IVSHMEMInfo * info =
     (struct IVSHMEMInfo *)dev->opaque;
 
-  return info->dmaFd >= 0;
+  return info->hasDMA;
 }
 
 int ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size)
