@@ -117,8 +117,8 @@ struct WCBState
   char * stashedMimetype;
   uint8_t * stashedContents;
   ssize_t stashedSize;
-  bool isReceiving;
   bool isSelfCopy;
+  char lgMimetype[64];
 
   bool haveRequest;
   LG_ClipboardData      type;
@@ -1005,6 +1005,9 @@ static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
       free(wcb.stashedMimetype);
     wcb.stashedMimetype = strdup(mimetype);
   }
+
+  if (!strcmp(mimetype, wcb.lgMimetype))
+    wcb.isSelfCopy = true;
 }
 
 static void dataOfferHandleSourceActions(void * data,
@@ -1029,13 +1032,14 @@ static void dataDeviceHandleDataOffer(void * data,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
   wcb.stashedType = LG_CLIPBOARD_DATA_NONE;
+  wcb.isSelfCopy  = false;
   wl_data_offer_add_listener(offer, &dataOfferListener, NULL);
 }
 
 static void dataDeviceHandleSelection(void * data,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  if (wcb.stashedType == LG_CLIPBOARD_DATA_NONE || !offer)
+  if (wcb.stashedType == LG_CLIPBOARD_DATA_NONE || wcb.isSelfCopy || !offer)
     return;
 
   int fds[2];
@@ -1045,8 +1049,6 @@ static void dataDeviceHandleSelection(void * data,
     abort();
   }
 
-  wcb.isReceiving = true;
-  wcb.isSelfCopy = false;
   wl_data_offer_receive(offer, wcb.stashedMimetype, fds[1]);
   close(fds[1]);
   free(wcb.stashedMimetype);
@@ -1093,13 +1095,10 @@ static void dataDeviceHandleSelection(void * data,
 
   wcb.stashedSize = numRead;
   wcb.stashedContents = buf;
-  wcb.isReceiving = false;
 
   close(fds[0]);
   wl_data_offer_destroy(offer);
-
-  if (!wcb.isSelfCopy)
-    app_clipboardNotify(wcb.stashedType, 0);
+  app_clipboardNotify(wcb.stashedType, 0);
 }
 
 static const struct wl_data_device_listener dataDeviceListener = {
@@ -1121,6 +1120,9 @@ static bool waylandCBInit(void)
   wcb.stashedType = LG_CLIPBOARD_DATA_NONE;
   wl_data_device_add_listener(wm.dataDevice, &dataDeviceListener, NULL);
 
+  snprintf(wcb.lgMimetype, sizeof(wcb.lgMimetype),
+      "application/x-looking-glass-copy;pid=%d", getpid());
+
   return true;
 }
 
@@ -1128,9 +1130,7 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     const char * mimetype, int fd)
 {
   struct WCBTransfer * transfer = (struct WCBTransfer *) data;
-  if (wcb.isReceiving)
-    wcb.isSelfCopy = true;
-  else if (containsMimetype(transfer->mimetypes, mimetype))
+  if (containsMimetype(transfer->mimetypes, mimetype))
   {
     // Consider making this do non-blocking sends to not stall the Wayland
     // event loop if it becomes a problem. This is "fine" in the sense that
@@ -1187,6 +1187,7 @@ static void waylandCBReplyFn(void * opaque, LG_ClipboardData type,
   wl_data_source_add_listener(source, &dataSourceListener, transfer);
   for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
     wl_data_source_offer(source, *mimetype);
+  wl_data_source_offer(source, wcb.lgMimetype);
 
   wl_data_device_set_selection(wm.dataDevice, source,
     wm.keyboardEnterSerial);
