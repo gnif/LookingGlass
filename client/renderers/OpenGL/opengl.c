@@ -48,17 +48,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define FADE_TIME 1000000
 
-static bool opengl_vsync_option_validator(struct Option * opt, const char ** error)
-{
-  if (opt->value.x_bool && getenv("WAYLAND_DISPLAY"))
-  {
-    DEBUG_WARN("Cannot disable vsync on Wayland, forcing opengl:vsync=off");
-    opt->value.x_bool = false;
-  }
-
-  return true;
-}
-
 static struct Option opengl_options[] =
 {
   {
@@ -74,7 +63,6 @@ static struct Option opengl_options[] =
     .description  = "Enable vsync",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = false,
-    .validator    = &opengl_vsync_option_validator
   },
   {
     .module       = "opengl",
