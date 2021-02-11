@@ -41,6 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app.h"
 #include "common/debug.h"
 #include "common/locking.h"
+#include "common/countedbuffer.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
 #include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
@@ -128,8 +129,7 @@ struct WaylandDSState
 
 struct WCBTransfer
 {
-  void * data;
-  size_t size;
+  struct CountedBuffer * data;
   const char ** mimetypes;
 };
 
@@ -1332,6 +1332,38 @@ static bool waylandCBInit(void)
   return true;
 }
 
+struct ClipboardWrite
+{
+  int fd;
+  size_t pos;
+  struct CountedBuffer * buffer;
+};
+
+static void clipboardWriteCallback(uint32_t events, void * opaque)
+{
+  struct ClipboardWrite * data = opaque;
+  if (events & EPOLLERR)
+    goto error;
+
+  ssize_t written = write(data->fd, data->buffer->data + data->pos, data->buffer->size - data->pos);
+  if (written < 0)
+  {
+    if (errno != EPIPE)
+      DEBUG_ERROR("Failed to write clipboard data: %s", strerror(errno));
+    goto error;
+  }
+
+  data->pos += written;
+  if (data->pos < data->buffer->size)
+    return;
+
+error:
+  waylandEpollUnregister(data->fd);
+  close(data->fd);
+  countedBufferRelease(&data->buffer);
+  free(data);
+}
+
 static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     const char * mimetype, int fd)
 {
@@ -1343,19 +1375,19 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     // wl-copy also stalls like this, but it's not necessary.
     fcntl(fd, F_SETFL, 0);
 
-    size_t pos = 0;
-    while (pos < transfer->size)
+    struct ClipboardWrite * data = malloc(sizeof(struct ClipboardWrite));
+    if (!data)
     {
-      ssize_t written = write(fd, transfer->data + pos, transfer->size - pos);
-      if (written < 0)
-      {
-        if (errno != EPIPE)
-          DEBUG_ERROR("Failed to write clipboard data: %s", strerror(errno));
-        goto error;
-      }
-
-      pos += written;
+      DEBUG_ERROR("Out of memory trying to allocate ClipboardWrite");
+      goto error;
     }
+
+    data->fd     = fd;
+    data->pos    = 0;
+    data->buffer = transfer->data;
+    countedBufferAddRef(transfer->data);
+    waylandEpollRegister(fd, clipboardWriteCallback, data, EPOLLOUT);
+    return;
   }
 
 error:
@@ -1366,7 +1398,7 @@ static void dataSourceHandleCancelled(void * data,
     struct wl_data_source * source)
 {
   struct WCBTransfer * transfer = (struct WCBTransfer *) data;
-  free(transfer->data);
+  countedBufferRelease(&transfer->data);
   free(transfer);
   wl_data_source_destroy(source);
 }
@@ -1380,13 +1412,21 @@ static void waylandCBReplyFn(void * opaque, LG_ClipboardData type,
    	uint8_t * data, uint32_t size)
 {
   struct WCBTransfer * transfer = malloc(sizeof(struct WCBTransfer));
-  void * dataCopy = malloc(size);
-  memcpy(dataCopy, data, size);
-  *transfer = (struct WCBTransfer) {
-    .data = dataCopy,
-    .size = size,
-    .mimetypes = cbTypeToMimetypes(type),
-  };
+  if (!transfer)
+  {
+    DEBUG_ERROR("Out of memory when allocating WCBTransfer");
+    return;
+  }
+
+  transfer->mimetypes = cbTypeToMimetypes(type);
+  transfer->data = countedBufferNew(size);
+  if (!transfer->data)
+  {
+    DEBUG_ERROR("Out of memory when allocating clipboard buffer");
+    free(transfer);
+    return;
+  }
+  memcpy(transfer->data->data, data, size);
 
   struct wl_data_source * source =
     wl_data_device_manager_create_data_source(wm.dataDeviceManager);
