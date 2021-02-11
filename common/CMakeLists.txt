@@ -19,6 +19,7 @@ set(COMMON_SOURCES
   src/option.c
   src/framebuffer.c
   src/KVMFR.c
+  src/countedbuffer.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})
