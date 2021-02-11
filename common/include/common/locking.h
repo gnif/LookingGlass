@@ -36,9 +36,9 @@ typedef atomic_flag LG_Lock;
 #define INTERLOCKED_INC(x) atomic_fetch_add((x), 1)
 #define INTERLOCKED_DEC(x) atomic_fetch_sub((x), 1)
 
-#define INTERLOCKED_SECTION(lock, x) \
+#define INTERLOCKED_SECTION(lock, ...) \
   LG_LOCK(lock) \
-  x \
+  __VA_ARGS__ \
   LG_UNLOCK(lock)
 
 #endif

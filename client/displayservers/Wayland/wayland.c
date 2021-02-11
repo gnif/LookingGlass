@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 #include <linux/input.h>
 #include <poll.h>
+#include <sys/epoll.h>
 
 #include <SDL2/SDL.h>
 #include <wayland-client.h>
@@ -39,6 +40,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "common/debug.h"
+#include "common/locking.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
 #include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
@@ -46,6 +48,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
 #include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
+
+#define EPOLL_EVENTS 10 // Maximum number of fds we can process at once in waylandWait
+
+typedef void (*WaylandPollCallback)(uint32_t events, void * opaque);
+
+struct WaylandPoll
+{
+  int fd;
+  bool removed;
+  WaylandPollCallback callback;
+  void * opaque;
+  struct wl_list link;
+};
 
 struct WaylandDSState
 {
@@ -102,6 +117,13 @@ struct WaylandDSState
 
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
+
+  struct wl_list poll; // WaylandPoll::link
+  struct wl_list pollFree; // WaylandPoll::link
+  LG_Lock pollLock;
+  LG_Lock pollFreeLock;
+  int epollFd;
+  int displayFd;
 };
 
 struct WCBTransfer
@@ -465,6 +487,77 @@ static void xdgToplevelClose(void * data, struct xdg_toplevel * xdgToplevel)
   app_handleCloseEvent();
 }
 
+static void waylandEpollRemoveNode(struct WaylandPoll * node)
+{
+  INTERLOCKED_SECTION(wm.pollLock,
+  {
+    wl_list_remove(&node->link);
+  });
+}
+
+static bool waylandEpollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events)
+{
+  struct WaylandPoll * node = malloc(sizeof(struct WaylandPoll));
+  if (!node)
+    return false;
+
+  node->fd       = fd;
+  node->removed  = false;
+  node->callback = callback;
+  node->opaque   = opaque;
+
+  INTERLOCKED_SECTION(wm.pollLock,
+  {
+    wl_list_insert(&wm.poll, &node->link);
+  });
+
+  if (epoll_ctl(wm.epollFd, EPOLL_CTL_ADD, fd, &(struct epoll_event) {
+    .events = events,
+    .data = (epoll_data_t) { .ptr = node },
+  }) < 0)
+  {
+    waylandEpollRemoveNode(node);
+    free(node);
+    return false;
+  }
+
+  return true;
+}
+
+static bool waylandEpollUnregister(int fd)
+{
+  struct WaylandPoll * node = NULL;
+  INTERLOCKED_SECTION(wm.pollLock,
+  {
+    wl_list_for_each(node, &wm.poll, link)
+    {
+      if (node->fd == fd)
+        break;
+    }
+  });
+
+  if (!node)
+  {
+    DEBUG_ERROR("Attempt to unregister a fd that was not registered: %d", fd);
+    return false;
+  }
+
+  node->removed = true;
+  if (epoll_ctl(wm.epollFd, EPOLL_CTL_DEL, fd, NULL) < 0)
+  {
+    DEBUG_ERROR("Failed to unregistered from epoll: %s", strerror(errno));
+    return false;
+  }
+
+  waylandEpollRemoveNode(node);
+
+  INTERLOCKED_SECTION(wm.pollFreeLock,
+  {
+    wl_list_insert(&wm.pollFree, &node->link);
+  });
+  return true;
+}
+
 static const struct xdg_toplevel_listener xdgToplevelListener = {
   .configure = xdgToplevelConfigure,
   .close     = xdgToplevelClose,
@@ -487,13 +580,32 @@ static bool waylandProbe(void)
 }
 
 static EGLDisplay waylandGetEGLDisplay(void);
+static void waylandDisplayCallback(uint32_t events, void * opaque);
 
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wm, 0, sizeof(wm));
 
+  wm.epollFd = epoll_create1(EPOLL_CLOEXEC);
+  if (wm.epollFd < 0)
+  {
+    DEBUG_ERROR("Failed to initialize epoll: %s", strerror(errno));
+    return false;
+  }
+
   wm.display = wl_display_connect(NULL);
   wm.registry = wl_display_get_registry(wm.display);
+
+  wl_list_init(&wm.poll);
+  wl_list_init(&wm.pollFree);
+  LG_LOCK_INIT(wm.pollLock);
+  LG_LOCK_INIT(wm.pollFreeLock);
+  wm.displayFd = wl_display_get_fd(wm.display);
+  if (!waylandEpollRegister(wm.displayFd, waylandDisplayCallback, NULL, EPOLLIN))
+  {
+    DEBUG_ERROR("Failed register display to epoll: %s", strerror(errno));
+    return false;
+  }
 
   wl_registry_add_listener(wm.registry, &registryListener, NULL);
   wl_display_roundtrip(wm.display);
@@ -717,20 +829,46 @@ static void waylandWait(unsigned int time)
     wl_display_dispatch_pending(wm.display);
   wl_display_flush(wm.display);
 
-  struct pollfd pollfd = {
-    .fd     = wl_display_get_fd(wm.display),
-    .events = POLLIN,
-  };
-
-  if (poll(&pollfd, 1, time) == -1 || pollfd.revents & POLLERR)
+  struct epoll_event events[EPOLL_EVENTS];
+  int count;
+  if ((count = epoll_wait(wm.epollFd, events, EPOLL_EVENTS, time)) < 0)
   {
     if (errno != EINTR)
-      DEBUG_INFO("Poll failed: %d\n", errno);
+      DEBUG_INFO("epoll failed: %s", strerror(errno));
     wl_display_cancel_read(wm.display);
+    return;
   }
+
+  bool sawDisplay = false;
+  for (int i = 0; i < count; ++i) {
+    struct WaylandPoll * poll = events[i].data.ptr;
+    if (!poll->removed)
+      poll->callback(events[i].events, poll->opaque);
+    if (poll->fd == wm.displayFd)
+      sawDisplay = true;
+  }
+
+  if (!sawDisplay)
+    wl_display_cancel_read(wm.display);
+
+  INTERLOCKED_SECTION(wm.pollFreeLock,
+  {
+    struct WaylandPoll * node;
+    struct WaylandPoll * temp;
+    wl_list_for_each_safe(node, temp, &wm.pollFree, link)
+    {
+      wl_list_remove(&node->link);
+      free(node);
+    }
+  });
+}
+
+static void waylandDisplayCallback(uint32_t events, void * opaque)
+{
+  if (events & EPOLLERR)
+    wl_display_cancel_read(wm.display);
   else
     wl_display_read_events(wm.display);
-
   wl_display_dispatch_pending(wm.display);
 }
 
