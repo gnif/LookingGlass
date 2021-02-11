@@ -133,17 +133,32 @@ struct WCBTransfer
   const char ** mimetypes;
 };
 
+struct ClipboardRead
+{
+  int fd;
+  size_t size;
+  size_t numRead;
+  uint8_t * buf;
+  enum LG_ClipboardData type;
+  struct wl_data_offer * offer;
+};
+
 struct WCBState
 {
-  enum LG_ClipboardData stashedType;
-  char * stashedMimetype;
-  uint8_t * stashedContents;
-  ssize_t stashedSize;
-  bool isSelfCopy;
   char lgMimetype[64];
 
+  enum LG_ClipboardData pendingType;
+  char * pendingMimetype;
+  bool isSelfCopy;
+
+  enum LG_ClipboardData stashedType;
+  uint8_t * stashedContents;
+  ssize_t stashedSize;
+
   bool haveRequest;
-  LG_ClipboardData      type;
+  LG_ClipboardData type;
+
+  struct ClipboardRead * currentRead;
 };
 
 static struct WaylandDSState wm;
@@ -1135,13 +1150,13 @@ static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
   // Since we can't copy or paste rich text, we should instead prefer actual
   // images or plain text.
   if (type != LG_CLIPBOARD_DATA_NONE &&
-      (wcb.stashedType == LG_CLIPBOARD_DATA_NONE ||
-       strstr(wcb.stashedMimetype, "html")))
+      (wcb.pendingType == LG_CLIPBOARD_DATA_NONE ||
+       strstr(wcb.pendingMimetype, "html")))
   {
-    wcb.stashedType = type;
-    if (wcb.stashedMimetype)
-      free(wcb.stashedMimetype);
-    wcb.stashedMimetype = strdup(mimetype);
+    wcb.pendingType = type;
+    if (wcb.pendingMimetype)
+      free(wcb.pendingMimetype);
+    wcb.pendingMimetype = strdup(mimetype);
   }
 
   if (!strcmp(mimetype, wcb.lgMimetype))
@@ -1169,16 +1184,74 @@ static const struct wl_data_offer_listener dataOfferListener = {
 static void dataDeviceHandleDataOffer(void * data,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  wcb.stashedType = LG_CLIPBOARD_DATA_NONE;
+  wcb.pendingType = LG_CLIPBOARD_DATA_NONE;
   wcb.isSelfCopy  = false;
   wl_data_offer_add_listener(offer, &dataOfferListener, NULL);
 }
 
-static void dataDeviceHandleSelection(void * data,
+static void clipboardReadCancel(struct ClipboardRead * data, bool freeBuf)
+{
+  waylandEpollUnregister(data->fd);
+  close(data->fd);
+  wl_data_offer_destroy(data->offer);
+  if (freeBuf)
+    free(data->buf);
+  free(data);
+  wcb.currentRead = NULL;
+}
+
+static void clipboardReadCallback(uint32_t events, void * opaque)
+{
+  struct ClipboardRead * data = opaque;
+  if (events & EPOLLERR) 
+  {
+    clipboardReadCancel(data, true);
+    return;
+  }
+
+  ssize_t result = read(data->fd, data->buf + data->numRead, data->size - data->numRead);
+  if (result < 0)
+  {
+    DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
+    clipboardReadCancel(data, true);
+    return;
+  }
+
+  if (result == 0)
+  {
+    data->buf[data->numRead] = 0;
+    wcb.stashedType = data->type;
+    wcb.stashedSize = data->numRead;
+    wcb.stashedContents = data->buf;
+
+    clipboardReadCancel(data, false);
+    app_clipboardNotify(wcb.stashedType, 0);
+    return;
+  }
+
+  data->numRead += result;
+  if (data->numRead >= data->size)
+  {
+    data->size *= 2;
+    void * nbuf = realloc(data->buf, data->size);
+    if (!nbuf) {
+      DEBUG_ERROR("Failed to realloc clipboard buffer: %s", strerror(errno));
+      clipboardReadCancel(data, true);
+      return;
+    }
+
+    data->buf = nbuf;
+  }
+}
+
+static void dataDeviceHandleSelection(void * opaque,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  if (wcb.stashedType == LG_CLIPBOARD_DATA_NONE || wcb.isSelfCopy || !offer)
+  if (wcb.pendingType == LG_CLIPBOARD_DATA_NONE || wcb.isSelfCopy || !offer)
     return;
+
+  if (wcb.currentRead)
+    clipboardReadCancel(wcb.currentRead, true);
 
   int fds[2];
   if (pipe(fds) < 0)
@@ -1187,10 +1260,10 @@ static void dataDeviceHandleSelection(void * data,
     abort();
   }
 
-  wl_data_offer_receive(offer, wcb.stashedMimetype, fds[1]);
+  wl_data_offer_receive(offer, wcb.pendingMimetype, fds[1]);
   close(fds[1]);
-  free(wcb.stashedMimetype);
-  wcb.stashedMimetype = NULL;
+  free(wcb.pendingMimetype);
+  wcb.pendingMimetype = NULL;
 
   wl_display_roundtrip(wm.display);
 
@@ -1200,43 +1273,38 @@ static void dataDeviceHandleSelection(void * data,
     wcb.stashedContents = NULL;
   }
 
-  size_t size = 4096, numRead = 0;
-  uint8_t * buf = (uint8_t *) malloc(size);
-  while (true)
+  struct ClipboardRead * data = malloc(sizeof(struct ClipboardRead));
+  if (!data)
   {
-    ssize_t result = read(fds[0], buf + numRead, size - numRead);
-    if (result < 0)
-    {
-      DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
-      abort();
-    }
-
-    if (result == 0)
-    {
-      buf[numRead] = 0;
-      break;
-    }
-
-    numRead += result;
-    if (numRead >= size)
-    {
-      size *= 2;
-      void * nbuf = realloc(buf, size);
-      if (!nbuf) {
-        DEBUG_ERROR("Failed to realloc clipboard buffer: %s", strerror(errno));
-        abort();
-      }
-
-      buf = nbuf;
-    }
+    DEBUG_ERROR("Failed to allocate memory to read clipboard");
+    close(fds[0]);
+    return;
   }
 
-  wcb.stashedSize = numRead;
-  wcb.stashedContents = buf;
+  data->fd      = fds[0];
+  data->size    = 4096;
+  data->numRead = 0;
+  data->buf     = malloc(data->size);
+  data->offer   = offer;
+  data->type    = wcb.pendingType;
 
-  close(fds[0]);
-  wl_data_offer_destroy(offer);
-  app_clipboardNotify(wcb.stashedType, 0);
+  if (!data->buf)
+  {
+    DEBUG_ERROR("Failed to allocate memory to receive clipboard data");
+    close(data->fd);
+    free(data);
+    return;
+  }
+
+  if (!waylandEpollRegister(data->fd, clipboardReadCallback, data, EPOLLIN))
+  {
+    DEBUG_ERROR("Failed to register clipboard read into epoll: %s", strerror(errno));
+    close(data->fd);
+    free(data->buf);
+    free(data);
+  }
+
+  wcb.currentRead = data;
 }
 
 static const struct wl_data_device_listener dataDeviceListener = {
