@@ -128,6 +128,7 @@ struct AppParams
   bool              grabKeyboardOnFocus;
   int               escapeKey;
   bool              ignoreWindowsKeys;
+  bool              releaseKeysOnFocusLoss;
   bool              showAlerts;
   bool              captureOnStart;
   bool              quickSplash;
