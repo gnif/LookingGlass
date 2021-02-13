@@ -273,6 +273,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "releaseKeysOnFocusLoss",
+    .description    = "On focus loss, send key up events to guest for all held keys",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "input",
     .name           = "escapeKey",
     .description    = "Specify the escape key, see <linux/input-event-codes.h> for valid values",
     .shortopt       = 'm',
@@ -512,17 +519,18 @@ bool config_load(int argc, char * argv[])
     case 270: g_params.winRotate = LG_ROTATE_270; break;
   }
 
-  g_params.grabKeyboard        = option_get_bool("input", "grabKeyboard"       );
-  g_params.grabKeyboardOnFocus = option_get_bool("input", "grabKeyboardOnFocus");
-  g_params.escapeKey           = option_get_int ("input", "escapeKey"          );
-  g_params.ignoreWindowsKeys   = option_get_bool("input", "ignoreWindowsKeys"  );
-  g_params.hideMouse           = option_get_bool("input", "hideCursor"         );
-  g_params.mouseSens           = option_get_int ("input", "mouseSens"          );
-  g_params.mouseSmoothing      = option_get_bool("input", "mouseSmoothing"     );
-  g_params.rawMouse            = option_get_bool("input", "rawMouse"           );
-  g_params.mouseRedraw         = option_get_bool("input", "mouseRedraw"        );
-  g_params.autoCapture         = option_get_bool("input", "autoCapture"        );
-  g_params.captureInputOnly    = option_get_bool("input", "captureOnly"        );
+  g_params.grabKeyboard           = option_get_bool("input", "grabKeyboard"          );
+  g_params.grabKeyboardOnFocus    = option_get_bool("input", "grabKeyboardOnFocus"   );
+  g_params.releaseKeysOnFocusLoss = option_get_bool("input", "releaseKeysOnFocusLoss");
+  g_params.escapeKey              = option_get_int ("input", "escapeKey"             );
+  g_params.ignoreWindowsKeys      = option_get_bool("input", "ignoreWindowsKeys"     );
+  g_params.hideMouse              = option_get_bool("input", "hideCursor"            );
+  g_params.mouseSens              = option_get_int ("input", "mouseSens"             );
+  g_params.mouseSmoothing         = option_get_bool("input", "mouseSmoothing"        );
+  g_params.rawMouse               = option_get_bool("input", "rawMouse"              );
+  g_params.mouseRedraw            = option_get_bool("input", "mouseRedraw"           );
+  g_params.autoCapture            = option_get_bool("input", "autoCapture"           );
+  g_params.captureInputOnly       = option_get_bool("input", "captureOnly"           );
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 

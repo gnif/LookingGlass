@@ -145,21 +145,22 @@ Command line arguments will override any options loaded from the config files.
 | win:rotate              |       | 0                      | Rotate the displayed image (0, 90, 180, 270)                         |
 |---------------------------------------------------------------------------------------------------------------------------------|
 
-|----------------------------------------------------------------------------------------------------------------------------------------------|
-| Long                      | Short | Value           | Description                                                                            |
-|----------------------------------------------------------------------------------------------------------------------------------------------|
-| input:grabKeyboard        | -G    | yes             | Grab the keyboard in capture mode                                                      |
-| input:grabKeyboardOnFocus |       | yes             | Grab the keyboard when focused                                                         |
-| input:escapeKey           | -m    | 71 = ScrollLock | Specify the escape key, see https://wiki.libsdl.org/SDLScancodeLookup for valid values |
-| input:ignoreWindowsKeys   |       | no              | Do not pass events for the windows keys to the guest                                   |
-| input:hideCursor          | -M    | yes             | Hide the local mouse cursor                                                            |
-| input:mouseSens           |       | 0               | Initial mouse sensitivity when in capture mode (-9 to 9)                               |
-| input:mouseSmoothing      |       | yes             | Apply simple mouse smoothing when rawMouse is not in use (helps reduce aliasing)       |
-| input:rawMouse            |       | no              | Use RAW mouse input when in capture mode (good for gaming)                             |
-| input:mouseRedraw         |       | yes             | Mouse movements trigger redraws (ignores FPS minimum)                                  |
-| input:autoCapture         |       | no              | Try to keep the mouse captured when needed                                             |
-| input:captureOnly         |       | no              | Only enable input via SPICE if in capture mode                                         |
-|----------------------------------------------------------------------------------------------------------------------------------------------|
+|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| Long                         | Short | Value               | Description                                                                      |
+|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| input:grabKeyboard           | -G    | no                  | Grab the keyboard in capture mode                                                |
+| input:grabKeyboardOnFocus    |       | no                  | Grab the keyboard when focused                                                   |
+| input:releaseKeysOnFocusLoss |       | yes                 | On focus loss, send key up events to guest for all held keys                     |
+| input:escapeKey              | -m    | 70 = KEY_SCROLLLOCK | Specify the escape key, see <linux/input-event-codes.h> for valid values         |
+| input:ignoreWindowsKeys      |       | no                  | Do not pass events for the windows keys to the guest                             |
+| input:hideCursor             | -M    | yes                 | Hide the local mouse cursor                                                      |
+| input:mouseSens              |       | 0                   | Initial mouse sensitivity when in capture mode (-9 to 9)                         |
+| input:mouseSmoothing         |       | yes                 | Apply simple mouse smoothing when rawMouse is not in use (helps reduce aliasing) |
+| input:rawMouse               |       | no                  | Use RAW mouse input when in capture mode (good for gaming)                       |
+| input:mouseRedraw            |       | yes                 | Mouse movements trigger redraws (ignores FPS minimum)                            |
+| input:autoCapture            |       | no                  | Try to keep the mouse captured when needed                                       |
+| input:captureOnly            |       | no                  | Only enable input via SPICE if in capture mode                                   |
+|-----------------------------------------------------------------------------------------------------------------------------------------------|
 
 |------------------------------------------------------------------------------------------------------------------|
 | Long                   | Short | Value     | Description                                                         |
