@@ -57,6 +57,11 @@ void app_handleFocusEvent(bool focused)
   {
     core_setGrabQuiet(false);
     core_setCursorInView(false);
+
+    if (g_params.releaseKeysOnFocusLoss)
+      for (int key = 0; key < KEY_MAX; key++)
+        if (g_state.keyDown[key])
+          app_handleKeyRelease(key);
   }
 
   g_cursor.realign = true;
