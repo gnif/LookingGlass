@@ -84,6 +84,9 @@ typedef struct LG_DSGLContext
 
 struct LG_DisplayServerOps
 {
+  /* called before options are parsed, useful for registering options */
+  void (*setup)(void);
+
   /* return true if the selected ds is valid for the current platform */
   bool (*probe)(void);
 
@@ -175,6 +178,7 @@ struct LG_DisplayServerOps
 #endif
 
 #define ASSERT_LG_DS_VALID(x) \
+  assert((x)->setup              ); \
   assert((x)->probe              ); \
   assert((x)->earlyInit          ); \
   assert((x)->init               ); \

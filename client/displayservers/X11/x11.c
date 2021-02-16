@@ -118,6 +118,10 @@ static void x11SetFullscreen(bool fs);
 static int  x11EventThread(void * unused);
 static void x11GenericEvent(XGenericEventCookie *cookie);
 
+static void x11Setup(void)
+{
+}
+
 static bool x11Probe(void)
 {
   return getenv("DISPLAY") != NULL;
@@ -1490,6 +1494,7 @@ static void x11CBRequest(LG_ClipboardData type)
 
 struct LG_DisplayServerOps LGDS_X11 =
 {
+  .setup              = x11Setup,
   .probe              = x11Probe,
   .earlyInit          = x11EarlyInit,
   .init               = x11Init,

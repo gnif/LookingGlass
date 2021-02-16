@@ -42,6 +42,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/debug.h"
 #include "common/locking.h"
 #include "common/countedbuffer.h"
+#include "common/option.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
 #include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
@@ -165,6 +166,18 @@ struct WCBState
 
 static struct WaylandDSState wm;
 static struct WCBState       wcb;
+
+static struct Option waylandOptions[] =
+{
+  {
+    .module       = "wayland",
+    .name         = "warpSupport",
+    .description  = "Enable cursor warping",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true,
+  },
+  {0}
+};
 
 static const uint32_t cursorBitmap[] = {
   0x000000, 0x000000, 0x000000, 0x000000,
@@ -618,6 +631,11 @@ static bool waylandEarlyInit(void)
   return true;
 }
 
+static void waylandSetup(void)
+{
+  option_register(waylandOptions);
+}
+
 static bool waylandProbe(void)
 {
   return getenv("WAYLAND_DISPLAY") != NULL;
@@ -629,6 +647,8 @@ static void waylandDisplayCallback(uint32_t events, void * opaque);
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wm, 0, sizeof(wm));
+
+  wm.warpSupport = option_get_bool("wayland", "warpSupport");
 
   wm.epollFd = epoll_create1(EPOLL_CLOEXEC);
   if (wm.epollFd < 0)
@@ -1514,6 +1534,7 @@ static void waylandCBRelease(void)
 
 struct LG_DisplayServerOps LGDS_Wayland =
 {
+  .setup              = waylandSetup,
   .probe              = waylandProbe,
   .earlyInit          = waylandEarlyInit,
   .init               = waylandInit,
