@@ -1032,6 +1032,9 @@ int main(int argc, char * argv[])
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
     LG_Renderers[i]->setup();
 
+  for(unsigned int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
+    LG_DisplayServers[i]->setup();
+
   if (!config_load(argc, argv))
     return -1;
 
