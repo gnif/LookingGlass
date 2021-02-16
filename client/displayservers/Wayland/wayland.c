@@ -79,6 +79,8 @@ struct WaylandDSState
   bool fullscreen;
   uint32_t resizeSerial;
   bool configured;
+  bool warpSupport;
+  double cursorX, cursorY;
 
 #ifdef ENABLE_EGL
   struct wl_egl_window * eglWindow;
@@ -267,10 +269,11 @@ static const struct wl_registry_listener registryListener = {
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, wl_fixed_t sxW, wl_fixed_t syW)
 {
-  int sx = wl_fixed_to_int(sxW);
-  int sy = wl_fixed_to_int(syW);
-  app_updateCursorPos(sx, sy);
-  if (!wm.relativePointer)
+  wm.cursorX = wl_fixed_to_double(sxW);
+  wm.cursorY = wl_fixed_to_double(syW);
+  app_updateCursorPos(wm.cursorX, wm.cursorY);
+
+  if (!wm.warpSupport && !wm.relativePointer)
     app_handleMouseBasic();
 }
 
@@ -283,15 +286,21 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
   wl_pointer_set_cursor(pointer, serial, wm.showPointer ? wm.cursor : NULL, 0, 0);
   wm.pointerEnterSerial = serial;
 
+  wm.cursorX = wl_fixed_to_double(sxW);
+  wm.cursorY = wl_fixed_to_double(syW);
+  app_updateCursorPos(wm.cursorX, wm.cursorY);
+
+  if (wm.warpSupport)
+  {
+    app_handleMouseRelative(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+
   if (wm.relativePointer)
     return;
 
-  int sx = wl_fixed_to_int(sxW);
-  int sy = wl_fixed_to_int(syW);
   app_resyncMouseBasic();
-  app_updateCursorPos(sx, sy);
-  if (!wm.relativePointer)
-    app_handleMouseBasic();
+  app_handleMouseBasic();
 }
 
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
@@ -346,6 +355,26 @@ static const struct wl_pointer_listener pointerListener = {
   .motion = pointerMotionHandler,
   .button = pointerButtonHandler,
   .axis = pointerAxisHandler,
+};
+
+static void relativePointerMotionHandler(void * data,
+    struct zwp_relative_pointer_v1 *pointer, uint32_t timeHi, uint32_t timeLo,
+    wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
+    wl_fixed_t dyUnaccelW)
+{
+  wm.cursorX += wl_fixed_to_double(dxW);
+  wm.cursorY += wl_fixed_to_double(dyW);
+  app_updateCursorPos(wm.cursorX, wm.cursorY);
+
+  app_handleMouseRelative(
+      wl_fixed_to_double(dxW),
+      wl_fixed_to_double(dyW),
+      wl_fixed_to_double(dxUnaccelW),
+      wl_fixed_to_double(dyUnaccelW));
+}
+
+static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
+    .relative_motion = relativePointerMotionHandler,
 };
 
 static void waylandInhibitIdle(void)
@@ -644,12 +673,28 @@ static bool waylandInit(const LG_DSInitParams params)
     DEBUG_WARN("zwp_idle_inhibit_manager_v1 not exported by compositor, will "
                "not be able to suppress idle states");
 
+  if (wm.warpSupport && (!wm.relativePointerManager || !wm.pointerConstraints))
+  {
+    DEBUG_WARN("Cursor warp is requested, but cannot be honoured due to lack "
+               "of zwp_relative_pointer_manager_v1 or zwp_pointer_constraints_v1");
+    wm.warpSupport = false;
+  }
+
   wl_seat_add_listener(wm.seat, &seatListener, NULL);
   xdg_wm_base_add_listener(wm.xdgWmBase, &xdgWmBaseListener, NULL);
   wl_display_roundtrip(wm.display);
 
   wm.dataDevice = wl_data_device_manager_get_data_device(
       wm.dataDeviceManager, wm.seat);
+
+  if (wm.warpSupport)
+  {
+    wm.relativePointer =
+      zwp_relative_pointer_manager_v1_get_relative_pointer(
+        wm.relativePointerManager, wm.pointer);
+    zwp_relative_pointer_v1_add_listener(wm.relativePointer,
+      &relativePointerListener, NULL);
+  }
 
   wm.surface = wl_compositor_create_surface(wm.compositor);
   wm.eglWindow = wl_egl_window_create(wm.surface, params.w, params.h);
@@ -905,28 +950,12 @@ static bool waylandGetFullscreen(void)
   return wm.fullscreen;
 }
 
-static void relativePointerMotionHandler(void * data,
-    struct zwp_relative_pointer_v1 *pointer, uint32_t timeHi, uint32_t timeLo,
-    wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
-    wl_fixed_t dyUnaccelW)
-{
-  app_handleMouseRelative(
-      wl_fixed_to_double(dxW),
-      wl_fixed_to_double(dyW),
-      wl_fixed_to_double(dxUnaccelW),
-      wl_fixed_to_double(dyUnaccelW));
-}
-
-static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
-    .relative_motion = relativePointerMotionHandler,
-};
-
 static void waylandGrabPointer(void)
 {
   if (!wm.relativePointerManager || !wm.pointerConstraints)
     return;
 
-  if (!wm.relativePointer)
+  if (!wm.warpSupport && !wm.relativePointer)
   {
     wm.relativePointer =
       zwp_relative_pointer_manager_v1_get_relative_pointer(
@@ -945,20 +974,26 @@ static void waylandGrabPointer(void)
 
 static void waylandUngrabPointer(void)
 {
-  if (wm.relativePointer)
-  {
-    zwp_relative_pointer_v1_destroy(wm.relativePointer);
-    wm.relativePointer = NULL;
-  }
-
   if (wm.confinedPointer)
   {
     zwp_confined_pointer_v1_destroy(wm.confinedPointer);
     wm.confinedPointer = NULL;
   }
 
-  app_resyncMouseBasic();
-  app_handleMouseBasic();
+  if (!wm.warpSupport)
+  {
+    if (!wm.relativePointer)
+    {
+      wm.relativePointer =
+        zwp_relative_pointer_manager_v1_get_relative_pointer(
+          wm.relativePointerManager, wm.pointer);
+      zwp_relative_pointer_v1_add_listener(wm.relativePointer,
+        &relativePointerListener, NULL);
+    }
+
+    app_resyncMouseBasic();
+    app_handleMouseBasic();
+  }
 }
 
 static void waylandGrabKeyboard(void)
@@ -981,12 +1016,38 @@ static void waylandUngrabKeyboard(void)
 
 static void waylandWarpPointer(int x, int y, bool exiting)
 {
-  // This is an unsupported operation on Wayland.
+  if (x < 0) x = 0;
+  else if (x >= wm.width) x = wm.width - 1;
+  if (y < 0) y = 0;
+  else if (y >= wm.height) y = wm.height - 1;
+
+  struct wl_region * region = wl_compositor_create_region(wm.compositor);
+  wl_region_add(region, x, y, 1, 1);
+
+  if (wm.confinedPointer)
+  {
+    zwp_confined_pointer_v1_set_region(wm.confinedPointer, region);
+    wl_surface_commit(wm.surface);
+    zwp_confined_pointer_v1_set_region(wm.confinedPointer, NULL);
+  }
+  else
+  {
+    struct zwp_confined_pointer_v1 * confine;
+    confine = zwp_pointer_constraints_v1_confine_pointer(
+          wm.pointerConstraints, wm.surface, wm.pointer, region,
+          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    wl_surface_commit(wm.surface);
+    zwp_confined_pointer_v1_destroy(confine);
+  }
+
+  wl_surface_commit(wm.surface);
+  wl_region_destroy(region);
 }
 
 static void waylandRealignPointer(void)
 {
-  app_resyncMouseBasic();
+  if (!wm.warpSupport)
+    app_resyncMouseBasic();
 }
 
 static bool waylandIsValidPointerPos(int x, int y)
@@ -1015,7 +1076,7 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 {
   if (prop == LG_DS_WARP_SUPPORT)
   {
-    *(enum LG_DSWarpSupport*)ret = LG_DS_WARP_NONE;
+    *(enum LG_DSWarpSupport*)ret = wm.warpSupport ? LG_DS_WARP_SURFACE : LG_DS_WARP_NONE;
     return true;
   }
 
