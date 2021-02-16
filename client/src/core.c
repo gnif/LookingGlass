@@ -57,7 +57,7 @@ void core_setCursorInView(bool enable)
 
   /* if the display server does not support warp, then we can not operate in
    * always relative mode and we should not grab the pointer */
-  bool warpSupport = true;
+  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
 
   g_cursor.warpState = enable ? WARP_STATE_ON : WARP_STATE_OFF;
@@ -67,7 +67,7 @@ void core_setCursorInView(bool enable)
     if (g_params.hideMouse)
       g_state.ds->showPointer(false);
 
-    if (warpSupport && !g_params.captureInputOnly)
+    if (warpSupport != LG_DS_WARP_NONE && !g_params.captureInputOnly)
       g_state.ds->grabPointer();
 
     if (g_params.grabKeyboardOnFocus)
@@ -78,7 +78,7 @@ void core_setCursorInView(bool enable)
     if (g_params.hideMouse)
       g_state.ds->showPointer(true);
 
-    if (warpSupport)
+    if (warpSupport != LG_DS_WARP_NONE)
       g_state.ds->ungrabPointer();
 
     g_state.ds->ungrabKeyboard();
@@ -112,7 +112,7 @@ void core_setGrabQuiet(bool enable)
 
   /* if the display server does not support warp we need to ungrab the pointer
    * here instead of in the move handler */
-  bool warpSupport = true;
+  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
 
   if (enable)
@@ -133,7 +133,7 @@ void core_setGrabQuiet(bool enable)
         g_state.ds->ungrabKeyboard();
     }
 
-    if (!warpSupport || g_params.captureInputOnly || !g_state.formatValid)
+    if (warpSupport != LG_DS_WARP_NONE || g_params.captureInputOnly || !g_state.formatValid)
       g_state.ds->ungrabPointer();
 
     // if exiting capture when input on capture only, we want to show the cursor
@@ -327,6 +327,15 @@ void core_handleMouseGrabbed(double ex, double ey)
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
+static bool isInView(void)
+{
+  return
+    g_cursor.pos.x >= g_state.dstRect.x                     &&
+    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
+    g_cursor.pos.y >= g_state.dstRect.y                     &&
+    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
+}
+
 void core_handleMouseNormal(double ex, double ey)
 {
   // prevent cursor handling outside of capture if the position is not known
@@ -339,19 +348,14 @@ void core_handleMouseNormal(double ex, double ey)
   /* scale the movement to the guest */
   if (g_cursor.useScale && g_params.scaleMouseInput)
   {
-    ex *= g_cursor.scale.x / g_cursor.dpiScale;
-    ey *= g_cursor.scale.y / g_cursor.dpiScale;
+    ex *= g_cursor.scale.x;
+    ey *= g_cursor.scale.y;
   }
 
   bool testExit = true;
   if (!g_cursor.inView)
   {
-    const bool inView =
-      g_cursor.pos.x >= g_state.dstRect.x                     &&
-      g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-      g_cursor.pos.y >= g_state.dstRect.y                     &&
-      g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
-
+    const bool inView = isInView();
     core_setCursorInView(inView);
     if (inView)
       g_cursor.realign = true;
@@ -397,6 +401,9 @@ void core_handleMouseNormal(double ex, double ey)
 
   if (testExit)
   {
+    enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
+    app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+
     /* translate the move to the guests orientation */
     struct DoublePoint move = {.x = ex, .y = ey};
     util_rotatePoint(&move);
@@ -417,21 +424,42 @@ void core_handleMouseNormal(double ex, double ey)
       const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
       const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
 
-      if (core_isValidPointerPos(
-            g_state.windowPos.x + g_state.border.left + tx,
-            g_state.windowPos.y + g_state.border.top  + ty))
+      switch (warpSupport)
       {
-        core_setCursorInView(false);
+        case LG_DS_WARP_NONE:
+          break;
 
-        /* preempt the window leave flag if the warp will leave our window */
-        if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
-          g_cursor.inWindow = false;
+        case LG_DS_WARP_SURFACE:
+          g_state.ds->ungrabPointer();
+          core_warpPointer(tx, ty, true);
 
-        /* ungrab the pointer and move the local cursor to the exit point */
-        g_state.ds->ungrabPointer();
-        core_warpPointer(tx, ty, true);
-        return;
+          if (!isInView() && tx >= 0 && tx < g_state.windowW && ty >= 0 && ty < g_state.windowH)
+            core_setCursorInView(false);
+          break;
+
+        case LG_DS_WARP_SCREEN:
+          if (core_isValidPointerPos(
+                g_state.windowPos.x + g_state.border.left + tx,
+                g_state.windowPos.y + g_state.border.top  + ty))
+          {
+            core_setCursorInView(false);
+
+            /* preempt the window leave flag if the warp will leave our window */
+            if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
+              g_cursor.inWindow = false;
+
+            /* ungrab the pointer and move the local cursor to the exit point */
+            g_state.ds->ungrabPointer();
+            core_warpPointer(tx, ty, true);
+            return;
+          }
       }
+    }
+    else if (warpSupport == LG_DS_WARP_SURFACE && isInView())
+    {
+      /* regrab the pointer in case the user did not move off the surface */
+      g_state.ds->grabPointer();
+      g_cursor.warpState = WARP_STATE_ON;
     }
   }
 

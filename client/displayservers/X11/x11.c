@@ -449,52 +449,62 @@ static void x11Free(void)
 
 static bool x11GetProp(LG_DSProperty prop, void *ret)
 {
-  if (prop != LG_DS_MAX_MULTISAMPLE)
-    return false;
-
-  Display * dpy = XOpenDisplay(NULL);
-  if (!dpy)
-    return false;
-
-  XVisualInfo queryTemplate;
-  queryTemplate.screen = 0;
-
-  int visualCount;
-  int maxSamples = -1;
-  XVisualInfo * visuals = XGetVisualInfo(dpy, VisualScreenMask,
-      &queryTemplate, &visualCount);
-
-  for (int i = 0; i < visualCount; i++)
+  switch (prop)
   {
-    XVisualInfo * visual = &visuals[i];
+    case LG_DS_WARP_SUPPORT:
+      *(enum LG_DSWarpSupport*)ret = LG_DS_WARP_SCREEN;
+      return true;
 
-    int res, supportsGL;
-    // Some GLX visuals do not use GL, and these must be ignored in our search.
-    if ((res = glXGetConfig(dpy, visual, GLX_USE_GL, &supportsGL)) != 0 ||
-        !supportsGL)
-      continue;
+    case LG_DS_MAX_MULTISAMPLE:
+    {
+      Display * dpy = XOpenDisplay(NULL);
+      if (!dpy)
+        return false;
 
-    int sampleBuffers, samples;
-    if ((res = glXGetConfig(dpy, visual, GLX_SAMPLE_BUFFERS, &sampleBuffers)) != 0)
-      continue;
+      XVisualInfo queryTemplate;
+      queryTemplate.screen = 0;
 
-    // Will be 1 if this visual supports multisampling
-    if (sampleBuffers != 1)
-      continue;
+      int visualCount;
+      int maxSamples = -1;
+      XVisualInfo * visuals = XGetVisualInfo(dpy, VisualScreenMask,
+          &queryTemplate, &visualCount);
 
-    if ((res = glXGetConfig(dpy, visual, GLX_SAMPLES, &samples)) != 0)
-      continue;
+      for (int i = 0; i < visualCount; i++)
+      {
+        XVisualInfo * visual = &visuals[i];
 
-    // Track the largest number of samples supported
-    if (samples > maxSamples)
-      maxSamples = samples;
+        int res, supportsGL;
+        // Some GLX visuals do not use GL, and these must be ignored in our search.
+        if ((res = glXGetConfig(dpy, visual, GLX_USE_GL, &supportsGL)) != 0 ||
+            !supportsGL)
+          continue;
+
+        int sampleBuffers, samples;
+        if ((res = glXGetConfig(dpy, visual, GLX_SAMPLE_BUFFERS, &sampleBuffers)) != 0)
+          continue;
+
+        // Will be 1 if this visual supports multisampling
+        if (sampleBuffers != 1)
+          continue;
+
+        if ((res = glXGetConfig(dpy, visual, GLX_SAMPLES, &samples)) != 0)
+          continue;
+
+        // Track the largest number of samples supported
+        if (samples > maxSamples)
+          maxSamples = samples;
+      }
+
+      XFree(visuals);
+      XCloseDisplay(dpy);
+
+      *(int*)ret = maxSamples;
+      return true;
+    }
+
+    default:
+      return true;
   }
-
-  XFree(visuals);
-  XCloseDisplay(dpy);
-
-  *(int*)ret = maxSamples;
-  return true;
 }
 
 static int x11EventThread(void * unused)
