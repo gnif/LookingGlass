@@ -53,6 +53,13 @@ typedef enum LG_DSProperty
 }
 LG_DSProperty;
 
+enum LG_DSWarpSupport
+{
+  LG_DS_WARP_NONE,
+  LG_DS_WARP_SURFACE,
+  LG_DS_WARP_SCREEN,
+};
+
 typedef struct LG_DSInitParams
 {
   const char * title;

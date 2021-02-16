@@ -1015,7 +1015,7 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 {
   if (prop == LG_DS_WARP_SUPPORT)
   {
-    *(bool*)ret = false;
+    *(enum LG_DSWarpSupport*)ret = LG_DS_WARP_NONE;
     return true;
   }
 
