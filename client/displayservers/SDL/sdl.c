@@ -53,6 +53,10 @@ static struct SDLDSState sdl;
 /* forwards */
 static int sdlEventFilter(void * userdata, SDL_Event * event);
 
+static void sdlSetup(void)
+{
+}
+
 static bool sdlProbe(void)
 {
   return true;
@@ -504,6 +508,7 @@ static bool sdlGetFullscreen(void)
 
 struct LG_DisplayServerOps LGDS_SDL =
 {
+  .setup               = sdlSetup,
   .probe               = sdlProbe,
   .earlyInit           = sdlEarlyInit,
   .init                = sdlInit,

@@ -196,4 +196,10 @@ Command line arguments will override any options loaded from the config files.
 | opengl:preventBuffer |       | yes   | Prevent the driver from buffering frames    |
 | opengl:amdPinnedMem  |       | yes   | Use GL_AMD_pinned_memory if it is available |
 |------------------------------------------------------------------------------------|
+
+|-------------------------------------------------------------|
+| Long                | Short | Value | Description           |
+|-------------------------------------------------------------|
+| wayland:warpSupport |       | yes   | Enable cursor warping |
+|-------------------------------------------------------------|
 ```
