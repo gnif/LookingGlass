@@ -68,6 +68,13 @@ device node, for example:
 
     ./looking-glass-client -f /dev/kvmfr0
 
+You may also use a config file: `~/.looking-glass-client.ini`, or `/etc/looking-glass-client.ini`.
+
+```ini
+[app]
+shmFile=/dev/kvmfr0
+```
+
 ### VM->Host
 
 In VM->host mode, use this device in place of the shared memory file.
