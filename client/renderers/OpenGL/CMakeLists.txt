@@ -4,7 +4,6 @@ project(renderer_Opengl LANGUAGES C)
 find_package(PkgConfig)
 pkg_check_modules(RENDERER_OPENGL_PKGCONFIG REQUIRED
 	gl
-	glu
 )
 
 add_library(renderer_OpenGL STATIC
