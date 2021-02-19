@@ -27,7 +27,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <SDL2/SDL_ttf.h>
 
 #include <GL/gl.h>
-#include <GL/glu.h>
 #include <GL/glx.h>
 
 #include "common/debug.h"
@@ -319,7 +318,7 @@ void opengl_on_resize(void * opaque, const int width, const int height,
   glViewport(0, 0, this->window.x, this->window.y);
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  gluOrtho2D(0, this->window.x, this->window.y, 0);
+  glOrtho(0, this->window.x, this->window.y, 0, -1, 1);
 
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
@@ -842,7 +841,40 @@ static bool _check_gl_error(unsigned int line, const char * name)
   if (error == GL_NO_ERROR)
     return false;
 
-  const GLubyte * errStr = gluErrorString(error);
+  const char * errStr;
+  switch (error)
+  {
+    case GL_INVALID_ENUM:
+      errStr = "GL_INVALID_ENUM";
+      break;
+
+    case GL_INVALID_VALUE:
+      errStr = "GL_INVALID_VALUE";
+      break;
+
+    case GL_INVALID_OPERATION:
+      errStr = "GL_INVALID_OPERATION";
+      break;
+
+    case GL_STACK_OVERFLOW:
+      errStr = "GL_STACK_OVERFLOW";
+      break;
+
+    case GL_STACK_UNDERFLOW:
+      errStr = "GL_STACK_UNDERFLOW";
+      break;
+
+    case GL_OUT_OF_MEMORY:
+      errStr = "GL_OUT_OF_MEMORY";
+      break;
+
+    case GL_TABLE_TOO_LARGE:
+      errStr = "GL_TABLE_TOO_LARGE";
+      break;
+
+    default:
+      errStr = "unknown error";
+  }
   DEBUG_ERROR("%d: %s = %d (%s)", line, name, error, errStr);
   return true;
 }
@@ -1270,7 +1302,7 @@ static bool draw_frame(struct Inst * this)
         break;
 
       case GL_WAIT_FAILED:
-        DEBUG_ERROR("Wait failed %s", gluErrorString(glGetError()));
+        DEBUG_ERROR("Wait failed %d", glGetError());
         break;
     }
 
