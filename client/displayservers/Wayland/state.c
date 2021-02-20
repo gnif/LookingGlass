@@ -1,7 +1,8 @@
 /*
 Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2021 Guanzhong Chen <quantum2048@gmail.com>
-https://looking-glass.hostfission.com
+Copyright (C) 2021 Guanzhong Chen (quantum2048@gmail.com)
+Copyright (C) 2021 Tudor Brindus (contact@tbrindus.ca)
+https://looking-glass.io
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -17,19 +18,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _H_LG_COMMON_COUNTEDBUFFER_
-#define _H_LG_COMMON_COUNTEDBUFFER_
+#include "wayland.h"
 
-#include <stddef.h>
-
-struct CountedBuffer {
-  _Atomic(size_t) refs;
-  size_t size;
-  char data[];
-};
-
-struct CountedBuffer * countedBufferNew(size_t size);
-void countedBufferAddRef(struct CountedBuffer * buffer);
-void countedBufferRelease(struct CountedBuffer ** buffer);
-
-#endif
+struct WaylandDSState wlWm;
+struct WCBState       wlCb;
