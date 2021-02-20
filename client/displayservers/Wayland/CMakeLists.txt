@@ -10,7 +10,16 @@ pkg_check_modules(DISPLAYSERVER_Wayland_PKGCONFIG REQUIRED
 #)
 
 add_library(displayserver_Wayland STATIC
+	clipboard.c
+	cursor.c
+	gl.c
+	idle.c
+	input.c
+	poll.c
+	state.c
+	registry.c
 	wayland.c
+	window.c
 )
 
 target_link_libraries(displayserver_Wayland
