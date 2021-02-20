@@ -39,8 +39,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define DRM_FORMAT_BGRA1010102   fourcc_code('B', 'A', '3', '0')
 #define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
 
-#include <SDL2/SDL_egl.h>
-
 /* this must be a multiple of 2 */
 #define BUFFER_COUNT 4
 

@@ -23,8 +23,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "shader.h"
 #include "common/framebuffer.h"
 
-#include <SDL2/SDL_egl.h>
 #include <GL/gl.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 typedef struct EGL_Texture EGL_Texture;
 

@@ -20,7 +20,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #pragma once
 
 #include <stdbool.h>
-#include <SDL2/SDL_egl.h>
 
 #include "interface/renderer.h"
 

@@ -29,8 +29,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <assert.h>
 
-#include <SDL2/SDL_egl.h>
-
 struct EGL_Model
 {
   bool        rebuild;
