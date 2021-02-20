@@ -140,10 +140,12 @@ static int mmap_kvmfrbuf(struct dma_buf * buf, struct vm_area_struct * vma)
     case KVMFR_TYPE_PCI:
     {
       unsigned long pfn = virt_to_phys(kbuf->kdev->addr + kbuf->offset + offset) >> PAGE_SHIFT;
+      vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
       return remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot);
     }
 
     case KVMFR_TYPE_STATIC:
+      vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
       return remap_vmalloc_range(vma, kbuf->kdev->addr + kbuf->offset, vma->vm_pgoff);
 
     default:
@@ -286,10 +288,12 @@ static int device_mmap(struct file * filp, struct vm_area_struct * vma)
     case KVMFR_TYPE_PCI:
     {
       unsigned long pfn = virt_to_phys(kdev->addr + offset) >> PAGE_SHIFT;
+      vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
       return remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot);
     }
 
     case KVMFR_TYPE_STATIC:
+      vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
       return remap_vmalloc_range(vma, kdev->addr, vma->vm_pgoff);
 
     default:
