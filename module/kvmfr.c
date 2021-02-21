@@ -1,6 +1,7 @@
 /*
 KVMFR IVSHMEM DMA Buffer Driver
 Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
+Copyright (C) 2021 Guanzhong Chen <quantum2048@gmail.com>
 https://looking-glass.hostfission.com
 
 This program is free software; you can redistribute it and/or modify it under
@@ -36,8 +37,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 DEFINE_MUTEX(minor_lock);
 DEFINE_IDR(kvmfr_idr);
 
-#define KVMFR_UIO_NAME    "KVMFR"
-#define KVMFR_UIO_VER     "0.0.5"
 #define KVMFR_DEV_NAME    "kvmfr"
 #define KVMFR_MAX_DEVICES 10
 
@@ -570,3 +569,5 @@ module_exit(kvmfr_module_exit);
 MODULE_DEVICE_TABLE(pci, kvmfr_pci_ids);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Geoffrey McRae <geoff@hostfission.com>");
+MODULE_AUTHOR("Guanzhong Chen <quantum2048@gmail.com>");
+MODULE_VERSION("0.0.7");
