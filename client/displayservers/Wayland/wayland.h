@@ -51,6 +51,14 @@ struct WaylandPoll
   struct wl_list link;
 };
 
+struct WaylandOutput
+{
+  uint32_t name;
+  int32_t scale;
+  struct wl_output * output;
+  struct wl_list link;
+};
+
 struct WaylandDSState
 {
   bool pointerGrabbed;
@@ -107,6 +115,8 @@ struct WaylandDSState
 
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
+
+  struct wl_list outputs; // WaylandOutput::link
 
   struct wl_list poll; // WaylandPoll::link
   struct wl_list pollFree; // WaylandPoll::link
@@ -199,6 +209,13 @@ void waylandUngrabKeyboard(void);
 void waylandUngrabPointer(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
+
+// output module
+bool waylandOutputInit(void);
+void waylandOutputFree(void);
+void waylandOutputBind(uint32_t name);
+void waylandOutputTryUnbind(uint32_t name);
+int32_t waylandOutputGetScale(struct wl_output * output);
 
 // poll module
 bool waylandPollInit(void);
