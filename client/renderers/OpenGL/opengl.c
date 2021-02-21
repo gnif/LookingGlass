@@ -111,6 +111,7 @@ struct Inst
   LG_DSGLContext    glContext;
 
   SDL_Point         window;
+  float             uiScale;
   bool              frameUpdate;
 
   const LG_Font   * font;
@@ -305,6 +306,7 @@ void opengl_on_resize(void * opaque, const int width, const int height, const do
 
   this->window.x = width * scale;
   this->window.y = height * scale;
+  this->uiScale  = (float) scale;
 
   if (destRect.valid)
   {
@@ -661,6 +663,7 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
     glPushMatrix();
       glLoadIdentity();
       glTranslatef(this->window.x / 2, this->window.y / 2, 0.0f);
+      glScalef(this->uiScale, this->uiScale, 1.0f);
       glCallList(this->alertList);
     glPopMatrix();
     break;
@@ -703,9 +706,6 @@ void opengl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
   this->fpsTexture  = true;
 
   glNewList(this->fpsList, GL_COMPILE);
-    glPushMatrix();
-    glLoadIdentity();
-
     glEnable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
     glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
@@ -727,8 +727,6 @@ void opengl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
     glEnd();
     glBindTexture(GL_TEXTURE_2D, 0);
     glDisable(GL_BLEND);
-
-    glPopMatrix();
   glEndList();
 }
 
