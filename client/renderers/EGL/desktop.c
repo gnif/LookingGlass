@@ -34,13 +34,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "desktop.vert.h"
 #include "desktop_rgb.frag.h"
 
+#define LG_SCALE_NEAREST 0
+#define LG_SCALE_LINEAR  1
+
 struct DesktopShader
 {
   EGL_Shader * shader;
   GLint uDesktopPos;
   GLint uDesktopSize;
   GLint uRotate;
-  GLint uNearest;
+  GLint uScaleAlgo;
   GLint uNV, uNVGain;
   GLint uCBMode;
 };
@@ -87,13 +90,13 @@ static bool egl_init_desktop_shader(
     return false;
   }
 
-  shader->uDesktopPos  = egl_shader_get_uniform_location(shader->shader, "position");
-  shader->uDesktopSize = egl_shader_get_uniform_location(shader->shader, "size"    );
-  shader->uRotate      = egl_shader_get_uniform_location(shader->shader, "rotate"  );
-  shader->uNearest     = egl_shader_get_uniform_location(shader->shader, "nearest" );
-  shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"      );
-  shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"  );
-  shader->uCBMode      = egl_shader_get_uniform_location(shader->shader, "cbMode"  );
+  shader->uDesktopPos  = egl_shader_get_uniform_location(shader->shader, "position" );
+  shader->uDesktopSize = egl_shader_get_uniform_location(shader->shader, "size"     );
+  shader->uRotate      = egl_shader_get_uniform_location(shader->shader, "rotate"   );
+  shader->uScaleAlgo   = egl_shader_get_uniform_location(shader->shader, "scaleAlgo");
+  shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"       );
+  shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"   );
+  shader->uCBMode      = egl_shader_get_uniform_location(shader->shader, "cbMode"   );
 
   return true;
 }
@@ -241,33 +244,31 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
 }
 
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
-    const float scaleX, const float scaleY, const bool nearest,
+    const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate)
 {
   if (!desktop->shader)
     return false;
 
-  bool useNearest = nearest;
-  if (!nearest)
-  {
-    switch(rotate)
-    {
-      case LG_ROTATE_90:
-      case LG_ROTATE_270:
-        if (scaleX < 1.0f || scaleY < 1.0f)
-          useNearest = true;
-        break;
+  int scaleAlgo;
 
-      default:
-        break;
-    }
+  switch (scaleType)
+  {
+    case EGL_DESKTOP_NOSCALE:
+    case EGL_DESKTOP_UPSCALE:
+      scaleAlgo = LG_SCALE_NEAREST;
+      break;
+
+    case EGL_DESKTOP_DOWNSCALE:
+      scaleAlgo = LG_SCALE_LINEAR;
+      break;
   }
 
   const struct DesktopShader * shader = desktop->shader;
   egl_shader_use(shader->shader);
   glUniform4f(shader->uDesktopPos , x, y, scaleX, scaleY);
   glUniform1i(shader->uRotate     , rotate);
-  glUniform1i(shader->uNearest    , useNearest ? 1 : 0);
+  glUniform1i(shader->uScaleAlgo  , scaleAlgo);
   glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
 
   if (desktop->nvGain)
