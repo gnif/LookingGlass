@@ -11,6 +11,12 @@ if(ENABLE_BACKTRACE)
   add_definitions(-DENABLE_BACKTRACE)
 endif()
 
+if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
+  add_compile_options(
+    "-Wno-unknown-warning-option"
+  )
+endif()
+
 add_subdirectory(src/platform)
 
 set(COMMON_SOURCES
