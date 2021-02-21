@@ -20,6 +20,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #ifndef _H_LG_COMMON_STRINGUTILS
 #define _H_LG_COMMON_STRINGUTILS
 
+// vsprintf but with buffer allocation
+int valloc_sprintf(char ** str, const char * format, va_list ap)
+  __attribute__ ((format (printf, 2, 0)));
+
 // sprintf but with buffer allocation
 int alloc_sprintf(char ** str, const char * format, ...)
   __attribute__ ((format (printf, 2, 3)));

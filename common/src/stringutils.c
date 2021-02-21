@@ -21,7 +21,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdlib.h>
 #include <stdarg.h>
 
-static int valloc_sprintf(char ** str, const char * format, va_list ap)
+int valloc_sprintf(char ** str, const char * format, va_list ap)
 {
   if (!str)
     return -1;
@@ -30,13 +30,20 @@ static int valloc_sprintf(char ** str, const char * format, va_list ap)
 
   va_list ap1;
   va_copy(ap1, ap);
-  int len = vsnprintf(NULL, 0, format, ap1);
+
+  // for some reason some versions of GCC warn about format being NULL when any
+  // kind of optimization is enabled, this is a false positive.
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wformat-truncation"
+  const int len = vsnprintf(*str, 0, format, ap1);
+  #pragma GCC diagnostic pop
+
   va_end(ap1);
 
   if (len < 0)
     return len;
 
-  *str = malloc(len+1);
+  *str = malloc(len + 1);
 
   int ret = vsnprintf(*str, len + 1, format, ap);
   if (ret < 0)
