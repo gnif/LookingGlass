@@ -30,4 +30,5 @@ void egl_alert_free(EGL_Alert ** alert);
 
 void egl_alert_set_color(EGL_Alert * alert, const uint32_t color);
 void egl_alert_set_text (EGL_Alert * alert, const char * str);
+void egl_alert_set_font (EGL_Alert * alert, LG_Font * fontObj);
 void egl_alert_render   (EGL_Alert * alert, const float scaleX, const float scaleY);
