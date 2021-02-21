@@ -41,11 +41,60 @@ static const struct xdg_wm_base_listener xdgWmBaseListener = {
 
 // Surface-handling listeners.
 
+static void surfaceUpdateScale(void)
+{
+  int32_t maxScale = 0;
+  struct SurfaceOutput * node;
+
+  wl_list_for_each(node, &wlWm.surfaceOutputs, link)
+  {
+    int32_t scale = waylandOutputGetScale(node->output);
+    if (scale > maxScale)
+      maxScale = scale;
+  }
+
+  if (maxScale)
+  {
+    wlWm.scale = maxScale;
+    wlWm.needsResize = true;
+  }
+}
+
+static void wlSurfaceEnterHandler(void * data, struct wl_surface * surface, struct wl_output * output)
+{
+  struct SurfaceOutput * node = malloc(sizeof(struct SurfaceOutput));
+  node->output = output;
+  wl_list_insert(&wlWm.surfaceOutputs, &node->link);
+  surfaceUpdateScale();
+}
+
+static void wlSurfaceLeaveHandler(void * data, struct wl_surface * surface, struct wl_output * output)
+{
+  struct SurfaceOutput * node;
+  wl_list_for_each(node, &wlWm.surfaceOutputs, link)
+    if (node->output == output)
+    {
+      wl_list_remove(&node->link);
+      break;
+    }
+  surfaceUpdateScale();
+}
+
+static const struct wl_surface_listener wlSurfaceListener = {
+  .enter = wlSurfaceEnterHandler,
+  .leave = wlSurfaceLeaveHandler,
+};
+
+// XDG Surface listeners.
+
 static void xdgSurfaceConfigure(void * data, struct xdg_surface * xdgSurface,
     uint32_t serial)
 {
   if (wlWm.configured)
+  {
+    wlWm.needsResize  = true;
     wlWm.resizeSerial = serial;
+  }
   else
   {
     xdg_surface_ack_configure(xdgSurface, serial);
@@ -57,7 +106,7 @@ static const struct xdg_surface_listener xdgSurfaceListener = {
   .configure = xdgSurfaceConfigure,
 };
 
-// XDG Surface listeners.
+// XDG Toplevel listeners.
 
 static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
     int32_t width, int32_t height, struct wl_array * states)
@@ -86,6 +135,8 @@ static const struct xdg_toplevel_listener xdgToplevelListener = {
 
 bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless)
 {
+  wlWm.scale = 1;
+
   if (!wlWm.compositor)
   {
     DEBUG_ERROR("Compositor missing wl_compositor, will not proceed");
@@ -99,7 +150,6 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
   }
 
   xdg_wm_base_add_listener(wlWm.xdgWmBase, &xdgWmBaseListener, NULL);
-  //wl_display_roundtrip(wlWm.display);
 
   wlWm.surface = wl_compositor_create_surface(wlWm.compositor);
   if (!wlWm.surface)
@@ -107,6 +157,9 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
     DEBUG_ERROR("Failed to create wl_surface");
     return false;
   }
+
+  wl_list_init(&wlWm.surfaceOutputs);
+  wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
   wlWm.xdgSurface = xdg_wm_base_get_xdg_surface(wlWm.xdgWmBase, wlWm.surface);
   xdg_surface_add_listener(wlWm.xdgSurface, &xdgSurfaceListener, NULL);

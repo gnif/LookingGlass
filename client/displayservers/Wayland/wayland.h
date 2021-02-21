@@ -59,6 +59,12 @@ struct WaylandOutput
   struct wl_list link;
 };
 
+struct SurfaceOutput
+{
+  struct wl_output * output;
+  struct wl_list link;
+};
+
 struct WaylandDSState
 {
   bool pointerGrabbed;
@@ -71,7 +77,8 @@ struct WaylandDSState
   struct wl_shm * shm;
   struct wl_compositor * compositor;
 
-  int32_t width, height;
+  int32_t width, height, scale;
+  bool needsResize;
   bool fullscreen;
   uint32_t resizeSerial;
   bool configured;
@@ -117,6 +124,7 @@ struct WaylandDSState
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
 
   struct wl_list outputs; // WaylandOutput::link
+  struct wl_list surfaceOutputs; // SurfaceOutput::link
 
   struct wl_list poll; // WaylandPoll::link
   struct wl_list pollFree; // WaylandPoll::link
