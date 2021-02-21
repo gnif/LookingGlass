@@ -30,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <EGL/egl.h>
 
 #include <assert.h>
+#include <math.h>
 #include <string.h>
 
 #include "app.h"
@@ -83,6 +84,7 @@ struct Inst
   bool     closeFlag;
 
   int               width, height;
+  float             uiScale;
   LG_RendererRect   destRect;
   LG_RendererRotate rotate; //client side rotation
 
@@ -101,7 +103,9 @@ struct Inst
 
   const LG_Font     * font;
   LG_FontObj        fontObj;
+  unsigned          fontSize;
   LG_FontObj        helpFontObj;
+  unsigned          helpFontSize;
 };
 
 static struct Option egl_options[] =
@@ -163,6 +167,55 @@ void egl_setup(void)
   option_register(egl_options);
 }
 
+static bool egl_update_font(struct Inst * this)
+{
+  unsigned size = round(16.0f * this->uiScale);
+  if (size == this->fontSize)
+    return true;
+
+  LG_FontObj fontObj;
+  if (!this->font->create(&fontObj, NULL, size))
+  {
+    DEBUG_ERROR("Failed to create a font instance");
+    return false;
+  }
+
+  if (this->alert)
+    egl_alert_set_font(this->alert, fontObj);
+
+  if (this->fps)
+    egl_fps_set_font(this->fps, fontObj);
+
+  if (this->fontObj)
+    this->font->destroy(this->fontObj);
+  this->fontObj = fontObj;
+
+  return true;
+}
+
+static bool egl_update_help_font(struct Inst * this)
+{
+  unsigned size = round(14.0f * this->uiScale);
+  if (size == this->helpFontSize)
+    return true;
+
+  LG_FontObj fontObj;
+  if (!this->font->create(&fontObj, NULL, size))
+  {
+    DEBUG_ERROR("Failed to create a font instance");
+    return false;
+  }
+
+  if (this->help)
+    egl_help_set_font(this->help, fontObj);
+
+  if (this->helpFontObj)
+    this->font->destroy(this->helpFontObj);
+  this->helpFontObj = fontObj;
+
+  return true;
+}
+
 bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
@@ -191,19 +244,14 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
   this->scaleY       = 1.0f;
   this->screenScaleX = 1.0f;
   this->screenScaleY = 1.0f;
+  this->uiScale      = 1.0;
 
   this->font = LG_Fonts[0];
-  if (!this->font->create(&this->fontObj, NULL, 16))
-  {
-    DEBUG_ERROR("Failed to create a font instance");
+  if (!egl_update_font(this))
     return false;
-  }
 
-  if (!this->font->create(&this->helpFontObj, NULL, 14))
-  {
-    DEBUG_ERROR("Failed to create a font instance");
+  if (!egl_update_help_font(this))
     return false;
-  }
 
   *needsOpenGL = false;
   return true;
@@ -384,9 +432,10 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  this->width  = width * scale;
-  this->height = height * scale;
-  this->rotate = rotate;
+  this->width   = width * scale;
+  this->height  = height * scale;
+  this->uiScale = (float) scale;
+  this->rotate  = rotate;
 
   this->destRect.x = destRect.x * scale;
   this->destRect.y = destRect.y * scale;
@@ -413,6 +462,8 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   this->screenScaleY = 1.0f / this->height;
 
   egl_calc_mouse_state(this);
+  egl_update_font(this);
+  egl_update_help_font(this);
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,

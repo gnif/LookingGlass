@@ -138,6 +138,11 @@ void egl_fps_set_display(EGL_FPS * fps, bool display)
   fps->display = display;
 }
 
+void egl_fps_set_font(EGL_FPS * fps, LG_Font * fontObj)
+{
+  fps->fontObj = fontObj;
+}
+
 void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
 {
   if (!fps->display)

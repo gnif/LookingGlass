@@ -164,6 +164,13 @@ void egl_alert_set_text (EGL_Alert * alert, const char * str)
   LG_UNLOCK(alert->lock);
 }
 
+void egl_alert_set_font(EGL_Alert * alert, LG_Font * fontObj)
+{
+  LG_LOCK(alert->lock);
+  alert->fontObj = fontObj;
+  LG_UNLOCK(alert->lock);
+}
+
 void egl_alert_render(EGL_Alert * alert, const float scaleX, const float scaleY)
 {
   if (alert->update)

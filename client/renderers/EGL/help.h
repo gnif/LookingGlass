@@ -29,4 +29,5 @@ bool egl_help_init(EGL_Help ** help, const LG_Font * font, LG_FontObj fontObj);
 void egl_help_free(EGL_Help ** help);
 
 void egl_help_set_text(EGL_Help * help, const char * help_text);
+void egl_help_set_font(EGL_Help * help, LG_FontObj fontObj);
 void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY);

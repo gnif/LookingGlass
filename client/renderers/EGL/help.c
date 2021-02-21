@@ -154,6 +154,11 @@ void egl_help_set_text(EGL_Help * help, const char * help_text)
   }
 }
 
+void egl_help_set_font(EGL_Help * help, LG_FontObj fontObj)
+{
+  help->fontObj = fontObj;
+}
+
 void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
 {
   LG_FontBitmap * bmp = atomic_exchange(&help->bmp, NULL);
