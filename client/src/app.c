@@ -349,18 +349,19 @@ void app_updateWindowPos(int x, int y)
   g_state.windowPos.y = y;
 }
 
-void app_handleResizeEvent(int w, int h, const struct Border border)
+void app_handleResizeEvent(int w, int h, double scale, const struct Border border)
 {
   memcpy(&g_state.border, &border, sizeof(border));
 
   /* don't do anything else if the window dimensions have not changed */
-  if (g_state.windowW == w && g_state.windowH == h)
+  if (g_state.windowW == w && g_state.windowH == h && g_state.windowScale == scale)
     return;
 
-  g_state.windowW  = w;
-  g_state.windowH  = h;
-  g_state.windowCX = w / 2;
-  g_state.windowCY = h / 2;
+  g_state.windowW     = w;
+  g_state.windowH     = h;
+  g_state.windowCX    = w / 2;
+  g_state.windowCY    = h / 2;
+  g_state.windowScale = scale;
   core_updatePositionInfo();
 
   if (core_inputEnabled())

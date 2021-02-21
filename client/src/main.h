@@ -58,6 +58,7 @@ struct AppState
   struct Point         windowPos;
   int                  windowW, windowH;
   int                  windowCX, windowCY;
+  double               windowScale;
   LG_RendererRotate    rotate;
   bool                 focused;
   struct Border        border;

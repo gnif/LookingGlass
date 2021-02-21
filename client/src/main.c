@@ -126,7 +126,7 @@ static int renderThread(void * unused)
     {
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
-            g_state.dstRect, g_params.winRotate);
+            g_state.windowScale, g_state.dstRect, g_params.winRotate);
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 

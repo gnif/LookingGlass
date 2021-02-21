@@ -381,6 +381,7 @@ static int sdlEventFilter(void * userdata, SDL_Event * event)
           app_handleResizeEvent(
               event->window.data1,
               event->window.data2,
+              1,
               border);
           break;
         }
