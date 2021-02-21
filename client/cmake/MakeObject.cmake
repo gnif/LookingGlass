@@ -32,3 +32,11 @@ function(make_object out_var)
   set(${out_var}_OBJS "${result}"   PARENT_SCOPE)
   set(${out_var}_INCS "${result_h}" PARENT_SCOPE)
 endfunction()
+
+function(make_defines in_file out_file)
+  add_custom_command(OUTPUT ${out_file}
+    COMMAND grep "^#define" "${in_file}" > "${out_file}"
+    DEPENDS ${in_file}
+    COMMENT "Creating #defines from ${in_file}"
+  )
+endfunction()

@@ -34,6 +34,11 @@ make_object(
 	shader/splash_logo.frag
 )
 
+make_defines(
+	"${CMAKE_CURRENT_SOURCE_DIR}/shader/desktop_rgb.frag"
+	"${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgh.def.h"
+)
+
 add_library(renderer_EGL STATIC
 	egl.c
 	egldebug.c
@@ -48,6 +53,7 @@ add_library(renderer_EGL STATIC
 	splash.c
 	alert.c
 	${EGL_SHADER_OBJS}
+	"${EGL_SHADER_INCS}/desktop_rgh.def.h"
 )
 
 target_link_libraries(renderer_EGL
