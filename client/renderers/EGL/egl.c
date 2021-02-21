@@ -384,30 +384,33 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  this->width  = width;
-  this->height = height;
+  this->width  = width * scale;
+  this->height = height * scale;
   this->rotate = rotate;
 
-  memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
+  this->destRect.x = destRect.x * scale;
+  this->destRect.y = destRect.y * scale;
+  this->destRect.w = destRect.w * scale;
+  this->destRect.h = destRect.h * scale;
 
-  glViewport(0, 0, width, height);
+  glViewport(0, 0, this->width, this->height);
 
   if (destRect.valid)
   {
-    this->translateX     = 1.0f - (((destRect.w / 2) + destRect.x) * 2) / (float)width;
-    this->translateY     = 1.0f - (((destRect.h / 2) + destRect.y) * 2) / (float)height;
-    this->scaleX         = (float)destRect.w / (float)width;
-    this->scaleY         = (float)destRect.h / (float)height;
-    this->viewportWidth  = destRect.w;
-    this->viewportHeight = destRect.h;
+    this->translateX     = 1.0f - (((this->destRect.w / 2) + this->destRect.x) * 2) / (float)this->width;
+    this->translateY     = 1.0f - (((this->destRect.h / 2) + this->destRect.y) * 2) / (float)this->height;
+    this->scaleX         = (float)this->destRect.w / (float)this->width;
+    this->scaleY         = (float)this->destRect.h / (float)this->height;
+    this->viewportWidth  = this->destRect.w;
+    this->viewportHeight = this->destRect.h;
   }
 
   egl_update_scale_type(this);
   egl_calc_mouse_size(this);
 
   this->splashRatio  = (float)width / (float)height;
-  this->screenScaleX = 1.0f / width;
-  this->screenScaleY = 1.0f / height;
+  this->screenScaleX = 1.0f / this->width;
+  this->screenScaleY = 1.0f / this->height;
 
   egl_calc_mouse_state(this);
 }
