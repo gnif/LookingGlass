@@ -248,7 +248,7 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
   if (!desktop->shader)
     return false;
 
-  int scaleAlgo;
+  int scaleAlgo = LG_SCALE_NEAREST;
 
   switch (scaleType)
   {

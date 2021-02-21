@@ -223,13 +223,12 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
     return false;
 
   // create our local storage
-  *opaque = malloc(sizeof(struct Inst));
+  *opaque = calloc(1, sizeof(struct Inst));
   if (!*opaque)
   {
     DEBUG_INFO("Failed to allocate %lu bytes", sizeof(struct Inst));
     return false;
   }
-  memset(*opaque, 0, sizeof(struct Inst));
 
   // safe off parameteres and init our default option values
   struct Inst * this = (struct Inst *)*opaque;
@@ -402,7 +401,7 @@ static void egl_calc_mouse_state(struct Inst * this)
 
 static void egl_update_scale_type(struct Inst * this)
 {
-  int width, height;
+  int width = 0, height = 0;
 
   switch (this->rotate)
   {
