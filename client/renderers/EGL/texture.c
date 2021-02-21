@@ -269,6 +269,10 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       glDeleteTextures(1, &texture->dmaTex);
     glGenFramebuffers(1, &texture->dmaFBO);
     glGenTextures(1, &texture->dmaTex);
+
+    for (size_t i = 0; i < texture->dmaImageUsed; ++i)
+      eglDestroyImage(texture->display, texture->dmaImages[i].image);
+    texture->dmaImageUsed = 0;
     return true;
   }
 
