@@ -303,11 +303,17 @@ void opengl_on_resize(void * opaque, const int width, const int height, const do
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  this->window.x = width;
-  this->window.y = height;
+  this->window.x = width * scale;
+  this->window.y = height * scale;
 
   if (destRect.valid)
-    memcpy(&this->destRect, &destRect, sizeof(LG_RendererRect));
+  {
+    this->destRect.valid = true;
+    this->destRect.x = destRect.x * scale;
+    this->destRect.y = destRect.y * scale;
+    this->destRect.w = destRect.w * scale;
+    this->destRect.h = destRect.h * scale;
+  }
 
   // setup the projection matrix
   glViewport(0, 0, this->window.x, this->window.y);
