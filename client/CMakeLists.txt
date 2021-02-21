@@ -13,6 +13,8 @@ if(OPTIMIZE_FOR_NATIVE)
   if(COMPILER_SUPPORTS_MARCH_NATIVE)
     add_compile_options("-march=native")
   endif()
+else()
+  add_compile_options("-march=nehalem" "-mtune=generic")
 endif()
 
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
