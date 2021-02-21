@@ -71,16 +71,22 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
 {
   eglSwapBuffers(display, surface);
 
-  if (wlWm.resizeSerial)
+  if (wlWm.needsResize)
   {
-    wl_egl_window_resize(wlWm.eglWindow, wlWm.width, wlWm.height, 0, 0);
+    wl_egl_window_resize(wlWm.eglWindow, wlWm.width * wlWm.scale, wlWm.height * wlWm.scale, 0, 0);
+    wl_surface_set_buffer_scale(wlWm.surface, wlWm.scale);
 
     struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
     wl_region_add(region, 0, 0, wlWm.width, wlWm.height);
     wl_surface_set_opaque_region(wlWm.surface, region);
     wl_region_destroy(region);
 
-    app_handleResizeEvent(wlWm.width, wlWm.height, 1, (struct Border) {0, 0, 0, 0});
+    app_handleResizeEvent(wlWm.width, wlWm.height, wlWm.scale, (struct Border) {0, 0, 0, 0});
+    wlWm.needsResize = false;
+  }
+
+  if (wlWm.resizeSerial)
+  {
     xdg_surface_ack_configure(wlWm.xdgSurface, wlWm.resizeSerial);
     wlWm.resizeSerial = 0;
   }
