@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "kb.h"
 
 #include "common/debug.h"
+#include "common/stringutils.h"
 
 #include <stdarg.h>
 #include <math.h>
@@ -448,14 +449,11 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   if (!g_state.lgr || !g_params.showAlerts)
     return;
 
+  char * buffer;
+
   va_list args;
   va_start(args, fmt);
-  const int length = vsnprintf(NULL, 0, fmt, args);
-  va_end(args);
-
-  char *buffer = malloc(length + 1);
-  va_start(args, fmt);
-  vsnprintf(buffer, length + 1, fmt, args);
+  valloc_sprintf(&buffer, fmt, args);
   va_end(args);
 
   g_state.lgr->on_alert(
