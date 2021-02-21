@@ -80,7 +80,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
     wl_surface_set_opaque_region(wlWm.surface, region);
     wl_region_destroy(region);
 
-    app_handleResizeEvent(wlWm.width, wlWm.height, (struct Border) {0, 0, 0, 0});
+    app_handleResizeEvent(wlWm.width, wlWm.height, 1, (struct Border) {0, 0, 0, 0});
     xdg_surface_ack_configure(wlWm.xdgSurface, wlWm.resizeSerial);
     wlWm.resizeSerial = 0;
   }

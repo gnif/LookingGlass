@@ -298,7 +298,7 @@ void opengl_on_restart(void * opaque)
   this->waiting = true;
 }
 
-void opengl_on_resize(void * opaque, const int width, const int height,
+void opengl_on_resize(void * opaque, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;

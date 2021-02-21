@@ -379,7 +379,7 @@ static void egl_update_scale_type(struct Inst * this)
     this->scaleType = EGL_DESKTOP_UPSCALE;
 }
 
-void egl_on_resize(void * opaque, const int width, const int height,
+void egl_on_resize(void * opaque, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
