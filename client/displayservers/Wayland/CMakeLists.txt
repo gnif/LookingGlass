@@ -15,6 +15,7 @@ add_library(displayserver_Wayland STATIC
 	gl.c
 	idle.c
 	input.c
+	output.c
 	poll.c
 	state.c
 	registry.c

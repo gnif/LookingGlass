@@ -30,7 +30,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 static void registryGlobalHandler(void * data, struct wl_registry * registry,
     uint32_t name, const char * interface, uint32_t version)
 {
-  if (!strcmp(interface, wl_seat_interface.name) && !wlWm.seat)
+  if (!strcmp(interface, wl_output_interface.name))
+    waylandOutputBind(name);
+  else if (!strcmp(interface, wl_seat_interface.name) && !wlWm.seat)
     wlWm.seat = wl_registry_bind(wlWm.registry, name, &wl_seat_interface, 1);
   else if (!strcmp(interface, wl_shm_interface.name))
     wlWm.shm = wl_registry_bind(wlWm.registry, name, &wl_shm_interface, 1);
@@ -61,7 +63,7 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
 static void registryGlobalRemoveHandler(void * data,
     struct wl_registry * registry, uint32_t name)
 {
-  // Do nothing.
+  waylandOutputTryUnbind(name);
 }
 
 static const struct wl_registry_listener registryListener = {

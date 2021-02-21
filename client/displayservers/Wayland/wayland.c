@@ -97,6 +97,9 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandPollInit())
     return false;
 
+  if (!waylandOutputInit())
+    return false;
+
   if (!waylandRegistryInit())
     return false;
 
@@ -139,6 +142,7 @@ static void waylandFree(void)
   waylandIdleFree();
   waylandWindowFree();
   waylandInputFree();
+  waylandOutputFree();
   waylandRegistryFree();
   wl_display_disconnect(wlWm.display);
 }
