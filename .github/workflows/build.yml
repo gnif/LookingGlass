@@ -6,6 +6,9 @@ jobs:
     strategy:
       matrix:
         cc: [gcc, clang]
+        build_type:
+          - Release
+          - Debug
     steps:
     - uses: actions/checkout@v1
       with:
@@ -22,10 +25,12 @@ jobs:
           libx11-dev libxss-dev libxi-dev \
           wayland-protocols
     - name: Configure client
+      env:
+        CC: /usr/bin/${{ matrix.cc }}
       run: |
         mkdir client/build
         cd client/build
-        CC=/usr/bin/${{ matrix.cc }} cmake ..
+        cmake -DCMAKE_BUILD_TYPE={{ matrix.build_type }} ..
     - name: Build client
       run: |
         cd client/build
