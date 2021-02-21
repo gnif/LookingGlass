@@ -90,7 +90,9 @@ struct Inst
   float scaleX      , scaleY;
   float splashRatio;
   float screenScaleX, screenScaleY;
-  bool  useNearest;
+
+  int viewportWidth, viewportHeight;
+  enum EGL_DesktopScaleType scaleType;
 
   bool         cursorVisible;
   int          cursorX    , cursorY;
@@ -350,6 +352,33 @@ static void egl_calc_mouse_state(struct Inst * this)
   }
 }
 
+static void egl_update_scale_type(struct Inst * this)
+{
+  int width, height;
+
+  switch (this->rotate)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      width  = this->format.width;
+      height = this->format.height;
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      width  = this->format.height;
+      height = this->format.width;
+      break;
+  }
+
+  if (width == this->viewportWidth || height == this->viewportHeight)
+    this->scaleType = EGL_DESKTOP_NOSCALE;
+  else if (width > this->viewportWidth || height > this->viewportHeight)
+    this->scaleType = EGL_DESKTOP_DOWNSCALE;
+  else
+    this->scaleType = EGL_DESKTOP_UPSCALE;
+}
+
 void egl_on_resize(void * opaque, const int width, const int height,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
@@ -365,12 +394,15 @@ void egl_on_resize(void * opaque, const int width, const int height,
 
   if (destRect.valid)
   {
-    this->translateX = 1.0f - (((destRect.w / 2) + destRect.x) * 2) / (float)width;
-    this->translateY = 1.0f - (((destRect.h / 2) + destRect.y) * 2) / (float)height;
-    this->scaleX     = (float)destRect.w / (float)width;
-    this->scaleY     = (float)destRect.h / (float)height;
+    this->translateX     = 1.0f - (((destRect.w / 2) + destRect.x) * 2) / (float)width;
+    this->translateY     = 1.0f - (((destRect.h / 2) + destRect.y) * 2) / (float)height;
+    this->scaleX         = (float)destRect.w / (float)width;
+    this->scaleY         = (float)destRect.h / (float)height;
+    this->viewportWidth  = destRect.w;
+    this->viewportHeight = destRect.h;
   }
 
+  egl_update_scale_type(this);
   egl_calc_mouse_size(this);
 
   this->splashRatio  = (float)width / (float)height;
@@ -436,7 +468,7 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool use
     }
   }
 
-  this->useNearest = this->width < format.width || this->height < format.height;
+  egl_update_scale_type(this);
   return egl_desktop_setup(this->desktop, format, useDMA);
 }
 
@@ -676,8 +708,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
   if (this->start && egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
-        this->useNearest,
-        rotate))
+        this->scaleType , rotate))
   {
     if (!this->waitFadeTime)
     {
