@@ -863,7 +863,7 @@ restart:
     {
       DEBUG_BREAK();
       DEBUG_INFO("Please check the host application is running and is the correct version");
-      DEBUG_INFO("Check the host log in your guest at %%TEMP%%\\looking-glass-host.txt");
+      DEBUG_INFO("Check the host log in your guest at %%ProgramData%%\\Looking Glass (host)\\looking-glass-host.txt");
       DEBUG_INFO("Continuing to wait...");
     }
 
