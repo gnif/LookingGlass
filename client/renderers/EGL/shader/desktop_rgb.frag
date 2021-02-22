@@ -1,7 +1,9 @@
 #version 300 es
 
-#define LG_SCALE_NEAREST 0
-#define LG_SCALE_LINEAR  1
+#define EGL_SCALE_AUTO    0
+#define EGL_SCALE_NEAREST 1
+#define EGL_SCALE_LINEAR  2
+#define EGL_SCALE_MAX     3
 
 in  highp vec2 uv;
 out highp vec4 color;
@@ -41,11 +43,11 @@ void main()
 
   switch (scaleAlgo)
   {
-    case LG_SCALE_NEAREST:
+    case EGL_SCALE_NEAREST:
       color = texelFetch(sampler1, ivec2(ruv * size), 0);
       break;
 
-    case LG_SCALE_LINEAR:
+    case EGL_SCALE_LINEAR:
       color = texture(sampler1, ruv);
       break;
   }
