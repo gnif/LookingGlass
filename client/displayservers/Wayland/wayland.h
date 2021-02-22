@@ -238,6 +238,7 @@ void waylandRegistryFree(void);
 // window module
 bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless);
 void waylandWindowFree(void);
+void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);
 void waylandSetFullscreen(bool fs);
 bool waylandGetFullscreen(void);

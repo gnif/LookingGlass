@@ -49,6 +49,7 @@ static void outputScaleHandler(void * opaque, struct wl_output * output, int32_t
 {
   struct WaylandOutput * node = opaque;
   node->scale = scale;
+  waylandWindowUpdateScale();
 }
 
 static const struct wl_output_listener outputListener = {

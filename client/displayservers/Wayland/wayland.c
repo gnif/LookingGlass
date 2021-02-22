@@ -89,6 +89,7 @@ static bool waylandProbe(void)
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
+  wl_list_init(&wlWm.surfaceOutputs);
 
   wlWm.warpSupport = option_get_bool("wayland", "warpSupport");
 
