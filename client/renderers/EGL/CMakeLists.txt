@@ -36,7 +36,7 @@ make_object(
 
 make_defines(
 	"${CMAKE_CURRENT_SOURCE_DIR}/shader/desktop_rgb.frag"
-	"${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgh.def.h"
+	"${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
 )
 
 add_library(renderer_EGL STATIC
@@ -53,7 +53,7 @@ add_library(renderer_EGL STATIC
 	splash.c
 	alert.c
 	${EGL_SHADER_OBJS}
-	"${EGL_SHADER_INCS}/desktop_rgh.def.h"
+	"${EGL_SHADER_INCS}/desktop_rgb.def.h"
 )
 
 target_link_libraries(renderer_EGL
