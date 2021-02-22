@@ -142,9 +142,10 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
   app_registerKeybind(KEY_N, egl_desktop_toggle_nv, *desktop, "Toggle night vision mode");
   app_registerKeybind(KEY_S, egl_desktop_toggle_scale_algo, *desktop, "Toggle scale algorithm");
 
-  (*desktop)->nvMax  = option_get_int("egl", "nvGainMax");
-  (*desktop)->nvGain = option_get_int("egl", "nvGain"   );
-  (*desktop)->cbMode = option_get_int("egl", "cbMode"   );
+  (*desktop)->nvMax     = option_get_int("egl", "nvGainMax");
+  (*desktop)->nvGain    = option_get_int("egl", "nvGain"   );
+  (*desktop)->cbMode    = option_get_int("egl", "cbMode"   );
+  (*desktop)->scaleAlgo = option_get_int("egl", "scale"    );
 
   return true;
 }
@@ -175,13 +176,23 @@ static const char * egl_desktop_scale_algo_name(int algorithm)
   }
 }
 
+bool egl_desktop_scale_validate(struct Option * opt, const char ** error)
+{
+  if (opt->value.x_int >= 0 && opt->value.x_int < EGL_SCALE_MAX)
+    return true;
+
+  *error = "Invalid scale algorithm number";
+  return false;
+}
+
 void egl_desktop_toggle_scale_algo(int key, void * opaque)
 {
   EGL_Desktop * desktop = (EGL_Desktop *)opaque;
   if (++desktop->scaleAlgo == EGL_SCALE_MAX)
     desktop->scaleAlgo = 0;
 
-  app_alert(LG_ALERT_INFO, "Scale Algorithm: %s", egl_desktop_scale_algo_name(desktop->scaleAlgo));
+  app_alert(LG_ALERT_INFO, "Scale Algorithm %d: %s", desktop->scaleAlgo,
+      egl_desktop_scale_algo_name(desktop->scaleAlgo));
 }
 
 void egl_desktop_free(EGL_Desktop ** desktop)
