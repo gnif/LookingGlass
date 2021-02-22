@@ -32,6 +32,9 @@ enum EGL_DesktopScaleType
   EGL_DESKTOP_DOWNSCALE,
 };
 
+struct Option;
+bool egl_desktop_scale_validate(struct Option * opt, const char ** error);
+
 bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display);
 void egl_desktop_free(EGL_Desktop ** desktop);
 

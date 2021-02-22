@@ -152,6 +152,14 @@ static struct Option egl_options[] =
     .type         = OPTION_TYPE_INT,
     .value.x_int  = 0
   },
+  {
+    .module       = "egl",
+    .name         = "scale",
+    .description  = "Set the scale algorithm (0 = auto, 1 = nearest, 2 = linear)",
+    .type         = OPTION_TYPE_INT,
+    .validator    = egl_desktop_scale_validate,
+    .value.x_int  = 0
+  },
   {0}
 };
 
