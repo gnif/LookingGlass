@@ -569,7 +569,7 @@ static void doLicense(void)
   fprintf(stderr,
     "\n"
     "Looking Glass - KVM FrameRelay (KVMFR) Client\n"
-    "Copyright(C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>\n"
+    "Copyright(C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>\n"
     "https://looking-glass.hostfission.com\n"
     "\n"
     "This program is free software; you can redistribute it and / or modify it under\n"
