@@ -479,11 +479,7 @@ void core_handleMouseNormal(double ex, double ey)
     {
       g_cursor.delta.x = 0;
       g_cursor.delta.y = 0;
-      core_warpPointer(g_state.windowCX, g_state.windowCY, false);
     }
-
-    g_cursor.guest.x = g_state.srcSize.x / 2;
-    g_cursor.guest.y = g_state.srcSize.y / 2;
   }
   else
   {
