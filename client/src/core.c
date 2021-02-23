@@ -176,8 +176,9 @@ void core_updatePositionInfo(void)
   if (!g_state.haveSrcSize)
     goto done;
 
-  float srcW;
-  float srcH;
+  float srcW = 0.0f;
+  float srcH = 0.0f;
+
   switch(g_params.winRotate)
   {
     case LG_ROTATE_0:
