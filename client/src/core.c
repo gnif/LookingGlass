@@ -393,7 +393,7 @@ void core_handleMouseNormal(double ex, double ey)
 
   /* if we are in "autoCapture" and the delta was large don't test for exit */
   if (g_params.autoCapture &&
-      (fabs(ex) > 100.0 / g_cursor.scale.x || fabs(ey) > 100.0 / g_cursor.scale.y))
+      (fabs(ex) > 20.0 / g_cursor.scale.x || fabs(ey) > 20.0 / g_cursor.scale.y))
     testExit = false;
 
   /* if any buttons are held we should not allow exit to happen */
