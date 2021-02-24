@@ -22,19 +22,21 @@ WIKI_PREFIX_SED=$(
 	echo "$WIKI_PREFIX" | sed -e "s/\\//\\\\\//g" -e "s/\./\\\./g"
 )
 
-MD_WIKILINK_PAGE="[[:alpha:]_]+"
-MD_WIKILINK_TOKEN="#[[:alpha:]_]+"
-MD_WIKILINK_MAGIC=" \"wikilink\""
+MD_WIKILINK_TOKEN="[[:alpha:]_]"
+MD_WIKILINK_MDTAG="[[:alpha:]-]"
+MD_WIKILINK_MAGIC=" \"wikilink\"" # from pandoc
 
 # Run after special replaces
-MD_WIKILINK_TO_WIKI="s/\(($MD_WIKILINK_PAGE($MD_WIKILINK_TOKEN)?)$MD_WIKILINK_MAGIC\)/\($WIKI_PREFIX_SED\/\1\)/g"
-# Run after TO_WIKI
-MD_WIKILINK_SELF="s/\(($MD_WIKILINK_TOKEN)$MD_WIKILINK_MAGIC\)/\(\1\)/g"
+MD_WIKILINK_TO_WIKI="s/\((${MD_WIKILINK_TOKEN}+(#${MD_WIKILINK_TOKEN}+)?)$MD_WIKILINK_MAGIC\)/\($WIKI_PREFIX_SED\/\1\)/g"
+# Run after link replaces
+MD_WIKILINK_TAG_TO_MDTAG=":l; s/\((${MD_WIKILINK_TOKEN}*#${MD_WIKILINK_MDTAG}+)_(${MD_WIKILINK_MDTAG}*$MD_WIKILINK_MAGIC)\)/\(\1-\2\)/g; tl;"
+# Run last
+MD_WIKILINK_REMOVE_MAGIC="s/\(([^)(]+)$MD_WIKILINK_MAGIC\)/\(\1\)/g"
 
 # Generates sed expression to replace a wiki page name with a local file path
 # args: returnvar, pagename, localpath
 md_wikilink_replace () {
-	export "$1"="s/\($2($MD_WIKILINK_TOKEN)?$MD_WIKILINK_MAGIC\)/\($3\1\)/g"
+	export "$1"="s/\($2(#${MD_WIKILINK_TOKEN}+)?$MD_WIKILINK_MAGIC\)/\($3\1\)/g"
 }
 
 md_wikilink_replace "MD_WIKILINK_INSTALL" "Installation" "INSTALL.md"
@@ -51,9 +53,11 @@ pandoc -f mediawiki -t gfm -o client/FAQ.md "$WIKI_PREFIX/FAQ?action=raw"
 sed -i client/INSTALL.md -E \
 -e "$MD_WIKILINK_FAQ" \
 -e "$MD_WIKILINK_TO_WIKI" \
--e "$MD_WIKILINK_SELF"
+-e "$MD_WIKILINK_TAG_TO_MDTAG" \
+-e "$MD_WIKILINK_REMOVE_MAGIC"
 
 sed -i client/FAQ.md -E \
 -e "$MD_WIKILINK_INSTALL" \
 -e "$MD_WIKILINK_TO_WIKI" \
--e "$MD_WIKILINK_SELF"
+-e "$MD_WIKILINK_TAG_TO_MDTAG" \
+-e "$MD_WIKILINK_REMOVE_MAGIC"
