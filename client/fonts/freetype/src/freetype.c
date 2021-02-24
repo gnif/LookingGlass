@@ -97,6 +97,13 @@ static bool lgf_freetype_create(LG_FontObj * opaque, const char * font_name, uns
       goto fail_match;
     }
 
+    if (FT_Select_Charmap(this->face, ft_encoding_unicode))
+    {
+      DEBUG_ERROR("FT_Select_Charmap failed");
+      FT_Done_Face(this->face);
+      goto fail_match;
+    }
+
     FT_Set_Pixel_Sizes(this->face, 0, size);
     this->height = size;
   }
@@ -154,6 +161,42 @@ static void lgf_freetype_destroy(LG_FontObj opaque)
   }
 }
 
+// A very simple UTF-8 decoder that assumes the input is valid.
+static unsigned int utf8_decode(const char * str)
+{
+  const unsigned char * ptr = (const unsigned char *) str;
+  // Handle the 4 byte case: 1111 0xxx 10xx xxxx 10xx xxxx 10xx xxxx.
+  if ((*ptr & 0xf8) == 0xf0)
+    return (ptr[0] & 0x07) << 18 | (ptr[1] & 0x3f) << 12 | (ptr[2] & 0x3f) << 6 | (ptr[3] & 0x3f);
+  // Handle the 3 byte case: 1110 xxxx 10xx xxxx 10xx xxxx.
+  else if ((*ptr & 0xf0) == 0xe0)
+    return (ptr[0] & 0x0f) << 12 | (ptr[1] & 0x3f) << 6 | (ptr[2] & 0x3f);
+  // Handle the 2 byte case: 110x xxxx 10xx xxxx.
+  else if ((*ptr & 0xe0) == 0xc0)
+    return (ptr[0] & 0x1f) << 6 | (ptr[1] & 0x3f);
+  // Everything else is the 1 byte case.
+  else
+    return *ptr;
+}
+
+// Return the length of the current UTF-8 character. Assumes the input is valid.
+static unsigned int utf8_advance(const char * str)
+{
+  const unsigned char * ptr = (const unsigned char *) str;
+  // 4 byte case starts with 1111 0xxx.
+  if ((*ptr & 0xf8) == 0xf0)
+    return 4;
+  // 3 byte case starts with 1110 xxxx.
+  else if ((*ptr & 0xf0) == 0xe0)
+    return 3;
+  // 2 byte case starts with 110x xxxx.
+  else if ((*ptr & 0xe0) == 0xc0)
+    return 2;
+  // Everything else is the 1 byte case.
+  else
+    return 1;
+}
+
 static LG_FontBitmap * lgf_freetype_render(LG_FontObj opaque, unsigned int fg_color, const char * text)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -164,18 +207,19 @@ static LG_FontBitmap * lgf_freetype_render(LG_FontObj opaque, unsigned int fg_co
   int topAscend = 0;
   int bottomDescend = 0;
 
-  for (const char * ptr = text; *ptr; ++ptr)
+  for (const char * ptr = text; *ptr; ptr += utf8_advance(ptr))
   {
-    if (*ptr == '\n')
+    unsigned int ch = utf8_decode(ptr);
+    if (ch == '\n')
     {
-      if (!*(ptr + 1))
+      if (!ptr[1])
         break;
       if (rowWidth > width)
         width = rowWidth;
       rowWidth = bottomDescend = 0;
       ++row;
     }
-    else if (FT_Load_Char(this->face, *ptr, FT_LOAD_RENDER))
+    else if (FT_Load_Char(this->face, ch, FT_LOAD_RENDER))
     {
       DEBUG_ERROR("Failed to load character: %c", *ptr);
       return NULL;
@@ -213,16 +257,17 @@ static LG_FontBitmap * lgf_freetype_render(LG_FontObj opaque, unsigned int fg_co
   unsigned int b = (fg_color & 0x0000ff00) >>  8;
   uint32_t color = (r << 0) | (g << 8) | (b << 16);
 
-  for (const char * ptr = text; *ptr; ++ptr)
+  for (const char * ptr = text; *ptr; ptr += utf8_advance(ptr))
   {
-    if (*ptr == '\n')
+    unsigned int ch = utf8_decode(ptr);
+    if (ch == '\n')
     {
       baseline += this->height;
       x = 0;
     }
-    else if (FT_Load_Char(this->face, *ptr, FT_LOAD_RENDER))
+    else if (FT_Load_Char(this->face, ch, FT_LOAD_RENDER))
     {
-      DEBUG_ERROR("Failed to load character: %c", *ptr);
+      DEBUG_ERROR("Failed to load character: U+%x", ch);
       return NULL;
     }
     else
