@@ -1,0 +1,59 @@
+#!/bin/sh
+
+# Looking Glass - KVM FrameRelay (KVMFR) Client
+# Copyright (C) 2021 Jonathan Rubenstein (jrubcop@gmail.com)
+# https://looking-glass.io
+# 
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2 of the License, or (at your option) any later
+# version.
+# 
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+# Place, Suite 330, Boston, MA 02111-1307 USA
+
+WIKI_PREFIX="https://looking-glass.io/wiki"
+WIKI_PREFIX_SED=$(
+	echo "$WIKI_PREFIX" | sed -e "s/\\//\\\\\//g" -e "s/\./\\\./g"
+)
+
+MD_WIKILINK_PAGE="[[:alpha:]_]+"
+MD_WIKILINK_TOKEN="#[[:alpha:]_]+"
+MD_WIKILINK_MAGIC=" \"wikilink\""
+
+# Run after special replaces
+MD_WIKILINK_TO_WIKI="s/\(($MD_WIKILINK_PAGE($MD_WIKILINK_TOKEN)?)$MD_WIKILINK_MAGIC\)/\($WIKI_PREFIX_SED\/\1\)/g"
+# Run after TO_WIKI
+MD_WIKILINK_SELF="s/\(($MD_WIKILINK_TOKEN)$MD_WIKILINK_MAGIC\)/\(\1\)/g"
+
+# Generates sed expression to replace a wiki page name with a local file path
+# args: returnvar, pagename, localpath
+md_wikilink_replace () {
+	export "$1"="s/\($2($MD_WIKILINK_TOKEN)?$MD_WIKILINK_MAGIC\)/\($3\1\)/g"
+}
+
+md_wikilink_replace "MD_WIKILINK_INSTALL" "Installation" "INSTALL.md"
+md_wikilink_replace "MD_WIKILINK_FAQ" "FAQ" "FAQ.md"
+
+if [ ! -x /usr/bin/pandoc ]; then
+	echo "Please install 'pandoc'"
+	return 1
+fi
+
+pandoc -f mediawiki -t gfm -o client/INSTALL.md "$WIKI_PREFIX/Installation?action=raw"
+pandoc -f mediawiki -t gfm -o client/FAQ.md "$WIKI_PREFIX/FAQ?action=raw"
+
+sed -i client/INSTALL.md -E \
+-e "$MD_WIKILINK_FAQ" \
+-e "$MD_WIKILINK_TO_WIKI" \
+-e "$MD_WIKILINK_SELF"
+
+sed -i client/FAQ.md -E \
+-e "$MD_WIKILINK_INSTALL" \
+-e "$MD_WIKILINK_TO_WIKI" \
+-e "$MD_WIKILINK_SELF"
