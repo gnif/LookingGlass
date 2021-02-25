@@ -73,11 +73,6 @@ if(ENABLE_UBSAN)
   set(EXE_FLAGS "${EXE_FLAGS} -fsanitize=undefined")
 endif()
 
-find_package(PkgConfig)
-pkg_check_modules(PKGCONFIG REQUIRED
-	sdl2
-)
-
 find_package(GMP)
 
 add_definitions(-D ATOMIC_LOCKING)
@@ -94,12 +89,10 @@ add_custom_command(
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PKGCONFIG_INCLUDE_DIRS} ${PKGCONFIG_OPT_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )
 
 link_libraries(
-	${PKGCONFIG_LIBRARIES} ${PKGCONFIG_OPT_LIBRARIES}
 	${GMP_LIBRARIES}
 	${CMAKE_DL_LIBS}
 	rt
@@ -130,7 +123,6 @@ add_subdirectory(renderers)
 add_subdirectory(fonts)
 
 add_executable(looking-glass-client ${SOURCES})
-target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER} ${PKGCONFIG_OPT_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	lg_common

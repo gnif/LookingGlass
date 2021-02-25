@@ -11,8 +11,6 @@ This is the Looking Glass client application that is designed to work in tandem 
 * binutils-dev
 * cmake
 * fonts-freefont-ttf
-* libsdl2-dev
-* libsdl2-ttf-dev
 * libspice-protocol-dev
 * libfontconfig1-dev
 * libx11-dev
@@ -22,7 +20,7 @@ This is the Looking Glass client application that is designed to work in tandem 
 
 #### Debian (and maybe Ubuntu)
 
-    apt-get install binutils-dev cmake fonts-freefont-ttf libsdl2-dev libsdl2-ttf-dev libspice-protocol-dev libfontconfig1-dev libx11-dev nettle-dev libxss-dev libxi-dev
+    apt-get install binutils-dev cmake fonts-freefont-ttf libspice-protocol-dev libfontconfig1-dev libx11-dev nettle-dev libxss-dev libxi-dev
 
 ### Building
 
