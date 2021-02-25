@@ -40,11 +40,6 @@ Wayland and/or X11 support can be disabled with the compile options
 
     cmake ../ -DENABLE_WAYLAND=OFF
 
-At this time, X11 is the perferred and best supported interface. Wayland is not
-far behind, however it lacks some of the seamless interaction features that X11
-has due to the lack of cursor warp (programmatic movement of the local cusror) on
-Wayland.
-
 ---
 
 ## Usage Tips
