@@ -49,6 +49,7 @@ struct AppState
   bool                 ignoreInput;
   bool                 showFPS;
   bool                 escapeActive;
+  uint64_t             escapeTime;
   int                  escapeAction;
   KeybindHandle        bindings[KEY_MAX];
   const char *         keyDescription[KEY_MAX];
