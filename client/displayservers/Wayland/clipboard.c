@@ -329,7 +329,7 @@ bool waylandCBInit(void)
 
   if (!wlWm.dataDeviceManager)
   {
-    DEBUG_ERROR("Missing wl_data_device_manager interface");
+    DEBUG_ERROR("Missing wl_data_device_manager interface (version 3+)");
     return false;
   }
 

@@ -77,11 +77,17 @@ void waylandOutputFree(void)
   }
 }
 
-void waylandOutputBind(uint32_t name)
+void waylandOutputBind(uint32_t name, uint32_t version)
 {
   struct WaylandOutput * node = malloc(sizeof(struct WaylandOutput));
   if (!node)
     return;
+
+  if (version < 3)
+  {
+    DEBUG_WARN("wl_output version too old: expected 3, got %d", version);
+    return;
+  }
 
   node->name   = name;
   node->scale  = 0;
