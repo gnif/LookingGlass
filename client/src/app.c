@@ -194,6 +194,7 @@ void app_handleKeyPress(int sc)
   if (sc == g_params.escapeKey && !g_state.escapeActive)
   {
     g_state.escapeActive = true;
+    g_state.escapeTime   = microtime();
     g_state.escapeAction = -1;
     app_showHelp(true);
     return;
@@ -233,7 +234,7 @@ void app_handleKeyRelease(int sc)
   {
     if (g_state.escapeAction == -1)
     {
-      if (g_params.useSpiceInput)
+      if (microtime() - g_state.escapeTime < 500000 && g_params.useSpiceInput)
         core_setGrab(!g_cursor.grab);
     }
     else
