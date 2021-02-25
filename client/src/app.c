@@ -196,7 +196,6 @@ void app_handleKeyPress(int sc)
     g_state.escapeActive = true;
     g_state.escapeTime   = microtime();
     g_state.escapeAction = -1;
-    app_showHelp(true);
     return;
   }
 
@@ -234,7 +233,7 @@ void app_handleKeyRelease(int sc)
   {
     if (g_state.escapeAction == -1)
     {
-      if (microtime() - g_state.escapeTime < 500000 && g_params.useSpiceInput)
+      if (!g_state.escapeHelp && g_params.useSpiceInput)
         core_setGrab(!g_cursor.grab);
     }
     else
@@ -248,10 +247,7 @@ void app_handleKeyRelease(int sc)
     }
 
     if (sc == g_params.escapeKey)
-    {
       g_state.escapeActive = false;
-      app_showHelp(false);
-    }
   }
 
   if (!core_inputEnabled())
@@ -384,6 +380,26 @@ void app_handleCloseEvent(void)
 {
   if (!g_params.ignoreQuit || !g_cursor.inView)
     g_state.state = APP_STATE_SHUTDOWN;
+}
+
+void app_handleRenderEvent(const uint64_t timeUs)
+{
+  if (!g_state.escapeActive)
+  {
+    if (g_state.escapeHelp)
+    {
+      g_state.escapeHelp = false;
+      app_showHelp(false);
+    }
+  }
+  else
+  {
+    if (!g_state.escapeHelp && timeUs - g_state.escapeTime > 200000)
+    {
+      g_state.escapeHelp = true;
+      app_showHelp(true);
+    }
+  }
 }
 
 void app_setFullscreen(bool fs)

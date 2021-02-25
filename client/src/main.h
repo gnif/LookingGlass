@@ -51,6 +51,7 @@ struct AppState
   bool                 escapeActive;
   uint64_t             escapeTime;
   int                  escapeAction;
+  bool                 escapeHelp;
   KeybindHandle        bindings[KEY_MAX];
   const char *         keyDescription[KEY_MAX];
   bool                 keyDown[KEY_MAX];

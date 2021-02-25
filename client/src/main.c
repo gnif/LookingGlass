@@ -157,7 +157,8 @@ static int renderThread(void * unused)
       }
     }
 
-    if (!g_state.resizeDone && g_state.resizeTimeout < microtime())
+    const uint64_t now = microtime();
+    if (!g_state.resizeDone && g_state.resizeTimeout < now)
     {
       g_state.ds->setWindowSize(
         g_state.dstRect.w,
@@ -165,6 +166,8 @@ static int renderThread(void * unused)
       );
       g_state.resizeDone = true;
     }
+
+    app_handleRenderEvent(now);
   }
 
   g_state.state = APP_STATE_SHUTDOWN;
