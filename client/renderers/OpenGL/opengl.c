@@ -20,11 +20,10 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/renderer.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include <unistd.h>
 #include <malloc.h>
 #include <math.h>
-
-#include <SDL2/SDL_ttf.h>
 
 #include <GL/gl.h>
 #include <GL/glx.h>
@@ -80,6 +79,20 @@ static struct Option opengl_options[] =
   {0}
 };
 
+struct IntPoint
+{
+  int x;
+  int y;
+};
+
+struct IntRect
+{
+  int x;
+  int y;
+  int w;
+  int h;
+};
+
 struct OpenGL_Options
 {
   bool mipmap;
@@ -110,7 +123,7 @@ struct Inst
   bool              reconfigure;
   LG_DSGLContext    glContext;
 
-  SDL_Point         window;
+  struct IntPoint   window;
   float             uiScale;
   bool              frameUpdate;
 
@@ -151,7 +164,7 @@ struct Inst
 
   bool              showFPS;
   bool              fpsTexture;
-  SDL_Rect          fpsRect;
+  struct IntRect    fpsRect;
 
   LG_Lock           mouseLock;
   LG_RendererCursor mouseCursor;
@@ -165,7 +178,7 @@ struct Inst
   bool              newShape;
   LG_RendererCursor mouseType;
   bool              mouseVisible;
-  SDL_Rect          mousePos;
+  struct IntRect    mousePos;
 };
 
 static bool _check_gl_error(unsigned int line, const char * name);
@@ -456,7 +469,7 @@ void opengl_on_alert(void * opaque, const LG_MsgAlert alert, const char * messag
 
   if (!(a->text = this->font->render(this->alertFontObj, 0xffffff00, message)))
   {
-    DEBUG_ERROR("Failed to render alert text: %s", TTF_GetError());
+    DEBUG_ERROR("Failed to render alert text");
     free(a);
     return;
   }
