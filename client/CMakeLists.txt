@@ -32,9 +32,6 @@ add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
 option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
 
-option(ENABLE_SDL "Build with SDL support" OFF)
-add_feature_info(ENABLE_SDL ENABLE_SDL "SDL support.")
-
 option(ENABLE_X11 "Build with X11 support" ON)
 add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
 
@@ -44,8 +41,8 @@ add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
 option(ENABLE_LIBDECOR "Build with libdecor support" OFF)
 add_feature_info(ENABLE_LIBDECOR ENABLE_LIBDECOR "libdecor support.")
 
-if (NOT ENABLE_SDL AND NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
-  message(FATAL_ERROR "One of ENABLE_SDL, ENABLE_X11, or ENABLE_WAYLAND must be on")
+if (NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
+  message(FATAL_ERROR "Either ENABLE_X11 or ENABLE_WAYLAND must be on")
 endif()
 
 add_compile_options(
