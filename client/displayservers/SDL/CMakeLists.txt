@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.0)
 project(displayserver_SDL LANGUAGES C)
 
-#find_package(PkgConfig)
-#pkg_check_modules(DISPLAYSERVER_SDL_PKGCONFIG REQUIRED
-#	#sdl2
-#)
+find_package(PkgConfig)
+pkg_check_modules(DISPLAYSERVER_SDL_PKGCONFIG REQUIRED
+	sdl2
+)
 
 add_library(displayserver_SDL STATIC
 	sdl.c

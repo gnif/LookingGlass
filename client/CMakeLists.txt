@@ -32,11 +32,18 @@ add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
 option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
 
+option(ENABLE_SDL "Build with SDL support" OFF)
+add_feature_info(ENABLE_SDL ENABLE_SDL "SDL support.")
+
 option(ENABLE_X11 "Build with X11 support" ON)
 add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
 
 option(ENABLE_WAYLAND "Build with Wayland support" ON)
 add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
+
+if (NOT ENABLE_SDL AND NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
+  message(FATAL_ERROR "One of ENABLE_SDL, ENABLE_X11, or ENABLE_WAYLAND must be on")
+endif()
 
 add_compile_options(
   "-Wall"
@@ -73,11 +80,6 @@ if(ENABLE_UBSAN)
   set(EXE_FLAGS "${EXE_FLAGS} -fsanitize=undefined")
 endif()
 
-find_package(PkgConfig)
-pkg_check_modules(PKGCONFIG REQUIRED
-	sdl2
-)
-
 find_package(GMP)
 
 add_definitions(-D ATOMIC_LOCKING)
@@ -94,12 +96,10 @@ add_custom_command(
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${PKGCONFIG_INCLUDE_DIRS} ${PKGCONFIG_OPT_INCLUDE_DIRS}
 	${GMP_INCLUDE_DIR}
 )
 
 link_libraries(
-	${PKGCONFIG_LIBRARIES} ${PKGCONFIG_OPT_LIBRARIES}
 	${GMP_LIBRARIES}
 	${CMAKE_DL_LIBS}
 	rt
@@ -130,7 +130,6 @@ add_subdirectory(renderers)
 add_subdirectory(fonts)
 
 add_executable(looking-glass-client ${SOURCES})
-target_compile_options(looking-glass-client PUBLIC ${PKGCONFIG_CFLAGS_OTHER} ${PKGCONFIG_OPT_CFLAGS_OTHER})
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	lg_common

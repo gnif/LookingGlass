@@ -28,7 +28,9 @@ if (ENABLE_X11)
 endif()
 
 # SDL must be last as it's the fallback implemntation
-add_displayserver(SDL)
+if (ENABLE_SDL)
+  add_displayserver(SDL)
+endif()
 
 list(REMOVE_AT DISPLAYSERVERS      0)
 list(REMOVE_AT DISPLAYSERVERS_LINK 0)
