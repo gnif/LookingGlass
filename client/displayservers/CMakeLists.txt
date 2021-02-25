@@ -27,8 +27,9 @@ if (ENABLE_X11)
   add_displayserver(X11)
 endif()
 
-# SDL must be last as it's the fallback implemntation
-add_displayserver(SDL)
+if (NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
+  message(FATAL_ERROR "Either ENABLE_X11 or ENABLE_WAYLAND must be on")
+endif()
 
 list(REMOVE_AT DISPLAYSERVERS      0)
 list(REMOVE_AT DISPLAYSERVERS_LINK 0)
