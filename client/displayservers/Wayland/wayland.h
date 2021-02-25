@@ -221,7 +221,7 @@ void waylandWarpPointer(int x, int y, bool exiting);
 // output module
 bool waylandOutputInit(void);
 void waylandOutputFree(void);
-void waylandOutputBind(uint32_t name);
+void waylandOutputBind(uint32_t name, uint32_t version);
 void waylandOutputTryUnbind(uint32_t name);
 int32_t waylandOutputGetScale(struct wl_output * output);
 

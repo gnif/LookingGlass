@@ -31,12 +31,12 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
     uint32_t name, const char * interface, uint32_t version)
 {
   if (!strcmp(interface, wl_output_interface.name))
-    waylandOutputBind(name);
+    waylandOutputBind(name, version);
   else if (!strcmp(interface, wl_seat_interface.name) && !wlWm.seat)
     wlWm.seat = wl_registry_bind(wlWm.registry, name, &wl_seat_interface, 1);
   else if (!strcmp(interface, wl_shm_interface.name))
     wlWm.shm = wl_registry_bind(wlWm.registry, name, &wl_shm_interface, 1);
-  else if (!strcmp(interface, wl_compositor_interface.name))
+  else if (!strcmp(interface, wl_compositor_interface.name) && version >= 4)
     wlWm.compositor = wl_registry_bind(wlWm.registry, name, &wl_compositor_interface, 4);
   else if (!strcmp(interface, xdg_wm_base_interface.name))
     wlWm.xdgWmBase = wl_registry_bind(wlWm.registry, name, &xdg_wm_base_interface, 1);
@@ -52,7 +52,7 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, zwp_keyboard_shortcuts_inhibit_manager_v1_interface.name))
     wlWm.keyboardInhibitManager = wl_registry_bind(wlWm.registry, name,
         &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1);
-  else if (!strcmp(interface, wl_data_device_manager_interface.name))
+  else if (!strcmp(interface, wl_data_device_manager_interface.name) && version >= 3)
     wlWm.dataDeviceManager = wl_registry_bind(wlWm.registry, name,
         &wl_data_device_manager_interface, 3);
   else if (!strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name))
