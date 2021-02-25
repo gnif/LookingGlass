@@ -20,38 +20,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define _GNU_SOURCE
 #include "wayland.h"
 
-#include <assert.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <signal.h>
-#include <stdbool.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <linux/input.h>
-#include <poll.h>
-#include <sys/epoll.h>
-
-#include <SDL2/SDL.h>
+#include <string.h>
 #include <wayland-client.h>
 
-#if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
-# include <wayland-egl.h>
-# include "egl_dynprocs.h"
-# include <EGL/eglext.h>
-#endif
-
-#include "app.h"
 #include "common/debug.h"
-#include "common/locking.h"
-#include "common/countedbuffer.h"
 #include "common/option.h"
-
-#include "wayland-xdg-shell-client-protocol.h"
-#include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
-#include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
-#include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
-#include "wayland-relative-pointer-unstable-v1-client-protocol.h"
-#include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
 
 static struct Option waylandOptions[] =
 {
