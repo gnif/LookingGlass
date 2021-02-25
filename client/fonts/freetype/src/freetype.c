@@ -285,7 +285,7 @@ static LG_FontBitmap * lgf_freetype_render(LG_FontObj opaque, unsigned int fg_co
       for (int i = 0; i < glyph->bitmap.rows; ++i)
         for (int j = 0; j < glyph->bitmap.width; ++j)
           pixels[(start + i) * pitch + x + j + glyph->bitmap_left] = color |
-              glyph->bitmap.buffer[i * glyph->bitmap.pitch + j] << 24;
+              (uint32_t)glyph->bitmap.buffer[i * glyph->bitmap.pitch + j] << 24;
 
       x += glyph->advance.x / 64;
     }
