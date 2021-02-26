@@ -215,7 +215,7 @@ static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
   DEBUG_ERROR("signal %d (%s), address is %p", sig_num, strsignal(sig_num), info->si_addr);
   printBacktrace();
   cleanupCrashHandler();
-  exit(EXIT_FAILURE);
+  abort();
 }
 
 bool installCrashHandler(const char * exe)
