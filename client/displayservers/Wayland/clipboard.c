@@ -318,9 +318,30 @@ static void dataDeviceHandleSelection(void * opaque,
   wlCb.currentRead = data;
 }
 
+static void dataDeviceHandleEnter(void * data, struct wl_data_device * device,
+    uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW, wl_fixed_t syW,
+    struct wl_data_offer * offer)
+{
+  // Do nothing.
+}
+
+static void dataDeviceHandleMotion(void * data, struct wl_data_device * device,
+    uint32_t time, wl_fixed_t sxW, wl_fixed_t syW)
+{
+  // Do nothing.
+}
+
+static void dataDeviceHandleLeave(void * data, struct wl_data_device * device)
+{
+  // Do nothing.
+}
+
 static const struct wl_data_device_listener dataDeviceListener = {
   .data_offer = dataDeviceHandleDataOffer,
   .selection = dataDeviceHandleSelection,
+  .enter = dataDeviceHandleEnter,
+  .motion = dataDeviceHandleMotion,
+  .leave = dataDeviceHandleLeave,
 };
 
 bool waylandCBInit(void)
