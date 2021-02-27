@@ -30,7 +30,7 @@ jobs:
       run: |
         mkdir client/build
         cd client/build
-        cmake -DCMAKE_BUILD_TYPE={{ matrix.build_type }} ..
+        cmake -DCMAKE_BUILD_TYPE={{ matrix.build_type }} -DENABLE_SDL=ON ..
     - name: Build client
       run: |
         cd client/build
