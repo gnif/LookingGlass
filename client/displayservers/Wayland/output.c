@@ -71,7 +71,8 @@ void waylandOutputFree(void)
   struct WaylandOutput * temp;
   wl_list_for_each_safe(node, temp, &wlWm.outputs, link)
   {
-    wl_output_release(node->output);
+    if (node->version >= 3)
+      wl_output_release(node->output);
     wl_list_remove(&node->link);
     free(node);
   }
@@ -83,16 +84,17 @@ void waylandOutputBind(uint32_t name, uint32_t version)
   if (!node)
     return;
 
-  if (version < 3)
+  if (version < 2)
   {
-    DEBUG_WARN("wl_output version too old: expected 3, got %d", version);
+    DEBUG_WARN("wl_output version too old: expected >= 2, got %d", version);
     return;
   }
 
-  node->name   = name;
-  node->scale  = 0;
-  node->output = wl_registry_bind(wlWm.registry, name,
-      &wl_output_interface, 3);
+  node->name    = name;
+  node->scale   = 0;
+  node->version = version;
+  node->output  = wl_registry_bind(wlWm.registry, name,
+      &wl_output_interface, version >= 3 ? 3 : 2);
 
   if (!node->output)
   {
@@ -113,7 +115,8 @@ void waylandOutputTryUnbind(uint32_t name)
   {
     if (node->name == name)
     {
-      wl_output_release(node->output);
+      if (node->version >= 3)
+        wl_output_release(node->output);
       wl_list_remove(&node->link);
       free(node);
       break;
