@@ -566,8 +566,6 @@ int app_main(int argc, char * argv[])
     DEBUG_ERROR("Failed to create the LGMP timer");
 
     iface->deinit();
-    iface->free();
-
     goto fail_timer;
   }
 
@@ -685,6 +683,7 @@ fail_capture:
   lgTimerDestroy(app.lgmpTimer);
 
 fail_timer:
+  iface->free();
   LG_LOCK_FREE(app.pointerLock);
 
 fail_lgmp:
