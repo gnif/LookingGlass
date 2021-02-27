@@ -1023,6 +1023,7 @@ static CaptureResult dxgi_releaseFrame(void)
 
 struct CaptureInterface Capture_DXGI =
 {
+  .shortName       = "DXGI",
   .getName         = dxgi_getName,
   .initOptions     = dxgi_initOptions,
   .create          = dxgi_create,

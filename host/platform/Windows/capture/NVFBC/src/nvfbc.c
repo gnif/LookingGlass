@@ -427,6 +427,7 @@ static int pointerThread(void * unused)
 
 struct CaptureInterface Capture_NVFBC =
 {
+  .shortName       = "NvFBC",
   .getName         = nvfbc_getName,
   .initOptions     = nvfbc_initOptions,
 
