@@ -139,7 +139,7 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
 
   if (!wlWm.compositor)
   {
-    DEBUG_ERROR("Compositor missing wl_compositor (version 4+), will not proceed");
+    DEBUG_ERROR("Compositor missing wl_compositor (version 3+), will not proceed");
     return false;
   }
 
