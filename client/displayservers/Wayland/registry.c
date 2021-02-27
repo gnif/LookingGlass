@@ -36,8 +36,8 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
     wlWm.seat = wl_registry_bind(wlWm.registry, name, &wl_seat_interface, 1);
   else if (!strcmp(interface, wl_shm_interface.name))
     wlWm.shm = wl_registry_bind(wlWm.registry, name, &wl_shm_interface, 1);
-  else if (!strcmp(interface, wl_compositor_interface.name) && version >= 4)
-    wlWm.compositor = wl_registry_bind(wlWm.registry, name, &wl_compositor_interface, 4);
+  else if (!strcmp(interface, wl_compositor_interface.name) && version >= 3)
+    wlWm.compositor = wl_registry_bind(wlWm.registry, name, &wl_compositor_interface, 3);
   else if (!strcmp(interface, xdg_wm_base_interface.name))
     wlWm.xdgWmBase = wl_registry_bind(wlWm.registry, name, &xdg_wm_base_interface, 1);
   else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
