@@ -97,6 +97,31 @@ struct app
 
 static struct app app;
 
+static bool validateCaptureBackend(struct Option * opt, const char ** error)
+{
+  if (!*opt->value.x_string)
+    return true;
+
+  for (int i = 0; CaptureInterfaces[i]; ++i)
+    if (!strcasecmp(opt->value.x_string, CaptureInterfaces[i]->shortName))
+      return true;
+
+  return false;
+}
+
+static struct Option options[] =
+{
+  {
+    .module         = "app",
+    .name           = "capture",
+    .description    = "Select the capture backend",
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "",
+    .validator      = validateCaptureBackend,
+  },
+  {0}
+};
+
 static bool lgmpTimer(void * opaque)
 {
   LGMP_STATUS status;
@@ -407,6 +432,8 @@ int app_main(int argc, char * argv[])
     if (CaptureInterfaces[i]->initOptions)
       CaptureInterfaces[i]->initOptions();
 
+  option_register(options);
+
   // try load values from a config file
   const char * dataPath = os_getDataPath();
   if (!dataPath)
@@ -528,10 +555,14 @@ int app_main(int argc, char * argv[])
     }
   }
 
+  const char * ifaceName = option_get_string("app", "capture");
   CaptureInterface * iface = NULL;
   for(int i = 0; CaptureInterfaces[i]; ++i)
   {
     iface = CaptureInterfaces[i];
+    if (*ifaceName && strcasecmp(ifaceName, iface->shortName))
+      continue;
+
     DEBUG_INFO("Trying           : %s", iface->getName());
 
     if (!iface->create(captureGetPointerBuffer, capturePostPointerBuffer))
@@ -549,7 +580,10 @@ int app_main(int argc, char * argv[])
 
   if (!iface)
   {
-    DEBUG_ERROR("Failed to find a supported capture interface");
+    if (*ifaceName)
+      DEBUG_ERROR("Specified capture interface not supported");
+    else
+      DEBUG_ERROR("Failed to find a supported capture interface");
     exitcode = LG_HOST_EXIT_FAILED;
     goto fail_lgmp;
   }
