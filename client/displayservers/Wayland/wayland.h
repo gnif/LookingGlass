@@ -56,6 +56,7 @@ struct WaylandOutput
   uint32_t name;
   int32_t scale;
   struct wl_output * output;
+  uint32_t version;
   struct wl_list link;
 };
 
