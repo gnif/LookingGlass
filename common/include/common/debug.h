@@ -31,8 +31,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #ifdef ENABLE_BACKTRACE
 void printBacktrace(void);
+#define DEBUG_PRINT_BACKTRACE() printBacktrace()
 #else
-#define printBacktrace
+#define DEBUG_PRINT_BACKTRACE()
 #endif
 
 #if defined(_WIN32) && !defined(__GNUC__)
@@ -76,7 +77,7 @@ void printBacktrace(void);
 #define DEBUG_FATAL(fmt, ...) do { \
   DEBUG_BREAK(); \
   DEBUG_PRINT("[!]", fmt, ##__VA_ARGS__); \
-  printBacktrace(); \
+  DEBUG_PRINT_BACKTRACE(); \
   abort(); \
 } while(0)
 
