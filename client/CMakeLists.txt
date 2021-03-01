@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 project(looking-glass-client C)
 
-set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
