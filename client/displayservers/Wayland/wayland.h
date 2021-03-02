@@ -117,7 +117,7 @@ struct WaylandDSState
   struct zwp_relative_pointer_manager_v1 * relativePointerManager;
   struct zwp_pointer_constraints_v1 * pointerConstraints;
   struct zwp_relative_pointer_v1 * relativePointer;
-  struct zwp_confined_pointer_v1 * confinedPointer;
+  struct zwp_locked_pointer_v1 * lockedPointer;
   bool showPointer;
   uint32_t pointerEnterSerial;
 

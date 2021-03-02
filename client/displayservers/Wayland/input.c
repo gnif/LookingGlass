@@ -306,9 +306,9 @@ void waylandGrabPointer(void)
       &relativePointerListener, NULL);
   }
 
-  if (!wlWm.confinedPointer)
+  if (!wlWm.lockedPointer)
   {
-    wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
+    wlWm.lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
         wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
         ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
   }
@@ -316,10 +316,10 @@ void waylandGrabPointer(void)
 
 void waylandUngrabPointer(void)
 {
-  if (wlWm.confinedPointer)
+  if (wlWm.lockedPointer)
   {
-    zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
-    wlWm.confinedPointer = NULL;
+    zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
+    wlWm.lockedPointer = NULL;
   }
 
   if (!wlWm.warpSupport)
@@ -332,9 +332,6 @@ void waylandUngrabPointer(void)
       zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
         &relativePointerListener, NULL);
     }
-
-    app_resyncMouseBasic();
-    app_handleMouseBasic();
   }
 }
 
@@ -366,21 +363,24 @@ void waylandWarpPointer(int x, int y, bool exiting)
   struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
   wl_region_add(region, x, y, 1, 1);
 
-  if (wlWm.confinedPointer)
+  bool restoreLock = false;
+  if (wlWm.lockedPointer)
   {
-    zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, region);
-    wl_surface_commit(wlWm.surface);
-    zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, NULL);
+    zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
+    restoreLock = true;
   }
-  else
-  {
-    struct zwp_confined_pointer_v1 * confine;
-    confine = zwp_pointer_constraints_v1_confine_pointer(
-          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
-          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
-    wl_surface_commit(wlWm.surface);
-    zwp_confined_pointer_v1_destroy(confine);
-  }
+
+  struct zwp_confined_pointer_v1 * confine;
+  confine = zwp_pointer_constraints_v1_confine_pointer(
+        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
+        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  wl_surface_commit(wlWm.surface);
+  zwp_confined_pointer_v1_destroy(confine);
+
+  if (restoreLock)
+    wlWm.lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
+        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
 
   wl_surface_commit(wlWm.surface);
   wl_region_destroy(region);
