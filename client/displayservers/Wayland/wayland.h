@@ -229,8 +229,8 @@ int32_t waylandOutputGetScale(struct wl_output * output);
 // poll module
 bool waylandPollInit(void);
 void waylandWait(unsigned int time);
-bool waylandEpollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events);
-bool waylandEpollUnregister(int fd);
+bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events);
+bool waylandPollUnregister(int fd);
 
 // registry module
 bool waylandRegistryInit(void);

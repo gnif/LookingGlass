@@ -56,7 +56,7 @@ bool waylandPollInit(void)
   LG_LOCK_INIT(wlWm.pollFreeLock);
 
   wlWm.displayFd = wl_display_get_fd(wlWm.display);
-  if (!waylandEpollRegister(wlWm.displayFd, waylandDisplayCallback, NULL, EPOLLIN))
+  if (!waylandPollRegister(wlWm.displayFd, waylandDisplayCallback, NULL, EPOLLIN))
   {
     DEBUG_ERROR("Failed register display to epoll: %s", strerror(errno));
     return false;
@@ -105,7 +105,7 @@ void waylandWait(unsigned int time)
   });
 }
 
-static void waylandEpollRemoveNode(struct WaylandPoll * node)
+static void waylandPollRemoveNode(struct WaylandPoll * node)
 {
   INTERLOCKED_SECTION(wlWm.pollLock,
   {
@@ -113,7 +113,7 @@ static void waylandEpollRemoveNode(struct WaylandPoll * node)
   });
 }
 
-bool waylandEpollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events)
+bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events)
 {
   struct WaylandPoll * node = malloc(sizeof(struct WaylandPoll));
   if (!node)
@@ -134,7 +134,7 @@ bool waylandEpollRegister(int fd, WaylandPollCallback callback, void * opaque, u
     .data = (epoll_data_t) { .ptr = node },
   }) < 0)
   {
-    waylandEpollRemoveNode(node);
+    waylandPollRemoveNode(node);
     free(node);
     return false;
   }
@@ -142,7 +142,7 @@ bool waylandEpollRegister(int fd, WaylandPollCallback callback, void * opaque, u
   return true;
 }
 
-bool waylandEpollUnregister(int fd)
+bool waylandPollUnregister(int fd)
 {
   struct WaylandPoll * node = NULL;
   INTERLOCKED_SECTION(wlWm.pollLock,
@@ -167,7 +167,7 @@ bool waylandEpollUnregister(int fd)
     return false;
   }
 
-  waylandEpollRemoveNode(node);
+  waylandPollRemoveNode(node);
 
   INTERLOCKED_SECTION(wlWm.pollFreeLock,
   {
