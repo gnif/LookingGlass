@@ -202,7 +202,7 @@ static void dataDeviceHandleDataOffer(void * data,
 
 static void clipboardReadCancel(struct ClipboardRead * data, bool freeBuf)
 {
-  waylandEpollUnregister(data->fd);
+  waylandPollUnregister(data->fd);
   close(data->fd);
   wl_data_offer_destroy(data->offer);
   if (freeBuf)
@@ -307,7 +307,7 @@ static void dataDeviceHandleSelection(void * opaque,
     return;
   }
 
-  if (!waylandEpollRegister(data->fd, clipboardReadCallback, data, EPOLLIN))
+  if (!waylandPollRegister(data->fd, clipboardReadCallback, data, EPOLLIN))
   {
     DEBUG_ERROR("Failed to register clipboard read into epoll: %s", strerror(errno));
     close(data->fd);
@@ -404,7 +404,7 @@ static void clipboardWriteCallback(uint32_t events, void * opaque)
     return;
 
 error:
-  waylandEpollUnregister(data->fd);
+  waylandPollUnregister(data->fd);
   close(data->fd);
   countedBufferRelease(&data->buffer);
   free(data);
@@ -432,7 +432,7 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     data->pos    = 0;
     data->buffer = transfer->data;
     countedBufferAddRef(transfer->data);
-    waylandEpollRegister(fd, clipboardWriteCallback, data, EPOLLOUT);
+    waylandPollRegister(fd, clipboardWriteCallback, data, EPOLLOUT);
     return;
   }
 
