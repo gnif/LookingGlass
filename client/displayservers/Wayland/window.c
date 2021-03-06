@@ -28,17 +28,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app.h"
 #include "common/debug.h"
 
-// XDG WM base listeners.
-
-static void xdgWmBasePing(void * data, struct xdg_wm_base * xdgWmBase, uint32_t serial)
-{
-  xdg_wm_base_pong(xdgWmBase, serial);
-}
-
-static const struct xdg_wm_base_listener xdgWmBaseListener = {
-  .ping = xdgWmBasePing,
-};
-
 // Surface-handling listeners.
 
 void waylandWindowUpdateScale(void)
@@ -85,54 +74,6 @@ static const struct wl_surface_listener wlSurfaceListener = {
   .leave = wlSurfaceLeaveHandler,
 };
 
-// XDG Surface listeners.
-
-static void xdgSurfaceConfigure(void * data, struct xdg_surface * xdgSurface,
-    uint32_t serial)
-{
-  if (wlWm.configured)
-  {
-    wlWm.needsResize  = true;
-    wlWm.resizeSerial = serial;
-  }
-  else
-  {
-    xdg_surface_ack_configure(xdgSurface, serial);
-    wlWm.configured = true;
-  }
-}
-
-static const struct xdg_surface_listener xdgSurfaceListener = {
-  .configure = xdgSurfaceConfigure,
-};
-
-// XDG Toplevel listeners.
-
-static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
-    int32_t width, int32_t height, struct wl_array * states)
-{
-  wlWm.width = width;
-  wlWm.height = height;
-  wlWm.fullscreen = false;
-
-  enum xdg_toplevel_state * state;
-  wl_array_for_each(state, states)
-  {
-    if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN)
-      wlWm.fullscreen = true;
-  }
-}
-
-static void xdgToplevelClose(void * data, struct xdg_toplevel * xdgToplevel)
-{
-  app_handleCloseEvent();
-}
-
-static const struct xdg_toplevel_listener xdgToplevelListener = {
-  .configure = xdgToplevelConfigure,
-  .close     = xdgToplevelClose,
-};
-
 bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless)
 {
   wlWm.scale = 1;
@@ -143,14 +84,6 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
     return false;
   }
 
-  if (!wlWm.xdgWmBase)
-  {
-    DEBUG_ERROR("Compositor missing xdg_wm_base, will not proceed");
-    return false;
-  }
-
-  xdg_wm_base_add_listener(wlWm.xdgWmBase, &xdgWmBaseListener, NULL);
-
   wlWm.surface = wl_compositor_create_surface(wlWm.compositor);
   if (!wlWm.surface)
   {
@@ -160,35 +93,10 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
 
   wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
-  wlWm.xdgSurface = xdg_wm_base_get_xdg_surface(wlWm.xdgWmBase, wlWm.surface);
-  xdg_surface_add_listener(wlWm.xdgSurface, &xdgSurfaceListener, NULL);
-
-  wlWm.xdgToplevel = xdg_surface_get_toplevel(wlWm.xdgSurface);
-  xdg_toplevel_add_listener(wlWm.xdgToplevel, &xdgToplevelListener, NULL);
-  xdg_toplevel_set_title(wlWm.xdgToplevel, title);
-  xdg_toplevel_set_app_id(wlWm.xdgToplevel, "looking-glass-client");
-
-  if (fullscreen)
-    xdg_toplevel_set_fullscreen(wlWm.xdgToplevel, NULL);
-
-  if (maximize)
-    xdg_toplevel_set_maximized(wlWm.xdgToplevel);
+  if (!waylandShellInit(title, fullscreen, maximize, borderless))
+    return false;
 
   wl_surface_commit(wlWm.surface);
-
-  if (wlWm.xdgDecorationManager)
-  {
-    wlWm.xdgToplevelDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
-        wlWm.xdgDecorationManager, wlWm.xdgToplevel);
-    if (wlWm.xdgToplevelDecoration)
-    {
-      zxdg_toplevel_decoration_v1_set_mode(wlWm.xdgToplevelDecoration,
-          borderless ?
-            ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE :
-            ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-    }
-  }
-
   return true;
 }
 
@@ -200,19 +108,6 @@ void waylandWindowFree(void)
 void waylandSetWindowSize(int x, int y)
 {
   // FIXME: implement.
-}
-
-void waylandSetFullscreen(bool fs)
-{
-  if (fs)
-    xdg_toplevel_set_fullscreen(wlWm.xdgToplevel, NULL);
-  else
-    xdg_toplevel_unset_fullscreen(wlWm.xdgToplevel);
-}
-
-bool waylandGetFullscreen(void)
-{
-  return wlWm.fullscreen;
 }
 
 bool waylandIsValidPointerPos(int x, int y)

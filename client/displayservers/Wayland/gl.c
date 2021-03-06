@@ -85,11 +85,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
     wlWm.needsResize = false;
   }
 
-  if (wlWm.resizeSerial)
-  {
-    xdg_surface_ack_configure(wlWm.xdgSurface, wlWm.resizeSerial);
-    wlWm.resizeSerial = 0;
-  }
+  waylandShellAckConfigureIfNeeded();
 }
 #endif
 
