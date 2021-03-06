@@ -19,6 +19,7 @@ add_library(displayserver_Wayland STATIC
 	poll.c
 	state.c
 	registry.c
+	shell_xdg.c
 	wayland.c
 	window.c
 )

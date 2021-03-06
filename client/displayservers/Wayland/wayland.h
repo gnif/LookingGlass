@@ -236,11 +236,15 @@ bool waylandPollUnregister(int fd);
 bool waylandRegistryInit(void);
 void waylandRegistryFree(void);
 
+// shell module
+bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless);
+void waylandShellAckConfigureIfNeeded(void);
+void waylandSetFullscreen(bool fs);
+bool waylandGetFullscreen(void);
+
 // window module
 bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless);
 void waylandWindowFree(void);
 void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);
-void waylandSetFullscreen(bool fs);
-bool waylandGetFullscreen(void);
 bool waylandIsValidPointerPos(int x, int y);
