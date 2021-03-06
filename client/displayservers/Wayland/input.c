@@ -46,6 +46,10 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW,
     wl_fixed_t syW)
 {
+  if (surface != wlWm.surface)
+    return;
+
+  wlWm.pointerInSurface = true;
   app_handleEnterEvent(true);
 
   wl_pointer_set_cursor(pointer, serial, wlWm.showPointer ? wlWm.cursor : NULL, 0, 0);
@@ -71,6 +75,10 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface)
 {
+  if (surface != wlWm.surface)
+    return;
+
+  wlWm.pointerInSurface = false;
   app_handleEnterEvent(false);
 }
 
@@ -153,6 +161,10 @@ static void keyboardKeymapHandler(void * data, struct wl_keyboard * keyboard,
 static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {
+  if (surface != wlWm.surface)
+    return;
+
+  wlWm.focusedOnSurface = true;
   app_handleFocusEvent(true);
   wlWm.keyboardEnterSerial = serial;
 
@@ -164,12 +176,19 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
+  if (surface != wlWm.surface)
+    return;
+
+  wlWm.focusedOnSurface = false;
   app_handleFocusEvent(false);
 }
 
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
+  if (!wlWm.focusedOnSurface)
+    return;
+
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
     app_handleKeyPress(key);
   else
@@ -358,6 +377,9 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
+  if (!wlWm.pointerInSurface)
+    return;
+
   if (x < 0) x = 0;
   else if (x >= wlWm.width) x = wlWm.width - 1;
   if (y < 0) y = 0;
