@@ -38,11 +38,13 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
     wlWm.shm = wl_registry_bind(wlWm.registry, name, &wl_shm_interface, 1);
   else if (!strcmp(interface, wl_compositor_interface.name) && version >= 3)
     wlWm.compositor = wl_registry_bind(wlWm.registry, name, &wl_compositor_interface, 3);
+#ifndef ENABLE_LIBDECOR
   else if (!strcmp(interface, xdg_wm_base_interface.name))
     wlWm.xdgWmBase = wl_registry_bind(wlWm.registry, name, &xdg_wm_base_interface, 1);
   else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
     wlWm.xdgDecorationManager = wl_registry_bind(wlWm.registry, name,
         &zxdg_decoration_manager_v1_interface, 1);
+#endif
   else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name))
     wlWm.relativePointerManager = wl_registry_bind(wlWm.registry, name,
         &zwp_relative_pointer_manager_v1_interface, 1);

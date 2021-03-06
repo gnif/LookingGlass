@@ -96,11 +96,16 @@ struct WaylandDSState
   EGLSurface glSurface;
 #endif
 
+#ifdef ENABLE_LIBDECOR
+  struct libdecor * libdecor;
+  struct libdecor_frame * libdecorFrame;
+#else
   struct xdg_wm_base * xdgWmBase;
   struct xdg_surface * xdgSurface;
   struct xdg_toplevel * xdgToplevel;
   struct zxdg_decoration_manager_v1 * xdgDecorationManager;
   struct zxdg_toplevel_decoration_v1 * xdgToplevelDecoration;
+#endif
 
   struct wl_surface * cursor;
 

@@ -68,6 +68,8 @@ static bool waylandInit(const LG_DSInitParams params)
   wlWm.warpSupport = option_get_bool("wayland", "warpSupport");
 
   wlWm.display = wl_display_connect(NULL);
+  wlWm.width = params.w;
+  wlWm.height = params.h;
 
   if (!waylandPollInit())
     return false;
