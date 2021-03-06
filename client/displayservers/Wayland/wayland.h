@@ -70,6 +70,8 @@ struct WaylandDSState
 {
   bool pointerGrabbed;
   bool keyboardGrabbed;
+  bool pointerInSurface;
+  bool focusedOnSurface;
 
   struct wl_display * display;
   struct wl_surface * surface;
