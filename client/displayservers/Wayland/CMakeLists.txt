@@ -9,6 +9,20 @@ pkg_check_modules(DISPLAYSERVER_Wayland_PKGCONFIG REQUIRED
 #pkg_check_modules(DISPLAYSERVER_Wayland_OPT_PKGCONFIG
 #)
 
+set(displayserver_Wayland_SHELL_SRC "")
+
+if (ENABLE_LIBDECOR)
+	pkg_check_modules(DISPLAYSERVER_Wayland_LIBDECOR REQUIRED
+		libdecor-0.1
+	)
+	list(APPEND DISPLAYSERVER_Wayland_PKGCONFIG_LIBRARIES ${DISPLAYSERVER_Wayland_LIBDECOR_LIBRARIES})
+	list(APPEND DISPLAYSERVER_Wayland_PKGCONFIG_INCLUDE_DIRS ${DISPLAYSERVER_Wayland_LIBDECOR_INCLUDE_DIRS})
+	list(APPEND displayserver_Wayland_SHELL_SRC shell_libdecor.c)
+	add_definitions(-D ENABLE_LIBDECOR)
+else()
+	list(APPEND displayserver_Wayland_SHELL_SRC shell_xdg.c)
+endif()
+
 add_library(displayserver_Wayland STATIC
 	clipboard.c
 	cursor.c
@@ -19,9 +33,9 @@ add_library(displayserver_Wayland STATIC
 	poll.c
 	state.c
 	registry.c
-	shell_xdg.c
 	wayland.c
 	window.c
+	${displayserver_Wayland_SHELL_SRC}
 )
 
 target_link_libraries(displayserver_Wayland

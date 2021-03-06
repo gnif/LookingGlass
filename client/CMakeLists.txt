@@ -41,6 +41,9 @@ add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
 option(ENABLE_WAYLAND "Build with Wayland support" ON)
 add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
 
+option(ENABLE_LIBDECOR "Build with libdecor support" OFF)
+add_feature_info(ENABLE_LIBDECOR ENABLE_LIBDECOR "libdecor support.")
+
 if (NOT ENABLE_SDL AND NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
   message(FATAL_ERROR "One of ENABLE_SDL, ENABLE_X11, or ENABLE_WAYLAND must be on")
 endif()
