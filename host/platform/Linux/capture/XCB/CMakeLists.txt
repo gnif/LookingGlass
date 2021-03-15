@@ -9,7 +9,7 @@ target_link_libraries(capture_XCB
 	lg_common
 	xcb
 	xcb-shm
-	Xfixes
+	xcb-xfixes
 )
 
 target_include_directories(capture_XCB
