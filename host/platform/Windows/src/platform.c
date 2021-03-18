@@ -27,6 +27,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <fcntl.h>
 #include <powrprof.h>
 #include <ntstatus.h>
+#include <wtsapi32.h>
+#include <userenv.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -71,6 +73,34 @@ static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
 typedef WINBOOL WINAPI (*PChangeWindowMessageFilterEx)(HWND hwnd, UINT message, DWORD action, void * pChangeFilterStruct);
 PChangeWindowMessageFilterEx _ChangeWindowMessageFilterEx = NULL;
 
+CreateProcessAsUserA_t f_CreateProcessAsUserA = NULL;
+
+bool windowsSetupAPI(void)
+{
+  /* first look in kernel32.dll */
+  HMODULE mod;
+
+  mod = GetModuleHandleA("kernel32.dll");
+  if (mod)
+  {
+    f_CreateProcessAsUserA = (CreateProcessAsUserA_t)
+      GetProcAddress(mod, "CreateProcessAsUserA");
+    if (f_CreateProcessAsUserA)
+      return true;
+  }
+
+  mod = GetModuleHandleA("advapi32.dll");
+  if (mod)
+  {
+    f_CreateProcessAsUserA = (CreateProcessAsUserA_t)
+      GetProcAddress(mod, "CreateProcessAsUserA");
+    if (f_CreateProcessAsUserA)
+      return true;
+  }
+
+  return false;
+}
+
 static void RegisterTrayIcon(void)
 {
   // register our TrayIcon
@@ -84,6 +114,99 @@ static void RegisterTrayIcon(void)
     app.iconData.hIcon            = LoadIcon(app.hInst, IDI_APPLICATION);
   }
   Shell_NotifyIcon(NIM_ADD, &app.iconData);
+}
+
+// This function executes notepad as the logged in user, and therefore is secure to use.
+static bool OpenLogFile(const char * logFile)
+{
+  bool result = false;
+
+  DWORD console = WTSGetActiveConsoleSessionId();
+  if (console == 0xFFFFFFFF)
+  {
+    DEBUG_WINERROR("Failed to get active console session ID", GetLastError());
+    return false;
+  }
+
+  WTS_CONNECTSTATE_CLASS * state;
+  DWORD size;
+  if (!WTSQuerySessionInformationA(WTS_CURRENT_SERVER_HANDLE, console, WTSConnectState,
+      (LPSTR *) &state, &size))
+  {
+    DEBUG_WINERROR("Failed to get session information", GetLastError());
+    return false;
+  }
+
+  if (*state != WTSActive)
+  {
+    DEBUG_WINERROR("Will not open log file because user is not logged in", GetLastError());
+    WTSFreeMemory(state);
+    return false;
+  }
+  WTSFreeMemory(state);
+
+  char system32[MAX_PATH];
+  if (!GetSystemDirectoryA(system32, MAX_PATH))
+  {
+    DEBUG_WINERROR("Failed to get system directory", GetLastError());
+    return false;
+  }
+
+  if (!f_CreateProcessAsUserA && !windowsSetupAPI())
+  {
+    DEBUG_WINERROR("Failed to get CreateProcessAsUserA", GetLastError());
+    return false;
+  }
+
+  HANDLE hToken;
+  if (!WTSQueryUserToken(console, &hToken))
+  {
+    DEBUG_WINERROR("Failed to get active console session user token", GetLastError());
+    return false;
+  }
+
+  LPVOID env;
+  if (!CreateEnvironmentBlock(&env, hToken, FALSE))
+  {
+    DEBUG_WINERROR("Failed to create environment", GetLastError());
+    goto fail_token;
+  }
+
+  char notepad[MAX_PATH];
+  PathCombineA(notepad, system32, "notepad.exe");
+
+  char cmdline[MAX_PATH + 10];
+  snprintf(cmdline, sizeof(cmdline), "notepad \"%s\"", logFile);
+
+  STARTUPINFO si = { .cb = sizeof(STARTUPINFO) };
+  PROCESS_INFORMATION pi = {0};
+  if (!f_CreateProcessAsUserA(
+      hToken,
+      notepad,
+      cmdline,
+      NULL,
+      NULL,
+      FALSE,
+      CREATE_UNICODE_ENVIRONMENT,
+      env,
+      os_getDataPath(),
+      &si,
+      &pi
+    ))
+  {
+    DEBUG_WINERROR("Failed to open log file", GetLastError());
+    goto fail_env;
+  }
+
+  result = true;
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+
+fail_env:
+  DestroyEnvironmentBlock(env);
+fail_token:
+  CloseHandle(hToken);
+  return result;
 }
 
 LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -123,14 +246,8 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
           const char * logFile = option_get_string("os", "logFile");
           if (strcmp(logFile, "stderr") == 0)
             DEBUG_INFO("Ignoring request to open the logFile, logging to stderr");
-          else
-          {
-            /* If LG is running as SYSTEM, ShellExecute would launch a process
-             * as the SYSTEM user also, for security we will just show the file
-             * location instead */
-            //ShellExecute(NULL, NULL, logFile, NULL, NULL, SW_SHOWNORMAL);
+          else if (!OpenLogFile(logFile))
             MessageBoxA(hwnd, logFile, "Log File Location", MB_OK | MB_ICONINFORMATION);
-          }
         }
       }
       break;
@@ -295,9 +412,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   MessageHWND = app.messageWnd;
 
   app.trayMenu = CreatePopupMenu();
-  AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_SHOW_LOG, "Log File Location");
-  AppendMenu(app.trayMenu, MF_SEPARATOR, 0               , NULL               );
-  AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_EXIT    , "Exit"             );
+  AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_SHOW_LOG, "Open Log File");
+  AppendMenu(app.trayMenu, MF_SEPARATOR, 0               , NULL           );
+  AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_EXIT    , "Exit"         );
 
   // create the application thread
   LGThread * thread;
