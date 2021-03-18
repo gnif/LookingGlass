@@ -44,24 +44,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define FAIL_MAX_RETRIES         5
 #define FAIL_RETRY_INIT_INTERVAL 1000
 
-/*
- * Windows 10 provides this API via kernel32.dll as well as advapi32.dll and
- * mingw opts for linking against the kernel32.dll version which is fine
- * provided you don't intend to run this on earlier versions of windows. As such
- * we need to lookup this method at runtime. */
-typedef WINBOOL WINAPI (*CreateProcessAsUserA_t)(HANDLE hToken,
-    LPCSTR lpApplicationName,
-    LPSTR lpCommandLine,
-    LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    WINBOOL bInheritHandles,
-    DWORD dwCreationFlags,
-    LPVOID lpEnvironment,
-    LPCSTR lpCurrentDirectory,
-    LPSTARTUPINFOA lpStartupInfo,
-    LPPROCESS_INFORMATION lpProcessInformation);
-static CreateProcessAsUserA_t f_CreateProcessAsUserA = NULL;
-
 struct Service
 {
   FILE * logFile;
@@ -89,32 +71,6 @@ void doLogReal(const char * fmt, ...)
 }
 
 #define doLog(fmt, ...) doLogReal("[%s] " fmt, currentTime(), ##__VA_ARGS__)
-
-static bool setupAPI(void)
-{
-  /* first look in kernel32.dll */
-  HMODULE mod;
-
-  mod = GetModuleHandleA("kernel32.dll");
-  if (mod)
-  {
-    f_CreateProcessAsUserA = (CreateProcessAsUserA_t)
-      GetProcAddress(mod, "CreateProcessAsUserA");
-    if (f_CreateProcessAsUserA)
-      return true;
-  }
-
-  mod = GetModuleHandleA("advapi32.dll");
-  if (mod)
-  {
-    f_CreateProcessAsUserA = (CreateProcessAsUserA_t)
-      GetProcAddress(mod, "CreateProcessAsUserA");
-    if (f_CreateProcessAsUserA)
-      return true;
-  }
-
-  return false;
-}
 
 static void setupLogging(void)
 {
@@ -260,9 +216,9 @@ void Launch(void)
     service.process = NULL;
   }
 
-  if (!setupAPI())
+  if (!windowsSetupAPI())
   {
-    doLog("setupAPI failed\n");
+    doLog("windowsSetupAPI failed\n");
     return;
   }
 
