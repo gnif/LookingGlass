@@ -41,6 +41,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define SVC_ERROR ((DWORD)0xC0020001L)
 #define LOG_NAME  "looking-glass-host-service.txt"
 
+#define FAIL_MAX_RETRIES         5
+#define FAIL_RETRY_INIT_INTERVAL 1000
+
 /*
  * Windows 10 provides this API via kernel32.dll as well as advapi32.dll and
  * mingw opts for linking against the kernel32.dll version which is fine
@@ -644,6 +647,8 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   ivshmemFree(&shmDev);
 
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
+
+  int failCount = 0;
   while(1)
   {
     ULONGLONG launchTime = 0ULL;
@@ -689,15 +694,28 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
             case LG_HOST_EXIT_CAPTURE:
               doLog("Host application exited due to capture error; restarting\n");
+              failCount = 0;
               break;
 
             case LG_HOST_EXIT_KILLED:
               doLog("Host application was killed; restarting\n");
+              failCount = 0;
               break;
 
             case LG_HOST_EXIT_FAILED:
-              doLog("Host application failed to start; will not restart\n");
-              goto stopped;
+            {
+              ++failCount;
+              if (failCount > FAIL_MAX_RETRIES)
+              {
+                doLog("Host application failed to start %d times; will not restart\n", FAIL_MAX_RETRIES);
+                goto stopped;
+              }
+
+              DWORD backoff = FAIL_RETRY_INIT_INTERVAL << (failCount - 1);
+              doLog("Host application failed to start %d times, waiting %u ms...\n", failCount, backoff);
+              Sleep(backoff);
+              break;
+            }
 
             default:
               doLog("Host application failed due to unknown error; restarting\n");
