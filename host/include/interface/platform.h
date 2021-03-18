@@ -29,6 +29,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define LG_HOST_EXIT_KILLED  0x30
 // exit code for failed to start
 #define LG_HOST_EXIT_FAILED  0x40
+// exit code for failed to start, and no amount of restarting could help
+#define LG_HOST_EXIT_FATAL   0x50
 
 int  app_main(int argc, char * argv[]);
 bool app_init();
