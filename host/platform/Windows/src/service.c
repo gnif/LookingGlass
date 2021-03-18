@@ -717,6 +717,10 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
               break;
             }
 
+            case LG_HOST_EXIT_FATAL:
+              doLog("Host application failed to start with fatal error; will not restart\n");
+              goto stopped;
+
             default:
               doLog("Host application failed due to unknown error; restarting\n");
               break;

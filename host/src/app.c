@@ -440,7 +440,7 @@ int app_main(int argc, char * argv[])
   {
     option_free();
     DEBUG_ERROR("Failed to get the application's data path");
-    return LG_HOST_EXIT_FAILED;
+    return LG_HOST_EXIT_FATAL;
   }
 
   const size_t len = strlen(dataPath) + sizeof(CONFIG_FILE) + 1;
@@ -457,18 +457,18 @@ int app_main(int argc, char * argv[])
   {
     option_free();
     DEBUG_ERROR("Failure to parse the command line");
-    return LG_HOST_EXIT_FAILED;
+    return LG_HOST_EXIT_FATAL;
   }
 
   if (!option_validate())
   {
     option_free();
-    return LG_HOST_EXIT_FAILED;
+    return LG_HOST_EXIT_FATAL;
   }
 
   // perform platform specific initialization
   if (!app_init())
-    return LG_HOST_EXIT_FAILED;
+    return LG_HOST_EXIT_FATAL;
 
   DEBUG_INFO("Looking Glass Host (%s)", BUILD_VERSION);
 
@@ -476,13 +476,13 @@ int app_main(int argc, char * argv[])
   if (!ivshmemInit(&shmDev))
   {
     DEBUG_ERROR("Failed to find the IVSHMEM device");
-    return LG_HOST_EXIT_FAILED;
+    return LG_HOST_EXIT_FATAL;
   }
 
   if (!ivshmemOpen(&shmDev))
   {
     DEBUG_ERROR("Failed to open the IVSHMEM device");
-    return LG_HOST_EXIT_FAILED;
+    return LG_HOST_EXIT_FATAL;
   }
 
   int exitcode  = 0;
@@ -502,21 +502,21 @@ int app_main(int argc, char * argv[])
           sizeof(udata), (uint8_t *)&udata)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FAILED;
+    exitcode = LG_HOST_EXIT_FATAL;
     goto fail_ivshmem;
   }
 
   if ((status = lgmpHostQueueNew(app.lgmp, FRAME_QUEUE_CONFIG, &app.frameQueue)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FAILED;
+    exitcode = LG_HOST_EXIT_FATAL;
     goto fail_lgmp;
   }
 
   if ((status = lgmpHostQueueNew(app.lgmp, POINTER_QUEUE_CONFIG, &app.pointerQueue)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostQueueNew Failed (Pointer): %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FAILED;
+    exitcode = LG_HOST_EXIT_FATAL;
     goto fail_lgmp;
   }
 
@@ -525,7 +525,7 @@ int app_main(int argc, char * argv[])
     if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
-      exitcode = LG_HOST_EXIT_FAILED;
+      exitcode = LG_HOST_EXIT_FATAL;
       goto fail_lgmp;
     }
     memset(lgmpHostMemPtr(app.pointerMemory[i]), 0, MAX_POINTER_SIZE);
@@ -535,7 +535,7 @@ int app_main(int argc, char * argv[])
   if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerShape)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Shape): %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FAILED;
+    exitcode = LG_HOST_EXIT_FATAL;
     goto fail_lgmp;
   }
 
@@ -550,7 +550,7 @@ int app_main(int argc, char * argv[])
     if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize, sz, &app.frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
-      exitcode = LG_HOST_EXIT_FAILED;
+      exitcode = LG_HOST_EXIT_FATAL;
       goto fail_lgmp;
     }
   }
