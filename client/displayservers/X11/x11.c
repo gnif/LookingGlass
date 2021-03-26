@@ -462,7 +462,7 @@ static int x11EventThread(void * unused)
       case ClientMessage:
         if (xe.xclient.data.l[0] == x11atoms.WM_DELETE_WINDOW)
           app_handleCloseEvent();
-        break;
+        continue;
 
       case ConfigureNotify:
       {
