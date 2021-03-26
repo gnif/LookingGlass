@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "interface/displayserver.h"
 
 #include "x11.h"
+#include "atoms.h"
 #include "clipboard.h"
 
 #include <string.h>
@@ -145,31 +146,17 @@ static bool x11Init(const LG_DSInitParams params)
   free(hint.res_name);
   free(hint.res_class);
 
-  x11.aNetReqFrameExtents =
-    XInternAtom(x11.display, "_NET_REQUEST_FRAME_EXTENTS", True);
-  x11.aNetFrameExtents =
-    XInternAtom(x11.display, "_NET_FRAME_EXTENTS", True);
-  x11.aNetWMState =
-    XInternAtom(x11.display, "_NET_WM_STATE", True);
-  x11.aNetWMStateFullscreen =
-    XInternAtom(x11.display, "_NET_WM_STATE_FULLSCREEN", True);
-  x11.aNetWMWindowType =
-    XInternAtom(x11.display, "_NET_WM_WINDOW_TYPE", True);
-  x11.aNetWMWindowTypeNormal =
-    XInternAtom(x11.display, "_NET_WM_WINDOW_TYPE_NORMAL", True);
-  x11.aWMDeleteWindow =
-    XInternAtom(x11.display, "WM_DELETE_WINDOW", True);
-
-  XSetWMProtocols(x11.display, x11.window, &x11.aWMDeleteWindow, 1);
+  X11AtomsInit();
+  XSetWMProtocols(x11.display, x11.window, &x11atoms.WM_DELETE_WINDOW, 1);
 
   XChangeProperty(
     x11.display,
     x11.window,
-    x11.aNetWMWindowType,
+    x11atoms._NET_WM_WINDOW_TYPE,
     XA_ATOM,
     32,
     PropModeReplace,
-    (unsigned char *)&x11.aNetWMWindowTypeNormal,
+    (unsigned char *)&x11atoms._NET_WM_WINDOW_TYPE_NORMAL,
     1
   );
 
@@ -178,16 +165,16 @@ static bool x11Init(const LG_DSInitParams params)
     XChangeProperty(
       x11.display,
       x11.window,
-      x11.aNetWMState,
+      x11atoms._NET_WM_STATE,
       XA_ATOM,
       32,
       PropModeReplace,
-      (unsigned char *)&x11.aNetWMStateFullscreen,
+      (unsigned char *)&x11atoms._NET_WM_STATE_FULLSCREEN,
       1
     );
   }
 
-  if (x11.aNetReqFrameExtents)
+  if (x11atoms._NET_REQUEST_FRAME_EXTENTS)
   {
     XEvent reqevent =
     {
@@ -196,7 +183,7 @@ static bool x11Init(const LG_DSInitParams params)
         .type         = ClientMessage,
         .window       = x11.window,
         .format       = 32,
-        .message_type = x11.aNetReqFrameExtents
+        .message_type = x11atoms._NET_REQUEST_FRAME_EXTENTS
       }
     };
 
@@ -473,7 +460,7 @@ static int x11EventThread(void * unused)
     switch(xe.type)
     {
       case ClientMessage:
-        if (xe.xclient.data.l[0] == x11.aWMDeleteWindow)
+        if (xe.xclient.data.l[0] == x11atoms.WM_DELETE_WINDOW)
           app_handleCloseEvent();
         break;
 
@@ -526,7 +513,7 @@ static int x11EventThread(void * unused)
             xe.xproperty.state   != PropertyNewValue)
           continue;
 
-        if (xe.xproperty.atom == x11.aNetWMState)
+        if (xe.xproperty.atom == x11atoms._NET_WM_STATE)
         {
           Atom type;
           int fmt;
@@ -534,7 +521,7 @@ static int x11EventThread(void * unused)
           unsigned char *data;
 
           if (XGetWindowProperty(x11.display, x11.window,
-              x11.aNetWMState, 0, ~0L, False, AnyPropertyType,
+              x11atoms._NET_WM_STATE, 0, ~0L, False, AnyPropertyType,
               &type, &fmt, &num, &bytes, &data) != Success)
             break;
 
@@ -542,7 +529,7 @@ static int x11EventThread(void * unused)
           for(int i = 0; i < num; ++i)
           {
             Atom prop = ((Atom *)data)[i];
-            if (prop == x11.aNetWMStateFullscreen)
+            if (prop == x11atoms._NET_WM_STATE_FULLSCREEN)
               fullscreen = true;
           }
 
@@ -551,7 +538,7 @@ static int x11EventThread(void * unused)
           break;
         }
 
-        if (xe.xproperty.atom == x11.aNetFrameExtents)
+        if (xe.xproperty.atom == x11atoms._NET_FRAME_EXTENTS)
         {
           Atom type;
           int fmt;
@@ -559,7 +546,7 @@ static int x11EventThread(void * unused)
           unsigned char *data;
 
           if (XGetWindowProperty(x11.display, x11.window,
-                x11.aNetFrameExtents, 0, 4, False, AnyPropertyType,
+                x11atoms._NET_FRAME_EXTENTS, 0, 4, False, AnyPropertyType,
                 &type, &fmt, &num, &bytes, &data) != Success)
               break;
 
@@ -1052,12 +1039,12 @@ static void x11SetFullscreen(bool fs)
     .xclient = {
       .type         = ClientMessage,
       .send_event   = true,
-      .message_type = x11.aNetWMState,
+      .message_type = x11atoms._NET_WM_STATE,
       .format       = 32,
       .window       = x11.window,
       .data.l       = {
         fs ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
-        x11.aNetWMStateFullscreen,
+        x11atoms._NET_WM_STATE_FULLSCREEN,
         0
       }
     }

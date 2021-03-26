@@ -12,6 +12,7 @@ pkg_check_modules(DISPLAYSERVER_X11_PKGCONFIG REQUIRED
 
 add_library(displayserver_X11 STATIC
 	x11.c
+	atoms.c
 	clipboard.c
 )
 

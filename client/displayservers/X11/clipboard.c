@@ -19,6 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "clipboard.h"
 #include "x11.h"
+#include "atoms.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -31,11 +32,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct X11ClipboardState
 {
-  Atom             aSelection;
   Atom             aCurSelection;
-  Atom             aTargets;
-  Atom             aSelData;
-  Atom             aIncr;
   Atom             aTypes[LG_CLIPBOARD_DATA_NONE];
   LG_ClipboardData type;
   bool             haveRequest;
@@ -79,7 +76,7 @@ void x11CBEventThread(const XEvent xe)
       break;
 
     case PropertyNotify:
-      if (xe.xproperty.atom == x11cb.aSelData)
+      if (xe.xproperty.atom == x11atoms.SEL_DATA)
       {
         if (x11cb.lowerBound == 0)
           break;
@@ -101,12 +98,7 @@ void x11CBEventThread(const XEvent xe)
 
 bool x11CBInit()
 {
-  x11cb.aSelection    = XInternAtom(x11.display, "CLIPBOARD"  , False);
-  x11cb.aTargets      = XInternAtom(x11.display, "TARGETS"    , False);
-  x11cb.aSelData      = XInternAtom(x11.display, "SEL_DATA"   , False);
-  x11cb.aIncr         = XInternAtom(x11.display, "INCR"       , False);
   x11cb.aCurSelection = BadValue;
-
   for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
   {
     x11cb.aTypes[i] = XInternAtom(x11.display, atomTypes[i], False);
@@ -127,7 +119,7 @@ bool x11CBInit()
   XFixesSelectSelectionInput(x11.display, x11.window,
       XA_PRIMARY, XFixesSetSelectionOwnerNotifyMask);
   XFixesSelectSelectionInput(x11.display, x11.window,
-      x11cb.aSelection, XFixesSetSelectionOwnerNotifyMask);
+      x11atoms.CLIPBOARD, XFixesSetSelectionOwnerNotifyMask);
 
   return true;
 }
@@ -166,10 +158,10 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     goto nodata;
 
   // target list requested
-  if (e.target == x11cb.aTargets)
+  if (e.target == x11atoms.TARGETS)
   {
     Atom targets[2];
-    targets[0] = x11cb.aTargets;
+    targets[0] = x11atoms.TARGETS;
     targets[1] = x11cb.aTypes[x11cb.type];
 
     XChangeProperty(
@@ -206,7 +198,7 @@ send:
 
 static void x11CBSelectionClear(const XSelectionClearEvent e)
 {
-  if (e.selection != XA_PRIMARY && e.selection != x11cb.aSelection)
+  if (e.selection != XA_PRIMARY && e.selection != x11atoms.CLIPBOARD)
     return;
 
   x11cb.aCurSelection = BadValue;
@@ -227,7 +219,7 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
       e.atom,
       0, ~0L, // start and length
       True,   // delete the property
-      x11cb.aIncr,
+      x11atoms.INCR,
       &type,
       &format,
       &itemCount,
@@ -292,7 +284,7 @@ out:
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
 {
   // check if the selection is valid and it isn't ourself
-  if ((e.selection != XA_PRIMARY && e.selection != x11cb.aSelection) ||
+  if ((e.selection != XA_PRIMARY && e.selection != x11atoms.CLIPBOARD) ||
       e.owner == x11.window || e.owner == 0)
   {
     return;
@@ -303,8 +295,8 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
   XConvertSelection(
       x11.display,
       e.selection,
-      x11cb.aTargets,
-      x11cb.aTargets,
+      x11atoms.TARGETS,
+      x11atoms.TARGETS,
       x11.window,
       CurrentTime);
 
@@ -338,7 +330,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     goto out;
   }
 
-  if (type == x11cb.aIncr)
+  if (type == x11atoms.INCR)
   {
     x11cb.incrStart  = true;
     x11cb.lowerBound = *(unsigned int *)data;
@@ -346,7 +338,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   }
 
   // the target list
-  if (e.property == x11cb.aTargets)
+  if (e.property == x11atoms.TARGETS)
   {
     // the format is 32-bit and we must have data
     // this is technically incorrect however as it's
@@ -372,7 +364,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     goto out;
   }
 
-  if (e.property == x11cb.aSelData)
+  if (e.property == x11atoms.SEL_DATA)
   {
     LG_ClipboardData dataType;
     for(dataType = 0; dataType < LG_CLIPBOARD_DATA_NONE; ++dataType)
@@ -399,16 +391,16 @@ void x11CBNotice(LG_ClipboardData type)
 {
   x11cb.haveRequest = true;
   x11cb.type        = type;
-  XSetSelectionOwner(x11.display, XA_PRIMARY      , x11.window, CurrentTime);
-  XSetSelectionOwner(x11.display, x11cb.aSelection, x11.window, CurrentTime);
+  XSetSelectionOwner(x11.display, XA_PRIMARY        , x11.window, CurrentTime);
+  XSetSelectionOwner(x11.display, x11atoms.CLIPBOARD, x11.window, CurrentTime);
   XFlush(x11.display);
 }
 
 void x11CBRelease(void)
 {
   x11cb.haveRequest = false;
-  XSetSelectionOwner(x11.display, XA_PRIMARY      , None, CurrentTime);
-  XSetSelectionOwner(x11.display, x11cb.aSelection, None, CurrentTime);
+  XSetSelectionOwner(x11.display, XA_PRIMARY        , None, CurrentTime);
+  XSetSelectionOwner(x11.display, x11atoms.CLIPBOARD, None, CurrentTime);
   XFlush(x11.display);
 }
 
@@ -421,7 +413,7 @@ void x11CBRequest(LG_ClipboardData type)
       x11.display,
       x11cb.aCurSelection,
       x11cb.aTypes[type],
-      x11cb.aSelData,
+      x11atoms.SEL_DATA,
       x11.window,
       CurrentTime);
 }

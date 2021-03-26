@@ -17,45 +17,34 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _H_X11DS_X11_
-#define _H_X11DS_X11_
+#ifndef _H_X11DS_ATOMS_
+#define _H_X11DS_ATOMS_
+
+#define DEF_ATOMS() \
+  DEF_ATOM(_NET_REQUEST_FRAME_EXTENTS) \
+  DEF_ATOM(_NET_FRAME_EXTENTS) \
+  DEF_ATOM(_NET_WM_STATE) \
+  DEF_ATOM(_NET_WM_STATE_FULLSCREEN) \
+  DEF_ATOM(_NET_WM_WINDOW_TYPE) \
+  DEF_ATOM(_NET_WM_WINDOW_TYPE_NORMAL) \
+  DEF_ATOM(WM_DELETE_WINDOW) \
+  \
+  DEF_ATOM(CLIPBOARD) \
+  DEF_ATOM(TARGETS) \
+  DEF_ATOM(SEL_DATA) \
+  DEF_ATOM(INCR)
 
 #include <X11/Xlib.h>
-#include <X11/Xatom.h>
-#include <X11/Xutil.h>
 
-#include "common/thread.h"
-#include "common/types.h"
-
-struct X11DSState
+#define DEF_ATOM(x) Atom x;
+struct X11DSAtoms
 {
-  Display *     display;
-  Window        window;
-  XVisualInfo * visual;
-  int        xinputOp;
-
-  LGThread * eventThread;
-
-  int pointerDev;
-  int keyboardDev;
-
-  bool pointerGrabbed;
-  bool keyboardGrabbed;
-  bool entered;
-  bool focused;
-  bool fullscreen;
-
-  struct Rect   rect;
-  struct Border border;
-
-  Cursor blankCursor;
-  Cursor squareCursor;
-
-  // XFixes vars
-  int eventBase;
-  int errorBase;
+  DEF_ATOMS()
 };
+#undef DEF_ATOM
 
-extern struct X11DSState x11;
+extern struct X11DSAtoms x11atoms;
+
+void X11AtomsInit(void);
 
 #endif

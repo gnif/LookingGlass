@@ -17,45 +17,14 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _H_X11DS_X11_
-#define _H_X11DS_X11_
+#include "atoms.h"
+#include "x11.h"
 
-#include <X11/Xlib.h>
-#include <X11/Xatom.h>
-#include <X11/Xutil.h>
+struct X11DSAtoms x11atoms = { 0 };
 
-#include "common/thread.h"
-#include "common/types.h"
-
-struct X11DSState
+void X11AtomsInit(void)
 {
-  Display *     display;
-  Window        window;
-  XVisualInfo * visual;
-  int        xinputOp;
-
-  LGThread * eventThread;
-
-  int pointerDev;
-  int keyboardDev;
-
-  bool pointerGrabbed;
-  bool keyboardGrabbed;
-  bool entered;
-  bool focused;
-  bool fullscreen;
-
-  struct Rect   rect;
-  struct Border border;
-
-  Cursor blankCursor;
-  Cursor squareCursor;
-
-  // XFixes vars
-  int eventBase;
-  int errorBase;
-};
-
-extern struct X11DSState x11;
-
-#endif
+  #define DEF_ATOM(x) x11atoms.x = XInternAtom(x11.display, #x, True);
+  DEF_ATOMS()
+  #undef DEF_ATOM
+}
