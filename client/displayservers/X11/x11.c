@@ -96,6 +96,8 @@ static bool x11Init(const LG_DSInitParams params)
   int event, error;
 
   memset(&x11, 0, sizeof(x11));
+  x11.xValuator = -1;
+  x11.yValuator = -1;
   x11.display = XOpenDisplay(NULL);
 
   XSetWindowAttributes swa =
@@ -292,23 +294,38 @@ static bool x11Init(const LG_DSInitParams params)
     goto fail_window;
   }
 
+  Atom rel_x = XInternAtom(x11.display, "Rel X", True);
+  Atom rel_y = XInternAtom(x11.display, "Rel Y", True);
+
   bool havePointer  = false;
   bool haveKeyboard = false;
   for(int i = 0; i < count; ++i)
   {
     /* look for the master pointing device */
     if (!havePointer && devinfo[i].use == XIMasterPointer)
+    {
       for(int j = 0; j < devinfo[i].num_classes; ++j)
       {
         XIAnyClassInfo *cdevinfo =
           (XIAnyClassInfo *)(devinfo[i].classes[j]);
         if (cdevinfo->type == XIValuatorClass)
         {
-          havePointer = true;
-          x11.pointerDev = devinfo[i].deviceid;
-          break;
+          XIValuatorClassInfo *vdevinfo = (XIValuatorClassInfo *)cdevinfo;
+          if (vdevinfo->label == rel_x || (!vdevinfo->label &&
+              vdevinfo->number == 0 && vdevinfo->mode == XIModeRelative))
+            x11.xValuator = vdevinfo->number;
+          else if (vdevinfo->label == rel_y || (!vdevinfo->label &&
+              vdevinfo->number == 1 && vdevinfo->mode == XIModeRelative))
+            x11.yValuator = vdevinfo->number;
         }
       }
+
+      if (x11.xValuator >= 0 && x11.yValuator >= 0)
+      {
+        havePointer = true;
+        x11.pointerDev = devinfo[i].deviceid;
+      }
+    }
 
     /* look for the master keyboard device */
     if (!haveKeyboard && devinfo[i].use == XIMasterKeyboard)
@@ -820,31 +837,37 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
         return;
 
       XIRawEvent *raw = cookie->data;
-      double raw_axis[2];
-      double axis[2];
+      double raw_axis[2] = { 0 };
+      double axis[2] = { 0 };
 
       /* select the active validators for the X & Y axis */
       double *valuator = raw->valuators.values;
       double *r_value  = raw->raw_values;
-      int    count     = 0;
+      bool   has_axes  = false;
       for(int i = 0; i < raw->valuators.mask_len * 8; ++i)
       {
         if (XIMaskIsSet(raw->valuators.mask, i))
         {
-          raw_axis[count] = *r_value;
-          axis    [count] = *valuator;
-          ++count;
-
-          if (count == 2)
-            break;
+          if (i == x11.xValuator)
+          {
+            raw_axis[0] = *r_value;
+            axis    [0] = *valuator;
+            has_axes = true;
+          }
+          else if (i == x11.yValuator)
+          {
+            raw_axis[1] = *r_value;
+            axis    [1] = *valuator;
+            has_axes = true;
+          }
 
           ++valuator;
           ++r_value;
         }
       }
 
-      /* filter out scroll wheel and other events */
-      if (count < 2)
+      /* filter out events with no axis data */
+      if (!has_axes)
         return;
 
       /* filter out duplicate events */
