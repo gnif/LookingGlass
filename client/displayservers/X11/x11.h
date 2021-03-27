@@ -38,6 +38,8 @@ struct X11DSState
 
   int pointerDev;
   int keyboardDev;
+  int xValuator;
+  int yValuator;
 
   bool pointerGrabbed;
   bool keyboardGrabbed;
