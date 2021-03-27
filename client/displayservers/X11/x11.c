@@ -138,18 +138,6 @@ static bool x11Init(const LG_DSInitParams params)
   }
 #endif
 
-  swaMask |= CWBitGravity | CWWinGravity;
-  if (params.center)
-  {
-    swa.bit_gravity = CenterGravity;
-    swa.win_gravity = CenterGravity;
-  }
-  else
-  {
-    swa.bit_gravity = NorthWestGravity;
-    swa.win_gravity = NorthWestGravity;
-  }
-
   x11.window = XCreateWindow(
       x11.display,
       XDefaultRootWindow(x11.display),
@@ -178,6 +166,15 @@ static bool x11Init(const LG_DSInitParams params)
   XSetClassHint(x11.display, x11.window, &hint);
   free(hint.res_name);
   free(hint.res_class);
+
+  if (params.center)
+  {
+    XSizeHints *xsh = XAllocSizeHints();
+    xsh->flags       = PWinGravity;
+    xsh->win_gravity = 5; //Center
+    XSetWMNormalHints(x11.display, x11.window, xsh);
+    XFree(xsh);
+  }
 
   X11AtomsInit();
   XSetWMProtocols(x11.display, x11.window, &x11atoms.WM_DELETE_WINDOW, 1);
