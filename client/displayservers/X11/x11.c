@@ -202,17 +202,20 @@ static bool x11Init(const LG_DSInitParams params)
         5
       );
     }
-
-    XChangeProperty(
-      x11.display,
-      x11.window,
-      x11atoms._NET_WM_WINDOW_TYPE,
-      XA_ATOM,
-      32,
-      PropModeReplace,
-      (unsigned char *)&x11atoms._NET_WM_WINDOW_TYPE_UTILITY,
-      1
-    );
+    else
+    {
+      // fallback to making a utility window, not ideal but better then nothing
+      XChangeProperty(
+        x11.display,
+        x11.window,
+        x11atoms._NET_WM_WINDOW_TYPE,
+        XA_ATOM,
+        32,
+        PropModeReplace,
+        (unsigned char *)&x11atoms._NET_WM_WINDOW_TYPE_UTILITY,
+        1
+      );
+    }
   }
   else
   {
