@@ -48,6 +48,27 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 struct X11DSState x11;
 
+struct MwmHints
+{
+  unsigned long flags;
+  unsigned long functions;
+  unsigned long decorations;
+  long          input_mode;
+  unsigned long status;
+};
+
+enum {
+  MWM_HINTS_FUNCTIONS   = (1L << 0),
+  MWM_HINTS_DECORATIONS = (1L << 1),
+
+  MWM_FUNC_ALL          = (1L << 0),
+  MWM_FUNC_RESIZE       = (1L << 1),
+  MWM_FUNC_MOVE         = (1L << 2),
+  MWM_FUNC_MINIMIZE     = (1L << 3),
+  MWM_FUNC_MAXIMIZE     = (1L << 4),
+  MWM_FUNC_CLOSE        = (1L << 5)
+};
+
 // forwards
 static void x11SetFullscreen(bool fs);
 static int  x11EventThread(void * unused);
@@ -117,6 +138,18 @@ static bool x11Init(const LG_DSInitParams params)
   }
 #endif
 
+  swaMask |= CWBitGravity | CWWinGravity;
+  if (params.center)
+  {
+    swa.bit_gravity = CenterGravity;
+    swa.win_gravity = CenterGravity;
+  }
+  else
+  {
+    swa.bit_gravity = NorthWestGravity;
+    swa.win_gravity = NorthWestGravity;
+  }
+
   x11.window = XCreateWindow(
       x11.display,
       XDefaultRootWindow(x11.display),
@@ -149,18 +182,69 @@ static bool x11Init(const LG_DSInitParams params)
   X11AtomsInit();
   XSetWMProtocols(x11.display, x11.window, &x11atoms.WM_DELETE_WINDOW, 1);
 
-  XChangeProperty(
-    x11.display,
-    x11.window,
-    x11atoms._NET_WM_WINDOW_TYPE,
-    XA_ATOM,
-    32,
-    PropModeReplace,
-    (unsigned char *)&x11atoms._NET_WM_WINDOW_TYPE_NORMAL,
-    1
-  );
+  if (params.borderless)
+  {
+    if (x11atoms._MOTIF_WM_HINTS)
+    {
+      const struct MwmHints hints =
+      {
+        .flags       = MWM_HINTS_DECORATIONS,
+        .decorations = 0
+      };
+
+      XChangeProperty(
+        x11.display,
+        x11.window,
+        x11atoms._MOTIF_WM_HINTS,
+        x11atoms._MOTIF_WM_HINTS,
+        32,
+        PropModeReplace,
+        (unsigned char *)&hints,
+        5
+      );
+    }
+
+    XChangeProperty(
+      x11.display,
+      x11.window,
+      x11atoms._NET_WM_WINDOW_TYPE,
+      XA_ATOM,
+      32,
+      PropModeReplace,
+      (unsigned char *)&x11atoms._NET_WM_WINDOW_TYPE_UTILITY,
+      1
+    );
+  }
+  else
+  {
+    XChangeProperty(
+      x11.display,
+      x11.window,
+      x11atoms._NET_WM_WINDOW_TYPE,
+      XA_ATOM,
+      32,
+      PropModeReplace,
+      (unsigned char *)&x11atoms._NET_WM_WINDOW_TYPE_NORMAL,
+      1
+    );
+  }
+
+  Atom wmState[3] = {0};
+  int wmStateCount = 0;
 
   if (params.fullscreen)
+  {
+    x11.fullscreen = true;
+    wmState[wmStateCount++] = x11atoms._NET_WM_STATE_FULLSCREEN;
+  }
+
+  if (params.maximize)
+  {
+    wmState[wmStateCount++] = x11atoms._NET_WM_STATE_MAXIMIZED_HORZ;
+    wmState[wmStateCount++] = x11atoms._NET_WM_STATE_MAXIMIZED_VERT;
+  }
+
+  if (wmStateCount)
   {
     XChangeProperty(
       x11.display,
@@ -169,8 +253,8 @@ static bool x11Init(const LG_DSInitParams params)
       XA_ATOM,
       32,
       PropModeReplace,
-      (unsigned char *)&x11atoms._NET_WM_STATE_FULLSCREEN,
-      1
+      (unsigned char *)&wmState,
+      wmStateCount
     );
   }
 
