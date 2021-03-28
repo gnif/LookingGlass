@@ -238,6 +238,20 @@ void core_updatePositionInfo(void)
       g_state.dstRect.y = (g_state.windowH >> 1) - (g_state.dstRect.h >> 1);
     }
 
+    if (g_params.dontUpscale && g_params.shrinkOnUpscale)
+    {
+      if (g_state.windowW > srcW)
+      {
+        force = true;
+        g_state.dstRect.w = srcW;
+      }
+      if (g_state.windowH > srcH)
+      {
+        force = true;
+        g_state.dstRect.h = srcH;
+      }
+    }
+
     if (force && g_params.forceAspect)
     {
       g_state.resizeTimeout = microtime() + RESIZE_TIMEOUT;

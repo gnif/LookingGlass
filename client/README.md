@@ -126,6 +126,7 @@ Command line arguments will override any options loaded from the config files.
 | win:keepAspect          | -r    | yes                    | Maintain the correct aspect ratio                                    |
 | win:forceAspect         |       | yes                    | Force the window to maintain the aspect ratio                        |
 | win:dontUpscale         |       | no                     | Never try to upscale the window                                      |
+| win:shrinkOnUpscale     |       | no                     | Limit the window dimensions when dontUpscale is enabled              |
 | win:borderless          | -d    | no                     | Borderless mode                                                      |
 | win:fullScreen          | -F    | no                     | Launch in fullscreen borderless mode                                 |
 | win:maximize            | -T    | no                     | Launch window maximized                                              |
