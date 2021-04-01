@@ -46,10 +46,6 @@ static void libdecorHandleError(struct libdecor * context, enum libdecor_error e
   DEBUG_ERROR("Got libdecor error (%d): %s", error, message);
 }
 
-static struct libdecor_interface libdecorListener = {
-  libdecorHandleError,
-};
-
 static void libdecorFrameConfigure(struct libdecor_frame * frame,
     struct libdecor_configuration * configuration, void * opaque)
 {
@@ -81,15 +77,22 @@ static void libdecorFrameClose(struct libdecor_frame * frame, void * opaque)
   app_handleCloseEvent();
 }
 
-static void libdecorFrameCommit(void * opaque)
+static void libdecorFrameCommit(struct libdecor_frame * frame, void * opaque)
 {
 }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+static struct libdecor_interface libdecorListener = {
+  libdecorHandleError,
+};
 
 static struct libdecor_frame_interface libdecorFrameListener = {
   libdecorFrameConfigure,
   libdecorFrameClose,
   libdecorFrameCommit,
 };
+#pragma GCC diagnostic pop
 
 bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless)
 {
