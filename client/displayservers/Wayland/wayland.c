@@ -121,6 +121,7 @@ static void waylandFree(void)
   waylandInputFree();
   waylandOutputFree();
   waylandRegistryFree();
+  waylandCursorFree();
   wl_display_disconnect(wlWm.display);
 }
 

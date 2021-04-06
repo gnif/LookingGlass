@@ -82,15 +82,23 @@ bool waylandCursorInit(void)
     return false;
   }
 
-  struct wl_buffer * cursorBuffer = createCursorBuffer();
-  if (cursorBuffer)
+  wlWm.cursorBuffer = createCursorBuffer();
+  if (wlWm.cursorBuffer)
   {
     wlWm.cursor = wl_compositor_create_surface(wlWm.compositor);
-    wl_surface_attach(wlWm.cursor, cursorBuffer, 0, 0);
+    wl_surface_attach(wlWm.cursor, wlWm.cursorBuffer, 0, 0);
     wl_surface_commit(wlWm.cursor);
   }
 
   return true;
+}
+
+void waylandCursorFree(void)
+{
+  if (wlWm.cursor)
+    wl_surface_destroy(wlWm.cursor);
+  if (wlWm.cursorBuffer)
+    wl_buffer_destroy(wlWm.cursorBuffer);
 }
 
 void waylandShowPointer(bool show)
