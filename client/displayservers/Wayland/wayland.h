@@ -110,6 +110,7 @@ struct WaylandDSState
 #endif
 
   struct wl_surface * cursor;
+  struct wl_buffer * cursorBuffer;
 
   struct wl_data_device_manager * dataDeviceManager;
 
@@ -188,6 +189,7 @@ void waylandCBRelease(void);
 
 // cursor module
 bool waylandCursorInit(void);
+void waylandCursorFree(void);
 void waylandShowPointer(bool show);
 
 // gl module
