@@ -28,7 +28,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/stat.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <string.h>
+
 
 // forwards
 static bool       optRendererParse   (struct Option * opt, const char * str);
@@ -433,31 +435,99 @@ void config_init(void)
   option_register(options);
 }
 
+bool load_config_from_file(char * file, bool * load_config_error)
+{
+  struct stat st;
+  if (stat(file, &st) >= 0)
+  {
+    DEBUG_INFO("Loading config from: %s", file);
+    if (!option_load(file))
+    {
+      *load_config_error = true;
+    }
+    return true;
+  }
+  return false;
+}
+
 bool config_load(int argc, char * argv[])
 {
+  bool err = false;
   // load any global options first
-  struct stat st;
-  if (stat("/etc/looking-glass-client.ini", &st) >= 0)
-  {
-    DEBUG_INFO("Loading config from: /etc/looking-glass-client.ini");
-    if (!option_load("/etc/looking-glass-client.ini"))
-      return false;
-  }
+
+  if (!load_config_from_file("/etc/looking-glass-client.ini", &err) || err)
+    return false;
 
   // load user's local options
-  struct passwd * pw = getpwuid(getuid());
-  char * localFile;
-  alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
-  if (stat(localFile, &st) >= 0)
+  bool user_config_loaded = false;
+
+  char * envFile = getenv("LOOKING_GLASS_CLIENT_CONFIG");
+  if (envFile && load_config_from_file(envFile, &err))
   {
-    DEBUG_INFO("Loading config from: %s", localFile);
-    if (!option_load(localFile))
+    if (err)
+      return false;
+    user_config_loaded = true;
+  }
+
+  char * xdgFile = getenv("XDG_CONFIG_HOME");
+  if (xdgFile && !user_config_loaded)
+  {
+    char * localFile;
+    alloc_sprintf(&localFile, "%s/looking-glass-client.ini", xdgFile);
+    if (load_config_from_file(localFile, &err))
     {
-      free(localFile);
+      if (err)
+      {
+        free(localFile);
+        return false;
+      }
+      user_config_loaded = true;
+    }
+
+    free(localFile);
+  }
+
+  struct passwd * pw;
+  if (!user_config_loaded)
+  {
+    pw = getpwuid(getuid());
+    if (!pw)
+    {
+        perror("getpwuid");
+        return false;
+    }
+    char * localFile;
+    alloc_sprintf(&localFile, "%s/.config/looking-glass-client.ini", pw->pw_dir);
+    if (load_config_from_file(localFile, &err))
+    {
+      if (err)
+      {
+        free(localFile);
+        return false;
+      }
+      user_config_loaded = true;
+    }
+    free(localFile);
+  }
+
+  if (!user_config_loaded)
+  {
+    char * localFile;
+    alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
+    if (load_config_from_file(localFile, &err))
+    {
+      user_config_loaded = true;
+      if (err)
+      {
+        free(localFile);
+        return false;
+      }
+    }
+    else
+    {
       return false;
     }
   }
-  free(localFile);
 
   // parse the command line arguments
   if (!option_parse(argc, argv))

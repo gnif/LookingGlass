@@ -85,9 +85,10 @@ The syntax is simple: `module:name=value`, for example:
 
 ### Setting options via configuration files
 
-By default the application will look for and load the config files in the following locations
+By default the application will load the config file in /etc/looking-glass-client.ini and then look for one user config file in the following locations
 
-  * /etc/looking-glass-client.ini
+  * $XDG_CONFIG_HOME/looking-glass-client.ini
+  * ~/.config/looking-glass-client.ini
   * ~/.looking-glass-client.ini
 
 The format of this file is the commonly known INI format, for example:
