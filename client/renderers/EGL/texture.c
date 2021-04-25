@@ -479,6 +479,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
       DEBUG_EGL_ERROR("glClientWaitSync failed");
   }
 
+  glDeleteSync(fence);
   atomic_fetch_add_explicit(&texture->state.w, 1, memory_order_release);
   return true;
 }
