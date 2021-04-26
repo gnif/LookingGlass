@@ -91,7 +91,8 @@ static void on_mouseMove(int x, int y)
   this->hasMousePosition = true;
   this->mouseX           = x;
   this->mouseY           = y;
-  lgSignalEvent(this->cursorEvents[0]);
+  if (this->cursorEvents[0])
+    lgSignalEvent(this->cursorEvents[0]);
 }
 
 static const char * nvfbc_getName(void)
