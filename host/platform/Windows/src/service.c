@@ -161,6 +161,16 @@ HANDLE dupeSystemProcessToken(void)
   EnumProcesses(pids, count * sizeof(DWORD), &returned);
   returned /= sizeof(DWORD);
 
+  char systemSidBuf[SECURITY_MAX_SID_SIZE];
+  PSID systemSid = (PSID) systemSidBuf;
+  DWORD cbSystemSid = sizeof systemSidBuf;
+
+  if (!CreateWellKnownSid(WinLocalSystemSid, NULL, systemSid, &cbSystemSid))
+  {
+    doLog("failed to create local system SID");
+    return NULL;
+  }
+
   for(DWORD i = 0; i < returned; ++i)
   {
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pids[i]);
@@ -179,13 +189,8 @@ HANDLE dupeSystemProcessToken(void)
     if (!GetTokenInformation(hToken, TokenUser, user, sizeof(userBuf), &tmp))
       goto err_token;
 
-    CHAR * sid = NULL;
-    if (!ConvertSidToStringSidA(user->User.Sid, &sid))
-      goto err_token;
-
-    if (strcmp(sid, "S-1-5-18") == 0)
+    if (EqualSid(user->User.Sid, systemSid))
     {
-      LocalFree(sid);
       CloseHandle(hProcess);
 
       // duplicate the token so we can use it
@@ -198,7 +203,6 @@ HANDLE dupeSystemProcessToken(void)
       return hDupe;
     }
 
-    LocalFree(sid);
 err_token:
     CloseHandle(hToken);
 err_proc:
