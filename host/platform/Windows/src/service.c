@@ -97,7 +97,7 @@ void winerr(void)
   doLog("0x%08lx - %s", GetLastError(), buf);
 }
 
-bool enablePriv(const char * name)
+bool adjustPriv(const char * name, DWORD attributes)
 {
   HANDLE           hToken;
   LUID             luid;
@@ -120,7 +120,7 @@ bool enablePriv(const char * name)
 
   tp.PrivilegeCount           = 1;
   tp.Privileges[0].Luid       = luid;
-  tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+  tp.Privileges[0].Attributes = attributes;
 
   if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL,
         NULL))
@@ -143,6 +143,16 @@ bool enablePriv(const char * name)
 fail:
   CloseHandle(hToken);
   return false;
+}
+
+bool enablePriv(const char * name)
+{
+  return adjustPriv(name, SE_PRIVILEGE_ENABLED);
+}
+
+bool disablePriv(const char * name)
+{
+  return adjustPriv(name, 0);
 }
 
 HANDLE dupeSystemProcessToken(void)
@@ -223,7 +233,10 @@ void Launch(void)
   }
 
   if (!enablePriv(SE_DEBUG_NAME))
+  {
+    doLog("failed to enable " SE_DEBUG_NAME);
     return;
+  }
 
   HANDLE hToken = dupeSystemProcessToken();
   if (!hToken)
@@ -232,12 +245,18 @@ void Launch(void)
     return;
   }
 
+  if (!disablePriv(SE_DEBUG_NAME))
+    doLog("failed to disable " SE_DEBUG_NAME);
+
   DWORD origSessionID, targetSessionID, returnedLen;
   GetTokenInformation(hToken, TokenSessionId, &origSessionID,
       sizeof(origSessionID), &returnedLen);
 
   if (!enablePriv(SE_TCB_NAME))
+  {
+    doLog("failed to enable " SE_TCB_NAME);
     goto fail_token;
+  }
 
   targetSessionID = WTSGetActiveConsoleSessionId();
   if (origSessionID != targetSessionID)
@@ -251,6 +270,9 @@ void Launch(void)
     }
   }
 
+  if (!disablePriv(SE_TCB_NAME))
+    doLog("failed to disable " SE_TCB_NAME);
+
   LPVOID pEnvironment = NULL;
   if (!CreateEnvironmentBlock(&pEnvironment, hToken, TRUE))
   {
@@ -260,10 +282,16 @@ void Launch(void)
   }
 
   if (!enablePriv(SE_ASSIGNPRIMARYTOKEN_NAME))
+  {
+    doLog("failed to enable " SE_ASSIGNPRIMARYTOKEN_NAME);
     goto fail_token;
+  }
 
   if (!enablePriv(SE_INCREASE_QUOTA_NAME))
+  {
+    doLog("failed to enable " SE_INCREASE_QUOTA_NAME);
     goto fail_token;
+  }
 
   DWORD flags = CREATE_NEW_CONSOLE | HIGH_PRIORITY_CLASS;
   if (!pEnvironment)
@@ -297,6 +325,12 @@ void Launch(void)
     winerr();
     goto fail_token;
   }
+
+  if (!disablePriv(SE_INCREASE_QUOTA_NAME))
+    doLog("failed to disable " SE_INCREASE_QUOTA_NAME);
+
+  if (!disablePriv(SE_ASSIGNPRIMARYTOKEN_NAME))
+    doLog("failed to disable " SE_ASSIGNPRIMARYTOKEN_NAME);
 
   CloseHandle(pi.hThread);
   service.process = pi.hProcess;
