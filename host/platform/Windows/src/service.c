@@ -312,7 +312,7 @@ void Launch(void)
       NULL,
       NULL,
       NULL,
-      TRUE,
+      FALSE,
       flags,
       NULL,
       os_getDataPath(),
