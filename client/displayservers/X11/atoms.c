@@ -24,7 +24,8 @@ struct X11DSAtoms x11atoms = { 0 };
 
 void X11AtomsInit(void)
 {
-  #define DEF_ATOM(x) x11atoms.x = XInternAtom(x11.display, #x, True);
+  #define DEF_ATOM(x, onlyIfExists) \
+    x11atoms.x = XInternAtom(x11.display, #x, onlyIfExists);
   DEF_ATOMS()
   #undef DEF_ATOM
 }
