@@ -151,6 +151,7 @@ struct AppParams
   bool              rawMouse;
   bool              autoCapture;
   bool              captureInputOnly;
+  bool              showCursorDot;
 };
 
 struct CBRequest

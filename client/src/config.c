@@ -421,6 +421,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
+  {
+    .module        = "app",
+    .name          = "showCursorDot",
+    .description   = "Use a \"dot\" cursor when the window does not have focus",
+    .type          = OPTION_TYPE_BOOL,
+    .value.x_bool  = true
+  },
   {0}
 };
 
@@ -483,9 +490,9 @@ bool config_load(int argc, char * argv[])
   }
 
   // setup the application params for the basic types
-  g_params.cursorPollInterval = option_get_int   ("app", "cursorPollInterval");
-  g_params.framePollInterval  = option_get_int   ("app", "framePollInterval" );
-  g_params.allowDMA           = option_get_bool  ("app", "allowDMA"          );
+  g_params.cursorPollInterval = option_get_int   ("app"  , "cursorPollInterval");
+  g_params.framePollInterval  = option_get_int   ("app"  , "framePollInterval" );
+  g_params.allowDMA           = option_get_bool  ("app"  , "allowDMA"          );
 
   g_params.windowTitle     = option_get_string("win", "title"          );
   g_params.autoResize      = option_get_bool  ("win", "autoResize"     );
@@ -551,9 +558,10 @@ bool config_load(int argc, char * argv[])
         g_params.useSpiceClipboard = false;
     }
 
-    g_params.scaleMouseInput = option_get_bool("spice", "scaleCursor");
-    g_params.captureOnStart  = option_get_bool("spice", "captureOnStart");
-    g_params.alwaysShowCursor  = option_get_bool("spice", "alwaysShowCursor");
+    g_params.scaleMouseInput  = option_get_bool("spice", "scaleCursor");
+    g_params.captureOnStart   = option_get_bool("spice", "captureOnStart");
+    g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
+    g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
   }
 
   return true;

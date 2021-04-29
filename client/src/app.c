@@ -63,6 +63,9 @@ void app_handleFocusEvent(bool focused)
       for (int key = 0; key < KEY_MAX; key++)
         if (g_state.keyDown[key])
           app_handleKeyRelease(key);
+
+    if (!g_params.showCursorDot)
+      g_state.ds->showPointer(false);
   }
 
   g_cursor.realign = true;
