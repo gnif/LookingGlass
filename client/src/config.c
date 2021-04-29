@@ -422,7 +422,7 @@ static struct Option options[] =
     .value.x_bool   = false
   },
   {
-    .module        = "app",
+    .module        = "spice",
     .name          = "showCursorDot",
     .description   = "Use a \"dot\" cursor when the window does not have focus",
     .type          = OPTION_TYPE_BOOL,
