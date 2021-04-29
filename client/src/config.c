@@ -92,7 +92,7 @@ static struct Option options[] =
   {
     .module        = "app",
     .name          = "allowDMA",
-    .description   = "Allow direct DMA transfers if possible (VM-VM only for now)",
+    .description   = "Allow direct DMA transfers if supported (see `README.md` in the `module` dir)",
     .type          = OPTION_TYPE_BOOL,
     .value.x_bool  = true
   },
