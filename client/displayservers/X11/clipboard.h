@@ -25,7 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "interface/displayserver.h"
 
-void x11CBEventThread(const XEvent xe);
+bool x11CBEventThread(const XEvent xe);
 
 bool x11CBInit();
 void x11CBNotice(LG_ClipboardData type);

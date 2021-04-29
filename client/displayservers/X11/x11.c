@@ -558,6 +558,10 @@ static int x11EventThread(void * unused)
     XEvent xe;
     XNextEvent(x11.display, &xe);
 
+    // call the clipboard handling code
+    if (x11CBEventThread(xe))
+      continue;
+
     switch(xe.type)
     {
       case ClientMessage:
@@ -666,9 +670,6 @@ static int x11EventThread(void * unused)
         }
         break;
     }
-
-    // call the clipboard handling code
-    x11CBEventThread(xe);
   }
 
   return 0;
