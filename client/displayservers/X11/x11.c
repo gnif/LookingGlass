@@ -611,7 +611,7 @@ static int x11EventThread(void * unused)
         break;
       }
 
-     case PropertyNotify:
+      case PropertyNotify:
         // ignore property events that are not for us
         if (xe.xproperty.display != x11.display      ||
             xe.xproperty.window  != x11.window       ||
