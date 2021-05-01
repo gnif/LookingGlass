@@ -397,7 +397,7 @@ void app_handleRenderEvent(const uint64_t timeUs)
   }
   else
   {
-    if (!g_state.escapeHelp && timeUs - g_state.escapeTime > 200000)
+    if (!g_state.escapeHelp && timeUs - g_state.escapeTime > g_params.helpMenuDelayUs)
     {
       g_state.escapeHelp = true;
       app_showHelp(true);
