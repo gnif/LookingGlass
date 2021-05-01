@@ -352,6 +352,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
+  {
+    .module         = "input",
+    .name           = "helpMenuDelay",
+    .description    = "Show help menu after holding down the escape key for this many milliseconds",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 200
+  },
 
   // spice options
   {
@@ -546,6 +553,8 @@ bool config_load(int argc, char * argv[])
   g_params.mouseRedraw            = option_get_bool("input", "mouseRedraw"           );
   g_params.autoCapture            = option_get_bool("input", "autoCapture"           );
   g_params.captureInputOnly       = option_get_bool("input", "captureOnly"           );
+
+  g_params.helpMenuDelayUs = option_get_int("input", "helpMenuDelay") * (uint64_t) 1000;
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 

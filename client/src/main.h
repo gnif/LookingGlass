@@ -137,6 +137,7 @@ struct AppParams
   bool              captureOnStart;
   bool              quickSplash;
   bool              alwaysShowCursor;
+  uint64_t          helpMenuDelayUs;
 
   unsigned int      cursorPollInterval;
   unsigned int      framePollInterval;
