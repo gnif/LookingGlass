@@ -151,16 +151,16 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
     GL_MAP_INVALIDATE_BUFFER_BIT |
     GL_MAP_PERSISTENT_BIT
   );
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   if (!texture->buf[i].map)
   {
     DEBUG_EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i,
         texture->pboBufferSize);
-    return false;
   }
 
-  return true;
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+  return texture->buf[i].map;
 }
 
 static void egl_texture_unmap(EGL_Texture * texture, uint8_t i)
