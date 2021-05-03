@@ -291,13 +291,6 @@ void app_handleMouseRelative(double normx, double normy,
       core_handleMouseNormal(normx, normy);
 }
 
-static inline double clamp(double x, double min, double max)
-{
-  if (x < min) return min;
-  if (x > max) return max;
-  return x;
-}
-
 // On some display servers normal cursor logic does not work due to the lack of
 // cursor warp support. Instead, we attempt a best-effort emulation which works
 // with a 1:1 mouse movement patch applied in the guest. For anything fancy, use
@@ -323,8 +316,10 @@ void app_handleMouseBasic()
   struct DoublePoint guest;
   util_localCurToGuest(&guest);
 
-  int x = (int) round(clamp(guest.x, 0, g_state.srcSize.x) - g_cursor.projected.x);
-  int y = (int) round(clamp(guest.y, 0, g_state.srcSize.y) - g_cursor.projected.y);
+  int x = (int) round(util_clamp(guest.x, 0, g_state.srcSize.x) -
+      g_cursor.projected.x);
+  int y = (int) round(util_clamp(guest.y, 0, g_state.srcSize.y) -
+      g_cursor.projected.y);
 
   if (!x && !y)
     return;
