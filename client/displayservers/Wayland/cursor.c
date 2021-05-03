@@ -106,7 +106,3 @@ void waylandShowPointer(bool show)
   wlWm.showPointer = show;
   wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, show ? wlWm.cursor : NULL, 0, 0);
 }
-
-void waylandGuestPointerUpdated(double x, double y, int localX, int localY)
-{
-}

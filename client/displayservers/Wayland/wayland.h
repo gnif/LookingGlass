@@ -190,7 +190,6 @@ void waylandCBRelease(void);
 // cursor module
 bool waylandCursorInit(void);
 void waylandCursorFree(void);
-void waylandGuestPointerUpdated(double x, double y, int localX, int localY);
 void waylandShowPointer(bool show);
 
 // gl module
@@ -228,6 +227,7 @@ void waylandUngrabKeyboard(void);
 void waylandUngrabPointer(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
+void waylandGuestPointerUpdated(double x, double y, int localX, int localY);
 
 // output module
 bool waylandOutputInit(void);
