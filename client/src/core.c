@@ -326,6 +326,17 @@ void core_stopFrameThread(void)
   g_state.frameThread = NULL;
 }
 
+void core_handleGuestMouseUpdate(void)
+{
+  int x, y;
+  struct DoublePoint localPos;
+  util_guestCurToLocal(&localPos);
+  localPos.x = util_clamp(localPos.x, 0.0, g_state.dstRect.w);
+  localPos.y = util_clamp(localPos.y, 0.0, g_state.dstRect.h);
+  util_cursorToInt(localPos.x, localPos.y, &x, &y);
+  g_state.ds->guestPointerUpdated(g_cursor.guest.x, g_cursor.guest.y, x, y);
+}
+
 void core_handleMouseGrabbed(double ex, double ey)
 {
   if (!core_inputEnabled())

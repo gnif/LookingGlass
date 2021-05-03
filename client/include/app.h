@@ -37,6 +37,7 @@ LG_MsgAlert;
 
 bool app_isRunning(void);
 bool app_inputEnabled(void);
+bool app_isCaptureMode(void);
 void app_updateCursorPos(double x, double y);
 void app_updateWindowPos(int x, int y);
 void app_handleResizeEvent(int w, int h, double scale, const struct Border border);

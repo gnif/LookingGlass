@@ -306,6 +306,9 @@ static int cursorThread(void * unused)
         core_alignToGuest();
         app_resyncMouseBasic();
       }
+
+      // tell the DS there was an update
+      core_handleGuestMouseUpdate();
     }
 
     lgmpClientMessageDone(queue);

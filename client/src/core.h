@@ -32,6 +32,7 @@ void core_alignToGuest(void);
 bool core_isValidPointerPos(int x, int y);
 bool core_startFrameThread(void);
 void core_stopFrameThread(void);
+void core_handleGuestMouseUpdate(void);
 void core_handleMouseGrabbed(double ex, double ey);
 void core_handleMouseNormal(double ex, double ey);
 

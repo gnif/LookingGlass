@@ -41,6 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "common/debug.h"
+#include "common/time.h"
 
 #define _NET_WM_STATE_REMOVE 0
 #define _NET_WM_STATE_ADD    1
@@ -105,7 +106,8 @@ static bool x11Init(const LG_DSInitParams params)
     .event_mask =
       StructureNotifyMask |
       PropertyChangeMask |
-      ExposureMask
+      ExposureMask |
+      PointerMotionMask
   };
   unsigned long swaMask = CWEventMask;
 
@@ -677,6 +679,8 @@ static int x11EventThread(void * unused)
 
 static void x11GenericEvent(XGenericEventCookie *cookie)
 {
+  static int button_state = 0;
+
   if (cookie->extension != x11.xinputOp)
     return;
 
@@ -718,10 +722,10 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
 
     case XI_Enter:
     {
-      if (x11.entered)
+      XIEnterEvent *xie = cookie->data;
+      if (x11.entered || xie->event != x11.window)
         return;
 
-      XIEnterEvent *xie = cookie->data;
       app_updateCursorPos(xie->event_x, xie->event_y);
       app_handleEnterEvent(true);
       x11.entered = true;
@@ -730,10 +734,11 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
 
     case XI_Leave:
     {
-      if (!x11.entered)
+      XILeaveEvent *xie = cookie->data;
+      if (!x11.entered || xie->event != x11.window ||
+          button_state != 0 || app_isCaptureMode())
         return;
 
-      XILeaveEvent *xie = cookie->data;
       app_updateCursorPos(xie->event_x, xie->event_y);
       app_handleEnterEvent(false);
       x11.entered = false;
@@ -793,8 +798,9 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
       if (raw->time == prev_time && raw->detail == prev_detail)
         return;
 
-      prev_time   = raw->time;
-      prev_detail = raw->detail;
+      prev_time     = raw->time;
+      prev_detail   = raw->detail;
+      button_state |= (1 << raw->detail);
 
       app_handleButtonPress(
           raw->detail > 5 ? raw->detail - 2 : raw->detail);
@@ -814,8 +820,9 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
       if (raw->time == prev_time && raw->detail == prev_detail)
         return;
 
-      prev_time   = raw->time;
-      prev_detail = raw->detail;
+      prev_time     = raw->time;
+      prev_detail   = raw->detail;
+      button_state &= ~(1 << raw->detail);
 
       app_handleButtonRelease(
           raw->detail > 5 ? raw->detail - 2 : raw->detail);
@@ -957,6 +964,29 @@ static void x11GLSwapBuffers(void)
 }
 #endif
 
+static void x11GuestPointerUpdated(double x, double y, int localX, int localY)
+{
+  if (app_isCaptureMode() || !x11.entered)
+    return;
+
+  // avoid running too often
+  static uint64_t last_warp = 0;
+  uint64_t now = microtime();
+  if (now - last_warp < 10000)
+    return;
+  last_warp = now;
+
+  XIWarpPointer(
+      x11.display,
+      x11.pointerDev,
+      None,
+      x11.window,
+      0, 0, 0, 0,
+      localX, localY);
+
+  XSync(x11.display, False);
+}
+
 static void x11ShowPointer(bool show)
 {
   if (show)
@@ -1000,6 +1030,8 @@ static void x11GrabPointer(void)
   XISetMask(mask.mask, XI_RawButtonRelease);
   XISetMask(mask.mask, XI_RawMotion       );
   XISetMask(mask.mask, XI_Motion          );
+  XISetMask(mask.mask, XI_Enter           );
+  XISetMask(mask.mask, XI_Leave           );
 
   Status ret = XIGrabDevice(
       x11.display,
@@ -1189,20 +1221,21 @@ struct LG_DisplayServerOps LGDS_X11 =
   .glSetSwapInterval  = x11GLSetSwapInterval,
   .glSwapBuffers      = x11GLSwapBuffers,
 #endif
-  .showPointer        = x11ShowPointer,
-  .grabPointer        = x11GrabPointer,
-  .ungrabPointer      = x11UngrabPointer,
-  .grabKeyboard       = x11GrabKeyboard,
-  .ungrabKeyboard     = x11UngrabKeyboard,
-  .warpPointer        = x11WarpPointer,
-  .realignPointer     = x11RealignPointer,
-  .isValidPointerPos  = x11IsValidPointerPos,
-  .inhibitIdle        = x11InhibitIdle,
-  .uninhibitIdle      = x11UninhibitIdle,
-  .wait               = x11Wait,
-  .setWindowSize      = x11SetWindowSize,
-  .setFullscreen      = x11SetFullscreen,
-  .getFullscreen      = x11GetFullscreen,
+  .guestPointerUpdated = x11GuestPointerUpdated,
+  .showPointer         = x11ShowPointer,
+  .grabPointer         = x11GrabPointer,
+  .ungrabPointer       = x11UngrabPointer,
+  .grabKeyboard        = x11GrabKeyboard,
+  .ungrabKeyboard      = x11UngrabKeyboard,
+  .warpPointer         = x11WarpPointer,
+  .realignPointer      = x11RealignPointer,
+  .isValidPointerPos   = x11IsValidPointerPos,
+  .inhibitIdle         = x11InhibitIdle,
+  .uninhibitIdle       = x11UninhibitIdle,
+  .wait                = x11Wait,
+  .setWindowSize       = x11SetWindowSize,
+  .setFullscreen       = x11SetFullscreen,
+  .getFullscreen       = x11GetFullscreen,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,

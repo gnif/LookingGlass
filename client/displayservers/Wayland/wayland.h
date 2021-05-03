@@ -190,6 +190,7 @@ void waylandCBRelease(void);
 // cursor module
 bool waylandCursorInit(void);
 void waylandCursorFree(void);
+void waylandGuestPointerUpdated(double x, double y, int localX, int localY);
 void waylandShowPointer(bool show);
 
 // gl module

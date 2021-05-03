@@ -33,4 +33,11 @@ bool util_guestCurToLocal(struct DoublePoint *local);
 void util_localCurToGuest(struct DoublePoint *guest);
 void util_rotatePoint(struct DoublePoint *point);
 
+static inline double util_clamp(double x, double min, double max)
+{
+  if (x < min) return min;
+  if (x > max) return max;
+  return x;
+}
+
 #endif

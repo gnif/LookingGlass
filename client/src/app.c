@@ -41,6 +41,11 @@ bool app_isRunning(void)
     g_state.state == APP_STATE_RESTART;
 }
 
+bool app_isCaptureMode(void)
+{
+  return g_cursor.grab;
+}
+
 void app_updateCursorPos(double x, double y)
 {
   g_cursor.pos.x = x;

@@ -129,6 +129,7 @@ struct LG_DisplayServerOps
 #endif
 
   /* dm specific cursor implementations */
+  void (*guestPointerUpdated)(double x, double y, int localX, int localY);
   void (*showPointer)(bool show);
   void (*grabPointer)();
   void (*ungrabPointer)();
@@ -194,6 +195,7 @@ struct LG_DisplayServerOps
   ASSERT_OPENGL_FN((x)->glMakeCurrent    ); \
   ASSERT_OPENGL_FN((x)->glSetSwapInterval); \
   ASSERT_OPENGL_FN((x)->glSwapBuffers    ); \
+  assert((x)->guestPointerUpdated); \
   assert((x)->showPointer        ); \
   assert((x)->grabPointer        ); \
   assert((x)->ungrabPointer      ); \
