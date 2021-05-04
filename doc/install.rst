@@ -75,28 +75,27 @@ wayland-protocols``
 Downloading
 ^^^^^^^^^^^
 
-Either visit the site at `Looking Glass Download
-Page <https://looking-glass.io/downloads>`_
-
-Or pull the lastest **bleeding-edge version** using the **git** command.
-
-.. note::
-
-   If you are using the latest bleeding-edge from the master branch
-   you MUST download/use the corresponding host application
+Either visit the Looking Glass website's `Download
+Page <https://looking-glass.io/downloads>`_, or pull the lastest **bleeding-edge
+version** with ``git``.
 
 .. code:: bash
 
    git clone --recursive https://github.com/gnif/LookingGlass.git
+
+.. note::
+
+   When using the latest bleeding-edge client version,
+   you *MUST* download and install the corresponding host application.
 
 .. _client_building:
 
 Building
 ^^^^^^^^
 
-If you downloaded the file via the web link then you should have a 'zip'
-file. Simply unzip and cd into the new directory. If you used 'git' then
-cd into the 'LookingGlass' directory.
+If you've downloaded the source code as a zip file, simply unzip and cd into the
+new directory. If you've cloned the repo with ``git``, then ``cd`` into the
+'LookingGlass' directory.
 
 .. code:: bash
 
@@ -113,13 +112,13 @@ cd into the 'LookingGlass' directory.
    crash please be sure to use gdb to obtain a backtrace manually or there is
    nothing that can be done to help you.
 
-Should this all go well you should be left with the file
-**looking-glass-client**. Before you run the client you will first need
-to configure either Libvirt or Qemu (whichever you prefer) and then set
-up the Windows side service.
+Should this all go well, you will build the **looking-glass-client**.
+Before you run the client, you will first need
+to configure either libvirt, or QEMU (whichever you prefer) then set
+up the **looking-glass-host** service in your VM.
 
-You can call the client from the build directory; or, you can make it
-callable generally by adding the directory to your path or issuing
+You can run the client from the build directory, add the build directory to your
+path to call it from anywhere, or run this command
 
 .. code:: bash
 
@@ -132,17 +131,16 @@ from the build directory.
 libvirt Configuration
 ~~~~~~~~~~~~~~~~~~~~~
 
-This article assumes you already have a fully functional libvirt VM with
-PCI Passthrough working on a dedicated monitor. If you do not please
-ensure this is configured before you proceed.
+This article assumes you already have a fully functional libvirt domain with
+PCI passthrough working on a dedicated monitor.
 
-If you use virt-manager, this guide also applies to you, since it uses
-libvirt.
+If you use virt-manager, this guide also applies to you, since virt-manager uses
+libvirt as its back-end.
 
 **If you are using QEMU directly, this does not apply to you.**
 
-Add the following to the libvirt machine configuration inside the
-'devices' section by running "virsh edit VM" where VM is the name of
+Add the following to your libvirt machine configuration inside the
+'devices' section by running ``virsh edit <VM>`` where ``<VM>`` is the name of
 your virtual machine.
 
 .. code:: xml
@@ -198,18 +196,17 @@ can be done by adding the following to
 Qemu Commands
 ~~~~~~~~~~~~~
 
-**If you are using virt manager/libvirt then this does not apply to
-you.**
+**If you are using libvirt/virt-manager, then this does not apply to you.**
 
 Add the following to the commands to your QEMU command line, adjusting
-the bus to suit your particular configuration:
+the ``bus`` parameter to suit your particular configuration:
 
 .. code:: bash
 
    -device ivshmem-plain,memdev=ivshmem,bus=pcie.0 \
    -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
 
-The memory size (show as 32 in the example above) may need to be
+The memory size (shown as 32M in the example above) may need to be
 adjusted as per :ref:`Determining Memory <determining_memory>` section.
 
 .. _determining_memory:
@@ -217,37 +214,44 @@ adjusted as per :ref:`Determining Memory <determining_memory>` section.
 Determining Memory
 ~~~~~~~~~~~~~~~~~~
 
-You will need to adjust the memory size to a value that is suitable for
-your desired maximum resolution using the following formula:
+You will need to adjust the memory size to be suitable for
+your desired maximum resolution, with the following formula:
 
 ``width x height x 4 x 2 = total bytes``
 
 ``total bytes / 1024 / 1024 = total megabytes + 10``
 
-For example, for a resolution of 1920x1080 (1080p)
+For example, for a resolution of 1920x1080 (1080p):
 
 ``1920 x 1080 x 4 x 2 = 16,588,800 bytes``
 
 ``16,588,800 / 1024 / 1024 = 15.82 MB + 10 = 25.82``
 
-You must round this value up to the nearest power of two, which with the
-above example would be 32MB
+You must round this value up to the nearest power of two, which for the
+provided example is 32MB.
 
-The shared memory file will be located in /dev/shm/looking-glass and
-will need to be created on every boot otherwise it will have incorrect
-permissions. Looking glass will not be able to run unless it has
-permissions to this file. You can create the shared memory file
-automatically by adding the following config file:
+.. _shared_memory_file_permissions:
 
-``touch /etc/tmpfiles.d/10-looking-glass.conf``
+Shared Memory File Permissions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Add the following content to the file::
+The shared memory file used by IVSHMEM is found in ``/dev/shm/looking-glass``.
+By default, it is owned by QEMU, and does not give read/write permissions to
+your user, which are required for Looking Glass to run properly.
 
-   #Type Path Mode UID GID Age Argument
+You can use `systemd-tmpfiles` to create the file before running your VM,
+granting the necessary permissions which allow Looking Glass to use the file
+properly.
+
+Create a new file ``/etc/tmpfiles.d/10-looking-glass.conf``, and populate it
+with the following::
+
+   #Type Path               Mode UID  GID Age Argument
 
    f /dev/shm/looking-glass 0660 user kvm -
 
-Be sure to set the UID to your local user.
+Change ``UID`` to the user name you will run Looking Glass with, usually your
+own.
 
 .. _looking_glass_service_windows:
 
@@ -275,9 +279,8 @@ https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/upstream-virtio
 
 Please note that you must obtain version 0.1.161 or later.
 
-If the installation of the driver results in warnings or errors about
-driver signatures, ensure secure boot is turned off for the virtual
-machine bios/uefi.
+If you encounter warnings or errors about driver signatures, ensure secure boot
+is turned off in the bios/uefi settings of your virtual machine.
 
 .. _a_note_about_ivshmem_and_scream_audio:
 
@@ -320,12 +323,11 @@ about to be stable, but haven't passed validation.
    branch** you have to pick the **Bleeding Edge** version.
 
 Next, extract the zip archive using the commit hash for the password.
-Then, run the ``looking-glass-host-setup.exe`` installer
-and click through it. By default, the installer will install a service that
+Then, run the ``looking-glass-host-setup.exe`` installer and install the host.
+By default, the installer will install a service that
 automatically starts the host application at boot. The installer can
-also be installed in silent mode with the ``/S`` switch. Other command
-line options for the installer are documented by running it with the
-``/h`` switch.
+also be installed in silent mode with the ``/S`` switch. You can find other
+command line options with the ``/h`` switch.
 
 The windows host application captures the windows desktop and stuffs the
 frames into the shared memory via the shared memory virtual device,
