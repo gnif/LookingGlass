@@ -80,8 +80,10 @@ Page <https://looking-glass.io/downloads>`_
 
 Or pull the lastest **bleeding-edge version** using the **git** command.
 
-**Note: If you are using the latest bleeding-edge from the master branch
-you MUST download/use the corresponding host application**
+.. note::
+
+   If you are using the latest bleeding-edge from the master branch
+   you MUST download/use the corresponding host application
 
 .. code:: bash
 
@@ -103,7 +105,13 @@ cd into the 'LookingGlass' directory.
    cmake ../
    make
 
-NOTE: The most common compile error is related to backtrace support. This can be disabled by adding the following option to the cmake command: **-DENABLE_BACKTRACE=0**, however, if you disable this and need support for a crash please be sure to use gdb to obtain a backtrace manually or there is nothing that can be done to help you.
+.. note::
+
+   The most common compile error is related to backtrace support. This can be
+   disabled by adding the following option to the cmake command:
+   **-DENABLE_BACKTRACE=0**, however, if you disable this and need support for a
+   crash please be sure to use gdb to obtain a backtrace manually or there is
+   nothing that can be done to help you.
 
 Should this all go well you should be left with the file
 **looking-glass-client**. Before you run the client you will first need
