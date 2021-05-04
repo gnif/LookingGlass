@@ -45,11 +45,6 @@ The Clipboard is not Working
          **NOTE: Do make sure that you do NOT install the QEMU Guest
          Tools driver. These are not the same.**
 
--  **Are you using Wayland?**
-
-   -  Clipboard functionality is not compatible with Wayland. If you are
-      using it you need to disable it for the clipboard to work.
-
 .. _followed_installation_instructions_but_looking_glass_still_doesnt_launch:
 
 Followed Installation Instructions but Looking Glass Still Doesn't Launch
@@ -64,9 +59,6 @@ AppArmor
 
 AppArmor is a security application that can prevent Looking Glass from
 running. How to add security exceptions may vary on your distribution:
-
-Debian(Ubuntu)
-''''''''''''''
 
 Start by opening the file ``/etc/apparmor.d/abstractions/libvirt-qemu``.
 Now locate and edit the following lines to represent how they appear in
