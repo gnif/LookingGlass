@@ -357,6 +357,24 @@ void waylandUngrabPointer(void)
   }
 }
 
+void waylandCapturePointer(void)
+{
+  waylandGrabPointer();
+}
+
+void waylandUncapturePointer(void)
+{
+  /* we need to ungrab the pointer on the following conditions when exiting capture mode:
+   *   - if warp is not supported, exit via window edge detection will never work
+   *     as the cursor can not be warped out of the window when we release it.
+   *   - if the format is invalid as we do not know where the guest cursor is,
+   *     which also breaks edge detection.
+   *   - if the user has opted to use captureInputOnly mode.
+   */
+  if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
+    waylandUngrabPointer();
+}
+
 void waylandGrabKeyboard(void)
 {
   if (wlWm.keyboardInhibitManager && !wlWm.keyboardInhibitor)

@@ -123,7 +123,7 @@ void core_setGrabQuiet(bool enable)
     if (g_params.grabKeyboard)
       g_state.ds->grabKeyboard();
 
-    g_state.ds->grabPointer();
+    g_state.ds->capturePointer();
   }
   else
   {
@@ -134,17 +134,7 @@ void core_setGrabQuiet(bool enable)
         g_state.ds->ungrabKeyboard();
     }
 
-    /* we need to ungrab the pointer on the following conditions
-     *   - if the backend does not support warp as exit via window edge
-     *     detection will never work as the cursor can not be warped out of the
-     *     window when we release it.
-     *   - if the format is invalid as we do not know where the guest cursor is
-     *     which also breaks edge detection.
-     *   - if the user has opted to use captureInputOnly mode.
-     */
-    if (warpSupport == LG_DS_WARP_NONE || !g_state.formatValid ||
-        g_params.captureInputOnly)
-      g_state.ds->ungrabPointer();
+    g_state.ds->uncapturePointer();
 
     /* if exiting capture when input on capture only we need to align the local
      * cursor to the guest's location before it is shown. */
