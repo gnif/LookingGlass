@@ -459,10 +459,10 @@ void waylandRealignPointer(void)
     app_resyncMouseBasic();
 }
 
-void waylandGuestPointerUpdated(double x, double y, int localX, int localY)
+void waylandGuestPointerUpdated(double x, double y, double localX, double localY)
 {
   if (!wlWm.warpSupport || !wlWm.pointerInSurface || wlWm.lockedPointer)
     return;
 
-  waylandWarpPointer(localX, localY, false);
+  waylandWarpPointer((int) localX, (int) localY, false);
 }

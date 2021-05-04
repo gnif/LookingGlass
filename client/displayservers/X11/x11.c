@@ -963,7 +963,7 @@ static void x11GLSwapBuffers(void)
 }
 #endif
 
-static void x11GuestPointerUpdated(double x, double y, int localX, int localY)
+static void x11GuestPointerUpdated(double x, double y, double localX, double localY)
 {
   if (app_isCaptureMode() || !x11.entered)
     return;
