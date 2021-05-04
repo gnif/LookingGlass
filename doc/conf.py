@@ -18,8 +18,8 @@
 # -- Project information -----------------------------------------------------
 
 project = 'Looking Glass'
-copyright = '2021, Geoffrey McRae, quantum, xyenne, and other contributors'
-author = 'Geoffrey McRae, quantum, xyenne, and other contributors'
+copyright = '2021, Geoffrey McRae, quantum, xyene, and other contributors'
+author = 'Geoffrey McRae, quantum, xyene, and other contributors'
 
 # The full version, including alpha/beta/rc tags
 release = 'B4'
