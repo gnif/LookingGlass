@@ -27,10 +27,9 @@ Why is my UPS (Updates Per Second) so low?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 There are several reasons why this can happen, the most common is your
-capture resolution. At the time of this writing, the windows capture
-methods struggle to capture high resolutions under certain
-circumstances, as a general rule of thumb anything greater than 1200p
-(1920x1200) starts to suffer from performance issues.
+capture resolution, or refresh rate. At the time of this writing, the windows
+capture methods struggle to capture high resolutions under certain
+circumstances.
 
 Another cause can be how the game or application you are running is
 configured. Because of the way windows integrate with the WDM (Windows
@@ -79,7 +78,7 @@ Where is the host application for Linux?
 
 The "Windows host application" is actually the display server, which
 runs in the guest VM. The only thing that needs to run in your Linux
-host OS is the \`looking-glass-client\` application
+host OS is the \`looking-glass-client\` application.
 
 Mouse
 -----
@@ -137,21 +136,8 @@ configuration):
 The mouse doesn't stay aligned with the host.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This is due to windows mouse acceleration, it can be disabled by
-following one of these methods:
-
--  Disabling pointer precision (Control Panel > Mouse > Pointer Options
-   > Uncheck Enhance pointer precision)
--  By changing the acceleration behavior with the following registry
-   magic:
-   http://donewmouseaccel.blogspot.com.au/2010/03/markc-windows-7-mouse-acceleration-fix.html
-   (Contrary to the title this works just fine on Windows 10)
-
-Some other things to try:
-
--  Have you tried pressing Scroll Lock to toggle mouse capture mode?
--  Try keeping the client window the same size as the guest's
-   resolution.
+This is intentional. The host's mouse no longer interacts with your operating
+system, and is completely captured by Looking Glass.
 
 .. _the_cursor_position_doesnt_update_until_i_click:
 
