@@ -222,19 +222,16 @@ your desired maximum resolution using the following formula:
 
 ``width x height x 4 x 2 = total bytes``
 
-``total bytes / 1024 / 1024 = total megabytes + 2``
+``total bytes / 1024 / 1024 = total megabytes + 10``
 
 For example, for a resolution of 1920x1080 (1080p)
 
 ``1920 x 1080 x 4 x 2 = 16,588,800 bytes``
 
-``16,588,800 / 1024 / 1024 = 15.82 MB + 2 = 17.82``
+``16,588,800 / 1024 / 1024 = 15.82 MB + 10 = 25.82``
 
 You must round this value up to the nearest power of two, which with the
 above example would be 32MB
-
-Note: This formula may be out of date. A 1440p display requires 64mb
-shared memory.
 
 The shared memory file will be located in /dev/shm/looking-glass and
 will need to be created on every boot otherwise it will have incorrect
