@@ -328,8 +328,7 @@ and click through it. By default, the installer will install a service that
 automatically starts the host application at boot. The installer can
 also be installed in silent mode with the ``/S`` switch. Other command
 line options for the installer are documented by running it with the
-``/h`` switch. There is also an unofficial Chocolatey package available,
-install with ``choco install looking-glass-host --pre``.
+``/h`` switch.
 
 The windows host application captures the windows desktop and stuffs the
 frames into the shared memory via the shared memory virtual device,
