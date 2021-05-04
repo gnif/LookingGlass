@@ -51,6 +51,10 @@ master_doc = 'index'
 #
 html_theme = 'alabaster'
 
+html_logo = '../resources/icon-128x128.png'
+
+html_favicon = '../resources/icon.ico'
+
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
