@@ -129,7 +129,7 @@ struct LG_DisplayServerOps
 #endif
 
   /* dm specific cursor implementations */
-  void (*guestPointerUpdated)(double x, double y, int localX, int localY);
+  void (*guestPointerUpdated)(double x, double y, double localX, double localY);
   void (*showPointer)(bool show);
   void (*grabKeyboard)();
   void (*ungrabKeyboard)();

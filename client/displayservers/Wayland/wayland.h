@@ -230,7 +230,7 @@ void waylandCapturePointer(void);
 void waylandUncapturePointer(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
-void waylandGuestPointerUpdated(double x, double y, int localX, int localY);
+void waylandGuestPointerUpdated(double x, double y, double localX, double localY);
 
 // output module
 bool waylandOutputInit(void);
