@@ -18,6 +18,11 @@ Categories:
    faq
    tech_faq
 
+.. toctree::
+   :hidden:
+
+   credits
+
 More information:
 
 * `Offical Website <https://looking-glass.io/>`_
