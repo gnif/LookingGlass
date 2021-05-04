@@ -12,7 +12,7 @@ Developers
 
 * gnif (Geoffrey McRae)
 * quantum
-* xyene
+* xyene (Tudor Brindus)
 
 .. _lg_documentation_guys:
 
