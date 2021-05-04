@@ -21,23 +21,21 @@ Can I feed the VM directly into OBS?
 Looking Glass now features a functional :doc:`OBS plugin <obs>`, which acts as
 another Looking Glass client, but instead gives the captured frames to OBS.
 
-.. _why_is_my_ups_updates_per_second_so_low:
+.. _why_is_my_ups_so_low:
 
 Why is my UPS (Updates Per Second) so low?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-There are several reasons why this can happen, the most common is your
-capture resolution, or refresh rate. At the time of this writing, the windows
-capture methods struggle to capture high resolutions under certain
-circumstances.
+There are several reasons why this can happen, the most common are your
+capture resolution, or refresh rate. The windows capture methods currently
+struggle to capture high resolutions under certain circumstances.
 
 Another cause can be how the game or application you are running is
 configured. Because of the way windows integrate with the WDM (Windows
-Desktop Manager) running applications in "Full Screen" mode may in some
-cases cause a large performance penalty. Try switching to windowed
+Desktop Manager), running applications in "Full Screen" mode may—in some
+cases—cause a large performance penalty. Try switching to windowed
 full-screen mode, the difference in performance can be like night and
-day. Titles known to be affected by this are Fallout76, The BattleField
-Series and SCUM.
+day.
 
 Some titles do some strange things at early initialization that cause
 capture performance issues. One such title is the Unigine Valley
@@ -56,8 +54,8 @@ that you have support for WDDM 1.2 or greater.
 
 The server-side (guest) probing error "Capture is not possible,
 unsupported device or driver" indicates NVidia duplication has failed,
-not that DXGI has failed. You can make the error go away by specifying
-"-c DXGI"
+not that DXGI has failed. You can fix the error by specifying
+``-c DXGI``
 
 .. _why_do_i_need_spice_if_i_dont_want_a_spice_display_device:
 
@@ -69,7 +67,7 @@ built in to provide some conveniences, but you can disable it with the
 "-s" argument.
 
 Note that without Spice, you will not be sending mouse/keyboard events
-to the guest nor will you get clipboard Synchronization support.
+to the guest, nor will you get clipboard synchronization support.
 
 .. _where_is_the_host_application_for_linux:
 
@@ -152,7 +150,7 @@ does not support them.
 Audio
 -----
 
-Looking Glass does not handle audio at all, nor will it ever. The preferred
+Looking Glass does not support audio routing. The preferred
 solution is to pass through QEMU's audio to your host's audio system.
 
 Another popular solution is to use
@@ -171,10 +169,8 @@ Windows
 NvFBC (NVIDIA Capture API) doesn't work
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unfortunately, NVIDIA deemed fit to only allow owners of "Professional
-Cards", and their own software (ShadowPlay) the right to use the NVIDIA
-Capture API. There is little we can do about this other than to complain
-to NVIDIA.
+NvFBC is only supported on professional-grade GPUs, and will not function on
+consumer-grade cards like those from the GeForce series.
 
 .. _the_screen_stops_updating_when_left_idle_for_a_time:
 

@@ -45,12 +45,18 @@ The Clipboard is not Working
          **NOTE: Do make sure that you do NOT install the QEMU Guest
          Tools driver. These are not the same.**
 
+   -  **Did you install them twice?**
+
+      -  The Spice VDAgent is available in both Spice Guest Tools, and
+         standalone as a separate installer. Check your installed programs
+         and uninstall the VDAgent if it's installed separately.
+
 .. _followed_installation_instructions_but_looking_glass_still_doesnt_launch:
 
 Followed Installation Instructions but Looking Glass Still Doesn't Launch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-At times depending on your distribution circumstances can cause Looking
+Depending on your distribution, various circumstances can cause Looking
 Glass to still not run. Below is a list of known issues that can prevent
 Looking Glass from running properly.
 
