@@ -46,6 +46,16 @@ bool app_isCaptureMode(void)
   return g_cursor.grab;
 }
 
+bool app_isCaptureOnlyMode(void)
+{
+  return g_params.captureInputOnly;
+}
+
+bool app_isFormatValid(void)
+{
+  return g_state.formatValid;
+}
+
 void app_updateCursorPos(double x, double y)
 {
   g_cursor.pos.x = x;

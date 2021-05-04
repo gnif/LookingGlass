@@ -1063,6 +1063,23 @@ static void x11UngrabPointer(void)
   x11.pointerGrabbed = false;
 }
 
+static void x11CapturePointer(void)
+{
+  x11GrabPointer();
+}
+
+static void x11UncapturePointer(void)
+{
+  /* we need to ungrab the pointer on the following conditions when exiting capture mode:
+   *   - if the format is invalid as we do not know where the guest cursor is,
+   *     which breaks edge detection as the cursor can not be warped out of the
+   *     window when we release it.
+   *   - if the user has opted to use captureInputOnly mode.
+   */
+  if (!app_isFormatValid() || app_isCaptureOnlyMode())
+    x11UngrabPointer();
+}
+
 static void x11GrabKeyboard(void)
 {
   if (x11.keyboardGrabbed)
@@ -1224,6 +1241,8 @@ struct LG_DisplayServerOps LGDS_X11 =
   .showPointer         = x11ShowPointer,
   .grabPointer         = x11GrabPointer,
   .ungrabPointer       = x11UngrabPointer,
+  .capturePointer      = x11CapturePointer,
+  .uncapturePointer    = x11UncapturePointer,
   .grabKeyboard        = x11GrabKeyboard,
   .ungrabKeyboard      = x11UngrabKeyboard,
   .warpPointer         = x11WarpPointer,

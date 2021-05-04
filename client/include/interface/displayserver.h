@@ -131,10 +131,14 @@ struct LG_DisplayServerOps
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, int localX, int localY);
   void (*showPointer)(bool show);
-  void (*grabPointer)();
-  void (*ungrabPointer)();
   void (*grabKeyboard)();
   void (*ungrabKeyboard)();
+  /* (un)grabPointer is used to toggle cursor tracking/confine in normal mode */
+  void (*grabPointer)();
+  void (*ungrabPointer)();
+  /* (un)capturePointer is used do toggle special cursor tracking in capture mode */
+  void (*capturePointer)();
+  void (*uncapturePointer)();
 
   /* exiting = true if the warp is to leave the window */
   void (*warpPointer)(int x, int y, bool exiting);
@@ -199,6 +203,8 @@ struct LG_DisplayServerOps
   assert((x)->showPointer        ); \
   assert((x)->grabPointer        ); \
   assert((x)->ungrabPointer      ); \
+  assert((x)->capturePointer     ); \
+  assert((x)->uncapturePointer   ); \
   assert((x)->warpPointer        ); \
   assert((x)->realignPointer     ); \
   assert((x)->isValidPointerPos  ); \

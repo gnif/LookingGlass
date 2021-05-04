@@ -225,6 +225,8 @@ void waylandGrabKeyboard(void);
 void waylandGrabPointer(void);
 void waylandUngrabKeyboard(void);
 void waylandUngrabPointer(void);
+void waylandCapturePointer(void);
+void waylandUncapturePointer(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
 void waylandGuestPointerUpdated(double x, double y, int localX, int localY);
