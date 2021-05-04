@@ -106,8 +106,7 @@ static bool x11Init(const LG_DSInitParams params)
     .event_mask =
       StructureNotifyMask |
       PropertyChangeMask |
-      ExposureMask |
-      PointerMotionMask
+      ExposureMask
   };
   unsigned long swaMask = CWEventMask;
 
