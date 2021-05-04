@@ -276,7 +276,7 @@ from the below address:
 
 https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/upstream-virtio/
 
-Please note that you must obtain version 0.1.161 or later
+Please note that you must obtain version 0.1.161 or later.
 
 If the installation of the driver results in warnings or errors about
 driver signatures, ensure secure boot is turned off for the virtual
@@ -322,8 +322,8 @@ about to be stable, but haven't passed validation.
    If your **looking-glass-client** was created by building from the **master
    branch** you have to pick the **Bleeding Edge** version.
 
-Next, use `7-Zip <7-zip.org/>`_ to extract the zip archive using the commit
-hash for the password. Then, run the ``looking-glass-host-setup.exe`` installer
+Next, extract the zip archive using the commit hash for the password.
+Then, run the ``looking-glass-host-setup.exe`` installer
 and click through it. By default, the installer will install a service that
 automatically starts the host application at boot. The installer can
 also be installed in silent mode with the ``/S`` switch. Other command
