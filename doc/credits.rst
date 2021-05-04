@@ -11,7 +11,7 @@ Developers
 ------------------
 
 * gnif (Geoffrey McRae)
-* quantum
+* quantum (Guanzhong Chen)
 * xyene (Tudor Brindus)
 
 .. _lg_documentation_guys:
