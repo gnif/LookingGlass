@@ -359,11 +359,31 @@ void waylandUngrabPointer(void)
 
 void waylandCapturePointer(void)
 {
-  waylandGrabPointer();
+  if (!wlWm.warpSupport)
+  {
+    waylandGrabPointer();
+    return;
+  }
+
+  if (wlWm.confinedPointer)
+  {
+    zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
+    wlWm.confinedPointer = NULL;
+  }
+
+  wlWm.lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
+        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
 }
 
 void waylandUncapturePointer(void)
 {
+  if (wlWm.lockedPointer)
+  {
+    zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
+    wlWm.lockedPointer = NULL;
+  }
+
   /* we need to ungrab the pointer on the following conditions when exiting capture mode:
    *   - if warp is not supported, exit via window edge detection will never work
    *     as the cursor can not be warped out of the window when we release it.
@@ -372,7 +392,14 @@ void waylandUncapturePointer(void)
    *   - if the user has opted to use captureInputOnly mode.
    */
   if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
+  {
     waylandUngrabPointer();
+    return;
+  }
+
+  wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
+      wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+      ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
 }
 
 void waylandGrabKeyboard(void)
@@ -434,7 +461,7 @@ void waylandRealignPointer(void)
 
 void waylandGuestPointerUpdated(double x, double y, int localX, int localY)
 {
-  if (!wlWm.warpSupport || !wlWm.pointerInSurface)
+  if (!wlWm.warpSupport || !wlWm.pointerInSurface || wlWm.lockedPointer)
     return;
 
   waylandWarpPointer(localX, localY, false);
