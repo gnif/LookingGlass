@@ -108,15 +108,7 @@ configuration):
    -chardev spicevmc,id=vdagent,name=vdagent \
    -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
 
--  Virt Manager GUI
-
-   -  Open Machine Properties > Add Hardware > Channel
-   -  Set Name to ``com.redhat.spice.0`` and Device Type to
-      ``Spice agent (spicevmc)`` and click Finish
-   -  No need to add VirtIO Serial device, it will be added
-      automatically
-
--  libvirt using virsh
+-  libvirt
 
    -  Edit the VM using virsh ``sudo virsh edit VIRTUAL_MACHINE_NAME``
    -  Paste the code from below right above (note the closing tag)
