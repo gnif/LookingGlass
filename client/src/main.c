@@ -160,10 +160,13 @@ static int renderThread(void * unused)
     const uint64_t now = microtime();
     if (!g_state.resizeDone && g_state.resizeTimeout < now)
     {
-      g_state.ds->setWindowSize(
-        g_state.dstRect.w,
-        g_state.dstRect.h
-      );
+      if (g_params.autoResize)
+      {
+        g_state.ds->setWindowSize(
+          g_state.dstRect.w,
+          g_state.dstRect.h
+        );
+      }
       g_state.resizeDone = true;
     }
 
