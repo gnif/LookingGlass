@@ -37,7 +37,7 @@ struct OptionGroup
 
 struct State
 {
-  bool                 doHelp;
+  enum doHelpMode      doHelp;
   struct Option     ** options;
   int                  oCount;
   struct OptionGroup * groups;
@@ -46,7 +46,7 @@ struct State
 
 static struct State state =
 {
-  .doHelp  = false,
+  .doHelp  = DOHELP_MODE_NO,
   .options = NULL,
   .oCount  = 0,
   .groups  = NULL,
@@ -258,7 +258,13 @@ bool option_parse(int argc, char * argv[])
     {
       if (strcmp(argv[a], "-h") == 0 || strcmp(argv[a], "--help") == 0)
       {
-        state.doHelp = true;
+        state.doHelp = DOHELP_MODE_YES;
+        continue;
+      }
+
+      if (strcmp(argv[a], "--rst-help") == 0)
+      {
+        state.doHelp = DOHELP_MODE_RST;
         continue;
       }
 
@@ -528,7 +534,7 @@ exit:
 
 bool option_validate(void)
 {
-  if (state.doHelp)
+  if (state.doHelp != DOHELP_MODE_NO)
   {
     option_print();
     return false;
@@ -577,6 +583,24 @@ bool option_validate(void)
   return ok;
 }
 
+void option_print_hrule(char * headerLine, int maxLen, char ruleChar)
+{
+  printf("  +%c", ruleChar);
+  for (int i = 0; i < maxLen; i++)
+  {
+    if(i < strlen(headerLine))
+    {
+      if (headerLine[i] == '|')
+      {
+        putc('+', stdout);
+        continue;
+      }
+    }
+    putc(ruleChar, stdout);
+  }
+  printf("%c+\n", ruleChar);
+}
+
 void option_print(void)
 {
   printf(
@@ -591,6 +615,7 @@ void option_print(void)
     int maxLen;
     int valueLen = 5;
     char * line;
+    char * headerLine;
 
     // ensure the pad length is atleast as wide as the heading
     if (state.groups[g].pad < 4)
@@ -626,6 +651,7 @@ void option_print(void)
     );
 
     assert(maxLen > 0);
+    headerLine = line;
     stringlist_push(lines, line);
 
     for(int i = 0; i < state.groups[g].count; ++i)
@@ -659,11 +685,7 @@ void option_print(void)
     {
       if (i == 0)
       {
-        // print a horizontal rule
-        printf("  |");
-        for(int i = 0; i < maxLen + 2; ++i)
-          putc('-', stdout);
-        printf("|\n");
+        option_print_hrule(headerLine, maxLen, '-');
       }
 
       char * line = stringlist_at(lines, i);
@@ -671,19 +693,15 @@ void option_print(void)
 
       if (i == 0)
       {
-        // print a horizontal rule
-        printf("  |");
-        for(int i = 0; i < maxLen + 2; ++i)
-          putc('-', stdout);
-        printf("|\n");
+        option_print_hrule(headerLine, maxLen, state.doHelp == DOHELP_MODE_RST ? '=' : '-');
+      }
+      else if (state.doHelp == DOHELP_MODE_RST && i < stringlist_count(lines) - 1)
+      {
+        option_print_hrule(headerLine, maxLen, '-');
       }
     }
 
-    // print a horizontal rule
-    printf("  |");
-    for(int i = 0; i < maxLen + 2; ++i)
-      putc('-', stdout);
-    printf("|\n");
+    option_print_hrule(headerLine, maxLen, '-');
 
     stringlist_free(&lines);
 

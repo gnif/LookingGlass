@@ -32,6 +32,13 @@ enum OptionType
   OPTION_TYPE_CUSTOM
 };
 
+enum doHelpMode
+{
+  DOHELP_MODE_NO = 0,
+  DOHELP_MODE_YES,
+  DOHELP_MODE_RST
+};
+
 struct Option;
 
 struct Option
