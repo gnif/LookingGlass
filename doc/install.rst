@@ -362,12 +362,13 @@ Example: ``looking-glass-client --help``
 Common options include ``-s`` for disabling spice, ``-S`` for disabling the
 screen saver, and ``-F`` to automatically enter full screen.
 
-Options may be provided with a Short form, if available, or directly by
-Long form. Boolean options may be specified without a paramater to toggle their
+Options may be provided with a short form, if available, or directly by
+long form. Boolean options may be specified without a paramater to toggle their
 state.
 
 Examples:
 
-- ``looking-glass-client -F yes`` (Short)
-- ``looking-glass-client win:fullScreen yes`` (Long)
-- ``looking-glass-client win:fullScreen`` (boolean toggle)
+- ``looking-glass-client -F`` (short)
+- ``looking-glass-client win:fullScreen`` (long)
+- ``looking-glass-client -f /dev/shm/my-lg-shmem`` (short with parameter)
+- ``looking-glass-client app:shmFile=/dev/shm/my-lg-shmem`` (long with parameter)
