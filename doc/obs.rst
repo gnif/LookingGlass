@@ -25,7 +25,9 @@ dependencies <installing_build_dependencies>`.
 
 -  libobs-dev
 
-Please install this package or the equivalent in your package manager... code:: bash
+Please install this package or the equivalent in your package manager.
+
+.. code:: bash
 
    apt-get install libobs-dev
 
