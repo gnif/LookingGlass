@@ -322,8 +322,10 @@ void core_handleGuestMouseUpdate(void)
   util_guestCurToLocal(&localPos);
   g_state.ds->guestPointerUpdated(
     g_cursor.guest.x, g_cursor.guest.y,
-    util_clamp(localPos.x, 0.0, g_state.dstRect.w),
-    util_clamp(localPos.y, 0.0, g_state.dstRect.h)
+    util_clamp(localPos.x, g_state.dstRect.x,
+      g_state.dstRect.x + g_state.dstRect.w),
+    util_clamp(localPos.y, g_state.dstRect.y,
+      g_state.dstRect.y + g_state.dstRect.h)
   );
 }
 
