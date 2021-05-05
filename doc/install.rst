@@ -349,8 +349,25 @@ Running the Client
 The client command is the binary file: **looking-glass-client**. This
 command should run after the Windows Host Application has started.
 
-For an updated list of arguments visit:
-https://github.com/gnif/LookingGlass/blob/master/client/README.md
+.. _client_cli_options:
+
+Command Line Options
+~~~~~~~~~~~~~~~~~~~~
+
+A full list of command line options is available with the ``--help`` or ``-h``
+options.
+
+Example: ``looking-glass-client --help``
 
 Common options include ``-s`` for disabling spice, ``-S`` for disabling the
 screen saver, and ``-F`` to automatically enter full screen.
+
+Options may be provided with a Short form, if available, or directly by
+Long form. Boolean options may be specified without a paramater to toggle their
+state.
+
+Examples:
+
+- ``looking-glass-client -F yes`` (Short)
+- ``looking-glass-client win:fullScreen yes`` (Long)
+- ``looking-glass-client win:fullScreen`` (boolean toggle)
