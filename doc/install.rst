@@ -187,7 +187,7 @@ AppArmor
 For libvirt versions before **5.10.0**, if you are using AppArmor, you
 need to add permissions for QEMU to access the shared memory file. This
 can be done by adding the following to
-*/etc/apparmor.d/abstractions/libvirt-qemu*.
+*/etc/apparmor.d/local/abstractions/libvirt-qemu*.
 
 ``/dev/shm/looking-glass rw,``
 
