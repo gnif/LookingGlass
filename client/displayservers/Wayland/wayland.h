@@ -254,6 +254,7 @@ bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool b
 void waylandShellAckConfigureIfNeeded(void);
 void waylandSetFullscreen(bool fs);
 bool waylandGetFullscreen(void);
+void waylandMinimize(void);
 
 // window module
 bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless);

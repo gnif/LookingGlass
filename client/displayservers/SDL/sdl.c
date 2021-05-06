@@ -120,8 +120,7 @@ static bool sdlInit(const LG_DSInitParams params)
 
   SDL_ShowWindow(sdl.window);
 
-  SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
-      params.minimizeOnFocusLoss ? "1" : "0");
+  SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
   if (params.fullscreen)
     SDL_SetWindowFullscreen(sdl.window, SDL_WINDOW_FULLSCREEN_DESKTOP);
@@ -507,6 +506,11 @@ static bool sdlGetFullscreen(void)
   return (SDL_GetWindowFlags(sdl.window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
 }
 
+static void sdlMinimize(void)
+{
+  SDL_MinimizeWindow(sdl.window);
+}
+
 struct LG_DisplayServerOps LGDS_SDL =
 {
   .setup               = sdlSetup,
@@ -548,6 +552,7 @@ struct LG_DisplayServerOps LGDS_SDL =
   .setWindowSize       = sdlSetWindowSize,
   .setFullscreen       = sdlSetFullscreen,
   .getFullscreen       = sdlGetFullscreen,
+  .minimize            = sdlMinimize,
 
   /* SDL does not have clipboard support */
   .cbInit    = NULL,

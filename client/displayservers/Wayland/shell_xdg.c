@@ -146,3 +146,8 @@ bool waylandGetFullscreen(void)
 {
   return wlWm.fullscreen;
 }
+
+void waylandMinimize(void)
+{
+  //FIXME
+}

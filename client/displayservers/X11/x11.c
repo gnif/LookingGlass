@@ -1215,6 +1215,11 @@ static bool x11GetFullscreen(void)
   return x11.fullscreen;
 }
 
+static void x11Minimize(void)
+{
+  XIconifyWindow(x11.display, x11.window, XDefaultScreen(x11.display));
+}
+
 struct LG_DisplayServerOps LGDS_X11 =
 {
   .setup              = x11Setup,
@@ -1254,6 +1259,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .setWindowSize       = x11SetWindowSize,
   .setFullscreen       = x11SetFullscreen,
   .getFullscreen       = x11GetFullscreen,
+  .minimize            = x11Minimize,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,

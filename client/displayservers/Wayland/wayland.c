@@ -177,6 +177,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .setWindowSize       = waylandSetWindowSize,
   .setFullscreen       = waylandSetFullscreen,
   .getFullscreen       = waylandGetFullscreen,
+  .minimize            = waylandMinimize,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,
