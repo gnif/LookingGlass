@@ -69,7 +69,6 @@ typedef struct LG_DSInitParams
   bool resizable;
   bool borderless;
   bool maximize;
-  bool minimizeOnFocusLoss;
 
   // if true the renderer requires an OpenGL context
   bool opengl;
@@ -158,10 +157,11 @@ struct LG_DisplayServerOps
   /* wait for the specified time without blocking UI processing/event loops */
   void (*wait)(unsigned int time);
 
-  /* get/set the window dimensions */
+  /* get/set the window dimensions & state */
   void (*setWindowSize)(int x, int y);
   bool (*getFullscreen)(void);
   void (*setFullscreen)(bool fs);
+  void (*minimize)(void);
 
   /* clipboard support, optional, if not supported set to NULL */
   bool (*cbInit)(void);
@@ -213,6 +213,7 @@ struct LG_DisplayServerOps
   assert((x)->wait               ); \
   assert((x)->setWindowSize      ); \
   assert((x)->setFullscreen      ); \
-  assert((x)->getFullscreen      );
+  assert((x)->getFullscreen      ); \
+  assert((x)->minimize           );
 
 #endif

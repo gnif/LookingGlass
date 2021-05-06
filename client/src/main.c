@@ -765,7 +765,6 @@ static int lg_run(void)
     .resizable           = g_params.allowResize,
     .borderless          = g_params.borderless,
     .maximize            = g_params.maximize,
-    .minimizeOnFocusLoss = g_params.minimizeOnFocusLoss,
     .opengl              = needsOpenGL
   };
 

@@ -67,7 +67,11 @@ void app_handleFocusEvent(bool focused)
 {
   g_state.focused = focused;
   if (!core_inputEnabled())
+  {
+    if (!focused && g_params.minimizeOnFocusLoss)
+      g_state.ds->minimize();
     return;
+  }
 
   if (!focused)
   {
@@ -81,6 +85,9 @@ void app_handleFocusEvent(bool focused)
 
     if (!g_params.showCursorDot)
       g_state.ds->showPointer(false);
+
+    if (g_params.minimizeOnFocusLoss)
+      g_state.ds->minimize();
   }
 
   g_cursor.realign = true;
