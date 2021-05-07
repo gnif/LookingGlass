@@ -130,3 +130,8 @@ bool waylandGetFullscreen(void)
 {
   return wlWm.fullscreen;
 }
+
+void waylandMinimize(void)
+{
+  libdecor_frame_set_minimized(wlWm.libdecorFrame);
+}
