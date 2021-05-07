@@ -64,3 +64,18 @@ Initially, we were using interrupts in early designs however it became
 clear that the performance, especially for high update rate mice was
 extremely poor. This may have improved in recent QEMU versions and
 perhaps should be re-evaluated at some point.
+
+.. _how_do_i_build_the_host:
+
+How do I build the looking-glass-host?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+It is not recommended to build the looking-glass-host program, and instead
+download it from the `website <https://looking-glass.io/downloads/>`_. However,
+if you know what you're doing, you can follow the
+:doc:`build instructions <host>`.
+
+.. toctree::
+   :hidden:
+
+   host
