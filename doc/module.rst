@@ -134,3 +134,26 @@ For cgroups, in ``/etc/libvirt/qemu.conf``, uncomment the
 restart ``libvirtd``::
 
    sudo systemctl restart libvirtd.service
+
+.. _systemd_modules_load:
+
+systemd-modules-load
+~~~~~~~~~~~~~~~~~~~~
+
+For convenience, you may load the KVMFR module when starting your computer.
+We can use the ``systemd-modules-load.service(8)`` service for this task.
+
+Create a file as ``/etc/modules-load.d/kvmfr.conf`` with the following
+contents::
+
+   #KVMFR Looking Glass module
+   kvmfr
+
+This will now run the next time you start your machine.
+
+If you are running in VM->host mode, you must additionally add another file in
+``/etc/modprobe.d/kvmfr.conf`` to properly set the size. It should have the
+following contents, while adjusting ``static_size_mb`` to your needs::
+
+   #KVMFR Looking Glass module
+   options kvmfr static_size_mb=128
