@@ -149,5 +149,5 @@ bool waylandGetFullscreen(void)
 
 void waylandMinimize(void)
 {
-  //FIXME
+  xdg_toplevel_set_minimized(wlWm.xdgToplevel);
 }
