@@ -29,14 +29,10 @@ Glass please download the source archive from the website instead:
 
 https://looking-glass.io/downloads
 
-Please also be sure to see the following files for more information
-Note: The `README.md` files are slowly being deprecated from this project in
-favor of the wiki at https://looking-glass.io/wiki, and as such the
-information in these files may be dated.
+Further documentation can be found in the `/doc` directory.
 
-* [client/README.md](client/README.md)
-* [host/README.md](host/README.md)
-* [module/README.md](module/README.md)
+You may view this locally as HTML by running `make html` with `python3-sphinx`
+installed, or online at https://looking-glass.io/docsurlhere
 
 ## Latest Version
 
