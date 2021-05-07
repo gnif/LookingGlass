@@ -349,6 +349,48 @@ Running the Client
 The client command is the binary file: **looking-glass-client**. This
 command should run after the Windows Host Application has started.
 
+.. _client_key_bindings:
+
+Default Key Bindings
+~~~~~~~~~~~~~~~~~~~~
+
+By default Looking Glass uses the :kbd:`Scroll Lock` key as the escape key
+for commands as well as the input :kbd:`capture` mode toggle, this can be
+changed using the ``-m`` switch if you desire a different key. Below are
+a list of current key bindings:
+
+============================ =======================================================
+Command                      Description
+============================ =======================================================
+:kbd:`ScrLk`                 Toggle capture mode
+:kbd:`ScrLk` + :kbd:`Q`      Quit
+:kbd:`ScrLk` + :kbd:`R`      Rotate the output clockwise by 90° increments
+:kbd:`ScrLk` + :kbd:`I`      Spice keyboard & mouse enable toggle
+:kbd:`ScrLk` + :kbd:`S`      Toggle scale algorithm
+:kbd:`ScrLk` + :kbd:`D`      FPS display toggle
+:kbd:`ScrLk` + :kbd:`F`      Full screen toggle
+:kbd:`ScrLk` + :kbd:`V`      Video stream toggle
+:kbd:`ScrLk` + :kbd:`N`      Toggle night vision mode
+:kbd:`ScrLk` + :kbd:`F1`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F1` to the guest
+:kbd:`ScrLk` + :kbd:`F2`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F2` to the guest
+:kbd:`ScrLk` + :kbd:`F3`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F3` to the guest
+:kbd:`ScrLk` + :kbd:`F4`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F4` to the guest
+:kbd:`ScrLk` + :kbd:`F5`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F5` to the guest
+:kbd:`ScrLk` + :kbd:`F6`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F6` to the guest
+:kbd:`ScrLk` + :kbd:`F7`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F7` to the guest
+:kbd:`ScrLk` + :kbd:`F8`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F8` to the guest
+:kbd:`ScrLk` + :kbd:`F9`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F9` to the guest
+:kbd:`ScrLk` + :kbd:`F10`    Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F10` to the guest
+:kbd:`ScrLk` + :kbd:`F11`    Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F11` to the guest
+:kbd:`ScrLk` + :kbd:`F12`    Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F12` to the guest
+:kbd:`ScrLk` + :kbd:`Insert` Increase mouse sensitivity in capture mode
+:kbd:`ScrLk` + :kbd:`Del`    Decrease mouse sensitivity in capture mode
+:kbd:`ScrLk` + :kbd:`LWin`   Send :kbd:`LWin` to the guest
+:kbd:`ScrLk` + :kbd:`RWin`   Send :kbd:`RWin` to the guest
+============================ =======================================================
+
+You can also find this list at any time by holding down :kbd:`Scroll Lock`.
+
 .. _client_cli_options:
 
 Command Line Options
