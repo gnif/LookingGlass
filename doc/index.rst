@@ -13,6 +13,7 @@ systems for legacy programs that require high-performance graphics.
    install
    troubleshooting
    obs
+   module
    faq
    tech_faq
 
