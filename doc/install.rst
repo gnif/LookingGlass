@@ -83,6 +83,13 @@ version** with ``git``.
 
    git clone --recursive https://github.com/gnif/LookingGlass.git
 
+.. warning::
+
+   Please only clone from Git if you're a developer, and know what you're
+   doing. Looking Glass requires git submodules that must be setup and updated
+   when building. Source code downloads from the website come bundled with the
+   necessary submodules.
+
 .. note::
 
    When using the latest bleeding-edge client version,
