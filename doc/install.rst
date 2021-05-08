@@ -117,15 +117,6 @@ Before you run the client, you will first need
 to configure either libvirt, or QEMU (whichever you prefer) then set
 up the **looking-glass-host** service in your VM.
 
-You can run the client from the build directory, add the build directory to your
-path to call it from anywhere, or run this command
-
-.. code:: bash
-
-   ln -s $(pwd)/looking-glass-client /usr/local/bin/
-
-from the build directory.
-
 .. _libvirt_configuration:
 
 libvirt Configuration
@@ -341,13 +332,22 @@ incompatible.
    Looking-Glass host executable as a virus and in some cases will
    automatically delete the file.
 
-.. _running_the_client:
+.. _client_usage:
 
-Running the Client
-------------------
+Usage
+-----
 
 The client command is the binary file: **looking-glass-client**. This
 command should run after the Windows Host Application has started.
+
+You can run the client from the build directory, add the build directory to your
+path to call it from anywhere, or run this command
+
+.. code:: bash
+
+   ln -s $(pwd)/looking-glass-client /usr/local/bin/
+
+from the build directory.
 
 .. _client_key_bindings:
 
