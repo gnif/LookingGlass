@@ -106,6 +106,9 @@ struct Inst
   unsigned          fontSize;
   LG_FontObj        helpFontObj;
   unsigned          helpFontSize;
+
+  bool               cursorLastValid;
+  struct CursorState cursorLast;
 };
 
 static struct Option egl_options[] =
@@ -472,6 +475,8 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   egl_calc_mouse_state(this);
   egl_update_font(this);
   egl_update_help_font(this);
+
+  this->cursorLastValid = false;
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
@@ -545,6 +550,7 @@ bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd)
   }
 
   this->start = true;
+  this->cursorLastValid = false;
   return true;
 }
 
@@ -581,12 +587,14 @@ void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, 
   }
 
   this->showAlert = true;
+  this->cursorLastValid = false;
 }
 
 void egl_on_help(void * opaque, const char * message)
 {
   struct Inst * this = (struct Inst *)opaque;
   egl_help_set_text(this->help, message);
+  this->cursorLastValid = false;
 }
 
 void egl_on_show_fps(void * opaque, bool showFPS)
@@ -767,6 +775,10 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
+  bool hasLastCursor = this->cursorLastValid;
+  bool cursorRendered = false;
+  struct CursorState cursorState;
+
   if (this->start && egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
@@ -780,6 +792,8 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
         this->waitDone = true;
     }
 
+    cursorRendered = true;
+    cursorState = egl_cursor_get_state(this->cursor, this->width, this->height);
     egl_cursor_render(this->cursor,
         (this->format.rotate + rotate) % LG_ROTATE_MAX);
   }
@@ -819,14 +833,39 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
       close = true;
 
     if (close)
+    {
       this->showAlert = false;
+      this->cursorLastValid = false;
+    }
     else
       egl_alert_render(this->alert, this->screenScaleX, this->screenScaleY);
   }
 
+  struct Rect damage[2];
+  int damageIdx = 0;
+
+  if (this->waitDone)
+  {
+    if (cursorRendered && hasLastCursor)
+    {
+      if (this->cursorLast.visible)
+        damage[damageIdx++] = this->cursorLast.rect;
+
+      if (cursorState.visible)
+        damage[damageIdx++] = cursorState.rect;
+
+      this->cursorLast = cursorState;
+    }
+    else if (cursorRendered)
+    {
+      this->cursorLast = cursorState;
+      this->cursorLastValid = true;
+    }
+  }
+
   egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
-  app_eglSwapBuffers(this->display, this->surface);
+  app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
   return true;
 }
 
@@ -834,6 +873,7 @@ void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
 {
   struct Inst * this = (struct Inst *)opaque;
   egl_fps_update(this->fps, avgUPS, avgFPS);
+  this->cursorLastValid = false;
 }
 
 struct LG_Renderer LGR_EGL =

@@ -41,6 +41,7 @@ bool waylandEGLInit(int w, int h)
     DEBUG_ERROR("Failed to create EGL window");
     return false;
   }
+
   return true;
 }
 
@@ -68,9 +69,51 @@ EGLDisplay waylandGetEGLDisplay(void)
   return eglGetDisplay(native);
 }
 
-void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface)
+void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
 {
-  eglSwapBuffers(display, surface);
+  if (!wlWm.eglSwapWithDamageInit)
+  {
+    const char *exts = eglQueryString(display, EGL_EXTENSIONS);
+    wlWm.eglSwapWithDamageInit = true;
+    if (wl_proxy_get_version((struct wl_proxy *) wlWm.surface) < 4)
+      DEBUG_INFO("Swapping buffers with damage: not supported, need wl_compositor v4");
+    else if (strstr(exts, "EGL_KHR_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageKHR)
+    {
+      wlWm.eglSwapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageKHR;
+      DEBUG_INFO("Using EGL_KHR_swap_buffers_with_damage");
+    }
+    else if (strstr(exts, "EGL_EXT_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageEXT)
+    {
+      wlWm.eglSwapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageEXT;
+      DEBUG_INFO("Using EGL_EXT_swap_buffers_with_damage");
+    }
+    else
+      DEBUG_INFO("Swapping buffers with damage: not supported");
+  }
+
+  if (wlWm.eglSwapWithDamage && count)
+  {
+    if (count * 4 > wlWm.eglDamageRectCount)
+    {
+      free(wlWm.eglDamageRects);
+      wlWm.eglDamageRects = malloc(sizeof(EGLint) * count * 4);
+      if (!wlWm.eglDamageRects)
+        DEBUG_FATAL("Out of memory");
+      wlWm.eglDamageRectCount = count * 4;
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+      wlWm.eglDamageRects[i*4+0] = damage[i].x;
+      wlWm.eglDamageRects[i*4+1] = damage[i].y;
+      wlWm.eglDamageRects[i*4+2] = damage[i].w;
+      wlWm.eglDamageRects[i*4+3] = damage[i].h;
+    }
+
+    wlWm.eglSwapWithDamage(display, surface, wlWm.eglDamageRects, count);
+  }
+  else
+    eglSwapBuffers(display, surface);
 
   if (wlWm.needsResize)
   {
@@ -169,6 +212,6 @@ void waylandGLSetSwapInterval(int interval)
 
 void waylandGLSwapBuffers(void)
 {
-  waylandEGLSwapBuffers(wlWm.glDisplay, wlWm.glSurface);
+  waylandEGLSwapBuffers(wlWm.glDisplay, wlWm.glSurface, NULL, 0);
 }
 #endif

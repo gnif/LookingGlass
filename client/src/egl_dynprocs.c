@@ -31,6 +31,10 @@ void egl_dynProcsInit(void)
     eglGetProcAddress("eglGetPlatformDisplayEXT");
   g_egl_dynProcs.glEGLImageTargetTexture2DOES = (glEGLImageTargetTexture2DOES_t)
     eglGetProcAddress("glEGLImageTargetTexture2DOES");
+  g_egl_dynProcs.eglSwapBuffersWithDamageKHR = (eglSwapBuffersWithDamageKHR_t)
+    eglGetProcAddress("eglSwapBuffersWithDamageKHR");
+  g_egl_dynProcs.eglSwapBuffersWithDamageEXT = (eglSwapBuffersWithDamageKHR_t)
+    eglGetProcAddress("eglSwapBuffersWithDamageEXT");
 };
 
 #endif

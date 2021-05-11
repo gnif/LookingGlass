@@ -215,6 +215,16 @@ void egl_cursor_set_state(EGL_Cursor * cursor, const bool visible, const float x
   cursor->y       = y;
 }
 
+struct CursorState egl_cursor_get_state(EGL_Cursor * cursor, int width, int height) {
+  return (struct CursorState) {
+    .visible = cursor->visible,
+    .rect.x = (cursor->x * width + width) / 2,
+    .rect.y = (-cursor->y * height + height) / 2 - cursor->h * height,
+    .rect.w = cursor->w * width + 2,
+    .rect.h = cursor->h * height + 2,
+  };
+}
+
 void egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rotate)
 {
   if (!cursor->visible)

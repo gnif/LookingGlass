@@ -29,6 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 # include <EGL/eglext.h>
 #endif
 
+#include "egl_dynprocs.h"
 #include "common/locking.h"
 #include "common/countedbuffer.h"
 #include "interface/displayserver.h"
@@ -66,6 +67,13 @@ struct SurfaceOutput
   struct wl_list link;
 };
 
+enum EGLSwapWithDamageState {
+  SWAP_WITH_DAMAGE_UNKNOWN,
+  SWAP_WITH_DAMAGE_UNSUPPORTED,
+  SWAP_WITH_DAMAGE_KHR,
+  SWAP_WITH_DAMAGE_EXT,
+};
+
 struct WaylandDSState
 {
   bool pointerGrabbed;
@@ -88,8 +96,12 @@ struct WaylandDSState
   bool warpSupport;
   double cursorX, cursorY;
 
-#ifdef ENABLE_EGL
+#if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
   struct wl_egl_window * eglWindow;
+  bool eglSwapWithDamageInit;
+  eglSwapBuffersWithDamageKHR_t eglSwapWithDamage;
+  EGLint * eglDamageRects;
+  int eglDamageRectCount;
 #endif
 
 #ifdef ENABLE_OPENGL
@@ -197,7 +209,7 @@ void waylandShowPointer(bool show);
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
 bool waylandEGLInit(int w, int h);
 EGLDisplay waylandGetEGLDisplay(void);
-void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface);
+void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count);
 #endif
 
 #ifdef ENABLE_EGL
