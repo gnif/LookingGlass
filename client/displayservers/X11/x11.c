@@ -930,7 +930,7 @@ static EGLNativeWindowType x11GetEGLNativeWindow(void)
   return (EGLNativeWindowType)x11.window;
 }
 
-static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface)
+static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
 {
   eglSwapBuffers(display, surface);
 }

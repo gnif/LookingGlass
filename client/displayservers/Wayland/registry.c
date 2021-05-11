@@ -37,7 +37,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, wl_shm_interface.name))
     wlWm.shm = wl_registry_bind(wlWm.registry, name, &wl_shm_interface, 1);
   else if (!strcmp(interface, wl_compositor_interface.name) && version >= 3)
-    wlWm.compositor = wl_registry_bind(wlWm.registry, name, &wl_compositor_interface, 3);
+    wlWm.compositor = wl_registry_bind(wlWm.registry, name,
+        // we only need v3 to run, but v4 can use eglSwapBuffersWithDamageKHR
+        &wl_compositor_interface, version > 4 ? 4 : version);
 #ifndef ENABLE_LIBDECOR
   else if (!strcmp(interface, xdg_wm_base_interface.name))
     wlWm.xdgWmBase = wl_registry_bind(wlWm.registry, name, &xdg_wm_base_interface, 1);

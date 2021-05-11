@@ -66,7 +66,7 @@ bool app_getProp(LG_DSProperty prop, void * ret);
 #ifdef ENABLE_EGL
 EGLDisplay app_getEGLDisplay(void);
 EGLNativeWindowType app_getEGLNativeWindow(void);
-void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface);
+void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count);
 #endif
 
 #ifdef ENABLE_OPENGL

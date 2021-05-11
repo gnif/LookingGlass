@@ -114,5 +114,3 @@ bool waylandIsValidPointerPos(int x, int y)
 {
   return x >= 0 && x < wlWm.width && y >= 0 && y < wlWm.height;
 }
-
-

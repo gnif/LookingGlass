@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdbool.h>
 #include <EGL/egl.h>
+#include "common/types.h"
 
 typedef enum LG_ClipboardData
 {
@@ -115,7 +116,7 @@ struct LG_DisplayServerOps
   /* EGL support */
   EGLDisplay (*getEGLDisplay)(void);
   EGLNativeWindowType (*getEGLNativeWindow)(void);
-  void (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface);
+  void (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count);
 #endif
 
 #ifdef ENABLE_OPENGL
