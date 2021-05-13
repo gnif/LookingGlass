@@ -20,6 +20,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #ifndef _H_LG_COMMON_STRINGUTILS
 #define _H_LG_COMMON_STRINGUTILS
 
+#include <stdbool.h>
+
 // vsprintf but with buffer allocation
 int valloc_sprintf(char ** str, const char * format, va_list ap)
   __attribute__ ((format (printf, 2, 0)));
@@ -27,5 +29,8 @@ int valloc_sprintf(char ** str, const char * format, va_list ap)
 // sprintf but with buffer allocation
 int alloc_sprintf(char ** str, const char * format, ...)
   __attribute__ ((format (printf, 2, 3)));
+
+// Find value in a list separated by delimiter.
+bool str_containsValue(const char * list, char delimiter, const char * value);
 
 #endif

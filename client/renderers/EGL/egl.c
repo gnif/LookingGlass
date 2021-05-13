@@ -698,7 +698,7 @@ bool egl_render_startup(void * opaque)
 
   if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
-    if (strstr(client_exts, "EGL_EXT_image_dma_buf_import") != NULL)
+    if (util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import"))
     {
       /*
        * As of version 455.45.01 NVidia started advertising support for this

@@ -21,9 +21,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "main.h"
 
 #include "common/debug.h"
+#include "common/stringutils.h"
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <assert.h>
 #include <math.h>
 
@@ -206,4 +208,9 @@ void util_rotatePoint(struct DoublePoint *point)
       point->y =  temp;
       break;
   }
+}
+
+bool util_hasGLExt(const char * exts, const char * ext)
+{
+  return str_containsValue(exts, ' ', ext);
 }
