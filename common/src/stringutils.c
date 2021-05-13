@@ -17,9 +17,13 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
+
+#include "common/stringutils.h"
 
 int valloc_sprintf(char ** str, const char * format, va_list ap)
 {
@@ -63,4 +67,24 @@ int alloc_sprintf(char ** str, const char * format, ...)
   int ret = valloc_sprintf(str, format, ap);
   va_end(ap);
   return ret;
+}
+
+bool str_containsValue(const char * list, char delimiter, const char * value)
+{
+  size_t len = strlen(value);
+  const char span[] = {delimiter, '\0'};
+
+  while (*list)
+  {
+    if (*list == delimiter)
+    {
+      ++list;
+      continue;
+    }
+    size_t n = strcspn(list, span);
+    if (n == len && strncmp(value, list, n) == 0)
+      return true;
+    list += n;
+  }
+  return false;
 }

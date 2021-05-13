@@ -42,6 +42,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app.h"
 #include "common/debug.h"
 #include "common/time.h"
+#include "util.h"
 
 #define _NET_WM_STATE_REMOVE 0
 #define _NET_WM_STATE_ADD    1
@@ -901,14 +902,14 @@ static EGLDisplay x11GetEGLDisplay(void)
   EGLDisplay ret;
   const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
 
-  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
+  if (util_hasGLExt(early_exts, "EGL_KHR_platform_base") &&
       g_egl_dynProcs.eglGetPlatformDisplay)
   {
     DEBUG_INFO("Using eglGetPlatformDisplay");
     ret = g_egl_dynProcs.eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR,
         x11.display, NULL);
   }
-  else if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
+  else if (util_hasGLExt(early_exts, "EGL_EXT_platform_base") &&
       g_egl_dynProcs.eglGetPlatformDisplayEXT)
   {
     DEBUG_INFO("Using eglGetPlatformDisplayEXT");

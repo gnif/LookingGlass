@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app.h"
 #include "common/debug.h"
+#include "util.h"
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
 #include "egl_dynprocs.h"
@@ -49,14 +50,14 @@ EGLDisplay waylandGetEGLDisplay(void)
 
   const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
 
-  if (strstr(early_exts, "EGL_KHR_platform_wayland") != NULL &&
+  if (util_hasGLExt(early_exts, "EGL_KHR_platform_wayland") &&
       g_egl_dynProcs.eglGetPlatformDisplay)
   {
     DEBUG_INFO("Using eglGetPlatformDisplay");
     return g_egl_dynProcs.eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, native, NULL);
   }
 
-  if (strstr(early_exts, "EGL_EXT_platform_wayland") != NULL &&
+  if (util_hasGLExt(early_exts, "EGL_EXT_platform_wayland") &&
       g_egl_dynProcs.eglGetPlatformDisplayEXT)
   {
     DEBUG_INFO("Using eglGetPlatformDisplayEXT");

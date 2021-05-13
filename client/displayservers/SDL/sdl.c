@@ -35,6 +35,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "egl_dynprocs.h"
 #include "common/types.h"
 #include "common/debug.h"
+#include "util.h"
 
 struct SDLDSState
 {
@@ -199,14 +200,14 @@ static EGLDisplay sdlGetEGLDisplay(void)
 
   const char *early_exts = eglQueryString(NULL, EGL_EXTENSIONS);
 
-  if (strstr(early_exts, "EGL_KHR_platform_base") != NULL &&
+  if (util_hasGLExt(early_exts, "EGL_KHR_platform_base") &&
       g_egl_dynProcs.eglGetPlatformDisplay)
   {
     DEBUG_INFO("Using eglGetPlatformDisplay");
     return g_egl_dynProcs.eglGetPlatformDisplay(platform, native, NULL);
   }
 
-  if (strstr(early_exts, "EGL_EXT_platform_base") != NULL &&
+  if (util_hasGLExt(early_exts, "EGL_EXT_platform_base") &&
       g_egl_dynProcs.eglGetPlatformDisplayEXT)
   {
     DEBUG_INFO("Using eglGetPlatformDisplayEXT");
