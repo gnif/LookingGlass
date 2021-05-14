@@ -9,15 +9,20 @@ Building
 For Windows on Windows
 ~~~~~~~~~~~~~~~~~~~~~~
 
-1. download and install msys2 x86_64 from
+1. Download and install msys2 x86_64 from
    `http://www.msys2.org/ <http://www.msys2.org/>`__ following the setup
    instructions provided
-2. execute ``pacman -Fy`` and then
-   ``pacman -Sy git make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake``
-3. run "C:\msys64\mingw64.exe"
-4. checkout the project
+2. Run the MSYS2 shell.
+3. Download build dependencies with pacman
+
+.. code:: bash
+
+   pacman -Fy
+   pacman -Sy git make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
+
+4. Checkout the project
    ``git clone https://github.com/gnif/LookingGlass.git``
-5. configure the project and build it
+5. Configure the project and build it
 
 .. code:: bash
 
@@ -26,21 +31,32 @@ For Windows on Windows
    cmake -G "MSYS Makefiles" ..
    make
 
+.. _host_linux_on_linux:
+   
 For Linux on Linux
 ~~~~~~~~~~~~~~~~~~
 
+Make a ``host/build`` direstory, then run ``cmake``
+
 .. code:: bash
 
+   cd host
    mkdir build
    cd build
    cmake ..
    make
 
+.. _host_win_cross_on_linux:
+
 For Windows cross compiling on Linux
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Like :ref:`host_linux_on_linux`, but specifying the mingw64 toolchain in cmake
+for building.
+
 .. code:: bash
 
+   cd host
    mkdir build
    cd build
    cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
@@ -49,11 +65,25 @@ For Windows cross compiling on Linux
 Building the Windows installer
 ------------------------------
 
-Install NSIS compiler Build the host program, see above sections. Build
-installer with ``makensis platform/Windows/installer.nsi`` The resulting
-installer will be at ``platform/Windows/looking-glass-host-setup.exe``
+1. :ref:`Build <host_win_cross_on_linux>` the host for Linux.
+
+2. Install ``nsis``
+
+.. code:: bash
+
+   apt-get install nsis
+
+3. Use ``makensis`` to build the installer.
+
+.. code:: bash
+
+   cd host/build/platform/Windows
+   makensis installer.nsi
 
 .. _host_questions:
+
+This will build ``looking-glass-host-setup.exe`` under
+``host/build/platform/Windows/looking-glass-host-setup.exe``
 
 Questions and Answers
 ---------------------
