@@ -32,7 +32,7 @@ https://looking-glass.io/downloads
 Further documentation can be found in the `/doc` directory.
 
 You may view this locally as HTML by running `make html` with `python3-sphinx`
-installed, or online at https://looking-glass.io/docsurlhere
+installed. <!-- or online at https://looking-glass.io/docs-->
 
 ## Latest Version
 
