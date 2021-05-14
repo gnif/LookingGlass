@@ -110,10 +110,14 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
       wlWm.eglDamageRects[i*4+3] = damage[i].h;
     }
 
+    waylandPresentationFrame();
     wlWm.eglSwapWithDamage(display, surface, wlWm.eglDamageRects, count);
   }
   else
+  {
+    waylandPresentationFrame();
     eglSwapBuffers(display, surface);
+  }
 
   if (wlWm.needsResize)
   {

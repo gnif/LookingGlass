@@ -47,6 +47,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
     wlWm.xdgDecorationManager = wl_registry_bind(wlWm.registry, name,
         &zxdg_decoration_manager_v1_interface, 1);
 #endif
+  else if (!strcmp(interface, wp_presentation_interface.name))
+    wlWm.presentation = wl_registry_bind(wlWm.registry, name,
+        &wp_presentation_interface, 1);
   else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name))
     wlWm.relativePointerManager = wl_registry_bind(wlWm.registry, name,
         &zwp_relative_pointer_manager_v1_interface, 1);

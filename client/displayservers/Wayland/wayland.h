@@ -35,6 +35,7 @@
 #include "interface/displayserver.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
+#include "wayland-presentation-time-client-protocol.h"
 #include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
@@ -109,6 +110,9 @@ struct WaylandDSState
   EGLConfig glConfig;
   EGLSurface glSurface;
 #endif
+
+  struct wp_presentation * presentation;
+  clockid_t clkId;
 
 #ifdef ENABLE_LIBDECOR
   struct libdecor * libdecor;
@@ -254,6 +258,11 @@ bool waylandPollInit(void);
 void waylandWait(unsigned int time);
 bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events);
 bool waylandPollUnregister(int fd);
+
+// presentation module
+bool waylandPresentationInit(void);
+void waylandPresentationFrame(void);
+void waylandPresentationFree(void);
 
 // registry module
 bool waylandRegistryInit(void);
