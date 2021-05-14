@@ -21,7 +21,11 @@ For Windows on Windows
    pacman -Sy git make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
 
 4. Checkout the project
-   ``git clone https://github.com/gnif/LookingGlass.git``
+
+.. code:: bash
+
+   git clone https://github.com/gnif/LookingGlass.git
+
 5. Configure the project and build it
 
 .. code:: bash
