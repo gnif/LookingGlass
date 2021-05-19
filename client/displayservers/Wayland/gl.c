@@ -77,12 +77,12 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
     wlWm.eglSwapWithDamageInit = true;
     if (wl_proxy_get_version((struct wl_proxy *) wlWm.surface) < 4)
       DEBUG_INFO("Swapping buffers with damage: not supported, need wl_compositor v4");
-    else if (strstr(exts, "EGL_KHR_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageKHR)
+    else if (util_hasGLExt(exts, "EGL_KHR_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageKHR)
     {
       wlWm.eglSwapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageKHR;
       DEBUG_INFO("Using EGL_KHR_swap_buffers_with_damage");
     }
-    else if (strstr(exts, "EGL_EXT_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageEXT)
+    else if (util_hasGLExt(exts, "EGL_EXT_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageEXT)
     {
       wlWm.eglSwapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageEXT;
       DEBUG_INFO("Using EGL_EXT_swap_buffers_with_damage");
