@@ -259,7 +259,7 @@ static void * pointerThread(void * data)
 
         case CURSOR_TYPE_MONOCHROME:
         {
-          dataSize = cursor->height * sizeof(uint32_t);
+          dataSize = cursor->height * cursor->width * sizeof(uint32_t);
           allocCursorData(this, dataSize);
 
           const int hheight = cursor->height / 2;
