@@ -422,7 +422,7 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
-  if (!wlWm.pointerInSurface)
+  if (!wlWm.pointerInSurface || wlWm.lockedPointer)
     return;
 
   if (x < 0) x = 0;
