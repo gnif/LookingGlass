@@ -124,7 +124,8 @@ Remember to add
 On certain distros, running libvirt this way poses issues with apparmor
 and cgroups.
 
-For apparmor, in ``/etc/apparmor.d/abstractions/libvirt-qemu``, append::
+For apparmor, create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if
+it doesn't exist, and add the following::
 
    # Looking Glass
    /dev/kvmfr0 rw,
