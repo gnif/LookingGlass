@@ -24,8 +24,18 @@ systems for legacy programs that require high-performance graphics.
 
 More information:
 
-* `Offical Website <https://looking-glass.io/>`_
+* `Official Website <https://looking-glass.io/>`_
 * `GitHub <https://github.com/gnif/LookingGlass>`_
 * `Discord <https://discord.gg/52SMupxkvt>`_
 * `Forum <https://forum.level1techs.com/c/software/lookingglass/142>`_
 * `Community wiki <https://looking-glass.io/wiki/>`_
+* IRC - #looking-glass on `libera.chat <https://libera.chat/>`_
+* `Trello <https://trello.com/b/tI1Xbwsg/looking-glass>`_
+
+Donate:
+
+* `GitHub <https://github.com/sponsors/gnif>`__
+* `Ko-Fi <https://ko-fi.com/lookingglass>`_
+* `Patreon <https://www.patreon.com/gnif>`_
+* `PayPal <https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ESQ72XUPGKXRY>`_
+* BTC - 14ZFcYjsKPiVreHqcaekvHGL846u3ZuT13
