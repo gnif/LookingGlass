@@ -31,7 +31,7 @@ The Clipboard is not Working
 
    -  Before you can Copy/Paste content between the Guest and the Host
       you must `Enable Clipboard
-      Synchronization <https://looking-glass.hostfission.com/wiki/FAQ#How_to_enable_clipboard_synchronization_via_SPICE>`_
+      Synchronization <https://looking-glass.io/wiki/FAQ#How_to_enable_clipboard_synchronization_via_SPICE>`_
 
 -  **Did you install the Spice Guest Tools?**
 
