@@ -8,7 +8,8 @@ VGA PCI Passthrough.
 
 ## Documentation
 
-** IMPORTANT **
+❕❕❕ **IMPORTANT** ❕❕❕
+
 This project contains submodules that must be checked out if building from the
 git repository! If you are not a developer and just want to compile Looking
 Glass, please download the source archive from the website instead:
