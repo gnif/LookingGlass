@@ -29,7 +29,7 @@ More information:
 * `Discord <https://discord.gg/52SMupxkvt>`_
 * `Forum <https://forum.level1techs.com/c/software/lookingglass/142>`_
 * `Community wiki <https://looking-glass.io/wiki/>`_
-* IRC - #looking-glass on `libera.chat <https://libera.chat/>`_
+* IRC - #LookingGlass on `libera.chat <https://libera.chat/>`_
 * `Trello <https://trello.com/b/tI1Xbwsg/looking-glass>`_
 
 Donate:
