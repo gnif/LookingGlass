@@ -60,7 +60,7 @@ https://forum.level1techs.com/c/software/lookingglass/142
 
 ## IRC
 
-Join us in the #LookingGlass channel on the FreeNode network
+Join us in the #LookingGlass channel on the Libera.Chat network.
 
 ## Trello
 
