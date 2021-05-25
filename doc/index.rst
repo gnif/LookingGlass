@@ -11,6 +11,7 @@ systems for legacy programs that require high-performance graphics.
    :maxdepth: 2
 
    install
+   build
    troubleshooting
    obs
    module

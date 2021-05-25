@@ -24,6 +24,9 @@ author = 'Geoffrey McRae and the Looking Glass team'
 # The full version, including alpha/beta/rc tags
 release = 'B4'
 
+rst_prolog = """
+.. |license| replace:: GPLv2
+"""
 
 # -- General configuration ---------------------------------------------------
 
