@@ -1,130 +1,23 @@
+.. _installing:
+
 Installation
 ############
 
-.. _looking_glass_client:
+.. _client_install:
 
-Looking Glass Client
---------------------
+Client
+------
 
-This guide will step you through building the looking glass client from
-source, before you attempt to do this you should have a basic
-understanding of how to use the shell.
+The Looking Glass Client recieves frames from the :ref:`host_install` to
+display on your screen. It also handles input, and can optionally share the
+system clipboard with your guest OS through Spice.
 
-.. _building_the_application:
+First you must build the client from source code, see :ref:`building`.
 
-Building the Application
-~~~~~~~~~~~~~~~~~~~~~~~~
+After this, you may move the client into a directory in your path, some may
+allow ``~/.local/bin``, or run it directly from the build directory.
 
-.. _installing_build_dependencies:
-
-Installing Build Dependencies
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-These required libraries and tools should be installed first.
-
-.. _required_dependencies:
-
-Required Dependencies
-'''''''''''''''''''''
-
--  cmake
--  gcc \| clang
--  fonts-freefont-ttf
--  libegl-dev
--  libgl-dev
--  libfontconfig1-dev
--  libgmp-dev
--  libsdl2-dev
--  libsdl2-ttf-dev
--  libspice-protocol-dev
--  make
--  nettle-dev
--  pkg-config
-
-.. _may_be_disabled:
-
-May be disabled
-<<<<<<<<<<<<<<<
-
-These dependencies are required by default, but may be omitted if their
-feature is disabled when running :ref:`cmake <client_building>`.
-
--  Disable with ``cmake -DENABLE_BACKTRACE=no``
-
-   -  binutils-dev
-
--  Disable with ``cmake -DENABLE_X11=no``
-
-   -  libx11-dev
-   -  libxfixes-dev
-   -  libxi-dev
-   -  libxss-dev
-
--  Disable with ``cmake -DENABLE_WAYLAND=no``
-
-   -  libwayland-bin
-   -  libwayland-dev
-   -  wayland-protocols
-
-You can fetch these dependencies on Debian systems with the following command:
-
-``apt-get install binutils-dev cmake fonts-freefont-ttf libfontconfig1-dev
-libsdl2-dev libsdl2-ttf-dev libspice-protocol-dev libx11-dev nettle-dev
-wayland-protocols``
-
-Downloading
-^^^^^^^^^^^
-
-Either visit the Looking Glass website's `Download
-Page <https://looking-glass.io/downloads>`_, or pull the lastest **bleeding-edge
-version** with ``git``.
-
-.. code:: bash
-
-   git clone --recursive https://github.com/gnif/LookingGlass.git
-
-.. warning::
-
-   Please only clone from Git if you're a developer, and know what you're
-   doing. Looking Glass requires git submodules that must be setup and updated
-   when building. Source code downloads from the website come bundled with the
-   necessary submodules.
-
-.. note::
-
-   When using the latest bleeding-edge client version,
-   you *MUST* download and install the corresponding host application.
-
-.. _client_building:
-
-Building
-^^^^^^^^
-
-If you've downloaded the source code as a zip file, simply unzip and cd into the
-new directory. If you've cloned the repo with ``git``, then ``cd`` into the
-'LookingGlass' directory.
-
-.. code:: bash
-
-   mkdir client/build
-   cd client/build
-   cmake ../
-   make
-
-.. note::
-
-   The most common compile error is related to backtrace support. This can be
-   disabled by adding the following option to the cmake command:
-   **-DENABLE_BACKTRACE=0**, however, if you disable this and need support for a
-   crash please be sure to use gdb to obtain a backtrace manually or there is
-   nothing that can be done to help you.
-
-Should this all go well, you will build the **looking-glass-client**.
-Before you run the client, you will first need
-to configure either libvirt, or QEMU (whichever you prefer) then set
-up the **looking-glass-host** service in your VM.
-
-.. _libvirt_configuration:
+.. _client_libvirt_configuration:
 
 libvirt Configuration
 ~~~~~~~~~~~~~~~~~~~~~
@@ -149,9 +42,9 @@ your virtual machine.
    </shmem>
 
 The memory size (show as 32 in the example above) may need to be
-adjusted as per the :ref:`Determining Memory <determining_memory>` section.
+adjusted as per the :ref:`Determining Memory <client_determining_memory>` section.
 
-.. _spice_server:
+.. _client_spice_server:
 
 Spice Server
 ^^^^^^^^^^^^
@@ -179,6 +72,8 @@ along with clipboard sync support, make sure you have a
 If you want clipboard synchronization please see
 :ref:`how_to_enable_clipboard_synchronization_via_spice`
 
+.. _client_apparmor:
+
 AppArmor
 ^^^^^^^^
 
@@ -189,7 +84,7 @@ can be done by adding the following to
 
 ``/dev/shm/looking-glass rw,``
 
-.. _qemu_commands:
+.. _client_qemu_commands:
 
 Qemu Commands
 ~~~~~~~~~~~~~
@@ -205,9 +100,9 @@ the ``bus`` parameter to suit your particular configuration:
    -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
 
 The memory size (shown as 32M in the example above) may need to be
-adjusted as per :ref:`Determining Memory <determining_memory>` section.
+adjusted as per :ref:`Determining Memory <client_determining_memory>` section.
 
-.. _determining_memory:
+.. _client_determining_memory:
 
 Determining Memory
 ~~~~~~~~~~~~~~~~~~
@@ -228,7 +123,7 @@ For example, for a resolution of 1920x1080 (1080p):
 You must round this value up to the nearest power of two, which for the
 provided example is 32MB.
 
-.. _shared_memory_file_permissions:
+.. _client_shmfile_permissions:
 
 Shared Memory File Permissions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -250,94 +145,6 @@ with the following::
 
 Change ``UID`` to the user name you will run Looking Glass with, usually your
 own.
-
-.. _looking_glass_service_windows:
-
-Looking Glass Service (Windows)
--------------------------------
-
-You must first run the Windows VM with the changes noted above in either
-the :ref:`libvirt_configuration` or :ref:`qemu_commands` sections.
-
-.. _installing_the_ivshmem_driver:
-
-Installing the IVSHMEM Driver
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Windows will not prompt for a driver for the IVSHMEM device, instead, it
-will use a default null (do nothing) driver for the device. To install
-the IVSHMEM driver you will need to go into the device manager and
-update the driver for the device "PCI standard RAM Controller" under the
-"System Devices" node.
-
-A signed Windows 10 driver can be obtained from Red Hat for this device
-from the below address:
-
-https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/upstream-virtio/
-
-Please note that you must obtain version 0.1.161 or later.
-
-If you encounter warnings or errors about driver signatures, ensure secure boot
-is turned off in the bios/uefi settings of your virtual machine.
-
-.. _a_note_about_ivshmem_and_scream_audio:
-
-A note about IVSHMEM and Scream Audio
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. warning::
-   Using IVSHMEM with Scream may interfere with Looking Glass, as they may try
-   to use the same device.
-
-Please do not use the IVSHMEM plugin for Scream.
-Use the default network transfer method. The IVSHMEM method induces
-additional latency that is built into its implementation. When using
-VirtIO for a network device the VM is already using a highly optimized
-memory copy anyway so there is no need to make another one.
-
-If you insist on using IVSHMEM for Scream—despite its inferiority to the
-default network implementation—the Windows Host Application can be told
-what device to use. Create a ``looking-glass-host.ini`` file in the same
-directory as the looking-glass-host.exe file. In it, you can use the
-``os:shmDevice`` option like so:
-
-.. code:: INI
-
-   [os]
-   shmDevice=1
-
-.. _using_the_windows_host_application:
-
-Using the Windows Host Application
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Start by downloading the correct version for your release from
-https://looking-glass.io/downloads. You can either choose between
-**Official Releases**, which are stable; or **Release Candidates**, new versions
-about to be stable, but haven't passed validation.
-
-.. note::
-   If your **looking-glass-client** was created by building from the **master
-   branch** you have to pick the **Bleeding Edge** version.
-
-Next, extract the zip archive using the commit hash for the password.
-Then, run the ``looking-glass-host-setup.exe`` installer and install the host.
-By default, the installer will install a service that
-automatically starts the host application at boot. The installer can
-also be installed in silent mode with the ``/S`` switch. You can find other
-command line options with the ``/h`` switch.
-
-The windows host application captures the windows desktop and stuffs the
-frames into the shared memory via the shared memory virtual device,
-without this Looking Glass will not function. It is critical that the
-version of the host application matches the version of the client
-application, as differing versions can be, and usually are,
-incompatible.
-
-.. note::
-   As of 2020-10-23, Microsoft Defender is known to mark the
-   Looking-Glass host executable as a virus and in some cases will
-   automatically delete the file.
 
 .. _client_usage:
 
@@ -607,3 +414,79 @@ The following is a complete list of options accepted by this application
   +=====================+=======+=======+=======================+
   | wayland:warpSupport |       | yes   | Enable cursor warping |
   +---------------------+-------+-------+-----------------------+
+
+.. _host_install:
+
+Host
+----
+
+The Looking Glass Host captures frames from the guest OS using a capture API,
+and sends these frames to the :ref:`client_install`, be it on the host OS
+(hypervisor) or another Virtual Machine, through a low-latency transfer
+protocol over shared memory.
+
+You can get the host program in two ways:
+
+-  Download a pre-built binary from https://looking-glass.io/downloads
+   (**recommended**)
+
+-  Download the source code as described in :ref:`building`, then
+   :ref:`build the host <host_building>`.
+
+.. _host_install_windows:
+
+Windows
+~~~~~~~
+
+To begin, you must first run the Windows VM with the changes noted above in
+either the :ref:`client_libvirt_configuration` or :ref:`client_qemu_commands`
+sections.
+
+.. _installing_the_ivshmem_driver:
+
+Installing the IVSHMEM Driver
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Windows will not prompt for a driver for the IVSHMEM device, instead, it
+will use a default null (do nothing) driver for the device. To install
+the IVSHMEM driver you will need to go into the device manager and
+update the driver for the device "PCI standard RAM Controller" under the
+"System Devices" node.
+
+A signed Windows 10 driver can be obtained from Red Hat for this device
+from the below address:
+
+https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/upstream-virtio/
+
+Please note that you must obtain version 0.1.161 or later.
+
+If you encounter warnings or errors about driver signatures, ensure secure boot
+is turned off in the bios/uefi settings of your virtual machine.
+
+.. _host_install_service:
+
+Installing the Looking Glass Service
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+After installing your IVSHMEM driver, we can now install the Looking Glass Host
+onto our Windows Virtual Machine.
+
+1. First, run ``looking-glass-host-setup.exe`` as an administrator
+   (:ref:`Why? <faq_host_admin_privs>`)
+2. You will be greeted by an intro screen. Press ``Next`` to continue.
+3. You are presented with the |license| license. Please read and agree to the
+   license by pressing ``Agree``.
+4. You can change the install path if you wish, otherwise press ``Next`` to
+   continue.
+5. You may enable or disable options on this screen to configure the
+   installation. The default values are recommended for most users.
+   Press ``Install`` to begin installation.
+6. After a few moments, installation will complete, and you will have a
+   running instance of Looking Glass. If you experience failures, you can
+   see them in the install log appearing in the middle of the window.
+7. Press ``Close`` to exit the installer.
+
+Command line users can run ``looking-glass-host-setup.exe /S`` to execute a
+silent install with default options selected. Further configuration from the
+command line can be done with flags. You can list all available flags by
+running ``looking-glass-host-setup.exe /?``.

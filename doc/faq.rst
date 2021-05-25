@@ -150,8 +150,7 @@ Another popular solution is to use
 pipes audio through the network. A guide for setting up scream is available on
 the wiki: https://looking-glass.io/wiki/Using_Scream_over_LAN
 
-
-
+.. _faq_win:
 
 Windows
 -------
@@ -171,3 +170,103 @@ The screen stops updating when left idle for a time
 
 Windows is likely turning off the display to save power, you can prevent
 this by adjusting the \`Power Options\` in the control panel.
+
+.. _faq_host:
+
+Host
+----
+
+Where is the log?
+~~~~~~~~~~~~~~~~~
+
+The log file for the host application is located at::
+
+   %ProgramData%\Looking Glass (host)\looking-glass-host.txt
+
+You can also find out where the file is by right clicking on the tray
+icon and selecting "Log File Location".
+
+The log file for the looking glass service is located at::
+
+   %ProgramData%\Looking Glass (host)\looking-glass-host-service.txt
+
+This is useful for troubleshooting errors related to the host
+application not starting.
+
+High priority capture using DXGI and Secure Desktop (UAC) capture support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default Windows gives priority to the foreground application for any
+GPU work which causes issues with capture if the foreground application
+is consuming 100% of the available GPU resources. The looking glass host
+application is able to increase the kernel GPU thread to realtime
+priority which fixes this, but in order to do so it must run as the
+``SYSTEM`` user account. To do this, Looking Glass needs to run as a
+service. This can be accomplished by either using the NSIS installer
+which will do this for you, or you can use the following command to
+Install the service manually:
+
+::
+
+   looking-glass-host.exe InstallService
+
+To remove the service use the following command:
+
+::
+
+   looking-glass-host.exe UninstallService
+
+This will also enable the host application to capture the secure desktop
+which includes things like the lock screen and UAC prompts.
+
+.. _faq_host_admin_privs:
+
+Why does the host require Administrator privileges?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This is intentional for several reasons.
+
+1. NvFBC requires a system wide hook to correctly obtain the cursor
+   position as NVIDIA decided to not provide this as part of the cursor
+   updates.
+2. NvFBC requires administrator level access to enable the interface in
+   the first place. (WIP)
+3. DXGI performance can be improved if we have this. (WIP)
+
+NvFBC (NVIDIA Frame Buffer Capture)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Why can't I compile NvFBC support into the host?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You must download and install the NVidia Capture SDK. Please note that
+by doing so you will be agreeing to NVIDIA's SDK License agreement.
+
+*-Geoff*
+
+.. _a_note_about_ivshmem_and_scream_audio:
+
+Why doesn't Looking Glass work with Scream over IVSHMEM?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+   Using IVSHMEM with Scream may interfere with Looking Glass, as they may try
+   to use the same device.
+
+Please do not use the IVSHMEM plugin for Scream.
+To fix this issue, use the default network transfer method.
+The IVSHMEM method induces additional latency that is built into its
+implementation. When using VirtIO for a network device the VM is already using
+a highly optimized memory copy anyway so there is no need to make another one.
+
+If you insist on using IVSHMEM for Scream—despite its inferiority to the
+default network implementation—the Windows Host Application can be told
+what device to use. Create a ``looking-glass-host.ini`` file in the same
+directory as the looking-glass-host.exe file. In it, you can use the
+``os:shmDevice`` option like so:
+
+.. code:: INI
+
+   [os]
+   shmDevice=1
+

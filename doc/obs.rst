@@ -14,7 +14,7 @@ Build Instructions
 
 The OBS plugin is included in the main source tree of Looking Glass. The
 building process is very similar to the
-:ref:`client's <looking_glass_client>`.
+:ref:`client's <build_client_section>`.
 
 Dependencies
 ^^^^^^^^^^^^
