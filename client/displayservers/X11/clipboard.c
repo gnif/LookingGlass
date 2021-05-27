@@ -76,6 +76,9 @@ bool x11CBEventThread(const XEvent xe)
       return true;
 
     case PropertyNotify:
+      if (xe.xproperty.state != PropertyNewValue)
+        break;
+
       if (xe.xproperty.atom == x11atoms.SEL_DATA)
       {
         if (x11cb.lowerBound == 0)
