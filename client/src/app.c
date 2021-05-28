@@ -68,7 +68,7 @@ void app_handleFocusEvent(bool focused)
   g_state.focused = focused;
   if (!core_inputEnabled())
   {
-    if (!focused && g_params.minimizeOnFocusLoss)
+    if (!focused && g_params.minimizeOnFocusLoss && app_getFullscreen())
       g_state.ds->minimize();
     return;
   }
