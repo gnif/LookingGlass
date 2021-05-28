@@ -319,7 +319,9 @@ void core_stopFrameThread(void)
 void core_handleGuestMouseUpdate(void)
 {
   struct DoublePoint localPos;
-  util_guestCurToLocal(&localPos);
+  if (!util_guestCurToLocal(&localPos))
+    return;
+
   g_state.ds->guestPointerUpdated(
     g_cursor.guest.x, g_cursor.guest.y,
     util_clamp(localPos.x, g_state.dstRect.x,
