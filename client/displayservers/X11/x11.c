@@ -171,14 +171,24 @@ static bool x11Init(const LG_DSInitParams params)
   free(hint.res_name);
   free(hint.res_class);
 
+  XSizeHints *xsh = XAllocSizeHints();
   if (params.center)
   {
-    XSizeHints *xsh = XAllocSizeHints();
-    xsh->flags       = PWinGravity;
+    xsh->flags      |= PWinGravity;
     xsh->win_gravity = 5; //Center
-    XSetWMNormalHints(x11.display, x11.window, xsh);
-    XFree(xsh);
   }
+
+  if (!params.resizable)
+  {
+    xsh->flags      |= PMinSize | PMaxSize;
+    xsh->min_width   = params.w;
+    xsh->max_width   = params.w;
+    xsh->min_height  = params.h;
+    xsh->max_height  = params.h;
+  }
+
+  XSetWMNormalHints(x11.display, x11.window, xsh);
+  XFree(xsh);
 
   X11AtomsInit();
   XSetWMProtocols(x11.display, x11.window, &x11atoms.WM_DELETE_WINDOW, 1);
