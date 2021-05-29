@@ -151,6 +151,23 @@ static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
   return LG_CLIPBOARD_DATA_NONE;
 }
 
+static bool isOptionalImageCbtype(enum LG_ClipboardData type)
+{
+  switch (type)
+  {
+    case LG_CLIPBOARD_DATA_TEXT:
+    case LG_CLIPBOARD_DATA_PNG:
+      return false;
+    case LG_CLIPBOARD_DATA_BMP:
+    case LG_CLIPBOARD_DATA_TIFF:
+    case LG_CLIPBOARD_DATA_JPEG:
+      return true;
+    default:
+      DEBUG_ERROR("invalid clipboard type");
+      abort();
+  }
+}
+
 // Destination client handlers.
 
 static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
@@ -160,9 +177,13 @@ static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
   // We almost never prefer text/html, as that's used to represent rich text.
   // Since we can't copy or paste rich text, we should instead prefer actual
   // images or plain text.
+  // We also prefer PNG over other image types as it's the only type guaranteed
+  // to be supported by the spice agent.
   if (type != LG_CLIPBOARD_DATA_NONE &&
       (wlCb.pendingType == LG_CLIPBOARD_DATA_NONE ||
-       strstr(wlCb.pendingMimetype, "html")))
+       strstr(wlCb.pendingMimetype, "html") ||
+       (type == LG_CLIPBOARD_DATA_PNG &&
+        isOptionalImageCbtype(wlCb.pendingType))))
   {
     wlCb.pendingType = type;
     if (wlCb.pendingMimetype)
