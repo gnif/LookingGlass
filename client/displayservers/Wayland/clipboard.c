@@ -33,6 +33,11 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app.h"
 #include "common/debug.h"
 
+struct DataOffer {
+  bool isSelfCopy;
+  char * mimetypes[LG_CLIPBOARD_DATA_NONE];
+};
+
 static const char * textMimetypes[] =
 {
   "text/plain",
@@ -116,6 +121,9 @@ static bool isTextMimetype(const char * mimetype)
   if (containsMimetype(textMimetypes, mimetype))
     return true;
 
+  if (!strcmp(mimetype, "text/ico"))
+    return false;
+
   char * text = "text/";
   if (!strncmp(mimetype, text, strlen(text)))
     return true;
@@ -151,13 +159,13 @@ static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
   return LG_CLIPBOARD_DATA_NONE;
 }
 
-static bool isOptionalImageCbtype(enum LG_ClipboardData type)
+static bool isImageCbtype(enum LG_ClipboardData type)
 {
   switch (type)
   {
     case LG_CLIPBOARD_DATA_TEXT:
-    case LG_CLIPBOARD_DATA_PNG:
       return false;
+    case LG_CLIPBOARD_DATA_PNG:
     case LG_CLIPBOARD_DATA_BMP:
     case LG_CLIPBOARD_DATA_TIFF:
     case LG_CLIPBOARD_DATA_JPEG:
@@ -168,31 +176,56 @@ static bool isOptionalImageCbtype(enum LG_ClipboardData type)
   }
 }
 
+static bool hasAnyMimetype(char ** mimetypes)
+{
+  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+    if (mimetypes[i])
+      return true;
+  return false;
+}
+
+static bool hasImageMimetype(char ** mimetypes)
+{
+  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+    if (isImageCbtype(i) && mimetypes[i])
+      return true;
+  return false;
+}
+
 // Destination client handlers.
 
-static void dataOfferHandleOffer(void * data, struct wl_data_offer * offer,
+static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
     const char * mimetype)
 {
-  enum LG_ClipboardData type = mimetypeToCbType(mimetype);
-  // We almost never prefer text/html, as that's used to represent rich text.
-  // Since we can't copy or paste rich text, we should instead prefer actual
-  // images or plain text.
-  // We also prefer PNG over other image types as it's the only type guaranteed
-  // to be supported by the spice agent.
-  if (type != LG_CLIPBOARD_DATA_NONE &&
-      (wlCb.pendingType == LG_CLIPBOARD_DATA_NONE ||
-       strstr(wlCb.pendingMimetype, "html") ||
-       (type == LG_CLIPBOARD_DATA_PNG &&
-        isOptionalImageCbtype(wlCb.pendingType))))
-  {
-    wlCb.pendingType = type;
-    if (wlCb.pendingMimetype)
-      free(wlCb.pendingMimetype);
-    wlCb.pendingMimetype = strdup(mimetype);
-  }
+  struct DataOffer * data = opaque;
 
   if (!strcmp(mimetype, wlCb.lgMimetype))
-    wlCb.isSelfCopy = true;
+  {
+    data->isSelfCopy = true;
+    return;
+  }
+
+  enum LG_ClipboardData type = mimetypeToCbType(mimetype);
+
+  if (type == LG_CLIPBOARD_DATA_NONE)
+    return;
+
+  // text/html represents rich text format and should not be used when an image
+  // format is available.
+  if (isImageCbtype(type) && data->mimetypes[LG_CLIPBOARD_DATA_TEXT] &&
+      strstr(data->mimetypes[LG_CLIPBOARD_DATA_TEXT], "html"))
+  {
+    free(data->mimetypes[LG_CLIPBOARD_DATA_TEXT]);
+    data->mimetypes[LG_CLIPBOARD_DATA_TEXT] = NULL;
+  }
+
+  if (strstr(mimetype, "html") && hasImageMimetype(data->mimetypes))
+    return;
+
+  if (data->mimetypes[type])
+    return;
+
+  data->mimetypes[type] = strdup(mimetype);
 }
 
 static void dataOfferHandleSourceActions(void * data,
@@ -216,135 +249,66 @@ static const struct wl_data_offer_listener dataOfferListener = {
 static void dataDeviceHandleDataOffer(void * data,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  wlCb.pendingType = LG_CLIPBOARD_DATA_NONE;
-  wlCb.isSelfCopy  = false;
-  wl_data_offer_add_listener(offer, &dataOfferListener, NULL);
-}
-
-static void clipboardReadCancel(struct ClipboardRead * data, bool freeBuf)
-{
-  waylandPollUnregister(data->fd);
-  close(data->fd);
-  wl_data_offer_destroy(data->offer);
-  if (freeBuf)
-    free(data->buf);
-  free(data);
-  wlCb.currentRead = NULL;
-}
-
-static void clipboardReadCallback(uint32_t events, void * opaque)
-{
-  struct ClipboardRead * data = opaque;
-  if (events & EPOLLERR) 
+  struct DataOffer * extra = calloc(1, sizeof(struct DataOffer));
+  if (!extra)
   {
-    clipboardReadCancel(data, true);
-    return;
+    DEBUG_ERROR("Out of memory while handling clipboard");
+    abort();
   }
-
-  ssize_t result = read(data->fd, data->buf + data->numRead, data->size - data->numRead);
-  if (result < 0)
-  {
-    DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
-    clipboardReadCancel(data, true);
-    return;
-  }
-
-  if (result == 0)
-  {
-    data->buf[data->numRead] = 0;
-    wlCb.stashedType = data->type;
-    wlCb.stashedSize = data->numRead;
-    wlCb.stashedContents = data->buf;
-
-    clipboardReadCancel(data, false);
-    app_clipboardNotifyTypes(&wlCb.stashedType, 1);
-    app_clipboardNotifySize(wlCb.stashedType, 0);
-    return;
-  }
-
-  data->numRead += result;
-  if (data->numRead >= data->size)
-  {
-    data->size *= 2;
-    void * nbuf = realloc(data->buf, data->size);
-    if (!nbuf) {
-      DEBUG_ERROR("Failed to realloc clipboard buffer: %s", strerror(errno));
-      clipboardReadCancel(data, true);
-      return;
-    }
-
-    data->buf = nbuf;
-  }
+  wl_data_offer_set_user_data(offer, extra);
+  wl_data_offer_add_listener(offer, &dataOfferListener, extra);
 }
 
 static void dataDeviceHandleSelection(void * opaque,
     struct wl_data_device * dataDevice, struct wl_data_offer * offer)
 {
-  if (wlCb.pendingType == LG_CLIPBOARD_DATA_NONE || wlCb.isSelfCopy || !offer)
-    return;
-
-  if (wlCb.currentRead)
-    clipboardReadCancel(wlCb.currentRead, true);
-
-  int fds[2];
-  if (pipe(fds) < 0)
+  if (!offer)
   {
-    DEBUG_ERROR("Failed to get a clipboard pipe: %s", strerror(errno));
-    abort();
-  }
-
-  wl_data_offer_receive(offer, wlCb.pendingMimetype, fds[1]);
-  close(fds[1]);
-  free(wlCb.pendingMimetype);
-  wlCb.pendingMimetype = NULL;
-
-  wl_display_roundtrip(wlWm.display);
-
-  if (wlCb.stashedContents)
-  {
-    free(wlCb.stashedContents);
-    wlCb.stashedContents = NULL;
-  }
-
-  struct ClipboardRead * data = malloc(sizeof(struct ClipboardRead));
-  if (!data)
-  {
-    DEBUG_ERROR("Failed to allocate memory to read clipboard");
-    close(fds[0]);
+    waylandCBInvalidate();
     return;
   }
 
-  data->fd      = fds[0];
-  data->size    = 4096;
-  data->numRead = 0;
-  data->buf     = malloc(data->size);
-  data->offer   = offer;
-  data->type    = wlCb.pendingType;
-
-  if (!data->buf)
+  struct DataOffer * extra = wl_data_offer_get_user_data(offer);
+  if (!hasAnyMimetype(extra->mimetypes) || extra->isSelfCopy)
   {
-    DEBUG_ERROR("Failed to allocate memory to receive clipboard data");
-    close(data->fd);
-    free(data);
+    waylandCBInvalidate();
+    wl_data_offer_destroy(offer);
     return;
   }
 
-  if (!waylandPollRegister(data->fd, clipboardReadCallback, data, EPOLLIN))
-  {
-    DEBUG_ERROR("Failed to register clipboard read into epoll: %s", strerror(errno));
-    close(data->fd);
-    free(data->buf);
-    free(data);
-  }
+  wlCb.offer = offer;
 
-  wlCb.currentRead = data;
+  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+    free(wlCb.mimetypes[i]);
+  memcpy(wlCb.mimetypes, extra->mimetypes, sizeof(wlCb.mimetypes));
+
+  wl_data_offer_set_user_data(offer, NULL);
+  free(extra);
+
+  int idx = 0;
+  enum LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
+  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+    if (wlCb.mimetypes[i])
+      types[idx++] = i;
+
+  app_clipboardNotifyTypes(types, idx);
 }
 
 static void dataDeviceHandleEnter(void * data, struct wl_data_device * device,
     uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW, wl_fixed_t syW,
     struct wl_data_offer * offer)
 {
-  // Do nothing.
+  assert(wlCb.dndOffer == NULL);
+  wlCb.dndOffer = offer;
+
+  struct DataOffer * extra = wl_data_offer_get_user_data(offer);
+  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+    free(extra->mimetypes[i]);
+  free(extra);
+
+  wl_data_offer_set_user_data(offer, NULL);
+  wl_data_offer_set_actions(offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE,
+      WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE);
 }
 
 static void dataDeviceHandleMotion(void * data, struct wl_data_device * device,
@@ -355,7 +319,14 @@ static void dataDeviceHandleMotion(void * data, struct wl_data_device * device,
 
 static void dataDeviceHandleLeave(void * data, struct wl_data_device * device)
 {
-  // Do nothing.
+  wl_data_offer_destroy(wlCb.dndOffer);
+  wlCb.dndOffer = NULL;
+}
+
+static void dataDeviceHandleDrop(void * data, struct wl_data_device * device)
+{
+  wl_data_offer_destroy(wlCb.dndOffer);
+  wlCb.dndOffer = NULL;
 }
 
 static const struct wl_data_device_listener dataDeviceListener = {
@@ -364,6 +335,7 @@ static const struct wl_data_device_listener dataDeviceListener = {
   .enter = dataDeviceHandleEnter,
   .motion = dataDeviceHandleMotion,
   .leave = dataDeviceHandleLeave,
+  .drop = dataDeviceHandleDrop,
 };
 
 bool waylandCBInit(void)
@@ -384,7 +356,6 @@ bool waylandCBInit(void)
     return false;
   }
 
-  wlCb.stashedType = LG_CLIPBOARD_DATA_NONE;
   wl_data_device_add_listener(wlCb.dataDevice, &dataDeviceListener, NULL);
 
   snprintf(wlCb.lgMimetype, sizeof(wlCb.lgMimetype),
@@ -393,11 +364,120 @@ bool waylandCBInit(void)
   return true;
 }
 
+static void clipboardReadCancel(struct ClipboardRead * data)
+{
+  waylandPollUnregister(data->fd);
+  close(data->fd);
+  free(data->buf);
+  free(data);
+  wlCb.currentRead = NULL;
+}
+
+static void clipboardReadCallback(uint32_t events, void * opaque)
+{
+  struct ClipboardRead * data = opaque;
+  if (events & EPOLLERR) 
+  {
+    clipboardReadCancel(data);
+    return;
+  }
+
+  ssize_t result = read(data->fd, data->buf + data->numRead, data->size - data->numRead);
+  if (result < 0)
+  {
+    DEBUG_ERROR("Failed to read from clipboard: %s", strerror(errno));
+    clipboardReadCancel(data);
+    return;
+  }
+
+  if (result == 0)
+  {
+    app_clipboardNotifySize(data->type, data->numRead);
+    app_clipboardData(data->type, data->buf, data->numRead);
+    clipboardReadCancel(data);
+    return;
+  }
+
+  data->numRead += result;
+  if (data->numRead >= data->size)
+  {
+    data->size *= 2;
+    void * nbuf = realloc(data->buf, data->size);
+    if (!nbuf) {
+      DEBUG_ERROR("Failed to realloc clipboard buffer: %s", strerror(errno));
+      clipboardReadCancel(data);
+      return;
+    }
+
+    data->buf = nbuf;
+  }
+}
+
+void waylandCBInvalidate(void)
+{
+  if (wlCb.currentRead)
+    clipboardReadCancel(wlCb.currentRead);
+
+  app_clipboardRelease();
+
+  if (wlCb.offer)
+    wl_data_offer_destroy(wlCb.offer);
+  wlCb.offer = NULL;
+}
+
 void waylandCBRequest(LG_ClipboardData type)
 {
-  // We only notified once, so it must be this.
-  assert(type == wlCb.stashedType);
-  app_clipboardData(wlCb.stashedType, wlCb.stashedContents, wlCb.stashedSize);
+  if (!wlCb.offer || !wlCb.mimetypes[type])
+  {
+    app_clipboardRelease();
+    return;
+  }
+
+  if (wlCb.currentRead)
+    clipboardReadCancel(wlCb.currentRead);
+
+  int fds[2];
+  if (pipe(fds) < 0)
+  {
+    DEBUG_ERROR("Failed to get a clipboard pipe: %s", strerror(errno));
+    abort();
+  }
+
+  wl_data_offer_receive(wlCb.offer, wlCb.mimetypes[type], fds[1]);
+  close(fds[1]);
+
+  struct ClipboardRead * data = malloc(sizeof(struct ClipboardRead));
+  if (!data)
+  {
+    DEBUG_ERROR("Failed to allocate memory to read clipboard");
+    close(fds[0]);
+    return;
+  }
+
+  data->fd      = fds[0];
+  data->size    = 4096;
+  data->numRead = 0;
+  data->buf     = malloc(data->size);
+  data->offer   = wlCb.offer;
+  data->type    = type;
+
+  if (!data->buf)
+  {
+    DEBUG_ERROR("Failed to allocate memory to receive clipboard data");
+    close(data->fd);
+    free(data);
+    return;
+  }
+
+  if (!waylandPollRegister(data->fd, clipboardReadCallback, data, EPOLLIN))
+  {
+    DEBUG_ERROR("Failed to register clipboard read into epoll: %s", strerror(errno));
+    close(data->fd);
+    free(data->buf);
+    free(data);
+  }
+
+  wlCb.currentRead = data;
 }
 
 struct ClipboardWrite
