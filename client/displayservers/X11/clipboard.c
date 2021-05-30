@@ -233,7 +233,7 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
       &data) != Success)
   {
     DEBUG_INFO("GetProp Failed");
-    app_clipboardNotify(LG_CLIPBOARD_DATA_NONE, 0);
+    app_clipboardNotifySize(LG_CLIPBOARD_DATA_NONE, 0);
     goto out;
   }
 
@@ -248,13 +248,13 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
         XGetAtomName(x11.display, type));
 
     x11cb.lowerBound = 0;
-    app_clipboardNotify(LG_CLIPBOARD_DATA_NONE, 0);
+    app_clipboardNotifySize(LG_CLIPBOARD_DATA_NONE, 0);
     goto out;
   }
 
   if (x11cb.incrStart)
   {
-    app_clipboardNotify(dataType, x11cb.lowerBound);
+    app_clipboardNotifySize(dataType, x11cb.lowerBound);
     x11cb.incrStart = false;
   }
 
@@ -275,7 +275,7 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
       &data) != Success)
   {
     DEBUG_ERROR("XGetWindowProperty Failed");
-    app_clipboardNotify(LG_CLIPBOARD_DATA_NONE, 0);
+    app_clipboardNotifySize(LG_CLIPBOARD_DATA_NONE, 0);
     goto out;
   }
 
@@ -332,7 +332,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
       &after,
       &data) != Success)
   {
-    app_clipboardNotify(LG_CLIPBOARD_DATA_NONE, 0);
+    app_clipboardNotifySize(LG_CLIPBOARD_DATA_NONE, 0);
     goto out;
   }
 
@@ -352,21 +352,19 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     if (!data || format != 32)
       goto out;
 
+    int typeCount = 0;
+    LG_ClipboardData types[itemCount];
+
     // see if we support any of the targets listed
     const uint64_t * targets = (const uint64_t *)data;
     for(unsigned long i = 0; i < itemCount; ++i)
     {
       for(int n = 0; n < LG_CLIPBOARD_DATA_NONE; ++n)
         if (x11cb.aTypes[n] == targets[i])
-        {
-          // we have a match, so send the notification
-          app_clipboardNotify(n, 0);
-          goto out;
-        }
+          types[typeCount++] = n;
     }
 
-    // no matches
-    app_clipboardNotify(LG_CLIPBOARD_DATA_NONE, 0);
+    app_clipboardNotifyTypes(types, typeCount);
     goto out;
   }
 
