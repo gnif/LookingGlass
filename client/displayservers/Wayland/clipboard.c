@@ -236,7 +236,8 @@ static void clipboardReadCallback(uint32_t events, void * opaque)
     wlCb.stashedContents = data->buf;
 
     clipboardReadCancel(data, false);
-    app_clipboardNotify(wlCb.stashedType, 0);
+    app_clipboardNotifyTypes(&wlCb.stashedType, 1);
+    app_clipboardNotifySize(wlCb.stashedType, 0);
     return;
   }
 
