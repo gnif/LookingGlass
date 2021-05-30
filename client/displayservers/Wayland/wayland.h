@@ -177,13 +177,9 @@ struct WCBState
   struct wl_data_device * dataDevice;
   char lgMimetype[64];
 
-  enum LG_ClipboardData pendingType;
-  char * pendingMimetype;
-  bool isSelfCopy;
-
-  enum LG_ClipboardData stashedType;
-  uint8_t * stashedContents;
-  ssize_t stashedSize;
+  char * mimetypes[LG_CLIPBOARD_DATA_NONE];
+  struct wl_data_offer * offer;
+  struct wl_data_offer * dndOffer;
 
   bool haveRequest;
   LG_ClipboardData type;
@@ -199,6 +195,7 @@ bool waylandCBInit(void);
 void waylandCBRequest(LG_ClipboardData type);
 void waylandCBNotice(LG_ClipboardData type);
 void waylandCBRelease(void);
+void waylandCBInvalidate(void);
 
 // cursor module
 bool waylandCursorInit(void);

@@ -180,6 +180,7 @@ static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     return;
 
   wlWm.focusedOnSurface = false;
+  waylandCBInvalidate();
   app_handleFocusEvent(false);
 }
 
