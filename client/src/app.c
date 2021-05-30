@@ -126,7 +126,22 @@ void app_clipboardRelease(void)
   spice_clipboard_release();
 }
 
-void app_clipboardNotify(const LG_ClipboardData type, size_t size)
+void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
+{
+  if (count == 0)
+  {
+    spice_clipboard_release();
+    return;
+  }
+
+  SpiceDataType conv[count];
+  for(int i = 0; i < count; ++i)
+    conv[i] = cb_lgTypeToSpiceType(types[i]);
+
+  spice_clipboard_grab(conv, count);
+}
+
+void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
 {
   if (!g_params.clipboardToVM)
     return;
@@ -141,10 +156,7 @@ void app_clipboardNotify(const LG_ClipboardData type, size_t size)
   g_state.cbChunked = size > 0;
   g_state.cbXfer    = size;
 
-  spice_clipboard_grab(g_state.cbType);
-
-  if (size)
-    spice_clipboard_data_start(g_state.cbType, size);
+  spice_clipboard_data_start(g_state.cbType, size);
 }
 
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
