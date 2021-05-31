@@ -244,7 +244,7 @@ static void * pointerThread(void * data)
 
           const uint32_t * s = (const uint32_t *)data;
           uint32_t * d       = this->cursorData;
-          for(int i = 0; i < dataSize; ++i, ++s, ++d)
+          for(int i = 0; i < dataSize / sizeof(uint32_t); ++i, ++s, ++d)
             *d = (*s & ~0xFF000000) | (*s & 0xFF000000 ? 0x0 : 0xFF000000);
           break;
         }
