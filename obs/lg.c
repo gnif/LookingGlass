@@ -581,12 +581,12 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
         gs_draw_sprite_subregion(
             this->cursorTex    , 0,
             0                  , 0,
-            this->cursorRect.cx, this->cursorRect.cy / 2 - 1);
+            this->cursorRect.cx, this->cursorRect.cy / 2);
 
         glLogicOp(GL_XOR);
         gs_draw_sprite_subregion(
             this->cursorTex    , 0,
-            0                  , this->cursorRect.cy / 2 + 1,
+            0                  , this->cursorRect.cy / 2,
             this->cursorRect.cx, this->cursorRect.cy / 2);
 
         glDisable(GL_COLOR_LOGIC_OP);
