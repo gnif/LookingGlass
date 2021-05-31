@@ -409,7 +409,7 @@ static void lgVideoTick(void * data, float seconds)
           gs_texture_create(
               this->cursor.width,
               this->cursor.height,
-              GS_RGBA,
+              GS_BGRA,
               1,
               (const uint8_t **)&this->cursorData,
               GS_DYNAMIC);
@@ -568,8 +568,10 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
 
     if (!this->cursorMono)
     {
+      gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
       while (gs_effect_loop(effect, "Draw"))
         gs_draw_sprite(this->cursorTex, 0, 0, 0);
+      gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
     }
     else
     {
