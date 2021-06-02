@@ -568,11 +568,14 @@ bool config_load(int argc, char * argv[])
 
     if (g_params.useSpiceClipboard)
     {
-      g_params.clipboardToVM    = option_get_bool("spice", "clipboardToVM"   );
-      g_params.clipboardToLocal = option_get_bool("spice", "clipboardToLocal");
-
-      if (!g_params.clipboardToVM && !g_params.clipboardToLocal)
-        g_params.useSpiceClipboard = false;
+      g_params.clipboardToVM     = option_get_bool("spice", "clipboardToVM"   );
+      g_params.clipboardToLocal  = option_get_bool("spice", "clipboardToLocal");
+      g_params.useSpiceClipboard = g_params.clipboardToVM || g_params.clipboardToLocal;
+    }
+    else
+    {
+      g_params.clipboardToVM    = false;
+      g_params.clipboardToLocal = false;
     }
 
     g_params.scaleMouseInput  = option_get_bool("spice", "scaleCursor");

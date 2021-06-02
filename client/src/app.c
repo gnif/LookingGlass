@@ -128,6 +128,9 @@ void app_clipboardRelease(void)
 
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
 {
+  if (!g_params.clipboardToVM)
+    return;
+
   if (count == 0)
   {
     spice_clipboard_release();

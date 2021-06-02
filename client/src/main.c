@@ -684,11 +684,12 @@ static int lg_run(void)
   // try to connect to the spice server
   if (g_params.useSpiceInput || g_params.useSpiceClipboard)
   {
-    spice_set_clipboard_cb(
-        cb_spiceNotice,
-        cb_spiceData,
-        cb_spiceRelease,
-        cb_spiceRequest);
+    if (g_params.useSpiceClipboard)
+      spice_set_clipboard_cb(
+          cb_spiceNotice,
+          cb_spiceData,
+          cb_spiceRelease,
+          cb_spiceRequest);
 
     if (!spice_connect(g_params.spiceHost, g_params.spicePort, ""))
     {
