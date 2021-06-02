@@ -295,7 +295,7 @@ static bool captureStart(void)
   const unsigned int maxFrameSize = app.iface->getMaxFrameSize();
   if (maxFrameSize > app.maxFrameSize)
   {
-    DEBUG_ERROR("Maximum frame size of %d bytes excceds maximum space available", maxFrameSize);
+    DEBUG_ERROR("Maximum frame size of %d bytes exceeds maximum space available", maxFrameSize);
     return false;
   }
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
