@@ -438,11 +438,6 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
   struct WCBTransfer * transfer = (struct WCBTransfer *) data;
   if (containsMimetype(transfer->mimetypes, mimetype))
   {
-    // Consider making this do non-blocking sends to not stall the Wayland
-    // event loop if it becomes a problem. This is "fine" in the sense that
-    // wl-copy also stalls like this, but it's not necessary.
-    fcntl(fd, F_SETFL, 0);
-
     struct ClipboardWrite * data = malloc(sizeof(struct ClipboardWrite));
     if (!data)
     {
