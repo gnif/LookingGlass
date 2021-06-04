@@ -12,6 +12,7 @@ add_library(platform_Linux STATIC
 add_subdirectory("capture")
 
 target_link_libraries(platform_Linux
+	m
 	capture
 	pthread
 	X11
