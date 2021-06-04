@@ -77,3 +77,8 @@ bool os_blockScreensaver()
 {
   return false;
 }
+
+void os_showMessage(const char * caption, const char * msg)
+{
+  DEBUG_INFO("%s: %s", caption, msg);
+}
