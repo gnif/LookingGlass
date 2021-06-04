@@ -40,5 +40,6 @@ void app_quit();
 // these must be implemented for each OS
 const char * os_getExecutable();
 const char * os_getDataPath();
+void os_showMessage(const char * caption, const char * msg);
 
 bool os_blockScreensaver();

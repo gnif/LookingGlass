@@ -537,3 +537,8 @@ bool os_blockScreensaver()
   }
   return lastResult;
 }
+
+void os_showMessage(const char * caption, const char * msg)
+{
+  MessageBoxA(NULL, msg, caption, MB_OK | MB_ICONINFORMATION);
+}

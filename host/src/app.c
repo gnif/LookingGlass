@@ -30,6 +30,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/ivshmem.h"
 #include "common/sysinfo.h"
 #include "common/time.h"
+#include "common/stringutils.h"
 
 #include <lgmp/host.h>
 
@@ -38,6 +39,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define CONFIG_FILE "looking-glass-host.ini"
 #define POINTER_SHAPE_BUFFERS 3
@@ -295,7 +297,16 @@ static bool captureStart(void)
   const unsigned int maxFrameSize = app.iface->getMaxFrameSize();
   if (maxFrameSize > app.maxFrameSize)
   {
-    DEBUG_ERROR("Maximum frame size of %d bytes excceds maximum space available", maxFrameSize);
+    DEBUG_ERROR("Maximum frame size of %d bytes exceeds maximum space available", maxFrameSize);
+
+    const float needed = ((maxFrameSize * 2) / 1048576.0f) + 10.0f;
+    const int   size   = (int)powf(2.0f, ceilf(logf(needed) / logf(2.0f)));
+
+    char * msg;
+    alloc_sprintf(&msg, "IVSHMEM size too small, increase to %d MiB", size);
+    os_showMessage("Looking Glass Error", msg);
+    free(msg);
+
     return false;
   }
   DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
