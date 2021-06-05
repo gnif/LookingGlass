@@ -143,7 +143,7 @@ static void dxgi_initOptions(void)
       .name           = "maxTextures",
       .description    = "The maximum number of frames to buffer before skipping",
       .type           = OPTION_TYPE_INT,
-      .value.x_int    = 3
+      .value.x_int    = 4
     },
     {
       .module         = "dxgi",
