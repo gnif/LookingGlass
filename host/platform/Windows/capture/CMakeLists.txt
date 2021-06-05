@@ -17,12 +17,12 @@ if(NOT EXISTS "${nvfbc_sdk}/inc" OR NOT IS_DIRECTORY "${nvfbc_sdk}/inc")
   set(USE_NVFBC OFF)
 endif()
 
-if(USE_NVFBC)
-  add_capture("NVFBC")
-endif()
-
 if(USE_DXGI)
   add_capture("DXGI")
+endif()
+
+if(USE_NVFBC)
+  add_capture("NVFBC")
 endif()
 
 include("PostCapture")

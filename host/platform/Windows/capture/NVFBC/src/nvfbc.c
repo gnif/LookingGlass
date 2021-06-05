@@ -165,6 +165,10 @@ static bool nvfbc_init(void)
     free(buffer);
   }
 
+  // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
+  // causes a substantial performance pentalty even if it fails! As such we only
+  // attempt NvFBC as a last resort, or if configured via the app:capture
+  // option.
   if (!NvFBCToSysCreate(privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
   {
     free(privData);
