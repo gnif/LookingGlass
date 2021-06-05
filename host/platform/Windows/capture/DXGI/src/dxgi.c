@@ -26,6 +26,7 @@
 #include "common/locking.h"
 #include "common/event.h"
 #include "common/dpi.h"
+#include "common/runningavg.h"
 
 #include <assert.h>
 #include <stdatomic.h>
@@ -63,6 +64,7 @@ typedef struct Texture
   volatile enum TextureState state;
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
+  uint64_t                   copyTime;
 }
 Texture;
 
@@ -89,6 +91,9 @@ struct iface
   int                        texWIndex;
   atomic_int                 texReady;
   bool                       needsRelease;
+
+  RunningAvg                 avgMapTime;
+  uint64_t                   usleepMapTime;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
   CapturePostPointerBuffer   postPointerBufferFn;
@@ -185,6 +190,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this->texture             = calloc(sizeof(struct Texture), this->maxTextures);
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
+  this->avgMapTime          = runningavg_new(10);
   return true;
 }
 
@@ -220,6 +226,9 @@ static bool dxgi_init(void)
   this->texRIndex = 0;
   this->texWIndex = 0;
   atomic_store(&this->texReady, 0);
+
+  runningavg_reset(this->avgMapTime);
+  this->usleepMapTime = 0;
 
   lgResetEvent(this->frameEvent);
 
@@ -700,6 +709,7 @@ static void dxgi_free(void)
 
   free(this->texture);
 
+  runningavg_free(&this->avgMapTime);
   free(this);
   this = NULL;
 }
@@ -821,6 +831,7 @@ static CaptureResult dxgi_capture(void)
       if (copyFrame)
       {
         // issue the copy from GPU to CPU RAM
+        tex->copyTime = microtime();
         ID3D11DeviceContext_CopyResource(this->deviceContext,
           (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
       }
@@ -935,6 +946,11 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
 
   Texture * tex = &this->texture[this->texRIndex];
 
+  // sleep until it's close to time to map
+  const uint64_t delta = microtime() - tex->copyTime;
+  if (delta < this->usleepMapTime)
+    usleep(this->usleepMapTime - delta);
+
   // try to map the resource, but don't wait for it
   for (int i = 0; ; ++i)
   {
@@ -957,6 +973,10 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
 
     break;
   }
+
+  // update the sleep average and sleep for 80% of the average on the next call
+  runningavg_push(this->avgMapTime, microtime() - tex->copyTime);
+  this->usleepMapTime = (uint64_t)(runningavg_calc(this->avgMapTime) * 0.8);
 
   tex->state = TEXTURE_STATE_MAPPED;
 

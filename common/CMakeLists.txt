@@ -28,6 +28,7 @@ set(COMMON_SOURCES
   src/framebuffer.c
   src/KVMFR.c
   src/countedbuffer.c
+  src/runningavg.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})
