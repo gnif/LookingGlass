@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+
+import datetime
+import fnmatch
+import os
+import re
+import subprocess
+
+PROJECT = os.path.dirname(__file__)
+EXTENSIONS = ('.c', '.cpp', '.h')
+START_YEAR = 2017
+CURRENT_YEAR = datetime.date.today().year
+
+reignore = re.compile('^vendor/')
+recopyright = re.compile(r'\A/\*.*?\*/\s+', re.DOTALL)
+copyright = f'''\
+/**
+ * Looking Glass
+ * Copyright (C) {START_YEAR}-{CURRENT_YEAR} The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+'''
+
+
+def update_copyright(file):
+    print(f'Updating copyright for {file}...')
+    with open(file, encoding='utf-8') as f:
+        data = recopyright.sub('', f.read())
+    with open(file, 'w', encoding='utf-8') as f:
+        f.write(copyright)
+        f.write(data)
+
+
+def main():
+    files = subprocess.check_output(['git', '-C', PROJECT, 'ls-files', '-z']).decode('utf-8').split('\0')
+    for file in files:
+        if reignore.match(file):
+            continue
+        if file.endswith(EXTENSIONS):
+            update_copyright(os.path.join(PROJECT, file))
+
+
+if __name__ == '__main__':
+    main()
