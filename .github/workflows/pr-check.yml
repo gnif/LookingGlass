@@ -1,0 +1,18 @@
+name: pr-check
+on: pull_request
+jobs:
+  authors:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Check AUTHORS file
+      run: |
+        user="$(curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' -s https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }} | jq -r .user.login)"
+        echo "Checking if GitHub user $user is in AUTHORS file..."
+        if grep -q -E '> \('"$user"'\)' AUTHORS; then
+          echo "$user found in AUTHORS file, all good!"
+        else
+          echo "$user not found in AUTHORS file."
+          echo "Please add yourself to the AUTHORS file and try again."
+          exit 1
+        fi
