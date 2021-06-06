@@ -301,12 +301,15 @@ bool waylandInputInit(void)
       &relativePointerListener, NULL);
   }
 
+  LG_LOCK_INIT(wlWm.confineLock);
+
   return true;
 }
 
 void waylandInputFree(void)
 {
   waylandUngrabPointer();
+  LG_LOCK_FREE(wlWm.confineLock);
   wl_pointer_destroy(wlWm.pointer);
   wl_keyboard_destroy(wlWm.keyboard);
   wl_seat_destroy(wlWm.seat);
@@ -326,21 +329,27 @@ void waylandGrabPointer(void)
       &relativePointerListener, NULL);
   }
 
-  if (!wlWm.confinedPointer)
+  INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
-        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
-        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
-  }
+    if (!wlWm.confinedPointer)
+    {
+      wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
+          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    }
+  });
 }
 
 void waylandUngrabPointer(void)
 {
-  if (wlWm.confinedPointer)
+  INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
-    wlWm.confinedPointer = NULL;
-  }
+    if (wlWm.confinedPointer)
+    {
+      zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
+      wlWm.confinedPointer = NULL;
+    }
+  });
 
   if (!wlWm.warpSupport)
   {
@@ -366,41 +375,48 @@ void waylandCapturePointer(void)
     return;
   }
 
-  if (wlWm.confinedPointer)
+  INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
-    wlWm.confinedPointer = NULL;
-  }
+    if (wlWm.confinedPointer)
+    {
+      zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
+      wlWm.confinedPointer = NULL;
+    }
 
-  wlWm.lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
-        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
-        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    wlWm.lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
+          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  });
 }
 
 void waylandUncapturePointer(void)
 {
-  if (wlWm.lockedPointer)
+  INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
-    wlWm.lockedPointer = NULL;
-  }
+    if (wlWm.lockedPointer)
+    {
+      zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
+      wlWm.lockedPointer = NULL;
+    }
 
-  /* we need to ungrab the pointer on the following conditions when exiting capture mode:
-   *   - if warp is not supported, exit via window edge detection will never work
-   *     as the cursor can not be warped out of the window when we release it.
-   *   - if the format is invalid as we do not know where the guest cursor is,
-   *     which also breaks edge detection.
-   *   - if the user has opted to use captureInputOnly mode.
-   */
-  if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
-  {
-    waylandUngrabPointer();
-    return;
-  }
-
-  wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
-      wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
-      ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    /* we need to ungrab the pointer on the following conditions when exiting capture mode:
+     *   - if warp is not supported, exit via window edge detection will never work
+     *     as the cursor can not be warped out of the window when we release it.
+     *   - if the format is invalid as we do not know where the guest cursor is,
+     *     which also breaks edge detection.
+     *   - if the user has opted to use captureInputOnly mode.
+     */
+    if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
+    {
+      waylandUngrabPointer();
+    }
+    else
+    {
+      wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
+          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    }
+  });
 }
 
 void waylandGrabKeyboard(void)
@@ -423,35 +439,44 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
-  if (!wlWm.pointerInSurface || wlWm.lockedPointer)
+  if (!wlWm.pointerInSurface)
     return;
 
-  if (x < 0) x = 0;
-  else if (x >= wlWm.width) x = wlWm.width - 1;
-  if (y < 0) y = 0;
-  else if (y >= wlWm.height) y = wlWm.height - 1;
-
-  struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
-  wl_region_add(region, x, y, 1, 1);
-
-  if (wlWm.confinedPointer)
+  INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, region);
-    wl_surface_commit(wlWm.surface);
-    zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, NULL);
-  }
-  else
-  {
-    struct zwp_confined_pointer_v1 * confine;
-    confine = zwp_pointer_constraints_v1_confine_pointer(
-          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
-          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
-    wl_surface_commit(wlWm.surface);
-    zwp_confined_pointer_v1_destroy(confine);
-  }
+    if (!wlWm.lockedPointer)
+    {
+      LG_UNLOCK(wlWm.confineLock);
+      return;
+    }
 
-  wl_surface_commit(wlWm.surface);
-  wl_region_destroy(region);
+    if (x < 0) x = 0;
+    else if (x >= wlWm.width) x = wlWm.width - 1;
+    if (y < 0) y = 0;
+    else if (y >= wlWm.height) y = wlWm.height - 1;
+
+    struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
+    wl_region_add(region, x, y, 1, 1);
+
+    if (wlWm.confinedPointer)
+    {
+      zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, region);
+      wl_surface_commit(wlWm.surface);
+      zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, NULL);
+    }
+    else
+    {
+      struct zwp_confined_pointer_v1 * confine;
+      confine = zwp_pointer_constraints_v1_confine_pointer(
+            wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
+            ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+      wl_surface_commit(wlWm.surface);
+      zwp_confined_pointer_v1_destroy(confine);
+    }
+
+    wl_surface_commit(wlWm.surface);
+    wl_region_destroy(region);
+  });
 }
 
 void waylandRealignPointer(void)

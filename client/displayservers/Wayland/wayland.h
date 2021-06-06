@@ -141,6 +141,7 @@ struct WaylandDSState
   struct zwp_locked_pointer_v1 * lockedPointer;
   bool showPointer;
   uint32_t pointerEnterSerial;
+  LG_Lock confineLock;
 
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
