@@ -394,14 +394,11 @@ static bool x11Init(const LG_DSInitParams params)
     goto fail_window;
   }
 
-  Atom NETWM_BYPASS_COMPOSITOR = XInternAtom(x11.display,
-      "NETWM_BYPASS_COMPOSITOR", False);
-
   unsigned long value = 1;
   XChangeProperty(
     x11.display,
     x11.window,
-    NETWM_BYPASS_COMPOSITOR,
+    x11atoms._NET_WM_BYPASS_COMPOSITOR,
     XA_CARDINAL,
     32,
     PropModeReplace,
