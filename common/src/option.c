@@ -397,6 +397,10 @@ bool option_load(const char * filename)
       continue;
     comment = false;
 
+    // ignore non-typeable ascii characters
+    if (c < 32 || c > 126)
+      continue;
+
     switch(c)
     {
       case '[':
