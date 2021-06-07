@@ -397,10 +397,6 @@ bool option_load(const char * filename)
       continue;
     comment = false;
 
-    // ignore non-typeable ascii characters
-    if (c < 32 || c > 126)
-      continue;
-
     switch(c)
     {
       case '[':
@@ -508,6 +504,10 @@ bool option_load(const char * filename)
         // fallthrough
 
       default:
+        // ignore non-typeable ascii characters
+        if (c < 32 || c > 126)
+          continue;
+
         if (expectLine)
         {
           DEBUG_ERROR("Syntax error on line %d, expected new line", lineno);
