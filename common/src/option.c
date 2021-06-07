@@ -370,6 +370,29 @@ static char * file_parse_module(FILE * fp)
   return NULL;
 }
 
+static bool process_option_line(const char * module, const char * name,
+    char * value, int valueLen, int lineno)
+{
+  if (!module)
+  {
+    DEBUG_ERROR("Syntax error on line %d, module not specified for option", lineno);
+    return false;
+  }
+
+  struct Option * o = option_get(module, name);
+  if (!o)
+    DEBUG_WARN("Ignored unknown option %s:%s", module, name);
+  else
+  {
+    if (value)
+      value[valueLen] = '\0';
+
+    if (!option_set(o, value))
+      DEBUG_ERROR("Failed to set the option value");
+  }
+  return true;
+}
+
 bool option_load(const char * filename)
 {
   FILE * fp = fopen(filename, "r");
@@ -431,26 +454,10 @@ bool option_load(const char * filename)
         continue;
 
       case '\n':
-        if (name)
+        if (name && !process_option_line(module, name, value, valueLen, lineno))
         {
-          if (!module)
-          {
-            DEBUG_ERROR("Syntax error on line %d, module not specified for option", lineno);
-            result = false;
-            goto exit;
-          }
-
-          struct Option * o = option_get(module, name);
-          if (!o)
-            DEBUG_WARN("Ignored unknown option %s:%s", module, name);
-          else
-          {
-            if (value)
-              value[valueLen] = '\0';
-
-            if (!option_set(o, value))
-              DEBUG_ERROR("Failed to set the option value");
-          }
+          result = false;
+          goto exit;
         }
 
         line        = true;
@@ -526,6 +533,9 @@ bool option_load(const char * filename)
         break;
     }
   }
+
+  if (name && !process_option_line(module, name, value, valueLen, lineno))
+    result = false;
 
 exit:
   fclose(fp);
