@@ -65,9 +65,9 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
   static int raCount = 0;
+  const uint64_t ts = microtime();
   if (!ra)
     ra = runningavg_new(100);
-  const uint64_t ts = microtime();
 #endif
 
   uint8_t * restrict d     = (uint8_t*)dst;
@@ -116,6 +116,14 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
 bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
     size_t bpp, size_t pitch, FrameBufferReadFn fn, void * opaque)
 {
+#ifdef FB_PROFILE
+  static RunningAvg ra = NULL;
+  static int raCount = 0;
+  const uint64_t ts = microtime();
+  if (!ra)
+    ra = runningavg_new(100);
+#endif
+
   uint_least32_t rp        = 0;
   size_t         y         = 0;
   const size_t   linewidth = width * bpp;
@@ -143,6 +151,12 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
     ++y;
   }
 
+#ifdef FB_PROFILE
+  runningavg_push(ra, microtime() - ts);
+  if (++raCount % 100 == 0)
+    DEBUG_INFO("Average Copy Time: %.2fμs", runningavg_calc(ra));
+#endif
+
   return true;
 }
 
@@ -156,6 +170,14 @@ void framebuffer_prepare(FrameBuffer * frame)
 
 bool framebuffer_write(FrameBuffer * frame, const void * restrict src, size_t size)
 {
+#ifdef FB_PROFILE
+  static RunningAvg ra = NULL;
+  static int raCount = 0;
+  const uint64_t ts = microtime();
+  if (!ra)
+    ra = runningavg_new(100);
+#endif
+
   __m128i * restrict s = (__m128i *)src;
   __m128i * restrict d = (__m128i *)frame->data;
   size_t wp = 0;
@@ -193,5 +215,12 @@ bool framebuffer_write(FrameBuffer * frame, const void * restrict src, size_t si
   }
 
   atomic_store_explicit(&frame->wp, wp, memory_order_release);
+
+#ifdef FB_PROFILE
+  runningavg_push(ra, microtime() - ts);
+  if (++raCount % 100 == 0)
+    DEBUG_INFO("Average Copy Time: %.2fμs", runningavg_calc(ra));
+#endif
+
   return true;
 }
