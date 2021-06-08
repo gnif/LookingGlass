@@ -250,7 +250,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
 
   texture->pitch = stride / texture->bpp;
 
-  if (texture->tex)
+  if (texture->tex[0])
     glDeleteTextures(texture->bufferCount, texture->tex);
   glGenTextures(texture->bufferCount, texture->tex);
 
