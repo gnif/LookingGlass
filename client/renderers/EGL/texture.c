@@ -576,7 +576,8 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
       sd = atomic_fetch_add_explicit(&texture->state.d, 1,
           memory_order_release) + 1;
 
-    tex = texture->tex[sd % BUFFER_COUNT];
+    if (!texture->dma)
+      tex = texture->tex[sd % BUFFER_COUNT];
   }
 
   glActiveTexture(GL_TEXTURE0);
