@@ -130,19 +130,8 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
 
   while(y < height)
   {
-    uint_least32_t wp;
-    int spinCount = 0;
-
-    /* spinlock */
-    wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
-    while(wp - rp < linewidth)
-    {
-      if (++spinCount == FB_SPIN_LIMIT)
-        return false;
-
-      usleep(1);
-      wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
-    }
+    if (!framebuffer_wait(frame, rp + linewidth))
+      return false;
 
     if (!fn(opaque, frame->data + rp, linewidth))
       return false;
