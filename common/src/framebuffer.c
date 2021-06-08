@@ -76,7 +76,7 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
   // copy in large 1MB chunks if the pitches match
   if (dstpitch == pitch)
   {
-    size_t remaining = (height - 1) * pitch + dstpitch;
+    size_t remaining = height * pitch;
     while(remaining)
     {
       const size_t copy = remaining < FB_CHUNK_SIZE ? remaining : FB_CHUNK_SIZE;
