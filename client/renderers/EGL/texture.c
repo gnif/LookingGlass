@@ -76,7 +76,7 @@ struct EGL_Texture
 
   struct BufferState state;
   int             bufferCount;
-  GLuint          tex;
+  GLuint          tex[BUFFER_COUNT];
   struct Buffer   buf[BUFFER_COUNT];
 
   size_t dmaImageCount;
@@ -130,7 +130,7 @@ void egl_texture_free(EGL_Texture ** texture)
     }
   }
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glDeleteTextures(1, &(*texture)->tex);
+  glDeleteTextures((*texture)->bufferCount, (*texture)->tex);
 
   for (size_t i = 0; i < (*texture)->dmaImageUsed; ++i)
     eglDestroyImage((*texture)->display, (*texture)->dmaImages[i].image);
@@ -150,7 +150,8 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
     GL_MAP_WRITE_BIT             |
     GL_MAP_UNSYNCHRONIZED_BIT    |
     GL_MAP_INVALIDATE_BUFFER_BIT |
-    GL_MAP_PERSISTENT_BIT
+    GL_MAP_PERSISTENT_BIT        |
+    GL_MAP_COHERENT_BIT
   );
 
   if (!texture->buf[i].map)
@@ -250,8 +251,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   texture->pitch = stride / texture->bpp;
 
   if (texture->tex)
-    glDeleteTextures(1, &texture->tex);
-  glGenTextures(1, &texture->tex);
+    glDeleteTextures(texture->bufferCount, texture->tex);
+  glGenTextures(texture->bufferCount, texture->tex);
 
   if (!texture->sampler)
   {
@@ -277,9 +278,12 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     return true;
   }
 
-  glBindTexture(GL_TEXTURE_2D, texture->tex);
-  glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->width,
-    texture->height, 0, texture->format, texture->dataType, NULL);
+  for(int i = 0; i < texture->bufferCount; ++i)
+  {
+    glBindTexture(GL_TEXTURE_2D, texture->tex[i]);
+    glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->width,
+      texture->height, 0, texture->format, texture->dataType, NULL);
+  }
   glBindTexture(GL_TEXTURE_2D, 0);
 
   if (!streaming)
@@ -295,8 +299,9 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
       GL_PIXEL_UNPACK_BUFFER,
       texture->pboBufferSize,
       NULL,
-      GL_MAP_WRITE_BIT |
-      GL_MAP_PERSISTENT_BIT
+      GL_MAP_WRITE_BIT      |
+      GL_MAP_PERSISTENT_BIT |
+      GL_MAP_COHERENT_BIT
     );
 
     if (!egl_texture_map(texture, i))
@@ -338,7 +343,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   }
   else
   {
-    glBindTexture(GL_TEXTURE_2D, texture->tex);
+    glBindTexture(GL_TEXTURE_2D, texture->tex[0]);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->pitch);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height,
         texture->format, texture->dataType, buffer);
@@ -459,7 +464,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
   glBindFramebuffer(GL_FRAMEBUFFER, texture->dmaFBO);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->dmaTex, 0);
 
-  glBindTexture(GL_TEXTURE_2D, texture->tex);
+  glBindTexture(GL_TEXTURE_2D, texture->tex[0]);
   glCopyTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, 0, 0, texture->width, texture->height, 0);
 
   GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -506,7 +511,7 @@ enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
   if (!texture->dma)
   {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->buf[b].pbo);
-    glBindTexture(GL_TEXTURE_2D, texture->tex);
+    glBindTexture(GL_TEXTURE_2D, texture->tex[b]);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->pitch);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texture->width, texture->height,
         texture->format, texture->dataType, (const void *)0);
@@ -529,6 +534,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
 {
   uint8_t ss = atomic_load_explicit(&texture->state.s, memory_order_acquire);
   uint8_t sd = atomic_load_explicit(&texture->state.d, memory_order_acquire);
+  GLuint tex = texture->tex[0];
 
   if (texture->streaming)
   {
@@ -569,10 +575,12 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
     if (ss != sd && ss != (uint8_t)(sd + 1))
       sd = atomic_fetch_add_explicit(&texture->state.d, 1,
           memory_order_release) + 1;
+
+    tex = texture->tex[sd % BUFFER_COUNT];
   }
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture->tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
   glBindSampler(0, texture->sampler);
 
   return EGL_TEX_STATUS_OK;
