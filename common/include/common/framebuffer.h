@@ -37,7 +37,7 @@ extern const size_t FrameBufferStructSize;
 /**
  * Wait for the framebuffer to fill to the specified size
  */
-void framebuffer_wait(const FrameBuffer * frame, size_t size);
+bool framebuffer_wait(const FrameBuffer * frame, size_t size);
 
 /**
  * Read data from the KVMFRFrame into the dst buffer

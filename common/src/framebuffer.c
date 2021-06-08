@@ -21,6 +21,11 @@
 #include "common/framebuffer.h"
 #include "common/debug.h"
 
+//#define FB_PROFILE
+#ifdef FB_PROFILE
+#include "common/runningavg.h"
+#endif
+
 #include <string.h>
 #include <stdatomic.h>
 #include <emmintrin.h>
@@ -38,7 +43,7 @@ struct stFrameBuffer
 
 const size_t FrameBufferStructSize = sizeof(FrameBuffer);
 
-void framebuffer_wait(const FrameBuffer * frame, size_t size)
+bool framebuffer_wait(const FrameBuffer * frame, size_t size)
 {
   while(atomic_load_explicit(&frame->wp, memory_order_acquire) < size)
   {
@@ -46,79 +51,64 @@ void framebuffer_wait(const FrameBuffer * frame, size_t size)
     while(frame->wp < size)
     {
       if (++spinCount == FB_SPIN_LIMIT)
-        return;
+        return false;
       usleep(1);
     }
   }
+
+  return true;
 }
 
 bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
     size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
 {
+#ifdef FB_PROFILE
+  static RunningAvg ra = NULL;
+  static int raCount = 0;
+  if (!ra)
+    ra = runningavg_new(100);
+  const uint64_t ts = microtime();
+#endif
+
   uint8_t * restrict d     = (uint8_t*)dst;
   uint_least32_t rp        = 0;
-  size_t         y         = 0;
-  const size_t   linewidth = width * bpp;
 
-  while(y < height)
+  // copy in large 1MB chunks if the pitches match
+  if (dstpitch == pitch)
   {
-    uint_least32_t wp;
-    int spinCount = 0;
-
-    /* spinlock */
-    wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
-    while(wp - rp < linewidth)
+    size_t remaining = (height - 1) * pitch + dstpitch;
+    while(remaining)
     {
-      if (++spinCount == FB_SPIN_LIMIT)
+      const size_t copy = remaining < FB_CHUNK_SIZE ? remaining : FB_CHUNK_SIZE;
+      if (!framebuffer_wait(frame, rp + copy))
         return false;
 
-      usleep(1);
-      wp = atomic_load_explicit(&frame->wp, memory_order_acquire);
+      memcpy(d, frame->data + rp, copy);
+      remaining -= copy;
+      rp        += copy;
+      d         += copy;
     }
-
-    /* copy any unaligned bytes */
-    const uint8_t * src = frame->data + rp;
-    const size_t unaligned = (uintptr_t)src & 0xF;
-    if (unaligned)
-    {
-      memcpy(d, src, unaligned);
-      src += unaligned;
-      d   += unaligned;
-    }
-
-    const size_t blocks = (linewidth - unaligned) / 64;
-    const size_t left   = (linewidth - unaligned) % 64;
-
-    _mm_mfence();
-    __m128i * restrict s = (__m128i *)src;
-    for(int i = 0; i < blocks; ++i)
-    {
-      __m128i *_d = (__m128i *)d;
-      __m128i *_s = (__m128i *)s;
-      __m128i v1 = _mm_stream_load_si128(_s + 0);
-      __m128i v2 = _mm_stream_load_si128(_s + 1);
-      __m128i v3 = _mm_stream_load_si128(_s + 2);
-      __m128i v4 = _mm_stream_load_si128(_s + 3);
-
-      _mm_storeu_si128(_d + 0, v1);
-      _mm_storeu_si128(_d + 1, v2);
-      _mm_storeu_si128(_d + 2, v3);
-      _mm_storeu_si128(_d + 3, v4);
-
-      d += 64;
-      s += 4;
-    }
-
-    if (left)
-    {
-      memcpy(d, s, left);
-      d += left;
-    }
-
-    rp += pitch;
-    d  += dstpitch - linewidth;
-    ++y;
   }
+  else
+  {
+    // copy per line to match the pitch of the destination buffer
+    const size_t linewidth = width * bpp;
+    for(size_t y = 0; y < height; ++y)
+    {
+      if (!framebuffer_wait(frame, rp + linewidth))
+        return false;
+
+      memcpy(d, frame->data + rp, dstpitch);
+      rp += linewidth;
+      d  += dstpitch;
+    }
+  }
+
+#ifdef FB_PROFILE
+  runningavg_push(ra, microtime() - ts);
+  if (++raCount % 100 == 0)
+    DEBUG_INFO("Average Copy Time: %.2fμs", runningavg_calc(ra));
+#endif
 
   return true;
 }
