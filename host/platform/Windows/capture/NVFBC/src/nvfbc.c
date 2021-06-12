@@ -275,11 +275,6 @@ static void nvfbc_free(void)
   NvFBCFree();
 }
 
-static unsigned int nvfbc_getMaxFrameSize(void)
-{
-  return this->maxWidth * this->maxHeight * 4;
-}
-
 static unsigned int nvfbc_getMouseScale(void)
 {
   return this->dpi * 100 / DPI_100_PERCENT;
@@ -320,7 +315,8 @@ static CaptureResult nvfbc_capture(void)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
+static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
+    const size_t maxFrameSize)
 {
   if (!lgWaitEvent(this->frameEvent, 1000))
     return CAPTURE_RESULT_TIMEOUT;
@@ -339,12 +335,15 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
     ++this->formatVer;
   }
 
-  frame->formatVer = this->formatVer;
-  frame->width     = this->grabWidth;
-  frame->height    = this->grabHeight;
-  frame->pitch     = this->grabStride * 4;
-  frame->stride    = this->grabStride;
-  frame->rotation  = CAPTURE_ROT_0;
+  const unsigned int maxHeight = maxFrameSize / (this->grabStride * 4);
+
+  frame->formatVer  = this->formatVer;
+  frame->width      = this->grabWidth;
+  frame->height     = maxHeight > this->grabHeight ? this->grabHeight : maxHeight;
+  frame->realHeight = this->grabHeight;
+  frame->pitch      = this->grabStride * 4;
+  frame->stride     = this->grabStride;
+  frame->rotation   = CAPTURE_ROT_0;
 
 #if 0
   //NvFBC never sets bIsHDR so instead we check for any data in the alpha channel
@@ -366,12 +365,13 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_getFrame(FrameBuffer * frame)
+static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
+    const unsigned int height)
 {
   framebuffer_write(
     frame,
     this->frameBuffer,
-    this->grabInfo.dwHeight * this->grabInfo.dwBufferWidth * 4
+    height * this->grabInfo.dwBufferWidth * 4
   );
   return CAPTURE_RESULT_OK;
 }
@@ -442,7 +442,6 @@ struct CaptureInterface Capture_NVFBC =
   .stop            = nvfbc_stop,
   .deinit          = nvfbc_deinit,
   .free            = nvfbc_free,
-  .getMaxFrameSize = nvfbc_getMaxFrameSize,
   .getMouseScale   = nvfbc_getMouseScale,
   .capture         = nvfbc_capture,
   .waitFrame       = nvfbc_waitFrame,

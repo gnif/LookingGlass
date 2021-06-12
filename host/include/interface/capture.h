@@ -64,6 +64,7 @@ typedef struct CaptureFrame
   unsigned int    formatVer;
   unsigned int    width;
   unsigned int    height;
+  unsigned int    realHeight;
   unsigned int    pitch;
   unsigned int    stride;
   CaptureFormat   format;
@@ -99,15 +100,14 @@ typedef struct CaptureInterface
     CapturePostPointerBuffer postPointerBufferFn
   );
 
-  bool          (*init           )();
-  void          (*stop           )();
-  bool          (*deinit         )();
-  void          (*free           )();
-  unsigned int  (*getMaxFrameSize)();
-  unsigned int  (*getMouseScale  )();
+  bool          (*init         )();
+  void          (*stop         )();
+  bool          (*deinit       )();
+  void          (*free         )();
+  unsigned int  (*getMouseScale)();
 
   CaptureResult (*capture   )();
-  CaptureResult (*waitFrame )(CaptureFrame * frame);
-  CaptureResult (*getFrame  )(FrameBuffer  * frame);
+  CaptureResult (*waitFrame )(CaptureFrame * frame, const size_t maxFrameSize);
+  CaptureResult (*getFrame  )(FrameBuffer  * frame, const unsigned int height);
 }
 CaptureInterface;

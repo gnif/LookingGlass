@@ -156,7 +156,7 @@ static int frameThread(void * opaque)
       continue;
     }
 
-    switch(app.iface->waitFrame(&frame))
+    switch(app.iface->waitFrame(&frame, app.maxFrameSize))
     {
       case CAPTURE_RESULT_OK:
         repeatFrame = false;
@@ -230,6 +230,7 @@ static int frameThread(void * opaque)
     fi->formatVer         = frame.formatVer;
     fi->width             = frame.width;
     fi->height            = frame.height;
+    fi->realHeight        = frame.realHeight;
     fi->stride            = frame.stride;
     fi->pitch             = frame.pitch;
     fi->offset            = pageSize - FrameBufferStructSize;
@@ -248,7 +249,7 @@ static int frameThread(void * opaque)
       DEBUG_ERROR("%s", lgmpStatusString(status));
       continue;
     }
-    app.iface->getFrame(fb);
+    app.iface->getFrame(fb, frame.height);
   }
   DEBUG_INFO("Frame thread stopped");
   return 0;
@@ -295,24 +296,7 @@ static bool captureStart(void)
     }
   }
 
-  const unsigned int maxFrameSize = app.iface->getMaxFrameSize();
-  if (maxFrameSize > app.maxFrameSize)
-  {
-    DEBUG_ERROR("Maximum frame size of %d bytes exceeds maximum space available", maxFrameSize);
-
-    const float needed = ((maxFrameSize * 2) / 1048576.0f) + 10.0f;
-    const int   size   = (int)powf(2.0f, ceilf(logf(needed) / logf(2.0f)));
-
-    char * msg;
-    alloc_sprintf(&msg, "IVSHMEM size too small, increase to %d MiB", size);
-    os_showMessage("Looking Glass Error", msg);
-    free(msg);
-
-    return false;
-  }
-  DEBUG_INFO("Capture Size     : %u MiB (%u)", maxFrameSize / 1048576, maxFrameSize);
-
-  DEBUG_INFO("==== [ Capture  Start ] ====");
+  DEBUG_INFO("==== [ Capture Start ] ====");
   return true;
 }
 

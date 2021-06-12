@@ -714,14 +714,6 @@ static void dxgi_free(void)
   this = NULL;
 }
 
-static unsigned int dxgi_getMaxFrameSize(void)
-{
-  assert(this);
-  assert(this->initialized);
-
-  return this->height * this->pitch;
-}
-
 static unsigned int dxgi_getMouseScale(void)
 {
   assert(this);
@@ -928,7 +920,7 @@ static CaptureResult dxgi_capture(void)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
+static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameSize)
 {
   assert(this);
   assert(this->initialized);
@@ -980,26 +972,30 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame)
 
   tex->state = TEXTURE_STATE_MAPPED;
 
-  frame->formatVer = tex->formatVer;
-  frame->width     = this->width;
-  frame->height    = this->height;
-  frame->pitch     = this->pitch;
-  frame->stride    = this->stride;
-  frame->format    = this->format;
-  frame->rotation  = this->rotation;
+  const unsigned int maxHeight = maxFrameSize / this->pitch;
+
+  frame->formatVer  = tex->formatVer;
+  frame->width      = this->width;
+  frame->height     = maxHeight > this->height ? this->height : maxHeight;
+  frame->realHeight = this->height;
+  frame->pitch      = this->pitch;
+  frame->stride     = this->stride;
+  frame->format     = this->format;
+  frame->rotation   = this->rotation;
 
   atomic_fetch_sub_explicit(&this->texReady, 1, memory_order_release);
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_getFrame(FrameBuffer * frame)
+static CaptureResult dxgi_getFrame(FrameBuffer * frame,
+    const unsigned int height)
 {
   assert(this);
   assert(this->initialized);
 
   Texture * tex = &this->texture[this->texRIndex];
 
-  framebuffer_write(frame, tex->map.pData, this->pitch * this->height);
+  framebuffer_write(frame, tex->map.pData, this->pitch * height);
   LOCKED({ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);});
   tex->state = TEXTURE_STATE_UNUSED;
 
@@ -1052,7 +1048,6 @@ struct CaptureInterface Capture_DXGI =
   .stop            = dxgi_stop,
   .deinit          = dxgi_deinit,
   .free            = dxgi_free,
-  .getMaxFrameSize = dxgi_getMaxFrameSize,
   .getMouseScale   = dxgi_getMouseScale,
   .capture         = dxgi_capture,
   .waitFrame       = dxgi_waitFrame,

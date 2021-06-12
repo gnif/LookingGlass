@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 9
+#define KVMFR_VERSION 10
 
 #define LGMP_Q_POINTER     1
 #define LGMP_Q_FRAME       2
@@ -68,8 +68,9 @@ typedef struct KVMFRFrame
 {
   uint32_t      formatVer;         // the frame format version number
   FrameType     type;              // the frame data type
-  uint32_t      width;             // the width
-  uint32_t      height;            // the height
+  uint32_t      width;             // the frame width
+  uint32_t      height;            // the frame height
+  uint32_t      realHeight;        // the real height if the frame was truncated due to low mem
   FrameRotation rotation;          // the frame rotation
   uint32_t      stride;            // the row stride (zero if compressed data)
   uint32_t      pitch;             // the row pitch  (stride in bytes or the compressed frame size)
