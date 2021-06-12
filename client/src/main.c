@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <linux/input.h>
 
@@ -427,6 +428,23 @@ int main_frameThread(void * unused)
       lgrFormat.height = frame->height;
       lgrFormat.stride = frame->stride;
       lgrFormat.pitch  = frame->pitch;
+
+      if (frame->height != frame->realHeight)
+      {
+        const float needed =
+          ((frame->realHeight * frame->pitch * 2) / 1048576.0f) + 10.0f;
+        const int   size   = (int)powf(2.0f, ceilf(logf(needed) / logf(2.0f)));
+
+        DEBUG_BREAK();
+        DEBUG_WARN("IVSHMEM too small, screen truncated");
+        DEBUG_WARN("Recommend increase size to %d MiB", size);
+        DEBUG_BREAK();
+
+        app_alert(LG_ALERT_ERROR,
+          "IVSHMEM too small, screen truncated\n"
+          "Recommend increasing size to %d MiB",
+          size);
+      }
 
       switch(frame->rotation)
       {
