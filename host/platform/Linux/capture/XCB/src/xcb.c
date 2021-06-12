@@ -54,7 +54,6 @@ struct xcb * this = NULL;
 // forwards
 
 static bool xcb_deinit();
-static unsigned int xcb_getMaxFrameSize();
 
 // implementation
 
@@ -109,7 +108,8 @@ static bool xcb_init(void)
   DEBUG_INFO("Frame Size       : %u x %u", this->width, this->height);
 
   this->seg   = xcb_generate_id(this->xcb);
-  this->shmID = shmget(IPC_PRIVATE, xcb_getMaxFrameSize(), IPC_CREAT | 0777);
+  const size_t maxFrameSize = this->width * this->height * 4;
+  this->shmID = shmget(IPC_PRIVATE, maxFrameSize, IPC_CREAT | 0777);
   if (this->shmID == -1)
   {
     DEBUG_ERROR("shmget failed");
@@ -165,11 +165,6 @@ static void xcb_free(void)
   this = NULL;
 }
 
-static unsigned int xcb_getMaxFrameSize(void)
-{
-  return this->width * this->height * 4;
-}
-
 static unsigned int xcb_getMouseScale(void)
 {
   return 100;
@@ -200,21 +195,25 @@ static CaptureResult xcb_capture(void)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_waitFrame(CaptureFrame * frame)
+static CaptureResult xcb_waitFrame(CaptureFrame * frame,
+    const size_t maxFrameSize)
 {
   lgWaitEvent(this->frameEvent, TIMEOUT_INFINITE);
 
-  frame->width    = this->width;
-  frame->height   = this->height;
-  frame->pitch    = this->width * 4;
-  frame->stride   = this->width;
-  frame->format   = CAPTURE_FMT_BGRA;
-  frame->rotation = CAPTURE_ROT_0;
+  const unsigned int maxHeight = maxFrameSize / (this->width * 4);
+
+  frame->width      = this->width;
+  frame->height     = maxHeight > this->height ? this->height : maxHeight;
+  frame->realHeight = this->height;
+  frame->pitch      = this->width * 4;
+  frame->stride     = this->width;
+  frame->format     = CAPTURE_FMT_BGRA;
+  frame->rotation   = CAPTURE_ROT_0;
 
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_getFrame(FrameBuffer * frame)
+static CaptureResult xcb_getFrame(FrameBuffer * frame, const unsigned int height)
 {
   assert(this);
   assert(this->initialized);
@@ -227,7 +226,7 @@ static CaptureResult xcb_getFrame(FrameBuffer * frame)
     return CAPTURE_RESULT_ERROR;
   }
 
-  framebuffer_write(frame, this->data, this->width * this->height * 4);
+  framebuffer_write(frame, this->data, this->width * height * 4);
   free(img);
 
   this->hasFrame = false;
@@ -242,7 +241,6 @@ struct CaptureInterface Capture_XCB =
   .init            = xcb_init,
   .deinit          = xcb_deinit,
   .free            = xcb_free,
-  .getMaxFrameSize = xcb_getMaxFrameSize,
   .getMouseScale   = xcb_getMouseScale,
   .capture         = xcb_capture,
   .waitFrame       = xcb_waitFrame,
