@@ -439,7 +439,7 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
-  if (!wlWm.pointerInSurface)
+  if (!wlWm.pointerInSurface || wlWm.lockedPointer)
     return;
 
   INTERLOCKED_SECTION(wlWm.confineLock,
