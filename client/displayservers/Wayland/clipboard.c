@@ -210,9 +210,10 @@ static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
   if (type == LG_CLIPBOARD_DATA_NONE)
     return;
 
-  // text/html represents rich text format and should not be used when an image
-  // format is available.
-  if (isImageCbtype(type) && data->mimetypes[LG_CLIPBOARD_DATA_TEXT] &&
+  // text/html represents rich text format, which is almost never desirable when
+  // and should not be used when a plain text or image format is available.
+  if ((isImageCbtype(type) || containsMimetype(textMimetypes, mimetype)) &&
+      data->mimetypes[LG_CLIPBOARD_DATA_TEXT] &&
       strstr(data->mimetypes[LG_CLIPBOARD_DATA_TEXT], "html"))
   {
     free(data->mimetypes[LG_CLIPBOARD_DATA_TEXT]);
