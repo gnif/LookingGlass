@@ -26,7 +26,7 @@ struct RunningAvg
 {
   int       length, samples;
   int       pos;
-  int       value;
+  int64_t   value;
   int64_t   values[0];
 };
 
