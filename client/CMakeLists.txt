@@ -143,6 +143,8 @@ target_link_libraries(looking-glass-client
 	fonts
 )
 
-install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-client DESTINATION bin/ COMPONENT binary)
+install(TARGETS looking-glass-client
+	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+	COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
