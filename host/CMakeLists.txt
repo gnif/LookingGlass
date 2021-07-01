@@ -6,6 +6,7 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG" CACHE STRING "compiler flag
 
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
+include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
 
@@ -81,6 +82,8 @@ else()
   set_target_properties(looking-glass-host PROPERTIES LINK_FLAGS "-Wl,--gc-sections -z noexecstack")
 endif()
 
-install(PROGRAMS ${CMAKE_BINARY_DIR}/looking-glass-host DESTINATION bin/ COMPONENT binary)
+install(TARGETS looking-glass-host
+	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+	COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
