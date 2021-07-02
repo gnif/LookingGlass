@@ -10,6 +10,7 @@ add_library(platform_Windows STATIC
 	src/service.c
 	src/mousehook.c
 	src/force_compose.c
+	resource.rc
 )
 
 # allow use of functions for Windows Vista or later
@@ -17,15 +18,7 @@ add_definitions(-D _WIN32_WINNT=0x6000)
 
 add_subdirectory("capture")
 
-FIND_PROGRAM(WINDRES_EXECUTABLE NAMES "x86_64-w64-mingw32-windres" "windres.exe" DOC "windres executable")
-ADD_CUSTOM_COMMAND(TARGET platform_Windows POST_BUILD
-	WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-	COMMAND ${WINDRES_EXECUTABLE} -i resource.rc -o "${PROJECT_BINARY_DIR}/resource.o"
-	VERBATIM
-)
-
 target_link_libraries(platform_Windows
-	"${PROJECT_BINARY_DIR}/resource.o"
 	lg_common
 	capture
 
