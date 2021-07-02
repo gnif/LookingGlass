@@ -279,6 +279,13 @@ void opengl_deinitialize(void * opaque)
   }
 
   deconfigure(this);
+
+  if (this->hasTextures)
+  {
+    glDeleteTextures(TEXTURE_COUNT, this->textures);
+    this->hasTextures = false;
+  }
+
   if (this->mouseData)
     free(this->mouseData);
 
@@ -1090,12 +1097,6 @@ static enum ConfigStatus configure(struct Inst * this)
 
 static void deconfigure(struct Inst * this)
 {
-  if (this->hasTextures)
-  {
-    glDeleteTextures(TEXTURE_COUNT, this->textures);
-    this->hasTextures = false;
-  }
-
   if (this->hasFrames)
   {
     glDeleteTextures(BUFFER_COUNT, this->frames);
