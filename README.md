@@ -4,7 +4,7 @@ An extremely low latency KVMFR (KVM FrameRelay) implementation for guests with
 VGA PCI Passthrough.
 
 * Project Website: https://looking-glass.io
-* Documentation: https://looking-glass.io/docs
+* Documentation: https://looking-glass.io/ci/host/doc?id=bleeding
 
 ## Documentation
 
