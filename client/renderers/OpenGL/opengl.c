@@ -126,7 +126,7 @@ struct Inst
 
   struct IntPoint   window;
   float             uiScale;
-  bool              frameUpdate;
+  _Atomic(bool)     frameUpdate;
 
   const LG_Font   * font;
   LG_FontObj        fontObj, alertFontObj;
@@ -144,9 +144,9 @@ struct Inst
   bool              hasBuffers;
   GLuint            vboID[BUFFER_COUNT];
   uint8_t         * texPixels[BUFFER_COUNT];
-  LG_Lock           syncLock;
+  LG_Lock           frameLock;
   bool              texReady;
-  int               texIndex;
+  int               texWIndex, texRIndex;
   int               texList;
   int               fpsList;
   int               mouseList;
@@ -231,7 +231,7 @@ bool opengl_create(void ** opaque, const LG_RendererParams params,
 
 
   LG_LOCK_INIT(this->formatLock);
-  LG_LOCK_INIT(this->syncLock  );
+  LG_LOCK_INIT(this->frameLock );
   LG_LOCK_INIT(this->mouseLock );
 
   this->font = LG_Fonts[0];
@@ -296,7 +296,7 @@ void opengl_deinitialize(void * opaque)
   }
 
   LG_LOCK_FREE(this->formatLock);
-  LG_LOCK_FREE(this->syncLock  );
+  LG_LOCK_FREE(this->frameLock );
   LG_LOCK_FREE(this->mouseLock );
 
   struct Alert * alert;
@@ -418,10 +418,10 @@ bool opengl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd)
 {
   struct Inst * this = (struct Inst *)opaque;
 
-  LG_LOCK(this->syncLock);
-  this->frame       = frame;
-  this->frameUpdate = true;
-  LG_UNLOCK(this->syncLock);
+  LG_LOCK(this->frameLock);
+  this->frame = frame;
+  atomic_store_explicit(&this->frameUpdate, true, memory_order_release);
+  LG_UNLOCK(this->frameLock);
 
   if (this->waiting)
   {
@@ -612,7 +612,7 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
   {
     bool newShape;
     update_mouse_shape(this, &newShape);
-    glCallList(this->texList + this->texIndex);
+    glCallList(this->texList + this->texRIndex);
     draw_mouse(this);
 
     if (!this->waitDone)
@@ -1294,23 +1294,9 @@ static bool opengl_buffer_fn(void * opaque, const void * data, size_t size)
 
 static bool draw_frame(struct Inst * this)
 {
-  LG_LOCK(this->syncLock);
-  if (!this->frameUpdate)
+  if (glIsSync(this->fences[this->texWIndex]))
   {
-    LG_UNLOCK(this->syncLock);
-    return true;
-  }
-
-  if (++this->texIndex == BUFFER_COUNT)
-    this->texIndex = 0;
-
-  this->frameUpdate = false;
-  LG_UNLOCK(this->syncLock);
-
-  LG_LOCK(this->formatLock);
-  if (glIsSync(this->fences[this->texIndex]))
-  {
-    switch(glClientWaitSync(this->fences[this->texIndex], 0, GL_TIMEOUT_IGNORED))
+    switch(glClientWaitSync(this->fences[this->texWIndex], 0, GL_TIMEOUT_IGNORED))
     {
       case GL_ALREADY_SIGNALED:
         break;
@@ -1328,12 +1314,24 @@ static bool draw_frame(struct Inst * this)
         break;
     }
 
-    glDeleteSync(this->fences[this->texIndex]);
-    this->fences[this->texIndex] = NULL;
+    glDeleteSync(this->fences[this->texWIndex]);
+    this->fences[this->texWIndex] = NULL;
+
+    this->texRIndex = this->texWIndex;
+    if (++this->texWIndex == BUFFER_COUNT)
+      this->texWIndex = 0;
   }
 
-  glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texIndex]);
+  LG_LOCK(this->frameLock);
+  if (!atomic_exchange_explicit(&this->frameUpdate, false, memory_order_acquire))
+  {
+    LG_UNLOCK(this->frameLock);
+    return true;
+  }
+
+  LG_LOCK(this->formatLock);
+  glBindTexture(GL_TEXTURE_2D, this->frames[this->texWIndex]);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texWIndex]);
 
   const int bpp = this->format.bpp / 8;
   glPixelStorei(GL_UNPACK_ALIGNMENT , bpp);
@@ -1351,6 +1349,8 @@ static bool draw_frame(struct Inst * this)
     this
   );
 
+  LG_UNLOCK(this->frameLock);
+
   // update the texture
   glTexSubImage2D(
     GL_TEXTURE_2D,
@@ -1365,14 +1365,10 @@ static bool draw_frame(struct Inst * this)
   );
   if (check_gl_error("glTexSubImage2D"))
   {
-    DEBUG_ERROR("texIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
-      this->texIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
+    DEBUG_ERROR("texWIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
+      this->texWIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
     );
   }
-
-  // set a fence so we don't overwrite a buffer in use
-  this->fences[this->texIndex] =
-    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
   // unbind the buffer
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -1393,6 +1389,11 @@ static bool draw_frame(struct Inst * this)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   }
   glBindTexture(GL_TEXTURE_2D, 0);
+
+  // set a fence so we don't overwrite a buffer in use
+  this->fences[this->texWIndex] =
+    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  glFlush();
 
   LG_UNLOCK(this->formatLock);
   this->texReady = true;
