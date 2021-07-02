@@ -913,8 +913,7 @@ static enum ConfigStatus configure(struct Inst * this)
     return CONFIG_STATUS_NOOP;
   }
 
-  if (this->configured)
-    deconfigure(this);
+  deconfigure(this);
 
   switch(this->format.type)
   {
@@ -1091,9 +1090,6 @@ static enum ConfigStatus configure(struct Inst * this)
 
 static void deconfigure(struct Inst * this)
 {
-  if (!this->configured)
-    return;
-
   if (this->hasTextures)
   {
     glDeleteTextures(TEXTURE_COUNT, this->textures);
