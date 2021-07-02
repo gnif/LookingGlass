@@ -1381,7 +1381,6 @@ static bool draw_frame(struct Inst * this)
     (this->format.width  > this->destRect.w) ||
     (this->format.height > this->destRect.h));
 
-  glBindTexture(GL_TEXTURE_2D, this->frames[this->texIndex]);
   if (mipmap)
   {
     glGenerateMipmap(GL_TEXTURE_2D);
