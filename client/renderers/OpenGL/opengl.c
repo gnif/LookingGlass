@@ -599,8 +599,8 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
 
     case CONFIG_STATUS_NOOP :
     case CONFIG_STATUS_OK   :
-     if (!draw_frame(this))
-       return false;
+      if (!draw_frame(this))
+        return false;
   }
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1079,8 +1079,8 @@ static enum ConfigStatus configure(struct Inst * this)
         glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
         glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
         glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
-     glEnd();
-     glBindTexture(GL_TEXTURE_2D, 0);
+      glEnd();
+      glBindTexture(GL_TEXTURE_2D, 0);
     glEndList();
   }
 
