@@ -118,11 +118,13 @@ static bool x11Init(const LG_DSInitParams params)
     GLint glXAttribs[] =
     {
       GLX_RGBA,
+      GLX_DOUBLEBUFFER  ,
       GLX_DEPTH_SIZE    , 24,
       GLX_STENCIL_SIZE  , 0,
       GLX_RED_SIZE      , 8,
       GLX_GREEN_SIZE    , 8,
       GLX_BLUE_SIZE     , 8,
+      GLX_DEPTH_SIZE    , 0,
       GLX_SAMPLE_BUFFERS, 0,
       GLX_SAMPLES       , 0,
       None
