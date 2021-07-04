@@ -321,29 +321,44 @@ bool captureGetPointerBuffer(void ** data, uint32_t * size)
   return true;
 }
 
-static void sendPointer(bool newClient)
+static void postPointer(uint32_t flags, PLGMPMemory mem)
 {
-  PLGMPMemory mem;
-  if (app.pointerInfo.shapeUpdate || newClient)
+  LGMP_STATUS status;
+  while ((status = lgmpHostQueuePost(app.pointerQueue, flags, mem)) != LGMP_OK)
   {
-    if (!newClient)
+    if (status == LGMP_ERR_QUEUE_FULL)
     {
-      // swap the latest shape buffer out of rotation
-      PLGMPMemory tmp  = app.pointerShape;
-      app.pointerShape = app.pointerMemory[app.pointerIndex];
-      app.pointerMemory[app.pointerIndex] = tmp;
+      usleep(1);
+      continue;
     }
 
-    // use the last known shape buffer
-    mem = app.pointerShape;
+    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
+    break;
   }
-  else
-    mem = app.pointerMemory[app.pointerIndex];
+}
 
-  if (++app.pointerIndex == POINTER_SHAPE_BUFFERS)
-    app.pointerIndex = 0;
+static void sendPointer(bool newClient)
+{
+  // new clients need the last known shape and current position
+  if (newClient)
+  {
+    if (!app.pointerShapeValid)
+      return;
+
+    // update the saved details with the current cursor position
+    KVMFRCursor *cursor = lgmpHostMemPtr(app.pointerShape);
+    cursor->x = app.pointerInfo.x;
+    cursor->y = app.pointerInfo.y;
+
+    const uint32_t flags = CURSOR_FLAG_POSITION | CURSOR_FLAG_SHAPE |
+      (app.pointerInfo.visible ? CURSOR_FLAG_VISIBLE : 0);
+
+    postPointer(flags, app.pointerShape);
+    return;
+  }
 
   uint32_t flags = 0;
+  PLGMPMemory mem = app.pointerMemory[app.pointerIndex];
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
 
   if (app.pointerInfo.positionUpdate || newClient)
@@ -375,23 +390,19 @@ static void sendPointer(bool newClient)
     }
 
     app.pointerShapeValid = true;
-  }
-
-  if ((app.pointerInfo.shapeUpdate || newClient) && app.pointerShapeValid)
     flags |= CURSOR_FLAG_SHAPE;
 
-  LGMP_STATUS status;
-  while ((status = lgmpHostQueuePost(app.pointerQueue, flags, mem)) != LGMP_OK)
-  {
-    if (status == LGMP_ERR_QUEUE_FULL)
-    {
-      usleep(1);
-      continue;
-    }
-
-    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
-    break;
+    // retain this memory for new clients
+    app.pointerMemory[app.pointerIndex] = app.pointerShape;
+    app.pointerShape = mem;
   }
+
+  // only advance the index if the shape was changed
+  if ((flags & CURSOR_FLAG_SHAPE) != 0)
+    if (++app.pointerIndex == POINTER_SHAPE_BUFFERS)
+      app.pointerIndex = 0;
+
+  postPointer(flags, mem);
 }
 
 void capturePostPointerBuffer(CapturePointer pointer)
