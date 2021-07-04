@@ -234,12 +234,12 @@ void core_updatePositionInfo(void)
       if (g_state.windowW > srcW)
       {
         force = true;
-        g_state.dstRect.w = srcW;
+        g_state.dstRect.w = (int) (srcW + 0.5);
       }
       if (g_state.windowH > srcH)
       {
         force = true;
-        g_state.dstRect.h = srcH;
+        g_state.dstRect.h = (int) (srcH + 0.5);
       }
     }
 
