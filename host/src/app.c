@@ -397,8 +397,8 @@ static void sendPointer(bool newClient)
     app.pointerShape = mem;
   }
 
-  // only advance the index if the shape was changed
-  if ((flags & CURSOR_FLAG_SHAPE) != 0)
+  // only advance if the pointer shape was not swapped out of the list
+  if ((flags & CURSOR_FLAG_SHAPE) == 0)
     if (++app.pointerIndex == POINTER_SHAPE_BUFFERS)
       app.pointerIndex = 0;
 
