@@ -106,6 +106,8 @@ static int renderThread(void * unused)
     return 1;
   }
 
+  LG_LOCK_INIT(g_state.lgrLock);
+
   g_state.lgr->on_show_fps(g_state.lgrData, g_state.showFPS);
 
   /* signal to other threads that the renderer is ready */
@@ -132,8 +134,13 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
+    LG_LOCK(g_state.lgrLock);
     if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate))
+    {
+      LG_UNLOCK(g_state.lgrLock);
       break;
+    }
+    LG_UNLOCK(g_state.lgrLock);
 
     if (g_state.showFPS)
     {
@@ -184,6 +191,8 @@ static int renderThread(void * unused)
 
   g_state.lgr->deinitialize(g_state.lgrData);
   g_state.lgr = NULL;
+  LG_LOCK_FREE(g_state.lgrLock);
+
   return 0;
 }
 
@@ -492,12 +501,15 @@ int main_frameThread(void * unused)
           frame->stride, frame->pitch,
           frame->rotation);
 
+      LG_LOCK(g_state.lgrLock);
       if (!g_state.lgr->on_frame_format(g_state.lgrData, lgrFormat, useDMA))
       {
         DEBUG_ERROR("renderer failed to configure format");
         g_state.state = APP_STATE_SHUTDOWN;
+        LG_UNLOCK(g_state.lgrLock);
         break;
       }
+      LG_UNLOCK(g_state.lgrLock);
 
       g_state.srcSize.x = lgrFormat.width;
       g_state.srcSize.y = lgrFormat.height;

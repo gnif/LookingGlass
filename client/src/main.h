@@ -28,6 +28,7 @@
 #include "common/thread.h"
 #include "common/types.h"
 #include "common/ivshmem.h"
+#include "common/locking.h"
 
 #include "spice/spice.h"
 #include <lgmp/client.h>
@@ -73,6 +74,7 @@ struct AppState
   const LG_Renderer  * lgr;
   void               * lgrData;
   atomic_int           lgrResize;
+  LG_Lock              lgrLock;
 
   bool                 cbAvailable;
   SpiceDataType        cbType;
