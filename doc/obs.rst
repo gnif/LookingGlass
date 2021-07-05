@@ -6,8 +6,8 @@ to OBS as a video source with the included OBS plugin. This provides a
 lower-latency alternative to capturing the Looking Glass client window
 with a Screen or Window Capture source.
 
-This may help improve your viewers' experience watching your stream, and
-allows you to use your host without them seeing.
+This may help improve your viewers' watching experience, and
+allows you to use your host privately.
 
 Build Instructions
 ~~~~~~~~~~~~~~~~~~
@@ -25,7 +25,7 @@ dependencies <installing_build_dependencies>`.
 
 -  libobs-dev
 
-Please install this package or the equivalent in your package manager.
+Install this package with ``apt-get``
 
 .. code:: bash
 
@@ -37,7 +37,7 @@ Please install this package or the equivalent in your package manager.
 Building
 ^^^^^^^^
 
-These instructions are the same as when building the
+These instructions are similar to building the
 :ref:`client <client_building>`.
 
 .. code:: bash
@@ -50,8 +50,14 @@ These instructions are the same as when building the
 Installation
 ~~~~~~~~~~~~
 
-The resulting liblooking-glass-obs.so file should be placed in your OBS
-plugin directory.
+You can install the plugin for all users by running ``make install`` as root.
+
+.. code:: bash
+
+   make install
+
+If you'd rather install for your local user, copy
+``liblooking-glass-obs.so`` to the correct path for local plugins.
 
 .. code:: bash
 
@@ -62,8 +68,8 @@ Setup
 ~~~~~
 
 Once installed, you can select the *"Looking Glass Client"* source from
-the OBS sources menu. The configuration only requires the IVSHMEM file
-that is used by the VM, and this is pre-populated with the default
+the OBS sources menu. Configuration requires the IVSHMEM file
+used by the VM, and this is pre-populated with the default
 filename for Looking Glass.
 
 .. _open_broadcaster_software:
@@ -75,7 +81,7 @@ Open Broadcaster Software
 The plugin is made for OBS, an open source streaming and recording
 studio. Find out more at https://obsproject.com/
 
-It's available under most distributions as *obs-studio* or just *obs*.
+OBS is available under most distributions as *obs-studio* or just *obs*.
 
 Screenshots
 ~~~~~~~~~~~
