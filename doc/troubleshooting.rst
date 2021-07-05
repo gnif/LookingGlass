@@ -11,41 +11,39 @@ When Launching Looking Glass the Desktop Doesn't Appear
 
 -  **Using an AMD GPU?**
 
-   -  After the end of the Radeon HD Series AMD started incorporating a
-      feature into their GPU's that effectively puts the card to sleep
-      when no display is connected. For this reason one of two
-      conditions need to be met.
+   -  After the end of the Radeon HD Series, new AMD GPUs go to sleep when no
+      display is connected. For this reason, one of two conditions must be met.
 
 #. The GPU needs to remain plugged into a monitor (this is good for
    testing & troubleshooting).
-#. The GPU needs to have a plug like the ones used in GPU Crypto mining
-   installed to trick the card into thinking that a display is
-   connected.
+#. The GPU needs to have a dummy plug installed which presents itself as a
+   monitor.
 
 .. _the_clipboard_is_not_working:
 
 The Clipboard is not Working
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  **Did you enable it?**
+-  **Is clipboard synchronization enabled?**
 
-   -  Before you can Copy/Paste content between the Guest and the Host
-      you must `Enable Clipboard
-      Synchronization <https://looking-glass.io/wiki/FAQ#How_to_enable_clipboard_synchronization_via_SPICE>`_
+   -  Before you can copy or paste content between the Guest and Host,
+      :ref:`clipboard
+      synchronization <how_to_enable_clipboard_synchronization_via_spice>`
+      must be enabled.
 
 -  **Did you install the Spice Guest Tools?**
 
-   -  Before you can Copy/Paste content between the Guest and the Host
-      you must install the `SPICE Guest Tools
-      driver <https://www.spice-space.org/download.html>`_. The
-      download is labeled as "spice-guest-tools".
+   -  The `SPICE Guest Tools
+      driver <https://www.spice-space.org/download.html>`_ must be installed
+      on the host OS to synchronize the clipboard.
+      The download is labeled "spice-guest-tools".
 
       .. warning::
 
-         **NOTE: Do make sure that you do NOT install the QEMU Guest
-         Tools driver. These are not the same.**
+         Do **NOT** install the QEMU Guest Tools driver.
+         These are not the same.
 
-   -  **Did you install them twice?**
+   -  **Is it installed twice?**
 
       -  The Spice VDAgent is available in both Spice Guest Tools, and
          standalone as a separate installer. Check your installed programs
