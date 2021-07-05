@@ -3,18 +3,21 @@
 Building
 ########
 
-The following instructions will help you build Looking Glass for yourself
-from source code. Before you attempt to do this, you should have a basic
-understanding of how to use the shell.
+The following instructions will help you build Looking Glass from source code.
+Before attempting this, you should have a basic understanding of
+how to use the shell.
 
 .. _download_source:
 
 Downloading
 -----------
 
-Either visit the Looking Glass website's `Download
-Page <https://looking-glass.io/downloads>`_, or pull the lastest **bleeding-edge
-version** with ``git``.
+Visit the Looking Glass `Download Page <https://looking-glass.io/downloads>`__,
+and download the stable version (**recommended**).
+You can also download a *bleeding-edge version*, or the latest RC version
+during a Release Candidate cycle.
+
+Developers can clone the source code repo with ``git``.
 
 .. code:: bash
 
@@ -71,18 +74,18 @@ May be disabled
 These dependencies are required by default, but may be omitted if their
 feature is disabled when running :ref:`cmake <client_building>`.
 
--  Disable with ``cmake -DENABLE_BACKTRACE=no``
+-  Disable with ``cmake -DENABLE_BACKTRACE=no ..``
 
    -  binutils-dev
 
--  Disable with ``cmake -DENABLE_X11=no``
+-  Disable with ``cmake -DENABLE_X11=no ..``
 
    -  libx11-dev
    -  libxfixes-dev
    -  libxi-dev
    -  libxss-dev
 
--  Disable with ``cmake -DENABLE_WAYLAND=no``
+-  Disable with ``cmake -DENABLE_WAYLAND=no ..``
 
    -  libwayland-bin
    -  libwayland-dev
@@ -100,9 +103,9 @@ wayland-protocols``
 Building
 ~~~~~~~~
 
-If you've downloaded the source code as a zip file, simply unzip and cd into the
-new directory. If you've cloned the repo with ``git``, then ``cd`` into the
-'LookingGlass' directory.
+If you've downloaded the source code as a zip file, simply unzip and ``cd``
+into the new directory. If you've cloned the repo with ``git``, then ``cd``
+into the *LookingGlass* directory.
 
 .. code:: bash
 
@@ -111,27 +114,28 @@ new directory. If you've cloned the repo with ``git``, then ``cd`` into the
    cmake ../
    make
 
-Should this all go well, you will build the **looking-glass-client**.
+This will build the **looking-glass-client** binary, which is used to display
+frames from the guest.
 
 .. seealso::
 
-   :ref:`Installing the Client <client_install>`
+   -  :ref:`Installing the Client <client_install>`
+   -  :ref:`Client Usage <client_usage>`
 
 .. note::
 
    The most common compile error is related to backtrace support. This can be
    disabled by adding the following option to the cmake command:
-   **-DENABLE_BACKTRACE=0**, however, if you disable this and need support for a
-   crash please be sure to use gdb to obtain a backtrace manually or there is
-   nothing that can be done to help you.
+   ``-DENABLE_BACKTRACE=0``. However, if you disable this and need support for
+   a crash, use ``gdb`` to obtain a backtrace manually.
 
 .. _host_building:
 
 Host
 ----
 
-These instructions help you build the host yourself from the :ref:`downloaded
-source code <download_source>`.
+These instructions help you build the host yourself from the
+:ref:`downloaded source code <download_source>`.
 
 .. warning::
    Building the host from source code is not recommended for most purposes,
@@ -152,7 +156,9 @@ For Windows on Windows
 1. Download and install msys2 x86_64 from
    `http://www.msys2.org/ <http://www.msys2.org/>`__ following the setup
    instructions provided
-2. Run the MSYS2 shell.
+
+2. Run the MSYS2 shell
+
 3. Download build dependencies with pacman
 
 .. code:: bash
@@ -160,33 +166,28 @@ For Windows on Windows
    pacman -Fy
    pacman -Sy git make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
 
-4. Checkout the project
-
-.. code:: bash
-
-   git clone https://github.com/gnif/LookingGlass.git
+4. Change directory to the source tree with ``cd``
 
 5. Configure the project and build it
 
 .. code:: bash
 
-   mkdir LookingGlass/host/build
-   cd LookingGlass/host/build
+   mkdir host/build
+   cd host/build
    cmake -G "MSYS Makefiles" ..
    make
 
 .. _host_linux_on_linux:
-   
+
 For Linux on Linux
 ~~~~~~~~~~~~~~~~~~
 
-Make a ``host/build`` direstory, then run ``cmake``
+Make a ``host/build`` directory, then run ``cmake``
 
 .. code:: bash
 
-   cd host
-   mkdir build
-   cd build
+   mkdir host/build
+   cd host/build
    cmake ..
    make
 
@@ -195,14 +196,13 @@ Make a ``host/build`` direstory, then run ``cmake``
 For Windows cross compiling on Linux
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Like :ref:`host_linux_on_linux`, but specifying the mingw64 toolchain in cmake
-for building.
+Like :ref:`host_linux_on_linux`, but using the mingw64 toolchain to
+cross-compile a Windows ``.exe`` file.
 
 .. code:: bash
 
-   cd host
-   mkdir build
-   cd build
+   mkdir host/build
+   cd host/build
    cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-mingw64.cmake ..
    make
 
@@ -211,7 +211,7 @@ for building.
 Building the Windows installer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. :ref:`Build <host_win_cross_on_linux>` the host for Linux.
+1. :ref:`Build <host_win_cross_on_linux>` the host on Linux.
 
 2. Install ``nsis``
 
