@@ -1,15 +1,16 @@
-execute_process(
-	COMMAND git describe --always --abbrev=10 --dirty=+ --tags
-	WORKING_DIRECTORY "${PROJECT_TOP}"
-        OUTPUT_VARIABLE GIT_REV
-        ERROR_QUIET)
+if (EXISTS ${PROJECT_TOP}/VERSION)
+	file(READ ${PROJECT_TOP}/VERSION GIT_REV)
+else()
+	execute_process(
+		COMMAND git describe --always --abbrev=10 --dirty=+ --tags
+		WORKING_DIRECTORY "${PROJECT_TOP}"
+		OUTPUT_VARIABLE GIT_REV
+		ERROR_QUIET)
+endif()
+
 
 if ("${GIT_REV}" STREQUAL "")
-	if (EXISTS ${PROJECT_TOP}/VERSION)
-		file(READ ${PROJECT_TOP}/VERSION GIT_REV)
-	else()
-		set(GIT_REV "UNKNOWN")
-	endif()
+	set(GIT_REV "UNKNOWN")
 endif()
 
 string(STRIP "${GIT_REV}" GIT_VERSION)
