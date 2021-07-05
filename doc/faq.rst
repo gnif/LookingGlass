@@ -95,38 +95,6 @@ The mouse is jumpy, slow, laggy when using SPICE
 Please be sure to install the SPICE guest tools from
 https://www.spice-space.org/download.html#windows-binaries.
 
-.. _how_to_enable_clipboard_synchronization_via_spice:
-
-How to enable clipboard synchronization via SPICE
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Install the SPICE guest tools from
-https://www.spice-space.org/download.html#windows-binaries.
-
-Choose only one of the settings below (the one that applies to your
-configuration):
-
--  QEMU
-
-.. code:: bash
-
-   -device virtio-serial-pci \
-   -chardev spicevmc,id=vdagent,name=vdagent \
-   -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
-
--  libvirt
-
-   -  Edit the VM using virsh ``sudo virsh edit VIRTUAL_MACHINE_NAME``
-   -  Paste the code from below right above (note the closing tag)
-
-.. code:: xml
-
-     <!-- No need to add VirtIO Serial device, it will be added automatically -->
-     <channel type="spicevmc">
-       <target type="virtio" name="com.redhat.spice.0"/>
-       <address type="virtio-serial" controller="0" bus="0" port="1"/>
-     </channel>
-
 .. _the_mouse_doesnt_stay_aligned_with_the_host.:
 
 The mouse doesn't stay aligned with the host.
