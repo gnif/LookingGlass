@@ -9,7 +9,8 @@ General
 How does Looking Glass work?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Please see the following video that covers this:
+This YouTube video featured created by the author features a detailed
+explanation:
 
 https://www.youtube.com/watch?v=U44lihtNVVM
 
@@ -19,7 +20,7 @@ Can I feed the VM directly into OBS?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Looking Glass now features a functional :doc:`OBS plugin <obs>`, which acts as
-another Looking Glass client, but instead gives the captured frames to OBS.
+another Looking Glass client, but instead feeds the captured frames into OBS.
 
 .. _why_is_my_ups_so_low:
 
@@ -66,8 +67,10 @@ You don't need Display Spice enabled. Looking Glass has a Spice client
 built in to provide some conveniences, but you can disable it with the
 "-s" argument.
 
-Note that without Spice, you will not be sending mouse/keyboard events
-to the guest, nor will you get clipboard synchronization support.
+.. note::
+
+   Without Spice, Looking Glass cannot send mouse/keyboard input to the guest
+   and clipboard synchronization is disabled.
 
 .. _where_is_the_host_application_for_linux:
 
@@ -76,7 +79,10 @@ Where is the host application for Linux?
 
 The "Windows host application" is actually the display server, which
 runs in the guest VM. The only thing that needs to run in your Linux
-host OS is the \`looking-glass-client\` application.
+host OS is the ``looking-glass-client`` application.
+
+You can :ref:`build <host_linux_on_linux>` a version of the host for Linux as
+well.
 
 Mouse
 -----
@@ -135,8 +141,8 @@ The cursor position doesn't update until I click
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Make sure you have removed the Virtual Tablet Device from the Virtual
-Machine. Due to the design of windows absolute pointing devices break
-applications/games that require cursor capture and as such Looking Glass
+Machine. Due to the design of Windows, absolute pointing devices break
+applications/games that require cursor capture, and as such Looking Glass
 does not support them.
 
 Audio
@@ -169,7 +175,7 @@ The screen stops updating when left idle for a time
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Windows is likely turning off the display to save power, you can prevent
-this by adjusting the \`Power Options\` in the control panel.
+this by adjusting the ``Power Options`` in the control panel.
 
 .. _faq_host:
 
