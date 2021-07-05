@@ -342,15 +342,13 @@ static void sendPointer(bool newClient)
   // new clients need the last known shape and current position
   if (newClient)
   {
-    if (!app.pointerShapeValid)
-      return;
-
     // update the saved details with the current cursor position
     KVMFRCursor *cursor = lgmpHostMemPtr(app.pointerShape);
     cursor->x = app.pointerInfo.x;
     cursor->y = app.pointerInfo.y;
 
-    const uint32_t flags = CURSOR_FLAG_POSITION | CURSOR_FLAG_SHAPE |
+    const uint32_t flags = CURSOR_FLAG_POSITION |
+      (app.pointerShapeValid   ? CURSOR_FLAG_SHAPE   : 0) |
       (app.pointerInfo.visible ? CURSOR_FLAG_VISIBLE : 0);
 
     postPointer(flags, app.pointerShape);
