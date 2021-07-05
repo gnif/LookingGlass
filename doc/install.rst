@@ -81,6 +81,12 @@ can be done by adding the following to
 
    /dev/shm/looking-glass rw,
 
+then, restart AppArmor.
+
+.. code:: bash
+
+   sudo systemctl restart apparmor
+
 .. _client_qemu_commands:
 
 Qemu Commands
