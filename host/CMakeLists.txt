@@ -66,7 +66,10 @@ add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 add_subdirectory(platform)
 
 if(WIN32)
-  add_executable(looking-glass-host WIN32 ${SOURCES})
+  add_executable(looking-glass-host WIN32
+    platform/Windows/resource.rc
+    ${SOURCES}
+  )
 else()
   add_executable(looking-glass-host ${SOURCES})
 endif()
