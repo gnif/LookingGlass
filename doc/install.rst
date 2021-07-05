@@ -8,14 +8,11 @@ Installation
 Client
 ------
 
-The Looking Glass Client recieves frames from the :ref:`host_install` to
+The Looking Glass Client recieves frames from the :ref:`Host <host_install>` to
 display on your screen. It also handles input, and can optionally share the
 system clipboard with your guest OS through Spice.
 
 First you must build the client from source code, see :ref:`building`.
-
-After this, you may move the client into a directory in your path, some may
-allow ``~/.local/bin``, or run it directly from the build directory.
 
 .. _client_libvirt_configuration:
 
@@ -80,9 +77,9 @@ AppArmor
 For libvirt versions before **5.10.0**, if you are using AppArmor, you
 need to add permissions for QEMU to access the shared memory file. This
 can be done by adding the following to
-*/etc/apparmor.d/local/abstractions/libvirt-qemu*.
+``/etc/apparmor.d/local/abstractions/libvirt-qemu``::
 
-``/dev/shm/looking-glass rw,``
+   /dev/shm/looking-glass rw,
 
 .. _client_qemu_commands:
 
@@ -118,7 +115,7 @@ For example, for a resolution of 1920x1080 (1080p):
 
 ``1920 x 1080 x 4 x 2 = 16,588,800 bytes``
 
-``16,588,800 / 1024 / 1024 = 15.82 MB + 10 = 25.82``
+``16,588,800 / 1024 / 1024 = 15.82 MB + 10 = 25.82 MB``
 
 You must round this value up to the nearest power of two, which for the
 provided example is 32MB.
@@ -154,22 +151,24 @@ Usage
 The client command is the binary file: **looking-glass-client**. This
 command should run after the Windows Host Application has started.
 
-You can run the client from the build directory, add the build directory to your
-path to call it from anywhere, or run this command
+You may run the client directly from the build directory. Alternatively, to
+install the client for all users, you can run
+::
 
-.. code:: bash
+   make install
 
-   ln -s $(pwd)/looking-glass-client /usr/local/bin/
+To install for the local user only, run
+::
 
-from the build directory.
+   cmake -DCMAKE_INSTALL_PREFIX=~/.local .. && make install
 
 .. _client_key_bindings:
 
 Default Key Bindings
 ~~~~~~~~~~~~~~~~~~~~
 
-By default Looking Glass uses the :kbd:`Scroll Lock` key as the escape key
-for commands as well as the input :kbd:`capture` mode toggle, this can be
+By default, Looking Glass uses the :kbd:`Scroll Lock` key as the escape key
+for commands, as well as the input :kbd:`capture` mode toggle; this can be
 changed using the ``-m`` switch if you desire a different key. Below are
 a list of current key bindings:
 
@@ -218,8 +217,8 @@ Example: ``looking-glass-client --help``
 Common options include ``-s`` for disabling spice, ``-S`` for disabling the
 screen saver, and ``-F`` to automatically enter full screen.
 
-Options may be provided with a short form, if available, or directly by
-long form. Boolean options may be specified without a paramater to toggle their
+Options may be provided with a short form, if available, or long form.
+Boolean options may be specified without a paramater to toggle their
 state.
 
 Examples:
@@ -234,8 +233,8 @@ Examples:
 Configuration Files
 ~~~~~~~~~~~~~~~~~~~
 
-By default the application will look for and load the config files in
-the following locations
+By default, the application will look for and load the config files in
+the following locations:
 
 -  /etc/looking-glass-client.ini
 -  ~/.looking-glass-client.ini
@@ -421,9 +420,9 @@ Host
 ----
 
 The Looking Glass Host captures frames from the guest OS using a capture API,
-and sends these frames to the :ref:`client_install`, be it on the host OS
-(hypervisor) or another Virtual Machine, through a low-latency transfer
-protocol over shared memory.
+and sends them to the :ref:`Client <client_install>`—be it on the host OS (hypervisor)
+or another Virtual Machine—through a low-latency transfer protocol over shared
+memory.
 
 You can get the host program in two ways:
 
@@ -461,7 +460,7 @@ https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/upstream-virtio
 Please note that you must obtain version 0.1.161 or later.
 
 If you encounter warnings or errors about driver signatures, ensure secure boot
-is turned off in the bios/uefi settings of your virtual machine.
+is turned off in the bios/UEFI settings of your virtual machine.
 
 .. _host_install_service:
 
