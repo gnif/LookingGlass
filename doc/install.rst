@@ -67,7 +67,7 @@ along with clipboard sync support, make sure you have a
       to be installed in the guest
 
 If you want clipboard synchronization please see
-:ref:`how_to_enable_clipboard_synchronization_via_spice`
+:ref:`client_clipboard_synchronization`
 
 .. _client_apparmor:
 
@@ -148,6 +148,37 @@ with the following::
 
 Change ``UID`` to the user name you will run Looking Glass with, usually your
 own.
+
+.. _client_clipboard_synchronization:
+
+Clipboard Synchronization
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Looking Glass can synchronize the clipboard between the host and guest using
+the SPICE guest agent.
+
+1. Install the SPICE guest tools from
+https://www.spice-space.org/download.html#windows-binaries.
+
+2. Configure your VM to enable the SPICE guest agent:
+
+-  QEMU
+
+.. code:: bash
+
+   -device virtio-serial-pci \
+   -chardev spicevmc,id=vdagent,name=vdagent \
+   -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
+
+-  libvirt
+
+.. code:: xml
+
+     <channel type="spicevmc">
+       <target type="virtio" name="com.redhat.spice.0"/>
+       <address type="virtio-serial" controller="0" bus="0" port="1"/>
+     </channel>
+     <!-- No need to add a VirtIO Serial device, it will be added automatically -->
 
 .. _client_usage:
 

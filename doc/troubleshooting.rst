@@ -28,7 +28,7 @@ The Clipboard is not Working
 
    -  Before you can copy or paste content between the Guest and Host,
       :ref:`clipboard
-      synchronization <how_to_enable_clipboard_synchronization_via_spice>`
+      synchronization <client_clipboard_synchronization>`
       must be enabled.
 
 -  **Did you install the Spice Guest Tools?**
