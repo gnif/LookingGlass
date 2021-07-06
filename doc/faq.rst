@@ -157,8 +157,9 @@ The log file for the host application is located at::
 
    %ProgramData%\Looking Glass (host)\looking-glass-host.txt
 
-You can also find out where the file is by right clicking on the tray
-icon and selecting "Log File Location".
+You can also open the log file by right clicking on the Looking Glass
+system tray icon, then clicking *Open Log File*. This opens the log
+file in Notepad.
 
 The log file for the looking glass service is located at::
 
