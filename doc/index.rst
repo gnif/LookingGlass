@@ -31,7 +31,6 @@ More information:
 * `Forum <https://forum.level1techs.com/c/software/lookingglass/142>`_
 * `Community wiki <https://looking-glass.io/wiki/>`_
 * IRC - #LookingGlass on `libera.chat <https://libera.chat/>`_
-* `Trello <https://trello.com/b/tI1Xbwsg/looking-glass>`_
 
 Donate:
 
@@ -40,3 +39,4 @@ Donate:
 * `Patreon <https://www.patreon.com/gnif>`_
 * `PayPal <https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ESQ72XUPGKXRY>`_
 * BTC - 14ZFcYjsKPiVreHqcaekvHGL846u3ZuT13
+* ETH - 0x6f8aEe454384122bF9ed28f025FBCe2Bce98db85
