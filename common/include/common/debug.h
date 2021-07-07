@@ -32,6 +32,7 @@
 
 enum DebugLevel
 {
+  DEBUG_LEVEL_NONE,
   DEBUG_LEVEL_INFO,
   DEBUG_LEVEL_WARN,
   DEBUG_LEVEL_ERROR,
@@ -79,9 +80,9 @@ void printBacktrace(void);
   sizeof(s) > 21 && (s)[sizeof(s)-22] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 21 : (s))
 
 #define DEBUG_PRINT(level, fmt, ...) do { \
-  fprintf(stdout, "%s%12" PRId64 "%20s:%-4u | %-30s | " fmt "\n", \
+  fprintf(stderr, "%s%12" PRId64 "%20s:%-4u | %-30s | " fmt "%s\n", \
       debug_lookup[level], microtime(), STRIPPATH(__FILE__), \
-      __LINE__, __FUNCTION__, ##__VA_ARGS__); \
+      __LINE__, __FUNCTION__, ##__VA_ARGS__, debug_lookup[DEBUG_LEVEL_NONE]); \
 } while (0)
 
 #define DEBUG_BREAK() DEBUG_PRINT(DEBUG_LEVEL_INFO, "================================================================================")

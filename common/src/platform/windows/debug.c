@@ -26,6 +26,7 @@ void debug_init(void)
 {
   static const char * plainLookup[] =
   {
+    ""    , // DEBUG_LEVEL_NONE
     "[I] ", // DEBUG_LEVEL_INFO
     "[W] ", // DEBUG_LEVEL_WARN
     "[E] ", // DEBUG_LEVEL_ERROR

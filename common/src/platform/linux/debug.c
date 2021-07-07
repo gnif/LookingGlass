@@ -34,6 +34,7 @@ void debug_init(void)
 {
   static const char * colorLookup[] =
   {
+    COLOR_RESET        , // DEBUG_LEVEL_NONE
     COLOR_RESET  "[I] ", // DEBUG_LEVEL_INFO
     COLOR_YELLOW "[W] ", // DEBUG_LEVEL_WARN
     COLOR_RED    "[E] ", // DEBUG_LEVEL_ERROR
@@ -43,6 +44,7 @@ void debug_init(void)
 
   static const char * plainLookup[] =
   {
+    ""    , // DEBUG_LEVEL_NONE
     "[I] ", // DEBUG_LEVEL_INFO
     "[W] ", // DEBUG_LEVEL_WARN
     "[E] ", // DEBUG_LEVEL_ERROR
@@ -50,5 +52,5 @@ void debug_init(void)
     "[!] "  // DEBUG_LEVEL_FATAL
   };
 
-  debug_lookup = (isatty(0) == 1) ? colorLookup : plainLookup;
+  debug_lookup = (isatty(STDERR_FILENO) == 1) ? colorLookup : plainLookup;
 }
