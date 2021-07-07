@@ -30,6 +30,20 @@
 #include <inttypes.h>
 #include "time.h"
 
+enum DebugLevel
+{
+  DEBUG_LEVEL_INFO,
+  DEBUG_LEVEL_WARN,
+  DEBUG_LEVEL_ERROR,
+  DEBUG_LEVEL_FIXME,
+  DEBUG_LEVEL_FATAL
+};
+
+extern const char ** debug_lookup;
+
+void debug_init(void);
+void debug_print(const enum DebugLevel level, const char * fmt, ...);
+
 #ifdef ENABLE_BACKTRACE
 void printBacktrace(void);
 #define DEBUG_PRINT_BACKTRACE() printBacktrace()
@@ -65,19 +79,20 @@ void printBacktrace(void);
   sizeof(s) > 20 && (s)[sizeof(s)-21] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 20 : \
   sizeof(s) > 21 && (s)[sizeof(s)-22] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 21 : (s))
 
-#define DEBUG_PRINT(type, fmt, ...) do { \
-  fprintf(stderr, "%12" PRId64 " " type " %20s:%-4u | %-30s | " fmt "\n", \
-      microtime(), STRIPPATH(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);\
+#define DEBUG_PRINT(level, fmt, ...) do { \
+  fprintf(stdout, "%s%12" PRId64 "%20s:%-4u | %-30s | " fmt "\n", \
+      debug_lookup[level], microtime(), STRIPPATH(__FILE__), \
+      __LINE__, __FUNCTION__, ##__VA_ARGS__); \
 } while (0)
 
-#define DEBUG_BREAK() DEBUG_PRINT("[ ]", "================================================================================")
-#define DEBUG_INFO(fmt, ...) DEBUG_PRINT("[I]", fmt, ##__VA_ARGS__)
-#define DEBUG_WARN(fmt, ...) DEBUG_PRINT("[W]", fmt, ##__VA_ARGS__)
-#define DEBUG_ERROR(fmt, ...) DEBUG_PRINT("[E]", fmt, ##__VA_ARGS__)
-#define DEBUG_FIXME(fmt, ...) DEBUG_PRINT("[F]", fmt, ##__VA_ARGS__)
+#define DEBUG_BREAK() DEBUG_PRINT(DEBUG_LEVEL_INFO, "================================================================================")
+#define DEBUG_INFO(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define DEBUG_WARN(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define DEBUG_ERROR(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define DEBUG_FIXME(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_FIXME, fmt, ##__VA_ARGS__)
 #define DEBUG_FATAL(fmt, ...) do { \
   DEBUG_BREAK(); \
-  DEBUG_PRINT("[!]", fmt, ##__VA_ARGS__); \
+  DEBUG_PRINT(DEBUG_LEVEL_FATAL, fmt, ##__VA_ARGS__); \
   DEBUG_PRINT_BACKTRACE(); \
   abort(); \
 } while(0)

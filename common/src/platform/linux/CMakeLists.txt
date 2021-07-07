@@ -7,6 +7,7 @@ include_directories(
 )
 
 add_library(lg_common_platform_code STATIC
+    debug.c
     crash.c
     sysinfo.c
     thread.c

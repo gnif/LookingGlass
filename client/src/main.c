@@ -1052,6 +1052,9 @@ static void lg_shutdown(void)
 
 int main(int argc, char * argv[])
 {
+  // initialize for DEBUG_* macros
+  debug_init();
+
   if (getuid() == 0)
   {
     DEBUG_ERROR("Do not run looking glass as root!");

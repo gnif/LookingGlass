@@ -314,6 +314,9 @@ fail:
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+  // initialize for DEBUG_* macros
+  debug_init();
+
   // convert the command line to the standard argc and argv
   LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &app.argc);
   app.argv = malloc(sizeof(char *) * app.argc);

@@ -41,6 +41,9 @@ struct app app = { 0 };
 
 int main(int argc, char * argv[])
 {
+  // initialize for DEBUG_* macros
+  debug_init();
+
   app.executable = argv[0];
 
   struct passwd * pw = getpwuid(getuid());
