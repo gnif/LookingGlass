@@ -4,3 +4,6 @@
 [submodule "repos/PureSpice"]
 	path = repos/PureSpice
 	url = https://github.com/gnif/PureSpice
+[submodule "repos/cimgui"]
+	path = repos/cimgui
+	url = https://github.com/cimgui/cimgui.git
