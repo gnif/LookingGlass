@@ -42,7 +42,6 @@ enum DebugLevel
 extern const char ** debug_lookup;
 
 void debug_init(void);
-void debug_print(const enum DebugLevel level, const char * fmt, ...);
 
 #ifdef ENABLE_BACKTRACE
 void printBacktrace(void);
