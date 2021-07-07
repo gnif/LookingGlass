@@ -198,7 +198,7 @@ static struct Option options[] =
     .name           = "minimizeOnFocusLoss",
     .description    = "Minimize window on focus loss",
     .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true,
+    .value.x_bool   = false,
   },
   {
     .module         = "win",
