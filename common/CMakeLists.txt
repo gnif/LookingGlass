@@ -29,6 +29,7 @@ set(COMMON_SOURCES
   src/KVMFR.c
   src/countedbuffer.c
   src/runningavg.c
+  src/ringbuffer.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})
