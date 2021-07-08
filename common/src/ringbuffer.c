@@ -69,6 +69,11 @@ void ringbuffer_reset(RingBuffer rb)
   rb->count = 0;
 }
 
+int ringbuffer_getLength(const RingBuffer rb)
+{
+  return rb->length;
+}
+
 int ringbuffer_getStart(const RingBuffer rb)
 {
   return rb->start;

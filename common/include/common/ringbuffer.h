@@ -27,6 +27,7 @@ void ringbuffer_free(RingBuffer * rb);
 void ringbuffer_push(RingBuffer rb, const void * value);
 void ringbuffer_reset(RingBuffer rb);
 
+int    ringbuffer_getLength(const RingBuffer rb);
 int    ringbuffer_getStart (const RingBuffer rb);
 int    ringbuffer_getCount (const RingBuffer rb);
 void * ringbuffer_getValues(const RingBuffer rb);
