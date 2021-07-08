@@ -623,7 +623,47 @@ void app_showFPS(bool showFPS)
 bool app_renderImGui(void)
 {
   igNewFrame();
-  igShowDemoWindow(NULL);
+
+  ImGuiStyle * style = igGetStyle();
+  style->WindowBorderSize = 0.0f;
+
+  const ImVec2 pos = {0.0f, 0.0f};
+  igSetNextWindowBgAlpha(0.4f);
+  igSetNextWindowPos(pos, 0, pos);
+
+  igBegin(
+    "Performance Metrics",
+    NULL,
+    ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
+    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+    ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
+  );
+
+  const ImVec2 size = {400.0f, 100.0f};
+  igPlotLinesFloatPtr(
+      "",
+      (float *)ringbuffer_getValues(g_state.renderTimings),
+      ringbuffer_getLength(g_state.renderTimings),
+      ringbuffer_getStart (g_state.renderTimings),
+      NULL,
+      0.0f,
+      50.0f,
+      size,
+      sizeof(float));
+
+  igPlotLinesFloatPtr(
+      "",
+      (float *)ringbuffer_getValues(g_state.frameTimings),
+      ringbuffer_getLength(g_state.frameTimings),
+      ringbuffer_getStart (g_state.frameTimings),
+      NULL,
+      0.0f,
+      50.0f,
+      size,
+      sizeof(float));
+
+  igEnd();
+
   igRender();
   return true;
 }
