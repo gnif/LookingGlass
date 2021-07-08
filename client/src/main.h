@@ -33,6 +33,8 @@
 #include "spice/spice.h"
 #include <lgmp/client.h>
 
+#include "cimgui.h"
+
 enum RunState
 {
   APP_STATE_RUNNING,
@@ -43,6 +45,8 @@ enum RunState
 struct AppState
 {
   enum RunState state;
+
+  ImGuiIO * io;
 
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;

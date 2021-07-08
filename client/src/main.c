@@ -56,8 +56,6 @@
 #include "ll.h"
 #include "egl_dynprocs.h"
 
-#include "cimgui.h"
-
 // forwards
 static int cursorThread(void * unused);
 static int renderThread(void * unused);
@@ -99,21 +97,12 @@ static void lgInit(void)
 
 static int renderThread(void * unused)
 {
-  /* setup imgui */
-  igCreateContext(NULL);
-  ImGuiIO * io = igGetIO();
-  unsigned char *text_pixels = NULL;
-  int text_w, text_h;
-  ImFontAtlas_GetTexDataAsRGBA32(io->Fonts, &text_pixels,
-      &text_w, &text_h, NULL);
-
   if (!g_state.lgr->render_startup(g_state.lgrData))
   {
     g_state.state = APP_STATE_SHUTDOWN;
 
     /* unblock threads waiting on the condition */
     lgSignalEvent(e_startup);
-    igDestroyContext(NULL);
     return 1;
   }
 
@@ -144,7 +133,7 @@ static int renderThread(void * unused)
         .x = g_state.windowW,
         .y = g_state.windowH
       };
-      io->DisplaySize = displaySize;
+      g_state.io->DisplaySize = displaySize;
 
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
@@ -211,7 +200,6 @@ static int renderThread(void * unused)
   g_state.lgr = NULL;
   LG_LOCK_FREE(g_state.lgrLock);
 
-  igDestroyContext(NULL);
   return 0;
 }
 
@@ -701,6 +689,14 @@ static int lg_run(void)
 
   g_state.showFPS = g_params.showFPS;
 
+  /* setup imgui */
+  igCreateContext(NULL);
+  g_state.io = igGetIO();
+  unsigned char *text_pixels = NULL;
+  int text_w, text_h;
+  ImFontAtlas_GetTexDataAsRGBA32(g_state.io->Fonts, &text_pixels,
+      &text_w, &text_h, NULL);
+
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
     if (LG_DisplayServers[i]->probe())
@@ -1067,6 +1063,8 @@ static void lg_shutdown(void)
     g_state.ds->free();
 
   ivshmemClose(&g_state.shm);
+
+  igDestroyContext(NULL);
 }
 
 int main(int argc, char * argv[])
