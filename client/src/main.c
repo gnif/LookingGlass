@@ -149,11 +149,15 @@ static int renderThread(void * unused)
     }
     LG_UNLOCK(g_state.lgrLock);
 
+    const uint64_t t      = nanotime();
+    const uint64_t delta  = t - g_state.lastRenderTime;
+    g_state.lastRenderTime = t;
+    const float fdelta = (float)delta / 1000000.0f;
+    ringbuffer_push(g_state.renderTimings, &fdelta);
+
     if (g_state.showFPS)
     {
-      const uint64_t t    = nanotime();
-      g_state.renderTime   += t - g_state.lastFrameTime;
-      g_state.lastFrameTime = t;
+      g_state.renderTime   += delta;
       ++g_state.renderCount;
 
       if (g_state.renderTime > 1e9)
@@ -594,6 +598,12 @@ int main_frameThread(void * unused)
       g_state.autoIdleInhibitState = frame->blockScreensaver;
     }
 
+    const uint64_t t      = nanotime();
+    const uint64_t delta  = t - g_state.lastFrameTime;
+    g_state.lastFrameTime = t;
+    const float fdelta = (float)delta / 1000000.0f;
+    ringbuffer_push(g_state.frameTimings, &fdelta);
+
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
     lgSignalEvent(e_frame);
     lgmpClientMessageDone(queue);
@@ -696,6 +706,10 @@ static int lg_run(void)
   int text_w, text_h;
   ImFontAtlas_GetTexDataAsRGBA32(g_state.io->Fonts, &text_pixels,
       &text_w, &text_h, NULL);
+
+  // initialize metrics ringbuffers
+  g_state.renderTimings = ringbuffer_new(256, sizeof(float));
+  g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
 
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
@@ -1063,6 +1077,10 @@ static void lg_shutdown(void)
     g_state.ds->free();
 
   ivshmemClose(&g_state.shm);
+
+  // free metrics ringbuffers
+  ringbuffer_free(&g_state.renderTimings);
+  ringbuffer_free(&g_state.frameTimings );
 
   igDestroyContext(NULL);
 }

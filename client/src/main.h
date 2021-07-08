@@ -29,6 +29,7 @@
 #include "common/types.h"
 #include "common/ivshmem.h"
 #include "common/locking.h"
+#include "common/ringbuffer.h"
 
 #include "spice/spice.h"
 #include <lgmp/client.h>
@@ -96,9 +97,11 @@ struct AppState
   atomic_uint_least64_t frameTime;
   uint64_t              lastFrameTime;
   uint64_t              renderTime;
+  uint64_t              lastRenderTime;
   atomic_uint_least64_t frameCount;
   uint64_t              renderCount;
-
+  RingBuffer            renderTimings;
+  RingBuffer            frameTimings;
 
   uint64_t resizeTimeout;
   bool     resizeDone;
