@@ -23,6 +23,7 @@
 #include "common/time.h"
 
 #include <windows.h>
+#include <stdatomic.h>
 
 struct LGEvent
 {
@@ -31,7 +32,7 @@ struct LGEvent
   HANDLE        handle;
   bool          wrapped;
   unsigned int  msSpinTime;
-  volatile bool signaled;
+  _Atomic(bool) signaled;
 };
 
 LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
@@ -48,7 +49,7 @@ LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
   event->handle     = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
   event->wrapped    = false;
   event->msSpinTime = msSpinTime;
-  event->signaled   = false;
+  atomic_store(&event->signaled, false);
 
   if (!event->handle)
   {
@@ -74,7 +75,7 @@ LGEvent * lgWrapEvent(void * handle)
   event->handle     = (HANDLE)handle;
   event->wrapped    = true;
   event->msSpinTime = 0;
-  event->signaled   = false;
+  atomic_store(&event->signaled, false);
   return event;
 }
 
@@ -88,20 +89,19 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
   // wrapped events can't be enahnced
   if (!event->wrapped)
   {
-    if (event->signaled)
+    if (event->reset)
     {
-      if (event->reset)
-        event->signaled = false;
-      return true;
+      if (atomic_exchange(&event->signaled, false))
+        return true;
+    }
+    else
+    {
+      if (atomic_load(&event->signaled))
+        return true;
     }
 
     if (timeout == 0)
-    {
-      bool ret = event->signaled;
-      if (event->reset)
-        event->signaled = false;
-      return ret;
-    }
+      return false;
 
     if (event->msSpinTime)
     {
@@ -119,17 +119,25 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
 
       uint64_t now = microtime();
       uint64_t end = now + spinTime * 1000;
-      while(!event->signaled)
-      {
-        now = microtime();
-        if (now >= end)
-          break;
-      }
 
-      if (event->signaled)
+      if (event->reset)
       {
-        if (event->reset)
-          event->signaled = false;
+        while(!atomic_exchange(&event->signaled, false))
+        {
+          now = microtime();
+          if (now >= end)
+            return false;
+        }
+        return true;
+      }
+      else
+      {
+        while(!atomic_load(&event->signaled))
+        {
+          now = microtime();
+          if (now >= end)
+            return false;
+        }
         return true;
       }
     }
@@ -142,7 +150,7 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
     {
       case WAIT_OBJECT_0:
         if (!event->reset)
-          event->signaled = true;
+          atomic_store(&event->signaled, true);
         return true;
 
       case WAIT_ABANDONED:
@@ -211,12 +219,12 @@ bool lgWaitEvents(LGEvent * events[], int count, bool waitAll, unsigned int time
 
 bool lgSignalEvent(LGEvent * event)
 {
-  event->signaled = true;
+  atomic_store(&event->signaled, true);
   return SetEvent(event->handle);
 }
 
 bool lgResetEvent(LGEvent * event)
 {
-  event->signaled = false;
+  atomic_store(&event->signaled, false);
   return ResetEvent(event->handle);
 }
