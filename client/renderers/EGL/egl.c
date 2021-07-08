@@ -25,10 +25,15 @@
 #include "common/sysinfo.h"
 #include "common/time.h"
 #include "common/locking.h"
+#include "app.h"
 #include "util.h"
 #include "dynamic/fonts.h"
 
+#include <GL/glew.h>
 #include <EGL/egl.h>
+
+#include "cimgui.h"
+#include "generator/output/cimgui_impl.h"
 
 #include <assert.h>
 #include <math.h>
@@ -72,6 +77,7 @@ struct Inst
   EGL_Splash      * splash;  // the splash screen
   EGL_Alert       * alert;   // the alert display
   EGL_Help        * help;    // the help display
+  bool              imgui;   // if imgui was initialized
 
   LG_RendererFormat    format;
   bool                 formatValid;
@@ -279,6 +285,9 @@ void egl_deinitialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
+  if (this->imgui)
+    ImGui_ImplOpenGL3_Shutdown();
+
   if (this->font)
   {
     if (this->fontObj)
@@ -287,7 +296,6 @@ void egl_deinitialize(void * opaque)
     if (this->helpFontObj)
       this->font->destroy(this->helpFontObj);
   }
-
 
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
@@ -766,6 +774,20 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
+  // glew is needed for imgui
+  if (!glewInit())
+  {
+    DEBUG_ERROR("GLEW failed to initialize");
+    return false;
+  }
+
+  if (!ImGui_ImplOpenGL3_Init("#version 100"))
+  {
+    DEBUG_ERROR("Failed to initialize ImGui");
+    return false;
+  }
+
+  this->imgui = true;
   return true;
 }
 
@@ -866,6 +888,13 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
 
   egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
+
+  if (app_renderImGui())
+  {
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
+  }
+
   app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
   return true;
 }

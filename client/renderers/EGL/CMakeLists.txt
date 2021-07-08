@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(renderer_EGL LANGUAGES C)
+project(renderer_EGL LANGUAGES C CXX)
 
 find_package(PkgConfig)
 pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
@@ -54,13 +54,19 @@ add_library(renderer_EGL STATIC
 	alert.c
 	${EGL_SHADER_OBJS}
 	"${EGL_SHADER_INCS}/desktop_rgb.def.h"
+	${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp
 )
+
+target_compile_definitions(renderer_EGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
 
 target_link_libraries(renderer_EGL
 	${RENDERER_EGL_PKGCONFIG_LIBRARIES}
 	${RENDERER_EGL_OPT_PKGCONFIG_LIBRARIES}
 	lg_common
 	fonts
+
+	cimgui
+	GLEW
 )
 
 target_include_directories(renderer_EGL

@@ -56,6 +56,8 @@
 #include "ll.h"
 #include "egl_dynprocs.h"
 
+#include "cimgui.h"
+
 // forwards
 static int cursorThread(void * unused);
 static int renderThread(void * unused);
@@ -97,12 +99,21 @@ static void lgInit(void)
 
 static int renderThread(void * unused)
 {
+  /* setup imgui */
+  igCreateContext(NULL);
+  ImGuiIO * io = igGetIO();
+  unsigned char *text_pixels = NULL;
+  int text_w, text_h;
+  ImFontAtlas_GetTexDataAsRGBA32(io->Fonts, &text_pixels,
+      &text_w, &text_h, NULL);
+
   if (!g_state.lgr->render_startup(g_state.lgrData))
   {
     g_state.state = APP_STATE_SHUTDOWN;
 
     /* unblock threads waiting on the condition */
     lgSignalEvent(e_startup);
+    igDestroyContext(NULL);
     return 1;
   }
 
@@ -128,6 +139,13 @@ static int renderThread(void * unused)
     int resize = atomic_load(&g_state.lgrResize);
     if (resize)
     {
+      const ImVec2 displaySize =
+      {
+        .x = g_state.windowW,
+        .y = g_state.windowH
+      };
+      io->DisplaySize = displaySize;
+
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
             g_state.windowScale, g_state.dstRect, g_params.winRotate);
@@ -193,6 +211,7 @@ static int renderThread(void * unused)
   g_state.lgr = NULL;
   LG_LOCK_FREE(g_state.lgrLock);
 
+  igDestroyContext(NULL);
   return 0;
 }
 

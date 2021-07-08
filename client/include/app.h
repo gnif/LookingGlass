@@ -78,6 +78,8 @@ void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
 #endif
 
+bool app_renderImGui(void);
+
 void app_clipboardRelease(void);
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count);
 void app_clipboardNotifySize(const LG_ClipboardData type, size_t size);

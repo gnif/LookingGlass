@@ -31,6 +31,8 @@
 #include "common/debug.h"
 #include "common/stringutils.h"
 
+#include "cimgui.h"
+
 #include <stdarg.h>
 #include <math.h>
 #include <string.h>
@@ -616,4 +618,12 @@ void app_showFPS(bool showFPS)
     return;
 
   g_state.lgr->on_show_fps(g_state.lgrData, showFPS);
+}
+
+bool app_renderImGui(void)
+{
+  igNewFrame();
+  igShowDemoWindow(NULL);
+  igRender();
+  return true;
 }

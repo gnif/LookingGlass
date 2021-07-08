@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(looking-glass-client C)
+project(looking-glass-client C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
@@ -127,12 +127,16 @@ set(SOURCES
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
 add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
+add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui"   )
 
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
 add_subdirectory(fonts)
 
 add_executable(looking-glass-client ${SOURCES})
+
+target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
+
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	lg_common
@@ -141,6 +145,7 @@ target_link_libraries(looking-glass-client
 	purespice
 	renderers
 	fonts
+	cimgui
 )
 
 install(TARGETS looking-glass-client

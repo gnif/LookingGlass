@@ -29,6 +29,9 @@
 #include <GL/gl.h>
 #include <GL/glx.h>
 
+#include "cimgui.h"
+#include "generator/output/cimgui_impl.h"
+
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
@@ -272,6 +275,8 @@ void opengl_deinitialize(void * opaque)
 
   if (this->renderStarted)
   {
+    ImGui_ImplOpenGL2_Shutdown();
+
     glDeleteLists(this->texList  , BUFFER_COUNT);
     glDeleteLists(this->mouseList, 1);
     glDeleteLists(this->fpsList  , 1);
@@ -581,6 +586,13 @@ bool opengl_render_startup(void * opaque)
   this->hasTextures = true;
 
   app_glSetSwapInterval(this->opt.vsync ? 1 : 0);
+
+  if (!ImGui_ImplOpenGL2_Init())
+  {
+    DEBUG_ERROR("Failed to initialize ImGui");
+    return false;
+  }
+
   this->renderStarted = true;
   return true;
 }
@@ -688,6 +700,12 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
       glCallList(this->alertList);
     glPopMatrix();
     break;
+  }
+
+  if (app_renderImGui())
+  {
+    ImGui_ImplOpenGL2_NewFrame();
+    ImGui_ImplOpenGL2_RenderDrawData(igGetDrawData());
   }
 
   if (this->opt.preventBuffer)
