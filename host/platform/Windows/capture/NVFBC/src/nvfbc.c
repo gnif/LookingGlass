@@ -58,7 +58,7 @@ struct iface
   NvFBCFrameGrabInfo grabInfo;
 
   LGEvent * frameEvent;
-  LGEvent * cursorEvents[2];
+  LGEvent * cursorEvent;
 
   int mouseX, mouseY, mouseHotX, mouseHotY;
   bool mouseVisible, hasMousePosition;
@@ -92,8 +92,16 @@ static void on_mouseMove(int x, int y)
   this->hasMousePosition = true;
   this->mouseX           = x;
   this->mouseY           = y;
-  if (this->cursorEvents[0])
-    lgSignalEvent(this->cursorEvents[0]);
+
+  const CapturePointer pointer =
+  {
+    .positionUpdate = true,
+    .visible        = this->mouseVisible,
+    .x              = x - this->mouseHotX,
+    .y              = y - this->mouseHotY
+  };
+
+  this->postPointerBufferFn(pointer);
 }
 
 static const char * nvfbc_getName(void)
@@ -196,10 +204,8 @@ static bool nvfbc_init(void)
     return false;
   }
 
-  this->cursorEvents[0] = lgCreateEvent(true, 10);
-
   if (this->seperateCursor)
-    this->cursorEvents[1] = lgWrapEvent(event);
+    this->cursorEvent = lgWrapEvent(event);
 
   if (!this->mouseHookCreated)
   {
@@ -232,7 +238,7 @@ static void nvfbc_stop(void)
 {
   this->stop = true;
 
-  lgSignalEvent(this->cursorEvents[0]);
+  lgSignalEvent(this->cursorEvent);
   lgSignalEvent(this->frameEvent);
 
   if (this->pointerThread)
@@ -244,12 +250,7 @@ static void nvfbc_stop(void)
 
 static bool nvfbc_deinit(void)
 {
-  if (this->cursorEvents[0])
-  {
-    lgFreeEvent(this->cursorEvents[0]);
-    this->cursorEvents[0] = NULL;
-  }
-
+  this->cursorEvent = NULL;
   if (this->nvfbc)
   {
     NvFBCToSysRelease(&this->nvfbc);
@@ -378,13 +379,9 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
 
 static int pointerThread(void * unused)
 {
-  lgSignalEvent(this->cursorEvents[1]);
-
   while(!this->stop)
   {
-    LGEvent * events[2];
-    memcpy(&events, &this->cursorEvents, sizeof(LGEvent *) * 2);
-    if (!lgWaitEvents(events, this->seperateCursor ? 2 : 1, false, 1000))
+    if (!lgWaitEvent(this->cursorEvent, 1000))
       continue;
 
     if (this->stop)
@@ -392,38 +389,30 @@ static int pointerThread(void * unused)
 
     CaptureResult  result;
     CapturePointer pointer = { 0 };
-    bool           hotspotUpdated = false;
 
-    if (this->seperateCursor && events[1])
+    void * data;
+    uint32_t size;
+    if (!this->getPointerBufferFn(&data, &size))
     {
-      void * data;
-      uint32_t size;
-      if (!this->getPointerBufferFn(&data, &size))
-      {
-        DEBUG_WARN("failed to get a pointer buffer");
-        continue;
-      }
-
-      result = NvFBCToSysGetCursor(this->nvfbc, &pointer, data, size);
-      if (result != CAPTURE_RESULT_OK)
-      {
-        DEBUG_WARN("NvFBCToSysGetCursor failed");
-        continue;
-      }
-
-      this->mouseVisible = pointer.visible;
-      this->mouseHotX    = pointer.hx;
-      this->mouseHotY    = pointer.hy;
-      hotspotUpdated     = true;
+      DEBUG_WARN("failed to get a pointer buffer");
+      continue;
     }
 
-    if (events[0] || (hotspotUpdated && this->hasMousePosition))
+    result = NvFBCToSysGetCursor(this->nvfbc, &pointer, data, size);
+    if (result != CAPTURE_RESULT_OK)
     {
-      pointer.positionUpdate = true;
-      pointer.visible        = this->mouseVisible;
-      pointer.x              = this->mouseX - this->mouseHotX;
-      pointer.y              = this->mouseY - this->mouseHotY;
+      DEBUG_WARN("NvFBCToSysGetCursor failed");
+      continue;
     }
+
+    this->mouseVisible = pointer.visible;
+    this->mouseHotX    = pointer.hx;
+    this->mouseHotY    = pointer.hy;
+
+    pointer.positionUpdate = true;
+    pointer.visible        = this->mouseVisible;
+    pointer.x              = this->mouseX - pointer.hx;
+    pointer.y              = this->mouseY - pointer.hy;
 
     this->postPointerBufferFn(pointer);
   }

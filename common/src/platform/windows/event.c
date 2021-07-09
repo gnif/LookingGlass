@@ -25,132 +25,36 @@
 #include <windows.h>
 #include <stdatomic.h>
 
-struct LGEvent
-{
-  volatile int  lock;
-  bool          reset;
-  HANDLE        handle;
-  bool          wrapped;
-  unsigned int  msSpinTime;
-  _Atomic(bool) signaled;
-};
-
 LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
 {
-  LGEvent * event = (LGEvent *)malloc(sizeof(LGEvent));
-  if (!event)
-  {
-    DEBUG_ERROR("out of ram");
-    return NULL;
-  }
-
-  event->lock       = 0;
-  event->reset      = autoReset;
-  event->handle     = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
-  event->wrapped    = false;
-  event->msSpinTime = msSpinTime;
-  atomic_store(&event->signaled, false);
-
-  if (!event->handle)
+  HANDLE handle = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
+  if (!handle)
   {
     DEBUG_WINERROR("Failed to create the event", GetLastError());
-    free(event);
     return NULL;
   }
 
-  return event;
+  return (LGEvent *)handle;
 }
 
 LGEvent * lgWrapEvent(void * handle)
 {
-  LGEvent * event = (LGEvent *)malloc(sizeof(LGEvent));
-  if (!event)
-  {
-    DEBUG_ERROR("out of ram");
-    return NULL;
-  }
-
-  event->lock       = 0;
-  event->reset      = false;
-  event->handle     = (HANDLE)handle;
-  event->wrapped    = true;
-  event->msSpinTime = 0;
-  atomic_store(&event->signaled, false);
-  return event;
+  return (LGEvent *)handle;
 }
 
 void lgFreeEvent(LGEvent * event)
 {
-  CloseHandle(event->handle);
+  CloseHandle((HANDLE)event);
 }
 
 bool lgWaitEvent(LGEvent * event, unsigned int timeout)
 {
-  // wrapped events can't be enahnced
-  if (!event->wrapped)
-  {
-    if (event->reset)
-    {
-      if (atomic_exchange(&event->signaled, false))
-        return true;
-    }
-    else
-    {
-      if (atomic_load(&event->signaled))
-        return true;
-    }
-
-    if (timeout == 0)
-      return false;
-
-    if (event->msSpinTime)
-    {
-      unsigned int spinTime = event->msSpinTime;
-      if (timeout != TIMEOUT_INFINITE)
-      {
-        if (timeout > event->msSpinTime)
-          timeout -= event->msSpinTime;
-        else
-        {
-          spinTime -= timeout;
-          timeout   = 0;
-        }
-      }
-
-      uint64_t now = microtime();
-      uint64_t end = now + spinTime * 1000;
-
-      if (event->reset)
-      {
-        while(!atomic_exchange(&event->signaled, false))
-        {
-          now = microtime();
-          if (now >= end)
-            return false;
-        }
-        return true;
-      }
-      else
-      {
-        while(!atomic_load(&event->signaled))
-        {
-          now = microtime();
-          if (now >= end)
-            return false;
-        }
-        return true;
-      }
-    }
-  }
-
   const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
-  while(true)
+  do
   {
-    switch(WaitForSingleObject(event->handle, to))
+    switch(WaitForSingleObject((HANDLE)event, to))
     {
       case WAIT_OBJECT_0:
-        if (!event->reset)
-          atomic_store(&event->signaled, true);
         return true;
 
       case WAIT_ABANDONED:
@@ -159,7 +63,6 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
       case WAIT_TIMEOUT:
         if (timeout == TIMEOUT_INFINITE)
           continue;
-
         return false;
 
       case WAIT_FAILED:
@@ -168,63 +71,18 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
     }
 
     DEBUG_ERROR("Unknown wait event return code");
-    return false;
   }
-}
+  while(0);
 
-bool lgWaitEvents(LGEvent * events[], int count, bool waitAll, unsigned int timeout)
-{
-  const DWORD to = (timeout == TIMEOUT_INFINITE) ? INFINITE : (DWORD)timeout;
-
-  HANDLE * handles = (HANDLE *)malloc(sizeof(HANDLE) * count);
-  for(int i = 0; i < count; ++i)
-    handles[i] = events[i]->handle;
-
-  while(true)
-  {
-    DWORD result = WaitForMultipleObjects(count, handles, waitAll, to);
-    if (result >= WAIT_OBJECT_0 && result < count)
-    {
-      // null non signaled events from the handle list
-      for(int i = 0; i < count; ++i)
-        if (i != result && !lgWaitEvent(events[i], 0))
-          events[i] = NULL;
-      free(handles);
-      return true;
-    }
-
-    if (result >= WAIT_ABANDONED_0 && result - WAIT_ABANDONED_0 < count)
-      continue;
-
-    switch(result)
-    {
-      case WAIT_TIMEOUT:
-        if (timeout == TIMEOUT_INFINITE)
-          continue;
-
-        free(handles);
-        return false;
-
-      case WAIT_FAILED:
-        DEBUG_WINERROR("Wait for event failed", GetLastError());
-        free(handles);
-        return false;
-    }
-
-    DEBUG_ERROR("Unknown wait event return code");
-    free(handles);
-    return false;
-  }
+  return false;
 }
 
 bool lgSignalEvent(LGEvent * event)
 {
-  atomic_store(&event->signaled, true);
-  return SetEvent(event->handle);
+  return SetEvent((HANDLE)event);
 }
 
 bool lgResetEvent(LGEvent * event)
 {
-  atomic_store(&event->signaled, false);
-  return ResetEvent(event->handle);
+  return ResetEvent((HANDLE)event);
 }

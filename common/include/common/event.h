@@ -31,7 +31,6 @@ typedef struct LGEvent LGEvent;
 LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime);
 void      lgFreeEvent  (LGEvent * handle);
 bool      lgWaitEvent  (LGEvent * handle, unsigned int timeout);
-bool      lgWaitEvents (LGEvent * handles[], int count, bool waitAll, unsigned int timeout);
 bool      lgSignalEvent(LGEvent * handle);
 bool      lgResetEvent (LGEvent * handle);
 
