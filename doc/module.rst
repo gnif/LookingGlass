@@ -76,7 +76,7 @@ To install the module into DKMS, run
 
 .. code:: bash
 
-   dkms install .
+   dkms install "."
 
 .. _module_dkms_loading:
 
