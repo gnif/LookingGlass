@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "common/framebuffer.h"
+#include "common/KVMFR.h"
 
 typedef enum CaptureResult
 {
@@ -69,6 +70,8 @@ typedef struct CaptureFrame
   unsigned int    stride;
   CaptureFormat   format;
   CaptureRotation rotation;
+  uint32_t        damageRectsCount;
+  FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
 }
 CaptureFrame;
 
