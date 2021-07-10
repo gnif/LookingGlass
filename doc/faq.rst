@@ -31,13 +31,6 @@ There are several reasons why this can happen, the most common are your
 capture resolution, or refresh rate. The windows capture methods currently
 struggle to capture high resolutions under certain circumstances.
 
-Another cause can be how the game or application you are running is
-configured. Because of the way windows integrate with the WDM (Windows
-Desktop Manager), running applications in "Full Screen" mode may—in some
-cases—cause a large performance penalty. Try switching to windowed
-full-screen mode, the difference in performance can be like night and
-day.
-
 Some titles do some strange things at early initialization that cause
 capture performance issues. One such title is the Unigine Valley
 benchmark where the capture rate is limited to 1/2 the actual rate. For
@@ -137,6 +130,16 @@ NvFBC (NVIDIA Capture API) doesn't work
 NvFBC is only supported on professional-grade GPUs, and will not function on
 consumer-grade cards like those from the GeForce series.
 
+If you have a supported card, you can enable NVFBC by adding the following
+to the host ini file, found at
+``%ProgramFiles%\Looking Glass (host)\looking-glass-host.ini``
+(create one if it doesn't exist):
+
+.. code:: INI
+
+   [app]
+   capture=nvfbc
+
 .. _the_screen_stops_updating_when_left_idle_for_a_time:
 
 The screen stops updating when left idle for a time
@@ -205,8 +208,9 @@ This is intentional for several reasons.
    position as NVIDIA decided to not provide this as part of the cursor
    updates.
 2. NvFBC requires administrator level access to enable the interface in
-   the first place. (WIP)
-3. DXGI performance can be improved if we have this. (WIP)
+   the first place.
+3. General capture performance is boosted by taking advantage of high priority
+   scheduling with SYSTEM level privileges.
 
 NvFBC (NVIDIA Frame Buffer Capture)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -216,8 +220,6 @@ Why can't I compile NvFBC support into the host?
 
 You must download and install the NVidia Capture SDK. Please note that
 by doing so you will be agreeing to NVIDIA's SDK License agreement.
-
-*-Geoff*
 
 .. _a_note_about_ivshmem_and_scream_audio:
 
@@ -236,9 +238,10 @@ a highly optimized memory copy anyway so there is no need to make another one.
 
 If you insist on using IVSHMEM for Scream—despite its inferiority to the
 default network implementation—the Windows Host Application can be told
-what device to use. Create a ``looking-glass-host.ini`` file in the same
-directory as the looking-glass-host.exe file. In it, you can use the
-``os:shmDevice`` option like so:
+what device to use. Edit the file
+``%ProgramFiles%\Looking Glass (host)\looking-glass-host.ini``,
+(create one if it doesn't exist)
+then, you can add the ``os:shmDevice`` option like so:
 
 .. code:: INI
 
