@@ -21,6 +21,8 @@
 #ifndef _LG_TYPES_H_
 #define _LG_TYPES_H_
 
+#include <stdint.h>
+
 struct Point
 {
   int x, y;
@@ -60,6 +62,15 @@ typedef enum FrameRotation
   FRAME_ROT_270
 }
 FrameRotation;
+
+typedef struct FrameDamageRect
+{
+  uint32_t x;
+  uint32_t y;
+  uint32_t width;
+  uint32_t height;
+}
+FrameDamageRect;
 
 extern const char * FrameTypeStr[FRAME_TYPE_MAX];
 
