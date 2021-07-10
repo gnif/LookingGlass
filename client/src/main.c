@@ -152,8 +152,13 @@ static int renderThread(void * unused)
     const uint64_t t      = nanotime();
     const uint64_t delta  = t - g_state.lastRenderTime;
     g_state.lastRenderTime = t;
-    const float fdelta = (float)delta / 1000000.0f;
-    ringbuffer_push(g_state.renderTimings, &fdelta);
+
+    if (g_state.lastRenderTimeValid)
+    {
+      const float fdelta = (float)delta / 1000000.0f;
+      ringbuffer_push(g_state.renderTimings, &fdelta);
+    }
+    g_state.lastRenderTimeValid = true;
 
     if (g_state.showFPS)
     {
@@ -601,8 +606,13 @@ int main_frameThread(void * unused)
     const uint64_t t      = nanotime();
     const uint64_t delta  = t - g_state.lastFrameTime;
     g_state.lastFrameTime = t;
-    const float fdelta = (float)delta / 1000000.0f;
-    ringbuffer_push(g_state.frameTimings, &fdelta);
+
+    if (g_state.lastFrameTimeValid)
+    {
+      const float fdelta = (float)delta / 1000000.0f;
+      ringbuffer_push(g_state.frameTimings, &fdelta);
+    }
+    g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
     lgSignalEvent(e_frame);
