@@ -142,7 +142,7 @@ static void dxgi_initOptions(void)
     {
       .module         = "dxgi",
       .name           = "useAcquireLock",
-      .description    = "Enable locking around `AcquireFrame` (EXPERIMENTAL, leave enabled if you're not sure!)",
+      .description    = "Enable locking around `AcquireNextFrame` (EXPERIMENTAL, leave enabled if you're not sure!)",
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = true
     },
@@ -230,7 +230,7 @@ static bool dxgi_init(void)
   const char * optAdapter = option_get_string("dxgi", "adapter");
   const char * optOutput  = option_get_string("dxgi", "output" );
 
-  for(int i = 0; IDXGIFactory1_EnumAdapters1(this->factory, i, &this->adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+  for (int i = 0; IDXGIFactory1_EnumAdapters1(this->factory, i, &this->adapter) != DXGI_ERROR_NOT_FOUND; ++i)
   {
     if (optAdapter)
     {
@@ -259,7 +259,7 @@ static bool dxgi_init(void)
       DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
     }
 
-    for(int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
+    for (int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
     {
       IDXGIOutput_GetDesc(this->output, &outputDesc);
       if (optOutput)
@@ -542,7 +542,7 @@ static bool dxgi_init(void)
   texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   texDesc.MiscFlags          = 0;
 
-  for(int i = 0; i < this->maxTextures; ++i)
+  for (int i = 0; i < this->maxTextures; ++i)
   {
     status = ID3D11Device_CreateTexture2D(this->device, &texDesc, NULL, &this->texture[i].tex);
     if (FAILED(status))
@@ -583,7 +583,7 @@ static bool dxgi_deinit(void)
 {
   assert(this);
 
-  for(int i = 0; i < this->maxTextures; ++i)
+  for (int i = 0; i < this->maxTextures; ++i)
   {
     this->texture[i].state = TEXTURE_STATE_UNUSED;
 
@@ -764,7 +764,7 @@ static CaptureResult dxgi_capture(void)
   uint32_t bufferSize;
   if (frameInfo.PointerShapeBufferSize > 0)
   {
-    if(!this->getPointerBufferFn(&pointerShape, &bufferSize))
+    if (!this->getPointerBufferFn(&pointerShape, &bufferSize))
       DEBUG_WARN("Failed to obtain a buffer for the pointer shape");
     else
       copyPointer = true;
@@ -881,13 +881,13 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   assert(this->initialized);
 
   // NOTE: the event may be signaled when there are no frames available
-  if(atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
+  if (atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
   {
     if (!lgWaitEvent(this->frameEvent, 1000))
       return CAPTURE_RESULT_TIMEOUT;
 
     // the count will still be zero if we are stopping
-    if(atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
+    if (atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
       return CAPTURE_RESULT_TIMEOUT;
   }
 
