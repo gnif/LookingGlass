@@ -165,7 +165,7 @@ static bool nvfbc_init(void)
     privDataLen = (bufferLen - 1) / 2;
     privData    = (uint8_t *)malloc(privDataLen);
     char hex[3] = {0};
-    for(int i = 0; i < privDataLen; ++i)
+    for (int i = 0; i < privDataLen; ++i)
     {
       memcpy(hex, &buffer[i*2], 2);
       privData[i] = (uint8_t)strtoul(hex, NULL, 16);
@@ -300,14 +300,15 @@ static CaptureResult nvfbc_capture(void)
   bool changed = false;
   const unsigned int h = (this->height + 127) / 128;
   const unsigned int w = (this->width  + 127) / 128;
-  for(unsigned int y = 0; y < h; ++y)
-    for(unsigned int x = 0; x < w; ++x)
+  for (unsigned int y = 0; y < h; ++y)
+    for (unsigned int x = 0; x < w; ++x)
       if (this->diffMap[(y*w)+x])
       {
         changed = true;
-        break;
+        goto done;
       }
 
+done:
   if (!changed)
     return CAPTURE_RESULT_TIMEOUT;
 
