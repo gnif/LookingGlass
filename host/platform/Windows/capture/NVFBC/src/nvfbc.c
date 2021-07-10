@@ -28,6 +28,7 @@
 #include "common/event.h"
 #include "common/thread.h"
 #include "common/dpi.h"
+#include "common/KVMFR.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -329,6 +330,32 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   frame->pitch      = this->grabStride * 4;
   frame->stride     = this->grabStride;
   frame->rotation   = CAPTURE_ROT_0;
+
+  const unsigned int h = (this->height + 127) / 128;
+  const unsigned int w = (this->width  + 127) / 128;
+
+  // TODO: use some algorithm to merge large regions
+  int rectId = 0;
+  for (unsigned int y = 0; y < h; ++y)
+    for (unsigned int x = 0; x < w; ++x)
+      if (this->diffMap[(y*w)+x])
+      {
+        if (rectId >= KVMFR_MAX_DAMAGE_RECTS)
+        {
+          rectId = 0;
+          goto done;
+        }
+
+        frame->damageRects[rectId++] = (FrameDamageRect) {
+          .x = x * 128,
+          .y = y * 128,
+          .width = 128,
+          .height = 128,
+        };
+      }
+
+done:
+  frame->damageRectsCount = rectId;
 
 #if 0
   //NvFBC never sets bIsHDR so instead we check for any data in the alpha channel
