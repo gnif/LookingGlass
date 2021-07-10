@@ -620,6 +620,26 @@ void app_showFPS(bool showFPS)
   g_state.lgr->on_show_fps(g_state.lgrData, showFPS);
 }
 
+bool rbCalcMetrics(int index, float * value, float * udata)
+{
+  if (index == 0)
+  {
+    udata[0] = *value;
+    udata[1] = *value;
+    udata[2] = *value;
+    return true;
+  }
+
+  if (udata[0] > *value)
+    udata[0] = *value;
+
+  if (udata[1] < *value)
+    udata[1] = *value;
+
+  udata[2] += *value;
+  return true;
+}
+
 bool app_renderImGui(void)
 {
   igNewFrame();
@@ -639,24 +659,56 @@ bool app_renderImGui(void)
     ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
   );
 
+
+  float renderMetrics[4] = {};
+  float frameMetrics [4] = {};
+  ringbuffer_forEach(g_state.renderTimings, (RingBufferIterator)rbCalcMetrics,
+      renderMetrics);
+  ringbuffer_forEach(g_state.frameTimings , (RingBufferIterator)rbCalcMetrics,
+      frameMetrics);
+
+  if (renderMetrics[2] > 0.0f)
+  {
+    renderMetrics[2] /= ringbuffer_getCount(g_state.renderTimings);
+    renderMetrics[3]  = 1000.0f / renderMetrics[2];
+  }
+
+  if (frameMetrics[2] > 0.0f)
+  {
+    frameMetrics[2] /= ringbuffer_getCount(g_state.frameTimings );
+    frameMetrics[3]  = 1000.0f / frameMetrics[2];
+  }
+
+  char  buffer[64];
   const ImVec2 size = {400.0f, 100.0f};
+
+  snprintf(buffer, sizeof(buffer),
+      "RENDER: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
+      renderMetrics[0], renderMetrics[1], renderMetrics[2],
+      renderMetrics[3]);
+
   igPlotLinesFloatPtr(
       "",
       (float *)ringbuffer_getValues(g_state.renderTimings),
       ringbuffer_getLength(g_state.renderTimings),
       ringbuffer_getStart (g_state.renderTimings),
-      NULL,
+      buffer,
       0.0f,
       50.0f,
       size,
       sizeof(float));
+
+  snprintf(buffer, sizeof(buffer),
+      "UPLOAD: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
+      frameMetrics[0], frameMetrics[1], frameMetrics[2],
+      frameMetrics[3]);
 
   igPlotLinesFloatPtr(
       "",
       (float *)ringbuffer_getValues(g_state.frameTimings),
       ringbuffer_getLength(g_state.frameTimings),
       ringbuffer_getStart (g_state.frameTimings),
-      NULL,
+      buffer,
       0.0f,
       50.0f,
       size,
