@@ -467,6 +467,41 @@ finish:
   return result;
 }
 
+void boostPriority(void)
+{
+  typedef enum _D3DKMT_SCHEDULINGPRIORITYCLASS
+  {
+    D3DKMT_SCHEDULINGPRIORITYCLASS_IDLE,
+    D3DKMT_SCHEDULINGPRIORITYCLASS_BELOW_NORMAL,
+    D3DKMT_SCHEDULINGPRIORITYCLASS_NORMAL,
+    D3DKMT_SCHEDULINGPRIORITYCLASS_ABOVE_NORMAL,
+    D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH,
+    D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME
+  }
+  D3DKMT_SCHEDULINGPRIORITYCLASS;
+  typedef NTSTATUS WINAPI (*PD3DKMTSetProcessSchedulingPriorityClass)
+    (HANDLE, D3DKMT_SCHEDULINGPRIORITYCLASS);
+
+  HMODULE gdi32 = GetModuleHandleA("GDI32");
+  if (!gdi32)
+    return;
+
+  PD3DKMTSetProcessSchedulingPriorityClass fn =
+    (PD3DKMTSetProcessSchedulingPriorityClass)
+    GetProcAddress(gdi32, "D3DKMTSetProcessSchedulingPriorityClass");
+
+  if (!fn)
+    return;
+
+  if (FAILED(fn(GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_REALTIME)))
+  {
+    DEBUG_WARN("Failed to set realtime GPU priority.");
+    DEBUG_INFO("This is not a failure, please do not report this as an issue.");
+    DEBUG_INFO("To fix this, install and run the Looking Glass host as a service.");
+    DEBUG_INFO("looking-glass-host.exe InstallService");
+  }
+}
+
 bool app_init(void)
 {
   const char * logFile   = option_get_string("os", "logFile"  );
@@ -489,6 +524,9 @@ bool app_init(void)
 
   // get the performance frequency for spinlocks
   QueryPerformanceFrequency(&app.perfFreq);
+
+  // try to boost the scheduler priority
+  boostPriority();
 
   return true;
 }
