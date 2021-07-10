@@ -88,3 +88,17 @@ void * ringbuffer_getValues(const RingBuffer rb)
 {
   return rb->values;
 }
+
+void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn, void * udata)
+{
+  int index = rb->start;
+  for(int i = 0; i < rb->count; ++i)
+  {
+    void * value = rb->values + index * rb->valueSize;
+    if (++index == rb->length)
+      index = 0;
+
+    if (!fn(i, value, udata))
+      break;
+  }
+}

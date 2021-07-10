@@ -19,6 +19,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef struct RingBuffer * RingBuffer;
 
@@ -31,3 +32,7 @@ int    ringbuffer_getLength(const RingBuffer rb);
 int    ringbuffer_getStart (const RingBuffer rb);
 int    ringbuffer_getCount (const RingBuffer rb);
 void * ringbuffer_getValues(const RingBuffer rb);
+
+typedef bool (*RingBufferIterator)(int index, void * value, void * udata);
+void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn,
+    void * udata);
