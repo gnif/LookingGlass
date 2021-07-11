@@ -253,6 +253,11 @@ CaptureResult NvFBCToSysCapture(
       handle->retry = 0;
       break;
 
+    case NVFBC_ERROR_PROTECTED_CONTENT:
+      DEBUG_WARN("Protected content is playing, can't capture");
+      Sleep(100);
+      return CAPTURE_RESULT_TIMEOUT;
+
     case NVFBC_ERROR_INVALID_PARAM:
       if (handle->retry < 2)
       {
