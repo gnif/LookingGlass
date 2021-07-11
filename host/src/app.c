@@ -79,12 +79,14 @@ struct app
   PLGMPHost lgmp;
 
   PLGMPHostQueue pointerQueue;
-  PLGMPMemory    pointerMemory[POINTER_SHAPE_BUFFERS];
+  PLGMPMemory    pointerMemory[LGMP_Q_POINTER_LEN];
+  PLGMPMemory    pointerShapeMemory[POINTER_SHAPE_BUFFERS];
   LG_Lock        pointerLock;
   CapturePointer pointerInfo;
   PLGMPMemory    pointerShape;
   bool           pointerShapeValid;
   unsigned int   pointerIndex;
+  unsigned int   pointerShapeIndex;
 
   size_t         maxFrameSize;
   PLGMPHostQueue frameQueue;
@@ -315,8 +317,8 @@ static bool captureStop(void)
 
 bool captureGetPointerBuffer(void ** data, uint32_t * size)
 {
-  PLGMPMemory mem = app.pointerMemory[app.pointerIndex];
-  *data = ((uint8_t*)lgmpHostMemPtr(mem)) + sizeof(KVMFRCursor);
+  PLGMPMemory mem = app.pointerShapeMemory[app.pointerShapeIndex];
+  *data = (uint8_t*)lgmpHostMemPtr(mem) + sizeof(KVMFRCursor);
   *size = MAX_POINTER_SIZE - sizeof(KVMFRCursor);
   return true;
 }
@@ -342,8 +344,18 @@ static void sendPointer(bool newClient)
   // new clients need the last known shape and current position
   if (newClient)
   {
+    PLGMPMemory mem;
+    if (app.pointerShapeValid)
+      mem = app.pointerShape;
+    else
+    {
+      mem = app.pointerMemory[app.pointerIndex];
+      if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
+        app.pointerIndex = 0;
+    }
+
     // update the saved details with the current cursor position
-    KVMFRCursor *cursor = lgmpHostMemPtr(app.pointerShape);
+    KVMFRCursor *cursor = lgmpHostMemPtr(mem);
     cursor->x = app.pointerInfo.x;
     cursor->y = app.pointerInfo.y;
 
@@ -351,12 +363,24 @@ static void sendPointer(bool newClient)
       (app.pointerShapeValid   ? CURSOR_FLAG_SHAPE   : 0) |
       (app.pointerInfo.visible ? CURSOR_FLAG_VISIBLE : 0);
 
-    postPointer(flags, app.pointerShape);
+    postPointer(flags, mem);
     return;
   }
 
   uint32_t flags = 0;
-  PLGMPMemory mem = app.pointerMemory[app.pointerIndex];
+  PLGMPMemory mem;
+  if (app.pointerInfo.shapeUpdate)
+  {
+    mem = app.pointerShapeMemory[app.pointerShapeIndex];
+    if (++app.pointerShapeIndex == POINTER_SHAPE_BUFFERS)
+      app.pointerShapeIndex = 0;
+  }
+  else
+  {
+    mem = app.pointerMemory[app.pointerIndex];
+    if (++app.pointerIndex == LGMP_Q_POINTER_LEN)
+      app.pointerIndex = 0;
+  }
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
 
   if (app.pointerInfo.positionUpdate || newClient)
@@ -390,15 +414,8 @@ static void sendPointer(bool newClient)
     app.pointerShapeValid = true;
     flags |= CURSOR_FLAG_SHAPE;
 
-    // retain this memory for new clients
-    app.pointerMemory[app.pointerIndex] = app.pointerShape;
     app.pointerShape = mem;
   }
-
-  // only advance if the pointer shape was not swapped out of the list
-  if ((flags & CURSOR_FLAG_SHAPE) == 0)
-    if (++app.pointerIndex == POINTER_SHAPE_BUFFERS)
-      app.pointerIndex = 0;
 
   postPointer(flags, mem);
 }
@@ -525,24 +542,29 @@ int app_main(int argc, char * argv[])
     goto fail_lgmp;
   }
 
-  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
   {
-    if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerMemory[i])) != LGMP_OK)
+    if ((status = lgmpHostMemAlloc(app.lgmp, sizeof(KVMFRCursor), &app.pointerMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
       exitcode = LG_HOST_EXIT_FATAL;
       goto fail_lgmp;
     }
-    memset(lgmpHostMemPtr(app.pointerMemory[i]), 0, MAX_POINTER_SIZE);
+    memset(lgmpHostMemPtr(app.pointerMemory[i]), 0, sizeof(KVMFRCursor));
+  }
+
+  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+  {
+    if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerShapeMemory[i])) != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Shapes): %s", lgmpStatusString(status));
+      exitcode = LG_HOST_EXIT_FATAL;
+      goto fail_lgmp;
+    }
+    memset(lgmpHostMemPtr(app.pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
   }
 
   app.pointerShapeValid = false;
-  if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerShape)) != LGMP_OK)
-  {
-    DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Shape): %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FATAL;
-    goto fail_lgmp;
-  }
 
   const long sz = sysinfo_getPageSize();
   app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
@@ -728,9 +750,10 @@ fail_timer:
 fail_lgmp:
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     lgmpHostMemFree(&app.frameMemory[i]);
-  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
     lgmpHostMemFree(&app.pointerMemory[i]);
-  lgmpHostMemFree(&app.pointerShape);
+  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+    lgmpHostMemFree(&app.pointerShapeMemory[i]);
   lgmpHostFree(&app.lgmp);
 
 fail_ivshmem:
