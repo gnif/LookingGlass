@@ -187,10 +187,10 @@ void egl_fps_update(EGL_FPS * fps, const float avgFPS, const float renderFPS)
   fps->font->release(fps->fontObj, bmp);
 }
 
-void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY)
+bool egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY)
 {
   if (!fps->display || !fps->ready)
-    return;
+    return false;
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -208,4 +208,5 @@ void egl_fps_render(EGL_FPS * fps, const float scaleX, const float scaleY)
   egl_model_render(fps->model);
 
   glDisable(GL_BLEND);
+  return true;
 }
