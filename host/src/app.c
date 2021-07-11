@@ -254,7 +254,7 @@ static bool sendFrame(void)
     return true;
   }
 
-  app.iface->getFrame(fb, frame.height);
+  app.iface->getFrame(fb, frame.height, app.frameIndex);
   return true;
 }
 
