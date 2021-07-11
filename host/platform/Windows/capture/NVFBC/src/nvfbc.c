@@ -67,13 +67,6 @@ struct iface
   bool forceCompositionCreated;
 };
 
-struct Bounds {
-  int x1;
-  int y1;
-  int x2;
-  int y2;
-};
-
 static struct iface * this = NULL;
 
 static bool nvfbc_deinit(void);
@@ -311,58 +304,78 @@ done:
   return CAPTURE_RESULT_OK;
 }
 
+struct DisjointSet {
+  int id;
+  int x1;
+  int y1;
+  int x2;
+  int y2;
+};
+
+static int dsFind(struct DisjointSet * ds, int id)
+{
+  if (ds[id].id != id)
+    ds[id].id = dsFind(ds, ds[id].id);
+  return ds[id].id;
+}
+
+static void dsUnion(struct DisjointSet * ds, int a, int b)
+{
+  a = dsFind(ds, a);
+  b = dsFind(ds, b);
+  if (a == b)
+    return;
+
+  ds[b].id = a;
+  ds[a].x1 = min(ds[a].x1, ds[b].x1);
+  ds[a].x2 = max(ds[a].x2, ds[b].x2);
+  ds[a].y1 = min(ds[a].y1, ds[b].y1);
+  ds[a].y2 = max(ds[a].y2, ds[b].y2);
+}
+
 static void updateDamageRects(CaptureFrame * frame)
 {
   const unsigned int h = (this->height + 127) / 128;
   const unsigned int w = (this->width  + 127) / 128;
 
-  struct Bounds rects[KVMFR_MAX_DAMAGE_RECTS];
-  struct Bounds *links[w * h];
-  int rectId = 0;
+  struct DisjointSet ds[w * h];
 
   for (unsigned int y = 0; y < h; ++y)
     for (unsigned int x = 0; x < w; ++x)
-      if (this->diffMap[(y*w)+x])
+      if (this->diffMap[y * w + x])
       {
-        struct Bounds *join = NULL;
+        ds[y * w + x].id = y * w + x;
+        ds[y * w + x].x1 = ds[y * w + x].x2 = x;
+        ds[y * w + x].y1 = ds[y * w + x].y2 = y;
+
         if (y > 0 && this->diffMap[(y-1) * w + x])
-          join = links[(y-1) * w + x];
+          dsUnion(ds, (y-1) * w + x, y * w + x);
+
         if (x > 0 && this->diffMap[y * w + x - 1])
-          join = links[y * w + x - 1];
+          dsUnion(ds, y * w + x, y * w + x - 1);
+      }
 
-        if (join)
+  int rectId = 0;
+  for (unsigned int y = 0; y < h; ++y)
+    for (unsigned int x = 0; x < w; ++x)
+      if (this->diffMap[y * w + x] && ds[y * w + x].id == y * w + x)
+      {
+        if (rectId >= KVMFR_MAX_DAMAGE_RECTS)
         {
-          join->x1 = min(join->x1, x);
-          join->x2 = max(join->x2, x);
-          join->y1 = min(join->y1, y);
-          join->y2 = max(join->y2, y);
-        }
-        else
-        {
-          if (rectId >= KVMFR_MAX_DAMAGE_RECTS)
-          {
-            rectId = 0;
-            goto done;
-          }
-          join = &rects[rectId++];
-          join->x1 = join->x2 = x;
-          join->y1 = join->y2 = y;
+          rectId = 0;
+          goto done;
         }
 
-        links[y * w + x] = join;
+        frame->damageRects[rectId++] = (FrameDamageRect) {
+          .x = ds[y * w + x].x1 * 128,
+          .y = ds[y * w + x].y1 * 128,
+          .width = (ds[y * w + x].x2 - ds[y * w + x].x1 + 1) * 128,
+          .height = (ds[y * w + x].y2 - ds[y * w + x].y1 + 1) * 128,
+        };
       }
 
 done:
   frame->damageRectsCount = rectId;
-  for (int i = 0; i < rectId; ++i)
-  {
-    frame->damageRects[i] = (FrameDamageRect) {
-      .x = rects[i].x1 * 128,
-      .y = rects[i].y1 * 128,
-      .width = (rects[i].x2 - rects[i].x1 + 1) * 128,
-      .height = (rects[i].y2 - rects[i].y1 + 1) * 128,
-    };
-  }
 }
 
 static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
