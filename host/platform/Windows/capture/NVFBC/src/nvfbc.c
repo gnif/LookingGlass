@@ -67,6 +67,13 @@ struct iface
   bool forceCompositionCreated;
 };
 
+struct Bounds {
+  int x1;
+  int y1;
+  int x2;
+  int y2;
+};
+
 static struct iface * this = NULL;
 
 static bool nvfbc_deinit(void);
@@ -304,6 +311,60 @@ done:
   return CAPTURE_RESULT_OK;
 }
 
+static void updateDamageRects(CaptureFrame * frame)
+{
+  const unsigned int h = (this->height + 127) / 128;
+  const unsigned int w = (this->width  + 127) / 128;
+
+  struct Bounds rects[KVMFR_MAX_DAMAGE_RECTS];
+  struct Bounds *links[w * h];
+  int rectId = 0;
+
+  for (unsigned int y = 0; y < h; ++y)
+    for (unsigned int x = 0; x < w; ++x)
+      if (this->diffMap[(y*w)+x])
+      {
+        struct Bounds *join = NULL;
+        if (y > 0 && this->diffMap[(y-1) * w + x])
+          join = links[(y-1) * w + x];
+        if (x > 0 && this->diffMap[y * w + x - 1])
+          join = links[y * w + x - 1];
+
+        if (join)
+        {
+          join->x1 = min(join->x1, x);
+          join->x2 = max(join->x2, x);
+          join->y1 = min(join->y1, y);
+          join->y2 = max(join->y2, y);
+        }
+        else
+        {
+          if (rectId >= KVMFR_MAX_DAMAGE_RECTS)
+          {
+            rectId = 0;
+            goto done;
+          }
+          join = &rects[rectId++];
+          join->x1 = join->x2 = x;
+          join->y1 = join->y2 = y;
+        }
+
+        links[y * w + x] = join;
+      }
+
+done:
+  frame->damageRectsCount = rectId;
+  for (int i = 0; i < rectId; ++i)
+  {
+    frame->damageRects[i] = (FrameDamageRect) {
+      .x = rects[i].x1 * 128,
+      .y = rects[i].y1 * 128,
+      .width = (rects[i].x2 - rects[i].x1 + 1) * 128,
+      .height = (rects[i].y2 - rects[i].y1 + 1) * 128,
+    };
+  }
+}
+
 static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     const size_t maxFrameSize)
 {
@@ -331,31 +392,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   frame->stride     = this->grabStride;
   frame->rotation   = CAPTURE_ROT_0;
 
-  const unsigned int h = (this->height + 127) / 128;
-  const unsigned int w = (this->width  + 127) / 128;
-
-  // TODO: use some algorithm to merge large regions
-  int rectId = 0;
-  for (unsigned int y = 0; y < h; ++y)
-    for (unsigned int x = 0; x < w; ++x)
-      if (this->diffMap[(y*w)+x])
-      {
-        if (rectId >= KVMFR_MAX_DAMAGE_RECTS)
-        {
-          rectId = 0;
-          goto done;
-        }
-
-        frame->damageRects[rectId++] = (FrameDamageRect) {
-          .x = x * 128,
-          .y = y * 128,
-          .width = 128,
-          .height = 128,
-        };
-      }
-
-done:
-  frame->damageRectsCount = rectId;
+  updateDamageRects(frame);
 
 #if 0
   //NvFBC never sets bIsHDR so instead we check for any data in the alpha channel
