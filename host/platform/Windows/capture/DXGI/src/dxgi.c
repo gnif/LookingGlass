@@ -20,6 +20,7 @@
 
 #include "interface/capture.h"
 #include "interface/platform.h"
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/windebug.h"
 #include "common/option.h"
@@ -716,14 +717,13 @@ static void computeFrameDamage(Texture * tex)
   // By default, damage the full frame.
   tex->damageRectsCount = 0;
 
-  const int maxDamageRectsCount =
-    sizeof(tex->damageRects) / sizeof(*tex->damageRects);
+  const int maxDamageRectsCount = ARRAY_LENGTH(tex->damageRects);
 
   // Compute dirty rectangles.
   RECT dirtyRects[maxDamageRectsCount];
   UINT dirtyRectsBufferSizeRequired;
   if (IDXGIOutputDuplication_GetFrameDirtyRects(this->dup,
-        sizeof(dirtyRects) / sizeof(*dirtyRects), dirtyRects,
+        ARRAY_LENGTH(dirtyRects), dirtyRects,
         &dirtyRectsBufferSizeRequired) != S_OK)
     return;
 
@@ -738,7 +738,7 @@ static void computeFrameDamage(Texture * tex)
   DXGI_OUTDUPL_MOVE_RECT moveRects[(maxDamageRectsCount - dirtyRectsCount) / 2];
   UINT moveRectsBufferSizeRequired;
   if (IDXGIOutputDuplication_GetFrameMoveRects(this->dup,
-        sizeof(moveRects) / sizeof(*moveRects), moveRects,
+        ARRAY_LENGTH(moveRects), moveRects,
         &moveRectsBufferSizeRequired) != S_OK)
     return;
 
