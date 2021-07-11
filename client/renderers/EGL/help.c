@@ -160,7 +160,7 @@ void egl_help_set_font(EGL_Help * help, LG_FontObj fontObj)
   help->fontObj = fontObj;
 }
 
-void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
+bool egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
 {
   LG_FontBitmap * bmp = atomic_exchange(&help->bmp, NULL);
   if (bmp)
@@ -194,7 +194,7 @@ void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
   }
 
   if (!help->shouldRender)
-    return;
+    return false;
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -212,4 +212,5 @@ void egl_help_render(EGL_Help * help, const float scaleX, const float scaleY)
   egl_model_render(help->model);
 
   glDisable(GL_BLEND);
+  return true;
 }
