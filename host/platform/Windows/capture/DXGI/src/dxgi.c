@@ -55,7 +55,7 @@ typedef struct Texture
   D3D11_MAPPED_SUBRESOURCE   map;
   uint64_t                   copyTime;
   uint8_t                    damageRectsCount;
-  RECT                       damageRects[KVMFR_MAX_DAMAGE_RECTS];
+  FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
 }
 Texture;
 
@@ -700,6 +700,80 @@ static CaptureResult dxgi_hResultToCaptureResult(const HRESULT status)
   }
 }
 
+static void rectToFrameDamageRect(RECT * src, FrameDamageRect * dst)
+{
+  *dst = (FrameDamageRect)
+  {
+    .x = src->left,
+    .y = src->top,
+    .width = src->right - src->left,
+    .height = src->bottom - src->top
+  };
+}
+
+static void computeFrameDamage(Texture * tex)
+{
+  // By default, damage the full frame.
+  tex->damageRectsCount = 0;
+
+  const int maxDamageRectsCount =
+    sizeof(tex->damageRects) / sizeof(*tex->damageRects);
+
+  // Compute dirty rectangles.
+  RECT dirtyRects[maxDamageRectsCount];
+  UINT dirtyRectsBufferSizeRequired;
+  if (IDXGIOutputDuplication_GetFrameDirtyRects(this->dup,
+        sizeof(dirtyRects) / sizeof(*dirtyRects), dirtyRects,
+        &dirtyRectsBufferSizeRequired) != S_OK)
+    return;
+
+  const int dirtyRectsCount = dirtyRectsBufferSizeRequired / sizeof(*dirtyRects);
+
+  // Compute moved rectangles.
+  //
+  // Move rects are seemingly not generated on Windows 10, but may be present
+  // on Windows 8 and earlier.
+  //
+  // Divide by two here since each move generates two dirty regions.
+  DXGI_OUTDUPL_MOVE_RECT moveRects[(maxDamageRectsCount - dirtyRectsCount) / 2];
+  UINT moveRectsBufferSizeRequired;
+  if (IDXGIOutputDuplication_GetFrameMoveRects(this->dup,
+        sizeof(moveRects) / sizeof(*moveRects), moveRects,
+        &moveRectsBufferSizeRequired) != S_OK)
+    return;
+
+  const int moveRectsCount = moveRectsBufferSizeRequired / sizeof(*moveRects);
+
+  FrameDamageRect * texDamageRect = tex->damageRects;
+  for (RECT *dirtyRect = dirtyRects;
+       dirtyRect < dirtyRects + dirtyRectsCount;
+       dirtyRect++)
+    rectToFrameDamageRect(dirtyRect, texDamageRect++);
+
+  for (DXGI_OUTDUPL_MOVE_RECT *moveRect = moveRects;
+       moveRect < moveRects + moveRectsCount;
+       moveRect++)
+  {
+    // According to WebRTC source comments, the DirectX capture API may randomly
+    // return unmoved rects, which should be skipped to avoid unnecessary work.
+    if (moveRect->SourcePoint.x == moveRect->DestinationRect.left &&
+        moveRect->SourcePoint.y == moveRect->DestinationRect.top)
+      continue;
+
+    *(texDamageRect++) = (FrameDamageRect)
+    {
+      .x = moveRect->SourcePoint.x,
+      .y = moveRect->SourcePoint.y,
+      .width = moveRect->DestinationRect.right - moveRect->DestinationRect.left,
+      .height = moveRect->DestinationRect.bottom - moveRect->DestinationRect.top
+    };
+
+    rectToFrameDamageRect(&moveRect->DestinationRect, texDamageRect++);
+  }
+
+  tex->damageRectsCount = dirtyRectsCount + moveRectsCount;
+}
+
 static CaptureResult dxgi_capture(void)
 {
   assert(this);
@@ -781,19 +855,12 @@ static CaptureResult dxgi_capture(void)
     {
       if (copyFrame)
       {
+        computeFrameDamage(tex);
+
         // issue the copy from GPU to CPU RAM
         tex->copyTime = microtime();
         ID3D11DeviceContext_CopyResource(this->deviceContext,
           (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
-
-        UINT damageRectsBufferSizeRequired;
-        if (IDXGIOutputDuplication_GetFrameDirtyRects(this->dup, KVMFR_MAX_DAMAGE_RECTS,
-            tex->damageRects, &damageRectsBufferSizeRequired) == S_OK)
-          tex->damageRectsCount = damageRectsBufferSizeRequired / sizeof(*tex->damageRects);
-        else
-          // Either received too many damage regions or hit another error;
-          // damage the full frame instead.
-          tex->damageRectsCount = 0;
       }
 
       if (copyPointer)
@@ -952,16 +1019,8 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   frame->rotation         = this->rotation;
 
   frame->damageRectsCount = tex->damageRectsCount;
-  for (int i = 0; i < tex->damageRectsCount; i++)
-  {
-    RECT damageRect = tex->damageRects[i];
-    frame->damageRects[i] = (FrameDamageRect) {
-      .x = damageRect.left,
-      .y = damageRect.top,
-      .width = damageRect.right - damageRect.left,
-      .height = damageRect.bottom - damageRect.top
-    };
-  }
+  memcpy(frame->damageRects, tex->damageRects,
+      tex->damageRectsCount * sizeof(*tex->damageRects));
 
   atomic_fetch_sub_explicit(&this->texReady, 1, memory_order_release);
   return CAPTURE_RESULT_OK;
