@@ -428,7 +428,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
 }
 
 static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
-    const unsigned int height)
+    const unsigned int height, int frameIndex)
 {
   framebuffer_write(
     frame,
