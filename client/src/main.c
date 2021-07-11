@@ -589,7 +589,8 @@ int main_frameThread(void * unused)
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!g_state.lgr->on_frame(g_state.lgrData, fb, useDMA ? dma->fd : -1))
+    if (!g_state.lgr->on_frame(g_state.lgrData, fb, useDMA ? dma->fd : -1,
+        frame->damageRects, frame->damageRectsCount))
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");

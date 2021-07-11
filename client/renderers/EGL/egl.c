@@ -21,6 +21,7 @@
 #include "interface/renderer.h"
 
 #include "common/debug.h"
+#include "common/KVMFR.h"
 #include "common/option.h"
 #include "common/sysinfo.h"
 #include "common/time.h"
@@ -57,6 +58,12 @@ struct Options
 {
   bool vsync;
   bool doubleBuffer;
+};
+
+struct DesktopDamage
+{
+  int count;
+  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
 };
 
 struct Inst
@@ -116,6 +123,8 @@ struct Inst
 
   bool               cursorLastValid;
   struct CursorState cursorLast;
+
+  _Atomic(struct DesktopDamage *) desktopDamage;
 };
 
 static struct Option egl_options[] =
@@ -262,6 +271,8 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
   this->screenScaleX = 1.0f;
   this->screenScaleY = 1.0f;
   this->uiScale      = 1.0;
+
+  atomic_init(&this->desktopDamage, NULL);
 
   this->font = LG_Fonts[0];
   if (!egl_update_font(this))
@@ -486,6 +497,15 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   egl_update_help_font(this);
 
   this->cursorLastValid = false;
+
+  struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
+  if (!damage)
+  {
+    DEBUG_FATAL("Out of memory");
+    abort();
+  }
+  damage->count = 0;
+  free(atomic_exchange(&this->desktopDamage, damage));
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
@@ -548,7 +568,8 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool use
   return egl_desktop_setup(this->desktop, format, useDMA);
 }
 
-bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd)
+bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
+    const FrameDamageRect * damageRects, int damageRectsCount)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -560,6 +581,17 @@ bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd)
 
   this->start = true;
   this->cursorLastValid = false;
+
+  struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
+  if (!damage)
+  {
+    DEBUG_FATAL("Out of memory");
+    abort();
+  }
+  damage->count = damageRectsCount;
+  memcpy(damage->rects, damageRects, damageRectsCount * sizeof(FrameDamageRect));
+  free(atomic_exchange(&this->desktopDamage, damage));
+
   return true;
 }
 
@@ -801,24 +833,31 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
   bool hasLastCursor = this->cursorLastValid;
   bool cursorRendered = false;
   struct CursorState cursorState;
+  struct DesktopDamage * desktopDamage = NULL;
 
-  if (this->start && egl_desktop_render(this->desktop,
+  if (this->start)
+  {
+    desktopDamage = atomic_exchange(&this->desktopDamage, NULL);
+    if (egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate))
-  {
-    if (!this->waitFadeTime)
     {
-      if (!this->params.quickSplash)
-        this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
-      else
-        this->waitDone = true;
-    }
+      if (!this->waitFadeTime)
+      {
+        if (!this->params.quickSplash)
+          this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
+        else
+          this->waitDone = true;
+      }
 
-    cursorRendered = true;
-    cursorState = egl_cursor_get_state(this->cursor, this->width, this->height);
-    egl_cursor_render(this->cursor,
-        (this->format.rotate + rotate) % LG_ROTATE_MAX);
+      cursorRendered = true;
+      cursorState = egl_cursor_get_state(this->cursor, this->width, this->height);
+      egl_cursor_render(this->cursor,
+          (this->format.rotate + rotate) % LG_ROTATE_MAX);
+    }
+    else
+      desktopDamage->count = 0;
   }
 
   if (!this->waitDone)
@@ -864,7 +903,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
       egl_alert_render(this->alert, this->screenScaleX, this->screenScaleY);
   }
 
-  struct Rect damage[2];
+  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + 2];
   int damageIdx = 0;
 
   if (this->waitDone)
@@ -883,6 +922,35 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
     {
       this->cursorLast = cursorState;
       this->cursorLastValid = true;
+
+      if (cursorState.visible)
+        damage[damageIdx++] = cursorState.rect;
+    }
+
+    if (desktopDamage)
+    {
+      if (desktopDamage->count == 0)
+        // Zero damage count means invalidating entire window.
+        damageIdx = 0;
+      else
+      {
+        double scaleX = (double) this->destRect.w / this->format.width;
+        double scaleY = (double) this->destRect.h / this->format.height;
+        for (int i = 0; i < desktopDamage->count; ++i)
+        {
+          FrameDamageRect rect = desktopDamage->rects[i];
+          int x1 = (int) (rect.x * scaleX);
+          int y1 = (int) (rect.y * scaleY);
+          int x2 = (int) ceil((rect.x + rect.width) * scaleX);
+          int y2 = (int) ceil((rect.y + rect.height) * scaleY);
+          damage[damageIdx++] = (struct Rect) {
+            .x = this->destRect.x + x1,
+            .y = this->height - (this->destRect.y + y2),
+            .w = x2 - x1,
+            .h = y2 - y1,
+          };
+        }
+      }
     }
   }
 
