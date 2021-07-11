@@ -114,7 +114,7 @@ typedef void         (* LG_RendererOnResize     )(void * opaque, const int width
 typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visible , const int x, const int y);
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
-typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD);
+typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD, const FrameDamageRect * damage, int damageCount);
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
 typedef void         (* LG_RendererOnHelp       )(void * opaque, const char * message);
 typedef void         (* LG_RendererOnShowFPS    )(void * opaque, bool showFPS);
