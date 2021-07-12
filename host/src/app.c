@@ -148,12 +148,12 @@ static bool sendFrame(void)
   bool repeatFrame = false;
 
   //wait until there is room in the queue
-  while(app.state == APP_STATE_RUNNING)
-    if(lgmpHostQueuePending(app.frameQueue) == LGMP_Q_FRAME_LEN)
-    {
-      usleep(1);
-      continue;
-    }
+  while(app.state == APP_STATE_RUNNING &&
+      lgmpHostQueuePending(app.frameQueue) == LGMP_Q_FRAME_LEN)
+  {
+    usleep(1);
+    continue;
+  }
 
   if (app.state != APP_STATE_RUNNING)
     return false;
