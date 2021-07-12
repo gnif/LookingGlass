@@ -22,6 +22,8 @@
 #include <common/version.h>
 #include <stdio.h>
 
+#include "common/debug.h"
+
 #ifdef _WIN32
 #undef EXPORT
 #define EXPORT __declspec(dllexport)
@@ -38,6 +40,7 @@ extern struct obs_source_info lg_source;
 
 MODULE_EXPORT bool obs_module_load(void)
 {
+  debug_init();
   printf("Looking Glass OBS Client (%s)\n", BUILD_VERSION);
   obs_register_source(&lg_source);
   return true;
