@@ -302,6 +302,8 @@ static bool dxgi_init(void)
     goto fail;
   }
 
+  DEBUG_INFO("Device Name      : %ls", outputDesc.DeviceName);
+
   static const D3D_FEATURE_LEVEL win8[] =
   {
     D3D_FEATURE_LEVEL_11_1,
