@@ -91,9 +91,10 @@ typedef void (*CapturePostPointerBuffer)(CapturePointer pointer);
 
 typedef struct CaptureInterface
 {
-  const char     *shortName;
-  const char *  (*getName        )();
-  void          (*initOptions    )();
+  const char * shortName;
+  const bool   asyncCapture;
+  const char * (*getName        )();
+  void         (*initOptions    )();
 
   bool(*create)(
     CaptureGetPointerBuffer  getPointerBufferFn,

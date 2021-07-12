@@ -88,10 +88,12 @@ struct app
   unsigned int   pointerIndex;
   unsigned int   pointerShapeIndex;
 
+  long           pageSize;
   size_t         maxFrameSize;
   PLGMPHostQueue frameQueue;
   PLGMPMemory    frameMemory[LGMP_Q_FRAME_LEN];
   unsigned int   frameIndex;
+  bool           frameValid;
 
   CaptureInterface * iface;
 
@@ -140,14 +142,110 @@ static bool lgmpTimer(void * opaque)
   return true;
 }
 
+static bool sendFrame(void)
+{
+  CaptureFrame frame = { 0 };
+  bool repeatFrame = false;
+  switch(app.iface->waitFrame(&frame, app.maxFrameSize))
+  {
+    case CAPTURE_RESULT_OK:
+      break;
+
+    case CAPTURE_RESULT_REINIT:
+    {
+      app.state = APP_STATE_RESTART;
+      DEBUG_INFO("Frame thread reinit");
+      return false;
+    }
+
+    case CAPTURE_RESULT_ERROR:
+    {
+      DEBUG_ERROR("Failed to get the frame");
+      return false;
+    }
+
+    case CAPTURE_RESULT_TIMEOUT:
+    {
+      if (app.frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
+      {
+        // resend the last frame
+        repeatFrame = true;
+        break;
+      }
+
+      return true;
+    }
+  }
+
+  LGMP_STATUS status;
+
+  // if we are repeating a frame just send the last frame again
+  if (repeatFrame)
+  {
+    if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+      DEBUG_ERROR("%s", lgmpStatusString(status));
+    return true;
+  }
+
+  // we increment the index first so that if we need to repeat a frame
+  // the index still points to the latest valid frame
+  if (++app.frameIndex == LGMP_Q_FRAME_LEN)
+    app.frameIndex = 0;
+
+  KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
+  switch(frame.format)
+  {
+    case CAPTURE_FMT_BGRA   : fi->type = FRAME_TYPE_BGRA   ; break;
+    case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
+    case CAPTURE_FMT_RGBA10 : fi->type = FRAME_TYPE_RGBA10 ; break;
+    case CAPTURE_FMT_RGBA16F: fi->type = FRAME_TYPE_RGBA16F; break;
+    default:
+      DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
+      return true;
+  }
+
+  switch(frame.rotation)
+  {
+    case CAPTURE_ROT_0  : fi->rotation = FRAME_ROT_0  ; break;
+    case CAPTURE_ROT_90 : fi->rotation = FRAME_ROT_90 ; break;
+    case CAPTURE_ROT_180: fi->rotation = FRAME_ROT_180; break;
+    case CAPTURE_ROT_270: fi->rotation = FRAME_ROT_270; break;
+    default:
+      DEBUG_WARN("Unsupported frame rotation %d", frame.rotation);
+      fi->rotation = FRAME_ROT_0;
+      break;
+  }
+
+  fi->formatVer         = frame.formatVer;
+  fi->width             = frame.width;
+  fi->height            = frame.height;
+  fi->realHeight        = frame.realHeight;
+  fi->stride            = frame.stride;
+  fi->pitch             = frame.pitch;
+  fi->offset            = app.pageSize - FrameBufferStructSize;
+  fi->mouseScalePercent = app.iface->getMouseScale();
+  fi->blockScreensaver  = os_blockScreensaver();
+  app.frameValid        = true;
+
+  // put the framebuffer on the border of the next page
+  // this is to allow for aligned DMA transfers by the receiver
+  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
+  framebuffer_prepare(fb);
+
+  /* we post and then get the frame, this is intentional! */
+  if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+  {
+    DEBUG_ERROR("%s", lgmpStatusString(status));
+    return true;
+  }
+
+  app.iface->getFrame(fb, frame.height);
+  return true;
+}
+
 static int frameThread(void * opaque)
 {
   DEBUG_INFO("Frame thread started");
-
-  bool         frameValid     = false;
-  bool         repeatFrame    = false;
-  CaptureFrame frame          = { 0 };
-  const long   pageSize       = sysinfo_getPageSize();
 
   while(app.state == APP_STATE_RUNNING)
   {
@@ -158,100 +256,8 @@ static int frameThread(void * opaque)
       continue;
     }
 
-    switch(app.iface->waitFrame(&frame, app.maxFrameSize))
-    {
-      case CAPTURE_RESULT_OK:
-        repeatFrame = false;
-        break;
-
-      case CAPTURE_RESULT_REINIT:
-      {
-        app.state = APP_STATE_RESTART;
-        DEBUG_INFO("Frame thread reinit");
-        return 0;
-      }
-
-      case CAPTURE_RESULT_ERROR:
-      {
-        DEBUG_ERROR("Failed to get the frame");
-        return 0;
-      }
-
-      case CAPTURE_RESULT_TIMEOUT:
-      {
-        if (frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
-        {
-          // resend the last frame
-          repeatFrame = true;
-          break;
-        }
-
-        continue;
-      }
-    }
-
-    LGMP_STATUS status;
-
-    // if we are repeating a frame just send the last frame again
-    if (repeatFrame)
-    {
-      if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
-        DEBUG_ERROR("%s", lgmpStatusString(status));
-      continue;
-    }
-
-    // we increment the index first so that if we need to repeat a frame
-    // the index still points to the latest valid frame
-    if (++app.frameIndex == LGMP_Q_FRAME_LEN)
-      app.frameIndex = 0;
-
-    KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
-    switch(frame.format)
-    {
-      case CAPTURE_FMT_BGRA   : fi->type = FRAME_TYPE_BGRA   ; break;
-      case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
-      case CAPTURE_FMT_RGBA10 : fi->type = FRAME_TYPE_RGBA10 ; break;
-      case CAPTURE_FMT_RGBA16F: fi->type = FRAME_TYPE_RGBA16F; break;
-      default:
-        DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
-        continue;
-    }
-
-    switch(frame.rotation)
-    {
-      case CAPTURE_ROT_0  : fi->rotation = FRAME_ROT_0  ; break;
-      case CAPTURE_ROT_90 : fi->rotation = FRAME_ROT_90 ; break;
-      case CAPTURE_ROT_180: fi->rotation = FRAME_ROT_180; break;
-      case CAPTURE_ROT_270: fi->rotation = FRAME_ROT_270; break;
-      default:
-        DEBUG_WARN("Unsupported frame rotation %d", frame.rotation);
-        fi->rotation = FRAME_ROT_0;
-        break;
-    }
-
-    fi->formatVer         = frame.formatVer;
-    fi->width             = frame.width;
-    fi->height            = frame.height;
-    fi->realHeight        = frame.realHeight;
-    fi->stride            = frame.stride;
-    fi->pitch             = frame.pitch;
-    fi->offset            = pageSize - FrameBufferStructSize;
-    fi->mouseScalePercent = app.iface->getMouseScale();
-    fi->blockScreensaver  = os_blockScreensaver();
-    frameValid            = true;
-
-    // put the framebuffer on the border of the next page
-    // this is to allow for aligned DMA transfers by the receiver
-    FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
-    framebuffer_prepare(fb);
-
-    /* we post and then get the frame, this is intentional! */
-    if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
-    {
-      DEBUG_ERROR("%s", lgmpStatusString(status));
-      continue;
-    }
-    app.iface->getFrame(fb, frame.height);
+    if (!sendFrame())
+      break;
   }
   DEBUG_INFO("Frame thread stopped");
   return 0;
@@ -260,6 +266,9 @@ static int frameThread(void * opaque)
 bool startThreads(void)
 {
   app.state = APP_STATE_RUNNING;
+  if (!app.iface->asyncCapture)
+    return true;
+
   if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
   {
     DEBUG_ERROR("Failed to create the frame thread");
@@ -271,20 +280,25 @@ bool startThreads(void)
 
 bool stopThreads(void)
 {
-  bool ok = true;
-
   app.iface->stop();
   if (app.state != APP_STATE_SHUTDOWN)
     app.state = APP_STATE_IDLE;
 
-  if (app.frameThread && !lgJoinThread(app.frameThread, NULL))
-  {
-    DEBUG_WARN("Failed to join the frame thread");
-    ok = false;
-  }
-  app.frameThread = NULL;
+  if (!app.iface->asyncCapture)
+    return true;
 
-  return ok;
+  if (app.frameThread)
+  {
+    if (!lgJoinThread(app.frameThread, NULL))
+    {
+      DEBUG_WARN("Failed to join the frame thread");
+      app.frameThread = NULL;
+      return false;
+    }
+    app.frameThread = NULL;
+  }
+
+  return true;
 }
 
 static bool captureStart(void)
@@ -564,17 +578,19 @@ int app_main(int argc, char * argv[])
     memset(lgmpHostMemPtr(app.pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
   }
 
+  app.pageSize          = sysinfo_getPageSize();
+  app.frameValid        = false;
   app.pointerShapeValid = false;
 
-  const long sz = sysinfo_getPageSize();
   app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
-  app.maxFrameSize = (app.maxFrameSize - (sz - 1)) & ~(sz - 1);
+  app.maxFrameSize = (app.maxFrameSize - (app.pageSize - 1)) & ~(app.pageSize - 1);
   app.maxFrameSize /= LGMP_Q_FRAME_LEN;
   DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
 
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize, sz, &app.frameMemory[i])) != LGMP_OK)
+    if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize,
+            app.pageSize, &app.frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
       exitcode = LG_HOST_EXIT_FATAL;
@@ -616,6 +632,8 @@ int app_main(int argc, char * argv[])
   }
 
   DEBUG_INFO("Using            : %s", iface->getName());
+  DEBUG_INFO("Capture Method   : %s", iface->asyncCapture ?
+      "Asynchronous" : "Synchronous");
 
   app.state = APP_STATE_RUNNING;
   app.iface = iface;
@@ -710,6 +728,9 @@ int app_main(int argc, char * argv[])
           exitcode = LG_HOST_EXIT_FAILED;
           goto fail_capture;
       }
+
+      if (!iface->asyncCapture)
+        sendFrame();
     }
 
     if (app.state != APP_STATE_SHUTDOWN)

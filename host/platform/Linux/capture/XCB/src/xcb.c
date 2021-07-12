@@ -236,6 +236,7 @@ static CaptureResult xcb_getFrame(FrameBuffer * frame, const unsigned int height
 struct CaptureInterface Capture_XCB =
 {
   .shortName       = "XCB",
+  .asyncCapture    = true,
   .getName         = xcb_getName,
   .create          = xcb_create,
   .init            = xcb_init,
