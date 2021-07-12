@@ -146,6 +146,18 @@ static bool sendFrame(void)
 {
   CaptureFrame frame = { 0 };
   bool repeatFrame = false;
+
+  //wait until there is room in the queue
+  while(app.state == APP_STATE_RUNNING)
+    if(lgmpHostQueuePending(app.frameQueue) == LGMP_Q_FRAME_LEN)
+    {
+      usleep(1);
+      continue;
+    }
+
+  if (app.state != APP_STATE_RUNNING)
+    return false;
+
   switch(app.iface->waitFrame(&frame, app.maxFrameSize))
   {
     case CAPTURE_RESULT_OK:
@@ -249,13 +261,6 @@ static int frameThread(void * opaque)
 
   while(app.state == APP_STATE_RUNNING)
   {
-    //wait until there is room in the queue
-    if(lgmpHostQueuePending(app.frameQueue) == LGMP_Q_FRAME_LEN)
-    {
-      usleep(1);
-      continue;
-    }
-
     if (!sendFrame())
       break;
   }
