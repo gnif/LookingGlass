@@ -61,4 +61,16 @@ void framebuffer_prepare(FrameBuffer * frame);
  */
 bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size);
 
+/**
+ * Gets the underlying data buffer of the framebuffer.
+ * For custom write routines only.
+ */
+uint8_t * framebuffer_get_data(FrameBuffer * frame);
+
+/**
+ * Sets the write pointer of the framebuffer.
+ * For custom write routines only.
+ */
+void framebuffer_set_write_ptr(FrameBuffer * frame, size_t size);
+
 #endif

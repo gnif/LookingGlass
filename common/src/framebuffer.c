@@ -213,3 +213,13 @@ bool framebuffer_write(FrameBuffer * frame, const void * restrict src, size_t si
 
   return true;
 }
+
+uint8_t * framebuffer_get_data(FrameBuffer * frame)
+{
+  return frame->data;
+}
+
+void framebuffer_set_write_ptr(FrameBuffer * frame, size_t size)
+{
+  atomic_store_explicit(&frame->wp, size, memory_order_release);
+}
