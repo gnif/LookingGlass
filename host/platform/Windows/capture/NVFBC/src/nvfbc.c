@@ -31,10 +31,21 @@
 #include "common/KVMFR.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <windows.h>
 
 #include <NvFBC/nvFBC.h>
 #include "wrapper.h"
+
+#define DIFF_MAP_DIM(x) ((x + 127) / 128)
+
+struct FrameInfo
+{
+  unsigned int width;
+  unsigned int height;
+  bool wasFresh;
+  uint8_t * diffMap;
+};
 
 struct iface
 {
@@ -65,6 +76,8 @@ struct iface
 
   bool mouseHookCreated;
   bool forceCompositionCreated;
+
+  struct FrameInfo frameInfo[LGMP_Q_FRAME_LEN];
 };
 
 static struct iface * this = NULL;
@@ -213,6 +226,20 @@ static bool nvfbc_init(void)
 
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    this->frameInfo[i].width    = 0;
+    this->frameInfo[i].height   = 0;
+    this->frameInfo[i].wasFresh = false;
+    this->frameInfo[i].diffMap  = malloc(DIFF_MAP_DIM(this->maxWidth) * DIFF_MAP_DIM(this->maxHeight));
+    if (!this->frameInfo[i].diffMap)
+    {
+      DEBUG_ERROR("Failed to allocate memory for diffMaps");
+      nvfbc_deinit();
+      return false;
+    }
+  }
+
   Sleep(100);
 
   if (!lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
@@ -242,6 +269,13 @@ static void nvfbc_stop(void)
 static bool nvfbc_deinit(void)
 {
   this->cursorEvent = NULL;
+
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    free(this->frameInfo[i].diffMap);
+    this->frameInfo[i].diffMap = NULL;
+  }
+
   if (this->nvfbc)
   {
     NvFBCToSysRelease(&this->nvfbc);
@@ -286,8 +320,8 @@ static CaptureResult nvfbc_capture(void)
     return result;
 
   bool changed = false;
-  const unsigned int h = (this->height + 127) / 128;
-  const unsigned int w = (this->width  + 127) / 128;
+  const unsigned int h = DIFF_MAP_DIM(this->height);
+  const unsigned int w = DIFF_MAP_DIM(this->width);
   for (unsigned int y = 0; y < h; ++y)
     for (unsigned int x = 0; x < w; ++x)
       if (this->diffMap[(y*w)+x])
@@ -335,8 +369,8 @@ static void dsUnion(struct DisjointSet * ds, int a, int b)
 
 static void updateDamageRects(CaptureFrame * frame)
 {
-  const unsigned int h = (this->height + 127) / 128;
-  const unsigned int w = (this->width  + 127) / 128;
+  const unsigned int h = DIFF_MAP_DIM(this->height);
+  const unsigned int w = DIFF_MAP_DIM(this->width);
 
   struct DisjointSet ds[w * h];
 
@@ -427,14 +461,89 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   return CAPTURE_RESULT_OK;
 }
 
+inline static void rectCopyUnaligned(uint8_t * dest, uint8_t * src, int ystart,
+    int yend, int dx, int stride, int width)
+{
+  for (int i = ystart; i < yend; ++i)
+  {
+    unsigned int offset = i * stride + dx;
+    memcpy(dest + offset, src + offset, width);
+  }
+}
+
 static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
     const unsigned int height, int frameIndex)
 {
-  framebuffer_write(
-    frame,
-    this->frameBuffer,
-    height * this->grabInfo.dwBufferWidth * 4
-  );
+  const unsigned int h = DIFF_MAP_DIM(this->height);
+  const unsigned int w = DIFF_MAP_DIM(this->width);
+  uint8_t * frameData = framebuffer_get_data(frame);
+  struct FrameInfo * info = this->frameInfo + frameIndex;
+
+  if (info->width == this->grabWidth && info->height == this->grabHeight)
+  {
+    const bool wasFresh = info->wasFresh;
+
+    for (unsigned int y = 0; y < h; ++y)
+    {
+      const unsigned int ystart = y * 128;
+      const unsigned int yend = min(height, (y + 1) * 128);
+
+      for (unsigned int x = 0; x < w; )
+      {
+        if ((wasFresh || !info->diffMap[y * w + x]) && !this->diffMap[y * w + x])
+        {
+          ++x;
+          continue;
+        }
+
+        unsigned int x2 = x;
+        while (x2 < w && ((!wasFresh && info->diffMap[y * w + x2]) || this->diffMap[y * w + x2]))
+          ++x2;
+
+        unsigned int width = (min(x2 * 128, this->grabStride) - x * 128) * 4;
+        rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend, x * 512,
+            this->grabStride * 4, width);
+
+        x = x2;
+      }
+      framebuffer_set_write_ptr(frame, yend * this->grabStride * 4);
+    }
+  }
+  else
+    framebuffer_write(
+      frame,
+      this->frameBuffer,
+      height * this->grabInfo.dwBufferWidth * 4
+    );
+
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    if (i == frameIndex)
+    {
+      this->frameInfo[i].width    = this->grabWidth;
+      this->frameInfo[i].height   = this->grabHeight;
+      this->frameInfo[i].wasFresh = true;
+    }
+    else if (this->frameInfo[i].width == this->grabWidth &&
+          this->frameInfo[i].height == this->grabHeight)
+    {
+      if (this->frameInfo[i].wasFresh)
+      {
+        memcpy(this->frameInfo[i].diffMap, this->diffMap, h * w);
+        this->frameInfo[i].wasFresh = false;
+      }
+      else
+      {
+        for (unsigned int j = 0; j < h * w; ++j)
+          this->frameInfo[i].diffMap[j] |= this->diffMap[j];
+      }
+    }
+    else
+    {
+      this->frameInfo[i].width  = 0;
+      this->frameInfo[i].height = 0;
+    }
+  }
   return CAPTURE_RESULT_OK;
 }
 
