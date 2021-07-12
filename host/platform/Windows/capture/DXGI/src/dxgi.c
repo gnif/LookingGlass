@@ -302,7 +302,15 @@ static bool dxgi_init(void)
     goto fail;
   }
 
-  DEBUG_INFO("Device Name      : %ls", outputDesc.DeviceName);
+  DXGI_ADAPTER_DESC1 adapterDesc;
+  IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+  DEBUG_INFO("Device Name      : %ls"    , outputDesc.DeviceName);
+  DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
+  DEBUG_INFO("Device Vendor ID : 0x%x"   , adapterDesc.VendorId);
+  DEBUG_INFO("Device Device ID : 0x%x"   , adapterDesc.DeviceId);
+  DEBUG_INFO("Device Video Mem : %u MiB" , (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
+  DEBUG_INFO("Device Sys Mem   : %u MiB" , (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
+  DEBUG_INFO("Shared Sys Mem   : %u MiB" , (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
 
   static const D3D_FEATURE_LEVEL win8[] =
   {
@@ -370,9 +378,6 @@ static bool dxgi_init(void)
     goto fail;
   }
 
-  DXGI_ADAPTER_DESC1 adapterDesc;
-  IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
-
   switch(outputDesc.Rotation)
   {
     case DXGI_MODE_ROTATION_ROTATE90:
@@ -413,12 +418,6 @@ static bool dxgi_init(void)
   this->dpi = monitor_dpi(outputDesc.Monitor);
   ++this->formatVer;
 
-  DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
-  DEBUG_INFO("Device Vendor ID : 0x%x"   , adapterDesc.VendorId);
-  DEBUG_INFO("Device Device ID : 0x%x"   , adapterDesc.DeviceId);
-  DEBUG_INFO("Device Video Mem : %u MiB" , (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
-  DEBUG_INFO("Device Sys Mem   : %u MiB" , (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
-  DEBUG_INFO("Shared Sys Mem   : %u MiB" , (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
   DEBUG_INFO("Feature Level    : 0x%x"   , this->featureLevel);
   DEBUG_INFO("Capture Size     : %u x %u", this->width, this->height);
   DEBUG_INFO("AcquireLock      : %s"     , this->useAcquireLock ? "enabled" : "disabled");
