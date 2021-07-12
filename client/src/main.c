@@ -286,7 +286,11 @@ static int cursorThread(void * unused)
       break;
     }
 
-    KVMFRCursor * cursor = (KVMFRCursor *)msg.mem;
+    /* copy and release the message ASAP */
+    char buffer[msg.size];
+    memcpy(buffer, msg.mem, msg.size);
+    KVMFRCursor * cursor = (KVMFRCursor *)buffer;
+    lgmpClientMessageDone(queue);
 
     g_cursor.guest.visible =
       msg.udata & CURSOR_FLAG_VISIBLE;
@@ -318,7 +322,6 @@ static int cursorThread(void * unused)
       )
       {
         DEBUG_ERROR("Failed to update mouse shape");
-        lgmpClientMessageDone(queue);
         continue;
       }
     }
@@ -341,7 +344,6 @@ static int cursorThread(void * unused)
       core_handleGuestMouseUpdate();
     }
 
-    lgmpClientMessageDone(queue);
     g_cursor.redraw = false;
 
     g_state.lgr->on_mouse_event
