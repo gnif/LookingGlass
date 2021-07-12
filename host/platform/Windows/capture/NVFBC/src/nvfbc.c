@@ -57,7 +57,6 @@ struct iface
 
   NvFBCFrameGrabInfo grabInfo;
 
-  LGEvent * frameEvent;
   LGEvent * cursorEvent;
 
   int mouseX, mouseY, mouseHotX, mouseHotY;
@@ -134,13 +133,6 @@ static bool nvfbc_create(
     return false;
 
   this = (struct iface *)calloc(sizeof(struct iface), 1);
-  this->frameEvent = lgCreateEvent(true, 17);
-  if (!this->frameEvent)
-  {
-    DEBUG_ERROR("failed to create the frame event");
-    nvfbc_free();
-    return false;
-  }
 
   this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
   this->getPointerBufferFn  = getPointerBufferFn;
@@ -186,7 +178,6 @@ static bool nvfbc_init(void)
   free(privData);
 
   getDesktopSize(&this->width, &this->height, &this->dpi);
-  lgResetEvent(this->frameEvent);
 
   HANDLE event;
   if (!NvFBCToSysSetup(
@@ -239,7 +230,6 @@ static void nvfbc_stop(void)
   this->stop = true;
 
   lgSignalEvent(this->cursorEvent);
-  lgSignalEvent(this->frameEvent);
 
   if (this->pointerThread)
   {
@@ -262,9 +252,6 @@ static bool nvfbc_deinit(void)
 
 static void nvfbc_free(void)
 {
-  if (this->frameEvent)
-    lgFreeEvent(this->frameEvent);
-
   if (this->mouseHookCreated)
     mouseHook_remove();
 
@@ -313,16 +300,12 @@ done:
     return CAPTURE_RESULT_TIMEOUT;
 
   memcpy(&this->grabInfo, &grabInfo, sizeof(grabInfo));
-  lgSignalEvent(this->frameEvent);
   return CAPTURE_RESULT_OK;
 }
 
 static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     const size_t maxFrameSize)
 {
-  if (!lgWaitEvent(this->frameEvent, 1000))
-    return CAPTURE_RESULT_TIMEOUT;
-
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
