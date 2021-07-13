@@ -215,3 +215,46 @@ bool util_hasGLExt(const char * exts, const char * ext)
 {
   return str_containsValue(exts, ' ', ext);
 }
+
+static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageRect * r2)
+{
+  return r1->x < r2->x + r2->width &&
+         r1->x + r1->width > r2->x &&
+         r1->y < r2->y + r2->height &&
+         r2->y + r1->height > r2->y;
+}
+
+int util_mergeOverlappingRects(FrameDamageRect * out, const FrameDamageRect * rects, int count)
+{
+  bool removed[count];
+  bool changed;
+
+  memset(removed, 0, sizeof(removed));
+  memcpy(out, rects, count * sizeof(FrameDamageRect));
+
+  do
+  {
+    changed = false;
+    for (int i = 0; i < count; ++i)
+      if (!removed[i])
+        for (int j = i + 1; j < count; ++j)
+          if (!removed[j] && rectIntersects(out + i, out + j))
+          {
+            uint32_t x2 = max(out[i].x + out[i].width, out[j].x + out[j].width);
+            uint32_t y2 = max(out[i].y + out[i].height, out[j].y + out[j].height);
+            out[i].x = min(out[i].x, out[j].x);
+            out[i].y = min(out[i].y, out[j].y);
+            out[i].width  = x2 - out[i].x;
+            out[i].height = y2 - out[i].y;
+            removed[j] = true;
+            changed = true;
+          }
+  }
+  while (changed);
+
+  int o = 0;
+  for (int i = 0; i < count; ++i)
+    if (!removed[i])
+      out[o++] = out[i];
+  return o;
+}
