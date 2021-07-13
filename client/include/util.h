@@ -25,6 +25,9 @@
 #include <stdbool.h>
 #include "common/types.h"
 
+#define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
+#define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
+
 // reads the specified file into a new buffer
 // the callee must free the buffer
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length);
@@ -34,6 +37,7 @@ bool util_guestCurToLocal(struct DoublePoint *local);
 void util_localCurToGuest(struct DoublePoint *guest);
 void util_rotatePoint(struct DoublePoint *point);
 bool util_hasGLExt(const char * exts, const char * ext);
+int util_mergeOverlappingRects(FrameDamageRect * out, const FrameDamageRect * rects, int count);
 
 static inline double util_clamp(double x, double min, double max)
 {
