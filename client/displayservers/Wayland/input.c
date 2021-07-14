@@ -444,7 +444,7 @@ void waylandWarpPointer(int x, int y, bool exiting)
 
   INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    if (!wlWm.lockedPointer)
+    if (wlWm.lockedPointer)
     {
       LG_UNLOCK(wlWm.confineLock);
       return;
