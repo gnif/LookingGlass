@@ -88,13 +88,20 @@ The mouse is jumpy, slow, laggy when using SPICE
 Please be sure to install the SPICE guest tools from
 https://www.spice-space.org/download.html#windows-binaries.
 
-.. _the_mouse_doesnt_stay_aligned_with_the_host.:
+.. _mouse_desync_when_exiting:
 
-The mouse doesn't stay aligned with the host.
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The mouse doesn't stay aligned with the host when exiting the window
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This is intentional. The host's mouse no longer interacts with your operating
-system, and is completely captured by Looking Glass.
+This is due to windows mouse acceleration, it can be disabled by
+following one of these methods:
+
+-  Disabling pointer precision (Control Panel > Mouse > Pointer Options
+   > Uncheck Enhance pointer precision)
+-  By changing the acceleration behavior with the following registry
+   magic:
+   http://donewmouseaccel.blogspot.com.au/2010/03/markc-windows-7-mouse-acceleration-fix.html
+   (Contrary to the title this works just fine on Windows 10)
 
 .. _the_cursor_position_doesnt_update_until_i_click:
 
