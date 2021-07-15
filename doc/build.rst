@@ -59,14 +59,12 @@ Required Dependencies
 -  libgl-dev
 -  libfontconfig1-dev
 -  libgmp-dev
--  libsdl2-dev
--  libsdl2-ttf-dev
 -  libspice-protocol-dev
 -  make
 -  nettle-dev
 -  pkg-config
 
-.. _may_be_disabled:
+.. _client_deps_may_be_disabled:
 
 May be disabled
 <<<<<<<<<<<<<<<
@@ -83,6 +81,7 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  libx11-dev
    -  libxfixes-dev
    -  libxi-dev
+   -  libxinerama-dev
    -  libxss-dev
 
 -  Disable with ``cmake -DENABLE_WAYLAND=no ..``
@@ -91,11 +90,33 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  libwayland-dev
    -  wayland-protocols
 
-You can fetch these dependencies on Debian systems with the following command:
+.. _client_deps_deprecated:
+
+Deprecated
+<<<<<<<<<<
+
+These dependencies may be used, but are not required, and will be removed
+in the future.
+
+-  Enable with ``cmake -DENABLE_SDL=yes ..``
+
+   -  libsdl2-dev
+   -  libsdl2-ttf-dev
+
+.. _client_fetching_with_apt:
+
+Fetching with APT
+^^^^^^^^^^^^^^^^^
+
+You can fetch these dependencies with the following command:
 
 ``apt-get install binutils-dev cmake fonts-freefont-ttf libfontconfig1-dev
-libsdl2-dev libsdl2-ttf-dev libspice-protocol-dev libx11-dev nettle-dev
-wayland-protocols``
+libegl-dev libspice-protocol-dev nettle-dev libx11-dev libxi-dev libxinerama-dev
+libxss-dev libwayland-dev wayland-protocols``
+
+You may omit some dependencies, if you disable the feature which requires them
+when running :ref:`cmake <client_building>`.
+(See :ref:`client_deps_may_be_disabled`)
 
 
 .. _client_building:
