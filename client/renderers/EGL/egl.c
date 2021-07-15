@@ -44,6 +44,7 @@
 #include "egl_dynprocs.h"
 #include "model.h"
 #include "shader.h"
+#include "damage.h"
 #include "desktop.h"
 #include "cursor.h"
 #include "fps.h"
@@ -58,12 +59,6 @@ struct Options
 {
   bool vsync;
   bool doubleBuffer;
-};
-
-struct DesktopDamage
-{
-  int count;
-  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
 };
 
 struct Inst
@@ -84,6 +79,7 @@ struct Inst
   EGL_Splash      * splash;  // the splash screen
   EGL_Alert       * alert;   // the alert display
   EGL_Help        * help;    // the help display
+  EGL_Damage      * damage;  // the damage display
   bool              imgui;   // if imgui was initialized
 
   LG_RendererFormat    format;
@@ -96,6 +92,7 @@ struct Inst
   uint64_t alertTimeout;
   bool     useCloseFlag;
   bool     closeFlag;
+  bool     showDamage;
 
   int               width, height;
   float             uiScale;
@@ -314,7 +311,8 @@ void egl_deinitialize(void * opaque)
   egl_fps_free    (&this->fps   );
   egl_splash_free (&this->splash);
   egl_alert_free  (&this->alert );
-  egl_help_free   (&this->help);
+  egl_help_free   (&this->help  );
+  egl_damage_free (&this->damage);
 
   LG_LOCK_FREE(this->lock);
 
@@ -507,6 +505,8 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   }
   damage->count = 0;
   free(atomic_exchange(&this->desktopDamage, damage));
+
+  egl_damage_resize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
 }
 
 bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
@@ -566,6 +566,8 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool use
   }
 
   egl_update_scale_type(this);
+  egl_damage_setup(this->damage, format.width, format.height);
+
   return egl_desktop_setup(this->desktop, format, useDMA);
 }
 
@@ -807,6 +809,12 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
+  if (!egl_damage_init(&this->damage))
+  {
+    DEBUG_ERROR("Failed to initialize the damage display");
+    return false;
+  }
+
   // glew is needed for imgui
   if (!glewInit())
   {
@@ -913,6 +921,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
 
   hasOverlay |= egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   hasOverlay |= egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
+  hasOverlay |= egl_damage_render(this->damage, desktopDamage);
 
   if (app_renderImGui())
   {

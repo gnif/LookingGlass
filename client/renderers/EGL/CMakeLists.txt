@@ -19,6 +19,8 @@ make_object(
 	shader/cursor.vert
 	shader/cursor_rgb.frag
 	shader/cursor_mono.frag
+	shader/damage.vert
+	shader/damage.frag
 	shader/fps.vert
 	shader/fps.frag
 	shader/fps_bg.frag
@@ -52,6 +54,7 @@ add_library(renderer_EGL STATIC
 	draw.c
 	splash.c
 	alert.c
+	damage.c
 	${EGL_SHADER_OBJS}
 	"${EGL_SHADER_INCS}/desktop_rgb.def.h"
 	${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp
