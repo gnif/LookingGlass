@@ -272,6 +272,11 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     glGenFramebuffers(1, &texture->dmaFBO);
     glGenTextures(1, &texture->dmaTex);
 
+    glBindTexture(GL_TEXTURE_2D, texture->tex[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, texture->width,
+      texture->height, 0, texture->format, texture->dataType, NULL);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
     for (size_t i = 0; i < texture->dmaImageUsed; ++i)
       eglDestroyImage(texture->display, texture->dmaImages[i].image);
     texture->dmaImageUsed = 0;
@@ -465,7 +470,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->dmaTex, 0);
 
   glBindTexture(GL_TEXTURE_2D, texture->tex[0]);
-  glCopyTexImage2D(GL_TEXTURE_2D, 0, texture->intFormat, 0, 0, texture->width, texture->height, 0);
+  glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, texture->width, texture->height);
 
   GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   glFlush();
