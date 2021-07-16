@@ -88,10 +88,10 @@ The mouse is jumpy, slow, laggy when using SPICE
 Please be sure to install the SPICE guest tools from
 https://www.spice-space.org/download.html#windows-binaries.
 
-.. _mouse_desync_when_exiting:
+.. _mouse_desync_when_entering:
 
-The mouse doesn't stay aligned with the host when exiting the window
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The mouse position is wrong when entering the window
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This is due to windows mouse acceleration, it can be disabled by
 following one of these methods:
