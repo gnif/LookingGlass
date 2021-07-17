@@ -165,11 +165,6 @@ static void xcb_free(void)
   this = NULL;
 }
 
-static unsigned int xcb_getMouseScale(void)
-{
-  return 100;
-}
-
 static CaptureResult xcb_capture(void)
 {
   assert(this);
@@ -243,7 +238,6 @@ struct CaptureInterface Capture_XCB =
   .init            = xcb_init,
   .deinit          = xcb_deinit,
   .free            = xcb_free,
-  .getMouseScale   = xcb_getMouseScale,
   .capture         = xcb_capture,
   .waitFrame       = xcb_waitFrame,
   .getFrame        = xcb_getFrame

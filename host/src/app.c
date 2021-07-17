@@ -235,7 +235,6 @@ static bool sendFrame(void)
   fi->stride            = frame.stride;
   fi->pitch             = frame.pitch;
   fi->offset            = app.pageSize - FrameBufferStructSize;
-  fi->mouseScalePercent = app.iface->getMouseScale();
   fi->blockScreensaver  = os_blockScreensaver();
   app.frameValid        = true;
 
