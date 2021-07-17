@@ -260,12 +260,10 @@ void core_updatePositionInfo(void)
 
   g_cursor.useScale = (
       srcH       != g_state.dstRect.h ||
-      srcW       != g_state.dstRect.w ||
-      g_cursor.guest.dpiScale != 100);
+      srcW       != g_state.dstRect.w);
 
   g_cursor.scale.x  = (float)srcW / (float)g_state.dstRect.w;
   g_cursor.scale.y  = (float)srcH / (float)g_state.dstRect.h;
-  g_cursor.dpiScale = g_cursor.guest.dpiScale / 100.0f;
 
   if (!g_state.posInfoValid)
   {
