@@ -55,6 +55,7 @@ struct AppState
   bool                 stopVideo;
   bool                 ignoreInput;
   bool                 showFPS;
+  bool                 showTiming;
   bool                 escapeActive;
   uint64_t             escapeTime;
   int                  escapeAction;

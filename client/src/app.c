@@ -642,6 +642,9 @@ bool rbCalcMetrics(int index, float * value, float * udata)
 
 bool app_renderImGui(void)
 {
+  if (!g_state.showTiming)
+    return false;
+
   igNewFrame();
 
   ImGuiStyle * style = igGetStyle();
