@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include <Windows.h>
+#include <windows.h>
 
 typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution,
     BOOLEAN Set, PULONG ActualResolution);
