@@ -519,7 +519,7 @@ bool app_init(void)
   {
     ULONG actualResolution;
     ZwSetTimerResolution(1, true, &actualResolution);
-    DEBUG_INFO("System timer resolution: %.2f ns", (float)actualResolution / 100.0f);
+    DEBUG_INFO("System timer resolution: %lu ns", actualResolution * 100);
   }
 
   // get the performance frequency for spinlocks
