@@ -20,6 +20,7 @@
 
 #include "platform.h"
 #include "service.h"
+#include "windows/delay.h"
 #include "windows/mousehook.h"
 
 #include <windows.h>
@@ -60,10 +61,6 @@ struct AppState
 
 static struct AppState app = {0};
 HWND MessageHWND;
-
-// undocumented API to adjust the system timer resolution (yes, its a nasty hack)
-typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution, BOOLEAN Set, PULONG ActualResolution);
-static ZwSetTimerResolution_t ZwSetTimerResolution = NULL;
 
 // linux mingw64 is missing this
 #ifndef MSGFLT_RESET
@@ -504,7 +501,7 @@ void boostPriority(void)
 
 bool app_init(void)
 {
-  const char * logFile   = option_get_string("os", "logFile"  );
+  const char * logFile = option_get_string("os", "logFile");
 
   // redirect stderr to a file
   if (logFile && strcmp(logFile, "stderr") != 0)
@@ -513,14 +510,7 @@ bool app_init(void)
   // always flush stderr
   setbuf(stderr, NULL);
 
-  // Increase the timer resolution
-  ZwSetTimerResolution = (ZwSetTimerResolution_t)GetProcAddress(GetModuleHandle("ntdll.dll"), "ZwSetTimerResolution");
-  if (ZwSetTimerResolution)
-  {
-    ULONG actualResolution;
-    ZwSetTimerResolution(1, true, &actualResolution);
-    DEBUG_INFO("System timer resolution: %lu ns", actualResolution * 100);
-  }
+  delayInit();
 
   // get the performance frequency for spinlocks
   QueryPerformanceFrequency(&app.perfFreq);
