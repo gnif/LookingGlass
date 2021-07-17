@@ -26,7 +26,6 @@
 #include "common/option.h"
 #include "common/locking.h"
 #include "common/event.h"
-#include "common/dpi.h"
 #include "common/runningavg.h"
 #include "common/KVMFR.h"
 
@@ -98,7 +97,6 @@ struct iface
   unsigned int    stride;
   CaptureFormat   format;
   CaptureRotation rotation;
-  unsigned int    dpi;
 
   int  lastPointerX, lastPointerY;
   bool lastPointerVisible;
@@ -419,7 +417,6 @@ static bool dxgi_init(void)
       break;
   }
 
-  this->dpi = monitor_dpi(outputDesc.Monitor);
   ++this->formatVer;
 
   DEBUG_INFO("Feature Level    : 0x%x"   , this->featureLevel);
@@ -672,14 +669,6 @@ static void dxgi_free(void)
   runningavg_free(&this->avgMapTime);
   free(this);
   this = NULL;
-}
-
-static unsigned int dxgi_getMouseScale(void)
-{
-  assert(this);
-  assert(this->initialized);
-
-  return this->dpi * 100 / DPI_100_PERCENT;
 }
 
 static CaptureResult dxgi_hResultToCaptureResult(const HRESULT status)
@@ -1088,7 +1077,6 @@ struct CaptureInterface Capture_DXGI =
   .stop            = dxgi_stop,
   .deinit          = dxgi_deinit,
   .free            = dxgi_free,
-  .getMouseScale   = dxgi_getMouseScale,
   .capture         = dxgi_capture,
   .waitFrame       = dxgi_waitFrame,
   .getFrame        = dxgi_getFrame

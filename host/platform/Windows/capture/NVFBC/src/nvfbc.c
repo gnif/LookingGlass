@@ -27,7 +27,6 @@
 #include "common/framebuffer.h"
 #include "common/event.h"
 #include "common/thread.h"
-#include "common/dpi.h"
 #include "common/KVMFR.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -59,7 +58,6 @@ struct iface
 
   unsigned int maxWidth , maxHeight;
   unsigned int width    , height;
-  unsigned int dpi;
 
   unsigned int formatVer;
   unsigned int grabWidth, grabHeight, grabStride;
@@ -86,7 +84,7 @@ static bool nvfbc_deinit(void);
 static void nvfbc_free(void);
 static int pointerThread(void * unused);
 
-static void getDesktopSize(unsigned int * width, unsigned int * height, unsigned int * dpi)
+static void getDesktopSize(unsigned int * width, unsigned int * height)
 {
   HMONITOR    monitor     = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
   MONITORINFO monitorInfo = {
@@ -94,7 +92,6 @@ static void getDesktopSize(unsigned int * width, unsigned int * height, unsigned
   };
 
   GetMonitorInfo(monitor, &monitorInfo);
-  *dpi = monitor_dpi(monitor);
 
   *width  = monitorInfo.rcMonitor.right  - monitorInfo.rcMonitor.left;
   *height = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
@@ -191,7 +188,7 @@ static bool nvfbc_init(void)
   }
   free(privData);
 
-  getDesktopSize(&this->width, &this->height, &this->dpi);
+  getDesktopSize(&this->width, &this->height);
 
   HANDLE event;
   if (!NvFBCToSysSetup(
@@ -298,14 +295,9 @@ static void nvfbc_free(void)
   NvFBCFree();
 }
 
-static unsigned int nvfbc_getMouseScale(void)
-{
-  return this->dpi * 100 / DPI_100_PERCENT;
-}
-
 static CaptureResult nvfbc_capture(void)
 {
-  getDesktopSize(&this->width, &this->height, &this->dpi);
+  getDesktopSize(&this->width, &this->height);
   NvFBCFrameGrabInfo grabInfo;
   CaptureResult result = NvFBCToSysCapture(
     this->nvfbc,
@@ -602,7 +594,6 @@ struct CaptureInterface Capture_NVFBC =
   .stop            = nvfbc_stop,
   .deinit          = nvfbc_deinit,
   .free            = nvfbc_free,
-  .getMouseScale   = nvfbc_getMouseScale,
   .capture         = nvfbc_capture,
   .waitFrame       = nvfbc_waitFrame,
   .getFrame        = nvfbc_getFrame
