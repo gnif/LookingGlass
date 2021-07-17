@@ -31,8 +31,8 @@ struct mouseHook
   HHOOK       hook;
   MouseHookFn callback;
   int         x, y;
-  HANDLE      event;
-  HANDLE      thread;
+  HANDLE      event , updateEvent;
+  HANDLE      thread, updateThread;
 };
 
 static struct mouseHook mouseHook = { 0 };
@@ -82,6 +82,31 @@ static VOID WINAPI winEventProc(HWINEVENTHOOK hWinEventHook, DWORD event,
       UnhookWindowsHookEx(mouseHook.hook);
       switchDesktopAndHook();
       break;
+  }
+}
+
+static DWORD WINAPI updateThreadProc(LPVOID lParam)
+{
+  HANDLE events[2] = {
+    mouseHook.event,
+    mouseHook.updateEvent
+  };
+
+  while(true)
+  {
+    switch(WaitForMultipleObjects(2, events, FALSE, INFINITE))
+    {
+      case WAIT_OBJECT_0:
+        DEBUG_INFO("Mouse hook update thread received quit request");
+        return 0;
+
+      case WAIT_OBJECT_0 + 1:
+        mouseHook.callback(mouseHook.x, mouseHook.y);
+
+        // limit this to 1000Hz, who has a mouse that updates faster anyway?
+        Sleep(1);
+        break;
+    }
   }
 }
 
@@ -143,11 +168,28 @@ void mouseHook_install(MouseHookFn callback)
     mouseHook.event = CreateEventA(NULL, FALSE, FALSE, NULL);
     if (!mouseHook.event)
     {
-      DEBUG_WINERROR("Failed to create mouse hook uninstall event", GetLastError());
+      DEBUG_WINERROR("Failed to create mouse hook uninstall event",
+          GetLastError());
       return;
     }
   }
-  mouseHook.thread = CreateThread(NULL, 0, threadProc, callback, 0, NULL);
+
+  if (!mouseHook.updateEvent)
+  {
+    mouseHook.updateEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
+    if (!mouseHook.event)
+    {
+      DEBUG_WINERROR("Failed to create mouse hook update event",
+          GetLastError());
+      return;
+    }
+  }
+
+  mouseHook.thread =
+    CreateThread(NULL, 0, threadProc, callback, 0, NULL);
+
+  mouseHook.updateThread =
+    CreateThread(NULL, 0, updateThreadProc, 0, 0, NULL);
 }
 
 void mouseHook_remove(void)
@@ -156,8 +198,10 @@ void mouseHook_remove(void)
     return;
 
   SetEvent(mouseHook.event);
-  WaitForSingleObject(mouseHook.thread, INFINITE);
+  WaitForSingleObject(mouseHook.thread      , INFINITE);
+  WaitForSingleObject(mouseHook.updateThread, INFINITE);
   CloseHandle(mouseHook.thread);
+  CloseHandle(mouseHook.updateThread);
 }
 
 static LRESULT WINAPI mouseHook_hook(int nCode, WPARAM wParam, LPARAM lParam)
@@ -169,7 +213,7 @@ static LRESULT WINAPI mouseHook_hook(int nCode, WPARAM wParam, LPARAM lParam)
     {
       mouseHook.x = msg->pt.x;
       mouseHook.y = msg->pt.y;
-      mouseHook.callback(msg->pt.x, msg->pt.y);
+      SetEvent(mouseHook.updateEvent);
     }
   }
   return CallNextHookEx(mouseHook.hook, nCode, wParam, lParam);
