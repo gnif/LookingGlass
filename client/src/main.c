@@ -256,7 +256,8 @@ static int cursorThread(void * unused)
             g_cursor.guest.y
           );
 
-          lgSignalEvent(e_frame);
+          if (!g_state.stopVideo)
+            lgSignalEvent(e_frame);
         }
 
         const struct timespec req =
@@ -354,7 +355,7 @@ static int cursorThread(void * unused)
       g_cursor.guest.y
     );
 
-    if (g_params.mouseRedraw && g_cursor.guest.visible)
+    if (g_params.mouseRedraw && g_cursor.guest.visible && !g_state.stopVideo)
       lgSignalEvent(e_frame);
   }
 
