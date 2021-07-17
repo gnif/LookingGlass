@@ -44,6 +44,6 @@ void delayInit(void)
 
 void delayExecution(float ms)
 {
-  LARGE_INTEGER interval = { .QuadPart = -1 * (int)(ms * 1000.0f) };
+  LARGE_INTEGER interval = { .QuadPart = -1 * (int)(ms * 10000.0f) };
   NtDelayExecution(FALSE, &interval);
 }
