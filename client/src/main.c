@@ -536,7 +536,6 @@ int main_frameThread(void * unused)
       if (g_params.autoResize)
         g_state.ds->setWindowSize(lgrFormat.width, lgrFormat.height);
 
-      g_cursor.guest.dpiScale = frame->mouseScalePercent;
       core_updatePositionInfo();
     }
 

@@ -202,9 +202,6 @@ struct CursorInfo
 
   /* true if the details in this struct are valid */
   bool valid;
-
-  /* the DPI scaling of the guest */
-  uint32_t dpiScale;
 };
 
 struct CursorState
@@ -232,9 +229,6 @@ struct CursorState
 
   /* the amount to scale the X & Y movements by */
   struct DoublePoint scale;
-
-  /* the dpi scale factor from the guest as a fraction */
-  double dpiScale;
 
   /* the error accumulator */
   struct DoublePoint acc;
