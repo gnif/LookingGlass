@@ -91,19 +91,6 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  libwayland-dev
    -  wayland-protocols
 
-.. _client_deps_deprecated:
-
-Deprecated
-<<<<<<<<<<
-
-These dependencies may be used, but are not required, and will be removed
-in the future.
-
--  Enable with ``cmake -DENABLE_SDL=yes ..``
-
-   -  libsdl2-dev
-   -  libsdl2-ttf-dev
-
 .. _client_fetching_with_apt:
 
 Fetching with APT
