@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 11
+#define KVMFR_VERSION 12
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -79,7 +79,6 @@ typedef struct KVMFRFrame
   uint32_t        offset;             // offset from the start of this header to the FrameBuffer header
   uint32_t        damageRectsCount;   // the number of damage rectangles (zero for full-frame damage)
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
-  uint32_t        mouseScalePercent;  // movement scale factor of the mouse (relates to DPI of display, 100 = no scale)
   bool            blockScreensaver;   // whether the guest has requested to block screensavers
 }
 KVMFRFrame;
