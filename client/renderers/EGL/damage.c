@@ -37,10 +37,9 @@ struct EGL_Damage
 {
   EGL_Shader * shader;
 
-  GLfloat   transform[6];
-  GLuint    buffers[2];
-  GLuint    vao;
-  GLfloat * vertices;
+  GLfloat transform[6];
+  GLuint  buffers[2];
+  GLuint  vao;
 
   bool          show;
   KeybindHandle toggleHandle;
@@ -92,7 +91,6 @@ bool egl_damage_init(EGL_Damage ** damage)
   glBufferData(GL_ARRAY_BUFFER, KVMFR_MAX_DAMAGE_RECTS * 8 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
   glEnableVertexAttribArray(0);
   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-  (*damage)->vertices = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   GLushort indices[KVMFR_MAX_DAMAGE_RECTS * 6];
@@ -124,11 +122,7 @@ void egl_damage_free(EGL_Damage ** damage)
 
   app_releaseKeybind(&(*damage)->toggleHandle);
   glDeleteVertexArrays(1, &(*damage)->vao);
-
-  glBindBuffer(GL_ARRAY_BUFFER, (*damage)->buffers[0]);
-  glUnmapBuffer(GL_ARRAY_BUFFER);
   glDeleteBuffers(2, (*damage)->buffers);
-
   egl_shader_free(&(*damage)->shader);
 
   free(*damage);
@@ -187,19 +181,24 @@ bool egl_damage_render(EGL_Damage * damage, const struct DesktopDamage * data)
   egl_shader_use(damage->shader);
   glUniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
 
+  GLfloat vertices[KVMFR_MAX_DAMAGE_RECTS * 8];
   if (count == 0)
   {
-    FrameDamageRect rect = {
+    FrameDamageRect full = {
       .x = 0, .y = 0, .width = damage->width, .height = damage->height,
     };
-    rectToVertices(damage->vertices, &rect);
     count = 1;
+    rectToVertices(vertices, &full);
   }
   else
   {
     for (int i = 0; i < count; ++i)
-      rectToVertices(damage->vertices + i * 8, data->rects + i);
+      rectToVertices(vertices + i * 8, data->rects + i);
   }
+
+  glBindBuffer(GL_ARRAY_BUFFER, damage->buffers[0]);
+  glBufferSubData(GL_ARRAY_BUFFER, 0, count * 8 * sizeof(GLfloat), vertices);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   glBindVertexArray(damage->vao);
   glDrawElements(GL_TRIANGLES, 6 * count, GL_UNSIGNED_SHORT, NULL);
