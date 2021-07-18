@@ -25,9 +25,6 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 
-// if GLEW is included, GLeglImageOES was not defined
-typedef void * GLeglImageOES;
-
 typedef EGLDisplay (*eglGetPlatformDisplayEXT_t)(EGLenum platform,
     void *native_display, const EGLint *attrib_list);
 typedef void (*eglSwapBuffersWithDamageKHR_t)(EGLDisplay dpy,
