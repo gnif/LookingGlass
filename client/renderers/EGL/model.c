@@ -38,6 +38,7 @@ struct EGL_Model
   bool        finish;
 
   GLuint  buffer;
+  GLuint  vao;
 
   EGL_Shader  * shader;
   EGL_Texture * texture;
@@ -84,6 +85,9 @@ void egl_model_free(EGL_Model ** model)
 
   if ((*model)->buffer)
     glDeleteBuffers(1, &(*model)->buffer);
+
+  if ((*model)->vao)
+    glDeleteVertexArrays(1, &(*model)->vao);
 
   free(*model);
   *model = NULL;
@@ -139,6 +143,11 @@ void egl_model_render(EGL_Model * model)
     if (model->buffer)
       glDeleteBuffers(1, &model->buffer);
 
+    if (!model->vao)
+      glGenVertexArrays(1, &model->vao);
+
+    glBindVertexArray(model->vao);
+
     /* create a buffer large enough */
     glGenBuffers(1, &model->buffer);
     glBindBuffer(GL_ARRAY_BUFFER, model->buffer);
@@ -161,16 +170,18 @@ void egl_model_render(EGL_Model * model)
       offset += sizeof(GLfloat) * fl->count * 2;
     }
 
+    /* set up vertex arrays in the VAO */
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(GLfloat) * model->vertexCount * 3));
+
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
     model->rebuild = false;
   }
 
-  /* bind the model buffer and setup the pointers */
-  glBindBuffer(GL_ARRAY_BUFFER, model->buffer);
-  glEnableVertexAttribArray(0);
-  glEnableVertexAttribArray(1);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(GLfloat) * model->vertexCount * 3));
+  glBindVertexArray(model->vao);
 
   if (model->shader)
     egl_shader_use(model->shader);
@@ -189,8 +200,7 @@ void egl_model_render(EGL_Model * model)
 
   /* unbind and cleanup */
   glBindTexture(GL_TEXTURE_2D, 0);
-  glDisableVertexAttribArray(0);
-  glDisableVertexAttribArray(1);
+  glBindVertexArray(0);
   glUseProgram(0);
 }
 
