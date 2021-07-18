@@ -22,7 +22,6 @@
 
 #include <stdbool.h>
 
-#include "common/types.h"
 #include "interface/renderer.h"
 
 typedef struct EGL_Desktop EGL_Desktop;
@@ -41,8 +40,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display);
 void egl_desktop_free(EGL_Desktop ** desktop);
 
 bool egl_desktop_setup (EGL_Desktop * desktop, const LG_RendererFormat format, bool useDMA);
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * rects, int rectsCount);
+bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd);
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate);
