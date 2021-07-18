@@ -612,14 +612,6 @@ void app_showHelp(bool show)
   free(help);
 }
 
-void app_showFPS(bool showFPS)
-{
-  if (!g_state.lgr)
-    return;
-
-  g_state.lgr->on_show_fps(g_state.lgrData, showFPS);
-}
-
 struct ImGuiGraph
 {
   const char * name;
@@ -676,7 +668,8 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
 
 bool app_renderImGui(void)
 {
-  if (!g_state.showTiming)
+  if (!g_state.showFPS &&
+      !g_state.showTiming)
     return false;
 
   igNewFrame();
@@ -684,53 +677,79 @@ bool app_renderImGui(void)
   ImGuiStyle * style = igGetStyle();
   style->WindowBorderSize = 0.0f;
 
-  const ImVec2 pos = {0.0f, 0.0f};
-  igSetNextWindowBgAlpha(0.4f);
-  igSetNextWindowPos(pos, 0, pos);
-
-  igBegin(
-    "Performance Metrics",
-    NULL,
-    ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
-    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-    ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
-  );
-
-  GraphHandle graph;
-  for (ll_reset(g_state.graphs); ll_walk(g_state.graphs, (void **)&graph); )
+  if (g_state.showFPS)
   {
-    if (!graph->enabled)
-      continue;
+    const ImVec2 pos = {0.0f, 0.0f};
+    igSetNextWindowPos(pos, 0, pos);
 
-    struct BufferMetrics metrics = {};
-    ringbuffer_forEach(graph->buffer, rbCalcMetrics, &metrics);
+    igBegin(
+      "FPS",
+      NULL,
+      ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
+    );
 
-    if (metrics.sum > 0.0f)
-    {
-      metrics.avg  = metrics.sum / ringbuffer_getCount(graph->buffer);
-      metrics.freq = 1000.0f / metrics.avg;
-    }
+    const float fps = 1000.0f / (g_state.renderTimeTotal /
+      ringbuffer_getCount(g_state.renderTimings));
+    const float ups = 1000.0f / (g_state.frameTimeTotal  /
+      ringbuffer_getCount(g_state.frameTimings));
 
-    char  title[64];
-    const ImVec2 size = {400.0f, 100.0f};
+    igText("FPS:%4.2f UPS:%4.2f", fps, ups);
 
-    snprintf(title, sizeof(title),
-        "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
-        graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
-
-    igPlotLinesFloatPtr(
-        "",
-        (float *)ringbuffer_getValues(graph->buffer),
-        ringbuffer_getLength(graph->buffer),
-        ringbuffer_getStart (graph->buffer),
-        title,
-        0.0f,
-        50.0f,
-        size,
-        sizeof(float));
+    igEnd();
   }
 
-  igEnd();
+  if (g_state.showTiming)
+  {
+    const ImVec2 pos = {0.0f, 0.0f};
+    igSetNextWindowBgAlpha(0.4f);
+    igSetNextWindowPos(pos, 0, pos);
+
+    igBegin(
+      "Performance Metrics",
+      NULL,
+      ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
+    );
+
+    GraphHandle graph;
+    for (ll_reset(g_state.graphs); ll_walk(g_state.graphs, (void **)&graph); )
+    {
+      if (!graph->enabled)
+        continue;
+
+      struct BufferMetrics metrics = {};
+      ringbuffer_forEach(graph->buffer, rbCalcMetrics, &metrics);
+
+      if (metrics.sum > 0.0f)
+      {
+        metrics.avg  = metrics.sum / ringbuffer_getCount(graph->buffer);
+        metrics.freq = 1000.0f / metrics.avg;
+      }
+
+      char  title[64];
+      const ImVec2 size = {400.0f, 100.0f};
+
+      snprintf(title, sizeof(title),
+          "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
+          graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
+
+      igPlotLinesFloatPtr(
+          "",
+          (float *)ringbuffer_getValues(graph->buffer),
+          ringbuffer_getLength(graph->buffer),
+          ringbuffer_getStart (graph->buffer),
+          title,
+          0.0f,
+          50.0f,
+          size,
+          sizeof(float));
+    }
+
+    igEnd();
+  }
 
   igRender();
   return true;

@@ -46,7 +46,6 @@
 #include "damage.h"
 #include "desktop.h"
 #include "cursor.h"
-#include "fps.h"
 #include "splash.h"
 #include "alert.h"
 #include "help.h"
@@ -74,7 +73,6 @@ struct Inst
 
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
-  EGL_FPS         * fps;     // the fps display
   EGL_Splash      * splash;  // the splash screen
   EGL_Alert       * alert;   // the alert display
   EGL_Help        * help;    // the help display
@@ -214,9 +212,6 @@ static bool egl_update_font(struct Inst * this)
   if (this->alert)
     egl_alert_set_font(this->alert, fontObj);
 
-  if (this->fps)
-    egl_fps_set_font(this->fps, fontObj);
-
   if (this->fontObj)
     this->font->destroy(this->fontObj);
   this->fontObj = fontObj;
@@ -314,7 +309,6 @@ void egl_deinitialize(void * opaque)
 
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
-  egl_fps_free    (&this->fps   );
   egl_splash_free (&this->splash);
   egl_alert_free  (&this->alert );
   egl_help_free   (&this->help  );
@@ -647,12 +641,6 @@ void egl_on_help(void * opaque, const char * message)
   this->cursorLastValid = false;
 }
 
-void egl_on_show_fps(void * opaque, bool showFPS)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  egl_fps_set_display(this->fps, showFPS);
-}
-
 static void debugCallback(GLenum source, GLenum type, GLuint id,
     GLenum severity, GLsizei length, const GLchar * message,
     const void * userParam)
@@ -894,12 +882,6 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
-  if (!egl_fps_init(&this->fps, this->font, this->fontObj))
-  {
-    DEBUG_ERROR("Failed to initialize the FPS display");
-    return false;
-  }
-
   if (!egl_splash_init(&this->splash))
   {
     DEBUG_ERROR("Failed to initialize the splash screen");
@@ -1021,7 +1003,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
     }
   }
 
-  hasOverlay |= egl_fps_render(this->fps, this->screenScaleX, this->screenScaleY);
   hasOverlay |= egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
   hasOverlay |= egl_damage_render(this->damage, desktopDamage);
 
@@ -1088,13 +1069,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
   return true;
 }
 
-void egl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  egl_fps_update(this->fps, avgUPS, avgFPS);
-  this->cursorLastValid = false;
-}
-
 struct LG_Renderer LGR_EGL =
 {
   .get_name        = egl_get_name,
@@ -1111,8 +1085,6 @@ struct LG_Renderer LGR_EGL =
   .on_frame        = egl_on_frame,
   .on_alert        = egl_on_alert,
   .on_help         = egl_on_help,
-  .on_show_fps     = egl_on_show_fps,
   .render_startup  = egl_render_startup,
-  .render          = egl_render,
-  .update_fps      = egl_update_fps
+  .render          = egl_render
 };

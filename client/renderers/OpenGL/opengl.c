@@ -151,7 +151,6 @@ struct Inst
   bool              texReady;
   int               texWIndex, texRIndex;
   int               texList;
-  int               fpsList;
   int               mouseList;
   LG_RendererRect   destRect;
 
@@ -165,10 +164,6 @@ struct Inst
   bool              waiting;
   uint64_t          waitFadeTime;
   bool              waitDone;
-
-  bool              showFPS;
-  bool              fpsTexture;
-  struct IntRect    fpsRect;
 
   LG_Lock           mouseLock;
   LG_RendererCursor mouseCursor;
@@ -279,7 +274,6 @@ void opengl_deinitialize(void * opaque)
 
     glDeleteLists(this->texList  , BUFFER_COUNT);
     glDeleteLists(this->mouseList, 1);
-    glDeleteLists(this->fpsList  , 1);
     glDeleteLists(this->alertList, 1);
   }
 
@@ -502,12 +496,6 @@ void opengl_on_help(void * opaque, const char * message)
   // TODO: Implement this.
 }
 
-void opengl_on_show_fps(void * opaque, bool showFPS)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  this->showFPS = showFPS;
-}
-
 void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
 {
   glBindTexture(GL_TEXTURE_2D       , texture      );
@@ -574,7 +562,6 @@ bool opengl_render_startup(void * opaque)
   // generate lists for drawing
   this->texList   = glGenLists(BUFFER_COUNT);
   this->mouseList = glGenLists(1);
-  this->fpsList   = glGenLists(1);
   this->alertList = glGenLists(1);
 
   // create the overlay textures
@@ -631,9 +618,6 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
     if (!this->waitDone)
       render_wait(this);
   }
-
-  if (this->showFPS && this->fpsTexture)
-    glCallList(this->fpsList);
 
   struct Alert * alert;
   while(ll_peek_head(this->alerts, (void **)&alert))
@@ -719,55 +703,6 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate)
 
   this->mouseUpdate = false;
   return true;
-}
-
-void opengl_update_fps(void * opaque, const float avgUPS, const float avgFPS)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this->showFPS)
-    return;
-
-  char str[128];
-  snprintf(str, sizeof(str), "UPS: %8.4f, FPS: %8.4f", avgUPS, avgFPS);
-
-  LG_FontBitmap *textSurface = NULL;
-  if (!(textSurface = this->font->render(this->fontObj, 0xffffff00, str)))
-    DEBUG_ERROR("Failed to render text");
-
-  bitmap_to_texture(textSurface, this->textures[FPS_TEXTURE]);
-
-  this->fpsRect.x = 5;
-  this->fpsRect.y = 5;
-  this->fpsRect.w = textSurface->width;
-  this->fpsRect.h = textSurface->height;
-
-  this->font->release(this->fontObj, textSurface);
-
-  this->fpsTexture  = true;
-
-  glNewList(this->fpsList, GL_COMPILE);
-    glEnable(GL_BLEND);
-    glDisable(GL_TEXTURE_2D);
-    glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
-    glBegin(GL_TRIANGLE_STRIP);
-      glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-      glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-      glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-      glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-    glEnd();
-    glEnable(GL_TEXTURE_2D);
-
-    glBindTexture(GL_TEXTURE_2D, this->textures[FPS_TEXTURE]);
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    glBegin(GL_TRIANGLE_STRIP);
-      glTexCoord2f(0.0f , 0.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y                  );
-      glTexCoord2f(1.0f , 0.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y                  );
-      glTexCoord2f(0.0f , 1.0f); glVertex2i(this->fpsRect.x                  , this->fpsRect.y + this->fpsRect.h);
-      glTexCoord2f(1.0f,  1.0f); glVertex2i(this->fpsRect.x + this->fpsRect.w, this->fpsRect.y + this->fpsRect.h);
-    glEnd();
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDisable(GL_BLEND);
-  glEndList();
 }
 
 void draw_torus(float x, float y, float inner, float outer, unsigned int pts)
@@ -880,10 +815,8 @@ const LG_Renderer LGR_OpenGL =
   .on_frame        = opengl_on_frame,
   .on_alert        = opengl_on_alert,
   .on_help         = opengl_on_help,
-  .on_show_fps     = opengl_on_show_fps,
   .render_startup  = opengl_render_startup,
-  .render          = opengl_render,
-  .update_fps      = opengl_update_fps
+  .render          = opengl_render
 };
 
 static bool _check_gl_error(unsigned int line, const char * name)

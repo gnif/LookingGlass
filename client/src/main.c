@@ -108,8 +108,6 @@ static int renderThread(void * unused)
 
   LG_LOCK_INIT(g_state.lgrLock);
 
-  g_state.lgr->on_show_fps(g_state.lgrData, g_state.showFPS);
-
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
@@ -157,30 +155,9 @@ static int renderThread(void * unused)
     {
       const float fdelta = (float)delta / 1000000.0f;
       ringbuffer_push(g_state.renderTimings, &fdelta);
+      g_state.renderTimeTotal += fdelta;
     }
     g_state.lastRenderTimeValid = true;
-
-    if (g_state.showFPS)
-    {
-      g_state.renderTime   += delta;
-      ++g_state.renderCount;
-
-      if (g_state.renderTime > 1e9)
-      {
-        const float avgUPS = 1000.0f / (((float)g_state.renderTime /
-          atomic_exchange_explicit(&g_state.frameCount, 0, memory_order_acquire)) /
-          1e6f);
-
-        const float avgFPS = 1000.0f / (((float)g_state.renderTime /
-          g_state.renderCount) /
-          1e6f);
-
-        g_state.lgr->update_fps(g_state.lgrData, avgUPS, avgFPS);
-
-        g_state.renderTime  = 0;
-        g_state.renderCount = 0;
-      }
-    }
 
     const uint64_t now = microtime();
     if (!g_state.resizeDone && g_state.resizeTimeout < now)
@@ -614,10 +591,10 @@ int main_frameThread(void * unused)
     {
       const float fdelta = (float)delta / 1000000.0f;
       ringbuffer_push(g_state.frameTimings, &fdelta);
+      g_state.frameTimeTotal += fdelta;
     }
     g_state.lastFrameTimeValid = true;
 
-    atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
     lgSignalEvent(e_frame);
     lgmpClientMessageDone(queue);
   }
@@ -702,6 +679,13 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
   return true;
 }
 
+static void rbSubtractFloat(void * value_, void * udata_)
+{
+  float * value = (float *)value_;
+  float * udata = (float *)udata_;
+  *udata -= *value;
+}
+
 static int lg_run(void)
 {
   memset(&g_state, 0, sizeof(g_state));
@@ -725,6 +709,11 @@ static int lg_run(void)
   // initialize metrics ringbuffers
   g_state.renderTimings = ringbuffer_new(256, sizeof(float));
   g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
+
+  ringbuffer_setPreOverwriteFn(g_state.renderTimings, rbSubtractFloat,
+      &g_state.renderTimeTotal);
+  ringbuffer_setPreOverwriteFn(g_state.frameTimings , rbSubtractFloat,
+      &g_state.frameTimeTotal);
 
   app_registerGraph("RENDER", g_state.renderTimings);
   app_registerGraph("UPLOAD", g_state.frameTimings);

@@ -51,7 +51,6 @@ static void bind_video(int sc, void * opaque)
 static void bind_showFPS(int sc, void * opaque)
 {
   g_state.showFPS = !g_state.showFPS;
-  app_showFPS(g_state.showFPS);
 }
 
 static void bind_showTiming(int sc, void * opaque)
