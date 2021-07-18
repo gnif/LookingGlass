@@ -177,6 +177,13 @@ static struct Option egl_options[] =
     .validator    = egl_desktop_scale_validate,
     .value.x_int  = 0
   },
+  {
+    .module       = "egl",
+    .name         = "debug",
+    .description  = "Enable debug output",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = false
+  },
   {0}
 };
 
@@ -661,10 +668,9 @@ static void debugCallback(GLenum source, GLenum type, GLuint id,
       level = DEBUG_LEVEL_WARN;
       break;
     case GL_DEBUG_SEVERITY_LOW:
+    case GL_DEBUG_SEVERITY_NOTIFICATION:
       level = DEBUG_LEVEL_INFO;
       break;
-    case GL_DEBUG_SEVERITY_NOTIFICATION:
-      return;
   }
 
   const char * sourceName = "unknown";
@@ -785,9 +791,11 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
+  bool debugContext = option_get_bool("egl", "debug");
   EGLint ctxattr[] =
   {
     EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_CONTEXT_OPENGL_DEBUG  , debugContext ? EGL_TRUE : EGL_FALSE,
     EGL_NONE
   };
 
@@ -855,20 +863,23 @@ bool egl_render_startup(void * opaque)
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
   }
 
-  if ((esMaj > 3 || (esMaj == 3 && esMin >= 2)) && g_egl_dynProcs.glDebugMessageCallback)
+  if (debugContext)
   {
-    glEnable(GL_DEBUG_OUTPUT);
-    g_egl_dynProcs.glDebugMessageCallback(debugCallback, NULL);
-    DEBUG_INFO("Using debug message callback from OpenGL ES 3.2+");
-  }
-  else if (util_hasGLExt(gl_exts, "GL_KHR_debug") && g_egl_dynProcs.glDebugMessageCallbackKHR)
-  {
-    glEnable(GL_DEBUG_OUTPUT);
-    g_egl_dynProcs.glDebugMessageCallbackKHR(debugCallback, NULL);
-    DEBUG_INFO("Using debug message callback from GL_KHR_debug");
+    if ((esMaj > 3 || (esMaj == 3 && esMin >= 2)) && g_egl_dynProcs.glDebugMessageCallback)
+    {
+      g_egl_dynProcs.glDebugMessageCallback(debugCallback, NULL);
+      DEBUG_INFO("Using debug message callback from OpenGL ES 3.2+");
+    }
+    else if (util_hasGLExt(gl_exts, "GL_KHR_debug") && g_egl_dynProcs.glDebugMessageCallbackKHR)
+    {
+      g_egl_dynProcs.glDebugMessageCallbackKHR(debugCallback, NULL);
+      DEBUG_INFO("Using debug message callback from GL_KHR_debug");
+    }
+    else
+      DEBUG_INFO("Debug message callback not supported");
   }
   else
-    DEBUG_INFO("Debug message callback not supported");
+    DEBUG_INFO("Debug messages disabled, enable with egl:debug=true");
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
