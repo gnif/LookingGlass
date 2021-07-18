@@ -26,7 +26,7 @@
 #include "shader.h"
 #include "model.h"
 
-#include <GL/gl.h>
+#include <GLES3/gl3.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>

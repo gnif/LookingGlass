@@ -19,7 +19,6 @@
  */
 
 #include "egldebug.h"
-#include <GL/gl.h>
 #include <EGL/egl.h>
 
 const char * egl_getErrorStr(void)

@@ -150,8 +150,8 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
     GL_MAP_WRITE_BIT             |
     GL_MAP_UNSYNCHRONIZED_BIT    |
     GL_MAP_INVALIDATE_BUFFER_BIT |
-    GL_MAP_PERSISTENT_BIT        |
-    GL_MAP_COHERENT_BIT
+    GL_MAP_PERSISTENT_BIT_EXT    |
+    GL_MAP_COHERENT_BIT_EXT
   );
 
   if (!texture->buf[i].map)
@@ -209,8 +209,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
   {
     case EGL_PF_BGRA:
       texture->bpp           = 4;
-      texture->format        = GL_BGRA;
-      texture->intFormat     = GL_BGRA;
+      texture->format        = GL_BGRA_EXT;
+      texture->intFormat     = GL_BGRA_EXT;
       texture->dataType      = GL_UNSIGNED_BYTE;
       texture->fourcc        = DRM_FORMAT_ARGB8888;
       texture->pboBufferSize = height * stride;
@@ -219,7 +219,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     case EGL_PF_RGBA:
       texture->bpp           = 4;
       texture->format        = GL_RGBA;
-      texture->intFormat     = GL_BGRA;
+      texture->intFormat     = GL_RGBA;
       texture->dataType      = GL_UNSIGNED_BYTE;
       texture->fourcc        = DRM_FORMAT_ABGR8888;
       texture->pboBufferSize = height * stride;
@@ -300,13 +300,13 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt, size_
     texture->buf[i].hasPBO = true;
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, texture->buf[i].pbo);
-    glBufferStorage(
+    glBufferStorageEXT(
       GL_PIXEL_UNPACK_BUFFER,
       texture->pboBufferSize,
       NULL,
-      GL_MAP_WRITE_BIT      |
-      GL_MAP_PERSISTENT_BIT |
-      GL_MAP_COHERENT_BIT
+      GL_MAP_WRITE_BIT          |
+      GL_MAP_PERSISTENT_BIT_EXT |
+      GL_MAP_COHERENT_BIT_EXT
     );
 
     if (!egl_texture_map(texture, i))

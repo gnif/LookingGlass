@@ -24,7 +24,7 @@
 #include "shader.h"
 #include "texture.h"
 
-#include <GL/gl.h>
+#include <GLES3/gl3.h>
 
 typedef struct EGL_Model EGL_Model;
 
