@@ -647,6 +647,84 @@ void egl_on_show_fps(void * opaque, bool showFPS)
   egl_fps_set_display(this->fps, showFPS);
 }
 
+static void debugCallback(GLenum source, GLenum type, GLuint id,
+    GLenum severity, GLsizei length, const GLchar * message,
+    const void * userParam)
+{
+  enum DebugLevel level = DEBUG_LEVEL_FIXME;
+  switch (severity)
+  {
+    case GL_DEBUG_SEVERITY_HIGH:
+      level = DEBUG_LEVEL_ERROR;
+      break;
+    case GL_DEBUG_SEVERITY_MEDIUM:
+      level = DEBUG_LEVEL_WARN;
+      break;
+    case GL_DEBUG_SEVERITY_LOW:
+      level = DEBUG_LEVEL_INFO;
+      break;
+    case GL_DEBUG_SEVERITY_NOTIFICATION:
+      return;
+  }
+
+  const char * sourceName = "unknown";
+  switch (source)
+  {
+    case GL_DEBUG_SOURCE_API:
+      sourceName = "OpenGL API";
+      break;
+    case GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+      sourceName = "window system";
+      break;
+    case GL_DEBUG_SOURCE_SHADER_COMPILER:
+      sourceName = "shader compiler";
+      break;
+    case GL_DEBUG_SOURCE_THIRD_PARTY:
+      sourceName = "third party";
+      break;
+    case GL_DEBUG_SOURCE_APPLICATION:
+      sourceName = "application";
+      break;
+    case GL_DEBUG_SOURCE_OTHER:
+      sourceName = "other";
+      break;
+  }
+
+  const char * typeName = "unknown";
+  switch (type)
+  {
+    case GL_DEBUG_TYPE_ERROR:
+      typeName = "error";
+      break;
+    case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+      typeName = "deprecated behaviour";
+      break;
+    case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+      typeName = "undefined behaviour";
+      break;
+    case GL_DEBUG_TYPE_PORTABILITY:
+      typeName = "portability";
+      break;
+    case GL_DEBUG_TYPE_PERFORMANCE:
+      typeName = "performance";
+      break;
+    case GL_DEBUG_TYPE_MARKER:
+      typeName = "marker";
+      break;
+    case GL_DEBUG_TYPE_PUSH_GROUP:
+      typeName = "group pushing";
+      break;
+    case GL_DEBUG_TYPE_POP_GROUP:
+      typeName = "group popping";
+      break;
+    case GL_DEBUG_TYPE_OTHER:
+      typeName = "other";
+      break;
+  }
+
+  DEBUG_PRINT(level, "GL message (source: %s, type: %s): %s", sourceName, typeName, message);
+}
+
 bool egl_render_startup(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -739,14 +817,20 @@ bool egl_render_startup(void * opaque)
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
   const char *client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
+  const char *gl_exts     = (const char *)glGetString(GL_EXTENSIONS);
   const char *vendor      = (const char *)glGetString(GL_VENDOR);
 
-  DEBUG_INFO("EGL       : %d.%d", maj, min);
-  DEBUG_INFO("Vendor    : %s", vendor);
-  DEBUG_INFO("Renderer  : %s", glGetString(GL_RENDERER));
-  DEBUG_INFO("Version   : %s", glGetString(GL_VERSION ));
-  DEBUG_INFO("EGL APIs  : %s", eglQueryString(this->display, EGL_CLIENT_APIS));
-  DEBUG_INFO("Extensions: %s", client_exts);
+  DEBUG_INFO("EGL     : %d.%d", maj, min);
+  DEBUG_INFO("Vendor  : %s", vendor);
+  DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
+  DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
+  DEBUG_INFO("EGL APIs: %s", eglQueryString(this->display, EGL_CLIENT_APIS));
+  DEBUG_INFO("EGL Exts: %s", client_exts);
+  DEBUG_INFO("GL Exts : %s", gl_exts);
+
+  GLint esMaj, esMin;
+  glGetIntegerv(GL_MAJOR_VERSION, &esMaj);
+  glGetIntegerv(GL_MINOR_VERSION, &esMin);
 
   if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
@@ -770,6 +854,21 @@ bool egl_render_startup(void * opaque)
   {
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
   }
+
+  if ((esMaj > 3 || (esMaj == 3 && esMin >= 2)) && g_egl_dynProcs.glDebugMessageCallback)
+  {
+    glEnable(GL_DEBUG_OUTPUT);
+    g_egl_dynProcs.glDebugMessageCallback(debugCallback, NULL);
+    DEBUG_INFO("Using debug message callback from OpenGL ES 3.2+");
+  }
+  else if (util_hasGLExt(gl_exts, "GL_KHR_debug") && g_egl_dynProcs.glDebugMessageCallbackKHR)
+  {
+    glEnable(GL_DEBUG_OUTPUT);
+    g_egl_dynProcs.glDebugMessageCallbackKHR(debugCallback, NULL);
+    DEBUG_INFO("Using debug message callback from GL_KHR_debug");
+  }
+  else
+    DEBUG_INFO("Debug message callback not supported");
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
