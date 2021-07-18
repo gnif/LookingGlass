@@ -388,7 +388,8 @@ bool egl_texture_update_from_frame(EGL_Texture * texture, const FrameBuffer * fr
   return true;
 }
 
-bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * frame, const int dmaFd)
+bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * frame, const int dmaFd,
+    const FrameDamageRect * rects, int rectsCount)
 {
   if (!texture->streaming)
     return false;
@@ -470,7 +471,15 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture->dmaTex, 0);
 
   glBindTexture(GL_TEXTURE_2D, texture->tex[0]);
-  glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, texture->width, texture->height);
+
+  if (!texture->ready || rectsCount == 0)
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, texture->width, texture->height);
+  else
+  {
+    for (int i = 0; i < rectsCount; ++i)
+      glCopyTexSubImage2D(GL_TEXTURE_2D, 0, rects[i].x, rects[i].y, rects[i].x, rects[i].y,
+        rects[i].width, rects[i].height);
+  }
 
   GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   glFlush();

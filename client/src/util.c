@@ -224,13 +224,12 @@ static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageRect * r
          r2->y + r1->height > r2->y;
 }
 
-int util_mergeOverlappingRects(FrameDamageRect * out, const FrameDamageRect * rects, int count)
+int util_mergeOverlappingRects(FrameDamageRect * rects, int count)
 {
   bool removed[count];
   bool changed;
 
   memset(removed, 0, sizeof(removed));
-  memcpy(out, rects, count * sizeof(FrameDamageRect));
 
   do
   {
@@ -238,14 +237,14 @@ int util_mergeOverlappingRects(FrameDamageRect * out, const FrameDamageRect * re
     for (int i = 0; i < count; ++i)
       if (!removed[i])
         for (int j = i + 1; j < count; ++j)
-          if (!removed[j] && rectIntersects(out + i, out + j))
+          if (!removed[j] && rectIntersects(rects + i, rects + j))
           {
-            uint32_t x2 = max(out[i].x + out[i].width, out[j].x + out[j].width);
-            uint32_t y2 = max(out[i].y + out[i].height, out[j].y + out[j].height);
-            out[i].x = min(out[i].x, out[j].x);
-            out[i].y = min(out[i].y, out[j].y);
-            out[i].width  = x2 - out[i].x;
-            out[i].height = y2 - out[i].y;
+            uint32_t x2 = max(rects[i].x + rects[i].width, rects[j].x + rects[j].width);
+            uint32_t y2 = max(rects[i].y + rects[i].height, rects[j].y + rects[j].height);
+            rects[i].x = min(rects[i].x, rects[j].x);
+            rects[i].y = min(rects[i].y, rects[j].y);
+            rects[i].width  = x2 - rects[i].x;
+            rects[i].height = y2 - rects[i].y;
             removed[j] = true;
             changed = true;
           }
@@ -255,6 +254,6 @@ int util_mergeOverlappingRects(FrameDamageRect * out, const FrameDamageRect * re
   int o = 0;
   for (int i = 0; i < count; ++i)
     if (!removed[i])
-      out[o++] = out[i];
+      rects[o++] = rects[i];
   return o;
 }

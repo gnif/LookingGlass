@@ -27,6 +27,7 @@
 #include "texture.h"
 #include "shader.h"
 #include "model.h"
+#include "util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -259,11 +260,16 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bo
   return true;
 }
 
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd)
+bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+    const FrameDamageRect * origRects, int rectsCount)
 {
+  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
+  memcpy(rects, origRects, rectsCount * sizeof(FrameDamageRect));
+  rectsCount = util_mergeOverlappingRects(rects, rectsCount);
+
   if (dmaFd >= 0)
   {
-    if (!egl_texture_update_from_dma(desktop->texture, frame, dmaFd))
+    if (!egl_texture_update_from_dma(desktop->texture, frame, dmaFd, rects, rectsCount))
       return false;
   }
   else
