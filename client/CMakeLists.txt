@@ -124,6 +124,9 @@ set(SOURCES
 	src/egl_dynprocs.c
 )
 
+# Force cimgui to build as a static library.
+set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
+
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
 add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
