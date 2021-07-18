@@ -720,9 +720,14 @@ static int lg_run(void)
   ImFontAtlas_GetTexDataAsRGBA32(g_state.io->Fonts, &text_pixels,
       &text_w, &text_h, NULL);
 
+  g_state.graphs = ll_new();
+
   // initialize metrics ringbuffers
   g_state.renderTimings = ringbuffer_new(256, sizeof(float));
   g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
+
+  app_registerGraph("RENDER", g_state.renderTimings);
+  app_registerGraph("UPLOAD", g_state.frameTimings);
 
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
