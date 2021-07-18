@@ -30,7 +30,6 @@
 #include "util.h"
 #include "dynamic/fonts.h"
 
-#include <GL/glew.h>
 #include <EGL/egl.h>
 
 #include "cimgui.h"
@@ -925,14 +924,7 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
-  // glew is needed for imgui
-  if (!glewInit())
-  {
-    DEBUG_ERROR("GLEW failed to initialize");
-    return false;
-  }
-
-  if (!ImGui_ImplOpenGL3_Init("#version 100"))
+  if (!ImGui_ImplOpenGL3_Init("#version 300 es"))
   {
     DEBUG_ERROR("Failed to initialize ImGui");
     return false;

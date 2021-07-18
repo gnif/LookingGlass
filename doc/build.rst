@@ -57,7 +57,6 @@ Required Dependencies
 -  fonts-freefont-ttf
 -  libegl-dev
 -  libgl-dev
--  libglew-dev
 -  libfontconfig1-dev
 -  libgmp-dev
 -  libspice-protocol-dev
