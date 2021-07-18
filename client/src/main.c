@@ -640,7 +640,7 @@ int main_frameThread(void * unused)
 int spiceThread(void * arg)
 {
   while(g_state.state != APP_STATE_SHUTDOWN)
-    if (!spice_process(1000))
+    if (!spice_process(100))
     {
       if (g_state.state != APP_STATE_SHUTDOWN)
       {
