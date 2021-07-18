@@ -24,6 +24,7 @@
 #include <stdbool.h>
 #include <linux/input.h>
 
+#include "common/ringbuffer.h"
 #include "common/types.h"
 #include "interface/displayserver.h"
 
@@ -78,6 +79,9 @@ void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
 #endif
 
+typedef struct ImGuiGraph * GraphHandle;
+GraphHandle app_registerGraph(const char * name, RingBuffer buffer);
+void app_unregisterGraph(GraphHandle handle);
 bool app_renderImGui(void);
 
 void app_clipboardRelease(void);

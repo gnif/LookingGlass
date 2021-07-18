@@ -620,8 +620,33 @@ void app_showFPS(bool showFPS)
   g_state.lgr->on_show_fps(g_state.lgrData, showFPS);
 }
 
-bool rbCalcMetrics(int index, float * value, float * udata)
+struct ImGuiGraph
 {
+  const char * name;
+  RingBuffer   buffer;
+  bool         enabled;
+};
+
+GraphHandle app_registerGraph(const char * name, RingBuffer buffer)
+{
+  struct ImGuiGraph * graph = malloc(sizeof(struct ImGuiGraph));
+  graph->name    = name;
+  graph->buffer  = buffer;
+  graph->enabled = true;
+  ll_push(g_state.graphs, graph);
+  return graph;
+}
+
+void app_unregisterGraph(GraphHandle handle)
+{
+  handle->enabled = false;
+}
+
+static bool rbCalcMetrics(int index, void * value_, void * udata_)
+{
+  float * value = value_;
+  float * udata = udata_;
+
   if (index == 0)
   {
     udata[0] = *value;
@@ -662,60 +687,39 @@ bool app_renderImGui(void)
     ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
   );
 
-
-  float renderMetrics[4] = {};
-  float frameMetrics [4] = {};
-  ringbuffer_forEach(g_state.renderTimings, (RingBufferIterator)rbCalcMetrics,
-      renderMetrics);
-  ringbuffer_forEach(g_state.frameTimings , (RingBufferIterator)rbCalcMetrics,
-      frameMetrics);
-
-  if (renderMetrics[2] > 0.0f)
+  GraphHandle graph;
+  for (ll_reset(g_state.graphs); ll_walk(g_state.graphs, (void **)&graph); )
   {
-    renderMetrics[2] /= ringbuffer_getCount(g_state.renderTimings);
-    renderMetrics[3]  = 1000.0f / renderMetrics[2];
+    if (!graph->enabled)
+      continue;
+
+    float metrics[4] = {};
+    ringbuffer_forEach(graph->buffer, rbCalcMetrics, metrics);
+
+    if (metrics[2] > 0.0f)
+    {
+      metrics[2] /= ringbuffer_getCount(graph->buffer);
+      metrics[3]  = 1000.0f / metrics[2];
+    }
+
+    char  title[64];
+    const ImVec2 size = {400.0f, 100.0f};
+
+    snprintf(title, sizeof(title),
+        "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
+        graph->name, metrics[0], metrics[1], metrics[2], metrics[3]);
+
+    igPlotLinesFloatPtr(
+        "",
+        (float *)ringbuffer_getValues(graph->buffer),
+        ringbuffer_getLength(graph->buffer),
+        ringbuffer_getStart (graph->buffer),
+        title,
+        0.0f,
+        50.0f,
+        size,
+        sizeof(float));
   }
-
-  if (frameMetrics[2] > 0.0f)
-  {
-    frameMetrics[2] /= ringbuffer_getCount(g_state.frameTimings );
-    frameMetrics[3]  = 1000.0f / frameMetrics[2];
-  }
-
-  char  buffer[64];
-  const ImVec2 size = {400.0f, 100.0f};
-
-  snprintf(buffer, sizeof(buffer),
-      "RENDER: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
-      renderMetrics[0], renderMetrics[1], renderMetrics[2],
-      renderMetrics[3]);
-
-  igPlotLinesFloatPtr(
-      "",
-      (float *)ringbuffer_getValues(g_state.renderTimings),
-      ringbuffer_getLength(g_state.renderTimings),
-      ringbuffer_getStart (g_state.renderTimings),
-      buffer,
-      0.0f,
-      50.0f,
-      size,
-      sizeof(float));
-
-  snprintf(buffer, sizeof(buffer),
-      "UPLOAD: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
-      frameMetrics[0], frameMetrics[1], frameMetrics[2],
-      frameMetrics[3]);
-
-  igPlotLinesFloatPtr(
-      "",
-      (float *)ringbuffer_getValues(g_state.frameTimings),
-      ringbuffer_getLength(g_state.frameTimings),
-      ringbuffer_getStart (g_state.frameTimings),
-      buffer,
-      0.0f,
-      50.0f,
-      size,
-      sizeof(float));
 
   igEnd();
 

@@ -47,7 +47,8 @@ struct AppState
 {
   enum RunState state;
 
-  ImGuiIO * io;
+  ImGuiIO   * io;
+  struct ll * graphs;
 
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
