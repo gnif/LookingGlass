@@ -29,9 +29,11 @@
 # include <EGL/eglext.h>
 #endif
 
+#include "app.h"
 #include "egl_dynprocs.h"
 #include "common/locking.h"
 #include "common/countedbuffer.h"
+#include "common/ringbuffer.h"
 #include "interface/displayserver.h"
 
 #include "wayland-xdg-shell-client-protocol.h"
@@ -113,6 +115,8 @@ struct WaylandDSState
 
   struct wp_presentation * presentation;
   clockid_t clkId;
+  RingBuffer photonTimings;
+  GraphHandle photonGraph;
 
 #ifdef ENABLE_LIBDECOR
   struct libdecor * libdecor;
