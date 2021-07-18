@@ -23,7 +23,8 @@
 #ifdef ENABLE_EGL
 
 #include <EGL/egl.h>
-#include <GL/gl.h>
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
 
 typedef EGLDisplay (*eglGetPlatformDisplayEXT_t)(EGLenum platform,
     void *native_display, const EGLint *attrib_list);

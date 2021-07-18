@@ -23,7 +23,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include <GL/gl.h>
+#include <GLES3/gl3.h>
 
 typedef struct EGL_Shader EGL_Shader;
 

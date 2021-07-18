@@ -31,6 +31,7 @@
 #include "dynamic/fonts.h"
 
 #include <EGL/egl.h>
+#include <GLES3/gl32.h>
 
 #include "cimgui.h"
 #include "generator/output/cimgui_impl.h"
@@ -826,6 +827,18 @@ bool egl_render_startup(void * opaque)
   GLint esMaj, esMin;
   glGetIntegerv(GL_MAJOR_VERSION, &esMaj);
   glGetIntegerv(GL_MINOR_VERSION, &esMin);
+
+  if (!util_hasGLExt(gl_exts, "GL_EXT_buffer_storage"))
+  {
+    DEBUG_ERROR("GL_EXT_buffer_storage is needed to use EGL backend");
+    return false;
+  }
+
+  if (!util_hasGLExt(gl_exts, "GL_EXT_texture_format_BGRA8888"))
+  {
+    DEBUG_ERROR("GL_EXT_texture_format_BGRA8888 is needed to use EGL backend");
+    return false;
+  }
 
   if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
