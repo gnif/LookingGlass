@@ -5,7 +5,9 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        cc: [gcc, clang]
+        compiler:
+          - {cc: gcc, cxx: g++}
+          - {cc: clang, cxx: clang++}
         build_type:
           - Release
           - Debug
@@ -27,7 +29,8 @@ jobs:
           wayland-protocols
     - name: Configure client
       env:
-        CC: /usr/bin/${{ matrix.cc }}
+        CC: /usr/bin/${{ matrix.compiler.cc }}
+        CXX: /usr/bin/${{ matrix.compiler.cxx }}
       run: |
         mkdir client/build
         cd client/build
