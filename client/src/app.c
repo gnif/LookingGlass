@@ -680,6 +680,7 @@ bool app_renderImGui(void)
   if (g_state.showFPS)
   {
     const ImVec2 pos = {0.0f, 0.0f};
+    igSetNextWindowBgAlpha(0.6f);
     igSetNextWindowPos(pos, 0, pos);
 
     igBegin(
