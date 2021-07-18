@@ -37,7 +37,6 @@ struct EGL_Model
   size_t      vertexCount;
   bool        finish;
 
-  bool    hasBuffer;
   GLuint  buffer;
 
   EGL_Shader  * shader;
@@ -83,7 +82,7 @@ void egl_model_free(EGL_Model ** model)
   }
   ll_free((*model)->verticies);
 
-  if ((*model)->hasBuffer)
+  if ((*model)->buffer)
     glDeleteBuffers(1, &(*model)->buffer);
 
   free(*model);
@@ -137,7 +136,7 @@ void egl_model_render(EGL_Model * model)
 
   if (model->rebuild)
   {
-    if (model->hasBuffer)
+    if (model->buffer)
       glDeleteBuffers(1, &model->buffer);
 
     /* create a buffer large enough */
