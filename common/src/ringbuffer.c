@@ -25,6 +25,9 @@
 
 struct RingBuffer
 {
+  RingBufferValueFn preOverwriteFn;
+  void *            preOverwriteUdata;
+
   int     length;
   size_t  valueSize;
   int     start, pos, count;
@@ -50,13 +53,20 @@ void ringbuffer_free(RingBuffer * rb)
 
 void ringbuffer_push(RingBuffer rb, const void * value)
 {
+  void * dst = rb->values + rb->pos * rb->valueSize;
+
   if (rb->count < rb->length)
     ++rb->count;
   else
+  {
     if (++rb->start == rb->length)
       rb->start = 0;
 
-  memcpy(rb->values + rb->pos * rb->valueSize, value, rb->valueSize);
+    if (rb->preOverwriteFn)
+      rb->preOverwriteFn(dst, rb->preOverwriteUdata);
+  }
+
+  memcpy(dst, value, rb->valueSize);
 
   if (++rb->pos == rb->length)
     rb->pos = 0;
@@ -87,6 +97,13 @@ int ringbuffer_getCount(const RingBuffer rb)
 void * ringbuffer_getValues(const RingBuffer rb)
 {
   return rb->values;
+}
+
+void ringbuffer_setPreOverwriteFn(const RingBuffer rb, RingBufferValueFn fn,
+    void * udata)
+{
+  rb->preOverwriteFn    = fn;
+  rb->preOverwriteUdata = udata;
 }
 
 void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn, void * udata)

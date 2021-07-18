@@ -24,6 +24,7 @@
 typedef struct RingBuffer * RingBuffer;
 
 RingBuffer ringbuffer_new(int length, size_t valueSize);
+
 void ringbuffer_free(RingBuffer * rb);
 void ringbuffer_push(RingBuffer rb, const void * value);
 void ringbuffer_reset(RingBuffer rb);
@@ -32,6 +33,12 @@ int    ringbuffer_getLength(const RingBuffer rb);
 int    ringbuffer_getStart (const RingBuffer rb);
 int    ringbuffer_getCount (const RingBuffer rb);
 void * ringbuffer_getValues(const RingBuffer rb);
+
+typedef void (*RingBufferValueFn)(void * value, void * udata);
+
+// set a function to call before a value is about to be overwritten
+void ringbuffer_setPreOverwriteFn(RingBuffer rb, RingBufferValueFn fn,
+    void * udata);
 
 typedef bool (*RingBufferIterator)(int index, void * value, void * udata);
 void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn,
