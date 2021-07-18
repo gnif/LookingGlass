@@ -63,12 +63,7 @@ static void presentationFeedbackPresented(void * opaque,
   struct timespec delta;
 
   tsDiff(&delta, &present, &data->sent);
-  printf("Presented in %3jd.%06lums, vsync: %d, hw_clock: %d, hw_compl: %d, zero_copy: %d\n",
-      (intmax_t) delta.tv_sec * 1000 + delta.tv_nsec / 1000000, delta.tv_nsec % 1000000,
-      (bool) (flags & WP_PRESENTATION_FEEDBACK_KIND_VSYNC),
-      (bool) (flags & WP_PRESENTATION_FEEDBACK_KIND_HW_CLOCK),
-      (bool) (flags & WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION),
-      (bool) (flags & WP_PRESENTATION_FEEDBACK_KIND_ZERO_COPY));
+  ringbuffer_push(wlWm.photonTimings, &(float){ delta.tv_sec + delta.tv_nsec * 1e-6f });
   free(data);
 }
 
@@ -86,6 +81,9 @@ static const struct wp_presentation_feedback_listener presentationFeedbackListen
 
 bool waylandPresentationInit(void)
 {
+  wlWm.photonTimings = ringbuffer_new(256, sizeof(float));
+  wlWm.photonGraph   = app_registerGraph("PHOTON", wlWm.photonTimings);
+
   if (wlWm.presentation)
     wp_presentation_add_listener(wlWm.presentation, &presentationListener, NULL);
   return true;
@@ -94,6 +92,8 @@ bool waylandPresentationInit(void)
 void waylandPresentationFree(void)
 {
   wp_presentation_destroy(wlWm.presentation);
+  app_unregisterGraph(wlWm.photonGraph);
+  ringbuffer_free(&wlWm.photonTimings);
 }
 
 void waylandPresentationFrame(void)
