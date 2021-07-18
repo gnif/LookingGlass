@@ -642,26 +642,35 @@ void app_unregisterGraph(GraphHandle handle)
   handle->enabled = false;
 }
 
+struct BufferMetrics
+{
+  float min;
+  float max;
+  float sum;
+  float avg;
+  float freq;
+};
+
 static bool rbCalcMetrics(int index, void * value_, void * udata_)
 {
   float * value = value_;
-  float * udata = udata_;
+  struct BufferMetrics * udata = udata_;
 
   if (index == 0)
   {
-    udata[0] = *value;
-    udata[1] = *value;
-    udata[2] = *value;
+    udata->min = *value;
+    udata->max = *value;
+    udata->sum = *value;
     return true;
   }
 
-  if (udata[0] > *value)
-    udata[0] = *value;
+  if (udata->min > *value)
+    udata->min = *value;
 
-  if (udata[1] < *value)
-    udata[1] = *value;
+  if (udata->max < *value)
+    udata->max = *value;
 
-  udata[2] += *value;
+  udata->sum += *value;
   return true;
 }
 
@@ -693,13 +702,13 @@ bool app_renderImGui(void)
     if (!graph->enabled)
       continue;
 
-    float metrics[4] = {};
-    ringbuffer_forEach(graph->buffer, rbCalcMetrics, metrics);
+    struct BufferMetrics metrics = {};
+    ringbuffer_forEach(graph->buffer, rbCalcMetrics, &metrics);
 
-    if (metrics[2] > 0.0f)
+    if (metrics.sum > 0.0f)
     {
-      metrics[2] /= ringbuffer_getCount(graph->buffer);
-      metrics[3]  = 1000.0f / metrics[2];
+      metrics.avg  = metrics.sum / ringbuffer_getCount(graph->buffer);
+      metrics.freq = 1000.0f / metrics.avg;
     }
 
     char  title[64];
@@ -707,7 +716,7 @@ bool app_renderImGui(void)
 
     snprintf(title, sizeof(title),
         "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
-        graph->name, metrics[0], metrics[1], metrics[2], metrics[3]);
+        graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
 
     igPlotLinesFloatPtr(
         "",
