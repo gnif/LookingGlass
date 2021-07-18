@@ -36,6 +36,10 @@ void egl_dynProcsInit(void)
     eglGetProcAddress("eglSwapBuffersWithDamageKHR");
   g_egl_dynProcs.eglSwapBuffersWithDamageEXT = (eglSwapBuffersWithDamageKHR_t)
     eglGetProcAddress("eglSwapBuffersWithDamageEXT");
+  g_egl_dynProcs.glDebugMessageCallback = (glDebugMessageCallback_t)
+    eglGetProcAddress("glDebugMessageCallback");
+  g_egl_dynProcs.glDebugMessageCallbackKHR = (glDebugMessageCallback_t)
+    eglGetProcAddress("glDebugMessageCallbackKHR");
 };
 
 #endif

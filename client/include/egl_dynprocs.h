@@ -34,6 +34,11 @@ typedef void (*eglSwapBuffersWithDamageKHR_t)(EGLDisplay dpy,
     EGLSurface surface, const EGLint *rects, EGLint n_rects);
 typedef void (*glEGLImageTargetTexture2DOES_t)(GLenum target,
     GLeglImageOES image);
+typedef void (*DEBUGPROC_t)(GLenum source,
+    GLenum type, GLuint id, GLenum severity, GLsizei length,
+    const GLchar *message, const void *userParam);
+typedef void (*glDebugMessageCallback_t)(DEBUGPROC_t callback,
+    const void * userParam);
 
 struct EGLDynProcs
 {
@@ -42,6 +47,8 @@ struct EGLDynProcs
   eglSwapBuffersWithDamageKHR_t  eglSwapBuffersWithDamageKHR;
   eglSwapBuffersWithDamageKHR_t  eglSwapBuffersWithDamageEXT;
   glEGLImageTargetTexture2DOES_t glEGLImageTargetTexture2DOES;
+  glDebugMessageCallback_t       glDebugMessageCallback;
+  glDebugMessageCallback_t       glDebugMessageCallbackKHR;
 };
 
 extern struct EGLDynProcs g_egl_dynProcs;
