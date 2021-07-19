@@ -15,7 +15,7 @@ add_library(platform_Windows STATIC
 )
 
 # allow use of functions for Windows Vista or later
-add_definitions(-D _WIN32_WINNT=0x6000)
+add_compile_definitions(WINVER=0x0600 _WIN32_WINNT=0x0600)
 
 add_subdirectory("capture")
 
