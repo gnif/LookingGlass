@@ -116,7 +116,6 @@ struct Inst
   LG_FontObj        helpFontObj;
   unsigned          helpFontSize;
 
-  bool               cursorLastValid;
   struct CursorState cursorLast;
 
   bool                            hadOverlay;
@@ -496,8 +495,6 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   egl_update_font(this);
   egl_update_help_font(this);
 
-  this->cursorLastValid = false;
-
   struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
   if (!damage)
   {
@@ -584,7 +581,6 @@ bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
   }
 
   this->start = true;
-  this->cursorLastValid = false;
 
   struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
   if (!damage)
@@ -632,14 +628,12 @@ void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, 
   }
 
   this->showAlert = true;
-  this->cursorLastValid = false;
 }
 
 void egl_on_help(void * opaque, const char * message)
 {
   struct Inst * this = (struct Inst *)opaque;
   egl_help_set_text(this->help, message);
-  this->cursorLastValid = false;
 }
 
 static void debugCallback(GLenum source, GLenum type, GLuint id,
@@ -936,10 +930,8 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  bool hasLastCursor = this->cursorLastValid;
-  bool cursorRendered = false;
   bool hasOverlay = false;
-  struct CursorState cursorState;
+  struct CursorState cursorState = { .visible = false };
   struct DesktopDamage * desktopDamage = NULL;
 
   if (this->start)
@@ -958,10 +950,9 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
           this->waitDone = true;
       }
 
-      cursorRendered = true;
-      cursorState = egl_cursor_get_state(this->cursor, this->width, this->height);
-      egl_cursor_render(this->cursor,
-          (this->format.rotate + rotate) % LG_ROTATE_MAX);
+      cursorState = egl_cursor_render(this->cursor,
+          (this->format.rotate + rotate) % LG_ROTATE_MAX,
+          this->width, this->height);
     }
     else
       desktopDamage->count = 0;
@@ -1005,10 +996,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
       close = true;
 
     if (close)
-    {
       this->showAlert = false;
-      this->cursorLastValid = false;
-    }
     else
     {
       egl_alert_render(this->alert, this->screenScaleX, this->screenScaleY);
@@ -1031,24 +1019,13 @@ bool egl_render(void * opaque, LG_RendererRotate rotate)
 
   if (!hasOverlay && !this->hadOverlay)
   {
-    if (cursorRendered && hasLastCursor)
-    {
-      if (this->cursorLast.visible)
-        damage[damageIdx++] = this->cursorLast.rect;
+    if (this->cursorLast.visible)
+      damage[damageIdx++] = this->cursorLast.rect;
 
-      if (cursorState.visible)
-        damage[damageIdx++] = cursorState.rect;
+    if (cursorState.visible)
+      damage[damageIdx++] = cursorState.rect;
 
-      this->cursorLast = cursorState;
-    }
-    else if (cursorRendered)
-    {
-      this->cursorLast = cursorState;
-      this->cursorLastValid = true;
-
-      if (cursorState.visible)
-        damage[damageIdx++] = cursorState.rect;
-    }
+    this->cursorLast = cursorState;
 
     if (desktopDamage)
     {

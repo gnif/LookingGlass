@@ -47,6 +47,5 @@ void egl_cursor_set_size(EGL_Cursor * cursor, const float x, const float y);
 void egl_cursor_set_state(EGL_Cursor * cursor, const bool visible,
     const float x, const float y);
 
-struct CursorState egl_cursor_get_state(EGL_Cursor * cursor, int width, int height);
-
-void egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rotate);
+struct CursorState egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rotate,
+    int width, int height);
