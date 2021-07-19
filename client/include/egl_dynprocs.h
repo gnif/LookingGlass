@@ -28,7 +28,7 @@
 
 typedef EGLDisplay (*eglGetPlatformDisplayEXT_t)(EGLenum platform,
     void *native_display, const EGLint *attrib_list);
-typedef void (*eglSwapBuffersWithDamageKHR_t)(EGLDisplay dpy,
+typedef EGLBoolean (*eglSwapBuffersWithDamageKHR_t)(EGLDisplay dpy,
     EGLSurface surface, const EGLint *rects, EGLint n_rects);
 typedef void (*glEGLImageTargetTexture2DOES_t)(GLenum target,
     GLeglImageOES image);
