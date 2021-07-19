@@ -221,9 +221,7 @@ void Launch(void)
     goto fail_token;
   }
 
-  DWORD flags = CREATE_NEW_CONSOLE | HIGH_PRIORITY_CLASS;
-  if (!pEnvironment)
-    flags |= CREATE_UNICODE_ENVIRONMENT;
+  DWORD flags = DETACHED_PROCESS | HIGH_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT;
 
   PROCESS_INFORMATION pi = {0};
   STARTUPINFO si =
