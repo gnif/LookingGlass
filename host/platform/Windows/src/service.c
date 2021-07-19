@@ -50,6 +50,8 @@ struct Service
   FILE * logFile;
   bool   running;
   HANDLE process;
+  HANDLE exitEvent;
+  char   exitEventName[64];
 };
 
 struct Service service = { 0 };
@@ -311,10 +313,19 @@ void Launch(void)
     .lpDesktop   = "WinSta0\\Default"
   };
 
+  char * cmdline = NULL;
+  char cmdbuf[128];
+  if (service.exitEvent)
+  {
+    snprintf(cmdbuf, sizeof(cmdbuf), "looking-glass-host.exe os:exitEvent=%s",
+      service.exitEventName);
+    cmdline = cmdbuf;
+  }
+
   if (!f_CreateProcessAsUserA(
       hToken,
       os_getExecutable(),
-      NULL,
+      cmdline,
       NULL,
       NULL,
       FALSE,
@@ -643,6 +654,21 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
 
+  UUID uuid;
+  RPC_CSTR uuidStr;
+  UuidCreate(&uuid);
+
+  if (UuidToString(&uuid, &uuidStr) == RPC_S_OK)
+  {
+    strcpy(service.exitEventName, "Global\\");
+    strcat(service.exitEventName, (const char*) uuidStr);
+    RpcStringFree(&uuidStr);
+
+    service.exitEvent = CreateEvent(NULL, FALSE, FALSE, service.exitEventName);
+    if (!service.exitEvent)
+      doLog("Failed to create exit event: 0x%lx\n", GetLastError());
+  }
+
   int failCount = 0;
   while(1)
   {
@@ -736,14 +762,34 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
   stopped:
   if (service.running)
   {
-    doLog("Terminating the host application\n");
-    if (TerminateProcess(service.process, LG_HOST_EXIT_KILLED))
+    SetEvent(service.exitEvent);
+    switch (WaitForSingleObject(service.process, 1000))
     {
-      while(WaitForSingleObject(service.process, INFINITE) != WAIT_OBJECT_0) {}
-      doLog("Host application terminated\n");
+      case WAIT_OBJECT_0:
+        service.running = false;
+        break;
+      case WAIT_TIMEOUT:
+        doLog("Host application failed to exit in 1 second\n");
+        break;
+      case WAIT_FAILED:
+        doLog("WaitForSingleObject failed: 0x%lx\n", GetLastError());
+        break;
     }
-    else
-      doLog("Failed to terminate the host application\n");
+
+    if (service.running)
+    {
+      doLog("Terminating the host application\n");
+      if (TerminateProcess(service.process, LG_HOST_EXIT_KILLED))
+      {
+        if (WaitForSingleObject(service.process, INFINITE) == WAIT_OBJECT_0)
+          doLog("Host application terminated\n");
+        else
+          doLog("WaitForSingleObject failed: 0x%lx\n", GetLastError());
+      }
+      else
+        doLog("Failed to terminate the host application\n");
+    }
+
     CloseHandle(service.process);
     service.process = NULL;
   }
