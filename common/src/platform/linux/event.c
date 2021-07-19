@@ -33,7 +33,8 @@ struct LGEvent
 {
   pthread_mutex_t mutex;
   pthread_cond_t  cond;
-  atomic_uint     count;
+  atomic_int      waiting;
+  atomic_bool     signaled;
   bool            autoReset;
 };
 
@@ -79,6 +80,9 @@ void lgFreeEvent(LGEvent * handle)
 {
   assert(handle);
 
+  if (atomic_load_explicit(&handle->waiting, memory_order_acquire) != 0)
+    DEBUG_ERROR("BUG: Freeing an event that still has threads waiting on it");
+
   pthread_cond_destroy (&handle->cond );
   pthread_mutex_destroy(&handle->mutex);
   free(handle);
@@ -89,17 +93,17 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   assert(handle);
 
   bool ret   = true;
-  int  count = 0;
   int  res;
 
-  while(ret && (count = atomic_load(&handle->count)) == 0)
+  if (pthread_mutex_lock(&handle->mutex) != 0)
   {
-    if (pthread_mutex_lock(&handle->mutex) != 0)
-    {
-      DEBUG_ERROR("Failed to lock the mutex");
-      return false;
-    }
+    DEBUG_ERROR("Failed to lock the mutex");
+    return false;
+  }
 
+  atomic_fetch_add_explicit(&handle->waiting, 1, memory_order_release);
+  while(ret && !atomic_load_explicit(&handle->signaled, memory_order_acquire))
+  {
     if (!ts)
     {
       if ((res = pthread_cond_wait(&handle->cond, &handle->mutex)) != 0)
@@ -125,16 +129,17 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
           break;
       }
     }
+  }
 
-    if (pthread_mutex_unlock(&handle->mutex) != 0)
-    {
-      DEBUG_ERROR("Failed to unlock the mutex");
-      return false;
-    }
+  atomic_fetch_sub_explicit(&handle->waiting, 1, memory_order_release);
+  if (pthread_mutex_unlock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to unlock the mutex");
+    return false;
   }
 
   if (ret && handle->autoReset)
-    atomic_fetch_sub(&handle->count, count);
+    atomic_store_explicit(&handle->signaled, false, memory_order_release);
 
   return ret;
 }
@@ -170,10 +175,10 @@ bool lgSignalEvent(LGEvent * handle)
 {
   assert(handle);
 
-  const bool signalled = atomic_fetch_add_explicit(&handle->count, 1,
-      memory_order_acquire) > 0;
+  const bool signaled = atomic_exchange_explicit(&handle->signaled, true,
+      memory_order_release);
 
-  if (signalled)
+  if (signaled)
     return true;
 
   if (pthread_cond_broadcast(&handle->cond) != 0)
@@ -188,6 +193,6 @@ bool lgSignalEvent(LGEvent * handle)
 bool lgResetEvent(LGEvent * handle)
 {
   assert(handle);
-  atomic_store(&handle->count, 0);
+  atomic_store_explicit(&handle->signaled, false, memory_order_release);
   return true;
 }
