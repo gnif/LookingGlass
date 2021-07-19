@@ -33,8 +33,6 @@ void DebugWinError(const char * file, const unsigned int line, const char * func
 
 #define DEBUG_WINERROR(x, y) DebugWinError(STRIPPATH(__FILE__), __LINE__, __FUNCTION__, x, y)
 
-bool IsWindows8();
-
 #ifdef __cplusplus
 }
 #endif
