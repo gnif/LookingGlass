@@ -25,7 +25,6 @@ jobs:
           libsdl2-dev libsdl2-ttf-dev \
           libspice-protocol-dev nettle-dev \
           libx11-dev libxss-dev libxi-dev \
-          libglew-dev \
           wayland-protocols
     - name: Configure client
       env:
