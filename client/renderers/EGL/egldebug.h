@@ -21,9 +21,16 @@
 #include "common/debug.h"
 
 const char * egl_getErrorStr(void);
+const char * gl_getErrorStr(void);
 
 #define DEBUG_EGL_WARN(fmt, ...) \
   DEBUG_WARN(fmt " (%s)", ##__VA_ARGS__, egl_getErrorStr())
 
 #define DEBUG_EGL_ERROR(fmt, ...) \
   DEBUG_ERROR(fmt " (%s)", ##__VA_ARGS__, egl_getErrorStr())
+
+#define DEBUG_GL_WARN(fmt, ...) \
+  DEBUG_WARN(fmt " (%s)", ##__VA_ARGS__, gl_getErrorStr())
+
+#define DEBUG_GL_ERROR(fmt, ...) \
+  DEBUG_ERROR(fmt " (%s)", ##__VA_ARGS__, gl_getErrorStr())

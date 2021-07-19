@@ -156,7 +156,7 @@ static bool egl_texture_map(EGL_Texture * texture, uint8_t i)
 
   if (!texture->buf[i].map)
   {
-    DEBUG_EGL_ERROR("glMapBufferRange failed for %d of %lu bytes", i,
+    DEBUG_GL_ERROR("glMapBufferRange failed for %d of %lu bytes", i,
         texture->pboBufferSize);
   }
 
@@ -447,7 +447,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
       void * new = realloc(texture->dmaImages, newCount * sizeof *texture->dmaImages);
       if (!new)
       {
-        DEBUG_EGL_ERROR("Failed to allocate memory");
+        DEBUG_ERROR("Failed to allocate memory");
         eglDestroyImage(texture->display, image);
         return false;
       }
@@ -487,7 +487,7 @@ bool egl_texture_update_from_dma(EGL_Texture * texture, const FrameBuffer * fram
 
     case GL_WAIT_FAILED:
     case GL_INVALID_VALUE:
-      DEBUG_EGL_ERROR("glClientWaitSync failed");
+      DEBUG_GL_ERROR("glClientWaitSync failed");
   }
 
   glDeleteSync(fence);
@@ -572,7 +572,7 @@ enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
         case GL_INVALID_VALUE:
           glDeleteSync(texture->buf[b].sync);
           texture->buf[b].sync = 0;
-          DEBUG_EGL_ERROR("glClientWaitSync failed");
+          DEBUG_GL_ERROR("glClientWaitSync failed");
           return EGL_TEX_STATUS_ERROR;
       }
     }
