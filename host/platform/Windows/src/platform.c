@@ -57,6 +57,9 @@ struct AppState
   NOTIFYICONDATA iconData;
   UINT           trayRestartMsg;
   HMENU          trayMenu;
+
+  HANDLE         exitThreadEvent;
+  LGThread     * exitThread;
 };
 
 static struct AppState app = {0};
@@ -212,6 +215,7 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   switch(msg)
   {
     case WM_DESTROY:
+      Shell_NotifyIcon(NIM_DELETE, &app.iconData);
       PostQuitMessage(0);
       break;
 
@@ -264,10 +268,29 @@ static int appThread(void * opaque)
 {
   RegisterTrayIcon();
   int result = app_main(app.argc, app.argv);
-
-  Shell_NotifyIcon(NIM_DELETE, &app.iconData);
-  SendMessage(app.messageWnd, WM_DESTROY, 0, 0);
+  DestroyWindow(app.messageWnd);
   return result;
+}
+
+static int exitThread(void * opaque)
+{
+  HANDLE handles[2] = { (HANDLE) opaque, app.exitThreadEvent };
+
+  switch (WaitForMultipleObjects(2, handles, FALSE, INFINITE))
+  {
+    case WAIT_OBJECT_0:
+      DEBUG_INFO("Received exit event");
+      SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
+      break;
+
+    case WAIT_OBJECT_0 + 1:
+      break;
+
+    case WAIT_FAILED:
+      DEBUG_ERROR("WaitForMultipleObjects failed: 0x%lx", GetLastError());
+  }
+
+  return 0;
 }
 
 LRESULT sendAppMessage(UINT Msg, WPARAM wParam, LPARAM lParam)
@@ -362,6 +385,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
       .type           = OPTION_TYPE_STRING,
       .value.x_string = logFilePath
     },
+    {
+      .module         = "os",
+      .name           = "exitEvent",
+      .description    = "Exit when the specified event is signaled",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = ""
+    },
     {0}
   };
 
@@ -403,6 +433,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   app.trayRestartMsg = RegisterWindowMessage("TaskbarCreated");
 
   app.messageWnd = CreateWindowEx(0, MAKEINTATOM(class), NULL, 0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
+
+  app.exitThreadEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
   // this is needed so that unprivileged processes can send us this message
   _ChangeWindowMessageFilterEx = (PChangeWindowMessageFilterEx)GetProcAddress(user32, "ChangeWindowMessageFilterEx");
@@ -449,9 +481,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 shutdown:
   DestroyMenu(app.trayMenu);
   app_shutdown();
+  SetEvent(app.exitThreadEvent);
+
   if (!lgJoinThread(thread, &result))
   {
     DEBUG_ERROR("Failed to join the main application thread");
+    result = LG_HOST_EXIT_FAILED;
+  }
+
+  if (app.exitThread && !lgJoinThread(app.exitThread, &result))
+  {
+    DEBUG_ERROR("Failed to join the exit thread");
     result = LG_HOST_EXIT_FAILED;
   }
 
@@ -517,6 +557,19 @@ bool app_init(void)
 
   // try to boost the scheduler priority
   boostPriority();
+
+  // open exit signaling event
+  HANDLE exitEvent = NULL;
+  const char * exitEventName = option_get_string("os", "exitEvent");
+  if (exitEventName && exitEventName[0])
+  {
+    exitEvent = OpenEvent(SYNCHRONIZE, FALSE, exitEventName);
+    if (!exitEvent)
+      DEBUG_WARN("Failed to open exitEvent with error 0x%lx: %s", GetLastError(), exitEventName);
+  }
+
+  if (exitEvent && !lgCreateThread("exitThread", exitThread, exitEvent, &app.exitThread))
+    DEBUG_ERROR("Failed to create the exit thread");
 
   return true;
 }
