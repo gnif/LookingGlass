@@ -77,8 +77,8 @@ bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
 
   struct timespec interval =
   {
-    .tv_sec = 0,
-    .tv_nsec = intervalMS * 1000 * 1000,
+    .tv_sec  = intervalMS / 1000,
+    .tv_nsec = (intervalMS % 1000) * 1000000,
   };
   struct itimerspec spec =
   {
