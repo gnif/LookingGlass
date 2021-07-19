@@ -38,6 +38,7 @@
 #ifdef ENABLE_EGL
 #include <EGL/eglext.h>
 #include "egl_dynprocs.h"
+#include "eglutil.h"
 #endif
 
 #include "app.h"
@@ -943,40 +944,11 @@ static EGLNativeWindowType x11GetEGLNativeWindow(void)
 static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface,
     const struct Rect * damage, int count)
 {
-  static bool detectDone = false;
-  static eglSwapBuffersWithDamageKHR_t swapWithDamage = NULL;
+  static struct SwapWithDamageData data = {0};
+  if (!data.init)
+    swapWithDamageInit(&data, display);
 
-  if (!detectDone)
-  {
-    const char *exts = eglQueryString(display, EGL_EXTENSIONS);
-    DEBUG_INFO("%s", exts);
-    if (util_hasGLExt(exts, "EGL_KHR_swap_buffers_with_damage"))
-      swapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageKHR;
-    else if (util_hasGLExt(exts, "EGL_EXT_swap_buffers_with_damage"))
-      swapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageEXT;
-
-    if (swapWithDamage)
-      DEBUG_INFO("Using eglSwapBuffersWithDamage");
-
-    detectDone = true;
-  }
-
-  if (swapWithDamage && count)
-  {
-    EGLint rects[count*4];
-    EGLint *p = rects;
-    for(int i = 0; i < count; ++i, p += 4)
-    {
-      p[0] = damage[i].x;
-      p[1] = damage[i].y;
-      p[2] = damage[i].w;
-      p[3] = damage[i].h;
-    }
-
-    swapWithDamage(display, surface, rects, count);
-  }
-  else
-    eglSwapBuffers(display, surface);
+  swapWithDamage(&data, display, surface, damage, count);
 }
 #endif
 

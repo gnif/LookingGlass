@@ -32,6 +32,7 @@
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
 #include "egl_dynprocs.h"
+#include "eglutil.h"
 
 bool waylandEGLInit(int w, int h)
 {
@@ -71,53 +72,19 @@ EGLDisplay waylandGetEGLDisplay(void)
 
 void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
 {
-  if (!wlWm.eglSwapWithDamageInit)
+  if (!wlWm.swapWithDamage.init)
   {
-    const char *exts = eglQueryString(display, EGL_EXTENSIONS);
-    wlWm.eglSwapWithDamageInit = true;
     if (wl_proxy_get_version((struct wl_proxy *) wlWm.surface) < 4)
+    {
       DEBUG_INFO("Swapping buffers with damage: not supported, need wl_compositor v4");
-    else if (util_hasGLExt(exts, "EGL_KHR_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageKHR)
-    {
-      wlWm.eglSwapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageKHR;
-      DEBUG_INFO("Using EGL_KHR_swap_buffers_with_damage");
-    }
-    else if (util_hasGLExt(exts, "EGL_EXT_swap_buffers_with_damage") && g_egl_dynProcs.eglSwapBuffersWithDamageEXT)
-    {
-      wlWm.eglSwapWithDamage = g_egl_dynProcs.eglSwapBuffersWithDamageEXT;
-      DEBUG_INFO("Using EGL_EXT_swap_buffers_with_damage");
+      swapWithDamageDisable(&wlWm.swapWithDamage);
     }
     else
-      DEBUG_INFO("Swapping buffers with damage: not supported");
+      swapWithDamageInit(&wlWm.swapWithDamage, display);
   }
 
-  if (wlWm.eglSwapWithDamage && count)
-  {
-    if (count * 4 > wlWm.eglDamageRectCount)
-    {
-      free(wlWm.eglDamageRects);
-      wlWm.eglDamageRects = malloc(sizeof(EGLint) * count * 4);
-      if (!wlWm.eglDamageRects)
-        DEBUG_FATAL("Out of memory");
-      wlWm.eglDamageRectCount = count * 4;
-    }
-
-    for (int i = 0; i < count; ++i)
-    {
-      wlWm.eglDamageRects[i*4+0] = damage[i].x;
-      wlWm.eglDamageRects[i*4+1] = damage[i].y;
-      wlWm.eglDamageRects[i*4+2] = damage[i].w;
-      wlWm.eglDamageRects[i*4+3] = damage[i].h;
-    }
-
-    waylandPresentationFrame();
-    wlWm.eglSwapWithDamage(display, surface, wlWm.eglDamageRects, count);
-  }
-  else
-  {
-    waylandPresentationFrame();
-    eglSwapBuffers(display, surface);
-  }
+  waylandPresentationFrame();
+  swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
 
   if (wlWm.needsResize)
   {
