@@ -21,25 +21,22 @@
 #include "windows/delay.h"
 #include "common/debug.h"
 
-NtDelayExecution_t NtDelayExecution;
-ZwSetTimerResolution_t ZwSetTimerResolution;
+NTSYSCALLAPI NTSTATUS NTAPI NtDelayExecution(
+  _In_ BOOLEAN Alertable,
+  _In_opt_ PLARGE_INTEGER DelayInterval
+);
+
+NTSYSCALLAPI NTSTATUS NTAPI NtSetTimerResolution(
+  _In_ ULONG DesiredTime,
+  _In_ BOOLEAN SetResolution,
+  _Out_ PULONG ActualTime
+);
 
 void delayInit(void)
 {
-  HMODULE ntdll = GetModuleHandle("ntdll.dll");
-  NtDelayExecution = (NtDelayExecution_t)
-    GetProcAddress(ntdll, "NtDelayExecution");
-
-  // Increase the timer resolution
-  ZwSetTimerResolution = (ZwSetTimerResolution_t)
-    GetProcAddress(ntdll, "ZwSetTimerResolution");
-
-  if (ZwSetTimerResolution)
-  {
-    ULONG actualResolution;
-    ZwSetTimerResolution(1, true, &actualResolution);
-    DEBUG_INFO("System timer resolution: %lu ns", actualResolution * 100);
-  }
+  ULONG actualResolution;
+  NtSetTimerResolution(1, true, &actualResolution);
+  DEBUG_INFO("System timer resolution: %.1f μs", actualResolution / 10.0);
 }
 
 void delayExecution(float ms)

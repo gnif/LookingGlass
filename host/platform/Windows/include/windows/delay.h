@@ -20,14 +20,6 @@
 
 #include <windows.h>
 
-typedef NTSTATUS (__stdcall *ZwSetTimerResolution_t)(ULONG RequestedResolution,
-    BOOLEAN Set, PULONG ActualResolution);
-extern ZwSetTimerResolution_t ZwSetTimerResolution;
-
-typedef NTSTATUS (__stdcall *NtDelayExecution_t)(BOOL Alertable,
-    PLARGE_INTEGER DelayInterval);
-extern NtDelayExecution_t NtDelayExecution;
-
 void delayInit(void);
 
 // like sleep but more accurate
