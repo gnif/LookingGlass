@@ -27,6 +27,7 @@
 # include <wayland-egl.h>
 # include <EGL/egl.h>
 # include <EGL/eglext.h>
+# include "eglutil.h"
 #endif
 
 #include "app.h"
@@ -101,10 +102,7 @@ struct WaylandDSState
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
   struct wl_egl_window * eglWindow;
-  bool eglSwapWithDamageInit;
-  eglSwapBuffersWithDamageKHR_t eglSwapWithDamage;
-  EGLint * eglDamageRects;
-  int eglDamageRectCount;
+  struct SwapWithDamageData swapWithDamage;
 #endif
 
 #ifdef ENABLE_OPENGL

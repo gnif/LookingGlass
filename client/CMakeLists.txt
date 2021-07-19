@@ -119,6 +119,7 @@ set(SOURCES
 	src/clipboard.c
 	src/kb.c
 	src/egl_dynprocs.c
+	src/eglutil.c
 )
 
 # Force cimgui to build as a static library.
