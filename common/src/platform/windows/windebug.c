@@ -41,27 +41,3 @@ void DebugWinError(const char * file, const unsigned int line, const char * func
   fprintf(stderr, "%12" PRId64 " [E] %20s:%-4u | %-30s | %s: 0x%08x (%s)\n", microtime(), file, line, function, desc, (int)status, buffer);
   LocalFree(buffer);
 }
-
-/* credit for this function to: https://stackoverflow.com/questions/17399302/how-can-i-detect-windows-8-1-in-a-desktop-application */
-inline static BOOL CompareWindowsVersion(DWORD dwMajorVersion, DWORD dwMinorVersion)
-{
-  OSVERSIONINFOEX ver;
-  DWORDLONG dwlConditionMask = 0;
-
-  ZeroMemory(&ver, sizeof(OSVERSIONINFOEX));
-  ver.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-  ver.dwMajorVersion = dwMajorVersion;
-  ver.dwMinorVersion = dwMinorVersion;
-
-  VER_SET_CONDITION(dwlConditionMask, VER_MAJORVERSION, VER_EQUAL);
-  VER_SET_CONDITION(dwlConditionMask, VER_MINORVERSION, VER_EQUAL);
-
-  return VerifyVersionInfo(&ver, VER_MAJORVERSION | VER_MINORVERSION, dwlConditionMask);
-}
-
-bool IsWindows8(void)
-{
-  return
-    (CompareWindowsVersion(6, 3) == TRUE) ||
-    (CompareWindowsVersion(6, 2) == TRUE);
-}
