@@ -156,73 +156,6 @@ bool disablePriv(const char * name)
   return adjustPriv(name, 0);
 }
 
-HANDLE dupeSystemProcessToken(void)
-{
-  DWORD count = 0;
-  DWORD returned;
-  do
-  {
-    count += 512;
-    DWORD pids[count];
-    EnumProcesses(pids, count * sizeof(DWORD), &returned);
-  }
-  while(returned / sizeof(DWORD) == count);
-
-  DWORD pids[count];
-  EnumProcesses(pids, count * sizeof(DWORD), &returned);
-  returned /= sizeof(DWORD);
-
-  char systemSidBuf[SECURITY_MAX_SID_SIZE];
-  PSID systemSid = (PSID) systemSidBuf;
-  DWORD cbSystemSid = sizeof systemSidBuf;
-
-  if (!CreateWellKnownSid(WinLocalSystemSid, NULL, systemSid, &cbSystemSid))
-  {
-    doLog("failed to create local system SID");
-    return NULL;
-  }
-
-  for(DWORD i = 0; i < returned; ++i)
-  {
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pids[i]);
-    if (!hProcess)
-      continue;
-
-    HANDLE hToken;
-    if (!OpenProcessToken(hProcess,
-          TOKEN_QUERY | TOKEN_READ | TOKEN_IMPERSONATE | TOKEN_QUERY_SOURCE |
-          TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_EXECUTE, &hToken))
-      goto err_proc;
-
-    DWORD tmp;
-    char userBuf[1024];
-    TOKEN_USER * user = (TOKEN_USER *)userBuf;
-    if (!GetTokenInformation(hToken, TokenUser, user, sizeof(userBuf), &tmp))
-      goto err_token;
-
-    if (EqualSid(user->User.Sid, systemSid))
-    {
-      CloseHandle(hProcess);
-
-      // duplicate the token so we can use it
-      HANDLE hDupe = NULL;
-      if (!DuplicateTokenEx(hToken, MAXIMUM_ALLOWED, NULL, SecurityImpersonation,
-            TokenPrimary, &hDupe))
-        hDupe = NULL;
-
-      CloseHandle(hToken);
-      return hDupe;
-    }
-
-err_token:
-    CloseHandle(hToken);
-err_proc:
-    CloseHandle(hProcess);
-  }
-
-  return NULL;
-}
-
 void Launch(void)
 {
   if (service.process)
@@ -237,31 +170,28 @@ void Launch(void)
     return;
   }
 
-  if (!enablePriv(SE_DEBUG_NAME))
-  {
-    doLog("failed to enable " SE_DEBUG_NAME);
-    return;
-  }
-
-  HANDLE hToken = dupeSystemProcessToken();
-  if (!hToken)
+  HANDLE hSystemToken;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE |
+        TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_SESSIONID | TOKEN_ADJUST_DEFAULT,
+        &hSystemToken))
   {
     doLog("failed to get the system process token\n");
     return;
   }
 
-  if (!disablePriv(SE_DEBUG_NAME))
-    doLog("failed to disable " SE_DEBUG_NAME);
+  HANDLE hToken;
+  if (!DuplicateTokenEx(hSystemToken, 0, NULL, SecurityAnonymous,
+        TokenPrimary, &hToken))
+  {
+    doLog("failed to duplicate the system process token\n");
+    CloseHandle(hSystemToken);
+    return;
+  }
+  CloseHandle(hSystemToken);
 
   DWORD origSessionID, targetSessionID, returnedLen;
   GetTokenInformation(hToken, TokenSessionId, &origSessionID,
       sizeof(origSessionID), &returnedLen);
-
-  if (!enablePriv(SE_TCB_NAME))
-  {
-    doLog("failed to enable " SE_TCB_NAME);
-    goto fail_token;
-  }
 
   targetSessionID = WTSGetActiveConsoleSessionId();
   if (origSessionID != targetSessionID)
@@ -275,20 +205,11 @@ void Launch(void)
     }
   }
 
-  if (!disablePriv(SE_TCB_NAME))
-    doLog("failed to disable " SE_TCB_NAME);
-
   LPVOID pEnvironment = NULL;
   if (!CreateEnvironmentBlock(&pEnvironment, hToken, TRUE))
   {
     doLog("fail_tokened to create the envionment block\n");
     winerr();
-    goto fail_token;
-  }
-
-  if (!enablePriv(SE_ASSIGNPRIMARYTOKEN_NAME))
-  {
-    doLog("failed to enable " SE_ASSIGNPRIMARYTOKEN_NAME);
     goto fail_token;
   }
 
@@ -333,9 +254,6 @@ void Launch(void)
 
   if (!disablePriv(SE_INCREASE_QUOTA_NAME))
     doLog("failed to disable " SE_INCREASE_QUOTA_NAME);
-
-  if (!disablePriv(SE_ASSIGNPRIMARYTOKEN_NAME))
-    doLog("failed to disable " SE_ASSIGNPRIMARYTOKEN_NAME);
 
   CloseHandle(pi.hThread);
   service.process = pi.hProcess;
