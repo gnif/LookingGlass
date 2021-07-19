@@ -111,7 +111,7 @@ bool adjustPriv(const char * name, DWORD attributes)
   {
     doLog("failed to open the process\n");
     winerr();
-    return -1;
+    return false;
   }
 
   if (!LookupPrivilegeValueA(NULL, name, &luid))
