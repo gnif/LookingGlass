@@ -35,6 +35,7 @@
 #include <dxgi.h>
 #include <d3d11.h>
 #include <d3dcommon.h>
+#include <versionhelpers.h>
 
 #include "dxgi_extra.h"
 
@@ -340,15 +341,15 @@ static bool dxgi_init(void)
 
   const D3D_FEATURE_LEVEL * featureLevels;
   unsigned int featureLevelCount;
-  if (IsWindows8())
+  if (IsWindows10OrGreater())
   {
-    featureLevels     = win8;
-    featureLevelCount = sizeof(win8) / sizeof(D3D_FEATURE_LEVEL);
+    featureLevels     = win10;
+    featureLevelCount = ARRAY_LENGTH(win10);
   }
   else
   {
-    featureLevels     = win10;
-    featureLevelCount = sizeof(win10) / sizeof(D3D_FEATURE_LEVEL);
+    featureLevels     = win8;
+    featureLevelCount = ARRAY_LENGTH(win8);
   }
 
   IDXGIAdapter * tmp;
