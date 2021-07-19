@@ -691,12 +691,9 @@ bool app_renderImGui(void)
       ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
     );
 
-    const float fps = 1000.0f / (g_state.renderTimeTotal /
-      ringbuffer_getCount(g_state.renderTimings));
-    const float ups = 1000.0f / (g_state.frameTimeTotal  /
-      ringbuffer_getCount(g_state.frameTimings));
-
-    igText("FPS:%4.2f UPS:%4.2f", fps, ups);
+    igText("FPS:%4.2f UPS:%4.2f",
+        atomic_load_explicit(&g_state.fps, memory_order_relaxed),
+        atomic_load_explicit(&g_state.ups, memory_order_relaxed));
 
     igEnd();
   }

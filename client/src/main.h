@@ -103,8 +103,10 @@ struct AppState
   bool                  lastRenderTimeValid;
   RingBuffer            renderTimings;
   RingBuffer            frameTimings;
-  float                 renderTimeTotal;
-  float                 frameTimeTotal;
+
+  atomic_uint_least64_t renderTime;
+  atomic_uint_least64_t renderCount, frameCount;
+  _Atomic(float)        fps, ups;
 
   uint64_t resizeTimeout;
   bool     resizeDone;

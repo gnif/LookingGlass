@@ -95,6 +95,26 @@ static void lgInit(void)
     g_state.ds->showPointer(true);
 }
 
+static bool fpsTimerFn(void * unused)
+{
+  const float renderTime =
+    (float)atomic_exchange_explicit(&g_state.renderTime, 0,
+        memory_order_acquire);
+
+  const float fps = 1e9f / (renderTime /
+    (float)atomic_exchange_explicit(&g_state.renderCount, 0,
+      memory_order_acquire));
+
+  const float ups = 1e9f / (renderTime /
+    (float)atomic_exchange_explicit(&g_state.frameCount, 0,
+      memory_order_acquire));
+
+  atomic_store_explicit(&g_state.fps, fps, memory_order_relaxed);
+  atomic_store_explicit(&g_state.ups, ups, memory_order_relaxed);
+
+  return true;
+}
+
 static int renderThread(void * unused)
 {
   if (!g_state.lgr->render_startup(g_state.lgrData))
@@ -103,6 +123,14 @@ static int renderThread(void * unused)
 
     /* unblock threads waiting on the condition */
     lgSignalEvent(e_startup);
+    return 1;
+  }
+
+  /* start up the fps timer */
+  LGTimer * fpsTimer;
+  if (!lgCreateTimer(1000, fpsTimerFn, NULL, &fpsTimer))
+  {
+    DEBUG_ERROR("Failed to create the fps timer");
     return 1;
   }
 
@@ -147,15 +175,17 @@ static int renderThread(void * unused)
     }
     LG_UNLOCK(g_state.lgrLock);
 
-    const uint64_t t      = nanotime();
-    const uint64_t delta  = t - g_state.lastRenderTime;
+    const uint64_t t     = nanotime();
+    const uint64_t delta = t - g_state.lastRenderTime;
+
     g_state.lastRenderTime = t;
+    atomic_fetch_add_explicit(&g_state.renderTime , delta, memory_order_relaxed);
+    atomic_fetch_add_explicit(&g_state.renderCount, 1    , memory_order_relaxed);
 
     if (g_state.lastRenderTimeValid)
     {
-      const float fdelta = (float)delta / 1000000.0f;
+      const float fdelta = (float)delta / 1e6f;
       ringbuffer_push(g_state.renderTimings, &fdelta);
-      g_state.renderTimeTotal += fdelta;
     }
     g_state.lastRenderTimeValid = true;
 
@@ -176,6 +206,8 @@ static int renderThread(void * unused)
   }
 
   g_state.state = APP_STATE_SHUTDOWN;
+
+  lgTimerDestroy(fpsTimer);
 
   if (t_cursor)
     lgJoinThread(t_cursor, NULL);
@@ -591,10 +623,10 @@ int main_frameThread(void * unused)
     {
       const float fdelta = (float)delta / 1000000.0f;
       ringbuffer_push(g_state.frameTimings, &fdelta);
-      g_state.frameTimeTotal += fdelta;
     }
     g_state.lastFrameTimeValid = true;
 
+    atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
     lgSignalEvent(e_frame);
     lgmpClientMessageDone(queue);
   }
@@ -679,13 +711,6 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
   return true;
 }
 
-static void rbSubtractFloat(void * value_, void * udata_)
-{
-  float * value = (float *)value_;
-  float * udata = (float *)udata_;
-  *udata -= *value;
-}
-
 static int lg_run(void)
 {
   memset(&g_state, 0, sizeof(g_state));
@@ -709,11 +734,6 @@ static int lg_run(void)
   // initialize metrics ringbuffers
   g_state.renderTimings = ringbuffer_new(256, sizeof(float));
   g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
-
-  ringbuffer_setPreOverwriteFn(g_state.renderTimings, rbSubtractFloat,
-      &g_state.renderTimeTotal);
-  ringbuffer_setPreOverwriteFn(g_state.frameTimings , rbSubtractFloat,
-      &g_state.frameTimeTotal);
 
   app_registerGraph("RENDER", g_state.renderTimings);
   app_registerGraph("UPLOAD", g_state.frameTimings);
