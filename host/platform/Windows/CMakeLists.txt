@@ -24,6 +24,7 @@ target_link_libraries(platform_Windows
 	capture
 
 	userenv
+	ntdll
 	wtsapi32
 	psapi
 	shlwapi
