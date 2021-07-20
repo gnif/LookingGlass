@@ -135,7 +135,7 @@ static int renderThread(void * unused)
 
   /* start up the fps timer */
   LGTimer * fpsTimer;
-  if (!lgCreateTimer(1000, fpsTimerFn, NULL, &fpsTimer))
+  if (!lgCreateTimer(100, fpsTimerFn, NULL, &fpsTimer))
   {
     DEBUG_ERROR("Failed to create the fps timer");
     return 1;
