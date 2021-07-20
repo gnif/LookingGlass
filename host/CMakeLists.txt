@@ -71,6 +71,9 @@ add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 add_subdirectory(platform)
 
 if(WIN32)
+  set_source_files_properties(platform/Windows/resource.rc PROPERTIES
+    OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/platform/Windows/app.manifest;${PROJECT_TOP}/resources/icon.ico"
+  )
   add_executable(looking-glass-host WIN32
     platform/Windows/resource.rc
     ${SOURCES}
