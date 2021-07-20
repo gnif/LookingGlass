@@ -5,6 +5,9 @@ include_directories(
         ${PROJECT_TOP}/vendor/ivshmem
 )
 
+# allow use of functions for Windows 7 or later
+add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
+
 add_library(lg_common_platform_code STATIC
     debug.c
     crash.c
