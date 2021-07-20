@@ -540,6 +540,19 @@ VOID WINAPI SvcCtrlHandler(DWORD dwControl)
   ReportSvcStatus(gSvcStatus.dwCurrentState, NO_ERROR, 0);
 }
 
+static bool sleepOrStop(DWORD ms)
+{
+  switch (WaitForSingleObject(ghSvcStopEvent, ms))
+  {
+    case WAIT_OBJECT_0:
+      return true;
+
+    case WAIT_FAILED:
+      doLog("Failed to WaitForSingleObject (0x%lx)\n", GetLastError());
+  }
+  return false;
+}
+
 VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 {
   gSvcStatusHandle = RegisterServiceCtrlHandler(SVCNAME, SvcCtrlHandler);
@@ -650,7 +663,9 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
               DWORD backoff = FAIL_RETRY_INIT_INTERVAL << (failCount - 1);
               doLog("Host application failed to start %d times, waiting %u ms...\n", failCount, backoff);
-              Sleep(backoff);
+
+              if (sleepOrStop(backoff))
+                goto stopped;
               break;
             }
 
@@ -665,8 +680,8 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
         }
 
         // avoid restarting too often
-        if (GetTickCount64() - launchTime < 1000)
-          Sleep(1000);
+        if (GetTickCount64() - launchTime < 1000 && sleepOrStop(1000))
+          goto stopped;
         break;
       }
 
