@@ -81,16 +81,20 @@ static const struct wp_presentation_feedback_listener presentationFeedbackListen
 
 bool waylandPresentationInit(void)
 {
-  wlWm.photonTimings = ringbuffer_new(256, sizeof(float));
-  wlWm.photonGraph   = app_registerGraph("PHOTON", wlWm.photonTimings);
-
   if (wlWm.presentation)
+  {
+    wlWm.photonTimings = ringbuffer_new(256, sizeof(float));
+    wlWm.photonGraph   = app_registerGraph("PHOTON", wlWm.photonTimings);
     wp_presentation_add_listener(wlWm.presentation, &presentationListener, NULL);
+  }
   return true;
 }
 
 void waylandPresentationFree(void)
 {
+  if (!wlWm.presentation)
+    return;
+
   wp_presentation_destroy(wlWm.presentation);
   app_unregisterGraph(wlWm.photonGraph);
   ringbuffer_free(&wlWm.photonTimings);
@@ -98,6 +102,9 @@ void waylandPresentationFree(void)
 
 void waylandPresentationFrame(void)
 {
+  if (!wlWm.presentation)
+    return;
+
   struct FrameData * data = malloc(sizeof(struct FrameData));
   if (clock_gettime(wlWm.clkId, &data->sent))
   {
