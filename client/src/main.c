@@ -97,17 +97,24 @@ static void lgInit(void)
 
 static bool fpsTimerFn(void * unused)
 {
-  const float renderTime =
-    (float)atomic_exchange_explicit(&g_state.renderTime, 0,
-        memory_order_acquire);
+  static uint64_t last;
+  if (!last)
+  {
+    last = microtime();
+    return true;
+  }
 
-  const float fps = 1e9f / (renderTime /
-    (float)atomic_exchange_explicit(&g_state.renderCount, 0,
-      memory_order_acquire));
+  const uint64_t renderCount = atomic_exchange_explicit(&g_state.renderCount, 0,
+      memory_order_acquire);
+  const uint64_t frameCount = atomic_exchange_explicit(&g_state.frameCount, 0,
+      memory_order_acquire);
 
-  const float ups = 1e9f / (renderTime /
-    (float)atomic_exchange_explicit(&g_state.frameCount, 0,
-      memory_order_acquire));
+  const uint64_t time = microtime();
+  const float elapsed = (float)(time - last) / 1e3;
+  last = time;
+
+  const float fps = 1e3f / (elapsed / (float)renderCount);
+  const float ups = 1e3f / (elapsed / (float)frameCount);
 
   atomic_store_explicit(&g_state.fps, fps, memory_order_relaxed);
   atomic_store_explicit(&g_state.ups, ups, memory_order_relaxed);
@@ -179,8 +186,7 @@ static int renderThread(void * unused)
     const uint64_t delta = t - g_state.lastRenderTime;
 
     g_state.lastRenderTime = t;
-    atomic_fetch_add_explicit(&g_state.renderTime , delta, memory_order_relaxed);
-    atomic_fetch_add_explicit(&g_state.renderCount, 1    , memory_order_relaxed);
+    atomic_fetch_add_explicit(&g_state.renderCount, 1, memory_order_relaxed);
 
     if (g_state.lastRenderTimeValid)
     {
@@ -621,7 +627,7 @@ int main_frameThread(void * unused)
 
     if (g_state.lastFrameTimeValid)
     {
-      const float fdelta = (float)delta / 1000000.0f;
+      const float fdelta = (float)delta / 1e6f;
       ringbuffer_push(g_state.frameTimings, &fdelta);
     }
     g_state.lastFrameTimeValid = true;
