@@ -65,15 +65,6 @@ struct AppState
 static struct AppState app = {0};
 HWND MessageHWND;
 
-// linux mingw64 is missing this
-#ifndef MSGFLT_RESET
-  #define MSGFLT_RESET (0)
-  #define MSGFLT_ALLOW (1)
-  #define MSGFLT_DISALLOW (2)
-#endif
-typedef WINBOOL WINAPI (*PChangeWindowMessageFilterEx)(HWND hwnd, UINT message, DWORD action, void * pChangeFilterStruct);
-PChangeWindowMessageFilterEx _ChangeWindowMessageFilterEx = NULL;
-
 CreateProcessAsUserA_t f_CreateProcessAsUserA = NULL;
 
 bool windowsSetupAPI(void)
@@ -425,10 +416,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   app.exitThreadEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
   // this is needed so that unprivileged processes can send us this message
-  HMODULE user32 = GetModuleHandle("user32.dll");
-  _ChangeWindowMessageFilterEx = (PChangeWindowMessageFilterEx)GetProcAddress(user32, "ChangeWindowMessageFilterEx");
-  if (_ChangeWindowMessageFilterEx)
-    _ChangeWindowMessageFilterEx(app.messageWnd, app.trayRestartMsg, MSGFLT_ALLOW, NULL);
+  ChangeWindowMessageFilterEx(app.messageWnd, app.trayRestartMsg, MSGFLT_ALLOW, NULL);
 
   // set the global
   MessageHWND = app.messageWnd;
