@@ -100,7 +100,7 @@ static bool fpsTimerFn(void * unused)
   static uint64_t last;
   if (!last)
   {
-    last = microtime();
+    last = nanotime();
     return true;
   }
 
@@ -109,15 +109,19 @@ static bool fpsTimerFn(void * unused)
   const uint64_t frameCount = atomic_exchange_explicit(&g_state.frameCount, 0,
       memory_order_acquire);
 
-  const uint64_t time = microtime();
-  const float elapsed = (float)(time - last) / 1e3;
+  const uint64_t time = nanotime();
+  const float elapsedNs = time - last;
   last = time;
 
-  const float fps = 1e3f / (elapsed / (float)renderCount);
-  const float ups = 1e3f / (elapsed / (float)frameCount);
+  const float elapsedMs = (float)elapsedNs / 1e6;
 
-  atomic_store_explicit(&g_state.fps, fps, memory_order_relaxed);
-  atomic_store_explicit(&g_state.ups, ups, memory_order_relaxed);
+  const float    fps     = 1e3f / (elapsedMs / (float)renderCount);
+  const float    ups     = 1e3f / (elapsedMs / (float)frameCount);
+  const uint64_t upsTime = elapsedNs / frameCount;
+
+  atomic_store_explicit(&g_state.fps    , fps    , memory_order_relaxed);
+  atomic_store_explicit(&g_state.ups    , ups    , memory_order_relaxed);
+  atomic_store_explicit(&g_state.upsTime, upsTime, memory_order_relaxed);
 
   return true;
 }
@@ -153,9 +157,12 @@ static int renderThread(void * unused)
   {
     if (g_params.fpsMin != 0)
     {
+      const uint64_t upsTime = atomic_load_explicit(&g_state.upsTime,
+          memory_order_relaxed);
+
       lgWaitEventAbs(e_frame, &time);
       clock_gettime(CLOCK_MONOTONIC, &time);
-      tsAdd(&time, g_state.frameTime);
+      tsAdd(&time, g_state.frameTime + upsTime);
     }
 
     int resize = atomic_load(&g_state.lgrResize);
