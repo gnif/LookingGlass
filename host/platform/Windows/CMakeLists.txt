@@ -14,8 +14,8 @@ add_library(platform_Windows STATIC
 	resource.rc
 )
 
-# allow use of functions for Windows Vista or later
-add_compile_definitions(WINVER=0x0600 _WIN32_WINNT=0x0600)
+# allow use of functions for Windows 7 or later
+add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
 
 add_subdirectory("capture")
 
