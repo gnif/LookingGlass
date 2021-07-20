@@ -11,7 +11,6 @@ add_library(platform_Windows STATIC
 	src/mousehook.c
 	src/force_compose.c
 	src/delay.c
-	resource.rc
 )
 
 # allow use of functions for Windows Vista or later
