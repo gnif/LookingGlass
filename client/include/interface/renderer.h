@@ -116,7 +116,7 @@ typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuff
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
 typedef void         (* LG_RendererOnHelp       )(void * opaque, const char * message);
 typedef bool         (* LG_RendererRenderStartup)(void * opaque);
-typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate);
+typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate, const bool newFrame);
 
 typedef struct LG_Renderer
 {

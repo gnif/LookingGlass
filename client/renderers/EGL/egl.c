@@ -923,7 +923,7 @@ bool egl_render_startup(void * opaque)
   return true;
 }
 
-bool egl_render(void * opaque, LG_RendererRotate rotate)
+bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
 {
   struct Inst * this = (struct Inst *)opaque;
 

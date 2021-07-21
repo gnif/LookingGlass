@@ -191,8 +191,14 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
+    static uint64_t lastFrameCount = 0;
+    const uint64_t frameCount =
+      atomic_load_explicit(&g_state.frameCount, memory_order_relaxed);
+    const bool newFrame = frameCount != lastFrameCount;
+    lastFrameCount = frameCount;
+
     LG_LOCK(g_state.lgrLock);
-    if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate))
+    if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate, newFrame))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
