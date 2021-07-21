@@ -18,6 +18,22 @@ add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
 
 add_subdirectory("capture")
 
+if (MINGW)
+	# Build our own ntdll.dll import library
+	# This tricks MinGW into not linking stuff like memcpy from ntdll.dll instead of mscvrt.dll
+	find_program(DLLTOOL_EXECUTABLE NAMES "x86_64-w64-mingw32-dlltool" "dlltool.exe" DOC "dlltool executable")
+	add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/ntdll.a"
+		COMMAND "${DLLTOOL_EXECUTABLE}" -d "${PROJECT_SOURCE_DIR}/ntdll.def" -l "${PROJECT_BINARY_DIR}/ntdll.a"
+		MAIN_DEPENDENCY "${PROJECT_SOURCE_DIR}/ntdll.def"
+		COMMENT "Building import library ntdll.a"
+		VERBATIM
+	)
+	add_custom_target(ntdll_target DEPENDS "${PROJECT_BINARY_DIR}/ntdll.a")
+	add_library(ntdll STATIC IMPORTED GLOBAL)
+	add_dependencies(ntdll ntdll_target)
+	set_target_properties(ntdll PROPERTIES IMPORTED_LOCATION "${PROJECT_BINARY_DIR}/ntdll.a")
+endif()
+
 target_link_libraries(platform_Windows
 	lg_common
 	capture
