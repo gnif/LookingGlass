@@ -57,9 +57,7 @@ struct AppState
   NOTIFYICONDATA iconData;
   UINT           trayRestartMsg;
   HMENU          trayMenu;
-
-  HANDLE         exitThreadEvent;
-  LGThread     * exitThread;
+  HANDLE         exitWait;
 };
 
 static struct AppState app = {0};
@@ -263,27 +261,6 @@ static int appThread(void * opaque)
   return result;
 }
 
-static int exitThread(void * opaque)
-{
-  HANDLE handles[2] = { (HANDLE) opaque, app.exitThreadEvent };
-
-  switch (WaitForMultipleObjects(2, handles, FALSE, INFINITE))
-  {
-    case WAIT_OBJECT_0:
-      DEBUG_INFO("Received exit event");
-      SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
-      break;
-
-    case WAIT_OBJECT_0 + 1:
-      break;
-
-    case WAIT_FAILED:
-      DEBUG_ERROR("WaitForMultipleObjects failed: 0x%lx", GetLastError());
-  }
-
-  return 0;
-}
-
 LRESULT sendAppMessage(UINT Msg, WPARAM wParam, LPARAM lParam)
 {
   return SendMessage(app.messageWnd, Msg, wParam, lParam);
@@ -413,8 +390,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   app.messageWnd = CreateWindowEx(0, MAKEINTATOM(class), NULL, 0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
 
-  app.exitThreadEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-
   // this is needed so that unprivileged processes can send us this message
   ChangeWindowMessageFilterEx(app.messageWnd, app.trayRestartMsg, MSGFLT_ALLOW, NULL);
 
@@ -458,17 +433,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 shutdown:
   DestroyMenu(app.trayMenu);
   app_shutdown();
-  SetEvent(app.exitThreadEvent);
+  UnregisterWait(app.exitWait);
 
   if (!lgJoinThread(thread, &result))
   {
     DEBUG_ERROR("Failed to join the main application thread");
-    result = LG_HOST_EXIT_FAILED;
-  }
-
-  if (app.exitThread && !lgJoinThread(app.exitThread, &result))
-  {
-    DEBUG_ERROR("Failed to join the exit thread");
     result = LG_HOST_EXIT_FAILED;
   }
 
@@ -508,6 +477,12 @@ void boostPriority(void)
   }
 }
 
+void CALLBACK exitEventCallback(PVOID opaque, BOOLEAN timedOut)
+{
+  DEBUG_INFO("Received exit event");
+  SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
+}
+
 bool app_init(void)
 {
   const char * logFile = option_get_string("os", "logFile");
@@ -537,8 +512,9 @@ bool app_init(void)
       DEBUG_WARN("Failed to open exitEvent with error 0x%lx: %s", GetLastError(), exitEventName);
   }
 
-  if (exitEvent && !lgCreateThread("exitThread", exitThread, exitEvent, &app.exitThread))
-    DEBUG_ERROR("Failed to create the exit thread");
+  if (!RegisterWaitForSingleObject(&app.exitWait, exitEvent, exitEventCallback, NULL,
+        INFINITE, WT_EXECUTEONLYONCE))
+    DEBUG_ERROR("Failed to create register wait for exit event: 0x%lx", GetLastError());
 
   return true;
 }
