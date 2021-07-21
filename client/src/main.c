@@ -106,22 +106,30 @@ static bool fpsTimerFn(void * unused)
 
   const uint64_t renderCount = atomic_exchange_explicit(&g_state.renderCount, 0,
       memory_order_acquire);
-  const uint64_t frameCount = atomic_exchange_explicit(&g_state.frameCount, 0,
-      memory_order_acquire);
 
-  const uint64_t time = nanotime();
-  const float elapsedNs = time - last;
-  last = time;
+  float fps, ups;
+  if (renderCount > 0)
+  {
+    const uint64_t frameCount = atomic_exchange_explicit(&g_state.frameCount, 0,
+        memory_order_acquire);
 
-  const float elapsedMs = (float)elapsedNs / 1e6;
+    const uint64_t time      = nanotime();
+    const uint64_t elapsedNs = time - last;
+    const float    elapsedMs = (float)elapsedNs / 1e6f;
 
-  const float    fps     = 1e3f / (elapsedMs / (float)renderCount);
-  const float    ups     = 1e3f / (elapsedMs / (float)frameCount);
-  const uint64_t upsTime = elapsedNs / frameCount;
+    last = time;
+    fps  = 1e3f / (elapsedMs / (float)renderCount);
+    ups  = 1e3f / (elapsedMs / (float)frameCount);
+  }
+  else
+  {
+    last = nanotime();
+    fps  = 0.0f;
+    ups  = 0.0f;
+  }
 
-  atomic_store_explicit(&g_state.fps    , fps    , memory_order_relaxed);
-  atomic_store_explicit(&g_state.ups    , ups    , memory_order_relaxed);
-  atomic_store_explicit(&g_state.upsTime, upsTime, memory_order_relaxed);
+  atomic_store_explicit(&g_state.fps, fps, memory_order_relaxed);
+  atomic_store_explicit(&g_state.ups, ups, memory_order_relaxed);
 
   return true;
 }
@@ -157,12 +165,12 @@ static int renderThread(void * unused)
   {
     if (g_params.fpsMin != 0)
     {
-      const uint64_t upsTime = atomic_load_explicit(&g_state.upsTime,
-          memory_order_relaxed);
-
-      lgWaitEventAbs(e_frame, &time);
-      clock_gettime(CLOCK_MONOTONIC, &time);
-      tsAdd(&time, g_state.frameTime + upsTime);
+      if (!lgWaitEventAbs(e_frame, &time))
+      {
+        /* only update the time if we woke up early */
+        clock_gettime(CLOCK_MONOTONIC, &time);
+        tsAdd(&time, g_state.frameTime);
+      }
     }
 
     int resize = atomic_load(&g_state.lgrResize);
