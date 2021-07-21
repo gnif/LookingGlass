@@ -7,7 +7,7 @@ import re
 import subprocess
 
 PROJECT = os.path.dirname(__file__)
-EXTENSIONS = ('.c', '.cpp', '.h')
+EXTENSIONS = ('.c', '.cpp', '.h', '.nsi', '.rc')
 START_YEAR = 2017
 CURRENT_YEAR = datetime.date.today().year
 
