@@ -40,6 +40,7 @@ struct EGL_Damage
   GLfloat transform[6];
   GLuint  buffers[2];
   GLuint  vao;
+  int     count;
 
   bool          show;
   KeybindHandle toggleHandle;
@@ -109,6 +110,7 @@ bool egl_damage_init(EGL_Damage ** damage)
 
   glBindVertexArray(0);
 
+  (*damage)->count = -1;
   (*damage)->uTransform = egl_shader_get_uniform_location((*damage)->shader, "transform");
   (*damage)->toggleHandle = app_registerKeybind(KEY_A, egl_damage_show_toggle, *damage, "Toggle damage display");
 
@@ -170,10 +172,9 @@ inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect
 
 bool egl_damage_render(EGL_Damage * damage, const struct DesktopDamage * data)
 {
-  if (!damage->show || !data)
+  if (!damage->show || (!data && damage->count == -1))
     return false;
 
-  int count = data->count;
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -181,27 +182,32 @@ bool egl_damage_render(EGL_Damage * damage, const struct DesktopDamage * data)
   egl_shader_use(damage->shader);
   glUniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
 
-  GLfloat vertices[KVMFR_MAX_DAMAGE_RECTS * 8];
-  if (count == 0)
+  if (data)
   {
-    FrameDamageRect full = {
-      .x = 0, .y = 0, .width = damage->width, .height = damage->height,
-    };
-    count = 1;
-    rectToVertices(vertices, &full);
-  }
-  else
-  {
-    for (int i = 0; i < count; ++i)
-      rectToVertices(vertices + i * 8, data->rects + i);
-  }
+    damage->count = data->count;
+    GLfloat vertices[KVMFR_MAX_DAMAGE_RECTS * 8];
+    if (damage->count == 0)
+    {
+      FrameDamageRect full = {
+        .x = 0, .y = 0, .width = damage->width, .height = damage->height,
+      };
+      damage->count = 1;
+      rectToVertices(vertices, &full);
+    }
+    else
+    {
+      for (int i = 0; i < damage->count; ++i)
+        rectToVertices(vertices + i * 8, data->rects + i);
+    }
 
-  glBindBuffer(GL_ARRAY_BUFFER, damage->buffers[0]);
-  glBufferSubData(GL_ARRAY_BUFFER, 0, count * 8 * sizeof(GLfloat), vertices);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, damage->buffers[0]);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, damage->count * 8 * sizeof(GLfloat),
+        vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+  }
 
   glBindVertexArray(damage->vao);
-  glDrawElements(GL_TRIANGLES, 6 * count, GL_UNSIGNED_SHORT, NULL);
+  glDrawElements(GL_TRIANGLES, 6 * damage->count, GL_UNSIGNED_SHORT, NULL);
   glBindVertexArray(0);
 
   glDisable(GL_BLEND);

@@ -1005,7 +1005,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
   }
 
   hasOverlay |= egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
-  hasOverlay |= egl_damage_render(this->damage, desktopDamage);
+  hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
 
   if (app_renderImGui())
   {
