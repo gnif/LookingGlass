@@ -1,0 +1,7 @@
+; This file is used to trick MinGW to not like stuff like memcpy from ntdll.dll.
+; See CMakeLists.txt for how this is compiled.
+
+LIBRARY "ntdll.dll"
+EXPORTS
+NtDelayExecution
+NtSetTimerResolution
