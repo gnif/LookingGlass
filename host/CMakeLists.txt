@@ -46,6 +46,7 @@ get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 add_custom_command(
 	OUTPUT	${CMAKE_BINARY_DIR}/version.c
+    ${CMAKE_BINARY_DIR}/include/version.h
 		${CMAKE_BINARY_DIR}/_version.c
 	COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
 		${PROJECT_TOP}/version.cmake
@@ -72,7 +73,7 @@ add_subdirectory(platform)
 
 if(WIN32)
   set_source_files_properties(platform/Windows/resource.rc PROPERTIES
-    OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/platform/Windows/app.manifest;${PROJECT_TOP}/resources/icon.ico"
+    OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/platform/Windows/app.manifest;${PROJECT_TOP}/resources/icon.ico;${CMAKE_BINARY_DIR}/include/version.h"
   )
   add_executable(looking-glass-host WIN32
     platform/Windows/resource.rc
