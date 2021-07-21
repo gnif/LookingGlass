@@ -20,8 +20,10 @@
 
 #include "wayland.h"
 
+#include <errno.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/epoll.h>
 
 #include <libdecor.h>
 #include <wayland-client.h>
@@ -94,6 +96,11 @@ static struct libdecor_frame_interface libdecorFrameListener = {
 };
 #pragma GCC diagnostic pop
 
+static void libdecorCallback(uint32_t events, void * opaque)
+{
+  libdecor_dispatch(wlWm.libdecor, 0);
+}
+
 bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless)
 {
   wlWm.libdecor = libdecor_new(wlWm.display, &libdecorListener);
@@ -104,8 +111,13 @@ bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool b
   libdecor_frame_map(wlWm.libdecorFrame);
 
   while (!wlWm.configured)
-    wl_display_roundtrip(wlWm.display);
+    libdecor_dispatch(wlWm.libdecor, 0);
 
+  if (!waylandPollRegister(libdecor_get_fd(wlWm.libdecor), libdecorCallback, NULL, EPOLLIN))
+  {
+    DEBUG_ERROR("Failed register display to epoll: %s", strerror(errno));
+    return false;
+  }
   return true;
 }
 
