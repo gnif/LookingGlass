@@ -166,7 +166,7 @@ void mouseHook_install(MouseHookFn callback)
 {
   if (!mouseHook.event)
   {
-    mouseHook.event = CreateEventA(NULL, FALSE, FALSE, NULL);
+    mouseHook.event = CreateEventA(NULL, TRUE, FALSE, NULL);
     if (!mouseHook.event)
     {
       DEBUG_WINERROR("Failed to create mouse hook uninstall event",
@@ -201,6 +201,7 @@ void mouseHook_remove(void)
   SetEvent(mouseHook.event);
   WaitForSingleObject(mouseHook.thread      , INFINITE);
   WaitForSingleObject(mouseHook.updateThread, INFINITE);
+  ResetEvent(mouseHook.event);
   CloseHandle(mouseHook.thread);
   CloseHandle(mouseHook.updateThread);
 }

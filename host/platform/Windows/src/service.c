@@ -698,6 +698,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
     {
       case WAIT_OBJECT_0:
         service.running = false;
+        doLog("Host application exited gracefully\n");
         break;
       case WAIT_TIMEOUT:
         doLog("Host application failed to exit in 1 second\n");

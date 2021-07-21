@@ -787,6 +787,7 @@ fail_lgmp:
 fail_ivshmem:
   ivshmemClose(&shmDev);
   ivshmemFree(&shmDev);
+  DEBUG_INFO("Host application exited");
   return exitcode;
 }
 
