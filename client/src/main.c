@@ -147,7 +147,7 @@ static int renderThread(void * unused)
 
   /* start up the fps timer */
   LGTimer * fpsTimer;
-  if (!lgCreateTimer(1000, fpsTimerFn, NULL, &fpsTimer))
+  if (!lgCreateTimer(500, fpsTimerFn, NULL, &fpsTimer))
   {
     DEBUG_ERROR("Failed to create the fps timer");
     return 1;
@@ -165,7 +165,9 @@ static int renderThread(void * unused)
   {
     if (g_params.fpsMin != 0)
     {
-      if (!lgWaitEventAbs(e_frame, &time))
+      float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
+
+      if (!lgWaitEventAbs(e_frame, &time) || ups > g_params.fpsMin)
       {
         /* only update the time if we woke up early */
         clock_gettime(CLOCK_MONOTONIC, &time);
