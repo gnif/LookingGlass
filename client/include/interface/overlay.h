@@ -22,6 +22,8 @@
 #define _H_I_OVERLAY_
 
 #include <stdbool.h>
+#include <assert.h>
+
 #include "common/types.h"
 
 enum LG_OverlayFlags
@@ -57,7 +59,8 @@ struct LG_OverlayOps
    * mode.
    *
    * The caller provides `windowRects` to be populated by the callee and is sized
-   * according to the return value of `getWindowCount`
+   * according to the return value of `getWindowCount`. Note, `windowRects` may
+   * be NULL if the caller does not want this information.
    */
   void (*render)(void * udata, bool interactive, struct Rect windowRects[]);
 

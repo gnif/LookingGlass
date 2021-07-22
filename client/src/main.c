@@ -55,6 +55,7 @@
 #include "clipboard.h"
 #include "ll.h"
 #include "egl_dynprocs.h"
+#include "overlays.h"
 
 // forwards
 static int cursorThread(void * unused);
@@ -758,14 +759,15 @@ static int lg_run(void)
   ImFontAtlas_GetTexDataAsRGBA32(g_state.io->Fonts, &text_pixels,
       &text_w, &text_h, NULL);
 
-  g_state.graphs = ll_new();
+  g_state.overlays = ll_new();
+  app_registerOverlay(&LGOverlayFPS   , NULL);
+  app_registerOverlay(&LGOverlayGraphs, NULL);
 
   // initialize metrics ringbuffers
   g_state.renderTimings = ringbuffer_new(256, sizeof(float));
   g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
-
-  app_registerGraph("RENDER", g_state.renderTimings);
-  app_registerGraph("UPLOAD", g_state.frameTimings);
+  overlayGraph_register("RENDER", g_state.renderTimings);
+  overlayGraph_register("UPLOAD", g_state.frameTimings );
 
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
@@ -1090,6 +1092,13 @@ static void lg_shutdown(void)
   }
 
   lgmpClientFree(&g_state.lgmp);
+
+  if (g_state.overlays)
+  {
+    app_freeOverlays();
+    ll_free(g_state.overlays);
+    g_state.overlays = NULL;
+  }
 
   if (e_frame)
   {

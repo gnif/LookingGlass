@@ -30,6 +30,8 @@
 
 #include "common/debug.h"
 #include "common/stringutils.h"
+#include "interface/overlay.h"
+#include "overlays.h"
 
 #include "cimgui.h"
 
@@ -612,143 +614,87 @@ void app_showHelp(bool show)
   free(help);
 }
 
-struct ImGuiGraph
-{
-  const char * name;
-  RingBuffer   buffer;
-  bool         enabled;
-};
-
 GraphHandle app_registerGraph(const char * name, RingBuffer buffer)
 {
-  struct ImGuiGraph * graph = malloc(sizeof(struct ImGuiGraph));
-  graph->name    = name;
-  graph->buffer  = buffer;
-  graph->enabled = true;
-  ll_push(g_state.graphs, graph);
-  return graph;
+  return overlayGraph_register(name, buffer);
 }
 
 void app_unregisterGraph(GraphHandle handle)
 {
-  handle->enabled = false;
+  overlayGraph_unregister(handle);
 }
 
-struct BufferMetrics
+struct Overlay
 {
-  float min;
-  float max;
-  float sum;
-  float avg;
-  float freq;
+  const struct LG_OverlayOps * ops;
+  void * udata;
+  int windowCount;
 };
 
-static bool rbCalcMetrics(int index, void * value_, void * udata_)
+void app_registerOverlay(const struct LG_OverlayOps * ops, void * params)
 {
-  float * value = value_;
-  struct BufferMetrics * udata = udata_;
+  ASSERT_LG_OVERLAY_VALID(ops);
 
-  if (index == 0)
+  void * udata;
+  if (!ops->init(&udata, params))
   {
-    udata->min = *value;
-    udata->max = *value;
-    udata->sum = *value;
-    return true;
+    DEBUG_ERROR("Overlay `%s` failed to initialize", ops->name);
+    return;
   }
 
-  if (udata->min > *value)
-    udata->min = *value;
-
-  if (udata->max < *value)
-    udata->max = *value;
-
-  udata->sum += *value;
-  return true;
+  struct Overlay * overlay = malloc(sizeof(struct Overlay));
+  overlay->ops   = ops;
+  overlay->udata = udata;
+  ll_push(g_state.overlays, overlay);
 }
 
-bool app_renderImGui(void)
+int app_renderOverlay(struct Rect * rects, int maxRects)
 {
-  if (!g_state.showFPS &&
-      !g_state.showTiming)
-    return false;
+  int windowCount = 0;
+  struct Overlay * overlay;
 
-  igNewFrame();
-
-  ImGuiStyle * style = igGetStyle();
-  style->WindowBorderSize = 0.0f;
-
-  if (g_state.showFPS)
+  // get the total window count
+  for (ll_reset(g_state.overlays);
+      ll_walk(g_state.overlays, (void **)&overlay); )
   {
-    const ImVec2 pos = {0.0f, 0.0f};
-    igSetNextWindowBgAlpha(0.6f);
-    igSetNextWindowPos(pos, 0, pos);
-
-    igBegin(
-      "FPS",
-      NULL,
-      ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
-      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-      ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
-    );
-
-    igText("FPS:%4.2f UPS:%4.2f",
-        atomic_load_explicit(&g_state.fps, memory_order_relaxed),
-        atomic_load_explicit(&g_state.ups, memory_order_relaxed));
-
-    igEnd();
+    overlay->windowCount = overlay->ops->getWindowCount(overlay->udata, false);
+    windowCount += overlay->windowCount;
   }
 
-  if (g_state.showTiming)
+  // return -1 if there are no windows to render
+  if (windowCount == 0)
+    return -1;
+
+  if (windowCount > maxRects)
   {
-    const ImVec2 pos = {0.0f, 0.0f};
-    igSetNextWindowBgAlpha(0.4f);
-    igSetNextWindowPos(pos, 0, pos);
+    rects = NULL;
+    windowCount = 0;
+  }
 
-    igBegin(
-      "Performance Metrics",
-      NULL,
-      ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
-      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-      ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
-    );
+  // render the overlays
+  igNewFrame();
+  for (ll_reset(g_state.overlays);
+      ll_walk(g_state.overlays, (void **)&overlay); )
+  {
+    if (overlay->windowCount == 0)
+      continue;
 
-    GraphHandle graph;
-    for (ll_reset(g_state.graphs); ll_walk(g_state.graphs, (void **)&graph); )
-    {
-      if (!graph->enabled)
-        continue;
-
-      struct BufferMetrics metrics = {};
-      ringbuffer_forEach(graph->buffer, rbCalcMetrics, &metrics);
-
-      if (metrics.sum > 0.0f)
-      {
-        metrics.avg  = metrics.sum / ringbuffer_getCount(graph->buffer);
-        metrics.freq = 1000.0f / metrics.avg;
-      }
-
-      char  title[64];
-      const ImVec2 size = {400.0f, 100.0f};
-
-      snprintf(title, sizeof(title),
-          "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
-          graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
-
-      igPlotLinesFloatPtr(
-          "",
-          (float *)ringbuffer_getValues(graph->buffer),
-          ringbuffer_getLength(graph->buffer),
-          ringbuffer_getStart (graph->buffer),
-          title,
-          0.0f,
-          50.0f,
-          size,
-          sizeof(float));
-    }
-
-    igEnd();
+    overlay->ops->render(overlay->udata, false, rects);
+    if (rects)
+      rects += overlay->windowCount;
   }
 
   igRender();
-  return true;
+
+  return windowCount;
+}
+
+void app_freeOverlays(void)
+{
+  struct Overlay * overlay;
+  while(ll_shift(g_state.overlays, (void **)&overlay))
+  {
+    overlay->ops->free(overlay->udata);
+    free(overlay);
+  }
 }

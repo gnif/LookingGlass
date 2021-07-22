@@ -1007,15 +1007,23 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
   hasOverlay |= egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
   hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
 
-  if (app_renderImGui())
+  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + 2];
+  int damageIdx = app_renderOverlay(damage, KVMFR_MAX_DAMAGE_RECTS);
+
+  // if no overlay
+  if (damageIdx == -1)
+  {
+    damageIdx = 0;
+  }
+  else
   {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
-    hasOverlay = true;
-  }
 
-  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + 2];
-  int damageIdx = 0;
+    // if there were too many rects invalidate the entire window
+    if (damageIdx == 0)
+      hasOverlay = true;
+  }
 
   if (!hasOverlay && !this->hadOverlay)
   {

@@ -27,6 +27,7 @@
 #include "common/ringbuffer.h"
 #include "common/types.h"
 #include "interface/displayserver.h"
+#include "interface/overlay.h"
 
 typedef enum LG_MsgAlert
 {
@@ -79,10 +80,15 @@ void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
 #endif
 
-typedef struct ImGuiGraph * GraphHandle;
+void app_registerOverlay(const struct LG_OverlayOps * ops, void * params);
+int app_renderOverlay(struct Rect * rects, int maxRects);
+void app_freeOverlays(void);
+
+struct OverlayGraph;
+typedef struct OverlayGraph * GraphHandle;
+
 GraphHandle app_registerGraph(const char * name, RingBuffer buffer);
 void app_unregisterGraph(GraphHandle handle);
-bool app_renderImGui(void);
 
 void app_clipboardRelease(void);
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count);
