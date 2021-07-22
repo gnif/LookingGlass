@@ -1020,6 +1020,9 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
 
+    for (int i = 0; i < damageIdx; ++i)
+      damage[i].y = this->height - damage[i].y - damage[i].h;
+
     // if there were too many rects invalidate the entire window
     if (damageIdx == 0)
       hasOverlay = true;
