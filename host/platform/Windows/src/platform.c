@@ -205,6 +205,7 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   {
     case WM_DESTROY:
       Shell_NotifyIcon(NIM_DELETE, &app.iconData);
+      MessageHWND = NULL;
       PostQuitMessage(0);
       break;
 
