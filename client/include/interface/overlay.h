@@ -59,7 +59,7 @@ struct LG_OverlayOps
    * The caller provides `windowRects` to be populated by the callee and is sized
    * according to the return value of `getWindowCount`
    */
-  void (*render)(void * udata, bool interactive, struct Rect * windowRects[]);
+  void (*render)(void * udata, bool interactive, struct Rect windowRects[]);
 
   /* TODO: add load/save settings capabillity */
 };
