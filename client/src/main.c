@@ -179,12 +179,14 @@ static int renderThread(void * unused)
     int resize = atomic_load(&g_state.lgrResize);
     if (resize)
     {
-      const ImVec2 displaySize =
-      {
+      g_state.io->DisplaySize = (ImVec2) {
         .x = g_state.windowW,
         .y = g_state.windowH
       };
-      g_state.io->DisplaySize = displaySize;
+      g_state.io->DisplayFramebufferScale = (ImVec2) {
+        .x = g_state.windowScale,
+        .y = g_state.windowScale,
+      };
 
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
