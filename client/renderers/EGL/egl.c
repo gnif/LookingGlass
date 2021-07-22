@@ -1007,8 +1007,8 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
   hasOverlay |= egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
   hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
 
-  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + 2];
-  int damageIdx = app_renderOverlay(damage, KVMFR_MAX_DAMAGE_RECTS);
+  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + 12];
+  int damageIdx = app_renderOverlay(damage, 10);
 
   // if no overlay
   if (damageIdx == -1)
