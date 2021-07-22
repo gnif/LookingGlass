@@ -120,6 +120,7 @@ set(SOURCES
 	src/kb.c
 	src/egl_dynprocs.c
 	src/eglutil.c
+	src/overlay_utils.c
 
 	src/overlay/fps.c
 	src/overlay/graphs.c
