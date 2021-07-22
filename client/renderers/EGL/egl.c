@@ -1016,7 +1016,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
       break;
     case -1: // full damage
       hasOverlay = true;
-      damageIdx = 0;
       // fallthrough
     default:
       ImGui_ImplOpenGL3_NewFrame();
@@ -1062,6 +1061,8 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
       }
     }
   }
+  else
+    damageIdx = 0;
   this->hadOverlay = hasOverlay;
   free(desktopDamage);
 
