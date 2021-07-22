@@ -65,7 +65,7 @@ void lgTimerDestroy(LGTimer * timer)
 {
   if (timer->running)
   {
-    if (!KillTimer(MessageHWND, timer->handle))
+    if (MessageHWND && !KillTimer(MessageHWND, timer->handle))
       DEBUG_ERROR("failed to destroy the timer");
   }
 
