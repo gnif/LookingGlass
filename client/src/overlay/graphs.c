@@ -48,6 +48,9 @@ static bool graphs_init(void ** udata, void * params)
 
 static void graphs_free(void * udata)
 {
+  struct OverlayGraph * graph;
+  while(ll_shift(gs.graphs, (void **)&graph))
+    free(graph);
   ll_free(gs.graphs);
 }
 
