@@ -257,7 +257,7 @@ static int appThread(void * opaque)
 {
   RegisterTrayIcon();
   int result = app_main(app.argc, app.argv);
-  DestroyWindow(app.messageWnd);
+  SendMessage(app.messageWnd, WM_CLOSE, 0, 0);
   return result;
 }
 
