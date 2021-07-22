@@ -56,8 +56,8 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
 
   if (maxRects == 0)
   {
-    return -1;
     igEnd();
+    return -1;
   }
 
   ImVec2 size;
@@ -68,6 +68,7 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
   windowRects[0].w = size.x;
   windowRects[0].h = size.y;
   igEnd();
+
   return 1;
 }
 
