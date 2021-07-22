@@ -54,12 +54,6 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
       atomic_load_explicit(&g_state.fps, memory_order_relaxed),
       atomic_load_explicit(&g_state.ups, memory_order_relaxed));
 
-  if (maxRects == 0)
-  {
-    igEnd();
-    return -1;
-  }
-
   ImVec2 size;
   igGetWindowPos(&pos);
   igGetWindowSize(&size);
