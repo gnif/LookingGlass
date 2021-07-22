@@ -25,6 +25,7 @@
 
 #include "ll.h"
 #include "common/debug.h"
+#include "overlay_utils.h"
 
 struct GraphState
 {
@@ -138,14 +139,7 @@ static int graphs_render(void * udata, bool interactive,
         sizeof(float));
   };
 
-  ImVec2 size;
-  igGetWindowPos(&pos);
-  igGetWindowSize(&size);
-  windowRects[0].x = pos.x;
-  windowRects[0].y = pos.y;
-  windowRects[0].w = size.x;
-  windowRects[0].h = size.y;
-
+  overlayGetImGuiRect(windowRects);
   igEnd();
   return 1;
 }

@@ -20,6 +20,7 @@
 
 #include "interface/overlay.h"
 #include "cimgui.h"
+#include "overlay_utils.h"
 
 #include "../main.h"
 
@@ -54,13 +55,7 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
       atomic_load_explicit(&g_state.fps, memory_order_relaxed),
       atomic_load_explicit(&g_state.ups, memory_order_relaxed));
 
-  ImVec2 size;
-  igGetWindowPos(&pos);
-  igGetWindowSize(&size);
-  windowRects[0].x = pos.x;
-  windowRects[0].y = pos.y;
-  windowRects[0].w = size.x;
-  windowRects[0].h = size.y;
+  overlayGetImGuiRect(windowRects);
   igEnd();
 
   return 1;
