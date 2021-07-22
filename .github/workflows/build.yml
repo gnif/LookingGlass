@@ -22,10 +22,10 @@ jobs:
       run: |
         sudo apt-get install \
           binutils-dev \
-          libsdl2-dev libsdl2-ttf-dev \
           libspice-protocol-dev nettle-dev \
-          libx11-dev libxss-dev libxi-dev \
-          wayland-protocols
+          libgl-dev libgles-dev \
+          libx11-dev libxss-dev libxi-dev libxinerama-dev \
+          libwayland-dev wayland-protocols
     - name: Configure client
       env:
         CC: /usr/bin/${{ matrix.compiler.cc }}
@@ -36,7 +36,6 @@ jobs:
         cmake \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCMAKE_LINKER:FILEPATH=/usr/bin/ld \
-          -DENABLE_SDL=ON \
           ..
     - name: Build client
       run: |
