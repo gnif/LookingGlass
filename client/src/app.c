@@ -675,8 +675,9 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
     }
     else
     {
-      maxRects -= written;
-      rects    += written;
+      maxRects   -= written;
+      rects      += written;
+      totalRects += written;
     }
   }
 
