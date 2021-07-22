@@ -54,11 +54,6 @@ static void graphs_free(void * udata)
   ll_free(gs.graphs);
 }
 
-static int graphs_getWindowCount(void * udata, bool interactive)
-{
-  return g_state.showTiming ? 1 : 0;
-}
-
 struct BufferMetrics
 {
   float min;
@@ -91,9 +86,13 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
   return true;
 }
 
-static void graphs_render(void * udata, bool interactive, struct Rect * windowRects)
+static int graphs_render(void * udata, bool interactive,
+    struct Rect * windowRects, int maxRects)
 {
-  const ImVec2 pos = {0.0f, 0.0f};
+  if (!g_state.showTiming)
+    return 0;
+
+  ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
   igSetNextWindowPos(pos, 0, pos);
 
@@ -139,18 +138,22 @@ static void graphs_render(void * udata, bool interactive, struct Rect * windowRe
         sizeof(float));
   };
 
-  if (windowRects)
+  if (maxRects == 0)
   {
-    ImVec2 pos, size;
-    igGetWindowPos(&pos);
-    igGetWindowSize(&size);
-    windowRects[0].x = pos.x;
-    windowRects[0].y = pos.y;
-    windowRects[0].w = size.x;
-    windowRects[0].h = size.y;
+    igEnd();
+    return -1;
   }
 
+  ImVec2 size;
+  igGetWindowPos(&pos);
+  igGetWindowSize(&size);
+  windowRects[0].x = pos.x;
+  windowRects[0].y = pos.y;
+  windowRects[0].w = size.x;
+  windowRects[0].h = size.y;
+
   igEnd();
+  return 1;
 }
 
 struct LG_OverlayOps LGOverlayGraphs =
@@ -158,7 +161,6 @@ struct LG_OverlayOps LGOverlayGraphs =
   .name           = "Graphs",
   .init           = graphs_init,
   .free           = graphs_free,
-  .getWindowCount = graphs_getWindowCount,
   .render         = graphs_render
 };
 

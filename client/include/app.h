@@ -81,7 +81,16 @@ void app_glSwapBuffers(void);
 #endif
 
 void app_registerOverlay(const struct LG_OverlayOps * ops, void * params);
+
+/**
+ * render the overlay
+ * returns:
+ *   -1 for no overlay
+ *    0 for full output damage
+ *   >0 number of rects written into rects
+ */
 int app_renderOverlay(struct Rect * rects, int maxRects);
+
 void app_freeOverlays(void);
 
 struct OverlayGraph;

@@ -628,7 +628,6 @@ struct Overlay
 {
   const struct LG_OverlayOps * ops;
   void * udata;
-  int windowCount;
 };
 
 void app_registerOverlay(const struct LG_OverlayOps * ops, void * params)
@@ -650,43 +649,40 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, void * params)
 
 int app_renderOverlay(struct Rect * rects, int maxRects)
 {
-  int windowCount = 0;
+  int  totalRects  = 0;
+  bool totalDamage = false;
   struct Overlay * overlay;
 
-  // get the total window count
-  for (ll_reset(g_state.overlays);
-      ll_walk(g_state.overlays, (void **)&overlay); )
-  {
-    overlay->windowCount = overlay->ops->getWindowCount(overlay->udata, false);
-    windowCount += overlay->windowCount;
-  }
-
-  // return -1 if there are no windows to render
-  if (windowCount == 0)
-    return -1;
-
-  if (windowCount > maxRects)
-  {
-    rects = NULL;
-    windowCount = 0;
-  }
+  igNewFrame();
 
   // render the overlays
-  igNewFrame();
   for (ll_reset(g_state.overlays);
       ll_walk(g_state.overlays, (void **)&overlay); )
   {
-    if (overlay->windowCount == 0)
+    const int written =
+      overlay->ops->render(overlay->udata, false, rects, maxRects);
+
+    if (!totalDamage)
       continue;
 
-    overlay->ops->render(overlay->udata, false, rects);
-    if (rects)
-      rects += overlay->windowCount;
+    if (written == -1)
+    {
+      // out of rects, return that the entire surface is damaged
+      totalDamage = true;
+      rects       = NULL;
+      maxRects    = 0;
+      totalRects  = 0;
+    }
+    else
+    {
+      maxRects -= written;
+      rects    += written;
+    }
   }
 
   igRender();
 
-  return windowCount;
+  return totalDamage ? -1 : totalRects;
 }
 
 void app_freeOverlays(void)

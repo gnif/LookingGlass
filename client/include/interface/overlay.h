@@ -46,23 +46,21 @@ struct LG_OverlayOps
   /* general state flags, may be changed at any time */
   enum LG_OverlayFlags flags;
 
-  /* get the number of windows that will be rendered when `render` is called
-   *
-   *`interactive` is true if the application is currently in overlay interaction
-   * mode
-   */
-  int (*getWindowCount)(void * udata, bool interactive);
-
   /* perform the actual drawing/rendering
    *
    * `interactive` is true if the application is currently in overlay interaction
    * mode.
    *
-   * The caller provides `windowRects` to be populated by the callee and is sized
-   * according to the return value of `getWindowCount`. Note, `windowRects` may
-   * be NULL if the caller does not want this information.
+   * `windowRects` is an array of window rects that were rendered using screen
+   * coordinates. Will be `NULL` if the information is not required.
+   *
+   * `maxRects` is the length of `windowRects`, or 0 if `windowRects` is `NULL`
+   *
+   * returns the number of rects written to `windowRects`, or -1 if there is not
+   * enough room left.
    */
-  void (*render)(void * udata, bool interactive, struct Rect windowRects[]);
+  int (*render)(void * udata, bool interactive, struct Rect * windowRects,
+      int maxRects);
 
   /* TODO: add load/save settings capabillity */
 };
@@ -71,7 +69,6 @@ struct LG_OverlayOps
   assert((x)->name          ); \
   assert((x)->init          ); \
   assert((x)->free          ); \
-  assert((x)->getWindowCount); \
   assert((x)->render        );
 
 #endif

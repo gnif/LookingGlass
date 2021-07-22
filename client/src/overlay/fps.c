@@ -32,14 +32,13 @@ static void fps_free(void * udata)
 {
 }
 
-static int fps_getWindowCount(void * udata, bool interactive)
+static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
+    int maxRects)
 {
-  return g_state.showFPS ? 1 : 0;
-}
+  if (!g_state.showFPS)
+    return 0;
 
-static void fps_render(void * udata, bool interactive, struct Rect * windowRects)
-{
-  const ImVec2 pos = {0.0f, 0.0f};
+  ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.6f);
   igSetNextWindowPos(pos, 0, pos);
 
@@ -55,18 +54,21 @@ static void fps_render(void * udata, bool interactive, struct Rect * windowRects
       atomic_load_explicit(&g_state.fps, memory_order_relaxed),
       atomic_load_explicit(&g_state.ups, memory_order_relaxed));
 
-  if (windowRects)
+  if (maxRects == 0)
   {
-    ImVec2 pos, size;
-    igGetWindowPos(&pos);
-    igGetWindowSize(&size);
-    windowRects[0].x = pos.x;
-    windowRects[0].y = pos.y;
-    windowRects[0].w = size.x;
-    windowRects[0].h = size.y;
+    return -1;
+    igEnd();
   }
 
+  ImVec2 size;
+  igGetWindowPos(&pos);
+  igGetWindowSize(&size);
+  windowRects[0].x = pos.x;
+  windowRects[0].y = pos.y;
+  windowRects[0].w = size.x;
+  windowRects[0].h = size.y;
   igEnd();
+  return 1;
 }
 
 struct LG_OverlayOps LGOverlayFPS =
@@ -74,6 +76,5 @@ struct LG_OverlayOps LGOverlayFPS =
   .name           = "FPS",
   .init           = fps_init,
   .free           = fps_free,
-  .getWindowCount = fps_getWindowCount,
   .render         = fps_render
 };
