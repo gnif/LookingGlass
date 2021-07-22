@@ -46,14 +46,14 @@ struct LG_OverlayOps
 
   /* get the number of windows that will be rendered when `render` is called
    *
-   *`interactive` is true if the application is currently in ovelay interaction
+   *`interactive` is true if the application is currently in overlay interaction
    * mode
    */
   int (*getWindowCount)(void * udata, bool interactive);
 
   /* perform the actual drawing/rendering
    *
-   * `interactive` is true if the application is currently in ovelay interaction
+   * `interactive` is true if the application is currently in overlay interaction
    * mode.
    *
    * The caller provides `windowRects` to be populated by the callee and is sized
