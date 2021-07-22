@@ -686,7 +686,7 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
     break;
   }
 
-  if (app_renderOverlay(NULL, 0) > -1)
+  if (app_renderOverlay(NULL, 0) != 0)
   {
     ImGui_ImplOpenGL2_NewFrame();
     ImGui_ImplOpenGL2_RenderDrawData(igGetDrawData());

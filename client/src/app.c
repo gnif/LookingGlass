@@ -662,7 +662,7 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
     const int written =
       overlay->ops->render(overlay->udata, false, rects, maxRects);
 
-    if (!totalDamage)
+    if (totalDamage)
       continue;
 
     if (written == -1)

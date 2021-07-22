@@ -1010,22 +1010,20 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + 12];
   int damageIdx = app_renderOverlay(damage, 10);
 
-  // if no overlay
-  if (damageIdx == -1)
+  switch (damageIdx)
   {
-    damageIdx = 0;
-  }
-  else
-  {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
-
-    for (int i = 0; i < damageIdx; ++i)
-      damage[i].y = this->height - damage[i].y - damage[i].h;
-
-    // if there were too many rects invalidate the entire window
-    if (damageIdx == 0)
+    case 0: // no overlay
+      break;
+    case -1: // full damage
       hasOverlay = true;
+      damageIdx = 0;
+      // fallthrough
+    default:
+      ImGui_ImplOpenGL3_NewFrame();
+      ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
+
+      for (int i = 0; i < damageIdx; ++i)
+        damage[i].y = this->height - damage[i].y - damage[i].h;
   }
 
   if (!hasOverlay && !this->hadOverlay)
