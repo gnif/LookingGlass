@@ -8,13 +8,15 @@ jobs:
         compiler:
           - {cc: gcc, cxx: g++}
           - {cc: clang, cxx: clang++}
-        build_type:
-          - Release
-          - Debug
+        wayland_shell: [xdg-shell, libdecor]
+        build_type: [Release, Debug]
     steps:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
+    - name: Install libdecor PPA
+      run: sudo add-apt-repository ppa:christianrauch/libdecoration
+      if: ${{ matrix.wayland_shell == 'libdecor' }}
     - name: Update apt
       run: |
         sudo apt-get update
@@ -25,7 +27,8 @@ jobs:
           libspice-protocol-dev nettle-dev \
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev \
-          libwayland-dev wayland-protocols
+          libwayland-dev wayland-protocols \
+          $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-dev libdbus-1-dev')
     - name: Configure client
       env:
         CC: /usr/bin/${{ matrix.compiler.cc }}
@@ -36,6 +39,7 @@ jobs:
         cmake \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCMAKE_LINKER:FILEPATH=/usr/bin/ld \
+          -DENABLE_LIBDECOR=${{ matrix.wayland_shell == 'libdecor' }} \
           ..
     - name: Build client
       run: |
