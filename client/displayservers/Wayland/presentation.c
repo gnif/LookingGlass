@@ -65,12 +65,14 @@ static void presentationFeedbackPresented(void * opaque,
   tsDiff(&delta, &present, &data->sent);
   ringbuffer_push(wlWm.photonTimings, &(float){ delta.tv_sec + delta.tv_nsec * 1e-6f });
   free(data);
+  wp_presentation_feedback_destroy(feedback);
 }
 
 static void presentationFeedbackDiscarded(void * data,
     struct wp_presentation_feedback * feedback)
 {
   free(data);
+  wp_presentation_feedback_destroy(feedback);
 }
 
 static const struct wp_presentation_feedback_listener presentationFeedbackListener = {
