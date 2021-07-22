@@ -1054,6 +1054,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
     }
   }
   this->hadOverlay = hasOverlay;
+  free(desktopDamage);
 
   app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
   return true;
