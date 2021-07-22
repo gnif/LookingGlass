@@ -138,12 +138,6 @@ static int graphs_render(void * udata, bool interactive,
         sizeof(float));
   };
 
-  if (maxRects == 0)
-  {
-    igEnd();
-    return -1;
-  }
-
   ImVec2 size;
   igGetWindowPos(&pos);
   igGetWindowSize(&size);
