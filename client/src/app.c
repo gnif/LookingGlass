@@ -628,6 +628,8 @@ struct Overlay
 {
   const struct LG_OverlayOps * ops;
   void * udata;
+  int lastRectCount;
+  struct Rect lastRects[MAX_OVERLAY_RECTS];
 };
 
 void app_registerOverlay(const struct LG_OverlayOps * ops, void * params)
@@ -642,9 +644,21 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, void * params)
   }
 
   struct Overlay * overlay = malloc(sizeof(struct Overlay));
-  overlay->ops   = ops;
-  overlay->udata = udata;
+  overlay->ops           = ops;
+  overlay->udata         = udata;
+  overlay->lastRectCount = 0;
   ll_push(g_state.overlays, overlay);
+}
+
+static inline void mergeRect(struct Rect * dest, const struct Rect * a, const struct Rect * b)
+{
+  int x2 = max(a->x + a->w, b->x + b->w);
+  int y2 = max(a->y + a->h, b->y + b->h);
+
+  dest->x = min(a->x, b->x);
+  dest->y = min(a->y, b->y);
+  dest->w = x2 - dest->x;
+  dest->h = y2 - dest->y;
 }
 
 int app_renderOverlay(struct Rect * rects, int maxRects)
@@ -652,6 +666,7 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   int  totalRects  = 0;
   bool totalDamage = false;
   struct Overlay * overlay;
+  struct Rect buffer[MAX_OVERLAY_RECTS];
 
   igNewFrame();
 
@@ -660,25 +675,32 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
       ll_walk(g_state.overlays, (void **)&overlay); )
   {
     const int written =
-      overlay->ops->render(overlay->udata, false, rects, maxRects);
+      overlay->ops->render(overlay->udata, false, buffer, MAX_OVERLAY_RECTS);
 
-    if (totalDamage)
-      continue;
+    // It is an error to run out of rectangles, because we will not be able to
+    // correctly calculate the damage of the next frame.
+    assert(written >= 0);
 
-    if (written == -1)
+    const int toAdd = max(written, overlay->lastRectCount);
+    totalDamage |= toAdd > maxRects;
+
+    if (!totalDamage && toAdd)
     {
-      // out of rects, return that the entire surface is damaged
-      totalDamage = true;
-      rects       = NULL;
-      maxRects    = 0;
-      totalRects  = 0;
+      int i = 0;
+      for (; i < overlay->lastRectCount && i < written; ++i)
+        mergeRect(rects + i, buffer + i, overlay->lastRects + i);
+
+      // only one of the following memcpys will copy non-zero bytes.
+      memcpy(rects + i, buffer + i, (written - i) * sizeof(struct Rect));
+      memcpy(rects + i, overlay->lastRects + i, (overlay->lastRectCount - i) * sizeof(struct Rect));
+
+      rects      += toAdd;
+      totalRects += toAdd;
+      maxRects   -= toAdd;
     }
-    else
-    {
-      maxRects   -= written;
-      rects      += written;
-      totalRects += written;
-    }
+
+    memcpy(overlay->lastRects, buffer, sizeof(struct Rect) * written);
+    overlay->lastRectCount = written;
   }
 
   igRender();

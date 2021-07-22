@@ -80,6 +80,7 @@ void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
 #endif
 
+#define MAX_OVERLAY_RECTS 10
 void app_registerOverlay(const struct LG_OverlayOps * ops, void * params);
 
 /**
