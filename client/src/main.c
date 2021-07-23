@@ -191,7 +191,7 @@ static int renderThread(void * unused)
 
       ImFontAtlas_Clear(g_state.io->Fonts);
       ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
-        14 * g_state.windowScale, NULL, NULL);
+        g_params.uiSize * g_state.windowScale, NULL, NULL);
       ImFontAtlas_Build(g_state.io->Fonts);
 
       if (g_state.lgr)
@@ -770,7 +770,7 @@ static int lg_run(void)
       &text_w, &text_h, NULL);
 
   g_state.windowScale = 1.0;
-  g_state.fontName    = util_getUIFont(DEFAULT_FONT_NAME);
+  g_state.fontName    = util_getUIFont(g_params.uiFont);
   DEBUG_INFO("Using font: %s", g_state.fontName);
 
   g_state.overlays = ll_new();
