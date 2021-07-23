@@ -16,7 +16,6 @@ target_compile_definitions(renderer_OpenGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUC
 target_link_libraries(renderer_OpenGL
 	${RENDERER_OPENGL_PKGCONFIG_LIBRARIES}
 	lg_common
-	fonts
 
 	cimgui
 )

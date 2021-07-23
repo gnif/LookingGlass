@@ -17,6 +17,9 @@ else()
   add_compile_options("-march=nehalem" "-mtune=generic")
 endif()
 
+find_package(PkgConfig)
+pkg_check_modules(FONTCONFIG_PKGCONFIG REQUIRED fontconfig)
+
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
 add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
 
@@ -97,6 +100,7 @@ include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
 	${GMP_INCLUDE_DIR}
+	${FONTCONFIG_PKGCONFIG_INCLUDE_DIRS}
 )
 
 link_libraries(
@@ -139,7 +143,6 @@ add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui"  
 
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
-add_subdirectory(fonts)
 
 add_executable(looking-glass-client ${SOURCES})
 
@@ -147,12 +150,12 @@ target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_
 
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
+	${FONTCONFIG_PKGCONFIG_LIBRARIES}
 	lg_common
 	displayservers
 	lgmp
 	purespice
 	renderers
-	fonts
 	cimgui
 )
 
