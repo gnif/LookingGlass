@@ -28,7 +28,6 @@
 #include "common/locking.h"
 #include "app.h"
 #include "util.h"
-#include "dynamic/fonts.h"
 
 #include <EGL/egl.h>
 #include <GLES3/gl32.h>
@@ -99,10 +98,6 @@ struct Inst
   float mouseWidth , mouseHeight;
   float mouseScaleX, mouseScaleY;
   bool  showDamage;
-
-  const LG_Font     * font;
-  LG_FontObj        fontObj;
-  unsigned          fontSize;
 
   struct CursorState cursorLast;
 
@@ -184,26 +179,6 @@ void egl_setup(void)
   option_register(egl_options);
 }
 
-static bool egl_update_font(struct Inst * this)
-{
-  unsigned size = round(16.0f * this->uiScale);
-  if (size == this->fontSize)
-    return true;
-
-  LG_FontObj fontObj;
-  if (!this->font->create(&fontObj, NULL, size))
-  {
-    DEBUG_ERROR("Failed to create a font instance");
-    return false;
-  }
-
-  if (this->fontObj)
-    this->font->destroy(this->fontObj);
-  this->fontObj = fontObj;
-
-  return true;
-}
-
 bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
@@ -235,10 +210,6 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
 
   atomic_init(&this->desktopDamage, NULL);
 
-  this->font = LG_Fonts[0];
-  if (!egl_update_font(this))
-    return false;
-
   *needsOpenGL = false;
   return true;
 }
@@ -256,12 +227,6 @@ void egl_deinitialize(void * opaque)
 
   if (this->imgui)
     ImGui_ImplOpenGL3_Shutdown();
-
-  if (this->font)
-  {
-    if (this->fontObj)
-      this->font->destroy(this->fontObj);
-  }
 
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
@@ -446,7 +411,6 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   this->screenScaleY = 1.0f / this->height;
 
   egl_calc_mouse_state(this);
-  egl_update_font(this);
 
   struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
   if (!damage)
