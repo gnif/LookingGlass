@@ -35,7 +35,6 @@
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/locking.h"
-#include "dynamic/fonts.h"
 #include "ll.h"
 
 #define BUFFER_COUNT       2
@@ -115,9 +114,6 @@ struct Inst
   struct IntPoint   window;
   float             uiScale;
   _Atomic(bool)     frameUpdate;
-
-  const LG_Font   * font;
-  LG_FontObj        fontObj;
 
   LG_Lock             formatLock;
   LG_RendererFormat   format;
@@ -215,13 +211,6 @@ bool opengl_create(void ** opaque, const LG_RendererParams params,
   LG_LOCK_INIT(this->frameLock );
   LG_LOCK_INIT(this->mouseLock );
 
-  this->font = LG_Fonts[0];
-  if (!this->font->create(&this->fontObj, NULL, 14))
-  {
-    DEBUG_ERROR("Unable to create the font renderer");
-    return false;
-  }
-
   *needsOpenGL = true;
   return true;
 }
@@ -271,9 +260,6 @@ void opengl_deinitialize(void * opaque)
   LG_LOCK_FREE(this->formatLock);
   LG_LOCK_FREE(this->frameLock );
   LG_LOCK_FREE(this->mouseLock );
-
-  if (this->font && this->fontObj)
-    this->font->destroy(this->fontObj);
 
   free(this);
 }
@@ -405,31 +391,6 @@ bool opengl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
   }
 
   return true;
-}
-
-void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
-{
-  glBindTexture(GL_TEXTURE_2D       , texture      );
-  glPixelStorei(GL_UNPACK_ALIGNMENT , 4            );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, bitmap->width);
-  glTexImage2D(
-    GL_TEXTURE_2D,
-    0,
-    bitmap->bpp,
-    bitmap->width,
-    bitmap->height,
-    0,
-    GL_BGRA,
-    GL_UNSIGNED_BYTE,
-    bitmap->pixels
-  );
-
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-  glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 bool opengl_render_startup(void * opaque)
