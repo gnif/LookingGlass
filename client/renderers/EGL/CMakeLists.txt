@@ -21,9 +21,6 @@ make_object(
 	shader/cursor_mono.frag
 	shader/damage.vert
 	shader/damage.frag
-	shader/help.vert
-	shader/help.frag
-	shader/help_bg.frag
 	shader/alert.vert
 	shader/alert.frag
 	shader/alert_bg.frag
@@ -46,7 +43,6 @@ add_library(renderer_EGL STATIC
 	model.c
 	desktop.c
 	cursor.c
-	help.c
 	draw.c
 	splash.c
 	alert.c

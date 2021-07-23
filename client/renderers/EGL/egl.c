@@ -49,7 +49,6 @@
 #include "cursor.h"
 #include "splash.h"
 #include "alert.h"
-#include "help.h"
 
 #define SPLASH_FADE_TIME 1000000
 #define ALERT_TIMEOUT    2000000
@@ -76,7 +75,6 @@ struct Inst
   EGL_Cursor      * cursor;  // the mouse cursor
   EGL_Splash      * splash;  // the splash screen
   EGL_Alert       * alert;   // the alert display
-  EGL_Help        * help;    // the help display
   EGL_Damage      * damage;  // the damage display
   bool              imgui;   // if imgui was initialized
 
@@ -113,8 +111,6 @@ struct Inst
   const LG_Font     * font;
   LG_FontObj        fontObj;
   unsigned          fontSize;
-  LG_FontObj        helpFontObj;
-  unsigned          helpFontSize;
 
   struct CursorState cursorLast;
 
@@ -219,29 +215,6 @@ static bool egl_update_font(struct Inst * this)
   return true;
 }
 
-static bool egl_update_help_font(struct Inst * this)
-{
-  unsigned size = round(14.0f * this->uiScale);
-  if (size == this->helpFontSize)
-    return true;
-
-  LG_FontObj fontObj;
-  if (!this->font->create(&fontObj, NULL, size))
-  {
-    DEBUG_ERROR("Failed to create a font instance");
-    return false;
-  }
-
-  if (this->help)
-    egl_help_set_font(this->help, fontObj);
-
-  if (this->helpFontObj)
-    this->font->destroy(this->helpFontObj);
-  this->helpFontObj = fontObj;
-
-  return true;
-}
-
 bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
@@ -277,9 +250,6 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
   if (!egl_update_font(this))
     return false;
 
-  if (!egl_update_help_font(this))
-    return false;
-
   *needsOpenGL = false;
   return true;
 }
@@ -302,16 +272,12 @@ void egl_deinitialize(void * opaque)
   {
     if (this->fontObj)
       this->font->destroy(this->fontObj);
-
-    if (this->helpFontObj)
-      this->font->destroy(this->helpFontObj);
   }
 
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
   egl_splash_free (&this->splash);
   egl_alert_free  (&this->alert );
-  egl_help_free   (&this->help  );
   egl_damage_free (&this->damage);
 
   LG_LOCK_FREE(this->lock);
@@ -493,7 +459,6 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
 
   egl_calc_mouse_state(this);
   egl_update_font(this);
-  egl_update_help_font(this);
 
   struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
   if (!damage)
@@ -632,12 +597,6 @@ void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, 
   }
 
   this->showAlert = true;
-}
-
-void egl_on_help(void * opaque, const char * message)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  egl_help_set_text(this->help, message);
 }
 
 static void debugCallback(GLenum source, GLenum type, GLuint id,
@@ -905,12 +864,6 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
-  if (!egl_help_init(&this->help, this->font, this->helpFontObj))
-  {
-    DEBUG_ERROR("Failed to initialize the alert display");
-    return false;
-  }
-
   if (!egl_damage_init(&this->damage))
   {
     DEBUG_ERROR("Failed to initialize the damage display");
@@ -1008,7 +961,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
     }
   }
 
-  hasOverlay |= egl_help_render(this->help, this->screenScaleX, this->screenScaleY);
   hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
 
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
@@ -1089,7 +1041,6 @@ struct LG_Renderer LGR_EGL =
   .on_frame_format = egl_on_frame_format,
   .on_frame        = egl_on_frame,
   .on_alert        = egl_on_alert,
-  .on_help         = egl_on_help,
   .render_startup  = egl_render_startup,
   .render          = egl_render
 };

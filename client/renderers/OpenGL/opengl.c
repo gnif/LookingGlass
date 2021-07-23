@@ -494,11 +494,6 @@ void opengl_on_alert(void * opaque, const LG_MsgAlert alert, const char * messag
   ll_push(this->alerts, a);
 }
 
-void opengl_on_help(void * opaque, const char * message)
-{
-  // TODO: Implement this.
-}
-
 void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
 {
   glBindTexture(GL_TEXTURE_2D       , texture      );
@@ -817,7 +812,6 @@ const LG_Renderer LGR_OpenGL =
   .on_frame_format = opengl_on_frame_format,
   .on_frame        = opengl_on_frame,
   .on_alert        = opengl_on_alert,
-  .on_help         = opengl_on_help,
   .render_startup  = opengl_render_startup,
   .render          = opengl_render
 };
