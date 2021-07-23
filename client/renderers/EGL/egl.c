@@ -48,10 +48,8 @@
 #include "desktop.h"
 #include "cursor.h"
 #include "splash.h"
-#include "alert.h"
 
 #define SPLASH_FADE_TIME 1000000
-#define ALERT_TIMEOUT    2000000
 
 struct Options
 {
@@ -74,7 +72,6 @@ struct Inst
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
   EGL_Splash      * splash;  // the splash screen
-  EGL_Alert       * alert;   // the alert display
   EGL_Damage      * damage;  // the damage display
   bool              imgui;   // if imgui was initialized
 
@@ -83,12 +80,6 @@ struct Inst
   bool                 start;
   uint64_t             waitFadeTime;
   bool                 waitDone;
-
-  bool     showAlert;
-  uint64_t alertTimeout;
-  bool     useCloseFlag;
-  bool     closeFlag;
-  bool     showDamage;
 
   int               width, height;
   float             uiScale;
@@ -103,10 +94,11 @@ struct Inst
   int viewportWidth, viewportHeight;
   enum EGL_DesktopScaleType scaleType;
 
-  bool         cursorVisible;
-  int          cursorX    , cursorY;
-  float        mouseWidth , mouseHeight;
-  float        mouseScaleX, mouseScaleY;
+  bool  cursorVisible;
+  int   cursorX    , cursorY;
+  float mouseWidth , mouseHeight;
+  float mouseScaleX, mouseScaleY;
+  bool  showDamage;
 
   const LG_Font     * font;
   LG_FontObj        fontObj;
@@ -205,9 +197,6 @@ static bool egl_update_font(struct Inst * this)
     return false;
   }
 
-  if (this->alert)
-    egl_alert_set_font(this->alert, fontObj);
-
   if (this->fontObj)
     this->font->destroy(this->fontObj);
   this->fontObj = fontObj;
@@ -277,7 +266,6 @@ void egl_deinitialize(void * opaque)
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
   egl_splash_free (&this->splash);
-  egl_alert_free  (&this->alert );
   egl_damage_free (&this->damage);
 
   LG_LOCK_FREE(this->lock);
@@ -564,41 +552,6 @@ bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
   return true;
 }
 
-void egl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag)
-{
-  struct Inst * this = (struct Inst *)opaque;
-
-  static const uint32_t colors[] =
-  {
-    0x0000CCCC, // LG_ALERT_INFO
-    0x00CC00CC, // LG_ALERT_SUCCESS
-    0xCC7F00CC, // LG_ALERT_WARNING
-    0xFF0000CC  // LG_ALERT_ERROR
-  };
-
-  if (alert > LG_ALERT_ERROR || alert < 0)
-  {
-    DEBUG_ERROR("Invalid alert value");
-    return;
-  }
-
-  egl_alert_set_color(this->alert, colors[alert]);
-  egl_alert_set_text (this->alert, message      );
-
-  if (closeFlag)
-  {
-    this->useCloseFlag = true;
-    *closeFlag = &this->closeFlag;
-  }
-  else
-  {
-    this->useCloseFlag = false;
-    this->alertTimeout = microtime() + ALERT_TIMEOUT;
-  }
-
-  this->showAlert = true;
-}
-
 static void debugCallback(GLenum source, GLenum type, GLuint id,
     GLenum severity, GLsizei length, const GLchar * message,
     const void * userParam)
@@ -858,12 +811,6 @@ bool egl_render_startup(void * opaque)
     return false;
   }
 
-  if (!egl_alert_init(&this->alert, this->font, this->fontObj))
-  {
-    DEBUG_ERROR("Failed to initialize the alert display");
-    return false;
-  }
-
   if (!egl_damage_init(&this->damage))
   {
     DEBUG_ERROR("Failed to initialize the damage display");
@@ -942,23 +889,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
   {
     egl_splash_render(this->splash, 1.0f, this->splashRatio);
     hasOverlay = true;
-  }
-
-  if (this->showAlert)
-  {
-    bool close = false;
-    if (this->useCloseFlag)
-      close = this->closeFlag;
-    else if (this->alertTimeout < microtime())
-      close = true;
-
-    if (close)
-      this->showAlert = false;
-    else
-    {
-      egl_alert_render(this->alert, this->screenScaleX, this->screenScaleY);
-      hasOverlay = true;
-    }
   }
 
   hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
@@ -1040,7 +970,6 @@ struct LG_Renderer LGR_EGL =
   .on_mouse_event  = egl_on_mouse_event,
   .on_frame_format = egl_on_frame_format,
   .on_frame        = egl_on_frame,
-  .on_alert        = egl_on_alert,
   .render_startup  = egl_render_startup,
   .render          = egl_render
 };
