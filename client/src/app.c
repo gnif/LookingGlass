@@ -39,6 +39,8 @@
 #include <math.h>
 #include <string.h>
 
+#define ALERT_TIMEOUT 2000000
+
 bool app_isRunning(void)
 {
   return
@@ -511,14 +513,11 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   valloc_sprintf(&buffer, fmt, args);
   va_end(args);
 
-  g_state.lgr->on_alert(
-    g_state.lgrData,
-    type,
-    buffer,
-    NULL
-  );
-
-  free(buffer);
+  free(g_state.alertMessage);
+  g_state.alertMessage = buffer;
+  g_state.alertTimeout = microtime() + ALERT_TIMEOUT;
+  g_state.alertType    = type;
+  g_state.alertShow    = true;
 }
 
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)

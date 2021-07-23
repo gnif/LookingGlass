@@ -192,6 +192,8 @@ static int renderThread(void * unused)
       ImFontAtlas_Clear(g_state.io->Fonts);
       ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
         g_params.uiSize * g_state.windowScale, NULL, NULL);
+      g_state.fontLarge = ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts,
+        g_state.fontName, 2 * g_params.uiSize * g_state.windowScale, NULL, NULL);
       ImFontAtlas_Build(g_state.io->Fonts);
 
       if (g_state.lgr)
@@ -774,6 +776,7 @@ static int lg_run(void)
   DEBUG_INFO("Using font: %s", g_state.fontName);
 
   g_state.overlays = ll_new();
+  app_registerOverlay(&LGOverlayAlert , NULL);
   app_registerOverlay(&LGOverlayFPS   , NULL);
   app_registerOverlay(&LGOverlayGraphs, NULL);
   app_registerOverlay(&LGOverlayHelp  , NULL);
