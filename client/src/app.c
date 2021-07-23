@@ -429,7 +429,6 @@ void app_handleRenderEvent(const uint64_t timeUs)
     if (g_state.escapeHelp)
     {
       g_state.escapeHelp = false;
-      app_showHelp(false);
     }
   }
   else
@@ -437,7 +436,6 @@ void app_handleRenderEvent(const uint64_t timeUs)
     if (!g_state.escapeHelp && timeUs - g_state.escapeTime > g_params.helpMenuDelayUs)
     {
       g_state.escapeHelp = true;
-      app_showHelp(true);
     }
   }
 }
@@ -560,58 +558,6 @@ void app_releaseAllKeybinds(void)
       free(g_state.bindings[i]);
       g_state.bindings[i] = NULL;
     }
-}
-
-static char * build_help_str()
-{
-  size_t size   = 50;
-  size_t offset = 0;
-  char * buffer = malloc(size);
-
-  if (!buffer)
-    return NULL;
-
-  const char * escapeName = xfree86_to_display[g_params.escapeKey];
-
-  offset += snprintf(buffer, size, "%s %-10s Toggle capture mode\n", escapeName, "");
-  if (offset >= size)
-  {
-    DEBUG_ERROR("Help string somehow overflowed. This should be impossible.");
-    return NULL;
-  }
-
-  for (int i = 0; i < KEY_MAX; ++i)
-  {
-    if (g_state.keyDescription[i])
-    {
-      const char * keyName = xfree86_to_display[i];
-      const char * desc    = g_state.keyDescription[i];
-      int needed = snprintf(buffer + offset, size - offset, "%s+%-10s %s\n", escapeName, keyName, desc);
-      if (offset + needed < size)
-        offset += needed;
-      else
-      {
-        size = size * 2 + needed;
-        void * new = realloc(buffer, size);
-        if (!new) {
-          free(buffer);
-          DEBUG_ERROR("Out of memory when constructing help text");
-          return NULL;
-        }
-        buffer = new;
-        offset += snprintf(buffer + offset, size - offset, "%s+%-10s %s\n", escapeName, keyName, desc);
-      }
-    }
-  }
-
-  return buffer;
-}
-
-void app_showHelp(bool show)
-{
-  char * help = show ? build_help_str() : NULL;
-  g_state.lgr->on_help(g_state.lgrData, help);
-  free(help);
 }
 
 GraphHandle app_registerGraph(const char * name, RingBuffer buffer)

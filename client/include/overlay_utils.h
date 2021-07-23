@@ -27,7 +27,10 @@
 extern "C" {
 #endif
 
+typedef struct ImVec2 ImVec2;
+
 void overlayGetImGuiRect(struct Rect * rect);
+ImVec2 * overlayGetScreenSize(void);
 void imGuiResetStyle(void);
 
 #ifdef __cplusplus

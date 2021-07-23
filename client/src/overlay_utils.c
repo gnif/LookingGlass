@@ -21,6 +21,7 @@
 #include "overlay_utils.h"
 
 #include "cimgui.h"
+#include "main.h"
 
 void overlayGetImGuiRect(struct Rect * rect)
 {
@@ -34,4 +35,9 @@ void overlayGetImGuiRect(struct Rect * rect)
   rect->y = pos.y;
   rect->w = size.x;
   rect->h = size.y;
+}
+
+ImVec2 * overlayGetScreenSize(void)
+{
+  return &g_state.io->DisplaySize;
 }
