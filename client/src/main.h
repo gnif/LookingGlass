@@ -154,6 +154,8 @@ struct AppParams
   bool              quickSplash;
   bool              alwaysShowCursor;
   uint64_t          helpMenuDelayUs;
+  const char *      uiFont;
+  int               uiSize;
 
   unsigned int      cursorPollInterval;
   unsigned int      framePollInterval;
