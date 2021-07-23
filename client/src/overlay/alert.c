@@ -22,69 +22,68 @@
 #include "cimgui.h"
 #include "overlay_utils.h"
 
-#include "common/debug.h"
-
-#include "../kb.h"
 #include "../main.h"
 
-static bool help_init(void ** udata, void * params)
+static bool alert_init(void ** udata, void * params)
 {
   return true;
 }
 
-static void help_free(void * udata)
+static void alert_free(void * udata)
 {
 }
 
-static int help_render(void * udata, bool interactive, struct Rect * windowRects,
+static const uint32_t colours[] =
+{
+  0xCC0000, // LG_ALERT_INFO
+  0x00CC00, // LG_ALERT_SUCCESS
+  0x007FCC, // LG_ALERT_WARNING
+  0x0000FF  // LG_ALERT_ERROR
+};
+
+static int alert_render(void * udata, bool interactive, struct Rect * windowRects,
     int maxRects)
 {
-  if (!g_state.escapeHelp)
+  if (!g_state.alertShow)
     return 0;
 
+  if (g_state.alertTimeout < microtime())
+  {
+    g_state.alertShow = false;
+    free(g_state.alertMessage);
+    g_state.alertMessage = NULL;
+    return 0;
+  }
+
   ImVec2 * screen = overlayGetScreenSize();
-  igSetNextWindowBgAlpha(0.6f);
-  igSetNextWindowPos((ImVec2) { 0.0f, screen->y }, 0, (ImVec2) { 0.0f, 1.0f });
+  igSetNextWindowBgAlpha(0.8f);
+  igSetNextWindowPos((ImVec2) { screen->x / 2.0f, screen->y / 2.0f }, 0,
+    (ImVec2) { 0.5f, 0.5f });
+  igPushStyleColorU32(ImGuiCol_WindowBg, colours[g_state.alertType]);
 
   igBegin(
-    "Help",
+    "Alert",
     NULL,
     ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
     ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
   );
 
-  if (igBeginTable("Help", 2, 0, (ImVec2) { 0.0f, 0.0f }, 0.0f))
-  {
-    const char * escapeName = xfree86_to_display[g_params.escapeKey];
-
-    igTableNextColumn();
-    igText("%s", escapeName);
-    igTableNextColumn();
-    igText("Toggle capture mode");
-
-    for (int i = 0; i < KEY_MAX; ++i)
-      if (g_state.keyDescription[i])
-      {
-        igTableNextColumn();
-        igText("%s+%s", escapeName, xfree86_to_display[i]);
-        igTableNextColumn();
-        igText(g_state.keyDescription[i]);
-      }
-
-    igEndTable();
-  }
+  igPushFont(g_state.fontLarge);
+  igText("%s", g_state.alertMessage);
+  igPopFont();
 
   overlayGetImGuiRect(windowRects);
   igEnd();
+  igPopStyleColor(1);
 
   return 1;
 }
 
-struct LG_OverlayOps LGOverlayHelp =
+struct LG_OverlayOps LGOverlayAlert =
 {
-  .name           = "Help",
-  .init           = help_init,
-  .free           = help_free,
-  .render         = help_render
+  .name           = "alert",
+  .init           = alert_init,
+  .free           = alert_free,
+  .render         = alert_render
 };

@@ -23,6 +23,7 @@
 
 #include "interface/overlay.h"
 
+extern struct LG_OverlayOps LGOverlayAlert;
 extern struct LG_OverlayOps LGOverlayFPS;
 extern struct LG_OverlayOps LGOverlayGraphs;
 extern struct LG_OverlayOps LGOverlayHelp;

@@ -123,6 +123,7 @@ set(SOURCES
 	src/overlay_utils.c
 	src/overlay_utils.cpp
 
+	src/overlay/alert.c
 	src/overlay/fps.c
 	src/overlay/graphs.c
 	src/overlay/help.c

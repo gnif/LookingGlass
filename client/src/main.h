@@ -51,6 +51,12 @@ struct AppState
   ImGuiStyle * style;
   struct ll  * overlays;
   char       * fontName;
+  ImFont     * fontLarge;
+
+  bool        alertShow;
+  char      * alertMessage;
+  LG_MsgAlert alertType;
+  uint64_t    alertTimeout;
 
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
