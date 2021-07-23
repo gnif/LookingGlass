@@ -56,6 +56,8 @@
 #include "ll.h"
 #include "egl_dynprocs.h"
 #include "overlays.h"
+#include "overlay_utils.h"
+#include "util.h"
 
 // forwards
 static int cursorThread(void * unused);
@@ -180,13 +182,17 @@ static int renderThread(void * unused)
     if (resize)
     {
       g_state.io->DisplaySize = (ImVec2) {
-        .x = g_state.windowW,
-        .y = g_state.windowH
+        .x = g_state.windowW * g_state.windowScale,
+        .y = g_state.windowH * g_state.windowScale
       };
-      g_state.io->DisplayFramebufferScale = (ImVec2) {
-        .x = g_state.windowScale,
-        .y = g_state.windowScale,
-      };
+
+      imGuiResetStyle();
+      ImGuiStyle_ScaleAllSizes(g_state.style, g_state.windowScale);
+
+      ImFontAtlas_Clear(g_state.io->Fonts);
+      ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
+        14 * g_state.windowScale, NULL, NULL);
+      ImFontAtlas_Build(g_state.io->Fonts);
 
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
@@ -755,11 +761,17 @@ static int lg_run(void)
 
   /* setup imgui */
   igCreateContext(NULL);
-  g_state.io = igGetIO();
+  g_state.io    = igGetIO();
+  g_state.style = igGetStyle();
+
   unsigned char *text_pixels = NULL;
   int text_w, text_h;
   ImFontAtlas_GetTexDataAsRGBA32(g_state.io->Fonts, &text_pixels,
       &text_w, &text_h, NULL);
+
+  g_state.windowScale = 1.0;
+  g_state.fontName    = util_getUIFont(DEFAULT_FONT_NAME);
+  DEBUG_INFO("Using font: %s", g_state.fontName);
 
   g_state.overlays = ll_new();
   app_registerOverlay(&LGOverlayFPS   , NULL);
@@ -1149,6 +1161,7 @@ static void lg_shutdown(void)
   ringbuffer_free(&g_state.renderTimings);
   ringbuffer_free(&g_state.frameTimings );
 
+  free(g_state.fontName);
   igDestroyContext(NULL);
 }
 

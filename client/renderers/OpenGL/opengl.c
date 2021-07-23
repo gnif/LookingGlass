@@ -354,6 +354,10 @@ void opengl_on_resize(void * opaque, const int width, const int height, const do
       1.0f
     );
   }
+
+  // this is needed to refresh the font atlas texture
+  ImGui_ImplOpenGL2_Shutdown();
+  ImGui_ImplOpenGL2_NewFrame();
 }
 
 bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,

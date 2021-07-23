@@ -121,6 +121,7 @@ set(SOURCES
 	src/egl_dynprocs.c
 	src/eglutil.c
 	src/overlay_utils.c
+	src/overlay_utils.cpp
 
 	src/overlay/fps.c
 	src/overlay/graphs.c

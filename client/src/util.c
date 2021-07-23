@@ -29,6 +29,7 @@
 #include <string.h>
 #include <assert.h>
 #include <math.h>
+#include <fontconfig/fontconfig.h>
 
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length)
 {
@@ -257,4 +258,49 @@ int util_mergeOverlappingRects(FrameDamageRect * out, const FrameDamageRect * re
     if (!removed[i])
       out[o++] = out[i];
   return o;
+}
+
+char * util_getUIFont(const char * fontName)
+{
+  static FcConfig * fc = NULL;
+  char * ttf = NULL;
+
+  if (!fc)
+    fc = FcInitLoadConfigAndFonts();
+
+  if (!fc)
+  {
+    DEBUG_ERROR("FcInitLoadConfigAndFonts Failed");
+    return NULL;
+  }
+
+  FcPattern * pat = FcNameParse((const FcChar8*) fontName);
+  if (!pat)
+  {
+    DEBUG_ERROR("FCNameParse failed");
+    return NULL;
+  }
+
+  FcConfigSubstitute(fc, pat, FcMatchPattern);
+  FcDefaultSubstitute(pat);
+  FcResult result;
+  FcChar8 * file = NULL;
+  FcPattern * match = FcFontMatch(fc, pat, &result);
+
+  if (!match)
+  {
+    DEBUG_ERROR("FcFontMatch Failed");
+    goto fail_parse;
+  }
+
+  if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch)
+    ttf = strdup((char *) file);
+  else
+    DEBUG_ERROR("Failed to locate the requested font: %s", fontName);
+
+  FcPatternDestroy(match);
+
+fail_parse:
+  FcPatternDestroy(pat);
+  return ttf;
 }

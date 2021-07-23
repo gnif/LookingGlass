@@ -46,4 +46,7 @@ static inline double util_clamp(double x, double min, double max)
   return x;
 }
 
+#define DEFAULT_FONT_NAME "DejaVu Sans Mono"
+char * util_getUIFont(const char * fontName);
+
 #endif

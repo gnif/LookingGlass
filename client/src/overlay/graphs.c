@@ -93,6 +93,8 @@ static int graphs_render(void * udata, bool interactive,
   if (!g_state.showTiming)
     return 0;
 
+  float fontSize = igGetFontSize();
+
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
   igSetNextWindowPos(pos, 0, pos);
@@ -121,7 +123,7 @@ static int graphs_render(void * udata, bool interactive,
     }
 
     char  title[64];
-    const ImVec2 size = {400.0f, 100.0f};
+    const ImVec2 size = {28.0f * fontSize, 7.0f * fontSize};
 
     snprintf(title, sizeof(title),
         "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
