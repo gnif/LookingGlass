@@ -776,6 +776,7 @@ static int lg_run(void)
   g_state.overlays = ll_new();
   app_registerOverlay(&LGOverlayFPS   , NULL);
   app_registerOverlay(&LGOverlayGraphs, NULL);
+  app_registerOverlay(&LGOverlayHelp  , NULL);
 
   // initialize metrics ringbuffers
   g_state.renderTimings = ringbuffer_new(256, sizeof(float));
