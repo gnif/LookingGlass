@@ -42,10 +42,7 @@
 
 #define FPS_TEXTURE        0
 #define MOUSE_TEXTURE      1
-#define ALERT_TEXTURE      2
-#define TEXTURE_COUNT      3
-
-#define ALERT_TIMEOUT_FLAG ((uint64_t)-1)
+#define TEXTURE_COUNT      2
 
 #define FADE_TIME 1000000
 
@@ -104,17 +101,6 @@ struct OpenGL_Options
   bool amdPinnedMem;
 };
 
-struct Alert
-{
-  bool          ready;
-  bool          useCloseFlag;
-
-  LG_FontBitmap *text;
-  float         r, g, b, a;
-  uint64_t      timeout;
-  bool          closeFlag;
-};
-
 struct Inst
 {
   LG_RendererParams     params;
@@ -131,7 +117,7 @@ struct Inst
   _Atomic(bool)     frameUpdate;
 
   const LG_Font   * font;
-  LG_FontObj        fontObj, alertFontObj;
+  LG_FontObj        fontObj;
 
   LG_Lock             formatLock;
   LG_RendererFormat   format;
@@ -157,8 +143,6 @@ struct Inst
   GLuint            frames[BUFFER_COUNT];
   GLsync            fences[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
-  struct ll       * alerts;
-  int               alertList;
 
   bool              waiting;
   uint64_t          waitFadeTime;
@@ -238,14 +222,6 @@ bool opengl_create(void ** opaque, const LG_RendererParams params,
     return false;
   }
 
-  if (!this->font->create(&this->alertFontObj, NULL, 18))
-  {
-    DEBUG_ERROR("Unable to create the font renderer");
-    return false;
-  }
-
-  this->alerts = ll_new();
-
   *needsOpenGL = true;
   return true;
 }
@@ -273,7 +249,6 @@ void opengl_deinitialize(void * opaque)
 
     glDeleteLists(this->texList  , BUFFER_COUNT);
     glDeleteLists(this->mouseList, 1);
-    glDeleteLists(this->alertList, 1);
   }
 
   deconfigure(this);
@@ -296,15 +271,6 @@ void opengl_deinitialize(void * opaque)
   LG_LOCK_FREE(this->formatLock);
   LG_LOCK_FREE(this->frameLock );
   LG_LOCK_FREE(this->mouseLock );
-
-  struct Alert * alert;
-  while(ll_shift(this->alerts, (void **)&alert))
-  {
-    if (alert->text)
-      this->font->release(this->alertFontObj, alert->text);
-    free(alert);
-  }
-  ll_free(this->alerts);
 
   if (this->font && this->fontObj)
     this->font->destroy(this->fontObj);
@@ -441,59 +407,6 @@ bool opengl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
   return true;
 }
 
-void opengl_on_alert(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag)
-{
-  struct Inst * this = (struct Inst *)opaque;
-  struct Alert * a = malloc(sizeof(struct Alert));
-  memset(a, 0, sizeof(struct Alert));
-
-  switch(alert)
-  {
-    case LG_ALERT_INFO:
-      a->r = 0.0f;
-      a->g = 0.0f;
-      a->b = 0.8f;
-      a->a = 0.8f;
-      break;
-
-    case LG_ALERT_SUCCESS:
-      a->r = 0.0f;
-      a->g = 0.8f;
-      a->b = 0.0f;
-      a->a = 0.8f;
-      break;
-
-    case LG_ALERT_WARNING:
-      a->r = 0.8f;
-      a->g = 0.5f;
-      a->b = 0.0f;
-      a->a = 0.8f;
-      break;
-
-    case LG_ALERT_ERROR:
-      a->r = 1.0f;
-      a->g = 0.0f;
-      a->b = 0.0f;
-      a->a = 0.8f;
-      break;
-  }
-
-  if (!(a->text = this->font->render(this->alertFontObj, 0xffffff00, message)))
-  {
-    DEBUG_ERROR("Failed to render alert text");
-    free(a);
-    return;
-  }
-
-  if (closeFlag)
-  {
-    a->useCloseFlag = true;
-    *closeFlag = &a->closeFlag;
-  }
-
-  ll_push(this->alerts, a);
-}
-
 void bitmap_to_texture(LG_FontBitmap * bitmap, GLuint texture)
 {
   glBindTexture(GL_TEXTURE_2D       , texture      );
@@ -560,7 +473,6 @@ bool opengl_render_startup(void * opaque)
   // generate lists for drawing
   this->texList   = glGenLists(BUFFER_COUNT);
   this->mouseList = glGenLists(1);
-  this->alertList = glGenLists(1);
 
   // create the overlay textures
   glGenTextures(TEXTURE_COUNT, this->textures);
@@ -615,74 +527,6 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
 
     if (!this->waitDone)
       render_wait(this);
-  }
-
-  struct Alert * alert;
-  while(ll_peek_head(this->alerts, (void **)&alert))
-  {
-    if (!alert->ready)
-    {
-      bitmap_to_texture(alert->text, this->textures[ALERT_TEXTURE]);
-
-      glNewList(this->alertList, GL_COMPILE);
-        const int p = 4;
-        const int w = alert->text->width  + p * 2;
-        const int h = alert->text->height + p * 2;
-        glTranslatef(-(w / 2), -(h / 2), 0.0f);
-        glEnable(GL_BLEND);
-        glDisable(GL_TEXTURE_2D);
-        glColor4f(alert->r, alert->g, alert->b, alert->a);
-        glBegin(GL_TRIANGLE_STRIP);
-          glVertex2i(0, 0);
-          glVertex2i(w, 0);
-          glVertex2i(0, h);
-          glVertex2i(w, h);
-        glEnd();
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, this->textures[ALERT_TEXTURE]);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        glTranslatef(p, p, 0.0f);
-        glBegin(GL_TRIANGLE_STRIP);
-          glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
-          glTexCoord2f(1.0f, 0.0f); glVertex2i(alert->text->width, 0                  );
-          glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , alert->text->height);
-          glTexCoord2f(1.0f, 1.0f); glVertex2i(alert->text->width, alert->text->height);
-        glEnd();
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glDisable(GL_BLEND);
-      glEndList();
-
-      if (!alert->useCloseFlag)
-        alert->timeout = microtime() + 2*1000000;
-      alert->ready   = true;
-
-      this->font->release(this->fontObj, alert->text);
-      alert->text  = NULL;
-      alert->ready = true;
-    }
-    else
-    {
-      bool close = false;
-      if (alert->useCloseFlag)
-        close = alert->closeFlag;
-      else if (alert->timeout < microtime())
-        close = true;
-
-      if (close)
-      {
-        free(alert);
-        ll_shift(this->alerts, NULL);
-        continue;
-      }
-    }
-
-    glPushMatrix();
-      glLoadIdentity();
-      glTranslatef(this->window.x / 2, this->window.y / 2, 0.0f);
-      glScalef(this->uiScale, this->uiScale, 1.0f);
-      glCallList(this->alertList);
-    glPopMatrix();
-    break;
   }
 
   if (app_renderOverlay(NULL, 0) != 0)
@@ -811,7 +655,6 @@ const LG_Renderer LGR_OpenGL =
   .on_mouse_event  = opengl_on_mouse_event,
   .on_frame_format = opengl_on_frame_format,
   .on_frame        = opengl_on_frame,
-  .on_alert        = opengl_on_alert,
   .render_startup  = opengl_render_startup,
   .render          = opengl_render
 };

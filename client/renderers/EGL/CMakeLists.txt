@@ -21,9 +21,6 @@ make_object(
 	shader/cursor_mono.frag
 	shader/damage.vert
 	shader/damage.frag
-	shader/alert.vert
-	shader/alert.frag
-	shader/alert_bg.frag
 	shader/splash_bg.vert
 	shader/splash_bg.frag
 	shader/splash_logo.vert
@@ -45,7 +42,6 @@ add_library(renderer_EGL STATIC
 	cursor.c
 	draw.c
 	splash.c
-	alert.c
 	damage.c
 	${EGL_SHADER_OBJS}
 	"${EGL_SHADER_INCS}/desktop_rgb.def.h"
