@@ -36,7 +36,6 @@
    (x)->on_mouse_shape && \
    (x)->on_mouse_event && \
    (x)->on_alert       && \
-   (x)->on_help        && \
    (x)->render_startup && \
    (x)->render)
 
@@ -114,7 +113,6 @@ typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visi
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD, const FrameDamageRect * damage, int damageCount);
 typedef void         (* LG_RendererOnAlert      )(void * opaque, const LG_MsgAlert alert, const char * message, bool ** closeFlag);
-typedef void         (* LG_RendererOnHelp       )(void * opaque, const char * message);
 typedef bool         (* LG_RendererRenderStartup)(void * opaque);
 typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate, const bool newFrame);
 
@@ -134,7 +132,6 @@ typedef struct LG_Renderer
   LG_RendererOnFrameFormat  on_frame_format;
   LG_RendererOnFrame        on_frame;
   LG_RendererOnAlert        on_alert;
-  LG_RendererOnHelp         on_help;
   LG_RendererRenderStartup  render_startup;
   LG_RendererRender         render;
 }
