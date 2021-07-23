@@ -18,20 +18,11 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_OVERLAY_UTILS_
-#define _H_LG_OVERLAY_UTILS_
+#include "overlay_utils.h"
 
-#include "common/types.h"
+#include "imgui.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-void overlayGetImGuiRect(struct Rect * rect);
-void imGuiResetStyle(void);
-
-#ifdef __cplusplus
+void imGuiResetStyle(void)
+{
+  ImGui::GetStyle() = ImGuiStyle();
 }
-#endif
-
-#endif

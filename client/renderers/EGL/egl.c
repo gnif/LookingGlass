@@ -504,6 +504,10 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   damage->count = 0;
   free(atomic_exchange(&this->desktopDamage, damage));
 
+  // this is needed to refresh the font atlas texture
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplOpenGL3_NewFrame();
+
   egl_damage_resize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
 }
 
