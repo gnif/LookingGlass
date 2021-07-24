@@ -8,6 +8,7 @@ include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
 
+set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
