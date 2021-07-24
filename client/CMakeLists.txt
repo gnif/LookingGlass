@@ -1,21 +1,14 @@
 cmake_minimum_required(VERSION 3.0)
 project(looking-glass-client C CXX)
 
-list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
+get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
 
-option(OPTIMIZE_FOR_NATIVE "Build with -march=native" ON)
-if(OPTIMIZE_FOR_NATIVE)
-  CHECK_C_COMPILER_FLAG("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-  if(COMPILER_SUPPORTS_MARCH_NATIVE)
-    add_compile_options("-march=native")
-  endif()
-else()
-  add_compile_options("-march=nehalem" "-mtune=generic")
-endif()
+include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 
 find_package(PkgConfig)
 pkg_check_modules(FONTCONFIG_PKGCONFIG REQUIRED fontconfig)
@@ -87,7 +80,6 @@ find_package(GMP)
 
 add_definitions(-D ATOMIC_LOCKING)
 add_definitions(-D GL_GLEXT_PROTOTYPES)
-get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 add_custom_command(
 	OUTPUT	${CMAKE_BINARY_DIR}/version.c

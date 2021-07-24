@@ -1,19 +1,14 @@
 cmake_minimum_required(VERSION 3.0)
 project(profiler-client C)
 
-set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
+get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/../.." ABSOLUTE)
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
 
-option(OPTIMIZE_FOR_NATIVE "Build with -march=native" ON)
-if(OPTIMIZE_FOR_NATIVE)
-  CHECK_C_COMPILER_FLAG("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-  if(COMPILER_SUPPORTS_MARCH_NATIVE)
-    add_compile_options("-march=native")
-  endif()
-endif()
+include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 
 add_compile_options(
   "-Wall"
@@ -36,7 +31,6 @@ execute_process(
 )
 
 add_definitions(-D BUILD_VERSION='"${BUILD_VERSION}"')
-get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/../.." ABSOLUTE)
 
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
