@@ -12,7 +12,7 @@ set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 
 find_package(PkgConfig)
-pkg_check_modules(FONTCONFIG_PKGCONFIG REQUIRED fontconfig)
+pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
 add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
@@ -90,7 +90,6 @@ add_custom_command(
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${FONTCONFIG_PKGCONFIG_INCLUDE_DIRS}
 )
 
 link_libraries(
@@ -139,7 +138,7 @@ target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_
 
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
-	${FONTCONFIG_PKGCONFIG_LIBRARIES}
+	PkgConfig::FONTCONFIG
 	lg_common
 	displayservers
 	lgmp

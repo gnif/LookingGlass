@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 3.0)
 project(renderer_EGL LANGUAGES C CXX)
 
 find_package(PkgConfig)
-pkg_check_modules(RENDERER_EGL_PKGCONFIG REQUIRED
+pkg_check_modules(RENDERER_EGL REQUIRED IMPORTED_TARGET
 	egl
 	gl
 )
 
-pkg_check_modules(RENDERER_EGL_OPT_PKGCONFIG
+pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
 	wayland-egl
 )
 
@@ -51,17 +51,19 @@ add_library(renderer_EGL STATIC
 target_compile_definitions(renderer_EGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 IMGUI_IMPL_OPENGL_ES3)
 
 target_link_libraries(renderer_EGL
-	${RENDERER_EGL_PKGCONFIG_LIBRARIES}
-	${RENDERER_EGL_OPT_PKGCONFIG_LIBRARIES}
+	PkgConfig::RENDERER_EGL
 	lg_common
 
 	cimgui
 )
+if(RENDERER_EGL_OPT_FOUND)
+	target_link_libraries(renderer_EGL
+		PkgConfig::RENDERER_EGL_OPT
+	)
+endif()
 
 target_include_directories(renderer_EGL
 	PRIVATE
 		src
 		${EGL_SHADER_INCS}
-		${RENDERER_EGL_PKGCONFIG_INCLUDE_DIRS}
-		${RENDERER_EGL_OPT_PKGCONFIG_INCLUDE_DIRS}
 )

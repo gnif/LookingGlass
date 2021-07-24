@@ -2,21 +2,18 @@ cmake_minimum_required(VERSION 3.0)
 project(displayserver_Wayland LANGUAGES C)
 
 find_package(PkgConfig)
-pkg_check_modules(DISPLAYSERVER_Wayland_PKGCONFIG REQUIRED
+pkg_check_modules(DISPLAYSERVER_Wayland REQUIRED IMPORTED_TARGET
 	wayland-client
 )
 
-#pkg_check_modules(DISPLAYSERVER_Wayland_OPT_PKGCONFIG
-#)
-
+set(DISPLAYSERVER_Wayland_OPT_PKGCONFIG_LIBRARIES "")
 set(displayserver_Wayland_SHELL_SRC "")
 
 if (ENABLE_LIBDECOR)
-	pkg_check_modules(DISPLAYSERVER_Wayland_LIBDECOR REQUIRED
+	pkg_check_modules(DISPLAYSERVER_Wayland_LIBDECOR REQUIRED IMPORTED_TARGET
 		libdecor-0
 	)
-	list(APPEND DISPLAYSERVER_Wayland_PKGCONFIG_LIBRARIES ${DISPLAYSERVER_Wayland_LIBDECOR_LIBRARIES})
-	list(APPEND DISPLAYSERVER_Wayland_PKGCONFIG_INCLUDE_DIRS ${DISPLAYSERVER_Wayland_LIBDECOR_INCLUDE_DIRS})
+	list(APPEND DISPLAYSERVER_Wayland_OPT_PKGCONFIG_LIBRARIES PkgConfig::DISPLAYSERVER_Wayland_LIBDECOR)
 	list(APPEND displayserver_Wayland_SHELL_SRC shell_libdecor.c)
 	add_compile_definitions(ENABLE_LIBDECOR)
 else()
@@ -40,7 +37,7 @@ add_library(displayserver_Wayland STATIC
 )
 
 target_link_libraries(displayserver_Wayland
-	${DISPLAYSERVER_Wayland_PKGCONFIG_LIBRARIES}
+	PkgConfig::DISPLAYSERVER_Wayland
 	${DISPLAYSERVER_Wayland_OPT_PKGCONFIG_LIBRARIES}
 	lg_common
 )
@@ -48,8 +45,6 @@ target_link_libraries(displayserver_Wayland
 target_include_directories(displayserver_Wayland
 	PRIVATE
 		src
-		${DISPLAYSERVER_Wayland_PKGCONFIG_INCLUDE_DIRS}
-		${DISPLAYSERVER_Wayland_OPT_PKGCONFIG_INCLUDE_DIRS}
 )
 
 find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
