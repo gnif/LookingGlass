@@ -21,9 +21,12 @@ add_subdirectory("capture")
 if (MINGW)
 	# Build our own ntdll.dll import library
 	# This tricks MinGW into not linking stuff like memcpy from ntdll.dll instead of mscvrt.dll
-	find_program(DLLTOOL_EXECUTABLE NAMES "x86_64-w64-mingw32-dlltool" "dlltool.exe" DOC "dlltool executable")
+	if(NOT CMAKE_DLLTOOL)
+		# cmake older than 3.16 doesn't know how to find dlltool
+		find_program(CMAKE_DLLTOOL NAMES "x86_64-w64-mingw32-dlltool" "dlltool.exe" DOC "dlltool executable")
+	endif()
 	add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/ntdll.a"
-		COMMAND "${DLLTOOL_EXECUTABLE}" -d "${PROJECT_SOURCE_DIR}/ntdll.def" -l "${PROJECT_BINARY_DIR}/ntdll.a"
+		COMMAND "${CMAKE_DLLTOOL}" -d "${PROJECT_SOURCE_DIR}/ntdll.def" -l "${PROJECT_BINARY_DIR}/ntdll.a"
 		MAIN_DEPENDENCY "${PROJECT_SOURCE_DIR}/ntdll.def"
 		COMMENT "Building import library ntdll.a"
 		VERBATIM
