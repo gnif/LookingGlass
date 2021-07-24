@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0)
 project(renderer_Opengl LANGUAGES C CXX)
 
 find_package(PkgConfig)
-pkg_check_modules(RENDERER_OPENGL_PKGCONFIG REQUIRED
+pkg_check_modules(RENDERER_OPENGL REQUIRED IMPORTED_TARGET
 	gl
 )
 
@@ -14,7 +14,7 @@ add_library(renderer_OpenGL STATIC
 target_compile_definitions(renderer_OpenGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
 
 target_link_libraries(renderer_OpenGL
-	${RENDERER_OPENGL_PKGCONFIG_LIBRARIES}
+	PkgConfig::RENDERER_OPENGL
 	lg_common
 
 	cimgui
@@ -23,5 +23,4 @@ target_link_libraries(renderer_OpenGL
 target_include_directories(renderer_OpenGL
 	PRIVATE
 		src
-		${RENDERER_OPENGL_PKGCONFIG_INCLUDE_DIRS}
 )
