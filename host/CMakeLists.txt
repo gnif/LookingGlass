@@ -56,7 +56,6 @@ include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
 	${PKGCONFIG_INCLUDE_DIRS}
-	${GMP_INCLUDE_DIR}
 )
 
 #link_libraries(
