@@ -4,29 +4,14 @@ project(looking-glass-host C)
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG" CACHE STRING "compiler flags" FORCE)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG" CACHE STRING "compiler flags" FORCE)
 
-set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
+get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
 
-option(OPTIMIZE_FOR_NATIVE "Build with -march=native" OFF)
-if(OPTIMIZE_FOR_NATIVE)
-  CHECK_C_COMPILER_FLAG("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-  if(COMPILER_SUPPORTS_MARCH_NATIVE)
-    add_compile_options("-march=native")
-  endif()
-else()
-  CHECK_C_COMPILER_FLAG("-march=x86-64-v2" COMPILER_SUPPORTS_MARCH_X86_64_V2)
-  if(COMPILER_SUPPORTS_MARCH_X86_64_V2)
-    add_compile_options("-march=x86-64-v2")
-  else()
-    CHECK_C_COMPILER_FLAG("-march=nehalem" COMPILER_SUPPORTS_MARCH_NEHALEM)
-    if(COMPILER_SUPPORTS_MARCH_NEHALEM)
-      add_compile_options("-march=nehalem")
-    endif()
-  endif()
-endif()
+include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
@@ -41,8 +26,6 @@ add_compile_options(
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
 set(CMAKE_C_STANDARD  11)
-
-get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 add_custom_command(
 	OUTPUT	${CMAKE_BINARY_DIR}/version.c
