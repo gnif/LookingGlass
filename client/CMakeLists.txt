@@ -77,8 +77,6 @@ if(ENABLE_UBSAN)
   set(EXE_FLAGS "${EXE_FLAGS} -fsanitize=undefined")
 endif()
 
-find_package(GMP)
-
 add_definitions(-D ATOMIC_LOCKING)
 add_definitions(-D GL_GLEXT_PROTOTYPES)
 
@@ -92,12 +90,10 @@ add_custom_command(
 include_directories(
 	${PROJECT_SOURCE_DIR}/include
 	${CMAKE_BINARY_DIR}/include
-	${GMP_INCLUDE_DIR}
 	${FONTCONFIG_PKGCONFIG_INCLUDE_DIRS}
 )
 
 link_libraries(
-	${GMP_LIBRARIES}
 	${CMAKE_DL_LIBS}
 	rt
 	m
