@@ -615,6 +615,12 @@ static int x11EventThread(void * unused)
         break;
       }
 
+      case Expose:
+      {
+        app_invalidateWindow();
+        break;
+      }
+
       case GenericEvent:
       {
         XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
