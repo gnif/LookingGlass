@@ -424,8 +424,9 @@ int main_frameThread(void * unused)
   LGMP_STATUS      status;
   PLGMPClientQueue queue;
 
-  uint32_t          formatVer = 0;
-  size_t            dataSize  = 0;
+  uint32_t          frameSerial = 0;
+  uint32_t          formatVer   = 0;
+  size_t            dataSize    = 0;
   LG_RendererFormat lgrFormat;
 
   struct DMAFrameInfo dmaInfo[LGMP_Q_FRAME_LEN] = {0};
@@ -495,6 +496,16 @@ int main_frameThread(void * unused)
     }
 
     KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+
+    // ignore any repeated frames, this happens when a new client connects to
+    // the same host application.
+    if (frame->frameSerial == frameSerial)
+    {
+      lgmpClientMessageDone(queue);
+      continue;
+    }
+    frameSerial = frame->frameSerial;
+
     struct DMAFrameInfo *dma = NULL;
 
     if (!g_state.formatValid || frame->formatVer != formatVer)
