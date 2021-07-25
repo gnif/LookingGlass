@@ -499,7 +499,7 @@ int main_frameThread(void * unused)
 
     // ignore any repeated frames, this happens when a new client connects to
     // the same host application.
-    if (frame->frameSerial == frameSerial)
+    if (frame->frameSerial == frameSerial && g_state.formatValid)
     {
       lgmpClientMessageDone(queue);
       continue;
