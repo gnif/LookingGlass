@@ -456,7 +456,8 @@ bool opengl_render_startup(void * opaque)
   return true;
 }
 
-bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
+bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
+    const bool invalidateWindow)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)

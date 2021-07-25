@@ -418,6 +418,12 @@ void app_handleResizeEvent(int w, int h, double scale, const struct Border borde
   }
 }
 
+void app_invalidateWindow(void)
+{
+  atomic_store(&g_state.invalidateWindow, true);
+  lgSignalEvent(g_state.frameEvent);
+}
+
 void app_handleCloseEvent(void)
 {
   if (!g_params.ignoreQuit || !g_cursor.inView)

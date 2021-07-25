@@ -64,7 +64,6 @@ static int cursorThread(void * unused);
 static int renderThread(void * unused);
 
 static LGEvent  *e_startup = NULL;
-static LGEvent  *e_frame   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
@@ -170,7 +169,7 @@ static int renderThread(void * unused)
     {
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
 
-      if (!lgWaitEventAbs(e_frame, &time) || ups > g_params.fpsMin)
+      if (!lgWaitEventAbs(g_state.frameEvent, &time) || ups > g_params.fpsMin)
       {
         /* only update the time if we woke up early */
         clock_gettime(CLOCK_MONOTONIC, &time);
@@ -208,8 +207,11 @@ static int renderThread(void * unused)
     const bool newFrame = frameCount != lastFrameCount;
     lastFrameCount = frameCount;
 
+    const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
+
     LG_LOCK(g_state.lgrLock);
-    if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate, newFrame))
+    if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate, newFrame,
+          invalidate))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
@@ -306,7 +308,7 @@ static int cursorThread(void * unused)
           );
 
           if (!g_state.stopVideo)
-            lgSignalEvent(e_frame);
+            lgSignalEvent(g_state.frameEvent);
         }
 
         const struct timespec req =
@@ -405,7 +407,7 @@ static int cursorThread(void * unused)
     );
 
     if (g_params.mouseRedraw && g_cursor.guest.visible && !g_state.stopVideo)
-      lgSignalEvent(e_frame);
+      lgSignalEvent(g_state.frameEvent);
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -678,7 +680,7 @@ int main_frameThread(void * unused)
     g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
-    lgSignalEvent(e_frame);
+    lgSignalEvent(g_state.frameEvent);
     lgmpClientMessageDone(queue);
   }
 
@@ -950,7 +952,7 @@ static int lg_run(void)
   }
 
   // setup the new frame event
-  if (!(e_frame = lgCreateEvent(true, 0)))
+  if (!(g_state.frameEvent = lgCreateEvent(true, 0)))
   {
     DEBUG_ERROR("failed to create the frame event");
     return -1;
@@ -1092,7 +1094,7 @@ restart:
   if (g_state.state == APP_STATE_RESTART)
   {
     lgSignalEvent(e_startup);
-    lgSignalEvent(e_frame);
+    lgSignalEvent(g_state.frameEvent);
 
     core_stopFrameThread();
 
@@ -1116,7 +1118,7 @@ static void lg_shutdown(void)
   if (t_render)
   {
     lgSignalEvent(e_startup);
-    lgSignalEvent(e_frame);
+    lgSignalEvent(g_state.frameEvent);
     lgJoinThread(t_render, NULL);
   }
 
@@ -1129,10 +1131,10 @@ static void lg_shutdown(void)
     g_state.overlays = NULL;
   }
 
-  if (e_frame)
+  if (g_state.frameEvent)
   {
-    lgFreeEvent(e_frame);
-    e_frame = NULL;
+    lgFreeEvent(g_state.frameEvent);
+    g_state.frameEvent = NULL;
   }
 
   if (e_startup)

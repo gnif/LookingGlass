@@ -791,7 +791,8 @@ bool egl_render_startup(void * opaque)
   return true;
 }
 
-bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
+bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
+    const bool invalidateWindow)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -856,6 +857,7 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame)
   }
 
   hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
+  hasOverlay |= invalidateWindow;
 
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
   int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);

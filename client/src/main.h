@@ -30,6 +30,7 @@
 #include "common/ivshmem.h"
 #include "common/locking.h"
 #include "common/ringbuffer.h"
+#include "common/event.h"
 
 #include "spice/spice.h"
 #include <lgmp/client.h>
@@ -103,6 +104,8 @@ struct AppState
   PLGMPClientQueue     pointerQueue;
 
   LGThread            * frameThread;
+  LGEvent             * frameEvent;
+  atomic_bool           invalidateWindow;
   bool                  formatValid;
   atomic_uint_least64_t frameTime;
   uint64_t              lastFrameTime;
