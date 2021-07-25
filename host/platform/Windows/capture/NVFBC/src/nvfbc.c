@@ -392,11 +392,15 @@ static void updateDamageRects(CaptureFrame * frame)
           goto done;
         }
 
+        int x1 = ds[y * w + x].x1 * 128;
+        int y1 = ds[y * w + x].y1 * 128;
+        int x2 = min((ds[y * w + x].x2 + 1) * 128, this->width);
+        int y2 = min((ds[y * w + x].y2 + 1) * 128, this->height);
         frame->damageRects[rectId++] = (FrameDamageRect) {
-          .x = ds[y * w + x].x1 * 128,
-          .y = ds[y * w + x].y1 * 128,
-          .width = (ds[y * w + x].x2 - ds[y * w + x].x1 + 1) * 128,
-          .height = (ds[y * w + x].y2 - ds[y * w + x].y1 + 1) * 128,
+          .x = x1,
+          .y = y1,
+          .width = x2 - x1,
+          .height = y2 - y1,
         };
       }
 
