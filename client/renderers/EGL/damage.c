@@ -48,6 +48,7 @@ struct EGL_Damage
   int   width     , height;
   float translateX, translateY;
   float scaleX    , scaleY;
+  bool  rotate;
 
   // uniforms
   GLint uTransform;
@@ -133,10 +134,12 @@ void egl_damage_free(EGL_Damage ** damage)
 
 static void update_matrix(EGL_Damage * damage)
 {
-  damage->transform[0] = 2.0f * damage->scaleX / damage->width;
+  int width  = damage->rotate ? damage->height : damage->width;
+  int height = damage->rotate ? damage->width  : damage->height;
+  damage->transform[0] = 2.0f * damage->scaleX / width;
   damage->transform[1] = 0.0f;
   damage->transform[2] = 0.0f;
-  damage->transform[3] = -2.0f * damage->scaleY / damage->height;
+  damage->transform[3] = -2.0f * damage->scaleY / height;
   damage->transform[4] = damage->translateX - damage->scaleX;
   damage->transform[5] = damage->translateY + damage->scaleY;
 }
@@ -170,11 +173,16 @@ inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect
   vertex[7] = rect->y + rect->height;
 }
 
-bool egl_damage_render(EGL_Damage * damage, const struct DesktopDamage * data)
+bool egl_damage_render(EGL_Damage * damage, bool rotate, const struct DesktopDamage * data)
 {
   if (!damage->show || (!data && damage->count == -1))
     return false;
 
+  if (rotate != damage->rotate)
+  {
+    damage->rotate = rotate;
+    update_matrix(damage);
+  }
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
