@@ -26,6 +26,7 @@
 #include "texture.h"
 #include "shader.h"
 #include "model.h"
+#include "util.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -331,6 +332,9 @@ struct CursorState egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rota
     default:
       assert(!"unreachable");
   }
+
+  state.rect.x = max(0, state.rect.x);
+  state.rect.y = max(0, state.rect.y);
 
   glEnable(GL_BLEND);
   switch(cursor->type)
