@@ -192,7 +192,7 @@ static int renderThread(void * unused)
       ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
         g_params.uiSize * g_state.windowScale, NULL, NULL);
       g_state.fontLarge = ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts,
-        g_state.fontName, 2 * g_params.uiSize * g_state.windowScale, NULL, NULL);
+        g_state.fontName, 1.3f * g_params.uiSize * g_state.windowScale, NULL, NULL);
       ImFontAtlas_Build(g_state.io->Fonts);
 
       if (g_state.lgr)

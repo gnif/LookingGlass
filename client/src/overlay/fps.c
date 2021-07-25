@@ -42,6 +42,8 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.6f);
   igSetNextWindowPos(pos, 0, pos);
+  igPushStyleVarVec2(ImGuiStyleVar_WindowPadding, (ImVec2) { 4.0f , 4.0f });
+  igPushStyleVarVec2(ImGuiStyleVar_WindowMinSize, (ImVec2) { 0.0f , 0.0f });
 
   igBegin(
     "FPS",
@@ -57,6 +59,8 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
 
   overlayGetImGuiRect(windowRects);
   igEnd();
+
+  igPopStyleVar(2);
 
   return 1;
 }
