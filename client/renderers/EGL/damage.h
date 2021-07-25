@@ -37,4 +37,4 @@ void egl_damage_free(EGL_Damage ** damage);
 void egl_damage_setup(EGL_Damage * damage, int width, int height);
 void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
     float scaleX, float scaleY);
-bool egl_damage_render(EGL_Damage * damage, const struct DesktopDamage * data);
+bool egl_damage_render(EGL_Damage * damage, bool rotate, const struct DesktopDamage * data);
