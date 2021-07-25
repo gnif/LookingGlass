@@ -69,6 +69,7 @@ static void libdecorFrameConfigure(struct libdecor_frame * frame,
   {
     wlWm.needsResize = true;
     wlWm.resizeSerial = configuration->serial;
+    app_invalidateWindow();
   }
   else
     wlWm.configured = true;
