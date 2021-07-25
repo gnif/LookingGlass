@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 12
+#define KVMFR_VERSION 13
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -69,6 +69,7 @@ KVMFRCursor;
 typedef struct KVMFRFrame
 {
   uint32_t        formatVer;          // the frame format version number
+  uint32_t        frameSerial;        // the unique frame number
   FrameType       type;               // the frame data type
   uint32_t        width;              // the frame width
   uint32_t        height;             // the frame height

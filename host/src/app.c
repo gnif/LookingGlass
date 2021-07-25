@@ -94,6 +94,7 @@ struct app
   PLGMPMemory    frameMemory[LGMP_Q_FRAME_LEN];
   unsigned int   frameIndex;
   bool           frameValid;
+  uint32_t       frameSerial;
 
   CaptureInterface * iface;
 
@@ -229,6 +230,7 @@ static bool sendFrame(void)
   }
 
   fi->formatVer         = frame.formatVer;
+  fi->frameSerial       = app.frameSerial++;
   fi->width             = frame.width;
   fi->height            = frame.height;
   fi->realHeight        = frame.realHeight;
