@@ -856,7 +856,69 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
     hasOverlay = true;
   }
 
-  hasOverlay |= egl_damage_render(this->damage, newFrame ? desktopDamage : NULL);
+  if (desktopDamage && rotate != LG_ROTATE_0)
+  {
+    for (int i = 0; i < desktopDamage->count; ++i)
+    {
+      FrameDamageRect * r = desktopDamage->rects + i;
+
+      switch (rotate)
+      {
+        case LG_ROTATE_90:
+          *r = (FrameDamageRect) {
+            .x = this->format.height - r->y - r->height,
+            .y = r->x,
+            .width = r->height,
+            .height = r->width,
+          };
+          break;
+
+        case LG_ROTATE_180:
+          r->x = this->format.width  - r->x - r->width;
+          r->y = this->format.height - r->y - r->height;
+          break;
+
+        case LG_ROTATE_270:
+          *r = (FrameDamageRect) {
+            .x = r->y,
+            .y = this->format.width - r->x - r->width,
+            .width = r->height,
+            .height = r->width,
+          };
+          break;
+
+        case LG_ROTATE_0:
+        default:
+          assert(!"unreachable");
+      }
+    }
+  }
+
+  double scaleX = 0;
+  double scaleY = 0;
+  bool rotated = false;
+
+  switch (rotate)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      scaleX = (double) this->destRect.w / this->format.width;
+      scaleY = (double) this->destRect.h / this->format.height;
+      rotated = false;
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      scaleX = (double) this->destRect.w / this->format.height;
+      scaleY = (double) this->destRect.h / this->format.width;
+      rotated = true;
+      break;
+
+    default:
+      assert(!"unreachable");
+  }
+
+  hasOverlay |= egl_damage_render(this->damage, rotated, newFrame ? desktopDamage : NULL);
   hasOverlay |= invalidateWindow;
 
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
@@ -894,8 +956,6 @@ bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
         damageIdx = 0;
       else
       {
-        double scaleX = (double) this->destRect.w / this->format.width;
-        double scaleY = (double) this->destRect.h / this->format.height;
         for (int i = 0; i < desktopDamage->count; ++i)
         {
           FrameDamageRect rect = desktopDamage->rects[i];
