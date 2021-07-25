@@ -182,7 +182,7 @@ static bool sendFrame(void)
       if (app.frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
       {
         // resend the last frame
-        repeatFrame = true;
+        repeatFrame = app.iface->asyncCapture;
         break;
       }
 
@@ -195,7 +195,8 @@ static bool sendFrame(void)
   // if we are repeating a frame just send the last frame again
   if (repeatFrame)
   {
-    if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+    if ((status = lgmpHostQueuePost(app.frameQueue, 0,
+           app.frameMemory[app.frameIndex])) != LGMP_OK)
       DEBUG_ERROR("%s", lgmpStatusString(status));
     return true;
   }
@@ -726,6 +727,14 @@ int app_main(int argc, char * argv[])
           break;
 
         case CAPTURE_RESULT_TIMEOUT:
+          if (!iface->asyncCapture)
+            if (app.frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
+            {
+              if ((status = lgmpHostQueuePost(app.frameQueue, 0,
+                      app.frameMemory[app.frameIndex])) != LGMP_OK)
+                DEBUG_ERROR("%s", lgmpStatusString(status));
+            }
+
           continue;
 
         case CAPTURE_RESULT_REINIT:
