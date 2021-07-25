@@ -296,11 +296,41 @@ struct CursorState egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rota
 
   struct CursorState state = {
     .visible = true,
-    .rect.x = (pos.x * width + width) / 2,
-    .rect.y = (-pos.y * height + height) / 2 - size.h * height,
-    .rect.w = size.w * width + 2,
-    .rect.h = size.h * height + 2,
   };
+
+  switch (rotate)
+  {
+    case LG_ROTATE_0:
+      state.rect.x = (pos.x * width + width) / 2;
+      state.rect.y = (-pos.y * height + height) / 2 - size.h * height;
+      state.rect.w = size.w * width + 2;
+      state.rect.h = size.h * height + 2;
+      break;
+
+    case LG_ROTATE_90:
+      state.rect.x = (-pos.y * width + width) / 2 - size.h * width;
+      state.rect.y = (-pos.x * height + height) / 2 - size.w * height;
+      state.rect.w = size.h * width + 2;
+      state.rect.h = size.w * height + 2;
+      break;
+
+    case LG_ROTATE_180:
+      state.rect.x = (-pos.x * width + width) / 2 - size.w * width;
+      state.rect.y = (pos.y * height + height) / 2;
+      state.rect.w = size.w * width + 2;
+      state.rect.h = size.h * height + 2;
+      break;
+
+    case LG_ROTATE_270:
+      state.rect.x = (pos.y * width + width) / 2;
+      state.rect.y = (pos.x * height + height) / 2;
+      state.rect.w = size.h * width + 2;
+      state.rect.h = size.w * height + 2;
+      break;
+
+    default:
+      assert(!"unreachable");
+  }
 
   glEnable(GL_BLEND);
   switch(cursor->type)
