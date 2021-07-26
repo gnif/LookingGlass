@@ -215,12 +215,14 @@ Command                      Description
 :kbd:`ScrLk`                 Toggle capture mode
 :kbd:`ScrLk` + :kbd:`Q`      Quit
 :kbd:`ScrLk` + :kbd:`R`      Rotate the output clockwise by 90° increments
+:kbd:`ScrLk` + :kbd:`T`      Show frame timing information
 :kbd:`ScrLk` + :kbd:`I`      Spice keyboard & mouse enable toggle
 :kbd:`ScrLk` + :kbd:`S`      Toggle scale algorithm
 :kbd:`ScrLk` + :kbd:`D`      FPS display toggle
 :kbd:`ScrLk` + :kbd:`F`      Full screen toggle
 :kbd:`ScrLk` + :kbd:`V`      Video stream toggle
 :kbd:`ScrLk` + :kbd:`N`      Toggle night vision mode
+:kbd:`ScrLk` + :kbd:`M`      Toggle overlay
 :kbd:`ScrLk` + :kbd:`F1`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F1` to the guest
 :kbd:`ScrLk` + :kbd:`F2`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F2` to the guest
 :kbd:`ScrLk` + :kbd:`F3`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F3` to the guest
@@ -340,7 +342,7 @@ The following is a complete list of options accepted by this application
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:maximize            | -T    | no                     | Launch window maximized                                              |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
-  | win:minimizeOnFocusLoss |       | yes                    | Minimize window on focus loss                                        |
+  | win:minimizeOnFocusLoss |       | no                     | Minimize window on focus loss                                        |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:fpsMin              | -K    | -1                     | Frame rate minimum (0 = disable - not recommended, -1 = auto detect) |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
@@ -357,6 +359,10 @@ The following is a complete list of options accepted by this application
   | win:quickSplash         |       | no                     | Skip fading out the splash screen when a connection is established   |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:rotate              |       | 0                      | Rotate the displayed image (0, 90, 180, 270)                         |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:uiFont              |       | DejaVu Sans Mono       | The font to use when rendering on-screen UI                          |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:uiSize              |       | 14                     | The font size to use when rendering on-screen UI                     |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
 
   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
@@ -431,6 +437,8 @@ The following is a complete list of options accepted by this application
   | egl:cbMode       |       | 0     | Color Blind Mode (0 = Off, 1 = Protanope, 2 = Deuteranope, 3 = Tritanope) |
   +------------------+-------+-------+---------------------------------------------------------------------------+
   | egl:scale        |       | 0     | Set the scale algorithm (0 = auto, 1 = nearest, 2 = linear)               |
+  +------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:debug        |       | no    | Enable debug output                                                       |
   +------------------+-------+-------+---------------------------------------------------------------------------+
 
   +----------------------+-------+-------+---------------------------------------------+
