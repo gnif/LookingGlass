@@ -193,7 +193,8 @@ static int renderThread(void * unused)
         g_params.uiSize * g_state.windowScale, NULL, NULL);
       g_state.fontLarge = ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts,
         g_state.fontName, 1.3f * g_params.uiSize * g_state.windowScale, NULL, NULL);
-      ImFontAtlas_Build(g_state.io->Fonts);
+      if (!ImFontAtlas_Build(g_state.io->Fonts))
+        DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
       if (g_state.lgr)
         g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
@@ -778,11 +779,6 @@ static int lg_run(void)
   igCreateContext(NULL);
   g_state.io    = igGetIO();
   g_state.style = igGetStyle();
-
-  unsigned char *text_pixels = NULL;
-  int text_w, text_h;
-  ImFontAtlas_GetTexDataAsRGBA32(g_state.io->Fonts, &text_pixels,
-      &text_w, &text_h, NULL);
 
   g_state.windowScale = 1.0;
   g_state.fontName    = util_getUIFont(g_params.uiFont);
