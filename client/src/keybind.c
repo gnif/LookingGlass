@@ -133,14 +133,30 @@ static void bind_passthrough(int sc, void * opaque)
   spice_key_up  (sc);
 }
 
+static void bind_toggleOverlay(int sc, void * opaque)
+{
+  g_state.overlayInput ^= true;
+  if (g_state.overlayInput)
+  {
+    g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    app_alert(LG_ALERT_INFO, "Overlay input enabled");
+  }
+  else
+  {
+    g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    app_alert(LG_ALERT_INFO, "Overlay input disabled");
+  }
+}
+
 void keybind_register(void)
 {
-  app_registerKeybind(KEY_F, bind_fullscreen, NULL, "Full screen toggle");
-  app_registerKeybind(KEY_V, bind_video     , NULL, "Video stream toggle");
-  app_registerKeybind(KEY_D, bind_showFPS   , NULL, "FPS display toggle");
-  app_registerKeybind(KEY_T, bind_showTiming, NULL, "Show frame timing information");
-  app_registerKeybind(KEY_R, bind_rotate    , NULL, "Rotate the output clockwise by 90° increments");
-  app_registerKeybind(KEY_Q, bind_quit      , NULL, "Quit");
+  app_registerKeybind(KEY_F, bind_fullscreen   , NULL, "Full screen toggle");
+  app_registerKeybind(KEY_V, bind_video        , NULL, "Video stream toggle");
+  app_registerKeybind(KEY_D, bind_showFPS      , NULL, "FPS display toggle");
+  app_registerKeybind(KEY_T, bind_showTiming   , NULL, "Show frame timing information");
+  app_registerKeybind(KEY_R, bind_rotate       , NULL, "Rotate the output clockwise by 90° increments");
+  app_registerKeybind(KEY_Q, bind_quit         , NULL, "Quit");
+  app_registerKeybind(KEY_O, bind_toggleOverlay, NULL, "Toggle overlay");
 
   if (g_params.useSpiceInput)
   {

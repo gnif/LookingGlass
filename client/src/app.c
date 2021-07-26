@@ -68,6 +68,9 @@ void app_updateCursorPos(double x, double y)
   g_cursor.pos.x = x;
   g_cursor.pos.y = y;
   g_cursor.valid = true;
+
+  if (g_state.overlayInput)
+    g_state.io->MousePos = (ImVec2) { x * g_state.windowScale, y * g_state.windowScale };
 }
 
 void app_handleFocusEvent(bool focused)
@@ -214,9 +217,33 @@ void spiceClipboardNotice(const SpiceDataType type)
   g_state.ds->cbNotice(cb_spiceTypeToLGType(type));
 }
 
+static int mapSpiceToImGuiButton(uint32_t button)
+{
+  switch (button)
+  {
+    case 1:  // SPICE_MOUSE_BUTTON_LEFT
+      return ImGuiMouseButton_Left;
+    case 2:  // SPICE_MOUSE_BUTTON_MIDDLE
+      return ImGuiMouseButton_Middle;
+    case 3:  // SPICE_MOUSE_BUTTON_RIGHT
+      return ImGuiMouseButton_Right;
+  }
+
+  return -1;
+}
+
 void app_handleButtonPress(int button)
 {
   g_cursor.buttons |= (1U << button);
+
+  if (g_state.overlayInput)
+  {
+    int igButton = mapSpiceToImGuiButton(button);
+    if (igButton != -1)
+      g_state.io->MouseDown[igButton] = true;
+    if (g_state.io->WantCaptureMouse)
+      return;
+  }
 
   if (!core_inputEnabled() || !g_cursor.inView)
     return;
@@ -228,6 +255,15 @@ void app_handleButtonPress(int button)
 void app_handleButtonRelease(int button)
 {
   g_cursor.buttons &= ~(1U << button);
+
+  if (g_state.overlayInput)
+  {
+    int igButton = mapSpiceToImGuiButton(button);
+    if (igButton != -1)
+      g_state.io->MouseDown[igButton] = false;
+    if (g_state.io->WantCaptureMouse)
+      return;
+  }
 
   if (!core_inputEnabled())
     return;
