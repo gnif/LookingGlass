@@ -53,6 +53,7 @@ struct AppState
   struct ll  * overlays;
   char       * fontName;
   ImFont     * fontLarge;
+  bool         overlayInput;
 
   bool        alertShow;
   char      * alertMessage;
