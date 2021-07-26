@@ -288,6 +288,13 @@ void app_handleKeyPress(int sc)
     return;
   }
 
+  if (g_state.overlayInput)
+  {
+    g_state.io->KeysDown[sc] = true;
+    if (g_state.io->WantCaptureKeyboard)
+      return;
+  }
+
   if (!core_inputEnabled())
     return;
 
@@ -335,6 +342,13 @@ void app_handleKeyRelease(int sc)
 
   if (!core_inputEnabled())
     return;
+
+  if (g_state.overlayInput)
+  {
+    g_state.io->KeysDown[sc] = false;
+    if (g_state.io->WantCaptureKeyboard)
+      return;
+  }
 
   // avoid sending key up events when we didn't send a down
   if (!g_state.keyDown[sc])
