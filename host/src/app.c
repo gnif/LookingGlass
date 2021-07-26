@@ -127,6 +127,13 @@ static struct Option options[] =
     .value.x_string = "",
     .validator      = validateCaptureBackend,
   },
+  {
+    .module         = "app",
+    .name           = "throttleFPS",
+    .description    = "Throttle Capture Frame Rate",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 0,
+  },
   {0}
 };
 
@@ -608,6 +615,10 @@ int app_main(int argc, char * argv[])
     }
   }
 
+  int throttleFps = option_get_int("app", "throttleFPS");
+  int throttleUs = throttleFps ? 1000000 / throttleFps : 0;
+  uint64_t previousFrameTime = 0;
+
   const char * ifaceName = option_get_string("app", "capture");
   CaptureInterface * iface = NULL;
   for(int i = 0; CaptureInterfaces[i]; ++i)
@@ -720,6 +731,16 @@ int app_main(int argc, char * argv[])
         sendPointer(true);
         LG_UNLOCK(app.pointerLock);
       }
+
+      const uint64_t now = microtime();
+      const uint64_t delta = now - previousFrameTime;
+      if (delta < throttleUs)
+      {
+        nsleep((throttleUs - delta) * 1000);
+        previousFrameTime = microtime();
+      }
+      else
+        previousFrameTime = now;
 
       switch(iface->capture())
       {
