@@ -20,7 +20,6 @@
 
 #include "platform.h"
 #include "service.h"
-#include "windows/delay.h"
 #include "windows/mousehook.h"
 
 #include <windows.h>
@@ -38,6 +37,7 @@
 #include "common/option.h"
 #include "common/locking.h"
 #include "common/thread.h"
+#include "common/time.h"
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_EXIT     3001
@@ -495,7 +495,7 @@ bool app_init(void)
   // always flush stderr
   setbuf(stderr, NULL);
 
-  delayInit();
+  windowsSetTimerResolution();
 
   // get the performance frequency for spinlocks
   QueryPerformanceFrequency(&app.perfFreq);

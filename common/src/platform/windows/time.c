@@ -71,3 +71,16 @@ void lgTimerDestroy(LGTimer * timer)
 
   free(timer);
 }
+
+NTSYSCALLAPI NTSTATUS NTAPI NtSetTimerResolution(
+  _In_ ULONG DesiredTime,
+  _In_ BOOLEAN SetResolution,
+  _Out_ PULONG ActualTime
+);
+
+void windowsSetTimerResolution(void)
+{
+  ULONG actualResolution;
+  NtSetTimerResolution(1, true, &actualResolution);
+  DEBUG_INFO("System timer resolution: %.1f μs", actualResolution / 10.0);
+}

@@ -19,8 +19,8 @@
  */
 
 #include "windows/mousehook.h"
-#include "windows/delay.h"
 #include "common/windebug.h"
+#include "common/time.h"
 #include "platform.h"
 
 #include <windows.h>
@@ -105,7 +105,7 @@ static DWORD WINAPI updateThreadProc(LPVOID lParam)
         mouseHook.callback(mouseHook.x, mouseHook.y);
 
         // limit this to 1000Hz, who has a mouse that updates faster anyway?
-        delayExecution(1.0f);
+        nsleep(1000000);
         break;
     }
   }

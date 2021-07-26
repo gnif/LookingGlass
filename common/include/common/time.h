@@ -25,6 +25,13 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+
+void windowsSetTimerResolution(void);
+NTSYSCALLAPI NTSTATUS NTAPI NtDelayExecution(
+  _In_ BOOLEAN Alertable,
+  _In_opt_ PLARGE_INTEGER DelayInterval
+);
+
 #else
 #include <time.h>
 #include <stdint.h>
@@ -49,6 +56,21 @@ static inline uint64_t microtime(void)
 #endif
 }
 
+static inline void nsleep(uint64_t ns)
+{
+#if defined(_WIN32)
+  LARGE_INTEGER interval = { .QuadPart = -(int64_t)(ns / 100LL) };
+  NtDelayExecution(FALSE, &interval);
+#else
+  const struct timespec ts =
+  {
+    .tv_sec  = ns / 1e9,
+    .tv_nsec = ns - ((ns / 1e9) * 1e9)
+  };
+  nanosleep(&ts, NULL);
+#endif
+}
+
 #if !defined(_WIN32)
 //FIXME: make win32 versions
 static inline uint64_t nanotime(void)
@@ -56,16 +78,6 @@ static inline uint64_t nanotime(void)
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);
   return ((uint64_t)time.tv_sec * 1000000000LL) + time.tv_nsec;
-}
-
-static inline void nsleep(uint64_t ns)
-{
-  const struct timespec ts =
-  {
-    .tv_sec  = ns / 1e9,
-    .tv_nsec = ns - ((ns / 1e9) * 1e9)
-  };
-  nanosleep(&ts, NULL);
 }
 
 static inline void tsDiff(struct timespec *diff, const struct timespec *left,
