@@ -239,7 +239,7 @@ static bool nvfbc_init(void)
 
   Sleep(100);
 
-  if (!lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
+  if (this->seperateCursor && !lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
   {
     DEBUG_ERROR("Failed to create the NvFBCPointer thread");
     nvfbc_deinit();
@@ -254,12 +254,15 @@ static void nvfbc_stop(void)
 {
   this->stop = true;
 
-  lgSignalEvent(this->cursorEvent);
-
-  if (this->pointerThread)
+  if (this->seperateCursor)
   {
-    lgJoinThread(this->pointerThread, NULL);
-    this->pointerThread = NULL;
+    lgSignalEvent(this->cursorEvent);
+
+    if (this->pointerThread)
+    {
+      lgJoinThread(this->pointerThread, NULL);
+      this->pointerThread = NULL;
+    }
   }
 }
 
