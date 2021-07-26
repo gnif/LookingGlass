@@ -84,19 +84,6 @@ static bool nvfbc_deinit(void);
 static void nvfbc_free(void);
 static int pointerThread(void * unused);
 
-static void getDesktopSize(unsigned int * width, unsigned int * height)
-{
-  HMONITOR    monitor     = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
-  MONITORINFO monitorInfo = {
-    .cbSize = sizeof(MONITORINFO)
-  };
-
-  GetMonitorInfo(monitor, &monitorInfo);
-
-  *width  = monitorInfo.rcMonitor.right  - monitorInfo.rcMonitor.left;
-  *height = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
-}
-
 static void on_mouseMove(int x, int y)
 {
   this->hasMousePosition = true;
@@ -188,7 +175,8 @@ static bool nvfbc_init(void)
   }
   free(privData);
 
-  getDesktopSize(&this->width, &this->height);
+  this->width = this->maxWidth;
+  this->height = this->maxHeight;
 
   HANDLE event;
   if (!NvFBCToSysSetup(
@@ -297,19 +285,21 @@ static void nvfbc_free(void)
 
 static CaptureResult nvfbc_capture(void)
 {
-  getDesktopSize(&this->width, &this->height);
   NvFBCFrameGrabInfo grabInfo;
   CaptureResult result = NvFBCToSysCapture(
     this->nvfbc,
     1000,
     0, 0,
-    this->width,
-    this->height,
+    this->maxWidth,
+    this->maxHeight,
     &grabInfo
   );
 
   if (result != CAPTURE_RESULT_OK)
     return result;
+
+  this->width = grabInfo.dwWidth;
+  this->height = grabInfo.dwHeight;
 
   bool changed = false;
   const unsigned int h = DIFF_MAP_DIM(this->height);
