@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -31,10 +32,6 @@ NTSYSCALLAPI NTSTATUS NTAPI NtDelayExecution(
   _In_ BOOLEAN Alertable,
   _In_opt_ PLARGE_INTEGER DelayInterval
 );
-
-#else
-#include <time.h>
-#include <stdint.h>
 #endif
 
 typedef struct LGTimer LGTimer;
@@ -71,13 +68,25 @@ static inline void nsleep(uint64_t ns)
 #endif
 }
 
-#if !defined(_WIN32)
-//FIXME: make win32 versions
 static inline uint64_t nanotime(void)
 {
+#if defined(_WIN32)
+  static double multiplier = 0.0;
+  if (!multiplier)
+  {
+    LARGE_INTEGER freq = { 0 };
+    QueryPerformanceFrequency(&freq);
+    multiplier = 1e9 / freq.QuadPart;
+  }
+
+  LARGE_INTEGER time;
+  QueryPerformanceCounter(&time);
+  return (uint64_t) (time.QuadPart * multiplier);
+#else
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time);
   return ((uint64_t)time.tv_sec * 1000000000LL) + time.tv_nsec;
+#endif
 }
 
 static inline void tsDiff(struct timespec *diff, const struct timespec *left,
@@ -115,7 +124,6 @@ static inline void tsAdd(struct timespec *a, uint64_t ns)
   a->tv_sec  += __iter_div_u64_rem(a->tv_nsec + ns, 1000000000L, &ns);
   a->tv_nsec = ns;
 }
-#endif
 
 typedef bool (*LGTimerFn)(void * udata);
 
