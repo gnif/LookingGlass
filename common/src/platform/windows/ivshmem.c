@@ -50,6 +50,26 @@ void ivshmemOptionsInit(void)
   option_register(options);
 }
 
+struct IVSHMEMData
+{
+  SP_DEVINFO_DATA devInfoData;
+  DWORD64         busAddr;
+};
+
+static int ivshmemComparator(const void * a_, const void * b_)
+{
+  const struct IVSHMEMData * a = a_;
+  const struct IVSHMEMData * b = b_;
+
+  if (a->busAddr < b->busAddr)
+    return -1;
+
+  if (a->busAddr > b->busAddr)
+    return 1;
+
+  return 0;
+}
+
 bool ivshmemInit(struct IVSHMEM * dev)
 {
   assert(dev && !dev->opaque);
@@ -57,22 +77,79 @@ bool ivshmemInit(struct IVSHMEM * dev)
   HANDLE                           handle;
   HDEVINFO                         devInfoSet;
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
+  SP_DEVINFO_DATA                  devInfoData = {0};
   SP_DEVICE_INTERFACE_DATA         devInterfaceData = {0};
+  int                              deviceAllocated = 1;
+  int                              deviceCount = 0;
+  struct IVSHMEMData             * devices = malloc(sizeof(struct IVSHMEMData) * deviceAllocated);
 
-  devInfoSet = SetupDiGetClassDevs(NULL, NULL, NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES | DIGCF_DEVICEINTERFACE);
+  devInfoSet = SetupDiGetClassDevs(&GUID_DEVINTERFACE_IVSHMEM, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+  devInfoData.cbSize      = sizeof(SP_DEVINFO_DATA);
   devInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
-  const int shmDevice = option_get_int("os", "shmDevice");
-  if (SetupDiEnumDeviceInterfaces(devInfoSet, NULL, &GUID_DEVINTERFACE_IVSHMEM, shmDevice, &devInterfaceData) == FALSE)
+  if (!devices)
   {
-    DWORD error = GetLastError();
-    if (error == ERROR_NO_MORE_ITEMS)
+    DEBUG_ERROR("Failed to allocate memory");
+    return false;
+  }
+
+  for (; SetupDiEnumDeviceInfo(devInfoSet, deviceCount, &devInfoData); ++deviceCount)
+  {
+    if (deviceCount >= deviceAllocated)
     {
-      DEBUG_WINERROR("Unable to enumerate the device, is it attached?", error);
-      return false;
+      int newCount = deviceAllocated * 2;
+      void * new = realloc(devices, newCount * sizeof(struct IVSHMEMData));
+      if (!new)
+      {
+        DEBUG_ERROR("Failed to allocate memory");
+        break;
+      }
+      deviceAllocated = newCount;
+      devices         = new;
     }
 
-    DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", error);
+    DWORD bus, addr;
+    if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData, SPDRP_BUSNUMBER,
+        NULL, (void*) &bus, sizeof(bus), NULL))
+    {
+      DEBUG_WINERROR("Failed to SetupDiGetDeviceRegistryProperty", GetLastError());
+      bus = 0xFFFF;
+    }
+
+    if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData, SPDRP_ADDRESS,
+        NULL, (void*) &addr, sizeof(addr), NULL))
+    {
+      DEBUG_WINERROR("Failed to SetupDiGetDeviceRegistryProperty", GetLastError());
+      addr = 0xFFFFFFFF;
+    }
+
+    devices[deviceCount].busAddr = (((DWORD64) bus) << 32) | addr;
+    memcpy(&devices[deviceCount].devInfoData, &devInfoData, sizeof(SP_DEVINFO_DATA));
+  }
+
+  if (GetLastError() != ERROR_NO_MORE_ITEMS)
+  {
+    DEBUG_WINERROR("SetupDiEnumDeviceInfo failed", GetLastError());
+    return false;
+  }
+
+  const int shmDevice = option_get_int("os", "shmDevice");
+  qsort(devices, deviceCount, sizeof(struct IVSHMEMData), ivshmemComparator);
+
+  for (int i = 0; i < deviceCount; ++i)
+  {
+    DWORD bus = devices[i].busAddr >> 32;
+    DWORD addr = devices[i].busAddr & 0xFFFFFFFF;
+    DEBUG_INFO("IVSHMEM %d%c on bus 0x%lx, device 0x%lx, function 0x%lx", i,
+      i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
+  }
+
+  memcpy(&devInfoData, &devices[shmDevice].devInfoData, sizeof(SP_DEVINFO_DATA));
+  free(devices);
+
+  if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
+  {
+    DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", GetLastError());
     return false;
   }
 
