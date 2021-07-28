@@ -99,7 +99,7 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
         return false;
 
       memcpy(d, frame->data + rp, dstpitch);
-      rp += linewidth;
+      rp += pitch;
       d  += dstpitch;
     }
   }
