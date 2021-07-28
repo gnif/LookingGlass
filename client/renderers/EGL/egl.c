@@ -103,6 +103,9 @@ struct Inst
 
   bool                            hadOverlay;
   _Atomic(struct DesktopDamage *) desktopDamage;
+
+  RingBuffer importTimings;
+  GraphHandle importGraph;
 };
 
 static struct Option egl_options[] =
@@ -210,6 +213,9 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
 
   atomic_init(&this->desktopDamage, NULL);
 
+  this->importTimings = ringbuffer_new(256, sizeof(float));
+  this->importGraph   = app_registerGraph("IMPORT", this->importTimings);
+
   *needsOpenGL = false;
   return true;
 }
@@ -227,6 +233,9 @@ void egl_deinitialize(void * opaque)
 
   if (this->imgui)
     ImGui_ImplOpenGL3_Shutdown();
+
+  app_unregisterGraph(this->importGraph);
+  ringbuffer_free(&this->importTimings);
 
   egl_desktop_free(&this->desktop);
   egl_cursor_free (&this->cursor);
@@ -495,11 +504,13 @@ bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
 {
   struct Inst * this = (struct Inst *)opaque;
 
+  uint64_t start = nanotime();
   if (!egl_desktop_update(this->desktop, frame, dmaFd))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
   }
+  ringbuffer_push(this->importTimings, &(float){ (nanotime() - start) * 1e-6f });
 
   this->start = true;
 
