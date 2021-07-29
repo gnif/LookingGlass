@@ -48,12 +48,13 @@ struct AppState
 {
   enum RunState state;
 
-  ImGuiIO    * io;
-  ImGuiStyle * style;
-  struct ll  * overlays;
-  char       * fontName;
-  ImFont     * fontLarge;
-  bool         overlayInput;
+  ImGuiIO        * io;
+  ImGuiStyle     * style;
+  struct ll      * overlays;
+  char           * fontName;
+  ImFont         * fontLarge;
+  bool             overlayInput;
+  ImGuiMouseCursor cursorLast;
 
   bool        alertShow;
   char      * alertMessage;

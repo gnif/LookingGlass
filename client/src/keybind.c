@@ -136,6 +136,7 @@ static void bind_passthrough(int sc, void * opaque)
 static void bind_toggleOverlay(int sc, void * opaque)
 {
   g_state.overlayInput ^= true;
+  g_state.cursorLast    = -2;
   if (g_state.overlayInput)
     g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
   else

@@ -662,6 +662,35 @@ static inline void mergeRect(struct Rect * dest, const struct Rect * a, const st
   dest->h = y2 - dest->y;
 }
 
+static inline LG_DSPointer mapImGuiCursor(ImGuiMouseCursor cursor)
+{
+  switch (cursor)
+  {
+    case ImGuiMouseCursor_None:
+      return LG_POINTER_NONE;
+    case ImGuiMouseCursor_Arrow:
+      return LG_POINTER_ARROW;
+    case ImGuiMouseCursor_TextInput:
+      return LG_POINTER_INPUT;
+    case ImGuiMouseCursor_ResizeAll:
+      return LG_POINTER_MOVE;
+    case ImGuiMouseCursor_ResizeNS:
+      return LG_POINTER_RESIZE_NS;
+    case ImGuiMouseCursor_ResizeEW:
+      return LG_POINTER_RESIZE_EW;
+    case ImGuiMouseCursor_ResizeNESW:
+      return LG_POINTER_RESIZE_NESW;
+    case ImGuiMouseCursor_ResizeNWSE:
+      return LG_POINTER_RESIZE_NWSE;
+    case ImGuiMouseCursor_Hand:
+      return LG_POINTER_HAND;
+    case ImGuiMouseCursor_NotAllowed:
+      return LG_POINTER_NOT_ALLOWED;
+    default:
+      return LG_POINTER_ARROW;
+  }
+}
+
 int app_renderOverlay(struct Rect * rects, int maxRects)
 {
   int  totalRects  = 0;
@@ -676,6 +705,16 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
     totalDamage = true;
     ImDrawList_AddRectFilled(igGetBackgroundDrawListNil(), (ImVec2) { 0.0f , 0.0f },
       g_state.io->DisplaySize, 0xCC000000, 0, 0);
+
+    bool test;
+    igShowDemoWindow(&test);
+
+    ImGuiMouseCursor cursor = igGetMouseCursor();
+    if (cursor != g_state.cursorLast)
+    {
+      g_state.ds->setPointer(mapImGuiCursor(cursor));
+      g_state.cursorLast = cursor;
+    }
   }
 
   // render the overlays
