@@ -780,6 +780,8 @@ static int lg_run(void)
   g_state.io    = igGetIO();
   g_state.style = igGetStyle();
 
+  g_state.io->BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
+
   g_state.windowScale = 1.0;
   g_state.fontName    = util_getUIFont(g_params.uiFont);
   DEBUG_INFO("Using font: %s", g_state.fontName);
