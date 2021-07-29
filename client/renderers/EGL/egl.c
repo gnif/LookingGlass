@@ -170,19 +170,17 @@ static struct Option egl_options[] =
   {0}
 };
 
-void update_mouse_shape(struct Inst * this);
-
-const char * egl_get_name(void)
+static const char * egl_get_name(void)
 {
   return "EGL";
 }
 
-void egl_setup(void)
+static void egl_setup(void)
 {
   option_register(egl_options);
 }
 
-bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
+static bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
   if (!eglQueryString(EGL_NO_DISPLAY, EGL_VERSION))
@@ -220,14 +218,14 @@ bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpen
   return true;
 }
 
-bool egl_initialize(void * opaque)
+static bool egl_initialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
   DEBUG_INFO("Double buffering is %s", this->opt.doubleBuffer ? "on" : "off");
   return true;
 }
 
-void egl_deinitialize(void * opaque)
+static void egl_deinitialize(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -257,7 +255,7 @@ void egl_deinitialize(void * opaque)
   free(this);
 }
 
-bool egl_supports(void * opaque, LG_RendererSupport flag)
+static bool egl_supports(void * opaque, LG_RendererSupport flag)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -271,7 +269,7 @@ bool egl_supports(void * opaque, LG_RendererSupport flag)
   }
 }
 
-void egl_on_restart(void * opaque)
+static void egl_on_restart(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -385,7 +383,7 @@ static void egl_update_scale_type(struct Inst * this)
     this->scaleType = EGL_DESKTOP_UPSCALE;
 }
 
-void egl_on_resize(void * opaque, const int width, const int height, const double scale,
+static void egl_on_resize(void * opaque, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -437,7 +435,7 @@ void egl_on_resize(void * opaque, const int width, const int height, const doubl
   egl_damage_resize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
 }
 
-bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
+static bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
     const int width, const int height,
     const int pitch, const uint8_t * data)
 {
@@ -456,7 +454,7 @@ bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
   return true;
 }
 
-bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
+static bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
 {
   struct Inst * this = (struct Inst *)opaque;
   this->cursorVisible = visible;
@@ -466,7 +464,7 @@ bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const in
   return true;
 }
 
-bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool useDMA)
+static bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool useDMA)
 {
   struct Inst * this = (struct Inst *)opaque;
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
@@ -499,7 +497,7 @@ bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool use
   return egl_desktop_setup(this->desktop, format, useDMA);
 }
 
-bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
+static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -604,7 +602,7 @@ static void debugCallback(GLenum source, GLenum type, GLuint id,
   DEBUG_PRINT(level, "GL message (source: %s, type: %s): %s", sourceName, typeName, message);
 }
 
-bool egl_render_startup(void * opaque)
+static bool egl_render_startup(void * opaque)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -802,7 +800,7 @@ bool egl_render_startup(void * opaque)
   return true;
 }
 
-bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
+static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
     const bool invalidateWindow)
 {
   struct Inst * this = (struct Inst *)opaque;
