@@ -66,7 +66,7 @@ void core_setCursorInView(bool enable)
   if (enable)
   {
     if (g_params.hideMouse)
-      g_state.ds->showPointer(false);
+      g_state.ds->setPointer(LG_POINTER_NONE);
 
     if (warpSupport != LG_DS_WARP_NONE && !g_params.captureInputOnly)
       g_state.ds->grabPointer();
@@ -77,7 +77,7 @@ void core_setCursorInView(bool enable)
   else
   {
     if (g_params.hideMouse)
-      g_state.ds->showPointer(true);
+      g_state.ds->setPointer(LG_POINTER_SQUARE);
 
     if (warpSupport != LG_DS_WARP_NONE)
       g_state.ds->ungrabPointer();
@@ -102,7 +102,7 @@ void core_setGrabQuiet(bool enable)
 {
   /* we always do this so that at init the cursor is in the right state */
   if (g_params.captureInputOnly && g_params.hideMouse)
-    g_state.ds->showPointer(!enable);
+    g_state.ds->setPointer(enable ? LG_POINTER_NONE : LG_POINTER_SQUARE);
 
   if (g_cursor.grab == enable)
     return;

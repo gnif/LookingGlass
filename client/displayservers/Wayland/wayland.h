@@ -207,7 +207,7 @@ void waylandCBInvalidate(void);
 // cursor module
 bool waylandCursorInit(void);
 void waylandCursorFree(void);
-void waylandShowPointer(bool show);
+void waylandSetPointer(LG_DSPointer pointer);
 
 // gl module
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)

@@ -92,9 +92,9 @@ static void lgInit(void)
 
   // if spice is not in use, hide the local cursor
   if (!core_inputEnabled() && g_params.hideMouse)
-    g_state.ds->showPointer(false);
+    g_state.ds->setPointer(LG_POINTER_NONE);
   else
-    g_state.ds->showPointer(true);
+    g_state.ds->setPointer(LG_POINTER_SQUARE);
 }
 
 static bool fpsTimerFn(void * unused)
