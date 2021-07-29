@@ -98,7 +98,7 @@ void app_freeOverlays(void);
 struct OverlayGraph;
 typedef struct OverlayGraph * GraphHandle;
 
-GraphHandle app_registerGraph(const char * name, RingBuffer buffer);
+GraphHandle app_registerGraph(const char * name, RingBuffer buffer, float min, float max);
 void app_unregisterGraph(GraphHandle handle);
 
 void app_clipboardRelease(void);

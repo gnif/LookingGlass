@@ -793,8 +793,8 @@ static int lg_run(void)
   // initialize metrics ringbuffers
   g_state.renderTimings = ringbuffer_new(256, sizeof(float));
   g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
-  overlayGraph_register("RENDER", g_state.renderTimings);
-  overlayGraph_register("UPLOAD", g_state.frameTimings );
+  overlayGraph_register("RENDER", g_state.renderTimings, 0.0f, 50.0f);
+  overlayGraph_register("UPLOAD", g_state.frameTimings , 0.0f, 50.0f);
 
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)

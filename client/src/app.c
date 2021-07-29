@@ -565,9 +565,9 @@ void app_releaseAllKeybinds(void)
     }
 }
 
-GraphHandle app_registerGraph(const char * name, RingBuffer buffer)
+GraphHandle app_registerGraph(const char * name, RingBuffer buffer, float min, float max)
 {
-  return overlayGraph_register(name, buffer);
+  return overlayGraph_register(name, buffer, min, max);
 }
 
 void app_unregisterGraph(GraphHandle handle)
