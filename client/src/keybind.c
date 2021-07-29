@@ -137,15 +137,9 @@ static void bind_toggleOverlay(int sc, void * opaque)
 {
   g_state.overlayInput ^= true;
   if (g_state.overlayInput)
-  {
     g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
-    app_alert(LG_ALERT_INFO, "Overlay input enabled");
-  }
   else
-  {
     g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
-    app_alert(LG_ALERT_INFO, "Overlay input disabled");
-  }
 }
 
 void keybind_register(void)
