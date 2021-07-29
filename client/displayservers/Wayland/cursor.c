@@ -38,7 +38,7 @@ static const uint32_t cursorBitmap[] = {
   0x000000, 0x000000, 0x000000, 0x000000,
 };
 
-static struct wl_buffer * createCursorBuffer(void)
+static struct wl_buffer * createSquareCursorBuffer(void)
 {
   int fd = memfd_create("lg-cursor", 0);
   if (fd < 0)
@@ -74,6 +74,58 @@ fail:
   return result;
 }
 
+static bool loadThemedCursor(const char * name, struct wl_surface ** surface,
+    struct Point * hotspot)
+{
+  struct wl_cursor * cursor = wl_cursor_theme_get_cursor(wlWm.cursorTheme, name);
+  if (!cursor)
+    return false;
+
+  struct wl_buffer * buffer = wl_cursor_image_get_buffer(cursor->images[0]);
+  if (!buffer)
+    return false;
+
+  *surface = wl_compositor_create_surface(wlWm.compositor);
+  if (!*surface)
+    return NULL;
+
+  wl_surface_attach(*surface, buffer, 0, 0);
+  wl_surface_commit(*surface);
+
+  *hotspot = (struct Point) {
+    .x = cursor->images[0]->hotspot_x,
+    .y = cursor->images[0]->hotspot_y,
+  };
+  return true;
+}
+
+static const char ** nameLists[LG_POINTER_COUNT] = {
+  [LG_POINTER_ARROW      ] = (const char *[]) { "left_ptr", "arrow", NULL },
+  [LG_POINTER_INPUT      ] = (const char *[]) { "text", "xterm", "ibeam", NULL },
+  [LG_POINTER_MOVE       ] = (const char *[]) {
+    "move", "4498f0e0c1937ffe01fd06f973665830", "9081237383d90e509aa00f00170e968f", NULL
+  },
+  [LG_POINTER_RESIZE_NS  ] = (const char *[]) {
+    "sb_v_double_arrow", "size_ver", "v_double_arrow",
+    "2870a09082c103050810ffdffffe0204", "00008160000006810000408080010102", NULL
+  },
+  [LG_POINTER_RESIZE_EW  ] = (const char *[]) {
+    "sb_h_double_arrow", "size_hor", "h_double_arrow",
+    "14fef782d02440884392942c11205230", "028006030e0e7ebffc7f7070c0600140", NULL
+  },
+  [LG_POINTER_RESIZE_NESW] = (const char *[]) {
+    "fd_double_arrow", "size_bdiag", "fcf1c3c7cd4491d801f1e1c78f100000", NULL
+  },
+  [LG_POINTER_RESIZE_NWSE] = (const char *[]) {
+    "bd_double_arrow", "size_fdiag", "c7088f0f3e6c8088236ef8e1e3e70000", NULL
+  },
+  [LG_POINTER_HAND       ] = (const char *[]) {
+    "hand", "pointing_hand", "hand1", "hand2", "pointer",
+    "e29285e634086352946a0e7090d73106", "9d800788f1b08800ae810202380a0822", NULL
+  },
+  [LG_POINTER_NOT_ALLOWED] = (const char *[]) { "crossed_circle", "not-allowed", NULL },
+};
+
 bool waylandCursorInit(void)
 {
   if (!wlWm.compositor)
@@ -82,27 +134,39 @@ bool waylandCursorInit(void)
     return false;
   }
 
-  wlWm.cursorBuffer = createCursorBuffer();
-  if (wlWm.cursorBuffer)
+  wlWm.cursorSquareBuffer = createSquareCursorBuffer();
+  if (wlWm.cursorSquareBuffer)
   {
-    wlWm.cursor = wl_compositor_create_surface(wlWm.compositor);
-    wl_surface_attach(wlWm.cursor, wlWm.cursorBuffer, 0, 0);
-    wl_surface_commit(wlWm.cursor);
+    wlWm.cursors[LG_POINTER_SQUARE] = wl_compositor_create_surface(wlWm.compositor);
+    wl_surface_attach(wlWm.cursors[LG_POINTER_SQUARE], wlWm.cursorSquareBuffer, 0, 0);
+    wl_surface_commit(wlWm.cursors[LG_POINTER_SQUARE]);
   }
+
+  wlWm.cursorTheme = wl_cursor_theme_load(NULL, 24, wlWm.shm);
+  if (wlWm.cursorTheme)
+    for (LG_DSPointer pointer = LG_POINTER_ARROW; pointer < LG_POINTER_COUNT; ++pointer)
+      for (const char ** names = nameLists[pointer]; *names; ++names)
+        if (loadThemedCursor(*names, wlWm.cursors + pointer, wlWm.cursorHot + pointer))
+          break;
 
   return true;
 }
 
 void waylandCursorFree(void)
 {
-  if (wlWm.cursor)
-    wl_surface_destroy(wlWm.cursor);
-  if (wlWm.cursorBuffer)
-    wl_buffer_destroy(wlWm.cursorBuffer);
+  for (int i = 0; i < LG_POINTER_COUNT; ++i)
+    if (wlWm.cursors[i])
+      wl_surface_destroy(wlWm.cursors[i]);
+  if (wlWm.cursorTheme)
+    wl_cursor_theme_destroy(wlWm.cursorTheme);
+  if (wlWm.cursorSquareBuffer)
+    wl_buffer_destroy(wlWm.cursorSquareBuffer);
 }
 
 void waylandSetPointer(LG_DSPointer pointer)
 {
-  wlWm.showPointer = pointer != LG_POINTER_NONE;
-  wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.showPointer ? wlWm.cursor : NULL, 0, 0);
+  wlWm.cursor     = wlWm.cursors[pointer];
+  wlWm.cursorHotX = wlWm.cursorHot[pointer].x;
+  wlWm.cursorHotY = wlWm.cursorHot[pointer].y;
+  wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
 }
