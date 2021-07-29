@@ -671,6 +671,13 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
 
   igNewFrame();
 
+  if (g_state.overlayInput)
+  {
+    totalDamage = true;
+    ImDrawList_AddRectFilled(igGetBackgroundDrawListNil(), (ImVec2) { 0.0f , 0.0f },
+      g_state.io->DisplaySize, 0xCC000000, 0, 0);
+  }
+
   // render the overlays
   for (ll_reset(g_state.overlays);
       ll_walk(g_state.overlays, (void **)&overlay); )
