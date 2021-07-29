@@ -241,8 +241,7 @@ void app_handleButtonPress(int button)
     int igButton = mapSpiceToImGuiButton(button);
     if (igButton != -1)
       g_state.io->MouseDown[igButton] = true;
-    if (g_state.io->WantCaptureMouse)
-      return;
+    return;
   }
 
   if (!core_inputEnabled() || !g_cursor.inView)
@@ -261,8 +260,7 @@ void app_handleButtonRelease(int button)
     int igButton = mapSpiceToImGuiButton(button);
     if (igButton != -1)
       g_state.io->MouseDown[igButton] = false;
-    if (g_state.io->WantCaptureMouse)
-      return;
+    return;
   }
 
   if (!core_inputEnabled())
@@ -291,8 +289,7 @@ void app_handleKeyPress(int sc)
   if (g_state.overlayInput)
   {
     g_state.io->KeysDown[sc] = true;
-    if (g_state.io->WantCaptureKeyboard)
-      return;
+    return;
   }
 
   if (!core_inputEnabled())
@@ -323,7 +320,7 @@ void app_handleKeyRelease(int sc)
   {
     if (g_state.escapeAction == -1)
     {
-      if (!g_state.escapeHelp && g_params.useSpiceInput)
+      if (!g_state.escapeHelp && g_params.useSpiceInput && !g_state.overlayInput)
         core_setGrab(!g_cursor.grab);
     }
     else
@@ -346,8 +343,7 @@ void app_handleKeyRelease(int sc)
   if (g_state.overlayInput)
   {
     g_state.io->KeysDown[sc] = false;
-    if (g_state.io->WantCaptureKeyboard)
-      return;
+    return;
   }
 
   // avoid sending key up events when we didn't send a down
@@ -373,6 +369,9 @@ void app_handleKeyRelease(int sc)
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
+  if (g_state.overlayInput)
+    return;
+
   if (g_cursor.grab)
   {
     if (g_params.rawMouse)
@@ -392,7 +391,7 @@ void app_handleMouseRelative(double normx, double normy,
 void app_handleMouseBasic()
 {
   /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused)
+  if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused || g_state.overlayInput)
     return;
 
   if (!core_inputEnabled())
