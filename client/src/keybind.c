@@ -137,7 +137,11 @@ static void bind_toggleOverlay(int sc, void * opaque)
 {
   g_state.overlayInput ^= true;
   if (g_state.overlayInput)
+  {
     g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    core_setGrabQuiet(false);
+    core_setCursorInView(false);
+  }
   else
     g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
 }
