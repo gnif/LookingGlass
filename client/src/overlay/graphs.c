@@ -39,6 +39,8 @@ struct OverlayGraph
   const char * name;
   RingBuffer   buffer;
   bool         enabled;
+  float        min;
+  float        max;
 };
 
 static bool graphs_init(void ** udata, void * params)
@@ -135,8 +137,8 @@ static int graphs_render(void * udata, bool interactive,
         ringbuffer_getLength(graph->buffer),
         ringbuffer_getStart (graph->buffer),
         title,
-        0.0f,
-        50.0f,
+        graph->min,
+        graph->max,
         size,
         sizeof(float));
   };
@@ -154,12 +156,14 @@ struct LG_OverlayOps LGOverlayGraphs =
   .render         = graphs_render
 };
 
-GraphHandle overlayGraph_register(const char * name, RingBuffer buffer)
+GraphHandle overlayGraph_register(const char * name, RingBuffer buffer, float min, float max)
 {
   struct OverlayGraph * graph = malloc(sizeof(struct OverlayGraph));
   graph->name    = name;
   graph->buffer  = buffer;
   graph->enabled = true;
+  graph->min     = min;
+  graph->max     = max;
   ll_push(gs.graphs, graph);
   return graph;
 }

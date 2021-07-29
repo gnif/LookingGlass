@@ -86,7 +86,7 @@ bool waylandPresentationInit(void)
   if (wlWm.presentation)
   {
     wlWm.photonTimings = ringbuffer_new(256, sizeof(float));
-    wlWm.photonGraph   = app_registerGraph("PHOTON", wlWm.photonTimings);
+    wlWm.photonGraph   = app_registerGraph("PHOTON", wlWm.photonTimings, 0.0f, 30.0f);
     wp_presentation_add_listener(wlWm.presentation, &presentationListener, NULL);
   }
   return true;
