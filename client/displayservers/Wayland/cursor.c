@@ -101,8 +101,8 @@ void waylandCursorFree(void)
     wl_buffer_destroy(wlWm.cursorBuffer);
 }
 
-void waylandShowPointer(bool show)
+void waylandSetPointer(LG_DSPointer pointer)
 {
-  wlWm.showPointer = show;
-  wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, show ? wlWm.cursor : NULL, 0, 0);
+  wlWm.showPointer = pointer != LG_POINTER_NONE;
+  wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.showPointer ? wlWm.cursor : NULL, 0, 0);
 }

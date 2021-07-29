@@ -62,6 +62,24 @@ enum LG_DSWarpSupport
   LG_DS_WARP_SCREEN,
 };
 
+typedef enum LG_DSPointer
+{
+  LG_POINTER_NONE = 0,
+  LG_POINTER_SQUARE,
+  LG_POINTER_ARROW,
+  LG_POINTER_INPUT,
+  LG_POINTER_MOVE,
+  LG_POINTER_RESIZE_NS,
+  LG_POINTER_RESIZE_EW,
+  LG_POINTER_RESIZE_NESW,
+  LG_POINTER_RESIZE_NWSE,
+  LG_POINTER_HAND,
+  LG_POINTER_NOT_ALLOWED,
+}
+LG_DSPointer;
+
+#define LG_POINTER_COUNT (LG_POINTER_NOT_ALLOWED + 1)
+
 typedef struct LG_DSInitParams
 {
   const char * title;
@@ -131,7 +149,7 @@ struct LG_DisplayServerOps
 
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
-  void (*showPointer)(bool show);
+  void (*setPointer)(LG_DSPointer pointer);
   void (*grabKeyboard)();
   void (*ungrabKeyboard)();
   /* (un)grabPointer is used to toggle cursor tracking/confine in normal mode */
@@ -202,7 +220,7 @@ struct LG_DisplayServerOps
   ASSERT_OPENGL_FN((x)->glSetSwapInterval); \
   ASSERT_OPENGL_FN((x)->glSwapBuffers    ); \
   assert((x)->guestPointerUpdated); \
-  assert((x)->showPointer        ); \
+  assert((x)->setPointer         ); \
   assert((x)->grabPointer        ); \
   assert((x)->ungrabPointer      ); \
   assert((x)->capturePointer     ); \

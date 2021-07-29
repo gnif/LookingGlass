@@ -94,7 +94,7 @@ void app_handleFocusEvent(bool focused)
           app_handleKeyRelease(key);
 
     if (!g_params.showCursorDot)
-      g_state.ds->showPointer(false);
+      g_state.ds->setPointer(LG_POINTER_NONE);
 
     if (g_params.minimizeOnFocusLoss)
       g_state.ds->minimize();

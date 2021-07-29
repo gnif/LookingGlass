@@ -1009,9 +1009,9 @@ static void x11GuestPointerUpdated(double x, double y, double localX, double loc
   XSync(x11.display, False);
 }
 
-static void x11ShowPointer(bool show)
+static void x11SetPointer(LG_DSPointer pointer)
 {
-  if (show)
+  if (pointer != LG_POINTER_NONE)
     XDefineCursor(x11.display, x11.window, x11.squareCursor);
   else
     XDefineCursor(x11.display, x11.window, x11.blankCursor);
@@ -1266,7 +1266,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .glSwapBuffers      = x11GLSwapBuffers,
 #endif
   .guestPointerUpdated = x11GuestPointerUpdated,
-  .showPointer         = x11ShowPointer,
+  .setPointer          = x11SetPointer,
   .grabPointer         = x11GrabPointer,
   .ungrabPointer       = x11UngrabPointer,
   .capturePointer      = x11CapturePointer,
