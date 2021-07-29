@@ -742,11 +742,11 @@ bool egl_render_startup(void * opaque)
       else
         this->dmaSupport = true;
     }
+    else
+      DEBUG_INFO("EGL_EXT_image_dma_buf_import unavailable, DMA support disabled");
   }
   else
-  {
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
-  }
 
   if (debugContext)
   {
