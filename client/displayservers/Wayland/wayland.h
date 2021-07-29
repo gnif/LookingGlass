@@ -22,6 +22,7 @@
 #include <sys/types.h>
 
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
 # include <wayland-egl.h>
@@ -127,8 +128,13 @@ struct WaylandDSState
   struct zxdg_toplevel_decoration_v1 * xdgToplevelDecoration;
 #endif
 
-  struct wl_surface * cursor;
-  struct wl_buffer * cursorBuffer;
+  struct wl_cursor_theme * cursorTheme;
+  struct wl_buffer       * cursorSquareBuffer;
+  struct wl_surface      * cursors[LG_POINTER_COUNT];
+  struct Point             cursorHot[LG_POINTER_COUNT];
+  struct wl_surface      * cursor;
+  int                      cursorHotX;
+  int                      cursorHotY;
 
   struct wl_data_device_manager * dataDeviceManager;
 

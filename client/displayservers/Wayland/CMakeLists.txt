@@ -4,6 +4,7 @@ project(displayserver_Wayland LANGUAGES C)
 find_package(PkgConfig)
 pkg_check_modules(DISPLAYSERVER_Wayland REQUIRED IMPORTED_TARGET
 	wayland-client
+	wayland-cursor
 )
 
 set(DISPLAYSERVER_Wayland_OPT_PKGCONFIG_LIBRARIES "")

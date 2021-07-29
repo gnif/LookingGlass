@@ -52,7 +52,7 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
   wlWm.pointerInSurface = true;
   app_handleEnterEvent(true);
 
-  wl_pointer_set_cursor(pointer, serial, wlWm.showPointer ? wlWm.cursor : NULL, 0, 0);
+  wl_pointer_set_cursor(pointer, serial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
   wlWm.pointerEnterSerial = serial;
 
   wlWm.cursorX = wl_fixed_to_double(sxW);
