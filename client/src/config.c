@@ -612,24 +612,26 @@ void config_free(void)
 static void doLicense(void)
 {
   fprintf(stderr,
+    // BEGIN LICENSE BLOCK
     "\n"
-    "Looking Glass - KVM FrameRelay (KVMFR) Client\n"
-    "Copyright(C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>\n"
-    "https://looking-glass.hostfission.com\n"
+    "Looking Glass\n"
+    "Copyright (C) 2017-2021 The Looking Glass Authors\n"
+    "https://looking-glass.io\n"
     "\n"
-    "This program is free software; you can redistribute it and / or modify it under\n"
+    "This program is free software; you can redistribute it and/or modify it under\n"
     "the terms of the GNU General Public License as published by the Free Software\n"
     "Foundation; either version 2 of the License, or (at your option) any later\n"
     "version.\n"
     "\n"
     "This program is distributed in the hope that it will be useful, but WITHOUT ANY\n"
     "WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A\n"
-    "PARTICULAR PURPOSE.See the GNU General Public License for more details.\n"
+    "PARTICULAR PURPOSE. See the GNU General Public License for more details.\n"
     "\n"
     "You should have received a copy of the GNU General Public License along with\n"
     "this program; if not, write to the Free Software Foundation, Inc., 59 Temple\n"
-    "Place, Suite 330, Boston, MA 02111 - 1307 USA\n"
+    "Place, Suite 330, Boston, MA 02111-1307 USA\n"
     "\n"
+    // END LICENSE BLOCK
   );
 }
 

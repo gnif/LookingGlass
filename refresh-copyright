@@ -5,6 +5,7 @@ import fnmatch
 import os
 import re
 import subprocess
+from textwrap import wrap
 
 PROJECT = os.path.dirname(__file__)
 EXTENSIONS = ('.c', '.cpp', '.h', '.nsi', '.rc')
@@ -13,31 +14,51 @@ CURRENT_YEAR = datetime.date.today().year
 
 reignore = re.compile('^vendor/')
 recopyright = re.compile(r'\A/\*.*?\*/\s+', re.DOTALL)
-copyright = f'''\
-/**
- * Looking Glass
- * Copyright (C) {START_YEAR}-{CURRENT_YEAR} The Looking Glass Authors
- * https://looking-glass.io
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc., 59
- * Temple Place, Suite 330, Boston, MA 02111-1307 USA
- */
 
+header = f'''\
+Looking Glass
+Copyright (C) {START_YEAR}-{CURRENT_YEAR} The Looking Glass Authors
+https://looking-glass.io
 '''
 
+paragraphs = ['''\
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation; either version 2 of the License, or (at your option)
+any later version.''',
+'''\
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.''',
+'''\
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc., 59
+Temple Place, Suite 330, Boston, MA 02111-1307 USA''']
 
-def update_copyright(file):
+
+def make_comment_block():
+    lines = ['/**']
+    lines += [' * ' + line for line in header.splitlines()]
+
+    for paragraph in paragraphs:
+        lines.append(' *')
+        lines += wrap(paragraph, width=78, initial_indent=' * ', subsequent_indent=' * ')
+
+    lines.append(' */')
+    return '\n'.join(lines) + '\n\n'
+
+
+def gen_c_literal():
+    lines = [''] + header.splitlines()
+    for paragraph in paragraphs:
+        lines.append('')
+        lines += wrap(paragraph, width=79)
+    lines.append('')
+    return '\n'.join(f'    "{line}\\n"' for line in lines) + '\n'
+
+
+def update_c_style(file, copyright):
     print(f'Updating copyright for {file}...')
     with open(file, encoding='utf-8') as f:
         data = recopyright.sub('', f.read())
@@ -46,14 +67,40 @@ def update_copyright(file):
         f.write(data)
 
 
+def update_config_c(file):
+    prefix = []
+    suffix = []
+    current = prefix
+
+    print(f'Refresh embedded copyright string in {file}...')
+
+    with open(file, encoding='utf-8') as f:
+        for line in f:
+            if '// BEGIN LICENSE BLOCK' in line:
+                prefix.append(line)
+                current = []
+            elif '// END LICENSE BLOCK' in line:
+                suffix.append(line)
+                current = suffix
+            else:
+                current.append(line)
+
+    with open(file, 'w', encoding='utf-8') as f:
+        f.writelines(prefix)
+        f.write(gen_c_literal())
+        f.writelines(suffix)
+
+
 def main():
+    comment_block = make_comment_block()
     files = subprocess.check_output(['git', '-C', PROJECT, 'ls-files', '-z']).decode('utf-8').split('\0')
     for file in files:
         if reignore.match(file):
             continue
         if file.endswith(EXTENSIONS):
-            update_copyright(os.path.join(PROJECT, file))
+            update_c_style(os.path.join(PROJECT, file), comment_block)
 
+    update_config_c(os.path.join(PROJECT, 'client', 'src', 'config.c'))
 
 if __name__ == '__main__':
     main()
