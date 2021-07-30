@@ -473,7 +473,7 @@ bool config_load(int argc, char * argv[])
 {
   // load any global options first
   struct stat st;
-  if (stat("/etc/looking-glass-client.ini", &st) >= 0)
+  if (stat("/etc/looking-glass-client.ini", &st) >= 0 && S_ISREG(st.st_mode))
   {
     DEBUG_INFO("Loading config from: /etc/looking-glass-client.ini");
     if (!option_load("/etc/looking-glass-client.ini"))
@@ -484,7 +484,7 @@ bool config_load(int argc, char * argv[])
   struct passwd * pw = getpwuid(getuid());
   char * localFile;
   alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
-  if (stat(localFile, &st) >= 0)
+  if (stat(localFile, &st) >= 0 && S_ISREG(st.st_mode))
   {
     DEBUG_INFO("Loading config from: %s", localFile);
     if (!option_load(localFile))
