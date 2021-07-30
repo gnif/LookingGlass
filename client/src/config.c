@@ -503,6 +503,12 @@ bool config_load(int argc, char * argv[])
   const char * configFile = option_get_string("app", "configFile");
   if (configFile)
   {
+    if (stat(configFile, &st) < 0 || !S_ISREG(st.st_mode))
+    {
+      DEBUG_ERROR("app:configFile set to invalid file: %s", configFile);
+      return false;
+    }
+
     DEBUG_INFO("Loading config from: %s", configFile);
     if (!option_load(configFile))
       return false;
