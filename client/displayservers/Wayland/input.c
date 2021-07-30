@@ -85,6 +85,9 @@ static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
 static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   uint32_t serial, uint32_t axis, wl_fixed_t value)
 {
+  if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
+    return;
+
   int button = value > 0 ?
     5 /* SPICE_MOUSE_BUTTON_DOWN */ :
     4 /* SPICE_MOUSE_BUTTON_UP */;
