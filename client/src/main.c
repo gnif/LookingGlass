@@ -181,12 +181,14 @@ static int renderThread(void * unused)
     if (resize)
     {
       g_state.io->DisplaySize = (ImVec2) {
-        .x = g_state.windowW * g_state.windowScale,
-        .y = g_state.windowH * g_state.windowScale
+        .x = g_state.windowW,
+        .y = g_state.windowH,
       };
-
-      imGuiResetStyle();
-      ImGuiStyle_ScaleAllSizes(g_state.style, g_state.windowScale);
+      g_state.io->DisplayFramebufferScale = (ImVec2) {
+        .x = g_state.windowScale,
+        .y = g_state.windowScale,
+      };
+      g_state.io->FontGlobalScale = 1.0f / g_state.windowScale;
 
       ImFontAtlas_Clear(g_state.io->Fonts);
       ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
