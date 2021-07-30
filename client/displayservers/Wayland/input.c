@@ -93,6 +93,7 @@ static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
     4 /* SPICE_MOUSE_BUTTON_UP */;
   app_handleButtonPress(button);
   app_handleButtonRelease(button);
+  app_handleWheelMotion(wl_fixed_to_double(value) / 15.0);
 }
 
 static int mapWaylandToSpiceButton(uint32_t button)
