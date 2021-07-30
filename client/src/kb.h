@@ -18,9 +18,16 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifndef _H_LG_KB_
+#define _H_LG_KB_
+
 #include <linux/input.h>
 #include <stdint.h>
 
 extern const uint32_t xfree86_to_ps2[KEY_MAX];
 extern const char *   xfree86_to_str[KEY_MAX];
 extern const char *   xfree86_to_display[KEY_MAX];
+
+void initImGuiKeyMap(int * keymap);
+
+#endif

@@ -53,6 +53,7 @@
 #include "app.h"
 #include "keybind.h"
 #include "clipboard.h"
+#include "kb.h"
 #include "ll.h"
 #include "egl_dynprocs.h"
 #include "overlays.h"
@@ -799,6 +800,8 @@ static int lg_run(void)
   g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
   overlayGraph_register("RENDER", g_state.renderTimings, 0.0f, 50.0f);
   overlayGraph_register("UPLOAD", g_state.frameTimings , 0.0f, 50.0f);
+
+  initImGuiKeyMap(g_state.io->KeyMap);
 
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
