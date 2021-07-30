@@ -63,10 +63,10 @@ static bool int_parser(struct Option * opt, const char * str)
 static bool bool_parser(struct Option * opt, const char * str)
 {
   opt->value.x_bool =
-    strcmp(str, "1"   ) == 0 ||
-    strcmp(str, "on"  ) == 0 ||
-    strcmp(str, "yes" ) == 0 ||
-    strcmp(str, "true") == 0;
+    strcasecmp(str, "1"   ) == 0 ||
+    strcasecmp(str, "on"  ) == 0 ||
+    strcasecmp(str, "yes" ) == 0 ||
+    strcasecmp(str, "true") == 0;
   return true;
 }
 
@@ -257,13 +257,13 @@ bool option_parse(int argc, char * argv[])
     // emulate getopt for backwards compatability
     if (argv[a][0] == '-')
     {
-      if (strcmp(argv[a], "-h") == 0 || strcmp(argv[a], "--help") == 0)
+      if (strcasecmp(argv[a], "-h") == 0 || strcasecmp(argv[a], "--help") == 0)
       {
         state.doHelp = DOHELP_MODE_YES;
         continue;
       }
 
-      if (strcmp(argv[a], "--rst-help") == 0)
+      if (strcasecmp(argv[a], "--rst-help") == 0)
       {
         state.doHelp = DOHELP_MODE_RST;
         continue;
@@ -271,7 +271,7 @@ bool option_parse(int argc, char * argv[])
 
       if (strlen(argv[a]) != 2)
       {
-        DEBUG_WARN("Ignored invalid argvument: %s", argv[a]);
+        DEBUG_WARN("Ignored invalid argument: %s", argv[a]);
         continue;
       }
 
@@ -729,7 +729,7 @@ struct Option * option_get(const char * module, const char * name)
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = state.options[i];
-    if ((strcmp(o->module, module) == 0) && (strcmp(o->name, name) == 0))
+    if ((strcasecmp(o->module, module) == 0) && (strcasecmp(o->name, name) == 0))
       return o;
   }
   return NULL;
