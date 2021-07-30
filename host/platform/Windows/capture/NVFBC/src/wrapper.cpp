@@ -79,10 +79,11 @@ bool NvFBCInit()
     return false;
   }
 
+  NVFBCRESULT status;
   NvU32 version;
-  if (nvapi.getVersion(&version) != NVFBC_SUCCESS)
+  if ((status = nvapi.getVersion(&version)) != NVFBC_SUCCESS)
   {
-    DEBUG_ERROR("Failed to get the NvFBC SDK version");
+    DEBUG_ERROR("Failed to get the NvFBC SDK version: %d", status);
     return false;
   }
 
@@ -90,7 +91,7 @@ bool NvFBCInit()
 
   if (nvapi.enable(NVFBC_STATE_ENABLE) != NVFBC_SUCCESS)
   {
-    DEBUG_ERROR("Failed to enable the NvFBC interface");
+    DEBUG_ERROR("Failed to enable the NvFBC interface: %d", status);
     return false;
   }
 
@@ -124,8 +125,10 @@ bool NvFBCToSysCreate(
   params.dwPrivateDataSize = privDataSize;
   params.pPrivateData      = privData;
 
-  if (nvapi.createEx(&params) != NVFBC_SUCCESS)
+  NVFBCRESULT status = nvapi.createEx(&params);
+  if (status != NVFBC_SUCCESS)
   {
+    DEBUG_ERROR("Failed to create nvfbc: %d", status);
     *handle = NULL;
     return false;
   }
@@ -207,7 +210,7 @@ bool NvFBCToSysSetup(
   NVFBCRESULT status = handle->nvfbc->NvFBCToSysSetUp(&params);
   if (status != NVFBC_SUCCESS)
   {
-    DEBUG_ERROR("Failed to setup NVFBCToSys");
+    DEBUG_ERROR("Failed to setup NVFBCToSys: %d", status);
     return false;
   }
 
@@ -265,6 +268,7 @@ CaptureResult NvFBCToSysCapture(
         ++handle->retry;
         return CAPTURE_RESULT_TIMEOUT;
       }
+      DEBUG_ERROR("Invalid parameter");
       return CAPTURE_RESULT_ERROR;
 
     case NVFBC_ERROR_DYNAMIC_DISABLE:
@@ -276,7 +280,7 @@ CaptureResult NvFBCToSysCapture(
       return CAPTURE_RESULT_REINIT;
 
     default:
-      DEBUG_ERROR("Unknown NVFBCRESULT failure 0x%x", status);
+      DEBUG_ERROR("Unknown NVFBCRESULT failure %d", status);
       return CAPTURE_RESULT_ERROR;
   }
 
@@ -288,9 +292,10 @@ CaptureResult NvFBCToSysGetCursor(NvFBCHandle handle, CapturePointer * pointer, 
   NVFBC_CURSOR_CAPTURE_PARAMS params;
   params.dwVersion = NVFBC_CURSOR_CAPTURE_PARAMS_VER;
 
-  if (handle->nvfbc->NvFBCToSysCursorCapture(&params) != NVFBC_SUCCESS)
+  NVFBCRESULT status = handle->nvfbc->NvFBCToSysCursorCapture(&params);
+  if (status != NVFBC_SUCCESS)
   {
-    DEBUG_ERROR("Failed to get the cursor");
+    DEBUG_ERROR("Failed to get the cursor: %d", status);
     return CAPTURE_RESULT_ERROR;
   }
 
