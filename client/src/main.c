@@ -1189,6 +1189,12 @@ int main(int argc, char * argv[])
     return -1;
   }
 
+  if (getuid() != geteuid())
+  {
+    DEBUG_ERROR("Do not run looking glass as setuid!");
+    return -1;
+  }
+
   DEBUG_INFO("Looking Glass (%s)", BUILD_VERSION);
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
 
