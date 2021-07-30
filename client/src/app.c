@@ -272,6 +272,12 @@ void app_handleButtonRelease(int button)
     DEBUG_ERROR("app_handleButtonRelease: failed to send message");
 }
 
+void app_handleWheelMotion(double motion)
+{
+  if (g_state.overlayInput)
+    g_state.io->MouseWheel -= motion;
+}
+
 void app_handleKeyPress(int sc)
 {
   if (sc == g_params.escapeKey && !g_state.escapeActive)

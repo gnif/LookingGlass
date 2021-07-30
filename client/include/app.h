@@ -56,6 +56,7 @@ void app_resyncMouseBasic(void);
 
 void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
+void app_handleWheelMotion(double motion);
 void app_handleKeyPress(int scancode);
 void app_handleKeyRelease(int scancode);
 void app_handleEnterEvent(bool entered);
