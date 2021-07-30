@@ -480,7 +480,7 @@ bool config_load(int argc, char * argv[])
       return false;
   }
 
-  // load user's local options
+  // load config from user's home directory
   struct passwd * pw = getpwuid(getuid());
   char * localFile;
   alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
@@ -494,6 +494,28 @@ bool config_load(int argc, char * argv[])
     }
   }
   free(localFile);
+
+  // load config from XDG_CONFIG_HOME
+  char * xdgFile;
+  char * dir;
+
+  if ((dir = getenv("XDG_CONFIG_HOME")) != NULL)
+    alloc_sprintf(&xdgFile, "%s/looking-glass/client.ini", dir);
+  else if ((dir = getenv("HOME")) != NULL)
+    alloc_sprintf(&xdgFile, "%s/.config/looking-glass/client.ini", dir);
+  else
+    alloc_sprintf(&xdgFile, "%s/.config/looking-glass/client.ini", pw->pw_dir);
+
+  if (xdgFile && stat(xdgFile, &st) >= 0 && S_ISREG(st.st_mode))
+  {
+    DEBUG_INFO("Loading config from: %s", xdgFile);
+    if (!option_load(xdgFile))
+    {
+      free(xdgFile);
+      return false;
+    }
+  }
+  free(xdgFile);
 
   // parse the command line arguments
   if (!option_parse(argc, argv))
