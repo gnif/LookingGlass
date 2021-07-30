@@ -70,7 +70,7 @@ void app_updateCursorPos(double x, double y)
   g_cursor.valid = true;
 
   if (g_state.overlayInput)
-    g_state.io->MousePos = (ImVec2) { x * g_state.windowScale, y * g_state.windowScale };
+    g_state.io->MousePos = (ImVec2) { x, y };
 }
 
 void app_handleFocusEvent(bool focused)
@@ -722,6 +722,14 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   {
     const int written =
       overlay->ops->render(overlay->udata, false, buffer, MAX_OVERLAY_RECTS);
+
+    for (int i = 0; i < written; ++i)
+    {
+      buffer[i].x *= g_state.windowScale;
+      buffer[i].y *= g_state.windowScale;
+      buffer[i].w *= g_state.windowScale;
+      buffer[i].h *= g_state.windowScale;
+    }
 
     // It is an error to run out of rectangles, because we will not be able to
     // correctly calculate the damage of the next frame.
