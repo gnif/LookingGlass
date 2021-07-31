@@ -101,6 +101,8 @@ typedef void (* LG_ClipboardReplyFn)(void * opaque, const LG_ClipboardData type,
 typedef struct LG_DSGLContext
   * LG_DSGLContext;
 
+typedef struct LGEvent LGEvent;
+
 struct LG_DisplayServerOps
 {
   /* called before options are parsed, useful for registering options */
@@ -146,6 +148,12 @@ struct LG_DisplayServerOps
   void (*glSetSwapInterval)(int interval);
   void (*glSwapBuffers)(void);
 #endif
+
+  /* Signals event when the next frame should be rendered in time for the next vblank.
+   * This must be invoked on the render thread before swapping buffers.
+   * If used, the render thread MUST wait for event before rendering the next frame.
+   * This is optional and a display server may choose to not implement it. */
+  void (*signalNextFrame)(LGEvent * event);
 
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
