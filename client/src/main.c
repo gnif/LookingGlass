@@ -166,7 +166,9 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
-    if (g_params.fpsMin != 0)
+    if (g_state.overlayMustWait)
+      lgWaitEvent(g_state.overlayRenderEvent, TIMEOUT_INFINITE);
+    else if (g_params.fpsMin != 0)
     {
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
 
@@ -178,6 +180,14 @@ static int renderThread(void * unused)
             g_state.overlayFrameTime : g_state.frameTime);
       }
     }
+
+    if (g_state.overlayInput && g_state.ds->signalNextFrame)
+    {
+      g_state.ds->signalNextFrame(g_state.overlayRenderEvent);
+      g_state.overlayMustWait = true;
+    }
+    else
+      g_state.overlayMustWait = false;
 
     int resize = atomic_load(&g_state.lgrResize);
     if (resize)
@@ -966,6 +976,12 @@ static int lg_run(void)
     return -1;
   }
 
+  if (!(g_state.overlayRenderEvent = lgCreateEvent(true, 0)))
+  {
+    DEBUG_ERROR("failed to create the overlay render event");
+    return -1;
+  }
+
   lgInit();
 
   // start the renderThread so we don't just display junk
@@ -1143,6 +1159,12 @@ static void lg_shutdown(void)
   {
     lgFreeEvent(g_state.frameEvent);
     g_state.frameEvent = NULL;
+  }
+
+  if (g_state.overlayRenderEvent)
+  {
+    lgFreeEvent(g_state.overlayRenderEvent);
+    g_state.overlayRenderEvent = NULL;
   }
 
   if (e_startup)

@@ -55,6 +55,8 @@ struct AppState
   ImFont         * fontLarge;
   bool             overlayInput;
   ImGuiMouseCursor cursorLast;
+  LGEvent        * overlayRenderEvent;
+  bool             overlayMustWait;
 
   bool        alertShow;
   char      * alertMessage;
