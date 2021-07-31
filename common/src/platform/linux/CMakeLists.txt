@@ -14,6 +14,7 @@ add_library(lg_common_platform_code STATIC
     event.c
     ivshmem.c
     time.c
+    paths.c
 )
 
 if(ENABLE_BACKTRACE)
