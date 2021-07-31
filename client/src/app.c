@@ -76,6 +76,17 @@ void app_updateCursorPos(double x, double y)
 void app_handleFocusEvent(bool focused)
 {
   g_state.focused = focused;
+
+  if (!focused && g_state.overlayInput)
+  {
+    // release any imgui buttons/keys if we lost focus
+    g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
+    g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
+    g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
+    for(int key = 0; key < sizeof(g_state.io->KeysDown) / sizeof(bool); key++)
+      g_state.io->KeysDown[key] = false;
+  }
+
   if (!core_inputEnabled())
   {
     if (!focused && g_params.minimizeOnFocusLoss && app_getFullscreen())
@@ -120,6 +131,15 @@ void app_handleEnterEvent(bool entered)
   {
     g_cursor.inWindow = false;
     core_setCursorInView(false);
+
+    // stop the user being able to drag windows off the screen and work around
+    // the mouse button release being missed due to not being in capture mode.
+    if (g_state.overlayInput)
+    {
+      g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
+      g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
+      g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
+    }
 
     if (!core_inputEnabled())
       return;
