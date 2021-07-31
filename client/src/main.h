@@ -57,6 +57,7 @@ struct AppState
   ImGuiMouseCursor cursorLast;
   LGEvent        * overlayRenderEvent;
   bool             overlayMustWait;
+  char           * imGuiIni;
 
   bool        alertShow;
   char      * alertMessage;
