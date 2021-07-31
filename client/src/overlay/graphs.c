@@ -100,14 +100,23 @@ static int graphs_render(void * udata, bool interactive,
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
   igSetNextWindowPos(pos, ImGuiCond_FirstUseEver, pos);
+  igSetNextWindowSize(
+      (ImVec2){
+        28.0f * fontSize,
+        7.0f  * fontSize * ll_count(gs.graphs)
+      },
+      ImGuiCond_FirstUseEver);
 
-  igBegin(
-    "Performance Metrics",
-    NULL,
-    ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
-    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-    ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
-  );
+  ImGuiWindowFlags flags = ImGuiWindowFlags_NoNav;
+  if (!interactive)
+    flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoDecoration;
+
+  igBegin("Performance Metrics",  NULL, flags);
+
+  ImVec2 winSize;
+  igGetContentRegionAvail(&winSize);
+  const float height = (winSize.y / ll_count(gs.graphs))
+    - igGetStyle()->ItemSpacing.y;
 
   GraphHandle graph;
   for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
@@ -124,9 +133,7 @@ static int graphs_render(void * udata, bool interactive,
       metrics.freq = 1000.0f / metrics.avg;
     }
 
-    char  title[64];
-    const ImVec2 size = {28.0f * fontSize, 7.0f * fontSize};
-
+    char title[64];
     snprintf(title, sizeof(title),
         "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
         graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
@@ -139,7 +146,7 @@ static int graphs_render(void * udata, bool interactive,
         title,
         graph->min,
         graph->max,
-        size,
+        (ImVec2){ winSize.x, height },
         sizeof(float));
   };
 
