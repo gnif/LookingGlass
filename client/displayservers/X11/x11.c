@@ -382,13 +382,15 @@ static bool x11Init(const LG_DSInitParams params)
   eventmask.mask_len = sizeof(mask);
   eventmask.mask     = mask;
 
-  XISetMask(mask, XI_FocusIn   );
-  XISetMask(mask, XI_FocusOut  );
-  XISetMask(mask, XI_Enter     );
-  XISetMask(mask, XI_Leave     );
-  XISetMask(mask, XI_Motion    );
-  XISetMask(mask, XI_KeyPress  );
-  XISetMask(mask, XI_KeyRelease);
+  XISetMask(mask, XI_FocusIn      );
+  XISetMask(mask, XI_FocusOut     );
+  XISetMask(mask, XI_Enter        );
+  XISetMask(mask, XI_Leave        );
+  XISetMask(mask, XI_Motion       );
+  XISetMask(mask, XI_KeyPress     );
+  XISetMask(mask, XI_KeyRelease   );
+  XISetMask(mask, XI_ButtonPress  );
+  XISetMask(mask, XI_ButtonRelease);
 
   if (XISelectEvents(x11.display, x11.window, &eventmask, 1) != Success)
   {
@@ -799,6 +801,26 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
 
       XIRawEvent *raw = cookie->data;
       app_handleKeyRelease(raw->detail - 8);
+      return;
+    }
+
+    case XI_ButtonPress:
+    {
+      if (!x11.focused || !x11.entered)
+        return;
+
+      XIDeviceEvent *device = cookie->data;
+      app_handleButtonPress(device->detail);
+      return;
+    }
+
+    case XI_ButtonRelease:
+    {
+      if (!x11.focused || !x11.entered)
+        return;
+
+      XIDeviceEvent *device = cookie->data;
+      app_handleButtonRelease(device->detail);
       return;
     }
 
