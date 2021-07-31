@@ -48,6 +48,7 @@
 #include "common/ivshmem.h"
 #include "common/time.h"
 #include "common/version.h"
+#include "common/paths.h"
 
 #include "core.h"
 #include "app.h"
@@ -1235,6 +1236,7 @@ int main(int argc, char * argv[])
   if (!installCrashHandler("/proc/self/exe"))
     DEBUG_WARN("Failed to install the crash handler");
 
+  lgPathsInit("looking-glass");
   config_init();
   ivshmemOptionsInit();
   egl_dynProcsInit();
