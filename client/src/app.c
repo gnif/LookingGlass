@@ -345,14 +345,14 @@ void app_handleKeyRelease(int sc)
       g_state.escapeActive = false;
   }
 
-  if (!core_inputEnabled())
-    return;
-
   if (g_state.overlayInput)
   {
     g_state.io->KeysDown[sc] = false;
     return;
   }
+
+  if (!core_inputEnabled())
+    return;
 
   // avoid sending key up events when we didn't send a down
   if (!g_state.keyDown[sc])
