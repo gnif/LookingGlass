@@ -109,7 +109,8 @@ struct AppState
   LGEvent             * frameEvent;
   atomic_bool           invalidateWindow;
   bool                  formatValid;
-  atomic_uint_least64_t frameTime;
+  uint64_t              frameTime;
+  uint64_t              overlayFrameTime;
   uint64_t              lastFrameTime;
   bool                  lastFrameTimeValid;
   uint64_t              lastRenderTime;

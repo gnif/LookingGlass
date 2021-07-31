@@ -174,7 +174,8 @@ static int renderThread(void * unused)
       {
         /* only update the time if we woke up early */
         clock_gettime(CLOCK_MONOTONIC, &time);
-        tsAdd(&time, g_state.frameTime);
+        tsAdd(&time, g_state.overlayInput ?
+            g_state.overlayFrameTime : g_state.frameTime);
       }
     }
 
@@ -944,6 +945,10 @@ static int lg_run(void)
     DEBUG_INFO("Using the FPS minimum from args: %d", g_params.fpsMin);
     g_state.frameTime = 1000000000ULL / (unsigned long long)g_params.fpsMin;
   }
+
+  // when the overlay is shown we should run at a minimum of 60 fps for
+  // interactivity.
+  g_state.overlayFrameTime = min(g_state.frameTime, 1000000000ULL / 60ULL);
 
   keybind_register();
 
