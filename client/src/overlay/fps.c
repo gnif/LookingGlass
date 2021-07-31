@@ -48,9 +48,9 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
   igBegin(
     "FPS",
     NULL,
-    ImGuiWindowFlags_NoDecoration    | ImGuiWindowFlags_AlwaysAutoResize   |
-    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-    ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
+    ImGuiWindowFlags_NoDecoration       | ImGuiWindowFlags_AlwaysAutoResize |
+    ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav            |
+    ImGuiWindowFlags_NoTitleBar
   );
 
   igText("FPS:%4.2f UPS:%4.2f",
