@@ -1158,8 +1158,6 @@ static void lg_shutdown(void)
     g_state.overlays = NULL;
   }
 
-  free(g_state.imGuiIni);
-
   if (g_state.frameEvent)
   {
     lgFreeEvent(g_state.frameEvent);
@@ -1215,6 +1213,7 @@ static void lg_shutdown(void)
 
   free(g_state.fontName);
   igDestroyContext(NULL);
+  free(g_state.imGuiIni);
 }
 
 int main(int argc, char * argv[])
