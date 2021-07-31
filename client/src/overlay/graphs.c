@@ -99,7 +99,7 @@ static int graphs_render(void * udata, bool interactive,
 
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
-  igSetNextWindowPos(pos, 0, pos);
+  igSetNextWindowPos(pos, ImGuiCond_FirstUseEver, pos);
 
   igBegin(
     "Performance Metrics",
