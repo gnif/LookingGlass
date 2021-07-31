@@ -24,6 +24,7 @@
 
 #include "common/option.h"
 #include "common/debug.h"
+#include "common/paths.h"
 #include "common/stringutils.h"
 
 #include <sys/stat.h>
@@ -497,14 +498,7 @@ bool config_load(int argc, char * argv[])
 
   // load config from XDG_CONFIG_HOME
   char * xdgFile;
-  char * dir;
-
-  if ((dir = getenv("XDG_CONFIG_HOME")) != NULL)
-    alloc_sprintf(&xdgFile, "%s/looking-glass/client.ini", dir);
-  else if ((dir = getenv("HOME")) != NULL)
-    alloc_sprintf(&xdgFile, "%s/.config/looking-glass/client.ini", dir);
-  else
-    alloc_sprintf(&xdgFile, "%s/.config/looking-glass/client.ini", pw->pw_dir);
+  alloc_sprintf(&xdgFile, "%s/client.ini", lgConfigDir());
 
   if (xdgFile && stat(xdgFile, &st) >= 0 && S_ISREG(st.st_mode))
   {
