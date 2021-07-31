@@ -795,6 +795,8 @@ static int lg_run(void)
   g_state.io    = igGetIO();
   g_state.style = igGetStyle();
 
+  alloc_sprintf(&g_state.imGuiIni, "%s/imgui.ini", lgConfigDir());
+  g_state.io->IniFilename   = g_state.imGuiIni;
   g_state.io->BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
 
   g_state.windowScale = 1.0;
@@ -1155,6 +1157,8 @@ static void lg_shutdown(void)
     ll_free(g_state.overlays);
     g_state.overlays = NULL;
   }
+
+  free(g_state.imGuiIni);
 
   if (g_state.frameEvent)
   {
