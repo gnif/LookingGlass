@@ -39,7 +39,7 @@ static void help_free(void * udata)
 static int help_render(void * udata, bool interactive, struct Rect * windowRects,
     int maxRects)
 {
-  if (!g_state.escapeHelp && !g_state.overlayInput)
+  if (!g_state.escapeHelp && !interactive)
     return 0;
 
   ImVec2 * screen = overlayGetScreenSize();
