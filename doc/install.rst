@@ -217,12 +217,12 @@ Command                      Description
 :kbd:`ScrLk` + :kbd:`R`      Rotate the output clockwise by 90° increments
 :kbd:`ScrLk` + :kbd:`T`      Show frame timing information
 :kbd:`ScrLk` + :kbd:`I`      Spice keyboard & mouse enable toggle
+:kbd:`ScrLk` + :kbd:`O`      Toggle overlay
 :kbd:`ScrLk` + :kbd:`S`      Toggle scale algorithm
 :kbd:`ScrLk` + :kbd:`D`      FPS display toggle
 :kbd:`ScrLk` + :kbd:`F`      Full screen toggle
 :kbd:`ScrLk` + :kbd:`V`      Video stream toggle
 :kbd:`ScrLk` + :kbd:`N`      Toggle night vision mode
-:kbd:`ScrLk` + :kbd:`M`      Toggle overlay
 :kbd:`ScrLk` + :kbd:`F1`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F1` to the guest
 :kbd:`ScrLk` + :kbd:`F2`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F2` to the guest
 :kbd:`ScrLk` + :kbd:`F3`     Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F3` to the guest
