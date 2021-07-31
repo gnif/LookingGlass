@@ -25,6 +25,7 @@
 
 #include "common/time.h"
 #include "common/debug.h"
+#include "common/array.h"
 
 #include <assert.h>
 #include <math.h>
@@ -521,4 +522,13 @@ void core_handleMouseNormal(double ex, double ey)
 
   if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
+}
+
+void core_resetOverlayInputState(void)
+{
+  g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
+  g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
+  g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
+  for(int key = 0; key < ARRAY_LENGTH(g_state.io->KeysDown); key++)
+    g_state.io->KeysDown[key] = false;
 }

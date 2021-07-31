@@ -77,15 +77,9 @@ void app_handleFocusEvent(bool focused)
 {
   g_state.focused = focused;
 
+  // release any imgui buttons/keys if we lost focus
   if (!focused && g_state.overlayInput)
-  {
-    // release any imgui buttons/keys if we lost focus
-    g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
-    g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
-    g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
-    for(int key = 0; key < sizeof(g_state.io->KeysDown) / sizeof(bool); key++)
-      g_state.io->KeysDown[key] = false;
-  }
+    core_resetOverlayInputState();
 
   if (!core_inputEnabled())
   {

@@ -36,5 +36,6 @@ void core_stopFrameThread(void);
 void core_handleGuestMouseUpdate(void);
 void core_handleMouseGrabbed(double ex, double ey);
 void core_handleMouseNormal(double ex, double ey);
+void core_resetOverlayInputState(void);
 
 #endif
