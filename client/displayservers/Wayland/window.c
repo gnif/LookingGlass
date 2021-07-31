@@ -27,6 +27,7 @@
 
 #include "app.h"
 #include "common/debug.h"
+#include "common/event.h"
 
 // Surface-handling listeners.
 
@@ -113,4 +114,22 @@ void waylandSetWindowSize(int x, int y)
 bool waylandIsValidPointerPos(int x, int y)
 {
   return x >= 0 && x < wlWm.width && y >= 0 && y < wlWm.height;
+}
+
+static void frameHandler(void * opaque, struct wl_callback * callback, unsigned int data)
+{
+  LGEvent * event = opaque;
+  lgSignalEvent(event);
+  wl_callback_destroy(callback);
+}
+
+static const struct wl_callback_listener frame_listener = {
+   .done = frameHandler,
+};
+
+void waylandSignalNextFrame(LGEvent * event)
+{
+  struct wl_callback * callback = wl_surface_frame(wlWm.surface);
+  if (callback)
+    wl_callback_add_listener(callback, &frame_listener, event);
 }

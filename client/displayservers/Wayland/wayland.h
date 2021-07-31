@@ -289,3 +289,4 @@ void waylandWindowFree(void);
 void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);
 bool waylandIsValidPointerPos(int x, int y);
+void waylandSignalNextFrame(LGEvent * event);
