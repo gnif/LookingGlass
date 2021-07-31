@@ -810,7 +810,14 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
         return;
 
       XIDeviceEvent *device = cookie->data;
-      app_handleButtonPress(device->detail);
+      if (device->detail == 4)
+        app_handleWheelMotion(-0.5);
+      else if (device->detail == 5)
+        app_handleWheelMotion(0.5);
+      else
+        app_handleButtonPress(
+            device->detail > 5 ? device->detail - 2 : device->detail);
+
       return;
     }
 
