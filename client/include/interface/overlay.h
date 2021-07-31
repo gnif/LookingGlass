@@ -26,12 +26,6 @@
 
 #include "common/types.h"
 
-enum LG_OverlayFlags
-{
-  /* requires mouse interaction */
-  LG_OVERLAY_INTERACTIVE = (1U << 1U),
-};
-
 struct LG_OverlayOps
 {
   /* internal name of the overlay for debugging */
@@ -42,9 +36,6 @@ struct LG_OverlayOps
 
   /* final free */
   void (*free)(void * udata);
-
-  /* general state flags, may be changed at any time */
-  enum LG_OverlayFlags flags;
 
   /* perform the actual drawing/rendering
    *

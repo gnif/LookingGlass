@@ -752,7 +752,8 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
       ll_walk(g_state.overlays, (void **)&overlay); )
   {
     const int written =
-      overlay->ops->render(overlay->udata, false, buffer, MAX_OVERLAY_RECTS);
+      overlay->ops->render(overlay->udata, g_state.overlayInput,
+          buffer, MAX_OVERLAY_RECTS);
 
     for (int i = 0; i < written; ++i)
     {
