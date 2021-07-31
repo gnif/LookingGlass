@@ -31,6 +31,7 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/scrnsaver.h>
 #include <X11/extensions/Xinerama.h>
+#include <X11/Xcursor/Xcursor.h>
 
 #include <GL/glx.h>
 #include <GL/glxext.h>
@@ -416,7 +417,7 @@ static bool x11Init(const LG_DSInitParams params)
     static char data[] = { 0x00 };
     XColor dummy;
     Pixmap temp = XCreateBitmapFromData(x11.display, x11.window, data, 1, 1);
-    x11.blankCursor = XCreatePixmapCursor(x11.display, temp, temp,
+    x11.cursors[LG_POINTER_NONE] = XCreatePixmapCursor(x11.display, temp, temp,
         &dummy, &dummy, 0, 0);
     XFreePixmap(x11.display, temp);
   }
@@ -438,15 +439,53 @@ static bool x11Init(const LG_DSInitParams params)
     Pixmap img = XCreateBitmapFromData(x11.display, x11.window, data, 3, 3);
     Pixmap msk = XCreateBitmapFromData(x11.display, x11.window, mask, 3, 3);
 
-    x11.squareCursor = XCreatePixmapCursor(x11.display, img, msk,
+    x11.cursors[LG_POINTER_SQUARE] = XCreatePixmapCursor(x11.display, img, msk,
         &colors[0], &colors[1], 1, 1);
 
     XFreePixmap(x11.display, img);
     XFreePixmap(x11.display, msk);
   }
 
+  /* initialize the rest of the cursors */
+  const char * cursorLookup[LG_POINTER_COUNT] = {
+    NULL               , // LG_POINTER_NONE
+    NULL               , // LG_POINTER_SQUARE
+    "left_ptr"         , // LG_POINTER_ARROW
+    "text"             , // LG_POINTER_INPUT
+    "move"             , // LG_POINTER_MOVE
+    "ns-resize"        , // LG_POINTER_RESIZE_NS
+    "ew-resize"        , // LG_POINTER_RESIZE_EW
+    "nesw-resize"      , // LG_POINTER_RESIZE_NESW
+    "nwse-resize"      , // LG_POINTER_RESIZE_NWSE
+    "hand"             , // LG_POINTER_HAND
+    "not-allowed"      , // LG_POINTER_NOT_ALLOWED
+  };
+
+  const char * fallbackLookup[LG_POINTER_COUNT] = {
+    NULL               , // LG_POINTER_NONE
+    NULL               , // LG_POINTER_SQUARE
+    "left_ptr"         , // LG_POINTER_ARROW
+    "xterm"            , // LG_POINTER_INPUT
+    "fluer"            , // LG_POINTER_MOVE
+    "sb_v_double_arrow", // LG_POINTER_RESIZE_NS
+    "sb_h_double_arrow", // LG_POINTER_RESIZE_EW
+    "sizing"           , // LG_POINTER_RESIZE_NESW
+    "sizing"           , // LG_POINTER_RESIZE_NWSE
+    "hand2"            , // LG_POINTER_HAND
+    "X_cursor"         , // LG_POINTER_NOT_ALLOWED
+  };
+
+  for(int i = 0; i < LG_POINTER_COUNT; ++i)
+  {
+    if (!cursorLookup[i])
+      continue;
+    x11.cursors[i] = XcursorLibraryLoadCursor(x11.display, cursorLookup[i]);
+    if (!x11.cursors[i])
+      x11.cursors[i] = XcursorLibraryLoadCursor(x11.display, fallbackLookup[i]);
+  }
+
   /* default to the square cursor */
-  XDefineCursor(x11.display, x11.window, x11.squareCursor);
+  XDefineCursor(x11.display, x11.window, x11.cursors[LG_POINTER_SQUARE]);
 
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
@@ -483,8 +522,10 @@ static void x11Free(void)
   if (x11.window)
     XDestroyWindow(x11.display, x11.window);
 
-  XFreeCursor(x11.display, x11.squareCursor);
-  XFreeCursor(x11.display, x11.blankCursor);
+  for(int i = 0; i < LG_POINTER_COUNT; ++i)
+    if (x11.cursors[i])
+      XFreeCursor(x11.display, x11.cursors[i]);
+
   XCloseDisplay(x11.display);
 }
 
@@ -1040,10 +1081,7 @@ static void x11GuestPointerUpdated(double x, double y, double localX, double loc
 
 static void x11SetPointer(LG_DSPointer pointer)
 {
-  if (pointer != LG_POINTER_NONE)
-    XDefineCursor(x11.display, x11.window, x11.squareCursor);
-  else
-    XDefineCursor(x11.display, x11.window, x11.blankCursor);
+  XDefineCursor(x11.display, x11.window, x11.cursors[pointer]);
 }
 
 static void x11PrintGrabError(const char * type, int dev, Status ret)

@@ -25,6 +25,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 
+#include "interface/displayserver.h"
 #include "common/thread.h"
 #include "common/types.h"
 
@@ -51,8 +52,7 @@ struct X11DSState
   struct Rect   rect;
   struct Border border;
 
-  Cursor blankCursor;
-  Cursor squareCursor;
+  Cursor cursors[LG_POINTER_COUNT];
 
   // XFixes vars
   int eventBase;

@@ -83,6 +83,7 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  libxi-dev
    -  libxinerama-dev
    -  libxss-dev
+   -  libxcursor-dev
 
 -  Disable with ``cmake -DENABLE_WAYLAND=no ..``
 

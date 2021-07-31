@@ -8,6 +8,7 @@ pkg_check_modules(DISPLAYSERVER_X11 REQUIRED IMPORTED_TARGET
 	xfixes
 	xscrnsaver
 	xinerama
+	xcursor
 )
 
 add_library(displayserver_X11 STATIC
