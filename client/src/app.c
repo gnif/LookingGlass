@@ -93,6 +93,8 @@ void app_handleFocusEvent(bool focused)
         if (g_state.keyDown[key])
           app_handleKeyRelease(key);
 
+    g_state.escapeActive = false;
+
     if (!g_params.showCursorDot)
       g_state.ds->showPointer(false);
 
