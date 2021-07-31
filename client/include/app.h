@@ -84,6 +84,7 @@ void app_glSwapBuffers(void);
 
 #define MAX_OVERLAY_RECTS 10
 void app_registerOverlay(const struct LG_OverlayOps * ops, void * params);
+void app_setOverlay(bool enable);
 
 /**
  * render the overlay

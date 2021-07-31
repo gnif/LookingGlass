@@ -313,7 +313,10 @@ void app_handleKeyPress(int sc)
 
   if (g_state.overlayInput)
   {
-    g_state.io->KeysDown[sc] = true;
+    if (sc == KEY_ESC)
+      app_setOverlay(false);
+    else
+      g_state.io->KeysDown[sc] = true;
     return;
   }
 
@@ -795,5 +798,26 @@ void app_freeOverlays(void)
   {
     overlay->ops->free(overlay->udata);
     free(overlay);
+  }
+}
+
+void app_setOverlay(bool enable)
+{
+  if (g_state.overlayInput == enable)
+    return;
+
+  g_state.overlayInput = enable;
+  g_state.cursorLast   = -2;
+
+  if (g_state.overlayInput)
+  {
+    g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    core_setGrabQuiet(false);
+    core_setCursorInView(false);
+  }
+  else
+  {
+    g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    core_resetOverlayInputState();
   }
 }

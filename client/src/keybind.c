@@ -135,16 +135,7 @@ static void bind_passthrough(int sc, void * opaque)
 
 static void bind_toggleOverlay(int sc, void * opaque)
 {
-  g_state.overlayInput ^= true;
-  g_state.cursorLast    = -2;
-  if (g_state.overlayInput)
-  {
-    g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
-    core_setGrabQuiet(false);
-    core_setCursorInView(false);
-  }
-  else
-    g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
+  app_setOverlay(!g_state.overlayInput);
 }
 
 void keybind_register(void)
