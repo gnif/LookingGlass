@@ -280,18 +280,21 @@ void app_handleWheelMotion(double motion)
 
 void app_handleKeyPress(int sc)
 {
-  if (sc == g_params.escapeKey && !g_state.escapeActive)
+  if (!g_state.overlayInput || !g_state.io->WantCaptureKeyboard)
   {
-    g_state.escapeActive = true;
-    g_state.escapeTime   = microtime();
-    g_state.escapeAction = -1;
-    return;
-  }
+    if (sc == g_params.escapeKey && !g_state.escapeActive)
+    {
+      g_state.escapeActive = true;
+      g_state.escapeTime   = microtime();
+      g_state.escapeAction = -1;
+      return;
+    }
 
-  if (g_state.escapeActive)
-  {
-    g_state.escapeAction = sc;
-    return;
+    if (g_state.escapeActive)
+    {
+      g_state.escapeAction = sc;
+      return;
+    }
   }
 
   if (g_state.overlayInput)
