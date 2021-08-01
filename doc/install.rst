@@ -273,10 +273,18 @@ Configuration Files
 ~~~~~~~~~~~~~~~~~~~
 
 By default, the application will look for and load the config files in
-the following locations:
+the following locations and order:
 
 -  /etc/looking-glass-client.ini
 -  ~/.looking-glass-client.ini
+-  $XDG_CONFIG_HOME/looking-glass/client.ini (usually ~/.config/looking-glass/client.ini)
+
+Config options are merged from all files. Same options appearing in more
+than one file will overridden by the latest loaded one (E.g. an option
+appearing in ~/.config/looking-glass/client.ini will override the same
+option appearing in ~/.looking-glass-client.ini). When first launched,
+the Looking-Glass client will create the folder $XDG_CONFIG_HOME/looking-glass/
+if it does not yet exist.
 
 The format of this file is the commonly known INI format, for example::
 
