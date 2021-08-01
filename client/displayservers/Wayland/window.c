@@ -151,7 +151,7 @@ void waylandSkipFrame(void)
   wl_surface_commit(wlWm.surface);
 }
 
-void waylandForceRender(void)
+void waylandStopWaitFrame(void)
 {
   lgSignalEvent(wlWm.frameEvent);
 }

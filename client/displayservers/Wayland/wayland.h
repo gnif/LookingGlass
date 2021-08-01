@@ -308,4 +308,4 @@ void waylandSetWindowSize(int x, int y);
 bool waylandIsValidPointerPos(int x, int y);
 void waylandWaitFrame(void);
 void waylandSkipFrame(void);
-void waylandForceRender(void);
+void waylandStopWaitFrame(void);
