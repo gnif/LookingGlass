@@ -456,6 +456,12 @@ bool opengl_render_startup(void * opaque)
   return true;
 }
 
+static bool opengl_needs_render(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  return !this->waitDone;
+}
+
 bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
     const bool invalidateWindow)
 {
@@ -618,6 +624,7 @@ const LG_Renderer LGR_OpenGL =
   .on_frame_format = opengl_on_frame_format,
   .on_frame        = opengl_on_frame,
   .render_startup  = opengl_render_startup,
+  .needs_render    = opengl_needs_render,
   .render          = opengl_render
 };
 

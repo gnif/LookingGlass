@@ -36,6 +36,7 @@
    (x)->on_mouse_shape && \
    (x)->on_mouse_event && \
    (x)->render_startup && \
+   (x)->needs_render   && \
    (x)->render)
 
 typedef struct LG_RendererParams
@@ -112,6 +113,7 @@ typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visi
 typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD, const FrameDamageRect * damage, int damageCount);
 typedef bool         (* LG_RendererRenderStartup)(void * opaque);
+typedef bool         (* LG_RendererNeedsRender  )(void * opaque);
 typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate, const bool newFrame, const bool invalidateWindow);
 
 typedef struct LG_Renderer
@@ -130,6 +132,7 @@ typedef struct LG_Renderer
   LG_RendererOnFrameFormat  on_frame_format;
   LG_RendererOnFrame        on_frame;
   LG_RendererRenderStartup  render_startup;
+  LG_RendererNeedsRender    needs_render;
   LG_RendererRender         render;
 }
 LG_Renderer;

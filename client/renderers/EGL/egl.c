@@ -805,6 +805,12 @@ static bool egl_render_startup(void * opaque)
   return true;
 }
 
+static bool egl_needs_render(void * opaque)
+{
+  struct Inst * this = (struct Inst *)opaque;
+  return !this->waitDone;
+}
+
 static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
     const bool invalidateWindow)
 {
@@ -1007,5 +1013,6 @@ struct LG_Renderer LGR_EGL =
   .on_frame_format = egl_on_frame_format,
   .on_frame        = egl_on_frame,
   .render_startup  = egl_render_startup,
+  .needs_render    = egl_needs_render,
   .render          = egl_render
 };
