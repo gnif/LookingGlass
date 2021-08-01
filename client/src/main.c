@@ -167,8 +167,8 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
-    if (g_state.overlayMustWait)
-      lgWaitEvent(g_state.overlayRenderEvent, TIMEOUT_INFINITE);
+    if (g_state.jitRender)
+      lgWaitEvent(g_state.jitEvent, TIMEOUT_INFINITE);
     else if (g_params.fpsMin != 0)
     {
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
@@ -182,13 +182,11 @@ static int renderThread(void * unused)
       }
     }
 
-    if (g_state.overlayInput && g_state.ds->signalNextFrame)
-    {
-      g_state.ds->signalNextFrame(g_state.overlayRenderEvent);
-      g_state.overlayMustWait = true;
-    }
-    else
-      g_state.overlayMustWait = false;
+    if (!g_params.jitRender && g_state.ds->signalNextFrame)
+      g_state.jitRender = g_state.overlayInput;
+
+    if (g_state.jitRender)
+      g_state.ds->signalNextFrame(g_state.jitEvent);
 
     int resize = atomic_load(&g_state.lgrResize);
     if (resize)
@@ -828,6 +826,14 @@ static int lg_run(void)
   assert(g_state.ds);
   ASSERT_LG_DS_VALID(g_state.ds);
 
+  if (g_params.jitRender)
+  {
+    if (g_state.ds->signalNextFrame)
+      g_state.jitRender = true;
+    else
+      DEBUG_WARN("JIT render not supported on display server backend, disabled");
+  }
+
   // init the subsystem
   if (!g_state.ds->earlyInit())
   {
@@ -979,10 +985,16 @@ static int lg_run(void)
     return -1;
   }
 
-  if (!(g_state.overlayRenderEvent = lgCreateEvent(true, 0)))
+  if (!(g_state.jitEvent = lgCreateEvent(true, 0)))
   {
     DEBUG_ERROR("failed to create the overlay render event");
     return -1;
+  }
+
+  if (g_state.jitRender)
+  {
+    DEBUG_INFO("Using JIT render mode");
+    lgSignalEvent(g_state.jitEvent);
   }
 
   lgInit();
@@ -1136,6 +1148,8 @@ restart:
     goto restart;
   }
 
+  lgSignalEvent(g_state.jitEvent);
+
   return 0;
 }
 
@@ -1164,10 +1178,10 @@ static void lg_shutdown(void)
     g_state.frameEvent = NULL;
   }
 
-  if (g_state.overlayRenderEvent)
+  if (g_state.jitEvent)
   {
-    lgFreeEvent(g_state.overlayRenderEvent);
-    g_state.overlayRenderEvent = NULL;
+    lgFreeEvent(g_state.jitEvent);
+    g_state.jitEvent = NULL;
   }
 
   if (e_startup)
