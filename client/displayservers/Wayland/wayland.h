@@ -176,6 +176,8 @@ struct WaylandDSState
   struct wl_list surfaceOutputs; // SurfaceOutput::link
   bool useFractionalScale;
 
+  LGEvent * frameEvent;
+
   struct wl_list poll; // WaylandPoll::link
   struct wl_list pollFree; // WaylandPoll::link
   LG_Lock pollLock;
@@ -304,4 +306,4 @@ void waylandWindowFree(void);
 void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);
 bool waylandIsValidPointerPos(int x, int y);
-void waylandSignalNextFrame(LGEvent * event);
+void waylandWaitFrame(void);

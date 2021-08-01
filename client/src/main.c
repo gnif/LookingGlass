@@ -167,8 +167,8 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
-    if (g_state.jitRender)
-      lgWaitEvent(g_state.jitEvent, TIMEOUT_INFINITE);
+    if (g_state.jitRender || (g_state.ds->waitFrame && g_state.overlayInput))
+      g_state.ds->waitFrame();
     else if (g_params.fpsMin != 0)
     {
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
@@ -181,12 +181,6 @@ static int renderThread(void * unused)
             g_state.overlayFrameTime : g_state.frameTime);
       }
     }
-
-    if (!g_params.jitRender && g_state.ds->signalNextFrame)
-      g_state.jitRender = g_state.overlayInput;
-
-    if (g_state.jitRender)
-      g_state.ds->signalNextFrame(g_state.jitEvent);
 
     int resize = atomic_load(&g_state.lgrResize);
     if (resize)
@@ -828,7 +822,7 @@ static int lg_run(void)
 
   if (g_params.jitRender)
   {
-    if (g_state.ds->signalNextFrame)
+    if (g_state.ds->waitFrame)
       g_state.jitRender = true;
     else
       DEBUG_WARN("JIT render not supported on display server backend, disabled");

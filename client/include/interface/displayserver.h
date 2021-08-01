@@ -149,11 +149,10 @@ struct LG_DisplayServerOps
   void (*glSwapBuffers)(void);
 #endif
 
-  /* Signals event when the next frame should be rendered in time for the next vblank.
-   * This must be invoked on the render thread before swapping buffers.
-   * If used, the render thread MUST wait for event before rendering the next frame.
+  /* Waits for a good time to render the next frame in time for the next vblank.
+   * Once this returns, a frame must be rendered.
    * This is optional and a display server may choose to not implement it. */
-  void (*signalNextFrame)(LGEvent * event);
+  void (*waitFrame)(void);
 
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
