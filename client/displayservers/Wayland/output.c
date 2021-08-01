@@ -27,29 +27,63 @@
 
 #include "common/debug.h"
 
-static void outputGeometryHandler(void * data, struct wl_output * output, int32_t x, int32_t y,
+static void outputUpdateScale(struct WaylandOutput * node)
+{
+  wl_fixed_t original = node->scale;
+
+  if (!wlWm.viewporter || !node->logicalWidth || !node->logicalHeight)
+    node->scale = wl_fixed_from_int(node->scaleInt);
+  else
+  {
+    int32_t modeWidth = node->modeRotate ? node->modeHeight : node->modeWidth;
+    node->scale = wl_fixed_from_double(1.0 * modeWidth / node->logicalWidth);
+  }
+
+  if (original != node->scale)
+    waylandWindowUpdateScale();
+}
+
+static void outputGeometryHandler(void * opaque, struct wl_output * output, int32_t x, int32_t y,
     int32_t physical_width, int32_t physical_height, int32_t subpixel, const char * make,
     const char * model, int32_t output_transform)
 {
-  // Do nothing.
+  struct WaylandOutput * node = opaque;
+
+  switch (output_transform)
+  {
+    case WL_OUTPUT_TRANSFORM_90:
+    case WL_OUTPUT_TRANSFORM_270:
+    case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+    case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+      node->modeRotate = true;
+      break;
+
+    default:
+      node->modeRotate = false;
+  }
 }
 
-static void outputModeHandler(void * data, struct wl_output * wl_output, uint32_t flags,
+static void outputModeHandler(void * opaque, struct wl_output * wl_output, uint32_t flags,
     int32_t width, int32_t height, int32_t refresh)
 {
-  // Do nothing.
+  if (!(flags & WL_OUTPUT_MODE_CURRENT))
+    return;
+
+  struct WaylandOutput * node = opaque;
+  node->modeWidth  = width;
+  node->modeHeight = height;
 }
 
-static void outputDoneHandler(void * data, struct wl_output * output)
+static void outputDoneHandler(void * opaque, struct wl_output * output)
 {
-  // Do nothing.
+  struct WaylandOutput * node = opaque;
+  outputUpdateScale(node);
 }
 
 static void outputScaleHandler(void * opaque, struct wl_output * output, int32_t scale)
 {
   struct WaylandOutput * node = opaque;
-  node->scale = scale;
-  waylandWindowUpdateScale();
+  node->scaleInt = scale;
 }
 
 static const struct wl_output_listener outputListener = {
@@ -57,6 +91,45 @@ static const struct wl_output_listener outputListener = {
   .mode = outputModeHandler,
   .done = outputDoneHandler,
   .scale = outputScaleHandler,
+};
+
+static void xdgOutputLogicalPositionHandler(void * opaque, struct zxdg_output_v1 * xdgOutput,
+    int32_t x, int32_t y)
+{
+  // Do nothing.
+}
+
+static void xdgOutputLogicalSizeHandler(void * opaque, struct zxdg_output_v1 * xdgOutput,
+    int32_t width, int32_t height)
+{
+  struct WaylandOutput * node = opaque;
+  node->logicalWidth  = width;
+  node->logicalHeight = height;
+}
+
+static void xdgOutputDoneHandler(void * opaque, struct zxdg_output_v1 * xdgOutput)
+{
+  struct WaylandOutput * node = opaque;
+  outputUpdateScale(node);
+}
+
+static void xdgOutputNameHandler(void * opaque, struct zxdg_output_v1 * xdgOutput, const char * name)
+{
+  // Do nothing.
+}
+
+static void xdgOutputDescriptionHandler(void * opaque, struct zxdg_output_v1 * xdgOutput,
+    const char * description)
+{
+  // Do nothing.
+}
+
+static const struct zxdg_output_v1_listener xdgOutputListener = {
+  .logical_position = xdgOutputLogicalPositionHandler,
+  .logical_size = xdgOutputLogicalSizeHandler,
+  .done = xdgOutputDoneHandler,
+  .name = xdgOutputNameHandler,
+  .description = xdgOutputDescriptionHandler,
 };
 
 bool waylandOutputInit(void)
@@ -73,6 +146,8 @@ void waylandOutputFree(void)
   {
     if (node->version >= 3)
       wl_output_release(node->output);
+    if (node->xdgOutput)
+      zxdg_output_v1_destroy(node->xdgOutput);
     wl_list_remove(&node->link);
     free(node);
   }
@@ -80,7 +155,7 @@ void waylandOutputFree(void)
 
 void waylandOutputBind(uint32_t name, uint32_t version)
 {
-  struct WaylandOutput * node = malloc(sizeof(struct WaylandOutput));
+  struct WaylandOutput * node = calloc(1, sizeof(struct WaylandOutput));
   if (!node)
     return;
 
@@ -103,6 +178,13 @@ void waylandOutputBind(uint32_t name, uint32_t version)
     return;
   }
 
+  if (wlWm.xdgOutputManager)
+  {
+    node->xdgOutput = zxdg_output_manager_v1_get_xdg_output(wlWm.xdgOutputManager, node->output);
+    if (node->xdgOutput)
+      zxdg_output_v1_add_listener(node->xdgOutput, &xdgOutputListener, node);
+  }
+
   wl_output_add_listener(node->output, &outputListener, node);
   wl_list_insert(&wlWm.outputs, &node->link);
 }
@@ -117,6 +199,8 @@ void waylandOutputTryUnbind(uint32_t name)
     {
       if (node->version >= 3)
         wl_output_release(node->output);
+      if (node->xdgOutput)
+        zxdg_output_v1_destroy(node->xdgOutput);
       wl_list_remove(&node->link);
       free(node);
       break;
@@ -124,7 +208,7 @@ void waylandOutputTryUnbind(uint32_t name)
   }
 }
 
-int32_t waylandOutputGetScale(struct wl_output * output)
+wl_fixed_t waylandOutputGetScale(struct wl_output * output)
 {
   struct WaylandOutput * node;
 
