@@ -144,3 +144,14 @@ void waylandWaitFrame(void)
   if (callback)
     wl_callback_add_listener(callback, &frame_listener, NULL);
 }
+
+void waylandSkipFrame(void)
+{
+  // If we decided to not render, we must commit the surface so that the callback is registered.
+  wl_surface_commit(wlWm.surface);
+}
+
+void waylandForceRender(void)
+{
+  lgSignalEvent(wlWm.frameEvent);
+}
