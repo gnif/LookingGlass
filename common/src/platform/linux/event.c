@@ -203,6 +203,5 @@ bool lgSignalEvent(LGEvent * handle)
 bool lgResetEvent(LGEvent * handle)
 {
   assert(handle);
-  atomic_store_explicit(&handle->signaled, false, memory_order_release);
-  return true;
+  return atomic_exchange_explicit(&handle->signaled, false, memory_order_release);
 }
