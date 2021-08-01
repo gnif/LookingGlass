@@ -150,9 +150,11 @@ struct LG_DisplayServerOps
 #endif
 
   /* Waits for a good time to render the next frame in time for the next vblank.
-   * Once this returns, a frame must be rendered.
    * This is optional and a display server may choose to not implement it. */
   void (*waitFrame)(void);
+
+  /* This must be called when waitFrame returns, but no frame is actually rendered. */
+  void (*skipFrame)(void);
 
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
