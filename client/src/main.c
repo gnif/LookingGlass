@@ -171,13 +171,19 @@ static int renderThread(void * unused)
     if (g_state.jitRender)
     {
       g_state.ds->waitFrame();
-      if (!lgResetEvent(g_state.frameEvent) && !g_state.overlayInput &&
-          !g_state.lgr->needs_render(g_state.lgrData))
+
+      const uint64_t pending =
+        atomic_load_explicit(&g_state.pendingCount, memory_order_acquire);
+      if (!lgResetEvent(g_state.frameEvent) && !pending && !g_state.overlayInput
+          && !g_state.lgr->needs_render(g_state.lgrData))
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();
         continue;
       }
+
+      if (pending > 0)
+        atomic_fetch_sub(&g_state.pendingCount, 1);
     }
     else if (g_params.fpsMin != 0)
     {
@@ -696,7 +702,15 @@ int main_frameThread(void * unused)
     g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
-    lgSignalEvent(g_state.frameEvent);
+    if (g_state.jitRender)
+    {
+      if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
+        atomic_fetch_add_explicit(&g_state.pendingCount, 1,
+            memory_order_release);
+    }
+    else
+      lgSignalEvent(g_state.frameEvent);
+
     lgmpClientMessageDone(queue);
   }
 

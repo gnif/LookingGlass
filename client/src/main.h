@@ -120,6 +120,7 @@ struct AppState
   RingBuffer            renderTimings;
   RingBuffer            frameTimings;
 
+  atomic_uint_least64_t pendingCount;
   atomic_uint_least64_t renderCount, frameCount;
   _Atomic(float)        fps, ups;
 
