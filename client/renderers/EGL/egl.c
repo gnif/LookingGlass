@@ -49,6 +49,7 @@
 #include "splash.h"
 
 #define SPLASH_FADE_TIME 1000000
+#define DESKTOP_DAMAGE_COUNT 2
 
 struct Options
 {
@@ -101,8 +102,9 @@ struct Inst
 
   struct CursorState cursorLast;
 
-  bool                            hadOverlay;
-  _Atomic(struct DesktopDamage *) desktopDamage;
+  bool                 hadOverlay;
+  struct DesktopDamage desktopDamage[DESKTOP_DAMAGE_COUNT];
+  atomic_uint          desktopDamageIdx;
 
   RingBuffer importTimings;
   GraphHandle importGraph;
@@ -180,6 +182,16 @@ static void egl_setup(void)
   option_register(egl_options);
 }
 
+inline static struct DesktopDamage * currentDesktopDamage(struct Inst * this)
+{
+  return this->desktopDamage + atomic_load(&this->desktopDamageIdx) % DESKTOP_DAMAGE_COUNT;
+}
+
+inline static struct DesktopDamage * finishDesktopDamage(struct Inst * this)
+{
+  return this->desktopDamage + atomic_fetch_add(&this->desktopDamageIdx, 1) % DESKTOP_DAMAGE_COUNT;
+}
+
 static bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
@@ -209,7 +221,8 @@ static bool egl_create(void ** opaque, const LG_RendererParams params, bool * ne
   this->screenScaleY = 1.0f;
   this->uiScale      = 1.0;
 
-  atomic_init(&this->desktopDamage, NULL);
+  atomic_init(&this->desktopDamageIdx, 0);
+  this->desktopDamage[0].count = -1;
 
   this->importTimings = ringbuffer_new(256, sizeof(float));
   this->importGraph   = app_registerGraph("IMPORT", this->importTimings, 0.0f, 5.0f);
@@ -419,14 +432,7 @@ static void egl_on_resize(void * opaque, const int width, const int height, cons
 
   egl_calc_mouse_state(this);
 
-  struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
-  if (!damage)
-  {
-    DEBUG_FATAL("Out of memory");
-    abort();
-  }
-  damage->count = 0;
-  free(atomic_exchange(&this->desktopDamage, damage));
+  currentDesktopDamage(this)->count = -1;
 
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL3_Shutdown();
@@ -512,15 +518,14 @@ static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
 
   this->start = true;
 
-  struct DesktopDamage * damage = malloc(sizeof(struct DesktopDamage));
-  if (!damage)
+  struct DesktopDamage * damage = currentDesktopDamage(this);
+  if (damage->count == -1 || damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS)
+    damage->count = -1;
+  else
   {
-    DEBUG_FATAL("Out of memory");
-    abort();
+    memcpy(damage->rects + damage->count, damageRects, damageRectsCount * sizeof(FrameDamageRect));
+    damage->count += damageRectsCount;
   }
-  damage->count = damageRectsCount;
-  memcpy(damage->rects, damageRects, damageRectsCount * sizeof(FrameDamageRect));
-  free(atomic_exchange(&this->desktopDamage, damage));
 
   return true;
 }
@@ -810,11 +815,10 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
 
   bool hasOverlay = false;
   struct CursorState cursorState = { .visible = false };
-  struct DesktopDamage * desktopDamage = NULL;
+  struct DesktopDamage * desktopDamage = finishDesktopDamage(this);
 
   if (this->start)
   {
-    desktopDamage = atomic_exchange(&this->desktopDamage, NULL);
     if (egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
@@ -833,7 +837,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
           this->width, this->height);
     }
     else
-      desktopDamage->count = 0;
+      desktopDamage->count = -1;
   }
 
   if (!this->waitDone)
@@ -865,7 +869,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     hasOverlay = true;
   }
 
-  if (desktopDamage && rotate != LG_ROTATE_0)
+  if (desktopDamage->count > 0 && rotate != LG_ROTATE_0)
   {
     for (int i = 0; i < desktopDamage->count; ++i)
     {
@@ -958,34 +962,32 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
 
     this->cursorLast = cursorState;
 
-    if (desktopDamage)
+    if (desktopDamage->count == -1)
+      // -1 damage count means invalidating entire window.
+      damageIdx = 0;
+    else
     {
-      if (desktopDamage->count == 0)
-        // Zero damage count means invalidating entire window.
-        damageIdx = 0;
-      else
+      for (int i = 0; i < desktopDamage->count; ++i)
       {
-        for (int i = 0; i < desktopDamage->count; ++i)
-        {
-          FrameDamageRect rect = desktopDamage->rects[i];
-          int x1 = (int) (rect.x * scaleX);
-          int y1 = (int) (rect.y * scaleY);
-          int x2 = (int) ceil((rect.x + rect.width) * scaleX);
-          int y2 = (int) ceil((rect.y + rect.height) * scaleY);
-          damage[damageIdx++] = (struct Rect) {
-            .x = this->destRect.x + x1,
-            .y = this->height - (this->destRect.y + y2),
-            .w = x2 - x1,
-            .h = y2 - y1,
-          };
-        }
+        FrameDamageRect rect = desktopDamage->rects[i];
+        int x1 = (int) (rect.x * scaleX);
+        int y1 = (int) (rect.y * scaleY);
+        int x2 = (int) ceil((rect.x + rect.width) * scaleX);
+        int y2 = (int) ceil((rect.y + rect.height) * scaleY);
+        damage[damageIdx++] = (struct Rect) {
+          .x = this->destRect.x + x1,
+          .y = this->height - (this->destRect.y + y2),
+          .w = x2 - x1,
+          .h = y2 - y1,
+        };
       }
     }
   }
   else
     damageIdx = 0;
+
   this->hadOverlay = hasOverlay;
-  free(desktopDamage);
+  desktopDamage->count = 0;
 
   app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
   return true;
