@@ -734,6 +734,26 @@ static inline LG_DSPointer mapImGuiCursor(ImGuiMouseCursor cursor)
   }
 }
 
+bool app_overlayNeedsRender(void)
+{
+  struct Overlay * overlay;
+
+  if (g_state.overlayInput)
+    return true;
+
+  for (ll_reset(g_state.overlays);
+      ll_walk(g_state.overlays, (void **)&overlay); )
+  {
+    if (!overlay->ops->needs_render)
+      continue;
+
+    if (overlay->ops->needs_render(overlay->udata, g_state.overlayInput))
+      return true;
+  }
+
+  return false;
+}
+
 int app_renderOverlay(struct Rect * rects, int maxRects)
 {
   int  totalRects  = 0;

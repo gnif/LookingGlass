@@ -174,7 +174,9 @@ static int renderThread(void * unused)
 
       const uint64_t pending =
         atomic_load_explicit(&g_state.pendingCount, memory_order_acquire);
-      if (!lgResetEvent(g_state.frameEvent) && !pending && !g_state.overlayInput
+      if (!lgResetEvent(g_state.frameEvent)
+          && !pending
+          && !app_overlayNeedsRender()
           && !g_state.lgr->needs_render(g_state.lgrData))
       {
         if (g_state.ds->skipFrame)
