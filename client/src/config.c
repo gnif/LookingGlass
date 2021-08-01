@@ -282,7 +282,7 @@ static struct Option options[] =
     .name           = "jitRender",
     .description    = "Enable just-in-time rendering",
     .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = false,
+    .value.x_bool   = true,
   },
 
   // input options
