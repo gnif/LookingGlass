@@ -167,8 +167,8 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
-    if (g_state.overlayMustWait)
-      lgWaitEvent(g_state.overlayRenderEvent, TIMEOUT_INFINITE);
+    if (g_state.smartVsync)
+      lgWaitEvent(g_state.vsyncEvent, TIMEOUT_INFINITE);
     else if (g_params.fpsMin != 0)
     {
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
@@ -182,13 +182,11 @@ static int renderThread(void * unused)
       }
     }
 
-    if (g_state.overlayInput && g_state.ds->signalNextFrame)
-    {
-      g_state.ds->signalNextFrame(g_state.overlayRenderEvent);
-      g_state.overlayMustWait = true;
-    }
-    else
-      g_state.overlayMustWait = false;
+    if (!g_params.vsync && g_state.ds->signalNextFrame)
+      g_state.smartVsync = g_state.overlayInput;
+
+    if (g_state.smartVsync)
+      g_state.ds->signalNextFrame(g_state.vsyncEvent);
 
     int resize = atomic_load(&g_state.lgrResize);
     if (resize)
@@ -828,6 +826,9 @@ static int lg_run(void)
   assert(g_state.ds);
   ASSERT_LG_DS_VALID(g_state.ds);
 
+  // enable smart vsync if vsync requested and display server supports it
+  g_state.smartVsync = g_params.vsync && g_state.ds->signalNextFrame;
+
   // init the subsystem
   if (!g_state.ds->earlyInit())
   {
@@ -883,6 +884,7 @@ static int lg_run(void)
   bool needsOpenGL;
   LG_RendererParams lgrParams;
   lgrParams.quickSplash = g_params.quickSplash;
+  lgrParams.vsync       = g_params.vsync && !g_state.ds->signalNextFrame;
 
   if (g_params.forceRenderer)
   {
@@ -979,10 +981,16 @@ static int lg_run(void)
     return -1;
   }
 
-  if (!(g_state.overlayRenderEvent = lgCreateEvent(true, 0)))
+  if (!(g_state.vsyncEvent = lgCreateEvent(true, 0)))
   {
     DEBUG_ERROR("failed to create the overlay render event");
     return -1;
+  }
+
+  if (g_state.smartVsync)
+  {
+    DEBUG_INFO("Using smart vsync mode");
+    lgSignalEvent(g_state.vsyncEvent);
   }
 
   lgInit();
@@ -1136,6 +1144,8 @@ restart:
     goto restart;
   }
 
+  lgSignalEvent(g_state.vsyncEvent);
+
   return 0;
 }
 
@@ -1164,10 +1174,10 @@ static void lg_shutdown(void)
     g_state.frameEvent = NULL;
   }
 
-  if (g_state.overlayRenderEvent)
+  if (g_state.vsyncEvent)
   {
-    lgFreeEvent(g_state.overlayRenderEvent);
-    g_state.overlayRenderEvent = NULL;
+    lgFreeEvent(g_state.vsyncEvent);
+    g_state.vsyncEvent = NULL;
   }
 
   if (e_startup)

@@ -55,8 +55,6 @@ struct AppState
   ImFont         * fontLarge;
   bool             overlayInput;
   ImGuiMouseCursor cursorLast;
-  LGEvent        * overlayRenderEvent;
-  bool             overlayMustWait;
   char           * imGuiIni;
 
   bool        alertShow;
@@ -66,6 +64,8 @@ struct AppState
 
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
+  bool                         smartVsync;
+  LGEvent                    * vsyncEvent;
 
   bool                 stopVideo;
   bool                 ignoreInput;
