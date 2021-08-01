@@ -174,6 +174,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
 #endif
   .waitFrame           = waylandWaitFrame,
   .skipFrame           = waylandSkipFrame,
+  .stopWaitFrame       = waylandStopWaitFrame,
   .guestPointerUpdated = waylandGuestPointerUpdated,
   .setPointer          = waylandSetPointer,
   .grabPointer         = waylandGrabPointer,
