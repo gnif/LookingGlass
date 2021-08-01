@@ -31,7 +31,7 @@ static void outputUpdateScale(struct WaylandOutput * node)
 {
   wl_fixed_t original = node->scale;
 
-  if (!wlWm.viewporter || !node->logicalWidth || !node->logicalHeight)
+  if (!wlWm.useFractionalScale || !wlWm.viewporter || !node->logicalWidth)
     node->scale = wl_fixed_from_int(node->scaleInt);
   else
   {

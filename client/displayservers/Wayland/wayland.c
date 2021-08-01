@@ -37,6 +37,13 @@ static struct Option waylandOptions[] =
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = true,
   },
+  {
+    .module       = "wayland",
+    .name         = "fractionScale",
+    .description  = "Enable fractional scale",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true,
+  },
   {0}
 };
 
@@ -66,7 +73,8 @@ static bool waylandInit(const LG_DSInitParams params)
   memset(&wlWm, 0, sizeof(wlWm));
   wl_list_init(&wlWm.surfaceOutputs);
 
-  wlWm.warpSupport = option_get_bool("wayland", "warpSupport");
+  wlWm.warpSupport        = option_get_bool("wayland", "warpSupport");
+  wlWm.useFractionalScale = option_get_bool("wayland", "fractionScale");
 
   wlWm.display = wl_display_connect(NULL);
   wlWm.width = params.w;
