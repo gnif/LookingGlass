@@ -47,14 +47,6 @@ static int alert_render(void * udata, bool interactive, struct Rect * windowRect
   if (!g_state.alertShow)
     return 0;
 
-  if (g_state.alertTimeout < microtime())
-  {
-    g_state.alertShow = false;
-    free(g_state.alertMessage);
-    g_state.alertMessage = NULL;
-    return 0;
-  }
-
   ImVec2 * screen = overlayGetScreenSize();
   igSetNextWindowBgAlpha(0.8f);
   igSetNextWindowPos((ImVec2) { screen->x / 2.0f, screen->y / 2.0f }, 0,

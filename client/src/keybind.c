@@ -51,11 +51,13 @@ static void bind_video(int sc, void * opaque)
 static void bind_showFPS(int sc, void * opaque)
 {
   g_state.showFPS = !g_state.showFPS;
+  app_invalidateWindow();
 }
 
 static void bind_showTiming(int sc, void * opaque)
 {
   g_state.showTiming = !g_state.showTiming;
+  app_invalidateWindow();
 }
 
 static void bind_rotate(int sc, void * opaque)

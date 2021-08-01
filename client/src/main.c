@@ -167,6 +167,7 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
+    app_handleRenderEvent(microtime());
     if (g_state.jitRender)
     {
       g_state.ds->waitFrame();
@@ -255,8 +256,6 @@ static int renderThread(void * unused)
       }
       g_state.resizeDone = true;
     }
-
-    app_handleRenderEvent(now);
   }
 
   g_state.state = APP_STATE_SHUTDOWN;

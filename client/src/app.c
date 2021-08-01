@@ -509,11 +509,13 @@ void app_handleCloseEvent(void)
 
 void app_handleRenderEvent(const uint64_t timeUs)
 {
+  bool invalidate = false;
   if (!g_state.escapeActive)
   {
     if (g_state.escapeHelp)
     {
       g_state.escapeHelp = false;
+      invalidate = true;
     }
   }
   else
@@ -521,8 +523,21 @@ void app_handleRenderEvent(const uint64_t timeUs)
     if (!g_state.escapeHelp && timeUs - g_state.escapeTime > g_params.helpMenuDelayUs)
     {
       g_state.escapeHelp = true;
+      invalidate = true;
     }
   }
+
+  if (g_state.alertShow)
+    if (g_state.alertTimeout < timeUs)
+    {
+      g_state.alertShow = false;
+      free(g_state.alertMessage);
+      g_state.alertMessage = NULL;
+      invalidate = true;
+    }
+
+  if (invalidate)
+    app_invalidateWindow();
 }
 
 void app_setFullscreen(bool fs)
@@ -601,6 +616,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   g_state.alertTimeout = microtime() + ALERT_TIMEOUT;
   g_state.alertType    = type;
   g_state.alertShow    = true;
+  app_invalidateWindow();
 }
 
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
