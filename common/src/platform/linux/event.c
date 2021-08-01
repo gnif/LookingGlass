@@ -175,15 +175,25 @@ bool lgSignalEvent(LGEvent * handle)
 {
   assert(handle);
 
+  if (pthread_mutex_lock(&handle->mutex) != 0)
+  {
+    DEBUG_ERROR("Failed to lock the mutex");
+    return false;
+  }
+
   const bool signaled = atomic_exchange_explicit(&handle->signaled, true,
       memory_order_release);
 
-  if (signaled)
-    return true;
+  if (!signaled)
+    if (pthread_cond_broadcast(&handle->cond) != 0)
+    {
+      DEBUG_ERROR("Failed to signal the condition");
+      return false;
+    }
 
-  if (pthread_cond_broadcast(&handle->cond) != 0)
+  if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
-    DEBUG_ERROR("Failed to signal the condition");
+    DEBUG_ERROR("Failed to unlock the mutex");
     return false;
   }
 
