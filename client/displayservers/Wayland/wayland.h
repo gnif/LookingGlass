@@ -174,6 +174,7 @@ struct WaylandDSState
   struct zxdg_output_manager_v1 * xdgOutputManager;
   struct wl_list outputs; // WaylandOutput::link
   struct wl_list surfaceOutputs; // SurfaceOutput::link
+  bool useFractionalScale;
 
   struct wl_list poll; // WaylandPoll::link
   struct wl_list pollFree; // WaylandPoll::link
