@@ -198,7 +198,7 @@ static bool egl_create(void ** opaque, const LG_RendererParams params, bool * ne
   struct Inst * this = (struct Inst *)*opaque;
   memcpy(&this->params, &params, sizeof(LG_RendererParams));
 
-  this->opt.vsync        = option_get_bool("egl", "vsync");
+  this->opt.vsync        = option_get_bool("egl", "vsync") || params.vsync;
   this->opt.doubleBuffer = option_get_bool("egl", "doubleBuffer");
 
   this->translateX   = 0;
