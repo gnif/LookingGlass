@@ -156,6 +156,9 @@ struct LG_DisplayServerOps
   /* This must be called when waitFrame returns, but no frame is actually rendered. */
   void (*skipFrame)(void);
 
+  /* This is used to interrupt waitFrame. */
+  void (*stopWaitFrame)(void);
+
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
   void (*setPointer)(LG_DSPointer pointer);
@@ -228,6 +231,7 @@ struct LG_DisplayServerOps
   ASSERT_OPENGL_FN((x)->glMakeCurrent    ); \
   ASSERT_OPENGL_FN((x)->glSetSwapInterval); \
   ASSERT_OPENGL_FN((x)->glSwapBuffers    ); \
+  assert(!(x)->waitFrame == !(x)->stopWaitFrame); \
   assert((x)->guestPointerUpdated); \
   assert((x)->setPointer         ); \
   assert((x)->grabPointer        ); \
