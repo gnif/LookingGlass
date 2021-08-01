@@ -70,7 +70,8 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
         &zwp_idle_inhibit_manager_v1_interface, 1);
   else if (!strcmp(interface, zxdg_output_manager_v1_interface.name) && version >= 2)
     wlWm.xdgOutputManager = wl_registry_bind(wlWm.registry, name,
-        &zxdg_output_manager_v1_interface, 2);
+        // we only need v2 to run, but v3 saves a callback
+        &zxdg_output_manager_v1_interface, version > 3 ? 3 : version);
 }
 
 static void registryGlobalRemoveHandler(void * data,
