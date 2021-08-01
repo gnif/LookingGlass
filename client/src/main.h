@@ -65,7 +65,6 @@ struct AppState
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
   bool                         jitRender;
-  LGEvent                    * jitEvent;
 
   bool                 stopVideo;
   bool                 ignoreInput;

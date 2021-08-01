@@ -167,8 +167,12 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
-    if (g_state.jitRender || (g_state.ds->waitFrame && g_state.overlayInput))
+    if (g_state.jitRender)
+    {
       g_state.ds->waitFrame();
+      if (!lgResetEvent(g_state.frameEvent) && !g_state.overlayInput)
+        continue;
+    }
     else if (g_params.fpsMin != 0)
     {
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
@@ -973,23 +977,14 @@ static int lg_run(void)
   }
 
   // setup the new frame event
-  if (!(g_state.frameEvent = lgCreateEvent(true, 0)))
+  if (!(g_state.frameEvent = lgCreateEvent(!g_state.jitRender, 0)))
   {
     DEBUG_ERROR("failed to create the frame event");
     return -1;
   }
 
-  if (!(g_state.jitEvent = lgCreateEvent(true, 0)))
-  {
-    DEBUG_ERROR("failed to create the overlay render event");
-    return -1;
-  }
-
   if (g_state.jitRender)
-  {
     DEBUG_INFO("Using JIT render mode");
-    lgSignalEvent(g_state.jitEvent);
-  }
 
   lgInit();
 
@@ -1142,8 +1137,6 @@ restart:
     goto restart;
   }
 
-  lgSignalEvent(g_state.jitEvent);
-
   return 0;
 }
 
@@ -1170,12 +1163,6 @@ static void lg_shutdown(void)
   {
     lgFreeEvent(g_state.frameEvent);
     g_state.frameEvent = NULL;
-  }
-
-  if (g_state.jitEvent)
-  {
-    lgFreeEvent(g_state.jitEvent);
-    g_state.jitEvent = NULL;
   }
 
   if (e_startup)
