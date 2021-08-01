@@ -55,8 +55,6 @@ struct AppState
   ImFont         * fontLarge;
   bool             overlayInput;
   ImGuiMouseCursor cursorLast;
-  LGEvent        * overlayRenderEvent;
-  bool             overlayMustWait;
   char           * imGuiIni;
 
   bool        alertShow;
@@ -66,6 +64,8 @@ struct AppState
 
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
+  bool                         jitRender;
+  LGEvent                    * jitEvent;
 
   bool                 stopVideo;
   bool                 ignoreInput;
@@ -171,6 +171,7 @@ struct AppParams
   uint64_t          helpMenuDelayUs;
   const char *      uiFont;
   int               uiSize;
+  bool              jitRender;
 
   unsigned int      cursorPollInterval;
   unsigned int      framePollInterval;
