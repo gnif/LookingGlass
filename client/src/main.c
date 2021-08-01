@@ -1163,6 +1163,8 @@ static void lg_shutdown(void)
   g_state.state = APP_STATE_SHUTDOWN;
   if (t_render)
   {
+    if (g_state.ds->stopWaitFrame)
+      g_state.ds->stopWaitFrame();
     lgSignalEvent(e_startup);
     lgSignalEvent(g_state.frameEvent);
     lgJoinThread(t_render, NULL);
