@@ -40,9 +40,8 @@
 
 typedef struct LG_RendererParams
 {
-//  TTF_Font * font;
-//  TTF_Font * alertFont;
-  bool       quickSplash;
+  bool quickSplash;
+  bool vsync;
 }
 LG_RendererParams;
 
