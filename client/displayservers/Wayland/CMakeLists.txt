@@ -75,6 +75,9 @@ wayland_generate(
     "${WAYLAND_PROTOCOLS_BASE}/stable/presentation-time/presentation-time.xml"
     "${CMAKE_BINARY_DIR}/wayland/wayland-presentation-time-client-protocol")
 wayland_generate(
+    "${WAYLAND_PROTOCOLS_BASE}/stable/viewporter/viewporter.xml"
+    "${CMAKE_BINARY_DIR}/wayland/wayland-viewporter-client-protocol")
+wayland_generate(
     "${WAYLAND_PROTOCOLS_BASE}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"
     "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-decoration-unstable-v1-client-protocol")
 wayland_generate(
@@ -89,3 +92,6 @@ wayland_generate(
 wayland_generate(
     "${WAYLAND_PROTOCOLS_BASE}/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml"
     "${CMAKE_BINARY_DIR}/wayland/wayland-idle-inhibit-unstable-v1-client-protocol")
+wayland_generate(
+    "${WAYLAND_PROTOCOLS_BASE}/unstable/xdg-output/xdg-output-unstable-v1.xml"
+    "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-output-unstable-v1-client-protocol")

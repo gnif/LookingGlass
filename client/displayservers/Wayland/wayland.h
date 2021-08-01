@@ -40,11 +40,13 @@
 
 #include "wayland-xdg-shell-client-protocol.h"
 #include "wayland-presentation-time-client-protocol.h"
+#include "wayland-viewporter-client-protocol.h"
 #include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
 #include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
+#include "wayland-xdg-output-unstable-v1-client-protocol.h"
 
 typedef void (*WaylandPollCallback)(uint32_t events, void * opaque);
 
@@ -60,8 +62,15 @@ struct WaylandPoll
 struct WaylandOutput
 {
   uint32_t name;
-  int32_t scale;
+  wl_fixed_t scale;
+  int32_t scaleInt;
+  int32_t logicalWidth;
+  int32_t logicalHeight;
+  int32_t modeWidth;
+  int32_t modeHeight;
+  bool    modeRotate;
   struct wl_output * output;
+  struct zxdg_output_v1 * xdgOutput;
   uint32_t version;
   struct wl_list link;
 };
@@ -93,7 +102,9 @@ struct WaylandDSState
   struct wl_shm * shm;
   struct wl_compositor * compositor;
 
-  int32_t width, height, scale;
+  int32_t width, height;
+  wl_fixed_t scale;
+  bool fractionalScale;
   bool needsResize;
   bool fullscreen;
   uint32_t resizeSerial;
@@ -158,6 +169,9 @@ struct WaylandDSState
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
 
+  struct wp_viewporter * viewporter;
+  struct wp_viewport * viewport;
+  struct zxdg_output_manager_v1 * xdgOutputManager;
   struct wl_list outputs; // WaylandOutput::link
   struct wl_list surfaceOutputs; // SurfaceOutput::link
 
@@ -259,7 +273,7 @@ bool waylandOutputInit(void);
 void waylandOutputFree(void);
 void waylandOutputBind(uint32_t name, uint32_t version);
 void waylandOutputTryUnbind(uint32_t name);
-int32_t waylandOutputGetScale(struct wl_output * output);
+wl_fixed_t waylandOutputGetScale(struct wl_output * output);
 
 // poll module
 bool waylandPollInit(void);
