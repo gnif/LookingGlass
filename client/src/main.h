@@ -171,6 +171,7 @@ struct AppParams
   uint64_t          helpMenuDelayUs;
   const char *      uiFont;
   int               uiSize;
+  bool              vsync;
 
   unsigned int      cursorPollInterval;
   unsigned int      framePollInterval;
