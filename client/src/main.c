@@ -171,7 +171,8 @@ static int renderThread(void * unused)
     if (g_state.jitRender)
     {
       g_state.ds->waitFrame();
-      if (!lgResetEvent(g_state.frameEvent) && !g_state.overlayInput)
+      if (!lgResetEvent(g_state.frameEvent) && !g_state.overlayInput &&
+          !g_state.lgr->needs_render(g_state.lgrData))
         continue;
     }
     else if (g_params.fpsMin != 0)
