@@ -960,8 +960,6 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     if (cursorState.visible)
       damage[damageIdx++] = cursorState.rect;
 
-    this->cursorLast = cursorState;
-
     if (desktopDamage->count == -1)
       // -1 damage count means invalidating entire window.
       damageIdx = 0;
@@ -987,6 +985,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     damageIdx = 0;
 
   this->hadOverlay = hasOverlay;
+  this->cursorLast = cursorState;
   desktopDamage->count = 0;
 
   app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
