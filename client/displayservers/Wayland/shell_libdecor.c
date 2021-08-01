@@ -70,6 +70,7 @@ static void libdecorFrameConfigure(struct libdecor_frame * frame,
     wlWm.needsResize = true;
     wlWm.resizeSerial = configuration->serial;
     app_invalidateWindow();
+    waylandForceRender();
   }
   else
     wlWm.configured = true;
