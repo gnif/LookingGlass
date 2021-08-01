@@ -80,6 +80,14 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
 {
   wlWm.scale = wl_fixed_from_int(1);
 
+  wlWm.frameEvent = lgCreateEvent(true, 0);
+  if (!wlWm.frameEvent)
+  {
+    DEBUG_ERROR("Failed to initialize event for waitFrame");
+    return false;
+  }
+  lgSignalEvent(wlWm.frameEvent);
+
   if (!wlWm.compositor)
   {
     DEBUG_ERROR("Compositor missing wl_compositor (version 3+), will not proceed");
@@ -105,6 +113,7 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
 void waylandWindowFree(void)
 {
   wl_surface_destroy(wlWm.surface);
+  lgFreeEvent(wlWm.frameEvent);
 }
 
 void waylandSetWindowSize(int x, int y)
@@ -119,8 +128,7 @@ bool waylandIsValidPointerPos(int x, int y)
 
 static void frameHandler(void * opaque, struct wl_callback * callback, unsigned int data)
 {
-  LGEvent * event = opaque;
-  lgSignalEvent(event);
+  lgSignalEvent(wlWm.frameEvent);
   wl_callback_destroy(callback);
 }
 
@@ -128,9 +136,11 @@ static const struct wl_callback_listener frame_listener = {
    .done = frameHandler,
 };
 
-void waylandSignalNextFrame(LGEvent * event)
+void waylandWaitFrame(void)
 {
+  lgWaitEvent(wlWm.frameEvent, TIMEOUT_INFINITE);
+
   struct wl_callback * callback = wl_surface_frame(wlWm.surface);
   if (callback)
-    wl_callback_add_listener(callback, &frame_listener, event);
+    wl_callback_add_listener(callback, &frame_listener, NULL);
 }

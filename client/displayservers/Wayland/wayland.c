@@ -172,7 +172,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .glSetSwapInterval   = waylandGLSetSwapInterval,
   .glSwapBuffers       = waylandGLSwapBuffers,
 #endif
-  .signalNextFrame     = waylandSignalNextFrame,
+  .waitFrame           = waylandWaitFrame,
   .guestPointerUpdated = waylandGuestPointerUpdated,
   .setPointer          = waylandSetPointer,
   .grabPointer         = waylandGrabPointer,
