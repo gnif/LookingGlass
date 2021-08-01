@@ -104,7 +104,8 @@ struct Inst
 
   bool                 hadOverlay;
   struct DesktopDamage desktopDamage[DESKTOP_DAMAGE_COUNT];
-  atomic_uint          desktopDamageIdx;
+  unsigned int         desktopDamageIdx;
+  LG_Lock              desktopDamageLock;
 
   RingBuffer importTimings;
   GraphHandle importGraph;
@@ -182,16 +183,6 @@ static void egl_setup(void)
   option_register(egl_options);
 }
 
-inline static struct DesktopDamage * currentDesktopDamage(struct Inst * this)
-{
-  return this->desktopDamage + atomic_load(&this->desktopDamageIdx) % DESKTOP_DAMAGE_COUNT;
-}
-
-inline static struct DesktopDamage * finishDesktopDamage(struct Inst * this)
-{
-  return this->desktopDamage + atomic_fetch_add(&this->desktopDamageIdx, 1) % DESKTOP_DAMAGE_COUNT;
-}
-
 static bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
 {
   // check if EGL is even available
@@ -221,7 +212,7 @@ static bool egl_create(void ** opaque, const LG_RendererParams params, bool * ne
   this->screenScaleY = 1.0f;
   this->uiScale      = 1.0;
 
-  atomic_init(&this->desktopDamageIdx, 0);
+  LG_LOCK_INIT(this->desktopDamageLock);
   this->desktopDamage[0].count = -1;
 
   this->importTimings = ringbuffer_new(256, sizeof(float));
@@ -254,6 +245,7 @@ static void egl_deinitialize(void * opaque)
   egl_damage_free (&this->damage);
 
   LG_LOCK_FREE(this->lock);
+  LG_LOCK_FREE(this->desktopDamageLock);
 
   eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
@@ -432,7 +424,9 @@ static void egl_on_resize(void * opaque, const int width, const int height, cons
 
   egl_calc_mouse_state(this);
 
-  currentDesktopDamage(this)->count = -1;
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    this->desktopDamage[this->desktopDamageIdx].count = -1;
+  });
 
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL3_Shutdown();
@@ -518,14 +512,16 @@ static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
 
   this->start = true;
 
-  struct DesktopDamage * damage = currentDesktopDamage(this);
-  if (damage->count == -1 || damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS)
-    damage->count = -1;
-  else
-  {
-    memcpy(damage->rects + damage->count, damageRects, damageRectsCount * sizeof(FrameDamageRect));
-    damage->count += damageRectsCount;
-  }
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
+    if (damage->count == -1 || damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS)
+      damage->count = -1;
+    else
+    {
+      memcpy(damage->rects + damage->count, damageRects, damageRectsCount * sizeof(FrameDamageRect));
+      damage->count += damageRectsCount;
+    }
+  });
 
   return true;
 }
@@ -815,7 +811,12 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
 
   bool hasOverlay = false;
   struct CursorState cursorState = { .visible = false };
-  struct DesktopDamage * desktopDamage = finishDesktopDamage(this);
+  struct DesktopDamage * desktopDamage;
+
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    desktopDamage = this->desktopDamage + this->desktopDamageIdx;
+    this->desktopDamageIdx = (this->desktopDamageIdx + 1) % DESKTOP_DAMAGE_COUNT;
+  });
 
   if (this->start)
   {
