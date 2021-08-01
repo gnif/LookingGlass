@@ -202,7 +202,7 @@ bool opengl_create(void ** opaque, const LG_RendererParams params,
   memcpy(&this->params, &params, sizeof(LG_RendererParams));
 
   this->opt.mipmap        = option_get_bool("opengl", "mipmap"       );
-  this->opt.vsync         = option_get_bool("opengl", "vsync"        );
+  this->opt.vsync         = option_get_bool("opengl", "vsync"        ) || params.vsync;
   this->opt.preventBuffer = option_get_bool("opengl", "preventBuffer");
   this->opt.amdPinnedMem  = option_get_bool("opengl", "amdPinnedMem" );
 
