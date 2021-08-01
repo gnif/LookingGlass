@@ -173,7 +173,11 @@ static int renderThread(void * unused)
       g_state.ds->waitFrame();
       if (!lgResetEvent(g_state.frameEvent) && !g_state.overlayInput &&
           !g_state.lgr->needs_render(g_state.lgrData))
+      {
+        if (g_state.ds->skipFrame)
+          g_state.ds->skipFrame();
         continue;
+      }
     }
     else if (g_params.fpsMin != 0)
     {
