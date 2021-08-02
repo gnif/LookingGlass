@@ -21,23 +21,27 @@
 #pragma once
 
 #include <stdbool.h>
-#include "common/KVMFR.h"
+#include "common/types.h"
 #include "interface/renderer.h"
-#include "desktop_rects.h"
 
-struct DesktopDamage
+struct DamageRects
 {
   int count;
-  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
+  FrameDamageRect rects[];
 };
 
-typedef struct EGL_Damage EGL_Damage;
+typedef struct EGL_DesktopRects EGL_DesktopRects;
 
-bool egl_damage_init(EGL_Damage ** damage);
-void egl_damage_free(EGL_Damage ** damage);
+bool egl_desktopRectsInit(EGL_DesktopRects ** rects, int maxCount);
+void egl_desktopRectsFree(EGL_DesktopRects ** rects);
 
-void egl_damage_setup(EGL_Damage * damage, int width, int height);
-void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
-    float scaleX, float scaleY);
-bool egl_damage_render(EGL_Damage * damage, LG_RendererRotate rotate,
-    const struct DesktopDamage * data);
+void egl_desktopRectsMatrix(float matrix[6], int width, int height, float translateX,
+    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate);
+void egl_desktopToScreenMatrix(double matrix[6], int frameWidth, int frameHeight,
+    double translateX, double translateY, double scaleX, double scaleY, LG_RendererRotate rotate,
+    double windowWidth, double windowHeight);
+struct Rect egl_desktopToScreen(const double matrix[6], const struct FrameDamageRect * rect);
+
+void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects * data,
+    int width, int height);
+void egl_desktopRectsRender(EGL_DesktopRects * rects);

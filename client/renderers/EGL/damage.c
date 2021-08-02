@@ -24,6 +24,7 @@
 #include "common/locking.h"
 
 #include "app.h"
+#include "desktop_rects.h"
 #include "shader.h"
 
 #include <stdlib.h>
@@ -35,12 +36,9 @@
 
 struct EGL_Damage
 {
-  EGL_Shader * shader;
-
-  GLfloat transform[6];
-  GLuint  buffers[2];
-  GLuint  vao;
-  int     count;
+  EGL_Shader       * shader;
+  EGL_DesktopRects * mesh;
+  GLfloat            transform[6];
 
   bool          show;
   KeybindHandle toggleHandle;
@@ -48,7 +46,7 @@ struct EGL_Damage
   int   width     , height;
   float translateX, translateY;
   float scaleX    , scaleY;
-  bool  rotate;
+  LG_RendererRotate rotate;
 
   // uniforms
   GLint uTransform;
@@ -65,7 +63,7 @@ bool egl_damage_init(EGL_Damage ** damage)
   *damage = (EGL_Damage *)malloc(sizeof(EGL_Damage));
   if (!*damage)
   {
-    DEBUG_ERROR("Failed to malloc EGL_Alert");
+    DEBUG_ERROR("Failed to malloc EGL_Damage");
     return false;
   }
 
@@ -85,33 +83,12 @@ bool egl_damage_init(EGL_Damage ** damage)
     return false;
   }
 
-  glGenVertexArrays(1, &(*damage)->vao);
-  glBindVertexArray((*damage)->vao);
-
-  glGenBuffers(2, (*damage)->buffers);
-  glBindBuffer(GL_ARRAY_BUFFER, (*damage)->buffers[0]);
-  glBufferData(GL_ARRAY_BUFFER, KVMFR_MAX_DAMAGE_RECTS * 8 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-  GLushort indices[KVMFR_MAX_DAMAGE_RECTS * 6];
-  for (int i = 0; i < KVMFR_MAX_DAMAGE_RECTS; ++i)
+  if (!egl_desktopRectsInit(&(*damage)->mesh, KVMFR_MAX_DAMAGE_RECTS))
   {
-    indices[6 * i + 0] = 4 * i + 0;
-    indices[6 * i + 1] = 4 * i + 1;
-    indices[6 * i + 2] = 4 * i + 2;
-    indices[6 * i + 3] = 4 * i + 0;
-    indices[6 * i + 4] = 4 * i + 2;
-    indices[6 * i + 5] = 4 * i + 3;
+    DEBUG_ERROR("Failed to initialize the mesh");
+    return false;
   }
 
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (*damage)->buffers[1]);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof indices, indices, GL_STATIC_DRAW);
-
-  glBindVertexArray(0);
-
-  (*damage)->count = -1;
   (*damage)->uTransform = egl_shader_get_uniform_location((*damage)->shader, "transform");
   (*damage)->toggleHandle = app_registerKeybind(KEY_A, egl_damage_show_toggle, *damage, "Toggle damage display");
 
@@ -124,8 +101,7 @@ void egl_damage_free(EGL_Damage ** damage)
     return;
 
   app_releaseKeybind(&(*damage)->toggleHandle);
-  glDeleteVertexArrays(1, &(*damage)->vao);
-  glDeleteBuffers(2, (*damage)->buffers);
+  egl_desktopRectsFree(&(*damage)->mesh);
   egl_shader_free(&(*damage)->shader);
 
   free(*damage);
@@ -134,14 +110,8 @@ void egl_damage_free(EGL_Damage ** damage)
 
 static void update_matrix(EGL_Damage * damage)
 {
-  int width  = damage->rotate ? damage->height : damage->width;
-  int height = damage->rotate ? damage->width  : damage->height;
-  damage->transform[0] = 2.0f * damage->scaleX / width;
-  damage->transform[1] = 0.0f;
-  damage->transform[2] = 0.0f;
-  damage->transform[3] = -2.0f * damage->scaleY / height;
-  damage->transform[4] = damage->translateX - damage->scaleX;
-  damage->transform[5] = damage->translateY + damage->scaleY;
+  egl_desktopRectsMatrix(damage->transform, damage->width, damage->height,
+    damage->translateX, damage->translateY, damage->scaleX, damage->scaleY, damage->rotate);
 }
 
 void egl_damage_setup(EGL_Damage * damage, int width, int height)
@@ -161,21 +131,9 @@ void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
   update_matrix(damage);
 }
 
-inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect)
+bool egl_damage_render(EGL_Damage * damage, LG_RendererRotate rotate, const struct DesktopDamage * data)
 {
-  vertex[0] = rect->x;
-  vertex[1] = rect->y;
-  vertex[2] = rect->x + rect->width;
-  vertex[3] = rect->y;
-  vertex[4] = rect->x + rect->width;
-  vertex[5] = rect->y + rect->height;
-  vertex[6] = rect->x;
-  vertex[7] = rect->y + rect->height;
-}
-
-bool egl_damage_render(EGL_Damage * damage, bool rotate, const struct DesktopDamage * data)
-{
-  if (!damage->show || (!data && damage->count == -1))
+  if (!damage->show)
     return false;
 
   if (rotate != damage->rotate)
@@ -191,32 +149,10 @@ bool egl_damage_render(EGL_Damage * damage, bool rotate, const struct DesktopDam
   glUniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
 
   if (data && data->count != 0)
-  {
-    damage->count = data->count;
-    GLfloat vertices[KVMFR_MAX_DAMAGE_RECTS * 8];
-    if (damage->count == -1)
-    {
-      FrameDamageRect full = {
-        .x = 0, .y = 0, .width = damage->width, .height = damage->height,
-      };
-      damage->count = 1;
-      rectToVertices(vertices, &full);
-    }
-    else
-    {
-      for (int i = 0; i < damage->count; ++i)
-        rectToVertices(vertices + i * 8, data->rects + i);
-    }
+    egl_desktopRectsUpdate(damage->mesh, (const struct DamageRects *) data,
+        damage->width, damage->height);
 
-    glBindBuffer(GL_ARRAY_BUFFER, damage->buffers[0]);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, damage->count * 8 * sizeof(GLfloat),
-        vertices);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-  }
-
-  glBindVertexArray(damage->vao);
-  glDrawElements(GL_TRIANGLES, 6 * damage->count, GL_UNSIGNED_SHORT, NULL);
-  glBindVertexArray(0);
+  egl_desktopRectsRender(damage->mesh);
 
   glDisable(GL_BLEND);
   return true;

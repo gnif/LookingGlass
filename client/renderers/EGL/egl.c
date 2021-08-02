@@ -880,69 +880,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     hasOverlay = true;
   }
 
-  if (desktopDamage->count > 0 && rotate != LG_ROTATE_0)
-  {
-    for (int i = 0; i < desktopDamage->count; ++i)
-    {
-      FrameDamageRect * r = desktopDamage->rects + i;
-
-      switch (rotate)
-      {
-        case LG_ROTATE_90:
-          *r = (FrameDamageRect) {
-            .x = this->format.height - r->y - r->height,
-            .y = r->x,
-            .width = r->height,
-            .height = r->width,
-          };
-          break;
-
-        case LG_ROTATE_180:
-          r->x = this->format.width  - r->x - r->width;
-          r->y = this->format.height - r->y - r->height;
-          break;
-
-        case LG_ROTATE_270:
-          *r = (FrameDamageRect) {
-            .x = r->y,
-            .y = this->format.width - r->x - r->width,
-            .width = r->height,
-            .height = r->width,
-          };
-          break;
-
-        case LG_ROTATE_0:
-        default:
-          assert(!"unreachable");
-      }
-    }
-  }
-
-  double scaleX = 0;
-  double scaleY = 0;
-  bool rotated = false;
-
-  switch (rotate)
-  {
-    case LG_ROTATE_0:
-    case LG_ROTATE_180:
-      scaleX = (double) this->destRect.w / this->format.width;
-      scaleY = (double) this->destRect.h / this->format.height;
-      rotated = false;
-      break;
-
-    case LG_ROTATE_90:
-    case LG_ROTATE_270:
-      scaleX = (double) this->destRect.w / this->format.height;
-      scaleY = (double) this->destRect.h / this->format.width;
-      rotated = true;
-      break;
-
-    default:
-      assert(!"unreachable");
-  }
-
-  hasOverlay |= egl_damage_render(this->damage, rotated, newFrame ? desktopDamage : NULL);
+  hasOverlay |= egl_damage_render(this->damage, rotate, newFrame ? desktopDamage : NULL);
   hasOverlay |= invalidateWindow;
 
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
@@ -976,20 +914,13 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
       damageIdx = 0;
     else
     {
+      double matrix[6];
+      egl_desktopToScreenMatrix(matrix, this->format.width, this->format.height,
+          this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
+          this->width, this->height);
+
       for (int i = 0; i < desktopDamage->count; ++i)
-      {
-        FrameDamageRect rect = desktopDamage->rects[i];
-        int x1 = (int) (rect.x * scaleX);
-        int y1 = (int) (rect.y * scaleY);
-        int x2 = (int) ceil((rect.x + rect.width) * scaleX);
-        int y2 = (int) ceil((rect.y + rect.height) * scaleY);
-        damage[damageIdx++] = (struct Rect) {
-          .x = this->destRect.x + x1,
-          .y = this->height - (this->destRect.y + y2),
-          .w = x2 - x1,
-          .h = y2 - y1,
-        };
-      }
+        damage[damageIdx++] = egl_desktopToScreen(matrix, desktopDamage->rects + i);
     }
   }
   else
