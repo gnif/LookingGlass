@@ -190,11 +190,11 @@ bool egl_damage_render(EGL_Damage * damage, bool rotate, const struct DesktopDam
   egl_shader_use(damage->shader);
   glUniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
 
-  if (data)
+  if (data && data->count != 0)
   {
     damage->count = data->count;
     GLfloat vertices[KVMFR_MAX_DAMAGE_RECTS * 8];
-    if (damage->count == 0)
+    if (damage->count == -1)
     {
       FrameDamageRect full = {
         .x = 0, .y = 0, .width = damage->width, .height = damage->height,

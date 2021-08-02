@@ -514,7 +514,8 @@ static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
-    if (damage->count == -1 || damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS)
+    if (damage->count == -1 || damageRectsCount == 0 ||
+        damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS)
       damage->count = -1;
     else
     {
