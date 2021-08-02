@@ -21,20 +21,30 @@
 #ifndef _H_X11DS_X11_
 #define _H_X11DS_X11_
 
+#include <stdatomic.h>
+
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 
+#include <GL/glx.h>
+
 #include "interface/displayserver.h"
 #include "common/thread.h"
 #include "common/types.h"
+#include "common/runningavg.h"
 
 struct X11DSState
 {
   Display *     display;
   Window        window;
   XVisualInfo * visual;
-  int        xinputOp;
+  int        xinputOp, xpresentOp;
+
+  uint32_t presentSerial;
+  Pixmap presentPixmap;
+  RunningAvg presentAvg;
+  LGEvent * frameEvent;
 
   LGThread * eventThread;
 

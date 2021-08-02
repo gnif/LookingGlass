@@ -31,6 +31,7 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/scrnsaver.h>
 #include <X11/extensions/Xinerama.h>
+#include <X11/extensions/Xpresent.h>
 #include <X11/Xcursor/Xcursor.h>
 
 #include <GL/glx.h>
@@ -45,6 +46,7 @@
 #include "app.h"
 #include "common/debug.h"
 #include "common/time.h"
+#include "common/event.h"
 #include "util.h"
 
 #define _NET_WM_STATE_REMOVE 0
@@ -77,7 +79,32 @@ enum {
 // forwards
 static void x11SetFullscreen(bool fs);
 static int  x11EventThread(void * unused);
-static void x11GenericEvent(XGenericEventCookie *cookie);
+static void x11XInputEvent(XGenericEventCookie *cookie);
+static void x11XPresentEvent(XGenericEventCookie *cookie);
+
+static void x11DoPresent(void)
+{
+  XPresentPixmap(
+    x11.display,
+    x11.window,
+    x11.presentPixmap,
+    x11.presentSerial++,
+    0,    // valid
+    0,    // update
+    -1,    // x_off,
+    -1,    // y_off,
+    0,    // target_crtc
+    None, // wait_fence
+    None, // idle_fence
+    0,    // options
+    0,    // target_msc,
+    0,    // divisor,
+    0,    // remainder,
+    NULL, // notifies
+    0     // nnotifies
+  );
+  XFlush(x11.display);
+}
 
 static void x11Setup(void)
 {
@@ -487,14 +514,23 @@ static bool x11Init(const LG_DSInitParams params)
   /* default to the square cursor */
   XDefineCursor(x11.display, x11.window, x11.cursors[LG_POINTER_SQUARE]);
 
+  x11.frameEvent = lgCreateEvent(true, 0);
+
+  x11.presentAvg = runningavg_new(1000);
+  XPresentQueryExtension(x11.display, &x11.xpresentOp, &event, &error);
+  x11.presentPixmap = XCreatePixmap(x11.display, x11.window, 1, 1, 24);
+  XPresentSelectInput(x11.display, x11.window,
+      PresentCompleteNotifyMask | PresentIdleNotifyMask);
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
 
   if (!lgCreateThread("X11EventThread", x11EventThread, NULL, &x11.eventThread))
   {
     DEBUG_ERROR("Failed to create the x11 event thread");
-    return false;
+    goto fail_window;
   }
+
+  x11DoPresent();
 
   return true;
 
@@ -513,11 +549,13 @@ static void x11Startup(void)
 
 static void x11Shutdown(void)
 {
+  lgSignalEvent(x11.frameEvent);
 }
 
 static void x11Free(void)
 {
   lgJoinThread(x11.eventThread, NULL);
+  lgFreeEvent(x11.frameEvent);
 
   if (x11.window)
     XDestroyWindow(x11.display, x11.window);
@@ -667,9 +705,18 @@ static int x11EventThread(void * unused)
       case GenericEvent:
       {
         XGenericEventCookie *cookie = (XGenericEventCookie*)&xe.xcookie;
-        XGetEventData(x11.display, cookie);
-        x11GenericEvent(cookie);
-        XFreeEventData(x11.display, cookie);
+        if (cookie->extension == x11.xinputOp)
+        {
+          XGetEventData(x11.display, cookie);
+          x11XInputEvent(cookie);
+          XFreeEventData(x11.display, cookie);
+        }
+        else if (cookie->extension == x11.xpresentOp)
+        {
+          XGetEventData(x11.display, cookie);
+          x11XPresentEvent(cookie);
+          XFreeEventData(x11.display, cookie);
+        }
         break;
       }
 
@@ -737,12 +784,9 @@ static int x11EventThread(void * unused)
   return 0;
 }
 
-static void x11GenericEvent(XGenericEventCookie *cookie)
+static void x11XInputEvent(XGenericEventCookie *cookie)
 {
   static int button_state = 0;
-
-  if (cookie->extension != x11.xinputOp)
-    return;
 
   switch(cookie->evtype)
   {
@@ -983,6 +1027,51 @@ static void x11GenericEvent(XGenericEventCookie *cookie)
   }
 }
 
+#include <math.h>
+
+static void x11XPresentEvent(XGenericEventCookie *cookie)
+{
+  switch(cookie->evtype)
+  {
+    case PresentCompleteNotify:
+    {
+      lgSignalEvent(x11.frameEvent);
+      x11DoPresent();
+#if 0
+
+      static uint64_t last    = 0;
+      static uint64_t predict = 0;
+
+      XPresentCompleteNotifyEvent * ev =
+        (XPresentCompleteNotifyEvent *)cookie->data;
+
+      const int64_t err = (int64_t)predict - ev->ust;
+      if (last)
+      {
+        const uint64_t delta = ev->ust - last;
+        runningavg_push(x11.presentAvg, delta);
+      }
+
+      DEBUG_WARN("predict err %f", err / 1000.0f);
+
+      predict = (ev->ust + round(runningavg_calc(x11.presentAvg)));
+      last = ev->ust;
+      XFlush(x11.display);
+#endif
+      break;
+    }
+
+    case PresentIdleNotify:
+    {
+      XPresentIdleNotifyEvent * ev =
+        (XPresentIdleNotifyEvent *)cookie->data;
+      (void)ev;
+
+      break;
+    }
+  }
+}
+
 #ifdef ENABLE_EGL
 static EGLDisplay x11GetEGLDisplay(void)
 {
@@ -1055,6 +1144,16 @@ static void x11GLSwapBuffers(void)
   glXSwapBuffers(x11.display, x11.window);
 }
 #endif
+
+static void x11WaitFrame(void)
+{
+  lgWaitEvent(x11.frameEvent, TIMEOUT_INFINITE);
+}
+
+static void x11StopWaitFrame(void)
+{
+  lgSignalEvent(x11.frameEvent);
+}
 
 static void x11GuestPointerUpdated(double x, double y, double localX, double localY)
 {
@@ -1332,6 +1431,8 @@ struct LG_DisplayServerOps LGDS_X11 =
   .glSetSwapInterval  = x11GLSetSwapInterval,
   .glSwapBuffers      = x11GLSwapBuffers,
 #endif
+  .waitFrame           = x11WaitFrame,
+  .stopWaitFrame       = x11StopWaitFrame,
   .guestPointerUpdated = x11GuestPointerUpdated,
   .setPointer          = x11SetPointer,
   .grabPointer         = x11GrabPointer,
