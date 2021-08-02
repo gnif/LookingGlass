@@ -297,6 +297,30 @@ The format of this file is the commonly known INI format, for example::
 Command line arguments will override any options loaded from the config
 files.
 
+.. _client_overlay_mode:
+
+Overlay Mode
+~~~~~~~~~~~~
+
+Looking-Glass is utilizing an overlay layer to draw various widgets (such
+as the FPS display). An "Overlay Mode" can be toggled (see 
+:ref:`client_key_bindings`) that allows editing and modifying widgets
+properties, such as their position and size. To use the Overlay Mode:
+
+- Enable one or more widgets (such as the FPS display)
+- Enter Overlay Mode by using its keybinding (the screen will turn
+  darker to indicate Overlay Mode is active)
+- Drag the widgets you enabled to your preferred position
+- Change the widget size (if the widget allows you) by dragging the
+  lower right edge
+- Change any other properties a widget has and are modifiable
+- Exit Overlay Mode by pressing :kbd:`ESC` or using the Overlay-Mode
+  keybinding again
+
+Modifications done in Overlay Mode are persistent and are stored
+in a special config file $XDG_CONFIG_HOME/looking-glass/imgui.ini.
+Please refrain from editing this file manually as your changes might
+be overwritten by the client.
 
 .. _client_full_command_options:
 
