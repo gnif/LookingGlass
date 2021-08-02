@@ -50,33 +50,41 @@ static void eglTexBuffer_cleanup(TextureBuffer * this)
 
 // common functions
 
-bool eglTexBuffer_init(EGL_Texture ** texture_, EGLDisplay * display)
+bool eglTexBuffer_init(EGL_Texture ** texture, EGLDisplay * display)
 {
-  TextureBuffer * this = (TextureBuffer *)calloc(1, sizeof(*this));
-  if (!this)
+  TextureBuffer * this;
+  if (!*texture)
   {
-    DEBUG_ERROR("Failed to malloc TexB");
-    return false;
+    this = (TextureBuffer *)calloc(1, sizeof(*this));
+    if (!this)
+    {
+      DEBUG_ERROR("Failed to malloc TexB");
+      return false;
+    }
+    *texture = &this->base;
+    this->free = true;
   }
-  *texture_ = &this->base;
+  else
+    this = UPCAST(TextureBuffer, *texture);
 
-  this->display  = display;
   this->texCount = 1;
   return true;
 }
 
-void eglTexBuffer_free(EGL_Texture * texture_)
+void eglTexBuffer_free(EGL_Texture * texture)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
   eglTexBuffer_cleanup(this);
   LG_LOCK_FREE(this->copyLock);
-  free(this);
+
+  if (this->free)
+    free(this);
 }
 
-bool eglTexBuffer_setup(EGL_Texture * texture_, const EGL_TexSetup * setup)
+bool eglTexBuffer_setup(EGL_Texture * texture, const EGL_TexSetup * setup)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
   eglTexBuffer_cleanup(this);
 
@@ -110,9 +118,9 @@ bool eglTexBuffer_setup(EGL_Texture * texture_, const EGL_TexSetup * setup)
   return true;
 }
 
-static bool eglTexBuffer_update(EGL_Texture * texture_, const EGL_TexUpdate * update)
+static bool eglTexBuffer_update(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
   assert(update->type == EGL_TEXTYPE_BUFFER);
 
   glBindTexture(GL_TEXTURE_2D, this->tex[0]);
@@ -129,14 +137,14 @@ static bool eglTexBuffer_update(EGL_Texture * texture_, const EGL_TexUpdate * up
   return true;
 }
 
-EGL_TexStatus eglTexBuffer_process(EGL_Texture * texture_)
+EGL_TexStatus eglTexBuffer_process(EGL_Texture * texture)
 {
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus eglTexBuffer_bind(EGL_Texture * texture_)
+EGL_TexStatus eglTexBuffer_bind(EGL_Texture * texture)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, this->tex[0]);
@@ -147,31 +155,31 @@ EGL_TexStatus eglTexBuffer_bind(EGL_Texture * texture_)
 
 // streaming functions
 
-bool eglTexBuffer_stream_init(EGL_Texture ** texture_, EGLDisplay * display)
+bool eglTexBuffer_stream_init(EGL_Texture ** texture, EGLDisplay * display)
 {
-  if (!eglTexBuffer_init(texture_, display))
+  if (!eglTexBuffer_init(texture, display))
     return false;
 
-  TextureBuffer * this = UPCAST(TextureBuffer, *texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, *texture);
 
   this->texCount = 2;
   LG_LOCK_INIT(this->copyLock);
   return true;
 }
 
-bool eglTexBuffer_stream_setup(EGL_Texture * texture_, const EGL_TexSetup * setup)
+bool eglTexBuffer_stream_setup(EGL_Texture * texture, const EGL_TexSetup * setup)
 {
-  if (!eglTexBuffer_setup(texture_, setup))
+  if (!eglTexBuffer_setup(texture, setup))
     return false;
 
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
   return eglTexUtilGenBuffers(&this->format, this->buf, this->texCount);
 }
 
-static bool eglTexBuffer_stream_update(EGL_Texture * texture_,
+static bool eglTexBuffer_stream_update(EGL_Texture * texture,
     const EGL_TexUpdate * update)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
   assert(update->type == EGL_TEXTYPE_BUFFER);
 
   LG_LOCK(this->copyLock);
@@ -183,9 +191,9 @@ static bool eglTexBuffer_stream_update(EGL_Texture * texture_,
   return true;
 }
 
-EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture_)
+EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
   LG_LOCK(this->copyLock);
 
@@ -225,9 +233,9 @@ EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture_)
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus eglTexBuffer_stream_bind(EGL_Texture * texture_)
+EGL_TexStatus eglTexBuffer_stream_bind(EGL_Texture * texture)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
   if (this->rIndex == -1)
     return EGL_TEX_STATUS_NOTREADY;

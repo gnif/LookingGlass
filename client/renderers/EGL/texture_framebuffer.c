@@ -25,9 +25,9 @@
 #include "texture_buffer.h"
 #include "common/debug.h"
 
-static bool eglTexFB_update(EGL_Texture * texture_, const EGL_TexUpdate * update)
+static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture_);
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
   assert(update->type == EGL_TEXTYPE_FRAMEBUFFER);
 
   LG_LOCK(this->copyLock);

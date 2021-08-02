@@ -60,6 +60,7 @@ bool egl_texture_init(EGL_Texture ** texture, EGLDisplay * display,
       return false;
   }
 
+  *texture = NULL;
   if (!ops->init(texture, display))
     return false;
 

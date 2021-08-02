@@ -748,6 +748,9 @@ static bool egl_render_startup(void * opaque, bool useDMA)
   else
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
 
+  if (!this->dmaSupport)
+    useDMA = false;
+
   if (debugContext)
   {
     if ((esMaj > 3 || (esMaj == 3 && esMin >= 2)) && g_egl_dynProcs.glDebugMessageCallback)

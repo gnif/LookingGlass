@@ -27,8 +27,8 @@
 typedef struct TextureBuffer
 {
   EGL_Texture base;
+  bool free;
 
-  EGLDisplay    display;
   EGL_TexFormat format;
   int           texCount;
   GLuint        tex[2];

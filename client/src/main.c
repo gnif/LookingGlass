@@ -149,6 +149,10 @@ static int renderThread(void * unused)
     return 1;
   }
 
+  if (g_state.lgr->supports &&
+      !g_state.lgr->supports(g_state.lgrData, LG_SUPPORTS_DMABUF))
+    g_state.useDMA = false;
+
   /* start up the fps timer */
   LGTimer * fpsTimer;
   if (!lgCreateTimer(500, fpsTimerFn, NULL, &fpsTimer))
@@ -925,17 +929,15 @@ static int lg_run(void)
     }
   }
 
-  g_state.useDMA =
-    g_params.allowDMA &&
-    ivshmemHasDMA(&g_state.shm) &&
-    g_state.lgr->supports &&
-    g_state.lgr->supports(g_state.lgrData, LG_SUPPORTS_DMABUF);
-
   if (!g_state.lgr)
   {
     DEBUG_INFO("Unable to find a suitable renderer");
     return -1;
   }
+
+  g_state.useDMA =
+    g_params.allowDMA &&
+    ivshmemHasDMA(&g_state.shm);
 
   // initialize the window dimensions at init for renderers
   g_state.windowW  = g_params.w;
