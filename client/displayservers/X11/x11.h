@@ -32,7 +32,6 @@
 #include "interface/displayserver.h"
 #include "common/thread.h"
 #include "common/types.h"
-#include "common/runningavg.h"
 
 struct X11DSState
 {
@@ -43,7 +42,6 @@ struct X11DSState
 
   uint32_t presentSerial;
   Pixmap presentPixmap;
-  RunningAvg presentAvg;
   LGEvent * frameEvent;
 
   LGThread * eventThread;

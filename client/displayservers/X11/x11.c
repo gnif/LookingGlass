@@ -516,11 +516,9 @@ static bool x11Init(const LG_DSInitParams params)
 
   x11.frameEvent = lgCreateEvent(true, 0);
 
-  x11.presentAvg = runningavg_new(1000);
   XPresentQueryExtension(x11.display, &x11.xpresentOp, &event, &error);
   x11.presentPixmap = XCreatePixmap(x11.display, x11.window, 1, 1, 24);
-  XPresentSelectInput(x11.display, x11.window,
-      PresentCompleteNotifyMask | PresentIdleNotifyMask);
+  XPresentSelectInput(x11.display, x11.window, PresentCompleteNotifyMask);
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
 
@@ -1037,36 +1035,6 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
     {
       lgSignalEvent(x11.frameEvent);
       x11DoPresent();
-#if 0
-
-      static uint64_t last    = 0;
-      static uint64_t predict = 0;
-
-      XPresentCompleteNotifyEvent * ev =
-        (XPresentCompleteNotifyEvent *)cookie->data;
-
-      const int64_t err = (int64_t)predict - ev->ust;
-      if (last)
-      {
-        const uint64_t delta = ev->ust - last;
-        runningavg_push(x11.presentAvg, delta);
-      }
-
-      DEBUG_WARN("predict err %f", err / 1000.0f);
-
-      predict = (ev->ust + round(runningavg_calc(x11.presentAvg)));
-      last = ev->ust;
-      XFlush(x11.display);
-#endif
-      break;
-    }
-
-    case PresentIdleNotify:
-    {
-      XPresentIdleNotifyEvent * ev =
-        (XPresentIdleNotifyEvent *)cookie->data;
-      (void)ev;
-
       break;
     }
   }
