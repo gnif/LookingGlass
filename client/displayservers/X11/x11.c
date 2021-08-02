@@ -27,7 +27,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <X11/extensions/Xfixes.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/scrnsaver.h>
 #include <X11/extensions/Xinerama.h>
@@ -89,10 +88,10 @@ static void x11DoPresent(void)
     x11.window,
     x11.presentPixmap,
     x11.presentSerial++,
-    0,    // valid
-    0,    // update
-    -1,    // x_off,
-    -1,    // y_off,
+    x11.presentRegion, // valid
+    x11.presentRegion, // update
+    0,    // x_off,
+    0,    // y_off,
     0,    // target_crtc
     None, // wait_fence
     None, // idle_fence
@@ -519,6 +518,8 @@ static bool x11Init(const LG_DSInitParams params)
   XPresentQueryExtension(x11.display, &x11.xpresentOp, &event, &error);
   x11.presentPixmap = XCreatePixmap(x11.display, x11.window, 1, 1, 24);
   XPresentSelectInput(x11.display, x11.window, PresentCompleteNotifyMask);
+  x11.presentRegion = XFixesCreateRegion(x11.display, &(XRectangle){0}, 1);
+
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
 

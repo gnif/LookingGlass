@@ -26,6 +26,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
+#include <X11/extensions/Xfixes.h>
 
 #include <GL/glx.h>
 
@@ -42,6 +43,7 @@ struct X11DSState
 
   uint32_t presentSerial;
   Pixmap presentPixmap;
+  XserverRegion presentRegion;
   LGEvent * frameEvent;
 
   LGThread * eventThread;
