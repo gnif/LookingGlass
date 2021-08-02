@@ -84,7 +84,7 @@ static bool egl_cursor_tex_init(struct CursorTex * t,
     const char * vertex_code  , size_t vertex_size,
     const char * fragment_code, size_t fragment_size)
 {
-  if (!egl_texture_init(&t->texture, NULL))
+  if (!egl_texture_init(&t->texture, NULL, EGL_TEXTYPE_BUFFER, false))
   {
     DEBUG_ERROR("Failed to initialize the cursor texture");
     return false;
@@ -256,7 +256,7 @@ struct CursorState egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rota
 
       case LG_CURSOR_COLOR:
       {
-        egl_texture_setup(cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->stride, false, false);
+        egl_texture_setup(cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->stride);
         egl_texture_update(cursor->norm.texture, data);
         egl_model_set_texture(cursor->model, cursor->norm.texture);
         break;
@@ -280,8 +280,8 @@ struct CursorState egl_cursor_render(EGL_Cursor * cursor, LG_RendererRotate rota
             xor[y * cursor->width + x] = xorMask;
           }
 
-        egl_texture_setup (cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false, false);
-        egl_texture_setup (cursor->mono.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4, false, false);
+        egl_texture_setup (cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4);
+        egl_texture_setup (cursor->mono.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4);
         egl_texture_update(cursor->norm.texture, (uint8_t *)and);
         egl_texture_update(cursor->mono.texture, (uint8_t *)xor);
         break;

@@ -36,7 +36,11 @@ add_library(renderer_EGL STATIC
 	egl.c
 	egldebug.c
 	shader.c
+	texture_util.c
 	texture.c
+	texture_buffer.c
+	texture_framebuffer.c
+	texture_dmabuf.c
 	model.c
 	desktop.c
 	cursor.c

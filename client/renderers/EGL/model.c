@@ -221,6 +221,5 @@ void update_uniform_bindings(EGL_Model * model)
   if (!model->shader || !model->texture)
     return;
 
-  const int count = egl_texture_count(model->texture);
-  egl_shader_associate_textures(model->shader, count);
+  egl_shader_associate_textures(model->shader, 1);
 }

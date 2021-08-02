@@ -464,7 +464,7 @@ static bool egl_on_mouse_event(void * opaque, const bool visible, const int x, c
   return true;
 }
 
-static bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, bool useDMA)
+static bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
 {
   struct Inst * this = (struct Inst *)opaque;
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
@@ -494,7 +494,7 @@ static bool egl_on_frame_format(void * opaque, const LG_RendererFormat format, b
   egl_update_scale_type(this);
   egl_damage_setup(this->damage, format.width, format.height);
 
-  return egl_desktop_setup(this->desktop, format, useDMA);
+  return egl_desktop_setup(this->desktop, format);
 }
 
 static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
@@ -603,7 +603,7 @@ static void debugCallback(GLenum source, GLenum type, GLuint id,
   DEBUG_PRINT(level, "GL message (source: %s, type: %s): %s", sourceName, typeName, message);
 }
 
-static bool egl_render_startup(void * opaque)
+static bool egl_render_startup(void * opaque, bool useDMA)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -767,7 +767,7 @@ static bool egl_render_startup(void * opaque)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(&this->desktop, this->display))
+  if (!egl_desktop_init(&this->desktop, this->display, useDMA))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;

@@ -95,6 +95,7 @@ struct AppState
   void               * lgrData;
   atomic_int           lgrResize;
   LG_Lock              lgrLock;
+  bool                 useDMA;
 
   bool                 cbAvailable;
   SpiceDataType        cbType;

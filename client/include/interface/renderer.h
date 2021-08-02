@@ -110,9 +110,9 @@ typedef void         (* LG_RendererOnRestart    )(void * opaque);
 typedef void         (* LG_RendererOnResize     )(void * opaque, const int width, const int height, const double scale, const LG_RendererRect destRect, LG_RendererRotate rotate);
 typedef bool         (* LG_RendererOnMouseShape )(void * opaque, const LG_RendererCursor cursor, const int width, const int height, const int pitch, const uint8_t * data);
 typedef bool         (* LG_RendererOnMouseEvent )(void * opaque, const bool visible , const int x, const int y);
-typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format, bool useDMA);
+typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_RendererFormat format);
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD, const FrameDamageRect * damage, int damageCount);
-typedef bool         (* LG_RendererRenderStartup)(void * opaque);
+typedef bool         (* LG_RendererRenderStartup)(void * opaque, bool useDMA);
 typedef bool         (* LG_RendererNeedsRender  )(void * opaque);
 typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate, const bool newFrame, const bool invalidateWindow);
 

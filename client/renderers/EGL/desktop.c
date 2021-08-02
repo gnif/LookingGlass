@@ -104,7 +104,7 @@ static bool egl_init_desktop_shader(
   return true;
 }
 
-bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
+bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA)
 {
   *desktop = (EGL_Desktop *)malloc(sizeof(EGL_Desktop));
   if (!*desktop)
@@ -116,7 +116,8 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display)
   memset(*desktop, 0, sizeof(EGL_Desktop));
   (*desktop)->display = display;
 
-  if (!egl_texture_init(&(*desktop)->texture, display))
+  if (!egl_texture_init(&(*desktop)->texture, display,
+        useDMA ? EGL_TEXTYPE_DMABUF : EGL_TEXTYPE_FRAMEBUFFER, true))
   {
     DEBUG_ERROR("Failed to initialize the desktop texture");
     return false;
@@ -209,7 +210,7 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   *desktop = NULL;
 }
 
-bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bool useDMA)
+bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
 {
   enum EGL_PixelFormat pixFmt;
   switch(format.type)
@@ -247,9 +248,7 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format, bo
     pixFmt,
     format.width,
     format.height,
-    format.pitch,
-    true, // streaming texture
-    useDMA
+    format.pitch
   ))
   {
     DEBUG_ERROR("Failed to setup the desktop texture");
@@ -272,13 +271,6 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
       return false;
   }
 
-  enum EGL_TexStatus status;
-  if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)
-  {
-    if (status != EGL_TEX_STATUS_NOTREADY)
-      DEBUG_ERROR("Failed to process the desktop texture");
-  }
-
   return true;
 }
 
@@ -288,6 +280,13 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
 {
   if (!desktop->shader)
     return false;
+
+  enum EGL_TexStatus status;
+  if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)
+  {
+    if (status != EGL_TEX_STATUS_NOTREADY)
+      DEBUG_ERROR("Failed to process the desktop texture");
+  }
 
   int scaleAlgo = EGL_SCALE_NEAREST;
 

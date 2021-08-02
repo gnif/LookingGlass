@@ -28,6 +28,9 @@
 #define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
 #define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
 
+#define UPCAST(type, x) \
+  (type *)((uintptr_t)(x) - offsetof(type, base))
+
 // reads the specified file into a new buffer
 // the callee must free the buffer
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length);

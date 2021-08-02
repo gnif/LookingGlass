@@ -20,27 +20,35 @@
 
 #pragma once
 
-#include <stdbool.h>
+#include "texture.h"
 
-#include "interface/renderer.h"
-
-typedef struct EGL_Desktop EGL_Desktop;
-
-enum EGL_DesktopScaleType
+typedef struct EGL_TexFormat
 {
-  EGL_DESKTOP_NOSCALE,
-  EGL_DESKTOP_UPSCALE,
-  EGL_DESKTOP_DOWNSCALE,
-};
+  size_t       bpp;
+  GLenum       format;
+  GLenum       intFormat;
+  GLenum       dataType;
+  unsigned int fourcc;
+  size_t       bufferSize;
 
-struct Option;
-bool egl_desktop_scale_validate(struct Option * opt, const char ** error);
+  size_t       width, height;
+  size_t       stride, pitch;
+}
+EGL_TexFormat;
 
-bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA);
-void egl_desktop_free(EGL_Desktop ** desktop);
+typedef struct EGL_TexBuffer
+{
+  size_t size;
+  GLuint pbo;
+  void * map;
+  GLsync sync;
+  bool   updated;
+}
+EGL_TexBuffer;
 
-bool egl_desktop_setup (EGL_Desktop * desktop, const LG_RendererFormat format);
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd);
-bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
-    const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
-    LG_RendererRotate rotate);
+bool eglTexUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
+bool eglTexUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
+    int count);
+void eglTexUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
+bool eglTexUtilMapBuffer(EGL_TexBuffer * buffer);
+void eglTexUtilUnmapBuffer(EGL_TexBuffer * buffer);

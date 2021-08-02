@@ -140,7 +140,7 @@ static bool fpsTimerFn(void * unused)
 
 static int renderThread(void * unused)
 {
-  if (!g_state.lgr->render_startup(g_state.lgrData))
+  if (!g_state.lgr->render_startup(g_state.lgrData, g_state.useDMA))
   {
     g_state.state = APP_STATE_SHUTDOWN;
 
@@ -456,13 +456,7 @@ int main_frameThread(void * unused)
   LG_RendererFormat lgrFormat;
 
   struct DMAFrameInfo dmaInfo[LGMP_Q_FRAME_LEN] = {0};
-  const bool useDMA =
-    g_params.allowDMA &&
-    ivshmemHasDMA(&g_state.shm) &&
-    g_state.lgr->supports &&
-    g_state.lgr->supports(g_state.lgrData, LG_SUPPORTS_DMABUF);
-
-  if (useDMA)
+  if (g_state.useDMA)
     DEBUG_INFO("Using DMA buffer support");
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
@@ -607,7 +601,7 @@ int main_frameThread(void * unused)
           frame->rotation);
 
       LG_LOCK(g_state.lgrLock);
-      if (!g_state.lgr->on_frame_format(g_state.lgrData, lgrFormat, useDMA))
+      if (!g_state.lgr->on_frame_format(g_state.lgrData, lgrFormat))
       {
         DEBUG_ERROR("renderer failed to configure format");
         g_state.state = APP_STATE_SHUTDOWN;
@@ -625,7 +619,7 @@ int main_frameThread(void * unused)
       core_updatePositionInfo();
     }
 
-    if (useDMA)
+    if (g_state.useDMA)
     {
       /* find the existing dma buffer if it exists */
       for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
@@ -674,7 +668,7 @@ int main_frameThread(void * unused)
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!g_state.lgr->on_frame(g_state.lgrData, fb, useDMA ? dma->fd : -1,
+    if (!g_state.lgr->on_frame(g_state.lgrData, fb, g_state.useDMA ? dma->fd : -1,
         frame->damageRects, frame->damageRectsCount))
     {
       lgmpClientMessageDone(queue);
@@ -719,7 +713,7 @@ int main_frameThread(void * unused)
   lgmpClientUnsubscribe(&queue);
   g_state.lgr->on_restart(g_state.lgrData);
 
-  if (useDMA)
+  if (g_state.useDMA)
   {
     for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
       if (dmaInfo[i].fd >= 0)
@@ -930,6 +924,12 @@ static int lg_run(void)
       }
     }
   }
+
+  g_state.useDMA =
+    g_params.allowDMA &&
+    ivshmemHasDMA(&g_state.shm) &&
+    g_state.lgr->supports &&
+    g_state.lgr->supports(g_state.lgrData, LG_SUPPORTS_DMABUF);
 
   if (!g_state.lgr)
   {
