@@ -34,6 +34,8 @@ typedef struct TextureBuffer
   GLuint        tex[2];
   GLuint        sampler;
   EGL_TexBuffer buf[2];
+  int           bufFree;
+  GLsync        sync;
   LG_Lock       copyLock;
   int           bufIndex;
   int           rIndex;

@@ -41,7 +41,6 @@ typedef struct EGL_TexBuffer
   size_t size;
   GLuint pbo;
   void * map;
-  GLsync sync;
   bool   updated;
 }
 EGL_TexBuffer;

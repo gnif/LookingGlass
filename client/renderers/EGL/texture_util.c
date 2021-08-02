@@ -124,12 +124,6 @@ void eglTexUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
 
     eglTexUtilUnmapBuffer(buffer);
     glDeleteBuffers(1, &buffer->pbo);
-    if (buffer->sync)
-    {
-      glDeleteSync(buffer->sync);
-      buffer->sync = 0;
-    }
-
     buffer->pbo = 0;
   }
 }
