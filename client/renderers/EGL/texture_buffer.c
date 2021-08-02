@@ -148,7 +148,6 @@ bool eglTexBuffer_stream_init(EGL_Texture ** texture_, EGLDisplay * display)
 
   TextureBuffer * this = UPCAST(TextureBuffer, *texture_);
 
-  this->base.ops = &EGL_TextureBufferStream;
   this->texCount = 2;
   LG_LOCK_INIT(this->copyLock);
   return true;
