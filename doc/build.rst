@@ -84,6 +84,7 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  libxinerama-dev
    -  libxss-dev
    -  libxcursor-dev
+   -  libxpresent-dev
 
 -  Disable with ``cmake -DENABLE_WAYLAND=no ..``
 
