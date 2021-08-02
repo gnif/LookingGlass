@@ -145,6 +145,54 @@ bool NvFBCToSysCreate(
   return true;
 }
 
+void NvFBCGetDiffMapBlockSize(
+  int                     diffRes,
+  enum DiffMapBlockSize * diffMapBlockSize,
+  int                   * diffShift,
+  void                  * privData,
+  unsigned int            privDataSize
+)
+{
+  NvFBCStatusEx status = {0};
+  status.dwVersion = NVFBC_STATUS_VER;
+  status.dwPrivateDataSize = privDataSize;
+  status.pPrivateData      = privData;
+
+  NVFBCRESULT result = nvapi.getStatusEx(&status);
+  if (result != NVFBC_SUCCESS)
+    status.bSupportConfigurableDiffMap = FALSE;
+
+  if (!status.bSupportConfigurableDiffMap)
+  {
+    *diffMapBlockSize = DIFFMAP_BLOCKSIZE_128X128;
+    *diffShift        = 7;
+    return;
+  }
+
+  switch (diffRes)
+  {
+    case 16:
+      *diffMapBlockSize = DIFFMAP_BLOCKSIZE_16X16;
+      *diffShift        = 4;
+      break;
+
+    case 32:
+      *diffMapBlockSize = DIFFMAP_BLOCKSIZE_32X32;
+      *diffShift        = 5;
+      break;
+
+    case 64:
+      *diffMapBlockSize = DIFFMAP_BLOCKSIZE_64X64;
+      *diffShift        = 6;
+      break;
+
+    default:
+      *diffMapBlockSize = DIFFMAP_BLOCKSIZE_128X128;
+      *diffShift        = 7;
+      break;
+  }
+}
+
 void NvFBCToSysRelease(NvFBCHandle * handle)
 {
   if (!*handle)

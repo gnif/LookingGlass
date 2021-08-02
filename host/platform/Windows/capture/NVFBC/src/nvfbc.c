@@ -36,7 +36,7 @@
 #include <NvFBC/nvFBC.h>
 #include "wrapper.h"
 
-#define DIFF_MAP_DIM(x) ((x + 127) / 128)
+#define DIFF_MAP_DIM(x, shift) (((x) + (1 << (shift)) - 1) >> (shift))
 
 struct FrameInfo
 {
@@ -64,6 +64,7 @@ struct iface
 
   uint8_t * frameBuffer;
   uint8_t * diffMap;
+  int       diffShift;
 
   NvFBCFrameGrabInfo grabInfo;
 
@@ -130,6 +131,13 @@ static void nvfbc_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = true
     },
+    {
+      .module         = "nvfbc",
+      .name           = "diffRes",
+      .description    = "The resolution of the diff map",
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 128
+    },
     {0}
   };
 
@@ -186,6 +194,10 @@ static bool nvfbc_init(void)
     free(privData);
     return false;
   }
+
+  int diffRes = option_get_bool("nvfbc", "diffRes");
+  enum DiffMapBlockSize blockSize;
+  NvFBCGetDiffMapBlockSize(diffRes, &blockSize, &this->diffShift, privData, privDataLen);
   free(privData);
 
   getDesktopSize(&this->width, &this->height);
@@ -197,7 +209,7 @@ static bool nvfbc_init(void)
     !this->seperateCursor,
     this->seperateCursor,
     true,
-    DIFFMAP_BLOCKSIZE_128X128,
+    blockSize,
     (void **)&this->frameBuffer,
     (void **)&this->diffMap,
     &event
@@ -221,6 +233,10 @@ static bool nvfbc_init(void)
     this->forceCompositionCreated = true;
   }
 
+  if (diffRes != (1 << this->diffShift))
+    DEBUG_WARN("DiffMap block size not supported: %dx%d", diffRes, diffRes);
+
+  DEBUG_INFO("DiffMap block    : %dx%d", 1 << this->diffShift, 1 << this->diffShift);
   DEBUG_INFO("Cursor mode      : %s", this->seperateCursor ? "decoupled" : "integrated");
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
@@ -228,7 +244,10 @@ static bool nvfbc_init(void)
     this->frameInfo[i].width    = 0;
     this->frameInfo[i].height   = 0;
     this->frameInfo[i].wasFresh = false;
-    this->frameInfo[i].diffMap  = malloc(DIFF_MAP_DIM(this->maxWidth) * DIFF_MAP_DIM(this->maxHeight));
+    this->frameInfo[i].diffMap  = malloc(
+      DIFF_MAP_DIM(this->maxWidth, this->diffShift) *
+      DIFF_MAP_DIM(this->maxHeight, this->diffShift)
+    );
     if (!this->frameInfo[i].diffMap)
     {
       DEBUG_ERROR("Failed to allocate memory for diffMaps");
@@ -312,8 +331,8 @@ static CaptureResult nvfbc_capture(void)
     return result;
 
   bool changed = false;
-  const unsigned int h = DIFF_MAP_DIM(this->height);
-  const unsigned int w = DIFF_MAP_DIM(this->width);
+  const unsigned int h = DIFF_MAP_DIM(this->height, this->diffShift);
+  const unsigned int w = DIFF_MAP_DIM(this->width,  this->diffShift);
   for (unsigned int y = 0; y < h; ++y)
     for (unsigned int x = 0; x < w; ++x)
       if (this->diffMap[(y*w)+x])
@@ -361,8 +380,8 @@ static void dsUnion(struct DisjointSet * ds, int a, int b)
 
 static void updateDamageRects(CaptureFrame * frame)
 {
-  const unsigned int h = DIFF_MAP_DIM(this->height);
-  const unsigned int w = DIFF_MAP_DIM(this->width);
+  const unsigned int h = DIFF_MAP_DIM(this->height, this->diffShift);
+  const unsigned int w = DIFF_MAP_DIM(this->width,  this->diffShift);
 
   struct DisjointSet ds[w * h];
 
@@ -392,10 +411,10 @@ static void updateDamageRects(CaptureFrame * frame)
           goto done;
         }
 
-        int x1 = ds[y * w + x].x1 * 128;
-        int y1 = ds[y * w + x].y1 * 128;
-        int x2 = min((ds[y * w + x].x2 + 1) * 128, this->width);
-        int y2 = min((ds[y * w + x].y2 + 1) * 128, this->height);
+        int x1 = ds[y * w + x].x1 << this->diffShift;
+        int y1 = ds[y * w + x].y1 << this->diffShift;
+        int x2 = min((ds[y * w + x].x2 + 1) << this->diffShift, this->width);
+        int y2 = min((ds[y * w + x].y2 + 1) << this->diffShift, this->height);
         frame->damageRects[rectId++] = (FrameDamageRect) {
           .x = x1,
           .y = y1,
@@ -470,8 +489,8 @@ inline static void rectCopyUnaligned(uint8_t * dest, uint8_t * src, int ystart,
 static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
     const unsigned int height, int frameIndex)
 {
-  const unsigned int h = DIFF_MAP_DIM(this->height);
-  const unsigned int w = DIFF_MAP_DIM(this->width);
+  const unsigned int h = DIFF_MAP_DIM(this->height, this->diffShift);
+  const unsigned int w = DIFF_MAP_DIM(this->width,  this->diffShift);
   uint8_t * frameData = framebuffer_get_data(frame);
   struct FrameInfo * info = this->frameInfo + frameIndex;
 
@@ -481,8 +500,8 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
 
     for (unsigned int y = 0; y < h; ++y)
     {
-      const unsigned int ystart = y * 128;
-      const unsigned int yend = min(height, (y + 1) * 128);
+      const unsigned int ystart = y  << this->diffShift;
+      const unsigned int yend = min(height, (y + 1)  << this->diffShift);
 
       for (unsigned int x = 0; x < w; )
       {
@@ -496,8 +515,8 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
         while (x2 < w && ((!wasFresh && info->diffMap[y * w + x2]) || this->diffMap[y * w + x2]))
           ++x2;
 
-        unsigned int width = (min(x2 * 128, this->grabStride) - x * 128) * 4;
-        rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend, x * 512,
+        unsigned int width = (min(x2 << this->diffShift, this->grabStride) - (x << this->diffShift)) * 4;
+        rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend, x << (2 + this->diffShift),
             this->grabStride * 4, width);
 
         x = x2;

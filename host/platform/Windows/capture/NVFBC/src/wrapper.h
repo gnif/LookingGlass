@@ -60,6 +60,14 @@ bool NvFBCToSysCreate(
 );
 void NvFBCToSysRelease(NvFBCHandle * handle);
 
+void NvFBCGetDiffMapBlockSize(
+  int                     diffRes,
+  enum DiffMapBlockSize * diffMapBlockSize,
+  int                   * diffShift,
+  void                  * privData,
+  unsigned int            privDataSize
+);
+
 bool NvFBCToSysSetup(
   NvFBCHandle           handle,
   enum                  BufferFormat format,
