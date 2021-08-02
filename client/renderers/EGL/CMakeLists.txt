@@ -43,6 +43,7 @@ add_library(renderer_EGL STATIC
 	texture_dmabuf.c
 	model.c
 	desktop.c
+	desktop_rects.c
 	cursor.c
 	draw.c
 	splash.c
