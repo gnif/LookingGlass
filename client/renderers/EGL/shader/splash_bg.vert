@@ -3,7 +3,6 @@
 layout(location = 0) in vec3 vertexPosition_modelspace;
 
 out highp vec3  pos;
-out highp float a;
 
 void main()
 {
