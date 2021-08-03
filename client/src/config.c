@@ -575,8 +575,8 @@ bool config_load(int argc, char * argv[])
 
   if (g_params.noScreensaver && g_params.autoScreensaver)
   {
-    fprintf(stderr, "win:noScreensaver (-S) and win:autoScreensaver "
-        "can't be used simultaneously\n");
+    DEBUG_WARN("win:noScreensaver (-S) and win:autoScreensaver "
+        "can't be used simultaneously");
     return false;
   }
 
