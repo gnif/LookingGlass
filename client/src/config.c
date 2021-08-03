@@ -601,6 +601,12 @@ bool config_load(int argc, char * argv[])
   g_params.autoCapture            = option_get_bool("input", "autoCapture"           );
   g_params.captureInputOnly       = option_get_bool("input", "captureOnly"           );
 
+  if (g_params.jitRender && !g_params.mouseRedraw)
+  {
+    DEBUG_WARN("win:jitRender is enabled, forcing input:mouseRedraw");
+    g_params.mouseRedraw = true;
+  }
+
   g_params.helpMenuDelayUs = option_get_int("input", "helpMenuDelay") * (uint64_t) 1000;
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
