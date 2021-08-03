@@ -47,9 +47,13 @@
 #include "desktop.h"
 #include "cursor.h"
 #include "splash.h"
+#include "util.h"
 
 #define SPLASH_FADE_TIME 1000000
-#define DESKTOP_DAMAGE_COUNT 2
+#define MAX_BUFFER_AGE       3
+#define DESKTOP_DAMAGE_COUNT 4
+#define MAX_ACCUMULATED_DAMAGE ((KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
+#define IDX_AGO(counter, i, total) ((counter) + (total) - i) % (total)
 
 struct Options
 {
@@ -106,6 +110,11 @@ struct Inst
   struct DesktopDamage desktopDamage[DESKTOP_DAMAGE_COUNT];
   unsigned int         desktopDamageIdx;
   LG_Lock              desktopDamageLock;
+
+  bool         hasBufferAge;
+  struct Rect  overlayHistory[DESKTOP_DAMAGE_COUNT][MAX_OVERLAY_RECTS + 1];
+  int          overlayHistoryCount[DESKTOP_DAMAGE_COUNT];
+  unsigned int overlayHistoryIdx;
 
   RingBuffer importTimings;
   GraphHandle importGraph;
@@ -725,6 +734,8 @@ static bool egl_render_startup(void * opaque, bool useDMA)
     return false;
   }
 
+  this->hasBufferAge = util_hasGLExt(client_exts, "EGL_EXT_buffer_age");
+
   if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
     if (util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import"))
@@ -771,7 +782,7 @@ static bool egl_render_startup(void * opaque, bool useDMA)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(&this->desktop, this->display, useDMA, 1))
+  if (!egl_desktop_init(&this->desktop, this->display, useDMA, MAX_ACCUMULATED_DAMAGE))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
@@ -811,29 +822,132 @@ static bool egl_needs_render(void * opaque)
   return !this->waitDone;
 }
 
+inline static EGLint egl_buffer_age(struct Inst * this)
+{
+  if (!this->hasBufferAge)
+    return 0;
+
+  EGLint result;
+  eglQuerySurface(this->display, this->surface, EGL_BUFFER_AGE_EXT, &result);
+  return result;
+}
+
+inline static void renderLetterBox(struct Inst * this)
+{
+  bool hLB = this->destRect.x > 0;
+  bool vLB = this->destRect.y > 0;
+
+  if (hLB || vLB)
+  {
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glEnable(GL_SCISSOR_TEST);
+
+    if (hLB)
+    {
+      glScissor(0.0f, 0.0f, this->destRect.x, this->height);
+      glClear(GL_COLOR_BUFFER_BIT);
+
+      float x2 = this->destRect.x + this->destRect.w;
+      glScissor(x2, 0.0f, this->width - x2, this->height);
+      glClear(GL_COLOR_BUFFER_BIT);
+    }
+
+    if (vLB)
+    {
+      glScissor(0.0f, 0.0f, this->width, this->destRect.y);
+      glClear(GL_COLOR_BUFFER_BIT);
+
+      float y2 = this->destRect.y + this->destRect.h;
+      glScissor(0.0f, y2, this->width, this->height - y2);
+      glClear(GL_COLOR_BUFFER_BIT);
+    }
+
+    glDisable(GL_SCISSOR_TEST);
+  }
+}
+
 static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
     const bool invalidateWindow)
 {
   struct Inst * this = (struct Inst *)opaque;
-
-  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
+  EGLint bufferAge   = egl_buffer_age(this);
+  bool renderAll     = invalidateWindow || !this->start || this->hadOverlay ||
+                       bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE;
 
   bool hasOverlay = false;
   struct CursorState cursorState = { .visible = false };
   struct DesktopDamage * desktopDamage;
 
+  char accumulated_[
+    sizeof(struct DamageRects) +
+    MAX_ACCUMULATED_DAMAGE * sizeof(struct FrameDamageRect)
+  ];
+  struct DamageRects * accumulated = (struct DamageRects *) accumulated_;
+  accumulated->count = 0;
+
   INTERLOCKED_SECTION(this->desktopDamageLock, {
+    if (!renderAll)
+    {
+      for (int i = 0; i < bufferAge; ++i)
+      {
+        struct DesktopDamage * damage = this->desktopDamage +
+            IDX_AGO(this->desktopDamageIdx, i, DESKTOP_DAMAGE_COUNT);
+
+        if (damage->count < 0)
+        {
+          renderAll = true;
+          break;
+        }
+
+        memcpy(accumulated->rects + accumulated->count, damage->rects,
+            damage->count * sizeof(struct FrameDamageRect));
+        accumulated->count += damage->count;
+      }
+    }
     desktopDamage = this->desktopDamage + this->desktopDamageIdx;
     this->desktopDamageIdx = (this->desktopDamageIdx + 1) % DESKTOP_DAMAGE_COUNT;
+    this->desktopDamage[this->desktopDamageIdx].count = 0;
   });
+
+  if (!renderAll)
+  {
+    double matrix[6];
+    egl_screenToDesktopMatrix(matrix, this->format.width, this->format.height,
+        this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
+        this->width, this->height);
+
+    for (int i = 0; i < bufferAge; ++i)
+    {
+      int idx   = IDX_AGO(this->overlayHistoryIdx, i, DESKTOP_DAMAGE_COUNT);
+      int count = this->overlayHistoryCount[idx];
+      struct Rect * damage = this->overlayHistory[idx];
+
+      if (count < 0)
+      {
+        renderAll = true;
+        break;
+      }
+
+      for (int j = 0; j < count; ++j)
+        accumulated->count += egl_screenToDesktop(
+          accumulated->rects + accumulated->count, matrix, damage + j,
+          this->format.width, this->format.height
+        );
+    }
+
+    ++this->overlayHistoryIdx;
+    accumulated->count = util_mergeOverlappingRects(accumulated->rects, accumulated->count);
+  }
+
+  if (renderAll)
+    renderLetterBox(this);
 
   if (this->start)
   {
     if (egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
-        this->scaleType , rotate, NULL))
+        this->scaleType , rotate, renderAll ? NULL : accumulated))
     {
       if (!this->waitFadeTime)
       {
@@ -848,7 +962,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
           this->width, this->height);
     }
     else
-      desktopDamage->count = -1;
+      hasOverlay = true;
   }
 
   if (!this->waitDone)
@@ -901,13 +1015,23 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
         damage[i].y = this->height - damage[i].y - damage[i].h;
   }
 
+  if (damageIdx >= 0 && cursorState.visible)
+    damage[damageIdx++] = cursorState.rect;
+
+  int overlayHistoryIdx = this->overlayHistoryIdx % DESKTOP_DAMAGE_COUNT;
+  if (hasOverlay)
+    this->overlayHistoryCount[overlayHistoryIdx] = -1;
+  else
+  {
+    if (damageIdx > 0)
+      memcpy(this->overlayHistory[overlayHistoryIdx], damage, damageIdx * sizeof(struct Rect));
+    this->overlayHistoryCount[overlayHistoryIdx] = damageIdx;
+  }
+
   if (!hasOverlay && !this->hadOverlay)
   {
     if (this->cursorLast.visible)
       damage[damageIdx++] = this->cursorLast.rect;
-
-    if (cursorState.visible)
-      damage[damageIdx++] = cursorState.rect;
 
     if (desktopDamage->count == -1)
       // -1 damage count means invalidating entire window.
@@ -928,7 +1052,6 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
 
   this->hadOverlay = hasOverlay;
   this->cursorLast = cursorState;
-  desktopDamage->count = 0;
 
   app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
   return true;
