@@ -39,16 +39,17 @@ struct X11DSState
   Display *     display;
   Window        window;
   XVisualInfo * visual;
-  int        xinputOp, xpresentOp;
 
-  bool jitRender;
-  uint32_t presentSerial;
-  Pixmap presentPixmap;
+  int           xpresentOp;
+  bool          jitRender;
+  uint32_t      presentSerial;
+  Pixmap        presentPixmap;
   XserverRegion presentRegion;
-  LGEvent * frameEvent;
+  LGEvent *     frameEvent;
 
   LGThread * eventThread;
 
+  int xinputOp;
   int pointerDev;
   int keyboardDev;
   int xValuator;
