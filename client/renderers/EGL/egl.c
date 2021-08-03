@@ -941,9 +941,6 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     accumulated->count = util_mergeOverlappingRects(accumulated->rects, accumulated->count);
   }
 
-  if (renderAll)
-    renderLetterBox(this);
-
   if (this->start)
   {
     if (egl_desktop_render(this->desktop,
@@ -966,6 +963,8 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     else
       hasOverlay = true;
   }
+
+  renderLetterBox(this);
 
   if (!this->waitDone)
   {
