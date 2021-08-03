@@ -92,6 +92,10 @@ typedef struct LG_DSInitParams
 
   // if true the renderer requires an OpenGL context
   bool opengl;
+
+  // x11 needs to know if this is in use so we can decide to setup for
+  // presentation times
+  bool jitRender;
 }
 LG_DSInitParams;
 

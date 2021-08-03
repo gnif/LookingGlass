@@ -958,7 +958,8 @@ static int lg_run(void)
     .resizable           = g_params.allowResize,
     .borderless          = g_params.borderless,
     .maximize            = g_params.maximize,
-    .opengl              = needsOpenGL
+    .opengl              = needsOpenGL,
+    .jitRender           = g_params.jitRender
   };
 
   g_state.dsInitialized = g_state.ds->init(params);
