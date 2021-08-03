@@ -32,9 +32,6 @@ typedef struct TexDMABUF
 
   EGLDisplay display;
 
-  GLuint fbo;
-  GLuint tex;
-
   size_t imageCount;
   size_t imageUsed;
   struct
@@ -52,19 +49,7 @@ EGL_TextureOps EGL_TextureDMABUF;
 
 static void eglTexDMABUF_cleanup(TexDMABUF * this)
 {
-  if (this->fbo)
-  {
-    glDeleteFramebuffers(1, &this->fbo);
-    this->fbo = 0;
-  }
-
-  if (this->tex)
-  {
-    glDeleteTextures(1, &this->tex);
-    this->tex = 0;
-  }
-
-  for(size_t i = 0; i < this->imageUsed; ++i)
+  for (size_t i = 0; i < this->imageUsed; ++i)
     eglDestroyImage(this->display, this->images[i].image);
 
   this->imageUsed = 0;
@@ -110,9 +95,6 @@ static bool eglTexDMABUF_setup(EGL_Texture * texture, const EGL_TexSetup * setup
 
   if (!eglTexBuffer_setup(&parent->base, setup))
     return false;
-
-  glGenFramebuffers(1, &this->fbo);
-  glGenTextures    (1, &this->tex);
 
   glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
   glTexImage2D(GL_TEXTURE_2D,
@@ -190,53 +172,19 @@ static bool eglTexDMABUF_update(EGL_Texture * texture,
     this->images[index].image = image;
   }
 
-  glBindTexture(GL_TEXTURE_2D, this->tex);
-  g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
-
-  /* should any of the following even be here? move to process? - gnif */
-
-  glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-      this->tex, 0);
-
   glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
-  glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, parent->format.width,
-      parent->format.height);
-
-  GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  glFlush();
-
-  switch(glClientWaitSync(fence, 0, 20000000)) //20ms
-  {
-    case GL_ALREADY_SIGNALED:
-    case GL_CONDITION_SATISFIED:
-      break;
-
-    case GL_TIMEOUT_EXPIRED:
-      break;
-
-    case GL_WAIT_FAILED:
-    case GL_INVALID_VALUE:
-      DEBUG_GL_ERROR("glClientWaitSync failed");
-      break;
-  }
-
-  glDeleteSync(fence);
+  g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
   return true;
 }
 
 static EGL_TexStatus eglTexDMABUF_process(EGL_Texture * texture)
 {
-//  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
-//  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
-
   return EGL_TEX_STATUS_OK;
 }
 
 static EGL_TexStatus eglTexDMABUF_bind(EGL_Texture * texture)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
-//  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
