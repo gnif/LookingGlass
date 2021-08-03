@@ -735,6 +735,8 @@ static bool egl_render_startup(void * opaque, bool useDMA)
   }
 
   this->hasBufferAge = util_hasGLExt(client_exts, "EGL_EXT_buffer_age");
+  if (!this->hasBufferAge)
+    DEBUG_WARN("GL_EXT_buffer_age is not supported, will not perform as well.");
 
   if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
