@@ -103,9 +103,13 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
     {
       if (wlWm.viewport)
       {
+        // Clearing the source and destination rectangles should happen in wp_viewport_destroy.
+        // However, wlroots does not clear the rectangle until fixed in 456c6e22 (2021-08-02).
+        // This should be kept to work around old versions of wlroots.
         wl_fixed_t clear = wl_fixed_from_int(-1);
         wp_viewport_set_source(wlWm.viewport, clear, clear, clear, clear);
         wp_viewport_set_destination(wlWm.viewport, -1, -1);
+
         wp_viewport_destroy(wlWm.viewport);
         wlWm.viewport = NULL;
       }
