@@ -154,8 +154,11 @@ struct LG_DisplayServerOps
 #endif
 
   /* Waits for a good time to render the next frame in time for the next vblank.
-   * This is optional and a display server may choose to not implement it. */
-  void (*waitFrame)(void);
+   * This is optional and a display server may choose to not implement it.
+   *
+   * return true to force the frame to be rendered, this is used by X11 for
+   * calibration */
+  bool (*waitFrame)(void);
 
   /* This must be called when waitFrame returns, but no frame is actually rendered. */
   void (*skipFrame)(void);

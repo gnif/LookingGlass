@@ -171,14 +171,17 @@ static int renderThread(void * unused)
 
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
+    bool forceRender = false;
+    if (g_state.jitRender)
+      forceRender = g_state.ds->waitFrame();
+
     app_handleRenderEvent(microtime());
     if (g_state.jitRender)
     {
-      g_state.ds->waitFrame();
-
       const uint64_t pending =
         atomic_load_explicit(&g_state.pendingCount, memory_order_acquire);
       if (!lgResetEvent(g_state.frameEvent)
+          && !forceRender
           && !pending
           && !app_overlayNeedsRender()
           && !g_state.lgr->needs_render(g_state.lgrData))

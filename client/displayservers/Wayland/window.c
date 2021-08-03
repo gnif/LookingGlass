@@ -138,13 +138,15 @@ static const struct wl_callback_listener frame_listener = {
    .done = frameHandler,
 };
 
-void waylandWaitFrame(void)
+bool waylandWaitFrame(void)
 {
   lgWaitEvent(wlWm.frameEvent, TIMEOUT_INFINITE);
 
   struct wl_callback * callback = wl_surface_frame(wlWm.surface);
   if (callback)
     wl_callback_add_listener(callback, &frame_listener, NULL);
+
+  return false;
 }
 
 void waylandSkipFrame(void)

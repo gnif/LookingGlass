@@ -1128,7 +1128,7 @@ static void x11GLSwapBuffers(void)
 }
 #endif
 
-static void x11WaitFrame(void)
+static bool x11WaitFrame(void)
 {
   /* wait until we are woken up by the present event */
   lgWaitEvent(x11.frameEvent, TIMEOUT_INFINITE);
@@ -1196,6 +1196,13 @@ static void x11WaitFrame(void)
 
   struct timespec ts = { .tv_nsec = delay * 1000 };
   while(nanosleep(&ts, &ts)) {};
+
+  /* force rendering until we have finished calibration so we can take into
+   * account how long it takes for the scene to render */
+  if (calibrate < CALIBRATION_COUNT)
+    return true;
+
+  return false;
 }
 
 static void x11StopWaitFrame(void)
