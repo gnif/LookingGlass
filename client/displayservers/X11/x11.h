@@ -41,6 +41,7 @@ struct X11DSState
   XVisualInfo * visual;
   int        xinputOp, xpresentOp;
 
+  bool jitRender;
   uint32_t presentSerial;
   Pixmap presentPixmap;
   XserverRegion presentRegion;

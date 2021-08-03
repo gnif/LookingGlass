@@ -130,6 +130,7 @@ static bool x11Init(const LG_DSInitParams params)
   x11.xValuator = -1;
   x11.yValuator = -1;
   x11.display = XOpenDisplay(NULL);
+  x11.jitRender = params.jitRender;
 
   XSetWindowAttributes swa =
   {
@@ -513,12 +514,14 @@ static bool x11Init(const LG_DSInitParams params)
   /* default to the square cursor */
   XDefineCursor(x11.display, x11.window, x11.cursors[LG_POINTER_SQUARE]);
 
-  x11.frameEvent = lgCreateEvent(true, 0);
-
-  XPresentQueryExtension(x11.display, &x11.xpresentOp, &event, &error);
-  x11.presentPixmap = XCreatePixmap(x11.display, x11.window, 1, 1, 24);
-  XPresentSelectInput(x11.display, x11.window, PresentCompleteNotifyMask);
-  x11.presentRegion = XFixesCreateRegion(x11.display, &(XRectangle){0}, 1);
+  if (x11.jitRender)
+  {
+    x11.frameEvent = lgCreateEvent(true, 0);
+    XPresentQueryExtension(x11.display, &x11.xpresentOp, &event, &error);
+    XPresentSelectInput(x11.display, x11.window, PresentCompleteNotifyMask);
+    x11.presentPixmap = XCreatePixmap(x11.display, x11.window, 1, 1, 24);
+    x11.presentRegion = XFixesCreateRegion(x11.display, &(XRectangle){0}, 1);
+  }
 
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
@@ -529,7 +532,8 @@ static bool x11Init(const LG_DSInitParams params)
     goto fail_window;
   }
 
-  x11DoPresent();
+  if (x11.jitRender)
+    x11DoPresent();
 
   return true;
 
@@ -548,13 +552,20 @@ static void x11Startup(void)
 
 static void x11Shutdown(void)
 {
-  lgSignalEvent(x11.frameEvent);
+  if (x11.jitRender)
+    lgSignalEvent(x11.frameEvent);
 }
 
 static void x11Free(void)
 {
   lgJoinThread(x11.eventThread, NULL);
-  lgFreeEvent(x11.frameEvent);
+
+  if (x11.jitRender)
+  {
+    lgFreeEvent(x11.frameEvent);
+    XFreePixmap(x11.display, x11.presentPixmap);
+    XFixesDestroyRegion(x11.display, x11.presentRegion);
+  }
 
   if (x11.window)
     XDestroyWindow(x11.display, x11.window);
