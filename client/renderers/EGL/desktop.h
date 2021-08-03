@@ -23,6 +23,7 @@
 #include <stdbool.h>
 
 #include "interface/renderer.h"
+#include "desktop_rects.h"
 
 typedef struct EGL_Desktop EGL_Desktop;
 
@@ -36,11 +37,11 @@ enum EGL_DesktopScaleType
 struct Option;
 bool egl_desktop_scale_validate(struct Option * opt, const char ** error);
 
-bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA);
+bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA, int maxRects);
 void egl_desktop_free(EGL_Desktop ** desktop);
 
 bool egl_desktop_setup (EGL_Desktop * desktop, const LG_RendererFormat format);
 bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd);
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
-    LG_RendererRotate rotate);
+    LG_RendererRotate rotate, const struct DamageRects * rects);
