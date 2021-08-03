@@ -1041,72 +1041,15 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
 static void x11XPresentEvent(XGenericEventCookie *cookie)
 {
-#define CALIBRATION_COUNT 200
-  uint64_t deltats  = 0;
-  uint64_t deltamsc = 0;
-
   switch(cookie->evtype)
   {
     case PresentCompleteNotify:
     {
-      x11DoPresent();
-
       XPresentCompleteNotifyEvent * e = cookie->data;
-
-      /* calibrate a delay to push our presentation time forward as far as
-       * possible without skipping frames */
-      static int      calibrate = 0;
-      static uint64_t lastts    = 0;
-      static uint64_t lastmsc   = 0;
-      static uint64_t delay     = 0;
-      if (lastts)
-      {
-        deltats  = e->ust - lastts;
-        deltamsc = e->msc - lastmsc;
-
-        if (calibrate == 0)
-        {
-          if (!delay)
-            delay = deltats / 2;
-          else
-          {
-            /* increase the delay until we see a skip */
-            if (deltamsc < 2)
-              delay += 100;
-            else
-            {
-              delay -= 100;
-              ++calibrate;
-            }
-          }
-        }
-        else
-        {
-          if (calibrate < CALIBRATION_COUNT)
-          {
-            /* every skip we back off the delay */
-            if (deltamsc > 1)
-            {
-              delay -= 100;
-              calibrate = 1;
-            }
-
-            /* if we have finished, print out the delay */
-            if (++calibrate == CALIBRATION_COUNT)
-              DEBUG_INFO("Calibration done, delay = %lu us", delay);
-          }
-        }
-      }
-
-      lastts  = e->ust;
-      lastmsc = e->msc;
-
-      /* minor adjustments if we are still seeing odd skips */
-      if (deltamsc > 1)
-        delay -= 10;
-
-      usleep(delay);
+      atomic_store(&x11.presentMsc, e->msc);
+      atomic_store(&x11.presentUst, e->ust);
       lgSignalEvent(x11.frameEvent);
+      x11DoPresent();
       break;
     }
   }
@@ -1187,7 +1130,72 @@ static void x11GLSwapBuffers(void)
 
 static void x11WaitFrame(void)
 {
+  /* wait until we are woken up by the present event */
   lgWaitEvent(x11.frameEvent, TIMEOUT_INFINITE);
+
+#define CALIBRATION_COUNT 400
+  const uint64_t ust = atomic_load(&x11.presentUst);
+  const uint64_t msc = atomic_load(&x11.presentMsc);
+
+  /* calibrate a delay to push our presentation time forward as far as
+   * possible without skipping frames */
+  static int      calibrate = 0;
+  static uint64_t lastts    = 0;
+  static uint64_t lastmsc   = 0;
+  static uint64_t delay     = 0;
+
+  uint64_t deltats  = 0;
+  uint64_t deltamsc = 0;
+  if (lastts)
+  {
+    deltats  = ust - lastts;
+    deltamsc = msc - lastmsc;
+
+    if (calibrate == 0)
+    {
+      if (!delay)
+        delay = deltats / 2;
+      else
+      {
+        /* increase the delay until we see a skip */
+        if (deltamsc < 2)
+          delay += 100;
+        else
+        {
+          delay -= 100;
+          ++calibrate;
+          deltamsc = 0;
+        }
+      }
+    }
+    else
+    {
+      if (calibrate < CALIBRATION_COUNT)
+      {
+        /* every skip we back off the delay */
+        if (deltamsc > 1)
+        {
+          delay -= 100;
+          calibrate = 1;
+          deltamsc = 0;
+        }
+
+        /* if we have finished, print out the delay */
+        if (++calibrate == CALIBRATION_COUNT)
+          DEBUG_INFO("Calibration done, delay = %lu us", delay);
+      }
+    }
+  }
+
+  lastts  = ust;
+  lastmsc = msc;
+
+  /* minor adjustments if we are still seeing odd skips */
+  if (deltamsc > 1)
+    delay -= 10;
+
+  struct timespec ts = { .tv_nsec = delay * 1000 };
+  while(nanosleep(&ts, &ts)) {};
 }
 
 static void x11StopWaitFrame(void)

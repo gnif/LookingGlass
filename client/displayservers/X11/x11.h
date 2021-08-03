@@ -40,12 +40,13 @@ struct X11DSState
   Window        window;
   XVisualInfo * visual;
 
-  int           xpresentOp;
-  bool          jitRender;
-  uint32_t      presentSerial;
-  Pixmap        presentPixmap;
-  XserverRegion presentRegion;
-  LGEvent *     frameEvent;
+  int               xpresentOp;
+  bool              jitRender;
+  _Atomic(uint64_t) presentMsc, presentUst;
+  uint32_t          presentSerial;
+  Pixmap            presentPixmap;
+  XserverRegion     presentRegion;
+  LGEvent *         frameEvent;
 
   LGThread * eventThread;
 
