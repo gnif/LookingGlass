@@ -26,7 +26,7 @@
 #include "app.h"
 #include "texture.h"
 #include "shader.h"
-#include "model.h"
+#include "desktop_rects.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -39,9 +39,9 @@
 struct DesktopShader
 {
   EGL_Shader * shader;
-  GLint uDesktopPos;
+  GLint uTransform;
+  GLint uUVScale;
   GLint uDesktopSize;
-  GLint uRotate;
   GLint uScaleAlgo;
   GLint uNV, uNVGain;
   GLint uCBMode;
@@ -53,7 +53,7 @@ struct EGL_Desktop
 
   EGL_Texture          * texture;
   struct DesktopShader * shader; // the active shader
-  EGL_Model            * model;
+  EGL_DesktopRects     * mesh;
 
   // internals
   int               width, height;
@@ -93,9 +93,11 @@ static bool egl_init_desktop_shader(
     return false;
   }
 
-  shader->uDesktopPos  = egl_shader_get_uniform_location(shader->shader, "position" );
+  egl_shader_associate_textures(shader->shader, 1);
+
+  shader->uTransform   = egl_shader_get_uniform_location(shader->shader, "transform");
+  shader->uUVScale     = egl_shader_get_uniform_location(shader->shader, "uvScale"  );
   shader->uDesktopSize = egl_shader_get_uniform_location(shader->shader, "size"     );
-  shader->uRotate      = egl_shader_get_uniform_location(shader->shader, "rotate"   );
   shader->uScaleAlgo   = egl_shader_get_uniform_location(shader->shader, "scaleAlgo");
   shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"       );
   shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"   );
@@ -104,7 +106,7 @@ static bool egl_init_desktop_shader(
   return true;
 }
 
-bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA)
+bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA, int maxRects)
 {
   *desktop = (EGL_Desktop *)malloc(sizeof(EGL_Desktop));
   if (!*desktop)
@@ -132,14 +134,11 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA)
     return false;
   }
 
-  if (!egl_model_init(&(*desktop)->model))
+  if (!egl_desktopRectsInit(&(*desktop)->mesh, maxRects))
   {
-    DEBUG_ERROR("Failed to initialize the desktop model");
+    DEBUG_ERROR("Failed to initialize the desktop mesh");
     return false;
   }
-
-  egl_model_set_default((*desktop)->model);
-  egl_model_set_texture((*desktop)->model, (*desktop)->texture);
 
   app_registerKeybind(KEY_N, egl_desktop_toggle_nv, *desktop, "Toggle night vision mode");
   app_registerKeybind(KEY_S, egl_desktop_toggle_scale_algo, *desktop, "Toggle scale algorithm");
@@ -202,9 +201,9 @@ void egl_desktop_free(EGL_Desktop ** desktop)
   if (!*desktop)
     return;
 
-  egl_texture_free(&(*desktop)->texture              );
-  egl_shader_free (&(*desktop)->shader_generic.shader);
-  egl_model_free  (&(*desktop)->model                );
+  egl_texture_free    (&(*desktop)->texture              );
+  egl_shader_free     (&(*desktop)->shader_generic.shader);
+  egl_desktopRectsFree(&(*desktop)->mesh                 );
 
   free(*desktop);
   *desktop = NULL;
@@ -276,7 +275,7 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
 
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
-    LG_RendererRotate rotate)
+    LG_RendererRotate rotate, const struct DamageRects * rects)
 {
   if (!desktop->shader)
     return false;
@@ -310,12 +309,16 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
       scaleAlgo = desktop->scaleAlgo;
   }
 
+  float matrix[6];
+  egl_desktopRectsMatrix(matrix, desktop->width, desktop->height, x, y, scaleX, scaleY, rotate);
+  egl_desktopRectsUpdate(desktop->mesh, rects, desktop->width, desktop->height);
+
   const struct DesktopShader * shader = desktop->shader;
   egl_shader_use(shader->shader);
-  glUniform4f(shader->uDesktopPos , x, y, scaleX, scaleY);
-  glUniform1i(shader->uRotate     , rotate);
   glUniform1i(shader->uScaleAlgo  , scaleAlgo);
   glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
+  glUniform2f(shader->uUVScale    , 1.0f / desktop->width, 1.0f / desktop->height);
+  glUniformMatrix3x2fv(shader->uTransform, 1, GL_FALSE, matrix);
 
   if (desktop->nvGain)
   {
@@ -326,6 +329,9 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     glUniform1i(shader->uNV, 0);
 
   glUniform1i(shader->uCBMode, desktop->cbMode);
-  egl_model_render(desktop->model);
+
+  egl_texture_bind(desktop->texture);
+  egl_desktopRectsRender(desktop->mesh);
+  glBindTexture(GL_TEXTURE_2D, 0);
   return true;
 }

@@ -12,7 +12,6 @@ uniform sampler2D sampler1;
 
 uniform       int   scaleAlgo;
 uniform highp vec2  size;
-uniform       int   rotate;
 
 uniform       int   nv;
 uniform highp float nvGain;
@@ -20,35 +19,14 @@ uniform       int   cbMode;
 
 void main()
 {
-  highp vec2 ruv;
-  if (rotate == 0) // 0
-  {
-    ruv = uv;
-  }
-  else if (rotate == 1) // 90
-  {
-    ruv.x =  uv.y;
-    ruv.y = -uv.x + 1.0f;
-  }
-  else if (rotate == 2) // 180
-  {
-    ruv.x = -uv.x + 1.0f;
-    ruv.y = -uv.y + 1.0f;
-  }
-  else if (rotate == 3) // 270
-  {
-    ruv.x = -uv.y + 1.0f;
-    ruv.y =  uv.x;
-  }
-
   switch (scaleAlgo)
   {
     case EGL_SCALE_NEAREST:
-      color = texelFetch(sampler1, ivec2(ruv * size), 0);
+      color = texelFetch(sampler1, ivec2(uv * size), 0);
       break;
 
     case EGL_SCALE_LINEAR:
-      color = texture(sampler1, ruv);
+      color = texture(sampler1, uv);
       break;
   }
 

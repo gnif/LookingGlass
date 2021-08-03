@@ -771,7 +771,7 @@ static bool egl_render_startup(void * opaque, bool useDMA)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(&this->desktop, this->display, useDMA))
+  if (!egl_desktop_init(&this->desktop, this->display, useDMA, 1))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
@@ -833,7 +833,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
     if (egl_desktop_render(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
-        this->scaleType , rotate))
+        this->scaleType , rotate, NULL))
     {
       if (!this->waitFadeTime)
       {

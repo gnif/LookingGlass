@@ -219,6 +219,45 @@ struct Rect egl_desktopToScreen(const double matrix[6], const struct FrameDamage
   };
 }
 
+void egl_screenToDesktopMatrix(double matrix[6], int frameWidth, int frameHeight,
+    double translateX, double translateY, double scaleX, double scaleY, LG_RendererRotate rotate,
+    double windowWidth, double windowHeight)
+{
+  double inverted[6] = {0};
+  egl_desktopToScreenMatrix(inverted, frameWidth, frameHeight, translateX, translateY,
+      scaleX, scaleY, rotate, windowWidth, windowHeight);
+
+  double det = inverted[0] * inverted[3] - inverted[1] * inverted[2];
+  matrix[0] =  inverted[3] / det;
+  matrix[1] = -inverted[1] / det;
+  matrix[2] = -inverted[2] / det;
+  matrix[3] =  inverted[0] / det;
+  matrix[4] = (inverted[2] * inverted[5] - inverted[3] * inverted[4]) / det;
+  matrix[5] = (inverted[1] * inverted[4] - inverted[0] * inverted[5]) / det;
+}
+
+bool egl_screenToDesktop(struct FrameDamageRect * output, const double matrix[6],
+    const struct Rect * rect, int width, int height)
+{
+  double x1, y1, x2, y2;
+  matrixMultiply(matrix, &x1, &y1, rect->x, rect->y);
+  matrixMultiply(matrix, &x2, &y2, rect->x + rect->w, rect->y + rect->h);
+
+  int x3 = min(x1, x2);
+  int y3 = min(y1, y2);
+  int x4 = ceil(max(x1, x2));
+  int y4 = ceil(max(y1, y2));
+
+  if (x4 < 0 || y4 < 0 || x3 >= width || y3 >= height)
+    return false;
+
+  output->x = max(x3, 0);
+  output->y = max(y3, 0);
+  output->width  = min(width,  x4) - output->x;
+  output->height = min(height, y4) - output->y;
+  return true;
+}
+
 void egl_desktopRectsRender(EGL_DesktopRects * rects)
 {
   if (!rects->count)

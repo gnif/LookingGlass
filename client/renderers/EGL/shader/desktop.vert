@@ -1,20 +1,13 @@
 #version 300 es
 
-layout(location = 0) in vec3 vertexPosition_modelspace;
-layout(location = 1) in vec2 vertexUV;
-
-uniform vec4 position;
-
+layout(location = 0) in vec2 vertex;
 out highp vec2 uv;
+
+uniform highp vec2 uvScale;
+uniform mat3x2 transform;
 
 void main()
 {
-  gl_Position.xyz = vertexPosition_modelspace; 
-  gl_Position.w   = 1.0;
-  gl_Position.x  -= position.x;
-  gl_Position.y  -= position.y;
-  gl_Position.x  *= position.z;
-  gl_Position.y  *= position.w;
-
-  uv = vertexUV;
+  gl_Position = vec4(transform * vec3(vertex, 1.0), 0.0, 1.0);
+  uv = vertex * uvScale;
 }
