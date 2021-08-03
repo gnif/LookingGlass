@@ -700,10 +700,7 @@ int main_frameThread(void * unused)
     g_state.lastFrameTime = t;
 
     if (g_state.lastFrameTimeValid)
-    {
-      const float fdelta = (float)delta / 1e6f;
-      ringbuffer_push(g_state.frameTimings, &fdelta);
-    }
+      ringbuffer_push(g_state.uploadTimings, &(float) { delta * 1e-6f });
     g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
@@ -830,10 +827,10 @@ static int lg_run(void)
 
   // initialize metrics ringbuffers
   g_state.renderTimings  = ringbuffer_new(256, sizeof(float));
-  g_state.frameTimings   = ringbuffer_new(256, sizeof(float));
+  g_state.uploadTimings  = ringbuffer_new(256, sizeof(float));
   g_state.renderDuration = ringbuffer_new(256, sizeof(float));
   overlayGraph_register("FRAME" , g_state.renderTimings , 0.0f, 50.0f);
-  overlayGraph_register("UPLOAD", g_state.frameTimings  , 0.0f, 50.0f);
+  overlayGraph_register("UPLOAD", g_state.uploadTimings , 0.0f, 50.0f);
   overlayGraph_register("RENDER", g_state.renderDuration, 0.0f,  2.0f);
 
   initImGuiKeyMap(g_state.io->KeyMap);
@@ -1236,7 +1233,7 @@ static void lg_shutdown(void)
 
   // free metrics ringbuffers
   ringbuffer_free(&g_state.renderTimings);
-  ringbuffer_free(&g_state.frameTimings );
+  ringbuffer_free(&g_state.uploadTimings);
   ringbuffer_free(&g_state.renderDuration);
 
   free(g_state.fontName);
