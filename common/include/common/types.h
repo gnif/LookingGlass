@@ -38,6 +38,11 @@ struct Rect
   int x, y, w, h;
 };
 
+struct DoubleRect
+{
+  double x, y, w, h;
+};
+
 struct Border
 {
   int left, top, right, bottom;

@@ -87,7 +87,7 @@ struct Inst
 
   int               width, height;
   float             uiScale;
-  LG_RendererRect   destRect;
+  struct DoubleRect destRect;
   LG_RendererRotate rotate; //client side rotation
 
   float translateX  , translateY;
