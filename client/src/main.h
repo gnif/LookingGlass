@@ -119,6 +119,7 @@ struct AppState
   uint64_t              lastRenderTime;
   bool                  lastRenderTimeValid;
   RingBuffer            renderTimings;
+  RingBuffer            renderDuration;
   RingBuffer            frameTimings;
 
   atomic_uint_least64_t pendingCount;

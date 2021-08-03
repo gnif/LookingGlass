@@ -242,6 +242,7 @@ static int renderThread(void * unused)
 
     const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
 
+    const uint64_t renderStart = nanotime();
     LG_LOCK(g_state.lgrLock);
     if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate, newFrame,
           invalidate))
@@ -250,6 +251,7 @@ static int renderThread(void * unused)
       break;
     }
     LG_UNLOCK(g_state.lgrLock);
+    ringbuffer_push(g_state.renderDuration, &(float) {(nanotime() - renderStart) * 1e-6f});
 
     const uint64_t t     = nanotime();
     const uint64_t delta = t - g_state.lastRenderTime;
@@ -828,10 +830,12 @@ static int lg_run(void)
   app_registerOverlay(&LGOverlayConfig, NULL);
 
   // initialize metrics ringbuffers
-  g_state.renderTimings = ringbuffer_new(256, sizeof(float));
-  g_state.frameTimings  = ringbuffer_new(256, sizeof(float));
-  overlayGraph_register("RENDER", g_state.renderTimings, 0.0f, 50.0f);
-  overlayGraph_register("UPLOAD", g_state.frameTimings , 0.0f, 50.0f);
+  g_state.renderTimings  = ringbuffer_new(256, sizeof(float));
+  g_state.frameTimings   = ringbuffer_new(256, sizeof(float));
+  g_state.renderDuration = ringbuffer_new(256, sizeof(float));
+  overlayGraph_register("FRAME" , g_state.renderTimings , 0.0f, 50.0f);
+  overlayGraph_register("UPLOAD", g_state.frameTimings  , 0.0f, 50.0f);
+  overlayGraph_register("RENDER", g_state.renderDuration, 0.0f,  2.0f);
 
   initImGuiKeyMap(g_state.io->KeyMap);
 
@@ -1234,6 +1238,7 @@ static void lg_shutdown(void)
   // free metrics ringbuffers
   ringbuffer_free(&g_state.renderTimings);
   ringbuffer_free(&g_state.frameTimings );
+  ringbuffer_free(&g_state.renderDuration);
 
   free(g_state.fontName);
   igDestroyContext(NULL);
