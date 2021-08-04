@@ -495,9 +495,10 @@ void app_handleResizeEvent(int w, int h, double scale, const struct Border borde
   }
 }
 
-void app_invalidateWindow(void)
+void app_invalidateWindow(bool full)
 {
-  atomic_store(&g_state.invalidateWindow, true);
+  if (full)
+    atomic_store(&g_state.invalidateWindow, true);
   lgSignalEvent(g_state.frameEvent);
 }
 
@@ -537,7 +538,7 @@ void app_handleRenderEvent(const uint64_t timeUs)
     }
 
   if (invalidate)
-    app_invalidateWindow();
+    app_invalidateWindow(false);
 }
 
 void app_setFullscreen(bool fs)
@@ -616,7 +617,7 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   g_state.alertTimeout = microtime() + ALERT_TIMEOUT;
   g_state.alertType    = type;
   g_state.alertShow    = true;
-  app_invalidateWindow();
+  app_invalidateWindow(false);
 }
 
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
@@ -875,7 +876,7 @@ void app_setOverlay(bool enable)
     g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
     core_resetOverlayInputState();
     core_setGrabQuiet(wasGrabbed);
-    app_invalidateWindow();
+    app_invalidateWindow(false);
   }
 }
 

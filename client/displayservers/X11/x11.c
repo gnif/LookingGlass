@@ -708,7 +708,7 @@ static int x11EventThread(void * unused)
 
       case Expose:
       {
-        app_invalidateWindow();
+        app_invalidateWindow(true);
         break;
       }
 

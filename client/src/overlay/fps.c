@@ -31,7 +31,7 @@ static bool showFPS;
 static void showFPSKeybind(int sc, void * opaque)
 {
   showFPS ^= true;
-  app_invalidateWindow();
+  app_invalidateWindow(false);
 }
 
 static void fps_earlyInit(void)

@@ -123,7 +123,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
 
     app_handleResizeEvent(wlWm.width, wlWm.height, wl_fixed_to_double(wlWm.scale),
         (struct Border) {0, 0, 0, 0});
-    app_invalidateWindow();
+    app_invalidateWindow(true);
     waylandStopWaitFrame();
     wlWm.needsResize = false;
   }

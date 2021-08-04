@@ -65,7 +65,7 @@ static void configCallback(void * udata)
 static void showTimingKeybind(int sc, void * opaque)
 {
   gs.show ^= true;
-  app_invalidateWindow();
+  app_invalidateWindow(false);
 }
 
 static bool graphs_init(void ** udata, const void * params)

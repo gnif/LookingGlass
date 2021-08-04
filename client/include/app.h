@@ -46,7 +46,7 @@ bool app_isFormatValid(void);
 void app_updateCursorPos(double x, double y);
 void app_updateWindowPos(int x, int y);
 void app_handleResizeEvent(int w, int h, double scale, const struct Border border);
-void app_invalidateWindow(void);
+void app_invalidateWindow(bool full);
 
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy);

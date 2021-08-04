@@ -46,7 +46,7 @@ static void xdgSurfaceConfigure(void * data, struct xdg_surface * xdgSurface,
   {
     wlWm.needsResize  = true;
     wlWm.resizeSerial = serial;
-    app_invalidateWindow();
+    app_invalidateWindow(true);
     waylandStopWaitFrame();
   }
   else
