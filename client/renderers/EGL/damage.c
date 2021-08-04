@@ -26,6 +26,7 @@
 #include "app.h"
 #include "desktop_rects.h"
 #include "shader.h"
+#include "cimgui.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +42,6 @@ struct EGL_Damage
   GLfloat            transform[6];
 
   bool          show;
-  KeybindHandle toggleHandle;
 
   int   width     , height;
   float translateX, translateY;
@@ -52,10 +52,10 @@ struct EGL_Damage
   GLint uTransform;
 };
 
-void egl_damage_show_toggle(int key, void * opaque)
+void egl_damage_config_ui(void * opaque)
 {
   EGL_Damage * damage = opaque;
-  damage->show ^= true;
+  igCheckbox("Show damage overlay", &damage->show);
 }
 
 bool egl_damage_init(EGL_Damage ** damage)
@@ -90,7 +90,7 @@ bool egl_damage_init(EGL_Damage ** damage)
   }
 
   (*damage)->uTransform = egl_shader_get_uniform_location((*damage)->shader, "transform");
-  (*damage)->toggleHandle = app_registerKeybind(KEY_A, egl_damage_show_toggle, *damage, "Toggle damage display");
+  app_overlayConfigRegister("EGL", egl_damage_config_ui, *damage);
 
   return true;
 }
@@ -100,7 +100,6 @@ void egl_damage_free(EGL_Damage ** damage)
   if (!*damage)
     return;
 
-  app_releaseKeybind(&(*damage)->toggleHandle);
   egl_desktopRectsFree(&(*damage)->mesh);
   egl_shader_free(&(*damage)->shader);
 

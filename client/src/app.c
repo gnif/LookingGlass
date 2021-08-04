@@ -860,3 +860,9 @@ void app_setOverlay(bool enable)
     core_resetOverlayInputState();
   }
 }
+
+void app_overlayConfigRegister(const char * title,
+    void (*callback)(void * udata), void * udata)
+{
+  overlayConfig_register(title, callback, udata);
+}

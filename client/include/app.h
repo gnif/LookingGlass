@@ -103,6 +103,9 @@ typedef struct OverlayGraph * GraphHandle;
 GraphHandle app_registerGraph(const char * name, RingBuffer buffer, float min, float max);
 void app_unregisterGraph(GraphHandle handle);
 
+void app_overlayConfigRegister(const char * title,
+    void (*callback)(void * udata), void * udata);
+
 void app_clipboardRelease(void);
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count);
 void app_clipboardNotifySize(const LG_ClipboardData type, size_t size);
