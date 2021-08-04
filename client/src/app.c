@@ -771,13 +771,6 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
 
 //    bool test;
 //    igShowDemoWindow(&test);
-
-    ImGuiMouseCursor cursor = igGetMouseCursor();
-    if (cursor != g_state.cursorLast)
-    {
-      g_state.ds->setPointer(mapImGuiCursor(cursor));
-      g_state.cursorLast = cursor;
-    }
   }
 
   // render the overlays
@@ -820,6 +813,16 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
 
     memcpy(overlay->lastRects, buffer, sizeof(struct Rect) * written);
     overlay->lastRectCount = written;
+  }
+
+  if (g_state.overlayInput)
+  {
+    ImGuiMouseCursor cursor = igGetMouseCursor();
+    if (cursor != g_state.cursorLast)
+    {
+      g_state.ds->setPointer(mapImGuiCursor(cursor));
+      g_state.cursorLast = cursor;
+    }
   }
 
   igRender();
