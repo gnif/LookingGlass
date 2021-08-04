@@ -15,11 +15,10 @@ CURRENT_YEAR = datetime.date.today().year
 reignore = re.compile('^vendor/')
 recopyright = re.compile(r'\A/\*.*?\*/\s+', re.DOTALL)
 
-header = f'''\
-Looking Glass
-Copyright (C) {START_YEAR}-{CURRENT_YEAR} The Looking Glass Authors
-https://looking-glass.io
-'''
+project_name = 'Looking Glass'
+copyright = f'Copyright © {START_YEAR}-{CURRENT_YEAR} The Looking Glass Authors'
+project_url = 'https://looking-glass.io'
+header = [project_name, copyright, project_url]
 
 paragraphs = ['''\
 This program is free software; you can redistribute it and/or modify it
@@ -39,7 +38,7 @@ Temple Place, Suite 330, Boston, MA 02111-1307 USA''']
 
 def make_comment_block():
     lines = ['/**']
-    lines += [' * ' + line for line in header.splitlines()]
+    lines += [' * ' + line for line in header]
 
     for paragraph in paragraphs:
         lines.append(' *')
@@ -50,7 +49,7 @@ def make_comment_block():
 
 
 def gen_c_literal():
-    lines = [''] + header.splitlines()
+    lines = [''] + header
     for paragraph in paragraphs:
         lines.append('')
         lines += wrap(paragraph, width=79)
@@ -91,6 +90,43 @@ def update_config_c(file):
         f.writelines(suffix)
 
 
+def appstring_license():
+    lines = []
+    for paragraph in paragraphs:
+        paragraph = wrap(paragraph, width=75)
+        for line in paragraph[:-1]:
+            lines.append(f'  "{line} "')
+        lines.append(f'  "{paragraph[-1]}\\n"')
+        lines.append(r'  "\n"')
+    lines.pop()
+    lines[-1] = f'{lines[-1][:-3]}";'
+    return lines
+
+
+def update_appstrings(file):
+    print(f'Refresh app string in {file}...')
+    lines = []
+
+    with open(file, encoding='utf-8') as f:
+        f = iter(f)
+        for line in f:
+            lines.append(line)
+            if 'LG_COPYRIGHT_STR' in line:
+                next(f)
+                lines.append(f'  "{copyright}";\n')
+            elif 'LG_WEBSITE_STR' in line:
+                next(f)
+                lines.append(f'  "{project_url}";\n')
+            elif 'LG_LICENSE_STR' in line:
+                lines += [f'{line}\n' for line in appstring_license()]
+                for line in f:
+                    if '";' in line:
+                        break
+
+    with open(file, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
+
 def main():
     comment_block = make_comment_block()
     files = subprocess.check_output(['git', '-C', PROJECT, 'ls-files', '-z']).decode('utf-8').split('\0')
@@ -101,6 +137,7 @@ def main():
             update_c_style(os.path.join(PROJECT, file), comment_block)
 
     update_config_c(os.path.join(PROJECT, 'client', 'src', 'config.c'))
+    update_appstrings(os.path.join(PROJECT, 'common', 'src', 'appstrings.c'))
 
 if __name__ == '__main__':
     main()
