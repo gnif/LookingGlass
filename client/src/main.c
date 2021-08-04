@@ -1261,19 +1261,19 @@ int main(int argc, char * argv[])
   ivshmemOptionsInit();
   egl_dynProcsInit();
 
-  // early renderer setup for option registration
-  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-    LG_Renderers[i]->setup();
-
-  for(unsigned int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
-    LG_DisplayServers[i]->setup();
-
   g_state.overlays = ll_new();
   app_registerOverlay(&LGOverlayConfig, NULL);
   app_registerOverlay(&LGOverlayAlert , NULL);
   app_registerOverlay(&LGOverlayFPS   , NULL);
   app_registerOverlay(&LGOverlayGraphs, NULL);
   app_registerOverlay(&LGOverlayHelp  , NULL);
+
+  // early renderer setup for option registration
+  for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
+    LG_Renderers[i]->setup();
+
+  for(unsigned int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
+    LG_DisplayServers[i]->setup();
 
   if (!config_load(argc, argv))
     return -1;
