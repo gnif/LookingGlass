@@ -842,6 +842,8 @@ void app_freeOverlays(void)
 
 void app_setOverlay(bool enable)
 {
+  static bool wasGrabbed = false;
+
   if (g_state.overlayInput == enable)
     return;
 
@@ -850,6 +852,8 @@ void app_setOverlay(bool enable)
 
   if (g_state.overlayInput)
   {
+    wasGrabbed = g_cursor.grab;
+
     g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
     core_setGrabQuiet(false);
     core_setCursorInView(false);
@@ -858,6 +862,8 @@ void app_setOverlay(bool enable)
   {
     g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
     core_resetOverlayInputState();
+    core_setGrabQuiet(wasGrabbed);
+    app_invalidateWindow();
   }
 }
 
