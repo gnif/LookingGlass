@@ -93,7 +93,7 @@ static void lgInit(void)
   g_cursor.guest.valid   = false;
 
   // if spice is not in use, hide the local cursor
-  if (!core_inputEnabled() && g_params.hideMouse)
+  if ((!g_params.useSpiceInput && g_params.hideMouse) || !g_params.showCursorDot)
     g_state.ds->setPointer(LG_POINTER_NONE);
   else
     g_state.ds->setPointer(LG_POINTER_SQUARE);
