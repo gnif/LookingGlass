@@ -27,7 +27,7 @@ IDI_APPLICATION ICON "../../../resources/icon.ico"
 
 #define STRINGIFY2(s) #s
 #define STRINGIFY(s) STRINGIFY2(s)
-#define COPYRIGHT_TEXT(year) (c) 2017-year The Looking Glass Developers
+#define COPYRIGHT_TEXT(year) \xa9 2017-year The Looking Glass Developers
 #define COPYRIGHT_STR(year) STRINGIFY(COPYRIGHT_TEXT(year))
 
 VS_VERSION_INFO VERSIONINFO
@@ -41,7 +41,7 @@ FILESUBTYPE     VFT2_UNKNOWN
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        BLOCK "04090000"
+        BLOCK "040904E4"
         BEGIN
             VALUE "CompanyName",      "The Looking Glass Developers"
             VALUE "FileDescription",  "Looking Glass (host)"
