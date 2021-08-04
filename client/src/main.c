@@ -820,11 +820,11 @@ static int lg_run(void)
   DEBUG_INFO("Using font: %s", g_state.fontName);
 
   g_state.overlays = ll_new();
+  app_registerOverlay(&LGOverlayConfig, NULL);
   app_registerOverlay(&LGOverlayAlert , NULL);
   app_registerOverlay(&LGOverlayFPS   , NULL);
   app_registerOverlay(&LGOverlayGraphs, NULL);
   app_registerOverlay(&LGOverlayHelp  , NULL);
-  app_registerOverlay(&LGOverlayConfig, NULL);
 
   // initialize metrics ringbuffers
   g_state.renderTimings  = ringbuffer_new(256, sizeof(float));

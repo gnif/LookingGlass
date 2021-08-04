@@ -21,27 +21,50 @@
 #include "interface/overlay.h"
 #include "cimgui.h"
 #include "overlay_utils.h"
+#include "ll.h"
 
 #include "../main.h"
 #include "../overlays.h"
 #include "version.h"
 
+#include "common/debug.h"
 #include "common/appstrings.h"
+
+typedef struct ConfigCallback
+{
+  const char * title;
+  void * udata;
+  void (*callback)(void * udata);
+}
+ConfigCallback;
+
+typedef struct OverlayConfig
+{
+  struct ll * callbacks;
+}
+OverlayConfig;
+
+static OverlayConfig cfg = { 0 };
 
 static bool config_init(void ** udata, void * params)
 {
+  cfg.callbacks = ll_new();
+  if (!cfg.callbacks)
+  {
+    DEBUG_ERROR("failed to allocate ram");
+    return false;
+  }
+
   return true;
 }
 
 static void config_free(void * udata)
 {
-}
+  ConfigCallback * cb;
+  while(ll_shift(cfg.callbacks, (void **)&cb))
+    free(cb);
 
-static void graphIterator(GraphHandle handle, const char * name, bool * enabled,
-    void * udata)
-{
-  igTableNextColumn();
-  igCheckbox(name, enabled);
+  ll_free(cfg.callbacks);
 }
 
 static int config_render(void * udata, bool interactive, struct Rect * windowRects,
@@ -132,14 +155,12 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     }
   }
 
-  if(igCollapsingHeaderBoolPtr("Performance Metrics", NULL, 0))
+  ConfigCallback * cb;
+  for (ll_reset(cfg.callbacks); ll_walk(cfg.callbacks, (void **)&cb); )
   {
-    igCheckbox("Show Timing Graphs", &g_state.showTiming);
-    igSeparator();
-
-    igBeginTable("split", 2, 0, (ImVec2){}, 0);
-    overlayGraph_iterate(graphIterator, NULL);
-    igEndTable();
+    if (!igCollapsingHeaderBoolPtr(cb->title, NULL, 0))
+      continue;
+    cb->callback(cb->udata);
   }
 
   overlayGetImGuiRect(windowRects);
@@ -153,4 +174,20 @@ struct LG_OverlayOps LGOverlayConfig =
   .init           = config_init,
   .free           = config_free,
   .render         = config_render
+};
+
+void overlayConfig_register(const char * title, void (*callback)(void * udata),
+    void * udata)
+{
+  ConfigCallback * cb = calloc(1, sizeof(*cb));
+  if (!cb)
+  {
+    DEBUG_ERROR("failed to allocate ram");
+    return;
+  }
+
+  cb->title    = title;
+  cb->udata    = udata;
+  cb->callback = callback;
+  ll_push(cfg.callbacks, cb);
 };

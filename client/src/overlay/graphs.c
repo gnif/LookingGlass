@@ -22,6 +22,7 @@
 #include "cimgui.h"
 
 #include "../main.h"
+#include "../overlays.h"
 
 #include "ll.h"
 #include "common/debug.h"
@@ -43,9 +44,28 @@ struct OverlayGraph
   float        max;
 };
 
+
+static void configCallback(void * udata)
+{
+  igCheckbox("Show Timing Graphs", &g_state.showTiming);
+  igSeparator();
+
+  igBeginTable("split", 2, 0, (ImVec2){}, 0);
+
+  GraphHandle graph;
+  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+  {
+    igTableNextColumn();
+    igCheckbox(graph->name, &graph->enabled);
+  }
+
+  igEndTable();
+}
+
 static bool graphs_init(void ** udata, void * params)
 {
   gs.graphs = ll_new();
+  overlayConfig_register("Performance Metrics", configCallback, NULL);
   return true;
 }
 

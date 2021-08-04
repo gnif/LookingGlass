@@ -33,6 +33,9 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max);
 void overlayGraph_unregister();
 void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
-      bool * enabled, void * udata), void * udata);
+    bool * enabled, void * udata), void * udata);
+
+void overlayConfig_register(const char * title, void (*callback)(void * udata),
+    void * udata);
 
 #endif
