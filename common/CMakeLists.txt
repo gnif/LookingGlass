@@ -22,6 +22,7 @@ endif()
 add_subdirectory(src/platform)
 
 set(COMMON_SOURCES
+  src/appstrings.c
   src/stringutils.c
   src/stringlist.c
   src/option.c

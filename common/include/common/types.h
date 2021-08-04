@@ -87,4 +87,11 @@ typedef enum CursorType
 }
 CursorType;
 
+typedef struct StringPair
+{
+  const char * name;
+  const char * value;
+}
+StringPair;
+
 #endif

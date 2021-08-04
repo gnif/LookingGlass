@@ -118,6 +118,7 @@ set(SOURCES
 	src/overlay/fps.c
 	src/overlay/graphs.c
 	src/overlay/help.c
+	src/overlay/config.c
 )
 
 # Force cimgui to build as a static library.

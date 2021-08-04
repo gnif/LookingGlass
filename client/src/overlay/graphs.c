@@ -97,13 +97,19 @@ static int graphs_render(void * udata, bool interactive,
 
   float fontSize = igGetFontSize();
 
+  GraphHandle graph;
+  int graphCount = 0;
+  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+    if (graph->enabled)
+      ++graphCount;
+
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
   igSetNextWindowPos(pos, ImGuiCond_FirstUseEver, pos);
   igSetNextWindowSize(
       (ImVec2){
         28.0f * fontSize,
-        7.0f  * fontSize * ll_count(gs.graphs)
+        7.0f  * fontSize * graphCount
       },
       ImGuiCond_FirstUseEver);
 
@@ -115,10 +121,9 @@ static int graphs_render(void * udata, bool interactive,
 
   ImVec2 winSize;
   igGetContentRegionAvail(&winSize);
-  const float height = (winSize.y / ll_count(gs.graphs))
+  const float height = (winSize.y / graphCount)
     - igGetStyle()->ItemSpacing.y;
 
-  GraphHandle graph;
   for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
   {
     if (!graph->enabled)
@@ -178,4 +183,12 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer, float mi
 void overlayGraph_unregister(GraphHandle handle)
 {
   handle->enabled = false;
+}
+
+void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
+      bool * enabled, void * udata), void * udata)
+{
+  GraphHandle graph;
+  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+    callback(graph, graph->name, &graph->enabled, udata);
 }

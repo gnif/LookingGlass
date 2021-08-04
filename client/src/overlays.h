@@ -27,8 +27,12 @@ extern struct LG_OverlayOps LGOverlayAlert;
 extern struct LG_OverlayOps LGOverlayFPS;
 extern struct LG_OverlayOps LGOverlayGraphs;
 extern struct LG_OverlayOps LGOverlayHelp;
+extern struct LG_OverlayOps LGOverlayConfig;
 
-GraphHandle overlayGraph_register(const char * name, RingBuffer buffer, float min, float max);
+GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
+    float min, float max);
 void overlayGraph_unregister();
+void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
+      bool * enabled, void * udata), void * udata);
 
 #endif
