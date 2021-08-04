@@ -24,7 +24,7 @@
 
 #include "../main.h"
 
-static bool alert_init(void ** udata, void * params)
+static bool alert_init(void ** udata, const void * params)
 {
   return true;
 }

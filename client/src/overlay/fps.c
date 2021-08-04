@@ -22,10 +22,39 @@
 #include "cimgui.h"
 #include "overlay_utils.h"
 
+#include "common/option.h"
+
 #include "../main.h"
 
-static bool fps_init(void ** udata, void * params)
+static bool showFPS;
+
+static void showFPSKeybind(int sc, void * opaque)
 {
+  showFPS ^= true;
+  app_invalidateWindow();
+}
+
+static void fps_earlyInit(void)
+{
+  static struct Option options[] =
+  {
+    {
+      .module         = "win",
+      .name           = "showFPS",
+      .description    = "Enable the FPS & UPS display",
+      .shortopt       = 'k',
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false,
+    },
+    { 0 }
+  };
+  option_register(options);
+}
+
+static bool fps_init(void ** udata, const void * params)
+{
+  app_registerKeybind(KEY_D, showFPSKeybind, NULL, "FPS display toggle");
+  showFPS = option_get_bool("win", "showFPS");
   return true;
 }
 
@@ -36,7 +65,7 @@ static void fps_free(void * udata)
 static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
     int maxRects)
 {
-  if (!g_state.showFPS)
+  if (!showFPS)
     return 0;
 
   ImVec2 pos = {0.0f, 0.0f};
@@ -68,6 +97,7 @@ static int fps_render(void * udata, bool interactive, struct Rect * windowRects,
 struct LG_OverlayOps LGOverlayFPS =
 {
   .name           = "FPS",
+  .earlyInit      = fps_earlyInit,
   .init           = fps_init,
   .free           = fps_free,
   .render         = fps_render

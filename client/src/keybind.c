@@ -48,18 +48,6 @@ static void bind_video(int sc, void * opaque)
     core_startFrameThread();
 }
 
-static void bind_showFPS(int sc, void * opaque)
-{
-  g_state.showFPS = !g_state.showFPS;
-  app_invalidateWindow();
-}
-
-static void bind_showTiming(int sc, void * opaque)
-{
-  g_state.showTiming = !g_state.showTiming;
-  app_invalidateWindow();
-}
-
 static void bind_rotate(int sc, void * opaque)
 {
   if (g_params.winRotate == LG_ROTATE_MAX-1)
@@ -144,8 +132,6 @@ void keybind_register(void)
 {
   app_registerKeybind(KEY_F, bind_fullscreen   , NULL, "Full screen toggle");
   app_registerKeybind(KEY_V, bind_video        , NULL, "Video stream toggle");
-  app_registerKeybind(KEY_D, bind_showFPS      , NULL, "FPS display toggle");
-  app_registerKeybind(KEY_T, bind_showTiming   , NULL, "Show frame timing information");
   app_registerKeybind(KEY_R, bind_rotate       , NULL, "Rotate the output clockwise by 90° increments");
   app_registerKeybind(KEY_Q, bind_quit         , NULL, "Quit");
   app_registerKeybind(KEY_O, bind_toggleOverlay, NULL, "Toggle overlay");

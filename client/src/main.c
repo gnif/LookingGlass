@@ -70,7 +70,7 @@ static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
 
-struct AppState g_state;
+struct AppState g_state = { 0 };
 struct CursorState g_cursor;
 
 // this structure is initialized in config.c
@@ -798,13 +798,9 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
 
 static int lg_run(void)
 {
-  memset(&g_state, 0, sizeof(g_state));
-
   g_cursor.sens = g_params.mouseSens;
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
-
-  g_state.showFPS = g_params.showFPS;
 
   /* setup imgui */
   igCreateContext(NULL);
@@ -819,12 +815,7 @@ static int lg_run(void)
   g_state.fontName    = util_getUIFont(g_params.uiFont);
   DEBUG_INFO("Using font: %s", g_state.fontName);
 
-  g_state.overlays = ll_new();
-  app_registerOverlay(&LGOverlayConfig, NULL);
-  app_registerOverlay(&LGOverlayAlert , NULL);
-  app_registerOverlay(&LGOverlayFPS   , NULL);
-  app_registerOverlay(&LGOverlayGraphs, NULL);
-  app_registerOverlay(&LGOverlayHelp  , NULL);
+  app_initOverlays();
 
   // initialize metrics ringbuffers
   g_state.renderTimings  = ringbuffer_new(256, sizeof(float));
@@ -1276,6 +1267,13 @@ int main(int argc, char * argv[])
 
   for(unsigned int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
     LG_DisplayServers[i]->setup();
+
+  g_state.overlays = ll_new();
+  app_registerOverlay(&LGOverlayConfig, NULL);
+  app_registerOverlay(&LGOverlayAlert , NULL);
+  app_registerOverlay(&LGOverlayFPS   , NULL);
+  app_registerOverlay(&LGOverlayGraphs, NULL);
+  app_registerOverlay(&LGOverlayHelp  , NULL);
 
   if (!config_load(argc, argv))
     return -1;

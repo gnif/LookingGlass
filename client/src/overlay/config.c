@@ -46,7 +46,7 @@ OverlayConfig;
 
 static OverlayConfig cfg = { 0 };
 
-static bool config_init(void ** udata, void * params)
+static bool config_init(void ** udata, const void * params)
 {
   cfg.callbacks = ll_new();
   if (!cfg.callbacks)

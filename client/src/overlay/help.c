@@ -27,7 +27,7 @@
 #include "../kb.h"
 #include "../main.h"
 
-static bool help_init(void ** udata, void * params)
+static bool help_init(void ** udata, const void * params)
 {
   return true;
 }

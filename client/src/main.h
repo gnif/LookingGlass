@@ -68,8 +68,6 @@ struct AppState
 
   bool                 stopVideo;
   bool                 ignoreInput;
-  bool                 showFPS;
-  bool                 showTiming;
   bool                 escapeActive;
   uint64_t             escapeTime;
   int                  escapeAction;
@@ -148,7 +146,6 @@ struct AppParams
   int               x, y;
   unsigned int      w, h;
   int               fpsMin;
-  bool              showFPS;
   LG_RendererRotate winRotate;
   bool              useSpiceInput;
   bool              useSpiceClipboard;

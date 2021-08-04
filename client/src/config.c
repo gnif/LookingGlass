@@ -211,14 +211,6 @@ static struct Option options[] =
   },
   {
     .module         = "win",
-    .name           = "showFPS",
-    .description    = "Enable the FPS & UPS display",
-    .shortopt       = 'k',
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = false,
-  },
-  {
-    .module         = "win",
     .name           = "ignoreQuit",
     .description    = "Ignore requests to quit (ie: Alt+F4)",
     .shortopt       = 'Q',
@@ -563,7 +555,6 @@ bool config_load(int argc, char * argv[])
   g_params.fullscreen      = option_get_bool  ("win", "fullScreen"     );
   g_params.maximize        = option_get_bool  ("win", "maximize"       );
   g_params.fpsMin          = option_get_int   ("win", "fpsMin"         );
-  g_params.showFPS         = option_get_bool  ("win", "showFPS"        );
   g_params.ignoreQuit      = option_get_bool  ("win", "ignoreQuit"     );
   g_params.noScreensaver   = option_get_bool  ("win", "noScreensaver"  );
   g_params.autoScreensaver = option_get_bool  ("win", "autoScreensaver");

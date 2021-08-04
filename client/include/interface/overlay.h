@@ -31,8 +31,11 @@ struct LG_OverlayOps
   /* internal name of the overlay for debugging */
   const char * name;
 
+  /* called very early to allow for option registration, optional */
+  void (*earlyInit)(void);
+
   /* called when the overlay is registered */
-  bool (*init)(void ** udata, void * params);
+  bool (*init)(void ** udata, const void * params);
 
   /* final free */
   void (*free)(void * udata);

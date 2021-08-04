@@ -29,6 +29,7 @@
 
 struct GraphState
 {
+  bool show;
   struct ll * graphs;
 };
 
@@ -46,7 +47,7 @@ struct OverlayGraph
 
 static void configCallback(void * udata)
 {
-  igCheckbox("Show Timing Graphs", &g_state.showTiming);
+  igCheckbox("Show Timing Graphs", &gs.show);
   igSeparator();
 
   igBeginTable("split", 2, 0, (ImVec2){}, 0);
@@ -61,10 +62,18 @@ static void configCallback(void * udata)
   igEndTable();
 }
 
-static bool graphs_init(void ** udata, void * params)
+static void showTimingKeybind(int sc, void * opaque)
+{
+  gs.show ^= true;
+  app_invalidateWindow();
+}
+
+static bool graphs_init(void ** udata, const void * params)
 {
   gs.graphs = ll_new();
   app_overlayConfigRegister("Performance Metrics", configCallback, NULL);
+  app_registerKeybind(KEY_T, showTimingKeybind, NULL,
+      "Show frame timing information");
   return true;
 }
 
@@ -111,7 +120,7 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
 static int graphs_render(void * udata, bool interactive,
     struct Rect * windowRects, int maxRects)
 {
-  if (!g_state.showTiming)
+  if (!gs.show)
     return 0;
 
   float fontSize = igGetFontSize();

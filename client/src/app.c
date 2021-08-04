@@ -671,27 +671,39 @@ void app_unregisterGraph(GraphHandle handle)
 struct Overlay
 {
   const struct LG_OverlayOps * ops;
+  const void * params;
   void * udata;
   int lastRectCount;
   struct Rect lastRects[MAX_OVERLAY_RECTS];
 };
 
-void app_registerOverlay(const struct LG_OverlayOps * ops, void * params)
+void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
 {
   ASSERT_LG_OVERLAY_VALID(ops);
 
-  void * udata;
-  if (!ops->init(&udata, params))
-  {
-    DEBUG_ERROR("Overlay `%s` failed to initialize", ops->name);
-    return;
-  }
-
   struct Overlay * overlay = malloc(sizeof(struct Overlay));
   overlay->ops           = ops;
-  overlay->udata         = udata;
+  overlay->params        = params;
+  overlay->udata         = NULL;
   overlay->lastRectCount = 0;
   ll_push(g_state.overlays, overlay);
+
+  if (ops->earlyInit)
+    ops->earlyInit();
+}
+
+void app_initOverlays(void)
+{
+  struct Overlay * overlay;
+  for (ll_reset(g_state.overlays);
+      ll_walk(g_state.overlays, (void **)&overlay); )
+  {
+    if (!overlay->ops->init(&overlay->udata, overlay->params))
+    {
+      DEBUG_ERROR("Overlay `%s` failed to initialize", overlay->ops->name);
+      overlay->ops = NULL;
+    }
+  }
 }
 
 static inline void mergeRect(struct Rect * dest, const struct Rect * a, const struct Rect * b)
