@@ -868,6 +868,8 @@ void app_setOverlay(bool enable)
     wasGrabbed = g_cursor.grab;
 
     g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    g_state.io->MousePos = (ImVec2) { g_cursor.pos.x, g_cursor.pos.y };
+
     core_setGrabQuiet(false);
     core_setCursorInView(false);
   }
