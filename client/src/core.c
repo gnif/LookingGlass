@@ -147,10 +147,9 @@ void core_setGrabQuiet(bool enable)
 
 bool core_warpPointer(int x, int y, bool exiting)
 {
-  if (!g_cursor.inWindow && !exiting)
-    return false;
-
-  if (g_cursor.warpState == WARP_STATE_OFF)
+  if ((!g_cursor.inWindow && !exiting) ||
+      g_state.overlayInput ||
+      g_cursor.warpState == WARP_STATE_OFF)
     return false;
 
   if (exiting)
