@@ -22,7 +22,6 @@
 #include "cimgui.h"
 
 #include "../main.h"
-#include "../overlays.h"
 
 #include "ll.h"
 #include "common/debug.h"
@@ -65,7 +64,7 @@ static void configCallback(void * udata)
 static bool graphs_init(void ** udata, void * params)
 {
   gs.graphs = ll_new();
-  overlayConfig_register("Performance Metrics", configCallback, NULL);
+  app_overlayConfigRegister("Performance Metrics", configCallback, NULL);
   return true;
 }
 
