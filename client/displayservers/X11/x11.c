@@ -1175,9 +1175,19 @@ static bool x11WaitFrame(void)
         /* every skip we back off the delay */
         if (deltamsc > 1)
         {
-          delay -= 100;
-          calibrate = 1;
-          deltamsc = 0;
+          /* prevent underflow */
+          if (delay - 100 < delay)
+          {
+            delay -= 100;
+            calibrate = 1;
+            deltamsc = 0;
+          }
+          else
+          {
+            /* if underflow, we are simply too slow, no delay */
+            delay = 0;
+            calibrate = CALIBRATION_COUNT;
+          }
         }
 
         /* if we have finished, print out the delay */
@@ -1191,11 +1201,14 @@ static bool x11WaitFrame(void)
   lastmsc = msc;
 
   /* minor adjustments if we are still seeing odd skips */
-  if (deltamsc > 1)
+  if (deltamsc > 1 && delay - 10 < delay)
     delay -= 10;
 
-  struct timespec ts = { .tv_nsec = delay * 1000 };
-  while(nanosleep(&ts, &ts)) {};
+  if (delay)
+  {
+    struct timespec ts = { .tv_nsec = delay * 1000 };
+    while(nanosleep(&ts, &ts)) {};
+  }
 
   /* force rendering until we have finished calibration so we can take into
    * account how long it takes for the scene to render */
