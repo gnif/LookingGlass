@@ -901,9 +901,17 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
           break;
         }
 
-        memcpy(accumulated->rects + accumulated->count, damage->rects,
-            damage->count * sizeof(struct FrameDamageRect));
-        accumulated->count += damage->count;
+        for (int j = 0; j < damage->count; ++j)
+        {
+          struct FrameDamageRect * rect = damage->rects + j;
+          int x = rect->x > 0 ? rect->x - 1 : 0;
+          int y = rect->y > 0 ? rect->y - 1 : 0;
+          accumulated->rects[accumulated->count++] = (struct FrameDamageRect) {
+            .x = x, .y = y,
+            .width  = min(this->format.width  - x, rect->width  + 2),
+            .height = min(this->format.height - y, rect->height + 2),
+          };
+        }
       }
     }
     desktopDamage = this->desktopDamage + this->desktopDamageIdx;
