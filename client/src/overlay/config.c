@@ -101,7 +101,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
   if (igCollapsingHeaderBoolPtr("About Looking Glass", NULL, 0))
   {
     igText(LG_COPYRIGHT_STR);
-    igText(LG_WEBSITE_STR);
+    overlayTextURL(LG_WEBSITE_STR, NULL);
     igText(LG_VERSION_STR);
     igSeparator();
     igTextWrapped(LG_LICENSE_STR);
@@ -116,7 +116,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
       igTableNextColumn();
       igBulletText(help->name);
       igTableNextColumn();
-      igTextWrapped(help->value);
+      overlayTextMaybeURL(help->value, true);
     }
     igEndTable();
   }
@@ -145,7 +145,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
             igTableNextColumn();
             igBulletText(donate->name);
             igTableNextColumn();
-            igText(donate->value);
+            overlayTextMaybeURL(donate->value, false);
           }
           igEndTable();
         }
