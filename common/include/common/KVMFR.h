@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 13
+#define KVMFR_VERSION 14
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -47,11 +47,26 @@ enum
 
 typedef uint32_t KVMFRCursorFlags;
 
+enum
+{
+  KVMFR_FEATURE_SETCURSORPOS = 0x1
+};
+
+typedef uint32_t KVMFRFeatureFlags;
+
+enum
+{
+  KVMFR_MESSAGE_SETCURSORPOS
+};
+
+typedef uint32_t KVMFRMessageType;
+
 typedef struct KVMFR
 {
-  char     magic[8];
-  uint32_t version;
-  char     hostver[32];
+  char              magic[8];
+  uint32_t          version;
+  char              hostver[32];
+  KVMFRFeatureFlags features;
 }
 KVMFR;
 
@@ -83,5 +98,18 @@ typedef struct KVMFRFrame
   bool            blockScreensaver;   // whether the guest has requested to block screensavers
 }
 KVMFRFrame;
+
+typedef struct KVMFRMessage
+{
+  KVMFRMessageType type;
+}
+KVMFRMessage;
+
+typedef struct KVMFRSetCursorPos
+{
+  KVMFRMessage msg;
+  int32_t x, y;
+}
+KVMFRSetCursorPos;
 
 #endif
