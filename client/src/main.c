@@ -299,7 +299,6 @@ static int renderThread(void * unused)
 static int cursorThread(void * unused)
 {
   LGMP_STATUS         status;
-  PLGMPClientQueue    queue;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
@@ -307,7 +306,8 @@ static int cursorThread(void * unused)
   // subscribe to the pointer queue
   while(g_state.state == APP_STATE_RUNNING)
   {
-    status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_POINTER, &queue);
+    status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_POINTER,
+        &g_state.pointerQueue);
     if (status == LGMP_OK)
       break;
 
@@ -325,7 +325,7 @@ static int cursorThread(void * unused)
   while(g_state.state == APP_STATE_RUNNING)
   {
     LGMPMessage msg;
-    if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
+    if ((status = lgmpClientProcess(g_state.pointerQueue, &msg)) != LGMP_OK)
     {
       if (status == LGMP_ERR_QUEUE_EMPTY)
       {
@@ -375,7 +375,7 @@ static int cursorThread(void * unused)
     char buffer[msg.size];
     memcpy(buffer, msg.mem, msg.size);
     KVMFRCursor * cursor = (KVMFRCursor *)buffer;
-    lgmpClientMessageDone(queue);
+    lgmpClientMessageDone(g_state.pointerQueue);
 
     g_cursor.guest.visible =
       msg.udata & CURSOR_FLAG_VISIBLE;
@@ -389,7 +389,7 @@ static int cursorThread(void * unused)
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
           DEBUG_ERROR("Invalid cursor type");
-          lgmpClientMessageDone(queue);
+          lgmpClientMessageDone(g_state.pointerQueue);
           continue;
       }
 
@@ -443,7 +443,7 @@ static int cursorThread(void * unused)
       lgSignalEvent(g_state.frameEvent);
   }
 
-  lgmpClientUnsubscribe(&queue);
+  lgmpClientUnsubscribe(&g_state.pointerQueue);
   return 0;
 }
 
@@ -1136,6 +1136,8 @@ restart:
 
   DEBUG_INFO("Host ready, reported version: %s", udata->hostver);
   DEBUG_INFO("Starting session");
+
+  g_state.kvmfrFeatures = udata->features;
 
   if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
   {

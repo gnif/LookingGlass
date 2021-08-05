@@ -407,13 +407,25 @@ void core_handleMouseNormal(double ex, double ey)
   if (g_cursor.realign)
   {
     g_cursor.realign = false;
-
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
 
-    /* add the difference to the offset */
-    ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
-    ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+    if (g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS)
+    {
+      const KVMFRSetCursorPos msg = {
+        .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
+        .x        = guest.x,
+        .y        = guest.y
+      };
+
+      lgmpClientSendData(g_state.pointerQueue, &msg, sizeof(msg));
+    }
+    else
+    {
+      /* add the difference to the offset */
+      ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
+      ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+    }
 
     /* don't test for an exit as we just entered, we can get into a enter/exit
      * loop otherwise */

@@ -103,8 +103,8 @@ struct AppState
 
   struct IVSHMEM       shm;
   PLGMPClient          lgmp;
-  PLGMPClientQueue     frameQueue;
   PLGMPClientQueue     pointerQueue;
+  KVMFRFeatureFlags    kvmfrFeatures;
 
   LGThread            * frameThread;
   LGEvent             * frameEvent;
