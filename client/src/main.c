@@ -1070,7 +1070,7 @@ restart:
       if (g_state.state != APP_STATE_RUNNING)
         return -1;
 
-      status = LGMP_OK;
+      break;
     }
 
     if (status != LGMP_ERR_INVALID_SESSION && status != LGMP_ERR_INVALID_MAGIC)
