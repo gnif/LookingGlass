@@ -44,3 +44,5 @@ const char * os_getDataPath();
 void os_showMessage(const char * caption, const char * msg);
 
 bool os_blockScreensaver();
+bool os_hasSetCursorPos(void);
+void os_setCursorPos(int x, int y);

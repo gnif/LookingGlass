@@ -573,3 +573,13 @@ void os_showMessage(const char * caption, const char * msg)
 {
   MessageBoxA(NULL, msg, caption, MB_OK | MB_ICONINFORMATION);
 }
+
+bool os_hasSetCursorPos(void)
+{
+  return true;
+}
+
+void os_setCursorPos(int x, int y)
+{
+  SetCursorPos(x, y);
+}

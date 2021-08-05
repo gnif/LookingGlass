@@ -86,3 +86,12 @@ void os_showMessage(const char * caption, const char * msg)
 {
   DEBUG_INFO("%s: %s", caption, msg);
 }
+
+bool os_hasSetCursorPos(void)
+{
+  return false;
+}
+
+void os_setCursorPos(int x, int y)
+{
+}

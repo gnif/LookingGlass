@@ -147,6 +147,22 @@ static bool lgmpTimer(void * opaque)
     return false;
   }
 
+  uint8_t data[LGMP_MSGS_SIZE];
+  size_t size;
+  while((status = lgmpHostReadData(app.pointerQueue, &data, &size)) == LGMP_OK)
+  {
+    KVMFRMessage *msg = (KVMFRMessage *)data;
+    switch(msg->type)
+    {
+      case KVMFR_MESSAGE_SETCURSORPOS:
+      {
+        KVMFRSetCursorPos *sp = (KVMFRSetCursorPos *)msg;
+        os_setCursorPos(sp->x, sp->y);
+        break;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -545,8 +561,9 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);
 
   KVMFR udata = {
-    .magic   = KVMFR_MAGIC,
-    .version = KVMFR_VERSION,
+    .magic    = KVMFR_MAGIC,
+    .version  = KVMFR_VERSION,
+    .features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0
   };
   strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver)-1);
 
@@ -661,7 +678,7 @@ int app_main(int argc, char * argv[])
 
   LG_LOCK_INIT(app.pointerLock);
 
-  if (!lgCreateTimer(100, lgmpTimer, NULL, &app.lgmpTimer))
+  if (!lgCreateTimer(10, lgmpTimer, NULL, &app.lgmpTimer))
   {
     DEBUG_ERROR("Failed to create the LGMP timer");
 
