@@ -20,6 +20,9 @@
 
 #include "overlay_utils.h"
 
+#include <string.h>
+
+#include "common/open.h"
 #include "cimgui.h"
 #include "main.h"
 
@@ -40,4 +43,37 @@ void overlayGetImGuiRect(struct Rect * rect)
 ImVec2 * overlayGetScreenSize(void)
 {
   return &g_state.io->DisplaySize;
+}
+
+static void overlayAddUnderline(ImU32 color)
+{
+  ImVec2 min, max;
+  igGetItemRectMin(&min);
+  igGetItemRectMax(&max);
+  min.y = max.y;
+  ImDrawList_AddLine(igGetWindowDrawList(), min, max, color, 1.0f);
+}
+
+void overlayTextURL(const char * url, const char * text)
+{
+  igText(text ? text : url);
+
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+  {
+    if (igIsItemClicked(ImGuiMouseButton_Left))
+      lgOpenURL(url);
+    overlayAddUnderline(igGetColorU32Vec4(*igGetStyleColorVec4(ImGuiCol_ButtonHovered)));
+    igSetMouseCursor(ImGuiMouseCursor_Hand);
+    igSetTooltip("Open in browser: %s", url);
+  }
+}
+
+void overlayTextMaybeURL(const char * text, bool wrapped)
+{
+  if (strncmp(text, "https://", 8) == 0)
+    overlayTextURL(text, NULL);
+  else if (wrapped)
+    igTextWrapped(text);
+  else
+    igText(text);
 }
