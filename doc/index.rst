@@ -28,7 +28,7 @@ More information:
 * `Official Website <https://looking-glass.io/>`_
 * `GitHub <https://github.com/gnif/LookingGlass>`_
 * `Discord <https://discord.gg/52SMupxkvt>`_
-* `Forum <https://forum.level1techs.com/c/software/lookingglass/142>`_
+* `Forum <https://level1techs.com/lg>`_
 * `Community wiki <https://looking-glass.io/wiki/>`_
 * IRC - #LookingGlass on `libera.chat <https://libera.chat/>`_
 
