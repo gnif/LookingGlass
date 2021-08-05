@@ -796,6 +796,14 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
   return true;
 }
 
+static void reportBadVersion()
+{
+  DEBUG_BREAK();
+  DEBUG_ERROR("The host application is not compatible with this client");
+  DEBUG_ERROR("This is not a Looking Glass error, do not report this");
+  DEBUG_ERROR("Please install the matching host application for this client");
+}
+
 static int lg_run(void)
 {
   g_cursor.sens = g_params.mouseSens;
@@ -1051,6 +1059,20 @@ restart:
     if ((status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
       break;
 
+    if (status == LGMP_ERR_INVALID_VERSION)
+    {
+      reportBadVersion();
+      DEBUG_INFO("Waiting for you to upgrade the host application");
+      while (g_state.state == APP_STATE_RUNNING &&
+          lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata) != LGMP_OK)
+        g_state.ds->wait(1000);
+
+      if (g_state.state != APP_STATE_RUNNING)
+        return -1;
+
+      status = LGMP_OK;
+    }
+
     if (status != LGMP_ERR_INVALID_SESSION && status != LGMP_ERR_INVALID_MAGIC)
     {
       DEBUG_ERROR("lgmpClientSessionInit Failed: %s", lgmpStatusString(status));
@@ -1084,11 +1106,7 @@ restart:
   const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
   if (udataSize != sizeof(KVMFR) || !magicMatches || udata->version != KVMFR_VERSION)
   {
-    DEBUG_BREAK();
-    DEBUG_ERROR("The host application is not compatible with this client");
-    DEBUG_ERROR("This is not a Looking Glass error, do not report this");
-    DEBUG_ERROR("Please install the matching host application for this client");
-
+    reportBadVersion();
     if (magicMatches)
     {
       DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
