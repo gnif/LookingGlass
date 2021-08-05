@@ -21,11 +21,15 @@
 #ifndef _H_LG_OVERLAY_UTILS_
 #define _H_LG_OVERLAY_UTILS_
 
+#include <stdbool.h>
+
 #include "common/types.h"
 
 typedef struct ImVec2 ImVec2;
 
 void overlayGetImGuiRect(struct Rect * rect);
 ImVec2 * overlayGetScreenSize(void);
+void overlayTextURL(const char * url, const char * text);
+void overlayTextMaybeURL(const char * text, bool wrapped);
 
 #endif
