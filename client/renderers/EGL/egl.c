@@ -617,6 +617,8 @@ static void egl_config_ui(void * opaque)
 {
   struct Inst * this = opaque;
   egl_damage_config_ui(this->damage);
+  igSeparator();
+  egl_desktop_config_ui(this->desktop);
 }
 
 static bool egl_render_startup(void * opaque, bool useDMA)

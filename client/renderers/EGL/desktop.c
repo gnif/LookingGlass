@@ -27,6 +27,7 @@
 #include "texture.h"
 #include "shader.h"
 #include "desktop_rects.h"
+#include "cimgui.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -75,7 +76,6 @@ struct EGL_Desktop
 
 // forwards
 void egl_desktop_toggle_nv(int key, void * opaque);
-void egl_desktop_toggle_scale_algo(int key, void * opaque);
 
 static bool egl_init_desktop_shader(
   struct DesktopShader * shader,
@@ -141,7 +141,6 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA,
   }
 
   app_registerKeybind(KEY_N, egl_desktop_toggle_nv, *desktop, "Toggle night vision mode");
-  app_registerKeybind(KEY_S, egl_desktop_toggle_scale_algo, *desktop, "Toggle scale algorithm");
 
   (*desktop)->nvMax     = option_get_int("egl", "nvGainMax");
   (*desktop)->nvGain    = option_get_int("egl", "nvGain"   );
@@ -162,21 +161,6 @@ void egl_desktop_toggle_nv(int key, void * opaque)
   else app_alert(LG_ALERT_INFO, "NV Gain + %d", desktop->nvGain - 1);
 }
 
-static const char * egl_desktop_scale_algo_name(int algorithm)
-{
-  switch (algorithm)
-  {
-    case EGL_SCALE_AUTO:
-      return "Automatic (downscale: linear, upscale: nearest)";
-    case EGL_SCALE_NEAREST:
-      return "Nearest";
-    case EGL_SCALE_LINEAR:
-      return "Linear";
-    default:
-      return "(unknown)";
-  }
-}
-
 bool egl_desktop_scale_validate(struct Option * opt, const char ** error)
 {
   if (opt->value.x_int >= 0 && opt->value.x_int < EGL_SCALE_MAX)
@@ -184,16 +168,6 @@ bool egl_desktop_scale_validate(struct Option * opt, const char ** error)
 
   *error = "Invalid scale algorithm number";
   return false;
-}
-
-void egl_desktop_toggle_scale_algo(int key, void * opaque)
-{
-  EGL_Desktop * desktop = (EGL_Desktop *)opaque;
-  if (++desktop->scaleAlgo == EGL_SCALE_MAX)
-    desktop->scaleAlgo = 0;
-
-  app_alert(LG_ALERT_INFO, "Scale Algorithm %d: %s", desktop->scaleAlgo,
-      egl_desktop_scale_algo_name(desktop->scaleAlgo));
 }
 
 void egl_desktop_free(EGL_Desktop ** desktop)
@@ -207,6 +181,31 @@ void egl_desktop_free(EGL_Desktop ** desktop)
 
   free(*desktop);
   *desktop = NULL;
+}
+
+static const char * algorithmNames[EGL_SCALE_MAX] = {
+  [EGL_SCALE_AUTO]    = "Automatic (downscale: linear, upscale: nearest)",
+  [EGL_SCALE_NEAREST] = "Nearest",
+  [EGL_SCALE_LINEAR]  = "Linear",
+};
+
+void egl_desktop_config_ui(EGL_Desktop * desktop)
+{
+  igText("Scale algorithm:");
+  igPushItemWidth(igGetWindowWidth() - igGetStyle()->WindowPadding.x * 2);
+  if (igBeginCombo("##scale", algorithmNames[desktop->scaleAlgo], 0))
+  {
+    for (int i = 0; i < EGL_SCALE_MAX; ++i)
+    {
+      bool selected = i == desktop->scaleAlgo;
+      if (igSelectableBool(algorithmNames[i], selected, 0, (ImVec2) { 0.0f, 0.0f }))
+        desktop->scaleAlgo = i;
+      if (selected)
+        igSetItemDefaultFocus();
+    }
+    igEndCombo();
+  }
+  igPopItemWidth();
 }
 
 bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
