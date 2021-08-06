@@ -36,6 +36,7 @@ typedef struct EGL_Damage EGL_Damage;
 bool egl_damage_init(EGL_Damage ** damage);
 void egl_damage_free(EGL_Damage ** damage);
 
+void egl_damage_config_ui(EGL_Damage * damage);
 void egl_damage_setup(EGL_Damage * damage, int width, int height);
 void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
     float scaleX, float scaleY);

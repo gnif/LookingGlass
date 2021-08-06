@@ -613,6 +613,12 @@ static void debugCallback(GLenum source, GLenum type, GLuint id,
   DEBUG_PRINT(level, "GL message (source: %s, type: %s): %s", sourceName, typeName, message);
 }
 
+static void egl_config_ui(void * opaque)
+{
+  struct Inst * this = opaque;
+  egl_damage_config_ui(this->damage);
+}
+
 static bool egl_render_startup(void * opaque, bool useDMA)
 {
   struct Inst * this = (struct Inst *)opaque;
@@ -813,6 +819,8 @@ static bool egl_render_startup(void * opaque, bool useDMA)
     DEBUG_ERROR("Failed to initialize ImGui");
     return false;
   }
+
+  app_overlayConfigRegister("EGL", egl_config_ui, this);
 
   this->imgui = true;
   return true;
