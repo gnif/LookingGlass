@@ -463,7 +463,7 @@ static bool opengl_needs_render(void * opaque)
 }
 
 bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
-    const bool invalidateWindow)
+    const bool invalidateWindow, void (*preSwap)(void * udata), void * udata)
 {
   struct Inst * this = (struct Inst *)opaque;
   if (!this)
@@ -503,6 +503,7 @@ bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
     ImGui_ImplOpenGL2_RenderDrawData(igGetDrawData());
   }
 
+  preSwap(udata);
   if (this->opt.preventBuffer)
   {
     app_glSwapBuffers();

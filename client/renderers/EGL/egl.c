@@ -879,7 +879,7 @@ inline static void renderLetterBox(struct Inst * this)
 }
 
 static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
-    const bool invalidateWindow)
+    const bool invalidateWindow, void (*preSwap)(void * udata), void * udata)
 {
   struct Inst * this = (struct Inst *)opaque;
   EGLint bufferAge   = egl_buffer_age(this);
@@ -1072,6 +1072,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
   this->hadOverlay = hasOverlay;
   this->cursorLast = cursorState;
 
+  preSwap(udata);
   app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
   return true;
 }

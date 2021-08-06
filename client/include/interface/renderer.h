@@ -114,7 +114,7 @@ typedef bool         (* LG_RendererOnFrameFormat)(void * opaque, const LG_Render
 typedef bool         (* LG_RendererOnFrame      )(void * opaque, const FrameBuffer * frame, int dmaFD, const FrameDamageRect * damage, int damageCount);
 typedef bool         (* LG_RendererRenderStartup)(void * opaque, bool useDMA);
 typedef bool         (* LG_RendererNeedsRender  )(void * opaque);
-typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate, const bool newFrame, const bool invalidateWindow);
+typedef bool         (* LG_RendererRender       )(void * opaque, LG_RendererRotate rotate, const bool newFrame, const bool invalidateWindow, void (*preSwap)(void * udata), void * udata);
 
 typedef struct LG_Renderer
 {

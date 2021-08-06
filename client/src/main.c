@@ -138,6 +138,13 @@ static bool fpsTimerFn(void * unused)
   return true;
 }
 
+static void preSwapCallback(void * udata)
+{
+  const uint64_t * renderStart = (const uint64_t *)udata;
+  ringbuffer_push(g_state.renderDuration,
+      &(float) {(nanotime() - *renderStart) * 1e-6f});
+}
+
 static int renderThread(void * unused)
 {
   if (!g_state.lgr->render_startup(g_state.lgrData, g_state.useDMA))
@@ -245,13 +252,12 @@ static int renderThread(void * unused)
     const uint64_t renderStart = nanotime();
     LG_LOCK(g_state.lgrLock);
     if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate, newFrame,
-          invalidate))
+          invalidate, preSwapCallback, (void *)&renderStart))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
     }
     LG_UNLOCK(g_state.lgrLock);
-    ringbuffer_push(g_state.renderDuration, &(float) {(nanotime() - renderStart) * 1e-6f});
 
     const uint64_t t     = nanotime();
     const uint64_t delta = t - g_state.lastRenderTime;
