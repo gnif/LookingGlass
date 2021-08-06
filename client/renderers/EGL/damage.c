@@ -52,9 +52,8 @@ struct EGL_Damage
   GLint uTransform;
 };
 
-void egl_damage_config_ui(void * opaque)
+void egl_damage_config_ui(EGL_Damage * damage)
 {
-  EGL_Damage * damage = opaque;
   igCheckbox("Show damage overlay", &damage->show);
 }
 
@@ -90,7 +89,6 @@ bool egl_damage_init(EGL_Damage ** damage)
   }
 
   (*damage)->uTransform = egl_shader_get_uniform_location((*damage)->shader, "transform");
-  app_overlayConfigRegister("EGL", egl_damage_config_ui, *damage);
 
   return true;
 }
