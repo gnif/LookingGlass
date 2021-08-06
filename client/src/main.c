@@ -831,7 +831,7 @@ static int lg_run(void)
   g_state.renderDuration = ringbuffer_new(256, sizeof(float));
   overlayGraph_register("FRAME" , g_state.renderTimings , 0.0f, 50.0f);
   overlayGraph_register("UPLOAD", g_state.uploadTimings , 0.0f, 50.0f);
-  overlayGraph_register("RENDER", g_state.renderDuration, 0.0f,  2.0f);
+  overlayGraph_register("RENDER", g_state.renderDuration, 0.0f, 10.0f);
 
   initImGuiKeyMap(g_state.io->KeyMap);
 
