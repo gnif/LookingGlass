@@ -90,19 +90,18 @@ static void x11DoPresent(void)
     x11.presentSerial++,
     x11.presentRegion, // valid
     x11.presentRegion, // update
-    0,    // x_off,
-    0,    // y_off,
-    0,    // target_crtc
-    None, // wait_fence
-    None, // idle_fence
-    0,    // options
-    0,    // target_msc,
-    0,    // divisor,
-    0,    // remainder,
-    NULL, // notifies
-    0     // nnotifies
+    0,                 // x_off,
+    0,                 // y_off,
+    None,              // target_crtc
+    None,              // wait_fence
+    None,              // idle_fence
+    PresentOptionNone, // options
+    0,                 // target_msc,
+    0,                 // divisor,
+    0,                 // remainder,
+    NULL,              // notifies
+    0                  // nnotifies
   );
-  XFlush(x11.display);
 }
 
 static void x11Setup(void)
@@ -708,7 +707,7 @@ static int x11EventThread(void * unused)
 
       case Expose:
       {
-        app_invalidateWindow(true);
+        app_invalidateWindow(false);
         break;
       }
 
@@ -1133,9 +1132,27 @@ static bool x11WaitFrame(void)
   /* wait until we are woken up by the present event */
   lgWaitEvent(x11.frameEvent, TIMEOUT_INFINITE);
 
+#define WARMUP_TIME 3000000 //2s
 #define CALIBRATION_COUNT 400
   const uint64_t ust = atomic_load(&x11.presentUst);
   const uint64_t msc = atomic_load(&x11.presentMsc);
+
+  static bool warmup = true;
+  if (warmup)
+  {
+    static uint64_t expire = 0;
+    if (!expire)
+    {
+      DEBUG_INFO("Warming up...");
+      expire = ust + WARMUP_TIME;
+    }
+
+    if (ust < expire)
+      return false;
+
+    warmup = false;
+    DEBUG_INFO("Warmup done, doing calibration...");
+  }
 
   /* calibrate a delay to push our presentation time forward as far as
    * possible without skipping frames */
@@ -1192,7 +1209,16 @@ static bool x11WaitFrame(void)
 
         /* if we have finished, print out the delay */
         if (++calibrate == CALIBRATION_COUNT)
-          DEBUG_INFO("Calibration done, delay = %lu us", delay);
+        {
+          /* delays shorter then 1ms are unmaintainable */
+          if (delay < 1000)
+          {
+            delay = 0;
+            DEBUG_INFO("Calibration done, no delay required");
+          }
+          else
+            DEBUG_INFO("Calibration done, delay = %lu us", delay);
+        }
       }
     }
   }
@@ -1200,9 +1226,28 @@ static bool x11WaitFrame(void)
   lastts  = ust;
   lastmsc = msc;
 
-  /* minor adjustments if we are still seeing odd skips */
-  if (deltamsc > 1 && delay - 10 < delay)
-    delay -= 10;
+  /* adjustments if we are still seeing odd skips */
+  if (delay > 0 && deltamsc > 1)
+  {
+    /* only adjust if the last skip was less then 1s ago */
+    static uint64_t lastSkip = 0;
+    const bool adjust = ust - lastSkip < 1000000UL;
+    lastSkip = ust;
+
+    if (adjust)
+    {
+      if (delay - 500 < delay)
+      {
+        delay -= 500;
+        DEBUG_INFO("Excessing skipping detected, reduced calibration delay to %lu us", delay);
+      }
+      else
+      {
+        delay = 0;
+        DEBUG_WARN("Excessive skipping detected, calibration delay disabled");
+      }
+    }
+  }
 
   if (delay)
   {
