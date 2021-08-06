@@ -131,12 +131,12 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
         igTextWrapped(member->blurb);
         if (member->donate[0].name)
         {
-          igSpacing();
+          igSeparator();
           igTextWrapped(
               "If you would like to show financial support for his work you can "
-              "do so directly via the following platform(s):");
+              "do so directly via the following platform%s:",
+              member->donate[1].name ? "s" : "");
 
-          igSeparator();
           igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
           igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
               fontSize * 10.0f, 0);
