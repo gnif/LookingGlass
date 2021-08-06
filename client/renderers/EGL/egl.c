@@ -856,21 +856,21 @@ inline static void renderLetterBox(struct Inst * this)
 
     if (hLB)
     {
-      glScissor(0.0f, 0.0f, this->destRect.x, this->height);
+      glScissor(0.0f, 0.0f, this->destRect.x + 0.5f, this->height);
       glClear(GL_COLOR_BUFFER_BIT);
 
       float x2 = this->destRect.x + this->destRect.w;
-      glScissor(x2, 0.0f, this->width - x2, this->height);
+      glScissor(x2, 0.0f, this->width - x2 - 0.5f, this->height);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
     if (vLB)
     {
-      glScissor(0.0f, 0.0f, this->width, this->destRect.y);
+      glScissor(0.0f, 0.0f, this->width, this->destRect.y + 0.5f);
       glClear(GL_COLOR_BUFFER_BIT);
 
       float y2 = this->destRect.y + this->destRect.h;
-      glScissor(0.0f, y2, this->width, this->height - y2);
+      glScissor(0.0f, y2, this->width, this->height - y2 - 0.5f);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
