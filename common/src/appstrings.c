@@ -99,7 +99,12 @@ const struct LGTeamMember LG_TEAM[] =
   },
   {
     .name   = "Guanzhong Chen (quantum)",
-    .blurb  = "Wayland developer",
+    .blurb  =
+      "Major code contributor to Looking Glass, with a specific focus on "
+      "improving Wayland support and the Windows side of things. He works "
+      "on many things, from small cosmetic issues to major features. "
+      "He implemented much of the Wayland backend, VM->Host DMABUF import, "
+      "and damage tracking.",
     .donate = { { 0 } }
   },
   {
