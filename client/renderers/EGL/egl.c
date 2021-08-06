@@ -860,7 +860,7 @@ inline static void renderLetterBox(struct Inst * this)
       glClear(GL_COLOR_BUFFER_BIT);
 
       float x2 = this->destRect.x + this->destRect.w;
-      glScissor(x2 + 0.5, 0.0f, this->width - x2, this->height);
+      glScissor(x2 - 0.5, 0.0f, this->width - x2, this->height + 1.0f);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
@@ -870,7 +870,7 @@ inline static void renderLetterBox(struct Inst * this)
       glClear(GL_COLOR_BUFFER_BIT);
 
       float y2 = this->destRect.y + this->destRect.h;
-      glScissor(0.0f, y2 + 0.5, this->width, this->height - y2);
+      glScissor(0.0f, y2 - 0.5, this->width, this->height - y2 + 1.0f);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
