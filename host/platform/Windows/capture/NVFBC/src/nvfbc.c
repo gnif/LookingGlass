@@ -61,6 +61,7 @@ struct iface
 
   unsigned int formatVer;
   unsigned int grabWidth, grabHeight, grabStride;
+  unsigned int shmStride;
 
   uint8_t * frameBuffer;
   uint8_t * diffMap;
@@ -444,17 +445,19 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     this->grabWidth  = this->grabInfo.dwWidth;
     this->grabHeight = this->grabInfo.dwHeight;
     this->grabStride = this->grabInfo.dwBufferWidth;
+    // Round up stride in IVSHMEM to avoid issues with dmabuf import.
+    this->shmStride  = (this->grabStride + 0x1F) & ~0x1F;
     ++this->formatVer;
   }
 
-  const unsigned int maxHeight = maxFrameSize / (this->grabStride * 4);
+  const unsigned int maxHeight = maxFrameSize / (this->shmStride * 4);
 
   frame->formatVer  = this->formatVer;
   frame->width      = this->grabWidth;
   frame->height     = maxHeight > this->grabHeight ? this->grabHeight : maxHeight;
   frame->realHeight = this->grabHeight;
-  frame->pitch      = this->grabStride * 4;
-  frame->stride     = this->grabStride;
+  frame->pitch      = this->shmStride * 4;
+  frame->stride     = this->shmStride;
   frame->rotation   = CAPTURE_ROT_0;
 
   updateDamageRects(frame);
@@ -480,12 +483,13 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
 }
 
 inline static void rectCopyUnaligned(uint8_t * dest, uint8_t * src, int ystart,
-    int yend, int dx, int stride, int width)
+    int yend, int dx, int dstStride, int srcStride, int width)
 {
   for (int i = ystart; i < yend; ++i)
   {
-    unsigned int offset = i * stride + dx;
-    memcpy(dest + offset, src + offset, width);
+    unsigned int srcOffset = i * srcStride + dx;
+    unsigned int dstOffset = i * dstStride + dx;
+    memcpy(dest + dstOffset, src + srcOffset, width);
   }
 }
 
@@ -503,7 +507,7 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
 
     for (unsigned int y = 0; y < h; ++y)
     {
-      const unsigned int ystart = y  << this->diffShift;
+      const unsigned int ystart = y << this->diffShift;
       const unsigned int yend = min(height, (y + 1)  << this->diffShift);
 
       for (unsigned int x = 0; x < w; )
@@ -518,13 +522,23 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
         while (x2 < w && ((!wasFresh && info->diffMap[y * w + x2]) || this->diffMap[y * w + x2]))
           ++x2;
 
-        unsigned int width = (min(x2 << this->diffShift, this->grabStride) - (x << this->diffShift)) * 4;
+        unsigned int width = (min(x2 << this->diffShift, this->grabWidth) - (x << this->diffShift)) * 4;
         rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend, x << (2 + this->diffShift),
-            this->grabStride * 4, width);
+            this->shmStride * 4, this->grabStride * 4, width);
 
         x = x2;
       }
-      framebuffer_set_write_ptr(frame, yend * this->grabStride * 4);
+      framebuffer_set_write_ptr(frame, yend * this->shmStride * 4);
+    }
+  }
+  else if (this->grabStride != this->shmStride)
+  {
+    for (int y = 0; y < height; y += 64)
+    {
+      int yend = min(height, y + 128);
+      rectCopyUnaligned(frameData, this->frameBuffer, y, yend, 0, this->shmStride * 4,
+        this->grabStride * 4, this->grabWidth * 4);
+      framebuffer_set_write_ptr(frame, yend * this->shmStride * 4);
     }
   }
   else
