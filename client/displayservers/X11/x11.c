@@ -741,6 +741,8 @@ static int x11EventThread(void * unused)
 
         if (xe.xproperty.atom == x11atoms._NET_WM_STATE)
         {
+          atomic_store(&x11.lastWMEvent, microtime());
+
           Atom type;
           int fmt;
           unsigned long num, bytes;
@@ -766,6 +768,8 @@ static int x11EventThread(void * unused)
 
         if (xe.xproperty.atom == x11atoms._NET_FRAME_EXTENTS)
         {
+          atomic_store(&x11.lastWMEvent, microtime());
+
           Atom type;
           int fmt;
           unsigned long num, bytes;
@@ -804,6 +808,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
   {
     case XI_FocusIn:
     {
+      atomic_store(&x11.lastWMEvent, microtime());
       if (x11.focused)
         return;
 
@@ -821,6 +826,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_FocusOut:
     {
+      atomic_store(&x11.lastWMEvent, microtime());
       if (!x11.focused)
         return;
 
@@ -838,6 +844,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_Enter:
     {
+      atomic_store(&x11.lastWMEvent, microtime());
       XIEnterEvent *xie = cookie->data;
       if (x11.entered || xie->event != x11.window)
         return;
@@ -850,6 +857,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_Leave:
     {
+      atomic_store(&x11.lastWMEvent, microtime());
       XILeaveEvent *xie = cookie->data;
       if (!x11.entered || xie->event != x11.window ||
           button_state != 0 || app_isCaptureMode())
