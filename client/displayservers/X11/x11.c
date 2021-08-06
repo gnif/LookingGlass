@@ -674,6 +674,8 @@ static int x11EventThread(void * unused)
 
       case ConfigureNotify:
       {
+        atomic_store(&x11.lastWMEvent, microtime());
+
         int x, y;
 
         /* the window may have been re-parented so we need to translate to
@@ -707,6 +709,7 @@ static int x11EventThread(void * unused)
 
       case Expose:
       {
+        atomic_store(&x11.lastWMEvent, microtime());
         app_invalidateWindow(false);
         break;
       }
@@ -1227,7 +1230,9 @@ static bool x11WaitFrame(void)
   lastmsc = msc;
 
   /* adjustments if we are still seeing odd skips */
-  if (delay > 0 && deltamsc > 1)
+  const uint64_t lastWMEvent = atomic_load(&x11.lastWMEvent);
+  const uint64_t eventDelta = ust > lastWMEvent ? ust - lastWMEvent : 0;
+  if (delay > 0 && deltamsc > 1 && eventDelta > 1000000UL)
   {
     /* only adjust if the last skip was less then 1s ago */
     static uint64_t lastSkip = 0;

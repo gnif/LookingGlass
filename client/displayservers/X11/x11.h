@@ -40,6 +40,8 @@ struct X11DSState
   Window        window;
   XVisualInfo * visual;
 
+  _Atomic(uint64_t) lastWMEvent;
+
   int               xpresentOp;
   bool              jitRender;
   _Atomic(uint64_t) presentMsc, presentUst;
