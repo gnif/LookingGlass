@@ -60,6 +60,12 @@ typedef struct Texture
 }
 Texture;
 
+struct FrameDamage
+{
+  int             count;
+  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
+};
+
 // locals
 struct iface
 {
@@ -101,6 +107,8 @@ struct iface
 
   int  lastPointerX, lastPointerY;
   bool lastPointerVisible;
+
+  struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
 };
 
 static struct iface * this    = NULL;
@@ -567,6 +575,9 @@ static bool dxgi_init(void)
   this->stride = mapping.RowPitch / bpp;
   ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0);
 
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    this->frameDamage[i].count = -1;
+
   QueryPerformanceFrequency(&this->perfFreq) ;
   QueryPerformanceCounter  (&this->frameTime);
   this->initialized = true;
@@ -1016,6 +1027,144 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   return CAPTURE_RESULT_OK;
 }
 
+struct Corner
+{
+  int x;
+  int y;
+  int delta;
+};
+
+struct Edge
+{
+  int x;
+  int delta;
+};
+
+static int cornerCompare(const void * a_, const void * b_)
+{
+  const struct Corner * a = a_;
+  const struct Corner * b = b_;
+
+  if (a->y < b->y) return -1;
+  if (a->y > b->y) return +1;
+  if (a->x < b->x) return -1;
+  if (a->x > b->x) return +1;
+  return 0;
+}
+
+inline static void rectCopyUnaligned(uint8_t * dest, const uint8_t * src, int ystart,
+    int yend, int dx, int stride, int width)
+{
+  for (int i = ystart; i < yend; ++i)
+  {
+    unsigned int offset = i * stride + dx;
+    memcpy(dest + offset, src + offset, width);
+  }
+}
+
+static void copyRects(struct FrameDamage * damage, FrameBuffer * frame, int height,
+  const uint8_t * src, int stride)
+{
+  uint8_t * frameData = framebuffer_get_data(frame);
+  struct Corner corners[4 * KVMFR_MAX_DAMAGE_RECTS];
+  const int cornerCount = 4 * damage->count;
+
+  for (int i = 0; i < damage->count; ++i)
+  {
+    FrameDamageRect * rect = damage->rects + i;
+    corners[4 * i + 0] = (struct Corner) {
+      .x = rect->x, .y = rect->y, .delta = 1
+    };
+    corners[4 * i + 1] = (struct Corner) {
+      .x = rect->x + rect->width, .y = rect->y, .delta = -1
+    };
+    corners[4 * i + 2] = (struct Corner) {
+      .x = rect->x, .y = rect->y + rect->height, .delta = -1
+    };
+    corners[4 * i + 3] = (struct Corner) {
+      .x = rect->x + rect->width, .y = rect->y + rect->height, .delta = 1
+    };
+  }
+  qsort(corners, cornerCount, sizeof(struct Corner), cornerCompare);
+
+  struct Edge active_[2][4 * KVMFR_MAX_DAMAGE_RECTS];
+  struct Edge change[4 * KVMFR_MAX_DAMAGE_RECTS];
+  int prev_y = 0;
+  int activeRow = 0;
+  int actives = 0;
+
+  for (int rs = 0;;)
+  {
+    int y = corners[rs].y;
+    int re = rs;
+    while (re < cornerCount && corners[re].y == y)
+      ++re;
+
+    if (y > height)
+      y = height;
+
+    int changes = 0;
+    for (int i = rs; i < re; )
+    {
+      int x = corners[i].x;
+      int delta = 0;
+      while (i < re && corners[i].x == x)
+        delta += corners[i++].delta;
+      change[changes++] = (struct Edge) { .x = x, .delta = delta };
+    }
+
+    struct Edge * active = active_[activeRow];
+    int x1 = 0;
+    int in_rect = 0;
+    for (int i = 0; i < actives; ++i)
+    {
+      if (!in_rect)
+        x1 = active[i].x;
+      in_rect += active[i].delta;
+      if (!in_rect)
+        rectCopyUnaligned(frameData, src, prev_y, y, x1 * 4, stride, (active[i].x - x1) * 4);
+    }
+
+    if (re >= cornerCount || y == height)
+      break;
+
+    framebuffer_set_write_ptr(frame, y * stride * 4);
+
+    struct Edge * new = active_[activeRow ^ 1];
+    int ai = 0;
+    int ci = 0;
+    int ni = 0;
+
+    while (ai < actives && ci < changes)
+    {
+      if (active[ai].x < change[ci].x)
+        new[ni++] = active[ai++];
+      else if (active[ai].x > change[ci].x)
+        new[ni++] = change[ci++];
+      else
+      {
+        active[ai].delta += change[ci++].delta;
+        if (active[ai].delta != 0)
+          new[ni++] = active[ai];
+        ++ai;
+      }
+    }
+
+    // only one of (actives - ai) and (changes - ci) will be non-zero.
+    memcpy(new + ni, active + ai, (actives - ai) * sizeof(struct Edge));
+    memcpy(new + ni, change + ci, (changes - ci) * sizeof(struct Edge));
+    ni += actives - ai;
+    ni += changes - ci;
+
+    actives = ni;
+    prev_y = y;
+    rs = re;
+    activeRow ^= 1;
+  }
+
+  framebuffer_set_write_ptr(frame, height * stride * 4);
+}
+
 static CaptureResult dxgi_getFrame(FrameBuffer * frame,
     const unsigned int height, int frameIndex)
 {
@@ -1024,7 +1173,36 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
 
   Texture * tex = &this->texture[this->texRIndex];
 
-  framebuffer_write(frame, tex->map.pData, this->pitch * height);
+  struct FrameDamage * damage = this->frameDamage + frameIndex;
+  bool damageAll = tex->damageRectsCount == 0 || damage->count < 0 ||
+      damage->count + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS;
+
+  if (damageAll)
+    framebuffer_write(frame, tex->map.pData, this->pitch * height);
+  else
+  {
+    memcpy(damage->rects + damage->count, tex->damageRects,
+      tex->damageRectsCount * sizeof(FrameDamageRect));
+    damage->count += tex->damageRectsCount;
+    copyRects(damage, frame, height, tex->map.pData, this->pitch);
+  }
+
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    struct FrameDamage * damage = this->frameDamage + i;
+    if (i == frameIndex)
+      damage->count = 0;
+    else if (tex->damageRectsCount > 0 && damage->count >= 0 &&
+             damage->count + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
+    {
+      memcpy(damage->rects + damage->count, tex->damageRects,
+        tex->damageRectsCount * sizeof(FrameDamageRect));
+      damage->count += tex->damageRectsCount;
+    }
+    else
+      damage->count = -1;
+  }
+
   LOCKED({ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);});
   tex->state = TEXTURE_STATE_UNUSED;
 
