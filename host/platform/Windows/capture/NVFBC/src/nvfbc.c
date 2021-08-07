@@ -26,6 +26,7 @@
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/event.h"
+#include "common/rects.h"
 #include "common/thread.h"
 #include "common/KVMFR.h"
 #include <assert.h>
@@ -480,17 +481,6 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
 
   frame->format = this->grabInfo.bIsHDR ? CAPTURE_FMT_RGBA10 : CAPTURE_FMT_BGRA;
   return CAPTURE_RESULT_OK;
-}
-
-inline static void rectCopyUnaligned(uint8_t * dest, uint8_t * src, int ystart,
-    int yend, int dx, int dstStride, int srcStride, int width)
-{
-  for (int i = ystart; i < yend; ++i)
-  {
-    unsigned int srcOffset = i * srcStride + dx;
-    unsigned int dstOffset = i * dstStride + dx;
-    memcpy(dest + dstOffset, src + srcOffset, width);
-  }
 }
 
 static CaptureResult nvfbc_getFrame(FrameBuffer * frame,

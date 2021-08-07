@@ -29,6 +29,7 @@ set(COMMON_SOURCES
   src/framebuffer.c
   src/KVMFR.c
   src/countedbuffer.c
+  src/rects.c
   src/runningavg.c
   src/ringbuffer.c
 )
