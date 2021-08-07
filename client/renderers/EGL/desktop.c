@@ -206,6 +206,20 @@ void egl_desktop_config_ui(EGL_Desktop * desktop)
     igEndCombo();
   }
   igPopItemWidth();
+
+  igText("Night vision mode:");
+  igSameLine(0.0f, -1.0f);
+  igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() - igGetStyle()->WindowPadding.x);
+
+  const char * format;
+  switch (desktop->nvGain)
+  {
+    case 0: format = "off"; break;
+    case 1: format = "on";  break;
+    default: format = "gain: %d";
+  }
+  igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
+  igPopItemWidth();
 }
 
 bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
