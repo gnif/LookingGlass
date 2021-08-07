@@ -159,6 +159,8 @@ void egl_desktop_toggle_nv(int key, void * opaque)
        if (desktop->nvGain == 0) app_alert(LG_ALERT_INFO, "NV Disabled");
   else if (desktop->nvGain == 1) app_alert(LG_ALERT_INFO, "NV Enabled");
   else app_alert(LG_ALERT_INFO, "NV Gain + %d", desktop->nvGain - 1);
+
+  app_invalidateWindow(true);
 }
 
 bool egl_desktop_scale_validate(struct Option * opt, const char ** error)
