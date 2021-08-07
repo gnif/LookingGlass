@@ -41,11 +41,9 @@ static void eglTexBuffer_cleanup(TextureBuffer * this)
   if (this->sampler)
     glDeleteSamplers(1, &this->sampler);
 
-  if (this->sync)
-  {
-    glDeleteSync(this->sync);
-    this->sync = 0;
-  }
+  GLsync sync = atomic_exchange(&this->sync, 0);
+  if (sync)
+    glDeleteSync(sync);
 }
 
 // common functions
@@ -201,7 +199,7 @@ EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture)
   GLuint          tex    = this->tex[this->bufIndex];
   EGL_TexBuffer * buffer = &this->buf[this->bufIndex];
 
-  if (buffer->updated && this->sync == 0)
+  if (buffer->updated && atomic_load(&this->sync) == 0)
   {
     this->rIndex = this->bufIndex;
     if (++this->bufIndex == this->texCount)
