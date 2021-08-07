@@ -31,16 +31,16 @@ typedef struct TextureBuffer
   EGL_Texture base;
   bool free;
 
-  EGL_TexFormat format;
-  int           texCount;
-  GLuint        tex[EGL_TEX_BUFFER_MAX];
-  GLuint        sampler;
-  EGL_TexBuffer buf[EGL_TEX_BUFFER_MAX];
-  int           bufFree;
-  GLsync        sync;
-  LG_Lock       copyLock;
-  int           bufIndex;
-  int           rIndex;
+  EGL_TexFormat   format;
+  int             texCount;
+  GLuint          tex[EGL_TEX_BUFFER_MAX];
+  GLuint          sampler;
+  EGL_TexBuffer   buf[EGL_TEX_BUFFER_MAX];
+  int             bufFree;
+  _Atomic(GLsync) sync;
+  LG_Lock         copyLock;
+  int             bufIndex;
+  int             rIndex;
 }
 TextureBuffer;
 
