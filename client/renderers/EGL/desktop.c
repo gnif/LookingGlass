@@ -256,7 +256,8 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
   return true;
 }
 
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd)
+bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+    const FrameDamageRect * damageRects, int damageRectsCount)
 {
   if (dmaFd >= 0)
   {
@@ -265,7 +266,7 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
   }
   else
   {
-    if (!egl_texture_update_from_frame(desktop->texture, frame))
+    if (!egl_texture_update_from_frame(desktop->texture, frame, damageRects, damageRectsCount))
       return false;
   }
 

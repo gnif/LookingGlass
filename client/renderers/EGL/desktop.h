@@ -42,7 +42,8 @@ void egl_desktop_free(EGL_Desktop ** desktop);
 
 void egl_desktop_config_ui(EGL_Desktop * desktop);
 bool egl_desktop_setup (EGL_Desktop * desktop, const LG_RendererFormat format);
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd);
+bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+    const FrameDamageRect * damageRects, int damageRectsCount);
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects);

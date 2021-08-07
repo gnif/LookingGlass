@@ -92,7 +92,12 @@ typedef struct EGL_TexUpdate
     const uint8_t * buffer;
 
     /* EGL_TEXTURE_FRAMEBUFFER */
-    const FrameBuffer * frame;
+    struct
+    {
+      const FrameBuffer * frame;
+      const FrameDamageRect * rects;
+      int rectCount;
+    };
 
     /* EGL_TEXTURE_DMABUF */
     int dmaFD;
@@ -132,7 +137,8 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
 bool egl_texture_update (EGL_Texture * texture, const uint8_t * buffer);
 
 bool egl_texture_update_from_frame(EGL_Texture * texture,
-    const FrameBuffer * frame);
+    const FrameBuffer * frame, const FrameDamageRect * damageRects,
+    int damageRectsCount);
 
 bool egl_texture_update_from_dma(EGL_Texture * texture,
     const FrameBuffer * frame, const int dmaFd);
