@@ -46,7 +46,7 @@ static bool eglTexFB_init(EGL_Texture ** texture, EGLDisplay * display)
   *texture = &this->base.base;
 
   EGL_Texture * parent = &this->base.base;
-  if (!eglTexBuffer_init(&parent, display))
+  if (!eglTexBuffer_stream_init(&parent, display))
   {
     free(this);
     *texture = NULL;
