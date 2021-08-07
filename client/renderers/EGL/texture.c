@@ -99,12 +99,15 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
 }
 
 bool egl_texture_update_from_frame(EGL_Texture * texture,
-    const FrameBuffer * frame)
+    const FrameBuffer * frame, const FrameDamageRect * damageRects,
+    int damageRectsCount)
 {
   const struct EGL_TexUpdate update =
   {
-    .type  = EGL_TEXTYPE_FRAMEBUFFER,
-    .frame = frame
+    .type      = EGL_TEXTYPE_FRAMEBUFFER,
+    .frame     = frame,
+    .rects     = damageRects,
+    .rectCount = damageRectsCount,
   };
   return texture->ops->update(texture, &update);
 }

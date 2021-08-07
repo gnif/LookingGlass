@@ -512,7 +512,7 @@ static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
   struct Inst * this = (struct Inst *)opaque;
 
   uint64_t start = nanotime();
-  if (!egl_desktop_update(this->desktop, frame, dmaFd))
+  if (!egl_desktop_update(this->desktop, frame, dmaFd, damageRects, damageRectsCount))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
