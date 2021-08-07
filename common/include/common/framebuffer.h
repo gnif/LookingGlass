@@ -63,6 +63,12 @@ bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size);
 
 /**
  * Gets the underlying data buffer of the framebuffer.
+ * For custom read routines only.
+ */
+const uint8_t * framebuffer_get_buffer(const FrameBuffer * frame);
+
+/**
+ * Gets the underlying data buffer of the framebuffer.
  * For custom write routines only.
  */
 uint8_t * framebuffer_get_data(FrameBuffer * frame);

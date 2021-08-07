@@ -42,4 +42,8 @@ void rectsBufferToFramebuffer(FrameDamageRect * rects, int count,
   FrameBuffer * frame, int dstStride, int height,
   const uint8_t * src, int srcStride);
 
+void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
+  uint8_t * dst, int dstStride, int height,
+  const FrameBuffer * frame, int srcStride);
+
 #endif

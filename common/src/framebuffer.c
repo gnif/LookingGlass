@@ -214,6 +214,11 @@ bool framebuffer_write(FrameBuffer * frame, const void * restrict src, size_t si
   return true;
 }
 
+const uint8_t * framebuffer_get_buffer(const FrameBuffer * frame)
+{
+  return frame->data;
+}
+
 uint8_t * framebuffer_get_data(FrameBuffer * frame)
 {
   return frame->data;
