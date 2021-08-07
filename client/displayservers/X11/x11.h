@@ -41,6 +41,7 @@ struct X11DSState
   XVisualInfo * visual;
 
   _Atomic(uint64_t) lastWMEvent;
+  bool              invalidateAll;
 
   int               xpresentOp;
   bool              jitRender;

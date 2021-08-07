@@ -643,6 +643,13 @@ static int x11EventThread(void * unused)
 
   while(app_isRunning())
   {
+    const uint64_t lastWMEvent = atomic_load(&x11.lastWMEvent);
+    if (x11.invalidateAll && microtime() - lastWMEvent > 100000UL)
+    {
+      x11.invalidateAll = false;
+      app_invalidateWindow(true);
+    }
+
     if (!XPending(x11.display))
     {
       FD_ZERO(&in_fds);
@@ -710,7 +717,7 @@ static int x11EventThread(void * unused)
       case Expose:
       {
         atomic_store(&x11.lastWMEvent, microtime());
-        app_invalidateWindow(false);
+        x11.invalidateAll = true;
         break;
       }
 
