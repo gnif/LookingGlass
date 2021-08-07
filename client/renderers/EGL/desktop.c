@@ -72,6 +72,9 @@ struct EGL_Desktop
 
   // colorblind mode
   int cbMode;
+
+  bool useDMA;
+  LG_RendererFormat format;
 };
 
 // forwards
@@ -146,6 +149,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA,
   (*desktop)->nvGain    = option_get_int("egl", "nvGain"   );
   (*desktop)->cbMode    = option_get_int("egl", "cbMode"   );
   (*desktop)->scaleAlgo = option_get_int("egl", "scale"    );
+  (*desktop)->useDMA    = useDMA;
 
   return true;
 }
@@ -226,6 +230,8 @@ void egl_desktop_config_ui(EGL_Desktop * desktop)
 
 bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
 {
+  memcpy(&desktop->format, &format, sizeof(LG_RendererFormat));
+
   enum EGL_PixelFormat pixFmt;
   switch(format.type)
   {
@@ -275,18 +281,26 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
 bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
-  if (dmaFd >= 0)
+  if (desktop->useDMA && dmaFd >= 0)
   {
-    if (!egl_texture_update_from_dma(desktop->texture, frame, dmaFd))
+    if (egl_texture_update_from_dma(desktop->texture, frame, dmaFd))
+      return true;
+
+    DEBUG_WARN("DMA update failed, disabling DMABUF imports");
+    desktop->useDMA = false;
+
+    egl_texture_free(&desktop->texture);
+    if (!egl_texture_init(&desktop->texture, desktop->display, EGL_TEXTYPE_FRAMEBUFFER, true))
+    {
+      DEBUG_ERROR("Failed to initialize the desktop texture");
       return false;
-  }
-  else
-  {
-    if (!egl_texture_update_from_frame(desktop->texture, frame, damageRects, damageRectsCount))
+    }
+
+    if (!egl_desktop_setup(desktop, desktop->format))
       return false;
   }
 
-  return true;
+  return egl_texture_update_from_frame(desktop->texture, frame, damageRects, damageRectsCount);
 }
 
 bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
