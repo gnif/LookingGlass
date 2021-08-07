@@ -61,25 +61,26 @@ static bool eglTexFB_init(EGL_Texture ** texture, EGLDisplay * display)
 
 static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
-  TextureBuffer * this = UPCAST(TextureBuffer, texture);
-  TexFB * fb = UPCAST(TexFB, this);
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexFB         * this   = UPCAST(TexFB        , parent );
+
   assert(update->type == EGL_TEXTYPE_FRAMEBUFFER);
 
-  LG_LOCK(this->copyLock);
+  LG_LOCK(parent->copyLock);
 
-  struct TexDamage * damage = fb->damage + this->bufIndex;
+  struct TexDamage * damage = this->damage + parent->bufIndex;
   bool damageAll = !update->rects || update->rectCount == 0 || damage->count < 0 ||
     damage->count + update->rectCount > KVMFR_MAX_DAMAGE_RECTS;
 
   if (damageAll)
     framebuffer_read(
       update->frame,
-      this->buf[this->bufIndex].map,
-      this->format.stride,
-      this->format.height,
-      this->format.width,
-      this->format.bpp,
-      this->format.stride
+      parent->buf[parent->bufIndex].map,
+      parent->format.stride,
+      parent->format.height,
+      parent->format.width,
+      parent->format.bpp,
+      parent->format.stride
     );
   else
   {
@@ -89,20 +90,20 @@ static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
     rectsFramebufferToBuffer(
       damage->rects,
       damage->count,
-      this->buf[this->bufIndex].map,
-      this->format.stride,
-      this->format.height,
+      parent->buf[parent->bufIndex].map,
+      parent->format.stride,
+      parent->format.height,
       update->frame,
-      this->format.stride
+      parent->format.stride
     );
   }
 
-  this->buf[this->bufIndex].updated = true;
+  parent->buf[parent->bufIndex].updated = true;
 
   for (int i = 0; i < EGL_TEX_BUFFER_MAX; ++i)
   {
-    struct TexDamage * damage = fb->damage + i;
-    if (i == this->bufIndex)
+    struct TexDamage * damage = this->damage + i;
+    if (i == parent->bufIndex)
       damage->count = 0;
     else if (update->rects && update->rectCount > 0 && damage->count >= 0 &&
              damage->count + update->rectCount <= KVMFR_MAX_DAMAGE_RECTS)
@@ -115,7 +116,7 @@ static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
       damage->count = -1;
   }
 
-  LG_UNLOCK(this->copyLock);
+  LG_UNLOCK(parent->copyLock);
 
   return true;
 }
