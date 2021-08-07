@@ -41,9 +41,11 @@ static void eglTexBuffer_cleanup(TextureBuffer * this)
   if (this->sampler)
     glDeleteSamplers(1, &this->sampler);
 
-  GLsync sync = atomic_exchange(&this->sync, 0);
-  if (sync)
-    glDeleteSync(sync);
+  if (this->sync)
+  {
+    glDeleteSync(this->sync);
+    this->sync = 0;
+  }
 }
 
 // common functions
@@ -66,7 +68,6 @@ bool eglTexBuffer_init(EGL_Texture ** texture, EGLDisplay * display)
     this = UPCAST(TextureBuffer, *texture);
 
   this->texCount = 1;
-  atomic_init(&this->sync, 0);
   return true;
 }
 
@@ -199,7 +200,7 @@ EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture)
   GLuint          tex    = this->tex[this->bufIndex];
   EGL_TexBuffer * buffer = &this->buf[this->bufIndex];
 
-  if (buffer->updated && atomic_load(&this->sync) == 0)
+  if (buffer->updated && this->sync == 0)
   {
     this->rIndex = this->bufIndex;
     if (++this->bufIndex == this->texCount)
@@ -225,8 +226,7 @@ EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture)
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    glDeleteSync(atomic_exchange(&this->sync, sync));
+    this->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     glFlush();
   }
 
@@ -240,14 +240,14 @@ EGL_TexStatus eglTexBuffer_stream_bind(EGL_Texture * texture)
   if (this->rIndex == -1)
     return EGL_TEX_STATUS_NOTREADY;
 
-  GLsync sync = atomic_exchange(&this->sync, 0);
-  if (sync)
+  if (this->sync)
   {
-    switch(glClientWaitSync(sync, 0, 20000000)) // 20ms
+    switch(glClientWaitSync(this->sync, 0, 20000000)) // 20ms
     {
       case GL_ALREADY_SIGNALED:
       case GL_CONDITION_SATISFIED:
-        glDeleteSync(sync);
+        glDeleteSync(this->sync);
+        this->sync = 0;
         break;
 
       case GL_TIMEOUT_EXPIRED:
@@ -255,7 +255,8 @@ EGL_TexStatus eglTexBuffer_stream_bind(EGL_Texture * texture)
 
       case GL_WAIT_FAILED:
       case GL_INVALID_VALUE:
-        glDeleteSync(sync);
+        glDeleteSync(this->sync);
+        this->sync = 0;
         DEBUG_GL_ERROR("glClientWaitSync failed");
         return EGL_TEX_STATUS_ERROR;
     }
