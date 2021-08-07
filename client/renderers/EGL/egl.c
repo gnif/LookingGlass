@@ -749,20 +749,7 @@ static bool egl_render_startup(void * opaque, bool useDMA)
   if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
   {
     if (util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import"))
-    {
-      /*
-       * As of version 455.45.01 NVidia started advertising support for this
-       * feature, however even on the latest version 460.27.04 this is still
-       * broken and does not work, until this is fixed and we have way to detect
-       * this early just disable dma for all NVIDIA devices.
-       *
-       * ref: https://forums.developer.nvidia.com/t/egl-ext-image-dma-buf-import-broken-egl-bad-alloc-with-tons-of-free-ram/165552
-       */
-      if (strstr(vendor, "NVIDIA") != NULL)
-        DEBUG_WARN("NVIDIA driver detected, ignoring broken DMA support");
-      else
-        this->dmaSupport = true;
-    }
+      this->dmaSupport = true;
     else
       DEBUG_INFO("EGL_EXT_image_dma_buf_import unavailable, DMA support disabled");
   }
