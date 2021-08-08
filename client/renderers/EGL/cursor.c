@@ -129,7 +129,7 @@ static inline void egl_cursor_tex_uniforms(EGL_Cursor * cursor, struct CursorTex
 
 static void egl_cursor_tex_free(struct CursorTex * t)
 {
-  egl_texture_free(&t->texture);
+  egl_textureFree(&t->texture);
   egl_shaderFree (&t->shader );
 };
 

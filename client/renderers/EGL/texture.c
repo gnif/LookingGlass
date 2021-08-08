@@ -69,7 +69,7 @@ bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
   return true;
 }
 
-void egl_texture_free(EGL_Texture ** tex)
+void egl_textureFree(EGL_Texture ** tex)
 {
   (*tex)->ops.free(*tex);
   *tex = NULL;

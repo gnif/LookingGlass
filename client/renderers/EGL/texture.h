@@ -128,7 +128,7 @@ struct EGL_Texture
 
 bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type, bool streaming);
-void egl_texture_free(EGL_Texture ** tex);
+void egl_textureFree(EGL_Texture ** tex);
 
 bool egl_textureSetup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
     size_t width, size_t height, size_t stride);

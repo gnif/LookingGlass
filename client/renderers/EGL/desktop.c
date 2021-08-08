@@ -181,7 +181,7 @@ void egl_desktopFree(EGL_Desktop ** desktop)
   if (!*desktop)
     return;
 
-  egl_texture_free    (&(*desktop)->texture              );
+  egl_textureFree    (&(*desktop)->texture              );
   egl_shaderFree     (&(*desktop)->shader_generic.shader);
   egl_desktopRectsFree(&(*desktop)->mesh                 );
 
@@ -289,7 +289,7 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
     DEBUG_WARN("DMA update failed, disabling DMABUF imports");
     desktop->useDMA = false;
 
-    egl_texture_free(&desktop->texture);
+    egl_textureFree(&desktop->texture);
     if (!egl_textureInit(&desktop->texture, desktop->display, EGL_TEXTYPE_FRAMEBUFFER, true))
     {
       DEBUG_ERROR("Failed to initialize the desktop texture");
