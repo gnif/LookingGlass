@@ -44,14 +44,14 @@ typedef struct TextureBuffer
 }
 TextureBuffer;
 
-bool eglTexBuffer_init(EGL_Texture ** texture_, EGLDisplay * display);
-void eglTexBuffer_free(EGL_Texture * texture_);
-bool eglTexBuffer_setup(EGL_Texture * texture_, const EGL_TexSetup * setup);
-EGL_TexStatus eglTexBuffer_process(EGL_Texture * texture_);
-EGL_TexStatus eglTexBuffer_bind(EGL_Texture * texture_);
+bool egl_texBufferInit(EGL_Texture ** texture_, EGLDisplay * display);
+void egl_texBufferFree(EGL_Texture * texture_);
+bool egl_texBufferSetup(EGL_Texture * texture_, const EGL_TexSetup * setup);
+EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferBind(EGL_Texture * texture_);
 
-bool eglTexBuffer_stream_init(EGL_Texture ** texture_, EGLDisplay * display);
-bool eglTexBuffer_stream_setup(EGL_Texture * texture_,
+bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGLDisplay * display);
+bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
-EGL_TexStatus eglTexBuffer_stream_process(EGL_Texture * texture_);
-EGL_TexStatus eglTexBuffer_stream_bind(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferStreamBind(EGL_Texture * texture_);

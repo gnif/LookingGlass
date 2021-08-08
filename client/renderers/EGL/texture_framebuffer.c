@@ -40,13 +40,13 @@ typedef struct TexFB
 }
 TexFB;
 
-static bool eglTexFB_init(EGL_Texture ** texture, EGLDisplay * display)
+static bool egl_texFBInit(EGL_Texture ** texture, EGLDisplay * display)
 {
   TexFB * this = calloc(sizeof(*this), 1);
   *texture = &this->base.base;
 
   EGL_Texture * parent = &this->base.base;
-  if (!eglTexBuffer_stream_init(&parent, display))
+  if (!egl_texBufferStreamInit(&parent, display))
   {
     free(this);
     *texture = NULL;
@@ -59,16 +59,16 @@ static bool eglTexFB_init(EGL_Texture ** texture, EGLDisplay * display)
   return true;
 }
 
-void eglTexFB_free(EGL_Texture * texture)
+void egl_texFBFree(EGL_Texture * texture)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexFB         * this   = UPCAST(TexFB        , parent );
 
-  eglTexBuffer_free(texture);
+  egl_texBufferFree(texture);
   free(this);
 }
 
-static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
+static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexFB         * this   = UPCAST(TexFB        , parent );
@@ -132,10 +132,10 @@ static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
 
 EGL_TextureOps EGL_TextureFrameBuffer =
 {
-  .init        = eglTexFB_init,
-  .free        = eglTexFB_free,
-  .setup       = eglTexBuffer_stream_setup,
-  .update      = eglTexFB_update,
-  .process     = eglTexBuffer_stream_process,
-  .bind        = eglTexBuffer_stream_bind
+  .init        = egl_texFBInit,
+  .free        = egl_texFBFree,
+  .setup       = egl_texBufferStreamSetup,
+  .update      = egl_texFBUpdate,
+  .process     = egl_texBufferStreamProcess,
+  .bind        = egl_texBufferStreamBind
 };

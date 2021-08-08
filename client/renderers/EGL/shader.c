@@ -32,7 +32,7 @@ struct EGL_Shader
   GLuint shader;
 };
 
-bool egl_shader_init(EGL_Shader ** this)
+bool egl_shaderInit(EGL_Shader ** this)
 {
   *this = (EGL_Shader *)malloc(sizeof(EGL_Shader));
   if (!*this)
@@ -45,7 +45,7 @@ bool egl_shader_init(EGL_Shader ** this)
   return true;
 }
 
-void egl_shader_free(EGL_Shader ** this)
+void egl_shaderFree(EGL_Shader ** this)
 {
   if (!*this)
     return;
@@ -57,7 +57,7 @@ void egl_shader_free(EGL_Shader ** this)
   *this = NULL;
 }
 
-bool egl_shader_load(EGL_Shader * this, const char * vertex_file, const char * fragment_file)
+bool egl_shaderLoad(EGL_Shader * this, const char * vertex_file, const char * fragment_file)
 {
   char   * vertex_code, * fragment_code;
   size_t   vertex_size,   fragment_size;
@@ -79,13 +79,14 @@ bool egl_shader_load(EGL_Shader * this, const char * vertex_file, const char * f
 
   DEBUG_INFO("Loaded fragment shader: %s", fragment_file);
 
-  bool ret = egl_shader_compile(this, vertex_code, vertex_size, fragment_code, fragment_size);
+  bool ret = egl_shaderCompile(this, vertex_code, vertex_size, fragment_code, fragment_size);
   free(vertex_code);
   free(fragment_code);
   return ret;
 }
 
-bool egl_shader_compile(EGL_Shader * this, const char * vertex_code, size_t vertex_size, const char * fragment_code, size_t fragment_size)
+bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
+    size_t vertex_size, const char * fragment_code, size_t fragment_size)
 {
   if (this->hasShader)
   {
@@ -186,7 +187,7 @@ bool egl_shader_compile(EGL_Shader * this, const char * vertex_code, size_t vert
   return true;
 }
 
-void egl_shader_use(EGL_Shader * this)
+void egl_shaderUse(EGL_Shader * this)
 {
   if (this->hasShader)
     glUseProgram(this->shader);
@@ -194,7 +195,7 @@ void egl_shader_use(EGL_Shader * this)
     DEBUG_ERROR("Shader program has not been compiled");
 }
 
-void egl_shader_associate_textures(EGL_Shader * this, const int count)
+void egl_shaderAssocTextures(EGL_Shader * this, const int count)
 {
   char name[] = "sampler1";
   glUseProgram(this->shader);
@@ -212,7 +213,7 @@ void egl_shader_associate_textures(EGL_Shader * this, const int count)
   glUseProgram(0);
 }
 
-GLint egl_shader_get_uniform_location(EGL_Shader * this, const char * name)
+GLint egl_shaderGetUniform(EGL_Shader * this, const char * name)
 {
   if (!this->shader)
   {

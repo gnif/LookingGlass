@@ -47,7 +47,7 @@ EGL_TextureOps EGL_TextureDMABUF;
 
 // internal functions
 
-static void eglTexDMABUF_cleanup(TexDMABUF * this)
+static void egl_texDMABUFCleanup(TexDMABUF * this)
 {
   for (size_t i = 0; i < this->imageUsed; ++i)
     eglDestroyImage(this->display, this->images[i].image);
@@ -57,13 +57,13 @@ static void eglTexDMABUF_cleanup(TexDMABUF * this)
 
 // dmabuf functions
 
-static bool eglTexDMABUF_init(EGL_Texture ** texture, EGLDisplay * display)
+static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
 {
   TexDMABUF * this = (TexDMABUF *)calloc(sizeof(*this), 1);
   *texture = &this->base.base;
 
   EGL_Texture * parent = &this->base.base;
-  if (!eglTexBuffer_init(&parent, display))
+  if (!egl_texBufferInit(&parent, display))
   {
     free(this);
     *texture = NULL;
@@ -74,26 +74,26 @@ static bool eglTexDMABUF_init(EGL_Texture ** texture, EGLDisplay * display)
   return true;
 }
 
-static void eglTexDMABUF_free(EGL_Texture * texture)
+static void egl_texDMABUFFree(EGL_Texture * texture)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
-  eglTexDMABUF_cleanup(this);
+  egl_texDMABUFCleanup(this);
   free(this->images);
 
-  eglTexBuffer_free(&parent->base);
+  egl_texBufferFree(&parent->base);
   free(this);
 }
 
-static bool eglTexDMABUF_setup(EGL_Texture * texture, const EGL_TexSetup * setup)
+static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
-  eglTexDMABUF_cleanup(this);
+  egl_texDMABUFCleanup(this);
 
-  if (!eglTexBuffer_setup(&parent->base, setup))
+  if (!egl_texBufferSetup(&parent->base, setup))
     return false;
 
   glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
@@ -110,7 +110,7 @@ static bool eglTexDMABUF_setup(EGL_Texture * texture, const EGL_TexSetup * setup
   return true;
 }
 
-static bool eglTexDMABUF_update(EGL_Texture * texture,
+static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     const EGL_TexUpdate * update)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
@@ -177,12 +177,12 @@ static bool eglTexDMABUF_update(EGL_Texture * texture,
   return true;
 }
 
-static EGL_TexStatus eglTexDMABUF_process(EGL_Texture * texture)
+static EGL_TexStatus egl_texDMABUFProcess(EGL_Texture * texture)
 {
   return EGL_TEX_STATUS_OK;
 }
 
-static EGL_TexStatus eglTexDMABUF_bind(EGL_Texture * texture)
+static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
 
@@ -195,10 +195,10 @@ static EGL_TexStatus eglTexDMABUF_bind(EGL_Texture * texture)
 
 EGL_TextureOps EGL_TextureDMABUF =
 {
-  .init        = eglTexDMABUF_init,
-  .free        = eglTexDMABUF_free,
-  .setup       = eglTexDMABUF_setup,
-  .update      = eglTexDMABUF_update,
-  .process     = eglTexDMABUF_process,
-  .bind        = eglTexDMABUF_bind
+  .init        = egl_texDMABUFInit,
+  .free        = egl_texDMABUFFree,
+  .setup       = egl_texDMABUFSetup,
+  .update      = egl_texDMABUFUpdate,
+  .process     = egl_texDMABUFProcess,
+  .bind        = egl_texDMABUFBind
 };

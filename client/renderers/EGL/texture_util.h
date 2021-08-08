@@ -45,9 +45,9 @@ typedef struct EGL_TexBuffer
 }
 EGL_TexBuffer;
 
-bool eglTexUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
-bool eglTexUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
+bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
+bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
     int count);
-void eglTexUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
-bool eglTexUtilMapBuffer(EGL_TexBuffer * buffer);
-void eglTexUtilUnmapBuffer(EGL_TexBuffer * buffer);
+void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
+bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer);
+void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);

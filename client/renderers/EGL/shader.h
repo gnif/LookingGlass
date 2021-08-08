@@ -27,12 +27,17 @@
 
 typedef struct EGL_Shader EGL_Shader;
 
-bool egl_shader_init(EGL_Shader ** shader);
-void egl_shader_free(EGL_Shader ** shader);
+bool egl_shaderInit(EGL_Shader ** shader);
+void egl_shaderFree(EGL_Shader ** shader);
 
-bool egl_shader_load   (EGL_Shader * model, const char * vertex_file, const char * fragment_file);
-bool egl_shader_compile(EGL_Shader * model, const char * vertex_code, size_t vertex_size, const char * fragment_code, size_t fragment_size);
-void egl_shader_use    (EGL_Shader * shader);
+bool egl_shaderLoad(EGL_Shader * model, const char * vertex_file,
+    const char * fragment_file);
 
-void egl_shader_associate_textures(EGL_Shader * shader, const int count);
-GLint egl_shader_get_uniform_location(EGL_Shader * shader, const char * name);
+bool egl_shaderCompile(EGL_Shader * model, const char * vertex_code,
+    size_t vertex_size, const char * fragment_code, size_t fragment_size);
+
+void egl_shaderUse(EGL_Shader * shader);
+
+void egl_shaderAssocTextures(EGL_Shader * shader, const int count);
+
+GLint egl_shaderGetUniform(EGL_Shader * shader, const char * name);

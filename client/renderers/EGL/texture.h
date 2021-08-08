@@ -127,24 +127,22 @@ typedef struct EGL_TextureOps
 }
 EGL_TextureOps;
 
-bool egl_texture_init(EGL_Texture ** texture, EGLDisplay * display,
+bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type, bool streaming);
 void egl_texture_free(EGL_Texture ** tex);
 
-bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
+bool egl_textureSetup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
     size_t width, size_t height, size_t stride);
 
-bool egl_texture_update (EGL_Texture * texture, const uint8_t * buffer);
+bool egl_textureUpdate(EGL_Texture * texture, const uint8_t * buffer);
 
-bool egl_texture_update_from_frame(EGL_Texture * texture,
+bool egl_textureUpdateFromFrame(EGL_Texture * texture,
     const FrameBuffer * frame, const FrameDamageRect * damageRects,
     int damageRectsCount);
 
-bool egl_texture_update_from_dma(EGL_Texture * texture,
+bool egl_textureUpdateFromDMA(EGL_Texture * texture,
     const FrameBuffer * frame, const int dmaFd);
 
-enum EGL_TexStatus egl_texture_process(EGL_Texture * texture);
+enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
 
-enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture);
-
-int egl_texture_count(EGL_Texture * texture);
+enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);

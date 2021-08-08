@@ -52,12 +52,12 @@ struct EGL_Damage
   GLint uTransform;
 };
 
-void egl_damage_config_ui(EGL_Damage * damage)
+void egl_damageConfigUI(EGL_Damage * damage)
 {
   igCheckbox("Show damage overlay", &damage->show);
 }
 
-bool egl_damage_init(EGL_Damage ** damage)
+bool egl_damageInit(EGL_Damage ** damage)
 {
   *damage = (EGL_Damage *)malloc(sizeof(EGL_Damage));
   if (!*damage)
@@ -68,13 +68,13 @@ bool egl_damage_init(EGL_Damage ** damage)
 
   memset(*damage, 0, sizeof(EGL_Damage));
 
-  if (!egl_shader_init(&(*damage)->shader))
+  if (!egl_shaderInit(&(*damage)->shader))
   {
     DEBUG_ERROR("Failed to initialize the damage shader");
     return false;
   }
 
-  if (!egl_shader_compile((*damage)->shader,
+  if (!egl_shaderCompile((*damage)->shader,
         b_shader_damage_vert, b_shader_damage_vert_size,
         b_shader_damage_frag, b_shader_damage_frag_size))
   {
@@ -88,18 +88,18 @@ bool egl_damage_init(EGL_Damage ** damage)
     return false;
   }
 
-  (*damage)->uTransform = egl_shader_get_uniform_location((*damage)->shader, "transform");
+  (*damage)->uTransform = egl_shaderGetUniform((*damage)->shader, "transform");
 
   return true;
 }
 
-void egl_damage_free(EGL_Damage ** damage)
+void egl_damageFree(EGL_Damage ** damage)
 {
   if (!*damage)
     return;
 
   egl_desktopRectsFree(&(*damage)->mesh);
-  egl_shader_free(&(*damage)->shader);
+  egl_shaderFree(&(*damage)->shader);
 
   free(*damage);
   *damage = NULL;
@@ -111,14 +111,14 @@ static void update_matrix(EGL_Damage * damage)
     damage->translateX, damage->translateY, damage->scaleX, damage->scaleY, damage->rotate);
 }
 
-void egl_damage_setup(EGL_Damage * damage, int width, int height)
+void egl_damageSetup(EGL_Damage * damage, int width, int height)
 {
   damage->width  = width;
   damage->height = height;
   update_matrix(damage);
 }
 
-void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
+void egl_damageResize(EGL_Damage * damage, float translateX, float translateY,
     float scaleX, float scaleY)
 {
   damage->translateX = translateX;
@@ -128,7 +128,7 @@ void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
   update_matrix(damage);
 }
 
-bool egl_damage_render(EGL_Damage * damage, LG_RendererRotate rotate, const struct DesktopDamage * data)
+bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struct DesktopDamage * data)
 {
   if (!damage->show)
     return false;
@@ -142,7 +142,7 @@ bool egl_damage_render(EGL_Damage * damage, LG_RendererRotate rotate, const stru
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-  egl_shader_use(damage->shader);
+  egl_shaderUse(damage->shader);
   glUniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
 
   if (data && data->count != 0)

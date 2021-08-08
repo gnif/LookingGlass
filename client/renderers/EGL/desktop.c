@@ -86,30 +86,30 @@ static bool egl_init_desktop_shader(
   const char * fragment_code, size_t fragment_size
 )
 {
-  if (!egl_shader_init(&shader->shader))
+  if (!egl_shaderInit(&shader->shader))
     return false;
 
-  if (!egl_shader_compile(shader->shader,
+  if (!egl_shaderCompile(shader->shader,
         vertex_code  , vertex_size,
         fragment_code, fragment_size))
   {
     return false;
   }
 
-  egl_shader_associate_textures(shader->shader, 1);
+  egl_shaderAssocTextures(shader->shader, 1);
 
-  shader->uTransform   = egl_shader_get_uniform_location(shader->shader, "transform");
-  shader->uUVScale     = egl_shader_get_uniform_location(shader->shader, "uvScale"  );
-  shader->uDesktopSize = egl_shader_get_uniform_location(shader->shader, "size"     );
-  shader->uScaleAlgo   = egl_shader_get_uniform_location(shader->shader, "scaleAlgo");
-  shader->uNV          = egl_shader_get_uniform_location(shader->shader, "nv"       );
-  shader->uNVGain      = egl_shader_get_uniform_location(shader->shader, "nvGain"   );
-  shader->uCBMode      = egl_shader_get_uniform_location(shader->shader, "cbMode"   );
+  shader->uTransform   = egl_shaderGetUniform(shader->shader, "transform");
+  shader->uUVScale     = egl_shaderGetUniform(shader->shader, "uvScale"  );
+  shader->uDesktopSize = egl_shaderGetUniform(shader->shader, "size"     );
+  shader->uScaleAlgo   = egl_shaderGetUniform(shader->shader, "scaleAlgo");
+  shader->uNV          = egl_shaderGetUniform(shader->shader, "nv"       );
+  shader->uNVGain      = egl_shaderGetUniform(shader->shader, "nvGain"   );
+  shader->uCBMode      = egl_shaderGetUniform(shader->shader, "cbMode"   );
 
   return true;
 }
 
-bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA, int maxRects)
+bool egl_desktopInit(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA, int maxRects)
 {
   *desktop = (EGL_Desktop *)malloc(sizeof(EGL_Desktop));
   if (!*desktop)
@@ -121,7 +121,7 @@ bool egl_desktop_init(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA,
   memset(*desktop, 0, sizeof(EGL_Desktop));
   (*desktop)->display = display;
 
-  if (!egl_texture_init(&(*desktop)->texture, display,
+  if (!egl_textureInit(&(*desktop)->texture, display,
         useDMA ? EGL_TEXTYPE_DMABUF : EGL_TEXTYPE_FRAMEBUFFER, true))
   {
     DEBUG_ERROR("Failed to initialize the desktop texture");
@@ -167,7 +167,7 @@ void egl_desktop_toggle_nv(int key, void * opaque)
   app_invalidateWindow(true);
 }
 
-bool egl_desktop_scale_validate(struct Option * opt, const char ** error)
+bool egl_desktopScaleValidate(struct Option * opt, const char ** error)
 {
   if (opt->value.x_int >= 0 && opt->value.x_int < EGL_SCALE_MAX)
     return true;
@@ -176,13 +176,13 @@ bool egl_desktop_scale_validate(struct Option * opt, const char ** error)
   return false;
 }
 
-void egl_desktop_free(EGL_Desktop ** desktop)
+void egl_desktopFree(EGL_Desktop ** desktop)
 {
   if (!*desktop)
     return;
 
   egl_texture_free    (&(*desktop)->texture              );
-  egl_shader_free     (&(*desktop)->shader_generic.shader);
+  egl_shaderFree     (&(*desktop)->shader_generic.shader);
   egl_desktopRectsFree(&(*desktop)->mesh                 );
 
   free(*desktop);
@@ -195,7 +195,7 @@ static const char * algorithmNames[EGL_SCALE_MAX] = {
   [EGL_SCALE_LINEAR]  = "Linear",
 };
 
-void egl_desktop_config_ui(EGL_Desktop * desktop)
+void egl_desktopConfigUI(EGL_Desktop * desktop)
 {
   igText("Scale algorithm:");
   igPushItemWidth(igGetWindowWidth() - igGetStyle()->WindowPadding.x * 2);
@@ -228,7 +228,7 @@ void egl_desktop_config_ui(EGL_Desktop * desktop)
   igPopItemWidth();
 }
 
-bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
+bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 {
   memcpy(&desktop->format, &format, sizeof(LG_RendererFormat));
 
@@ -263,7 +263,7 @@ bool egl_desktop_setup(EGL_Desktop * desktop, const LG_RendererFormat format)
   desktop->width  = format.width;
   desktop->height = format.height;
 
-  if (!egl_texture_setup(
+  if (!egl_textureSetup(
     desktop->texture,
     pixFmt,
     format.width,
@@ -283,27 +283,27 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
 {
   if (desktop->useDMA && dmaFd >= 0)
   {
-    if (egl_texture_update_from_dma(desktop->texture, frame, dmaFd))
+    if (egl_textureUpdateFromDMA(desktop->texture, frame, dmaFd))
       return true;
 
     DEBUG_WARN("DMA update failed, disabling DMABUF imports");
     desktop->useDMA = false;
 
     egl_texture_free(&desktop->texture);
-    if (!egl_texture_init(&desktop->texture, desktop->display, EGL_TEXTYPE_FRAMEBUFFER, true))
+    if (!egl_textureInit(&desktop->texture, desktop->display, EGL_TEXTYPE_FRAMEBUFFER, true))
     {
       DEBUG_ERROR("Failed to initialize the desktop texture");
       return false;
     }
 
-    if (!egl_desktop_setup(desktop, desktop->format))
+    if (!egl_desktopSetup(desktop, desktop->format))
       return false;
   }
 
-  return egl_texture_update_from_frame(desktop->texture, frame, damageRects, damageRectsCount);
+  return egl_textureUpdateFromFrame(desktop->texture, frame, damageRects, damageRectsCount);
 }
 
-bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
+bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects)
 {
@@ -311,7 +311,7 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
     return false;
 
   enum EGL_TexStatus status;
-  if ((status = egl_texture_process(desktop->texture)) != EGL_TEX_STATUS_OK)
+  if ((status = egl_textureProcess(desktop->texture)) != EGL_TEX_STATUS_OK)
   {
     if (status != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to process the desktop texture");
@@ -344,7 +344,7 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
   egl_desktopRectsUpdate(desktop->mesh, rects, desktop->width, desktop->height);
 
   const struct DesktopShader * shader = desktop->shader;
-  egl_shader_use(shader->shader);
+  egl_shaderUse(shader->shader);
   glUniform1i(shader->uScaleAlgo  , scaleAlgo);
   glUniform2f(shader->uDesktopSize, desktop->width, desktop->height);
   glUniform2f(shader->uUVScale    , 1.0f / desktop->width, 1.0f / desktop->height);
@@ -360,7 +360,7 @@ bool egl_desktop_render(EGL_Desktop * desktop, const float x, const float y,
 
   glUniform1i(shader->uCBMode, desktop->cbMode);
 
-  egl_texture_bind(desktop->texture);
+  egl_textureBind(desktop->texture);
   egl_desktopRectsRender(desktop->mesh);
   glBindTexture(GL_TEXTURE_2D, 0);
   return true;

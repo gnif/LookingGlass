@@ -35,7 +35,7 @@ extern const EGL_TextureOps EGL_TextureBufferStream;
 extern const EGL_TextureOps EGL_TextureFrameBuffer;
 extern const EGL_TextureOps EGL_TextureDMABUF;
 
-bool egl_texture_init(EGL_Texture ** texture, EGLDisplay * display,
+bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type, bool streaming)
 {
   const EGL_TextureOps * ops;
@@ -74,7 +74,7 @@ void egl_texture_free(EGL_Texture ** tex)
   *tex = NULL;
 }
 
-bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
+bool egl_textureSetup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
     size_t width, size_t height, size_t stride)
 {
   const struct EGL_TexSetup setup =
@@ -88,7 +88,7 @@ bool egl_texture_setup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
   return texture->ops->setup(texture, &setup);
 }
 
-bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
+bool egl_textureUpdate(EGL_Texture * texture, const uint8_t * buffer)
 {
   const struct EGL_TexUpdate update =
   {
@@ -98,7 +98,7 @@ bool egl_texture_update(EGL_Texture * texture, const uint8_t * buffer)
   return texture->ops->update(texture, &update);
 }
 
-bool egl_texture_update_from_frame(EGL_Texture * texture,
+bool egl_textureUpdateFromFrame(EGL_Texture * texture,
     const FrameBuffer * frame, const FrameDamageRect * damageRects,
     int damageRectsCount)
 {
@@ -112,7 +112,7 @@ bool egl_texture_update_from_frame(EGL_Texture * texture,
   return texture->ops->update(texture, &update);
 }
 
-bool egl_texture_update_from_dma(EGL_Texture * texture,
+bool egl_textureUpdateFromDMA(EGL_Texture * texture,
     const FrameBuffer * frame, const int dmaFd)
 {
   const struct EGL_TexUpdate update =
@@ -127,12 +127,12 @@ bool egl_texture_update_from_dma(EGL_Texture * texture,
   return texture->ops->update(texture, &update);
 }
 
-enum EGL_TexStatus egl_texture_process(EGL_Texture * texture)
+enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture)
 {
   return texture->ops->process(texture);
 }
 
-enum EGL_TexStatus egl_texture_bind(EGL_Texture * texture)
+enum EGL_TexStatus egl_textureBind(EGL_Texture * texture)
 {
   return texture->ops->bind(texture);
 }

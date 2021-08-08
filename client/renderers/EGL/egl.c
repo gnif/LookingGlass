@@ -171,7 +171,7 @@ static struct Option egl_options[] =
     .name         = "scale",
     .description  = "Set the scale algorithm (0 = auto, 1 = nearest, 2 = linear)",
     .type         = OPTION_TYPE_INT,
-    .validator    = egl_desktop_scale_validate,
+    .validator    = egl_desktopScaleValidate,
     .value.x_int  = 0
   },
   {
@@ -251,10 +251,10 @@ static void egl_deinitialize(LG_Renderer * renderer)
   app_unregisterGraph(this->importGraph);
   ringbuffer_free(&this->importTimings);
 
-  egl_desktop_free(&this->desktop);
-  egl_cursor_free (&this->cursor);
-  egl_splash_free (&this->splash);
-  egl_damage_free (&this->damage);
+  egl_desktopFree(&this->desktop);
+  egl_cursorFree (&this->cursor);
+  egl_splashFree (&this->splash);
+  egl_damageFree (&this->damage);
 
   LG_LOCK_FREE(this->lock);
   LG_LOCK_FREE(this->desktopDamageLock);
@@ -328,7 +328,7 @@ static void egl_calc_mouse_size(struct Inst * this)
   {
     case LG_ROTATE_0:
     case LG_ROTATE_180:
-      egl_cursor_set_size(this->cursor,
+      egl_cursorSetSize(this->cursor,
         (this->mouseWidth  * (1.0f / w)) * this->scaleX,
         (this->mouseHeight * (1.0f / h)) * this->scaleY
       );
@@ -336,7 +336,7 @@ static void egl_calc_mouse_size(struct Inst * this)
 
     case LG_ROTATE_90:
     case LG_ROTATE_270:
-      egl_cursor_set_size(this->cursor,
+      egl_cursorSetSize(this->cursor,
         (this->mouseWidth  * (1.0f / w)) * this->scaleY,
         (this->mouseHeight * (1.0f / h)) * this->scaleX
       );
@@ -353,7 +353,7 @@ static void egl_calc_mouse_state(struct Inst * this)
   {
     case LG_ROTATE_0:
     case LG_ROTATE_180:
-      egl_cursor_set_state(
+      egl_cursorSetState(
         this->cursor,
         this->cursorVisible,
         (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
@@ -363,7 +363,7 @@ static void egl_calc_mouse_state(struct Inst * this)
 
     case LG_ROTATE_90:
     case LG_ROTATE_270:
-      egl_cursor_set_state(
+      egl_cursorSetState(
         this->cursor,
         this->cursorVisible,
         (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleY,
@@ -444,7 +444,7 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplOpenGL3_NewFrame();
 
-  egl_damage_resize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
+  egl_damageResize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
 }
 
 static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
@@ -453,7 +453,7 @@ static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cur
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
-  if (!egl_cursor_set_shape(this->cursor, cursor, width, height, pitch, data))
+  if (!egl_cursorSetShape(this->cursor, cursor, width, height, pitch, data))
   {
     DEBUG_ERROR("Failed to update the cursor shape");
     return false;
@@ -504,9 +504,9 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   }
 
   egl_update_scale_type(this);
-  egl_damage_setup(this->damage, format.width, format.height);
+  egl_damageSetup(this->damage, format.width, format.height);
 
-  return egl_desktop_setup(this->desktop, format);
+  return egl_desktopSetup(this->desktop, format);
 }
 
 static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
@@ -619,9 +619,9 @@ static void debugCallback(GLenum source, GLenum type, GLuint id,
 static void egl_config_ui(void * opaque)
 {
   struct Inst * this = opaque;
-  egl_damage_config_ui(this->damage);
+  egl_damageConfigUI(this->damage);
   igSeparator();
-  egl_desktop_config_ui(this->desktop);
+  egl_desktopConfigUI(this->desktop);
 }
 
 static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
@@ -782,25 +782,25 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktop_init(&this->desktop, this->display, useDMA, MAX_ACCUMULATED_DAMAGE))
+  if (!egl_desktopInit(&this->desktop, this->display, useDMA, MAX_ACCUMULATED_DAMAGE))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
   }
 
-  if (!egl_cursor_init(&this->cursor))
+  if (!egl_cursorInit(&this->cursor))
   {
     DEBUG_ERROR("Failed to initialize the cursor");
     return false;
   }
 
-  if (!egl_splash_init(&this->splash))
+  if (!egl_splashInit(&this->splash))
   {
     DEBUG_ERROR("Failed to initialize the splash screen");
     return false;
   }
 
-  if (!egl_damage_init(&this->damage))
+  if (!egl_damageInit(&this->damage))
   {
     DEBUG_ERROR("Failed to initialize the damage display");
     return false;
@@ -952,7 +952,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
   if (this->start)
   {
-    if (egl_desktop_render(this->desktop,
+    if (egl_desktopRender(this->desktop,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated))
@@ -965,7 +965,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
           this->waitDone = true;
       }
 
-      cursorState = egl_cursor_render(this->cursor,
+      cursorState = egl_cursorRender(this->cursor,
           (this->format.rotate + rotate) % LG_ROTATE_MAX,
           this->width, this->height);
     }
@@ -994,17 +994,17 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
     if (!this->waitDone)
     {
-      egl_splash_render(this->splash, a, this->splashRatio);
+      egl_splashRender(this->splash, a, this->splashRatio);
       hasOverlay = true;
     }
   }
   else if (!this->start)
   {
-    egl_splash_render(this->splash, 1.0f, this->splashRatio);
+    egl_splashRender(this->splash, 1.0f, this->splashRatio);
     hasOverlay = true;
   }
 
-  hasOverlay |= egl_damage_render(this->damage, rotate, newFrame ? desktopDamage : NULL);
+  hasOverlay |= egl_damageRender(this->damage, rotate, newFrame ? desktopDamage : NULL);
   hasOverlay |= invalidateWindow;
 
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];

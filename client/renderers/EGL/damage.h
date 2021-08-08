@@ -33,12 +33,12 @@ struct DesktopDamage
 
 typedef struct EGL_Damage EGL_Damage;
 
-bool egl_damage_init(EGL_Damage ** damage);
-void egl_damage_free(EGL_Damage ** damage);
+bool egl_damageInit(EGL_Damage ** damage);
+void egl_damageFree(EGL_Damage ** damage);
 
-void egl_damage_config_ui(EGL_Damage * damage);
-void egl_damage_setup(EGL_Damage * damage, int width, int height);
-void egl_damage_resize(EGL_Damage * damage, float translateX, float translateY,
+void egl_damageConfigUI(EGL_Damage * damage);
+void egl_damageSetup(EGL_Damage * damage, int width, int height);
+void egl_damageResize(EGL_Damage * damage, float translateX, float translateY,
     float scaleX, float scaleY);
-bool egl_damage_render(EGL_Damage * damage, LG_RendererRotate rotate,
+bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate,
     const struct DesktopDamage * data);

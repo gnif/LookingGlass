@@ -37,7 +37,7 @@
 #define DRM_FORMAT_BGRA1010102   fourcc_code('B', 'A', '3', '0')
 #define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
 
-bool eglTexUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
+bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
 {
   switch(setup->pixFmt)
   {
@@ -87,7 +87,7 @@ bool eglTexUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
   return true;
 }
 
-bool eglTexUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
+bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
     int count)
 {
   for(int i = 0; i < count; ++i)
@@ -106,14 +106,14 @@ bool eglTexUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
       GL_MAP_COHERENT_BIT_EXT
     );
 
-    if (!eglTexUtilMapBuffer(buffer))
+    if (!egl_texUtilMapBuffer(buffer))
       return false;
   }
 
   return true;
 }
 
-void eglTexUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
+void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
 {
   for(int i = 0; i < count; ++i)
   {
@@ -122,13 +122,13 @@ void eglTexUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
     if (!buffer->pbo)
       continue;
 
-    eglTexUtilUnmapBuffer(buffer);
+    egl_texUtilUnmapBuffer(buffer);
     glDeleteBuffers(1, &buffer->pbo);
     buffer->pbo = 0;
   }
 }
 
-bool eglTexUtilMapBuffer(EGL_TexBuffer * buffer)
+bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer)
 {
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
   buffer->map = glMapBufferRange(
@@ -148,7 +148,7 @@ bool eglTexUtilMapBuffer(EGL_TexBuffer * buffer)
   return buffer->map;
 }
 
-void eglTexUtilUnmapBuffer(EGL_TexBuffer * buffer)
+void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer)
 {
   if (!buffer->map)
     return;

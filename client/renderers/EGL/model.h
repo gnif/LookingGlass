@@ -28,12 +28,12 @@
 
 typedef struct EGL_Model EGL_Model;
 
-bool egl_model_init(EGL_Model ** model);
-void egl_model_free(EGL_Model ** model);
+bool egl_modelInit(EGL_Model ** model);
+void egl_modelFree(EGL_Model ** model);
 
-void egl_model_set_default  (EGL_Model * model);
-void egl_model_add_verticies(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count);
-void egl_model_set_shader   (EGL_Model * model, EGL_Shader  * shader);
-void egl_model_set_texture  (EGL_Model * model, EGL_Texture * texture);
+void egl_modelSetDefault  (EGL_Model * model);
+void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count);
+void egl_modelSetShader   (EGL_Model * model, EGL_Shader  * shader);
+void egl_modelSetTexture  (EGL_Model * model, EGL_Texture * texture);
 
-void egl_model_render(EGL_Model * model);
+void egl_modelRender(EGL_Model * model);

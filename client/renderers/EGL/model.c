@@ -53,7 +53,7 @@ struct FloatList
 
 void update_uniform_bindings(EGL_Model * model);
 
-bool egl_model_init(EGL_Model ** model)
+bool egl_modelInit(EGL_Model ** model)
 {
   *model = (EGL_Model *)malloc(sizeof(EGL_Model));
   if (!*model)
@@ -69,7 +69,7 @@ bool egl_model_init(EGL_Model ** model)
   return true;
 }
 
-void egl_model_free(EGL_Model ** model)
+void egl_modelFree(EGL_Model ** model)
 {
   if (!*model)
     return;
@@ -93,7 +93,7 @@ void egl_model_free(EGL_Model ** model)
   *model = NULL;
 }
 
-void egl_model_set_default(EGL_Model * model)
+void egl_modelSetDefault(EGL_Model * model)
 {
   static const GLfloat square[] =
   {
@@ -111,10 +111,10 @@ void egl_model_set_default(EGL_Model * model)
     1.0f, 0.0f
   };
 
-  egl_model_add_verticies(model, square, uvs, 4);
+  egl_modelAddVerts(model, square, uvs, 4);
 }
 
-void egl_model_add_verticies(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count)
+void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count)
 {
   struct FloatList * fl = (struct FloatList *)malloc(sizeof(struct FloatList));
 
@@ -133,7 +133,7 @@ void egl_model_add_verticies(EGL_Model * model, const GLfloat * verticies, const
   model->vertexCount += count;
 }
 
-void egl_model_render(EGL_Model * model)
+void egl_modelRender(EGL_Model * model)
 {
   if (!model->vertexCount)
     return;
@@ -184,10 +184,10 @@ void egl_model_render(EGL_Model * model)
   glBindVertexArray(model->vao);
 
   if (model->shader)
-    egl_shader_use(model->shader);
+    egl_shaderUse(model->shader);
 
   if (model->texture)
-    egl_texture_bind(model->texture);
+    egl_textureBind(model->texture);
 
   /* draw the arrays */
   GLint offset = 0;
@@ -204,13 +204,13 @@ void egl_model_render(EGL_Model * model)
   glUseProgram(0);
 }
 
-void egl_model_set_shader(EGL_Model * model, EGL_Shader * shader)
+void egl_modelSetShader(EGL_Model * model, EGL_Shader * shader)
 {
   model->shader = shader;
   update_uniform_bindings(model);
 }
 
-void egl_model_set_texture(EGL_Model * model, EGL_Texture * texture)
+void egl_modelSetTexture(EGL_Model * model, EGL_Texture * texture)
 {
   model->texture = texture;
   update_uniform_bindings(model);
@@ -221,5 +221,5 @@ void update_uniform_bindings(EGL_Model * model)
   if (!model->shader || !model->texture)
     return;
 
-  egl_shader_associate_textures(model->shader, 1);
+  egl_shaderAssocTextures(model->shader, 1);
 }
