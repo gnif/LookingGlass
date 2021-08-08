@@ -162,8 +162,8 @@ struct Inst
   struct IntRect    mousePos;
 };
 
-static bool _check_gl_error(unsigned int line, const char * name);
-#define check_gl_error(name) _check_gl_error(__LINE__, name)
+static bool _checkGLError(unsigned int line, const char * name);
+#define check_gl_error(name) _checkGLError(__LINE__, name)
 
 enum ConfigStatus
 {
@@ -174,10 +174,10 @@ enum ConfigStatus
 
 static void deconfigure(struct Inst * this);
 static enum ConfigStatus configure(struct Inst * this);
-static void update_mouse_shape(struct Inst * this, bool * newShape);
-static bool draw_frame(struct Inst * this);
-static void draw_mouse(struct Inst * this);
-static void render_wait(struct Inst * this);
+static void updateMouseShape(struct Inst * this, bool * newShape);
+static bool drawFrame(struct Inst * this);
+static void drawMouse(struct Inst * this);
+static void renderWait(struct Inst * this);
 
 const char * opengl_getName(void)
 {
@@ -469,7 +469,7 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
 
     case CONFIG_STATUS_NOOP :
     case CONFIG_STATUS_OK   :
-      if (!draw_frame(this))
+      if (!drawFrame(this))
         return false;
   }
 
@@ -477,16 +477,16 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
   glClear(GL_COLOR_BUFFER_BIT);
 
   if (this->waiting)
-    render_wait(this);
+    renderWait(this);
   else
   {
     bool newShape;
-    update_mouse_shape(this, &newShape);
+    updateMouseShape(this, &newShape);
     glCallList(this->texList + this->texRIndex);
-    draw_mouse(this);
+    drawMouse(this);
 
     if (!this->waitDone)
-      render_wait(this);
+      renderWait(this);
   }
 
   if (app_renderOverlay(NULL, 0) != 0)
@@ -508,7 +508,7 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
   return true;
 }
 
-void draw_torus(float x, float y, float inner, float outer, unsigned int pts)
+void drawTorus(float x, float y, float inner, float outer, unsigned int pts)
 {
   glBegin(GL_QUAD_STRIP);
   for (unsigned int i = 0; i <= pts; ++i)
@@ -520,7 +520,7 @@ void draw_torus(float x, float y, float inner, float outer, unsigned int pts)
   glEnd();
 }
 
-void draw_torus_arc(float x, float y, float inner, float outer, unsigned int pts, float s, float e)
+void drawTorusArc(float x, float y, float inner, float outer, unsigned int pts, float s, float e)
 {
   glBegin(GL_QUAD_STRIP);
   for (unsigned int i = 0; i <= pts; ++i)
@@ -532,7 +532,7 @@ void draw_torus_arc(float x, float y, float inner, float outer, unsigned int pts
   glEnd();
 }
 
-static void render_wait(struct Inst * this)
+static void renderWait(struct Inst * this)
 {
   float a;
   if (this->waiting)
@@ -572,11 +572,11 @@ static void render_wait(struct Inst * this)
   glColor4f(1.0f, 1.0f, 1.0f, a);
   glScalef (2.0f, 2.0f, 1.0f);
 
-  draw_torus    (  0,  0, 40, 42, 60);
-  draw_torus    (  0,  0, 32, 34, 60);
-  draw_torus    (-50, -3,  2,  4, 30);
-  draw_torus    ( 50, -3,  2,  4, 30);
-  draw_torus_arc(  0,  0, 51, 49, 60, 0.0f, M_PI);
+  drawTorus   (  0,  0, 40, 42, 60);
+  drawTorus   (  0,  0, 32, 34, 60);
+  drawTorus   (-50, -3,  2,  4, 30);
+  drawTorus   ( 50, -3,  2,  4, 30);
+  drawTorusArc(  0,  0, 51, 49, 60, 0.0f, M_PI);
 
   glBegin(GL_QUADS);
     glVertex2f(-1 , 50);
@@ -593,8 +593,8 @@ static void render_wait(struct Inst * this)
     glVertex2f( 21, 83);
   glEnd();
 
-  draw_torus_arc(-14, 83, 5, 7, 10, M_PI       , M_PI / 2.0f);
-  draw_torus_arc( 14, 83, 5, 7, 10, M_PI * 1.5f, M_PI / 2.0f);
+  drawTorusArc(-14, 83, 5, 7, 10, M_PI       , M_PI / 2.0f);
+  drawTorusArc( 14, 83, 5, 7, 10, M_PI * 1.5f, M_PI / 2.0f);
 
   //FIXME: draw the diagnoal marks on the circle
 
@@ -621,7 +621,7 @@ const LG_RendererOps LGR_OpenGL =
   .render        = opengl_render
 };
 
-static bool _check_gl_error(unsigned int line, const char * name)
+static bool _checkGLError(unsigned int line, const char * name)
 {
   GLenum error = glGetError();
   if (error == GL_NO_ERROR)
@@ -884,7 +884,7 @@ static void deconfigure(struct Inst * this)
   this->configured = false;
 }
 
-static void update_mouse_shape(struct Inst * this, bool * newShape)
+static void updateMouseShape(struct Inst * this, bool * newShape)
 {
   LG_LOCK(this->mouseLock);
   *newShape = this->newShape;
@@ -1029,7 +1029,7 @@ static void update_mouse_shape(struct Inst * this, bool * newShape)
   LG_UNLOCK(this->mouseLock);
 }
 
-static bool opengl_buffer_fn(void * opaque, const void * data, size_t size)
+static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
 {
   struct Inst * this = (struct Inst *)opaque;
 
@@ -1046,7 +1046,7 @@ static bool opengl_buffer_fn(void * opaque, const void * data, size_t size)
   return true;
 }
 
-static bool draw_frame(struct Inst * this)
+static bool drawFrame(struct Inst * this)
 {
   if (glIsSync(this->fences[this->texWIndex]))
   {
@@ -1099,7 +1099,7 @@ static bool draw_frame(struct Inst * this)
     this->format.width,
     bpp,
     this->format.pitch,
-    opengl_buffer_fn,
+    opengl_bufferFn,
     this
   );
 
@@ -1154,7 +1154,7 @@ static bool draw_frame(struct Inst * this)
   return true;
 }
 
-static void draw_mouse(struct Inst * this)
+static void drawMouse(struct Inst * this)
 {
   if (!this->mouseVisible)
     return;
