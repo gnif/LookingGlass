@@ -777,7 +777,7 @@ void intHandler(int sig)
 static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
     bool * needsOpenGL)
 {
-  const LG_Renderer *r = LG_Renderers[index];
+  const LG_RendererOps *r = LG_Renderers[index];
 
   if (!IS_LG_RENDERER_VALID(r))
   {

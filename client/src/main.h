@@ -89,7 +89,7 @@ struct AppState
   bool                 posInfoValid;
   bool                 alignToGuest;
 
-  const LG_Renderer  * lgr;
+  const LG_RendererOps * lgr;
   void               * lgrData;
   atomic_int           lgrResize;
   LG_Lock              lgrLock;

@@ -610,7 +610,7 @@ static void render_wait(struct Inst * this)
   glDisable(GL_BLEND);
 }
 
-const LG_Renderer LGR_OpenGL =
+const LG_RendererOps LGR_OpenGL =
 {
   .get_name        = opengl_get_name,
   .setup           = opengl_setup,

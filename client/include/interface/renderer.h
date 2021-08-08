@@ -94,7 +94,7 @@ typedef enum LG_RendererCursor
 }
 LG_RendererCursor;
 
-typedef struct LG_Renderer
+typedef struct LG_RendererOps
 {
   /* returns the friendly name of the renderer */
   const char * (*get_name)(void);
@@ -163,4 +163,4 @@ typedef struct LG_Renderer
   bool (*render)(void * opaque, LG_RendererRotate rotate, const bool newFrame,
       const bool invalidateWindow, void (*preSwap)(void * udata), void * udata);
 }
-LG_Renderer;
+LG_RendererOps;

@@ -1064,7 +1064,7 @@ static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFr
   return true;
 }
 
-struct LG_Renderer LGR_EGL =
+struct LG_RendererOps LGR_EGL =
 {
   .get_name        = egl_get_name,
   .setup           = egl_setup,

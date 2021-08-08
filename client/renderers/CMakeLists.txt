@@ -5,7 +5,7 @@ set(RENDERER_H "${CMAKE_BINARY_DIR}/include/dynamic/renderers.h")
 set(RENDERER_C "${CMAKE_BINARY_DIR}/src/renderers.c")
 
 file(WRITE  ${RENDERER_H} "#include \"interface/renderer.h\"\n\n")
-file(APPEND ${RENDERER_H} "extern LG_Renderer * LG_Renderers[];\n\n")
+file(APPEND ${RENDERER_H} "extern LG_RendererOps * LG_Renderers[];\n\n")
 
 file(WRITE  ${RENDERER_C} "#include \"interface/renderer.h\"\n\n")
 file(APPEND ${RENDERER_C} "#include <stddef.h>\n\n")
@@ -33,10 +33,10 @@ list(LENGTH RENDERERS RENDERER_COUNT)
 file(APPEND ${RENDERER_H} "#define LG_RENDERER_COUNT ${RENDERER_COUNT}\n")
 
 foreach(renderer ${RENDERERS})
-  file(APPEND ${RENDERER_C} "extern LG_Renderer LGR_${renderer};\n")
+  file(APPEND ${RENDERER_C} "extern LG_RendererOps LGR_${renderer};\n")
 endforeach()
 
-file(APPEND ${RENDERER_C} "\nconst LG_Renderer * LG_Renderers[] =\n{\n")
+file(APPEND ${RENDERER_C} "\nconst LG_RendererOps * LG_Renderers[] =\n{\n")
 foreach(renderer ${RENDERERS})
   file(APPEND ${RENDERER_C} "  &LGR_${renderer},\n")
 endforeach()
