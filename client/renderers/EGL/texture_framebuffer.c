@@ -59,6 +59,15 @@ static bool eglTexFB_init(EGL_Texture ** texture, EGLDisplay * display)
   return true;
 }
 
+void eglTexFB_free(EGL_Texture * texture)
+{
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexFB         * this   = UPCAST(TexFB        , parent );
+
+  eglTexBuffer_free(texture);
+  free(this);
+}
+
 static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
@@ -124,7 +133,7 @@ static bool eglTexFB_update(EGL_Texture * texture, const EGL_TexUpdate * update)
 EGL_TextureOps EGL_TextureFrameBuffer =
 {
   .init        = eglTexFB_init,
-  .free        = eglTexBuffer_free,
+  .free        = eglTexFB_free,
   .setup       = eglTexBuffer_stream_setup,
   .update      = eglTexFB_update,
   .process     = eglTexBuffer_stream_process,
