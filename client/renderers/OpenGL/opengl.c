@@ -36,6 +36,7 @@
 #include "common/framebuffer.h"
 #include "common/locking.h"
 #include "ll.h"
+#include "util.h"
 
 #define BUFFER_COUNT       2
 
@@ -102,6 +103,8 @@ struct OpenGL_Options
 
 struct Inst
 {
+  LG_Renderer base;
+
   LG_RendererParams     params;
   struct OpenGL_Options opt;
 
@@ -186,21 +189,19 @@ static void opengl_setup(void)
   option_register(opengl_options);
 }
 
-bool opengl_create(void ** opaque, const LG_RendererParams params,
+bool opengl_create(LG_Renderer ** renderer, const LG_RendererParams params,
     bool * needsOpenGL)
 {
   // create our local storage
-  *opaque = malloc(sizeof(struct Inst));
-  if (!*opaque)
+  struct Inst * this = calloc(1, sizeof(*this));
+  if (!this)
   {
-    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(struct Inst));
+    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(*this));
     return false;
   }
-  memset(*opaque, 0, sizeof(struct Inst));
+  *renderer = &this->base;
 
-  struct Inst * this = (struct Inst *)*opaque;
   memcpy(&this->params, &params, sizeof(LG_RendererParams));
-
   this->opt.mipmap        = option_get_bool("opengl", "mipmap"       );
   this->opt.vsync         = option_get_bool("opengl", "vsync"        );
   this->opt.preventBuffer = option_get_bool("opengl", "preventBuffer");
@@ -215,22 +216,18 @@ bool opengl_create(void ** opaque, const LG_RendererParams params,
   return true;
 }
 
-bool opengl_initialize(void * opaque)
+bool opengl_initialize(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return false;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->waiting  = true;
   this->waitDone = false;
   return true;
 }
 
-void opengl_deinitialize(void * opaque)
+void opengl_deinitialize(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   if (this->renderStarted)
   {
@@ -264,16 +261,17 @@ void opengl_deinitialize(void * opaque)
   free(this);
 }
 
-void opengl_on_restart(void * opaque)
+void opengl_on_restart(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
   this->waiting = true;
 }
 
-void opengl_on_resize(void * opaque, const int width, const int height, const double scale,
+void opengl_on_resize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->window.x = width * scale;
   this->window.y = height * scale;
@@ -312,12 +310,10 @@ void opengl_on_resize(void * opaque, const int width, const int height, const do
   ImGui_ImplOpenGL2_NewFrame();
 }
 
-bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
+bool opengl_on_mouse_shape(LG_Renderer * renderer, const LG_RendererCursor cursor,
     const int width, const int height, const int pitch, const uint8_t * data)
 {
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return false;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   LG_LOCK(this->mouseLock);
   this->mouseCursor = cursor;
@@ -341,11 +337,9 @@ bool opengl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
   return true;
 }
 
-bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
+bool opengl_on_mouse_event(LG_Renderer * renderer, const bool visible, const int x, const int y)
 {
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return false;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   if (this->mousePos.x == x && this->mousePos.y == y && this->mouseVisible == visible)
     return true;
@@ -357,9 +351,9 @@ bool opengl_on_mouse_event(void * opaque, const bool visible, const int x, const
   return false;
 }
 
-bool opengl_on_frame_format(void * opaque, const LG_RendererFormat format)
+bool opengl_on_frame_format(LG_Renderer * renderer, const LG_RendererFormat format)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   LG_LOCK(this->formatLock);
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
@@ -368,10 +362,10 @@ bool opengl_on_frame_format(void * opaque, const LG_RendererFormat format)
   return true;
 }
 
-bool opengl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
+bool opengl_on_frame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damage, int damageCount)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   LG_LOCK(this->frameLock);
   this->frame = frame;
@@ -393,9 +387,9 @@ bool opengl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
   return true;
 }
 
-bool opengl_render_startup(void * opaque, bool useDMA)
+bool opengl_render_startup(LG_Renderer * renderer, bool useDMA)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->glContext = app_glCreateContext();
   if (!this->glContext)
@@ -456,18 +450,16 @@ bool opengl_render_startup(void * opaque, bool useDMA)
   return true;
 }
 
-static bool opengl_needs_render(void * opaque)
+static bool opengl_needs_render(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
   return !this->waitDone;
 }
 
-bool opengl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
+bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool newFrame,
     const bool invalidateWindow, void (*preSwap)(void * udata), void * udata)
 {
-  struct Inst * this = (struct Inst *)opaque;
-  if (!this)
-    return false;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   switch(configure(this))
   {

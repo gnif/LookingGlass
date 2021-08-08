@@ -94,6 +94,8 @@ typedef enum LG_RendererCursor
 }
 LG_RendererCursor;
 
+typedef struct LG_Renderer LG_Renderer;
+
 typedef struct LG_RendererOps
 {
   /* returns the friendly name of the renderer */
@@ -105,62 +107,69 @@ typedef struct LG_RendererOps
 
   /* creates an instance of the renderer
    * Context: lg_run */
-  bool (*create)(void ** opaque, const LG_RendererParams params,
+  bool (*create)(LG_Renderer ** renderer, const LG_RendererParams params,
       bool * needsOpenGL);
 
   /* initializes the renderer for use
    * Context: lg_run */
-  bool (*initialize)(void * opaque);
+  bool (*initialize)(LG_Renderer * renderer);
 
   /* deinitializes & frees the renderer
    * Context: lg_run & renderThread */
-  void (*deinitialize)(void * opaque);
+  void (*deinitialize)(LG_Renderer * renderer);
 
   /* returns true if the specified feature is supported
    * Context: renderThread */
-  bool (*supports)(void * opaque, LG_RendererSupport support);
+  bool (*supports)(LG_Renderer * renderer, LG_RendererSupport support);
 
   /* called when the renderer is to reset it's state
    * Context: lg_run & frameThread */
-  void (*on_restart)(void * opaque);
+  void (*on_restart)(LG_Renderer * renderer);
 
   /* called when the viewport has been resized
    * Context: renderThrtead */
-  void (*on_resize)(void * opaque, const int width, const int height,
+  void (*on_resize)(LG_Renderer * renderer, const int width, const int height,
       const double scale, const LG_RendererRect destRect,
       LG_RendererRotate rotate);
 
   /* called when the mouse shape has changed
    * Context: cursorThread */
-  bool (*on_mouse_shape)(void * opaque, const LG_RendererCursor cursor,
-      const int width, const int height, const int pitch,
-      const uint8_t * data);
+  bool (*on_mouse_shape)(LG_Renderer * renderer, const LG_RendererCursor cursor,
+      const int width, const int height, const int pitch, const uint8_t * data);
 
   /* called when the mouse has moved or changed visibillity
    * Context: cursorThread */
-  bool (*on_mouse_event)(void * opaque, const bool visible,
-      const int x, const int y);
+  bool (*on_mouse_event)(LG_Renderer * renderer, const bool visible, const int x,
+      const int y);
 
   /* called when the frame format has changed
    * Context: frameThread */
-  bool (*on_frame_format)(void * opaque, const LG_RendererFormat format);
+  bool (*on_frame_format)(LG_Renderer * renderer,
+      const LG_RendererFormat format);
 
   /* called when there is a new frame
    * Context: frameThread */
-  bool (*on_frame)(void * opaque, const FrameBuffer * frame, int dmaFD,
+  bool (*on_frame)(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFD,
       const FrameDamageRect * damage, int damageCount);
 
   /* called when the rederer is to startup
    * Context: renderThread */
-  bool (*render_startup)(void * opaque, bool useDMA);
+  bool (*render_startup)(LG_Renderer * renderer, bool useDMA);
 
   /* returns if the render method must be called even if nothing has changed.
    * Context: renderThread */
-  bool (*needs_render)(void * opaque);
+  bool (*needs_render)(LG_Renderer * renderer);
 
   /* called to render the scene
    * Context: renderThread */
-  bool (*render)(void * opaque, LG_RendererRotate rotate, const bool newFrame,
-      const bool invalidateWindow, void (*preSwap)(void * udata), void * udata);
+  bool (*render)(LG_Renderer * renderer, LG_RendererRotate rotate,
+      const bool newFrame, const bool invalidateWindow,
+      void (*preSwap)(void * udata), void * udata);
 }
 LG_RendererOps;
+
+typedef struct LG_Renderer
+{
+  LG_RendererOps ops;
+}
+LG_Renderer;

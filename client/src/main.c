@@ -147,7 +147,7 @@ static void preSwapCallback(void * udata)
 
 static int renderThread(void * unused)
 {
-  if (!g_state.lgr->render_startup(g_state.lgrData, g_state.useDMA))
+  if (!RENDERER(render_startup, g_state.useDMA))
   {
     g_state.state = APP_STATE_SHUTDOWN;
 
@@ -156,8 +156,7 @@ static int renderThread(void * unused)
     return 1;
   }
 
-  if (g_state.lgr->supports &&
-      !g_state.lgr->supports(g_state.lgrData, LG_SUPPORTS_DMABUF))
+  if (g_state.lgr->ops.supports && !RENDERER(supports, LG_SUPPORTS_DMABUF))
     g_state.useDMA = false;
 
   /* start up the fps timer */
@@ -191,7 +190,7 @@ static int renderThread(void * unused)
           && !forceRender
           && !pending
           && !app_overlayNeedsRender()
-          && !g_state.lgr->needs_render(g_state.lgrData))
+          && !RENDERER(needs_render))
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();
@@ -236,7 +235,7 @@ static int renderThread(void * unused)
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
       if (g_state.lgr)
-        g_state.lgr->on_resize(g_state.lgrData, g_state.windowW, g_state.windowH,
+        RENDERER(on_resize, g_state.windowW, g_state.windowH,
             g_state.windowScale, g_state.dstRect, g_params.winRotate);
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
@@ -251,8 +250,8 @@ static int renderThread(void * unused)
 
     const uint64_t renderStart = nanotime();
     LG_LOCK(g_state.lgrLock);
-    if (!g_state.lgr->render(g_state.lgrData, g_params.winRotate, newFrame,
-          invalidate, preSwapCallback, (void *)&renderStart))
+    if (!RENDERER(render, g_params.winRotate, newFrame, invalidate,
+          preSwapCallback, (void *)&renderStart))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
@@ -295,7 +294,7 @@ static int renderThread(void * unused)
 
   core_stopFrameThread();
 
-  g_state.lgr->deinitialize(g_state.lgrData);
+  RENDERER(deinitialize);
   g_state.lgr = NULL;
   LG_LOCK_FREE(g_state.lgrLock);
 
@@ -338,9 +337,7 @@ static int cursorThread(void * unused)
         if (g_cursor.redraw && g_cursor.guest.valid)
         {
           g_cursor.redraw = false;
-          g_state.lgr->on_mouse_event
-          (
-            g_state.lgrData,
+          RENDERER(on_mouse_event,
             g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
             g_cursor.guest.x,
             g_cursor.guest.y
@@ -403,8 +400,7 @@ static int cursorThread(void * unused)
       g_cursor.guest.hy = cursor->hy;
 
       const uint8_t * data = (const uint8_t *)(cursor + 1);
-      if (!g_state.lgr->on_mouse_shape(
-        g_state.lgrData,
+      if (!RENDERER(on_mouse_shape,
         cursorType,
         cursor->width,
         cursor->height,
@@ -437,9 +433,7 @@ static int cursorThread(void * unused)
 
     g_cursor.redraw = false;
 
-    g_state.lgr->on_mouse_event
-    (
-      g_state.lgrData,
+    RENDERER(on_mouse_event,
       g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
       g_cursor.guest.x,
       g_cursor.guest.y
@@ -616,7 +610,7 @@ int main_frameThread(void * unused)
           frame->rotation);
 
       LG_LOCK(g_state.lgrLock);
-      if (!g_state.lgr->on_frame_format(g_state.lgrData, lgrFormat))
+      if (!RENDERER(on_frame_format, lgrFormat))
       {
         DEBUG_ERROR("renderer failed to configure format");
         g_state.state = APP_STATE_SHUTDOWN;
@@ -683,8 +677,8 @@ int main_frameThread(void * unused)
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!g_state.lgr->on_frame(g_state.lgrData, fb, g_state.useDMA ? dma->fd : -1,
-        frame->damageRects, frame->damageRectsCount))
+    if (!RENDERER(on_frame, fb, g_state.useDMA ? dma->fd : -1,
+          frame->damageRects, frame->damageRectsCount))
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");
@@ -723,7 +717,7 @@ int main_frameThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&queue);
-  g_state.lgr->on_restart(g_state.lgrData);
+  RENDERER(on_restart);
 
   if (g_state.useDMA)
   {
@@ -786,15 +780,22 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
   }
 
   // create the renderer
-  g_state.lgrData = NULL;
-  *needsOpenGL    = false;
-  if (!r->create(&g_state.lgrData, lgrParams, needsOpenGL))
+  g_state.lgr  = NULL;
+  *needsOpenGL = false;
+  if (!r->create(&g_state.lgr, lgrParams, needsOpenGL))
+  {
+    g_state.lgr = NULL;
     return false;
+  }
+
+  // init the ops member
+  memcpy(&g_state.lgr->ops, r, sizeof(*r));
 
   // initialize the renderer
-  if (!r->initialize(g_state.lgrData))
+  if (!r->initialize(g_state.lgr))
   {
-    r->deinitialize(g_state.lgrData);
+    r->deinitialize(g_state.lgr);
+    g_state.lgr = NULL;
     return false;
   }
 
@@ -924,7 +925,6 @@ static int lg_run(void)
       DEBUG_ERROR("Forced renderer failed to iniailize");
       return -1;
     }
-    g_state.lgr = LG_Renderers[g_params.forceRendererIndex];
   }
   else
   {
@@ -932,10 +932,7 @@ static int lg_run(void)
     for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
     {
       if (tryRenderer(i, lgrParams, &needsOpenGL))
-      {
-        g_state.lgr = LG_Renderers[i];
         break;
-      }
     }
   }
 
@@ -1176,7 +1173,7 @@ restart:
 
     lgInit();
 
-    g_state.lgr->on_restart(g_state.lgrData);
+    RENDERER(on_restart);
 
     DEBUG_INFO("Waiting for the host to restart...");
     goto restart;

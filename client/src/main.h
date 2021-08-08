@@ -89,8 +89,7 @@ struct AppState
   bool                 posInfoValid;
   bool                 alignToGuest;
 
-  const LG_RendererOps * lgr;
-  void               * lgrData;
+  LG_Renderer        * lgr;
   atomic_int           lgrResize;
   LG_Lock              lgrLock;
   bool                 useDMA;
@@ -284,3 +283,5 @@ extern struct CursorState g_cursor;
 extern struct AppParams   g_params;
 
 int main_frameThread(void * unused);
+
+#define RENDERER(fn, ...) g_state.lgr->ops.fn(g_state.lgr, ##__VA_ARGS__)

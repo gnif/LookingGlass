@@ -63,6 +63,8 @@ struct Options
 
 struct Inst
 {
+  LG_Renderer base;
+
   bool dmaSupport;
   LG_RendererParams params;
   struct Options    opt;
@@ -192,22 +194,23 @@ static void egl_setup(void)
   option_register(egl_options);
 }
 
-static bool egl_create(void ** opaque, const LG_RendererParams params, bool * needsOpenGL)
+static bool egl_create(LG_Renderer ** renderer, const LG_RendererParams params,
+    bool * needsOpenGL)
 {
   // check if EGL is even available
   if (!eglQueryString(EGL_NO_DISPLAY, EGL_VERSION))
     return false;
 
   // create our local storage
-  *opaque = calloc(1, sizeof(struct Inst));
-  if (!*opaque)
+  struct Inst * this = calloc(1, sizeof(*this));
+  if (!this)
   {
-    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(struct Inst));
+    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(*this));
     return false;
   }
+  *renderer = &this->base;
 
   // safe off parameteres and init our default option values
-  struct Inst * this = (struct Inst *)*opaque;
   memcpy(&this->params, &params, sizeof(LG_RendererParams));
 
   this->opt.vsync        = option_get_bool("egl", "vsync");
@@ -231,16 +234,16 @@ static bool egl_create(void ** opaque, const LG_RendererParams params, bool * ne
   return true;
 }
 
-static bool egl_initialize(void * opaque)
+static bool egl_initialize(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
   DEBUG_INFO("Double buffering is %s", this->opt.doubleBuffer ? "on" : "off");
   return true;
 }
 
-static void egl_deinitialize(void * opaque)
+static void egl_deinitialize(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   if (this->imgui)
     ImGui_ImplOpenGL3_Shutdown();
@@ -269,9 +272,9 @@ static void egl_deinitialize(void * opaque)
   free(this);
 }
 
-static bool egl_supports(void * opaque, LG_RendererSupport flag)
+static bool egl_supports(LG_Renderer * renderer, LG_RendererSupport flag)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   switch(flag)
   {
@@ -283,9 +286,9 @@ static bool egl_supports(void * opaque, LG_RendererSupport flag)
   }
 }
 
-static void egl_on_restart(void * opaque)
+static void egl_on_restart(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   eglDestroyContext(this->display, this->frameContext);
   this->frameContext = NULL;
@@ -397,10 +400,10 @@ static void egl_update_scale_type(struct Inst * this)
     this->scaleType = EGL_DESKTOP_UPSCALE;
 }
 
-static void egl_on_resize(void * opaque, const int width, const int height, const double scale,
+static void egl_on_resize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->width   = width * scale;
   this->height  = height * scale;
@@ -444,11 +447,11 @@ static void egl_on_resize(void * opaque, const int width, const int height, cons
   egl_damage_resize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
 }
 
-static bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
+static bool egl_on_mouse_shape(LG_Renderer * renderer, const LG_RendererCursor cursor,
     const int width, const int height,
     const int pitch, const uint8_t * data)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   if (!egl_cursor_set_shape(this->cursor, cursor, width, height, pitch, data))
   {
@@ -463,9 +466,9 @@ static bool egl_on_mouse_shape(void * opaque, const LG_RendererCursor cursor,
   return true;
 }
 
-static bool egl_on_mouse_event(void * opaque, const bool visible, const int x, const int y)
+static bool egl_on_mouse_event(LG_Renderer * renderer, const bool visible, const int x, const int y)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
   this->cursorVisible = visible;
   this->cursorX       = x;
   this->cursorY       = y;
@@ -473,9 +476,9 @@ static bool egl_on_mouse_event(void * opaque, const bool visible, const int x, c
   return true;
 }
 
-static bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
+static bool egl_on_frame_format(LG_Renderer * renderer, const LG_RendererFormat format)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
   this->formatValid = true;
 
@@ -506,10 +509,10 @@ static bool egl_on_frame_format(void * opaque, const LG_RendererFormat format)
   return egl_desktop_setup(this->desktop, format);
 }
 
-static bool egl_on_frame(void * opaque, const FrameBuffer * frame, int dmaFd,
+static bool egl_on_frame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   uint64_t start = nanotime();
   if (!egl_desktop_update(this->desktop, frame, dmaFd, damageRects, damageRectsCount))
@@ -621,9 +624,9 @@ static void egl_config_ui(void * opaque)
   egl_desktop_config_ui(this->desktop);
 }
 
-static bool egl_render_startup(void * opaque, bool useDMA)
+static bool egl_render_startup(LG_Renderer * renderer, bool useDMA)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->nativeWind = app_getEGLNativeWindow();
   if (!this->nativeWind)
@@ -815,9 +818,9 @@ static bool egl_render_startup(void * opaque, bool useDMA)
   return true;
 }
 
-static bool egl_needs_render(void * opaque)
+static bool egl_needs_render(LG_Renderer * renderer)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
   return !this->waitDone;
 }
 
@@ -865,10 +868,11 @@ inline static void renderLetterBox(struct Inst * this)
   }
 }
 
-static bool egl_render(void * opaque, LG_RendererRotate rotate, const bool newFrame,
-    const bool invalidateWindow, void (*preSwap)(void * udata), void * udata)
+static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
+    const bool newFrame, const bool invalidateWindow,
+    void (*preSwap)(void * udata), void * udata)
 {
-  struct Inst * this = (struct Inst *)opaque;
+  struct Inst * this = UPCAST(struct Inst, renderer);
   EGLint bufferAge   = egl_buffer_age(this);
   bool renderAll     = invalidateWindow || !this->start || this->hadOverlay ||
                        bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE;
