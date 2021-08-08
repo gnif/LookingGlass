@@ -63,7 +63,7 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
   *texture = &this->base.base;
 
   EGL_Texture * parent = &this->base.base;
-  if (!egl_texBufferInit(&parent, display))
+  if (!egl_texBufferStreamInit(&parent, display))
   {
     free(this);
     *texture = NULL;
@@ -93,21 +93,7 @@ static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup
 
   egl_texDMABUFCleanup(this);
 
-  if (!egl_texBufferSetup(&parent->base, setup))
-    return false;
-
-  glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
-  glTexImage2D(GL_TEXTURE_2D,
-      0,
-      texture->format.intFormat,
-      texture->format.width,
-      texture->format.height,
-      0,
-      texture->format.format,
-      texture->format.dataType,
-      NULL);
-
-  return true;
+  return egl_texBufferSetup(&parent->base, setup);
 }
 
 static bool egl_texDMABUFUpdate(EGL_Texture * texture,
@@ -172,8 +158,17 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     this->images[index].image = image;
   }
 
-  glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
-  g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+  INTERLOCKED_SECTION(parent->copyLock,
+  {
+    glBindTexture(GL_TEXTURE_2D, parent->tex[parent->bufIndex]);
+    g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+
+    if (parent->sync)
+      glDeleteSync(parent->sync);
+
+    parent->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  });
+  glFlush();
   return true;
 }
 
@@ -185,8 +180,48 @@ static EGL_TexStatus egl_texDMABUFProcess(EGL_Texture * texture)
 static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  GLsync sync = 0;
 
-  *tex = parent->tex[0];
+  INTERLOCKED_SECTION(parent->copyLock,
+  {
+    if (parent->sync)
+    {
+      sync           = parent->sync;
+      parent->sync   = 0;
+      parent->rIndex = parent->bufIndex;
+      if (++parent->bufIndex == parent->texCount)
+        parent->bufIndex = 0;
+    }
+  });
+
+  if (sync)
+  {
+    switch(glClientWaitSync(sync, 0, 20000000)) // 20ms
+    {
+      case GL_ALREADY_SIGNALED:
+      case GL_CONDITION_SATISFIED:
+        glDeleteSync(sync);
+        break;
+
+      case GL_TIMEOUT_EXPIRED:
+        INTERLOCKED_SECTION(parent->copyLock,
+        {
+          if (!parent->sync)
+            parent->sync = sync;
+          else
+            glDeleteSync(sync);
+        });
+        return EGL_TEX_STATUS_NOTREADY;
+
+      case GL_WAIT_FAILED:
+      case GL_INVALID_VALUE:
+        glDeleteSync(sync);
+        DEBUG_GL_ERROR("glClientWaitSync failed");
+        return EGL_TEX_STATUS_ERROR;
+    }
+  }
+
+  *tex = parent->tex[parent->rIndex];
   return EGL_TEX_STATUS_OK;
 }
 
