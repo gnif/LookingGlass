@@ -674,7 +674,7 @@ static bool optRendererParse(struct Option * opt, const char * str)
   }
 
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-    if (strcasecmp(str, LG_Renderers[i]->get_name()) == 0)
+    if (strcasecmp(str, LG_Renderers[i]->getName()) == 0)
     {
       g_params.forceRenderer      = true;
       g_params.forceRendererIndex = i;
@@ -690,7 +690,7 @@ static StringList optRendererValues(struct Option * opt)
 
   // this typecast is safe as the stringlist doesn't own the values
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-    stringlist_push(sl, (char *)LG_Renderers[i]->get_name());
+    stringlist_push(sl, (char *)LG_Renderers[i]->getName());
 
   return sl;
 }
@@ -703,7 +703,7 @@ static char * optRendererToString(struct Option * opt)
   if (g_params.forceRendererIndex >= LG_RENDERER_COUNT)
     return NULL;
 
-  return strdup(LG_Renderers[g_params.forceRendererIndex]->get_name());
+  return strdup(LG_Renderers[g_params.forceRendererIndex]->getName());
 }
 
 static bool optPosParse(struct Option * opt, const char * str)

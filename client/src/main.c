@@ -147,7 +147,7 @@ static void preSwapCallback(void * udata)
 
 static int renderThread(void * unused)
 {
-  if (!RENDERER(render_startup, g_state.useDMA))
+  if (!RENDERER(renderStartup, g_state.useDMA))
   {
     g_state.state = APP_STATE_SHUTDOWN;
 
@@ -190,7 +190,7 @@ static int renderThread(void * unused)
           && !forceRender
           && !pending
           && !app_overlayNeedsRender()
-          && !RENDERER(needs_render))
+          && !RENDERER(needsRender))
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();
@@ -235,7 +235,7 @@ static int renderThread(void * unused)
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
       if (g_state.lgr)
-        RENDERER(on_resize, g_state.windowW, g_state.windowH,
+        RENDERER(onResize, g_state.windowW, g_state.windowH,
             g_state.windowScale, g_state.dstRect, g_params.winRotate);
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
@@ -337,7 +337,7 @@ static int cursorThread(void * unused)
         if (g_cursor.redraw && g_cursor.guest.valid)
         {
           g_cursor.redraw = false;
-          RENDERER(on_mouse_event,
+          RENDERER(onMouseEvent,
             g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
             g_cursor.guest.x,
             g_cursor.guest.y
@@ -400,7 +400,7 @@ static int cursorThread(void * unused)
       g_cursor.guest.hy = cursor->hy;
 
       const uint8_t * data = (const uint8_t *)(cursor + 1);
-      if (!RENDERER(on_mouse_shape,
+      if (!RENDERER(onMouseShape,
         cursorType,
         cursor->width,
         cursor->height,
@@ -433,7 +433,7 @@ static int cursorThread(void * unused)
 
     g_cursor.redraw = false;
 
-    RENDERER(on_mouse_event,
+    RENDERER(onMouseEvent,
       g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
       g_cursor.guest.x,
       g_cursor.guest.y
@@ -610,7 +610,7 @@ int main_frameThread(void * unused)
           frame->rotation);
 
       LG_LOCK(g_state.lgrLock);
-      if (!RENDERER(on_frame_format, lgrFormat))
+      if (!RENDERER(onFrameFormat, lgrFormat))
       {
         DEBUG_ERROR("renderer failed to configure format");
         g_state.state = APP_STATE_SHUTDOWN;
@@ -677,7 +677,7 @@ int main_frameThread(void * unused)
     }
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!RENDERER(on_frame, fb, g_state.useDMA ? dma->fd : -1,
+    if (!RENDERER(onFrame, fb, g_state.useDMA ? dma->fd : -1,
           frame->damageRects, frame->damageRectsCount))
     {
       lgmpClientMessageDone(queue);
@@ -717,7 +717,7 @@ int main_frameThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&queue);
-  RENDERER(on_restart);
+  RENDERER(onRestart);
 
   if (g_state.useDMA)
   {
@@ -799,7 +799,7 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
     return false;
   }
 
-  DEBUG_INFO("Using Renderer: %s", r->get_name());
+  DEBUG_INFO("Using Renderer: %s", r->getName());
   return true;
 }
 
@@ -1173,7 +1173,7 @@ restart:
 
     lgInit();
 
-    RENDERER(on_restart);
+    RENDERER(onRestart);
 
     DEBUG_INFO("Waiting for the host to restart...");
     goto restart;

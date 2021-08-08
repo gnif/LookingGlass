@@ -179,7 +179,7 @@ static bool draw_frame(struct Inst * this);
 static void draw_mouse(struct Inst * this);
 static void render_wait(struct Inst * this);
 
-const char * opengl_get_name(void)
+const char * opengl_getName(void)
 {
   return "OpenGL";
 }
@@ -261,14 +261,14 @@ void opengl_deinitialize(LG_Renderer * renderer)
   free(this);
 }
 
-void opengl_on_restart(LG_Renderer * renderer)
+void opengl_onRestart(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->waiting = true;
 }
 
-void opengl_on_resize(LG_Renderer * renderer, const int width, const int height, const double scale,
+void opengl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -310,7 +310,7 @@ void opengl_on_resize(LG_Renderer * renderer, const int width, const int height,
   ImGui_ImplOpenGL2_NewFrame();
 }
 
-bool opengl_on_mouse_shape(LG_Renderer * renderer, const LG_RendererCursor cursor,
+bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
     const int width, const int height, const int pitch, const uint8_t * data)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -337,7 +337,7 @@ bool opengl_on_mouse_shape(LG_Renderer * renderer, const LG_RendererCursor curso
   return true;
 }
 
-bool opengl_on_mouse_event(LG_Renderer * renderer, const bool visible, const int x, const int y)
+bool opengl_onMouseEvent(LG_Renderer * renderer, const bool visible, const int x, const int y)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -351,7 +351,7 @@ bool opengl_on_mouse_event(LG_Renderer * renderer, const bool visible, const int
   return false;
 }
 
-bool opengl_on_frame_format(LG_Renderer * renderer, const LG_RendererFormat format)
+bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -362,7 +362,7 @@ bool opengl_on_frame_format(LG_Renderer * renderer, const LG_RendererFormat form
   return true;
 }
 
-bool opengl_on_frame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
+bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damage, int damageCount)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -387,7 +387,7 @@ bool opengl_on_frame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaF
   return true;
 }
 
-bool opengl_render_startup(LG_Renderer * renderer, bool useDMA)
+bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -450,7 +450,7 @@ bool opengl_render_startup(LG_Renderer * renderer, bool useDMA)
   return true;
 }
 
-static bool opengl_needs_render(LG_Renderer * renderer)
+static bool opengl_needsRender(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   return !this->waitDone;
@@ -604,21 +604,21 @@ static void render_wait(struct Inst * this)
 
 const LG_RendererOps LGR_OpenGL =
 {
-  .get_name        = opengl_get_name,
-  .setup           = opengl_setup,
+  .getName       = opengl_getName,
+  .setup         = opengl_setup,
 
-  .create          = opengl_create,
-  .initialize      = opengl_initialize,
-  .deinitialize    = opengl_deinitialize,
-  .on_restart      = opengl_on_restart,
-  .on_resize       = opengl_on_resize,
-  .on_mouse_shape  = opengl_on_mouse_shape,
-  .on_mouse_event  = opengl_on_mouse_event,
-  .on_frame_format = opengl_on_frame_format,
-  .on_frame        = opengl_on_frame,
-  .render_startup  = opengl_render_startup,
-  .needs_render    = opengl_needs_render,
-  .render          = opengl_render
+  .create        = opengl_create,
+  .initialize    = opengl_initialize,
+  .deinitialize  = opengl_deinitialize,
+  .onRestart     = opengl_onRestart,
+  .onResize      = opengl_onResize,
+  .onMouseShape  = opengl_onMouseShape,
+  .onMouseEvent  = opengl_onMouseEvent,
+  .onFrameFormat = opengl_onFrameFormat,
+  .onFrame       = opengl_onFrame,
+  .renderStartup = opengl_renderStartup,
+  .needsRender   = opengl_needsRender,
+  .render        = opengl_render
 };
 
 static bool _check_gl_error(unsigned int line, const char * name)

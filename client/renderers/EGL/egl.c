@@ -184,7 +184,7 @@ static struct Option egl_options[] =
   {0}
 };
 
-static const char * egl_get_name(void)
+static const char * egl_getName(void)
 {
   return "EGL";
 }
@@ -286,7 +286,7 @@ static bool egl_supports(LG_Renderer * renderer, LG_RendererSupport flag)
   }
 }
 
-static void egl_on_restart(LG_Renderer * renderer)
+static void egl_onRestart(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -400,7 +400,7 @@ static void egl_update_scale_type(struct Inst * this)
     this->scaleType = EGL_DESKTOP_UPSCALE;
 }
 
-static void egl_on_resize(LG_Renderer * renderer, const int width, const int height, const double scale,
+static void egl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -447,7 +447,7 @@ static void egl_on_resize(LG_Renderer * renderer, const int width, const int hei
   egl_damage_resize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
 }
 
-static bool egl_on_mouse_shape(LG_Renderer * renderer, const LG_RendererCursor cursor,
+static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
     const int width, const int height,
     const int pitch, const uint8_t * data)
 {
@@ -466,7 +466,7 @@ static bool egl_on_mouse_shape(LG_Renderer * renderer, const LG_RendererCursor c
   return true;
 }
 
-static bool egl_on_mouse_event(LG_Renderer * renderer, const bool visible, const int x, const int y)
+static bool egl_onMouseEvent(LG_Renderer * renderer, const bool visible, const int x, const int y)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   this->cursorVisible = visible;
@@ -476,7 +476,7 @@ static bool egl_on_mouse_event(LG_Renderer * renderer, const bool visible, const
   return true;
 }
 
-static bool egl_on_frame_format(LG_Renderer * renderer, const LG_RendererFormat format)
+static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
@@ -509,7 +509,7 @@ static bool egl_on_frame_format(LG_Renderer * renderer, const LG_RendererFormat 
   return egl_desktop_setup(this->desktop, format);
 }
 
-static bool egl_on_frame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
+static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -624,7 +624,7 @@ static void egl_config_ui(void * opaque)
   egl_desktop_config_ui(this->desktop);
 }
 
-static bool egl_render_startup(LG_Renderer * renderer, bool useDMA)
+static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -818,7 +818,7 @@ static bool egl_render_startup(LG_Renderer * renderer, bool useDMA)
   return true;
 }
 
-static bool egl_needs_render(LG_Renderer * renderer)
+static bool egl_needsRender(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   return !this->waitDone;
@@ -1070,19 +1070,19 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
 struct LG_RendererOps LGR_EGL =
 {
-  .get_name        = egl_get_name,
-  .setup           = egl_setup,
-  .create          = egl_create,
-  .initialize      = egl_initialize,
-  .deinitialize    = egl_deinitialize,
-  .supports        = egl_supports,
-  .on_restart      = egl_on_restart,
-  .on_resize       = egl_on_resize,
-  .on_mouse_shape  = egl_on_mouse_shape,
-  .on_mouse_event  = egl_on_mouse_event,
-  .on_frame_format = egl_on_frame_format,
-  .on_frame        = egl_on_frame,
-  .render_startup  = egl_render_startup,
-  .needs_render    = egl_needs_render,
-  .render          = egl_render
+  .getName       = egl_getName,
+  .setup         = egl_setup,
+  .create        = egl_create,
+  .initialize    = egl_initialize,
+  .deinitialize  = egl_deinitialize,
+  .supports      = egl_supports,
+  .onRestart     = egl_onRestart,
+  .onResize      = egl_onResize,
+  .onMouseShape  = egl_onMouseShape,
+  .onMouseEvent  = egl_onMouseEvent,
+  .onFrameFormat = egl_onFrameFormat,
+  .onFrame       = egl_onFrame,
+  .renderStartup = egl_renderStartup,
+  .needsRender   = egl_needsRender,
+  .render        = egl_render
 };
