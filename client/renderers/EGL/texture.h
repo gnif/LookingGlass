@@ -29,17 +29,6 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-struct EGL_TextureOps;
-
-typedef struct EGL_Texture
-{
-  const struct EGL_TextureOps * ops;
-
-  // needed for dmabuf
-  size_t size;
-}
-EGL_Texture;
-
 typedef enum EGL_TexType
 {
   EGL_TEXTYPE_BUFFER,
@@ -105,6 +94,8 @@ typedef struct EGL_TexUpdate
 }
 EGL_TexUpdate;
 
+typedef struct EGL_Texture EGL_Texture;
+
 typedef struct EGL_TextureOps
 {
   /* allocate & initialize an EGL_Texture */
@@ -126,6 +117,14 @@ typedef struct EGL_TextureOps
   enum EGL_TexStatus (*bind)(EGL_Texture * texture);
 }
 EGL_TextureOps;
+
+struct EGL_Texture
+{
+  struct EGL_TextureOps ops;
+
+  // needed for dmabuf
+  size_t size;
+};
 
 bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type, bool streaming);

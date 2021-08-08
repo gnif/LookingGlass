@@ -22,6 +22,7 @@
 
 #include <stdbool.h>
 #include <assert.h>
+#include <string.h>
 #include "shader.h"
 #include "common/framebuffer.h"
 
@@ -64,13 +65,13 @@ bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
   if (!ops->init(texture, display))
     return false;
 
-  (*texture)->ops = ops;
+  memcpy(&(*texture)->ops, ops, sizeof(*ops));
   return true;
 }
 
 void egl_texture_free(EGL_Texture ** tex)
 {
-  (*tex)->ops->free(*tex);
+  (*tex)->ops.free(*tex);
   *tex = NULL;
 }
 
@@ -85,7 +86,7 @@ bool egl_textureSetup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
     .stride = stride
   };
   texture->size = height * stride;
-  return texture->ops->setup(texture, &setup);
+  return texture->ops.setup(texture, &setup);
 }
 
 bool egl_textureUpdate(EGL_Texture * texture, const uint8_t * buffer)
@@ -95,7 +96,7 @@ bool egl_textureUpdate(EGL_Texture * texture, const uint8_t * buffer)
     .type   = EGL_TEXTYPE_BUFFER,
     .buffer = buffer
   };
-  return texture->ops->update(texture, &update);
+  return texture->ops.update(texture, &update);
 }
 
 bool egl_textureUpdateFromFrame(EGL_Texture * texture,
@@ -109,7 +110,7 @@ bool egl_textureUpdateFromFrame(EGL_Texture * texture,
     .rects     = damageRects,
     .rectCount = damageRectsCount,
   };
-  return texture->ops->update(texture, &update);
+  return texture->ops.update(texture, &update);
 }
 
 bool egl_textureUpdateFromDMA(EGL_Texture * texture,
@@ -124,15 +125,15 @@ bool egl_textureUpdateFromDMA(EGL_Texture * texture,
   /* wait for completion */
   framebuffer_wait(frame, texture->size);
 
-  return texture->ops->update(texture, &update);
+  return texture->ops.update(texture, &update);
 }
 
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture)
 {
-  return texture->ops->process(texture);
+  return texture->ops.process(texture);
 }
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture)
 {
-  return texture->ops->bind(texture);
+  return texture->ops.bind(texture);
 }
