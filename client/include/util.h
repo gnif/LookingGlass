@@ -49,6 +49,8 @@ static inline double util_clamp(double x, double min, double max)
   return x;
 }
 
+bool util_initUIFonts(void);
+void util_freeUIFonts(void);
 char * util_getUIFont(const char * fontName);
 
 #endif

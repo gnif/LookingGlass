@@ -827,8 +827,11 @@ static int lg_run(void)
   g_state.io->BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
 
   g_state.windowScale = 1.0;
-  g_state.fontName    = util_getUIFont(g_params.uiFont);
-  DEBUG_INFO("Using font: %s", g_state.fontName);
+  if (util_initUIFonts())
+  {
+    g_state.fontName = util_getUIFont(g_params.uiFont);
+    DEBUG_INFO("Using font: %s", g_state.fontName);
+  }
 
   app_initOverlays();
 
@@ -1306,6 +1309,7 @@ int main(int argc, char * argv[])
 
   config_free();
 
+  util_freeUIFonts();
   cleanupCrashHandler();
   return ret;
 }

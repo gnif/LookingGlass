@@ -31,6 +31,8 @@
 #include <math.h>
 #include <fontconfig/fontconfig.h>
 
+static FcConfig * FontConfig = NULL;
+
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length)
 {
   FILE * fh = fopen(filename, "r");
@@ -259,19 +261,25 @@ int util_mergeOverlappingRects(FrameDamageRect * rects, int count)
   return o;
 }
 
-char * util_getUIFont(const char * fontName)
+bool util_initUIFonts(void)
 {
-  static FcConfig * fc = NULL;
-  char * ttf = NULL;
+  if (FontConfig)
+    return true;
 
-  if (!fc)
-    fc = FcInitLoadConfigAndFonts();
+  FontConfig = FcInitLoadConfigAndFonts();
 
-  if (!fc)
+  if (!FontConfig)
   {
     DEBUG_ERROR("FcInitLoadConfigAndFonts Failed");
-    return NULL;
+    return false;
   }
+
+  return true;
+}
+
+char * util_getUIFont(const char * fontName)
+{
+  char * ttf = NULL;
 
   FcPattern * pat = FcNameParse((const FcChar8*) fontName);
   if (!pat)
@@ -280,11 +288,11 @@ char * util_getUIFont(const char * fontName)
     return NULL;
   }
 
-  FcConfigSubstitute(fc, pat, FcMatchPattern);
+  FcConfigSubstitute(FontConfig, pat, FcMatchPattern);
   FcDefaultSubstitute(pat);
   FcResult result;
   FcChar8 * file = NULL;
-  FcPattern * match = FcFontMatch(fc, pat, &result);
+  FcPattern * match = FcFontMatch(FontConfig, pat, &result);
 
   if (!match)
   {
@@ -302,4 +310,14 @@ char * util_getUIFont(const char * fontName)
 fail_parse:
   FcPatternDestroy(pat);
   return ttf;
+}
+
+void util_freeUIFonts(void)
+{
+  if (!FontConfig)
+    return;
+
+  FcConfigDestroy(FontConfig);
+  FontConfig = NULL;
+  FcFini();
 }
