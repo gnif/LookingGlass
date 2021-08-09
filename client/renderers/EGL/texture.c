@@ -254,7 +254,7 @@ BindInfo;
 typedef struct BindData
 {
   GLuint sampler;
-  GLuint dimensions[0];
+  GLuint dimensions[];
 }
 BindData;
 
