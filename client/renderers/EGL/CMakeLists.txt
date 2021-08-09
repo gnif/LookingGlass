@@ -11,15 +11,22 @@ pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
 	wayland-egl
 )
 
+find_program(AWK gawk mawk original-awk awk)
+
+if(AWK MATCHES ".+-NOTFOUND")
+    message(FATAL_ERROR "FATAL: some known version of awk couldn't be found (${AWK}).")
+else()
+	message(STATUS "Using awk: ${AWK}")
+endif()
+
 include(MakeObject)
 function(build_shaders header_dir)
 	file(GLOB headers "${header_dir}/*.h")
-	message("${headers}")
 	set(EGL_SHADER_PROCESSED)
 	foreach(shader ${ARGN})
 		set(out_f "${CMAKE_CURRENT_BINARY_DIR}/${shader}")
 		add_custom_command(OUTPUT "${out_f}"
-			COMMAND awk -f "${CMAKE_CURRENT_SOURCE_DIR}/glsl.include.awk"
+			COMMAND "${AWK}" -f "${CMAKE_CURRENT_SOURCE_DIR}/glsl.include.awk"
 					"${CMAKE_CURRENT_SOURCE_DIR}/${shader}" > "${out_f}"
 			MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${shader}"
 			DEPENDS ${headers}
