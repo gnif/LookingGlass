@@ -70,6 +70,12 @@ static bool bool_parser(struct Option * opt, const char * str)
   return true;
 }
 
+static bool float_parser(struct Option * opt, const char * str)
+{
+  opt->value.x_float = atof(str);
+  return true;
+}
+
 static bool string_parser(struct Option * opt, const char * str)
 {
   free(opt->value.x_string);
@@ -88,6 +94,14 @@ static char * int_toString(struct Option * opt)
 static char * bool_toString(struct Option * opt)
 {
   return strdup(opt->value.x_bool ? "yes" : "no");
+}
+
+static char * float_toString(struct Option * opt)
+{
+  int len = snprintf(NULL, 0, "%f", opt->value.x_float);
+  char * ret = malloc(len + 1);
+  sprintf(ret, "%f", opt->value.x_float);
+  return ret;
 }
 
 static char * string_toString(struct Option * opt)
@@ -131,6 +145,10 @@ bool option_register(struct Option options[])
           o->parser = bool_parser;
           break;
 
+        case OPTION_TYPE_FLOAT:
+          o->parser = float_parser;
+          break;
+
         default:
           DEBUG_ERROR("BUG: Non int/string/bool option types must have a parser");
           continue;
@@ -151,6 +169,10 @@ bool option_register(struct Option options[])
 
         case OPTION_TYPE_BOOL:
           o->toString = bool_toString;
+          break;
+
+        case OPTION_TYPE_FLOAT:
+          o->toString = float_toString;
           break;
 
         default:
@@ -769,4 +791,16 @@ bool option_get_bool(const char * module, const char * name)
   }
   assert(o->type == OPTION_TYPE_BOOL);
   return o->value.x_bool;
+}
+
+bool option_get_float(const char * module, const char * name)
+{
+  struct Option * o = option_get(module, name);
+  if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
+    return false;
+  }
+  assert(o->type == OPTION_TYPE_FLOAT);
+  return o->value.x_float;
 }

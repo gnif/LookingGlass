@@ -30,6 +30,7 @@ enum OptionType
   OPTION_TYPE_INT,
   OPTION_TYPE_STRING,
   OPTION_TYPE_BOOL,
+  OPTION_TYPE_FLOAT,
   OPTION_TYPE_CUSTOM
 };
 
@@ -55,6 +56,7 @@ struct Option
     int    x_int;
     char * x_string;
     bool   x_bool;
+    float  x_float;
     void * x_custom;
   }
   value;
@@ -78,6 +80,7 @@ struct Option * option_get       (const char * module, const char * name);
 int             option_get_int   (const char * module, const char * name);
 const char *    option_get_string(const char * module, const char * name);
 bool            option_get_bool  (const char * module, const char * name);
+bool            option_get_float (const char * module, const char * name);
 
 // called by the main application to parse the command line arguments
 bool option_parse(int argc, char * argv[]);
