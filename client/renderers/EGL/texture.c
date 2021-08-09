@@ -87,9 +87,7 @@ bool egl_textureInit(EGL * egl, EGL_Texture ** texture_,
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
 
-  this->textures = ringbuffer_new(8, sizeof(GLuint));
   this->scale = 1.0f;
-
   return true;
 }
 
@@ -110,10 +108,10 @@ void egl_textureFree(EGL_Texture ** tex)
     }
     ll_free(this->render);
     egl_modelFree(&this->model);
+    ringbuffer_free(&this->textures);
   }
 
   glDeleteSamplers(1, &this->sampler);
-  ringbuffer_free(&this->textures);
 
   this->ops.free(this);
   *tex = NULL;
@@ -334,6 +332,7 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
     this->render = ll_new();
     egl_modelInit(&this->model);
     egl_modelSetDefault(this->model, false);
+    this->textures = ringbuffer_new(8, sizeof(GLuint));
   }
 
   RenderStep * step = calloc(1, sizeof(*step));
