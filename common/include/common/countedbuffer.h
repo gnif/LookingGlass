@@ -23,14 +23,16 @@
 
 #include <stddef.h>
 
-struct CountedBuffer {
+typedef struct CountedBuffer
+{
   _Atomic(size_t) refs;
   size_t size;
   char data[];
-};
+}
+CountedBuffer;
 
 struct CountedBuffer * countedBufferNew(size_t size);
-void countedBufferAddRef(struct CountedBuffer * buffer);
-void countedBufferRelease(struct CountedBuffer ** buffer);
+void countedBufferAddRef(CountedBuffer * buffer);
+void countedBufferRelease(CountedBuffer ** buffer);
 
 #endif
