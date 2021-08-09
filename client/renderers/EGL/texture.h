@@ -176,4 +176,6 @@ PostProcessHandle egl_textureAddFilter(EGL_Texture * texture,
 
 void egl_textureEnableFilter(PostProcessHandle * handle, bool enable);
 
+void egl_textureInvalidate(EGL_Texture * texture);
+
 float egl_textureGetScale(EGL_Texture * texture);

@@ -266,12 +266,14 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
 
+  bool invalidateCAS = false;
   bool cas = desktop->ffxCASEnable;
   igCheckbox("AMD FidelityFX CAS", &cas);
   if (cas != desktop->ffxCASEnable)
   {
     desktop->ffxCASEnable = cas;
     egl_textureEnableFilter(desktop->ffxCASHandle, cas);
+    invalidateCAS = true;
   }
 
   float sharpness = desktop->ffxUniform.f[0];
@@ -286,6 +288,13 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   {
     desktop->ffxUniform.f[0] = sharpness;
     egl_shaderSetUniforms(desktop->ffxCAS, &desktop->ffxUniform, 1);
+    invalidateCAS = true;
+  }
+
+  if (invalidateCAS)
+  {
+    egl_textureInvalidate(desktop->texture);
+    app_invalidateWindow(true);
   }
 }
 

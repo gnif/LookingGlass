@@ -39,6 +39,8 @@ extern const EGL_TextureOps EGL_TextureDMABUF;
 
 typedef struct RenderStep
 {
+  EGL_Texture *owner;
+
   bool enabled;
   GLuint fb;
   GLuint tex;
@@ -403,6 +405,7 @@ PostProcessHandle egl_textureAddFilter(EGL_Texture * this, EGL_Shader * shader,
 
   RenderStep * step = calloc(1, sizeof(*step));
   glGenTextures(1, &step->tex);
+  step->owner   = this;
   step->shader  = shader;
   step->scale   = outputScale;
   step->uInRes  = egl_shaderGetUniform(shader, "uInRes" );
@@ -426,7 +429,16 @@ PostProcessHandle egl_textureAddFilter(EGL_Texture * this, EGL_Shader * shader,
 void egl_textureEnableFilter(PostProcessHandle * handle, bool enable)
 {
   RenderStep * step = (RenderStep *)handle;
+  if (step->enabled == enable)
+    return;
+
   step->enabled = enable;
+  egl_textureInvalidate(step->owner);
+}
+
+void egl_textureInvalidate(EGL_Texture * texture)
+{
+  texture->postProcessed = false;
 }
 
 float egl_textureGetScale(EGL_Texture * this)
