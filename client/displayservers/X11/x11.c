@@ -84,25 +84,74 @@ static void x11XPresentEvent(XGenericEventCookie *cookie);
 
 static void x11DoPresent(void)
 {
-  XPresentPixmap(
-    x11.display,
-    x11.window,
-    x11.presentPixmap,
-    x11.presentSerial++,
-    x11.presentRegion, // valid
-    x11.presentRegion, // update
-    0,                 // x_off,
-    0,                 // y_off,
-    None,              // target_crtc
-    None,              // wait_fence
-    None,              // idle_fence
-    PresentOptionNone, // options
-    0,                 // target_msc,
-    0,                 // divisor,
-    0,                 // remainder,
-    NULL,              // notifies
-    0                  // nnotifies
-  );
+  static bool startup = true;
+  if (startup)
+  {
+    XPresentPixmap(
+      x11.display,
+      x11.window,
+      x11.presentPixmap,
+      x11.presentSerial++,
+      x11.presentRegion, // valid
+      x11.presentRegion, // update
+      0,                 // x_off,
+      0,                 // y_off,
+      None,              // target_crtc
+      None,              // wait_fence
+      None,              // idle_fence
+      PresentOptionNone, // options
+      0,                 // target_msc,
+      0,                 // divisor,
+      0,                 // remainder,
+      NULL,              // notifies
+      0                  // nnotifies
+    );
+    startup = false;
+    return;
+  }
+
+  static bool first   = true;
+  static uint64_t lastMsc = 0;
+  uint64_t msc = atomic_load(&x11.presentMsc);
+
+  uint64_t refill;
+  if (!first)
+    refill = 50 - (lastMsc - msc);
+  else
+  {
+    refill  = 50;
+    first   = false;
+    lastMsc = msc;
+  }
+
+  if (refill < 25)
+    return;
+
+  if (refill == 0)
+    lastMsc = msc;
+
+  for(int i = 0; i < refill; ++i)
+  {
+    XPresentPixmap(
+      x11.display,
+      x11.window,
+      x11.presentPixmap,
+      x11.presentSerial++,
+      x11.presentRegion, // valid
+      x11.presentRegion, // update
+      0,                 // x_off,
+      0,                 // y_off,
+      None,              // target_crtc
+      None,              // wait_fence
+      None,              // idle_fence
+      PresentOptionNone, // options
+      ++lastMsc,         // target_msc,
+      0,                 // divisor,
+      0,                 // remainder,
+      NULL,              // notifies
+      0                  // nnotifies
+    );
+  }
 }
 
 static void x11Setup(void)
