@@ -82,6 +82,7 @@ struct EGL_Desktop
   EGL_Shader * ffxCAS;
   bool enableCAS;
   PostProcessHandle ffxCASHandle;
+  EGL_Uniform ffxUniform;
 };
 
 // forwards
@@ -176,6 +177,11 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
       b_shader_basic_vert  , b_shader_basic_vert_size,
       b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size);
 
+  desktop->ffxUniform.type     = EGL_UNIFORM_TYPE_1F;
+  desktop->ffxUniform.location =
+    egl_shaderGetUniform(desktop->ffxCAS, "uSharpness");
+  desktop->ffxUniform.f[0]     = 0.0f;
+
   setupFilters(desktop);
 
   return true;
@@ -262,6 +268,19 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   {
     desktop->enableCAS = cas;
     egl_textureEnableFilter(desktop->ffxCASHandle, cas);
+  }
+
+  float sharpness = desktop->ffxUniform.f[0];
+  igText("Sharpness:");
+  igSameLine(0.0f, -1.0f);
+  igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() - igGetStyle()->WindowPadding.x);
+  igSliderFloat("##casSharpness", &sharpness, 0.0f, 1.0f, NULL, 0);
+  igPopItemWidth();
+
+  if (sharpness != desktop->ffxUniform.f[0])
+  {
+    desktop->ffxUniform.f[0] = sharpness;
+    egl_shaderSetUniforms(desktop->ffxCAS, &desktop->ffxUniform, 1);
   }
 }
 

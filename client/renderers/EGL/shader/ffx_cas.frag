@@ -8,6 +8,7 @@ out vec4  fragColor;
 uniform sampler2D iChannel0;
 uniform uvec2     uInRes[8];
 uniform uvec2     uOutRes;
+uniform float     uSharpness;
 
 // the following are not available until verion 400 or later
 // so we implement our own versions of them
@@ -51,12 +52,11 @@ void main()
   vec4 color;
   vec2 inputResolution  = vec2(uInRes[0]);
   vec2 outputResolution = vec2(uOutRes);
-  float sharpnessTuning = 1.0f;
 
   uvec4 const0;
   uvec4 const1;
 
-  CasSetup(const0, const1, sharpnessTuning,
+  CasSetup(const0, const1, uSharpness,
     inputResolution.x, inputResolution.y, 
     outputResolution.x, outputResolution.y);
 
