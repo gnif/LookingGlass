@@ -88,7 +88,6 @@ bool egl_textureInit(EGL * egl, EGL_Texture ** texture_,
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
 
   this->textures = ringbuffer_new(8, sizeof(GLuint));
-  this->scale = 1.0f;
 
   return true;
 }
