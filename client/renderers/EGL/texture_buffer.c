@@ -38,9 +38,6 @@ static void egl_texBuffer_cleanup(TextureBuffer * this)
   if (this->tex[0])
     glDeleteTextures(this->texCount, this->tex);
 
-  if (this->sampler)
-    glDeleteSamplers(1, &this->sampler);
-
   if (this->sync)
   {
     glDeleteSync(this->sync);
@@ -88,27 +85,18 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
 
   egl_texBuffer_cleanup(this);
 
-  if (!egl_texUtilGetFormat(setup, &this->format))
-    return false;
-
-  glGenSamplers(1, &this->sampler);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-
   glGenTextures(this->texCount, this->tex);
   for(int i = 0; i < this->texCount; ++i)
   {
     glBindTexture(GL_TEXTURE_2D, this->tex[i]);
     glTexImage2D(GL_TEXTURE_2D,
         0,
-        this->format.intFormat,
-        this->format.width,
-        this->format.height,
+        texture->format.intFormat,
+        texture->format.width,
+        texture->format.height,
         0,
-        this->format.format,
-        this->format.dataType,
+        texture->format.format,
+        texture->format.dataType,
         NULL);
   }
 
@@ -118,19 +106,19 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   return true;
 }
 
-static bool egl_texBuffer_update(EGL_Texture * texture, const EGL_TexUpdate * update)
+static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
   assert(update->type == EGL_TEXTYPE_BUFFER);
 
   glBindTexture(GL_TEXTURE_2D, this->tex[0]);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.pitch);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.pitch);
   glTexSubImage2D(GL_TEXTURE_2D,
       0, 0, 0,
-      this->format.width,
-      this->format.height,
-      this->format.format,
-      this->format.dataType,
+      texture->format.width,
+      texture->format.height,
+      texture->format.format,
+      texture->format.dataType,
       update->buffer);
   glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -142,15 +130,11 @@ EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture)
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus egl_texBufferBind(EGL_Texture * texture)
+EGL_TexStatus egl_texBufferGet(EGL_Texture * texture, GLuint * tex)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
-
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, this->tex[0]);
-  glBindSampler(0, this->sampler);
-
-  return true;
+  *tex = this->tex[0];
+  return EGL_TEX_STATUS_OK;
 }
 
 // streaming functions
@@ -173,7 +157,7 @@ bool egl_texBufferStreamSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
     return false;
 
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
-  return egl_texUtilGenBuffers(&this->format, this->buf, this->texCount);
+  return egl_texUtilGenBuffers(&texture->format, this->buf, this->texCount);
 }
 
 static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
@@ -184,7 +168,7 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
 
   LG_LOCK(this->copyLock);
   memcpy(this->buf[this->bufIndex].map, update->buffer,
-      this->format.bufferSize);
+      texture->format.bufferSize);
   this->buf[this->bufIndex].updated = true;
   LG_UNLOCK(this->copyLock);
 
@@ -215,13 +199,13 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.pitch);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.pitch);
     glTexSubImage2D(GL_TEXTURE_2D,
         0, 0, 0,
-        this->format.width,
-        this->format.height,
-        this->format.format,
-        this->format.dataType,
+        texture->format.width,
+        texture->format.height,
+        texture->format.format,
+        texture->format.dataType,
         (const void *)0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -233,7 +217,7 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus egl_texBufferStreamBind(EGL_Texture * texture)
+EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
@@ -262,10 +246,7 @@ EGL_TexStatus egl_texBufferStreamBind(EGL_Texture * texture)
     }
   }
 
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, this->tex[this->rIndex]);
-  glBindSampler(0, this->sampler);
-
+  *tex = this->tex[this->rIndex];
   return EGL_TEX_STATUS_OK;
 }
 
@@ -274,9 +255,9 @@ const EGL_TextureOps EGL_TextureBuffer =
   .init        = egl_texBufferInit,
   .free        = egl_texBufferFree,
   .setup       = egl_texBufferSetup,
-  .update      = egl_texBuffer_update,
+  .update      = egl_texBufferUpdate,
   .process     = egl_texBufferProcess,
-  .bind        = egl_texBufferBind
+  .get         = egl_texBufferGet
 };
 
 const EGL_TextureOps EGL_TextureBufferStream =
@@ -286,5 +267,5 @@ const EGL_TextureOps EGL_TextureBufferStream =
   .setup       = egl_texBufferStreamSetup,
   .update      = egl_texBufferStreamUpdate,
   .process     = egl_texBufferStreamProcess,
-  .bind        = egl_texBufferStreamBind
+  .get         = egl_texBufferStreamGet
 };

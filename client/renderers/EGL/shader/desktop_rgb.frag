@@ -13,7 +13,6 @@ uniform sampler2D sampler1;
 uniform       int   scaleAlgo;
 uniform highp vec2  size;
 
-uniform       int   nv;
 uniform highp float nvGain;
 uniform       int   cbMode;
 
@@ -67,7 +66,7 @@ void main()
     color.b += (error.r * 0.7) + (error.b * 1.0);
   }
 
-  if (nv == 1)
+  if (nvGain > 0.0)
   {
     highp float lumi = 1.0 - (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b);
     color *= 1.0 + lumi;

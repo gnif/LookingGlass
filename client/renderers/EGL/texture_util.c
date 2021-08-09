@@ -18,6 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include "texture.h"
 #include "texture_util.h"
 
 #include <EGL/egl.h>

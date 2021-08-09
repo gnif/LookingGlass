@@ -21,13 +21,21 @@
 #pragma once
 
 #include <stdbool.h>
+#include "egl.h"
 #include "shader.h"
+#include "model.h"
 #include "common/framebuffer.h"
+#include "common/ringbuffer.h"
 
 #include "util.h"
+#include "ll.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+
+#include "texture_util.h"
+
+typedef struct EGL_Model EGL_Model;
 
 typedef enum EGL_TexType
 {
@@ -113,20 +121,32 @@ typedef struct EGL_TextureOps
   /* called from a background job to prepare the texture for use before bind */
   enum EGL_TexStatus (*process)(EGL_Texture * texture);
 
-  /* bind the texture for use */
-  enum EGL_TexStatus (*bind)(EGL_Texture * texture);
+  /* get the texture for use */
+  enum EGL_TexStatus (*get)(EGL_Texture * texture, GLuint * tex);
 }
 EGL_TextureOps;
 
 struct EGL_Texture
 {
   struct EGL_TextureOps ops;
+  EGL * egl;
+  GLuint sampler;
+  RingBuffer textures;
+
+  EGL_TexFormat format;
+  bool formatValid;
 
   // needed for dmabuf
   size_t size;
+
+  // for applying shaders
+  struct ll * render;
+  _Atomic(bool) updated;
+  bool postProcessed;
+  EGL_Model * model;
 };
 
-bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
+bool egl_textureInit(EGL * egl, EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type, bool streaming);
 void egl_textureFree(EGL_Texture ** tex);
 
@@ -145,3 +165,5 @@ bool egl_textureUpdateFromDMA(EGL_Texture * texture,
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
+
+enum EGL_TexStatus egl_textureAddShader(EGL_Texture * texture, EGL_Shader * shader);

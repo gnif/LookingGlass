@@ -80,7 +80,7 @@ bool egl_splashInit(EGL_Splash ** splash)
     return false;
   }
 
-  egl_modelSetDefault((*splash)->bg);
+  egl_modelSetDefault((*splash)->bg, false);
 
   if (!egl_shaderInit(&(*splash)->logoShader))
   {

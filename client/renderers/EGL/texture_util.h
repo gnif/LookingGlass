@@ -22,6 +22,8 @@
 
 #include "texture.h"
 
+typedef struct EGL_TexSetup EGL_TexSetup;
+
 typedef struct EGL_TexFormat
 {
   size_t       bpp;

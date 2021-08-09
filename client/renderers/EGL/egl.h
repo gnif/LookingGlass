@@ -20,21 +20,5 @@
 
 #pragma once
 
-#include <stdbool.h>
-#include "shader.h"
-#include "texture.h"
-
-#include <GLES3/gl3.h>
-
-typedef struct EGL_Model EGL_Model;
-typedef struct EGL_Texture EGL_Texture;
-
-bool egl_modelInit(EGL_Model ** model);
-void egl_modelFree(EGL_Model ** model);
-
-void egl_modelSetDefault  (EGL_Model * model, bool flipped);
-void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count);
-void egl_modelSetShader   (EGL_Model * model, EGL_Shader  * shader);
-void egl_modelSetTexture  (EGL_Model * model, EGL_Texture * texture);
-
-void egl_modelRender(EGL_Model * model);
+typedef struct Inst EGL;
+void egl_resetViewport(EGL * egl);

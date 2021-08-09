@@ -80,11 +80,11 @@ struct EGL_Cursor
   struct EGL_Model * model;
 };
 
-static bool egl_cursor_tex_init(struct CursorTex * t,
+static bool cursorTexInit(EGL * egl, struct CursorTex * t,
     const char * vertex_code  , size_t vertex_size,
     const char * fragment_code, size_t fragment_size)
 {
-  if (!egl_textureInit(&t->texture, NULL, EGL_TEXTYPE_BUFFER, false))
+  if (!egl_textureInit(egl, &t->texture, NULL, EGL_TEXTYPE_BUFFER, false))
   {
     DEBUG_ERROR("Failed to initialize the cursor texture");
     return false;
@@ -110,8 +110,8 @@ static bool egl_cursor_tex_init(struct CursorTex * t,
   return true;
 }
 
-static inline void egl_cursor_tex_uniforms(EGL_Cursor * cursor, struct CursorTex * t,
-    bool mono, float x, float y, float w, float h)
+static inline void setCursorTexUniforms(EGL_Cursor * cursor,
+    struct CursorTex * t, bool mono, float x, float y, float w, float h)
 {
   if (mono)
   {
@@ -127,13 +127,13 @@ static inline void egl_cursor_tex_uniforms(EGL_Cursor * cursor, struct CursorTex
   }
 }
 
-static void egl_cursor_tex_free(struct CursorTex * t)
+static void cursorTexFree(struct CursorTex * t)
 {
   egl_textureFree(&t->texture);
   egl_shaderFree (&t->shader );
 };
 
-bool egl_cursorInit(EGL_Cursor ** cursor)
+bool egl_cursorInit(EGL * egl, EGL_Cursor ** cursor)
 {
   *cursor = (EGL_Cursor *)malloc(sizeof(EGL_Cursor));
   if (!*cursor)
@@ -145,12 +145,12 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   memset(*cursor, 0, sizeof(EGL_Cursor));
   LG_LOCK_INIT((*cursor)->lock);
 
-  if (!egl_cursor_tex_init(&(*cursor)->norm,
+  if (!cursorTexInit(egl, &(*cursor)->norm,
       b_shader_cursor_vert    , b_shader_cursor_vert_size,
       b_shader_cursor_rgb_frag, b_shader_cursor_rgb_frag_size))
     return false;
 
-  if (!egl_cursor_tex_init(&(*cursor)->mono,
+  if (!cursorTexInit(egl, &(*cursor)->mono,
       b_shader_cursor_vert     , b_shader_cursor_vert_size,
       b_shader_cursor_mono_frag, b_shader_cursor_mono_frag_size))
     return false;
@@ -161,7 +161,7 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
     return false;
   }
 
-  egl_modelSetDefault((*cursor)->model);
+  egl_modelSetDefault((*cursor)->model, true);
 
   (*cursor)->cbMode = option_get_int("egl", "cbMode");
 
@@ -182,8 +182,8 @@ void egl_cursorFree(EGL_Cursor ** cursor)
   if ((*cursor)->data)
     free((*cursor)->data);
 
-  egl_cursor_tex_free(&(*cursor)->norm);
-  egl_cursor_tex_free(&(*cursor)->mono);
+  cursorTexFree(&(*cursor)->norm);
+  cursorTexFree(&(*cursor)->mono);
   egl_modelFree(&(*cursor)->model);
 
   free(*cursor);
@@ -342,13 +342,13 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_MONOCHROME:
     {
       egl_shaderUse(cursor->norm.shader);
-      egl_cursor_tex_uniforms(cursor, &cursor->norm, true, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->norm, true, pos.x, pos.y, size.w, size.h);
       glBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
       egl_shaderUse(cursor->mono.shader);
-      egl_cursor_tex_uniforms(cursor, &cursor->mono, true, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->mono, true, pos.x, pos.y, size.w, size.h);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
       egl_modelRender(cursor->model);
@@ -358,7 +358,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_COLOR:
     {
       egl_shaderUse(cursor->norm.shader);
-      egl_cursor_tex_uniforms(cursor, &cursor->norm, false, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y, size.w, size.h);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelRender(cursor->model);
       break;
@@ -367,7 +367,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_MASKED_COLOR:
     {
       egl_shaderUse(cursor->mono.shader);
-      egl_cursor_tex_uniforms(cursor, &cursor->mono, false, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y, size.w, size.h);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelRender(cursor->model);
       break;

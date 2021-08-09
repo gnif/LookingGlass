@@ -31,7 +31,6 @@ typedef struct TextureBuffer
   EGL_Texture base;
   bool free;
 
-  EGL_TexFormat format;
   int           texCount;
   GLuint        tex[EGL_TEX_BUFFER_MAX];
   GLuint        sampler;
@@ -48,10 +47,10 @@ bool egl_texBufferInit(EGL_Texture ** texture_, EGLDisplay * display);
 void egl_texBufferFree(EGL_Texture * texture_);
 bool egl_texBufferSetup(EGL_Texture * texture_, const EGL_TexSetup * setup);
 EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture_);
-EGL_TexStatus egl_texBufferBind(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferGet(EGL_Texture * texture_, GLuint * tex);
 
 bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGLDisplay * display);
 bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
 EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_);
-EGL_TexStatus egl_texBufferStreamBind(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture_, GLuint * tex);

@@ -22,7 +22,7 @@
 
 #include <stdbool.h>
 
-#include "interface/renderer.h"
+#include "egl.h"
 #include "desktop_rects.h"
 
 typedef struct EGL_Desktop EGL_Desktop;
@@ -37,7 +37,8 @@ enum EGL_DesktopScaleType
 struct Option;
 bool egl_desktopScaleValidate(struct Option * opt, const char ** error);
 
-bool egl_desktopInit(EGL_Desktop ** desktop, EGLDisplay * display, bool useDMA, int maxRects);
+bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
+    bool useDMA, int maxRects);
 void egl_desktopFree(EGL_Desktop ** desktop);
 
 void egl_desktopConfigUI(EGL_Desktop * desktop);

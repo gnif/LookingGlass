@@ -93,7 +93,7 @@ void egl_modelFree(EGL_Model ** model)
   *model = NULL;
 }
 
-void egl_modelSetDefault(EGL_Model * model)
+void egl_modelSetDefault(EGL_Model * model, bool flipped)
 {
   static const GLfloat square[] =
   {
@@ -103,7 +103,15 @@ void egl_modelSetDefault(EGL_Model * model)
      1.0f,  1.0f, 0.0f
   };
 
-  static const GLfloat uvs[] =
+  static const GLfloat uvsNormal[] =
+  {
+    0.0f, 0.0f,
+    1.0f, 0.0f,
+    0.0f, 1.0f,
+    1.0f, 1.0f
+  };
+
+  static const GLfloat uvsFlipped[] =
   {
     0.0f, 1.0f,
     1.0f, 1.0f,
@@ -111,7 +119,7 @@ void egl_modelSetDefault(EGL_Model * model)
     1.0f, 0.0f
   };
 
-  egl_modelAddVerts(model, square, uvs, 4);
+  egl_modelAddVerts(model, square, flipped ? uvsFlipped : uvsNormal, 4);
 }
 
 void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count)

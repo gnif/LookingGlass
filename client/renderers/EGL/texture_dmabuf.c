@@ -99,12 +99,12 @@ static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup
   glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
   glTexImage2D(GL_TEXTURE_2D,
       0,
-      parent->format.intFormat,
-      parent->format.width,
-      parent->format.height,
+      texture->format.intFormat,
+      texture->format.width,
+      texture->format.height,
       0,
-      parent->format.format,
-      parent->format.dataType,
+      texture->format.format,
+      texture->format.dataType,
       NULL);
 
   return true;
@@ -130,12 +130,12 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
   {
     EGLAttrib const attribs[] =
     {
-      EGL_WIDTH                    , parent->format.width,
-      EGL_HEIGHT                   , parent->format.height,
-      EGL_LINUX_DRM_FOURCC_EXT     , parent->format.fourcc,
+      EGL_WIDTH                    , texture->format.width,
+      EGL_HEIGHT                   , texture->format.height,
+      EGL_LINUX_DRM_FOURCC_EXT     , texture->format.fourcc,
       EGL_DMA_BUF_PLANE0_FD_EXT    , update->dmaFD,
       EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-      EGL_DMA_BUF_PLANE0_PITCH_EXT , parent->format.stride,
+      EGL_DMA_BUF_PLANE0_PITCH_EXT , texture->format.stride,
       EGL_NONE                     , EGL_NONE
     };
 
@@ -182,14 +182,11 @@ static EGL_TexStatus egl_texDMABUFProcess(EGL_Texture * texture)
   return EGL_TEX_STATUS_OK;
 }
 
-static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
+static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
 
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, parent->tex[0]);
-  glBindSampler(0, parent->sampler);
-
+  *tex = parent->tex[0];
   return EGL_TEX_STATUS_OK;
 }
 
@@ -200,5 +197,5 @@ EGL_TextureOps EGL_TextureDMABUF =
   .setup       = egl_texDMABUFSetup,
   .update      = egl_texDMABUFUpdate,
   .process     = egl_texDMABUFProcess,
-  .bind        = egl_texDMABUFBind
+  .get         = egl_texDMABUFGet
 };

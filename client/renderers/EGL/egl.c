@@ -400,6 +400,11 @@ static void egl_update_scale_type(struct Inst * this)
     this->scaleType = EGL_DESKTOP_UPSCALE;
 }
 
+void egl_resetViewport(EGL * this)
+{
+  glViewport(0, 0, this->width, this->height);
+}
+
 static void egl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
@@ -782,13 +787,13 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   eglSwapInterval(this->display, this->opt.vsync ? 1 : 0);
 
-  if (!egl_desktopInit(&this->desktop, this->display, useDMA, MAX_ACCUMULATED_DAMAGE))
+  if (!egl_desktopInit(this, &this->desktop, this->display, useDMA, MAX_ACCUMULATED_DAMAGE))
   {
     DEBUG_ERROR("Failed to initialize the desktop");
     return false;
   }
 
-  if (!egl_cursorInit(&this->cursor))
+  if (!egl_cursorInit(this, &this->cursor))
   {
     DEBUG_ERROR("Failed to initialize the cursor");
     return false;

@@ -85,11 +85,11 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
     framebuffer_read(
       update->frame,
       parent->buf[parent->bufIndex].map,
-      parent->format.stride,
-      parent->format.height,
-      parent->format.width,
-      parent->format.bpp,
-      parent->format.stride
+      texture->format.stride,
+      texture->format.height,
+      texture->format.width,
+      texture->format.bpp,
+      texture->format.stride
     );
   else
   {
@@ -100,10 +100,10 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
       damage->rects,
       damage->count,
       parent->buf[parent->bufIndex].map,
-      parent->format.stride,
-      parent->format.height,
+      texture->format.stride,
+      texture->format.height,
       update->frame,
-      parent->format.stride
+      texture->format.stride
     );
   }
 
@@ -132,10 +132,10 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 
 EGL_TextureOps EGL_TextureFrameBuffer =
 {
-  .init        = egl_texFBInit,
-  .free        = egl_texFBFree,
-  .setup       = egl_texBufferStreamSetup,
-  .update      = egl_texFBUpdate,
-  .process     = egl_texBufferStreamProcess,
-  .bind        = egl_texBufferStreamBind
+  .init    = egl_texFBInit,
+  .free    = egl_texFBFree,
+  .setup   = egl_texBufferStreamSetup,
+  .update  = egl_texFBUpdate,
+  .process = egl_texBufferStreamProcess,
+  .get     = egl_texBufferStreamGet
 };

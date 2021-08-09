@@ -22,6 +22,7 @@
 
 #include <stdbool.h>
 
+#include "egl.h"
 #include "interface/renderer.h"
 
 typedef struct EGL_Cursor EGL_Cursor;
@@ -31,7 +32,7 @@ struct CursorState {
   struct Rect rect;
 };
 
-bool egl_cursorInit(EGL_Cursor ** cursor);
+bool egl_cursorInit(EGL * egl, EGL_Cursor ** cursor);
 void egl_cursorFree(EGL_Cursor ** cursor);
 
 bool egl_cursorSetShape(

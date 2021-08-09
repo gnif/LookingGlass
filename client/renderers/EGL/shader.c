@@ -30,31 +30,38 @@ struct EGL_Shader
 {
   bool   hasShader;
   GLuint shader;
+
+  EGL_Uniform * uniforms;
+  int           uniformCount;
+  int           uniformUsed;
 };
 
 bool egl_shaderInit(EGL_Shader ** this)
 {
-  *this = (EGL_Shader *)malloc(sizeof(EGL_Shader));
+  *this = (EGL_Shader *)calloc(1, sizeof(EGL_Shader));
   if (!*this)
   {
     DEBUG_ERROR("Failed to malloc EGL_Shader");
     return false;
   }
 
-  memset(*this, 0, sizeof(EGL_Shader));
   return true;
 }
 
-void egl_shaderFree(EGL_Shader ** this)
+void egl_shaderFree(EGL_Shader ** shader)
 {
-  if (!*this)
+  EGL_Shader * this = *shader;
+  if (!this)
     return;
 
-  if ((*this)->hasShader)
-    glDeleteProgram((*this)->shader);
+  if (this->hasShader)
+    glDeleteProgram(this->shader);
 
-  free(*this);
-  *this = NULL;
+  egl_shaderFreeUniforms(this);
+  free(this->uniforms);
+
+  free(this);
+  *shader = NULL;
 }
 
 bool egl_shaderLoad(EGL_Shader * this, const char * vertex_file, const char * fragment_file)
@@ -187,12 +194,277 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
   return true;
 }
 
+void egl_shaderSetUniforms(EGL_Shader * this, EGL_Uniform * uniforms, int count)
+{
+  egl_shaderFreeUniforms(this);
+  if (count > this->uniformCount)
+  {
+    free(this->uniforms);
+    this->uniforms = malloc(sizeof(*this->uniforms) * count);
+    this->uniformCount = count;
+  }
+
+  this->uniformUsed = count;
+  memcpy(this->uniforms, uniforms, sizeof(*this->uniforms) * count);
+
+  for(int i = 0; i < this->uniformUsed; ++i)
+  {
+    switch(this->uniforms[i].type)
+    {
+      case EGL_UNIFORM_TYPE_1FV:
+      case EGL_UNIFORM_TYPE_2FV:
+      case EGL_UNIFORM_TYPE_3FV:
+      case EGL_UNIFORM_TYPE_4FV:
+      case EGL_UNIFORM_TYPE_1IV:
+      case EGL_UNIFORM_TYPE_2IV:
+      case EGL_UNIFORM_TYPE_3IV:
+      case EGL_UNIFORM_TYPE_4IV:
+      case EGL_UNIFORM_TYPE_1UIV:
+      case EGL_UNIFORM_TYPE_2UIV:
+      case EGL_UNIFORM_TYPE_3UIV:
+      case EGL_UNIFORM_TYPE_4UIV:
+        countedBufferAddRef(this->uniforms[i].v);
+        break;
+
+      case EGL_UNIFORM_TYPE_M2FV:
+      case EGL_UNIFORM_TYPE_M3FV:
+      case EGL_UNIFORM_TYPE_M4FV:
+      case EGL_UNIFORM_TYPE_M2x3FV:
+      case EGL_UNIFORM_TYPE_M3x2FV:
+      case EGL_UNIFORM_TYPE_M2x4FV:
+      case EGL_UNIFORM_TYPE_M4x2FV:
+      case EGL_UNIFORM_TYPE_M3x4FV:
+      case EGL_UNIFORM_TYPE_M4x3FV:
+        countedBufferAddRef(this->uniforms[i].m.v);
+        break;
+
+      default:
+        break;
+    }
+  }
+};
+
+void egl_shaderFreeUniforms(EGL_Shader * this)
+{
+  for(int i = 0; i < this->uniformUsed; ++i)
+  {
+    switch(this->uniforms[i].type)
+    {
+      case EGL_UNIFORM_TYPE_1FV:
+      case EGL_UNIFORM_TYPE_2FV:
+      case EGL_UNIFORM_TYPE_3FV:
+      case EGL_UNIFORM_TYPE_4FV:
+      case EGL_UNIFORM_TYPE_1IV:
+      case EGL_UNIFORM_TYPE_2IV:
+      case EGL_UNIFORM_TYPE_3IV:
+      case EGL_UNIFORM_TYPE_4IV:
+      case EGL_UNIFORM_TYPE_1UIV:
+      case EGL_UNIFORM_TYPE_2UIV:
+      case EGL_UNIFORM_TYPE_3UIV:
+      case EGL_UNIFORM_TYPE_4UIV:
+        countedBufferRelease(&this->uniforms[i].v);
+        break;
+
+      case EGL_UNIFORM_TYPE_M2FV:
+      case EGL_UNIFORM_TYPE_M3FV:
+      case EGL_UNIFORM_TYPE_M4FV:
+      case EGL_UNIFORM_TYPE_M2x3FV:
+      case EGL_UNIFORM_TYPE_M3x2FV:
+      case EGL_UNIFORM_TYPE_M2x4FV:
+      case EGL_UNIFORM_TYPE_M4x2FV:
+      case EGL_UNIFORM_TYPE_M3x4FV:
+      case EGL_UNIFORM_TYPE_M4x3FV:
+        countedBufferRelease(&this->uniforms[i].m.v);
+        break;
+
+      default:
+        break;
+    }
+  }
+  this->uniformUsed = 0;
+}
+
 void egl_shaderUse(EGL_Shader * this)
 {
   if (this->hasShader)
     glUseProgram(this->shader);
   else
     DEBUG_ERROR("Shader program has not been compiled");
+
+  for(int i = 0; i < this->uniformUsed; ++i)
+  {
+    EGL_Uniform * uniform = &this->uniforms[i];
+    switch(uniform->type)
+    {
+      case EGL_UNIFORM_TYPE_1F:
+        glUniform1f(uniform->location, uniform->f[0]);
+        break;
+
+      case EGL_UNIFORM_TYPE_2F:
+        glUniform2f(uniform->location, uniform->f[0], uniform->f[1]);
+        break;
+
+      case EGL_UNIFORM_TYPE_3F:
+        glUniform3f(uniform->location, uniform->f[0], uniform->f[1],
+            uniform->f[2]);
+        break;
+
+      case EGL_UNIFORM_TYPE_4F:
+        glUniform4f(uniform->location, uniform->f[0], uniform->f[1],
+            uniform->f[2], uniform->f[3]);
+        break;
+
+      case EGL_UNIFORM_TYPE_1I:
+        glUniform1i(uniform->location, uniform->i[0]);
+        break;
+
+      case EGL_UNIFORM_TYPE_2I:
+        glUniform2i(uniform->location, uniform->i[0], uniform->i[1]);
+        break;
+
+      case EGL_UNIFORM_TYPE_3I:
+        glUniform3i(uniform->location, uniform->i[0], uniform->i[1],
+            uniform->i[2]);
+        break;
+
+      case EGL_UNIFORM_TYPE_4I:
+        glUniform4i(uniform->location, uniform->i[0], uniform->i[1],
+            uniform->i[2], uniform->i[3]);
+        break;
+
+      case EGL_UNIFORM_TYPE_1UI:
+        glUniform1ui(uniform->location, uniform->ui[0]);
+        break;
+
+      case EGL_UNIFORM_TYPE_2UI:
+        glUniform2ui(uniform->location, uniform->ui[0], uniform->ui[1]);
+        break;
+
+      case EGL_UNIFORM_TYPE_3UI:
+        glUniform3ui(uniform->location, uniform->ui[0], uniform->ui[1],
+            uniform->ui[2]);
+        break;
+
+      case EGL_UNIFORM_TYPE_4UI:
+        glUniform4ui(uniform->location, uniform->ui[0], uniform->ui[1],
+            uniform->ui[2], uniform->ui[3]);
+        break;
+
+      case EGL_UNIFORM_TYPE_1FV:
+        glUniform1fv(uniform->location, uniform->v->size / sizeof(GLfloat),
+            (const GLfloat *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_2FV:
+        glUniform2fv(uniform->location, uniform->v->size / sizeof(GLfloat) / 2,
+            (const GLfloat *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_3FV:
+        glUniform3fv(uniform->location, uniform->v->size / sizeof(GLfloat) / 3,
+            (const GLfloat *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_4FV:
+        glUniform4fv(uniform->location, uniform->v->size / sizeof(GLfloat) / 4,
+            (const GLfloat *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_1IV:
+        glUniform1iv(uniform->location, uniform->v->size / sizeof(GLint),
+            (const GLint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_2IV:
+        glUniform2iv(uniform->location, uniform->v->size / sizeof(GLint) / 2,
+            (const GLint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_3IV:
+        glUniform3iv(uniform->location, uniform->v->size / sizeof(GLint) / 3,
+            (const GLint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_4IV:
+        glUniform4iv(uniform->location, uniform->v->size / sizeof(GLint) / 4,
+            (const GLint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_1UIV:
+        glUniform1uiv(uniform->location, uniform->v->size / sizeof(GLuint),
+            (const GLuint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_2UIV:
+        glUniform2uiv(uniform->location, uniform->v->size / sizeof(GLuint) / 2,
+            (const GLuint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_3UIV:
+        glUniform3uiv(uniform->location, uniform->v->size / sizeof(GLuint) / 3,
+            (const GLuint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_4UIV:
+        glUniform4uiv(uniform->location, uniform->v->size / sizeof(GLuint) / 4,
+            (const GLuint *)uniform->v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M2FV:
+        glUniformMatrix2fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 2,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M3FV:
+        glUniformMatrix3fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 3,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M4FV:
+        glUniformMatrix4fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 4,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M2x3FV:
+        glUniformMatrix2x3fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 6,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M3x2FV:
+        glUniformMatrix3x2fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 6,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M2x4FV:
+        glUniformMatrix2x4fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 8,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M4x2FV:
+        glUniformMatrix4x2fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 8,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M3x4FV:
+        glUniformMatrix3x4fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 12,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+
+      case EGL_UNIFORM_TYPE_M4x3FV:
+        glUniformMatrix4x3fv(uniform->location,
+            uniform->v->size / sizeof(GLfloat) / 12,
+            uniform->m.transpose, (const GLfloat *)uniform->m.v->data);
+        break;
+    }
+  }
 }
 
 void egl_shaderAssocTextures(EGL_Shader * this, const int count)
