@@ -25,6 +25,8 @@ make_object(
 	shader/splash_bg.frag
 	shader/splash_logo.vert
 	shader/splash_logo.frag
+	shader/null.vert
+	shader/null.frag
 )
 
 make_defines(
