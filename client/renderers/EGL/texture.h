@@ -166,4 +166,5 @@ enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
 
-enum EGL_TexStatus egl_textureAddShader(EGL_Texture * texture, EGL_Shader * shader);
+enum EGL_TexStatus egl_textureAddShader(EGL_Texture * texture,
+    EGL_Shader * shader, float outputScale);

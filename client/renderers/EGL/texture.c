@@ -42,6 +42,9 @@ typedef struct RenderStep
   GLuint fb;
   GLuint tex;
   EGL_Shader * shader;
+  float scale;
+
+  unsigned int width, height;
 }
 RenderStep;
 
@@ -117,12 +120,15 @@ void egl_textureFree(EGL_Texture ** tex)
 
 bool setupRenderStep(EGL_Texture * this, RenderStep * step)
 {
+  step->width  = this->format.width  * step->scale;
+  step->height = this->format.height * step->scale;
+
   glBindTexture(GL_TEXTURE_2D, step->tex);
   glTexImage2D(GL_TEXTURE_2D,
       0,
       this->format.intFormat,
-      this->format.width,
-      this->format.height,
+      step->width,
+      step->height,
       0,
       this->format.format,
       this->format.dataType,
@@ -292,7 +298,7 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
       else
         glBindFramebuffer(GL_FRAMEBUFFER, step->fb);
 
-      glViewport(0, 0, this->format.width, this->format.height);
+      glViewport(0, 0, step->width, step->height);
       egl_shaderUse(step->shader);
       egl_modelRender(this->model);
 
@@ -319,7 +325,8 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
   return EGL_TEX_STATUS_OK;
 }
 
-enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader)
+enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
+    float outputScale)
 {
   if (!this->render)
   {
@@ -331,6 +338,7 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader)
   RenderStep * step = calloc(1, sizeof(*step));
   glGenTextures(1, &step->tex);
   step->shader = shader;
+  step->scale  = outputScale;
 
   if (this->formatValid)
     if (!setupRenderStep(this, step))
