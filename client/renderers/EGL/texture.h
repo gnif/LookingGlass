@@ -144,6 +144,7 @@ struct EGL_Texture
   _Atomic(bool) updated;
   bool postProcessed;
   EGL_Model * model;
+  float scale;
 };
 
 bool egl_textureInit(EGL * egl, EGL_Texture ** texture, EGLDisplay * display,
@@ -168,3 +169,5 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
 
 enum EGL_TexStatus egl_textureAddShader(EGL_Texture * texture,
     EGL_Shader * shader, float outputScale);
+
+float egl_textureGetScale(EGL_Texture * texture);

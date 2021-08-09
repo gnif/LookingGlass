@@ -339,6 +339,7 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
   glGenTextures(1, &step->tex);
   step->shader = shader;
   step->scale  = outputScale;
+  this->scale  = outputScale;
 
   if (this->formatValid)
     if (!setupRenderStep(this, step))
@@ -350,4 +351,9 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
 
   ll_push(this->render, step);
   return EGL_TEX_STATUS_OK;
+}
+
+float egl_textureGetScale(EGL_Texture * this)
+{
+  return this->scale;
 }

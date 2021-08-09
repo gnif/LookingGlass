@@ -43,6 +43,7 @@ struct DesktopShader
   EGL_Shader * shader;
   GLint uTransform;
   GLint uDesktopSize;
+  GLint uTextureScale;
   GLint uScaleAlgo;
   GLint uNVGain;
   GLint uCBMode;
@@ -95,11 +96,12 @@ static bool egl_initDesktopShader(
     return false;
   }
 
-  shader->uTransform   = egl_shaderGetUniform(shader->shader, "transform");
-  shader->uDesktopSize = egl_shaderGetUniform(shader->shader, "size"     );
-  shader->uScaleAlgo   = egl_shaderGetUniform(shader->shader, "scaleAlgo");
-  shader->uNVGain      = egl_shaderGetUniform(shader->shader, "nvGain"   );
-  shader->uCBMode      = egl_shaderGetUniform(shader->shader, "cbMode"   );
+  shader->uTransform    = egl_shaderGetUniform(shader->shader, "transform"   );
+  shader->uDesktopSize  = egl_shaderGetUniform(shader->shader, "size"        );
+  shader->uTextureScale = egl_shaderGetUniform(shader->shader, "textureScale");
+  shader->uScaleAlgo    = egl_shaderGetUniform(shader->shader, "scaleAlgo"   );
+  shader->uNVGain       = egl_shaderGetUniform(shader->shader, "nvGain"      );
+  shader->uCBMode       = egl_shaderGetUniform(shader->shader, "cbMode"      );
 
   return true;
 }
@@ -355,6 +357,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
       .type        = EGL_UNIFORM_TYPE_2F,
       .location    = shader->uDesktopSize,
       .f           = { desktop->width, desktop->height },
+    },
+    {
+      .type        = EGL_UNIFORM_TYPE_1F,
+      .location    = shader->uTextureScale,
+      .f           = { egl_textureGetScale(desktop->texture) },
     },
     {
       .type        = EGL_UNIFORM_TYPE_M3x2FV,
