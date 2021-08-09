@@ -42,4 +42,4 @@ void ringbuffer_setPreOverwriteFn(RingBuffer rb, RingBufferValueFn fn,
 
 typedef bool (*RingBufferIterator)(int index, void * value, void * udata);
 void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn,
-    void * udata);
+    void * udata, bool reverse);

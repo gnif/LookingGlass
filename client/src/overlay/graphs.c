@@ -158,7 +158,7 @@ static int graphs_render(void * udata, bool interactive,
       continue;
 
     struct BufferMetrics metrics = {};
-    ringbuffer_forEach(graph->buffer, rbCalcMetrics, &metrics);
+    ringbuffer_forEach(graph->buffer, rbCalcMetrics, &metrics, false);
 
     if (metrics.sum > 0.0f)
     {

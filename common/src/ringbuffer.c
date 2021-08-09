@@ -106,16 +106,36 @@ void ringbuffer_setPreOverwriteFn(const RingBuffer rb, RingBufferValueFn fn,
   rb->preOverwriteUdata = udata;
 }
 
-void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn, void * udata)
+void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn, void * udata,
+    bool reverse)
 {
-  int index = rb->start;
-  for(int i = 0; i < rb->count; ++i)
+  if (reverse)
   {
-    void * value = rb->values + index * rb->valueSize;
-    if (++index == rb->length)
-      index = 0;
+    int index = rb->start + rb->count - 1;
+    if (index >= rb->length)
+      index -= rb->length;
 
-    if (!fn(i, value, udata))
-      break;
+    for(int i = 0; i < rb->count; ++i)
+    {
+      void * value = rb->values + index * rb->valueSize;
+      if (--index == -1)
+        index = rb->length - 1;
+
+      if (!fn(i, value, udata))
+        break;
+    }
+  }
+  else
+  {
+    int index = rb->start;
+    for(int i = 0; i < rb->count; ++i)
+    {
+      void * value = rb->values + index * rb->valueSize;
+      if (++index == rb->length)
+        index = 0;
+
+      if (!fn(i, value, udata))
+        break;
+    }
   }
 }
