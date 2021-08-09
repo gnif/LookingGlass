@@ -26,6 +26,7 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/scrnsaver.h>
@@ -638,8 +639,21 @@ static bool x11GetProp(LG_DSProperty prop, void *ret)
 
 static int x11EventThread(void * unused)
 {
-  fd_set in_fds;
+  int epollfd = epoll_create1(0);
+  if (epollfd == -1)
+  {
+    DEBUG_ERROR("epolld_create1 failure");
+    return 0;
+  }
+
+  struct epoll_event ev = { .events = EPOLLIN };
   const int fd = ConnectionNumber(x11.display);
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev) == -1)
+  {
+    close(epollfd);
+    DEBUG_ERROR("epoll_ctl failed");
+    return 0;
+  }
 
   while(app_isRunning())
   {
@@ -652,16 +666,16 @@ static int x11EventThread(void * unused)
 
     if (!XPending(x11.display))
     {
-      FD_ZERO(&in_fds);
-      FD_SET(fd, &in_fds);
-      struct timeval tv =
+      struct epoll_event events[1];
+      int nfds = epoll_wait(epollfd, events, 1, 100);
+      if (nfds == -1)
       {
-        .tv_usec = 250000,
-        .tv_sec  = 0
-      };
+        close(epollfd);
+        DEBUG_ERROR("epoll_wait failure");
+        return 0;
+      }
 
-      int ret = select(fd + 1, &in_fds, NULL, NULL, &tv);
-      if (ret == 0 || !XPending(x11.display))
+      if (nfds == 0)
         continue;
     }
 
@@ -804,6 +818,7 @@ static int x11EventThread(void * unused)
     }
   }
 
+  close(epollfd);
   return 0;
 }
 
