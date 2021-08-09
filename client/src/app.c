@@ -780,7 +780,7 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   {
     totalDamage = true;
     ImDrawList_AddRectFilled(igGetBackgroundDrawListNil(), (ImVec2) { 0.0f , 0.0f },
-      g_state.io->DisplaySize, 0xCC000000, 0, 0);
+      g_state.io->DisplaySize, 0x66000000, 0, 0);
 
 //    bool test;
 //    igShowDemoWindow(&test);
