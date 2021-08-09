@@ -9,6 +9,6 @@ out vec2 iFragCoord;
 
 void main()
 {
-  gl_Position.xy = uVertex;
-  iFragCoord     = uUV;
+  gl_Position = vec4(uVertex, 0.0, 1.0);
+  iFragCoord  = uUV;
 }
