@@ -119,20 +119,21 @@ static void setupFilters(EGL_Desktop * desktop)
     egl_textureAddFilter(desktop->texture, desktop->ffxCAS, 1.0f, false);
 }
 
-bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
+bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     bool useDMA, int maxRects)
 {
-  *desktop = (EGL_Desktop *)calloc(1, sizeof(EGL_Desktop));
-  if (!*desktop)
+  EGL_Desktop * desktop = (EGL_Desktop *)calloc(1, sizeof(EGL_Desktop));
+  if (!desktop)
   {
     DEBUG_ERROR("Failed to malloc EGL_Desktop");
     return false;
   }
+  *desktop_ = desktop;
 
-  (*desktop)->egl     = egl;
-  (*desktop)->display = display;
+  desktop->egl     = egl;
+  desktop->display = display;
 
-  if (!egl_textureInit(egl, &(*desktop)->texture, display,
+  if (!egl_textureInit(egl, &desktop->texture, display,
         useDMA ? EGL_TEXTYPE_DMABUF : EGL_TEXTYPE_FRAMEBUFFER, true))
   {
     DEBUG_ERROR("Failed to initialize the desktop texture");
@@ -140,7 +141,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
   }
 
   if (!egl_initDesktopShader(
-    &(*desktop)->shader,
+    &desktop->shader,
     b_shader_desktop_vert    , b_shader_desktop_vert_size,
     b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size))
   {
@@ -148,33 +149,34 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
     return false;
   }
 
-  if (!egl_desktopRectsInit(&(*desktop)->mesh, maxRects))
+  if (!egl_desktopRectsInit(&desktop->mesh, maxRects))
   {
     DEBUG_ERROR("Failed to initialize the desktop mesh");
     return false;
   }
 
-  (*desktop)->matrix = countedBufferNew(6 * sizeof(GLfloat));
-  if (!(*desktop)->matrix)
+  desktop->matrix = countedBufferNew(6 * sizeof(GLfloat));
+  if (!desktop->matrix)
   {
     DEBUG_ERROR("Failed to allocate the desktop matrix buffer");
     return false;
   }
 
-  app_registerKeybind(KEY_N, egl_desktop_toggle_nv, *desktop, "Toggle night vision mode");
+  app_registerKeybind(KEY_N, egl_desktop_toggle_nv, desktop,
+      "Toggle night vision mode");
 
-  (*desktop)->nvMax     = option_get_int("egl", "nvGainMax");
-  (*desktop)->nvGain    = option_get_int("egl", "nvGain"   );
-  (*desktop)->cbMode    = option_get_int("egl", "cbMode"   );
-  (*desktop)->scaleAlgo = option_get_int("egl", "scale"    );
-  (*desktop)->useDMA    = useDMA;
+  desktop->nvMax     = option_get_int("egl", "nvGainMax");
+  desktop->nvGain    = option_get_int("egl", "nvGain"   );
+  desktop->cbMode    = option_get_int("egl", "cbMode"   );
+  desktop->scaleAlgo = option_get_int("egl", "scale"    );
+  desktop->useDMA    = useDMA;
 
-  egl_shaderInit(&(*desktop)->ffxCAS);
-  egl_shaderCompile((*desktop)->ffxCAS,
+  egl_shaderInit(&desktop->ffxCAS);
+  egl_shaderCompile(desktop->ffxCAS,
       b_shader_basic_vert  , b_shader_basic_vert_size,
       b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size);
 
-  setupFilters(*desktop);
+  setupFilters(desktop);
 
   return true;
 }
