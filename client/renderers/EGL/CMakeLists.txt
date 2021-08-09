@@ -12,8 +12,35 @@ pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
 )
 
 include(MakeObject)
-make_object(
-	EGL_SHADER
+function(build_shaders header_dir)
+	file(GLOB headers "${header_dir}/*.h")
+	message("${headers}")
+	set(EGL_SHADER_PROCESSED)
+	foreach(shader ${ARGN})
+		set(out_f "${CMAKE_CURRENT_BINARY_DIR}/${shader}")
+		add_custom_command(OUTPUT "${out_f}"
+			COMMAND awk -f "${CMAKE_CURRENT_SOURCE_DIR}/glsl.include.awk"
+					"${CMAKE_CURRENT_SOURCE_DIR}/${shader}" > "${out_f}"
+			MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${shader}"
+			DEPENDS ${headers}
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/shader"
+			COMMENT "Preprocessing shader ${shader}"
+			VERBATIM
+		)
+	endforeach()
+
+	set(CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+	make_object(
+		EGL_SHADER
+		${ARGN}
+	)
+
+	set(EGL_SHADER_OBJS "${EGL_SHADER_OBJS}" PARENT_SCOPE)
+	set(EGL_SHADER_INCS "${EGL_SHADER_INCS}" PARENT_SCOPE)
+endfunction()
+
+build_shaders(
+	shader
 	shader/desktop.vert
 	shader/desktop_rgb.frag
 	shader/cursor.vert
@@ -49,7 +76,7 @@ add_library(renderer_EGL STATIC
 	splash.c
 	damage.c
 	${EGL_SHADER_OBJS}
-	"${EGL_SHADER_INCS}/desktop_rgb.def.h"
+	"${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
 	${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp
 )
 
