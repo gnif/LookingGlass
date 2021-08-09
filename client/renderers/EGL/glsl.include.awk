@@ -1,7 +1,7 @@
 BEGIN { FS="\"" }
 
 function process(line, second) {
-    if (line ~ /^#include[ \t]*".+"[ \t]*$/) {
+    if (line ~ /^#include[ \t]*".+"[ \t\r]*$/) {
         while (getline < second) {
             process($0, $2)
         }

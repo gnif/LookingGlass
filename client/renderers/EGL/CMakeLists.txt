@@ -14,7 +14,7 @@ pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
 find_program(AWK gawk mawk original-awk awk)
 
 if(AWK MATCHES ".+-NOTFOUND")
-    message(FATAL_ERROR "FATAL: some known version of awk couldn't be found (${AWK}).")
+	message(FATAL_ERROR "FATAL: some known version of awk couldn't be found (${AWK}).")
 else()
 	message(STATUS "Using awk: ${AWK}")
 endif()
