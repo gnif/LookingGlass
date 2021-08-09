@@ -294,7 +294,7 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
     free(this->bindData);
 
     BindData * bd = (BindData *)calloc(1, sizeof(struct BindData) +
-        sizeof(bd->dimensions[0]) * ll_count(this->render) * 2);
+        sizeof(bd->dimensions[0]) * (ll_count(this->render)+1) * 2);
     bd->sampler = this->sampler;
 
     this->bindData     = bd;
