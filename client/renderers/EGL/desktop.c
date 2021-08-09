@@ -286,6 +286,13 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
 
   if (sharpness != desktop->ffxUniform.f[0])
   {
+    // enable CAS if the sharpness was changed
+    if (!cas)
+    {
+      cas = true;
+      desktop->ffxCASEnable = cas;
+      egl_textureEnableFilter(desktop->ffxCASHandle, cas);
+    }
     desktop->ffxUniform.f[0] = sharpness;
     egl_shaderSetUniforms(desktop->ffxCAS, &desktop->ffxUniform, 1);
     invalidateCAS = true;
