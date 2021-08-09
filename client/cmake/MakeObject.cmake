@@ -5,8 +5,8 @@ function(make_object out_var)
     file(RELATIVE_PATH out_f ${CMAKE_CURRENT_SOURCE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/${in_f}")
     set(out_h "${CMAKE_CURRENT_BINARY_DIR}/${out_f}.h")
     set(out_f "${CMAKE_CURRENT_BINARY_DIR}/${out_f}.o")
-    string(REGEX REPLACE "[/.]" "_" sym_in  "${CMAKE_CURRENT_SOURCE_DIR}/${in_f}")
-    string(REGEX REPLACE "[/.]" "_" sym_out "${in_f}")
+    string(REGEX REPLACE "[/.-]" "_" sym_in  "${CMAKE_CURRENT_SOURCE_DIR}/${in_f}")
+    string(REGEX REPLACE "[/.-]" "_" sym_out "${in_f}")
 
     add_custom_command(OUTPUT ${out_f}
       COMMAND ${CMAKE_LINKER} -r -b binary -o ${out_f} "${CMAKE_CURRENT_SOURCE_DIR}/${in_f}"
