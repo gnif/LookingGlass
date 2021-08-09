@@ -1311,19 +1311,26 @@ static bool x11WaitFrame(void)
   /* adjustments if we are still seeing odd skips */
   const uint64_t lastWMEvent = atomic_load(&x11.lastWMEvent);
   const uint64_t eventDelta = ust > lastWMEvent ? ust - lastWMEvent : 0;
+
+  static int      skipCount = 0;
+  static uint64_t lastSkipTime = 0;
+
+  if (skipCount > 0 && ust - lastSkipTime > 1000000UL)
+    skipCount = 0;
+
   if (delay > 0 && deltamsc > 1 && eventDelta > 1000000UL)
   {
     /* only adjust if the last skip was less then 1s ago */
-    static uint64_t lastSkip = 0;
-    const bool adjust = ust - lastSkip < 1000000UL;
-    lastSkip = ust;
+    const bool flag = ust - lastSkipTime < 1000000UL;
+    lastSkipTime = ust;
 
-    if (adjust)
+    if (flag && ++skipCount > 10)
     {
       if (delay - 500 < delay)
       {
         delay -= 500;
         DEBUG_INFO("Excessing skipping detected, reduced calibration delay to %lu us", delay);
+        skipCount = 0;
       }
       else
       {
