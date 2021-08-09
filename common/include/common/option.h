@@ -80,7 +80,7 @@ struct Option * option_get       (const char * module, const char * name);
 int             option_get_int   (const char * module, const char * name);
 const char *    option_get_string(const char * module, const char * name);
 bool            option_get_bool  (const char * module, const char * name);
-bool            option_get_float (const char * module, const char * name);
+float           option_get_float (const char * module, const char * name);
 
 // called by the main application to parse the command line arguments
 bool option_parse(int argc, char * argv[]);

@@ -793,7 +793,7 @@ bool option_get_bool(const char * module, const char * name)
   return o->value.x_bool;
 }
 
-bool option_get_float(const char * module, const char * name)
+float option_get_float(const char * module, const char * name)
 {
   struct Option * o = option_get(module, name);
   if (!o)
