@@ -5,3 +5,4 @@ LIBRARY "ntdll.dll"
 EXPORTS
 NtDelayExecution
 NtSetTimerResolution
+RtlNtStatusToDosError

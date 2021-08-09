@@ -30,6 +30,7 @@
 #include <ntstatus.h>
 #include <wtsapi32.h>
 #include <userenv.h>
+#include <winternl.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -566,7 +567,8 @@ bool os_blockScreensaver()
     if (status == STATUS_SUCCESS)
       lastResult = executionState & ES_DISPLAY_REQUIRED;
     else
-      DEBUG_ERROR("Failed to call CallNtPowerInformation(SystemExecutionState): %ld", status);
+      DEBUG_WINERROR("Failed to call CallNtPowerInformation(SystemExecutionState)",
+        RtlNtStatusToDosError(status));
     lastCheck = now;
   }
   return lastResult;
