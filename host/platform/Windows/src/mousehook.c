@@ -151,7 +151,7 @@ static DWORD WINAPI threadProc(LPVOID lParam) {
         }
         break;
       default:
-        DEBUG_ERROR("MsgWaitForMultipleObjects failed: 0x%lx", GetLastError());
+        DEBUG_WINERROR("MsgWaitForMultipleObjects failed", GetLastError());
         goto exit;
     }
   }
