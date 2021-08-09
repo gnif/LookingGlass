@@ -181,6 +181,22 @@ static struct Option egl_options[] =
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = false
   },
+
+  {
+    .module       = "eglFilter",
+    .name         = "ffxCAS",
+    .description  = "AMD FidelityFX CAS",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = false
+  },
+  {
+    .module        = "eglFilter",
+    .name          = "ffxCASSharpness",
+    .description   = "AMD FidelityFX CAS Sharpness",
+    .type          = OPTION_TYPE_FLOAT,
+    .value.x_float = 0.0f
+  },
+
   {0}
 };
 

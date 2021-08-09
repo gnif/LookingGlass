@@ -80,7 +80,7 @@ struct EGL_Desktop
   LG_RendererFormat format;
 
   EGL_Shader * ffxCAS;
-  bool enableCAS;
+  bool ffxCASEnable;
   PostProcessHandle ffxCASHandle;
   EGL_Uniform ffxUniform;
 };
@@ -117,7 +117,8 @@ static bool egl_initDesktopShader(
 static void setupFilters(EGL_Desktop * desktop)
 {
   desktop->ffxCASHandle =
-    egl_textureAddFilter(desktop->texture, desktop->ffxCAS, 1.0f, false);
+    egl_textureAddFilter(desktop->texture, desktop->ffxCAS, 1.0f,
+        desktop->ffxCASEnable);
 }
 
 bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
@@ -177,10 +178,13 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
       b_shader_basic_vert  , b_shader_basic_vert_size,
       b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size);
 
-  desktop->ffxUniform.type     = EGL_UNIFORM_TYPE_1F;
+  desktop->ffxCASEnable = option_get_bool("eglFilter", "ffxCAS");
+  desktop->ffxUniform.type = EGL_UNIFORM_TYPE_1F;
   desktop->ffxUniform.location =
     egl_shaderGetUniform(desktop->ffxCAS, "uSharpness");
-  desktop->ffxUniform.f[0]     = 0.0f;
+  desktop->ffxUniform.f[0] =
+    option_get_float("eglFilter", "ffxCASSharpness");
+  egl_shaderSetUniforms(desktop->ffxCAS, &desktop->ffxUniform, 1);
 
   setupFilters(desktop);
 
@@ -262,18 +266,19 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
 
-  bool cas = desktop->enableCAS;
+  bool cas = desktop->ffxCASEnable;
   igCheckbox("AMD FidelityFX CAS", &cas);
-  if (cas != desktop->enableCAS)
+  if (cas != desktop->ffxCASEnable)
   {
-    desktop->enableCAS = cas;
+    desktop->ffxCASEnable = cas;
     egl_textureEnableFilter(desktop->ffxCASHandle, cas);
   }
 
   float sharpness = desktop->ffxUniform.f[0];
   igText("Sharpness:");
   igSameLine(0.0f, -1.0f);
-  igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() - igGetStyle()->WindowPadding.x);
+  igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() -
+      igGetStyle()->WindowPadding.x);
   igSliderFloat("##casSharpness", &sharpness, 0.0f, 1.0f, NULL, 0);
   igPopItemWidth();
 
