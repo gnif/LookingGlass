@@ -45,6 +45,9 @@ typedef struct RenderStep
   float scale;
 
   unsigned int width, height;
+
+  GLint uInRes;
+  GLint uOutRes;
 }
 RenderStep;
 
@@ -109,6 +112,7 @@ void egl_textureFree(EGL_Texture ** tex)
     ll_free(this->render);
     egl_modelFree(&this->model);
     ringbuffer_free(&this->textures);
+    free(this->bindData);
   }
 
   glDeleteSamplers(1, &this->sampler);
@@ -238,14 +242,31 @@ enum EGL_TexStatus egl_textureProcess(EGL_Texture * this)
   return status;
 }
 
+typedef struct BindInfo
+{
+  GLuint tex;
+  unsigned int width;
+  unsigned int height;
+}
+BindInfo;
+
+typedef struct BindData
+{
+  GLuint sampler;
+  GLuint dimensions[0];
+}
+BindData;
+
 static bool rbBindTexture(int index, void * value, void * udata)
 {
-  GLuint      * tex  = (GLuint *)value;
-  EGL_Texture * this = (EGL_Texture *)udata;
+  BindInfo * bi = (BindInfo *)value;
+  BindData * bd = (BindData *)udata;
 
   glActiveTexture(GL_TEXTURE0 + index);
-  glBindTexture(GL_TEXTURE_2D, *tex);
-  glBindSampler(0, this->sampler);
+  glBindTexture(GL_TEXTURE_2D, bi->tex);
+  glBindSampler(0, bd->sampler);
+  bd->dimensions[index * 2 + 0] = bi->width;
+  bd->dimensions[index * 2 + 1] = bi->height;
   return true;
 }
 
@@ -265,6 +286,19 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
     return EGL_TEX_STATUS_OK;
   }
 
+  if (this->bindDataSize < ll_count(this->render))
+  {
+    free(this->bindData);
+
+    BindData * bd = (BindData *)calloc(1, sizeof(struct BindData) +
+        sizeof(bd->dimensions[0]) * ll_count(this->render) * 2);
+    bd->sampler = this->sampler;
+
+    this->bindData     = bd;
+    this->bindDataSize = ll_count(this->render);
+  }
+
+  BindData * bd = (BindData *)this->bindData;
   RenderStep * step;
   ringbuffer_reset(this->textures);
 
@@ -274,8 +308,13 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
     if ((status = this->ops.get(this, &tex)) != EGL_TEX_STATUS_OK)
       return status;
 
-    ringbuffer_push(this->textures, &tex);
-    ringbuffer_forEach(this->textures, rbBindTexture, this, true);
+    ringbuffer_push(this->textures, &(BindInfo) {
+      .tex    = tex,
+      .width  = this->format.width,
+      .height = this->format.height
+    });
+
+    ringbuffer_forEach(this->textures, rbBindTexture, bd, true);
 
     for(ll_reset(this->render); ll_walk(this->render, (void **)&step); )
     {
@@ -298,11 +337,27 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
         glBindFramebuffer(GL_FRAMEBUFFER, step->fb);
 
       glViewport(0, 0, step->width, step->height);
+
+      /* use the shader (also configures it's set uniforms) */
       egl_shaderUse(step->shader);
+
+      /* set the size uniforms */
+      glUniform2uiv(step->uInRes,
+          ringbuffer_getCount(this->textures), bd->dimensions);
+      glUniform2ui(step->uOutRes, step->width, step->height);
+
+      /* render the scene */
       egl_modelRender(this->model);
 
-      ringbuffer_push(this->textures, &step->tex);
-      ringbuffer_forEach(this->textures, rbBindTexture, this, true);
+      /* push the details into the ringbuffer for the next pass */
+      ringbuffer_push(this->textures, &(BindInfo) {
+        .tex    = step->tex,
+        .width  = step->width,
+        .height = step->height
+      });
+
+      /* bind the textures for the next pass */
+      ringbuffer_forEach(this->textures, rbBindTexture, bd, true);
     }
 
     /* restore the state and the viewport */
@@ -332,14 +387,17 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
     this->render = ll_new();
     egl_modelInit(&this->model);
     egl_modelSetDefault(this->model, false);
-    this->textures = ringbuffer_new(8, sizeof(GLuint));
+    this->textures = ringbuffer_new(8, sizeof(BindInfo));
   }
 
   RenderStep * step = calloc(1, sizeof(*step));
   glGenTextures(1, &step->tex);
-  step->shader = shader;
-  step->scale  = outputScale;
-  this->scale  = outputScale;
+  step->shader  = shader;
+  step->scale   = outputScale;
+  step->uInRes  = egl_shaderGetUniform(shader, "uInRes" );
+  step->uOutRes = egl_shaderGetUniform(shader, "uOutRes");
+
+  this->scale = outputScale;
 
   if (this->formatValid)
     if (!setupRenderStep(this, step))

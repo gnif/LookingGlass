@@ -145,6 +145,9 @@ struct EGL_Texture
   bool postProcessed;
   EGL_Model * model;
   float scale;
+
+  void * bindData;
+  int bindDataSize;
 };
 
 bool egl_textureInit(EGL * egl, EGL_Texture ** texture, EGLDisplay * display,
