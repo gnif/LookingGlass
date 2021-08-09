@@ -724,7 +724,7 @@ static int x11EventThread(void * unused)
         return 0;
       }
 
-      if (nfds == 0)
+      if (nfds == 0 || !XPending(x11.display))
         continue;
     }
 
