@@ -510,12 +510,15 @@ bool app_init(void)
   {
     exitEvent = OpenEvent(SYNCHRONIZE, FALSE, exitEventName);
     if (!exitEvent)
-      DEBUG_WARN("Failed to open exitEvent with error 0x%lx: %s", GetLastError(), exitEventName);
+    {
+      DEBUG_WINERROR("Failed to open exitEvent", GetLastError());
+      DEBUG_INFO("Exit event name: %s", exitEventName);
+    }
   }
 
   if (!RegisterWaitForSingleObject(&app.exitWait, exitEvent, exitEventCallback, NULL,
         INFINITE, WT_EXECUTEONLYONCE))
-    DEBUG_ERROR("Failed to create register wait for exit event: 0x%lx", GetLastError());
+    DEBUG_WINERROR("Failed to create register wait for exit event", GetLastError());
 
   return true;
 }
