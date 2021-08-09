@@ -21,6 +21,7 @@
 #include "common/crash.h"
 #include "common/debug.h"
 #include "common/version.h"
+#include "common/windebug.h"
 
 #ifdef ENABLE_BACKTRACE
 
@@ -90,7 +91,7 @@ static LONG CALLBACK exception_filter(EXCEPTION_POINTERS * exc)
 
   if (!SymInitialize(GetCurrentProcess(), NULL, TRUE))
   {
-    DEBUG_ERROR("Failed to SymInitialize: 0x%08lx, could not generate stack trace", GetLastError());
+    DEBUG_WINERROR("Failed to SymInitialize, could not generate stack trace", GetLastError());
     goto fail;
   }
   SymSetOptions(SYMOPT_LOAD_LINES);
