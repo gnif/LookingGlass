@@ -38,6 +38,9 @@
 #include "desktop_rgb.frag.h"
 #include "desktop_rgb.def.h"
 
+#include "basic.vert.h"
+#include "ffx_cas.frag.h"
+
 struct DesktopShader
 {
   EGL_Shader * shader;
@@ -75,6 +78,10 @@ struct EGL_Desktop
 
   bool useDMA;
   LG_RendererFormat format;
+
+  EGL_Shader * ffxCAS;
+  bool enableCAS;
+  PostProcessHandle ffxCASHandle;
 };
 
 // forwards
@@ -104,6 +111,12 @@ static bool egl_initDesktopShader(
   shader->uCBMode       = egl_shaderGetUniform(shader->shader, "cbMode"      );
 
   return true;
+}
+
+static void setupFilters(EGL_Desktop * desktop)
+{
+  desktop->ffxCASHandle =
+    egl_textureAddFilter(desktop->texture, desktop->ffxCAS, 1.0f, false);
 }
 
 bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
@@ -156,6 +169,13 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
   (*desktop)->scaleAlgo = option_get_int("egl", "scale"    );
   (*desktop)->useDMA    = useDMA;
 
+  egl_shaderInit(&(*desktop)->ffxCAS);
+  egl_shaderCompile((*desktop)->ffxCAS,
+      b_shader_basic_vert  , b_shader_basic_vert_size,
+      b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size);
+
+  setupFilters(*desktop);
+
   return true;
 }
 
@@ -190,6 +210,7 @@ void egl_desktopFree(EGL_Desktop ** desktop)
   egl_shaderFree     (&(*desktop)->shader.shader);
   egl_desktopRectsFree(&(*desktop)->mesh        );
   countedBufferRelease(&(*desktop)->matrix      );
+  egl_shaderFree(&(*desktop)->ffxCAS);
 
   free(*desktop);
   *desktop = NULL;
@@ -232,6 +253,14 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   }
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
+
+  bool cas = desktop->enableCAS;
+  igCheckbox("AMD FidelityFX CAS", &cas);
+  if (cas != desktop->enableCAS)
+  {
+    desktop->enableCAS = cas;
+    egl_textureEnableFilter(desktop->ffxCASHandle, cas);
+  }
 }
 
 bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
@@ -298,6 +327,8 @@ bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dm
       DEBUG_ERROR("Failed to initialize the desktop texture");
       return false;
     }
+
+    setupFilters(desktop);
 
     if (!egl_desktopSetup(desktop, desktop->format))
       return false;

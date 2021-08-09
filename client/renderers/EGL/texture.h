@@ -170,7 +170,10 @@ enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
 
-enum EGL_TexStatus egl_textureAddShader(EGL_Texture * texture,
-    EGL_Shader * shader, float outputScale);
+typedef void * PostProcessHandle;
+PostProcessHandle egl_textureAddFilter(EGL_Texture * texture,
+    EGL_Shader * shader, float outputScale, bool enabled);
+
+void egl_textureEnableFilter(PostProcessHandle * handle, bool enable);
 
 float egl_textureGetScale(EGL_Texture * texture);

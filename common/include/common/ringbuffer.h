@@ -33,6 +33,7 @@ int    ringbuffer_getLength(const RingBuffer rb);
 int    ringbuffer_getStart (const RingBuffer rb);
 int    ringbuffer_getCount (const RingBuffer rb);
 void * ringbuffer_getValues(const RingBuffer rb);
+void * ringBuffer_getLastValue(const RingBuffer rb);
 
 typedef void (*RingBufferValueFn)(void * value, void * udata);
 

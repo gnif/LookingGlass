@@ -99,6 +99,18 @@ void * ringbuffer_getValues(const RingBuffer rb)
   return rb->values;
 }
 
+void * ringBuffer_getLastValue(const RingBuffer rb)
+{
+  if (rb->count == 0)
+    return NULL;
+
+  int index = rb->start + rb->count - 1;
+  if (index >= rb->length)
+    index -= rb->length;
+
+  return rb->values + index * rb->valueSize;
+}
+
 void ringbuffer_setPreOverwriteFn(const RingBuffer rb, RingBufferValueFn fn,
     void * udata)
 {

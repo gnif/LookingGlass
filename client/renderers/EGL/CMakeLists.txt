@@ -52,6 +52,8 @@ build_shaders(
 	shader/splash_bg.frag
 	shader/splash_logo.vert
 	shader/splash_logo.frag
+	shader/basic.vert
+	shader/ffx_cas.frag
 )
 
 make_defines(

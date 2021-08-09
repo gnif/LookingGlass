@@ -39,6 +39,7 @@ extern const EGL_TextureOps EGL_TextureDMABUF;
 
 typedef struct RenderStep
 {
+  bool enabled;
   GLuint fb;
   GLuint tex;
   EGL_Shader * shader;
@@ -300,11 +301,12 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
 
   BindData * bd = (BindData *)this->bindData;
   RenderStep * step;
-  ringbuffer_reset(this->textures);
 
   /* if the postProcessing has not yet been done */
   if (!this->postProcessed)
   {
+    ringbuffer_reset(this->textures);
+
     if ((status = this->ops.get(this, &tex)) != EGL_TEX_STATUS_OK)
       return status;
 
@@ -316,8 +318,14 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
 
     ringbuffer_forEach(this->textures, rbBindTexture, bd, true);
 
+    bool cleanup = false;
     for(ll_reset(this->render); ll_walk(this->render, (void **)&step); )
     {
+      if (!step->enabled)
+        continue;
+
+      cleanup = true;
+
       /* create the framebuffer here as it must be in the same gl context as
        * it's usage */
       if (!step->fb)
@@ -361,26 +369,29 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
     }
 
     /* restore the state and the viewport */
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glUseProgram(0);
-    egl_resetViewport(this->egl);
+    if (cleanup)
+    {
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+      glUseProgram(0);
+      egl_resetViewport(this->egl);
+    }
 
     this->postProcessed = true;
   }
   else
   {
     /* bind the last texture */
-    ll_peek_tail(this->render, (void **)&step);
+    BindInfo * bi = (BindInfo *)ringBuffer_getLastValue(this->textures);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, step->tex);
+    glBindTexture(GL_TEXTURE_2D, bi->tex);
     glBindSampler(0, this->sampler);
   }
 
   return EGL_TEX_STATUS_OK;
 }
 
-enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
-    float outputScale)
+PostProcessHandle egl_textureAddFilter(EGL_Texture * this, EGL_Shader * shader,
+    float outputScale, bool enabled)
 {
   if (!this->render)
   {
@@ -396,6 +407,7 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
   step->scale   = outputScale;
   step->uInRes  = egl_shaderGetUniform(shader, "uInRes" );
   step->uOutRes = egl_shaderGetUniform(shader, "uOutRes");
+  step->enabled = enabled;
 
   this->scale = outputScale;
 
@@ -404,11 +416,17 @@ enum EGL_TexStatus egl_textureAddShader(EGL_Texture * this, EGL_Shader * shader,
     {
       glDeleteTextures(1, &step->tex);
       free(step);
-      return EGL_TEX_STATUS_ERROR;
+      return NULL;
     }
 
   ll_push(this->render, step);
-  return EGL_TEX_STATUS_OK;
+  return (PostProcessHandle)step;
+}
+
+void egl_textureEnableFilter(PostProcessHandle * handle, bool enable)
+{
+  RenderStep * step = (RenderStep *)handle;
+  step->enabled = enable;
 }
 
 float egl_textureGetScale(EGL_Texture * this)
