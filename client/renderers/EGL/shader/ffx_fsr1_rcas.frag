@@ -26,10 +26,10 @@ void FsrRcasInputF(inout AF1 r, inout AF1 g, inout AF1 b) {}
 void main()
 {
   vec2 inRes  = vec2(uInRes[0]);
-  uvec2 point = uvec2(iFragCoord * inRes);
+  uvec2 point = uvec2(iFragCoord * (inRes + 0.5f));
 
   uvec4 const0;
-  FsrRcasCon(const0, 1.0f - uSharpness);
+  FsrRcasCon(const0, uSharpness);
 
   FsrRcasF(fragColor.r, fragColor.g, fragColor.b, point, const0);
   fragColor.a = 1.0f;

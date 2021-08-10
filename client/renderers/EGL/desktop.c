@@ -338,7 +338,7 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
       egl_textureEnableFilter(desktop->ffxFSR1Handle[1],
           fsr1 && desktop->upscale);
     }
-    desktop->ffxFSR1Uniform.f[0] = fsr1Sharpness;
+    desktop->ffxFSR1Uniform.f[0] = 2.0f - fsr1Sharpness * 2.0f;
     egl_shaderSetUniforms(desktop->ffxFSR1[1], &desktop->ffxFSR1Uniform, 1);
     invalidateTex = true;
   }
@@ -492,6 +492,12 @@ bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
 
   int scaleAlgo = EGL_SCALE_NEAREST;
 
+  struct Rect finalSize;
+  egl_textureBind(desktop->texture);
+  egl_textureGetFinalSize(desktop->texture, &finalSize);
+  if (finalSize.x > desktop->width || finalSize.y > desktop->height)
+    scaleType = EGL_DESKTOP_DOWNSCALE;
+
   switch (desktop->scaleAlgo)
   {
     case EGL_SCALE_AUTO:
@@ -511,10 +517,6 @@ bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
     default:
       scaleAlgo = desktop->scaleAlgo;
   }
-
-  struct Rect finalSize;
-  egl_textureBind(desktop->texture);
-  egl_textureGetFinalSize(desktop->texture, &finalSize);
 
   egl_desktopRectsMatrix((float *)desktop->matrix->data,
       desktop->width, desktop->height, x, y, scaleX, scaleY, rotate);

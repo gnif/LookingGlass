@@ -265,7 +265,7 @@ static bool rbBindTexture(int index, void * value, void * udata)
 
   glActiveTexture(GL_TEXTURE0 + index);
   glBindTexture(GL_TEXTURE_2D, bi->tex);
-  glBindSampler(0, bd->sampler);
+  glBindSampler(index, bd->sampler);
   bd->dimensions[index * 2 + 0] = bi->width;
   bd->dimensions[index * 2 + 1] = bi->height;
   return true;
