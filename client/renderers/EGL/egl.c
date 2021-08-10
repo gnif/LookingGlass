@@ -183,11 +183,25 @@ static struct Option egl_options[] =
   },
 
   {
-    .module       = "eglFilter",
-    .name         = "ffxCAS",
-    .description  = "AMD FidelityFX CAS",
-    .type         = OPTION_TYPE_BOOL,
-    .value.x_bool = false
+    .module        = "eglFilter",
+    .name          = "ffxFSR",
+    .description   = "AMD FidelityFX FSR",
+    .type          = OPTION_TYPE_BOOL,
+    .value.x_bool  = false
+  },
+  {
+    .module        = "eglFilter",
+    .name          = "ffxFSRSharpness",
+    .description   = "AMD FidelityFX FSR Sharpness",
+    .type          = OPTION_TYPE_FLOAT,
+    .value.x_float = 1.0f
+  },
+  {
+    .module        = "eglFilter",
+    .name          = "ffxCAS",
+    .description   = "AMD FidelityFX CAS",
+    .type          = OPTION_TYPE_BOOL,
+    .value.x_bool  = false
   },
   {
     .module        = "eglFilter",
@@ -466,6 +480,7 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   ImGui_ImplOpenGL3_NewFrame();
 
   egl_damageResize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
+  egl_desktopResize(this->desktop, this->width, this->height);
 }
 
 static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,

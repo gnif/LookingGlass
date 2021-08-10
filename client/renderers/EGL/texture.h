@@ -26,6 +26,7 @@
 #include "model.h"
 #include "common/framebuffer.h"
 #include "common/ringbuffer.h"
+#include "common/types.h"
 
 #include "util.h"
 #include "ll.h"
@@ -144,7 +145,7 @@ struct EGL_Texture
   _Atomic(bool) updated;
   bool postProcessed;
   EGL_Model * model;
-  float scale;
+  unsigned int finalWidth, finalHeight;
 
   void * bindData;
   int bindDataSize;
@@ -172,10 +173,13 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
 
 typedef void * PostProcessHandle;
 PostProcessHandle egl_textureAddFilter(EGL_Texture * texture,
-    EGL_Shader * shader, float outputScale, bool enabled);
+    EGL_Shader * shader, bool enabled);
 
 void egl_textureEnableFilter(PostProcessHandle * handle, bool enable);
 
+void egl_textureSetFilterRes(PostProcessHandle * handle,
+    unsigned int x, unsigned int y);
+
 void egl_textureInvalidate(EGL_Texture * texture);
 
-float egl_textureGetScale(EGL_Texture * texture);
+void egl_textureGetFinalSize(EGL_Texture * texture, struct Rect * rect);

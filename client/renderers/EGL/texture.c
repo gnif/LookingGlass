@@ -42,10 +42,10 @@ typedef struct RenderStep
   EGL_Texture *owner;
 
   bool enabled;
+  bool ready;
   GLuint fb;
   GLuint tex;
   EGL_Shader * shader;
-  float scale;
 
   unsigned int width, height;
 
@@ -92,8 +92,6 @@ bool egl_textureInit(EGL * egl, EGL_Texture ** texture_,
   glSamplerParameteri(this->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-
-  this->scale = 1.0f;
   return true;
 }
 
@@ -126,15 +124,15 @@ void egl_textureFree(EGL_Texture ** tex)
 
 bool setupRenderStep(EGL_Texture * this, RenderStep * step)
 {
-  step->width  = this->format.width  * step->scale;
-  step->height = this->format.height * step->scale;
+  if (step->ready && (step->width > 0 || step->height > 0))
+    return true;
 
   glBindTexture(GL_TEXTURE_2D, step->tex);
   glTexImage2D(GL_TEXTURE_2D,
       0,
       this->format.intFormat,
-      step->width,
-      step->height,
+      step->width  > 0 ? step->width  : this->format.width,
+      step->height > 0 ? step->height : this->format.height,
       0,
       this->format.format,
       this->format.dataType,
@@ -143,6 +141,7 @@ bool setupRenderStep(EGL_Texture * this, RenderStep * step)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glBindTexture(GL_TEXTURE_2D, 0);
 
+  step->ready = true;
   return true;
 }
 
@@ -168,8 +167,7 @@ bool egl_textureSetup(EGL_Texture * this, enum EGL_PixelFormat pixFmt,
   {
     RenderStep * step;
     for(ll_reset(this->render); ll_walk(this->render, (void **)&step); )
-      if (!setupRenderStep(this, step))
-        return false;
+      step->ready = false;
   }
 
   return this->ops.setup(this, &setup);
@@ -309,8 +307,24 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
   {
     ringbuffer_reset(this->textures);
 
+    /* configure all the filters */
+    for(ll_reset(this->render); ll_walk(this->render, (void **)&step); )
+    {
+      if (!step->enabled)
+        continue;
+
+      if (!step->ready)
+        setupRenderStep(this, step);
+    }
+
     if ((status = this->ops.get(this, &tex)) != EGL_TEX_STATUS_OK)
       return status;
+
+    struct Rect finalSz =
+    {
+      .x = this->format.width,
+      .y = this->format.height
+    };
 
     ringbuffer_push(this->textures, &(BindInfo) {
       .tex    = tex,
@@ -346,7 +360,13 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
       else
         glBindFramebuffer(GL_FRAMEBUFFER, step->fb);
 
-      glViewport(0, 0, step->width, step->height);
+      const struct Rect sz =
+      {
+        .x = step->width  > 0 ? step->width  : this->format.width,
+        .y = step->height > 0 ? step->height : this->format.height
+      };
+
+      glViewport(0, 0, sz.x, sz.y);
 
       /* use the shader (also configures it's set uniforms) */
       egl_shaderUse(step->shader);
@@ -354,16 +374,18 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
       /* set the size uniforms */
       glUniform2uiv(step->uInRes,
           ringbuffer_getCount(this->textures), bd->dimensions);
-      glUniform2ui(step->uOutRes, step->width, step->height);
+      glUniform2ui(step->uOutRes, sz.x, sz.y);
 
       /* render the scene */
       egl_modelRender(this->model);
+      finalSz.x = sz.x;
+      finalSz.y = sz.y;
 
       /* push the details into the ringbuffer for the next pass */
       ringbuffer_push(this->textures, &(BindInfo) {
         .tex    = step->tex,
-        .width  = step->width,
-        .height = step->height
+        .width  = sz.x,
+        .height = sz.y
       });
 
       /* bind the textures for the next pass */
@@ -378,6 +400,8 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
       egl_resetViewport(this->egl);
     }
 
+    this->finalWidth  = finalSz.x;
+    this->finalHeight = finalSz.y;
     this->postProcessed = true;
   }
   else
@@ -393,7 +417,7 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
 }
 
 PostProcessHandle egl_textureAddFilter(EGL_Texture * this, EGL_Shader * shader,
-    float outputScale, bool enabled)
+    bool enabled)
 {
   if (!this->render)
   {
@@ -407,20 +431,9 @@ PostProcessHandle egl_textureAddFilter(EGL_Texture * this, EGL_Shader * shader,
   glGenTextures(1, &step->tex);
   step->owner   = this;
   step->shader  = shader;
-  step->scale   = outputScale;
   step->uInRes  = egl_shaderGetUniform(shader, "uInRes" );
   step->uOutRes = egl_shaderGetUniform(shader, "uOutRes");
   step->enabled = enabled;
-
-  this->scale = outputScale;
-
-  if (this->formatValid)
-    if (!setupRenderStep(this, step))
-    {
-      glDeleteTextures(1, &step->tex);
-      free(step);
-      return NULL;
-    }
 
   ll_push(this->render, step);
   return (PostProcessHandle)step;
@@ -436,12 +449,33 @@ void egl_textureEnableFilter(PostProcessHandle * handle, bool enable)
   egl_textureInvalidate(step->owner);
 }
 
+void egl_textureSetFilterRes(PostProcessHandle * handle,
+    unsigned int x, unsigned int y)
+{
+  RenderStep * step = (RenderStep *)handle;
+  if (step->width == x && step->height == y)
+    return;
+
+  step->width  = x;
+  step->height = y;
+  step->ready  = false;
+  egl_textureInvalidate(step->owner);
+}
+
 void egl_textureInvalidate(EGL_Texture * texture)
 {
   texture->postProcessed = false;
 }
 
-float egl_textureGetScale(EGL_Texture * this)
+void egl_textureGetFinalSize(EGL_Texture * this, struct Rect * rect)
 {
-  return this->scale;
+  if (!this->render)
+  {
+    rect->x = this->format.width;
+    rect->y = this->format.height;
+    return;
+  }
+
+  rect->x = this->finalWidth;
+  rect->y = this->finalHeight;
 }

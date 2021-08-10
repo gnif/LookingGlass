@@ -1,6 +1,7 @@
 #version 300 es
-
 precision mediump float;
+
+#include "compat.h"
 
 in  vec2  iFragCoord;
 out vec4  fragColor;
@@ -9,22 +10,6 @@ uniform sampler2D iChannel0;
 uniform uvec2     uInRes[8];
 uniform uvec2     uOutRes;
 uniform float     uSharpness;
-
-// the following are not available until verion 400 or later
-// so we implement our own versions of them
-uint bitfieldExtract(uint val, int off, int size)
-{
-  uint mask = uint((1 << size) - 1);
-  return uint(val >> off) & mask;
-}
-
-uint bitfieldInsert(uint a, uint b, int c, int d)
-{
-  uint mask = ~(0xffffffffu << d) << c;
-  mask = ~mask;
-  a &= mask;
-  return a | (b << c);
-}
 
 #define A_GPU 1
 #define A_GLSL 1
