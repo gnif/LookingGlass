@@ -68,6 +68,17 @@ void egl_texFBFree(EGL_Texture * texture)
   free(this);
 }
 
+bool egl_texFBSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
+{
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexFB         * this   = UPCAST(TexFB        , parent );
+
+  for (int i = 0; i < EGL_TEX_BUFFER_MAX; ++i)
+    this->damage[i].count = -1;
+
+  return egl_texBufferStreamSetup(texture, setup);
+}
+
 static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
@@ -134,7 +145,7 @@ EGL_TextureOps EGL_TextureFrameBuffer =
 {
   .init    = egl_texFBInit,
   .free    = egl_texFBFree,
-  .setup   = egl_texBufferStreamSetup,
+  .setup   = egl_texFBSetup,
   .update  = egl_texFBUpdate,
   .process = egl_texBufferStreamProcess,
   .get     = egl_texBufferStreamGet
