@@ -18,9 +18,19 @@ uniform uvec2     uOutRes;
 
 #define FSR_EASU_F 1
 
-AF4 FsrEasuRF(AF2 p){return AF4(textureGather(iChannel0, p, 0));}
-AF4 FsrEasuGF(AF2 p){return AF4(textureGather(iChannel0, p, 1));}
-AF4 FsrEasuBF(AF2 p){return AF4(textureGather(iChannel0, p, 2));}
+vec4 _textureGather(sampler2D tex, vec2 uv, int comp)
+{
+  ivec2 p = ivec2((uv * vec2(uInRes[0])) - 0.5f);
+  vec4 c0 = texelFetchOffset(tex, p, 0, ivec2(0,1));
+  vec4 c1 = texelFetchOffset(tex, p, 0, ivec2(1,1));
+  vec4 c2 = texelFetchOffset(tex, p, 0, ivec2(1,0));
+  vec4 c3 = texelFetchOffset(tex, p, 0, ivec2(0,0));
+  return vec4(c0[comp], c1[comp], c2[comp],c3[comp]);
+}
+
+AF4 FsrEasuRF(AF2 p){return AF4(_textureGather(iChannel0, p, 0));}
+AF4 FsrEasuGF(AF2 p){return AF4(_textureGather(iChannel0, p, 1));}
+AF4 FsrEasuBF(AF2 p){return AF4(_textureGather(iChannel0, p, 2));}
 
 #include "ffx_fsr1.h"
 
