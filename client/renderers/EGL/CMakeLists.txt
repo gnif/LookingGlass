@@ -86,6 +86,7 @@ add_library(renderer_EGL STATIC
 	draw.c
 	splash.c
 	damage.c
+	ffx.c
 	${EGL_SHADER_OBJS}
 	"${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
 	${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp
