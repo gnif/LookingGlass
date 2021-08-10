@@ -982,9 +982,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         );
     }
 
-    ++this->overlayHistoryIdx;
     accumulated->count = util_mergeOverlappingRects(accumulated->rects, accumulated->count);
   }
+  ++this->overlayHistoryIdx;
 
   if (this->start)
   {
