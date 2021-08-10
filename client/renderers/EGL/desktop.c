@@ -94,7 +94,7 @@ struct EGL_Desktop
 };
 
 // forwards
-void egl_desktop_toggle_nv(int key, void * opaque);
+void toggleNV(int key, void * opaque);
 
 static bool egl_initDesktopShader(
   struct DesktopShader * shader,
@@ -179,7 +179,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     return false;
   }
 
-  app_registerKeybind(KEY_N, egl_desktop_toggle_nv, desktop,
+  app_registerKeybind(KEY_N, toggleNV, desktop,
       "Toggle night vision mode");
 
   desktop->nvMax     = option_get_int("egl", "nvGainMax");
@@ -226,7 +226,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
   return true;
 }
 
-void egl_desktop_toggle_nv(int key, void * opaque)
+void toggleNV(int key, void * opaque)
 {
   EGL_Desktop * desktop = (EGL_Desktop *)opaque;
   if (desktop->nvGain++ == desktop->nvMax)
@@ -428,7 +428,7 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
   return true;
 }
 
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
   if (desktop->useDMA && dmaFd >= 0)

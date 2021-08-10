@@ -551,7 +551,7 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   uint64_t start = nanotime();
-  if (!egl_desktop_update(this->desktop, frame, dmaFd, damageRects, damageRectsCount))
+  if (!egl_desktopUpdate(this->desktop, frame, dmaFd, damageRects, damageRectsCount))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;

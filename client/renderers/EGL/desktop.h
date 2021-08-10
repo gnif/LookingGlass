@@ -43,7 +43,7 @@ void egl_desktopFree(EGL_Desktop ** desktop);
 
 void egl_desktopConfigUI(EGL_Desktop * desktop);
 bool egl_desktopSetup (EGL_Desktop * desktop, const LG_RendererFormat format);
-bool egl_desktop_update(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount);
 void egl_desktopResize(EGL_Desktop * desktop, int width, int height);
 bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
