@@ -17,7 +17,6 @@ uniform uvec2     uOutRes;
 #include "ffx_a.h"
 
 #define FSR_EASU_F 1
-#define FSR_RCAS_F 1
 
 AF4 FsrEasuRF(AF2 p){return AF4(textureGather(iChannel0, p, 0));}
 AF4 FsrEasuGF(AF2 p){return AF4(textureGather(iChannel0, p, 1));}
