@@ -187,6 +187,71 @@ static bool egl_filterFFXFSR1ImguiConfig(EGL_Filter * filter)
     redraw = true;
   }
 
+  if (this->active)
+  {
+    double dimScale = (double) this->width / this->inWidth;
+    const char * name;
+    if (dimScale < 1.29)
+       name = "better than Ultra Quality";
+    else if (dimScale < 1.31)
+       name = "Ultra Quality";
+    else if (dimScale < 1.4)
+       name = "slightly worse than Ultra Quality";
+    else if (dimScale < 1.49)
+       name = "slightly better than Quality";
+    else if (dimScale < 1.51)
+       name = "Quality";
+    else if (dimScale < 1.6)
+       name = "slightly worse than Quality";
+    else if (dimScale < 1.69)
+       name = "slightly better than Balanced";
+    else if (dimScale < 1.71)
+       name = "Balanced";
+    else if (dimScale < 1.85)
+       name = "slightly worse than Balanced";
+    else if (dimScale < 1.99)
+       name = "slightly better than Performance";
+    else if (dimScale < 2.01)
+       name = "Performance";
+    else
+       name = "worse than Performance";
+    igText("Equivalent quality mode: %s", name);
+  }
+  else
+    igText("Equivalent quality mode: not upscaling, inactive");
+
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+  {
+    igBeginTooltip();
+    igText(
+      "Equivalent quality mode is decided by the resolution in the guest VM or the output\n"
+      "of the previous filter in the chain.\n\n"
+      "Here are the input resolutions needed for each quality mode at current window size:\n"
+    );
+
+    if (igBeginTable("Resolutions", 2, 0, (ImVec2) { 0.0f, 0.0f }, 0.0f))
+    {
+      igTableNextColumn();
+      igText("Ultra Quality");
+      igTableNextColumn();
+      igText("%.0fx%.0f", this->width / 1.3, this->height / 1.3);
+      igTableNextColumn();
+      igText("Quality");
+      igTableNextColumn();
+      igText("%.0fx%.0f", this->width / 1.5, this->height / 1.5);
+      igTableNextColumn();
+      igText("Balanced");
+      igTableNextColumn();
+      igText("%.0fx%.0f", this->width / 1.7, this->height / 1.7);
+      igTableNextColumn();
+      igText("Performance");
+      igTableNextColumn();
+      igText("%.0fx%.0f", this->width / 2.0, this->height / 2.0);
+      igEndTable();
+    }
+    igEndTooltip();
+  }
+
   igText("Sharpness:");
   igSameLine(0.0f, -1.0f);
   igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() -
