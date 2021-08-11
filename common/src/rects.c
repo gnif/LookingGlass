@@ -22,6 +22,9 @@
 
 #include <stdlib.h>
 
+#define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
+#define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
+
 struct Corner
 {
   int x;
@@ -196,4 +199,46 @@ void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
   struct FromFramebufferData data = { .frame = frame, .stride = srcStride };
   rectsBufferCopy(rects, count, dst, dstStride, height,
     framebuffer_get_buffer(frame), srcStride, &data, fbRowStart, NULL);
+}
+
+static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageRect * r2)
+{
+  return r1->x < r2->x + r2->width &&
+         r1->x + r1->width > r2->x &&
+         r1->y < r2->y + r2->height &&
+         r2->y + r1->height > r2->y;
+}
+
+int rectsMergeOverlapping(FrameDamageRect * rects, int count)
+{
+  bool removed[count];
+  bool changed;
+
+  memset(removed, 0, sizeof(removed));
+
+  do
+  {
+    changed = false;
+    for (int i = 0; i < count; ++i)
+      if (!removed[i])
+        for (int j = i + 1; j < count; ++j)
+          if (!removed[j] && rectIntersects(rects + i, rects + j))
+          {
+            uint32_t x2 = max(rects[i].x + rects[i].width, rects[j].x + rects[j].width);
+            uint32_t y2 = max(rects[i].y + rects[i].height, rects[j].y + rects[j].height);
+            rects[i].x = min(rects[i].x, rects[j].x);
+            rects[i].y = min(rects[i].y, rects[j].y);
+            rects[i].width  = x2 - rects[i].x;
+            rects[i].height = y2 - rects[i].y;
+            removed[j] = true;
+            changed = true;
+          }
+  }
+  while (changed);
+
+  int o = 0;
+  for (int i = 0; i < count; ++i)
+    if (!removed[i])
+      rects[o++] = rects[i];
+  return o;
 }
