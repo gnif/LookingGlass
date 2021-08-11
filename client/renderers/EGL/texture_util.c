@@ -79,12 +79,22 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       return false;
   }
 
-  fmt->width      = setup->width;
-  fmt->height     = setup->height;
-  fmt->stride     = setup->stride;
-  fmt->pitch      = setup->stride / fmt->bpp;
-  fmt->bufferSize = setup->height * setup->stride;
+  fmt->pixFmt = setup->pixFmt;
+  fmt->width  = setup->width;
+  fmt->height = setup->height;
 
+  if (setup->stride == 0)
+  {
+    fmt->stride = fmt->width * fmt->bpp;
+    fmt->pitch  = fmt->width;
+  }
+  else
+  {
+    fmt->stride = setup->stride;
+    fmt->pitch  = setup->stride / fmt->bpp;
+  }
+
+  fmt->bufferSize = fmt->height * fmt->stride;
   return true;
 }
 

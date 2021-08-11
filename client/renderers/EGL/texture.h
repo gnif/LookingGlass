@@ -22,10 +22,10 @@
 
 #include <stdbool.h>
 #include "egl.h"
+#include "egltypes.h"
 #include "shader.h"
 #include "model.h"
 #include "common/framebuffer.h"
-#include "common/ringbuffer.h"
 #include "common/types.h"
 
 #include "util.h"
@@ -37,47 +37,6 @@
 #include "texture_util.h"
 
 typedef struct EGL_Model EGL_Model;
-
-typedef enum EGL_TexType
-{
-  EGL_TEXTYPE_BUFFER,
-  EGL_TEXTYPE_FRAMEBUFFER,
-  EGL_TEXTYPE_DMABUF
-}
-EGL_TexType;
-
-typedef enum EGL_PixelFormat
-{
-  EGL_PF_RGBA,
-  EGL_PF_BGRA,
-  EGL_PF_RGBA10,
-  EGL_PF_RGBA16F
-}
-EGL_PixelFormat;
-
-typedef enum EGL_TexStatus
-{
-  EGL_TEX_STATUS_NOTREADY,
-  EGL_TEX_STATUS_OK,
-  EGL_TEX_STATUS_ERROR
-}
-EGL_TexStatus;
-
-typedef struct EGL_TexSetup
-{
-  /* the pixel format of the texture */
-  EGL_PixelFormat pixFmt;
-
-  /* the width of the texture in pixels */
-  size_t width;
-
-  /* the height of the texture in pixels */
-  size_t height;
-
-  /* the stide of the texture in bytes */
-  size_t stride;
-}
-EGL_TexSetup;
 
 typedef struct EGL_TexUpdate
 {
@@ -130,28 +89,12 @@ EGL_TextureOps;
 struct EGL_Texture
 {
   struct EGL_TextureOps ops;
-  EGL * egl;
   GLuint sampler;
-  RingBuffer textures;
 
   EGL_TexFormat format;
-  bool formatValid;
-
-  // needed for dmabuf
-  size_t size;
-
-  // for applying shaders
-  struct ll * render;
-  _Atomic(bool) updated;
-  bool postProcessed;
-  EGL_Model * model;
-  unsigned int finalWidth, finalHeight;
-
-  void * bindData;
-  int bindDataSize;
 };
 
-bool egl_textureInit(EGL * egl, EGL_Texture ** texture, EGLDisplay * display,
+bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type, bool streaming);
 void egl_textureFree(EGL_Texture ** tex);
 
@@ -168,6 +111,16 @@ bool egl_textureUpdateFromDMA(EGL_Texture * texture,
     const FrameBuffer * frame, const int dmaFd);
 
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
+
+static inline EGL_TexStatus egl_textureGet(EGL_Texture * texture, GLuint * tex,
+    unsigned int * sizeX, unsigned int * sizeY)
+{
+  if (sizeX)
+    *sizeX = texture->format.width;
+  if (sizeY)
+    *sizeY = texture->format.height;
+  return texture->ops.get(texture, tex);
+}
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
 

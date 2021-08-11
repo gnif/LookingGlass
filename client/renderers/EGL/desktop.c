@@ -38,10 +38,8 @@
 #include "desktop_rgb.frag.h"
 #include "desktop_rgb.def.h"
 
-#include "basic.vert.h"
-#include "ffx_cas.frag.h"
-#include "ffx_fsr1_easu.frag.h"
-#include "ffx_fsr1_rcas.frag.h"
+#include "postprocess.h"
+#include "filters.h"
 
 struct DesktopShader
 {
@@ -60,6 +58,7 @@ struct EGL_Desktop
   EGLDisplay * display;
 
   EGL_Texture          * texture;
+  GLuint                 sampler;
   struct DesktopShader shader;
   EGL_DesktopRects     * mesh;
   CountedBuffer        * matrix;
@@ -67,7 +66,6 @@ struct EGL_Desktop
   // internals
   int               width, height;
   LG_RendererRotate rotate;
-  bool              upscale;
 
   // scale algorithm
   int scaleAlgo;
@@ -82,15 +80,8 @@ struct EGL_Desktop
   bool useDMA;
   LG_RendererFormat format;
 
-  EGL_Shader * ffxFSR1[2];
-  bool ffxFSR1Enable;
-  PostProcessHandle ffxFSR1Handle[2];
-  EGL_Uniform ffxFSR1Uniform;
-
-  EGL_Shader * ffxCAS;
-  bool ffxCASEnable;
-  PostProcessHandle ffxCASHandle;
-  EGL_Uniform ffxCASUniform;
+  EGL_PostProcess * pp;
+  _Atomic(bool) processFrame;
 };
 
 // forwards
@@ -122,20 +113,6 @@ static bool egl_initDesktopShader(
   return true;
 }
 
-static void setupFilters(EGL_Desktop * desktop)
-{
-  desktop->ffxFSR1Handle[0] =
-    egl_textureAddFilter(desktop->texture, desktop->ffxFSR1[0],
-        desktop->ffxFSR1Enable);
-  desktop->ffxFSR1Handle[1] =
-    egl_textureAddFilter(desktop->texture, desktop->ffxFSR1[1],
-        desktop->ffxFSR1Enable);
-
-  desktop->ffxCASHandle =
-    egl_textureAddFilter(desktop->texture, desktop->ffxCAS,
-        desktop->ffxCASEnable);
-}
-
 bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     bool useDMA, int maxRects)
 {
@@ -150,7 +127,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
   desktop->egl     = egl;
   desktop->display = display;
 
-  if (!egl_textureInit(egl, &desktop->texture, display,
+  if (!egl_textureInit(&desktop->texture, display,
         useDMA ? EGL_TEXTYPE_DMABUF : EGL_TEXTYPE_FRAMEBUFFER, true))
   {
     DEBUG_ERROR("Failed to initialize the desktop texture");
@@ -188,41 +165,14 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
   desktop->scaleAlgo = option_get_int("egl", "scale"    );
   desktop->useDMA    = useDMA;
 
-  // AMD FidelidyFX FSR
-  egl_shaderInit(&desktop->ffxFSR1[0]);
-  egl_shaderCompile(desktop->ffxFSR1[0],
-      b_shader_basic_vert        , b_shader_basic_vert_size,
-      b_shader_ffx_fsr1_easu_frag, b_shader_ffx_fsr1_easu_frag_size);
+  if (!egl_postProcessInit(&desktop->pp))
+  {
+    DEBUG_ERROR("Failed to initialize the post process manager");
+    return false;
+  }
 
-  egl_shaderInit(&desktop->ffxFSR1[1]);
-  egl_shaderCompile(desktop->ffxFSR1[1],
-      b_shader_basic_vert        , b_shader_basic_vert_size,
-      b_shader_ffx_fsr1_rcas_frag, b_shader_ffx_fsr1_rcas_frag_size);
-
-  desktop->ffxFSR1Enable = option_get_bool("eglFilter", "ffxFSR");
-  desktop->ffxFSR1Uniform.type = EGL_UNIFORM_TYPE_1F;
-  desktop->ffxFSR1Uniform.location =
-    egl_shaderGetUniform(desktop->ffxFSR1[1], "uSharpness");
-  desktop->ffxFSR1Uniform.f[0] =
-    option_get_float("eglFilter", "ffxFSRSharpness");
-  egl_shaderSetUniforms(desktop->ffxFSR1[1], &desktop->ffxFSR1Uniform, 1);
-
-  // AMD FidelidyFX CAS
-  egl_shaderInit(&desktop->ffxCAS);
-  egl_shaderCompile(desktop->ffxCAS,
-      b_shader_basic_vert  , b_shader_basic_vert_size,
-      b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size);
-
-  desktop->ffxCASEnable = option_get_bool("eglFilter", "ffxCAS");
-  desktop->ffxCASUniform.type = EGL_UNIFORM_TYPE_1F;
-  desktop->ffxCASUniform.location =
-    egl_shaderGetUniform(desktop->ffxCAS, "uSharpness");
-  desktop->ffxCASUniform.f[0] =
-    option_get_float("eglFilter", "ffxCASSharpness");
-  egl_shaderSetUniforms(desktop->ffxCAS, &desktop->ffxCASUniform, 1);
-
-  setupFilters(desktop);
-
+  egl_postProcessAdd(desktop->pp, &egl_filterFFXFSR1Ops);
+  egl_postProcessAdd(desktop->pp, &egl_filterFFXCASOps );
   return true;
 }
 
@@ -258,9 +208,7 @@ void egl_desktopFree(EGL_Desktop ** desktop)
   egl_desktopRectsFree(&(*desktop)->mesh        );
   countedBufferRelease(&(*desktop)->matrix      );
 
-  egl_shaderFree(&(*desktop)->ffxFSR1[0]);
-  egl_shaderFree(&(*desktop)->ffxFSR1[1]);
-  egl_shaderFree(&(*desktop)->ffxCAS);
+  egl_postProcessFree(&(*desktop)->pp);
 
   free(*desktop);
   *desktop = NULL;
@@ -304,81 +252,10 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
 
-  bool invalidateTex = false;
-  // AMD FidelityFX FSR
-  bool fsr1 = desktop->ffxFSR1Enable;
-  igCheckbox("AMD FidelityFX FSR", &fsr1);
-  if (fsr1 != desktop->ffxFSR1Enable)
+  if (egl_postProcessImgui(desktop->pp))
   {
-    desktop->ffxFSR1Enable = fsr1;
-    egl_textureEnableFilter(desktop->ffxFSR1Handle[0],
-        fsr1 && desktop->upscale);
-    egl_textureEnableFilter(desktop->ffxFSR1Handle[1],
-        fsr1 && desktop->upscale);
-    invalidateTex = true;
-  }
-
-  float fsr1Sharpness = desktop->ffxFSR1Uniform.f[0];
-  igText("Sharpness:");
-  igSameLine(0.0f, -1.0f);
-  igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() -
-      igGetStyle()->WindowPadding.x);
-  igSliderFloat("##fsr1Sharpness", &fsr1Sharpness, 0.0f, 1.0f, NULL, 0);
-  igPopItemWidth();
-
-  if (fsr1Sharpness != desktop->ffxFSR1Uniform.f[0])
-  {
-    // enable FSR1 if the sharpness was changed
-    if (!fsr1)
-    {
-      fsr1 = true;
-      desktop->ffxFSR1Enable = fsr1;
-      egl_textureEnableFilter(desktop->ffxFSR1Handle[0],
-          fsr1 && desktop->upscale);
-      egl_textureEnableFilter(desktop->ffxFSR1Handle[1],
-          fsr1 && desktop->upscale);
-    }
-    desktop->ffxFSR1Uniform.f[0] = 2.0f - fsr1Sharpness * 2.0f;
-    egl_shaderSetUniforms(desktop->ffxFSR1[1], &desktop->ffxFSR1Uniform, 1);
-    invalidateTex = true;
-  }
-
-  // AMD FiedlityFX CAS
-  bool cas = desktop->ffxCASEnable;
-  igCheckbox("AMD FidelityFX CAS", &cas);
-  if (cas != desktop->ffxCASEnable)
-  {
-    desktop->ffxCASEnable = cas;
-    egl_textureEnableFilter(desktop->ffxCASHandle, cas);
-    invalidateTex = true;
-  }
-
-  float casSharpness = desktop->ffxCASUniform.f[0];
-  igText("Sharpness:");
-  igSameLine(0.0f, -1.0f);
-  igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() -
-      igGetStyle()->WindowPadding.x);
-  igSliderFloat("##casSharpness", &casSharpness, 0.0f, 1.0f, NULL, 0);
-  igPopItemWidth();
-
-  if (casSharpness != desktop->ffxCASUniform.f[0])
-  {
-    // enable CAS if the sharpness was changed
-    if (!cas)
-    {
-      cas = true;
-      desktop->ffxCASEnable = cas;
-      egl_textureEnableFilter(desktop->ffxCASHandle, cas);
-    }
-    desktop->ffxCASUniform.f[0] = casSharpness;
-    egl_shaderSetUniforms(desktop->ffxCAS, &desktop->ffxCASUniform, 1);
-    invalidateTex = true;
-  }
-
-  if (invalidateTex)
-  {
-    egl_textureInvalidate(desktop->texture);
-    app_invalidateWindow(true);
+    atomic_store(&desktop->processFrame, true);
+    app_invalidateWindow(false);
   }
 }
 
@@ -425,6 +302,12 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
     return false;
   }
 
+  glGenSamplers(1, &desktop->sampler);
+  glSamplerParameteri(desktop->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glSamplerParameteri(desktop->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glSamplerParameteri(desktop->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+  glSamplerParameteri(desktop->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+
   return true;
 }
 
@@ -434,52 +317,43 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
   if (desktop->useDMA && dmaFd >= 0)
   {
     if (egl_textureUpdateFromDMA(desktop->texture, frame, dmaFd))
+    {
+      atomic_store(&desktop->processFrame, true);
       return true;
+    }
 
     DEBUG_WARN("DMA update failed, disabling DMABUF imports");
     desktop->useDMA = false;
 
     egl_textureFree(&desktop->texture);
-    if (!egl_textureInit(desktop->egl, &desktop->texture, desktop->display,
+    if (!egl_textureInit(&desktop->texture, desktop->display,
           EGL_TEXTYPE_FRAMEBUFFER, true))
     {
       DEBUG_ERROR("Failed to initialize the desktop texture");
       return false;
     }
 
-    setupFilters(desktop);
-
     if (!egl_desktopSetup(desktop, desktop->format))
       return false;
   }
 
-  return egl_textureUpdateFromFrame(desktop->texture, frame, damageRects, damageRectsCount);
+  if (egl_textureUpdateFromFrame(desktop->texture, frame,
+        damageRects, damageRectsCount))
+  {
+    atomic_store(&desktop->processFrame, true);
+    return true;
+  }
+
+  return false;
 }
 
 void egl_desktopResize(EGL_Desktop * desktop, int width, int height)
 {
-  if (width > desktop->width && height > desktop->height)
-  {
-    desktop->upscale = true;
-    if (desktop->ffxFSR1Enable)
-    {
-      egl_textureEnableFilter(desktop->ffxFSR1Handle[0], true);
-      egl_textureEnableFilter(desktop->ffxFSR1Handle[1], true);
-    }
-    egl_textureSetFilterRes(desktop->ffxFSR1Handle[0], width, height);
-    egl_textureSetFilterRes(desktop->ffxFSR1Handle[1], width, height);
-    egl_textureSetFilterRes(desktop->ffxCASHandle    , width, height);
-  }
-  else
-  {
-    desktop->upscale = false;
-    egl_textureEnableFilter(desktop->ffxFSR1Handle[0], false);
-    egl_textureEnableFilter(desktop->ffxFSR1Handle[1], false);
-    egl_textureSetFilterRes(desktop->ffxCASHandle, 0, 0);
-  }
+  atomic_store(&desktop->processFrame, true);
 }
 
-bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
+bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
+    unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects)
 {
@@ -492,10 +366,21 @@ bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
 
   int scaleAlgo = EGL_SCALE_NEAREST;
 
-  struct Rect finalSize;
-  egl_textureBind(desktop->texture);
-  egl_textureGetFinalSize(desktop->texture, &finalSize);
-  if (finalSize.x > desktop->width || finalSize.y > desktop->height)
+  if (atomic_exchange(&desktop->processFrame, false))
+    egl_postProcessRun(desktop->pp, desktop->texture, outputWidth, outputHeight);
+
+  unsigned int finalSizeX, finalSizeY;
+  GLuint texture = egl_postProcessGetOutput(desktop->pp,
+      &finalSizeX, &finalSizeY);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  egl_resetViewport(desktop->egl);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glBindSampler(0, desktop->sampler);
+
+  if (finalSizeX > desktop->width || finalSizeY > desktop->height)
     scaleType = EGL_DESKTOP_DOWNSCALE;
 
   switch (desktop->scaleAlgo)
@@ -538,7 +423,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, const float x, const float y,
     {
       .type        = EGL_UNIFORM_TYPE_2I,
       .location    = shader->uTextureSize,
-      .i           = { finalSize.x, finalSize.y },
+      .i           = { finalSizeX, finalSizeY },
     },
     {
       .type        = EGL_UNIFORM_TYPE_M3x2FV,

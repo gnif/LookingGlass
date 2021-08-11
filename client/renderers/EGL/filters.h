@@ -20,38 +20,5 @@
 
 #pragma once
 
-#include "egltypes.h"
-
-//typedef struct EGL_TexSetup EGL_TexSetup;
-
-typedef struct EGL_TexFormat
-{
-  EGL_PixelFormat pixFmt;
-
-  size_t       bpp;
-  GLenum       format;
-  GLenum       intFormat;
-  GLenum       dataType;
-  unsigned int fourcc;
-  size_t       bufferSize;
-
-  size_t       width, height;
-  size_t       stride, pitch;
-}
-EGL_TexFormat;
-
-typedef struct EGL_TexBuffer
-{
-  size_t size;
-  GLuint pbo;
-  void * map;
-  bool   updated;
-}
-EGL_TexBuffer;
-
-bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
-bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
-    int count);
-void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
-bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer);
-void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
+extern EGL_FilterOps egl_filterFFXCASOps;
+extern EGL_FilterOps egl_filterFFXFSR1Ops;

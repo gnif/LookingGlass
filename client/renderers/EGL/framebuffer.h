@@ -20,38 +20,16 @@
 
 #pragma once
 
-#include "egltypes.h"
+#include "texture.h"
 
-//typedef struct EGL_TexSetup EGL_TexSetup;
+typedef struct EGL_Framebuffer EGL_Framebuffer;
 
-typedef struct EGL_TexFormat
-{
-  EGL_PixelFormat pixFmt;
+bool egl_framebufferInit(EGL_Framebuffer ** fb);
+void egl_framebufferFree(EGL_Framebuffer ** fb);
 
-  size_t       bpp;
-  GLenum       format;
-  GLenum       intFormat;
-  GLenum       dataType;
-  unsigned int fourcc;
-  size_t       bufferSize;
+bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
+    unsigned int width, unsigned int height);
 
-  size_t       width, height;
-  size_t       stride, pitch;
-}
-EGL_TexFormat;
+void egl_framebufferBind(EGL_Framebuffer * this);
 
-typedef struct EGL_TexBuffer
-{
-  size_t size;
-  GLuint pbo;
-  void * map;
-  bool   updated;
-}
-EGL_TexBuffer;
-
-bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
-bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
-    int count);
-void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
-bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer);
-void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
+GLuint egl_framebufferGetTexture(EGL_Framebuffer * this);

@@ -20,38 +20,27 @@
 
 #pragma once
 
-#include "egltypes.h"
+#include "filter.h"
+#include "texture.h"
 
-//typedef struct EGL_TexSetup EGL_TexSetup;
+typedef struct EGL_PostProcess EGL_PostProcess;
 
-typedef struct EGL_TexFormat
-{
-  EGL_PixelFormat pixFmt;
+void egl_postProcessEarlyInit(void);
 
-  size_t       bpp;
-  GLenum       format;
-  GLenum       intFormat;
-  GLenum       dataType;
-  unsigned int fourcc;
-  size_t       bufferSize;
+bool egl_postProcessInit(EGL_PostProcess ** pp);
+void egl_postProcessFree(EGL_PostProcess ** pp);
 
-  size_t       width, height;
-  size_t       stride, pitch;
-}
-EGL_TexFormat;
+/* create and add a filter to this processor */
+bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops);
 
-typedef struct EGL_TexBuffer
-{
-  size_t size;
-  GLuint pbo;
-  void * map;
-  bool   updated;
-}
-EGL_TexBuffer;
+/* render the imgui options
+ * returns true if the filter needs to be re-run */
+bool egl_postProcessImgui(EGL_PostProcess * this);
 
-bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
-bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
-    int count);
-void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
-bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer);
-void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
+/* apply the filters to the supplied texture
+ * targetX/Y is the final target output dimension hint if scalers are present */
+bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
+    unsigned int targetX, unsigned int targetY);
+
+GLuint egl_postProcessGetOutput(EGL_PostProcess * this,
+    unsigned int * outputX, unsigned int * outputY);

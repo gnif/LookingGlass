@@ -20,38 +20,53 @@
 
 #pragma once
 
-#include "egltypes.h"
+#include <stddef.h>
 
-//typedef struct EGL_TexSetup EGL_TexSetup;
-
-typedef struct EGL_TexFormat
+typedef enum EGL_TexType
 {
+  EGL_TEXTYPE_BUFFER,
+  EGL_TEXTYPE_FRAMEBUFFER,
+  EGL_TEXTYPE_DMABUF
+}
+EGL_TexType;
+
+typedef enum EGL_PixelFormat
+{
+  EGL_PF_RGBA,
+  EGL_PF_BGRA,
+  EGL_PF_RGBA10,
+  EGL_PF_RGBA16F
+}
+EGL_PixelFormat;
+
+typedef enum EGL_TexStatus
+{
+  EGL_TEX_STATUS_NOTREADY,
+  EGL_TEX_STATUS_OK,
+  EGL_TEX_STATUS_ERROR
+}
+EGL_TexStatus;
+
+typedef struct EGL_TexSetup
+{
+  /* the pixel format of the texture */
   EGL_PixelFormat pixFmt;
 
-  size_t       bpp;
-  GLenum       format;
-  GLenum       intFormat;
-  GLenum       dataType;
-  unsigned int fourcc;
-  size_t       bufferSize;
+  /* the width of the texture in pixels */
+  size_t width;
 
-  size_t       width, height;
-  size_t       stride, pitch;
+  /* the height of the texture in pixels */
+  size_t height;
+
+  /* the stide of the texture in bytes */
+  size_t stride;
 }
-EGL_TexFormat;
+EGL_TexSetup;
 
-typedef struct EGL_TexBuffer
+typedef enum EGL_FilterType
 {
-  size_t size;
-  GLuint pbo;
-  void * map;
-  bool   updated;
+  EGL_FILTER_TYPE_EFFECT,
+  EGL_FILTER_TYPE_UPSCALE,
+  EGL_FILTER_TYPE_DOWNSCALE
 }
-EGL_TexBuffer;
-
-bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
-bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
-    int count);
-void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
-bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer);
-void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
+EGL_FilterType;

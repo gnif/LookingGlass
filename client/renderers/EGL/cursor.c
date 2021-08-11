@@ -80,11 +80,11 @@ struct EGL_Cursor
   struct EGL_Model * model;
 };
 
-static bool cursorTexInit(EGL * egl, struct CursorTex * t,
+static bool cursorTexInit(struct CursorTex * t,
     const char * vertex_code  , size_t vertex_size,
     const char * fragment_code, size_t fragment_size)
 {
-  if (!egl_textureInit(egl, &t->texture, NULL, EGL_TEXTYPE_BUFFER, false))
+  if (!egl_textureInit(&t->texture, NULL, EGL_TEXTYPE_BUFFER, false))
   {
     DEBUG_ERROR("Failed to initialize the cursor texture");
     return false;
@@ -133,7 +133,7 @@ static void cursorTexFree(struct CursorTex * t)
   egl_shaderFree (&t->shader );
 };
 
-bool egl_cursorInit(EGL * egl, EGL_Cursor ** cursor)
+bool egl_cursorInit(EGL_Cursor ** cursor)
 {
   *cursor = (EGL_Cursor *)malloc(sizeof(EGL_Cursor));
   if (!*cursor)
@@ -145,12 +145,12 @@ bool egl_cursorInit(EGL * egl, EGL_Cursor ** cursor)
   memset(*cursor, 0, sizeof(EGL_Cursor));
   LG_LOCK_INIT((*cursor)->lock);
 
-  if (!cursorTexInit(egl, &(*cursor)->norm,
+  if (!cursorTexInit(&(*cursor)->norm,
       b_shader_cursor_vert    , b_shader_cursor_vert_size,
       b_shader_cursor_rgb_frag, b_shader_cursor_rgb_frag_size))
     return false;
 
-  if (!cursorTexInit(egl, &(*cursor)->mono,
+  if (!cursorTexInit(&(*cursor)->mono,
       b_shader_cursor_vert     , b_shader_cursor_vert_size,
       b_shader_cursor_mono_frag, b_shader_cursor_mono_frag_size))
     return false;

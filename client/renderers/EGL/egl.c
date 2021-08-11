@@ -47,6 +47,7 @@
 #include "desktop.h"
 #include "cursor.h"
 #include "splash.h"
+#include "postprocess.h"
 #include "util.h"
 
 #define SPLASH_FADE_TIME 1000000
@@ -182,35 +183,6 @@ static struct Option egl_options[] =
     .value.x_bool = false
   },
 
-  {
-    .module        = "eglFilter",
-    .name          = "ffxFSR",
-    .description   = "AMD FidelityFX FSR",
-    .type          = OPTION_TYPE_BOOL,
-    .value.x_bool  = false
-  },
-  {
-    .module        = "eglFilter",
-    .name          = "ffxFSRSharpness",
-    .description   = "AMD FidelityFX FSR Sharpness",
-    .type          = OPTION_TYPE_FLOAT,
-    .value.x_float = 1.0f
-  },
-  {
-    .module        = "eglFilter",
-    .name          = "ffxCAS",
-    .description   = "AMD FidelityFX CAS",
-    .type          = OPTION_TYPE_BOOL,
-    .value.x_bool  = false
-  },
-  {
-    .module        = "eglFilter",
-    .name          = "ffxCASSharpness",
-    .description   = "AMD FidelityFX CAS Sharpness",
-    .type          = OPTION_TYPE_FLOAT,
-    .value.x_float = 0.0f
-  },
-
   {0}
 };
 
@@ -222,6 +194,7 @@ static const char * egl_getName(void)
 static void egl_setup(void)
 {
   option_register(egl_options);
+  egl_postProcessEarlyInit();
 }
 
 static bool egl_create(LG_Renderer ** renderer, const LG_RendererParams params,
@@ -824,7 +797,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
-  if (!egl_cursorInit(this, &this->cursor))
+  if (!egl_cursorInit(&this->cursor))
   {
     DEBUG_ERROR("Failed to initialize the cursor");
     return false;
@@ -989,6 +962,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   if (this->start)
   {
     if (egl_desktopRender(this->desktop,
+        this->destRect.w, this->destRect.h,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated))

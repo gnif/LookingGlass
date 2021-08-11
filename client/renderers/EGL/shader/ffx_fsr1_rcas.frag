@@ -3,11 +3,10 @@ precision mediump float;
 
 #include "compat.h"
 
-in  vec2  iFragCoord;
+in  vec2  fragCoord;
 out vec4  fragColor;
 
-uniform sampler2D iChannel0;
-uniform uvec2     uInRes[8];
+uniform sampler2D texture;
 uniform float     uSharpness;
 
 #define A_GPU  1
@@ -16,7 +15,7 @@ uniform float     uSharpness;
 
 #include "ffx_a.h"
 
-AF4 FsrRcasLoadF(ASU2 p) { return texelFetch(iChannel0, ASU2(p), 0); }
+AF4 FsrRcasLoadF(ASU2 p) { return texelFetch(texture, ASU2(p), 0); }
 void FsrRcasInputF(inout AF1 r, inout AF1 g, inout AF1 b) {}
 
 #define FSR_RCAS_F       1
@@ -25,8 +24,8 @@ void FsrRcasInputF(inout AF1 r, inout AF1 g, inout AF1 b) {}
 
 void main()
 {
-  vec2 inRes  = vec2(uInRes[0]);
-  uvec2 point = uvec2(iFragCoord * (inRes + 0.5f));
+  vec2  inRes = vec2(textureSize(texture, 0));
+  uvec2 point = uvec2(fragCoord * (inRes + 0.5f));
 
   uvec4 const0;
   FsrRcasCon(const0, uSharpness);

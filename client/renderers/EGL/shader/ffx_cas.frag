@@ -3,12 +3,10 @@ precision mediump float;
 
 #include "compat.h"
 
-in  vec2  iFragCoord;
+in  vec2  fragCoord;
 out vec4  fragColor;
 
-uniform sampler2D iChannel0;
-uniform uvec2     uInRes[8];
-uniform uvec2     uOutRes;
+uniform sampler2D texture;
 uniform float     uSharpness;
 
 #define A_GPU 1
@@ -18,7 +16,7 @@ uniform float     uSharpness;
 
 vec3 imageLoad(ivec2 point)
 {
-  return texelFetch(iChannel0, point, 0).rgb;
+  return texelFetch(texture, point, 0).rgb;
 }
 
 AF3 CasLoad(ASU2 p)
@@ -32,18 +30,15 @@ void CasInput(inout AF1 r,inout AF1 g,inout AF1 b) {}
 
 void main()
 {
-  uvec2 point = uvec2(iFragCoord * vec2(uInRes[0].xy));
+  vec2  res   = vec2(textureSize(texture, 0));
+  uvec2 point = uvec2(fragCoord * res);
    
   vec4 color;
-  vec2 inputResolution  = vec2(uInRes[0]);
-  vec2 outputResolution = vec2(uOutRes);
-
   uvec4 const0;
   uvec4 const1;
 
   CasSetup(const0, const1, uSharpness,
-    inputResolution.x, inputResolution.y, 
-    outputResolution.x, outputResolution.y);
+    res.x, res.y, res.x, res.y);
 
   CasFilter(
     fragColor.r, fragColor.g, fragColor.b,
