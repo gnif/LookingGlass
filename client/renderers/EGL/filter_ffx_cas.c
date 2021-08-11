@@ -74,8 +74,9 @@ static void egl_filterFFXCASEarlyInit(void)
 
 static void casUpdateConsts(EGL_FilterFFXCAS * this)
 {
-  ffxCasConst((uint32_t *) this->consts->data, this->sharpness, this->width, this->height,
-    this->width, this->height);
+  ffxCasConst((uint32_t *) this->consts->data, this->sharpness,
+      this->width, this->height,
+      this->width, this->height);
 }
 
 static bool egl_filterFFXCASInit(EGL_Filter ** filter)
@@ -103,6 +104,12 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
   }
 
   this->consts = countedBufferNew(8 * sizeof(GLuint));
+  if (!this->consts)
+  {
+    DEBUG_ERROR("Failed to allocate consts buffer");
+    goto error_shader;
+  }
+
   egl_shaderSetUniforms(this->shader, &(EGL_Uniform) {
     .type     = EGL_UNIFORM_TYPE_4UIV,
     .location = egl_shaderGetUniform(this->shader, "uConsts"),
@@ -115,7 +122,7 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
   if (!egl_framebufferInit(&this->fb))
   {
     DEBUG_ERROR("Failed to initialize the framebuffer");
-    goto error_shader;
+    goto error_consts;
   }
 
   glGenSamplers(1, &this->sampler);
@@ -126,6 +133,9 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
 
   *filter = &this->base;
   return true;
+
+error_consts:
+   countedBufferRelease(&this->consts);
 
 error_shader:
   egl_shaderFree(&this->shader);
@@ -140,6 +150,7 @@ static void egl_filterFFXCASFree(EGL_Filter * filter)
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
   egl_shaderFree(&this->shader);
+  countedBufferRelease(&this->consts);
   egl_framebufferFree(&this->fb);
   glDeleteSamplers(1, &this->sampler);
   free(this);
