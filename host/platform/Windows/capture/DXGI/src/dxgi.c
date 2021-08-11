@@ -40,7 +40,7 @@
 
 #include "dxgi_extra.h"
 
-#define LOCKED(x) INTERLOCKED_SECTION(this->deviceContextLock, x)
+#define LOCKED(...) INTERLOCKED_SECTION(this->deviceContextLock, __VA_ARGS__)
 
 enum TextureState
 {
@@ -56,8 +56,10 @@ typedef struct Texture
   ID3D11Texture2D          * tex;
   D3D11_MAPPED_SUBRESOURCE   map;
   uint64_t                   copyTime;
-  uint8_t                    damageRectsCount;
+  uint32_t                   damageRectsCount;
   FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
+  int32_t                    texDamageCount;
+  FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
 }
 Texture;
 
@@ -556,6 +558,7 @@ static bool dxgi_init(void)
 
   for (int i = 0; i < this->maxTextures; ++i)
   {
+    this->texture[i].texDamageCount = -1;
     status = ID3D11Device_CreateTexture2D(this->device, &texDesc, NULL, &this->texture[i].tex);
     if (FAILED(status))
     {
@@ -859,10 +862,36 @@ static CaptureResult dxgi_capture(void)
       {
         computeFrameDamage(tex);
 
+        if (tex->texDamageCount < 0 || tex->damageRectsCount == 0 ||
+            tex->texDamageCount + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS)
+          tex->texDamageCount = -1;
+        else
+        {
+          memcpy(tex->texDamageRects + tex->texDamageCount, tex->damageRects,
+            tex->damageRectsCount * sizeof(FrameDamageRect));
+          tex->texDamageCount += tex->damageRectsCount;
+          tex->texDamageCount = rectsMergeOverlapping(tex->texDamageRects, tex->texDamageCount);
+        }
+
         // issue the copy from GPU to CPU RAM
         tex->copyTime = microtime();
-        ID3D11DeviceContext_CopyResource(this->deviceContext,
-          (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
+        if (tex->texDamageCount < 0)
+          ID3D11DeviceContext_CopyResource(this->deviceContext,
+            (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
+        else
+        {
+          for (int i = 0; i < tex->texDamageCount; ++i)
+          {
+            FrameDamageRect * rect = tex->texDamageRects + i;
+            D3D11_BOX box = {
+              .left = rect->x, .top = rect->y, .front = 0, .back = 1,
+              .right = rect->x + rect->width, .bottom = rect->y + rect->height,
+            };
+            ID3D11DeviceContext_CopySubresourceRegion(this->deviceContext,
+              (ID3D11Resource *)tex->tex, 0, rect->x, rect->y, 0,
+              (ID3D11Resource *)src, 0, &box);
+          }
+        }
       }
 
       if (copyPointer)
@@ -878,6 +907,22 @@ static CaptureResult dxgi_capture(void)
     if (copyFrame)
     {
       ID3D11Texture2D_Release(src);
+
+      for (int i = 0; i < this->maxTextures; ++i)
+      {
+        Texture * t = this->texture + i;
+        if (i == this->texWIndex)
+          t->texDamageCount = 0;
+        else if (tex->damageRectsCount > 0 && t->texDamageCount >= 0 &&
+                 t->texDamageCount + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
+        {
+          memcpy(t->texDamageRects + t->texDamageCount, tex->damageRects,
+            tex->damageRectsCount * sizeof(FrameDamageRect));
+          t->texDamageCount += tex->damageRectsCount;
+        }
+        else
+          t->texDamageCount = -1;
+      }
 
       // set the state, and signal
       tex->state     = TEXTURE_STATE_PENDING_MAP;
