@@ -226,7 +226,7 @@ static bool egl_filterFFXFSR1ImguiConfig(EGL_Filter * filter)
        name = "Performance";
     else
        name = "worse than Performance";
-    igText("Equivalent quality mode: %s", name);
+    igText("Equivalent quality mode: %s%s", name, this->enable ? "" : ", inactive");
   }
   else
     igText("Equivalent quality mode: not upscaling, inactive");
