@@ -36,10 +36,11 @@ typedef struct EGL_FilterFFXFSR1
 {
   EGL_Filter base;
 
-  EGL_Shader * easu, * rcas;
-  bool         enable, active;
-  float        sharpness;
-  EGL_Uniform  easuUniform[2], rcasUniform;
+  EGL_Shader    * easu, * rcas;
+  bool            enable, active;
+  float           sharpness;
+  CountedBuffer * consts;
+  EGL_Uniform     easuUniform[2], rcasUniform;
 
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
@@ -120,13 +121,20 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
     goto error_rcas;
   }
 
+  this->consts = countedBufferNew(16 * sizeof(GLuint));
+  if (!this->consts)
+  {
+    DEBUG_ERROR("Failed to allocate consts buffer");
+    goto error_rcas;
+  }
+
 
   this->enable = option_get_bool("eglFilter", "ffxFSR");
 
   this->easuUniform[0].type = EGL_UNIFORM_TYPE_4UIV;
   this->easuUniform[0].location =
     egl_shaderGetUniform(this->easu, "uConsts");
-  this->easuUniform[0].v = countedBufferNew(16 * sizeof(GLuint));
+  this->easuUniform[0].v = this->consts;
   this->easuUniform[1].type = EGL_UNIFORM_TYPE_2F;
   this->easuUniform[1].location =
     egl_shaderGetUniform(this->easu, "uOutRes");
@@ -139,7 +147,7 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
   if (!egl_framebufferInit(&this->easuFb))
   {
     DEBUG_ERROR("Failed to initialize the Easu framebuffer");
-    goto error_rcas;
+    goto error_consts;
   }
 
   if (!egl_framebufferInit(&this->rcasFb))
@@ -160,6 +168,9 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
 error_easuFb:
   egl_framebufferFree(&this->rcasFb);
 
+error_consts:
+  countedBufferRelease(&this->consts);
+
 error_rcas:
   egl_shaderFree(&this->rcas);
 
@@ -177,6 +188,7 @@ static void egl_filterFFXFSR1Free(EGL_Filter * filter)
 
   egl_shaderFree(&this->easu);
   egl_shaderFree(&this->rcas);
+  countedBufferRelease(&this->consts);
   egl_framebufferFree(&this->easuFb);
   egl_framebufferFree(&this->rcasFb);
   glDeleteSamplers(1, &this->sampler);
@@ -327,7 +339,7 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
 
   this->easuUniform[1].f[0] = this->width;
   this->easuUniform[1].f[1] = this->height;
-  ffxFsrEasuConst((uint32_t *) this->easuUniform[0].v->data, this->inWidth, this->inHeight,
+  ffxFsrEasuConst((uint32_t *)this->consts->data, this->inWidth, this->inHeight,
     this->inWidth, this->inHeight, this->width, this->height);
   return true;
 }
