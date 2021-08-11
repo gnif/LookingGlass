@@ -1,13 +1,13 @@
 #version 300 es
+precision mediump float;
 
 #include "color_blind.h"
 
-in  highp vec2 uv;
-out highp vec4 color;
+in  vec2 uv;
+out vec4 color;
 
 uniform sampler2D sampler1;
 
-uniform lowp int rotate;
 uniform int cbMode;
 
 void main()

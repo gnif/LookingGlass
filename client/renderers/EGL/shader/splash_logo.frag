@@ -1,6 +1,7 @@
 #version 300 es
+precision mediump float;
 
-out highp vec4 color;
+out vec4 color;
 
 uniform sampler2D sampler1;
 

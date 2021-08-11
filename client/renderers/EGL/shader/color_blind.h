@@ -1,9 +1,9 @@
-highp vec4 cbTransform(highp vec4 color, int cbMode)
+vec4 cbTransform(vec4 color, int cbMode)
 {
-  highp float L = (17.8824000 * color.r) + (43.516100 * color.g) + (4.11935 * color.b);
-  highp float M = (03.4556500 * color.r) + (27.155400 * color.g) + (3.86714 * color.b);
-  highp float S = (00.0299566 * color.r) + (00.184309 * color.g) + (1.46709 * color.b);
-  highp float l, m, s;
+  float L = (17.8824000 * color.r) + (43.516100 * color.g) + (4.11935 * color.b);
+  float M = (03.4556500 * color.r) + (27.155400 * color.g) + (3.86714 * color.b);
+  float S = (00.0299566 * color.r) + (00.184309 * color.g) + (1.46709 * color.b);
+  float l, m, s;
 
   if (cbMode == 1) // Protanope
   {
@@ -24,7 +24,7 @@ highp vec4 cbTransform(highp vec4 color, int cbMode)
     s = -0.395913 * L + 0.801109 * M + 0.0 * S;
   }
 
-  highp vec4 error;
+  vec4 error;
   error.r = ( 0.080944447900 * l) + (-0.13050440900 * m) + ( 0.116721066 * s);
   error.g = (-0.010248533500 * l) + ( 0.05401932660 * m) + (-0.113614708 * s);
   error.b = (-0.000365296938 * l) + (-0.00412161469 * m) + ( 0.693511405 * s);

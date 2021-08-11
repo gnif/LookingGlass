@@ -1,12 +1,13 @@
 #version 300 es
+precision mediump float;
 
 layout(location = 0) in vec3 vertexPosition_modelspace;
 layout(location = 1) in vec2 vertexUV;
 
 uniform vec4 mouse;
-uniform lowp int rotate;
+uniform int rotate;
 
-out highp vec2 uv;
+out vec2 uv;
 
 void main()
 {

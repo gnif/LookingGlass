@@ -1,4 +1,5 @@
 #version 300 es
+precision mediump float;
 
 #define EGL_SCALE_AUTO    0
 #define EGL_SCALE_NEAREST 1
@@ -7,16 +8,16 @@
 
 #include "color_blind.h"
 
-in  highp vec2 uv;
-out highp vec4 color;
+in  vec2 uv;
+out vec4 color;
 
 uniform sampler2D sampler1;
 
-uniform       int   scaleAlgo;
-uniform highp ivec2 textureSize;
+uniform int   scaleAlgo;
+uniform ivec2 textureSize;
 
-uniform highp float nvGain;
-uniform       int   cbMode;
+uniform float nvGain;
+uniform int   cbMode;
 
 void main()
 {

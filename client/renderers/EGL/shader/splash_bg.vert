@@ -1,8 +1,9 @@
 #version 300 es
+precision mediump float;
 
 layout(location = 0) in vec3 vertexPosition_modelspace;
 
-out highp vec3  pos;
+out vec3 pos;
 
 void main()
 {
