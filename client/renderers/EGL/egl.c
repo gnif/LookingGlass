@@ -24,6 +24,7 @@
 #include "common/KVMFR.h"
 #include "common/option.h"
 #include "common/sysinfo.h"
+#include "common/rects.h"
 #include "common/time.h"
 #include "common/locking.h"
 #include "app.h"
@@ -955,7 +956,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         );
     }
 
-    accumulated->count = util_mergeOverlappingRects(accumulated->rects, accumulated->count);
+    accumulated->count = rectsMergeOverlapping(accumulated->rects, accumulated->count);
   }
   ++this->overlayHistoryIdx;
 
