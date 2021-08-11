@@ -7,7 +7,8 @@ in  vec2  fragCoord;
 out vec4  fragColor;
 
 uniform sampler2D texture;
-uniform uvec2     uOutRes;
+uniform vec2      uOutRes;
+uniform uvec4     uConsts[4];
 
 #define A_GPU  1
 #define A_GLSL 1
@@ -36,22 +37,8 @@ AF4 FsrEasuBF(AF2 p){return AF4(_textureGather(texture, p, 2));}
 
 void main()
 {
-  vec2 inRes  = vec2(textureSize(texture, 0));
-  vec2 outRes = vec2(uOutRes);
-
-  AU4 con0, con1, con2, con3;
-  FsrEasuCon(
-    con0,
-    con1,
-    con2,
-    con3,
-    inRes.x , inRes.y,
-    inRes.x , inRes.y,
-    outRes.x, outRes.y
-  );
-
   vec3 color;
-  uvec2 point = uvec2(fragCoord * outRes);
-  FsrEasuF(color, point, con0, con1, con2, con3);
-  fragColor = vec4(color.xyz, 1);
+  uvec2 point = uvec2(fragCoord * uOutRes);
+  FsrEasuF(color, point, uConsts[0], uConsts[1], uConsts[2], uConsts[3]);
+  fragColor = vec4(color.rgb, 1);
 }

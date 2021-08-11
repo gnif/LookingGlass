@@ -21,9 +21,12 @@
 #include "filter.h"
 #include "framebuffer.h"
 
+#include "common/array.h"
+#include "common/countedbuffer.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "cimgui.h"
+#include "ffx.h"
 
 #include "basic.vert.h"
 #include "ffx_fsr1_easu.frag.h"
@@ -36,7 +39,7 @@ typedef struct EGL_FilterFFXFSR1
   EGL_Shader * easu, * rcas;
   bool         enable, active;
   float        sharpness;
-  EGL_Uniform  easuUniform, rcasUniform;
+  EGL_Uniform  easuUniform[2], rcasUniform;
 
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
@@ -71,6 +74,11 @@ static void egl_filterFFXFSR1EarlyInit(void)
   };
 
   option_register(options);
+}
+
+static void rcasUpdateUniform(EGL_FilterFFXFSR1 * this)
+{
+  ffxFsrRcasConst(this->rcasUniform.ui, 2.0f - this->sharpness * 2.0f);
 }
 
 static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
@@ -115,15 +123,18 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
 
   this->enable = option_get_bool("eglFilter", "ffxFSR");
 
-  this->easuUniform.type = EGL_UNIFORM_TYPE_2UI;
-  this->easuUniform.location =
+  this->easuUniform[0].type = EGL_UNIFORM_TYPE_4UIV;
+  this->easuUniform[0].location =
+    egl_shaderGetUniform(this->easu, "uConsts");
+  this->easuUniform[0].v = countedBufferNew(16 * sizeof(GLuint));
+  this->easuUniform[1].type = EGL_UNIFORM_TYPE_2F;
+  this->easuUniform[1].location =
     egl_shaderGetUniform(this->easu, "uOutRes");
 
-  this->rcasUniform.type = EGL_UNIFORM_TYPE_1F;
-  this->rcasUniform.location =
-    egl_shaderGetUniform(this->rcas, "uSharpness");
+  this->rcasUniform.type = EGL_UNIFORM_TYPE_4UI;
+  this->rcasUniform.location = egl_shaderGetUniform(this->rcas, "uConsts");
   this->sharpness = option_get_float("eglFilter", "ffxFSRSharpness");
-  this->rcasUniform.f[0] = 2.0f - this->sharpness * 2.0f;
+  rcasUpdateUniform(this);
 
   if (!egl_framebufferInit(&this->easuFb))
   {
@@ -269,7 +280,7 @@ static bool egl_filterFFXFSR1ImguiConfig(EGL_Filter * filter)
     }
 
     this->sharpness = sharpness;
-    this->rcasUniform.f[0] = 2.0f - sharpness * 2.0f;
+    rcasUpdateUniform(this);
     redraw = true;
   }
 
@@ -313,6 +324,11 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
   this->sizeChanged = false;
   this->pixFmt      = pixFmt;
   this->prepared    = false;
+
+  this->easuUniform[1].f[0] = this->width;
+  this->easuUniform[1].f[1] = this->height;
+  ffxFsrEasuConst((uint32_t *) this->easuUniform[0].v->data, this->inWidth, this->inHeight,
+    this->inWidth, this->inHeight, this->width, this->height);
   return true;
 }
 
@@ -334,10 +350,7 @@ static bool egl_filterFFXFSR1Prepare(EGL_Filter * filter)
   if (this->prepared)
     return true;
 
-  this->easuUniform.ui[0] = this->width;
-  this->easuUniform.ui[1] = this->height;
-
-  egl_shaderSetUniforms(this->easu, &this->easuUniform, 1);
+  egl_shaderSetUniforms(this->easu, this->easuUniform, ARRAY_LENGTH(this->easuUniform));
   egl_shaderSetUniforms(this->rcas, &this->rcasUniform, 1);
   this->prepared = true;
 

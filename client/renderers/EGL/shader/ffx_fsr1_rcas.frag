@@ -7,7 +7,7 @@ in  vec2  fragCoord;
 out vec4  fragColor;
 
 uniform sampler2D texture;
-uniform float     uSharpness;
+uniform uvec4     uConsts;
 
 #define A_GPU  1
 #define A_GLSL 1
@@ -27,9 +27,6 @@ void main()
   vec2  inRes = vec2(textureSize(texture, 0));
   uvec2 point = uvec2(fragCoord * (inRes + 0.5f));
 
-  uvec4 const0;
-  FsrRcasCon(const0, uSharpness);
-
-  FsrRcasF(fragColor.r, fragColor.g, fragColor.b, point, const0);
+  FsrRcasF(fragColor.r, fragColor.g, fragColor.b, point, uConsts);
   fragColor.a = 1.0f;
 }
