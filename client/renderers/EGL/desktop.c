@@ -171,8 +171,8 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     return false;
   }
 
-  egl_postProcessAdd(desktop->pp, &egl_filterFFXFSR1Ops);
   egl_postProcessAdd(desktop->pp, &egl_filterFFXCASOps );
+  egl_postProcessAdd(desktop->pp, &egl_filterFFXFSR1Ops);
   return true;
 }
 
