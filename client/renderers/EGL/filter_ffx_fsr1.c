@@ -40,6 +40,7 @@ typedef struct EGL_FilterFFXFSR1
 
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
+  unsigned int inWidth, inHeight;
   bool sizeChanged;
   bool prepared;
 
@@ -231,19 +232,28 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
-  if (pixFmt == this->pixFmt && !this->sizeChanged)
+  const bool inSizeChanged = this->width != width || this->height != height;
+
+  if (pixFmt == this->pixFmt && !this->sizeChanged && !inSizeChanged)
     return true;
 
-  if (!egl_framebufferSetup(this->easuFb, pixFmt, this->width, this->height))
-    return false;
+  if (this->sizeChanged)
+  {
+    if (!egl_framebufferSetup(this->easuFb, pixFmt, this->width, this->height))
+      return false;
 
-  if (!egl_framebufferSetup(this->rcasFb, pixFmt, this->width, this->height))
-    return false;
+    if (!egl_framebufferSetup(this->rcasFb, pixFmt, this->width, this->height))
+      return false;
+  }
 
+  this->inWidth     = width;
+  this->inHeight    = height;
   this->active      = this->width > width && this->height > height;
   this->sizeChanged = false;
   this->pixFmt      = pixFmt;
   this->prepared    = false;
+
+  DEBUG_INFO("%d %d %d", width, height, this->active);
   return true;
 }
 
