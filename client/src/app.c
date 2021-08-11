@@ -883,7 +883,13 @@ void app_setOverlay(bool enable)
 }
 
 void app_overlayConfigRegister(const char * title,
-    void (*callback)(void * udata), void * udata)
+    void (*callback)(void * udata, int * id), void * udata)
 {
   overlayConfig_register(title, callback, udata);
+}
+
+void app_overlayConfigRegisterTab(const char * title,
+    void (*callback)(void * udata, int * id), void * udata)
+{
+  overlayConfig_registerTab(title, callback, udata);
 }

@@ -626,7 +626,7 @@ static void debugCallback(GLenum source, GLenum type, GLuint id,
   DEBUG_PRINT(level, "GL message (source: %s, type: %s): %s", sourceName, typeName, message);
 }
 
-static void egl_config_ui(void * opaque)
+static void egl_configUI(void * opaque, int * id)
 {
   struct Inst * this = opaque;
   egl_damageConfigUI(this->damage);
@@ -822,7 +822,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
-  app_overlayConfigRegister("EGL", egl_config_ui, this);
+  app_overlayConfigRegister("EGL", egl_configUI, this);
 
   this->imgui = true;
   return true;

@@ -20,6 +20,10 @@
 
 #include "postprocess.h"
 #include "filters.h"
+#include "app.h"
+#include "cimgui.h"
+
+#include <stdatomic.h>
 
 #include "common/debug.h"
 #include "common/array.h"
@@ -37,6 +41,7 @@ struct EGL_PostProcess
   struct ll * filters;
   GLuint output;
   unsigned int outputX, outputY;
+  _Atomic(bool) modified;
 
   EGL_Model * model;
 };
@@ -45,6 +50,27 @@ void egl_postProcessEarlyInit(void)
 {
   for(int i = 0; i < ARRAY_LENGTH(EGL_Filters); ++i)
     EGL_Filters[i]->earlyInit();
+}
+
+static void configUI(void * opaque, int * id)
+{
+  struct EGL_PostProcess * this = opaque;
+
+  bool redraw = false;
+  EGL_Filter * filter;
+  for(ll_reset(this->filters); ll_walk(this->filters, (void **)&filter); )
+  {
+    igPushIDInt(++*id);
+    if (igCollapsingHeaderBoolPtr(filter->ops.name, NULL, 0))
+      redraw |= egl_filterImguiConfig(filter);
+    igPopID();
+  }
+
+  if (redraw)
+  {
+    atomic_store(&this->modified, true);
+    app_invalidateWindow(false);
+  }
 }
 
 bool egl_postProcessInit(EGL_PostProcess ** pp)
@@ -69,6 +95,8 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     goto error_filters;
   }
   egl_modelSetDefault(this->model, false);
+
+  app_overlayConfigRegisterTab("EGL Filters", configUI, this);
 
   *pp = this;
   return true;
@@ -111,14 +139,9 @@ bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
   return true;
 }
 
-bool egl_postProcessImgui(EGL_PostProcess * this)
+bool egl_postProcessConfigModified(EGL_PostProcess * this)
 {
-  bool redraw = false;
-  EGL_Filter * filter;
-  for(ll_reset(this->filters); ll_walk(this->filters, (void **)&filter); )
-    redraw |= egl_filterImguiConfig(filter);
-
-  return redraw;
+  return atomic_load(&this->modified);
 }
 
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
@@ -131,6 +154,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   if (egl_textureGet(tex, &texture, &sizeX, &sizeY) != EGL_TEX_STATUS_OK)
     return false;
 
+  atomic_store(&this->modified, false);
   for(ll_reset(this->filters); ll_walk(this->filters, (void **)&filter); )
   {
     egl_filterSetOutputResHint(filter, targetX, targetY);

@@ -35,7 +35,10 @@ void overlayGraph_unregister();
 void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
     bool * enabled, void * udata), void * udata);
 
-void overlayConfig_register(const char * title, void (*callback)(void * udata),
-    void * udata);
+void overlayConfig_register(const char * title,
+    void (*callback)(void * udata, int * id), void * udata);
+
+void overlayConfig_registerTab(const char * title,
+    void (*callback)(void * udata, int * id), void * udata);
 
 #endif

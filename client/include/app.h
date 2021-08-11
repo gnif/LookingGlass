@@ -105,7 +105,10 @@ GraphHandle app_registerGraph(const char * name, RingBuffer buffer, float min, f
 void app_unregisterGraph(GraphHandle handle);
 
 void app_overlayConfigRegister(const char * title,
-    void (*callback)(void * udata), void * udata);
+    void (*callback)(void * udata, int * id), void * udata);
+
+void app_overlayConfigRegisterTab(const char * title,
+    void (*callback)(void * udata, int * id), void * udata);
 
 void app_clipboardRelease(void);
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count);

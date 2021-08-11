@@ -164,7 +164,7 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
   bool  cas          = this->enable;
   float casSharpness = this->sharpness;
 
-  igCheckbox("AMD FidelityFX CAS", &cas);
+  igCheckbox("Enabled", &cas);
   if (cas != this->enable)
   {
     this->enable = cas;

@@ -251,12 +251,6 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   }
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
-
-  if (egl_postProcessImgui(desktop->pp))
-  {
-    atomic_store(&desktop->processFrame, true);
-    app_invalidateWindow(false);
-  }
 }
 
 bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
@@ -366,7 +360,8 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   int scaleAlgo = EGL_SCALE_NEAREST;
 
-  if (atomic_exchange(&desktop->processFrame, false))
+  if (atomic_exchange(&desktop->processFrame, false) ||
+      egl_postProcessConfigModified(desktop->pp))
     egl_postProcessRun(desktop->pp, desktop->texture, outputWidth, outputHeight);
 
   unsigned int finalSizeX, finalSizeY;

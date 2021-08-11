@@ -33,9 +33,8 @@ void egl_postProcessFree(EGL_PostProcess ** pp);
 /* create and add a filter to this processor */
 bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops);
 
-/* render the imgui options
- * returns true if the filter needs to be re-run */
-bool egl_postProcessImgui(EGL_PostProcess * this);
+/* returns true if the configuration was modified since the last run */
+bool egl_postProcessConfigModified(EGL_PostProcess * this);
 
 /* apply the filters to the supplied texture
  * targetX/Y is the final target output dimension hint if scalers are present */

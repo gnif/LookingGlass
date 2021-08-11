@@ -45,7 +45,7 @@ struct OverlayGraph
 };
 
 
-static void configCallback(void * udata)
+static void configCallback(void * udata, int * id)
 {
   igCheckbox("Show Timing Graphs", &gs.show);
   igSeparator();

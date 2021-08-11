@@ -203,7 +203,7 @@ static bool egl_filterFFXFSR1ImguiConfig(EGL_Filter * filter)
   bool  enable    = this->enable;
   float sharpness = this->sharpness;
 
-  igCheckbox("AMD FidelityFX FSR", &enable);
+  igCheckbox("Enabled", &enable);
   if (enable != this->enable)
   {
     this->enable = enable;

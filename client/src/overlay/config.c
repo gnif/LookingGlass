@@ -34,13 +34,14 @@ typedef struct ConfigCallback
 {
   const char * title;
   void * udata;
-  void (*callback)(void * udata);
+  void (*callback)(void * udata, int * id);
 }
 ConfigCallback;
 
 typedef struct OverlayConfig
 {
   struct ll * callbacks;
+  struct ll * tabCallbacks;
 }
 OverlayConfig;
 
@@ -48,7 +49,8 @@ static OverlayConfig cfg = { 0 };
 
 static bool config_init(void ** udata, const void * params)
 {
-  cfg.callbacks = ll_new();
+  cfg.callbacks    = ll_new();
+  cfg.tabCallbacks = ll_new();
   if (!cfg.callbacks)
   {
     DEBUG_ERROR("failed to allocate ram");
@@ -58,47 +60,26 @@ static bool config_init(void ** udata, const void * params)
   return true;
 }
 
-static void config_free(void * udata)
+static void config_freeList(struct ll * list)
 {
   ConfigCallback * cb;
-  while(ll_shift(cfg.callbacks, (void **)&cb))
+  while(ll_shift(list, (void **)&cb))
     free(cb);
-
-  ll_free(cfg.callbacks);
+  ll_free(list);
 }
 
-static int config_render(void * udata, bool interactive, struct Rect * windowRects,
-    int maxRects)
+static void config_free(void * udata)
 {
-  if (!interactive)
-    return 0;
+  config_freeList(cfg.callbacks);
+  config_freeList(cfg.tabCallbacks);
+}
 
+static void config_renderLGTab(void)
+{
   const float fontSize = igGetFontSize();
-  const ImGuiViewport * viewport = igGetMainViewport();
-  igSetNextWindowPos(
-      (ImVec2){
-        viewport->WorkPos.x + 100,
-        viewport->WorkPos.y + 30
-      },
-      ImGuiCond_FirstUseEver,
-      (ImVec2){}
-  );
 
-  igSetNextWindowSize(
-      (ImVec2){550, 680},
-      ImGuiCond_FirstUseEver);
-
-  if (!igBegin("Configuration", NULL, ImGuiWindowFlags_MenuBar))
-  {
-    overlayGetImGuiRect(windowRects);
-    igEnd();
-    return 1;
-  }
-
-  igBeginMenuBar();
-  igEndMenuBar();
-
-  if (igCollapsingHeaderBoolPtr("About Looking Glass", NULL, 0))
+  if (igCollapsingHeaderBoolPtr("About", NULL,
+        ImGuiTreeNodeFlags_DefaultOpen))
   {
     igText(LG_COPYRIGHT_STR);
     overlayTextURL(LG_WEBSITE_STR, NULL);
@@ -107,7 +88,8 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     igTextWrapped(LG_LICENSE_STR);
   }
 
-  if (igCollapsingHeaderBoolPtr("Help & Support", NULL, 0))
+  if (igCollapsingHeaderBoolPtr("Help & Support", NULL,
+        ImGuiTreeNodeFlags_DefaultOpen))
   {
     igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
     igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize * 9.0f, 0);
@@ -121,7 +103,8 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     igEndTable();
   }
 
-  if (igCollapsingHeaderBoolPtr("The Looking Glass Team / Donations", NULL, 0))
+  if (igCollapsingHeaderBoolPtr("The Looking Glass Team / Donations", NULL,
+        ImGuiTreeNodeFlags_DefaultOpen))
   {
     for(const struct LGTeamMember * member = LG_TEAM; member->name; ++member)
     {
@@ -154,17 +137,82 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
       }
     }
   }
+}
+
+static int config_render(void * udata, bool interactive, struct Rect * windowRects,
+    int maxRects)
+{
+  if (!interactive)
+    return 0;
+
+  int id = 1000;
+
+  const ImGuiViewport * viewport = igGetMainViewport();
+  igSetNextWindowPos(
+      (ImVec2){
+        viewport->WorkPos.x + 100,
+        viewport->WorkPos.y + 30
+      },
+      ImGuiCond_FirstUseEver,
+      (ImVec2){}
+  );
+
+  igSetNextWindowSize(
+      (ImVec2){550, 680},
+      ImGuiCond_FirstUseEver);
+
+  igPushIDInt(id++);
+  if (!igBegin("Configuration", NULL, ImGuiWindowFlags_MenuBar))
+  {
+    overlayGetImGuiRect(windowRects);
+    igEnd();
+    igPopID();
+    return 1;
+  }
+
+  igBeginMenuBar();
+  igEndMenuBar();
+
+  igBeginTabBar("Configuration#tabs", 0);
+
+  if (igBeginTabItem("Looking Glass", NULL, 0))
+  {
+    config_renderLGTab();
+    igEndTabItem();
+  }
 
   ConfigCallback * cb;
-  for (ll_reset(cfg.callbacks); ll_walk(cfg.callbacks, (void **)&cb); )
+
+  if (igBeginTabItem("Settings", NULL, 0))
   {
-    if (!igCollapsingHeaderBoolPtr(cb->title, NULL, 0))
-      continue;
-    cb->callback(cb->udata);
+    for (ll_reset(cfg.callbacks); ll_walk(cfg.callbacks, (void **)&cb); )
+    {
+      if (!igCollapsingHeaderBoolPtr(cb->title, NULL, 0))
+        continue;
+
+      igPushIDInt(id++);
+      cb->callback(cb->udata, &id);
+      igPopID();
+    }
+    igEndTabItem();
   }
+
+  for (ll_reset(cfg.tabCallbacks); ll_walk(cfg.tabCallbacks, (void **)&cb); )
+  {
+    if (!igBeginTabItem(cb->title, NULL, 0))
+      continue;
+
+    igPushIDInt(id++);
+    cb->callback(cb->udata, &id);
+    igPopID();
+    igEndTabItem();
+  }
+
+  igEndTabBar();
 
   overlayGetImGuiRect(windowRects);
   igEnd();
+  igPopID();
   return 1;
 }
 
@@ -176,8 +224,8 @@ struct LG_OverlayOps LGOverlayConfig =
   .render         = config_render
 };
 
-void overlayConfig_register(const char * title, void (*callback)(void * udata),
-    void * udata)
+static void config_addToList(struct ll * list, const char * title,
+    void(*callback)(void * udata, int * id), void * udata)
 {
   ConfigCallback * cb = calloc(1, sizeof(*cb));
   if (!cb)
@@ -189,5 +237,17 @@ void overlayConfig_register(const char * title, void (*callback)(void * udata),
   cb->title    = title;
   cb->udata    = udata;
   cb->callback = callback;
-  ll_push(cfg.callbacks, cb);
+  ll_push(list, cb);
+}
+
+void overlayConfig_register(const char * title,
+    void (*callback)(void * udata, int * id), void * udata)
+{
+  config_addToList(cfg.callbacks, title, callback, udata);
+};
+
+void overlayConfig_registerTab(const char * title,
+    void (*callback)(void * udata, int * id), void * udata)
+{
+  config_addToList(cfg.tabCallbacks, title, callback, udata);
 };
