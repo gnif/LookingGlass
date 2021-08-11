@@ -46,4 +46,6 @@ void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
   uint8_t * dst, int dstStride, int height,
   const FrameBuffer * frame, int srcStride);
 
+int rectsMergeOverlapping(FrameDamageRect * rects, int count);
+
 #endif
