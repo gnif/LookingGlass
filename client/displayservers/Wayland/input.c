@@ -344,16 +344,19 @@ void waylandGrabPointer(void)
   });
 }
 
-void waylandUngrabPointer(void)
+inline static void internalUngrabPointer(bool lock)
 {
-  INTERLOCKED_SECTION(wlWm.confineLock,
+  if (lock)
+    LG_LOCK(wlWm.confineLock);
+
+  if (wlWm.confinedPointer)
   {
-    if (wlWm.confinedPointer)
-    {
-      zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
-      wlWm.confinedPointer = NULL;
-    }
-  });
+    zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
+    wlWm.confinedPointer = NULL;
+  }
+
+  if (lock)
+    LG_UNLOCK(wlWm.confineLock);
 
   if (!wlWm.warpSupport)
   {
@@ -369,6 +372,11 @@ void waylandUngrabPointer(void)
     app_resyncMouseBasic();
     app_handleMouseBasic();
   }
+}
+
+void waylandUngrabPointer(void)
+{
+  internalUngrabPointer(true);
 }
 
 void waylandCapturePointer(void)
@@ -411,9 +419,7 @@ void waylandUncapturePointer(void)
      *   - if the user has opted to use captureInputOnly mode.
      */
     if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
-    {
-      waylandUngrabPointer();
-    }
+      internalUngrabPointer(false);
     else
     {
       wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
