@@ -1,9 +1,10 @@
 #version 300 es
+precision mediump float;
 
 layout(location = 0) in vec2 vertex;
-out highp vec2 uv;
+out vec2 uv;
 
-uniform highp vec2 desktopSize;
+uniform vec2   desktopSize;
 uniform mat3x2 transform;
 
 void main()
