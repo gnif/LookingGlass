@@ -21,9 +21,11 @@
 #include "filter.h"
 #include "framebuffer.h"
 
+#include "common/countedbuffer.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "cimgui.h"
+#include "ffx.h"
 
 #include "basic.vert.h"
 #include "ffx_cas.frag.h"
@@ -34,10 +36,11 @@ typedef struct EGL_FilterFFXCAS
 
   EGL_Shader * shader;
   bool         enable;
-  EGL_Uniform  uniform;
 
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
+  float sharpness;
+  CountedBuffer * consts;
   bool prepared;
 
   EGL_Framebuffer * fb;
@@ -69,6 +72,12 @@ static void egl_filterFFXCASEarlyInit(void)
   option_register(options);
 }
 
+static void casUpdateConsts(EGL_FilterFFXCAS * this)
+{
+  ffxCasConst((uint32_t *) this->consts->data, this->sharpness, this->width, this->height,
+    this->width, this->height);
+}
+
 static bool egl_filterFFXCASInit(EGL_Filter ** filter)
 {
   EGL_FilterFFXCAS * this = calloc(1, sizeof(*this));
@@ -93,12 +102,15 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
     goto error_shader;
   }
 
-  this->enable = option_get_bool("eglFilter", "ffxCAS");
-  this->uniform.type = EGL_UNIFORM_TYPE_1F;
-  this->uniform.location =
-    egl_shaderGetUniform(this->shader, "uSharpness");
-  this->uniform.f[0] =
-    option_get_float("eglFilter", "ffxCASSharpness");
+  this->consts = countedBufferNew(8 * sizeof(GLuint));
+  egl_shaderSetUniforms(this->shader, &(EGL_Uniform) {
+    .type     = EGL_UNIFORM_TYPE_4UIV,
+    .location = egl_shaderGetUniform(this->shader, "uConsts"),
+    .v        = this->consts,
+  }, 1);
+
+  this->enable    = option_get_bool("eglFilter", "ffxCAS");
+  this->sharpness = option_get_float("eglFilter", "ffxCASSharpness");
 
   if (!egl_framebufferInit(&this->fb))
   {
@@ -139,7 +151,7 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
 
   bool  redraw       = false;
   bool  cas          = this->enable;
-  float casSharpness = this->uniform.f[0];
+  float casSharpness = this->sharpness;
 
   igCheckbox("AMD FidelityFX CAS", &cas);
   if (cas != this->enable)
@@ -156,7 +168,7 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
   igSliderFloat("##casSharpness", &casSharpness, 0.0f, 1.0f, NULL, 0);
   igPopItemWidth();
 
-  if (casSharpness != this->uniform.f[0])
+  if (casSharpness != this->sharpness)
   {
     // enable CAS if the sharpness was changed
     if (!cas)
@@ -165,7 +177,8 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
       this->enable = true;
     }
 
-    this->uniform.f[0] = casSharpness;
+    this->sharpness = casSharpness;
+    casUpdateConsts(this);
     redraw = true;
   }
 
@@ -190,6 +203,7 @@ static bool egl_filterFFXCASSetup(EGL_Filter * filter,
   this->width    = width;
   this->height   = height;
   this->prepared = false;
+  casUpdateConsts(this);
 
   return true;
 }
@@ -212,7 +226,6 @@ static bool egl_filterFFXCASPrepare(EGL_Filter * filter)
   if (this->prepared)
     return true;
 
-  egl_shaderSetUniforms(this->shader, &this->uniform, 1);
   this->prepared = true;
 
   return true;
