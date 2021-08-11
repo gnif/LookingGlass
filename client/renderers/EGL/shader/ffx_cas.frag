@@ -7,7 +7,7 @@ in  vec2  fragCoord;
 out vec4  fragColor;
 
 uniform sampler2D texture;
-uniform float     uSharpness;
+uniform uvec4     uConsts[2];
 
 #define A_GPU 1
 #define A_GLSL 1
@@ -32,17 +32,8 @@ void main()
 {
   vec2  res   = vec2(textureSize(texture, 0));
   uvec2 point = uvec2(fragCoord * res);
-   
-  vec4 color;
-  uvec4 const0;
-  uvec4 const1;
-
-  CasSetup(const0, const1, uSharpness,
-    res.x, res.y, res.x, res.y);
 
   CasFilter(
     fragColor.r, fragColor.g, fragColor.b,
-    point,
-    const0, const1,
-    true);
+    point, uConsts[0], uConsts[1], true);
 }
