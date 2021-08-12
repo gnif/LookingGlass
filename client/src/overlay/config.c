@@ -162,16 +162,13 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
       ImGuiCond_FirstUseEver);
 
   igPushIDInt(id++);
-  if (!igBegin("Configuration", NULL, ImGuiWindowFlags_MenuBar))
+  if (!igBegin("Configuration", NULL, 0))
   {
     overlayGetImGuiRect(windowRects);
     igEnd();
     igPopID();
     return 1;
   }
-
-  igBeginMenuBar();
-  igEndMenuBar();
 
   igBeginTabBar("Configuration#tabs", 0);
 
