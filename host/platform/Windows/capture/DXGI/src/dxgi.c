@@ -36,88 +36,22 @@
 #include <dxgi1_2.h>
 #include <dxgi1_5.h>
 #include <d3d11.h>
+#include <d3d12.h>
 #include <d3dcommon.h>
 #include <versionhelpers.h>
 #include <dwmapi.h>
 
-#include "dxgi_extra.h"
+#include "dxgi_capture.h"
 
 #define LOCKED(...) INTERLOCKED_SECTION(this->deviceContextLock, __VA_ARGS__)
 
-enum TextureState
-{
-  TEXTURE_STATE_UNUSED,
-  TEXTURE_STATE_PENDING_MAP,
-  TEXTURE_STATE_MAPPED
-};
-
-typedef struct Texture
-{
-  unsigned int               formatVer;
-  volatile enum TextureState state;
-  ID3D11Texture2D          * tex;
-  D3D11_MAPPED_SUBRESOURCE   map;
-  uint64_t                   copyTime;
-  uint32_t                   damageRectsCount;
-  FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
-  int32_t                    texDamageCount;
-  FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
-}
-Texture;
-
-struct FrameDamage
-{
-  int             count;
-  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
-};
-
 // locals
-struct iface
-{
-  bool                       initialized;
-  LARGE_INTEGER              perfFreq;
-  LARGE_INTEGER              frameTime;
-  bool                       stop;
-  HDESK                      desktop;
-  IDXGIFactory1            * factory;
-  IDXGIAdapter1            * adapter;
-  IDXGIOutput              * output;
-  ID3D11Device             * device;
-  ID3D11DeviceContext      * deviceContext;
-  LG_Lock                    deviceContextLock;
-  bool                       useAcquireLock;
-  bool                       dwmFlush;
-  D3D_FEATURE_LEVEL          featureLevel;
-  IDXGIOutputDuplication   * dup;
-  int                        maxTextures;
-  Texture                  * texture;
-  int                        texRIndex;
-  int                        texWIndex;
-  atomic_int                 texReady;
-  bool                       needsRelease;
+static struct DXGIInterface * this = NULL;
 
-  RunningAvg                 avgMapTime;
-  uint64_t                   usleepMapTime;
-
-  CaptureGetPointerBuffer    getPointerBufferFn;
-  CapturePostPointerBuffer   postPointerBufferFn;
-  LGEvent                  * frameEvent;
-
-  unsigned int    formatVer;
-  unsigned int    width;
-  unsigned int    height;
-  unsigned int    pitch;
-  unsigned int    stride;
-  CaptureFormat   format;
-  CaptureRotation rotation;
-
-  int  lastPointerX, lastPointerY;
-  bool lastPointerVisible;
-
-  struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
+extern struct DXGICopyBackend copyBackendD3D11;
+static struct DXGICopyBackend * backends[] = {
+  &copyBackendD3D11,
 };
-
-static struct iface * this    = NULL;
 
 // forwards
 
@@ -182,7 +116,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this = calloc(1, sizeof(*this));
   if (!this)
   {
-    DEBUG_ERROR("failed to allocate iface struct");
+    DEBUG_ERROR("failed to allocate DXGIInterface struct");
     return false;
   }
 
@@ -203,7 +137,6 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
-  this->avgMapTime          = runningavg_new(10);
   return true;
 }
 
@@ -239,9 +172,6 @@ static bool dxgi_init(void)
   this->texRIndex = 0;
   this->texWIndex = 0;
   atomic_store(&this->texReady, 0);
-
-  runningavg_reset(this->avgMapTime);
-  this->usleepMapTime = 0;
 
   lgResetEvent(this->frameEvent);
 
@@ -534,9 +464,11 @@ static bool dxgi_init(void)
 
   DXGI_OUTDUPL_DESC dupDesc;
   IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
-  DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
 
-  uint8_t bpp = 4;
+  this->dxgiFormat = dupDesc.ModeDesc.Format;
+  DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(this->dxgiFormat));
+
+  this->bpp = 4;
   switch(dupDesc.ModeDesc.Format)
   {
     case DXGI_FORMAT_B8G8R8A8_UNORM    : this->format = CAPTURE_FMT_BGRA   ; break;
@@ -545,7 +477,7 @@ static bool dxgi_init(void)
 
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
       this->format = CAPTURE_FMT_RGBA16F;
-      bpp = 8;
+      this->bpp = 8;
       break;
 
     default:
@@ -553,42 +485,26 @@ static bool dxgi_init(void)
       goto fail;
   }
 
-  D3D11_TEXTURE2D_DESC texDesc;
-  memset(&texDesc, 0, sizeof(texDesc));
-  texDesc.Width              = this->width;
-  texDesc.Height             = this->height;
-  texDesc.MipLevels          = 1;
-  texDesc.ArraySize          = 1;
-  texDesc.SampleDesc.Count   = 1;
-  texDesc.SampleDesc.Quality = 0;
-  texDesc.Usage              = D3D11_USAGE_STAGING;
-  texDesc.Format             = dupDesc.ModeDesc.Format;
-  texDesc.BindFlags          = 0;
-  texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
-  texDesc.MiscFlags          = 0;
-
-  for (int i = 0; i < this->maxTextures; ++i)
+  for (int i = 0; i < ARRAY_LENGTH(backends); ++i)
   {
-    this->texture[i].texDamageCount = -1;
-    status = ID3D11Device_CreateTexture2D(this->device, &texDesc, NULL, &this->texture[i].tex);
-    if (FAILED(status))
+    if (backends[i]->create(this))
     {
-      DEBUG_WINERROR("Failed to create texture", status);
-      goto fail;
+      this->backend = backends[i];
+      break;
     }
   }
 
-  // map the texture simply to get the pitch and stride
-  D3D11_MAPPED_SUBRESOURCE mapping;
-  status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0, D3D11_MAP_READ, 0, &mapping);
-  if (FAILED(status))
+  if (!this->backend)
   {
-    DEBUG_WINERROR("Failed to map the texture", status);
+    DEBUG_ERROR("Could not find a usable copy backend");
     goto fail;
   }
-  this->pitch  = mapping.RowPitch;
-  this->stride = mapping.RowPitch / bpp;
-  ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource *)this->texture[0].tex, 0);
+
+  DEBUG_INFO("Copy backend     : %s", this->backend->name);
+  DEBUG_INFO("AcquireLock      : %s", this->useAcquireLock ? "enabled" : "disabled");
+
+  for (int i = 0; i < this->maxTextures; ++i)
+    this->texture[i].texDamageCount = -1;
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     this->frameDamage[i].count = -1;
@@ -614,19 +530,23 @@ static bool dxgi_deinit(void)
 
   for (int i = 0; i < this->maxTextures; ++i)
   {
+    if (this->texture[i].map)
+    {
+      this->backend->unmapTexture(this->texture + i);
+      this->texture[i].map = NULL;
+    }
+  }
+
+  if (this->backend)
+  {
+    this->backend->free();
+    this->backend = NULL;
+  }
+
+  for (int i = 0; i < this->maxTextures; ++i)
+  {
     this->texture[i].state = TEXTURE_STATE_UNUSED;
-
-    if (this->texture[i].map.pData)
-    {
-      ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)this->texture[i].tex, 0);
-      this->texture[i].map.pData = NULL;
-    }
-
-    if (this->texture[i].tex)
-    {
-      ID3D11Texture2D_Release(this->texture[i].tex);
-      this->texture[i].tex = NULL;
-    }
+    this->texture[i].impl  = NULL;
   }
 
   if (this->dup)
@@ -692,8 +612,6 @@ static void dxgi_free(void)
     dxgi_deinit();
 
   free(this->texture);
-
-  runningavg_free(&this->avgMapTime);
   free(this);
   this = NULL;
 }
@@ -792,6 +710,20 @@ static void computeFrameDamage(Texture * tex)
   tex->damageRectsCount = dirtyRectsCount + actuallyMovedRectsCount;
 }
 
+static void computeTexDamage(Texture * tex)
+{
+  if (tex->texDamageCount < 0 || tex->damageRectsCount == 0 ||
+      tex->texDamageCount + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS)
+    tex->texDamageCount = -1;
+  else
+  {
+    memcpy(tex->texDamageRects + tex->texDamageCount, tex->damageRects,
+      tex->damageRectsCount * sizeof(FrameDamageRect));
+    tex->texDamageCount += tex->damageRectsCount;
+    tex->texDamageCount = rectsMergeOverlapping(tex->texDamageRects, tex->texDamageCount);
+  }
+}
+
 static CaptureResult dxgi_capture(void)
 {
   DEBUG_ASSERT(this);
@@ -881,57 +813,22 @@ static CaptureResult dxgi_capture(void)
 
   if (copyFrame || copyPointer)
   {
-    DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
-    LOCKED(
-    {
-      if (copyFrame)
-      {
-        computeFrameDamage(tex);
-
-        if (tex->texDamageCount < 0 || tex->damageRectsCount == 0 ||
-            tex->texDamageCount + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS)
-          tex->texDamageCount = -1;
-        else
-        {
-          memcpy(tex->texDamageRects + tex->texDamageCount, tex->damageRects,
-            tex->damageRectsCount * sizeof(*tex->damageRects));
-          tex->texDamageCount += tex->damageRectsCount;
-          tex->texDamageCount = rectsMergeOverlapping(tex->texDamageRects, tex->texDamageCount);
-        }
-
-        // issue the copy from GPU to CPU RAM
-        tex->copyTime = microtime();
-        if (tex->texDamageCount < 0)
-          ID3D11DeviceContext_CopyResource(this->deviceContext,
-            (ID3D11Resource *)tex->tex, (ID3D11Resource *)src);
-        else
-        {
-          for (int i = 0; i < tex->texDamageCount; ++i)
-          {
-            FrameDamageRect * rect = tex->texDamageRects + i;
-            D3D11_BOX box = {
-              .left = rect->x, .top = rect->y, .front = 0, .back = 1,
-              .right = rect->x + rect->width, .bottom = rect->y + rect->height,
-            };
-            ID3D11DeviceContext_CopySubresourceRegion(this->deviceContext,
-              (ID3D11Resource *)tex->tex, 0, rect->x, rect->y, 0,
-              (ID3D11Resource *)src, 0, &box);
-          }
-        }
-      }
-
-      if (copyPointer)
-      {
-        // grab the pointer shape
-        status = IDXGIOutputDuplication_GetFramePointerShape(
-            this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
-      }
-
-      ID3D11DeviceContext_Flush(this->deviceContext);
-    });
-
     if (copyFrame)
     {
+      if (this->useAcquireLock)
+      {
+        LOCKED({ computeFrameDamage(tex); });
+      }
+      else
+        computeFrameDamage(tex);
+      computeTexDamage(tex);
+
+      if (!this->backend->copyFrame(tex, src))
+      {
+        ID3D11Texture2D_Release(src);
+        return CAPTURE_RESULT_ERROR;
+      }
+
       ID3D11Texture2D_Release(src);
 
       for (int i = 0; i < this->maxTextures; ++i)
@@ -966,6 +863,18 @@ static CaptureResult dxgi_capture(void)
 
     if (copyPointer)
     {
+      DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo;
+      if (this->useAcquireLock)
+      {
+        LOCKED({
+          status = IDXGIOutputDuplication_GetFramePointerShape(
+              this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
+        });
+      }
+      else
+        status = IDXGIOutputDuplication_GetFramePointerShape(
+            this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
+
       result = dxgi_hResultToCaptureResult(status);
       if (result != CAPTURE_RESULT_OK)
       {
@@ -1046,37 +955,9 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
 
   Texture * tex = &this->texture[this->texRIndex];
 
-  // sleep until it's close to time to map
-  const uint64_t delta = microtime() - tex->copyTime;
-  if (delta < this->usleepMapTime)
-    usleep(this->usleepMapTime - delta);
-
-  // try to map the resource, but don't wait for it
-  for (int i = 0; ; ++i)
-  {
-    HRESULT status;
-    LOCKED({status = ID3D11DeviceContext_Map(this->deviceContext, (ID3D11Resource*)tex->tex, 0, D3D11_MAP_READ, 0x100000L, &tex->map);});
-    if (status == DXGI_ERROR_WAS_STILL_DRAWING)
-    {
-      if (i == 100)
-        return CAPTURE_RESULT_TIMEOUT;
-
-      usleep(1);
-      continue;
-    }
-
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to map the texture", status);
-      return CAPTURE_RESULT_ERROR;
-    }
-
-    break;
-  }
-
-  // update the sleep average and sleep for 80% of the average on the next call
-  runningavg_push(this->avgMapTime, microtime() - tex->copyTime);
-  this->usleepMapTime = (uint64_t)(runningavg_calc(this->avgMapTime) * 0.8);
+  CaptureResult result = this->backend->mapTexture(tex);
+  if (result != CAPTURE_RESULT_OK)
+    return result;
 
   tex->state = TEXTURE_STATE_MAPPED;
 
@@ -1112,14 +993,14 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
       damage->count + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS;
 
   if (damageAll)
-    framebuffer_write(frame, tex->map.pData, this->pitch * height);
+    framebuffer_write(frame, tex->map, this->pitch * height);
   else
   {
     memcpy(damage->rects + damage->count, tex->damageRects,
       tex->damageRectsCount * sizeof(*tex->damageRects));
     damage->count += tex->damageRectsCount;
     rectsBufferToFramebuffer(damage->rects, damage->count, frame, this->pitch,
-      height, tex->map.pData, this->pitch);
+      height, tex->map, this->pitch);
   }
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
@@ -1138,7 +1019,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
       damage->count = -1;
   }
 
-  LOCKED({ID3D11DeviceContext_Unmap(this->deviceContext, (ID3D11Resource*)tex->tex, 0);});
+  this->backend->unmapTexture(tex);
   tex->state = TEXTURE_STATE_UNUSED;
 
   if (++this->texRIndex == this->maxTextures)

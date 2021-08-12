@@ -3,6 +3,8 @@ project(capture_DXGI LANGUAGES C)
 
 add_library(capture_DXGI STATIC
 	src/dxgi.c
+	src/d3d11.c
+	src/util.c
 )
 
 add_definitions("-DCOBJMACROS -DINITGUID")
