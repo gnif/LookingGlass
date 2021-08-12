@@ -20,5 +20,6 @@
 
 #pragma once
 
+extern EGL_FilterOps egl_filterDownscaleOps;
 extern EGL_FilterOps egl_filterFFXCASOps;
 extern EGL_FilterOps egl_filterFFXFSR1Ops;

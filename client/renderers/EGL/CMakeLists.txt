@@ -63,6 +63,7 @@ build_shaders(
 	shader/ffx_cas.frag
 	shader/ffx_fsr1_easu.frag
 	shader/ffx_fsr1_rcas.frag
+	shader/downscale.frag
 )
 
 make_defines(
@@ -91,6 +92,7 @@ add_library(renderer_EGL STATIC
 	ffx.c
 	filter_ffx_cas.c
 	filter_ffx_fsr1.c
+	filter_downscale.c
 	${EGL_SHADER_OBJS}
 	"${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
 	${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp

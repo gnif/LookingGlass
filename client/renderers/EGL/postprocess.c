@@ -32,6 +32,7 @@
 
 static const EGL_FilterOps * EGL_Filters[] =
 {
+  &egl_filterDownscaleOps,
   &egl_filterFFXFSR1Ops,
   &egl_filterFFXCASOps
 };
