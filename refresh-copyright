@@ -12,7 +12,7 @@ EXTENSIONS = ('.c', '.cpp', '.h', '.nsi', '.rc')
 START_YEAR = 2017
 CURRENT_YEAR = datetime.date.today().year
 
-reignore = re.compile('^vendor/|.*/shader/')
+reignore = re.compile('^vendor/|.*/shader/|.*/d3d12.h$')
 recopyright = re.compile(r'\A/\*.*?\*/\s+', re.DOTALL)
 
 project_name = 'Looking Glass'
