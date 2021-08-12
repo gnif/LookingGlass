@@ -29,7 +29,6 @@
 
 struct D3D12Texture
 {
-  ID3D12Resource            * src;
   ID3D12Resource            * tex;
   ID3D12CommandAllocator    * commandAllocator;
   ID3D12CommandList         * commandList;
@@ -43,7 +42,11 @@ struct D3D12Backend
 {
   ID3D12Device        * device;
   ID3D12CommandQueue  * commandQueue;
+  ID3D12Resource      * src;
   struct D3D12Texture * texture;
+  UINT64                fenceValue;
+  ID3D12Fence         * fence;
+  HANDLE                event;
 };
 
 static struct DXGIInterface * dxgi = NULL;
@@ -119,6 +122,22 @@ static bool d3d12_create(struct DXGIInterface * intf)
   if (!this->texture)
   {
     DEBUG_ERROR("Failed to allocate memory");
+    goto fail;
+  }
+
+  this->event = CreateEvent(NULL, TRUE, TRUE, NULL);
+  if (!this->event)
+  {
+    DEBUG_WINERROR("Failed to create capture event", status);
+    goto fail;
+  }
+
+  this->fenceValue = 0;
+  status = ID3D12Device_CreateFence(this->device, 0, D3D12_FENCE_FLAG_NONE,
+    &IID_ID3D12Fence, (void **)&this->fence);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create capture fence", status);
     goto fail;
   }
 
@@ -232,6 +251,15 @@ static void d3d12_free(void)
     free(this->texture);
   }
 
+  if (this->fence)
+    ID3D12Fence_Release(this->fence);
+
+  if (this->event)
+    CloseHandle(this->event);
+
+  if (this->src)
+    ID3D12Resource_Release(this->src);
+
   if (this->commandQueue)
     ID3D12CommandQueue_Release(this->commandQueue);
 
@@ -265,7 +293,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
     goto cleanup;
   }
 
-  status = ID3D12Device_OpenSharedHandle(this->device, handle, &IID_ID3D12Resource, (void **)&tex->src);
+  status = ID3D12Device_OpenSharedHandle(this->device, handle, &IID_ID3D12Resource, (void **)&this->src);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to get create shared handle for texture", status);
@@ -277,7 +305,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   CloseHandle(handle);
 
   D3D12_TEXTURE_COPY_LOCATION srcLoc = {
-    .pResource        = tex->src,
+    .pResource        = this->src,
     .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
     .SubresourceIndex = 0
   };
@@ -324,10 +352,27 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
 
   ID3D12CommandQueue_ExecuteCommandLists(this->commandQueue, 1, &tex->commandList);
 
+  status = ID3D12CommandQueue_Signal(this->commandQueue, this->fence, ++this->fenceValue);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to signal capture fence", status);
+    fail = true;
+    goto cleanup;
+  }
+
+  ResetEvent(this->event);
+  status = ID3D12Fence_SetEventOnCompletion(this->fence, this->fenceValue, this->event);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to signal capture fence event", status);
+    fail = true;
+    goto cleanup;
+  }
+
   status = ID3D12CommandQueue_Signal(this->commandQueue, tex->fence, ++tex->fenceValue);
   if (FAILED(status))
   {
-    DEBUG_WINERROR("Failed to signal fence", status);
+    DEBUG_WINERROR("Failed to signal texture fence", status);
     fail = true;
     goto cleanup;
   }
@@ -335,7 +380,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   status = ID3D12Fence_SetEventOnCompletion(tex->fence, tex->fenceValue, tex->event);
   if (FAILED(status))
   {
-    DEBUG_WINERROR("Failed to signal fence event", status);
+    DEBUG_WINERROR("Failed to signal texture fence event", status);
     fail = true;
     goto cleanup;
   }
@@ -367,8 +412,6 @@ static CaptureResult d3d12_mapTexture(Texture * parent)
     return CAPTURE_RESULT_ERROR;
   }
 
-  ID3D12Resource_Release(tex->src);
-
   D3D12_RANGE range = { .Begin = 0, .End = dxgi->pitch * dxgi->height };
   status = ID3D12Resource_Map(tex->tex, 0, &range, &parent->map);
 
@@ -390,6 +433,17 @@ static void d3d12_unmapTexture(Texture * parent)
   parent->map = NULL;
 }
 
+static void d3d12_preRelease(void)
+{
+  WaitForSingleObject(this->event, INFINITE);
+
+  if (this->src)
+  {
+    ID3D12Resource_Release(this->src);
+    this->src = NULL;
+  }
+}
+
 struct DXGICopyBackend copyBackendD3D12 = {
   .name         = "Direct3D 12",
   .create       = d3d12_create,
@@ -397,4 +451,5 @@ struct DXGICopyBackend copyBackendD3D12 = {
   .copyFrame    = d3d12_copyFrame,
   .mapTexture   = d3d12_mapTexture,
   .unmapTexture = d3d12_unmapTexture,
+  .preRelease   = d3d12_preRelease,
 };

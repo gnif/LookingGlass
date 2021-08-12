@@ -539,6 +539,9 @@ static bool dxgi_deinit(void)
     }
   }
 
+  if (this->dup)
+    dxgi_releaseFrame();
+
   if (this->backend)
   {
     this->backend->free();
@@ -553,7 +556,6 @@ static bool dxgi_deinit(void)
 
   if (this->dup)
   {
-    dxgi_releaseFrame();
     IDXGIOutputDuplication_Release(this->dup);
     this->dup = NULL;
   }
@@ -1035,6 +1037,8 @@ static CaptureResult dxgi_releaseFrame(void)
   DEBUG_ASSERT(this);
   if (!this->needsRelease)
     return CAPTURE_RESULT_OK;
+
+  this->backend->preRelease();
 
   HRESULT status;
   LOCKED({status = IDXGIOutputDuplication_ReleaseFrame(this->dup);});

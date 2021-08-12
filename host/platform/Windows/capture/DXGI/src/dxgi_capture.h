@@ -113,6 +113,7 @@ struct DXGICopyBackend
   bool (*copyFrame)(Texture * tex, ID3D11Texture2D * src);
   CaptureResult (*mapTexture)(Texture * tex);
   void (*unmapTexture)(Texture * tex);
+  void (*preRelease)(void);
 };
 
 const char * GetDXGIFormatStr(DXGI_FORMAT format);
