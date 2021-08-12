@@ -239,7 +239,6 @@ static GLuint egl_filterDownscaleRun(EGL_Filter * filter, EGL_Model * model,
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, texture);
-  glGenerateMipmap(GL_TEXTURE_2D);
   glBindSampler(0, this->sampler);
 
   egl_shaderUse(this->shader);
