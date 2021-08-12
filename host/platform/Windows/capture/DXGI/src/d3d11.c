@@ -188,6 +188,11 @@ static void d3d11_unmapTexture(Texture * tex)
   tex->map = NULL;
 }
 
+static void d3d11_preRelease(void)
+{
+  // Nothing needs to be done.
+}
+
 struct DXGICopyBackend copyBackendD3D11 = {
   .name         = "Direct3D 11",
   .create       = d3d11_create,
@@ -195,4 +200,5 @@ struct DXGICopyBackend copyBackendD3D11 = {
   .copyFrame    = d3d11_copyFrame,
   .mapTexture   = d3d11_mapTexture,
   .unmapTexture = d3d11_unmapTexture,
+  .preRelease   = d3d11_preRelease,
 };
