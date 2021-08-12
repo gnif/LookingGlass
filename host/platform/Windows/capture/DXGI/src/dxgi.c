@@ -757,6 +757,7 @@ static void computeFrameDamage(Texture * tex)
        dirtyRect++)
     rectToFrameDamageRect(dirtyRect, texDamageRect++);
 
+  int actuallyMovedRectsCount = 0;
   for (DXGI_OUTDUPL_MOVE_RECT *moveRect = moveRects;
        moveRect < moveRects + moveRectsCount;
        moveRect++)
@@ -767,7 +768,7 @@ static void computeFrameDamage(Texture * tex)
         moveRect->SourcePoint.y == moveRect->DestinationRect.top)
       continue;
 
-    *(texDamageRect++) = (FrameDamageRect)
+    *texDamageRect++ = (FrameDamageRect)
     {
       .x = moveRect->SourcePoint.x,
       .y = moveRect->SourcePoint.y,
@@ -776,9 +777,10 @@ static void computeFrameDamage(Texture * tex)
     };
 
     rectToFrameDamageRect(&moveRect->DestinationRect, texDamageRect++);
+    actuallyMovedRectsCount += 2;
   }
 
-  tex->damageRectsCount = dirtyRectsCount + moveRectsCount;
+  tex->damageRectsCount = dirtyRectsCount + actuallyMovedRectsCount;
 }
 
 static CaptureResult dxgi_capture(void)
