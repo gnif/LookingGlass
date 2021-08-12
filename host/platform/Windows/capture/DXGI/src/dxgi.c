@@ -49,7 +49,9 @@
 static struct DXGIInterface * this = NULL;
 
 extern struct DXGICopyBackend copyBackendD3D11;
+extern struct DXGICopyBackend copyBackendD3D12;
 static struct DXGICopyBackend * backends[] = {
+  &copyBackendD3D12,
   &copyBackendD3D11,
 };
 
