@@ -18,9 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include <dxgi.h>
-#include <d3d11.h>
-#include <d3dcommon.h>
+#include "dxgi_capture.h"
 
 static const char * DXGI_FORMAT_STR[] = {
   "DXGI_FORMAT_UNKNOWN",
@@ -147,7 +145,7 @@ static const char * DXGI_FORMAT_STR[] = {
   "DXGI_FORMAT_V408"
 };
 
-static const char * GetDXGIFormatStr(DXGI_FORMAT format)
+const char * GetDXGIFormatStr(DXGI_FORMAT format)
 {
   if (format > sizeof(DXGI_FORMAT_STR) / sizeof(const char *))
     return DXGI_FORMAT_STR[0];
