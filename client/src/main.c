@@ -38,6 +38,7 @@
 #include <stdatomic.h>
 #include <linux/input.h>
 
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/crash.h"
 #include "common/KVMFR.h"
@@ -631,7 +632,7 @@ int main_frameThread(void * unused)
     if (g_state.useDMA)
     {
       /* find the existing dma buffer if it exists */
-      for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
+      for(int i = 0; i < ARRAY_LENGTH(dmaInfo); ++i)
       {
         if (dmaInfo[i].frame == frame)
         {
@@ -648,7 +649,7 @@ int main_frameThread(void * unused)
 
       /* otherwise find a free buffer for use */
       if (!dma)
-        for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
+        for(int i = 0; i < ARRAY_LENGTH(dmaInfo); ++i)
         {
           if (!dmaInfo[i].frame)
           {
@@ -721,7 +722,7 @@ int main_frameThread(void * unused)
 
   if (g_state.useDMA)
   {
-    for(int i = 0; i < sizeof(dmaInfo) / sizeof(struct DMAFrameInfo); ++i)
+    for(int i = 0; i < ARRAY_LENGTH(dmaInfo); ++i)
       if (dmaInfo[i].fd >= 0)
         close(dmaInfo[i].fd);
   }
