@@ -23,7 +23,6 @@
 #include "egldebug.h"
 
 #include <string.h>
-#include <assert.h>
 
 // forwards
 extern const EGL_TextureOps EGL_TextureBuffer;
@@ -109,7 +108,7 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
 static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
-  assert(update->type == EGL_TEXTYPE_BUFFER);
+  DEBUG_ASSERT(update->type == EGL_TEXTYPE_BUFFER);
 
   glBindTexture(GL_TEXTURE_2D, this->tex[0]);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.pitch);
@@ -164,7 +163,7 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
     const EGL_TexUpdate * update)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
-  assert(update->type == EGL_TEXTYPE_BUFFER);
+  DEBUG_ASSERT(update->type == EGL_TEXTYPE_BUFFER);
 
   LG_LOCK(this->copyLock);
   memcpy(this->buf[this->bufIndex].map, update->buffer,

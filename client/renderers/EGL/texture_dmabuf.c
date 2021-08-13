@@ -21,8 +21,6 @@
 #include "texture.h"
 #include "texture_buffer.h"
 
-#include <assert.h>
-
 #include "egl_dynprocs.h"
 #include "egldebug.h"
 
@@ -101,7 +99,8 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
-  assert(update->type == EGL_TEXTYPE_DMABUF);
+
+  DEBUG_ASSERT(update->type == EGL_TEXTYPE_DMABUF);
 
   EGLImage image = EGL_NO_IMAGE;
 

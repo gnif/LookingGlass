@@ -24,6 +24,7 @@
 #include <stdbool.h>
 #include <EGL/egl.h>
 #include "common/types.h"
+#include "common/debug.h"
 
 typedef enum LG_ClipboardData
 {
@@ -210,50 +211,50 @@ struct LG_DisplayServerOps
 };
 
 #ifdef ENABLE_EGL
-  #define ASSERT_EGL_FN(x) assert(x);
+  #define ASSERT_EGL_FN(x) DEBUG_ASSERT(x)
 #else
   #define ASSERT_EGL_FN(x)
 #endif
 
 #ifdef ENABLE_OPENGL
-  #define ASSERT_OPENGL_FN(x) assert(x)
+  #define ASSERT_OPENGL_FN(x) DEBUG_ASSERT(x)
 #else
   #define ASSERT_OPENGL_FN(x)
 #endif
 
 #define ASSERT_LG_DS_VALID(x) \
-  assert((x)->setup              ); \
-  assert((x)->probe              ); \
-  assert((x)->earlyInit          ); \
-  assert((x)->init               ); \
-  assert((x)->startup            ); \
-  assert((x)->shutdown           ); \
-  assert((x)->free               ); \
-  assert((x)->getProp            ); \
-  ASSERT_EGL_FN((x)->getEGLDisplay      ); \
-  ASSERT_EGL_FN((x)->getEGLNativeWindow ); \
-  ASSERT_EGL_FN((x)->eglSwapBuffers     ); \
+  DEBUG_ASSERT((x)->setup    ); \
+  DEBUG_ASSERT((x)->probe    ); \
+  DEBUG_ASSERT((x)->earlyInit); \
+  DEBUG_ASSERT((x)->init     ); \
+  DEBUG_ASSERT((x)->startup  ); \
+  DEBUG_ASSERT((x)->shutdown ); \
+  DEBUG_ASSERT((x)->free     ); \
+  DEBUG_ASSERT((x)->getProp  ); \
+  ASSERT_EGL_FN((x)->getEGLDisplay     ); \
+  ASSERT_EGL_FN((x)->getEGLNativeWindow); \
+  ASSERT_EGL_FN((x)->eglSwapBuffers    ); \
   ASSERT_OPENGL_FN((x)->glCreateContext  ); \
   ASSERT_OPENGL_FN((x)->glDeleteContext  ); \
   ASSERT_OPENGL_FN((x)->glMakeCurrent    ); \
   ASSERT_OPENGL_FN((x)->glSetSwapInterval); \
   ASSERT_OPENGL_FN((x)->glSwapBuffers    ); \
-  assert(!(x)->waitFrame == !(x)->stopWaitFrame); \
-  assert((x)->guestPointerUpdated); \
-  assert((x)->setPointer         ); \
-  assert((x)->grabPointer        ); \
-  assert((x)->ungrabPointer      ); \
-  assert((x)->capturePointer     ); \
-  assert((x)->uncapturePointer   ); \
-  assert((x)->warpPointer        ); \
-  assert((x)->realignPointer     ); \
-  assert((x)->isValidPointerPos  ); \
-  assert((x)->inhibitIdle        ); \
-  assert((x)->uninhibitIdle      ); \
-  assert((x)->wait               ); \
-  assert((x)->setWindowSize      ); \
-  assert((x)->setFullscreen      ); \
-  assert((x)->getFullscreen      ); \
-  assert((x)->minimize           );
+  DEBUG_ASSERT(!(x)->waitFrame == !(x)->stopWaitFrame); \
+  DEBUG_ASSERT((x)->guestPointerUpdated); \
+  DEBUG_ASSERT((x)->setPointer         ); \
+  DEBUG_ASSERT((x)->grabPointer        ); \
+  DEBUG_ASSERT((x)->ungrabPointer      ); \
+  DEBUG_ASSERT((x)->capturePointer     ); \
+  DEBUG_ASSERT((x)->uncapturePointer   ); \
+  DEBUG_ASSERT((x)->warpPointer        ); \
+  DEBUG_ASSERT((x)->realignPointer     ); \
+  DEBUG_ASSERT((x)->isValidPointerPos  ); \
+  DEBUG_ASSERT((x)->inhibitIdle        ); \
+  DEBUG_ASSERT((x)->uninhibitIdle      ); \
+  DEBUG_ASSERT((x)->wait               ); \
+  DEBUG_ASSERT((x)->setWindowSize      ); \
+  DEBUG_ASSERT((x)->setFullscreen      ); \
+  DEBUG_ASSERT((x)->getFullscreen      ); \
+  DEBUG_ASSERT((x)->minimize           );
 
 #endif
