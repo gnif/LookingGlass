@@ -64,6 +64,7 @@ build_shaders(
 	shader/ffx_fsr1_easu.frag
 	shader/ffx_fsr1_rcas.frag
 	shader/downscale.frag
+	shader/downscale_lanczos2.frag
 )
 
 make_defines(
