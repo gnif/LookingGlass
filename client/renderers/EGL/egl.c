@@ -303,7 +303,7 @@ static void egl_calc_mouse_size(struct Inst * this)
   if (!this->formatValid)
     return;
 
-  int w  = 0, h = 0;
+  int w, h;
 
   switch(this->format.rotate)
   {
