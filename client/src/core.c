@@ -27,7 +27,6 @@
 #include "common/debug.h"
 #include "common/array.h"
 
-#include <assert.h>
 #include <math.h>
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
@@ -185,7 +184,7 @@ void core_updatePositionInfo(void)
       break;
 
     default:
-      assert(!"unreachable");
+      DEBUG_UNREACHABLE();
   }
 
   if (g_params.keepAspect)

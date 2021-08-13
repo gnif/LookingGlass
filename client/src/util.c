@@ -27,7 +27,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
 #include <math.h>
 #include <fontconfig/fontconfig.h>
 
@@ -182,7 +181,7 @@ void util_localCurToGuest(struct DoublePoint *guest)
       break;
 
     default:
-      assert(!"unreachable");
+      DEBUG_UNREACHABLE();
   }
 }
 

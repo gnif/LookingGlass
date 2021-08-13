@@ -36,7 +36,6 @@
 #include "cimgui.h"
 #include "generator/output/cimgui_impl.h"
 
-#include <assert.h>
 #include <math.h>
 #include <string.h>
 
@@ -325,7 +324,7 @@ static void egl_calc_mouse_size(struct Inst * this)
       break;
 
     default:
-      assert(!"unreachable");
+      DEBUG_UNREACHABLE();
   }
 
   switch((this->format.rotate + this->rotate) % LG_ROTATE_MAX)
