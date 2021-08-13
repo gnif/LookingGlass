@@ -23,7 +23,6 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include <string.h>
-#include <assert.h>
 #include <stdlib.h>
 #include <inttypes.h>
 #include <xcb/shm.h>
@@ -64,7 +63,7 @@ static const char * xcb_getName(void)
 
 static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
-  assert(!this);
+  DEBUG_ASSERT(!this);
   this             = (struct xcb *)calloc(sizeof(struct xcb), 1);
   this->shmID      = -1;
   this->data       = (void *)-1;
@@ -82,8 +81,8 @@ static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPo
 
 static bool xcb_init(void)
 {
-  assert(this);
-  assert(!this->initialized);
+  DEBUG_ASSERT(this);
+  DEBUG_ASSERT(!this->initialized);
 
   lgResetEvent(this->frameEvent);
 
@@ -134,7 +133,7 @@ fail:
 
 static bool xcb_deinit(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
 
   if ((uintptr_t)this->data != -1)
   {
@@ -167,8 +166,8 @@ static void xcb_free(void)
 
 static CaptureResult xcb_capture(void)
 {
-  assert(this);
-  assert(this->initialized);
+  DEBUG_ASSERT(this);
+  DEBUG_ASSERT(this->initialized);
 
   if (!this->hasFrame)
   {
@@ -211,8 +210,8 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame,
 static CaptureResult xcb_getFrame(FrameBuffer * frame,
     const unsigned int height, int frameIndex)
 {
-  assert(this);
-  assert(this->initialized);
+  DEBUG_ASSERT(this);
+  DEBUG_ASSERT(this->initialized);
 
   xcb_shm_get_image_reply_t * img;
   img = xcb_shm_get_image_reply(this->xcb, this->imgC, NULL);

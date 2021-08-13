@@ -30,7 +30,6 @@
 #include "common/rects.h"
 #include "common/thread.h"
 #include "common/KVMFR.h"
-#include <assert.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <windows.h>
