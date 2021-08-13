@@ -330,7 +330,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       break;
 
     default:
-      assert(!"unreachable");
+      DEBUG_UNREACHABLE();
   }
 
   state.rect.x = max(0, state.rect.x);
