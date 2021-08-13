@@ -119,7 +119,7 @@ void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects *
   else
   {
     rects->count = data->count;
-    assert(rects->count <= rects->maxCount);
+    DEBUG_ASSERT(rects->count <= rects->maxCount);
 
     for (int i = 0; i < rects->count; ++i)
       rectToVertices(vertices + i * 8, data->rects + i);

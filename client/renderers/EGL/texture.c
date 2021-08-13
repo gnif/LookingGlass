@@ -21,7 +21,6 @@
 #include "texture.h"
 
 #include <stdbool.h>
-#include <assert.h>
 #include <string.h>
 #include "shader.h"
 #include "common/framebuffer.h"
@@ -66,12 +65,12 @@ bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
       break;
 
     case EGL_TEXTYPE_FRAMEBUFFER:
-      assert(streaming);
+      DEBUG_ASSERT(streaming);
       ops = &EGL_TextureFrameBuffer;
       break;
 
     case EGL_TEXTYPE_DMABUF:
-      assert(streaming);
+      DEBUG_ASSERT(streaming);
       ops = &EGL_TextureDMABUF;
       break;
 

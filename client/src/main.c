@@ -33,7 +33,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <linux/input.h>
@@ -854,7 +853,7 @@ static int lg_run(void)
       break;
     }
 
-  assert(g_state.ds);
+  DEBUG_ASSERT(g_state.ds);
   ASSERT_LG_DS_VALID(g_state.ds);
 
   if (g_params.jitRender)

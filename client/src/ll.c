@@ -20,9 +20,9 @@
 
 #include "ll.h"
 
+#include "common/debug.h"
 #include "common/locking.h"
 #include <stdlib.h>
-#include <assert.h>
 
 struct ll_item
 {
@@ -53,7 +53,7 @@ struct ll * ll_new(void)
 void ll_free(struct ll * list)
 {
   // never free a list with items in it!
-  assert(!list->head);
+  DEBUG_ASSERT(!list->head);
 
   LG_LOCK_FREE(list->lock);
   free(list);

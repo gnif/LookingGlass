@@ -22,7 +22,6 @@
 #define _H_I_OVERLAY_
 
 #include <stdbool.h>
-#include <assert.h>
 
 #include "common/types.h"
 
@@ -64,9 +63,9 @@ struct LG_OverlayOps
 };
 
 #define ASSERT_LG_OVERLAY_VALID(x) \
-  assert((x)->name          ); \
-  assert((x)->init          ); \
-  assert((x)->free          ); \
-  assert((x)->render        );
+  DEBUG_ASSERT((x)->name  ); \
+  DEBUG_ASSERT((x)->init  ); \
+  DEBUG_ASSERT((x)->free  ); \
+  DEBUG_ASSERT((x)->render);
 
 #endif

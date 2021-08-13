@@ -20,7 +20,6 @@
 
 #include "wayland.h"
 
-#include <assert.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -299,7 +298,7 @@ static void dataDeviceHandleEnter(void * data, struct wl_data_device * device,
     uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW, wl_fixed_t syW,
     struct wl_data_offer * offer)
 {
-  assert(wlCb.dndOffer == NULL);
+  DEBUG_ASSERT(wlCb.dndOffer == NULL);
   wlCb.dndOffer = offer;
 
   struct DataOffer * extra = wl_data_offer_get_user_data(offer);

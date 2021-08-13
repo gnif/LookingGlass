@@ -804,7 +804,7 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
 
     // It is an error to run out of rectangles, because we will not be able to
     // correctly calculate the damage of the next frame.
-    assert(written >= 0);
+    DEBUG_ASSERT(written >= 0);
 
     const int toAdd = max(written, overlay->lastRectCount);
     totalDamage |= toAdd > maxRects;

@@ -20,8 +20,6 @@
 
 #include "texture.h"
 
-#include <assert.h>
-
 #include "texture_buffer.h"
 #include "common/debug.h"
 #include "common/KVMFR.h"
@@ -84,7 +82,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexFB         * this   = UPCAST(TexFB        , parent );
 
-  assert(update->type == EGL_TEXTYPE_FRAMEBUFFER);
+  DEBUG_ASSERT(update->type == EGL_TEXTYPE_FRAMEBUFFER);
 
   LG_LOCK(parent->copyLock);
 
