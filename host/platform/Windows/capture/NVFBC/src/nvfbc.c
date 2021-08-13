@@ -197,7 +197,7 @@ static bool nvfbc_init(void)
     return false;
   }
 
-  int diffRes = option_get_bool("nvfbc", "diffRes");
+  int diffRes = option_get_int("nvfbc", "diffRes");
   enum DiffMapBlockSize blockSize;
   NvFBCGetDiffMapBlockSize(diffRes, &blockSize, &this->diffShift, privData, privDataLen);
   free(privData);
