@@ -22,5 +22,6 @@
 #define _LG_ARRAY_H_
 
 #define ARRAY_LENGTH(arr) (sizeof(arr) / sizeof(*(arr)))
+#define ALIGN_PAD(value, align) (((value) + (align) - 1) & -(align))
 
 #endif

@@ -23,6 +23,7 @@
 #include "common/windebug.h"
 #include "windows/mousehook.h"
 #include "windows/force_compose.h"
+#include "common/array.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/event.h"
@@ -449,7 +450,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     this->grabHeight = this->grabInfo.dwHeight;
     this->grabStride = this->grabInfo.dwBufferWidth;
     // Round up stride in IVSHMEM to avoid issues with dmabuf import.
-    this->shmStride  = (this->grabStride + 0x1F) & ~0x1F;
+    this->shmStride  = ALIGN_PAD(this->grabStride, 32);
     ++this->formatVer;
   }
 

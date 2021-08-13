@@ -31,6 +31,7 @@
 #include <string.h>
 #include <errno.h>
 
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/sysinfo.h"
@@ -232,7 +233,7 @@ int ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size)
     (struct IVSHMEMInfo *)dev->opaque;
 
   // align to the page size
-  size = (size + pageSize - 1) & -pageSize;
+  size = ALIGN_PAD(size, pageSize);
 
   const struct kvmfr_dmabuf_create create =
   {
