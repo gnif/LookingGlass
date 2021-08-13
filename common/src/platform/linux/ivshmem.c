@@ -33,6 +33,7 @@
 
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/sysinfo.h"
 #include "common/stringutils.h"
 #include "module/kvmfr.h"
 
@@ -222,11 +223,16 @@ int ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size)
   assert(dev && dev->opaque);
   assert(offset + size <= dev->size);
 
+  static long pageSize = 0;
+
+  if (!pageSize)
+    pageSize = sysinfo_getPageSize();
+
   struct IVSHMEMInfo * info =
     (struct IVSHMEMInfo *)dev->opaque;
 
   // align to the page size
-  size = (size & ~(0x1000-1)) + 0x1000;
+  size = (size + pageSize - 1) & -pageSize;
 
   const struct kvmfr_dmabuf_create create =
   {
