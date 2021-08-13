@@ -20,10 +20,13 @@
 
 #define _GNU_SOURCE //needed for pthread_setname_np
 
+#include <obs/obs-config.h>
 #include <obs/obs-module.h>
 #include <obs/util/threading.h>
+#include <obs/graphics/graphics.h>
 #include <obs/graphics/matrix4.h>
 
+#include <common/array.h>
 #include <common/ivshmem.h>
 #include <common/KVMFR.h>
 #include <common/framebuffer.h>
@@ -34,6 +37,17 @@
 #include <stdatomic.h>
 #include <GL/gl.h>
 
+/**
+ * the following comes from drm_fourcc.h and is included here to avoid the
+ * external dependency for the few simple defines we need
+ */
+#define fourcc_code(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | \
+         ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+#define DRM_FORMAT_ARGB8888      fourcc_code('A', 'R', '2', '4')
+#define DRM_FORMAT_ABGR8888      fourcc_code('A', 'B', '2', '4')
+#define DRM_FORMAT_BGRA1010102   fourcc_code('B', 'A', '3', '0')
+#define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
+
 typedef enum
 {
   STATE_STOPPED,
@@ -43,6 +57,14 @@ typedef enum
   STATE_STOPPING
 }
 LGState;
+
+typedef struct
+{
+  KVMFRFrame * frame;
+  size_t       dataSize;
+  int          fd;
+}
+DMAFrameInfo;
 
 typedef struct
 {
@@ -59,6 +81,11 @@ typedef struct
   gs_texture_t    * texture;
   uint8_t         * texData;
   uint32_t          linesize;
+
+#if LIBOBS_API_MAJOR_VER >= 27
+  bool              dmabuf;
+  DMAFrameInfo      dmaInfo[LGMP_Q_FRAME_LEN];
+#endif
 
   pthread_t         frameThread, pointerThread;
   os_sem_t        * frameSem;
@@ -114,6 +141,15 @@ static void deinit(LGPlugin * this)
       /* fallthrough */
 
     case STATE_OPEN:
+#if LIBOBS_API_MAJOR_VER >= 27
+      for (int i = 0 ; i < ARRAY_LENGTH(this->dmaInfo); ++i)
+        if (this->dmaInfo[i].fd >= 0)
+        {
+          close(this->dmaInfo[i].fd);
+          this->dmaInfo[i].fd = -1;
+        }
+#endif
+
       lgmpClientFree(&this->lgmp);
       ivshmemClose(&this->shmDev);
       break;
@@ -168,6 +204,9 @@ static obs_properties_t * lgGetProperties(void * data)
   obs_properties_t * props = obs_properties_create();
 
   obs_properties_add_text(props, "shmFile", obs_module_text("SHM File"), OBS_TEXT_DEFAULT);
+#if LIBOBS_API_MAJOR_VER >= 27
+  obs_properties_add_bool(props, "dmabuf",  obs_module_text("Use DMABUF import (requires kvmfr device)"));
+#endif
 
   return props;
 }
@@ -341,6 +380,10 @@ static void lgUpdate(void * data, obs_data_t * settings)
   if (!ivshmemOpenDev(&this->shmDev, this->shmFile))
     return;
 
+#if LIBOBS_API_MAJOR_VER >= 27
+  this->dmabuf = obs_data_get_bool(settings, "dmabuf") && ivshmemHasDMA(&this->shmDev);
+#endif
+
   this->state = STATE_OPEN;
 
   uint32_t udataSize;
@@ -373,6 +416,57 @@ static void lgUpdate(void * data, obs_data_t * settings)
   pthread_setname_np(this->pointerThread, "LGPointerThread");
 }
 
+#if LIBOBS_API_MAJOR_VER >= 27
+static int dmabufGetFd(LGPlugin * this, LGMPMessage * msg, KVMFRFrame * frame, size_t dataSize)
+{
+  DMAFrameInfo * dma = NULL;
+
+  /* find the existing dma buffer if it exists */
+  for (int i = 0; i < ARRAY_LENGTH(this->dmaInfo); ++i)
+    if (this->dmaInfo[i].frame == frame)
+    {
+      dma = this->dmaInfo + i;
+      /* if it's too small close it */
+      if (dma->dataSize < dataSize)
+      {
+        close(dma->fd);
+        dma->fd = -1;
+      }
+      break;
+    }
+
+  /* otherwise find a free buffer for use */
+  if (!dma)
+    for (int i = 0; i < ARRAY_LENGTH(this->dmaInfo); ++i)
+      if (!this->dmaInfo[i].frame)
+      {
+        dma = this->dmaInfo + i;
+        dma->frame = frame;
+        dma->fd    = -1;
+        break;
+      }
+
+  assert(dma);
+
+  /* open the buffer */
+  if (dma->fd == -1)
+  {
+    const uintptr_t pos    = (uintptr_t) msg->mem - (uintptr_t) this->shmDev.mem;
+    const uintptr_t offset = (uintptr_t) frame->offset + FrameBufferStructSize;
+
+    dma->dataSize = dataSize;
+    dma->fd       = ivshmemGetDMABuf(&this->shmDev, pos + offset, dataSize);
+    if (dma->fd < 0)
+    {
+      puts("Failed to get the DMA buffer for the frame");
+      return -1;
+    }
+  }
+
+  return dma->fd;
+}
+#endif
+
 static void lgVideoTick(void * data, float seconds)
 {
   LGPlugin * this = (LGPlugin *)data;
@@ -382,6 +476,7 @@ static void lgVideoTick(void * data, float seconds)
 
   LGMP_STATUS status;
   LGMPMessage msg;
+  bool framebuffer = true;
 
   os_sem_wait(this->frameSem);
   if (this->state != STATE_RUNNING)
@@ -448,7 +543,6 @@ static void lgVideoTick(void * data, float seconds)
     os_sem_post(this->cursorSem);
   }
 
-
   if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
   {
     if (status != LGMP_ERR_QUEUE_EMPTY)
@@ -490,16 +584,30 @@ static void lgVideoTick(void * data, float seconds)
     }
 
     enum gs_color_format format;
+    uint32_t drm_format;
+
     this->bpp = 4;
     switch(this->type)
     {
-      case FRAME_TYPE_BGRA   : format = GS_BGRA       ; break;
-      case FRAME_TYPE_RGBA   : format = GS_RGBA       ; break;
-      case FRAME_TYPE_RGBA10 : format = GS_R10G10B10A2; break;
+      case FRAME_TYPE_BGRA:
+        format     = GS_BGRA;
+        drm_format = DRM_FORMAT_ARGB8888;
+        break;
+
+      case FRAME_TYPE_RGBA:
+        format     = GS_RGBA;
+        drm_format = DRM_FORMAT_ARGB8888;
+        break;
+
+      case FRAME_TYPE_RGBA10:
+        format     = GS_R10G10B10A2;
+        drm_format = DRM_FORMAT_BGRA1010102;
+        break;
 
       case FRAME_TYPE_RGBA16F:
-        this->bpp = 8;
-        format    = GS_RGBA16F;
+        this->bpp  = 8;
+        format     = GS_RGBA16F;
+        drm_format = DRM_FORMAT_ABGR16161616F;
         break;
 
       default:
@@ -509,8 +617,38 @@ static void lgVideoTick(void * data, float seconds)
         return;
     }
 
-    this->texture = gs_texture_create(
-        this->width, this->height, format, 1, NULL, GS_DYNAMIC);
+    this->texture = NULL;
+
+#if LIBOBS_API_MAJOR_VER >= 27
+    if (this->dmabuf)
+    {
+      int fd = dmabufGetFd(this, &msg, frame, frame->height * frame->pitch);
+
+      if (fd < 0)
+        goto dmabuf_fail;
+
+      this->texture = gs_texture_create_from_dmabuf(frame->width, frame->height,
+        drm_format, format, 1, &fd, &(uint32_t) { frame->pitch },
+        &(uint32_t) { 0 }, &(uint64_t) { 0 });
+
+      if (!this->texture)
+      {
+        puts("Failed to create dmabuf texture");
+        this->dmabuf = false;
+        goto dmabuf_fail;
+      }
+
+      framebuffer = false;
+    }
+
+  dmabuf_fail:
+#else
+    (void) drm_format;
+#endif
+
+    if (!this->texture)
+      this->texture = gs_texture_create(
+          this->width, this->height, format, 1, NULL, GS_DYNAMIC);
 
     if (!this->texture)
     {
@@ -524,7 +662,7 @@ static void lgVideoTick(void * data, float seconds)
     obs_leave_graphics();
   }
 
-  if (this->texture)
+  if (framebuffer && this->texture)
   {
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
     framebuffer_read(
