@@ -45,9 +45,6 @@
 #define CONFIG_FILE "looking-glass-host.ini"
 #define POINTER_SHAPE_BUFFERS 3
 
-#define ALIGN_DN(x) ((uintptr_t)(x) & ~0x7F)
-#define ALIGN_UP(x) ALIGN_DN(x + 0x7F)
-
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
   .queueID     = LGMP_Q_FRAME,
