@@ -30,7 +30,6 @@
 #include "common/runningavg.h"
 #include "common/KVMFR.h"
 
-#include <assert.h>
 #include <stdatomic.h>
 #include <unistd.h>
 #include <dxgi.h>
@@ -170,7 +169,7 @@ static void dxgi_initOptions(void)
 
 static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
-  assert(!this);
+  DEBUG_ASSERT(!this);
   this = calloc(sizeof(struct iface), 1);
   if (!this)
   {
@@ -200,7 +199,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
 
 static bool dxgi_init(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
 
   this->desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
   if (!this->desktop)
@@ -601,7 +600,7 @@ static void dxgi_stop(void)
 
 static bool dxgi_deinit(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
 
   for (int i = 0; i < this->maxTextures; ++i)
   {
@@ -677,7 +676,7 @@ static bool dxgi_deinit(void)
 
 static void dxgi_free(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
 
   if (this->initialized)
     dxgi_deinit();
@@ -785,8 +784,8 @@ static void computeFrameDamage(Texture * tex)
 
 static CaptureResult dxgi_capture(void)
 {
-  assert(this);
-  assert(this->initialized);
+  DEBUG_ASSERT(this);
+  DEBUG_ASSERT(this->initialized);
 
   Texture                 * tex = NULL;
   CaptureResult             result;
@@ -1008,8 +1007,8 @@ static CaptureResult dxgi_capture(void)
 
 static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameSize)
 {
-  assert(this);
-  assert(this->initialized);
+  DEBUG_ASSERT(this);
+  DEBUG_ASSERT(this->initialized);
 
   // NOTE: the event may be signaled when there are no frames available
   if (atomic_load_explicit(&this->texReady, memory_order_acquire) == 0)
@@ -1080,8 +1079,8 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
 static CaptureResult dxgi_getFrame(FrameBuffer * frame,
     const unsigned int height, int frameIndex)
 {
-  assert(this);
-  assert(this->initialized);
+  DEBUG_ASSERT(this);
+  DEBUG_ASSERT(this->initialized);
 
   Texture * tex = &this->texture[this->texRIndex];
 
@@ -1127,7 +1126,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
 
 static CaptureResult dxgi_releaseFrame(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
   if (!this->needsRelease)
     return CAPTURE_RESULT_OK;
 
