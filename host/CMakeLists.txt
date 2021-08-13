@@ -27,6 +27,10 @@ add_compile_options(
 )
 set(CMAKE_C_STANDARD  11)
 
+if(WIN32)
+  add_compile_options("-fdebug-prefix-map=${PROJECT_TOP}/=")
+endif()
+
 add_custom_command(
 	OUTPUT	${CMAKE_BINARY_DIR}/version.c
     ${CMAKE_BINARY_DIR}/include/version.h
