@@ -428,6 +428,8 @@ static void updateDamageRects(CaptureFrame * frame)
         };
       }
 
+  rectId = rectsRejectContained(frame->damageRects, rectId);
+
 done:
   frame->damageRectsCount = rectId;
 }
