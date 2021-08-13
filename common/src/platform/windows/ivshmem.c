@@ -25,7 +25,6 @@
 #include <windows.h>
 #include "ivshmem.h"
 
-#include <assert.h>
 #include <setupapi.h>
 #include <io.h>
 
@@ -72,7 +71,7 @@ static int ivshmemComparator(const void * a_, const void * b_)
 
 bool ivshmemInit(struct IVSHMEM * dev)
 {
-  assert(dev && !dev->opaque);
+  DEBUG_ASSERT(dev && !dev->opaque);
 
   HANDLE                           handle;
   HDEVINFO                         devInfoSet;
@@ -195,7 +194,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
 
 bool ivshmemOpen(struct IVSHMEM * dev)
 {
-  assert(dev && dev->opaque && !dev->mem);
+  DEBUG_ASSERT(dev && dev->opaque && !dev->mem);
 
   struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)dev->opaque;
 
@@ -226,7 +225,7 @@ bool ivshmemOpen(struct IVSHMEM * dev)
 
 void ivshmemClose(struct IVSHMEM * dev)
 {
-  assert(dev && dev->opaque && dev->mem);
+  DEBUG_ASSERT(dev && dev->opaque && dev->mem);
 
   struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)dev->opaque;
 
@@ -239,7 +238,7 @@ void ivshmemClose(struct IVSHMEM * dev)
 
 void ivshmemFree(struct IVSHMEM * dev)
 {
-  assert(dev && dev->opaque && !dev->mem);
+  DEBUG_ASSERT(dev && dev->opaque && !dev->mem);
 
   struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)dev->opaque;
 

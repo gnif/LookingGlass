@@ -24,7 +24,6 @@
 
 #include <stdlib.h>
 #include <pthread.h>
-#include <assert.h>
 #include <errno.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -78,7 +77,7 @@ LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
 
 void lgFreeEvent(LGEvent * handle)
 {
-  assert(handle);
+  DEBUG_ASSERT(handle);
 
   if (atomic_load_explicit(&handle->waiting, memory_order_acquire) != 0)
     DEBUG_ERROR("BUG: Freeing an event that still has threads waiting on it");
@@ -90,7 +89,7 @@ void lgFreeEvent(LGEvent * handle)
 
 bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
 {
-  assert(handle);
+  DEBUG_ASSERT(handle);
 
   bool ret   = true;
   int  res;
@@ -173,7 +172,7 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
 
 bool lgSignalEvent(LGEvent * handle)
 {
-  assert(handle);
+  DEBUG_ASSERT(handle);
 
   if (pthread_mutex_lock(&handle->mutex) != 0)
   {
@@ -202,6 +201,6 @@ bool lgSignalEvent(LGEvent * handle)
 
 bool lgResetEvent(LGEvent * handle)
 {
-  assert(handle);
+  DEBUG_ASSERT(handle);
   return atomic_exchange_explicit(&handle->signaled, false, memory_order_release);
 }

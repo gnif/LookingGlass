@@ -20,7 +20,6 @@
 
 #include "common/ivshmem.h"
 
-#include <assert.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -118,7 +117,7 @@ bool ivshmemOpen(struct IVSHMEM * dev)
 
 bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 {
-  assert(dev);
+  DEBUG_ASSERT(dev);
 
   unsigned int devSize;
   int devFd = -1;
@@ -186,7 +185,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
 void ivshmemClose(struct IVSHMEM * dev)
 {
-  assert(dev);
+  DEBUG_ASSERT(dev);
 
   if (!dev->opaque)
     return;
@@ -210,7 +209,7 @@ void ivshmemFree(struct IVSHMEM * dev)
 
 bool ivshmemHasDMA(struct IVSHMEM * dev)
 {
-  assert(dev && dev->opaque);
+  DEBUG_ASSERT(dev && dev->opaque);
 
   struct IVSHMEMInfo * info =
     (struct IVSHMEMInfo *)dev->opaque;
@@ -220,9 +219,9 @@ bool ivshmemHasDMA(struct IVSHMEM * dev)
 
 int ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size)
 {
-  assert(ivshmemHasDMA(dev));
-  assert(dev && dev->opaque);
-  assert(offset + size <= dev->size);
+  DEBUG_ASSERT(ivshmemHasDMA(dev));
+  DEBUG_ASSERT(dev && dev->opaque);
+  DEBUG_ASSERT(offset + size <= dev->size);
 
   static long pageSize = 0;
 
