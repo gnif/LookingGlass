@@ -26,7 +26,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
 
 struct OptionGroup
 {
@@ -687,7 +686,7 @@ void option_print(void)
       "Value"
     );
 
-    assert(maxLen > 0);
+    DEBUG_ASSERT(maxLen > 0);
     headerLine = line;
     stringlist_push(lines, line);
 
@@ -709,7 +708,7 @@ void option_print(void)
         o->description
       );
 
-      assert(len > 0);
+      DEBUG_ASSERT(len > 0);
       stringlist_push(lines, line);
       if (len > maxLen)
         maxLen = len;
@@ -765,7 +764,7 @@ int option_get_int(const char * module, const char * name)
     DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return -1;
   }
-  assert(o->type == OPTION_TYPE_INT);
+  DEBUG_ASSERT(o->type == OPTION_TYPE_INT);
   return o->value.x_int;
 }
 
@@ -777,7 +776,7 @@ const char * option_get_string(const char * module, const char * name)
     DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return NULL;
   }
-  assert(o->type == OPTION_TYPE_STRING);
+  DEBUG_ASSERT(o->type == OPTION_TYPE_STRING);
   return o->value.x_string;
 }
 
@@ -789,7 +788,7 @@ bool option_get_bool(const char * module, const char * name)
     DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return false;
   }
-  assert(o->type == OPTION_TYPE_BOOL);
+  DEBUG_ASSERT(o->type == OPTION_TYPE_BOOL);
   return o->value.x_bool;
 }
 
@@ -801,6 +800,6 @@ float option_get_float(const char * module, const char * name)
     DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
     return false;
   }
-  assert(o->type == OPTION_TYPE_FLOAT);
+  DEBUG_ASSERT(o->type == OPTION_TYPE_FLOAT);
   return o->value.x_float;
 }
