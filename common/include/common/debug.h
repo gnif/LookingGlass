@@ -57,6 +57,14 @@ void printBacktrace(void);
   #define DIRECTORY_SEPARATOR '/'
 #endif
 
+#ifdef __GNUC__
+  #define DEBUG_UNREACHABLE_MARKER() __builtin_unreachable()
+#elif __defined__(_MSC_VER)
+  #define DEBUG_UNREACHABLE_MARKER() __assume(0)
+#else
+  #define DEBUG_UNREACHABLE_MARKER()
+#endif
+
 #define STRIPPATH(s) ( \
   sizeof(s) >  2 && (s)[sizeof(s)- 3] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  2 : \
   sizeof(s) >  3 && (s)[sizeof(s)- 4] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  3 : \
@@ -95,6 +103,7 @@ void printBacktrace(void);
   DEBUG_PRINT(DEBUG_LEVEL_FATAL, fmt, ##__VA_ARGS__); \
   DEBUG_PRINT_BACKTRACE(); \
   abort(); \
+  DEBUG_UNREACHABLE_MARKER(); \
 } while(0)
 
 #define DEBUG_ASSERT_PRINT(...) DEBUG_ERROR("Assertion failed: %s", #__VA_ARGS__)
@@ -113,6 +122,8 @@ void printBacktrace(void);
     } \
   } while (0)
 #endif
+
+#define DEBUG_UNREACHABLE() DEBUG_FATAL("Unreachable code reached")
 
 #if defined(DEBUG_SPICE) | defined(DEBUG_IVSHMEM)
   #define DEBUG_PROTO(fmt, args...) DEBUG_PRINT("[P]", fmt, ##args)
