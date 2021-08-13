@@ -729,9 +729,9 @@ static void computeFrameDamage(Texture * tex)
   // Compute dirty rectangles.
   RECT dirtyRects[maxDamageRectsCount];
   UINT dirtyRectsBufferSizeRequired;
-  if (IDXGIOutputDuplication_GetFrameDirtyRects(this->dup,
+  if (FAILED(IDXGIOutputDuplication_GetFrameDirtyRects(this->dup,
         ARRAY_LENGTH(dirtyRects), dirtyRects,
-        &dirtyRectsBufferSizeRequired) != S_OK)
+        &dirtyRectsBufferSizeRequired)))
     return;
 
   const int dirtyRectsCount = dirtyRectsBufferSizeRequired / sizeof(*dirtyRects);
@@ -744,9 +744,9 @@ static void computeFrameDamage(Texture * tex)
   // Divide by two here since each move generates two dirty regions.
   DXGI_OUTDUPL_MOVE_RECT moveRects[(maxDamageRectsCount - dirtyRectsCount) / 2];
   UINT moveRectsBufferSizeRequired;
-  if (IDXGIOutputDuplication_GetFrameMoveRects(this->dup,
+  if (FAILED(IDXGIOutputDuplication_GetFrameMoveRects(this->dup,
         ARRAY_LENGTH(moveRects), moveRects,
-        &moveRectsBufferSizeRequired) != S_OK)
+        &moveRectsBufferSizeRequired)))
     return;
 
   const int moveRectsCount = moveRectsBufferSizeRequired / sizeof(*moveRects);
