@@ -201,7 +201,7 @@ void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
     framebuffer_get_buffer(frame), srcStride, &data, fbRowStart, NULL);
 }
 
-static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageRect * r2)
+inline static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageRect * r2)
 {
   return r1->x < r2->x + r2->width &&
          r1->x + r1->width > r2->x &&
@@ -235,6 +235,32 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
           }
   }
   while (changed);
+
+  int o = 0;
+  for (int i = 0; i < count; ++i)
+    if (!removed[i])
+      rects[o++] = rects[i];
+  return o;
+}
+
+inline static bool rectContains(const FrameDamageRect * r1, const FrameDamageRect * r2)
+{
+  return r1->x <= r2->x &&
+         r1->y <= r2->y &&
+         r1->x + r1->width >= r2->x + r2->width &&
+         r1->y + r1->height >= r2->x + r2->height;
+}
+
+int rectsRejectContained(FrameDamageRect * rects, int count)
+{
+  bool removed[count];
+  memset(removed, 0, sizeof(removed));
+
+  for (int i = 0; i < count; ++i)
+    if (!removed[i])
+      for (int j = 0; j < count; ++j)
+        if (!removed[j] && j != i && rectContains(rects + i, rects + j))
+          removed[j] = true;
 
   int o = 0;
   for (int i = 0; i < count; ++i)
