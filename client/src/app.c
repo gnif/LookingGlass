@@ -412,6 +412,17 @@ void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
   g_state.io->KeySuper = super;
 }
 
+void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
+{
+  uint32_t modifiers =
+    (scrollLock ? 1 /* SPICE_SCROLL_LOCK_MODIFIER */ : 0) |
+    (numLock    ? 2 /* SPICE_NUM_LOCK_MODIFIER    */ : 0) |
+    (capsLock   ? 4 /* SPICE_CAPS_LOCK_MODIFIER   */ : 0);
+
+  if (!spice_key_modifiers(modifiers))
+    DEBUG_ERROR("app_handleKeyboardLEDs: failed to send message");
+}
+
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
