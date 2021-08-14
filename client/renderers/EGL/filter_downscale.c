@@ -217,15 +217,12 @@ static bool egl_filterDownscaleImguiConfig(EGL_Filter * filter)
     igEndCombo();
   }
 
-  int majorPixelSize = floor(this->pixelSize);
-  int minorPixelSize = round((this->pixelSize - majorPixelSize) * 10.0f);
-
-  igSliderInt("Major Pixel Size", &majorPixelSize, 1, 10, NULL, 0);
-  igSliderInt("Minor Pixel Size", &minorPixelSize, 0,  9, NULL, 0);
-
-  float pixelSize = (float)majorPixelSize + (float)minorPixelSize / 10.0f;
-  igText("Pixel Size: %.2f", pixelSize);
+  float pixelSize = this->pixelSize;
+  igInputFloat("Pixel size", &pixelSize, 0.1f, 1.0f, "%.2f", ImGuiInputTextFlags_CharsDecimal);
+  igSliderFloat("##pixelsize", &pixelSize, 1.0f, 10.0f, "%.2f",
+      ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoInput);
   igText("Resolution: %dx%d", this->width, this->height);
+
   if (pixelSize != this->pixelSize)
   {
     this->pixelSize = pixelSize;
