@@ -90,6 +90,7 @@ static bool loadThemedCursor(const char * name, struct wl_surface ** surface,
     return NULL;
 
   wl_surface_attach(*surface, buffer, 0, 0);
+  wl_surface_set_buffer_scale(*surface, wlWm.cursorScale);
   wl_surface_commit(*surface);
 
   *hotspot = (struct Point) {
@@ -126,6 +127,15 @@ static const char ** nameLists[LG_POINTER_COUNT] = {
   [LG_POINTER_NOT_ALLOWED] = (const char *[]) { "crossed_circle", "not-allowed", NULL },
 };
 
+static void reloadCursors(void)
+{
+  if (wlWm.cursorTheme)
+    for (LG_DSPointer pointer = LG_POINTER_ARROW; pointer < LG_POINTER_COUNT; ++pointer)
+      for (const char ** names = nameLists[pointer]; *names; ++names)
+        if (loadThemedCursor(*names, wlWm.cursors + pointer, wlWm.cursorHot + pointer))
+          break;
+}
+
 bool waylandCursorInit(void)
 {
   if (!wlWm.compositor)
@@ -142,23 +152,20 @@ bool waylandCursorInit(void)
     wl_surface_commit(wlWm.cursors[LG_POINTER_SQUARE]);
   }
 
-  const char * cursorTheme   = getenv("XCURSOR_THEME");
-  const char * cursorSizeEnv = getenv("XCURSOR_SIZE");
-  int cursorSize = 24;
+  wlWm.cursorThemeName = getenv("XCURSOR_THEME");
+  wlWm.cursorSize      = 24;
 
+  const char * cursorSizeEnv = getenv("XCURSOR_SIZE");
   if (cursorSizeEnv)
   {
     int size = atoi(cursorSizeEnv);
     if (size)
-      cursorSize = size;
+      wlWm.cursorSize = size;
   }
 
-  wlWm.cursorTheme = wl_cursor_theme_load(cursorTheme, cursorSize, wlWm.shm);
-  if (wlWm.cursorTheme)
-    for (LG_DSPointer pointer = LG_POINTER_ARROW; pointer < LG_POINTER_COUNT; ++pointer)
-      for (const char ** names = nameLists[pointer]; *names; ++names)
-        if (loadThemedCursor(*names, wlWm.cursors + pointer, wlWm.cursorHot + pointer))
-          break;
+  wlWm.cursorTheme = wl_cursor_theme_load(wlWm.cursorThemeName, wlWm.cursorSize, wlWm.shm);
+  wlWm.cursorScale = 1;
+  reloadCursors();
 
   return true;
 }
@@ -174,8 +181,39 @@ void waylandCursorFree(void)
     wl_buffer_destroy(wlWm.cursorSquareBuffer);
 }
 
+void waylandCursorScaleChange(void)
+{
+  int newScale = ceil(wl_fixed_to_double(wlWm.scale));
+  if (newScale == wlWm.cursorScale)
+    return;
+
+  struct wl_cursor_theme * new = wl_cursor_theme_load(wlWm.cursorThemeName,
+      wlWm.cursorSize * newScale, wlWm.shm);
+
+  if (!new)
+    return;
+
+  struct wl_surface * old[LG_POINTER_COUNT];
+  memcpy(old, wlWm.cursors, sizeof(old));
+  memset(wlWm.cursors, 0, sizeof(wlWm.cursors));
+
+  if (wlWm.cursorTheme)
+    wl_cursor_theme_destroy(wlWm.cursorTheme);
+
+  wlWm.cursorTheme = new;
+  wlWm.cursorScale = newScale;
+  reloadCursors();
+
+  waylandSetPointer(wlWm.cursorId);
+
+  for (int i = 0; i < LG_POINTER_COUNT; ++i)
+    if (old[i])
+      wl_surface_destroy(old[i]);
+}
+
 void waylandSetPointer(LG_DSPointer pointer)
 {
+  wlWm.cursorId   = pointer;
   wlWm.cursor     = wlWm.cursors[pointer];
   wlWm.cursorHotX = wlWm.cursorHot[pointer].x;
   wlWm.cursorHotY = wlWm.cursorHot[pointer].y;
