@@ -142,7 +142,18 @@ bool waylandCursorInit(void)
     wl_surface_commit(wlWm.cursors[LG_POINTER_SQUARE]);
   }
 
-  wlWm.cursorTheme = wl_cursor_theme_load(NULL, 24, wlWm.shm);
+  const char * cursorTheme   = getenv("XCURSOR_THEME");
+  const char * cursorSizeEnv = getenv("XCURSOR_SIZE");
+  int cursorSize = 24;
+
+  if (cursorSizeEnv)
+  {
+    int size = atoi(cursorSizeEnv);
+    if (size)
+      cursorSize = size;
+  }
+
+  wlWm.cursorTheme = wl_cursor_theme_load(cursorTheme, cursorSize, wlWm.shm);
   if (wlWm.cursorTheme)
     for (LG_DSPointer pointer = LG_POINTER_ARROW; pointer < LG_POINTER_COUNT; ++pointer)
       for (const char ** names = nameLists[pointer]; *names; ++names)
