@@ -143,10 +143,14 @@ struct WaylandDSState
   struct zxdg_toplevel_decoration_v1 * xdgToplevelDecoration;
 #endif
 
+  const char             * cursorThemeName;
+  int                      cursorSize;
+  int                      cursorScale;
   struct wl_cursor_theme * cursorTheme;
   struct wl_buffer       * cursorSquareBuffer;
   struct wl_surface      * cursors[LG_POINTER_COUNT];
   struct Point             cursorHot[LG_POINTER_COUNT];
+  LG_DSPointer             cursorId;
   struct wl_surface      * cursor;
   int                      cursorHotX;
   int                      cursorHotY;
@@ -238,6 +242,7 @@ void waylandCBInvalidate(void);
 bool waylandCursorInit(void);
 void waylandCursorFree(void);
 void waylandSetPointer(LG_DSPointer pointer);
+void waylandCursorScaleChange(void);
 
 // gl module
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)

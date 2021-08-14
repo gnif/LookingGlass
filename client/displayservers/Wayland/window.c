@@ -48,6 +48,7 @@ void waylandWindowUpdateScale(void)
     wlWm.scale = maxScale;
     wlWm.fractionalScale = wl_fixed_from_int(wl_fixed_to_int(maxScale)) != maxScale;
     wlWm.needsResize = true;
+    waylandCursorScaleChange();
     app_invalidateWindow(true);
     waylandStopWaitFrame();
   }
