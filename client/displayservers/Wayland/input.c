@@ -274,6 +274,12 @@ static void keyboardModifiersHandler(void * data,
     xkb_state_mod_name_is_active(wlWm.xkbState, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0,
     xkb_state_mod_name_is_active(wlWm.xkbState, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0
   );
+
+  app_handleKeyboardLEDs(
+    xkb_state_led_name_is_active(wlWm.xkbState, XKB_LED_NAME_NUM) > 0,
+    xkb_state_led_name_is_active(wlWm.xkbState, XKB_LED_NAME_CAPS) > 0,
+    xkb_state_led_name_is_active(wlWm.xkbState, XKB_LED_NAME_SCROLL) > 0
+  );
 }
 
 static const struct wl_keyboard_listener keyboardListener = {
