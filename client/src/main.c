@@ -150,6 +150,7 @@ static int renderThread(void * unused)
 {
   if (!RENDERER(renderStartup, g_state.useDMA))
   {
+    DEBUG_ERROR("EGL render failed to start");
     g_state.state = APP_STATE_SHUTDOWN;
 
     /* unblock threads waiting on the condition */
