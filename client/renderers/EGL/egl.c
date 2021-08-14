@@ -639,11 +639,17 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   this->nativeWind = app_getEGLNativeWindow();
   if (!this->nativeWind)
+  {
+    DEBUG_ERROR("Failed to get EGL native window");
     return false;
+  }
 
   this->display = app_getEGLDisplay();
   if (this->display == EGL_NO_DISPLAY)
+  {
+    DEBUG_ERROR("Failed to get EGL display");
     return false;
+  }
 
   int maj, min;
   if (!eglInitialize(this->display, &maj, &min))
