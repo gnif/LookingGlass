@@ -219,8 +219,10 @@ static bool egl_filterDownscaleImguiConfig(EGL_Filter * filter)
 
   float pixelSize = this->pixelSize;
   igInputFloat("Pixel size", &pixelSize, 0.1f, 1.0f, "%.2f", ImGuiInputTextFlags_CharsDecimal);
+  pixelSize = util_clamp(pixelSize, 1.0f, 10.0f);
   igSliderFloat("##pixelsize", &pixelSize, 1.0f, 10.0f, "%.2f",
       ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoInput);
+
   igText("Resolution: %dx%d", this->width, this->height);
 
   if (pixelSize != this->pixelSize)
