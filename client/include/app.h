@@ -62,6 +62,7 @@ void app_handleKeyPress(int scancode);
 void app_handleKeyRelease(int scancode);
 void app_handleKeyboardTyped(const char * typed);
 void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super);
+void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock);
 void app_handleEnterEvent(bool entered);
 void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
