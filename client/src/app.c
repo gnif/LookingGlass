@@ -63,6 +63,11 @@ bool app_isFormatValid(void)
   return g_state.formatValid;
 }
 
+bool app_isOverlayMode(void)
+{
+  return g_state.overlayInput;
+}
+
 void app_updateCursorPos(double x, double y)
 {
   g_cursor.pos.x = x;
@@ -392,6 +397,19 @@ void app_handleKeyRelease(int sc)
     DEBUG_ERROR("app_handleKeyRelease: failed to send message");
     return;
   }
+}
+
+void app_handleKeyboardTyped(const char * typed)
+{
+  ImGuiIO_AddInputCharactersUTF8(g_state.io, typed);
+}
+
+void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
+{
+  g_state.io->KeyCtrl  = ctrl;
+  g_state.io->KeyShift = shift;
+  g_state.io->KeyAlt   = alt;
+  g_state.io->KeySuper = super;
 }
 
 void app_handleMouseRelative(double normx, double normy,
