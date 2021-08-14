@@ -28,7 +28,7 @@ jobs:
           libspice-protocol-dev nettle-dev \
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
-          libwayland-dev wayland-protocols \
+          libwayland-dev wayland-protocols libxkbcommon-dev \
           $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-dev libdbus-1-dev')
     - name: Configure client
       env:
