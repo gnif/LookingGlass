@@ -88,6 +88,10 @@ enum EGLSwapWithDamageState {
   SWAP_WITH_DAMAGE_EXT,
 };
 
+struct xkb_context;
+struct xkb_keymap;
+struct xkb_state;
+
 struct WaylandDSState
 {
   bool pointerGrabbed;
@@ -155,6 +159,9 @@ struct WaylandDSState
   struct zwp_keyboard_shortcuts_inhibit_manager_v1 * keyboardInhibitManager;
   struct zwp_keyboard_shortcuts_inhibitor_v1 * keyboardInhibitor;
   uint32_t keyboardEnterSerial;
+  struct xkb_context * xkb;
+  struct xkb_state * xkbState;
+  struct xkb_keymap * keymap;
 
   struct wl_pointer * pointer;
   struct zwp_relative_pointer_manager_v1 * relativePointerManager;

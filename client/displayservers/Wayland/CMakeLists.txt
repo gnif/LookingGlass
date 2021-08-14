@@ -5,6 +5,7 @@ find_package(PkgConfig)
 pkg_check_modules(DISPLAYSERVER_Wayland REQUIRED IMPORTED_TARGET
 	wayland-client
 	wayland-cursor
+	xkbcommon
 )
 
 set(DISPLAYSERVER_Wayland_OPT_PKGCONFIG_LIBRARIES "")
