@@ -153,7 +153,7 @@ static bool nvfbc_create(
   if (!NvFBCInit())
     return false;
 
-  this = (struct iface *)calloc(1, sizeof(*this));
+  this = calloc(1, sizeof(*this));
 
   this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
   this->getPointerBufferFn  = getPointerBufferFn;
@@ -176,7 +176,7 @@ static bool nvfbc_init(void)
     GetEnvironmentVariable("NVFBC_PRIV_DATA", buffer, bufferLen);
 
     privDataLen = (bufferLen - 1) / 2;
-    privData    = (uint8_t *)malloc(privDataLen);
+    privData    = malloc(privDataLen);
     char hex[3] = {0};
     for (int i = 0; i < privDataLen; ++i)
     {
