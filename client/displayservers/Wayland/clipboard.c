@@ -446,7 +446,7 @@ void waylandCBRequest(LG_ClipboardData type)
   wl_data_offer_receive(wlCb.offer, wlCb.mimetypes[type], fds[1]);
   close(fds[1]);
 
-  struct ClipboardRead * data = malloc(sizeof(struct ClipboardRead));
+  struct ClipboardRead * data = malloc(sizeof(*data));
   if (!data)
   {
     DEBUG_ERROR("Failed to allocate memory to read clipboard");
@@ -518,7 +518,7 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
   struct WCBTransfer * transfer = (struct WCBTransfer *) data;
   if (containsMimetype(transfer->mimetypes, mimetype))
   {
-    struct ClipboardWrite * data = malloc(sizeof(struct ClipboardWrite));
+    struct ClipboardWrite * data = malloc(sizeof(*data));
     if (!data)
     {
       DEBUG_ERROR("Out of memory trying to allocate ClipboardWrite");
@@ -554,7 +554,7 @@ static const struct wl_data_source_listener dataSourceListener = {
 static void waylandCBReplyFn(void * opaque, LG_ClipboardData type,
    	uint8_t * data, uint32_t size)
 {
-  struct WCBTransfer * transfer = malloc(sizeof(struct WCBTransfer));
+  struct WCBTransfer * transfer = malloc(sizeof(*transfer));
   if (!transfer)
   {
     DEBUG_ERROR("Out of memory when allocating WCBTransfer");

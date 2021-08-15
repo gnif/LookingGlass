@@ -135,7 +135,7 @@ static void waylandPollRemoveNode(struct WaylandPoll * node)
 
 bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events)
 {
-  struct WaylandPoll * node = malloc(sizeof(struct WaylandPoll));
+  struct WaylandPoll * node = malloc(sizeof(*node));
   if (!node)
     return false;
 

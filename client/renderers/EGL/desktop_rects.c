@@ -40,14 +40,14 @@ struct EGL_DesktopRects
 
 bool egl_desktopRectsInit(EGL_DesktopRects ** rects_, int maxCount)
 {
-  EGL_DesktopRects * rects = malloc(sizeof(EGL_DesktopRects));
+  EGL_DesktopRects * rects = malloc(sizeof(*rects));
   if (!rects)
   {
     DEBUG_ERROR("Failed to malloc EGL_DesktopRects");
     return false;
   }
   *rects_ = rects;
-  memset(rects, 0, sizeof(EGL_DesktopRects));
+  memset(rects, 0, sizeof(*rects));
 
   glGenVertexArrays(1, &rects->vao);
   glBindVertexArray(rects->vao);

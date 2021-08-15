@@ -107,7 +107,7 @@ void waylandPresentationFrame(void)
   if (!wlWm.presentation)
     return;
 
-  struct FrameData * data = malloc(sizeof(struct FrameData));
+  struct FrameData * data = malloc(sizeof(*data));
   if (clock_gettime(wlWm.clkId, &data->sent))
   {
     DEBUG_ERROR("clock_gettime failed: %s\n", strerror(errno));

@@ -198,7 +198,7 @@ struct LG_OverlayOps LGOverlayGraphs =
 
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer, float min, float max)
 {
-  struct OverlayGraph * graph = malloc(sizeof(struct OverlayGraph));
+  struct OverlayGraph * graph = malloc(sizeof(*graph));
   graph->name    = name;
   graph->buffer  = buffer;
   graph->enabled = true;

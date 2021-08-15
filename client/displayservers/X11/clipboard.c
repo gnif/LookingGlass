@@ -153,7 +153,7 @@ static void x11CBReplyFn(void * opaque, LG_ClipboardData type,
 
 static void x11CBSelectionRequest(const XSelectionRequestEvent e)
 {
-  XEvent * s = (XEvent *)malloc(sizeof(XEvent));
+  XEvent * s = (XEvent *)malloc(sizeof(*s));
   s->xselection.type      = SelectionNotify;
   s->xselection.requestor = e.requestor;
   s->xselection.selection = e.selection;
