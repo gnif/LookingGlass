@@ -39,7 +39,7 @@ struct LGEvent
 
 LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
 {
-  LGEvent * handle = (LGEvent *)calloc(sizeof(*handle), 1);
+  LGEvent * handle = (LGEvent *)calloc(1, sizeof(*handle));
   if (!handle)
   {
     DEBUG_ERROR("Failed to allocate memory");
