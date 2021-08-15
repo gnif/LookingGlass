@@ -170,7 +170,7 @@ static void dxgi_initOptions(void)
 static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
   DEBUG_ASSERT(!this);
-  this = calloc(sizeof(*this), 1);
+  this = calloc(1, sizeof(*this));
   if (!this)
   {
     DEBUG_ERROR("failed to allocate iface struct");
@@ -190,7 +190,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
     this->maxTextures = 1;
 
   this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
-  this->texture             = calloc(sizeof(*this->texture), this->maxTextures);
+  this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
   this->avgMapTime          = runningavg_new(10);
