@@ -177,6 +177,8 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
       igGetStyle()->WindowPadding.x);
 
   igSliderFloat("##casSharpness", &casSharpness, 0.0f, 1.0f, NULL, 0);
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+    igSetTooltip("Ctrl+Click to enter a value");
   igPopItemWidth();
 
   if (casSharpness != this->sharpness)
