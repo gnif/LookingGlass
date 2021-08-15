@@ -22,6 +22,7 @@
 #include "common/debug.h"
 #include "common/stringutils.h"
 
+#include <ctype.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -508,7 +509,7 @@ bool option_load(const char * filename)
           }
 
           //rtrim
-          while(nameLen > 1 && (name[nameLen-1] == ' ' || name[nameLen-1] == '\t'))
+          while (nameLen > 1 && isspace(name[nameLen-1]))
             --nameLen;
           name[nameLen] = '\0';
           expectValue   = true;
@@ -545,7 +546,7 @@ bool option_load(const char * filename)
         line = false;
 
         //ltrim
-        if (*len == 0 && (c == ' ' || c == '\t'))
+        if (*len == 0 && isspace(c))
           break;
 
         if (*len % 32 == 0)
