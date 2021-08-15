@@ -25,7 +25,7 @@
 void egl_drawTorus(EGL_Model * model, unsigned int pts, float x, float y,
     float inner, float outer)
 {
-  GLfloat * v   = (GLfloat *)malloc(sizeof(*v) * (pts + 1) * 6);
+  GLfloat * v   = malloc(sizeof(*v) * (pts + 1) * 6);
   GLfloat * dst = v;
 
   for(unsigned int i = 0; i <= pts; ++i)
@@ -48,7 +48,7 @@ void egl_drawTorus(EGL_Model * model, unsigned int pts, float x, float y,
 void egl_drawTorusArc(EGL_Model * model, unsigned int pts, float x, float y,
     float inner, float outer, float s, float e)
 {
-  GLfloat * v   = (GLfloat *)malloc(sizeof(*v) * (pts + 1) * 6);
+  GLfloat * v   = malloc(sizeof(*v) * (pts + 1) * 6);
   GLfloat * dst = v;
 
   for(unsigned int i = 0; i <= pts; ++i)

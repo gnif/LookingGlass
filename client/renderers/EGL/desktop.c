@@ -116,7 +116,7 @@ static bool egl_initDesktopShader(
 bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     bool useDMA, int maxRects)
 {
-  EGL_Desktop * desktop = (EGL_Desktop *)calloc(1, sizeof(EGL_Desktop));
+  EGL_Desktop * desktop = calloc(1, sizeof(EGL_Desktop));
   if (!desktop)
   {
     DEBUG_ERROR("Failed to malloc EGL_Desktop");

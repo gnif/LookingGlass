@@ -51,7 +51,7 @@ bool egl_texBufferInit(EGL_Texture ** texture, EGLDisplay * display)
   TextureBuffer * this;
   if (!*texture)
   {
-    this = (TextureBuffer *)calloc(1, sizeof(*this));
+    this = calloc(1, sizeof(*this));
     if (!this)
     {
       DEBUG_ERROR("Failed to malloc TexB");

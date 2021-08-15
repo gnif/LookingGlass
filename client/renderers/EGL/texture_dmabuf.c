@@ -57,7 +57,7 @@ static void egl_texDMABUFCleanup(TexDMABUF * this)
 
 static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
 {
-  TexDMABUF * this = (TexDMABUF *)calloc(1, sizeof(*this));
+  TexDMABUF * this = calloc(1, sizeof(*this));
   *texture = &this->base.base;
 
   EGL_Texture * parent = &this->base.base;
