@@ -125,7 +125,7 @@ bool option_register(struct Option options[])
 
   for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
   {
-    state.options[state.oCount + i] = (struct Option *)malloc(sizeof(**state.options));
+    state.options[state.oCount + i] = malloc(sizeof(**state.options));
     struct Option * o = state.options[state.oCount + i];
     memcpy(o, &options[i], sizeof(*o));
 

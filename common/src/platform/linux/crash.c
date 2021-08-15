@@ -89,7 +89,7 @@ static bool load_symbols(void)
   }
 
   long storage   = bfd_get_symtab_upper_bound(crash.fd);
-  crash.syms     = (asymbol **)malloc(storage);
+  crash.syms     = malloc(storage);
   crash.symCount = bfd_canonicalize_symtab(crash.fd, crash.syms);
   if (crash.symCount < 0)
   {
