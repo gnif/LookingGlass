@@ -40,7 +40,7 @@ TexFB;
 
 static bool egl_texFBInit(EGL_Texture ** texture, EGLDisplay * display)
 {
-  TexFB * this = calloc(sizeof(*this), 1);
+  TexFB * this = calloc(1, sizeof(*this));
   *texture = &this->base.base;
 
   EGL_Texture * parent = &this->base.base;
