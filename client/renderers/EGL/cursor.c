@@ -135,7 +135,7 @@ static void cursorTexFree(struct CursorTex * t)
 
 bool egl_cursorInit(EGL_Cursor ** cursor)
 {
-  *cursor = (EGL_Cursor *)malloc(sizeof(**cursor));
+  *cursor = malloc(sizeof(**cursor));
   if (!*cursor)
   {
     DEBUG_ERROR("Failed to malloc EGL_Cursor");
@@ -206,7 +206,7 @@ bool egl_cursorSetShape(EGL_Cursor * cursor, const LG_RendererCursor type,
     if (cursor->data)
       free(cursor->data);
 
-    cursor->data = (uint8_t *)malloc(size);
+    cursor->data = malloc(size);
     if (!cursor->data)
     {
       DEBUG_ERROR("Failed to malloc buffer for cursor shape");

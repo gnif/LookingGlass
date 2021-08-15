@@ -59,7 +59,7 @@ void egl_damageConfigUI(EGL_Damage * damage)
 
 bool egl_damageInit(EGL_Damage ** damage)
 {
-  *damage = (EGL_Damage *)malloc(sizeof(**damage));
+  *damage = malloc(sizeof(**damage));
   if (!*damage)
   {
     DEBUG_ERROR("Failed to malloc EGL_Damage");

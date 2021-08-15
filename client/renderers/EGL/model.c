@@ -54,7 +54,7 @@ void update_uniform_bindings(EGL_Model * model);
 
 bool egl_modelInit(EGL_Model ** model)
 {
-  *model = (EGL_Model *)malloc(sizeof(**model));
+  *model = malloc(sizeof(**model));
   if (!*model)
   {
     DEBUG_ERROR("Failed to malloc EGL_Model");
@@ -123,11 +123,11 @@ void egl_modelSetDefault(EGL_Model * model, bool flipped)
 
 void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count)
 {
-  struct FloatList * fl = (struct FloatList *)malloc(sizeof(*fl));
+  struct FloatList * fl = malloc(sizeof(*fl));
 
   fl->count = count;
-  fl->v     = (GLfloat *)malloc(sizeof(GLfloat) * count * 3);
-  fl->u     = (GLfloat *)malloc(sizeof(GLfloat) * count * 2);
+  fl->v     = malloc(sizeof(GLfloat) * count * 3);
+  fl->u     = malloc(sizeof(GLfloat) * count * 2);
   memcpy(fl->v, verticies, sizeof(GLfloat) * count * 3);
 
   if (uvs)

@@ -326,7 +326,7 @@ bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
   {
     if (this->mouseData)
       free(this->mouseData);
-    this->mouseData     = (uint8_t *)malloc(size);
+    this->mouseData     = malloc(size);
     this->mouseDataSize = size;
   }
 

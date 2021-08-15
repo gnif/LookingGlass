@@ -51,7 +51,7 @@ struct EGL_Splash
 
 bool egl_splashInit(EGL_Splash ** splash)
 {
-  *splash = (EGL_Splash *)malloc(sizeof(**splash));
+  *splash = malloc(sizeof(**splash));
   if (!*splash)
   {
     DEBUG_ERROR("Failed to malloc EGL_Splash");

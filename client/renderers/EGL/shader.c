@@ -38,7 +38,7 @@ struct EGL_Shader
 
 bool egl_shaderInit(EGL_Shader ** this)
 {
-  *this = (EGL_Shader *)calloc(1, sizeof(EGL_Shader));
+  *this = calloc(1, sizeof(EGL_Shader));
   if (!*this)
   {
     DEBUG_ERROR("Failed to malloc EGL_Shader");

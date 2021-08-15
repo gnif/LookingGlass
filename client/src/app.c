@@ -216,7 +216,7 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
   if (!g_params.clipboardToLocal)
     return;
 
-  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(*cbr));
+  struct CBRequest * cbr = malloc(sizeof(*cbr));
 
   cbr->type    = g_state.cbType;
   cbr->replyFn = replyFn;
@@ -661,7 +661,7 @@ KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, con
     return NULL;
   }
 
-  KeybindHandle handle = (KeybindHandle)malloc(sizeof(*handle));
+  KeybindHandle handle = malloc(sizeof(*handle));
   handle->sc       = sc;
   handle->callback = callback;
   handle->opaque   = opaque;
