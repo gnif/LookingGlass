@@ -64,7 +64,7 @@ static const char * xcb_getName(void)
 static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
   DEBUG_ASSERT(!this);
-  this             = (struct xcb *)calloc(sizeof(struct xcb), 1);
+  this             = (struct xcb *)calloc(sizeof(*this), 1);
   this->shmID      = -1;
   this->data       = (void *)-1;
   this->frameEvent = lgCreateEvent(true, 20);

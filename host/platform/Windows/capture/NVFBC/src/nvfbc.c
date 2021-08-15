@@ -153,7 +153,7 @@ static bool nvfbc_create(
   if (!NvFBCInit())
     return false;
 
-  this = (struct iface *)calloc(sizeof(struct iface), 1);
+  this = (struct iface *)calloc(sizeof(*this), 1);
 
   this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
   this->getPointerBufferFn  = getPointerBufferFn;
