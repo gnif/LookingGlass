@@ -160,7 +160,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
     return false;
   }
 
-  infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(reqSize, 1);
+  infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(1, reqSize);
   infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
   if (!SetupDiGetDeviceInterfaceDetail(devInfoSet, &devInterfaceData, infData, reqSize, NULL, NULL))
   {
