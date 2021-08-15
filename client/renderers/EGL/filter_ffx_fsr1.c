@@ -280,6 +280,7 @@ static bool egl_filterFFXFSR1ImguiConfig(EGL_Filter * filter)
   igPushItemWidth(igGetWindowWidth() - igGetCursorPosX() -
       igGetStyle()->WindowPadding.x);
   igSliderFloat("##fsr1Sharpness", &sharpness, 0.0f, 1.0f, NULL, 0);
+  sharpness = util_clamp(sharpness, 0.0f, 1.0f);
   if (igIsItemHovered(ImGuiHoveredFlags_None))
     igSetTooltip("Ctrl+Click to enter a value");
   igPopItemWidth();
