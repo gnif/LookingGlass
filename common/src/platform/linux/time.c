@@ -49,7 +49,7 @@ static void TimerProc(union sigval arg)
 bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
     void * udata, LGTimer ** result)
 {
-  LGTimer * ret = malloc(sizeof(LGTimer));
+  LGTimer * ret = malloc(sizeof(*ret));
 
   if (!ret)
   {

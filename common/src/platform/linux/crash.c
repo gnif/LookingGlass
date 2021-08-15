@@ -164,7 +164,7 @@ static int dl_iterate_phdr_callback(struct dl_phdr_info * info, size_t size, voi
       ttl += hdr.p_memsz;
   }
 
-  crash.ranges = realloc(crash.ranges, sizeof(struct range) * (crash.rangeCount + 1));
+  crash.ranges = realloc(crash.ranges, sizeof(*crash.ranges) * (crash.rangeCount + 1));
   crash.ranges[crash.rangeCount].start = info->dlpi_addr;
   crash.ranges[crash.rangeCount].end   = info->dlpi_addr + ttl;
   ++crash.rangeCount;

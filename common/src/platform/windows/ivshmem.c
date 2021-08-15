@@ -80,7 +80,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
   SP_DEVICE_INTERFACE_DATA         devInterfaceData = {0};
   int                              deviceAllocated = 1;
   int                              deviceCount = 0;
-  struct IVSHMEMData             * devices = malloc(sizeof(struct IVSHMEMData) * deviceAllocated);
+  struct IVSHMEMData             * devices = malloc(sizeof(*devices) * deviceAllocated);
 
   devInfoSet = SetupDiGetClassDevs(&GUID_DEVINTERFACE_IVSHMEM, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
   devInfoData.cbSize      = sizeof(SP_DEVINFO_DATA);
@@ -97,7 +97,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
     if (deviceCount >= deviceAllocated)
     {
       int newCount = deviceAllocated * 2;
-      void * new = realloc(devices, newCount * sizeof(struct IVSHMEMData));
+      struct IVSHMEMData * new = realloc(devices, newCount * sizeof(*new));
       if (!new)
       {
         DEBUG_ERROR("Failed to allocate memory");
@@ -133,7 +133,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
   }
 
   const int shmDevice = option_get_int("os", "shmDevice");
-  qsort(devices, deviceCount, sizeof(struct IVSHMEMData), ivshmemComparator);
+  qsort(devices, deviceCount, sizeof(*devices), ivshmemComparator);
 
   for (int i = 0; i < deviceCount; ++i)
   {
@@ -181,8 +181,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
   free(infData);
   SetupDiDestroyDeviceInfoList(devInfoSet);
 
-  struct IVSHMEMInfo * info =
-    (struct IVSHMEMInfo *)malloc(sizeof(struct IVSHMEMInfo));
+  struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)malloc(sizeof(*info));
 
   info->handle = handle;
   dev->opaque  = info;
