@@ -133,7 +133,7 @@ bool NvFBCToSysCreate(
     return false;
   }
 
-  *handle = (NvFBCHandle)calloc(sizeof(struct stNvFBCHandle), 1);
+  *handle = (NvFBCHandle)calloc(sizeof(**handle), 1);
   (*handle)->nvfbc = static_cast<NvFBCToSys *>(params.pNvFBC);
 
   if (maxWidth)

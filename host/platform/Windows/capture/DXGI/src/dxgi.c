@@ -170,7 +170,7 @@ static void dxgi_initOptions(void)
 static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
   DEBUG_ASSERT(!this);
-  this = calloc(sizeof(struct iface), 1);
+  this = calloc(sizeof(*this), 1);
   if (!this)
   {
     DEBUG_ERROR("failed to allocate iface struct");
@@ -190,7 +190,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
     this->maxTextures = 1;
 
   this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
-  this->texture             = calloc(sizeof(struct Texture), this->maxTextures);
+  this->texture             = calloc(sizeof(*this->texture), this->maxTextures);
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
   this->avgMapTime          = runningavg_new(10);
@@ -499,7 +499,7 @@ static bool dxgi_init(void)
         output5,
         (IUnknown *)this->device,
         0,
-        sizeof(supportedFormats) / sizeof(DXGI_FORMAT),
+        ARRAY_LENGTH(supportedFormats),
         supportedFormats,
         &this->dup);
 
@@ -871,7 +871,7 @@ static CaptureResult dxgi_capture(void)
         else
         {
           memcpy(tex->texDamageRects + tex->texDamageCount, tex->damageRects,
-            tex->damageRectsCount * sizeof(FrameDamageRect));
+            tex->damageRectsCount * sizeof(*tex->damageRects));
           tex->texDamageCount += tex->damageRectsCount;
           tex->texDamageCount = rectsMergeOverlapping(tex->texDamageRects, tex->texDamageCount);
         }
@@ -920,7 +920,7 @@ static CaptureResult dxgi_capture(void)
                  t->texDamageCount + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
         {
           memcpy(t->texDamageRects + t->texDamageCount, tex->damageRects,
-            tex->damageRectsCount * sizeof(FrameDamageRect));
+            tex->damageRectsCount * sizeof(*tex->damageRects));
           t->texDamageCount += tex->damageRectsCount;
         }
         else
@@ -1093,7 +1093,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
   else
   {
     memcpy(damage->rects + damage->count, tex->damageRects,
-      tex->damageRectsCount * sizeof(FrameDamageRect));
+      tex->damageRectsCount * sizeof(*tex->damageRects));
     damage->count += tex->damageRectsCount;
     rectsBufferToFramebuffer(damage->rects, damage->count, frame, this->pitch,
       height, tex->map.pData, this->pitch);
@@ -1108,7 +1108,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
              damage->count + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
     {
       memcpy(damage->rects + damage->count, tex->damageRects,
-        tex->damageRectsCount * sizeof(FrameDamageRect));
+        tex->damageRectsCount * sizeof(*tex->damageRects));
       damage->count += tex->damageRectsCount;
     }
     else
