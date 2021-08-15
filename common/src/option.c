@@ -120,14 +120,14 @@ bool option_register(struct Option options[])
 
   state.options = realloc(
     state.options,
-    sizeof(struct Option *) * (state.oCount + new)
+    sizeof(*state.options) * (state.oCount + new)
   );
 
   for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
   {
-    state.options[state.oCount + i] = (struct Option *)malloc(sizeof(struct Option));
+    state.options[state.oCount + i] = (struct Option *)malloc(sizeof(**state.options));
     struct Option * o = state.options[state.oCount + i];
-    memcpy(o, &options[i], sizeof(struct Option));
+    memcpy(o, &options[i], sizeof(*o));
 
     if (!o->parser)
     {
@@ -199,7 +199,7 @@ bool option_register(struct Option options[])
       found = true;
       group->options = realloc(
         group->options,
-        sizeof(struct Option *) * (group->count + 1)
+        sizeof(*group->options) * (group->count + 1)
       );
       group->options[group->count] = o;
 
@@ -215,14 +215,14 @@ bool option_register(struct Option options[])
     {
       state.groups = realloc(
         state.groups,
-        sizeof(struct OptionGroup) * (state.gCount + 1)
+        sizeof(*state.groups) * (state.gCount + 1)
       );
 
       struct OptionGroup * group = &state.groups[state.gCount];
       ++state.gCount;
 
       group->module     = o->module;
-      group->options    = malloc(sizeof(struct Option *));
+      group->options    = malloc(sizeof(*group->options));
       group->options[0] = o;
       group->count      = 1;
       group->pad        = strlen(o->name);

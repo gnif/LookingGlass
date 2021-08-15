@@ -171,8 +171,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     return false;
   }
 
-  struct IVSHMEMInfo * info =
-    (struct IVSHMEMInfo *)malloc(sizeof(struct IVSHMEMInfo));
+  struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)malloc(sizeof(*info));
   info->size   = devSize;
   info->devFd  = devFd;
   info->hasDMA = hasDMA;

@@ -24,7 +24,7 @@
 
 struct CountedBuffer * countedBufferNew(size_t size)
 {
-  struct CountedBuffer * buffer = malloc(sizeof(struct CountedBuffer) + size);
+  struct CountedBuffer * buffer = malloc(sizeof(*buffer) + size);
   if (!buffer)
     return NULL;
 

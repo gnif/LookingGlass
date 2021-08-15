@@ -32,7 +32,7 @@ struct StringList
 
 StringList stringlist_new(bool owns_strings)
 {
-  StringList sl = malloc(sizeof(struct StringList));
+  StringList sl = malloc(sizeof(*sl));
 
   sl->owns_strings = owns_strings;
   sl->size         = 32;
@@ -58,7 +58,7 @@ int stringlist_push (StringList sl, char * str)
   if (sl->count == sl->size)
   {
     sl->size += 32;
-    sl->list  = realloc(sl->list, sizeof(char *) * sl->size);
+    sl->list  = realloc(sl->list, sizeof(*sl->list) * sl->size);
   }
 
   unsigned int index = sl->count;

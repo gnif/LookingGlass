@@ -45,7 +45,7 @@ static void TimerProc(HWND Arg1, UINT Arg2, UINT_PTR Arg3, DWORD Arg4)
 bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
     void * udata, LGTimer ** result)
 {
-  LGTimer * ret = malloc(sizeof(LGTimer));
+  LGTimer * ret = malloc(sizeof(*ret));
   if (!ret)
   {
     DEBUG_ERROR("failed to malloc LGTimer struct");

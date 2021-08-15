@@ -44,7 +44,7 @@ static DWORD WINAPI threadWrapper(LPVOID lpParameter)
 
 bool lgCreateThread(const char * name, LGThreadFunction function, void * opaque, LGThread ** handle)
 {
-  *handle             = (LGThread *)malloc(sizeof(LGThread));
+  *handle             = (LGThread *)malloc(sizeof(**handle));
   (*handle)->name     = name;
   (*handle)->function = function;
   (*handle)->opaque   = opaque;
