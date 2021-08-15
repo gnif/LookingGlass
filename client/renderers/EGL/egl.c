@@ -201,8 +201,11 @@ static bool egl_create(LG_Renderer ** renderer, const LG_RendererParams params,
     bool * needsOpenGL)
 {
   // check if EGL is even available
-  if (!eglQueryString(EGL_NO_DISPLAY, EGL_VERSION))
+  if (!eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS))
+  {
+    DEBUG_WARN("EGL is not available");
     return false;
+  }
 
   // create our local storage
   struct Inst * this = calloc(1, sizeof(*this));
