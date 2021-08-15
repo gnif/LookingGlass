@@ -41,7 +41,7 @@ struct ll
 
 struct ll * ll_new(void)
 {
-  struct ll * list = malloc(sizeof(struct ll));
+  struct ll * list = malloc(sizeof(*list));
   list->head  = NULL;
   list->tail  = NULL;
   list->pos   = NULL;
@@ -61,7 +61,7 @@ void ll_free(struct ll * list)
 
 void ll_push(struct ll * list, void * data)
 {
-  struct ll_item * item = malloc(sizeof(struct ll_item));
+  struct ll_item * item = malloc(sizeof(*item));
   item->data = data;
   item->next = NULL;
 

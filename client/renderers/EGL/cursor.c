@@ -135,14 +135,14 @@ static void cursorTexFree(struct CursorTex * t)
 
 bool egl_cursorInit(EGL_Cursor ** cursor)
 {
-  *cursor = (EGL_Cursor *)malloc(sizeof(EGL_Cursor));
+  *cursor = (EGL_Cursor *)malloc(sizeof(**cursor));
   if (!*cursor)
   {
     DEBUG_ERROR("Failed to malloc EGL_Cursor");
     return false;
   }
 
-  memset(*cursor, 0, sizeof(EGL_Cursor));
+  memset(*cursor, 0, sizeof(**cursor));
   LG_LOCK_INIT((*cursor)->lock);
 
   if (!cursorTexInit(&(*cursor)->norm,

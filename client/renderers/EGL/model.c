@@ -54,14 +54,14 @@ void update_uniform_bindings(EGL_Model * model);
 
 bool egl_modelInit(EGL_Model ** model)
 {
-  *model = (EGL_Model *)malloc(sizeof(EGL_Model));
+  *model = (EGL_Model *)malloc(sizeof(**model));
   if (!*model)
   {
     DEBUG_ERROR("Failed to malloc EGL_Model");
     return false;
   }
 
-  memset(*model, 0, sizeof(EGL_Model));
+  memset(*model, 0, sizeof(**model));
 
   (*model)->verticies = ll_new();
 
@@ -123,7 +123,7 @@ void egl_modelSetDefault(EGL_Model * model, bool flipped)
 
 void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count)
 {
-  struct FloatList * fl = (struct FloatList *)malloc(sizeof(struct FloatList));
+  struct FloatList * fl = (struct FloatList *)malloc(sizeof(*fl));
 
   fl->count = count;
   fl->v     = (GLfloat *)malloc(sizeof(GLfloat) * count * 3);

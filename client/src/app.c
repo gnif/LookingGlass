@@ -216,7 +216,7 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
   if (!g_params.clipboardToLocal)
     return;
 
-  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(struct CBRequest));
+  struct CBRequest * cbr = (struct CBRequest *)malloc(sizeof(*cbr));
 
   cbr->type    = g_state.cbType;
   cbr->replyFn = replyFn;
@@ -658,7 +658,7 @@ KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, con
     return NULL;
   }
 
-  KeybindHandle handle = (KeybindHandle)malloc(sizeof(struct KeybindHandle));
+  KeybindHandle handle = (KeybindHandle)malloc(sizeof(*handle));
   handle->sc       = sc;
   handle->callback = callback;
   handle->opaque   = opaque;
@@ -711,7 +711,7 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
 {
   ASSERT_LG_OVERLAY_VALID(ops);
 
-  struct Overlay * overlay = malloc(sizeof(struct Overlay));
+  struct Overlay * overlay = malloc(sizeof(*overlay));
   overlay->ops           = ops;
   overlay->params        = params;
   overlay->udata         = NULL;

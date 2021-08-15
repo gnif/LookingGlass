@@ -51,14 +51,14 @@ struct EGL_Splash
 
 bool egl_splashInit(EGL_Splash ** splash)
 {
-  *splash = (EGL_Splash *)malloc(sizeof(EGL_Splash));
+  *splash = (EGL_Splash *)malloc(sizeof(**splash));
   if (!*splash)
   {
     DEBUG_ERROR("Failed to malloc EGL_Splash");
     return false;
   }
 
-  memset(*splash, 0, sizeof(EGL_Splash));
+  memset(*splash, 0, sizeof(**splash));
 
   if (!egl_shaderInit(&(*splash)->bgShader))
   {
