@@ -160,7 +160,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
     return false;
   }
 
-  infData         = (PSP_DEVICE_INTERFACE_DETAIL_DATA)calloc(1, reqSize);
+  infData         = calloc(1, reqSize);
   infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
   if (!SetupDiGetDeviceInterfaceDetail(devInfoSet, &devInterfaceData, infData, reqSize, NULL, NULL))
   {
@@ -181,7 +181,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
   free(infData);
   SetupDiDestroyDeviceInfoList(devInfoSet);
 
-  struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)malloc(sizeof(*info));
+  struct IVSHMEMInfo * info = malloc(sizeof(*info));
 
   info->handle = handle;
   dev->opaque  = info;
