@@ -206,6 +206,10 @@ static obs_properties_t * lgGetProperties(void * data)
   obs_properties_add_text(props, "shmFile", obs_module_text("SHM File"), OBS_TEXT_DEFAULT);
 #if LIBOBS_API_MAJOR_VER >= 27
   obs_properties_add_bool(props, "dmabuf",  obs_module_text("Use DMABUF import (requires kvmfr device)"));
+#else
+  obs_property_t * dmabuf = obs_properties_add_bool(props, "dmabuf",
+      obs_module_text("Use DMABUF import (requires OBS 27+ and kvmfr device)"));
+  obs_property_set_enabled(dmabuf, false);
 #endif
 
   return props;
