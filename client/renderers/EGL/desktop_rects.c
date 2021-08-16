@@ -240,8 +240,8 @@ bool egl_screenToDesktop(struct FrameDamageRect * output, const double matrix[6]
     const struct Rect * rect, int width, int height)
 {
   double x1, y1, x2, y2;
-  matrixMultiply(matrix, &x1, &y1, rect->x, rect->y);
-  matrixMultiply(matrix, &x2, &y2, rect->x + rect->w, rect->y + rect->h);
+  matrixMultiply(matrix, &x1, &y1, rect->x - 1, rect->y - 1);
+  matrixMultiply(matrix, &x2, &y2, rect->x + rect->w + 1, rect->y + rect->h + 1);
 
   int x3 = min(x1, x2);
   int y3 = min(y1, y2);
