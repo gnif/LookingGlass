@@ -10,6 +10,7 @@ include(FeatureSummary)
 
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
+include(UninstallTarget)
 
 find_package(PkgConfig)
 pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
