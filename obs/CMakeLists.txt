@@ -10,6 +10,7 @@ include(FeatureSummary)
 
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
+include(UninstallTarget)
 
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
