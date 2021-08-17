@@ -25,7 +25,7 @@ void DebugWinError(const char * file, const unsigned int line, const char * func
 {
   char *buffer;
   FormatMessageA(
-    FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER,
+    FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
     NULL,
     status,
     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
