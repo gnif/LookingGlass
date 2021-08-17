@@ -21,7 +21,7 @@
 #include "kb.h"
 #include "cimgui.h"
 
-const uint32_t xfree86_to_ps2[KEY_MAX] =
+const uint32_t linux_to_ps2[KEY_MAX] =
 {
   [KEY_RESERVED]         /* = USB   0 */ = 0x000000,
   [KEY_ESC]              /* = USB  41 */ = 0x000001,
@@ -144,7 +144,7 @@ const uint32_t xfree86_to_ps2[KEY_MAX] =
   [KEY_PRINT]            /* = USB  70 */ = 0x00E037,
 };
 
-const char * xfree86_to_str[KEY_MAX] =
+const char * linux_to_str[KEY_MAX] =
 {
   [KEY_RESERVED]         = "KEY_RESERVED",
   [KEY_ESC]              = "KEY_ESC",
@@ -267,7 +267,7 @@ const char * xfree86_to_str[KEY_MAX] =
   [KEY_PRINT]            = "KEY_PRINT",
 };
 
-const char * xfree86_to_display[KEY_MAX] =
+const char * linux_to_display[KEY_MAX] =
 {
   [KEY_RESERVED]         = "Reserved",
   [KEY_ESC]              = "Esc",

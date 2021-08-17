@@ -24,9 +24,9 @@
 #include <linux/input.h>
 #include <stdint.h>
 
-extern const uint32_t xfree86_to_ps2[KEY_MAX];
-extern const char *   xfree86_to_str[KEY_MAX];
-extern const char *   xfree86_to_display[KEY_MAX];
+extern const uint32_t linux_to_ps2[KEY_MAX];
+extern const char *   linux_to_str[KEY_MAX];
+extern const char *   linux_to_display[KEY_MAX];
 
 void initImGuiKeyMap(int * keymap);
 

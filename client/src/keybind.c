@@ -104,9 +104,9 @@ static void bind_mouseSens(int sc, void * opaque)
 
 static void bind_ctrlAltFn(int sc, void * opaque)
 {
-  const uint32_t ctrl = xfree86_to_ps2[KEY_LEFTCTRL];
-  const uint32_t alt  = xfree86_to_ps2[KEY_LEFTALT ];
-  const uint32_t fn   = xfree86_to_ps2[sc];
+  const uint32_t ctrl = linux_to_ps2[KEY_LEFTCTRL];
+  const uint32_t alt  = linux_to_ps2[KEY_LEFTALT ];
+  const uint32_t fn   = linux_to_ps2[sc];
   spice_key_down(ctrl);
   spice_key_down(alt );
   spice_key_down(fn  );
@@ -118,7 +118,7 @@ static void bind_ctrlAltFn(int sc, void * opaque)
 
 static void bind_passthrough(int sc, void * opaque)
 {
-  sc = xfree86_to_ps2[sc];
+  sc = linux_to_ps2[sc];
   spice_key_down(sc);
   spice_key_up  (sc);
 }

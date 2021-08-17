@@ -56,7 +56,7 @@ static int help_render(void * udata, bool interactive, struct Rect * windowRects
 
   if (igBeginTable("Help", 2, 0, (ImVec2) { 0.0f, 0.0f }, 0.0f))
   {
-    const char * escapeName = xfree86_to_display[g_params.escapeKey];
+    const char * escapeName = linux_to_display[g_params.escapeKey];
 
     igTableNextColumn();
     igText("%s", escapeName);
@@ -67,7 +67,7 @@ static int help_render(void * udata, bool interactive, struct Rect * windowRects
       if (g_state.keyDescription[i])
       {
         igTableNextColumn();
-        igText("%s+%s", escapeName, xfree86_to_display[i]);
+        igText("%s+%s", escapeName, linux_to_display[i]);
         igTableNextColumn();
         igText(g_state.keyDescription[i]);
       }
