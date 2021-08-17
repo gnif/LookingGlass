@@ -333,7 +333,7 @@ void app_handleKeyPress(int sc)
 
   if (!g_state.keyDown[sc])
   {
-    uint32_t ps2 = xfree86_to_ps2[sc];
+    uint32_t ps2 = linux_to_ps2[sc];
     if (!ps2)
       return;
 
@@ -386,7 +386,7 @@ void app_handleKeyRelease(int sc)
   if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
     return;
 
-  uint32_t ps2 = xfree86_to_ps2[sc];
+  uint32_t ps2 = linux_to_ps2[sc];
   if (!ps2)
     return;
 

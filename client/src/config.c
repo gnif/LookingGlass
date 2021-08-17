@@ -790,7 +790,7 @@ static char * optScancodeToString(struct Option * opt)
 {
   char * str;
   alloc_sprintf(&str, "%d = %s", opt->value.x_int,
-      xfree86_to_str[opt->value.x_int]);
+      linux_to_str[opt->value.x_int]);
   return str;
 }
 
