@@ -4,6 +4,7 @@ project(looking-glass-client C CXX)
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
+include(CheckSubmodule)
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
