@@ -979,9 +979,6 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
           xie->mode != XINotifyNormal)
         return;
 
-      if (xie->event_x < 0 || xie->event_y < 0)
-        DEBUG_INFO("enter %f %f", xie->event_x, xie->event_y);
-
       app_updateCursorPos(xie->event_x, xie->event_y);
       app_handleEnterEvent(true);
       x11.entered = true;
