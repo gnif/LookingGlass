@@ -320,7 +320,7 @@ void core_handleGuestMouseUpdate(void)
   if (!util_guestCurToLocal(&localPos))
     return;
 
-  if (g_state.overlayInput)
+  if (g_state.overlayInput || !g_cursor.inView)
     return;
 
   g_state.ds->guestPointerUpdated(
