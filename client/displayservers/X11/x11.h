@@ -34,6 +34,20 @@
 #include "common/thread.h"
 #include "common/types.h"
 
+enum Modifiers
+{
+  MOD_CTRL_LEFT = 0,
+  MOD_CTRL_RIGHT,
+  MOD_SHIFT_LEFT,
+  MOD_SHIFT_RIGHT,
+  MOD_ALT_LEFT,
+  MOD_ALT_RIGHT,
+  MOD_SUPER_LEFT,
+  MOD_SUPER_RIGHT,
+};
+
+#define MOD_COUNT (MOD_SUPER_RIGHT + 1)
+
 struct X11DSState
 {
   Display *     display;
@@ -72,6 +86,7 @@ struct X11DSState
 
   XIM xim;
   XIC xic;
+  bool modifiers[MOD_COUNT];
 
   // XFixes vars
   int eventBase;
