@@ -975,8 +975,12 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
     {
       atomic_store(&x11.lastWMEvent, microtime());
       XIEnterEvent *xie = cookie->data;
-      if (x11.entered || xie->event != x11.window)
+      if (x11.entered || xie->event != x11.window ||
+          xie->mode != XINotifyNormal)
         return;
+
+      if (xie->event_x < 0 || xie->event_y < 0)
+        DEBUG_INFO("enter %f %f", xie->event_x, xie->event_y);
 
       app_updateCursorPos(xie->event_x, xie->event_y);
       app_handleEnterEvent(true);
