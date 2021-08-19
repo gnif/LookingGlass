@@ -420,7 +420,7 @@ void core_handleMouseNormal(double ex, double ey)
         .y        = guest.y
       };
 
-      lgmpClientSendData(g_state.pointerQueue, &msg, sizeof(msg));
+      lgmpClientSendData(g_state.pointerQueue, &msg, sizeof(msg), NULL);
     }
     else
     {

@@ -158,6 +158,8 @@ static bool lgmpTimer(void * opaque)
         break;
       }
     }
+
+    lgmpHostAckData(app.pointerQueue);
   }
 
   return true;
