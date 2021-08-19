@@ -112,7 +112,7 @@ void app_handleFocusEvent(bool focused)
       g_state.ds->minimize();
   }
 
-  core_setGuestCursorPos();
+  g_cursor.realign = true;
   g_state.ds->realignPointer();
 }
 
@@ -124,7 +124,7 @@ void app_handleEnterEvent(bool entered)
     if (!core_inputEnabled())
       return;
 
-    core_setGuestCursorPos();
+    g_cursor.realign = true;
   }
   else
   {

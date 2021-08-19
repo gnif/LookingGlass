@@ -314,46 +314,6 @@ void core_stopFrameThread(void)
   g_state.frameThread = NULL;
 }
 
-void core_setGuestCursorPos(void)
-{
-  struct DoublePoint guest;
-  util_localCurToGuest(&guest);
-
-  if (!(g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS))
-  {
-    g_cursor.realign = true;
-    return;
-  }
-
-  const KVMFRSetCursorPos msg = {
-    .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
-    .x        = round(guest.x),
-    .y        = round(guest.y)
-  };
-
-  uint32_t setPosSerial;
-  if (lgmpClientSendData(g_state.pointerQueue,
-        &msg, sizeof(msg), &setPosSerial) != LGMP_OK)
-    return;
-
-  /* wait for the move request to be processed */
-  do
-  {
-    uint32_t hostSerial;
-    if (lgmpClientGetSerial(g_state.pointerQueue, &hostSerial) != LGMP_OK)
-      return;
-
-    if (hostSerial >= setPosSerial)
-      break;
-
-    g_state.ds->wait(1);
-  }
-  while(app_isRunning());
-
-  g_cursor.guest.x = msg.x;
-  g_cursor.guest.y = msg.y;
-}
-
 void core_handleGuestMouseUpdate(void)
 {
   struct DoublePoint localPos;
@@ -430,7 +390,7 @@ void core_handleMouseNormal(double ex, double ey)
     const bool inView = isInView();
     core_setCursorInView(inView);
     if (inView)
-      core_setGuestCursorPos();
+      g_cursor.realign = true;
   }
 
   /* nothing to do if we are outside the viewport */
@@ -451,9 +411,44 @@ void core_handleMouseNormal(double ex, double ey)
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
 
-    /* add the difference to the offset */
-    ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
-    ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+    if (g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS)
+    {
+      const KVMFRSetCursorPos msg = {
+        .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
+        .x        = round(guest.x),
+        .y        = round(guest.y)
+      };
+
+      uint32_t setPosSerial;
+      if (lgmpClientSendData(g_state.pointerQueue,
+            &msg, sizeof(msg), &setPosSerial) == LGMP_OK)
+      {
+        /* wait for the move request to be processed */
+        do
+        {
+          uint32_t hostSerial;
+          if (lgmpClientGetSerial(g_state.pointerQueue, &hostSerial) != LGMP_OK)
+            return;
+
+          if (hostSerial >= setPosSerial)
+            break;
+
+          g_state.ds->wait(1);
+        }
+        while(app_isRunning());
+
+        g_cursor.guest.x = msg.x;
+        g_cursor.guest.y = msg.y;
+        g_cursor.realign = false;
+        return;
+      }
+    }
+    else
+    {
+      /* add the difference to the offset */
+      ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
+      ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+    }
 
     g_cursor.realign = false;
 
