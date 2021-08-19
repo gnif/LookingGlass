@@ -70,6 +70,9 @@ struct X11DSState
 
   Cursor cursors[LG_POINTER_COUNT];
 
+  XIM xim;
+  XIC xic;
+
   // XFixes vars
   int eventBase;
   int errorBase;
