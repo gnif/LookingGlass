@@ -37,6 +37,8 @@ typedef void (*DEBUGPROC_t)(GLenum source,
     const GLchar *message, const void *userParam);
 typedef void (*glDebugMessageCallback_t)(DEBUGPROC_t callback,
     const void * userParam);
+typedef void (*glBufferStorageEXT_t)(GLenum target, GLsizeiptr size,
+    const void * data, GLbitfield flags);
 
 struct EGLDynProcs
 {
@@ -47,6 +49,7 @@ struct EGLDynProcs
   glEGLImageTargetTexture2DOES_t glEGLImageTargetTexture2DOES;
   glDebugMessageCallback_t       glDebugMessageCallback;
   glDebugMessageCallback_t       glDebugMessageCallbackKHR;
+  glBufferStorageEXT_t           glBufferStorageEXT;
 };
 
 extern struct EGLDynProcs g_egl_dynProcs;

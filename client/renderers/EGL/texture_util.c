@@ -26,6 +26,7 @@
 #include <GLES2/gl2ext.h>
 
 #include "egldebug.h"
+#include "egl_dynprocs.h"
 
 /**
  * the following comes from drm_fourcc.h and is included here to avoid the
@@ -108,7 +109,7 @@ bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
     buffer->size = fmt->bufferSize;
     glGenBuffers(1, &buffer->pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
-    glBufferStorageEXT(
+    g_egl_dynProcs.glBufferStorageEXT(
       GL_PIXEL_UNPACK_BUFFER,
       fmt->bufferSize,
       NULL,

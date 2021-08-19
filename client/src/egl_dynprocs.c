@@ -40,6 +40,8 @@ void egl_dynProcsInit(void)
     eglGetProcAddress("glDebugMessageCallback");
   g_egl_dynProcs.glDebugMessageCallbackKHR = (glDebugMessageCallback_t)
     eglGetProcAddress("glDebugMessageCallbackKHR");
+  g_egl_dynProcs.glBufferStorageEXT = (glBufferStorageEXT_t)
+    eglGetProcAddress("glBufferStorageEXT");
 };
 
 #endif
