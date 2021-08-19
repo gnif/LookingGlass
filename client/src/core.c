@@ -385,17 +385,14 @@ void core_handleMouseNormal(double ex, double ey)
   }
 
   bool testExit = true;
+  const bool inView = isInView();
   if (!g_cursor.inView)
   {
-    const bool inView = isInView();
-    core_setCursorInView(inView);
     if (inView)
       g_cursor.realign = true;
+    else /* nothing to do if we are outside the viewport */
+      return;
   }
-
-  /* nothing to do if we are outside the viewport */
-  if (!g_cursor.inView)
-    return;
 
   /*
    * do not pass mouse events to the guest if we do not have focus, this must be
@@ -403,7 +400,10 @@ void core_handleMouseNormal(double ex, double ey)
    * we know if we should be drawing the cursor.
    */
   if (!g_state.focused)
+  {
+    core_setCursorInView(inView);
     return;
+  }
 
   /* if we have been instructed to realign */
   if (g_cursor.realign)
@@ -440,6 +440,7 @@ void core_handleMouseNormal(double ex, double ey)
         g_cursor.guest.x = msg.x;
         g_cursor.guest.y = msg.y;
         g_cursor.realign = false;
+        core_setCursorInView(true);
         return;
       }
     }
@@ -448,6 +449,7 @@ void core_handleMouseNormal(double ex, double ey)
       /* add the difference to the offset */
       ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
       ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
+      core_setCursorInView(true);
     }
 
     g_cursor.realign = false;
