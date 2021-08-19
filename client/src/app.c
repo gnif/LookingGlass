@@ -406,10 +406,10 @@ void app_handleKeyboardTyped(const char * typed)
 
 void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
 {
-  g_state.io->KeyCtrl  = ctrl;
-  g_state.io->KeyShift = shift;
-  g_state.io->KeyAlt   = alt;
-  g_state.io->KeySuper = super;
+  g_state.modCtrl  = ctrl;
+  g_state.modShift = shift;
+  g_state.modAlt   = alt;
+  g_state.modSuper = super;
 }
 
 void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
@@ -805,6 +805,11 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   bool totalDamage = false;
   struct Overlay * overlay;
   struct Rect buffer[MAX_OVERLAY_RECTS];
+
+  g_state.io->KeyCtrl  = g_state.modCtrl;
+  g_state.io->KeyShift = g_state.modShift;
+  g_state.io->KeyAlt   = g_state.modAlt;
+  g_state.io->KeySuper = g_state.modSuper;
 
   igNewFrame();
 
