@@ -408,7 +408,6 @@ void core_handleMouseNormal(double ex, double ey)
   /* if we have been instructed to realign */
   if (g_cursor.realign)
   {
-    g_cursor.realign = false;
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
 
@@ -416,11 +415,33 @@ void core_handleMouseNormal(double ex, double ey)
     {
       const KVMFRSetCursorPos msg = {
         .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
-        .x        = guest.x,
-        .y        = guest.y
+        .x        = round(guest.x),
+        .y        = round(guest.y)
       };
 
-      lgmpClientSendData(g_state.pointerQueue, &msg, sizeof(msg), NULL);
+      uint32_t setPosSerial;
+      if (lgmpClientSendData(g_state.pointerQueue,
+            &msg, sizeof(msg), &setPosSerial) == LGMP_OK)
+      {
+        /* wait for the move request to be processed */
+        do
+        {
+          uint32_t hostSerial;
+          if (lgmpClientGetSerial(g_state.pointerQueue, &hostSerial) != LGMP_OK)
+            return;
+
+          if (hostSerial >= setPosSerial)
+            break;
+
+          g_state.ds->wait(1);
+        }
+        while(app_isRunning());
+
+        g_cursor.guest.x = msg.x;
+        g_cursor.guest.y = msg.y;
+        g_cursor.realign = false;
+        return;
+      }
     }
     else
     {
@@ -428,6 +449,8 @@ void core_handleMouseNormal(double ex, double ey)
       ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
       ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
     }
+
+    g_cursor.realign = false;
 
     /* don't test for an exit as we just entered, we can get into a enter/exit
      * loop otherwise */
