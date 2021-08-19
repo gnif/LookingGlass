@@ -56,6 +56,10 @@ struct AppState
   bool             overlayInput;
   ImGuiMouseCursor cursorLast;
   char           * imGuiIni;
+  bool             modCtrl;
+  bool             modShift;
+  bool             modAlt;
+  bool             modSuper;
 
   bool        alertShow;
   char      * alertMessage;
