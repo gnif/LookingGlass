@@ -903,6 +903,32 @@ static int x11EventThread(void * unused)
   return 0;
 }
 
+static enum Modifiers keySymToModifier(KeySym sym)
+{
+  switch (sym)
+  {
+    case XK_Control_L: return MOD_CTRL_LEFT;
+    case XK_Control_R: return MOD_CTRL_RIGHT;
+    case XK_Shift_L:   return MOD_SHIFT_LEFT;
+    case XK_Shift_R:   return MOD_SHIFT_RIGHT;
+    case XK_Alt_L:     return MOD_ALT_LEFT;
+    case XK_Alt_R:     return MOD_ALT_RIGHT;
+    case XK_Super_L:   return MOD_SUPER_LEFT;
+    case XK_Super_R:   return MOD_SUPER_RIGHT;
+    default:           return -1;
+  }
+}
+
+static void updateModifiers(void)
+{
+  app_handleKeyboardModifiers(
+    x11.modifiers[MOD_CTRL_LEFT] || x11.modifiers[MOD_CTRL_RIGHT],
+    x11.modifiers[MOD_SHIFT_LEFT] || x11.modifiers[MOD_SHIFT_RIGHT],
+    x11.modifiers[MOD_ALT_LEFT] || x11.modifiers[MOD_ALT_RIGHT],
+    x11.modifiers[MOD_SUPER_LEFT] || x11.modifiers[MOD_SUPER_RIGHT]
+  );
+}
+
 static void x11XInputEvent(XGenericEventCookie *cookie)
 {
   static int button_state = 0;
@@ -1009,6 +1035,16 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         buffer[count] = '\0';
         app_handleKeyboardTyped(buffer);
       }
+
+      if (status == XLookupKeySym || status == XLookupBoth)
+      {
+        int modifier = keySymToModifier(sym);
+        if (modifier >= 0)
+        {
+          x11.modifiers[modifier] = true;
+          updateModifiers();
+        }
+      }
       return;
     }
 
@@ -1019,6 +1055,25 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
       XIDeviceEvent *device = cookie->data;
       app_handleKeyRelease(device->detail - 8);
+
+      if (!x11.xic || !app_isOverlayMode())
+        return;
+
+      XKeyPressedEvent ev = {
+        .display = x11.display,
+        .window  = x11.window,
+        .type    = KeyRelease,
+        .keycode = device->detail,
+        .state   = device->mods.effective,
+      };
+      KeySym sym = XLookupKeysym(&ev, 0);
+      int modifier = keySymToModifier(sym);
+
+      if (modifier >= 0)
+      {
+        x11.modifiers[modifier] = false;
+        updateModifiers();
+      }
       return;
     }
 
