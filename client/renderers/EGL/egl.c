@@ -703,12 +703,21 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   }
 
   bool debugContext = option_get_bool("egl", "debug");
-  EGLint ctxattr[] =
+  EGLint ctxattr[5];
+  int ctxidx = 0;
+
+  ctxattr[ctxidx++] = EGL_CONTEXT_CLIENT_VERSION;
+  ctxattr[ctxidx++] = 2;
+
+  if (maj > 1 || (maj == 1 && min >= 5))
   {
-    EGL_CONTEXT_CLIENT_VERSION, 2,
-    EGL_CONTEXT_OPENGL_DEBUG  , debugContext ? EGL_TRUE : EGL_FALSE,
-    EGL_NONE
-  };
+    ctxattr[ctxidx++] = EGL_CONTEXT_OPENGL_DEBUG;
+    ctxattr[ctxidx++] = debugContext ? EGL_TRUE : EGL_FALSE;
+  }
+  else if (debugContext)
+    DEBUG_WARN("Cannot create debug contexts before EGL 1.5");
+
+  ctxattr[ctxidx++] = EGL_NONE;
 
   this->context = eglCreateContext(this->display, this->configs, EGL_NO_CONTEXT, ctxattr);
   if (this->context == EGL_NO_CONTEXT)
