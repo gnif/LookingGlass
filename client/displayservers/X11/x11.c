@@ -575,6 +575,38 @@ static bool x11Init(const LG_DSInitParams params)
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
 
+  XSetLocaleModifiers(""); // Load XMODIFIERS
+  x11.xim = XOpenIM(x11.display, 0, 0, 0);
+
+  if (!x11.xim)
+  {
+    // disable IME
+    XSetLocaleModifiers("@im=none");
+    x11.xim = XOpenIM(x11.display, 0, 0, 0);
+  }
+
+  if (x11.xim)
+  {
+    x11.xic = XCreateIC(
+      x11.xim,
+      XNInputStyle,   XIMPreeditNothing | XIMStatusNothing,
+      XNClientWindow, x11.window,
+      XNFocusWindow,  x11.window,
+      NULL
+    );
+  }
+  else
+    DEBUG_WARN("Failed to initialize X Input Method");
+
+  if (x11.xic)
+  {
+    XSetICFocus(x11.xic);
+    XSelectInput(x11.display, x11.window, StructureNotifyMask | ExposureMask |
+        PropertyChangeMask | KeyPressMask);
+  }
+  else
+    DEBUG_WARN("Failed to initialize X Input Context, typing will not work");
+
   if (!lgCreateThread("X11EventThread", x11EventThread, NULL, &x11.eventThread))
   {
     DEBUG_ERROR("Failed to create the x11 event thread");
@@ -947,6 +979,36 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
       XIDeviceEvent *device = cookie->data;
       app_handleKeyPress(device->detail - 8);
+
+      if (!x11.xic || !app_isOverlayMode())
+        return;
+
+      char buffer[128];
+      KeySym sym;
+      Status status;
+      int count;
+      XKeyPressedEvent ev = {
+        .display = x11.display,
+        .window  = x11.window,
+        .type    = KeyPress,
+        .keycode = device->detail,
+        .state   = device->mods.effective,
+      };
+
+      count = Xutf8LookupString(x11.xic, &ev, buffer, sizeof(buffer),
+        &sym, &status);
+
+      if (status == XBufferOverflow || count >= sizeof(buffer))
+      {
+        DEBUG_WARN("Typing too many characters at once, ignoring");
+        return;
+      }
+
+      if (status == XLookupChars || status == XLookupBoth)
+      {
+        buffer[count] = '\0';
+        app_handleKeyboardTyped(buffer);
+      }
       return;
     }
 
