@@ -48,7 +48,7 @@ struct xcb
   xcb_xfixes_get_cursor_image_cookie_t curC;
 };
 
-struct xcb * this = NULL;
+static struct xcb * this = NULL;
 
 // forwards
 
