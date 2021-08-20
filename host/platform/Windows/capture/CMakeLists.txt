@@ -25,6 +25,9 @@ if(USE_NVFBC)
   add_capture("NVFBC")
 endif()
 
+add_feature_info(USE_DXGI USE_DXGI "DXGI Desktop Duplication capture backend.")
+add_feature_info(USE_NVFBC USE_NVFBC "NVFBC capture backend.")
+
 include("PostCapture")
 
 add_library(capture STATIC ${CAPTURE_C})
