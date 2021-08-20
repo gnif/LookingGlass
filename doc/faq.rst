@@ -77,6 +77,31 @@ host OS is the ``looking-glass-client`` application.
 You can :ref:`build <host_linux_on_linux>` a version of the host for Linux as
 well.
 
+.. _gnome_wayland_decorations:
+
+Why is there no title bar? / Why can't I resize the window?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This happens on GNOME Wayland because GNOME doesn't support the `standard
+protocol`_ for server-side decorations. As a result, the window decorations
+do not appear.
+
+The easy solution is to use `libdecor`_. This is currently not packaged in
+most distros, so you will need to build it from the linked git repository.
+
+Once you have built it, you can then build the the client with libdecor
+support by passing ``-DENABLE_LIBDECOR=ON`` to ``cmake``.
+
+Please be aware that libdecor comes with overheads, which is why it is not
+used by default. You should avoid it if possible.
+
+An alternative solution is to hold down the Super key (Windows key on most
+keyboards), and then right click on the window. This should bring up a menu,
+which will allow you to move the window and resize it.
+
+.. _standard protocol: https://wayland.app/protocols/xdg-decoration-unstable-v1
+.. _libdecor: https://gitlab.gnome.org/jadahl/libdecor
+
 Mouse
 -----
 

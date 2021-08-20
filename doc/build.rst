@@ -127,6 +127,13 @@ into the *LookingGlass* directory.
 This will build the **looking-glass-client** binary, which is used to display
 frames from the guest.
 
+.. note::
+
+   If you are using GNOME on Wayland, you likely want to pass
+   ``-DENABLE_LIBDECOR=ON`` to ``cmake``, i.e. run ``cmake -DENABLE_LIBDECOR=ON ../``.
+
+   For details, see :ref:`the FAQ <gnome_wayland_decorations>`.
+
 .. seealso::
 
    -  :ref:`Installing the Client <client_install>`
