@@ -27,8 +27,7 @@
 
 #include "common/debug.h"
 #include "common/array.h"
-
-#include "ll.h"
+#include "common/vector.h"
 
 static const EGL_FilterOps * EGL_Filters[] =
 {
@@ -39,7 +38,7 @@ static const EGL_FilterOps * EGL_Filters[] =
 
 struct EGL_PostProcess
 {
-  struct ll * filters;
+  Vector * filters;
   GLuint output;
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
@@ -58,8 +57,9 @@ static void configUI(void * opaque, int * id)
   struct EGL_PostProcess * this = opaque;
 
   bool redraw = false;
+
   EGL_Filter * filter;
-  for(ll_reset(this->filters); ll_walk(this->filters, (void **)&filter); )
+  vector_forEach(filter, this->filters)
   {
     igPushIDInt(++*id);
     if (igCollapsingHeaderBoolPtr(filter->ops.name, NULL, 0))
@@ -83,7 +83,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     return false;
   }
 
-  this->filters = ll_new(sizeof(EGL_Filter *));
+  this->filters = vector_create(sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters));
   if (!this->filters)
   {
     DEBUG_ERROR("Failed to allocate the filter list");
@@ -103,7 +103,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
   return true;
 
 error_filters:
-  ll_free(this->filters);
+  vector_free(this->filters);
 
 error_this:
   free(this);
@@ -119,10 +119,10 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
 
   if (this->filters)
   {
-    EGL_Filter * filter;
-    while(ll_shift(this->filters, (void **)&filter))
-      egl_filterFree(&filter);
-    ll_free(this->filters);
+    EGL_Filter ** filter;
+    vector_forEachRef(filter, this->filters)
+      egl_filterFree(filter);
+    vector_free(this->filters);
   }
 
   egl_modelFree(&this->model);
@@ -136,7 +136,7 @@ bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
   if (!egl_filterInit(ops, &filter))
     return false;
 
-  ll_push(this->filters, filter);
+  vector_push(this->filters, &filter);
   return true;
 }
 
@@ -148,7 +148,7 @@ bool egl_postProcessConfigModified(EGL_PostProcess * this)
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     unsigned int targetX, unsigned int targetY)
 {
-  EGL_Filter * lastFilter = NULL, * filter;
+  EGL_Filter * lastFilter = NULL;
   unsigned int sizeX, sizeY;
 
   GLuint texture;
@@ -156,7 +156,9 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     return false;
 
   atomic_store(&this->modified, false);
-  for(ll_reset(this->filters); ll_walk(this->filters, (void **)&filter); )
+
+  EGL_Filter * filter;
+  vector_forEach(filter, this->filters)
   {
     egl_filterSetOutputResHint(filter, targetX, targetY);
     egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY);
