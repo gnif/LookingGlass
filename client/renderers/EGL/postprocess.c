@@ -57,14 +57,44 @@ static void configUI(void * opaque, int * id)
   struct EGL_PostProcess * this = opaque;
 
   bool redraw = false;
+  size_t moveIdx = 0;
 
-  EGL_Filter * filter;
-  vector_forEach(filter, this->filters)
+  float lastBegin = 0.0f;
+  ImVec2 window;
+  igGetWindowPos(&window);
+
+  EGL_Filter ** filters = vector_data(this->filters);
+  size_t count = vector_size(this->filters);
+  for (size_t i = 0; i < count; ++i)
   {
-    igPushIDInt(++*id);
-    if (igCollapsingHeaderBoolPtr(filter->ops.name, NULL, 0))
+    EGL_Filter * filter = filters[i];
+    float begin = igGetCursorPosY();
+
+    igPushIDPtr(filter);
+    bool draw = igCollapsingHeaderBoolPtr(filter->ops.name, NULL, 0);
+    bool active = igIsItemActive();
+    if (draw)
       redraw |= egl_filterImguiConfig(filter);
     igPopID();
+
+    if (active && igIsMouseDragging(ImGuiMouseButton_Left, -1.0f))
+    {
+      ImVec2 pos;
+      igGetMousePos(&pos);
+      if (i > 0 && pos.y - window.y < (lastBegin + begin) / 2.0f)
+        moveIdx = i;
+      else if (i + 1 < count && pos.y - window.y > igGetCursorPosY())
+        moveIdx = i + 1;
+    }
+
+    lastBegin = begin;
+  }
+
+  if (moveIdx)
+  {
+    EGL_Filter * tmp = filters[moveIdx];
+    filters[moveIdx] = filters[moveIdx - 1];
+    filters[moveIdx - 1] = tmp;
   }
 
   if (redraw)
