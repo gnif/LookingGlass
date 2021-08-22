@@ -34,7 +34,7 @@ Vector;
 Vector * vector_create(size_t itemSize, size_t capacity);
 void vector_free(Vector * vector);
 
-bool vector_push(Vector * vector, void * item);
+void * vector_push(Vector * vector, void * item);
 void vector_pop(Vector * vector);
 size_t vector_size(Vector * vector);
 void * vector_data(Vector * vector);
