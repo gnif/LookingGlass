@@ -47,6 +47,8 @@ Vector * vector_create(size_t itemSize, size_t capacity)
 
 void vector_free(Vector * vector)
 {
+  if (!vector)
+    return;
   free(vector->data);
   free(vector);
 }
