@@ -40,6 +40,7 @@ size_t vector_size(Vector * vector);
 void * vector_data(Vector * vector);
 void vector_at(Vector * vector, size_t index, void * data);
 void * vector_ptrTo(Vector * vector, size_t index);
+void vector_clear(Vector * vector);
 
 #define vector_forEach(name, vector) \
   for (char * vecIterCurrent = (vector)->data, \

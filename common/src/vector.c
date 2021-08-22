@@ -101,3 +101,8 @@ void * vector_ptrTo(Vector * vector, size_t index)
   DEBUG_ASSERT(index < vector->size && "Out of bounds access");
   return (char *)vector->data + index * vector->itemSize;
 }
+
+void vector_clear(Vector * vector)
+{
+  vector->size = 0;
+}
