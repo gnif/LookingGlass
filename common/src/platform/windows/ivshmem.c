@@ -20,6 +20,7 @@
 
 #include "common/ivshmem.h"
 #include "common/option.h"
+#include "common/vector.h"
 #include "common/windebug.h"
 
 #include <windows.h>
@@ -78,34 +79,21 @@ bool ivshmemInit(struct IVSHMEM * dev)
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVINFO_DATA                  devInfoData = {0};
   SP_DEVICE_INTERFACE_DATA         devInterfaceData = {0};
-  int                              deviceAllocated = 1;
-  int                              deviceCount = 0;
-  struct IVSHMEMData             * devices = malloc(sizeof(*devices) * deviceAllocated);
 
   devInfoSet = SetupDiGetClassDevs(&GUID_DEVINTERFACE_IVSHMEM, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
   devInfoData.cbSize      = sizeof(SP_DEVINFO_DATA);
   devInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
+  Vector * devices = vector_create(sizeof(struct IVSHMEMData), 1);
   if (!devices)
   {
     DEBUG_ERROR("Failed to allocate memory");
     return false;
   }
 
-  for (; SetupDiEnumDeviceInfo(devInfoSet, deviceCount, &devInfoData); ++deviceCount)
+  for (int i = 0; SetupDiEnumDeviceInfo(devInfoSet, i, &devInfoData); ++i)
   {
-    if (deviceCount >= deviceAllocated)
-    {
-      int newCount = deviceAllocated * 2;
-      struct IVSHMEMData * new = realloc(devices, newCount * sizeof(*new));
-      if (!new)
-      {
-        DEBUG_ERROR("Failed to allocate memory");
-        break;
-      }
-      deviceAllocated = newCount;
-      devices         = new;
-    }
+    struct IVSHMEMData * device = vector_push(devices, NULL);
 
     DWORD bus, addr;
     if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData, SPDRP_BUSNUMBER,
@@ -122,8 +110,8 @@ bool ivshmemInit(struct IVSHMEM * dev)
       addr = 0xFFFFFFFF;
     }
 
-    devices[deviceCount].busAddr = (((DWORD64) bus) << 32) | addr;
-    memcpy(&devices[deviceCount].devInfoData, &devInfoData, sizeof(SP_DEVINFO_DATA));
+    device->busAddr = (((DWORD64) bus) << 32) | addr;
+    memcpy(&device->devInfoData, &devInfoData, sizeof(SP_DEVINFO_DATA));
   }
 
   if (GetLastError() != ERROR_NO_MORE_ITEMS)
@@ -133,18 +121,20 @@ bool ivshmemInit(struct IVSHMEM * dev)
   }
 
   const int shmDevice = option_get_int("os", "shmDevice");
-  qsort(devices, deviceCount, sizeof(*devices), ivshmemComparator);
+  qsort(vector_data(devices), vector_size(devices), sizeof(struct IVSHMEMData), ivshmemComparator);
 
-  for (int i = 0; i < deviceCount; ++i)
+  struct IVSHMEMData * device;
+  vector_forEachRefIdx(i, device, devices)
   {
-    DWORD bus = devices[i].busAddr >> 32;
-    DWORD addr = devices[i].busAddr & 0xFFFFFFFF;
-    DEBUG_INFO("IVSHMEM %d%c on bus 0x%lx, device 0x%lx, function 0x%lx", i,
+    DWORD bus = device->busAddr >> 32;
+    DWORD addr = device->busAddr & 0xFFFFFFFF;
+    DEBUG_INFO("IVSHMEM %" PRIuPTR "%c on bus 0x%lx, device 0x%lx, function 0x%lx", i,
       i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
   }
 
-  memcpy(&devInfoData, &devices[shmDevice].devInfoData, sizeof(SP_DEVINFO_DATA));
-  free(devices);
+  device = vector_ptrTo(devices, shmDevice);
+  memcpy(&devInfoData, &device->devInfoData, sizeof(SP_DEVINFO_DATA));
+  vector_free(devices);
 
   if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
   {
