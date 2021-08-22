@@ -53,7 +53,7 @@ void vector_free(Vector * vector)
   free(vector);
 }
 
-bool vector_push(Vector * vector, void * item)
+void * vector_push(Vector * vector, void * item)
 {
   if (vector->size >= vector->capacity)
   {
@@ -62,16 +62,18 @@ bool vector_push(Vector * vector, void * item)
     if (!new)
     {
       DEBUG_ERROR("Failed to allocate memory in vector: %" PRIuPTR " bytes", newCapacity * vector->itemSize);
-      return false;
+      return NULL;
     }
 
     vector->capacity = newCapacity;
     vector->data = new;
   }
 
-  memcpy((char *)vector->data + vector->size * vector->itemSize, item, vector->itemSize);
+  void * ptr = (char *)vector->data + vector->size * vector->itemSize;
+  if (item)
+    memcpy(ptr, item, vector->itemSize);
   ++vector->size;
-  return true;
+  return ptr;
 }
 
 void vector_pop(Vector * vector)
