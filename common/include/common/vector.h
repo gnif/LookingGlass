@@ -53,3 +53,14 @@ void vector_clear(Vector * vector);
             * vecIterEnd = vecIterCurrent + (vector)->size * (vector)->itemSize; \
        vecIterCurrent < vecIterEnd ? name = (void *)vecIterCurrent, true : false; \
        vecIterCurrent += (vector)->itemSize)
+
+#define vector_forEachIdx(index, name, vector) \
+  for (size_t index = 0; \
+       index < (vector)->size ? vector_at((vector), index, &(name)), true : false; \
+       ++index)
+
+
+#define vector_forEachRefIdx(index, name, vector) \
+  for (size_t index = 0; \
+       index < (vector)->size ? (name) = vector_ptrTo((vector), index), true : false; \
+       ++index)
