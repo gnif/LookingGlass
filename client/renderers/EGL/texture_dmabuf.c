@@ -21,23 +21,22 @@
 #include "texture.h"
 #include "texture_buffer.h"
 
+#include "common/vector.h"
 #include "egl_dynprocs.h"
 #include "egldebug.h"
+
+struct FdImage
+{
+  int fd;
+  EGLImage image;
+};
 
 typedef struct TexDMABUF
 {
   TextureBuffer base;
 
   EGLDisplay display;
-
-  size_t imageCount;
-  size_t imageUsed;
-  struct
-  {
-    int fd;
-    EGLImage image;
-  }
-  * images;
+  Vector * images;
 }
 TexDMABUF;
 
@@ -47,10 +46,10 @@ EGL_TextureOps EGL_TextureDMABUF;
 
 static void egl_texDMABUFCleanup(TexDMABUF * this)
 {
-  for (size_t i = 0; i < this->imageUsed; ++i)
-    eglDestroyImage(this->display, this->images[i].image);
-
-  this->imageUsed = 0;
+  struct FdImage * image;
+  vector_forEachRef(image, this->images)
+    eglDestroyImage(this->display, image->image);
+  vector_clear(this->images);
 }
 
 // dmabuf functions
@@ -60,9 +59,18 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
   TexDMABUF * this = calloc(1, sizeof(*this));
   *texture = &this->base.base;
 
+  this->images = vector_create(sizeof(struct FdImage), 2);
+  if (!this->images)
+  {
+    free(this);
+    *texture = NULL;
+    return false;
+  }
+
   EGL_Texture * parent = &this->base.base;
   if (!egl_texBufferStreamInit(&parent, display))
   {
+    vector_free(this->images);
     free(this);
     *texture = NULL;
     return false;
@@ -104,10 +112,11 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   EGLImage image = EGL_NO_IMAGE;
 
-  for(int i = 0; i < this->imageUsed; ++i)
-    if (this->images[i].fd == update->dmaFD)
+  struct FdImage * fdImage;
+  vector_forEachRef(fdImage, this->images)
+    if (fdImage->fd == update->dmaFD)
     {
-      image = this->images[i].image;
+      image = fdImage->image;
       break;
     }
 
@@ -137,24 +146,15 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
       return false;
     }
 
-    if (this->imageUsed == this->imageCount)
+    if (!vector_push(this->images, &(struct FdImage) {
+      .fd    = update->dmaFD,
+      .image = image,
+    }))
     {
-      size_t newCount = this->imageCount * 2 + 2;
-      void * new = realloc(this->images, newCount * sizeof(*this->images));
-      if (!new)
-      {
-        DEBUG_ERROR("Failed to allocate memory");
-        eglDestroyImage(this->display, image);
-        return false;
-      }
-
-      this->imageCount = newCount;
-      this->images     = new;
+      DEBUG_ERROR("Failed to store EGLImage");
+      eglDestroyImage(this->display, image);
+      return false;
     }
-
-    const size_t index = this->imageUsed++;
-    this->images[index].fd    = update->dmaFD;
-    this->images[index].image = image;
   }
 
   INTERLOCKED_SECTION(parent->copyLock,
