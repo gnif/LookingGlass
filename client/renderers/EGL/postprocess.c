@@ -52,49 +52,91 @@ void egl_postProcessEarlyInit(void)
     EGL_Filters[i]->earlyInit();
 }
 
+static void drawDropTarget(void)
+{
+  igPushStyleColorVec4(ImGuiCol_Separator, (ImVec4) { 1.0f, 1.0f, 0.0f, 1.0f });
+  igSeparator();
+  igPopStyleColor(1);
+}
+
 static void configUI(void * opaque, int * id)
 {
   struct EGL_PostProcess * this = opaque;
 
   bool redraw = false;
-  size_t moveIdx = 0;
 
-  float lastBegin = 0.0f;
-  ImVec2 window;
+  static size_t mouseIdx = -1;
+  static bool   moving   = false;
+  static size_t moveIdx  = 0;
+  bool doMove = false;
+
+  ImVec2 window, pos;
   igGetWindowPos(&window);
+  igGetMousePos(&pos);
 
   EGL_Filter ** filters = vector_data(this->filters);
   size_t count = vector_size(this->filters);
   for (size_t i = 0; i < count; ++i)
   {
     EGL_Filter * filter = filters[i];
-    float begin = igGetCursorPosY();
+
+    if (moving && mouseIdx < moveIdx && i == mouseIdx)
+      drawDropTarget();
 
     igPushIDPtr(filter);
     bool draw = igCollapsingHeaderBoolPtr(filter->ops.name, NULL, 0);
+    if (igIsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+      mouseIdx = i;
+
     bool active = igIsItemActive();
     if (draw)
       redraw |= egl_filterImguiConfig(filter);
     igPopID();
 
-    if (active && igIsMouseDragging(ImGuiMouseButton_Left, -1.0f))
+    if (moving)
     {
-      ImVec2 pos;
-      igGetMousePos(&pos);
-      if (i > 0 && pos.y - window.y < (lastBegin + begin) / 2.0f)
-        moveIdx = i;
-      else if (i + 1 < count && pos.y - window.y > igGetCursorPosY())
-        moveIdx = i + 1;
+      if (!igIsMouseDragging(ImGuiMouseButton_Left, -1.0f))
+      {
+        moving = false;
+        doMove = true;
+      }
     }
+    else
+      if (active && igIsMouseDragging(ImGuiMouseButton_Left, -1.0f))
+      {
+        moveIdx = mouseIdx;
+        moving = true;
+      }
 
-    lastBegin = begin;
+    if (moving && mouseIdx > moveIdx && i == mouseIdx)
+      drawDropTarget();
   }
 
-  if (moveIdx)
+  if (moving)
   {
-    EGL_Filter * tmp = filters[moveIdx];
-    filters[moveIdx] = filters[moveIdx - 1];
-    filters[moveIdx - 1] = tmp;
+    igSetMouseCursor(ImGuiMouseCursor_Hand);
+    igSetTooltip(filters[moveIdx]->ops.name);
+  }
+
+  if (doMove)
+  {
+    EGL_Filter * tmp[count];
+    memcpy(tmp, filters, sizeof(*tmp) * count);
+
+    size_t s = 0, d = 0;
+    for(size_t i = 0; i < count; ++i)
+    {
+      if (i == mouseIdx)
+      {
+        filters[d++] = tmp[moveIdx];
+        continue;
+      }
+
+      if (s == moveIdx)
+        ++s;
+
+      filters[d++] = tmp[s++];
+    }
   }
 
   if (redraw)
