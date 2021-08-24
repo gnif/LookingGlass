@@ -120,23 +120,12 @@ static void configUI(void * opaque, int * id)
 
   if (doMove)
   {
-    EGL_Filter * tmp[count];
-    memcpy(tmp, filters, sizeof(*tmp) * count);
-
-    size_t s = 0, d = 0;
-    for(size_t i = 0; i < count; ++i)
-    {
-      if (i == mouseIdx)
-      {
-        filters[d++] = tmp[moveIdx];
-        continue;
-      }
-
-      if (s == moveIdx)
-        ++s;
-
-      filters[d++] = tmp[s++];
-    }
+    EGL_Filter * tmp = filters[moveIdx];
+    if (mouseIdx > moveIdx) // moving down
+      memmove(filters + moveIdx, filters + moveIdx + 1, (mouseIdx - moveIdx) * sizeof(EGL_Filter *));
+    else // moving up
+      memmove(filters + mouseIdx + 1, filters + mouseIdx, (moveIdx - mouseIdx) * sizeof(EGL_Filter *));
+    filters[mouseIdx] = tmp;
   }
 
   if (redraw)
