@@ -31,8 +31,13 @@ typedef struct Vector
 }
 Vector;
 
-Vector * vector_create(size_t itemSize, size_t capacity);
+// Dynamically allocates the vector
+Vector * vector_alloc(size_t itemSize, size_t capacity);
 void vector_free(Vector * vector);
+
+// Uses existing vector, but dynamically allocates storage
+bool vector_create(Vector * vector, size_t itemSize, size_t capacity);
+void vector_destroy(Vector * vector);
 
 inline static size_t vector_size(Vector * vector)
 {
