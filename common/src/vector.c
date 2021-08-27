@@ -82,16 +82,6 @@ void vector_pop(Vector * vector)
   --vector->size;
 }
 
-size_t vector_size(Vector * vector)
-{
-  return vector->size;
-}
-
-void * vector_data(Vector * vector)
-{
-  return vector->data;
-}
-
 void vector_at(Vector * vector, size_t index, void * data)
 {
   DEBUG_ASSERT(index < vector->size && "Out of bounds access");
