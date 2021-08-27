@@ -19,62 +19,61 @@
  */
 
 #include "common/stringlist.h"
+#include "common/vector.h"
 
 #include <stdlib.h>
 
 struct StringList
 {
-  bool         owns_strings;
-  unsigned int size;
-  unsigned int count;
-  char ** list;
+  bool   owns_strings;
+  Vector vector;
 };
 
 StringList stringlist_new(bool owns_strings)
 {
   StringList sl = malloc(sizeof(*sl));
-
   sl->owns_strings = owns_strings;
-  sl->size         = 32;
-  sl->count        = 0;
-  sl->list         = malloc(sizeof(char *) * sl->size);
 
+  if (!vector_create(&sl->vector, sizeof(char *), 32))
+  {
+    free(sl);
+    return NULL;
+  }
   return sl;
 }
 
 void stringlist_free(StringList * sl)
 {
   if ((*sl)->owns_strings)
-    for(unsigned int i = 0; i < (*sl)->count; ++i)
-      free((*sl)->list[i]);
+  {
+    char * ptr;
+    vector_forEach(ptr, &(*sl)->vector)
+      free(ptr);
+  }
 
-  free((*sl)->list);
+  vector_destroy(&(*sl)->vector);
   free((*sl));
   *sl = NULL;
 }
 
-int stringlist_push (StringList sl, char * str)
+int stringlist_push(StringList sl, char * str)
 {
-  if (sl->count == sl->size)
-  {
-    sl->size += 32;
-    sl->list  = realloc(sl->list, sizeof(*sl->list) * sl->size);
-  }
-
-  unsigned int index = sl->count;
-  sl->list[sl->count++] = str;
+  int index = vector_size(&sl->vector);
+  vector_push(&sl->vector, &str);
   return index;
 }
 
 unsigned int stringlist_count(StringList sl)
 {
-  return sl->count;
+  return vector_size(&sl->vector);
 }
 
 char * stringlist_at(StringList sl, unsigned int index)
 {
-  if (index >= sl->count)
+  if (index >= vector_size(&sl->vector))
     return NULL;
 
-  return sl->list[index];
+  char * ptr;
+  vector_at(&sl->vector, index, &ptr);
+  return ptr;
 }
