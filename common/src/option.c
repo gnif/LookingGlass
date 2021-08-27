@@ -747,6 +747,25 @@ void option_print(void)
   }
 }
 
+// dump the options in ini format into the file
+bool option_dump(FILE * file, const char * module)
+{
+  fprintf(file, "[%s]\n", module);
+
+  for (int i = 0; i < state.oCount; ++i)
+  {
+    struct Option * o = state.options[i];
+    if (strcasecmp(o->module, module) != 0)
+      continue;
+    char * value = o->toString(o);
+    fprintf(file, "%s=%s\n", o->name, value);
+    free(value);
+  }
+
+  fputc('\n', file);
+  return true;
+}
+
 struct Option * option_get(const char * module, const char * name)
 {
   for(int i = 0; i < state.oCount; ++i)
