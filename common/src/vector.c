@@ -25,22 +25,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-Vector * vector_create(size_t itemSize, size_t capacity)
+Vector * vector_alloc(size_t itemSize, size_t capacity)
 {
-  Vector * vector = calloc(1, sizeof(Vector));
+  Vector * vector = malloc(sizeof(Vector));
   if (!vector)
     return NULL;
 
-  vector->itemSize = itemSize;
-  vector->capacity = capacity;
-  if (capacity)
+  if (!vector_create(vector, itemSize, capacity))
   {
-    vector->data = malloc(itemSize * capacity);
-    if (!vector->data)
-    {
-      free(vector);
-      return NULL;
-    }
+    free(vector);
+    return NULL;
   }
   return vector;
 }
@@ -49,8 +43,31 @@ void vector_free(Vector * vector)
 {
   if (!vector)
     return;
-  free(vector->data);
+  vector_destroy(vector);
   free(vector);
+}
+
+bool vector_create(Vector * vector, size_t itemSize, size_t capacity)
+{
+  vector->itemSize = itemSize;
+  vector->capacity = capacity;
+  vector->size     = 0;
+  vector->data     = NULL;
+
+  if (capacity)
+  {
+    vector->data = malloc(itemSize * capacity);
+    if (!vector->data)
+      return false;
+  }
+  return true;
+}
+
+void vector_destroy(Vector * vector)
+{
+  free(vector->data);
+  vector->capacity = 0;
+  vector->itemSize = 0;
 }
 
 void * vector_push(Vector * vector, void * item)

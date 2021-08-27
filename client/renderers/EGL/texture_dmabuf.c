@@ -36,7 +36,7 @@ typedef struct TexDMABUF
   TextureBuffer base;
 
   EGLDisplay display;
-  Vector * images;
+  Vector images;
 }
 TexDMABUF;
 
@@ -47,9 +47,9 @@ EGL_TextureOps EGL_TextureDMABUF;
 static void egl_texDMABUFCleanup(TexDMABUF * this)
 {
   struct FdImage * image;
-  vector_forEachRef(image, this->images)
+  vector_forEachRef(image, &this->images)
     eglDestroyImage(this->display, image->image);
-  vector_clear(this->images);
+  vector_clear(&this->images);
 }
 
 // dmabuf functions
@@ -59,8 +59,7 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
   TexDMABUF * this = calloc(1, sizeof(*this));
   *texture = &this->base.base;
 
-  this->images = vector_create(sizeof(struct FdImage), 2);
-  if (!this->images)
+  if (!vector_create(&this->images, sizeof(struct FdImage), 2))
   {
     free(this);
     *texture = NULL;
@@ -70,7 +69,7 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
   EGL_Texture * parent = &this->base.base;
   if (!egl_texBufferStreamInit(&parent, display))
   {
-    vector_free(this->images);
+    vector_destroy(&this->images);
     free(this);
     *texture = NULL;
     return false;
@@ -86,7 +85,7 @@ static void egl_texDMABUFFree(EGL_Texture * texture)
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
   egl_texDMABUFCleanup(this);
-  free(this->images);
+  vector_destroy(&this->images);
 
   egl_texBufferFree(&parent->base);
   free(this);
@@ -113,7 +112,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
   EGLImage image = EGL_NO_IMAGE;
 
   struct FdImage * fdImage;
-  vector_forEachRef(fdImage, this->images)
+  vector_forEachRef(fdImage, &this->images)
     if (fdImage->fd == update->dmaFD)
     {
       image = fdImage->image;
@@ -146,7 +145,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
       return false;
     }
 
-    if (!vector_push(this->images, &(struct FdImage) {
+    if (!vector_push(&this->images, &(struct FdImage) {
       .fd    = update->dmaFD,
       .image = image,
     }))

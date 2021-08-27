@@ -79,13 +79,13 @@ bool ivshmemInit(struct IVSHMEM * dev)
   PSP_DEVICE_INTERFACE_DETAIL_DATA infData = NULL;
   SP_DEVINFO_DATA                  devInfoData = {0};
   SP_DEVICE_INTERFACE_DATA         devInterfaceData = {0};
+  Vector                           devices;
 
   devInfoSet = SetupDiGetClassDevs(&GUID_DEVINTERFACE_IVSHMEM, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
   devInfoData.cbSize      = sizeof(SP_DEVINFO_DATA);
   devInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
-  Vector * devices = vector_create(sizeof(struct IVSHMEMData), 1);
-  if (!devices)
+  if (!vector_create(&devices, sizeof(struct IVSHMEMData), 1))
   {
     DEBUG_ERROR("Failed to allocate memory");
     return false;
@@ -93,7 +93,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
 
   for (int i = 0; SetupDiEnumDeviceInfo(devInfoSet, i, &devInfoData); ++i)
   {
-    struct IVSHMEMData * device = vector_push(devices, NULL);
+    struct IVSHMEMData * device = vector_push(&devices, NULL);
 
     DWORD bus, addr;
     if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData, SPDRP_BUSNUMBER,
@@ -121,10 +121,10 @@ bool ivshmemInit(struct IVSHMEM * dev)
   }
 
   const int shmDevice = option_get_int("os", "shmDevice");
-  qsort(vector_data(devices), vector_size(devices), sizeof(struct IVSHMEMData), ivshmemComparator);
+  qsort(vector_data(&devices), vector_size(&devices), sizeof(struct IVSHMEMData), ivshmemComparator);
 
   struct IVSHMEMData * device;
-  vector_forEachRefIdx(i, device, devices)
+  vector_forEachRefIdx(i, device, &devices)
   {
     DWORD bus = device->busAddr >> 32;
     DWORD addr = device->busAddr & 0xFFFFFFFF;
@@ -132,9 +132,9 @@ bool ivshmemInit(struct IVSHMEM * dev)
       i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
   }
 
-  device = vector_ptrTo(devices, shmDevice);
+  device = vector_ptrTo(&devices, shmDevice);
   memcpy(&devInfoData, &device->devInfoData, sizeof(SP_DEVINFO_DATA));
-  vector_free(devices);
+  vector_destroy(&devices);
 
   if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
   {

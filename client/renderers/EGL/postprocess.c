@@ -38,7 +38,7 @@ static const EGL_FilterOps * EGL_Filters[] =
 
 struct EGL_PostProcess
 {
-  Vector * filters;
+  Vector filters;
   GLuint output;
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
@@ -74,8 +74,8 @@ static void configUI(void * opaque, int * id)
   igGetWindowPos(&window);
   igGetMousePos(&pos);
 
-  EGL_Filter ** filters = vector_data(this->filters);
-  size_t count = vector_size(this->filters);
+  EGL_Filter ** filters = vector_data(&this->filters);
+  size_t count = vector_size(&this->filters);
   for (size_t i = 0; i < count; ++i)
   {
     EGL_Filter * filter = filters[i];
@@ -144,8 +144,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     return false;
   }
 
-  this->filters = vector_create(sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters));
-  if (!this->filters)
+  if (!vector_create(&this->filters, sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters)))
   {
     DEBUG_ERROR("Failed to allocate the filter list");
     goto error_this;
@@ -164,7 +163,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
   return true;
 
 error_filters:
-  vector_free(this->filters);
+  vector_destroy(&this->filters);
 
 error_this:
   free(this);
@@ -178,13 +177,10 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
 
   EGL_PostProcess * this = *pp;
 
-  if (this->filters)
-  {
-    EGL_Filter ** filter;
-    vector_forEachRef(filter, this->filters)
-      egl_filterFree(filter);
-    vector_free(this->filters);
-  }
+  EGL_Filter ** filter;
+  vector_forEachRef(filter, &this->filters)
+    egl_filterFree(filter);
+  vector_destroy(&this->filters);
 
   egl_modelFree(&this->model);
   free(this);
@@ -197,7 +193,7 @@ bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
   if (!egl_filterInit(ops, &filter))
     return false;
 
-  vector_push(this->filters, &filter);
+  vector_push(&this->filters, &filter);
   return true;
 }
 
@@ -219,7 +215,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   atomic_store(&this->modified, false);
 
   EGL_Filter * filter;
-  vector_forEach(filter, this->filters)
+  vector_forEach(filter, &this->filters)
   {
     egl_filterSetOutputResHint(filter, targetX, targetY);
     egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY);
