@@ -22,6 +22,7 @@
 #define _H_COMMON_OPTION_
 
 #include <stdbool.h>
+#include <stdio.h>
 #include "common/stringlist.h"
 
 enum OptionType
@@ -93,6 +94,9 @@ bool option_validate(void);
 
 // print out the options, help, and their current values
 void option_print(void);
+
+// dump the options in ini format into the file
+bool option_dump(FILE * file, const char * module);
 
 // final cleanup
 void option_free(void);
