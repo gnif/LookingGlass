@@ -56,6 +56,7 @@ void egl_framebufferFree(EGL_Framebuffer ** fb)
 {
   EGL_Framebuffer * this = *fb;
 
+  egl_textureFree(&this->tex);
   free(this);
   *fb = NULL;
 }
