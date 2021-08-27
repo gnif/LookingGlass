@@ -34,10 +34,18 @@ Vector;
 Vector * vector_create(size_t itemSize, size_t capacity);
 void vector_free(Vector * vector);
 
+inline static size_t vector_size(Vector * vector)
+{
+  return vector->size;
+}
+
+inline static void * vector_data(Vector * vector)
+{
+  return vector->data;
+}
+
 void * vector_push(Vector * vector, void * item);
 void vector_pop(Vector * vector);
-size_t vector_size(Vector * vector);
-void * vector_data(Vector * vector);
 void vector_at(Vector * vector, size_t index, void * data);
 void * vector_ptrTo(Vector * vector, size_t index);
 void vector_clear(Vector * vector);
@@ -58,7 +66,6 @@ void vector_clear(Vector * vector);
   for (size_t index = 0; \
        index < (vector)->size ? vector_at((vector), index, &(name)), true : false; \
        ++index)
-
 
 #define vector_forEachRefIdx(index, name, vector) \
   for (size_t index = 0; \
