@@ -83,6 +83,16 @@ static void egl_filterDownscaleEarlyInit(void)
   option_register(options);
 }
 
+static void egl_filterDownscaleSaveState(EGL_Filter * filter)
+{
+  // not implemented
+}
+
+static void egl_filterDownscaleLoadState(EGL_Filter * filter)
+{
+  // not implemented
+}
+
 static bool egl_filterDownscaleInit(EGL_Filter ** filter)
 {
   EGL_FilterDownscale * this = calloc(1, sizeof(*this));
@@ -364,6 +374,8 @@ EGL_FilterOps egl_filterDownscaleOps =
   .init         = egl_filterDownscaleInit,
   .free         = egl_filterDownscaleFree,
   .imguiConfig  = egl_filterDownscaleImguiConfig,
+  .saveState    = egl_filterDownscaleSaveState,
+  .loadState    = egl_filterDownscaleLoadState,
   .setup        = egl_filterDownscaleSetup,
   .getOutputRes = egl_filterDownscaleGetOutputRes,
   .prepare      = egl_filterDownscalePrepare,
