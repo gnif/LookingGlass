@@ -57,6 +57,7 @@ struct EGL_PostProcess
   char * presetDir;
   int activePreset;
   char presetEdit[128];
+  char * presetError;
 };
 
 void egl_postProcessEarlyInit(void)
@@ -125,7 +126,13 @@ fail:
     stringlist_free(&this->presets);
 }
 
-static void savePreset(struct EGL_PostProcess * this, const char * name)
+static void presetError(struct EGL_PostProcess * this, char * message)
+{
+  free(this->presetError);
+  this->presetError = message;
+}
+
+static bool savePreset(struct EGL_PostProcess * this, const char * name)
 {
   EGL_Filter * filter;
   vector_forEach(filter, &this->filters)
@@ -136,21 +143,28 @@ static void savePreset(struct EGL_PostProcess * this, const char * name)
   if (!path)
   {
     DEBUG_ERROR("Failed to allocate memory");
-    return;
+    return false;
   }
 
   FILE * file = fopen(path, "w");
   if (!file)
   {
-    DEBUG_ERROR("Failed to open preset \"%s\" for writing: %s", name, strerror(errno));
+    const char * strError = strerror(errno);
+    DEBUG_ERROR("Failed to open preset \"%s\" for writing: %s", name, strError);
     free(path);
-    return;
+
+    char * error;
+    alloc_sprintf(&error, "Failed to save preset: %s\nError: %s", name, strError);
+    if (error)
+      presetError(this, error);
+    return false;
   }
   free(path);
 
   DEBUG_INFO("Saving preset: %s", name);
   option_dump(file, "eglFilter");
   fclose(file);
+  return true;
 }
 
 static void loadPreset(struct EGL_PostProcess * this, const char * name)
@@ -167,6 +181,11 @@ static void loadPreset(struct EGL_PostProcess * this, const char * name)
   {
     DEBUG_ERROR("Failed to load preset: %s", name);
     free(path);
+
+    char * error;
+    alloc_sprintf(&error, "Failed to load preset: %s", name);
+    if (error)
+      presetError(this, error);
     return;
   }
   free(path);
@@ -180,9 +199,9 @@ static void loadPreset(struct EGL_PostProcess * this, const char * name)
 static void createPreset(struct EGL_PostProcess * this)
 {
   DEBUG_INFO("Create preset: %s", this->presetEdit);
-  char * name = strdup(this->presetEdit);
-  this->activePreset = stringlist_push(this->presets, name);
-  savePreset(this, name);
+  if (!savePreset(this, this->presetEdit))
+    return;
+  this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
 }
 
 static bool presetsUI(struct EGL_PostProcess * this)
@@ -255,6 +274,26 @@ static bool presetsUI(struct EGL_PostProcess * this)
     igSameLine(0.0f, -1.0f);
     if (igButton("Cancel", (ImVec2) { 0.0f, 0.0f }))
       igCloseCurrentPopup();
+
+    igEndPopup();
+  }
+
+  if (this->presetError)
+    igOpenPopup("Preset error", ImGuiPopupFlags_None);
+
+  if (igBeginPopupModal("Preset error", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+  {
+    igText("%s", this->presetError);
+
+    if (!igIsAnyItemActive())
+      igSetKeyboardFocusHere(0);
+
+    if (igButton("OK", (ImVec2) { 0.0f, 0.0f }))
+    {
+      free(this->presetError);
+      this->presetError = NULL;
+      igCloseCurrentPopup();
+    }
 
     igEndPopup();
   }
@@ -399,6 +438,7 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
     stringlist_free(&this->presets);
 
   egl_modelFree(&this->model);
+  free(this->presetError);
   free(this);
   *pp = NULL;
 }
