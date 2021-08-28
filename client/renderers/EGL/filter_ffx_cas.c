@@ -279,6 +279,7 @@ static GLuint egl_filterFFXCASRun(EGL_Filter * filter, EGL_Model * model,
 
 EGL_FilterOps egl_filterFFXCASOps =
 {
+  .id           = "ffxCAS",
   .name         = "AMD FidelityFX CAS",
   .type         = EGL_FILTER_TYPE_EFFECT,
   .earlyInit    = egl_filterFFXCASEarlyInit,

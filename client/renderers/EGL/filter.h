@@ -31,6 +31,9 @@ typedef struct EGL_Filter EGL_Filter;
 
 typedef struct EGL_FilterOps
 {
+  /* the identifier of this filter */
+  const char * id;
+
   /* the friendly name of this filter */
   const char * name;
 

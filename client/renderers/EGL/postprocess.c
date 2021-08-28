@@ -18,6 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#define _GNU_SOURCE
 #include "postprocess.h"
 #include "filters.h"
 #include "app.h"
@@ -25,6 +26,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
@@ -62,7 +64,20 @@ struct EGL_PostProcess
 
 void egl_postProcessEarlyInit(void)
 {
-  for(int i = 0; i < ARRAY_LENGTH(EGL_Filters); ++i)
+  static struct Option options[] =
+  {
+    {
+      .module         = "eglFilter",
+      .name           = "order",
+      .description    = "The order of filters to use",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = ""
+    },
+    { 0 }
+  };
+  option_register(options);
+
+  for (int i = 0; i < ARRAY_LENGTH(EGL_Filters); ++i)
     EGL_Filters[i]->earlyInit();
 }
 
@@ -138,6 +153,22 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
   vector_forEach(filter, &this->filters)
     egl_filterSaveState(filter);
 
+  size_t orderLen = 0;
+  vector_forEach(filter, &this->filters)
+    orderLen += strlen(filter->ops.id) + 1;
+
+  char order[orderLen];
+  char * p = order;
+  vector_forEach(filter, &this->filters)
+  {
+    strcpy(p, filter->ops.id);
+    p += strlen(filter->ops.id);
+    *p++ = ';';
+  }
+  if (p > order)
+    p[-1] = '\0';
+  option_set_string("eglFilter", "order", order);
+
   char * path;
   alloc_sprintf(&path, "%s/%s", this->presetDir, name);
   if (!path)
@@ -167,6 +198,59 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
   return true;
 }
 
+static int stringListIndex(StringList list, const char * str)
+{
+  unsigned int count = stringlist_count(list);
+  for (unsigned int i = 0; i < count; ++i)
+    if (strcmp(stringlist_at(list, i), str) == 0)
+      return i;
+  return INT_MAX;
+}
+
+static int compareFilterOrder(const void * a_, const void * b_, void * opaque)
+{
+  const EGL_Filter * a = *(const EGL_Filter **)a_;
+  const EGL_Filter * b = *(const EGL_Filter **)b_;
+  StringList order = opaque;
+
+  return stringListIndex(order, a->ops.id) - stringListIndex(order, b->ops.id);
+}
+
+static void reorderFilters(struct EGL_PostProcess * this)
+{
+  StringList order = stringlist_new(false);
+  if (!order)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return;
+  }
+
+  char * orderStr = strdup(option_get_string("eglFilter", "order"));
+  if (!orderStr)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    stringlist_free(&order);
+    return;
+  }
+
+  char * p = orderStr;
+  while (*p)
+  {
+    stringlist_push(order, p);
+    char * end = strchr(p, ';');
+    if (!end)
+      break;
+    *end = '\0';
+    p = end + 1;
+  }
+
+  qsort_r(vector_data(&this->filters), vector_size(&this->filters),
+    sizeof(EGL_Filter *), compareFilterOrder, order);
+
+  stringlist_free(&order);
+  free(orderStr);
+}
+
 static void loadPreset(struct EGL_PostProcess * this, const char * name)
 {
   char * path;
@@ -194,6 +278,7 @@ static void loadPreset(struct EGL_PostProcess * this, const char * name)
   EGL_Filter * filter;
   vector_forEach(filter, &this->filters)
     egl_filterLoadState(filter);
+  reorderFilters(this);
 }
 
 static void createPreset(struct EGL_PostProcess * this)
@@ -408,6 +493,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
   egl_modelSetDefault(this->model, false);
 
   loadPresetList(this);
+  reorderFilters(this);
   app_overlayConfigRegisterTab("EGL Filters", configUI, this);
 
   *pp = this;

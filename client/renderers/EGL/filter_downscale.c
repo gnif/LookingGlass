@@ -417,6 +417,7 @@ static GLuint egl_filterDownscaleRun(EGL_Filter * filter, EGL_Model * model,
 
 EGL_FilterOps egl_filterDownscaleOps =
 {
+  .id           = "downscale",
   .name         = "Downscaler",
   .type         = EGL_FILTER_TYPE_DOWNSCALE,
   .earlyInit    = egl_filterDownscaleEarlyInit,
