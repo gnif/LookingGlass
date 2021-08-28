@@ -63,6 +63,11 @@ int stringlist_push(StringList sl, char * str)
   return index;
 }
 
+void stringlist_remove(StringList sl, unsigned int index)
+{
+  vector_remove(&sl->vector, index);
+}
+
 unsigned int stringlist_count(StringList sl)
 {
   return vector_size(&sl->vector);
