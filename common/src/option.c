@@ -23,6 +23,7 @@
 #include "common/stringutils.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -799,7 +800,7 @@ float option_get_float(const char * module, const char * name)
   if (!o)
   {
     DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
-    return false;
+    return NAN;
   }
   DEBUG_ASSERT(o->type == OPTION_TYPE_FLOAT);
   return o->value.x_float;
