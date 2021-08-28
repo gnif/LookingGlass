@@ -25,10 +25,11 @@
 
 typedef struct StringList * StringList;
 
-StringList   stringlist_new  (bool owns_strings);
-void         stringlist_free (StringList * sl);
-int          stringlist_push (StringList sl, char * str);
-unsigned int stringlist_count(StringList sl);
-char *       stringlist_at   (StringList sl, unsigned int index);
+StringList   stringlist_new   (bool owns_strings);
+void         stringlist_free  (StringList * sl);
+int          stringlist_push  (StringList sl, char * str);
+void         stringlist_remove(StringList sl, unsigned int index);
+unsigned int stringlist_count (StringList sl);
+char *       stringlist_at    (StringList sl, unsigned int index);
 
 #endif
