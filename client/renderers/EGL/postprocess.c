@@ -31,6 +31,7 @@
 
 #include "common/debug.h"
 #include "common/array.h"
+#include "common/option.h"
 #include "common/paths.h"
 #include "common/stringlist.h"
 #include "common/stringutils.h"
@@ -124,10 +125,64 @@ fail:
     stringlist_free(&this->presets);
 }
 
+static void savePreset(struct EGL_PostProcess * this, const char * name)
+{
+  EGL_Filter * filter;
+  vector_forEach(filter, &this->filters)
+    egl_filterSaveState(filter);
+
+  char * path;
+  alloc_sprintf(&path, "%s/%s", this->presetDir, name);
+  if (!path)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return;
+  }
+
+  FILE * file = fopen(path, "w");
+  if (!file)
+  {
+    DEBUG_ERROR("Failed to open preset \"%s\" for writing: %s", name, strerror(errno));
+    free(path);
+    return;
+  }
+  free(path);
+
+  DEBUG_INFO("Saving preset: %s", name);
+  option_dump(file, "eglFilter");
+  fclose(file);
+}
+
+static void loadPreset(struct EGL_PostProcess * this, const char * name)
+{
+  char * path;
+  alloc_sprintf(&path, "%s/%s", this->presetDir, name);
+  if (!path)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return;
+  }
+
+  if (!option_load(path))
+  {
+    DEBUG_ERROR("Failed to load preset: %s", name);
+    free(path);
+    return;
+  }
+  free(path);
+
+  DEBUG_INFO("Loading preset: %s", name);
+  EGL_Filter * filter;
+  vector_forEach(filter, &this->filters)
+    egl_filterLoadState(filter);
+}
+
 static void createPreset(struct EGL_PostProcess * this)
 {
   DEBUG_INFO("Create preset: %s", this->presetEdit);
-  this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
+  char * name = strdup(this->presetEdit);
+  this->activePreset = stringlist_push(this->presets, name);
+  savePreset(this, name);
 }
 
 static bool presetsUI(struct EGL_PostProcess * this)
@@ -155,12 +210,15 @@ static bool presetsUI(struct EGL_PostProcess * this)
   }
 
   if (igButton("Load preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
-    DEBUG_INFO("Loading preset: %s", stringlist_at(this->presets, this->activePreset));
+  {
+    redraw = true;
+    loadPreset(this, stringlist_at(this->presets, this->activePreset));
+  }
 
   igSameLine(0.0f, -1.0f);
 
   if (igButton("Save preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
-    DEBUG_INFO("Saving preset: %s", stringlist_at(this->presets, this->activePreset));
+    savePreset(this, stringlist_at(this->presets, this->activePreset));
 
   if (igIsItemHovered(ImGuiHoveredFlags_None) && this->activePreset >= 0)
     igSetTooltip("This will overwrite the preset named: %s",
