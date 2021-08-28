@@ -823,3 +823,52 @@ float option_get_float(const char * module, const char * name)
   DEBUG_ASSERT(o->type == OPTION_TYPE_FLOAT);
   return o->value.x_float;
 }
+
+void option_set_int(const char * module, const char * name, int value)
+{
+  struct Option * o = option_get(module, name);
+  if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to set the value for option %s:%s", module, name);
+    return;
+  }
+  DEBUG_ASSERT(o->type == OPTION_TYPE_INT);
+  o->value.x_int = value;
+}
+
+void option_set_string(const char * module, const char * name, const char * value)
+{
+  struct Option * o = option_get(module, name);
+  if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to set the value for option %s:%s", module, name);
+    return;
+  }
+  DEBUG_ASSERT(o->type == OPTION_TYPE_STRING);
+  free(o->value.x_string);
+  o->value.x_string = strdup(value);
+}
+
+void option_set_bool(const char * module, const char * name, bool value)
+{
+  struct Option * o = option_get(module, name);
+  if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to set the value for option %s:%s", module, name);
+    return;
+  }
+  DEBUG_ASSERT(o->type == OPTION_TYPE_BOOL);
+  o->value.x_bool = value;
+}
+
+void option_set_float(const char * module, const char * name, float value)
+{
+  struct Option * o = option_get(module, name);
+  if (!o)
+  {
+    DEBUG_ERROR("BUG: Failed to set the value for option %s:%s", module, name);
+    return;
+  }
+  DEBUG_ASSERT(o->type == OPTION_TYPE_FLOAT);
+  o->value.x_float = value;
+}
