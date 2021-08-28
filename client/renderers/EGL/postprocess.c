@@ -339,8 +339,13 @@ static bool presetsUI(struct EGL_PostProcess * this)
 
   igSameLine(0.0f, -1.0f);
 
-  if (igButton("Save preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
-    savePreset(this, stringlist_at(this->presets, this->activePreset));
+  if (igButton("Save preset", (ImVec2) { 0.0f, 0.0f }))
+  {
+    if (this->activePreset >= 0)
+      savePreset(this, stringlist_at(this->presets, this->activePreset));
+    else
+      presetError(this, strdup("You must select a preset to save."));
+  }
 
   if (igIsItemHovered(ImGuiHoveredFlags_None) && this->activePreset >= 0)
     igSetTooltip("This will overwrite the preset named: %s",
