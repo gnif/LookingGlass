@@ -23,10 +23,17 @@
 #include "app.h"
 #include "cimgui.h"
 
+#include <dirent.h>
+#include <errno.h>
+#include <unistd.h>
 #include <stdatomic.h>
+#include <sys/stat.h>
 
 #include "common/debug.h"
 #include "common/array.h"
+#include "common/paths.h"
+#include "common/stringlist.h"
+#include "common/stringutils.h"
 #include "common/vector.h"
 
 static const EGL_FilterOps * EGL_Filters[] =
@@ -44,12 +51,157 @@ struct EGL_PostProcess
   _Atomic(bool) modified;
 
   EGL_Model * model;
+
+  StringList presets;
+  char * presetDir;
+  int activePreset;
+  char presetEdit[128];
 };
 
 void egl_postProcessEarlyInit(void)
 {
   for(int i = 0; i < ARRAY_LENGTH(EGL_Filters); ++i)
     EGL_Filters[i]->earlyInit();
+}
+
+static void loadPresetList(struct EGL_PostProcess * this)
+{
+  DIR * dir = NULL;
+
+  alloc_sprintf(&this->presetDir, "%s/presets", lgConfigDir());
+  if (!this->presetDir)
+  {
+    DEBUG_ERROR("Failed to allocate memory for presets");
+    return;
+  }
+
+  if (mkdir(this->presetDir, S_IRWXU) < 0 && errno != EEXIST)
+  {
+    DEBUG_ERROR("Failed to create presets directory: %s", this->presetDir);
+    goto fail;
+  }
+
+  dir = opendir(this->presetDir);
+  if (!dir)
+  {
+    DEBUG_ERROR("Failed to open presets directory: %s", this->presetDir);
+    goto fail;
+  }
+
+  this->presets = stringlist_new(true);
+  if (!this->presets)
+  {
+    DEBUG_ERROR("Failed to allocate memory for preset list");
+    goto fail;
+  }
+
+  struct dirent * entry;
+  while ((entry = readdir(dir)) != NULL)
+  {
+    if (entry->d_type != DT_REG)
+      continue;
+
+    DEBUG_INFO("Found preset: %s", entry->d_name);
+    char * name = strdup(entry->d_name);
+    if (!name)
+    {
+      DEBUG_ERROR("Failed to allocate memory");
+      goto fail;
+    }
+    stringlist_push(this->presets, name);
+  }
+  closedir(dir);
+
+  this->activePreset = -1;
+  return;
+
+fail:  
+  free(this->presetDir);
+  this->presetDir = NULL;
+  if (dir)
+    closedir(dir);
+  if (this->presets)
+    stringlist_free(&this->presets);
+}
+
+static void createPreset(struct EGL_PostProcess * this)
+{
+  DEBUG_INFO("Create preset: %s", this->presetEdit);
+  this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
+}
+
+static bool presetsUI(struct EGL_PostProcess * this)
+{
+  if (!this->presets)
+    return false;
+
+  bool redraw = false;
+  const char * active = "<none>";
+
+  if (this->activePreset >= 0)
+    active = stringlist_at(this->presets, this->activePreset);
+
+  if (igBeginCombo("Preset name", active, 0))
+  {
+    for (unsigned i = 0; i < stringlist_count(this->presets); ++i)
+    {
+      bool selected = i == this->activePreset;
+      if (igSelectableBool(stringlist_at(this->presets, i), selected, 0, (ImVec2) { 0.0f, 0.0f }))
+        this->activePreset = i;
+      if (selected)
+        igSetItemDefaultFocus();
+    }
+    igEndCombo();
+  }
+
+  if (igButton("Load preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
+    DEBUG_INFO("Loading preset: %s", stringlist_at(this->presets, this->activePreset));
+
+  igSameLine(0.0f, -1.0f);
+
+  if (igButton("Save preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
+    DEBUG_INFO("Saving preset: %s", stringlist_at(this->presets, this->activePreset));
+
+  if (igIsItemHovered(ImGuiHoveredFlags_None) && this->activePreset >= 0)
+    igSetTooltip("This will overwrite the preset named: %s",
+      stringlist_at(this->presets, this->activePreset));
+
+  igSameLine(0.0f, -1.0f);
+
+  if (igButton("Create preset", (ImVec2) { 0.0f, 0.0f }))
+  {
+    this->presetEdit[0] = '\0';
+    igOpenPopup("Create preset", ImGuiPopupFlags_None);
+  }
+
+  if (igBeginPopupModal("Create preset", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+  {
+    igText("Enter a name for the new preset:");
+
+    if (!igIsAnyItemActive())
+      igSetKeyboardFocusHere(0);
+
+    if (igInputText("##name", this->presetEdit, sizeof(this->presetEdit),
+        ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL))
+    {
+      createPreset(this);
+      igCloseCurrentPopup();
+    }
+
+    if (igButton("Create", (ImVec2) { 0.0f, 0.0f }))
+    {
+      createPreset(this);
+      igCloseCurrentPopup();
+    }
+
+    igSameLine(0.0f, -1.0f);
+    if (igButton("Cancel", (ImVec2) { 0.0f, 0.0f }))
+      igCloseCurrentPopup();
+
+    igEndPopup();
+  }
+
+  return redraw;
 }
 
 static void drawDropTarget(void)
@@ -64,6 +216,7 @@ static void configUI(void * opaque, int * id)
   struct EGL_PostProcess * this = opaque;
 
   bool redraw = false;
+  redraw |= presetsUI(this);
 
   static size_t mouseIdx = -1;
   static bool   moving   = false;
@@ -157,6 +310,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
   }
   egl_modelSetDefault(this->model, false);
 
+  loadPresetList(this);
   app_overlayConfigRegisterTab("EGL Filters", configUI, this);
 
   *pp = this;
@@ -181,6 +335,10 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
   vector_forEachRef(filter, &this->filters)
     egl_filterFree(filter);
   vector_destroy(&this->filters);
+
+  free(this->presetDir);
+  if (this->presets)
+    stringlist_free(&this->presets);
 
   egl_modelFree(&this->model);
   free(this);
