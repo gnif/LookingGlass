@@ -289,6 +289,24 @@ static void createPreset(struct EGL_PostProcess * this)
   this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
 }
 
+static void deletePreset(struct EGL_PostProcess * this)
+{
+  char * path;
+  alloc_sprintf(&path, "%s/%s", this->presetDir,
+    stringlist_at(this->presets, this->activePreset));
+  if (!path)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return;
+  }
+
+  unlink(path);
+  free(path);
+  stringlist_remove(this->presets, this->activePreset);
+  if (this->activePreset >= stringlist_count(this->presets))
+    this->activePreset = stringlist_count(this->presets) - 1;
+}
+
 static bool presetsUI(struct EGL_PostProcess * this)
 {
   if (!this->presets)
@@ -335,6 +353,11 @@ static bool presetsUI(struct EGL_PostProcess * this)
     this->presetEdit[0] = '\0';
     igOpenPopup("Create preset", ImGuiPopupFlags_None);
   }
+
+  igSameLine(0.0f, -1.0f);
+
+  if (igButton("Delete preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
+    deletePreset(this);
 
   if (igBeginPopupModal("Create preset", NULL, ImGuiWindowFlags_AlwaysAutoResize))
   {
