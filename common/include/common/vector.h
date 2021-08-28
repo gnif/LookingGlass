@@ -51,6 +51,7 @@ inline static void * vector_data(Vector * vector)
 
 void * vector_push(Vector * vector, void * item);
 void vector_pop(Vector * vector);
+void vector_remove(Vector * vector, size_t index);
 void vector_at(Vector * vector, size_t index, void * data);
 void * vector_ptrTo(Vector * vector, size_t index);
 void vector_clear(Vector * vector);
