@@ -414,6 +414,7 @@ static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter, EGL_Model * model,
 
 EGL_FilterOps egl_filterFFXFSR1Ops =
 {
+  .id               = "ffxFSR1",
   .name             = "AMD FidelityFX FSR",
   .type             = EGL_FILTER_TYPE_UPSCALE,
   .earlyInit        = egl_filterFFXFSR1EarlyInit,
