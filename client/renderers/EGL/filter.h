@@ -50,6 +50,12 @@ typedef struct EGL_FilterOps
    * Returns true if a redraw is required */
   bool (*imguiConfig)(EGL_Filter * filter);
 
+  /* writes filter state to options */
+  void (*saveState)(EGL_Filter * filter);
+
+  /* reads filter state from options */
+  void (*loadState)(EGL_Filter * filter);
+
   /* set the input format of the filter */
   bool (*setup)(EGL_Filter * filter, enum EGL_PixelFormat pixFmt,
       unsigned int width, unsigned int height);
@@ -101,6 +107,16 @@ static inline void egl_filterFree(EGL_Filter ** filter)
 static inline bool egl_filterImguiConfig(EGL_Filter * filter)
 {
   return filter->ops.imguiConfig(filter);
+}
+
+static inline void egl_filterSaveState(EGL_Filter * filter)
+{
+  filter->ops.saveState(filter);
+}
+
+static inline void egl_filterLoadState(EGL_Filter * filter)
+{
+  filter->ops.loadState(filter);
 }
 
 static inline bool egl_filterSetup(EGL_Filter * filter,

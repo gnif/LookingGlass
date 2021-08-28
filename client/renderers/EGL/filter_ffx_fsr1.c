@@ -82,6 +82,22 @@ static void rcasUpdateUniform(EGL_FilterFFXFSR1 * this)
   ffxFsrRcasConst(this->rcasUniform.ui, 2.0f - this->sharpness * 2.0f);
 }
 
+static void egl_filterFFXFSR1SaveState(EGL_Filter * filter)
+{
+  EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
+
+  option_set_bool ("eglFilter", "ffxFSR", this->enable);
+  option_set_float("eglFilter", "ffxFSRSharpness", this->sharpness);
+}
+
+static void egl_filterFFXFSR1LoadState(EGL_Filter * filter)
+{
+  EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
+
+  this->enable    = option_get_bool ("eglFilter", "ffxFSR");
+  this->sharpness = option_get_float("eglFilter", "ffxFSRSharpness");
+}
+
 static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
 {
   EGL_FilterFFXFSR1 * this = calloc(1, sizeof(*this));
@@ -128,8 +144,7 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
     goto error_rcas;
   }
 
-
-  this->enable = option_get_bool("eglFilter", "ffxFSR");
+  egl_filterFFXFSR1LoadState(&this->base);
 
   this->easuUniform[0].type = EGL_UNIFORM_TYPE_4UIV;
   this->easuUniform[0].location =
@@ -141,7 +156,6 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
 
   this->rcasUniform.type = EGL_UNIFORM_TYPE_4UI;
   this->rcasUniform.location = egl_shaderGetUniform(this->rcas, "uConsts");
-  this->sharpness = option_get_float("eglFilter", "ffxFSRSharpness");
   rcasUpdateUniform(this);
 
   if (!egl_framebufferInit(&this->easuFb))
@@ -406,6 +420,8 @@ EGL_FilterOps egl_filterFFXFSR1Ops =
   .init             = egl_filterFFXFSR1Init,
   .free             = egl_filterFFXFSR1Free,
   .imguiConfig      = egl_filterFFXFSR1ImguiConfig,
+  .saveState        = egl_filterFFXFSR1SaveState,
+  .loadState        = egl_filterFFXFSR1LoadState,
   .setup            = egl_filterFFXFSR1Setup,
   .setOutputResHint = egl_filterFFXFSR1SetOutputResHint,
   .getOutputRes     = egl_filterFFXFSR1GetOutputRes,

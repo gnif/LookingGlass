@@ -79,6 +79,22 @@ static void casUpdateConsts(EGL_FilterFFXCAS * this)
       this->width, this->height);
 }
 
+static void egl_filterFFXCASSaveState(EGL_Filter * filter)
+{
+  EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
+
+  option_set_bool ("eglFilter", "ffxCAS", this->enable);
+  option_set_float("eglFilter", "ffxCASSharpness", this->sharpness);
+}
+
+static void egl_filterFFXCASLoadState(EGL_Filter * filter)
+{
+  EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
+
+  this->enable    = option_get_bool ("eglFilter", "ffxCAS");
+  this->sharpness = option_get_float("eglFilter", "ffxCASSharpness");
+}
+
 static bool egl_filterFFXCASInit(EGL_Filter ** filter)
 {
   EGL_FilterFFXCAS * this = calloc(1, sizeof(*this));
@@ -116,8 +132,7 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
     .v        = this->consts,
   }, 1);
 
-  this->enable    = option_get_bool("eglFilter", "ffxCAS");
-  this->sharpness = option_get_float("eglFilter", "ffxCASSharpness");
+  egl_filterFFXCASLoadState(&this->base);
 
   if (!egl_framebufferInit(&this->fb))
   {
@@ -270,6 +285,8 @@ EGL_FilterOps egl_filterFFXCASOps =
   .init         = egl_filterFFXCASInit,
   .free         = egl_filterFFXCASFree,
   .imguiConfig  = egl_filterFFXCASImguiConfig,
+  .saveState    = egl_filterFFXCASSaveState,
+  .loadState    = egl_filterFFXCASLoadState,
   .setup        = egl_filterFFXCASSetup,
   .getOutputRes = egl_filterFFXCASGetOutputRes,
   .prepare      = egl_filterFFXCASPrepare,
