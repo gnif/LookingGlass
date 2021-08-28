@@ -77,6 +77,41 @@ static void egl_filterDownscaleEarlyInit(void)
   // as it's per title. We need presets to make this nicer to use.
   static struct Option options[] =
   {
+    {
+      .module        = "eglFilter",
+      .name          = "downscale",
+      .description   = "Enable downscaling",
+      .type          = OPTION_TYPE_BOOL,
+      .value.x_bool  = false
+    },
+    {
+      .module        = "eglFilter",
+      .name          = "downscalePixelSize",
+      .description   = "Downscale filter pixel size",
+      .type          = OPTION_TYPE_FLOAT,
+      .value.x_float = 2.0f
+    },
+    {
+      .module        = "eglFilter",
+      .name          = "downscaleHOffset",
+      .description   = "Downscale filter horizontal offset",
+      .type          = OPTION_TYPE_FLOAT,
+      .value.x_float = 0.0f
+    },
+    {
+      .module        = "eglFilter",
+      .name          = "downscaleVOffset",
+      .description   = "Downscale filter vertical offset",
+      .type          = OPTION_TYPE_FLOAT,
+      .value.x_float = 0.0f
+    },
+    {
+      .module        = "eglFilter",
+      .name          = "downscaleFilter",
+      .description   = "Downscale filter type",
+      .type          = OPTION_TYPE_INT,
+      .value.x_int   = 0
+    },
     { 0 }
   };
 
@@ -85,12 +120,29 @@ static void egl_filterDownscaleEarlyInit(void)
 
 static void egl_filterDownscaleSaveState(EGL_Filter * filter)
 {
-  // not implemented
+  EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
+
+  option_set_bool ("eglFilter", "downscale",          this->enable);
+  option_set_float("eglFilter", "downscalePixelSize", this->pixelSize);
+  option_set_float("eglFilter", "downscaleHOffset",   this->vOffset);
+  option_set_float("eglFilter", "downscaleVOffset",   this->hOffset);
+  option_set_int  ("eglFilter", "downscaleFilter",    this->filter);
 }
 
 static void egl_filterDownscaleLoadState(EGL_Filter * filter)
 {
-  // not implemented
+  EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
+
+  this->enable    = option_get_bool ("eglFilter", "downscale");
+  this->pixelSize = option_get_float("eglFilter", "downscalePixelSize");
+  this->vOffset   = option_get_float("eglFilter", "downscaleHOffset");
+  this->hOffset   = option_get_float("eglFilter", "downscaleVOffset");
+  this->filter    = option_get_int  ("eglFilter", "downscaleFilter");
+
+  if (this->filter < 0 || this->filter >= DOWNSCALE_COUNT)
+    this->filter = 0;
+
+  this->prepared = false;
 }
 
 static bool egl_filterDownscaleInit(EGL_Filter ** filter)
@@ -167,10 +219,7 @@ static bool egl_filterDownscaleInit(EGL_Filter ** filter)
   glSamplerParameteri(this->sampler[1], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
   glSamplerParameteri(this->sampler[1], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
 
-  this->enable    = false;
-  this->pixelSize = 2.0f;
-  this->vOffset   = 0.0f;
-  this->hOffset   = 0.0f;
+  egl_filterDownscaleLoadState(&this->base);
 
   *filter = &this->base;
   return true;
