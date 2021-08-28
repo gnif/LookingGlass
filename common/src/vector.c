@@ -99,6 +99,16 @@ void vector_pop(Vector * vector)
   --vector->size;
 }
 
+void vector_remove(Vector * vector, size_t index)
+{
+  DEBUG_ASSERT(index < vector->size && "Attempting to remove non-existent index!");
+  memmove((char *)vector->data + index * vector->itemSize,
+    (char *)vector->data + (index + 1) * vector->itemSize,
+    (vector->size - index - 1) * vector->itemSize
+  );
+  --vector->size;
+}
+
 void vector_at(Vector * vector, size_t index, void * data)
 {
   DEBUG_ASSERT(index < vector->size && "Out of bounds access");
