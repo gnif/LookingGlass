@@ -108,8 +108,10 @@ const struct LGTeamMember LG_TEAM[] =
     .donate = { { 0 } }
   },
   {
-    .name   = "Tudor Brindus (xyene)",
-    .blurb  = "Wayland developer",
+    .name   = "Tudor Brindus (Xyene)",
+    .blurb  =
+      "Wayland developer. Thinks a lot about latency, and occasionally turns "
+      "those thoughts into code.",
     .donate = { { 0 } }
   },
   {
