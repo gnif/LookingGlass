@@ -823,6 +823,8 @@ static int lg_run(void)
   g_state.io    = igGetIO();
   g_state.style = igGetStyle();
 
+  g_state.style->Colors[ImGuiCol_ModalWindowDimBg] = (ImVec4) { 0.0f, 0.0f, 0.0f, 0.4f };
+
   alloc_sprintf(&g_state.imGuiIni, "%s/imgui.ini", lgConfigDir());
   g_state.io->IniFilename   = g_state.imGuiIni;
   g_state.io->BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
