@@ -282,9 +282,8 @@ static void loadPreset(struct EGL_PostProcess * this, const char * name)
   reorderFilters(this);
 }
 
-static void createPreset(struct EGL_PostProcess * this)
+static void savePresetAs(struct EGL_PostProcess * this)
 {
-  DEBUG_INFO("Create preset: %s", this->presetEdit);
   if (!savePreset(this, this->presetEdit))
     return;
   this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
@@ -325,20 +324,17 @@ static bool presetsUI(struct EGL_PostProcess * this)
     {
       bool selected = i == this->activePreset;
       if (igSelectableBool(stringlist_at(this->presets, i), selected, 0, (ImVec2) { 0.0f, 0.0f }))
+      {
         this->activePreset = i;
+        redraw = true;
+        loadPreset(this, stringlist_at(this->presets, this->activePreset));
+      }
       if (selected)
         igSetItemDefaultFocus();
     }
     igEndCombo();
   }
-
-  if (igButton("Load preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
-  {
-    redraw = true;
-    loadPreset(this, stringlist_at(this->presets, this->activePreset));
-  }
-
-  igSameLine(0.0f, -1.0f);
+  igSetTooltip("Selecting a preset will load it");
 
   if (igButton("Save preset", (ImVec2) { 0.0f, 0.0f }))
   {
@@ -354,10 +350,10 @@ static bool presetsUI(struct EGL_PostProcess * this)
 
   igSameLine(0.0f, -1.0f);
 
-  if (igButton("Create preset", (ImVec2) { 0.0f, 0.0f }))
+  if (igButton("Save preset as...", (ImVec2) { 0.0f, 0.0f }))
   {
     this->presetEdit[0] = '\0';
-    igOpenPopup("Create preset", ImGuiPopupFlags_None);
+    igOpenPopup("Save preset as...", ImGuiPopupFlags_None);
   }
 
   igSameLine(0.0f, -1.0f);
@@ -365,7 +361,7 @@ static bool presetsUI(struct EGL_PostProcess * this)
   if (igButton("Delete preset", (ImVec2) { 0.0f, 0.0f }) && this->activePreset >= 0)
     deletePreset(this);
 
-  if (igBeginPopupModal("Create preset", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+  if (igBeginPopupModal("Save preset as...", NULL, ImGuiWindowFlags_AlwaysAutoResize))
   {
     igText("Enter a name for the new preset:");
 
@@ -375,13 +371,13 @@ static bool presetsUI(struct EGL_PostProcess * this)
     if (igInputText("##name", this->presetEdit, sizeof(this->presetEdit),
         ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL))
     {
-      createPreset(this);
+      savePresetAs(this);
       igCloseCurrentPopup();
     }
 
-    if (igButton("Create", (ImVec2) { 0.0f, 0.0f }))
+    if (igButton("Save", (ImVec2) { 0.0f, 0.0f }))
     {
-      createPreset(this);
+      savePresetAs(this);
       igCloseCurrentPopup();
     }
 
