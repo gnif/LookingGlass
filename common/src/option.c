@@ -758,21 +758,31 @@ void option_print(void)
 }
 
 // dump the options in ini format into the file
-bool option_dump(FILE * file, const char * module)
+bool option_dump_preset(FILE * file)
 {
-  fprintf(file, "[%s]\n", module);
-
-  for (int i = 0; i < state.oCount; ++i)
+  for (int g = 0; g < state.gCount; ++g)
   {
-    struct Option * o = state.options[i];
-    if (strcasecmp(o->module, module) != 0)
+    bool hasPreset = false;
+    for (int i = 0; i < state.groups[g].count; ++i)
+      hasPreset |= state.groups[g].options[i]->preset;
+    if (!hasPreset)
       continue;
-    char * value = o->toString(o);
-    fprintf(file, "%s=%s\n", o->name, value);
-    free(value);
+
+    fprintf(file, "[%s]\n", state.groups[g].module);
+
+    for (int i = 0; i < state.groups[g].count; ++i)
+    {
+      struct Option * o = state.groups[g].options[i];
+      if (!o->preset)
+        continue;
+
+      char * value = o->toString(o);
+      fprintf(file, "%s=%s\n", o->name, value);
+      free(value);
+    }
+    fputc('\n', file);
   }
 
-  fputc('\n', file);
   return true;
 }
 

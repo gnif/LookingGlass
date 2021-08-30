@@ -102,8 +102,8 @@ bool option_validate(void);
 // print out the options, help, and their current values
 void option_print(void);
 
-// dump the options in ini format into the file
-bool option_dump(FILE * file, const char * module);
+// dump preset options in ini format into the file
+bool option_dump_preset(FILE * file);
 
 // final cleanup
 void option_free(void);
