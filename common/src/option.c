@@ -662,6 +662,8 @@ void option_print(void)
     for(int i = 0; i < state.groups[g].count; ++i)
     {
       struct Option * o = state.groups[g].options[i];
+      if (o->preset)
+        continue;
       char * value = o->toString(o);
       if (!value)
       {
@@ -694,8 +696,10 @@ void option_print(void)
     for(int i = 0; i < state.groups[g].count; ++i)
     {
       struct Option * o = state.groups[g].options[i];
-      char * value = stringlist_at(values, i);
+      if (o->preset)
+        continue;
 
+      char * value = stringlist_at(values, i);
       len = alloc_sprintf(
         &line,
         "%s:%-*s | %c%c    | %-*s | %s",
@@ -716,6 +720,12 @@ void option_print(void)
     }
 
     stringlist_free(&values);
+
+    if (stringlist_count(lines) <= 1)
+    {
+      stringlist_free(&lines);
+      continue;
+    }
 
     // print out the lines
     for(int i = 0; i < stringlist_count(lines); ++i)
