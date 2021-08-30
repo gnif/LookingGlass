@@ -286,6 +286,17 @@ static void savePresetAs(struct EGL_PostProcess * this)
 {
   if (!savePreset(this, this->presetEdit))
     return;
+
+  for (unsigned i = 0; i < stringlist_count(this->presets); ++i)
+  {
+    DEBUG_INFO("Saw preset: %s", stringlist_at(this->presets, i));
+    if (strcmp(stringlist_at(this->presets, i), this->presetEdit) == 0)
+    {
+      this->activePreset = i;
+      return;
+    }
+  }
+
   this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
 }
 
