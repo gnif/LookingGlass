@@ -56,6 +56,7 @@ static void egl_filterFFXCASEarlyInit(void)
       .module        = "eglFilter",
       .name          = "ffxCAS",
       .description   = "AMD FidelityFX CAS",
+      .preset        = true,
       .type          = OPTION_TYPE_BOOL,
       .value.x_bool  = false
     },
@@ -63,6 +64,7 @@ static void egl_filterFFXCASEarlyInit(void)
       .module        = "eglFilter",
       .name          = "ffxCASSharpness",
       .description   = "AMD FidelityFX CAS Sharpness",
+      .preset        = true,
       .type          = OPTION_TYPE_FLOAT,
       .value.x_float = 0.0f
     },

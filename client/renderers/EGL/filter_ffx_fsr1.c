@@ -61,6 +61,7 @@ static void egl_filterFFXFSR1EarlyInit(void)
       .module        = "eglFilter",
       .name          = "ffxFSR",
       .description   = "AMD FidelityFX FSR",
+      .preset        = true,
       .type          = OPTION_TYPE_BOOL,
       .value.x_bool  = false
     },
@@ -68,6 +69,7 @@ static void egl_filterFFXFSR1EarlyInit(void)
       .module        = "eglFilter",
       .name          = "ffxFSRSharpness",
       .description   = "AMD FidelityFX FSR Sharpness",
+      .preset        = true,
       .type          = OPTION_TYPE_FLOAT,
       .value.x_float = 1.0f
     },

@@ -70,6 +70,7 @@ void egl_postProcessEarlyInit(void)
       .module         = "eglFilter",
       .name           = "order",
       .description    = "The order of filters to use",
+      .preset         = true,
       .type           = OPTION_TYPE_STRING,
       .value.x_string = ""
     },
