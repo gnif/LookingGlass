@@ -811,6 +811,10 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   g_state.io->KeyAlt   = g_state.modAlt;
   g_state.io->KeySuper = g_state.modSuper;
 
+  uint64_t now = nanotime();
+  g_state.io->DeltaTime  = (now - g_state.lastImGuiFrame) * 1e-9f;
+  g_state.lastImGuiFrame = now;
+
   igNewFrame();
 
   if (g_state.overlayInput)

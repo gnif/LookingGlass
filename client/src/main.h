@@ -60,6 +60,7 @@ struct AppState
   bool             modShift;
   bool             modAlt;
   bool             modSuper;
+  uint64_t         lastImGuiFrame;
 
   bool        alertShow;
   char      * alertMessage;
