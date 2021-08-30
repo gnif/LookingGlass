@@ -435,6 +435,7 @@ static void configUI(void * opaque, int * id)
 
   bool redraw = false;
   redraw |= presetsUI(this);
+  igSeparator();
 
   static size_t mouseIdx = -1;
   static bool   moving   = false;
