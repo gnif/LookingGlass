@@ -50,6 +50,7 @@ struct Option
   char * name;
   char * description;
   const char shortopt;
+  bool preset;
 
   enum OptionType type;
   union
