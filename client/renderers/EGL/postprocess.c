@@ -345,7 +345,8 @@ static bool presetsUI(struct EGL_PostProcess * this)
     }
     igEndCombo();
   }
-  igSetTooltip("Selecting a preset will load it");
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+    igSetTooltip("Selecting a preset will load it");
 
   if (igButton("Save preset", (ImVec2) { 0.0f, 0.0f }))
   {
