@@ -194,7 +194,7 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
   free(path);
 
   DEBUG_INFO("Saving preset: %s", name);
-  option_dump(file, "eglFilter");
+  option_dump_preset(file);
   fclose(file);
   return true;
 }
