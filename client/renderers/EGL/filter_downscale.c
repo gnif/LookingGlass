@@ -81,6 +81,7 @@ static void egl_filterDownscaleEarlyInit(void)
       .module        = "eglFilter",
       .name          = "downscale",
       .description   = "Enable downscaling",
+      .preset        = true,
       .type          = OPTION_TYPE_BOOL,
       .value.x_bool  = false
     },
@@ -88,6 +89,7 @@ static void egl_filterDownscaleEarlyInit(void)
       .module        = "eglFilter",
       .name          = "downscalePixelSize",
       .description   = "Downscale filter pixel size",
+      .preset        = true,
       .type          = OPTION_TYPE_FLOAT,
       .value.x_float = 2.0f
     },
@@ -95,6 +97,7 @@ static void egl_filterDownscaleEarlyInit(void)
       .module        = "eglFilter",
       .name          = "downscaleHOffset",
       .description   = "Downscale filter horizontal offset",
+      .preset        = true,
       .type          = OPTION_TYPE_FLOAT,
       .value.x_float = 0.0f
     },
@@ -102,6 +105,7 @@ static void egl_filterDownscaleEarlyInit(void)
       .module        = "eglFilter",
       .name          = "downscaleVOffset",
       .description   = "Downscale filter vertical offset",
+      .preset        = true,
       .type          = OPTION_TYPE_FLOAT,
       .value.x_float = 0.0f
     },
@@ -109,6 +113,7 @@ static void egl_filterDownscaleEarlyInit(void)
       .module        = "eglFilter",
       .name          = "downscaleFilter",
       .description   = "Downscale filter type",
+      .preset        = true,
       .type          = OPTION_TYPE_INT,
       .value.x_int   = 0
     },
