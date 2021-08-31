@@ -49,6 +49,12 @@ static bool getCPUModel(char * model, size_t modelSize)
     return false;
   }
 
+  // trim any whitespace
+  --cb;
+  while (cb > 0 && isspace(model[cb-1]))
+    --cb;
+  model[cb] = '\0';
+
   return true;
 }
 
