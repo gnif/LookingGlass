@@ -49,6 +49,7 @@
 #include "common/time.h"
 #include "common/version.h"
 #include "common/paths.h"
+#include "common/cpuinfo.h"
 
 #include "core.h"
 #include "app.h"
@@ -1281,6 +1282,7 @@ int main(int argc, char * argv[])
 
   DEBUG_INFO("Looking Glass (%s)", BUILD_VERSION);
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
+  lgDebugCPU();
 
   if (!installCrashHandler("/proc/self/exe"))
     DEBUG_WARN("Failed to install the crash handler");
