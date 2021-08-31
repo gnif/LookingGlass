@@ -702,6 +702,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
+  const char * client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
   bool debugContext = option_get_bool("egl", "debug");
   EGLint ctxattr[5];
   int ctxidx = 0;
@@ -714,8 +715,13 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     ctxattr[ctxidx++] = EGL_CONTEXT_OPENGL_DEBUG;
     ctxattr[ctxidx++] = debugContext ? EGL_TRUE : EGL_FALSE;
   }
+  else if (util_hasGLExt(client_exts, "EGL_KHR_create_context"))
+  {
+    ctxattr[ctxidx++] = EGL_CONTEXT_FLAGS_KHR;
+    ctxattr[ctxidx++] = debugContext ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0;
+  }
   else if (debugContext)
-    DEBUG_WARN("Cannot create debug contexts before EGL 1.5");
+    DEBUG_WARN("Cannot create debug contexts before EGL 1.5 without EGL_KHR_create_context");
 
   ctxattr[ctxidx++] = EGL_NONE;
 
@@ -744,9 +750,8 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   }
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
-  const char *client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
-  const char *gl_exts     = (const char *)glGetString(GL_EXTENSIONS);
-  const char *vendor      = (const char *)glGetString(GL_VENDOR);
+  const char * gl_exts = (const char *)glGetString(GL_EXTENSIONS);
+  const char * vendor  = (const char *)glGetString(GL_VENDOR);
 
   DEBUG_INFO("EGL     : %d.%d", maj, min);
   DEBUG_INFO("Vendor  : %s", vendor);
