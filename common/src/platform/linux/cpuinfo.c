@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores)
 {
@@ -51,7 +52,13 @@ bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores)
       const char * name = strstr(buffer, ": ");
       if (name)
         name += 2;
-      snprintf(model, modelSize, "%s", name ? name : "Unknown");
+      int len = snprintf(model, modelSize, "%s", name ? name : "Unknown");
+
+      // trim any whitespace
+      while(len > 0 && isspace(model[len-1]))
+        --len;
+      model[len] = '\0';
+
       model = NULL;
     }
     else if (cores && strncmp(buffer, "cpu cores", 9) == 0)
