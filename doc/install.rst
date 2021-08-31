@@ -218,7 +218,6 @@ Command                      Description
 :kbd:`ScrLk` + :kbd:`T`      Show frame timing information
 :kbd:`ScrLk` + :kbd:`I`      Spice keyboard & mouse enable toggle
 :kbd:`ScrLk` + :kbd:`O`      Toggle overlay
-:kbd:`ScrLk` + :kbd:`S`      Toggle scale algorithm
 :kbd:`ScrLk` + :kbd:`D`      FPS display toggle
 :kbd:`ScrLk` + :kbd:`F`      Full screen toggle
 :kbd:`ScrLk` + :kbd:`V`      Video stream toggle
@@ -280,7 +279,7 @@ the following locations and order:
 -  $XDG_CONFIG_HOME/looking-glass/client.ini (usually ~/.config/looking-glass/client.ini)
 
 Config options are merged from all files. Same options appearing in more
-than one file will overridden by the latest loaded one (E.g. an option
+than one file will be overridden by the latest loaded one (E.g. an option
 appearing in ~/.config/looking-glass/client.ini will override the same
 option appearing in ~/.looking-glass-client.ini). When first launched,
 the Looking-Glass client will create the folder $XDG_CONFIG_HOME/looking-glass/
