@@ -16,6 +16,7 @@ add_library(lg_common_platform_code STATIC
     time.c
     paths.c
     open.c
+    cpuinfo.c
 )
 
 if(ENABLE_BACKTRACE)
