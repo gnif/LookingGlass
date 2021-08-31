@@ -25,12 +25,10 @@
 
 #define A_CPU
 #define A_RESTRICT
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
+#define A_STATIC inline static
 #include "shader/ffx_a.h"
 #include "shader/ffx_cas.h"
 #include "shader/ffx_fsr1.h"
-#pragma GCC diagnostic pop
 
 void ffxCasConst(uint32_t consts[8], float sharpness, float inputX, float inputY,
     float outputX, float outputY)
