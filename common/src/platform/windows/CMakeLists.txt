@@ -36,6 +36,7 @@ add_library(lg_common_platform_code STATIC
     windebug.c
     ivshmem.c
     time.c
+    cpuinfo.c
 )
 
 target_link_libraries(lg_common_platform_code
