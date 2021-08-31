@@ -32,6 +32,7 @@
 #include "common/sysinfo.h"
 #include "common/time.h"
 #include "common/stringutils.h"
+#include "common/cpuinfo.h"
 
 #include <lgmp/host.h>
 
@@ -539,6 +540,7 @@ int app_main(int argc, char * argv[])
     return LG_HOST_EXIT_FATAL;
 
   DEBUG_INFO("Looking Glass Host (%s)", BUILD_VERSION);
+  lgDebugCPU();
 
   struct IVSHMEM shmDev = { 0 };
   if (!ivshmemInit(&shmDev))
