@@ -73,8 +73,6 @@ EGL_FilterDownscale;
 
 static void egl_filterDownscaleEarlyInit(void)
 {
-  // doesn't really make sense to have any options for this filter
-  // as it's per title. We need presets to make this nicer to use.
   static struct Option options[] =
   {
     {
