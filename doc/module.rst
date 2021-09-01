@@ -105,7 +105,7 @@ Usage
 The module will create the ``/dev/kvmfr0`` node, which represents the KVMFR
 interface. To use the interface, you need permission to access it by
 either: creating a udev rule to ensure your user can read and write to
-it, or simply change its ownership manually, ie:
+it, or simply change its ownership manually, i.e.:
 
 .. code:: bash
 
