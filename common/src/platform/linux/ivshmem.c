@@ -92,7 +92,7 @@ void ivshmemOptionsInit(void)
       .module         = "app",
       .name           = "shmFile",
       .shortopt       = 'f',
-      .description    = "The path to the shared memory file, or the name of the kvmfr device to use, ie: kvmfr0",
+      .description    = "The path to the shared memory file, or the name of the kvmfr device to use, e.g. kvmfr0",
       .type           = OPTION_TYPE_STRING,
       .value.x_string = "/dev/shm/looking-glass",
       .validator      = ivshmemDeviceValidator,
