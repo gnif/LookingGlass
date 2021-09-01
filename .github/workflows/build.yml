@@ -150,3 +150,20 @@ jobs:
       run: |
         cd obs/build
         make -j$(nproc)
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Update apt
+      run: |
+        sudo apt-get update
+    - name: Install docs dependencies
+      run: |
+        sudo apt-get install python3-sphinx
+    - name: Build docs
+      run: |
+        cd doc
+        make dirhtml -j$(nproc)
