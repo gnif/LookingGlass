@@ -517,9 +517,10 @@ bool app_init(void)
     }
   }
 
-  if (!RegisterWaitForSingleObject(&app.exitWait, exitEvent, exitEventCallback, NULL,
+  if (exitEvent &&
+      !RegisterWaitForSingleObject(&app.exitWait, exitEvent, exitEventCallback, NULL,
         INFINITE, WT_EXECUTEONLYONCE))
-    DEBUG_WINERROR("Failed to create register wait for exit event", GetLastError());
+    DEBUG_WINERROR("Failed to register wait for exit event", GetLastError());
 
   return true;
 }
