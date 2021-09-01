@@ -24,16 +24,6 @@
 
 #include <windows.h>
 
-static void getProcessorCount(int * procs)
-{
-  if (!procs)
-    return;
-
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
-  *procs = si.dwNumberOfProcessors;
-}
-
 static bool getCPUModel(char * model, size_t modelSize)
 {
   if (!model)
@@ -58,9 +48,9 @@ static bool getCPUModel(char * model, size_t modelSize)
   return true;
 }
 
-static bool getCoreCount(int * cores)
+static bool getCoreCount(int * cores, int * procs)
 {
-  if (!cores)
+  if (!cores && !procs)
     return true;
 
   DWORD cb = 0;
@@ -79,14 +69,26 @@ static bool getCoreCount(int * cores)
     return false;
   }
 
-  *cores = 0;
+  if (cores)
+    *cores = 0;
+
+  if (procs)
+    *procs = 0;
+
   DWORD offset = 0;
   while (offset < cb)
   {
     PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX lpi =
       (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) (buffer + offset);
     if (lpi->Relationship == RelationProcessorCore)
-      ++*cores;
+    {
+      if (cores)
+        ++*cores;
+
+      if (procs)
+        for (int i = 0; i < lpi->Processor.GroupCount; ++i)
+          *procs += __builtin_popcount(lpi->Processor.GroupMask[i].Mask);
+    }
     offset += lpi->Size;
   }
 
@@ -95,6 +97,5 @@ static bool getCoreCount(int * cores)
 
 bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores)
 {
-  getProcessorCount(procs);
-  return getCPUModel(model, modelSize) && getCoreCount(cores);
+  return getCPUModel(model, modelSize) && getCoreCount(cores, procs);
 }
