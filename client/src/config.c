@@ -212,7 +212,7 @@ static struct Option options[] =
   {
     .module         = "win",
     .name           = "ignoreQuit",
-    .description    = "Ignore requests to quit (ie: Alt+F4)",
+    .description    = "Ignore requests to quit (i.e. Alt+F4)",
     .shortopt       = 'Q',
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false,
@@ -730,7 +730,7 @@ static StringList optPosValues(struct Option * opt)
 {
   StringList sl = stringlist_new(false);
   stringlist_push(sl, "center");
-  stringlist_push(sl, "<left>x<top>, ie: 100x100");
+  stringlist_push(sl, "<left>x<top>, e.g. 100x100");
   return sl;
 }
 
@@ -764,7 +764,7 @@ static bool optSizeParse(struct Option * opt, const char * str)
 static StringList optSizeValues(struct Option * opt)
 {
   StringList sl = stringlist_new(false);
-  stringlist_push(sl, "<left>x<top>, ie: 100x100");
+  stringlist_push(sl, "<left>x<top>, e.g. 100x100");
   return sl;
 }
 
