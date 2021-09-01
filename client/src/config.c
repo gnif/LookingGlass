@@ -410,21 +410,21 @@ static struct Option options[] =
   {
     .module         = "spice",
     .name           = "clipboard",
-    .description    = "Use SPICE to syncronize the clipboard contents with the guest",
+    .description    = "Use SPICE to synchronize the clipboard contents with the guest",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true
   },
   {
     .module         = "spice",
     .name           = "clipboardToVM",
-    .description    = "Allow the clipboard to be syncronized TO the VM",
+    .description    = "Allow the clipboard to be synchronized TO the VM",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true
   },
   {
     .module         = "spice",
     .name           = "clipboardToLocal",
-    .description    = "Allow the clipboard to be syncronized FROM the VM",
+    .description    = "Allow the clipboard to be synchronized FROM the VM",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true
   },
