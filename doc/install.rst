@@ -8,7 +8,7 @@ Installation
 Client
 ------
 
-The Looking Glass Client recieves frames from the :ref:`Host <host_install>` to
+The Looking Glass Client receives frames from the :ref:`Host <host_install>` to
 display on your screen. It also handles input, and can optionally share the
 system clipboard with your guest OS through Spice.
 
@@ -89,7 +89,7 @@ then, restart AppArmor.
 
 .. _client_qemu_commands:
 
-Qemu Commands
+QEMU Commands
 ~~~~~~~~~~~~~
 
 **If you are using libvirt/virt-manager, then this does not apply to you.**
@@ -256,7 +256,7 @@ Common options include ``-s`` for disabling spice, ``-S`` for disabling the
 screen saver, and ``-F`` to automatically enter full screen.
 
 Options may be provided with a short form, if available, or long form.
-Boolean options may be specified without a paramater to toggle their
+Boolean options may be specified without a parameter to toggle their
 state.
 
 Examples:
@@ -394,23 +394,23 @@ Full Command Line Options
 
 The following is a complete list of options accepted by this application
 
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | Long                   | Short | Value                  | Description                                                                            |
-  +========================+=======+========================+========================================================================================+
-  | app:configFile         | -C    | NULL                   | A file to read additional configuration from                                           |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | app:renderer           | -g    | auto                   | Specify the renderer to use                                                            |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | app:license            | -l    | no                     | Show the license for this application and then terminate                               |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds                                 |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds                                  |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | app:allowDMA           |       | yes                    | Allow direct DMA transfers if supported (see `README.md` in the `module` dir)          |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
-  | app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file, or the name of the kvmfr device to use, ie: kvmfr0 |
-  +------------------------+-------+------------------------+----------------------------------------------------------------------------------------+
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | Long                   | Short | Value                  | Description                                                                              |
+  +========================+=======+========================+==========================================================================================+
+  | app:configFile         | -C    | NULL                   | A file to read additional configuration from                                             |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | app:renderer           | -g    | auto                   | Specify the renderer to use                                                              |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | app:license            | -l    | no                     | Show the license for this application and then terminate                                 |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds                                   |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds                                    |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | app:allowDMA           |       | yes                    | Allow direct DMA transfers if supported (see `README.md` in the `module` dir)            |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  | app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file, or the name of the kvmfr device to use, e.g.: kvmfr0 |
+  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
 
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | Long                    | Short | Value                  | Description                                                          |
@@ -443,7 +443,7 @@ The following is a complete list of options accepted by this application
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:fpsMin              | -K    | -1                     | Frame rate minimum (0 = disable - not recommended, -1 = auto detect) |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
-  | win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (ie: Alt+F4)                                 |
+  | win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (i.e.: Alt+F4)                               |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting                                |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
@@ -505,11 +505,11 @@ The following is a complete list of options accepted by this application
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:input            |       | yes       | Use SPICE to send keyboard and mouse input events to the guest      |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
-  | spice:clipboard        |       | yes       | Use SPICE to syncronize the clipboard contents with the guest       |
+  | spice:clipboard        |       | yes       | Use SPICE to synchronize the clipboard contents with the guest      |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
-  | spice:clipboardToVM    |       | yes       | Allow the clipboard to be syncronized TO the VM                     |
+  | spice:clipboardToVM    |       | yes       | Allow the clipboard to be synchronized TO the VM                    |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
-  | spice:clipboardToLocal |       | yes       | Allow the clipboard to be syncronized FROM the VM                   |
+  | spice:clipboardToLocal |       | yes       | Allow the clipboard to be synchronized FROM the VM                  |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
   +------------------------+-------+-----------+---------------------------------------------------------------------+

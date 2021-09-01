@@ -1,7 +1,7 @@
 Technical FAQ
 #############
 
-This FAQ is targetted at developers or technical people that want to
+This FAQ is targeted at developers or technical people that want to
 know more about what's going on under the hood.
 
 .. _ivshmemshared_ram:
