@@ -36,23 +36,6 @@ extern const EGL_TextureOps EGL_TextureBufferStream;
 extern const EGL_TextureOps EGL_TextureFrameBuffer;
 extern const EGL_TextureOps EGL_TextureDMABUF;
 
-typedef struct RenderStep
-{
-  EGL_Texture *owner;
-
-  bool enabled;
-  bool ready;
-  GLuint fb;
-  GLuint tex;
-  EGL_Shader * shader;
-
-  unsigned int width, height;
-
-  GLint uInRes;
-  GLint uOutRes;
-}
-RenderStep;
-
 bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
     EGL_TexType type, bool streaming)
 {
