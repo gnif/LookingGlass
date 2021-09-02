@@ -5,6 +5,7 @@ clang
 cmake
 config
 deuteranope
+dir
 distros
 dmabuf
 fullscreen
