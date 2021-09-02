@@ -30,6 +30,7 @@ jobs:
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
           libwayland-dev wayland-protocols libxkbcommon-dev \
           $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-dev libdbus-1-dev')
+        sudo pip3 install pyenchant
     - name: Configure client
       env:
         CC: /usr/bin/${{ matrix.compiler.cc }}
@@ -46,6 +47,8 @@ jobs:
       run: |
         cd client/build
         make -j$(nproc)
+    - name: Checking help spelling
+      run: ./client/build/looking-glass-client --help | ./doc/lgspell.py
 
   module:
     runs-on: ubuntu-latest
