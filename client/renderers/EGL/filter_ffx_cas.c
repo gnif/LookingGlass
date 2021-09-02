@@ -262,8 +262,8 @@ static bool egl_filterFFXCASPrepare(EGL_Filter * filter)
   return true;
 }
 
-static GLuint egl_filterFFXCASRun(EGL_Filter * filter, EGL_Model * model,
-    GLuint texture)
+static GLuint egl_filterFFXCASRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, GLuint texture)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
@@ -274,7 +274,7 @@ static GLuint egl_filterFFXCASRun(EGL_Filter * filter, EGL_Model * model,
   glBindSampler(0, this->sampler);
 
   egl_shaderUse(this->shader);
-  egl_modelRender(model);
+  egl_filterRectsRender(this->shader, rects);
 
   return egl_framebufferGetTexture(this->fb);
 }

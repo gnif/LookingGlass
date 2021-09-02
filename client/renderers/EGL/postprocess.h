@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "desktop_rects.h"
 #include "filter.h"
 #include "texture.h"
 
@@ -39,6 +40,7 @@ bool egl_postProcessConfigModified(EGL_PostProcess * this);
 /* apply the filters to the supplied texture
  * targetX/Y is the final target output dimension hint if scalers are present */
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
+    EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
     unsigned int targetX, unsigned int targetY);
 
 GLuint egl_postProcessGetOutput(EGL_PostProcess * this,

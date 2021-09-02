@@ -361,9 +361,14 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   int scaleAlgo = EGL_SCALE_NEAREST;
 
+  egl_desktopRectsMatrix((float *)desktop->matrix->data,
+      desktop->width, desktop->height, x, y, scaleX, scaleY, rotate);
+  egl_desktopRectsUpdate(desktop->mesh, rects, desktop->width, desktop->height);
+
   if (atomic_exchange(&desktop->processFrame, false) ||
       egl_postProcessConfigModified(desktop->pp))
-    egl_postProcessRun(desktop->pp, desktop->texture, outputWidth, outputHeight);
+    egl_postProcessRun(desktop->pp, desktop->texture, desktop->mesh,
+        desktop->width, desktop->height, outputWidth, outputHeight);
 
   unsigned int finalSizeX, finalSizeY;
   GLuint texture = egl_postProcessGetOutput(desktop->pp,
@@ -398,10 +403,6 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     default:
       scaleAlgo = desktop->scaleAlgo;
   }
-
-  egl_desktopRectsMatrix((float *)desktop->matrix->data,
-      desktop->width, desktop->height, x, y, scaleX, scaleY, rotate);
-  egl_desktopRectsUpdate(desktop->mesh, rects, desktop->width, desktop->height);
 
   const struct DesktopShader * shader = &desktop->shader;
   EGL_Uniform uniforms[] =

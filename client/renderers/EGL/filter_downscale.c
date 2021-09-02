@@ -385,8 +385,8 @@ static bool egl_filterDownscalePrepare(EGL_Filter * filter)
   return true;
 }
 
-static GLuint egl_filterDownscaleRun(EGL_Filter * filter, EGL_Model * model,
-    GLuint texture)
+static GLuint egl_filterDownscaleRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, GLuint texture)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
 
@@ -395,25 +395,31 @@ static GLuint egl_filterDownscaleRun(EGL_Filter * filter, EGL_Model * model,
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, texture);
 
+  EGL_Shader * shader;
+
   switch (this->filter)
   {
     case DOWNSCALE_NEAREST:
       glBindSampler(0, this->sampler[0]);
-      egl_shaderUse(this->nearest);
+      shader = this->nearest;
       break;
 
     case DOWNSCALE_LINEAR:
       glBindSampler(0, this->sampler[1]);
-      egl_shaderUse(this->linear);
+      shader = this->linear;
       break;
 
     case DOWNSCALE_LANCZOS2:
       glBindSampler(0, this->sampler[0]);
-      egl_shaderUse(this->lanczos2);
+      shader = this->lanczos2;
       break;
+
+    default:
+      DEBUG_UNREACHABLE();
   }
 
-  egl_modelRender(model);
+  egl_shaderUse(shader);
+  egl_filterRectsRender(shader, rects);
 
   return egl_framebufferGetTexture(this->fb);
 }

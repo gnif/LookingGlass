@@ -23,9 +23,18 @@
 #include "util.h"
 #include "shader.h"
 #include "egltypes.h"
+#include "desktop_rects.h"
 #include "model.h"
 
 #include <string.h>
+
+typedef struct EGL_FilterRects
+{
+  EGL_DesktopRects * rects;
+  GLfloat * matrix;
+  int width, height;
+}
+EGL_FilterRects;
 
 typedef struct EGL_Filter EGL_Filter;
 
@@ -78,7 +87,8 @@ typedef struct EGL_FilterOps
 
   /* runs the filter on the provided texture
    * returns the processed texture as the output */
-  GLuint (*run)(EGL_Filter * filter, EGL_Model * model, GLuint texture);
+  GLuint (*run)(EGL_Filter * filter, EGL_FilterRects * rects,
+      GLuint texture);
 
   /* called when the filter output is no loger needed so it can release memory
    * this is optional */
@@ -146,10 +156,10 @@ static inline bool egl_filterPrepare(EGL_Filter * filter)
   return filter->ops.prepare(filter);
 }
 
-static inline GLuint egl_filterRun(EGL_Filter * filter, EGL_Model * model,
-    GLuint texture)
+static inline GLuint egl_filterRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, GLuint texture)
 {
-  return filter->ops.run(filter, model, texture);
+  return filter->ops.run(filter, rects, texture);
 }
 
 static inline void egl_filterRelease(EGL_Filter * filter)
@@ -157,3 +167,5 @@ static inline void egl_filterRelease(EGL_Filter * filter)
   if (filter->ops.release)
     filter->ops.release(filter);
 }
+
+void egl_filterRectsRender(EGL_Shader * shader, EGL_FilterRects * rects);
