@@ -349,7 +349,7 @@ static int cursorThread(void * unused)
             lgSignalEvent(g_state.frameEvent);
         }
 
-        const struct timespec req =
+        struct timespec req =
         {
           .tv_sec  = 0,
           .tv_nsec = g_params.cursorPollInterval * 1000L
@@ -357,11 +357,14 @@ static int cursorThread(void * unused)
 
         struct timespec rem;
         while(nanosleep(&req, &rem) < 0)
+        {
           if (errno != -EINTR)
           {
             DEBUG_ERROR("nanosleep failed");
             break;
           }
+          req = rem;
+        }
 
         continue;
       }
@@ -499,7 +502,7 @@ int main_frameThread(void * unused)
     {
       if (status == LGMP_ERR_QUEUE_EMPTY)
       {
-        const struct timespec req =
+        struct timespec req =
         {
           .tv_sec  = 0,
           .tv_nsec = g_params.framePollInterval * 1000L
@@ -507,11 +510,14 @@ int main_frameThread(void * unused)
 
         struct timespec rem;
         while(nanosleep(&req, &rem) < 0)
+        {
           if (errno != -EINTR)
           {
             DEBUG_ERROR("nanosleep failed");
             break;
           }
+          req = rem;
+        }
 
         continue;
       }
