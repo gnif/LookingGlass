@@ -388,8 +388,8 @@ static bool egl_filterFFXFSR1Prepare(EGL_Filter * filter)
   return true;
 }
 
-static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter, EGL_Model * model,
-    GLuint texture)
+static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter,
+    EGL_FilterRects * rects, GLuint texture)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
@@ -399,7 +399,7 @@ static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter, EGL_Model * model,
   glBindTexture(GL_TEXTURE_2D, texture);
   glBindSampler(0, this->sampler);
   egl_shaderUse(this->easu);
-  egl_modelRender(model);
+  egl_filterRectsRender(this->easu, rects);
   texture = egl_framebufferGetTexture(this->easuFb);
 
   // pass 2, Rcas
@@ -408,7 +408,7 @@ static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter, EGL_Model * model,
   glBindTexture(GL_TEXTURE_2D, texture);
   glBindSampler(0, this->sampler);
   egl_shaderUse(this->rcas);
-  egl_modelRender(model);
+  egl_filterRectsRender(this->rcas, rects);
   texture = egl_framebufferGetTexture(this->rcasFb);
 
   return texture;

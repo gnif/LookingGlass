@@ -1,14 +1,15 @@
 #version 300 es
-
 precision mediump float;
 
-layout(location = 0) in vec2 uVertex;
-layout(location = 1) in vec2 uUV;
-
+layout(location = 0) in vec2 vertex;
 out vec2 fragCoord;
+
+uniform vec2   desktopSize;
+uniform mat3x2 transform;
 
 void main()
 {
-  gl_Position = vec4(uVertex, 0.0, 1.0);
-  fragCoord   = uUV;
+  vec2 pos    = transform * vec3(vertex, 1.0);
+  gl_Position = vec4(pos.x, -pos.y, 0.0, 1.0);
+  fragCoord   = vertex / desktopSize;
 }

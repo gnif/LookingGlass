@@ -92,6 +92,7 @@ add_library(renderer_EGL STATIC
 	framebuffer.c
 	postprocess.c
 	ffx.c
+	filter.c
 	filter_ffx_cas.c
 	filter_ffx_fsr1.c
 	filter_downscale.c

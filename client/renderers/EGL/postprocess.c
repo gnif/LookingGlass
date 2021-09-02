@@ -53,7 +53,7 @@ struct EGL_PostProcess
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
 
-  EGL_Model * model;
+  EGL_DesktopRects * rects;
 
   StringList presets;
   char * presetDir;
@@ -523,12 +523,11 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     goto error_this;
   }
 
-  if (!egl_modelInit(&this->model))
+  if (!egl_desktopRectsInit(&this->rects, 1))
   {
-    DEBUG_ERROR("Failed to initialize the model");
+    DEBUG_ERROR("Failed to initialize the desktop rects");
     goto error_filters;
   }
-  egl_modelSetDefault(this->model, false);
 
   loadPresetList(this);
   reorderFilters(this);
@@ -561,7 +560,7 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
   if (this->presets)
     stringlist_free(&this->presets);
 
-  egl_modelFree(&this->model);
+  egl_desktopRectsFree(&this->rects);
   free(this->presetError);
   free(this);
   *pp = NULL;
@@ -583,6 +582,7 @@ bool egl_postProcessConfigModified(EGL_PostProcess * this)
 }
 
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
+    EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
     unsigned int targetX, unsigned int targetY)
 {
   EGL_Filter * lastFilter = NULL;
@@ -592,7 +592,22 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   if (egl_textureGet(tex, &texture, &sizeX, &sizeY) != EGL_TEX_STATUS_OK)
     return false;
 
-  atomic_store(&this->modified, false);
+  if (atomic_exchange(&this->modified, false))
+  {
+    rects = this->rects;
+    egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
+  }
+
+  GLfloat matrix[6];
+  egl_desktopRectsMatrix(matrix, desktopWidth, desktopHeight, 0.0f, 0.0f,
+      1.0f, 1.0f, LG_ROTATE_0);
+
+  EGL_FilterRects filterRects = {
+    .rects  = rects,
+    .matrix = matrix,
+    .width  = desktopWidth,
+    .height = desktopHeight,
+  };
 
   EGL_Filter * filter;
   vector_forEach(filter, &this->filters)
@@ -603,7 +618,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     if (!egl_filterPrepare(filter))
       continue;
 
-    texture = egl_filterRun(filter, this->model, texture);
+    texture = egl_filterRun(filter, &filterRects, texture);
     egl_filterGetOutputRes(filter, &sizeX, &sizeY);
 
     if (lastFilter)
