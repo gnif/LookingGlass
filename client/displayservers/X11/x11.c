@@ -1733,7 +1733,17 @@ static void x11Minimize(void)
 
 static void x11SystemChanged(void)
 {
-  // do nothing
+  if (x11.pointerGrabbed)
+  {
+    x11UngrabPointer();
+    x11GrabPointer();
+  }
+
+  if (x11.keyboardGrabbed)
+  {
+    x11UngrabKeyboard();
+    x11GrabKeyboard();
+  }
 }
 
 struct LG_DisplayServerOps LGDS_X11 =
