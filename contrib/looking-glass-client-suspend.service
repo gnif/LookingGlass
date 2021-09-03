@@ -1,0 +1,10 @@
+[Unit]
+Description=Signal Looking Glass after waking from suspend
+After=suspend.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/killall -USR1 looking-glass-client
+
+[Install]
+WantedBy=suspend.target
