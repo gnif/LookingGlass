@@ -71,8 +71,10 @@ static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 static LGThread *t_cursor  = NULL;
 
+
 struct AppState g_state = { 0 };
 struct CursorState g_cursor;
+static atomic_bool g_systemChanged;
 
 // this structure is initialized in config.c
 struct AppParams g_params = { 0 };
@@ -770,6 +772,11 @@ void intHandler(int sig)
   }
 }
 
+void usr1Handler(int sig)
+{
+  atomic_store(&g_systemChanged, true);
+}
+
 static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
     bool * needsOpenGL)
 {
@@ -879,6 +886,9 @@ static int lg_run(void)
   // SIGINT and the user sending a close event, such as ALT+F4
   signal(SIGINT , intHandler);
   signal(SIGTERM, intHandler);
+
+  atomic_init(&g_systemChanged, false);
+  signal(SIGUSR1, usr1Handler);
 
   // try map the shared memory
   if (!ivshmemOpen(&g_state.shm))
@@ -1164,6 +1174,11 @@ restart:
     {
       g_state.state = APP_STATE_RESTART;
       break;
+    }
+    if (atomic_exchange(&g_systemChanged, false))
+    {
+      DEBUG_INFO("Received SIGUSR1, invoking system change handler");
+      g_state.ds->systemChanged();
     }
     g_state.ds->wait(100);
   }

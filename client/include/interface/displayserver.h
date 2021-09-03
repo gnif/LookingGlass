@@ -203,6 +203,9 @@ struct LG_DisplayServerOps
   void (*setFullscreen)(bool fs);
   void (*minimize)(void);
 
+  /* called when the system has changed in some way, e.g. resuming from suspend */
+  void (*systemChanged)(void);
+
   /* clipboard support, optional, if not supported set to NULL */
   bool (*cbInit)(void);
   void (*cbNotice)(LG_ClipboardData type);

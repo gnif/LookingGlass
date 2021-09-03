@@ -148,6 +148,11 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
   return false;
 }
 
+static void waylandSystemChanged(void)
+{
+  // do nothing
+}
+
 struct LG_DisplayServerOps LGDS_Wayland =
 {
   .setup               = waylandSetup,
@@ -193,6 +198,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .setFullscreen       = waylandSetFullscreen,
   .getFullscreen       = waylandGetFullscreen,
   .minimize            = waylandMinimize,
+  .systemChanged       = waylandSystemChanged,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,

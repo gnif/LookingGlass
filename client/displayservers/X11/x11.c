@@ -1731,6 +1731,11 @@ static void x11Minimize(void)
   XIconifyWindow(x11.display, x11.window, XDefaultScreen(x11.display));
 }
 
+static void x11SystemChanged(void)
+{
+  // do nothing
+}
+
 struct LG_DisplayServerOps LGDS_X11 =
 {
   .setup              = x11Setup,
@@ -1773,6 +1778,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .setFullscreen       = x11SetFullscreen,
   .getFullscreen       = x11GetFullscreen,
   .minimize            = x11Minimize,
+  .systemChanged       = x11SystemChanged,
 
   .cbInit    = x11CBInit,
   .cbNotice  = x11CBNotice,
