@@ -8,6 +8,8 @@ deuteranope
 dir
 distros
 dmabuf
+downscaler
+downscaling
 fullscreen
 gcc
 gnif
@@ -45,6 +47,9 @@ uncheck
 uncomment
 Unigine
 unix
+upscaled
+upscaler
+upscaling
 VM
 vsync
 wayland
