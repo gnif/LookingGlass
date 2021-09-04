@@ -337,6 +337,7 @@ Settings tab
   Widget. Multiple graphs can be enabled and they will stack vertically.
 - EGL: Modify EGL features such as the algorithm used for scaling and
   enabling night vision mode.
+
 Changes in the Settings tab are not persistent and will change back to
 their default values when the client is restarted.
 
