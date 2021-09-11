@@ -127,9 +127,6 @@ static void x11DoPresent(void)
   if (refill < 25)
     return;
 
-  if (refill == 0)
-    lastMsc = msc;
-
   for(int i = 0; i < refill; ++i)
   {
     XPresentPixmap(
