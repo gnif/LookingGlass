@@ -751,7 +751,7 @@ static bool optSizeParse(struct Option * opt, const char * str)
   if (!str)
     return false;
 
-  if (sscanf(str, "%dx%d", &g_params.w, &g_params.h) == 2)
+  if (sscanf(str, "%ux%u", &g_params.w, &g_params.h) == 2)
   {
     if (g_params.w < 1 || g_params.h < 1)
       return false;
@@ -770,9 +770,9 @@ static StringList optSizeValues(struct Option * opt)
 
 static char * optSizeToString(struct Option * opt)
 {
-  int len = snprintf(NULL, 0, "%dx%d", g_params.w, g_params.h);
+  int len = snprintf(NULL, 0, "%ux%u", g_params.w, g_params.h);
   char * str = malloc(len + 1);
-  sprintf(str, "%dx%d", g_params.w, g_params.h);
+  sprintf(str, "%ux%u", g_params.w, g_params.h);
 
   return str;
 }
