@@ -226,18 +226,6 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
   spice_clipboard_request(g_state.cbType);
 }
 
-void spiceClipboardNotice(const SpiceDataType type)
-{
-  if (!g_params.clipboardToLocal)
-    return;
-
-  if (!g_state.cbAvailable)
-    return;
-
-  g_state.cbType = type;
-  g_state.ds->cbNotice(cb_spiceTypeToLGType(type));
-}
-
 static int mapSpiceToImGuiButton(uint32_t button)
 {
   switch (button)

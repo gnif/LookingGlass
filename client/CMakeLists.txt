@@ -107,7 +107,6 @@ set(SOURCES
 	src/app.c
 	src/config.c
 	src/keybind.c
-	src/lg-renderer.c
 	src/ll.c
 	src/util.c
 	src/clipboard.c

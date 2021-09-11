@@ -20,31 +20,3 @@
 
 #include <stdbool.h>
 #include <string.h>
-
-bool LG_RendererValidatorBool(const char * value)
-{
-  if (!value)
-    return false;
-
-  return
-    (strcasecmp(value, "1"      ) == 0) ||
-    (strcasecmp(value, "0"      ) == 0) ||
-    (strcasecmp(value, "true"   ) == 0) ||
-    (strcasecmp(value, "false"  ) == 0) ||
-    (strcasecmp(value, "yes"    ) == 0) ||
-    (strcasecmp(value, "no"     ) == 0) ||
-    (strcasecmp(value, "on"     ) == 0) ||
-    (strcasecmp(value, "off"    ) == 0) ||
-    (strcasecmp(value, "enable" ) == 0) ||
-    (strcasecmp(value, "disable") == 0);
-}
-
-bool LG_RendererValueToBool(const char * value)
-{
-  return
-    (strcasecmp(value, "1"      ) == 0) ||
-    (strcasecmp(value, "true"   ) == 0) ||
-    (strcasecmp(value, "yes"    ) == 0) ||
-    (strcasecmp(value, "on"     ) == 0) ||
-    (strcasecmp(value, "enable" ) == 0);
-}
