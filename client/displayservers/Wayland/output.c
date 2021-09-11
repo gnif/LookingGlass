@@ -162,6 +162,7 @@ void waylandOutputBind(uint32_t name, uint32_t version)
   if (version < 2)
   {
     DEBUG_WARN("wl_output version too old: expected >= 2, got %d", version);
+    free(node);
     return;
   }
 
@@ -217,4 +218,3 @@ wl_fixed_t waylandOutputGetScale(struct wl_output * output)
       return node->scale;
   return 0;
 }
-
