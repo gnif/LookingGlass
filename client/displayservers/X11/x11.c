@@ -1358,11 +1358,10 @@ static bool x11WaitFrame(void)
   static uint64_t lastmsc   = 0;
   static uint64_t delay     = 0;
 
-  uint64_t deltats  = 0;
   uint64_t deltamsc = 0;
   if (lastts)
   {
-    deltats  = ust - lastts;
+    uint64_t deltats = ust - lastts;
     deltamsc = msc - lastmsc;
 
     if (calibrate == 0)
