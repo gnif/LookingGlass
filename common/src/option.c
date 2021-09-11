@@ -382,7 +382,16 @@ static char * file_parse_module(FILE * fp)
 
       default:
         if (len % 32 == 0)
-          module = realloc(module, len + 32 + 1);
+        {
+          char * p = realloc(module, len + 32 + 1);
+          if (!p)
+          {
+            DEBUG_ERROR("out of memory");
+            free(module);
+            return NULL;
+          }
+          module = p;
+        }
         module[len++] = c;
     }
   }
@@ -469,7 +478,16 @@ bool option_load(const char * filename)
         }
 
         if (*len % 32 == 0)
-          *p = realloc(*p, *len + 32 + 1);
+        {
+          char * tmp = realloc(*p, *len + 32 + 1);
+          if (!tmp)
+          {
+            DEBUG_ERROR("out of memory");
+            result = false;
+            goto exit;
+          }
+          *p = tmp;
+        }
         (*p)[(*len)++] = c;
         break;
 
@@ -521,7 +539,16 @@ bool option_load(const char * filename)
         }
 
         if (*len % 32 == 0)
-          *p = realloc(*p, *len + 32 + 1);
+        {
+          char * tmp = realloc(*p, *len + 32 + 1);
+          if (!tmp)
+          {
+            DEBUG_ERROR("out of memory");
+            result = false;
+            goto exit;
+          }
+          *p = tmp;
+        }
         (*p)[(*len)++] = c;
         break;
 
@@ -551,7 +578,16 @@ bool option_load(const char * filename)
           break;
 
         if (*len % 32 == 0)
-          *p = realloc(*p, *len + 32 + 1);
+        {
+          char * tmp = realloc(*p, *len + 32 + 1);
+          if (!tmp)
+          {
+            DEBUG_ERROR("out of memory");
+            result = false;
+            goto exit;
+          }
+          *p = tmp;
+        }
         (*p)[(*len)++] = c;
         break;
     }
