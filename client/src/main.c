@@ -1209,13 +1209,6 @@ static void lg_shutdown(void)
 
   lgmpClientFree(&g_state.lgmp);
 
-  if (g_state.overlays)
-  {
-    app_freeOverlays();
-    ll_free(g_state.overlays);
-    g_state.overlays = NULL;
-  }
-
   if (g_state.frameEvent)
   {
     lgFreeEvent(g_state.frameEvent);
@@ -1256,6 +1249,13 @@ static void lg_shutdown(void)
 
   if (g_state.dsInitialized)
     g_state.ds->free();
+
+  if (g_state.overlays)
+  {
+    app_freeOverlays();
+    ll_free(g_state.overlays);
+    g_state.overlays = NULL;
+  }
 
   ivshmemClose(&g_state.shm);
 
