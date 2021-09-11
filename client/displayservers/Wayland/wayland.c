@@ -130,6 +130,7 @@ static void waylandFree(void)
 {
   waylandIdleFree();
   waylandWindowFree();
+  waylandPresentationFree();
   waylandInputFree();
   waylandOutputFree();
   waylandRegistryFree();
