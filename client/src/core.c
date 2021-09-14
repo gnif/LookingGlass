@@ -440,6 +440,10 @@ void core_handleMouseNormal(double ex, double ey)
         g_cursor.guest.x = msg.x;
         g_cursor.guest.y = msg.y;
         g_cursor.realign = false;
+
+        if (!g_cursor.inWindow)
+          return;
+
         core_setCursorInView(true);
         return;
       }
