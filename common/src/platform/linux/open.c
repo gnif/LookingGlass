@@ -23,7 +23,6 @@
 
 #include <errno.h>
 #include <string.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 static bool xdgOpen(const char * path)
@@ -39,24 +38,8 @@ static bool xdgOpen(const char * path)
     DEBUG_ERROR("Failed to launch xdg-open: %s", strerror(errno));
     return false;
   }
-  else
-  {
-    int status;
-    if (waitpid(pid, &status, 0) < 0)
-    {
-      DEBUG_ERROR("waitpid failed: %s", strerror(errno));
-      return false;
-    }
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
-      return true;
-
-    if (WIFEXITED(status))
-      DEBUG_ERROR("xdg-open exited with code %d", WEXITSTATUS(status));
-    else
-      DEBUG_ERROR("xdg-open exited with signal: %s", strsignal(WTERMSIG(status)));
-    return false;
-  }
+	return true;
 }
 
 bool lgOpenURL(const char * url)
