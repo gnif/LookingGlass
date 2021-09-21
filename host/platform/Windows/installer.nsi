@@ -26,12 +26,16 @@
 
 ;Settings
 Name "Looking Glass (host)"
-OutFile "looking-glass-host-setup.exe" 
+OutFile "looking-glass-host-setup.exe"
 Unicode true
 RequestExecutionLevel admin
 ShowInstDetails "show"
 ShowUninstDetails "show"
 InstallDir "$PROGRAMFILES64\Looking Glass (host)"
+
+!ifndef BUILD_32BIT
+Target AMD64-Unicode
+!endif
 
 !define MUI_ICON "icon.ico"
 !define MUI_UNICON "icon.ico"

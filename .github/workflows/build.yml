@@ -127,7 +127,7 @@ jobs:
     - name: Build Windows host installer
       run: |
         cd host\build
-        makensis platform\Windows\installer.nsi
+        makensis -DBUILD_32BIT platform\Windows\installer.nsi
 
   obs:
     runs-on: ubuntu-latest
