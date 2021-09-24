@@ -31,8 +31,15 @@ static bool xdgOpen(const char * path)
   pid_t pid = fork();
   if (pid == 0)
   {
-    execlp("xdg-open", "xdg-open", path, NULL);
-    _exit(127);
+    // setsid and fork again to detach the xdg-open process.
+    setsid();
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+      execlp("xdg-open", "xdg-open", path, NULL);
+      _exit(127);
+    }
+    _exit(pid < 0);
   }
   else if (pid < 0)
   {
@@ -52,9 +59,9 @@ static bool xdgOpen(const char * path)
       return true;
 
     if (WIFEXITED(status))
-      DEBUG_ERROR("xdg-open exited with code %d", WEXITSTATUS(status));
+      DEBUG_ERROR("helper process exited with code %d", WEXITSTATUS(status));
     else
-      DEBUG_ERROR("xdg-open exited with signal: %s", strsignal(WTERMSIG(status)));
+      DEBUG_ERROR("helper process exited with signal: %s", strsignal(WTERMSIG(status)));
     return false;
   }
 }
