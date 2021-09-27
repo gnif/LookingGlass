@@ -573,10 +573,9 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame,
 
 static int pointerThread(void * unused)
 {
-  while(!this->stop)
+  while (!this->stop)
   {
-    if (!lgWaitEvent(this->cursorEvent, 1000))
-      continue;
+    lgWaitEvent(this->cursorEvent, TIMEOUT_INFINITE);
 
     if (this->stop)
       break;
