@@ -59,7 +59,7 @@ void printBacktrace(void);
 
 #ifdef __GNUC__
   #define DEBUG_UNREACHABLE_MARKER() __builtin_unreachable()
-#elif __defined__(_MSC_VER)
+#elif defined(_MSC_VER)
   #define DEBUG_UNREACHABLE_MARKER() __assume(0)
 #else
   #define DEBUG_UNREACHABLE_MARKER()
