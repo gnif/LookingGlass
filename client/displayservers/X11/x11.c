@@ -1315,6 +1315,14 @@ static void x11GLMakeCurrent(LG_DSGLContext context)
 
 static void x11GLSetSwapInterval(int interval)
 {
+  static PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = NULL;
+  if (!glXSwapIntervalEXT)
+  {
+    glXSwapIntervalEXT = (PFNGLXSWAPINTERVALEXTPROC) glXGetProcAddressARB(
+        (const GLubyte *) "glXSwapIntervalEXT");
+    if (!glXSwapIntervalEXT)
+      DEBUG_FATAL("Failed to load glXSwapIntervalEXT");
+  }
   glXSwapIntervalEXT(x11.display, x11.window, interval);
 }
 
