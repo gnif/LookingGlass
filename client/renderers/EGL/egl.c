@@ -781,15 +781,16 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!this->hasBufferAge)
     DEBUG_WARN("GL_EXT_buffer_age is not supported, will not perform as well.");
 
-  if (g_egl_dynProcs.glEGLImageTargetTexture2DOES)
-  {
-    if (util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import"))
-      this->dmaSupport = true;
-    else
-      DEBUG_INFO("EGL_EXT_image_dma_buf_import unavailable, DMA support disabled");
-  }
-  else
+  if (!g_egl_dynProcs.glEGLImageTargetTexture2DOES)
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
+  else if (!g_egl_dynProcs.eglCreateImage || !g_egl_dynProcs.eglDestroyImage)
+    DEBUG_INFO("eglCreateImage or eglDestroyImage unavailable, DMA support disabled");
+  else if (!util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import"))
+    DEBUG_INFO("EGL_EXT_image_dma_buf_import unavailable, DMA support disabled");
+  else if ((maj < 1 || (maj == 1 && min < 5)) && !util_hasGLExt(client_exts, "EGL_KHR_image_base"))
+    DEBUG_INFO("Need EGL 1.5+ or EGL_KHR_image_base for eglCreateImage(KHR)");
+  else
+    this->dmaSupport = true;
 
   if (!this->dmaSupport)
     useDMA = false;

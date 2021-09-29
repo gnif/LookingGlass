@@ -132,7 +132,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
       EGL_NONE                     , EGL_NONE
     };
 
-    image = eglCreateImage(
+    image = g_egl_dynProcs.eglCreateImage(
         this->display,
         EGL_NO_CONTEXT,
         EGL_LINUX_DMA_BUF_EXT,
@@ -151,7 +151,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     }))
     {
       DEBUG_ERROR("Failed to store EGLImage");
-      eglDestroyImage(this->display, image);
+      g_egl_dynProcs.eglDestroyImage(this->display, image);
       return false;
     }
   }
