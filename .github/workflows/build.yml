@@ -29,7 +29,8 @@ jobs:
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
           libwayland-dev wayland-protocols libxkbcommon-dev \
-          $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-dev libdbus-1-dev')
+          $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-dev libdbus-1-dev') \
+          $([ '${{ matrix.compiler.cc }}' = clang ] && echo 'clang-tools')
         sudo pip3 install pyenchant
     - name: Configure client
       env:
@@ -41,6 +42,7 @@ jobs:
         cmake \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCMAKE_LINKER:FILEPATH=/usr/bin/ld \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DENABLE_LIBDECOR=${{ matrix.wayland_shell == 'libdecor' }} \
           ..
     - name: Build client
@@ -49,6 +51,9 @@ jobs:
         make -j$(nproc)
     - name: Checking help spelling
       run: ./client/build/looking-glass-client --help | ./doc/lgspell.py
+    - name: Check GL function calls
+      if: matrix.compiler.cc == 'clang'
+      run: WAYLAND_SHELL='${{ matrix.wayland_shell }}' ./gl-check
 
   module:
     runs-on: ubuntu-latest
