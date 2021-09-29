@@ -42,6 +42,17 @@ void egl_dynProcsInit(void)
     eglGetProcAddress("glDebugMessageCallbackKHR");
   g_egl_dynProcs.glBufferStorageEXT = (PFNGLBUFFERSTORAGEEXTPROC)
     eglGetProcAddress("glBufferStorageEXT");
+  g_egl_dynProcs.eglCreateImage = (PFNEGLCREATEIMAGEPROC)
+    eglGetProcAddress("eglCreateImage");
+  g_egl_dynProcs.eglDestroyImage = (PFNEGLDESTROYIMAGEPROC)
+    eglGetProcAddress("eglDestroyImage");
+
+  if (!g_egl_dynProcs.eglCreateImage)
+    g_egl_dynProcs.eglCreateImage = (PFNEGLCREATEIMAGEPROC)
+      eglGetProcAddress("eglCreateImageKHR");
+  if (!g_egl_dynProcs.eglDestroyImage)
+    g_egl_dynProcs.eglDestroyImage = (PFNEGLDESTROYIMAGEPROC)
+      eglGetProcAddress("eglDestroyImageKHR");
 };
 
 #endif

@@ -38,6 +38,8 @@ struct EGLDynProcs
   PFNGLDEBUGMESSAGECALLBACKKHRPROC    glDebugMessageCallback;
   PFNGLDEBUGMESSAGECALLBACKKHRPROC    glDebugMessageCallbackKHR;
   PFNGLBUFFERSTORAGEEXTPROC           glBufferStorageEXT;
+  PFNEGLCREATEIMAGEPROC               eglCreateImage;
+  PFNEGLDESTROYIMAGEPROC              eglDestroyImage;
 };
 
 extern struct EGLDynProcs g_egl_dynProcs;
