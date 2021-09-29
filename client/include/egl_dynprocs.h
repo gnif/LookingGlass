@@ -23,33 +23,21 @@
 #ifdef ENABLE_EGL
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
+#undef GL_KHR_debug
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 
-typedef EGLDisplay (*eglGetPlatformDisplayEXT_t)(EGLenum platform,
-    void *native_display, const EGLint *attrib_list);
-typedef EGLBoolean (*eglSwapBuffersWithDamageKHR_t)(EGLDisplay dpy,
-    EGLSurface surface, const EGLint *rects, EGLint n_rects);
-typedef void (*glEGLImageTargetTexture2DOES_t)(GLenum target,
-    GLeglImageOES image);
-typedef void (*DEBUGPROC_t)(GLenum source,
-    GLenum type, GLuint id, GLenum severity, GLsizei length,
-    const GLchar *message, const void *userParam);
-typedef void (*glDebugMessageCallback_t)(DEBUGPROC_t callback,
-    const void * userParam);
-typedef void (*glBufferStorageEXT_t)(GLenum target, GLsizeiptr size,
-    const void * data, GLbitfield flags);
-
 struct EGLDynProcs
 {
-  eglGetPlatformDisplayEXT_t     eglGetPlatformDisplay;
-  eglGetPlatformDisplayEXT_t     eglGetPlatformDisplayEXT;
-  eglSwapBuffersWithDamageKHR_t  eglSwapBuffersWithDamageKHR;
-  eglSwapBuffersWithDamageKHR_t  eglSwapBuffersWithDamageEXT;
-  glEGLImageTargetTexture2DOES_t glEGLImageTargetTexture2DOES;
-  glDebugMessageCallback_t       glDebugMessageCallback;
-  glDebugMessageCallback_t       glDebugMessageCallbackKHR;
-  glBufferStorageEXT_t           glBufferStorageEXT;
+  PFNEGLGETPLATFORMDISPLAYPROC        eglGetPlatformDisplay;
+  PFNEGLGETPLATFORMDISPLAYPROC        eglGetPlatformDisplayEXT;
+  PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC  eglSwapBuffersWithDamageKHR;
+  PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC  eglSwapBuffersWithDamageEXT;
+  PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
+  PFNGLDEBUGMESSAGECALLBACKKHRPROC    glDebugMessageCallback;
+  PFNGLDEBUGMESSAGECALLBACKKHRPROC    glDebugMessageCallbackKHR;
+  PFNGLBUFFERSTORAGEEXTPROC           glBufferStorageEXT;
 };
 
 extern struct EGLDynProcs g_egl_dynProcs;
