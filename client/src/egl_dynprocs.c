@@ -26,21 +26,21 @@ struct EGLDynProcs g_egl_dynProcs = {0};
 
 void egl_dynProcsInit(void)
 {
-  g_egl_dynProcs.eglGetPlatformDisplay = (eglGetPlatformDisplayEXT_t)
+  g_egl_dynProcs.eglGetPlatformDisplay = (PFNEGLGETPLATFORMDISPLAYPROC)
     eglGetProcAddress("eglGetPlatformDisplay");
-  g_egl_dynProcs.eglGetPlatformDisplayEXT = (eglGetPlatformDisplayEXT_t)
+  g_egl_dynProcs.eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYPROC)
     eglGetProcAddress("eglGetPlatformDisplayEXT");
-  g_egl_dynProcs.glEGLImageTargetTexture2DOES = (glEGLImageTargetTexture2DOES_t)
+  g_egl_dynProcs.glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
     eglGetProcAddress("glEGLImageTargetTexture2DOES");
-  g_egl_dynProcs.eglSwapBuffersWithDamageKHR = (eglSwapBuffersWithDamageKHR_t)
+  g_egl_dynProcs.eglSwapBuffersWithDamageKHR = (PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC)
     eglGetProcAddress("eglSwapBuffersWithDamageKHR");
-  g_egl_dynProcs.eglSwapBuffersWithDamageEXT = (eglSwapBuffersWithDamageKHR_t)
+  g_egl_dynProcs.eglSwapBuffersWithDamageEXT = (PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC)
     eglGetProcAddress("eglSwapBuffersWithDamageEXT");
-  g_egl_dynProcs.glDebugMessageCallback = (glDebugMessageCallback_t)
+  g_egl_dynProcs.glDebugMessageCallback = (PFNGLDEBUGMESSAGECALLBACKKHRPROC)
     eglGetProcAddress("glDebugMessageCallback");
-  g_egl_dynProcs.glDebugMessageCallbackKHR = (glDebugMessageCallback_t)
+  g_egl_dynProcs.glDebugMessageCallbackKHR = (PFNGLDEBUGMESSAGECALLBACKKHRPROC)
     eglGetProcAddress("glDebugMessageCallbackKHR");
-  g_egl_dynProcs.glBufferStorageEXT = (glBufferStorageEXT_t)
+  g_egl_dynProcs.glBufferStorageEXT = (PFNGLBUFFERSTORAGEEXTPROC)
     eglGetProcAddress("glBufferStorageEXT");
 };
 

@@ -23,14 +23,14 @@
 
 #include <stdbool.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 #include "common/types.h"
-#include "egl_dynprocs.h"
 
 struct SwapWithDamageData
 {
   bool init;
-  eglSwapBuffersWithDamageKHR_t func;
+  PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC func;
 };
 
 void swapWithDamageInit(struct SwapWithDamageData * data, EGLDisplay display);
