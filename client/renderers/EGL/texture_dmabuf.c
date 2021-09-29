@@ -48,7 +48,7 @@ static void egl_texDMABUFCleanup(TexDMABUF * this)
 {
   struct FdImage * image;
   vector_forEachRef(image, &this->images)
-    eglDestroyImage(this->display, image->image);
+    g_egl_dynProcs.eglDestroyImage(this->display, image->image);
   vector_clear(&this->images);
 }
 
