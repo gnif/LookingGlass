@@ -35,6 +35,7 @@
 #include "common/option.h"
 #include "common/framebuffer.h"
 #include "common/locking.h"
+#include "gl_dynprocs.h"
 #include "ll.h"
 #include "util.h"
 
@@ -413,6 +414,31 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
       DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
   }
 
+  GLint maj, min;
+  glGetIntegerv(GL_MAJOR_VERSION, &maj);
+  glGetIntegerv(GL_MINOR_VERSION, &min);
+
+  if ((maj < 3 || (maj == 3 && min < 2)) && !util_hasGLExt(exts, "GL_ARB_sync"))
+  {
+    DEBUG_ERROR("Need OpenGL 3.2+ or GL_ARB_sync for sync objects");
+    return false;
+  }
+
+  if (maj < 2 && !util_hasGLExt(exts, "GL_ARB_pixel_buffer_object"))
+  {
+    DEBUG_ERROR("Need OpenGL 2.0+ or GL_ARB_pixel_buffer_object");
+    return false;
+  }
+
+  if (this->opt.mipmap && maj < 3 &&
+      !util_hasGLExt(exts, "GL_ARB_framebuffer_object") &&
+      !util_hasGLExt(exts, "GL_EXT_framebuffer_object"))
+  {
+    DEBUG_WARN("Need OpenGL 3.0+ or GL_ARB_framebuffer_object or "
+      "GL_EXT_framebuffer_object for glGenerateMipmap, disabling mipmaps");
+    this->opt.mipmap = false;
+  }
+
   glEnable(GL_TEXTURE_2D);
   glEnable(GL_COLOR_MATERIAL);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -705,7 +731,7 @@ static enum ConfigStatus configure(struct Inst * this)
   this->texSize = this->format.height * this->format.pitch;
   this->texPos  = 0;
 
-  glGenBuffers(BUFFER_COUNT, this->vboID);
+  g_gl_dynProcs.glGenBuffers(BUFFER_COUNT, this->vboID);
   if (check_gl_error("glGenBuffers"))
   {
     LG_UNLOCK(this->formatLock);
@@ -728,14 +754,14 @@ static enum ConfigStatus configure(struct Inst * this)
 
       memset(this->texPixels[i], 0, this->texSize);
 
-      glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
+      g_gl_dynProcs.glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
       if (check_gl_error("glBindBuffer"))
       {
         LG_UNLOCK(this->formatLock);
         return CONFIG_STATUS_ERROR;
       }
 
-      glBufferData(
+      g_gl_dynProcs.glBufferData(
         GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
         this->texSize,
         this->texPixels[i],
@@ -748,20 +774,20 @@ static enum ConfigStatus configure(struct Inst * this)
         return CONFIG_STATUS_ERROR;
       }
     }
-    glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
+    g_gl_dynProcs.glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
   }
   else
   {
     for(int i = 0; i < BUFFER_COUNT; ++i)
     {
-      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
+      g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
       if (check_gl_error("glBindBuffer"))
       {
         LG_UNLOCK(this->formatLock);
         return CONFIG_STATUS_ERROR;
       }
 
-      glBufferData(
+      g_gl_dynProcs.glBufferData(
         GL_PIXEL_UNPACK_BUFFER,
         this->texSize,
         NULL,
@@ -773,7 +799,7 @@ static enum ConfigStatus configure(struct Inst * this)
         return CONFIG_STATUS_ERROR;
       }
     }
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
 
   // create the frame textures
@@ -833,7 +859,7 @@ static enum ConfigStatus configure(struct Inst * this)
   }
 
   glBindTexture(GL_TEXTURE_2D, 0);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   this->drawStart   = nanotime();
   this->configured  = true;
@@ -853,7 +879,7 @@ static void deconfigure(struct Inst * this)
 
   if (this->hasBuffers)
   {
-    glDeleteBuffers(BUFFER_COUNT, this->vboID);
+    g_gl_dynProcs.glDeleteBuffers(BUFFER_COUNT, this->vboID);
     this->hasBuffers = false;
   }
 
@@ -863,7 +889,7 @@ static void deconfigure(struct Inst * this)
     {
       if (this->fences[i])
       {
-        glDeleteSync(this->fences[i]);
+        g_gl_dynProcs.glDeleteSync(this->fences[i]);
         this->fences[i] = NULL;
       }
 
@@ -1028,7 +1054,7 @@ static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
   struct Inst * this = (struct Inst *)opaque;
 
   // update the buffer, this performs a DMA transfer if possible
-  glBufferSubData(
+  g_gl_dynProcs.glBufferSubData(
     GL_PIXEL_UNPACK_BUFFER,
     this->texPos,
     size,
@@ -1042,9 +1068,9 @@ static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
 
 static bool drawFrame(struct Inst * this)
 {
-  if (glIsSync(this->fences[this->texWIndex]))
+  if (g_gl_dynProcs.glIsSync(this->fences[this->texWIndex]))
   {
-    switch(glClientWaitSync(this->fences[this->texWIndex], 0, GL_TIMEOUT_IGNORED))
+    switch(g_gl_dynProcs.glClientWaitSync(this->fences[this->texWIndex], 0, GL_TIMEOUT_IGNORED))
     {
       case GL_ALREADY_SIGNALED:
         break;
@@ -1062,7 +1088,7 @@ static bool drawFrame(struct Inst * this)
         break;
     }
 
-    glDeleteSync(this->fences[this->texWIndex]);
+    g_gl_dynProcs.glDeleteSync(this->fences[this->texWIndex]);
     this->fences[this->texWIndex] = NULL;
 
     this->texRIndex = this->texWIndex;
@@ -1079,7 +1105,7 @@ static bool drawFrame(struct Inst * this)
 
   LG_LOCK(this->formatLock);
   glBindTexture(GL_TEXTURE_2D, this->frames[this->texWIndex]);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texWIndex]);
+  g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texWIndex]);
 
   const int bpp = this->format.bpp / 8;
   glPixelStorei(GL_UNPACK_ALIGNMENT , bpp);
@@ -1119,7 +1145,7 @@ static bool drawFrame(struct Inst * this)
   }
 
   // unbind the buffer
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   const bool mipmap = this->opt.mipmap && (
     (this->format.width  > this->destRect.w) ||
@@ -1127,7 +1153,7 @@ static bool drawFrame(struct Inst * this)
 
   if (mipmap)
   {
-    glGenerateMipmap(GL_TEXTURE_2D);
+    g_gl_dynProcs.glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   }
@@ -1140,7 +1166,7 @@ static bool drawFrame(struct Inst * this)
 
   // set a fence so we don't overwrite a buffer in use
   this->fences[this->texWIndex] =
-    glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    g_gl_dynProcs.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   glFlush();
 
   LG_UNLOCK(this->formatLock);
