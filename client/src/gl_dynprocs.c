@@ -31,7 +31,7 @@ static void * getProcAddressGL(const char * name)
   return (void *) glXGetProcAddressARB((const GLubyte *) name);
 }
 
-static void * setProcAddressGL2(const char * name, const char * backup)
+static void * getProcAddressGL2(const char * name, const char * backup)
 {
   void * func = getProcAddressGL(name);
   return func ? func : getProcAddressGL(backup);
@@ -39,11 +39,11 @@ static void * setProcAddressGL2(const char * name, const char * backup)
 
 void gl_dynProcsInit(void)
 {
-  g_gl_dynProcs.glGenBuffers    = setProcAddressGL2("glGenBuffers", "glGenBuffersARB");
-  g_gl_dynProcs.glBindBuffer    = setProcAddressGL2("glBindBuffer", "glBindBufferARB");
-  g_gl_dynProcs.glBufferData    = setProcAddressGL2("glBufferData", "glBufferDataARB");
-  g_gl_dynProcs.glBufferSubData = setProcAddressGL2("glBufferSubData", "glBufferSubDataARB");
-  g_gl_dynProcs.glDeleteBuffers = setProcAddressGL2("glDeleteBuffers", "glDeleteBuffersARB");
+  g_gl_dynProcs.glGenBuffers    = getProcAddressGL2("glGenBuffers", "glGenBuffersARB");
+  g_gl_dynProcs.glBindBuffer    = getProcAddressGL2("glBindBuffer", "glBindBufferARB");
+  g_gl_dynProcs.glBufferData    = getProcAddressGL2("glBufferData", "glBufferDataARB");
+  g_gl_dynProcs.glBufferSubData = getProcAddressGL2("glBufferSubData", "glBufferSubDataARB");
+  g_gl_dynProcs.glDeleteBuffers = getProcAddressGL2("glDeleteBuffers", "glDeleteBuffersARB");
 
   g_gl_dynProcs.glIsSync         = getProcAddressGL("glIsSync");
   g_gl_dynProcs.glFenceSync      = getProcAddressGL("glFenceSync");
