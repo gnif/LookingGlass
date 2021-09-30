@@ -58,6 +58,7 @@
 #include "kb.h"
 #include "ll.h"
 #include "egl_dynprocs.h"
+#include "gl_dynprocs.h"
 #include "overlays.h"
 #include "overlay_utils.h"
 #include "util.h"
@@ -1297,6 +1298,7 @@ int main(int argc, char * argv[])
   config_init();
   ivshmemOptionsInit();
   egl_dynProcsInit();
+  gl_dynProcsInit();
 
   g_state.overlays = ll_new();
   app_registerOverlay(&LGOverlayConfig, NULL);

@@ -111,6 +111,7 @@ set(SOURCES
 	src/util.c
 	src/clipboard.c
 	src/kb.c
+	src/gl_dynprocs.c
 	src/egl_dynprocs.c
 	src/eglutil.c
 	src/overlay_utils.c
