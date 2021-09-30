@@ -401,22 +401,16 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
   DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
 
-  GLint n;
-  glGetIntegerv(GL_NUM_EXTENSIONS, &n);
-  for(GLint i = 0; i < n; ++i)
+  const char * exts = (const char *)glGetString(GL_EXTENSIONS);
+  if (util_hasGLExt(exts, "GL_AMD_pinned_memory"))
   {
-    const GLubyte *ext = glGetStringi(GL_EXTENSIONS, i);
-    if (strcmp((const char *)ext, "GL_AMD_pinned_memory") == 0)
+    if (this->opt.amdPinnedMem)
     {
-      if (this->opt.amdPinnedMem)
-      {
-        this->amdPinnedMemSupport = true;
-        DEBUG_INFO("Using GL_AMD_pinned_memory");
-      }
-      else
-        DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
-      break;
+      this->amdPinnedMemSupport = true;
+      DEBUG_INFO("Using GL_AMD_pinned_memory");
     }
+    else
+      DEBUG_INFO("GL_AMD_pinned_memory is available but not in use");
   }
 
   glEnable(GL_TEXTURE_2D);
