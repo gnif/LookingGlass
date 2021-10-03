@@ -51,9 +51,6 @@ static void libdecorHandleError(struct libdecor * context, enum libdecor_error e
 static void libdecorFrameConfigure(struct libdecor_frame * frame,
     struct libdecor_configuration * configuration, void * opaque)
 {
-  if (wlWm.needsResize)
-    return;
-
   int width, height;
   if (libdecor_configuration_get_content_size(configuration, frame, &width, &height)) 
   {
