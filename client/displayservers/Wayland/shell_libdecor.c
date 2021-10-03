@@ -76,7 +76,7 @@ static void libdecorFrameConfigure(struct libdecor_frame * frame,
     app_invalidateWindow(true);
     waylandStopWaitFrame();
   }
-  else 
+  else
     wlWm.configured = true;
 }
 
