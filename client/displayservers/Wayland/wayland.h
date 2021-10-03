@@ -306,14 +306,15 @@ bool waylandRegistryInit(void);
 void waylandRegistryFree(void);
 
 // shell module
-bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless);
+bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable);
 void waylandShellAckConfigureIfNeeded(void);
 void waylandSetFullscreen(bool fs);
 bool waylandGetFullscreen(void);
 void waylandMinimize(void);
+void waylandShellResize(int w, int h);
 
 // window module
-bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless);
+bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable);
 void waylandWindowFree(void);
 void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);
