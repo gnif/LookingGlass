@@ -98,7 +98,7 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandInputInit())
     return false;
 
-  if (!waylandWindowInit(params.title, params.fullscreen, params.maximize, params.borderless))
+  if (!waylandWindowInit(params.title, params.fullscreen, params.maximize, params.borderless, params.resizable))
     return false;
 
   if (!waylandEGLInit(params.w, params.h))

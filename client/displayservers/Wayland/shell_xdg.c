@@ -87,7 +87,7 @@ static const struct xdg_toplevel_listener xdgToplevelListener = {
   .close     = xdgToplevelClose,
 };
 
-bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless)
+bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable)
 {
   if (!wlWm.xdgWmBase)
   {
@@ -152,4 +152,9 @@ bool waylandGetFullscreen(void)
 void waylandMinimize(void)
 {
   xdg_toplevel_set_minimized(wlWm.xdgToplevel);
+}
+
+void waylandShellResize(int w, int h)
+{
+  //TODO: Implement resize for XDG.
 }

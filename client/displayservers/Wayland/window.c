@@ -79,7 +79,7 @@ static const struct wl_surface_listener wlSurfaceListener = {
   .leave = wlSurfaceLeaveHandler,
 };
 
-bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless)
+bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable)
 {
   wlWm.scale = wl_fixed_from_int(1);
 
@@ -106,7 +106,7 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
 
   wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
-  if (!waylandShellInit(title, fullscreen, maximize, borderless))
+  if (!waylandShellInit(title, fullscreen, maximize, borderless, resizable))
     return false;
 
   wl_surface_commit(wlWm.surface);
@@ -121,7 +121,7 @@ void waylandWindowFree(void)
 
 void waylandSetWindowSize(int x, int y)
 {
-  // FIXME: implement.
+    waylandShellResize(x, y);
 }
 
 bool waylandIsValidPointerPos(int x, int y)
