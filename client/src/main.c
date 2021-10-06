@@ -64,13 +64,11 @@
 #include "util.h"
 
 // forwards
-static int cursorThread(void * unused);
 static int renderThread(void * unused);
 
 static LGEvent  *e_startup = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
-static LGThread *t_cursor  = NULL;
 
 struct AppState g_state = { 0 };
 struct CursorState g_cursor;
@@ -292,9 +290,7 @@ static int renderThread(void * unused)
 
   lgTimerDestroy(fpsTimer);
 
-  if (t_cursor)
-    lgJoinThread(t_cursor, NULL);
-
+  core_stopCursorThread();
   core_stopFrameThread();
 
   RENDERER(deinitialize);
@@ -304,7 +300,7 @@ static int renderThread(void * unused)
   return 0;
 }
 
-static int cursorThread(void * unused)
+int main_cursorThread(void * unused)
 {
   LGMP_STATUS         status;
   LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
@@ -330,7 +326,7 @@ static int cursorThread(void * unused)
     break;
   }
 
-  while(g_state.state == APP_STATE_RUNNING)
+  while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LGMPMessage msg;
     if ((status = lgmpClientProcess(g_state.pointerQueue, &msg)) != LGMP_OK)
@@ -1156,13 +1152,7 @@ restart:
 
   g_state.kvmfrFeatures = udata->features;
 
-  if (!lgCreateThread("cursorThread", cursorThread, NULL, &t_cursor))
-  {
-    DEBUG_ERROR("cursor create thread failed");
-    return 1;
-  }
-
-  if (!core_startFrameThread())
+  if (!core_startCursorThread() || !core_startFrameThread())
     return -1;
 
   while(g_state.state == APP_STATE_RUNNING)
@@ -1181,9 +1171,7 @@ restart:
     lgSignalEvent(g_state.frameEvent);
 
     core_stopFrameThread();
-
-    lgJoinThread(t_cursor, NULL);
-    t_cursor = NULL;
+    core_stopCursorThread();
 
     lgInit();
 

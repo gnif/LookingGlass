@@ -110,6 +110,7 @@ struct AppState
   PLGMPClientQueue     pointerQueue;
   KVMFRFeatureFlags    kvmfrFeatures;
 
+  LGThread            * cursorThread;
   LGThread            * frameThread;
   LGEvent             * frameEvent;
   atomic_bool           invalidateWindow;
@@ -287,6 +288,7 @@ extern struct AppState    g_state;
 extern struct CursorState g_cursor;
 extern struct AppParams   g_params;
 
+int main_cursorThread(void * unused);
 int main_frameThread(void * unused);
 
 #define RENDERER(fn, ...) g_state.lgr->ops.fn(g_state.lgr, ##__VA_ARGS__)

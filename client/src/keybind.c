@@ -43,9 +43,15 @@ static void bind_video(int sc, void * opaque)
   );
 
   if (g_state.stopVideo)
+  {
+    core_stopCursorThread();
     core_stopFrameThread();
+  }
   else
+  {
+    core_startCursorThread();
     core_startFrameThread();
+  }
 }
 
 static void bind_rotate(int sc, void * opaque)
