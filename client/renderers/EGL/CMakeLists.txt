@@ -11,7 +11,7 @@ pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
 	wayland-egl
 )
 
-find_program(AWK gawk mawk original-awk awk)
+find_program(AWK NAMES gawk mawk original-awk awk)
 
 if(AWK MATCHES ".+-NOTFOUND")
 	message(FATAL_ERROR "FATAL: some known version of awk couldn't be found (${AWK}).")
