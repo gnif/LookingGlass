@@ -290,6 +290,30 @@ bool core_isValidPointerPos(int x, int y)
   return g_state.ds->isValidPointerPos(x, y);
 }
 
+bool core_startCursorThread(void)
+{
+  if (g_state.cursorThread)
+    return true;
+
+  g_state.stopVideo = false;
+  if (!lgCreateThread("cursorThread", main_cursorThread, NULL,
+        &g_state.cursorThread))
+  {
+    DEBUG_ERROR("cursor create thread failed");
+    return false;
+  }
+  return true;
+}
+
+void core_stopCursorThread(void)
+{
+  g_state.stopVideo = true;
+  if (g_state.cursorThread)
+    lgJoinThread(g_state.cursorThread, NULL);
+
+  g_state.cursorThread = NULL;
+}
+
 bool core_startFrameThread(void)
 {
   if (g_state.frameThread)

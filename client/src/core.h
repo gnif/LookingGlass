@@ -31,6 +31,8 @@ bool core_warpPointer(int x, int y, bool exiting);
 void core_updatePositionInfo(void);
 void core_alignToGuest(void);
 bool core_isValidPointerPos(int x, int y);
+bool core_startCursorThread(void);
+void core_stopCursorThread(void);
 bool core_startFrameThread(void);
 void core_stopFrameThread(void);
 void core_handleGuestMouseUpdate(void);
