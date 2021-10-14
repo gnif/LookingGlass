@@ -110,6 +110,7 @@ struct Inst
   struct CursorState cursorLast;
 
   bool                 hadOverlay;
+  bool                 noSwapDamage;
   struct DesktopDamage desktopDamage[DESKTOP_DAMAGE_COUNT];
   unsigned int         desktopDamageIdx;
   LG_Lock              desktopDamageLock;
@@ -179,6 +180,20 @@ static struct Option egl_options[] =
     .module       = "egl",
     .name         = "debug",
     .description  = "Enable debug output",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = false
+  },
+  {
+    .module       = "egl",
+    .name         = "noBufferAge",
+    .description  = "Disable partial rendering based on buffer age",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = false
+  },
+  {
+    .module       = "egl",
+    .name         = "noSwapDamage",
+    .description  = "Disable swapping with damage",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = false
   },
@@ -781,6 +796,16 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!this->hasBufferAge)
     DEBUG_WARN("GL_EXT_buffer_age is not supported, will not perform as well.");
 
+  if (this->hasBufferAge && option_get_bool("egl", "noBufferAge"))
+  {
+    DEBUG_WARN("egl:noBufferAge specified, disabling buffer age.");
+    this->hasBufferAge = false;
+  }
+
+  this->noSwapDamage = option_get_bool("egl", "noSwapDamage");
+  if (this->noSwapDamage)
+    DEBUG_WARN("egl:noSwapDamage specified, disabling swap buffers with damage.");
+
   if (!g_egl_dynProcs.glEGLImageTargetTexture2DOES)
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
   else if (!g_egl_dynProcs.eglCreateImage || !g_egl_dynProcs.eglDestroyImage)
@@ -1098,7 +1123,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   this->cursorLast = cursorState;
 
   preSwap(udata);
-  app_eglSwapBuffers(this->display, this->surface, damage, damageIdx);
+  app_eglSwapBuffers(this->display, this->surface, damage, this->noSwapDamage ? 0 : damageIdx);
   return true;
 }
 
