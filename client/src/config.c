@@ -291,7 +291,7 @@ static struct Option options[] =
     .name           = "grabKeyboardOnFocus",
     .description    = "Grab the keyboard when focused",
     .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true,
+    .value.x_bool   = false,
   },
   {
     .module         = "input",

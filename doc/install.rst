@@ -470,7 +470,7 @@ The following is a complete list of options accepted by this application
   +==============================+=======+=====================+==================================================================================+
   | input:grabKeyboard           | -G    | yes                 | Grab the keyboard in capture mode                                                |
   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
-  | input:grabKeyboardOnFocus    |       | yes                 | Grab the keyboard when focused                                                   |
+  | input:grabKeyboardOnFocus    |       | no                  | Grab the keyboard when focused                                                   |
   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
   | input:releaseKeysOnFocusLoss |       | yes                 | On focus loss, send key up events to guest for all held keys                     |
   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
