@@ -100,8 +100,8 @@ Fetching with APT
 You can fetch these dependencies with the following command:
 
 ``apt-get install binutils-dev cmake fonts-freefont-ttf libfontconfig1-dev
-libegl-dev libspice-protocol-dev nettle-dev libx11-dev libxi-dev libxinerama-dev
-libxss-dev libwayland-dev wayland-protocols``
+libegl-dev libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev
+libxinerama-dev libxpresent-dev libxss-dev libwayland-dev wayland-protocols``
 
 You may omit some dependencies, if you disable the feature which requires them
 when running :ref:`cmake <client_building>`.
