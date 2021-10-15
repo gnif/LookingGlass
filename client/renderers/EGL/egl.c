@@ -882,7 +882,7 @@ static bool egl_needsRender(LG_Renderer * renderer)
   return !this->waitDone;
 }
 
-inline static EGLint egl_buffer_age(struct Inst * this)
+inline static EGLint egl_bufferAge(struct Inst * this)
 {
   if (!this->hasBufferAge)
     return 0;
@@ -931,7 +931,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     void (*preSwap)(void * udata), void * udata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
-  EGLint bufferAge   = egl_buffer_age(this);
+  EGLint bufferAge   = egl_bufferAge(this);
   bool renderAll     = invalidateWindow || !this->start || this->hadOverlay ||
                        bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE;
 
