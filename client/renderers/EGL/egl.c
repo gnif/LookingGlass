@@ -54,7 +54,7 @@
 #define MAX_BUFFER_AGE       3
 #define DESKTOP_DAMAGE_COUNT 4
 #define MAX_ACCUMULATED_DAMAGE ((KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
-#define IDX_AGO(counter, i, total) ((counter) + (total) - i) % (total)
+#define IDX_AGO(counter, i, total) (((counter) + (total) - (i)) % (total))
 
 struct Options
 {
