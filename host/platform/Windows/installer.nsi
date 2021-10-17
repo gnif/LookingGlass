@@ -31,10 +31,12 @@ Unicode true
 RequestExecutionLevel admin
 ShowInstDetails "show"
 ShowUninstDetails "show"
-InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 
 !ifndef BUILD_32BIT
 Target AMD64-Unicode
+InstallDir "$PROGRAMFILES\Looking Glass (host)"
+!else
+InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 !endif
 
 !define MUI_ICON "icon.ico"
