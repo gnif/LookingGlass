@@ -174,19 +174,19 @@ Create the following XML block in your domain:
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
-to start.
+to start:
 
-For AppArmor, create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if
-it doesn't exist, and add the following::
+- For AppArmor, create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if
+  it doesn't exist, and add the following::
 
-   # Looking Glass
-   /dev/kvmfr0 rw,
+     # Looking Glass
+     /dev/kvmfr0 rw,
 
-For cgroups, edit ``/etc/libvirt/qemu.conf``, uncomment the
-``cgroup_device_acl`` block, and add ``/dev/kvmfr0`` to the list.
-Then restart ``libvirtd``:
+- For cgroups, edit ``/etc/libvirt/qemu.conf``, uncomment the
+  ``cgroup_device_acl`` block, and add ``/dev/kvmfr0`` to the list.
+  Then restart ``libvirtd``:
 
-.. code:: bash
+  .. code:: bash
 
    sudo systemctl restart libvirtd.service
 
