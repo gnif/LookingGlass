@@ -82,10 +82,11 @@ bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
       GL_TEXTURE_2D, tex, 0);
   glDrawBuffers(1, &(GLenum){GL_COLOR_ATTACHMENT0});
 
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+  GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE)
   {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    DEBUG_ERROR("Failed to setup the framebuffer");
+    DEBUG_ERROR("Failed to setup the framebuffer: 0x%x", status);
     return false;
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
