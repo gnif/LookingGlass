@@ -333,6 +333,9 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
   width  = (float)width  / this->pixelSize;
   height = (float)height / this->pixelSize;
 
+  if (!this->enable)
+    return false;
+
   if (this->prepared               &&
       pixFmt       == this->pixFmt &&
       this->width  == width        &&
