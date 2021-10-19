@@ -98,6 +98,15 @@ Multiple devices can be created by separating the sizes with commas. For
 example, ``static_size_mb=128,64`` would create two kvmfr devices:
 ``kvmfr0`` would be 128 MB and ``kvmfr1`` would be 64 MB.
 
+.. note::
+
+   If you have already loaded an older version of the module, unload it
+   first. You can do this by rebooting, or with ``rmmod``:
+
+   .. code:: bash
+
+      rmmod kvmfr.ko
+
 .. _module_usage:
 
 Usage
