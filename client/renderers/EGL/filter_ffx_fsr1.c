@@ -339,6 +339,13 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
+  if (!this->enable)
+    return false;
+
+  this->active = this->width > width && this->height > height;
+  if (!this->active)
+    return false;
+
   if (pixFmt == this->pixFmt && !this->sizeChanged &&
       width == this->inWidth && height == this->inHeight)
     return true;
@@ -351,7 +358,6 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
 
   this->inWidth     = width;
   this->inHeight    = height;
-  this->active      = this->width > width && this->height > height;
   this->sizeChanged = false;
   this->pixFmt      = pixFmt;
   this->prepared    = false;
@@ -360,6 +366,7 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
   this->easuUniform[1].f[1] = this->height;
   ffxFsrEasuConst((uint32_t *)this->consts->data, this->inWidth, this->inHeight,
     this->inWidth, this->inHeight, this->width, this->height);
+
   return true;
 }
 
@@ -375,7 +382,7 @@ static bool egl_filterFFXFSR1Prepare(EGL_Filter * filter)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
-  if (!this->enable || !this->active)
+  if (!this->active)
     return false;
 
   if (this->prepared)

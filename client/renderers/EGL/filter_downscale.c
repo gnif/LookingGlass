@@ -365,9 +365,6 @@ static bool egl_filterDownscalePrepare(EGL_Filter * filter)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
 
-  if (!this->enable)
-    return false;
-
   if (this->prepared)
     return true;
 

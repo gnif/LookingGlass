@@ -224,6 +224,9 @@ static bool egl_filterFFXCASSetup(EGL_Filter * filter,
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
+  if (!this->enable)
+    return false;
+
   if (pixFmt == this->pixFmt && this->width == width && this->height == height)
     return true;
 
@@ -250,9 +253,6 @@ static void egl_filterFFXCASGetOutputRes(EGL_Filter * filter,
 static bool egl_filterFFXCASPrepare(EGL_Filter * filter)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
-
-  if (!this->enable)
-    return false;
 
   if (this->prepared)
     return true;
