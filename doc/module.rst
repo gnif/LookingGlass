@@ -25,40 +25,10 @@ Then switch to the ``module/`` directory
 
    cd module/
 
-.. _module_manual:
-
-Compiling & Loading (Manual)
-----------------------------
-
-To compile the module manually, run ``make`` in the module directory.
-
-.. _module_manual_loading:
-
-Loading
-~~~~~~~
-
-For VM->VM mode, run:
-
-.. code:: bash
-
-   insmod kvmfr.ko
-
-For VM->host mode with dmabuf, instead of creating a shared memory file,
-load this module with the parameter ``static_size_mb``. For example, a
-32 MB shared memory device can be created with:
-
-.. code:: bash
-
-   insmod kvmfr.ko static_size_mb=32
-
-Multiple devices can be created by separating the sizes with commas. For
-example, ``static_size_mb=128,64`` would create two kvmfr devices:
-``kvmfr0`` would be 128 MB and ``kvmfr1`` would be 64 MB.
-
 .. _module_dkms:
 
-Using DKMS
-----------
+Using DKMS (Recommended)
+------------------------
 
 You can use the kernel's DKMS feature to keep the module across upgrades.
 ``dkms`` must be installed.
@@ -96,6 +66,37 @@ For VM->host with dmabuf, modprobe with the parameter
 
 Just like above, multiple devices can be created by separating the sizes
 with commas.
+
+
+.. _module_manual:
+
+Compiling & Loading (Manual)
+----------------------------
+
+To compile the module manually, run ``make`` in the module directory.
+
+.. _module_manual_loading:
+
+Loading
+~~~~~~~
+
+For VM->VM mode, run:
+
+.. code:: bash
+
+   insmod kvmfr.ko
+
+For VM->host mode with dmabuf, instead of creating a shared memory file,
+load this module with the parameter ``static_size_mb``. For example, a
+32 MB shared memory device can be created with:
+
+.. code:: bash
+
+   insmod kvmfr.ko static_size_mb=32
+
+Multiple devices can be created by separating the sizes with commas. For
+example, ``static_size_mb=128,64`` would create two kvmfr devices:
+``kvmfr0`` would be 128 MB and ``kvmfr1`` would be 64 MB.
 
 .. _module_usage:
 
