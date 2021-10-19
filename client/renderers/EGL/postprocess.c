@@ -613,9 +613,9 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   vector_forEach(filter, &this->filters)
   {
     egl_filterSetOutputResHint(filter, targetX, targetY);
-    egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY);
 
-    if (!egl_filterPrepare(filter))
+    if (!egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY) ||
+        !egl_filterPrepare(filter))
       continue;
 
     texture = egl_filterRun(filter, &filterRects, texture);
