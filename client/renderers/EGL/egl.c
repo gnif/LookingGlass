@@ -713,8 +713,17 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   this->surface = eglCreateWindowSurface(this->display, this->configs, this->nativeWind, surfattr);
   if (this->surface == EGL_NO_SURFACE)
   {
-    DEBUG_ERROR("Failed to create EGL surface (eglError: 0x%x)", eglGetError());
-    return false;
+    // On Nvidia proprietary drivers on Wayland, specifying EGL_RENDER_BUFFER can cause
+    // window creation to fail, so we try again without it.
+    this->surface = eglCreateWindowSurface(this->display, this->configs, this->nativeWind, NULL);
+    if (this->surface == EGL_NO_SURFACE)
+    {
+      DEBUG_ERROR("Failed to create EGL surface (eglError: 0x%x)", eglGetError());
+      return false;
+    }
+    else
+      DEBUG_WARN("EGL surface creation with EGL_RENDER_BUFFER failed, "
+        "egl:doubleBuffer setting may not be respected");
   }
 
   const char * client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
