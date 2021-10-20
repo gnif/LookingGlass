@@ -27,6 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/epoll.h>
+#include <errno.h>
 
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/scrnsaver.h>
@@ -748,6 +749,9 @@ static int x11EventThread(void * unused)
       int nfds = epoll_wait(epollfd, events, 1, 100);
       if (nfds == -1)
       {
+        if (errno == EINTR)
+          continue;
+
         close(epollfd);
         DEBUG_ERROR("epoll_wait failure");
         return 0;
