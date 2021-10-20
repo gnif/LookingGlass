@@ -318,6 +318,14 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
     }
 
     DEBUG_WARN("DMA update failed, disabling DMABUF imports");
+
+    const char * vendor  = (const char *)glGetString(GL_VENDOR);
+    if (strstr(vendor, "NVIDIA"))
+    {
+      DEBUG_WARN("NVIDIA's DMABUF support is incomplete, please direct your complaints to NVIDIA");
+      DEBUG_WARN("This is not a bug in Looking Glass");
+    }
+
     desktop->useDMA = false;
 
     egl_textureFree(&desktop->texture);
