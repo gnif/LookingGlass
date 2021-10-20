@@ -352,6 +352,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects)
 {
+  if (outputWidth == 0 && outputHeight == 0)
+    DEBUG_FATAL("outputWidth || outputHeight == 0");
+
   enum EGL_TexStatus status;
   if ((status = egl_textureProcess(desktop->texture)) != EGL_TEX_STATUS_OK)
   {

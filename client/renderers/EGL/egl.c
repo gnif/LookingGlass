@@ -1008,7 +1008,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   }
   ++this->overlayHistoryIdx;
 
-  if (this->start)
+  if (this->start && this->destRect.w > 0 && this->destRect.h > 0)
   {
     if (egl_desktopRender(this->desktop,
         this->destRect.w, this->destRect.h,

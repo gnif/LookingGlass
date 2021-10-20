@@ -133,7 +133,7 @@ static void loadPresetList(struct EGL_PostProcess * this)
   this->activePreset = -1;
   return;
 
-fail:  
+fail:
   free(this->presetDir);
   this->presetDir = NULL;
   if (dir)
@@ -585,6 +585,9 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
     unsigned int targetX, unsigned int targetY)
 {
+  if (targetX == 0 && targetY == 0)
+    DEBUG_FATAL("targetX || targetY == 0");
+
   EGL_Filter * lastFilter = NULL;
   unsigned int sizeX, sizeY;
 
