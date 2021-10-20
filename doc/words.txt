@@ -4,6 +4,7 @@ cgroups
 clang
 cmake
 config
+dejavu
 deuteranope
 dir
 distros
