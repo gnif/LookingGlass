@@ -87,6 +87,24 @@ then, restart AppArmor.
 
    sudo systemctl restart apparmor
 
+.. _client_memballoon_tweak:
+
+Memballoon
+^^^^^^^^^^
+
+The VirtIO memballoon device enables the host to dynamically reclaim memory
+from your VM by growing the balloon inside the guest, reserving reclaimed
+memory. Libvirt adds this device to guests by default.
+
+However, this device causes major performance issues with VFIO passthrough
+setups, and should be disabled.
+
+Find the ``<memballoon>`` tag and set its type to ``none``:
+
+.. code:: xml
+
+   <memballoon model="none"/>
+
 .. _client_qemu_commands:
 
 QEMU Commands
