@@ -53,11 +53,11 @@ Required Dependencies
 ^^^^^^^^^^^^^^^^^^^^^
 
 -  cmake
--  gcc \| clang
--  fonts-freefont-ttf
+-  gcc, g++ \| clang
 -  libegl-dev
 -  libgl-dev
--  libfontconfig1-dev
+-  libgles-dev
+-  libfontconfig-dev
 -  libgmp-dev
 -  libspice-protocol-dev
 -  make
@@ -88,9 +88,19 @@ feature is disabled when running :ref:`cmake <client_building>`.
 
 -  Disable with ``cmake -DENABLE_WAYLAND=no ..``
 
+   -  libxkbcommon-dev
    -  libwayland-bin
    -  libwayland-dev
    -  wayland-protocols
+
+
+.. _client_deps_recommended:
+
+Recommended
+<<<<<<<<<<<
+
+-  fonts-dejavu-core (This is the default UI font, but a random font will
+   be chosen if not available).
 
 .. _client_fetching_with_apt:
 
@@ -99,9 +109,10 @@ Fetching with APT
 
 You can fetch these dependencies with the following command:
 
-``apt-get install binutils-dev cmake fonts-freefont-ttf libfontconfig1-dev
-libegl-dev libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev
-libxinerama-dev libxpresent-dev libxss-dev libwayland-dev wayland-protocols``
+``apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev
+gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev
+nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev
+libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols``
 
 You may omit some dependencies, if you disable the feature which requires them
 when running :ref:`cmake <client_building>`.
