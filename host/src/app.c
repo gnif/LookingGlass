@@ -185,6 +185,8 @@ static bool sendFrame(void)
   switch(app.iface->waitFrame(&frame, app.maxFrameSize))
   {
     case CAPTURE_RESULT_OK:
+      // reading the new subs count zeros it
+      lgmpHostQueueNewSubs(app.frameQueue);
       break;
 
     case CAPTURE_RESULT_REINIT:
