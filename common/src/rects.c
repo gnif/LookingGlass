@@ -211,6 +211,9 @@ inline static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageR
 
 int rectsMergeOverlapping(FrameDamageRect * rects, int count)
 {
+  if (count == 0)
+    return 0;
+
   bool removed[count];
   bool changed;
 

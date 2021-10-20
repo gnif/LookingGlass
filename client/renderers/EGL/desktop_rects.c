@@ -107,6 +107,12 @@ inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect
 void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects * data,
     int width, int height)
 {
+  if (data && data->count == 0)
+  {
+    rects->count = 0;
+    return;
+  }
+
   GLfloat vertices[(!data || data->count < 0 ? 1 : data->count) * 8];
   if (!data || data->count < 0)
   {
