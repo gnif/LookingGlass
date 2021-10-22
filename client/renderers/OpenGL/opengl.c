@@ -338,7 +338,8 @@ bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
   return true;
 }
 
-bool opengl_onMouseEvent(LG_Renderer * renderer, const bool visible, const int x, const int y)
+bool opengl_onMouseEvent(LG_Renderer * renderer, const bool visible,
+    int x, int y, const int hx, const int hy)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 

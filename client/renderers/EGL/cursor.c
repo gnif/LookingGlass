@@ -42,6 +42,7 @@ struct CursorTex
   struct EGL_Texture * texture;
   struct EGL_Shader  * shader;
   GLuint uMousePos;
+  GLuint uScale;
   GLuint uRotate;
   GLuint uCBMode;
 };
@@ -73,7 +74,9 @@ struct EGL_Cursor
   int               cbMode;
 
   _Atomic(struct CursorPos)  pos;
+  _Atomic(struct CursorPos)  hs;
   _Atomic(struct CursorSize) size;
+  _Atomic(float)             scale;
 
   struct CursorTex norm;
   struct CursorTex mono;
@@ -103,28 +106,22 @@ static bool cursorTexInit(struct CursorTex * t,
     return false;
   }
 
-  t->uMousePos = egl_shaderGetUniform(t->shader, "mouse" );
-  t->uRotate   = egl_shaderGetUniform(t->shader, "rotate");
-  t->uCBMode   = egl_shaderGetUniform(t->shader, "cbMode");
+  t->uMousePos = egl_shaderGetUniform(t->shader, "mouse"  );
+  t->uScale    = egl_shaderGetUniform(t->shader, "scale"  );
+  t->uRotate   = egl_shaderGetUniform(t->shader, "rotate" );
+  t->uCBMode   = egl_shaderGetUniform(t->shader, "cbMode" );
 
   return true;
 }
 
 static inline void setCursorTexUniforms(EGL_Cursor * cursor,
-    struct CursorTex * t, bool mono, float x, float y, float w, float h)
+    struct CursorTex * t, bool mono, float x, float y,
+    float w, float h, float scale)
 {
-  if (mono)
-  {
-    glUniform4f(t->uMousePos, x, y, w, h / 2);
-    glUniform1i(t->uRotate  , cursor->rotate);
-    glUniform1i(t->uCBMode  , cursor->cbMode);
-  }
-  else
-  {
-    glUniform4f(t->uMousePos, x, y, w, h);
-    glUniform1i(t->uRotate  , cursor->rotate);
-    glUniform1i(t->uCBMode  , cursor->cbMode);
-  }
+  glUniform4f(t->uMousePos, x, y, w, mono ? h / 2 : h);
+  glUniform1f(t->uScale   , scale);
+  glUniform1i(t->uRotate  , cursor->rotate);
+  glUniform1i(t->uCBMode  , cursor->cbMode);
 }
 
 static void cursorTexFree(struct CursorTex * t)
@@ -166,9 +163,12 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   (*cursor)->cbMode = option_get_int("egl", "cbMode");
 
   struct CursorPos  pos  = { .x = 0, .y = 0 };
+  struct CursorPos  hs   = { .x = 0, .y = 0 };
   struct CursorSize size = { .w = 0, .h = 0 };
-  atomic_init(&(*cursor)->pos,  pos);
-  atomic_init(&(*cursor)->size, size);
+  atomic_init(&(*cursor)->pos  , pos );
+  atomic_init(&(*cursor)->hs   , hs  );
+  atomic_init(&(*cursor)->size , size);
+  atomic_init(&(*cursor)->scale, 1.0f);
 
   return true;
 }
@@ -229,11 +229,19 @@ void egl_cursorSetSize(EGL_Cursor * cursor, const float w, const float h)
   atomic_store(&cursor->size, size);
 }
 
-void egl_cursorSetState(EGL_Cursor * cursor, const bool visible, const float x, const float y)
+void egl_cursorSetScale(EGL_Cursor * cursor, const float scale)
+{
+  atomic_store(&cursor->scale, scale);
+}
+
+void egl_cursorSetState(EGL_Cursor * cursor, const bool visible,
+    const float x, const float y, const float hx, const float hy)
 {
   cursor->visible = visible;
-  struct CursorPos pos = { .x = x, .y = y};
+  struct CursorPos pos = { .x = x , .y = y  };
+  struct CursorPos hs  = { .x = hx, .y = hy };
   atomic_store(&cursor->pos, pos);
+  atomic_store(&cursor->hs , hs);
 }
 
 struct CursorState egl_cursorRender(EGL_Cursor * cursor,
@@ -256,7 +264,8 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
       case LG_CURSOR_COLOR:
       {
-        egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->stride);
+        egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
+            cursor->width, cursor->height, cursor->stride);
         egl_textureUpdate(cursor->norm.texture, data);
         egl_modelSetTexture(cursor->model, cursor->norm.texture);
         break;
@@ -264,10 +273,11 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
       case LG_CURSOR_MONOCHROME:
       {
-        uint32_t and[cursor->width * cursor->height];
-        uint32_t xor[cursor->width * cursor->height];
+        uint32_t and[cursor->height][cursor->width];
+        uint32_t xor[cursor->height][cursor->width];
 
         for(int y = 0; y < cursor->height; ++y)
+        {
           for(int x = 0; x < cursor->width; ++x)
           {
             const uint8_t  * srcAnd  = data + (cursor->stride * y) + (x / 8);
@@ -276,12 +286,15 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
             const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
             const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
 
-            and[y * cursor->width + x] = andMask;
-            xor[y * cursor->width + x] = xorMask;
+            and[y][x] = andMask;
+            xor[y][x] = xorMask;
           }
+        }
 
-        egl_textureSetup (cursor->norm.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4);
-        egl_textureSetup (cursor->mono.texture, EGL_PF_BGRA, cursor->width, cursor->height, cursor->width * 4);
+        egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
+            cursor->width, cursor->height, sizeof(and[0]));
+        egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
+            cursor->width, cursor->height, sizeof(xor[0]));
         egl_textureUpdate(cursor->norm.texture, (uint8_t *)and);
         egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor);
         break;
@@ -292,8 +305,15 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
   cursor->rotate = rotate;
 
-  struct CursorPos  pos  = atomic_load(&cursor->pos);
-  struct CursorSize size = atomic_load(&cursor->size);
+  struct CursorPos  pos   = atomic_load(&cursor->pos  );
+  float             scale = atomic_load(&cursor->scale);
+  struct CursorPos  hs    = atomic_load(&cursor->hs   );
+  struct CursorSize size  = atomic_load(&cursor->size );
+
+  pos.x  -= hs.x * scale;
+  pos.y  -= hs.y * scale;
+  size.w *= scale;
+  size.h *= scale;
 
   struct CursorState state = {
     .visible = true,
@@ -342,13 +362,15 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_MONOCHROME:
     {
       egl_shaderUse(cursor->norm.shader);
-      setCursorTexUniforms(cursor, &cursor->norm, true, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->norm, true, pos.x, pos.y,
+          size.w, size.h, scale);
       glBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
       egl_shaderUse(cursor->mono.shader);
-      setCursorTexUniforms(cursor, &cursor->mono, true, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->mono, true, pos.x, pos.y,
+          size.w, size.h, scale);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
       egl_modelRender(cursor->model);
@@ -358,7 +380,8 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_COLOR:
     {
       egl_shaderUse(cursor->norm.shader);
-      setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
+          size.w, size.h, scale);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelRender(cursor->model);
       break;
@@ -367,7 +390,8 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_MASKED_COLOR:
     {
       egl_shaderUse(cursor->mono.shader);
-      setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y, size.w, size.h);
+      setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y,
+          size.w, size.h, scale);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelRender(cursor->model);
       break;

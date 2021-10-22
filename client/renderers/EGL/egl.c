@@ -103,9 +103,11 @@ struct Inst
 
   bool  cursorVisible;
   int   cursorX    , cursorY;
+  int   cursorHX   , cursorHY;
   float mouseWidth , mouseHeight;
   float mouseScaleX, mouseScaleY;
   bool  showDamage;
+  bool  scalePointer;
 
   struct CursorState cursorLast;
 
@@ -196,6 +198,13 @@ static struct Option egl_options[] =
     .description  = "Disable swapping with damage",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = false
+  },
+  {
+    .module       = "egl",
+    .name         = "scalePointer",
+    .description  = "Keep the pointer size 1:1 when downscaling",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
   },
 
   {0}
@@ -381,8 +390,10 @@ static void egl_calc_mouse_state(struct Inst * this)
       egl_cursorSetState(
         this->cursor,
         this->cursorVisible,
-        (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleX,
-        (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleY
+        (((float)this->cursorX  * this->mouseScaleX) - 1.0f) * this->scaleX,
+        (((float)this->cursorY  * this->mouseScaleY) - 1.0f) * this->scaleY,
+        ((float)this->cursorHX * this->mouseScaleX) * this->scaleX,
+        ((float)this->cursorHY * this->mouseScaleY) * this->scaleY
       );
       break;
 
@@ -391,8 +402,10 @@ static void egl_calc_mouse_state(struct Inst * this)
       egl_cursorSetState(
         this->cursor,
         this->cursorVisible,
-        (((float)this->cursorX * this->mouseScaleX) - 1.0f) * this->scaleY,
-        (((float)this->cursorY * this->mouseScaleY) - 1.0f) * this->scaleX
+        (((float)this->cursorX  * this->mouseScaleX) - 1.0f) * this->scaleY,
+        (((float)this->cursorY  * this->mouseScaleY) - 1.0f) * this->scaleX,
+        ((float)this->cursorHX * this->mouseScaleX) * this->scaleY,
+        ((float)this->cursorHY * this->mouseScaleY) * this->scaleX
       );
       break;
   }
@@ -465,6 +478,12 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   this->screenScaleY = 1.0f / this->height;
 
   egl_calc_mouse_state(this);
+  if (this->scalePointer)
+  {
+    float scale = max(1.0f,
+        this->formatValid ? (float)this->format.width / this->width : 1.0f);
+    egl_cursorSetScale(this->cursor, scale);
+  }
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     this->desktopDamage[this->desktopDamageIdx].count = -1;
@@ -497,12 +516,15 @@ static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cur
   return true;
 }
 
-static bool egl_onMouseEvent(LG_Renderer * renderer, const bool visible, const int x, const int y)
+static bool egl_onMouseEvent(LG_Renderer * renderer, const bool visible,
+    int x, int y, const int hx, const int hy)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   this->cursorVisible = visible;
-  this->cursorX       = x;
-  this->cursorY       = y;
+  this->cursorX       = x + hx;
+  this->cursorY       = y + hy;
+  this->cursorHX      = hx;
+  this->cursorHY      = hy;
   egl_calc_mouse_state(this);
   return true;
 }
@@ -532,6 +554,12 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
       DEBUG_ERROR("Failed to make the frame context current");
       return false;
     }
+  }
+
+  if (this->scalePointer)
+  {
+    float scale = max(1.0f, (float)format.width / this->width);
+    egl_cursorSetScale(this->cursor, scale);
   }
 
   egl_update_scale_type(this);
@@ -817,6 +845,8 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   this->noSwapDamage = option_get_bool("egl", "noSwapDamage");
   if (this->noSwapDamage)
     DEBUG_WARN("egl:noSwapDamage specified, disabling swap buffers with damage.");
+
+  this->scalePointer = option_get_bool("egl", "scalePointer");
 
   if (!g_egl_dynProcs.glEGLImageTargetTexture2DOES)
     DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");

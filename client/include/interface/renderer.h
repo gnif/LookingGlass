@@ -139,8 +139,8 @@ typedef struct LG_RendererOps
 
   /* called when the mouse has moved or changed visibillity
    * Context: cursorThread */
-  bool (*onMouseEvent)(LG_Renderer * renderer, const bool visible, const int x,
-      const int y);
+  bool (*onMouseEvent)(LG_Renderer * renderer, const bool visible, int x, int y,
+      const int hx, const int hy);
 
   /* called when the frame format has changed
    * Context: frameThread */
