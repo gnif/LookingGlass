@@ -533,6 +533,12 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   egl_update_scale_type(this);
   egl_damageSetup(this->damage, format.width, format.height);
 
+  /* we need full screen damage when the format changes */
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
+    damage->count = -1;
+  });
+
   return egl_desktopSetup(this->desktop, format);
 }
 
