@@ -314,6 +314,10 @@ static void egl_onRestart(LG_Renderer * renderer)
   eglDestroyContext(this->display, this->frameContext);
   this->frameContext = NULL;
   this->start        = false;
+
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    this->desktopDamage[this->desktopDamageIdx].count = -1;
+  });
 }
 
 static void egl_calc_mouse_size(struct Inst * this)
@@ -535,8 +539,7 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 
   /* we need full screen damage when the format changes */
   INTERLOCKED_SECTION(this->desktopDamageLock, {
-    struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
-    damage->count = -1;
+    this->desktopDamage[this->desktopDamageIdx].count = -1;
   });
 
   return egl_desktopSetup(this->desktop, format);
