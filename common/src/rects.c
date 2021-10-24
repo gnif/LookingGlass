@@ -58,6 +58,21 @@ inline static bool rectContains(const FrameDamageRect * r1,
     r2->y + r2->height > r1->y + r1->height);
 }
 
+inline static int removeRects(FrameDamageRect * rects, int count,
+    bool removed[])
+{
+  int o = 0;
+  for (int i = 0; i < count; ++i)
+  {
+    if (removed[i] || i == o++)
+      continue;
+
+    rects[o-1] = rects[i];
+  }
+
+  return 0;
+}
+
 static int cornerCompare(const void * a_, const void * b_)
 {
   const struct Corner * a = a_;
@@ -260,12 +275,7 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
   }
   while (changed);
 
-  int o = 0;
-  for (int i = 0; i < count; ++i)
-    if (!removed[i])
-      rects[o++] = rects[i];
-
-  return o;
+  return removeRects(rects, count, removed);
 }
 
 int rectsRejectContained(FrameDamageRect * rects, int count)
@@ -287,10 +297,5 @@ int rectsRejectContained(FrameDamageRect * rects, int count)
     }
   }
 
-  int o = 0;
-  for (int i = 0; i < count; ++i)
-    if (!removed[i])
-      rects[o++] = rects[i];
-
-  return o;
+  return removeRects(rects, count, removed);
 }
