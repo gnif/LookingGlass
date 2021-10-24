@@ -109,6 +109,7 @@ void NvFBCFree()
 }
 
 bool NvFBCToSysCreate(
+  int            adapterIndex,
   void         * privData,
   unsigned int   privDataSize,
   NvFBCHandle  * handle,
@@ -121,7 +122,7 @@ bool NvFBCToSysCreate(
   params.dwVersion         = NVFBC_CREATE_PARAMS_VER;
   params.dwInterfaceType   = NVFBC_TO_SYS;
   params.pDevice           = NULL;
-  params.dwAdapterIdx      = 0;
+  params.dwAdapterIdx      = adapterIndex;
   params.dwPrivateDataSize = privDataSize;
   params.pPrivateData      = privData;
 

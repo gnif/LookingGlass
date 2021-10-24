@@ -140,6 +140,13 @@ static void nvfbc_initOptions(void)
       .type           = OPTION_TYPE_INT,
       .value.x_int    = 128
     },
+    {
+      .module         = "nvfbc",
+      .name           = "adapterIndex",
+      .description    = "The index of the adapter to capture from",
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 0
+    },
     {0}
   };
 
@@ -186,12 +193,14 @@ static bool nvfbc_init(void)
 
     free(buffer);
   }
+  
+  int adapterIndex = option_get_int("nvfbc", "adapterIndex");
 
   // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
   // causes a substantial performance pentalty even if it fails! As such we only
   // attempt NvFBC as a last resort, or if configured via the app:capture
   // option.
-  if (!NvFBCToSysCreate(privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+  if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
   {
     free(privData);
     return false;
