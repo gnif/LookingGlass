@@ -70,7 +70,7 @@ inline static int removeRects(FrameDamageRect * rects, int count,
     rects[o-1] = rects[i];
   }
 
-  return 0;
+  return o;
 }
 
 static int cornerCompare(const void * a_, const void * b_)
