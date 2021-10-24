@@ -52,6 +52,7 @@ bool NvFBCInit();
 void NvFBCFree();
 
 bool NvFBCToSysCreate(
+  int            adapterIndex,
   void         * privData,
   unsigned int   privDataSize,
   NvFBCHandle  * handle,
