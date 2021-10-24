@@ -38,6 +38,26 @@ struct Edge
   int delta;
 };
 
+inline static bool rectIntersects(const FrameDamageRect * r1,
+    const FrameDamageRect * r2)
+{
+  return !(
+    r1->x > r2->x + r2->width  ||
+    r2->x > r1->x + r1->width  ||
+    r1->y > r2->y + r2->height ||
+    r2->y > r1->y + r1->height);
+}
+
+inline static bool rectContains(const FrameDamageRect * r1,
+    const FrameDamageRect * r2)
+{
+  return !(
+    r2->x              < r1->x              ||
+    r2->x + r2->width  > r1->x + r1->width  ||
+    r2->y              < r1->y              ||
+    r2->y + r2->height > r1->y + r1->height);
+}
+
 static int cornerCompare(const void * a_, const void * b_)
 {
   const struct Corner * a = a_;
@@ -201,15 +221,6 @@ void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
     framebuffer_get_buffer(frame), srcStride, &data, fbRowStart, NULL);
 }
 
-inline static bool rectIntersects(const FrameDamageRect * r1, const FrameDamageRect * r2)
-{
-  return !(
-    r1->x > r2->x + r2->width  ||
-    r2->x > r1->x + r1->width  ||
-    r1->y > r2->y + r2->height ||
-    r2->y > r1->y + r1->height);
-}
-
 int rectsMergeOverlapping(FrameDamageRect * rects, int count)
 {
   if (count == 0)
@@ -224,19 +235,28 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
   {
     changed = false;
     for (int i = 0; i < count; ++i)
-      if (!removed[i])
-        for (int j = i + 1; j < count; ++j)
-          if (!removed[j] && rectIntersects(rects + i, rects + j))
-          {
-            uint32_t x2 = max(rects[i].x + rects[i].width, rects[j].x + rects[j].width);
-            uint32_t y2 = max(rects[i].y + rects[i].height, rects[j].y + rects[j].height);
-            rects[i].x = min(rects[i].x, rects[j].x);
-            rects[i].y = min(rects[i].y, rects[j].y);
-            rects[i].width  = x2 - rects[i].x;
-            rects[i].height = y2 - rects[i].y;
-            removed[j] = true;
-            changed = true;
-          }
+    {
+      if (removed[i])
+        continue;
+
+      for (int j = i + 1; j < count; ++j)
+      {
+        if (removed[j] || !rectIntersects(rects + i, rects + j))
+          continue;
+
+        rects[i].x = min(rects[i].x, rects[j].x);
+        rects[i].y = min(rects[i].y, rects[j].y);
+
+        rects[i].width = max(rects[i].x + rects[i].width,
+            rects[j].x + rects[j].width) - rects[i].x;
+
+        rects[i].height = max(rects[i].y + rects[i].height,
+            rects[j].y + rects[j].height) - rects[i].y;
+
+        removed[j] = true;
+        changed    = true;
+      }
+    }
   }
   while (changed);
 
@@ -244,15 +264,8 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
   for (int i = 0; i < count; ++i)
     if (!removed[i])
       rects[o++] = rects[i];
-  return o;
-}
 
-inline static bool rectContains(const FrameDamageRect * r1, const FrameDamageRect * r2)
-{
-  return r1->x <= r2->x &&
-         r1->y <= r2->y &&
-         r1->x + r1->width >= r2->x + r2->width &&
-         r1->y + r1->height >= r2->y + r2->height;
+  return o;
 }
 
 int rectsRejectContained(FrameDamageRect * rects, int count)
@@ -261,14 +274,23 @@ int rectsRejectContained(FrameDamageRect * rects, int count)
   memset(removed, 0, sizeof(removed));
 
   for (int i = 0; i < count; ++i)
-    if (!removed[i])
-      for (int j = 0; j < count; ++j)
-        if (!removed[j] && j != i && rectContains(rects + i, rects + j))
-          removed[j] = true;
+  {
+    if (removed[i])
+      continue;
+
+    for (int j = 0; j < count; ++j)
+    {
+      if (j == i || removed[j])
+        continue;
+
+      removed[j] = rectContains(rects + i, rects + j);
+    }
+  }
 
   int o = 0;
   for (int i = 0; i < count; ++i)
     if (!removed[i])
       rects[o++] = rects[i];
+
   return o;
 }
