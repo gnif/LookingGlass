@@ -355,11 +355,13 @@ done:
 }
 
 struct DisjointSet {
-  int id;
-  int x1;
-  int y1;
-  int x2;
-  int y2;
+  int  id;
+  bool use;
+  bool row;
+  int  x1;
+  int  y1;
+  int  x2;
+  int  y2;
 };
 
 static int dsFind(struct DisjointSet * ds, int id)
@@ -377,9 +379,7 @@ static void dsUnion(struct DisjointSet * ds, int a, int b)
     return;
 
   ds[b].id = a;
-  ds[a].x1 = min(ds[a].x1, ds[b].x1);
   ds[a].x2 = max(ds[a].x2, ds[b].x2);
-  ds[a].y1 = min(ds[a].y1, ds[b].y1);
   ds[a].y2 = max(ds[a].y2, ds[b].y2);
 }
 
@@ -390,25 +390,93 @@ static void updateDamageRects(CaptureFrame * frame)
 
   struct DisjointSet ds[w * h];
 
+  // init the ds usage
+  for(unsigned int i = 0; i < ARRAY_LENGTH(ds); ++i)
+    ds[i].use = (bool)this->diffMap[i];
+
+  // reduce the number of reusuting rectangles by filling in holes and merging
+  // iiregular shapes into contiguous rectangles
+  bool resolve;
+  do
+  {
+    resolve = false;
+    for (unsigned int y = 0; y < h; ++y)
+      for (unsigned int x = 0; x < w; ++x)
+      {
+        const int c = y * w + x;     // current
+        if (ds[c].use)
+          continue;
+
+        const int l  = c - 1; // left
+        const int r  = c + 1; // right
+        const int u  = c - w; // up
+        const int d  = c + w; // down
+
+        if ((x < w - 1 && y < h - 1 && ds[r].use && ds[d].use) ||
+            (x > 0     && y < h - 1 && ds[l].use && ds[d].use) ||
+            (x < w - 1 && y > 0     && ds[r].use && ds[u].use) ||
+            (x > 0     && y > 0     && ds[l].use && ds[u].use) ||
+            (x > 0     && y > 0     &&
+             x < w - 1 && y < h - 1 && ds[l].use && ds[u].use &&
+                                       ds[r].use && ds[d].use)
+            )
+        {
+          ds[c].use = true;
+          resolve   = true;
+        }
+      }
+  }
+  while(resolve);
+
   for (unsigned int y = 0; y < h; ++y)
     for (unsigned int x = 0; x < w; ++x)
-      if (this->diffMap[y * w + x])
+    {
+      const int c = y * w + x; // current
+      const int l = c - 1;     // left
+      const int u = c - w;     // up
+
+      if (ds[c].use)
       {
-        ds[y * w + x].id = y * w + x;
-        ds[y * w + x].x1 = ds[y * w + x].x2 = x;
-        ds[y * w + x].y1 = ds[y * w + x].y2 = y;
+        ds[c].id  = c;
+        ds[c].row = false;
+        ds[c].x1  = ds[c].x2 = x;
+        ds[c].y1  = ds[c].y2 = y;
 
-        if (y > 0 && this->diffMap[(y-1) * w + x])
-          dsUnion(ds, (y-1) * w + x, y * w + x);
+        if (y > 0 && ds[u].use)
+        {
+          bool ok = true;
+          if (x > 0 && ds[l].id != ds[u].id)
+          {
+            // no need to use dsFind as the search order ensures that the id has
+            // been fully resolved of the block above
+            for(unsigned int j = ds[ds[u].id].x1; j <= ds[ds[u].id].x2; ++j)
+              if (!ds[y * w + j].use)
+              {
+                ok = false;
+                break;
+              }
+          }
 
-        if (x > 0 && this->diffMap[y * w + x - 1])
-          dsUnion(ds, y * w + x, y * w + x - 1);
+          if (ok)
+          {
+            dsUnion(ds, u, c);
+            ds[c].row = true;
+            continue;
+          }
+        }
+
+        if (x > 0 && ds[l].use && (ds[l].id == l || !ds[l].row))
+          dsUnion(ds, l, c);
       }
+    }
 
   int rectId = 0;
   for (unsigned int y = 0; y < h; ++y)
     for (unsigned int x = 0; x < w; ++x)
-      if (this->diffMap[y * w + x] && ds[y * w + x].id == y * w + x)
+    {
+      const int c = y * w + x;
+
+      if (ds[c].use && ds[c].id == c)
       {
         if (rectId >= KVMFR_MAX_DAMAGE_RECTS)
         {
@@ -416,10 +484,10 @@ static void updateDamageRects(CaptureFrame * frame)
           goto done;
         }
 
-        int x1 = ds[y * w + x].x1 << this->diffShift;
-        int y1 = ds[y * w + x].y1 << this->diffShift;
-        int x2 = min((ds[y * w + x].x2 + 1) << this->diffShift, this->width);
-        int y2 = min((ds[y * w + x].y2 + 1) << this->diffShift, this->height);
+        int x1 = ds[c].x1 << this->diffShift;
+        int y1 = ds[c].y1 << this->diffShift;
+        int x2 = min((ds[c].x2 + 1) << this->diffShift, this->width);
+        int y2 = min((ds[c].y2 + 1) << this->diffShift, this->height);
         frame->damageRects[rectId++] = (FrameDamageRect) {
           .x = x1,
           .y = y1,
@@ -427,8 +495,7 @@ static void updateDamageRects(CaptureFrame * frame)
           .height = y2 - y1,
         };
       }
-
-  rectId = rectsRejectContained(frame->damageRects, rectId);
+    }
 
 done:
   frame->damageRectsCount = rectId;
