@@ -957,11 +957,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   struct CursorState cursorState = { .visible = false };
   struct DesktopDamage * desktopDamage;
 
-  char accumulated_[
+  struct DamageRects * accumulated = (struct DamageRects *)alloca(
     sizeof(struct DamageRects) +
     MAX_ACCUMULATED_DAMAGE * sizeof(struct FrameDamageRect)
-  ];
-  struct DamageRects * accumulated = (struct DamageRects *) accumulated_;
+  );
   accumulated->count = 0;
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
