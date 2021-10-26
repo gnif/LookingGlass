@@ -256,7 +256,7 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
 
       for (int j = i + 1; j < count; ++j)
       {
-        if (!(!removed[j] && rectIntersects(rects + i, rects + j)))
+        if (removed[j] || !rectIntersects(rects + i, rects + j))
           continue;
 
         rects[i].x = min(rects[i].x, rects[j].x);
