@@ -259,14 +259,15 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
         if (removed[j] || !rectIntersects(rects + i, rects + j))
           continue;
 
-        rects[i].x = min(rects[i].x, rects[j].x);
-        rects[i].y = min(rects[i].y, rects[j].y);
+        const uint32_t x2 = max(rects[i].x + rects[i].width,
+            rects[j].x + rects[j].width);
+        const uint32_t y2 = max(rects[i].y + rects[i].height,
+            rects[j].y + rects[j].height);
 
-        rects[i].width = max(rects[i].x + rects[i].width,
-            rects[j].x + rects[j].width) - rects[i].x;
-
-        rects[i].height = max(rects[i].y + rects[i].height,
-            rects[j].y + rects[j].height) - rects[i].y;
+        rects[i].x      = min(rects[i].x, rects[j].x);
+        rects[i].y      = min(rects[i].y, rects[j].y);
+        rects[i].width  = x2 - rects[i].x;
+        rects[i].height = y2 - rects[i].y;
 
         removed[j] = true;
         changed    = true;
