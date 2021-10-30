@@ -178,7 +178,7 @@ static bool xcb_deinit(void)
   }
 
   this->initialized = false;
-  return false;
+  return true;
 }
 
 static void xcb_free(void)
