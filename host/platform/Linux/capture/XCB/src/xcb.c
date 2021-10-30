@@ -20,6 +20,7 @@
 
 #include "interface/capture.h"
 #include "interface/platform.h"
+#include "common/option.h"
 #include "common/debug.h"
 #include "common/event.h"
 #include <string.h>
@@ -33,6 +34,7 @@
 struct xcb
 {
   bool               initialized;
+  bool               stop;
   xcb_connection_t * xcb;
   xcb_screen_t     * xcbScreen;
   uint32_t           seg;
@@ -61,6 +63,16 @@ static const char * xcb_getName(void)
   return "XCB";
 }
 
+static void xcb_initOptions(void)
+{
+  struct Option options[] =
+  {
+    {0}
+  };
+
+  option_register(options);
+}
+
 static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
 {
   DEBUG_ASSERT(!this);
@@ -86,6 +98,7 @@ static bool xcb_init(void)
 
   lgResetEvent(this->frameEvent);
 
+  this->stop = false;
   this->xcb = xcb_connect(NULL, NULL);
   if (!this->xcb || xcb_connection_has_error(this->xcb))
   {
@@ -129,6 +142,17 @@ static bool xcb_init(void)
 fail:
   xcb_deinit();
   return false;
+}
+
+static void xcb_stop(void)
+{
+  this->stop = true;
+
+  if(this->pointerThread)
+  {
+    lgJoinThread(this->pointerThread, NULL);
+    this->pointerThread = NULL;
+  }
 }
 
 static bool xcb_deinit(void)
@@ -232,9 +256,11 @@ struct CaptureInterface Capture_XCB =
 {
   .shortName       = "XCB",
   .asyncCapture    = true,
+  .initOptions     = xcb_initOptions,
   .getName         = xcb_getName,
   .create          = xcb_create,
   .init            = xcb_init,
+  .stop            = xcb_stop,
   .deinit          = xcb_deinit,
   .free            = xcb_free,
   .capture         = xcb_capture,
