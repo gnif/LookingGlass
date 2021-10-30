@@ -23,9 +23,11 @@
 #include "common/option.h"
 #include "common/debug.h"
 #include "common/event.h"
+#include "common/thread.h"
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <unistd.h>
 #include <xcb/shm.h>
 #include <xcb/xfixes.h>
 #include <sys/ipc.h>
@@ -33,17 +35,23 @@
 
 struct xcb
 {
-  bool               initialized;
-  bool               stop;
-  xcb_connection_t * xcb;
-  xcb_screen_t     * xcbScreen;
-  uint32_t           seg;
-  int                shmID;
-  void             * data;
-  LGEvent          * frameEvent;
+  bool                        initialized;
+  bool                        stop;
+  xcb_connection_t          * xcb;
+  xcb_screen_t              * xcbScreen;
+  uint32_t                    seg;
+  int                         shmID;
+  void                      * data;
+  LGEvent                   * frameEvent;
+
+  CaptureGetPointerBuffer     getPointerBufferFn;
+  CapturePostPointerBuffer    postPointerBufferFn;
+  LGThread                  * pointerThread;
 
   unsigned int width;
   unsigned int height;
+
+  int mouseX, mouseY, mouseHotX, mouseHotY;
 
   bool                                 hasFrame;
   xcb_shm_get_image_cookie_t           imgC;
@@ -51,6 +59,8 @@ struct xcb
 };
 
 static struct xcb * this = NULL;
+
+static int pointerThread(void * unused);
 
 // forwards
 
@@ -80,6 +90,9 @@ static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPo
   this->shmID      = -1;
   this->data       = (void *)-1;
   this->frameEvent = lgCreateEvent(true, 20);
+
+  this->getPointerBufferFn = getPointerBufferFn;
+  this->postPointerBufferFn = postPointerBufferFn;
 
   if (!this->frameEvent)
   {
@@ -136,6 +149,37 @@ static bool xcb_init(void)
     goto fail;
   }
   DEBUG_INFO("Frame Data       : 0x%" PRIXPTR, (uintptr_t)this->data);
+
+  xcb_query_extension_cookie_t extension_cookie =
+		xcb_query_extension(this->xcb, strlen("XFIXES"), "XFIXES");
+  xcb_query_extension_reply_t * extension_reply =
+		xcb_query_extension_reply(this->xcb, extension_cookie, NULL);
+  if(!extension_reply)
+  {
+    DEBUG_ERROR("Extension \"XFIXES\" isn't available");
+    free(extension_reply);
+    goto fail;
+  }
+  free(extension_reply);
+
+  xcb_xfixes_query_version_cookie_t version_cookie =
+		xcb_xfixes_query_version(this->xcb, XCB_XFIXES_MAJOR_VERSION, XCB_XFIXES_MINOR_VERSION);
+  xcb_xfixes_query_version_reply_t * version_reply =
+		xcb_xfixes_query_version_reply(this->xcb, version_cookie, NULL);
+  if(!version_reply)
+  {
+    DEBUG_ERROR("Extension \"XFIXES\" isn't available");
+    free(version_reply);
+    goto fail;
+  }
+  free(version_reply);
+
+  if (!lgCreateThread("XCBPointer", pointerThread, NULL, &this->pointerThread))
+  {
+    DEBUG_ERROR("Failed to create the XCBPointer thread");
+    xcb_deinit();
+    return false;
+  }
 
   this->initialized = true;
   return true;
@@ -250,6 +294,77 @@ static CaptureResult xcb_getFrame(FrameBuffer * frame,
 
   this->hasFrame = false;
   return CAPTURE_RESULT_OK;
+}
+
+static int pointerThread(void * unused)
+{
+  while (!this->stop)
+  {
+    if (this->stop)
+      break;
+
+    CapturePointer pointer = { 0 };
+
+    this->curC = xcb_xfixes_get_cursor_image_unchecked(this->xcb);
+
+    void * data;
+    uint32_t size;
+    if (!this->getPointerBufferFn(&data, &size))
+    {
+      DEBUG_WARN("failed to get a pointer buffer");
+      continue;
+    }
+
+    xcb_xfixes_get_cursor_image_reply_t * curReply;
+    curReply = xcb_xfixes_get_cursor_image_reply(this->xcb, this->curC, NULL);
+    if (curReply == NULL)
+    {
+      DEBUG_WARN("Failed to get cursor reply");
+      continue;
+    }
+
+    if(curReply->xhot != this->mouseHotX || curReply->yhot != this->mouseHotY)
+    {
+      pointer.shapeUpdate = true;
+      this->mouseHotX = curReply->xhot;
+      this->mouseHotY = curReply->yhot;
+
+      uint32_t * src = xcb_xfixes_get_cursor_image_cursor_image(curReply);
+      uint32_t * dst = (uint32_t *) (data);
+      memcpy(dst, src, curReply->width * curReply->height * sizeof(uint32_t));
+    }
+    else
+      pointer.shapeUpdate = false;
+
+    if(curReply->x != this->mouseX || curReply->y != this->mouseY)
+    {
+      pointer.positionUpdate = true;
+      this->mouseX = curReply->x;
+      this->mouseY = curReply->y;
+    }
+    else
+      pointer.positionUpdate = false;
+
+    if(pointer.positionUpdate || pointer.shapeUpdate)
+    {
+      pointer.hx      = curReply->xhot;
+      pointer.hy      = curReply->yhot;
+      pointer.visible = true;
+      pointer.x       = curReply->x - curReply->xhot;
+      pointer.y       = curReply->y - curReply->yhot;
+      pointer.format  = CAPTURE_FMT_COLOR;
+      pointer.width   = curReply->width;
+      pointer.height  = curReply->height;
+      pointer.pitch   = curReply->width * 4;
+
+      this->postPointerBufferFn(pointer);
+    }
+
+    free(curReply);
+    usleep(1000);
+  }
+
+  return 0;
 }
 
 struct CaptureInterface Capture_XCB =
