@@ -61,8 +61,8 @@ static inline void nsleep(uint64_t ns)
 #else
   const struct timespec ts =
   {
-    .tv_sec  = ns / 1e9,
-    .tv_nsec = ns - ((ns / 1e9) * 1e9)
+    .tv_sec  = ns / 1000000000,
+    .tv_nsec = ns % 1000000000,
   };
   nanosleep(&ts, NULL);
 #endif
