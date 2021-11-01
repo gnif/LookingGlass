@@ -305,6 +305,7 @@ int main_cursorThread(void * unused)
   LGMP_STATUS         status;
   LG_RendererCursor   cursorType = LG_CURSOR_COLOR;
   KVMFRCursor *       cursor     = NULL;
+  int                 cursorSize = 0;
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
@@ -377,6 +378,12 @@ int main_cursorThread(void * unused)
       break;
     }
 
+    if (cursor && msg.size > cursorSize)
+    {
+      free(cursor);
+      cursor = NULL;
+    }
+
     /* copy and release the message ASAP */
     if (!cursor)
     {
@@ -387,6 +394,7 @@ int main_cursorThread(void * unused)
         g_state.state = APP_STATE_SHUTDOWN;
         break;
       }
+      cursorSize = msg.size;
     }
 
     memcpy(cursor, msg.mem, msg.size);
