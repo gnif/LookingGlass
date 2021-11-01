@@ -303,7 +303,8 @@ static int renderThread(void * unused)
 int main_cursorThread(void * unused)
 {
   LGMP_STATUS         status;
-  LG_RendererCursor   cursorType     = LG_CURSOR_COLOR;
+  LG_RendererCursor   cursorType = LG_CURSOR_COLOR;
+  KVMFRCursor *       cursor     = NULL;
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
@@ -377,9 +378,18 @@ int main_cursorThread(void * unused)
     }
 
     /* copy and release the message ASAP */
-    char buffer[msg.size];
-    memcpy(buffer, msg.mem, msg.size);
-    KVMFRCursor * cursor = (KVMFRCursor *)buffer;
+    if (!cursor)
+    {
+      cursor = malloc(msg.size);
+      if (!cursor)
+      {
+        DEBUG_ERROR("failed to allocate %d bytes for cursor", msg.size);
+        g_state.state = APP_STATE_SHUTDOWN;
+        break;
+      }
+    }
+
+    memcpy(cursor, msg.mem, msg.size);
     lgmpClientMessageDone(g_state.pointerQueue);
 
     g_cursor.guest.visible =
@@ -446,6 +456,14 @@ int main_cursorThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&g_state.pointerQueue);
+
+
+  if (cursor)
+  {
+    free(cursor);
+    cursor = NULL;
+  }
+
   return 0;
 }
 
