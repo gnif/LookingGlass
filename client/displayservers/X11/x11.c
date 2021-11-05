@@ -991,7 +991,8 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       atomic_store(&x11.lastWMEvent, microtime());
       XILeaveEvent *xie = cookie->data;
       if (!x11.entered || xie->event != x11.window ||
-          button_state != 0 || app_isCaptureMode())
+          button_state != 0 || app_isCaptureMode() ||
+          xie->mode != XINotifyNormal)
         return;
 
       app_updateCursorPos(xie->event_x, xie->event_y);
