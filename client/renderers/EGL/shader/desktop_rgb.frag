@@ -14,7 +14,6 @@ out vec4 color;
 uniform sampler2D sampler1;
 
 uniform int   scaleAlgo;
-uniform ivec2 textureSize;
 
 uniform float nvGain;
 uniform int   cbMode;
@@ -24,7 +23,8 @@ void main()
   switch (scaleAlgo)
   {
     case EGL_SCALE_NEAREST:
-      color = texelFetch(sampler1, ivec2(uv * vec2(textureSize)), 0);
+      vec2 ts = vec2(textureSize(sampler1, 0));
+      color   = texelFetch(sampler1, ivec2(uv * ts), 0);
       break;
 
     case EGL_SCALE_LINEAR:

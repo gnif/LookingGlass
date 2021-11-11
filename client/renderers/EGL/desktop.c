@@ -46,7 +46,6 @@ struct DesktopShader
   EGL_Shader * shader;
   GLint uTransform;
   GLint uDesktopSize;
-  GLint uTextureSize;
   GLint uScaleAlgo;
   GLint uNVGain;
   GLint uCBMode;
@@ -105,7 +104,6 @@ static bool egl_initDesktopShader(
 
   shader->uTransform   = egl_shaderGetUniform(shader->shader, "transform"  );
   shader->uDesktopSize = egl_shaderGetUniform(shader->shader, "desktopSize");
-  shader->uTextureSize = egl_shaderGetUniform(shader->shader, "textureSize");
   shader->uScaleAlgo   = egl_shaderGetUniform(shader->shader, "scaleAlgo"  );
   shader->uNVGain      = egl_shaderGetUniform(shader->shader, "nvGain"     );
   shader->uCBMode      = egl_shaderGetUniform(shader->shader, "cbMode"     );
@@ -427,11 +425,6 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       .type        = EGL_UNIFORM_TYPE_2F,
       .location    = shader->uDesktopSize,
       .f           = { desktop->width, desktop->height },
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_2I,
-      .location    = shader->uTextureSize,
-      .i           = { finalSizeX, finalSizeY },
     },
     {
       .type        = EGL_UNIFORM_TYPE_M3x2FV,
