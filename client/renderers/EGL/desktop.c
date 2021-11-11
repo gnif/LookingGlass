@@ -400,11 +400,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     case EGL_SCALE_AUTO:
       switch (scaleType)
       {
-        case EGL_DESKTOP_NOSCALE:
         case EGL_DESKTOP_UPSCALE:
           scaleAlgo = EGL_SCALE_NEAREST;
           break;
 
+        case EGL_DESKTOP_NOSCALE:
         case EGL_DESKTOP_DOWNSCALE:
           scaleAlgo = EGL_SCALE_LINEAR;
           break;
