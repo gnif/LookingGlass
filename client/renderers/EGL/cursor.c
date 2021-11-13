@@ -304,37 +304,37 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_ROTATE_0:
       state.rect.x = (pos.x * width + width) / 2;
       state.rect.y = (-pos.y * height + height) / 2 - size.h * height;
-      state.rect.w = size.w * width + 2;
-      state.rect.h = size.h * height + 2;
+      state.rect.w = size.w * width + 3;
+      state.rect.h = size.h * height + 3;
       break;
 
     case LG_ROTATE_90:
       state.rect.x = (-pos.y * width + width) / 2 - size.h * width;
       state.rect.y = (-pos.x * height + height) / 2 - size.w * height;
-      state.rect.w = size.h * width + 2;
-      state.rect.h = size.w * height + 2;
+      state.rect.w = size.h * width + 3;
+      state.rect.h = size.w * height + 3;
       break;
 
     case LG_ROTATE_180:
       state.rect.x = (-pos.x * width + width) / 2 - size.w * width;
       state.rect.y = (pos.y * height + height) / 2;
-      state.rect.w = size.w * width + 2;
-      state.rect.h = size.h * height + 2;
+      state.rect.w = size.w * width + 3;
+      state.rect.h = size.h * height + 3;
       break;
 
     case LG_ROTATE_270:
       state.rect.x = (pos.y * width + width) / 2;
       state.rect.y = (pos.x * height + height) / 2;
-      state.rect.w = size.h * width + 2;
-      state.rect.h = size.w * height + 2;
+      state.rect.w = size.h * width + 3;
+      state.rect.h = size.w * height + 3;
       break;
 
     default:
       DEBUG_UNREACHABLE();
   }
 
-  state.rect.x = max(0, state.rect.x);
-  state.rect.y = max(0, state.rect.y);
+  state.rect.x = max(0, state.rect.x - 1);
+  state.rect.y = max(0, state.rect.y - 1);
 
   glEnable(GL_BLEND);
   switch(cursor->type)
