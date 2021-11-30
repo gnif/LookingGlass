@@ -573,6 +573,9 @@ static bool x11Init(const LG_DSInitParams params)
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
 
+  if (!params.center)
+    XMoveWindow(x11.display, x11.window, params.x, params.y);
+
   XSetLocaleModifiers(""); // Load XMODIFIERS
   x11.xim = XOpenIM(x11.display, 0, 0, 0);
 
