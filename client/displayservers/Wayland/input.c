@@ -290,16 +290,39 @@ static const struct wl_keyboard_listener keyboardListener = {
   .modifiers = keyboardModifiersHandler,
 };
 
+static void waylandCleanUpPointer(void)
+{
+  INTERLOCKED_SECTION(wlWm.confineLock, {
+    if (wlWm.lockedPointer)
+    {
+      zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
+      wlWm.lockedPointer = NULL;
+    }
+
+    if (wlWm.confinedPointer)
+    {
+      zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
+      wlWm.confinedPointer = NULL;
+    }
+  });
+
+  if (wlWm.relativePointer)
+  {
+    zwp_relative_pointer_v1_destroy(wlWm.relativePointer);
+    wlWm.relativePointer = NULL;
+  }
+
+  wl_pointer_destroy(wlWm.pointer);
+  wlWm.pointer = NULL;
+}
+
 // Seat-handling listeners.
 
 static void handlePointerCapability(uint32_t capabilities)
 {
   bool hasPointer = capabilities & WL_SEAT_CAPABILITY_POINTER;
   if (!hasPointer && wlWm.pointer)
-  {
-    wl_pointer_destroy(wlWm.pointer);
-    wlWm.pointer = NULL;
-  }
+    waylandCleanUpPointer();
   else if (hasPointer && !wlWm.pointer)
   {
     wlWm.pointer = wl_seat_get_pointer(wlWm.seat);
@@ -394,7 +417,9 @@ void waylandInputFree(void)
 {
   waylandUngrabPointer();
   LG_LOCK_FREE(wlWm.confineLock);
-  wl_pointer_destroy(wlWm.pointer);
+
+  if (wlWm.pointer)
+    waylandCleanUpPointer();
   wl_keyboard_destroy(wlWm.keyboard);
   wl_seat_destroy(wlWm.seat);
 
