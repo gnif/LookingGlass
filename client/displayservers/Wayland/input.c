@@ -304,6 +304,7 @@ static void handlePointerCapability(uint32_t capabilities)
   {
     wlWm.pointer = wl_seat_get_pointer(wlWm.seat);
     wl_pointer_add_listener(wlWm.pointer, &pointerListener, NULL);
+    waylandSetPointer(wlWm.cursorId);
   }
 }
 

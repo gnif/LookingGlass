@@ -95,6 +95,9 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandPresentationInit())
     return false;
 
+  if (!waylandCursorInit())
+    return false;
+
   if (!waylandInputInit())
     return false;
 
@@ -102,9 +105,6 @@ static bool waylandInit(const LG_DSInitParams params)
     return false;
 
   if (!waylandEGLInit(params.w, params.h))
-    return false;
-
-  if (!waylandCursorInit())
     return false;
 
 #ifdef ENABLE_OPENGL
