@@ -217,5 +217,6 @@ void waylandSetPointer(LG_DSPointer pointer)
   wlWm.cursor     = wlWm.cursors[pointer];
   wlWm.cursorHotX = wlWm.cursorHot[pointer].x;
   wlWm.cursorHotY = wlWm.cursorHot[pointer].y;
-  wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
+  if (wlWm.pointer)
+    wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
 }
