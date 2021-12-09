@@ -530,7 +530,9 @@ void core_handleMouseNormal(double ex, double ey)
           g_state.ds->ungrabPointer();
           core_warpPointer(tx, ty, true);
 
-          if (!isInView() && tx >= 0 && tx < g_state.windowW && ty >= 0 && ty < g_state.windowH)
+          if (!isInView() &&
+              tx >= 0 && tx < g_state.windowW &&
+              ty >= 0 && ty < g_state.windowH)
             core_setCursorInView(false);
           break;
 
