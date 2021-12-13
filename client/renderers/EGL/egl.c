@@ -906,7 +906,11 @@ inline static EGLint egl_bufferAge(struct Inst * this)
     return 0;
 
   EGLint result;
-  eglQuerySurface(this->display, this->surface, EGL_BUFFER_AGE_EXT, &result);
+  if (eglQuerySurface(this->display, this->surface, EGL_BUFFER_AGE_EXT, &result) == EGL_FALSE)
+  {
+    DEBUG_ERROR("eglQuerySurface(EGL_BUFFER_AGE_EXT) failed");
+    return 0;
+  }
   return result;
 }
 
