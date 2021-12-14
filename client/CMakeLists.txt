@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.0)
 project(looking-glass-client C CXX)
 
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+
+if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
+	message(FATAL_ERROR
+		"\n"
+		"In-source builds are not supported\n"
+		"See build instructions provided in: "
+		"${PROJECT_TOP}/doc/build.rst\n"
+		"Refusing to continue"
+	)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(CheckSubmodule)
