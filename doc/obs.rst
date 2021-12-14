@@ -59,7 +59,7 @@ Alternatively if you would like to install the plugin for all users.
 Installation
 ~~~~~~~~~~~~
 
-You can install the plugin for by running ``make install``.
+You can install the plugin by running ``make install``.
 
 .. code:: bash
 
