@@ -798,12 +798,6 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   glGetIntegerv(GL_MAJOR_VERSION, &esMaj);
   glGetIntegerv(GL_MINOR_VERSION, &esMin);
 
-  if (!util_hasGLExt(gl_exts, "GL_EXT_buffer_storage"))
-  {
-    DEBUG_ERROR("GL_EXT_buffer_storage is needed to use EGL backend");
-    return false;
-  }
-
   if (!util_hasGLExt(gl_exts, "GL_EXT_texture_format_BGRA8888"))
   {
     DEBUG_ERROR("GL_EXT_texture_format_BGRA8888 is needed to use EGL backend");
@@ -836,7 +830,14 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     this->dmaSupport = true;
 
   if (!this->dmaSupport)
+  {
     useDMA = false;
+    if (!util_hasGLExt(gl_exts, "GL_EXT_buffer_storage"))
+    {
+      DEBUG_ERROR("GL_EXT_buffer_storage is needed to use EGL backend");
+      return false;
+    }
+  }
 
   if (debugContext)
   {

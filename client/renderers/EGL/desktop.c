@@ -326,6 +326,13 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
 
     desktop->useDMA = false;
 
+    const char * gl_exts = (const char *)glGetString(GL_EXTENSIONS);
+    if (!util_hasGLExt(gl_exts, "GL_EXT_buffer_storage"))
+    {
+      DEBUG_ERROR("GL_EXT_buffer_storage is needed to use EGL backend");
+      return false;
+    }
+
     egl_textureFree(&desktop->texture);
     if (!egl_textureInit(&desktop->texture, desktop->display,
           EGL_TEXTYPE_FRAMEBUFFER, true))
