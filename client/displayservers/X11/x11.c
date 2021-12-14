@@ -1643,7 +1643,10 @@ static void x11GrabPointer(void)
   XISetMask(mask.mask, XI_Enter           );
   XISetMask(mask.mask, XI_Leave           );
 
-  Status ret = XIGrabDevice(
+  Status ret;
+  for(int retry = 0; retry < 2; ++retry)
+  {
+    ret = XIGrabDevice(
       x11.display,
       x11.pointerDev,
       x11.window,
@@ -1653,6 +1656,13 @@ static void x11GrabPointer(void)
       XIGrabModeAsync,
       XINoOwnerEvents,
       &mask);
+
+    // on some WMs (i3) for an unknown reason the first grab attempt when
+    // switching to a desktop that has LG on it fails with GrabFrozen, however
+    // adding as short delay seems to resolve the issue.
+    if (ret == GrabFrozen && retry == 0)
+      usleep(100000);
+  }
 
   if (ret != Success)
   {
