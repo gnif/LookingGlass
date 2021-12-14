@@ -1661,7 +1661,12 @@ static void x11GrabPointer(void)
     // switching to a desktop that has LG on it fails with GrabFrozen, however
     // adding as short delay seems to resolve the issue.
     if (ret == GrabFrozen && retry == 0)
+    {
       usleep(100000);
+      continue;
+    }
+
+    break;
   }
 
   if (ret != Success)
