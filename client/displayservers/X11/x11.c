@@ -82,6 +82,7 @@ static void x11SetFullscreen(bool fs);
 static int  x11EventThread(void * unused);
 static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
+static void x11GrabPointer(void);
 
 static void x11DoPresent(void)
 {
@@ -165,6 +166,69 @@ static bool x11EarlyInit(void)
 {
   XInitThreads();
   return true;
+}
+
+static void x11CheckEWMHSupport(void)
+{
+  if (x11atoms._NET_SUPPORTING_WM_CHECK == None ||
+      x11atoms._NET_SUPPORTED == None)
+    return;
+
+  Atom type;
+  int fmt;
+  unsigned long num, bytes;
+  unsigned char *data;
+
+  if (XGetWindowProperty(x11.display, DefaultRootWindow(x11.display),
+      x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out;
+
+  Window * windowFromRoot = (Window *)data;
+
+  if (XGetWindowProperty(x11.display, *windowFromRoot,
+      x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out_root;
+
+  Window * windowFromChild = (Window *)data;
+  if (*windowFromChild != *windowFromRoot)
+    goto out_child;
+
+  if (XGetWindowProperty(x11.display, DefaultRootWindow(x11.display),
+      x11atoms._NET_SUPPORTED, 0, ~0L, False, AnyPropertyType,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out_child;
+
+  Atom * supported = (Atom *)data;
+  unsigned long supportedCount = num;
+
+  if (XGetWindowProperty(x11.display, *windowFromRoot,
+      x11atoms._NET_WM_NAME, 0, ~0L, False, AnyPropertyType,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out_supported;
+
+  char * wmName = (char *)data;
+
+  for(unsigned long i = 0; i < supportedCount; ++i)
+  {
+    if (supported[i] == x11atoms._NET_WM_STATE_FOCUSED)
+      x11.ewmhHasFocusEvent = true;
+  }
+
+  DEBUG_INFO("EWMH-complient window manager detected: %s", wmName);
+  x11.ewmhSupport = true;
+
+
+  XFree(wmName);
+out_supported:
+  XFree(supported);
+out_child:
+  XFree(windowFromChild);
+out_root:
+  XFree(windowFromRoot);
+out:
+  return;
 }
 
 static bool x11Init(const LG_DSInitParams params)
@@ -271,6 +335,9 @@ static bool x11Init(const LG_DSInitParams params)
 
   X11AtomsInit();
   XSetWMProtocols(x11.display, x11.window, &x11atoms.WM_DELETE_WINDOW, 1);
+
+  // check for Extended Window Manager Hints support
+  x11CheckEWMHSupport();
 
   if (params.borderless)
   {
@@ -457,8 +524,12 @@ static bool x11Init(const LG_DSInitParams params)
   eventmask.mask_len = sizeof(mask);
   eventmask.mask     = mask;
 
-  XISetMask(mask, XI_FocusIn      );
-  XISetMask(mask, XI_FocusOut     );
+  if (!x11.ewmhHasFocusEvent)
+  {
+    XISetMask(mask, XI_FocusIn );
+    XISetMask(mask, XI_FocusOut);
+  }
+
   XISetMask(mask, XI_Enter        );
   XISetMask(mask, XI_Leave        );
   XISetMask(mask, XI_Motion       );
@@ -839,6 +910,7 @@ static int x11EventThread(void * unused)
       }
 
       case PropertyNotify:
+
         // ignore property events that are not for us
         if (xe.xproperty.display != x11.display      ||
             xe.xproperty.window  != x11.window       ||
@@ -860,11 +932,20 @@ static int x11EventThread(void * unused)
             break;
 
           bool fullscreen = false;
-          for(int i = 0; i < num; ++i)
+          bool focused    = false;
+          for(unsigned long i = 0; i < num; ++i)
           {
             Atom prop = ((Atom *)data)[i];
             if (prop == x11atoms._NET_WM_STATE_FULLSCREEN)
               fullscreen = true;
+            else if (prop == x11atoms._NET_WM_STATE_FOCUSED)
+              focused = true;
+          }
+
+          if (x11.focused != focused)
+          {
+            x11.focused = focused;
+            app_handleFocusEvent(focused);
           }
 
           x11.fullscreen = fullscreen;
@@ -941,6 +1022,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
   {
     case XI_FocusIn:
     {
+      if (x11.ewmhHasFocusEvent)
+        return;
+
       atomic_store(&x11.lastWMEvent, microtime());
       if (x11.focused)
         return;
@@ -959,6 +1043,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_FocusOut:
     {
+      if (x11.ewmhHasFocusEvent)
+        return;
+
       atomic_store(&x11.lastWMEvent, microtime());
       if (!x11.focused)
         return;

@@ -54,6 +54,11 @@ struct X11DSState
   Window        window;
   XVisualInfo * visual;
 
+  //Extended Window Manager Hints
+  //ref: https://specifications.freedesktop.org/wm-spec/latest/
+  bool              ewmhSupport;
+  bool              ewmhHasFocusEvent;
+
   _Atomic(uint64_t) lastWMEvent;
   bool              invalidateAll;
 
