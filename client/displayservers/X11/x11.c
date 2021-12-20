@@ -84,7 +84,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
 static void x11GrabPointer(void);
 
-static void x11DoPresent(void)
+static void x11DoPresent(uint64_t msc)
 {
   static bool startup = true;
   if (startup)
@@ -114,7 +114,6 @@ static void x11DoPresent(void)
 
   static bool first   = true;
   static uint64_t lastMsc = 0;
-  uint64_t msc = atomic_load(&x11.presentMsc);
 
   uint64_t refill;
   if (!first)
@@ -686,7 +685,7 @@ static bool x11Init(const LG_DSInitParams params)
   }
 
   if (x11.jitRender)
-    x11DoPresent();
+    x11DoPresent(0);
 
   return true;
 
@@ -1338,10 +1337,10 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
     case PresentCompleteNotify:
     {
       XPresentCompleteNotifyEvent * e = cookie->data;
+      x11DoPresent(e->msc);
       atomic_store(&x11.presentMsc, e->msc);
       atomic_store(&x11.presentUst, e->ust);
       lgSignalEvent(x11.frameEvent);
-      x11DoPresent();
       break;
     }
   }
