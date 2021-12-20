@@ -117,7 +117,16 @@ static void x11DoPresent(uint64_t msc)
 
   uint64_t refill;
   if (!first)
-    refill = 50 - (lastMsc - msc);
+  {
+    const uint64_t delta = (lastMsc >= msc) ?
+      lastMsc - msc :
+      ~0ULL - msc + lastMsc;
+
+    if (delta > 50)
+      return;
+
+    refill = 50 - delta;
+  }
   else
   {
     refill  = 50;
