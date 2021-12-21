@@ -1652,7 +1652,7 @@ static void x11GrabPointer(void)
   XISetMask(mask.mask, XI_Leave           );
 
   Status ret;
-  for(int retry = 0; retry < 2; ++retry)
+  for(int retry = 0; retry < 10; ++retry)
   {
     ret = XIGrabDevice(
       x11.display,
@@ -1668,7 +1668,7 @@ static void x11GrabPointer(void)
     // on some WMs (i3) for an unknown reason the first grab attempt when
     // switching to a desktop that has LG on it fails with GrabFrozen, however
     // adding as short delay seems to resolve the issue.
-    if (ret == GrabFrozen && retry == 0)
+    if (ret == GrabFrozen && retry < 9)
     {
       usleep(100000);
       continue;
