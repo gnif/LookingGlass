@@ -172,15 +172,22 @@ Create the following XML block in your domain:
 
    <qemu:commandline>
      <qemu:arg value='-device'/>
-     <qemu:arg value='ivshmem-plain,id=shmem0,memdev=looking-glass'/>
+     <qemu:arg value='{"driver":"ivshmem-plain","id":"shmem0","memdev":"looking-glass"}'/>
      <qemu:arg value='-object'/>
-     <qemu:arg value='memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=32M,share=yes'/>
+     <qemu:arg value='{"qom-type":"memory-backend-file","id":"looking-glass","mem-path":"/dev/kvmfr0","size":33554432,"share":true}'/>
    </qemu:commandline>
 
 .. note::
 
-   Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
-   to the ``<domain>`` tag.
+   - Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
+     to the ``<domain>`` tag.
+
+   - The ``"size"`` tag represents the size of the shared memory device in bytes.
+     Once you determine the proper size of the device as per 
+     :ref:`Determining Memory <client_determining_memory>`, use the figure you got
+     to calculate the size in bytes:
+     
+     ``size_in_MB x 1024 x 1024 = size_in_bytes``
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
