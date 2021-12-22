@@ -166,7 +166,9 @@ Add the following arguments to your ``qemu`` command line::
 libvirt
 ^^^^^^^
 
-Create the following XML block in your domain:
+Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration became the default
+syntax. As such, if you're running QEMU 6.2 or later **and** libvirt 7.9 or later,
+please create the following XML block in your domain:
 
 .. code:: xml
 
@@ -179,8 +181,8 @@ Create the following XML block in your domain:
 
 .. note::
 
-   - Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
-     to the ``<domain>`` tag.
+   - Not using the new syntax above might cause QEMU to abort while starting the VM with
+     "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
 
    - The ``"size"`` tag represents the size of the shared memory device in bytes.
      Once you determine the proper size of the device as per 
@@ -188,6 +190,23 @@ Create the following XML block in your domain:
      to calculate the size in bytes:
      
      ``size_in_MB x 1024 x 1024 = size_in_bytes``
+
+If you are running QEMU older than 6.2 or libvirt older than 7.9, please use
+the older syntax for the IVSHMEM XML block:
+
+.. code:: xml
+
+   <qemu:commandline>
+     <qemu:arg value='-device'/>
+     <qemu:arg value='ivshmem-plain,id=shmem0,memdev=looking-glass'/>
+     <qemu:arg value='-object'/>
+     <qemu:arg value='memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=32M,share=yes'/>
+   </qemu:commandline>
+
+.. note::
+
+   Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
+   to the ``<domain>`` tag.
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
