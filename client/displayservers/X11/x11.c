@@ -950,7 +950,7 @@ static int x11EventThread(void * unused)
               focused = true;
           }
 
-          if (x11.focused != focused)
+          if (x11.ewmhHasFocusEvent && x11.focused != focused)
           {
             x11.focused = focused;
             app_handleFocusEvent(focused);
