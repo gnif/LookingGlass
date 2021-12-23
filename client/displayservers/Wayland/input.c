@@ -328,6 +328,15 @@ static void handlePointerCapability(uint32_t capabilities)
     wlWm.pointer = wl_seat_get_pointer(wlWm.seat);
     wl_pointer_add_listener(wlWm.pointer, &pointerListener, NULL);
     waylandSetPointer(wlWm.cursorId);
+
+    if (wlWm.warpSupport)
+    {
+      wlWm.relativePointer =
+        zwp_relative_pointer_manager_v1_get_relative_pointer(
+          wlWm.relativePointerManager, wlWm.pointer);
+      zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
+        &relativePointerListener, NULL);
+    }
   }
 }
 
@@ -398,15 +407,6 @@ bool waylandInputInit(void)
 
   wl_seat_add_listener(wlWm.seat, &seatListener, NULL);
   wl_display_roundtrip(wlWm.display);
-
-  if (wlWm.warpSupport)
-  {
-    wlWm.relativePointer =
-      zwp_relative_pointer_manager_v1_get_relative_pointer(
-        wlWm.relativePointerManager, wlWm.pointer);
-    zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
-      &relativePointerListener, NULL);
-  }
 
   LG_LOCK_INIT(wlWm.confineLock);
 
