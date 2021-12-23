@@ -420,7 +420,12 @@ void waylandInputFree(void)
 
   if (wlWm.pointer)
     waylandCleanUpPointer();
-  wl_keyboard_destroy(wlWm.keyboard);
+
+  // The only legal way the keyboard can be null is if it never existed.
+  // When unplugged, the compositor must have an inert object.
+  if (wlWm.keyboard)
+    wl_keyboard_destroy(wlWm.keyboard);
+
   wl_seat_destroy(wlWm.seat);
 
   if (wlWm.xkbState)
