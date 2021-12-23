@@ -534,7 +534,7 @@ void waylandUncapturePointer(void)
      */
     if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
       internalUngrabPointer(false);
-    else
+    else if (wlWm.pointer)
     {
       wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
           wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
