@@ -268,6 +268,19 @@ void core_updatePositionInfo(void)
   {
     g_state.posInfoValid = true;
     g_state.ds->realignPointer();
+
+    // g_cursor.guest.valid could have become true in the meantime.
+    if (g_cursor.guest.valid)
+    {
+      // Since posInfoValid was false, core_handleGuestMouseUpdate becomes a
+      // noop when called on the cursor thread, which means we need to call it
+      // again in order for the cursor to show up.
+      core_handleGuestMouseUpdate();
+
+      // Similarly, the position needs to be valid before the initial mouse
+      // move, otherwise we wouldn't know if the cursor is in the viewport.
+      app_handleMouseRelative(0.0, 0.0, 0.0, 0.0);
+    }
   }
 
 done:
