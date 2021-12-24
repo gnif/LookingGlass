@@ -30,11 +30,22 @@ void ringbuffer_push(RingBuffer rb, const void * value);
 bool ringbuffer_shift(RingBuffer rb, void * dst);
 void ringbuffer_reset(RingBuffer rb);
 
+/* Note that the following functions are NOT thread-safe */
 int    ringbuffer_getLength(const RingBuffer rb);
 int    ringbuffer_getStart (const RingBuffer rb);
 int    ringbuffer_getCount (const RingBuffer rb);
 void * ringbuffer_getValues(const RingBuffer rb);
 void * ringBuffer_getLastValue(const RingBuffer rb);
+
+/* appends up to count values to the buffer returning the number of values
+ * appended
+ * Note: This function is thread-safe */
+int ringbuffer_append(const RingBuffer rb, const void * values, int count);
+
+/* consumes and returns up to *count values from the buffer setting *count to
+ * the number of valid values returned.
+ * Note: This function is thread-safe */
+void * ringbuffer_consume(const RingBuffer rb, int * count);
 
 typedef void (*RingBufferValueFn)(void * value, void * udata);
 
