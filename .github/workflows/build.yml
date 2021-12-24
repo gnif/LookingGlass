@@ -43,7 +43,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCMAKE_LINKER:FILEPATH=/usr/bin/ld \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-          -DENABLE_LIBDECOR=${{ matrix.wayland_shell == 'libdecor' }} \
+          -DENABLE_LIBDECOR=${{ matrix.wayland_shell == 'libdecor' }}  \
+          -DENABLE_PIPEWIRE=0 \
           ..
     - name: Build client
       run: |

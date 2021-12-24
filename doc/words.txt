@@ -6,6 +6,7 @@ cmake
 config
 dejavu
 deuteranope
+dev
 dir
 distros
 dmabuf
@@ -19,6 +20,7 @@ ini
 kvmfr
 laggy
 libdecor
+libpipewire
 libvirt
 linux
 LookingGlass

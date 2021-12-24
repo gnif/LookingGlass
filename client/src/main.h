@@ -24,6 +24,7 @@
 
 #include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
+#include "dynamic/audiodev.h"
 
 #include "common/thread.h"
 #include "common/types.h"
@@ -133,6 +134,9 @@ struct AppState
   bool     resizeDone;
 
   bool     autoIdleInhibitState;
+
+  struct LG_AudioDevOps * audioDev;
+  bool audioStarted;
 };
 
 struct AppParams
@@ -154,6 +158,7 @@ struct AppParams
   LG_RendererRotate winRotate;
   bool              useSpiceInput;
   bool              useSpiceClipboard;
+  bool              useSpiceAudio;
   const char *      spiceHost;
   unsigned int      spicePort;
   bool              clipboardToVM;
