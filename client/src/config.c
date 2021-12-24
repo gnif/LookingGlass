@@ -430,6 +430,13 @@ static struct Option options[] =
   },
   {
     .module         = "spice",
+    .name           = "audio",
+    .description    = "Enable SPICE audio support",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "spice",
     .name           = "scaleCursor",
     .description    = "Scale cursor input position to screen size when up/down scaled",
     .shortopt       = 'j',
@@ -609,6 +616,7 @@ bool config_load(int argc, char * argv[])
 
     g_params.useSpiceInput     = option_get_bool("spice", "input"    );
     g_params.useSpiceClipboard = option_get_bool("spice", "clipboard");
+    g_params.useSpiceAudio     = option_get_bool("spice", "audio"    );
 
     if (g_params.useSpiceClipboard)
     {

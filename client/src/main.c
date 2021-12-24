@@ -846,6 +846,66 @@ static void reportBadVersion()
   DEBUG_ERROR("Please install the matching host application for this client");
 }
 
+void audioStart(int channels, int sampleRate, PSAudioFormat format,
+  uint32_t time)
+{
+  /*
+   * we probe here so that the audiodev is operating in the context of the SPICE
+   * thread/loop to avoid any audio API threading issues
+   */
+  static int probed = false;
+  if (!probed)
+  {
+    probed = true;
+
+    // search for the best audiodev to use
+    for(int i = 0; i < LG_AUDIODEV_COUNT; ++i)
+      if (LG_AudioDevs[i]->init())
+      {
+        g_state.audioDev = LG_AudioDevs[i];
+        DEBUG_INFO("Using AudioDev: %s", g_state.audioDev->name);
+        break;
+      }
+
+    if (!g_state.audioDev)
+      DEBUG_WARN("Failed to initialize an audio backend");
+  }
+
+  if (g_state.audioDev)
+  {
+    static int lastChannels   = 0;
+    static int lastSampleRate = 0;
+
+    if (g_state.audioStarted)
+    {
+      if (channels != lastChannels || sampleRate != lastSampleRate)
+        g_state.audioDev->stop();
+      else
+        return;
+    }
+
+    lastChannels   = channels;
+    lastSampleRate = sampleRate;
+    g_state.audioStarted = true;
+
+    DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
+    g_state.audioDev->start(channels, sampleRate);
+  }
+}
+
+void audioStop(void)
+{
+  if (g_state.audioDev)
+    g_state.audioDev->stop();
+  g_state.audioStarted = false;
+}
+
+void audioData(uint8_t * data, size_t size)
+{
+  if (g_state.audioDev)
+    g_state.audioDev->play(data, size);
+}
+
 static int lg_run(void)
 {
   g_cursor.sens = g_params.mouseSens;
@@ -921,7 +981,9 @@ static int lg_run(void)
   }
 
   // try to connect to the spice server
-  if (g_params.useSpiceInput || g_params.useSpiceClipboard)
+  if (g_params.useSpiceInput     ||
+      g_params.useSpiceClipboard ||
+      g_params.useSpiceAudio)
   {
     if (g_params.useSpiceClipboard)
       spice_set_clipboard_cb(
@@ -930,7 +992,14 @@ static int lg_run(void)
           cb_spiceRelease,
           cb_spiceRequest);
 
-    if (!spice_connect(g_params.spiceHost, g_params.spicePort, ""))
+    if (g_params.useSpiceAudio)
+      spice_set_audio_cb(
+          audioStart,
+          audioStop,
+          audioData);
+
+    if (!spice_connect(g_params.spiceHost, g_params.spicePort, "",
+          g_params.useSpiceAudio))
     {
       DEBUG_ERROR("Failed to connect to spice server");
       return -1;

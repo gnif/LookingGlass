@@ -93,6 +93,9 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  libwayland-dev
    -  wayland-protocols
 
+-  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
+
+   -  libpipewire-0.3-dev
 
 .. _client_deps_recommended:
 
