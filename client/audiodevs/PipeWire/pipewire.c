@@ -35,6 +35,7 @@ struct PipeWire
   int    stride;
 
   RingBuffer buffer;
+  bool       active;
 };
 
 static struct PipeWire pw = {0};
@@ -133,7 +134,7 @@ static void pipewire_free(void)
   pw_deinit();
 }
 
-static void pipewire_stop(void)
+static void pipewire_stop_stream(void)
 {
   if (!pw.stream)
     return;
@@ -156,7 +157,7 @@ static void pipewire_start(int channels, int sampleRate)
     .process = pipewire_on_process
   };
 
-  pipewire_stop();
+  pipewire_stop_stream();
 
   pw.channels = channels;
   pw.stride   = sizeof(uint16_t) * channels;
@@ -197,7 +198,8 @@ static void pipewire_start(int channels, int sampleRate)
       PW_ID_ANY,
       PW_STREAM_FLAG_AUTOCONNECT |
       PW_STREAM_FLAG_MAP_BUFFERS |
-      PW_STREAM_FLAG_RT_PROCESS,
+      PW_STREAM_FLAG_RT_PROCESS  |
+      PW_STREAM_FLAG_INACTIVE,
       params, 1);
 
   pw_thread_loop_unlock(pw.thread);
@@ -210,11 +212,25 @@ static void pipewire_play(uint8_t * data, int size)
 
   for(int i = 0; i < size; i += pw.stride)
     ringbuffer_push(pw.buffer, data + i);
+
+  if (!pw.active)
+  {
+    pw_thread_loop_lock(pw.thread);
+    pw_stream_set_active(pw.stream, true);
+    pw.active = true;
+    pw_thread_loop_unlock(pw.thread);
+  }
 }
 
-static void pipewire_stop_nop(void)
+static void pipewire_stop(void)
 {
-  // we ignore the stop message to avoid messing up any audio graph
+  if (!pw.active)
+    return;
+
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_set_active(pw.stream, false);
+  pw.active = false;
+  pw_thread_loop_unlock(pw.thread);
 }
 
 struct LG_AudioDevOps LGAD_PipeWire =
@@ -224,5 +240,5 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .free  = pipewire_free,
   .start = pipewire_start,
   .play  = pipewire_play,
-  .stop  = pipewire_stop_nop
+  .stop  = pipewire_stop
 };
