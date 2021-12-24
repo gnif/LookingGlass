@@ -44,8 +44,7 @@ static void pipewire_on_process(void * userdata)
 {
   struct pw_buffer * pbuf;
 
-  const int avail = ringbuffer_getCount(pw.buffer);
-  if (!avail)
+  if (!ringbuffer_getCount(pw.buffer))
     return;
 
   if (!(pbuf = pw_stream_dequeue_buffer(pw.stream))) {
@@ -60,14 +59,8 @@ static void pipewire_on_process(void * userdata)
     return;
 
   int frames = sbuf->datas[0].maxsize / pw.stride;
-  if (frames > avail)
-    frames = avail;
-
-  for(int i = 0; i < frames; ++i)
-  {
-    ringbuffer_shift(pw.buffer, dst);
-    dst += pw.stride;
-  }
+  void * values = ringbuffer_consume(pw.buffer, &frames);
+  memcpy(dst, values, frames * pw.stride);
 
   sbuf->datas[0].chunk->offset = 0;
   sbuf->datas[0].chunk->stride = pw.stride;
@@ -210,8 +203,7 @@ static void pipewire_play(uint8_t * data, int size)
   if (!pw.stream)
     return;
 
-  for(int i = 0; i < size; i += pw.stride)
-    ringbuffer_push(pw.buffer, data + i);
+  ringbuffer_append(pw.buffer, data, size / pw.stride);
 
   if (!pw.active)
   {
