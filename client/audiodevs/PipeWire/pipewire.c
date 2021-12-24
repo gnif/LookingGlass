@@ -133,6 +133,18 @@ static void pipewire_free(void)
   pw_deinit();
 }
 
+static void pipewire_stop(void)
+{
+  if (!pw.stream)
+    return;
+
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_flush(pw.stream, true);
+  pw_stream_destroy(pw.stream);
+  pw.stream = NULL;
+  pw_thread_loop_unlock(pw.thread);
+}
+
 static void pipewire_start(int channels, int sampleRate)
 {
   const struct spa_pod * params[1];
@@ -143,6 +155,8 @@ static void pipewire_start(int channels, int sampleRate)
     .version = PW_VERSION_STREAM_EVENTS,
     .process = pipewire_on_process
   };
+
+  pipewire_stop();
 
   pw.channels = channels;
   pw.stride   = sizeof(uint16_t) * channels;
@@ -197,16 +211,9 @@ static void pipewire_play(uint8_t * data, int size)
     ringbuffer_push(pw.buffer, data + i);
 }
 
-static void pipewire_stop(void)
+static void pipewire_stop_nop(void)
 {
-  if (!pw.stream)
-    return;
-
-  pw_thread_loop_lock(pw.thread);
-  pw_stream_flush(pw.stream, true);
-  pw_stream_destroy(pw.stream);
-  pw.stream = NULL;
-  pw_thread_loop_unlock(pw.thread);
+  // we ignore the stop message to avoid messing up any audio graph
 }
 
 struct LG_AudioDevOps LGAD_PipeWire =
@@ -216,5 +223,5 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .free  = pipewire_free,
   .start = pipewire_start,
   .play  = pipewire_play,
-  .stop  = pipewire_stop
+  .stop  = pipewire_stop_nop
 };
