@@ -167,6 +167,7 @@ static void pipewire_start(int channels, int sampleRate)
     pw.loop,
     "LookingGlass",
     pw_properties_new(
+      PW_KEY_NODE_NAME     , "Looking Glass",
       PW_KEY_MEDIA_TYPE    , "Audio",
       PW_KEY_MEDIA_CATEGORY, "Playback",
       PW_KEY_MEDIA_ROLE    , "Music",
