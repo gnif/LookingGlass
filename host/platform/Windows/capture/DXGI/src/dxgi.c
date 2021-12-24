@@ -319,13 +319,13 @@ static bool dxgi_init(void)
 
   DXGI_ADAPTER_DESC1 adapterDesc;
   IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
-  DEBUG_INFO("Device Name      : %ls"    , outputDesc.DeviceName);
-  DEBUG_INFO("Device Descripion: %ls"    , adapterDesc.Description);
-  DEBUG_INFO("Device Vendor ID : 0x%x"   , adapterDesc.VendorId);
-  DEBUG_INFO("Device Device ID : 0x%x"   , adapterDesc.DeviceId);
-  DEBUG_INFO("Device Video Mem : %u MiB" , (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
-  DEBUG_INFO("Device Sys Mem   : %u MiB" , (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
-  DEBUG_INFO("Shared Sys Mem   : %u MiB" , (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
+  DEBUG_INFO("Device Name       : %ls"    , outputDesc.DeviceName);
+  DEBUG_INFO("Device Description: %ls"    , adapterDesc.Description);
+  DEBUG_INFO("Device Vendor ID  : 0x%x"   , adapterDesc.VendorId);
+  DEBUG_INFO("Device Device ID  : 0x%x"   , adapterDesc.DeviceId);
+  DEBUG_INFO("Device Video Mem  : %u MiB" , (unsigned)(adapterDesc.DedicatedVideoMemory  / 1048576));
+  DEBUG_INFO("Device Sys Mem    : %u MiB" , (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
+  DEBUG_INFO("Shared Sys Mem    : %u MiB" , (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
 
   static const D3D_FEATURE_LEVEL win8[] =
   {
@@ -432,9 +432,9 @@ static bool dxgi_init(void)
 
   ++this->formatVer;
 
-  DEBUG_INFO("Feature Level    : 0x%x"   , this->featureLevel);
-  DEBUG_INFO("Capture Size     : %u x %u", this->width, this->height);
-  DEBUG_INFO("AcquireLock      : %s"     , this->useAcquireLock ? "enabled" : "disabled");
+  DEBUG_INFO("Feature Level     : 0x%x"   , this->featureLevel);
+  DEBUG_INFO("Capture Size      : %u x %u", this->width, this->height);
+  DEBUG_INFO("AcquireLock       : %s"     , this->useAcquireLock ? "enabled" : "disabled");
 
   // try to reduce the latency
   {
@@ -524,7 +524,7 @@ static bool dxgi_init(void)
 
   DXGI_OUTDUPL_DESC dupDesc;
   IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
-  DEBUG_INFO("Source Format    : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
+  DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
 
   uint8_t bpp = 4;
   switch(dupDesc.ModeDesc.Format)
