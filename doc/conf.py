@@ -71,8 +71,8 @@ master_doc = 'index'
 html_theme = 'alabaster'
 
 html_theme_options = {
-	'logo': 'icon-128x128.png',
-	'fixed_sidebar': 'true',
+    'logo': 'icon-128x128.png',
+    'fixed_sidebar': 'true',
 }
 
 html_sidebars = {
