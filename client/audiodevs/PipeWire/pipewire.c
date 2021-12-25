@@ -23,6 +23,7 @@
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/props.h>
 #include <pipewire/pipewire.h>
+#include <math.h>
 
 #include "common/debug.h"
 #include "common/ringbuffer.h"
@@ -244,10 +245,7 @@ static void pipewire_volume(int channels, const uint16_t volume[])
 
   float param[channels];
   for(int i = 0; i < channels; ++i)
-  {
-    //TODO: the scaling here is wrong and needs fixing
-    param[i] = (1.0f / 65535.0f) * volume[i];
-  }
+    param[i] = 9.3234e-7 * pow(1.000211902, volume[i]) - 0.000172787;
 
   pw_thread_loop_lock(pw.thread);
   pw_stream_set_control(pw.stream, SPA_PROP_channelVolumes, channels, param, 0);
