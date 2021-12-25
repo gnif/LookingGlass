@@ -21,6 +21,7 @@
 #include "interface/audiodev.h"
 
 #include <spa/param/audio/format-utils.h>
+#include <spa/param/props.h>
 #include <pipewire/pipewire.h>
 
 #include "common/debug.h"
@@ -236,12 +237,38 @@ static void pipewire_stop(void)
   pw_thread_loop_unlock(pw.thread);
 }
 
+static void pipewire_volume(int channels, const uint16_t volume[])
+{
+  if (channels != pw.channels)
+    return;
+
+  float param[channels];
+  for(int i = 0; i < channels; ++i)
+  {
+    //TODO: the scaling here is wrong and needs fixing
+    param[i] = (1.0f / 65535.0f) * volume[i];
+  }
+
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_set_control(pw.stream, SPA_PROP_channelVolumes, channels, param, 0);
+  pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_mute(bool mute)
+{
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_set_control(pw.stream, SPA_PROP_mute, 1, (void *)&mute, 0);
+  pw_thread_loop_unlock(pw.thread);
+}
+
 struct LG_AudioDevOps LGAD_PipeWire =
 {
-  .name  = "PipeWire",
-  .init  = pipewire_init,
-  .free  = pipewire_free,
-  .start = pipewire_start,
-  .play  = pipewire_play,
-  .stop  = pipewire_stop
+  .name   = "PipeWire",
+  .init   = pipewire_init,
+  .free   = pipewire_free,
+  .start  = pipewire_start,
+  .play   = pipewire_play,
+  .stop   = pipewire_stop,
+  .volume = pipewire_volume,
+  .mute   = pipewire_mute
 };
