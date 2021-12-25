@@ -47,7 +47,7 @@ These instructions are similar to building the
    cmake -DUSER_INSTALL=1 ../
    make
 
-Alternatively if you would like to install the plugin for all users.
+Alternatively, if you would like to install the plugin for all users.
 
 .. code:: bash
 
@@ -65,8 +65,12 @@ You can install the plugin by running ``make install``.
 
    make install
 
-If you opted to install the plugin for all users you will need to run
+If you've opted to install the plugin for all users, you will need to run
 this command as ``root``.
+
+.. code:: bash
+
+   sudo make install
 
 Setup
 ~~~~~
