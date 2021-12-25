@@ -328,6 +328,8 @@ These include:
 - Performance metrics options
 - Debug frame damage display
 
+(see :ref:`client_config_widget`)
+
 You can also reposition and resize enabled widgets, like the FPS/UPS Display,
 and Performance Metrics.
 
@@ -344,57 +346,52 @@ as your changes may be discarded.
 Configuration Widget
 ~~~~~~~~~~~~~~~~~~~~
 
-The Configuration Widget is accessible through the Overlay mode. The
+The Configuration Widget is accessible through the Overlay Mode. The
 widget has multiple tabs that allow setting a variety of modes and
-parameters for the application.
+parameters for Looking Glass at runtime.
 
 Settings tab
 ^^^^^^^^^^^^
 
-- Performance Metrics: Enabling this will turn on the Metrics Graphs
-  Widget. Multiple graphs can be enabled and they will stack vertically.
-- EGL: Modify EGL features such as the algorithm used for scaling and
-  enabling night vision mode.
+- Performance Metrics: A toggle for the Performance Metrics Widget.
+  Multiple graphs are available, and they will stack vertically.
+- EGL: Modify EGL features, such as the algorithm used for scaling, and
+  night vision mode.
 
-Changes in the Settings tab are not persistent and will change back to
+Changes in the Settings tab are not persistent, and will change back to
 their default values when the client is restarted.
 
 EGL Filters tab
 ^^^^^^^^^^^^^^^
 
-The EGL Filters tab is a GUI for enabling, configuring and ordering
-the post-processing filter stack. Each filter can be expanded to open
-its settings. Filters can also be re-ordered by dragging them up or down.
-Filters application is cumulative, and order is important (e.g. applying CAS
-before FSR might have different results than the reverse). Users are
-encouraged to experiment with the order and parameters to achieve optimal
-results. The currently available filters include:
+The EGL Filters tab contains options for toggling, configuring, and ordering 
+post-processing filters. Each filter can be expanded to open its settings. 
+Filters can also be re-ordered by dragging them up or down. Filters are applied 
+from top to bottom, keep this in mind when ordering them. (applying CAS before 
+FSR might have different results than the reverse). Users are encouraged to 
+experiment with the order and parameters to achieve optimal results. The 
+currently available filters include:
 
-- Downscaler: Filter for downscaling resolution. Can be used to undo the
-  poor upscaling that some games implement such that it can then
-  be better upscaled using FSR (see below). The filter has a pixel-size setting
-  that is used to set the effective downscaling ratio and can be set to use
-  different downscaling algorithms.
-- AMD FidelityFX Super Resolution (FSR): Filter implementing  a rendering
-  technique for upscaling resolution. FSR works by accepting the original
-  frames (on the guest) at lower resolution, then applying a spatial upscaling
-  algorithm in the client to make the final result look as though it is
-  rendered in high-resolution. The FSR filter interface allows for fine
-  tuning the sharpness factor of the algorithm and shows the equivalent
-  quality mode based on the ratio between the original frame resolution
-  and the client resolution.
-- AMD FidelityFX Contrast Adaptive Sharpening (CAS): Filter that
-  increases visual quality by applying a sharpening algorithm to the
-  frame. CAS can sometimes restore detail lost in a typical upscaling
-  application. The CAS filter interface has an adjustable sharpness
-  control.
+-  Downscaler: Filter for downscaling the host resolution. Can be used to undo 
+   poor upscaling on the VM to better utilize AMD FSR (see below). The filter 
+   has a pixel-size setting that is used to set the effective downscaling ratio,
+   and a configurable interpolation algorithm.
 
-The filter stack settings and order can be saved to presets so that it
-can be conveniently recalled at a later time. As filter settings are
-usually application specific, multiple presets can be defined for each
-case scenario. To save a preset, click on "Save preset as..." and enter
-a preset name. Presets are recalled by selecting them in the "Preset name"
-pull down. Presets are persistent and are stored on disk at
+-  AMD FidelityFX Super Resolution (FSR): A spatial upcaling filter that works 
+   on low resolution frames from the guest VM and intelligently upscales to a 
+   higher resolution. The filter sharpness is tunable, and displays the
+   equivalent AMD quality mode based on the resolution difference.
+
+-  AMD FidelityFX Contrast Adaptive Sharpening (CAS): Filter that
+   increases visual quality by applying a sharpening algorithm to the
+   video. CAS can sometimes restore detail lost in a typical upscaling
+   application. Has adjustable sharpness setting.
+
+The filter settings and order can be saved to presets so that it can be restored
+at a later time. As filter settings are usually application specific, multiple 
+presets can be defined for each case scenario. To save a preset, click on "Save 
+preset as..." and enter a preset name. Presets are loaded by selecting them in 
+the "Preset name" pull down. Presets are persistent and are stored on disk at
 ``$XDG_CONFIG_HOME/looking-glass/presets``.
 
 .. warning::
