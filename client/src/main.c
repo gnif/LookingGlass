@@ -778,6 +778,12 @@ int spiceThread(void * arg)
       break;
     }
 
+  if (g_state.audioDev)
+  {
+    g_state.audioDev->free();
+    g_state.audioDev = NULL;
+  }
+
   g_state.state = APP_STATE_SHUTDOWN;
   return 0;
 }
