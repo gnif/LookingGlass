@@ -321,25 +321,23 @@ files.
 Overlay Mode
 ~~~~~~~~~~~~
 
-Looking-Glass is utilizing an overlay layer to draw various widgets (such
-as the FPS display). An "Overlay Mode" can be toggled (see 
-:ref:`client_key_bindings`) that allows editing and modifying widgets
-properties, such as their position and size. To use the Overlay Mode:
+The Overlay Mode lets you configure various runtime options for Looking Glass.
+These include:
 
-- Enable one or more widgets (such as the FPS display)
-- Enter Overlay Mode by using its keybinding (the screen will turn
-  darker to indicate Overlay Mode is active)
-- Drag the widgets you enabled to your preferred position
-- Change the widget size (if the widget allows you) by dragging the
-  lower right edge
-- Change any other properties a widget has and are modifiable
-- Exit Overlay Mode by pressing :kbd:`ESC` or using the Overlay-Mode
-  keybinding again
+- EGL filters
+- Performance metrics options
+- Debug frame damage display
 
-Modifications done in Overlay Mode are persistent and are stored
-in a special config file $XDG_CONFIG_HOME/looking-glass/imgui.ini.
-Please refrain from editing this file manually as your changes might
-be overwritten by the client.
+You can also reposition and resize enabled widgets, like the FPS/UPS Display,
+and Performance Metrics.
+
+Enter and exit Overlay Mode with :kbd:`ScrLk` + :kbd:`O`.
+:kbd:`ESC` can also be used to exit. (see :ref:`client_key_bindings`)
+
+Modifications done to widgets in Overlay Mode are stored in
+``$XDG_CONFIG_HOME/looking-glass/imgui.ini``.
+Please do not manually edit this file while Looking Glass is running,
+as your changes may be discarded.
 
 .. _client_config_widget:
 
