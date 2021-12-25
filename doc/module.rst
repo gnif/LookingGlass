@@ -166,9 +166,9 @@ Add the following arguments to your ``qemu`` command line::
 libvirt
 ^^^^^^^
 
-Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration became the default
-syntax. As such, if you're running QEMU 6.2 or later **and** libvirt 7.9 or later,
-please create the following XML block in your domain:
+Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration is the 
+default syntax. Users running QEMU 6.2 or later **and** libvirt 7.9 or later, 
+should use this XML block to configure their VM for kvmfr:
 
 .. code:: xml
 
@@ -181,18 +181,19 @@ please create the following XML block in your domain:
 
 .. note::
 
-   - Not using the new syntax above might cause QEMU to abort while starting the VM with
-     "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
+   -  Using an incorrect syntax for your host configuration may cause QEMU to 
+      abort with the following error message:
+      "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
 
-   - The ``"size"`` tag represents the size of the shared memory device in bytes.
-     Once you determine the proper size of the device as per 
-     :ref:`Determining Memory <client_determining_memory>`, use the figure you got
-     to calculate the size in bytes:
-     
+   -  The ``"size"`` tag represents the size of the shared memory device in 
+      bytes. Once you determine the proper size of the device as per
+      :ref:`Determining Memory <client_determining_memory>`, use the figure you
+      got to calculate the size in bytes:
+
      ``size_in_MB x 1024 x 1024 = size_in_bytes``
 
 If you are running QEMU older than 6.2 or libvirt older than 7.9, please use
-the older syntax for the IVSHMEM XML block:
+legacy syntax for IVSHMEM setup:
 
 .. code:: xml
 
