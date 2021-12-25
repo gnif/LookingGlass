@@ -8,3 +8,5 @@ module/modules.order
 *.o
 *.exe
 */build
+__pycache__
+*.py[co]
