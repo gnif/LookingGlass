@@ -113,6 +113,11 @@ jobs:
       run: |
         cd host/build
         makensis platform/Windows/installer.nsi
+    - name: Build Windows host installer with IVSHMEM drivers
+      run: |
+        cd host/build
+        curl https://dl.quantum2.xyz/ivshmem.tar.gz | tar xz
+        makensis -DIVSHMEM platform/Windows/installer.nsi
 
   host-windows-native:
     runs-on: windows-latest
