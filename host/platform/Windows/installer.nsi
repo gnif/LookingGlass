@@ -98,7 +98,7 @@ Function .onInit
   StrCpy $option_noservice     0
 
   Push $R0
-    
+
   ${GetOptions} $cmdLineParams '/startmenu' $R0
   IfErrors +2 0
   StrCpy $option_startMenu 1
@@ -184,7 +184,7 @@ SectionEnd
 
 Section "-Hidden Start Menu" Section5
   SetShellVarContext all
-  
+
   ${If} $option_startMenu == 1
     CreateDirectory "$APPDATA\Looking Glass (host)"
     CreateDirectory "$SMPROGRAMS\Looking Glass (host)"
@@ -195,7 +195,6 @@ Section "-Hidden Start Menu" Section5
   ${If} $option_desktop == 1
     CreateShortCut "$DESKTOP\Looking Glass (host).lnk" $INSTDIR\looking-glass-host.exe
   ${EndIf}
-  
 SectionEnd
 
 Section "Uninstall" Section6
@@ -211,6 +210,7 @@ Section "Uninstall" Section6
   Delete "$DESKTOP\Looking Glass (host).lnk"
   Delete "$INSTDIR\uninstaller.exe"
   Delete "$INSTDIR\looking-glass-host.exe"
+  Delete "$INSTDIR\looking-glass-host.pdb"
   Delete "$INSTDIR\LICENSE.txt"
 
   RMDir $INSTDIR
