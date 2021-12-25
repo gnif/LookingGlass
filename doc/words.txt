@@ -29,6 +29,7 @@ modprobe
 msys
 multisampling
 Nvidia
+overlayed
 pacman
 passthrough
 pre
@@ -38,11 +39,13 @@ radeon
 realtime
 renderer
 repo
+runtime
 submodule
 submodules
 systemd
 toolchain
 tritanope
+tunable
 udev
 UEFI
 uncheck
@@ -51,6 +54,7 @@ Unigine
 unix
 upscaled
 upscaler
+upscales
 upscaling
 VM
 vsync

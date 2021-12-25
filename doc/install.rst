@@ -377,8 +377,8 @@ currently available filters include:
    has a pixel-size setting that is used to set the effective downscaling ratio,
    and a configurable interpolation algorithm.
 
--  AMD FidelityFX Super Resolution (FSR): A spatial upcaling filter that works 
-   on low resolution frames from the guest VM and intelligently upscales to a 
+-  AMD FidelityFX Super Resolution (FSR): A spatial upscaling filter that works
+   on low resolution frames from the guest VM and intelligently upscales to a
    higher resolution. The filter sharpness is tunable, and displays the
    equivalent AMD quality mode based on the resolution difference.
 
