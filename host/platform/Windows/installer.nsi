@@ -31,6 +31,7 @@ Unicode true
 RequestExecutionLevel admin
 ShowInstDetails "show"
 ShowUninstDetails "show"
+ManifestDPIAware true
 
 !ifndef BUILD_32BIT
 Target AMD64-Unicode
