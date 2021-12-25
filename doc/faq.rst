@@ -79,25 +79,28 @@ well.
 
 .. _gnome_wayland_decorations:
 
-Why is there no title bar? / Why can't I resize the window?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Why is there no title bar on GNOME? / Why can't I resize the window on GNOME?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This happens on GNOME Wayland because GNOME doesn't support the `standard
-protocol`_ for server-side decorations. As a result, the window decorations
-do not appear.
+This happens because GNOME on Wayland doesn't support the `standard protocol`_
+for server-side decorations, and Looking Glass doesn't implement its own
+decorations.
 
-The easy solution is to use `libdecor`_. This is currently not packaged in
-most distros, so you will need to build it from the linked git repository.
+The easiest solution is to build Looking Glass with `libdecor`_ support.
+If your distribution lacks a ``libdecor`` package, you must build it from
+`source code <libdecor_>`_.
 
-Once you have built it, you can then build the the client with libdecor
-support by passing ``-DENABLE_LIBDECOR=ON`` to ``cmake``.
-
-Please be aware that libdecor comes with overheads, which is why it is not
-used by default. You should avoid it if possible.
+You can then build the the client with libdecor support by passing
+``-DENABLE_LIBDECOR=ON`` to ``cmake``.
 
 An alternative solution is to hold down the Super key (Windows key on most
-keyboards), and then right click on the window. This should bring up a menu,
+keyboards), then right click Looking Glass. This should bring up a menu,
 which will allow you to move the window and resize it.
+
+.. warning::
+   Libdecor support is provided for the convenience of our Wayland users on
+   GNOME, however it is not a priority feature and may break, please seek
+   alternatives if you require stable operation.
 
 .. _standard protocol: https://wayland.app/protocols/xdg-decoration-unstable-v1
 .. _libdecor: https://gitlab.gnome.org/jadahl/libdecor
