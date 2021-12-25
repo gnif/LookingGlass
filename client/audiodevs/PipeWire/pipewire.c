@@ -104,28 +104,9 @@ err_context:
   pw_context_destroy(context);
 
 err:
+  pw_loop_destroy(pw.loop);
   pw_deinit();
   return false;
-}
-
-static void pipewire_free(void)
-{
-  if (pw.thread)
-  {
-    pw_thread_loop_lock(pw.thread);
-    if (pw.stream)
-    {
-      pw_stream_destroy(pw.stream);
-      pw.stream = NULL;
-    }
-
-    pw_thread_loop_signal(pw.thread, true);
-    pw_thread_loop_destroy(pw.thread);
-    pw.loop = NULL;
-  }
-
-  ringbuffer_free(&pw.buffer);
-  pw_deinit();
 }
 
 static void pipewire_stop_stream(void)
@@ -138,6 +119,20 @@ static void pipewire_stop_stream(void)
   pw_stream_destroy(pw.stream);
   pw.stream = NULL;
   pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_free(void)
+{
+  pipewire_stop_stream();
+  pw_thread_loop_stop(pw.thread);
+  pw_thread_loop_destroy(pw.thread);
+  pw_loop_destroy(pw.loop);
+
+  pw.loop   = NULL;
+  pw.thread = NULL;
+
+  ringbuffer_free(&pw.buffer);
+  pw_deinit();
 }
 
 static void pipewire_start(int channels, int sampleRate)
