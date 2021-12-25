@@ -289,21 +289,23 @@ Examples:
 Configuration Files
 ~~~~~~~~~~~~~~~~~~~
 
-By default, the application will look for and load the config files in
-the following locations and order:
+By default, Looking Glass will load config files from
+the following locations:
 
 -  /etc/looking-glass-client.ini
 -  ~/.looking-glass-client.ini
 -  $XDG_CONFIG_HOME/looking-glass/client.ini (usually ~/.config/looking-glass/client.ini)
 
-Config options are merged from all files. Same options appearing in more
-than one file will be overridden by the latest loaded one (E.g. an option
-appearing in ~/.config/looking-glass/client.ini will override the same
-option appearing in ~/.looking-glass-client.ini). When first launched,
-the Looking-Glass client will create the folder $XDG_CONFIG_HOME/looking-glass/
-if it does not yet exist.
+All config files are loaded in order. Duplicate entries override earlier ones.
+This means you can set a system-wide configuration in
+``/etc/looking-glass-client.ini``, and override specific options for just
+your user in ``~/.looking-glass-client.ini``, which is overlayed on top of
+the system-wide configuration.
 
-The format of this file is the commonly known INI format, for example::
+When first launched, the Looking-Glass client will create the folder
+$XDG_CONFIG_HOME/looking-glass/ if it does not yet exist.
+
+The format of config files is the commonly known INI format, for example::
 
    [win]
    fullScreen=yes
@@ -311,7 +313,7 @@ The format of this file is the commonly known INI format, for example::
    [egl]
    nvGain=1
 
-Command line arguments will override any options loaded from the config
+Command line arguments will override any options loaded from config
 files.
 
 .. _client_overlay_mode:
