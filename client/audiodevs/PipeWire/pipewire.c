@@ -32,6 +32,7 @@ struct PipeWire
   struct pw_thread_loop * thread;
   struct pw_stream      * stream;
   int    channels;
+  int    sampleRate;
   int    stride;
 
   RingBuffer buffer;
@@ -150,11 +151,15 @@ static void pipewire_start(int channels, int sampleRate)
     .process = pipewire_on_process
   };
 
+  if (pw.stream && pw.channels == channels && pw.sampleRate == sampleRate)
+    return;
+
   pipewire_stop_stream();
 
-  pw.channels = channels;
-  pw.stride   = sizeof(uint16_t) * channels;
-  pw.buffer   = ringbuffer_new(sampleRate / 10, channels * sizeof(uint16_t));
+  pw.channels   = channels;
+  pw.sampleRate = sampleRate;
+  pw.stride     = sizeof(uint16_t) * channels;
+  pw.buffer     = ringbuffer_new(sampleRate / 10, channels * sizeof(uint16_t));
 
   pw_thread_loop_lock(pw.thread);
   pw.stream = pw_stream_new_simple(
