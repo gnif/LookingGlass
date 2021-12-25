@@ -367,9 +367,9 @@ EGL Filters tab
 The EGL Filters tab contains options for toggling, configuring, and ordering 
 post-processing filters. Each filter can be expanded to open its settings. 
 Filters can also be re-ordered by dragging them up or down. Filters are applied 
-from top to bottom, keep this in mind when ordering them. (applying CAS before 
-FSR might have different results than the reverse). Users are encouraged to 
-experiment with the order and parameters to achieve optimal results. The 
+from top to bottom, keep this in mind when ordering them, e.g applying CAS
+before FSR might have different results than the reverse. Users are encouraged
+to experiment with the order and parameters to achieve optimal results. The 
 currently available filters include:
 
 -  Downscaler: Filter for downscaling the host resolution. Can be used to undo 
@@ -377,7 +377,7 @@ currently available filters include:
    has a pixel-size setting that is used to set the effective downscaling ratio,
    and a configurable interpolation algorithm.
 
--  AMD FidelityFX Super Resolution (FSR): A spatial upscaling filter that works
+-  AMD FidelityFX Super Resolution (FSR): Spatial upscaling filter that works
    on low resolution frames from the guest VM and intelligently upscales to a
    higher resolution. The filter sharpness is tunable, and displays the
    equivalent AMD quality mode based on the resolution difference.

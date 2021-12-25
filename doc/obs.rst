@@ -47,7 +47,7 @@ These instructions are similar to building the
    cmake -DUSER_INSTALL=1 ../
    make
 
-Alternatively, if you would like to install the plugin for all users.
+Alternatively, if you would like to install the plugin for all users:
 
 .. code:: bash
 

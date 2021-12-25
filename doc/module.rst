@@ -181,10 +181,6 @@ should use this XML block to configure their VM for kvmfr:
 
 .. note::
 
-   -  Using an incorrect syntax for your host configuration may cause QEMU to 
-      abort with the following error message:
-      "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
-
    -  The ``"size"`` tag represents the size of the shared memory device in 
       bytes. Once you determine the proper size of the device as per
       :ref:`Determining Memory <client_determining_memory>`, use the figure you
@@ -206,8 +202,12 @@ legacy syntax for IVSHMEM setup:
 
 .. note::
 
-   Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
-   to the ``<domain>`` tag.
+   -  Using the legacy syntax on QEMU 6.2/libvirt 7.9 may cause QEMU to 
+      abort with the following error message:
+      "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
+
+   -  Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
+      to the ``<domain>`` tag.
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
