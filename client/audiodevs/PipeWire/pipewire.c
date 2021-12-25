@@ -154,7 +154,7 @@ static void pipewire_start(int channels, int sampleRate)
 
   pw.channels = channels;
   pw.stride   = sizeof(uint16_t) * channels;
-  pw.buffer   = ringbuffer_new(sampleRate, channels * sizeof(uint16_t));
+  pw.buffer   = ringbuffer_new(sampleRate / 10, channels * sizeof(uint16_t));
 
   pw_thread_loop_lock(pw.thread);
   pw.stream = pw_stream_new_simple(
@@ -202,6 +202,17 @@ static void pipewire_play(uint8_t * data, int size)
 {
   if (!pw.stream)
     return;
+
+  // if the buffer fill is higher then the average skip the update to reduce lag
+  static unsigned int ttlSize = 0;
+  static unsigned int count   = 0;
+  ttlSize += size;
+  if (++count > 100 && ringbuffer_getCount(pw.buffer) > ttlSize / count)
+  {
+    count   = 0;
+    ttlSize = 0;
+    return;
+  }
 
   ringbuffer_append(pw.buffer, data, size / pw.stride);
 
