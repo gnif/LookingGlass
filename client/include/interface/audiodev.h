@@ -50,6 +50,12 @@ struct LG_AudioDevOps
 
   /* called when SPICE reports the audio stream has stopped */
   void (*stop)(void);
+
+  /* [optional] called to set the volume of the channels */
+  void (*volume)(int channels, const uint16_t volume[]);
+
+  /* [optional] called to set muting of the output */
+  void (*mute)(bool mute);
 };
 
 #define ASSERT_LG_AUDIODEV_VALID(x) \

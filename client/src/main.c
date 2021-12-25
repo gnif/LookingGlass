@@ -899,14 +899,26 @@ void audioStart(int channels, int sampleRate, PSAudioFormat format,
   }
 }
 
-void audioStop(void)
+static void audioStop(void)
 {
   if (g_state.audioDev)
     g_state.audioDev->stop();
   g_state.audioStarted = false;
 }
 
-void audioData(uint8_t * data, size_t size)
+static void audioVolume(int channels, const uint16_t volume[])
+{
+  if (g_state.audioDev && g_state.audioDev->volume)
+    g_state.audioDev->volume(channels, volume);
+}
+
+static void audioMute(bool mute)
+{
+  if (g_state.audioDev && g_state.audioDev->mute)
+    g_state.audioDev->mute(mute);
+}
+
+static void audioData(uint8_t * data, size_t size)
 {
   if (g_state.audioDev)
     g_state.audioDev->play(data, size);
@@ -1001,6 +1013,8 @@ static int lg_run(void)
     if (g_params.useSpiceAudio)
       spice_set_audio_cb(
           audioStart,
+          audioVolume,
+          audioMute,
           audioStop,
           audioData);
 
