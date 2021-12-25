@@ -140,7 +140,7 @@ frames from the guest.
 
 .. note::
 
-   If you are using GNOME on Wayland, you likely want to pass
+   For users running GNOME on Wayland, you likely want to pass
    ``-DENABLE_LIBDECOR=ON`` to ``cmake``, i.e. run ``cmake -DENABLE_LIBDECOR=ON ../``.
 
    For details, see :ref:`the FAQ <gnome_wayland_decorations>`.
