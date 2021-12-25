@@ -97,6 +97,11 @@ Function .onInit
   StrCpy $option_desktop       0
   StrCpy $option_noservice     0
 
+!ifdef IVSHMEM
+  Var /GlOBAL option_driver
+  StrCpy $option_driver        0
+!endif
+
   Push $R0
 
   ${GetOptions} $cmdLineParams '/startmenu' $R0
@@ -110,6 +115,12 @@ Function .onInit
   ${GetOptions} $cmdLineParams '/noservice' $R0
   IfErrors +2 0
   StrCpy $option_noservice 1
+
+!ifdef IVSHMEM
+  ${GetOptions} $cmdLineParams '/driver' $R0
+  IfErrors +2 0
+  StrCpy $option_driver 1
+!endif
 
   Pop $R0
 
@@ -129,6 +140,26 @@ FunctionEnd
 !macroend
 
 ;Install 
+!ifdef IVSHMEM
+Section "IVSHMEM Driver" Section0
+  StrCpy $option_driver 1
+SectionEnd
+
+Section "-IVSHMEM Driver"
+  ${If} $option_driver == 1
+    DetailPrint "Extracting IVSHMEM driver"
+    SetOutPath $INSTDIR
+    File ..\..\ivshmem\ivshmem.cat
+    File ..\..\ivshmem\ivshmem.inf
+    File ..\..\ivshmem\ivshmem.sys
+    File /nonfatal ..\..\ivshmem\ivshmem.pdb
+
+    DetailPrint "Installing IVSHMEM driver"
+    nsExec::ExecToLog '"$SYSDIR\pnputil.exe" /add-driver "$INSTDIR\ivshmem.inf" /install'
+  ${EndIf}
+SectionEnd
+!endif
+
 Section "-Install" Section1
 
   !insertmacro StopLookingGlassService
@@ -211,18 +242,26 @@ Section "Uninstall" Section6
   Delete "$INSTDIR\uninstaller.exe"
   Delete "$INSTDIR\looking-glass-host.exe"
   Delete "$INSTDIR\looking-glass-host.pdb"
+  Delete "$INSTDIR\ivshmem.cat"
+  Delete "$INSTDIR\ivshmem.inf"
+  Delete "$INSTDIR\ivshmem.sys"
+  Delete "$INSTDIR\ivshmem.pdb"
   Delete "$INSTDIR\LICENSE.txt"
 
   RMDir $INSTDIR
 SectionEnd
 
 ;Description text for selection of install items
+LangString DESC_Section0 ${LANG_ENGLISH} "Install the IVSHMEM driver. This driver is needed for Looking Glass to function. This will replace the driver if it is already installed."
 LangString DESC_Section1 ${LANG_ENGLISH} "Install Files into $INSTDIR"
 LangString DESC_Section2 ${LANG_ENGLISH} "Install service to automatically start Looking Glass (host)."
 LangString DESC_Section3 ${LANG_ENGLISH} "Create desktop shortcut icon."
 LangString DESC_Section4 ${LANG_ENGLISH} "Create start menu shortcut."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+!ifdef IVSHMEM
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section0} $(DESC_Section0)
+!endif
   !insertmacro MUI_DESCRIPTION_TEXT ${Section1} $(DESC_Section1)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section2} $(DESC_Section2)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section3} $(DESC_Section3)
