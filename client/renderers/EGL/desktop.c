@@ -46,7 +46,6 @@ struct DesktopShader
   EGL_Shader * shader;
   GLint uTransform;
   GLint uDesktopSize;
-  GLint uTextureSize;
   GLint uScaleAlgo;
   GLint uNVGain;
   GLint uCBMode;
@@ -105,7 +104,6 @@ static bool egl_initDesktopShader(
 
   shader->uTransform   = egl_shaderGetUniform(shader->shader, "transform"  );
   shader->uDesktopSize = egl_shaderGetUniform(shader->shader, "desktopSize");
-  shader->uTextureSize = egl_shaderGetUniform(shader->shader, "textureSize");
   shader->uScaleAlgo   = egl_shaderGetUniform(shader->shader, "scaleAlgo"  );
   shader->uNVGain      = egl_shaderGetUniform(shader->shader, "nvGain"     );
   shader->uCBMode      = egl_shaderGetUniform(shader->shader, "cbMode"     );
@@ -328,6 +326,13 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
 
     desktop->useDMA = false;
 
+    const char * gl_exts = (const char *)glGetString(GL_EXTENSIONS);
+    if (!util_hasGLExt(gl_exts, "GL_EXT_buffer_storage"))
+    {
+      DEBUG_ERROR("GL_EXT_buffer_storage is needed to use EGL backend");
+      return false;
+    }
+
     egl_textureFree(&desktop->texture);
     if (!egl_textureInit(&desktop->texture, desktop->display,
           EGL_TEXTYPE_FRAMEBUFFER, true))
@@ -400,11 +405,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     case EGL_SCALE_AUTO:
       switch (scaleType)
       {
-        case EGL_DESKTOP_NOSCALE:
         case EGL_DESKTOP_UPSCALE:
           scaleAlgo = EGL_SCALE_NEAREST;
           break;
 
+        case EGL_DESKTOP_NOSCALE:
         case EGL_DESKTOP_DOWNSCALE:
           scaleAlgo = EGL_SCALE_LINEAR;
           break;
@@ -427,11 +432,6 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       .type        = EGL_UNIFORM_TYPE_2F,
       .location    = shader->uDesktopSize,
       .f           = { desktop->width, desktop->height },
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_2I,
-      .location    = shader->uTextureSize,
-      .i           = { finalSizeX, finalSizeY },
     },
     {
       .type        = EGL_UNIFORM_TYPE_M3x2FV,

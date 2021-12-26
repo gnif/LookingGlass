@@ -1,11 +1,22 @@
 cmake_minimum_required(VERSION 3.0)
 project(looking-glass-host C)
 
+get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+
+if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
+	message(FATAL_ERROR
+		"\n"
+		"In-source builds are not supported\n"
+		"See build instructions provided in: "
+		"${PROJECT_TOP}/doc/build.rst\n"
+		"Refusing to continue"
+	)
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
+
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG" CACHE STRING "compiler flags" FORCE)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG" CACHE STRING "compiler flags" FORCE)
-
-get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
-list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(CheckSubmodule)
 include(GNUInstallDirs)

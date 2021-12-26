@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.0)
 project(looking-glass-client C CXX)
 
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+
+if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
+	message(FATAL_ERROR
+		"\n"
+		"In-source builds are not supported\n"
+		"See build instructions provided in: "
+		"${PROJECT_TOP}/doc/build.rst\n"
+		"Refusing to continue"
+	)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
 
 include(CheckSubmodule)
@@ -39,6 +50,9 @@ add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
 
 option(ENABLE_LIBDECOR "Build with libdecor support" OFF)
 add_feature_info(ENABLE_LIBDECOR ENABLE_LIBDECOR "libdecor support.")
+
+option(ENABLE_PIPEWIRE "Build with PipeWire audio output support" ON)
+add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
 
 if (NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
   message(FATAL_ERROR "Either ENABLE_X11 or ENABLE_WAYLAND must be on")
@@ -133,6 +147,7 @@ add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui" E
 
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
+add_subdirectory(audiodevs)
 
 add_executable(looking-glass-client ${SOURCES})
 
@@ -147,6 +162,7 @@ target_link_libraries(looking-glass-client
 	purespice
 	renderers
 	cimgui
+	audiodevs
 )
 
 install(TARGETS looking-glass-client

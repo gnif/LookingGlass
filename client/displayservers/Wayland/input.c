@@ -290,20 +290,53 @@ static const struct wl_keyboard_listener keyboardListener = {
   .modifiers = keyboardModifiersHandler,
 };
 
+static void waylandCleanUpPointer(void)
+{
+  INTERLOCKED_SECTION(wlWm.confineLock, {
+    if (wlWm.lockedPointer)
+    {
+      zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
+      wlWm.lockedPointer = NULL;
+    }
+
+    if (wlWm.confinedPointer)
+    {
+      zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
+      wlWm.confinedPointer = NULL;
+    }
+  });
+
+  if (wlWm.relativePointer)
+  {
+    zwp_relative_pointer_v1_destroy(wlWm.relativePointer);
+    wlWm.relativePointer = NULL;
+  }
+
+  wl_pointer_destroy(wlWm.pointer);
+  wlWm.pointer = NULL;
+}
+
 // Seat-handling listeners.
 
 static void handlePointerCapability(uint32_t capabilities)
 {
   bool hasPointer = capabilities & WL_SEAT_CAPABILITY_POINTER;
   if (!hasPointer && wlWm.pointer)
-  {
-    wl_pointer_destroy(wlWm.pointer);
-    wlWm.pointer = NULL;
-  }
+    waylandCleanUpPointer();
   else if (hasPointer && !wlWm.pointer)
   {
     wlWm.pointer = wl_seat_get_pointer(wlWm.seat);
     wl_pointer_add_listener(wlWm.pointer, &pointerListener, NULL);
+    waylandSetPointer(wlWm.cursorId);
+
+    if (wlWm.warpSupport)
+    {
+      wlWm.relativePointer =
+        zwp_relative_pointer_manager_v1_get_relative_pointer(
+          wlWm.relativePointerManager, wlWm.pointer);
+      zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
+        &relativePointerListener, NULL);
+    }
   }
 }
 
@@ -375,15 +408,6 @@ bool waylandInputInit(void)
   wl_seat_add_listener(wlWm.seat, &seatListener, NULL);
   wl_display_roundtrip(wlWm.display);
 
-  if (wlWm.warpSupport)
-  {
-    wlWm.relativePointer =
-      zwp_relative_pointer_manager_v1_get_relative_pointer(
-        wlWm.relativePointerManager, wlWm.pointer);
-    zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
-      &relativePointerListener, NULL);
-  }
-
   LG_LOCK_INIT(wlWm.confineLock);
 
   return true;
@@ -393,8 +417,15 @@ void waylandInputFree(void)
 {
   waylandUngrabPointer();
   LG_LOCK_FREE(wlWm.confineLock);
-  wl_pointer_destroy(wlWm.pointer);
-  wl_keyboard_destroy(wlWm.keyboard);
+
+  if (wlWm.pointer)
+    waylandCleanUpPointer();
+
+  // The only legal way the keyboard can be null is if it never existed.
+  // When unplugged, the compositor must have an inert object.
+  if (wlWm.keyboard)
+    wl_keyboard_destroy(wlWm.keyboard);
+
   wl_seat_destroy(wlWm.seat);
 
   if (wlWm.xkbState)
@@ -508,7 +539,7 @@ void waylandUncapturePointer(void)
      */
     if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
       internalUngrabPointer(false);
-    else
+    else if (wlWm.pointer)
     {
       wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
           wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,

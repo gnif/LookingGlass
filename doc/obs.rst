@@ -44,25 +44,33 @@ These instructions are similar to building the
 
    mkdir obs/build
    cd obs/build
+   cmake -DUSER_INSTALL=1 ../
+   make
+
+Alternatively, if you would like to install the plugin for all users:
+
+.. code:: bash
+
+   mkdir obs/build
+   cd obs/build
    cmake ../
    make
 
 Installation
 ~~~~~~~~~~~~
 
-You can install the plugin for all users by running ``make install`` as root.
+You can install the plugin by running ``make install``.
 
 .. code:: bash
 
    make install
 
-If you'd rather install for your local user, copy
-``liblooking-glass-obs.so`` to the correct path for local plugins.
+If you've opted to install the plugin for all users, you will need to run
+this command as ``root``.
 
 .. code:: bash
 
-   mkdir -p ~/.config/obs-studio/plugins/looking-glass-obs/bin/64bit
-   cp liblooking-glass-obs.so ~/.config/obs-studio/plugins/looking-glass-obs/bin/64bit
+   sudo make install
 
 Setup
 ~~~~~

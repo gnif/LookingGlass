@@ -140,6 +140,13 @@ static void nvfbc_initOptions(void)
       .type           = OPTION_TYPE_INT,
       .value.x_int    = 128
     },
+    {
+      .module         = "nvfbc",
+      .name           = "adapterIndex",
+      .description    = "The index of the adapter to capture from",
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 0
+    },
     {0}
   };
 
@@ -186,12 +193,14 @@ static bool nvfbc_init(void)
 
     free(buffer);
   }
+  
+  int adapterIndex = option_get_int("nvfbc", "adapterIndex");
 
   // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
   // causes a substantial performance pentalty even if it fails! As such we only
   // attempt NvFBC as a last resort, or if configured via the app:capture
   // option.
-  if (!NvFBCToSysCreate(privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+  if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
   {
     free(privData);
     return false;
@@ -394,8 +403,8 @@ static void updateDamageRects(CaptureFrame * frame)
   for(unsigned int i = 0; i < ARRAY_LENGTH(ds); ++i)
     ds[i].use = (bool)this->diffMap[i];
 
-  // reduce the number of reusuting rectangles by filling in holes and merging
-  // iiregular shapes into contiguous rectangles
+  // reduce the number of resulting rectangles by filling in holes and merging
+  // irregular shapes into contiguous rectangles
   bool resolve;
   do
   {
@@ -447,8 +456,8 @@ static void updateDamageRects(CaptureFrame * frame)
           bool ok = true;
           if (x > 0 && ds[l].id != ds[u].id)
           {
-            // no need to use dsFind as the search order ensures that the id has
-            // been fully resolved of the block above
+            // no need to use dsFind as the search order ensures that the id of
+            // the block above has been fully resolved
             for(unsigned int j = ds[ds[u].id].x1; j <= ds[ds[u].id].x2; ++j)
               if (!ds[y * w + j].use)
               {

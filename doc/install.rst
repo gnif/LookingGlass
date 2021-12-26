@@ -289,21 +289,23 @@ Examples:
 Configuration Files
 ~~~~~~~~~~~~~~~~~~~
 
-By default, the application will look for and load the config files in
-the following locations and order:
+By default, Looking Glass will load config files from
+the following locations:
 
 -  /etc/looking-glass-client.ini
 -  ~/.looking-glass-client.ini
 -  $XDG_CONFIG_HOME/looking-glass/client.ini (usually ~/.config/looking-glass/client.ini)
 
-Config options are merged from all files. Same options appearing in more
-than one file will be overridden by the latest loaded one (E.g. an option
-appearing in ~/.config/looking-glass/client.ini will override the same
-option appearing in ~/.looking-glass-client.ini). When first launched,
-the Looking-Glass client will create the folder $XDG_CONFIG_HOME/looking-glass/
-if it does not yet exist.
+All config files are loaded in order. Duplicate entries override earlier ones.
+This means you can set a system-wide configuration in
+``/etc/looking-glass-client.ini``, and override specific options for just
+your user in ``~/.looking-glass-client.ini``, which is overlayed on top of
+the system-wide configuration.
 
-The format of this file is the commonly known INI format, for example::
+When first launched, the Looking-Glass client will create the folder
+$XDG_CONFIG_HOME/looking-glass/ if it does not yet exist.
+
+The format of config files is the commonly known INI format, for example::
 
    [win]
    fullScreen=yes
@@ -311,7 +313,7 @@ The format of this file is the commonly known INI format, for example::
    [egl]
    nvGain=1
 
-Command line arguments will override any options loaded from the config
+Command line arguments will override any options loaded from config
 files.
 
 .. _client_overlay_mode:
@@ -319,82 +321,77 @@ files.
 Overlay Mode
 ~~~~~~~~~~~~
 
-Looking-Glass is utilizing an overlay layer to draw various widgets (such
-as the FPS display). An "Overlay Mode" can be toggled (see 
-:ref:`client_key_bindings`) that allows editing and modifying widgets
-properties, such as their position and size. To use the Overlay Mode:
+The Overlay Mode lets you configure various runtime options for Looking Glass.
+These include:
 
-- Enable one or more widgets (such as the FPS display)
-- Enter Overlay Mode by using its keybinding (the screen will turn
-  darker to indicate Overlay Mode is active)
-- Drag the widgets you enabled to your preferred position
-- Change the widget size (if the widget allows you) by dragging the
-  lower right edge
-- Change any other properties a widget has and are modifiable
-- Exit Overlay Mode by pressing :kbd:`ESC` or using the Overlay-Mode
-  keybinding again
+- EGL filters
+- Performance metrics options
+- Debug frame damage display
 
-Modifications done in Overlay Mode are persistent and are stored
-in a special config file $XDG_CONFIG_HOME/looking-glass/imgui.ini.
-Please refrain from editing this file manually as your changes might
-be overwritten by the client.
+(see :ref:`client_config_widget`)
+
+You can also reposition and resize enabled widgets, like the FPS/UPS Display,
+and Performance Metrics.
+
+Enter and exit Overlay Mode with :kbd:`ScrLk` + :kbd:`O`.
+:kbd:`ESC` can also be used to exit. (see :ref:`client_key_bindings`)
+
+Modifications done to widgets in Overlay Mode are stored in
+``$XDG_CONFIG_HOME/looking-glass/imgui.ini``.
+Please do not manually edit this file while Looking Glass is running,
+as your changes may be discarded.
 
 .. _client_config_widget:
 
 Configuration Widget
 ~~~~~~~~~~~~~~~~~~~~
 
-The Configuration Widget is accessible through the Overlay mode. The
+The Configuration Widget is accessible through the Overlay Mode. The
 widget has multiple tabs that allow setting a variety of modes and
-parameters for the application.
+parameters for Looking Glass at runtime.
 
 Settings tab
 ^^^^^^^^^^^^
 
-- Performance Metrics: Enabling this will turn on the Metrics Graphs
-  Widget. Multiple graphs can be enabled and they will stack vertically.
-- EGL: Modify EGL features such as the algorithm used for scaling and
-  enabling night vision mode.
+- Performance Metrics: A toggle for the Performance Metrics Widget.
+  Multiple graphs are available, and they will stack vertically.
+- EGL: Modify EGL features, such as the algorithm used for scaling, and
+  night vision mode.
 
-Changes in the Settings tab are not persistent and will change back to
+Changes in the Settings tab are not persistent, and will change back to
 their default values when the client is restarted.
 
 EGL Filters tab
 ^^^^^^^^^^^^^^^
 
-The EGL Filters tab is a GUI for enabling, configuring and ordering
-the post-processing filter stack. Each filter can be expanded to open
-its settings. Filters can also be re-ordered by dragging them up or down.
-Filters application is cumulative, and order is important (e.g. applying CAS
-before FSR might have different results than the reverse). Users are
-encouraged to experiment with the order and parameters to achieve optimal
-results. The currently available filters include:
+The EGL Filters tab contains options for toggling, configuring, and ordering 
+post-processing filters. Each filter can be expanded to open its settings. 
+Filters can also be re-ordered by dragging them up or down. Filters are applied 
+from top to bottom, keep this in mind when ordering them, e.g applying CAS
+before FSR might have different results than the reverse. Users are encouraged
+to experiment with the order and parameters to achieve optimal results. The 
+currently available filters include:
 
-- Downscaler: Filter for downscaling resolution. Can be used to undo the
-  poor upscaling that some games implement such that it can then
-  be better upscaled using FSR (see below). The filter has a pixel-size setting
-  that is used to set the effective downscaling ratio and can be set to use
-  different downscaling algorithms.
-- AMD FidelityFX Super Resolution (FSR): Filter implementing  a rendering
-  technique for upscaling resolution. FSR works by accepting the original
-  frames (on the guest) at lower resolution, then applying a spatial upscaling
-  algorithm in the client to make the final result look as though it is
-  rendered in high-resolution. The FSR filter interface allows for fine
-  tuning the sharpness factor of the algorithm and shows the equivalent
-  quality mode based on the ratio between the original frame resolution
-  and the client resolution.
-- AMD FidelityFX Contrast Adaptive Sharpening (CAS): Filter that
-  increases visual quality by applying a sharpening algorithm to the
-  frame. CAS can sometimes restore detail lost in a typical upscaling
-  application. The CAS filter interface has an adjustable sharpness
-  control.
+-  Downscaler: Filter for downscaling the host resolution. Can be used to undo 
+   poor upscaling on the VM to better utilize AMD FSR (see below). The filter 
+   has a pixel-size setting that is used to set the effective downscaling ratio,
+   and a configurable interpolation algorithm.
 
-The filter stack settings and order can be saved to presets so that it
-can be conveniently recalled at a later time. As filter settings are
-usually application specific, multiple presets can be defined for each
-case scenario. To save a preset, click on "Save preset as..." and enter
-a preset name. Presets are recalled by selecting them in the "Preset name"
-pull down. Presets are persistent and are stored on disk at
+-  AMD FidelityFX Super Resolution (FSR): Spatial upscaling filter that works
+   on low resolution frames from the guest VM and intelligently upscales to a
+   higher resolution. The filter sharpness is tunable, and displays the
+   equivalent AMD quality mode based on the resolution difference.
+
+-  AMD FidelityFX Contrast Adaptive Sharpening (CAS): Filter that
+   increases visual quality by applying a sharpening algorithm to the
+   video. CAS can sometimes restore detail lost in a typical upscaling
+   application. Has adjustable sharpness setting.
+
+The filter settings and order can be saved to presets so that it can be restored
+at a later time. As filter settings are usually application specific, multiple 
+presets can be defined for each case scenario. To save a preset, click on "Save 
+preset as..." and enter a preset name. Presets are loaded by selecting them in 
+the "Preset name" pull down. Presets are persistent and are stored on disk at
 ``$XDG_CONFIG_HOME/looking-glass/presets``.
 
 .. warning::
@@ -413,23 +410,23 @@ Full Command Line Options
 
 The following is a complete list of options accepted by this application
 
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | Long                   | Short | Value                  | Description                                                                              |
-  +========================+=======+========================+==========================================================================================+
-  | app:configFile         | -C    | NULL                   | A file to read additional configuration from                                             |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | app:renderer           | -g    | auto                   | Specify the renderer to use                                                              |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | app:license            | -l    | no                     | Show the license for this application and then terminate                                 |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds                                   |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds                                    |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | app:allowDMA           |       | yes                    | Allow direct DMA transfers if supported (see `README.md` in the `module` dir)            |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
-  | app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file, or the name of the kvmfr device to use, e.g.: kvmfr0 |
-  +------------------------+-------+------------------------+------------------------------------------------------------------------------------------+
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | Long                   | Short | Value                  | Description                                                                             |
+  +========================+=======+========================+=========================================================================================+
+  | app:configFile         | -C    | NULL                   | A file to read additional configuration from                                            |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | app:renderer           | -g    | auto                   | Specify the renderer to use                                                             |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | app:license            | -l    | no                     | Show the license for this application and then terminate                                |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds                                  |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds                                   |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | app:allowDMA           |       | yes                    | Allow direct DMA transfers if supported (see `README.md` in the `module` dir)           |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  | app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file, or the name of the kvmfr device to use, e.g. kvmfr0 |
+  +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
 
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | Long                    | Short | Value                  | Description                                                          |
@@ -462,7 +459,7 @@ The following is a complete list of options accepted by this application
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:fpsMin              | -K    | -1                     | Frame rate minimum (0 = disable - not recommended, -1 = auto detect) |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
-  | win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (i.e.: Alt+F4)                               |
+  | win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (i.e. Alt+F4)                                |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
   | win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting                                |
   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
@@ -557,6 +554,10 @@ The following is a complete list of options accepted by this application
   | egl:scale        |       | 0     | Set the scale algorithm (0 = auto, 1 = nearest, 2 = linear)               |
   +------------------+-------+-------+---------------------------------------------------------------------------+
   | egl:debug        |       | no    | Enable debug output                                                       |
+  +------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:noBufferAge  |       | no    | Disable partial rendering based on buffer age                             |
+  +------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:noSwapDamage |       | no    | Disable swapping with damage                                              |
   +------------------+-------+-------+---------------------------------------------------------------------------+
 
   +----------------------+-------+-------+---------------------------------------------+

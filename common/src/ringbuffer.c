@@ -19,6 +19,7 @@
  */
 
 #include "common/ringbuffer.h"
+#include "common/locking.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,7 @@ struct RingBuffer
 
   int     length;
   size_t  valueSize;
+  LG_Lock lock;
   int     start, pos, count;
   char    values[0];
 };
@@ -39,6 +41,7 @@ RingBuffer ringbuffer_new(int length, size_t valueSize)
   struct RingBuffer * rb = calloc(1, sizeof(*rb) + valueSize * length);
   rb->length    = length;
   rb->valueSize = valueSize;
+  LG_LOCK_INIT(rb->lock);
   return rb;
 }
 
@@ -47,6 +50,7 @@ void ringbuffer_free(RingBuffer * rb)
   if (!*rb)
     return;
 
+  LG_LOCK_FREE(rb->lock);
   free(*rb);
   *rb = NULL;
 }
@@ -54,7 +58,6 @@ void ringbuffer_free(RingBuffer * rb)
 void ringbuffer_push(RingBuffer rb, const void * value)
 {
   void * dst = rb->values + rb->pos * rb->valueSize;
-
   if (rb->count < rb->length)
     ++rb->count;
   else
@@ -67,9 +70,21 @@ void ringbuffer_push(RingBuffer rb, const void * value)
   }
 
   memcpy(dst, value, rb->valueSize);
-
   if (++rb->pos == rb->length)
     rb->pos = 0;
+}
+
+bool ringbuffer_shift(RingBuffer rb, void * dst)
+{
+  if (rb->count == 0)
+    return false;
+
+  memcpy(dst, rb->values + rb->start * rb->valueSize, rb->valueSize);
+  --rb->count;
+  if (++rb->start == rb->length)
+    rb->start = 0;
+
+  return true;
 }
 
 void ringbuffer_reset(RingBuffer rb)
@@ -109,6 +124,66 @@ void * ringBuffer_getLastValue(const RingBuffer rb)
     index -= rb->length;
 
   return rb->values + index * rb->valueSize;
+}
+
+int ringbuffer_append(const RingBuffer rb, const void * values, int count)
+{
+  if (count == 0)
+    return 0;
+
+  LG_LOCK(rb->lock);
+  if (count > rb->length - rb->count)
+    count = rb->length - rb->count;
+
+  const char * p = (const char *)values;
+  int remain = count;
+  do
+  {
+    int copy = rb->length - rb->pos;
+    if (copy > remain)
+      copy = remain;
+
+    memcpy(rb->values + rb->pos * rb->valueSize, p, copy * rb->valueSize);
+    rb->pos += copy;
+    if (rb->pos == rb->length)
+      rb->pos = 0;
+
+    p      += copy * rb->valueSize;
+    remain -= copy;
+  }
+  while(remain > 0);
+
+  rb->count += count;
+  LG_UNLOCK(rb->lock);
+
+  return count;
+}
+
+void * ringbuffer_consume(const RingBuffer rb, int * count)
+{
+  LG_LOCK(rb->lock);
+  if (rb->count == 0)
+  {
+    *count = 0;
+    LG_UNLOCK(rb->lock);
+    return NULL;
+  }
+
+  if (*count > rb->count)
+    *count = rb->count;
+
+  if (*count > rb->length - rb->start)
+    *count = rb->length - rb->start;
+
+  void * values = rb->values + rb->start * rb->valueSize;
+  rb->start += *count;
+  rb->count -= *count;
+  if (rb->start == rb->length)
+    rb->start = 0;
+
+  LG_UNLOCK(rb->lock);
+
+  return values;
 }
 
 void ringbuffer_setPreOverwriteFn(const RingBuffer rb, RingBufferValueFn fn,

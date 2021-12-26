@@ -82,8 +82,9 @@ static void x11SetFullscreen(bool fs);
 static int  x11EventThread(void * unused);
 static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
+static void x11GrabPointer(void);
 
-static void x11DoPresent(void)
+static void x11DoPresent(uint64_t msc)
 {
   static bool startup = true;
   if (startup)
@@ -113,11 +114,19 @@ static void x11DoPresent(void)
 
   static bool first   = true;
   static uint64_t lastMsc = 0;
-  uint64_t msc = atomic_load(&x11.presentMsc);
 
   uint64_t refill;
   if (!first)
-    refill = 50 - (lastMsc - msc);
+  {
+    const uint64_t delta = (lastMsc >= msc) ?
+      lastMsc - msc :
+      ~0ULL - msc + lastMsc;
+
+    if (delta > 50)
+      return;
+
+    refill = 50 - delta;
+  }
   else
   {
     refill  = 50;
@@ -165,6 +174,69 @@ static bool x11EarlyInit(void)
 {
   XInitThreads();
   return true;
+}
+
+static void x11CheckEWMHSupport(void)
+{
+  if (x11atoms._NET_SUPPORTING_WM_CHECK == None ||
+      x11atoms._NET_SUPPORTED == None)
+    return;
+
+  Atom type;
+  int fmt;
+  unsigned long num, bytes;
+  unsigned char *data;
+
+  if (XGetWindowProperty(x11.display, DefaultRootWindow(x11.display),
+      x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out;
+
+  Window * windowFromRoot = (Window *)data;
+
+  if (XGetWindowProperty(x11.display, *windowFromRoot,
+      x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out_root;
+
+  Window * windowFromChild = (Window *)data;
+  if (*windowFromChild != *windowFromRoot)
+    goto out_child;
+
+  if (XGetWindowProperty(x11.display, DefaultRootWindow(x11.display),
+      x11atoms._NET_SUPPORTED, 0, ~0L, False, AnyPropertyType,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out_child;
+
+  Atom * supported = (Atom *)data;
+  unsigned long supportedCount = num;
+
+  if (XGetWindowProperty(x11.display, *windowFromRoot,
+      x11atoms._NET_WM_NAME, 0, ~0L, False, AnyPropertyType,
+      &type, &fmt, &num, &bytes, &data) != Success)
+    goto out_supported;
+
+  char * wmName = (char *)data;
+
+  for(unsigned long i = 0; i < supportedCount; ++i)
+  {
+    if (supported[i] == x11atoms._NET_WM_STATE_FOCUSED)
+      x11.ewmhHasFocusEvent = true;
+  }
+
+  DEBUG_INFO("EWMH-complient window manager detected: %s", wmName);
+  x11.ewmhSupport = true;
+
+
+  XFree(wmName);
+out_supported:
+  XFree(supported);
+out_child:
+  XFree(windowFromChild);
+out_root:
+  XFree(windowFromRoot);
+out:
+  return;
 }
 
 static bool x11Init(const LG_DSInitParams params)
@@ -271,6 +343,9 @@ static bool x11Init(const LG_DSInitParams params)
 
   X11AtomsInit();
   XSetWMProtocols(x11.display, x11.window, &x11atoms.WM_DELETE_WINDOW, 1);
+
+  // check for Extended Window Manager Hints support
+  x11CheckEWMHSupport();
 
   if (params.borderless)
   {
@@ -457,8 +532,12 @@ static bool x11Init(const LG_DSInitParams params)
   eventmask.mask_len = sizeof(mask);
   eventmask.mask     = mask;
 
-  XISetMask(mask, XI_FocusIn      );
-  XISetMask(mask, XI_FocusOut     );
+  if (!x11.ewmhHasFocusEvent)
+  {
+    XISetMask(mask, XI_FocusIn );
+    XISetMask(mask, XI_FocusOut);
+  }
+
   XISetMask(mask, XI_Enter        );
   XISetMask(mask, XI_Leave        );
   XISetMask(mask, XI_Motion       );
@@ -573,6 +652,9 @@ static bool x11Init(const LG_DSInitParams params)
   XMapWindow(x11.display, x11.window);
   XFlush(x11.display);
 
+  if (!params.center)
+    XMoveWindow(x11.display, x11.window, params.x, params.y);
+
   XSetLocaleModifiers(""); // Load XMODIFIERS
   x11.xim = XOpenIM(x11.display, 0, 0, 0);
 
@@ -612,7 +694,7 @@ static bool x11Init(const LG_DSInitParams params)
   }
 
   if (x11.jitRender)
-    x11DoPresent();
+    x11DoPresent(0);
 
   return true;
 
@@ -836,6 +918,7 @@ static int x11EventThread(void * unused)
       }
 
       case PropertyNotify:
+
         // ignore property events that are not for us
         if (xe.xproperty.display != x11.display      ||
             xe.xproperty.window  != x11.window       ||
@@ -857,11 +940,20 @@ static int x11EventThread(void * unused)
             break;
 
           bool fullscreen = false;
-          for(int i = 0; i < num; ++i)
+          bool focused    = false;
+          for(unsigned long i = 0; i < num; ++i)
           {
             Atom prop = ((Atom *)data)[i];
             if (prop == x11atoms._NET_WM_STATE_FULLSCREEN)
               fullscreen = true;
+            else if (prop == x11atoms._NET_WM_STATE_FOCUSED)
+              focused = true;
+          }
+
+          if (x11.ewmhHasFocusEvent && x11.focused != focused)
+          {
+            x11.focused = focused;
+            app_handleFocusEvent(focused);
           }
 
           x11.fullscreen = fullscreen;
@@ -938,6 +1030,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
   {
     case XI_FocusIn:
     {
+      if (x11.ewmhHasFocusEvent)
+        return;
+
       atomic_store(&x11.lastWMEvent, microtime());
       if (x11.focused)
         return;
@@ -956,6 +1051,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_FocusOut:
     {
+      if (x11.ewmhHasFocusEvent)
+        return;
+
       atomic_store(&x11.lastWMEvent, microtime());
       if (!x11.focused)
         return;
@@ -990,8 +1088,10 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
     {
       atomic_store(&x11.lastWMEvent, microtime());
       XILeaveEvent *xie = cookie->data;
+
       if (!x11.entered || xie->event != x11.window ||
-          button_state != 0 || app_isCaptureMode())
+          button_state != 0 || app_isCaptureMode() ||
+          xie->mode == NotifyGrab)
         return;
 
       app_updateCursorPos(xie->event_x, xie->event_y);
@@ -1246,10 +1346,10 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
     case PresentCompleteNotify:
     {
       XPresentCompleteNotifyEvent * e = cookie->data;
+      x11DoPresent(e->msc);
       atomic_store(&x11.presentMsc, e->msc);
       atomic_store(&x11.presentUst, e->ust);
       lgSignalEvent(x11.frameEvent);
-      x11DoPresent();
       break;
     }
   }
@@ -1551,7 +1651,10 @@ static void x11GrabPointer(void)
   XISetMask(mask.mask, XI_Enter           );
   XISetMask(mask.mask, XI_Leave           );
 
-  Status ret = XIGrabDevice(
+  Status ret;
+  for(int retry = 0; retry < 10; ++retry)
+  {
+    ret = XIGrabDevice(
       x11.display,
       x11.pointerDev,
       x11.window,
@@ -1561,6 +1664,18 @@ static void x11GrabPointer(void)
       XIGrabModeAsync,
       XINoOwnerEvents,
       &mask);
+
+    // on some WMs (i3) for an unknown reason the first grab attempt when
+    // switching to a desktop that has LG on it fails with GrabFrozen, however
+    // adding as short delay seems to resolve the issue.
+    if (ret == GrabFrozen && retry < 9)
+    {
+      usleep(100000);
+      continue;
+    }
+
+    break;
+  }
 
   if (ret != Success)
   {
