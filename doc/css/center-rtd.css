@@ -7,7 +7,7 @@
  }
 }
 
-@media screen and (max-width:1430px) {
+@media screen and (min-width:769px) and (max-width:1420px) {
  .wy-nav-content-wrap {
   margin-left: 300px;
  }
