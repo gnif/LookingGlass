@@ -448,7 +448,8 @@ void core_handleMouseNormal(double ex, double ey)
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
 
-    if (g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS)
+    if (!g_state.stopVideo &&
+      g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS)
     {
       const KVMFRSetCursorPos msg = {
         .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
