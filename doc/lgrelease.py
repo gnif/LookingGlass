@@ -1,8 +1,6 @@
 # -- Path setup --------------------------------------------------------------
 from pathlib import Path
 
-release = None
-
 try:
     with open(Path(__file__).parent.parent / 'VERSION') as f:
         release = f.read().strip()

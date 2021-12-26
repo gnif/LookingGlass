@@ -9,7 +9,6 @@
 import sys, os
 sys.path.append(os.path.dirname(__file__))
 
-
 from lgrelease import release
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -20,7 +19,6 @@ from lgrelease import release
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 
-
 # -- Project information -----------------------------------------------------
 
 project = 'Looking Glass'
@@ -30,7 +28,6 @@ author = 'Geoffrey McRae and the Looking Glass team'
 rst_prolog = """
 .. |license| replace:: GPLv2
 """
-
 
 # -- General configuration ---------------------------------------------------
 

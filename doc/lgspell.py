@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import re
-import sys, os
-sys.path.append(os.path.dirname(__file__))
 
 from lgrelease import release
 
