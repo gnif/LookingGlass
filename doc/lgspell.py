@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 import re
+import sys, os
+sys.path.append(os.path.dirname(__file__))
+
+from lgrelease import release
 
 from enchant.tokenize import Filter
 
@@ -34,6 +38,11 @@ class PathFilter(Filter):
 class CryptoAddressFilter(Filter):
     def _skip(self, word):
         return recrypto.match(word)
+
+
+class VersionFilter(Filter):
+    def _skip(self, word):
+        return word == release
 
 
 if __name__ == '__main__':

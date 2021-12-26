@@ -4,8 +4,13 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-# -- Path setup --------------------------------------------------------------
-from pathlib import Path
+# -- Release import
+
+import sys, os
+sys.path.append(os.path.dirname(__file__))
+
+
+from lgrelease import release
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -22,30 +27,17 @@ project = 'Looking Glass'
 copyright = '2021, Looking Glass team'
 author = 'Geoffrey McRae and the Looking Glass team'
 
-# The full version, including alpha/beta/rc tags
-try:
-    with open(Path(__file__).parent.parent / 'VERSION') as f:
-        release = f.read().strip()
-except IOError:
-    import subprocess
-    try:
-        release = subprocess.check_output([
-            'git', 'describe', '--always', '--abbrev=10', '--dirty=+', '--tags'
-        ]).decode('utf-8').strip()
-    except (subprocess.CalledProcessError, OSError):
-        release = '(unknown version)'
-    del subprocess
-
-
 rst_prolog = """
 .. |license| replace:: GPLv2
 """
+
 
 # -- General configuration ---------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
+
 extensions = [
     'sphinx_rtd_theme',
 ]
@@ -58,11 +50,9 @@ else:
     del spelling
     extensions += ['sphinxcontrib.spelling']
 
-    import sys, os
-    sys.path.append(os.path.dirname(__file__))
     spelling_filters = [
         'lgspell.OptionFilter', 'lgspell.PackageFilter', 'lgspell.PathFilter',
-        'lgspell.CryptoAddressFilter'
+        'lgspell.CryptoAddressFilter', 'lgspell.VersionFilter'
     ]
     spelling_word_list_filename = [os.path.join(os.path.dirname(__file__), 'words.txt')]
 
