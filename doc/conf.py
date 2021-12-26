@@ -86,7 +86,7 @@ html_theme = 'sphinx_rtd_theme'
 
 html_theme_options = {
     'logo_only': True,
-    'style_nav_header_background': 'transparent',
+    'style_nav_header_background': '#343131',
 }
 
 html_sidebars = {
