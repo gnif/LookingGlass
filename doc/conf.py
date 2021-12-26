@@ -5,6 +5,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 # -- Path setup --------------------------------------------------------------
+from pathlib import Path
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -22,7 +23,19 @@ copyright = '2021, Looking Glass team'
 author = 'Geoffrey McRae and the Looking Glass team'
 
 # The full version, including alpha/beta/rc tags
-release = 'B4'
+try:
+    with open(Path(__file__).parent.parent / 'VERSION') as f:
+        release = f.read().strip()
+except IOError:
+    import subprocess
+    try:
+        release = subprocess.check_output([
+            'gist', 'describe', '--always', '--abbrev=10', '--dirty=+', '--tags'
+        ]).decode('utf-8').strip()
+    except (subprocess.CalledProcessError, OSError):
+        release = '(unknown version)'
+    del subprocess
+
 
 rst_prolog = """
 .. |license| replace:: GPLv2
