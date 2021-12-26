@@ -161,7 +161,7 @@ static void pipewire_start(int channels, int sampleRate)
   pw_thread_loop_lock(pw.thread);
   pw.stream = pw_stream_new_simple(
     pw.loop,
-    "LookingGlass",
+    "Looking Glass",
     pw_properties_new(
       PW_KEY_NODE_NAME     , "Looking Glass",
       PW_KEY_MEDIA_TYPE    , "Audio",
