@@ -97,6 +97,10 @@ feature is disabled when running :ref:`cmake <client_building>`.
 
    -  libpipewire-0.3-dev
 
+-  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
+
+   -  libpulse-dev
+
 .. _client_deps_recommended:
 
 Recommended

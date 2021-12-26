@@ -21,6 +21,7 @@ kvmfr
 laggy
 libdecor
 libpipewire
+libpulse
 libvirt
 linux
 LookingGlass

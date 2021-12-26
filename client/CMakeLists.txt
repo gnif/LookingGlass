@@ -54,6 +54,9 @@ add_feature_info(ENABLE_LIBDECOR ENABLE_LIBDECOR "libdecor support.")
 option(ENABLE_PIPEWIRE "Build with PipeWire audio output support" ON)
 add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
 
+option(ENABLE_PULSEAUDIO "Build with PulseAudio audio output support" ON)
+add_feature_info(ENABLE_PULSEAUDIO ENABLE_PULSEAUDIO "PulseAudio audio support.")
+
 if (NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
   message(FATAL_ERROR "Either ENABLE_X11 or ENABLE_WAYLAND must be on")
 endif()
