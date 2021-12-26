@@ -19,4 +19,4 @@ https://looking-glass.io/downloads
 Source code for the documentation can be found in the `/doc` directory.
 
 You may view this locally as HTML by running `make html` with `python3-sphinx`
-installed.
+and `python3-sphinx-rtd-theme` installed.
