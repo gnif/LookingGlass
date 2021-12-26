@@ -32,7 +32,7 @@ jobs:
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
           libwayland-dev wayland-protocols libxkbcommon-dev \
-          libpipewire-0.3-dev \
+          libpipewire-0.3-dev libpulse-dev \
           $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-dev libdbus-1-dev') \
           $([ '${{ matrix.compiler.cc }}' = clang ] && echo 'clang-tools')
         sudo pip3 install pyenchant
