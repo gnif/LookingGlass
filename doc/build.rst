@@ -116,15 +116,16 @@ Fetching with APT
 
 You can fetch these dependencies with the following command:
 
-``apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev
-gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev
-nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev
-libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols``
+.. code:: bash
+
+   apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev \
+   gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev \
+   nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
+   libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols
 
 You may omit some dependencies, if you disable the feature which requires them
 when running :ref:`cmake <client_building>`.
 (See :ref:`client_deps_may_be_disabled`)
-
 
 .. _client_building:
 
