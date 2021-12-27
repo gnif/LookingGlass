@@ -33,12 +33,12 @@ void egl_drawTorus(EGL_Model * model, unsigned int pts, float x, float y,
     const float angle = (i / (float)pts) * M_PI * 2.0f;
     const float c = cos(angle);
     const float s = sin(angle);
-    *dst = x + (inner * c); ++dst;
-    *dst = y + (inner * s); ++dst;
-    *dst = 0.0f; ++dst;
-    *dst = x + (outer * c); ++dst;
-    *dst = y + (outer * s); ++dst;
-    *dst = 0.0f; ++dst;
+    *dst++ = x + (inner * c);
+    *dst++ = y + (inner * s);
+    *dst++ = 0.0f;
+    *dst++ = x + (outer * c);
+    *dst++ = y + (outer * s);
+    *dst++ = 0.0f;
   }
 
   egl_modelAddVerts(model, v, NULL, (pts + 1) * 2);
@@ -56,12 +56,12 @@ void egl_drawTorusArc(EGL_Model * model, unsigned int pts, float x, float y,
     const float angle = s + ((i / (float)pts) * e);
     const float c = cos(angle);
     const float s = sin(angle);
-    *dst = x + (inner * c); ++dst;
-    *dst = y + (inner * s); ++dst;
-    *dst = 0.0f; ++dst;
-    *dst = x + (outer * c); ++dst;
-    *dst = y + (outer * s); ++dst;
-    *dst = 0.0f; ++dst;
+    *dst++ = x + (inner * c);
+    *dst++ = y + (inner * s);
+    *dst++ = 0.0f;
+    *dst++ = x + (outer * c);
+    *dst++ = y + (outer * s);
+    *dst++ = 0.0f;
   }
 
   egl_modelAddVerts(model, v, NULL, (pts + 1) * 2);
