@@ -481,7 +481,9 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   if (this->scalePointer)
   {
     float scale = max(1.0f,
-        this->formatValid ? (float)this->format.width / this->width : 1.0f);
+        this->formatValid ?
+	max((float)this->format.width / this->width, (float)this->format.height / this->height)
+	: 1.0f);
     egl_cursorSetScale(this->cursor, scale);
   }
 
