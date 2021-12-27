@@ -907,6 +907,7 @@ void app_setOverlay(bool enable)
     g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
     core_resetOverlayInputState();
     core_setGrabQuiet(wasGrabbed);
+    core_invalidatePointer();
     app_invalidateWindow(false);
   }
 }

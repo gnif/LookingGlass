@@ -37,33 +37,16 @@ bool core_inputEnabled(void)
     ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
 }
 
-void core_setCursorInView(bool enable)
+void core_invalidatePointer(void)
 {
-  // if the state has not changed, don't do anything else
-  if (g_cursor.inView == enable)
-    return;
-
-  if (enable && !g_state.focused)
-    return;
-
-  // do not allow the view to become active if any mouse buttons are being held,
-  // this fixes issues with meta window resizing.
-  if (enable && g_cursor.buttons)
-    return;
-
-  g_cursor.inView = enable;
-  g_cursor.draw   = (g_params.alwaysShowCursor || g_params.captureInputOnly)
-    ? true : enable;
-  g_cursor.redraw = true;
-
   /* if the display server does not support warp, then we can not operate in
    * always relative mode and we should not grab the pointer */
   enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
 
-  g_cursor.warpState = enable ? WARP_STATE_ON : WARP_STATE_OFF;
+  g_cursor.warpState = g_cursor.inView ? WARP_STATE_ON : WARP_STATE_OFF;
 
-  if (enable)
+  if (g_cursor.inView)
   {
     if (g_params.hideMouse)
       g_state.ds->setPointer(LG_POINTER_NONE);
@@ -86,6 +69,28 @@ void core_setCursorInView(bool enable)
   }
 
   g_cursor.warpState = WARP_STATE_ON;
+}
+
+void core_setCursorInView(bool enable)
+{
+  // if the state has not changed, don't do anything else
+  if (g_cursor.inView == enable)
+    return;
+
+  if (enable && !g_state.focused)
+    return;
+
+  // do not allow the view to become active if any mouse buttons are being held,
+  // this fixes issues with meta window resizing.
+  if (enable && g_cursor.buttons)
+    return;
+
+  g_cursor.inView = enable;
+  g_cursor.draw   = (g_params.alwaysShowCursor || g_params.captureInputOnly)
+    ? true : enable;
+  g_cursor.redraw = true;
+
+  core_invalidatePointer();
 }
 
 void core_setGrab(bool enable)
