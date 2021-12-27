@@ -179,8 +179,7 @@ jobs:
         sudo apt-get update
     - name: Install docs dependencies
       run: |
-        sudo apt-get install python3-sphinx python3-sphinx-rtd-theme
-        sudo pip3 install sphinxcontrib-spelling
+        sudo apt-get install python3-sphinx python3-sphinx-rtd-theme python3-sphinxcontrib.spelling
     - name: Build docs
       run: |
         cd doc
