@@ -2,6 +2,7 @@ if (EXISTS ${PROJECT_TOP}/VERSION)
 	file(READ ${PROJECT_TOP}/VERSION GIT_REV)
 else()
 	execute_process(
+		# Synchronize docs/lgrelease.py if updated
 		COMMAND git describe --always --abbrev=10 --dirty=+ --tags
 		WORKING_DIRECTORY "${PROJECT_TOP}"
 		OUTPUT_VARIABLE GIT_REV
