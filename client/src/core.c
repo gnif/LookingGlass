@@ -31,21 +31,44 @@
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
 
+static bool isInView(void)
+{
+  return
+    g_cursor.pos.x >= g_state.dstRect.x                     &&
+    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
+    g_cursor.pos.y >= g_state.dstRect.y                     &&
+    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
+}
+
 bool core_inputEnabled(void)
 {
   return g_params.useSpiceInput && !g_state.ignoreInput &&
     ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
 }
 
-void core_invalidatePointer(void)
+void core_invalidatePointer(bool detectInView)
 {
   /* if the display server does not support warp, then we can not operate in
    * always relative mode and we should not grab the pointer */
   enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
 
-  g_cursor.warpState = g_cursor.inView ? WARP_STATE_ON : WARP_STATE_OFF;
+  if (detectInView)
+  {
+    bool inView = isInView();
+    // do not allow the view to become active if any mouse buttons are being held,
+    // this fixes issues with meta window resizing.
+    if (inView && g_cursor.buttons)
+      return;
 
+    g_cursor.inView = inView;
+  }
+
+  g_cursor.draw = (g_params.alwaysShowCursor || g_params.captureInputOnly)
+    ? true : g_cursor.inView;
+  g_cursor.redraw = true;
+
+  g_cursor.warpState = g_cursor.inView ? WARP_STATE_ON : WARP_STATE_OFF;
   if (g_cursor.inView)
   {
     if (g_params.hideMouse)
@@ -80,17 +103,8 @@ void core_setCursorInView(bool enable)
   if (enable && !g_state.focused)
     return;
 
-  // do not allow the view to become active if any mouse buttons are being held,
-  // this fixes issues with meta window resizing.
-  if (enable && g_cursor.buttons)
-    return;
-
   g_cursor.inView = enable;
-  g_cursor.draw   = (g_params.alwaysShowCursor || g_params.captureInputOnly)
-    ? true : enable;
-  g_cursor.redraw = true;
-
-  core_invalidatePointer();
+  core_invalidatePointer(false);
 }
 
 void core_setGrab(bool enable)
@@ -399,15 +413,6 @@ void core_handleMouseGrabbed(double ex, double ey)
 
   if (!spice_mouse_motion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
-}
-
-static bool isInView(void)
-{
-  return
-    g_cursor.pos.x >= g_state.dstRect.x                     &&
-    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-    g_cursor.pos.y >= g_state.dstRect.y                     &&
-    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 }
 
 void core_handleMouseNormal(double ex, double ey)

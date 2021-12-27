@@ -24,7 +24,7 @@
 #include <stdbool.h>
 
 bool core_inputEnabled(void);
-void core_invalidatePointer(void);
+void core_invalidatePointer(bool detectInView);
 void core_setCursorInView(bool enable);
 void core_setGrab(bool enable);
 void core_setGrabQuiet(bool enable);
