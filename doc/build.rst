@@ -50,7 +50,7 @@ These required libraries and tools should be installed first.
 .. note::
 
    The below list of dependencies is for Debian. A community maintained list of
-   dependencies for other distrubutions for the current **stable** version of
+   dependencies for other distributions for the current **stable** version of
    Looking Glass is maintained on the wiki at:
    https://looking-glass.io/wiki/Installation_on_other_distributions
 
