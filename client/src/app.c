@@ -154,7 +154,7 @@ void app_clipboardRelease(void)
   if (!g_params.clipboardToVM)
     return;
 
-  spice_clipboard_release();
+  purespice_clipboardRelease();
 }
 
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
@@ -164,15 +164,15 @@ void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
 
   if (count == 0)
   {
-    spice_clipboard_release();
+    purespice_clipboardRelease();
     return;
   }
 
-  SpiceDataType conv[count];
+  PSDataType conv[count];
   for(int i = 0; i < count; ++i)
     conv[i] = cb_lgTypeToSpiceType(types[i]);
 
-  spice_clipboard_grab(conv, count);
+  purespice_clipboardGrab(conv, count);
 }
 
 void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
@@ -182,7 +182,7 @@ void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
 
   if (type == LG_CLIPBOARD_DATA_NONE)
   {
-    spice_clipboard_release();
+    purespice_clipboardRelease();
     return;
   }
 
@@ -190,7 +190,7 @@ void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
   g_state.cbChunked = size > 0;
   g_state.cbXfer    = size;
 
-  spice_clipboard_data_start(g_state.cbType, size);
+  purespice_clipboardDataStart(g_state.cbType, size);
 }
 
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
@@ -205,9 +205,9 @@ void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
   }
 
   if (!g_state.cbChunked)
-    spice_clipboard_data_start(g_state.cbType, size);
+    purespice_clipboardDataStart(g_state.cbType, size);
 
-  spice_clipboard_data(g_state.cbType, data, (uint32_t)size);
+  purespice_clipboardData(g_state.cbType, data, (uint32_t)size);
   g_state.cbXfer -= size;
 }
 
@@ -223,7 +223,7 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
   cbr->opaque  = opaque;
   ll_push(g_state.cbRequestList, cbr);
 
-  spice_clipboard_request(g_state.cbType);
+  purespice_clipboardRequest(g_state.cbType);
 }
 
 static int mapSpiceToImGuiButton(uint32_t button)
@@ -256,7 +256,7 @@ void app_handleButtonPress(int button)
   if (!core_inputEnabled() || !g_cursor.inView)
     return;
 
-  if (!spice_mouse_press(button))
+  if (!purespice_mousePress(button))
     DEBUG_ERROR("app_handleButtonPress: failed to send message");
 }
 
@@ -275,7 +275,7 @@ void app_handleButtonRelease(int button)
   if (!core_inputEnabled())
     return;
 
-  if (!spice_mouse_release(button))
+  if (!purespice_mouseRelease(button))
     DEBUG_ERROR("app_handleButtonRelease: failed to send message");
 }
 
@@ -325,7 +325,7 @@ void app_handleKeyPress(int sc)
     if (!ps2)
       return;
 
-    if (spice_key_down(ps2))
+    if (purespice_keyDown(ps2))
       g_state.keyDown[sc] = true;
     else
     {
@@ -378,7 +378,7 @@ void app_handleKeyRelease(int sc)
   if (!ps2)
     return;
 
-  if (spice_key_up(ps2))
+  if (purespice_keyUp(ps2))
     g_state.keyDown[sc] = false;
   else
   {
@@ -410,7 +410,7 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
     (numLock    ? 2 /* SPICE_NUM_LOCK_MODIFIER    */ : 0) |
     (capsLock   ? 4 /* SPICE_CAPS_LOCK_MODIFIER   */ : 0);
 
-  if (!spice_key_modifiers(modifiers))
+  if (!purespice_keyModifiers(modifiers))
     DEBUG_ERROR("app_handleKeyboardLEDs: failed to send message");
 }
 
@@ -468,7 +468,7 @@ void app_handleMouseBasic()
   g_cursor.projected.x += x;
   g_cursor.projected.y += y;
 
-  if (!spice_mouse_motion(x, y))
+  if (!purespice_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 

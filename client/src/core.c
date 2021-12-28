@@ -411,7 +411,7 @@ void core_handleMouseGrabbed(double ex, double ey)
   if (x == 0 && y == 0)
     return;
 
-  if (!spice_mouse_motion(x, y))
+  if (!purespice_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
@@ -612,7 +612,7 @@ void core_handleMouseNormal(double ex, double ey)
     g_cursor.guest.y += y;
   }
 
-  if (!spice_mouse_motion(x, y))
+  if (!purespice_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 

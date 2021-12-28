@@ -101,7 +101,7 @@ struct AppState
   bool                 useDMA;
 
   bool                 cbAvailable;
-  SpiceDataType        cbType;
+  PSDataType           cbType;
   bool                 cbChunked;
   size_t               cbXfer;
   struct ll          * cbRequestList;
@@ -201,7 +201,7 @@ struct AppParams
 
 struct CBRequest
 {
-  SpiceDataType       type;
+  PSDataType          type;
   LG_ClipboardReplyFn replyFn;
   void              * opaque;
 };

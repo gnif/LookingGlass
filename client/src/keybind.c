@@ -113,20 +113,20 @@ static void bind_ctrlAltFn(int sc, void * opaque)
   const uint32_t ctrl = linux_to_ps2[KEY_LEFTCTRL];
   const uint32_t alt  = linux_to_ps2[KEY_LEFTALT ];
   const uint32_t fn   = linux_to_ps2[sc];
-  spice_key_down(ctrl);
-  spice_key_down(alt );
-  spice_key_down(fn  );
+  purespice_keyDown(ctrl);
+  purespice_keyDown(alt );
+  purespice_keyDown(fn  );
 
-  spice_key_up(ctrl);
-  spice_key_up(alt );
-  spice_key_up(fn  );
+  purespice_keyUp(ctrl);
+  purespice_keyUp(alt );
+  purespice_keyUp(fn  );
 }
 
 static void bind_passthrough(int sc, void * opaque)
 {
   sc = linux_to_ps2[sc];
-  spice_key_down(sc);
-  spice_key_up  (sc);
+  purespice_keyDown(sc);
+  purespice_keyUp  (sc);
 }
 
 static void bind_toggleOverlay(int sc, void * opaque)

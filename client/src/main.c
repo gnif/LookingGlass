@@ -768,7 +768,7 @@ int main_frameThread(void * unused)
 int spiceThread(void * arg)
 {
   while(g_state.state != APP_STATE_SHUTDOWN)
-    if (!spice_process(100))
+    if (!purespice_process(100))
     {
       if (g_state.state != APP_STATE_SHUTDOWN)
       {
@@ -1004,36 +1004,36 @@ static int lg_run(void)
       g_params.useSpiceAudio)
   {
     if (g_params.useSpiceClipboard)
-      spice_set_clipboard_cb(
+      purespice_setClipboardCb(
           cb_spiceNotice,
           cb_spiceData,
           cb_spiceRelease,
           cb_spiceRequest);
 
     if (g_params.useSpiceAudio)
-      spice_set_audio_cb(
+      purespice_setAudioCb(
           audioStart,
           audioVolume,
           audioMute,
           audioStop,
           audioData);
 
-    if (!spice_connect(g_params.spiceHost, g_params.spicePort, "",
+    if (!purespice_connect(g_params.spiceHost, g_params.spicePort, "",
           g_params.useSpiceAudio))
     {
       DEBUG_ERROR("Failed to connect to spice server");
       return -1;
     }
 
-    while(g_state.state != APP_STATE_SHUTDOWN && !spice_ready())
-      if (!spice_process(1000))
+    while(g_state.state != APP_STATE_SHUTDOWN && !purespice_ready())
+      if (!purespice_process(1000))
       {
         g_state.state = APP_STATE_SHUTDOWN;
         DEBUG_ERROR("Failed to process spice messages");
         return -1;
       }
 
-    spice_mouse_mode(true);
+    purespice_mouseMode(true);
     if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
     {
       DEBUG_ERROR("spice create thread failed");
@@ -1330,16 +1330,16 @@ static void lg_shutdown(void)
   }
 
   // if spice is still connected send key up events for any pressed keys
-  if (g_params.useSpiceInput && spice_ready())
+  if (g_params.useSpiceInput && purespice_ready())
   {
     for(int scancode = 0; scancode < KEY_MAX; ++scancode)
       if (g_state.keyDown[scancode])
       {
         g_state.keyDown[scancode] = false;
-        spice_key_up(scancode);
+        purespice_keyUp(scancode);
       }
 
-    spice_disconnect();
+    purespice_disconnect();
     if (t_spice)
       lgJoinThread(t_spice, NULL);
   }
