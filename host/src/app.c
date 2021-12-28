@@ -850,6 +850,12 @@ void app_shutdown(void)
 
 void app_quit(void)
 {
+  if (app.state == APP_STATE_SHUTDOWN)
+  {
+    DEBUG_INFO("Received second shutdown request, force quitting");
+    exit(LG_HOST_EXIT_USER);
+  }
+
   app.exitcode = LG_HOST_EXIT_USER;
   app_shutdown();
 }
