@@ -25,8 +25,7 @@
 #include "core.h"
 #include "kb.h"
 
-#include "spice/spice.h"
-
+#include <purespice.h>
 #include <stdio.h>
 
 static void bind_fullscreen(int sc, void * opaque)

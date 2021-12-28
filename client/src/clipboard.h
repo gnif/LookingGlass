@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "spice/spice.h"
+#include <purespice.h>
 #include "interface/displayserver.h"
 
 LG_ClipboardData cb_spiceTypeToLGType(const PSDataType type);

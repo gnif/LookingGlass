@@ -33,7 +33,7 @@
 #include "common/ringbuffer.h"
 #include "common/event.h"
 
-#include "spice/spice.h"
+#include <purespice.h>
 #include <lgmp/client.h>
 
 #include "cimgui.h"
