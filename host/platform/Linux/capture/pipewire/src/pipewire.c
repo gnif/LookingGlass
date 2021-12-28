@@ -95,7 +95,7 @@ static bool startStream(struct pw_stream * stream, uint32_t node)
     SPA_FORMAT_VIDEO_format, SPA_POD_CHOICE_ENUM_Id(6,
       SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBA,
       SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_RGBx,
-      SPA_VIDEO_FORMAT_r210, SPA_VIDEO_FORMAT_RGBA_F16),
+      SPA_VIDEO_FORMAT_xBGR_210LE, SPA_VIDEO_FORMAT_RGBA_F16),
     SPA_FORMAT_VIDEO_size, SPA_POD_CHOICE_RANGE_Rectangle(
       &SPA_RECTANGLE(1920, 1080), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 4320)),
     SPA_FORMAT_VIDEO_framerate, SPA_POD_CHOICE_RANGE_Fraction(
@@ -151,7 +151,7 @@ static CaptureFormat convertSpaFormat(enum spa_video_format spa)
     case SPA_VIDEO_FORMAT_BGRx:
       return CAPTURE_FMT_BGRA;
 
-    case SPA_VIDEO_FORMAT_r210:
+    case SPA_VIDEO_FORMAT_xBGR_210LE:
       return CAPTURE_FMT_RGBA10;
 
     case SPA_VIDEO_FORMAT_RGBA_F16:
