@@ -203,9 +203,21 @@ static void streamParamChangedCallback(void * opaque, uint32_t id,
   pw_thread_loop_signal(this->threadLoop, true);
 }
 
+static void streamStateChangedCallback(void * opaque,
+  enum pw_stream_state oldState, enum pw_stream_state newState,
+  const char * error)
+{
+  DEBUG_INFO("PipeWire stream state change: %s -> %s",
+    pw_stream_state_as_string(oldState), pw_stream_state_as_string(newState));
+
+  if (newState == PW_STREAM_STATE_ERROR)
+    DEBUG_ERROR("PipeWire stream error: %s", error);
+}
+
 static const struct pw_stream_events streamEvents = {
   PW_VERSION_STREAM_EVENTS,
   .process       = streamProcessCallback,
+  .state_changed = streamStateChangedCallback,
   .param_changed = streamParamChangedCallback,
 };
 
