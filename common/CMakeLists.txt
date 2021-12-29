@@ -34,6 +34,7 @@ set(COMMON_SOURCES
   src/ringbuffer.c
   src/vector.c
   src/cpuinfo.c
+  src/debug.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})

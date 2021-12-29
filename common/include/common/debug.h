@@ -131,4 +131,13 @@ void printBacktrace(void);
   #define DEBUG_PROTO(fmt, ...) do {} while(0)
 #endif
 
+void debug_info(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
+
+void debug_warn(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
+
+void debug_error(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
+
 #endif
