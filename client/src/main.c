@@ -1003,30 +1003,34 @@ static int lg_run(void)
       g_params.useSpiceClipboard ||
       g_params.useSpiceAudio)
   {
-    if (g_params.useSpiceClipboard)
-      purespice_setClipboardCb(
-          cb_spiceNotice,
-          cb_spiceData,
-          cb_spiceRelease,
-          cb_spiceRequest);
-
-    if (g_params.useSpiceAudio)
-      purespice_setAudioCb(
-          audioStart,
-          audioVolume,
-          audioMute,
-          audioStop,
-          audioData);
-
     const struct PSConfig config =
     {
       .host      = g_params.spiceHost,
       .port      = g_params.spicePort,
       .password  = "",
-      .playback  = g_params.useSpiceAudio,
-      .log.info  = debug_info,
-      .log.warn  = debug_warn,
-      .log.error = debug_error
+      .log =
+      {
+        .info  = debug_info,
+        .warn  = debug_warn,
+        .error = debug_error,
+      },
+      .clipboard =
+      {
+        .enable  = g_params.useSpiceClipboard,
+        .notice  = cb_spiceNotice,
+        .data    = cb_spiceData,
+        .release = cb_spiceRelease,
+        .request = cb_spiceRequest
+      },
+      .playback =
+      {
+        .enable = g_params.useSpiceAudio,
+        .start  = audioStart,
+        .volume = audioVolume,
+        .mute   = audioMute,
+        .stop   = audioStop,
+        .data   = audioData
+      }
     };
 
     if (!purespice_connect(&config))
