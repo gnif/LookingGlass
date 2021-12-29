@@ -1018,8 +1018,18 @@ static int lg_run(void)
           audioStop,
           audioData);
 
-    if (!purespice_connect(g_params.spiceHost, g_params.spicePort, "",
-          g_params.useSpiceAudio))
+    const struct PSConfig config =
+    {
+      .host      = g_params.spiceHost,
+      .port      = g_params.spicePort,
+      .password  = "",
+      .playback  = g_params.useSpiceAudio,
+      .log.info  = debug_info,
+      .log.warn  = debug_warn,
+      .log.error = debug_error
+    };
+
+    if (!purespice_connect(&config))
     {
       DEBUG_ERROR("Failed to connect to spice server");
       return -1;
