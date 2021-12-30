@@ -326,7 +326,8 @@ bool startThreads(void)
 bool stopThreads(void)
 {
   app.iface->stop();
-  if (app.state != APP_STATE_SHUTDOWN)
+  if (app.state != APP_STATE_SHUTDOWN &&
+      app.state != APP_STATE_REINIT)
     app.state = APP_STATE_IDLE;
 
   if (!app.iface->asyncCapture)
@@ -512,6 +513,8 @@ static void lgmpShutdown()
   for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
     lgmpHostMemFree(&app.pointerShapeMemory[i]);
   lgmpHostFree(&app.lgmp);
+
+  app.pointerShapeValid = false;
 }
 
 static bool lgmpSetup(struct IVSHMEM * shmDev)
@@ -671,11 +674,11 @@ int app_main(int argc, char * argv[])
   app.frameValid        = false;
   app.pointerShapeValid = false;
 
-   if (!lgmpSetup(&shmDev))
-   {
-     exitcode = LG_HOST_EXIT_FATAL;
-     goto fail_ivshmem;
-   }
+  if (!lgmpSetup(&shmDev))
+  {
+    exitcode = LG_HOST_EXIT_FATAL;
+    goto fail_ivshmem;
+  }
 
   int throttleFps = option_get_int("app", "throttleFPS");
   int throttleUs = throttleFps ? 1000000 / throttleFps : 0;
@@ -725,52 +728,20 @@ int app_main(int argc, char * argv[])
 
   while(app.state != APP_STATE_SHUTDOWN)
   {
-    if(lgmpHostQueueHasSubs(app.pointerQueue) ||
-        lgmpHostQueueHasSubs(app.frameQueue))
+    if (app.state == APP_STATE_REINIT)
     {
-      if (!captureStart())
-      {
-        exitcode = LG_HOST_EXIT_FAILED;
-        goto fail_capture;
-      }
-
-      if (!startThreads())
-      {
-        exitcode = LG_HOST_EXIT_FAILED;
-        goto fail_threads;
-      }
-    }
-    else
-    {
-      usleep(100000);
-      continue;
+      DEBUG_INFO("Performing LGMP reinitialization");
+      lgmpShutdown();
+      if (!lgmpSetup(&shmDev))
+        goto fail_lgmp;
+      app.state = APP_STATE_RUNNING;
     }
 
-    while(app.state != APP_STATE_SHUTDOWN && (
-          lgmpHostQueueHasSubs(app.pointerQueue) ||
-          lgmpHostQueueHasSubs(app.frameQueue)))
+    if (app.state == APP_STATE_IDLE)
     {
-      if (app.state == APP_STATE_RESTART || app.state == APP_STATE_REINIT)
+      if(lgmpHostQueueHasSubs(app.pointerQueue) ||
+          lgmpHostQueueHasSubs(app.frameQueue))
       {
-        if (!stopThreads())
-        {
-          exitcode = LG_HOST_EXIT_FAILED;
-          goto fail_threads;
-        }
-
-        if (!captureStop())
-        {
-          exitcode = LG_HOST_EXIT_FAILED;
-          goto fail_capture;
-        }
-
-        if (app.state == APP_STATE_REINIT)
-        {
-          lgmpShutdown();
-          if (!lgmpSetup(&shmDev))
-            goto fail_lgmp;
-        }
-
         if (!captureStart())
         {
           exitcode = LG_HOST_EXIT_FAILED;
@@ -782,9 +753,20 @@ int app_main(int argc, char * argv[])
           exitcode = LG_HOST_EXIT_FAILED;
           goto fail_threads;
         }
-
-        app.state = APP_STATE_RUNNING;
       }
+      else
+      {
+        usleep(100000);
+        continue;
+      }
+    }
+
+    while(app.state != APP_STATE_SHUTDOWN && (
+          lgmpHostQueueHasSubs(app.pointerQueue) ||
+          lgmpHostQueueHasSubs(app.frameQueue)))
+    {
+      if (app.state == APP_STATE_RESTART || app.state == APP_STATE_REINIT)
+        break;
 
       if (lgmpHostQueueNewSubs(app.pointerQueue) > 0)
       {
@@ -836,8 +818,6 @@ int app_main(int argc, char * argv[])
 
     if (app.state != APP_STATE_SHUTDOWN)
     {
-      DEBUG_INFO("No subscribers, going to sleep...");
-
       if (!stopThreads())
       {
         exitcode = LG_HOST_EXIT_FAILED;
