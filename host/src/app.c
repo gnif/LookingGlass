@@ -67,6 +67,7 @@ enum AppState
   APP_STATE_RUNNING,
   APP_STATE_IDLE,
   APP_STATE_RESTART,
+  APP_STATE_REINIT,
   APP_STATE_SHUTDOWN
 };
 
@@ -140,6 +141,15 @@ static bool lgmpTimer(void * opaque)
   LGMP_STATUS status;
   if ((status = lgmpHostProcess(app.lgmp)) != LGMP_OK)
   {
+    // something has messed up the LGMP headers, etc, we need to reinit
+    if (status == LGMP_ERR_CORRUPTED)
+    {
+      DEBUG_ERROR("LGMP reported the shared memory has been corrrupted, "
+          "attempting to recover");
+      app.state = APP_STATE_REINIT;
+      return false;
+    }
+
     DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
     app.state = APP_STATE_SHUTDOWN;
     return false;
@@ -490,6 +500,100 @@ void capturePostPointerBuffer(CapturePointer pointer)
   LG_UNLOCK(app.pointerLock);
 }
 
+static void lgmpShutdown()
+{
+  if (app.lgmpTimer)
+    lgTimerDestroy(app.lgmpTimer);
+
+  for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    lgmpHostMemFree(&app.frameMemory[i]);
+  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+    lgmpHostMemFree(&app.pointerMemory[i]);
+  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+    lgmpHostMemFree(&app.pointerShapeMemory[i]);
+  lgmpHostFree(&app.lgmp);
+}
+
+static bool lgmpSetup(struct IVSHMEM * shmDev)
+{
+  KVMFR udata =
+  {
+    .magic    = KVMFR_MAGIC,
+    .version  = KVMFR_VERSION,
+    .features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0
+  };
+  strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver)-1);
+
+  LGMP_STATUS status;
+  if ((status = lgmpHostInit(shmDev->mem, shmDev->size, &app.lgmp,
+          sizeof(udata), (uint8_t *)&udata)) != LGMP_OK)
+  {
+    DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
+    goto fail_init;
+  }
+
+  if ((status = lgmpHostQueueNew(app.lgmp, FRAME_QUEUE_CONFIG, &app.frameQueue)) != LGMP_OK)
+  {
+    DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
+    goto fail_lgmp;
+  }
+
+  if ((status = lgmpHostQueueNew(app.lgmp, POINTER_QUEUE_CONFIG, &app.pointerQueue)) != LGMP_OK)
+  {
+    DEBUG_ERROR("lgmpHostQueueNew Failed (Pointer): %s", lgmpStatusString(status));
+    goto fail_lgmp;
+  }
+
+  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+  {
+    if ((status = lgmpHostMemAlloc(app.lgmp, sizeof(KVMFRCursor), &app.pointerMemory[i])) != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
+      goto fail_lgmp;
+    }
+    memset(lgmpHostMemPtr(app.pointerMemory[i]), 0, sizeof(KVMFRCursor));
+  }
+
+  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+  {
+    if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerShapeMemory[i])) != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Shapes): %s", lgmpStatusString(status));
+      goto fail_lgmp;
+    }
+    memset(lgmpHostMemPtr(app.pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
+  }
+
+  app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
+  app.maxFrameSize = (app.maxFrameSize - (app.pageSize - 1)) & ~(app.pageSize - 1);
+  app.maxFrameSize /= LGMP_Q_FRAME_LEN;
+  DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
+
+  for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize,
+            app.pageSize, &app.frameMemory[i])) != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
+      goto fail_lgmp;
+    }
+  }
+
+  if (!lgCreateTimer(10, lgmpTimer, NULL, &app.lgmpTimer))
+  {
+    DEBUG_ERROR("Failed to create the LGMP timer");
+    goto fail_lgmp;
+  }
+
+  return true;
+
+fail_lgmp:
+  lgmpShutdown();
+
+fail_init:
+  return false;
+}
+
 // this is called from the platform specific startup routine
 int app_main(int argc, char * argv[])
 {
@@ -563,77 +667,15 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
   DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);
 
-  KVMFR udata = {
-    .magic    = KVMFR_MAGIC,
-    .version  = KVMFR_VERSION,
-    .features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0
-  };
-  strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver)-1);
-
-  LGMP_STATUS status;
-  if ((status = lgmpHostInit(shmDev.mem, shmDev.size, &app.lgmp,
-          sizeof(udata), (uint8_t *)&udata)) != LGMP_OK)
-  {
-    DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FATAL;
-    goto fail_ivshmem;
-  }
-
-  if ((status = lgmpHostQueueNew(app.lgmp, FRAME_QUEUE_CONFIG, &app.frameQueue)) != LGMP_OK)
-  {
-    DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FATAL;
-    goto fail_lgmp;
-  }
-
-  if ((status = lgmpHostQueueNew(app.lgmp, POINTER_QUEUE_CONFIG, &app.pointerQueue)) != LGMP_OK)
-  {
-    DEBUG_ERROR("lgmpHostQueueNew Failed (Pointer): %s", lgmpStatusString(status));
-    exitcode = LG_HOST_EXIT_FATAL;
-    goto fail_lgmp;
-  }
-
-  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
-  {
-    if ((status = lgmpHostMemAlloc(app.lgmp, sizeof(KVMFRCursor), &app.pointerMemory[i])) != LGMP_OK)
-    {
-      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
-      exitcode = LG_HOST_EXIT_FATAL;
-      goto fail_lgmp;
-    }
-    memset(lgmpHostMemPtr(app.pointerMemory[i]), 0, sizeof(KVMFRCursor));
-  }
-
-  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
-  {
-    if ((status = lgmpHostMemAlloc(app.lgmp, MAX_POINTER_SIZE, &app.pointerShapeMemory[i])) != LGMP_OK)
-    {
-      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Shapes): %s", lgmpStatusString(status));
-      exitcode = LG_HOST_EXIT_FATAL;
-      goto fail_lgmp;
-    }
-    memset(lgmpHostMemPtr(app.pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
-  }
-
   app.pageSize          = sysinfo_getPageSize();
   app.frameValid        = false;
   app.pointerShapeValid = false;
 
-  app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
-  app.maxFrameSize = (app.maxFrameSize - (app.pageSize - 1)) & ~(app.pageSize - 1);
-  app.maxFrameSize /= LGMP_Q_FRAME_LEN;
-  DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
-
-  for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
-  {
-    if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize,
-            app.pageSize, &app.frameMemory[i])) != LGMP_OK)
-    {
-      DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
-      exitcode = LG_HOST_EXIT_FATAL;
-      goto fail_lgmp;
-    }
-  }
+   if (!lgmpSetup(&shmDev))
+   {
+     exitcode = LG_HOST_EXIT_FATAL;
+     goto fail_ivshmem;
+   }
 
   int throttleFps = option_get_int("app", "throttleFPS");
   int throttleUs = throttleFps ? 1000000 / throttleFps : 0;
@@ -681,14 +723,6 @@ int app_main(int argc, char * argv[])
 
   LG_LOCK_INIT(app.pointerLock);
 
-  if (!lgCreateTimer(10, lgmpTimer, NULL, &app.lgmpTimer))
-  {
-    DEBUG_ERROR("Failed to create the LGMP timer");
-
-    iface->deinit();
-    goto fail_timer;
-  }
-
   while(app.state != APP_STATE_SHUTDOWN)
   {
     if(lgmpHostQueueHasSubs(app.pointerQueue) ||
@@ -716,7 +750,7 @@ int app_main(int argc, char * argv[])
           lgmpHostQueueHasSubs(app.pointerQueue) ||
           lgmpHostQueueHasSubs(app.frameQueue)))
     {
-      if (app.state == APP_STATE_RESTART)
+      if (app.state == APP_STATE_RESTART || app.state == APP_STATE_REINIT)
       {
         if (!stopThreads())
         {
@@ -728,6 +762,13 @@ int app_main(int argc, char * argv[])
         {
           exitcode = LG_HOST_EXIT_FAILED;
           goto fail_capture;
+        }
+
+        if (app.state == APP_STATE_REINIT)
+        {
+          lgmpShutdown();
+          if (!lgmpSetup(&shmDev))
+            goto fail_lgmp;
         }
 
         if (!captureStart())
@@ -771,6 +812,7 @@ int app_main(int argc, char * argv[])
           if (!iface->asyncCapture)
             if (app.frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
             {
+              LGMP_STATUS status;
               if ((status = lgmpHostQueuePost(app.frameQueue, 0,
                       app.frameMemory[app.frameIndex])) != LGMP_OK)
                 DEBUG_ERROR("%s", lgmpStatusString(status));
@@ -821,20 +863,11 @@ fail_threads:
   captureStop();
 
 fail_capture:
-  lgTimerDestroy(app.lgmpTimer);
-
-fail_timer:
   iface->free();
   LG_LOCK_FREE(app.pointerLock);
 
 fail_lgmp:
-  for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
-    lgmpHostMemFree(&app.frameMemory[i]);
-  for(int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
-    lgmpHostMemFree(&app.pointerMemory[i]);
-  for(int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
-    lgmpHostMemFree(&app.pointerShapeMemory[i]);
-  lgmpHostFree(&app.lgmp);
+  lgmpShutdown();
 
 fail_ivshmem:
   ivshmemClose(&shmDev);
