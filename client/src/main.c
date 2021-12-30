@@ -82,6 +82,7 @@ static void lgInit(void)
   g_state.formatValid   = false;
   g_state.resizeDone    = true;
 
+  core_setCursorInView(false);
   if (g_cursor.grab)
     core_setGrab(false);
 
