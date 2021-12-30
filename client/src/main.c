@@ -1276,8 +1276,8 @@ restart:
 
       goto restart;
     }
-    else
-      return -1;
+//    else
+//      return -1;
   }
 
   DEBUG_INFO("Host ready, reported version: %s", udata->hostver);
