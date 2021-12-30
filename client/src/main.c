@@ -769,15 +769,15 @@ int main_frameThread(void * unused)
 int spiceThread(void * arg)
 {
   while(g_state.state != APP_STATE_SHUTDOWN)
-    if (!purespice_process(100))
+  {
+    PSStatus status;
+    if ((status = purespice_process(100)) != PS_STATUS_RUN)
     {
-      if (g_state.state != APP_STATE_SHUTDOWN)
-      {
-        g_state.state = APP_STATE_SHUTDOWN;
+      if (status != PS_STATUS_SHUTDOWN)
         DEBUG_ERROR("failed to process spice messages");
-      }
       break;
     }
+  }
 
   if (g_state.audioDev)
   {
@@ -1041,12 +1041,16 @@ static int lg_run(void)
     }
 
     while(g_state.state != APP_STATE_SHUTDOWN && !purespice_ready())
-      if (!purespice_process(1000))
+    {
+      PSStatus status;
+      if ((status = purespice_process(1000)) != PS_STATUS_RUN)
       {
         g_state.state = APP_STATE_SHUTDOWN;
-        DEBUG_ERROR("Failed to process spice messages");
+        if (status != PS_STATUS_SHUTDOWN)
+          DEBUG_ERROR("Failed to process spice messages");
         return -1;
       }
+    }
 
     purespice_mouseMode(true);
     if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
