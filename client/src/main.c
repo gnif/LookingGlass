@@ -78,7 +78,6 @@ struct AppParams g_params = { 0 };
 
 static void lgInit(void)
 {
-  g_state.state         = APP_STATE_RUNNING;
   g_state.formatValid   = false;
   g_state.resizeDone    = true;
 
@@ -766,8 +765,132 @@ int main_frameThread(void * unused)
   return 0;
 }
 
+void audioStart(int channels, int sampleRate, PSAudioFormat format,
+  uint32_t time)
+{
+  /*
+   * we probe here so that the audiodev is operating in the context of the SPICE
+   * thread/loop to avoid any audio API threading issues
+   */
+  static int probed = false;
+  if (!probed)
+  {
+    probed = true;
+
+    // search for the best audiodev to use
+    for(int i = 0; i < LG_AUDIODEV_COUNT; ++i)
+      if (LG_AudioDevs[i]->init())
+      {
+        g_state.audioDev = LG_AudioDevs[i];
+        DEBUG_INFO("Using AudioDev: %s", g_state.audioDev->name);
+        break;
+      }
+
+    if (!g_state.audioDev)
+      DEBUG_WARN("Failed to initialize an audio backend");
+  }
+
+  if (g_state.audioDev)
+  {
+    static int lastChannels   = 0;
+    static int lastSampleRate = 0;
+
+    if (g_state.audioStarted)
+    {
+      if (channels != lastChannels || sampleRate != lastSampleRate)
+        g_state.audioDev->stop();
+      else
+        return;
+    }
+
+    lastChannels   = channels;
+    lastSampleRate = sampleRate;
+    g_state.audioStarted = true;
+
+    DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
+    g_state.audioDev->start(channels, sampleRate);
+  }
+}
+
+static void audioStop(void)
+{
+  if (g_state.audioDev)
+    g_state.audioDev->stop();
+  g_state.audioStarted = false;
+}
+
+static void audioVolume(int channels, const uint16_t volume[])
+{
+  if (g_state.audioDev && g_state.audioDev->volume)
+    g_state.audioDev->volume(channels, volume);
+}
+
+static void audioMute(bool mute)
+{
+  if (g_state.audioDev && g_state.audioDev->mute)
+    g_state.audioDev->mute(mute);
+}
+
+static void audioData(uint8_t * data, size_t size)
+{
+  if (g_state.audioDev)
+    g_state.audioDev->play(data, size);
+}
+
 int spiceThread(void * arg)
 {
+  const struct PSConfig config =
+  {
+    .host      = g_params.spiceHost,
+    .port      = g_params.spicePort,
+    .password  = "",
+    .log =
+    {
+      .info  = debug_info,
+      .warn  = debug_warn,
+      .error = debug_error,
+    },
+    .clipboard =
+    {
+      .enable  = g_params.useSpiceClipboard,
+      .notice  = cb_spiceNotice,
+      .data    = cb_spiceData,
+      .release = cb_spiceRelease,
+      .request = cb_spiceRequest
+    },
+    .playback =
+    {
+      .enable = g_params.useSpiceAudio,
+      .start  = audioStart,
+      .volume = audioVolume,
+      .mute   = audioMute,
+      .stop   = audioStop,
+      .data   = audioData
+    }
+  };
+
+  if (!purespice_connect(&config))
+  {
+    DEBUG_ERROR("Failed to connect to spice server");
+    goto end;
+  }
+
+  // wait for spice to finish connecting
+  while(g_state.state != APP_STATE_SHUTDOWN && !purespice_ready())
+  {
+    PSStatus status;
+    if ((status = purespice_process(1000)) != PS_STATUS_RUN)
+    {
+      if (status != PS_STATUS_SHUTDOWN)
+        DEBUG_ERROR("Failed to process spice messages");
+      goto end;
+    }
+  }
+
+  // set the intial mouse mode
+  purespice_mouseMode(true);
+
+  // process all spice messages
   while(g_state.state != APP_STATE_SHUTDOWN)
   {
     PSStatus status;
@@ -775,9 +898,11 @@ int spiceThread(void * arg)
     {
       if (status != PS_STATUS_SHUTDOWN)
         DEBUG_ERROR("failed to process spice messages");
-      break;
+      goto end;
     }
   }
+
+end:
 
   if (g_state.audioDev)
   {
@@ -851,78 +976,6 @@ static void reportBadVersion()
   DEBUG_ERROR("The host application is not compatible with this client");
   DEBUG_ERROR("This is not a Looking Glass error, do not report this");
   DEBUG_ERROR("Please install the matching host application for this client");
-}
-
-void audioStart(int channels, int sampleRate, PSAudioFormat format,
-  uint32_t time)
-{
-  /*
-   * we probe here so that the audiodev is operating in the context of the SPICE
-   * thread/loop to avoid any audio API threading issues
-   */
-  static int probed = false;
-  if (!probed)
-  {
-    probed = true;
-
-    // search for the best audiodev to use
-    for(int i = 0; i < LG_AUDIODEV_COUNT; ++i)
-      if (LG_AudioDevs[i]->init())
-      {
-        g_state.audioDev = LG_AudioDevs[i];
-        DEBUG_INFO("Using AudioDev: %s", g_state.audioDev->name);
-        break;
-      }
-
-    if (!g_state.audioDev)
-      DEBUG_WARN("Failed to initialize an audio backend");
-  }
-
-  if (g_state.audioDev)
-  {
-    static int lastChannels   = 0;
-    static int lastSampleRate = 0;
-
-    if (g_state.audioStarted)
-    {
-      if (channels != lastChannels || sampleRate != lastSampleRate)
-        g_state.audioDev->stop();
-      else
-        return;
-    }
-
-    lastChannels   = channels;
-    lastSampleRate = sampleRate;
-    g_state.audioStarted = true;
-
-    DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
-    g_state.audioDev->start(channels, sampleRate);
-  }
-}
-
-static void audioStop(void)
-{
-  if (g_state.audioDev)
-    g_state.audioDev->stop();
-  g_state.audioStarted = false;
-}
-
-static void audioVolume(int channels, const uint16_t volume[])
-{
-  if (g_state.audioDev && g_state.audioDev->volume)
-    g_state.audioDev->volume(channels, volume);
-}
-
-static void audioMute(bool mute)
-{
-  if (g_state.audioDev && g_state.audioDev->mute)
-    g_state.audioDev->mute(mute);
-}
-
-static void audioData(uint8_t * data, size_t size)
-{
-  if (g_state.audioDev)
-    g_state.audioDev->play(data, size);
 }
 
 static int lg_run(void)
@@ -999,60 +1052,10 @@ static int lg_run(void)
     return -1;
   }
 
-  // try to connect to the spice server
   if (g_params.useSpiceInput     ||
       g_params.useSpiceClipboard ||
       g_params.useSpiceAudio)
   {
-    const struct PSConfig config =
-    {
-      .host      = g_params.spiceHost,
-      .port      = g_params.spicePort,
-      .password  = "",
-      .log =
-      {
-        .info  = debug_info,
-        .warn  = debug_warn,
-        .error = debug_error,
-      },
-      .clipboard =
-      {
-        .enable  = g_params.useSpiceClipboard,
-        .notice  = cb_spiceNotice,
-        .data    = cb_spiceData,
-        .release = cb_spiceRelease,
-        .request = cb_spiceRequest
-      },
-      .playback =
-      {
-        .enable = g_params.useSpiceAudio,
-        .start  = audioStart,
-        .volume = audioVolume,
-        .mute   = audioMute,
-        .stop   = audioStop,
-        .data   = audioData
-      }
-    };
-
-    if (!purespice_connect(&config))
-    {
-      DEBUG_ERROR("Failed to connect to spice server");
-      return -1;
-    }
-
-    while(g_state.state != APP_STATE_SHUTDOWN && !purespice_ready())
-    {
-      PSStatus status;
-      if ((status = purespice_process(1000)) != PS_STATUS_RUN)
-      {
-        g_state.state = APP_STATE_SHUTDOWN;
-        if (status != PS_STATUS_SHUTDOWN)
-          DEBUG_ERROR("Failed to process spice messages");
-        return -1;
-      }
-    }
-
-    purespice_mouseMode(true);
     if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
     {
       DEBUG_ERROR("spice create thread failed");
@@ -1311,6 +1314,8 @@ restart:
     core_stopFrameThread();
     core_stopCursorThread();
 
+
+    g_state.state = APP_STATE_RUNNING;
     lgInit();
 
     RENDERER(onRestart);
