@@ -603,6 +603,7 @@ int app_main(int argc, char * argv[])
   if (!installCrashHandler(os_getExecutable()))
     DEBUG_WARN("Failed to install the crash handler");
 
+  app.state = APP_STATE_RUNNING;
   ivshmemOptionsInit();
 
   // register capture interface options
@@ -721,7 +722,6 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("Capture Method   : %s", iface->asyncCapture ?
       "Asynchronous" : "Synchronous");
 
-  app.state = APP_STATE_RUNNING;
   app.iface = iface;
 
   LG_LOCK_INIT(app.pointerLock);
