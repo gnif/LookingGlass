@@ -837,6 +837,12 @@ static void audioData(uint8_t * data, size_t size)
     g_state.audioDev->play(data, size);
 }
 
+void spiceReady(void)
+{
+  // set the intial mouse mode
+  purespice_mouseMode(true);
+}
+
 int spiceThread(void * arg)
 {
   const struct PSConfig config =
@@ -844,6 +850,7 @@ int spiceThread(void * arg)
     .host      = g_params.spiceHost,
     .port      = g_params.spicePort,
     .password  = "",
+    .ready     = spiceReady,
     .log =
     {
       .info  = debug_info,
@@ -874,21 +881,6 @@ int spiceThread(void * arg)
     DEBUG_ERROR("Failed to connect to spice server");
     goto end;
   }
-
-  // wait for spice to finish connecting
-  while(g_state.state != APP_STATE_SHUTDOWN && !purespice_ready())
-  {
-    PSStatus status;
-    if ((status = purespice_process(1000)) != PS_STATUS_RUN)
-    {
-      if (status != PS_STATUS_SHUTDOWN)
-        DEBUG_ERROR("Failed to process spice messages");
-      goto end;
-    }
-  }
-
-  // set the intial mouse mode
-  purespice_mouseMode(true);
 
   // process all spice messages
   while(g_state.state != APP_STATE_SHUTDOWN)
@@ -1354,7 +1346,7 @@ static void lg_shutdown(void)
   }
 
   // if spice is still connected send key up events for any pressed keys
-  if (g_params.useSpiceInput && purespice_ready())
+  if (g_params.useSpiceInput)
   {
     for(int scancode = 0; scancode < KEY_MAX; ++scancode)
       if (g_state.keyDown[scancode])
