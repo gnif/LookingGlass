@@ -25,6 +25,7 @@
 #include "common/locking.h"
 #include "common/stringutils.h"
 #include "common/ivshmem.h"
+#include "common/util.h"
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -36,9 +37,6 @@
 #include <time.h>
 
 #include <lgmp/client.h>
-
-#define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
-#define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
 
 struct state
 {

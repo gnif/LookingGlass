@@ -18,33 +18,15 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_UTIL_
-#define _H_LG_UTIL_
+#ifndef _H_LG_COMMON_UTIL_
+#define _H_LG_COMMON_UTIL_
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include "common/types.h"
-#include "common/util.h"
+#define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); \
+    _a < _b ? _a : _b; })
+#define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); \
+    _a > _b ? _a : _b; })
 
-// reads the specified file into a new buffer
-// the callee must free the buffer
-bool util_fileGetContents(const char * filename, char ** buffer, size_t * length);
-
-void util_cursorToInt(double ex, double ey, int *x, int *y);
-bool util_guestCurToLocal(struct DoublePoint *local);
-void util_localCurToGuest(struct DoublePoint *guest);
-void util_rotatePoint(struct DoublePoint *point);
-bool util_hasGLExt(const char * exts, const char * ext);
-
-static inline double util_clamp(double x, double min, double max)
-{
-  if (x < min) return min;
-  if (x > max) return max;
-  return x;
-}
-
-bool util_initUIFonts(void);
-void util_freeUIFonts(void);
-char * util_getUIFont(const char * fontName);
+#define UPCAST(type, x) \
+  (type *)((uintptr_t)(x) - offsetof(type, base))
 
 #endif

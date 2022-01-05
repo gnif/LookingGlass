@@ -33,6 +33,7 @@
 #include "common/time.h"
 #include "common/stringutils.h"
 #include "common/cpuinfo.h"
+#include "common/util.h"
 
 #include <lgmp/host.h>
 
