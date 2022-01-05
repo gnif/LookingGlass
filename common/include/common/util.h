@@ -21,10 +21,15 @@
 #ifndef _H_LG_COMMON_UTIL_
 #define _H_LG_COMMON_UTIL_
 
+#ifndef min
 #define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); \
     _a < _b ? _a : _b; })
+#endif
+
+#ifndef max
 #define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); \
     _a > _b ? _a : _b; })
+#endif
 
 #define UPCAST(type, x) \
   (type *)((uintptr_t)(x) - offsetof(type, base))
