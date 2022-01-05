@@ -353,7 +353,13 @@ static bool captureStart(void)
   {
     if (!app.iface->init())
     {
-      DEBUG_ERROR("Initialize the capture device");
+      DEBUG_ERROR("Failed to initialize the capture device");
+      return false;
+    }
+
+    if (app.iface->start && !app.iface->start())
+    {
+      DEBUG_ERROR("Failed to start the capture device");
       return false;
     }
   }
@@ -517,19 +523,129 @@ static void lgmpShutdown()
   app.pointerShapeValid = false;
 }
 
+typedef struct KVMFRUserData
+{
+  size_t    size;
+  size_t    used;
+  uint8_t * data;
+}
+KVMFRUserData;
+
+static void * allocUserData(KVMFRUserData * dst, size_t need, bool consume)
+{
+  size_t avail = dst->size - dst->used;
+  if (need > avail)
+  {
+    size_t newSize = dst->size;
+    do
+    {
+      newSize += 1024;
+      avail = newSize - dst->used;
+    }
+    while(need > avail);
+
+    dst->data = realloc(dst->data, newSize);
+    if (!dst->data)
+    {
+      DEBUG_ERROR("failed to realloc");
+      return NULL;
+    }
+
+    dst->size = newSize;
+  }
+
+  void * ret = dst->data + dst->used;
+  if (consume)
+    dst->used += need;
+
+  return ret;
+}
+
+static bool appendBuffer(KVMFRUserData * dst, KVMFRRecord * rec,
+    const void * src, size_t size)
+{
+  void * mem = allocUserData(dst, size, true);
+  if (!mem)
+    return false;
+
+  memcpy(mem, src, size);
+  rec->size += size;
+
+  return true;
+}
+
+static bool newKVMFRData(KVMFRUserData * dst)
+{
+  KVMFRRecord * record;
+  memset(dst, 0, sizeof(*dst));
+
+  KVMFR * kvmfr = allocUserData(dst, sizeof(*kvmfr), true);
+  if (!kvmfr)
+    return false;
+
+  memcpy(kvmfr->magic, KVMFR_MAGIC,
+      min(sizeof(kvmfr->magic), sizeof(KVMFR_MAGIC)));
+  kvmfr->version  = KVMFR_VERSION;
+  kvmfr->features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0;
+  strncpy(kvmfr->hostver, BUILD_VERSION, sizeof(kvmfr->hostver) - 1);
+
+  {
+    if (!(record = allocUserData(dst, sizeof(*record), true)))
+      return false;
+
+    KVMFRRecord_VMInfo * vmInfo = allocUserData(dst, sizeof(*vmInfo), true);
+    if (!vmInfo)
+      return false;
+
+    record->type = KVMFR_RECORD_VMINFO;
+    record->size = sizeof(*vmInfo);
+
+    strncpy(vmInfo->capture, app.iface->shortName, sizeof(vmInfo->capture) - 1);
+
+    char * model = allocUserData(dst, 1024, false);
+    if (!model)
+      return false;
+
+    int cpus, cores;
+    if (lgCPUInfo(model, 1024, &cpus, &cores))
+    {
+      vmInfo->cpus  = cpus;
+      vmInfo->cores = cores;
+      const int modelLen = strlen(model) + 1;
+      record->size += modelLen;
+      dst->used    += modelLen;
+    }
+  }
+
+  {
+    if (!(record = allocUserData(dst, sizeof(*record), true)))
+      return false;
+
+    KVMFRRecord_OSInfo * osInfo = allocUserData(dst, sizeof(*osInfo), true);
+    if (!osInfo)
+      return false;
+
+    record->type = KVMFR_RECORD_OSINFO;
+    record->size = sizeof(*osInfo);
+
+    osInfo->os = KVMFR_OS_OTHER;
+    if (!appendBuffer(dst, record, "Unknown", 9))
+      return false;
+  }
+
+DEBUG_INFO("done KVMFRData");
+  return true;
+}
+
 static bool lgmpSetup(struct IVSHMEM * shmDev)
 {
-  KVMFR udata =
-  {
-    .magic    = KVMFR_MAGIC,
-    .version  = KVMFR_VERSION,
-    .features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0
-  };
-  strncpy(udata.hostver, BUILD_VERSION, sizeof(udata.hostver)-1);
+  KVMFRUserData udata = { 0 };
+  if (!newKVMFRData(&udata))
+    return false;
 
   LGMP_STATUS status;
   if ((status = lgmpHostInit(shmDev->mem, shmDev->size, &app.lgmp,
-          sizeof(udata), (uint8_t *)&udata)) != LGMP_OK)
+          udata.used, udata.data)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
     goto fail_init;
@@ -588,12 +704,14 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
     goto fail_lgmp;
   }
 
+  free(udata.data);
   return true;
 
 fail_lgmp:
   lgmpShutdown();
 
 fail_init:
+  free(udata.data);
   return false;
 }
 
@@ -675,12 +793,6 @@ int app_main(int argc, char * argv[])
   app.frameValid        = false;
   app.pointerShapeValid = false;
 
-  if (!lgmpSetup(&shmDev))
-  {
-    exitcode = LG_HOST_EXIT_FATAL;
-    goto fail_ivshmem;
-  }
-
   int throttleFps = option_get_int("app", "throttleFPS");
   int throttleUs = throttleFps ? 1000000 / throttleFps : 0;
   uint64_t previousFrameTime = 0;
@@ -724,7 +836,20 @@ int app_main(int argc, char * argv[])
 
   app.iface = iface;
 
+  if (!lgmpSetup(&shmDev))
+  {
+    exitcode = LG_HOST_EXIT_FATAL;
+    goto fail_ivshmem;
+  }
+
   LG_LOCK_INIT(app.pointerLock);
+
+  if (app.iface->start && !app.iface->start())
+  {
+    DEBUG_ERROR("Failed to start the capture interface");
+    exitcode = LG_HOST_EXIT_FATAL;
+    goto fail_lgmp;
+  }
 
   while(app.state != APP_STATE_SHUTDOWN)
   {

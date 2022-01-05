@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 14
+#define KVMFR_VERSION 15
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -67,8 +67,49 @@ typedef struct KVMFR
   uint32_t          version;
   char              hostver[32];
   KVMFRFeatureFlags features;
+  //KVMFRRecords start here if there are any
 }
 KVMFR;
+
+typedef struct KVMFRRecord
+{
+  uint8_t  type;
+  uint32_t size;
+  uint8_t  data[];
+}
+KVMFRRecord;
+
+enum
+{
+  KVMFR_RECORD_VMINFO = 1,
+  KVMFR_RECORD_OSINFO
+};
+
+enum
+{
+  KVMFR_OS_LINUX,
+  KVMFR_OS_BSD,
+  KVMFR_OS_OSX,
+  KVMFR_OS_WINDOWS,
+  KVMFR_OS_OTHER
+};
+
+typedef struct KVMFRRecord_VMInfo
+{
+  uint8_t uuid   [16]; // the guest's UUID
+  char    capture[32]; // the capture device in use
+  uint8_t cpus;        // number of CPUs
+  uint8_t cores;       // number of CPU cores
+  char    model[];
+}
+KVMFRRecord_VMInfo;
+
+typedef struct KVMFRRecord_OSInfo
+{
+  uint8_t os;     // KVMFR_OS_*
+  char    name[]; // friendly name
+}
+KVMFRRecord_OSInfo;
 
 typedef struct KVMFRCursor
 {

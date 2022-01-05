@@ -105,6 +105,7 @@ typedef struct CaptureInterface
   );
 
   bool          (*init         )();
+  bool          (*start        )();
   void          (*stop         )();
   bool          (*deinit       )();
   void          (*free         )();

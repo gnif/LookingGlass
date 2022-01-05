@@ -193,7 +193,7 @@ static bool nvfbc_init(void)
 
     free(buffer);
   }
-  
+
   int adapterIndex = option_get_int("nvfbc", "adapterIndex");
 
   // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
@@ -232,18 +232,6 @@ static bool nvfbc_init(void)
   if (this->seperateCursor)
     this->cursorEvent = lgWrapEvent(event);
 
-  if (!this->mouseHookCreated)
-  {
-    mouseHook_install(on_mouseMove);
-    this->mouseHookCreated = true;
-  }
-
-  if (!this->forceCompositionCreated)
-  {
-    dwmForceComposition();
-    this->forceCompositionCreated = true;
-  }
-
   if (diffRes != (1 << this->diffShift))
     DEBUG_WARN("DiffMap block size not supported: %dx%d", diffRes, diffRes);
 
@@ -267,16 +255,38 @@ static bool nvfbc_init(void)
     }
   }
 
-  Sleep(100);
+  ++this->formatVer;
+  return true;
+}
 
-  if (this->seperateCursor && !lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
+static bool nvfbc_start(void)
+{
+  if (!this->mouseHookCreated)
+  {
+    mouseHook_install(on_mouseMove);
+    this->mouseHookCreated = true;
+  }
+
+  if (!this->forceCompositionCreated)
+  {
+    dwmForceComposition();
+    this->forceCompositionCreated = true;
+  }
+
+  if (!this->stop)
+  {
+    DEBUG_ERROR("BUG: start called when not stopped");
+    return true;
+  }
+
+  this->stop = false;
+  if (this->seperateCursor &&
+      !lgCreateThread("NvFBCPointer", pointerThread, NULL, &this->pointerThread))
   {
     DEBUG_ERROR("Failed to create the NvFBCPointer thread");
-    nvfbc_deinit();
     return false;
   }
 
-  ++this->formatVer;
   return true;
 }
 
@@ -698,6 +708,7 @@ struct CaptureInterface Capture_NVFBC =
 
   .create          = nvfbc_create,
   .init            = nvfbc_init,
+  .start           = nvfbc_start,
   .stop            = nvfbc_stop,
   .deinit          = nvfbc_deinit,
   .free            = nvfbc_free,

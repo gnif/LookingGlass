@@ -1250,7 +1250,7 @@ restart:
   waitCount = 100;
 
   const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
-  if (udataSize != sizeof(KVMFR) || !magicMatches || udata->version != KVMFR_VERSION)
+  if (udataSize < sizeof(KVMFR) || !magicMatches || udata->version != KVMFR_VERSION)
   {
     reportBadVersion();
     if (magicMatches)
