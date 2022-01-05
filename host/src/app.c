@@ -604,6 +604,10 @@ static bool newKVMFRData(KVMFRUserData * dst)
 
     strncpy(vmInfo->capture, app.iface->shortName, sizeof(vmInfo->capture) - 1);
 
+    const uint8_t * uuid = os_getUUID();
+    if (uuid)
+      memcpy(vmInfo->uuid, uuid, 16);
+
     char * model = allocUserData(dst, 1024, false);
     if (!model)
       return false;
@@ -630,8 +634,12 @@ static bool newKVMFRData(KVMFRUserData * dst)
     record->type = KVMFR_RECORD_OSINFO;
     record->size = sizeof(*osInfo);
 
-    osInfo->os = KVMFR_OS_OTHER;
-    if (!appendBuffer(dst, record, "Unknown", 8))
+    osInfo->os = os_getKVMFRType();
+    const char * osName = os_getOSName();
+    if (!osName)
+      osName = "";
+
+    if (!appendBuffer(dst, record, osName, strlen(osName) + 1))
       return false;
   }
 

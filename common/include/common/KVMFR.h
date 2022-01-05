@@ -85,14 +85,15 @@ enum
   KVMFR_RECORD_OSINFO
 };
 
-enum
+typedef enum
 {
   KVMFR_OS_LINUX,
   KVMFR_OS_BSD,
   KVMFR_OS_OSX,
   KVMFR_OS_WINDOWS,
   KVMFR_OS_OTHER
-};
+}
+KVMFROS;
 
 typedef struct KVMFRRecord_VMInfo
 {

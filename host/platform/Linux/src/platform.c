@@ -95,3 +95,20 @@ bool os_hasSetCursorPos(void)
 void os_setCursorPos(int x, int y)
 {
 }
+
+KVMFROS os_getKVMFRType(void)
+{
+  return KVMFR_OS_LINUX;
+}
+
+const char * os_getOSName(void)
+{
+  //TODO
+  return NULL;
+}
+
+const uint8_t * os_getUUID(void)
+{
+  //TODO
+  return NULL;
+}

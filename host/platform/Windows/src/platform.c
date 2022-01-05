@@ -589,3 +589,20 @@ void os_setCursorPos(int x, int y)
 {
   SetCursorPos(x, y);
 }
+
+KVMFROS os_getKVMFRType(void)
+{
+  return KVMFR_OS_WINDOWS;
+}
+
+const char * os_getOSName(void)
+{
+  //TODO
+  return NULL;
+}
+
+const uint8_t * os_getUUID(void)
+{
+  //TODO
+  return NULL;
+}

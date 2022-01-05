@@ -21,6 +21,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include "common/KVMFR.h"
 
 // exit code for user opted to exit looking-glass-host
 #define LG_HOST_EXIT_USER    0x10
@@ -46,3 +47,13 @@ void os_showMessage(const char * caption, const char * msg);
 bool os_blockScreensaver();
 bool os_hasSetCursorPos(void);
 void os_setCursorPos(int x, int y);
+
+// return the KVMFR OS type
+KVMFROS os_getKVMFRType(void);
+
+// returns the OS name & version if possible
+const char * os_getOSName(void);
+
+// returns the UUID that was given to the VM, this can be obtained from the
+// SMBIOS. Must return exactly 16 bytes or NULL.
+const uint8_t * os_getUUID(void);
