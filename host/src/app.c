@@ -552,6 +552,7 @@ static void * allocUserData(KVMFRUserData * dst, size_t need, bool consume)
       return NULL;
     }
 
+    memset(dst->data + dst->size, 0, newSize - dst->size);
     dst->size = newSize;
   }
 
