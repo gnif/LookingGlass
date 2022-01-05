@@ -629,7 +629,7 @@ static bool newKVMFRData(KVMFRUserData * dst)
     record->size = sizeof(*osInfo);
 
     osInfo->os = KVMFR_OS_OTHER;
-    if (!appendBuffer(dst, record, "Unknown", 9))
+    if (!appendBuffer(dst, record, "Unknown\0", 9))
       return false;
   }
 
