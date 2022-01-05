@@ -171,8 +171,6 @@ static bool nvfbc_create(
 
 static bool nvfbc_init(void)
 {
-  this->stop = false;
-
   int       bufferLen   = GetEnvironmentVariable("NVFBC_PRIV_DATA", NULL, 0);
   uint8_t * privData    = NULL;
   int       privDataLen = 0;
@@ -256,6 +254,7 @@ static bool nvfbc_init(void)
   }
 
   ++this->formatVer;
+  this->stop = true;
   return true;
 }
 
