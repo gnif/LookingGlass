@@ -403,7 +403,7 @@ static void lgUpdate(void * data, obs_data_t * settings)
       != LGMP_OK)
     return;
 
-  if (udataSize != sizeof(KVMFR) ||
+  if (udataSize < sizeof(KVMFR) ||
       memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) != 0 ||
       udata->version != KVMFR_VERSION)
   {
