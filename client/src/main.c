@@ -1342,7 +1342,7 @@ restart:
         };
 
         const char * type;
-        if (osInfo->os > ARRAY_LENGTH(typeStr))
+        if (osInfo->os >= ARRAY_LENGTH(typeStr))
           type = "Unknown";
         else
           type = typeStr[osInfo->os];
