@@ -766,6 +766,12 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   }
 
   const char * client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
+  if (!client_exts)
+  {
+    DEBUG_ERROR("Failed to query EGL_EXTENSIONS");
+    return false;
+  }
+
   bool debugContext = option_get_bool("egl", "debug");
   EGLint ctxattr[5];
   int ctxidx = 0;
@@ -814,7 +820,18 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
   const char * gl_exts = (const char *)glGetString(GL_EXTENSIONS);
+  if (!gl_exts)
+  {
+    DEBUG_ERROR("Failed to query GL_EXTENSIONS");
+    return false;
+  }
+
   const char * vendor  = (const char *)glGetString(GL_VENDOR);
+  if (!vendor)
+  {
+    DEBUG_ERROR("Failed to query GL_VENDOR");
+    return false;
+  }
 
   DEBUG_INFO("EGL     : %d.%d", maj, min);
   DEBUG_INFO("Vendor  : %s", vendor);
