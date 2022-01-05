@@ -1250,7 +1250,7 @@ restart:
   waitCount = 100;
 
   const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
-  if (udataSize < sizeof(KVMFR) || !magicMatches || udata->version != KVMFR_VERSION)
+  if (udataSize < sizeof(*udata) || !magicMatches || udata->version != KVMFR_VERSION)
   {
     reportBadVersion();
     if (magicMatches)
@@ -1278,6 +1278,87 @@ restart:
     }
     else
       return -1;
+  }
+
+  /* parse the kvmfr records from the userdata */
+  udataSize -= sizeof(*udata);
+  uint8_t * p = (uint8_t *)(udata + 1);
+  while(udataSize >= sizeof(KVMFRRecord))
+  {
+    KVMFRRecord * record = (KVMFRRecord *)p;
+    p         += sizeof(*record);
+    udataSize -= sizeof(*record);
+    if (record->size > udataSize)
+    {
+      DEBUG_WARN("KVMFRecord size is invalid, aborting parsing.");
+      break;
+    }
+
+    switch(record->type)
+    {
+      case KVMFR_RECORD_VMINFO:
+      {
+        KVMFRRecord_VMInfo * vmInfo = (KVMFRRecord_VMInfo *)p;
+        DEBUG_INFO("SMBIOS UUID    : "
+          "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+          vmInfo->uuid[ 0], vmInfo->uuid[ 1], vmInfo->uuid[ 2],
+          vmInfo->uuid[ 3], vmInfo->uuid[ 4], vmInfo->uuid[ 5],
+          vmInfo->uuid[ 6], vmInfo->uuid[ 7], vmInfo->uuid[ 8],
+          vmInfo->uuid[ 9], vmInfo->uuid[10], vmInfo->uuid[11],
+          vmInfo->uuid[12], vmInfo->uuid[13], vmInfo->uuid[14],
+          vmInfo->uuid[15]);
+
+        DEBUG_INFO("Guest CPU Model: %s", vmInfo->model);
+        DEBUG_INFO("Guest CPU      : %u cores, %u threads",
+            vmInfo->cores, vmInfo->cpus);
+        DEBUG_INFO("Capture Device : %s", vmInfo->capture);
+
+        bool checkUUID = false;
+        for(int i = 0; i < 16; ++i)
+         if (vmInfo->uuid[i])
+         {
+           checkUUID = true;
+           break;
+         }
+
+        if (!checkUUID)
+          break;
+
+        //TODO: compare UUID with the one provided by SPICE if SPICE is in use
+
+        break;
+      }
+
+      case KVMFR_RECORD_OSINFO:
+      {
+        KVMFRRecord_OSInfo * osInfo = (KVMFRRecord_OSInfo *)p;
+        static const char * typeStr[] =
+        {
+          "Linux",
+          "BSD",
+          "OSX",
+          "Windows",
+          "Other"
+        };
+
+        const char * type;
+        if (osInfo->os > ARRAY_LENGTH(typeStr))
+          type = "Unknown";
+        else
+          type = typeStr[osInfo->os];
+
+        DEBUG_INFO("Guest OS       : %s", type);
+        DEBUG_INFO("Guest OS Name  : %s", osInfo->name);
+        break;
+      }
+
+      default:
+        DEBUG_WARN("Unhandled KVMFRecord type: %d", record->type);
+        break;
+    }
+
+    p         += record->size;
+    udataSize -= record->size;
   }
 
   DEBUG_INFO("Host ready, reported version: %s", udata->hostver);
