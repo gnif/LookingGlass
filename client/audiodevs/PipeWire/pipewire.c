@@ -32,13 +32,19 @@ struct PipeWire
 {
   struct pw_loop        * loop;
   struct pw_thread_loop * thread;
-  struct pw_stream      * stream;
-  int    channels;
-  int    sampleRate;
-  int    stride;
 
-  RingBuffer buffer;
-  bool       active;
+  struct
+  {
+    struct pw_stream * stream;
+
+    int    channels;
+    int    sampleRate;
+    int    stride;
+
+    RingBuffer buffer;
+    bool       active;
+  }
+  playback;
 };
 
 static struct PipeWire pw = {0};
@@ -47,10 +53,11 @@ static void pipewire_on_process(void * userdata)
 {
   struct pw_buffer * pbuf;
 
-  if (!ringbuffer_getCount(pw.buffer))
+  if (!ringbuffer_getCount(pw.playback.buffer))
     return;
 
-  if (!(pbuf = pw_stream_dequeue_buffer(pw.stream))) {
+  if (!(pbuf = pw_stream_dequeue_buffer(pw.playback.stream)))
+  {
     DEBUG_WARN("out of buffers");
     return;
   }
@@ -61,15 +68,15 @@ static void pipewire_on_process(void * userdata)
   if (!(dst = sbuf->datas[0].data))
     return;
 
-  int frames = sbuf->datas[0].maxsize / pw.stride;
-  void * values = ringbuffer_consume(pw.buffer, &frames);
-  memcpy(dst, values, frames * pw.stride);
+  int frames = sbuf->datas[0].maxsize / pw.playback.stride;
+  void * values = ringbuffer_consume(pw.playback.buffer, &frames);
+  memcpy(dst, values, frames * pw.playback.stride);
 
   sbuf->datas[0].chunk->offset = 0;
-  sbuf->datas[0].chunk->stride = pw.stride;
-  sbuf->datas[0].chunk->size   = frames * pw.stride;
+  sbuf->datas[0].chunk->stride = pw.playback.stride;
+  sbuf->datas[0].chunk->size   = frames * pw.playback.stride;
 
-  pw_stream_queue_buffer(pw.stream, pbuf);
+  pw_stream_queue_buffer(pw.playback.stream, pbuf);
 }
 
 static bool pipewire_init(void)
@@ -92,7 +99,7 @@ static bool pipewire_init(void)
   pw_context_destroy(context);
 
   /* PipeWire is available so create the loop thread and start it */
-  pw.thread = pw_thread_loop_new_full(pw.loop, "Playback", NULL);
+  pw.thread = pw_thread_loop_new_full(pw.loop, "PipeWire", NULL);
   if (!pw.thread)
   {
     DEBUG_ERROR("Failed to create the thread loop");
@@ -111,21 +118,21 @@ err:
   return false;
 }
 
-static void pipewire_stop_stream(void)
+static void pipewire_playbackStop_stream(void)
 {
-  if (!pw.stream)
+  if (!pw.playback.stream)
     return;
 
   pw_thread_loop_lock(pw.thread);
-  pw_stream_flush(pw.stream, true);
-  pw_stream_destroy(pw.stream);
-  pw.stream = NULL;
+  pw_stream_flush(pw.playback.stream, true);
+  pw_stream_destroy(pw.playback.stream);
+  pw.playback.stream = NULL;
   pw_thread_loop_unlock(pw.thread);
 }
 
 static void pipewire_free(void)
 {
-  pipewire_stop_stream();
+  pipewire_playbackStop_stream();
   pw_thread_loop_stop(pw.thread);
   pw_thread_loop_destroy(pw.thread);
   pw_loop_destroy(pw.loop);
@@ -133,11 +140,11 @@ static void pipewire_free(void)
   pw.loop   = NULL;
   pw.thread = NULL;
 
-  ringbuffer_free(&pw.buffer);
+  ringbuffer_free(&pw.playback.buffer);
   pw_deinit();
 }
 
-static void pipewire_start(int channels, int sampleRate)
+static void pipewire_playbackPlaybackStart(int channels, int sampleRate)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -148,18 +155,20 @@ static void pipewire_start(int channels, int sampleRate)
     .process = pipewire_on_process
   };
 
-  if (pw.stream && pw.channels == channels && pw.sampleRate == sampleRate)
+  if (pw.playback.stream &&
+      pw.playback.channels == channels &&
+      pw.playback.sampleRate == sampleRate)
     return;
 
-  pipewire_stop_stream();
+  pipewire_playbackStop_stream();
 
-  pw.channels   = channels;
-  pw.sampleRate = sampleRate;
-  pw.stride     = sizeof(uint16_t) * channels;
-  pw.buffer     = ringbuffer_new(sampleRate / 10, channels * sizeof(uint16_t));
+  pw.playback.channels   = channels;
+  pw.playback.sampleRate = sampleRate;
+  pw.playback.stride     = sizeof(uint16_t) * channels;
+  pw.playback.buffer     = ringbuffer_new(sampleRate / 10, channels * sizeof(uint16_t));
 
   pw_thread_loop_lock(pw.thread);
-  pw.stream = pw_stream_new_simple(
+  pw.playback.stream = pw_stream_new_simple(
     pw.loop,
     "Looking Glass",
     pw_properties_new(
@@ -173,7 +182,7 @@ static void pipewire_start(int channels, int sampleRate)
     NULL
   );
 
-  if (!pw.stream)
+  if (!pw.playback.stream)
   {
     pw_thread_loop_unlock(pw.thread);
     DEBUG_ERROR("Failed to create the stream");
@@ -188,7 +197,7 @@ static void pipewire_start(int channels, int sampleRate)
         ));
 
   pw_stream_connect(
-      pw.stream,
+      pw.playback.stream,
       PW_DIRECTION_OUTPUT,
       PW_ID_ANY,
       PW_STREAM_FLAG_AUTOCONNECT |
@@ -200,47 +209,47 @@ static void pipewire_start(int channels, int sampleRate)
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_play(uint8_t * data, size_t size)
+static void pipewire_playbackPlay(uint8_t * data, size_t size)
 {
-  if (!pw.stream)
+  if (!pw.playback.stream)
     return;
 
   // if the buffer fill is higher then the average skip the update to reduce lag
   static unsigned int ttlSize = 0;
   static unsigned int count   = 0;
   ttlSize += size;
-  if (++count > 100 && ringbuffer_getCount(pw.buffer) > ttlSize / count)
+  if (++count > 100 && ringbuffer_getCount(pw.playback.buffer) > ttlSize / count)
   {
     count   = 0;
     ttlSize = 0;
     return;
   }
 
-  ringbuffer_append(pw.buffer, data, size / pw.stride);
+  ringbuffer_append(pw.playback.buffer, data, size / pw.playback.stride);
 
-  if (!pw.active)
+  if (!pw.playback.active)
   {
     pw_thread_loop_lock(pw.thread);
-    pw_stream_set_active(pw.stream, true);
-    pw.active = true;
+    pw_stream_set_active(pw.playback.stream, true);
+    pw.playback.active = true;
     pw_thread_loop_unlock(pw.thread);
   }
 }
 
-static void pipewire_stop(void)
+static void pipewire_playbackStop(void)
 {
-  if (!pw.active)
+  if (!pw.playback.active)
     return;
 
   pw_thread_loop_lock(pw.thread);
-  pw_stream_set_active(pw.stream, false);
-  pw.active = false;
+  pw_stream_set_active(pw.playback.stream, false);
+  pw.playback.active = false;
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_volume(int channels, const uint16_t volume[])
+static void pipewire_playbackVolume(int channels, const uint16_t volume[])
 {
-  if (channels != pw.channels)
+  if (channels != pw.playback.channels)
     return;
 
   float param[channels];
@@ -248,14 +257,15 @@ static void pipewire_volume(int channels, const uint16_t volume[])
     param[i] = 9.3234e-7 * pow(1.000211902, volume[i]) - 0.000172787;
 
   pw_thread_loop_lock(pw.thread);
-  pw_stream_set_control(pw.stream, SPA_PROP_channelVolumes, channels, param, 0);
+  pw_stream_set_control(pw.playback.stream, SPA_PROP_channelVolumes,
+      channels, param, 0);
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_mute(bool mute)
+static void pipewire_playbackMute(bool mute)
 {
   pw_thread_loop_lock(pw.thread);
-  pw_stream_set_control(pw.stream, SPA_PROP_mute, 1, (void *)&mute, 0);
+  pw_stream_set_control(pw.playback.stream, SPA_PROP_mute, 1, (void *)&mute, 0);
   pw_thread_loop_unlock(pw.thread);
 }
 
@@ -266,10 +276,10 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .free   = pipewire_free,
   .playback =
   {
-    .start  = pipewire_start,
-    .play   = pipewire_play,
-    .stop   = pipewire_stop,
-    .volume = pipewire_volume,
-    .mute   = pipewire_mute
+    .start  = pipewire_playbackPlaybackStart,
+    .play   = pipewire_playbackPlay,
+    .stop   = pipewire_playbackStop,
+    .volume = pipewire_playbackVolume,
+    .mute   = pipewire_playbackMute
   }
 };
