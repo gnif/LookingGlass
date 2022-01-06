@@ -9,11 +9,12 @@ add_library(capture_NVFBC STATIC
 file(TO_CMAKE_PATH "${NVFBC_SDK}" nvfbc_sdk)
 include_directories(file, "${nvfbc_sdk}/inc")
 
+target_link_libraries(capture_NVFBC
+	platform_Windows
+	dwmapi
+)
+
 target_include_directories(capture_NVFBC
 	PRIVATE
 		src
-)
-
-target_link_libraries(capture_NVFBC
-	platform_Windows
 )
