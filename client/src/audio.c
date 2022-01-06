@@ -112,7 +112,8 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
         audio.playback.volume);
 
   // set the inital mute state
-  audio.audioDev->playback.mute(audio.playback.mute);
+  if (audio.audioDev->playback.mute)
+    audio.audioDev->playback.mute(audio.playback.mute);
 }
 
 void audio_playbackStop(void)
@@ -201,7 +202,8 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
         audio.playback.volume);
 
   // set the inital mute state
-  audio.audioDev->record.mute(audio.playback.mute);
+  if (audio.audioDev->record.mute)
+    audio.audioDev->record.mute(audio.playback.mute);
 }
 
 void audio_recordStop(void)
