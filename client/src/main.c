@@ -847,7 +847,6 @@ static void checkUUID(void)
     return;
 
   DEBUG_ERROR("UUIDs do not match, you have connected SPICE to the wrong guest");
-  DEBUG_ERROR("Shutting down");
   g_state.state = APP_STATE_SHUTDOWN;
 }
 
@@ -1359,7 +1358,6 @@ restart:
 
         memcpy(g_state.guestUUID, vmInfo->uuid, sizeof(g_state.guestUUID));
         g_state.guestUUIDValid = true;
-        checkUUID();
         break;
       }
 
@@ -1395,8 +1393,10 @@ restart:
     udataSize -= record->size;
   }
 
-  DEBUG_INFO("Host ready, reported version: %s", udata->hostver);
-  DEBUG_INFO("Starting session");
+  checkUUID();
+
+  if (g_state.state == APP_STATE_RUNNING)
+    DEBUG_INFO("Starting session");
 
   g_state.kvmfrFeatures = udata->features;
 
