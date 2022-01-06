@@ -837,10 +837,43 @@ static void audioData(uint8_t * data, size_t size)
     g_state.audioDev->play(data, size);
 }
 
+static void checkUUID(void)
+{
+  if (!g_state.spiceUUIDValid || !g_state.guestUUIDValid)
+    return;
+
+  if (memcmp(g_state.spiceUUID, g_state.guestUUID,
+        sizeof(g_state.spiceUUID)) != 0)
+    return;
+
+  DEBUG_ERROR("UUIDs do not match, you have connected SPICE to the wrong guest");
+  DEBUG_ERROR("Shutting down");
+  g_state.state = APP_STATE_SHUTDOWN;
+}
+
 void spiceReady(void)
 {
   // set the intial mouse mode
   purespice_mouseMode(true);
+
+  PSServerInfo info;
+  if (!purespice_getServerInfo(&info))
+    return;
+
+  bool uuidValid = false;
+  for(int i = 0; i < sizeof(info.uuid); ++i)
+    if (info.uuid[i])
+    {
+      uuidValid = true;
+      break;
+    }
+
+  if (!uuidValid)
+    return;
+
+  memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
+  g_state.spiceUUIDValid = true;
+  checkUUID();
 }
 
 int spiceThread(void * arg)
@@ -1313,19 +1346,20 @@ restart:
             vmInfo->cores, vmInfo->cpus);
         DEBUG_INFO("Capture Device : %s", vmInfo->capture);
 
-        bool checkUUID = false;
-        for(int i = 0; i < 16; ++i)
+        bool uuidValid = false;
+        for(int i = 0; i < sizeof(vmInfo->uuid); ++i)
          if (vmInfo->uuid[i])
          {
-           checkUUID = true;
+           uuidValid = true;
            break;
          }
 
-        if (!checkUUID)
+        if (!uuidValid)
           break;
 
-        //TODO: compare UUID with the one provided by SPICE if SPICE is in use
-
+        memcpy(g_state.guestUUID, vmInfo->uuid, sizeof(g_state.guestUUID));
+        g_state.guestUUIDValid = true;
+        checkUUID();
         break;
       }
 

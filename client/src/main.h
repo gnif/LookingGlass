@@ -72,6 +72,11 @@ struct AppState
   bool                         dsInitialized;
   bool                         jitRender;
 
+  uint8_t spiceUUID[16];
+  bool    spiceUUIDValid;
+  uint8_t guestUUID[16];
+  bool    guestUUIDValid;
+
   bool                 stopVideo;
   bool                 ignoreInput;
   bool                 escapeActive;
