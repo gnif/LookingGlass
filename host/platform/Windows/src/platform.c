@@ -32,6 +32,7 @@
 #include <userenv.h>
 #include <winternl.h>
 #include <dwmapi.h>
+#include <avrt.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -60,6 +61,7 @@ struct AppState
   UINT           trayRestartMsg;
   HMENU          trayMenu;
   HANDLE         exitWait;
+  HANDLE         taskHandle;
 };
 
 static struct AppState app = {0};
@@ -450,6 +452,9 @@ finish:
     free(app.argv[i]);
   free(app.argv);
 
+  if (app.taskHandle)
+    AvRevertMmThreadCharacteristics(app.taskHandle);
+
   return result;
 }
 
@@ -479,7 +484,15 @@ void boostPriority(void)
     DEBUG_INFO("looking-glass-host.exe InstallService");
   }
 
-  DwmEnableMMCSS(true);
+  DWORD taskIndex = 0;
+  app.taskHandle =
+    AvSetMmThreadCharacteristicsA("Capture", &taskIndex);
+
+  if (!app.taskHandle)
+    DEBUG_WINERROR("AvSetMmThreadCharacteristicsA failed", GetLastError());
+
+  if (!AvSetMmThreadPriority(app.taskHandle, AVRT_PRIORITY_CRITICAL))
+    DEBUG_WINERROR("Failed to set thread priority", GetLastError());
 }
 
 void CALLBACK exitEventCallback(PVOID opaque, BOOLEAN timedOut)

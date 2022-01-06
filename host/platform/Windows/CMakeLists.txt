@@ -27,6 +27,7 @@ target_link_libraries(platform_Windows
 	shlwapi
 	powrprof
 	rpcrt4
+	avrt
 )
 
 target_include_directories(platform_Windows
