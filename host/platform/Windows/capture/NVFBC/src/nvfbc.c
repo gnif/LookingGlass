@@ -154,7 +154,7 @@ static void nvfbc_initOptions(void)
       .name           = "dwmFlush",
       .description    = "Use DwmFlush to sync the capture to the windows presentation inverval",
       .type           = OPTION_TYPE_BOOL,
-      .value.x_bool   = true
+      .value.x_bool   = false
     },
     {0}
   };
