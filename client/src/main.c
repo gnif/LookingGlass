@@ -1113,7 +1113,7 @@ static int lg_run(void)
 
   if (!g_state.lgr)
   {
-    DEBUG_INFO("Unable to find a suitable renderer");
+    DEBUG_ERROR("Unable to find a suitable renderer");
     return -1;
   }
 
