@@ -27,6 +27,7 @@
 
 #include "common/debug.h"
 #include "common/ringbuffer.h"
+#include "common/util.h"
 
 struct PipeWire
 {
@@ -45,11 +46,24 @@ struct PipeWire
     bool       active;
   }
   playback;
+
+  struct
+  {
+    struct pw_stream * stream;
+
+    int    channels;
+    int    sampleRate;
+    int    stride;
+    void (*dataFn)(uint8_t * data, size_t size);
+
+    bool   active;
+  }
+  record;
 };
 
 static struct PipeWire pw = {0};
 
-static void pipewire_on_process(void * userdata)
+static void pipewire_onPlaybackProcess(void * userdata)
 {
   struct pw_buffer * pbuf;
 
@@ -130,20 +144,6 @@ static void pipewire_playbackStopStream(void)
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_free(void)
-{
-  pipewire_playbackStopStream();
-  pw_thread_loop_stop(pw.thread);
-  pw_thread_loop_destroy(pw.thread);
-  pw_loop_destroy(pw.loop);
-
-  pw.loop   = NULL;
-  pw.thread = NULL;
-
-  ringbuffer_free(&pw.playback.buffer);
-  pw_deinit();
-}
-
 static void pipewire_playbackStart(int channels, int sampleRate)
 {
   const struct spa_pod * params[1];
@@ -152,7 +152,7 @@ static void pipewire_playbackStart(int channels, int sampleRate)
   static const struct pw_stream_events events =
   {
     .version = PW_VERSION_STREAM_EVENTS,
-    .process = pipewire_on_process
+    .process = pipewire_onPlaybackProcess
   };
 
   if (pw.playback.stream &&
@@ -165,7 +165,8 @@ static void pipewire_playbackStart(int channels, int sampleRate)
   pw.playback.channels   = channels;
   pw.playback.sampleRate = sampleRate;
   pw.playback.stride     = sizeof(uint16_t) * channels;
-  pw.playback.buffer     = ringbuffer_new(sampleRate / 10, channels * sizeof(uint16_t));
+  pw.playback.buffer     = ringbuffer_new(sampleRate / 10,
+      channels * sizeof(uint16_t));
 
   pw_thread_loop_lock(pw.thread);
   pw.playback.stream = pw_stream_new_simple(
@@ -269,6 +270,157 @@ static void pipewire_playbackMute(bool mute)
   pw_thread_loop_unlock(pw.thread);
 }
 
+static void pipewire_recordStopStream(void)
+{
+  if (!pw.record.stream)
+    return;
+
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_flush(pw.record.stream, true);
+  pw_stream_destroy(pw.record.stream);
+  pw.record.stream = NULL;
+  pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_onRecordProcess(void * userdata)
+{
+  struct pw_buffer * pbuf;
+
+  if (!(pbuf = pw_stream_dequeue_buffer(pw.record.stream)))
+  {
+    DEBUG_WARN("out of buffers");
+    return;
+  }
+
+  struct spa_buffer * sbuf = pbuf->buffer;
+  uint8_t * dst;
+
+  if (!(dst = sbuf->datas[0].data))
+    return;
+
+  dst += sbuf->datas[0].chunk->offset;
+  pw.record.dataFn(dst,
+    min(
+      sbuf->datas[0].chunk->size,
+      sbuf->datas[0].maxsize - sbuf->datas[0].chunk->offset)
+    );
+
+  pw_stream_queue_buffer(pw.record.stream, pbuf);
+}
+
+static void pipewire_recordStart(int channels, int sampleRate,
+  void (*dataFn)(uint8_t * data, size_t size))
+{
+  const struct spa_pod * params[1];
+  uint8_t buffer[1024];
+  struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+  static const struct pw_stream_events events =
+  {
+    .version = PW_VERSION_STREAM_EVENTS,
+    .process = pipewire_onRecordProcess
+  };
+
+  if (pw.record.stream &&
+      pw.record.channels == channels &&
+      pw.record.sampleRate == sampleRate)
+    return;
+
+  pipewire_recordStopStream();
+
+  pw.record.channels   = channels;
+  pw.record.sampleRate = sampleRate;
+  pw.record.stride     = sizeof(uint16_t) * channels;
+  pw.record.dataFn     = dataFn;
+
+  pw_thread_loop_lock(pw.thread);
+  pw.record.stream = pw_stream_new_simple(
+    pw.loop,
+    "Looking Glass",
+    pw_properties_new(
+      PW_KEY_NODE_NAME     , "Looking Glass",
+      PW_KEY_MEDIA_TYPE    , "Audio",
+      PW_KEY_MEDIA_CATEGORY, "Capture",
+      PW_KEY_MEDIA_ROLE    , "Music",
+      NULL
+    ),
+    &events,
+    NULL
+  );
+
+  if (!pw.record.stream)
+  {
+    pw_thread_loop_unlock(pw.thread);
+    DEBUG_ERROR("Failed to create the stream");
+    return;
+  }
+
+  params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
+      &SPA_AUDIO_INFO_RAW_INIT(
+        .format   = SPA_AUDIO_FORMAT_S16,
+        .channels = channels,
+        .rate     = sampleRate
+        ));
+
+  pw_stream_connect(
+      pw.record.stream,
+      PW_DIRECTION_INPUT,
+      PW_ID_ANY,
+      PW_STREAM_FLAG_AUTOCONNECT |
+      PW_STREAM_FLAG_MAP_BUFFERS |
+      PW_STREAM_FLAG_RT_PROCESS,
+      params, 1);
+
+  pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_recordStop(void)
+{
+  if (!pw.record.active)
+    return;
+
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_set_active(pw.record.stream, false);
+  pw.record.active = false;
+  pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_recordVolume(int channels, const uint16_t volume[])
+{
+  if (channels != pw.record.channels)
+    return;
+
+  float param[channels];
+  for(int i = 0; i < channels; ++i)
+    param[i] = 9.3234e-7 * pow(1.000211902, volume[i]) - 0.000172787;
+
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_set_control(pw.record.stream, SPA_PROP_channelVolumes,
+      channels, param, 0);
+  pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_recordMute(bool mute)
+{
+  pw_thread_loop_lock(pw.thread);
+  pw_stream_set_control(pw.record.stream, SPA_PROP_mute, 1, (void *)&mute, 0);
+  pw_thread_loop_unlock(pw.thread);
+}
+
+static void pipewire_free(void)
+{
+  pipewire_playbackStopStream();
+  pipewire_recordStopStream();
+  pw_thread_loop_stop(pw.thread);
+  pw_thread_loop_destroy(pw.thread);
+  pw_loop_destroy(pw.loop);
+
+  pw.loop   = NULL;
+  pw.thread = NULL;
+
+  ringbuffer_free(&pw.playback.buffer);
+  pw_deinit();
+}
+
 struct LG_AudioDevOps LGAD_PipeWire =
 {
   .name   = "PipeWire",
@@ -281,5 +433,12 @@ struct LG_AudioDevOps LGAD_PipeWire =
     .stop   = pipewire_playbackStop,
     .volume = pipewire_playbackVolume,
     .mute   = pipewire_playbackMute
+  },
+  .record =
+  {
+    .start  = pipewire_recordStart,
+    .stop   = pipewire_recordStop,
+    .volume = pipewire_recordVolume,
+    .mute   = pipewire_recordMute
   }
 };
