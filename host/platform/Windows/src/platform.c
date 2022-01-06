@@ -31,6 +31,7 @@
 #include <wtsapi32.h>
 #include <userenv.h>
 #include <winternl.h>
+#include <dwmapi.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -477,6 +478,8 @@ void boostPriority(void)
     DEBUG_INFO("To fix this, install and run the Looking Glass host as a service.");
     DEBUG_INFO("looking-glass-host.exe InstallService");
   }
+
+  DwmEnableMMCSS(true);
 }
 
 void CALLBACK exitEventCallback(PVOID opaque, BOOLEAN timedOut)
