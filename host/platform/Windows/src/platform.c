@@ -601,8 +601,134 @@ const char * os_getOSName(void)
   return NULL;
 }
 
+#define TABLE_SIG(x) (\
+    ((uint32_t)(x[0]) << 24) | \
+    ((uint32_t)(x[1]) << 16) | \
+    ((uint32_t)(x[2]) << 8 ) | \
+    ((uint32_t)(x[3]) << 0 ))
+
+#define SMBVER(major, minor) \
+  ((smbData->SMBIOSMajorVersion == major && \
+    smbData->SMBIOSMinorVersion >= minor) || \
+    (smbData->SMBIOSMajorVersion > major))
+
+#define SMB_SST_SystemInformation 1
+
+#define REVERSE32(x) \
+  *(uint32_t*)(x) = ((*(uint32_t*)(x) & 0xFFFF0000) >> 16) | \
+                    ((*(uint32_t*)(x) & 0x0000FFFF) << 16)
+
+#define REVERSE16(x) \
+  *(uint16_t*)(x) = ((*(uint16_t*)(x) & 0xFF00) >> 8) | \
+                    ((*(uint16_t*)(x) & 0x00FF) << 8)
+
+
+static void * smbParseData(uint8_t ** data, char * strings[])
+{
+  typedef struct
+  {
+    uint8_t type;
+    uint8_t length;
+  }
+  __attribute__((packed)) SMBHeader;
+
+  SMBHeader *h = (SMBHeader *)*data;
+
+  *data += h->length;
+  if (**data)
+    for(int i = 1; i < 256 && **data; ++i)
+    {
+      strings[i] = (char *)*data;
+      *data += strlen((char *)*data) + 1;
+    }
+  else
+    ++*data;
+
+  ++*data;
+  return h;
+}
+
 const uint8_t * os_getUUID(void)
 {
-  //TODO
+  static uint8_t uuid[16] = {0};
+  static bool uuidValid = false;
+
+  if (uuidValid)
+    return uuid;
+
+  typedef struct
+  {
+    BYTE  Used20CallingMethod;
+    BYTE  SMBIOSMajorVersion;
+    BYTE  SMBIOSMinorVersion;
+    BYTE  DmiRevision;
+    DWORD Length;
+    BYTE  SMBIOSTableData[];
+  }
+  RawSMBIOSData;
+
+  typedef struct
+  {
+    uint8_t  type;
+    uint8_t  length;
+    uint16_t handle;
+    uint8_t  manufacturerStr;
+    uint8_t  productStr;
+    uint8_t  versionStr;
+    uint8_t  serialStr;
+    uint8_t  uuid[16];
+    uint8_t  wakeupType;
+    uint8_t  skuNumberStr;
+    uint8_t  familyStr;
+  }
+  __attribute__((packed)) SMBSystemInformation;
+
+  DWORD           smbDataSize;
+  RawSMBIOSData * smbData;
+
+  smbDataSize = GetSystemFirmwareTable(TABLE_SIG("RSMB"), 0, NULL, 0);
+  smbData     = (RawSMBIOSData *)malloc(smbDataSize);
+  if (!smbData)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
+  if (GetSystemFirmwareTable(TABLE_SIG("RSMB"), 0, smbData, smbDataSize)
+      != smbDataSize)
+  {
+    DEBUG_ERROR("Failed to read the RSMB table");
+    goto err;
+  }
+
+  uint8_t * data         = (uint8_t *)smbData->SMBIOSTableData;
+  uint8_t * end          = (uint8_t *)smbData->SMBIOSTableData + smbData->Length;
+  char    * strings[256] = {0};
+
+  while(data != end)
+  {
+    if (data[0] == SMB_SST_SystemInformation)
+    {
+      SMBSystemInformation * info = smbParseData(&data, strings);
+      memcpy(uuid, &info->uuid, 16);
+
+      // convert to the same format that SPICE is using
+      REVERSE32(&uuid[0]);
+      REVERSE16(&uuid[0]);
+      REVERSE16(&uuid[2]);
+      REVERSE16(&uuid[4]);
+      REVERSE16(&uuid[6]);
+      uuidValid = true;
+      break;
+    }
+
+    smbParseData(&data, strings);
+  }
+
+  free(smbData);
+  return uuid;
+
+err:
+  free(smbData);
   return NULL;
 }
