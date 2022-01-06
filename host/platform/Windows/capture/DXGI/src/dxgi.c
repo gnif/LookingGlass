@@ -38,6 +38,7 @@
 #include <d3d11.h>
 #include <d3dcommon.h>
 #include <versionhelpers.h>
+#include <dwmapi.h>
 
 #include "dxgi_extra.h"
 
@@ -85,6 +86,7 @@ struct iface
   ID3D11DeviceContext      * deviceContext;
   LG_Lock                    deviceContextLock;
   bool                       useAcquireLock;
+  bool                       dwmFlush;
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication   * dup;
   int                        maxTextures;
@@ -161,6 +163,13 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = true
     },
+    {
+      .module         = "dxgi",
+      .name           = "dwmFlush",
+      .description    = "Use DwmFlush to sync the capture to the windows presentation inverval",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
     {0}
   };
 
@@ -190,6 +199,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
     this->maxTextures = 1;
 
   this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
+  this->dwmFlush            = option_get_bool("dxgi", "dwmFlush");
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
@@ -806,6 +816,13 @@ static CaptureResult dxgi_capture(void)
   result = dxgi_releaseFrame();
   if (result != CAPTURE_RESULT_OK)
     return result;
+
+  // this is a bit of a hack as it causes this thread to block until the next
+  // present, by doing this we can allow the mouse updates to accumulate instead
+  // of being called to process every single one. The only caveat is we are
+  // limited to the refresh rate of the monitor.
+  if (this->dwmFlush)
+    DwmFlush();
 
   if (this->useAcquireLock)
   {
