@@ -783,7 +783,6 @@ void spiceReady(void)
 {
   // set the intial mouse mode
   purespice_mouseMode(true);
-  audio_init();
 
   PSServerInfo info;
   if (!purespice_getServerInfo(&info))
@@ -807,6 +806,9 @@ void spiceReady(void)
 
 int spiceThread(void * arg)
 {
+  if (g_params.useSpiceAudio)
+    audio_init();
+
   const struct PSConfig config =
   {
     .host      = g_params.spiceHost,
@@ -829,12 +831,20 @@ int spiceThread(void * arg)
     },
     .playback =
     {
-      .enable = g_params.useSpiceAudio,
+      .enable = audio_supportsPlayback(),
       .start  = audio_playbackStart,
       .volume = audio_playbackVolume,
       .mute   = audio_playbackMute,
       .stop   = audio_playbackStop,
       .data   = audio_playbackData
+    },
+    .record =
+    {
+      .enable = audio_supportsRecord(),
+      .start  = audio_recordStart,
+      .volume = audio_recordVolume,
+      .mute   = audio_recordMute,
+      .stop   = audio_recordStop
     }
   };
 

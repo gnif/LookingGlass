@@ -45,6 +45,7 @@ typedef struct
     int      volumeChannels;
     uint16_t volume[8];
     bool     mute;
+    uint32_t time;
   }
   record;
 }
@@ -73,6 +74,11 @@ void audio_free(void)
 
   audio.audioDev->free();
   audio.audioDev = NULL;
+}
+
+bool audio_supportsPlayback(void)
+{
+  return audio.audioDev && audio.audioDev->playback.start;
 }
 
 void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
@@ -153,4 +159,85 @@ void audio_playbackData(uint8_t * data, size_t size)
     return;
 
   audio.audioDev->playback.play(data, size);
+}
+
+bool audio_supportsRecord(void)
+{
+  return audio.audioDev && audio.audioDev->record.start;
+}
+
+static void recordData(uint8_t * data, size_t size)
+{
+  purespice_writeAudio(data, size, 0);
+}
+
+void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
+{
+  if (!audio.audioDev)
+    return;
+
+  static int lastChannels   = 0;
+  static int lastSampleRate = 0;
+
+  if (audio.record.started)
+  {
+    if (channels != lastChannels || sampleRate != lastSampleRate)
+      audio.audioDev->record.stop();
+    else
+      return;
+  }
+
+  lastChannels   = channels;
+  lastSampleRate = sampleRate;
+  audio.record.started = true;
+
+  DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
+  audio.audioDev->record.start(channels, sampleRate, recordData);
+
+  // if a volume level was stored, set it before we return
+  if (audio.record.volumeChannels)
+    audio.audioDev->record.volume(
+        audio.playback.volumeChannels,
+        audio.playback.volume);
+
+  // set the inital mute state
+  audio.audioDev->record.mute(audio.playback.mute);
+}
+
+void audio_recordStop(void)
+{
+  if (!audio.audioDev || !audio.record.started)
+    return;
+
+  audio.audioDev->record.stop();
+  audio.record.started = false;
+}
+
+void audio_recordVolume(int channels, const uint16_t volume[])
+{
+  if (!audio.audioDev || !audio.audioDev->record.volume)
+    return;
+
+  // store the values so we can restore the state if the stream is restarted
+  channels = min(ARRAY_LENGTH(audio.record.volume), channels);
+  memcpy(audio.record.volume, volume, sizeof(uint16_t) * channels);
+  audio.record.volumeChannels = channels;
+
+  if (!audio.record.started)
+    return;
+
+  audio.audioDev->record.volume(channels, volume);
+}
+
+void audio_recordMute(bool mute)
+{
+  if (!audio.audioDev || !audio.audioDev->record.mute)
+    return;
+
+  // store the value so we can restore it if the stream is restarted
+  audio.record.mute = mute;
+  if (!audio.record.started)
+    return;
+
+  audio.audioDev->record.mute(mute);
 }

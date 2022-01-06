@@ -23,6 +23,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 struct LG_AudioDevOps
 {
@@ -48,7 +49,7 @@ struct LG_AudioDevOps
     /* called for each packet of output audio to play
      * Note: size is the size of data in bytes, not frames/samples
      */
-    void (*play)(uint8_t * data, int size);
+    void (*play)(uint8_t * data, size_t size);
 
     /* called when SPICE reports the audio stream has stopped */
     void (*stop)(void);
@@ -67,7 +68,7 @@ struct LG_AudioDevOps
      * Note: currently SPICE only supports S16 samples so always assume so
      */
     void (*start)(int channels, int sampleRate,
-        void (*dataFn)(uint8_t * data, int size));
+        void (*dataFn)(uint8_t * data, size_t size));
 
     /* called when SPICE reports the audio stream has stopped */
     void (*stop)(void);

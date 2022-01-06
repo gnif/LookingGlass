@@ -288,7 +288,7 @@ static void pulseaudio_start(int channels, int sampleRate)
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
-static void pulseaudio_play(uint8_t * data, int size)
+static void pulseaudio_play(uint8_t * data, size_t size)
 {
   if (!pa.sink)
     return;

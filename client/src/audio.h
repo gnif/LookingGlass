@@ -21,9 +21,16 @@
 void audio_init(void);
 void audio_free(void);
 
+bool audio_supportsPlayback(void);
 void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   uint32_t time);
 void audio_playbackStop(void);
 void audio_playbackVolume(int channels, const uint16_t volume[]);
 void audio_playbackMute(bool mute);
 void audio_playbackData(uint8_t * data, size_t size);
+
+bool audio_supportsRecord(void);
+void audio_recordStart(int channels, int sampleRate, PSAudioFormat format);
+void audio_recordStop(void);
+void audio_recordVolume(int channels, const uint16_t volume[]);
+void audio_recordMute(bool mute);

@@ -200,7 +200,7 @@ static void pipewire_start(int channels, int sampleRate)
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_play(uint8_t * data, int size)
+static void pipewire_play(uint8_t * data, size_t size)
 {
   if (!pw.stream)
     return;
