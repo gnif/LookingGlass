@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <windows.h>
+#include <dwmapi.h>
 
 #include <NvFBC/nvFBC.h>
 #include "wrapper.h"
@@ -53,6 +54,7 @@ struct iface
   NvFBCHandle nvfbc;
 
   bool                       seperateCursor;
+  bool                       dwmFlush;
   CaptureGetPointerBuffer    getPointerBufferFn;
   CapturePostPointerBuffer   postPointerBufferFn;
   LGThread                 * pointerThread;
@@ -147,6 +149,13 @@ static void nvfbc_initOptions(void)
       .type           = OPTION_TYPE_INT,
       .value.x_int    = 0
     },
+    {
+      .module         = "nvfbc",
+      .name           = "dwmFlush",
+      .description    = "Use DwmFlush to sync the capture to the windows presentation inverval",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
     {0}
   };
 
@@ -163,6 +172,7 @@ static bool nvfbc_create(
   this = calloc(1, sizeof(*this));
 
   this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
+  this->dwmFlush            = option_get_bool("nvfbc", "dwmFlush"      );
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
 
@@ -339,6 +349,12 @@ static void nvfbc_free(void)
 
 static CaptureResult nvfbc_capture(void)
 {
+  // this is a bit of a hack as it causes this thread to block until the next
+  // present keeping us locked with the refresh rate of the monitor being
+  // captured
+  if (this->dwmFlush)
+    DwmFlush();
+
   getDesktopSize(&this->width, &this->height);
   NvFBCFrameGrabInfo grabInfo;
   CaptureResult result = NvFBCToSysCapture(
