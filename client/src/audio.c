@@ -19,6 +19,9 @@
  */
 
 #include "main.h"
+#include "common/array.h"
+#include "common/util.h"
+
 #include "dynamic/audiodev.h"
 
 #include <string.h>
@@ -29,12 +32,21 @@ typedef struct
 
   struct
   {
-    bool       started;
-    int        volumeChannels;
-    uint16_t * volume;
-    bool       mute;
+    bool     started;
+    int      volumeChannels;
+    uint16_t volume[8];
+    bool     mute;
   }
   playback;
+
+  struct
+  {
+    bool     started;
+    int      volumeChannels;
+    uint16_t volume[8];
+    bool     mute;
+  }
+  record;
 }
 AudioState;
 
@@ -61,9 +73,6 @@ void audio_free(void)
 
   audio.audioDev->free();
   audio.audioDev = NULL;
-
-  free(audio.playback.volume);
-  audio.playback.volume = NULL;
 }
 
 void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
@@ -91,7 +100,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.audioDev->playback.start(channels, sampleRate);
 
   // if a volume level was stored, set it before we return
-  if (audio.playback.volume)
+  if (audio.playback.volumeChannels)
     audio.audioDev->playback.volume(
         audio.playback.volumeChannels,
         audio.playback.volume);
@@ -114,18 +123,13 @@ void audio_playbackVolume(int channels, const uint16_t volume[])
   if (!audio.audioDev || !audio.audioDev->playback.volume)
     return;
 
-  // if playback has not started yet, store the volume levels for later
+  // store the values so we can restore the state if the stream is restarted
+  channels = min(ARRAY_LENGTH(audio.playback.volume), channels);
+  memcpy(audio.playback.volume, volume, sizeof(uint16_t) * channels);
+  audio.playback.volumeChannels = channels;
+
   if (!audio.playback.started)
-  {
-    if (audio.playback.volumeChannels < channels)
-    {
-      free(audio.playback.volume);
-      audio.playback.volume = malloc(sizeof(uint16_t) * channels);
-    }
-    memcpy(audio.playback.volume, volume, sizeof(uint16_t) * channels);
-    audio.playback.volumeChannels = channels;
     return;
-  }
 
   audio.audioDev->playback.volume(channels, volume);
 }
@@ -135,12 +139,10 @@ void audio_playbackMute(bool mute)
   if (!audio.audioDev || !audio.audioDev->playback.mute)
     return;
 
-  // if playback has not yet started, store the mute status for later
+  // store the value so we can restore it if the stream is restarted
+  audio.playback.mute = mute;
   if (!audio.playback.started)
-  {
-    audio.playback.mute = mute;
     return;
-  }
 
   audio.audioDev->playback.mute(mute);
 }
