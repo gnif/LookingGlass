@@ -122,6 +122,7 @@ set(SOURCES
 	src/main.c
 	src/core.c
 	src/app.c
+	src/audio.c
 	src/config.c
 	src/keybind.c
 	src/ll.c

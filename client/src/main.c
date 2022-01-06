@@ -53,6 +53,7 @@
 
 #include "core.h"
 #include "app.h"
+#include "audio.h"
 #include "keybind.h"
 #include "clipboard.h"
 #include "kb.h"
@@ -765,78 +766,6 @@ int main_frameThread(void * unused)
   return 0;
 }
 
-void playbackStart(int channels, int sampleRate, PSAudioFormat format,
-  uint32_t time)
-{
-  /*
-   * we probe here so that the audiodev is operating in the context of the SPICE
-   * thread/loop to avoid any audio API threading issues
-   */
-  static int probed = false;
-  if (!probed)
-  {
-    probed = true;
-
-    // search for the best audiodev to use
-    for(int i = 0; i < LG_AUDIODEV_COUNT; ++i)
-      if (LG_AudioDevs[i]->init())
-      {
-        g_state.audioDev = LG_AudioDevs[i];
-        DEBUG_INFO("Using AudioDev: %s", g_state.audioDev->name);
-        break;
-      }
-
-    if (!g_state.audioDev)
-      DEBUG_WARN("Failed to initialize an audio backend");
-  }
-
-  if (g_state.audioDev)
-  {
-    static int lastChannels   = 0;
-    static int lastSampleRate = 0;
-
-    if (g_state.playbackStarted)
-    {
-      if (channels != lastChannels || sampleRate != lastSampleRate)
-        g_state.audioDev->playback.stop();
-      else
-        return;
-    }
-
-    lastChannels   = channels;
-    lastSampleRate = sampleRate;
-    g_state.playbackStarted = true;
-
-    DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
-    g_state.audioDev->playback.start(channels, sampleRate);
-  }
-}
-
-static void playbackStop(void)
-{
-  if (g_state.audioDev)
-    g_state.audioDev->playback.stop();
-  g_state.playbackStarted = false;
-}
-
-static void playbackVolume(int channels, const uint16_t volume[])
-{
-  if (g_state.audioDev && g_state.audioDev->playback.volume)
-    g_state.audioDev->playback.volume(channels, volume);
-}
-
-static void playbackMute(bool mute)
-{
-  if (g_state.audioDev && g_state.audioDev->playback.mute)
-    g_state.audioDev->playback.mute(mute);
-}
-
-static void playbackData(uint8_t * data, size_t size)
-{
-  if (g_state.audioDev)
-    g_state.audioDev->playback.play(data, size);
-}
-
 static void checkUUID(void)
 {
   if (!g_state.spiceUUIDValid || !g_state.guestUUIDValid)
@@ -854,6 +783,7 @@ void spiceReady(void)
 {
   // set the intial mouse mode
   purespice_mouseMode(true);
+  audio_init();
 
   PSServerInfo info;
   if (!purespice_getServerInfo(&info))
@@ -900,11 +830,11 @@ int spiceThread(void * arg)
     .playback =
     {
       .enable = g_params.useSpiceAudio,
-      .start  = playbackStart,
-      .volume = playbackVolume,
-      .mute   = playbackMute,
-      .stop   = playbackStop,
-      .data   = playbackData
+      .start  = audio_playbackStart,
+      .volume = audio_playbackVolume,
+      .mute   = audio_playbackMute,
+      .stop   = audio_playbackStop,
+      .data   = audio_playbackData
     }
   };
 
@@ -928,12 +858,7 @@ int spiceThread(void * arg)
 
 end:
 
-  if (g_state.audioDev)
-  {
-    g_state.audioDev->free();
-    g_state.audioDev = NULL;
-  }
-
+  audio_free();
   g_state.state = APP_STATE_SHUTDOWN;
   return 0;
 }

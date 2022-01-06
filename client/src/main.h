@@ -24,7 +24,6 @@
 
 #include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
-#include "dynamic/audiodev.h"
 
 #include "common/thread.h"
 #include "common/types.h"
@@ -139,9 +138,6 @@ struct AppState
   bool     resizeDone;
 
   bool     autoIdleInhibitState;
-
-  struct LG_AudioDevOps * audioDev;
-  bool playbackStarted;
 };
 
 struct AppParams
