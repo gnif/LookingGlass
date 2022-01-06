@@ -264,9 +264,12 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .name   = "PipeWire",
   .init   = pipewire_init,
   .free   = pipewire_free,
-  .start  = pipewire_start,
-  .play   = pipewire_play,
-  .stop   = pipewire_stop,
-  .volume = pipewire_volume,
-  .mute   = pipewire_mute
+  .playback =
+  {
+    .start  = pipewire_start,
+    .play   = pipewire_play,
+    .stop   = pipewire_stop,
+    .volume = pipewire_volume,
+    .mute   = pipewire_mute
+  }
 };

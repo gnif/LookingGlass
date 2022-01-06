@@ -38,32 +38,47 @@ struct LG_AudioDevOps
   /* final free */
   void (*free)(void);
 
-  /* setup the playback audio stream
-   * Note: currently SPICE only supports S16 samples so always assume so
-   */
-  void (*start)(int channels, int sampleRate);
+  struct
+  {
+    /* start the playback audio stream
+     * Note: currently SPICE only supports S16 samples so always assume so
+     */
+    void (*start)(int channels, int sampleRate);
 
-  /* called for each packet of output audio to play
-   * Note: size is the size of data in bytes, not frames/samples
-   */
-  void (*play)(uint8_t * data, int size);
+    /* called for each packet of output audio to play
+     * Note: size is the size of data in bytes, not frames/samples
+     */
+    void (*play)(uint8_t * data, int size);
 
-  /* called when SPICE reports the audio stream has stopped */
-  void (*stop)(void);
+    /* called when SPICE reports the audio stream has stopped */
+    void (*stop)(void);
 
-  /* [optional] called to set the volume of the channels */
-  void (*volume)(int channels, const uint16_t volume[]);
+    /* [optional] called to set the volume of the channels */
+    void (*volume)(int channels, const uint16_t volume[]);
 
-  /* [optional] called to set muting of the output */
-  void (*mute)(bool mute);
+    /* [optional] called to set muting of the output */
+    void (*mute)(bool mute);
+  }
+  playback;
+
+  struct
+  {
+    /* start the record stream
+     * Note: currently SPICE only supports S16 samples so always assume so
+     */
+    void (*start)(int channels, int sampleRate,
+        void (*dataFn)(uint8_t * data, int size));
+
+    /* called when SPICE reports the audio stream has stopped */
+    void (*stop)(void);
+
+    /* [optional] called to set the volume of the channels */
+    void (*volume)(int channels, const uint16_t volume[]);
+
+    /* [optional] called to set muting of the input */
+    void (*mute)(bool mute);
+  }
+  record;
 };
-
-#define ASSERT_LG_AUDIODEV_VALID(x) \
-  DEBUG_ASSERT((x)->name  ); \
-  DEBUG_ASSERT((x)->init  ); \
-  DEBUG_ASSERT((x)->free  ); \
-  DEBUG_ASSERT((x)->start ); \
-  DEBUG_ASSERT((x)->play  ); \
-  DEBUG_ASSERT((x)->stop  );
 
 #endif

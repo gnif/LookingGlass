@@ -765,7 +765,7 @@ int main_frameThread(void * unused)
   return 0;
 }
 
-void audioStart(int channels, int sampleRate, PSAudioFormat format,
+void playbackStart(int channels, int sampleRate, PSAudioFormat format,
   uint32_t time)
 {
   /*
@@ -795,46 +795,46 @@ void audioStart(int channels, int sampleRate, PSAudioFormat format,
     static int lastChannels   = 0;
     static int lastSampleRate = 0;
 
-    if (g_state.audioStarted)
+    if (g_state.playbackStarted)
     {
       if (channels != lastChannels || sampleRate != lastSampleRate)
-        g_state.audioDev->stop();
+        g_state.audioDev->playback.stop();
       else
         return;
     }
 
     lastChannels   = channels;
     lastSampleRate = sampleRate;
-    g_state.audioStarted = true;
+    g_state.playbackStarted = true;
 
     DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
-    g_state.audioDev->start(channels, sampleRate);
+    g_state.audioDev->playback.start(channels, sampleRate);
   }
 }
 
-static void audioStop(void)
+static void playbackStop(void)
 {
   if (g_state.audioDev)
-    g_state.audioDev->stop();
-  g_state.audioStarted = false;
+    g_state.audioDev->playback.stop();
+  g_state.playbackStarted = false;
 }
 
-static void audioVolume(int channels, const uint16_t volume[])
+static void playbackVolume(int channels, const uint16_t volume[])
 {
-  if (g_state.audioDev && g_state.audioDev->volume)
-    g_state.audioDev->volume(channels, volume);
+  if (g_state.audioDev && g_state.audioDev->playback.volume)
+    g_state.audioDev->playback.volume(channels, volume);
 }
 
-static void audioMute(bool mute)
+static void playbackMute(bool mute)
 {
-  if (g_state.audioDev && g_state.audioDev->mute)
-    g_state.audioDev->mute(mute);
+  if (g_state.audioDev && g_state.audioDev->playback.mute)
+    g_state.audioDev->playback.mute(mute);
 }
 
-static void audioData(uint8_t * data, size_t size)
+static void playbackData(uint8_t * data, size_t size)
 {
   if (g_state.audioDev)
-    g_state.audioDev->play(data, size);
+    g_state.audioDev->playback.play(data, size);
 }
 
 static void checkUUID(void)
@@ -900,11 +900,11 @@ int spiceThread(void * arg)
     .playback =
     {
       .enable = g_params.useSpiceAudio,
-      .start  = audioStart,
-      .volume = audioVolume,
-      .mute   = audioMute,
-      .stop   = audioStop,
-      .data   = audioData
+      .start  = playbackStart,
+      .volume = playbackVolume,
+      .mute   = playbackMute,
+      .stop   = playbackStop,
+      .data   = playbackData
     }
   };
 

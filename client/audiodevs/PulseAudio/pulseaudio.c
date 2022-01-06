@@ -346,9 +346,12 @@ struct LG_AudioDevOps LGAD_PulseAudio =
   .name   = "PulseAudio",
   .init   = pulseaudio_init,
   .free   = pulseaudio_free,
-  .start  = pulseaudio_start,
-  .play   = pulseaudio_play,
-  .stop   = pulseaudio_stop,
-  .volume = pulseaudio_volume,
-  .mute   = pulseaudio_mute
+  .playback =
+  {
+    .start  = pulseaudio_start,
+    .play   = pulseaudio_play,
+    .stop   = pulseaudio_stop,
+    .volume = pulseaudio_volume,
+    .mute   = pulseaudio_mute
+  }
 };

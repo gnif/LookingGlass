@@ -141,7 +141,7 @@ struct AppState
   bool     autoIdleInhibitState;
 
   struct LG_AudioDevOps * audioDev;
-  bool audioStarted;
+  bool playbackStarted;
 };
 
 struct AppParams
