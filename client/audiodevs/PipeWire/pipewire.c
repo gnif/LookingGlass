@@ -118,7 +118,7 @@ err:
   return false;
 }
 
-static void pipewire_playbackStop_stream(void)
+static void pipewire_playbackStopStream(void)
 {
   if (!pw.playback.stream)
     return;
@@ -132,7 +132,7 @@ static void pipewire_playbackStop_stream(void)
 
 static void pipewire_free(void)
 {
-  pipewire_playbackStop_stream();
+  pipewire_playbackStopStream();
   pw_thread_loop_stop(pw.thread);
   pw_thread_loop_destroy(pw.thread);
   pw_loop_destroy(pw.loop);
@@ -160,7 +160,7 @@ static void pipewire_playbackStart(int channels, int sampleRate)
       pw.playback.sampleRate == sampleRate)
     return;
 
-  pipewire_playbackStop_stream();
+  pipewire_playbackStopStream();
 
   pw.playback.channels   = channels;
   pw.playback.sampleRate = sampleRate;
