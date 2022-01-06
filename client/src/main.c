@@ -1312,6 +1312,9 @@ restart:
       return -1;
   }
 
+  DEBUG_INFO("Guest Information:");
+  DEBUG_INFO("Version  : %s", udata->hostver);
+
   /* parse the kvmfr records from the userdata */
   udataSize -= sizeof(*udata);
   uint8_t * p = (uint8_t *)(udata + 1);
@@ -1331,7 +1334,7 @@ restart:
       case KVMFR_RECORD_VMINFO:
       {
         KVMFRRecord_VMInfo * vmInfo = (KVMFRRecord_VMInfo *)p;
-        DEBUG_INFO("SMBIOS UUID    : "
+        DEBUG_INFO("UUID     : "
           "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
           vmInfo->uuid[ 0], vmInfo->uuid[ 1], vmInfo->uuid[ 2],
           vmInfo->uuid[ 3], vmInfo->uuid[ 4], vmInfo->uuid[ 5],
@@ -1340,10 +1343,10 @@ restart:
           vmInfo->uuid[12], vmInfo->uuid[13], vmInfo->uuid[14],
           vmInfo->uuid[15]);
 
-        DEBUG_INFO("Guest CPU Model: %s", vmInfo->model);
-        DEBUG_INFO("Guest CPU      : %u cores, %u threads",
+        DEBUG_INFO("CPU Model: %s", vmInfo->model);
+        DEBUG_INFO("CPU      : %u cores, %u threads",
             vmInfo->cores, vmInfo->cpus);
-        DEBUG_INFO("Capture Device : %s", vmInfo->capture);
+        DEBUG_INFO("Using    : %s", vmInfo->capture);
 
         bool uuidValid = false;
         for(int i = 0; i < sizeof(vmInfo->uuid); ++i)
@@ -1379,8 +1382,9 @@ restart:
         else
           type = typeStr[osInfo->os];
 
-        DEBUG_INFO("Guest OS       : %s", type);
-        DEBUG_INFO("Guest OS Name  : %s", osInfo->name);
+        DEBUG_INFO("OS       : %s", type);
+        if (osInfo->name[0])
+          DEBUG_INFO("OS Name  : %s", osInfo->name);
         break;
       }
 
