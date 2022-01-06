@@ -144,7 +144,7 @@ static void pipewire_free(void)
   pw_deinit();
 }
 
-static void pipewire_playbackPlaybackStart(int channels, int sampleRate)
+static void pipewire_playbackStart(int channels, int sampleRate)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -276,7 +276,7 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .free   = pipewire_free,
   .playback =
   {
-    .start  = pipewire_playbackPlaybackStart,
+    .start  = pipewire_playbackStart,
     .play   = pipewire_playbackPlay,
     .stop   = pipewire_playbackStop,
     .volume = pipewire_playbackVolume,
