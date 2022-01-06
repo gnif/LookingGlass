@@ -843,7 +843,7 @@ static void checkUUID(void)
     return;
 
   if (memcmp(g_state.spiceUUID, g_state.guestUUID,
-        sizeof(g_state.spiceUUID)) != 0)
+        sizeof(g_state.spiceUUID)) == 0)
     return;
 
   DEBUG_ERROR("UUIDs do not match, you have connected SPICE to the wrong guest");
