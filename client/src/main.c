@@ -1279,8 +1279,8 @@ restart:
           vmInfo->uuid[15]);
 
         DEBUG_INFO("CPU Model: %s", vmInfo->model);
-        DEBUG_INFO("CPU      : %u cores, %u threads",
-            vmInfo->cores, vmInfo->cpus);
+        DEBUG_INFO("CPU      : %u sockets, %u cores, %u threads",
+            vmInfo->sockets, vmInfo->cores, vmInfo->cpus);
         DEBUG_INFO("Using    : %s", vmInfo->capture);
 
         bool uuidValid = false;
