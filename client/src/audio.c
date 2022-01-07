@@ -102,7 +102,6 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   lastSampleRate = sampleRate;
   audio.playback.started = true;
 
-  DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
   audio.audioDev->playback.start(channels, sampleRate);
 
   // if a volume level was stored, set it before we return
