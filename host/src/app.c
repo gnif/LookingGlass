@@ -612,11 +612,12 @@ static bool newKVMFRData(KVMFRUserData * dst)
     if (!model)
       return false;
 
-    int cpus, cores;
-    if (lgCPUInfo(model, 1024, &cpus, &cores, NULL))
+    int cpus, cores, sockets;
+    if (lgCPUInfo(model, 1024, &cpus, &cores, &sockets))
     {
-      vmInfo->cpus  = cpus;
-      vmInfo->cores = cores;
+      vmInfo->cpus    = cpus;
+      vmInfo->cores   = cores;
+      vmInfo->sockets = sockets;
       const int modelLen = strlen(model) + 1;
       record->size += modelLen;
       dst->used    += modelLen;
