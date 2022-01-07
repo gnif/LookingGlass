@@ -192,7 +192,6 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   lastSampleRate = sampleRate;
   audio.record.started = true;
 
-  DEBUG_INFO("%d channels @ %dHz", channels, sampleRate);
   audio.audioDev->record.start(channels, sampleRate, recordData);
 
   // if a volume level was stored, set it before we return
