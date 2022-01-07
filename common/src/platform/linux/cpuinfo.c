@@ -37,14 +37,13 @@ bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
     return false;
   }
 
+  int socketCount = 0;
+
   if (procs)
     *procs = 0;
 
   if (cores)
     *cores = 0;
-
-  if (sockets)
-    *sockets = 1;
 
   char buffer[1024];
   while (fgets(buffer, sizeof(buffer), cpuinfo))
@@ -65,13 +64,20 @@ bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
 
       model = NULL;
     }
-    else if (cores && strncmp(buffer, "cpu cores", 9) == 0)
+    else if (cores && *cores == 0 && strncmp(buffer, "cpu cores", 9) == 0)
+    {
+      const char * num = strstr(buffer, ": ");
+      if (num)
+        *cores = atoi(num + 2);
+    }
+    else if (strncmp(buffer, "physical id", 11) == 0)
     {
       const char * num = strstr(buffer, ": ");
       if (num)
       {
-        *cores = atoi(num + 2);
-        cores = NULL;
+        int id = atoi(num + 2);
+        if (id >= socketCount)
+          socketCount = id + 1;
       }
     }
 
@@ -82,6 +88,12 @@ bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
   }
 
 done:
+  if (sockets)
+    *sockets = socketCount;
+
+  if (cores)
+    *cores *= socketCount;
+
   fclose(cpuinfo);
   return true;
 }
