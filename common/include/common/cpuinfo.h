@@ -24,7 +24,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores);
+bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
+  int * sockets);
 void lgDebugCPU(void);
 
 #endif

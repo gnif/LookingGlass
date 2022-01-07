@@ -95,7 +95,11 @@ static bool getCoreCount(int * cores, int * procs)
   return true;
 }
 
-bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores)
+bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
+    int * sockets)
 {
+  if (sockets)
+    *sockets = 1;
+
   return getCPUModel(model, modelSize) && getCoreCount(cores, procs);
 }
