@@ -48,13 +48,13 @@ static bool getCPUModel(char * model, size_t modelSize)
   return true;
 }
 
-static bool getCoreCount(int * cores, int * procs)
+static bool getCoreCount(int * cores, int * procs, int * sockets)
 {
   if (!cores && !procs)
     return true;
 
   DWORD cb = 0;
-  GetLogicalProcessorInformationEx(RelationProcessorCore, NULL, &cb);
+  GetLogicalProcessorInformationEx(RelationAll, NULL, &cb);
   if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
   {
     DEBUG_WINERROR("Failed to call GetLogicalProcessorInformationEx", GetLastError());
@@ -62,7 +62,7 @@ static bool getCoreCount(int * cores, int * procs)
   }
 
   BYTE buffer[cb];
-  if (!GetLogicalProcessorInformationEx(RelationProcessorCore,
+  if (!GetLogicalProcessorInformationEx(RelationAll,
       (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) buffer, &cb))
   {
     DEBUG_WINERROR("Failed to call GetLogicalProcessorInformationEx", GetLastError());
@@ -75,19 +75,32 @@ static bool getCoreCount(int * cores, int * procs)
   if (procs)
     *procs = 0;
 
+  if (sockets)
+    *sockets = 0;
+
   DWORD offset = 0;
   while (offset < cb)
   {
     PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX lpi =
       (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) (buffer + offset);
-    if (lpi->Relationship == RelationProcessorCore)
+    switch (lpi->Relationship)
     {
-      if (cores)
-        ++*cores;
+      case RelationProcessorCore:
+        if (cores)
+          ++*cores;
 
-      if (procs)
-        for (int i = 0; i < lpi->Processor.GroupCount; ++i)
-          *procs += __builtin_popcount(lpi->Processor.GroupMask[i].Mask);
+        if (procs)
+          for (int i = 0; i < lpi->Processor.GroupCount; ++i)
+            *procs += __builtin_popcount(lpi->Processor.GroupMask[i].Mask);
+        break;
+
+      case RelationProcessorPackage:
+        if (sockets)
+          ++*sockets;
+        break;
+
+      default:
+        break;
     }
     offset += lpi->Size;
   }
@@ -98,8 +111,5 @@ static bool getCoreCount(int * cores, int * procs)
 bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
     int * sockets)
 {
-  if (sockets)
-    *sockets = 1;
-
-  return getCPUModel(model, modelSize) && getCoreCount(cores, procs);
+  return getCPUModel(model, modelSize) && getCoreCount(cores, procs, sockets);
 }
