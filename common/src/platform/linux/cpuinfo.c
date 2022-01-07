@@ -27,7 +27,8 @@
 #include <string.h>
 #include <ctype.h>
 
-bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores)
+bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
+  int * sockets)
 {
   FILE * cpuinfo = fopen("/proc/cpuinfo", "r");
   if (!cpuinfo)
@@ -41,6 +42,9 @@ bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores)
 
   if (cores)
     *cores = 0;
+
+  if (sockets)
+    *sockets = 1;
 
   char buffer[1024];
   while (fgets(buffer, sizeof(buffer), cpuinfo))

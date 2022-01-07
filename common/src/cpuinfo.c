@@ -26,13 +26,14 @@ void lgDebugCPU(void)
   char model[1024];
   int procs;
   int cores;
+  int sockets;
 
-  if (!lgCPUInfo(model, sizeof model, &procs, &cores))
+  if (!lgCPUInfo(model, sizeof model, &procs, &cores, &sockets))
   {
     DEBUG_WARN("Failed to get CPU information");
     return;
   }
 
   DEBUG_INFO("CPU Model: %s", model);
-  DEBUG_INFO("CPU: %d cores, %d threads", cores, procs);
+  DEBUG_INFO("CPU: %d sockets, %d cores, %d threads", sockets, cores, procs);
 }

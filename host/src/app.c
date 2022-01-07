@@ -613,7 +613,7 @@ static bool newKVMFRData(KVMFRUserData * dst)
       return false;
 
     int cpus, cores;
-    if (lgCPUInfo(model, 1024, &cpus, &cores))
+    if (lgCPUInfo(model, 1024, &cpus, &cores, NULL))
     {
       vmInfo->cpus  = cpus;
       vmInfo->cores = cores;
