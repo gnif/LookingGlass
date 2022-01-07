@@ -61,6 +61,7 @@ struct AppState
   bool             modAlt;
   bool             modSuper;
   uint64_t         lastImGuiFrame;
+  bool             renderImGuiTwice;
 
   bool        alertShow;
   char      * alertMessage;

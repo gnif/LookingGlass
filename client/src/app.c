@@ -637,6 +637,8 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   g_state.alertTimeout = microtime() + ALERT_TIMEOUT;
   g_state.alertType    = type;
   g_state.alertShow    = true;
+
+  g_state.renderImGuiTwice = true;
   app_invalidateWindow(false);
 }
 
@@ -803,6 +805,8 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   g_state.io->DeltaTime  = (now - g_state.lastImGuiFrame) * 1e-9f;
   g_state.lastImGuiFrame = now;
 
+render_again:
+
   igNewFrame();
 
   if (g_state.overlayInput)
@@ -870,6 +874,16 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   }
 
   igRender();
+
+  /* imgui requires two passes to calculate the bounding box of auto sized
+   * windows, this is by design
+   * ref: https://github.com/ocornut/imgui/issues/2158#issuecomment-434223618
+   */
+  if (g_state.renderImGuiTwice)
+  {
+    g_state.renderImGuiTwice = false;
+    goto render_again;
+  }
 
   return totalDamage ? -1 : totalRects;
 }
