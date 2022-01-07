@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 15
+#define KVMFR_VERSION 16
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -101,6 +101,7 @@ typedef struct KVMFRRecord_VMInfo
   char    capture[32]; // the capture device in use
   uint8_t cpus;        // number of CPUs
   uint8_t cores;       // number of CPU cores
+  uint8_t sockets;     // number of CPU sockets
   char    model[];
 }
 KVMFRRecord_VMInfo;
