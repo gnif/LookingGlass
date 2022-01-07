@@ -268,7 +268,7 @@ static bool egl_filterDownscaleImguiConfig(EGL_Filter * filter)
     for (int i = 0; i < DOWNSCALE_COUNT; ++i)
     {
       bool selected = i == this->filter;
-      if (igSelectableBool(filterNames[i], selected, 0, (ImVec2) { 0.0f, 0.0f }))
+      if (igSelectable_Bool(filterNames[i], selected, 0, (ImVec2) { 0.0f, 0.0f }))
       {
         redraw = true;
         this->filter = i;

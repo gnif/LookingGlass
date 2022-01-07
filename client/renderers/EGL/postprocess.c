@@ -334,7 +334,8 @@ static bool presetsUI(struct EGL_PostProcess * this)
     for (unsigned i = 0; i < stringlist_count(this->presets); ++i)
     {
       bool selected = i == this->activePreset;
-      if (igSelectableBool(stringlist_at(this->presets, i), selected, 0, (ImVec2) { 0.0f, 0.0f }))
+      if (igSelectable_Bool(stringlist_at(this->presets, i), selected, 0,
+            (ImVec2) { 0.0f, 0.0f }))
       {
         this->activePreset = i;
         redraw = true;
@@ -365,7 +366,7 @@ static bool presetsUI(struct EGL_PostProcess * this)
   if (igButton("Save preset as...", (ImVec2) { 0.0f, 0.0f }))
   {
     this->presetEdit[0] = '\0';
-    igOpenPopup("Save preset as...", ImGuiPopupFlags_None);
+    igOpenPopup_Str("Save preset as...", ImGuiPopupFlags_None);
   }
 
   igSameLine(0.0f, -1.0f);
@@ -401,7 +402,7 @@ static bool presetsUI(struct EGL_PostProcess * this)
   }
 
   if (this->presetError)
-    igOpenPopup("Preset error", ImGuiPopupFlags_None);
+    igOpenPopup_Str("Preset error", ImGuiPopupFlags_None);
 
   if (igBeginPopupModal("Preset error", NULL, ImGuiWindowFlags_AlwaysAutoResize))
   {
@@ -425,7 +426,7 @@ static bool presetsUI(struct EGL_PostProcess * this)
 
 static void drawDropTarget(void)
 {
-  igPushStyleColorVec4(ImGuiCol_Separator, (ImVec4) { 1.0f, 1.0f, 0.0f, 1.0f });
+  igPushStyleColor_Vec4(ImGuiCol_Separator, (ImVec4) { 1.0f, 1.0f, 0.0f, 1.0f });
   igSeparator();
   igPopStyleColor(1);
 }
@@ -456,8 +457,8 @@ static void configUI(void * opaque, int * id)
     if (moving && mouseIdx < moveIdx && i == mouseIdx)
       drawDropTarget();
 
-    igPushIDPtr(filter);
-    bool draw = igCollapsingHeaderBoolPtr(filter->ops.name, NULL, 0);
+    igPushID_Ptr(filter);
+    bool draw = igCollapsingHeader_BoolPtr(filter->ops.name, NULL, 0);
     if (igIsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
       mouseIdx = i;
 

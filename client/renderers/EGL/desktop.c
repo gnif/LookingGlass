@@ -228,7 +228,8 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
     for (int i = 0; i < EGL_SCALE_MAX; ++i)
     {
       bool selected = i == desktop->scaleAlgo;
-      if (igSelectableBool(algorithmNames[i], selected, 0, (ImVec2) { 0.0f, 0.0f }))
+      if (igSelectable_Bool(algorithmNames[i], selected, 0,
+            (ImVec2) { 0.0f, 0.0f }))
         desktop->scaleAlgo = i;
       if (selected)
         igSetItemDefaultFocus();

@@ -78,7 +78,7 @@ static void config_renderLGTab(void)
 {
   const float fontSize = igGetFontSize();
 
-  if (igCollapsingHeaderBoolPtr("About", NULL,
+  if (igCollapsingHeader_BoolPtr("About", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
     igText(LG_COPYRIGHT_STR);
@@ -88,7 +88,7 @@ static void config_renderLGTab(void)
     igTextWrapped(LG_LICENSE_STR);
   }
 
-  if (igCollapsingHeaderBoolPtr("Help & Support", NULL,
+  if (igCollapsingHeader_BoolPtr("Help & Support", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
     igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
@@ -103,12 +103,12 @@ static void config_renderLGTab(void)
     igEndTable();
   }
 
-  if (igCollapsingHeaderBoolPtr("The Looking Glass Team / Donations", NULL,
+  if (igCollapsingHeader_BoolPtr("The Looking Glass Team / Donations", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
     for(const struct LGTeamMember * member = LG_TEAM; member->name; ++member)
     {
-      if (igTreeNodeStr(member->name))
+      if (igTreeNode_Str(member->name))
       {
         igSpacing();
         igTextWrapped(member->blurb);
@@ -161,7 +161,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
       (ImVec2){550, 680},
       ImGuiCond_FirstUseEver);
 
-  igPushIDInt(id++);
+  igPushID_Int(id++);
   if (!igBegin("Configuration", NULL, 0))
   {
     overlayGetImGuiRect(windowRects);
@@ -184,10 +184,10 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
   {
     for (ll_reset(cfg.callbacks); ll_walk(cfg.callbacks, (void **)&cb); )
     {
-      if (!igCollapsingHeaderBoolPtr(cb->title, NULL, 0))
+      if (!igCollapsingHeader_BoolPtr(cb->title, NULL, 0))
         continue;
 
-      igPushIDInt(id++);
+      igPushID_Int(id++);
       cb->callback(cb->udata, &id);
       igPopID();
     }
@@ -199,7 +199,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     if (!igBeginTabItem(cb->title, NULL, 0))
       continue;
 
-    igPushIDInt(id++);
+    igPushID_Int(id++);
     cb->callback(cb->udata, &id);
     igPopID();
     igEndTabItem();

@@ -493,6 +493,7 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
 
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplOpenGL3_Init("#version 300 es");
   ImGui_ImplOpenGL3_NewFrame();
 
   egl_damageResize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);

@@ -171,7 +171,7 @@ static int graphs_render(void * udata, bool interactive,
         "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
         graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
 
-    igPlotLinesFloatPtr(
+    igPlotLines_FloatPtr(
         "",
         (float *)ringbuffer_getValues(graph->buffer),
         ringbuffer_getLength(graph->buffer),

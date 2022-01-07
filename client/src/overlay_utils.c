@@ -62,7 +62,8 @@ void overlayTextURL(const char * url, const char * text)
   {
     if (igIsItemClicked(ImGuiMouseButton_Left))
       lgOpenURL(url);
-    overlayAddUnderline(igGetColorU32Vec4(*igGetStyleColorVec4(ImGuiCol_ButtonHovered)));
+    overlayAddUnderline(igGetColorU32_Vec4(
+          *igGetStyleColorVec4(ImGuiCol_ButtonHovered)));
     igSetMouseCursor(ImGuiMouseCursor_Hand);
     igSetTooltip("Open in browser: %s", url);
   }

@@ -51,9 +51,9 @@ static int alert_render(void * udata, bool interactive, struct Rect * windowRect
   igSetNextWindowBgAlpha(0.8f);
   igSetNextWindowPos((ImVec2) { screen->x / 2.0f, screen->y / 2.0f }, 0,
     (ImVec2) { 0.5f, 0.5f });
-  igPushStyleColorU32(ImGuiCol_WindowBg, colours[g_state.alertType]);
-  igPushStyleVarVec2(ImGuiStyleVar_WindowPadding, (ImVec2) { 4.0f , 4.0f });
-  igPushStyleVarVec2(ImGuiStyleVar_WindowMinSize, (ImVec2) { 0.0f , 0.0f });
+  igPushStyleColor_U32(ImGuiCol_WindowBg, colours[g_state.alertType]);
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, (ImVec2) { 4.0f , 4.0f });
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowMinSize, (ImVec2) { 0.0f , 0.0f });
 
   igBegin(
     "Alert",

@@ -808,8 +808,10 @@ int app_renderOverlay(struct Rect * rects, int maxRects)
   if (g_state.overlayInput)
   {
     totalDamage = true;
-    ImDrawList_AddRectFilled(igGetBackgroundDrawListNil(), (ImVec2) { 0.0f , 0.0f },
-      g_state.io->DisplaySize, igGetColorU32Col(ImGuiCol_ModalWindowDimBg, 1.0f), 0, 0);
+    ImDrawList_AddRectFilled(igGetBackgroundDrawList_Nil(), (ImVec2) { 0.0f , 0.0f },
+      g_state.io->DisplaySize,
+      igGetColorU32_Col(ImGuiCol_ModalWindowDimBg, 1.0f),
+      0, 0);
 
 //    bool test;
 //    igShowDemoWindow(&test);
