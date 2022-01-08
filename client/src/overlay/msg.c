@@ -97,11 +97,24 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
   for(int i = 0; i < lines; ++i)
   {
     const char * line = stringlist_at(msg->lines, i);
+    if (line[0] == '\0')
+    {
+      igNewLine();
+      continue;
+    }
+
+    if (line[0] == '-' && line[1] == '\0')
+    {
+      igSeparator();
+      continue;
+    }
+
     igCalcTextSize(&textSize, line, NULL, false, 0.0);
     igSetCursorPosX((igGetWindowWidth() * 0.5f) - (textSize.x * 0.5f));
     igText("%s", stringlist_at(msg->lines, i));
   }
 
+  igNewLine();
   igCalcTextSize(&textSize, "OK", NULL, false, 0.0);
   ImGuiStyle * style = igGetStyle();
   textSize.x += (style->FramePadding.x * 2.0f) * 8.0f;
@@ -142,10 +155,21 @@ void overlayMsg_show(const char * caption, const char * fmt, va_list args)
   msg->lines   = stringlist_new(false);
   valloc_sprintf(&msg->message, fmt, args);
 
-  char * rest = msg->message;
-  char * token;
-  stringlist_clear(msg->lines);
-  while((token = strtok_r(rest, "\n", &rest)))
+  char * token = msg->message;
+  char * rest  = msg->message;
+  do
+  {
+    if (*rest == '\n')
+    {
+      *rest = '\0';
+      stringlist_push(msg->lines, token);
+      token = rest + 1;
+    }
+    ++rest;
+  }
+  while(*rest != '\0');
+
+  if (*token)
     stringlist_push(msg->lines, token);
 
   ll_push(l_msg.messages, msg);
