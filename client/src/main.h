@@ -94,6 +94,7 @@ struct AppState
   LG_RendererRect      dstRect;
   bool                 posInfoValid;
   bool                 alignToGuest;
+  bool                 spiceClose;
 
   LG_Renderer        * lgr;
   atomic_int           lgrResize;

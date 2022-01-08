@@ -805,8 +805,14 @@ static void checkUUID(void)
         sizeof(g_state.spiceUUID)) == 0)
     return;
 
-  DEBUG_ERROR("UUIDs do not match, you have connected SPICE to the wrong guest");
-  g_state.state = APP_STATE_SHUTDOWN;
+  app_msgBox(
+      "SPICE Configuration Error",
+      "You have connected SPICE to the wrong guest.\n"
+      "Input will not function until this is corrected.");
+
+  g_params.useSpiceInput = false;
+  g_state.spiceClose = true;
+  purespice_disconnect();
 }
 
 void spiceReady(void)
@@ -899,7 +905,12 @@ int spiceThread(void * arg)
 end:
 
   audio_free();
-  g_state.state = APP_STATE_SHUTDOWN;
+
+  // if the connection was disconnected intentionally we don't want to shutdown
+  // so that the user can see the message box and take action
+  if (!g_state.spiceClose)
+    g_state.state = APP_STATE_SHUTDOWN;
+
   return 0;
 }
 
