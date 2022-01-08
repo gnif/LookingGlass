@@ -59,6 +59,15 @@ struct LG_OverlayOps
   int (*render)(void * udata, bool interactive, struct Rect * windowRects,
       int maxRects);
 
+  /* called 25 times a second by the application
+   *
+   * Note: This may not run in the same context as `render`!
+   *
+   * return true if the frame needs to be rendered
+   * optional, if omitted assumes false
+   */
+  bool (*tick)(void * udata, unsigned long long tickCount);
+
   /* TODO: add load/save settings capabillity */
 };
 

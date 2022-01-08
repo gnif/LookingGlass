@@ -23,6 +23,15 @@
 
 #include "interface/overlay.h"
 
+struct Overlay
+{
+  const struct LG_OverlayOps * ops;
+  const void * params;
+  void       * udata;
+  int          lastRectCount;
+  struct Rect  lastRects[MAX_OVERLAY_RECTS];
+};
+
 extern struct LG_OverlayOps LGOverlayAlert;
 extern struct LG_OverlayOps LGOverlayFPS;
 extern struct LG_OverlayOps LGOverlayGraphs;

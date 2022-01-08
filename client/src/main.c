@@ -139,6 +139,26 @@ static bool fpsTimerFn(void * unused)
   return true;
 }
 
+static bool tickTimerFn(void * unused)
+{
+  static unsigned long long tickCount = 0;
+
+  bool needsRender = false;
+  struct Overlay * overlay;
+  for (ll_reset(g_state.overlays);
+      ll_walk(g_state.overlays, (void **)&overlay); )
+  {
+    if (overlay->ops->tick && overlay->ops->tick(overlay->udata, tickCount))
+      needsRender = true;
+  }
+
+  if (needsRender)
+    app_invalidateWindow(false);
+
+  ++tickCount;
+  return true;
+}
+
 static void preSwapCallback(void * udata)
 {
   const uint64_t * renderStart = (const uint64_t *)udata;
@@ -166,6 +186,14 @@ static int renderThread(void * unused)
   if (!lgCreateTimer(500, fpsTimerFn, NULL, &fpsTimer))
   {
     DEBUG_ERROR("Failed to create the fps timer");
+    return 1;
+  }
+
+  LGTimer * tickTimer;
+  if (!lgCreateTimer(40, tickTimerFn, NULL, &tickTimer))
+  {
+    lgTimerDestroy(fpsTimer);
+    DEBUG_ERROR("Failed to create the tick timer");
     return 1;
   }
 
@@ -289,6 +317,7 @@ static int renderThread(void * unused)
 
   g_state.state = APP_STATE_SHUTDOWN;
 
+  lgTimerDestroy(tickTimer);
   lgTimerDestroy(fpsTimer);
 
   core_stopCursorThread();

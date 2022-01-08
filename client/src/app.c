@@ -519,6 +519,10 @@ void app_invalidateWindow(bool full)
 {
   if (full)
     atomic_store(&g_state.invalidateWindow, true);
+
+  if (g_state.jitRender && g_state.ds->stopWaitFrame)
+    g_state.ds->stopWaitFrame();
+
   lgSignalEvent(g_state.frameEvent);
 }
 
@@ -690,15 +694,6 @@ void app_unregisterGraph(GraphHandle handle)
 {
   overlayGraph_unregister(handle);
 }
-
-struct Overlay
-{
-  const struct LG_OverlayOps * ops;
-  const void * params;
-  void * udata;
-  int lastRectCount;
-  struct Rect lastRects[MAX_OVERLAY_RECTS];
-};
 
 void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
 {
