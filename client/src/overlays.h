@@ -38,6 +38,8 @@ extern struct LG_OverlayOps LGOverlayGraphs;
 extern struct LG_OverlayOps LGOverlayHelp;
 extern struct LG_OverlayOps LGOverlayConfig;
 
+void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args);
+
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max);
 void overlayGraph_unregister();

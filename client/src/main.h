@@ -63,11 +63,6 @@ struct AppState
   uint64_t         lastImGuiFrame;
   bool             renderImGuiTwice;
 
-  bool        alertShow;
-  char      * alertMessage;
-  LG_MsgAlert alertType;
-  uint64_t    alertTimeout;
-
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
   bool                         jitRender;

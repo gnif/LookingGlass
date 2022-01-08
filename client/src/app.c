@@ -39,8 +39,6 @@
 #include <math.h>
 #include <string.h>
 
-#define ALERT_TIMEOUT 2000000
-
 bool app_isRunning(void)
 {
   return
@@ -552,15 +550,6 @@ void app_handleRenderEvent(const uint64_t timeUs)
     }
   }
 
-  if (g_state.alertShow)
-    if (g_state.alertTimeout < timeUs)
-    {
-      g_state.alertShow = false;
-      free(g_state.alertMessage);
-      g_state.alertMessage = NULL;
-      invalidate = true;
-    }
-
   if (invalidate)
     app_invalidateWindow(false);
 }
@@ -629,18 +618,10 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   if (!g_state.lgr || !g_params.showAlerts)
     return;
 
-  char * buffer;
-
   va_list args;
   va_start(args, fmt);
-  valloc_sprintf(&buffer, fmt, args);
+  overlayAlert_show(type, fmt, args);
   va_end(args);
-
-  free(g_state.alertMessage);
-  g_state.alertMessage = buffer;
-  g_state.alertTimeout = microtime() + ALERT_TIMEOUT;
-  g_state.alertType    = type;
-  g_state.alertShow    = true;
 
   g_state.renderImGuiTwice = true;
   app_invalidateWindow(false);
