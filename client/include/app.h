@@ -102,6 +102,12 @@ int app_renderOverlay(struct Rect * rects, int maxRects);
 
 void app_freeOverlays(void);
 
+/**
+ * invalidate the window to update the overlay, if renderTwice is set the imgui
+ * render code will run twice so that auto sized windows are calculated correctly
+ */
+void app_invalidateOverlay(bool renderTwice);
+
 struct OverlayGraph;
 typedef struct OverlayGraph * GraphHandle;
 

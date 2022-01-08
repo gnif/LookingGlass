@@ -130,5 +130,6 @@ void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args)
   l_alert.timeout = ALERT_TIMEOUT;
   l_alert.type    = type;
   l_alert.show    = true;
-  l_alert.redraw  = true;
+
+  app_invalidateOverlay(true);
 }

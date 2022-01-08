@@ -622,9 +622,6 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   va_start(args, fmt);
   overlayAlert_show(type, fmt, args);
   va_end(args);
-
-  g_state.renderImGuiTwice = true;
-  app_invalidateWindow(false);
 }
 
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
@@ -914,4 +911,11 @@ void app_overlayConfigRegisterTab(const char * title,
     void (*callback)(void * udata, int * id), void * udata)
 {
   overlayConfig_registerTab(title, callback, udata);
+}
+
+void app_invalidateOverlay(bool renderTwice)
+{
+  if (renderTwice)
+    g_state.renderImGuiTwice = true;
+  app_invalidateWindow(false);
 }
