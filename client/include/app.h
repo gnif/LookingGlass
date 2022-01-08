@@ -134,6 +134,8 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque);
  */
 void app_alert(LG_MsgAlert type, const char * fmt, ...);
 
+void app_msgBox(const char * caption, const char * fmt, ...);
+
 typedef struct KeybindHandle * KeybindHandle;
 typedef void (*KeybindFn)(int sc, void * opaque);
 

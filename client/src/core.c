@@ -166,7 +166,7 @@ void core_setGrabQuiet(bool enable)
 bool core_warpPointer(int x, int y, bool exiting)
 {
   if ((!g_cursor.inWindow && !exiting) ||
-      g_state.overlayInput ||
+      app_isOverlayMode() ||
       g_cursor.warpState == WARP_STATE_OFF)
     return false;
 
@@ -376,7 +376,7 @@ void core_handleGuestMouseUpdate(void)
   if (!util_guestCurToLocal(&localPos))
     return;
 
-  if (g_state.overlayInput || !g_cursor.inView)
+  if (app_isOverlayMode() || !g_cursor.inView)
     return;
 
   g_state.ds->guestPointerUpdated(
@@ -623,4 +623,35 @@ void core_resetOverlayInputState(void)
   g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
   for(int key = 0; key < ARRAY_LENGTH(g_state.io->KeysDown); key++)
     g_state.io->KeysDown[key] = false;
+}
+
+void core_updateOverlayState(void)
+{
+  static bool lastState = false;
+  bool currentState = app_isOverlayMode();
+  if (lastState == currentState)
+    return;
+
+  lastState          = currentState;
+  g_state.cursorLast = -2;
+
+  static bool wasGrabbed = false;
+  if (app_isOverlayMode())
+  {
+    wasGrabbed = g_cursor.grab;
+
+    g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    g_state.io->MousePos = (ImVec2) { g_cursor.pos.x, g_cursor.pos.y };
+
+    core_setGrabQuiet(false);
+    core_setCursorInView(false);
+  }
+  else
+  {
+    g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    core_resetOverlayInputState();
+    core_setGrabQuiet(wasGrabbed);
+    core_invalidatePointer(true);
+    app_invalidateWindow(false);
+  }
 }

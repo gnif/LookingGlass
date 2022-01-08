@@ -43,6 +43,10 @@ struct LG_OverlayOps
    * optional, if omitted assumes false */
   bool (*needs_render)(void * udata, bool interactive);
 
+  /* return true if the overlay currently requires overlay mode
+   * optional, if omitted assumes false */
+  bool (*needs_overlay)(void * udata);
+
   /* perform the actual drawing/rendering
    *
    * `interactive` is true if the application is currently in overlay interaction

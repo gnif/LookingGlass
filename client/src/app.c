@@ -63,7 +63,18 @@ bool app_isFormatValid(void)
 
 bool app_isOverlayMode(void)
 {
-  return g_state.overlayInput;
+  if (g_state.overlayInput)
+    return true;
+
+  struct Overlay * overlay;
+  for (ll_reset(g_state.overlays);
+      ll_walk(g_state.overlays, (void **)&overlay); )
+  {
+    if (overlay->ops->needs_overlay && overlay->ops->needs_overlay(overlay))
+      return true;
+  }
+
+  return false;
 }
 
 void app_updateCursorPos(double x, double y)
@@ -72,7 +83,7 @@ void app_updateCursorPos(double x, double y)
   g_cursor.pos.y = y;
   g_cursor.valid = true;
 
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
     g_state.io->MousePos = (ImVec2) { x, y };
 }
 
@@ -81,7 +92,7 @@ void app_handleFocusEvent(bool focused)
   g_state.focused = focused;
 
   // release any imgui buttons/keys if we lost focus
-  if (!focused && g_state.overlayInput)
+  if (!focused && app_isOverlayMode())
     core_resetOverlayInputState();
 
   if (!core_inputEnabled())
@@ -131,7 +142,7 @@ void app_handleEnterEvent(bool entered)
 
     // stop the user being able to drag windows off the screen and work around
     // the mouse button release being missed due to not being in capture mode.
-    if (g_state.overlayInput)
+    if (app_isOverlayMode())
     {
       g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
       g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
@@ -243,7 +254,7 @@ void app_handleButtonPress(int button)
 {
   g_cursor.buttons |= (1U << button);
 
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
   {
     int igButton = mapSpiceToImGuiButton(button);
     if (igButton != -1)
@@ -262,7 +273,7 @@ void app_handleButtonRelease(int button)
 {
   g_cursor.buttons &= ~(1U << button);
 
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
   {
     int igButton = mapSpiceToImGuiButton(button);
     if (igButton != -1)
@@ -279,13 +290,13 @@ void app_handleButtonRelease(int button)
 
 void app_handleWheelMotion(double motion)
 {
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
     g_state.io->MouseWheel -= motion;
 }
 
 void app_handleKeyPress(int sc)
 {
-  if (!g_state.overlayInput || !g_state.io->WantCaptureKeyboard)
+  if (!app_isOverlayMode() || !g_state.io->WantCaptureKeyboard)
   {
     if (sc == g_params.escapeKey && !g_state.escapeActive)
     {
@@ -302,7 +313,7 @@ void app_handleKeyPress(int sc)
     }
   }
 
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
   {
     if (sc == KEY_ESC)
       app_setOverlay(false);
@@ -339,7 +350,8 @@ void app_handleKeyRelease(int sc)
   {
     if (g_state.escapeAction == -1)
     {
-      if (!g_state.escapeHelp && g_params.useSpiceInput && !g_state.overlayInput)
+      if (!g_state.escapeHelp && g_params.useSpiceInput &&
+          !app_isOverlayMode())
         core_setGrab(!g_cursor.grab);
     }
     else
@@ -356,7 +368,7 @@ void app_handleKeyRelease(int sc)
       g_state.escapeActive = false;
   }
 
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
   {
     g_state.io->KeysDown[sc] = false;
     return;
@@ -415,7 +427,7 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
     return;
 
   if (g_cursor.grab)
@@ -437,7 +449,8 @@ void app_handleMouseRelative(double normx, double normy,
 void app_handleMouseBasic()
 {
   /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused || g_state.overlayInput)
+  if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused ||
+      app_isOverlayMode())
     return;
 
   if (!core_inputEnabled())
@@ -624,6 +637,16 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   va_end(args);
 }
 
+void app_msgBox(const char * caption, const char * fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  overlayMsg_show(caption, fmt, args);
+  va_end(args);
+
+  core_updateOverlayState();
+}
+
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
 {
   // don't allow duplicate binds
@@ -746,7 +769,7 @@ bool app_overlayNeedsRender(void)
 {
   struct Overlay * overlay;
 
-  if (g_state.overlayInput)
+  if (app_isOverlayMode())
     return true;
 
   for (ll_reset(g_state.overlays);
@@ -755,7 +778,7 @@ bool app_overlayNeedsRender(void)
     if (!overlay->ops->needs_render)
       continue;
 
-    if (overlay->ops->needs_render(overlay->udata, g_state.overlayInput))
+    if (overlay->ops->needs_render(overlay->udata, false))
       return true;
   }
 
@@ -782,7 +805,8 @@ render_again:
 
   igNewFrame();
 
-  if (g_state.overlayInput)
+  const bool overlayMode = app_isOverlayMode();
+  if (overlayMode)
   {
     totalDamage = true;
     ImDrawList_AddRectFilled(igGetBackgroundDrawList_Nil(), (ImVec2) { 0.0f , 0.0f },
@@ -794,12 +818,17 @@ render_again:
 //    igShowDemoWindow(&test);
   }
 
+  const bool msgModal = overlayMsg_modal();
+
   // render the overlays
   for (ll_reset(g_state.overlays);
       ll_walk(g_state.overlays, (void **)&overlay); )
   {
+    if (msgModal && overlay->ops != &LGOverlayMsg)
+      continue;
+
     const int written =
-      overlay->ops->render(overlay->udata, g_state.overlayInput,
+      overlay->ops->render(overlay->udata, overlayMode,
           buffer, MAX_OVERLAY_RECTS);
 
     for (int i = 0; i < written; ++i)
@@ -836,7 +865,7 @@ render_again:
     overlay->lastRectCount = written;
   }
 
-  if (g_state.overlayInput)
+  if (overlayMode)
   {
     ImGuiMouseCursor cursor = igGetMouseCursor();
     if (cursor != g_state.cursorLast)
@@ -873,32 +902,11 @@ void app_freeOverlays(void)
 
 void app_setOverlay(bool enable)
 {
-  static bool wasGrabbed = false;
-
   if (g_state.overlayInput == enable)
     return;
 
   g_state.overlayInput = enable;
-  g_state.cursorLast   = -2;
-
-  if (g_state.overlayInput)
-  {
-    wasGrabbed = g_cursor.grab;
-
-    g_state.io->ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
-    g_state.io->MousePos = (ImVec2) { g_cursor.pos.x, g_cursor.pos.y };
-
-    core_setGrabQuiet(false);
-    core_setCursorInView(false);
-  }
-  else
-  {
-    g_state.io->ConfigFlags |= ImGuiConfigFlags_NoMouse;
-    core_resetOverlayInputState();
-    core_setGrabQuiet(wasGrabbed);
-    core_invalidatePointer(true);
-    app_invalidateWindow(false);
-  }
+  core_updateOverlayState();
 }
 
 void app_overlayConfigRegister(const char * title,

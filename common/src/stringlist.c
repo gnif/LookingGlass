@@ -44,12 +44,7 @@ StringList stringlist_new(bool owns_strings)
 
 void stringlist_free(StringList * sl)
 {
-  if ((*sl)->owns_strings)
-  {
-    char * ptr;
-    vector_forEach(ptr, &(*sl)->vector)
-      free(ptr);
-  }
+  stringlist_clear(*sl);
 
   vector_destroy(&(*sl)->vector);
   free((*sl));
@@ -81,4 +76,16 @@ char * stringlist_at(StringList sl, unsigned int index)
   char * ptr;
   vector_at(&sl->vector, index, &ptr);
   return ptr;
+}
+
+void stringlist_clear(StringList sl)
+{
+  if (sl->owns_strings)
+  {
+    char * ptr;
+    vector_forEach(ptr, &sl->vector)
+      free(ptr);
+  }
+
+  vector_clear(&sl->vector);
 }

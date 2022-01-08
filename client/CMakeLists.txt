@@ -139,6 +139,7 @@ set(SOURCES
 	src/overlay/graphs.c
 	src/overlay/help.c
 	src/overlay/config.c
+	src/overlay/msg.c
 )
 
 # Force cimgui to build as a static library.

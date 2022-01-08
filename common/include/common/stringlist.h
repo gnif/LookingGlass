@@ -31,5 +31,6 @@ int          stringlist_push  (StringList sl, char * str);
 void         stringlist_remove(StringList sl, unsigned int index);
 unsigned int stringlist_count (StringList sl);
 char *       stringlist_at    (StringList sl, unsigned int index);
+void         stringlist_clear (StringList sl);
 
 #endif
