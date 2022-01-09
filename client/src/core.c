@@ -468,8 +468,14 @@ void core_handleMouseNormal(double ex, double ey)
       };
 
       uint32_t setPosSerial;
-      if (lgmpClientSendData(g_state.pointerQueue,
-            &msg, sizeof(msg), &setPosSerial) == LGMP_OK)
+      LGMP_STATUS status;
+      if ((status = lgmpClientSendData(g_state.pointerQueue,
+            &msg, sizeof(msg), &setPosSerial)) != LGMP_OK)
+      {
+        DEBUG_WARN("Message send failed: %s", lgmpStatusString(status));
+        goto fallback;
+      }
+      else
       {
         /* wait for the move request to be processed */
         do
@@ -498,6 +504,7 @@ void core_handleMouseNormal(double ex, double ey)
     }
     else
     {
+fallback:
       /* add the difference to the offset */
       ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
       ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
