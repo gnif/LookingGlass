@@ -858,6 +858,13 @@ static CaptureResult dxgi_capture(void)
         return CAPTURE_RESULT_ERROR;
       }
     }
+    else
+    {
+      // If we are skipping the frame, then we lose track of the damage,
+      // and must invalidate all the textures.
+      for (int i = 0; i < this->maxTextures; ++i)
+        this->texture[i].texDamageCount = -1;
+    }
   }
 
   IDXGIResource_Release(res);
