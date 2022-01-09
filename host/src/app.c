@@ -34,6 +34,7 @@
 #include "common/stringutils.h"
 #include "common/cpuinfo.h"
 #include "common/util.h"
+#include "common/array.h"
 
 #include <lgmp/host.h>
 
@@ -532,115 +533,91 @@ typedef struct KVMFRUserData
 }
 KVMFRUserData;
 
-static void * allocUserData(KVMFRUserData * dst, size_t need, bool consume)
+static bool appendData(KVMFRUserData * dst, const void * src, const size_t size)
 {
-  size_t avail = dst->size - dst->used;
-  if (need > avail)
+  if (size > dst->size - dst->used)
   {
-    size_t newSize = dst->size;
-    do
-    {
-      newSize += 1024;
-      avail = newSize - dst->used;
-    }
-    while(need > avail);
-
+    size_t newSize = dst->size + max(1024, size);
     dst->data = realloc(dst->data, newSize);
     if (!dst->data)
     {
-      DEBUG_ERROR("failed to realloc");
-      return NULL;
+      DEBUG_ERROR("Out of memory");
+      return false;
     }
 
     memset(dst->data + dst->size, 0, newSize - dst->size);
     dst->size = newSize;
   }
 
-  void * ret = dst->data + dst->used;
-  if (consume)
-    dst->used += need;
-
-  return ret;
-}
-
-static bool appendBuffer(KVMFRUserData * dst, KVMFRRecord * rec,
-    const void * src, size_t size)
-{
-  void * mem = allocUserData(dst, size, true);
-  if (!mem)
-    return false;
-
-  memcpy(mem, src, size);
-  rec->size += size;
-
+  memcpy(dst->data + dst->used, src, size);
+  dst->used += size;
   return true;
 }
 
 static bool newKVMFRData(KVMFRUserData * dst)
 {
-  KVMFRRecord * record;
-  memset(dst, 0, sizeof(*dst));
-
-  KVMFR * kvmfr = allocUserData(dst, sizeof(*kvmfr), true);
-  if (!kvmfr)
-    return false;
-
-  memcpy(kvmfr->magic, KVMFR_MAGIC,
-      min(sizeof(kvmfr->magic), sizeof(KVMFR_MAGIC)));
-  kvmfr->version  = KVMFR_VERSION;
-  kvmfr->features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0;
-  strncpy(kvmfr->hostver, BUILD_VERSION, sizeof(kvmfr->hostver) - 1);
-
   {
-    if (!(record = allocUserData(dst, sizeof(*record), true)))
-      return false;
-
-    KVMFRRecord_VMInfo * vmInfo = allocUserData(dst, sizeof(*vmInfo), true);
-    if (!vmInfo)
-      return false;
-
-    record->type = KVMFR_RECORD_VMINFO;
-    record->size = sizeof(*vmInfo);
-
-    strncpy(vmInfo->capture, app.iface->shortName, sizeof(vmInfo->capture) - 1);
-
-    const uint8_t * uuid = os_getUUID();
-    if (uuid)
-      memcpy(vmInfo->uuid, uuid, 16);
-
-    char * model = allocUserData(dst, 1024, false);
-    if (!model)
-      return false;
-
-    int cpus, cores, sockets;
-    if (lgCPUInfo(model, 1024, &cpus, &cores, &sockets))
+    KVMFR kvmfr =
     {
-      vmInfo->cpus    = cpus;
-      vmInfo->cores   = cores;
-      vmInfo->sockets = sockets;
-      const int modelLen = strlen(model) + 1;
-      record->size += modelLen;
-      dst->used    += modelLen;
-    }
+      .magic    = KVMFR_MAGIC,
+      .version  = KVMFR_VERSION,
+      .features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0
+    };
+    strncpy(kvmfr.hostver, BUILD_VERSION, sizeof(kvmfr.hostver) - 1);
+    appendData(dst, &kvmfr, sizeof(kvmfr));
   }
 
   {
-    if (!(record = allocUserData(dst, sizeof(*record), true)))
+    int cpus, cores, sockets;
+    char model[1024];
+    if (!lgCPUInfo(model, sizeof(model), &cpus, &cores, &sockets))
       return false;
 
-    KVMFRRecord_OSInfo * osInfo = allocUserData(dst, sizeof(*osInfo), true);
-    if (!osInfo)
+    KVMFRRecord_VMInfo vmInfo =
+    {
+      .cpus    = cpus,
+      .cores   = cores,
+      .sockets = sockets,
+    };
+
+    const uint8_t * uuid = os_getUUID();
+    memcpy(vmInfo.uuid, uuid, 16);
+
+    strncpy(vmInfo.capture, app.iface->shortName, sizeof(vmInfo.capture) - 1);
+
+    const int modelLen = strlen(model) + 1;
+    const KVMFRRecord record =
+    {
+      .type = KVMFR_RECORD_VMINFO,
+      .size = sizeof(vmInfo) + modelLen
+    };
+
+    if (!appendData(dst, &record, sizeof(record)) ||
+        !appendData(dst, &vmInfo, sizeof(vmInfo)) ||
+        !appendData(dst, model  , modelLen      ))
       return false;
+  }
 
-    record->type = KVMFR_RECORD_OSINFO;
-    record->size = sizeof(*osInfo);
+  {
+    KVMFRRecord_OSInfo osInfo =
+    {
+      .os = os_getKVMFRType()
+    };
 
-    osInfo->os = os_getKVMFRType();
     const char * osName = os_getOSName();
     if (!osName)
       osName = "";
+    const int osNameLen = strlen(osName) + 1;
 
-    if (!appendBuffer(dst, record, osName, strlen(osName) + 1))
+    KVMFRRecord record =
+    {
+      .type = KVMFR_RECORD_OSINFO,
+      .size = sizeof(osInfo) + osNameLen
+    };
+
+    if (!appendData(dst, &record, sizeof(record)) ||
+        !appendData(dst, &osInfo, sizeof(osInfo)) ||
+        !appendData(dst, osName , osNameLen))
       return false;
   }
 
