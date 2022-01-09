@@ -29,6 +29,12 @@ include(UninstallTarget)
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 
+option(ENABLE_ASAN "Build with AddressSanitizer" OFF)
+add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
+
+option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
+add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
+
 add_compile_options(
   "-Wall"
   "-Werror"
@@ -42,6 +48,16 @@ set(CMAKE_C_STANDARD  11)
 
 if(WIN32)
   add_compile_options("-fdebug-prefix-map=${PROJECT_TOP}/=")
+endif()
+
+if(ENABLE_ASAN)
+  add_compile_options("-fno-omit-frame-pointer" "-fsanitize=address")
+  set(EXE_FLAGS "${EXE_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+endif()
+
+if(ENABLE_UBSAN)
+  add_compile_options("-fsanitize=undefined")
+  set(EXE_FLAGS "${EXE_FLAGS} -fsanitize=undefined")
 endif()
 
 add_custom_command(
@@ -59,6 +75,12 @@ include_directories(
 
 #link_libraries(
 #)
+
+if (ENABLE_ASAN OR ENABLE_UBSAN)
+  link_directories("c:/msys64/clang64/lib/clang/12.0.0/lib/windows")
+  link_libraries(clang_rt.asan_dynamic-x86_64 clang_rt.asan_dynamic_runtime_thunk-x86_64)
+endif()
+
 
 set(SOURCES
 	${CMAKE_BINARY_DIR}/version.c
