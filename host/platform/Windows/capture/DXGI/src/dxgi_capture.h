@@ -75,6 +75,7 @@ struct DXGIInterface
   LG_Lock                    deviceContextLock;
   bool                       useAcquireLock;
   bool                       dwmFlush;
+  bool                       disableDamage;
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication   * dup;
   int                        maxTextures;
