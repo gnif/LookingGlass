@@ -446,6 +446,7 @@ static void d3d12_preRelease(void)
 
 struct DXGICopyBackend copyBackendD3D12 = {
   .name         = "Direct3D 12",
+  .code         = "d3d12",
   .create       = d3d12_create,
   .free         = d3d12_free,
   .copyFrame    = d3d12_copyFrame,

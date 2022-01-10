@@ -106,6 +106,13 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
     },
+    {
+      .module         = "dxgi",
+      .name           = "copyBackend",
+      .description    = "The copy backend to use, i.e. d3d11 or d3d12",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = "d3d11",
+    },
     {0}
   };
 
@@ -487,10 +494,17 @@ static bool dxgi_init(void)
       goto fail;
   }
 
+  const char * copyBackend = option_get_string("dxgi", "copyBackend");
   for (int i = 0; i < ARRAY_LENGTH(backends); ++i)
   {
-    if (backends[i]->create(this))
+    if (!strcasecmp(copyBackend, backends[i]->code))
     {
+      if (!backends[i]->create(this))
+      {
+        DEBUG_ERROR("Failed to initialize selected capture backend: %s", backends[i]->name);
+        goto fail;
+      }
+
       this->backend = backends[i];
       break;
     }
@@ -498,12 +512,12 @@ static bool dxgi_init(void)
 
   if (!this->backend)
   {
-    DEBUG_ERROR("Could not find a usable copy backend");
+    DEBUG_ERROR("Could not find copy backend: %s", copyBackend);
     goto fail;
   }
 
-  DEBUG_INFO("Copy backend     : %s", this->backend->name);
-  DEBUG_INFO("AcquireLock      : %s", this->useAcquireLock ? "enabled" : "disabled");
+  DEBUG_INFO("Copy backend      : %s", this->backend->name);
+  DEBUG_INFO("AcquireLock       : %s", this->useAcquireLock ? "enabled" : "disabled");
 
   for (int i = 0; i < this->maxTextures; ++i)
     this->texture[i].texDamageCount = -1;

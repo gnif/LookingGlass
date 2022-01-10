@@ -195,6 +195,7 @@ static void d3d11_preRelease(void)
 
 struct DXGICopyBackend copyBackendD3D11 = {
   .name         = "Direct3D 11",
+  .code         = "d3d11",
   .create       = d3d11_create,
   .free         = d3d11_free,
   .copyFrame    = d3d11_copyFrame,
