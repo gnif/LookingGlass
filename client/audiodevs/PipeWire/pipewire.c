@@ -27,6 +27,7 @@
 
 #include "common/debug.h"
 #include "common/ringbuffer.h"
+#include "common/stringutils.h"
 #include "common/util.h"
 
 typedef enum
@@ -202,21 +203,29 @@ static void pipewire_playbackStart(int channels, int sampleRate)
 
   pipewire_playbackStopStream();
 
+  int bufferFrames = sampleRate / 10;
+
   pw.playback.channels   = channels;
   pw.playback.sampleRate = sampleRate;
   pw.playback.stride     = sizeof(uint16_t) * channels;
-  pw.playback.buffer     = ringbuffer_new(sampleRate / 10,
+  pw.playback.buffer     = ringbuffer_new(bufferFrames,
       channels * sizeof(uint16_t));
+
+  int maxLatencyFrames = bufferFrames / 2;
+  char maxLatency[32];
+  snprintf(maxLatency, sizeof(maxLatency), "%d/%d", maxLatencyFrames,
+      sampleRate);
 
   pw_thread_loop_lock(pw.thread);
   pw.playback.stream = pw_stream_new_simple(
     pw.loop,
     "Looking Glass",
     pw_properties_new(
-      PW_KEY_NODE_NAME     , "Looking Glass",
-      PW_KEY_MEDIA_TYPE    , "Audio",
-      PW_KEY_MEDIA_CATEGORY, "Playback",
-      PW_KEY_MEDIA_ROLE    , "Music",
+      PW_KEY_NODE_NAME       , "Looking Glass",
+      PW_KEY_MEDIA_TYPE      , "Audio",
+      PW_KEY_MEDIA_CATEGORY  , "Playback",
+      PW_KEY_MEDIA_ROLE      , "Music",
+      PW_KEY_NODE_MAX_LATENCY, maxLatency,
       NULL
     ),
     &events,
