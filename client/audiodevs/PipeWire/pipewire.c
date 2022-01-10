@@ -215,17 +215,6 @@ static void pipewire_playbackPlay(uint8_t * data, size_t size)
   if (!pw.playback.stream)
     return;
 
-  // if the buffer fill is higher then the average skip the update to reduce lag
-  static unsigned int ttlSize = 0;
-  static unsigned int count   = 0;
-  ttlSize += size;
-  if (++count > 100 && ringbuffer_getCount(pw.playback.buffer) > ttlSize / count)
-  {
-    count   = 0;
-    ttlSize = 0;
-    return;
-  }
-
   ringbuffer_append(pw.playback.buffer, data, size / pw.playback.stride);
 
   if (!pw.playback.active)
