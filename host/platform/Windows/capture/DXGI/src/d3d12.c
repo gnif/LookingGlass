@@ -78,7 +78,7 @@ static bool d3d12_create(struct DXGIInterface * intf)
   if (!D3D12CreateDevice)
     return false;
 
-  assert(!this);
+  DEBUG_ASSERT(!this);
   this = calloc(1, sizeof(struct D3D12Backend));
   if (!this)
   {
@@ -228,7 +228,7 @@ fail:
 
 static void d3d12_free(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
 
   if (this->texture)
   {

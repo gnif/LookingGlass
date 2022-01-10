@@ -42,7 +42,7 @@ static bool d3d11_create(struct DXGIInterface * intf)
   HRESULT status;
   dxgi = intf;
 
-  assert(!this);
+  DEBUG_ASSERT(!this);
   this = calloc(1, sizeof(struct D3D11Backend));
   if (!this)
   {
@@ -97,7 +97,7 @@ fail:
 
 static void d3d11_free(void)
 {
-  assert(this);
+  DEBUG_ASSERT(this);
 
   for (int i = 0; i < dxgi->maxTextures; ++i)
     if (dxgi->texture[i].impl)
