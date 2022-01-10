@@ -264,8 +264,14 @@ static void pipewire_playbackPlay(uint8_t * data, size_t size)
 
     switch (pw.playback.state) {
       case STREAM_STATE_INACTIVE:
-        pw_stream_set_active(pw.playback.stream, true);
-        pw.playback.state = STREAM_STATE_ACTIVE;
+        // Don't start playback until the buffer is sufficiently full to avoid
+        // glitches
+        if (ringbuffer_getCount(pw.playback.buffer) >=
+          ringbuffer_getLength(pw.playback.buffer) / 4)
+        {
+          pw_stream_set_active(pw.playback.stream, true);
+          pw.playback.state = STREAM_STATE_ACTIVE;
+        }
         break;
 
       case STREAM_STATE_FLUSHING:
