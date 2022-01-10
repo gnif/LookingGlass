@@ -113,6 +113,13 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_STRING,
       .value.x_string = "d3d11",
     },
+    {
+      .module         = "dxgi",
+      .name           = "disableDamage",
+      .description    = "Do not do damage-aware copies, i.e. always do full frame copies",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
+    },
     {0}
   };
 
@@ -143,6 +150,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
 
   this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
   this->dwmFlush            = option_get_bool("dxgi", "dwmFlush");
+  this->disableDamage       = option_get_bool("dxgi", "disableDamage");
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
@@ -517,7 +525,8 @@ static bool dxgi_init(void)
   }
 
   DEBUG_INFO("Copy backend      : %s", this->backend->name);
-  DEBUG_INFO("AcquireLock       : %s", this->useAcquireLock ? "enabled" : "disabled");
+  DEBUG_INFO("AcquireLock       : %s", this->useAcquireLock ? "enabled"  : "disabled");
+  DEBUG_INFO("Damage-aware copy : %s", this->disableDamage  ? "disabled" : "enabled" );
 
   for (int i = 0; i < this->maxTextures; ++i)
     this->texture[i].texDamageCount = -1;
@@ -668,6 +677,9 @@ static void computeFrameDamage(Texture * tex)
 {
   // By default, damage the full frame.
   tex->damageRectsCount = 0;
+
+  if (this->disableDamage)
+    return;
 
   const int maxDamageRectsCount = ARRAY_LENGTH(tex->damageRects);
 
