@@ -108,6 +108,7 @@ struct DXGIInterface
 struct DXGICopyBackend
 {
   const char * name;
+  const char * code;
   bool (*create)(struct DXGIInterface * intf);
   void (*free)(void);
   bool (*copyFrame)(Texture * tex, ID3D11Texture2D * src);
