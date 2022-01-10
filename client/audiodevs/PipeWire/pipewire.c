@@ -29,6 +29,16 @@
 #include "common/ringbuffer.h"
 #include "common/util.h"
 
+typedef enum
+{
+  STREAM_STATE_INACTIVE,
+  STREAM_STATE_ACTIVE,
+  STREAM_STATE_FLUSHING,
+  STREAM_STATE_DRAINING,
+  STREAM_STATE_RESTARTING
+}
+StreamState;
+
 struct PipeWire
 {
   struct pw_loop        * loop;
@@ -43,7 +53,7 @@ struct PipeWire
     int    stride;
 
     RingBuffer buffer;
-    bool       active;
+    StreamState state;
   }
   playback;
 
@@ -68,7 +78,17 @@ static void pipewire_onPlaybackProcess(void * userdata)
   struct pw_buffer * pbuf;
 
   if (!ringbuffer_getCount(pw.playback.buffer))
+  {
+    if (pw.playback.state == STREAM_STATE_FLUSHING)
+    {
+      pw_thread_loop_lock(pw.thread);
+      pw_stream_flush(pw.playback.stream, true);
+      pw.playback.state = STREAM_STATE_DRAINING;
+      pw_thread_loop_unlock(pw.thread);
+    }
+
     return;
+  }
 
   if (!(pbuf = pw_stream_dequeue_buffer(pw.playback.stream)))
   {
@@ -91,6 +111,26 @@ static void pipewire_onPlaybackProcess(void * userdata)
   sbuf->datas[0].chunk->size   = frames * pw.playback.stride;
 
   pw_stream_queue_buffer(pw.playback.stream, pbuf);
+}
+
+static void pipewire_onPlaybackDrained(void * userdata)
+{
+  pw_thread_loop_lock(pw.thread);
+
+  if (pw.playback.state == STREAM_STATE_RESTARTING)
+  {
+    // A play command was received while we were in the middle of stopping;
+    // switch straight back into playing
+    pw_stream_set_active(pw.playback.stream, true);
+    pw.playback.state = STREAM_STATE_ACTIVE;
+  }
+  else
+  {
+    pw_stream_set_active(pw.playback.stream, false);
+    pw.playback.state = STREAM_STATE_INACTIVE;
+  }
+
+  pw_thread_loop_unlock(pw.thread);
 }
 
 static bool pipewire_init(void)
@@ -138,7 +178,6 @@ static void pipewire_playbackStopStream(void)
     return;
 
   pw_thread_loop_lock(pw.thread);
-  pw_stream_flush(pw.playback.stream, true);
   pw_stream_destroy(pw.playback.stream);
   pw.playback.stream = NULL;
   pw_thread_loop_unlock(pw.thread);
@@ -152,7 +191,8 @@ static void pipewire_playbackStart(int channels, int sampleRate)
   static const struct pw_stream_events events =
   {
     .version = PW_VERSION_STREAM_EVENTS,
-    .process = pipewire_onPlaybackProcess
+    .process = pipewire_onPlaybackProcess,
+    .drained = pipewire_onPlaybackDrained
   };
 
   if (pw.playback.stream &&
@@ -217,23 +257,61 @@ static void pipewire_playbackPlay(uint8_t * data, size_t size)
 
   ringbuffer_append(pw.playback.buffer, data, size / pw.playback.stride);
 
-  if (!pw.playback.active)
+  if (pw.playback.state != STREAM_STATE_ACTIVE &&
+    pw.playback.state != STREAM_STATE_RESTARTING)
   {
     pw_thread_loop_lock(pw.thread);
-    pw_stream_set_active(pw.playback.stream, true);
-    pw.playback.active = true;
+
+    switch (pw.playback.state) {
+      case STREAM_STATE_INACTIVE:
+        pw_stream_set_active(pw.playback.stream, true);
+        pw.playback.state = STREAM_STATE_ACTIVE;
+        break;
+
+      case STREAM_STATE_FLUSHING:
+        // We were preparing to stop; just carry on as if nothing happened
+        pw.playback.state = STREAM_STATE_ACTIVE;
+        break;
+
+      case STREAM_STATE_DRAINING:
+        // We are in the middle of draining the PipeWire buffers; we will need
+        // to reactivate the stream once this has completed
+        pw.playback.state = STREAM_STATE_RESTARTING;
+        break;
+
+      default:
+        DEBUG_UNREACHABLE();
+    }
+
     pw_thread_loop_unlock(pw.thread);
   }
 }
 
 static void pipewire_playbackStop(void)
 {
-  if (!pw.playback.active)
+  if (pw.playback.state != STREAM_STATE_ACTIVE &&
+    pw.playback.state != STREAM_STATE_RESTARTING)
     return;
 
   pw_thread_loop_lock(pw.thread);
-  pw_stream_set_active(pw.playback.stream, false);
-  pw.playback.active = false;
+
+  switch (pw.playback.state)
+  {
+    case STREAM_STATE_ACTIVE:
+      pw.playback.state = STREAM_STATE_FLUSHING;
+      break;
+
+    case STREAM_STATE_RESTARTING:
+      // A stop was requested, and then a start while PipeWire was draining, and
+      // now another stop. PipeWire hasn't finished draining yet so just switch
+      // the state back
+      pw.playback.state = STREAM_STATE_DRAINING;
+      break;
+
+    default:
+      DEBUG_UNREACHABLE();
+  }
+
   pw_thread_loop_unlock(pw.thread);
 }
 
@@ -265,7 +343,6 @@ static void pipewire_recordStopStream(void)
     return;
 
   pw_thread_loop_lock(pw.thread);
-  pw_stream_flush(pw.record.stream, true);
   pw_stream_destroy(pw.record.stream);
   pw.record.stream = NULL;
   pw_thread_loop_unlock(pw.thread);
