@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <d3d12.h>
 #include "common/debug.h"
+#include "common/option.h"
 #include "common/windebug.h"
 
 #define ALIGN_TO(value, align) (((value) + (align) - 1) & -(align))
@@ -40,6 +41,7 @@ struct D3D12Texture
 
 struct D3D12Backend
 {
+  int                   copySleep;
   ID3D12Device        * device;
   ID3D12CommandQueue  * commandQueue;
   ID3D12Resource      * src;
@@ -83,6 +85,9 @@ static bool d3d12_create(struct DXGIInterface * intf)
     DEBUG_ERROR("failed to allocate D3D12Backend struct");
     return false;
   }
+
+  this->copySleep = option_get_int("dxgi", "d3d12CopySleep");
+  DEBUG_INFO("Sleep before copy : %d ms", this->copySleep);
 
   status = D3D12CreateDevice((IUnknown *) dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
     &IID_ID3D12Device, (void **)&this->device);
@@ -276,6 +281,9 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   bool fail = false;
   IDXGIResource1 * res1 = NULL;
   HRESULT status;
+
+  if (this->copySleep > 0)
+    Sleep(this->copySleep);
 
   status = ID3D11Texture2D_QueryInterface(src, &IID_IDXGIResource1, (void **)&res1);
   if (FAILED(status))

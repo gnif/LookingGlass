@@ -120,6 +120,13 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
     },
+    {
+      .module         = "dxgi",
+      .name           = "d3d12CopySleep",
+      .description    = "Milliseconds to sleep before copying frame with d3d12",
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 5
+    },
     {0}
   };
 
