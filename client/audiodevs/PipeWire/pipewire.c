@@ -48,6 +48,7 @@ struct PipeWire
   struct
   {
     struct pw_stream * stream;
+    struct spa_io_rate_match * rateMatch;
 
     int    channels;
     int    sampleRate;
@@ -73,6 +74,17 @@ struct PipeWire
 };
 
 static struct PipeWire pw = {0};
+
+static void pipewire_onPlaybackIoChanged(void * userdata, uint32_t id,
+  void * data, uint32_t size)
+{
+  switch (id)
+  {
+    case SPA_IO_RateMatch:
+      pw.playback.rateMatch = data;
+      break;
+  }
+}
 
 static void pipewire_onPlaybackProcess(void * userdata)
 {
@@ -104,6 +116,9 @@ static void pipewire_onPlaybackProcess(void * userdata)
     return;
 
   int frames = sbuf->datas[0].maxsize / pw.playback.stride;
+  if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
+    frames = min(frames, pw.playback.rateMatch->size);
+
   void * values = ringbuffer_consume(pw.playback.buffer, &frames);
   memcpy(dst, values, frames * pw.playback.stride);
 
@@ -180,7 +195,8 @@ static void pipewire_playbackStopStream(void)
 
   pw_thread_loop_lock(pw.thread);
   pw_stream_destroy(pw.playback.stream);
-  pw.playback.stream = NULL;
+  pw.playback.stream    = NULL;
+  pw.playback.rateMatch = NULL;
   pw_thread_loop_unlock(pw.thread);
 }
 
@@ -191,9 +207,10 @@ static void pipewire_playbackStart(int channels, int sampleRate)
   struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
   static const struct pw_stream_events events =
   {
-    .version = PW_VERSION_STREAM_EVENTS,
-    .process = pipewire_onPlaybackProcess,
-    .drained = pipewire_onPlaybackDrained
+    .version    = PW_VERSION_STREAM_EVENTS,
+    .io_changed = pipewire_onPlaybackIoChanged,
+    .process    = pipewire_onPlaybackProcess,
+    .drained    = pipewire_onPlaybackDrained
   };
 
   if (pw.playback.stream &&
