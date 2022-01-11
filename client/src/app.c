@@ -637,14 +637,25 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...)
   va_end(args);
 }
 
-void app_msgBox(const char * caption, const char * fmt, ...)
+MsgBoxHandle app_msgBox(const char * caption, const char * fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
-  overlayMsg_show(caption, fmt, args);
+  MsgBoxHandle handle =
+    overlayMsg_show(caption, fmt, args);
   va_end(args);
 
   core_updateOverlayState();
+
+  return handle;
+}
+
+void app_msgBoxClose(MsgBoxHandle * handle)
+{
+  if (!handle)
+    return;
+
+  overlayMsg_close(handle);
 }
 
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)

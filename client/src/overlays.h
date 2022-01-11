@@ -22,6 +22,7 @@
 #define _H_OVERLAYS_H
 
 #include "interface/overlay.h"
+#include "overlay/msg.h"
 
 struct Overlay
 {
@@ -40,9 +41,6 @@ extern struct LG_OverlayOps LGOverlayConfig;
 extern struct LG_OverlayOps LGOverlayMsg;
 
 void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args);
-
-bool overlayMsg_modal(void);
-void overlayMsg_show(const char * caption, const char * fmt, va_list args);
 
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max);

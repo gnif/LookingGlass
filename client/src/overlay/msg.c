@@ -18,6 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include "msg.h"
 #include "interface/overlay.h"
 #include "cimgui.h"
 #include "overlay_utils.h"
@@ -148,7 +149,8 @@ bool overlayMsg_modal(void)
   return ll_count(l_msg.messages) > 0;
 }
 
-void overlayMsg_show(const char * caption, const char * fmt, va_list args)
+MsgBoxHandle overlayMsg_show(
+    const char * caption, const char * fmt, va_list args)
 {
   struct Msg * msg = malloc(sizeof(*msg));
   msg->caption = strdup(caption);
@@ -174,4 +176,12 @@ void overlayMsg_show(const char * caption, const char * fmt, va_list args)
 
   ll_push(l_msg.messages, msg);
   app_invalidateOverlay(false);
+
+  return (MsgBoxHandle)msg;
+}
+
+void overlayMsg_close(MsgBoxHandle * handle)
+{
+  if (ll_removeData(l_msg.messages, handle))
+    freeMsg((struct Msg *)handle);
 }
