@@ -851,12 +851,6 @@ int spiceThread(void * arg)
     .port      = g_params.spicePort,
     .password  = "",
     .ready     = spiceReady,
-    .log =
-    {
-      .info  = debug_info,
-      .warn  = debug_warn,
-      .error = debug_error,
-    },
     .clipboard =
     {
       .enable  = g_params.useSpiceClipboard,
@@ -1064,6 +1058,17 @@ static int lg_run(void)
     DEBUG_ERROR("Failed to map memory");
     return -1;
   }
+
+  const PSInit psInit =
+  {
+    .log =
+    {
+      .info  = debug_info,
+      .warn  = debug_warn,
+      .error = debug_error,
+    }
+  };
+  purespice_init(&psInit);
 
   if (g_params.useSpiceInput     ||
       g_params.useSpiceClipboard ||
