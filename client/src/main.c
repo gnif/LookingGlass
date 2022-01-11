@@ -974,14 +974,14 @@ static void reportBadVersion()
   DEBUG_ERROR("Please install the matching host application for this client");
 }
 
-static void showSpiceInputHelp(void)
+static MsgBoxHandle showSpiceInputHelp(void)
 {
   static bool done = false;
   if (!g_params.useSpiceInput || done)
-    return;
+    return NULL;
 
   done = true;
-  app_msgBox(
+  return app_msgBox(
     "Information",
     "Please note you can still control your guest\n"
     "through SPICE if you press the capture key.");
@@ -1227,120 +1227,143 @@ static int lg_run(void)
   KVMFR *udata;
   int waitCount = 0;
 
+  MsgBoxHandle msgs[10];
+  int msgsCount;
+
 restart:
+  msgsCount = 0;
+  memset(msgs, 0, sizeof(msgs));
+
   while(g_state.state == APP_STATE_RUNNING)
   {
     if ((status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
       break;
 
-    if (status == LGMP_ERR_INVALID_VERSION)
+    switch(status)
     {
+      case LGMP_ERR_INVALID_VERSION:
+      {
+        reportBadVersion();
+        msgs[msgsCount++] = app_msgBox(
+          "Incompatible LGMP Version",
+          "The host application is not compatible with this client.\n"
+          "Please download and install the matching version."
+        );
+
+        DEBUG_INFO("Waiting for you to upgrade the host application");
+        while (g_state.state == APP_STATE_RUNNING &&
+            lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata) != LGMP_OK)
+          g_state.ds->wait(1000);
+
+        if (g_state.state != APP_STATE_RUNNING)
+          return -1;
+
+        continue;
+      }
+
+      case LGMP_ERR_INVALID_SESSION:
+      case LGMP_ERR_INVALID_MAGIC:
+      {
+        if (waitCount++ == 0)
+        {
+          DEBUG_BREAK();
+          DEBUG_INFO("The host application seems to not be running");
+          DEBUG_INFO("Waiting for the host application to start...");
+        }
+
+        if (waitCount == 30)
+        {
+          DEBUG_BREAK();
+          msgs[msgsCount++] = app_msgBox(
+              "Host Application Not Running",
+              "It seems the host application is not running or your\n"
+              "virtual machine is still starting up\n"
+              "\n"
+              "If the the VM is running and booted please check the\n"
+              "host application log for errors. You can find the\n"
+              "log through the shortcut in your start menu\n"
+              "\n"
+              "Continuing to wait...");
+
+          msgs[msgsCount++] = showSpiceInputHelp();
+
+          DEBUG_INFO("Check the host log in your guest at %%ProgramData%%\\Looking Glass (host)\\looking-glass-host.txt");
+          DEBUG_INFO("Continuing to wait...");
+        }
+
+        g_state.ds->wait(1000);
+        continue;
+      }
+
+      default:
+        DEBUG_ERROR("lgmpClientSessionInit Failed: %s", lgmpStatusString(status));
+        return -1;
+    }
+
+    if (g_state.state != APP_STATE_RUNNING)
+      return -1;
+
+    // dont show warnings again after the first successful startup
+    waitCount = 100;
+
+    const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
+    if (udataSize < sizeof(*udata) || !magicMatches || udata->version != KVMFR_VERSION)
+    {
+      static bool alertsDone = false;
+      if (alertsDone)
+      {
+        if(g_state.state == APP_STATE_RUNNING)
+          g_state.ds->wait(1000);
+        continue;
+      }
+
       reportBadVersion();
-      app_msgBox(
-        "Incompatible LGMP Version",
-        "The host application is not compatible with this client.\n"
-        "Please download and install the matching version."
-      );
+      if (magicMatches)
+      {
+        msgs[msgsCount++] = app_msgBox(
+          "Incompatible KVMFR Version",
+          "The host application is not compatible with this client.\n"
+          "Please download and install the matching version.\n"
+          "\n"
+          "Client Version: %s\n"
+          "Host Version: %s",
+          BUILD_VERSION,
+          udata->version >= 2 ? udata->hostver : NULL
+        );
+
+        DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
+        DEBUG_ERROR("Client version: %s", BUILD_VERSION);
+        if (udata->version >= 2)
+          DEBUG_ERROR("  Host version: %s", udata->hostver);
+      }
+      else
+        DEBUG_ERROR("Invalid KVMFR magic");
+
+      DEBUG_BREAK();
+
+      msgs[msgsCount++] = showSpiceInputHelp();
 
       DEBUG_INFO("Waiting for you to upgrade the host application");
-      while (g_state.state == APP_STATE_RUNNING &&
-          lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata) != LGMP_OK)
-        g_state.ds->wait(1000);
 
-      if (g_state.state != APP_STATE_RUNNING)
-        return -1;
-
-      break;
-    }
-
-    if (status != LGMP_ERR_INVALID_SESSION && status != LGMP_ERR_INVALID_MAGIC)
-    {
-      DEBUG_ERROR("lgmpClientSessionInit Failed: %s", lgmpStatusString(status));
-      return -1;
-    }
-
-    if (waitCount++ == 0)
-    {
-      DEBUG_BREAK();
-      DEBUG_INFO("The host application seems to not be running");
-      DEBUG_INFO("Waiting for the host application to start...");
-    }
-
-    if (waitCount == 30)
-    {
-      DEBUG_BREAK();
-      app_msgBox(
-          "Host Application Not Running",
-          "It seems the host application is not running or your\n"
-          "virtual machine is still starting up\n"
-          "\n"
-          "If the the VM is running and booted please check the\n"
-          "host application log for errors. You can find the\n"
-          "log through the shortcut in your start menu\n"
-          "\n"
-          "Continuing to wait...");
-
-      showSpiceInputHelp();
-
-      DEBUG_INFO("Check the host log in your guest at %%ProgramData%%\\Looking Glass (host)\\looking-glass-host.txt");
-      DEBUG_INFO("Continuing to wait...");
-    }
-
-    g_state.ds->wait(1000);
-  }
-
-  if (g_state.state != APP_STATE_RUNNING)
-    return -1;
-
-  // dont show warnings again after the first startup
-  waitCount = 100;
-
-  const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
-  if (udataSize < sizeof(*udata) || !magicMatches || udata->version != KVMFR_VERSION)
-  {
-    static bool alertsDone = false;
-    if (alertsDone)
-    {
+      alertsDone = true;
       if(g_state.state == APP_STATE_RUNNING)
         g_state.ds->wait(1000);
 
-      goto restart;
+      continue;
     }
 
-    reportBadVersion();
-    if (magicMatches)
-    {
-      app_msgBox(
-        "Incompatible KVMFR Version",
-        "The host application is not compatible with this client.\n"
-        "Please download and install the matching version.\n"
-        "\n"
-        "Client Version: %s\n"
-        "Host Version: %s",
-        BUILD_VERSION,
-        udata->version >= 2 ? udata->hostver : NULL
-      );
-
-      DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
-      DEBUG_ERROR("Client version: %s", BUILD_VERSION);
-      if (udata->version >= 2)
-        DEBUG_ERROR("  Host version: %s", udata->hostver);
-    }
-    else
-      DEBUG_ERROR("Invalid KVMFR magic");
-
-    DEBUG_BREAK();
-
-    showSpiceInputHelp();
-
-    DEBUG_INFO("Waiting for you to upgrade the host application");
-
-    alertsDone = true;
-    if(g_state.state == APP_STATE_RUNNING)
-      g_state.ds->wait(1000);
-
-    goto restart;
+    break;
   }
+
+  if(g_state.state != APP_STATE_RUNNING)
+    return -1;
+
+  /* close any informational message boxes from above as we now connected
+   * successfully */
+
+  for(int i = 0; i < msgsCount; ++i)
+    if (msgs[i])
+      app_msgBoxClose(msgs[i]);
 
   DEBUG_INFO("Guest Information:");
   DEBUG_INFO("Version  : %s", udata->hostver);
