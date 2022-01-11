@@ -838,6 +838,8 @@ void spiceReady(void)
   memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
   g_state.spiceUUIDValid = true;
   checkUUID();
+
+  purespice_freeServerInfo(&info);
 }
 
 int spiceThread(void * arg)
