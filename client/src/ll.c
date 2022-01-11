@@ -24,21 +24,6 @@
 #include "common/locking.h"
 #include <stdlib.h>
 
-struct ll_item
-{
-  void           * data;
-  struct ll_item * next;
-};
-
-struct ll
-{
-  struct ll_item * head;
-  struct ll_item * tail;
-  struct ll_item * pos;
-  unsigned int count;
-  LG_Lock lock;
-};
-
 struct ll * ll_new(void)
 {
   struct ll * list = malloc(sizeof(*list));
@@ -70,14 +55,18 @@ void ll_push(struct ll * list, void * data)
 
   if (!list->head)
   {
+    item->prev = NULL;
     list->head = item;
     list->tail = item;
     LG_UNLOCK(list->lock);
     return;
   }
 
+  item->prev = list->tail;
+
   list->tail->next = item;
   list->tail       = item;
+
   LG_UNLOCK(list->lock);
 }
 
@@ -90,13 +79,8 @@ bool ll_shift(struct ll * list, void ** data)
     return false;
   }
 
-  --list->count;
   struct ll_item * item = list->head;
-  list->head = item->next;
-  list->pos  = NULL;
-  if (list->tail == item)
-    list->tail = NULL;
-
+  ll_removeNL(list, item);
   LG_UNLOCK(list->lock);
 
   if (data)
@@ -135,19 +119,6 @@ bool ll_peek_tail(struct ll * list, void ** data)
 
   return true;
 }
-
-unsigned int ll_count(struct ll * list)
-{
-  return list->count;
-}
-
-void ll_reset (struct ll * list)
-{
-  LG_LOCK(list->lock);
-  list->pos = NULL;
-  LG_UNLOCK(list->lock);
-}
-
 
 bool ll_walk(struct ll * list, void ** data)
 {
