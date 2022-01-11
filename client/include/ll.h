@@ -22,6 +22,7 @@
 #define _H_LL_
 
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "common/locking.h"
 
@@ -97,6 +98,7 @@ static inline bool ll_removeData(struct ll * list, void * match)
     {
       ll_removeNL(list, item);
       ll_unlock(list);
+      free(item);
       return true;
     }
   ll_unlock(list);
