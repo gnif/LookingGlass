@@ -54,9 +54,11 @@ bool         ll_walk     (struct ll * list, void ** data);
 #define ll_unlock(ll) LG_UNLOCK((ll)->lock)
 
 #define ll_forEachNL(ll, item, v) \
-  for(struct ll_item * item = (ll)->head, * _ = (ll)->head->next; (item);) \
+  for(struct ll_item * item = (ll)->head, \
+      * _ = (item) ? (item)->next : NULL; (item); (item) = NULL) \
     for((v) = (__typeof__(v))((item)->data); (item); (item) = _, \
-        _ = _ ? _->next : NULL, (v) = (__typeof__(v))((item)->data))
+        _   = (item) ? (item)->next : NULL, \
+        (v) = (item) ? (__typeof__(v))((item)->data) : NULL)
 
 static inline unsigned int ll_count(struct ll * list)
 {
