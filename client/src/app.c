@@ -66,15 +66,20 @@ bool app_isOverlayMode(void)
   if (g_state.overlayInput)
     return true;
 
+  bool result = false;
   struct Overlay * overlay;
-  for (ll_reset(g_state.overlays);
-      ll_walk(g_state.overlays, (void **)&overlay); )
+  ll_lock(g_state.overlays);
+  ll_forEachNL(g_state.overlays, item, overlay)
   {
     if (overlay->ops->needs_overlay && overlay->ops->needs_overlay(overlay))
-      return true;
+    {
+      result = true;
+      break;
+    }
   }
+  ll_unlock(g_state.overlays);
 
-  return false;
+  return result;
 }
 
 void app_updateCursorPos(double x, double y)
@@ -725,8 +730,8 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
 void app_initOverlays(void)
 {
   struct Overlay * overlay;
-  for (ll_reset(g_state.overlays);
-      ll_walk(g_state.overlays, (void **)&overlay); )
+  ll_lock(g_state.overlays);
+  ll_forEachNL(g_state.overlays, item, overlay)
   {
     if (!overlay->ops->init(&overlay->udata, overlay->params))
     {
@@ -734,6 +739,7 @@ void app_initOverlays(void)
       overlay->ops = NULL;
     }
   }
+  ll_unlock(g_state.overlays);
 }
 
 static inline void mergeRect(struct Rect * dest, const struct Rect * a, const struct Rect * b)
@@ -778,22 +784,26 @@ static inline LG_DSPointer mapImGuiCursor(ImGuiMouseCursor cursor)
 
 bool app_overlayNeedsRender(void)
 {
-  struct Overlay * overlay;
-
   if (app_isOverlayMode())
     return true;
 
-  for (ll_reset(g_state.overlays);
-      ll_walk(g_state.overlays, (void **)&overlay); )
+  bool result = false;
+  struct Overlay * overlay;
+  ll_lock(g_state.overlays);
+  ll_forEachNL(g_state.overlays, item, overlay)
   {
     if (!overlay->ops->needs_render)
       continue;
 
     if (overlay->ops->needs_render(overlay->udata, false))
-      return true;
+    {
+      result = true;
+      break;
+    }
   }
+  ll_unlock(g_state.overlays);
 
-  return false;
+  return result;
 }
 
 int app_renderOverlay(struct Rect * rects, int maxRects)
@@ -832,8 +842,8 @@ render_again:
   const bool msgModal = overlayMsg_modal();
 
   // render the overlays
-  for (ll_reset(g_state.overlays);
-      ll_walk(g_state.overlays, (void **)&overlay); )
+  ll_lock(g_state.overlays);
+  ll_forEachNL(g_state.overlays, item, overlay)
   {
     if (msgModal && overlay->ops != &LGOverlayMsg)
       continue;
@@ -875,6 +885,7 @@ render_again:
     memcpy(overlay->lastRects, buffer, sizeof(struct Rect) * written);
     overlay->lastRectCount = written;
   }
+  ll_unlock(g_state.overlays);
 
   if (overlayMode)
   {

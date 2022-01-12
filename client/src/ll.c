@@ -29,7 +29,6 @@ struct ll * ll_new(void)
   struct ll * list = malloc(sizeof(*list));
   list->head  = NULL;
   list->tail  = NULL;
-  list->pos   = NULL;
   list->count = 0;
   LG_LOCK_INIT(list->lock);
   return list;
@@ -115,36 +114,6 @@ bool ll_peek_tail(struct ll * list, void ** data)
   }
 
   *data = list->tail->data;
-  LG_UNLOCK(list->lock);
-
-  return true;
-}
-
-bool ll_walk(struct ll * list, void ** data)
-{
-  LG_LOCK(list->lock);
-
-  if (!list->pos)
-  {
-    if (!list->head)
-    {
-      LG_UNLOCK(list->lock);
-      return false;
-    }
-
-    list->pos = list->head;
-  }
-  else
-  {
-    if (!list->pos->next)
-    {
-      LG_UNLOCK(list->lock);
-      return false;
-    }
-    list->pos = list->pos->next;
-  }
-
-  *data = list->pos->data;
   LG_UNLOCK(list->lock);
 
   return true;

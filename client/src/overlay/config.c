@@ -182,7 +182,8 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
 
   if (igBeginTabItem("Settings", NULL, 0))
   {
-    for (ll_reset(cfg.callbacks); ll_walk(cfg.callbacks, (void **)&cb); )
+    ll_lock(cfg.callbacks);
+    ll_forEachNL(cfg.callbacks, item, cb)
     {
       if (!igCollapsingHeader_BoolPtr(cb->title, NULL, 0))
         continue;
@@ -191,10 +192,12 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
       cb->callback(cb->udata, &id);
       igPopID();
     }
+    ll_unlock(cfg.callbacks);
     igEndTabItem();
   }
 
-  for (ll_reset(cfg.tabCallbacks); ll_walk(cfg.tabCallbacks, (void **)&cb); )
+  ll_lock(cfg.tabCallbacks);
+  ll_forEachNL(cfg.tabCallbacks, item, cb)
   {
     if (!igBeginTabItem(cb->title, NULL, 0))
       continue;
@@ -204,6 +207,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     igPopID();
     igEndTabItem();
   }
+  ll_unlock(cfg.tabCallbacks);
 
   igEndTabBar();
 

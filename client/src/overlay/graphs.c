@@ -53,11 +53,13 @@ static void configCallback(void * udata, int * id)
   igBeginTable("split", 2, 0, (ImVec2){}, 0);
 
   GraphHandle graph;
-  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+  ll_lock(gs.graphs);
+  ll_forEachNL(gs.graphs, item, graph)
   {
     igTableNextColumn();
     igCheckbox(graph->name, &graph->enabled);
   }
+  ll_unlock(gs.graphs);
 
   igEndTable();
 }
@@ -127,9 +129,12 @@ static int graphs_render(void * udata, bool interactive,
 
   GraphHandle graph;
   int graphCount = 0;
-  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+  ll_lock(gs.graphs);
+  ll_forEachNL(gs.graphs, item, graph)
+  {
     if (graph->enabled)
       ++graphCount;
+  }
 
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
@@ -152,7 +157,7 @@ static int graphs_render(void * udata, bool interactive,
   const float height = (winSize.y / graphCount)
     - igGetStyle()->ItemSpacing.y;
 
-  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+  ll_forEachNL(gs.graphs, item, graph)
   {
     if (!graph->enabled)
       continue;
@@ -182,6 +187,7 @@ static int graphs_render(void * udata, bool interactive,
         (ImVec2){ winSize.x, height },
         sizeof(float));
   };
+  ll_unlock(gs.graphs);
 
   overlayGetImGuiRect(windowRects);
   igEnd();
@@ -217,6 +223,8 @@ void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name
       bool * enabled, void * udata), void * udata)
 {
   GraphHandle graph;
-  for (ll_reset(gs.graphs); ll_walk(gs.graphs, (void **)&graph); )
+  ll_lock(gs.graphs);
+  ll_forEachNL(gs.graphs, item, graph)
     callback(graph, graph->name, &graph->enabled, udata);
+  ll_unlock(gs.graphs);
 }

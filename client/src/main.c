@@ -145,12 +145,13 @@ static bool tickTimerFn(void * unused)
 
   bool needsRender = false;
   struct Overlay * overlay;
-  for (ll_reset(g_state.overlays);
-      ll_walk(g_state.overlays, (void **)&overlay); )
+  ll_lock(g_state.overlays);
+  ll_forEachNL(g_state.overlays, item, overlay)
   {
     if (overlay->ops->tick && overlay->ops->tick(overlay->udata, tickCount))
       needsRender = true;
   }
+  ll_unlock(g_state.overlays);
 
   if (needsRender)
     app_invalidateWindow(false);

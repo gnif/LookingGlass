@@ -36,7 +36,6 @@ struct ll
 {
   struct ll_item * head;
   struct ll_item * tail;
-  struct ll_item * pos;
   unsigned int count;
   LG_Lock lock;
 };
@@ -47,8 +46,6 @@ void         ll_push     (struct ll * list, void * data);
 bool         ll_shift    (struct ll * list, void ** data);
 bool         ll_peek_head(struct ll * list, void ** data);
 bool         ll_peek_tail(struct ll * list, void ** data);
-
-bool         ll_walk     (struct ll * list, void ** data);
 
 #define ll_lock(ll) LG_LOCK((ll)->lock)
 #define ll_unlock(ll) LG_UNLOCK((ll)->lock)
@@ -63,13 +60,6 @@ bool         ll_walk     (struct ll * list, void ** data);
 static inline unsigned int ll_count(struct ll * list)
 {
   return list->count;
-}
-
-static inline void ll_reset (struct ll * list)
-{
-  LG_LOCK(list->lock);
-  list->pos = NULL;
-  LG_UNLOCK(list->lock);
 }
 
 static inline void ll_removeNL(struct ll * list, struct ll_item * item)
@@ -87,8 +77,6 @@ static inline void ll_removeNL(struct ll * list, struct ll_item * item)
 
   if (item->next)
     item->next->prev = item->prev;
-
-  list->pos = NULL;
 }
 
 static inline bool ll_removeData(struct ll * list, void * match)

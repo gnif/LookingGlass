@@ -164,18 +164,20 @@ void egl_modelRender(EGL_Model * model)
 
     /* buffer the verticies */
     struct FloatList * fl;
-    for(ll_reset(model->verticies); ll_walk(model->verticies, (void **)&fl);)
+    ll_lock(model->verticies);
+    ll_forEachNL(model->verticies, item, fl)
     {
       glBufferSubData(GL_ARRAY_BUFFER, offset, sizeof(GLfloat) * fl->count * 3, fl->v);
       offset += sizeof(GLfloat) * fl->count * 3;
     }
 
     /* buffer the uvs */
-    for(ll_reset(model->verticies); ll_walk(model->verticies, (void **)&fl);)
+    ll_forEachNL(model->verticies, item, fl)
     {
       glBufferSubData(GL_ARRAY_BUFFER, offset, sizeof(GLfloat) * fl->count * 2, fl->u);
       offset += sizeof(GLfloat) * fl->count * 2;
     }
+    ll_unlock(model->verticies);
 
     /* set up vertex arrays in the VAO */
     glEnableVertexAttribArray(0);
@@ -199,11 +201,13 @@ void egl_modelRender(EGL_Model * model)
   /* draw the arrays */
   GLint offset = 0;
   struct FloatList * fl;
-  for(ll_reset(model->verticies); ll_walk(model->verticies, (void **)&fl);)
+  ll_lock(model->verticies);
+  ll_forEachNL(model->verticies, item, fl)
   {
     glDrawArrays(GL_TRIANGLE_STRIP, offset, fl->count);
     offset += fl->count;
   }
+  ll_unlock(model->verticies);
 
   /* unbind and cleanup */
   glBindTexture(GL_TEXTURE_2D, 0);
