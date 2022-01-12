@@ -20,6 +20,8 @@
 
 #include "common/time.h"
 #include "common/debug.h"
+#include "common/thread.h"
+#include "common/ll.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -27,84 +29,124 @@
 #include <string.h>
 #include <time.h>
 
-struct LGTimer
+struct LGTimerState
 {
-  LGTimerFn   fn;
-  void      * udata;
-  timer_t     id;
-  bool        running;
+  bool              running;
+  struct LGThread * thread;
+  struct ll       * timers;
 };
 
-static void TimerProc(union sigval arg)
+struct LGTimer
 {
-  LGTimer * timer = (LGTimer *)arg.sival_ptr;
-  if (!timer->fn(timer->udata))
+  unsigned int   interval;
+  unsigned int   count;
+  LGTimerFn      fn;
+  void         * udata;
+};
+
+static struct LGTimerState l_ts = { 0 };
+
+static int timerFn(void * fn)
+{
+  struct LGTimer * timer;
+  struct timespec time;
+
+  clock_gettime(CLOCK_MONOTONIC, &time);
+
+  while(l_ts.running)
   {
-    if (timer_delete(timer->id))
-      DEBUG_ERROR("failed to destroy the timer: %s", strerror(errno));
-    timer->running = false;
+    ll_lock(l_ts.timers);
+    ll_forEachNL(l_ts.timers, item, timer)
+    {
+      if (timer->count++ == timer->interval)
+      {
+        timer->count = 0;
+        if (!timer->fn(timer->udata))
+          ll_removeNL(l_ts.timers, item);
+      }
+    }
+    ll_unlock(l_ts.timers);
+
+    tsAdd(&time, 1000000);
+    while(clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL) != 0) {}
   }
+
+  return 0;
+}
+
+static inline bool setupTimerThread(void)
+{
+  if (l_ts.thread)
+    return true;
+
+  l_ts.timers  = ll_new();
+  l_ts.running = true;
+  if (!l_ts.timers)
+  {
+    DEBUG_ERROR("failed to create linked list");
+    goto err;
+  }
+
+  if (!lgCreateThread("TimerThread", timerFn, NULL, &l_ts.thread))
+  {
+    DEBUG_ERROR("failed to create the timer thread");
+    goto err_thread;
+  }
+
+  return true;
+
+err_thread:
+  ll_free(l_ts.timers);
+
+err:
+  return false;
+}
+
+static void destroyTimerThread(void)
+{
+  if (ll_count(l_ts.timers))
+    return;
+
+  l_ts.running = false;
+  lgJoinThread(l_ts.thread, NULL);
+  l_ts.thread = NULL;
 }
 
 bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
     void * udata, LGTimer ** result)
 {
-  LGTimer * ret = malloc(sizeof(*ret));
-
-  if (!ret)
+  struct LGTimer * timer = malloc(sizeof(*timer));
+  if (!timer)
   {
-    DEBUG_ERROR("failed to malloc LGTimer struct");
+    DEBUG_ERROR("out of memory");
     return false;
   }
 
-  ret->fn      = fn;
-  ret->udata   = udata;
-  ret->running = true;
+  timer->interval = intervalMS;
+  timer->count    = 0;
+  timer->fn       = fn;
+  timer->udata    = udata;
 
-  struct sigevent sev =
+  if (!setupTimerThread())
   {
-    .sigev_notify = SIGEV_THREAD,
-    .sigev_notify_function = &TimerProc,
-    .sigev_value.sival_ptr = ret,
-  };
-
-  if (timer_create(CLOCK_MONOTONIC, &sev, &ret->id))
-  {
-    DEBUG_ERROR("failed to create timer: %s", strerror(errno));
-    free(ret);
-    return false;
+    DEBUG_ERROR("failed to setup the timer thread");
+    goto err_thread;
   }
 
-  struct timespec interval =
-  {
-    .tv_sec  = intervalMS / 1000,
-    .tv_nsec = (intervalMS % 1000) * 1000000,
-  };
-  struct itimerspec spec =
-  {
-    .it_interval = interval,
-    .it_value = interval,
-  };
-
-  if (timer_settime(ret->id, 0, &spec, NULL))
-  {
-    DEBUG_ERROR("failed to set timer: %s", strerror(errno));
-    timer_delete(ret->id);
-    free(ret);
-    return false;
-  }
-
-  *result = ret;
+  ll_push(l_ts.timers, timer);
+  *result = timer;
   return true;
+
+err_thread:
+  free(timer);
+  return false;
 }
 
 void lgTimerDestroy(LGTimer * timer)
 {
-  if (timer->running)
-  {
-    if (timer_delete(timer->id))
-      DEBUG_ERROR("failed to destroy the timer: %s", strerror(errno));
-  }
+  if (!l_ts.thread)
+    return;
 
-  free(timer);
+  ll_removeData(l_ts.timers, timer);
+  destroyTimerThread();
 }
