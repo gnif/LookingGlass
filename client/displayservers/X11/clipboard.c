@@ -124,8 +124,6 @@ bool x11CBInit()
   }
 
   XFixesSelectSelectionInput(x11.display, x11.window,
-      XA_PRIMARY, XFixesSetSelectionOwnerNotifyMask);
-  XFixesSelectSelectionInput(x11.display, x11.window,
       x11atoms.CLIPBOARD, XFixesSetSelectionOwnerNotifyMask);
 
   return true;
@@ -205,7 +203,7 @@ send:
 
 static void x11CBSelectionClear(const XSelectionClearEvent e)
 {
-  if (e.selection != XA_PRIMARY && e.selection != x11atoms.CLIPBOARD)
+  if (e.selection != x11atoms.CLIPBOARD)
     return;
 
   x11cb.aCurSelection = BadValue;
@@ -291,7 +289,7 @@ out:
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
 {
   // check if the selection is valid and it isn't ourself
-  if ((e.selection != XA_PRIMARY && e.selection != x11atoms.CLIPBOARD) ||
+  if (e.selection != x11atoms.CLIPBOARD ||
       e.owner == x11.window || e.owner == 0)
   {
     return;
@@ -396,7 +394,6 @@ void x11CBNotice(LG_ClipboardData type)
 {
   x11cb.haveRequest = true;
   x11cb.type        = type;
-  XSetSelectionOwner(x11.display, XA_PRIMARY        , x11.window, CurrentTime);
   XSetSelectionOwner(x11.display, x11atoms.CLIPBOARD, x11.window, CurrentTime);
   XFlush(x11.display);
 }
@@ -404,7 +401,6 @@ void x11CBNotice(LG_ClipboardData type)
 void x11CBRelease(void)
 {
   x11cb.haveRequest = false;
-  XSetSelectionOwner(x11.display, XA_PRIMARY        , None, CurrentTime);
   XSetSelectionOwner(x11.display, x11atoms.CLIPBOARD, None, CurrentTime);
   XFlush(x11.display);
 }
