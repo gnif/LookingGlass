@@ -105,6 +105,7 @@ static void d3d11_free(void)
 
   runningavg_free(&this->avgMapTime);
   free(this);
+  this = NULL;
 }
 
 static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
