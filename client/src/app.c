@@ -25,7 +25,6 @@
 #include "util.h"
 #include "clipboard.h"
 
-#include "ll.h"
 #include "kb.h"
 
 #include "common/debug.h"

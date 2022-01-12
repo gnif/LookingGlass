@@ -31,6 +31,7 @@
 #include "common/locking.h"
 #include "common/ringbuffer.h"
 #include "common/event.h"
+#include "common/ll.h"
 
 #include <purespice.h>
 #include <lgmp/client.h>

@@ -125,7 +125,6 @@ set(SOURCES
 	src/audio.c
 	src/config.c
 	src/keybind.c
-	src/ll.c
 	src/util.c
 	src/clipboard.c
 	src/kb.c

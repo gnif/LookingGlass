@@ -35,6 +35,7 @@ set(COMMON_SOURCES
   src/vector.c
   src/cpuinfo.c
   src/debug.c
+  src/ll.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})
