@@ -694,7 +694,7 @@ static void computeFrameDamage(Texture * tex)
   RECT dirtyRects[maxDamageRectsCount];
   UINT dirtyRectsBufferSizeRequired;
   if (FAILED(IDXGIOutputDuplication_GetFrameDirtyRects(this->dup,
-        ARRAY_LENGTH(dirtyRects), dirtyRects,
+        sizeof(dirtyRects), dirtyRects,
         &dirtyRectsBufferSizeRequired)))
     return;
 
@@ -709,7 +709,7 @@ static void computeFrameDamage(Texture * tex)
   DXGI_OUTDUPL_MOVE_RECT moveRects[(maxDamageRectsCount - dirtyRectsCount) / 2];
   UINT moveRectsBufferSizeRequired;
   if (FAILED(IDXGIOutputDuplication_GetFrameMoveRects(this->dup,
-        ARRAY_LENGTH(moveRects), moveRects,
+        sizeof(moveRects), moveRects,
         &moveRectsBufferSizeRequired)))
     return;
 
