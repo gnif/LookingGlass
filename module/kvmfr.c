@@ -571,3 +571,6 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Geoffrey McRae <geoff@hostfission.com>");
 MODULE_AUTHOR("Guanzhong Chen <quantum2048@gmail.com>");
 MODULE_VERSION("0.0.7");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
+MODULE_IMPORT_NS(DMA_BUF);
+#endif
