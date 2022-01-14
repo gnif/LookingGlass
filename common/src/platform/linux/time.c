@@ -148,5 +148,7 @@ void lgTimerDestroy(LGTimer * timer)
     return;
 
   ll_removeData(l_ts.timers, timer);
+  free(timer);
+
   destroyTimerThread();
 }
