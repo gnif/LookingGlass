@@ -28,9 +28,9 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 16
+#define KVMFR_VERSION 17
 
-#define KVMFR_MAX_DAMAGE_RECTS 64
+#define KVMFR_MAX_DAMAGE_RECTS 96
 
 #define LGMP_Q_POINTER     1
 #define LGMP_Q_FRAME       2
