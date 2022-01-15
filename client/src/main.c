@@ -258,9 +258,9 @@ static int renderThread(void * unused)
 
       ImFontAtlas_Clear(g_state.io->Fonts);
       ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
-        g_params.uiSize * g_state.windowScale, NULL, NULL);
+        g_params.uiSize * g_state.windowScale, NULL, g_state.fontRange.Data);
       g_state.fontLarge = ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts,
-        g_state.fontName, 1.3f * g_params.uiSize * g_state.windowScale, NULL, NULL);
+        g_state.fontName, 1.3f * g_params.uiSize * g_state.windowScale, NULL, g_state.fontRange.Data);
       if (!ImFontAtlas_Build(g_state.io->Fonts))
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
@@ -1011,6 +1011,17 @@ static int lg_run(void)
     DEBUG_INFO("Using font: %s", g_state.fontName);
   }
 
+  ImVector_ImWchar_Init(&g_state.fontRange);
+  ImFontGlyphRangesBuilder * rangeBuilder =
+    ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder();
+  ImFontGlyphRangesBuilder_AddRanges(rangeBuilder, (ImWchar[]) {
+    0x0020, 0x00FF, // Basic Latin + Latin Supplement
+    0x2190, 0x2193, // four directional arrows
+    0,
+  });
+  ImFontGlyphRangesBuilder_BuildRanges(rangeBuilder, &g_state.fontRange);
+  ImFontGlyphRangesBuilder_destroy(rangeBuilder);
+
   app_initOverlays();
 
   // initialize metrics ringbuffers
@@ -1560,6 +1571,7 @@ static void lg_shutdown(void)
   ringbuffer_free(&g_state.renderDuration);
 
   free(g_state.fontName);
+  ImVector_ImWchar_UnInit(&g_state.fontRange);
   igDestroyContext(NULL);
   free(g_state.imGuiIni);
 }

@@ -54,6 +54,7 @@ struct AppState
   struct ll      * overlays;
   char           * fontName;
   ImFont         * fontLarge;
+  ImVector_ImWchar fontRange;
   bool             overlayInput;
   ImGuiMouseCursor cursorLast;
   char           * imGuiIni;
