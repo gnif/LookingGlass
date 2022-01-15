@@ -421,6 +421,9 @@ void core_handleMouseNormal(double ex, double ey)
   if (!g_cursor.guest.valid)
     return;
 
+  if (g_cursor.realigning)
+    return;
+
   if (!core_inputEnabled())
     return;
 
@@ -478,11 +481,15 @@ void core_handleMouseNormal(double ex, double ey)
       else
       {
         /* wait for the move request to be processed */
+        g_cursor.realigning = true;
         do
         {
           uint32_t hostSerial;
           if (lgmpClientGetSerial(g_state.pointerQueue, &hostSerial) != LGMP_OK)
+          {
+            g_cursor.realigning = false;
             return;
+          }
 
           if (hostSerial >= setPosSerial)
             break;
@@ -491,9 +498,10 @@ void core_handleMouseNormal(double ex, double ey)
         }
         while(app_isRunning());
 
-        g_cursor.guest.x = msg.x;
-        g_cursor.guest.y = msg.y;
-        g_cursor.realign = false;
+        g_cursor.guest.x    = msg.x;
+        g_cursor.guest.y    = msg.y;
+        g_cursor.realign    = false;
+        g_cursor.realigning = false;
 
         if (!g_cursor.inWindow)
           return;

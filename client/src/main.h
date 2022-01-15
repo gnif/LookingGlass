@@ -250,6 +250,9 @@ struct CursorState
   /* true if the guest should be realigned to the host when next drawn */
   bool realign;
 
+  /* true if the guest is currently realigning to the host */
+  bool realigning;
+
   /* true if the cursor needs re-drawing/updating */
   bool redraw;
 
