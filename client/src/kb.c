@@ -145,6 +145,10 @@ const uint32_t linux_to_ps2[KEY_MAX] =
   [KEY_MUTE]             /* = USB 127 */ = 0x00E020,
   [KEY_VOLUMEUP]         /* = USB 128 */ = 0x00E030,
   [KEY_VOLUMEDOWN]       /* = USB 129 */ = 0x00E02E,
+  [KEY_NEXTSONG]         /* = USB 235 */ = 0x00E019,
+  [KEY_PLAYPAUSE]        /* = USB 232 */ = 0x00E022,
+  [KEY_PREVIOUSSONG]     /* = USB 234 */ = 0x00E010,
+  [KEY_STOPCD]           /* = USB 233 */ = 0x00E024,
 };
 
 const char * linux_to_str[KEY_MAX] =
@@ -271,6 +275,10 @@ const char * linux_to_str[KEY_MAX] =
   [KEY_MUTE]             = "KEY_MUTE",
   [KEY_VOLUMEUP]         = "KEY_VOLUMEUP",
   [KEY_VOLUMEDOWN]       = "KEY_VOLUMEDOWN",
+  [KEY_NEXTSONG]         = "KEY_NEXTSONG",
+  [KEY_PLAYPAUSE]        = "KEY_PLAYPAUSE",
+  [KEY_PREVIOUSSONG]     = "KEY_PREVIOUSSONG",
+  [KEY_STOPCD]           = "KEY_STOPCD",
 };
 
 const char * linux_to_display[KEY_MAX] =
@@ -397,6 +405,10 @@ const char * linux_to_display[KEY_MAX] =
   [KEY_MUTE]             = "Mute",
   [KEY_VOLUMEUP]         = "VolumeUp",
   [KEY_VOLUMEDOWN]       = "VolumeDown",
+  [KEY_NEXTSONG]         = "NextSong",
+  [KEY_PLAYPAUSE]        = "PlayPause",
+  [KEY_PREVIOUSSONG]     = "PreviousSong",
+  [KEY_STOPCD]           = "StopMedia",
 };
 
 void initImGuiKeyMap(int * keymap)
