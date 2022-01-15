@@ -133,6 +133,12 @@ static void bind_toggleOverlay(int sc, void * opaque)
   app_setOverlay(!g_state.overlayInput);
 }
 
+static void bind_toggleKey(int sc, void * opaque)
+{
+  purespice_keyDown((uintptr_t) opaque);
+  purespice_keyUp((uintptr_t) opaque);
+}
+
 void keybind_register(void)
 {
   app_registerKeybind(KEY_F, bind_fullscreen   , NULL, "Full screen toggle");
@@ -162,5 +168,9 @@ void keybind_register(void)
 
     app_registerKeybind(KEY_LEFTMETA , bind_passthrough, NULL, "Send LWin to the guest");
     app_registerKeybind(KEY_RIGHTMETA, bind_passthrough, NULL, "Send RWin to the guest");
+
+    app_registerKeybind(KEY_UP  , bind_toggleKey, (void *) PS2_VOLUME_UP  , "Send volume up to the guest");
+    app_registerKeybind(KEY_DOWN, bind_toggleKey, (void *) PS2_VOLUME_DOWN, "Send volume down to the guest");
+    app_registerKeybind(KEY_M   , bind_toggleKey, (void *) PS2_MUTE       , "Send mute to the guest");
   }
 }
