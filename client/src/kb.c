@@ -142,6 +142,9 @@ const uint32_t linux_to_ps2[KEY_MAX] =
   [KEY_F14]              /* = USB 105 */ = 0x00005E,
   [KEY_F15]              /* = USB 106 */ = 0x00005F,
   [KEY_PRINT]            /* = USB  70 */ = 0x00E037,
+  [KEY_MUTE]             /* = USB 127 */ = 0x00E020,
+  [KEY_VOLUMEUP]         /* = USB 128 */ = 0x00E030,
+  [KEY_VOLUMEDOWN]       /* = USB 129 */ = 0x00E02E,
 };
 
 const char * linux_to_str[KEY_MAX] =
@@ -265,6 +268,9 @@ const char * linux_to_str[KEY_MAX] =
   [KEY_F14]              = "KEY_F14",
   [KEY_F15]              = "KEY_F15",
   [KEY_PRINT]            = "KEY_PRINT",
+  [KEY_MUTE]             = "KEY_MUTE",
+  [KEY_VOLUMEUP]         = "KEY_VOLUMEUP",
+  [KEY_VOLUMEDOWN]       = "KEY_VOLUMEDOWN",
 };
 
 const char * linux_to_display[KEY_MAX] =
@@ -388,6 +394,9 @@ const char * linux_to_display[KEY_MAX] =
   [KEY_F14]              = "F14",
   [KEY_F15]              = "F15",
   [KEY_PRINT]            = "Print",
+  [KEY_MUTE]             = "Mute",
+  [KEY_VOLUMEUP]         = "VolumeUp",
+  [KEY_VOLUMEDOWN]       = "VolumeDown",
 };
 
 void initImGuiKeyMap(int * keymap)
