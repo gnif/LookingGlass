@@ -542,7 +542,6 @@ static bool dxgi_init(void)
   }
 
   DEBUG_INFO("Copy backend      : %s", this->backend->name);
-  DEBUG_INFO("AcquireLock       : %s", this->useAcquireLock ? "enabled"  : "disabled");
   DEBUG_INFO("Damage-aware copy : %s", this->disableDamage  ? "disabled" : "enabled" );
 
   for (int i = 0; i < this->maxTextures; ++i)
