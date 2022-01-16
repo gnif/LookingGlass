@@ -34,9 +34,9 @@
 #include <unistd.h>
 #include <dxgi.h>
 #include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <dxgi1_5.h>
 #include <d3d11.h>
-#include <d3d12.h>
 #include <d3dcommon.h>
 #include <versionhelpers.h>
 #include <dwmapi.h>
@@ -127,6 +127,13 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_INT,
       .value.x_int    = 5
     },
+    {
+      .module         = "dxgi",
+      .name           = "debug",
+      .description    = "Enable Direct3D debugging (developers only, massive performance penalty)",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
+    },
     {0}
   };
 
@@ -155,6 +162,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   if (this->maxTextures <= 0)
     this->maxTextures = 1;
 
+  this->debug               = option_get_bool("dxgi", "debug");
   this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
   this->dwmFlush            = option_get_bool("dxgi", "dwmFlush");
   this->disableDamage       = option_get_bool("dxgi", "disableDamage");
@@ -199,7 +207,8 @@ static bool dxgi_init(void)
 
   lgResetEvent(this->frameEvent);
 
-  status = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&this->factory);
+  status = CreateDXGIFactory2(this->debug ? DXGI_CREATE_FACTORY_DEBUG : 0,
+    &IID_IDXGIFactory1, (void **)&this->factory);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create DXGIFactory1", status);
@@ -399,6 +408,7 @@ static bool dxgi_init(void)
   DEBUG_INFO("Feature Level     : 0x%x"   , this->featureLevel);
   DEBUG_INFO("Capture Size      : %u x %u", this->width, this->height);
   DEBUG_INFO("AcquireLock       : %s"     , this->useAcquireLock ? "enabled" : "disabled");
+  DEBUG_INFO("Debug mode        : %s"     , this->debug ? "enabled" : "disabled");
 
   // try to reduce the latency
   {

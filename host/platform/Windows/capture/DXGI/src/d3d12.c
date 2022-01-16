@@ -22,9 +22,11 @@
 
 #include <assert.h>
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/windebug.h"
+#include "ods_capture.h"
 
 #define ALIGN_TO(value, align) (((value) + (align) - 1) & -(align))
 
@@ -43,6 +45,7 @@ struct D3D12Backend
 {
   int                   copySleep;
   ID3D12Device        * device;
+  ID3D12InfoQueue1    * debugInfoQueue;
   ID3D12CommandQueue  * commandQueue;
   ID3D12Resource      * src;
   struct D3D12Texture * texture;
@@ -61,6 +64,11 @@ typedef HRESULT (*D3D12CreateDevice_t)(
   void              **ppDevice
 );
 
+typedef HRESULT (*D3D12GetDebugInterface_t)(
+  REFIID riid,
+  void   **ppvDebug
+);
+
 static void d3d12_free();
 
 static bool d3d12_create(struct DXGIInterface * intf)
@@ -71,6 +79,22 @@ static bool d3d12_create(struct DXGIInterface * intf)
   HMODULE d3d12 = LoadLibrary("d3d12.dll");
   if (!d3d12)
     return false;
+
+  if (dxgi->debug)
+  {
+    D3D12GetDebugInterface_t D3D12GetDebugInterface = (D3D12GetDebugInterface_t)
+      GetProcAddress(d3d12, "D3D12GetDebugInterface");
+    ID3D12Debug1 * debug;
+    if (FAILED(status = D3D12GetDebugInterface(&IID_ID3D12Debug1, (void **)&debug)))
+      DEBUG_WINERROR("D3D12GetDebugInterface", status);
+    else
+    {
+      captureOutputDebugString();
+      ID3D12Debug1_EnableDebugLayer(debug);
+      ID3D12Debug1_SetEnableGPUBasedValidation(debug, TRUE);
+      ID3D12Debug1_SetEnableSynchronizedCommandQueueValidation(debug, TRUE);
+    }
+  }
 
   D3D12CreateDevice_t D3D12CreateDevice = (D3D12CreateDevice_t)
     GetProcAddress(d3d12, "D3D12CreateDevice");
