@@ -20,4 +20,5 @@ target_link_libraries(capture_DXGI
 target_include_directories(capture_DXGI
 	PRIVATE
 		src
+		"${PROJECT_TOP}/vendor/directx"
 )
