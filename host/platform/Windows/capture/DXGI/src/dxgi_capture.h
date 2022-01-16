@@ -73,6 +73,7 @@ struct DXGIInterface
   ID3D11Device             * device;
   ID3D11DeviceContext      * deviceContext;
   LG_Lock                    deviceContextLock;
+  bool                       debug;
   bool                       useAcquireLock;
   bool                       dwmFlush;
   bool                       disableDamage;
