@@ -59,6 +59,9 @@ struct LG_AudioDevOps
 
     /* [optional] called to set muting of the output */
     void (*mute)(bool mute);
+
+    /* return the current total playback latency in microseconds */
+    uint64_t (*latency)(void);
   }
   playback;
 

@@ -18,6 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include "audio.h"
 #include "main.h"
 #include "common/array.h"
 #include "common/util.h"
@@ -36,6 +37,10 @@ typedef struct
     int      volumeChannels;
     uint16_t volume[8];
     bool     mute;
+
+    LG_Lock     lock;
+    RingBuffer  timings;
+    GraphHandle graph;
   }
   playback;
 
@@ -60,6 +65,7 @@ void audio_init(void)
     if (LG_AudioDevs[i]->init())
     {
       audio.audioDev = LG_AudioDevs[i];
+      LG_LOCK_INIT(audio.playback.lock);
       DEBUG_INFO("Using AudioDev: %s", audio.audioDev->name);
       return;
     }
@@ -77,11 +83,22 @@ void audio_free(void)
 
   audio.audioDev->free();
   audio.audioDev = NULL;
+  LG_LOCK_FREE(audio.playback.lock);
 }
 
 bool audio_supportsPlayback(void)
 {
   return audio.audioDev && audio.audioDev->playback.start;
+}
+
+static const char * audioGraphFormatFn(const char * name,
+    float min, float max, float avg, float freq, float last)
+{
+  static char title[64];
+  snprintf(title, sizeof(title),
+      "%s: min:%4.2f max:%4.2f avg:%4.2f now:%4.2f",
+      name, min, max, avg, last);
+  return title;
 }
 
 void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
@@ -101,6 +118,8 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
       return;
   }
 
+  LG_LOCK(audio.playback.lock);
+
   lastChannels   = channels;
   lastSampleRate = sampleRate;
   audio.playback.started = true;
@@ -116,6 +135,16 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   // set the inital mute state
   if (audio.audioDev->playback.mute)
     audio.audioDev->playback.mute(audio.playback.mute);
+
+  // if the audio dev can report it's latency setup a timing graph
+  if (audio.audioDev->playback.latency)
+  {
+    audio.playback.timings = ringbuffer_new(2400, sizeof(float));
+    audio.playback.graph   = app_registerGraph("PLAYBACK",
+        audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
+  }
+
+  LG_UNLOCK(audio.playback.lock);
 }
 
 void audio_playbackStop(void)
@@ -123,8 +152,18 @@ void audio_playbackStop(void)
   if (!audio.audioDev || !audio.playback.started)
     return;
 
+  LG_LOCK(audio.playback.lock);
+
   audio.audioDev->playback.stop();
   audio.playback.started = false;
+
+  if (audio.playback.timings)
+  {
+    app_unregisterGraph(audio.playback.graph);
+    ringbuffer_free(&audio.playback.timings);
+  }
+
+  LG_UNLOCK(audio.playback.lock);
 }
 
 void audio_playbackVolume(int channels, const uint16_t volume[])
@@ -243,4 +282,20 @@ void audio_recordMute(bool mute)
     return;
 
   audio.audioDev->record.mute(mute);
+}
+
+void audio_tick(unsigned long long tickCount)
+{
+  LG_LOCK(audio.playback.lock);
+  if (!audio.playback.timings)
+  {
+    LG_UNLOCK(audio.playback.lock);
+    return;
+  }
+
+  const uint64_t latency  = audio.audioDev->playback.latency();
+  const float    flatency = latency > 0 ? (float)latency / 1000.0f : 0.0f;
+  ringbuffer_push(audio.playback.timings, &flatency);
+
+  LG_UNLOCK(audio.playback.lock);
 }

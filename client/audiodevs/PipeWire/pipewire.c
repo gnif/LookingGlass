@@ -370,6 +370,16 @@ static void pipewire_playbackMute(bool mute)
   pw_thread_loop_unlock(pw.thread);
 }
 
+static uint64_t pipewire_playbackLatency(void)
+{
+  const int frames = ringbuffer_getCount(pw.playback.buffer);
+  if (frames == 0)
+    return 0;
+
+  // TODO: we should really include the hw latency here too
+  return (uint64_t)pw.playback.sampleRate * 1000ULL / frames;
+}
+
 static void pipewire_recordStopStream(void)
 {
   if (!pw.record.stream)
@@ -527,11 +537,12 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .free   = pipewire_free,
   .playback =
   {
-    .start  = pipewire_playbackStart,
-    .play   = pipewire_playbackPlay,
-    .stop   = pipewire_playbackStop,
-    .volume = pipewire_playbackVolume,
-    .mute   = pipewire_playbackMute
+    .start   = pipewire_playbackStart,
+    .play    = pipewire_playbackPlay,
+    .stop    = pipewire_playbackStop,
+    .volume  = pipewire_playbackVolume,
+    .mute    = pipewire_playbackMute,
+    .latency = pipewire_playbackLatency
   },
   .record =
   {
