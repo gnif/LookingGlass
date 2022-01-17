@@ -228,7 +228,8 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
 
 void overlayGraph_unregister(GraphHandle handle)
 {
-  handle->enabled = false;
+  ll_removeData(gs.graphs, handle);
+  free(handle);
 }
 
 void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
