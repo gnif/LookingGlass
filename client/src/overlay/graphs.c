@@ -230,6 +230,9 @@ void overlayGraph_unregister(GraphHandle handle)
 {
   ll_removeData(gs.graphs, handle);
   free(handle);
+
+  if (gs.show)
+    app_invalidateWindow(false);
 }
 
 void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
