@@ -313,6 +313,9 @@ void app_handleKeyPress(int sc)
     if (g_state.escapeActive)
     {
       g_state.escapeAction = sc;
+      KeybindHandle handle = g_state.bindings[sc];
+      if (handle)
+        handle->callback(sc, handle->opaque);
       return;
     }
   }
@@ -357,15 +360,6 @@ void app_handleKeyRelease(int sc)
       if (!g_state.escapeHelp && g_params.useSpiceInput &&
           !app_isOverlayMode())
         core_setGrab(!g_cursor.grab);
-    }
-    else
-    {
-      KeybindHandle handle = g_state.bindings[sc];
-      if (handle)
-      {
-        handle->callback(sc, handle->opaque);
-        return;
-      }
     }
 
     if (sc == g_params.escapeKey)
