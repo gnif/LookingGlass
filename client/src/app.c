@@ -948,3 +948,28 @@ void app_invalidateOverlay(bool renderTwice)
     g_state.renderImGuiTwice = true;
   app_invalidateWindow(false);
 }
+
+bool app_guestIsLinux(void)
+{
+  return g_state.guestOS == KVMFR_OS_LINUX;
+}
+
+bool app_guestIsWindows(void)
+{
+  return g_state.guestOS == KVMFR_OS_WINDOWS;
+}
+
+bool app_guestIsOSX(void)
+{
+  return g_state.guestOS == KVMFR_OS_OSX;
+}
+
+bool app_guestIsBSD(void)
+{
+  return g_state.guestOS == KVMFR_OS_BSD;
+}
+
+bool app_guestIsOther(void)
+{
+  return g_state.guestOS == KVMFR_OS_OTHER;
+}

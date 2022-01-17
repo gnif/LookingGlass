@@ -798,7 +798,7 @@ int main_frameThread(void * unused)
 
 static void checkUUID(void)
 {
-  if (!g_state.spiceUUIDValid || !g_state.guestUUIDValid)
+  if (!g_state.spiceReady || !g_state.guestUUIDValid)
     return;
 
   if (memcmp(g_state.spiceUUID, g_state.guestUUID,
@@ -836,8 +836,11 @@ void spiceReady(void)
     return;
 
   memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
-  g_state.spiceUUIDValid = true;
+  g_state.spiceReady = true;
   checkUUID();
+
+  if (g_params.useSpiceInput)
+    keybind_spiceRegister();
 
   purespice_freeServerInfo(&info);
 }
@@ -1034,6 +1037,9 @@ static int lg_run(void)
 
   initImGuiKeyMap(g_state.io->KeyMap);
 
+  // unknown guest OS at this time
+  g_state.guestOS = KVMFR_OS_OTHER;
+
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
     if (LG_DisplayServers[i]->probe())
@@ -1179,7 +1185,7 @@ static int lg_run(void)
   // interactivity.
   g_state.overlayFrameTime = min(g_state.frameTime, 1000000000ULL / 60ULL);
 
-  keybind_register();
+  keybind_commonRegister();
 
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
@@ -1449,6 +1455,11 @@ restart:
         DEBUG_INFO("OS       : %s", type);
         if (osInfo->name[0])
           DEBUG_INFO("OS Name  : %s", osInfo->name);
+
+        g_state.guestOS = osInfo->os;
+
+        if (g_state.spiceReady && g_params.useSpiceInput)
+          keybind_spiceRegister();
         break;
       }
 

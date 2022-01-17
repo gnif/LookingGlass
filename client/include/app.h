@@ -162,4 +162,11 @@ void app_releaseKeybind(KeybindHandle * handle);
  */
 void app_releaseAllKeybinds(void);
 
+bool app_guestIsLinux(void);
+bool app_guestIsWindows(void);
+bool app_guestIsOSX(void);
+bool app_guestIsBSD(void);
+bool app_guestIsOther(void);
+
+
 #endif

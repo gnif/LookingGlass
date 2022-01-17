@@ -139,38 +139,83 @@ static void bind_toggleKey(int sc, void * opaque)
   purespice_keyUp((uintptr_t) opaque);
 }
 
-void keybind_register(void)
+void keybind_commonRegister(void)
 {
-  app_registerKeybind(KEY_F, bind_fullscreen   , NULL, "Full screen toggle");
-  app_registerKeybind(KEY_V, bind_video        , NULL, "Video stream toggle");
-  app_registerKeybind(KEY_R, bind_rotate       , NULL, "Rotate the output clockwise by 90° increments");
-  app_registerKeybind(KEY_Q, bind_quit         , NULL, "Quit");
-  app_registerKeybind(KEY_O, bind_toggleOverlay, NULL, "Toggle overlay");
+  app_registerKeybind(KEY_F, bind_fullscreen   , NULL,
+      "Full screen toggle");
+  app_registerKeybind(KEY_V, bind_video        , NULL,
+      "Video stream toggle");
+  app_registerKeybind(KEY_R, bind_rotate       , NULL,
+      "Rotate the output clockwise by 90° increments");
+  app_registerKeybind(KEY_Q, bind_quit         , NULL,
+      "Quit");
+  app_registerKeybind(KEY_O, bind_toggleOverlay, NULL,
+      "Toggle overlay");
+}
 
-  if (g_params.useSpiceInput)
+void keybind_spiceRegister(void)
+{
+  /* register the common keybinds for spice */
+  static bool firstTime = true;
+  if (firstTime)
   {
-    app_registerKeybind(KEY_I     , bind_input    , NULL        , "Spice keyboard & mouse toggle");
-    app_registerKeybind(KEY_INSERT, bind_mouseSens, (void*)true , "Increase mouse sensitivity in capture mode");
-    app_registerKeybind(KEY_DELETE, bind_mouseSens, (void*)false, "Descrease mouse sensitivity in capture mode");
+    app_registerKeybind(KEY_I, bind_input, NULL,
+        "Spice keyboard & mouse toggle");
 
-    app_registerKeybind(KEY_F1 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F1 to the guest");
-    app_registerKeybind(KEY_F2 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F2 to the guest");
-    app_registerKeybind(KEY_F3 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F3 to the guest");
-    app_registerKeybind(KEY_F4 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F4 to the guest");
-    app_registerKeybind(KEY_F5 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F5 to the guest");
-    app_registerKeybind(KEY_F6 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F6 to the guest");
-    app_registerKeybind(KEY_F7 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F7 to the guest");
-    app_registerKeybind(KEY_F8 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F8 to the guest");
-    app_registerKeybind(KEY_F9 , bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F9 to the guest");
-    app_registerKeybind(KEY_F10, bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F10 to the guest");
-    app_registerKeybind(KEY_F11, bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F11 to the guest");
-    app_registerKeybind(KEY_F12, bind_ctrlAltFn, NULL, "Send Ctrl+Alt+F12 to the guest");
+    app_registerKeybind(KEY_INSERT, bind_mouseSens, (void *) true ,
+        "Increase mouse sensitivity in capture mode");
+    app_registerKeybind(KEY_DELETE, bind_mouseSens, (void *) false,
+        "Descrease mouse sensitivity in capture mode");
 
-    app_registerKeybind(KEY_LEFTMETA , bind_passthrough, NULL, "Send LWin to the guest");
-    app_registerKeybind(KEY_RIGHTMETA, bind_passthrough, NULL, "Send RWin to the guest");
+    app_registerKeybind(KEY_UP  , bind_toggleKey, (void *) PS2_VOLUME_UP  ,
+        "Send volume up to the guest");
+    app_registerKeybind(KEY_DOWN, bind_toggleKey, (void *) PS2_VOLUME_DOWN,
+        "Send volume down to the guest");
+    app_registerKeybind(KEY_M   , bind_toggleKey, (void *) PS2_MUTE       ,
+        "Send mute to the guest");
 
-    app_registerKeybind(KEY_UP  , bind_toggleKey, (void *) PS2_VOLUME_UP  , "Send volume up to the guest");
-    app_registerKeybind(KEY_DOWN, bind_toggleKey, (void *) PS2_VOLUME_DOWN, "Send volume down to the guest");
-    app_registerKeybind(KEY_M   , bind_toggleKey, (void *) PS2_MUTE       , "Send mute to the guest");
+    app_registerKeybind(KEY_LEFTMETA , bind_passthrough, NULL,
+        "Send LWin to the guest");
+    app_registerKeybind(KEY_RIGHTMETA, bind_passthrough, NULL,
+        "Send RWin to the guest");
+
+    firstTime = false;
+  }
+
+  /* release any OS based keybinds that have been bound */
+  static KeybindHandle handles[32] = { 0 }; // increase size as needed
+  static int handleCount = 0;
+  for(int i = 0; i < handleCount; ++i)
+    app_releaseKeybind(&handles[i]);
+  handleCount = 0;
+
+
+  /* register OS based keybinds */
+  if (app_guestIsLinux())
+  {
+    handles[handleCount++] = app_registerKeybind(KEY_F1 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F1 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F2 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F2 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F3 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F3 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F4 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F4 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F5 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F5 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F6 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F6 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F7 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F7 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F8 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F8 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F9 , bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F9 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F10, bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F10 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F11, bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F11 to the guest");
+    handles[handleCount++] = app_registerKeybind(KEY_F12, bind_ctrlAltFn, NULL,
+        "Send Ctrl+Alt+F12 to the guest");
   }
 }

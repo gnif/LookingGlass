@@ -70,9 +70,10 @@ struct AppState
   bool                         jitRender;
 
   uint8_t spiceUUID[16];
-  bool    spiceUUIDValid;
+  bool    spiceReady;
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
+  KVMFROS guestOS;
 
   bool                 stopVideo;
   bool                 ignoreInput;

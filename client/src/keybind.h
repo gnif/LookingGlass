@@ -21,6 +21,7 @@
 #ifndef _H_LG_KEYBIND_
 #define _H_LG_KEYBIND_
 
-void keybind_register(void);
+void keybind_commonRegister(void);
+void keybind_spiceRegister(void);
 
 #endif
