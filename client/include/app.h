@@ -110,8 +110,11 @@ void app_invalidateOverlay(bool renderTwice);
 
 struct OverlayGraph;
 typedef struct OverlayGraph * GraphHandle;
+typedef const char * (*GraphFormatFn)(const char * name,
+    float min, float max, float avg, float freq, float last);
 
-GraphHandle app_registerGraph(const char * name, RingBuffer buffer, float min, float max);
+GraphHandle app_registerGraph(const char * name, RingBuffer buffer,
+    float min, float max, GraphFormatFn formatFn);
 void app_unregisterGraph(GraphHandle handle);
 
 void app_overlayConfigRegister(const char * title,

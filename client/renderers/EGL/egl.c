@@ -258,7 +258,8 @@ static bool egl_create(LG_Renderer ** renderer, const LG_RendererParams params,
   this->desktopDamage[0].count = -1;
 
   this->importTimings = ringbuffer_new(256, sizeof(float));
-  this->importGraph   = app_registerGraph("IMPORT", this->importTimings, 0.0f, 5.0f);
+  this->importGraph   = app_registerGraph("IMPORT", this->importTimings,
+      0.0f, 5.0f, NULL);
 
   *needsOpenGL = false;
   return true;

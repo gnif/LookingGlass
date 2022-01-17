@@ -36,11 +36,12 @@ static struct GraphState gs = {0};
 
 struct OverlayGraph
 {
-  const char * name;
-  RingBuffer   buffer;
-  bool         enabled;
-  float        min;
-  float        max;
+  const char *  name;
+  RingBuffer    buffer;
+  bool          enabled;
+  float         min;
+  float         max;
+  GraphFormatFn formatFn;
 };
 
 
@@ -93,6 +94,7 @@ struct BufferMetrics
   float sum;
   float avg;
   float freq;
+  float last;
 };
 
 static bool rbCalcMetrics(int index, void * value_, void * udata_)
@@ -115,6 +117,7 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
     udata->max = *value;
 
   udata->sum += *value;
+  udata->last = *value;
   return true;
 }
 
@@ -170,10 +173,18 @@ static int graphs_render(void * udata, bool interactive,
       metrics.freq = 1000.0f / metrics.avg;
     }
 
-    char title[64];
-    snprintf(title, sizeof(title),
-        "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
-        graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
+    const char * title;
+    if (graph->formatFn)
+      title = graph->formatFn(graph->name,
+          metrics.min, metrics.max, metrics.avg, metrics.freq, metrics.last);
+    else
+    {
+      static char _title[64];
+      snprintf(_title, sizeof(_title),
+          "%s: min:%4.2f max:%4.2f avg:%4.2f/%4.2fHz",
+          graph->name, metrics.min, metrics.max, metrics.avg, metrics.freq);
+      title = _title;
+    }
 
     igPlotLines_FloatPtr(
         "",
@@ -201,14 +212,16 @@ struct LG_OverlayOps LGOverlayGraphs =
   .render         = graphs_render
 };
 
-GraphHandle overlayGraph_register(const char * name, RingBuffer buffer, float min, float max)
+GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
+    float min, float max, GraphFormatFn formatFn)
 {
   struct OverlayGraph * graph = malloc(sizeof(*graph));
-  graph->name    = name;
-  graph->buffer  = buffer;
-  graph->enabled = true;
-  graph->min     = min;
-  graph->max     = max;
+  graph->name     = name;
+  graph->buffer   = buffer;
+  graph->enabled  = true;
+  graph->min      = min;
+  graph->max      = max;
+  graph->formatFn = formatFn;
   ll_push(gs.graphs, graph);
   return graph;
 }
