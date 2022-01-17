@@ -298,4 +298,6 @@ void audio_tick(unsigned long long tickCount)
   ringbuffer_push(audio.playback.timings, &flatency);
 
   LG_UNLOCK(audio.playback.lock);
+
+  app_invalidateGraphs();
 }
