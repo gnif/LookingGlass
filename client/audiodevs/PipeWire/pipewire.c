@@ -197,6 +197,7 @@ static void pipewire_playbackStopStream(void)
   pw_stream_destroy(pw.playback.stream);
   pw.playback.stream    = NULL;
   pw.playback.rateMatch = NULL;
+  ringbuffer_free(&pw.playback.buffer);
   pw_thread_loop_unlock(pw.thread);
 }
 

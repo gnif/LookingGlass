@@ -72,6 +72,9 @@ void audio_free(void)
   if (!audio.audioDev)
     return;
 
+  audio_playbackStop();
+  audio_recordStop();
+
   audio.audioDev->free();
   audio.audioDev = NULL;
 }
