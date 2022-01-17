@@ -26,7 +26,6 @@
 #include <math.h>
 
 #include "common/debug.h"
-#include "common/ringbuffer.h"
 #include "common/stringutils.h"
 #include "common/util.h"
 
@@ -50,11 +49,11 @@ struct PipeWire
     struct pw_stream * stream;
     struct spa_io_rate_match * rateMatch;
 
-    int    channels;
-    int    sampleRate;
-    int    stride;
+    int            channels;
+    int            sampleRate;
+    int            stride;
+    LG_AudioPullFn pullFn;
 
-    RingBuffer buffer;
     StreamState state;
   }
   playback;
@@ -63,10 +62,10 @@ struct PipeWire
   {
     struct pw_stream * stream;
 
-    int    channels;
-    int    sampleRate;
-    int    stride;
-    void (*dataFn)(uint8_t * data, size_t size);
+    int            channels;
+    int            sampleRate;
+    int            stride;
+    LG_AudioPushFn pushFn;
 
     bool   active;
   }
@@ -90,19 +89,6 @@ static void pipewire_onPlaybackProcess(void * userdata)
 {
   struct pw_buffer * pbuf;
 
-  if (!ringbuffer_getCount(pw.playback.buffer))
-  {
-    if (pw.playback.state == STREAM_STATE_FLUSHING)
-    {
-      pw_thread_loop_lock(pw.thread);
-      pw_stream_flush(pw.playback.stream, true);
-      pw.playback.state = STREAM_STATE_DRAINING;
-      pw_thread_loop_unlock(pw.thread);
-    }
-
-    return;
-  }
-
   if (!(pbuf = pw_stream_dequeue_buffer(pw.playback.stream)))
   {
     DEBUG_WARN("out of buffers");
@@ -119,8 +105,24 @@ static void pipewire_onPlaybackProcess(void * userdata)
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
     frames = min(frames, pw.playback.rateMatch->size);
 
-  void * values = ringbuffer_consume(pw.playback.buffer, &frames);
-  memcpy(dst, values, frames * pw.playback.stride);
+  uint8_t * data;
+  frames = pw.playback.pullFn(&data, frames);
+  if (!frames)
+  {
+    if (pw.playback.state == STREAM_STATE_FLUSHING)
+    {
+      pw_thread_loop_lock(pw.thread);
+      pw_stream_flush(pw.playback.stream, true);
+      pw.playback.state = STREAM_STATE_DRAINING;
+      pw_thread_loop_unlock(pw.thread);
+    }
+
+    sbuf->datas[0].chunk->size = 0;
+    pw_stream_queue_buffer(pw.playback.stream, pbuf);
+    return;
+  }
+
+  memcpy(dst, data, frames * pw.playback.stride);
 
   sbuf->datas[0].chunk->offset = 0;
   sbuf->datas[0].chunk->stride = pw.playback.stride;
@@ -197,11 +199,11 @@ static void pipewire_playbackStopStream(void)
   pw_stream_destroy(pw.playback.stream);
   pw.playback.stream    = NULL;
   pw.playback.rateMatch = NULL;
-  ringbuffer_free(&pw.playback.buffer);
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_playbackStart(int channels, int sampleRate)
+static void pipewire_playbackSetup(int channels, int sampleRate,
+   LG_AudioPullFn pullFn)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -226,8 +228,7 @@ static void pipewire_playbackStart(int channels, int sampleRate)
   pw.playback.channels   = channels;
   pw.playback.sampleRate = sampleRate;
   pw.playback.stride     = sizeof(uint16_t) * channels;
-  pw.playback.buffer     = ringbuffer_new(bufferFrames,
-      channels * sizeof(uint16_t));
+  pw.playback.pullFn     = pullFn;
 
   int maxLatencyFrames = bufferFrames / 2;
   char maxLatency[32];
@@ -277,28 +278,21 @@ static void pipewire_playbackStart(int channels, int sampleRate)
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_playbackPlay(uint8_t * data, size_t size)
+static void pipewire_playbackStart(void)
 {
   if (!pw.playback.stream)
     return;
-
-  ringbuffer_append(pw.playback.buffer, data, size / pw.playback.stride);
 
   if (pw.playback.state != STREAM_STATE_ACTIVE &&
     pw.playback.state != STREAM_STATE_RESTARTING)
   {
     pw_thread_loop_lock(pw.thread);
 
-    switch (pw.playback.state) {
+    switch (pw.playback.state)
+    {
       case STREAM_STATE_INACTIVE:
-        // Don't start playback until the buffer is sufficiently full to avoid
-        // glitches
-        if (ringbuffer_getCount(pw.playback.buffer) >=
-          ringbuffer_getLength(pw.playback.buffer) / 4)
-        {
-          pw_stream_set_active(pw.playback.stream, true);
-          pw.playback.state = STREAM_STATE_ACTIVE;
-        }
+        pw_stream_set_active(pw.playback.stream, true);
+        pw.playback.state = STREAM_STATE_ACTIVE;
         break;
 
       case STREAM_STATE_FLUSHING:
@@ -370,14 +364,9 @@ static void pipewire_playbackMute(bool mute)
   pw_thread_loop_unlock(pw.thread);
 }
 
-static uint64_t pipewire_playbackLatency(void)
+static size_t pipewire_playbackLatency(void)
 {
-  const int frames = ringbuffer_getCount(pw.playback.buffer);
-  if (frames == 0)
-    return 0;
-
-  // TODO: we should really include the hw latency here too
-  return (uint64_t)pw.playback.sampleRate * 1000ULL / frames;
+  return 0;
 }
 
 static void pipewire_recordStopStream(void)
@@ -408,17 +397,17 @@ static void pipewire_onRecordProcess(void * userdata)
     return;
 
   dst += sbuf->datas[0].chunk->offset;
-  pw.record.dataFn(dst,
+  pw.record.pushFn(dst,
     min(
       sbuf->datas[0].chunk->size,
-      sbuf->datas[0].maxsize - sbuf->datas[0].chunk->offset)
+      sbuf->datas[0].maxsize - sbuf->datas[0].chunk->offset) / pw.record.stride
     );
 
   pw_stream_queue_buffer(pw.record.stream, pbuf);
 }
 
 static void pipewire_recordStart(int channels, int sampleRate,
-  void (*dataFn)(uint8_t * data, size_t size))
+    LG_AudioPushFn pushFn)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -439,7 +428,7 @@ static void pipewire_recordStart(int channels, int sampleRate,
   pw.record.channels   = channels;
   pw.record.sampleRate = sampleRate;
   pw.record.stride     = sizeof(uint16_t) * channels;
-  pw.record.dataFn     = dataFn;
+  pw.record.pushFn     = pushFn;
 
   pw_thread_loop_lock(pw.thread);
   pw.record.stream = pw_stream_new_simple(
@@ -526,7 +515,6 @@ static void pipewire_free(void)
   pw.loop   = NULL;
   pw.thread = NULL;
 
-  ringbuffer_free(&pw.playback.buffer);
   pw_deinit();
 }
 
@@ -537,8 +525,8 @@ struct LG_AudioDevOps LGAD_PipeWire =
   .free   = pipewire_free,
   .playback =
   {
+    .setup   = pipewire_playbackSetup,
     .start   = pipewire_playbackStart,
-    .play    = pipewire_playbackPlay,
     .stop    = pipewire_playbackStop,
     .volume  = pipewire_playbackVolume,
     .mute    = pipewire_playbackMute,

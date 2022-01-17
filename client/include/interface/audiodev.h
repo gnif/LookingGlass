@@ -25,6 +25,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
+typedef int  (*LG_AudioPullFn)(uint8_t ** data, int frames);
+typedef void (*LG_AudioPushFn)(uint8_t *  data, int frames);
+
 struct LG_AudioDevOps
 {
   /* internal name of the audio for debugging */
@@ -41,15 +44,13 @@ struct LG_AudioDevOps
 
   struct
   {
-    /* start the playback audio stream
+    /* setup the stream for playback but don't start it yet
      * Note: currently SPICE only supports S16 samples so always assume so
      */
-    void (*start)(int channels, int sampleRate);
+    void (*setup)(int channels, int sampleRate, LG_AudioPullFn pullFn);
 
-    /* called for each packet of output audio to play
-     * Note: size is the size of data in bytes, not frames/samples
-     */
-    void (*play)(uint8_t * data, size_t size);
+    /* called when playback is about to start */
+    void (*start)(void);
 
     /* called when SPICE reports the audio stream has stopped */
     void (*stop)(void);
@@ -70,8 +71,7 @@ struct LG_AudioDevOps
     /* start the record stream
      * Note: currently SPICE only supports S16 samples so always assume so
      */
-    void (*start)(int channels, int sampleRate,
-        void (*dataFn)(uint8_t * data, size_t size));
+    void (*start)(int channels, int sampleRate, LG_AudioPushFn pushFn);
 
     /* called when SPICE reports the audio stream has stopped */
     void (*stop)(void);

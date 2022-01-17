@@ -22,6 +22,7 @@
 #include "main.h"
 #include "common/array.h"
 #include "common/util.h"
+#include "common/ringbuffer.h"
 
 #include "dynamic/audiodev.h"
 
@@ -33,10 +34,14 @@ typedef struct
 
   struct
   {
-    bool     started;
-    int      volumeChannels;
-    uint16_t volume[8];
-    bool     mute;
+    bool       setup;
+    bool       started;
+    int        volumeChannels;
+    uint16_t   volume[8];
+    bool       mute;
+    int        sampleRate;
+    int        stride;
+    RingBuffer buffer;
 
     LG_Lock     lock;
     RingBuffer  timings;
@@ -50,6 +55,7 @@ typedef struct
     int      volumeChannels;
     uint16_t volume[8];
     bool     mute;
+    int      stride;
     uint32_t time;
   }
   record;
@@ -101,6 +107,18 @@ static const char * audioGraphFormatFn(const char * name,
   return title;
 }
 
+static int playbackPullFrames(uint8_t ** data, int frames)
+{
+  LG_LOCK(audio.playback.lock);
+  if (audio.playback.buffer)
+    *data = ringbuffer_consume(audio.playback.buffer, &frames);
+  else
+    frames = 0;
+  LG_UNLOCK(audio.playback.lock);
+
+  return frames;
+}
+
 void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   uint32_t time)
 {
@@ -110,7 +128,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   static int lastChannels   = 0;
   static int lastSampleRate = 0;
 
-  if (audio.playback.started)
+  if (audio.playback.setup)
   {
     if (channels != lastChannels || sampleRate != lastSampleRate)
       audio.audioDev->playback.stop();
@@ -120,11 +138,18 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
 
   LG_LOCK(audio.playback.lock);
 
+  const int bufferFrames = sampleRate / 10;
+  audio.playback.buffer = ringbuffer_new(bufferFrames,
+      channels * sizeof(uint16_t));
+
   lastChannels   = channels;
   lastSampleRate = sampleRate;
-  audio.playback.started = true;
 
-  audio.audioDev->playback.start(channels, sampleRate);
+  audio.playback.sampleRate = sampleRate;
+  audio.playback.stride     = channels * sizeof(uint16_t);
+  audio.playback.setup      = true;
+
+  audio.audioDev->playback.setup(channels, sampleRate, playbackPullFrames);
 
   // if a volume level was stored, set it before we return
   if (audio.playback.volumeChannels)
@@ -137,12 +162,9 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
     audio.audioDev->playback.mute(audio.playback.mute);
 
   // if the audio dev can report it's latency setup a timing graph
-  if (audio.audioDev->playback.latency)
-  {
-    audio.playback.timings = ringbuffer_new(1200, sizeof(float));
-    audio.playback.graph   = app_registerGraph("PLAYBACK",
-        audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
-  }
+  audio.playback.timings = ringbuffer_new(1200, sizeof(float));
+  audio.playback.graph   = app_registerGraph("PLAYBACK",
+      audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
 
   LG_UNLOCK(audio.playback.lock);
 }
@@ -155,7 +177,9 @@ void audio_playbackStop(void)
   LG_LOCK(audio.playback.lock);
 
   audio.audioDev->playback.stop();
+  audio.playback.setup   = false;
   audio.playback.started = false;
+  ringbuffer_free(&audio.playback.buffer);
 
   if (audio.playback.timings)
   {
@@ -176,7 +200,7 @@ void audio_playbackVolume(int channels, const uint16_t volume[])
   memcpy(audio.playback.volume, volume, sizeof(uint16_t) * channels);
   audio.playback.volumeChannels = channels;
 
-  if (!audio.playback.started)
+  if (!audio.playback.setup)
     return;
 
   audio.audioDev->playback.volume(channels, volume);
@@ -189,7 +213,7 @@ void audio_playbackMute(bool mute)
 
   // store the value so we can restore it if the stream is restarted
   audio.playback.mute = mute;
-  if (!audio.playback.started)
+  if (!audio.playback.setup)
     return;
 
   audio.audioDev->playback.mute(mute);
@@ -197,10 +221,20 @@ void audio_playbackMute(bool mute)
 
 void audio_playbackData(uint8_t * data, size_t size)
 {
-  if (!audio.audioDev || !audio.playback.started)
+  if (!audio.audioDev || !audio.playback.setup)
     return;
 
-  audio.audioDev->playback.play(data, size);
+  const int frames = size / audio.playback.stride;
+  ringbuffer_append(audio.playback.buffer, data, frames);
+
+  // don't start playback until the buffer is sifficiently full to avoid
+  // glitches
+  if (!audio.playback.started && ringbuffer_getCount(audio.playback.buffer) >=
+      ringbuffer_getLength(audio.playback.buffer) / 4)
+  {
+    audio.playback.started = true;
+    audio.audioDev->playback.start();
+  }
 }
 
 bool audio_supportsRecord(void)
@@ -208,9 +242,9 @@ bool audio_supportsRecord(void)
   return audio.audioDev && audio.audioDev->record.start;
 }
 
-static void recordData(uint8_t * data, size_t size)
+static void recordPushFrames(uint8_t * data, int frames)
 {
-  purespice_writeAudio(data, size, 0);
+  purespice_writeAudio(data, frames * audio.record.stride, 0);
 }
 
 void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
@@ -232,8 +266,9 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   lastChannels   = channels;
   lastSampleRate = sampleRate;
   audio.record.started = true;
+  audio.record.stride  = channels * sizeof(uint16_t);
 
-  audio.audioDev->record.start(channels, sampleRate, recordData);
+  audio.audioDev->record.start(channels, sampleRate, recordPushFrames);
 
   // if a volume level was stored, set it before we return
   if (audio.record.volumeChannels)
@@ -287,15 +322,21 @@ void audio_recordMute(bool mute)
 void audio_tick(unsigned long long tickCount)
 {
   LG_LOCK(audio.playback.lock);
-  if (!audio.playback.timings)
+  if (!audio.playback.buffer)
   {
     LG_UNLOCK(audio.playback.lock);
     return;
   }
 
-  const uint64_t latency  = audio.audioDev->playback.latency();
-  const float    flatency = latency > 0 ? (float)latency / 1000.0f : 0.0f;
-  ringbuffer_push(audio.playback.timings, &flatency);
+  int frames = ringbuffer_getCount(audio.playback.buffer);
+  if (audio.audioDev->playback.latency)
+    frames += audio.audioDev->playback.latency();
+
+  const float latency = frames > 0
+    ? audio.playback.sampleRate / (float)frames
+    : 0.0f;
+
+  ringbuffer_push(audio.playback.timings, &latency);
 
   LG_UNLOCK(audio.playback.lock);
 

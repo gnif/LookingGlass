@@ -25,7 +25,6 @@
 #include <math.h>
 
 #include "common/debug.h"
-#include "common/ringbuffer.h"
 
 struct PulseAudio
 {
@@ -42,7 +41,7 @@ struct PulseAudio
   int                    sinkSampleRate;
   int                    sinkChannels;
   int                    sinkStride;
-  RingBuffer             sinkBuffer;
+  LG_AudioPullFn         sinkPullFn;
 };
 
 static struct PulseAudio pa = {0};
@@ -221,14 +220,14 @@ static void pulseaudio_free(void)
 
 static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
 {
-  uint8_t * dst;
+  uint8_t * dst, * src;
 
   pa_stream_begin_write(p, (void **)&dst, &nbytes);
 
-  int frames    = nbytes / pa.sinkStride;
-  void * values = ringbuffer_consume(pa.sinkBuffer, &frames);
+  int frames = nbytes / pa.sinkStride;
+  frames = pa.sinkPullFn(&src, frames);
 
-  memcpy(dst, values, frames * pa.sinkStride);
+  memcpy(dst, src, frames * pa.sinkStride);
   pa_stream_write(p, dst, frames * pa.sinkStride, NULL, 0, PA_SEEK_RELATIVE);
 }
 
@@ -242,7 +241,8 @@ static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
   DEBUG_WARN("Overflow");
 }
 
-static void pulseaudio_start(int channels, int sampleRate)
+static void pulseaudio_setup(int channels, int sampleRate,
+    LG_AudioPullFn pullFn)
 {
   if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
     return;
@@ -281,27 +281,22 @@ static void pulseaudio_start(int channels, int sampleRate)
     NULL, NULL);
 
   pa.sinkStride = channels * sizeof(uint16_t);
+  pa.sinkPullFn = pullFn;
   pa.sinkStart  = attribs.tlength / pa.sinkStride;
-  pa.sinkBuffer = ringbuffer_new(pa.sinkStart * 2, pa.sinkStride);
   pa.sinkCorked = true;
 
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
-static void pulseaudio_play(uint8_t * data, size_t size)
+static void pulseaudio_start(void)
 {
   if (!pa.sink)
     return;
 
-  ringbuffer_append(pa.sinkBuffer, data, size / pa.sinkStride);
-
-  if (pa.sinkCorked && ringbuffer_getCount(pa.sinkBuffer) >= pa.sinkStart)
-  {
-    pa_threaded_mainloop_lock(pa.loop);
-    pa_stream_cork(pa.sink, 0, NULL, NULL);
-    pa.sinkCorked = false;
-    pa_threaded_mainloop_unlock(pa.loop);
-  }
+  pa_threaded_mainloop_lock(pa.loop);
+  pa_stream_cork(pa.sink, 0, NULL, NULL);
+  pa.sinkCorked = false;
+  pa_threaded_mainloop_unlock(pa.loop);
 }
 
 static void pulseaudio_stop(void)
@@ -348,8 +343,8 @@ struct LG_AudioDevOps LGAD_PulseAudio =
   .free   = pulseaudio_free,
   .playback =
   {
+    .setup  = pulseaudio_setup,
     .start  = pulseaudio_start,
-    .play   = pulseaudio_play,
     .stop   = pulseaudio_stop,
     .volume = pulseaudio_volume,
     .mute   = pulseaudio_mute
