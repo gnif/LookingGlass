@@ -139,7 +139,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   // if the audio dev can report it's latency setup a timing graph
   if (audio.audioDev->playback.latency)
   {
-    audio.playback.timings = ringbuffer_new(2400, sizeof(float));
+    audio.playback.timings = ringbuffer_new(1200, sizeof(float));
     audio.playback.graph   = app_registerGraph("PLAYBACK",
         audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
   }
