@@ -59,6 +59,13 @@ These required libraries and tools should be installed first.
 Required Dependencies
 ^^^^^^^^^^^^^^^^^^^^^
 
+..
+   Editor note: Listed dependencies are Debian packages containing the
+   required resources. All dependencies must be explicitly defined.
+   Omitting required dependencies that happen to be pulled in via
+   Depends: or Recommends: from another listed package is not allowed.
+   All required packages must be listed.
+
 -  cmake
 -  gcc, g++ \| clang
 -  libegl-dev
