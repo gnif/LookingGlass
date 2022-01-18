@@ -25,8 +25,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-typedef int  (*LG_AudioPullFn)(uint8_t ** data, int frames);
-typedef void (*LG_AudioPushFn)(uint8_t *  data, int frames);
+typedef int  (*LG_AudioPullFn)(uint8_t * dst, int frames);
+typedef void (*LG_AudioPushFn)(uint8_t * src, int frames);
 
 struct LG_AudioDevOps
 {

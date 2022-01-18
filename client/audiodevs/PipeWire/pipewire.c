@@ -106,8 +106,7 @@ static void pipewire_onPlaybackProcess(void * userdata)
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
     frames = min(frames, pw.playback.rateMatch->size);
 
-  uint8_t * data;
-  frames = pw.playback.pullFn(&data, frames);
+  frames = pw.playback.pullFn(dst, frames);
   if (!frames)
   {
     if (pw.playback.state == STREAM_STATE_FLUSHING)
@@ -122,8 +121,6 @@ static void pipewire_onPlaybackProcess(void * userdata)
     pw_stream_queue_buffer(pw.playback.stream, pbuf);
     return;
   }
-
-  memcpy(dst, data, frames * pw.playback.stride);
 
   sbuf->datas[0].chunk->offset = 0;
   sbuf->datas[0].chunk->stride = pw.playback.stride;

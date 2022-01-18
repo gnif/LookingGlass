@@ -131,10 +131,21 @@ void playbackStopNL(void)
   }
 }
 
-static int playbackPullFrames(uint8_t ** data, int frames)
+static int playbackPullFrames(uint8_t * dst, int frames)
 {
   if (audio.playback.buffer)
-    *data = ringbuffer_consume(audio.playback.buffer, &frames);
+  {
+    frames = min(frames, ringbuffer_getCount(audio.playback.buffer));
+    for(int fetched = 0; fetched < frames; )
+    {
+      int       copy = frames - fetched;
+      uint8_t *  src = ringbuffer_consume(audio.playback.buffer, &copy);
+
+      memcpy(dst, src, copy * audio.playback.stride);
+      dst     += copy * audio.playback.stride;
+      fetched += copy;
+    }
+  }
   else
     frames = 0;
 

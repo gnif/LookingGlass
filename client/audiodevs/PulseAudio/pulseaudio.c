@@ -220,14 +220,13 @@ static void pulseaudio_free(void)
 
 static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
 {
-  uint8_t * dst, * src;
+  uint8_t * dst;
 
   pa_stream_begin_write(p, (void **)&dst, &nbytes);
 
   int frames = nbytes / pa.sinkStride;
-  frames = pa.sinkPullFn(&src, frames);
+  frames = pa.sinkPullFn(dst, frames);
 
-  memcpy(dst, src, frames * pa.sinkStride);
   pa_stream_write(p, dst, frames * pa.sinkStride, NULL, 0, PA_SEEK_RELATIVE);
 }
 
