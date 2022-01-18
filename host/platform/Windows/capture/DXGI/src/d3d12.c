@@ -328,7 +328,11 @@ static void d3d12_free(void)
     ID3D12CommandQueue_Release(this->commandQueue);
 
   if (this->device)
-    ID3D12Device_Release(this->device);
+  {
+    DWORD count = ID3D12Device_Release(this->device);
+    if (count != 0)
+      DEBUG_ERROR("ID3D12Device release is %lu, there is a memory leak!", count);
+  }
 
   free(this);
   this = NULL;
