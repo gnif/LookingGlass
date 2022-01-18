@@ -129,8 +129,6 @@ void playbackStopNL(void)
     app_unregisterGraph(audio.playback.graph);
     ringbuffer_free(&audio.playback.timings);
   }
-
-  audio.playback.state = STREAM_STATE_STOP;
 }
 
 static int playbackPullFrames(uint8_t ** data, int frames)
