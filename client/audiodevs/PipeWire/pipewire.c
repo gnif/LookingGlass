@@ -366,7 +366,14 @@ static void pipewire_playbackMute(bool mute)
 
 static size_t pipewire_playbackLatency(void)
 {
-  return 0;
+  struct pw_time time = { 0 };
+
+  pw_thread_loop_lock(pw.thread);
+  if (pw_stream_get_time(pw.playback.stream, &time) < 0)
+    DEBUG_ERROR("pw_stream_get_time failed");
+  pw_thread_loop_unlock(pw.thread);
+
+  return time.delay + time.queued / pw.playback.stride;
 }
 
 static void pipewire_recordStopStream(void)
