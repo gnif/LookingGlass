@@ -28,20 +28,31 @@
 
 #include <string.h>
 
+typedef enum
+{
+  STREAM_STATE_STOP,
+  STREAM_STATE_SETUP,
+  STREAM_STATE_RUN,
+  STREAM_STATE_DRAIN
+}
+StreamState;
+
+#define STREAM_ACTIVE(state) \
+  (state == STREAM_STATE_SETUP || state == STREAM_STATE_RUN)
+
 typedef struct
 {
   struct LG_AudioDevOps * audioDev;
 
   struct
   {
-    bool       setup;
-    bool       started;
-    int        volumeChannels;
-    uint16_t   volume[8];
-    bool       mute;
-    int        sampleRate;
-    int        stride;
-    RingBuffer buffer;
+    StreamState state;
+    int         volumeChannels;
+    uint16_t    volume[8];
+    bool        mute;
+    int         sampleRate;
+    int         stride;
+    RingBuffer  buffer;
 
     LG_Lock     lock;
     RingBuffer  timings;
@@ -107,15 +118,34 @@ static const char * audioGraphFormatFn(const char * name,
   return title;
 }
 
+void playbackStopNL(void)
+{
+  audio.playback.state = STREAM_STATE_STOP;
+  audio.audioDev->playback.stop();
+  ringbuffer_free(&audio.playback.buffer);
+
+  if (audio.playback.timings)
+  {
+    app_unregisterGraph(audio.playback.graph);
+    ringbuffer_free(&audio.playback.timings);
+  }
+
+  audio.playback.state = STREAM_STATE_STOP;
+}
+
 static int playbackPullFrames(uint8_t ** data, int frames)
 {
   LG_LOCK(audio.playback.lock);
+
   if (audio.playback.buffer)
     *data = ringbuffer_consume(audio.playback.buffer, &frames);
   else
     frames = 0;
-  LG_UNLOCK(audio.playback.lock);
 
+  if (audio.playback.state == STREAM_STATE_DRAIN && frames == 0)
+    playbackStopNL();
+
+  LG_UNLOCK(audio.playback.lock);
   return frames;
 }
 
@@ -125,18 +155,18 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (!audio.audioDev)
     return;
 
+  LG_LOCK(audio.playback.lock);
+
   static int lastChannels   = 0;
   static int lastSampleRate = 0;
 
-  if (audio.playback.setup)
+  if (STREAM_ACTIVE(audio.playback.state))
   {
-    if (channels != lastChannels || sampleRate != lastSampleRate)
-      audio.audioDev->playback.stop();
-    else
-      return;
-  }
+    if (channels == lastChannels && sampleRate == lastSampleRate)
+      goto no_change;
 
-  LG_LOCK(audio.playback.lock);
+    playbackStopNL();
+  }
 
   const int bufferFrames = sampleRate / 10;
   audio.playback.buffer = ringbuffer_new(bufferFrames,
@@ -147,7 +177,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
 
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(uint16_t);
-  audio.playback.setup      = true;
+  audio.playback.state      = STREAM_STATE_SETUP;
 
   audio.audioDev->playback.setup(channels, sampleRate, playbackPullFrames);
 
@@ -166,28 +196,19 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.graph   = app_registerGraph("PLAYBACK",
       audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
 
+  audio.playback.state = STREAM_STATE_SETUP;
+
+no_change:
   LG_UNLOCK(audio.playback.lock);
 }
 
 void audio_playbackStop(void)
 {
-  if (!audio.audioDev || !audio.playback.started)
+  if (!audio.audioDev || audio.playback.state == STREAM_STATE_STOP)
     return;
 
-  LG_LOCK(audio.playback.lock);
-
-  audio.audioDev->playback.stop();
-  audio.playback.setup   = false;
-  audio.playback.started = false;
-  ringbuffer_free(&audio.playback.buffer);
-
-  if (audio.playback.timings)
-  {
-    app_unregisterGraph(audio.playback.graph);
-    ringbuffer_free(&audio.playback.timings);
-  }
-
-  LG_UNLOCK(audio.playback.lock);
+  audio.playback.state = STREAM_STATE_DRAIN;
+  return;
 }
 
 void audio_playbackVolume(int channels, const uint16_t volume[])
@@ -200,7 +221,7 @@ void audio_playbackVolume(int channels, const uint16_t volume[])
   memcpy(audio.playback.volume, volume, sizeof(uint16_t) * channels);
   audio.playback.volumeChannels = channels;
 
-  if (!audio.playback.setup)
+  if (!STREAM_ACTIVE(audio.playback.state))
     return;
 
   audio.audioDev->playback.volume(channels, volume);
@@ -213,7 +234,7 @@ void audio_playbackMute(bool mute)
 
   // store the value so we can restore it if the stream is restarted
   audio.playback.mute = mute;
-  if (!audio.playback.setup)
+  if (!STREAM_ACTIVE(audio.playback.state))
     return;
 
   audio.audioDev->playback.mute(mute);
@@ -221,7 +242,10 @@ void audio_playbackMute(bool mute)
 
 void audio_playbackData(uint8_t * data, size_t size)
 {
-  if (!audio.audioDev || !audio.playback.setup)
+  if (!audio.audioDev)
+    return;
+
+  if (!STREAM_ACTIVE(audio.playback.state))
     return;
 
   const int frames = size / audio.playback.stride;
@@ -229,10 +253,11 @@ void audio_playbackData(uint8_t * data, size_t size)
 
   // don't start playback until the buffer is sifficiently full to avoid
   // glitches
-  if (!audio.playback.started && ringbuffer_getCount(audio.playback.buffer) >=
+  if (audio.playback.state == STREAM_STATE_SETUP &&
+      ringbuffer_getCount(audio.playback.buffer) >=
       ringbuffer_getLength(audio.playback.buffer) / 4)
   {
-    audio.playback.started = true;
+    audio.playback.state = STREAM_STATE_RUN;
     audio.audioDev->playback.start();
   }
 }
