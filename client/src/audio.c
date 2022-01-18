@@ -356,9 +356,8 @@ void audio_tick(unsigned long long tickCount)
   if (audio.audioDev->playback.latency)
     frames += audio.audioDev->playback.latency();
 
-  const float latency = frames > 0
-    ? audio.playback.sampleRate / (float)frames
-    : 0.0f;
+
+  const float latency = frames / (float)(audio.playback.sampleRate / 1000);
 
   ringbuffer_push(audio.playback.timings, &latency);
 
