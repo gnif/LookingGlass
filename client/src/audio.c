@@ -133,8 +133,6 @@ void playbackStopNL(void)
 
 static int playbackPullFrames(uint8_t ** data, int frames)
 {
-  LG_LOCK(audio.playback.lock);
-
   if (audio.playback.buffer)
     *data = ringbuffer_consume(audio.playback.buffer, &frames);
   else
@@ -142,9 +140,11 @@ static int playbackPullFrames(uint8_t ** data, int frames)
 
   if (audio.playback.state == STREAM_STATE_DRAIN &&
       ringbuffer_getCount(audio.playback.buffer) == 0)
+  {
+    LG_LOCK(audio.playback.lock);
     playbackStopNL();
-
-  LG_UNLOCK(audio.playback.lock);
+    LG_UNLOCK(audio.playback.lock);
+  }
   return frames;
 }
 
