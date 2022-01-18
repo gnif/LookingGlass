@@ -167,7 +167,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
     playbackStopNL();
   }
 
-  const int bufferFrames = sampleRate / 10;
+  const int bufferFrames = sampleRate;
   audio.playback.buffer = ringbuffer_new(bufferFrames,
       channels * sizeof(uint16_t));
 
@@ -247,17 +247,14 @@ void audio_playbackData(uint8_t * data, size_t size)
   if (!STREAM_ACTIVE(audio.playback.state))
     return;
 
-  const int frames = size / audio.playback.stride;
+  int frames = size / audio.playback.stride;
   ringbuffer_append(audio.playback.buffer, data, frames);
 
-  // don't start playback until the buffer is sifficiently full to avoid
-  // glitches
-  if (audio.playback.state == STREAM_STATE_SETUP &&
-      ringbuffer_getCount(audio.playback.buffer) >=
-      ringbuffer_getLength(audio.playback.buffer) / 4)
+  if (audio.playback.state == STREAM_STATE_SETUP)
   {
-    audio.playback.state = STREAM_STATE_RUN;
-    audio.audioDev->playback.start();
+    frames = ringbuffer_getLength(audio.playback.buffer);
+    if (audio.audioDev->playback.start(frames))
+      audio.playback.state = STREAM_STATE_RUN;
   }
 }
 

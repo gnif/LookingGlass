@@ -288,15 +288,20 @@ static void pulseaudio_setup(int channels, int sampleRate,
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
-static void pulseaudio_start(void)
+static bool pulseaudio_start(int framesBuffered)
 {
   if (!pa.sink)
-    return;
+    return false;
+
+  if (framesBuffered < pa.sinkStart)
+    return false;
 
   pa_threaded_mainloop_lock(pa.loop);
   pa_stream_cork(pa.sink, 0, NULL, NULL);
   pa.sinkCorked = false;
   pa_threaded_mainloop_unlock(pa.loop);
+
+  return true;
 }
 
 static void pulseaudio_stop(void)

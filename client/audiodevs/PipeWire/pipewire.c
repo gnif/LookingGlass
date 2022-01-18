@@ -53,6 +53,7 @@ struct PipeWire
     int            sampleRate;
     int            stride;
     LG_AudioPullFn pullFn;
+    int            startFrames;
 
     StreamState state;
   }
@@ -224,16 +225,16 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   pipewire_playbackStopStream();
 
   int bufferFrames = sampleRate / 10;
-
-  pw.playback.channels   = channels;
-  pw.playback.sampleRate = sampleRate;
-  pw.playback.stride     = sizeof(uint16_t) * channels;
-  pw.playback.pullFn     = pullFn;
-
   int maxLatencyFrames = bufferFrames / 2;
   char maxLatency[32];
   snprintf(maxLatency, sizeof(maxLatency), "%d/%d", maxLatencyFrames,
       sampleRate);
+
+  pw.playback.channels    = channels;
+  pw.playback.sampleRate  = sampleRate;
+  pw.playback.stride      = sizeof(uint16_t) * channels;
+  pw.playback.pullFn      = pullFn;
+  pw.playback.startFrames = maxLatencyFrames;
 
   pw_thread_loop_lock(pw.thread);
   pw.playback.stream = pw_stream_new_simple(
@@ -278,10 +279,12 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_playbackStart(void)
+static bool pipewire_playbackStart(int framesBuffered)
 {
   if (!pw.playback.stream)
-    return;
+    return false;
+
+  bool start = false;
 
   if (pw.playback.state != STREAM_STATE_ACTIVE &&
     pw.playback.state != STREAM_STATE_RESTARTING)
@@ -291,13 +294,18 @@ static void pipewire_playbackStart(void)
     switch (pw.playback.state)
     {
       case STREAM_STATE_INACTIVE:
-        pw_stream_set_active(pw.playback.stream, true);
-        pw.playback.state = STREAM_STATE_ACTIVE;
+        if (framesBuffered >= pw.playback.startFrames)
+        {
+          pw_stream_set_active(pw.playback.stream, true);
+          pw.playback.state = STREAM_STATE_ACTIVE;
+          start = true;
+        }
         break;
 
       case STREAM_STATE_FLUSHING:
         // We were preparing to stop; just carry on as if nothing happened
         pw.playback.state = STREAM_STATE_ACTIVE;
+        start = true;
         break;
 
       case STREAM_STATE_DRAINING:
@@ -312,6 +320,8 @@ static void pipewire_playbackStart(void)
 
     pw_thread_loop_unlock(pw.thread);
   }
+
+  return start;
 }
 
 static void pipewire_playbackStop(void)
