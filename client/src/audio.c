@@ -179,10 +179,16 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   static int lastChannels   = 0;
   static int lastSampleRate = 0;
 
-  if (STREAM_ACTIVE(audio.playback.state))
+  if (audio.playback.state != STREAM_STATE_STOP)
   {
     if (channels == lastChannels && sampleRate == lastSampleRate)
+    {
+      // if the stream was still draining and the format matches, return the
+      // stream to the run state
+      if (audio.playback.state == STREAM_STATE_DRAIN)
+        audio.playback.state = STREAM_STATE_RUN;
       goto no_change;
+    }
 
     playbackStopNL();
   }
