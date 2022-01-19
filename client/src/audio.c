@@ -75,6 +75,8 @@ AudioState;
 
 static AudioState audio = { 0 };
 
+static void playbackStopNL(void);
+
 void audio_init(void)
 {
   // search for the best audiodev to use
@@ -95,7 +97,11 @@ void audio_free(void)
   if (!audio.audioDev)
     return;
 
-  audio_playbackStop();
+  // immediate stop of the stream, do not wait for drain
+  LG_LOCK(audio.playback.lock);
+  playbackStopNL();
+  LG_UNLOCK(audio.playback.lock);
+
   audio_recordStop();
 
   audio.audioDev->free();
@@ -118,8 +124,11 @@ static const char * audioGraphFormatFn(const char * name,
   return title;
 }
 
-void playbackStopNL(void)
+static void playbackStopNL(void)
 {
+  if (audio.playback.state == STREAM_STATE_STOP)
+    return;
+
   audio.playback.state = STREAM_STATE_STOP;
   audio.audioDev->playback.stop();
   ringbuffer_free(&audio.playback.buffer);
@@ -363,7 +372,6 @@ void audio_tick(unsigned long long tickCount)
   int frames = ringbuffer_getCount(audio.playback.buffer);
   if (audio.audioDev->playback.latency)
     frames += audio.audioDev->playback.latency();
-
 
   const float latency = frames / (float)(audio.playback.sampleRate / 1000);
 
