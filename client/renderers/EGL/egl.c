@@ -39,7 +39,6 @@
 #include <math.h>
 #include <string.h>
 
-#include "app.h"
 #include "egl_dynprocs.h"
 #include "model.h"
 #include "shader.h"
