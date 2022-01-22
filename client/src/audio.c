@@ -278,7 +278,7 @@ void audio_playbackData(uint8_t * data, size_t size)
 
   if (audio.playback.state == STREAM_STATE_SETUP)
   {
-    frames = ringbuffer_getLength(audio.playback.buffer);
+    frames = ringbuffer_getCount(audio.playback.buffer);
     if (audio.audioDev->playback.start(frames))
       audio.playback.state = STREAM_STATE_RUN;
   }
