@@ -528,7 +528,8 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
   return true;
 }
 
-void drawTorus(float x, float y, float inner, float outer, unsigned int pts)
+static void drawTorus(float x, float y, float inner, float outer,
+  unsigned int pts)
 {
   glBegin(GL_QUAD_STRIP);
   for (unsigned int i = 0; i <= pts; ++i)
@@ -540,7 +541,8 @@ void drawTorus(float x, float y, float inner, float outer, unsigned int pts)
   glEnd();
 }
 
-void drawTorusArc(float x, float y, float inner, float outer, unsigned int pts, float s, float e)
+static void drawTorusArc(float x, float y, float inner, float outer,
+  unsigned int pts, float s, float e)
 {
   glBegin(GL_QUAD_STRIP);
   for (unsigned int i = 0; i <= pts; ++i)
