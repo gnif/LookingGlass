@@ -446,7 +446,6 @@ int main_cursorThread(void * unused)
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
           DEBUG_ERROR("Invalid cursor type");
-          lgmpClientMessageDone(g_state.pointerQueue);
           continue;
       }
 
