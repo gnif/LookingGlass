@@ -412,7 +412,11 @@ int main_cursorThread(void * unused)
       break;
     }
 
-    if (cursor && msg.size > cursorSize)
+    KVMFRCursor * tmp = (KVMFRCursor *)msg.mem;
+    const int neededSize = sizeof(*tmp) +
+      (msg.udata & CURSOR_FLAG_SHAPE ? tmp->height * tmp->pitch : 0);
+
+    if (cursor && neededSize > cursorSize)
     {
       free(cursor);
       cursor = NULL;
@@ -421,17 +425,17 @@ int main_cursorThread(void * unused)
     /* copy and release the message ASAP */
     if (!cursor)
     {
-      cursor = malloc(msg.size);
+      cursor = malloc(neededSize);
       if (!cursor)
       {
-        DEBUG_ERROR("failed to allocate %d bytes for cursor", msg.size);
+        DEBUG_ERROR("failed to allocate %d bytes for cursor", neededSize);
         g_state.state = APP_STATE_SHUTDOWN;
         break;
       }
       cursorSize = msg.size;
     }
 
-    memcpy(cursor, msg.mem, msg.size);
+    memcpy(cursor, msg.mem, neededSize);
     lgmpClientMessageDone(g_state.pointerQueue);
 
     g_cursor.guest.visible =
