@@ -143,18 +143,7 @@ static void playbackStopNL(void)
 static int playbackPullFrames(uint8_t * dst, int frames)
 {
   if (audio.playback.buffer)
-  {
-    frames = min(frames, ringbuffer_getCount(audio.playback.buffer));
-    for(int fetched = 0; fetched < frames; )
-    {
-      int       copy = frames - fetched;
-      uint8_t *  src = ringbuffer_consume(audio.playback.buffer, &copy);
-
-      memcpy(dst, src, copy * audio.playback.stride);
-      dst     += copy * audio.playback.stride;
-      fetched += copy;
-    }
-  }
+    frames = ringbuffer_consume(audio.playback.buffer, dst, frames);
   else
     frames = 0;
 
@@ -183,6 +172,10 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
     playbackStopNL();
   }
 
+  // Using a bounded ring buffer for now. We are not currently doing anything to
+  // keep the input and output in sync, so if we were using an unbounded buffer,
+  // it would eventually end up in a state of permanent underrun or overrun and
+  // the user would only hear silence
   const int bufferFrames = sampleRate;
   audio.playback.buffer = ringbuffer_new(bufferFrames,
       channels * sizeof(uint16_t));
