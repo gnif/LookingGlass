@@ -307,6 +307,7 @@ void opengl_onResize(LG_Renderer * renderer, const int width, const int height, 
 
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL2_Shutdown();
+  ImGui_ImplOpenGL2_Init();
   ImGui_ImplOpenGL2_NewFrame();
 }
 
