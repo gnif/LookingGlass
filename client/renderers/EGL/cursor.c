@@ -260,7 +260,13 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     switch(cursor->type)
     {
       case LG_CURSOR_MASKED_COLOR:
-        // fall through
+        for(int y = 0; y < cursor->height; ++y)
+          for(int x = 0; x < cursor->width; ++x)
+          {
+            uint8_t * mask = data + (cursor->stride * y) + x * 4 + 3;
+            *mask = (*mask == 0xFF) ? 0x00 : 0xFF;
+          }
+      // fall through
 
       case LG_CURSOR_COLOR:
       {
@@ -377,22 +383,13 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       break;
     }
 
+    case LG_CURSOR_MASKED_COLOR:
     case LG_CURSOR_COLOR:
     {
       egl_shaderUse(cursor->norm.shader);
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-      egl_modelRender(cursor->model);
-      break;
-    }
-
-    case LG_CURSOR_MASKED_COLOR:
-    {
-      egl_shaderUse(cursor->mono.shader);
-      setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y,
-          size.w, size.h, scale);
-      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelRender(cursor->model);
       break;
     }
