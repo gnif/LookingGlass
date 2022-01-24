@@ -502,6 +502,7 @@ void core_handleMouseNormal(double ex, double ey)
         g_cursor.guest.y    = msg.y;
         g_cursor.realign    = false;
         g_cursor.realigning = false;
+        g_cursor.redraw     = true;
 
         if (!g_cursor.inWindow)
           return;
