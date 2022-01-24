@@ -33,7 +33,6 @@ typedef enum
 {
   STREAM_STATE_INACTIVE,
   STREAM_STATE_ACTIVE,
-  STREAM_STATE_FLUSHING,
   STREAM_STATE_DRAINING,
   STREAM_STATE_RESTARTING
 }
@@ -109,14 +108,6 @@ static void pipewire_onPlaybackProcess(void * userdata)
   frames = pw.playback.pullFn(dst, frames);
   if (!frames)
   {
-    if (pw.playback.state == STREAM_STATE_FLUSHING)
-    {
-      pw_thread_loop_lock(pw.thread);
-      pw_stream_flush(pw.playback.stream, true);
-      pw.playback.state = STREAM_STATE_DRAINING;
-      pw_thread_loop_unlock(pw.thread);
-    }
-
     sbuf->datas[0].chunk->size = 0;
     pw_stream_queue_buffer(pw.playback.stream, pbuf);
     return;
@@ -299,12 +290,6 @@ static bool pipewire_playbackStart(int framesBuffered)
         }
         break;
 
-      case STREAM_STATE_FLUSHING:
-        // We were preparing to stop; just carry on as if nothing happened
-        pw.playback.state = STREAM_STATE_ACTIVE;
-        start = true;
-        break;
-
       case STREAM_STATE_DRAINING:
         // We are in the middle of draining the PipeWire buffers; we will need
         // to reactivate the stream once this has completed
@@ -332,7 +317,8 @@ static void pipewire_playbackStop(void)
   switch (pw.playback.state)
   {
     case STREAM_STATE_ACTIVE:
-      pw.playback.state = STREAM_STATE_FLUSHING;
+      pw_stream_flush(pw.playback.stream, true);
+      pw.playback.state = STREAM_STATE_DRAINING;
       break;
 
     case STREAM_STATE_RESTARTING:
