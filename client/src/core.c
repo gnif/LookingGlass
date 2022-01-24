@@ -668,5 +668,11 @@ void core_updateOverlayState(void)
     core_setGrabQuiet(wasGrabbed);
     core_invalidatePointer(true);
     app_invalidateWindow(false);
+
+    if (!g_cursor.grab)
+    {
+      g_cursor.realign = true;
+      core_handleMouseNormal(0, 0);
+    }
   }
 }
