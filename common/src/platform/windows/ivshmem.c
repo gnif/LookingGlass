@@ -132,6 +132,13 @@ bool ivshmemInit(struct IVSHMEM * dev)
       i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
   }
 
+  if (!device)
+  {
+    vector_destroy(&devices);
+    DEBUG_ERROR("Unable to find a IVSHMEM device");
+    return false;
+  }
+
   device = vector_ptrTo(&devices, shmDevice);
   memcpy(&devInfoData, &device->devInfoData, sizeof(SP_DEVINFO_DATA));
   vector_destroy(&devices);
