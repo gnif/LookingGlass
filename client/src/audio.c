@@ -176,29 +176,16 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
 
   LG_LOCK(audio.playback.lock);
 
-  static int lastChannels   = 0;
-  static int lastSampleRate = 0;
-
   if (audio.playback.state != STREAM_STATE_STOP)
   {
-    if (channels == lastChannels && sampleRate == lastSampleRate)
-    {
-      // if the stream was still draining and the format matches, return the
-      // stream to the run state
-      if (audio.playback.state == STREAM_STATE_DRAIN)
-        audio.playback.state = STREAM_STATE_RUN;
-      goto no_change;
-    }
-
+    // Stop the current playback immediately. Even if the format is compatible,
+    // we may not have enough data left in the buffers to avoid underrunning
     playbackStopNL();
   }
 
   const int bufferFrames = sampleRate;
   audio.playback.buffer = ringbuffer_new(bufferFrames,
       channels * sizeof(uint16_t));
-
-  lastChannels   = channels;
-  lastSampleRate = sampleRate;
 
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(uint16_t);
@@ -223,7 +210,6 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
 
   audio.playback.state = STREAM_STATE_SETUP;
 
-no_change:
   LG_UNLOCK(audio.playback.lock);
 }
 
