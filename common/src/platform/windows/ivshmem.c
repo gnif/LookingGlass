@@ -116,6 +116,7 @@ bool ivshmemInit(struct IVSHMEM * dev)
 
   if (GetLastError() != ERROR_NO_MORE_ITEMS)
   {
+    vector_destroy(&devices);
     DEBUG_WINERROR("SetupDiEnumDeviceInfo failed", GetLastError());
     return false;
   }
