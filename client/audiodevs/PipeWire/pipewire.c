@@ -33,8 +33,7 @@ typedef enum
 {
   STREAM_STATE_INACTIVE,
   STREAM_STATE_ACTIVE,
-  STREAM_STATE_DRAINING,
-  STREAM_STATE_RESTARTING
+  STREAM_STATE_DRAINING
 }
 StreamState;
 
@@ -123,20 +122,8 @@ static void pipewire_onPlaybackProcess(void * userdata)
 static void pipewire_onPlaybackDrained(void * userdata)
 {
   pw_thread_loop_lock(pw.thread);
-
-  if (pw.playback.state == STREAM_STATE_RESTARTING)
-  {
-    // A play command was received while we were in the middle of stopping;
-    // switch straight back into playing
-    pw_stream_set_active(pw.playback.stream, true);
-    pw.playback.state = STREAM_STATE_ACTIVE;
-  }
-  else
-  {
-    pw_stream_set_active(pw.playback.stream, false);
-    pw.playback.state = STREAM_STATE_INACTIVE;
-  }
-
+  pw_stream_set_active(pw.playback.stream, false);
+  pw.playback.state = STREAM_STATE_INACTIVE;
   pw_thread_loop_unlock(pw.thread);
 }
 
@@ -274,8 +261,7 @@ static bool pipewire_playbackStart(int framesBuffered)
 
   bool start = false;
 
-  if (pw.playback.state != STREAM_STATE_ACTIVE &&
-    pw.playback.state != STREAM_STATE_RESTARTING)
+  if (pw.playback.state != STREAM_STATE_ACTIVE)
   {
     pw_thread_loop_lock(pw.thread);
 
@@ -291,9 +277,8 @@ static bool pipewire_playbackStart(int framesBuffered)
         break;
 
       case STREAM_STATE_DRAINING:
-        // We are in the middle of draining the PipeWire buffers; we will need
-        // to reactivate the stream once this has completed
-        pw.playback.state = STREAM_STATE_RESTARTING;
+        // We are in the middle of draining the PipeWire buffers; we need to
+        // wait for this to complete before allowing the new playback to start
         break;
 
       default:
@@ -308,30 +293,12 @@ static bool pipewire_playbackStart(int framesBuffered)
 
 static void pipewire_playbackStop(void)
 {
-  if (pw.playback.state != STREAM_STATE_ACTIVE &&
-    pw.playback.state != STREAM_STATE_RESTARTING)
+  if (pw.playback.state != STREAM_STATE_ACTIVE)
     return;
 
   pw_thread_loop_lock(pw.thread);
-
-  switch (pw.playback.state)
-  {
-    case STREAM_STATE_ACTIVE:
-      pw_stream_flush(pw.playback.stream, true);
-      pw.playback.state = STREAM_STATE_DRAINING;
-      break;
-
-    case STREAM_STATE_RESTARTING:
-      // A stop was requested, and then a start while PipeWire was draining, and
-      // now another stop. PipeWire hasn't finished draining yet so just switch
-      // the state back
-      pw.playback.state = STREAM_STATE_DRAINING;
-      break;
-
-    default:
-      DEBUG_UNREACHABLE();
-  }
-
+  pw_stream_flush(pw.playback.stream, true);
+  pw.playback.state = STREAM_STATE_DRAINING;
   pw_thread_loop_unlock(pw.thread);
 }
 
