@@ -207,7 +207,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
 
   pw.playback.channels    = channels;
   pw.playback.sampleRate  = sampleRate;
-  pw.playback.stride      = sizeof(uint16_t) * channels;
+  pw.playback.stride      = sizeof(float) * channels;
   pw.playback.pullFn      = pullFn;
   pw.playback.startFrames = maxLatencyFrames;
 
@@ -236,7 +236,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
 
   params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
       &SPA_AUDIO_INFO_RAW_INIT(
-        .format   = SPA_AUDIO_FORMAT_S16,
+        .format   = SPA_AUDIO_FORMAT_F32,
         .channels = channels,
         .rate     = sampleRate
         ));

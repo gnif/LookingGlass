@@ -45,7 +45,7 @@ struct LG_AudioDevOps
   struct
   {
     /* setup the stream for playback but don't start it yet
-     * Note: currently SPICE only supports S16 samples so always assume so
+     * Note: the pull function returns f32 samples
      */
     void (*setup)(int channels, int sampleRate, LG_AudioPullFn pullFn);
 

@@ -26,6 +26,7 @@ include(UninstallTarget)
 
 find_package(PkgConfig)
 pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
 
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
 add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
@@ -160,6 +161,7 @@ target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	PkgConfig::FONTCONFIG
+	PkgConfig::SAMPLERATE
 	lg_common
 	displayservers
 	lgmp
