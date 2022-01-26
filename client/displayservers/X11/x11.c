@@ -1032,7 +1032,10 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       {
         // if meta ungrab for move/resize
         if (xie->mode == XINotifyUngrab)
+        {
+          app_updateCursorPos(xie->event_x, xie->event_y);
           app_handleFocusEvent(true);
+        }
         return;
       }
 
@@ -1058,7 +1061,10 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       {
         // if meta grab for move/resize
         if (xie->mode == XINotifyGrab)
+        {
+          app_updateCursorPos(xie->event_x, xie->event_y);
           app_handleFocusEvent(false);
+        }
         return;
       }
 
