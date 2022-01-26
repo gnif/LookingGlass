@@ -121,7 +121,7 @@ static void on_mouseMove(int x, int y)
 
 static const char * nvfbc_getName(void)
 {
-  return "NVFBC (NVidia Frame Buffer Capture)";
+  return "NVFBC";
 };
 
 static void nvfbc_initOptions(void)
