@@ -615,6 +615,21 @@ KVMFROS os_getKVMFRType(void)
   return KVMFR_OS_WINDOWS;
 }
 
+static bool getProductName(char * buffer, DWORD bufferSize)
+{
+  LSTATUS status = RegGetValueA(HKEY_LOCAL_MACHINE,
+    "Software\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
+    RRF_RT_REG_SZ, NULL, buffer, &bufferSize);
+
+  if (status != ERROR_SUCCESS)
+  {
+    DEBUG_WINERROR("Failed to read ProductName from registry", status);
+    return false;
+  }
+
+  return true;
+}
+
 const char * os_getOSName(void)
 {
   if (app.osVersion)
@@ -624,14 +639,28 @@ const char * os_getOSName(void)
   osvi.dwOSVersionInfoSize = sizeof(osvi);
   GetVersionExA(&osvi);
 
-  alloc_sprintf(
-    &app.osVersion,
-    "Windows %lu.%lu (Build: %lu) %s",
-    osvi.dwMajorVersion,
-    osvi.dwMinorVersion,
-    osvi.dwBuildNumber,
-    osvi.szCSDVersion
-  );
+  char productName[1024];
+  if (getProductName(productName, sizeof(productName)))
+  {
+    alloc_sprintf(
+      &app.osVersion,
+      "%s (Build: %lu) %s",
+      productName,
+      osvi.dwBuildNumber,
+      osvi.szCSDVersion
+    );
+  }
+  else
+  {
+    alloc_sprintf(
+      &app.osVersion,
+      "Windows %lu.%lu (Build: %lu) %s",
+      osvi.dwMajorVersion,
+      osvi.dwMinorVersion,
+      osvi.dwBuildNumber,
+      osvi.szCSDVersion
+    );
+  }
 
   return app.osVersion;
 }
