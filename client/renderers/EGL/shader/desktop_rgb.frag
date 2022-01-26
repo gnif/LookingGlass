@@ -37,8 +37,9 @@ void main()
 
   if (nvGain > 0.0)
   {
-    highp float lumi = 1.0 - (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b);
-    color *= 1.0 + lumi;
+    highp float lumi = (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b);
+    if (lumi < 0.5)
+      color *= atanh((1.0 - lumi) * 2.0 - 1.0) + 1.0;
     color *= nvGain;
   }
 
