@@ -260,12 +260,26 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     switch(cursor->type)
     {
       case LG_CURSOR_MASKED_COLOR:
+      {
+        uint32_t xor[cursor->height][cursor->width];
         for(int y = 0; y < cursor->height; ++y)
           for(int x = 0; x < cursor->width; ++x)
           {
-            uint8_t * mask = data + (cursor->stride * y) + x * 4 + 3;
-            *mask = (*mask == 0xFF) ? 0x00 : 0xFF;
+            uint32_t * src = (uint32_t *)(data + (cursor->stride * y) + x * 4);
+            const bool masked = (*src & 0xFF000000) != 0;
+            if (masked)
+              *src = xor[y][x] = *src & 0x00FFFFFF;
+            else
+            {
+              xor[y][x]  = 0xFF000000;
+              *src      |= 0xFF000000;
+            }
           }
+
+        egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
+            cursor->width, cursor->height, sizeof(xor[0]));
+        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor);
+      }
       // fall through
 
       case LG_CURSOR_COLOR:
@@ -273,7 +287,6 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
         egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
             cursor->width, cursor->height, cursor->stride);
         egl_textureUpdate(cursor->norm.texture, data);
-        egl_modelSetTexture(cursor->model, cursor->norm.texture);
         break;
       }
 
@@ -384,12 +397,30 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     }
 
     case LG_CURSOR_MASKED_COLOR:
+    {
+      egl_shaderUse(cursor->norm.shader);
+      setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
+          size.w, size.h, scale);
+      glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+      egl_modelSetTexture(cursor->model, cursor->norm.texture);
+      egl_modelRender(cursor->model);
+
+      egl_shaderUse(cursor->mono.shader);
+      setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y,
+          size.w, size.h, scale);
+      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+      egl_modelSetTexture(cursor->model, cursor->mono.texture);
+      egl_modelRender(cursor->model);
+      break;
+    }
+
     case LG_CURSOR_COLOR:
     {
       egl_shaderUse(cursor->norm.shader);
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+      egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
       break;
     }
