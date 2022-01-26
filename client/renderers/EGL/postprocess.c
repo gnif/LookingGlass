@@ -138,7 +138,7 @@ static void loadPresetList(struct EGL_PostProcess * this)
     }
     stringlist_push(this->presets, name);
 
-    if (strcmp(preset, name) == 0)
+    if (preset && strcmp(preset, name) == 0)
       presetValid = true;
   }
   closedir(dir);
