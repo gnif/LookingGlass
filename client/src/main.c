@@ -432,7 +432,7 @@ int main_cursorThread(void * unused)
         g_state.state = APP_STATE_SHUTDOWN;
         break;
       }
-      cursorSize = msg.size;
+      cursorSize = neededSize;
     }
 
     memcpy(cursor, msg.mem, neededSize);
