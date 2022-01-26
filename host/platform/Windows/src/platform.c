@@ -41,6 +41,7 @@
 #include "common/locking.h"
 #include "common/thread.h"
 #include "common/time.h"
+#include "common/stringutils.h"
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_EXIT     3001
@@ -56,6 +57,7 @@ struct AppState
 
   char           executable[MAX_PATH + 1];
   char           systemLogDir[MAX_PATH];
+  char         * osVersion;
   HWND           messageWnd;
   NOTIFYICONDATA iconData;
   UINT           trayRestartMsg;
@@ -448,6 +450,8 @@ shutdown:
 
 finish:
 
+  free(app.osVersion);
+
   for(int i = 0; i < app.argc; ++i)
     free(app.argv[i]);
   free(app.argv);
@@ -613,8 +617,23 @@ KVMFROS os_getKVMFRType(void)
 
 const char * os_getOSName(void)
 {
-  //TODO
-  return NULL;
+  if (app.osVersion)
+    return app.osVersion;
+
+  OSVERSIONINFOA osvi = { 0 };
+  osvi.dwOSVersionInfoSize = sizeof(osvi);
+  GetVersionExA(&osvi);
+
+  alloc_sprintf(
+    &app.osVersion,
+    "Windows %lu.%lu (Build: %lu) %s",
+    osvi.dwMajorVersion,
+    osvi.dwMinorVersion,
+    osvi.dwBuildNumber,
+    osvi.szCSDVersion
+  );
+
+  return app.osVersion;
 }
 
 #define TABLE_SIG(x) (\
