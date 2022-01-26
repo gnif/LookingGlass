@@ -1019,6 +1019,16 @@ static void updateModifiers(void)
   );
 }
 
+static void setFocus(bool focused, double x, double y)
+{
+  if (x11.focused == focused)
+    return;
+
+  x11.focused = focused;
+  app_updateCursorPos(x, y);
+  app_handleFocusEvent(focused);
+}
+
 static void x11XInputEvent(XGenericEventCookie *cookie)
 {
   static int button_state = 0;
@@ -1032,10 +1042,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       {
         // if meta ungrab for move/resize
         if (xie->mode == XINotifyUngrab)
-        {
-          app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleFocusEvent(true);
-        }
+          setFocus(true, xie->event_x, xie->event_y);
         return;
       }
 
@@ -1048,9 +1055,8 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
           xie->mode != XINotifyUngrab)
         return;
 
-      x11.focused = true;
-      app_updateCursorPos(xie->event_x, xie->event_y);
-      app_handleFocusEvent(true);
+
+      setFocus(true, xie->event_x, xie->event_y);
       return;
     }
 
@@ -1061,10 +1067,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       {
         // if meta grab for move/resize
         if (xie->mode == XINotifyGrab)
-        {
-          app_updateCursorPos(xie->event_x, xie->event_y);
-          app_handleFocusEvent(false);
-        }
+          setFocus(false, xie->event_x, xie->event_y);
         return;
       }
 
@@ -1077,9 +1080,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
           xie->mode != XINotifyGrab)
         return;
 
-      app_updateCursorPos(xie->event_x, xie->event_y);
-      app_handleFocusEvent(false);
-      x11.focused = false;
+      setFocus(false, xie->event_x, xie->event_y);
       return;
     }
 
