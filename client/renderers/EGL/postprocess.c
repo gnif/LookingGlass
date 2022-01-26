@@ -74,6 +74,12 @@ void egl_postProcessEarlyInit(void)
       .type           = OPTION_TYPE_STRING,
       .value.x_string = ""
     },
+    {
+      .module         = "egl",
+      .name           = "preset",
+      .description    = "The initial filter preset to load",
+      .type           = OPTION_TYPE_STRING
+    },
     { 0 }
   };
   option_register(options);
@@ -81,6 +87,8 @@ void egl_postProcessEarlyInit(void)
   for (int i = 0; i < ARRAY_LENGTH(EGL_Filters); ++i)
     EGL_Filters[i]->earlyInit();
 }
+
+static void loadPreset(struct EGL_PostProcess * this, const char * name);
 
 static void loadPresetList(struct EGL_PostProcess * this)
 {
@@ -114,6 +122,8 @@ static void loadPresetList(struct EGL_PostProcess * this)
   }
 
   struct dirent * entry;
+  const char * preset = option_get_string("egl", "preset");
+  bool presetValid    = false;
   while ((entry = readdir(dir)) != NULL)
   {
     if (entry->d_type != DT_REG)
@@ -127,10 +137,22 @@ static void loadPresetList(struct EGL_PostProcess * this)
       goto fail;
     }
     stringlist_push(this->presets, name);
+
+    if (strcmp(preset, name) == 0)
+      presetValid = true;
   }
   closedir(dir);
 
   this->activePreset = -1;
+
+  if (preset)
+  {
+    if (presetValid)
+      loadPreset(this, preset);
+    else
+      DEBUG_WARN("egl:preset '%s' does not exist", preset);
+  }
+
   return;
 
 fail:
