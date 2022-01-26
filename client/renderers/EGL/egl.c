@@ -773,7 +773,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
-  bool debugContext = option_get_bool("egl", "debug");
+  bool debug = option_get_bool("egl", "debug");
   EGLint ctxattr[5];
   int ctxidx = 0;
 
@@ -783,14 +783,14 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (maj > 1 || (maj == 1 && min >= 5))
   {
     ctxattr[ctxidx++] = EGL_CONTEXT_OPENGL_DEBUG;
-    ctxattr[ctxidx++] = debugContext ? EGL_TRUE : EGL_FALSE;
+    ctxattr[ctxidx++] = debug ? EGL_TRUE : EGL_FALSE;
   }
   else if (util_hasGLExt(client_exts, "EGL_KHR_create_context"))
   {
     ctxattr[ctxidx++] = EGL_CONTEXT_FLAGS_KHR;
-    ctxattr[ctxidx++] = debugContext ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0;
+    ctxattr[ctxidx++] = debug ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0;
   }
-  else if (debugContext)
+  else if (debug)
     DEBUG_WARN("Cannot create debug contexts before EGL 1.5 without EGL_KHR_create_context");
 
   ctxattr[ctxidx++] = EGL_NONE;
@@ -839,8 +839,12 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   DEBUG_INFO("Renderer: %s", glGetString(GL_RENDERER));
   DEBUG_INFO("Version : %s", glGetString(GL_VERSION ));
   DEBUG_INFO("EGL APIs: %s", eglQueryString(this->display, EGL_CLIENT_APIS));
-  DEBUG_INFO("EGL Exts: %s", client_exts);
-  DEBUG_INFO("GL Exts : %s", gl_exts);
+
+  if (debug)
+  {
+    DEBUG_INFO("EGL Exts: %s", client_exts);
+    DEBUG_INFO("GL Exts : %s", gl_exts);
+  }
 
   GLint esMaj, esMin;
   glGetIntegerv(GL_MAJOR_VERSION, &esMaj);
@@ -889,7 +893,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     }
   }
 
-  if (debugContext)
+  if (debug)
   {
     if ((esMaj > 3 || (esMaj == 3 && esMin >= 2)) && g_egl_dynProcs.glDebugMessageCallback)
     {
