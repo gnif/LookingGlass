@@ -484,12 +484,23 @@ void core_handleMouseNormal(double ex, double ey)
         g_cursor.realigning = true;
         do
         {
+          LG_LOCK(g_state.pointerQueueLock);
+          if (!g_state.pointerQueue)
+          {
+            /* the queue is nolonger valid, assume complete */
+            g_cursor.realigning = false;
+            LG_UNLOCK(g_state.pointerQueueLock);
+            break;
+          }
+
           uint32_t hostSerial;
           if (lgmpClientGetSerial(g_state.pointerQueue, &hostSerial) != LGMP_OK)
           {
             g_cursor.realigning = false;
+            LG_UNLOCK(g_state.pointerQueueLock);
             return;
           }
+          LG_UNLOCK(g_state.pointerQueueLock);
 
           if (hostSerial >= setPosSerial)
             break;

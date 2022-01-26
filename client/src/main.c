@@ -502,8 +502,9 @@ int main_cursorThread(void * unused)
       lgSignalEvent(g_state.frameEvent);
   }
 
+  LG_LOCK(g_state.pointerQueueLock);
   lgmpClientUnsubscribe(&g_state.pointerQueue);
-
+  LG_UNLOCK(g_state.pointerQueueLock);
 
   if (cursor)
   {
@@ -1484,8 +1485,12 @@ restart:
 
   g_state.kvmfrFeatures = udata->features;
 
+  LG_LOCK_INIT(g_state.pointerQueueLock);
   if (!core_startCursorThread() || !core_startFrameThread())
+  {
+    LG_LOCK_FREE(g_state.pointerQueueLock);
     return -1;
+  }
 
   while(g_state.state == APP_STATE_RUNNING)
   {
@@ -1514,6 +1519,7 @@ restart:
     goto restart;
   }
 
+  LG_LOCK_FREE(g_state.pointerQueueLock);
   return 0;
 }
 

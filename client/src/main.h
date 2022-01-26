@@ -113,6 +113,7 @@ struct AppState
   struct IVSHMEM       shm;
   PLGMPClient          lgmp;
   PLGMPClientQueue     pointerQueue;
+  LG_Lock              pointerQueueLock;
   KVMFRFeatureFlags    kvmfrFeatures;
 
   LGThread            * cursorThread;
