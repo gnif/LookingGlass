@@ -64,7 +64,13 @@ static CaptureResult dxgi_releaseFrame();
 
 static const char * dxgi_getName(void)
 {
-  return "DXGI";
+  if (!this)
+    return "DXGI";
+
+  static char name[64];
+  snprintf(name, sizeof(name), "DXGI %s", this->backend->name);
+
+  return name;
 }
 
 static void dxgi_initOptions(void)

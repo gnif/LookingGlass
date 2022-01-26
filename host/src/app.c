@@ -583,7 +583,7 @@ static bool newKVMFRData(KVMFRUserData * dst)
     const uint8_t * uuid = os_getUUID();
     memcpy(vmInfo.uuid, uuid, 16);
 
-    strncpy(vmInfo.capture, app.iface->shortName, sizeof(vmInfo.capture) - 1);
+    strncpy(vmInfo.capture, app.iface->getName(), sizeof(vmInfo.capture) - 1);
 
     const int modelLen = strlen(model) + 1;
     const KVMFRRecord record =
