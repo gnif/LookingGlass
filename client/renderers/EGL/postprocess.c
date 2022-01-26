@@ -123,7 +123,8 @@ static void loadPresetList(struct EGL_PostProcess * this)
 
   struct dirent * entry;
   const char * preset = option_get_string("egl", "preset");
-  bool presetValid    = false;
+  this->activePreset = -1;
+
   while ((entry = readdir(dir)) != NULL)
   {
     if (entry->d_type != DT_REG)
@@ -139,15 +140,14 @@ static void loadPresetList(struct EGL_PostProcess * this)
     stringlist_push(this->presets, name);
 
     if (preset && strcmp(preset, name) == 0)
-      presetValid = true;
+      this->activePreset = stringlist_count(this->presets) - 1;
   }
   closedir(dir);
 
-  this->activePreset = -1;
 
   if (preset)
   {
-    if (presetValid)
+    if (this->activePreset > -1)
       loadPreset(this, preset);
     else
       DEBUG_WARN("egl:preset '%s' does not exist", preset);
