@@ -401,7 +401,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       egl_shaderUse(cursor->norm.shader);
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
-      glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
