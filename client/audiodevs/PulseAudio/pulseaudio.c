@@ -220,6 +220,11 @@ static void pulseaudio_free(void)
 
 static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
 {
+  // PulseAudio tries to pull data from the stream as soon as it is created for
+  // some reason, even though it is corked
+  if (pa.sinkCorked)
+    return;
+
   uint8_t * dst;
 
   pa_stream_begin_write(p, (void **)&dst, &nbytes);
@@ -250,7 +255,7 @@ static void pulseaudio_setup(int channels, int sampleRate,
   const int PERIOD_LEN = 80;
 
   pa_sample_spec spec = {
-    .format   = PA_SAMPLE_S16LE,
+    .format   = PA_SAMPLE_FLOAT32,
     .rate     = sampleRate,
     .channels = channels
   };
@@ -279,7 +284,7 @@ static void pulseaudio_setup(int channels, int sampleRate,
     PA_STREAM_START_CORKED | PA_STREAM_ADJUST_LATENCY,
     NULL, NULL);
 
-  pa.sinkStride = channels * sizeof(uint16_t);
+  pa.sinkStride = channels * sizeof(float);
   pa.sinkPullFn = pullFn;
   pa.sinkStart  = attribs.tlength / pa.sinkStride;
   pa.sinkCorked = true;
