@@ -581,7 +581,8 @@ static bool newKVMFRData(KVMFRUserData * dst)
     };
 
     const uint8_t * uuid = os_getUUID();
-    memcpy(vmInfo.uuid, uuid, 16);
+    if (uuid)
+      memcpy(vmInfo.uuid, uuid, 16);
 
     strncpy(vmInfo.capture, app.iface->getName(), sizeof(vmInfo.capture) - 1);
 
