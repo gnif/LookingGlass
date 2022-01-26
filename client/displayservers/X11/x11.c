@@ -532,11 +532,8 @@ static bool x11Init(const LG_DSInitParams params)
   eventmask.mask_len = sizeof(mask);
   eventmask.mask     = mask;
 
-  if (!x11.ewmhHasFocusEvent)
-  {
-    XISetMask(mask, XI_FocusIn );
-    XISetMask(mask, XI_FocusOut);
-  }
+  XISetMask(mask, XI_FocusIn );
+  XISetMask(mask, XI_FocusOut);
 
   XISetMask(mask, XI_Enter        );
   XISetMask(mask, XI_Leave        );
@@ -1030,14 +1027,19 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
   {
     case XI_FocusIn:
     {
+      XIFocusOutEvent *xie = cookie->data;
       if (x11.ewmhHasFocusEvent)
+      {
+        // if meta ungrab for move/resize
+        if (xie->mode == XINotifyUngrab)
+          app_handleFocusEvent(true);
         return;
+      }
 
       atomic_store(&x11.lastWMEvent, microtime());
       if (x11.focused)
         return;
 
-      XIFocusOutEvent *xie = cookie->data;
       if (xie->mode != XINotifyNormal &&
           xie->mode != XINotifyWhileGrabbed &&
           xie->mode != XINotifyUngrab)
@@ -1051,14 +1053,19 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_FocusOut:
     {
+      XIFocusOutEvent *xie = cookie->data;
       if (x11.ewmhHasFocusEvent)
+      {
+        // if meta grab for move/resize
+        if (xie->mode == XINotifyGrab)
+          app_handleFocusEvent(false);
         return;
+      }
 
       atomic_store(&x11.lastWMEvent, microtime());
       if (!x11.focused)
         return;
 
-      XIFocusOutEvent *xie = cookie->data;
       if (xie->mode != XINotifyNormal &&
           xie->mode != XINotifyWhileGrabbed &&
           xie->mode != XINotifyGrab)
