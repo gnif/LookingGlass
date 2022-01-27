@@ -26,7 +26,6 @@ include(UninstallTarget)
 
 find_package(PkgConfig)
 pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
 
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
 add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
@@ -152,7 +151,6 @@ add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui" E
 
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
-add_subdirectory(audiodevs)
 
 add_executable(looking-glass-client ${SOURCES})
 
@@ -161,15 +159,23 @@ target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	PkgConfig::FONTCONFIG
-	PkgConfig::SAMPLERATE
 	lg_common
 	displayservers
 	lgmp
 	purespice
 	renderers
 	cimgui
-	audiodevs
 )
+
+if (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO)
+	add_definitions(-D ENABLE_AUDIO)
+	add_subdirectory(audiodevs)
+	pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
+	target_link_libraries(looking-glass-client
+		PkgConfig::SAMPLERATE
+		audiodevs
+	)
+endif()
 
 install(TARGETS looking-glass-client
 	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

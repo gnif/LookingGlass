@@ -18,6 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#if ENABLE_AUDIO
+
 #include "audio.h"
 #include "main.h"
 #include "common/array.h"
@@ -691,3 +693,5 @@ void audio_tick(unsigned long long tickCount)
 
   app_invalidateGraphs();
 }
+
+#endif

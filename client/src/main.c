@@ -870,6 +870,7 @@ int spiceThread(void * arg)
       .release = cb_spiceRelease,
       .request = cb_spiceRequest
     },
+#if ENABLE_AUDIO
     .playback =
     {
       .enable = audio_supportsPlayback(),
@@ -887,6 +888,7 @@ int spiceThread(void * arg)
       .mute   = audio_recordMute,
       .stop   = audio_recordStop
     }
+#endif
   };
 
   if (!purespice_connect(&config))

@@ -18,6 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#if ENABLE_AUDIO
+
 #include <stdbool.h>
 #include <purespice.h>
 
@@ -39,3 +41,11 @@ void audio_recordVolume(int channels, const uint16_t volume[]);
 void audio_recordMute(bool mute);
 
 void audio_tick(unsigned long long tickCount);
+
+#else
+
+static inline void audio_init(void) {}
+static inline void audio_free(void) {}
+static inline void audio_tick(unsigned long long tickCount) {}
+
+#endif
