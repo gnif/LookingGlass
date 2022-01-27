@@ -321,6 +321,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
 
   audio.playback.deviceData.nextPosition       = 0;
 
+  audio.playback.spiceData.periodFrames        = 0;
   audio.playback.spiceData.nextPosition        = 0;
   audio.playback.spiceData.devLastTime         = INT64_MIN;
   audio.playback.spiceData.devNextTime         = INT64_MIN;
