@@ -28,12 +28,12 @@
 
 struct RingBuffer
 {
-  uint32_t length;
-  uint32_t valueSize;
-  uint32_t readPos;
-  uint32_t writePos;
-  bool     unbounded;
-  char     values[0];
+  uint32_t          length;
+  uint32_t          valueSize;
+  _Atomic(uint32_t) readPos;
+  _Atomic(uint32_t) writePos;
+  bool              unbounded;
+  char              values[0];
 };
 
 RingBuffer ringbuffer_newInternal(int length, size_t valueSize,
@@ -44,8 +44,8 @@ RingBuffer ringbuffer_newInternal(int length, size_t valueSize,
   struct RingBuffer * rb = calloc(1, sizeof(*rb) + valueSize * length);
   rb->length    = length;
   rb->valueSize = valueSize;
-  rb->readPos   = 0;
-  rb->writePos  = 0;
+  atomic_store(&rb->readPos , 0);
+  atomic_store(&rb->writePos, 0);
   rb->unbounded = unbounded;
   return rb;
 }
@@ -116,7 +116,7 @@ int ringbuffer_append(const RingBuffer rb, const void * values, int count)
     return 0;
 
   uint32_t readPos = atomic_load_explicit(&rb->readPos, memory_order_acquire);
-  uint32_t writePos = rb->writePos;
+  uint32_t writePos = atomic_load_explicit(&rb->writePos, memory_order_relaxed);
   uint32_t newWritePos = writePos;
 
   if (count < 0)
@@ -196,7 +196,7 @@ int ringbuffer_consume(const RingBuffer rb, void * values, int count)
   if (count < 0 && !rb->unbounded)
     return 0;
 
-  uint32_t readPos = rb->readPos;
+  uint32_t readPos = atomic_load_explicit(&rb->readPos, memory_order_relaxed);
   uint32_t writePos = atomic_load_explicit(&rb->writePos, memory_order_acquire);
   uint32_t newReadPos = readPos;
 
@@ -263,7 +263,7 @@ int ringbuffer_consume(const RingBuffer rb, void * values, int count)
 void ringbuffer_forEach(const RingBuffer rb, RingBufferIterator fn,
     void * udata, bool reverse)
 {
-  uint32_t readPos = rb->readPos;
+  uint32_t readPos = atomic_load_explicit(&rb->readPos, memory_order_relaxed);
   uint32_t writePos = atomic_load_explicit(&rb->writePos, memory_order_acquire);
 
   int32_t writeOffset = writePos - readPos;
