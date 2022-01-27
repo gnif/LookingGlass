@@ -260,7 +260,8 @@ static int playbackPullFrames(uint8_t * dst, int frames)
       }
     }
 
-    PlaybackDeviceTick tick = {
+    PlaybackDeviceTick tick =
+    {
       .nextTime     = data->nextTime,
       .nextPosition = data->nextPosition
     };
@@ -406,10 +407,10 @@ void audio_playbackData(uint8_t * data, size_t size)
   int64_t now = nanotime();
 
   // Convert from s16 to f32 samples
-  int spiceStride = audio.playback.channels * sizeof(int16_t);
-  int frames = size / spiceStride;
+  int spiceStride    = audio.playback.channels * sizeof(int16_t);
+  int frames         = size / spiceStride;
   bool periodChanged = frames != spiceData->periodFrames;
-  bool init = spiceData->periodFrames == 0;
+  bool init          = spiceData->periodFrames == 0;
 
   if (periodChanged)
   {
@@ -531,15 +532,17 @@ void audio_playbackData(uint8_t * data, size_t size)
   int consumed = 0;
   while (consumed < frames)
   {
-    SRC_DATA srcData = {
-      .data_in = spiceData->framesIn + consumed * audio.playback.channels,
-      .data_out = spiceData->framesOut,
-      .input_frames = frames - consumed,
-      .output_frames = spiceData->framesOutSize,
+    SRC_DATA srcData =
+    {
+      .data_in           = spiceData->framesIn +
+        consumed * audio.playback.channels,
+      .data_out          = spiceData->framesOut,
+      .input_frames      = frames - consumed,
+      .output_frames     = spiceData->framesOutSize,
       .input_frames_used = 0,
       .output_frames_gen = 0,
-      .end_of_input = 0,
-      .src_ratio = ratio
+      .end_of_input      = 0,
+      .src_ratio         = ratio
     };
 
     int error = src_process(spiceData->src, &srcData);
