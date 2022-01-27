@@ -421,10 +421,22 @@ void audio_playbackData(uint8_t * data, size_t size)
     }
     spiceData->periodFrames  = frames;
     spiceData->framesIn      = malloc(frames * audio.playback.stride);
+    if (!spiceData->framesIn)
+    {
+      DEBUG_ERROR("Failed to malloc framesIn");
+      playbackStopNL();
+      return;
+    }
 
     spiceData->framesOutSize = round(frames * 1.1);
     spiceData->framesOut     =
       malloc(spiceData->framesOutSize * audio.playback.stride);
+    if (!spiceData->framesOut)
+    {
+      DEBUG_ERROR("Failed to malloc framesOut");
+      playbackStopNL();
+      return;
+    }
   }
 
   src_short_to_float_array((int16_t *) data, spiceData->framesIn,
