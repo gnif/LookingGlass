@@ -37,6 +37,7 @@ struct PulseAudio
   int                    sinkIndex;
   bool                   sinkCorked;
   bool                   sinkMuted;
+  int                    sinkStart;
   int                    sinkSampleRate;
   int                    sinkChannels;
   int                    sinkStride;
@@ -245,7 +246,7 @@ static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
 }
 
 static void pulseaudio_setup(int channels, int sampleRate,
-    LG_AudioPullFn pullFn, int * periodFrames)
+    LG_AudioPullFn pullFn)
 {
   if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
     return;
@@ -285,21 +286,26 @@ static void pulseaudio_setup(int channels, int sampleRate,
 
   pa.sinkStride = channels * sizeof(float);
   pa.sinkPullFn = pullFn;
+  pa.sinkStart  = attribs.tlength / pa.sinkStride;
   pa.sinkCorked = true;
-  *periodFrames = attribs.tlength / pa.sinkStride;
 
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
-static void pulseaudio_start(void)
+static bool pulseaudio_start(int framesBuffered)
 {
   if (!pa.sink)
-    return;
+    return false;
+
+  if (framesBuffered < pa.sinkStart)
+    return false;
 
   pa_threaded_mainloop_lock(pa.loop);
   pa_stream_cork(pa.sink, 0, NULL, NULL);
   pa.sinkCorked = false;
   pa_threaded_mainloop_unlock(pa.loop);
+
+  return true;
 }
 
 static void pulseaudio_stop(void)

@@ -104,17 +104,6 @@ static void pipewire_onPlaybackProcess(void * userdata)
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
     frames = min(frames, pw.playback.rateMatch->size);
 
-  /* pipewire doesn't provide a way to access the quantum, so we start the
-   * stream and stop it immediately at setup to get this value */
-  if (pw.playback.startFrames == -1)
-  {
-    sbuf->datas[0].chunk->size = 0;
-    pw_stream_queue_buffer(pw.playback.stream, pbuf);
-    pw_stream_set_active(pw.playback.stream, false);
-    pw.playback.startFrames = frames;
-    return;
-  }
-
   frames = pw.playback.pullFn(dst, frames);
   if (!frames)
   {
@@ -190,7 +179,7 @@ static void pipewire_playbackStopStream(void)
 }
 
 static void pipewire_playbackSetup(int channels, int sampleRate,
-   LG_AudioPullFn pullFn, int * periodFrames)
+   LG_AudioPullFn pullFn)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -220,7 +209,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   pw.playback.sampleRate  = sampleRate;
   pw.playback.stride      = sizeof(float) * channels;
   pw.playback.pullFn      = pullFn;
-  pw.playback.startFrames = -1;
+  pw.playback.startFrames = maxLatencyFrames;
 
   pw_thread_loop_lock(pw.thread);
   pw.playback.stream = pw_stream_new_simple(
@@ -258,22 +247,19 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_ID_ANY,
       PW_STREAM_FLAG_AUTOCONNECT |
       PW_STREAM_FLAG_MAP_BUFFERS |
-      PW_STREAM_FLAG_RT_PROCESS,
+      PW_STREAM_FLAG_RT_PROCESS  |
+      PW_STREAM_FLAG_INACTIVE,
       params, 1);
 
   pw_thread_loop_unlock(pw.thread);
-
-  /* wait for the stream to start and set this value */
-  while(pw.playback.startFrames == -1)
-    pw_thread_loop_wait(pw.thread);
-
-  *periodFrames = pw.playback.startFrames;
 }
 
-static void pipewire_playbackStart(void)
+static bool pipewire_playbackStart(int framesBuffered)
 {
   if (!pw.playback.stream)
-    return;
+    return false;
+
+  bool start = false;
 
   if (pw.playback.state != STREAM_STATE_ACTIVE)
   {
@@ -282,8 +268,12 @@ static void pipewire_playbackStart(void)
     switch (pw.playback.state)
     {
       case STREAM_STATE_INACTIVE:
-        pw_stream_set_active(pw.playback.stream, true);
-        pw.playback.state = STREAM_STATE_ACTIVE;
+        if (framesBuffered >= pw.playback.startFrames)
+        {
+          pw_stream_set_active(pw.playback.stream, true);
+          pw.playback.state = STREAM_STATE_ACTIVE;
+          start = true;
+        }
         break;
 
       case STREAM_STATE_DRAINING:
@@ -297,6 +287,8 @@ static void pipewire_playbackStart(void)
 
     pw_thread_loop_unlock(pw.thread);
   }
+
+  return start;
 }
 
 static void pipewire_playbackStop(void)

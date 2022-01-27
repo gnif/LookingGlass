@@ -47,11 +47,11 @@ struct LG_AudioDevOps
     /* setup the stream for playback but don't start it yet
      * Note: the pull function returns f32 samples
      */
-    void (*setup)(int channels, int sampleRate, LG_AudioPullFn pullFn,
-        int * periodFrames);
+    void (*setup)(int channels, int sampleRate, LG_AudioPullFn pullFn);
 
-    /* called when there is data available to start playback */
-    void (*start)();
+    /* called when there is data available to start playback
+     * return true if playback should start */
+    bool (*start)(int framesBuffered);
 
     /* called when SPICE reports the audio stream has stopped */
     void (*stop)(void);
