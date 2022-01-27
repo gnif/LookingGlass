@@ -706,9 +706,9 @@ void app_unregisterGraph(GraphHandle handle)
   overlayGraph_unregister(handle);
 }
 
-void app_invalidateGraphs(void)
+void app_invalidateGraph(GraphHandle handle)
 {
-  overlayGraph_invalidate();
+  overlayGraph_invalidate(handle);
 }
 
 void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)

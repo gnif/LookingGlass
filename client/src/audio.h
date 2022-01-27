@@ -40,12 +40,9 @@ void audio_recordStop(void);
 void audio_recordVolume(int channels, const uint16_t volume[]);
 void audio_recordMute(bool mute);
 
-void audio_tick(unsigned long long tickCount);
-
 #else
 
 static inline void audio_init(void) {}
 static inline void audio_free(void) {}
-static inline void audio_tick(unsigned long long tickCount) {}
 
 #endif

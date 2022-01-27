@@ -245,10 +245,11 @@ void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name
   ll_unlock(gs.graphs);
 }
 
-void overlayGraph_invalidate(void)
+void overlayGraph_invalidate(GraphHandle handle)
 {
   if (!gs.show)
     return;
 
-  app_invalidateWindow(false);
+  if (handle->enabled)
+    app_invalidateWindow(false);
 }

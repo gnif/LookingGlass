@@ -155,8 +155,6 @@ static bool tickTimerFn(void * unused)
   if (needsRender)
     app_invalidateWindow(false);
 
-  audio_tick(tickCount);
-
   ++tickCount;
   return true;
 }

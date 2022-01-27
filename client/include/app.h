@@ -116,7 +116,7 @@ typedef const char * (*GraphFormatFn)(const char * name,
 GraphHandle app_registerGraph(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn);
 void app_unregisterGraph(GraphHandle handle);
-void app_invalidateGraphs(void);
+void app_invalidateGraph(GraphHandle handle);
 
 void app_overlayConfigRegister(const char * title,
     void (*callback)(void * udata, int * id), void * udata);

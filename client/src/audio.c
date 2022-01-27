@@ -100,7 +100,6 @@ typedef struct
     RingBuffer  buffer;
     RingBuffer  deviceTiming;
 
-    LG_Lock     lock;
     RingBuffer  timings;
     GraphHandle graph;
 
@@ -134,7 +133,7 @@ typedef struct
 }
 PlaybackDeviceTick;
 
-static void playbackStopNL(void);
+static void playbackStop(void);
 
 void audio_init(void)
 {
@@ -143,7 +142,6 @@ void audio_init(void)
     if (LG_AudioDevs[i]->init())
     {
       audio.audioDev = LG_AudioDevs[i];
-      LG_LOCK_INIT(audio.playback.lock);
       DEBUG_INFO("Using AudioDev: %s", audio.audioDev->name);
       return;
     }
@@ -157,15 +155,11 @@ void audio_free(void)
     return;
 
   // immediate stop of the stream, do not wait for drain
-  LG_LOCK(audio.playback.lock);
-  playbackStopNL();
-  LG_UNLOCK(audio.playback.lock);
-
+  playbackStop();
   audio_recordStop();
 
   audio.audioDev->free();
   audio.audioDev = NULL;
-  LG_LOCK_FREE(audio.playback.lock);
 }
 
 bool audio_supportsPlayback(void)
@@ -183,7 +177,7 @@ static const char * audioGraphFormatFn(const char * name,
   return title;
 }
 
-static void playbackStopNL(void)
+static void playbackStop(void)
 {
   if (audio.playback.state == STREAM_STATE_STOP)
     return;
@@ -274,11 +268,8 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 
   if (audio.playback.state == STREAM_STATE_DRAIN &&
       ringbuffer_getCount(audio.playback.buffer) <= 0)
-  {
-    LG_LOCK(audio.playback.lock);
-    playbackStopNL();
-    LG_UNLOCK(audio.playback.lock);
-  }
+    playbackStop();
+
   return frames;
 }
 
@@ -288,13 +279,11 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (!audio.audioDev)
     return;
 
-  LG_LOCK(audio.playback.lock);
-
   if (audio.playback.state != STREAM_STATE_STOP)
   {
     // Stop the current playback immediately. Even if the format is compatible,
     // we may not have enough data left in the buffers to avoid underrunning
-    playbackStopNL();
+    playbackStop();
   }
 
   int srcError;
@@ -303,7 +292,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (!audio.playback.spiceData.src)
   {
     DEBUG_ERROR("Failed to create resampler: %s", src_strerror(srcError));
-    goto done;
+    return;
   }
 
   const int bufferFrames = sampleRate;
@@ -346,9 +335,6 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
       audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
 
   audio.playback.state = STREAM_STATE_SETUP;
-
-done:
-  LG_UNLOCK(audio.playback.lock);
 }
 
 void audio_playbackStop(void)
@@ -418,7 +404,7 @@ void audio_playbackData(uint8_t * data, size_t size)
     if (!spiceData->framesIn)
     {
       DEBUG_ERROR("Failed to malloc framesIn");
-      playbackStopNL();
+      playbackStop();
       return;
     }
 
@@ -428,7 +414,7 @@ void audio_playbackData(uint8_t * data, size_t size)
     if (!spiceData->framesOut)
     {
       DEBUG_ERROR("Failed to malloc framesOut");
-      playbackStopNL();
+      playbackStop();
       return;
     }
   }
@@ -571,6 +557,15 @@ void audio_playbackData(uint8_t * data, size_t size)
     if (audio.audioDev->playback.start(frames))
       audio.playback.state = STREAM_STATE_RUN;
   }
+
+  int latencyFrames = ringbuffer_getCount(audio.playback.buffer);
+  if (audio.audioDev->playback.latency)
+    latencyFrames += audio.audioDev->playback.latency();
+
+  const float latency = latencyFrames /
+    (float)(audio.playback.sampleRate / 1000);
+  ringbuffer_push(audio.playback.timings, &latency);
+  app_invalidateGraph(audio.playback.graph);
 }
 
 bool audio_supportsRecord(void)
@@ -653,28 +648,6 @@ void audio_recordMute(bool mute)
     return;
 
   audio.audioDev->record.mute(mute);
-}
-
-void audio_tick(unsigned long long tickCount)
-{
-  LG_LOCK(audio.playback.lock);
-  if (!audio.playback.buffer)
-  {
-    LG_UNLOCK(audio.playback.lock);
-    return;
-  }
-
-  int frames = ringbuffer_getCount(audio.playback.buffer);
-  if (audio.audioDev->playback.latency)
-    frames += audio.audioDev->playback.latency();
-
-  const float latency = frames / (float)(audio.playback.sampleRate / 1000);
-
-  ringbuffer_push(audio.playback.timings, &latency);
-
-  LG_UNLOCK(audio.playback.lock);
-
-  app_invalidateGraphs();
 }
 
 #endif
