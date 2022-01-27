@@ -110,10 +110,12 @@ feature is disabled when running :ref:`cmake <client_building>`.
 -  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
 
    -  libpipewire-0.3-dev
+   -  libsamplerate0-dev
 
 -  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
 
    -  libpulse-dev
+   -  libsamplerate0-dev
 
 .. _client_deps_recommended:
 
@@ -135,7 +137,8 @@ You can fetch these dependencies with the following command:
    apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev \
    gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev \
    nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
-   libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols
+   libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols \
+   libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
 
 You may omit some dependencies, if you disable the feature which requires them
 when running :ref:`cmake <client_building>`.
