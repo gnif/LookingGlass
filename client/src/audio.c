@@ -107,6 +107,7 @@ typedef struct
     // avoid false sharing
     alignas(64) PlaybackDeviceData deviceData;
     alignas(64) PlaybackSpiceData  spiceData;
+    int targetLatencyFrames;
   }
   playback;
 
@@ -218,15 +219,16 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 
   if (audio.playback.buffer)
   {
+    static bool first = true;
     // Measure the device clock and post to the Spice thread
-    if (frames != data->periodFrames)
+    if (frames != data->periodFrames || first)
     {
-      bool init = data->periodFrames == 0;
-      if (init)
+      if (first)
+      {
         data->nextTime = now;
+        first = false;
+      }
 
-      data->periodFrames  = frames;
-      data->periodSec     = (double) frames / audio.playback.sampleRate;
       data->nextTime     += llrint(data->periodSec * 1.0e9);
       data->nextPosition += frames;
 
@@ -314,10 +316,8 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.stride     = channels * sizeof(float);
   audio.playback.state      = STREAM_STATE_SETUP;
 
-  audio.playback.deviceData.periodFrames       = 0;
   audio.playback.deviceData.nextPosition       = 0;
 
-  audio.playback.spiceData.periodFrames        = 0;
   audio.playback.spiceData.nextPosition        = 0;
   audio.playback.spiceData.devLastTime         = INT64_MIN;
   audio.playback.spiceData.devNextTime         = INT64_MIN;
@@ -325,7 +325,14 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.spiceData.offsetErrorIntegral = 0.0;
   audio.playback.spiceData.ratioIntegral       = 0.0;
 
-  audio.audioDev->playback.setup(channels, sampleRate, playbackPullFrames);
+  int frames;
+  audio.audioDev->playback.setup(channels, sampleRate, playbackPullFrames,
+      &frames);
+
+  audio.playback.deviceData.periodFrames = frames;
+  audio.playback.targetLatencyFrames     = frames;
+  audio.playback.deviceData.periodSec    =
+    (double)frames / audio.playback.sampleRate;
 
   // if a volume level was stored, set it before we return
   if (audio.playback.volumeChannels)
@@ -394,7 +401,8 @@ void audio_playbackData(uint8_t * data, size_t size)
   if (!STREAM_ACTIVE(audio.playback.state))
     return;
 
-  PlaybackSpiceData * spiceData = &audio.playback.spiceData;
+  PlaybackSpiceData  * spiceData = &audio.playback.spiceData;
+  PlaybackDeviceData * devData   = &audio.playback.deviceData;
   int64_t now = nanotime();
 
   // Convert from s16 to f32 samples
@@ -429,6 +437,15 @@ void audio_playbackData(uint8_t * data, size_t size)
     spiceData->devLastPosition = spiceData->devNextPosition;
     spiceData->devNextTime     = deviceTick.nextTime;
     spiceData->devNextPosition = deviceTick.nextPosition;
+  }
+
+  // If the buffer is getting too empty increase the target latency
+  static bool checkFill = false;
+  if (checkFill && audio.playback.state == STREAM_STATE_RUN &&
+      ringbuffer_getCount(audio.playback.buffer) < devData->periodFrames)
+  {
+    audio.playback.targetLatencyFrames += devData->periodFrames;
+    checkFill = false;
   }
 
   // Measure the Spice audio clock
@@ -492,17 +509,8 @@ void audio_playbackData(uint8_t * data, size_t size)
         ((double) (curTime - spiceData->devLastTime) /
           (spiceData->devNextTime - spiceData->devLastTime));
 
-    // Target latency derived experimentally to avoid underruns. This could be
-    // reduced with more tuning. We could adjust on the fly based upon the
-    // device period size, but that would result in underruns if the period size
-    // suddenly increases. It may be better instead to just reduce the maximum
-    // latency on the audio devices, which currently is set quite high
-    int targetLatencyMs = 70;
-    int targetLatencyFrames =
-      targetLatencyMs * audio.playback.sampleRate / 1000;
-
     double actualOffset = curPosition - devPosition;
-    double actualOffsetError = -(actualOffset - targetLatencyFrames);
+    double actualOffsetError = -(actualOffset - audio.playback.targetLatencyFrames);
 
     double error = actualOffsetError - offsetError;
     spiceData->offsetError += spiceData->b * error +
@@ -551,9 +559,18 @@ void audio_playbackData(uint8_t * data, size_t size)
   if (audio.playback.state == STREAM_STATE_SETUP)
   {
     frames = ringbuffer_getCount(audio.playback.buffer);
-    if (audio.audioDev->playback.start(frames))
+    if (frames >= max(devData->periodFrames,
+          ringbuffer_getLength(audio.playback.buffer) / 20))
+    {
       audio.playback.state = STREAM_STATE_RUN;
+      audio.audioDev->playback.start();
+    }
   }
+
+  // re-arm the buffer fill check if we have buffered enough
+  if (!checkFill && ringbuffer_getCount(audio.playback.buffer) >=
+      audio.playback.targetLatencyFrames)
+    checkFill = true;
 }
 
 bool audio_supportsRecord(void)
