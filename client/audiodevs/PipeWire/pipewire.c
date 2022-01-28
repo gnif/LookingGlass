@@ -104,6 +104,16 @@ static void pipewire_onPlaybackProcess(void * userdata)
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
     frames = min(frames, pw.playback.rateMatch->size);
 
+  // stream was started just to get the initial period size
+  if (pw.playback.startFrames == -1)
+  {
+    pw.playback.startFrames = frames;
+    pw_stream_set_active(pw.playback.stream, false);
+    sbuf->datas[0].chunk->size = 0;
+    pw_stream_queue_buffer(pw.playback.stream, pbuf);
+    return;
+  }
+
   frames = pw.playback.pullFn(dst, frames);
   if (!frames)
   {
@@ -209,7 +219,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   pw.playback.sampleRate  = sampleRate;
   pw.playback.stride      = sizeof(float) * channels;
   pw.playback.pullFn      = pullFn;
-  pw.playback.startFrames = maxLatencyFrames;
+  pw.playback.startFrames = -1;
 
   pw_thread_loop_lock(pw.thread);
   pw.playback.stream = pw_stream_new_simple(
@@ -247,11 +257,13 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_ID_ANY,
       PW_STREAM_FLAG_AUTOCONNECT |
       PW_STREAM_FLAG_MAP_BUFFERS |
-      PW_STREAM_FLAG_RT_PROCESS  |
-      PW_STREAM_FLAG_INACTIVE,
+      PW_STREAM_FLAG_RT_PROCESS,
       params, 1);
 
   pw_thread_loop_unlock(pw.thread);
+
+  while(pw.playback.startFrames == -1)
+    pw_thread_loop_wait(pw.thread);
 }
 
 static bool pipewire_playbackStart(int framesBuffered)
@@ -268,7 +280,8 @@ static bool pipewire_playbackStart(int framesBuffered)
     switch (pw.playback.state)
     {
       case STREAM_STATE_INACTIVE:
-        if (framesBuffered >= pw.playback.startFrames)
+        if (framesBuffered >= max(pw.playback.startFrames,
+              pw.playback.sampleRate / 20)) //50ms
         {
           pw_stream_set_active(pw.playback.stream, true);
           pw.playback.state = STREAM_STATE_ACTIVE;
