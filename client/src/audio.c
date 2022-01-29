@@ -102,7 +102,6 @@ typedef struct
 
     RingBuffer  timings;
     GraphHandle graph;
-    float       jitter;
 
     // These two structs contain data specifically for use in the device and
     // Spice data threads respectively. Keep them on separate cache lines to
@@ -173,8 +172,8 @@ static const char * audioGraphFormatFn(const char * name,
 {
   static char title[64];
   snprintf(title, sizeof(title),
-      "%s: min:%4.2f max:%4.2f avg:%4.2f now:%4.2f jitter:%4.2f",
-      name, min, max, avg, last, max - min);
+      "%s: min:%4.2f max:%4.2f avg:%4.2f now:%4.2f",
+      name, min, max, avg, last);
   return title;
 }
 
@@ -306,7 +305,6 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(float);
   audio.playback.state      = STREAM_STATE_SETUP;
-  audio.playback.jitter     = 60.0f; //assume 60ms of jitter initially
 
   audio.playback.deviceData.periodFrames       = 0;
   audio.playback.deviceData.nextPosition       = 0;
@@ -331,10 +329,8 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (audio.audioDev->playback.mute)
     audio.audioDev->playback.mute(audio.playback.mute);
 
-  // timings for jitter calculations and display graph
-  // spice operates on a period size of (sampleRate / 100), so allocate enough
-  // room for 4 seconds of timing samples.
-  audio.playback.timings = ringbuffer_new(sampleRate / 100, sizeof(float));
+  // if the audio dev can report it's latency setup a timing graph
+  audio.playback.timings = ringbuffer_new(1200, sizeof(float));
   audio.playback.graph   = app_registerGraph("PLAYBACK",
       audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
 
@@ -377,22 +373,6 @@ void audio_playbackMute(bool mute)
     return;
 
   audio.audioDev->playback.mute(mute);
-}
-
-static bool getMinMax(int index, void * value, void * udata)
-{
-  float   ms     = *(float *)value;
-  float * minMax = (float *)udata;
-
-  if (index == 0)
-  {
-    minMax[0] = minMax[1] = ms;
-    return true;
-  }
-
-  minMax[0] = min(minMax[0], ms);
-  minMax[1] = max(minMax[1], ms);
-  return true;
 }
 
 void audio_playbackData(uint8_t * data, size_t size)
@@ -518,7 +498,7 @@ void audio_playbackData(uint8_t * data, size_t size)
     // device period size, but that would result in underruns if the period size
     // suddenly increases. It may be better instead to just reduce the maximum
     // latency on the audio devices, which currently is set quite high
-    int targetLatencyMs = ceil(audio.playback.jitter);
+    int targetLatencyMs = 70;
     int targetLatencyFrames =
       targetLatencyMs * audio.playback.sampleRate / 1000;
 
@@ -585,16 +565,6 @@ void audio_playbackData(uint8_t * data, size_t size)
   const float latency = latencyFrames /
     (float)(audio.playback.sampleRate / 1000);
   ringbuffer_push(audio.playback.timings, &latency);
-
-  // if the ringbuffer is full calculate the jitter
-  if (ringbuffer_getCount(audio.playback.timings) ==
-      ringbuffer_getLength(audio.playback.timings))
-  {
-    float minMax[2];
-    ringbuffer_forEach(audio.playback.timings, getMinMax, minMax, false);
-    audio.playback.jitter = minMax[1] - minMax[0];
-  }
-
   app_invalidateGraph(audio.playback.graph);
 }
 
