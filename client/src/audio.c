@@ -69,9 +69,9 @@ typedef struct
   double  b;
   double  c;
 
+  int     devPeriodFrames;
   int64_t devLastTime;
   int64_t devNextTime;
-
   int64_t devLastPosition;
   int64_t devNextPosition;
 
@@ -97,6 +97,7 @@ typedef struct
     int         channels;
     int         sampleRate;
     int         stride;
+    int         deviceMaxPeriodFrames;
     RingBuffer  buffer;
     RingBuffer  deviceTiming;
 
@@ -128,6 +129,7 @@ static AudioState audio = { 0 };
 
 typedef struct
 {
+  int     periodFrames;
   int64_t nextTime;
   int64_t nextPosition;
 }
@@ -217,13 +219,24 @@ static int playbackPullFrames(uint8_t * dst, int frames)
     // Measure the device clock and post to the Spice thread
     if (frames != data->periodFrames)
     {
+      double newPeriodSec = (double) frames / audio.playback.sampleRate;
+
       bool init = data->periodFrames == 0;
       if (init)
-        data->nextTime = now;
+        data->nextTime = now + llrint(newPeriodSec * 1.0e9);
+      else
+        // Due to the double-buffered nature of audio playback, we are filling
+        // in the next buffer while the device is playing the previous buffer.
+        // This results in slightly unintuitive behaviour when the period size
+        // changes. The device will request enough samples for the new period
+        // size, but won't call us again until the previous buffer at the old
+        // size has finished playing. So, to avoid a blip in the timing
+        // calculations, we must set the estimated next wakeup time based upon
+        // the previous period size, not the new one
+        data->nextTime += llrint(data->periodSec * 1.0e9);
 
       data->periodFrames  = frames;
-      data->periodSec     = (double) frames / audio.playback.sampleRate;
-      data->nextTime     += llrint(data->periodSec * 1.0e9);
+      data->periodSec     = newPeriodSec;
       data->nextPosition += frames;
 
       double bandwidth = 0.05;
@@ -256,6 +269,7 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 
     PlaybackDeviceTick tick =
     {
+      .periodFrames = data->periodFrames,
       .nextTime     = data->nextTime,
       .nextPosition = data->nextPosition
     };
@@ -317,7 +331,10 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.spiceData.offsetErrorIntegral = 0.0;
   audio.playback.spiceData.ratioIntegral       = 0.0;
 
-  audio.audioDev->playback.setup(channels, sampleRate, playbackPullFrames);
+  audio.playback.deviceMaxPeriodFrames = 0;
+  audio.audioDev->playback.setup(channels, sampleRate,
+    &audio.playback.deviceMaxPeriodFrames, playbackPullFrames);
+  DEBUG_ASSERT(audio.playback.deviceMaxPeriodFrames > 0);
 
   // if a volume level was stored, set it before we return
   if (audio.playback.volumeChannels)
@@ -332,7 +349,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   // if the audio dev can report it's latency setup a timing graph
   audio.playback.timings = ringbuffer_new(1200, sizeof(float));
   audio.playback.graph   = app_registerGraph("PLAYBACK",
-      audio.playback.timings, 0.0f, 100.0f, audioGraphFormatFn);
+      audio.playback.timings, 0.0f, 200.0f, audioGraphFormatFn);
 
   audio.playback.state = STREAM_STATE_SETUP;
 }
@@ -426,6 +443,7 @@ void audio_playbackData(uint8_t * data, size_t size)
   PlaybackDeviceTick deviceTick;
   while (ringbuffer_consume(audio.playback.deviceTiming, &deviceTick, 1))
   {
+    spiceData->devPeriodFrames = deviceTick.periodFrames;
     spiceData->devLastTime     = spiceData->devNextTime;
     spiceData->devLastPosition = spiceData->devNextPosition;
     spiceData->devNextTime     = deviceTick.nextTime;
@@ -484,6 +502,7 @@ void audio_playbackData(uint8_t * data, size_t size)
   // the playback speed to bring them back in line. This value can change
   // quite rapidly, particularly at the start of playback, so filter it to
   // avoid sudden pitch shifts which will be noticeable to the user.
+  double actualOffset = 0.0;
   double offsetError = spiceData->offsetError;
   if (spiceData->devLastTime != INT64_MIN)
   {
@@ -493,16 +512,56 @@ void audio_playbackData(uint8_t * data, size_t size)
         ((double) (curTime - spiceData->devLastTime) /
           (spiceData->devNextTime - spiceData->devLastTime));
 
-    // Target latency derived experimentally to avoid underruns. This could be
-    // reduced with more tuning. We could adjust on the fly based upon the
-    // device period size, but that would result in underruns if the period size
-    // suddenly increases. It may be better instead to just reduce the maximum
-    // latency on the audio devices, which currently is set quite high
-    int targetLatencyMs = 70;
-    int targetLatencyFrames =
-      targetLatencyMs * audio.playback.sampleRate / 1000;
+    // Determine the target latency. Ideally, this would be precisely equal to
+    // the maximum device period size. However, we need to allow for some timing
+    // jitter to avoid underruns. Packets from Spice in particular can sometimes
+    // be delayed by an entire period or more, so include a fixed amount of
+    // latency to absorb these gaps. For device jitter use a multiplier, so
+    // timing requirements get progressively stricter as the period size is
+    // reduced
+    int spiceJitterMs = 13;
+    double targetLatencyFrames =
+      spiceJitterMs * audio.playback.sampleRate / 1000.0 +
+      audio.playback.deviceMaxPeriodFrames * 1.1;
 
-    double actualOffset = curPosition - devPosition;
+    // If the device is currently at a lower period size than its maximum (which
+    // can happen, for example, if another application has requested a lower
+    // latency) then we need to take that into account in our target latency.
+    //
+    // The reason to do this is not necessarily obvious, since we already set
+    // the target latency based upon the maximum period size. The problem stems
+    // from the way the device changes the period size. When the period size is
+    // reduced, there will be a transitional period where `playbackPullFrames`
+    // is invoked with the new smaller period size, but the time until the next
+    // invocation is based upon the previous size. This happens because the
+    // device is preparing the next small buffer while still playing back the
+    // previous large buffer. The result of this is that we end up with a
+    // surplus of data in the ring buffer. The overall latency is unchanged, but
+    // the balance has shifted: there is more data in our ring buffer and less
+    // in the device buffer.
+    //
+    // Unaccounted for, this would be detected as an offset error and playback
+    // would be sped up to bring things back in line. In isolation, this is not
+    // inherently problematic, and may even be desirable because it would reduce
+    // the overall latency. The real problem occurs when the period size goes
+    // back up.
+    //
+    // When the period size increases, the exact opposite happens. The device
+    // will suddenly request data at the new period size, but the timing
+    // interval will be based upon the previous period size during the
+    // transition. If there is not enough data to satisfy this then playback
+    // will start severely underrunning until the timing loop can correct for
+    // the error.
+    //
+    // To counteract this issue, if the current period size is smaller than the
+    // maximum period size then we increase the target latency by the
+    // difference. This keeps the offset error stable and ensures we have
+    // enough data in the buffer to absorb rate increases.
+    if (spiceData->devPeriodFrames < audio.playback.deviceMaxPeriodFrames)
+      targetLatencyFrames +=
+        audio.playback.deviceMaxPeriodFrames - spiceData->devPeriodFrames;
+
+    actualOffset = curPosition - devPosition;
     double actualOffsetError = -(actualOffset - targetLatencyFrames);
 
     double error = actualOffsetError - offsetError;
@@ -558,12 +617,11 @@ void audio_playbackData(uint8_t * data, size_t size)
       audio.playback.state = STREAM_STATE_RUN;
   }
 
-  int latencyFrames = ringbuffer_getCount(audio.playback.buffer);
+  double latencyFrames = actualOffset;
   if (audio.audioDev->playback.latency)
     latencyFrames += audio.audioDev->playback.latency();
 
-  const float latency = latencyFrames /
-    (float)(audio.playback.sampleRate / 1000);
+  const float latency = latencyFrames * 1000.0 / audio.playback.sampleRate;
   ringbuffer_push(audio.playback.timings, &latency);
   app_invalidateGraph(audio.playback.graph);
 }

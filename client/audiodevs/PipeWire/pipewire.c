@@ -104,16 +104,6 @@ static void pipewire_onPlaybackProcess(void * userdata)
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
     frames = min(frames, pw.playback.rateMatch->size);
 
-  // stream was started just to get the initial period size
-  if (pw.playback.startFrames == -1)
-  {
-    pw.playback.startFrames = frames;
-    pw_stream_set_active(pw.playback.stream, false);
-    sbuf->datas[0].chunk->size = 0;
-    pw_stream_queue_buffer(pw.playback.stream, pbuf);
-    return;
-  }
-
   frames = pw.playback.pullFn(dst, frames);
   if (!frames)
   {
@@ -189,7 +179,7 @@ static void pipewire_playbackStopStream(void)
 }
 
 static void pipewire_playbackSetup(int channels, int sampleRate,
-   LG_AudioPullFn pullFn)
+    int * maxPeriodFrames, LG_AudioPullFn pullFn)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -205,37 +195,70 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   if (pw.playback.stream &&
       pw.playback.channels == channels &&
       pw.playback.sampleRate == sampleRate)
+  {
+    *maxPeriodFrames = pw.playback.startFrames;
     return;
+  }
 
   pipewire_playbackStopStream();
 
-  int bufferFrames = sampleRate / 10;
-  int maxLatencyFrames = bufferFrames / 2;
-  char maxLatency[32];
-  snprintf(maxLatency, sizeof(maxLatency), "%d/%d", maxLatencyFrames,
-      sampleRate);
+  int defaultLatencyFrames = 2048;
+  char defaultNodeLatency[32];
+  snprintf(defaultNodeLatency, sizeof(defaultNodeLatency), "%d/%d",
+    defaultLatencyFrames, sampleRate);
 
   pw.playback.channels    = channels;
   pw.playback.sampleRate  = sampleRate;
   pw.playback.stride      = sizeof(float) * channels;
   pw.playback.pullFn      = pullFn;
-  pw.playback.startFrames = -1;
 
   pw_thread_loop_lock(pw.thread);
   pw.playback.stream = pw_stream_new_simple(
     pw.loop,
     "Looking Glass",
     pw_properties_new(
-      PW_KEY_NODE_NAME       , "Looking Glass",
-      PW_KEY_MEDIA_TYPE      , "Audio",
-      PW_KEY_MEDIA_CATEGORY  , "Playback",
-      PW_KEY_MEDIA_ROLE      , "Music",
-      PW_KEY_NODE_MAX_LATENCY, maxLatency,
+      PW_KEY_NODE_NAME     , "Looking Glass",
+      PW_KEY_MEDIA_TYPE    , "Audio",
+      PW_KEY_MEDIA_CATEGORY, "Playback",
+      PW_KEY_MEDIA_ROLE    , "Music",
+      PW_KEY_NODE_LATENCY  , defaultNodeLatency,
       NULL
     ),
     &events,
     NULL
   );
+
+  // The user can override the default node latency with the PIPEWIRE_LATENCY
+  // environment variable, so get the actual node latency value from the stream.
+  // The actual quantum size may be lower than this value depending on what else
+  // is using the audio device, but we can treat this value as a maximum
+  const struct pw_properties * properties =
+    pw_stream_get_properties(pw.playback.stream);
+  const char *actualNodeLatency =
+    pw_properties_get(properties, PW_KEY_NODE_LATENCY);
+  DEBUG_ASSERT(actualNodeLatency != NULL);
+
+  unsigned num, denom;
+  if (sscanf(actualNodeLatency, "%u/%u", &num, &denom) != 2 ||
+    denom != sampleRate)
+  {
+    DEBUG_WARN(
+      "PIPEWIRE_LATENCY value '%s' is invalid or does not match stream sample "
+      "rate; defaulting to %d/%d", actualNodeLatency, defaultLatencyFrames,
+      sampleRate);
+
+    struct spa_dict_item items[] = {
+      { PW_KEY_NODE_LATENCY, defaultNodeLatency }
+    };
+    pw_stream_update_properties(pw.playback.stream,
+      &SPA_DICT_INIT_ARRAY(items));
+
+    pw.playback.startFrames = defaultLatencyFrames;
+  }
+  else
+    pw.playback.startFrames = num;
+
+  *maxPeriodFrames = pw.playback.startFrames;
 
   if (!pw.playback.stream)
   {
@@ -257,13 +280,11 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_ID_ANY,
       PW_STREAM_FLAG_AUTOCONNECT |
       PW_STREAM_FLAG_MAP_BUFFERS |
-      PW_STREAM_FLAG_RT_PROCESS,
+      PW_STREAM_FLAG_RT_PROCESS  |
+      PW_STREAM_FLAG_INACTIVE,
       params, 1);
 
   pw_thread_loop_unlock(pw.thread);
-
-  while(pw.playback.startFrames == -1)
-    pw_thread_loop_wait(pw.thread);
 }
 
 static bool pipewire_playbackStart(int framesBuffered)

@@ -246,10 +246,13 @@ static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
 }
 
 static void pulseaudio_setup(int channels, int sampleRate,
-    LG_AudioPullFn pullFn)
+    int * maxPeriodFrames, LG_AudioPullFn pullFn)
 {
   if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
+  {
+    *maxPeriodFrames = pa.sinkStart;
     return;
+  }
 
   //TODO: be smarter about this
   const int PERIOD_LEN = 80;
@@ -288,6 +291,8 @@ static void pulseaudio_setup(int channels, int sampleRate,
   pa.sinkPullFn = pullFn;
   pa.sinkStart  = attribs.tlength / pa.sinkStride;
   pa.sinkCorked = true;
+
+  *maxPeriodFrames = pa.sinkStart;
 
   pa_threaded_mainloop_unlock(pa.loop);
 }
