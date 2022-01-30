@@ -272,6 +272,9 @@ static bool option_set(struct Option * opt, const char * value)
 
 bool option_parse(int argc, char * argv[])
 {
+  if (argc < 1)
+    return true;
+
   for(int a = 1; a < argc; ++a)
   {
     struct Option * o = NULL;
