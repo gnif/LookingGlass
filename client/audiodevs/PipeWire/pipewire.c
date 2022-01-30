@@ -51,7 +51,7 @@ struct PipeWire
     int            sampleRate;
     int            stride;
     LG_AudioPullFn pullFn;
-    int            startFrames;
+    int            maxPeriodFrames;
 
     StreamState state;
   }
@@ -196,7 +196,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       pw.playback.channels == channels &&
       pw.playback.sampleRate == sampleRate)
   {
-    *maxPeriodFrames = pw.playback.startFrames;
+    *maxPeriodFrames = pw.playback.maxPeriodFrames;
     return;
   }
 
@@ -253,12 +253,12 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
     pw_stream_update_properties(pw.playback.stream,
       &SPA_DICT_INIT_ARRAY(items));
 
-    pw.playback.startFrames = defaultLatencyFrames;
+    pw.playback.maxPeriodFrames = defaultLatencyFrames;
   }
   else
-    pw.playback.startFrames = num;
+    pw.playback.maxPeriodFrames = num;
 
-  *maxPeriodFrames = pw.playback.startFrames;
+  *maxPeriodFrames = pw.playback.maxPeriodFrames;
 
   if (!pw.playback.stream)
   {
@@ -301,8 +301,12 @@ static bool pipewire_playbackStart(int framesBuffered)
     switch (pw.playback.state)
     {
       case STREAM_STATE_INACTIVE:
-        if (framesBuffered >= max(pw.playback.startFrames,
-              pw.playback.sampleRate / 20)) //50ms
+        // PipeWire startup latency varies wildly depending on what else is, or
+        // was last using the audio device. In the worst case, PipeWire can
+        // request two full buffers within a very short period of time
+        // immediately at the start of playback, so make sure we've got enough
+        // data in the buffer to support this
+        if (framesBuffered >= pw.playback.maxPeriodFrames * 2)
         {
           pw_stream_set_active(pw.playback.stream, true);
           pw.playback.state = STREAM_STATE_ACTIVE;
