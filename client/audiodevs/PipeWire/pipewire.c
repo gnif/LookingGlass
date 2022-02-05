@@ -287,12 +287,10 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   pw_thread_loop_unlock(pw.thread);
 }
 
-static bool pipewire_playbackStart(int framesBuffered)
+static void pipewire_playbackStart(void)
 {
   if (!pw.playback.stream)
-    return false;
-
-  bool start = false;
+    return;
 
   if (pw.playback.state != STREAM_STATE_ACTIVE)
   {
@@ -301,17 +299,8 @@ static bool pipewire_playbackStart(int framesBuffered)
     switch (pw.playback.state)
     {
       case STREAM_STATE_INACTIVE:
-        // PipeWire startup latency varies wildly depending on what else is, or
-        // was last using the audio device. In the worst case, PipeWire can
-        // request two full buffers within a very short period of time
-        // immediately at the start of playback, so make sure we've got enough
-        // data in the buffer to support this
-        if (framesBuffered >= pw.playback.maxPeriodFrames * 2)
-        {
-          pw_stream_set_active(pw.playback.stream, true);
-          pw.playback.state = STREAM_STATE_ACTIVE;
-          start = true;
-        }
+        pw_stream_set_active(pw.playback.stream, true);
+        pw.playback.state = STREAM_STATE_ACTIVE;
         break;
 
       case STREAM_STATE_DRAINING:
@@ -325,8 +314,6 @@ static bool pipewire_playbackStart(int framesBuffered)
 
     pw_thread_loop_unlock(pw.thread);
   }
-
-  return start;
 }
 
 static void pipewire_playbackStop(void)
