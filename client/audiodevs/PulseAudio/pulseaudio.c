@@ -37,7 +37,7 @@ struct PulseAudio
   int                    sinkIndex;
   bool                   sinkCorked;
   bool                   sinkMuted;
-  int                    sinkStart;
+  int                    sinkMaxPeriodFrames;
   int                    sinkSampleRate;
   int                    sinkChannels;
   int                    sinkStride;
@@ -250,7 +250,7 @@ static void pulseaudio_setup(int channels, int sampleRate,
 {
   if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
   {
-    *maxPeriodFrames = pa.sinkStart;
+    *maxPeriodFrames = pa.sinkMaxPeriodFrames;
     return;
   }
 
@@ -287,30 +287,25 @@ static void pulseaudio_setup(int channels, int sampleRate,
     PA_STREAM_START_CORKED | PA_STREAM_ADJUST_LATENCY,
     NULL, NULL);
 
-  pa.sinkStride = channels * sizeof(float);
-  pa.sinkPullFn = pullFn;
-  pa.sinkStart  = attribs.tlength / pa.sinkStride;
-  pa.sinkCorked = true;
+  pa.sinkStride          = channels * sizeof(float);
+  pa.sinkPullFn          = pullFn;
+  pa.sinkMaxPeriodFrames = attribs.tlength / pa.sinkStride;
+  pa.sinkCorked          = true;
 
-  *maxPeriodFrames = pa.sinkStart;
+  *maxPeriodFrames = pa.sinkMaxPeriodFrames;
 
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
-static bool pulseaudio_start(int framesBuffered)
+static void pulseaudio_start(void)
 {
   if (!pa.sink)
-    return false;
-
-  if (framesBuffered < pa.sinkStart)
-    return false;
+    return;
 
   pa_threaded_mainloop_lock(pa.loop);
   pa_stream_cork(pa.sink, 0, NULL, NULL);
   pa.sinkCorked = false;
   pa_threaded_mainloop_unlock(pa.loop);
-
-  return true;
 }
 
 static void pulseaudio_stop(void)

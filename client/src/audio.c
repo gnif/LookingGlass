@@ -612,9 +612,17 @@ void audio_playbackData(uint8_t * data, size_t size)
 
   if (audio.playback.state == STREAM_STATE_SETUP)
   {
-    frames = ringbuffer_getCount(audio.playback.buffer);
-    if (audio.audioDev->playback.start(frames))
+    // In the worst case, the audio device can immediately request two full
+    // buffers at the beginning of playback. Latency corrections at startup can
+    // also be quite significant due to poor packet pacing from Spice, so
+    // additionally require at least two full Spice periods' worth of data
+    // before starting playback to minimise the chances of underrunning
+    int startFrames =
+      spiceData->periodFrames * 2 + audio.playback.deviceMaxPeriodFrames * 2;
+    if (spiceData->nextPosition >= startFrames) {
+      audio.audioDev->playback.start();
       audio.playback.state = STREAM_STATE_RUN;
+    }
   }
 
   double latencyFrames = actualOffset;
