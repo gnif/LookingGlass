@@ -47,6 +47,7 @@
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
 #include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-xdg-output-unstable-v1-client-protocol.h"
+#include "wayland-xdg-activation-v1-client-protocol.h"
 
 typedef void (*WaylandPollCallback)(uint32_t events, void * opaque);
 
@@ -180,6 +181,8 @@ struct WaylandDSState
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
 
+  struct xdg_activation_v1 * xdgActivation;
+
   struct wp_viewporter * viewporter;
   struct wp_viewport * viewport;
   struct zxdg_output_manager_v1 * xdgOutputManager;
@@ -230,6 +233,10 @@ struct WCBState
 
 extern struct WaylandDSState wlWm;
 extern struct WCBState       wlCb;
+
+// activation module
+bool waylandActivationInit(void);
+void waylandActivationFree(void);
 
 // clipboard module
 bool waylandCBInit(void);

@@ -23,6 +23,7 @@ else()
 endif()
 
 add_library(displayserver_Wayland STATIC
+	activation.c
 	clipboard.c
 	cursor.c
 	gl.c

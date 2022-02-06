@@ -89,6 +89,9 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandRegistryInit())
     return false;
 
+  if (!waylandActivationInit())
+    return false;
+
   if (!waylandIdleInit())
     return false;
 
