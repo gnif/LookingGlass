@@ -21,6 +21,10 @@ jobs:
     - name: Install PipeWire repository
       run: |
         echo 'deb [trusted=yes] https://pipewire-ubuntu.quantum5.workers.dev ./' | sudo tee /etc/apt/sources.list.d/pipewire.list
+    - name: Install wayland-protocols repository
+      run: |
+        curl https://quantum5.ca/apt.key | sudo apt-key add -
+        echo 'deb https://apt.quantum2.xyz/sway-utils/ bullseye main' | sudo tee /etc/apt/sources.list.d/wayland-protocols.list
     - name: Update apt
       run: |
         sudo apt-get update
