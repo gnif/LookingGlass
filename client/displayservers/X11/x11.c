@@ -1813,6 +1813,11 @@ static bool x11IsValidPointerPos(int x, int y)
   return ret;
 }
 
+static void x11RequestActivation(void)
+{
+  // TODO
+}
+
 static void x11InhibitIdle(void)
 {
   XScreenSaverSuspend(x11.display, true);
@@ -1903,6 +1908,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .warpPointer         = x11WarpPointer,
   .realignPointer      = x11RealignPointer,
   .isValidPointerPos   = x11IsValidPointerPos,
+  .requestActivation   = x11RequestActivation,
   .inhibitIdle         = x11InhibitIdle,
   .uninhibitIdle       = x11UninhibitIdle,
   .wait                = x11Wait,

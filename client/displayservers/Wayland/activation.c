@@ -51,7 +51,7 @@ static const struct xdg_activation_token_v1_listener activationTokenListener = {
   .done = &activationTokenDone,
 };
 
-void waylandActivationRequest(void)
+void waylandActivationRequestActivation(void)
 {
   if (!wlWm.xdgActivation) return;
 

@@ -190,6 +190,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .warpPointer         = waylandWarpPointer,
   .realignPointer      = waylandRealignPointer,
   .isValidPointerPos   = waylandIsValidPointerPos,
+  .requestActivation   = waylandActivationRequestActivation,
   .inhibitIdle         = waylandInhibitIdle,
   .uninhibitIdle       = waylandUninhibitIdle,
   .wait                = waylandWait,
