@@ -40,3 +40,31 @@ void waylandActivationFree(void)
     xdg_activation_v1_destroy(wlWm.xdgActivation);
   }
 }
+
+static void activationTokenDone(void * data,
+    struct xdg_activation_token_v1 * xdgToken, const char * token)
+{
+  xdg_activation_token_v1_destroy(xdgToken);
+}
+
+static const struct xdg_activation_token_v1_listener activationTokenListener = {
+  .done = &activationTokenDone,
+};
+
+void waylandActivationRequest(void)
+{
+  if (!wlWm.xdgActivation) return;
+
+  struct xdg_activation_token_v1 * token =
+    xdg_activation_v1_get_activation_token(wlWm.xdgActivation);
+
+  if (!token)
+  {
+    DEBUG_ERROR("failed to retrieve XDG activation token");
+    return;
+  }
+
+  xdg_activation_token_v1_add_listener(token, &activationTokenListener, NULL);
+  xdg_activation_token_v1_set_surface(token, wlWm.surface);
+  xdg_activation_token_v1_commit(token);
+}
