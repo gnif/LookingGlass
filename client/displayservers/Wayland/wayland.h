@@ -237,7 +237,7 @@ extern struct WCBState       wlCb;
 // activation module
 bool waylandActivationInit(void);
 void waylandActivationFree(void);
-void waylandActivationRequest(void);
+void waylandActivationRequestActivation(void);
 
 // clipboard module
 bool waylandCBInit(void);

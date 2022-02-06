@@ -194,6 +194,9 @@ struct LG_DisplayServerOps
   void (*inhibitIdle)();
   void (*uninhibitIdle)();
 
+  /* called to request activation */
+  void (*requestActivation)();
+
   /* wait for the specified time without blocking UI processing/event loops */
   void (*wait)(unsigned int time);
 
