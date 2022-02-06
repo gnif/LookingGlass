@@ -44,6 +44,7 @@ void waylandActivationFree(void)
 static void activationTokenDone(void * data,
     struct xdg_activation_token_v1 * xdgToken, const char * token)
 {
+  xdg_activation_v1_activate(wlWm.xdgActivation, token, wlWm.surface);
   xdg_activation_token_v1_destroy(xdgToken);
 }
 
