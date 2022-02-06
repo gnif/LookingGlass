@@ -96,3 +96,6 @@ wayland_generate(
 wayland_generate(
     "${WAYLAND_PROTOCOLS_BASE}/unstable/xdg-output/xdg-output-unstable-v1.xml"
     "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-output-unstable-v1-client-protocol")
+wayland_generate(
+    "${WAYLAND_PROTOCOLS_BASE}/staging/xdg-activation/xdg-activation-v1.xml"
+    "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-activation-v1-client-protocol")
