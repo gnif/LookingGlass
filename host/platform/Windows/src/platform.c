@@ -59,11 +59,14 @@ struct AppState
   char           systemLogDir[MAX_PATH];
   char         * osVersion;
   HWND           messageWnd;
+  UINT           shellHookMsg;
   NOTIFYICONDATA iconData;
   UINT           trayRestartMsg;
   HMENU          trayMenu;
   HANDLE         exitWait;
   HANDLE         taskHandle;
+
+  _Atomic(bool)  hasPendingActivationRequest;
 };
 
 static struct AppState app = {0};
@@ -254,6 +257,14 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     default:
       if (msg == app.trayRestartMsg)
         RegisterTrayIcon();
+      else if (msg == app.shellHookMsg)
+      {
+        switch (LOWORD(wParam))
+        {
+          case HSHELL_FLASH:
+            atomic_store(&app.hasPendingActivationRequest, true);
+        }
+      }
       break;
   }
 
@@ -402,6 +413,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   // set the global
   MessageHWND = app.messageWnd;
+
+  // get shell events (e.g., for activation requests)
+  app.shellHookMsg = RegisterWindowMessage(TEXT("SHELLHOOK"));
+  RegisterShellHookWindow(app.messageWnd);
 
   app.trayMenu = CreatePopupMenu();
   AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_SHOW_LOG, "Open Log File");
@@ -571,6 +586,11 @@ const char * os_getDataPath(void)
 HWND os_getMessageWnd(void)
 {
   return app.messageWnd;
+}
+
+bool os_getAndClearPendingActivationRequest(void)
+{
+  return atomic_exchange(&app.hasPendingActivationRequest, false);
 }
 
 bool os_blockScreensaver()
