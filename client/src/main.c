@@ -758,6 +758,9 @@ int main_frameThread(void * unused)
       break;
     }
 
+    if (frame->requestActivation)
+      g_state.ds->requestActivation();
+
     if (g_params.autoScreensaver && g_state.autoIdleInhibitState != frame->blockScreensaver)
     {
       if (frame->blockScreensaver)
