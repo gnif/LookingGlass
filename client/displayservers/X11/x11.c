@@ -23,6 +23,7 @@
 #include "x11.h"
 #include "atoms.h"
 #include "clipboard.h"
+#include "resources/icondata.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -560,6 +561,17 @@ static bool x11Init(const LG_DSInitParams params)
     PropModeReplace,
     (unsigned char *)&value,
     1
+  );
+
+  XChangeProperty(
+    x11.display,
+    x11.window,
+    x11atoms._NET_WM_ICON,
+    XA_CARDINAL,
+    32,
+    PropModeReplace,
+    (unsigned char *)icondata,
+    sizeof(icondata) / sizeof(icondata[0])
   );
 
   /* create the blank cursor */
