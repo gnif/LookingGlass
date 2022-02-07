@@ -139,6 +139,7 @@ typedef struct KVMFRFrame
   uint32_t        damageRectsCount;   // the number of damage rectangles (zero for full-frame damage)
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
   bool            blockScreensaver;   // whether the guest has requested to block screensavers
+  bool            requestActivation;  // whether the guest has requested activation since the last frame
 }
 KVMFRFrame;
 

@@ -276,6 +276,7 @@ static bool sendFrame(void)
   fi->pitch             = frame.pitch;
   fi->offset            = app.pageSize - FrameBufferStructSize;
   fi->blockScreensaver  = os_blockScreensaver();
+  fi->requestActivation = true; // TODO
   app.frameValid        = true;
 
   fi->damageRectsCount  = frame.damageRectsCount;
