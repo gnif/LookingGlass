@@ -33,7 +33,6 @@ typedef struct TextureBuffer
 
   int           texCount;
   GLuint        tex[EGL_TEX_BUFFER_MAX];
-  GLuint        sampler;
   EGL_TexBuffer buf[EGL_TEX_BUFFER_MAX];
   int           bufFree;
   GLsync        sync;
