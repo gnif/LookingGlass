@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 16
+#define KVMFR_VERSION 17
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
