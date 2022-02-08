@@ -57,7 +57,6 @@ struct EGL_Desktop
   EGLDisplay * display;
 
   EGL_Texture          * texture;
-  GLuint                 sampler;
   struct DesktopShader shader;
   EGL_DesktopRects     * mesh;
   CountedBuffer        * matrix;
@@ -296,12 +295,6 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
     return false;
   }
 
-  glGenSamplers(1, &desktop->sampler);
-  glSamplerParameteri(desktop->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glSamplerParameteri(desktop->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glSamplerParameteri(desktop->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(desktop->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-
   return true;
 }
 
@@ -396,7 +389,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, texture);
-  glBindSampler(0, desktop->sampler);
+  glBindSampler(0, desktop->texture->sampler);
 
   if (finalSizeX > desktop->width || finalSizeY > desktop->height)
     scaleType = EGL_DESKTOP_DOWNSCALE;
