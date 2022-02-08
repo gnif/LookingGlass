@@ -7,3 +7,6 @@
 [submodule "repos/cimgui"]
 	path = repos/cimgui
 	url = https://github.com/cimgui/cimgui.git
+[submodule "repos/wayland-protocols"]
+	path = repos/wayland-protocols
+	url = https://gitlab.freedesktop.org/wayland/wayland-protocols.git
