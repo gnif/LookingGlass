@@ -300,7 +300,7 @@ const char *getSystemLogDirectory(void)
   return app.systemLogDir;
 }
 
-static void populateSystemLogDirectory()
+static void populateSystemLogDirectory(void)
 {
   char programData[MAX_PATH];
   if (GetEnvironmentVariableA("ProgramData", programData, sizeof(programData)) &&
@@ -593,7 +593,7 @@ bool os_getAndClearPendingActivationRequest(void)
   return atomic_exchange(&app.hasPendingActivationRequest, false);
 }
 
-bool os_blockScreensaver()
+bool os_blockScreensaver(void)
 {
   static bool      lastResult = false;
   static ULONGLONG lastCheck  = 0;

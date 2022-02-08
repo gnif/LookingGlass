@@ -510,7 +510,7 @@ void capturePostPointerBuffer(CapturePointer pointer)
   LG_UNLOCK(app.pointerLock);
 }
 
-static void lgmpShutdown()
+static void lgmpShutdown(void)
 {
   if (app.lgmpTimer)
     lgTimerDestroy(app.lgmpTimer);

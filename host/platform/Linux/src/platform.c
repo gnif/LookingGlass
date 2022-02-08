@@ -87,7 +87,7 @@ bool os_getAndClearPendingActivationRequest(void)
   return false;
 }
 
-bool os_blockScreensaver()
+bool os_blockScreensaver(void)
 {
   return false;
 }
@@ -111,7 +111,7 @@ KVMFROS os_getKVMFRType(void)
   return KVMFR_OS_LINUX;
 }
 
-static const char * getPrettyName()
+static const char * getPrettyName(void)
 {
   static char buffer[256];
 
