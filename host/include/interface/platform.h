@@ -35,17 +35,17 @@
 #define LG_HOST_EXIT_FATAL   0x50
 
 int  app_main(int argc, char * argv[]);
-bool app_init();
-void app_shutdown();
-void app_quit();
+bool app_init(void);
+void app_shutdown(void);
+void app_quit(void);
 
 // these must be implemented for each OS
-const char * os_getExecutable();
-const char * os_getDataPath();
+const char * os_getExecutable(void);
+const char * os_getDataPath(void);
 void os_showMessage(const char * caption, const char * msg);
 
 bool os_getAndClearPendingActivationRequest(void);
-bool os_blockScreensaver();
+bool os_blockScreensaver(void);
 bool os_hasSetCursorPos(void);
 void os_setCursorPos(int x, int y);
 

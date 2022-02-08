@@ -58,7 +58,7 @@ struct Service service = { 0 };
 
 char logTime[100];
 
-char * currentTime()
+char * currentTime(void)
 {
   time_t t = time(NULL);
   strftime(logTime, sizeof logTime, "%Y-%m-%d %H:%M:%S", localtime(&t));
