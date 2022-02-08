@@ -51,8 +51,6 @@ target_include_directories(displayserver_Wayland
 )
 
 find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
-pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.15)
-pkg_get_variable(WAYLAND_PROTOCOLS_BASE wayland-protocols pkgdatadir)
 
 macro(wayland_generate protocol_file output_file)
     add_custom_command(OUTPUT "${output_file}.h"
@@ -68,6 +66,7 @@ macro(wayland_generate protocol_file output_file)
     target_sources(displayserver_Wayland PRIVATE "${output_file}.h" "${output_file}.c")
 endmacro()
 
+set(WAYLAND_PROTOCOLS_BASE "${PROJECT_TOP}/repos/wayland-protocols")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/wayland")
 include_directories("${CMAKE_BINARY_DIR}/wayland")
 wayland_generate(
