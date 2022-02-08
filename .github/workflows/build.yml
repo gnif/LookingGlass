@@ -21,10 +21,6 @@ jobs:
     - name: Install PipeWire repository
       run: |
         echo 'deb [trusted=yes] https://pipewire-ubuntu.quantum5.workers.dev ./' | sudo tee /etc/apt/sources.list.d/pipewire.list
-    - name: Install wayland-protocols repository
-      run: |
-        curl https://quantum5.ca/apt.key | sudo apt-key add -
-        echo 'deb https://apt.quantum2.xyz/sway-utils/ bullseye main' | sudo tee /etc/apt/sources.list.d/wayland-protocols.list
     - name: Update apt
       run: |
         sudo apt-get update
@@ -35,7 +31,7 @@ jobs:
           libspice-protocol-dev nettle-dev \
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
-          libwayland-dev wayland-protocols libxkbcommon-dev \
+          libwayland-dev libxkbcommon-dev \
           libsamplerate0-dev libpipewire-0.3-dev libpulse-dev \
           $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-0-dev libdbus-1-dev') \
           $([ '${{ matrix.compiler.cc }}' = clang ] && echo 'clang-tools')
