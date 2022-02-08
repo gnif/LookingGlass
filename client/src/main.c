@@ -1264,11 +1264,12 @@ restart:
 
   while(g_state.state == APP_STATE_RUNNING)
   {
-    if ((status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata)) == LGMP_OK)
-      break;
-
+    status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata);
     switch(status)
     {
+      case LGMP_OK:
+        break;
+
       case LGMP_ERR_INVALID_VERSION:
       {
         reportBadVersion();
