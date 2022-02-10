@@ -195,10 +195,6 @@ static void x11CheckEWMHSupport(void)
 
   Window * windowFromRoot = (Window *)data;
 
-  if (!x11atoms._NET_SUPPORTING_WM_CHECK || !x11atoms._NET_SUPPORTED ||
-      !x11atoms._NET_WM_NAME)
-    goto out_root;
-
   if (XGetWindowProperty(x11.display, *windowFromRoot,
       x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
       &type, &fmt, &num, &bytes, &data) != Success)
