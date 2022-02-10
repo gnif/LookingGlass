@@ -758,16 +758,17 @@ int main_frameThread(void * unused)
       break;
     }
 
-    if (frame->requestActivation)
+    if (frame->flags && FRAME_FLAG_REQUEST_ACTIVATION)
       g_state.ds->requestActivation();
 
-    if (g_params.autoScreensaver && g_state.autoIdleInhibitState != frame->blockScreensaver)
+    const bool blockScreensaver = frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER;
+    if (g_params.autoScreensaver && g_state.autoIdleInhibitState != blockScreensaver)
     {
-      if (frame->blockScreensaver)
+      if (blockScreensaver)
         g_state.ds->inhibitIdle();
       else
         g_state.ds->uninhibitIdle();
-      g_state.autoIdleInhibitState = frame->blockScreensaver;
+      g_state.autoIdleInhibitState = blockScreensaver;
     }
 
     const uint64_t t      = nanotime();

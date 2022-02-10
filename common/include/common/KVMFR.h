@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 17
+#define KVMFR_VERSION 18
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -124,6 +124,14 @@ typedef struct KVMFRCursor
 }
 KVMFRCursor;
 
+enum
+{
+  FRAME_FLAG_BLOCK_SCREENSAVER  = 0x1,
+  FRAME_FLAG_REQUEST_ACTIVATION = 0x2
+};
+
+typedef uint32_t KVMFRFrameFlags;
+
 typedef struct KVMFRFrame
 {
   uint32_t        formatVer;          // the frame format version number
@@ -138,8 +146,7 @@ typedef struct KVMFRFrame
   uint32_t        offset;             // offset from the start of this header to the FrameBuffer header
   uint32_t        damageRectsCount;   // the number of damage rectangles (zero for full-frame damage)
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
-  bool            blockScreensaver;   // whether the guest has requested to block screensavers
-  bool            requestActivation;  // whether the guest has requested activation since the last frame
+  KVMFRFrameFlags flags;              // bit field combination of FRAME_FLAG_*
 }
 KVMFRFrame;
 
