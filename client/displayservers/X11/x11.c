@@ -1827,7 +1827,24 @@ static bool x11IsValidPointerPos(int x, int y)
 
 static void x11RequestActivation(void)
 {
-  // TODO
+  XEvent e =
+  {
+    .xclient = {
+      .type         = ClientMessage,
+      .send_event   = true,
+      .message_type = x11atoms._NET_WM_STATE,
+      .format       = 32,
+      .window       = x11.window,
+      .data.l       = {
+        _NET_WM_STATE_ADD,
+        x11atoms._NET_WM_STATE_DEMANDS_ATTENTION,
+        0
+      }
+    }
+  };
+
+  XSendEvent(x11.display, DefaultRootWindow(x11.display), False,
+      SubstructureNotifyMask | SubstructureRedirectMask, &e);
 }
 
 static void x11InhibitIdle(void)
