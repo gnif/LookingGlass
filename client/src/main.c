@@ -758,7 +758,7 @@ int main_frameThread(void * unused)
       break;
     }
 
-    if (frame->flags && FRAME_FLAG_REQUEST_ACTIVATION)
+    if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
       g_state.ds->requestActivation();
 
     const bool blockScreensaver = frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER;
