@@ -119,5 +119,12 @@ const struct LGTeamMember LG_TEAM[] =
     .blurb  = "Documentation Guru and Discord Community Manager",
     .donate = { { 0 } }
   },
+  {
+    .name   = "Chris Spencer (spencercw)",
+    .blurb  =
+      "Developer. Knows enough about audio programming to cause problems for "
+      "himself.",
+    .donate = { { 0 } }
+  },
   { 0 }
 };
