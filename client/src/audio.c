@@ -37,7 +37,8 @@
 typedef enum
 {
   STREAM_STATE_STOP,
-  STREAM_STATE_SETUP,
+  STREAM_STATE_SETUP_SPICE,
+  STREAM_STATE_SETUP_DEVICE,
   STREAM_STATE_RUN,
   STREAM_STATE_KEEP_ALIVE
 }
@@ -99,6 +100,7 @@ typedef struct
     int         sampleRate;
     int         stride;
     int         deviceMaxPeriodFrames;
+    int         deviceTargetStartFrames;
     RingBuffer  buffer;
     RingBuffer  deviceTiming;
 
@@ -217,6 +219,19 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 
   if (audio.playback.buffer)
   {
+    if (audio.playback.state == STREAM_STATE_SETUP_DEVICE)
+    {
+      // If necessary, slew backwards to play silence until we reach the target
+      // startup latency. This avoids underrunning the buffer if the audio
+      // device starts earlier than required
+      int offset = ringbuffer_getCount(audio.playback.buffer) -
+        audio.playback.deviceTargetStartFrames;
+      if (offset < 0)
+        ringbuffer_consume(audio.playback.buffer, NULL, offset);
+
+      audio.playback.state = STREAM_STATE_RUN;
+    }
+
     // Measure the device clock and post to the Spice thread
     if (frames != data->periodFrames)
     {
@@ -329,7 +344,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(float);
-  audio.playback.state      = STREAM_STATE_SETUP;
+  audio.playback.state      = STREAM_STATE_SETUP_SPICE;
 
   audio.playback.deviceData.periodFrames       = 0;
   audio.playback.deviceData.nextPosition       = 0;
@@ -362,8 +377,6 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.timings = ringbuffer_new(1200, sizeof(float));
   audio.playback.graph   = app_registerGraph("PLAYBACK",
       audio.playback.timings, 0.0f, 200.0f, audioGraphFormatFn);
-
-  audio.playback.state = STREAM_STATE_SETUP;
 }
 
 void audio_playbackStop(void)
@@ -390,8 +403,9 @@ void audio_playbackStop(void)
       break;
     }
 
-    case STREAM_STATE_SETUP:
-      // We haven't actually started the audio device yet so just clean up
+    case STREAM_STATE_SETUP_SPICE:
+    case STREAM_STATE_SETUP_DEVICE:
+      // Playback hasn't actually started yet so just clean up
       playbackStop();
       break;
 
@@ -679,7 +693,7 @@ void audio_playbackData(uint8_t * data, size_t size)
     spiceData->nextPosition += srcData.output_frames_gen;
   }
 
-  if (audio.playback.state == STREAM_STATE_SETUP)
+  if (audio.playback.state == STREAM_STATE_SETUP_SPICE)
   {
     // In the worst case, the audio device can immediately request two full
     // buffers at the beginning of playback. Latency corrections at startup can
@@ -688,10 +702,18 @@ void audio_playbackData(uint8_t * data, size_t size)
     // before starting playback to minimise the chances of underrunning
     int startFrames =
       spiceData->periodFrames * 2 + audio.playback.deviceMaxPeriodFrames * 2;
-    if (spiceData->nextPosition >= startFrames) {
-      audio.audioDev->playback.start();
-      audio.playback.state = STREAM_STATE_RUN;
-    }
+    audio.playback.deviceTargetStartFrames = startFrames;
+
+    // The actual time between opening the device and the device starting to
+    // pull data can range anywhere between nearly instant and hundreds of
+    // milliseconds. To minimise startup latency, we open the device
+    // immediately. If the device starts earlier than required (as per the
+    // `startFrames` value we just calculated), then a period of silence will be
+    // inserted at the beginning of playback to avoid underrunning. If it starts
+    // later, then we just accept the higher latency and let the adaptive
+    // resampling deal with it
+    audio.playback.state = STREAM_STATE_SETUP_DEVICE;
+    audio.audioDev->playback.start();
   }
 
   double latencyFrames = actualOffset;
