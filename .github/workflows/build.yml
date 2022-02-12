@@ -84,7 +84,7 @@ jobs:
         sudo apt-get update
     - name: Install Linux host dependencies
       run: |
-        sudo apt-get install binutils-dev libgl1-mesa-dev libxcb-xfixes0-dev \
+        sudo apt-get install binutils-dev libxcb-xfixes0-dev \
           libpipewire-0.3-dev
     - name: Configure Linux host
       run: |
