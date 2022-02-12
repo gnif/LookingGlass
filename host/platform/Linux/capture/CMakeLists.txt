@@ -4,7 +4,7 @@ project(capture LANGUAGES C)
 include("PreCapture")
 
 option(USE_XCB "Enable XSHM Support" ON)
-option(USE_PIPEWIRE "Enable Pipewire Support" OFF)
+option(USE_PIPEWIRE "Enable PipeWire Support" ON)
 
 if (USE_XCB)
   add_capture("XCB")
