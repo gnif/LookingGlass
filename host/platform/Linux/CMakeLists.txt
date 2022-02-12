@@ -15,7 +15,6 @@ target_link_libraries(platform_Linux
 	m
 	capture
 	pthread
-	X11
 )
 
 target_include_directories(platform_Linux
