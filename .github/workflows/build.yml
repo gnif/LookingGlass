@@ -76,12 +76,16 @@ jobs:
     - uses: actions/checkout@v1
       with:
         submodules: recursive
+    - name: Install PipeWire repository
+      run: |
+        echo 'deb [trusted=yes] https://pipewire-ubuntu.quantum5.workers.dev ./' | sudo tee /etc/apt/sources.list.d/pipewire.list
     - name: Update apt
       run: |
         sudo apt-get update
     - name: Install Linux host dependencies
       run: |
-        sudo apt-get install binutils-dev libgl1-mesa-dev libxcb-xfixes0-dev
+        sudo apt-get install binutils-dev libgl1-mesa-dev libxcb-xfixes0-dev \
+          libpipewire-0.3-dev
     - name: Configure Linux host
       run: |
         mkdir host/build
