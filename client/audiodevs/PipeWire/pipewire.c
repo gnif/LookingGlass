@@ -40,6 +40,7 @@ StreamState;
 struct PipeWire
 {
   struct pw_loop        * loop;
+  struct pw_context     * context;
   struct pw_thread_loop * thread;
 
   struct
@@ -132,33 +133,38 @@ static bool pipewire_init(void)
   pw_init(NULL, NULL);
 
   pw.loop = pw_loop_new(NULL);
-  struct pw_context * context = pw_context_new(pw.loop, NULL, 0);
-  if (!context)
+  pw.context = pw_context_new(
+    pw.loop,
+    pw_properties_new(
+      // Request real-time priority on the PipeWire threads
+      PW_KEY_CONFIG_NAME, "client-rt.conf",
+      NULL
+    ),
+    0);
+  if (!pw.context)
   {
     DEBUG_ERROR("Failed to create a context");
     goto err;
   }
 
   /* this is just to test for PipeWire availabillity */
-  struct pw_core * core = pw_context_connect(context, NULL, 0);
+  struct pw_core * core = pw_context_connect(pw.context, NULL, 0);
   if (!core)
     goto err_context;
-
-  pw_context_destroy(context);
 
   /* PipeWire is available so create the loop thread and start it */
   pw.thread = pw_thread_loop_new_full(pw.loop, "PipeWire", NULL);
   if (!pw.thread)
   {
     DEBUG_ERROR("Failed to create the thread loop");
-    goto err;
+    goto err_context;
   }
 
   pw_thread_loop_start(pw.thread);
   return true;
 
 err_context:
-  pw_context_destroy(context);
+  pw_context_destroy(pw.context);
 
 err:
   pw_loop_destroy(pw.loop);
@@ -502,10 +508,12 @@ static void pipewire_free(void)
   pipewire_recordStopStream();
   pw_thread_loop_stop(pw.thread);
   pw_thread_loop_destroy(pw.thread);
+  pw_context_destroy(pw.context);
   pw_loop_destroy(pw.loop);
 
-  pw.loop   = NULL;
-  pw.thread = NULL;
+  pw.loop    = NULL;
+  pw.context = NULL;
+  pw.thread  = NULL;
 
   pw_deinit();
 }
