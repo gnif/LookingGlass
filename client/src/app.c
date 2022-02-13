@@ -532,7 +532,8 @@ void app_invalidateWindow(bool full)
   if (g_state.jitRender && g_state.ds->stopWaitFrame)
     g_state.ds->stopWaitFrame();
 
-  lgSignalEvent(g_state.frameEvent);
+  if (g_state.frameEvent)
+    lgSignalEvent(g_state.frameEvent);
 }
 
 void app_handleCloseEvent(void)
