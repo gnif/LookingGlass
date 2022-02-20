@@ -46,7 +46,7 @@ static bool       optScancodeValidate(struct Option * opt, const char ** error);
 static char *     optScancodeToString(struct Option * opt);
 static bool       optRotateValidate  (struct Option * opt, const char ** error);
 
-static void doLicense();
+static void doLicense(void);
 
 static struct Option options[] =
 {

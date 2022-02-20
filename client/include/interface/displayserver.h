@@ -123,13 +123,13 @@ struct LG_DisplayServerOps
   bool (*init)(const LG_DSInitParams params);
 
   /* called at startup after window creation, renderer and SPICE is ready */
-  void (*startup)();
+  void (*startup)(void);
 
   /* called just before final window destruction, before final free */
-  void (*shutdown)();
+  void (*shutdown)(void);
 
   /* final free */
-  void (*free)();
+  void (*free)(void);
 
   /*
    * return a system specific property, returns false if unsupported or failure
@@ -170,14 +170,14 @@ struct LG_DisplayServerOps
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
   void (*setPointer)(LG_DSPointer pointer);
-  void (*grabKeyboard)();
-  void (*ungrabKeyboard)();
+  void (*grabKeyboard)(void);
+  void (*ungrabKeyboard)(void);
   /* (un)grabPointer is used to toggle cursor tracking/confine in normal mode */
-  void (*grabPointer)();
-  void (*ungrabPointer)();
+  void (*grabPointer)(void);
+  void (*ungrabPointer)(void);
   /* (un)capturePointer is used do toggle special cursor tracking in capture mode */
-  void (*capturePointer)();
-  void (*uncapturePointer)();
+  void (*capturePointer)(void);
+  void (*uncapturePointer)(void);
 
   /* exiting = true if the warp is to leave the window */
   void (*warpPointer)(int x, int y, bool exiting);
@@ -185,17 +185,17 @@ struct LG_DisplayServerOps
   /* called when the client needs to realign the pointer. This should simply
    * call the appropriate app_handleMouse* method for the platform with zero
    * deltas */
-  void (*realignPointer)();
+  void (*realignPointer)(void);
 
   /* returns true if the position specified is actually valid */
   bool (*isValidPointerPos)(int x, int y);
 
   /* called to disable/enable the screensaver */
-  void (*inhibitIdle)();
-  void (*uninhibitIdle)();
+  void (*inhibitIdle)(void);
+  void (*uninhibitIdle)(void);
 
   /* called to request activation */
-  void (*requestActivation)();
+  void (*requestActivation)(void);
 
   /* wait for the specified time without blocking UI processing/event loops */
   void (*wait)(unsigned int time);

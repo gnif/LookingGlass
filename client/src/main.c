@@ -981,7 +981,7 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
   return true;
 }
 
-static void reportBadVersion()
+static void reportBadVersion(void)
 {
   DEBUG_BREAK();
   DEBUG_ERROR("The host application is not compatible with this client");

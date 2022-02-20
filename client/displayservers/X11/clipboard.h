@@ -28,7 +28,7 @@
 
 bool x11CBEventThread(const XEvent xe);
 
-bool x11CBInit();
+bool x11CBInit(void);
 void x11CBNotice(LG_ClipboardData type);
 void x11CBRelease(void);
 void x11CBRequest(LG_ClipboardData type);
