@@ -100,7 +100,8 @@ typedef struct
     int         sampleRate;
     int         stride;
     int         deviceMaxPeriodFrames;
-    int         deviceTargetStartFrames;
+    int         deviceStartFrames;
+    int         targetStartFrames;
     RingBuffer  buffer;
     RingBuffer  deviceTiming;
 
@@ -225,7 +226,7 @@ static int playbackPullFrames(uint8_t * dst, int frames)
       // startup latency. This avoids underrunning the buffer if the audio
       // device starts earlier than required
       int offset = ringbuffer_getCount(audio.playback.buffer) -
-        audio.playback.deviceTargetStartFrames;
+        audio.playback.targetStartFrames;
       if (offset < 0)
       {
         data->nextPosition += offset;
@@ -361,9 +362,12 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.spiceData.offsetErrorIntegral = 0.0;
   audio.playback.spiceData.ratioIntegral       = 0.0;
 
+  int requestedPeriodFrames = max(g_params.audioPeriodSize, 1);
   audio.playback.deviceMaxPeriodFrames = 0;
-  audio.audioDev->playback.setup(channels, sampleRate,
-    &audio.playback.deviceMaxPeriodFrames, playbackPullFrames);
+  audio.playback.deviceStartFrames     = 0;
+  audio.audioDev->playback.setup(channels, sampleRate, requestedPeriodFrames,
+    &audio.playback.deviceMaxPeriodFrames, &audio.playback.deviceStartFrames,
+    playbackPullFrames);
   DEBUG_ASSERT(audio.playback.deviceMaxPeriodFrames > 0);
 
   // if a volume level was stored, set it before we return
@@ -698,14 +702,13 @@ void audio_playbackData(uint8_t * data, size_t size)
 
   if (audio.playback.state == STREAM_STATE_SETUP_SPICE)
   {
-    // In the worst case, the audio device can immediately request two full
-    // buffers at the beginning of playback. Latency corrections at startup can
-    // also be quite significant due to poor packet pacing from Spice, so
-    // additionally require at least two full Spice periods' worth of data
+    // Latency corrections at startup can be quite significant due to poor
+    // packet pacing from Spice, so require at least two full Spice periods'
+    // worth of data in addition to the startup delay requested by the device
     // before starting playback to minimise the chances of underrunning
     int startFrames =
-      spiceData->periodFrames * 2 + audio.playback.deviceMaxPeriodFrames * 2;
-    audio.playback.deviceTargetStartFrames = startFrames;
+      spiceData->periodFrames * 2 + audio.playback.deviceStartFrames;
+    audio.playback.targetStartFrames = startFrames;
 
     // The actual time between opening the device and the device starting to
     // pull data can range anywhere between nearly instant and hundreds of
