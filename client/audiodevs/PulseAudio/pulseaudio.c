@@ -313,10 +313,15 @@ static void pulseaudio_stop(void)
   if (!pa.sink)
     return;
 
-  pa_threaded_mainloop_lock(pa.loop);
+  bool needLock = !pa_threaded_mainloop_in_thread(pa.loop);
+  if (needLock)
+    pa_threaded_mainloop_lock(pa.loop);
+
   pa_stream_cork(pa.sink, 1, NULL, NULL);
   pa.sinkCorked = true;
-  pa_threaded_mainloop_unlock(pa.loop);
+
+  if (needLock)
+    pa_threaded_mainloop_unlock(pa.loop);
 }
 
 static void pulseaudio_volume(int channels, const uint16_t volume[])
