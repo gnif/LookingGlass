@@ -37,6 +37,7 @@ struct PulseAudio
   int                    sinkIndex;
   bool                   sinkCorked;
   bool                   sinkMuted;
+  bool                   sinkStarting;
   int                    sinkMaxPeriodFrames;
   int                    sinkSampleRate;
   int                    sinkChannels;
@@ -218,6 +219,16 @@ static void pulseaudio_free(void)
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
+static void pulseaudio_state_cb(pa_stream * p, void * userdata)
+{
+  if (pa.sinkStarting && pa_stream_get_state(pa.sink) == PA_STREAM_READY)
+  {
+    pa_stream_cork(pa.sink, 0, NULL, NULL);
+    pa.sinkCorked   = false;
+    pa.sinkStarting = false;
+  }
+}
+
 static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
 {
   // PulseAudio tries to pull data from the stream as soon as it is created for
@@ -279,6 +290,7 @@ static void pulseaudio_setup(int channels, int sampleRate,
   pa.sinkSampleRate = sampleRate;
 
   pa.sink = pa_stream_new(pa.context, "Looking Glass", &spec, NULL);
+  pa_stream_set_state_callback    (pa.sink, pulseaudio_state_cb    , NULL);
   pa_stream_set_write_callback    (pa.sink, pulseaudio_write_cb    , NULL);
   pa_stream_set_underflow_callback(pa.sink, pulseaudio_underflow_cb, NULL);
   pa_stream_set_overflow_callback (pa.sink, pulseaudio_overflow_cb , NULL);
@@ -291,6 +303,7 @@ static void pulseaudio_setup(int channels, int sampleRate,
   pa.sinkPullFn          = pullFn;
   pa.sinkMaxPeriodFrames = attribs.tlength / pa.sinkStride;
   pa.sinkCorked          = true;
+  pa.sinkStarting        = false;
 
   *maxPeriodFrames = pa.sinkMaxPeriodFrames;
 
@@ -303,8 +316,16 @@ static void pulseaudio_start(void)
     return;
 
   pa_threaded_mainloop_lock(pa.loop);
-  pa_stream_cork(pa.sink, 0, NULL, NULL);
-  pa.sinkCorked = false;
+
+  pa_stream_state_t state = pa_stream_get_state(pa.sink);
+  if (state == PA_STREAM_CREATING)
+    pa.sinkStarting = true;
+  else
+  {
+    pa_stream_cork(pa.sink, 0, NULL, NULL);
+    pa.sinkCorked = false;
+  }
+
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
@@ -318,7 +339,8 @@ static void pulseaudio_stop(void)
     pa_threaded_mainloop_lock(pa.loop);
 
   pa_stream_cork(pa.sink, 1, NULL, NULL);
-  pa.sinkCorked = true;
+  pa.sinkCorked   = true;
+  pa.sinkStarting = false;
 
   if (needLock)
     pa_threaded_mainloop_unlock(pa.loop);
