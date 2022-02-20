@@ -96,21 +96,21 @@ typedef struct CaptureInterface
 {
   const char * shortName;
   const bool   asyncCapture;
-  const char * (*getName        )();
-  void         (*initOptions    )();
+  const char * (*getName        )(void);
+  void         (*initOptions    )(void);
 
   bool(*create)(
     CaptureGetPointerBuffer  getPointerBufferFn,
     CapturePostPointerBuffer postPointerBufferFn
   );
 
-  bool          (*init         )();
-  bool          (*start        )();
-  void          (*stop         )();
-  bool          (*deinit       )();
-  void          (*free         )();
+  bool          (*init         )(void);
+  bool          (*start        )(void);
+  void          (*stop         )(void);
+  bool          (*deinit       )(void);
+  void          (*free         )(void);
 
-  CaptureResult (*capture   )();
+  CaptureResult (*capture   )(void);
   CaptureResult (*waitFrame )(CaptureFrame * frame, const size_t maxFrameSize);
   CaptureResult (*getFrame  )(FrameBuffer  * frame, const unsigned int height, int frameIndex);
 }

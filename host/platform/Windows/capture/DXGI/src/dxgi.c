@@ -57,8 +57,8 @@ static struct DXGICopyBackend * backends[] = {
 
 // forwards
 
-static bool          dxgi_deinit();
-static CaptureResult dxgi_releaseFrame();
+static bool          dxgi_deinit(void);
+static CaptureResult dxgi_releaseFrame(void);
 
 // implementation
 

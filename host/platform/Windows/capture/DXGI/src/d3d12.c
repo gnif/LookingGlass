@@ -79,7 +79,7 @@ typedef HRESULT (*D3D12GetDebugInterface_t)(
   void   **ppvDebug
 );
 
-static void d3d12_free();
+static void d3d12_free(void);
 
 static bool d3d12_create(struct DXGIInterface * intf)
 {

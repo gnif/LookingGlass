@@ -64,7 +64,7 @@ static int pointerThread(void * unused);
 
 // forwards
 
-static bool xcb_deinit();
+static bool xcb_deinit(void);
 
 // implementation
 

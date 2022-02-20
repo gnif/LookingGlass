@@ -48,8 +48,8 @@ enum DiffMapBlockSize
   DIFFMAP_BLOCKSIZE_64X64
 };
 
-bool NvFBCInit();
-void NvFBCFree();
+bool NvFBCInit(void);
+void NvFBCFree(void);
 
 bool NvFBCToSysCreate(
   int            adapterIndex,
