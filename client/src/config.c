@@ -464,6 +464,15 @@ static struct Option options[] =
     .type          = OPTION_TYPE_BOOL,
     .value.x_bool  = true
   },
+
+  // audio options
+  {
+    .module         = "audio",
+    .name           = "periodSize",
+    .description    = "Requested audio device period size in samples",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 2048
+  },
   {0}
 };
 
@@ -635,6 +644,8 @@ bool config_load(int argc, char * argv[])
     g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
     g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
   }
+
+  g_params.audioPeriodSize = option_get_int("audio", "periodSize");
 
   return true;
 }

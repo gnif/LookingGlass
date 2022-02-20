@@ -199,6 +199,8 @@ struct AppParams
   bool              autoCapture;
   bool              captureInputOnly;
   bool              showCursorDot;
+
+  int               audioPeriodSize;
 };
 
 struct CBRequest

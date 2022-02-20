@@ -53,6 +53,7 @@ struct PipeWire
     int            stride;
     LG_AudioPullFn pullFn;
     int            maxPeriodFrames;
+    int            startFrames;
 
     StreamState state;
   }
@@ -185,7 +186,8 @@ static void pipewire_playbackStopStream(void)
 }
 
 static void pipewire_playbackSetup(int channels, int sampleRate,
-    int * maxPeriodFrames, LG_AudioPullFn pullFn)
+    int requestedPeriodFrames, int * maxPeriodFrames, int * startFrames,
+    LG_AudioPullFn pullFn)
 {
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -203,15 +205,15 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       pw.playback.sampleRate == sampleRate)
   {
     *maxPeriodFrames = pw.playback.maxPeriodFrames;
+    *startFrames     = pw.playback.startFrames;
     return;
   }
 
   pipewire_playbackStopStream();
 
-  int defaultLatencyFrames = 2048;
-  char defaultNodeLatency[32];
-  snprintf(defaultNodeLatency, sizeof(defaultNodeLatency), "%d/%d",
-    defaultLatencyFrames, sampleRate);
+  char requestedNodeLatency[32];
+  snprintf(requestedNodeLatency, sizeof(requestedNodeLatency), "%d/%d",
+    requestedPeriodFrames, sampleRate);
 
   pw.playback.channels    = channels;
   pw.playback.sampleRate  = sampleRate;
@@ -227,7 +229,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_KEY_MEDIA_TYPE    , "Audio",
       PW_KEY_MEDIA_CATEGORY, "Playback",
       PW_KEY_MEDIA_ROLE    , "Music",
-      PW_KEY_NODE_LATENCY  , defaultNodeLatency,
+      PW_KEY_NODE_LATENCY  , requestedNodeLatency,
       NULL
     ),
     &events,
@@ -250,21 +252,26 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   {
     DEBUG_WARN(
       "PIPEWIRE_LATENCY value '%s' is invalid or does not match stream sample "
-      "rate; defaulting to %d/%d", actualNodeLatency, defaultLatencyFrames,
+      "rate; using %d/%d", actualNodeLatency, requestedPeriodFrames,
       sampleRate);
 
     struct spa_dict_item items[] = {
-      { PW_KEY_NODE_LATENCY, defaultNodeLatency }
+      { PW_KEY_NODE_LATENCY, requestedNodeLatency }
     };
     pw_stream_update_properties(pw.playback.stream,
       &SPA_DICT_INIT_ARRAY(items));
 
-    pw.playback.maxPeriodFrames = defaultLatencyFrames;
+    pw.playback.maxPeriodFrames = requestedPeriodFrames;
   }
   else
     pw.playback.maxPeriodFrames = num;
 
+  // If the previous quantum size was very small, PipeWire can request two full
+  // periods almost immediately at the start of playback
+  pw.playback.startFrames = pw.playback.maxPeriodFrames * 2;
+
   *maxPeriodFrames = pw.playback.maxPeriodFrames;
+  *startFrames     = pw.playback.startFrames;
 
   if (!pw.playback.stream)
   {

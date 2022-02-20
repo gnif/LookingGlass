@@ -39,6 +39,7 @@ struct PulseAudio
   bool                   sinkMuted;
   bool                   sinkStarting;
   int                    sinkMaxPeriodFrames;
+  int                    sinkStartFrames;
   int                    sinkSampleRate;
   int                    sinkChannels;
   int                    sinkStride;
@@ -257,16 +258,15 @@ static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
 }
 
 static void pulseaudio_setup(int channels, int sampleRate,
-    int * maxPeriodFrames, LG_AudioPullFn pullFn)
+    int requestedPeriodFrames, int * maxPeriodFrames, int * startFrames,
+    LG_AudioPullFn pullFn)
 {
   if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
   {
     *maxPeriodFrames = pa.sinkMaxPeriodFrames;
+    *startFrames     = pa.sinkStartFrames;
     return;
   }
-
-  //TODO: be smarter about this
-  const int PERIOD_LEN = 80;
 
   pa_sample_spec spec = {
     .format   = PA_SAMPLE_FLOAT32,
@@ -274,12 +274,13 @@ static void pulseaudio_setup(int channels, int sampleRate,
     .channels = channels
   };
 
+  int stride = channels * sizeof(float);
+  int bufferSize = requestedPeriodFrames * 2 * stride;
   pa_buffer_attr attribs =
   {
-    .maxlength = pa_usec_to_bytes((PERIOD_LEN * 2) * PA_USEC_PER_MSEC, &spec),
-    .tlength   = pa_usec_to_bytes(PERIOD_LEN * PA_USEC_PER_MSEC, &spec),
+    .maxlength = -1,
+    .tlength   = bufferSize,
     .prebuf    = 0,
-    .fragsize  = pa_usec_to_bytes(PERIOD_LEN * PA_USEC_PER_MSEC, &spec),
     .minreq    = (uint32_t)-1
   };
 
@@ -295,17 +296,21 @@ static void pulseaudio_setup(int channels, int sampleRate,
   pa_stream_set_underflow_callback(pa.sink, pulseaudio_underflow_cb, NULL);
   pa_stream_set_overflow_callback (pa.sink, pulseaudio_overflow_cb , NULL);
 
-  pa_stream_connect_playback(pa.sink, NULL, &attribs,
-    PA_STREAM_START_CORKED | PA_STREAM_ADJUST_LATENCY,
+  pa_stream_connect_playback(pa.sink, NULL, &attribs, PA_STREAM_START_CORKED,
     NULL, NULL);
 
-  pa.sinkStride          = channels * sizeof(float);
+  pa.sinkStride          = stride;
   pa.sinkPullFn          = pullFn;
-  pa.sinkMaxPeriodFrames = attribs.tlength / pa.sinkStride;
+  pa.sinkMaxPeriodFrames = requestedPeriodFrames;
   pa.sinkCorked          = true;
   pa.sinkStarting        = false;
 
-  *maxPeriodFrames = pa.sinkMaxPeriodFrames;
+  // If something else is, or was recently using a small latency value,
+  // PulseAudio can request way more data at startup than is reasonable
+  pa.sinkStartFrames = requestedPeriodFrames * 4;
+
+  *maxPeriodFrames = requestedPeriodFrames;
+  *startFrames     = pa.sinkStartFrames;
 
   pa_threaded_mainloop_unlock(pa.loop);
 }
