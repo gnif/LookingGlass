@@ -22,6 +22,6 @@
 #define _H_LG_COMMON_SYSUTILS
 
 // returns the page size
-long sysinfo_getPageSize();
+long sysinfo_getPageSize(void);
 
 #endif

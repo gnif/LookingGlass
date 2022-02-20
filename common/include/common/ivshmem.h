@@ -33,7 +33,7 @@ struct IVSHMEM
   void * opaque;
 };
 
-void ivshmemOptionsInit();
+void ivshmemOptionsInit(void);
 bool ivshmemInit(struct IVSHMEM * dev);
 bool ivshmemOpen(struct IVSHMEM * dev);
 bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDev);
