@@ -20,6 +20,6 @@
 
 #include <stdbool.h>
 
-void config_init();
+void config_init(void);
 bool config_load(int argc, char * argv[]);
-void config_free();
+void config_free(void);

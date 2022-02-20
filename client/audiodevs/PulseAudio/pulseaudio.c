@@ -187,7 +187,7 @@ err:
   return false;
 }
 
-static void pulseaudio_sink_close_nl()
+static void pulseaudio_sink_close_nl(void)
 {
   if (!pa.sink)
     return;

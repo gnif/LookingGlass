@@ -44,7 +44,7 @@ void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args);
 
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn);
-void overlayGraph_unregister();
+void overlayGraph_unregister(GraphHandle handle);
 void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
     bool * enabled, void * udata), void * udata);
 void overlayGraph_invalidate(GraphHandle handle);
