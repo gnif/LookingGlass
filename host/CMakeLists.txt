@@ -39,6 +39,7 @@ add_compile_options(
   "-Wall"
   "-Werror"
   "-Wfatal-errors"
+  "$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>"
   "-ffast-math"
   "-fdata-sections"
   "-ffunction-sections"

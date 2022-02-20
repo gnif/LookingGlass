@@ -56,7 +56,7 @@ static struct pipewire * this = NULL;
 
 // forwards
 
-static bool pipewire_deinit();
+static bool pipewire_deinit(void);
 
 // implementation
 

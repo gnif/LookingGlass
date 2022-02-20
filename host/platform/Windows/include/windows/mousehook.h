@@ -21,4 +21,4 @@
 typedef void (*MouseHookFn)(int x, int y);
 
 void mouseHook_install(MouseHookFn callback);
-void mouseHook_remove();
+void mouseHook_remove(void);
