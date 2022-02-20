@@ -40,7 +40,7 @@ struct ll
   LG_Lock lock;
 };
 
-struct ll *  ll_new();
+struct ll *  ll_new(void);
 void         ll_free     (struct ll * list);
 void         ll_push     (struct ll * list, void * data);
 bool         ll_shift    (struct ll * list, void ** data);
