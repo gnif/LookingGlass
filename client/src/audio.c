@@ -227,7 +227,10 @@ static int playbackPullFrames(uint8_t * dst, int frames)
       int offset = ringbuffer_getCount(audio.playback.buffer) -
         audio.playback.deviceTargetStartFrames;
       if (offset < 0)
+      {
+        data->nextPosition += offset;
         ringbuffer_consume(audio.playback.buffer, NULL, offset);
+      }
 
       audio.playback.state = STREAM_STATE_RUN;
     }
