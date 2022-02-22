@@ -473,6 +473,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_INT,
     .value.x_int    = 2048
   },
+  {
+    .module         = "audio",
+    .name           = "bufferLatency",
+    .description    = "Additional buffer latency in milliseconds",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 8
+  },
   {0}
 };
 
@@ -646,6 +653,7 @@ bool config_load(int argc, char * argv[])
   }
 
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
+  g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
 
   return true;
 }
