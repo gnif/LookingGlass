@@ -517,16 +517,26 @@ void audio_playbackData(uint8_t * data, size_t size)
     spiceData->devNextPosition = deviceTick.nextPosition;
   }
 
-  // Determine the target latency. Ideally, this would be precisely equal to
-  // the maximum device period size. However, we need to allow for some timing
-  // jitter to avoid underruns. Packets from Spice in particular can sometimes
-  // be delayed by an entire period or more, so include a fixed amount of
-  // latency to absorb these gaps. For device jitter use a multiplier, so timing
-  // requirements get progressively stricter as the period size is reduced
-  int spiceJitterMs = 13;
+  // Determine the target latency. This is made up of three components:
+  // 1. Half the Spice period. This is necessary due to the way qemu handles
+  //    audio. Data is not sent as soon as it is produced by the virtual sound
+  //    card; instead, qemu polls for new data every ~10ms. This results in a
+  //    sawtooth pattern in the packet timing as it drifts in and out of phase
+  //    with the virtual device. LG measures the average progression of the
+  //    Spice clock, so sees the packet timing error drift by half a period
+  //    above and below the measured clock. We need to account for this in the
+  //    target latency to avoid underrunning.
+  // 2. The maximum audio device period, plus a little extra to absorb timing
+  //    jitter.
+  // 3. A configurable additional buffer period. The default value is set high
+  //    enough to absorb typical timing jitter from Spice, which can be quite
+  //    significant. Users may reduce this if they care more about latency than
+  //    audio quality.
+  int configLatencyMs = max(g_params.audioBufferLatency, 0);
   double targetLatencyFrames =
-    spiceJitterMs * audio.playback.sampleRate / 1000.0 +
-    audio.playback.deviceMaxPeriodFrames * 1.1;
+    spiceData->periodFrames / 2.0 +
+    audio.playback.deviceMaxPeriodFrames * 1.1 +
+    configLatencyMs * audio.playback.sampleRate / 1000.0;
 
   // If the device is currently at a lower period size than its maximum (which
   // can happen, for example, if another application has requested a lower

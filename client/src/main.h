@@ -201,6 +201,7 @@ struct AppParams
   bool              showCursorDot;
 
   int               audioPeriodSize;
+  int               audioBufferLatency;
 };
 
 struct CBRequest
