@@ -328,8 +328,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
     playbackStop();
 
   int srcError;
-  audio.playback.spiceData.src =
-    src_new(SRC_SINC_BEST_QUALITY, channels, &srcError);
+  audio.playback.spiceData.src = src_new(SRC_SINC_FASTEST, channels, &srcError);
   if (!audio.playback.spiceData.src)
   {
     DEBUG_ERROR("Failed to create resampler: %s", src_strerror(srcError));
@@ -614,7 +613,7 @@ void audio_playbackData(uint8_t * data, size_t size)
         // the resampler startup latency
         if (audio.playback.state == STREAM_STATE_KEEP_ALIVE)
         {
-          int resamplerLatencyFrames = 144;
+          int resamplerLatencyFrames = 20;
           targetPosition += resamplerLatencyFrames;
         }
 
