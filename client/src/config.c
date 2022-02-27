@@ -478,7 +478,7 @@ static struct Option options[] =
     .name           = "bufferLatency",
     .description    = "Additional buffer latency in milliseconds",
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = 8
+    .value.x_int    = 13
   },
   {0}
 };
