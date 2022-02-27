@@ -428,7 +428,7 @@ void initImGuiKeyMap(int * keymap)
   keymap[ImGuiKey_Space      ] = KEY_SPACE;
   keymap[ImGuiKey_Enter      ] = KEY_ENTER;
   keymap[ImGuiKey_Escape     ] = KEY_SPACE;
-  keymap[ImGuiKey_KeyPadEnter] = KEY_KPENTER;
+  keymap[ImGuiKey_KeypadEnter] = KEY_KPENTER;
   keymap[ImGuiKey_A          ] = KEY_A;
   keymap[ImGuiKey_C          ] = KEY_C;
   keymap[ImGuiKey_V          ] = KEY_V;
