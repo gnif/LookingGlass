@@ -108,9 +108,9 @@ typedef struct
     RingBuffer  timings;
     GraphHandle graph;
 
-    // These two structs contain data specifically for use in the device and
-    // Spice data threads respectively. Keep them on separate cache lines to
-    // avoid false sharing
+    /* These two structs contain data specifically for use in the device and
+     * Spice data threads respectively. Keep them on separate cache lines to
+     * avoid false sharing. */
     alignas(64) PlaybackDeviceData deviceData;
     alignas(64) PlaybackSpiceData  spiceData;
   }
@@ -222,9 +222,9 @@ static int playbackPullFrames(uint8_t * dst, int frames)
   {
     if (audio.playback.state == STREAM_STATE_SETUP_DEVICE)
     {
-      // If necessary, slew backwards to play silence until we reach the target
-      // startup latency. This avoids underrunning the buffer if the audio
-      // device starts earlier than required
+      /* If necessary, slew backwards to play silence until we reach the target
+       * startup latency. This avoids underrunning the buffer if the audio
+       * device starts earlier than required. */
       int offset = ringbuffer_getCount(audio.playback.buffer) -
         audio.playback.targetStartFrames;
       if (offset < 0)
@@ -245,14 +245,14 @@ static int playbackPullFrames(uint8_t * dst, int frames)
       if (init)
         data->nextTime = now + llrint(newPeriodSec * 1.0e9);
       else
-        // Due to the double-buffered nature of audio playback, we are filling
-        // in the next buffer while the device is playing the previous buffer.
-        // This results in slightly unintuitive behaviour when the period size
-        // changes. The device will request enough samples for the new period
-        // size, but won't call us again until the previous buffer at the old
-        // size has finished playing. So, to avoid a blip in the timing
-        // calculations, we must set the estimated next wakeup time based upon
-        // the previous period size, not the new one
+        /* Due to the double-buffered nature of audio playback, we are filling
+         * in the next buffer while the device is playing the previous buffer.
+         * This results in slightly unintuitive behaviour when the period size
+         * changes. The device will request enough samples for the new period
+         * size, but won't call us again until the previous buffer at the old
+         * size has finished playing. So, to avoid a blip in the timing
+         * calculations, we must set the estimated next wakeup time based upon
+         * the previous period size, not the new one. */
         data->nextTime += llrint(data->periodSec * 1.0e9);
 
       data->periodFrames  = frames;
@@ -517,59 +517,59 @@ void audio_playbackData(uint8_t * data, size_t size)
     spiceData->devNextPosition = deviceTick.nextPosition;
   }
 
-  // Determine the target latency. This is made up of three components:
-  // 1. Half the Spice period. This is necessary due to the way qemu handles
-  //    audio. Data is not sent as soon as it is produced by the virtual sound
-  //    card; instead, qemu polls for new data every ~10ms. This results in a
-  //    sawtooth pattern in the packet timing as it drifts in and out of phase
-  //    with the virtual device. LG measures the average progression of the
-  //    Spice clock, so sees the packet timing error drift by half a period
-  //    above and below the measured clock. We need to account for this in the
-  //    target latency to avoid underrunning.
-  // 2. The maximum audio device period, plus a little extra to absorb timing
-  //    jitter.
-  // 3. A configurable additional buffer period. The default value is set high
-  //    enough to absorb typical timing jitter from Spice, which can be quite
-  //    significant. Users may reduce this if they care more about latency than
-  //    audio quality.
+  /* Determine the target latency. This is made up of three components:
+   * 1. Half the Spice period. This is necessary due to the way qemu handles
+   *    audio. Data is not sent as soon as it is produced by the virtual sound
+   *    card; instead, qemu polls for new data every ~10ms. This results in a
+   *    sawtooth pattern in the packet timing as it drifts in and out of phase
+   *    with the virtual device. LG measures the average progression of the
+   *    Spice clock, so sees the packet timing error drift by half a period
+   *    above and below the measured clock. We need to account for this in the
+   *    target latency to avoid underrunning.
+   * 2. The maximum audio device period, plus a little extra to absorb timing
+   *    jitter.
+   * 3. A configurable additional buffer period. The default value is set high
+   *    enough to absorb typical timing jitter from Spice, which can be quite
+   *    significant. Users may reduce this if they care more about latency than
+   *    audio quality. */
   int configLatencyMs = max(g_params.audioBufferLatency, 0);
   double targetLatencyFrames =
     spiceData->periodFrames / 2.0 +
     audio.playback.deviceMaxPeriodFrames * 1.1 +
     configLatencyMs * audio.playback.sampleRate / 1000.0;
 
-  // If the device is currently at a lower period size than its maximum (which
-  // can happen, for example, if another application has requested a lower
-  // latency) then we need to take that into account in our target latency.
-  //
-  // The reason to do this is not necessarily obvious, since we already set the
-  // target latency based upon the maximum period size. The problem stems from
-  // the way the device changes the period size. When the period size is
-  // reduced, there will be a transitional period where `playbackPullFrames` is
-  // invoked with the new smaller period size, but the time until the next
-  // invocation is based upon the previous size. This happens because the device
-  // is preparing the next small buffer while still playing back the previous
-  // large buffer. The result of this is that we end up with a surplus of data
-  // in the ring buffer. The overall latency is unchanged, but the balance has
-  // shifted: there is more data in our ring buffer and less in the device
-  // buffer.
-  //
-  // Unaccounted for, this would be detected as an offset error and playback
-  // would be sped up to bring things back in line. In isolation, this is not
-  // inherently problematic, and may even be desirable because it would reduce
-  // the overall latency. The real problem occurs when the period size goes back
-  // up.
-  //
-  // When the period size increases, the exact opposite happens. The device will
-  // suddenly request data at the new period size, but the timing interval will
-  // be based upon the previous period size during the transition. If there is
-  // not enough data to satisfy this then playback will start severely
-  // underrunning until the timing loop can correct for the error.
-  //
-  // To counteract this issue, if the current period size is smaller than the
-  // maximum period size then we increase the target latency by the difference.
-  // This keeps the offset error stable and ensures we have enough data in the
-  // buffer to absorb rate increases.
+  /* If the device is currently at a lower period size than its maximum (which
+   * can happen, for example, if another application has requested a lower
+   * latency) then we need to take that into account in our target latency.
+   *
+   * The reason to do this is not necessarily obvious, since we already set the
+   * target latency based upon the maximum period size. The problem stems from
+   * the way the device changes the period size. When the period size is
+   * reduced, there will be a transitional period where `playbackPullFrames` is
+   * invoked with the new smaller period size, but the time until the next
+   * invocation is based upon the previous size. This happens because the device
+   * is preparing the next small buffer while still playing back the previous
+   * large buffer. The result of this is that we end up with a surplus of data
+   * in the ring buffer. The overall latency is unchanged, but the balance has
+   * shifted: there is more data in our ring buffer and less in the device
+   * buffer.
+   *
+   * Unaccounted for, this would be detected as an offset error and playback
+   * would be sped up to bring things back in line. In isolation, this is not
+   * inherently problematic, and may even be desirable because it would reduce
+   * the overall latency. The real problem occurs when the period size goes back
+   * up.
+   *
+   * When the period size increases, the exact opposite happens. The device will
+   * suddenly request data at the new period size, but the timing interval will
+   * be based upon the previous period size during the transition. If there is
+   * not enough data to satisfy this then playback will start severely
+   * underrunning until the timing loop can correct for the error.
+   *
+   * To counteract this issue, if the current period size is smaller than the
+   * maximum period size then we increase the target latency by the difference.
+   * This keeps the offset error stable and ensures we have enough data in the
+   * buffer to absorb rate increases. */
   if (spiceData->devPeriodFrames != 0 &&
     spiceData->devPeriodFrames < audio.playback.deviceMaxPeriodFrames)
     targetLatencyFrames +=
@@ -600,10 +600,10 @@ void audio_playbackData(uint8_t * data, size_t size)
     double error = (now - spiceData->nextTime) * 1.0e-9;
     if (fabs(error) >= 0.2 || audio.playback.state == STREAM_STATE_KEEP_ALIVE)
     {
-      // Clock error is too high or we are starting a new playback; slew the
-      // write pointer and reset the timing parameters to get back in sync. If
-      // we know the device playback position then we can slew directly to the
-      // target latency, otherwise just slew based upon the error amount
+      /* Clock error is too high or we are starting a new playback; slew the
+       * write pointer and reset the timing parameters to get back in sync. If
+       * we know the device playback position then we can slew directly to the
+       * target latency, otherwise just slew based upon the error amount */
       int slewFrames;
       if (spiceData->devLastTime != INT64_MIN)
       {
@@ -649,11 +649,11 @@ void audio_playbackData(uint8_t * data, size_t size)
     }
   }
 
-  // Measure the offset between the Spice position and the device position,
-  // and how far away this is from the target latency. We use this to adjust
-  // the playback speed to bring them back in line. This value can change
-  // quite rapidly, particularly at the start of playback, so filter it to
-  // avoid sudden pitch shifts which will be noticeable to the user.
+  /* Measure the offset between the Spice position and the device position,
+   * and how far away this is from the target latency. We use this to adjust
+   * the playback speed to bring them back in line. This value can change
+   * quite rapidly, particularly at the start of playback, so filter it to
+   * avoid sudden pitch shifts which will be noticeable to the user. */
   double actualOffset = 0.0;
   double offsetError = spiceData->offsetError;
   if (spiceData->devLastTime != INT64_MIN)
@@ -712,22 +712,22 @@ void audio_playbackData(uint8_t * data, size_t size)
 
   if (audio.playback.state == STREAM_STATE_SETUP_SPICE)
   {
-    // Latency corrections at startup can be quite significant due to poor
-    // packet pacing from Spice, so require at least two full Spice periods'
-    // worth of data in addition to the startup delay requested by the device
-    // before starting playback to minimise the chances of underrunning
+    /* Latency corrections at startup can be quite significant due to poor
+     * packet pacing from Spice, so require at least two full Spice periods'
+     * worth of data in addition to the startup delay requested by the device
+     * before starting playback to minimise the chances of underrunning. */
     int startFrames =
       spiceData->periodFrames * 2 + audio.playback.deviceStartFrames;
     audio.playback.targetStartFrames = startFrames;
 
-    // The actual time between opening the device and the device starting to
-    // pull data can range anywhere between nearly instant and hundreds of
-    // milliseconds. To minimise startup latency, we open the device
-    // immediately. If the device starts earlier than required (as per the
-    // `startFrames` value we just calculated), then a period of silence will be
-    // inserted at the beginning of playback to avoid underrunning. If it starts
-    // later, then we just accept the higher latency and let the adaptive
-    // resampling deal with it
+    /* The actual time between opening the device and the device starting to
+     * pull data can range anywhere between nearly instant and hundreds of
+     * milliseconds. To minimise startup latency, we open the device
+     * immediately. If the device starts earlier than required (as per the
+     * `startFrames` value we just calculated), then a period of silence will be
+     * inserted at the beginning of playback to avoid underrunning. If it starts
+     * later, then we just accept the higher latency and let the adaptive
+     * resampling deal with it. */
     audio.playback.state = STREAM_STATE_SETUP_DEVICE;
     audio.audioDev->playback.start();
   }
