@@ -66,6 +66,7 @@ add_compile_options(
   "-Wextra"
   "-Wno-sign-compare"
   "-Wno-unused-parameter"
+  "-Wstrict-prototypes"
   "$<$<C_COMPILER_ID:GNU>:-Wimplicit-fallthrough=2>"
   "-Werror"
   "-Wfatal-errors"
