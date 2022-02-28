@@ -47,7 +47,7 @@ struct OverlayGraph
 
 static void configCallback(void * udata, int * id)
 {
-  igCheckbox("Show Timing Graphs", &gs.show);
+  igCheckbox("Show timing graphs", &gs.show);
   igSeparator();
 
   igBeginTable("split", 2, 0, (ImVec2){}, 0);
