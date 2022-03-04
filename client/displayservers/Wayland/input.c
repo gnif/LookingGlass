@@ -616,7 +616,10 @@ void waylandRealignPointer(void)
 
 void waylandGuestPointerUpdated(double x, double y, double localX, double localY)
 {
-  if (!wlWm.warpSupport || !wlWm.pointerInSurface || wlWm.lockedPointer)
+  if ( !wlWm.pointer          ||
+       !wlWm.warpSupport      ||
+       !wlWm.pointerInSurface ||
+        wlWm.lockedPointer    )
     return;
 
   waylandWarpPointer((int) localX, (int) localY, false);
