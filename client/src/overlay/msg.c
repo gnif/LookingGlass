@@ -152,6 +152,12 @@ MsgBoxHandle overlayMsg_show(
     const char * caption, const char * fmt, va_list args)
 {
   struct Msg * msg = malloc(sizeof(*msg));
+  if (!msg)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   msg->caption = strdup(caption);
   msg->lines   = stringlist_new(false);
   valloc_sprintf(&msg->message, fmt, args);

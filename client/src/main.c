@@ -641,6 +641,11 @@ int main_frameThread(void * unused)
         case FRAME_ROT_90 : lgrFormat.rotate = LG_ROTATE_90 ; break;
         case FRAME_ROT_180: lgrFormat.rotate = LG_ROTATE_180; break;
         case FRAME_ROT_270: lgrFormat.rotate = LG_ROTATE_270; break;
+
+        default:
+          DEBUG_ERROR("Unsupported/invalid frame rotation");
+          lgrFormat.rotate = LG_ROTATE_0;
+          break;
       }
       g_state.rotate = lgrFormat.rotate;
 
@@ -1113,7 +1118,7 @@ static int lg_run(void)
   }
 
   // select and init a renderer
-  bool needsOpenGL;
+  bool needsOpenGL = false;
   LG_RendererParams lgrParams;
   lgrParams.quickSplash = g_params.quickSplash;
 

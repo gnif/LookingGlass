@@ -793,7 +793,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   else if (debug)
     DEBUG_WARN("Cannot create debug contexts before EGL 1.5 without EGL_KHR_create_context");
 
-  ctxattr[ctxidx++] = EGL_NONE;
+  ctxattr[ctxidx] = EGL_NONE;
 
   this->context = eglCreateContext(this->display, this->configs, EGL_NO_CONTEXT, ctxattr);
   if (this->context == EGL_NO_CONTEXT)

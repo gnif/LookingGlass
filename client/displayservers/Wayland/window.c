@@ -57,6 +57,12 @@ void waylandWindowUpdateScale(void)
 static void wlSurfaceEnterHandler(void * data, struct wl_surface * surface, struct wl_output * output)
 {
   struct SurfaceOutput * node = malloc(sizeof(*node));
+  if (!node)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
+
   node->output = output;
   wl_list_insert(&wlWm.surfaceOutputs, &node->link);
   waylandWindowUpdateScale();

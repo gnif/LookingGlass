@@ -88,6 +88,12 @@ static char * int_toString(struct Option * opt)
 {
   int len = snprintf(NULL, 0, "%d", opt->value.x_int);
   char * ret = malloc(len + 1);
+  if (!ret)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   sprintf(ret, "%d", opt->value.x_int);
   return ret;
 }
@@ -101,6 +107,12 @@ static char * float_toString(struct Option * opt)
 {
   int len = snprintf(NULL, 0, "%f", opt->value.x_float);
   char * ret = malloc(len + 1);
+  if (!ret)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   sprintf(ret, "%f", opt->value.x_float);
   return ret;
 }
@@ -124,10 +136,22 @@ bool option_register(struct Option options[])
     sizeof(*state.options) * (state.oCount + new)
   );
 
+  if (!state.options)
+  {
+    DEBUG_ERROR("out of memory");
+    return false;
+  }
+
   for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
   {
-    state.options[state.oCount + i] = malloc(sizeof(**state.options));
-    struct Option * o = state.options[state.oCount + i];
+    struct Option * o =
+      state.options[state.oCount + i] = malloc(sizeof(**state.options));
+    if (!o)
+    {
+      DEBUG_ERROR("out of memory");
+      return false;
+    }
+
     memcpy(o, &options[i], sizeof(*o));
 
     if (!o->parser)
@@ -186,7 +210,14 @@ bool option_register(struct Option options[])
     if (o->type == OPTION_TYPE_STRING)
     {
       if (o->value.x_string)
+      {
         o->value.x_string = strdup(o->value.x_string);
+        if (!o->value.x_string)
+        {
+          DEBUG_ERROR("out of memory");
+          return false;
+        }
+      }
     }
 
     // add the option to the correct group for help printout
@@ -202,6 +233,11 @@ bool option_register(struct Option options[])
         group->options,
         sizeof(*group->options) * (group->count + 1)
       );
+      if (!group->options)
+      {
+        DEBUG_ERROR("out of memory");
+        return false;
+      }
       group->options[group->count] = o;
 
       int len = strlen(o->name);
@@ -218,6 +254,11 @@ bool option_register(struct Option options[])
         state.groups,
         sizeof(*state.groups) * (state.gCount + 1)
       );
+      if (!state.groups)
+      {
+        DEBUG_ERROR("out of memory");
+        return false;
+      }
 
       struct OptionGroup * group = &state.groups[state.gCount];
       ++state.gCount;
@@ -239,7 +280,7 @@ void option_free(void)
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = state.options[i];
-    if (o->type == OPTION_TYPE_STRING)
+    if (o->type == OPTION_TYPE_STRING && o->value.x_string)
       free(o->value.x_string);
     free(o);
   }

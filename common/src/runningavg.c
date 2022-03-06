@@ -19,6 +19,7 @@
  */
 
 #include "common/runningavg.h"
+#include "common/debug.h"
 
 #include <stdlib.h>
 
@@ -33,6 +34,12 @@ struct RunningAvg
 RunningAvg runningavg_new(int length)
 {
   struct RunningAvg * ra = calloc(1, sizeof(*ra) + sizeof(*ra->values) * length);
+  if (!ra)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   ra->length = length;
   return ra;
 }

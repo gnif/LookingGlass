@@ -152,6 +152,12 @@ static void x11CBReplyFn(void * opaque, LG_ClipboardData type,
 static void x11CBSelectionRequest(const XSelectionRequestEvent e)
 {
   XEvent * s = malloc(sizeof(*s));
+  if (!s)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
+
   s->xselection.type      = SelectionNotify;
   s->xselection.requestor = e.requestor;
   s->xselection.selection = e.selection;

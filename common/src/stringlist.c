@@ -20,6 +20,7 @@
 
 #include "common/stringlist.h"
 #include "common/vector.h"
+#include "common/debug.h"
 
 #include <stdlib.h>
 
@@ -32,6 +33,12 @@ struct StringList
 StringList stringlist_new(bool owns_strings)
 {
   StringList sl = malloc(sizeof(*sl));
+  if (!sl)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   sl->owns_strings = owns_strings;
 
   if (!vector_create(&sl->vector, sizeof(char *), 32))

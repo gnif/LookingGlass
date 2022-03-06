@@ -230,6 +230,11 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
     return;
 
   struct CBRequest * cbr = malloc(sizeof(*cbr));
+  if (!cbr)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
 
   cbr->type    = g_state.cbType;
   cbr->replyFn = replyFn;
@@ -666,6 +671,12 @@ KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, con
   }
 
   KeybindHandle handle = malloc(sizeof(*handle));
+  if (!handle)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   handle->sc       = sc;
   handle->callback = callback;
   handle->opaque   = opaque;
@@ -716,6 +727,12 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
   ASSERT_LG_OVERLAY_VALID(ops);
 
   struct Overlay * overlay = malloc(sizeof(*overlay));
+  if (!overlay)
+  {
+    DEBUG_ERROR("out of ram");
+    return;
+  }
+
   overlay->ops           = ops;
   overlay->params        = params;
   overlay->udata         = NULL;
@@ -732,6 +749,7 @@ void app_initOverlays(void)
   ll_lock(g_state.overlays);
   ll_forEachNL(g_state.overlays, item, overlay)
   {
+    DEBUG_ASSERT(overlay->ops);
     if (!overlay->ops->init(&overlay->udata, overlay->params))
     {
       DEBUG_ERROR("Overlay `%s` failed to initialize", overlay->ops->name);

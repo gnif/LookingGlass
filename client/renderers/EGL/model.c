@@ -124,10 +124,31 @@ void egl_modelSetDefault(EGL_Model * model, bool flipped)
 void egl_modelAddVerts(EGL_Model * model, const GLfloat * verticies, const GLfloat * uvs, const size_t count)
 {
   struct FloatList * fl = malloc(sizeof(*fl));
+  if (!fl)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
 
   fl->count = count;
-  fl->v     = malloc(sizeof(GLfloat) * count * 3);
-  fl->u     = malloc(sizeof(GLfloat) * count * 2);
+
+  fl->v = malloc(sizeof(GLfloat) * count * 3);
+  if (!fl->v)
+  {
+    DEBUG_ERROR("out of memory");
+    free(fl);
+    return;
+  }
+
+  fl->u = malloc(sizeof(GLfloat) * count * 2);
+  if (!fl->u)
+  {
+    DEBUG_ERROR("out of memory");
+    free(fl->v);
+    free(fl);
+    return;
+  }
+
   memcpy(fl->v, verticies, sizeof(GLfloat) * count * 3);
 
   if (uvs)

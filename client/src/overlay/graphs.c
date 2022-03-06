@@ -216,6 +216,12 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn)
 {
   struct OverlayGraph * graph = malloc(sizeof(*graph));
+  if (!graph)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   graph->name     = name;
   graph->buffer   = buffer;
   graph->enabled  = true;

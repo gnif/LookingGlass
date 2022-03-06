@@ -44,6 +44,12 @@ static void * threadWrapper(void * opaque)
 bool lgCreateThread(const char * name, LGThreadFunction function, void * opaque, LGThread ** handle)
 {
   *handle = malloc(sizeof(**handle));
+  if (!*handle)
+  {
+    DEBUG_ERROR("out of memory");
+    return false;
+  }
+
   (*handle)->name     = name;
   (*handle)->function = function;
   (*handle)->opaque   = opaque;

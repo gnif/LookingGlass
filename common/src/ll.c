@@ -26,6 +26,12 @@
 struct ll * ll_new(void)
 {
   struct ll * list = malloc(sizeof(*list));
+  if (!list)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   list->head  = NULL;
   list->tail  = NULL;
   list->count = 0;
@@ -45,6 +51,12 @@ void ll_free(struct ll * list)
 void ll_push(struct ll * list, void * data)
 {
   struct ll_item * item = malloc(sizeof(*item));
+  if (!item)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
+
   item->data = data;
   item->next = NULL;
 

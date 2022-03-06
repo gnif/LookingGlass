@@ -119,10 +119,15 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
     if (logLength > 0)
     {
       char *log = malloc(logLength + 1);
-      glGetShaderInfoLog(vertexShader, logLength, NULL, log);
-      log[logLength] = 0;
-      DEBUG_ERROR("%s", log);
-      free(log);
+      if (!log)
+        DEBUG_ERROR("out of memory");
+      else
+      {
+        glGetShaderInfoLog(vertexShader, logLength, NULL, log);
+        log[logLength] = 0;
+        DEBUG_ERROR("%s", log);
+        free(log);
+      }
     }
 
     glDeleteShader(vertexShader);
@@ -145,10 +150,15 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
     if (logLength > 0)
     {
       char *log = malloc(logLength + 1);
-      glGetShaderInfoLog(fragmentShader, logLength, NULL, log);
-      log[logLength] = 0;
-      DEBUG_ERROR("%s", log);
-      free(log);
+      if (!log)
+        DEBUG_ERROR("out of memory");
+      else
+      {
+        glGetShaderInfoLog(fragmentShader, logLength, NULL, log);
+        log[logLength] = 0;
+        DEBUG_ERROR("%s", log);
+        free(log);
+      }
     }
 
     glDeleteShader(fragmentShader);
@@ -201,6 +211,12 @@ void egl_shaderSetUniforms(EGL_Shader * this, EGL_Uniform * uniforms, int count)
   {
     free(this->uniforms);
     this->uniforms = malloc(sizeof(*this->uniforms) * count);
+    if (!this->uniforms)
+    {
+      DEBUG_ERROR("out of memory");
+      return;
+    }
+
     this->uniformCount = count;
   }
 

@@ -42,6 +42,12 @@ RingBuffer ringbuffer_newInternal(int length, size_t valueSize,
   DEBUG_ASSERT(valueSize > 0 && valueSize < UINT32_MAX);
 
   struct RingBuffer * rb = calloc(1, sizeof(*rb) + valueSize * length);
+  if (!rb)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
   rb->length    = length;
   rb->valueSize = valueSize;
   atomic_store(&rb->readPos , 0);

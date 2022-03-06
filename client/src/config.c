@@ -505,22 +505,38 @@ bool config_load(int argc, char * argv[])
 
   // load config from user's home directory
   struct passwd * pw = getpwuid(getuid());
-  char * localFile;
-  alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
-  if (stat(localFile, &st) >= 0 && S_ISREG(st.st_mode))
+  if (!pw)
+    DEBUG_WARN("getpwuid failed, unable to load user configuration");
+  else
   {
-    DEBUG_INFO("Loading config from: %s", localFile);
-    if (!option_load(localFile))
+    char * localFile;
+    alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
+    if (!localFile)
     {
-      free(localFile);
+      DEBUG_ERROR("out of memory");
       return false;
     }
+
+    if (stat(localFile, &st) >= 0 && S_ISREG(st.st_mode))
+    {
+      DEBUG_INFO("Loading config from: %s", localFile);
+      if (!option_load(localFile))
+      {
+        free(localFile);
+        return false;
+      }
+    }
+    free(localFile);
   }
-  free(localFile);
 
   // load config from XDG_CONFIG_HOME
   char * xdgFile;
   alloc_sprintf(&xdgFile, "%s/client.ini", lgConfigDir());
+  if (!xdgFile)
+  {
+    DEBUG_ERROR("out of memory");
+    return false;
+  }
 
   if (xdgFile && stat(xdgFile, &st) >= 0 && S_ISREG(st.st_mode))
   {
@@ -714,6 +730,8 @@ static bool optRendererParse(struct Option * opt, const char * str)
 static StringList optRendererValues(struct Option * opt)
 {
   StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
 
   // this typecast is safe as the stringlist doesn't own the values
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
@@ -756,6 +774,9 @@ static bool optPosParse(struct Option * opt, const char * str)
 static StringList optPosValues(struct Option * opt)
 {
   StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
+
   stringlist_push(sl, "center");
   stringlist_push(sl, "<left>x<top>, e.g. 100x100");
   return sl;
@@ -768,6 +789,11 @@ static char * optPosToString(struct Option * opt)
 
   int len = snprintf(NULL, 0, "%dx%d", g_params.x, g_params.y);
   char * str = malloc(len + 1);
+  if (!str)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
   sprintf(str, "%dx%d", g_params.x, g_params.y);
 
   return str;
@@ -791,6 +817,9 @@ static bool optSizeParse(struct Option * opt, const char * str)
 static StringList optSizeValues(struct Option * opt)
 {
   StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
+
   stringlist_push(sl, "<left>x<top>, e.g. 100x100");
   return sl;
 }
@@ -799,6 +828,11 @@ static char * optSizeToString(struct Option * opt)
 {
   int len = snprintf(NULL, 0, "%ux%u", g_params.w, g_params.h);
   char * str = malloc(len + 1);
+  if (!str)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
   sprintf(str, "%ux%u", g_params.w, g_params.h);
 
   return str;

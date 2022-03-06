@@ -120,7 +120,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
   DEBUG_ASSERT(dev);
 
   unsigned int devSize;
-  int devFd = -1;
+  int devFd;
   bool hasDMA;
 
   dev->opaque = NULL;
