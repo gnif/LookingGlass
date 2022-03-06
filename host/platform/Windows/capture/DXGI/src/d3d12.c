@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
+#include "common/time.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/windebug.h"
@@ -44,7 +45,7 @@ struct D3D12Texture
 
 struct D3D12Backend
 {
-  int                   copySleep;
+  float                 copySleep;
   ID3D12Device        * device;
   ID3D12InfoQueue1    * debugInfoQueue;
   ID3D12CommandQueue  * commandQueue;
@@ -120,8 +121,8 @@ static bool d3d12_create(struct DXGIInterface * intf)
     return false;
   }
 
-  this->copySleep = option_get_int("dxgi", "d3d12CopySleep");
-  DEBUG_INFO("Sleep before copy : %d ms", this->copySleep);
+  this->copySleep = option_get_float("dxgi", "d3d12CopySleep");
+  DEBUG_INFO("Sleep before copy : %f ms", this->copySleep);
 
   status = D3D12CreateDevice((IUnknown *) dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
     &IID_ID3D12Device, (void **)&this->device);
@@ -346,7 +347,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   HRESULT status;
 
   if (this->copySleep > 0)
-    Sleep(this->copySleep);
+    nsleep((uint64_t)(this->copySleep * 1000000));
 
   HANDLE handle = INVALID_HANDLE_VALUE;
 
