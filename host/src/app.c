@@ -390,6 +390,8 @@ static bool captureStop(void)
 bool captureGetPointerBuffer(void ** data, uint32_t * size)
 {
   PLGMPMemory mem = app.pointerShapeMemory[app.pointerShapeIndex];
+  if(!mem)
+    return false;
   *data = (uint8_t*)lgmpHostMemPtr(mem) + sizeof(KVMFRCursor);
   *size = MAX_POINTER_SIZE - sizeof(KVMFRCursor);
   return true;
