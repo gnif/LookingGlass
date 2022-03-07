@@ -174,18 +174,24 @@ static bool xcb_init(void)
   }
   free(version_reply);
 
-  if (!lgCreateThread("XCBPointer", pointerThread, NULL, &this->pointerThread))
-  {
-    DEBUG_ERROR("Failed to create the XCBPointer thread");
-    xcb_deinit();
-    return false;
-  }
-
   this->initialized = true;
   return true;
 fail:
   xcb_deinit();
   return false;
+}
+
+static bool xcb_start(void)
+{
+  this->stop = false;
+
+  if (!lgCreateThread("XCBPointer", pointerThread, NULL, &this->pointerThread))
+  {
+    DEBUG_ERROR("Failed to create the XCBPointer thread");
+    return false;
+  }
+
+  return true;
 }
 
 static void xcb_stop(void)
@@ -375,6 +381,7 @@ struct CaptureInterface Capture_XCB =
   .getName         = xcb_getName,
   .create          = xcb_create,
   .init            = xcb_init,
+  .start           = xcb_start,
   .stop            = xcb_stop,
   .deinit          = xcb_deinit,
   .free            = xcb_free,
