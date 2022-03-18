@@ -738,6 +738,45 @@ static void recordPushFrames(uint8_t * data, int frames)
   purespice_writeAudio(data, frames * audio.record.stride, 0);
 }
 
+static void realRecordStart(int channels, int sampleRate, PSAudioFormat format)
+{
+  audio.record.started = true;
+  audio.record.stride  = channels * sizeof(uint16_t);
+
+  audio.audioDev->record.start(channels, sampleRate, recordPushFrames);
+
+  // if a volume level was stored, set it before we return
+  if (audio.record.volumeChannels)
+    audio.audioDev->record.volume(
+        audio.playback.volumeChannels,
+        audio.playback.volume);
+
+  // set the inital mute state
+  if (audio.audioDev->record.mute)
+    audio.audioDev->record.mute(audio.playback.mute);
+}
+
+struct AudioFormat
+{
+   int channels;
+   int sampleRate;
+   PSAudioFormat format;
+};
+
+static void recordConfirm(bool yes, void * opaque)
+{
+  if (yes)
+  {
+    struct AudioFormat * format = opaque;
+    DEBUG_INFO("Microphone access granted");
+    realRecordStart(format->channels, format->sampleRate, format->format);
+  }
+  else
+    DEBUG_INFO("Microphone access denied");
+
+  free(opaque);
+}
+
 void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
 {
   if (!audio.audioDev)
@@ -756,20 +795,26 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
 
   lastChannels   = channels;
   lastSampleRate = sampleRate;
-  audio.record.started = true;
-  audio.record.stride  = channels * sizeof(uint16_t);
 
-  audio.audioDev->record.start(channels, sampleRate, recordPushFrames);
+  if (g_params.micAlwaysAllow)
+  {
+    DEBUG_INFO("Microphone access granted by default");
+    realRecordStart(channels, sampleRate, format);
+  }
+  else
+  {
+    struct AudioFormat * fmt = malloc(sizeof(*fmt));
+    if (!format)
+      DEBUG_FATAL("Failed to allocate memory!");
 
-  // if a volume level was stored, set it before we return
-  if (audio.record.volumeChannels)
-    audio.audioDev->record.volume(
-        audio.playback.volumeChannels,
-        audio.playback.volume);
+    fmt->channels   = channels;
+    fmt->sampleRate = sampleRate;
+    fmt->format     = format;
 
-  // set the inital mute state
-  if (audio.audioDev->record.mute)
-    audio.audioDev->record.mute(audio.playback.mute);
+    app_confirmMsgBox("Microphone", recordConfirm, fmt,
+      "An application just opened the microphone!\n"
+      "Do you want it to access your microphone?");
+  }
 }
 
 void audio_recordStop(void)
@@ -777,6 +822,7 @@ void audio_recordStop(void)
   if (!audio.audioDev || !audio.record.started)
     return;
 
+  DEBUG_INFO("Microphone recording stopped");
   audio.audioDev->record.stop();
   audio.record.started = false;
 }
