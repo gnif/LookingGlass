@@ -202,6 +202,7 @@ struct AppParams
 
   int               audioPeriodSize;
   int               audioBufferLatency;
+  bool              micAlwaysAllow;
 };
 
 struct CBRequest

@@ -480,6 +480,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_INT,
     .value.x_int    = 13
   },
+  {
+    .module         = "audio",
+    .name           = "micAlwaysAllow",
+    .description    = "Always allow guest attempts to access the microphone",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
   {0}
 };
 
@@ -670,6 +677,7 @@ bool config_load(int argc, char * argv[])
 
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
   g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
+  g_params.micAlwaysAllow     = option_get_bool("audio", "micAlwaysAllow");
 
   return true;
 }
