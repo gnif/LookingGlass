@@ -426,7 +426,16 @@ static void pipewire_recordStart(int channels, int sampleRate,
   if (pw.record.stream &&
       pw.record.channels == channels &&
       pw.record.sampleRate == sampleRate)
+  {
+    if (!pw.record.active)
+    {
+      pw_thread_loop_lock(pw.thread);
+      pw_stream_set_active(pw.record.stream, true);
+      pw.record.active = true;
+      pw_thread_loop_unlock(pw.thread);
+    }
     return;
+  }
 
   pipewire_recordStopStream();
 
@@ -474,6 +483,7 @@ static void pipewire_recordStart(int channels, int sampleRate,
       params, 1);
 
   pw_thread_loop_unlock(pw.thread);
+  pw.record.active = true;
 }
 
 static void pipewire_recordStop(void)
