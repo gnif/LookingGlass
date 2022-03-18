@@ -118,12 +118,16 @@ typedef struct
 
   struct
   {
-    bool     started;
-    int      volumeChannels;
-    uint16_t volume[8];
-    bool     mute;
-    int      stride;
-    uint32_t time;
+    bool          started;
+    int           volumeChannels;
+    uint16_t      volume[8];
+    bool          mute;
+    int           stride;
+    uint32_t      time;
+    MsgBoxHandle  confirmHandle;
+    int           confirmChannels;
+    int           confirmSampleRate;
+    PSAudioFormat confirmFormat;
   }
   record;
 }
@@ -767,14 +771,17 @@ static void recordConfirm(bool yes, void * opaque)
 {
   if (yes)
   {
-    struct AudioFormat * format = opaque;
     DEBUG_INFO("Microphone access granted");
-    realRecordStart(format->channels, format->sampleRate, format->format);
+    realRecordStart(
+      audio.record.confirmChannels,
+      audio.record.confirmSampleRate,
+      audio.record.confirmFormat
+    );
   }
   else
     DEBUG_INFO("Microphone access denied");
 
-  free(opaque);
+  audio.record.confirmHandle = NULL;
 }
 
 void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
@@ -803,15 +810,14 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   }
   else
   {
-    struct AudioFormat * fmt = malloc(sizeof(*fmt));
-    if (!format)
-      DEBUG_FATAL("Failed to allocate memory!");
+    if (audio.record.confirmHandle)
+      app_msgBoxClose(audio.record.confirmHandle);
 
-    fmt->channels   = channels;
-    fmt->sampleRate = sampleRate;
-    fmt->format     = format;
-
-    app_confirmMsgBox("Microphone", recordConfirm, fmt,
+    audio.record.confirmChannels   = channels;
+    audio.record.confirmSampleRate = sampleRate;
+    audio.record.confirmFormat     = format;
+    audio.record.confirmHandle     = app_confirmMsgBox(
+      "Microphone", recordConfirm, NULL,
       "An application just opened the microphone!\n"
       "Do you want it to access your microphone?");
   }
