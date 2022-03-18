@@ -219,7 +219,7 @@ MsgBoxHandle overlayMsg_show(
   return (MsgBoxHandle)msg;
 }
 
-void overlayMsg_close(MsgBoxHandle * handle)
+void overlayMsg_close(MsgBoxHandle handle)
 {
   if (ll_removeData(l_msg.messages, handle))
     freeMsg((struct Msg *)handle);

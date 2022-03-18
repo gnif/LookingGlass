@@ -138,14 +138,14 @@ void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque);
  */
 void app_alert(LG_MsgAlert type, const char * fmt, ...);
 
-typedef void * MsgBoxHandle;
+typedef struct MsgBoxHandle * MsgBoxHandle;
 MsgBoxHandle app_msgBox(const char * caption, const char * fmt, ...);
 
 typedef void (*MsgBoxConfirmCallback)(bool yes, void * opaque);
 MsgBoxHandle app_confirmMsgBox(const char * caption,
     MsgBoxConfirmCallback callback, void * opaque, const char * fmt, ...);
 
-void app_msgBoxClose(MsgBoxHandle * handle);
+void app_msgBoxClose(MsgBoxHandle handle);
 
 typedef struct KeybindHandle * KeybindHandle;
 typedef void (*KeybindFn)(int sc, void * opaque);

@@ -665,7 +665,7 @@ MsgBoxHandle app_confirmMsgBox(const char * caption,
   return handle;
 }
 
-void app_msgBoxClose(MsgBoxHandle * handle)
+void app_msgBoxClose(MsgBoxHandle handle)
 {
   if (!handle)
     return;
