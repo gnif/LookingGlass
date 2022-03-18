@@ -654,12 +654,6 @@ void core_resetOverlayInputState(void)
 
 void core_updateOverlayState(void)
 {
-  static bool lastState = false;
-  bool currentState = app_isOverlayMode();
-  if (lastState == currentState)
-    return;
-
-  lastState          = currentState;
   g_state.cursorLast = -2;
 
   static bool wasGrabbed = false;
