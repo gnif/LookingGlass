@@ -35,6 +35,8 @@ struct Msg
   char * caption;
   char * message;
   StringList lines;
+  MsgBoxConfirmCallback confirm;
+  void * opaque;
 };
 
 struct MsgState
@@ -115,13 +117,42 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
   }
 
   igNewLine();
-  igCalcTextSize(&textSize, "OK", NULL, false, 0.0);
-  ImGuiStyle * style = igGetStyle();
-  textSize.x += (style->FramePadding.x * 2.0f) * 8.0f;
-  textSize.y += (style->FramePadding.y * 2.0f) * 1.5f;
-  igSetCursorPosX((igGetWindowWidth() * 0.5f) - (textSize.x * 0.5f));
 
-  if (igButton("OK", textSize))
+  bool destroy = false;
+  if (msg->confirm)
+  {
+    igCalcTextSize(&textSize, "Yes", NULL, false, 0.0);
+    ImGuiStyle * style = igGetStyle();
+    textSize.x += (style->FramePadding.x * 2.0f) * 8.0f;
+    textSize.y += (style->FramePadding.y * 2.0f) * 1.5f;
+    igSetCursorPosX((igGetWindowWidth() * 0.5f) - textSize.x);
+
+    if (igButton("Yes", textSize))
+    {
+      destroy = true;
+      msg->confirm(true, msg->opaque);
+    }
+
+    igSameLine(0.0f, -1.0f);
+    if (igButton("No", textSize))
+    {
+      destroy = true;
+      msg->confirm(false, msg->opaque);
+    }
+  }
+  else
+  {
+    igCalcTextSize(&textSize, "OK", NULL, false, 0.0);
+    ImGuiStyle * style = igGetStyle();
+    textSize.x += (style->FramePadding.x * 2.0f) * 8.0f;
+    textSize.y += (style->FramePadding.y * 2.0f) * 1.5f;
+    igSetCursorPosX((igGetWindowWidth() * 0.5f) - (textSize.x * 0.5f));
+
+    if (igButton("OK", textSize))
+      destroy = true;
+  }
+
+  if (destroy)
   {
     ll_shift(l_msg.messages, NULL);
     freeMsg(msg);
@@ -149,7 +180,8 @@ bool overlayMsg_modal(void)
 }
 
 MsgBoxHandle overlayMsg_show(
-    const char * caption, const char * fmt, va_list args)
+    const char * caption, MsgBoxConfirmCallback confirm, void * opaque,
+    const char * fmt, va_list args)
 {
   struct Msg * msg = malloc(sizeof(*msg));
   if (!msg)
@@ -160,6 +192,8 @@ MsgBoxHandle overlayMsg_show(
 
   msg->caption = strdup(caption);
   msg->lines   = stringlist_new(false);
+  msg->confirm = confirm;
+  msg->opaque  = opaque;
   valloc_sprintf(&msg->message, fmt, args);
 
   char * token = msg->message;

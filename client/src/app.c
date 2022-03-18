@@ -644,8 +644,20 @@ MsgBoxHandle app_msgBox(const char * caption, const char * fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
-  MsgBoxHandle handle =
-    overlayMsg_show(caption, fmt, args);
+  MsgBoxHandle handle = overlayMsg_show(caption, NULL, NULL, fmt, args);
+  va_end(args);
+
+  core_updateOverlayState();
+
+  return handle;
+}
+
+MsgBoxHandle app_confirmMsgBox(const char * caption,
+    MsgBoxConfirmCallback callback, void * opaque, const char * fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  MsgBoxHandle handle = overlayMsg_show(caption, callback, opaque, fmt, args);
   va_end(args);
 
   core_updateOverlayState();
