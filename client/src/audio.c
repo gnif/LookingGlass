@@ -803,7 +803,9 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   lastChannels   = channels;
   lastSampleRate = sampleRate;
 
-  if (g_params.micAlwaysAllow)
+  if (audio.record.started)
+    realRecordStart(channels, sampleRate, format);
+  else if (g_params.micAlwaysAllow)
   {
     DEBUG_INFO("Microphone access granted by default");
     realRecordStart(channels, sampleRate, format);
