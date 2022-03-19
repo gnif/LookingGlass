@@ -150,6 +150,8 @@ void app_msgBoxClose(MsgBoxHandle handle);
 typedef struct KeybindHandle * KeybindHandle;
 typedef void (*KeybindFn)(int sc, void * opaque);
 
+void app_showRecord(bool show);
+
 /**
  * Register a handler for the <super>+<key> combination
  * @param sc       The scancode to register

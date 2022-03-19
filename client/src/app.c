@@ -673,6 +673,11 @@ void app_msgBoxClose(MsgBoxHandle handle)
   overlayMsg_close(handle);
 }
 
+void app_showRecord(bool show)
+{
+  overlayRecord_show(show);
+}
+
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
 {
   // don't allow duplicate binds

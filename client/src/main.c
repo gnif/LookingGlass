@@ -1647,6 +1647,7 @@ int main(int argc, char * argv[])
   app_registerOverlay(&LGOverlayGraphs, NULL);
   app_registerOverlay(&LGOverlayHelp  , NULL);
   app_registerOverlay(&LGOverlayMsg   , NULL);
+  app_registerOverlay(&LGOverlayRecord, NULL);
 
 
   // early renderer setup for option registration
