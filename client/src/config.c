@@ -487,6 +487,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
+  {
+    .module         = "audio",
+    .name           = "micShowIndicator",
+    .description    = "Display microphone usage indicator",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
   {0}
 };
 
@@ -678,6 +685,7 @@ bool config_load(int argc, char * argv[])
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
   g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
   g_params.micAlwaysAllow     = option_get_bool("audio", "micAlwaysAllow");
+  g_params.micShowIndicator   = option_get_bool("audio", "micShowIndicator");
 
   return true;
 }
