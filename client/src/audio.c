@@ -758,6 +758,9 @@ static void realRecordStart(int channels, int sampleRate, PSAudioFormat format)
   // set the inital mute state
   if (audio.audioDev->record.mute)
     audio.audioDev->record.mute(audio.playback.mute);
+
+  if (g_params.micShowIndicator)
+    app_showRecord(true);
 }
 
 struct AudioFormat
@@ -833,6 +836,9 @@ void audio_recordStop(void)
   DEBUG_INFO("Microphone recording stopped");
   audio.audioDev->record.stop();
   audio.record.started = false;
+
+  if (g_params.micShowIndicator)
+    app_showRecord(false);
 }
 
 void audio_recordVolume(int channels, const uint16_t volume[])
