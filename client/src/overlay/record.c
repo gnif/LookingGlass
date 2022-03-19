@@ -82,5 +82,6 @@ void overlayRecord_show(bool show)
     return;
 
   recordShow = show;
-  app_invalidateOverlay(true);
+  if (g_state.state != APP_STATE_SHUTDOWN)
+    app_invalidateOverlay(true);
 }
