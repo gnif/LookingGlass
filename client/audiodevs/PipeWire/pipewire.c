@@ -358,7 +358,8 @@ static void pipewire_playbackVolume(int channels, const uint16_t volume[])
 static void pipewire_playbackMute(bool mute)
 {
   pw_thread_loop_lock(pw.thread);
-  pw_stream_set_control(pw.playback.stream, SPA_PROP_mute, 1, (void *)&mute, 0);
+  float val = mute ? 1.0f : 0.0f;
+  pw_stream_set_control(pw.playback.stream, SPA_PROP_mute, 1, &val, 0);
   pw_thread_loop_unlock(pw.thread);
 }
 
@@ -515,7 +516,8 @@ static void pipewire_recordVolume(int channels, const uint16_t volume[])
 static void pipewire_recordMute(bool mute)
 {
   pw_thread_loop_lock(pw.thread);
-  pw_stream_set_control(pw.record.stream, SPA_PROP_mute, 1, (void *)&mute, 0);
+  float val = mute ? 1.0f : 0.0f;
+  pw_stream_set_control(pw.record.stream, SPA_PROP_mute, 1, &val, 0);
   pw_thread_loop_unlock(pw.thread);
 }
 
