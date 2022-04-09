@@ -368,7 +368,11 @@ static size_t pipewire_playbackLatency(void)
   struct pw_time time = { 0 };
 
   pw_thread_loop_lock(pw.thread);
+#if PW_CHECK_VERSION(0, 3, 50)
+  if (pw_stream_get_time_n(pw.playback.stream, &time, sizeof(time)) < 0)
+#else
   if (pw_stream_get_time(pw.playback.stream, &time) < 0)
+#endif
     DEBUG_ERROR("pw_stream_get_time failed");
   pw_thread_loop_unlock(pw.thread);
 
