@@ -328,6 +328,8 @@ The following is a complete list of options accepted by this application
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:clipboardToLocal |       | yes       | Allow the clipboard to be synchronized FROM the VM                  |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
+  | spice:audio            |       | yes       | Enable SPICE audio support                                          |
+  +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:captureOnStart   |       | no        | Capture mouse and keyboard on start                                 |
@@ -336,6 +338,18 @@ The following is a complete list of options accepted by this application
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:showCursorDot    |       | yes       | Use a "dot" cursor when the window does not have focus              |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
+
+  +------------------------+-------+-------+------------------------------------------------------+
+  | Long                   | Short | Value | Description                                          |
+  +========================+=======+=======+======================================================+
+  | audio:periodSize       |       | 2048  | Requested audio device period size in samples        |
+  +------------------------+-------+-------+------------------------------------------------------+
+  | audio:bufferLatency    |       | 13    | Additional buffer latency in milliseconds            |
+  +------------------------+-------+-------+------------------------------------------------------+
+  | audio:micAlwaysAllow   |       | no    | Always allow guest attempts to access the microphone |
+  +------------------------+-------+-------+------------------------------------------------------+
+  | audio:micShowIndicator |       | yes   | Display microphone usage indicator                   |
+  +------------------------+-------+-------+------------------------------------------------------+
 
   +------------------+-------+-------+---------------------------------------------------------------------------+
   | Long             | Short | Value | Description                                                               |
@@ -359,6 +373,10 @@ The following is a complete list of options accepted by this application
   | egl:noBufferAge  |       | no    | Disable partial rendering based on buffer age                             |
   +------------------+-------+-------+---------------------------------------------------------------------------+
   | egl:noSwapDamage |       | no    | Disable swapping with damage                                              |
+  +------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:scalePointer |       | yes   | Keep the pointer size 1:1 when downscaling                                |
+  +------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:preset       |       | NULL  | The initial filter preset to load                                         |
   +------------------+-------+-------+---------------------------------------------------------------------------+
 
   +----------------------+-------+-------+---------------------------------------------+
