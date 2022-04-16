@@ -172,7 +172,7 @@ it directly from the build directory:
 
 .. seealso::
 
-   -  :ref:`Installing the Client <client_install>`
+   -  :ref:`Client Installation <client_install>`
    -  :ref:`Client Usage <client_usage>`
 
 .. note::
