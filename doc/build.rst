@@ -177,17 +177,26 @@ it directly from the build directory:
 
 .. note::
 
-   For users running GNOME on Wayland, you likely want to pass
-   ``-DENABLE_LIBDECOR=ON`` to ``cmake``, i.e. run ``cmake -DENABLE_LIBDECOR=ON ../``.
+   For users running GNOME on Wayland, you may want to enable libdecor when
+   building.
+
+   .. code:: bash
+
+      cmake -DENABLE_LIBDECOR=ON ../
 
    For details, see :ref:`the FAQ <gnome_wayland_decorations>`.
 
 .. note::
 
-   The most common compile error is related to backtrace support. This can be
-   disabled by adding the following option to the cmake command:
-   ``-DENABLE_BACKTRACE=0``. However, if you disable this and need support for
-   a crash, use ``gdb`` to obtain a backtrace manually.
+   The most common compile error is related to backtrace support. Try disabling
+   this when building:
+
+   .. code:: bash
+
+      cmake -DENABLE_BACKTRACE=0 ../
+
+   If you disable this and need support for crash, use ``gdb`` to obtain a
+   backtrace manually.
 
 .. _host_building:
 
