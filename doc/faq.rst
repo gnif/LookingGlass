@@ -9,7 +9,7 @@ General
 How does Looking Glass work?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This YouTube video featured created by the author features a detailed
+This YouTube video created by the author features a detailed
 explanation:
 
 https://www.youtube.com/watch?v=U44lihtNVVM
