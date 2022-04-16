@@ -113,8 +113,7 @@ Mouse
 The mouse is jumpy, slow, laggy when using SPICE
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Add a virtio mouse, which can be done by adding the below XML. 
-And install the 
+Add a VirtIO mouse —which can be done by adding the below XML— and install
 `VirtIO drivers <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_ 
 in the VM:
 
