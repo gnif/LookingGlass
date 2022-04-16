@@ -113,6 +113,15 @@ Mouse
 The mouse is jumpy, slow, laggy when using SPICE
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Add a virtio mouse and keyboard, which can be done by adding the below XML and removing anything related to tablet. And install the `VirtIO drivers <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_ for the devices inside of the VM:
+
+.. code:: xml
+
+   <input type="mouse" bus="virtio">
+   </input>
+   <input type="keyboard" bus="virtio">
+   </input>
+
 Please be sure to install the SPICE guest tools from
 https://www.spice-space.org/download.html#windows-binaries.
 
