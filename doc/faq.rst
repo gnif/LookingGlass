@@ -9,7 +9,7 @@ General
 How does Looking Glass work?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This YouTube video featured created by the author features a detailed
+This YouTube video created by the author features a detailed
 explanation:
 
 https://www.youtube.com/watch?v=U44lihtNVVM
@@ -113,7 +113,7 @@ Mouse
 The mouse is jumpy, slow, laggy when using SPICE
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Add a virtio mouse and keyboard, which can be done by adding the below XML and removing anything related to tablet. And install the `VirtIO drivers <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_ for the devices inside of the VM:
+Add a virtio mouse and keyboard, which can be done by adding the below XML. And install the `VirtIO drivers <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_ for the devices inside of the VM:
 
 .. code:: xml
 
@@ -122,7 +122,7 @@ Add a virtio mouse and keyboard, which can be done by adding the below XML and r
    <input type="keyboard" bus="virtio">
    </input>
 
-Please be sure to install the SPICE guest tools from
+If this doesn't work try installing the SPICE Guest Tools
 https://www.spice-space.org/download.html#windows-binaries.
 
 .. _mouse_desync_when_entering:
