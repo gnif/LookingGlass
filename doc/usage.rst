@@ -6,16 +6,9 @@ Usage
 The client command is the binary file: **looking-glass-client**. This
 command should run after the Windows Host Application has started.
 
-You may run the client directly from the build directory. Alternatively, to
-install the client for all users, you can run
-::
 
-   make install
 
-To install for the local user only, run
-::
 
-   cmake -DCMAKE_INSTALL_PREFIX=~/.local .. && make install
 
 .. _client_key_bindings:
 
