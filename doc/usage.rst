@@ -3,12 +3,44 @@
 Usage
 -----
 
-The client command is the binary file: **looking-glass-client**. This
-command should run after the Windows Host Application has started.
+**looking-glass-client** [\-\-help] [\-f] [\-F] [\-s] [\-S] [options...]
 
 
+.. _client_cli_options:
 
+Command Line Options
+~~~~~~~~~~~~~~~~~~~~
 
+A full list of command line options is available with the ``--help`` or ``-h``
+options.
+
+Example: ``looking-glass-client --help``
+
+Common options are listed below:
+
+================  ===========================================
+ Short option      Description
+================  ===========================================
+ ``-f shmFile``    use ``shmFile`` for IVSHMEM shared memory
+ ``-F``            automatically enter full screen
+ ``-s``            disable spice
+ ``-S``            disable host screensaver
+================  ===========================================
+
+Options may be provided in short form when available, or long form.
+Boolean options may be specified without a parameter to toggle their
+state.
+
+Examples:
+
+- ``looking-glass-client -F`` (short)
+- ``looking-glass-client win:fullScreen`` (long)
+- ``looking-glass-client -f /dev/shm/my-lg-shmem`` (short with parameter)
+- ``looking-glass-client app:shmFile=/dev/shm/my-lg-shmem`` (long with parameter)
+
+.. seealso::
+
+   :ref:`client_full_command_options`
 
 .. _client_key_bindings:
 
@@ -52,30 +84,6 @@ Command                      Description
 ============================ =======================================================
 
 You can also find this list at any time by holding down :kbd:`Scroll Lock`.
-
-.. _client_cli_options:
-
-Command Line Options
-~~~~~~~~~~~~~~~~~~~~
-
-A full list of command line options is available with the ``--help`` or ``-h``
-options.
-
-Example: ``looking-glass-client --help``
-
-Common options include ``-s`` for disabling spice, ``-S`` for disabling the
-screen saver, and ``-F`` to automatically enter full screen.
-
-Options may be provided with a short form, if available, or long form.
-Boolean options may be specified without a parameter to toggle their
-state.
-
-Examples:
-
-- ``looking-glass-client -F`` (short)
-- ``looking-glass-client win:fullScreen`` (long)
-- ``looking-glass-client -f /dev/shm/my-lg-shmem`` (short with parameter)
-- ``looking-glass-client app:shmFile=/dev/shm/my-lg-shmem`` (long with parameter)
 
 .. _client_config_options_file:
 
