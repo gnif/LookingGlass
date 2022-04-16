@@ -12,7 +12,14 @@ The Looking Glass Client receives frames from the :ref:`Host <host_install>` to
 display on your screen. It also handles input, and can optionally share the
 system clipboard with your guest OS through Spice.
 
-First you must build the client from source code, see :ref:`building`.
+First you must build the client from source, see :ref:`building`. Once you have
+built the client, you can install it. Run the following as root::
+
+   make install
+
+To install for the local user only, run::
+
+   cmake -DCMAKE_INSTALL_PREFIX=~/.local .. && make install
 
 .. _client_libvirt_configuration:
 
