@@ -390,6 +390,16 @@ static bool dxgi_init(void)
       break;
   }
 
+  this->targetWidth  = this->width;
+  this->targetHeight = this->height;
+
+  //TODO: add logic here
+  if (this->width > 1920 && this->height > 1200)
+  {
+    this->targetWidth  /= 2;
+    this->targetHeight /= 2;
+  }
+
   switch(outputDesc.Rotation)
   {
     case DXGI_MODE_ROTATION_ROTATE90:
@@ -413,6 +423,7 @@ static bool dxgi_init(void)
 
   DEBUG_INFO("Feature Level     : 0x%x"   , this->featureLevel);
   DEBUG_INFO("Capture Size      : %u x %u", this->width, this->height);
+  DEBUG_INFO("Target Size       : %u x %u", this->targetWidth, this->targetHeight);
   DEBUG_INFO("AcquireLock       : %s"     , this->useAcquireLock ? "enabled" : "disabled");
   DEBUG_INFO("Debug mode        : %s"     , this->debug ? "enabled" : "disabled");
 
@@ -1016,9 +1027,11 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   const unsigned int maxHeight = maxFrameSize / this->pitch;
 
   frame->formatVer        = tex->formatVer;
-  frame->width            = this->width;
-  frame->height           = maxHeight > this->height ? this->height : maxHeight;
-  frame->realHeight       = this->height;
+  frame->screenWidth      = this->width;
+  frame->screenHeight     = this->height;
+  frame->frameWidth       = this->targetWidth;
+  frame->frameHeight      = min(maxHeight, this->targetHeight);
+  frame->truncated        = maxHeight < this->targetHeight;
   frame->pitch            = this->pitch;
   frame->stride           = this->stride;
   frame->format           = this->format;

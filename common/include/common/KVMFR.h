@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 18
+#define KVMFR_VERSION 19
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -127,7 +127,8 @@ KVMFRCursor;
 enum
 {
   FRAME_FLAG_BLOCK_SCREENSAVER  = 0x1,
-  FRAME_FLAG_REQUEST_ACTIVATION = 0x2
+  FRAME_FLAG_REQUEST_ACTIVATION = 0x2,
+  FRAME_FLAG_TRUNCATED          = 0x4 // ivshmem was too small for the frame
 };
 
 typedef uint32_t KVMFRFrameFlags;
@@ -137,9 +138,10 @@ typedef struct KVMFRFrame
   uint32_t        formatVer;          // the frame format version number
   uint32_t        frameSerial;        // the unique frame number
   FrameType       type;               // the frame data type
-  uint32_t        width;              // the frame width
-  uint32_t        height;             // the frame height
-  uint32_t        realHeight;         // the real height if the frame was truncated due to low mem
+  uint32_t        screenWidth;        // the client's screen width
+  uint32_t        screenHeight;       // the client's screen height
+  uint32_t        frameWidth;         // the frame width
+  uint32_t        frameHeight;        // the frame height
   FrameRotation   rotation;           // the frame rotation
   uint32_t        stride;             // the row stride (zero if compressed data)
   uint32_t        pitch;              // the row pitch  (stride in bytes or the compressed frame size)

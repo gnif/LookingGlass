@@ -269,9 +269,10 @@ static bool sendFrame(void)
 
   fi->formatVer         = frame.formatVer;
   fi->frameSerial       = app.frameSerial++;
-  fi->width             = frame.width;
-  fi->height            = frame.height;
-  fi->realHeight        = frame.realHeight;
+  fi->screenWidth       = frame.screenWidth;
+  fi->screenHeight      = frame.screenHeight;
+  fi->frameWidth        = frame.frameWidth;
+  fi->frameHeight       = frame.frameHeight;
   fi->stride            = frame.stride;
   fi->pitch             = frame.pitch;
   fi->offset            = app.pageSize - FrameBufferStructSize;
@@ -279,11 +280,15 @@ static bool sendFrame(void)
     (os_blockScreensaver() ?
      FRAME_FLAG_BLOCK_SCREENSAVER : 0) |
     (os_getAndClearPendingActivationRequest() ?
-     FRAME_FLAG_REQUEST_ACTIVATION : 0);
-  app.frameValid        = true;
+      FRAME_FLAG_REQUEST_ACTIVATION : 0) |
+    (frame.truncated ?
+      FRAME_FLAG_TRUNCATED : 0);
 
   fi->damageRectsCount  = frame.damageRectsCount;
-  memcpy(fi->damageRects, frame.damageRects, frame.damageRectsCount * sizeof(FrameDamageRect));
+  memcpy(fi->damageRects, frame.damageRects,
+    frame.damageRectsCount * sizeof(FrameDamageRect));
+
+  app.frameValid = true;
 
   // put the framebuffer on the border of the next page
   // this is to allow for aligned DMA transfers by the receiver
@@ -291,13 +296,14 @@ static bool sendFrame(void)
   framebuffer_prepare(fb);
 
   /* we post and then get the frame, this is intentional! */
-  if ((status = lgmpHostQueuePost(app.frameQueue, 0, app.frameMemory[app.frameIndex])) != LGMP_OK)
+  if ((status = lgmpHostQueuePost(app.frameQueue, 0,
+    app.frameMemory[app.frameIndex])) != LGMP_OK)
   {
     DEBUG_ERROR("%s", lgmpStatusString(status));
     return true;
   }
 
-  app.iface->getFrame(fb, frame.height, app.frameIndex);
+  app.iface->getFrame(fb, frame.frameHeight, app.frameIndex);
   return true;
 }
 

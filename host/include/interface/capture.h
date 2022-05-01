@@ -63,9 +63,11 @@ CaptureRotation;
 typedef struct CaptureFrame
 {
   unsigned int    formatVer;
-  unsigned int    width;
-  unsigned int    height;
-  unsigned int    realHeight;
+  unsigned int    screenWidth;
+  unsigned int    screenHeight;
+  unsigned int    frameWidth;
+  unsigned int    frameHeight;
+  bool            truncated;
   unsigned int    pitch;
   unsigned int    stride;
   CaptureFormat   format;

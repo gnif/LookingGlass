@@ -32,6 +32,15 @@ struct D3D11Backend
   uint64_t   usleepMapTime;
 };
 
+struct D3D11TexImpl
+{
+  ID3D11Texture2D          * gpu;
+  ID3D11Texture2D          * cpu;
+  ID3D11ShaderResourceView * srv;
+};
+
+#define TEXIMPL(x) ((struct D3D11TexImpl *)(x).impl)
+
 static struct DXGIInterface * dxgi = NULL;
 static struct D3D11Backend  * this = NULL;
 
@@ -52,33 +61,88 @@ static bool d3d11_create(struct DXGIInterface * intf)
 
   this->avgMapTime = runningavg_new(10);
 
-  D3D11_TEXTURE2D_DESC texDesc;
-  memset(&texDesc, 0, sizeof(texDesc));
-  texDesc.Width              = dxgi->width;
-  texDesc.Height             = dxgi->height;
-  texDesc.MipLevels          = 1;
-  texDesc.ArraySize          = 1;
-  texDesc.SampleDesc.Count   = 1;
-  texDesc.SampleDesc.Quality = 0;
-  texDesc.Usage              = D3D11_USAGE_STAGING;
-  texDesc.Format             = dxgi->dxgiFormat;
-  texDesc.BindFlags          = 0;
-  texDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
-  texDesc.MiscFlags          = 0;
+  const bool downsample =
+    dxgi->targetWidth  == dxgi->width  / 2 &&
+    dxgi->targetHeight == dxgi->height / 2;
+
+  if (!downsample)
+  {
+    dxgi->targetWidth  = dxgi->width;
+    dxgi->targetHeight = dxgi->height;
+  }
+
+  D3D11_TEXTURE2D_DESC gpuTexDesc =
+  {
+    .Width              = dxgi->width,
+    .Height             = dxgi->height,
+    .MipLevels          = 2,
+    .ArraySize          = 1,
+    .SampleDesc.Count   = 1,
+    .SampleDesc.Quality = 0,
+    .Usage              = D3D11_USAGE_DEFAULT,
+    .Format             = dxgi->dxgiFormat,
+    .BindFlags          = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+    .CPUAccessFlags     = 0,
+    .MiscFlags          = D3D11_RESOURCE_MISC_GENERATE_MIPS
+  };
+
+  D3D11_TEXTURE2D_DESC cpuTexDesc =
+  {
+    .Width              = dxgi->targetWidth,
+    .Height             = dxgi->targetHeight,
+    .MipLevels          = 1,
+    .ArraySize          = 1,
+    .SampleDesc.Count   = 1,
+    .SampleDesc.Quality = 0,
+    .Usage              = D3D11_USAGE_STAGING,
+    .Format             = dxgi->dxgiFormat,
+    .BindFlags          = 0,
+    .CPUAccessFlags     = D3D11_CPU_ACCESS_READ,
+    .MiscFlags          = 0
+  };
 
   for (int i = 0; i < dxgi->maxTextures; ++i)
   {
-    status = ID3D11Device_CreateTexture2D(dxgi->device, &texDesc, NULL, (ID3D11Texture2D **)&dxgi->texture[i].impl);
-    if (FAILED(status))
+    if (!(dxgi->texture[i].impl =
+      (struct D3D11TexImpl *)calloc(sizeof(struct D3D11TexImpl), 1)))
     {
-      DEBUG_WINERROR("Failed to create texture", status);
+      DEBUG_ERROR("Failed to allocate D3D11TexImpl struct");
       goto fail;
     }
+
+    struct D3D11TexImpl * teximpl = TEXIMPL(dxgi->texture[i]);
+
+    status = ID3D11Device_CreateTexture2D(dxgi->device, &cpuTexDesc, NULL,
+      &teximpl->cpu);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create CPU texture", status);
+      goto fail;
+    }
+
+    if (!downsample)
+      continue;
+
+    status = ID3D11Device_CreateTexture2D(dxgi->device, &gpuTexDesc, NULL,
+      &teximpl->gpu);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create GPU texture", status);
+      goto fail;
+    }
+
+    ID3D11Device_CreateShaderResourceView(dxgi->device,
+      (ID3D11Resource *)teximpl->gpu, NULL, &teximpl->srv);
   }
 
   // map the texture simply to get the pitch and stride
   D3D11_MAPPED_SUBRESOURCE mapping;
-  status = ID3D11DeviceContext_Map(dxgi->deviceContext, (ID3D11Resource *)dxgi->texture[0].impl, 0, D3D11_MAP_READ, 0, &mapping);
+  status = ID3D11DeviceContext_Map(dxgi->deviceContext,
+    (ID3D11Resource *)TEXIMPL(dxgi->texture[0])->cpu, 0,
+    D3D11_MAP_READ, 0, &mapping);
+
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to map the texture", status);
@@ -87,7 +151,10 @@ static bool d3d11_create(struct DXGIInterface * intf)
 
   dxgi->pitch  = mapping.RowPitch;
   dxgi->stride = mapping.RowPitch / dxgi->bpp;
-  ID3D11DeviceContext_Unmap(dxgi->deviceContext, (ID3D11Resource *)dxgi->texture[0].impl, 0);
+
+  ID3D11DeviceContext_Unmap(dxgi->deviceContext,
+    (ID3D11Resource *)TEXIMPL(dxgi->texture[0])->cpu, 0);
+
   return true;
 
 fail:
@@ -100,8 +167,22 @@ static void d3d11_free(void)
   DEBUG_ASSERT(this);
 
   for (int i = 0; i < dxgi->maxTextures; ++i)
-    if (dxgi->texture[i].impl)
-      ID3D11Texture2D_Release((ID3D11Texture2D *) dxgi->texture[i].impl);
+  {
+    struct D3D11TexImpl * teximpl = TEXIMPL(dxgi->texture[i]);
+    if (!teximpl)
+      continue;
+
+    if (teximpl->cpu)
+      ID3D11Texture2D_Release(teximpl->cpu);
+
+    if (teximpl->gpu)
+      ID3D11Texture2D_Release(teximpl->gpu);
+
+    if (teximpl->srv)
+      ID3D11ShaderResourceView_Release(teximpl->srv);
+
+    free(teximpl);
+  }
 
   runningavg_free(&this->avgMapTime);
   free(this);
@@ -110,25 +191,63 @@ static void d3d11_free(void)
 
 static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
 {
+  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
+  ID3D11Texture2D * dst = teximpl->gpu ? teximpl->gpu : teximpl->cpu;
+
   INTERLOCKED_SECTION(dxgi->deviceContextLock,
   {
     tex->copyTime = microtime();
 
     if (tex->texDamageCount < 0)
       ID3D11DeviceContext_CopyResource(dxgi->deviceContext,
-        (ID3D11Resource *)tex->impl, (ID3D11Resource *)src);
+        (ID3D11Resource *)dst, (ID3D11Resource *)src);
     else
     {
       for (int i = 0; i < tex->texDamageCount; ++i)
       {
         FrameDamageRect * rect = tex->texDamageRects + i;
-        D3D11_BOX box = {
-          .left = rect->x, .top = rect->y, .front = 0, .back = 1,
-          .right = rect->x + rect->width, .bottom = rect->y + rect->height,
+        D3D11_BOX box =
+        {
+          .left   = rect->x,
+          .top    = rect->y,
+          .front  = 0,
+          .back   = 1,
+          .right  = rect->x + rect->width,
+          .bottom = rect->y + rect->height,
         };
         ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
-          (ID3D11Resource *)tex->impl, 0, rect->x, rect->y, 0,
+          (ID3D11Resource *)dst, 0, rect->x, rect->y, 0,
           (ID3D11Resource *)src, 0, &box);
+      }
+    }
+
+    if (teximpl->gpu)
+    {
+      ID3D11DeviceContext_GenerateMips(dxgi->deviceContext, teximpl->srv);
+
+      if (tex->texDamageCount < 0)
+        ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
+          (ID3D11Resource *)teximpl->cpu, 0, 0, 0, 0,
+          (ID3D11Resource *)dst         , 1, NULL);
+      else
+      {
+        for (int i = 0; i < tex->texDamageCount; ++i)
+        {
+          FrameDamageRect * rect = tex->texDamageRects + i;
+          D3D11_BOX box =
+          {
+            .left   = rect->x / 2,
+            .top    = rect->y / 2,
+            .front  = 0,
+            .back   = 1,
+            .right  = (rect->x + rect->width ) / 2,
+            .bottom = (rect->y + rect->height) / 2,
+          };
+
+          ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
+            (ID3D11Resource *)teximpl->cpu, 0, rect->x / 2, rect->y / 2, 0,
+            (ID3D11Resource *)dst         , 1, &box);
+        }
       }
     }
 
@@ -139,6 +258,7 @@ static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
 
 static CaptureResult d3d11_mapTexture(Texture * tex)
 {
+  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
   D3D11_MAPPED_SUBRESOURCE map;
 
   // sleep until it's close to time to map
@@ -152,8 +272,8 @@ static CaptureResult d3d11_mapTexture(Texture * tex)
     HRESULT status;
 
     INTERLOCKED_SECTION(dxgi->deviceContextLock, {
-      status = ID3D11DeviceContext_Map(dxgi->deviceContext, (ID3D11Resource *) tex->impl,
-          0, D3D11_MAP_READ, 0x100000L, &map);
+      status = ID3D11DeviceContext_Map(dxgi->deviceContext,
+        (ID3D11Resource *)teximpl->cpu, 0, D3D11_MAP_READ, 0x100000L, &map);
     });
     if (status == DXGI_ERROR_WAS_STILL_DRAWING)
     {
@@ -183,8 +303,11 @@ static CaptureResult d3d11_mapTexture(Texture * tex)
 
 static void d3d11_unmapTexture(Texture * tex)
 {
+  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
+
   INTERLOCKED_SECTION(dxgi->deviceContextLock, {
-    ID3D11DeviceContext_Unmap(dxgi->deviceContext, (ID3D11Resource *) tex->impl, 0);
+    ID3D11DeviceContext_Unmap(dxgi->deviceContext,
+      (ID3D11Resource *)teximpl->cpu, 0);
   });
   tex->map = NULL;
 }
