@@ -299,8 +299,8 @@ void opengl_onResize(LG_Renderer * renderer, const int width, const int height, 
   {
     glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
     glScalef(
-      (float)this->destRect.w / (float)this->format.width,
-      (float)this->destRect.h / (float)this->format.height,
+      (float)this->destRect.w / (float)this->format.frameWidth,
+      (float)this->destRect.h / (float)this->format.frameHeight,
       1.0f
     );
   }
@@ -738,7 +738,7 @@ static enum ConfigStatus configure(struct Inst * this)
   }
 
   // calculate the texture size in bytes
-  this->texSize = this->format.height * this->format.pitch;
+  this->texSize = this->format.frameHeight * this->format.pitch;
   this->texPos  = 0;
 
   g_gl_dynProcs.glGenBuffers(BUFFER_COUNT, this->vboID);
@@ -835,8 +835,8 @@ static enum ConfigStatus configure(struct Inst * this)
       GL_TEXTURE_2D,
       0,
       this->intFormat,
-      this->format.width,
-      this->format.height,
+      this->format.frameWidth,
+      this->format.frameHeight,
       0,
       this->vboFormat,
       this->dataFormat,
@@ -859,10 +859,11 @@ static enum ConfigStatus configure(struct Inst * this)
       glBindTexture(GL_TEXTURE_2D, this->frames[i]);
       glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
       glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0.0f, 0.0f); glVertex2i(0                 , 0                  );
-        glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.width, 0                  );
-        glTexCoord2f(0.0f, 1.0f); glVertex2i(0                 , this->format.height);
-        glTexCoord2f(1.0f, 1.0f); glVertex2i(this->format.width, this->format.height);
+        glTexCoord2f(0.0f, 0.0f); glVertex2i(0, 0);
+        glTexCoord2f(1.0f, 0.0f); glVertex2i(this->format.frameWidth, 0);
+        glTexCoord2f(0.0f, 1.0f); glVertex2i(0, this->format.frameHeight);
+        glTexCoord2f(1.0f, 1.0f);
+        glVertex2i(this->format.frameWidth, this->format.frameHeight);
       glEnd();
       glBindTexture(GL_TEXTURE_2D, 0);
     glEndList();
@@ -1119,14 +1120,14 @@ static bool drawFrame(struct Inst * this)
 
   const int bpp = this->format.bpp / 8;
   glPixelStorei(GL_UNPACK_ALIGNMENT , bpp);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.width);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.frameWidth);
 
   this->texPos = 0;
 
   framebuffer_read_fn(
     this->frame,
-    this->format.height,
-    this->format.width,
+    this->format.frameHeight,
+    this->format.frameWidth,
     bpp,
     this->format.pitch,
     opengl_bufferFn,
@@ -1141,8 +1142,8 @@ static bool drawFrame(struct Inst * this)
     0,
     0,
     0,
-    this->format.width ,
-    this->format.height,
+    this->format.frameWidth ,
+    this->format.frameHeight,
     this->vboFormat,
     this->dataFormat,
     (void*)0
@@ -1150,7 +1151,8 @@ static bool drawFrame(struct Inst * this)
   if (check_gl_error("glTexSubImage2D"))
   {
     DEBUG_ERROR("texWIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
-      this->texWIndex, this->format.width, this->format.height, this->vboFormat, this->texSize
+      this->texWIndex, this->format.frameWidth, this->format.frameHeight,
+      this->vboFormat, this->texSize
     );
   }
 
@@ -1158,8 +1160,8 @@ static bool drawFrame(struct Inst * this)
   g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
   const bool mipmap = this->opt.mipmap && (
-    (this->format.width  > this->destRect.w) ||
-    (this->format.height > this->destRect.h));
+    (this->format.frameWidth  > this->destRect.w) ||
+    (this->format.frameHeight > this->destRect.h));
 
   if (mipmap)
   {

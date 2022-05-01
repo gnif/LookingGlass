@@ -66,9 +66,11 @@ LG_RendererRotate;
 
 typedef struct LG_RendererFormat
 {
-  FrameType         type;    // frame type
-  unsigned int      width;   // image width
-  unsigned int      height;  // image height
+  FrameType         type;         // frame type
+  unsigned int      screenWidth;  // actual width of the host
+  unsigned int      screenHeight; // actual height of the host
+  unsigned int      frameWidth;   // width of frame transmitted
+  unsigned int      frameHeight;  // height of frame transmitted
   unsigned int      stride;  // scanline width (zero if compresed)
   unsigned int      pitch;   // scanline bytes (or compressed size)
   unsigned int      bpp;     // bits per pixel (zero if compressed)

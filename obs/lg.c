@@ -72,7 +72,9 @@ typedef struct
   LGState           state;
   char            * shmFile;
   uint32_t          formatVer;
-  uint32_t          width, height;
+  uint32_t          screenWidth, screenHeight;
+  uint32_t          frameWidth, frameHeight;
+  struct vec2       screenScale;
   FrameType         type;
   int               bpp;
   struct IVSHMEM    shmDev;
@@ -574,10 +576,15 @@ static void lgVideoTick(void * data, float seconds)
   KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
   if (!this->texture || this->formatVer != frame->formatVer)
   {
-    this->formatVer = frame->formatVer;
-    this->width     = frame->width;
-    this->height    = frame->height;
-    this->type      = frame->type;
+    this->formatVer    = frame->formatVer;
+    this->screenWidth  = frame->screenWidth;
+    this->screenHeight = frame->screenHeight;
+    this->frameWidth   = frame->frameWidth;
+    this->frameHeight  = frame->frameHeight;
+    this->type         = frame->type;
+
+    this->screenScale.x = this->screenWidth  / this->frameWidth ;
+    this->screenScale.y = this->screenHeight / this->frameHeight;
 
     obs_enter_graphics();
     if (this->texture)
@@ -626,12 +633,14 @@ static void lgVideoTick(void * data, float seconds)
 #if LIBOBS_API_MAJOR_VER >= 27
     if (this->dmabuf)
     {
-      int fd = dmabufGetFd(this, &msg, frame, frame->height * frame->pitch);
+      int fd = dmabufGetFd(this, &msg, frame, frame->frameHeight * frame->pitch);
 
       if (fd < 0)
         goto dmabuf_fail;
 
-      this->texture = gs_texture_create_from_dmabuf(frame->width, frame->height,
+      this->texture = gs_texture_create_from_dmabuf(
+        frame->frameWidth,
+        frame->frameHeight,
         drm_format, format, 1, &fd, &(uint32_t) { frame->pitch },
         &(uint32_t) { 0 }, &(uint64_t) { 0 });
 
@@ -652,7 +661,7 @@ static void lgVideoTick(void * data, float seconds)
 
     if (!this->texture)
       this->texture = gs_texture_create(
-          this->width, this->height, format, 1, NULL, GS_DYNAMIC);
+          this->frameWidth, this->frameHeight, format, 1, NULL, GS_DYNAMIC);
 
     if (!this->texture)
     {
@@ -671,12 +680,12 @@ static void lgVideoTick(void * data, float seconds)
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
     framebuffer_read(
         fb,
-        this->texData,    // dst
-        this->linesize,   // dstpitch
-        frame->height,    // height
-        frame->width,     // width
-        this->bpp,        // bpp
-        frame->pitch      // linepitch
+        this->texData,      // dst
+        this->linesize,     // dstpitch
+        frame->frameHeight, // height
+        frame->frameWidth,  // width
+        this->bpp,          // bpp
+        frame->pitch        // linepitch
     );
 
     lgmpClientMessageDone(this->frameQueue);
@@ -716,8 +725,8 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
     {
       .x  = m4.t.x,
       .y  = m4.t.y,
-      .cx = (double)this->width  * m4.x.x,
-      .cy = (double)this->height * m4.y.y
+      .cx = (double)this->frameWidth  * m4.x.x,
+      .cy = (double)this->frameHeight * m4.y.y
     };
     gs_set_scissor_rect(&r);
 
@@ -726,7 +735,10 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
     gs_effect_set_texture(image, this->cursorTex);
 
     gs_matrix_push();
-    gs_matrix_translate3f(this->cursorRect.x, this->cursorRect.y, 0.0f);
+    gs_matrix_translate3f(
+        this->cursorRect.x / this->screenScale.x,
+        this->cursorRect.y / this->screenScale.y,
+        0.0f);
 
     if (!this->cursorMono)
     {
@@ -765,13 +777,13 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
 static uint32_t lgGetWidth(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
-  return this->width;
+  return this->frameWidth;
 }
 
 static uint32_t lgGetHeight(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
-  return this->height;
+  return this->frameHeight;
 }
 
 struct obs_source_info lg_source =

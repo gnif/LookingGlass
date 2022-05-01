@@ -340,18 +340,18 @@ static void egl_calc_mouse_size(struct Inst * this)
   {
     case LG_ROTATE_0:
     case LG_ROTATE_180:
-      this->mouseScaleX = 2.0f / this->format.width;
-      this->mouseScaleY = 2.0f / this->format.height;
-      w = this->format.width;
-      h = this->format.height;
+      this->mouseScaleX = 2.0f / this->format.screenWidth;
+      this->mouseScaleY = 2.0f / this->format.screenHeight;
+      w = this->format.screenWidth;
+      h = this->format.screenHeight;
       break;
 
     case LG_ROTATE_90:
     case LG_ROTATE_270:
-      this->mouseScaleX = 2.0f / this->format.height;
-      this->mouseScaleY = 2.0f / this->format.width;
-      w = this->format.height;
-      h = this->format.width;
+      this->mouseScaleX = 2.0f / this->format.screenHeight;
+      this->mouseScaleY = 2.0f / this->format.screenWidth;
+      w = this->format.screenHeight;
+      h = this->format.screenWidth;
       break;
 
     default:
@@ -419,14 +419,14 @@ static void egl_update_scale_type(struct Inst * this)
   {
     case LG_ROTATE_0:
     case LG_ROTATE_180:
-      width  = this->format.width;
-      height = this->format.height;
+      width  = this->format.frameWidth;
+      height = this->format.frameHeight;
       break;
 
     case LG_ROTATE_90:
     case LG_ROTATE_270:
-      width  = this->format.height;
-      height = this->format.width;
+      width  = this->format.frameHeight;
+      height = this->format.frameWidth;
       break;
   }
 
@@ -482,8 +482,10 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   {
     float scale = max(1.0f,
         this->formatValid ?
-	max((float)this->format.width / this->width, (float)this->format.height / this->height)
-	: 1.0f);
+        max(
+          (float)this->format.screenWidth  / this->width,
+          (float)this->format.screenHeight / this->height)
+        : 1.0f);
     egl_cursorSetScale(this->cursor, scale);
   }
 
@@ -561,12 +563,12 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 
   if (this->scalePointer)
   {
-    float scale = max(1.0f, (float)format.width / this->width);
+    float scale = max(1.0f, (float)format.screenWidth / this->width);
     egl_cursorSetScale(this->cursor, scale);
   }
 
   egl_update_scale_type(this);
-  egl_damageSetup(this->damage, format.width, format.height);
+  egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
 
   /* we need full screen damage when the format changes */
   INTERLOCKED_SECTION(this->desktopDamageLock, {
@@ -1043,8 +1045,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
           int y = rect->y > 0 ? rect->y - 1 : 0;
           accumulated->rects[accumulated->count++] = (struct FrameDamageRect) {
             .x = x, .y = y,
-            .width  = min(this->format.width  - x, rect->width  + 2),
-            .height = min(this->format.height - y, rect->height + 2),
+            .width  = min(this->format.frameWidth  - x, rect->width  + 2),
+            .height = min(this->format.frameHeight - y, rect->height + 2),
           };
         }
       }
@@ -1057,7 +1059,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   if (!renderAll)
   {
     double matrix[6];
-    egl_screenToDesktopMatrix(matrix, this->format.width, this->format.height,
+    egl_screenToDesktopMatrix(matrix,
+        this->format.frameWidth, this->format.frameHeight,
         this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
         this->width, this->height);
 
@@ -1076,7 +1079,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
       for (int j = 0; j < count; ++j)
         accumulated->count += egl_screenToDesktop(
           accumulated->rects + accumulated->count, matrix, damage + j,
-          this->format.width, this->format.height
+          this->format.frameWidth, this->format.frameHeight
         );
     }
 
@@ -1184,7 +1187,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     else
     {
       double matrix[6];
-      egl_desktopToScreenMatrix(matrix, this->format.width, this->format.height,
+      egl_desktopToScreenMatrix(matrix,
+          this->format.frameWidth, this->format.frameHeight,
           this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
           this->width, this->height);
 

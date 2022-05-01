@@ -280,14 +280,14 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
       return false;
   }
 
-  desktop->width  = format.width;
-  desktop->height = format.height;
+  desktop->width  = format.frameWidth;
+  desktop->height = format.frameHeight;
 
   if (!egl_textureSetup(
     desktop->texture,
     pixFmt,
-    format.width,
-    format.height,
+    format.frameWidth,
+    format.frameHeight,
     format.pitch
   ))
   {

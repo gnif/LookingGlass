@@ -611,16 +611,18 @@ int main_frameThread(void * unused)
     if (!g_state.formatValid || frame->formatVer != formatVer)
     {
       // setup the renderer format with the frame format details
-      lgrFormat.type   = frame->type;
-      lgrFormat.width  = frame->width;
-      lgrFormat.height = frame->height;
-      lgrFormat.stride = frame->stride;
-      lgrFormat.pitch  = frame->pitch;
+      lgrFormat.type         = frame->type;
+      lgrFormat.screenWidth  = frame->screenWidth;
+      lgrFormat.screenHeight = frame->screenHeight;
+      lgrFormat.frameWidth   = frame->frameWidth;
+      lgrFormat.frameHeight  = frame->frameHeight;
+      lgrFormat.stride       = frame->stride;
+      lgrFormat.pitch        = frame->pitch;
 
-      if (frame->height != frame->realHeight)
+      if (frame->flags && FRAME_FLAG_TRUNCATED)
       {
         const float needed =
-          ((frame->realHeight * frame->pitch * 2) / 1048576.0f) + 10.0f;
+          ((frame->screenHeight * frame->pitch * 2) / 1048576.0f) + 10.0f;
         const int   size   = (int)powf(2.0f, ceilf(logf(needed) / logf(2.0f)));
 
         DEBUG_BREAK();
@@ -655,12 +657,12 @@ int main_frameThread(void * unused)
         case FRAME_TYPE_RGBA:
         case FRAME_TYPE_BGRA:
         case FRAME_TYPE_RGBA10:
-          dataSize       = lgrFormat.height * lgrFormat.pitch;
+          dataSize       = lgrFormat.frameHeight * lgrFormat.pitch;
           lgrFormat.bpp  = 32;
           break;
 
         case FRAME_TYPE_RGBA16F:
-          dataSize       = lgrFormat.height * lgrFormat.pitch;
+          dataSize       = lgrFormat.frameHeight * lgrFormat.pitch;
           lgrFormat.bpp  = 64;
           break;
 
@@ -682,7 +684,7 @@ int main_frameThread(void * unused)
 
       DEBUG_INFO("Format: %s %ux%u stride:%u pitch:%u rotation:%d",
           FrameTypeStr[frame->type],
-          frame->width, frame->height,
+          frame->frameWidth, frame->frameHeight,
           frame->stride, frame->pitch,
           frame->rotation);
 
@@ -696,11 +698,11 @@ int main_frameThread(void * unused)
       }
       LG_UNLOCK(g_state.lgrLock);
 
-      g_state.srcSize.x = lgrFormat.width;
-      g_state.srcSize.y = lgrFormat.height;
+      g_state.srcSize.x = lgrFormat.screenWidth;
+      g_state.srcSize.y = lgrFormat.screenHeight;
       g_state.haveSrcSize = true;
       if (g_params.autoResize)
-        g_state.ds->setWindowSize(lgrFormat.width, lgrFormat.height);
+        g_state.ds->setWindowSize(lgrFormat.frameWidth, lgrFormat.frameHeight);
 
       core_updatePositionInfo();
     }
