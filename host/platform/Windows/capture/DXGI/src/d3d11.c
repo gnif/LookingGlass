@@ -199,8 +199,16 @@ static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
     tex->copyTime = microtime();
 
     if (tex->texDamageCount < 0)
-      ID3D11DeviceContext_CopyResource(dxgi->deviceContext,
-        (ID3D11Resource *)dst, (ID3D11Resource *)src);
+    {
+      if (!teximpl->gpu)
+        ID3D11DeviceContext_CopyResource(dxgi->deviceContext,
+          (ID3D11Resource *)dst, (ID3D11Resource *)src);
+      else
+        ID3D11DeviceContext_ResolveSubresource(dxgi->deviceContext,
+          (ID3D11Resource *)dst, 0,
+          (ID3D11Resource *)src, 0,
+          dxgi->dxgiFormat);
+    }
     else
     {
       for (int i = 0; i < tex->texDamageCount; ++i)
