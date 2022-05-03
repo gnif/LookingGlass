@@ -598,22 +598,27 @@ static bool dxgi_init(void)
       goto fail;
   }
 
-  this->targetWidth  = this->width;
-  this->targetHeight = this->height;
+  this->downsampleLevel = 0;
+  this->targetWidth     = this->width;
+  this->targetHeight    = this->height;
 
-  DownsampleRule * rule;
+  DownsampleRule * rule, * match = NULL;
   vector_forEachRef(rule, &downsampleRules)
   {
     if (
       ( rule->greater && (this->width  > rule->x || this->height  > rule->y)) ||
       (!rule->greater && (this->width == rule->x && this->height == rule->y)))
     {
-      DEBUG_INFO("Matched downsample rule %d", rule->id);
-      this->downsampleLevel = rule->level;
-      this->targetWidth   >>= rule->level;
-      this->targetHeight  >>= rule->level;
-      break;
+      match = rule;
     }
+  }
+
+  if (match)
+  {
+    DEBUG_INFO("Matched downsample rule %d", rule->id);
+    this->downsampleLevel = match->level;
+    this->targetWidth   >>= match->level;
+    this->targetHeight  >>= match->level;
   }
 
   DEBUG_INFO("Request Size      : %u x %u", this->targetWidth, this->targetHeight);
