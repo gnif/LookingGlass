@@ -179,74 +179,104 @@ static void d3d11_free(void)
   this = NULL;
 }
 
+static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
+{
+  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
+  ID3D11Texture2D * dst = teximpl->cpu;
+
+  if (tex->texDamageCount < 0)
+    ID3D11DeviceContext_CopyResource(dxgi->deviceContext,
+      (ID3D11Resource *)dst, (ID3D11Resource *)src);
+  else
+  {
+    for (int i = 0; i < tex->texDamageCount; ++i)
+    {
+      FrameDamageRect * rect = tex->texDamageRects + i;
+      D3D11_BOX box =
+      {
+        .left   = rect->x,
+        .top    = rect->y,
+        .front  = 0,
+        .back   = 1,
+        .right  = rect->x + rect->width ,
+        .bottom = rect->y + rect->height,
+      };
+      ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
+        (ID3D11Resource *)dst, 0, box.left, box.top, 0,
+        (ID3D11Resource *)src, 0, &box);
+    }
+  }
+}
+
+static void copyFrameDownsampled(Texture * tex, ID3D11Texture2D * src)
+{
+  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
+  ID3D11Texture2D * dst = teximpl->gpu;
+
+  if (tex->texDamageCount < 0)
+    ID3D11DeviceContext_ResolveSubresource(dxgi->deviceContext,
+      (ID3D11Resource *)dst, 0,
+      (ID3D11Resource *)src, 0,
+      dxgi->dxgiFormat);
+  else
+  {
+    for (int i = 0; i < tex->texDamageCount; ++i)
+    {
+      FrameDamageRect * rect = tex->texDamageRects + i;
+      D3D11_BOX box =
+      {
+        .left   = rect->x << dxgi->downsampleLevel,
+        .top    = rect->y << dxgi->downsampleLevel,
+        .front  = 0,
+        .back   = 1,
+        .right  = (rect->x + rect->width ) << dxgi->downsampleLevel,
+        .bottom = (rect->y + rect->height) << dxgi->downsampleLevel,
+      };
+      ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
+        (ID3D11Resource *)dst, 0, box.left, box.top, 0,
+        (ID3D11Resource *)src, 0, &box);
+    }
+  }
+
+  ID3D11DeviceContext_GenerateMips(dxgi->deviceContext, teximpl->srv);
+  if (tex->texDamageCount < 0)
+    ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
+      (ID3D11Resource *)teximpl->cpu, 0, 0, 0, 0,
+      (ID3D11Resource *)dst         , dxgi->downsampleLevel, NULL);
+  else
+  {
+    for (int i = 0; i < tex->texDamageCount; ++i)
+    {
+      FrameDamageRect * rect = tex->texDamageRects + i;
+      D3D11_BOX box =
+      {
+        .left   = rect->x,
+        .top    = rect->y,
+        .front  = 0,
+        .back   = 1,
+        .right  = rect->x + rect->width ,
+        .bottom = rect->y + rect->height,
+      };
+
+      ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
+        (ID3D11Resource *)teximpl->cpu, 0, box.left, box.top, 0,
+        (ID3D11Resource *)dst         , dxgi->downsampleLevel, &box);
+    }
+  }
+}
+
 static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
 {
   struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
-  ID3D11Texture2D * dst = teximpl->gpu ? teximpl->gpu : teximpl->cpu;
 
   INTERLOCKED_SECTION(dxgi->deviceContextLock,
   {
     tex->copyTime = microtime();
 
-    if (tex->texDamageCount < 0)
-    {
-      if (!teximpl->gpu)
-        ID3D11DeviceContext_CopyResource(dxgi->deviceContext,
-          (ID3D11Resource *)dst, (ID3D11Resource *)src);
-      else
-        ID3D11DeviceContext_ResolveSubresource(dxgi->deviceContext,
-          (ID3D11Resource *)dst, 0,
-          (ID3D11Resource *)src, 0,
-          dxgi->dxgiFormat);
-    }
-    else
-    {
-      for (int i = 0; i < tex->texDamageCount; ++i)
-      {
-        FrameDamageRect * rect = tex->texDamageRects + i;
-        D3D11_BOX box =
-        {
-          .left   = rect->x << dxgi->downsampleLevel,
-          .top    = rect->y << dxgi->downsampleLevel,
-          .front  = 0,
-          .back   = 1,
-          .right  = (rect->x + rect->width ) << dxgi->downsampleLevel,
-          .bottom = (rect->y + rect->height) << dxgi->downsampleLevel,
-        };
-        ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
-          (ID3D11Resource *)dst, 0, box.left, box.top, 0,
-          (ID3D11Resource *)src, 0, &box);
-      }
-    }
-
     if (teximpl->gpu)
-    {
-      ID3D11DeviceContext_GenerateMips(dxgi->deviceContext, teximpl->srv);
-      if (tex->texDamageCount < 0)
-        ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
-          (ID3D11Resource *)teximpl->cpu, 0, 0, 0, 0,
-          (ID3D11Resource *)dst         , dxgi->downsampleLevel, NULL);
-      else
-      {
-        for (int i = 0; i < tex->texDamageCount; ++i)
-        {
-          FrameDamageRect * rect = tex->texDamageRects + i;
-          D3D11_BOX box =
-          {
-            .left   = rect->x,
-            .top    = rect->y,
-            .front  = 0,
-            .back   = 1,
-            .right  = rect->x + rect->width ,
-            .bottom = rect->y + rect->height,
-          };
-
-          ID3D11DeviceContext_CopySubresourceRegion(dxgi->deviceContext,
-            (ID3D11Resource *)teximpl->cpu, 0, box.left, box.top, 0,
-            (ID3D11Resource *)dst         , dxgi->downsampleLevel, &box);
-        }
-      }
-    }
+      copyFrameDownsampled(tex, src);
+    else
+      copyFrameFull(tex, src);
 
     ID3D11DeviceContext_Flush(dxgi->deviceContext);
   });
