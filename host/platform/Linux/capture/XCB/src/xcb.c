@@ -270,13 +270,15 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame,
 
   const unsigned int maxHeight = maxFrameSize / (this->width * 4);
 
-  frame->width      = this->width;
-  frame->height     = maxHeight > this->height ? this->height : maxHeight;
-  frame->realHeight = this->height;
-  frame->pitch      = this->width * 4;
-  frame->stride     = this->width;
-  frame->format     = CAPTURE_FMT_BGRA;
-  frame->rotation   = CAPTURE_ROT_0;
+  frame->screenWidth  = this->width;
+  frame->screenHeight = this->height;
+  frame->frameWidth   = this->width;
+  frame->frameHeight  = maxHeight > this->height ? this->height : maxHeight;
+  frame->truncated    = maxHeight > this->height;
+  frame->pitch        = this->width * 4;
+  frame->stride       = this->width;
+  frame->format       = CAPTURE_FMT_BGRA;
+  frame->rotation     = CAPTURE_ROT_0;
 
   return CAPTURE_RESULT_OK;
 }
