@@ -619,7 +619,7 @@ int main_frameThread(void * unused)
       lgrFormat.stride       = frame->stride;
       lgrFormat.pitch        = frame->pitch;
 
-      if (frame->flags && FRAME_FLAG_TRUNCATED)
+      if (frame->flags & FRAME_FLAG_TRUNCATED)
       {
         const float needed =
           ((frame->screenHeight * frame->pitch * 2) / 1048576.0f) + 10.0f;
