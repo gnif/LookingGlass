@@ -21,6 +21,7 @@
 #include "portal.h"
 #include "interface/capture.h"
 #include "interface/platform.h"
+#include "common/util.h"
 #include "common/debug.h"
 #include "common/stringutils.h"
 #include <string.h>
