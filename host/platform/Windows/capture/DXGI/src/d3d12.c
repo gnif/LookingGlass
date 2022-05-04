@@ -91,6 +91,14 @@ static bool d3d12_create(struct DXGIInterface * intf)
   if (!d3d12)
     return false;
 
+  if (dxgi->downsampleLevel > 0)
+  {
+    DEBUG_WARN("The D3D12 backend does not support downsampling yet");
+    dxgi->downsampleLevel = 0;
+    dxgi->targetWidth     = dxgi->width;
+    dxgi->targetHeight    = dxgi->height;
+  }
+
   if (dxgi->debug)
   {
     D3D12GetDebugInterface_t D3D12GetDebugInterface = (D3D12GetDebugInterface_t)
