@@ -428,8 +428,8 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
   frame->screenWidth  = this->width;
   frame->screenHeight = this->height;
   frame->frameWidth   = this->width;
-  frame->frameHeight  = maxHeight > this->height ? this->height : maxHeight;
-  frame->truncated    = maxHeight > this->height;
+  frame->frameHeight  = min(maxHeight, this->height);
+  frame->truncated    = maxHeight < this->height;
   frame->pitch        = this->width * bpp;
   frame->stride       = this->width;
   frame->rotation     = CAPTURE_ROT_0;

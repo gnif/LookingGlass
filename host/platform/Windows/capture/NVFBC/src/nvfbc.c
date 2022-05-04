@@ -23,6 +23,7 @@
 #include "common/windebug.h"
 #include "windows/mousehook.h"
 #include "windows/force_compose.h"
+#include "common/util.h"
 #include "common/array.h"
 #include "common/option.h"
 #include "common/framebuffer.h"
@@ -560,8 +561,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   frame->screenWidth  = this->grabWidth;
   frame->screenHeight = this->grabHeight;
   frame->frameWidth   = this->grabWidth;
-  frame->frameHeight  = maxHeight < this->grabHeight ?
-    maxHeight : this->grabHeight;
+  frame->frameHeight  = min(maxHeight, this->grabHeight);
   frame->truncated    = maxHeight < this->grabHeight;
   frame->pitch        = this->shmStride * 4;
   frame->stride       = this->shmStride;
