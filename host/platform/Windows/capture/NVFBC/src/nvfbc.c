@@ -560,8 +560,9 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   frame->screenWidth  = this->grabWidth;
   frame->screenHeight = this->grabHeight;
   frame->frameWidth   = this->grabWidth;
-  frame->truncated    = maxHeight > this->grabHeight;
-  frame->frameHeight  = maxHeight > this->grabHeight ? this->grabHeight : maxHeight;
+  frame->frameHeight  = maxHeight < this->grabHeight ?
+    maxHeight : this->grabHeight;
+  frame->truncated    = maxHeight < this->grabHeight;
   frame->pitch        = this->shmStride * 4;
   frame->stride       = this->shmStride;
   frame->rotation     = CAPTURE_ROT_0;
