@@ -423,14 +423,16 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
   const int bpp = this->format == CAPTURE_FMT_RGBA16F ? 8 : 4;
   const unsigned int maxHeight = maxFrameSize / (this->width * bpp);
 
-  frame->formatVer  = this->formatVer;
-  frame->format     = this->format;
-  frame->width      = this->width;
-  frame->height     = maxHeight > this->height ? this->height : maxHeight;
-  frame->realHeight = this->height;
-  frame->pitch      = this->width * bpp;
-  frame->stride     = this->width;
-  frame->rotation   = CAPTURE_ROT_0;
+  frame->formatVer    = this->formatVer;
+  frame->format       = this->format;
+  frame->screenWidth  = this->width;
+  frame->screenHeight = this->height;
+  frame->frameWidth   = this->width;
+  frame->frameHeight  = maxHeight > this->height ? this->height : maxHeight;
+  frame->truncated    = maxHeight > this->height;
+  frame->pitch        = this->width * bpp;
+  frame->stride       = this->width;
+  frame->rotation     = CAPTURE_ROT_0;
 
   // TODO: implement damage.
   frame->damageRectsCount = 0;
