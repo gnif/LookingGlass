@@ -276,6 +276,7 @@ CaptureResult NvFBCToSysCapture(
   const unsigned int   y,
   const unsigned int   width,
   const unsigned int   height,
+  bool                 scale,
   NvFBCFrameGrabInfo * grabInfo
 )
 {
@@ -284,7 +285,8 @@ CaptureResult NvFBCToSysCapture(
   params.dwVersion           = NVFBC_TOSYS_GRAB_FRAME_PARAMS_VER;
   params.dwFlags             = NVFBC_TOSYS_WAIT_WITH_TIMEOUT;
   params.dwWaitTime          = waitTime;
-  params.eGMode              = NVFBC_TOSYS_SOURCEMODE_CROP;
+  params.eGMode              = scale ?
+    NVFBC_TOSYS_SOURCEMODE_SCALE : NVFBC_TOSYS_SOURCEMODE_CROP;
   params.dwStartX            = x;
   params.dwStartY            = y;
   params.dwTargetWidth       = width;

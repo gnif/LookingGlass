@@ -88,6 +88,7 @@ CaptureResult NvFBCToSysCapture(
   const unsigned int   y,
   const unsigned int   width,
   const unsigned int   height,
+  bool                 scale,
   NvFBCFrameGrabInfo * grabInfo
 );
 
