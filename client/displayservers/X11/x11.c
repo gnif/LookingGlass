@@ -186,18 +186,18 @@ static void x11CheckEWMHSupport(void)
   Atom type;
   int fmt;
   unsigned long num, bytes;
-  unsigned char *data;
+  unsigned char *data = NULL;
 
   if (XGetWindowProperty(x11.display, DefaultRootWindow(x11.display),
       x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
-      &type, &fmt, &num, &bytes, &data) != Success)
+      &type, &fmt, &num, &bytes, &data) != Success || !data)
     goto out;
 
   Window * windowFromRoot = (Window *)data;
 
   if (XGetWindowProperty(x11.display, *windowFromRoot,
       x11atoms._NET_SUPPORTING_WM_CHECK, 0, ~0L, False, XA_WINDOW,
-      &type, &fmt, &num, &bytes, &data) != Success)
+      &type, &fmt, &num, &bytes, &data) != Success || !data)
     goto out_root;
 
   Window * windowFromChild = (Window *)data;
@@ -206,7 +206,7 @@ static void x11CheckEWMHSupport(void)
 
   if (XGetWindowProperty(x11.display, DefaultRootWindow(x11.display),
       x11atoms._NET_SUPPORTED, 0, ~0L, False, AnyPropertyType,
-      &type, &fmt, &num, &bytes, &data) != Success)
+      &type, &fmt, &num, &bytes, &data) != Success || !data)
     goto out_child;
 
   Atom * supported = (Atom *)data;
@@ -214,7 +214,7 @@ static void x11CheckEWMHSupport(void)
 
   if (XGetWindowProperty(x11.display, *windowFromRoot,
       x11atoms._NET_WM_NAME, 0, ~0L, False, AnyPropertyType,
-      &type, &fmt, &num, &bytes, &data) != Success)
+      &type, &fmt, &num, &bytes, &data) != Success || !data)
     goto out_supported;
 
   char * wmName = (char *)data;
