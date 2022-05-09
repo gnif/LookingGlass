@@ -148,6 +148,7 @@ struct AppParams
   bool              keepAspect;
   bool              forceAspect;
   bool              dontUpscale;
+  bool              intUpscale;
   bool              shrinkOnUpscale;
   bool              borderless;
   bool              fullscreen;

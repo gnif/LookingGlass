@@ -165,6 +165,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "intUpscale",
+    .description    = "Allow only integer upscaling",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "win",
     .name           = "shrinkOnUpscale",
     .description    = "Limit the window dimensions when dontUpscale is enabled",
     .type           = OPTION_TYPE_BOOL,
@@ -603,6 +610,7 @@ bool config_load(int argc, char * argv[])
   g_params.keepAspect      = option_get_bool  ("win", "keepAspect"     );
   g_params.forceAspect     = option_get_bool  ("win", "forceAspect"    );
   g_params.dontUpscale     = option_get_bool  ("win", "dontUpscale"    );
+  g_params.intUpscale      = option_get_bool  ("win", "intUpscale"     );
   g_params.shrinkOnUpscale = option_get_bool  ("win", "shrinkOnUpscale");
   g_params.borderless      = option_get_bool  ("win", "borderless"     );
   g_params.fullscreen      = option_get_bool  ("win", "fullScreen"     );

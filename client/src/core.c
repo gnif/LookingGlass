@@ -223,6 +223,20 @@ void core_updatePositionInfo(void)
       g_state.dstRect.y = g_state.windowCY - srcH / 2;
     }
     else
+    if (g_params.intUpscale &&
+        srcW <= g_state.windowW &&
+        srcH <= g_state.windowH)
+    {
+      force = false;
+      const int scale = min(
+          floor(g_state.windowW / srcW),
+          floor(g_state.windowH / srcH));
+      g_state.dstRect.w = srcW * scale;
+      g_state.dstRect.h = srcH * scale;
+      g_state.dstRect.x = g_state.windowCX - g_state.dstRect.w / 2;
+      g_state.dstRect.y = g_state.windowCY - g_state.dstRect.h / 2;
+    }
+    else
     if ((int)(wndAspect * 1000) == (int)(srcAspect * 1000))
     {
       force           = false;
