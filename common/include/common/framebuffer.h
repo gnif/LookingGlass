@@ -21,11 +21,25 @@
 #ifndef _H_LG_COMMON_FRAMEBUFFER_
 #define _H_LG_COMMON_FRAMEBUFFER_
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 typedef struct stFrameBuffer FrameBuffer;
+
+#define FB_CHUNK_SIZE   1048576 // 1MB
+#define FB_SPIN_LIMIT   10000   // 10ms
+#define FB_WP_TYPE      atomic_uint_least32_t
+#define FB_WP_SIZE      sizeof(FB_WP_TYPE)    
+
+struct stFrameBuffer
+{
+  FB_WP_TYPE            wp;
+  uint8_t               data[0];
+};
+
+static const size_t FrameBufferStructSize = sizeof(FrameBuffer);
 
 typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 

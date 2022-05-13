@@ -16,6 +16,7 @@ target_link_libraries(capture_DXGI
 	d3d11
 	dxgi
 	dwmapi
+	ttc
 )
 
 target_include_directories(capture_DXGI

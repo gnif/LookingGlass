@@ -100,6 +100,7 @@ struct DXGIInterface
   unsigned int    stride;
   unsigned int    bpp;
   CaptureFormat   format;
+  FrameType       out_format;
   CaptureRotation rotation;
 
   int  lastPointerX, lastPointerY;

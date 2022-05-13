@@ -38,6 +38,7 @@
 #define DRM_FORMAT_ABGR8888      fourcc_code('A', 'B', '2', '4')
 #define DRM_FORMAT_BGRA1010102   fourcc_code('B', 'A', '3', '0')
 #define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
+#define DRM_FORMAT_RGB888        fourcc_code('R', 'G', '2', '4')
 
 bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
 {
@@ -49,6 +50,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_BGRA_EXT;
       fmt->dataType   = GL_UNSIGNED_BYTE;
       fmt->fourcc     = DRM_FORMAT_ARGB8888;
+      fmt->compressed = 0;
       break;
 
     case EGL_PF_RGBA:
@@ -57,6 +59,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_RGBA;
       fmt->dataType   = GL_UNSIGNED_BYTE;
       fmt->fourcc     = DRM_FORMAT_ABGR8888;
+      fmt->compressed = 0;
       break;
 
     case EGL_PF_RGBA10:
@@ -65,6 +68,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_RGB10_A2;
       fmt->dataType   = GL_UNSIGNED_INT_2_10_10_10_REV;
       fmt->fourcc     = DRM_FORMAT_BGRA1010102;
+      fmt->compressed = 0;
       break;
 
     case EGL_PF_RGBA16F:
@@ -73,6 +77,52 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_RGBA16F;
       fmt->dataType   = GL_HALF_FLOAT;
       fmt->fourcc     = DRM_FORMAT_ABGR16161616F;
+      fmt->compressed = 0;
+      break;
+
+    case EGL_PF_RGB:
+      fmt->bpp        = 3;
+      fmt->format     = GL_RGB;
+      fmt->intFormat  = GL_RGB8;
+      fmt->dataType   = GL_UNSIGNED_BYTE;
+      fmt->fourcc     = DRM_FORMAT_RGB888;
+      fmt->compressed = 0;
+      break;
+      
+    case EGL_PF_DXT1:
+      fmt->bpp        = 0;
+      fmt->format     = GL_RGB;
+      fmt->intFormat  = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+      fmt->dataType   = GL_HALF_FLOAT;
+      fmt->compressed = 1;
+      fmt->bufferSize = setup->width * setup->height / 2;
+      break;
+    
+    case EGL_PF_DXT5:
+      fmt->bpp        = 0;
+      fmt->format     = GL_RGBA;
+      fmt->intFormat  = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+      fmt->dataType   = GL_UNSIGNED_BYTE;
+      fmt->compressed = 1;
+      fmt->bufferSize = setup->width * setup->height;
+      break;
+    
+    case EGL_PF_ETC2_RGB:
+      fmt->bpp        = 0;
+      fmt->format     = GL_RGB;
+      fmt->intFormat  = GL_COMPRESSED_RGB8_ETC2;
+      fmt->dataType   = GL_UNSIGNED_BYTE;
+      fmt->compressed = 1;
+      fmt->bufferSize = setup->width * setup->height / 2;
+      break;
+    
+    case EGL_PF_ETC2_RGBA:
+      fmt->bpp        = 0;
+      fmt->format     = GL_RGBA;
+      fmt->intFormat  = GL_COMPRESSED_RGBA8_ETC2_EAC;
+      fmt->dataType   = GL_UNSIGNED_BYTE;
+      fmt->compressed = 1;
+      fmt->bufferSize = setup->width * setup->height;
       break;
 
     default:
@@ -83,19 +133,25 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
   fmt->pixFmt = setup->pixFmt;
   fmt->width  = setup->width;
   fmt->height = setup->height;
-
-  if (setup->stride == 0)
+  if (fmt->compressed)
   {
-    fmt->stride = fmt->width * fmt->bpp;
-    fmt->pitch  = fmt->width;
+    fmt->stride = 0;
+    fmt->pitch = 0;
   }
   else
   {
-    fmt->stride = setup->stride;
-    fmt->pitch  = setup->stride / fmt->bpp;
+    if (setup->stride == 0)
+    {
+      fmt->stride = fmt->width * fmt->bpp;
+      fmt->pitch  = fmt->width;
+    }
+    else
+    {
+      fmt->stride = setup->stride;
+      fmt->pitch  = setup->stride / fmt->bpp;
+    }
+    fmt->bufferSize = fmt->height * fmt->stride;
   }
-
-  fmt->bufferSize = fmt->height * fmt->stride;
   return true;
 }
 

@@ -35,6 +35,7 @@
 #include "common/cpuinfo.h"
 #include "common/util.h"
 #include "common/array.h"
+#include "common/transcode.h"
 
 #include <lgmp/host.h>
 
@@ -106,6 +107,8 @@ struct app
 
 static struct app app;
 
+static char *TranscodeTypes[] = {"off", "dxt1", "dxt5", "etc2", "etc2eac", "rgb", NULL };
+
 static bool validateCaptureBackend(struct Option * opt, const char ** error)
 {
   if (!*opt->value.x_string)
@@ -114,6 +117,17 @@ static bool validateCaptureBackend(struct Option * opt, const char ** error)
   for (int i = 0; CaptureInterfaces[i]; ++i)
     if (!strcasecmp(opt->value.x_string, CaptureInterfaces[i]->shortName))
       return true;
+
+  return false;
+}
+
+static bool validateTranscodeType(struct Option* opt, const char** error)
+{
+  if (!*opt->value.x_string)
+      return true;
+  for (int i = 0; TranscodeTypes[i]; ++i)
+      if (!strcasecmp(opt->value.x_string, TranscodeTypes[i]))
+        return true;
 
   return false;
 }
@@ -127,6 +141,14 @@ static struct Option options[] =
     .type           = OPTION_TYPE_STRING,
     .value.x_string = "",
     .validator      = validateCaptureBackend,
+  },
+  {
+    .module         = "app",
+    .name           = "transcode",
+    .description    = "Select the transcode type",
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "",
+    .validator      = validateTranscodeType,
   },
   {
     .module         = "app",
@@ -244,16 +266,24 @@ static bool sendFrame(void)
     app.frameIndex = 0;
 
   KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
-  switch(frame.format)
+  
+  int tmp_type;
+  if (frame.transcoded.type != FRAME_TYPE_INVALID)
   {
-    case CAPTURE_FMT_BGRA   : fi->type = FRAME_TYPE_BGRA   ; break;
-    case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
-    case CAPTURE_FMT_RGBA10 : fi->type = FRAME_TYPE_RGBA10 ; break;
-    case CAPTURE_FMT_RGBA16F: fi->type = FRAME_TYPE_RGBA16F; break;
-    default:
-      DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
-      return true;
+    tmp_type = frame.transcoded.type;
   }
+  else
+  {
+    tmp_type = captureFormatToFrameFormat(frame.format);
+  }
+
+  if (tmp_type < 0)
+  {
+    DEBUG_ERROR("Format lookup failed");
+    return true;
+  }
+
+  fi->type = (FrameType) tmp_type;
 
   switch(frame.rotation)
   {
@@ -267,14 +297,16 @@ static bool sendFrame(void)
       break;
   }
 
+  bool do_xc = (frame.transcoded.type != FRAME_TYPE_INVALID);
+
   fi->formatVer         = frame.formatVer;
   fi->frameSerial       = app.frameSerial++;
   fi->screenWidth       = frame.screenWidth;
   fi->screenHeight      = frame.screenHeight;
   fi->frameWidth        = frame.frameWidth;
   fi->frameHeight       = frame.frameHeight;
-  fi->stride            = frame.stride;
-  fi->pitch             = frame.pitch;
+  fi->stride            = do_xc ? frame.transcoded.stride : frame.stride;
+  fi->pitch             = do_xc ? frame.transcoded.pitch : frame.pitch;
   fi->offset            = app.pageSize - FrameBufferStructSize;
   fi->flags             =
     (os_blockScreensaver() ?

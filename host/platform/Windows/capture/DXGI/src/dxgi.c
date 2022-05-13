@@ -29,6 +29,7 @@
 #include "common/rects.h"
 #include "common/runningavg.h"
 #include "common/KVMFR.h"
+#include "common/transcode.h"
 #include "common/vector.h"
 
 #include <stdatomic.h>
@@ -537,13 +538,13 @@ static bool dxgi_init(void)
   }
   else
   {
-    const DXGI_FORMAT supportedFormats[] =
-    {
-      DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_FORMAT_R8G8B8A8_UNORM,
-      DXGI_FORMAT_R10G10B10A2_UNORM,
-      DXGI_FORMAT_R16G16B16A16_FLOAT
-    };
+     const DXGI_FORMAT supportedFormats[] =
+     {
+       DXGI_FORMAT_B8G8R8A8_UNORM,
+       DXGI_FORMAT_R8G8B8A8_UNORM,
+       DXGI_FORMAT_R10G10B10A2_UNORM,
+       DXGI_FORMAT_R16G16B16A16_FLOAT,
+     };
 
     // we try this twice in case we still get an error on re-initialization
     for (int i = 0; i < 2; ++i)
@@ -582,11 +583,53 @@ static bool dxgi_init(void)
   DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(this->dxgiFormat));
 
   this->bpp = 4;
+  this->out_format = FRAME_TYPE_INVALID;
+  const char* optComp = option_get_string("app", "transcode");
+  if (optComp)
+  {
+    if (_strnicmp(optComp, "dxt1", 4) == 0)
+    {
+      this->out_format = FRAME_TYPE_DXT1;
+    }
+    else if (_strnicmp(optComp, "dxt5", 4) == 0)
+    {
+      this->out_format = FRAME_TYPE_DXT5;
+    }
+    else if (_strnicmp(optComp, "etc2eac", 8) == 0)
+    {
+      this->out_format = FRAME_TYPE_ETC2_EAC;
+    }
+    else if (_strnicmp(optComp, "etc2", 7) == 0)
+    {
+      this->out_format = FRAME_TYPE_ETC2;
+    }
+    else if (_strnicmp(optComp, "rgb", 3) == 0)
+    {
+      this->out_format = FRAME_TYPE_RGB;
+    }
+    
+    if (this->out_format != FRAME_TYPE_INVALID && !this->disableDamage)
+    {
+      this->disableDamage = true;
+      DEBUG_INFO("Damage incompatible with transcode option");
+    }
+
+    DEBUG_INFO("Transcoded Format : %s", FrameTypeStr[this->out_format]);
+  }
+  
   switch(dupDesc.ModeDesc.Format)
   {
-    case DXGI_FORMAT_B8G8R8A8_UNORM    : this->format = CAPTURE_FMT_BGRA   ; break;
-    case DXGI_FORMAT_R8G8B8A8_UNORM    : this->format = CAPTURE_FMT_RGBA   ; break;
-    case DXGI_FORMAT_R10G10B10A2_UNORM : this->format = CAPTURE_FMT_RGBA10 ; break;
+    case DXGI_FORMAT_B8G8R8A8_UNORM    : 
+      this->format = CAPTURE_FMT_BGRA   ; 
+      break;
+
+    case DXGI_FORMAT_R8G8B8A8_UNORM    : 
+      this->format = CAPTURE_FMT_RGBA   ;
+      break;
+
+    case DXGI_FORMAT_R10G10B10A2_UNORM : 
+      this->format = CAPTURE_FMT_RGBA10 ; 
+      break;
 
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
       this->format = CAPTURE_FMT_RGBA16F;
@@ -799,7 +842,7 @@ static void computeFrameDamage(Texture * tex)
 {
   // By default, damage the full frame.
   tex->damageRectsCount = 0;
-
+  
   if (this->disableDamage)
     return;
 
@@ -890,7 +933,6 @@ static CaptureResult dxgi_capture(void)
   bool copyFrame   = false;
   bool copyPointer = false;
   ID3D11Texture2D * src;
-
   bool           postPointer      = false;
   CapturePointer pointer          = { 0 };
   void *         pointerShape     = NULL;
@@ -1115,17 +1157,21 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
 
   const unsigned int maxHeight = maxFrameSize / this->pitch;
 
-  frame->formatVer        = tex->formatVer;
-  frame->screenWidth      = this->width;
-  frame->screenHeight     = this->height;
-  frame->frameWidth       = this->targetWidth;
-  frame->frameHeight      = min(maxHeight, this->targetHeight);
-  frame->truncated        = maxHeight < this->targetHeight;
-  frame->pitch            = this->pitch;
-  frame->stride           = this->stride;
-  frame->format           = this->format;
-  frame->rotation         = this->rotation;
+  frame->formatVer         = tex->formatVer;
+  frame->screenWidth       = this->width;
+  frame->screenHeight      = this->height;
+  frame->frameWidth        = this->targetWidth;
+  frame->frameHeight       = min(maxHeight, this->targetHeight);
+  frame->truncated         = maxHeight < this->targetHeight;
+  frame->pitch             = this->pitch;
+  frame->stride            = this->stride;
+  frame->format            = this->format;
+  frame->rotation          = this->rotation;
+  frame->transcoded.width  = this->width;
+  frame->transcoded.height = this->height;
+  frame->transcoded.type   = this->out_format;
 
+  setTexConvParam(frame);
   frame->damageRectsCount = tex->damageRectsCount;
   memcpy(frame->damageRects, tex->damageRects,
       tex->damageRectsCount * sizeof(*tex->damageRects));
@@ -1146,39 +1192,60 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
   bool damageAll = tex->damageRectsCount == 0 || damage->count < 0 ||
       damage->count + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS;
 
-  if (damageAll)
-    framebuffer_write(frame, tex->map, this->pitch * height);
-  else
-  {
-    memcpy(damage->rects + damage->count, tex->damageRects,
-      tex->damageRectsCount * sizeof(*tex->damageRects));
-    damage->count += tex->damageRectsCount;
-    rectsBufferToFramebuffer(damage->rects, damage->count, frame, this->pitch,
-      height, tex->map, this->pitch);
-  }
+  // No transcoding was requested, normal path
 
-  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  if (this->out_format == FRAME_TYPE_INVALID)
   {
-    struct FrameDamage * damage = this->frameDamage + i;
-    if (i == frameIndex)
-      damage->count = 0;
-    else if (tex->damageRectsCount > 0 && damage->count >= 0 &&
-             damage->count + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
+    if (damageAll)
     {
-      memcpy(damage->rects + damage->count, tex->damageRects,
-        tex->damageRectsCount * sizeof(*tex->damageRects));
-      damage->count += tex->damageRectsCount;
+      framebuffer_write(frame, tex->map, this->pitch * height);
     }
     else
-      damage->count = -1;
+    {
+      memcpy(damage->rects + damage->count, tex->damageRects,
+      tex->damageRectsCount * sizeof(*tex->damageRects));
+      damage->count += tex->damageRectsCount;
+      rectsBufferToFramebuffer(damage->rects, damage->count, frame, this->pitch,
+        height, tex->map, this->pitch);
+      for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+      {
+        struct FrameDamage* damage = this->frameDamage + i;
+        if (i == frameIndex)
+          damage->count = 0;
+        else if (tex->damageRectsCount > 0 && damage->count >= 0 &&
+          damage->count + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
+        {
+          memcpy(damage->rects + damage->count, tex->damageRects,
+            tex->damageRectsCount * sizeof(*tex->damageRects));
+          damage->count += tex->damageRectsCount;
+        }
+        else
+          damage->count = -1;
+      }
+    }
+  }
+  else
+  {
+    int in_fmt = captureFormatToTtcFormat(this->format);
+    int out_fmt = frameTypeToTtcFormat(this->out_format);
+    int ret = ttcTranscode(tex->map, framebuffer_get_data(frame),
+                       this->width, this->height, in_fmt, out_fmt, 
+                       0);
+
+    if (ret != 0)
+    {
+      DEBUG_INFO("Unsupported transcode format!");
+      return CAPTURE_RESULT_ERROR;
+    }
+
+    framebuffer_set_write_ptr(frame, 
+      ttcGetSize(this->width, this->height, out_fmt));
   }
 
   this->backend->unmapTexture(tex);
   tex->state = TEXTURE_STATE_UNUSED;
-
   if (++this->texRIndex == this->maxTextures)
     this->texRIndex = 0;
-
   return CAPTURE_RESULT_OK;
 }
 

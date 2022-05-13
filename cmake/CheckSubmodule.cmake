@@ -3,7 +3,8 @@ if (EXISTS "${PROJECT_TOP}/.git" AND (
     (NOT EXISTS "${PROJECT_TOP}/repos/LGMP/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/PureSpice/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/cimgui/imgui/.git") OR
-    (NOT EXISTS "${PROJECT_TOP}/repos/wayland-protocols/.git")
+    (NOT EXISTS "${PROJECT_TOP}/repos/wayland-protocols/.git") OR
+    (NOT EXISTS "${PROJECT_TOP}/repos/libttc/.git")
 ))
     message(FATAL_ERROR "Submodules are not initialized. Run\n\tgit submodule update --init --recursive")
 endif()

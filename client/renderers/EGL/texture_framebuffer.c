@@ -20,6 +20,8 @@
 
 #include "texture.h"
 
+#include <GLES2/gl2ext.h>
+
 #include "texture_buffer.h"
 #include "common/debug.h"
 #include "common/KVMFR.h"
@@ -89,6 +91,24 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
   struct TexDamage * damage = this->damage + parent->bufIndex;
   bool damageAll = !update->rects || update->rectCount == 0 || damage->count < 0 ||
     damage->count + update->rectCount > KVMFR_MAX_DAMAGE_RECTS;
+
+  if (texture->format.compressed){
+    switch (texture->format.intFormat)
+    {
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGB8_ETC2:
+      texture->format.bpp = (texture->format.width * texture->format.height)/2;
+      break;
+      
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+    case GL_COMPRESSED_RGBA8_ETC2_EAC:
+      texture->format.bpp = (texture->format.width * texture->format.height);
+      break;
+
+    default:
+      break;
+    }
+  }
 
   if (damageAll)
     framebuffer_read(

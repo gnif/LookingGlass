@@ -10,3 +10,6 @@
 [submodule "repos/wayland-protocols"]
 	path = repos/wayland-protocols
 	url = https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+[submodule "repos/libttc"]
+	path = repos/libttc
+	url = https://github.com/telescope-proj/libttc.git

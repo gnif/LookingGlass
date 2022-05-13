@@ -37,11 +37,15 @@ CaptureResult;
 typedef enum CaptureFormat
 {
   // frame formats
-  CAPTURE_FMT_BGRA   ,
-  CAPTURE_FMT_RGBA   ,
-  CAPTURE_FMT_RGBA10 ,
-  CAPTURE_FMT_RGBA16F,
-
+  CAPTURE_FMT_BGRA      ,
+  CAPTURE_FMT_RGBA      ,
+  CAPTURE_FMT_RGBA10    ,
+  CAPTURE_FMT_RGBA16F   ,
+  CAPTURE_FMT_RGB       ,
+  CAPTURE_FMT_DXT1      ,
+  CAPTURE_FMT_DXT5      ,
+  CAPTURE_FMT_ETC2      ,
+  CAPTURE_FMT_ETC2_EAC  ,
   // pointer formats
   CAPTURE_FMT_COLOR ,
   CAPTURE_FMT_MONO  ,
@@ -60,6 +64,16 @@ typedef enum CaptureRotation
 }
 CaptureRotation;
 
+typedef struct TranscodeFrame
+{
+  unsigned int    width;
+  unsigned int    height;
+  unsigned int    pitch;
+  unsigned int    stride;
+  FrameType       type; // No transcode requested => FRAME_TYPE_INVALID
+  CaptureRotation rotation;
+} TranscodeFrame;
+
 typedef struct CaptureFrame
 {
   unsigned int    formatVer;
@@ -72,6 +86,7 @@ typedef struct CaptureFrame
   unsigned int    stride;
   CaptureFormat   format;
   CaptureRotation rotation;
+  TranscodeFrame  transcoded;
   uint32_t        damageRectsCount;
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
 }

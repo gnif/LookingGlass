@@ -37,6 +37,8 @@ typedef struct EGL_TexFormat
 
   size_t       width, height;
   size_t       stride, pitch;
+
+  int8_t       compressed;
 }
 EGL_TexFormat;
 
