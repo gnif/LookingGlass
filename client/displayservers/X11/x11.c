@@ -398,23 +398,14 @@ static bool x11Init(const LG_DSInitParams params)
     );
   }
 
-  Atom wmState[3] = {0};
-  int wmStateCount = 0;
-
-  if (params.fullscreen)
-  {
-    x11.fullscreen = true;
-    wmState[wmStateCount++] = x11atoms._NET_WM_STATE_FULLSCREEN;
-  }
-
   if (params.maximize)
   {
-    wmState[wmStateCount++] = x11atoms._NET_WM_STATE_MAXIMIZED_HORZ;
-    wmState[wmStateCount++] = x11atoms._NET_WM_STATE_MAXIMIZED_VERT;
-  }
+    Atom wmState[2] =
+    {
+      x11atoms._NET_WM_STATE_MAXIMIZED_HORZ,
+      x11atoms._NET_WM_STATE_MAXIMIZED_VERT
+    };
 
-  if (wmStateCount)
-  {
     XChangeProperty(
       x11.display,
       x11.window,
@@ -423,7 +414,7 @@ static bool x11Init(const LG_DSInitParams params)
       32,
       PropModeReplace,
       (unsigned char *)&wmState,
-      wmStateCount
+      2
     );
   }
 
@@ -663,6 +654,9 @@ static bool x11Init(const LG_DSInitParams params)
 
   if (!params.center)
     XMoveWindow(x11.display, x11.window, params.x, params.y);
+
+  if (params.fullscreen)
+    x11SetFullscreen(true);
 
   XSetLocaleModifiers(""); // Load XMODIFIERS
   x11.xim = XOpenIM(x11.display, 0, 0, 0);
