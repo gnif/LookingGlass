@@ -65,3 +65,4 @@ vsync
 wayland
 xdg
 xyene
+XMR
