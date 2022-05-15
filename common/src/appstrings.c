@@ -94,6 +94,10 @@ const struct LGTeamMember LG_TEAM[] =
         .name  = "Ethereum (ETH)",
         .value = "0x6f8aEe454384122bF9ed28f025FBCe2Bce98db85"
       },
+      {
+        .name  = "Monero (XMR)",
+        .value = "47xM4zG7b2tEj4mnSywHve4ydZzn3wzhf22snDRB7aSEcXrgUBpoT2Z4phTnyFMi1sMyQtHbdufMYRQ2PzMn3PGUJAE1dpc"
+      },
       { 0 }
     }
   },
