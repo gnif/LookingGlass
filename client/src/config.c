@@ -42,6 +42,8 @@ static char *     optPosToString     (struct Option * opt);
 static bool       optSizeParse       (struct Option * opt, const char * str);
 static StringList optSizeValues      (struct Option * opt);
 static char *     optSizeToString    (struct Option * opt);
+static bool       optScancodeParse   (struct Option * opt, const char * str);
+static StringList optScancodeValues  (struct Option * opt);
 static bool       optScancodeValidate(struct Option * opt, const char ** error);
 static char *     optScancodeToString(struct Option * opt);
 static bool       optRotateValidate  (struct Option * opt, const char ** error);
@@ -310,10 +312,12 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "escapeKey",
-    .description    = "Specify the escape key, see <linux/input-event-codes.h> for valid values",
+    .description    = "Specify the escape/menu key to use (use \"help\" to see valid values)",
     .shortopt       = 'm',
     .type           = OPTION_TYPE_INT,
     .value.x_int    = KEY_SCROLLLOCK,
+    .parser         = optScancodeParse,
+    .getValues      = optScancodeValues,
     .validator      = optScancodeValidate,
     .toString       = optScancodeToString,
   },
@@ -862,6 +866,20 @@ static char * optSizeToString(struct Option * opt)
   return str;
 }
 
+static StringList optScancodeValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
+
+  // this typecast is safe as the stringlist doesn't own the values
+  for(unsigned int i = 0; i < KEY_MAX; ++i)
+    if (linux_to_str[i])
+      stringlist_push(sl, (char *)linux_to_str[i]);
+
+  return sl;
+}
+
 static bool optScancodeValidate(struct Option * opt, const char ** error)
 {
   if (opt->value.x_int >= 0 && opt->value.x_int < KEY_MAX)
@@ -869,6 +887,29 @@ static bool optScancodeValidate(struct Option * opt, const char ** error)
 
   *error = "Out of range";
   return false;
+}
+
+static bool optScancodeParse(struct Option * opt, const char * str)
+{
+  for(unsigned int i = 0; i < KEY_MAX; ++i)
+  {
+    if (!linux_to_str[i])
+      continue;
+
+    if (strcasecmp(linux_to_str[i], str) == 0)
+    {
+      opt->value.x_int = i;
+      return true;
+    }
+  }
+
+  // fallback for pre-keycode name support
+  char * end;
+  opt->value.x_int = strtol(str, &end, 10);
+  if (*end)
+    return false;
+
+  return true;
 }
 
 static char * optScancodeToString(struct Option * opt)
