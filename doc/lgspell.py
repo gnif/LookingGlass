@@ -10,7 +10,7 @@ reoption = re.compile(r'^[a-z]+:\w+$')
 recamel = re.compile(r'^[A-Za-z]+[A-Z]\w+$')
 repackage = re.compile(r'^[\w-]+-(?:dev|bin)$|^fonts-[\w-]+-ttf$|^virt-manager$')
 repath = re.compile(r'^/dev/|.*\.\w+$')
-recrypto = re.compile(r'^[13][A-Za-z0-9]{25,34}$|^0x[0-9a-fA-F]{40}$')
+recrypto = re.compile(r'^[13][A-Za-z0-9]{25,34}$|^0x[0-9a-fA-F]{40}|^4([0-9]|[A-B])(.){93}$')
 
 
 class AcronymFilter(Filter):
