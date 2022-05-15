@@ -77,14 +77,19 @@ static void config_renderLGTab(void)
 {
   const float fontSize = igGetFontSize();
 
-  if (igCollapsingHeader_BoolPtr("About", NULL,
+  if (igCollapsingHeader_BoolPtr("Donations", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
-    igText(LG_COPYRIGHT_STR);
-    overlayTextURL(LG_WEBSITE_STR, NULL);
-    igText(LG_VERSION_STR);
-    igSeparator();
-    igTextWrapped(LG_LICENSE_STR);
+    igTextWrapped(LG_DONATION_STR);
+
+    igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
+    igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize, 0);
+    igTableNextColumn();
+    igBulletText("");
+    igTableNextColumn();
+    overlayTextURL(LG_DONATION_URL, NULL);
+
+    igEndTable();
   }
 
   if (igCollapsingHeader_BoolPtr("Help & Support", NULL,
@@ -102,7 +107,7 @@ static void config_renderLGTab(void)
     igEndTable();
   }
 
-  if (igCollapsingHeader_BoolPtr("The Looking Glass Team / Donations", NULL,
+  if (igCollapsingHeader_BoolPtr("The Looking Glass Team", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
     for(const struct LGTeamMember * member = LG_TEAM; member->name; ++member)
@@ -138,6 +143,15 @@ static void config_renderLGTab(void)
   }
 }
 
+static void config_renderLicenseTab(void)
+{
+  igText(LG_COPYRIGHT_STR);
+  overlayTextURL(LG_WEBSITE_URL, NULL);
+  igText(LG_VERSION_STR);
+  igSeparator();
+  igTextWrapped(LG_LICENSE_STR);
+}
+
 static int config_render(void * udata, bool interactive, struct Rect * windowRects,
     int maxRects)
 {
@@ -171,7 +185,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
 
   igBeginTabBar("Configuration#tabs", 0);
 
-  if (igBeginTabItem("Looking Glass", NULL, 0))
+  if (igBeginTabItem("About", NULL, 0))
   {
     config_renderLGTab();
     igEndTabItem();
@@ -207,6 +221,12 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     igEndTabItem();
   }
   ll_unlock(cfg.tabCallbacks);
+
+  if (igBeginTabItem("License", NULL, 0))
+  {
+    config_renderLicenseTab();
+    igEndTabItem();
+  }
 
   igEndTabBar();
 

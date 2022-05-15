@@ -21,8 +21,10 @@
 #include "common/types.h"
 
 extern const char * LG_COPYRIGHT_STR;
-extern const char * LG_WEBSITE_STR;
+extern const char * LG_WEBSITE_URL;
 extern const char * LG_LICENSE_STR;
+extern const char * LG_DONATION_STR;
+extern const char * LG_DONATION_URL;
 extern const StringPair LG_HELP_LINKS[];
 
 struct LGTeamMember
