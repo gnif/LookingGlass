@@ -920,6 +920,19 @@ int spiceThread(void * arg)
     }
   }
 
+  // send key up events for any pressed keys
+  if (g_params.useSpiceInput)
+  {
+    for(int scancode = 0; scancode < KEY_MAX; ++scancode)
+      if (g_state.keyDown[scancode])
+      {
+        g_state.keyDown[scancode] = false;
+        purespice_keyUp(scancode);
+      }
+  }
+
+  purespice_disconnect();
+
 end:
 
   audio_free();
@@ -1540,6 +1553,10 @@ restart:
 static void lg_shutdown(void)
 {
   g_state.state = APP_STATE_SHUTDOWN;
+
+  if (t_spice)
+    lgJoinThread(t_spice, NULL);
+
   if (t_render)
   {
     if (g_state.jitRender && g_state.ds->stopWaitFrame)
@@ -1561,21 +1578,6 @@ static void lg_shutdown(void)
   {
     lgFreeEvent(e_startup);
     e_startup = NULL;
-  }
-
-  // if spice is still connected send key up events for any pressed keys
-  if (g_params.useSpiceInput)
-  {
-    for(int scancode = 0; scancode < KEY_MAX; ++scancode)
-      if (g_state.keyDown[scancode])
-      {
-        g_state.keyDown[scancode] = false;
-        purespice_keyUp(scancode);
-      }
-
-    purespice_disconnect();
-    if (t_spice)
-      lgJoinThread(t_spice, NULL);
   }
 
   if (g_state.ds)
