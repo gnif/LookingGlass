@@ -32,6 +32,10 @@
 
 struct EGL_DesktopRects
 {
+  GLfloat * lastVertices;
+  int       lastVerticesCount;
+  int       lastVerticesSize;
+
   GLuint  buffers[2];
   GLuint  vao;
   int     count;
@@ -88,6 +92,7 @@ void egl_desktopRectsFree(EGL_DesktopRects ** rects_)
 
   glDeleteVertexArrays(1, &rects->vao);
   glDeleteBuffers(2, rects->buffers);
+  free(rects->lastVertices);
   free(rects);
   *rects_ = NULL;
 }
@@ -113,7 +118,8 @@ void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects *
     return;
   }
 
-  GLfloat vertices[(!data || data->count < 0 ? 1 : data->count) * 8];
+  const int count = (!data || data->count < 0 ? 1 : data->count) * 8;
+  GLfloat vertices[count];
   if (!data || data->count < 0)
   {
     FrameDamageRect full = {
@@ -130,6 +136,30 @@ void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects *
     for (int i = 0; i < rects->count; ++i)
       rectToVertices(vertices + i * 8, data->rects + i);
   }
+
+  // check if the value actually changed and needs updating
+  if (count == rects->lastVerticesCount &&
+      memcmp(rects->lastVertices, vertices, sizeof(GLfloat) * count) == 0)
+    return;
+
+  // ensure the local storage is large enough
+  if (count > rects->lastVerticesSize)
+  {
+    if (rects->lastVertices)
+      free(rects->lastVertices);
+
+    rects->lastVertices = malloc(sizeof(GLfloat) * count);
+    if (!rects->lastVertices)
+    {
+      DEBUG_ERROR("out of memory");
+      return;
+    }
+    rects->lastVerticesSize = count;
+  }
+
+  // copy the last value for later comparison
+  rects->lastVerticesCount = count;
+  memcpy(rects->lastVertices, vertices, sizeof(GLfloat) * count);
 
   glBindBuffer(GL_ARRAY_BUFFER, rects->buffers[0]);
   glBufferSubData(GL_ARRAY_BUFFER, 0, rects->count * 8 * sizeof(GLfloat), vertices);
