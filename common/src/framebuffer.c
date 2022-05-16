@@ -27,21 +27,9 @@
 #endif
 
 #include <string.h>
-#include <stdatomic.h>
 #include <emmintrin.h>
 #include <smmintrin.h>
 #include <unistd.h>
-
-#define FB_CHUNK_SIZE 1048576 // 1MB
-#define FB_SPIN_LIMIT 10000   // 10ms
-
-struct stFrameBuffer
-{
-  atomic_uint_least32_t wp;
-  uint8_t               data[0];
-};
-
-const size_t FrameBufferStructSize = sizeof(FrameBuffer);
 
 bool framebuffer_wait(const FrameBuffer * frame, size_t size)
 {
