@@ -22,8 +22,15 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "common/framebuffer.h"
 #include "common/KVMFR.h"
+
+#ifdef __cplusplus
+/* using common/framebuffer.h breaks compatibillity with C++ due to it's usage
+ * of stdatomic.h, so we need to forward declare the structure here */
+typedef struct stFrameBuffer FrameBuffer;
+#else
+#include "common/framebuffer.h"
+#endif
 
 typedef enum CaptureResult
 {
