@@ -275,7 +275,7 @@ static bool sendFrame(void)
   fi->frameHeight       = frame.frameHeight;
   fi->stride            = frame.stride;
   fi->pitch             = frame.pitch;
-  fi->offset            = app.pageSize - FrameBufferStructSize;
+  fi->offset            = app.pageSize - sizeof(FrameBuffer);
   fi->flags             =
     (os_blockScreensaver() ?
      FRAME_FLAG_BLOCK_SCREENSAVER : 0) |

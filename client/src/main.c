@@ -742,7 +742,7 @@ int main_frameThread(void * unused)
       if (dma->fd == -1)
       {
         const uintptr_t pos    = (uintptr_t)msg.mem - (uintptr_t)g_state.shm.mem;
-        const uintptr_t offset = (uintptr_t)frame->offset + FrameBufferStructSize;
+        const uintptr_t offset = (uintptr_t)frame->offset + sizeof(FrameBuffer);
 
         dma->dataSize = dataSize;
         dma->fd       = ivshmemGetDMABuf(&g_state.shm, pos + offset, dataSize);

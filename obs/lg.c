@@ -458,7 +458,7 @@ static int dmabufGetFd(LGPlugin * this, LGMPMessage * msg, KVMFRFrame * frame, s
   if (dma->fd == -1)
   {
     const uintptr_t pos    = (uintptr_t) msg->mem - (uintptr_t) this->shmDev.mem;
-    const uintptr_t offset = (uintptr_t) frame->offset + FrameBufferStructSize;
+    const uintptr_t offset = (uintptr_t) frame->offset + sizeof(FrameBuffer);
 
     dma->dataSize = dataSize;
     dma->fd       = ivshmemGetDMABuf(&this->shmDev, pos + offset, dataSize);
