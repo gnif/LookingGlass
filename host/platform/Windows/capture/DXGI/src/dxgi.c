@@ -309,6 +309,20 @@ static bool dxgi_init(void)
         goto fail;
       }
 
+      // check for virtual devices without D3D support
+      if (
+          // Microsoft Basic Render Driver
+          (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) ||
+          // QXL
+          (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) ||
+          // QEMU Standard VGA
+          (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))
+      {
+        DEBUG_INFO("Not using unsupported adapter: %ls",
+            adapterDesc.Description);
+        goto next_adapter;
+      }
+
       const size_t s = (wcslen(adapterDesc.Description)+1) * 2;
       char * desc = malloc(s);
       wcstombs(desc, adapterDesc.Description, s);
@@ -317,13 +331,16 @@ static bool dxgi_init(void)
       {
         DEBUG_INFO("Not using adapter: %ls", adapterDesc.Description);
         free(desc);
-        IDXGIAdapter1_Release(this->adapter);
-        this->adapter = NULL;
-        continue;
+        goto next_adapter;
       }
       free(desc);
 
       DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
+      break;
+
+next_adapter:
+      IDXGIAdapter1_Release(this->adapter);
+      this->adapter = NULL;
     }
 
     for (int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
@@ -339,11 +356,8 @@ static bool dxgi_init(void)
         {
           DEBUG_INFO("Not using adapter output: %ls", outputDesc.DeviceName);
           free(desc);
-          IDXGIOutput_Release(this->output);
-          this->output = NULL;
-          continue;
+          goto next_output;
         }
-
         free(desc);
 
         DEBUG_INFO("Adapter output matched, trying: %ls", outputDesc.DeviceName);
@@ -352,6 +366,7 @@ static bool dxgi_init(void)
       if (outputDesc.AttachedToDesktop)
         break;
 
+next_output:
       IDXGIOutput_Release(this->output);
       this->output = NULL;
     }
