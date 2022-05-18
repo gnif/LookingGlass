@@ -12,6 +12,7 @@ include_directories(file, "${nvfbc_sdk}/inc")
 target_link_libraries(capture_NVFBC
 	platform_Windows
 	dwmapi
+	d3d9
 )
 
 target_include_directories(capture_NVFBC

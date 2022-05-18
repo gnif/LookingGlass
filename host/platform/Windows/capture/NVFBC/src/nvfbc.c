@@ -36,6 +36,7 @@
 #include <stdatomic.h>
 #include <windows.h>
 #include <dwmapi.h>
+#include <d3d9.h>
 
 #include <NvFBC/nvFBC.h>
 #include "wrapper.h"
@@ -232,7 +233,7 @@ static void nvfbc_initOptions(void)
       .name           = "adapterIndex",
       .description    = "The index of the adapter to capture from",
       .type           = OPTION_TYPE_INT,
-      .value.x_int    = 0
+      .value.x_int    = -1
     },
     {
       .module         = "nvfbc",
@@ -315,16 +316,42 @@ static bool nvfbc_init(void)
   }
 
   int adapterIndex = option_get_int("nvfbc", "adapterIndex");
-
   // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
   // causes a substantial performance pentalty even if it fails! As such we only
   // attempt NvFBC as a last resort, or if configured via the app:capture
   // option.
-  if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+  if (adapterIndex < 0)
   {
-    free(privData);
-    return false;
+    IDirect3D9 * d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    int adapterCount = IDirect3D9_GetAdapterCount(d3d);
+    for(int i = 0; i < adapterCount; ++i)
+    {
+      D3DADAPTER_IDENTIFIER9 ident;
+      IDirect3D9_GetAdapterIdentifier(d3d, i, 0, &ident);
+      if (ident.VendorId != 0x10DE)
+        continue;
+
+      if (NvFBCToSysCreate(i, privData, privDataLen, &this->nvfbc,
+        &this->maxWidth, &this->maxHeight))
+      {
+        adapterIndex = i;
+        break;
+      }
+    }
+    IDirect3D9_Release(d3d);
+
+    if (adapterIndex < 0)
+    {
+      free(privData);
+      return false;
+    }
   }
+  else
+    if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+    {
+      free(privData);
+      return false;
+    }
 
   int diffRes = option_get_int("nvfbc", "diffRes");
   enum DiffMapBlockSize blockSize;
