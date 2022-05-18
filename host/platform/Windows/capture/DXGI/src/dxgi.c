@@ -299,30 +299,33 @@ static bool dxgi_init(void)
 
   for (int i = 0; IDXGIFactory1_EnumAdapters1(this->factory, i, &this->adapter) != DXGI_ERROR_NOT_FOUND; ++i)
   {
+    DXGI_ADAPTER_DESC1 adapterDesc;
+    status = IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to get the device description", status);
+      goto fail;
+    }
+
+    // check for virtual devices without D3D support
+    if (
+        // Microsoft Basic Render Driver
+        (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) ||
+        // QXL
+        (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) ||
+        // QEMU Standard VGA
+        (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))
+    {
+      DEBUG_INFO("Not using unsupported adapter: %ls",
+          adapterDesc.Description);
+
+      IDXGIAdapter1_Release(this->adapter);
+      this->adapter = NULL;
+      continue;
+    }
+
     if (optAdapter)
     {
-      DXGI_ADAPTER_DESC1 adapterDesc;
-      status = IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
-      if (FAILED(status))
-      {
-        DEBUG_WINERROR("Failed to get the device description", status);
-        goto fail;
-      }
-
-      // check for virtual devices without D3D support
-      if (
-          // Microsoft Basic Render Driver
-          (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) ||
-          // QXL
-          (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) ||
-          // QEMU Standard VGA
-          (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))
-      {
-        DEBUG_INFO("Not using unsupported adapter: %ls",
-            adapterDesc.Description);
-        goto next_adapter;
-      }
-
       const size_t s = (wcslen(adapterDesc.Description)+1) * 2;
       char * desc = malloc(s);
       wcstombs(desc, adapterDesc.Description, s);
@@ -331,16 +334,14 @@ static bool dxgi_init(void)
       {
         DEBUG_INFO("Not using adapter: %ls", adapterDesc.Description);
         free(desc);
-        goto next_adapter;
+
+        IDXGIAdapter1_Release(this->adapter);
+        this->adapter = NULL;
+        continue;
       }
       free(desc);
 
       DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
-      break;
-
-next_adapter:
-      IDXGIAdapter1_Release(this->adapter);
-      this->adapter = NULL;
     }
 
     for (int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
