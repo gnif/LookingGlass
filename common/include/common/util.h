@@ -31,6 +31,10 @@
     _a > _b ? _a : _b; })
 #endif
 
+#ifndef clamp
+#define clamp(v,a,b) min(max(v, a), b)
+#endif
+
 #define UPCAST(type, x) \
   (type *)((uintptr_t)(x) - offsetof(type, base))
 

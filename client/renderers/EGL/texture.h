@@ -42,6 +42,12 @@ typedef struct EGL_TexUpdate
   /* the type of this update */
   EGL_TexType type;
 
+  int x, y, width, height;
+
+  //pitch  = row length in pixels
+  //stride = row length in bytes
+  int pitch, stride;
+
   union
   {
     /* EGL_TEXTURE_BUFFER */
@@ -101,6 +107,10 @@ bool egl_textureSetup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
     size_t width, size_t height, size_t stride);
 
 bool egl_textureUpdate(EGL_Texture * texture, const uint8_t * buffer);
+
+bool egl_textureUpdateRect(EGL_Texture * texture,
+    int x, int y, int width, int height, int stride,
+    const uint8_t * buffer);
 
 bool egl_textureUpdateFromFrame(EGL_Texture * texture,
     const FrameBuffer * frame, const FrameDamageRect * damageRects,

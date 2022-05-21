@@ -108,6 +108,39 @@ bool egl_textureUpdate(EGL_Texture * this, const uint8_t * buffer)
   const struct EGL_TexUpdate update =
   {
     .type   = EGL_TEXTYPE_BUFFER,
+    .x      = 0,
+    .y      = 0,
+    .width  = this->format.width,
+    .height = this->format.height,
+    .pitch  = this->format.pitch,
+    .stride = this->format.stride,
+    .buffer = buffer
+  };
+
+  return this->ops.update(this, &update);
+}
+
+bool egl_textureUpdateRect(EGL_Texture * this,
+    int x, int y, int width, int height, int stride,
+    const uint8_t * buffer)
+{
+  x      = clamp(x     , 0, this->format.width     );
+  y      = clamp(y     , 0, this->format.height    );
+  width  = clamp(width , x, this->format.width  - x);
+  height = clamp(height, y, this->format.height - y);
+
+  if (!width || !height)
+    return true;
+
+  const struct EGL_TexUpdate update =
+  {
+    .type   = EGL_TEXTYPE_BUFFER,
+    .x      = x,
+    .y      = y,
+    .width  = width,
+    .height = height,
+    .pitch  = stride / (stride / width),
+    .stride = stride,
     .buffer = buffer
   };
 
@@ -121,6 +154,12 @@ bool egl_textureUpdateFromFrame(EGL_Texture * this,
   const struct EGL_TexUpdate update =
   {
     .type      = EGL_TEXTYPE_FRAMEBUFFER,
+    .x         = 0,
+    .y         = 0,
+    .width     = this->format.width,
+    .height    = this->format.height,
+    .pitch     = this->format.pitch,
+    .stride    = this->format.stride,
     .frame     = frame,
     .rects     = damageRects,
     .rectCount = damageRectsCount,
@@ -134,8 +173,14 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
 {
   const struct EGL_TexUpdate update =
   {
-    .type  = EGL_TEXTYPE_DMABUF,
-    .dmaFD = dmaFd
+    .type   = EGL_TEXTYPE_DMABUF,
+    .x      = 0,
+    .y      = 0,
+    .width  = this->format.width,
+    .height = this->format.height,
+    .pitch  = this->format.pitch,
+    .stride = this->format.stride,
+    .dmaFD  = dmaFd
   };
 
   /* wait for completion */

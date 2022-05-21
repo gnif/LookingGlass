@@ -111,11 +111,13 @@ static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * upd
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_BUFFER);
 
   glBindTexture(GL_TEXTURE_2D, this->tex[0]);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.pitch);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, update->pitch);
   glTexSubImage2D(GL_TEXTURE_2D,
-      0, 0, 0,
-      texture->format.width,
-      texture->format.height,
+      0,
+      update->x,
+      update->y,
+      update->width,
+      update->height,
       texture->format.format,
       texture->format.dataType,
       update->buffer);
