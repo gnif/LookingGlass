@@ -213,7 +213,6 @@ struct AppParams
 
   int                  audioPeriodSize;
   int                  audioBufferLatency;
-  bool                 micAlwaysAllow;
   bool                 micShowIndicator;
   enum MicDefaultState micDefaultState;
 };
