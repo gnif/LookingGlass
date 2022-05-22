@@ -54,7 +54,8 @@ static void egl_texDMABUFCleanup(TexDMABUF * this)
 
 // dmabuf functions
 
-static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
+static bool egl_texDMABUFInit(EGL_Texture ** texture, EGL_TexType type,
+    EGLDisplay * display)
 {
   TexDMABUF * this = calloc(1, sizeof(*this));
   *texture = &this->base.base;
@@ -67,7 +68,7 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGLDisplay * display)
   }
 
   EGL_Texture * parent = &this->base.base;
-  if (!egl_texBufferStreamInit(&parent, display))
+  if (!egl_texBufferStreamInit(&parent, type, display))
   {
     vector_destroy(&this->images);
     free(this);

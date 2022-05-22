@@ -50,3 +50,10 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects);
+
+void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height);
+void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
+    int height, uint32_t color);
+void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
+    int height, int stride, uint8_t * data, bool topDown);
+void egl_desktopSpiceShow(EGL_Desktop * desktop, bool show);

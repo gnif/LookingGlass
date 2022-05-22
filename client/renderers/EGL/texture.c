@@ -37,23 +37,26 @@ extern const EGL_TextureOps EGL_TextureFrameBuffer;
 extern const EGL_TextureOps EGL_TextureDMABUF;
 
 bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
-    EGL_TexType type, bool streaming)
+    EGL_TexType type)
 {
   const EGL_TextureOps * ops;
 
   switch(type)
   {
     case EGL_TEXTYPE_BUFFER:
-      ops = streaming ? &EGL_TextureBufferStream : &EGL_TextureBuffer;
+      ops = &EGL_TextureBuffer;
+      break;
+
+    case EGL_TEXTYPE_BUFFER_MAP:
+    case EGL_TEXTYPE_BUFFER_STREAM:
+      ops = &EGL_TextureBufferStream;
       break;
 
     case EGL_TEXTYPE_FRAMEBUFFER:
-      DEBUG_ASSERT(streaming);
       ops = &EGL_TextureFrameBuffer;
       break;
 
     case EGL_TEXTYPE_DMABUF:
-      DEBUG_ASSERT(streaming);
       ops = &EGL_TextureDMABUF;
       break;
 
@@ -62,7 +65,7 @@ bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
   }
 
   *texture_ = NULL;
-  if (!ops->init(texture_, display))
+  if (!ops->init(texture_, type, display))
     return false;
 
   EGL_Texture * this = *texture_;
@@ -105,18 +108,19 @@ bool egl_textureSetup(EGL_Texture * this, enum EGL_PixelFormat pixFmt,
   return this->ops.setup(this, &setup);
 }
 
-bool egl_textureUpdate(EGL_Texture * this, const uint8_t * buffer)
+bool egl_textureUpdate(EGL_Texture * this, const uint8_t * buffer, bool topDown)
 {
   const struct EGL_TexUpdate update =
   {
-    .type   = EGL_TEXTYPE_BUFFER,
-    .x      = 0,
-    .y      = 0,
-    .width  = this->format.width,
-    .height = this->format.height,
-    .pitch  = this->format.pitch,
-    .stride = this->format.stride,
-    .buffer = buffer
+    .type    = EGL_TEXTYPE_BUFFER,
+    .x       = 0,
+    .y       = 0,
+    .width   = this->format.width,
+    .height  = this->format.height,
+    .pitch   = this->format.pitch,
+    .stride  = this->format.stride,
+    .topDown = topDown,
+    .buffer  = buffer
   };
 
   return this->ops.update(this, &update);
@@ -124,7 +128,7 @@ bool egl_textureUpdate(EGL_Texture * this, const uint8_t * buffer)
 
 bool egl_textureUpdateRect(EGL_Texture * this,
     int x, int y, int width, int height, int stride,
-    const uint8_t * buffer)
+    const uint8_t * buffer, bool topDown)
 {
   x      = clamp(x     , 0, this->format.width     );
   y      = clamp(y     , 0, this->format.height    );
@@ -136,14 +140,15 @@ bool egl_textureUpdateRect(EGL_Texture * this,
 
   const struct EGL_TexUpdate update =
   {
-    .type   = EGL_TEXTYPE_BUFFER,
-    .x      = x,
-    .y      = y,
-    .width  = width,
-    .height = height,
-    .pitch  = stride / (stride / width),
-    .stride = stride,
-    .buffer = buffer
+    .type    = EGL_TEXTYPE_BUFFER,
+    .x       = x,
+    .y       = y,
+    .width   = width,
+    .height  = height,
+    .pitch   = stride / this->format.bpp,
+    .stride  = stride,
+    .topDown = topDown,
+    .buffer  = buffer
   };
 
   return this->ops.update(this, &update);
@@ -175,14 +180,14 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
 {
   const struct EGL_TexUpdate update =
   {
-    .type   = EGL_TEXTYPE_DMABUF,
-    .x      = 0,
-    .y      = 0,
-    .width  = this->format.width,
-    .height = this->format.height,
-    .pitch  = this->format.pitch,
-    .stride = this->format.stride,
-    .dmaFD  = dmaFd
+    .type    = EGL_TEXTYPE_DMABUF,
+    .x       = 0,
+    .y       = 0,
+    .width   = this->format.width,
+    .height  = this->format.height,
+    .pitch   = this->format.pitch,
+    .stride  = this->format.stride,
+    .dmaFD   = dmaFd
   };
 
   /* wait for completion */

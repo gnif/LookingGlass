@@ -32,6 +32,15 @@ void renderQueue_init(void)
   l_renderQueue = ll_new();
 }
 
+void renderQueue_free(void)
+{
+  if (!l_renderQueue)
+    return;
+
+  renderQueue_clear();
+  ll_free(l_renderQueue);
+}
+
 void renderQueue_clear(void)
 {
   RenderCommand * cmd;
@@ -68,7 +77,7 @@ void renderQueue_spiceDrawFill(int x, int y, int width, int height,
 }
 
 void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride,
-    void * data)
+    void * data, bool topDown)
 {
   RenderCommand * cmd = malloc(sizeof(*cmd));
   cmd->op                 = SPICE_OP_DRAW_BITMAP;
@@ -78,15 +87,10 @@ void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride
   cmd->drawBitmap.height  = height;
   cmd->drawBitmap.stride  = stride;
   cmd->drawBitmap.data    = malloc(height * stride);
+  cmd->drawBitmap.topDown = topDown;
   memcpy(cmd->drawBitmap.data, data, height * stride);
   ll_push(l_renderQueue, cmd);
   app_invalidateWindow(true);
-}
-
-void renderQueue_free(void)
-{
-  renderQueue_clear();
-  ll_free(l_renderQueue);
 }
 
 void renderQueue_process(void)
@@ -112,7 +116,8 @@ void renderQueue_process(void)
         RENDERER(spiceDrawBitmap,
             cmd->drawBitmap.x     , cmd->drawBitmap.y,
             cmd->drawBitmap.width , cmd->drawBitmap.height,
-            cmd->drawBitmap.stride, cmd->drawBitmap.data);
+            cmd->drawBitmap.stride, cmd->drawBitmap.data,
+            cmd->drawBitmap.topDown);
         free(cmd->drawBitmap.data);
         break;
     }

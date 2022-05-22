@@ -50,6 +50,7 @@
 #include "common/version.h"
 #include "common/paths.h"
 #include "common/cpuinfo.h"
+#include "common/ll.h"
 
 #include "core.h"
 #include "app.h"
@@ -809,7 +810,9 @@ int main_frameThread(void * unused)
   lgmpClientUnsubscribe(&queue);
 
   RENDERER(onRestart);
-  app_useSpiceDisplay(true);
+
+  if (g_state.state != APP_STATE_SHUTDOWN)
+    app_useSpiceDisplay(true);
 
   if (g_state.useDMA)
   {
@@ -873,6 +876,14 @@ void spiceReady(void)
 static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
     unsigned int width, unsigned int height)
 {
+  DEBUG_INFO("Create SPICE surface: id: %d, size: %dx%d",
+      surfaceId, width, height);
+
+  g_state.srcSize.x   = width;
+  g_state.srcSize.y   = height;
+  g_state.haveSrcSize = true;
+  core_updatePositionInfo();
+
   renderQueue_spiceConfigure(width, height);
   if (g_state.lgr)
     RENDERER(spiceShow, true);
@@ -880,6 +891,7 @@ static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
 
 static void spice_surfaceDestroy(unsigned int surfaceId)
 {
+  DEBUG_INFO("Destroy spice surface %d", surfaceId);
   if (g_state.lgr)
     RENDERER(spiceShow, false);
 }
@@ -893,7 +905,7 @@ static void spice_drawFill(unsigned int surfaceId, int x, int y, int width,
 static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
     bool topDown, int x, int y, int width, int height, int stride, void * data)
 {
-  renderQueue_spiceDrawBitmap(x, y, width, height, stride, data);
+  renderQueue_spiceDrawBitmap(x, y, width, height, stride, data, topDown);
 }
 
 int spiceThread(void * arg)
@@ -1579,8 +1591,8 @@ restart:
   {
     if (!lgmpClientSessionValid(g_state.lgmp))
     {
-      g_state.state = APP_STATE_RESTART;
       DEBUG_INFO("Waiting for the host to restart...");
+      g_state.state = APP_STATE_RESTART;
       break;
     }
     g_state.ds->wait(100);

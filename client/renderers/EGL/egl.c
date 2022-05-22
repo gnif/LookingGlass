@@ -123,6 +123,8 @@ struct Inst
 
   RingBuffer importTimings;
   GraphHandle importGraph;
+
+  bool showSpice;
 };
 
 static struct Option egl_options[] =
@@ -1012,7 +1014,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   struct Inst * this = UPCAST(struct Inst, renderer);
   EGLint bufferAge   = egl_bufferAge(this);
   bool renderAll     = invalidateWindow || !this->start || this->hadOverlay ||
-                       bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE;
+                       bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
+                       this->showSpice;
 
   bool hasOverlay = false;
   struct CursorState cursorState = { .visible = false };
@@ -1103,9 +1106,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
           this->waitDone = true;
       }
 
-      cursorState = egl_cursorRender(this->cursor,
-          (this->format.rotate + rotate) % LG_ROTATE_MAX,
-          this->width, this->height);
+      if (!this->showSpice)
+        cursorState = egl_cursorRender(this->cursor,
+            (this->format.rotate + rotate) % LG_ROTATE_MAX,
+            this->width, this->height);
     }
     else
       hasOverlay = true;
@@ -1207,6 +1211,36 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   return true;
 }
 
+static void egl_spiceConfigure(LG_Renderer * renderer, int width, int height)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_desktopSpiceConfigure(this->desktop, width, height);
+}
+
+static void egl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width,
+    int height, uint32_t color)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_desktopSpiceDrawFill(this->desktop, x, y, width, height, color);
+}
+
+static void egl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int width,
+    int height, int stride, uint8_t * data, bool topDown)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_desktopSpiceDrawBitmap(this->desktop, x, y, width, height, stride,
+      data, topDown);
+}
+
+static void egl_spiceShow(LG_Renderer * renderer, bool show)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  this->showSpice = show;
+  egl_desktopSpiceShow(this->desktop, show);
+  if (show)
+    this->start = true;
+}
+
 struct LG_RendererOps LGR_EGL =
 {
   .getName       = egl_getName,
@@ -1223,5 +1257,10 @@ struct LG_RendererOps LGR_EGL =
   .onFrame       = egl_onFrame,
   .renderStartup = egl_renderStartup,
   .needsRender   = egl_needsRender,
-  .render        = egl_render
+  .render        = egl_render,
+
+  .spiceConfigure  = egl_spiceConfigure,
+  .spiceDrawFill   = egl_spiceDrawFill,
+  .spiceDrawBitmap = egl_spiceDrawBitmap,
+  .spiceShow       = egl_spiceShow
 };

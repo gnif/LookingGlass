@@ -87,7 +87,7 @@ static bool cursorTexInit(struct CursorTex * t,
     const char * vertex_code  , size_t vertex_size,
     const char * fragment_code, size_t fragment_size)
 {
-  if (!egl_textureInit(&t->texture, NULL, EGL_TEXTYPE_BUFFER, false))
+  if (!egl_textureInit(&t->texture, NULL, EGL_TEXTYPE_BUFFER))
   {
     DEBUG_ERROR("Failed to initialize the cursor texture");
     return false;
@@ -278,7 +278,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
         egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
             cursor->width, cursor->height, sizeof(xor[0]));
-        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor);
+        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
       }
       // fall through
 
@@ -286,7 +286,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       {
         egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
             cursor->width, cursor->height, cursor->stride);
-        egl_textureUpdate(cursor->norm.texture, data);
+        egl_textureUpdate(cursor->norm.texture, data, true);
         break;
       }
 
@@ -314,8 +314,8 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
             cursor->width, cursor->height, sizeof(and[0]));
         egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
             cursor->width, cursor->height, sizeof(xor[0]));
-        egl_textureUpdate(cursor->norm.texture, (uint8_t *)and);
-        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor);
+        egl_textureUpdate(cursor->norm.texture, (uint8_t *)and, true);
+        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
         break;
       }
     }

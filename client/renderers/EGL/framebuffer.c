@@ -40,7 +40,7 @@ bool egl_framebufferInit(EGL_Framebuffer ** fb)
     return false;
   }
 
-  if (!egl_textureInit(&this->tex, NULL, EGL_TEXTYPE_BUFFER, false))
+  if (!egl_textureInit(&this->tex, NULL, EGL_TEXTYPE_BUFFER))
   {
     DEBUG_ERROR("Failed to initialize the texture");
     return false;

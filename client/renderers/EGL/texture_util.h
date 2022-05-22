@@ -35,7 +35,7 @@ typedef struct EGL_TexFormat
   unsigned int fourcc;
   size_t       bufferSize;
 
-  size_t       width, height;
+  size_t       width , height;
   size_t       stride, pitch;
 }
 EGL_TexFormat;

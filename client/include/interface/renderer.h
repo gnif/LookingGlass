@@ -181,7 +181,7 @@ typedef struct LG_RendererOps
 
   /* draw an image on the spice display, data is RGBA32 */
   void (*spiceDrawBitmap)(LG_Renderer * renderer, int x, int y, int width,
-      int height, int stride, uint8_t * data);
+      int height, int stride, uint8_t * data, bool topDown);
 
   /* show the spice display */
   void (*spiceShow)(LG_Renderer * renderer, bool show);

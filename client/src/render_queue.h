@@ -52,6 +52,7 @@ typedef struct
       int       width, height;
       int       stride;
       uint8_t * data;
+      bool      topDown;
     }
     drawBitmap;
   };
@@ -69,4 +70,4 @@ void renderQueue_spiceDrawFill(int x, int y, int width, int height,
     uint32_t color);
 
 void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride,
-    void * data);
+    void * data, bool topDown);

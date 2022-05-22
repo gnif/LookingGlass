@@ -42,13 +42,15 @@ typedef struct TextureBuffer
 }
 TextureBuffer;
 
-bool egl_texBufferInit(EGL_Texture ** texture_, EGLDisplay * display);
+bool egl_texBufferInit(EGL_Texture ** texture_, EGL_TexType type,
+    EGLDisplay * display);
 void egl_texBufferFree(EGL_Texture * texture_);
 bool egl_texBufferSetup(EGL_Texture * texture_, const EGL_TexSetup * setup);
 EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture_);
 EGL_TexStatus egl_texBufferGet(EGL_Texture * texture_, GLuint * tex);
 
-bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGLDisplay * display);
+bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGL_TexType type,
+    EGLDisplay * display);
 bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
 EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_);
