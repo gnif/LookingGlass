@@ -126,8 +126,8 @@ bool egl_textureUpdateRect(EGL_Texture * this,
 {
   x      = clamp(x     , 0, this->format.width     );
   y      = clamp(y     , 0, this->format.height    );
-  width  = clamp(width , x, this->format.width  - x);
-  height = clamp(height, y, this->format.height - y);
+  width  = clamp(width , 0, this->format.width  - x);
+  height = clamp(height, 0, this->format.height - y);
 
   if (!width || !height)
     return true;
