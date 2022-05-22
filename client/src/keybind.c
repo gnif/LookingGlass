@@ -22,6 +22,7 @@
 
 #include "main.h"
 #include "app.h"
+#include "audio.h"
 #include "core.h"
 #include "kb.h"
 
@@ -174,6 +175,13 @@ void keybind_spiceRegister(void)
     app_releaseKeybind(&handles[i]);
   handleCount = 0;
 
+#if ENABLE_AUDIO
+  if (audio_supportsRecord())
+  {
+    app_registerKeybind(KEY_E, audio_recordToggleKeybind, NULL,
+        "Toggle audio recording");
+  }
+#endif
 
   /* register OS based keybinds */
   if (app_guestIsLinux())
