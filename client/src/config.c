@@ -33,20 +33,23 @@
 #include <string.h>
 
 // forwards
-static bool       optRendererParse   (struct Option * opt, const char * str);
-static StringList optRendererValues  (struct Option * opt);
-static char *     optRendererToString(struct Option * opt);
-static bool       optPosParse        (struct Option * opt, const char * str);
-static StringList optPosValues       (struct Option * opt);
-static char *     optPosToString     (struct Option * opt);
-static bool       optSizeParse       (struct Option * opt, const char * str);
-static StringList optSizeValues      (struct Option * opt);
-static char *     optSizeToString    (struct Option * opt);
-static bool       optScancodeParse   (struct Option * opt, const char * str);
-static StringList optScancodeValues  (struct Option * opt);
-static bool       optScancodeValidate(struct Option * opt, const char ** error);
-static char *     optScancodeToString(struct Option * opt);
-static bool       optRotateValidate  (struct Option * opt, const char ** error);
+static bool       optRendererParse     (struct Option * opt, const char * str);
+static StringList optRendererValues    (struct Option * opt);
+static char *     optRendererToString  (struct Option * opt);
+static bool       optPosParse          (struct Option * opt, const char * str);
+static StringList optPosValues         (struct Option * opt);
+static char *     optPosToString       (struct Option * opt);
+static bool       optSizeParse         (struct Option * opt, const char * str);
+static StringList optSizeValues        (struct Option * opt);
+static char *     optSizeToString      (struct Option * opt);
+static bool       optScancodeParse     (struct Option * opt, const char * str);
+static StringList optScancodeValues    (struct Option * opt);
+static bool       optScancodeValidate  (struct Option * opt, const char ** error);
+static char *     optScancodeToString  (struct Option * opt);
+static bool       optRotateValidate    (struct Option * opt, const char ** error);
+static bool       optMicDefaultParse   (struct Option * opt, const char * str);
+static StringList optMicDefaultValues  (struct Option * opt);
+static char *     optMicDefaultToString(struct Option * opt);
 
 static void doLicense(void);
 
@@ -493,10 +496,12 @@ static struct Option options[] =
   },
   {
     .module         = "audio",
-    .name           = "micAlwaysAllow",
-    .description    = "Always allow guest attempts to access the microphone",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = false
+    .name           = "micDefault",
+    .description    = "Default action when an application opens the microphone (prompt, allow, deny)",
+    .type           = OPTION_TYPE_CUSTOM,
+    .parser         = optMicDefaultParse,
+    .getValues      = optMicDefaultValues,
+    .toString       = optMicDefaultToString
   },
   {
     .module         = "audio",
@@ -696,7 +701,6 @@ bool config_load(int argc, char * argv[])
 
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
   g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
-  g_params.micAlwaysAllow     = option_get_bool("audio", "micAlwaysAllow");
   g_params.micShowIndicator   = option_get_bool("audio", "micShowIndicator");
 
   return true;
@@ -933,4 +937,48 @@ static bool optRotateValidate(struct Option * opt, const char ** error)
 
   *error = "Rotation angle must be one of 0, 90, 180 or 270";
   return false;
+}
+
+static bool optMicDefaultParse(struct Option * opt, const char * str)
+{
+  if (!str)
+    return false;
+
+  if (strcasecmp(str, "prompt") == 0)
+    g_params.micDefaultState = MIC_DEFAULT_PROMPT;
+  else if (strcasecmp(str, "allow") == 0)
+    g_params.micDefaultState = MIC_DEFAULT_ALLOW;
+  else if (strcasecmp(str, "deny") == 0)
+    g_params.micDefaultState = MIC_DEFAULT_DENY;
+  else
+    return false;
+
+  return true;
+}
+
+static StringList optMicDefaultValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
+
+  stringlist_push(sl, (char *)"prompt");
+  stringlist_push(sl, (char *)"allow");
+  stringlist_push(sl, (char *)"deny");
+  return sl;
+}
+
+static char * optMicDefaultToString(struct Option * opt)
+{
+  switch (g_params.micDefaultState)
+  {
+    case MIC_DEFAULT_PROMPT:
+      return strdup("prompt");
+    case MIC_DEFAULT_ALLOW:
+      return strdup("allow");
+    case MIC_DEFAULT_DENY:
+      return strdup("deny");
+  }
+
+  return NULL;
 }
