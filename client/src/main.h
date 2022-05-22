@@ -45,6 +45,12 @@ enum RunState
   APP_STATE_SHUTDOWN
 };
 
+enum MicDefaultState {
+  MIC_DEFAULT_PROMPT,
+  MIC_DEFAULT_ALLOW,
+  MIC_DEFAULT_DENY
+};
+
 struct AppState
 {
   enum RunState state;
@@ -146,69 +152,70 @@ struct AppState
 
 struct AppParams
 {
-  bool              autoResize;
-  bool              allowResize;
-  bool              keepAspect;
-  bool              forceAspect;
-  bool              dontUpscale;
-  bool              intUpscale;
-  bool              shrinkOnUpscale;
-  bool              borderless;
-  bool              fullscreen;
-  bool              maximize;
-  bool              minimizeOnFocusLoss;
-  bool              center;
-  int               x, y;
-  unsigned int      w, h;
-  int               fpsMin;
-  LG_RendererRotate winRotate;
-  bool              useSpice;
-  bool              useSpiceInput;
-  bool              useSpiceClipboard;
-  bool              useSpiceAudio;
-  const char *      spiceHost;
-  unsigned int      spicePort;
-  bool              clipboardToVM;
-  bool              clipboardToLocal;
-  bool              scaleMouseInput;
-  bool              hideMouse;
-  bool              ignoreQuit;
-  bool              noScreensaver;
-  bool              autoScreensaver;
-  bool              grabKeyboard;
-  bool              grabKeyboardOnFocus;
-  int               escapeKey;
-  bool              ignoreWindowsKeys;
-  bool              releaseKeysOnFocusLoss;
-  bool              showAlerts;
-  bool              captureOnStart;
-  bool              quickSplash;
-  bool              alwaysShowCursor;
-  uint64_t          helpMenuDelayUs;
-  const char *      uiFont;
-  int               uiSize;
-  bool              jitRender;
+  bool                 autoResize;
+  bool                 allowResize;
+  bool                 keepAspect;
+  bool                 forceAspect;
+  bool                 dontUpscale;
+  bool                 intUpscale;
+  bool                 shrinkOnUpscale;
+  bool                 borderless;
+  bool                 fullscreen;
+  bool                 maximize;
+  bool                 minimizeOnFocusLoss;
+  bool                 center;
+  int                  x, y;
+  unsigned int         w, h;
+  int                  fpsMin;
+  LG_RendererRotate    winRotate;
+  bool                 useSpice;
+  bool                 useSpiceInput;
+  bool                 useSpiceClipboard;
+  bool                 useSpiceAudio;
+  const char *         spiceHost;
+  unsigned int         spicePort;
+  bool                 clipboardToVM;
+  bool                 clipboardToLocal;
+  bool                 scaleMouseInput;
+  bool                 hideMouse;
+  bool                 ignoreQuit;
+  bool                 noScreensaver;
+  bool                 autoScreensaver;
+  bool                 grabKeyboard;
+  bool                 grabKeyboardOnFocus;
+  int                  escapeKey;
+  bool                 ignoreWindowsKeys;
+  bool                 releaseKeysOnFocusLoss;
+  bool                 showAlerts;
+  bool                 captureOnStart;
+  bool                 quickSplash;
+  bool                 alwaysShowCursor;
+  uint64_t             helpMenuDelayUs;
+  const char *         uiFont;
+  int                  uiSize;
+  bool                 jitRender;
 
-  unsigned int      cursorPollInterval;
-  unsigned int      framePollInterval;
-  bool              allowDMA;
+  unsigned int         cursorPollInterval;
+  unsigned int         framePollInterval;
+  bool                 allowDMA;
 
-  bool              forceRenderer;
-  unsigned int      forceRendererIndex;
+  bool                 forceRenderer;
+  unsigned int         forceRendererIndex;
 
-  const char *      windowTitle;
-  bool              mouseRedraw;
-  int               mouseSens;
-  bool              mouseSmoothing;
-  bool              rawMouse;
-  bool              autoCapture;
-  bool              captureInputOnly;
-  bool              showCursorDot;
+  const char *         windowTitle;
+  bool                 mouseRedraw;
+  int                  mouseSens;
+  bool                 mouseSmoothing;
+  bool                 rawMouse;
+  bool                 autoCapture;
+  bool                 captureInputOnly;
+  bool                 showCursorDot;
 
-  int               audioPeriodSize;
-  int               audioBufferLatency;
-  bool              micAlwaysAllow;
-  bool              micShowIndicator;
+  int                  audioPeriodSize;
+  int                  audioBufferLatency;
+  bool                 micAlwaysAllow;
+  bool                 micShowIndicator;
+  enum MicDefaultState micDefaultState;
 };
 
 struct CBRequest
