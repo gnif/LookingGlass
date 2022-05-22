@@ -118,12 +118,16 @@ typedef struct
 
   struct
   {
+    bool          requested;
     bool          started;
     int           volumeChannels;
     uint16_t      volume[8];
     bool          mute;
     int           stride;
     uint32_t      time;
+    int           lastChannels;
+    int           lastSampleRate;
+    PSAudioFormat lastFormat;
     MsgBoxHandle  confirmHandle;
     int           confirmChannels;
     int           confirmSampleRate;
@@ -803,8 +807,10 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
       return;
   }
 
-  lastChannels   = channels;
-  lastSampleRate = sampleRate;
+  audio.record.requested      = true;
+  audio.record.lastChannels   = channels;
+  audio.record.lastSampleRate = sampleRate;
+  audio.record.lastFormat     = format;
 
   if (audio.record.started)
     realRecordStart(channels, sampleRate, format);
@@ -828,17 +834,50 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   }
 }
 
-void audio_recordStop(void)
+static void realRecordStop(void)
 {
-  if (!audio.audioDev || !audio.record.started)
-    return;
-
-  DEBUG_INFO("Microphone recording stopped");
   audio.audioDev->record.stop();
   audio.record.started = false;
 
   if (g_params.micShowIndicator)
     app_showRecord(false);
+}
+
+void audio_recordStop(void)
+{
+  audio.record.requested = false;
+  if (!audio.audioDev || !audio.record.started)
+    return;
+
+  DEBUG_INFO("Microphone recording stopped");
+  realRecordStop();
+}
+
+void audio_recordToggleKeybind(int sc, void * opaque)
+{
+  if (!audio.audioDev)
+    return;
+
+  if (!audio.record.requested)
+  {
+    app_alert(LG_ALERT_WARNING,
+      "No application is requesting microphone access.");
+    return;
+  }
+
+  if (audio.record.started)
+  {
+    app_alert(LG_ALERT_INFO, "Microphone disabled");
+    DEBUG_INFO("Microphone recording stopped by user");
+    realRecordStop();
+  }
+  else
+  {
+    app_alert(LG_ALERT_INFO, "Microphone enabled");
+    DEBUG_INFO("Microphone recording started by user");
+    realRecordStart(audio.record.lastChannels, audio.record.lastSampleRate,
+      audio.record.lastFormat);
+  }
 }
 
 void audio_recordVolume(int channels, const uint16_t volume[])

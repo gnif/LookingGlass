@@ -36,6 +36,7 @@ void audio_playbackData(uint8_t * data, size_t size);
 
 bool audio_supportsRecord(void);
 void audio_recordStart(int channels, int sampleRate, PSAudioFormat format);
+void audio_recordToggleKeybind(int sc, void * opaque);
 void audio_recordStop(void);
 void audio_recordVolume(int channels, const uint16_t volume[]);
 void audio_recordMute(bool mute);
