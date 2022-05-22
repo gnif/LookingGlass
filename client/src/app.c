@@ -1008,3 +1008,23 @@ bool app_guestIsOther(void)
 {
   return g_state.guestOS == KVMFR_OS_OTHER;
 }
+
+void app_useSpiceDisplay(bool enable)
+{
+  if (!g_params.useSpice)
+    return;
+
+  if (!purespice_hasChannel(PS_CHANNEL_DISPLAY))
+    return;
+
+  if (enable)
+  {
+    purespice_connectChannel(PS_CHANNEL_DISPLAY);
+    // do not call spiceShow as the surface create callback will do this
+  }
+  else
+  {
+    RENDERER(spiceShow, false);
+    purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
+  }
+}

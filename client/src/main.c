@@ -62,6 +62,7 @@
 #include "overlays.h"
 #include "overlay_utils.h"
 #include "util.h"
+#include "render_queue.h"
 
 // forwards
 static int renderThread(void * unused);
@@ -280,6 +281,9 @@ static int renderThread(void * unused)
 
     const uint64_t renderStart = nanotime();
     LG_LOCK(g_state.lgrLock);
+
+    renderQueue_process();
+
     if (!RENDERER(render, g_params.winRotate, newFrame, invalidate,
           preSwapCallback, (void *)&renderStart))
     {
@@ -595,6 +599,9 @@ int main_frameThread(void * unused)
       break;
     }
 
+    // disable the spice display as we have a frame from the LG host
+    app_useSpiceDisplay(false);
+
     KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
 
     // ignore any repeated frames, this happens when a new client connects to
@@ -800,7 +807,9 @@ int main_frameThread(void * unused)
   }
 
   lgmpClientUnsubscribe(&queue);
+
   RENDERER(onRestart);
+  app_useSpiceDisplay(true);
 
   if (g_state.useDMA)
   {
@@ -808,7 +817,6 @@ int main_frameThread(void * unused)
       if (dmaInfo[i].fd >= 0)
         close(dmaInfo[i].fd);
   }
-
 
   return 0;
 }
@@ -862,6 +870,32 @@ void spiceReady(void)
   purespice_freeServerInfo(&info);
 }
 
+static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
+    unsigned int width, unsigned int height)
+{
+  renderQueue_spiceConfigure(width, height);
+  if (g_state.lgr)
+    RENDERER(spiceShow, true);
+}
+
+static void spice_surfaceDestroy(unsigned int surfaceId)
+{
+  if (g_state.lgr)
+    RENDERER(spiceShow, false);
+}
+
+static void spice_drawFill(unsigned int surfaceId, int x, int y, int width,
+    int height, uint32_t color)
+{
+  renderQueue_spiceDrawFill(x, y, width, height, color);
+}
+
+static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
+    bool topDown, int x, int y, int width, int height, int stride, void * data)
+{
+  renderQueue_spiceDrawBitmap(x, y, width, height, stride, data);
+}
+
 int spiceThread(void * arg)
 {
   if (g_params.useSpiceAudio)
@@ -885,6 +919,14 @@ int spiceThread(void * arg)
       .data    = cb_spiceData,
       .release = cb_spiceRelease,
       .request = cb_spiceRequest
+    },
+    .display  =
+    {
+      .enable         = true,
+      .surfaceCreate  = spice_surfaceCreate,
+      .surfaceDestroy = spice_surfaceDestroy,
+      .drawFill       = spice_drawFill,
+      .drawBitmap     = spice_drawBitmap
     },
 #if ENABLE_AUDIO
     .playback =
@@ -1117,6 +1159,9 @@ static int lg_run(void)
     return -1;
   }
 
+  //setup the render command queue
+  renderQueue_init();
+
   const PSInit psInit =
   {
     .log =
@@ -1260,6 +1305,10 @@ static int lg_run(void)
   g_state.cbAvailable = g_state.ds->cbInit && g_state.ds->cbInit();
   if (g_state.cbAvailable)
     g_state.cbRequestList = ll_new();
+
+  // fallback to the spice display
+  if (g_params.useSpice && purespice_hasChannel(PS_CHANNEL_DISPLAY))
+    purespice_connectChannel(PS_CHANNEL_DISPLAY);
 
   LGMP_STATUS status;
 
@@ -1609,6 +1658,8 @@ static void lg_shutdown(void)
   }
 
   ivshmemClose(&g_state.shm);
+
+  renderQueue_free();
 
   // free metrics ringbuffers
   ringbuffer_free(&g_state.renderTimings);

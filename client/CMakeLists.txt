@@ -134,6 +134,7 @@ set(SOURCES
 	src/egl_dynprocs.c
 	src/eglutil.c
 	src/overlay_utils.c
+	src/render_queue.c
 
 	src/overlay/alert.c
 	src/overlay/fps.c

@@ -667,7 +667,7 @@ bool config_load(int argc, char * argv[])
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
 
-  if (option_get_bool("spice", "enable"))
+  if ((g_params.useSpice = option_get_bool("spice", "enable")))
   {
     g_params.spiceHost         = option_get_string("spice", "host");
     g_params.spicePort         = option_get_int   ("spice", "port");

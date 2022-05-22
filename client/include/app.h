@@ -179,5 +179,9 @@ bool app_guestIsOSX(void);
 bool app_guestIsBSD(void);
 bool app_guestIsOther(void);
 
+/**
+ * Enable/disable the spice display
+ */
+void app_useSpiceDisplay(bool enable);
 
 #endif
