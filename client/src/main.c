@@ -873,6 +873,11 @@ int spiceThread(void * arg)
     .port      = g_params.spicePort,
     .password  = "",
     .ready     = spiceReady,
+    .inputs    =
+    {
+      .enable      = g_params.useSpiceInput,
+      .autoConnect = true
+    },
     .clipboard =
     {
       .enable  = g_params.useSpiceClipboard,
@@ -884,20 +889,22 @@ int spiceThread(void * arg)
 #if ENABLE_AUDIO
     .playback =
     {
-      .enable = audio_supportsPlayback(),
-      .start  = audio_playbackStart,
-      .volume = audio_playbackVolume,
-      .mute   = audio_playbackMute,
-      .stop   = audio_playbackStop,
-      .data   = audio_playbackData
+      .enable      = audio_supportsPlayback(),
+      .autoConnect = true,
+      .start       = audio_playbackStart,
+      .volume      = audio_playbackVolume,
+      .mute        = audio_playbackMute,
+      .stop        = audio_playbackStop,
+      .data        = audio_playbackData
     },
     .record =
     {
-      .enable = audio_supportsRecord(),
-      .start  = audio_recordStart,
-      .volume = audio_recordVolume,
-      .mute   = audio_recordMute,
-      .stop   = audio_recordStop
+      .enable      = audio_supportsRecord(),
+      .autoConnect = true,
+      .start       = audio_recordStart,
+      .volume      = audio_recordVolume,
+      .mute        = audio_recordMute,
+      .stop        = audio_recordStop
     }
 #endif
   };
