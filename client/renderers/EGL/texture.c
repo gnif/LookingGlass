@@ -79,6 +79,8 @@ bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
 void egl_textureFree(EGL_Texture ** tex)
 {
   EGL_Texture * this = *tex;
+  if (!this)
+    return;
 
   glDeleteSamplers(1, &this->sampler);
 
