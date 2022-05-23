@@ -845,6 +845,10 @@ static void checkUUID(void)
 
 void spiceReady(void)
 {
+  g_state.spiceReady = true;
+  if (g_state.initialSpiceDisplay)
+    app_useSpiceDisplay(true);
+
   // set the intial mouse mode
   purespice_mouseMode(true);
 
@@ -864,7 +868,6 @@ void spiceReady(void)
     return;
 
   memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
-  g_state.spiceReady = true;
   checkUUID();
 
   if (g_params.useSpiceInput)
@@ -961,6 +964,11 @@ int spiceThread(void * arg)
     }
 #endif
   };
+
+  /* use the spice display until we get frames from the LG host application
+   * it is safe to call this before connect as it will be delayed until
+   * spiceReady is called */
+  app_useSpiceDisplay(true);
 
   if (!purespice_connect(&config))
   {
@@ -1316,9 +1324,6 @@ static int lg_run(void)
   g_state.cbAvailable = g_state.ds->cbInit && g_state.ds->cbInit();
   if (g_state.cbAvailable)
     g_state.cbRequestList = ll_new();
-
-  // use the spice display until we get frames from the LG host application
-  app_useSpiceDisplay(true);
 
   LGMP_STATUS status;
 

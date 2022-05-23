@@ -24,6 +24,7 @@
 #include "core.h"
 #include "util.h"
 #include "clipboard.h"
+#include "render_queue.h"
 
 #include "kb.h"
 
@@ -1043,6 +1044,13 @@ void app_useSpiceDisplay(bool enable)
   if (!g_params.useSpice || lastState == enable)
     return;
 
+  // if spice is not yet ready, flag the state we want for when it is
+  if (!g_state.spiceReady)
+  {
+    g_state.initialSpiceDisplay = enable;
+    return;
+  }
+
   if (!purespice_hasChannel(PS_CHANNEL_DISPLAY))
     return;
 
@@ -1054,11 +1062,11 @@ void app_useSpiceDisplay(bool enable)
   if (enable)
   {
     purespice_connectChannel(PS_CHANNEL_DISPLAY);
-    RENDERER(spiceShow, true);
+    renderQueue_spiceShow(true);
   }
   else
   {
+    renderQueue_spiceShow(false);
     purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
-    RENDERER(spiceShow, false);
   }
 }

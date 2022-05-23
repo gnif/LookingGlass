@@ -71,6 +71,7 @@ struct AppState
 
   uint8_t spiceUUID[16];
   bool    spiceReady;
+  bool    initialSpiceDisplay;
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
   KVMFROS guestOS;

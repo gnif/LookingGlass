@@ -26,7 +26,8 @@ typedef struct
   {
     SPICE_OP_CONFIGURE,
     SPICE_OP_DRAW_FILL,
-    SPICE_OP_DRAW_BITMAP
+    SPICE_OP_DRAW_BITMAP,
+    SPICE_OP_SHOW
   }
   op;
 
@@ -36,7 +37,7 @@ typedef struct
     {
       int width, height;
     }
-    configure;
+    spiceConfigure;
 
     struct
     {
@@ -44,7 +45,7 @@ typedef struct
       int      width, height;
       uint32_t color;
     }
-    fillRect;
+    spiceFillRect;
 
     struct
     {
@@ -54,7 +55,13 @@ typedef struct
       uint8_t * data;
       bool      topDown;
     }
-    drawBitmap;
+    spiceDrawBitmap;
+
+    struct
+    {
+      bool show;
+    }
+    spiceShow;
   };
 }
 RenderCommand;
@@ -71,3 +78,5 @@ void renderQueue_spiceDrawFill(int x, int y, int width, int height,
 
 void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride,
     void * data, bool topDown);
+
+void renderQueue_spiceShow(bool show);
