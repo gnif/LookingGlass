@@ -152,6 +152,7 @@ bool egl_texBufferStreamInit(EGL_Texture ** texture, EGL_TexType type,
   switch(type)
   {
     case EGL_TEXTYPE_BUFFER_STREAM:
+    case EGL_TEXTYPE_FRAMEBUFFER:
     case EGL_TEXTYPE_DMABUF:
       this->texCount = 2;
       break;
