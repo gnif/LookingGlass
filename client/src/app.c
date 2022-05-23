@@ -1011,20 +1011,23 @@ bool app_guestIsOther(void)
 
 void app_useSpiceDisplay(bool enable)
 {
-  if (!g_params.useSpice)
+  static bool enabled = false;
+
+  if (!g_params.useSpice || enabled == enable)
     return;
 
   if (!purespice_hasChannel(PS_CHANNEL_DISPLAY))
     return;
 
+  enabled = enable;
   if (enable)
   {
     purespice_connectChannel(PS_CHANNEL_DISPLAY);
-    // do not call spiceShow as the surface create callback will do this
+    RENDERER(spiceShow, true);
   }
   else
   {
-    RENDERER(spiceShow, false);
     purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
+    RENDERER(spiceShow, false);
   }
 }
