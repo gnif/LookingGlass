@@ -42,7 +42,8 @@
 
 #define FPS_TEXTURE        0
 #define MOUSE_TEXTURE      1
-#define TEXTURE_COUNT      2
+#define SPICE_TEXTURE      2
+#define TEXTURE_COUNT      3
 
 #define FADE_TIME 1000000
 
@@ -136,13 +137,17 @@ struct Inst
   int               texWIndex, texRIndex;
   int               texList;
   int               mouseList;
+  int               spiceList;
   LG_RendererRect   destRect;
+  struct IntPoint   spiceSize;
+  bool              spiceShow;
 
   bool              hasTextures, hasFrames;
   GLuint            frames[BUFFER_COUNT];
   GLsync            fences[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
 
+  bool              start;
   bool              waiting;
   uint64_t          waitFadeTime;
   bool              waitDone;
@@ -174,7 +179,7 @@ enum ConfigStatus
 
 static void deconfigure(struct Inst * this);
 static enum ConfigStatus configure(struct Inst * this);
-static void updateMouseShape(struct Inst * this, bool * newShape);
+static void updateMouseShape(struct Inst * this);
 static bool drawFrame(struct Inst * this);
 static void drawMouse(struct Inst * this);
 static void renderWait(struct Inst * this);
@@ -207,7 +212,6 @@ bool opengl_create(LG_Renderer ** renderer, const LG_RendererParams params,
   this->opt.preventBuffer = option_get_bool("opengl", "preventBuffer");
   this->opt.amdPinnedMem  = option_get_bool("opengl", "amdPinnedMem" );
 
-
   LG_LOCK_INIT(this->formatLock);
   LG_LOCK_INIT(this->frameLock );
   LG_LOCK_INIT(this->mouseLock );
@@ -235,6 +239,7 @@ void opengl_deinitialize(LG_Renderer * renderer)
 
     glDeleteLists(this->texList  , BUFFER_COUNT);
     glDeleteLists(this->mouseList, 1);
+    glDeleteLists(this->spiceList, 1);
   }
 
   deconfigure(this);
@@ -266,6 +271,34 @@ void opengl_onRestart(LG_Renderer * renderer)
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   this->waiting = true;
+  this->start   = false;
+}
+
+static void setupModelView(struct Inst * this)
+{
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+
+  if (!this->destRect.valid)
+    return;
+
+  int fw, fh;
+  if (this->spiceShow)
+  {
+    fw = this->spiceSize.x;
+    fh = this->spiceSize.y;
+  }
+  else
+  {
+    fw = this->format.frameWidth;
+    fh = this->format.frameHeight;
+  }
+  glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
+  glScalef(
+    (float)this->destRect.w / (float)fw,
+    (float)this->destRect.h / (float)fh,
+    1.0f
+  );
 }
 
 void opengl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
@@ -291,19 +324,6 @@ void opengl_onResize(LG_Renderer * renderer, const int width, const int height, 
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
   glOrtho(0, this->window.x, this->window.y, 0, -1, 1);
-
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
-
-  if (this->destRect.valid)
-  {
-    glTranslatef(this->destRect.x, this->destRect.y, 0.0f);
-    glScalef(
-      (float)this->destRect.w / (float)this->format.frameWidth,
-      (float)this->destRect.h / (float)this->format.frameHeight,
-      1.0f
-    );
-  }
 
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL2_Shutdown();
@@ -381,18 +401,7 @@ bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd
   atomic_store_explicit(&this->frameUpdate, true, memory_order_release);
   LG_UNLOCK(this->frameLock);
 
-  if (this->waiting)
-  {
-    this->waiting = false;
-    if (!this->params.quickSplash)
-      this->waitFadeTime = microtime() + FADE_TIME;
-    else
-    {
-      glDisable(GL_MULTISAMPLE);
-      this->waitDone = true;
-    }
-  }
-
+  this->start = true;
   return true;
 }
 
@@ -456,6 +465,7 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
   // generate lists for drawing
   this->texList   = glGenLists(BUFFER_COUNT);
   this->mouseList = glGenLists(1);
+  this->spiceList = glGenLists(1);
 
   // create the overlay textures
   glGenTextures(TEXTURE_COUNT, this->textures);
@@ -489,6 +499,20 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  setupModelView(this);
+
+  if (this->start && this->waiting)
+  {
+    this->waiting = false;
+    if (!this->params.quickSplash)
+      this->waitFadeTime = microtime() + FADE_TIME;
+    else
+    {
+      glDisable(GL_MULTISAMPLE);
+      this->waitDone = true;
+    }
+  }
+
   switch(configure(this))
   {
     case CONFIG_STATUS_ERROR:
@@ -508,10 +532,14 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
     renderWait(this);
   else
   {
-    bool newShape;
-    updateMouseShape(this, &newShape);
-    glCallList(this->texList + this->texRIndex);
-    drawMouse(this);
+    if (this->spiceShow)
+      glCallList(this->spiceList);
+    else
+    {
+      updateMouseShape(this);
+      glCallList(this->texList + this->texRIndex);
+      drawMouse(this);
+    }
 
     if (!this->waitDone)
       renderWait(this);
@@ -569,6 +597,9 @@ static void renderWait(struct Inst * this)
     a = 1.0f;
   else
   {
+    if (this->waitDone)
+      return;
+
     uint64_t t = microtime();
     if (t > this->waitFadeTime)
     {
@@ -626,10 +657,127 @@ static void renderWait(struct Inst * this)
   drawTorusArc(-14, 83, 5, 7, 10, M_PI       , M_PI / 2.0f);
   drawTorusArc( 14, 83, 5, 7, 10, M_PI * 1.5f, M_PI / 2.0f);
 
-  //FIXME: draw the diagnoal marks on the circle
+  //FIXME: draw the diagonal marks on the circle
 
   glPopMatrix();
   glDisable(GL_BLEND);
+}
+
+static void opengl_spiceConfigure(LG_Renderer * renderer, int width, int height)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  this->spiceSize.x = width;
+  this->spiceSize.y = height;
+
+  glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glTexImage2D
+  (
+    GL_TEXTURE_2D,
+    0      ,
+    GL_RGBA,
+    width  ,
+    height ,
+    0      ,
+    GL_BGRA,
+    GL_UNSIGNED_BYTE,
+    0
+  );
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  // create the display lists
+  glNewList(this->spiceList, GL_COMPILE);
+    glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_TRIANGLE_STRIP);
+      glTexCoord2f(0.0f, 0.0f); glVertex2i(0, 0);
+      glTexCoord2f(1.0f, 0.0f); glVertex2i(this->spiceSize.x, 0);
+      glTexCoord2f(0.0f, 1.0f); glVertex2i(0, this->spiceSize.y);
+      glTexCoord2f(1.0f, 1.0f);
+      glVertex2i(this->spiceSize.x, this->spiceSize.y);
+    glEnd();
+    glBindTexture(GL_TEXTURE_2D, 0);
+  glEndList();
+}
+
+static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width,
+    int height, uint32_t color)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
+  /* this is a fairly hacky way to do this, but since it's only for the fallback
+   * spice display it's not really an issue */
+
+  uint32_t line[width];
+  for(int x = 0; x < width; ++x)
+    line[x] = color;
+
+  glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+  for(; y < height; ++y)
+    glTexSubImage2D
+    (
+      GL_TEXTURE_2D,
+      0      ,
+      x      ,
+      y      ,
+      width  ,
+      1      ,
+      GL_BGRA,
+      GL_UNSIGNED_BYTE,
+      line
+    );
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int width,
+    int height, int stride, uint8_t * data, bool topDown)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
+  if (!topDown)
+  {
+    // this is non-optimal but as spice is a fallback it's not too critical
+    uint8_t line[stride];
+    for(int y = 0; y < height / 2; ++y)
+    {
+      uint8_t * top = data + y                * stride;
+      uint8_t * btm = data + (height - y - 1) * stride;
+      memcpy(line, top , stride);
+      memcpy(top , btm , stride);
+      memcpy(btm , line, stride);
+    }
+  }
+
+  glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glPixelStorei(GL_UNPACK_ALIGNMENT , 4         );
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
+  glTexSubImage2D
+  (
+    GL_TEXTURE_2D,
+    0      ,
+    x      ,
+    y      ,
+    width  ,
+    height ,
+    GL_BGRA,
+    GL_UNSIGNED_BYTE,
+    data
+  );
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+static void opengl_spiceShow(LG_Renderer * renderer, bool show)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  this->spiceShow = show;
+  if (show)
+    this->start = true;
 }
 
 const LG_RendererOps LGR_OpenGL =
@@ -648,7 +796,12 @@ const LG_RendererOps LGR_OpenGL =
   .onFrame       = opengl_onFrame,
   .renderStartup = opengl_renderStartup,
   .needsRender   = opengl_needsRender,
-  .render        = opengl_render
+  .render        = opengl_render,
+
+  .spiceConfigure  = opengl_spiceConfigure,
+  .spiceDrawFill   = opengl_spiceDrawFill,
+  .spiceDrawBitmap = opengl_spiceDrawBitmap,
+  .spiceShow       = opengl_spiceShow
 };
 
 static bool _checkGLError(unsigned int line, const char * name)
@@ -915,10 +1068,9 @@ static void deconfigure(struct Inst * this)
   this->configured = false;
 }
 
-static void updateMouseShape(struct Inst * this, bool * newShape)
+static void updateMouseShape(struct Inst * this)
 {
   LG_LOCK(this->mouseLock);
-  *newShape = this->newShape;
   if (!this->newShape)
   {
     LG_UNLOCK(this->mouseLock);
