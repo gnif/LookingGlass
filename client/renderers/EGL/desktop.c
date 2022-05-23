@@ -502,6 +502,18 @@ void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)
 void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
     int height, uint32_t color)
 {
+  /* this is a fairly hacky way to do this, but since it's only for the fallback
+   * spice display it's not really an issue */
+
+  uint32_t line[width];
+  for(int x = 0; x < width; ++x)
+    line[x] = color;
+
+  for(; y < height; ++y)
+    egl_textureUpdateRect(desktop->spiceTexture,
+        x, y, width, 1, sizeof(line), (uint8_t *)line, false);
+
+  atomic_store(&desktop->processFrame, true);
 }
 
 void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,

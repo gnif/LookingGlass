@@ -885,6 +885,7 @@ static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
   core_updatePositionInfo();
 
   renderQueue_spiceConfigure(width, height);
+  renderQueue_spiceDrawFill(0, 0, width, height, 0x0);
 }
 
 static void spice_surfaceDestroy(unsigned int surfaceId)
