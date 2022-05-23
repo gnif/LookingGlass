@@ -1009,17 +1009,48 @@ bool app_guestIsOther(void)
   return g_state.guestOS == KVMFR_OS_OTHER;
 }
 
+void app_stopVideo(bool stop)
+{
+  if (g_state.stopVideo == stop)
+    return;
+
+  // do not change the state if the host app is not connected
+  if (!g_state.lgHostConnected)
+    return;
+
+  g_state.stopVideo = stop;
+
+  app_alert(
+    LG_ALERT_INFO,
+    stop ? "Video Stream Disabled" : "Video Stream Enabled"
+  );
+
+  if (stop)
+  {
+    core_stopCursorThread();
+    core_stopFrameThread();
+  }
+  else
+  {
+    core_startCursorThread();
+    core_startFrameThread();
+  }
+}
+
 void app_useSpiceDisplay(bool enable)
 {
-  static bool enabled = false;
-
-  if (!g_params.useSpice || enabled == enable)
+  static bool lastState = false;
+  if (!g_params.useSpice || lastState == enable)
     return;
 
   if (!purespice_hasChannel(PS_CHANNEL_DISPLAY))
     return;
 
-  enabled = enable;
+  // do not allow stopping of the host app is not connected
+  if (!enable && !g_state.lgHostConnected)
+    return;
+
+  lastState = enable;
   if (enable)
   {
     purespice_connectChannel(PS_CHANNEL_DISPLAY);

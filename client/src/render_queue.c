@@ -54,6 +54,9 @@ void renderQueue_clear(void)
 
 void renderQueue_spiceConfigure(int width, int height)
 {
+  // reconfigurations invalidate the entire queue
+  renderQueue_clear();
+
   RenderCommand * cmd = malloc(sizeof(*cmd));
   cmd->op               = SPICE_OP_CONFIGURE;
   cmd->configure.width  = width;

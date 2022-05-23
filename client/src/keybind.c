@@ -35,22 +35,7 @@ static void bind_fullscreen(int sc, void * opaque)
 
 static void bind_video(int sc, void * opaque)
 {
-  g_state.stopVideo = !g_state.stopVideo;
-  app_alert(
-    LG_ALERT_INFO,
-    g_state.stopVideo ? "Video Stream Disabled" : "Video Stream Enabled"
-  );
-
-  if (g_state.stopVideo)
-  {
-    core_stopCursorThread();
-    core_stopFrameThread();
-  }
-  else
-  {
-    core_startCursorThread();
-    core_startFrameThread();
-  }
+  app_stopVideo(!g_state.stopVideo);
 }
 
 static void bind_rotate(int sc, void * opaque)

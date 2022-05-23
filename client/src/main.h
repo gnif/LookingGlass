@@ -75,6 +75,8 @@ struct AppState
   bool    guestUUIDValid;
   KVMFROS guestOS;
 
+  bool lgHostConnected;
+
   bool                 stopVideo;
   bool                 ignoreInput;
   bool                 escapeActive;

@@ -600,9 +600,6 @@ int main_frameThread(void * unused)
       break;
     }
 
-    // disable the spice display as we have a frame from the LG host
-    app_useSpiceDisplay(false);
-
     KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
 
     // ignore any repeated frames, this happens when a new client connects to
@@ -805,6 +802,9 @@ int main_frameThread(void * unused)
       lgSignalEvent(g_state.frameEvent);
 
     lgmpClientMessageDone(queue);
+
+    // switch over to the LG stream
+    app_useSpiceDisplay(false);
   }
 
   lgmpClientUnsubscribe(&queue);
@@ -890,8 +890,7 @@ static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
 static void spice_surfaceDestroy(unsigned int surfaceId)
 {
   DEBUG_INFO("Destroy spice surface %d", surfaceId);
-  if (g_state.lgr)
-    RENDERER(spiceShow, false);
+  app_useSpiceDisplay(false);
 }
 
 static void spice_drawFill(unsigned int surfaceId, int x, int y, int width,
@@ -933,6 +932,7 @@ int spiceThread(void * arg)
     .display  =
     {
       .enable         = true,
+      .autoConnect    = false,
       .surfaceCreate  = spice_surfaceCreate,
       .surfaceDestroy = spice_surfaceDestroy,
       .drawFill       = spice_drawFill,
@@ -1316,9 +1316,8 @@ static int lg_run(void)
   if (g_state.cbAvailable)
     g_state.cbRequestList = ll_new();
 
-  // fallback to the spice display
-  if (g_params.useSpice && purespice_hasChannel(PS_CHANNEL_DISPLAY))
-    purespice_connectChannel(PS_CHANNEL_DISPLAY);
+  // use the spice display until we get frames from the LG host application
+  app_useSpiceDisplay(true);
 
   LGMP_STATUS status;
 
@@ -1574,7 +1573,10 @@ restart:
   checkUUID();
 
   if (g_state.state == APP_STATE_RUNNING)
+  {
     DEBUG_INFO("Starting session");
+    g_state.lgHostConnected = true;
+  }
 
   g_state.kvmfrFeatures = udata->features;
 
@@ -1589,6 +1591,7 @@ restart:
   {
     if (!lgmpClientSessionValid(g_state.lgmp))
     {
+      g_state.lgHostConnected = false;
       DEBUG_INFO("Waiting for the host to restart...");
       g_state.state = APP_STATE_RESTART;
       break;
@@ -1604,11 +1607,8 @@ restart:
     core_stopFrameThread();
     core_stopCursorThread();
 
-
     g_state.state = APP_STATE_RUNNING;
     lgInit();
-
-    RENDERER(onRestart);
     goto restart;
   }
 
@@ -1720,7 +1720,6 @@ int main(int argc, char * argv[])
   app_registerOverlay(&LGOverlayHelp  , NULL);
   app_registerOverlay(&LGOverlayMsg   , NULL);
   app_registerOverlay(&LGOverlayRecord, NULL);
-
 
   // early renderer setup for option registration
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)

@@ -180,6 +180,11 @@ bool app_guestIsBSD(void);
 bool app_guestIsOther(void);
 
 /**
+ * Enable/disable the LG display
+ */
+void app_stopVideo(bool stop);
+
+/**
  * Enable/disable the spice display
  */
 void app_useSpiceDisplay(bool enable);
