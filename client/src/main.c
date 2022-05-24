@@ -1178,6 +1178,20 @@ static int lg_run(void)
     return -1;
   }
 
+  // setup the startup condition
+  if (!(e_startup = lgCreateEvent(false, 0)))
+  {
+    DEBUG_ERROR("failed to create the startup event");
+    return -1;
+  }
+
+  // setup the new frame event
+  if (!(g_state.frameEvent = lgCreateEvent(!g_state.jitRender, 0)))
+  {
+    DEBUG_ERROR("failed to create the frame event");
+    return -1;
+  }
+
   //setup the render command queue
   renderQueue_init();
 
@@ -1289,20 +1303,6 @@ static int lg_run(void)
   g_state.overlayFrameTime = min(g_state.frameTime, 1000000000ULL / 60ULL);
 
   keybind_commonRegister();
-
-  // setup the startup condition
-  if (!(e_startup = lgCreateEvent(false, 0)))
-  {
-    DEBUG_ERROR("failed to create the startup event");
-    return -1;
-  }
-
-  // setup the new frame event
-  if (!(g_state.frameEvent = lgCreateEvent(!g_state.jitRender, 0)))
-  {
-    DEBUG_ERROR("failed to create the frame event");
-    return -1;
-  }
 
   if (g_state.jitRender)
     DEBUG_INFO("Using JIT render mode");
