@@ -280,7 +280,6 @@ static void egl_deinitialize(LG_Renderer * renderer)
   if (this->imgui)
     ImGui_ImplOpenGL3_Shutdown();
 
-  app_unregisterGraph(this->importGraph);
   ringbuffer_free(&this->importTimings);
 
   egl_desktopFree(&this->desktop);

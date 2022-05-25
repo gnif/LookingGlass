@@ -201,6 +201,8 @@ static int renderThread(void * unused)
 
   LG_LOCK_INIT(g_state.lgrLock);
 
+  app_initOverlays();
+
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
@@ -321,6 +323,13 @@ static int renderThread(void * unused)
   }
 
   g_state.state = APP_STATE_SHUTDOWN;
+
+  if (g_state.overlays)
+  {
+    app_freeOverlays();
+    ll_free(g_state.overlays);
+    g_state.overlays = NULL;
+  }
 
   lgTimerDestroy(tickTimer);
   lgTimerDestroy(fpsTimer);
@@ -1125,8 +1134,6 @@ static int lg_run(void)
   ImFontGlyphRangesBuilder_BuildRanges(rangeBuilder, &g_state.fontRange);
   ImFontGlyphRangesBuilder_destroy(rangeBuilder);
 
-  app_initOverlays();
-
   // initialize metrics ringbuffers
   g_state.renderTimings  = ringbuffer_new(256, sizeof(float));
   g_state.uploadTimings  = ringbuffer_new(256, sizeof(float));
@@ -1665,13 +1672,6 @@ static void lg_shutdown(void)
 
   if (g_state.dsInitialized)
     g_state.ds->free();
-
-  if (g_state.overlays)
-  {
-    app_freeOverlays();
-    ll_free(g_state.overlays);
-    g_state.overlays = NULL;
-  }
 
   ivshmemClose(&g_state.shm);
 

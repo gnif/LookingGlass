@@ -980,6 +980,9 @@ void app_overlayConfigRegisterTab(const char * title,
 
 void app_invalidateOverlay(bool renderTwice)
 {
+  if (g_state.state == APP_STATE_SHUTDOWN)
+    return;
+
   if (renderTwice)
     g_state.renderImGuiTwice = true;
   app_invalidateWindow(false);

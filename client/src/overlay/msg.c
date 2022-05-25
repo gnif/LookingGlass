@@ -46,9 +46,13 @@ struct MsgState
 
 struct MsgState l_msg = { 0 };
 
-static bool msg_init(void ** udata, const void * params)
+static void msg_earlyInit(void)
 {
   l_msg.messages = ll_new();
+}
+
+static bool msg_init(void ** udata, const void * params)
+{
   return true;
 }
 
@@ -168,6 +172,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
 struct LG_OverlayOps LGOverlayMsg =
 {
   .name           = "msg",
+  .earlyInit      = msg_earlyInit,
   .init           = msg_init,
   .free           = msg_free,
   .needs_overlay  = msg_needsOverlay,

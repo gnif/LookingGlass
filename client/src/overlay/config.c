@@ -46,16 +46,14 @@ OverlayConfig;
 
 static OverlayConfig cfg = { 0 };
 
-static bool config_init(void ** udata, const void * params)
+static void config_earlyInit(void)
 {
   cfg.callbacks    = ll_new();
   cfg.tabCallbacks = ll_new();
-  if (!cfg.callbacks)
-  {
-    DEBUG_ERROR("failed to allocate ram");
-    return false;
-  }
+}
 
+static bool config_init(void ** udata, const void * params)
+{
   return true;
 }
 
@@ -239,6 +237,7 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
 struct LG_OverlayOps LGOverlayConfig =
 {
   .name           = "Config",
+  .earlyInit      = config_earlyInit,
   .init           = config_init,
   .free           = config_free,
   .render         = config_render

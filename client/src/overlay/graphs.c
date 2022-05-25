@@ -70,9 +70,13 @@ static void showTimingKeybind(int sc, void * opaque)
   app_invalidateWindow(false);
 }
 
-static bool graphs_init(void ** udata, const void * params)
+static void graphs_earlyInit(void)
 {
   gs.graphs = ll_new();
+}
+
+static bool graphs_init(void ** udata, const void * params)
+{
   app_overlayConfigRegister("Performance Metrics", configCallback, NULL);
   app_registerKeybind(KEY_T, showTimingKeybind, NULL,
       "Show frame timing information");
@@ -207,6 +211,7 @@ static int graphs_render(void * udata, bool interactive,
 struct LG_OverlayOps LGOverlayGraphs =
 {
   .name           = "Graphs",
+  .earlyInit      = graphs_earlyInit,
   .init           = graphs_init,
   .free           = graphs_free,
   .render         = graphs_render
