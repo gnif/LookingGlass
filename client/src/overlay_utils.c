@@ -26,6 +26,11 @@
 #include "cimgui.h"
 #include "main.h"
 
+#define NANOSVG_IMPLEMENTATION
+#define NANOSVG_ALL_COLOR_KEYWORDS
+#define NANOSVGRAST_IMPLEMENTATION
+#include "nanosvgrast.h"
+
 void overlayGetImGuiRect(struct Rect * rect)
 {
   ImVec2 size;
@@ -77,4 +82,94 @@ void overlayTextMaybeURL(const char * text, bool wrapped)
     igTextWrapped(text);
   else
     igText(text);
+}
+
+bool overlayLoadSVG(const char * data, unsigned int size, OverlayImage * image,
+    int width, int height)
+{
+  image->tex = NULL;
+
+  //nsvgParse alters the data, we need to make a copy and null terminate it
+  char * svg = malloc(size + 1);
+  if (!svg)
+  {
+    DEBUG_ERROR("out of ram");
+    goto err;
+  }
+
+  memcpy(svg, data, size);
+  svg[size] = 0;
+
+  NSVGimage * nvi = nsvgParse(svg, "px", 96.0);
+  if (!nvi)
+  {
+    free(svg);
+    DEBUG_ERROR("nvsgParseFromData failed");
+    goto err;
+  }
+  free(svg);
+
+  NSVGrasterizer * rast = nsvgCreateRasterizer();
+  if (!rast)
+  {
+    DEBUG_ERROR("nsvgCreateRasterizer failed");
+    goto err_image;
+  }
+
+  double srcAspect = nvi->width / nvi->height;
+  double dstAspect = (double)width / (double)height;
+  float  scale;
+  if (dstAspect > srcAspect)
+  {
+    image->width  = (double)height * srcAspect;
+    image->height = height;
+    scale         = (float)image->width / nvi->width;
+  }
+  else
+  {
+    image->width  = width;
+    image->height = (double)width / srcAspect;
+    scale         = (float)image->height / nvi->height;
+  }
+
+  uint8_t * img = malloc(image->width * image->height * 4);
+  if (!img)
+  {
+    DEBUG_ERROR("out of ram");
+    goto err_rast;
+  }
+
+  nsvgRasterize(rast, nvi,
+      0.0f, 0.0f,
+      scale,
+      img,
+      image->width,
+      image->height,
+      image->width * 4);
+
+  image->tex = RENDERER(createTexture, image->width, image->height, img);
+  free(img);
+
+  if (!image->tex)
+  {
+    DEBUG_ERROR("renderer failed to create the texture");
+    goto err_rast;
+  }
+
+err_rast:
+  nsvgDeleteRasterizer(rast);
+
+err_image:
+  nsvgDelete(nvi);
+
+err:
+  return image->tex != NULL;
+}
+
+void overlayFreeImage(OverlayImage * image)
+{
+  if (!image->tex)
+    return;
+
+  RENDERER(freeTexture, image->tex);
 }

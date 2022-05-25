@@ -676,7 +676,7 @@ void app_msgBoxClose(MsgBoxHandle handle)
 
 void app_showRecord(bool show)
 {
-  overlayRecord_show(show);
+  overlayStatus_set(LG_USER_STATUS_RECORDING, show);
 }
 
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
@@ -1072,4 +1072,5 @@ void app_useSpiceDisplay(bool enable)
     renderQueue_spiceShow(false);
     purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
   }
+  overlayStatus_set(LG_USER_STATUS_SPICE, enable);
 }

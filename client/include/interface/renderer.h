@@ -172,6 +172,17 @@ typedef struct LG_RendererOps
       const bool newFrame, const bool invalidateWindow,
       void (*preSwap)(void * udata), void * udata);
 
+  /* called to create a texture from the specified 32-bit RGB image data. This
+   * method is for use with Dear ImGui
+   * Context: renderThread */
+  void * (*createTexture)(LG_Renderer * renderer,
+      int width, int height, uint8_t * data);
+
+  /* called to free a texture previously created by createTexture. This method
+   * is for use with Dear ImGui
+   * Context: renderThread */
+  void (*freeTexture)(LG_Renderer * renderer, void * texture);
+
   /* setup the spice display */
   void (*spiceConfigure)(LG_Renderer * renderer, int width, int height);
 

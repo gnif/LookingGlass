@@ -39,7 +39,7 @@ extern struct LG_OverlayOps LGOverlayGraphs;
 extern struct LG_OverlayOps LGOverlayHelp;
 extern struct LG_OverlayOps LGOverlayConfig;
 extern struct LG_OverlayOps LGOverlayMsg;
-extern struct LG_OverlayOps LGOverlayRecord;
+extern struct LG_OverlayOps LGOverlayStatus;
 
 void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args);
 
@@ -56,6 +56,14 @@ void overlayConfig_register(const char * title,
 void overlayConfig_registerTab(const char * title,
     void (*callback)(void * udata, int * id), void * udata);
 
-void overlayRecord_show(bool show);
+typedef enum LG_UserStatus
+{
+  LG_USER_STATUS_SPICE,
+  LG_USER_STATUS_RECORDING,
+  LG_USER_STATUS_MAX
+}
+LGUserStatus;
+
+void overlayStatus_set(LGUserStatus, bool value);
 
 #endif

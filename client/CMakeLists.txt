@@ -110,7 +110,10 @@ add_custom_command(
 include_directories(
 	${PROJECT_TOP}
 	${PROJECT_SOURCE_DIR}/include
+	${CMAKE_BINARY_DIR}
 	${CMAKE_BINARY_DIR}/include
+
+        ${PROJECT_TOP}/repos/nanosvg/src
 )
 
 link_libraries(
@@ -142,12 +145,13 @@ set(SOURCES
 	src/overlay/help.c
 	src/overlay/config.c
 	src/overlay/msg.c
-	src/overlay/record.c
+	src/overlay/status.c
 )
 
 # Force cimgui to build as a static library.
 set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
 
+add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
 add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
@@ -163,6 +167,7 @@ target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_
 target_link_libraries(looking-glass-client
 	${EXE_FLAGS}
 	PkgConfig::FONTCONFIG
+	lg_resources
 	lg_common
 	displayservers
 	lgmp

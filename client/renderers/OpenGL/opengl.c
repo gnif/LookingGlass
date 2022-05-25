@@ -663,6 +663,41 @@ static void renderWait(struct Inst * this)
   glDisable(GL_BLEND);
 }
 
+static void * opengl_createTexture(LG_Renderer * renderer,
+  int width, int height, uint8_t * data)
+{
+  GLuint tex;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+  glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_RGBA,
+      width,
+      height,
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      data);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  return (void*)(intptr_t)tex;
+}
+
+static void opengl_freeTexture(LG_Renderer * renderer, void * texture)
+{
+  GLuint tex = (GLuint)(intptr_t)texture;
+  glDeleteTextures(1, &tex);
+}
+
 static void opengl_spiceConfigure(LG_Renderer * renderer, int width, int height)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -797,6 +832,8 @@ const LG_RendererOps LGR_OpenGL =
   .renderStartup = opengl_renderStartup,
   .needsRender   = opengl_needsRender,
   .render        = opengl_render,
+  .createTexture = opengl_createTexture,
+  .freeTexture   = opengl_freeTexture,
 
   .spiceConfigure  = opengl_spiceConfigure,
   .spiceDrawFill   = opengl_spiceDrawFill,

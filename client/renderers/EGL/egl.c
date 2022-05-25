@@ -1210,6 +1210,41 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   return true;
 }
 
+static void * egl_createTexture(LG_Renderer * renderer,
+  int width, int height, uint8_t * data)
+{
+  GLuint tex;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+  glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_RGBA,
+      width,
+      height,
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      data);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  return (void*)(intptr_t)tex;
+}
+
+static void egl_freeTexture(LG_Renderer * renderer, void * texture)
+{
+  GLuint tex = (GLuint)(intptr_t)texture;
+  glDeleteTextures(1, &tex);
+}
+
 static void egl_spiceConfigure(LG_Renderer * renderer, int width, int height)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -1257,6 +1292,8 @@ struct LG_RendererOps LGR_EGL =
   .renderStartup = egl_renderStartup,
   .needsRender   = egl_needsRender,
   .render        = egl_render,
+  .createTexture = egl_createTexture,
+  .freeTexture   = egl_freeTexture,
 
   .spiceConfigure  = egl_spiceConfigure,
   .spiceDrawFill   = egl_spiceDrawFill,

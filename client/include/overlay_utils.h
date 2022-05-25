@@ -27,9 +27,23 @@
 
 typedef struct ImVec2 ImVec2;
 
+typedef struct
+{
+  void * tex;
+  int    width;
+  int    height;
+}
+OverlayImage;
+
 void overlayGetImGuiRect(struct Rect * rect);
 ImVec2 * overlayGetScreenSize(void);
 void overlayTextURL(const char * url, const char * text);
 void overlayTextMaybeURL(const char * text, bool wrapped);
+
+// create a texture from a SVG and scale it to fit the supplied width & height
+bool overlayLoadSVG(const char * data, unsigned int size, OverlayImage * image,
+    int width, int height);
+
+void overlayFreeImage(OverlayImage * image);
 
 #endif
