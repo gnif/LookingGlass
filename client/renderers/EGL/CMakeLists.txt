@@ -82,7 +82,6 @@ add_library(renderer_EGL STATIC
 	desktop.c
 	desktop_rects.c
 	cursor.c
-	draw.c
 	damage.c
 	framebuffer.c
 	postprocess.c
