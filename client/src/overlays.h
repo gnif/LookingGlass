@@ -33,6 +33,7 @@ struct Overlay
   struct Rect  lastRects[MAX_OVERLAY_RECTS];
 };
 
+extern struct LG_OverlayOps LGOverlaySplash;
 extern struct LG_OverlayOps LGOverlayAlert;
 extern struct LG_OverlayOps LGOverlayFPS;
 extern struct LG_OverlayOps LGOverlayGraphs;
@@ -64,6 +65,7 @@ typedef enum LG_UserStatus
 }
 LGUserStatus;
 
+void overlaySplash_show(bool show);
 void overlayStatus_set(LGUserStatus, bool value);
 
 #endif

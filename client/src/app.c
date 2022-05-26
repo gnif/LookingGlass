@@ -1066,6 +1066,7 @@ void app_useSpiceDisplay(bool enable)
   {
     purespice_connectChannel(PS_CHANNEL_DISPLAY);
     renderQueue_spiceShow(true);
+    overlaySplash_show(false);
   }
   else
   {

@@ -139,6 +139,7 @@ set(SOURCES
 	src/overlay_utils.c
 	src/render_queue.c
 
+	src/overlay/splash.c
 	src/overlay/alert.c
 	src/overlay/fps.c
 	src/overlay/graphs.c

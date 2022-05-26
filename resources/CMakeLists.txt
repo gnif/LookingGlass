@@ -15,6 +15,7 @@ function(build_resources)
 endfunction()
 
 build_resources(
+	lg-logo.svg
 	status/spice.svg
 	status/recording.svg
 )

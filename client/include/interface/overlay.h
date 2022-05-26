@@ -25,6 +25,8 @@
 
 #include "common/types.h"
 
+#define TICK_RATE 25
+
 struct LG_OverlayOps
 {
   /* internal name of the overlay for debugging */
@@ -63,7 +65,7 @@ struct LG_OverlayOps
   int (*render)(void * udata, bool interactive, struct Rect * windowRects,
       int maxRects);
 
-  /* called 25 times a second by the application
+  /* called TICK_RATE times a second by the application
    *
    * Note: This may not run in the same context as `render`!
    *

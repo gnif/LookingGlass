@@ -192,7 +192,7 @@ static int renderThread(void * unused)
   }
 
   LGTimer * tickTimer;
-  if (!lgCreateTimer(40, tickTimerFn, NULL, &tickTimer))
+  if (!lgCreateTimer(1000 / TICK_RATE, tickTimerFn, NULL, &tickTimer))
   {
     lgTimerDestroy(fpsTimer);
     DEBUG_ERROR("Failed to create the tick timer");
@@ -779,6 +779,8 @@ int main_frameThread(void * unused)
       break;
     }
 
+    overlaySplash_show(false);
+
     if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
       g_state.ds->requestActivation();
 
@@ -821,7 +823,10 @@ int main_frameThread(void * unused)
   RENDERER(onRestart);
 
   if (g_state.state != APP_STATE_SHUTDOWN)
+  {
+    overlaySplash_show(true);
     app_useSpiceDisplay(true);
+  }
 
   if (g_state.useDMA)
   {
@@ -1719,6 +1724,7 @@ int main(int argc, char * argv[])
   gl_dynProcsInit();
 
   g_state.overlays = ll_new();
+  app_registerOverlay(&LGOverlaySplash, NULL);
   app_registerOverlay(&LGOverlayConfig, NULL);
   app_registerOverlay(&LGOverlayAlert , NULL);
   app_registerOverlay(&LGOverlayFPS   , NULL);

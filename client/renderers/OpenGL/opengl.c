@@ -45,8 +45,6 @@
 #define SPICE_TEXTURE      2
 #define TEXTURE_COUNT      3
 
-#define FADE_TIME 1000000
-
 static struct Option opengl_options[] =
 {
   {
@@ -147,11 +145,6 @@ struct Inst
   GLsync            fences[BUFFER_COUNT];
   GLuint            textures[TEXTURE_COUNT];
 
-  bool              start;
-  bool              waiting;
-  uint64_t          waitFadeTime;
-  bool              waitDone;
-
   LG_Lock           mouseLock;
   LG_RendererCursor mouseCursor;
   int               mouseWidth;
@@ -182,7 +175,6 @@ static enum ConfigStatus configure(struct Inst * this);
 static void updateMouseShape(struct Inst * this);
 static bool drawFrame(struct Inst * this);
 static void drawMouse(struct Inst * this);
-static void renderWait(struct Inst * this);
 
 const char * opengl_getName(void)
 {
@@ -222,10 +214,7 @@ bool opengl_create(LG_Renderer ** renderer, const LG_RendererParams params,
 
 bool opengl_initialize(LG_Renderer * renderer)
 {
-  struct Inst * this = UPCAST(struct Inst, renderer);
-
-  this->waiting  = true;
-  this->waitDone = false;
+//  struct Inst * this = UPCAST(struct Inst, renderer);
   return true;
 }
 
@@ -268,10 +257,7 @@ void opengl_deinitialize(LG_Renderer * renderer)
 
 void opengl_onRestart(LG_Renderer * renderer)
 {
-  struct Inst * this = UPCAST(struct Inst, renderer);
-
-  this->waiting = true;
-  this->start   = false;
+//  struct Inst * this = UPCAST(struct Inst, renderer);
 }
 
 static void setupModelView(struct Inst * this)
@@ -401,7 +387,6 @@ bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd
   atomic_store_explicit(&this->frameUpdate, true, memory_order_release);
   LG_UNLOCK(this->frameLock);
 
-  this->start = true;
   return true;
 }
 
@@ -490,8 +475,8 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
 static bool opengl_needsRender(LG_Renderer * renderer)
 {
-  struct Inst * this = UPCAST(struct Inst, renderer);
-  return !this->waitDone;
+//  struct Inst * this = UPCAST(struct Inst, renderer);
+  return false;
 }
 
 bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool newFrame,
@@ -500,18 +485,6 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   setupModelView(this);
-
-  if (this->start && this->waiting)
-  {
-    this->waiting = false;
-    if (!this->params.quickSplash)
-      this->waitFadeTime = microtime() + FADE_TIME;
-    else
-    {
-      glDisable(GL_MULTISAMPLE);
-      this->waitDone = true;
-    }
-  }
 
   switch(configure(this))
   {
@@ -528,21 +501,13 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
-  if (this->waiting)
-    renderWait(this);
+  if (this->spiceShow)
+    glCallList(this->spiceList);
   else
   {
-    if (this->spiceShow)
-      glCallList(this->spiceList);
-    else
-    {
-      updateMouseShape(this);
-      glCallList(this->texList + this->texRIndex);
-      drawMouse(this);
-    }
-
-    if (!this->waitDone)
-      renderWait(this);
+    updateMouseShape(this);
+    glCallList(this->texList + this->texRIndex);
+    drawMouse(this);
   }
 
   if (app_renderOverlay(NULL, 0) != 0)
@@ -562,105 +527,6 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
 
   this->mouseUpdate = false;
   return true;
-}
-
-static void drawTorus(float x, float y, float inner, float outer,
-  unsigned int pts)
-{
-  glBegin(GL_QUAD_STRIP);
-  for (unsigned int i = 0; i <= pts; ++i)
-  {
-    float angle = (i / (float)pts) * M_PI * 2.0f;
-    glVertex2f(x + (inner * cos(angle)), y + (inner * sin(angle)));
-    glVertex2f(x + (outer * cos(angle)), y + (outer * sin(angle)));
-  }
-  glEnd();
-}
-
-static void drawTorusArc(float x, float y, float inner, float outer,
-  unsigned int pts, float s, float e)
-{
-  glBegin(GL_QUAD_STRIP);
-  for (unsigned int i = 0; i <= pts; ++i)
-  {
-    float angle = s + ((i / (float)pts) * e);
-    glVertex2f(x + (inner * cos(angle)), y + (inner * sin(angle)));
-    glVertex2f(x + (outer * cos(angle)), y + (outer * sin(angle)));
-  }
-  glEnd();
-}
-
-static void renderWait(struct Inst * this)
-{
-  float a;
-  if (this->waiting)
-    a = 1.0f;
-  else
-  {
-    if (this->waitDone)
-      return;
-
-    uint64_t t = microtime();
-    if (t > this->waitFadeTime)
-    {
-      glDisable(GL_MULTISAMPLE);
-      this->waitDone = true;
-      return;
-    }
-
-    uint64_t delta = this->waitFadeTime - t;
-    a = 1.0f / FADE_TIME * delta;
-  }
-
-  glEnable(GL_BLEND);
-  glPushMatrix();
-  glLoadIdentity();
-  glTranslatef(this->window.x / 2.0f, this->window.y / 2.0f, 0.0f);
-
-  //draw the background gradient
-  glBegin(GL_TRIANGLE_FAN);
-  glColor4f(0.234375f, 0.015625f, 0.425781f, a);
-  glVertex2f(0, 0);
-  glColor4f(0, 0, 0, a);
-  for (unsigned int i = 0; i <= 100; ++i)
-  {
-    float angle = (i / (float)100) * M_PI * 2.0f;
-    glVertex2f(cos(angle) * this->window.x, sin(angle) * this->window.y);
-  }
-  glEnd();
-
-  // draw the logo
-  glColor4f(1.0f, 1.0f, 1.0f, a);
-  glScalef (2.0f, 2.0f, 1.0f);
-
-  drawTorus   (  0,  0, 40, 42, 60);
-  drawTorus   (  0,  0, 32, 34, 60);
-  drawTorus   (-50, -3,  2,  4, 30);
-  drawTorus   ( 50, -3,  2,  4, 30);
-  drawTorusArc(  0,  0, 51, 49, 60, 0.0f, M_PI);
-
-  glBegin(GL_QUADS);
-    glVertex2f(-1 , 50);
-    glVertex2f(-1 , 76);
-    glVertex2f( 1 , 76);
-    glVertex2f( 1 , 50);
-    glVertex2f(-14, 76);
-    glVertex2f(-14, 78);
-    glVertex2f( 14, 78);
-    glVertex2f( 14, 76);
-    glVertex2f(-21, 83);
-    glVertex2f(-21, 85);
-    glVertex2f( 21, 85);
-    glVertex2f( 21, 83);
-  glEnd();
-
-  drawTorusArc(-14, 83, 5, 7, 10, M_PI       , M_PI / 2.0f);
-  drawTorusArc( 14, 83, 5, 7, 10, M_PI * 1.5f, M_PI / 2.0f);
-
-  //FIXME: draw the diagonal marks on the circle
-
-  glPopMatrix();
-  glDisable(GL_BLEND);
 }
 
 static void * opengl_createTexture(LG_Renderer * renderer,
@@ -811,8 +677,6 @@ static void opengl_spiceShow(LG_Renderer * renderer, bool show)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   this->spiceShow = show;
-  if (show)
-    this->start = true;
 }
 
 const LG_RendererOps LGR_OpenGL =

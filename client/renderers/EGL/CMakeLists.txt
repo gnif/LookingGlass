@@ -55,10 +55,6 @@ build_shaders(
 	shader/cursor_mono.frag
 	shader/damage.vert
 	shader/damage.frag
-	shader/splash_bg.vert
-	shader/splash_bg.frag
-	shader/splash_logo.vert
-	shader/splash_logo.frag
 	shader/basic.vert
 	shader/ffx_cas.frag
 	shader/ffx_fsr1_easu.frag
@@ -87,7 +83,6 @@ add_library(renderer_EGL STATIC
 	desktop_rects.c
 	cursor.c
 	draw.c
-	splash.c
 	damage.c
 	framebuffer.c
 	postprocess.c

@@ -45,11 +45,9 @@
 #include "damage.h"
 #include "desktop.h"
 #include "cursor.h"
-#include "splash.h"
 #include "postprocess.h"
 #include "util.h"
 
-#define SPLASH_FADE_TIME 1000000
 #define MAX_BUFFER_AGE       3
 #define DESKTOP_DAMAGE_COUNT 4
 #define MAX_ACCUMULATED_DAMAGE ((KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
@@ -77,15 +75,11 @@ struct Inst
 
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
-  EGL_Splash      * splash;  // the splash screen
   EGL_Damage      * damage;  // the damage display
   bool              imgui;   // if imgui was initialized
 
   LG_RendererFormat    format;
   bool                 formatValid;
-  bool                 start;
-  uint64_t             waitFadeTime;
-  bool                 waitDone;
 
   int               width, height;
   float             uiScale;
@@ -284,7 +278,6 @@ static void egl_deinitialize(LG_Renderer * renderer)
 
   egl_desktopFree(&this->desktop);
   egl_cursorFree (&this->cursor);
-  egl_splashFree (&this->splash);
   egl_damageFree (&this->damage);
 
   LG_LOCK_FREE(this->lock);
@@ -323,7 +316,6 @@ static void egl_onRestart(LG_Renderer * renderer)
 
   eglDestroyContext(this->display, this->frameContext);
   this->frameContext = NULL;
-  this->start        = false;
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     this->desktopDamage[this->desktopDamageIdx].count = -1;
@@ -591,8 +583,6 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
     return false;
   }
   ringbuffer_push(this->importTimings, &(float){ (nanotime() - start) * 1e-6f });
-
-  this->start = true;
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
@@ -928,12 +918,6 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
-  if (!egl_splashInit(&this->splash))
-  {
-    DEBUG_ERROR("Failed to initialize the splash screen");
-    return false;
-  }
-
   if (!egl_damageInit(&this->damage))
   {
     DEBUG_ERROR("Failed to initialize the damage display");
@@ -954,8 +938,8 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
 static bool egl_needsRender(LG_Renderer * renderer)
 {
-  struct Inst * this = UPCAST(struct Inst, renderer);
-  return !this->waitDone;
+  //struct Inst * this = UPCAST(struct Inst, renderer);
+  return false;
 }
 
 inline static EGLint egl_bufferAge(struct Inst * this)
@@ -1012,7 +996,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   EGLint bufferAge   = egl_bufferAge(this);
-  bool renderAll     = invalidateWindow || !this->start || this->hadOverlay ||
+  bool renderAll     = invalidateWindow || this->hadOverlay ||
                        bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
                        this->showSpice;
 
@@ -1089,7 +1073,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   }
   ++this->overlayHistoryIdx;
 
-  if (this->start && this->destRect.w > 0 && this->destRect.h > 0)
+  if (this->destRect.w > 0 && this->destRect.h > 0)
   {
     if (egl_desktopRender(this->desktop,
         this->destRect.w, this->destRect.h,
@@ -1097,14 +1081,6 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated))
     {
-      if (!this->waitFadeTime)
-      {
-        if (!this->params.quickSplash)
-          this->waitFadeTime = microtime() + SPLASH_FADE_TIME;
-        else
-          this->waitDone = true;
-      }
-
       if (!this->showSpice)
         cursorState = egl_cursorRender(this->cursor,
             (this->format.rotate + rotate) % LG_ROTATE_MAX,
@@ -1115,35 +1091,6 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   }
 
   renderLetterBox(this);
-
-  if (!this->waitDone)
-  {
-    float a = 1.0f;
-    if (!this->waitFadeTime)
-      a = 1.0f;
-    else
-    {
-      uint64_t t = microtime();
-      if (t > this->waitFadeTime)
-        this->waitDone = true;
-      else
-      {
-        uint64_t delta = this->waitFadeTime - t;
-        a = 1.0f / SPLASH_FADE_TIME * delta;
-      }
-    }
-
-    if (!this->waitDone)
-    {
-      egl_splashRender(this->splash, a, this->splashRatio);
-      hasOverlay = true;
-    }
-  }
-  else if (!this->start)
-  {
-    egl_splashRender(this->splash, 1.0f, this->splashRatio);
-    hasOverlay = true;
-  }
 
   hasOverlay |= egl_damageRender(this->damage, rotate, newFrame ? desktopDamage : NULL);
   hasOverlay |= invalidateWindow;
@@ -1271,8 +1218,6 @@ static void egl_spiceShow(LG_Renderer * renderer, bool show)
   struct Inst * this = UPCAST(struct Inst, renderer);
   this->showSpice = show;
   egl_desktopSpiceShow(this->desktop, show);
-  if (show)
-    this->start = true;
 }
 
 struct LG_RendererOps LGR_EGL =
