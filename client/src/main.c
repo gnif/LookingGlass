@@ -824,8 +824,8 @@ int main_frameThread(void * unused)
 
   if (g_state.state != APP_STATE_SHUTDOWN)
   {
-    overlaySplash_show(true);
-    app_useSpiceDisplay(true);
+    if (!app_useSpiceDisplay(true))
+      overlaySplash_show(true);
   }
 
   if (g_state.useDMA)

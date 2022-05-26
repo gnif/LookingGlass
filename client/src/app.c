@@ -1041,25 +1041,25 @@ void app_stopVideo(bool stop)
   }
 }
 
-void app_useSpiceDisplay(bool enable)
+bool app_useSpiceDisplay(bool enable)
 {
   static bool lastState = false;
   if (!g_params.useSpice || lastState == enable)
-    return;
+    return g_params.useSpice && lastState;
 
   // if spice is not yet ready, flag the state we want for when it is
   if (!g_state.spiceReady)
   {
     g_state.initialSpiceDisplay = enable;
-    return;
+    return false;
   }
 
   if (!purespice_hasChannel(PS_CHANNEL_DISPLAY))
-    return;
+    return false;
 
-  // do not allow stopping of the host app is not connected
+  // do not allow stopping of the host app if not connected
   if (!enable && !g_state.lgHostConnected)
-    return;
+    return false;
 
   lastState = enable;
   if (enable)
@@ -1073,5 +1073,7 @@ void app_useSpiceDisplay(bool enable)
     renderQueue_spiceShow(false);
     purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
   }
+
   overlayStatus_set(LG_USER_STATUS_SPICE, enable);
+  return enable;
 }

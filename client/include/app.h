@@ -187,6 +187,6 @@ void app_stopVideo(bool stop);
 /**
  * Enable/disable the spice display
  */
-void app_useSpiceDisplay(bool enable);
+bool app_useSpiceDisplay(bool enable);
 
 #endif
