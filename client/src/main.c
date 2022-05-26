@@ -69,6 +69,7 @@
 static int renderThread(void * unused);
 
 static LGEvent  *e_startup = NULL;
+static LGEvent  *e_spice   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 
@@ -888,6 +889,7 @@ void spiceReady(void)
     keybind_spiceRegister();
 
   purespice_freeServerInfo(&info);
+  lgSignalEvent(e_spice);
 }
 
 static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
@@ -987,6 +989,7 @@ int spiceThread(void * arg)
   if (!purespice_connect(&config))
   {
     DEBUG_ERROR("Failed to connect to spice server");
+    lgSignalEvent(e_spice);
     goto end;
   }
 
@@ -1024,6 +1027,7 @@ end:
   if (!g_state.spiceClose)
     g_state.state = APP_STATE_SHUTDOWN;
 
+  lgSignalEvent(e_spice);
   return 0;
 }
 
@@ -1190,6 +1194,13 @@ static int lg_run(void)
     return -1;
   }
 
+  // setup the spice startup condition
+  if (!(e_spice = lgCreateEvent(false, 0)))
+  {
+    DEBUG_ERROR("failed to create the spice startup event");
+    return -1;
+  }
+
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
   {
@@ -1227,6 +1238,10 @@ static int lg_run(void)
       DEBUG_ERROR("spice create thread failed");
       return -1;
     }
+
+    lgWaitEvent(e_spice, TIMEOUT_INFINITE);
+    if (!g_state.spiceReady)
+      return -1;
   }
 
   // select and init a renderer
@@ -1661,6 +1676,12 @@ static void lg_shutdown(void)
   if (e_startup)
   {
     lgFreeEvent(e_startup);
+    e_startup = NULL;
+  }
+
+  if (e_spice)
+  {
+    lgFreeEvent(e_spice);
     e_startup = NULL;
   }
 
