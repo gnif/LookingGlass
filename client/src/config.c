@@ -630,9 +630,9 @@ bool config_load(int argc, char * argv[])
   g_params.autoScreensaver = option_get_bool  ("win", "autoScreensaver");
   g_params.showAlerts      = option_get_bool  ("win", "alerts"         );
   g_params.quickSplash     = option_get_bool  ("win", "quickSplash"    );
-  g_params.uiFont          = option_get_string("win"  , "uiFont"       );
-  g_params.uiSize          = option_get_int   ("win"  , "uiSize"       );
-  g_params.jitRender       = option_get_bool  ("win"  , "jitRender"    );
+  g_params.uiFont          = option_get_string("win", "uiFont"         );
+  g_params.uiSize          = option_get_int   ("win", "uiSize"         );
+  g_params.jitRender       = option_get_bool  ("win", "jitRender"      );
 
   if (g_params.noScreensaver && g_params.autoScreensaver)
   {
