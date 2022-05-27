@@ -19,6 +19,7 @@
  */
 
 #include "interface/overlay.h"
+#include "math.h"
 #include "cimgui.h"
 
 #include "../overlays.h"
@@ -34,15 +35,29 @@
 static bool         l_state[LG_USER_STATUS_MAX] = { 0 };
 static OverlayImage l_image[LG_USER_STATUS_MAX] = { 0 };
 static bool         l_recordToggle;
+static double       l_scale = 1.0;
+
+static void status_loadImage(const char * data, unsigned int size,
+    OverlayImage * image, int width, int height)
+{
+  overlayFreeImage(image);
+  overlayLoadSVG(data, size, image, width, height);
+}
+
+static void status_loadIcons(double scale)
+{
+  int iconSize = ceil(scale * ICON_SIZE);
+
+  status_loadImage(b_status_recording_svg, b_status_recording_svg_size,
+      &l_image[LG_USER_STATUS_RECORDING], iconSize, iconSize);
+
+  status_loadImage(b_status_spice_svg, b_status_spice_svg_size,
+      &l_image[LG_USER_STATUS_SPICE], iconSize, iconSize);
+}
 
 static bool status_init(void ** udata, const void * params)
 {
-  overlayLoadSVG(b_status_recording_svg, b_status_recording_svg_size,
-      &l_image[LG_USER_STATUS_RECORDING], ICON_SIZE, ICON_SIZE);
-
-  overlayLoadSVG(b_status_spice_svg, b_status_spice_svg_size,
-      &l_image[LG_USER_STATUS_SPICE], ICON_SIZE, ICON_SIZE);
-
+  status_loadIcons(l_scale);
   return true;
 }
 
@@ -58,6 +73,12 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
   const int marginX = 10;
   const int marginY = 10;
   const int gapX    = 5;
+
+  if (g_state.windowScale > l_scale)
+  {
+    l_scale = g_state.windowScale;
+    status_loadIcons(l_scale);
+  }
 
   ImVec2 * screen  = overlayGetScreenSize();
   struct Rect rect = {
@@ -87,7 +108,7 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
       },
       (ImVec2){
         xPos - ICON_SIZE,
-        img->height + marginY
+        img->height / l_scale + marginY
       },
       (ImVec2){ 0, 0 },
       (ImVec2){ 1, 1 },
