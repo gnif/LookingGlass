@@ -535,7 +535,7 @@ void app_invalidateWindow(bool full)
   if (full)
     atomic_store(&g_state.invalidateWindow, true);
 
-  if (g_state.jitRender && g_state.ds->stopWaitFrame)
+  if (g_state.dsInitialized && g_state.jitRender && g_state.ds->stopWaitFrame)
     g_state.ds->stopWaitFrame();
 
   lgSignalEvent(g_state.frameEvent);
