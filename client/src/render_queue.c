@@ -24,6 +24,7 @@
 
 #include "common/ll.h"
 #include "main.h"
+#include "overlays.h"
 
 struct ll * l_renderQueue = NULL;
 
@@ -54,9 +55,6 @@ void renderQueue_clear(void)
 
 void renderQueue_spiceConfigure(int width, int height)
 {
-  // reconfigurations invalidate the entire queue
-  renderQueue_clear();
-
   RenderCommand * cmd = malloc(sizeof(*cmd));
   cmd->op                    = SPICE_OP_CONFIGURE;
   cmd->spiceConfigure.width  = width;
@@ -135,6 +133,8 @@ void renderQueue_process(void)
 
       case SPICE_OP_SHOW:
         RENDERER(spiceShow, cmd->spiceShow.show);
+        if (cmd->spiceShow.show)
+          overlaySplash_show(false);
         break;
     }
     free(cmd);
