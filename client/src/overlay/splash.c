@@ -154,8 +154,14 @@ static int splash_render(void * udata, bool interactive, struct Rect * windowRec
 
 static bool splash_tick(void * udata, unsigned long long tickCount)
 {
-  if (!l_show && l_alpha > 0.0f)
+  if (!l_show && !l_fadeDone)
   {
+    if (g_params.quickSplash)
+    {
+      l_fadeDone = true;
+      return true;
+    }
+
     l_alpha -= 1.0f / TICK_RATE;
     if (l_alpha <= 0.0f)
       l_fadeDone = true;
