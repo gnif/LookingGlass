@@ -192,6 +192,7 @@ static int renderThread(void * unused)
     return 1;
   }
 
+  app_initOverlays();
   LGTimer * tickTimer;
   if (!lgCreateTimer(1000 / TICK_RATE, tickTimerFn, NULL, &tickTimer))
   {
@@ -201,8 +202,6 @@ static int renderThread(void * unused)
   }
 
   LG_LOCK_INIT(g_state.lgrLock);
-
-  app_initOverlays();
 
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
