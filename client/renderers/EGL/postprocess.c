@@ -527,7 +527,7 @@ static void configUI(void * opaque, int * id)
   if (redraw)
   {
     atomic_store(&this->modified, true);
-    app_invalidateWindow(false);
+    app_invalidateWindow(true);
   }
 }
 
