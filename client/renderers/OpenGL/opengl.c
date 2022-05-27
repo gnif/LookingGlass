@@ -473,12 +473,6 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
   return true;
 }
 
-static bool opengl_needsRender(LG_Renderer * renderer)
-{
-//  struct Inst * this = UPCAST(struct Inst, renderer);
-  return false;
-}
-
 bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool newFrame,
     const bool invalidateWindow, void (*preSwap)(void * udata), void * udata)
 {
@@ -694,7 +688,6 @@ const LG_RendererOps LGR_OpenGL =
   .onFrameFormat = opengl_onFrameFormat,
   .onFrame       = opengl_onFrame,
   .renderStartup = opengl_renderStartup,
-  .needsRender   = opengl_needsRender,
   .render        = opengl_render,
   .createTexture = opengl_createTexture,
   .freeTexture   = opengl_freeTexture,

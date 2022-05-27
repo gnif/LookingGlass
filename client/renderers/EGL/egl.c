@@ -936,12 +936,6 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   return true;
 }
 
-static bool egl_needsRender(LG_Renderer * renderer)
-{
-  //struct Inst * this = UPCAST(struct Inst, renderer);
-  return false;
-}
-
 inline static EGLint egl_bufferAge(struct Inst * this)
 {
   if (!this->hasBufferAge)
@@ -1235,7 +1229,6 @@ struct LG_RendererOps LGR_EGL =
   .onFrameFormat = egl_onFrameFormat,
   .onFrame       = egl_onFrame,
   .renderStartup = egl_renderStartup,
-  .needsRender   = egl_needsRender,
   .render        = egl_render,
   .createTexture = egl_createTexture,
   .freeTexture   = egl_freeTexture,

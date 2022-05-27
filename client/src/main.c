@@ -223,8 +223,7 @@ static int renderThread(void * unused)
       if (!lgResetEvent(g_state.frameEvent)
           && !forceRender
           && !pending
-          && !app_overlayNeedsRender()
-          && !RENDERER(needsRender))
+          && !app_overlayNeedsRender())
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();

@@ -36,8 +36,9 @@
    (x)->onMouseShape    && \
    (x)->onMouseEvent    && \
    (x)->renderStartup   && \
-   (x)->needsRender     && \
    (x)->render          && \
+   (x)->createTexture   && \
+   (x)->freeTexture     && \
    (x)->spiceConfigure  && \
    (x)->spiceDrawFill   && \
    (x)->spiceDrawBitmap && \
@@ -161,10 +162,6 @@ typedef struct LG_RendererOps
   /* called when the rederer is to startup
    * Context: renderThread */
   bool (*renderStartup)(LG_Renderer * renderer, bool useDMA);
-
-  /* returns if the render method must be called even if nothing has changed.
-   * Context: renderThread */
-  bool (*needsRender)(LG_Renderer * renderer);
 
   /* called to render the scene
    * Context: renderThread */
