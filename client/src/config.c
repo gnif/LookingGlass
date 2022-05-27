@@ -261,6 +261,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "overlayDimsDesktop",
+    .description    = "Dim the desktop when in interactive overlay mode",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "win",
     .name           = "rotate",
     .description    = "Rotate the displayed image (0, 90, 180, 270)",
     .type           = OPTION_TYPE_INT,
@@ -613,26 +620,27 @@ bool config_load(int argc, char * argv[])
   g_params.framePollInterval  = option_get_int   ("app"  , "framePollInterval" );
   g_params.allowDMA           = option_get_bool  ("app"  , "allowDMA"          );
 
-  g_params.windowTitle     = option_get_string("win", "title"          );
-  g_params.autoResize      = option_get_bool  ("win", "autoResize"     );
-  g_params.allowResize     = option_get_bool  ("win", "allowResize"    );
-  g_params.keepAspect      = option_get_bool  ("win", "keepAspect"     );
-  g_params.forceAspect     = option_get_bool  ("win", "forceAspect"    );
-  g_params.dontUpscale     = option_get_bool  ("win", "dontUpscale"    );
-  g_params.intUpscale      = option_get_bool  ("win", "intUpscale"     );
-  g_params.shrinkOnUpscale = option_get_bool  ("win", "shrinkOnUpscale");
-  g_params.borderless      = option_get_bool  ("win", "borderless"     );
-  g_params.fullscreen      = option_get_bool  ("win", "fullScreen"     );
-  g_params.maximize        = option_get_bool  ("win", "maximize"       );
-  g_params.fpsMin          = option_get_int   ("win", "fpsMin"         );
-  g_params.ignoreQuit      = option_get_bool  ("win", "ignoreQuit"     );
-  g_params.noScreensaver   = option_get_bool  ("win", "noScreensaver"  );
-  g_params.autoScreensaver = option_get_bool  ("win", "autoScreensaver");
-  g_params.showAlerts      = option_get_bool  ("win", "alerts"         );
-  g_params.quickSplash     = option_get_bool  ("win", "quickSplash"    );
-  g_params.uiFont          = option_get_string("win", "uiFont"         );
-  g_params.uiSize          = option_get_int   ("win", "uiSize"         );
-  g_params.jitRender       = option_get_bool  ("win", "jitRender"      );
+  g_params.windowTitle     = option_get_string("win", "title"             );
+  g_params.autoResize      = option_get_bool  ("win", "autoResize"        );
+  g_params.allowResize     = option_get_bool  ("win", "allowResize"       );
+  g_params.keepAspect      = option_get_bool  ("win", "keepAspect"        );
+  g_params.forceAspect     = option_get_bool  ("win", "forceAspect"       );
+  g_params.dontUpscale     = option_get_bool  ("win", "dontUpscale"       );
+  g_params.intUpscale      = option_get_bool  ("win", "intUpscale"        );
+  g_params.shrinkOnUpscale = option_get_bool  ("win", "shrinkOnUpscale"   );
+  g_params.borderless      = option_get_bool  ("win", "borderless"        );
+  g_params.fullscreen      = option_get_bool  ("win", "fullScreen"        );
+  g_params.maximize        = option_get_bool  ("win", "maximize"          );
+  g_params.fpsMin          = option_get_int   ("win", "fpsMin"            );
+  g_params.ignoreQuit      = option_get_bool  ("win", "ignoreQuit"        );
+  g_params.noScreensaver   = option_get_bool  ("win", "noScreensaver"     );
+  g_params.autoScreensaver = option_get_bool  ("win", "autoScreensaver"   );
+  g_params.showAlerts      = option_get_bool  ("win", "alerts"            );
+  g_params.quickSplash     = option_get_bool  ("win", "quickSplash"       );
+  g_params.overlayDim      = option_get_bool  ("win", "overlayDimsDesktop");
+  g_params.uiFont          = option_get_string("win", "uiFont"            );
+  g_params.uiSize          = option_get_int   ("win", "uiSize"            );
+  g_params.jitRender       = option_get_bool  ("win", "jitRender"         );
 
   if (g_params.noScreensaver && g_params.autoScreensaver)
   {

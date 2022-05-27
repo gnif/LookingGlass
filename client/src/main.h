@@ -189,6 +189,7 @@ struct AppParams
   bool                 showAlerts;
   bool                 captureOnStart;
   bool                 quickSplash;
+  bool                 overlayDim;
   bool                 alwaysShowCursor;
   uint64_t             helpMenuDelayUs;
   const char *         uiFont;

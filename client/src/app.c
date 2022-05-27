@@ -862,16 +862,13 @@ render_again:
   igNewFrame();
 
   const bool overlayMode = app_isOverlayMode();
-  if (overlayMode)
+  if (overlayMode && g_params.overlayDim)
   {
     totalDamage = true;
     ImDrawList_AddRectFilled(igGetBackgroundDrawList_Nil(), (ImVec2) { 0.0f , 0.0f },
       g_state.io->DisplaySize,
       igGetColorU32_Col(ImGuiCol_ModalWindowDimBg, 1.0f),
       0, 0);
-
-//    bool test;
-//    igShowDemoWindow(&test);
   }
 
   const bool msgModal = overlayMsg_modal();
