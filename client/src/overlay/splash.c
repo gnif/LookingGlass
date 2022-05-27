@@ -24,40 +24,39 @@
 #include "../overlays.h"
 #include "../main.h"
 #include "overlay_utils.h"
+#include "common/array.h"
 
 #include "resources/lg-logo.svg.h"
 
 #include <math.h>
 #include <GL/gl.h>
 
+#define SEGMENTS 12
+
 static bool         l_show;
 static bool         l_fadeDone;
 static float        l_alpha;
 static OverlayImage l_logo;
+static float        l_vectors[SEGMENTS][2];
 
-static bool splash_init(void ** udata, const void * params)
+static void calcRadialVectors(float vectors[][2], int segments)
 {
-  l_show     = true;
-  l_fadeDone = false;
-  l_alpha    = 1.0f;
-
-  overlayLoadSVG(b_lg_logo_svg, b_lg_logo_svg_size, &l_logo, 200, 200);
-
-  return true;
-}
-
-static void splash_free(void * udata)
-{
-  overlayFreeImage(&l_logo);
+  for (unsigned int i = 0; i < segments; ++i)
+  {
+    float angle = (i / (float)(segments - 1)) * M_PI * 2.0f;
+    vectors[i][0] = cos(angle);
+    vectors[i][1] = sin(angle);
+  }
 }
 
 static void drawRadialGradient(ImDrawList * list, int x, int y, int w, int h,
-    int steps, ImU32 innerColor, ImU32 outerColor)
+    ImU32 innerColor, ImU32 outerColor,
+    float vectors[0][2], int segments)
 {
   const ImVec2 uv = list->_Data->TexUvWhitePixel;
 
-  ImDrawList_PrimReserve(list, steps * 3, steps + 2);
-  for(int i = 0; i < steps; ++i)
+  ImDrawList_PrimReserve(list, (segments - 1) * 3, segments + 1);
+  for(int i = 0; i < segments - 1; ++i)
   {
     ImDrawList_PrimWriteIdx(list, list->_VtxCurrentIdx);
     ImDrawList_PrimWriteIdx(list, list->_VtxCurrentIdx + i + 1);
@@ -69,17 +68,30 @@ static void drawRadialGradient(ImDrawList * list, int x, int y, int w, int h,
       uv,
       innerColor);
 
-  for (unsigned int i = 0; i < steps + 1; ++i)
-  {
-    float angle = (i / (float)steps) * M_PI * 2.0f;
+  for (unsigned int i = 0; i < segments; ++i)
     ImDrawList_PrimWriteVtx(list,
         (ImVec2){
-          x + cos(angle) * w,
-          y + sin(angle) * h
+          x + vectors[i][0] * w,
+          y + vectors[i][1] * h
         },
         uv,
         outerColor);
-  }
+}
+
+static bool splash_init(void ** udata, const void * params)
+{
+  l_show     = true;
+  l_fadeDone = false;
+  l_alpha    = 1.0f;
+
+  overlayLoadSVG(b_lg_logo_svg, b_lg_logo_svg_size, &l_logo, 200, 200);
+  calcRadialVectors(l_vectors, ARRAY_LENGTH(l_vectors));
+  return true;
+}
+
+static void splash_free(void * udata)
+{
+  overlayFreeImage(&l_logo);
 }
 
 static int splash_render(void * udata, bool interactive, struct Rect * windowRects,
@@ -116,9 +128,10 @@ static int splash_render(void * udata, bool interactive, struct Rect * windowRec
   drawRadialGradient(list,
       screen->x / 2, screen->y / 2,
       screen->x    , screen->y    ,
-      12,
       innerColor,
-      outerColor);
+      outerColor,
+      l_vectors,
+      ARRAY_LENGTH(l_vectors));
 
   ImDrawList_AddImage(
     list,
