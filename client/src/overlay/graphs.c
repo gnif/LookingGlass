@@ -89,6 +89,7 @@ static void graphs_free(void * udata)
   while(ll_shift(gs.graphs, (void **)&graph))
     free(graph);
   ll_free(gs.graphs);
+  gs.graphs = NULL;
 }
 
 struct BufferMetrics
@@ -239,6 +240,9 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
 
 void overlayGraph_unregister(GraphHandle handle)
 {
+  if (!gs.graphs)
+    return;
+
   ll_removeData(gs.graphs, handle);
   free(handle);
 
