@@ -165,6 +165,14 @@ void keybind_spiceRegister(void)
     app_registerKeybind(KEY_RIGHTMETA, bind_passthrough, NULL,
         "Send RWin to the guest");
 
+#if ENABLE_AUDIO
+    if (audio_supportsRecord())
+    {
+      app_registerKeybind(KEY_E, audio_recordToggleKeybind, NULL,
+          "Toggle audio recording");
+    }
+#endif
+
     firstTime = false;
   }
 
@@ -174,14 +182,6 @@ void keybind_spiceRegister(void)
   for(int i = 0; i < handleCount; ++i)
     app_releaseKeybind(&handles[i]);
   handleCount = 0;
-
-#if ENABLE_AUDIO
-  if (audio_supportsRecord())
-  {
-    app_registerKeybind(KEY_E, audio_recordToggleKeybind, NULL,
-        "Toggle audio recording");
-  }
-#endif
 
   /* register OS based keybinds */
   if (app_guestIsLinux())
