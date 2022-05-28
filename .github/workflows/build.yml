@@ -12,7 +12,7 @@ jobs:
         wayland_shell: [xdg-shell, libdecor]
         build_type: [Release, Debug]
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
       with:
         submodules: recursive
     - name: Install libdecor PPA
@@ -62,7 +62,7 @@ jobs:
   module:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
       with:
         submodules: recursive
     - name: Build kernel module
@@ -73,7 +73,7 @@ jobs:
   host-linux:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
       with:
         submodules: recursive
     - name: Install PipeWire repository
@@ -99,7 +99,7 @@ jobs:
   host-windows-cross:
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
       with:
         submodules: recursive
     - name: Update apt
@@ -130,7 +130,7 @@ jobs:
   host-windows-native:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
       with:
         submodules: recursive
     - name: Configure Windows host for native MinGW-w64
@@ -153,7 +153,7 @@ jobs:
       matrix:
         cc: [gcc, clang]
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
       with:
         submodules: recursive
     - name: Update apt
