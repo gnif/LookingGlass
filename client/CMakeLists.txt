@@ -4,13 +4,13 @@ project(looking-glass-client C CXX)
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
-	message(FATAL_ERROR
-		"\n"
-		"In-source builds are not supported\n"
-		"See build instructions provided in: "
-		"${PROJECT_TOP}/doc/build.rst\n"
-		"Refusing to continue"
-	)
+  message(FATAL_ERROR
+    "\n"
+    "In-source builds are not supported\n"
+    "See build instructions provided in: "
+    "${PROJECT_TOP}/doc/build.rst\n"
+    "Refusing to continue"
+  )
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
@@ -101,52 +101,51 @@ add_definitions(-D ATOMIC_LOCKING)
 add_definitions(-D GL_GLEXT_PROTOTYPES)
 
 add_custom_command(
-	OUTPUT	${CMAKE_BINARY_DIR}/version.c
-		${CMAKE_BINARY_DIR}/_version.c
-	COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
-		${PROJECT_TOP}/version.cmake
+  OUTPUT  ${CMAKE_BINARY_DIR}/version.c
+    ${CMAKE_BINARY_DIR}/_version.c
+  COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
+    ${PROJECT_TOP}/version.cmake
 )
 
 include_directories(
-	${PROJECT_TOP}
-	${PROJECT_SOURCE_DIR}/include
-	${CMAKE_BINARY_DIR}
-	${CMAKE_BINARY_DIR}/include
-
-        ${PROJECT_TOP}/repos/nanosvg/src
+  ${PROJECT_TOP}
+  ${PROJECT_SOURCE_DIR}/include
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_BINARY_DIR}/include
+  ${PROJECT_TOP}/repos/nanosvg/src
 )
 
 link_libraries(
-	${CMAKE_DL_LIBS}
-	rt
-	m
+  ${CMAKE_DL_LIBS}
+  rt
+  m
 )
 
 set(SOURCES
-	${CMAKE_BINARY_DIR}/version.c
-	src/main.c
-	src/core.c
-	src/app.c
-	src/audio.c
-	src/config.c
-	src/keybind.c
-	src/util.c
-	src/clipboard.c
-	src/kb.c
-	src/gl_dynprocs.c
-	src/egl_dynprocs.c
-	src/eglutil.c
-	src/overlay_utils.c
-	src/render_queue.c
+  ${CMAKE_BINARY_DIR}/version.c
+  src/main.c
+  src/core.c
+  src/app.c
+  src/audio.c
+  src/config.c
+  src/keybind.c
+  src/util.c
+  src/clipboard.c
+  src/kb.c
+  src/gl_dynprocs.c
+  src/egl_dynprocs.c
+  src/eglutil.c
+  src/overlay_utils.c
+  src/render_queue.c
 
-	src/overlay/splash.c
-	src/overlay/alert.c
-	src/overlay/fps.c
-	src/overlay/graphs.c
-	src/overlay/help.c
-	src/overlay/config.c
-	src/overlay/msg.c
-	src/overlay/status.c
+  src/overlay/splash.c
+  src/overlay/alert.c
+  src/overlay/fps.c
+  src/overlay/graphs.c
+  src/overlay/help.c
+  src/overlay/config.c
+  src/overlay/msg.c
+  src/overlay/status.c
 )
 
 # Force cimgui to build as a static library.
@@ -166,29 +165,29 @@ add_executable(looking-glass-client ${SOURCES})
 target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
 
 target_link_libraries(looking-glass-client
-	${EXE_FLAGS}
-	PkgConfig::FONTCONFIG
-	lg_resources
-	lg_common
-	displayservers
-	lgmp
-	purespice
-	renderers
-	cimgui
+  ${EXE_FLAGS}
+  PkgConfig::FONTCONFIG
+  lg_resources
+  lg_common
+  displayservers
+  lgmp
+  purespice
+  renderers
+  cimgui
 )
 
 if (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO)
-	add_definitions(-D ENABLE_AUDIO)
-	add_subdirectory(audiodevs)
-	pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
-	target_link_libraries(looking-glass-client
-		PkgConfig::SAMPLERATE
-		audiodevs
-	)
+  add_definitions(-D ENABLE_AUDIO)
+  add_subdirectory(audiodevs)
+  pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
+  target_link_libraries(looking-glass-client
+    PkgConfig::SAMPLERATE
+    audiodevs
+  )
 endif()
 
 install(TARGETS looking-glass-client
-	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-	COMPONENT binary)
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
