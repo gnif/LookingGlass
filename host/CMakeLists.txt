@@ -4,13 +4,13 @@ project(looking-glass-host C)
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
-	message(FATAL_ERROR
-		"\n"
-		"In-source builds are not supported\n"
-		"See build instructions provided in: "
-		"${PROJECT_TOP}/doc/build.rst\n"
-		"Refusing to continue"
-	)
+  message(FATAL_ERROR
+    "\n"
+    "In-source builds are not supported\n"
+    "See build instructions provided in: "
+    "${PROJECT_TOP}/doc/build.rst\n"
+    "Refusing to continue"
+  )
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")
@@ -62,16 +62,16 @@ if(ENABLE_UBSAN)
 endif()
 
 add_custom_command(
-	OUTPUT	${CMAKE_BINARY_DIR}/version.c
+  OUTPUT  ${CMAKE_BINARY_DIR}/version.c
     ${CMAKE_BINARY_DIR}/include/version.h
-		${CMAKE_BINARY_DIR}/_version.c
-	COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
-		${PROJECT_TOP}/version.cmake
+    ${CMAKE_BINARY_DIR}/_version.c
+  COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
+    ${PROJECT_TOP}/version.cmake
 )
 
 include_directories(
-	${PROJECT_SOURCE_DIR}/include
-	${CMAKE_BINARY_DIR}/include
+  ${PROJECT_SOURCE_DIR}/include
+  ${CMAKE_BINARY_DIR}/include
 )
 
 #link_libraries(
@@ -84,8 +84,8 @@ endif()
 
 
 set(SOURCES
-	${CMAKE_BINARY_DIR}/version.c
-	src/app.c
+  ${CMAKE_BINARY_DIR}/version.c
+  src/app.c
 )
 
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common")
@@ -104,9 +104,9 @@ else()
   add_executable(looking-glass-host ${SOURCES})
 endif()
 target_link_libraries(looking-glass-host
-	lg_common
-	platform
-	lgmp
+  lg_common
+  platform
+  lgmp
 )
 
 if(WIN32)
@@ -116,7 +116,7 @@ else()
 endif()
 
 install(TARGETS looking-glass-host
-	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-	COMPONENT binary)
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT binary)
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
