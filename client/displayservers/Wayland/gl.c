@@ -88,10 +88,13 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
 
   if (wlWm.needsResize)
   {
+    bool skipResize = false;
     wl_egl_window_resize(wlWm.eglWindow, wl_fixed_to_int(wlWm.width * wlWm.scale),
         wl_fixed_to_int(wlWm.height * wlWm.scale), 0, 0);
 
-    if (wlWm.fractionalScale)
+    if (wlWm.width == 0 || wlWm.height == 0)
+      skipResize = true;
+    else if (wlWm.fractionalScale)
     {
       wl_surface_set_buffer_scale(wlWm.surface, 1);
       if (!wlWm.viewport)
@@ -125,7 +128,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
         (struct Border) {0, 0, 0, 0});
     app_invalidateWindow(true);
     waylandStopWaitFrame();
-    wlWm.needsResize = false;
+    wlWm.needsResize = !skipResize;
   }
 
   waylandShellAckConfigureIfNeeded();
