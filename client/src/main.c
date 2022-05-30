@@ -877,16 +877,16 @@ void spiceReady(void)
       break;
     }
 
-  if (!uuidValid)
-    return;
-
-  memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
-  checkUUID();
+  if (uuidValid)
+  {
+    memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
+    checkUUID();
+  }
+  purespice_freeServerInfo(&info);
 
   if (g_params.useSpiceInput)
     keybind_spiceRegister();
 
-  purespice_freeServerInfo(&info);
   lgSignalEvent(e_spice);
 }
 
