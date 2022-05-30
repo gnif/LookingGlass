@@ -28,6 +28,7 @@
 #include <linux/fs.h>
 #include <linux/dma-buf.h>
 #include <linux/highmem.h>
+#include <linux/memremap.h>
 #include <linux/version.h>
 
 #include <asm/io.h>
