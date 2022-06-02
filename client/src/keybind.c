@@ -139,6 +139,27 @@ void keybind_commonRegister(void)
       "Toggle overlay");
 }
 
+#if ENABLE_AUDIO
+static void bind_toggleMicDefault(int sc, void * opaque)
+{
+  g_state.micDefaultState = (g_state.micDefaultState + 1) % MIC_DEFAULT_MAX;
+
+  switch (g_state.micDefaultState)
+  {
+    case MIC_DEFAULT_PROMPT:
+      app_alert(LG_ALERT_INFO, "Microphone access will prompt");
+      break;
+
+    case MIC_DEFAULT_ALLOW:
+      app_alert(LG_ALERT_INFO, "Microphone access allowed by default");
+      break;
+
+    case MIC_DEFAULT_DENY:
+      app_alert(LG_ALERT_INFO, "Microphone access denied by default");
+  }
+}
+#endif
+
 void keybind_spiceRegister(void)
 {
   /* register the common keybinds for spice */
@@ -170,6 +191,8 @@ void keybind_spiceRegister(void)
     {
       app_registerKeybind(0, 'E', audio_recordToggleKeybind, NULL,
           "Toggle audio recording");
+      app_registerKeybind(0, 'C', bind_toggleMicDefault, NULL,
+          "Cycle audio recording default");
     }
 #endif
 
