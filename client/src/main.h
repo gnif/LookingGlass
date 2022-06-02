@@ -147,6 +147,8 @@ struct AppState
   bool     resizeDone;
 
   bool     autoIdleInhibitState;
+
+  enum MicDefaultState micDefaultState;
 };
 
 struct AppParams
