@@ -128,7 +128,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
         (struct Border) {0, 0, 0, 0});
     app_invalidateWindow(true);
     waylandStopWaitFrame();
-    wlWm.needsResize = !skipResize;
+    wlWm.needsResize = skipResize;
   }
 
   waylandShellAckConfigureIfNeeded();
