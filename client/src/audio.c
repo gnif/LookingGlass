@@ -814,9 +814,9 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
 
   if (audio.record.started)
     realRecordStart(channels, sampleRate, format);
-  else if (g_params.micDefaultState == MIC_DEFAULT_DENY)
+  else if (g_state.micDefaultState == MIC_DEFAULT_DENY)
     DEBUG_INFO("Microphone access denied by default");
-  else if (g_params.micDefaultState == MIC_DEFAULT_ALLOW)
+  else if (g_state.micDefaultState == MIC_DEFAULT_ALLOW)
   {
     DEBUG_INFO("Microphone access granted by default");
     realRecordStart(channels, sampleRate, format);

@@ -1234,6 +1234,8 @@ static int lg_run(void)
   };
   purespice_init(&psInit);
 
+  g_state.micDefaultState = g_params.micDefaultState;
+
   if (g_params.useSpiceInput     ||
       g_params.useSpiceClipboard ||
       g_params.useSpiceAudio)
