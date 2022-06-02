@@ -50,6 +50,7 @@ enum MicDefaultState {
   MIC_DEFAULT_ALLOW,
   MIC_DEFAULT_DENY
 };
+#define MIC_DEFAULT_MAX (MIC_DEFAULT_DENY + 1)
 
 struct AppState
 {
