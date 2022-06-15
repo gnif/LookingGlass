@@ -101,7 +101,10 @@ const struct LGTeamMember LG_TEAM[] =
   },
   {
     .name   = "Jonathan Rubenstein (JJRcop)",
-    .blurb  = "Documentation Guru and Discord Community Manager",
+    .blurb  =
+      "Documentation Guru and Discord Community Manager. Takes around four "
+      "or five tries and weeks of delay to turn ideas and spitballing into "
+      "tangible work, but tries to make the result look beautiful.",
     .donate = { { 0 } }
   },
   {
