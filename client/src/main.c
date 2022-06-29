@@ -1693,6 +1693,7 @@ static void lg_shutdown(void)
   }
 
   app_releaseAllKeybinds();
+  ll_free(g_state.bindings);
 
   if (g_state.dsInitialized)
     g_state.ds->free();
@@ -1741,6 +1742,8 @@ int main(int argc, char * argv[])
   ivshmemOptionsInit();
   egl_dynProcsInit();
   gl_dynProcsInit();
+
+  g_state.bindings = ll_new();
 
   g_state.overlays = ll_new();
   app_registerOverlay(&LGOverlaySplash, NULL);

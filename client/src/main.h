@@ -90,8 +90,7 @@ struct AppState
   uint64_t             escapeTime;
   int                  escapeAction;
   bool                 escapeHelp;
-  KeybindHandle        bindings[KEY_MAX];
-  const char *         keyDescription[KEY_MAX];
+  struct ll          * bindings;
   bool                 keyDown[KEY_MAX];
 
   bool                 haveSrcSize;
@@ -227,9 +226,11 @@ struct CBRequest
 
 struct KeybindHandle
 {
-  int       sc;
-  KeybindFn callback;
-  void    * opaque;
+  int          sc;
+  int          charcode;
+  KeybindFn    callback;
+  const char * description;
+  void *       opaque;
 };
 
 enum WarpState

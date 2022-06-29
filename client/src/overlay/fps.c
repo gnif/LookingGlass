@@ -53,7 +53,7 @@ static void fps_earlyInit(void)
 
 static bool fps_init(void ** udata, const void * params)
 {
-  app_registerKeybind(KEY_D, showFPSKeybind, NULL, "FPS display toggle");
+  app_registerKeybind(0, 'D', showFPSKeybind, NULL, "FPS display toggle");
   showFPS = option_get_bool("win", "showFPS");
   return true;
 }

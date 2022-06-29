@@ -209,6 +209,16 @@ done:
   close(fd);
 }
 
+static int getCharcode(uint32_t key)
+{
+  xkb_keysym_t sym = xkb_state_key_get_one_sym(wlWm.xkbState, key);
+  if (sym == XKB_KEY_NoSymbol)
+    return 0;
+
+  sym = xkb_keysym_to_upper(sym);
+  return xkb_keysym_to_utf32(sym);
+}
+
 static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {
@@ -221,7 +231,7 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
 
   uint32_t * key;
   wl_array_for_each(key, keys)
-    app_handleKeyPress(*key);
+    app_handleKeyPress(*key, getCharcode(*key));
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
@@ -242,9 +252,9 @@ static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     return;
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
-    app_handleKeyPress(key);
+    app_handleKeyPress(key, getCharcode(key));
   else
-    app_handleKeyRelease(key);
+    app_handleKeyRelease(key, getCharcode(key));
 
   if (!wlWm.xkbState || !app_isOverlayMode() || state != WL_KEYBOARD_KEY_STATE_PRESSED)
     return;

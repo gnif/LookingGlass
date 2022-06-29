@@ -54,6 +54,10 @@ struct X11DSState
   Window        window;
   XVisualInfo * visual;
 
+  int           minKeycode, maxKeycode;
+  int           symsPerKeycode;
+  KeySym *      keysyms;
+
   //Extended Window Manager Hints
   //ref: https://specifications.freedesktop.org/wm-spec/latest/
   bool              ewmhSupport;

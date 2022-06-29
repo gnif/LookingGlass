@@ -63,14 +63,20 @@ static int help_render(void * udata, bool interactive, struct Rect * windowRects
     igTableNextColumn();
     igText("Toggle capture mode");
 
-    for (int i = 0; i < KEY_MAX; ++i)
-      if (g_state.keyDescription[i])
-      {
-        igTableNextColumn();
-        igText("%s+%s", escapeName, linux_to_display[i]);
-        igTableNextColumn();
-        igText(g_state.keyDescription[i]);
-      }
+    KeybindHandle handle;
+    ll_forEachNL(g_state.bindings, item, handle)
+    {
+      if (!handle->description)
+        continue;
+
+      igTableNextColumn();
+      if (handle->sc)
+        igText("%s+%s", escapeName, linux_to_display[handle->sc]);
+      else
+        igText("%s+%c", escapeName, handle->charcode);
+      igTableNextColumn();
+      igText(handle->description);
+    }
 
     igEndTable();
   }

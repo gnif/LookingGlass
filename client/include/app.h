@@ -58,9 +58,9 @@ void app_resyncMouseBasic(void);
 void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
 void app_handleWheelMotion(double motion);
-void app_handleKeyPress(int scancode);
-void app_handleKeyRelease(int scancode);
 void app_handleKeyboardTyped(const char * typed);
+void app_handleKeyPress(int scancode, int charcode);
+void app_handleKeyRelease(int scancode, int charcode);
 void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super);
 void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock);
 void app_handleEnterEvent(bool entered);
@@ -155,12 +155,14 @@ void app_showRecord(bool show);
 /**
  * Register a handler for the <super>+<key> combination
  * @param sc       The scancode to register
+ * @param charcode The charcode to register (used instead of sc if non zero)
  * @param callback The function to be called when the combination is pressed
  * @param opaque   A pointer to be passed to the callback, may be NULL
  * @retval A handle for the binding or NULL on failure.
  *         The caller is required to release the handle via `app_releaseKeybind` when it is no longer required
  */
-KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description);
+KeybindHandle app_registerKeybind(int sc, int charcode, KeybindFn callback,
+    void * opaque, const char * description);
 
 /**
  * Release an existing key binding

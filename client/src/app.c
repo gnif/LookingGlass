@@ -38,6 +38,7 @@
 #include <stdarg.h>
 #include <math.h>
 #include <string.h>
+#include <ctype.h>
 
 bool app_isRunning(void)
 {
@@ -115,7 +116,7 @@ void app_handleFocusEvent(bool focused)
     if (g_params.releaseKeysOnFocusLoss)
       for (int key = 0; key < KEY_MAX; key++)
         if (g_state.keyDown[key])
-          app_handleKeyRelease(key);
+          app_handleKeyRelease(key, 0);
 
     g_state.escapeActive = false;
 
@@ -304,7 +305,7 @@ void app_handleWheelMotion(double motion)
     g_state.io->MouseWheel -= motion;
 }
 
-void app_handleKeyPress(int sc)
+void app_handleKeyPress(int sc, int charcode)
 {
   if (!app_isOverlayMode() || !g_state.io->WantCaptureKeyboard)
   {
@@ -319,9 +320,16 @@ void app_handleKeyPress(int sc)
     if (g_state.escapeActive)
     {
       g_state.escapeAction = sc;
-      KeybindHandle handle = g_state.bindings[sc];
-      if (handle)
-        handle->callback(sc, handle->opaque);
+      KeybindHandle handle;
+      ll_forEachNL(g_state.bindings, item, handle)
+      {
+        if ((handle->sc       && handle->sc       == sc       ) ||
+            (handle->charcode && handle->charcode == charcode))
+        {
+          handle->callback(sc, handle->opaque);
+          break;
+        }
+      }
       return;
     }
   }
@@ -357,7 +365,7 @@ void app_handleKeyPress(int sc)
   }
 }
 
-void app_handleKeyRelease(int sc)
+void app_handleKeyRelease(int sc, int charcode)
 {
   if (g_state.escapeActive)
   {
@@ -679,28 +687,48 @@ void app_showRecord(bool show)
   overlayStatus_set(LG_USER_STATUS_RECORDING, show);
 }
 
-KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque, const char * description)
+KeybindHandle app_registerKeybind(int sc, int charcode, KeybindFn callback,
+    void * opaque, const char * description)
 {
-  // don't allow duplicate binds
-  if (g_state.bindings[sc])
+  if (charcode != 0 && sc != 0)
   {
-    DEBUG_INFO("Key already bound");
+    DEBUG_ERROR("invalid keybind, one of scancode or charcode must be 0");
     return NULL;
   }
 
-  KeybindHandle handle = malloc(sizeof(*handle));
+  if (charcode && islower(charcode))
+  {
+    DEBUG_ERROR("invalid keybind, charcode must be uppercase");
+    return NULL;
+  }
+
+  KeybindHandle handle;
+
+  // don't allow duplicate binds
+  ll_forEachNL(g_state.bindings, item, handle)
+  {
+    if ((sc       && handle->sc       == sc      ) ||
+        (charcode && handle->charcode == charcode))
+    {
+      DEBUG_INFO("Key already bound");
+      return NULL;
+    }
+  }
+
+  handle = malloc(sizeof(*handle));
   if (!handle)
   {
     DEBUG_ERROR("out of memory");
     return NULL;
   }
 
-  handle->sc       = sc;
-  handle->callback = callback;
-  handle->opaque   = opaque;
+  handle->sc          = sc;
+  handle->charcode    = charcode;
+  handle->callback    = callback;
+  handle->description = description;
+  handle->opaque      = opaque;
 
-  g_state.bindings[sc] = handle;
-  g_state.keyDescription[sc] = description;
+  ll_push(g_state.bindings, handle);
   return handle;
 }
 
@@ -709,19 +737,16 @@ void app_releaseKeybind(KeybindHandle * handle)
   if (!*handle)
     return;
 
-  g_state.bindings[(*handle)->sc] = NULL;
+  ll_removeData(g_state.bindings, *handle);
   free(*handle);
   *handle = NULL;
 }
 
 void app_releaseAllKeybinds(void)
 {
-  for(int i = 0; i < KEY_MAX; ++i)
-    if (g_state.bindings[i])
-    {
-      free(g_state.bindings[i]);
-      g_state.bindings[i] = NULL;
-    }
+  KeybindHandle * handle;
+  while(ll_shift(g_state.bindings, (void **)&handle))
+    free(handle);
 }
 
 GraphHandle app_registerGraph(const char * name, RingBuffer buffer,
