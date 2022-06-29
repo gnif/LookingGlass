@@ -211,6 +211,7 @@ done:
 
 static int getCharcode(uint32_t key)
 {
+  key += 8; // xkb scancode is evdev scancode + 8
   xkb_keysym_t sym = xkb_state_key_get_one_sym(wlWm.xkbState, key);
   if (sym == XKB_KEY_NoSymbol)
     return 0;
