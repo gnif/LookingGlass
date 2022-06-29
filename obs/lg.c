@@ -84,6 +84,7 @@ typedef struct
   uint8_t         * texData;
   uint32_t          linesize;
 
+  bool              hideMouse;
 #if LIBOBS_API_MAJOR_VER >= 27
   bool              dmabuf;
   DMAFrameInfo      dmaInfo[LGMP_Q_FRAME_LEN];
@@ -206,6 +207,7 @@ static obs_properties_t * lgGetProperties(void * data)
   obs_properties_t * props = obs_properties_create();
 
   obs_properties_add_text(props, "shmFile", obs_module_text("SHM File"), OBS_TEXT_DEFAULT);
+  obs_properties_add_bool(props, "hideMouse", obs_module_text("Hide mouse cursor"));
 #if LIBOBS_API_MAJOR_VER >= 27
   obs_properties_add_bool(props, "dmabuf",  obs_module_text("Use DMABUF import (requires kvmfr device)"));
 #else
@@ -291,8 +293,8 @@ static void * pointerThread(void * data)
     }
 
     const KVMFRCursor * const cursor = (const KVMFRCursor * const)msg.mem;
-    this->cursorVisible =
-      msg.udata & CURSOR_FLAG_VISIBLE;
+    this->cursorVisible = this->hideMouse ?
+      0 : msg.udata & CURSOR_FLAG_VISIBLE;
 
     if (msg.udata & CURSOR_FLAG_SHAPE)
     {
@@ -386,6 +388,7 @@ static void lgUpdate(void * data, obs_data_t * settings)
   if (!ivshmemOpenDev(&this->shmDev, this->shmFile))
     return;
 
+  this->hideMouse = obs_data_get_bool(settings, "hideMouse") ? 1 : 0;
 #if LIBOBS_API_MAJOR_VER >= 27
   this->dmabuf = obs_data_get_bool(settings, "dmabuf") && ivshmemHasDMA(&this->shmDev);
 #endif
