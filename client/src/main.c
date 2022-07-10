@@ -1162,7 +1162,14 @@ static int lg_run(void)
       break;
     }
 
-  DEBUG_ASSERT(g_state.ds);
+  if (!g_state.ds)
+  {
+    DEBUG_ERROR("No display servers available, tried:");
+    for (int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
+      DEBUG_ERROR("* %s", LG_DisplayServers[i]->name);
+    return -1;
+  }
+
   ASSERT_LG_DS_VALID(g_state.ds);
 
   if (g_params.jitRender)
