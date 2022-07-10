@@ -154,6 +154,7 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 
 struct LG_DisplayServerOps LGDS_Wayland =
 {
+  .name                = "Wayland",
   .setup               = waylandSetup,
   .probe               = waylandProbe,
   .earlyInit           = waylandEarlyInit,

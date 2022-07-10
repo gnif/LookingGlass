@@ -1922,6 +1922,7 @@ static void x11Minimize(void)
 
 struct LG_DisplayServerOps LGDS_X11 =
 {
+  .name               = "X11",
   .setup              = x11Setup,
   .probe              = x11Probe,
   .earlyInit          = x11EarlyInit,
