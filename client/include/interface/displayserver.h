@@ -110,6 +110,8 @@ typedef struct LGEvent LGEvent;
 
 struct LG_DisplayServerOps
 {
+  const char * name;
+
   /* called before options are parsed, useful for registering options */
   void (*setup)(void);
 
