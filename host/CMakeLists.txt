@@ -74,8 +74,9 @@ include_directories(
   ${CMAKE_BINARY_DIR}/include
 )
 
-#link_libraries(
-#)
+link_libraries(
+  ${CMAKE_DL_LIBS}
+)
 
 if (ENABLE_ASAN OR ENABLE_UBSAN)
   link_directories("c:/msys64/clang64/lib/clang/12.0.0/lib/windows")
