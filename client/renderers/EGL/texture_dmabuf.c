@@ -20,6 +20,7 @@
 
 #include "texture.h"
 #include "texture_buffer.h"
+#include "util.h"
 
 #include "common/vector.h"
 #include "egl_dynprocs.h"
@@ -36,6 +37,7 @@ typedef struct TexDMABUF
   TextureBuffer base;
 
   EGLDisplay display;
+  bool hasImportModifiers;
   Vector images;
 }
 TexDMABUF;
@@ -77,6 +79,11 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGL_TexType type,
   }
 
   this->display = display;
+
+  const char * client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
+  this->hasImportModifiers =
+    util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import_modifiers");
+
   return true;
 }
 
@@ -122,16 +129,23 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   if (image == EGL_NO_IMAGE)
   {
-    EGLAttrib const attribs[] =
+    const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
+    EGLAttrib attribs[] =
     {
-      EGL_WIDTH                    , texture->format.width,
-      EGL_HEIGHT                   , texture->format.height,
-      EGL_LINUX_DRM_FOURCC_EXT     , texture->format.fourcc,
-      EGL_DMA_BUF_PLANE0_FD_EXT    , update->dmaFD,
-      EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-      EGL_DMA_BUF_PLANE0_PITCH_EXT , texture->format.stride,
-      EGL_NONE                     , EGL_NONE
+      EGL_WIDTH                         , texture->format.width,
+      EGL_HEIGHT                        , texture->format.height,
+      EGL_LINUX_DRM_FOURCC_EXT          , texture->format.fourcc,
+      EGL_DMA_BUF_PLANE0_FD_EXT         , update->dmaFD,
+      EGL_DMA_BUF_PLANE0_OFFSET_EXT     , 0,
+      EGL_DMA_BUF_PLANE0_PITCH_EXT      , texture->format.stride,
+      EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (modifier & 0xffffff),
+      EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (modifier >> 32),
+      EGL_NONE                          , EGL_NONE
     };
+
+    if (!this->hasImportModifiers)
+      attribs[12] = attribs[13] =
+      attribs[14] = attribs[15] = EGL_NONE;
 
     image = g_egl_dynProcs.eglCreateImage(
         this->display,

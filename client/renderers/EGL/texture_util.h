@@ -55,3 +55,20 @@ bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
 void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);
 bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer);
 void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
+
+/**
+ * the following comes from drm_fourcc.h and is included here to avoid the
+ * external dependency for the few simple defines we need
+ */
+#define fourcc_code(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | \
+         ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+#define DRM_FORMAT_ARGB8888      fourcc_code('A', 'R', '2', '4')
+#define DRM_FORMAT_ABGR8888      fourcc_code('A', 'B', '2', '4')
+#define DRM_FORMAT_BGRA1010102   fourcc_code('B', 'A', '3', '0')
+#define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
+
+#define DRM_FORMAT_MOD_VENDOR_NONE 0
+#define fourcc_mod_code(vendor, val) \
+        ((((uint64_t)DRM_FORMAT_MOD_VENDOR_## vendor) << 56) | \
+         ((val) & 0x00ffffffffffffffULL))
+#define DRM_FORMAT_MOD_LINEAR    fourcc_mod_code(NONE, 0)
