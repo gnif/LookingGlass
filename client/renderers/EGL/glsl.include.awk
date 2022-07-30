@@ -10,4 +10,4 @@ function process(line, second) {
     }
 }
 
-{ process($0, $2) }
+{ process($0, $2) } END { print "\0"; }
