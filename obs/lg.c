@@ -54,7 +54,8 @@ typedef enum
   STATE_OPEN,
   STATE_STARTING,
   STATE_RUNNING,
-  STATE_STOPPING
+  STATE_STOPPING,
+  STATE_RESTARTING
 }
 LGState;
 
@@ -107,6 +108,8 @@ typedef struct
 }
 LGPlugin;
 
+static void * frameThread(void * data);
+static void * pointerThread(void * data);
 static void lgUpdate(void * data, obs_data_t * settings);
 
 static const char * lgGetName(void * unused)
@@ -125,6 +128,20 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
   return this;
 }
 
+static void createThreads(LGPlugin * this)
+{
+  pthread_create(&this->frameThread, NULL, frameThread, this);
+  pthread_setname_np(this->frameThread, "LGFrameThread");
+  pthread_create(&this->pointerThread, NULL, pointerThread, this);
+  pthread_setname_np(this->pointerThread, "LGPointerThread");
+}
+
+static void waitThreads(LGPlugin * this)
+{
+  pthread_join(this->frameThread,   NULL);
+  pthread_join(this->pointerThread, NULL);
+}
+
 static void deinit(LGPlugin * this)
 {
   switch(this->state)
@@ -137,9 +154,9 @@ static void deinit(LGPlugin * this)
 
     case STATE_RUNNING:
     case STATE_STOPPING:
+    case STATE_RESTARTING:
       this->state = STATE_STOPPING;
-      pthread_join(this->frameThread  , NULL);
-      pthread_join(this->pointerThread, NULL);
+      createThreads(this);
       this->state = STATE_STOPPED;
       /* fallthrough */
 
@@ -251,7 +268,7 @@ static void * frameThread(void * data)
   }
 
   lgmpClientUnsubscribe(&this->frameQueue);
-  this->state = STATE_STOPPING;
+  this->state = STATE_RESTARTING;
   return NULL;
 }
 
@@ -375,7 +392,7 @@ static void * pointerThread(void * data)
   this->cursorData = NULL;
   this->cursorSize = 0;
 
-  this->state = STATE_STOPPING;
+  this->state = STATE_RESTARTING;
   return NULL;
 }
 
@@ -419,10 +436,7 @@ static void lgUpdate(void * data, obs_data_t * settings)
   }
 
   this->state = STATE_STARTING;
-  pthread_create(&this->frameThread, NULL, frameThread, this);
-  pthread_setname_np(this->frameThread, "LGFrameThread");
-  pthread_create(&this->pointerThread, NULL, pointerThread, this);
-  pthread_setname_np(this->pointerThread, "LGPointerThread");
+  createThreads(this);
 }
 
 #if LIBOBS_API_MAJOR_VER >= 27
@@ -480,6 +494,12 @@ static void lgVideoTick(void * data, float seconds)
 {
   LGPlugin * this = (LGPlugin *)data;
 
+  if (this->state == STATE_RESTARTING) {
+    waitThreads(this);
+
+    this->state = STATE_STARTING;
+    createThreads(this);
+  }
   if (this->state != STATE_RUNNING)
     return;
 
