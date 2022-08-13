@@ -512,6 +512,13 @@ error:
   free(data);
 }
 
+static void dataSourceHandleTarget(void * data, struct wl_data_source * source,
+    const char * mimetype)
+{
+  // Certain Wayland clients send this for copy-paste operations even though
+  // it only makes sense for drag-and-drop. We just do nothing.
+}
+
 static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     const char * mimetype, int fd)
 {
@@ -547,7 +554,8 @@ static void dataSourceHandleCancelled(void * data,
 }
 
 static const struct wl_data_source_listener dataSourceListener = {
-  .send = dataSourceHandleSend,
+  .target    = dataSourceHandleTarget,
+  .send      = dataSourceHandleSend,
   .cancelled = dataSourceHandleCancelled,
 };
 
