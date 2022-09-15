@@ -97,6 +97,8 @@ typedef struct LG_DSInitParams
   // x11 needs to know if this is in use so we can decide to setup for
   // presentation times
   bool jitRender;
+  // x11 needs this early to not override the defaults.
+  bool hideMouse;
 }
 LG_DSInitParams;
 

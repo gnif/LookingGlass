@@ -1305,7 +1305,8 @@ static int lg_run(void)
     .borderless          = g_params.borderless,
     .maximize            = g_params.maximize,
     .opengl              = needsOpenGL,
-    .jitRender           = g_params.jitRender
+    .jitRender           = g_params.jitRender,
+    .hideMouse           = g_params.hideMouse
   };
 
   g_state.dsInitialized = g_state.ds->init(params);

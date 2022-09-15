@@ -58,6 +58,7 @@
 #define _NET_WM_STATE_TOGGLE 2
 
 struct X11DSState x11;
+struct LG_DisplayServerOps LGDS_X11;
 
 struct MwmHints
 {
@@ -86,6 +87,7 @@ static int  x11EventThread(void * unused);
 static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
 static void x11GrabPointer(void);
+static void x11NoSetPointer(LG_DSPointer pointer);
 
 static void x11DoPresent(uint64_t msc)
 {
@@ -643,8 +645,12 @@ static bool x11Init(const LG_DSInitParams params)
       x11.cursors[i] = XcursorLibraryLoadCursor(x11.display, fallbackLookup[i]);
   }
 
-  /* default to the square cursor */
-  XDefineCursor(x11.display, x11.window, x11.cursors[LG_POINTER_SQUARE]);
+  /* leave the mouse alone if the user requests it. */
+
+  if (params.hideMouse)
+      XDefineCursor(x11.display, x11.window, x11.cursors[LG_POINTER_SQUARE]);
+  else
+      LGDS_X11.setPointer = x11NoSetPointer;
 
   if (x11.jitRender)
   {
@@ -1656,6 +1662,9 @@ static void x11SetPointer(LG_DSPointer pointer)
 {
   XDefineCursor(x11.display, x11.window, x11.cursors[pointer]);
 }
+
+static void x11NoSetPointer(LG_DSPointer pointer)
+{}
 
 static void x11PrintGrabError(const char * type, int dev, Status ret)
 {
