@@ -455,8 +455,8 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
 
   if (destRect.valid)
   {
-    this->translateX     = 1.0f - (((this->destRect.w / 2) + this->destRect.x) * 2) / (float)this->width;
-    this->translateY     = 1.0f - (((this->destRect.h / 2) + this->destRect.y) * 2) / (float)this->height;
+    this->translateX     = -1.0f + (((this->destRect.w / 2) + this->destRect.x) * 2) / (float)this->width;
+    this->translateY     =  1.0f - (((this->destRect.h / 2) + this->destRect.y) * 2) / (float)this->height;
     this->scaleX         = (float)this->destRect.w / (float)this->width;
     this->scaleY         = (float)this->destRect.h / (float)this->height;
     this->viewportWidth  = this->destRect.w;
@@ -962,21 +962,26 @@ inline static void renderLetterBox(struct Inst * this)
 
     if (hLB)
     {
-      glScissor(0.0f, 0.0f, this->destRect.x + 0.5f, this->height + 0.5f);
+      // left
+      glScissor(0, 0, this->destRect.x, this->height);
       glClear(GL_COLOR_BUFFER_BIT);
 
+      // right
       float x2 = this->destRect.x + this->destRect.w;
-      glScissor(x2 - 0.5f, 0.0f, this->width - x2 + 1.0f, this->height + 1.0f);
+      glScissor(x2, 0, this->width - x2, this->height);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
     if (vLB)
     {
-      glScissor(0.0f, 0.0f, this->width + 0.5f, this->destRect.y + 0.5f);
+      // top
+      glScissor(0, this->height - this->destRect.y,
+          this->width, this->destRect.y);
       glClear(GL_COLOR_BUFFER_BIT);
 
-      float y2 = this->destRect.y + this->destRect.h;
-      glScissor(0.0f, y2 - 0.5f, this->width + 1.0f, this->height - y2 + 1.0f);
+      // bottom
+      int y2 = this->destRect.y + this->destRect.h;
+      glScissor(0, 0, this->width, this->height - y2);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
