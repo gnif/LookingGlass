@@ -47,7 +47,7 @@ Examples:
 Default Key Bindings
 ~~~~~~~~~~~~~~~~~~~~
 
-By default, Looking Glass uses the :kbd:`Scroll Lock` key as the escape key
+By default, Looking Glass uses the :kbd:`ScrLk` key as the escape key
 for commands, as well as the input :kbd:`capture` mode toggle; this can be
 changed using the ``-m`` switch if you desire a different key. Below are
 a list of current key bindings:
@@ -57,6 +57,7 @@ Command                      Description
 ============================ =======================================================
 :kbd:`ScrLk`                 Toggle capture mode
 :kbd:`ScrLk` + :kbd:`Q`      Quit
+:kbd:`ScrLk` + :kbd:`E`      Toggle audio recording
 :kbd:`ScrLk` + :kbd:`R`      Rotate the output clockwise by 90° increments
 :kbd:`ScrLk` + :kbd:`T`      Show frame timing information
 :kbd:`ScrLk` + :kbd:`I`      Spice keyboard & mouse enable toggle
@@ -77,6 +78,9 @@ Command                      Description
 :kbd:`ScrLk` + :kbd:`F10`    Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F10` to the guest
 :kbd:`ScrLk` + :kbd:`F11`    Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F11` to the guest
 :kbd:`ScrLk` + :kbd:`F12`    Send :kbd:`Ctrl` + :kbd:`Alt` + :kbd:`F12` to the guest
+:kbd:`ScrLk` + :kbd:`M`      Send mute to the guest
+:kbd:`ScrLk` + :kbd:`↑`      Send volume up to the guest
+:kbd:`ScrLk` + :kbd:`↓`      Send volume down to the guest
 :kbd:`ScrLk` + :kbd:`Insert` Increase mouse sensitivity in capture mode
 :kbd:`ScrLk` + :kbd:`Del`    Decrease mouse sensitivity in capture mode
 :kbd:`ScrLk` + :kbd:`LWin`   Send :kbd:`LWin` to the guest
