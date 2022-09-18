@@ -144,13 +144,7 @@ does not support them.
 Audio
 -----
 
-Looking Glass does not support audio routing. The preferred
-solution is to pass through QEMU's audio to your host's audio system.
-
-Another popular solution is to use
-`Scream <https://github.com/duncanthrax/scream>`_, a virtual sound card which
-pipes audio through the network. A guide for setting up scream is available on
-the wiki: https://looking-glass.io/wiki/Using_Scream_over_LAN
+As of B6 Looking Glass supports audio input and output via SPICE.
 
 .. _faq_win:
 
