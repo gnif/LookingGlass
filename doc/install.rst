@@ -3,101 +3,24 @@
 Installation
 ############
 
-.. _host_install:
+.. _libvirt:
 
-Host Application
-----------------
-
-The Looking Glass Host application captures frames from the guest OS using a
-capture API, and sends them to the
-:ref:`Client <client_install>`—be it on the host OS (hypervisor) or another
-Virtual Machine—through a low-latency transfer protocol over shared memory.
-
-You can get the host program in two ways:
-
--  Download a pre-built binary from https://looking-glass.io/downloads
-   (**recommended**)
-
--  Download the source code as described in :ref:`building`, then
-   :ref:`build the host <host_building>`.
-
-.. _host_install_windows:
-
-Windows
-~~~~~~~
-
-To begin, you must first run the Windows VM with the changes noted above in
-either the :ref:`client_libvirt_configuration` or :ref:`client_qemu_commands`
-sections.
-
-.. _installing_the_ivshmem_driver:
-
-Installing the IVSHMEM Driver
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Since B6 the host installer available on the official Looking Glass website
-comes with the IVSHMEM driver and will install this for you. If you are running
-an older version of Looking Glass please refer to the documentation for your
-version.
-
-.. _host_install_service:
-
-Installing the Looking Glass Service
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-After installing your IVSHMEM driver, we can now install the Looking Glass Host
-onto our Windows Virtual Machine.
-
-1. First, run ``looking-glass-host-setup.exe`` as an administrator
-   (:ref:`Why? <faq_host_admin_privs>`)
-2. You will be greeted by an intro screen. Press ``Next`` to continue.
-3. You are presented with the |license| license. Please read and agree to the
-   license by pressing ``Agree``.
-4. You can change the install path if you wish, otherwise press ``Next`` to
-   continue.
-5. You may enable or disable options on this screen to configure the
-   installation. The default values are recommended for most users.
-   Press ``Install`` to begin installation.
-6. After a few moments, installation will complete, and you will have a
-   running instance of Looking Glass. If you experience failures, you can
-   see them in the install log appearing in the middle of the window.
-7. Press ``Close`` to exit the installer.
-
-Command line users can run ``looking-glass-host-setup.exe /S`` to execute a
-silent install with default options selected. Further configuration from the
-command line can be done with flags. You can list all available flags by
-running ``looking-glass-host-setup.exe /?``.
-
-.. _client_install:
-
-Client
-------
-
-The Looking Glass Client receives frames from the :ref:`Host <host_install>` to
-display on your screen. It also handles input, and can optionally share the
-system clipboard with your guest OS through Spice.
-
-First you must build the client from source, see :ref:`building`. Once you have
-built the client, you can install it. Run the following as root::
-
-   make install
-
-To install for the local user only, run::
-
-   cmake -DCMAKE_INSTALL_PREFIX=~/.local .. && make install
-
-.. _client_libvirt_configuration:
-
-libvirt Configuration
-~~~~~~~~~~~~~~~~~~~~~
+libvirt/QEMU Configuration:
+---------------------------
 
 This article assumes you already have a fully functional libvirt domain with
-PCI passthrough working on a dedicated monitor.
+PCI passthrough working.
 
 If you use virt-manager, this guide also applies to you, since virt-manager uses
 libvirt as its back-end.
 
-**If you are using QEMU directly, this does not apply to you.**
+.. _libvirt_ivshmem:
+
+IVSHMEM
+^^^^^^^
+
+Configuration
+~~~~~~~~~~~~~
 
 Add the following to your libvirt machine configuration inside the
 'devices' section by running ``virsh edit <VM>`` where ``<VM>`` is the name of
@@ -110,92 +33,22 @@ your virtual machine.
      <size unit='M'>32</size>
    </shmem>
 
+.. note::
+  If you are using QEMU directly without libvirt the following arguments are
+  required instead.
+   
+  Add the following to the commands to your QEMU command line, adjusting
+  the ``bus`` parameter to suit your particular configuration:
+
+  .. code:: bash
+
+     -device ivshmem-plain,memdev=ivshmem,bus=pcie.0 \
+     -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
+
 The memory size (show as 32 in the example above) may need to be
-adjusted as per the :ref:`Determining Memory <client_determining_memory>` section.
+adjusted as per the :ref:`Determining Memory <libvirt_determining_memory>` section.
 
-.. _client_spice_server:
-
-Spice Server
-^^^^^^^^^^^^
-
-If you would like to use Spice to give you keyboard and mouse input
-along with clipboard sync support, make sure you have a
-``<graphics type='spice'>`` device, then:
-
--  Find your ``<video>`` device, and set ``<model type='none'/>``
-
-   -  If you can't find it, make sure you have a ``<graphics>``
-      device, save and edit again
-   -  On older libvirt versions, just disable the device in Windows
-      Device Manager
-
--  Remove the ``<input type='tablet'/>`` device, if you have one
--  Create an ``<input type='mouse'/>`` device, if you don't already have one
--  Create an ``<input type='keyboard' bus='virtio'/>`` device to improve
-   keyboard usage
-
-   -  This requires the *vioinput* driver from
-      `virtio-win <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_
-      to be installed in the guest
-
-If you want clipboard synchronization please see
-:ref:`client_clipboard_synchronization`
-
-.. _client_apparmor:
-
-AppArmor
-^^^^^^^^
-
-For libvirt versions before **5.10.0**, if you are using AppArmor, you
-need to add permissions for QEMU to access the shared memory file. This
-can be done by adding the following to
-``/etc/apparmor.d/local/abstractions/libvirt-qemu``::
-
-   /dev/shm/looking-glass rw,
-
-then, restart AppArmor.
-
-.. code:: bash
-
-   sudo systemctl restart apparmor
-
-.. _client_memballoon_tweak:
-
-Memballoon
-^^^^^^^^^^
-
-The VirtIO memballoon device enables the host to dynamically reclaim memory
-from your VM by growing the balloon inside the guest, reserving reclaimed
-memory. Libvirt adds this device to guests by default.
-
-However, this device causes major performance issues with VFIO passthrough
-setups, and should be disabled.
-
-Find the ``<memballoon>`` tag and set its type to ``none``:
-
-.. code:: xml
-
-   <memballoon model="none"/>
-
-.. _client_qemu_commands:
-
-QEMU Commands
-~~~~~~~~~~~~~
-
-**If you are using libvirt/virt-manager, then this does not apply to you.**
-
-Add the following to the commands to your QEMU command line, adjusting
-the ``bus`` parameter to suit your particular configuration:
-
-.. code:: bash
-
-   -device ivshmem-plain,memdev=ivshmem,bus=pcie.0 \
-   -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
-
-The memory size (shown as 32M in the example above) may need to be
-adjusted as per :ref:`Determining Memory <client_determining_memory>` section.
-
-.. _client_determining_memory:
+.. _libvirt_determining_memory:
 
 Determining Memory
 ~~~~~~~~~~~~~~~~~~
@@ -216,10 +69,15 @@ For example, for a resolution of 1920x1080 (1080p):
 You must round this value up to the nearest power of two, which for the
 provided example is 32MB.
 
-.. _client_shmfile_permissions:
+.. note::
+  Increasing this value beyond what you need does not yield any performance
+  improvements, it simply will block access to that RAM making it unusable by
+  your system.
 
-Shared Memory File Permissions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. _libvirt_shmfile_permissions:
+
+Permissions
+~~~~~~~~~~~
 
 The shared memory file used by IVSHMEM is found in ``/dev/shm/looking-glass``.
 By default, it is owned by QEMU, and does not give read/write permissions to
@@ -239,10 +97,56 @@ with the following::
 Change ``UID`` to the user name you will run Looking Glass with, usually your
 own.
 
-.. _client_clipboard_synchronization:
+.. _libvirt_spice_server:
+
+Keyboard/Mouse/Display/Sound
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Looking Glass makes use of the SPICE protocol to provide keyboard and mouse
+input, sound input and output, and display fallback.
+
+.. note::
+  The default configuration that libvirt uses is not optimal and must be
+  adjusted. Failure to perform these changes will cause input issues along
+  with failure to support 5 button mice.   
+
+If you would like to use Spice to give you keyboard and mouse input
+along with clipboard sync support, make sure you have a
+``<graphics type='spice'>`` device, then:
+
+-  Find your ``<video>`` device, and set ``<model type='vga'/>``
+
+   -  If you can't find it, make sure you have a ``<graphics>``
+      device, save and edit again.
+
+-  Remove the ``<input type='tablet'/>`` device, if you have one.
+-  Create an ``<input type='mouse' bus='virtio'/>`` device, if you don't
+   already have one.
+-  Create an ``<input type='keyboard' bus='virtio'/>`` device to improve
+   keyboard usage.
+
+.. note::
+   Be sure to install the the *vioinput* driver from
+   `virtio-win <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_
+   in the guest
+
+To enable Audio support add a standard Intel HDA audio device to your
+configuration as per below:
+
+.. code:: xml
+   
+  <sound model='ich9'>
+    <audio id='1'/>
+  </sound>
+  <audio id='1' type='spice'/>
+
+If you also want clipboard synchronization please see
+:ref:`libvirt_clipboard_synchronization`
+
+.. _libvirt_clipboard_synchronization:
 
 Clipboard Synchronization
-~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Looking Glass can synchronize the clipboard between the host and guest using
 the SPICE guest agent.
@@ -269,3 +173,178 @@ https://www.spice-space.org/download.html#windows-binaries.
        <address type="virtio-serial" controller="0" bus="0" port="1"/>
      </channel>
      <!-- No need to add a VirtIO Serial device, it will be added automatically -->
+
+.. _libvirt_apparmor:
+
+AppArmor
+^^^^^^^^
+
+For libvirt versions before **5.10.0**, if you are using AppArmor, you
+need to add permissions for QEMU to access the shared memory file. This
+can be done by adding the following to
+``/etc/apparmor.d/local/abstractions/libvirt-qemu``::
+
+   /dev/shm/looking-glass rw,
+
+then, restart AppArmor.
+
+.. code:: bash
+
+   sudo systemctl restart apparmor
+
+.. _libvirt_memballoon_tweak:
+
+Memballoon
+^^^^^^^^^^
+
+The VirtIO memballoon device enables the host to dynamically reclaim memory
+from your VM by growing the balloon inside the guest, reserving reclaimed
+memory. Libvirt adds this device to guests by default.
+
+However, this device causes major performance issues with VFIO passthrough
+setups, and should be disabled.
+
+Find the ``<memballoon>`` tag and set its type to ``none``:
+
+.. code:: xml
+
+   <memballoon model="none"/>
+
+.. _host_install:
+
+Additional Tuning
+^^^^^^^^^^^^^^^^^
+
+Looking Glass is latency sensitive and as such it may suffer microstutters if
+you have not properly tuned your virtual machine. The physical display output
+of your GPU will usually not show such issues due to the nature of the hardware
+but be sure that if you are experiencing issues the following tuning is
+required to obtain optimal performance.
+
+1. Do not assign all your CPU cores to your guest VM, you must at minimum
+   reserve two CPU cores (4 threads) for your host system to use. For example,
+   if you have a 6 core CPU, only assign 4 cores (8 threads) to the guest.
+
+2. Ensure you correctly pin your VMs vCPU threads to the correct cores for your
+   CPU architecture.
+
+3. If you are on a NUMA architecture (dual CPU, or early Threadripper) be sure
+   that you pin the vCPU threads to the physical CPU/die attached to your GPU.
+
+4. Just because your GPU is in a slot that is physically x16 in size, does not
+   mean your GPU is running at x16, this is dependent on how your motherboard
+   is physically wired and the physical slot may be limited to x4 or x8.
+
+5. Be sure to set your CPU model type to `host-passthrough` so that your guest
+   operating system is aware of the acceleration features of your CPU and can
+   make full use of them.
+ 
+6. AMD users be sure that you have the CPU feature flag `topoext` enabled or
+   your guest operating system will not be aware of which CPU cores are
+   hyper-thread pairs.
+
+7. NVIDIA users may want to enable NvFBC as an alternative capture API in the
+   guest. Note that NvFBC is officially available on professional cards only
+   and methods to enable NvFBC on non-supported GPUs is against the NVIDIA
+   Capture API SDK License Agreement even though GeForce Experience and
+   Steam make use of it on any NVIDIA GPU.
+
+How to perform these changes is left as an exercise to the reader.
+
+Host Application
+----------------
+
+The Looking Glass Host application captures frames from the guest OS using a
+capture API, and sends them to the
+:ref:`Client <client_install>`—be it on the host OS (hypervisor) or another
+Virtual Machine—through a low-latency transfer protocol over shared memory.
+
+You can get the host program in two ways:
+
+-  Download a pre-built binary from https://looking-glass.io/downloads
+   (**recommended**)
+
+-  Download the source code as described in :ref:`building`, then
+   :ref:`build the host <host_building>`.
+
+.. _host_install_linux:
+
+For Linux
+^^^^^^^^^
+
+While the host application can be compiled and is somewhat functional for Linux
+it is currently considered incomplete and not ready for usage. As such use at
+your own risk and do not ask for support.
+
+.. _host_install_osx:
+
+
+For OSX
+^^^^^^^
+
+Currently there is no support or plans for support for OSX due to technical
+limitations.
+
+.. _host_install_windows:
+
+For Windows
+^^^^^^^^^^^
+
+To begin, you must first run the Windows VM with the changes noted above in
+either the :ref:`libvirt` section.
+
+.. _installing_the_ivshmem_driver:
+
+Installing the IVSHMEM Driver
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Since B6 the host installer available on the official Looking Glass website
+comes with the IVSHMEM driver and will install this for you. If you are running
+an older version of Looking Glass please refer to the documentation for your
+version.
+
+.. _host_install_service:
+
+Installing the Looking Glass Service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After installing your IVSHMEM driver, we can now install the Looking Glass Host
+onto our Windows Virtual Machine.
+
+1. First, run ``looking-glass-host-setup.exe`` as an administrator
+   (:ref:`Why? <faq_host_admin_privs>`)
+2. You will be greeted by an intro screen. Press ``Next`` to continue.
+3. You are presented with the |license| license. Please read and agree to the
+   license by pressing ``Agree``.
+4. You can change the install path if you wish, otherwise press ``Next`` to
+   continue.
+5. You may enable or disable options on this screen to configure the
+   installation. The default values are recommended for most users.
+   Press ``Install`` to begin installation.
+6. After a few moments, installation will complete, and you will have a
+   running instance of Looking Glass. If you experience failures, you can
+   see them in the install log appearing in the middle of the window.
+7. Press ``Close`` to exit the installer.
+
+Command line users can run ``looking-glass-host-setup.exe /S`` to execute a
+silent install with default options selected. Further configuration from the
+command line can be done with flags. You can list all available flags by
+running ``looking-glass-host-setup.exe /?``.
+
+.. _client_install:
+
+Client Application
+------------------
+
+The Looking Glass Client receives frames from the :ref:`Host <host_install>` to
+display on your screen. It also handles input, and can optionally share the
+system clipboard with your guest OS through Spice.
+
+First you must build the client from source, see :ref:`building`. Once you have
+built the client, you can install it. Run the following as root::
+
+   make install
+
+To install for the local user only, run::
+
+   cmake -DCMAKE_INSTALL_PREFIX=~/.local .. && make install

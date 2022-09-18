@@ -183,7 +183,7 @@ should use this XML block to configure their VM for kvmfr:
 
    -  The ``"size"`` tag represents the size of the shared memory device in 
       bytes. Once you determine the proper size of the device as per
-      :ref:`Determining Memory <client_determining_memory>`, use the figure you
+      :ref:`Determining Memory <libvirt_determining_memory>`, use the figure you
       got to calculate the size in bytes:
 
      ``size_in_MB x 1024 x 1024 = size_in_bytes``

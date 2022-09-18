@@ -28,6 +28,7 @@ libvirt
 linux
 LookingGlass
 memballoon
+microstutters
 mingw
 mipmapping
 modprobe
@@ -49,6 +50,7 @@ runtime
 submodule
 submodules
 systemd
+Threadripper
 toolchain
 tritanope
 tunable
