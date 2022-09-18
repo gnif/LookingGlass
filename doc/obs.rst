@@ -9,7 +9,7 @@ with a Screen or Window Capture source.
 This may help improve your viewers' watching experience, and
 allows you to use your host privately.
 
-Build Instructions
+Build instructions
 ~~~~~~~~~~~~~~~~~~
 
 The OBS plugin is included in the main source tree of Looking Glass. The

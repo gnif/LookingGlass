@@ -5,7 +5,7 @@ Installation
 
 .. _libvirt:
 
-libvirt/QEMU Configuration:
+libvirt/QEMU configuration:
 ---------------------------
 
 This article assumes you already have a fully functional libvirt domain with
@@ -42,7 +42,7 @@ your virtual machine.
 .. note::
   If you are using QEMU directly without libvirt the following arguments are
   required instead.
-   
+
   Add the following to the commands to your QEMU command line, adjusting
   the ``bus`` parameter to suit your particular configuration:
 
@@ -64,7 +64,7 @@ section.
 
 .. _libvirt_determining_memory:
 
-Determining Memory
+Determining memory
 ~~~~~~~~~~~~~~~~~~
 
 You will need to adjust the memory size to be suitable for your desired maximum
@@ -158,7 +158,7 @@ input, sound input and output, and display fallback.
 .. note::
   The default configuration that libvirt uses is not optimal and must be
   adjusted. Failure to perform these changes will cause input issues along
-  with failure to support 5 button mice.   
+  with failure to support 5 button mice.
 
 If you would like to use Spice to give you keyboard and mouse input
 along with clipboard sync support, make sure you have a
@@ -184,7 +184,7 @@ To enable Audio support add a standard Intel HDA audio device to your
 configuration as per below:
 
 .. code:: xml
-   
+
   <sound model='ich9'>
     <audio id='1'/>
   </sound>
@@ -195,7 +195,7 @@ If you also want clipboard synchronization please see
 
 .. _libvirt_clipboard_synchronization:
 
-Clipboard Synchronization
+Clipboard synchronization
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Looking Glass can synchronize the clipboard between the host and guest using
@@ -262,7 +262,7 @@ Find the ``<memballoon>`` tag and set its type to ``none``:
 
 .. _host_install:
 
-Additional Tuning
+Additional tuning
 ^^^^^^^^^^^^^^^^^
 
 Looking Glass is latency sensitive and as such it may suffer microstutters if
@@ -288,7 +288,7 @@ required to obtain optimal performance.
 5. Be sure to set your CPU model type to `host-passthrough` so that your guest
    operating system is aware of the acceleration features of your CPU and can
    make full use of them.
- 
+
 6. AMD users be sure that you have the CPU feature flag `topoext` enabled or
    your guest operating system will not be aware of which CPU cores are
    hyper-thread pairs.
@@ -301,7 +301,7 @@ required to obtain optimal performance.
 
 How to perform these changes is left as an exercise to the reader.
 
-Host Application
+Host application
 ----------------
 
 The Looking Glass Host application captures frames from the guest OS using a
@@ -345,7 +345,7 @@ either the :ref:`libvirt` section.
 
 .. _installing_the_ivshmem_driver:
 
-Installing the IVSHMEM Driver
+Installing the IVSHMEM driver
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Since B6 the host installer available on the official Looking Glass website
@@ -355,7 +355,7 @@ version.
 
 .. _host_install_service:
 
-Installing the Looking Glass Service
+Installing the Looking Glass service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 After installing your IVSHMEM driver, we can now install the Looking Glass Host
@@ -383,7 +383,7 @@ running ``looking-glass-host-setup.exe /?``.
 
 .. _client_install:
 
-Client Application
+Client application
 ------------------
 
 The Looking Glass Client receives frames from the :ref:`Host <host_install>` to

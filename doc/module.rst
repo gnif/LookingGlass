@@ -1,6 +1,6 @@
 .. _kernel_module:
 
-Kernel Module
+Kernel module
 #############
 
 This kernel module implements a basic interface to the IVSHMEM device
@@ -27,7 +27,7 @@ Then switch to the ``module/`` directory
 
 .. _module_dkms:
 
-Using DKMS (Recommended)
+Using DKMS (recommended)
 ------------------------
 
 You can use the kernel's DKMS feature to keep the module across upgrades.
@@ -70,7 +70,7 @@ with commas.
 
 .. _module_manual:
 
-Compiling & Loading (Manual)
+Compiling & loading (manual)
 ----------------------------
 
 To compile the module manually, run ``make`` in the module directory.
