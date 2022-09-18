@@ -42,7 +42,7 @@ Client
 
 .. _installing_build_dependencies:
 
-Installing Build Dependencies
+Installing build dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 These required libraries and tools should be installed first.
@@ -56,7 +56,7 @@ These required libraries and tools should be installed first.
 
 .. _client_dependencies:
 
-Required Dependencies
+Required dependencies
 ^^^^^^^^^^^^^^^^^^^^^
 
 ..

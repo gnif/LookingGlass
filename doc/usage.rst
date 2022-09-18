@@ -1,6 +1,6 @@
 .. _client_usage:
 
-Client Usage
+Client usage
 ------------
 
 **looking-glass-client** [\-\-help] [\-f] [\-F] [\-s] [\-S] [options...]
@@ -8,7 +8,7 @@ Client Usage
 
 .. _client_cli_options:
 
-Command Line Options
+Command line options
 ~~~~~~~~~~~~~~~~~~~~
 
 A full list of command line options is available with the ``--help`` or ``-h``
@@ -44,7 +44,7 @@ Examples:
 
 .. _client_key_bindings:
 
-Default Key Bindings
+Default key bindings
 ~~~~~~~~~~~~~~~~~~~~
 
 By default, Looking Glass uses the :kbd:`ScrLk` key as the escape key
@@ -91,7 +91,7 @@ You can also find this list at any time by holding down :kbd:`Scroll Lock`.
 
 .. _client_config_options_file:
 
-Configuration Files
+Configuration files
 ~~~~~~~~~~~~~~~~~~~
 
 By default, Looking Glass will load config files from
@@ -123,7 +123,7 @@ files.
 
 .. _client_overlay_mode:
 
-Overlay Mode
+Overlay mode
 ~~~~~~~~~~~~
 
 The Overlay Mode lets you configure various runtime options for Looking Glass.
@@ -148,7 +148,7 @@ as your changes may be discarded.
 
 .. _client_config_widget:
 
-Configuration Widget
+Configuration widget
 ~~~~~~~~~~~~~~~~~~~~
 
 The Configuration Widget is accessible through the Overlay Mode. The
@@ -166,19 +166,19 @@ Settings tab
 Changes in the Settings tab are not persistent, and will change back to
 their default values when the client is restarted.
 
-EGL Filters tab
+EGL filters tab
 ^^^^^^^^^^^^^^^
 
-The EGL Filters tab contains options for toggling, configuring, and ordering 
-post-processing filters. Each filter can be expanded to open its settings. 
-Filters can also be re-ordered by dragging them up or down. Filters are applied 
+The EGL Filters tab contains options for toggling, configuring, and ordering
+post-processing filters. Each filter can be expanded to open its settings.
+Filters can also be re-ordered by dragging them up or down. Filters are applied
 from top to bottom, keep this in mind when ordering them, e.g applying CAS
 before FSR might have different results than the reverse. Users are encouraged
-to experiment with the order and parameters to achieve optimal results. The 
+to experiment with the order and parameters to achieve optimal results. The
 currently available filters include:
 
--  Downscaler: Filter for downscaling the host resolution. Can be used to undo 
-   poor upscaling on the VM to better utilize AMD FSR (see below). The filter 
+-  Downscaler: Filter for downscaling the host resolution. Can be used to undo
+   poor upscaling on the VM to better utilize AMD FSR (see below). The filter
    has a pixel-size setting that is used to set the effective downscaling ratio,
    and a configurable interpolation algorithm.
 
@@ -193,9 +193,9 @@ currently available filters include:
    application. Has adjustable sharpness setting.
 
 The filter settings and order can be saved to presets so that it can be restored
-at a later time. As filter settings are usually application specific, multiple 
-presets can be defined for each case scenario. To save a preset, click on "Save 
-preset as..." and enter a preset name. Presets are loaded by selecting them in 
+at a later time. As filter settings are usually application specific, multiple
+presets can be defined for each case scenario. To save a preset, click on "Save
+preset as..." and enter a preset name. Presets are loaded by selecting them in
 the "Preset name" pull down. Presets are persistent and are stored on disk at
 ``$XDG_CONFIG_HOME/looking-glass/presets``.
 
@@ -210,8 +210,8 @@ the "Preset name" pull down. Presets are persistent and are stored on disk at
 
 .. _client_full_command_options:
 
-Full Command Line Options
-~~~~~~~~~~~~~~~~~~~~~~~~~
+All command line options
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 The following is a complete list of options accepted by this application
 
@@ -337,7 +337,7 @@ The following is a complete list of options accepted by this application
 
 .. _host_usage:
 
-Host Usage
+Host usage
 ----------
 
 By default the host application will simply work however there are some
@@ -350,7 +350,7 @@ application was installed for it to be found and used by the application
 
 .. _host_capture:
 
-Capture Interface
+Capture interface
 ~~~~~~~~~~~~~~~~~
 
 .. note::
@@ -397,7 +397,7 @@ to the `looking-glass-host.ini` configuration:
 
   [app]
   capture=dxgi
-   
+
   [dxgi]
   copyBackend=d3d12
   d3d12CopySleep=5

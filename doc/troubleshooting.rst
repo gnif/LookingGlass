@@ -6,7 +6,7 @@ Glass. Below is a list of known issues with potential solutions:
 
 .. _when_launching_looking_glass_the_desktop_doesnt_appear:
 
-When Launching Looking Glass the Desktop Doesn't Appear
+When launching Looking Glass the desktop doesn't appear
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  **Using an AMD GPU?**
@@ -21,7 +21,7 @@ When Launching Looking Glass the Desktop Doesn't Appear
 
 .. _the_clipboard_is_not_working:
 
-The Clipboard is not Working
+The clipboard is not working
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  **Is clipboard synchronization enabled?**
