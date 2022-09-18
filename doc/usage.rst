@@ -1,7 +1,7 @@
 .. _client_usage:
 
-Usage
------
+Client Usage
+------------
 
 **looking-glass-client** [\-\-help] [\-f] [\-F] [\-s] [\-S] [options...]
 
@@ -398,3 +398,182 @@ The following is a complete list of options accepted by this application
   +-----------------------+-------+-------+-------------------------+
   | wayland:fractionScale |       | yes   | Enable fractional scale |
   +-----------------------+-------+-------+-------------------------+
+
+.. _host_usage:
+
+Host Usage
+----------
+
+By default the host application will simply work however there are some
+configurable options available. While the host application will accept command
+line arguments just as the client will it is more convenient to create the
+`looking-glass-host.ini` file with the desired configuration options.
+
+This file must be placed in the same directory that the Looking Glass host
+application was installed for it to be found and used by the application
+
+.. _host_capture:
+
+Capture Interface
+~~~~~~~~~~~~~~~~~
+
+.. note::
+  Currently we only provide support for the Windows host application, Linux
+  options are not currently documented.
+
+Currently under windows there are two capture interfaces available for use,
+by default the most compatible and commonly supported interface is selected
+however this can be changed via the ini file with the following configuration:
+
+.. code:: ini
+
+ [app]
+ capture=<INTERFACE>
+
+Where `<INTERFACE>` is one of `dxgi` or `nvfbc`
+
+.. _host_capture_dxgi:
+
+Microsoft DXGI Desktop Duplication
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This interface (DXGI) is the default and most compatible capture interface for
+windows, unfortunately though it does suffer from several drawbacks over other
+options. DXGI capture can operate in two modes, DirectX 11 (default) or the
+experimental and unofficial DirectX 12 mode.
+
+Due to the design of Microsoft's DXGI API and the decision made to roll
+hardware cursor updates into the capture stream this interface can suffer from
+microstutters when the mouse is being moved/updated. This issue only affects
+guest applications that make use of the hardware cursor instead of compositing
+the cursor directly, as such titles that do not use a mouse (most FPV games)
+are not affected.
+
+The other drawback of this API is the overall system overhead, however this can
+be mitigated by using the DirectX 12 back end. Please be aware though that this
+back end is not experimental because it's new, but rather it's a slight
+abuse/misuse of the DXGI API and allows us to bypass some windows internals.
+
+To enable the DirectX 12 back end the following configuration needs to be added
+to the `looking-glass-host.ini` configuration:
+
+.. code:: ini
+
+  [app]
+  capture=dxgi
+   
+  [dxgi]
+  copyBackend=d3d12
+  d3d12CopySleep=5
+  disableDamage=false
+
+The option `d3d12CopySleep` is to work around the lack of locking this misuse
+of the API allows and you will need to tune this value to what suits your
+hardware best. The default value is 5ms as this should work for most, lowing
+it below 2ms is doubtful to be of practical use to anyone. If this value is too
+low you may see screen corruption which is usually most evident while dragging
+a window around on the Windows desktop.
+
+.. note::
+   Lowering d3d12CopySleep can improve the UPS however the UPS metric makes
+   little sense when using the d3d12 back end as if this value is too low
+   unchanged frames will be doubled up.
+
+The `disableDamage` option may be needed to avoid screen corruption however
+please note that this will increase the bandwidth required and in turn the
+overall load on your system.
+
+The DXGI capture interface also offers a feature that allows downsampling the
+captured frames in the guest GPU before transferring them to shared memory.
+This feature is very useful if you are super scaling for better picture quality
+and wish to reduce system memory pressure.
+
+The configuration for this is fairly straight forward and is defined as set of
+rules to determine when to perform this downsampling. The format is as follows:
+
+.. code:: ini
+
+  [dxgi]
+  downssample=RULE1,RULE2,RULE3
+
+The rules are written as follows:
+
+.. code::
+
+  (>|>=)(WIDTH)x(HEIGHT):(LEVEL)
+
+The `LEVEL` is the fractional scale level where 1 = 50%, 2 = 25%, 3 = 12.5%.
+
+**Examples:**
+
+.. code:: ini
+
+ [dxgi]
+ ; Downsample anything greater then 1920x1080 to 50% of it's original size
+ downsample=>1920:1080:1
+
+ ; Downsample exactly 1920x1080 to 25% of it's original size, and anything greater
+ ; then 1920x1080 to 50% of it's original size.
+ downsample=1920x1080:1,>1920x1080:2
+
+ ; Downsample anything greater or equal to 1920x1080 to 50% of it's original size
+ downsample=>=1920x1080:1
+
+.. _host_capture_nvfbc:
+
+NVIDIA Frame Buffer Capture
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Due to the NVIDIA SDK License agreement this GPU feature is only available on
+professional/workstation GPUs such as the Quadro series. It is known however
+that **all** NVIDIA GPUs are capable of this as both GeForce Experience and
+Steam are able to make use of it.
+
+If you are able to make use/enable this this feature it offers lower overall
+system load and lower latency capture, and does not suffer from the mouse
+motion stutter issues that DXGI suffers from.
+
+To enable it's usage use the following configuration in the
+`looking-glass-host.ini` file:
+
+.. code:: ini
+
+  [app]
+  capture=nvfbc
+
+If this feature is unavailable to you the host application will fail to start
+and the host log will contain an error stating that the feature is not
+available.
+
+The NVFBC capture interface also offers a feature much like DXGI to allow
+downsampling the captured frames in the guest GPU before transferring them to
+shared memory. However unlike DXGI which is limited to fractional scaling,
+NvFBC is able to scale to any arbitrary resolution.
+
+The configuration for this is fairly straight forward and is defined as set of
+rules to determine when to perform this downsampling. The format is as follows:
+
+.. code:: ini
+
+  [nvfbc]
+  downssample=RULE1,RULE2,RULE3
+
+The rules are written as follows:
+
+.. code::
+
+   (>|>=)(WIDTH)x(HEIGHT):(TARGET WIDTH)x(TARGET HEIGHT)
+
+**Examples:**
+
+.. code:: ini
+
+  [nvfbc]
+  ; Downsample exactly 3840x2160 to 1920x1080
+  downsample=3840x2160:1920x1080
+
+  ; Downsample anything greater then 1920x1080 to 1920x1080
+  downsample=>1920x1080:1920x1080
+
+  ; Downsample 3840x2160 to 1920x1080, or 3840x2400 to 1920x1200
+  downsample=3840x2160:1920x1080,3840x2400:1920x1200

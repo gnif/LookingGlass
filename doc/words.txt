@@ -5,15 +5,18 @@ cgroups
 clang
 cmake
 config
+CopySleep
 Debian
 dejavu
 deuteranope
 dev
 dir
+DirectX
 distros
 dmabuf
 downscaler
 downscaling
+downsampling
 fullscreen
 gcc
 gnif
@@ -42,6 +45,7 @@ passthrough
 pre
 protanope
 QEMU
+Quadro
 radeon
 realtime
 renderer
