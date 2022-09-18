@@ -10,6 +10,7 @@ systems for legacy programs that require high-performance graphics.
 .. toctree::
    :maxdepth: 2
 
+   requirements
    usage
    install
    build
