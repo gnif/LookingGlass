@@ -1,5 +1,6 @@
 backtrace
 borderless
+BigNavi
 cgroups
 clang
 cmake
@@ -32,6 +33,7 @@ mipmapping
 modprobe
 msys
 multisampling
+Navi
 Nvidia
 overlayed
 pacman
