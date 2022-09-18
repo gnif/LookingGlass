@@ -580,4 +580,4 @@ The rules are written as follows:
 
 This capture interface also looks for and reads the value of the system
 environment variable `NVFBC_PRIV_DATA` if it has been set, documentation on
-it's usage however is unavailble.
+it's usage however is unavailable.
