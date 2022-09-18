@@ -13,6 +13,7 @@ Developers
 * gnif (Geoffrey McRae)
 * quantum (Guanzhong Chen)
 * xyene (Tudor Brindus)
+* spencercw (Chris Spencer)
 
 .. _lg_documentation_guys:
 
