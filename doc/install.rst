@@ -37,7 +37,7 @@ Installing the IVSHMEM Driver
 
 Since B6 the host installer available on the official Looking Glass website
 comes with the IVSHMEM driver and will install this for you. If you are running
-an older verison of Looking Glass please refer to the documentation for your
+an older version of Looking Glass please refer to the documentation for your
 version.
 
 .. _host_install_service:
