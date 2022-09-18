@@ -22,6 +22,12 @@ IVSHMEM
 Configuration
 ~~~~~~~~~~~~~
 
+.. note::
+  If your host GPU is either AMD or Intel it is better to set this up using the
+  KVMFR kernel module as this will allow you to make use of DMA transfers to
+  offload some of the memory transfers to the GPU.
+  See `VM->host` in :ref:`kernel_module`.
+
 Add the following to your libvirt machine configuration inside the
 'devices' section by running ``virsh edit <VM>`` where ``<VM>`` is the name of
 your virtual machine.
@@ -46,19 +52,34 @@ your virtual machine.
      -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
 
 The memory size (show as 32 in the example above) may need to be
-adjusted as per the :ref:`Determining Memory <libvirt_determining_memory>` section.
+adjusted as per the :ref:`Determining Memory <libvirt_determining_memory>`
+section.
+
+.. warning::
+  If you change the size of this after starting your virtual machine you may
+  need to remove the file `/dev/shm/looking-glass` to allow QEMU to re-create
+  it with the correct size. If you do this the permissions of the file may be
+  incorrect for your user to be able to access it and you will need to correct
+  this. See :ref:`libvirt_shmfile_permissions`
 
 .. _libvirt_determining_memory:
 
 Determining Memory
 ~~~~~~~~~~~~~~~~~~
 
-You will need to adjust the memory size to be suitable for
-your desired maximum resolution, with the following formula:
+You will need to adjust the memory size to be suitable for your desired maximum
+resolution, with the following formula:
 
-``width x height x 4 x 2 = total bytes``
+``width x height x pixel size x 2 = total bytes``
 
 ``total bytes / 1024 / 1024 = total megabytes + 10``
+
+Where `pixel size` is 4 for 32-bit RGB (SDR) or 8 for 64-bit
+(HDR :ref:`* <libvirt_determining_memory_hdr>`).
+
+Failure to do so will cause Looking Glass to truncate the bottom of the screen
+and will trigger a message popup to inform you of the size you need to increase
+the value to.
 
 For example, for a resolution of 1920x1080 (1080p):
 
@@ -73,6 +94,35 @@ provided example is 32MB.
   Increasing this value beyond what you need does not yield any performance
   improvements, it simply will block access to that RAM making it unusable by
   your system.
+
+.. list-table:: Common Values
+  :widths: 50 25 25
+  :header-rows: 1
+
+  * - Resolution
+    - Standard Dynamic Range
+    - High Dynamic Range (HDR) :ref:`* <libvirt_determining_memory_hdr>`
+  * - 1920x1080 (1080p)
+    - 32
+    - 64
+  * - 1920x1200 (1200p)
+    - 32
+    - 64
+  * - 1920x1440 (1440p)
+    - 32
+    - 64
+  * - 3840x2160 (2160p/4K)
+    - 128
+    - 256
+
+.. _libvirt_determining_memory_hdr:
+
+.. warning::
+  While Looking Glass can capture and display HDR, at the time of writing
+  neither Xorg or Wayland can make use of it and it will be converted by the
+  GPU drivers/hardware to SDR. Additionally using HDR doubles the amount of
+  memory, bandwidth, and CPU load and should generally not be used unless you
+  have a special reason to do so.
 
 .. _libvirt_shmfile_permissions:
 
