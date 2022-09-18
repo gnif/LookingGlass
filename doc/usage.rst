@@ -577,3 +577,7 @@ The rules are written as follows:
 
   ; Downsample 3840x2160 to 1920x1080, or 3840x2400 to 1920x1200
   downsample=3840x2160:1920x1080,3840x2400:1920x1200
+
+This capture interface also looks for and reads the value of the system
+environment variable `NVFBC_PRIV_DATA` if it has been set, documentation on
+it's usage however is unavailble.
