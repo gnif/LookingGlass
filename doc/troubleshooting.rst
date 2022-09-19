@@ -26,7 +26,7 @@ The clipboard is not working
 
 -  **Is clipboard synchronization enabled?**
 
-   -  Before you can copy or paste content between the Guest and Host,
+   -  Before you can copy or paste content between the guest and host,
       :ref:`clipboard
       synchronization <libvirt_clipboard_synchronization>`
       must be enabled.

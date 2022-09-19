@@ -1,3 +1,4 @@
+backend
 backtrace
 borderless
 BigNavi
@@ -31,6 +32,7 @@ libvirt
 linux
 LookingGlass
 memballoon
+MiB
 microstutters
 mingw
 mipmapping
