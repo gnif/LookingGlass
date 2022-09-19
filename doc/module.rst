@@ -4,9 +4,9 @@ Kernel module
 #############
 
 This kernel module implements a basic interface to the IVSHMEM device
-for Looking Glass in VM->VM mode.
+for Looking Glass in VM → VM mode.
 
-Additionally in VM->host mode, it can be used to generate a shared
+Additionally in VM → host mode, it can be used to generate a shared
 memory device on the host machine that supports dmabuf.
 
 Prerequisites
@@ -53,11 +53,11 @@ To install the module into DKMS, run
 Loading
 ~~~~~~~
 
-For VM->VM, simply modprobe the module::
+For VM → VM, simply modprobe the module::
 
    modprobe kvmfr
 
-For VM->host with dmabuf, modprobe with the parameter
+For VM → host with dmabuf, modprobe with the parameter
 ``static_size_mb``:
 
 .. code:: bash
@@ -80,13 +80,13 @@ To compile the module manually, run ``make`` in the module directory.
 Loading
 ~~~~~~~
 
-For VM->VM mode, run:
+For VM → VM mode, run:
 
 .. code:: bash
 
    insmod kvmfr.ko
 
-For VM->host mode with dmabuf, instead of creating a shared memory file,
+For VM → host mode with dmabuf, instead of creating a shared memory file,
 load this module with the parameter ``static_size_mb``. For example, a
 32 MB shared memory device can be created with:
 
@@ -145,10 +145,10 @@ You may also use a config file: ``~/.looking-glass-client.ini``, or
 
 .. _module_vm_to_host:
 
-VM->Host
-~~~~~~~~
+VM → Host
+~~~~~~~~~~~~
 
-In VM->host mode, use this device in place of the shared memory file.
+In VM → host mode, use this device in place of the shared memory file.
 
 QEMU
 ^^^^
@@ -166,8 +166,8 @@ Add the following arguments to your ``qemu`` command line::
 libvirt
 ^^^^^^^
 
-Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration is the 
-default syntax. Users running QEMU 6.2 or later **and** libvirt 7.9 or later, 
+Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration is the
+default syntax. Users running QEMU 6.2 or later **and** libvirt 7.9 or later,
 should use this XML block to configure their VM for kvmfr:
 
 .. code:: xml
@@ -181,7 +181,7 @@ should use this XML block to configure their VM for kvmfr:
 
 .. note::
 
-   -  The ``"size"`` tag represents the size of the shared memory device in 
+   -  The ``"size"`` tag represents the size of the shared memory device in
       bytes. Once you determine the proper size of the device as per
       :ref:`Determining Memory <libvirt_determining_memory>`, use the figure you
       got to calculate the size in bytes:
@@ -202,7 +202,7 @@ legacy syntax for IVSHMEM setup:
 
 .. note::
 
-   -  Using the legacy syntax on QEMU 6.2/libvirt 7.9 may cause QEMU to 
+   -  Using the legacy syntax on QEMU 6.2/libvirt 7.9 may cause QEMU to
       abort with the following error message:
       "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
 
@@ -243,7 +243,7 @@ contents::
 
 This will now run the next time you start your machine.
 
-If you are running in VM->host mode, you must additionally create another file
+If you are running in VM → host mode, you must additionally create another file
 ``/etc/modprobe.d/kvmfr.conf`` to properly set the size. It should have the
 following contents::
 
