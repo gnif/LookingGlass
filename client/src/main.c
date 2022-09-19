@@ -1016,11 +1016,6 @@ int spiceThread(void * arg)
 #endif
   };
 
-  /* use the spice display until we get frames from the LG host application
-   * it is safe to call this before connect as it will be delayed until
-   * spiceReady is called */
-  app_useSpiceDisplay(true);
-
   if (!purespice_connect(&config))
   {
     DEBUG_ERROR("Failed to connect to spice server");
@@ -1425,12 +1420,24 @@ restart:
   msgsCount = 0;
   memset(msgs, 0, sizeof(msgs));
 
+  uint64_t initialSpiceEnable = microtime() + 1000 * 1000;
+
   while(g_state.state == APP_STATE_RUNNING)
   {
+    if (initialSpiceEnable && microtime() > initialSpiceEnable)
+    {
+      /* use the spice display until we get frames from the LG host application
+       * it is safe to call this before connect as it will be delayed until
+       * spiceReady is called */
+      app_useSpiceDisplay(true);
+      initialSpiceEnable = 0;
+    }
+
     status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata);
     switch(status)
     {
       case LGMP_OK:
+        initialSpiceEnable = 0;
         break;
 
       case LGMP_ERR_INVALID_VERSION:
