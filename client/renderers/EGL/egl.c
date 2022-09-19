@@ -119,6 +119,7 @@ struct Inst
   GraphHandle importGraph;
 
   bool showSpice;
+  int  spiceWidth, spiceHeight;
 };
 
 static struct Option egl_options[] =
@@ -324,6 +325,17 @@ static void egl_onRestart(LG_Renderer * renderer)
 
 static void egl_calc_mouse_size(struct Inst * this)
 {
+  if (this->showSpice)
+  {
+    this->mouseScaleX = 2.0f / this->spiceWidth;
+    this->mouseScaleY = 2.0f / this->spiceHeight;
+    egl_cursorSetSize(this->cursor,
+      (this->mouseWidth  * (1.0f / this->spiceWidth )) * this->scaleX,
+      (this->mouseHeight * (1.0f / this->spiceHeight)) * this->scaleY
+    );
+    return;
+  }
+
   if (!this->formatValid)
     return;
 
@@ -373,6 +385,19 @@ static void egl_calc_mouse_size(struct Inst * this)
 
 static void egl_calc_mouse_state(struct Inst * this)
 {
+  if (this->showSpice)
+  {
+    egl_cursorSetState(
+      this->cursor,
+      this->cursorVisible,
+      (((float)this->cursorX  * this->mouseScaleX) - 1.0f) * this->scaleX,
+      (((float)this->cursorY  * this->mouseScaleY) - 1.0f) * this->scaleY,
+      ((float)this->cursorHX * this->mouseScaleX) * this->scaleX,
+      ((float)this->cursorHY * this->mouseScaleY) * this->scaleY
+    );
+    return;
+  }
+
   if (!this->formatValid)
     return;
 
@@ -1080,10 +1105,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated))
     {
-      if (!this->showSpice)
-        cursorState = egl_cursorRender(this->cursor,
-            (this->format.rotate + rotate) % LG_ROTATE_MAX,
-            this->width, this->height);
+      cursorState = egl_cursorRender(this->cursor,
+          (this->format.rotate + rotate) % LG_ROTATE_MAX,
+          this->width, this->height);
     }
     else
       hasOverlay = true;
@@ -1194,6 +1218,8 @@ static void egl_freeTexture(LG_Renderer * renderer, void * texture)
 static void egl_spiceConfigure(LG_Renderer * renderer, int width, int height)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  this->spiceWidth   = width;
+  this->spiceHeight  = height;
   egl_desktopSpiceConfigure(this->desktop, width, height);
 }
 
