@@ -27,7 +27,9 @@ typedef struct
     SPICE_OP_CONFIGURE,
     SPICE_OP_DRAW_FILL,
     SPICE_OP_DRAW_BITMAP,
-    SPICE_OP_SHOW
+    SPICE_OP_SHOW,
+    CURSOR_OP_STATE,
+    CURSOR_OP_IMAGE,
   }
   op;
 
@@ -62,6 +64,26 @@ typedef struct
       bool show;
     }
     spiceShow;
+
+    struct
+    {
+      bool visible;
+      int  x;
+      int  y;
+      int  hx;
+      int  hy;
+    }
+    cursorState;
+
+    struct
+    {
+      bool      monochrome;
+      int       width;
+      int       height;
+      int       pitch;
+      uint8_t * data;
+    }
+    cursorImage;
   };
 }
 RenderCommand;
@@ -80,3 +102,8 @@ void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride
     void * data, bool topDown);
 
 void renderQueue_spiceShow(bool show);
+
+void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy);
+
+void renderQueue_cursorImage(bool monochrome, int width, int height, int pitch,
+    uint8_t * data);
