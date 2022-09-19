@@ -90,12 +90,12 @@ html_favicon = '../resources/icon.ico'
 html_logo = '../resources/icon-128x128.png'
 
 html_css_files = [
-    'center-rtd.css',
+    'lg-custom.css',
 ]
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = [
-    'css/center-rtd.css',
+    'css/',
 ]
