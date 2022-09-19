@@ -103,6 +103,31 @@ void renderQueue_spiceShow(bool show)
   app_invalidateWindow(true);
 }
 
+void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy)
+{
+  RenderCommand * cmd      = malloc(sizeof(*cmd));
+  cmd->op                  = CURSOR_OP_STATE;
+  cmd->cursorState.visible = visible;
+  cmd->cursorState.x       = x;
+  cmd->cursorState.y       = y;
+  cmd->cursorState.hx      = hx;
+  cmd->cursorState.hy      = hy;
+  ll_push(l_renderQueue, cmd);
+}
+
+void renderQueue_cursorImage(bool monochrome, int width, int height, int pitch,
+    uint8_t * data)
+{
+  RenderCommand * cmd         = malloc(sizeof(*cmd));
+  cmd->op                     = CURSOR_OP_IMAGE;
+  cmd->cursorImage.monochrome = monochrome;
+  cmd->cursorImage.width      = width;
+  cmd->cursorImage.height     = height;
+  cmd->cursorImage.pitch      = pitch;
+  cmd->cursorImage.data       = data;
+  ll_push(l_renderQueue, cmd);
+}
+
 void renderQueue_process(void)
 {
   RenderCommand * cmd;
@@ -136,6 +161,18 @@ void renderQueue_process(void)
         if (cmd->spiceShow.show)
           overlaySplash_show(false);
         break;
+
+      case CURSOR_OP_STATE:
+        RENDERER(onMouseEvent, cmd->cursorState.visible, cmd->cursorState.x,
+            cmd->cursorState.y, cmd->cursorState.hx, cmd->cursorState.hy);
+        break;
+
+      case CURSOR_OP_IMAGE:
+        RENDERER(onMouseShape,
+            cmd->cursorImage.monochrome ? LG_CURSOR_MONOCHROME : LG_CURSOR_COLOR,
+            cmd->cursorImage.width, cmd->cursorImage.height,
+            cmd->cursorImage.pitch, cmd->cursorImage.data);
+        free(cmd->cursorImage.data);
     }
     free(cmd);
   }
