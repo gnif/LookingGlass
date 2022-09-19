@@ -70,9 +70,11 @@ Determining memory
 You will need to adjust the memory size to be suitable for your desired maximum
 resolution, with the following formula:
 
-``width x height x pixel size x 2 = total bytes``
+``width x height x pixel size x 2 = frame bytes``
 
-``total bytes / 1024 / 1024 = total megabytes + 10``
+``total bytes / 1024 / 1024 = frame megabytes``
+
+``total megabytes + 10 = total size required``
 
 Where `pixel size` is 4 for 32-bit RGB (SDR) or 8 for 64-bit
 (HDR :ref:`* <libvirt_determining_memory_hdr>`).
@@ -85,7 +87,9 @@ For example, for a resolution of 1920x1080 (1080p):
 
 ``1920 x 1080 x 4 x 2 = 16,588,800 bytes``
 
-``16,588,800 / 1024 / 1024 = 15.82 MiB + 10 = 25.82 MiB``
+``16,588,800 / 1024 / 1024 = 15.82 MiB``
+
+``15.82 MiB + 10 MiB = 25.82 MiB``
 
 You must round this value up to the nearest power of two, which for the
 provided example is 32 MiB.
