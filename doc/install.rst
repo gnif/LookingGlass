@@ -74,7 +74,7 @@ resolution, with the following formula:
    
   width x height x pixel size x 2 = frame bytes
 
-  total bytes / 1024 / 1024 = frame megabytes
+  frame bytes / 1024 / 1024 = frame megabytes
 
   frame megabytes + 10 MiB = total megabytes
 
