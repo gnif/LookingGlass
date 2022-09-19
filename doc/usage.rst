@@ -87,7 +87,7 @@ Command                      Description
 :kbd:`ScrLk` + :kbd:`RWin`   Send :kbd:`RWin` to the guest
 ============================ =======================================================
 
-You can also find this list at any time by holding down :kbd:`Scroll Lock`.
+You can also find this list at any time by holding down :kbd:`ScrLk`.
 
 .. _client_config_options_file:
 
