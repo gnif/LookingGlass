@@ -923,6 +923,35 @@ static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
   renderQueue_spiceDrawBitmap(x, y, width, height, stride, data, topDown);
 }
 
+static void spice_setCursorRGBAImage(int width, int height, int hx, int hy,
+    const void * data)
+{
+  g_state.spiceHotX = hx;
+  g_state.spiceHotY = hy;
+
+  void * copied = malloc(width * height * 4);
+  memcpy(copied, data, width * height * 4);
+  renderQueue_cursorImage(false, width, height, width * 4, copied);
+}
+
+static void spice_setCursorMonoImage(int width, int height, int hx, int hy,
+    const void * xorMask, const void * andMask)
+{
+  g_state.spiceHotX = hx;
+  g_state.spiceHotY = hy;
+
+  int stride = (width + 7) / 8;
+  uint8_t * buffer = malloc(stride * height * 2);
+  memcpy(buffer, xorMask, stride * height);
+  memcpy(buffer + stride * height, andMask, stride * height);
+  renderQueue_cursorImage(true, width, height * 2, stride, buffer);
+}
+
+static void spice_setCursorState(bool visible, int x, int y)
+{
+  renderQueue_cursorState(visible, x, y, g_state.spiceHotX, g_state.spiceHotY);
+}
+
 int spiceThread(void * arg)
 {
   if (g_params.useSpiceAudio)
@@ -955,6 +984,14 @@ int spiceThread(void * arg)
       .surfaceDestroy = spice_surfaceDestroy,
       .drawFill       = spice_drawFill,
       .drawBitmap     = spice_drawBitmap
+    },
+    .cursor   =
+    {
+      .enable       = true,
+      .autoConnect  = false,
+      .setRGBAImage = spice_setCursorRGBAImage,
+      .setMonoImage = spice_setCursorMonoImage,
+      .setState     = spice_setCursorState,
     },
 #if ENABLE_AUDIO
     .playback =
