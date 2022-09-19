@@ -1087,12 +1087,14 @@ bool app_useSpiceDisplay(bool enable)
   if (enable)
   {
     purespice_connectChannel(PS_CHANNEL_DISPLAY);
+    purespice_connectChannel(PS_CHANNEL_CURSOR);
     renderQueue_spiceShow(true);
   }
   else
   {
     renderQueue_spiceShow(false);
     purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
+    purespice_disconnectChannel(PS_CHANNEL_CURSOR);
   }
 
   overlayStatus_set(LG_USER_STATUS_SPICE, enable);

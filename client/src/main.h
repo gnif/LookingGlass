@@ -150,6 +150,8 @@ struct AppState
   bool     autoIdleInhibitState;
 
   enum MicDefaultState micDefaultState;
+
+  int spiceHotX, spiceHotY;
 };
 
 struct AppParams
