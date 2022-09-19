@@ -70,7 +70,7 @@ Determining memory
 You will need to adjust the memory size to be suitable for your desired maximum
 resolution, with the following formula:
 
-.. code::
+.. code:: text
    
   width x height x pixel size x 2 = frame bytes
 
@@ -87,7 +87,7 @@ the value to.
 
 For example, for a resolution of 1920x1080 (1080p):
 
-.. code::
+.. code:: text
 
   1920 x 1080 x 4 x 2 = 16,588,800 bytes
 
