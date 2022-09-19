@@ -1242,6 +1242,7 @@ static void egl_spiceShow(LG_Renderer * renderer, bool show)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   this->showSpice = show;
+  egl_calc_mouse_size(this);
   egl_desktopSpiceShow(this->desktop, show);
 }
 
