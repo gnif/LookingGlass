@@ -495,14 +495,12 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
+  updateMouseShape(this);
   if (this->spiceShow)
     glCallList(this->spiceList);
   else
-  {
-    updateMouseShape(this);
     glCallList(this->texList + this->texRIndex);
-    drawMouse(this);
-  }
+  drawMouse(this);
 
   if (app_renderOverlay(NULL, 0) != 0)
   {
