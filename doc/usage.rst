@@ -3,7 +3,9 @@
 Client usage
 ------------
 
-**``looking-glass-client``** ``[--help] [-f] [-F] [-s] [-S] [options...]``
+.. raw:: html
+
+   <p><code class="literal"><b>looking-glass-client</b> [--help] [-f] [-F] [-s] [-S] [options...]</code></p>
 
 
 .. _client_cli_options:
