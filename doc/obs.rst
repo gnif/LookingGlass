@@ -23,7 +23,7 @@ The OBS plugin requires the following extra dependencies alongside the
 :ref:`client's build
 dependencies <installing_build_dependencies>`.
 
--  libobs-dev
+-  ``libobs-dev``
 
 Install this package with ``apt-get``
 

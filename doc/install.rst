@@ -5,8 +5,8 @@ Installation
 
 .. _libvirt:
 
-libvirt/QEMU configuration:
----------------------------
+libvirt/QEMU configuration
+--------------------------
 
 This article assumes you already have a fully functional libvirt domain with
 PCI passthrough working.
@@ -52,7 +52,7 @@ your virtual machine.
      -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
 
 The memory size (show as 32 in the example above) may need to be
-adjusted as per the :ref:`Determining Memory <libvirt_determining_memory>`
+adjusted as per the :ref:`Determining memory <libvirt_determining_memory>`
 section.
 
 .. warning::
@@ -85,10 +85,10 @@ For example, for a resolution of 1920x1080 (1080p):
 
 ``1920 x 1080 x 4 x 2 = 16,588,800 bytes``
 
-``16,588,800 / 1024 / 1024 = 15.82 MB + 10 = 25.82 MB``
+``16,588,800 / 1024 / 1024 = 15.82 MiB + 10 = 25.82 MiB``
 
 You must round this value up to the nearest power of two, which for the
-provided example is 32MB.
+provided example is 32 MiB.
 
 .. note::
   Increasing this value beyond what you need does not yield any performance
@@ -133,14 +133,14 @@ The shared memory file used by IVSHMEM is found in ``/dev/shm/looking-glass``.
 By default, it is owned by QEMU, and does not give read/write permissions to
 your user, which are required for Looking Glass to run properly.
 
-You can use `systemd-tmpfiles` to create the file before running your VM,
+You can use ``systemd-tmpfiles`` to create the file before running your VM,
 granting the necessary permissions which allow Looking Glass to use the file
 properly.
 
 Create a new file ``/etc/tmpfiles.d/10-looking-glass.conf``, and populate it
 with the following::
 
-   #Type Path               Mode UID  GID Age Argument
+   # Type Path               Mode UID  GID Age Argument
 
    f /dev/shm/looking-glass 0660 user kvm -
 
@@ -149,18 +149,18 @@ own.
 
 .. _libvirt_spice_server:
 
-Keyboard/Mouse/Display/Sound
+Keyboard/mouse/display/audio
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Looking Glass makes use of the SPICE protocol to provide keyboard and mouse
-input, sound input and output, and display fallback.
+input, audio input and output, and display fallback.
 
 .. note::
   The default configuration that libvirt uses is not optimal and must be
   adjusted. Failure to perform these changes will cause input issues along
   with failure to support 5 button mice.
 
-If you would like to use Spice to give you keyboard and mouse input
+If you would like to use SPICE to give you keyboard and mouse input
 along with clipboard sync support, make sure you have a
 ``<graphics type='spice'>`` device, then:
 
@@ -180,7 +180,7 @@ along with clipboard sync support, make sure you have a
    `virtio-win <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_
    in the guest
 
-To enable Audio support add a standard Intel HDA audio device to your
+To enable audio support add a standard Intel HDA audio device to your
 configuration as per below:
 
 .. code:: xml
@@ -306,7 +306,7 @@ Host application
 
 The Looking Glass Host application captures frames from the guest OS using a
 capture API, and sends them to the
-:ref:`Client <client_install>`—be it on the host OS (hypervisor) or another
+:ref:`client <client_install>`—be it on the host OS (hypervisor) or another
 Virtual Machine—through a low-latency transfer protocol over shared memory.
 
 You can get the host program in two ways:
@@ -386,9 +386,9 @@ running ``looking-glass-host-setup.exe /?``.
 Client application
 ------------------
 
-The Looking Glass Client receives frames from the :ref:`Host <host_install>` to
+The Looking Glass client receives frames from the :ref:`host <host_install>` to
 display on your screen. It also handles input, and can optionally share the
-system clipboard with your guest OS through Spice.
+system clipboard with your guest OS through SPICE.
 
 First you must build the client from source, see :ref:`building`. Once you have
 built the client, you can install it. Run the following as root::

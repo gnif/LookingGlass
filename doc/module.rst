@@ -12,7 +12,7 @@ memory device on the host machine that supports dmabuf.
 Prerequisites
 -------------
 
-The linux kernel headers for your kernel version are required for building.
+The Linux kernel headers for your kernel version are required for building.
 Install them with ``apt-get``
 
 .. code:: bash
@@ -53,11 +53,11 @@ To install the module into DKMS, run
 Loading
 ~~~~~~~
 
-For VM → VM, simply modprobe the module::
+For VM → VM, simply ``modprobe`` the module::
 
    modprobe kvmfr
 
-For VM → host with dmabuf, modprobe with the parameter
+For VM → host with dmabuf, ``modprobe`` with the parameter
 ``static_size_mb``:
 
 .. code:: bash
@@ -88,7 +88,7 @@ For VM → VM mode, run:
 
 For VM → host mode with dmabuf, instead of creating a shared memory file,
 load this module with the parameter ``static_size_mb``. For example, a
-32 MB shared memory device can be created with:
+32 MiB shared memory device can be created with:
 
 .. code:: bash
 
@@ -96,7 +96,7 @@ load this module with the parameter ``static_size_mb``. For example, a
 
 Multiple devices can be created by separating the sizes with commas. For
 example, ``static_size_mb=128,64`` would create two kvmfr devices:
-``kvmfr0`` would be 128 MB and ``kvmfr1`` would be 64 MB.
+``kvmfr0`` would be 128 MB and ``kvmfr1`` would be 64 MiB.
 
 .. note::
 
@@ -238,7 +238,7 @@ We can use the ``systemd-modules-load.service(8)`` service for this task.
 Create the file ``/etc/modules-load.d/kvmfr.conf`` with the following
 contents::
 
-   #KVMFR Looking Glass module
+   # KVMFR Looking Glass module
    kvmfr
 
 This will now run the next time you start your machine.

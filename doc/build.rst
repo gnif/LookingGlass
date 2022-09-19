@@ -66,17 +66,17 @@ Required dependencies
    Depends: or Recommends: from another listed package is not allowed.
    All required packages must be listed.
 
--  cmake
--  gcc, g++ \| clang
--  libegl-dev
--  libgl-dev
--  libgles-dev
--  libfontconfig-dev
--  libgmp-dev
--  libspice-protocol-dev
--  make
--  nettle-dev
--  pkg-config
+-  ``cmake``
+-  ``gcc``, ``g++`` \| ``clang``
+-  ``libegl-dev``
+-  ``libgl-dev``
+-  ``libgles-dev``
+-  ``libfontconfig-dev``
+-  ``libgmp-dev``
+-  ``libspice-protocol-dev``
+-  ``make``
+-  ``nettle-dev``
+-  ``pkg-config``
 
 .. _client_deps_may_be_disabled:
 
@@ -88,41 +88,41 @@ feature is disabled when running :ref:`cmake <client_building>`.
 
 -  Disable with ``cmake -DENABLE_BACKTRACE=no ..``
 
-   -  binutils-dev
+   -  ``binutils-dev``
 
 -  Disable with ``cmake -DENABLE_X11=no ..``
 
-   -  libx11-dev
-   -  libxfixes-dev
-   -  libxi-dev
-   -  libxinerama-dev
-   -  libxss-dev
-   -  libxcursor-dev
-   -  libxpresent-dev
+   -  ``libx11-dev``
+   -  ``libxfixes-dev``
+   -  ``libxi-dev``
+   -  ``libxinerama-dev``
+   -  ``libxss-dev``
+   -  ``libxcursor-dev``
+   -  ``libxpresent-dev``
 
 -  Disable with ``cmake -DENABLE_WAYLAND=no ..``
 
-   -  libxkbcommon-dev
-   -  libwayland-bin
-   -  libwayland-dev
-   -  wayland-protocols
+   -  ``libxkbcommon-dev``
+   -  ``libwayland-bin``
+   -  ``libwayland-dev``
+   -  ``wayland-protocols``
 
 -  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
 
-   -  libpipewire-0.3-dev
-   -  libsamplerate0-dev
+   -  ``libpipewire-0.3-dev``
+   -  ``libsamplerate0-dev``
 
 -  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
 
-   -  libpulse-dev
-   -  libsamplerate0-dev
+   -  ``libpulse-dev``
+   -  ``libsamplerate0-dev``
 
 .. _client_deps_recommended:
 
 Recommended
 <<<<<<<<<<<
 
--  fonts-dejavu-core (This is the default UI font, but a random font will
+-  ``fonts-dejavu-core`` (This is the default UI font, but a random font will
    be chosen if not available).
 
 .. _client_fetching_with_apt:
@@ -140,7 +140,7 @@ You can fetch these dependencies with the following command:
    libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols \
    libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
 
-You may omit some dependencies, if you disable the feature which requires them
+You may omit some dependencies if you disable the feature which requires them
 when running :ref:`cmake <client_building>`.
 (See :ref:`client_deps_may_be_disabled`)
 
@@ -160,7 +160,7 @@ into the *LookingGlass* directory.
    cmake ../
    make
 
-This will build the **looking-glass-client** binary, which is used to display
+This will build the ``looking-glass-client`` binary, which is used to display
 frames from the guest.
 
 You can then :ref:`continue installing Looking Glass <client_install>`, or run
@@ -172,12 +172,12 @@ it directly from the build directory:
 
 .. seealso::
 
-   -  :ref:`Client Installation <client_install>`
-   -  :ref:`Client Usage <client_usage>`
+   -  :ref:`Client installation <client_install>`
+   -  :ref:`Client usage <client_usage>`
 
 .. note::
 
-   For users running GNOME on Wayland, you may want to enable libdecor when
+   For users running GNOME on Wayland, you may want to enable ``libdecor`` when
    building.
 
    .. code:: bash
@@ -195,7 +195,7 @@ it directly from the build directory:
 
       cmake -DENABLE_BACKTRACE=0 ../
 
-   If you disable this and need support for crash, use ``gdb`` to obtain a
+   If you disable this and need support for a crash, use ``gdb`` to obtain a
    backtrace manually.
 
 .. _host_building:
