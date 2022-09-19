@@ -112,13 +112,17 @@ the system-wide configuration.
 When first launched, the Looking-Glass client will create the folder
 ``$XDG_CONFIG_HOME/looking-glass/`` if it does not yet exist.
 
-The format of config files is the commonly known INI format, for example::
+The format of config files is the commonly known INI format, for example:
+
+.. code-block:: ini
 
    [win]
    fullScreen=yes
 
    [egl]
    nvGain=1
+
+   ; this is a comment
 
 Command line arguments will override any options loaded from config
 files.
