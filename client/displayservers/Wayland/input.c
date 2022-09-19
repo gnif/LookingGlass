@@ -465,7 +465,7 @@ void waylandGrabPointer(void)
 
   INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    if (!wlWm.confinedPointer)
+    if (!wlWm.confinedPointer && !wlWm.lockedPointer)
     {
       wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
           wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
