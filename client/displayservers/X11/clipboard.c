@@ -103,7 +103,7 @@ bool x11CBEventThread(const XEvent xe)
   return false;
 }
 
-bool x11CBInit()
+bool x11CBInit(void)
 {
   x11cb.aCurSelection = BadValue;
   for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)

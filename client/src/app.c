@@ -458,7 +458,7 @@ void app_handleMouseRelative(double normx, double normy,
 // cursor warp support. Instead, we attempt a best-effort emulation which works
 // with a 1:1 mouse movement patch applied in the guest. For anything fancy, use
 // capture mode.
-void app_handleMouseBasic()
+void app_handleMouseBasic(void)
 {
   /* do not pass mouse events to the guest if we do not have focus */
   if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused ||
@@ -495,7 +495,7 @@ void app_handleMouseBasic()
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
-void app_resyncMouseBasic()
+void app_resyncMouseBasic(void)
 {
   if (!g_cursor.guest.valid)
     return;
