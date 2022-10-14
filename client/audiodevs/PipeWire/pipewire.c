@@ -138,7 +138,7 @@ static bool pipewire_init(void)
     pw.loop,
     pw_properties_new(
       // Request real-time priority on the PipeWire threads
-      PW_KEY_CONFIG_NAME, "client-rt.conf",
+      PW_KEY_CORE_NAME, "client-rt.conf",
       NULL
     ),
     0);
