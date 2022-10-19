@@ -525,12 +525,15 @@ void audio_playbackData(uint8_t * data, size_t size)
   }
 
   /* Determine the target latency. This is made up of the maximum audio device
-   * period (plus a little extra to absorb timing jitter) and a configurable
+   * period (or the current actual period, if larger than the expected maximum),
+   * plus a little extra to absorb timing jitter, and a configurable
    * additional buffer period. The default is set high enough to absorb typical
    * timing jitter from qemu. */
   int configLatencyMs = max(g_params.audioBufferLatency, 0);
+  int maxPeriodFrames =
+    max(audio.playback.deviceMaxPeriodFrames, spiceData->devPeriodFrames);
   double targetLatencyFrames =
-    audio.playback.deviceMaxPeriodFrames * 1.1 +
+    maxPeriodFrames * 1.1 +
     configLatencyMs * audio.playback.sampleRate / 1000.0;
 
   /* If the device is currently at a lower period size than its maximum (which
