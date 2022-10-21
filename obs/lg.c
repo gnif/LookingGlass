@@ -156,7 +156,7 @@ static void deinit(LGPlugin * this)
     case STATE_STOPPING:
     case STATE_RESTARTING:
       this->state = STATE_STOPPING;
-      createThreads(this);
+      waitThreads(this);
       this->state = STATE_STOPPED;
       /* fallthrough */
 
