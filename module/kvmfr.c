@@ -124,7 +124,8 @@ err:
   return ERR_PTR(ret);
 }
 
-static void unmap_kvmfrbuf(struct dma_buf_attachment * at, struct sg_table * sg, enum dma_data_direction direction)
+static void unmap_kvmfrbuf(struct dma_buf_attachment * at, struct sg_table * sg,
+    enum dma_data_direction direction)
 {
   dma_unmap_sg(at->dev, sg->sgl, sg->nents, direction);
   sg_free_table(sg);
@@ -144,7 +145,8 @@ static int mmap_kvmfrbuf(struct dma_buf * buf, struct vm_area_struct * vma)
   unsigned long size = vma->vm_end - vma->vm_start;
   unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 
-  if ((offset + size > (kbuf->pagecount << PAGE_SHIFT)) || (offset + size < offset))
+  if ((offset + size > (kbuf->pagecount << PAGE_SHIFT))
+      || (offset + size < offset))
     return -EINVAL;
 
   if ((vma->vm_flags & (VM_SHARED | VM_MAYSHARE)) == 0)
@@ -158,7 +160,8 @@ static int mmap_kvmfrbuf(struct dma_buf * buf, struct vm_area_struct * vma)
       return 0;
 
     case KVMFR_TYPE_STATIC:
-      return remap_vmalloc_range(vma, kbuf->kdev->addr + kbuf->offset, vma->vm_pgoff);
+      return remap_vmalloc_range(vma, kbuf->kdev->addr + kbuf->offset,
+          vma->vm_pgoff);
 
     default:
       return -EINVAL;
@@ -173,7 +176,8 @@ static const struct dma_buf_ops kvmfrbuf_ops =
   .mmap          = mmap_kvmfrbuf
 };
 
-static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, unsigned long arg)
+static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp,
+    unsigned long arg)
 {
   struct kvmfr_dmabuf_create create;
   DEFINE_DMA_BUF_EXPORT_INFO(exp_kdev);
@@ -194,7 +198,8 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
     return -EINVAL;
   }
 
-  if ((create.offset + create.size > kdev->size) || (create.offset + create.size < create.offset))
+  if ((create.offset + create.size > kdev->size) ||
+      (create.offset + create.size < create.offset))
     return -EINVAL;
 
   kbuf = kzalloc(sizeof(struct kvmfrbuf), GFP_KERNEL);
@@ -204,7 +209,8 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
   kbuf->kdev      = kdev;
   kbuf->pagecount = create.size >> PAGE_SHIFT;
   kbuf->offset    = create.offset;
-  kbuf->pages     = kmalloc_array(kbuf->pagecount, sizeof(*kbuf->pages), GFP_KERNEL);
+  kbuf->pages     = kmalloc_array(kbuf->pagecount, sizeof(*kbuf->pages),
+      GFP_KERNEL);
   if (!kbuf->pages)
   {
     ret = -ENOMEM;
@@ -244,7 +250,8 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp, uns
     goto err;
   }
 
-  printk("kvmfr_dmabuf_create: offset: %llu, size: %llu\n", create.offset, create.size);
+  printk("kvmfr_dmabuf_create: offset: %llu, size: %llu\n",
+      create.offset, create.size);
   return dma_buf_fd(buf, create.flags & KVMFR_DMABUF_FLAG_CLOEXEC ? O_CLOEXEC : 0);
 
 err:
@@ -253,7 +260,8 @@ err:
   return ret;
 }
 
-static long device_ioctl(struct file * filp, unsigned int ioctl, unsigned long arg)
+static long device_ioctl(struct file * filp, unsigned int ioctl,
+    unsigned long arg)
 {
   struct kvmfr_dev * kdev;
   long ret;
@@ -359,7 +367,8 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   mutex_unlock(&minor_lock);
 
   kdev->devNo = MKDEV(kvmfr->major, kdev->minor);
-  kdev->pDev  = device_create(kvmfr->pClass, NULL, kdev->devNo, NULL, KVMFR_DEV_NAME "%d", kdev->minor);
+  kdev->pDev  = device_create(kvmfr->pClass, NULL, kdev->devNo, NULL,
+      KVMFR_DEV_NAME "%d", kdev->minor);
   if (IS_ERR(kdev->pDev))
     goto out_unminor;
 
@@ -451,7 +460,9 @@ static int create_static_device_unlocked(int size_mb)
   kdev->addr = vmalloc_user(kdev->size);
   if (!kdev->addr)
   {
-    printk(KERN_ERR "kvmfr: failed to allocate memory for static device: %d MiB\n", size_mb);
+    printk(
+        KERN_ERR "kvmfr: failed to allocate memory for static device: %d MiB\n",
+        size_mb);
     ret = -ENOMEM;
     goto out_free;
   }
@@ -461,7 +472,8 @@ static int create_static_device_unlocked(int size_mb)
     goto out_release;
 
   kdev->devNo = MKDEV(kvmfr->major, kdev->minor);
-  kdev->pDev  = device_create(kvmfr->pClass, NULL, kdev->devNo, NULL, KVMFR_DEV_NAME "%d", kdev->minor);
+  kdev->pDev  = device_create(kvmfr->pClass, NULL, kdev->devNo, NULL,
+      KVMFR_DEV_NAME "%d", kdev->minor);
   if (IS_ERR(kdev->pDev))
     goto out_unminor;
 
