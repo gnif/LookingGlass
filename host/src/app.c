@@ -721,6 +721,9 @@ int app_main(int argc, char * argv[])
   if (!installCrashHandler(os_getExecutable()))
     DEBUG_WARN("Failed to install the crash handler");
 
+  // make sure rng is actually seeded for LGMP
+  srand((unsigned)time(NULL));
+
   app.state = APP_STATE_RUNNING;
   ivshmemOptionsInit();
 
