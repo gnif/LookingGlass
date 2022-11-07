@@ -421,7 +421,7 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   usleep(200000);
 
-  if (lgmpClientSessionInit(this->lgmp, &udataSize, (uint8_t **)&udata)
+  if (lgmpClientSessionInit(this->lgmp, &udataSize, (uint8_t **)&udata, NULL)
       != LGMP_OK)
     return;
 
