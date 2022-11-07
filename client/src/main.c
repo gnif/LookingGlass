@@ -1442,21 +1442,19 @@ restart:
 
       case LGMP_ERR_INVALID_VERSION:
       {
-        reportBadVersion();
-        msgs[msgsCount++] = app_msgBox(
-          "Incompatible LGMP Version",
-          "The host application is not compatible with this client.\n"
-          "Please download and install the matching version."
-        );
+        if (waitCount++ == 0)
+        {
+          reportBadVersion();
+          msgs[msgsCount++] = app_msgBox(
+            "Incompatible LGMP Version",
+            "The host application is not compatible with this client.\n"
+            "Please download and install the matching version."
+          );
 
-        DEBUG_INFO("Waiting for you to upgrade the host application");
-        while (g_state.state == APP_STATE_RUNNING &&
-            lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata) != LGMP_OK)
-          g_state.ds->wait(1000);
+          DEBUG_INFO("Waiting for you to upgrade the host application");
+        }
 
-        if (g_state.state != APP_STATE_RUNNING)
-          return -1;
-
+        g_state.ds->wait(1000);
         continue;
       }
 
