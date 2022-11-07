@@ -901,19 +901,20 @@ int app_main(int argc, char * argv[])
         LG_UNLOCK(app.pointerLock);
       }
 
-      const uint64_t now = microtime();
-      const uint64_t delta = now - previousFrameTime;
+      const uint64_t delta = microtime() - previousFrameTime;
       if (delta < throttleUs)
       {
-        nsleep((throttleUs - delta) * 1000);
-        previousFrameTime = microtime();
+        const uint64_t us = throttleUs - delta;
+        // only delay if the time is reasonable
+        if (us > 1000)
+          nsleep(us * 1000);
       }
-      else
-        previousFrameTime = now;
 
+      const uint64_t captureStart = microtime();
       switch(iface->capture())
       {
         case CAPTURE_RESULT_OK:
+          previousFrameTime = captureStart;
           break;
 
         case CAPTURE_RESULT_TIMEOUT:
