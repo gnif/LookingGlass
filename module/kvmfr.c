@@ -250,8 +250,8 @@ static long kvmfr_dmabuf_create(struct kvmfr_dev * kdev, struct file * filp,
     goto err;
   }
 
-  printk("kvmfr_dmabuf_create: offset: %llu, size: %llu\n",
-      create.offset, create.size);
+  printk("kvmfr_dmabuf_create with size %llu offset: %llu",
+      create.size, create.offset);
   return dma_buf_fd(buf, create.flags & KVMFR_DMABUF_FLAG_CLOEXEC ? O_CLOEXEC : 0);
 
 err:
