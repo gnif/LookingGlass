@@ -1433,7 +1433,8 @@ restart:
       initialSpiceEnable = 0;
     }
 
-    status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata);
+    status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata,
+        &g_state.clientID);
     switch(status)
     {
       case LGMP_OK:

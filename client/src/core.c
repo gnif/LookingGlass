@@ -478,10 +478,11 @@ void core_handleMouseNormal(double ex, double ey)
     if (!g_state.stopVideo &&
       g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS)
     {
-      const KVMFRSetCursorPos msg = {
-        .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
-        .x        = round(guest.x),
-        .y        = round(guest.y)
+      const KVMFRMessage_SetCursorPos msg = {
+        .msg.type     = KVMFR_MESSAGE_SETCURSORPOS,
+        .msg.clientID = g_state.clientID,
+        .x            = round(guest.x),
+        .y            = round(guest.y)
       };
 
       uint32_t setPosSerial;

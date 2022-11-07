@@ -167,7 +167,7 @@ typedef struct KVMFRMessage_SetCursorPos
   KVMFRMessage msg;
   int32_t x, y;
 }
-KVMFRSetCursorPos;
+KVMFRMessage_SetCursorPos;
 
 typedef struct KVMFRMessage_FrameTime
 {

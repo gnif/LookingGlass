@@ -121,6 +121,7 @@ struct AppState
 
   struct IVSHMEM       shm;
   PLGMPClient          lgmp;
+  uint32_t             clientID;
   PLGMPClientQueue     pointerQueue;
   LG_Lock              pointerQueueLock;
   KVMFRFeatureFlags    kvmfrFeatures;
