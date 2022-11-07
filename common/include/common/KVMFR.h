@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 19
+#define KVMFR_VERSION 20
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -56,7 +56,8 @@ typedef uint32_t KVMFRFeatureFlags;
 
 enum
 {
-  KVMFR_MESSAGE_SETCURSORPOS
+  KVMFR_MESSAGE_SETCURSORPOS,
+  KVMFR_MESSAGE_FRAME_TIME
 };
 
 typedef uint32_t KVMFRMessageType;
@@ -137,6 +138,8 @@ typedef struct KVMFRFrame
 {
   uint32_t        formatVer;          // the frame format version number
   uint32_t        frameSerial;        // the unique frame number
+  uint64_t        frameTimeUs;        // when the capture was started
+  uint64_t        frameElapsedUs;     // total time elapsed to capture the frame
   FrameType       type;               // the frame data type
   uint32_t        screenWidth;        // the client's screen width
   uint32_t        screenHeight;       // the client's screen height
@@ -155,14 +158,28 @@ KVMFRFrame;
 typedef struct KVMFRMessage
 {
   KVMFRMessageType type;
+  uint32_t         clientID;
 }
 KVMFRMessage;
 
-typedef struct KVMFRSetCursorPos
+typedef struct KVMFRMessage_SetCursorPos
 {
   KVMFRMessage msg;
   int32_t x, y;
 }
 KVMFRSetCursorPos;
+
+typedef struct KVMFRMessage_FrameTime
+{
+  KVMFRMessage msg;
+  /* this is the desired time to start the next capture operation where zero is
+   * immediate. This is only a hint to the host application and may not be
+   * honored. The value provided should be offset from the latest frame's
+   * frameTimeUs. When multiple clients are sending this message, the one with
+   * the lowest value will be used.
+   */
+  uint64_t frameTimeUs;
+}
+KVMFRMessage_FrameTime;
 
 #endif

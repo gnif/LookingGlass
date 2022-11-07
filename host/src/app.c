@@ -96,6 +96,7 @@ struct app
   unsigned int   frameIndex;
   bool           frameValid;
   uint32_t       frameSerial;
+  uint64_t       frameTimeUs;
 
   CaptureInterface * iface;
 
@@ -268,6 +269,7 @@ static bool sendFrame(void)
   }
 
   fi->formatVer         = frame.formatVer;
+  fi->frameTimeUs       = app.frameTimeUs;
   fi->frameSerial       = app.frameSerial++;
   fi->screenWidth       = frame.screenWidth;
   fi->screenHeight      = frame.screenHeight;
@@ -294,6 +296,11 @@ static bool sendFrame(void)
   // this is to allow for aligned DMA transfers by the receiver
   FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
   framebuffer_prepare(fb);
+
+  // calculate the elapsed time as late as possible, note that this does not
+  // take into account the memory copy time and the client's that care about
+  // this value will need to take this into account
+  fi->frameElapsedUs = microtime() - app.frameTimeUs;
 
   /* we post and then get the frame, this is intentional! */
   if ((status = lgmpHostQueuePost(app.frameQueue, 0,
@@ -911,6 +918,7 @@ int app_main(int argc, char * argv[])
       else
         previousFrameTime = now;
 
+      app.frameTimeUs = microtime();
       switch(iface->capture())
       {
         case CAPTURE_RESULT_OK:
