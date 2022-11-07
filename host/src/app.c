@@ -149,9 +149,7 @@ static bool lgmpTimer(void * opaque)
       DEBUG_ERROR("LGMP reported the shared memory has been corrrupted, "
           "attempting to recover");
       app.state = APP_STATE_REINIT;
-
-      // this is not a termination state, don't stop the timer
-      return true;
+      return false;
     }
 
     DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
@@ -860,9 +858,9 @@ int app_main(int argc, char * argv[])
     {
       DEBUG_INFO("Performing LGMP reinitialization");
       lgmpShutdown();
+      app.state = APP_STATE_RUNNING;
       if (!lgmpSetup(&shmDev))
         goto fail_lgmp;
-      app.state = APP_STATE_RUNNING;
     }
 
     if (app.state == APP_STATE_IDLE)
