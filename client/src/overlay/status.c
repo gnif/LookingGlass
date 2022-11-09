@@ -89,6 +89,7 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
   };
 
   int xPos = screen->x - marginX;
+  int rects = 1;
   for(int i = 0; i < LG_USER_STATUS_MAX; ++i)
   {
     OverlayImage * img = &l_image[i];
@@ -99,27 +100,52 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
     if (i == LG_USER_STATUS_RECORDING && !l_recordToggle)
       goto next;
 
+    const ImVec2 topRight = (ImVec2){
+      xPos,
+      marginY
+    };
+    const ImVec2 bottomLeft = (ImVec2){
+      xPos - ICON_SIZE,
+      img->height / l_scale + marginY
+    };
     ImDrawList_AddImage(
       igGetBackgroundDrawList_Nil(),
       img->tex,
-      (ImVec2){
-        xPos,
-        marginY
-      },
-      (ImVec2){
-        xPos - ICON_SIZE,
-        img->height / l_scale + marginY
-      },
+      topRight,
+      bottomLeft,
       (ImVec2){ 0, 0 },
       (ImVec2){ 1, 1 },
       0xFFFFFFFF);
+
+    // draw a helpful little tooltip if the user tries to mouse over the spice icon
+    if (i == LG_USER_STATUS_SPICE && g_cursor.valid) {
+      const double x = g_state.io->MousePos.x;
+      const double y = g_state.io->MousePos.y;
+      if (x >= bottomLeft.x && y <= bottomLeft.y && x <= topRight.x && y >= topRight.y) {
+        igBeginTooltipEx(ImGuiTooltipFlags_None, ImGuiWindowFlags_None);
+        igText("Using looking glass through SPICE emulation, there is likely a problem with your setup");
+        ImVec2 windowPos;
+        ImVec2 windowSize;
+        igGetWindowPos(&windowPos);
+        igGetWindowSize(&windowSize);
+        igEndTooltip();
+        *windowRects = (struct Rect) {
+          .x = floorf(windowPos.x),
+          .y = floorf(windowPos.y),
+          .w = ceilf(windowSize.x),
+          .h = ceilf(windowSize.y)
+        };
+        rects++;
+        windowRects++;
+      }
+    }
 
 next:
     xPos -= ICON_SIZE + gapX;
   }
 
   *windowRects = rect;
-  return 1;
+  return rects;
 }
 
 static bool status_tick(void * udata, unsigned long long tickCount)
