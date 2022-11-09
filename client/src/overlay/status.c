@@ -123,7 +123,7 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
       const double y = g_state.io->MousePos.y;
       if (x >= bottomLeft.x && y <= bottomLeft.y && x <= topRight.x && y >= topRight.y) {
         igBeginTooltipEx(ImGuiTooltipFlags_None, ImGuiWindowFlags_None);
-        igText("Using looking glass through SPICE emulation, there is likely a problem with your setup");
+        igText("Using Looking Glass through SPICE emulation, there is likely a problem with your setup");
         ImVec2 windowPos;
         ImVec2 windowSize;
         igGetWindowPos(&windowPos);
