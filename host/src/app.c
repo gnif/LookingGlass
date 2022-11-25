@@ -748,7 +748,7 @@ int app_main(int argc, char * argv[])
   if (option_load(configFile))
     DEBUG_INFO("Configuration file loaded");
   else
-    DEBUG_INFO("Configuration file not found or invalid");
+    DEBUG_INFO("Configuration file not found or invalid, continuing anyway...");
 
   // parse the command line arguments
   if (!option_parse(argc, argv))
