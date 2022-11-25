@@ -65,15 +65,30 @@ static const struct xdg_surface_listener xdgSurfaceListener = {
 static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
     int32_t width, int32_t height, struct wl_array * states)
 {
-  wlWm.width = width;
-  wlWm.height = height;
+  wlWm.width      = width;
+  wlWm.height     = height;
   wlWm.fullscreen = false;
+  wlWm.floating   = true;
 
   enum xdg_toplevel_state * state;
   wl_array_for_each(state, states)
   {
-    if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN)
+    switch (*state)
+    {
+    case XDG_TOPLEVEL_STATE_FULLSCREEN:
       wlWm.fullscreen = true;
+      // fallthrough
+    case XDG_TOPLEVEL_STATE_MAXIMIZED:
+    case XDG_TOPLEVEL_STATE_TILED_LEFT:
+    case XDG_TOPLEVEL_STATE_TILED_RIGHT:
+    case XDG_TOPLEVEL_STATE_TILED_TOP:
+    case XDG_TOPLEVEL_STATE_TILED_BOTTOM:
+      wlWm.floating = false;
+      break;
+
+    default:
+      break;
+    }
   }
 }
 
@@ -156,5 +171,14 @@ void waylandMinimize(void)
 
 void waylandShellResize(int w, int h)
 {
-  //TODO: Implement resize for XDG.
+  if (!wlWm.floating)
+    return;
+
+  wlWm.width = w;
+  wlWm.height = h;
+  xdg_surface_set_window_geometry(wlWm.xdgSurface, 0, 0, w, h);
+
+  wlWm.needsResize = true;
+  app_invalidateWindow(true);
+  waylandStopWaitFrame();
 }
