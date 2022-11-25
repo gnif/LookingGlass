@@ -112,6 +112,7 @@ struct WaylandDSState
   bool fractionalScale;
   bool needsResize;
   bool fullscreen;
+  bool floating;
   uint32_t resizeSerial;
   bool configured;
   bool warpSupport;
