@@ -526,7 +526,13 @@ bool app_init(void)
 
   // redirect stderr to a file
   if (logFile && strcmp(logFile, "stderr") != 0)
-    freopen(logFile, "a", stderr);
+  {
+    DEBUG_INFO("Logs will be written to: %s", logFile);
+    DEBUG_INFO("Please see there for any further information");
+
+    if (!freopen(logFile, "a", stderr))
+      DEBUG_WARN("Failed to open log file, will log to stderr");
+  }
 
   // always flush stderr
   setbuf(stderr, NULL);
