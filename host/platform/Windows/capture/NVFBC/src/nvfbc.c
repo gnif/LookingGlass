@@ -355,8 +355,8 @@ static bool nvfbc_init(void)
     if (created)
       break;
 
-    //10ms delay before retry
-    nsleep(10000000);
+    //1000ms delay before retry
+    nsleep(1000000000);
   }
 
   if (!created)
