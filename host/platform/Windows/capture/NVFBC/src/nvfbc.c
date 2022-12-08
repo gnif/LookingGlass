@@ -316,42 +316,54 @@ static bool nvfbc_init(void)
   }
 
   int adapterIndex = option_get_int("nvfbc", "adapterIndex");
-  // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
-  // causes a substantial performance pentalty even if it fails! As such we only
-  // attempt NvFBC as a last resort, or if configured via the app:capture
-  // option.
-  if (adapterIndex < 0)
+
+  bool created = false;
+  for(int retry = 0; retry < 2; ++retry)
   {
-    IDirect3D9 * d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    int adapterCount = IDirect3D9_GetAdapterCount(d3d);
-    for(int i = 0; i < adapterCount; ++i)
-    {
-      D3DADAPTER_IDENTIFIER9 ident;
-      IDirect3D9_GetAdapterIdentifier(d3d, i, 0, &ident);
-      if (ident.VendorId != 0x10DE)
-        continue;
-
-      if (NvFBCToSysCreate(i, privData, privDataLen, &this->nvfbc,
-        &this->maxWidth, &this->maxHeight))
-      {
-        adapterIndex = i;
-        break;
-      }
-    }
-    IDirect3D9_Release(d3d);
-
+    // NOTE: Calling this on hardware that doesn't support NvFBC such as GeForce
+    // causes a substantial performance pentalty even if it fails! As such we only
+    // attempt NvFBC as a last resort, or if configured via the app:capture
+    // option.
     if (adapterIndex < 0)
     {
-      free(privData);
-      return false;
+      IDirect3D9 * d3d = Direct3DCreate9(D3D_SDK_VERSION);
+      int adapterCount = IDirect3D9_GetAdapterCount(d3d);
+      for(int i = 0; i < adapterCount; ++i)
+      {
+        D3DADAPTER_IDENTIFIER9 ident;
+        IDirect3D9_GetAdapterIdentifier(d3d, i, 0, &ident);
+        if (ident.VendorId != 0x10DE)
+          continue;
+
+        if (NvFBCToSysCreate(i, privData, privDataLen, &this->nvfbc,
+          &this->maxWidth, &this->maxHeight))
+        {
+          adapterIndex = i;
+          created      = true;
+          break;
+        }
+      }
+      IDirect3D9_Release(d3d);
     }
-  }
-  else
-    if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+    else
     {
-      free(privData);
-      return false;
+      if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+        continue;
+      created = true;
     }
+
+    if (created)
+      break;
+
+    //10ms delay before retry
+    nsleep(10000000);
+  }
+
+  if (!created)
+  {
+    free(privData);
+    return false;
+  }
 
   int diffRes = option_get_int("nvfbc", "diffRes");
   enum DiffMapBlockSize blockSize;
