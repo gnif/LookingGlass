@@ -242,11 +242,30 @@ out:
   return;
 }
 
+static int x11ErrorHandler(Display * display, XErrorEvent * error)
+{
+  char errorText[1024];
+  XGetErrorText(display, error->error_code, errorText, sizeof(errorText));
+
+  DEBUG_ERROR("X11 Error: %s", errorText);
+  DEBUG_PRINT_BACKTRACE();
+  return 0;
+}
+
+static int x11IOErrorHandler(Display * display)
+{
+  DEBUG_FATAL("Fatal X11 IO Error");
+  return 0;
+}
+
 static bool x11Init(const LG_DSInitParams params)
 {
   XIDeviceInfo *devinfo;
   int count;
   int event, error;
+
+  XSetErrorHandler(x11ErrorHandler);
+  XSetIOErrorHandler(x11IOErrorHandler);
 
   memset(&x11, 0, sizeof(x11));
   x11.xValuator = -1;
