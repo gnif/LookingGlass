@@ -1814,6 +1814,10 @@ int main(int argc, char * argv[])
   for(unsigned int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
     LG_DisplayServers[i]->setup();
 
+  for(unsigned int i = 0; i < LG_AUDIODEV_COUNT; ++i)
+    if (LG_AudioDevs[i]->earlyInit)
+      LG_AudioDevs[i]->earlyInit();
+
   if (!config_load(argc, argv))
     return -1;
 
