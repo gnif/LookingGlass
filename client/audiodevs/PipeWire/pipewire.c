@@ -257,7 +257,13 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
 
   const char * device = option_get_string("pipewire", "outDevice");
   if (device)
+  {
+#ifdef PW_KEY_TARGET_OBJECT
     pw_properties_set(props, PW_KEY_TARGET_OBJECT, device);
+#else
+    pw_properties_set(props, PW_KEY_NODE_TARGET, device);
+#endif
+  }
 
   pw.playback.stream = pw_stream_new_simple(
     pw.loop,
@@ -491,7 +497,13 @@ static void pipewire_recordStart(int channels, int sampleRate,
 
   const char * device = option_get_string("pipewire", "recDevice");
   if (device)
+  {
+#ifdef PW_KEY_TARGET_OBJECT
     pw_properties_set(props, PW_KEY_TARGET_OBJECT, device);
+#else
+    pw_properties_set(props, PW_KEY_NODE_TARGET, device);
+#endif
+  }
 
   pw_thread_loop_lock(pw.thread);
   pw.record.stream = pw_stream_new_simple(
