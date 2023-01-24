@@ -28,6 +28,7 @@
 #include "common/debug.h"
 #include "common/stringutils.h"
 #include "common/util.h"
+#include "common/option.h"
 
 typedef enum
 {
@@ -129,6 +130,28 @@ static void pipewire_onPlaybackDrained(void * userdata)
   pw_thread_loop_unlock(pw.thread);
 }
 
+static struct Option pipewire_options[] =
+{
+  {
+    .module       = "pipewire",
+    .name         = "outDevice",
+    .description  = "The default playback device to use",
+    .type         = OPTION_TYPE_STRING
+  },
+  {
+    .module       = "pipewire",
+    .name         = "recDevice",
+    .description  = "The default record device to use",
+    .type         = OPTION_TYPE_STRING
+  },
+  { NULL }
+};
+
+static void pipewire_earlyInit(void)
+{
+  option_register(pipewire_options);
+}
+
 static bool pipewire_init(void)
 {
   pw_init(NULL, NULL);
@@ -221,9 +244,8 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   pw.playback.pullFn      = pullFn;
 
   pw_thread_loop_lock(pw.thread);
-  pw.playback.stream = pw_stream_new_simple(
-    pw.loop,
-    "Looking Glass",
+
+  struct pw_properties * props =
     pw_properties_new(
       PW_KEY_NODE_NAME     , "Looking Glass",
       PW_KEY_MEDIA_TYPE    , "Audio",
@@ -231,7 +253,16 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_KEY_MEDIA_ROLE    , "Music",
       PW_KEY_NODE_LATENCY  , requestedNodeLatency,
       NULL
-    ),
+    );
+
+  const char * device = option_get_string("pipewire", "outDevice");
+  if (device)
+    pw_properties_set(props, PW_KEY_TARGET_OBJECT, device);
+
+  pw.playback.stream = pw_stream_new_simple(
+    pw.loop,
+    "Looking Glass",
+    props,
     &events,
     NULL
   );
@@ -449,17 +480,24 @@ static void pipewire_recordStart(int channels, int sampleRate,
   pw.record.stride     = sizeof(uint16_t) * channels;
   pw.record.pushFn     = pushFn;
 
-  pw_thread_loop_lock(pw.thread);
-  pw.record.stream = pw_stream_new_simple(
-    pw.loop,
-    "Looking Glass",
+  struct pw_properties * props =
     pw_properties_new(
       PW_KEY_NODE_NAME     , "Looking Glass",
       PW_KEY_MEDIA_TYPE    , "Audio",
       PW_KEY_MEDIA_CATEGORY, "Capture",
       PW_KEY_MEDIA_ROLE    , "Music",
       NULL
-    ),
+    );
+
+  const char * device = option_get_string("pipewire", "recDevice");
+  if (device)
+    pw_properties_set(props, PW_KEY_TARGET_OBJECT, device);
+
+  pw_thread_loop_lock(pw.thread);
+  pw.record.stream = pw_stream_new_simple(
+    pw.loop,
+    "Looking Glass",
+    props,
     &events,
     NULL
   );
@@ -543,9 +581,10 @@ static void pipewire_free(void)
 
 struct LG_AudioDevOps LGAD_PipeWire =
 {
-  .name   = "PipeWire",
-  .init   = pipewire_init,
-  .free   = pipewire_free,
+  .name      = "PipeWire",
+  .earlyInit = pipewire_earlyInit,
+  .init      = pipewire_init,
+  .free      = pipewire_free,
   .playback =
   {
     .setup   = pipewire_playbackSetup,
