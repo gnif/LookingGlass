@@ -144,7 +144,8 @@ static struct Option pipewire_options[] =
     .description  = "The default record device to use",
     .type         = OPTION_TYPE_STRING
   },
-  { NULL }
+
+  {0}
 };
 
 static void pipewire_earlyInit(void)
