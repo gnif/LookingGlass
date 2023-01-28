@@ -466,6 +466,9 @@ The ``LEVEL`` is the fractional scale level where 1 = 50%, 2 = 25%, 3 = 12.5%.
 NVIDIA Frame Buffer Capture
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. warning::
+   NVFBC has been deprecated by NVIDIA.
+
 Due to the NVIDIA SDK License agreement this GPU feature is only available on
 professional/workstation GPUs such as the Quadro series. It is known however
 that **all** NVIDIA GPUs are capable of this as both GeForce Experience and
