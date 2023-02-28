@@ -71,12 +71,16 @@ static bool waylandProbe(void)
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
+
+  wlWm.display = wl_display_connect(NULL);
+  if (!wlWm.display)
+    return false;
+
   wl_list_init(&wlWm.surfaceOutputs);
 
   wlWm.warpSupport        = option_get_bool("wayland", "warpSupport");
   wlWm.useFractionalScale = option_get_bool("wayland", "fractionScale");
 
-  wlWm.display = wl_display_connect(NULL);
   wlWm.width = params.w;
   wlWm.height = params.h;
 
