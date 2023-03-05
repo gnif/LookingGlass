@@ -1171,6 +1171,46 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       app_updateCursorPos(xie->event_x, xie->event_y);
       app_handleEnterEvent(false);
       x11.entered = false;
+
+      /**
+       * Because there is a race with the pointer ungrab the enter event for the
+       * next window is sometimes sent with the mode NotifyUngrab, unfortunatly
+       * some window managers such as i3 will ignore these which breaks focus
+       * follows mouse mode. To correct this we generate and send a normal
+       * EnterNotify event.
+       */
+      int root_x, root_y, win_x, win_y;
+      Window root_win, child_win;
+      unsigned int mask;
+      XQueryPointer(x11.display, DefaultRootWindow(x11.display), &root_win,
+                  &child_win, &root_x, &root_y, &win_x, &win_y, &mask);
+
+      int target_x, target_y;
+      Window target_root;
+      XTranslateCoordinates(x11.display, DefaultRootWindow(x11.display),
+        child_win, root_x, root_y, &target_x, &target_y, &target_root);
+
+      XEvent event;
+      memset(&event, 0, sizeof(event));
+      event.type                  = EnterNotify;
+      event.xcrossing.serial      = 0;
+      event.xcrossing.send_event  = True;
+      event.xcrossing.display     = x11.display;
+      event.xcrossing.window      = child_win;
+      event.xcrossing.root        = root_win;
+      event.xcrossing.subwindow   = child_win;
+      event.xcrossing.time        = CurrentTime;
+      event.xcrossing.mode        = NotifyNormal;
+      event.xcrossing.detail      = NotifyNonlinear;
+      event.xcrossing.same_screen = True;
+      event.xcrossing.focus       = False;
+      event.xcrossing.x           = target_x;
+      event.xcrossing.y           = target_y;
+      event.xcrossing.x_root      = root_x;
+      event.xcrossing.y_root      = root_y;
+
+      XSendEvent(x11.display, child_win, True, EnterWindowMask, &event);
+      XFlush(x11.display);
       return;
     }
 
