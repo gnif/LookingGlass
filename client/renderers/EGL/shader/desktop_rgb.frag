@@ -1,5 +1,5 @@
 #version 300 es
-precision mediump float;
+precision highp float;
 
 #define EGL_SCALE_AUTO    0
 #define EGL_SCALE_NEAREST 1

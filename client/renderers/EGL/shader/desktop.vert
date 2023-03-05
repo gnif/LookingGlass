@@ -1,5 +1,5 @@
 #version 300 es
-precision mediump float;
+precision highp float;
 
 layout(location = 0) in vec2 vertex;
 out vec2 uv;
