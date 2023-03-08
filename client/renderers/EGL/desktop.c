@@ -46,6 +46,7 @@ struct DesktopShader
   EGL_Shader * shader;
   GLint uTransform;
   GLint uDesktopSize;
+  GLint uSamplerType;
   GLint uScaleAlgo;
   GLint uNVGain;
   GLint uCBMode;
@@ -57,7 +58,7 @@ struct EGL_Desktop
   EGLDisplay * display;
 
   EGL_Texture          * texture;
-  struct DesktopShader shader;
+  struct DesktopShader dmaShader, shader;
   EGL_DesktopRects     * mesh;
   CountedBuffer        * matrix;
 
@@ -92,7 +93,8 @@ void toggleNV(int key, void * opaque);
 static bool egl_initDesktopShader(
   struct DesktopShader * shader,
   const char * vertex_code  , size_t vertex_size,
-  const char * fragment_code, size_t fragment_size
+  const char * fragment_code, size_t fragment_size,
+  bool useDMA
 )
 {
   if (!egl_shaderInit(&shader->shader))
@@ -100,7 +102,8 @@ static bool egl_initDesktopShader(
 
   if (!egl_shaderCompile(shader->shader,
         vertex_code  , vertex_size,
-        fragment_code, fragment_size))
+        fragment_code, fragment_size,
+        useDMA))
   {
     return false;
   }
@@ -135,15 +138,6 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     return false;
   }
 
-  if (!egl_initDesktopShader(
-    &desktop->shader,
-    b_shader_desktop_vert    , b_shader_desktop_vert_size,
-    b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size))
-  {
-    DEBUG_ERROR("Failed to initialize the generic desktop shader");
-    return false;
-  }
-
   if (!egl_desktopRectsInit(&desktop->mesh, maxRects))
   {
     DEBUG_ERROR("Failed to initialize the desktop mesh");
@@ -156,6 +150,27 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     DEBUG_ERROR("Failed to allocate the desktop matrix buffer");
     return false;
   }
+
+  if (!egl_initDesktopShader(
+    &desktop->shader,
+    b_shader_desktop_vert    , b_shader_desktop_vert_size,
+    b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size,
+    false))
+  {
+    DEBUG_ERROR("Failed to initialize the desktop shader");
+    return false;
+  }
+
+  if (useDMA)
+    if (!egl_initDesktopShader(
+      &desktop->dmaShader,
+      b_shader_desktop_vert    , b_shader_desktop_vert_size,
+      b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size,
+      true))
+    {
+      DEBUG_ERROR("Failed to initialize the desktop DMA shader");
+      return false;
+    }
 
   app_registerKeybind(0, 'N', toggleNV, desktop,
       "Toggle night vision mode");
@@ -205,11 +220,12 @@ void egl_desktopFree(EGL_Desktop ** desktop)
   if (!*desktop)
     return;
 
-  egl_textureFree    (&(*desktop)->texture      );
-  egl_textureFree    (&(*desktop)->spiceTexture );
-  egl_shaderFree     (&(*desktop)->shader.shader);
-  egl_desktopRectsFree(&(*desktop)->mesh        );
-  countedBufferRelease(&(*desktop)->matrix      );
+  egl_textureFree    (&(*desktop)->texture         );
+  egl_textureFree    (&(*desktop)->spiceTexture    );
+  egl_shaderFree     (&(*desktop)->shader   .shader);
+  egl_shaderFree     (&(*desktop)->dmaShader.shader);
+  egl_desktopRectsFree(&(*desktop)->mesh           );
+  countedBufferRelease(&(*desktop)->matrix         );
 
   egl_postProcessFree(&(*desktop)->pp);
 
@@ -399,18 +415,17 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   if (atomic_exchange(&desktop->processFrame, false) ||
       egl_postProcessConfigModified(desktop->pp))
     egl_postProcessRun(desktop->pp, tex, desktop->mesh,
-        width, height, outputWidth, outputHeight);
+        width, height, outputWidth, outputHeight, desktop->useDMA);
 
   unsigned int finalSizeX, finalSizeY;
-  GLuint texture = egl_postProcessGetOutput(desktop->pp,
+  EGL_Texture * texture = egl_postProcessGetOutput(desktop->pp,
       &finalSizeX, &finalSizeY);
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   egl_resetViewport(desktop->egl);
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture);
-  glBindSampler(0, tex->sampler);
+  egl_textureBind(texture);
 
   if (finalSizeX > width || finalSizeY > height)
     scaleType = EGL_DESKTOP_DOWNSCALE;
@@ -435,7 +450,10 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       scaleAlgo = desktop->scaleAlgo;
   }
 
-  const struct DesktopShader * shader = &desktop->shader;
+  const struct DesktopShader * shader =
+    desktop->useDMA && texture == desktop->texture ?
+      &desktop->dmaShader : &desktop->shader;
+
   EGL_Uniform uniforms[] =
   {
     {

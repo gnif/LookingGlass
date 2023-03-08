@@ -41,7 +41,7 @@ bool egl_postProcessConfigModified(EGL_PostProcess * this);
  * targetX/Y is the final target output dimension hint if scalers are present */
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
-    unsigned int targetX, unsigned int targetY);
+    unsigned int targetX, unsigned int targetY, bool useDMA);
 
-GLuint egl_postProcessGetOutput(EGL_PostProcess * this,
+EGL_Texture * egl_postProcessGetOutput(EGL_PostProcess * this,
     unsigned int * outputX, unsigned int * outputY);

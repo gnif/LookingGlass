@@ -100,7 +100,7 @@ static bool cursorTexInit(struct CursorTex * t,
   }
 
   if (!egl_shaderCompile(t->shader,
-        vertex_code, vertex_size, fragment_code, fragment_size))
+        vertex_code, vertex_size, fragment_code, fragment_size, false))
   {
     DEBUG_ERROR("Failed to compile the cursor shader");
     return false;

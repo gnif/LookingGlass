@@ -1,4 +1,6 @@
 #version 300 es
+#extension GL_OES_EGL_image_external_essl3 : enable
+
 precision highp float;
 
 #include "compat.h"
@@ -6,7 +8,7 @@ precision highp float;
 in  vec2  fragCoord;
 out vec4  fragColor;
 
-uniform sampler2D texture;
+uniform sampler2D sampler1;
 uniform uvec4     uConsts[2];
 
 #define A_GPU 1
@@ -16,7 +18,7 @@ uniform uvec4     uConsts[2];
 
 vec3 imageLoad(ivec2 point)
 {
-  return texelFetch(texture, point, 0).rgb;
+  return texelFetch(sampler1, point, 0).rgb;
 }
 
 AF3 CasLoad(ASU2 p)
@@ -30,7 +32,7 @@ void CasInput(inout AF1 r,inout AF1 g,inout AF1 b) {}
 
 void main()
 {
-  vec2  res   = vec2(textureSize(texture, 0));
+  vec2  res   = vec2(textureSize(sampler1, 0));
   uvec2 point = uvec2(fragCoord * res);
 
   CasFilter(

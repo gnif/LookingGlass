@@ -292,6 +292,19 @@ EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex)
   return EGL_TEX_STATUS_OK;
 }
 
+EGL_TexStatus egl_texBufferBind(EGL_Texture * texture)
+{
+  GLuint tex;
+  EGL_TexStatus status;
+
+  if ((status = texture->ops.get(texture, &tex)) != EGL_TEX_STATUS_OK)
+    return status;
+
+  glBindTexture(GL_TEXTURE_2D, tex);
+  return EGL_TEX_STATUS_OK;
+}
+
+
 const EGL_TextureOps EGL_TextureBuffer =
 {
   .init        = egl_texBufferInit,
@@ -299,7 +312,8 @@ const EGL_TextureOps EGL_TextureBuffer =
   .setup       = egl_texBufferSetup,
   .update      = egl_texBufferUpdate,
   .process     = egl_texBufferProcess,
-  .get         = egl_texBufferGet
+  .get         = egl_texBufferGet,
+  .bind        = egl_texBufferBind
 };
 
 const EGL_TextureOps EGL_TextureBufferStream =
@@ -309,5 +323,6 @@ const EGL_TextureOps EGL_TextureBufferStream =
   .setup       = egl_texBufferStreamSetup,
   .update      = egl_texBufferStreamUpdate,
   .process     = egl_texBufferStreamProcess,
-  .get         = egl_texBufferStreamGet
+  .get         = egl_texBufferStreamGet,
+  .bind        = egl_texBufferBind
 };

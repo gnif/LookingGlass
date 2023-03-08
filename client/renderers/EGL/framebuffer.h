@@ -32,4 +32,4 @@ bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
 
 void egl_framebufferBind(EGL_Framebuffer * this);
 
-GLuint egl_framebufferGetTexture(EGL_Framebuffer * this);
+EGL_Texture * egl_framebufferGetTexture(EGL_Framebuffer * this);

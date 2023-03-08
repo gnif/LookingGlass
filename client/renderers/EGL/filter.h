@@ -68,9 +68,11 @@ typedef struct EGL_FilterOps
   /* reads filter state from options */
   void (*loadState)(EGL_Filter * filter);
 
-  /* set the input format of the filter */
+  /* set the input format of the filter
+   * useDMA will be true if the texture provided needs to use samplerExternalOES
+   */
   bool (*setup)(EGL_Filter * filter, enum EGL_PixelFormat pixFmt,
-      unsigned int width, unsigned int height);
+      unsigned int width, unsigned int height, bool useDMA);
 
   /* set the output resolution hint for the filter
    * this is optional and only a hint */
@@ -87,8 +89,8 @@ typedef struct EGL_FilterOps
 
   /* runs the filter on the provided texture
    * returns the processed texture as the output */
-  GLuint (*run)(EGL_Filter * filter, EGL_FilterRects * rects,
-      GLuint texture);
+  EGL_Texture * (*run)(EGL_Filter * filter, EGL_FilterRects * rects,
+      EGL_Texture * texture);
 
   /* called when the filter output is no loger needed so it can release memory
    * this is optional */
@@ -133,9 +135,10 @@ static inline void egl_filterLoadState(EGL_Filter * filter)
 }
 
 static inline bool egl_filterSetup(EGL_Filter * filter,
-    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height)
+    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    bool useDMA)
 {
-  return filter->ops.setup(filter, pixFmt, width, height);
+  return filter->ops.setup(filter, pixFmt, width, height, useDMA);
 }
 
 static inline void egl_filterSetOutputResHint(EGL_Filter * filter,
@@ -156,8 +159,8 @@ static inline bool egl_filterPrepare(EGL_Filter * filter)
   return filter->ops.prepare(filter);
 }
 
-static inline GLuint egl_filterRun(EGL_Filter * filter,
-    EGL_FilterRects * rects, GLuint texture)
+static inline EGL_Texture * egl_filterRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, EGL_Texture * texture)
 {
   return filter->ops.run(filter, rects, texture);
 }

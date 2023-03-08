@@ -46,12 +46,26 @@ EGL_TextureOps EGL_TextureDMABUF;
 
 // internal functions
 
-static void egl_texDMABUFCleanup(TexDMABUF * this)
+static void egl_texDMABUFCleanup(EGL_Texture * texture)
 {
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
   struct FdImage * image;
   vector_forEachRef(image, &this->images)
     g_egl_dynProcs.eglDestroyImage(this->display, image->image);
   vector_clear(&this->images);
+
+  egl_texUtilFreeBuffers(parent->buf, parent->texCount);
+
+  if (parent->tex[0])
+    glDeleteTextures(parent->texCount, parent->tex);
+
+  if (parent->sync)
+  {
+    glDeleteSync(parent->sync);
+    parent->sync = 0;
+  }
 }
 
 // dmabuf functions
@@ -92,7 +106,7 @@ static void egl_texDMABUFFree(EGL_Texture * texture)
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
-  egl_texDMABUFCleanup(this);
+  egl_texDMABUFCleanup(texture);
   vector_destroy(&this->images);
 
   egl_texBufferFree(&parent->base);
@@ -102,11 +116,27 @@ static void egl_texDMABUFFree(EGL_Texture * texture)
 static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
-  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
-  egl_texDMABUFCleanup(this);
+  egl_texDMABUFCleanup(texture);
 
-  return egl_texBufferSetup(&parent->base, setup);
+  glGenTextures(parent->texCount, parent->tex);
+  for(int i = 0; i < parent->texCount; ++i)
+  {
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[i]);
+    glTexImage2D(GL_TEXTURE_EXTERNAL_OES,
+        0,
+        texture->format.intFormat,
+        texture->format.width,
+        texture->format.height,
+        0,
+        texture->format.format,
+        texture->format.dataType,
+        NULL);
+  }
+
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+  parent->rIndex = -1;
+  return true;
 }
 
 static bool egl_texDMABUFUpdate(EGL_Texture * texture,
@@ -173,8 +203,8 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   INTERLOCKED_SECTION(parent->copyLock,
   {
-    glBindTexture(GL_TEXTURE_2D, parent->tex[parent->bufIndex]);
-    g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[parent->bufIndex]);
+    g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
 
     if (parent->sync)
       glDeleteSync(parent->sync);
@@ -238,6 +268,18 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex)
   return EGL_TEX_STATUS_OK;
 }
 
+static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
+{
+  GLuint tex;
+  EGL_TexStatus status;
+
+  if ((status = egl_texDMABUFGet(texture, &tex)) != EGL_TEX_STATUS_OK)
+    return status;
+
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
+  return EGL_TEX_STATUS_OK;
+}
+
 EGL_TextureOps EGL_TextureDMABUF =
 {
   .init        = egl_texDMABUFInit,
@@ -245,5 +287,6 @@ EGL_TextureOps EGL_TextureDMABUF =
   .setup       = egl_texDMABUFSetup,
   .update      = egl_texDMABUFUpdate,
   .process     = egl_texDMABUFProcess,
-  .get         = egl_texDMABUFGet
+  .get         = egl_texDMABUFGet,
+  .bind        = egl_texDMABUFBind
 };

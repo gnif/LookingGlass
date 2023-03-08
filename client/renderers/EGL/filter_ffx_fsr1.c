@@ -42,6 +42,7 @@ typedef struct EGL_FilterFFXFSR1
   CountedBuffer * consts;
   EGL_Uniform     easuUniform[2], rcasUniform;
 
+  int useDMA;
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
   unsigned int inWidth, inHeight;
@@ -109,6 +110,8 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
     return false;
   }
 
+  this->useDMA = -1;
+
   if (!egl_shaderInit(&this->easu))
   {
     DEBUG_ERROR("Failed to initialize the Easu shader");
@@ -121,18 +124,10 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
     goto error_esau;
   }
 
-  if (!egl_shaderCompile(this->easu,
-        b_shader_basic_vert        , b_shader_basic_vert_size,
-        b_shader_ffx_fsr1_easu_frag, b_shader_ffx_fsr1_easu_frag_size)
-     )
-  {
-    DEBUG_ERROR("Failed to compile the Easu shader");
-    goto error_rcas;
-  }
-
   if (!egl_shaderCompile(this->rcas,
         b_shader_basic_vert        , b_shader_basic_vert_size,
-        b_shader_ffx_fsr1_rcas_frag, b_shader_ffx_fsr1_rcas_frag_size)
+        b_shader_ffx_fsr1_rcas_frag, b_shader_ffx_fsr1_rcas_frag_size,
+        false)
      )
   {
     DEBUG_ERROR("Failed to compile the Rcas shader");
@@ -147,14 +142,6 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
   }
 
   egl_filterFFXFSR1LoadState(&this->base);
-
-  this->easuUniform[0].type = EGL_UNIFORM_TYPE_4UIV;
-  this->easuUniform[0].location =
-    egl_shaderGetUniform(this->easu, "uConsts");
-  this->easuUniform[0].v = this->consts;
-  this->easuUniform[1].type = EGL_UNIFORM_TYPE_2F;
-  this->easuUniform[1].location =
-    egl_shaderGetUniform(this->easu, "uOutRes");
 
   this->rcasUniform.type = EGL_UNIFORM_TYPE_4UI;
   this->rcasUniform.location = egl_shaderGetUniform(this->rcas, "uConsts");
@@ -335,12 +322,36 @@ static void egl_filterFFXFSR1SetOutputResHint(EGL_Filter * filter,
 }
 
 static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
-    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height)
+    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    bool useDMA)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
   if (!this->enable)
     return false;
+
+  if (this->useDMA != useDMA)
+  {
+    if (!egl_shaderCompile(this->easu,
+          b_shader_basic_vert        , b_shader_basic_vert_size,
+          b_shader_ffx_fsr1_easu_frag, b_shader_ffx_fsr1_easu_frag_size,
+          useDMA)
+       )
+    {
+      DEBUG_ERROR("Failed to compile the Easu shader");
+      return false;
+    }
+
+    this->easuUniform[0].type = EGL_UNIFORM_TYPE_4UIV;
+    this->easuUniform[0].location =
+      egl_shaderGetUniform(this->easu, "uConsts");
+    this->easuUniform[0].v = this->consts;
+    this->easuUniform[1].type = EGL_UNIFORM_TYPE_2F;
+    this->easuUniform[1].location =
+      egl_shaderGetUniform(this->easu, "uOutRes");
+
+    this->useDMA = useDMA;
+  }
 
   this->active = this->width > width && this->height > height;
   if (!this->active)
@@ -395,15 +406,15 @@ static bool egl_filterFFXFSR1Prepare(EGL_Filter * filter)
   return true;
 }
 
-static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter,
-    EGL_FilterRects * rects, GLuint texture)
+static EGL_Texture * egl_filterFFXFSR1Run(EGL_Filter * filter,
+    EGL_FilterRects * rects, EGL_Texture * texture)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
   // pass 1, Easu
   egl_framebufferBind(this->easuFb);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture);
+  egl_textureBind(texture);
   glBindSampler(0, this->sampler);
   egl_shaderUse(this->easu);
   egl_filterRectsRender(this->easu, rects);
@@ -412,7 +423,7 @@ static GLuint egl_filterFFXFSR1Run(EGL_Filter * filter,
   // pass 2, Rcas
   egl_framebufferBind(this->rcasFb);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture);
+  egl_textureBind(texture);
   glBindSampler(0, this->sampler);
   egl_shaderUse(this->rcas);
   egl_filterRectsRender(this->rcas, rects);

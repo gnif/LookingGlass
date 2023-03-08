@@ -60,6 +60,7 @@ typedef struct EGL_FilterDownscale
   EGL_Shader * lanczos2;
 
   DownscaleFilter filter;
+  int useDMA;
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
   float pixelSize;
@@ -157,19 +158,12 @@ static bool egl_filterDownscaleInit(EGL_Filter ** filter)
     return false;
   }
 
+  this->useDMA = -1;
+
   if (!egl_shaderInit(&this->nearest))
   {
     DEBUG_ERROR("Failed to initialize the shader");
     goto error_this;
-  }
-
-  if (!egl_shaderCompile(this->nearest,
-        b_shader_basic_vert    , b_shader_basic_vert_size,
-        b_shader_downscale_frag, b_shader_downscale_frag_size)
-     )
-  {
-    DEBUG_ERROR("Failed to compile the shader");
-    goto error_shader;
   }
 
   if (!egl_shaderInit(&this->linear))
@@ -178,33 +172,11 @@ static bool egl_filterDownscaleInit(EGL_Filter ** filter)
     goto error_this;
   }
 
-  if (!egl_shaderCompile(this->linear,
-        b_shader_basic_vert, b_shader_basic_vert_size,
-        b_shader_downscale_linear_frag, b_shader_downscale_linear_frag_size)
-     )
-  {
-    DEBUG_ERROR("Failed to compile the shader");
-    goto error_shader;
-  }
-
   if (!egl_shaderInit(&this->lanczos2))
   {
     DEBUG_ERROR("Failed to initialize the shader");
     goto error_this;
   }
-
-  if (!egl_shaderCompile(this->lanczos2,
-        b_shader_basic_vert, b_shader_basic_vert_size,
-        b_shader_downscale_lanczos2_frag, b_shader_downscale_lanczos2_frag_size)
-     )
-  {
-    DEBUG_ERROR("Failed to compile the shader");
-    goto error_shader;
-  }
-
-  this->uNearest.type = EGL_UNIFORM_TYPE_3F;
-  this->uNearest.location =
-    egl_shaderGetUniform(this->nearest, "uConfig");
 
   if (!egl_framebufferInit(&this->fb))
   {
@@ -326,7 +298,8 @@ static bool egl_filterDownscaleImguiConfig(EGL_Filter * filter)
 }
 
 static bool egl_filterDownscaleSetup(EGL_Filter * filter,
-    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height)
+    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    bool useDMA)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
 
@@ -335,6 +308,48 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
 
   if (!this->enable)
     return false;
+
+  if (this->useDMA != useDMA)
+  {
+    if (!egl_shaderCompile(this->nearest,
+          b_shader_basic_vert    , b_shader_basic_vert_size,
+          b_shader_downscale_frag,
+          b_shader_downscale_frag_size,
+          useDMA)
+       )
+    {
+      DEBUG_ERROR("Failed to compile the shader");
+      return false;
+    }
+
+    if (!egl_shaderCompile(this->linear,
+          b_shader_basic_vert, b_shader_basic_vert_size,
+          b_shader_downscale_linear_frag,
+          b_shader_downscale_linear_frag_size,
+          useDMA)
+       )
+    {
+      DEBUG_ERROR("Failed to compile the shader");
+      return false;
+    }
+
+    if (!egl_shaderCompile(this->lanczos2,
+          b_shader_basic_vert, b_shader_basic_vert_size,
+          b_shader_downscale_lanczos2_frag,
+          b_shader_downscale_lanczos2_frag_size,
+          useDMA)
+       )
+    {
+      DEBUG_ERROR("Failed to compile the shader");
+      return false;
+    }
+
+    this->uNearest.type = EGL_UNIFORM_TYPE_3F;
+    this->uNearest.location =
+      egl_shaderGetUniform(this->nearest, "uConfig");
+
+    this->useDMA = useDMA;
+  }
 
   if (this->prepared               &&
       pixFmt       == this->pixFmt &&
@@ -385,15 +400,15 @@ static bool egl_filterDownscalePrepare(EGL_Filter * filter)
   return true;
 }
 
-static GLuint egl_filterDownscaleRun(EGL_Filter * filter,
-    EGL_FilterRects * rects, GLuint texture)
+static EGL_Texture * egl_filterDownscaleRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, EGL_Texture * texture)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
 
   egl_framebufferBind(this->fb);
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture);
+  egl_textureBind(texture);
 
   EGL_Shader * shader;
 

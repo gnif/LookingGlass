@@ -1,4 +1,6 @@
 #version 300 es
+#extension GL_OES_EGL_image_external_essl3 : enable
+
 precision highp float;
 
 #define PI 3.141592653589793
@@ -6,7 +8,7 @@ precision highp float;
 in  vec2  fragCoord;
 out vec4  fragColor;
 
-uniform sampler2D texture;
+uniform sampler2D sampler1;
 float sinc(float x)
 {
   return x == 0.0 ? 1.0 : sin(x * PI) / (x * PI);
@@ -24,7 +26,7 @@ float lanczos(vec2 v)
 
 void main()
 {
-  vec2 size = vec2(textureSize(texture, 0));
+  vec2 size = vec2(textureSize(sampler1, 0));
   vec2 pos = fragCoord * size;
   vec2 invSize = 1.0 / size;
   vec2 uvc = floor(pos) + vec2(0.5, 0.5);
@@ -54,7 +56,7 @@ void main()
 
   vec3 color = vec3(0.0);
   for (int i = 0; i < 9; ++i)
-    color += texture2D(texture, uvs[i] * invSize).rgb * factors[i];
+    color += texture(sampler1, uvs[i] * invSize).rgb * factors[i];
 
   fragColor = vec4(color, 1.0);
 }

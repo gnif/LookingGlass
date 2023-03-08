@@ -93,6 +93,9 @@ typedef struct EGL_TextureOps
 
   /* get the texture for use */
   enum EGL_TexStatus (*get)(EGL_Texture * texture, GLuint * tex);
+
+  /* bind the texture for use */
+  enum EGL_TexStatus (*bind)(EGL_Texture * texture);
 }
 EGL_TextureOps;
 

@@ -37,6 +37,7 @@ typedef struct EGL_FilterFFXCAS
   EGL_Shader * shader;
   bool         enable;
 
+  int useDMA;
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
   float sharpness;
@@ -106,19 +107,12 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
     return false;
   }
 
+  this->useDMA = -1;
+
   if (!egl_shaderInit(&this->shader))
   {
     DEBUG_ERROR("Failed to initialize the shader");
     goto error_this;
-  }
-
-  if (!egl_shaderCompile(this->shader,
-        b_shader_basic_vert  , b_shader_basic_vert_size,
-        b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size)
-     )
-  {
-    DEBUG_ERROR("Failed to compile the shader");
-    goto error_shader;
   }
 
   this->consts = countedBufferNew(8 * sizeof(GLuint));
@@ -127,12 +121,6 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
     DEBUG_ERROR("Failed to allocate consts buffer");
     goto error_shader;
   }
-
-  egl_shaderSetUniforms(this->shader, &(EGL_Uniform) {
-    .type     = EGL_UNIFORM_TYPE_4UIV,
-    .location = egl_shaderGetUniform(this->shader, "uConsts"),
-    .v        = this->consts,
-  }, 1);
 
   egl_filterFFXCASLoadState(&this->base);
 
@@ -220,12 +208,34 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
 }
 
 static bool egl_filterFFXCASSetup(EGL_Filter * filter,
-    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height)
+    enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    bool useDMA)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
   if (!this->enable)
     return false;
+
+  if (this->useDMA != useDMA)
+  {
+    if (!egl_shaderCompile(this->shader,
+          b_shader_basic_vert  , b_shader_basic_vert_size,
+          b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size,
+          useDMA)
+       )
+    {
+      DEBUG_ERROR("Failed to compile the shader");
+      return false;
+    }
+
+    egl_shaderSetUniforms(this->shader, &(EGL_Uniform) {
+      .type     = EGL_UNIFORM_TYPE_4UIV,
+      .location = egl_shaderGetUniform(this->shader, "uConsts"),
+      .v        = this->consts,
+    }, 1);
+
+    this->useDMA = useDMA;
+  }
 
   if (pixFmt == this->pixFmt && this->width == width && this->height == height)
     return true;
@@ -262,15 +272,15 @@ static bool egl_filterFFXCASPrepare(EGL_Filter * filter)
   return true;
 }
 
-static GLuint egl_filterFFXCASRun(EGL_Filter * filter,
-    EGL_FilterRects * rects, GLuint texture)
+static EGL_Texture * egl_filterFFXCASRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, EGL_Texture * texture)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
   egl_framebufferBind(this->fb);
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture);
+  egl_textureBind(texture);
   glBindSampler(0, this->sampler);
 
   egl_shaderUse(this->shader);

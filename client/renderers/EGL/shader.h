@@ -97,10 +97,11 @@ bool egl_shaderInit(EGL_Shader ** shader);
 void egl_shaderFree(EGL_Shader ** shader);
 
 bool egl_shaderLoad(EGL_Shader * model, const char * vertex_file,
-    const char * fragment_file);
+    const char * fragment_file, bool useDMA);
 
 bool egl_shaderCompile(EGL_Shader * model, const char * vertex_code,
-    size_t vertex_size, const char * fragment_code, size_t fragment_size);
+    size_t vertex_size, const char * fragment_code, size_t fragment_size,
+    bool useDMA);
 
 void egl_shaderSetUniforms(EGL_Shader * shader, EGL_Uniform * uniforms,
     int count);

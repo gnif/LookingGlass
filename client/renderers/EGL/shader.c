@@ -64,7 +64,8 @@ void egl_shaderFree(EGL_Shader ** shader)
   *shader = NULL;
 }
 
-bool egl_shaderLoad(EGL_Shader * this, const char * vertex_file, const char * fragment_file)
+bool egl_shaderLoad(EGL_Shader * this,
+    const char * vertex_file, const char * fragment_file, bool useDMA)
 {
   char   * vertex_code, * fragment_code;
   size_t   vertex_size,   fragment_size;
@@ -86,13 +87,16 @@ bool egl_shaderLoad(EGL_Shader * this, const char * vertex_file, const char * fr
 
   DEBUG_INFO("Loaded fragment shader: %s", fragment_file);
 
-  bool ret = egl_shaderCompile(this, vertex_code, vertex_size, fragment_code, fragment_size);
+  bool ret = egl_shaderCompile(this,
+      vertex_code, vertex_size, fragment_code, fragment_size,
+      useDMA);
+
   free(vertex_code);
   free(fragment_code);
   return ret;
 }
 
-bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
+static bool shaderCompile(EGL_Shader * this, const char * vertex_code,
     size_t vertex_size, const char * fragment_code, size_t fragment_size)
 {
   if (this->hasShader)
@@ -202,6 +206,64 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
 
   this->hasShader = true;
   return true;
+}
+
+bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
+    size_t vertex_size, const char * fragment_code, size_t fragment_size,
+    bool useDMA)
+{
+  if (useDMA)
+  {
+    const char * search  = "sampler2D";
+    const char * replace = "samplerExternalOES";
+
+    const char * src = fragment_code;
+    int instances = 0;
+    while((src = strstr(src, search)))
+    {
+      ++instances;
+      src += strlen(search);
+    }
+
+    const int diff = (strlen(replace) - strlen(search)) * instances;
+    char * newCode = malloc(fragment_size + diff);
+    if (!newCode)
+    {
+      DEBUG_ERROR("Out of memory");
+      return false;
+    }
+
+    src        = fragment_code;
+    char * dst = newCode;
+    for(int i = 0; i < instances; ++i)
+    {
+      const char * pos = strstr(src, search);
+      const int offset = pos - src;
+
+      memcpy(dst, src, offset);
+      dst += offset;
+      src  = pos + strlen(search);
+
+      memcpy(dst, replace, strlen(replace));
+      dst += strlen(replace);
+    }
+
+    const int final = fragment_size - (src - fragment_code);
+    memcpy(dst, src, final);
+    dst[final] = 0;
+
+    bool result = shaderCompile(
+        this,
+        vertex_code, vertex_size,
+        newCode    , fragment_size + diff);
+
+    free(newCode);
+    return result;
+  }
+
+  return shaderCompile(this,
+      vertex_code  , vertex_size,
+      fragment_code, fragment_size);
 }
 
 void egl_shaderSetUniforms(EGL_Shader * this, EGL_Uniform * uniforms, int count)

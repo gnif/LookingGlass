@@ -100,9 +100,7 @@ void egl_framebufferBind(EGL_Framebuffer * this)
   glViewport(0, 0, this->tex->format.width, this->tex->format.height);
 }
 
-GLuint egl_framebufferGetTexture(EGL_Framebuffer * this)
+EGL_Texture * egl_framebufferGetTexture(EGL_Framebuffer * this)
 {
-  GLuint output;
-  egl_textureGet(this->tex, &output, NULL, NULL);
-  return output;
+  return this->tex;
 }

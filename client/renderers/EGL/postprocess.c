@@ -49,7 +49,7 @@ static const EGL_FilterOps * EGL_Filters[] =
 struct EGL_PostProcess
 {
   Vector filters;
-  GLuint output;
+  EGL_Texture * output;
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
 
@@ -606,7 +606,7 @@ bool egl_postProcessConfigModified(EGL_PostProcess * this)
 
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
-    unsigned int targetX, unsigned int targetY)
+    unsigned int targetX, unsigned int targetY, bool useDMA)
 {
   if (targetX == 0 && targetY == 0)
     DEBUG_FATAL("targetX || targetY == 0");
@@ -614,8 +614,9 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   EGL_Filter * lastFilter = NULL;
   unsigned int sizeX, sizeY;
 
-  GLuint texture;
-  if (egl_textureGet(tex, &texture, &sizeX, &sizeY) != EGL_TEX_STATUS_OK)
+  //TODO: clean this up
+  GLuint _unused;
+  if (egl_textureGet(tex, &_unused, &sizeX, &sizeY) != EGL_TEX_STATUS_OK)
     return false;
 
   if (atomic_exchange(&this->modified, false))
@@ -636,11 +637,12 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   };
 
   EGL_Filter * filter;
+  EGL_Texture * texture = tex;
   vector_forEach(filter, &this->filters)
   {
     egl_filterSetOutputResHint(filter, targetX, targetY);
 
-    if (!egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY) ||
+    if (!egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY, useDMA) ||
         !egl_filterPrepare(filter))
       continue;
 
@@ -651,6 +653,9 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
       egl_filterRelease(lastFilter);
 
     lastFilter = filter;
+
+    // the first filter to run will convert to a normal texture
+    useDMA = false;
   }
 
   this->output  = texture;
@@ -659,7 +664,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   return true;
 }
 
-GLuint egl_postProcessGetOutput(EGL_PostProcess * this,
+EGL_Texture * egl_postProcessGetOutput(EGL_PostProcess * this,
     unsigned int * outputX, unsigned int * outputY)
 {
   *outputX = this->outputX;

@@ -76,7 +76,8 @@ bool egl_damageInit(EGL_Damage ** damage)
 
   if (!egl_shaderCompile((*damage)->shader,
         b_shader_damage_vert, b_shader_damage_vert_size,
-        b_shader_damage_frag, b_shader_damage_frag_size))
+        b_shader_damage_frag, b_shader_damage_frag_size,
+        false))
   {
     DEBUG_ERROR("Failed to compile the damage shader");
     return false;

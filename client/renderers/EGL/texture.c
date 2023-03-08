@@ -25,6 +25,7 @@
 #include "shader.h"
 #include "common/framebuffer.h"
 #include "common/debug.h"
+#include "common/array.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -76,6 +77,7 @@ bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
   glSamplerParameteri(this->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
   glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+
   return true;
 }
 
@@ -203,14 +205,7 @@ enum EGL_TexStatus egl_textureProcess(EGL_Texture * this)
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
 {
-  GLuint tex;
-  EGL_TexStatus status;
-
-  if ((status = this->ops.get(this, &tex)) != EGL_TEX_STATUS_OK)
-    return status;
-
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, tex);
   glBindSampler(0, this->sampler);
-  return EGL_TEX_STATUS_OK;
+  return this->ops.bind(this);
 }

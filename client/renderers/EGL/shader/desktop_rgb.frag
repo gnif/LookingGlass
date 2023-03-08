@@ -1,4 +1,6 @@
 #version 300 es
+#extension GL_OES_EGL_image_external_essl3 : enable
+
 precision highp float;
 
 #define EGL_SCALE_AUTO    0
@@ -23,13 +25,17 @@ void main()
   switch (scaleAlgo)
   {
     case EGL_SCALE_NEAREST:
+    {
       vec2 ts = vec2(textureSize(sampler1, 0));
       color   = texelFetch(sampler1, ivec2(uv * ts), 0);
       break;
+    }
 
     case EGL_SCALE_LINEAR:
+    {
       color = texture(sampler1, uv);
       break;
+    }
   }
 
   if (cbMode > 0)

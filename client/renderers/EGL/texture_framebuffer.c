@@ -147,5 +147,6 @@ EGL_TextureOps EGL_TextureFrameBuffer =
   .setup   = egl_texFBSetup,
   .update  = egl_texFBUpdate,
   .process = egl_texBufferStreamProcess,
-  .get     = egl_texBufferStreamGet
+  .get     = egl_texBufferStreamGet,
+  .bind    = egl_texBufferBind
 };
