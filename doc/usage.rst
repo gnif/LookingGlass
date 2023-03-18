@@ -475,7 +475,7 @@ If you are able to make use/enable this this feature it offers lower overall
 system load and lower latency capture, and does not suffer from the mouse
 motion stutter issues that DXGI suffers from.
 
-To enable it's usage use the following configuration in the
+To enable its usage use the following configuration in the
 ``looking-glass-host.ini`` file:
 
 .. code:: ini
