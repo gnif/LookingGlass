@@ -393,7 +393,7 @@ are not affected.
 
 The other drawback of this API is the overall system overhead, however this can
 be mitigated by using the DirectX 12 backend. Please be aware though that this
-backend is not experimental because it's new, but rather it's a slight
+backend is not experimental because its new, but rather it's a slight
 abuse/misuse of the DXGI API and allows us to bypass some Windows internals.
 
 To enable the DirectX 12 backend the following configuration needs to be added
@@ -451,14 +451,14 @@ The ``LEVEL`` is the fractional scale level where 1 = 50%, 2 = 25%, 3 = 12.5%.
 .. code:: ini
 
  [dxgi]
- ; Downsample anything greater then 1920x1080 to 50% of it's original size
+ ; Downsample anything greater then 1920x1080 to 50% of its original size
  downsample=>1920:1080:1
 
- ; Downsample exactly 1920x1080 to 25% of it's original size, and anything greater
- ; then 1920x1080 to 50% of it's original size.
+ ; Downsample exactly 1920x1080 to 25% of its original size, and anything greater
+ ; then 1920x1080 to 50% of its original size.
  downsample=1920x1080:1,>1920x1080:2
 
- ; Downsample anything greater or equal to 1920x1080 to 50% of it's original size
+ ; Downsample anything greater or equal to 1920x1080 to 50% of its original size
  downsample=>=1920x1080:1
 
 .. _host_capture_nvfbc:
@@ -475,7 +475,7 @@ If you are able to make use/enable this this feature it offers lower overall
 system load and lower latency capture, and does not suffer from the mouse
 motion stutter issues that DXGI suffers from.
 
-To enable it's usage use the following configuration in the
+To enable its usage use the following configuration in the
 ``looking-glass-host.ini`` file:
 
 .. code:: ini
