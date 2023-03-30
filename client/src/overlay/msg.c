@@ -27,6 +27,7 @@
 #include "common/stringlist.h"
 
 #include "../main.h"
+#include "../core.h"
 
 #include <string.h>
 
@@ -41,6 +42,8 @@ struct Msg
 
 struct MsgState
 {
+  bool initialized;
+  bool updateOverlayState;
   struct ll * messages;
 };
 
@@ -53,6 +56,7 @@ static void msg_earlyInit(void)
 
 static bool msg_init(void ** udata, const void * params)
 {
+  l_msg.initialized = true;
   return true;
 }
 
@@ -70,6 +74,7 @@ static void msg_free(void * udata)
   while(ll_shift(l_msg.messages, (void **)&msg))
     freeMsg(msg);
   ll_free(l_msg.messages);
+  l_msg.initialized = false;
 }
 
 static bool msg_needsOverlay(void * udata)
@@ -181,6 +186,12 @@ struct LG_OverlayOps LGOverlayMsg =
 
 bool overlayMsg_modal(void)
 {
+  if (l_msg.updateOverlayState)
+  {
+    core_updateOverlayState();
+    l_msg.updateOverlayState = false;
+  }
+
   return ll_count(l_msg.messages) > 0;
 }
 
@@ -220,6 +231,11 @@ MsgBoxHandle overlayMsg_show(
 
   ll_push(l_msg.messages, msg);
   app_invalidateOverlay(false);
+
+  if (l_msg.initialized)
+    core_updateOverlayState();
+  else
+    l_msg.updateOverlayState = true;
 
   return (MsgBoxHandle)msg;
 }

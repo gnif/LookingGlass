@@ -656,8 +656,6 @@ MsgBoxHandle app_msgBox(const char * caption, const char * fmt, ...)
   MsgBoxHandle handle = overlayMsg_show(caption, NULL, NULL, fmt, args);
   va_end(args);
 
-  core_updateOverlayState();
-
   return handle;
 }
 
@@ -668,8 +666,6 @@ MsgBoxHandle app_confirmMsgBox(const char * caption,
   va_start(args, fmt);
   MsgBoxHandle handle = overlayMsg_show(caption, callback, opaque, fmt, args);
   va_end(args);
-
-  core_updateOverlayState();
 
   return handle;
 }
