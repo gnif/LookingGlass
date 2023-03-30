@@ -226,7 +226,7 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
     }
 
     const int diff = (strlen(replace) - strlen(search)) * instances;
-    char * newCode = malloc(fragment_size + diff);
+    char * newCode = malloc(fragment_size + diff + 1);
     if (!newCode)
     {
       DEBUG_ERROR("Out of memory");
