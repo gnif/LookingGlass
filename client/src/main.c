@@ -1599,6 +1599,56 @@ restart:
             vmInfo->sockets, vmInfo->cores, vmInfo->cpus);
         DEBUG_INFO("Using    : %s", vmInfo->capture);
 
+        bool hostHasSMP  = false;
+        bool guestHasSMP = false;
+        bool guestCPUPt  = false;
+        bool hostIsAMD   = false;
+        {
+          char model[1024];
+          int procs;
+          int cores;
+          int sockets;
+          if (lgCPUInfo(model, sizeof model, &procs, &cores, &sockets) &&
+              procs > cores)
+            hostHasSMP = true;
+
+          if (vmInfo->cpus > vmInfo->cores)
+            guestHasSMP = true;
+
+          if (strncmp(model, "AMD ", 4) == 0)
+            hostIsAMD = true;
+
+          if (strcmp(vmInfo->model, model) == 0)
+            guestCPUPt = true;
+        }
+
+        if (hostHasSMP && !guestHasSMP)
+        {
+          DEBUG_BREAK();
+          DEBUG_WARN(
+              "I have detected you have a CPU with hyperthreads but your guest"
+              " is not aware of this");
+          DEBUG_WARN(
+              "This will result in a degredation of latency sensitive tasks"
+              " including the use of Looking Glass");
+
+          if (hostIsAMD || true)
+            DEBUG_WARN("As you have an AMD CPU, please be sure you have enabled"
+                " the `topoext` cpu feature flag for your virtual machine");
+          DEBUG_BREAK();
+        }
+
+        if (!guestCPUPt)
+        {
+          DEBUG_BREAK();
+          DEBUG_WARN(
+              "Your guest is unaware of the acceleration features your CPU has");
+          DEBUG_WARN(
+              "Please be sure to set your CPU type to `host-passthrough` in"
+              " your VM configuration");
+          DEBUG_BREAK();
+        }
+
         bool uuidValid = false;
         for(int i = 0; i < sizeof(vmInfo->uuid); ++i)
          if (vmInfo->uuid[i])
