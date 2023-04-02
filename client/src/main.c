@@ -1632,7 +1632,7 @@ restart:
               "This will result in a degredation of latency sensitive tasks"
               " including the use of Looking Glass");
 
-          if (hostIsAMD || true)
+          if (hostIsAMD)
             DEBUG_WARN("As you have an AMD CPU, please be sure you have enabled"
                 " the `topoext` cpu feature flag for your virtual machine");
           DEBUG_BREAK();
