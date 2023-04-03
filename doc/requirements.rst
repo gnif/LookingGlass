@@ -1,9 +1,9 @@
-.. _requrements:
+.. _requirements:
 
 Requirements
 ############
 
-.. _minimum_:
+.. _minimum:
 
 Minimum
 -------
@@ -29,6 +29,11 @@ Hyper-threading (>= 12 threads).
 PCIe bandwidth can also be a limiting factor, as such both GPUs should have a
 minimum of 8 lanes (x8) at PCIe3 speeds, or 4 lanes (x4) at PCIe4 speeds.
 
+.. _connected_display:
+
+Connected Display
+^^^^^^^^^^^^^^^^^
+
 The GPU used for the guest virtual machine must have either a physical monitor
 attached to it, or a cheap dummy plug. The guest operating system (most notably
 Windows) will disable the GPU output if there is nothing attached to it and
@@ -36,7 +41,7 @@ Looking Glass will not be able to function. If you are using a vGPU the virtual
 device should already have a virtual monitor attached to it negating this
 requirement.
 
-.. _recommended_:
+.. _recommended:
 
 Recommended
 -----------

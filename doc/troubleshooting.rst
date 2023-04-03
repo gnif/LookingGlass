@@ -9,15 +9,9 @@ Glass. Below is a list of known issues with potential solutions:
 When launching Looking Glass the desktop doesn't appear
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  **Using an AMD GPU?**
-
-   -  After the end of the Radeon HD Series, new AMD GPUs go to sleep when no
-      display is connected. For this reason, one of two conditions must be met.
-
-#. The GPU needs to remain plugged into a monitor (this is good for
-   testing & troubleshooting).
-#. The GPU needs to have a dummy plug installed which presents itself as a
-   monitor.
+Make sure you meet the :ref:`minimum requirements<minimum>` for using
+Looking Glass, especially regarding your guest GPU. See
+:ref:`connected_display` for more details.
 
 .. _the_clipboard_is_not_working:
 
