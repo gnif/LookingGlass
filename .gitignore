@@ -10,3 +10,8 @@ module/modules.order
 */build
 __pycache__
 *.py[co]
+*/.vs
+idd/Debug
+idd/x64
+idd/LGIdd/x64
+idd/LGIdd/Debug
