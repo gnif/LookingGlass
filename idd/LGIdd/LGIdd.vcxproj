@@ -40,6 +40,7 @@
   <ItemGroup>
     <ClCompile Include="CIndirectDeviceContext.cpp" />
     <ClCompile Include="CIndirectMonitorContext.cpp" />
+    <ClCompile Include="CIVSHMEM.cpp" />
     <ClCompile Include="CSwapChainProcessor.cpp" />
     <ClCompile Include="Device.cpp" />
     <ClCompile Include="Direct3DDevice.cpp" />
@@ -47,6 +48,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CIndirectMonitorContext.h" />
+    <ClInclude Include="CIVSHMEM.h" />
     <ClInclude Include="CSwapChainProcessor.h" />
     <ClInclude Include="Device.h" />
     <ClInclude Include="Direct3DDevice.h" />
@@ -217,8 +219,8 @@
       <WppEnabled>true</WppEnabled>
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
-      <AdditionalOptions>/D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
@@ -229,8 +231,8 @@
       <WppEnabled>true</WppEnabled>
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
-      <AdditionalOptions>/D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
@@ -241,8 +243,8 @@
       <WppEnabled>true</WppEnabled>
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
-      <AdditionalOptions>/D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
@@ -253,8 +255,8 @@
       <WppEnabled>true</WppEnabled>
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
-      <AdditionalOptions>/D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=4 /IDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>

@@ -3,6 +3,9 @@
 
 void CIndirectDeviceContext::InitAdapter()
 {
+  if (!m_ivshmem.Init() || !m_ivshmem.Open())
+    return;
+
   IDDCX_ADAPTER_CAPS caps = {};
   caps.Size = sizeof(caps);
 

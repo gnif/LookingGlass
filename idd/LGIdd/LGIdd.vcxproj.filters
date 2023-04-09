@@ -51,6 +51,9 @@
     <ClInclude Include="Direct3DDevice.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CIVSHMEM.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Device.cpp">
@@ -69,6 +72,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Direct3DDevice.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CIVSHMEM.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
