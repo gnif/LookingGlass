@@ -38,6 +38,13 @@
 #define LGMP_Q_FRAME_LEN   2
 #define LGMP_Q_POINTER_LEN 20
 
+
+#ifdef _MSC_VER
+ // don't warn on zero length arrays
+#pragma warning(push)
+#pragma warning(disable: 4200)
+#endif
+
 enum
 {
   CURSOR_FLAG_POSITION = 0x1,
@@ -164,5 +171,9 @@ typedef struct KVMFRSetCursorPos
   int32_t x, y;
 }
 KVMFRSetCursorPos;
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #endif

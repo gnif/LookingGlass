@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <winioctl.h>
 
+#include "Debug.h"
 #include "ivshmem/ivshmem.h"
 
 CIVSHMEM::CIVSHMEM()
@@ -81,7 +82,7 @@ bool CIVSHMEM::Init()
   {
     DWORD bus = it->busAddr >> 32;
     DWORD addr = it->busAddr & 0xFFFFFFFF;
-    printf("IVSHMEM %u%c on bus 0x%lx, device 0x%lx, function 0x%lx\n",
+    DBGPRINT("IVSHMEM %u%c on bus 0x%lx, device 0x%lx, function 0x%lx\n",
       i, i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
 
     if (i == shmDevice)
@@ -132,7 +133,7 @@ bool CIVSHMEM::Open()
   IVSHMEM_SIZE size;
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_SIZE, nullptr, 0, &size, sizeof(size), nullptr, nullptr))
   {
-    printf("Failed to request ivshmem size\n");
+    DBGPRINT("Failed to request ivshmem size");
     return false;
   }
 
@@ -142,7 +143,7 @@ bool CIVSHMEM::Open()
   config.cacheMode = IVSHMEM_CACHE_WRITECOMBINED;
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_REQUEST_MMAP, &config, sizeof(config), &map, sizeof(map), nullptr, nullptr))
   {
-    printf("Failed to request ivshmem mmap\n");
+    DBGPRINT("Failed to request ivshmem mmap");
     return false;
   }
 
@@ -159,7 +160,7 @@ void CIVSHMEM::Close()
 
   if (!DeviceIoControl(m_handle, IOCTL_IVSHMEM_RELEASE_MMAP, nullptr, 0, nullptr, 0, nullptr, nullptr))
   {
-    printf("Failed to release ivshmem mmap\n");
+    DBGPRINT("Failed to release ivshmem mmap");
     return;
   }
 

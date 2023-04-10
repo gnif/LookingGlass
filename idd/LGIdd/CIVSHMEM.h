@@ -15,8 +15,8 @@ private:
 
   std::vector<struct IVSHMEMData> m_devices;
   HANDLE m_handle = INVALID_HANDLE_VALUE;
-  size_t m_size;
-  void * m_mem = nullptr;
+  size_t m_size   = 0;
+  void * m_mem    = nullptr;
 
 public:
   CIVSHMEM();
@@ -25,5 +25,8 @@ public:
   bool Init();
   bool Open();
   void Close();
+
+  size_t GetSize() { return m_size; }
+  void * GetMem () { return m_mem;  }
 };
 

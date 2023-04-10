@@ -8,14 +8,12 @@ CSwapChainProcessor::CSwapChainProcessor(IDDCX_SWAPCHAIN hSwapChain, std::shared
   m_device(device),
   m_newFrameEvent(newFrameEvent)
 {
-  OutputDebugStringA(__FUNCTION__);
   m_terminateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_thread.Attach(CreateThread(nullptr, 0, RunThread, this, 0, nullptr));
 }
 
 CSwapChainProcessor::~CSwapChainProcessor()
 {
-  OutputDebugStringA(__FUNCTION__);
   SetEvent(m_terminateEvent.Get());
   if (m_thread.Get())
     WaitForSingleObject(m_thread.Get(), INFINITE);
@@ -23,7 +21,6 @@ CSwapChainProcessor::~CSwapChainProcessor()
 
 DWORD CALLBACK CSwapChainProcessor::RunThread(LPVOID argument)
 {
-  OutputDebugStringA(__FUNCTION__);
   reinterpret_cast<CSwapChainProcessor*>(argument)->Run();
   return 0;
 }

@@ -1,9 +1,46 @@
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
 
+#include "CPlatformInfo.h"
+#include "Debug.h"
+
+static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
+{
+  LGMP_Q_FRAME,       //queueID
+  LGMP_Q_FRAME_LEN,   //numMessages
+  1000                //subTimeout
+};
+
+static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
+{
+  LGMP_Q_POINTER,     //queueID
+  LGMP_Q_POINTER_LEN, //numMesages
+  1000                //subTimeout
+};
+
+CIndirectDeviceContext::~CIndirectDeviceContext()
+{
+  if (m_lgmp == nullptr)
+    return;
+
+  if (m_lgmpTimer)
+  {
+    WdfTimerStop(m_lgmpTimer, TRUE);
+    m_lgmpTimer = nullptr;
+  }
+
+  for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    lgmpHostMemFree(&m_frameMemory[i]);
+  for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+    lgmpHostMemFree(&m_pointerMemory[i]);
+  for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+    lgmpHostMemFree(&m_pointerShapeMemory[i]);
+  lgmpHostFree(&m_lgmp);
+}
+
 void CIndirectDeviceContext::InitAdapter()
 {
-  if (!m_ivshmem.Init() || !m_ivshmem.Open())
+  if (!SetupLGMP())
     return;
 
   IDDCX_ADAPTER_CAPS caps = {};
@@ -117,4 +154,179 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 
   IDARG_OUT_MONITORARRIVAL out;
   status = IddCxMonitorArrival(createOut.MonitorObject, &out);
+}
+
+#include <sstream>
+
+bool CIndirectDeviceContext::SetupLGMP()
+{
+  if (!m_ivshmem.Init() || !m_ivshmem.Open())
+    return false;
+
+  std::stringstream ss;
+  {
+    KVMFR kvmfr = {};
+    memcpy_s(kvmfr.magic, sizeof(kvmfr.magic), KVMFR_MAGIC, sizeof(KVMFR_MAGIC) - 1);
+    kvmfr.version  = KVMFR_VERSION;
+    kvmfr.features = KVMFR_FEATURE_SETCURSORPOS;
+    strncpy_s(kvmfr.hostver, "FIXME-IDD", sizeof(kvmfr.hostver) - 1);
+    ss.write(reinterpret_cast<const char *>(&kvmfr), sizeof(kvmfr));
+  }
+
+  {
+    const std::string & model = CPlatformInfo::GetCPUModel();
+
+    KVMFRRecord_VMInfo * vmInfo = static_cast<KVMFRRecord_VMInfo *>(calloc(1, sizeof(*vmInfo)));
+    vmInfo->cpus    = static_cast<uint8_t>(CPlatformInfo::GetProcCount  ());
+    vmInfo->cores   = static_cast<uint8_t>(CPlatformInfo::GetCoreCount  ());
+    vmInfo->sockets = static_cast<uint8_t>(CPlatformInfo::GetSocketCount());
+
+    const uint8_t * uuid = CPlatformInfo::GetUUID();
+    memcpy_s (vmInfo->uuid, sizeof(vmInfo->uuid), uuid, 16);
+    strncpy_s(vmInfo->capture, "Idd Driver", sizeof(vmInfo->capture));
+
+    KVMFRRecord * record = static_cast<KVMFRRecord *>(calloc(1, sizeof(*record)));
+    record->type = KVMFR_RECORD_VMINFO;
+    record->size = sizeof(*vmInfo) + (uint32_t)model.length() + 1;
+
+    ss.write(reinterpret_cast<const char*>(record       ), sizeof(*record));
+    ss.write(reinterpret_cast<const char*>(vmInfo       ), sizeof(*vmInfo));
+    ss.write(reinterpret_cast<const char*>(model.c_str()), model.length() + 1);
+  }
+
+  {
+    KVMFRRecord_OSInfo * osInfo = static_cast<KVMFRRecord_OSInfo *>(calloc(1, sizeof(*osInfo)));
+    osInfo->os = KVMFR_OS_WINDOWS;
+
+    const std::string & osName = CPlatformInfo::GetProductName();
+
+    KVMFRRecord* record = static_cast<KVMFRRecord*>(calloc(1, sizeof(*record)));
+    record->type = KVMFR_RECORD_OSINFO;
+    record->size = sizeof(*osInfo) + (uint32_t)osName.length() + 1;
+
+    ss.write(reinterpret_cast<const char*>(record), sizeof(*record));
+    ss.write(reinterpret_cast<const char*>(osInfo), sizeof(*osInfo));
+    ss.write(reinterpret_cast<const char*>(osName.c_str()), osName.length() + 1);
+  }
+
+  LGMP_STATUS status;
+  std::string udata = ss.str();
+
+  if ((status = lgmpHostInit(m_ivshmem.GetMem(), (uint32_t)m_ivshmem.GetSize(),
+    &m_lgmp, (uint32_t)udata.size(), (uint8_t*)&udata[0])) != LGMP_OK)
+  {
+    DBGPRINT("lgmpHostInit Failed: %s", lgmpStatusString(status));
+    return false;
+  }
+
+  if ((status = lgmpHostQueueNew(m_lgmp, FRAME_QUEUE_CONFIG, &m_frameQueue)) != LGMP_OK)
+  {
+    DBGPRINT("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
+    return false;
+  }
+
+  if ((status = lgmpHostQueueNew(m_lgmp, POINTER_QUEUE_CONFIG, &m_pointerQueue)) != LGMP_OK)
+  {
+    DBGPRINT("lgmpHostQueueCreate Failed (Pointer): %s", lgmpStatusString(status));
+    return false;
+  }
+
+  for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+  {
+    if ((status = lgmpHostMemAlloc(m_lgmp, MAX_POINTER_SIZE, &m_pointerMemory[i])) != LGMP_OK)
+    {
+      DBGPRINT("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
+      return false;
+    }
+    memset(lgmpHostMemPtr(m_pointerMemory[i]), 0, MAX_POINTER_SIZE);
+  }
+
+  for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+  {
+    if ((status = lgmpHostMemAlloc(m_lgmp, MAX_POINTER_SIZE, &m_pointerShapeMemory[i])) != LGMP_OK)
+    {
+      DBGPRINT("lgmpHostMemAlloc Failed (Pointer Shapes): %s", lgmpStatusString(status));
+      return false;
+    }
+    memset(lgmpHostMemPtr(m_pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
+  }
+
+  m_maxFrameSize = lgmpHostMemAvail(m_lgmp);
+  m_maxFrameSize = (m_maxFrameSize -(CPlatformInfo::GetPageSize() - 1)) & ~(CPlatformInfo::GetPageSize() - 1);
+  m_maxFrameSize /= LGMP_Q_FRAME_LEN;
+  DBGPRINT("Max Frame Size: %u MiB\n", (unsigned int)(m_maxFrameSize / 1048576LL));
+
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if ((status = lgmpHostMemAllocAligned(m_lgmp, (uint32_t)m_maxFrameSize,
+        (uint32_t)CPlatformInfo::GetPageSize(), &m_frameMemory[i])) != LGMP_OK)
+    {
+      DBGPRINT("lgmpHostMemAllocAligned Failed (Frame): %s", lgmpStatusString(status));
+      return false;
+    }
+
+  WDF_TIMER_CONFIG config;
+  WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
+    [](WDFTIMER timer) -> void
+    {
+      WDFOBJECT parent = WdfTimerGetParentObject(timer);
+      auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(parent);
+      wrapper->context->LGMPTimer();
+    },
+    10);
+  config.AutomaticSerialization = FALSE;
+
+  /**
+  * documentation states that Dispatch is not available under the UDMF, however...
+  * using Passive returns a not supported error, and Dispatch works.
+  */
+  WDF_OBJECT_ATTRIBUTES attribs;
+  WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
+  attribs.ParentObject   = m_wdfDevice;
+  attribs.ExecutionLevel = WdfExecutionLevelDispatch;
+
+  NTSTATUS s = WdfTimerCreate(&config, &attribs, &m_lgmpTimer);
+  if (!NT_SUCCESS(s))
+  {
+    DBGPRINT("Timer creation failed: 0x%08x", s);
+    return false;
+  }
+  WdfTimerStart(m_lgmpTimer, WDF_REL_TIMEOUT_IN_MS(10));
+
+  return true;
+}
+
+void CIndirectDeviceContext::LGMPTimer()
+{
+  LGMP_STATUS status;
+  if ((status = lgmpHostProcess(m_lgmp)) != LGMP_OK)
+  {
+    if (status == LGMP_ERR_CORRUPTED)
+    {
+      DBGPRINT("LGMP reported the shared memory has been corrupted, attempting to recover\n");
+      //TODO: fixme - reinit
+      return;
+    }
+
+    DBGPRINT("lgmpHostProcess Failed: %s", lgmpStatusString(status));
+    //TODO: fixme - shutdown
+    return;
+  }
+
+  uint8_t data[LGMP_MSGS_SIZE];
+  size_t  size;
+  while ((status = lgmpHostReadData(m_pointerQueue, &data, &size)) == LGMP_OK)
+  {
+    KVMFRMessage * msg = (KVMFRMessage *)data;
+    switch (msg->type)
+    {
+      case KVMFR_MESSAGE_SETCURSORPOS:
+      {
+        KVMFRSetCursorPos *sp = (KVMFRSetCursorPos *)msg;
+        SetCursorPos(sp->x, sp->y);
+        break;
+      }
+    }
+
+    lgmpHostAckData(m_pointerQueue);
+  }
 }

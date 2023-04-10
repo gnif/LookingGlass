@@ -16,7 +16,7 @@ NTSTATUS LGIddDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousSta
 {
   UNREFERENCED_PARAMETER(previousState);
   UNREFERENCED_PARAMETER(device);
-    
+  
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
   wrapper->context->InitAdapter();
 
@@ -132,7 +132,6 @@ NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 
 NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
 {
-  OutputDebugStringA(__FUNCTION__);  
   WDF_PNPPOWER_EVENT_CALLBACKS pnpPowerCallbacks;
   WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
   pnpPowerCallbacks.EvtDeviceD0Entry = LGIddDeviceD0Entry;
@@ -150,10 +149,7 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
 
   NTSTATUS status = IddCxDeviceInitConfig(deviceInit, &config);
   if (!NT_SUCCESS(status))
-  {
-    OutputDebugStringA(__FUNCTION__ " FAILURE1");
     return status;
-  }
 
   WDF_OBJECT_ATTRIBUTES deviceAttributes;
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, CIndirectDeviceContextWrapper);
@@ -167,16 +163,11 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   WDFDEVICE device = nullptr;
   status = WdfDeviceCreate(&deviceInit, &deviceAttributes, &device);
   if (!NT_SUCCESS(status))
-  {
-    OutputDebugStringA(__FUNCTION__ " FAILURE2");
     return status;
-  }
 
   status = IddCxDeviceInitialize(device);
 
   auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
   wrapper->context = new CIndirectDeviceContext(device);
-
-  OutputDebugStringA(__FUNCTION__ " SUCCESS");
   return status;
 }
