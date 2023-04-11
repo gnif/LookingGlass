@@ -29,7 +29,14 @@ private:
   PLGMPMemory    m_pointerShapeMemory[POINTER_SHAPE_BUFFERS] = {};
 
   size_t         m_maxFrameSize = 0;
+  int            m_frameIndex   = 0;
+  uint32_t       m_formatVer    = 0;
+  uint32_t       m_frameSerial  = 0;
   PLGMPMemory    m_frameMemory[LGMP_Q_FRAME_LEN] = {};
+
+  int         m_width  = 0;
+  int         m_height = 0;
+  DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
 
   bool SetupLGMP();
 
@@ -46,6 +53,8 @@ public:
   void InitAdapter();
 
   void FinishInit(UINT connectorIndex);
+
+  void SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data);
 };
 
 struct CIndirectDeviceContextWrapper

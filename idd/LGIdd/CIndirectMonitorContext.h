@@ -5,16 +5,18 @@
 #include <IddCx.h>
 
 #include <memory>
+#include "CIndirectDeviceContext.h"
 #include "CSwapChainProcessor.h"
 
 class CIndirectMonitorContext
 {
 protected:
   IDDCX_MONITOR m_monitor;
+  CIndirectDeviceContext * m_devContext;
   std::unique_ptr<CSwapChainProcessor> m_thread;
 
 public:
-  CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor);
+  CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device);
 
   virtual ~CIndirectMonitorContext();
   

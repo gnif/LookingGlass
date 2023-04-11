@@ -9,6 +9,7 @@
 #include <avrt.h>
 #include <wrl.h>
 
+#include "Debug.h"
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
 

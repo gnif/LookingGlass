@@ -4,6 +4,8 @@
 #include "CPlatformInfo.h"
 #include "Debug.h"
 
+#include <sstream>
+
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
   LGMP_Q_FRAME,       //queueID
@@ -44,7 +46,7 @@ void CIndirectDeviceContext::InitAdapter()
     return;
 
   IDDCX_ADAPTER_CAPS caps = {};
-  caps.Size = sizeof(caps);
+  caps.Size = sizeof(caps);  
 
   caps.MaxMonitorsSupported = 1;
 
@@ -73,7 +75,10 @@ void CIndirectDeviceContext::InitAdapter()
   IDARG_OUT_ADAPTER_INIT initOut;
   NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
   if (!NT_SUCCESS(status))
+  {
+    DBGPRINT("IddCxAdapterInitAsync Failed");
     return;
+  }
 
   m_adapter = initOut.AdapterObject;
 
@@ -147,16 +152,17 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   IDARG_OUT_MONITORCREATE createOut;
   NTSTATUS status = IddCxMonitorCreate(m_adapter, &create, &createOut);
   if (!NT_SUCCESS(status))
+  {
+    DBGPRINT("IddCxMonitorCreate Failed");
     return;
+  }
 
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(createOut.MonitorObject);
-  wrapper->context = new CIndirectMonitorContext(createOut.MonitorObject);
+  wrapper->context = new CIndirectMonitorContext(createOut.MonitorObject, this);
 
   IDARG_OUT_MONITORARRIVAL out;
   status = IddCxMonitorArrival(createOut.MonitorObject, &out);
 }
-
-#include <sstream>
 
 bool CIndirectDeviceContext::SetupLGMP()
 {
@@ -177,6 +183,11 @@ bool CIndirectDeviceContext::SetupLGMP()
     const std::string & model = CPlatformInfo::GetCPUModel();
 
     KVMFRRecord_VMInfo * vmInfo = static_cast<KVMFRRecord_VMInfo *>(calloc(1, sizeof(*vmInfo)));
+    if (!vmInfo)
+    {
+      DBGPRINT("Failed to allocate KVMFRRecord_VMInfo");
+      return false;
+    }
     vmInfo->cpus    = static_cast<uint8_t>(CPlatformInfo::GetProcCount  ());
     vmInfo->cores   = static_cast<uint8_t>(CPlatformInfo::GetCoreCount  ());
     vmInfo->sockets = static_cast<uint8_t>(CPlatformInfo::GetSocketCount());
@@ -186,6 +197,12 @@ bool CIndirectDeviceContext::SetupLGMP()
     strncpy_s(vmInfo->capture, "Idd Driver", sizeof(vmInfo->capture));
 
     KVMFRRecord * record = static_cast<KVMFRRecord *>(calloc(1, sizeof(*record)));
+    if (!record)
+    {
+      DBGPRINT("Failed to allocate KVMFRRecord");
+      return false;
+    }
+
     record->type = KVMFR_RECORD_VMINFO;
     record->size = sizeof(*vmInfo) + (uint32_t)model.length() + 1;
 
@@ -196,11 +213,23 @@ bool CIndirectDeviceContext::SetupLGMP()
 
   {
     KVMFRRecord_OSInfo * osInfo = static_cast<KVMFRRecord_OSInfo *>(calloc(1, sizeof(*osInfo)));
+    if (!osInfo)
+    {
+      DBGPRINT("Failed to allocate KVMFRRecord_OSInfo");
+      return false;
+    }
+
     osInfo->os = KVMFR_OS_WINDOWS;
 
     const std::string & osName = CPlatformInfo::GetProductName();
 
     KVMFRRecord* record = static_cast<KVMFRRecord*>(calloc(1, sizeof(*record)));
+    if (!record)
+    {
+      DBGPRINT("Failed to allocate KVMFRRecord");
+      return false;
+    }
+
     record->type = KVMFR_RECORD_OSINFO;
     record->size = sizeof(*osInfo) + (uint32_t)osName.length() + 1;
 
@@ -329,4 +358,73 @@ void CIndirectDeviceContext::LGMPTimer()
 
     lgmpHostAckData(m_pointerQueue);
   }
+}
+
+void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data)
+{
+  if (!m_lgmp || !m_frameQueue)
+    return;
+
+  if (m_width != width || m_height != height || m_format != format)
+  {
+    m_width  = width;
+    m_height = height;
+    m_format = format;
+    ++m_formatVer;
+  }
+
+  while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
+    Sleep(0);
+
+  if (++m_frameIndex == LGMP_Q_FRAME_LEN)
+    m_frameIndex = 0;
+
+  KVMFRFrame * fi = (KVMFRFrame *)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+  int bpp = 4;
+  switch (format)
+  {
+    case DXGI_FORMAT_B8G8R8A8_UNORM    : fi->type = FRAME_TYPE_BGRA   ; break;
+    case DXGI_FORMAT_R8G8B8A8_UNORM    : fi->type = FRAME_TYPE_RGBA   ; break;
+    case DXGI_FORMAT_R10G10B10A2_UNORM : fi->type = FRAME_TYPE_RGBA10 ; break;
+
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+      fi->type = FRAME_TYPE_RGBA16F;
+      bpp = 8;
+      break;
+
+    default:
+      DBGPRINT("Unsuppoted DXGI format");
+      return;
+  }
+
+  //FIXME: this should not really be done here, this is a hack
+  #pragma warning(push)
+  #pragma warning(disable: 4200)
+  struct FrameBuffer
+  {
+    volatile uint32_t wp;
+    uint8_t data[0];
+  };
+  #pragma warning(pop)
+
+  fi->formatVer    = m_formatVer;
+  fi->frameSerial  = m_frameSerial++;
+  fi->screenWidth  = width;
+  fi->screenHeight = height;
+  fi->frameWidth   = width;
+  fi->frameHeight  = height;
+  fi->stride       = width * bpp;
+  fi->pitch        = pitch;
+  fi->offset       = (uint32_t)(CPlatformInfo::GetPageSize() - sizeof(FrameBuffer));
+  fi->flags        = 0;
+  fi->rotation     = FRAME_ROT_0;
+
+  fi->damageRectsCount = 0;
+
+  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
+  fb->wp = 0;
+
+  lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
+  memcpy(fb->data, data, (size_t)height * (size_t)pitch);
+  fb->wp = height * pitch;
 }

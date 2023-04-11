@@ -1,8 +1,9 @@
 #include "CIndirectMonitorContext.h"
 #include "Direct3DDevice.h"
 
-CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor) :
-  m_monitor(monitor)
+CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device) :
+  m_monitor(monitor),
+  m_devContext(device)
 {
 }
 
@@ -21,7 +22,7 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
     return;
   }
 
-  m_thread.reset(new CSwapChainProcessor(swapChain, device, newFrameEvent));
+  m_thread.reset(new CSwapChainProcessor(m_devContext, swapChain, device, newFrameEvent));
 }
 
 void CIndirectMonitorContext::UnassignSwapChain()

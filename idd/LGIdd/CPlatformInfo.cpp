@@ -218,6 +218,11 @@ void CPlatformInfo::InitCPUInfo()
   }
 
   BYTE * buffer = static_cast<BYTE *>(_malloca(cb));
+  if (!buffer)
+  {
+    DBGPRINT("Failed to allocate buffer for processor information");
+    return;
+  }
   if (!GetLogicalProcessorInformationEx(RelationAll,
     (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer, &cb))
   {
