@@ -171,7 +171,6 @@ bool ivshmemInit(struct IVSHMEM * dev)
   if (handle == INVALID_HANDLE_VALUE)
   {
     SetupDiDestroyDeviceInfoList(devInfoSet);
-    free(infData);
     DEBUG_WINERROR("CreateFile returned INVALID_HANDLE_VALUE", GetLastError());
     return false;
   }
@@ -199,7 +198,7 @@ bool ivshmemOpen(struct IVSHMEM * dev)
   if (!DeviceIoControl(info->handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
   {
     DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
-    return 0;
+    return false;
   }
 
   IVSHMEM_MMAP_CONFIG config = { .cacheMode = IVSHMEM_CACHE_WRITECOMBINED };
