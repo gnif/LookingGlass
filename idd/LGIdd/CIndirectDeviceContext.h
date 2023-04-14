@@ -21,14 +21,20 @@ private:
   IDDCX_ADAPTER m_adapter = nullptr;
   IDDCX_MONITOR m_monitor = nullptr;
 
-  CIVSHMEM      m_ivshmem;
+  CIVSHMEM m_ivshmem;
 
-  PLGMPHost      m_lgmp         = nullptr;
-  PLGMPHostQueue m_frameQueue   = nullptr;
+  PLGMPHost      m_lgmp       = nullptr;
+  WDFTIMER       m_lgmpTimer  = nullptr;
+  PLGMPHostQueue m_frameQueue = nullptr;
 
   PLGMPHostQueue m_pointerQueue = nullptr;
   PLGMPMemory    m_pointerMemory     [LGMP_Q_POINTER_LEN   ] = {};
   PLGMPMemory    m_pointerShapeMemory[POINTER_SHAPE_BUFFERS] = {};
+  PLGMPMemory    m_pointerShape = nullptr;
+  int m_pointerMemoryIndex = 0;
+  int m_pointerShapeIndex  = 0;
+  bool m_cursorVisible = false;
+  int m_cursorX = 0, m_cursorY = 0;
 
   size_t         m_maxFrameSize = 0;
   int            m_frameIndex   = 0;
@@ -42,10 +48,8 @@ private:
   DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
 
   bool SetupLGMP();
-
   void LGMPTimer();
-
-  WDFTIMER m_lgmpTimer = nullptr;
+  void ResendCursor();  
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
@@ -58,6 +62,7 @@ public:
   void FinishInit(UINT connectorIndex);
 
   void SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data);
+  void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);
 };
 
 struct CIndirectDeviceContextWrapper

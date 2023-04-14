@@ -374,6 +374,9 @@ void CIndirectDeviceContext::LGMPTimer()
     if (wrapper)
       wrapper->context->ResendLastFrame();
   }
+
+  if (lgmpHostQueueNewSubs(m_pointerQueue))
+    ResendCursor();
 }
 
 void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data)
@@ -444,4 +447,100 @@ void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FO
   lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
   memcpy(fb->data, data, (size_t)height * (size_t)pitch);
   fb->wp = height * pitch;
+}
+
+void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data)
+{
+  PLGMPMemory mem;
+  if (info.CursorShapeInfo.CursorType == IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
+  {
+    mem = m_pointerMemory[m_pointerMemoryIndex];
+    if (++m_pointerMemoryIndex == LGMP_Q_POINTER_LEN)
+      m_pointerMemoryIndex = 0;
+  }
+  else
+  {
+    mem = m_pointerShapeMemory[m_pointerShapeIndex];
+    if (++m_pointerShapeIndex == POINTER_SHAPE_BUFFERS)
+      m_pointerShapeIndex = 0;
+  }
+
+  KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
+
+  m_cursorVisible = info.IsCursorVisible;
+  m_cursorX       = info.X;
+  m_cursorY       = info.Y;
+
+  cursor->x = (int16_t)info.X;
+  cursor->y = (int16_t)info.Y;
+
+  uint32_t flags = CURSOR_FLAG_POSITION |
+    (info.IsCursorVisible ? CURSOR_FLAG_VISIBLE : 0);
+
+  if (info.CursorShapeInfo.CursorType != IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
+  {
+    memcpy(cursor + 1, data,
+      (size_t)(info.CursorShapeInfo.Height * info.CursorShapeInfo.Pitch));
+
+    cursor->hx     = (int8_t  )info.CursorShapeInfo.XHot;
+    cursor->hy     = (int8_t  )info.CursorShapeInfo.YHot;
+    cursor->width  = (uint32_t)info.CursorShapeInfo.Width;
+    cursor->height = (uint32_t)info.CursorShapeInfo.Height;
+    cursor->pitch  = (uint32_t)info.CursorShapeInfo.Pitch;
+
+    switch (info.CursorShapeInfo.CursorType)
+    {
+      case IDDCX_CURSOR_SHAPE_TYPE_ALPHA:
+        cursor->type = CURSOR_TYPE_COLOR;
+        break;
+
+      case IDDCX_CURSOR_SHAPE_TYPE_MASKED_COLOR:
+        cursor->type = CURSOR_TYPE_MASKED_COLOR;
+        break;
+    }
+
+    flags |= CURSOR_FLAG_SHAPE;
+    m_pointerShape = mem;
+  }
+
+  LGMP_STATUS status;
+  while ((status = lgmpHostQueuePost(m_pointerQueue, flags, mem)) != LGMP_OK)
+  {
+    if (status == LGMP_ERR_QUEUE_FULL)
+    {
+      Sleep(1);
+      continue;
+    }
+
+    DBGPRINT("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
+    break;
+  }
+}
+
+void CIndirectDeviceContext::ResendCursor()
+{
+  PLGMPMemory mem = m_pointerShape;
+  if (!mem)
+    return;
+
+  KVMFRCursor* cursor = (KVMFRCursor*)lgmpHostMemPtr(mem);
+  cursor->x = (int16_t)m_cursorX;
+  cursor->y = (int16_t)m_cursorY;
+
+  const uint32_t flags =
+    CURSOR_FLAG_POSITION | CURSOR_FLAG_SHAPE |
+    (m_cursorVisible ? CURSOR_FLAG_VISIBLE : 0);
+
+  LGMP_STATUS status;
+  while ((status = lgmpHostQueuePost(m_pointerQueue, flags, mem)) != LGMP_OK)
+  {
+    if (status == LGMP_ERR_QUEUE_FULL)
+    {
+      Sleep(1);
+      continue;
+    }
+
+    DBGPRINT("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
+    break;
+  }
 }

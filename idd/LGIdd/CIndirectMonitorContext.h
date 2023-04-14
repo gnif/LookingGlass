@@ -8,12 +8,24 @@
 #include "CIndirectDeviceContext.h"
 #include "CSwapChainProcessor.h"
 
+using namespace Microsoft::WRL;
+
 class CIndirectMonitorContext
 {
-protected:
+private:
   IDDCX_MONITOR m_monitor;
   CIndirectDeviceContext * m_devContext;
-  std::unique_ptr<CSwapChainProcessor> m_thread;
+  std::unique_ptr<CSwapChainProcessor> m_swapChain;
+
+  Wrappers::Event m_terminateEvent;
+  Wrappers::Event m_cursorDataEvent;
+  Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread;
+  BYTE * m_shapeBuffer;
+
+  DWORD m_lastShapeId = 0;
+
+  static DWORD CALLBACK _CursorThread(LPVOID arg);
+  void CursorThread();
 
 public:
   CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device);
@@ -25,8 +37,8 @@ public:
 
   inline void ResendLastFrame()
   {
-    if (m_thread)
-      m_thread->ResendLastFrame();
+    if (m_swapChain)
+      m_swapChain->ResendLastFrame();
   }
 };
 
