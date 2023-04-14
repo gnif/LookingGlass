@@ -38,6 +38,7 @@ private:
     int         height = 0;
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
+    D3D11_MAPPED_SUBRESOURCE map = {};
   };
 
   StagingTexture m_cpuTex[STAGING_TEXTURES] = {};

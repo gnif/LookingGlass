@@ -28,6 +28,13 @@ CSwapChainProcessor::~CSwapChainProcessor()
     WaitForSingleObject(m_thread[0].Get(), INFINITE);
   if (m_thread[1].Get())
     WaitForSingleObject(m_thread[1].Get(), INFINITE);
+
+  for(int i = 0; i < STAGING_TEXTURES; ++i)
+    if (m_cpuTex[i].map.pData)
+    {
+      m_device->m_context->Unmap(m_cpuTex[i].tex.Get(), 0);
+      m_cpuTex[i].map.pData = nullptr;
+    }
 }
 
 DWORD CALLBACK CSwapChainProcessor::_SwapChainThread(LPVOID arg)
@@ -153,10 +160,17 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   D3D11_TEXTURE2D_DESC desc;
   texture->GetDesc(&desc);
 
-  if (!SetupStagingTexture(m_cpuTex[m_texWIndex], desc.Width, desc.Height, desc.Format))
+  StagingTexture &st = m_cpuTex[m_texWIndex];
+  if (st.map.pData)
+  {
+    m_device->m_context->Unmap(st.tex.Get(), 0);
+    st.map.pData = nullptr;
+  }
+
+  if (!SetupStagingTexture(st, desc.Width, desc.Height, desc.Format))
     return;
 
-  m_device->m_context->CopyResource(m_cpuTex[m_texWIndex].tex.Get(), texture.Get());
+  m_device->m_context->CopyResource(st.tex.Get(), texture.Get());
 
   InterlockedAdd(&m_copyCount, 1);
   if (++m_texWIndex == STAGING_TEXTURES)
@@ -182,11 +196,10 @@ void CSwapChainProcessor::FrameThread()
       continue;
     }
 
-    D3D11_MAPPED_SUBRESOURCE map;
     StagingTexture & t = m_cpuTex[m_texRIndex];
 
     LOCK_CONTEXT();
-    HRESULT status = m_device->m_context->Map(t.tex.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &map);
+    HRESULT status = m_device->m_context->Map(t.tex.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &t.map);
     UNLOCK_CONTEXT();
 
     if (FAILED(status))
@@ -203,12 +216,7 @@ void CSwapChainProcessor::FrameThread()
       continue;
     }
 
-    m_devContext->SendFrame(t.width, t.height, map.RowPitch, t.format, map.pData);
-
-    LOCK_CONTEXT();
-    m_device->m_context->Unmap(t.tex.Get(), 0);
-    UNLOCK_CONTEXT();
-
+    m_devContext->SendFrame(t.width, t.height, t.map.RowPitch, t.format, t.map.pData);
     InterlockedAdd(&m_copyCount, -1);
     if (++m_texRIndex == STAGING_TEXTURES)
       m_texRIndex = 0;
