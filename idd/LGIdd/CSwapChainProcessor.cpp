@@ -3,11 +3,16 @@
 #include <avrt.h>
 #include "Debug.h"
 
-#define LOCK_CONTEXT() \
-  while (InterlockedCompareExchange((volatile LONG*)&m_contextLock, 1, 0) != 0) {};
+#define LOCK(lock) \
+  while (InterlockedCompareExchange((volatile LONG*)&(lock), 1, 0) != 0) {};
 
-#define UNLOCK_CONTEXT() \
-  InterlockedExchange((volatile LONG*)&m_contextLock, 0);
+#define UNLOCK(lock) \
+  InterlockedExchange((volatile LONG*)&(lock), 0);
+
+#define LOCK_CONTEXT()   LOCK(m_contextLock);
+#define UNLOCK_CONTEXT() UNLOCK(m_contextLock);
+#define LOCK_ST(st)      LOCK((st).lock);
+#define UNLOCK_ST(st)    UNLOCK((st).lock);
 
 CSwapChainProcessor::CSwapChainProcessor(CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<Direct3DDevice> device, HANDLE newFrameEvent) :
@@ -197,6 +202,7 @@ void CSwapChainProcessor::FrameThread()
     }
 
     StagingTexture & st = m_cpuTex[m_texRIndex];
+    LOCK(st);
 
     LOCK_CONTEXT();
     HRESULT status = m_device->m_context->Map(st.tex.Get(), 0, D3D11_MAP_READ,
@@ -205,6 +211,7 @@ void CSwapChainProcessor::FrameThread()
 
     if (FAILED(status))
     {
+      UNLOCK(st);
       if (status == DXGI_ERROR_WAS_STILL_DRAWING)
         continue;
 
@@ -219,8 +226,11 @@ void CSwapChainProcessor::FrameThread()
 
     m_devContext->SendFrame(st.width, st.height, st.map.RowPitch, st.format, st.map.pData);
     InterlockedAdd(&m_copyCount, -1);
+    m_lastIndex = m_texRIndex;
     if (++m_texRIndex == STAGING_TEXTURES)
       m_texRIndex = 0;
+
+    UNLOCK(st);
   }
 }
 
@@ -254,4 +264,21 @@ bool CSwapChainProcessor::SetupStagingTexture(StagingTexture & st, int width, in
   }
 
   return true;
+}
+
+void CSwapChainProcessor::ResendLastFrame()
+{
+  LOCK_CONTEXT()
+  StagingTexture & st = m_cpuTex[m_lastIndex];
+  LOCK_ST(st);
+  UNLOCK_CONTEXT();
+
+  if (!st.map.pData)
+  {
+    UNLOCK_ST(st);
+    return;
+  }
+
+  m_devContext->SendFrame(st.width, st.height, st.map.RowPitch, st.format, st.map.pData);
+  UNLOCK_ST(st);
 }

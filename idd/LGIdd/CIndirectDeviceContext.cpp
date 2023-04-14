@@ -165,11 +165,12 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
     return;
   }
 
-  auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(createOut.MonitorObject);
-  wrapper->context = new CIndirectMonitorContext(createOut.MonitorObject, this);
+  m_monitor = createOut.MonitorObject;
+  auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(m_monitor);
+  wrapper->context = new CIndirectMonitorContext(m_monitor, this);
 
   IDARG_OUT_MONITORARRIVAL out;
-  status = IddCxMonitorArrival(createOut.MonitorObject, &out);
+  status = IddCxMonitorArrival(m_monitor, &out);
 }
 
 bool CIndirectDeviceContext::SetupLGMP()
@@ -366,6 +367,13 @@ void CIndirectDeviceContext::LGMPTimer()
 
     lgmpHostAckData(m_pointerQueue);
   }
+
+  if (lgmpHostQueueNewSubs(m_frameQueue) && m_monitor)
+  {
+    auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(m_monitor);
+    if (wrapper)
+      wrapper->context->ResendLastFrame();
+  }
 }
 
 void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data)
@@ -373,11 +381,12 @@ void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FO
   if (!m_lgmp || !m_frameQueue)
     return;
 
-  if (m_width != width || m_height != height || m_format != format)
+  if (m_width != width || m_height != height || m_pitch != pitch || m_format != format)
   {
     m_width  = width;
     m_height = height;
     m_format = format;
+    m_pitch  = pitch;
     ++m_formatVer;
   }
 

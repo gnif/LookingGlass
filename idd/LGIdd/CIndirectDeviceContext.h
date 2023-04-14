@@ -19,6 +19,8 @@ class CIndirectDeviceContext
 private:
   WDFDEVICE     m_wdfDevice;
   IDDCX_ADAPTER m_adapter = nullptr;
+  IDDCX_MONITOR m_monitor = nullptr;
+
   CIVSHMEM      m_ivshmem;
 
   PLGMPHost      m_lgmp         = nullptr;
@@ -36,7 +38,9 @@ private:
 
   int         m_width  = 0;
   int         m_height = 0;
+  int         m_pitch  = 0;
   DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
+  void      * m_data   = nullptr;
 
   bool SetupLGMP();
 

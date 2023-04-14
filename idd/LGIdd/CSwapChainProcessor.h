@@ -34,6 +34,8 @@ private:
 
   struct StagingTexture
   {
+    volatile LONG lock = 0;
+
     int         width  = 0;
     int         height = 0;
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
@@ -46,6 +48,7 @@ private:
   volatile LONG m_contextLock = 0;
   int m_texRIndex = 0;
   int m_texWIndex = 0;
+  int m_lastIndex = 0;
 
   bool SetupStagingTexture(StagingTexture & st, int width, int height, DXGI_FORMAT format);
 
@@ -53,4 +56,6 @@ public:
   CSwapChainProcessor(CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<Direct3DDevice> device, HANDLE newFrameEvent);
   ~CSwapChainProcessor();
+
+  void ResendLastFrame();
 };
