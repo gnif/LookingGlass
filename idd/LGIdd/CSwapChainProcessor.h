@@ -47,7 +47,7 @@ private:
   int m_texRIndex = 0;
   int m_texWIndex = 0;
 
-  bool SetupStagingTexture(StagingTexture & t, int width, int height, DXGI_FORMAT format);
+  bool SetupStagingTexture(StagingTexture & st, int width, int height, DXGI_FORMAT format);
 
 public:
   CSwapChainProcessor(CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,

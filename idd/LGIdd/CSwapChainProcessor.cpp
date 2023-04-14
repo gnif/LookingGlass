@@ -196,10 +196,11 @@ void CSwapChainProcessor::FrameThread()
       continue;
     }
 
-    StagingTexture & t = m_cpuTex[m_texRIndex];
+    StagingTexture & st = m_cpuTex[m_texRIndex];
 
     LOCK_CONTEXT();
-    HRESULT status = m_device->m_context->Map(t.tex.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &t.map);
+    HRESULT status = m_device->m_context->Map(st.tex.Get(), 0, D3D11_MAP_READ,
+      D3D11_MAP_FLAG_DO_NOT_WAIT, &st.map);
     UNLOCK_CONTEXT();
 
     if (FAILED(status))
@@ -216,22 +217,22 @@ void CSwapChainProcessor::FrameThread()
       continue;
     }
 
-    m_devContext->SendFrame(t.width, t.height, t.map.RowPitch, t.format, t.map.pData);
+    m_devContext->SendFrame(st.width, st.height, st.map.RowPitch, st.format, st.map.pData);
     InterlockedAdd(&m_copyCount, -1);
     if (++m_texRIndex == STAGING_TEXTURES)
       m_texRIndex = 0;
   }
 }
 
-bool CSwapChainProcessor::SetupStagingTexture(StagingTexture & t, int width, int height, DXGI_FORMAT format)
+bool CSwapChainProcessor::SetupStagingTexture(StagingTexture & st, int width, int height, DXGI_FORMAT format)
 {
-  if (t.width == width && t.height == height && t.format == format)
+  if (st.width == width && st.height == height && st.format == format)
     return true;
 
-  t.tex.Reset();
-  t.width  = width;
-  t.height = height;
-  t.format = format;
+  st.tex.Reset();
+  st.width  = width;
+  st.height = height;
+  st.format = format;
 
   D3D11_TEXTURE2D_DESC desc = {};
   desc.Width              = width;
@@ -246,7 +247,7 @@ bool CSwapChainProcessor::SetupStagingTexture(StagingTexture & t, int width, int
   desc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
   desc.MiscFlags          = 0;
 
-  if (FAILED(m_device->m_device->CreateTexture2D(&desc, nullptr, &t.tex)))
+  if (FAILED(m_device->m_device->CreateTexture2D(&desc, nullptr, &st.tex)))
   {
     DBGPRINT("Failed to create staging texture");
     return false;
