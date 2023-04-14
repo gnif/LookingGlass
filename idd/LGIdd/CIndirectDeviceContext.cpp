@@ -466,16 +466,18 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   }
 
   KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
-
+  
   m_cursorVisible = info.IsCursorVisible;
-  m_cursorX       = info.X;
-  m_cursorY       = info.Y;
+  uint32_t flags  = 0;
 
-  cursor->x = (int16_t)info.X;
-  cursor->y = (int16_t)info.Y;
-
-  uint32_t flags = CURSOR_FLAG_POSITION |
-    (info.IsCursorVisible ? CURSOR_FLAG_VISIBLE : 0);
+  if (info.IsCursorVisible)
+  {
+    m_cursorX       = info.X;
+    m_cursorY       = info.Y;
+    cursor->x = (int16_t)info.X;
+    cursor->y = (int16_t)info.Y;
+    flags |= CURSOR_FLAG_POSITION | CURSOR_FLAG_VISIBLE;
+  }
 
   if (info.CursorShapeInfo.CursorType != IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
   {
