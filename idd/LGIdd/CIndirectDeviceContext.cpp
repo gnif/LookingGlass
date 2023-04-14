@@ -46,7 +46,15 @@ void CIndirectDeviceContext::InitAdapter()
     return;
 
   IDDCX_ADAPTER_CAPS caps = {};
-  caps.Size = sizeof(caps);  
+  caps.Size = sizeof(caps);
+
+  /**
+   * For some reason if we do not set this flag sometimes windows will
+   * refuse to enumerate our virtual monitor. Intel also noted in their
+   * sources that if this is not set dynamic resolution changes from this
+   * driver will not work. This behaviour is not documented by Microsoft.
+   */
+  caps.Flags = IDDCX_ADAPTER_FLAGS_USE_SMALLEST_MODE;
 
   caps.MaxMonitorsSupported = 1;
 

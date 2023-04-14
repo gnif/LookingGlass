@@ -34,9 +34,9 @@ private:
 
   struct StagingTexture
   {
-    int         width;
-    int         height;
-    DXGI_FORMAT format;
+    int         width  = 0;
+    int         height = 0;
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
   };
 

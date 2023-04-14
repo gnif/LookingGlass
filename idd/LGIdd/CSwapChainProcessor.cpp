@@ -60,6 +60,20 @@ void CSwapChainProcessor::SwapChainThreadCore()
     return;
   }
 
+  if (IDD_IS_FUNCTION_AVAILABLE(IddCxSetRealtimeGPUPriority))
+  {
+    DBGPRINT("Using IddCxSetRealtimeGPUPriority");
+    IDARG_IN_SETREALTIMEGPUPRIORITY arg;
+    arg.pDevice = dxgiDevice.Get();
+    if (FAILED(IddCxSetRealtimeGPUPriority(m_hSwapChain, &arg)))
+      DBGPRINT("Failed to set realtime GPU thread priority");
+  }
+  else
+  {
+    DBGPRINT("Using SetGPUThreadPriority");
+    dxgiDevice->SetGPUThreadPriority(7);
+  }
+
   IDARG_IN_SWAPCHAINSETDEVICE setDevice = {};
   setDevice.pDevice = dxgiDevice.Get();
 
@@ -69,7 +83,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
 
   if (FAILED(hr))
   {
-    DBGPRINT("IddCxSwapChainSetDevice Failed");
+    DBGPRINT("IddCxSwapChainSetDevice Failed (%08x)", hr);
     return;
   }
 

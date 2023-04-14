@@ -133,6 +133,16 @@ NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 
 NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
 {
+  NTSTATUS status;
+  IDARG_OUT_GETVERSION ver;
+  status = IddCxGetVersion(&ver);
+  if (FAILED(status))
+  {
+    DBGPRINT("IddCxGetVersion Failed");
+    return status;
+  }
+  DBGPRINT("Version: 0x%04x", ver.IddCxVersion);
+
   WDF_PNPPOWER_EVENT_CALLBACKS pnpPowerCallbacks;
   WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
   pnpPowerCallbacks.EvtDeviceD0Entry = LGIddDeviceD0Entry;
@@ -148,7 +158,7 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   config.EvtIddCxMonitorAssignSwapChain            = LGIddMonitorAssignSwapChain;
   config.EvtIddCxMonitorUnassignSwapChain          = LGIddMonitorUnassignSwapChain;
 
-  NTSTATUS status = IddCxDeviceInitConfig(deviceInit, &config);
+  status = IddCxDeviceInitConfig(deviceInit, &config);
   if (!NT_SUCCESS(status))
     return status;
 
