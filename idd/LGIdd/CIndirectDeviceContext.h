@@ -40,7 +40,6 @@ private:
   int         m_height = 0;
   int         m_pitch  = 0;
   DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
-  void      * m_data   = nullptr;
 
   bool SetupLGMP();
 
