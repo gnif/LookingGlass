@@ -346,13 +346,22 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
   kdev = kzalloc(sizeof(struct kvmfr_dev), GFP_KERNEL);
   if (!kdev)
+  {
+    printk(KERN_INFO "kvmfr: kvmfr_pci_probe: failed to allocate memory!\n");
     return -ENOMEM;
+  }
 
   if (pci_enable_device(dev))
+  {
+    printk(KERN_INFO "kvmfr: kvmfr_pci_probe: failed to enable device!\n");
     goto out_free;
+  }
 
   if (pci_request_regions(dev, KVMFR_DEV_NAME))
+  {
+    printk(KERN_INFO "kvmfr: kvmfr_pci_probe: failed to request regions!\n");
     goto out_disable;
+  }
 
   kdev->size = pci_resource_len(dev, 2);
   kdev->type = KVMFR_TYPE_PCI;
@@ -361,6 +370,7 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   kdev->minor = idr_alloc(&kvmfr_idr, kdev, 0, KVMFR_MAX_DEVICES, GFP_KERNEL);
   if (kdev->minor < 0)
   {
+    printk(KERN_INFO "kvmfr: kvmfr_pci_probe: failed to allocate ID!\n");
     mutex_unlock(&minor_lock);
     goto out_release;
   }
@@ -370,7 +380,13 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
   kdev->pDev  = device_create(kvmfr->pClass, NULL, kdev->devNo, NULL,
       KVMFR_DEV_NAME "%d", kdev->minor);
   if (IS_ERR(kdev->pDev))
+  {
+    printk(
+        KERN_INFO "kvmfr: kvmfr_pci_probe: failed to create /dev/%s%d device!\n",
+        KVMFR_DEV_NAME,
+        kdev->minor);
     goto out_unminor;
+  }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
   kdev->pgmap.res.start = pci_resource_start(dev, 2);
@@ -390,9 +406,18 @@ static int kvmfr_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
   kdev->addr = devm_memremap_pages(&dev->dev, &kdev->pgmap);
   if (IS_ERR(kdev->addr))
+  {
+    printk(
+        KERN_INFO "kvmfr: kvmfr_pci_probe: failed to remap pages! ret = %ld\n",
+        PTR_ERR(kdev->addr));
     goto out_destroy;
+  }
 
   pci_set_drvdata(dev, kdev);
+  printk(
+      KERN_INFO "kvmfr: kvmfr_pci_probe: /dev/%s%d created\n",
+      KVMFR_DEV_NAME,
+      kdev->minor);
   return 0;
 
 out_destroy:
