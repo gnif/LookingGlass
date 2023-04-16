@@ -221,6 +221,7 @@ struct AppParams
   int                  audioBufferLatency;
   bool                 micShowIndicator;
   enum MicDefaultState micDefaultState;
+  bool                 audioSyncVolume;
 };
 
 struct CBRequest

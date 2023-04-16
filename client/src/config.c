@@ -517,6 +517,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true
   },
+  {
+    .module         = "audio",
+    .name           = "syncVolume",
+    .description    = "Synchronize the volume level with the guest",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
   {0}
 };
 
@@ -710,6 +717,7 @@ bool config_load(int argc, char * argv[])
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
   g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
   g_params.micShowIndicator   = option_get_bool("audio", "micShowIndicator");
+  g_params.audioSyncVolume = option_get_bool("audio", "syncVolume");
 
   return true;
 }

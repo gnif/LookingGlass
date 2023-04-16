@@ -432,7 +432,8 @@ void audio_playbackStop(void)
 
 void audio_playbackVolume(int channels, const uint16_t volume[])
 {
-  if (!audio.audioDev || !audio.audioDev->playback.volume)
+  if (!audio.audioDev || !audio.audioDev->playback.volume ||
+      !g_params.audioSyncVolume)
     return;
 
   // store the values so we can restore the state if the stream is restarted
@@ -887,7 +888,8 @@ void audio_recordToggleKeybind(int sc, void * opaque)
 
 void audio_recordVolume(int channels, const uint16_t volume[])
 {
-  if (!audio.audioDev || !audio.audioDev->record.volume)
+  if (!audio.audioDev || !audio.audioDev->record.volume ||
+      !g_params.audioSyncVolume)
     return;
 
   // store the values so we can restore the state if the stream is restarted
