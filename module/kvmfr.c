@@ -557,25 +557,39 @@ static int __init kvmfr_module_init(void)
   int ret;
 
   kvmfr = kzalloc(sizeof(struct kvmfr_info), GFP_KERNEL);
-  if (!kvmfr)
+  if (!kvmfr) {
+    printk(KERN_INFO "kvmfr: kvmfr_module_init: failed to allocate memory!\n");
     return -ENOMEM;
+  }
 
   kvmfr->major = register_chrdev(0, KVMFR_DEV_NAME, &fops);
-  if (kvmfr->major < 0)
+  if (kvmfr->major < 0) {
+    printk(
+        KERN_INFO "kvmfr: kvmfr_module_init: failed to register char device!\n");
     goto out_free;
+  }
 
   kvmfr->pClass = class_create(THIS_MODULE, KVMFR_DEV_NAME);
-  if (IS_ERR(kvmfr->pClass))
+  if (IS_ERR(kvmfr->pClass)) {
+    printk(KERN_INFO "kvmfr: kvmfr_module_init: failed to create class!\n");
     goto out_unreg;
+  }
 
   ret = create_static_devices();
-  if (ret < 0)
+  if (ret < 0) {
+    printk(
+        KERN_INFO "kvmfr: kvmfr_module_init: failed to create static devices!\n");
     goto out_class_destroy;
+  }
 
   ret = pci_register_driver(&kvmfr_pci_driver);
-  if (ret < 0)
+  if (ret < 0) {
+    printk(
+        KERN_INFO "kvmfr: kvmfr_module_init: failed to register pci driver!\n");
     goto out_free_static;
+  }
 
+  printk(KERN_INFO "kvmfr: kvmfr_module_init: module loaded\n");
   return 0;
 
 out_free_static:
