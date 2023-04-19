@@ -64,7 +64,7 @@ void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
          ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 #define DRM_FORMAT_ARGB8888      fourcc_code('A', 'R', '2', '4')
 #define DRM_FORMAT_ABGR8888      fourcc_code('A', 'B', '2', '4')
-#define DRM_FORMAT_BGRA1010102   fourcc_code('B', 'A', '3', '0')
+#define DRM_FORMAT_BGRA2101010   fourcc_code('A', 'B', '3', '0')
 #define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
 
 #define DRM_FORMAT_MOD_VENDOR_NONE 0
