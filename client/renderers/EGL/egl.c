@@ -748,7 +748,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   EGLint attr[] =
   {
-    EGL_BUFFER_SIZE    , 24,
+    EGL_BUFFER_SIZE    , 30,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
     EGL_SAMPLE_BUFFERS , maxSamples > 0 ? 1 : 0,
     EGL_SAMPLES        , maxSamples,
