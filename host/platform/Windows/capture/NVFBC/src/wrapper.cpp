@@ -227,9 +227,7 @@ bool NvFBCToSysSetup(
     case BUFFER_FMT_RGB_PLANAR: params.eMode = NVFBC_TOSYS_RGB_PLANAR; break;
     case BUFFER_FMT_XOR       : params.eMode = NVFBC_TOSYS_XOR       ; break;
     case BUFFER_FMT_YUV444p   : params.eMode = NVFBC_TOSYS_YUV444p   ; break;
-    case BUFFER_FMT_ARGB10    :
-      params.eMode       = NVFBC_TOSYS_ARGB10;
-      params.bHDRRequest = TRUE;
+    case BUFFER_FMT_ARGB10    : params.eMode = NVFBC_TOSYS_ARGB10    ; break;
       break;
 
     default:
@@ -237,6 +235,7 @@ bool NvFBCToSysSetup(
       return false;
   }
 
+  params.bHDRRequest                  = TRUE;
   params.bWithHWCursor                = hwCursor              ? TRUE : FALSE;
   params.bEnableSeparateCursorCapture = seperateCursorCapture ? TRUE : FALSE;
   params.bDiffMap                     = useDiffMap            ? TRUE : FALSE;
