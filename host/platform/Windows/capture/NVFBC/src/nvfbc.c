@@ -81,6 +81,7 @@ struct iface
   unsigned int formatVer;
   unsigned int grabWidth, grabHeight, grabStride;
   unsigned int shmStride;
+  bool         isHDR;
 
   uint8_t * frameBuffer;
   uint8_t * diffMap;
@@ -707,6 +708,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     this->grabInfo.dwWidth       != this->grabWidth  ||
     this->grabInfo.dwHeight      != this->grabHeight ||
     this->grabInfo.dwBufferWidth != this->grabStride ||
+    this->grabInfo.bIsHDR        != this->isHDR      ||
     this->resChanged)
   {
     this->grabWidth  = this->grabInfo.dwWidth;
