@@ -153,7 +153,7 @@ static CaptureFormat convertSpaFormat(enum spa_video_format spa)
       return CAPTURE_FMT_BGRA;
 
     case SPA_VIDEO_FORMAT_xBGR_210LE:
-      return CAPTURE_FMT_RGBA10;
+      return CAPTURE_FMT_RGBA10_HDR;
 
     case SPA_VIDEO_FORMAT_RGBA_F16:
       return CAPTURE_FMT_RGBA16F;
