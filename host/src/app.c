@@ -244,12 +244,27 @@ static bool sendFrame(void)
     app.frameIndex = 0;
 
   KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
+  KVMFRFrameFlags flags = 0;
+
   switch(frame.format)
   {
     case CAPTURE_FMT_BGRA   : fi->type = FRAME_TYPE_BGRA   ; break;
     case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
-    case CAPTURE_FMT_RGBA10 : fi->type = FRAME_TYPE_RGBA10 ; break;
-    case CAPTURE_FMT_RGBA16F: fi->type = FRAME_TYPE_RGBA16F; break;
+
+    case CAPTURE_FMT_RGBA10_SDR:
+      fi->type = FRAME_TYPE_RGBA10;
+      break;
+
+    case CAPTURE_FMT_RGBA10_HDR:
+      fi->type  = FRAME_TYPE_RGBA10;
+      flags    |= FRAME_FLAG_HDR;
+      break;
+
+    case CAPTURE_FMT_RGBA16F:
+      fi->type  = FRAME_TYPE_RGBA16F;
+      flags    |= FRAME_FLAG_HDR;
+      break;
+
     default:
       DEBUG_ERROR("Unsupported frame format %d, skipping frame", frame.format);
       return true;
@@ -267,6 +282,15 @@ static bool sendFrame(void)
       break;
   }
 
+  if (os_blockScreensaver())
+    flags |= FRAME_FLAG_BLOCK_SCREENSAVER;
+
+  if (os_getAndClearPendingActivationRequest())
+    flags |= FRAME_FLAG_REQUEST_ACTIVATION;
+
+  if (frame.truncated)
+    flags |= FRAME_FLAG_TRUNCATED;
+
   fi->formatVer         = frame.formatVer;
   fi->frameSerial       = app.frameSerial++;
   fi->screenWidth       = frame.screenWidth;
@@ -276,14 +300,7 @@ static bool sendFrame(void)
   fi->stride            = frame.stride;
   fi->pitch             = frame.pitch;
   fi->offset            = app.pageSize - sizeof(FrameBuffer);
-  fi->flags             =
-    (os_blockScreensaver() ?
-     FRAME_FLAG_BLOCK_SCREENSAVER : 0) |
-    (os_getAndClearPendingActivationRequest() ?
-      FRAME_FLAG_REQUEST_ACTIVATION : 0) |
-    (frame.truncated ?
-      FRAME_FLAG_TRUNCATED : 0);
-
+  fi->flags             = flags;
   fi->damageRectsCount  = frame.damageRectsCount;
   memcpy(fi->damageRects, frame.damageRects,
     frame.damageRectsCount * sizeof(FrameDamageRect));

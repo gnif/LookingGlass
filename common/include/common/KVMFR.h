@@ -135,7 +135,8 @@ enum
 {
   FRAME_FLAG_BLOCK_SCREENSAVER  = 0x1,
   FRAME_FLAG_REQUEST_ACTIVATION = 0x2,
-  FRAME_FLAG_TRUNCATED          = 0x4 // ivshmem was too small for the frame
+  FRAME_FLAG_TRUNCATED          = 0x4, // ivshmem was too small for the frame
+  FRAME_FLAG_HDR                = 0x8  // RGBA10 may not be HDR
 };
 
 typedef uint32_t KVMFRFrameFlags;

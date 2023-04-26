@@ -600,9 +600,17 @@ next_output:
   this->bpp = 4;
   switch(dupDesc.ModeDesc.Format)
   {
-    case DXGI_FORMAT_B8G8R8A8_UNORM    : this->format = CAPTURE_FMT_BGRA   ; break;
-    case DXGI_FORMAT_R8G8B8A8_UNORM    : this->format = CAPTURE_FMT_RGBA   ; break;
-    case DXGI_FORMAT_R10G10B10A2_UNORM : this->format = CAPTURE_FMT_RGBA10 ; break;
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+      this->format = CAPTURE_FMT_BGRA;
+      break;
+
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+      this->format = CAPTURE_FMT_RGBA;
+      break;
+
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+      this->format = CAPTURE_FMT_RGBA10_HDR;
+      break;
 
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
       this->format = CAPTURE_FMT_RGBA16F;
