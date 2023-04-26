@@ -50,6 +50,7 @@ struct DesktopShader
   GLint uScaleAlgo;
   GLint uNVGain;
   GLint uCBMode;
+  GLint uIsHDR;
 };
 
 struct EGL_Desktop
@@ -64,6 +65,7 @@ struct EGL_Desktop
 
   // internals
   int               width, height;
+  bool              hdr;
   LG_RendererRotate rotate;
 
   bool useSpice;
@@ -113,6 +115,7 @@ static bool egl_initDesktopShader(
   shader->uScaleAlgo   = egl_shaderGetUniform(shader->shader, "scaleAlgo"  );
   shader->uNVGain      = egl_shaderGetUniform(shader->shader, "nvGain"     );
   shader->uCBMode      = egl_shaderGetUniform(shader->shader, "cbMode"     );
+  shader->uIsHDR       = egl_shaderGetUniform(shader->shader, "isHDR"      );
 
   return true;
 }
@@ -303,6 +306,7 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 
   desktop->width  = format.frameWidth;
   desktop->height = format.frameHeight;
+  desktop->hdr    = format.hdr;
 
   if (!egl_textureSetup(
     desktop->texture,
@@ -481,6 +485,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       .type        = EGL_UNIFORM_TYPE_1I,
       .location    = shader->uCBMode,
       .f           = { desktop->cbMode }
+    },
+    {
+      .type        = EGL_UNIFORM_TYPE_1I,
+      .location    = shader->uIsHDR,
+      .i           = { desktop->hdr }
     }
   };
 

@@ -9,6 +9,7 @@ precision highp float;
 #define EGL_SCALE_MAX     3
 
 #include "color_blind.h"
+#include "hdr.h"
 
 in  vec2 uv;
 out vec4 color;
@@ -19,6 +20,7 @@ uniform int   scaleAlgo;
 
 uniform float nvGain;
 uniform int   cbMode;
+uniform bool  isHDR;
 
 void main()
 {
@@ -37,6 +39,9 @@ void main()
       break;
     }
   }
+
+  if (isHDR)
+    color.rgb = mapToSDR(color.rgb);
 
   if (cbMode > 0)
     color = cbTransform(color, cbMode);

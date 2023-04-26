@@ -72,6 +72,7 @@ LG_RendererRotate;
 typedef struct LG_RendererFormat
 {
   FrameType         type;         // frame type
+  bool              hdr;          // if the frame is HDR or not
   unsigned int      screenWidth;  // actual width of the host
   unsigned int      screenHeight; // actual height of the host
   unsigned int      frameWidth;   // width of frame transmitted
