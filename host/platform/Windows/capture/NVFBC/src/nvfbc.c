@@ -714,6 +714,8 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     this->grabWidth  = this->grabInfo.dwWidth;
     this->grabHeight = this->grabInfo.dwHeight;
     this->grabStride = this->grabInfo.dwBufferWidth;
+    this->isHDR      = this->grabInfo.bIsHDR;
+
     // Round up stride in IVSHMEM to avoid issues with dmabuf import.
     this->shmStride  = ALIGN_PAD(this->grabStride, 32);
 
