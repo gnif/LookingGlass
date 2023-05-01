@@ -63,11 +63,20 @@ static bool int_parser(struct Option * opt, const char * str)
 
 static bool bool_parser(struct Option * opt, const char * str)
 {
-  opt->value.x_bool =
-    strcasecmp(str, "1"   ) == 0 ||
-    strcasecmp(str, "on"  ) == 0 ||
-    strcasecmp(str, "yes" ) == 0 ||
-    strcasecmp(str, "true") == 0;
+  char val[5];
+  size_t len = strlen(str);
+  while (len > 1 && isspace(str[len-1]))
+    --len;
+  if (len <= 5)
+  {
+    memcpy(val, str, len);
+    val[len] = '\0';
+    opt->value.x_bool =
+      strcasecmp(val, "1"   ) == 0 ||
+      strcasecmp(val, "on"  ) == 0 ||
+      strcasecmp(val, "yes" ) == 0 ||
+      strcasecmp(val, "true") == 0;
+  }
   return true;
 }
 
