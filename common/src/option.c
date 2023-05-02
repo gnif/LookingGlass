@@ -346,6 +346,7 @@ bool option_parse(int argc, char * argv[])
           o = state.options[i];
           if (o->type != OPTION_TYPE_BOOL && a < argc - 1)
           {
+            ++a;
             char * v = argv[a];
 
             //ltrim
