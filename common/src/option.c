@@ -346,8 +346,18 @@ bool option_parse(int argc, char * argv[])
           o = state.options[i];
           if (o->type != OPTION_TYPE_BOOL && a < argc - 1)
           {
-            ++a;
-            value = strdup(argv[a]);
+            char * v = argv[a];
+
+            //ltrim
+            while(*v && isspace(*v))
+              ++v;
+
+            int valueLen = strlen(v);
+            //rtrim
+            while (valueLen > 1 && isspace(v[valueLen-1]))
+              --valueLen;
+
+            value = strndup(v, valueLen);
           }
           break;
         }
@@ -369,7 +379,18 @@ bool option_parse(int argc, char * argv[])
 
       o = option_get(module, name);
       if (value)
-        value = strdup(value);
+      {
+        //ltrim
+        while(*value && isspace(*value))
+          ++value;
+
+        int valueLen = strlen(value);
+        //rtrim
+        while (valueLen > 1 && isspace(value[valueLen-1]))
+          --valueLen;
+
+        value = strndup(value, valueLen);
+      }
 
       free(arg);
     }
@@ -458,7 +479,13 @@ static bool process_option_line(const char * module, const char * name,
   else
   {
     if (value)
+    {
+      //rtrim
+      while (valueLen > 1 && isspace(name[valueLen-1]))
+        --valueLen;
+
       value[valueLen] = '\0';
+    }
 
     if (!option_set(o, value))
       DEBUG_ERROR("Failed to set the option value");
