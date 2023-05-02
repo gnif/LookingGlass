@@ -357,7 +357,9 @@ bool option_parse(int argc, char * argv[])
             while (valueLen > 1 && isspace(v[valueLen-1]))
               --valueLen;
 
-            value = strndup(v, valueLen);
+            value = malloc(valueLen + 1);
+            memcpy(value, v, valueLen);
+            value[valueLen] = '\0';
           }
           break;
         }
@@ -389,7 +391,10 @@ bool option_parse(int argc, char * argv[])
         while (valueLen > 1 && isspace(value[valueLen-1]))
           --valueLen;
 
-        value = strndup(value, valueLen);
+        char * v = malloc(valueLen + 1);
+        memcpy(v, value, valueLen);
+        v[valueLen] = '\0';
+        value = v;
       }
 
       free(arg);
