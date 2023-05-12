@@ -569,7 +569,11 @@ static int __init kvmfr_module_init(void)
     goto out_free;
   }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
   kvmfr->pClass = class_create(THIS_MODULE, KVMFR_DEV_NAME);
+#else
+  kvmfr->pClass = class_create(KVMFR_DEV_NAME);
+#endif
   if (IS_ERR(kvmfr->pClass)) {
     printk(KERN_INFO "kvmfr: kvmfr_module_init: failed to create class!\n");
     goto out_unreg;
