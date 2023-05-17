@@ -1,6 +1,6 @@
 /**
  * Looking Glass
- * Copyright © 2017-2022 The Looking Glass Authors
+ * Copyright © 2017-2023 The Looking Glass Authors
  * https://looking-glass.io
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -32,6 +32,10 @@
 #include <linux/version.h>
 
 #include <asm/io.h>
+
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+#include <asm/mem_encrypt.h>
+#endif
 
 #include "kvmfr.h"
 
@@ -321,6 +325,25 @@ static int device_mmap(struct file * filp, struct vm_area_struct * vma)
   switch (kdev->type)
   {
     case KVMFR_TYPE_PCI:
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+      /* Clear C-bit for ivshmem when mapped
+       * as normal memory to the userspace
+       *
+       * devm_memremap below will "hotplug" the ivshmem as normal mem,
+       * when sev and/or sev-snp is effective,
+       * ivshmem will be encrypted and private memory.
+       *
+       * However, this is not the intention of ivshmem, as it
+       * is meant to be shared with other VMs and the hypervisor.
+       *
+       * Mapping ivshmem as iomem could resolve the sev/sev-snp issue,
+       * but it then will not be cached and the performance is low.
+       *
+       * To maintain high performance yet make it shared, we should
+       * clear the C-bit for ivshmem.
+       */
+      vma->vm_page_prot.pgprot &= ~(sme_me_mask);
+#endif
       vma->vm_ops          = &pci_mmap_ops;
       vma->vm_private_data = kdev;
       return 0;
@@ -622,7 +645,7 @@ MODULE_DEVICE_TABLE(pci, kvmfr_pci_ids);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Geoffrey McRae <geoff@hostfission.com>");
 MODULE_AUTHOR("Guanzhong Chen <quantum2048@gmail.com>");
-MODULE_VERSION("0.0.8");
+MODULE_VERSION("0.0.9");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
 MODULE_IMPORT_NS(DMA_BUF);
 #endif
