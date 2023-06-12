@@ -124,9 +124,9 @@ it, or simply change its ownership manually, i.e.:
 As an example, you can create a new file in ``/etc/udev/rules.d/99-kvmfr.rules``
 with the following contents::
 
-   SUBSYSTEM=="kvmfr", OWNER="user", GROUP="kvm", MODE="0660"
+   SUBSYSTEM=="kvmfr", OWNER="1000", GROUP="kvm", MODE="0660"
 
-(replace ``user`` with your username)
+(replace ``1000`` with your username or UID)
 
 Usage with Looking Glass is simple, you only need to specify the path to
 the device node, for example:
