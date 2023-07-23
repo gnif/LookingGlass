@@ -103,7 +103,7 @@ which will allow you to move the window and resize it.
    alternatives if you require stable operation.
 
 .. _standard protocol: https://wayland.app/protocols/xdg-decoration-unstable-v1
-.. _libdecor: https://gitlab.gnome.org/jadahl/libdecor
+.. _libdecor: https://gitlab.freedesktop.org/libdecor/libdecor
 
 Mouse
 -----
