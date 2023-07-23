@@ -87,8 +87,8 @@ for server-side decorations, and Looking Glass doesn't implement its own
 decorations.
 
 The easiest solution is to build Looking Glass with `libdecor`_ support.
-If your distribution lacks a ``libdecor`` package, you must build it from
-`source code <libdecor_>`_.
+Install the ``libdecor-0-dev`` package. If your distribution lacks this package
+or any equivalents, you must build it from `source code <libdecor_>`_.
 
 You can then build the the client with libdecor support by passing
 ``-DENABLE_LIBDECOR=ON`` to ``cmake``.
