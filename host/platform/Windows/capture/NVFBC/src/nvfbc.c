@@ -860,9 +860,8 @@ static int pointerThread(void * unused)
     this->mouseHotY    = pointer.hy;
 
     pointer.positionUpdate = true;
-    pointer.visible        = this->mouseVisible;
-    pointer.x              = this->mouseX - pointer.hx;
-    pointer.y              = this->mouseY - pointer.hy;
+    pointer.x = this->mouseX - pointer.hx;
+    pointer.y = this->mouseY - pointer.hy;
 
     this->postPointerBufferFn(pointer);
   }
