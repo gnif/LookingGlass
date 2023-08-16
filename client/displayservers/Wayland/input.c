@@ -110,8 +110,10 @@ static int mapWaylandToSpiceButton(uint32_t button)
     case BTN_RIGHT:
       return 3;  // SPICE_MOUSE_BUTTON_RIGHT
     case BTN_SIDE:
+    case BTN_BACK:
       return 6;  // SPICE_MOUSE_BUTTON_SIDE
     case BTN_EXTRA:
+    case BTN_FORWARD:
       return 7;  // SPICE_MOUSE_BUTTON_EXTRA
   }
 
