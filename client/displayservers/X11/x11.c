@@ -476,7 +476,7 @@ static bool x11Init(const LG_DSInitParams params)
   if (XIQueryVersion(x11.display, &major, &minor) != Success)
   {
     DEBUG_ERROR("Failed to query the XInput version");
-    return false;
+    goto fail_window;
   }
 
   DEBUG_INFO("X11 XInput %d.%d in use", major, minor);
