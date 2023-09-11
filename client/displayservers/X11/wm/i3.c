@@ -26,6 +26,7 @@
 #include "atoms.h"
 #include "common/debug.h"
 #include "common/option.h"
+#include "common/util.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -146,7 +147,7 @@ static void wm_i3_setFullscreen(bool enable)
   while(msgSize)
   {
     int wrote = write(i3.sock, buf, msgSize);
-    if (wrote < 0)
+    if (wrote <= 0)
     {
       DEBUG_WARN("i3 IPC communication failure");
       return;
@@ -154,6 +155,31 @@ static void wm_i3_setFullscreen(bool enable)
 
     buf     += wrote;
     msgSize -= wrote;
+  }
+
+  if ((msgSize = read(i3.sock, msg, sizeof(*msg))) < 0)
+  {
+    DEBUG_WARN("i3 IPC read failure");
+    return;
+  }
+
+  if (memcmp(msg->magic, "i3-ipc", 6) != 0 ||
+      msg->type != I3_IPC_TYPE_RUN_COMMAND)
+  {
+    DEBUG_WARN("i3 IPC unexpected reply");
+    return;
+  }
+
+  // read and discard the payload
+  while(msg->length)
+  {
+    int len = read(i3.sock, cmd, min(msg->length, sizeof(cmd)));
+    if (len <= 0)
+    {
+      DEBUG_WARN("i3 IPC failed to read payload");
+      return;
+    }
+    msg->length -= len;
   }
 };
 
