@@ -95,6 +95,9 @@ void app_updateCursorPos(double x, double y)
 
 void app_handleFocusEvent(bool focused)
 {
+  if (g_state.focused == focused)
+    return;
+
   g_state.focused = focused;
 
   // release any imgui buttons/keys if we lost focus
@@ -126,6 +129,9 @@ void app_handleFocusEvent(bool focused)
     if (g_params.minimizeOnFocusLoss)
       g_state.ds->minimize();
   }
+  else
+    if (g_params.captureOnFocus)
+      core_setGrab(true);
 
   g_cursor.realign = true;
   g_state.ds->realignPointer();

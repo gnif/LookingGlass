@@ -186,6 +186,7 @@ struct AppParams
   bool                 ignoreQuit;
   bool                 noScreensaver;
   bool                 autoScreensaver;
+  bool                 captureOnFocus;
   bool                 grabKeyboard;
   bool                 grabKeyboardOnFocus;
   int                  escapeKey;

@@ -299,6 +299,13 @@ static struct Option options[] =
   // input options
   {
     .module         = "input",
+    .name           = "captureOnFocus",
+    .description    = "Enable capture mode when the window becomes focused",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+  {
+    .module         = "input",
     .name           = "grabKeyboard",
     .description    = "Grab the keyboard in capture mode",
     .shortopt       = 'G',
@@ -664,6 +671,7 @@ bool config_load(int argc, char * argv[])
     case 270: g_params.winRotate = LG_ROTATE_270; break;
   }
 
+  g_params.captureOnFocus         = option_get_bool("input", "captureOnFocus"        );
   g_params.grabKeyboard           = option_get_bool("input", "grabKeyboard"          );
   g_params.grabKeyboardOnFocus    = option_get_bool("input", "grabKeyboardOnFocus"   );
   g_params.releaseKeysOnFocusLoss = option_get_bool("input", "releaseKeysOnFocusLoss");
