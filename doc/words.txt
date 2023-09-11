@@ -21,6 +21,8 @@ downsampling
 fullscreen
 gcc
 gnif
+globalFullScreen
+i3
 imgui
 ini
 kvmfr
