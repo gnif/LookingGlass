@@ -53,10 +53,6 @@
 #include "common/event.h"
 #include "util.h"
 
-#define _NET_WM_STATE_REMOVE 0
-#define _NET_WM_STATE_ADD    1
-#define _NET_WM_STATE_TOGGLE 2
-
 struct X11DSState x11;
 
 struct MwmHints
@@ -166,6 +162,8 @@ static void x11DoPresent(uint64_t msc)
 
 static void x11Setup(void)
 {
+  X11WM_Default.setup();
+  X11WM_i3     .setup();
 }
 
 static bool x11Probe(void)
@@ -230,6 +228,8 @@ static void x11CheckEWMHSupport(void)
   DEBUG_INFO("EWMH-complient window manager detected: %s", wmName);
   x11.ewmhSupport = true;
 
+  if (strcmp(wmName, "i3") == 0)
+    x11.wm = &X11WM_i3;
 
   XFree(wmName);
 out_supported:
@@ -270,8 +270,9 @@ static bool x11Init(const LG_DSInitParams params)
   memset(&x11, 0, sizeof(x11));
   x11.xValuator = -1;
   x11.yValuator = -1;
-  x11.display = XOpenDisplay(NULL);
+  x11.display   = XOpenDisplay(NULL);
   x11.jitRender = params.jitRender;
+  x11.wm        = &X11WM_Default;
 
   XSetWindowAttributes swa =
   {
@@ -368,6 +369,16 @@ static bool x11Init(const LG_DSInitParams params)
 
   // check for Extended Window Manager Hints support
   x11CheckEWMHSupport();
+
+  if (!x11.wm->init())
+  {
+    x11.wm = &X11WM_Default;
+    if (!x11.wm->init())
+    {
+      DEBUG_ERROR("Failed to initialize the X11 window manager subsystem");
+      goto fail_window;
+    }
+  }
 
   if (x11atoms._NET_WM_PID)
   {
@@ -781,6 +792,7 @@ static void x11Free(void)
   if (x11.keysyms)
     XFree(x11.keysyms);
 
+  x11.wm->deinit();
   XCloseDisplay(x11.display);
 }
 
@@ -1964,24 +1976,7 @@ static void x11SetFullscreen(bool fs)
   if (x11.fullscreen == fs)
     return;
 
-  XEvent e =
-  {
-    .xclient = {
-      .type         = ClientMessage,
-      .send_event   = true,
-      .message_type = x11atoms._NET_WM_STATE,
-      .format       = 32,
-      .window       = x11.window,
-      .data.l       = {
-        fs ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
-        x11atoms._NET_WM_STATE_FULLSCREEN,
-        0
-      }
-    }
-  };
-
-  XSendEvent(x11.display, DefaultRootWindow(x11.display), False,
-      SubstructureNotifyMask | SubstructureRedirectMask, &e);
+  x11.wm->setFullscreen(fs);
 }
 
 static bool x11GetFullscreen(void)

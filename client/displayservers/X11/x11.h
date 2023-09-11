@@ -33,6 +33,7 @@
 #include "interface/displayserver.h"
 #include "common/thread.h"
 #include "common/types.h"
+#include "wm.h"
 
 enum Modifiers
 {
@@ -48,11 +49,16 @@ enum Modifiers
 
 #define MOD_COUNT (MOD_SUPER_RIGHT + 1)
 
+#define _NET_WM_STATE_REMOVE 0
+#define _NET_WM_STATE_ADD    1
+#define _NET_WM_STATE_TOGGLE 2
+
 struct X11DSState
 {
   Display *     display;
   Window        window;
   XVisualInfo * visual;
+  X11WM       * wm;
 
   int           minKeycode, maxKeycode;
   int           symsPerKeycode;
