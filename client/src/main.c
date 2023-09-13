@@ -569,9 +569,6 @@ int main_frameThread(void * unused)
     break;
   }
 
-  if (g_params.requestActivation)
-    g_state.ds->requestActivation();
-
   while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LGMPMessage msg;
