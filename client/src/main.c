@@ -569,7 +569,8 @@ int main_frameThread(void * unused)
     break;
   }
 
-  g_state.ds->requestActivation();
+  if (g_params.requestActivation)
+    g_state.ds->requestActivation();
 
   while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
   {
@@ -782,7 +783,8 @@ int main_frameThread(void * unused)
 
     overlaySplash_show(false);
 
-    if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
+    if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION &&
+        g_params.requestActivation)
       g_state.ds->requestActivation();
 
     const bool blockScreensaver = frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER;

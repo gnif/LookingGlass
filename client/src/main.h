@@ -201,6 +201,7 @@ struct AppParams
   const char *         uiFont;
   int                  uiSize;
   bool                 jitRender;
+  bool                 requestActivation;
 
   unsigned int         cursorPollInterval;
   unsigned int         framePollInterval;
