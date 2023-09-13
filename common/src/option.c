@@ -487,7 +487,7 @@ static bool process_option_line(const char * module, const char * name,
     if (value)
     {
       //rtrim
-      while (valueLen > 1 && isspace(name[valueLen-1]))
+      while (valueLen > 1 && isspace(value[valueLen-1]))
         --valueLen;
 
       value[valueLen] = '\0';
