@@ -218,6 +218,7 @@ struct AppParams
   bool                 autoCapture;
   bool                 captureInputOnly;
   bool                 showCursorDot;
+  bool                 largeCursorDot;
 
   int                  audioPeriodSize;
   int                  audioBufferLatency;

@@ -90,6 +90,7 @@ typedef struct LG_DSInitParams
   bool resizable;
   bool borderless;
   bool maximize;
+  bool largeCursorDot;
 
   // if true the renderer requires an OpenGL context
   bool opengl;

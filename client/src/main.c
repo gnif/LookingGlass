@@ -1337,6 +1337,7 @@ static int lg_run(void)
     .resizable           = g_params.allowResize,
     .borderless          = g_params.borderless,
     .maximize            = g_params.maximize,
+    .largeCursorDot      = g_params.largeCursorDot,
     .opengl              = needsOpenGL,
     .jitRender           = g_params.jitRender
   };

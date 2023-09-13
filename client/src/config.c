@@ -499,6 +499,13 @@ static struct Option options[] =
     .type          = OPTION_TYPE_BOOL,
     .value.x_bool  = true
   },
+  {
+    .module        = "spice",
+    .name          = "largeCursorDot",
+    .description   = "Use a larger version of the \"dot\" cursor",
+    .type          = OPTION_TYPE_BOOL,
+    .value.x_bool  = false
+  },
 
   // audio options
   {
@@ -728,6 +735,7 @@ bool config_load(int argc, char * argv[])
     g_params.captureOnStart   = option_get_bool("spice", "captureOnStart");
     g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
     g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
+    g_params.largeCursorDot   = option_get_bool("spice", "largeCursorDot");
   }
 
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");

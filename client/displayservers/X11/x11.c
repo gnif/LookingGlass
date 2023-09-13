@@ -23,7 +23,11 @@
 #include "x11.h"
 #include "atoms.h"
 #include "clipboard.h"
+#include "cursor.h"
+
 #include "resources/icondata.h"
+#include "resources/no-input-cursor/16.xcur.h"
+#include "resources/no-input-cursor/32.xcur.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -626,29 +630,17 @@ static bool x11Init(const LG_DSInitParams params)
     XFreePixmap(x11.display, temp);
   }
 
-  /* create the square cursor */
-  {
-    static char data[] = { 0x07, 0x05, 0x07 };
-    static char mask[] = { 0xff, 0xff, 0xff };
+  XcursorImages * images;
+  if (params.largeCursorDot)
+    images = x11cursor_load(b_no_input_cursor_32_xcur,
+        b_no_input_cursor_32_xcur_size);
+  else
+    images = x11cursor_load(b_no_input_cursor_16_xcur,
+        b_no_input_cursor_16_xcur_size);
 
-    Colormap cmap = DefaultColormap(x11.display, DefaultScreen(x11.display));
-    XColor colors[2] =
-    {
-      { .pixel = BlackPixelOfScreen(DefaultScreenOfDisplay(x11.display)) },
-      { .pixel = WhitePixelOfScreen(DefaultScreenOfDisplay(x11.display)) }
-    };
-
-    XQueryColors(x11.display, cmap, colors, 2);
-
-    Pixmap img = XCreateBitmapFromData(x11.display, x11.window, data, 3, 3);
-    Pixmap msk = XCreateBitmapFromData(x11.display, x11.window, mask, 3, 3);
-
-    x11.cursors[LG_POINTER_SQUARE] = XCreatePixmapCursor(x11.display, img, msk,
-        &colors[0], &colors[1], 1, 1);
-
-    XFreePixmap(x11.display, img);
-    XFreePixmap(x11.display, msk);
-  }
+  x11.cursors[LG_POINTER_SQUARE] =
+    XcursorImagesLoadCursor(x11.display, images);
+  XcursorImagesDestroy(images);
 
   /* initialize the rest of the cursors */
   const char * cursorLookup[LG_POINTER_COUNT] = {

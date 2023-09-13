@@ -18,6 +18,8 @@ build_resources(
 	lg-logo.svg
 	status/spice.svg
 	status/recording.svg
+	no-input-cursor/16.xcur
+	no-input-cursor/32.xcur
 )
 
 add_library(lg_resources STATIC ${LG_RESOURCES_OBJS})

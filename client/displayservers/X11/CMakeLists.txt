@@ -17,6 +17,7 @@ add_library(displayserver_X11 STATIC
   x11.c
   atoms.c
   clipboard.c
+  cursor.c
 
   wm/default.c
   wm/i3.c
@@ -27,6 +28,7 @@ add_definitions(-D GLX_GLXEXT_PROTOTYPES)
 target_link_libraries(displayserver_X11
   PkgConfig::DISPLAYSERVER_X11
   lg_common
+  lg_resources
 )
 
 target_include_directories(displayserver_X11
