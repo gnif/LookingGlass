@@ -51,6 +51,8 @@ struct DesktopShader
   GLint uNVGain;
   GLint uCBMode;
   GLint uIsHDR;
+  GLint uMapHDRtoSDR;
+  GLint uMapHDRGain;
 };
 
 struct EGL_Desktop
@@ -85,6 +87,11 @@ struct EGL_Desktop
   bool useDMA;
   LG_RendererFormat format;
 
+  // map HDR content to SDR
+  bool  mapHDRtoSDR;
+  int   peakLuminance;
+  int   maxCLL;
+
   EGL_PostProcess * pp;
   _Atomic(bool) processFrame;
 };
@@ -110,12 +117,14 @@ static bool egl_initDesktopShader(
     return false;
   }
 
-  shader->uTransform   = egl_shaderGetUniform(shader->shader, "transform"  );
-  shader->uDesktopSize = egl_shaderGetUniform(shader->shader, "desktopSize");
-  shader->uScaleAlgo   = egl_shaderGetUniform(shader->shader, "scaleAlgo"  );
-  shader->uNVGain      = egl_shaderGetUniform(shader->shader, "nvGain"     );
-  shader->uCBMode      = egl_shaderGetUniform(shader->shader, "cbMode"     );
-  shader->uIsHDR       = egl_shaderGetUniform(shader->shader, "isHDR"      );
+  shader->uTransform    = egl_shaderGetUniform(shader->shader, "transform"   );
+  shader->uDesktopSize  = egl_shaderGetUniform(shader->shader, "desktopSize" );
+  shader->uScaleAlgo    = egl_shaderGetUniform(shader->shader, "scaleAlgo"   );
+  shader->uNVGain       = egl_shaderGetUniform(shader->shader, "nvGain"      );
+  shader->uCBMode       = egl_shaderGetUniform(shader->shader, "cbMode"      );
+  shader->uIsHDR        = egl_shaderGetUniform(shader->shader, "isHDR"       );
+  shader->uMapHDRtoSDR  = egl_shaderGetUniform(shader->shader, "mapHDRtoSDR" );
+  shader->uMapHDRGain   = egl_shaderGetUniform(shader->shader, "mapHDRGain"  );
 
   return true;
 }
@@ -183,6 +192,10 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
   desktop->cbMode    = option_get_int("egl", "cbMode"   );
   desktop->scaleAlgo = option_get_int("egl", "scale"    );
   desktop->useDMA    = useDMA;
+
+  desktop->mapHDRtoSDR   = option_get_bool("egl", "mapHDRtoSDR"  );
+  desktop->peakLuminance = option_get_int ("egl", "peakLuminance");
+  desktop->maxCLL        = option_get_int ("egl", "maxCLL"       );
 
   if (!egl_postProcessInit(&desktop->pp))
   {
@@ -274,6 +287,14 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   }
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
+
+  igSeparator();
+  igCheckbox("Map HDR content to SDR", &desktop->mapHDRtoSDR);
+  igSliderInt("Peak Luminance", &desktop->peakLuminance, 1, 10000,
+      "%d nits",
+      ImGuiInputTextFlags_CharsDecimal);
+  igSliderInt("Max content light level (nits)", &desktop->maxCLL, 1, 10000,
+      "%d nits", ImGuiInputTextFlags_CharsDecimal);
 }
 
 bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
@@ -458,6 +479,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     desktop->useDMA && texture == desktop->texture ?
       &desktop->dmaShader : &desktop->shader;
 
+  const float mapHDRGain =
+    desktop->maxCLL / desktop->peakLuminance;
+
   EGL_Uniform uniforms[] =
   {
     {
@@ -490,6 +514,16 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       .type        = EGL_UNIFORM_TYPE_1I,
       .location    = shader->uIsHDR,
       .i           = { desktop->hdr }
+    },
+    {
+      .type        = EGL_UNIFORM_TYPE_1I,
+      .location    = shader->uMapHDRtoSDR,
+      .i           = { desktop->mapHDRtoSDR }
+    },
+    {
+      .type        = EGL_UNIFORM_TYPE_1F,
+      .location    = shader->uMapHDRGain,
+      .f           = { mapHDRGain }
     }
   };
 

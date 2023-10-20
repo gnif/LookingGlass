@@ -21,6 +21,8 @@ uniform int   scaleAlgo;
 uniform float nvGain;
 uniform int   cbMode;
 uniform bool  isHDR;
+uniform bool  mapHDRtoSDR;
+uniform float mapHDRGain;
 
 void main()
 {
@@ -40,8 +42,8 @@ void main()
     }
   }
 
-  if (isHDR)
-    color.rgb = mapToSDR(color.rgb);
+  if (isHDR && mapHDRtoSDR)
+    color.rgb = mapToSDR(color.rgb, mapHDRGain);
 
   if (cbMode > 0)
     color = cbTransform(color, cbMode);

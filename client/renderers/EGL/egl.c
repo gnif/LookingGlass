@@ -202,6 +202,27 @@ static struct Option egl_options[] =
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = true
   },
+  {
+    .module       = "egl",
+    .name         = "mapHDRtoSDR",
+    .description  = "Map HDR content to the SDR color space",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
+  },
+  {
+    .module       = "egl",
+    .name         = "peakLuminance",
+    .description  = "The peak luminance level in nits for HDR to SDR mapping",
+    .type         = OPTION_TYPE_INT,
+    .value.x_int  = 250,
+  },
+  {
+    .module       = "egl",
+    .name         = "maxCLL",
+    .description  = "Maximum content light level in nits for HDR to SDR mapping",
+    .type         = OPTION_TYPE_INT,
+    .value.x_int  = 10000,
+  },
 
   {0}
 };

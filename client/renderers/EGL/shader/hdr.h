@@ -13,14 +13,11 @@
  */
 
 // Configuration ---------------------------------------------------------------
-const float peakLuminance = 250.0;   // Peak playback screen luminance in nits
 const float knee          = 0.75;    // Compressor knee position
 const float ratio         = 4.0;     // Compressor ratio: 1 = disabled, <1 = expander
-const float maxCLL        = 10000.0; // Maximum content light level in nits
 // -----------------------------------------------------------------------------
 
 // Precalculated values
-const float gain       = maxCLL / peakLuminance;
 const float compressor = 1.0 / ratio;
 
 // PQ constants
@@ -43,10 +40,11 @@ float midGain(vec3 pixel)
       min(pixel.r, pixel.g)); // min = b
 }
 
-vec3 compress(vec3 pixel)
+vec3 compress(vec3 pixel, float gain)
 {
-  float gain = maxGain(pixel);
-  return pixel * (gain < knee ? gain : knee + max(gain - knee, 0.0) * compressor) / gain;
+  float maxGain = maxGain(pixel);
+  return pixel * (maxGain < knee ? maxGain :
+      knee + max(maxGain - knee, 0.0) * compressor) / maxGain;
 }
 
 vec3 fixClip(vec3 pixel)
@@ -67,7 +65,7 @@ vec3 fixClip(vec3 pixel)
 }
 
 // Returns luminance in nits
-vec3 pq2lin(vec3 pq)
+vec3 pq2lin(vec3 pq, float gain)
 {
   vec3 p = pow(pq, vec3(m2inv));
   vec3 d = max(p - c1, vec3(0.0)) / (c2 - c3 * p);
@@ -101,8 +99,8 @@ vec3 bt2020to709(vec3 bt2020)
     bt2020.r * -0.0182 + bt2020.g * -0.1006 + bt2020.b * 1.1187);
 }
 
-vec3 mapToSDR(vec3 color)
+vec3 mapToSDR(vec3 color, float gain)
 {
-  vec3 lin = bt2020to709(pq2lin(color.rgb));
-  return lin2srgb(compress(lin));
+  vec3 lin = bt2020to709(pq2lin(color.rgb, gain));
+  return lin2srgb(compress(lin, gain));
 }
