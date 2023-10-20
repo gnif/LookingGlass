@@ -32,6 +32,7 @@ libpipewire
 libpulse
 libvirt
 linux
+luminance
 LookingGlass
 memballoon
 MiB
