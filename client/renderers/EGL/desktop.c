@@ -293,7 +293,7 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   igSliderInt("Peak Luminance", &desktop->peakLuminance, 1, 10000,
       "%d nits",
       ImGuiInputTextFlags_CharsDecimal);
-  igSliderInt("Max content light level (nits)", &desktop->maxCLL, 1, 10000,
+  igSliderInt("Max content light level", &desktop->maxCLL, 1, 10000,
       "%d nits", ImGuiInputTextFlags_CharsDecimal);
 }
 
