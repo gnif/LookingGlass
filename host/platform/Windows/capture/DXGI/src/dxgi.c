@@ -555,10 +555,12 @@ next_output:
   {
     const DXGI_FORMAT supportedFormats[] =
     {
+      DXGI_FORMAT_R10G10B10A2_UNORM,
       DXGI_FORMAT_B8G8R8A8_UNORM,
       DXGI_FORMAT_R8G8B8A8_UNORM,
-      DXGI_FORMAT_R10G10B10A2_UNORM,
-      DXGI_FORMAT_R16G16B16A16_FLOAT
+
+      // we do not want this format as it doubles the bandwidth required
+//      DXGI_FORMAT_R16G16B16A16_FLOAT
     };
 
     // we try this twice in case we still get an error on re-initialization
@@ -591,14 +593,48 @@ next_output:
     IDXGIOutput5_Release(output5);
   }
 
-  DXGI_OUTDUPL_DESC dupDesc;
-  IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
+  {
+    DXGI_OUTDUPL_DESC dupDesc;
+    IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
+    DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
 
-  this->dxgiFormat = dupDesc.ModeDesc.Format;
-  DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(this->dxgiFormat));
+    DXGI_OUTDUPL_FRAME_INFO   frameInfo;
+    IDXGIResource           * res;
+    if (FAILED(status = IDXGIOutputDuplication_AcquireNextFrame(this->dup,
+      INFINITE, &frameInfo, &res)))
+    {
+      DEBUG_WINERROR("AcquireNextFrame Failed", status);
+      goto fail;
+    }
+
+    ID3D11Texture2D * src;
+    if (FAILED(status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D,
+      (void **)&src)))
+    {
+      DEBUG_WINERROR("ResourceQueryInterface failed", status);
+      IDXGIResource_Release(res);
+      IDXGIOutputDuplication_ReleaseFrame(this->dup);
+      goto fail;
+    }
+
+    D3D11_TEXTURE2D_DESC desc;
+    ID3D11Texture2D_GetDesc(src, &desc);
+
+    // there seems to be a bug here in DXGI, asking for 10bit when restarting
+    // reports as 16bit, even though it's really 10bit.
+    if (desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
+      desc.Format = DXGI_FORMAT_R10G10B10A2_UINT;
+
+    DEBUG_INFO("Capture Format    : %s", GetDXGIFormatStr(desc.Format));
+    this->dxgiFormat = desc.Format;
+
+    ID3D11Texture2D_Release(src);
+    IDXGIResource_Release(res);
+    IDXGIOutputDuplication_ReleaseFrame(this->dup);
+  }
 
   this->bpp = 4;
-  switch(dupDesc.ModeDesc.Format)
+  switch(this->dxgiFormat)
   {
     case DXGI_FORMAT_B8G8R8A8_UNORM:
       this->format = CAPTURE_FMT_BGRA;
