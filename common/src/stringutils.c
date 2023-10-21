@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <errno.h>
 
 #include "common/stringutils.h"
 
@@ -88,4 +89,24 @@ bool str_containsValue(const char * list, char delimiter, const char * value)
     list += n;
   }
   return false;
+}
+
+char * strdup(const char *s)
+{
+  if (!s)
+  {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  const ssize_t len = strlen(s) + 1;
+  char * out = malloc(len);
+  if (!out)
+  {
+    errno = ENOMEM;
+    return NULL;
+  }
+
+  memcpy(out, s, len);
+  return out;
 }
