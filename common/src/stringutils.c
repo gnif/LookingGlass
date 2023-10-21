@@ -91,7 +91,7 @@ bool str_containsValue(const char * list, char delimiter, const char * value)
   return false;
 }
 
-char * strdup(const char *s)
+char * lg_strdup(const char *s)
 {
   if (!s)
   {

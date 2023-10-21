@@ -109,6 +109,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
     rectsFramebufferToBuffer(
       damage->rects,
       damage->count,
+      texture->format.bpp,
       parent->buf[parent->bufIndex].map,
       texture->format.stride,
       texture->format.height,

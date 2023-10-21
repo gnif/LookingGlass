@@ -35,6 +35,6 @@ int alloc_sprintf(char ** str, const char * format, ...)
 bool str_containsValue(const char * list, char delimiter, const char * value);
 
 // Local implementation of strdup
-char * strdup(const char *s);
+char * lg_strdup(const char *s);
 
 #endif

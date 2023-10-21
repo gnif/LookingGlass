@@ -80,7 +80,7 @@ static bool float_parser(struct Option * opt, const char * str)
 static bool string_parser(struct Option * opt, const char * str)
 {
   free(opt->value.x_string);
-  opt->value.x_string = strdup(str);
+  opt->value.x_string = lg_strdup(str);
   return true;
 }
 
@@ -100,7 +100,7 @@ static char * int_toString(struct Option * opt)
 
 static char * bool_toString(struct Option * opt)
 {
-  return strdup(opt->value.x_bool ? "yes" : "no");
+  return lg_strdup(opt->value.x_bool ? "yes" : "no");
 }
 
 static char * float_toString(struct Option * opt)
@@ -122,7 +122,7 @@ static char * string_toString(struct Option * opt)
   if (!opt->value.x_string)
     return NULL;
 
-  return strdup(opt->value.x_string);
+  return lg_strdup(opt->value.x_string);
 }
 
 bool option_register(struct Option options[])
@@ -211,7 +211,7 @@ bool option_register(struct Option options[])
     {
       if (o->value.x_string)
       {
-        o->value.x_string = strdup(o->value.x_string);
+        o->value.x_string = lg_strdup(o->value.x_string);
         if (!o->value.x_string)
         {
           DEBUG_ERROR("out of memory");
@@ -368,7 +368,7 @@ bool option_parse(int argc, char * argv[])
     }
     else
     {
-      char * arg    = strdup(argv[a]);
+      char * arg    = lg_strdup(argv[a]);
       char * module = strtok(arg , ":");
       char * name   = strtok(NULL, "=");
       value = strtok(NULL, "" );
@@ -778,7 +778,7 @@ void option_print(void)
       char * value = o->toString(o);
       if (!value)
       {
-        value = strdup("NULL");
+        value = lg_strdup("NULL");
         len   = 4;
       }
       else
@@ -977,7 +977,7 @@ void option_set_string(const char * module, const char * name, const char * valu
   }
   DEBUG_ASSERT(o->type == OPTION_TYPE_STRING);
   free(o->value.x_string);
-  o->value.x_string = strdup(value);
+  o->value.x_string = lg_strdup(value);
 }
 
 void option_set_bool(const char * module, const char * name, bool value)
