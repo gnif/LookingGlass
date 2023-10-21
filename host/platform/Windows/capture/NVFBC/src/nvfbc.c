@@ -589,7 +589,10 @@ static void updateDamageRects(CaptureFrame * frame)
 
   // init the ds usage
   for(unsigned int i = 0; i < ARRAY_LENGTH(ds); ++i)
+  {
+    ds[i].id  = -1;
     ds[i].use = (bool)this->diffMap[i];
+  }
 
   // reduce the number of resulting rectangles by filling in holes and merging
   // irregular shapes into contiguous rectangles
