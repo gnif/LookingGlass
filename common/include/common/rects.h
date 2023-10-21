@@ -38,11 +38,11 @@ inline static void rectCopyUnaligned(uint8_t * dest, const uint8_t * src,
   }
 }
 
-void rectsBufferToFramebuffer(FrameDamageRect * rects, int count,
+void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
   FrameBuffer * frame, int dstStride, int height,
   const uint8_t * src, int srcStride);
 
-void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
+void rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstStride, int height,
   const FrameBuffer * frame, int srcStride);
 

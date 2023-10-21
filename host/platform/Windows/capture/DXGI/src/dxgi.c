@@ -1177,8 +1177,8 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame,
     memcpy(damage->rects + damage->count, tex->damageRects,
       tex->damageRectsCount * sizeof(*tex->damageRects));
     damage->count += tex->damageRectsCount;
-    rectsBufferToFramebuffer(damage->rects, damage->count, frame, this->pitch,
-      height, tex->map, this->pitch);
+    rectsBufferToFramebuffer(damage->rects, damage->count, this->bpp, frame,
+      this->pitch, height, tex->map, this->pitch);
   }
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)

@@ -83,7 +83,7 @@ static int cornerCompare(const void * a_, const void * b_)
   return 0;
 }
 
-inline static void rectsBufferCopy(FrameDamageRect * rects, int count,
+inline static void rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstStride, int height,
   const uint8_t * src, int srcStride, void * opaque,
   void (*rowCopyStart)(int y, void * opaque),
@@ -148,8 +148,8 @@ inline static void rectsBufferCopy(FrameDamageRect * rects, int count,
         x1 = active[i].x;
       in_rect += active[i].delta;
       if (!in_rect)
-        rectCopyUnaligned(dst, src, prev_y, y, x1 * 4, dstStride, srcStride,
-            (active[i].x - x1) * 4);
+        rectCopyUnaligned(dst, src, prev_y, y, x1 * bpp, dstStride, srcStride,
+            (active[i].x - x1) * bpp);
     }
 
     if (re >= cornerCount || y == height)
@@ -203,13 +203,13 @@ static void fbRowFinish(int y, void * opaque)
   framebuffer_set_write_ptr(data->frame, y * data->stride);
 }
 
-void rectsBufferToFramebuffer(FrameDamageRect * rects, int count,
+void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
   FrameBuffer * frame, int dstStride, int height,
   const uint8_t * src, int srcStride)
 {
   struct ToFramebufferData data = { .frame = frame, .stride = dstStride };
-  rectsBufferCopy(rects, count, framebuffer_get_data(frame), dstStride, height,
-    src, srcStride, &data, NULL, fbRowFinish);
+  rectsBufferCopy(rects, count, bpp, framebuffer_get_data(frame), dstStride,
+    height, src, srcStride, &data, NULL, fbRowFinish);
   framebuffer_set_write_ptr(frame, height * dstStride);
 }
 
@@ -225,12 +225,12 @@ static void fbRowStart(int y, void * opaque)
   framebuffer_wait(data->frame, y * data->stride);
 }
 
-void rectsFramebufferToBuffer(FrameDamageRect * rects, int count,
+void rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstStride, int height,
   const FrameBuffer * frame, int srcStride)
 {
   struct FromFramebufferData data = { .frame = frame, .stride = srcStride };
-  rectsBufferCopy(rects, count, dst, dstStride, height,
+  rectsBufferCopy(rects, count, bpp, dst, dstStride, height,
     framebuffer_get_buffer(frame), srcStride, &data, fbRowStart, NULL);
 }
 
