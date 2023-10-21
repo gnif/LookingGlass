@@ -815,44 +815,46 @@ int app_main(int argc, char * argv[])
   int throttleUs = throttleFps ? 1000000 / throttleFps : 0;
   uint64_t previousFrameTime = 0;
 
-  const char * ifaceName = option_get_string("app", "capture");
-  CaptureInterface * iface = NULL;
-  for(int i = 0; CaptureInterfaces[i]; ++i)
   {
-    iface = CaptureInterfaces[i];
-    if (*ifaceName && strcasecmp(ifaceName, iface->shortName))
-      continue;
-
-    DEBUG_INFO("Trying           : %s", iface->getName());
-
-    if (!iface->create(captureGetPointerBuffer, capturePostPointerBuffer))
+    const char * ifaceName = option_get_string("app", "capture");
+    CaptureInterface * iface = NULL;
+    for(int i = 0; CaptureInterfaces[i]; ++i)
     {
+      iface = CaptureInterfaces[i];
+      if (*ifaceName && strcasecmp(ifaceName, iface->shortName))
+        continue;
+
+      DEBUG_INFO("Trying           : %s", iface->getName());
+
+      if (!iface->create(captureGetPointerBuffer, capturePostPointerBuffer))
+      {
+        iface = NULL;
+        continue;
+      }
+
+      if (iface->init())
+        break;
+
+      iface->free();
       iface = NULL;
-      continue;
     }
 
-    if (iface->init())
-      break;
+    if (!iface)
+    {
+      if (*ifaceName)
+        DEBUG_ERROR("Specified capture interface not supported");
+      else
+        DEBUG_ERROR("Failed to find a supported capture interface");
+      exitcode = LG_HOST_EXIT_FAILED;
+      goto fail_lgmp;
+    }
 
-    iface->free();
-    iface = NULL;
+    DEBUG_INFO("Using            : %s", iface->getName());
+    DEBUG_INFO("Capture Method   : %s", iface->asyncCapture ?
+        "Asynchronous" : "Synchronous");
+
+    app.iface = iface;
   }
-
-  if (!iface)
-  {
-    if (*ifaceName)
-      DEBUG_ERROR("Specified capture interface not supported");
-    else
-      DEBUG_ERROR("Failed to find a supported capture interface");
-    exitcode = LG_HOST_EXIT_FAILED;
-    goto fail_lgmp;
-  }
-
-  DEBUG_INFO("Using            : %s", iface->getName());
-  DEBUG_INFO("Capture Method   : %s", iface->asyncCapture ?
-      "Asynchronous" : "Synchronous");
-
-  app.iface = iface;
 
   if (!lgmpSetup(&shmDev))
   {
@@ -928,14 +930,14 @@ int app_main(int argc, char * argv[])
       }
 
       const uint64_t captureStart = microtime();
-      switch(iface->capture())
+      switch(app.iface->capture())
       {
         case CAPTURE_RESULT_OK:
           previousFrameTime = captureStart;
           break;
 
         case CAPTURE_RESULT_TIMEOUT:
-          if (!iface->asyncCapture)
+          if (!app.iface->asyncCapture)
             if (app.frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
             {
               LGMP_STATUS status;
@@ -956,7 +958,7 @@ int app_main(int argc, char * argv[])
           goto fail_capture;
       }
 
-      if (!iface->asyncCapture)
+      if (!app.iface->asyncCapture)
         sendFrame();
     }
 
@@ -987,7 +989,7 @@ fail_threads:
   captureStop();
 
 fail_capture:
-  iface->free();
+  app.iface->free();
   LG_LOCK_FREE(app.pointerLock);
 
 fail_lgmp:
