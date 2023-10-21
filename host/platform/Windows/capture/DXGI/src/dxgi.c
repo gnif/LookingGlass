@@ -623,7 +623,7 @@ next_output:
     // there seems to be a bug here in DXGI, asking for 10bit when restarting
     // reports as 16bit, even though it's really 10bit.
     if (desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
-      desc.Format = DXGI_FORMAT_R10G10B10A2_UINT;
+      desc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
 
     DEBUG_INFO("Capture Format    : %s", GetDXGIFormatStr(desc.Format));
     this->dxgiFormat = desc.Format;
