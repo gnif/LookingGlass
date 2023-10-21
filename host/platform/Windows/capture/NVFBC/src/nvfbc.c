@@ -295,6 +295,17 @@ static void updateScale(void)
 
 static bool nvfbc_init(void)
 {
+  int adapterIndex = option_get_int("nvfbc", "adapterIndex");
+
+  IDirect3D9 * d3d = Direct3DCreate9(D3D_SDK_VERSION);
+  int adapterCount = IDirect3D9_GetAdapterCount(d3d);
+  if (adapterIndex > adapterCount)
+  {
+    DEBUG_ERROR("Invalid adapterIndex specified");
+    IDirect3D9_Release(d3d);
+    return false;
+  }
+
   int       bufferLen   = GetEnvironmentVariable("NVFBC_PRIV_DATA", NULL, 0);
   uint8_t * privData    = NULL;
   int       privDataLen = 0;
@@ -316,8 +327,7 @@ static bool nvfbc_init(void)
     free(buffer);
   }
 
-  int adapterIndex = option_get_int("nvfbc", "adapterIndex");
-
+  D3DADAPTER_IDENTIFIER9 ident;
   bool created = false;
   for(int retry = 0; retry < 2; ++retry)
   {
@@ -327,29 +337,34 @@ static bool nvfbc_init(void)
     // option.
     if (adapterIndex < 0)
     {
-      IDirect3D9 * d3d = Direct3DCreate9(D3D_SDK_VERSION);
-      int adapterCount = IDirect3D9_GetAdapterCount(d3d);
       for(int i = 0; i < adapterCount; ++i)
       {
-        D3DADAPTER_IDENTIFIER9 ident;
-        IDirect3D9_GetAdapterIdentifier(d3d, i, 0, &ident);
-        if (ident.VendorId != 0x10DE)
+        if (IDirect3D9_GetAdapterIdentifier(d3d, i, 0, &ident) != D3D_OK ||
+          ident.VendorId != 0x10DE)
           continue;
 
-        if (NvFBCToSysCreate(i, privData, privDataLen, &this->nvfbc,
+        if (!NvFBCToSysCreate(i, privData, privDataLen, &this->nvfbc,
           &this->maxWidth, &this->maxHeight))
-        {
-          adapterIndex = i;
-          created      = true;
-          break;
-        }
+          continue;
+
+        adapterIndex = i;
+        created      = true;
+        break;
       }
-      IDirect3D9_Release(d3d);
     }
     else
     {
-      if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc, &this->maxWidth, &this->maxHeight))
+      if (IDirect3D9_GetAdapterIdentifier(d3d, adapterIndex, 0, &ident) !=
+        D3D_OK || ident.VendorId != 0x10DE)
+      {
+        DEBUG_ERROR("adapterIndex %d is not a NVidia device", adapterIndex);
+        break;
+      }
+
+      if (!NvFBCToSysCreate(adapterIndex, privData, privDataLen, &this->nvfbc,
+        &this->maxWidth, &this->maxHeight))
         continue;
+
       created = true;
     }
 
@@ -359,6 +374,8 @@ static bool nvfbc_init(void)
     //1000ms delay before retry
     nsleep(1000000000);
   }
+
+  IDirect3D9_Release(d3d);
 
   if (!created)
   {
