@@ -37,6 +37,7 @@
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
 #include <dxgi1_5.h>
+#include <dxgi1_6.h>
 #include <d3d11.h>
 #include <d3dcommon.h>
 #include <versionhelpers.h>
@@ -249,6 +250,109 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
   return true;
+}
+
+static bool dxgi_getDisplayPathInfo(HMONITOR monitor,
+  DISPLAYCONFIG_PATH_INFO * info)
+{
+  bool result = false;
+  UINT32 numPath, numMode;
+
+  MONITORINFOEXW viewInfo = { .cbSize = sizeof(viewInfo) };
+    if (!GetMonitorInfoW(monitor, (MONITORINFO*)&viewInfo))
+  {
+    DEBUG_ERROR("Failed to get the monitor info");
+    goto err;
+  }
+
+err_retry:
+  if (FAILED(GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPath, &numMode)))
+    goto err;
+
+  DISPLAYCONFIG_PATH_INFO * pathInfo = calloc(sizeof(*pathInfo), numPath);
+  if (!pathInfo)
+    goto err_mem_pathInfo;
+
+  DISPLAYCONFIG_MODE_INFO * modeInfo = calloc(sizeof(*modeInfo), numMode);
+  if (!modeInfo)
+    goto err_mem_modeInfo;
+
+  LONG status = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
+    &numPath, pathInfo,
+    &numMode, modeInfo,
+    NULL);
+
+  if (status != ERROR_SUCCESS)
+  {
+    if (status == ERROR_INSUFFICIENT_BUFFER)
+    {
+      free(modeInfo);
+      free(pathInfo);
+      goto err_retry;
+    }
+
+    DEBUG_ERROR("QueryDisplayConfig failed with 0x%lx", status);
+    goto err_queryDisplay;
+  }
+
+  for(unsigned i = 0; i < numPath; ++i)
+  {
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName =
+    {
+      .header =
+      {
+        .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+        .size      = sizeof(sourceName),
+        .adapterId = pathInfo[i].sourceInfo.adapterId,
+        .id        = pathInfo[i].sourceInfo.id,
+      }
+    };
+
+    if (FAILED(DisplayConfigGetDeviceInfo(&sourceName.header)))
+      continue;
+
+    if (wcscmp(viewInfo.szDevice, sourceName.viewGdiDeviceName) != 0)
+      continue;
+
+    *info = pathInfo[i];
+    result = true;
+    break;
+  }
+
+err_queryDisplay:
+  free(modeInfo);
+
+err_mem_modeInfo:
+  free(pathInfo);
+
+err_mem_pathInfo:
+
+err:
+  return result;
+}
+
+static float dxgi_getSDRWhiteLevel(HMONITOR monitor)
+{
+  float nits = 80.0f;
+  DISPLAYCONFIG_PATH_INFO info;
+  if (!dxgi_getDisplayPathInfo(monitor, &info))
+    return nits;
+
+  DISPLAYCONFIG_SDR_WHITE_LEVEL level =
+  {
+    .header =
+    {
+      .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+      .size      = sizeof(level),
+      .adapterId = info.targetInfo.adapterId,
+      .id        = info.targetInfo.id,
+    }
+  };
+
+  if (SUCCEEDED(DisplayConfigGetDeviceInfo(&level.header)))
+    nits = level.SDRWhiteLevel / 1000.0f * 80.0f;
+
+  return nits;
 }
 
 static bool dxgi_init(void)
@@ -590,6 +694,24 @@ next_output:
       IDXGIOutput5_Release(output5);
       goto fail;
     }
+
+    IDXGIOutput6 * output6 = NULL;
+    status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput6, (void **)&output6);
+    if (SUCCEEDED(status))
+    {
+      DXGI_OUTPUT_DESC1 desc1;
+      IDXGIOutput6_GetDesc1(output6, &desc1);
+      this->dxgiColorSpace = desc1.ColorSpace;
+      this->sdrWhiteLevel  = dxgi_getSDRWhiteLevel(desc1.Monitor);
+
+      DEBUG_INFO("Bits Per Color    : %u"   , desc1.BitsPerColor);
+      DEBUG_INFO("Color Space       : %s"   , GetDXGIColorSpaceTypeStr(this->dxgiColorSpace));
+      DEBUG_INFO("Min/Max Luminance : %f/%f", desc1.MinLuminance, desc1.MaxLuminance);
+      DEBUG_INFO("Frame Luminance   : %f"   , desc1.MaxFullFrameLuminance);
+      DEBUG_INFO("SDR White Level   : %f"   , this->sdrWhiteLevel);
+      IDXGIOutput6_Release(output6);
+    }
+
     IDXGIOutput5_Release(output5);
   }
 
@@ -645,12 +767,15 @@ next_output:
       break;
 
     case DXGI_FORMAT_R10G10B10A2_UNORM:
-      this->format = CAPTURE_FMT_RGBA10_HDR;
+      if (this->dxgiColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+        this->format = CAPTURE_FMT_RGBA10_HDR;
+      else
+        this->format = CAPTURE_FMT_RGBA10_SDR;
       break;
 
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
       this->format = CAPTURE_FMT_RGBA16F;
-      this->bpp = 8;
+      this->bpp    = 8;
       break;
 
     default:

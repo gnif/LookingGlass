@@ -86,6 +86,8 @@ struct DXGIInterface
   atomic_int                 texReady;
   bool                       needsRelease;
   DXGI_FORMAT                dxgiFormat;
+  DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
+  float                      sdrWhiteLevel;
   struct DXGICopyBackend   * backend;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
@@ -121,3 +123,4 @@ struct DXGICopyBackend
 };
 
 const char * GetDXGIFormatStr(DXGI_FORMAT format);
+const char * GetDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type);
