@@ -47,6 +47,8 @@ typedef struct Texture
   FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
   int32_t                    texDamageCount;
   FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
+  ID3D11RenderTargetView   * renderTarget;
+  ID3D11Texture2D          * hdrTex;
 
   void                     * impl;
 }
@@ -85,9 +87,15 @@ struct DXGIInterface
   int                        texWIndex;
   atomic_int                 texReady;
   bool                       needsRelease;
-  DXGI_FORMAT                dxgiFormat;
+  DXGI_FORMAT                dxgiSrcFormat, dxgiFormat;
+  bool                       hdr;
+  DISPLAYCONFIG_PATH_INFO    displayPathInfo;
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
   float                      sdrWhiteLevel;
+  ID3D11Buffer             * constBuffer;
+  ID3D11PixelShader        * pixelShader;
+  ID3D11VertexShader       * vertexShader;
+  ID3D11SamplerState       * samplerState;
   struct DXGICopyBackend   * backend;
 
   CaptureGetPointerBuffer    getPointerBufferFn;

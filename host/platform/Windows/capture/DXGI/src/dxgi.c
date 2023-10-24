@@ -40,6 +40,7 @@
 #include <dxgi1_6.h>
 #include <d3d11.h>
 #include <d3dcommon.h>
+#include <d3dcompiler.h>
 #include <versionhelpers.h>
 #include <dwmapi.h>
 
@@ -58,6 +59,12 @@ typedef struct
 DownsampleRule;
 
 static Vector downsampleRules = {0};
+
+struct ShaderConsts
+{
+  float sdrWhiteLevel;
+}
+__attribute__((aligned(16)));
 
 // locals
 static struct DXGIInterface * this = NULL;
@@ -252,7 +259,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   return true;
 }
 
-static bool dxgi_getDisplayPathInfo(HMONITOR monitor,
+static bool getDisplayPathInfo(HMONITOR monitor,
   DISPLAYCONFIG_PATH_INFO * info)
 {
   bool result = false;
@@ -331,21 +338,17 @@ err:
   return result;
 }
 
-static float dxgi_getSDRWhiteLevel(HMONITOR monitor)
+static float getSDRWhiteLevel(void)
 {
   float nits = 80.0f;
-  DISPLAYCONFIG_PATH_INFO info;
-  if (!dxgi_getDisplayPathInfo(monitor, &info))
-    return nits;
-
   DISPLAYCONFIG_SDR_WHITE_LEVEL level =
   {
     .header =
     {
       .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
       .size      = sizeof(level),
-      .adapterId = info.targetInfo.adapterId,
-      .id        = info.targetInfo.id,
+      .adapterId = this->displayPathInfo.targetInfo.adapterId,
+      .id        = this->displayPathInfo.targetInfo.id,
     }
   };
 
@@ -353,6 +356,34 @@ static float dxgi_getSDRWhiteLevel(HMONITOR monitor)
     nits = level.SDRWhiteLevel / 1000.0f * 80.0f;
 
   return nits;
+}
+
+static bool compileShader(ID3DBlob ** dst, const char * entry,
+  const char * target, const char * code)
+{
+  ID3DBlob * errors;
+  HRESULT status = D3DCompile(
+    code,
+    strlen(code),
+    NULL,
+    NULL,
+    NULL,
+    entry,
+    target,
+    D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+    0,
+    dst,
+    &errors);
+
+  if (FAILED(status))
+  {
+    DEBUG_ERROR("Failed to compile the shader");
+    DEBUG_ERROR("%s", (const char *)ID3D10Blob_GetBufferPointer(errors));
+    ID3D10Blob_Release(errors);
+    return false;
+  }
+
+  return true;
 }
 
 static bool dxgi_init(void)
@@ -659,12 +690,9 @@ next_output:
   {
     const DXGI_FORMAT supportedFormats[] =
     {
-      DXGI_FORMAT_R10G10B10A2_UNORM,
       DXGI_FORMAT_B8G8R8A8_UNORM,
       DXGI_FORMAT_R8G8B8A8_UNORM,
-
-      // we do not want this format as it doubles the bandwidth required
-//      DXGI_FORMAT_R16G16B16A16_FLOAT
+      DXGI_FORMAT_R16G16B16A16_FLOAT
     };
 
     // we try this twice in case we still get an error on re-initialization
@@ -702,7 +730,14 @@ next_output:
       DXGI_OUTPUT_DESC1 desc1;
       IDXGIOutput6_GetDesc1(output6, &desc1);
       this->dxgiColorSpace = desc1.ColorSpace;
-      this->sdrWhiteLevel  = dxgi_getSDRWhiteLevel(desc1.Monitor);
+
+      if (!getDisplayPathInfo(desc1.Monitor, &this->displayPathInfo))
+      {
+        DEBUG_ERROR("Failed to get the display path info");
+        IDXGIOutput6_Release(output6);
+        goto fail;
+      }
+      this->sdrWhiteLevel = getSDRWhiteLevel();
 
       DEBUG_INFO("Bits Per Color    : %u"   , desc1.BitsPerColor);
       DEBUG_INFO("Color Space       : %s"   , GetDXGIColorSpaceTypeStr(this->dxgiColorSpace));
@@ -741,18 +776,16 @@ next_output:
 
     D3D11_TEXTURE2D_DESC desc;
     ID3D11Texture2D_GetDesc(src, &desc);
-
-    // there seems to be a bug here in DXGI, asking for 10bit when restarting
-    // reports as 16bit, even though it's really 10bit.
-    if (desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
-      desc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+    this->dxgiSrcFormat = desc.Format;
+    this->dxgiFormat    = desc.Format;
 
     DEBUG_INFO("Capture Format    : %s", GetDXGIFormatStr(desc.Format));
-    this->dxgiFormat = desc.Format;
 
     ID3D11Texture2D_Release(src);
     IDXGIResource_Release(res);
     IDXGIOutputDuplication_ReleaseFrame(this->dup);
+
+    this->hdr = this->dxgiColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
   }
 
   this->bpp = 4;
@@ -766,16 +799,10 @@ next_output:
       this->format = CAPTURE_FMT_RGBA;
       break;
 
-    case DXGI_FORMAT_R10G10B10A2_UNORM:
-      if (this->dxgiColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
-        this->format = CAPTURE_FMT_RGBA10_HDR;
-      else
-        this->format = CAPTURE_FMT_RGBA10_SDR;
-      break;
-
+    // we convert to HDR10 to save bandwidth
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
-      this->format = CAPTURE_FMT_RGBA16F;
-      this->bpp    = 8;
+      this->dxgiFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+      this->format     = CAPTURE_FMT_RGBA10_HDR;
       break;
 
     default:
@@ -836,7 +863,183 @@ next_output:
   DEBUG_INFO("Damage-aware copy : %s", this->disableDamage  ? "disabled" : "enabled" );
 
   for (int i = 0; i < this->maxTextures; ++i)
+  {
     this->texture[i].texDamageCount = -1;
+    if (!this->hdr)
+      continue;
+
+    D3D11_TEXTURE2D_DESC hdrTexDesc =
+    {
+      .Width              = this->width,
+      .Height             = this->height,
+      .MipLevels          = 1,
+      .ArraySize          = 1,
+      .SampleDesc.Count   = 1,
+      .SampleDesc.Quality = 0,
+      .Usage              = D3D11_USAGE_DEFAULT,
+      .Format             = DXGI_FORMAT_R10G10B10A2_UNORM,
+      .BindFlags          = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+      .CPUAccessFlags     = 0,
+      .MiscFlags          = 0
+    };
+
+    status = ID3D11Device_CreateTexture2D(this->device, &hdrTexDesc, NULL,
+      &this->texture[i].hdrTex);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create HDR texture", status);
+      goto fail;
+    }
+
+    status = ID3D11Device_CreateRenderTargetView(this->device,
+      (ID3D11Resource *)this->texture[i].hdrTex, NULL,
+      &this->texture[i].renderTarget);
+
+    ID3D11Texture2D_Release(this->texture[i].hdrTex);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create HDR target view", status);
+      goto fail;
+    }
+  }
+
+  if (this->hdr)
+  {
+    const D3D11_VIEWPORT vp =
+    {
+      .TopLeftX = 0.0f,
+      .TopLeftY = 0.0f,
+      .Width    = this->width,
+      .Height   = this->height,
+      .MinDepth = 0.0f,
+      .MaxDepth = 1.0f,
+    };
+    ID3D11DeviceContext_RSSetViewports(this->deviceContext, 1, &vp);
+
+    static const char * vshader =
+      "void main(\n"
+      "  in  uint   vertexID : SV_VERTEXID,\n"
+      "  out float4 position : SV_POSITION,\n"
+      "  out float2 texCoord : TEXCOORD0)\n"
+      "{\n"
+      "  float2 positions[4] =\n"
+      "  {\n"
+      "    float2(-1.0,  1.0),\n"
+      "    float2( 1.0,  1.0),\n"
+      "    float2(-1.0, -1.0),\n"
+      "    float2( 1.0, -1.0)\n"
+      "  };\n"
+      "\n"
+      "  float2 texCoords[4] =\n"
+      "  {\n"
+      "    float2(0.0, 0.0),\n"
+      "    float2(1.0, 0.0),\n"
+      "    float2(0.0, 1.0),\n"
+      "    float2(1.0, 1.0)\n"
+      "  };\n"
+      "\n"
+      "  position = float4(positions[vertexID], 0.0, 1.0);\n"
+      "  texCoord = texCoords[vertexID];\n"
+      "}";
+
+    static const char * pshader =
+      "Texture2D    gInputTexture : register(t0);\n"
+      "SamplerState gSamplerState : register(s0);\n"
+      "cbuffer      gConsts       : register(b0)\n"
+      "{\n"
+      "  float SDRWhiteLevel;"
+      "};\n"
+      "\n"
+      "float4 main(\n"
+      "  float4 position : SV_POSITION,\n"
+      "  float2 texCoord : TEXCOORD0) : SV_TARGET"
+      "{\n"
+      "  float4 color = gInputTexture.Sample(gSamplerState, texCoord);\n"
+      "  color.rgb   *= SDRWhiteLevel;\n"
+      "  return color;\n"
+      "}\n";
+
+    ID3DBlob * byteCode;
+    if (!compileShader(&byteCode, "main", "vs_5_0", vshader))
+      goto fail;
+
+    status = ID3D11Device_CreateVertexShader(
+      this->device,
+      ID3D10Blob_GetBufferPointer(byteCode),
+      ID3D10Blob_GetBufferSize   (byteCode),
+      NULL,
+      &this->vertexShader);
+
+    ID3D10Blob_Release(byteCode);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create the vertex shader", status);
+      goto fail;
+    }
+
+    if (!compileShader(&byteCode, "main", "ps_5_0", pshader))
+      goto fail;
+
+    status = ID3D11Device_CreatePixelShader(
+      this->device,
+      ID3D10Blob_GetBufferPointer(byteCode),
+      ID3D10Blob_GetBufferSize   (byteCode),
+      NULL,
+      &this->pixelShader);
+
+    ID3D10Blob_Release(byteCode);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create the pixel shader", status);
+      goto fail;
+    }
+
+    const D3D11_SAMPLER_DESC samplerDesc =
+    {
+      .Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+      .AddressU       = D3D11_TEXTURE_ADDRESS_WRAP,
+      .AddressV       = D3D11_TEXTURE_ADDRESS_WRAP,
+      .AddressW       = D3D11_TEXTURE_ADDRESS_WRAP,
+      .ComparisonFunc = D3D11_COMPARISON_NEVER,
+      .MinLOD         = 0,
+      .MaxLOD         = D3D11_FLOAT32_MAX
+    };
+
+    status = ID3D11Device_CreateSamplerState(
+      this->device, &samplerDesc, &this->samplerState);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create the sampler state", status);
+      goto fail;
+    }
+
+    struct ShaderConsts consts =
+    {
+      .sdrWhiteLevel = 80.0f / this->sdrWhiteLevel
+    };
+
+    D3D11_BUFFER_DESC bufferDesc =
+    {
+      .ByteWidth      = sizeof(consts),
+      .Usage          = D3D11_USAGE_DEFAULT,
+      .BindFlags      = D3D11_BIND_CONSTANT_BUFFER,
+    };
+
+    D3D11_SUBRESOURCE_DATA initData = { .pSysMem = &consts };
+    status = ID3D11Device_CreateBuffer(
+      this->device, &bufferDesc, &initData, &this->constBuffer);
+
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to create the constant buffer", status);
+      goto fail;
+    }
+  }
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     this->frameDamage[i].count = -1;
@@ -867,6 +1070,36 @@ static bool dxgi_deinit(void)
       this->backend->unmapTexture(this->texture + i);
       this->texture[i].map = NULL;
     }
+
+    if (this->texture[i].renderTarget)
+    {
+      ID3D11RenderTargetView_Release(this->texture[i].renderTarget);
+      this->texture[i].renderTarget = NULL;
+    }
+  }
+
+  if (this->pixelShader)
+  {
+    ID3D11PixelShader_Release(this->pixelShader);
+    this->pixelShader = NULL;
+  }
+
+  if (this->vertexShader)
+  {
+    ID3D11VertexShader_Release(this->vertexShader);
+    this->vertexShader = NULL;
+  }
+
+  if (this->samplerState)
+  {
+    ID3D11SamplerState_Release(this->samplerState);
+    this->samplerState = NULL;
+  }
+
+  if (this->constBuffer)
+  {
+    ID3D11Buffer_Release(this->constBuffer);
+    this->constBuffer = NULL;
   }
 
   if (this->dup)
@@ -1074,7 +1307,7 @@ static CaptureResult dxgi_capture(void)
 
   bool copyFrame   = false;
   bool copyPointer = false;
-  ID3D11Texture2D * src;
+  ID3D11Texture2D * src = NULL;
 
   bool           postPointer      = false;
   CapturePointer pointer          = { 0 };
@@ -1160,10 +1393,75 @@ static CaptureResult dxgi_capture(void)
         computeFrameDamage(tex);
       computeTexDamage(tex);
 
-      if (!this->backend->copyFrame(tex, src))
+      if (this->hdr)
       {
-        ID3D11Texture2D_Release(src);
-        return CAPTURE_RESULT_ERROR;
+        // setup the pixel shader input resource view
+        ID3D11ShaderResourceView * inputSRV;
+        {
+          const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc =
+          {
+            .Format              = this->dxgiSrcFormat,
+            .ViewDimension       = D3D11_SRV_DIMENSION_TEXTURE2D,
+            .Texture2D.MipLevels = 1
+          };
+          status = ID3D11Device_CreateShaderResourceView(
+            this->device, (ID3D11Resource *)src, &srvDesc, &inputSRV);
+          if (FAILED(status))
+          {
+            DEBUG_WINERROR("Failed to create the source resource view", status);
+            return CAPTURE_RESULT_ERROR;
+          }
+        }
+
+        float nits = getSDRWhiteLevel();
+        if (nits != this->sdrWhiteLevel)
+        {
+          this->sdrWhiteLevel = nits;
+
+          struct ShaderConsts consts =
+          {
+            .sdrWhiteLevel = 80.0f / nits
+          };
+
+          ID3D11DeviceContext_UpdateSubresource(
+            this->deviceContext, (ID3D11Resource*)this->constBuffer,
+            0, NULL, &consts, 0, 0);
+        }
+
+        ID3D11DeviceContext_VSSetShader(
+          this->deviceContext, this->vertexShader, NULL, 0);
+
+        ID3D11DeviceContext_PSSetShader(
+          this->deviceContext, this->pixelShader, NULL, 0);
+        ID3D11DeviceContext_PSSetShaderResources(
+          this->deviceContext, 0, 1, &inputSRV);
+        ID3D11DeviceContext_PSSetSamplers(
+          this->deviceContext, 0, 1, &this->samplerState);
+        ID3D11DeviceContext_PSSetConstantBuffers(
+          this->deviceContext, 0, 1, &this->constBuffer);
+
+        ID3D11DeviceContext_OMSetRenderTargets(
+          this->deviceContext, 1, &tex->renderTarget, NULL);
+
+        ID3D11DeviceContext_IASetPrimitiveTopology(this->deviceContext,
+          D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+        ID3D11DeviceContext_Draw(this->deviceContext, 4, 0);
+        ID3D11ShaderResourceView_Release(inputSRV);
+
+        if (!this->backend->copyFrame(tex, tex->hdrTex))
+        {
+          ID3D11Texture2D_Release(src);
+          return CAPTURE_RESULT_ERROR;
+        }
+      }
+      else
+      {
+        if (!this->backend->copyFrame(tex, src))
+        {
+          ID3D11Texture2D_Release(src);
+          return CAPTURE_RESULT_ERROR;
+        }
       }
 
       ID3D11Texture2D_Release(src);
