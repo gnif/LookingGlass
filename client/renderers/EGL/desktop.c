@@ -288,13 +288,27 @@ void egl_desktopConfigUI(EGL_Desktop * desktop)
   igSliderInt("##nvgain", &desktop->nvGain, 0, desktop->nvMax, format, 0);
   igPopItemWidth();
 
+  bool mapHDRtoSDR   = desktop->mapHDRtoSDR;
+  int  peakLuminance = desktop->peakLuminance;
+  int  maxCLL        = desktop->maxCLL;
+
   igSeparator();
-  igCheckbox("Map HDR content to SDR", &desktop->mapHDRtoSDR);
-  igSliderInt("Peak Luminance", &desktop->peakLuminance, 1, 10000,
+  igCheckbox("Map HDR content to SDR", &mapHDRtoSDR);
+  igSliderInt("Peak Luminance", &peakLuminance, 1, 10000,
       "%d nits",
       ImGuiInputTextFlags_CharsDecimal);
-  igSliderInt("Max content light level", &desktop->maxCLL, 1, 10000,
+  igSliderInt("Max content light level", &maxCLL, 1, 10000,
       "%d nits", ImGuiInputTextFlags_CharsDecimal);
+
+  if (mapHDRtoSDR   != desktop->mapHDRtoSDR   ||
+      peakLuminance != desktop->peakLuminance ||
+      maxCLL        != desktop->maxCLL)
+  {
+    desktop->mapHDRtoSDR   = mapHDRtoSDR;
+    desktop->peakLuminance = max(1, peakLuminance);
+    desktop->maxCLL        = max(1, maxCLL);
+    app_invalidateWindow(true);
+  }
 }
 
 bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
