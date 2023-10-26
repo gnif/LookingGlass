@@ -630,6 +630,7 @@ int main_frameThread(void * unused)
       lgrFormat.stride       = frame->stride;
       lgrFormat.pitch        = frame->pitch;
       lgrFormat.hdr          = frame->flags & FRAME_FLAG_HDR;
+      lgrFormat.hdrPQ        = frame->flags & FRAME_FLAG_HDR_PQ;
 
       if (frame->flags & FRAME_FLAG_TRUNCATED)
       {

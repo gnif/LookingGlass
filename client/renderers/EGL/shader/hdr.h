@@ -40,7 +40,7 @@ float midGain(vec3 pixel)
       min(pixel.r, pixel.g)); // min = b
 }
 
-vec3 compress(vec3 pixel, float gain)
+vec3 compress(vec3 pixel)
 {
   float maxGain = maxGain(pixel);
   return pixel * (maxGain < knee ? maxGain :
@@ -99,8 +99,10 @@ vec3 bt2020to709(vec3 bt2020)
     bt2020.r * -0.0182 + bt2020.g * -0.1006 + bt2020.b * 1.1187);
 }
 
-vec3 mapToSDR(vec3 color, float gain)
+vec3 mapToSDR(vec3 color, float gain, bool pq)
 {
-  vec3 lin = bt2020to709(pq2lin(color.rgb, gain));
-  return lin2srgb(compress(lin, gain));
+  if (pq)
+    color = pq2lin(color.rgb, gain);
+  color = bt2020to709(color);
+  return lin2srgb(compress(color));
 }

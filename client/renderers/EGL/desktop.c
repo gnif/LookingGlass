@@ -53,6 +53,7 @@ struct DesktopShader
   GLint uIsHDR;
   GLint uMapHDRtoSDR;
   GLint uMapHDRGain;
+  GLint uMapHDRPQ;
 };
 
 struct EGL_Desktop
@@ -68,6 +69,7 @@ struct EGL_Desktop
   // internals
   int               width, height;
   bool              hdr;
+  bool              hdrPQ;
   LG_RendererRotate rotate;
 
   bool useSpice;
@@ -125,6 +127,7 @@ static bool egl_initDesktopShader(
   shader->uIsHDR        = egl_shaderGetUniform(shader->shader, "isHDR"       );
   shader->uMapHDRtoSDR  = egl_shaderGetUniform(shader->shader, "mapHDRtoSDR" );
   shader->uMapHDRGain   = egl_shaderGetUniform(shader->shader, "mapHDRGain"  );
+  shader->uMapHDRPQ     = egl_shaderGetUniform(shader->shader, "mapHDRPQ"    );
 
   return true;
 }
@@ -342,6 +345,7 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
   desktop->width  = format.frameWidth;
   desktop->height = format.frameHeight;
   desktop->hdr    = format.hdr;
+  desktop->hdrPQ  = format.hdrPQ;
 
   if (!egl_textureSetup(
     desktop->texture,
@@ -538,6 +542,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       .type        = EGL_UNIFORM_TYPE_1F,
       .location    = shader->uMapHDRGain,
       .f           = { mapHDRGain }
+    },
+    {
+      .type        = EGL_UNIFORM_TYPE_1I,
+      .location    = shader->uMapHDRPQ,
+      .f           = { desktop->hdrPQ }
     }
   };
 

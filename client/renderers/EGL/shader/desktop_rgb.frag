@@ -23,6 +23,7 @@ uniform int   cbMode;
 uniform bool  isHDR;
 uniform bool  mapHDRtoSDR;
 uniform float mapHDRGain;
+uniform bool  mapHDRPQ;
 
 void main()
 {
@@ -43,7 +44,7 @@ void main()
   }
 
   if (isHDR && mapHDRtoSDR)
-    color.rgb = mapToSDR(color.rgb, mapHDRGain);
+    color.rgb = mapToSDR(color.rgb, mapHDRGain, mapHDRPQ);
 
   if (cbMode > 0)
     color = cbTransform(color, cbMode);
