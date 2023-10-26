@@ -757,8 +757,10 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
 
   updateDamageRects(frame);
 
-  frame->format = this->grabInfo.bIsHDR ?
-    CAPTURE_FMT_RGBA10_HDR : CAPTURE_FMT_RGBA10_SDR;
+  frame->format = CAPTURE_FMT_RGBA10;
+  frame->hdr    = this->grabInfo.bIsHDR;
+  frame->hdrPQ  = true;
+
   return CAPTURE_RESULT_OK;
 }
 

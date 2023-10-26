@@ -244,20 +244,17 @@ static bool sendFrame(void)
     app.frameIndex = 0;
 
   KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
-  KVMFRFrameFlags flags = 0;
+  KVMFRFrameFlags flags =
+    (frame.hdr   ? FRAME_FLAG_HDR    : 0) |
+    (frame.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
 
   switch(frame.format)
   {
     case CAPTURE_FMT_BGRA   : fi->type = FRAME_TYPE_BGRA   ; break;
     case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
 
-    case CAPTURE_FMT_RGBA10_SDR:
+    case CAPTURE_FMT_RGBA10:
       fi->type = FRAME_TYPE_RGBA10;
-      break;
-
-    case CAPTURE_FMT_RGBA10_HDR:
-      fi->type  = FRAME_TYPE_RGBA10;
-      flags    |= FRAME_FLAG_HDR;
       break;
 
     case CAPTURE_FMT_RGBA16F:

@@ -802,7 +802,7 @@ next_output:
     // we convert to HDR10 to save bandwidth
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
       this->dxgiFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
-      this->format     = CAPTURE_FMT_RGBA10_HDR;
+      this->format     = CAPTURE_FMT_RGBA10;
       break;
 
     default:
@@ -1607,6 +1607,8 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   frame->pitch            = this->pitch;
   frame->stride           = this->stride;
   frame->format           = this->format;
+  frame->hdr              = this->hdr;
+  frame->hdrPQ            = false;
   frame->rotation         = this->rotation;
 
   frame->damageRectsCount = tex->damageRectsCount;
