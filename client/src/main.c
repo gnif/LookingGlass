@@ -695,12 +695,13 @@ int main_frameThread(void * unused)
       g_state.formatValid = true;
       formatVer = frame->formatVer;
 
-      DEBUG_INFO("Format: %s %ux%u stride:%u pitch:%u rotation:%d hdr:%d",
+      DEBUG_INFO("Format: %s %ux%u stride:%u pitch:%u rotation:%d hdr:%d pq:%d",
           FrameTypeStr[frame->type],
           frame->frameWidth, frame->frameHeight,
           frame->stride, frame->pitch,
           frame->rotation,
-          frame->flags & FRAME_FLAG_HDR ? 1 : 0);
+          frame->flags & FRAME_FLAG_HDR    ? 1 : 0,
+          frame->flags & FRAME_FLAG_HDR_PQ ? 1 : 0);
 
       LG_LOCK(g_state.lgrLock);
       if (!RENDERER(onFrameFormat, lgrFormat))
