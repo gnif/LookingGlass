@@ -49,6 +49,8 @@ struct pipewire
   bool          formatChanged;
   int           width, height;
   CaptureFormat format;
+  bool          hdr;
+  bool          hdrPQ;
   uint8_t     * frameData;
   unsigned int  formatVer;
 };
@@ -153,7 +155,7 @@ static CaptureFormat convertSpaFormat(enum spa_video_format spa)
       return CAPTURE_FMT_BGRA;
 
     case SPA_VIDEO_FORMAT_xBGR_210LE:
-      return CAPTURE_FMT_RGBA10_HDR;
+      return CAPTURE_FMT_RGBA10;
 
     case SPA_VIDEO_FORMAT_RGBA_F16:
       return CAPTURE_FMT_RGBA16F;
@@ -185,6 +187,10 @@ static void streamParamChangedCallback(void * opaque, uint32_t id,
   this->width  = info.size.width;
   this->height = info.size.height;
   this->format = convertSpaFormat(info.format);
+  this->hdr    = info.format & (
+      SPA_VIDEO_FORMAT_xBGR_210LE |
+      SPA_VIDEO_FORMAT_RGBA_F16);
+  this->hdrPQ  = true; // this is assumed and untested
 
   if (this->hasFormat)
   {
@@ -426,6 +432,8 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
 
   frame->formatVer    = this->formatVer;
   frame->format       = this->format;
+  frame->hdr          = this->hdr;
+  frame->hdrPQ        = this->hdrPQ;
   frame->screenWidth  = this->width;
   frame->screenHeight = this->height;
   frame->frameWidth   = this->width;
