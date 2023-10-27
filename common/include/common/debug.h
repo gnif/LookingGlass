@@ -108,20 +108,13 @@ void printBacktrace(void);
 
 #define DEBUG_ASSERT_PRINT(...) DEBUG_ERROR("Assertion failed: %s", #__VA_ARGS__)
 
-#ifdef NDEBUG
-  #define DEBUG_ASSERT(...) do { \
-    if (!(__VA_ARGS__)) \
-      DEBUG_ASSERT_PRINT(__VA_ARGS__); \
-  } while (0)
-#else
-  #define DEBUG_ASSERT(...) do { \
-    if (!(__VA_ARGS__)) \
-    { \
-      DEBUG_ASSERT_PRINT(__VA_ARGS__); \
-      abort(); \
-    } \
-  } while (0)
-#endif
+#define DEBUG_ASSERT(...) do { \
+  if (!(__VA_ARGS__)) \
+  { \
+    DEBUG_ASSERT_PRINT(__VA_ARGS__); \
+    abort(); \
+  } \
+} while (0)
 
 #define DEBUG_UNREACHABLE() DEBUG_FATAL("Unreachable code reached")
 
