@@ -132,7 +132,7 @@ static bool d3d12_create(struct DXGIInterface * intf)
   this->copySleep = option_get_float("dxgi", "d3d12CopySleep");
   DEBUG_INFO("Sleep before copy : %f ms", this->copySleep);
 
-  status = D3D12CreateDevice((IUnknown *) dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
+  status = D3D12CreateDevice(*(IUnknown **)dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
     &IID_ID3D12Device, (void **)&this->device);
 
   if (FAILED(status))

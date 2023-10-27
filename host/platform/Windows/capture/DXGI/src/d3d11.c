@@ -19,6 +19,7 @@
  */
 
 #include "dxgi_capture.h"
+#include "com_ref.h"
 
 #include <assert.h>
 #include <unistd.h>
@@ -34,9 +35,9 @@ struct D3D11Backend
 
 struct D3D11TexImpl
 {
-  ID3D11Texture2D          * gpu;
-  ID3D11Texture2D          * cpu;
-  ID3D11ShaderResourceView * srv;
+  ID3D11Texture2D          ** gpu;
+  ID3D11Texture2D          ** cpu;
+  ID3D11ShaderResourceView ** srv;
 };
 
 #define TEXIMPL(x) ((struct D3D11TexImpl *)(x).impl)
@@ -103,7 +104,7 @@ static bool d3d11_create(struct DXGIInterface * intf)
     struct D3D11TexImpl * teximpl = TEXIMPL(dxgi->texture[i]);
 
     status = ID3D11Device_CreateTexture2D(*dxgi->device, &cpuTexDesc, NULL,
-      &teximpl->cpu);
+      (ID3D11Texture2D **)comRef_newGlobal(&teximpl->cpu));
 
     if (FAILED(status))
     {
@@ -115,7 +116,7 @@ static bool d3d11_create(struct DXGIInterface * intf)
       continue;
 
     status = ID3D11Device_CreateTexture2D(*dxgi->device, &gpuTexDesc, NULL,
-      &teximpl->gpu);
+      (ID3D11Texture2D **)comRef_newGlobal(&teximpl->gpu));
 
     if (FAILED(status))
     {
@@ -124,13 +125,14 @@ static bool d3d11_create(struct DXGIInterface * intf)
     }
 
     ID3D11Device_CreateShaderResourceView(*dxgi->device,
-      (ID3D11Resource *)teximpl->gpu, NULL, &teximpl->srv);
+      *(ID3D11Resource **)teximpl->gpu, NULL,
+      (ID3D11ShaderResourceView **)comRef_newGlobal(&teximpl->srv));
   }
 
   // map the texture simply to get the pitch and stride
   D3D11_MAPPED_SUBRESOURCE mapping;
   status = ID3D11DeviceContext_Map(*dxgi->deviceContext,
-    (ID3D11Resource *)TEXIMPL(dxgi->texture[0])->cpu, 0,
+    *(ID3D11Resource **)TEXIMPL(dxgi->texture[0])->cpu, 0,
     D3D11_MAP_READ, 0, &mapping);
 
   if (FAILED(status))
@@ -143,7 +145,7 @@ static bool d3d11_create(struct DXGIInterface * intf)
   dxgi->stride = mapping.RowPitch / dxgi->bpp;
 
   ID3D11DeviceContext_Unmap(*dxgi->deviceContext,
-    (ID3D11Resource *)TEXIMPL(dxgi->texture[0])->cpu, 0);
+    *(ID3D11Resource **)TEXIMPL(dxgi->texture[0])->cpu, 0);
 
   return true;
 
@@ -159,19 +161,8 @@ static void d3d11_free(void)
   for (int i = 0; i < dxgi->maxTextures; ++i)
   {
     struct D3D11TexImpl * teximpl = TEXIMPL(dxgi->texture[i]);
-    if (!teximpl)
-      continue;
-
-    if (teximpl->cpu)
-      ID3D11Texture2D_Release(teximpl->cpu);
-
-    if (teximpl->gpu)
-      ID3D11Texture2D_Release(teximpl->gpu);
-
-    if (teximpl->srv)
-      ID3D11ShaderResourceView_Release(teximpl->srv);
-
     free(teximpl);
+    teximpl = NULL;
   }
 
   runningavg_free(&this->avgMapTime);
@@ -182,7 +173,7 @@ static void d3d11_free(void)
 static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
 {
   struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
-  ID3D11Texture2D * dst = teximpl->cpu;
+  ID3D11Texture2D * dst = *teximpl->cpu;
 
   if (tex->texDamageCount < 0)
     ID3D11DeviceContext_CopyResource(*dxgi->deviceContext,
@@ -211,7 +202,7 @@ static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
 static void copyFrameDownsampled(Texture * tex, ID3D11Texture2D * src)
 {
   struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
-  ID3D11Texture2D * dst = teximpl->gpu;
+  ID3D11Texture2D * dst = *teximpl->gpu;
 
   if (tex->texDamageCount < 0)
     ID3D11DeviceContext_ResolveSubresource(*dxgi->deviceContext,
@@ -238,11 +229,11 @@ static void copyFrameDownsampled(Texture * tex, ID3D11Texture2D * src)
     }
   }
 
-  ID3D11DeviceContext_GenerateMips(*dxgi->deviceContext, teximpl->srv);
+  ID3D11DeviceContext_GenerateMips(*dxgi->deviceContext, *teximpl->srv);
   if (tex->texDamageCount < 0)
     ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
-      (ID3D11Resource *)teximpl->cpu, 0, 0, 0, 0,
-      (ID3D11Resource *)dst         , dxgi->downsampleLevel, NULL);
+      *(ID3D11Resource **)teximpl->cpu, 0, 0, 0, 0,
+       (ID3D11Resource * )dst          , dxgi->downsampleLevel, NULL);
   else
   {
     for (int i = 0; i < tex->texDamageCount; ++i)
@@ -259,8 +250,8 @@ static void copyFrameDownsampled(Texture * tex, ID3D11Texture2D * src)
       };
 
       ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
-        (ID3D11Resource *)teximpl->cpu, 0, box.left, box.top, 0,
-        (ID3D11Resource *)dst         , dxgi->downsampleLevel, &box);
+        *(ID3D11Resource **)teximpl->cpu, 0, box.left, box.top, 0,
+         (ID3D11Resource * )dst          , dxgi->downsampleLevel, &box);
     }
   }
 }
@@ -273,7 +264,7 @@ static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
   {
     tex->copyTime = microtime();
 
-    if (teximpl->gpu)
+    if (teximpl->gpu && *teximpl->gpu)
       copyFrameDownsampled(tex, src);
     else
       copyFrameFull(tex, src);
@@ -300,7 +291,7 @@ static CaptureResult d3d11_mapTexture(Texture * tex)
 
     INTERLOCKED_SECTION(dxgi->deviceContextLock, {
       status = ID3D11DeviceContext_Map(*dxgi->deviceContext,
-        (ID3D11Resource *)teximpl->cpu, 0, D3D11_MAP_READ, 0x100000L, &map);
+        (ID3D11Resource *)*teximpl->cpu, 0, D3D11_MAP_READ, 0x100000L, &map);
     });
     if (status == DXGI_ERROR_WAS_STILL_DRAWING)
     {
@@ -334,7 +325,7 @@ static void d3d11_unmapTexture(Texture * tex)
 
   INTERLOCKED_SECTION(dxgi->deviceContextLock, {
     ID3D11DeviceContext_Unmap(*dxgi->deviceContext,
-      (ID3D11Resource *)teximpl->cpu, 0);
+      (ID3D11Resource *)*teximpl->cpu, 0);
   });
   tex->map = NULL;
 }
