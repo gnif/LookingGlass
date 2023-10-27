@@ -7,6 +7,7 @@ add_library(capture_DXGI STATIC
   src/d3d12.c
   src/ods_capture.c
   src/util.c
+  src/com_ref.c
 )
 
 add_definitions("-DCOBJMACROS -DINITGUID")
