@@ -44,6 +44,11 @@ inline static size_t vector_size(Vector * vector)
   return vector->size;
 }
 
+inline static size_t vector_capacity(Vector * vector)
+{
+  return vector->capacity;
+}
+
 inline static void * vector_data(Vector * vector)
 {
   return vector->data;

@@ -43,6 +43,7 @@
 #include <versionhelpers.h>
 #include <dwmapi.h>
 
+#include "com_ref.h"
 #include "dxgi_capture.h"
 #include "util.h"
 
@@ -256,12 +257,24 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
+
   return true;
 }
 
 static bool dxgi_init(void)
 {
   DEBUG_ASSERT(this);
+
+  if (!comRef_init(
+    20 + this->maxTextures * 2, //max total globals
+    20                          //max total locals
+  ))
+  {
+    DEBUG_ERROR("failed to intialize the comRef tracking");
+    return false;
+  }
+
+  comRef_scopePush();
 
   this->desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
   if (!this->desktop)
@@ -295,7 +308,9 @@ static bool dxgi_init(void)
   lgResetEvent(this->frameEvent);
 
   status = CreateDXGIFactory2(this->debug ? DXGI_CREATE_FACTORY_DEBUG : 0,
-    &IID_IDXGIFactory1, (void **)&this->factory);
+    &IID_IDXGIFactory1,
+    (void **)comRef_newGlobal(&this->factory));
+
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create DXGIFactory1", status);
@@ -305,10 +320,17 @@ static bool dxgi_init(void)
   const char * optAdapter = option_get_string("dxgi", "adapter");
   const char * optOutput  = option_get_string("dxgi", "output" );
 
-  for (int i = 0; IDXGIFactory1_EnumAdapters1(this->factory, i, &this->adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+  comRef_defineLocal(IDXGIAdapter1, adapter);
+  comRef_defineLocal(IDXGIOutput  , output );
+
+  for (
+    int i = 0;
+    IDXGIFactory1_EnumAdapters1(*this->factory, i, adapter)
+      != DXGI_ERROR_NOT_FOUND;
+    ++i, comRef_release(adapter))
   {
     DXGI_ADAPTER_DESC1 adapterDesc;
-    status = IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+    status = IDXGIAdapter1_GetDesc1(*adapter, &adapterDesc);
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to get the device description", status);
@@ -326,9 +348,6 @@ static bool dxgi_init(void)
     {
       DEBUG_INFO("Not using unsupported adapter: %ls",
           adapterDesc.Description);
-
-      IDXGIAdapter1_Release(this->adapter);
-      this->adapter = NULL;
       continue;
     }
 
@@ -342,9 +361,6 @@ static bool dxgi_init(void)
       {
         DEBUG_INFO("Not using adapter: %ls", adapterDesc.Description);
         free(desc);
-
-        IDXGIAdapter1_Release(this->adapter);
-        this->adapter = NULL;
         continue;
       }
       free(desc);
@@ -352,9 +368,12 @@ static bool dxgi_init(void)
       DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
     }
 
-    for (int n = 0; IDXGIAdapter1_EnumOutputs(this->adapter, n, &this->output) != DXGI_ERROR_NOT_FOUND; ++n)
+    for (
+      int n = 0;
+      IDXGIAdapter1_EnumOutputs(*adapter, n, output) != DXGI_ERROR_NOT_FOUND;
+      ++n, comRef_release(output))
     {
-      IDXGIOutput_GetDesc(this->output, &outputDesc);
+      IDXGIOutput_GetDesc(*output, &outputDesc);
       if (optOutput)
       {
         const size_t s = (wcslen(outputDesc.DeviceName)+1) * 2;
@@ -365,7 +384,7 @@ static bool dxgi_init(void)
         {
           DEBUG_INFO("Not using adapter output: %ls", outputDesc.DeviceName);
           free(desc);
-          goto next_output;
+          continue;
         }
         free(desc);
 
@@ -374,27 +393,23 @@ static bool dxgi_init(void)
 
       if (outputDesc.AttachedToDesktop)
         break;
-
-next_output:
-      IDXGIOutput_Release(this->output);
-      this->output = NULL;
     }
 
-    if (this->output)
+    if (*output)
       break;
-
-    IDXGIAdapter1_Release(this->adapter);
-    this->adapter = NULL;
   }
 
-  if (!this->output)
+  if (!*output)
   {
     DEBUG_ERROR("Failed to locate a valid output device");
     goto fail;
   }
 
+  comRef_toGlobal(this->adapter, adapter);
+  comRef_toGlobal(this->output , output );
+
   DXGI_ADAPTER_DESC1 adapterDesc;
-  IDXGIAdapter1_GetDesc1(this->adapter, &adapterDesc);
+  IDXGIAdapter1_GetDesc1(*this->adapter, &adapterDesc);
   DEBUG_INFO("Device Name       : %ls"    , outputDesc.DeviceName);
   DEBUG_INFO("Device Description: %ls"    , adapterDesc.Description);
   DEBUG_INFO("Device Vendor ID  : 0x%x"   , adapterDesc.VendorId);
@@ -440,8 +455,10 @@ next_output:
     featureLevelCount = ARRAY_LENGTH(win8);
   }
 
-  IDXGIAdapter * tmp;
-  status = IDXGIAdapter1_QueryInterface(this->adapter, &IID_IDXGIAdapter, (void **)&tmp);
+  comRef_defineLocal(IDXGIAdapter, tmp);
+  status = IDXGIAdapter1_QueryInterface(
+    *this->adapter, &IID_IDXGIAdapter, (void **)tmp);
+
   if (FAILED(status))
   {
     DEBUG_ERROR("Failed to query IDXGIAdapter interface");
@@ -449,19 +466,17 @@ next_output:
   }
 
   status = D3D11CreateDevice(
-    tmp,
+    *tmp,
     D3D_DRIVER_TYPE_UNKNOWN,
     NULL,
     D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
     featureLevels, featureLevelCount,
     D3D11_SDK_VERSION,
-    &this->device,
+    (ID3D11Device **)comRef_newGlobal(&this->device),
     &this->featureLevel,
-    &this->deviceContext);
+    (ID3D11DeviceContext **)comRef_newGlobal(&this->deviceContext));
 
   LG_LOCK_INIT(this->deviceContextLock);
-
-  IDXGIAdapter_Release(tmp);
 
   if (FAILED(status))
   {
@@ -515,27 +530,32 @@ next_output:
 
   // try to reduce the latency
   {
-    IDXGIDevice1 * dxgi;
-    status = ID3D11Device_QueryInterface(this->device, &IID_IDXGIDevice1, (void **)&dxgi);
+    comRef_defineLocal(IDXGIDevice1, dxgi);
+    status = ID3D11Device_QueryInterface(
+      *this->device, &IID_IDXGIDevice1, (void **)dxgi);
+
     if (FAILED(status))
     {
       DEBUG_WINERROR("failed to query DXGI interface from device", status);
       goto fail;
     }
 
-    IDXGIDevice1_SetMaximumFrameLatency(dxgi, 1);
-    IDXGIDevice1_Release(dxgi);
+    IDXGIDevice1_SetMaximumFrameLatency(*dxgi, 1);
   }
 
-  IDXGIOutput5 * output5 = NULL;
-  status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput5, (void **)&output5);
+  comRef_defineLocal(IDXGIOutput5, output5);
+  status = IDXGIOutput_QueryInterface(
+    *this->output, &IID_IDXGIOutput5, (void **)output5);
+
   if (FAILED(status))
   {
     DEBUG_WARN("IDXGIOutput5 is not available, please update windows for improved performance!");
     DEBUG_WARN("Falling back to IDXIGOutput1");
 
-    IDXGIOutput1 * output1 = NULL;
-    status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput1, (void **)&output1);
+    comRef_defineLocal(IDXGIOutput1, output1);
+    status = IDXGIOutput_QueryInterface(
+      *this->output, &IID_IDXGIOutput1, (void **)output1);
+
     if (FAILED(status))
     {
       DEBUG_ERROR("Failed to query IDXGIOutput1 from the output");
@@ -545,7 +565,10 @@ next_output:
     // we try this twice in case we still get an error on re-initialization
     for (int i = 0; i < 2; ++i)
     {
-      status = IDXGIOutput1_DuplicateOutput(output1, (IUnknown *)this->device, &this->dup);
+      status = IDXGIOutput1_DuplicateOutput(
+        *output1, (IUnknown *)*this->device,
+        (IDXGIOutputDuplication **)comRef_newGlobal(&this->dup));
+
       if (SUCCEEDED(status))
         break;
       Sleep(200);
@@ -554,10 +577,8 @@ next_output:
     if (FAILED(status))
     {
       DEBUG_WINERROR("DuplicateOutput Failed", status);
-      IDXGIOutput1_Release(output1);
       goto fail;
     }
-    IDXGIOutput1_Release(output1);
   }
   else
   {
@@ -572,12 +593,12 @@ next_output:
     for (int i = 0; i < 2; ++i)
     {
       status = IDXGIOutput5_DuplicateOutput1(
-        output5,
-        (IUnknown *)this->device,
+        *output5,
+        (IUnknown *)*this->device,
         0,
         ARRAY_LENGTH(supportedFormats),
         supportedFormats,
-        &this->dup);
+        (IDXGIOutputDuplication **)comRef_newGlobal(&this->dup));
 
       if (SUCCEEDED(status))
         break;
@@ -592,22 +613,22 @@ next_output:
     if (FAILED(status))
     {
       DEBUG_WINERROR("DuplicateOutput1 Failed", status);
-      IDXGIOutput5_Release(output5);
       goto fail;
     }
 
-    IDXGIOutput6 * output6 = NULL;
-    status = IDXGIOutput_QueryInterface(this->output, &IID_IDXGIOutput6, (void **)&output6);
+    comRef_defineLocal(IDXGIOutput6, output6);
+    status = IDXGIOutput_QueryInterface(
+      *this->output, &IID_IDXGIOutput6, (void **)output6);
+
     if (SUCCEEDED(status))
     {
       DXGI_OUTPUT_DESC1 desc1;
-      IDXGIOutput6_GetDesc1(output6, &desc1);
+      IDXGIOutput6_GetDesc1(*output6, &desc1);
       this->dxgiColorSpace = desc1.ColorSpace;
 
       if (!getDisplayPathInfo(desc1.Monitor, &this->displayPathInfo))
       {
         DEBUG_ERROR("Failed to get the display path info");
-        IDXGIOutput6_Release(output6);
         goto fail;
       }
       this->sdrWhiteLevel = getSDRWhiteLevel(&this->displayPathInfo);
@@ -617,47 +638,41 @@ next_output:
       DEBUG_INFO("Min/Max Luminance : %f/%f", desc1.MinLuminance, desc1.MaxLuminance);
       DEBUG_INFO("Frame Luminance   : %f"   , desc1.MaxFullFrameLuminance);
       DEBUG_INFO("SDR White Level   : %f"   , this->sdrWhiteLevel);
-      IDXGIOutput6_Release(output6);
     }
-
-    IDXGIOutput5_Release(output5);
   }
 
   {
     DXGI_OUTDUPL_DESC dupDesc;
-    IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
+    IDXGIOutputDuplication_GetDesc(*this->dup, &dupDesc);
     DEBUG_INFO("Source Format     : %s", getDXGIFormatStr(dupDesc.ModeDesc.Format));
 
-    DXGI_OUTDUPL_FRAME_INFO   frameInfo;
-    IDXGIResource           * res;
-    if (FAILED(status = IDXGIOutputDuplication_AcquireNextFrame(this->dup,
-      INFINITE, &frameInfo, &res)))
+    DXGI_OUTDUPL_FRAME_INFO frameInfo;
+    comRef_defineLocal(IDXGIResource, res);
+
+    if (FAILED(status = IDXGIOutputDuplication_AcquireNextFrame(*this->dup,
+      INFINITE, &frameInfo, res)))
     {
       DEBUG_WINERROR("AcquireNextFrame Failed", status);
       goto fail;
     }
 
-    ID3D11Texture2D * src;
-    if (FAILED(status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D,
-      (void **)&src)))
+    comRef_defineLocal(ID3D11Texture2D, src);
+    if (FAILED(status = IDXGIResource_QueryInterface(*res, &IID_ID3D11Texture2D,
+      (void **)src)))
     {
       DEBUG_WINERROR("ResourceQueryInterface failed", status);
-      IDXGIResource_Release(res);
-      IDXGIOutputDuplication_ReleaseFrame(this->dup);
+      IDXGIOutputDuplication_ReleaseFrame(*this->dup);
       goto fail;
     }
 
     D3D11_TEXTURE2D_DESC desc;
-    ID3D11Texture2D_GetDesc(src, &desc);
+    ID3D11Texture2D_GetDesc(*src, &desc);
     this->dxgiSrcFormat = desc.Format;
     this->dxgiFormat    = desc.Format;
 
     DEBUG_INFO("Capture Format    : %s", getDXGIFormatStr(desc.Format));
 
-    ID3D11Texture2D_Release(src);
-    IDXGIResource_Release(res);
-    IDXGIOutputDuplication_ReleaseFrame(this->dup);
-
+    IDXGIOutputDuplication_ReleaseFrame(*this->dup);
     this->hdr = this->dxgiColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
   }
 
@@ -756,8 +771,8 @@ next_output:
       .MiscFlags          = 0
     };
 
-    status = ID3D11Device_CreateTexture2D(this->device, &hdrTexDesc, NULL,
-      &this->texture[i].hdrTex);
+    status = ID3D11Device_CreateTexture2D(*this->device, &hdrTexDesc, NULL,
+      (ID3D11Texture2D **)comRef_newGlobal(&this->texture[i].hdrTex));
 
     if (FAILED(status))
     {
@@ -765,11 +780,10 @@ next_output:
       goto fail;
     }
 
-    status = ID3D11Device_CreateRenderTargetView(this->device,
-      (ID3D11Resource *)this->texture[i].hdrTex, NULL,
-      &this->texture[i].renderTarget);
-
-    ID3D11Texture2D_Release(this->texture[i].hdrTex);
+    status = ID3D11Device_CreateRenderTargetView(*this->device,
+      (ID3D11Resource *)*this->texture[i].hdrTex, NULL,
+      (ID3D11RenderTargetView **)comRef_newGlobal(
+        &this->texture[i].renderTarget));
 
     if (FAILED(status))
     {
@@ -789,7 +803,7 @@ next_output:
       .MinDepth = 0.0f,
       .MaxDepth = 1.0f,
     };
-    ID3D11DeviceContext_RSSetViewports(this->deviceContext, 1, &vp);
+    ID3D11DeviceContext_RSSetViewports(*this->deviceContext, 1, &vp);
 
     static const char * vshader =
       "void main(\n"
@@ -834,18 +848,16 @@ next_output:
       "  return color;\n"
       "}\n";
 
-    ID3DBlob * byteCode;
-    if (!compileShader(&byteCode, "main", "vs_5_0", vshader))
+    comRef_defineLocal(ID3DBlob, byteCode);
+    if (!compileShader(byteCode, "main", "vs_5_0", vshader))
       goto fail;
 
     status = ID3D11Device_CreateVertexShader(
-      this->device,
-      ID3D10Blob_GetBufferPointer(byteCode),
-      ID3D10Blob_GetBufferSize   (byteCode),
+      *this->device,
+      ID3D10Blob_GetBufferPointer(*byteCode),
+      ID3D10Blob_GetBufferSize   (*byteCode),
       NULL,
-      &this->vertexShader);
-
-    ID3D10Blob_Release(byteCode);
+      (ID3D11VertexShader **)comRef_newGlobal(&this->vertexShader));
 
     if (FAILED(status))
     {
@@ -853,17 +865,16 @@ next_output:
       goto fail;
     }
 
-    if (!compileShader(&byteCode, "main", "ps_5_0", pshader))
+    comRef_release(byteCode);
+    if (!compileShader(byteCode, "main", "ps_5_0", pshader))
       goto fail;
 
     status = ID3D11Device_CreatePixelShader(
-      this->device,
-      ID3D10Blob_GetBufferPointer(byteCode),
-      ID3D10Blob_GetBufferSize   (byteCode),
+      *this->device,
+      ID3D10Blob_GetBufferPointer(*byteCode),
+      ID3D10Blob_GetBufferSize   (*byteCode),
       NULL,
-      &this->pixelShader);
-
-    ID3D10Blob_Release(byteCode);
+      (ID3D11PixelShader **)comRef_newGlobal(&this->pixelShader));
 
     if (FAILED(status))
     {
@@ -883,7 +894,8 @@ next_output:
     };
 
     status = ID3D11Device_CreateSamplerState(
-      this->device, &samplerDesc, &this->samplerState);
+      *this->device, &samplerDesc,
+      (ID3D11SamplerState  **)comRef_newGlobal(&this->samplerState));
 
     if (FAILED(status))
     {
@@ -905,7 +917,8 @@ next_output:
 
     D3D11_SUBRESOURCE_DATA initData = { .pSysMem = &consts };
     status = ID3D11Device_CreateBuffer(
-      this->device, &bufferDesc, &initData, &this->constBuffer);
+      *this->device, &bufferDesc, &initData,
+      (ID3D11Buffer **)comRef_newGlobal(&this->constBuffer));
 
     if (FAILED(status))
     {
@@ -920,9 +933,12 @@ next_output:
   QueryPerformanceFrequency(&this->perfFreq) ;
   QueryPerformanceCounter  (&this->frameTime);
   this->initialized = true;
+
+  comRef_scopePop();
   return true;
 
 fail:
+  comRef_scopePop();
   dxgi_deinit();
   return false;
 }
@@ -943,39 +959,9 @@ static bool dxgi_deinit(void)
       this->backend->unmapTexture(this->texture + i);
       this->texture[i].map = NULL;
     }
-
-    if (this->texture[i].renderTarget)
-    {
-      ID3D11RenderTargetView_Release(this->texture[i].renderTarget);
-      this->texture[i].renderTarget = NULL;
-    }
   }
 
-  if (this->pixelShader)
-  {
-    ID3D11PixelShader_Release(this->pixelShader);
-    this->pixelShader = NULL;
-  }
-
-  if (this->vertexShader)
-  {
-    ID3D11VertexShader_Release(this->vertexShader);
-    this->vertexShader = NULL;
-  }
-
-  if (this->samplerState)
-  {
-    ID3D11SamplerState_Release(this->samplerState);
-    this->samplerState = NULL;
-  }
-
-  if (this->constBuffer)
-  {
-    ID3D11Buffer_Release(this->constBuffer);
-    this->constBuffer = NULL;
-  }
-
-  if (this->dup)
+  if (this->dup && *this->dup)
     dxgi_releaseFrame();
 
   if (this->backend)
@@ -990,48 +976,6 @@ static bool dxgi_deinit(void)
     this->texture[i].impl  = NULL;
   }
 
-  if (this->dup)
-  {
-    IDXGIOutputDuplication_Release(this->dup);
-    this->dup = NULL;
-  }
-
-  if (this->deviceContext)
-  {
-    ID3D11DeviceContext_Release(this->deviceContext);
-    this->deviceContext = NULL;
-  }
-
-  if (this->output)
-  {
-    IDXGIOutput_Release(this->output);
-    this->output = NULL;
-  }
-
-  if (this->device)
-  {
-    ID3D11Device_Release(this->device);
-    this->device = NULL;
-  }
-
-  if (this->adapter)
-  {
-    IDXGIAdapter1_Release(this->adapter);
-    this->adapter = NULL;
-  }
-
-  if (this->factory)
-  {
-    // if this doesn't free we have a memory leak
-    DWORD count = IDXGIFactory1_Release(this->factory);
-    this->factory = NULL;
-    if (count != 0)
-    {
-      DEBUG_ERROR("Factory release is %lu, there is a memory leak!", count);
-      return false;
-    }
-  }
-
   LG_LOCK_FREE(this->deviceContextLock);
 
   if (this->desktop)
@@ -1041,6 +985,7 @@ static bool dxgi_deinit(void)
   }
 
   this->initialized = false;
+  comRef_free();
   return true;
 }
 
@@ -1099,7 +1044,7 @@ static void computeFrameDamage(Texture * tex)
   // Compute dirty rectangles.
   RECT dirtyRects[maxDamageRectsCount];
   UINT dirtyRectsBufferSizeRequired;
-  if (FAILED(IDXGIOutputDuplication_GetFrameDirtyRects(this->dup,
+  if (FAILED(IDXGIOutputDuplication_GetFrameDirtyRects(*this->dup,
         sizeof(dirtyRects), dirtyRects,
         &dirtyRectsBufferSizeRequired)))
     return;
@@ -1114,7 +1059,7 @@ static void computeFrameDamage(Texture * tex)
   // Divide by two here since each move generates two dirty regions.
   DXGI_OUTDUPL_MOVE_RECT moveRects[(maxDamageRectsCount - dirtyRectsCount) / 2];
   UINT moveRectsBufferSizeRequired;
-  if (FAILED(IDXGIOutputDuplication_GetFrameMoveRects(this->dup,
+  if (FAILED(IDXGIOutputDuplication_GetFrameMoveRects(*this->dup,
         sizeof(moveRects), moveRects,
         &moveRectsBufferSizeRequired)))
     return;
@@ -1171,16 +1116,17 @@ static CaptureResult dxgi_capture(void)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
+  comRef_scopePush();
 
   Texture                 * tex = NULL;
   CaptureResult             result;
   HRESULT                   status;
   DXGI_OUTDUPL_FRAME_INFO   frameInfo;
-  IDXGIResource           * res;
+  comRef_defineLocal(IDXGIResource, res);
 
   bool copyFrame   = false;
   bool copyPointer = false;
-  ID3D11Texture2D * src = NULL;
+  comRef_defineLocal(ID3D11Texture2D, src);
 
   bool           postPointer      = false;
   CapturePointer pointer          = { 0 };
@@ -1190,7 +1136,7 @@ static CaptureResult dxgi_capture(void)
   // release the prior frame
   result = dxgi_releaseFrame();
   if (result != CAPTURE_RESULT_OK)
-    return result;
+    goto exit;
 
   // this is a bit of a hack as it causes this thread to block until the next
   // present, by doing this we can allow the mouse updates to accumulate instead
@@ -1202,18 +1148,20 @@ static CaptureResult dxgi_capture(void)
   if (this->useAcquireLock)
   {
     LOCKED({
-        status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1, &frameInfo, &res);
+        status = IDXGIOutputDuplication_AcquireNextFrame(
+          *this->dup, 1, &frameInfo, res);
     });
   }
   else
-    status = IDXGIOutputDuplication_AcquireNextFrame(this->dup, 1000, &frameInfo, &res);
+    status = IDXGIOutputDuplication_AcquireNextFrame(
+      *this->dup, 1000, &frameInfo, res);
 
   result = dxgi_hResultToCaptureResult(status);
   if (result != CAPTURE_RESULT_OK)
   {
     if (result == CAPTURE_RESULT_ERROR)
       DEBUG_WINERROR("AcquireNextFrame failed", status);
-    return result;
+    goto exit;
   }
 
   this->needsRelease = true;
@@ -1225,12 +1173,14 @@ static CaptureResult dxgi_capture(void)
     if (tex->state == TEXTURE_STATE_UNUSED)
     {
       copyFrame = true;
-      status = IDXGIResource_QueryInterface(res, &IID_ID3D11Texture2D, (void **)&src);
+      status = IDXGIResource_QueryInterface(
+        *res, &IID_ID3D11Texture2D, (void **)src);
+
       if (FAILED(status))
       {
         DEBUG_WINERROR("Failed to get the texture from the dxgi resource", status);
-        IDXGIResource_Release(res);
-        return CAPTURE_RESULT_ERROR;
+        result = CAPTURE_RESULT_ERROR;
+        goto exit;
       }
     }
     else
@@ -1241,8 +1191,6 @@ static CaptureResult dxgi_capture(void)
         this->texture[i].texDamageCount = -1;
     }
   }
-
-  IDXGIResource_Release(res);
 
   // if the pointer shape has changed
   uint32_t bufferSize;
@@ -1269,7 +1217,7 @@ static CaptureResult dxgi_capture(void)
       if (this->hdr)
       {
         // setup the pixel shader input resource view
-        ID3D11ShaderResourceView * inputSRV;
+        comRef_defineLocal(ID3D11ShaderResourceView, inputSRV);
         {
           const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc =
           {
@@ -1278,11 +1226,12 @@ static CaptureResult dxgi_capture(void)
             .Texture2D.MipLevels = 1
           };
           status = ID3D11Device_CreateShaderResourceView(
-            this->device, (ID3D11Resource *)src, &srvDesc, &inputSRV);
+            *this->device, (ID3D11Resource *)*src, &srvDesc, inputSRV);
           if (FAILED(status))
           {
             DEBUG_WINERROR("Failed to create the source resource view", status);
-            return CAPTURE_RESULT_ERROR;
+            result = CAPTURE_RESULT_ERROR;
+            goto exit;
           }
         }
 
@@ -1297,47 +1246,44 @@ static CaptureResult dxgi_capture(void)
           };
 
           ID3D11DeviceContext_UpdateSubresource(
-            this->deviceContext, (ID3D11Resource*)this->constBuffer,
+            *this->deviceContext, (ID3D11Resource*)*this->constBuffer,
             0, NULL, &consts, 0, 0);
         }
 
         ID3D11DeviceContext_VSSetShader(
-          this->deviceContext, this->vertexShader, NULL, 0);
+          *this->deviceContext, *this->vertexShader, NULL, 0);
 
         ID3D11DeviceContext_PSSetShader(
-          this->deviceContext, this->pixelShader, NULL, 0);
+          *this->deviceContext, *this->pixelShader, NULL, 0);
         ID3D11DeviceContext_PSSetShaderResources(
-          this->deviceContext, 0, 1, &inputSRV);
+          *this->deviceContext, 0, 1, inputSRV);
         ID3D11DeviceContext_PSSetSamplers(
-          this->deviceContext, 0, 1, &this->samplerState);
+          *this->deviceContext, 0, 1, this->samplerState);
         ID3D11DeviceContext_PSSetConstantBuffers(
-          this->deviceContext, 0, 1, &this->constBuffer);
+          *this->deviceContext, 0, 1, this->constBuffer);
 
         ID3D11DeviceContext_OMSetRenderTargets(
-          this->deviceContext, 1, &tex->renderTarget, NULL);
+          *this->deviceContext, 1, tex->renderTarget, NULL);
 
-        ID3D11DeviceContext_IASetPrimitiveTopology(this->deviceContext,
-          D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        ID3D11DeviceContext_IASetPrimitiveTopology(
+          *this->deviceContext, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-        ID3D11DeviceContext_Draw(this->deviceContext, 4, 0);
-        ID3D11ShaderResourceView_Release(inputSRV);
+        ID3D11DeviceContext_Draw(*this->deviceContext, 4, 0);
 
-        if (!this->backend->copyFrame(tex, tex->hdrTex))
+        if (!this->backend->copyFrame(tex, *tex->hdrTex))
         {
-          ID3D11Texture2D_Release(src);
-          return CAPTURE_RESULT_ERROR;
+          result = CAPTURE_RESULT_ERROR;
+          goto exit;
         }
       }
       else
       {
-        if (!this->backend->copyFrame(tex, src))
+        if (!this->backend->copyFrame(tex, *src))
         {
-          ID3D11Texture2D_Release(src);
-          return CAPTURE_RESULT_ERROR;
+          result = CAPTURE_RESULT_ERROR;
+          goto exit;
         }
       }
-
-      ID3D11Texture2D_Release(src);
 
       for (int i = 0; i < this->maxTextures; ++i)
       {
@@ -1376,19 +1322,19 @@ static CaptureResult dxgi_capture(void)
       {
         LOCKED({
           status = IDXGIOutputDuplication_GetFramePointerShape(
-              this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
+              *this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
         });
       }
       else
         status = IDXGIOutputDuplication_GetFramePointerShape(
-            this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
+            *this->dup, bufferSize, pointerShape, &pointerShapeSize, &shapeInfo);
 
       result = dxgi_hResultToCaptureResult(status);
       if (result != CAPTURE_RESULT_OK)
       {
         if (result == CAPTURE_RESULT_ERROR)
           DEBUG_WINERROR("Failed to get the new pointer shape", status);
-        return result;
+        goto exit;
       }
 
       switch(shapeInfo.Type)
@@ -1398,7 +1344,8 @@ static CaptureResult dxgi_capture(void)
         case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME  : pointer.format = CAPTURE_FMT_MONO  ; break;
         default:
           DEBUG_ERROR("Unsupported cursor format");
-          return CAPTURE_RESULT_ERROR;
+          result = CAPTURE_RESULT_ERROR;
+          goto exit;
       }
 
       pointer.shapeUpdate = true;
@@ -1442,7 +1389,10 @@ static CaptureResult dxgi_capture(void)
     this->postPointerBufferFn(pointer);
   }
 
-  return CAPTURE_RESULT_OK;
+  result = CAPTURE_RESULT_OK;
+exit:
+  comRef_scopePop();
+  return result;
 }
 
 static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameSize)
@@ -1549,7 +1499,7 @@ static CaptureResult dxgi_releaseFrame(void)
   this->backend->preRelease();
 
   HRESULT status;
-  LOCKED({status = IDXGIOutputDuplication_ReleaseFrame(this->dup);});
+  LOCKED({status = IDXGIOutputDuplication_ReleaseFrame(*this->dup);});
   switch(status)
   {
     case S_OK:

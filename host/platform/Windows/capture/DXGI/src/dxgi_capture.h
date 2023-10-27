@@ -47,8 +47,8 @@ typedef struct Texture
   FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
   int32_t                    texDamageCount;
   FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
-  ID3D11RenderTargetView   * renderTarget;
-  ID3D11Texture2D          * hdrTex;
+  ID3D11RenderTargetView  ** renderTarget;
+  ID3D11Texture2D         ** hdrTex;
 
   void                     * impl;
 }
@@ -69,18 +69,18 @@ struct DXGIInterface
   LARGE_INTEGER              frameTime;
   bool                       stop;
   HDESK                      desktop;
-  IDXGIFactory1            * factory;
-  IDXGIAdapter1            * adapter;
-  IDXGIOutput              * output;
-  ID3D11Device             * device;
-  ID3D11DeviceContext      * deviceContext;
+  IDXGIFactory1           ** factory;
+  IDXGIAdapter1           ** adapter;
+  IDXGIOutput             ** output;
+  ID3D11Device            ** device;
+  ID3D11DeviceContext     ** deviceContext;
   LG_Lock                    deviceContextLock;
   bool                       debug;
   bool                       useAcquireLock;
   bool                       dwmFlush;
   bool                       disableDamage;
   D3D_FEATURE_LEVEL          featureLevel;
-  IDXGIOutputDuplication   * dup;
+  IDXGIOutputDuplication  ** dup;
   int                        maxTextures;
   Texture                  * texture;
   int                        texRIndex;
@@ -92,10 +92,10 @@ struct DXGIInterface
   DISPLAYCONFIG_PATH_INFO    displayPathInfo;
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
   float                      sdrWhiteLevel;
-  ID3D11Buffer             * constBuffer;
-  ID3D11PixelShader        * pixelShader;
-  ID3D11VertexShader       * vertexShader;
-  ID3D11SamplerState       * samplerState;
+  ID3D11Buffer            ** constBuffer;
+  ID3D11PixelShader       ** pixelShader;
+  ID3D11VertexShader      ** vertexShader;
+  ID3D11SamplerState      ** samplerState;
   struct DXGICopyBackend   * backend;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
