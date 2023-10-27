@@ -964,6 +964,9 @@ static bool dxgi_deinit(void)
   if (this->dup && *this->dup)
     dxgi_releaseFrame();
 
+  // this MUST run before backend->free().
+  comRef_free();
+
   if (this->backend)
   {
     this->backend->free();
@@ -985,7 +988,6 @@ static bool dxgi_deinit(void)
   }
 
   this->initialized = false;
-  comRef_free();
   return true;
 }
 
