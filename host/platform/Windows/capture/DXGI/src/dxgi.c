@@ -766,10 +766,18 @@ static bool dxgi_init(void)
       .SampleDesc.Quality = 0,
       .Usage              = D3D11_USAGE_DEFAULT,
       .Format             = DXGI_FORMAT_R10G10B10A2_UNORM,
-      .BindFlags          = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+      .BindFlags          = D3D11_BIND_RENDER_TARGET |
+                            D3D11_BIND_SHADER_RESOURCE,
       .CPUAccessFlags     = 0,
-      .MiscFlags          = 0
+      .MiscFlags          = D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+                            D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX
     };
+
+    // allow texture sharing with other backends
+    if (this->backend != &copyBackendD3D11)
+      hdrTexDesc.MiscFlags |=
+        D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+        D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
     status = ID3D11Device_CreateTexture2D(*this->device, &hdrTexDesc, NULL,
       (ID3D11Texture2D **)comRef_newGlobal(&this->texture[i].hdrTex));
