@@ -19,6 +19,7 @@
  */
 
 #include "dxgi_capture.h"
+#include "com_ref.h"
 
 #include <assert.h>
 #include <d3d12.h>
@@ -34,26 +35,25 @@
 
 struct D3D12Texture
 {
-  ID3D12Resource            * tex;
-  ID3D12CommandAllocator    * commandAllocator;
-  ID3D12CommandList         * commandList;
-  ID3D12GraphicsCommandList * graphicsCommandList;
-  UINT64                      fenceValue;
-  ID3D12Fence               * fence;
-  HANDLE                      event;
+  ID3D12Resource            ** tex;
+  ID3D12CommandAllocator    ** commandAllocator;
+  ID3D12CommandList         ** commandList;
+  ID3D12GraphicsCommandList ** graphicsCommandList;
+  UINT64                       fenceValue;
+  ID3D12Fence               ** fence;
+  HANDLE                       event;
 };
 
 struct D3D12Backend
 {
-  float                 copySleep;
-  ID3D12Device        * device;
-  ID3D12InfoQueue1    * debugInfoQueue;
-  ID3D12CommandQueue  * commandQueue;
-  ID3D12Resource      * src;
-  struct D3D12Texture * texture;
-  UINT64                fenceValue;
-  ID3D12Fence         * fence;
-  HANDLE                event;
+  float                  copySleep;
+  ID3D12Device        ** device;
+  ID3D12CommandQueue  ** commandQueue;
+  ID3D12Resource      ** src;
+  struct D3D12Texture *  texture;
+  UINT64                 fenceValue;
+  ID3D12Fence         ** fence;
+  HANDLE                 event;
 
   // shared handle cache
   struct
@@ -133,7 +133,7 @@ static bool d3d12_create(struct DXGIInterface * intf)
   DEBUG_INFO("Sleep before copy : %f ms", this->copySleep);
 
   status = D3D12CreateDevice(*(IUnknown **)dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
-    &IID_ID3D12Device, (void **)&this->device);
+    &IID_ID3D12Device, (void **)comRef_newGlobal(&this->device));
 
   if (FAILED(status))
   {
@@ -148,15 +148,15 @@ static bool d3d12_create(struct DXGIInterface * intf)
     .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE,
   };
 
-  status = ID3D12Device_CreateCommandQueue(this->device, &queueDesc,
-    &IID_ID3D12CommandQueue, (void **)&this->commandQueue);
+  status = ID3D12Device_CreateCommandQueue(*this->device, &queueDesc,
+    &IID_ID3D12CommandQueue, (void **)comRef_newGlobal(&this->commandQueue));
   if (FAILED(status))
   {
     DEBUG_WARN("Failed to create queue with real time priority");
     queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
 
-    status = ID3D12Device_CreateCommandQueue(this->device, &queueDesc,
-      &IID_ID3D12CommandQueue, (void **)&this->commandQueue);
+    status = ID3D12Device_CreateCommandQueue(*this->device, &queueDesc,
+      &IID_ID3D12CommandQueue, (void **)this->commandQueue);
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create D3D12 command allocator", status);
@@ -183,8 +183,8 @@ static bool d3d12_create(struct DXGIInterface * intf)
   }
 
   this->fenceValue = 0;
-  status = ID3D12Device_CreateFence(this->device, 0, D3D12_FENCE_FLAG_NONE,
-    &IID_ID3D12Fence, (void **)&this->fence);
+  status = ID3D12Device_CreateFence(*this->device, 0, D3D12_FENCE_FLAG_NONE,
+    &IID_ID3D12Fence, (void**)comRef_newGlobal(&this->fence));
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create capture fence", status);
@@ -213,14 +213,14 @@ static bool d3d12_create(struct DXGIInterface * intf)
 
   for (int i = 0; i < dxgi->maxTextures; ++i)
   {
-    status = ID3D12Device_CreateCommittedResource(this->device,
+    status = ID3D12Device_CreateCommittedResource(*this->device,
         &readbackHeapProperties,
         D3D12_HEAP_FLAG_NONE,
         &texDesc,
         D3D12_RESOURCE_STATE_COPY_DEST,
         NULL,
         &IID_ID3D12Resource,
-        (void **)&this->texture[i].tex);
+        (void **)comRef_newGlobal(&this->texture[i].tex));
 
     if (FAILED(status))
     {
@@ -236,18 +236,18 @@ static bool d3d12_create(struct DXGIInterface * intf)
     }
 
     this->texture[i].fenceValue = 0;
-    status = ID3D12Device_CreateFence(this->device, 0, D3D12_FENCE_FLAG_NONE,
-      &IID_ID3D12Fence, (void **)&this->texture[i].fence);
+    status = ID3D12Device_CreateFence(*this->device, 0, D3D12_FENCE_FLAG_NONE,
+      &IID_ID3D12Fence, (void **)comRef_newGlobal(&this->texture[i].fence));
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create fence", status);
       goto fail;
     }
 
-    status = ID3D12Device_CreateCommandAllocator(this->device,
+    status = ID3D12Device_CreateCommandAllocator(*this->device,
         D3D12_COMMAND_LIST_TYPE_COPY,
         &IID_ID3D12CommandAllocator,
-        (void **)&this->texture[i].commandAllocator);
+        (void **)comRef_newGlobal(&this->texture[i].commandAllocator));
 
     if (FAILED(status))
     {
@@ -255,13 +255,13 @@ static bool d3d12_create(struct DXGIInterface * intf)
       goto fail;
     }
 
-    status = ID3D12Device_CreateCommandList(this->device,
+    status = ID3D12Device_CreateCommandList(*this->device,
         0,
         D3D12_COMMAND_LIST_TYPE_COPY,
-        this->texture[i].commandAllocator,
+        *this->texture[i].commandAllocator,
         NULL,
         &IID_ID3D12GraphicsCommandList,
-        (void **)&this->texture[i].graphicsCommandList);
+        (void **)comRef_newGlobal(&this->texture[i].graphicsCommandList));
 
     if (FAILED(status))
     {
@@ -270,9 +270,9 @@ static bool d3d12_create(struct DXGIInterface * intf)
     }
 
     status = ID3D12GraphicsCommandList_QueryInterface(
-        this->texture[i].graphicsCommandList,
+        *this->texture[i].graphicsCommandList,
         &IID_ID3D12CommandList,
-        (void **)&this->texture[i].commandList);
+        (void **)comRef_newGlobal(&this->texture[i].commandList));
 
     if (FAILED(status))
     {
@@ -283,6 +283,7 @@ static bool d3d12_create(struct DXGIInterface * intf)
     dxgi->texture[i].impl = this->texture + i;
   }
 
+  comRef_newGlobal(&this->src);
   dxgi->useAcquireLock = false;
   return true;
 
@@ -299,49 +300,18 @@ static void d3d12_free(void)
   {
     for (int i = 0; i < dxgi->maxTextures; ++i)
     {
-      if (this->texture[i].tex)
-        ID3D12Resource_Release(this->texture[i].tex);
-
-      if (this->texture[i].fence)
-        ID3D12Fence_Release(this->texture[i].fence);
-
       if (this->texture[i].event)
         CloseHandle(this->texture[i].event);
-
-      if (this->texture[i].commandAllocator)
-        ID3D12CommandAllocator_Release(this->texture[i].commandAllocator);
-
-      if (this->texture[i].commandList)
-        ID3D12CommandList_Release(this->texture[i].commandList);
-
-      if (this->texture[i].graphicsCommandList)
-        ID3D12GraphicsCommandList_Release(this->texture[i].graphicsCommandList);
     }
 
     free(this->texture);
   }
 
-  if (this->fence)
-    ID3D12Fence_Release(this->fence);
-
   if (this->event)
     CloseHandle(this->event);
 
-  if (this->src)
-    ID3D12Resource_Release(this->src);
-
   for(int i = 0; i < this->handleCacheCount; ++i)
     CloseHandle(this->handleCache[i].handle);
-
-  if (this->commandQueue)
-    ID3D12CommandQueue_Release(this->commandQueue);
-
-  if (this->device)
-  {
-    DWORD count = ID3D12Device_Release(this->device);
-    if (count != 0)
-      DEBUG_ERROR("ID3D12Device release is %lu, there is a memory leak!", count);
-  }
 
   free(this);
   this = NULL;
@@ -349,9 +319,11 @@ static void d3d12_free(void)
 
 static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
 {
+  comRef_scopePush();
+
   struct D3D12Texture * tex = parent->impl;
-  bool fail = false;
-  IDXGIResource1 * res1 = NULL;
+  bool fail = true;
+  comRef_defineLocal(IDXGIResource1, res1);
   HRESULT status;
 
   if (this->copySleep > 0)
@@ -373,15 +345,15 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   if (handle == INVALID_HANDLE_VALUE)
   {
     status = ID3D11Texture2D_QueryInterface(src,
-        &IID_IDXGIResource1, (void **)&res1);
+        &IID_IDXGIResource1, (void **)res1);
 
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to get IDXGIResource1 from texture", status);
-      return CAPTURE_RESULT_ERROR;
+      goto cleanup;
     }
 
-    status = IDXGIResource1_CreateSharedHandle(res1,
+    status = IDXGIResource1_CreateSharedHandle(*res1,
         NULL, DXGI_SHARED_RESOURCE_READ, NULL, &handle);
 
     if (FAILED(status))
@@ -407,8 +379,8 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
     }
   }
 
-  status = ID3D12Device_OpenSharedHandle(this->device,
-      handle, &IID_ID3D12Resource, (void **)&this->src);
+  status = ID3D12Device_OpenSharedHandle(*this->device,
+      handle, &IID_ID3D12Resource, (void **)this->src);
 
   if (this->handleCacheCount == -1)
     CloseHandle(handle);
@@ -416,20 +388,19 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to get create shared handle for texture", status);
-    fail = true;
     goto cleanup;
   }
 
   D3D12_TEXTURE_COPY_LOCATION srcLoc =
   {
-    .pResource        = this->src,
+    .pResource        = *this->src,
     .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
     .SubresourceIndex = 0
   };
 
   D3D12_TEXTURE_COPY_LOCATION destLoc =
   {
-    .pResource       = tex->tex,
+    .pResource       = *tex->tex,
     .Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
     .PlacedFootprint =
     {
@@ -446,7 +417,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   };
 
   if (parent->texDamageCount < 0)
-    ID3D12GraphicsCommandList_CopyTextureRegion(tex->graphicsCommandList,
+    ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
         &destLoc, 0, 0, 0, &srcLoc, NULL);
   else
   {
@@ -462,62 +433,57 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
         .right  = rect->x + rect->width,
         .bottom = rect->y + rect->height,
       };
-      ID3D12GraphicsCommandList_CopyTextureRegion(tex->graphicsCommandList,
+      ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
           &destLoc, rect->x, rect->y, 0, &srcLoc, &box);
     }
   }
 
-  status = ID3D12GraphicsCommandList_Close(tex->graphicsCommandList);
+  status = ID3D12GraphicsCommandList_Close(*tex->graphicsCommandList);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to close command list", status);
-    fail = true;
     goto cleanup;
   }
 
-  ID3D12CommandQueue_ExecuteCommandLists(this->commandQueue,
-      1, &tex->commandList);
+  ID3D12CommandQueue_ExecuteCommandLists(*this->commandQueue,
+      1, tex->commandList);
 
-  status = ID3D12CommandQueue_Signal(this->commandQueue,
-      this->fence, ++this->fenceValue);
+  status = ID3D12CommandQueue_Signal(*this->commandQueue,
+      *this->fence, ++this->fenceValue);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal capture fence", status);
-    fail = true;
     goto cleanup;
   }
 
   ResetEvent(this->event);
-  status = ID3D12Fence_SetEventOnCompletion(this->fence,
+  status = ID3D12Fence_SetEventOnCompletion(*this->fence,
       this->fenceValue, this->event);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal capture fence event", status);
-    fail = true;
     goto cleanup;
   }
 
-  status = ID3D12CommandQueue_Signal(this->commandQueue,
-      tex->fence, ++tex->fenceValue);
+  status = ID3D12CommandQueue_Signal(*this->commandQueue,
+      *tex->fence, ++tex->fenceValue);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal texture fence", status);
-    fail = true;
     goto cleanup;
   }
 
-  status = ID3D12Fence_SetEventOnCompletion(tex->fence,
+  status = ID3D12Fence_SetEventOnCompletion(*tex->fence,
       tex->fenceValue, tex->event);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal texture fence event", status);
-    fail = true;
     goto cleanup;
   }
 
+  fail = false;
 cleanup:
-  if (res1)
-    IDXGIResource1_Release(res1);
+  comRef_scopePop();
   return !fail;
 }
 
@@ -528,15 +494,15 @@ static CaptureResult d3d12_mapTexture(Texture * parent)
 
   WaitForSingleObject(tex->event, INFINITE);
 
-  status = ID3D12CommandAllocator_Reset(tex->commandAllocator);
+  status = ID3D12CommandAllocator_Reset(*tex->commandAllocator);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to reset command allocator", status);
     return CAPTURE_RESULT_ERROR;
   }
 
-  status = ID3D12GraphicsCommandList_Reset(tex->graphicsCommandList,
-      tex->commandAllocator, NULL);
+  status = ID3D12GraphicsCommandList_Reset(*tex->graphicsCommandList,
+      *tex->commandAllocator, NULL);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to reset command list", status);
@@ -548,7 +514,7 @@ static CaptureResult d3d12_mapTexture(Texture * parent)
     .Begin = 0,
     .End   = dxgi->pitch * dxgi->height
   };
-  status = ID3D12Resource_Map(tex->tex, 0, &range, &parent->map);
+  status = ID3D12Resource_Map(*tex->tex, 0, &range, &parent->map);
 
   if (FAILED(status))
   {
@@ -568,19 +534,13 @@ static void d3d12_unmapTexture(Texture * parent)
     .Begin = 0,
     .End   = 0
   };
-  ID3D12Resource_Unmap(tex->tex, 0, &range);
+  ID3D12Resource_Unmap(*tex->tex, 0, &range);
   parent->map = NULL;
 }
 
 static void d3d12_preRelease(void)
 {
   WaitForSingleObject(this->event, INFINITE);
-
-  if (this->src)
-  {
-    ID3D12Resource_Release(this->src);
-    this->src = NULL;
-  }
 }
 
 struct DXGICopyBackend copyBackendD3D12 =

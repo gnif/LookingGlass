@@ -266,7 +266,7 @@ static bool dxgi_init(void)
   DEBUG_ASSERT(this);
 
   if (!comRef_init(
-    20 + this->maxTextures * 2, //max total globals
+    20 + this->maxTextures * 8, //max total globals
     20                          //max total locals
   ))
   {
