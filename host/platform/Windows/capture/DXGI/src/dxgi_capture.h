@@ -129,6 +129,3 @@ struct DXGICopyBackend
   void (*unmapTexture)(Texture * tex);
   void (*preRelease)(void);
 };
-
-const char * GetDXGIFormatStr(DXGI_FORMAT format);
-const char * GetDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type);

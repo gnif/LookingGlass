@@ -40,11 +40,11 @@
 #include <dxgi1_6.h>
 #include <d3d11.h>
 #include <d3dcommon.h>
-#include <d3dcompiler.h>
 #include <versionhelpers.h>
 #include <dwmapi.h>
 
 #include "dxgi_capture.h"
+#include "util.h"
 
 #define LOCKED(...) INTERLOCKED_SECTION(this->deviceContextLock, __VA_ARGS__)
 
@@ -256,133 +256,6 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
-  return true;
-}
-
-static bool getDisplayPathInfo(HMONITOR monitor,
-  DISPLAYCONFIG_PATH_INFO * info)
-{
-  bool result = false;
-  UINT32 numPath, numMode;
-
-  MONITORINFOEXW viewInfo = { .cbSize = sizeof(viewInfo) };
-    if (!GetMonitorInfoW(monitor, (MONITORINFO*)&viewInfo))
-  {
-    DEBUG_ERROR("Failed to get the monitor info");
-    goto err;
-  }
-
-err_retry:
-  if (FAILED(GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPath, &numMode)))
-    goto err;
-
-  DISPLAYCONFIG_PATH_INFO * pathInfo = calloc(sizeof(*pathInfo), numPath);
-  if (!pathInfo)
-    goto err_mem_pathInfo;
-
-  DISPLAYCONFIG_MODE_INFO * modeInfo = calloc(sizeof(*modeInfo), numMode);
-  if (!modeInfo)
-    goto err_mem_modeInfo;
-
-  LONG status = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
-    &numPath, pathInfo,
-    &numMode, modeInfo,
-    NULL);
-
-  if (status != ERROR_SUCCESS)
-  {
-    if (status == ERROR_INSUFFICIENT_BUFFER)
-    {
-      free(modeInfo);
-      free(pathInfo);
-      goto err_retry;
-    }
-
-    DEBUG_ERROR("QueryDisplayConfig failed with 0x%lx", status);
-    goto err_queryDisplay;
-  }
-
-  for(unsigned i = 0; i < numPath; ++i)
-  {
-    DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName =
-    {
-      .header =
-      {
-        .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-        .size      = sizeof(sourceName),
-        .adapterId = pathInfo[i].sourceInfo.adapterId,
-        .id        = pathInfo[i].sourceInfo.id,
-      }
-    };
-
-    if (FAILED(DisplayConfigGetDeviceInfo(&sourceName.header)))
-      continue;
-
-    if (wcscmp(viewInfo.szDevice, sourceName.viewGdiDeviceName) != 0)
-      continue;
-
-    *info = pathInfo[i];
-    result = true;
-    break;
-  }
-
-err_queryDisplay:
-  free(modeInfo);
-
-err_mem_modeInfo:
-  free(pathInfo);
-
-err_mem_pathInfo:
-
-err:
-  return result;
-}
-
-static float getSDRWhiteLevel(void)
-{
-  float nits = 80.0f;
-  DISPLAYCONFIG_SDR_WHITE_LEVEL level =
-  {
-    .header =
-    {
-      .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
-      .size      = sizeof(level),
-      .adapterId = this->displayPathInfo.targetInfo.adapterId,
-      .id        = this->displayPathInfo.targetInfo.id,
-    }
-  };
-
-  if (SUCCEEDED(DisplayConfigGetDeviceInfo(&level.header)))
-    nits = level.SDRWhiteLevel / 1000.0f * 80.0f;
-
-  return nits;
-}
-
-static bool compileShader(ID3DBlob ** dst, const char * entry,
-  const char * target, const char * code)
-{
-  ID3DBlob * errors;
-  HRESULT status = D3DCompile(
-    code,
-    strlen(code),
-    NULL,
-    NULL,
-    NULL,
-    entry,
-    target,
-    D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
-    0,
-    dst,
-    &errors);
-
-  if (FAILED(status))
-  {
-    DEBUG_ERROR("Failed to compile the shader");
-    DEBUG_ERROR("%s", (const char *)ID3D10Blob_GetBufferPointer(errors));
-    ID3D10Blob_Release(errors);
-    return false;
-  }
-
   return true;
 }
 
@@ -737,10 +610,10 @@ next_output:
         IDXGIOutput6_Release(output6);
         goto fail;
       }
-      this->sdrWhiteLevel = getSDRWhiteLevel();
+      this->sdrWhiteLevel = getSDRWhiteLevel(&this->displayPathInfo);
 
       DEBUG_INFO("Bits Per Color    : %u"   , desc1.BitsPerColor);
-      DEBUG_INFO("Color Space       : %s"   , GetDXGIColorSpaceTypeStr(this->dxgiColorSpace));
+      DEBUG_INFO("Color Space       : %s"   , getDXGIColorSpaceTypeStr(this->dxgiColorSpace));
       DEBUG_INFO("Min/Max Luminance : %f/%f", desc1.MinLuminance, desc1.MaxLuminance);
       DEBUG_INFO("Frame Luminance   : %f"   , desc1.MaxFullFrameLuminance);
       DEBUG_INFO("SDR White Level   : %f"   , this->sdrWhiteLevel);
@@ -753,7 +626,7 @@ next_output:
   {
     DXGI_OUTDUPL_DESC dupDesc;
     IDXGIOutputDuplication_GetDesc(this->dup, &dupDesc);
-    DEBUG_INFO("Source Format     : %s", GetDXGIFormatStr(dupDesc.ModeDesc.Format));
+    DEBUG_INFO("Source Format     : %s", getDXGIFormatStr(dupDesc.ModeDesc.Format));
 
     DXGI_OUTDUPL_FRAME_INFO   frameInfo;
     IDXGIResource           * res;
@@ -779,7 +652,7 @@ next_output:
     this->dxgiSrcFormat = desc.Format;
     this->dxgiFormat    = desc.Format;
 
-    DEBUG_INFO("Capture Format    : %s", GetDXGIFormatStr(desc.Format));
+    DEBUG_INFO("Capture Format    : %s", getDXGIFormatStr(desc.Format));
 
     ID3D11Texture2D_Release(src);
     IDXGIResource_Release(res);
@@ -1413,7 +1286,7 @@ static CaptureResult dxgi_capture(void)
           }
         }
 
-        float nits = getSDRWhiteLevel();
+        float nits = getSDRWhiteLevel(&this->displayPathInfo);
         if (nits != this->sdrWhiteLevel)
         {
           this->sdrWhiteLevel = nits;

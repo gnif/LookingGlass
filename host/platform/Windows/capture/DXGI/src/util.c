@@ -18,7 +18,10 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "dxgi_capture.h"
+#include "common/debug.h"
+
+#include <d3d11.h>
+#include <d3dcompiler.h>
 
 static const char * DXGI_FORMAT_STR[] = {
   "DXGI_FORMAT_UNKNOWN",
@@ -145,7 +148,7 @@ static const char * DXGI_FORMAT_STR[] = {
   "DXGI_FORMAT_V408"
 };
 
-const char * GetDXGIFormatStr(DXGI_FORMAT format)
+const char * getDXGIFormatStr(DXGI_FORMAT format)
 {
   if (format > sizeof(DXGI_FORMAT_STR) / sizeof(const char *))
     return DXGI_FORMAT_STR[0];
@@ -181,7 +184,7 @@ static const char * DXGI_COLOR_SPACE_TYPE_STR[] =
   "DXGI_COLOR_SPACE_YCBCR_STUDIO_G24_TOPLEFT_P2020"
 };
 
-const char * GetDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type)
+const char * getDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type)
 {
   if (type == DXGI_COLOR_SPACE_CUSTOM)
     return "DXGI_COLOR_SPACE_CUSTOM";
@@ -190,4 +193,130 @@ const char * GetDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type)
     return "Invalid or Unknown";
 
   return DXGI_COLOR_SPACE_TYPE_STR[type];
+}
+
+bool compileShader(ID3DBlob ** dst, const char * entry, const char * target,
+  const char * code)
+{
+  ID3DBlob * errors;
+  HRESULT status = D3DCompile(
+    code,
+    strlen(code),
+    NULL,
+    NULL,
+    NULL,
+    entry,
+    target,
+    D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+    0,
+    dst,
+    &errors);
+
+  if (FAILED(status))
+  {
+    DEBUG_ERROR("Failed to compile the shader");
+    DEBUG_ERROR("%s", (const char *)ID3D10Blob_GetBufferPointer(errors));
+    ID3D10Blob_Release(errors);
+    return false;
+  }
+
+  return true;
+}
+
+bool getDisplayPathInfo(HMONITOR monitor, DISPLAYCONFIG_PATH_INFO * info)
+{
+  bool result = false;
+  UINT32 numPath, numMode;
+
+  MONITORINFOEXW viewInfo = { .cbSize = sizeof(viewInfo) };
+    if (!GetMonitorInfoW(monitor, (MONITORINFO*)&viewInfo))
+  {
+    DEBUG_ERROR("Failed to get the monitor info");
+    goto err;
+  }
+
+err_retry:
+  if (FAILED(GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPath, &numMode)))
+    goto err;
+
+  DISPLAYCONFIG_PATH_INFO * pathInfo = calloc(sizeof(*pathInfo), numPath);
+  if (!pathInfo)
+    goto err_mem_pathInfo;
+
+  DISPLAYCONFIG_MODE_INFO * modeInfo = calloc(sizeof(*modeInfo), numMode);
+  if (!modeInfo)
+    goto err_mem_modeInfo;
+
+  LONG status = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
+    &numPath, pathInfo,
+    &numMode, modeInfo,
+    NULL);
+
+  if (status != ERROR_SUCCESS)
+  {
+    if (status == ERROR_INSUFFICIENT_BUFFER)
+    {
+      free(modeInfo);
+      free(pathInfo);
+      goto err_retry;
+    }
+
+    DEBUG_ERROR("QueryDisplayConfig failed with 0x%lx", status);
+    goto err_queryDisplay;
+  }
+
+  for(unsigned i = 0; i < numPath; ++i)
+  {
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName =
+    {
+      .header =
+      {
+        .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+        .size      = sizeof(sourceName),
+        .adapterId = pathInfo[i].sourceInfo.adapterId,
+        .id        = pathInfo[i].sourceInfo.id,
+      }
+    };
+
+    if (FAILED(DisplayConfigGetDeviceInfo(&sourceName.header)))
+      continue;
+
+    if (wcscmp(viewInfo.szDevice, sourceName.viewGdiDeviceName) != 0)
+      continue;
+
+    *info = pathInfo[i];
+    result = true;
+    break;
+  }
+
+err_queryDisplay:
+  free(modeInfo);
+
+err_mem_modeInfo:
+  free(pathInfo);
+
+err_mem_pathInfo:
+
+err:
+  return result;
+}
+
+float getSDRWhiteLevel(const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
+{
+  float nits = 80.0f;
+  DISPLAYCONFIG_SDR_WHITE_LEVEL level =
+  {
+    .header =
+    {
+      .type      = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+      .size      = sizeof(level),
+      .adapterId = displayPathInfo->targetInfo.adapterId,
+      .id        = displayPathInfo->targetInfo.id,
+    }
+  };
+
+  if (SUCCEEDED(DisplayConfigGetDeviceInfo(&level.header)))
+    nits = level.SDRWhiteLevel / 1000.0f * 80.0f;
+
+  return nits;
 }
