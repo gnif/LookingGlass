@@ -769,15 +769,14 @@ static bool dxgi_init(void)
       .BindFlags          = D3D11_BIND_RENDER_TARGET |
                             D3D11_BIND_SHADER_RESOURCE,
       .CPUAccessFlags     = 0,
-      .MiscFlags          = D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
-                            D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX
+      .MiscFlags          = 0
     };
 
     // allow texture sharing with other backends
     if (this->backend != &copyBackendD3D11)
       hdrTexDesc.MiscFlags |=
-        D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
-        D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+        D3D11_RESOURCE_MISC_SHARED |
+        D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
     status = ID3D11Device_CreateTexture2D(*this->device, &hdrTexDesc, NULL,
       (ID3D11Texture2D **)comRef_newGlobal(&this->texture[i].hdrTex));
