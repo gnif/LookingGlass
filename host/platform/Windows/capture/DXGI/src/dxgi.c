@@ -1278,6 +1278,7 @@ static CaptureResult dxgi_capture(void)
           *this->deviceContext, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
         ID3D11DeviceContext_Draw(*this->deviceContext, 4, 0);
+        ID3D11DeviceContext_Flush(*this->deviceContext);
 
         if (!this->backend->copyFrame(tex, *tex->hdrTex))
         {
