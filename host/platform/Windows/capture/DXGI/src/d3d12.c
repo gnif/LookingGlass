@@ -44,25 +44,25 @@ struct D3D12Texture
   HANDLE                       event;
 };
 
+struct SharedCache
+{
+  ID3D11Texture2D  * tex;
+  ID3D12Resource ** d12src;
+};
+
 struct D3D12Backend
 {
   float                  copySleep;
   ID3D12Device        ** device;
   ID3D12CommandQueue  ** commandQueue;
-  ID3D12Resource      ** src;
   struct D3D12Texture *  texture;
   UINT64                 fenceValue;
   ID3D12Fence         ** fence;
   HANDLE                 event;
 
   // shared handle cache
-  struct
-  {
-    ID3D11Texture2D * tex;
-    HANDLE            handle;
-  }
-  handleCache[10];
-  int handleCacheCount;
+  struct SharedCache sharedCache[10];
+  int sharedCacheCount;
 };
 
 static struct DXGIInterface * dxgi = NULL;
@@ -283,8 +283,7 @@ static bool d3d12_create(struct DXGIInterface * intf)
     dxgi->texture[i].impl = this->texture + i;
   }
 
-  comRef_newGlobal(&this->src);
-  dxgi->useAcquireLock = false;
+//  dxgi->useAcquireLock = false;
   return true;
 
 fail:
@@ -310,9 +309,6 @@ static void d3d12_free(void)
   if (this->event)
     CloseHandle(this->event);
 
-  for(int i = 0; i < this->handleCacheCount; ++i)
-    CloseHandle(this->handleCache[i].handle);
-
   free(this);
   this = NULL;
 }
@@ -324,25 +320,24 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   struct D3D12Texture * tex = parent->impl;
   bool fail = true;
   comRef_defineLocal(IDXGIResource1, res1);
+  ID3D12Resource * d12src = NULL;
   HRESULT status;
 
   if (this->copySleep > 0)
     nsleep((uint64_t)(this->copySleep * 1000000));
 
-  HANDLE handle = INVALID_HANDLE_VALUE;
-
-  if (this->handleCacheCount > -1)
+  if (this->sharedCacheCount > -1)
   {
     // see if there is a cached handle already available for this texture
-    for(int i = 0; i < this->handleCacheCount; ++i)
-      if (this->handleCache[i].tex == src)
+    for(int i = 0; i < this->sharedCacheCount; ++i)
+      if (this->sharedCache[i].tex == src)
       {
-        handle = this->handleCache[i].handle;
+        d12src = *this->sharedCache[i].d12src;
         break;
       }
   }
 
-  if (handle == INVALID_HANDLE_VALUE)
+  if (!d12src)
   {
     status = ID3D11Texture2D_QueryInterface(src,
         &IID_IDXGIResource1, (void **)res1);
@@ -353,47 +348,48 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
       goto cleanup;
     }
 
+    HANDLE handle;
     status = IDXGIResource1_CreateSharedHandle(*res1,
         NULL, DXGI_SHARED_RESOURCE_READ, NULL, &handle);
 
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to get create shared handle for texture", status);
-      fail = true;
       goto cleanup;
     }
 
-    // store the handle for later use
-    if (this->handleCacheCount < ARRAY_LENGTH(this->handleCache))
+    status = ID3D12Device_OpenSharedHandle(*this->device,
+        handle, &IID_ID3D12Resource, (void **)&d12src);
+    CloseHandle(handle);
+
+    if (FAILED(status))
     {
-      this->handleCache[this->handleCacheCount].tex    = src;
-      this->handleCache[this->handleCacheCount].handle = handle;
-      ++this->handleCacheCount;
+      DEBUG_WINERROR("Failed to open the shared handle for texture", status);
+      goto cleanup;
+    }
+
+    // store the texture for later use
+    if (this->sharedCacheCount < ARRAY_LENGTH(this->sharedCache))
+    {
+      struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
+      cache->tex = src;
+      *comRef_newGlobal(&cache->d12src) = (IUnknown *)d12src;
     }
     else
     {
       // too many handles to cache, disable the cache entirely
-      for(int i = 0; i < this->handleCacheCount; ++i)
-        CloseHandle(this->handleCache[i].handle);
-      this->handleCacheCount = -1;
+      for(int i = 0; i < this->sharedCacheCount; ++i)
+      {
+        struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
+        comRef_release(cache->d12src);
+      }
+      this->sharedCacheCount = -1;
     }
-  }
-
-  status = ID3D12Device_OpenSharedHandle(*this->device,
-      handle, &IID_ID3D12Resource, (void **)this->src);
-
-  if (this->handleCacheCount == -1)
-    CloseHandle(handle);
-
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to get create shared handle for texture", status);
-    goto cleanup;
   }
 
   D3D12_TEXTURE_COPY_LOCATION srcLoc =
   {
-    .pResource        = *this->src,
+    .pResource        = d12src,
     .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
     .SubresourceIndex = 0
   };
