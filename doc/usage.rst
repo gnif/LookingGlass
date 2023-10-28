@@ -348,11 +348,11 @@ Host usage
 
 By default the host application will simply work however there are some
 configurable options available. While the host application will accept command
-line arguments just as the client will it is more convenient to create the
-``looking-glass-host.ini`` file with the desired configuration options.
+line arguments, it is more convenient to create a ``looking-glass-host.ini``
+config file for persistent configuration changes.
 
-This file must be placed in the same directory that the Looking Glass host
-application was installed for it to be found and used by the application
+This file must be placed in the same directory as the Looking Glass host, by
+default ``C:\Program Files\Looking Glass (host)\``.
 
 .. _host_capture:
 
