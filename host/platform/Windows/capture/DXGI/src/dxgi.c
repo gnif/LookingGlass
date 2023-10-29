@@ -271,6 +271,57 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   return true;
 }
 
+static bool initVertexShader(void)
+{
+  static const char * vshaderSrc =
+    "void main(\n"
+    "  in  uint   vertexID : SV_VERTEXID,\n"
+    "  out float4 position : SV_POSITION,\n"
+    "  out float2 texCoord : TEXCOORD0)\n"
+    "{\n"
+    "  float2 positions[4] =\n"
+    "  {\n"
+    "    float2(-1.0,  1.0),\n"
+    "    float2( 1.0,  1.0),\n"
+    "    float2(-1.0, -1.0),\n"
+    "    float2( 1.0, -1.0)\n"
+    "  };\n"
+    "\n"
+    "  float2 texCoords[4] =\n"
+    "  {\n"
+    "    float2(0.0, 0.0),\n"
+    "    float2(1.0, 0.0),\n"
+    "    float2(0.0, 1.0),\n"
+    "    float2(1.0, 1.0)\n"
+    "  };\n"
+    "\n"
+    "  position = float4(positions[vertexID], 0.0, 1.0);\n"
+    "  texCoord = texCoords[vertexID];\n"
+    "}";
+
+  // compile and create the vertex shader
+  comRef_defineLocal(ID3DBlob, byteCode);
+  if (!compileShader(byteCode, "main", "vs_5_0", vshaderSrc))
+    return false;
+
+  comRef_defineLocal(ID3D11VertexShader, vshader);
+  HRESULT status = ID3D11Device_CreateVertexShader(
+    *this->device,
+    ID3D10Blob_GetBufferPointer(*byteCode),
+    ID3D10Blob_GetBufferSize   (*byteCode),
+    NULL,
+    vshader);
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the vertex shader", status);
+    return false;
+  }
+
+  comRef_toGlobal(this->vshader, vshader);
+  return true;
+}
+
 static bool dxgi_init(void)
 {
   DEBUG_ASSERT(this);
@@ -757,6 +808,9 @@ static bool dxgi_init(void)
     this->texture[i].texDamageCount = -1;
     vector_create(&this->texture[i].pp, sizeof(PostProcessInstance), 0);
   }
+
+  if (!initVertexShader())
+    goto fail;
 
   const D3D11_VIEWPORT vp =
   {
@@ -1371,8 +1425,24 @@ static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src)
       inst->src = src;
     }
 
+    // set the vertex shader
+    ID3D11DeviceContext_VSSetShader(
+      *this->deviceContext, *this->vshader, NULL, 0);
+
     // run the post processor
-    src = inst->pp->run(inst->opaque, inst->srv);
+    ID3D11Texture2D * out = inst->pp->run(inst->opaque, inst->srv);
+
+    // if the post processor returned a different texture then draw to run it
+    if (out == src)
+      continue;
+
+    // draw the full screen quad
+    ID3D11DeviceContext_IASetPrimitiveTopology(
+      *this->deviceContext, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    ID3D11DeviceContext_Draw(*this->deviceContext, 4, 0);
+
+    // the output is now the input
+    src = out;
   }
 
   return src;

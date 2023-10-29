@@ -94,6 +94,7 @@ struct DXGIInterface
   DXGI_FORMAT                dxgiSrcFormat, dxgiFormat;
   bool                       hdr;
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
+  ID3D11VertexShader      ** vshader;
   struct DXGICopyBackend   * backend;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
