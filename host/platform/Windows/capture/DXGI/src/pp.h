@@ -1,0 +1,54 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2023 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include <d3d11.h>
+#include <stdbool.h>
+
+typedef struct
+{
+  /* the friendly name of the processor for debugging */
+  const char * name;
+
+  /* early initialization for registering options */
+  void (*earlyInit)(void);
+
+  /* common setup */
+  bool (*setup)(
+    ID3D11Device        ** device,
+    ID3D11DeviceContext ** context,
+    IDXGIOutput         ** output);
+
+  /* instance initialization */
+  bool (*init)(
+    void ** opaque,
+    int     width,
+    int     height,
+    bool    shareable);
+
+  /* perform the processing */
+  ID3D11Texture2D * (*run)(void * opaque, ID3D11Texture2D * src);
+
+  /* instance destruction */
+  void (*free)(void * opaque);
+
+  /* cleanup */
+  void (*finish)(void);
+}
+DXGIPostProcess;

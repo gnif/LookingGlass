@@ -8,6 +8,8 @@ add_library(capture_DXGI STATIC
   src/ods_capture.c
   src/util.c
   src/com_ref.c
+
+  src/pp/sdrwhitelevel.c
 )
 
 add_definitions("-DCOBJMACROS -DINITGUID")

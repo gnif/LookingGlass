@@ -1,0 +1,377 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2023 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include "pp.h"
+#include "com_ref.h"
+#include "util.h"
+
+#include "common/debug.h"
+#include "common/windebug.h"
+
+#include <dxgi1_6.h>
+
+typedef struct SDRWhiteLevel
+{
+  ID3D11Device        ** device;
+  ID3D11DeviceContext ** context;
+
+  ID3D11VertexShader  ** vshader;
+  ID3D11PixelShader   ** pshader;
+  ID3D11SamplerState  ** sampler;
+  ID3D11Buffer        ** buffer;
+
+  DISPLAYCONFIG_PATH_INFO displayPathInfo;
+  float sdrWhiteLevel;
+}
+SDRWhiteLevel;
+SDRWhiteLevel this = {0};
+
+typedef struct
+{
+  ID3D11Texture2D        ** tex;
+  ID3D11RenderTargetView ** target;
+}
+SDRWhiteLevelInst;
+
+struct ShaderConsts
+{
+  float sdrWhiteLevel;
+}
+__attribute__((aligned(16)));
+
+static const char * vshader =
+  "void main(\n"
+  "  in  uint   vertexID : SV_VERTEXID,\n"
+  "  out float4 position : SV_POSITION,\n"
+  "  out float2 texCoord : TEXCOORD0)\n"
+  "{\n"
+  "  float2 positions[4] =\n"
+  "  {\n"
+  "    float2(-1.0,  1.0),\n"
+  "    float2( 1.0,  1.0),\n"
+  "    float2(-1.0, -1.0),\n"
+  "    float2( 1.0, -1.0)\n"
+  "  };\n"
+  "\n"
+  "  float2 texCoords[4] =\n"
+  "  {\n"
+  "    float2(0.0, 0.0),\n"
+  "    float2(1.0, 0.0),\n"
+  "    float2(0.0, 1.0),\n"
+  "    float2(1.0, 1.0)\n"
+  "  };\n"
+  "\n"
+  "  position = float4(positions[vertexID], 0.0, 1.0);\n"
+  "  texCoord = texCoords[vertexID];\n"
+  "}";
+
+static const char * pshader =
+  "Texture2D    gInputTexture : register(t0);\n"
+  "SamplerState gSamplerState : register(s0);\n"
+  "cbuffer      gConsts       : register(b0)\n"
+  "{\n"
+  "  float SDRWhiteLevel;"
+  "};\n"
+  "\n"
+  "float4 main(\n"
+  "  float4 position : SV_POSITION,\n"
+  "  float2 texCoord : TEXCOORD0) : SV_TARGET"
+  "{\n"
+  "  float4 color = gInputTexture.Sample(gSamplerState, texCoord);\n"
+  "  color.rgb   *= SDRWhiteLevel;\n"
+  "  return color;\n"
+  "}\n";
+
+static void updateConsts(void);
+
+static bool sdrWhiteLevel_setup(
+  ID3D11Device        ** device,
+  ID3D11DeviceContext ** context,
+  IDXGIOutput         ** output
+)
+{
+  bool result = false;
+  comRef_scopePush();
+  HRESULT status;
+
+  this.device  = device;
+  this.context = context;
+
+  comRef_defineLocal(IDXGIOutput6, output6);
+  status = IDXGIOutput_QueryInterface(
+    *output, &IID_IDXGIOutput6, (void **)output6);
+
+  if (!SUCCEEDED(status))
+  {
+    DEBUG_ERROR("Failed to get the IDXGIOutput6 interface");
+    goto exit;
+  }
+
+  DXGI_OUTPUT_DESC1 desc1;
+  IDXGIOutput6_GetDesc1(*output6, &desc1);
+  if (!getDisplayPathInfo(desc1.Monitor, &this.displayPathInfo))
+  {
+    DEBUG_ERROR("Failed to get the display path info");
+    goto exit;
+  }
+
+  // compile and create the vertex shader
+  comRef_defineLocal(ID3DBlob, byteCode);
+  if (!compileShader(byteCode, "main", "vs_5_0", vshader))
+    goto exit;
+
+  status = ID3D11Device_CreateVertexShader(
+    *this.device,
+    ID3D10Blob_GetBufferPointer(*byteCode),
+    ID3D10Blob_GetBufferSize   (*byteCode),
+    NULL,
+    (ID3D11VertexShader **)comRef_newGlobal(&this.vshader));
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the vertex shader", status);
+    goto exit;
+  }
+
+  comRef_release(byteCode);
+  if (!compileShader(byteCode, "main", "ps_5_0", pshader))
+    goto exit;
+
+  status = ID3D11Device_CreatePixelShader(
+    *this.device,
+    ID3D10Blob_GetBufferPointer(*byteCode),
+    ID3D10Blob_GetBufferSize   (*byteCode),
+    NULL,
+    (ID3D11PixelShader **)comRef_newGlobal(&this.pshader));
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the pixel shader", status);
+    goto exit;
+  }
+
+  const D3D11_SAMPLER_DESC samplerDesc =
+  {
+    .Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    .AddressU       = D3D11_TEXTURE_ADDRESS_WRAP,
+    .AddressV       = D3D11_TEXTURE_ADDRESS_WRAP,
+    .AddressW       = D3D11_TEXTURE_ADDRESS_WRAP,
+    .ComparisonFunc = D3D11_COMPARISON_NEVER,
+    .MinLOD         = 0,
+    .MaxLOD         = D3D11_FLOAT32_MAX
+  };
+
+  status = ID3D11Device_CreateSamplerState(
+    *this.device, &samplerDesc,
+    (ID3D11SamplerState  **)comRef_newGlobal(&this.sampler));
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the sampler state", status);
+    goto exit;
+  }
+
+  D3D11_BUFFER_DESC bufferDesc =
+  {
+    .ByteWidth      = sizeof(struct ShaderConsts),
+    .Usage          = D3D11_USAGE_DEFAULT,
+    .BindFlags      = D3D11_BIND_CONSTANT_BUFFER,
+  };
+
+  status = ID3D11Device_CreateBuffer(
+    *this.device, &bufferDesc, NULL,
+    (ID3D11Buffer **)comRef_newGlobal(&this.buffer));
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the constant buffer", status);
+    goto exit;
+  }
+
+  updateConsts();
+  DEBUG_INFO("SDR White Level   : %f"   , this.sdrWhiteLevel);
+
+  result = true;
+
+exit:
+  comRef_scopePop();
+  return result;
+}
+
+static void sdrWhiteLevel_finish(void)
+{
+  memset(&this, 0, sizeof(this));
+}
+
+static bool sdrWhiteLevel_init(
+  void ** opaque,
+  int  width,
+  int  height,
+  bool shareable)
+{
+  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)calloc(1, sizeof(*inst));
+  if (!inst)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return false;
+  }
+
+  comRef_scopePush();
+
+  // create the output texture
+  D3D11_TEXTURE2D_DESC texDesc =
+  {
+    .Width              = width,
+    .Height             = height,
+    .MipLevels          = 1,
+    .ArraySize          = 1,
+    .SampleDesc.Count   = 1,
+    .SampleDesc.Quality = 0,
+    .Usage              = D3D11_USAGE_DEFAULT,
+    .Format             = DXGI_FORMAT_R10G10B10A2_UNORM,
+    .BindFlags          = D3D11_BIND_RENDER_TARGET |
+                          D3D11_BIND_SHADER_RESOURCE,
+    .CPUAccessFlags     = 0,
+    .MiscFlags          = 0
+  };
+
+  // allow texture sharing with other backends
+  if (shareable)
+    texDesc.MiscFlags |=
+      D3D11_RESOURCE_MISC_SHARED |
+      D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+
+  comRef_defineLocal(ID3D11Texture2D, tex);
+  HRESULT status = ID3D11Device_CreateTexture2D(
+    *this.device, &texDesc, NULL, tex);
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the output texture", status);
+    goto fail;
+  }
+
+  comRef_defineLocal(ID3D11RenderTargetView, target);
+  status = ID3D11Device_CreateRenderTargetView(
+    *this.device, *(ID3D11Resource **)tex, NULL, target);
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the render target view", status);
+    goto fail;
+  }
+
+  *opaque = inst;
+  comRef_toGlobal(inst->tex   , tex   );
+  comRef_toGlobal(inst->target, target);
+
+  comRef_scopePop();
+  return true;
+
+fail:
+  comRef_scopePop();
+  free(inst);
+  return false;
+}
+
+static void sdrWhiteLevel_free(void * opaque)
+{
+  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
+  comRef_release(inst->target);
+  comRef_release(inst->tex   );
+  free(inst);
+}
+
+static void updateConsts(void)
+{
+  float nits = getSDRWhiteLevel(&this.displayPathInfo);
+  if (nits == this.sdrWhiteLevel)
+    return;
+
+  this.sdrWhiteLevel = nits;
+
+  struct ShaderConsts consts = { .sdrWhiteLevel = 80.0f / nits };
+  ID3D11DeviceContext_UpdateSubresource(
+    *this.context, *(ID3D11Resource**)this.buffer,
+    0, NULL, &consts, 0, 0);
+}
+
+static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque, ID3D11Texture2D * src)
+{
+  comRef_scopePush();
+  ID3D11Texture2D * result = NULL;
+  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
+  HRESULT status;
+
+  updateConsts();
+
+  // setup the pixel shader input resource view
+  comRef_defineLocal(ID3D11ShaderResourceView, inputSRV);
+  D3D11_TEXTURE2D_DESC desc;
+  ID3D11Texture2D_GetDesc(src, &desc);
+
+  const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc =
+  {
+    .Format              = desc.Format,
+    .ViewDimension       = D3D11_SRV_DIMENSION_TEXTURE2D,
+    .Texture2D.MipLevels = 1
+  };
+  status = ID3D11Device_CreateShaderResourceView(
+    *this.device, (ID3D11Resource *)src, &srvDesc, inputSRV);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create the source resource view", status);
+    goto exit;
+  }
+
+  // set the vertex and pixel shader
+  ID3D11DeviceContext_VSSetShader(*this.context, *this.vshader, NULL, 0);
+  ID3D11DeviceContext_PSSetShader(*this.context, *this.pshader, NULL, 0);
+
+  // set the pixel shader resources
+  ID3D11DeviceContext_PSSetShaderResources(*this.context, 0, 1, inputSRV    );
+  ID3D11DeviceContext_PSSetSamplers       (*this.context, 0, 1, this.sampler);
+  ID3D11DeviceContext_PSSetConstantBuffers(*this.context, 0, 1, this.buffer );
+
+  // set the render target
+  ID3D11DeviceContext_OMSetRenderTargets(*this.context, 1, inst->target, NULL);
+
+  ID3D11DeviceContext_IASetPrimitiveTopology(
+    *this.context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+  ID3D11DeviceContext_Draw(*this.context, 4, 0);
+
+  result = *inst->tex;
+
+exit:
+  comRef_scopePop();
+  return result;
+}
+
+DXGIPostProcess DXGIPP_SDRWhiteLevel =
+{
+  .name      = "SDRWhiteLevel",
+  .earlyInit = NULL,
+  .setup     = sdrWhiteLevel_setup,
+  .init      = sdrWhiteLevel_init,
+  .free      = sdrWhiteLevel_free,
+  .run       = sdrWhiteLevel_run,
+  .finish    = sdrWhiteLevel_finish
+};

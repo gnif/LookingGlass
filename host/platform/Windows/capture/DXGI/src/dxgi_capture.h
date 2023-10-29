@@ -18,6 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include "pp.h"
+
 #include <stdint.h>
 #include <dxgi.h>
 #include <dxgi1_2.h>
@@ -28,6 +30,7 @@
 #include "common/event.h"
 #include "common/locking.h"
 #include "common/types.h"
+#include "common/vector.h"
 #include "interface/capture.h"
 
 enum TextureState
@@ -47,8 +50,9 @@ typedef struct Texture
   FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
   int32_t                    texDamageCount;
   FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
-  ID3D11RenderTargetView  ** renderTarget;
-  ID3D11Texture2D         ** hdrTex;
+
+  // post processing
+  Vector                     pp;
 
   void                     * impl;
 }
@@ -89,13 +93,7 @@ struct DXGIInterface
   bool                       needsRelease;
   DXGI_FORMAT                dxgiSrcFormat, dxgiFormat;
   bool                       hdr;
-  DISPLAYCONFIG_PATH_INFO    displayPathInfo;
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
-  float                      sdrWhiteLevel;
-  ID3D11Buffer            ** constBuffer;
-  ID3D11PixelShader       ** pixelShader;
-  ID3D11VertexShader      ** vertexShader;
-  ID3D11SamplerState      ** samplerState;
   struct DXGICopyBackend   * backend;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
