@@ -96,19 +96,21 @@ struct DXGIInterface
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
   ID3D11VertexShader      ** vshader;
   struct DXGICopyBackend   * backend;
+  bool                       backendConfigured;
 
   CaptureGetPointerBuffer    getPointerBufferFn;
   CapturePostPointerBuffer   postPointerBufferFn;
   LGEvent                  * frameEvent;
 
   unsigned int    formatVer;
-  unsigned int    width , targetWidth ;
-  unsigned int    height, targetHeight;
+  unsigned int    width , outputWidth , dataWidth;
+  unsigned int    height, outputHeight, dataHeight;
   unsigned int    downsampleLevel;
   unsigned int    pitch;
   unsigned int    stride;
+  unsigned int    padding;
   unsigned int    bpp;
-  CaptureFormat   format;
+  CaptureFormat   format, outputFormat;
   CaptureRotation rotation;
 
   int  lastPointerX, lastPointerY;
@@ -122,6 +124,8 @@ struct DXGICopyBackend
   const char * name;
   const char * code;
   bool (*create)(struct DXGIInterface * intf);
+  bool (*configure)(unsigned width, unsigned height,
+    DXGI_FORMAT format, unsigned * pitch);
   void (*free)(void);
   bool (*copyFrame)(Texture * tex, ID3D11Texture2D * src);
   CaptureResult (*mapTexture)(Texture * tex);

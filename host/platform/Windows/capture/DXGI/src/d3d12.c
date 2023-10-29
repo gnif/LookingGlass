@@ -95,8 +95,8 @@ static bool d3d12_create(struct DXGIInterface * intf)
   {
     DEBUG_WARN("The D3D12 backend does not support downsampling yet");
     dxgi->downsampleLevel = 0;
-    dxgi->targetWidth     = dxgi->width;
-    dxgi->targetHeight    = dxgi->height;
+    dxgi->outputWidth     = dxgi->width;
+    dxgi->outputHeight    = dxgi->height;
   }
 
   if (dxgi->debug)

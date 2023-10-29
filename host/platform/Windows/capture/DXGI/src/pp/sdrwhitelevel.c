@@ -32,6 +32,7 @@ typedef struct SDRWhiteLevel
   ID3D11Device        ** device;
   ID3D11DeviceContext ** context;
 
+  bool shareable;
   ID3D11PixelShader   ** pshader;
   ID3D11SamplerState  ** sampler;
   ID3D11Buffer        ** buffer;
@@ -40,7 +41,7 @@ typedef struct SDRWhiteLevel
   float sdrWhiteLevel;
 }
 SDRWhiteLevel;
-SDRWhiteLevel this = {0};
+static SDRWhiteLevel this = {0};
 
 typedef struct
 {
@@ -60,15 +61,17 @@ static void updateConsts(void);
 static bool sdrWhiteLevel_setup(
   ID3D11Device        ** device,
   ID3D11DeviceContext ** context,
-  IDXGIOutput         ** output
+  IDXGIOutput         ** output,
+  bool                   shareable
 )
 {
   bool result = false;
   comRef_scopePush();
   HRESULT status;
 
-  this.device  = device;
-  this.context = context;
+  this.device    = device;
+  this.context   = context;
+  this.shareable = shareable;
 
   comRef_defineLocal(IDXGIOutput6, output6);
   status = IDXGIOutput_QueryInterface(
@@ -106,7 +109,7 @@ static bool sdrWhiteLevel_setup(
     "}\n";
 
   comRef_defineLocal(ID3DBlob, byteCode);
-  if (!compileShader(byteCode, "main", "ps_5_0", pshaderSrc))
+  if (!compileShader(byteCode, "main", "ps_5_0", pshaderSrc, NULL))
     goto exit;
 
   comRef_defineLocal(ID3D11PixelShader, pshader);
@@ -178,11 +181,7 @@ static void sdrWhiteLevel_finish(void)
   memset(&this, 0, sizeof(this));
 }
 
-static bool sdrWhiteLevel_init(
-  void ** opaque,
-  int  width,
-  int  height,
-  bool shareable)
+static bool sdrWhiteLevel_init(void ** opaque)
 {
   SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)calloc(1, sizeof(*inst));
   if (!inst)
@@ -191,13 +190,48 @@ static bool sdrWhiteLevel_init(
     return false;
   }
 
+ *opaque = inst;
+ return true;
+}
+
+static void sdrWhiteLevel_free(void * opaque)
+{
+  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
+  comRef_release(inst->target);
+  comRef_release(inst->tex   );
+  free(inst);
+}
+
+static void updateConsts(void)
+{
+  float nits = getSDRWhiteLevel(&this.displayPathInfo);
+  if (nits == this.sdrWhiteLevel)
+    return;
+
+  this.sdrWhiteLevel = nits;
+
+  struct ShaderConsts consts = { .sdrWhiteLevel = 80.0f / nits };
+  ID3D11DeviceContext_UpdateSubresource(
+    *this.context, *(ID3D11Resource**)this.buffer,
+    0, NULL, &consts, 0, 0);
+}
+
+static bool sdrWhiteLevel_configure(void * opaque,
+  int * width, int * height,
+  int * cols , int * rows,
+  CaptureFormat * format)
+{
+  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
+  if (inst->tex)
+    return true;
+
   comRef_scopePush();
 
   // create the output texture
   D3D11_TEXTURE2D_DESC texDesc =
   {
-    .Width              = width,
-    .Height             = height,
+    .Width              = *width,
+    .Height             = *height,
     .MipLevels          = 1,
     .ArraySize          = 1,
     .SampleDesc.Count   = 1,
@@ -211,7 +245,7 @@ static bool sdrWhiteLevel_init(
   };
 
   // allow texture sharing with other backends
-  if (shareable)
+  if (this.shareable)
     texDesc.MiscFlags |=
       D3D11_RESOURCE_MISC_SHARED |
       D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
@@ -236,39 +270,17 @@ static bool sdrWhiteLevel_init(
     goto fail;
   }
 
-  *opaque = inst;
   comRef_toGlobal(inst->tex   , tex   );
   comRef_toGlobal(inst->target, target);
 
   comRef_scopePop();
+
+  *format = CAPTURE_FMT_RGBA10;
   return true;
 
 fail:
   comRef_scopePop();
-  free(inst);
   return false;
-}
-
-static void sdrWhiteLevel_free(void * opaque)
-{
-  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
-  comRef_release(inst->target);
-  comRef_release(inst->tex   );
-  free(inst);
-}
-
-static void updateConsts(void)
-{
-  float nits = getSDRWhiteLevel(&this.displayPathInfo);
-  if (nits == this.sdrWhiteLevel)
-    return;
-
-  this.sdrWhiteLevel = nits;
-
-  struct ShaderConsts consts = { .sdrWhiteLevel = 80.0f / nits };
-  ID3D11DeviceContext_UpdateSubresource(
-    *this.context, *(ID3D11Resource**)this.buffer,
-    0, NULL, &consts, 0, 0);
 }
 
 static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
@@ -299,6 +311,7 @@ DXGIPostProcess DXGIPP_SDRWhiteLevel =
   .setup     = sdrWhiteLevel_setup,
   .init      = sdrWhiteLevel_init,
   .free      = sdrWhiteLevel_free,
+  .configure = sdrWhiteLevel_configure,
   .run       = sdrWhiteLevel_run,
   .finish    = sdrWhiteLevel_finish
 };

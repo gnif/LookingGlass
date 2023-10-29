@@ -21,6 +21,9 @@
 #include <d3d11.h>
 #include <stdbool.h>
 
+#include "interface/capture.h"
+#include "common/locking.h"
+
 typedef struct
 {
   /* the friendly name of the processor for debugging */
@@ -33,14 +36,17 @@ typedef struct
   bool (*setup)(
     ID3D11Device        ** device,
     ID3D11DeviceContext ** context,
-    IDXGIOutput         ** output);
+    IDXGIOutput         ** output,
+    bool                   shareable);
 
   /* instance initialization */
-  bool (*init)(
-    void ** opaque,
-    int     width,
-    int     height,
-    bool    shareable);
+  bool (*init)(void ** opaque);
+
+  /* showtime configuration */
+  bool (*configure)(void * opaque,
+    int * width, int * height, // the image dimensions
+    int * cols , int * rows  , // the texture dimensions for packed data
+    CaptureFormat * type);
 
   /* perform the processing */
   ID3D11Texture2D * (*run)(void * opaque, ID3D11ShaderResourceView * srv);
