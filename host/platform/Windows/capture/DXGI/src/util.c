@@ -196,18 +196,18 @@ const char * getDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type)
 }
 
 bool compileShader(ID3DBlob ** dst, const char * entry, const char * target,
-  const char * code)
+  const char * code, const D3D_SHADER_MACRO * defines)
 {
   ID3DBlob * errors;
   HRESULT status = D3DCompile(
     code,
     strlen(code),
     NULL,
-    NULL,
+    defines,
     NULL,
     entry,
     target,
-    D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+    0,//D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
     0,
     dst,
     &errors);

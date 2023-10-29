@@ -250,8 +250,13 @@ static bool sendFrame(void)
 
   switch(frame.format)
   {
-    case CAPTURE_FMT_BGRA   : fi->type = FRAME_TYPE_BGRA   ; break;
-    case CAPTURE_FMT_RGBA   : fi->type = FRAME_TYPE_RGBA   ; break;
+    case CAPTURE_FMT_BGRA:
+      fi->type = FRAME_TYPE_BGRA;
+      break;
+
+    case CAPTURE_FMT_RGBA:
+      fi->type = FRAME_TYPE_RGBA;
+      break;
 
     case CAPTURE_FMT_RGBA10:
       fi->type = FRAME_TYPE_RGBA10;
@@ -260,6 +265,10 @@ static bool sendFrame(void)
     case CAPTURE_FMT_RGBA16F:
       fi->type  = FRAME_TYPE_RGBA16F;
       flags    |= FRAME_FLAG_HDR;
+      break;
+
+    case CAPTURE_FMT_BGR:
+      fi->type = FRAME_TYPE_BGR;
       break;
 
     default:
@@ -292,6 +301,8 @@ static bool sendFrame(void)
   fi->frameSerial       = app.frameSerial++;
   fi->screenWidth       = frame.screenWidth;
   fi->screenHeight      = frame.screenHeight;
+  fi->dataWidth         = frame.dataWidth;
+  fi->dataHeight        = frame.dataHeight;
   fi->frameWidth        = frame.frameWidth;
   fi->frameHeight       = frame.frameHeight;
   fi->stride            = frame.stride;
@@ -317,7 +328,7 @@ static bool sendFrame(void)
     return true;
   }
 
-  app.iface->getFrame(fb, frame.frameHeight, app.frameIndex);
+  app.iface->getFrame(fb, app.frameIndex);
   return true;
 }
 

@@ -25,7 +25,7 @@ const char * getDXGIFormatStr(DXGI_FORMAT format);
 const char * getDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type);
 
 bool compileShader(ID3DBlob ** dst, const char * entry, const char * target,
-  const char * code);
+  const char * code, const D3D_SHADER_MACRO * defines);
 
 bool getDisplayPathInfo(HMONITOR monitor, DISPLAYCONFIG_PATH_INFO * info);
 

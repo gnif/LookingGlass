@@ -35,9 +35,7 @@ struct D3D11Backend
 
 struct D3D11TexImpl
 {
-  ID3D11Texture2D          ** gpu;
-  ID3D11Texture2D          ** cpu;
-  ID3D11ShaderResourceView ** srv;
+  ID3D11Texture2D ** cpu;
 };
 
 #define TEXIMPL(x) ((struct D3D11TexImpl *)(x).impl)
@@ -49,7 +47,6 @@ static void d3d11_free(void);
 
 static bool d3d11_create(struct DXGIInterface * intf)
 {
-  HRESULT status;
   dxgi = intf;
 
   DEBUG_ASSERT(!this);
@@ -61,32 +58,24 @@ static bool d3d11_create(struct DXGIInterface * intf)
   }
 
   this->avgMapTime = runningavg_new(10);
+  return true;
+}
 
-  D3D11_TEXTURE2D_DESC gpuTexDesc =
-  {
-    .Width              = dxgi->width,
-    .Height             = dxgi->height,
-    .MipLevels          = dxgi->downsampleLevel + 1,
-    .ArraySize          = 1,
-    .SampleDesc.Count   = 1,
-    .SampleDesc.Quality = 0,
-    .Usage              = D3D11_USAGE_DEFAULT,
-    .Format             = dxgi->dxgiFormat,
-    .BindFlags          = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
-    .CPUAccessFlags     = 0,
-    .MiscFlags          = D3D11_RESOURCE_MISC_GENERATE_MIPS
-  };
+static bool d3d11_configure(unsigned width, unsigned height, DXGI_FORMAT format,
+  unsigned * pitch)
+{
+  HRESULT status;
 
   D3D11_TEXTURE2D_DESC cpuTexDesc =
   {
-    .Width              = dxgi->targetWidth,
-    .Height             = dxgi->targetHeight,
+    .Width              = width,
+    .Height             = height,
     .MipLevels          = 1,
     .ArraySize          = 1,
     .SampleDesc.Count   = 1,
     .SampleDesc.Quality = 0,
     .Usage              = D3D11_USAGE_STAGING,
-    .Format             = dxgi->dxgiFormat,
+    .Format             = format,
     .BindFlags          = 0,
     .CPUAccessFlags     = D3D11_CPU_ACCESS_READ,
     .MiscFlags          = 0
@@ -111,22 +100,6 @@ static bool d3d11_create(struct DXGIInterface * intf)
       DEBUG_WINERROR("Failed to create CPU texture", status);
       goto fail;
     }
-
-    if (!dxgi->downsampleLevel)
-      continue;
-
-    status = ID3D11Device_CreateTexture2D(*dxgi->device, &gpuTexDesc, NULL,
-      (ID3D11Texture2D **)comRef_newGlobal(&teximpl->gpu));
-
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to create GPU texture", status);
-      goto fail;
-    }
-
-    ID3D11Device_CreateShaderResourceView(*dxgi->device,
-      *(ID3D11Resource **)teximpl->gpu, NULL,
-      (ID3D11ShaderResourceView **)comRef_newGlobal(&teximpl->srv));
   }
 
   // map the texture simply to get the pitch and stride
@@ -141,16 +114,13 @@ static bool d3d11_create(struct DXGIInterface * intf)
     goto fail;
   }
 
-  dxgi->pitch  = mapping.RowPitch;
-  dxgi->stride = mapping.RowPitch / dxgi->bpp;
-
   ID3D11DeviceContext_Unmap(*dxgi->deviceContext,
     *(ID3D11Resource **)TEXIMPL(dxgi->texture[0])->cpu, 0);
 
+  *pitch = mapping.RowPitch;
   return true;
 
 fail:
-  d3d11_free();
   return false;
 }
 
@@ -199,76 +169,12 @@ static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
   }
 }
 
-static void copyFrameDownsampled(Texture * tex, ID3D11Texture2D * src)
-{
-  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
-  ID3D11Texture2D * dst = *teximpl->gpu;
-
-  if (tex->texDamageCount < 0)
-    ID3D11DeviceContext_ResolveSubresource(*dxgi->deviceContext,
-      (ID3D11Resource *)dst, 0,
-      (ID3D11Resource *)src, 0,
-      dxgi->dxgiFormat);
-  else
-  {
-    for (int i = 0; i < tex->texDamageCount; ++i)
-    {
-      FrameDamageRect * rect = tex->texDamageRects + i;
-      D3D11_BOX box =
-      {
-        .left   = rect->x << dxgi->downsampleLevel,
-        .top    = rect->y << dxgi->downsampleLevel,
-        .front  = 0,
-        .back   = 1,
-        .right  = (rect->x + rect->width ) << dxgi->downsampleLevel,
-        .bottom = (rect->y + rect->height) << dxgi->downsampleLevel,
-      };
-      ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
-        (ID3D11Resource *)dst, 0, box.left, box.top, 0,
-        (ID3D11Resource *)src, 0, &box);
-    }
-  }
-
-  ID3D11DeviceContext_GenerateMips(*dxgi->deviceContext, *teximpl->srv);
-  if (tex->texDamageCount < 0)
-    ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
-      *(ID3D11Resource **)teximpl->cpu, 0, 0, 0, 0,
-       (ID3D11Resource * )dst          , dxgi->downsampleLevel, NULL);
-  else
-  {
-    for (int i = 0; i < tex->texDamageCount; ++i)
-    {
-      FrameDamageRect * rect = tex->texDamageRects + i;
-      D3D11_BOX box =
-      {
-        .left   = rect->x,
-        .top    = rect->y,
-        .front  = 0,
-        .back   = 1,
-        .right  = rect->x + rect->width ,
-        .bottom = rect->y + rect->height,
-      };
-
-      ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
-        *(ID3D11Resource **)teximpl->cpu, 0, box.left, box.top, 0,
-         (ID3D11Resource * )dst          , dxgi->downsampleLevel, &box);
-    }
-  }
-}
-
 static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
 {
-  struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
-
   INTERLOCKED_SECTION(dxgi->deviceContextLock,
   {
     tex->copyTime = microtime();
-
-    if (teximpl->gpu && *teximpl->gpu)
-      copyFrameDownsampled(tex, src);
-    else
-      copyFrameFull(tex, src);
-
+    copyFrameFull(tex, src);
     ID3D11DeviceContext_Flush(*dxgi->deviceContext);
   });
   return true;
@@ -339,6 +245,7 @@ struct DXGICopyBackend copyBackendD3D11 = {
   .name         = "Direct3D 11",
   .code         = "d3d11",
   .create       = d3d11_create,
+  .configure    = d3d11_configure,
   .free         = d3d11_free,
   .copyFrame    = d3d11_copyFrame,
   .mapTexture   = d3d11_mapTexture,

@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 19
+#define KVMFR_VERSION 20
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -149,6 +149,8 @@ typedef struct KVMFRFrame
   FrameType       type;               // the frame data type
   uint32_t        screenWidth;        // the client's screen width
   uint32_t        screenHeight;       // the client's screen height
+  uint32_t        dataWidth;          // the packed width of the frame data
+  uint32_t        dataHeight;         // the packed height of the frame data
   uint32_t        frameWidth;         // the frame width
   uint32_t        frameHeight;        // the frame height
   FrameRotation   rotation;           // the frame rotation

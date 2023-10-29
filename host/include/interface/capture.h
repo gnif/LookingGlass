@@ -48,6 +48,7 @@ typedef enum CaptureFormat
   CAPTURE_FMT_RGBA   ,
   CAPTURE_FMT_RGBA10 ,
   CAPTURE_FMT_RGBA16F,
+  CAPTURE_FMT_BGR    ,
 
   // pointer formats
   CAPTURE_FMT_COLOR ,
@@ -69,18 +70,21 @@ CaptureRotation;
 
 typedef struct CaptureFrame
 {
-  unsigned int    formatVer;
-  unsigned int    screenWidth;
-  unsigned int    screenHeight;
-  unsigned int    frameWidth;
-  unsigned int    frameHeight;
-  bool            truncated;
-  unsigned int    pitch;
-  unsigned int    stride;
-  CaptureFormat   format;
-  bool            hdr;
-  bool            hdrPQ;
-  CaptureRotation rotation;
+  unsigned        formatVer;
+  unsigned        screenWidth;  // actual screen width
+  unsigned        screenHeight; // actual screen height
+  unsigned        dataWidth;    // the width of the packed frame data
+  unsigned        dataHeight;   // the height of the packed frame data
+  unsigned        frameWidth;   // width of the frame image
+  unsigned        frameHeight;  // height of the frame image
+  unsigned        pitch;        // total width of one row of data in bytes
+  unsigned        stride;       // total width of one row of data in pixels
+  CaptureFormat   format;       // the data format of the frame
+  bool            truncated;    // true if the frame data is truncated
+  bool            hdr;          // true if the frame format is HDR
+  bool            hdrPQ;        // true if the frame format is PQ transformed
+  CaptureRotation rotation;     // output rotation of the frame
+
   uint32_t        damageRectsCount;
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
 }
@@ -94,9 +98,9 @@ typedef struct CapturePointer
 
   bool          shapeUpdate;
   CaptureFormat format;
-  unsigned int  hx, hy;
-  unsigned int  width, height;
-  unsigned int  pitch;
+  unsigned      hx, hy;
+  unsigned      width, height;
+  unsigned      pitch;
 }
 CapturePointer;
 
@@ -123,6 +127,6 @@ typedef struct CaptureInterface
 
   CaptureResult (*capture   )(void);
   CaptureResult (*waitFrame )(CaptureFrame * frame, const size_t maxFrameSize);
-  CaptureResult (*getFrame  )(FrameBuffer  * frame, const unsigned int height, int frameIndex);
+  CaptureResult (*getFrame  )(FrameBuffer  * frame, int frameIndex);
 }
 CaptureInterface;

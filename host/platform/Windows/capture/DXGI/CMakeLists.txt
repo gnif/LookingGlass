@@ -10,6 +10,7 @@ add_library(capture_DXGI STATIC
   src/com_ref.c
 
   src/pp/sdrwhitelevel.c
+  src/pp/rgb24.c
 )
 
 add_definitions("-DCOBJMACROS -DINITGUID")
