@@ -66,12 +66,15 @@ bool vector_create(Vector * vector, size_t itemSize, size_t capacity)
 void vector_destroy(Vector * vector)
 {
   free(vector->data);
+  vector->data     = NULL;
   vector->capacity = 0;
   vector->itemSize = 0;
 }
 
 void * vector_push(Vector * vector, void * item)
 {
+  DEBUG_ASSERT(vector->itemSize > 0 && "itemSize should not be zero");
+
   if (vector->size >= vector->capacity)
   {
     size_t newCapacity = vector->capacity < 4 ? 8 : vector->capacity * 2;
