@@ -32,7 +32,6 @@ typedef struct SDRWhiteLevel
   ID3D11Device        ** device;
   ID3D11DeviceContext ** context;
 
-  ID3D11VertexShader  ** vshader;
   ID3D11PixelShader   ** pshader;
   ID3D11SamplerState  ** sampler;
   ID3D11Buffer        ** buffer;
@@ -55,49 +54,6 @@ struct ShaderConsts
   float sdrWhiteLevel;
 }
 __attribute__((aligned(16)));
-
-static const char * vshader =
-  "void main(\n"
-  "  in  uint   vertexID : SV_VERTEXID,\n"
-  "  out float4 position : SV_POSITION,\n"
-  "  out float2 texCoord : TEXCOORD0)\n"
-  "{\n"
-  "  float2 positions[4] =\n"
-  "  {\n"
-  "    float2(-1.0,  1.0),\n"
-  "    float2( 1.0,  1.0),\n"
-  "    float2(-1.0, -1.0),\n"
-  "    float2( 1.0, -1.0)\n"
-  "  };\n"
-  "\n"
-  "  float2 texCoords[4] =\n"
-  "  {\n"
-  "    float2(0.0, 0.0),\n"
-  "    float2(1.0, 0.0),\n"
-  "    float2(0.0, 1.0),\n"
-  "    float2(1.0, 1.0)\n"
-  "  };\n"
-  "\n"
-  "  position = float4(positions[vertexID], 0.0, 1.0);\n"
-  "  texCoord = texCoords[vertexID];\n"
-  "}";
-
-static const char * pshader =
-  "Texture2D    gInputTexture : register(t0);\n"
-  "SamplerState gSamplerState : register(s0);\n"
-  "cbuffer      gConsts       : register(b0)\n"
-  "{\n"
-  "  float SDRWhiteLevel;"
-  "};\n"
-  "\n"
-  "float4 main(\n"
-  "  float4 position : SV_POSITION,\n"
-  "  float2 texCoord : TEXCOORD0) : SV_TARGET"
-  "{\n"
-  "  float4 color = gInputTexture.Sample(gSamplerState, texCoord);\n"
-  "  color.rgb   *= SDRWhiteLevel;\n"
-  "  return color;\n"
-  "}\n";
 
 static void updateConsts(void);
 
@@ -132,40 +88,42 @@ static bool sdrWhiteLevel_setup(
     goto exit;
   }
 
-  // compile and create the vertex shader
+  static const char * pshaderSrc =
+    "Texture2D    gInputTexture : register(t0);\n"
+    "SamplerState gSamplerState : register(s0);\n"
+    "cbuffer      gConsts       : register(b0)\n"
+    "{\n"
+    "  float SDRWhiteLevel;"
+    "};\n"
+    "\n"
+    "float4 main(\n"
+    "  float4 position : SV_POSITION,\n"
+    "  float2 texCoord : TEXCOORD0) : SV_TARGET"
+    "{\n"
+    "  float4 color = gInputTexture.Sample(gSamplerState, texCoord);\n"
+    "  color.rgb   *= SDRWhiteLevel;\n"
+    "  return color;\n"
+    "}\n";
+
   comRef_defineLocal(ID3DBlob, byteCode);
-  if (!compileShader(byteCode, "main", "vs_5_0", vshader))
+  if (!compileShader(byteCode, "main", "ps_5_0", pshaderSrc))
     goto exit;
 
-  status = ID3D11Device_CreateVertexShader(
-    *this.device,
-    ID3D10Blob_GetBufferPointer(*byteCode),
-    ID3D10Blob_GetBufferSize   (*byteCode),
-    NULL,
-    (ID3D11VertexShader **)comRef_newGlobal(&this.vshader));
-
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to create the vertex shader", status);
-    goto exit;
-  }
-
-  comRef_release(byteCode);
-  if (!compileShader(byteCode, "main", "ps_5_0", pshader))
-    goto exit;
-
+  comRef_defineLocal(ID3D11PixelShader, pshader);
   status = ID3D11Device_CreatePixelShader(
     *this.device,
     ID3D10Blob_GetBufferPointer(*byteCode),
     ID3D10Blob_GetBufferSize   (*byteCode),
     NULL,
-    (ID3D11PixelShader **)comRef_newGlobal(&this.pshader));
+    pshader);
 
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create the pixel shader", status);
     goto exit;
   }
+
+  comRef_toGlobal(this.pshader, pshader);
 
   const D3D11_SAMPLER_DESC samplerDesc =
   {
@@ -320,8 +278,7 @@ static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
 
   updateConsts();
 
-  // set the vertex and pixel shader
-  ID3D11DeviceContext_VSSetShader(*this.context, *this.vshader, NULL, 0);
+  // set the pixel shader & resource
   ID3D11DeviceContext_PSSetShader(*this.context, *this.pshader, NULL, 0);
 
   // set the pixel shader resources
@@ -331,11 +288,6 @@ static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
 
   // set the render target
   ID3D11DeviceContext_OMSetRenderTargets(*this.context, 1, inst->target, NULL);
-
-  ID3D11DeviceContext_IASetPrimitiveTopology(
-    *this.context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-  ID3D11DeviceContext_Draw(*this.context, 4, 0);
 
   return *inst->tex;
 }
