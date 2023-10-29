@@ -58,6 +58,9 @@ IUnknown ** comRef_newLocal(IUnknown *** dst);
  */
 inline static ULONG comRef_release(IUnknown ** ref)
 {
+  if (!ref)
+    return 0;
+
   ULONG count = 0;
   if (*ref)
     count = IUnknown_Release(*ref);
