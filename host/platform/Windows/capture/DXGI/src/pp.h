@@ -43,7 +43,7 @@ typedef struct
     bool    shareable);
 
   /* perform the processing */
-  ID3D11Texture2D * (*run)(void * opaque, ID3D11Texture2D * src);
+  ID3D11Texture2D * (*run)(void * opaque, ID3D11ShaderResourceView * srv);
 
   /* instance destruction */
   void (*free)(void * opaque);

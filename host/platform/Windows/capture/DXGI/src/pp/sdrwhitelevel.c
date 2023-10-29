@@ -313,40 +313,19 @@ static void updateConsts(void)
     0, NULL, &consts, 0, 0);
 }
 
-static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque, ID3D11Texture2D * src)
+static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
+  ID3D11ShaderResourceView * srv)
 {
-  comRef_scopePush();
-  ID3D11Texture2D * result = NULL;
   SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
-  HRESULT status;
 
   updateConsts();
-
-  // setup the pixel shader input resource view
-  comRef_defineLocal(ID3D11ShaderResourceView, inputSRV);
-  D3D11_TEXTURE2D_DESC desc;
-  ID3D11Texture2D_GetDesc(src, &desc);
-
-  const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc =
-  {
-    .Format              = desc.Format,
-    .ViewDimension       = D3D11_SRV_DIMENSION_TEXTURE2D,
-    .Texture2D.MipLevels = 1
-  };
-  status = ID3D11Device_CreateShaderResourceView(
-    *this.device, (ID3D11Resource *)src, &srvDesc, inputSRV);
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to create the source resource view", status);
-    goto exit;
-  }
 
   // set the vertex and pixel shader
   ID3D11DeviceContext_VSSetShader(*this.context, *this.vshader, NULL, 0);
   ID3D11DeviceContext_PSSetShader(*this.context, *this.pshader, NULL, 0);
 
   // set the pixel shader resources
-  ID3D11DeviceContext_PSSetShaderResources(*this.context, 0, 1, inputSRV    );
+  ID3D11DeviceContext_PSSetShaderResources(*this.context, 0, 1, &srv        );
   ID3D11DeviceContext_PSSetSamplers       (*this.context, 0, 1, this.sampler);
   ID3D11DeviceContext_PSSetConstantBuffers(*this.context, 0, 1, this.buffer );
 
@@ -358,11 +337,7 @@ static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque, ID3D11Texture2D * src)
 
   ID3D11DeviceContext_Draw(*this.context, 4, 0);
 
-  result = *inst->tex;
-
-exit:
-  comRef_scopePop();
-  return result;
+  return *inst->tex;
 }
 
 DXGIPostProcess DXGIPP_SDRWhiteLevel =

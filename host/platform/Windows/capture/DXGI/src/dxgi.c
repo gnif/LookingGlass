@@ -54,8 +54,10 @@ extern const DXGIPostProcess DXGIPP_SDRWhiteLevel;
 
 typedef struct
 {
-  const DXGIPostProcess * pp;
-  void                  * opaque;
+  ID3D11Texture2D          * src;
+  ID3D11ShaderResourceView * srv;
+  const DXGIPostProcess    * pp;
+  void                     * opaque;
 }
 PostProcessInstance;
 
@@ -1336,7 +1338,42 @@ static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src)
 {
   PostProcessInstance * inst;
   vector_forEachRef(inst, &tex->pp)
-    src = inst->pp->run(inst->opaque, src);
+  {
+    // if the srv exists and the src has changed, release it
+    if (inst->src != src && inst->srv)
+    {
+      ID3D11ShaderResourceView_Release(inst->srv);
+      inst->srv = NULL;
+    }
+
+    // if the srv is not set, create one
+    if (!inst->srv)
+    {
+      D3D11_TEXTURE2D_DESC desc;
+      ID3D11Texture2D_GetDesc(src, &desc);
+
+      const D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc =
+      {
+        .Format              = desc.Format,
+        .ViewDimension       = D3D11_SRV_DIMENSION_TEXTURE2D,
+        .Texture2D.MipLevels = 1
+      };
+
+      HRESULT status = ID3D11Device_CreateShaderResourceView(
+        *this->device, (ID3D11Resource *)src, &srvDesc, &inst->srv);
+
+      if (FAILED(status))
+      {
+        DEBUG_WINERROR("Failed to create the source resource view", status);
+        continue;
+      }
+
+      inst->src = src;
+    }
+
+    // run the post processor
+    src = inst->pp->run(inst->opaque, inst->srv);
+  }
 
   return src;
 }
@@ -1352,6 +1389,9 @@ static void ppFreeAll(void)
     PostProcessInstance * inst;
     vector_forEachRef(inst, &tex->pp)
     {
+      if(inst->srv)
+        ID3D11ShaderResourceView_Release(inst->srv);
+
       inst->pp->free(inst->opaque);
       if (i == this->maxTextures - 1)
         inst->pp->finish();
