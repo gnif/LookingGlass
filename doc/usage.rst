@@ -523,3 +523,40 @@ The rules are written as follows:
 This capture interface also looks for and reads the value of the system
 environment variable ``NVFBC_PRIV_DATA`` if it has been set, documentation on
 its usage however is unavailable.
+
+
+.. _host_select_ivshmem:
+
+Selecting an IVSHMEM device
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For those attaching multiple IVSHMEM devices to their Virtual Machines, you must
+configure the Looking Glass host to use the correct device. By default the first
+device is selected.
+
+The ``os:shmDevice`` option configures which device is used. These are ordered
+by PCI slot and count up from 0 (default), with 0 being the first IVSHMEM device
+in the lowest slot.
+
+.. code:: ini
+
+  [os]
+  ; Select the second IVSHMEM device
+  shmDevice=1
+
+.. note::
+   ``os:shmDevice`` ignores the actual PCI slot number, instead selecting the
+   *N*\th slot occupied by an IVSHMEM device. For example: with only two IVSHMEM
+   devices in slots 0x03 and 0x05, the device in slot 0x03 will be referred to
+   by *0* (first shm device), and the device in 0x05 by *1* (second shm device).
+
+PCI slot numbers are visible in Device Manager:
+
+1. Double-click any "IVSHMEM device" in Device Manager (``devmgmt.msc``)
+2. Find the slot number in the "Location:" field. (e.g. PCI slot 5)
+
+You can also find a listing of IVSHMEM devices in the ``looking-glass-host.txt``
+log file, with slot numbers shown next to "device" (asterisk indicates currently
+selected device)::
+
+   [I]     19989544      …      IVSHMEM 0  on bus 0x6, device 0x3, function 0x0
+   [I]     19990438      …      IVSHMEM 1* on bus 0x6, device 0x5, function 0x0
