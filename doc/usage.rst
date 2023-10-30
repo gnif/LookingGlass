@@ -352,7 +352,7 @@ line arguments, it is more convenient to create a ``looking-glass-host.ini``
 config file for persistent configuration changes.
 
 This file must be placed in the same directory as the Looking Glass host, by
-default ``C:\Program Files\Looking Glass (host)\``.
+default ``C:\Program&nbsp;Files\Looking&nbsp;Glass&nbsp;(host)\``.
 
 .. _host_capture:
 
