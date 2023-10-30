@@ -37,6 +37,7 @@ rst_prolog = """
 
 extensions = [
     'sphinx_rtd_theme',
+    'html_unescape',
 ]
 
 try:
@@ -63,6 +64,14 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # Explicitly state master_doc instead of relying on default
 master_doc = 'index'
+
+# Documents to exclude from html_unescape
+# For example ['index', 'credits']
+html_unescape_exclude = []
+
+# If not empty, html_unescape will ignore any documents not in the list
+# For example ['install', 'usage']
+html_unescape_onlyinclude = []
 
 # -- Options for HTML output -------------------------------------------------
 
