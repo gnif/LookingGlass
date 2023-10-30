@@ -56,11 +56,13 @@ realtime
 renderer
 repo
 runtime
+shm
 submodule
 submodules
 spencercw
 systemd
 Threadripper
+th
 toolchain
 tritanope
 tunable
