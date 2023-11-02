@@ -48,7 +48,7 @@ static const EGL_FilterOps * EGL_Filters[] =
 
 struct EGL_PostProcess
 {
-  Vector filters;
+  Vector filters, internalFilters;
   EGL_Texture * output;
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
@@ -85,7 +85,7 @@ void egl_postProcessEarlyInit(void)
   option_register(options);
 
   for (int i = 0; i < ARRAY_LENGTH(EGL_Filters); ++i)
-    EGL_Filters[i]->earlyInit();
+    egl_filterEarlyInit(EGL_Filters[i]);
 }
 
 static void loadPreset(struct EGL_PostProcess * this, const char * name);
@@ -464,7 +464,8 @@ static void configUI(void * opaque, int * id)
   static size_t mouseIdx = -1;
   static bool   moving   = false;
   static size_t moveIdx  = 0;
-  bool doMove = false;
+
+  bool   doMove = false;
 
   ImVec2 window, pos;
   igGetWindowPos(&window);
@@ -518,9 +519,16 @@ static void configUI(void * opaque, int * id)
   {
     EGL_Filter * tmp = filters[moveIdx];
     if (mouseIdx > moveIdx) // moving down
-      memmove(filters + moveIdx, filters + moveIdx + 1, (mouseIdx - moveIdx) * sizeof(EGL_Filter *));
+      memmove(
+          filters + moveIdx,
+          filters + moveIdx + 1,
+          (mouseIdx - moveIdx) * sizeof(EGL_Filter *));
     else // moving up
-      memmove(filters + mouseIdx + 1, filters + mouseIdx, (moveIdx - mouseIdx) * sizeof(EGL_Filter *));
+      memmove(
+          filters + mouseIdx + 1,
+          filters + mouseIdx,
+          (moveIdx - mouseIdx) * sizeof(EGL_Filter *));
+
     filters[mouseIdx] = tmp;
   }
 
@@ -540,16 +548,24 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     return false;
   }
 
-  if (!vector_create(&this->filters, sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters)))
+  if (!vector_create(&this->filters,
+        sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters)))
   {
     DEBUG_ERROR("Failed to allocate the filter list");
     goto error_this;
   }
 
+  if (!vector_create(&this->internalFilters,
+        sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters)))
+  {
+    DEBUG_ERROR("Failed to allocate the filter list");
+    goto error_filters;
+  }
+
   if (!egl_desktopRectsInit(&this->rects, 1))
   {
     DEBUG_ERROR("Failed to initialize the desktop rects");
-    goto error_filters;
+    goto error_internal;
   }
 
   loadPresetList(this);
@@ -558,6 +574,9 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
 
   *pp = this;
   return true;
+
+error_internal:
+  vector_destroy(&this->internalFilters);
 
 error_filters:
   vector_destroy(&this->filters);
@@ -579,6 +598,10 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
     egl_filterFree(filter);
   vector_destroy(&this->filters);
 
+  vector_forEachRef(filter, &this->internalFilters)
+    egl_filterFree(filter);
+  vector_destroy(&this->internalFilters);
+
   free(this->presetDir);
   if (this->presets)
     stringlist_free(&this->presets);
@@ -595,7 +618,10 @@ bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
   if (!egl_filterInit(ops, &filter))
     return false;
 
-  vector_push(&this->filters, &filter);
+  if (ops->type == EGL_FILTER_TYPE_INTERNAL)
+    vector_push(&this->internalFilters, &filter);
+  else
+    vector_push(&this->filters, &filter);
   return true;
 }
 
@@ -638,25 +664,35 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
 
   EGL_Filter * filter;
   EGL_Texture * texture = tex;
-  vector_forEach(filter, &this->filters)
+
+  const Vector * lists[] =
   {
-    egl_filterSetOutputResHint(filter, targetX, targetY);
+    &this->internalFilters,
+    &this->filters,
+    NULL
+  };
 
-    if (!egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY, useDMA) ||
-        !egl_filterPrepare(filter))
-      continue;
+  for(const Vector ** filters = lists; *filters; ++filters)
+    vector_forEach(filter, *filters)
+    {
+      egl_filterSetOutputResHint(filter, targetX, targetY);
 
-    texture = egl_filterRun(filter, &filterRects, texture);
-    egl_filterGetOutputRes(filter, &sizeX, &sizeY);
+      if (!egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY,
+            desktopWidth, desktopHeight, useDMA) ||
+          !egl_filterPrepare(filter))
+        continue;
 
-    if (lastFilter)
-      egl_filterRelease(lastFilter);
+      texture = egl_filterRun(filter, &filterRects, texture);
+      egl_filterGetOutputRes(filter, &sizeX, &sizeY);
 
-    lastFilter = filter;
+      if (lastFilter)
+        egl_filterRelease(lastFilter);
 
-    // the first filter to run will convert to a normal texture
-    useDMA = false;
-  }
+      lastFilter = filter;
+
+      // the first filter to run will convert to a normal texture
+      useDMA = false;
+    }
 
   this->output  = texture;
   this->outputX = sizeX;

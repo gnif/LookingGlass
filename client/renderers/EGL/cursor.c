@@ -277,7 +277,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
           }
 
         egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, sizeof(xor[0]));
+            cursor->width, cursor->height, cursor->width, sizeof(xor[0]));
         egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
       }
       // fall through
@@ -285,7 +285,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       case LG_CURSOR_COLOR:
       {
         egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, cursor->stride);
+            cursor->width, cursor->height, cursor->width, cursor->stride);
         egl_textureUpdate(cursor->norm.texture, data, true);
         break;
       }
@@ -311,9 +311,9 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
         }
 
         egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, sizeof(and[0]));
+            cursor->width, cursor->height, cursor->width, sizeof(and[0]));
         egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, sizeof(xor[0]));
+            cursor->width, cursor->height, cursor->width, sizeof(xor[0]));
         egl_textureUpdate(cursor->norm.texture, (uint8_t *)and, true);
         egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
         break;

@@ -323,6 +323,7 @@ static void egl_filterFFXFSR1SetOutputResHint(EGL_Filter * filter,
 
 static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
     enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    unsigned int desktopWidth, unsigned int desktopHeight,
     bool useDMA)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);

@@ -625,6 +625,8 @@ int main_frameThread(void * unused)
       lgrFormat.type         = frame->type;
       lgrFormat.screenWidth  = frame->screenWidth;
       lgrFormat.screenHeight = frame->screenHeight;
+      lgrFormat.dataWidth    = frame->dataWidth;
+      lgrFormat.dataHeight   = frame->dataHeight;
       lgrFormat.frameWidth   = frame->frameWidth;
       lgrFormat.frameHeight  = frame->frameHeight;
       lgrFormat.stride       = frame->stride;
@@ -664,19 +666,23 @@ int main_frameThread(void * unused)
       }
       g_state.rotate = lgrFormat.rotate;
 
+      dataSize = lgrFormat.dataHeight * lgrFormat.pitch;
+
       bool error = false;
       switch(frame->type)
       {
         case FRAME_TYPE_RGBA:
         case FRAME_TYPE_BGRA:
         case FRAME_TYPE_RGBA10:
-          dataSize       = lgrFormat.frameHeight * lgrFormat.pitch;
           lgrFormat.bpp  = 32;
           break;
 
         case FRAME_TYPE_RGBA16F:
-          dataSize       = lgrFormat.frameHeight * lgrFormat.pitch;
           lgrFormat.bpp  = 64;
+          break;
+
+        case FRAME_TYPE_BGR:
+          lgrFormat.bpp  = 24;
           break;
 
         default:
@@ -695,9 +701,10 @@ int main_frameThread(void * unused)
       g_state.formatValid = true;
       formatVer = frame->formatVer;
 
-      DEBUG_INFO("Format: %s %ux%u stride:%u pitch:%u rotation:%d hdr:%d pq:%d",
+      DEBUG_INFO("Format: %s %ux%u (%ux%u) stride:%u pitch:%u rotation:%d hdr:%d pq:%d",
           FrameTypeStr[frame->type],
           frame->frameWidth, frame->frameHeight,
+          frame->dataWidth , frame->dataHeight ,
           frame->stride, frame->pitch,
           frame->rotation,
           frame->flags & FRAME_FLAG_HDR    ? 1 : 0,

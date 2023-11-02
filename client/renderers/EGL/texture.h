@@ -44,8 +44,8 @@ typedef struct EGL_TexUpdate
 
   int x, y, width, height;
 
-  //pitch  = row length in pixels
-  //stride = row length in bytes
+  //pitch     = row length in pixels
+  //stride    = row length in bytes
   int pitch, stride;
 
   union
@@ -113,13 +113,13 @@ bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
 void egl_textureFree(EGL_Texture ** tex);
 
 bool egl_textureSetup(EGL_Texture * texture, enum EGL_PixelFormat pixFmt,
-    size_t width, size_t height, size_t stride);
+    size_t width, size_t height, size_t stride, size_t pitch);
 
 bool egl_textureUpdate(EGL_Texture * texture, const uint8_t * buffer,
     bool topDown);
 
 bool egl_textureUpdateRect(EGL_Texture * texture,
-    int x, int y, int width, int height, int stride,
+    int x, int y, int width, int height, int stride, int pitch,
     const uint8_t * buffer, bool topDown);
 
 bool egl_textureUpdateFromFrame(EGL_Texture * texture,

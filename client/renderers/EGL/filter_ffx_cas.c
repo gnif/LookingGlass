@@ -209,6 +209,7 @@ static bool egl_filterFFXCASImguiConfig(EGL_Filter * filter)
 
 static bool egl_filterFFXCASSetup(EGL_Filter * filter,
     enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    unsigned int desktopWidth, unsigned int desktopHeight,
     bool useDMA)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);

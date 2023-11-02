@@ -37,7 +37,8 @@ typedef enum EGL_PixelFormat
   EGL_PF_RGBA,
   EGL_PF_BGRA,
   EGL_PF_RGBA10,
-  EGL_PF_RGBA16F
+  EGL_PF_RGBA16F,
+  EGL_PF_BGR
 }
 EGL_PixelFormat;
 
@@ -60,13 +61,17 @@ typedef struct EGL_TexSetup
   /* the height of the texture in pixels */
   size_t height;
 
-  /* the stide of the texture in bytes */
+  /* the row length of the texture in pixels */
   size_t stride;
+
+  /* the row length of the texture in bytes */
+  size_t pitch;
 }
 EGL_TexSetup;
 
 typedef enum EGL_FilterType
 {
+  EGL_FILTER_TYPE_INTERNAL,
   EGL_FILTER_TYPE_EFFECT,
   EGL_FILTER_TYPE_UPSCALE,
   EGL_FILTER_TYPE_DOWNSCALE

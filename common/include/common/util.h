@@ -38,4 +38,6 @@
 #define UPCAST(type, x) \
   (type *)((uintptr_t)(x) - offsetof(type, base))
 
+#define ALIGN_TO(value, align) (((value) + (align) - 1) & -(align))
+
 #endif

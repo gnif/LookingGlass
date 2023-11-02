@@ -28,23 +28,23 @@
 #include "common/types.h"
 
 inline static void rectCopyUnaligned(uint8_t * dest, const uint8_t * src,
-    int ystart, int yend, int dx, int dstStride, int srcStride, int width)
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
   for (int i = ystart; i < yend; ++i)
   {
-    unsigned int srcOffset = i * srcStride + dx;
-    unsigned int dstOffset = i * dstStride + dx;
+    unsigned int srcOffset = i * srcPitch + dx;
+    unsigned int dstOffset = i * dstPitch + dx;
     memcpy(dest + dstOffset, src + srcOffset, width);
   }
 }
 
 void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
-  FrameBuffer * frame, int dstStride, int height,
-  const uint8_t * src, int srcStride);
+  FrameBuffer * frame, int dstPitch, int height,
+  const uint8_t * src, int srcPitch);
 
 void rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
-  uint8_t * dst, int dstStride, int height,
-  const FrameBuffer * frame, int srcStride);
+  uint8_t * dst, int dstPitch, int height,
+  const FrameBuffer * frame, int srcPitch);
 
 int rectsMergeOverlapping(FrameDamageRect * rects, int count);
 int rectsRejectContained(FrameDamageRect * rects, int count);

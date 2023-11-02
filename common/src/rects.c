@@ -194,44 +194,44 @@ inline static void rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
 struct ToFramebufferData
 {
   FrameBuffer * frame;
-  int stride;
+  int pitch;
 };
 
 static void fbRowFinish(int y, void * opaque)
 {
   struct ToFramebufferData * data = opaque;
-  framebuffer_set_write_ptr(data->frame, y * data->stride);
+  framebuffer_set_write_ptr(data->frame, y * data->pitch);
 }
 
 void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
-  FrameBuffer * frame, int dstStride, int height,
-  const uint8_t * src, int srcStride)
+  FrameBuffer * frame, int dstPitch, int height,
+  const uint8_t * src, int srcPitch)
 {
-  struct ToFramebufferData data = { .frame = frame, .stride = dstStride };
-  rectsBufferCopy(rects, count, bpp, framebuffer_get_data(frame), dstStride,
-    height, src, srcStride, &data, NULL, fbRowFinish);
-  framebuffer_set_write_ptr(frame, height * dstStride);
+  struct ToFramebufferData data = { .frame = frame, .pitch = dstPitch };
+  rectsBufferCopy(rects, count, bpp, framebuffer_get_data(frame), dstPitch,
+    height, src, srcPitch, &data, NULL, fbRowFinish);
+  framebuffer_set_write_ptr(frame, height * dstPitch);
 }
 
 struct FromFramebufferData
 {
   const FrameBuffer * frame;
-  int stride;
+  int pitch;
 };
 
 static void fbRowStart(int y, void * opaque)
 {
   struct FromFramebufferData * data = opaque;
-  framebuffer_wait(data->frame, y * data->stride);
+  framebuffer_wait(data->frame, y * data->pitch);
 }
 
 void rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
-  uint8_t * dst, int dstStride, int height,
-  const FrameBuffer * frame, int srcStride)
+  uint8_t * dst, int dstPitch, int height,
+  const FrameBuffer * frame, int srcPitch)
 {
-  struct FromFramebufferData data = { .frame = frame, .stride = srcStride };
-  rectsBufferCopy(rects, count, bpp, dst, dstStride, height,
-    framebuffer_get_buffer(frame), srcStride, &data, fbRowStart, NULL);
+  struct FromFramebufferData data = { .frame = frame, .pitch = srcPitch };
+  rectsBufferCopy(rects, count, bpp, dst, dstPitch, height,
+    framebuffer_get_buffer(frame), srcPitch, &data, fbRowStart, NULL);
 }
 
 int rectsMergeOverlapping(FrameDamageRect * rects, int count)

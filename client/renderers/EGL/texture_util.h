@@ -33,10 +33,14 @@ typedef struct EGL_TexFormat
   GLenum       intFormat;
   GLenum       dataType;
   unsigned int fourcc;
-  size_t       bufferSize;
 
+  size_t       dataSize;
   size_t       width , height;
   size_t       stride, pitch;
+
+  // for 24-bit BGR these are the physical adjusted values to get mapping working
+  size_t       bufferSize;
+  size_t       bufferPitch;
 }
 EGL_TexFormat;
 
@@ -62,9 +66,10 @@ void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer);
  */
 #define fourcc_code(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | \
          ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+
 #define DRM_FORMAT_ARGB8888      fourcc_code('A', 'R', '2', '4')
 #define DRM_FORMAT_ABGR8888      fourcc_code('A', 'B', '2', '4')
-#define DRM_FORMAT_BGRA2101010   fourcc_code('A', 'B', '3', '0')
+#define DRM_FORMAT_ABGR2101010   fourcc_code('A', 'B', '3', '0')
 #define DRM_FORMAT_ABGR16161616F fourcc_code('A', 'B', '4', 'H')
 
 #define DRM_FORMAT_MOD_VENDOR_NONE 0

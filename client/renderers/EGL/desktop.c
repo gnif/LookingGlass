@@ -119,8 +119,8 @@ static bool egl_initDesktopShader(
     return false;
   }
 
-  shader->uTransform    = egl_shaderGetUniform(shader->shader, "transform"   );
   shader->uDesktopSize  = egl_shaderGetUniform(shader->shader, "desktopSize" );
+  shader->uTransform    = egl_shaderGetUniform(shader->shader, "transform"   );
   shader->uScaleAlgo    = egl_shaderGetUniform(shader->shader, "scaleAlgo"   );
   shader->uNVGain       = egl_shaderGetUniform(shader->shader, "nvGain"      );
   shader->uCBMode       = egl_shaderGetUniform(shader->shader, "cbMode"      );
@@ -205,6 +205,9 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     DEBUG_ERROR("Failed to initialize the post process manager");
     return false;
   }
+
+  // this MUST be first
+  egl_postProcessAdd(desktop->pp, &egl_filterBGRtoBGRAOps);
 
   egl_postProcessAdd(desktop->pp, &egl_filterDownscaleOps);
   egl_postProcessAdd(desktop->pp, &egl_filterFFXCASOps   );
@@ -337,6 +340,10 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
       pixFmt = EGL_PF_RGBA16F;
       break;
 
+    case FRAME_TYPE_BGR:
+      pixFmt = EGL_PF_BGR;
+      break;
+
     default:
       DEBUG_ERROR("Unsupported frame format");
       return false;
@@ -350,8 +357,9 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
   if (!egl_textureSetup(
     desktop->texture,
     pixFmt,
-    format.frameWidth,
-    format.frameHeight,
+    format.dataWidth,
+    format.dataHeight,
+    format.stride,
     format.pitch
   ))
   {
@@ -572,6 +580,7 @@ void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)
     EGL_PF_BGRA,
     width,
     height,
+    width,
     width * 4
   ))
   {
@@ -595,7 +604,7 @@ void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
 
   for(; y < height; ++y)
     egl_textureUpdateRect(desktop->spiceTexture,
-        x, y, width, 1, sizeof(line), (uint8_t *)line, false);
+        x, y, width, 1, width, sizeof(line), (uint8_t *)line, false);
 
   atomic_store(&desktop->processFrame, true);
 }
@@ -604,7 +613,7 @@ void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
     int height, int stride, uint8_t * data, bool topDown)
 {
   egl_textureUpdateRect(desktop->spiceTexture,
-      x, y, width, height, stride, data, topDown);
+      x, y, width, height, width, stride, data, topDown);
   atomic_store(&desktop->processFrame, true);
 }
 

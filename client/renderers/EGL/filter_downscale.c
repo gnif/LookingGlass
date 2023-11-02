@@ -299,6 +299,7 @@ static bool egl_filterDownscaleImguiConfig(EGL_Filter * filter)
 
 static bool egl_filterDownscaleSetup(EGL_Filter * filter,
     enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    unsigned int desktopWidth, unsigned int desktopHeight,
     bool useDMA)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
