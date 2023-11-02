@@ -207,15 +207,20 @@ These instructions help you build the host yourself from the
 :ref:`downloaded source code <download_source>`.
 
 .. warning::
+   :name: dont-build-the-host
+
    Building the host from source code is not recommended for most purposes,
    and should only be attempted by users who are prepared to handle issues
    on their own. Please download the pre-built binary installers from
    https://looking-glass.io/downloads for stability, and increased support.
 
-.. note::
-   The pre-built binaries also include NvFBC support built in, which is
-   only available to current Nvidia SDK license holders, and cannot
-   be enabled when building the host without also having a license.
+   .. note::
+
+      The pre-built binaries also include NvFBC support built in, which is
+      only available to current Nvidia SDK license holders, and cannot
+      be enabled when building the host without also having a license.
+
+   (`link <#dont-build-the-host>`_)
 
 .. _host_win_on_win:
 
