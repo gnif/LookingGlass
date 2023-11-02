@@ -92,17 +92,20 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
     damage->count + update->rectCount > KVMFR_MAX_DAMAGE_RECTS;
 
   if (damageAll)
-    framebuffer_read(
+  {
+     framebuffer_read(
       update->frame,
       parent->buf[parent->bufIndex].map,
-      texture->format.stride,
+      texture->format.pitch,
       texture->format.height,
       texture->format.width,
       texture->format.bpp,
-      texture->format.stride
+      texture->format.pitch
     );
+  }
   else
   {
+    //FIXME! This is broken for BGR24
     memcpy(damage->rects + damage->count, update->rects,
       update->rectCount * sizeof(FrameDamageRect));
     damage->count += update->rectCount;
@@ -111,10 +114,10 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
       damage->count,
       texture->format.bpp,
       parent->buf[parent->bufIndex].map,
-      texture->format.stride,
+      texture->format.pitch,
       texture->format.height,
       update->frame,
-      texture->format.stride
+      texture->format.pitch
     );
   }
 

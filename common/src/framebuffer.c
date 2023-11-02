@@ -47,8 +47,8 @@ bool framebuffer_wait(const FrameBuffer * frame, size_t size)
   return true;
 }
 
-bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
-    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
+bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
+    size_t size)
 {
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
@@ -62,34 +62,54 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
   uint_least32_t rp        = 0;
 
   // copy in large 1MB chunks if the pitches match
-  if (dstpitch == pitch)
+  while(size)
   {
-    size_t remaining = height * pitch;
-    while(remaining)
-    {
-      const size_t copy = remaining < FB_CHUNK_SIZE ? remaining : FB_CHUNK_SIZE;
-      if (!framebuffer_wait(frame, rp + copy))
-        return false;
+    const size_t copy = size < FB_CHUNK_SIZE ? size : FB_CHUNK_SIZE;
+    if (!framebuffer_wait(frame, rp + copy))
+      return false;
 
-      memcpy(d, frame->data + rp, copy);
-      remaining -= copy;
-      rp        += copy;
-      d         += copy;
-    }
+    memcpy(d, frame->data + rp, copy);
+    size -= copy;
+    rp   += copy;
+    d    += copy;
   }
-  else
-  {
-    // copy per line to match the pitch of the destination buffer
-    const size_t linewidth = width * bpp;
-    for(size_t y = 0; y < height; ++y)
-    {
-      if (!framebuffer_wait(frame, rp + linewidth))
-        return false;
 
-      memcpy(d, frame->data + rp, dstpitch);
-      rp += pitch;
-      d  += dstpitch;
-    }
+#ifdef FB_PROFILE
+  runningavg_push(ra, microtime() - ts);
+  if (++raCount % 100 == 0)
+    DEBUG_INFO("Average Copy Time: %.2fμs", runningavg_calc(ra));
+#endif
+
+  return true;
+}
+
+bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
+{
+  if (dstpitch == pitch)
+    return framebuffer_read_linear(frame, dst, height * pitch);
+
+#ifdef FB_PROFILE
+  static RunningAvg ra = NULL;
+  static int raCount = 0;
+  const uint64_t ts = microtime();
+  if (!ra)
+    ra = runningavg_new(100);
+#endif
+
+  uint8_t * restrict d     = (uint8_t*)dst;
+  uint_least32_t rp        = 0;
+
+  // copy per line to match the pitch of the destination buffer
+  const size_t linewidth = width * bpp;
+  for(size_t y = 0; y < height; ++y)
+  {
+    if (!framebuffer_wait(frame, rp + linewidth))
+      return false;
+
+    memcpy(d, frame->data + rp, dstpitch);
+    rp += pitch;
+    d  += dstpitch;
   }
 
 #ifdef FB_PROFILE

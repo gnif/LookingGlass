@@ -94,14 +94,15 @@ void egl_textureFree(EGL_Texture ** tex)
 }
 
 bool egl_textureSetup(EGL_Texture * this, enum EGL_PixelFormat pixFmt,
-    size_t width, size_t height, size_t stride)
+    size_t width, size_t height, size_t stride, size_t pitch)
 {
   const struct EGL_TexSetup setup =
   {
-    .pixFmt = pixFmt,
-    .width  = width,
-    .height = height,
-    .stride = stride
+    .pixFmt  = pixFmt,
+    .width   = width,
+    .height  = height,
+    .stride  = stride,
+    .pitch   = pitch,
   };
 
   if (!egl_texUtilGetFormat(&setup, &this->format))
@@ -129,7 +130,7 @@ bool egl_textureUpdate(EGL_Texture * this, const uint8_t * buffer, bool topDown)
 }
 
 bool egl_textureUpdateRect(EGL_Texture * this,
-    int x, int y, int width, int height, int stride,
+    int x, int y, int width, int height, int stride, int pitch,
     const uint8_t * buffer, bool topDown)
 {
   x      = clamp(x     , 0, this->format.width     );
@@ -147,8 +148,8 @@ bool egl_textureUpdateRect(EGL_Texture * this,
     .y       = y,
     .width   = width,
     .height  = height,
-    .pitch   = stride / this->format.bpp,
     .stride  = stride,
+    .pitch   = pitch,
     .topDown = topDown,
     .buffer  = buffer
   };
@@ -193,7 +194,7 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
   };
 
   /* wait for completion */
-  framebuffer_wait(frame, this->format.bufferSize);
+  framebuffer_wait(frame, this->format.dataSize);
 
   return this->ops.update(this, &update);
 }

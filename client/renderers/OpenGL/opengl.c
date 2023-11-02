@@ -777,13 +777,29 @@ static enum ConfigStatus configure(struct Inst * this)
       this->dataFormat = GL_HALF_FLOAT;
       break;
 
+    case FRAME_TYPE_BGR:
+      this->intFormat  = GL_RGB8;
+      this->vboFormat  = GL_BGR;
+      this->dataFormat = GL_UNSIGNED_BYTE;
+
+      /* The data that the host returns for 24-bit BGR is tightly packed into an
+       * array that the host GPU will support, we need to adjust the parameters
+       * here to the correct dimensions as OpenGL can use it directly
+       */
+      this->format.dataWidth  = this->format.frameWidth;
+      this->format.dataHeight = this->format.frameHeight;
+      this->format.stride     = this->format.frameWidth;
+      this->format.pitch      = this->format.frameWidth * 3;
+      this->format.bpp        = 24;
+      break;
+
     default:
       DEBUG_ERROR("Unknown/unsupported compression type");
       return CONFIG_STATUS_ERROR;
   }
 
   // calculate the texture size in bytes
-  this->texSize = this->format.frameHeight * this->format.pitch;
+  this->texSize = this->format.dataHeight * this->format.pitch;
   this->texPos  = 0;
 
   g_gl_dynProcs.glGenBuffers(BUFFER_COUNT, this->vboID);
@@ -797,10 +813,10 @@ static enum ConfigStatus configure(struct Inst * this)
   if (this->amdPinnedMemSupport)
   {
     const int pagesize = getpagesize();
-
     for(int i = 0; i < BUFFER_COUNT; ++i)
     {
-      this->texPixels[i] = aligned_alloc(pagesize, this->texSize);
+      this->texPixels[i] = aligned_alloc(pagesize,
+          ALIGN_TO(this->texSize, pagesize));
       if (!this->texPixels[i])
       {
         DEBUG_ERROR("Failed to allocate memory for texture");
@@ -809,7 +825,8 @@ static enum ConfigStatus configure(struct Inst * this)
 
       memset(this->texPixels[i], 0, this->texSize);
 
-      g_gl_dynProcs.glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
+      g_gl_dynProcs.glBindBuffer(
+          GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
       if (check_gl_error("glBindBuffer"))
       {
         LG_UNLOCK(this->formatLock);
@@ -1162,16 +1179,15 @@ static bool drawFrame(struct Inst * this)
   glBindTexture(GL_TEXTURE_2D, this->frames[this->texWIndex]);
   g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texWIndex]);
 
-  const int bpp = this->format.bpp / 8;
-  glPixelStorei(GL_UNPACK_ALIGNMENT , bpp);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.frameWidth);
+  int bpp = this->format.bpp / 8;
+  glPixelStorei(GL_UNPACK_ALIGNMENT , bpp < 4 ? 1 : 0);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.stride);
 
   this->texPos = 0;
-
   framebuffer_read_fn(
     this->frame,
-    this->format.frameHeight,
-    this->format.frameWidth,
+    this->format.dataHeight,
+    this->format.dataWidth,
     bpp,
     this->format.pitch,
     opengl_bufferFn,
@@ -1194,9 +1210,17 @@ static bool drawFrame(struct Inst * this)
   );
   if (check_gl_error("glTexSubImage2D"))
   {
-    DEBUG_ERROR("texWIndex: %u, width: %u, height: %u, vboFormat: %x, texSize: %lu",
-      this->texWIndex, this->format.frameWidth, this->format.frameHeight,
-      this->vboFormat, this->texSize
+    DEBUG_ERROR(
+      "texWIndex: %u, "
+      "width: %u, "
+      "height: %u, "
+      "vboFormat: %x, "
+      "texSize: %lu",
+      this->texWIndex,
+      this->format.frameWidth,
+      this->format.frameHeight,
+      this->vboFormat,
+      this->texSize
     );
   }
 

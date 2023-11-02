@@ -162,12 +162,12 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
     EGLAttrib attribs[] =
     {
-      EGL_WIDTH                         , texture->format.width,
+      EGL_WIDTH                         , texture->format.width ,
       EGL_HEIGHT                        , texture->format.height,
       EGL_LINUX_DRM_FOURCC_EXT          , texture->format.fourcc,
       EGL_DMA_BUF_PLANE0_FD_EXT         , update->dmaFD,
       EGL_DMA_BUF_PLANE0_OFFSET_EXT     , 0,
-      EGL_DMA_BUF_PLANE0_PITCH_EXT      , texture->format.stride,
+      EGL_DMA_BUF_PLANE0_PITCH_EXT      , texture->format.bufferPitch,
       EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (modifier & 0xffffffff),
       EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (modifier >> 32),
       EGL_NONE                          , EGL_NONE

@@ -45,6 +45,12 @@ typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 bool framebuffer_wait(const FrameBuffer * frame, size_t size);
 
 /**
+ * Read `size` bytes from the KVMFRFrame into the dst buffer
+ */
+bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
+    size_t size);
+
+/**
  * Read data from the KVMFRFrame into the dst buffer
  */
 bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,

@@ -112,7 +112,7 @@ static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * upd
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_BUFFER);
 
   glBindTexture(GL_TEXTURE_2D, this->tex[0]);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, update->pitch);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, update->stride);
   glTexSubImage2D(GL_TEXTURE_2D,
       0,
       update->x,
@@ -187,7 +187,7 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
   LG_LOCK(this->copyLock);
 
   uint8_t * dst = this->buf[this->bufIndex].map +
-    texture->format.stride * update->y +
+    texture->format.pitch * update->y +
     update->x * texture->format.bpp;
 
   if (update->topDown)
@@ -195,19 +195,19 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
     const uint8_t * src = update->buffer;
     for(int y = 0; y < update->height; ++y)
     {
-      memcpy(dst, src, update->stride);
-      dst += texture->format.stride;
-      src += update->stride;
+      memcpy(dst, src, update->pitch);
+      dst += texture->format.bufferPitch;
+      src += update->pitch;
     }
   }
   else
   {
-    const uint8_t * src = update->buffer + update->stride * update->height;
+    const uint8_t * src = update->buffer + update->pitch * update->height;
     for(int y = 0; y < update->height; ++y)
     {
       src -= update->stride;
       memcpy(dst, src, update->stride);
-      dst += texture->format.stride;
+      dst += texture->format.bufferPitch;
     }
   }
 
@@ -241,7 +241,8 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.pitch);
+
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.width);
     glTexSubImage2D(GL_TEXTURE_2D,
         0, 0, 0,
         texture->format.width,

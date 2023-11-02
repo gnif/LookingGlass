@@ -72,7 +72,8 @@ typedef struct EGL_FilterOps
    * useDMA will be true if the texture provided needs to use samplerExternalOES
    */
   bool (*setup)(EGL_Filter * filter, enum EGL_PixelFormat pixFmt,
-      unsigned int width, unsigned int height, bool useDMA);
+      unsigned int width, unsigned int height,
+      unsigned int desktopWidth, unsigned int desktopHeight, bool useDMA);
 
   /* set the output resolution hint for the filter
    * this is optional and only a hint */
@@ -104,6 +105,12 @@ typedef struct EGL_Filter
 }
 EGL_Filter;
 
+static inline void egl_filterEarlyInit(const EGL_FilterOps * ops)
+{
+  if (ops->earlyInit)
+    ops->earlyInit();
+}
+
 static inline bool egl_filterInit(const EGL_FilterOps * ops, EGL_Filter ** filter)
 {
   if (!ops->init(filter))
@@ -121,24 +128,30 @@ static inline void egl_filterFree(EGL_Filter ** filter)
 
 static inline bool egl_filterImguiConfig(EGL_Filter * filter)
 {
-  return filter->ops.imguiConfig(filter);
+  if (filter->ops.imguiConfig)
+    return filter->ops.imguiConfig(filter);
+  return false;
 }
 
 static inline void egl_filterSaveState(EGL_Filter * filter)
 {
-  filter->ops.saveState(filter);
+  if (filter->ops.saveState)
+    filter->ops.saveState(filter);
 }
 
 static inline void egl_filterLoadState(EGL_Filter * filter)
 {
-  filter->ops.loadState(filter);
+  if (filter->ops.loadState)
+    filter->ops.loadState(filter);
 }
 
 static inline bool egl_filterSetup(EGL_Filter * filter,
     enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
+    unsigned int desktopWidth, unsigned int desktopHeight,
     bool useDMA)
 {
-  return filter->ops.setup(filter, pixFmt, width, height, useDMA);
+  return filter->ops.setup(filter, pixFmt, width, height,
+      desktopWidth, desktopHeight, useDMA);
 }
 
 static inline void egl_filterSetOutputResHint(EGL_Filter * filter,

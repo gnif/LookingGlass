@@ -32,6 +32,11 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
 {
   switch(setup->pixFmt)
   {
+    //EGL has no support for 24-bit formats, so we stuff it into a 32-bit
+    //texture to unpack with a shader later
+    case EGL_PF_BGR:
+      // fallthrough
+
     case EGL_PF_BGRA:
       fmt->bpp        = 4;
       fmt->format     = GL_BGRA_EXT;
@@ -53,7 +58,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->format     = GL_RGBA;
       fmt->intFormat  = GL_RGB10_A2;
       fmt->dataType   = GL_UNSIGNED_INT_2_10_10_10_REV;
-      fmt->fourcc     = DRM_FORMAT_BGRA2101010;
+      fmt->fourcc     = DRM_FORMAT_ABGR2101010;
       break;
 
     case EGL_PF_RGBA16F:
@@ -69,22 +74,28 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       return false;
   }
 
-  fmt->pixFmt = setup->pixFmt;
-  fmt->width  = setup->width;
-  fmt->height = setup->height;
+  fmt->pixFmt      = setup->pixFmt;
+  fmt->width       = setup->width;
+  fmt->height      = setup->height;
+  fmt->stride      = setup->stride;
+  fmt->pitch       = setup->pitch;
 
-  if (setup->stride == 0)
-  {
-    fmt->stride = fmt->width * fmt->bpp;
-    fmt->pitch  = fmt->width;
-  }
-  else
-  {
-    fmt->stride = setup->stride;
-    fmt->pitch  = setup->stride / fmt->bpp;
-  }
+  if (!fmt->stride)
+    fmt->stride = setup->width;
 
-  fmt->bufferSize = fmt->height * fmt->stride;
+  if (!fmt->pitch)
+    fmt->pitch = fmt->stride * fmt->bpp;
+
+  fmt->bufferPitch = setup->pitch;
+
+  // adjust the stride for 24-bit in 32-bit buffers
+  // this is needed to keep values sane for DMABUF support
+//  if (setup->pixFmt == EGL_PF_BGR)
+//    fmt->bufferPitch = setup->width * 4;
+
+  fmt->dataSize   = fmt->height * fmt->pitch;
+  fmt->bufferSize = fmt->height * fmt->bufferPitch;
+
   return true;
 }
 

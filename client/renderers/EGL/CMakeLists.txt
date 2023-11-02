@@ -56,6 +56,7 @@ build_shaders(
   shader/damage.vert
   shader/damage.frag
   shader/basic.vert
+  shader/convert_bgr_bgra.frag
   shader/ffx_cas.frag
   shader/ffx_fsr1_easu.frag
   shader/ffx_fsr1_rcas.frag
@@ -87,6 +88,7 @@ add_library(renderer_EGL STATIC
   postprocess.c
   ffx.c
   filter.c
+  filter_bgr_bgra.c
   filter_ffx_cas.c
   filter_ffx_fsr1.c
   filter_downscale.c

@@ -64,7 +64,7 @@ void egl_framebufferFree(EGL_Framebuffer ** fb)
 bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
     unsigned int width, unsigned int height)
 {
-  if (!egl_textureSetup(this->tex, pixFmt, width, height, 0))
+  if (!egl_textureSetup(this->tex, pixFmt, width, height, 0, 0))
   {
     DEBUG_ERROR("Failed to setup the texture");
     return false;
