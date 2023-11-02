@@ -300,6 +300,11 @@ Building the Windows installer
 This will build ``looking-glass-host-setup.exe`` under
 ``host/build/platform/Windows/looking-glass-host-setup.exe``
 
+.. tip::
+
+   If you want to build a 32-bit installer, add the ``-DBUILD_32BIT`` flag to
+   ``makensis``
+
 .. seealso::
 
    :ref:`Installing the Host <host_install>`
