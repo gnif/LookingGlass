@@ -95,7 +95,7 @@ static CaptureResult dxgi_releaseFrame(void);
 static bool ppInit(const DXGIPostProcess * pp, bool shareable);
 static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src,
   int * width, int * height,
-  int * rows , int * cols,
+  int * cols , int * rows,
   CaptureFormat * format);
 static void ppFreeAll(void);
 
@@ -1468,7 +1468,7 @@ static bool ppInit(const DXGIPostProcess * pp, bool shareable)
 
 static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src,
   int * width, int * height,
-  int * rows, int * cols,
+  int * cols , int * rows,
   CaptureFormat * format)
 {
   PostProcessInstance * inst;
