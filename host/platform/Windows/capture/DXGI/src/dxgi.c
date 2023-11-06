@@ -1365,6 +1365,11 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   return CAPTURE_RESULT_OK;
 }
 
+static int scaleForBGR(int x)
+{
+  return x * 3 / 4;
+}
+
 static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
 {
   DEBUG_ASSERT(this);
@@ -1383,7 +1388,19 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
     memcpy(damage->rects + damage->count, tex->damageRects,
       tex->damageRectsCount * sizeof(*tex->damageRects));
     damage->count += tex->damageRectsCount;
-    rectsBufferToFramebuffer(damage->rects, damage->count, this->bpp, frame,
+
+    FrameDamageRect scaledDamageRects[damage->count];
+    for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {
+      FrameDamageRect rect = damage->rects[i];
+      int originalX = rect.x;
+      int scaledX = scaleForBGR(originalX);
+      rect.x = scaledX;
+      rect.width = scaleForBGR(originalX + rect.width) - scaledX;
+
+      scaledDamageRects[i] = rect;
+    }
+
+    rectsBufferToFramebuffer(scaledDamageRects, damage->count, this->bpp, frame,
       this->pitch, this->dataHeight, tex->map, this->pitch);
   }
 
