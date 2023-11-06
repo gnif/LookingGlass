@@ -105,7 +105,6 @@ struct DXGIInterface
   unsigned int    formatVer;
   unsigned int    width , outputWidth , dataWidth;
   unsigned int    height, outputHeight, dataHeight;
-  unsigned int    downsampleLevel;
   unsigned int    pitch;
   unsigned int    stride;
   unsigned int    padding;

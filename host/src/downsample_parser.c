@@ -84,3 +84,22 @@ bool downsampleParser(struct Option * opt, const char * str)
 
   return true;
 }
+
+DownsampleRule * downsampleRule_match(int x, int y)
+{
+  DownsampleRule * rule, * match = NULL;
+  vector_forEachRef(rule, &downsampleRules)
+  {
+    if (
+      ( rule->greater && (x  > rule->x || y  > rule->y)) ||
+      (!rule->greater && (x == rule->x && y == rule->y)))
+    {
+      match = rule;
+    }
+  }
+
+  if (match)
+    DEBUG_INFO("Matched downsample rule %d", rule->id);
+
+  return match;
+}

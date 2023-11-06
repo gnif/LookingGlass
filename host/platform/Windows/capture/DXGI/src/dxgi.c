@@ -20,6 +20,7 @@
 
 #include "interface/capture.h"
 #include "interface/platform.h"
+#include "downsample_parser.h"
 #include "common/array.h"
 #include "common/debug.h"
 #include "common/windebug.h"
@@ -65,18 +66,6 @@ typedef struct
 }
 PostProcessInstance;
 
-typedef struct
-{
-  unsigned int id;
-  bool         greater;
-  unsigned int x;
-  unsigned int y;
-  unsigned int level;
-}
-DownsampleRule;
-
-static Vector downsampleRules = {0};
-
 // locals
 static struct DXGIInterface * this = NULL;
 
@@ -112,58 +101,6 @@ static const char * dxgi_getName(void)
   return name;
 }
 
-static bool downsampleOptParser(struct Option * opt, const char * str)
-{
-  if (!str)
-    return false;
-
-  opt->value.x_string = strdup(str);
-
-  if (downsampleRules.data)
-    vector_destroy(&downsampleRules);
-
-  if (!vector_create(&downsampleRules, sizeof(DownsampleRule), 10))
-  {
-    DEBUG_ERROR("Failed to allocate ram");
-    return false;
-  }
-
-  char * tmp   = strdup(str);
-  char * token = strtok(tmp, ",");
-  int count = 0;
-  while(token)
-  {
-    DownsampleRule rule = {0};
-    if (token[0] == '>')
-    {
-      rule.greater = true;
-      ++token;
-    }
-
-    if (sscanf(token, "%ux%u:%u", &rule.x, &rule.y, &rule.level) != 3)
-      return false;
-
-    rule.id = count++;
-
-    DEBUG_INFO(
-      "Rule %u: %u%% IF X %s %4u %s Y %s %4u",
-      rule.id,
-      100 / (1 << rule.level),
-      rule.greater ? "> "  : "==",
-      rule.x,
-      rule.greater ? "OR " : "AND",
-      rule.greater ? "> "  : "==",
-      rule.y
-    );
-    vector_push(&downsampleRules, &rule);
-
-    token = strtok(NULL, ",");
-  }
-  free(tmp);
-
-  return true;
-}
-
 static void dxgi_initOptions(void)
 {
   struct Option options[] =
@@ -182,14 +119,7 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_STRING,
       .value.x_string = NULL
     },
-    {
-      .module         = "dxgi",
-      .name           = "downsample", //dxgi:downsample=1920x1200:1,
-      .description    = "Downsample conditions and levels, format: [>](width)x(height):level",
-      .type           = OPTION_TYPE_STRING,
-      .value.x_string = NULL,
-      .parser         = downsampleOptParser
-    },
+    DOWNSAMPLE_PARSER("dxgi"),
     {
       .module         = "dxgi",
       .name           = "maxTextures",
@@ -761,27 +691,13 @@ static bool dxgi_init(void)
       goto fail;
   }
 
-  this->downsampleLevel = 0;
-  this->outputWidth     = this->width;
-  this->outputHeight    = this->height;
-
-  DownsampleRule * rule, * match = NULL;
-  vector_forEachRef(rule, &downsampleRules)
+  this->outputWidth  = this->width;
+  this->outputHeight = this->height;
+  DownsampleRule * rule = downsampleRule_match(this->width, this->height);
+  if (rule)
   {
-    if (
-      ( rule->greater && (this->width  > rule->x || this->height  > rule->y)) ||
-      (!rule->greater && (this->width == rule->x && this->height == rule->y)))
-    {
-      match = rule;
-    }
-  }
-
-  if (match)
-  {
-    DEBUG_INFO("Matched downsample rule %d", rule->id);
-    this->downsampleLevel = match->level;
-    this->outputWidth   >>= match->level;
-    this->outputHeight  >>= match->level;
+    this->outputWidth  = rule->targetX;
+    this->outputHeight = rule->targetY;
   }
 
   DEBUG_INFO("Request Size      : %u x %u", this->outputWidth, this->outputHeight);
@@ -940,10 +856,10 @@ static void rectToFrameDamageRect(RECT * src, FrameDamageRect * dst)
 {
   *dst = (FrameDamageRect)
   {
-    .x      = src->left                >> this->downsampleLevel,
-    .y      = src->top                 >> this->downsampleLevel,
-    .width  = (src->right - src->left) >> this->downsampleLevel,
-    .height = (src->bottom - src->top) >> this->downsampleLevel
+    .x      = src->left               ,
+    .y      = src->top                ,
+    .width  = (src->right - src->left),
+    .height = (src->bottom - src->top)
   };
 }
 

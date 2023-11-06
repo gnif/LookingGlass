@@ -191,23 +191,12 @@ static bool nvfbc_create(
 
 static void updateScale(void)
 {
-  DownsampleRule * rule, * match = NULL;
-  vector_forEachRef(rule, &downsampleRules)
+  DownsampleRule * rule = downsampleRule_match(this->width, this->height);
+  if (rule)
   {
-    if (
-      ( rule->greater && (this->width  > rule->x || this->height  > rule->y)) ||
-      (!rule->greater && (this->width == rule->x && this->height == rule->y)))
-    {
-      match = rule;
-    }
-  }
-
-  if (match)
-  {
-    DEBUG_INFO("Matched downsample rule %d", rule->id);
     this->scale        = true;
-    this->targetWidth  = match->targetX;
-    this->targetHeight = match->targetY;
+    this->targetWidth  = rule->targetX;
+    this->targetHeight = rule->targetY;
     return;
   }
 

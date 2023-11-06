@@ -37,6 +37,8 @@ extern Vector downsampleRules;
 
 bool downsampleParser(struct Option * opt, const char * str);
 
+DownsampleRule * downsampleRule_match(int x, int y);
+
 #define DOWNSAMPLE_PARSER(moduleName) \
 { \
   .module         = moduleName, \
