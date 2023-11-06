@@ -782,14 +782,12 @@ static enum ConfigStatus configure(struct Inst * this)
       this->vboFormat  = GL_BGR;
       this->dataFormat = GL_UNSIGNED_BYTE;
 
-      /* The data that the host returns for 24-bit BGR is tightly packed into an
-       * array that the host GPU will support, we need to adjust the parameters
-       * here to the correct dimensions as OpenGL can use it directly
+      /* The data that the host returns is comes from a 32-bit RBGA texture,
+       * as OpenGL supports BGR directly we need to correct dimensions in order
+       * to make this happen.
        */
       this->format.dataWidth  = this->format.frameWidth;
       this->format.dataHeight = this->format.frameHeight;
-      this->format.stride     = this->format.frameWidth;
-      this->format.pitch      = this->format.frameWidth * 3;
       this->format.bpp        = 24;
       break;
 
@@ -1181,7 +1179,7 @@ static bool drawFrame(struct Inst * this)
 
   int bpp = this->format.bpp / 8;
   glPixelStorei(GL_UNPACK_ALIGNMENT , bpp < 4 ? 1 : 0);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.stride);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.frameWidth);
 
   this->texPos = 0;
   framebuffer_read_fn(
