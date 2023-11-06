@@ -33,7 +33,8 @@ typedef struct RGB24
   ID3D11DeviceContext ** context;
   bool shareable;
 
-  int                    size;
+  int                    width;
+  int                    height;
   ID3D11PixelShader   ** pshader;
 }
 RGB24;
@@ -77,19 +78,21 @@ static bool rgb24_configure(void * opaque,
 
   if (!this.pshader)
   {
-    int pixels = (*cols * *rows) * 3 / 4;
-    this.size = (((int)ceil(sqrt(pixels))) + 0x3F) & ~0x3F;
+    this.width = *cols;
+    this.height = *rows;
 
-    char sWidth[6], sHeight[6], sSize[6];
-    snprintf(sWidth , sizeof(sWidth ), "%d", *width );
-    snprintf(sHeight, sizeof(sHeight), "%d", *height);
-    snprintf(sSize  , sizeof(sSize  ), "%d", this.size);
+    char sOutputWidth[6], sOutputHeight[6], sInputWidth[6], sInputHeight[6];
+    snprintf(sInputWidth  , sizeof(sInputWidth)  , "%d", *width     );
+    snprintf(sInputHeight , sizeof(sInputHeight) , "%d", *height    );
+    snprintf(sOutputWidth , sizeof(sOutputWidth) , "%d", this.width );
+    snprintf(sOutputHeight, sizeof(sOutputHeight), "%d", this.height);
 
     const D3D_SHADER_MACRO defines[] =
     {
-      {"INPUT_WIDTH"  , sWidth },
-      {"INPUT_HEIGHT" , sHeight},
-      {"OUTPUT_SIZE"  , sSize  },
+      {"INPUT_WIDTH"  , sInputWidth  },
+      {"INPUT_HEIGHT" , sInputHeight },
+      {"OUTPUT_WIDTH" , sOutputWidth },
+      {"OUTPUT_HEIGHT", sOutputHeight},
       {NULL, NULL}
     };
 
@@ -100,8 +103,8 @@ static bool rgb24_configure(void * opaque,
       "  float4 position : SV_POSITION,\n"
       "  float2 texCoord : TEXCOORD0) : SV_TARGET\n"
       "{\n"
-      "  uint outputIdx = uint(texCoord.y * OUTPUT_SIZE) * OUTPUT_SIZE +\n"
-      "    uint(texCoord.x * OUTPUT_SIZE);\n"
+      "  uint outputIdx = uint(texCoord.y * OUTPUT_HEIGHT) * OUTPUT_WIDTH +\n"
+      "    uint(texCoord.x * OUTPUT_WIDTH);\n"
       "\n"
       "  uint fst = (outputIdx * 4) / 3;\n"
       "  float4 color0 = gInputTexture.Load(\n"
@@ -147,8 +150,8 @@ static bool rgb24_configure(void * opaque,
   // This texture is actually going to contain the packed BGR24 output
   D3D11_TEXTURE2D_DESC texDesc =
   {
-    .Width              = this.size,
-    .Height             = this.size,
+    .Width              = this.width,
+    .Height             = this.height,
     .MipLevels          = 1,
     .ArraySize          = 1,
     .SampleDesc.Count   = 1,
@@ -187,8 +190,8 @@ static bool rgb24_configure(void * opaque,
     goto fail;
   }
 
-  *cols   = this.size;
-  *rows   = this.size;
+  *cols   = this.width;
+  *rows   = this.height;
   *format = CAPTURE_FMT_BGR;
 
   comRef_toGlobal(inst->tex   , tex    );
