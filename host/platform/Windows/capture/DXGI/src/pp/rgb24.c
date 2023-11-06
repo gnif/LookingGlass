@@ -78,19 +78,15 @@ static bool rgb24_configure(void * opaque,
 
   if (!this.pshader)
   {
-    this.width = *cols;
+    this.width  = *cols;
     this.height = *rows;
 
-    char sOutputWidth[6], sOutputHeight[6], sInputWidth[6], sInputHeight[6];
-    snprintf(sInputWidth  , sizeof(sInputWidth)  , "%d", *width     );
-    snprintf(sInputHeight , sizeof(sInputHeight) , "%d", *height    );
+    char sOutputWidth[6], sOutputHeight[6];
     snprintf(sOutputWidth , sizeof(sOutputWidth) , "%d", this.width );
     snprintf(sOutputHeight, sizeof(sOutputHeight), "%d", this.height);
 
     const D3D_SHADER_MACRO defines[] =
     {
-      {"INPUT_WIDTH"  , sInputWidth  },
-      {"INPUT_HEIGHT" , sInputHeight },
       {"OUTPUT_WIDTH" , sOutputWidth },
       {"OUTPUT_HEIGHT", sOutputHeight},
       {NULL, NULL}
@@ -103,26 +99,26 @@ static bool rgb24_configure(void * opaque,
       "  float4 position : SV_POSITION,\n"
       "  float2 texCoord : TEXCOORD0) : SV_TARGET\n"
       "{\n"
-      "  uint outputIdx = uint(texCoord.y * OUTPUT_HEIGHT) * OUTPUT_WIDTH +\n"
-      "    uint(texCoord.x * OUTPUT_WIDTH);\n"
+      "  uint inputAndOutputY = uint(texCoord.y * OUTPUT_HEIGHT);\n"
+      "  uint outputX = uint(texCoord.x * OUTPUT_WIDTH);\n"
       "\n"
-      "  uint fst = (outputIdx * 4) / 3;\n"
+      "  uint fstInputX = (outputX * 4) / 3;\n"
       "  float4 color0 = gInputTexture.Load(\n"
-      "    uint3(fst % INPUT_WIDTH, fst / INPUT_WIDTH, 0));\n"
+      "    uint3(fstInputX, inputAndOutputY, 0));\n"
       "\n"
-      "  uint snd = fst + 1;\n"
+      "  uint sndInputX = fstInputX + 1;\n"
       "  float4 color3 = gInputTexture.Load(\n"
-      "    uint3(snd % INPUT_WIDTH, snd / INPUT_WIDTH, 0));\n"
+      "    uint3(sndInputX, inputAndOutputY, 0));\n"
       "\n"
-      "  uint outputIdxMod3 = outputIdx % 3;\n"
+      "  uint outputXMod3 = outputX % 3;\n"
       "\n"
-      "  float4 color1 = outputIdxMod3 <= 1 ? color0 : color3;\n"
-      "  float4 color2 = outputIdxMod3 == 0 ? color0 : color3;\n"
+      "  float4 color1 = outputXMod3 <= 1 ? color0 : color3;\n"
+      "  float4 color2 = outputXMod3 == 0 ? color0 : color3;\n"
       "\n"
-      "  float b = color0.bgr[outputIdxMod3];\n"
-      "  float g = color1.grb[outputIdxMod3];\n"
-      "  float r = color2.rbg[outputIdxMod3];\n"
-      "  float a = color3.bgr[outputIdxMod3];\n"
+      "  float b = color0.bgr[outputXMod3];\n"
+      "  float g = color1.grb[outputXMod3];\n"
+      "  float r = color2.rbg[outputXMod3];\n"
+      "  float a = color3.bgr[outputXMod3];\n"
       "  return float4(r, g, b, a);\n"
       "}\n";
 
