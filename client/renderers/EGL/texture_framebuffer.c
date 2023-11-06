@@ -78,6 +78,11 @@ bool egl_texFBSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   return egl_texBufferStreamSetup(texture, setup);
 }
 
+static int scaleForBGR(int x)
+{
+  return x * 3 / 4;
+}
+
 static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
@@ -105,12 +110,23 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
   }
   else
   {
-    //FIXME! This is broken for BGR24
     memcpy(damage->rects + damage->count, update->rects,
       update->rectCount * sizeof(FrameDamageRect));
     damage->count += update->rectCount;
+
+    FrameDamageRect scaledDamageRects[damage->count];
+    for (int i = 0; i < damage->count; i++)
+    {
+      FrameDamageRect rect = damage->rects[i];
+      int originalX = rect.x;
+      int scaledX = scaleForBGR(originalX);
+      rect.x = scaledX;
+      rect.width = scaleForBGR(originalX + rect.width) - scaledX;
+      scaledDamageRects[i] = rect;
+    }
+
     rectsFramebufferToBuffer(
-      damage->rects,
+      scaledDamageRects,
       damage->count,
       texture->format.bpp,
       parent->buf[parent->bufIndex].map,
