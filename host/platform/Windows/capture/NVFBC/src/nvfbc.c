@@ -38,6 +38,8 @@
 #include <dwmapi.h>
 #include <d3d9.h>
 
+#include "downsample_parser.h"
+
 #include <NvFBC/nvFBC.h>
 #include "wrapper.h"
 
@@ -50,17 +52,6 @@ struct FrameInfo
   bool wasFresh;
   uint8_t * diffMap;
 };
-
-typedef struct
-{
-  unsigned int id;
-  bool         greater;
-  unsigned int x;
-  unsigned int y;
-  unsigned int targetX;
-  unsigned int targetY;
-}
-DownsampleRule;
 
 struct iface
 {
@@ -100,8 +91,6 @@ struct iface
 
   struct FrameInfo frameInfo[LGMP_Q_FRAME_LEN];
 };
-
-static Vector downsampleRules = {0};
 
 static struct iface * this = NULL;
 
@@ -144,78 +133,11 @@ static const char * nvfbc_getName(void)
   return "NVFBC";
 };
 
-static bool downsampleOptParser(struct Option * opt, const char * str)
-{
-  if (!str)
-    return false;
-
-  opt->value.x_string = strdup(str);
-
-  if (downsampleRules.data)
-    vector_destroy(&downsampleRules);
-
-  if (!vector_create(&downsampleRules, sizeof(DownsampleRule), 10))
-  {
-    DEBUG_ERROR("Failed to allocate ram");
-    return false;
-  }
-
-  char * tmp   = strdup(str);
-  char * token = strtok(tmp, ",");
-  int count = 0;
-  while(token)
-  {
-    DownsampleRule rule = {0};
-    if (token[0] == '>')
-    {
-      rule.greater = true;
-      ++token;
-    }
-
-    if (sscanf(token, "%ux%u:%ux%u",
-      &rule.x,
-      &rule.y,
-      &rule.targetX,
-      &rule.targetY) != 4)
-    {
-      DEBUG_INFO("Unable to parse NvFBC downsample rules");
-      return false;
-    }
-
-    rule.id = count++;
-
-    DEBUG_INFO(
-      "Rule %u: %ux%u IF X %s %4u %s Y %s %4u",
-      rule.id,
-      rule.targetX,
-      rule.targetY,
-      rule.greater ? "> "  : "==",
-      rule.x,
-      rule.greater ? "OR " : "AND",
-      rule.greater ? "> "  : "==",
-      rule.y
-    );
-    vector_push(&downsampleRules, &rule);
-
-    token = strtok(NULL, ",");
-  }
-  free(tmp);
-
-  return true;
-}
-
 static void nvfbc_initOptions(void)
 {
   struct Option options[] =
   {
-    {
-      .module         = "nvfbc",
-      .name           = "downsample", //dxgi:downsample=>1920x1080:1920x1080
-      .description    = "Downsample rules, format: [>](width)x(height):(toWidth)x(toHeight)",
-      .type           = OPTION_TYPE_STRING,
-      .value.x_string = NULL,
-      .parser         = downsampleOptParser
-    },
+    DOWNSAMPLE_PARSER("nvfbc"),
     {
       .module         = "nvfbc",
       .name           = "decoupleCursor",

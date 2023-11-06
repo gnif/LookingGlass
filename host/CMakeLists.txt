@@ -87,6 +87,7 @@ endif()
 set(SOURCES
   ${CMAKE_BINARY_DIR}/version.c
   src/app.c
+  src/downsample_parser.c
 )
 
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common")
