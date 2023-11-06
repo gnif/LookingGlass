@@ -140,6 +140,11 @@ static void d3d11_free(void)
   this = NULL;
 }
 
+static int scaleForBGR(int x)
+{
+  return x * 3 / 4;
+}
+
 static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
 {
   struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
@@ -155,11 +160,11 @@ static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
       FrameDamageRect * rect = tex->texDamageRects + i;
       D3D11_BOX box =
       {
-        .left   = rect->x,
+        .left   = scaleForBGR(rect->x),
         .top    = rect->y,
         .front  = 0,
         .back   = 1,
-        .right  = rect->x + rect->width ,
+        .right  = scaleForBGR(rect->x + rect->width),
         .bottom = rect->y + rect->height,
       };
       ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
