@@ -45,8 +45,9 @@
 #include <dwmapi.h>
 
 #include "com_ref.h"
-#include "dxgi_capture.h"
 #include "util.h"
+#include "backend.h"
+#include "pp.h"
 
 #define LOCKED(...) INTERLOCKED_SECTION(this->deviceContextLock, __VA_ARGS__)
 
@@ -73,6 +74,88 @@ typedef struct
   int  rows, cols;
 }
 PostProcessInstance;
+
+enum TextureState
+{
+  TEXTURE_STATE_UNUSED,
+  TEXTURE_STATE_PENDING_MAP,
+  TEXTURE_STATE_MAPPED
+};
+
+typedef struct Texture
+{
+  unsigned int               formatVer;
+  volatile enum TextureState state;
+  void                     * map;
+  uint32_t                   damageRectsCount;
+  FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
+  int                        texDamageCount;
+  FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
+
+  // post processing
+  Vector                     pp;
+}
+Texture;
+
+typedef struct FrameDamage
+{
+  int             count;
+  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
+}
+FrameDamage;
+
+struct DXGIInterface
+{
+  bool                       initialized;
+  LARGE_INTEGER              perfFreq;
+  LARGE_INTEGER              frameTime;
+  bool                       stop;
+  HDESK                      desktop;
+  IDXGIFactory1           ** factory;
+  IDXGIAdapter1           ** adapter;
+  IDXGIOutput             ** output;
+  ID3D11Device            ** device;
+  ID3D11DeviceContext     ** deviceContext;
+  LG_Lock                    deviceContextLock;
+  bool                       debug;
+  bool                       useAcquireLock;
+  bool                       dwmFlush;
+  bool                       disableDamage;
+  D3D_FEATURE_LEVEL          featureLevel;
+  IDXGIOutputDuplication  ** dup;
+  int                        maxTextures;
+  Texture                  * texture;
+  int                        texRIndex;
+  int                        texWIndex;
+  atomic_int                 texReady;
+  bool                       needsRelease;
+  DXGI_FORMAT                dxgiSrcFormat, dxgiFormat;
+  bool                       hdr;
+  DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
+  ID3D11VertexShader      ** vshader;
+  struct DXGICopyBackend   * backend;
+  bool                       backendConfigured;
+
+  CaptureGetPointerBuffer    getPointerBufferFn;
+  CapturePostPointerBuffer   postPointerBufferFn;
+  LGEvent                  * frameEvent;
+
+  unsigned int    formatVer;
+  unsigned int    width , outputWidth , dataWidth;
+  unsigned int    height, outputHeight, dataHeight;
+  unsigned int    pitch;
+  unsigned int    stride;
+  unsigned int    padding;
+  unsigned int    bpp;
+  double          scaleX, scaleY;
+  CaptureFormat   format, outputFormat;
+  CaptureRotation rotation;
+
+  int  lastPointerX, lastPointerY;
+  bool lastPointerVisible;
+
+  struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
+};
 
 // locals
 static struct DXGIInterface * this = NULL;
