@@ -35,23 +35,37 @@ struct DXGICopyBackend
   const char * code;
 
   // create the copy backend
-  bool (*create)(struct DXGIInterface * intf);
+  bool (*create)(unsigned textures);
 
   // configure the copy backend with the specified format
-  bool (*configure)(unsigned width, unsigned height,
-    DXGI_FORMAT format, unsigned * pitch);
+  bool (*configure)(
+    unsigned width,
+    unsigned height,
+    DXGI_FORMAT format,
+    unsigned bpp,
+    unsigned * pitch);
 
   // free the copy backend
   void (*free)(void);
 
-  // called each captured frame after post processing to copy the frame
-  bool (*copyFrame)(struct Texture * tex, ID3D11Texture2D * src);
+  // called just before the copy starts
+  bool (*preCopy)(ID3D11Texture2D * src, unsigned textureIndex);
+
+  // called to copy the full frame
+  bool (*copyFull)(ID3D11Texture2D * src, unsigned textureIndex);
+
+  // called for each damage rect that needs to be copied
+  bool (*copyRect)(ID3D11Texture2D * src, unsigned textureIndex,
+    FrameDamageRect * rect);
+
+  // called just after the copy has finished
+  bool (*postCopy)(ID3D11Texture2D * src, unsigned textureIndex);
 
   // maps the copied frame into memory
-  CaptureResult (*mapTexture)(struct Texture * tex);
+  CaptureResult (*mapTexture)(unsigned textureIndex, void ** map);
 
   // unmaps the copied frame from memory
-  void (*unmapTexture)(struct Texture * tex);
+  void (*unmapTexture)(unsigned textureIndex);
 
   // called just before the frame is released by the frontend
   void (*preRelease)(void);

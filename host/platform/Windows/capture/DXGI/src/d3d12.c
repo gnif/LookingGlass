@@ -1,5 +1,4 @@
 /**
- * Looking Glass
  * Copyright © 2017-2023 The Looking Glass Authors
  * https://looking-glass.io
  *
@@ -58,7 +57,6 @@ struct D3D12Backend
   float                  copySleep;
   ID3D12Device        ** device;
   ID3D12CommandQueue  ** commandQueue;
-  struct D3D12Texture *  texture;
   UINT64                 fenceValue;
   ID3D12Fence         ** fence;
   HANDLE                 event;
@@ -66,10 +64,13 @@ struct D3D12Backend
   // shared handle cache
   struct SharedCache sharedCache[10];
   int sharedCacheCount;
+  ID3D12Resource * d12src;
+
+  unsigned textures;
+  struct D3D12Texture texture[0];
 };
 
-static struct DXGIInterface * dxgi = NULL;
-static struct D3D12Backend  * this = NULL;
+static struct D3D12Backend * this = NULL;
 
 typedef HRESULT (*D3D12CreateDevice_t)(
   IUnknown          *pAdapter,
@@ -85,18 +86,17 @@ typedef HRESULT (*D3D12GetDebugInterface_t)(
 
 static void d3d12_free(void);
 
-static bool d3d12_create(struct DXGIInterface * intf)
+static bool d3d12_create(unsigned textures)
 {
   DEBUG_ASSERT(!this);
 
   HRESULT status;
-  dxgi = intf;
 
   HMODULE d3d12 = LoadLibrary("d3d12.dll");
   if (!d3d12)
     return false;
 
-  if (dxgi->debug)
+  if (dxgi_debug())
   {
     D3D12GetDebugInterface_t D3D12GetDebugInterface = (D3D12GetDebugInterface_t)
       GetProcAddress(d3d12, "D3D12GetDebugInterface");
@@ -118,20 +118,17 @@ static bool d3d12_create(struct DXGIInterface * intf)
   if (!D3D12CreateDevice)
     return false;
 
-  this = calloc(1, sizeof(struct D3D12Backend));
+  this = calloc(1,
+    sizeof(struct D3D12Backend) +
+    sizeof(*this->texture) * textures);
+
   if (!this)
   {
     DEBUG_ERROR("failed to allocate D3D12Backend struct");
     return false;
   }
 
-  this->texture = calloc(dxgi->maxTextures, sizeof(struct D3D12Texture));
-  if (!this->texture)
-  {
-    DEBUG_ERROR("Failed to allocate memory");
-    return false;
-  }
-
+  this->textures  = textures;
   this->copySleep = option_get_float("dxgi", "d3d12CopySleep");
   DEBUG_INFO("Sleep before copy : %f ms", this->copySleep);
 
@@ -139,8 +136,8 @@ static bool d3d12_create(struct DXGIInterface * intf)
   comRef_scopePush();
 
   comRef_defineLocal(ID3D12Device, device);
-  status = D3D12CreateDevice(*(IUnknown **)dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
-    &IID_ID3D12Device, (void **)device);
+  status = D3D12CreateDevice((IUnknown *)dxgi_getAdapter(),
+    D3D_FEATURE_LEVEL_11_0, &IID_ID3D12Device, (void **)device);
 
   if (FAILED(status))
   {
@@ -200,8 +197,12 @@ exit:
   return result;
 }
 
-static bool d3d12_configure(unsigned width, unsigned height, DXGI_FORMAT format,
-  unsigned * pitch)
+static bool d3d12_configure(
+  unsigned    width,
+  unsigned    height,
+  DXGI_FORMAT format,
+  unsigned    bpp,
+  unsigned *  pitch)
 {
   bool result = false;
   HRESULT status;
@@ -210,7 +211,7 @@ static bool d3d12_configure(unsigned width, unsigned height, DXGI_FORMAT format,
   this->width  = width;
   this->height = height;
   this->format = format;
-  this->pitch  = ALIGN_TO(width * dxgi->bpp, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+  this->pitch  = ALIGN_TO(width * bpp, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 
   D3D12_HEAP_PROPERTIES readbackHeapProperties =
   {
@@ -237,7 +238,7 @@ static bool d3d12_configure(unsigned width, unsigned height, DXGI_FORMAT format,
   comRef_defineLocal(ID3D12CommandAllocator   , commandAllocator   );
   comRef_defineLocal(ID3D12GraphicsCommandList, graphicsCommandList);
   comRef_defineLocal(ID3D12CommandList        , commandList        );
-  for (int i = 0; i < dxgi->maxTextures; ++i)
+  for (int i = 0; i < this->textures; ++i)
   {
     status = ID3D12Device_CreateCommittedResource(*this->device,
         &readbackHeapProperties,
@@ -306,8 +307,6 @@ static bool d3d12_configure(unsigned width, unsigned height, DXGI_FORMAT format,
       goto exit;
     }
 
-    dxgi->texture[i].impl = this->texture + i;
-
     comRef_toGlobal(this->texture[i].tex                , texture            );
     comRef_toGlobal(this->texture[i].fence              , fence              );
     comRef_toGlobal(this->texture[i].commandAllocator   , commandAllocator   );
@@ -329,13 +328,9 @@ static void d3d12_free(void)
   if (!this)
     return;
 
-  if (this->texture)
-  {
-    for (int i = 0; i < dxgi->maxTextures; ++i)
-      if (this->texture[i].event)
-        CloseHandle(this->texture[i].event);
-    free(this->texture);
-  }
+  for (int i = 0; i < this->textures; ++i)
+    if (this->texture[i].event)
+      CloseHandle(this->texture[i].event);
 
   if (this->event)
     CloseHandle(this->event);
@@ -344,86 +339,97 @@ static void d3d12_free(void)
   this = NULL;
 }
 
-static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
+static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
 {
-  // we need to flush the DX11 context explicity or we get tons of lag
-  ID3D11DeviceContext_Flush(*dxgi->deviceContext);
-
   comRef_scopePush();
+  bool result = false;
 
-  struct D3D12Texture * tex = parent->impl;
-  bool fail = true;
-  comRef_defineLocal(IDXGIResource1, res1);
-  ID3D12Resource * d12src = NULL;
-  HRESULT status;
+  // we need to flush the DX11 context explicity or we get tons of lag
+  dxgi_contextLock();
+  ID3D11DeviceContext_Flush(dxgi_getContext());
+  dxgi_contextUnlock();
 
   if (this->copySleep > 0)
     nsleep((uint64_t)(this->copySleep * 1000000));
 
+  this->d12src = NULL;
   if (this->sharedCacheCount > -1)
   {
     // see if there is a cached handle already available for this texture
     for(int i = 0; i < this->sharedCacheCount; ++i)
       if (this->sharedCache[i].tex == src)
       {
-        d12src = *this->sharedCache[i].d12src;
-        break;
+        this->d12src = *this->sharedCache[i].d12src;
+        result = true;
+        goto exit;
       }
   }
 
-  if (!d12src)
+  comRef_defineLocal(IDXGIResource1, res1);
+  HRESULT status = ID3D11Texture2D_QueryInterface(src,
+    &IID_IDXGIResource1, (void **)res1);
+
+  if (FAILED(status))
   {
-    status = ID3D11Texture2D_QueryInterface(src,
-        &IID_IDXGIResource1, (void **)res1);
+    DEBUG_WINERROR("Failed to get IDXGIResource1 from texture", status);
+    goto exit;
+  }
 
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to get IDXGIResource1 from texture", status);
-      goto cleanup;
-    }
+  HANDLE handle;
+  status = IDXGIResource1_CreateSharedHandle(*res1,
+      NULL, DXGI_SHARED_RESOURCE_READ, NULL, &handle);
 
-    HANDLE handle;
-    status = IDXGIResource1_CreateSharedHandle(*res1,
-        NULL, DXGI_SHARED_RESOURCE_READ, NULL, &handle);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to get create shared handle for texture", status);
+    goto exit;
+  }
 
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to get create shared handle for texture", status);
-      goto cleanup;
-    }
+  status = ID3D12Device_OpenSharedHandle(*this->device,
+      handle, &IID_ID3D12Resource, (void **)&this->d12src);
 
-    status = ID3D12Device_OpenSharedHandle(*this->device,
-        handle, &IID_ID3D12Resource, (void **)&d12src);
-    CloseHandle(handle);
+  CloseHandle(handle);
 
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to open the shared handle for texture", status);
-      goto cleanup;
-    }
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to open the shared handle for texture", status);
+    goto exit;
+  }
 
-    // store the texture for later use
-    if (this->sharedCacheCount < ARRAY_LENGTH(this->sharedCache))
+  // store the texture for later use
+  if (this->sharedCacheCount < ARRAY_LENGTH(this->sharedCache))
+  {
+    struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
+    cache->tex = src;
+    *comRef_newGlobal(&cache->d12src) = (IUnknown *)this->d12src;
+  }
+  else
+  {
+    // too many handles to cache, disable the cache entirely
+    for(int i = 0; i < this->sharedCacheCount; ++i)
     {
       struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
-      cache->tex = src;
-      *comRef_newGlobal(&cache->d12src) = (IUnknown *)d12src;
+      comRef_release(cache->d12src);
     }
-    else
-    {
-      // too many handles to cache, disable the cache entirely
-      for(int i = 0; i < this->sharedCacheCount; ++i)
-      {
-        struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
-        comRef_release(cache->d12src);
-      }
-      this->sharedCacheCount = -1;
-    }
+    this->sharedCacheCount = -1;
   }
+
+  result = true;
+
+exit:
+  if (!result)
+    comRef_scopePop();
+
+  return result;
+}
+
+static bool d3d12_copyFull(ID3D11Texture2D * src, unsigned textureIndex)
+{
+  struct D3D12Texture * tex = &this->texture[textureIndex];
 
   D3D12_TEXTURE_COPY_LOCATION srcLoc =
   {
-    .pResource        = d12src,
+    .pResource        = this->d12src,
     .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
     .SubresourceIndex = 0
   };
@@ -446,42 +452,69 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
     }
   };
 
-  if (parent->texDamageCount < 0)
+  ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
+      &destLoc, 0, 0, 0, &srcLoc, NULL);
+
+  return true;
+}
+
+
+static bool d3d12_copyRect(ID3D11Texture2D * src, unsigned textureIndex,
+  FrameDamageRect * rect)
+{
+  struct D3D12Texture * tex = &this->texture[textureIndex];
+
+  D3D12_TEXTURE_COPY_LOCATION srcLoc =
   {
-    ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
-        &destLoc, 0, 0, 0, &srcLoc, NULL);
-  }
-  else
+    .pResource        = this->d12src,
+    .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+    .SubresourceIndex = 0
+  };
+
+  D3D12_TEXTURE_COPY_LOCATION destLoc =
   {
-    for (int i = 0; i < parent->texDamageCount; ++i)
+    .pResource       = *tex->tex,
+    .Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+    .PlacedFootprint =
     {
-      FrameDamageRect * rect = parent->texDamageRects + i;
-      D3D12_BOX box =
+      .Offset    = 0,
+      .Footprint =
       {
-        .left   = rect->x,
-        .top    = rect->y,
-        .front  = 0,
-        .back   = 1,
-        .right  = rect->x + rect->width,
-        .bottom = rect->y + rect->height,
-      };
-
-      if (dxgi->outputFormat == CAPTURE_FMT_BGR)
-      {
-        box.left  = box.left  * 3 / 4;
-        box.right = box.right * 3 / 4;
+        .Format   = this->format,
+        .Width    = this->width,
+        .Height   = this->height,
+        .Depth    = 1,
+        .RowPitch = this->pitch,
       }
-
-      ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
-          &destLoc, box.left, box.top, 0, &srcLoc, &box);
     }
-  }
+  };
 
-  status = ID3D12GraphicsCommandList_Close(*tex->graphicsCommandList);
+  D3D12_BOX box =
+  {
+    .left   = rect->x,
+    .top    = rect->y,
+    .front  = 0,
+    .back   = 1,
+    .right  = rect->x + rect->width,
+    .bottom = rect->y + rect->height,
+  };
+
+  ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
+      &destLoc, box.left, box.top, 0, &srcLoc, &box);
+
+  return true;
+}
+
+static bool d3d12_postCopy(ID3D11Texture2D * src, unsigned textureIndex)
+{
+  bool result = false;
+  struct D3D12Texture * tex = &this->texture[textureIndex];
+
+  HRESULT status = ID3D12GraphicsCommandList_Close(*tex->graphicsCommandList);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to close command list", status);
-    goto cleanup;
+    goto exit;
   }
 
   ID3D12CommandQueue_ExecuteCommandLists(*this->commandQueue,
@@ -492,7 +525,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal capture fence", status);
-    goto cleanup;
+    goto exit;
   }
 
   ResetEvent(this->event);
@@ -501,7 +534,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal capture fence event", status);
-    goto cleanup;
+    goto exit;
   }
 
   status = ID3D12CommandQueue_Signal(*this->commandQueue,
@@ -509,7 +542,7 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal texture fence", status);
-    goto cleanup;
+    goto exit;
   }
 
   status = ID3D12Fence_SetEventOnCompletion(*tex->fence,
@@ -517,18 +550,19 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to signal texture fence event", status);
-    goto cleanup;
+    goto exit;
   }
 
-  fail = false;
-cleanup:
-  comRef_scopePop();
-  return !fail;
+  result = true;
+
+exit:
+  comRef_scopePop(); //push is in pre-copy
+  return result;
 }
 
-static CaptureResult d3d12_mapTexture(Texture * parent)
+static CaptureResult d3d12_mapTexture(unsigned textureIndex, void ** map)
 {
-  struct D3D12Texture * tex = parent->impl;
+  struct D3D12Texture * tex = &this->texture[textureIndex];
   HRESULT status;
 
   WaitForSingleObject(tex->event, INFINITE);
@@ -553,7 +587,7 @@ static CaptureResult d3d12_mapTexture(Texture * parent)
     .Begin = 0,
     .End   = this->pitch * this->height
   };
-  status = ID3D12Resource_Map(*tex->tex, 0, &range, &parent->map);
+  status = ID3D12Resource_Map(*tex->tex, 0, &range, map);
 
   if (FAILED(status))
   {
@@ -564,9 +598,9 @@ static CaptureResult d3d12_mapTexture(Texture * parent)
   return CAPTURE_RESULT_OK;
 }
 
-static void d3d12_unmapTexture(Texture * parent)
+static void d3d12_unmapTexture(unsigned textureIndex)
 {
-  struct D3D12Texture * tex = parent->impl;
+  struct D3D12Texture * tex = &this->texture[textureIndex];
 
   D3D12_RANGE range =
   {
@@ -574,7 +608,6 @@ static void d3d12_unmapTexture(Texture * parent)
     .End   = 0
   };
   ID3D12Resource_Unmap(*tex->tex, 0, &range);
-  parent->map = NULL;
 }
 
 static void d3d12_preRelease(void)
@@ -589,7 +622,10 @@ struct DXGICopyBackend copyBackendD3D12 =
   .create       = d3d12_create,
   .configure    = d3d12_configure,
   .free         = d3d12_free,
-  .copyFrame    = d3d12_copyFrame,
+  .preCopy      = d3d12_preCopy,
+  .copyFull     = d3d12_copyFull,
+  .copyRect     = d3d12_copyRect,
+  .postCopy     = d3d12_postCopy,
   .mapTexture   = d3d12_mapTexture,
   .unmapTexture = d3d12_unmapTexture,
   .preRelease   = d3d12_preRelease,

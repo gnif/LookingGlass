@@ -78,7 +78,7 @@ static bool rgb24_configure(void * opaque,
 
   if (!this.pshader)
   {
-    this.width  = *cols * 3 / 4;
+    this.width  = (*cols * 3 + 3) / 4;
     this.height = *rows;
 
     char sOutputWidth[6], sOutputHeight[6];

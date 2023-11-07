@@ -708,7 +708,7 @@ static bool dxgi_init(void)
   {
     if (!strcasecmp(copyBackend, backends[i]->code))
     {
-      if (!backends[i]->create(this))
+      if (!backends[i]->create(this->maxTextures))
       {
         DEBUG_ERROR("Failed to initialize selected capture backend: %s", backends[i]->name);
         backends[i]->free();
@@ -795,7 +795,7 @@ static bool dxgi_deinit(void)
     Texture * tex = &this->texture[i];
     if (!tex->map)
       continue;
-    this->backend->unmapTexture(tex);
+    this->backend->unmapTexture(i);
     tex->map = NULL;
   }
 
@@ -1099,7 +1099,12 @@ static CaptureResult dxgi_capture(void)
 
         unsigned pitch = 0;
         LG_LOCK(this->deviceContextLock);
-        if (!this->backend->configure(cols, rows, this->dxgiFormat, &pitch))
+        if (!this->backend->configure(
+          cols,
+          rows,
+          this->dxgiFormat,
+          this->bpp,
+          &pitch))
         {
           LG_UNLOCK(this->deviceContextLock);
           DEBUG_ERROR("Failed to configure the copy backend");
@@ -1132,7 +1137,44 @@ static CaptureResult dxgi_capture(void)
         computeFrameDamage(tex);
       computeTexDamage(tex);
 
-      if (!this->backend->copyFrame(tex, dst))
+      if (!this->backend->preCopy(dst, this->texWIndex))
+      {
+        result = CAPTURE_RESULT_ERROR;
+        goto exit;
+      }
+
+      if (tex->texDamageCount <= 0)
+      {
+        if (!this->backend->copyFull(dst, this->texWIndex))
+        {
+          // call this so the backend can cleanup
+          this->backend->postCopy(dst, this->texWIndex);
+          result = CAPTURE_RESULT_ERROR;
+          goto exit;
+        }
+      }
+      else
+      {
+        for (int i = 0; i < tex->texDamageCount; ++i)
+        {
+          FrameDamageRect * rect = &tex->texDamageRects[i];
+
+          // correct the damage rect for BGR packed data
+          if (this->outputFormat == CAPTURE_FMT_BGR)
+          {
+            rect->x     = (rect->x     * 3    ) / 4; // round down
+            rect->width = (rect->width * 3 + 3) / 4; // round up
+          }
+
+          if (!this->backend->copyRect(dst, this->texWIndex, rect))
+          {
+            result = CAPTURE_RESULT_ERROR;
+            goto exit;
+          }
+        }
+      }
+
+      if (!this->backend->postCopy(dst, this->texWIndex))
       {
         result = CAPTURE_RESULT_ERROR;
         goto exit;
@@ -1266,7 +1308,7 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
 
   Texture * tex = &this->texture[this->texRIndex];
 
-  CaptureResult result = this->backend->mapTexture(tex);
+  CaptureResult result = this->backend->mapTexture(this->texRIndex, &tex->map);
   if (result != CAPTURE_RESULT_OK)
     return result;
 
@@ -1355,7 +1397,8 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
       damage->count = -1;
   }
 
-  this->backend->unmapTexture(tex);
+  this->backend->unmapTexture(this->texRIndex);
+  tex->map   = NULL;
   tex->state = TEXTURE_STATE_UNUSED;
 
   if (++this->texRIndex == this->maxTextures)
@@ -1547,6 +1590,36 @@ static void ppFreeAll(void)
     }
     vector_destroy(&tex->pp);
   }
+}
+
+IDXGIAdapter1 * dxgi_getAdapter(void)
+{
+  return *this->adapter;
+}
+
+ID3D11Device * dxgi_getDevice(void)
+{
+  return *this->device;
+}
+
+ID3D11DeviceContext * dxgi_getContext(void)
+{
+  return *this->deviceContext;
+}
+
+void dxgi_contextLock(void)
+{
+  LG_LOCK(this->deviceContextLock);
+};
+
+void dxgi_contextUnlock(void)
+{
+  LG_UNLOCK(this->deviceContextLock);
+};
+
+bool dxgi_debug(void)
+{
+  return this->debug;
 }
 
 struct CaptureInterface Capture_DXGI =

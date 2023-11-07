@@ -50,7 +50,6 @@ typedef struct Texture
   unsigned int               formatVer;
   volatile enum TextureState state;
   void                     * map;
-  uint64_t                   copyTime;
   uint32_t                   damageRectsCount;
   FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
   int                        texDamageCount;
@@ -63,11 +62,12 @@ typedef struct Texture
 }
 Texture;
 
-struct FrameDamage
+typedef struct FrameDamage
 {
   int             count;
   FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
-};
+}
+FrameDamage;
 
 struct DXGIInterface
 {
@@ -121,5 +121,12 @@ struct DXGIInterface
 
   struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
 };
+
+IDXGIAdapter1       * dxgi_getAdapter(void);
+ID3D11Device        * dxgi_getDevice(void);
+ID3D11DeviceContext * dxgi_getContext(void);
+void                  dxgi_contextLock(void);
+void                  dxgi_contextUnlock(void);
+bool                  dxgi_debug(void);
 
 #endif
