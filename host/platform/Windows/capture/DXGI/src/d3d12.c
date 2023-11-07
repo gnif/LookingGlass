@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "dxgi_capture.h"
+#include "backend.h"
 #include "com_ref.h"
 
 #include <assert.h>

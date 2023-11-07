@@ -18,6 +18,9 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifndef _H_DXGI_PP_
+#define _H_DXGI_PP_
+
 #include <d3d11.h>
 #include <stdbool.h>
 
@@ -58,3 +61,5 @@ typedef struct
   void (*finish)(void);
 }
 DXGIPostProcess;
+
+#endif

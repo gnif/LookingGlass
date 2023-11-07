@@ -18,6 +18,9 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifndef _H_DXGI_CAPTURE_
+#define _H_DXGI_CAPTURE_
+
 #include "pp.h"
 
 #include <stdint.h>
@@ -32,6 +35,8 @@
 #include "common/types.h"
 #include "common/vector.h"
 #include "interface/capture.h"
+
+#include "backend.h"
 
 enum TextureState
 {
@@ -63,8 +68,6 @@ struct FrameDamage
   int             count;
   FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
 };
-
-struct DXGICopyBackend;
 
 struct DXGIInterface
 {
@@ -119,16 +122,4 @@ struct DXGIInterface
   struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
 };
 
-struct DXGICopyBackend
-{
-  const char * name;
-  const char * code;
-  bool (*create)(struct DXGIInterface * intf);
-  bool (*configure)(unsigned width, unsigned height,
-    DXGI_FORMAT format, unsigned * pitch);
-  void (*free)(void);
-  bool (*copyFrame)(Texture * tex, ID3D11Texture2D * src);
-  CaptureResult (*mapTexture)(Texture * tex);
-  void (*unmapTexture)(Texture * tex);
-  void (*preRelease)(void);
-};
+#endif
