@@ -130,7 +130,8 @@ static bool egl_filterBGRtoBGRASetup(EGL_Filter * filter,
     this->uOutputSize.location =
       egl_shaderGetUniform(this->shader, "outputSize");
 
-    this->useDMA = useDMA;
+    this->useDMA   = useDMA;
+    this->prepared = false;
   }
 
   if (this->prepared &&
