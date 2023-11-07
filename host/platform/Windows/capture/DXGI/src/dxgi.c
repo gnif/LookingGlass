@@ -1453,7 +1453,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
         int originalX = rect.x;
         int scaledX = originalX * 3 / 4;
         rect.x = scaledX;
-        rect.width = ((originalX + rect.width) * 3 / 4) - scaledX;
+        rect.width = (((originalX + rect.width) * 3 + 3) / 4) - scaledX;
 
         scaledDamageRects[i] = rect;
       }
