@@ -140,46 +140,45 @@ static void d3d11_free(void)
   this = NULL;
 }
 
-static int scaleForBGR(int x)
-{
-  return x * 3 / 4;
-}
-
-static void copyFrameFull(Texture * tex, ID3D11Texture2D * src)
+static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
 {
   struct D3D11TexImpl * teximpl = TEXIMPL(*tex);
   ID3D11Texture2D * dst = *teximpl->cpu;
 
-  if (tex->texDamageCount < 0)
-    ID3D11DeviceContext_CopyResource(*dxgi->deviceContext,
-      (ID3D11Resource *)dst, (ID3D11Resource *)src);
-  else
-  {
-    for (int i = 0; i < tex->texDamageCount; ++i)
-    {
-      FrameDamageRect * rect = tex->texDamageRects + i;
-      D3D11_BOX box =
-      {
-        .left   = scaleForBGR(rect->x),
-        .top    = rect->y,
-        .front  = 0,
-        .back   = 1,
-        .right  = scaleForBGR(rect->x + rect->width),
-        .bottom = rect->y + rect->height,
-      };
-      ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
-        (ID3D11Resource *)dst, 0, box.left, box.top, 0,
-        (ID3D11Resource *)src, 0, &box);
-    }
-  }
-}
-
-static bool d3d11_copyFrame(Texture * tex, ID3D11Texture2D * src)
-{
   INTERLOCKED_SECTION(dxgi->deviceContextLock,
   {
     tex->copyTime = microtime();
-    copyFrameFull(tex, src);
+
+    if (tex->texDamageCount < 0)
+      ID3D11DeviceContext_CopyResource(*dxgi->deviceContext,
+        (ID3D11Resource *)dst, (ID3D11Resource *)src);
+    else
+    {
+      for (int i = 0; i < tex->texDamageCount; ++i)
+      {
+        FrameDamageRect * rect = tex->texDamageRects + i;
+        D3D11_BOX box =
+        {
+          .left   = rect->x,
+          .top    = rect->y,
+          .front  = 0,
+          .back   = 1,
+          .right  = rect->x + rect->width,
+          .bottom = rect->y + rect->height,
+        };
+
+        if (dxgi->outputFormat == CAPTURE_FMT_BGR)
+        {
+          box.left  = box.left  * 3 / 4;
+          box.right = box.right * 3 / 4;
+        }
+
+        ID3D11DeviceContext_CopySubresourceRegion(*dxgi->deviceContext,
+          (ID3D11Resource *)dst, 0, box.left, box.top, 0,
+          (ID3D11Resource *)src, 0, &box);
+      }
+    }
+
     ID3D11DeviceContext_Flush(*dxgi->deviceContext);
   });
   return true;

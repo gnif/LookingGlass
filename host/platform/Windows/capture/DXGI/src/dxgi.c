@@ -1295,11 +1295,6 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   return CAPTURE_RESULT_OK;
 }
 
-static int scaleForBGR(int x)
-{
-  return x * 3 / 4;
-}
-
 static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
 {
   DEBUG_ASSERT(this);
@@ -1319,19 +1314,27 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
       tex->damageRectsCount * sizeof(*tex->damageRects));
     damage->count += tex->damageRectsCount;
 
-    FrameDamageRect scaledDamageRects[damage->count];
-    for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {
-      FrameDamageRect rect = damage->rects[i];
-      int originalX = rect.x;
-      int scaledX = scaleForBGR(originalX);
-      rect.x = scaledX;
-      rect.width = scaleForBGR(originalX + rect.width) - scaledX;
+    if (this->outputFormat == CAPTURE_FMT_BGR)
+    {
+      FrameDamageRect scaledDamageRects[damage->count];
+      for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {
+        FrameDamageRect rect = damage->rects[i];
+        int originalX = rect.x;
+        int scaledX = originalX * 3 / 4;
+        rect.x = scaledX;
+        rect.width = ((originalX + rect.width) * 3 / 4) - scaledX;
 
-      scaledDamageRects[i] = rect;
+        scaledDamageRects[i] = rect;
+      }
+
+      rectsBufferToFramebuffer(scaledDamageRects, damage->count, this->bpp, frame,
+        this->pitch, this->dataHeight, tex->map, this->pitch);
     }
-
-    rectsBufferToFramebuffer(scaledDamageRects, damage->count, this->bpp, frame,
-      this->pitch, this->dataHeight, tex->map, this->pitch);
+    else
+    {
+      rectsBufferToFramebuffer(damage->rects, damage->count, this->bpp, frame,
+        this->pitch, this->dataHeight, tex->map, this->pitch);
+    }
   }
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
