@@ -41,8 +41,6 @@ struct D3D11Backend
   texture[0];
 };
 
-#define TEXIMPL(x) ((struct D3D11TexImpl *)(x).impl)
-
 static struct D3D11Backend  * this = NULL;
 
 static void d3d11_free(void);
