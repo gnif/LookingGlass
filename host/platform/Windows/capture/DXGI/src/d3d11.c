@@ -126,7 +126,8 @@ fail:
 
 static void d3d11_free(void)
 {
-  DEBUG_ASSERT(this);
+  if (!this)
+    return;
 
   for (int i = 0; i < dxgi->maxTextures; ++i)
   {

@@ -52,6 +52,9 @@ struct SharedCache
 
 struct D3D12Backend
 {
+  unsigned width, height, pitch;
+  DXGI_FORMAT format;
+
   float                  copySleep;
   ID3D12Device        ** device;
   ID3D12CommandQueue  ** commandQueue;
@@ -84,6 +87,8 @@ static void d3d12_free(void);
 
 static bool d3d12_create(struct DXGIInterface * intf)
 {
+  DEBUG_ASSERT(!this);
+
   HRESULT status;
   dxgi = intf;
 
@@ -113,7 +118,6 @@ static bool d3d12_create(struct DXGIInterface * intf)
   if (!D3D12CreateDevice)
     return false;
 
-  DEBUG_ASSERT(!this);
   this = calloc(1, sizeof(struct D3D12Backend));
   if (!this)
   {
@@ -121,16 +125,27 @@ static bool d3d12_create(struct DXGIInterface * intf)
     return false;
   }
 
+  this->texture = calloc(dxgi->maxTextures, sizeof(struct D3D12Texture));
+  if (!this->texture)
+  {
+    DEBUG_ERROR("Failed to allocate memory");
+    return false;
+  }
+
   this->copySleep = option_get_float("dxgi", "d3d12CopySleep");
   DEBUG_INFO("Sleep before copy : %f ms", this->copySleep);
 
+  bool result = false;
+  comRef_scopePush();
+
+  comRef_defineLocal(ID3D12Device, device);
   status = D3D12CreateDevice(*(IUnknown **)dxgi->adapter, D3D_FEATURE_LEVEL_11_0,
-    &IID_ID3D12Device, (void **)comRef_newGlobal(&this->device));
+    &IID_ID3D12Device, (void **)device);
 
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create D3D12 device", status);
-    goto fail;
+    goto exit;
   }
 
   D3D12_COMMAND_QUEUE_DESC queueDesc =
@@ -140,48 +155,62 @@ static bool d3d12_create(struct DXGIInterface * intf)
     .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE,
   };
 
-  status = ID3D12Device_CreateCommandQueue(*this->device, &queueDesc,
-    &IID_ID3D12CommandQueue, (void **)comRef_newGlobal(&this->commandQueue));
+  comRef_defineLocal(ID3D12CommandQueue, commandQueue);
+  status = ID3D12Device_CreateCommandQueue(*device, &queueDesc,
+    &IID_ID3D12CommandQueue, (void **)commandQueue);
   if (FAILED(status))
   {
     DEBUG_WARN("Failed to create queue with real time priority");
     queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
 
-    status = ID3D12Device_CreateCommandQueue(*this->device, &queueDesc,
-      &IID_ID3D12CommandQueue, (void **)this->commandQueue);
+    status = ID3D12Device_CreateCommandQueue(*device, &queueDesc,
+      &IID_ID3D12CommandQueue, (void **)commandQueue);
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create D3D12 command allocator", status);
-      goto fail;
+      goto exit;
     }
-  }
-
-  dxgi->pitch  = ALIGN_TO(dxgi->width * dxgi->bpp,
-      D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
-  dxgi->stride = dxgi->pitch / dxgi->bpp;
-
-  this->texture = calloc(dxgi->maxTextures, sizeof(struct D3D12Texture));
-  if (!this->texture)
-  {
-    DEBUG_ERROR("Failed to allocate memory");
-    goto fail;
   }
 
   this->event = CreateEvent(NULL, TRUE, TRUE, NULL);
   if (!this->event)
   {
     DEBUG_WINERROR("Failed to create capture event", status);
-    goto fail;
+    goto exit;
   }
 
+  comRef_defineLocal(ID3D12Fence, fence);
   this->fenceValue = 0;
-  status = ID3D12Device_CreateFence(*this->device, 0, D3D12_FENCE_FLAG_NONE,
-    &IID_ID3D12Fence, (void**)comRef_newGlobal(&this->fence));
+  status = ID3D12Device_CreateFence(*device, 0, D3D12_FENCE_FLAG_NONE,
+    &IID_ID3D12Fence, (void**)fence);
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create capture fence", status);
-    goto fail;
+    goto exit;
   }
+
+  comRef_toGlobal(this->device      , device      );
+  comRef_toGlobal(this->commandQueue, commandQueue);
+  comRef_toGlobal(this->fence       , fence       );
+
+  result = true;
+
+exit:
+  comRef_scopePop();
+  return result;
+}
+
+static bool d3d12_configure(unsigned width, unsigned height, DXGI_FORMAT format,
+  unsigned * pitch)
+{
+  bool result = false;
+  HRESULT status;
+  comRef_scopePush();
+
+  this->width  = width;
+  this->height = height;
+  this->format = format;
+  this->pitch  = ALIGN_TO(width * dxgi->bpp, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 
   D3D12_HEAP_PROPERTIES readbackHeapProperties =
   {
@@ -192,7 +221,7 @@ static bool d3d12_create(struct DXGIInterface * intf)
   {
     .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
     .Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
-    .Width              = dxgi->pitch * dxgi->height,
+    .Width              = this->pitch * height,
     .Height             = 1,
     .DepthOrArraySize   = 1,
     .MipLevels          = 1,
@@ -203,6 +232,11 @@ static bool d3d12_create(struct DXGIInterface * intf)
     .Flags              = D3D12_RESOURCE_FLAG_NONE
   };
 
+  comRef_defineLocal(ID3D12Resource           , texture            );
+  comRef_defineLocal(ID3D12Fence              , fence              );
+  comRef_defineLocal(ID3D12CommandAllocator   , commandAllocator   );
+  comRef_defineLocal(ID3D12GraphicsCommandList, graphicsCommandList);
+  comRef_defineLocal(ID3D12CommandList        , commandList        );
   for (int i = 0; i < dxgi->maxTextures; ++i)
   {
     status = ID3D12Device_CreateCommittedResource(*this->device,
@@ -212,89 +246,94 @@ static bool d3d12_create(struct DXGIInterface * intf)
         D3D12_RESOURCE_STATE_COPY_DEST,
         NULL,
         &IID_ID3D12Resource,
-        (void **)comRef_newGlobal(&this->texture[i].tex));
+        (void **)texture);
 
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create texture", status);
-      goto fail;
+      goto exit;
     }
 
     this->texture[i].event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!this->texture[i].event)
     {
       DEBUG_WINERROR("Failed to create texture event", status);
-      goto fail;
+      goto exit;
     }
 
     this->texture[i].fenceValue = 0;
     status = ID3D12Device_CreateFence(*this->device, 0, D3D12_FENCE_FLAG_NONE,
-      &IID_ID3D12Fence, (void **)comRef_newGlobal(&this->texture[i].fence));
+      &IID_ID3D12Fence, (void **)fence);
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create fence", status);
-      goto fail;
+      goto exit;
     }
 
     status = ID3D12Device_CreateCommandAllocator(*this->device,
         D3D12_COMMAND_LIST_TYPE_COPY,
         &IID_ID3D12CommandAllocator,
-        (void **)comRef_newGlobal(&this->texture[i].commandAllocator));
+        (void **)commandAllocator);
 
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create D3D12 command allocator", status);
-      goto fail;
+      goto exit;
     }
 
     status = ID3D12Device_CreateCommandList(*this->device,
         0,
         D3D12_COMMAND_LIST_TYPE_COPY,
-        *this->texture[i].commandAllocator,
+        *commandAllocator,
         NULL,
         &IID_ID3D12GraphicsCommandList,
-        (void **)comRef_newGlobal(&this->texture[i].graphicsCommandList));
+        (void **)graphicsCommandList);
 
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create D3D12 command list", status);
-      goto fail;
+      goto exit;
     }
 
     status = ID3D12GraphicsCommandList_QueryInterface(
-        *this->texture[i].graphicsCommandList,
+        *graphicsCommandList,
         &IID_ID3D12CommandList,
-        (void **)comRef_newGlobal(&this->texture[i].commandList));
+        (void **)commandList);
 
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to convert D3D12 command list", status);
-      goto fail;
+      goto exit;
     }
 
     dxgi->texture[i].impl = this->texture + i;
+
+    comRef_toGlobal(this->texture[i].tex                , texture            );
+    comRef_toGlobal(this->texture[i].fence              , fence              );
+    comRef_toGlobal(this->texture[i].commandAllocator   , commandAllocator   );
+    comRef_toGlobal(this->texture[i].graphicsCommandList, graphicsCommandList);
+    comRef_toGlobal(this->texture[i].commandList        , commandList        );
   }
 
-//  dxgi->useAcquireLock = false;
-  return true;
 
-fail:
-  d3d12_free();
-  return false;
+  *pitch = this->pitch;
+  result = true;
+
+exit:
+  comRef_scopePop();
+  return result;
 }
 
 static void d3d12_free(void)
 {
-  DEBUG_ASSERT(this);
+  if (!this)
+    return;
 
   if (this->texture)
   {
     for (int i = 0; i < dxgi->maxTextures; ++i)
-    {
       if (this->texture[i].event)
         CloseHandle(this->texture[i].event);
-    }
-
     free(this->texture);
   }
 
@@ -307,6 +346,9 @@ static void d3d12_free(void)
 
 static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
 {
+  // we need to flush the DX11 context explicity or we get tons of lag
+  ID3D11DeviceContext_Flush(*dxgi->deviceContext);
+
   comRef_scopePush();
 
   struct D3D12Texture * tex = parent->impl;
@@ -395,18 +437,20 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
       .Offset    = 0,
       .Footprint =
       {
-        .Format   = dxgi->dxgiFormat,
-        .Width    = dxgi->width,
-        .Height   = dxgi->height,
+        .Format   = this->format,
+        .Width    = this->width,
+        .Height   = this->height,
         .Depth    = 1,
-        .RowPitch = dxgi->pitch,
+        .RowPitch = this->pitch,
       }
     }
   };
 
   if (parent->texDamageCount < 0)
+  {
     ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
         &destLoc, 0, 0, 0, &srcLoc, NULL);
+  }
   else
   {
     for (int i = 0; i < parent->texDamageCount; ++i)
@@ -421,8 +465,15 @@ static bool d3d12_copyFrame(Texture * parent, ID3D11Texture2D * src)
         .right  = rect->x + rect->width,
         .bottom = rect->y + rect->height,
       };
+
+      if (dxgi->outputFormat == CAPTURE_FMT_BGR)
+      {
+        box.left  = box.left  * 3 / 4;
+        box.right = box.right * 3 / 4;
+      }
+
       ID3D12GraphicsCommandList_CopyTextureRegion(*tex->graphicsCommandList,
-          &destLoc, rect->x, rect->y, 0, &srcLoc, &box);
+          &destLoc, box.left, box.top, 0, &srcLoc, &box);
     }
   }
 
@@ -536,6 +587,7 @@ struct DXGICopyBackend copyBackendD3D12 =
   .name         = "Direct3D 12",
   .code         = "d3d12",
   .create       = d3d12_create,
+  .configure    = d3d12_configure,
   .free         = d3d12_free,
   .copyFrame    = d3d12_copyFrame,
   .mapTexture   = d3d12_mapTexture,

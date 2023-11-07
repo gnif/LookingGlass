@@ -711,6 +711,7 @@ static bool dxgi_init(void)
       if (!backends[i]->create(this))
       {
         DEBUG_ERROR("Failed to initialize selected capture backend: %s", backends[i]->name);
+        backends[i]->free();
         goto fail;
       }
 
