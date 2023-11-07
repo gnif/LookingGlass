@@ -92,10 +92,7 @@ static bool downsample_configure(void * opaque,
     this.disabled = true;
 
   if (this.disabled)
-  {
-    result = true;
-    goto exit;
-  }
+    return true;
 
   HRESULT status;
   comRef_scopePush();
