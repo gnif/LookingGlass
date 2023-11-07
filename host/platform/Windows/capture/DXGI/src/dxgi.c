@@ -119,6 +119,7 @@ struct DXGIInterface
   LG_Lock                    deviceContextLock;
   bool                       debug;
   bool                       useAcquireLock;
+  bool                       allowRGB24;
   bool                       dwmFlush;
   bool                       disableDamage;
   D3D_FEATURE_LEVEL          featureLevel;
@@ -260,6 +261,13 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
     },
+    {
+      .module         = "dxgi",
+      .name           = "allowRGB24",
+      .description    = "Losslessly pack 32-bit RGBA8 into 24-bit RGB (saves bandwidth)",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
+    },
     {0}
   };
 
@@ -291,6 +299,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
 
   this->debug               = option_get_bool("dxgi", "debug");
   this->useAcquireLock      = option_get_bool("dxgi", "useAcquireLock");
+  this->allowRGB24          = option_get_bool("dxgi", "allowRGB24");
   this->dwmFlush            = option_get_bool("dxgi", "dwmFlush");
   this->disableDamage       = option_get_bool("dxgi", "disableDamage");
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
@@ -842,7 +851,7 @@ static bool dxgi_init(void)
   }
 
   //If not HDR, pack to RGB24
-  if (!this->hdr)
+  if (!this->hdr && this->allowRGB24)
   {
     if (!ppInit(&DXGIPP_RGB24, shareable))
       DEBUG_WARN("Failed to initialize the RGB24 post processor");

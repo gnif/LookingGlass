@@ -141,6 +141,10 @@ static bool rgb24_configure(void * opaque,
     }
 
     comRef_toGlobal(this.pshader, pshader);
+
+    DEBUG_INFO("RGBA to RGB packing enabled, %.2f MiB per frame saved",
+      (float)((*width * *height - this.width * this.height) * 4) / 1048576
+    );
   }
 
   // This texture is actually going to contain the packed BGR24 output
