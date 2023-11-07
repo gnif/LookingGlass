@@ -85,12 +85,17 @@ static bool downsample_configure(void * opaque,
   int * cols , int * rows  ,
   CaptureFormat * format)
 {
+  bool result = false;
   DownsampleInst * inst = (DownsampleInst *)opaque;
+
   if (*format == CAPTURE_FMT_BGR)
     this.disabled = true;
 
   if (this.disabled)
-    return true;
+  {
+    result = true;
+    goto exit;
+  }
 
   HRESULT status;
   comRef_scopePush();
@@ -101,7 +106,8 @@ static bool downsample_configure(void * opaque,
     if (!rule || (rule->targetX == *width && rule->targetY == *height))
     {
       this.disabled = true;
-      return true;
+      result = true;
+      goto exit;
     }
 
     this.width  = rule->targetX;
@@ -122,7 +128,7 @@ static bool downsample_configure(void * opaque,
 
     comRef_defineLocal(ID3DBlob, byteCode);
     if (!compileShader(byteCode, "main", "ps_5_0", pshaderSrc, NULL))
-      goto fail;
+      goto exit;
 
     comRef_defineLocal(ID3D11PixelShader, pshader);
     HRESULT status = ID3D11Device_CreatePixelShader(
@@ -135,7 +141,7 @@ static bool downsample_configure(void * opaque,
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create the pixel shader", status);
-      goto fail;
+      goto exit;
     }
 
     const D3D11_SAMPLER_DESC samplerDesc =
@@ -155,7 +161,7 @@ static bool downsample_configure(void * opaque,
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create the sampler state", status);
-      goto fail;
+      goto exit;
     }
 
     comRef_toGlobal(this.pshader, pshader);
@@ -191,7 +197,7 @@ static bool downsample_configure(void * opaque,
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create the output texture", status);
-    goto fail;
+    goto exit;
   }
 
   comRef_defineLocal(ID3D11RenderTargetView, target);
@@ -201,7 +207,7 @@ static bool downsample_configure(void * opaque,
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create the render target view", status);
-    goto fail;
+    goto exit;
   }
 
   *width  = *cols = this.width;
@@ -210,12 +216,9 @@ static bool downsample_configure(void * opaque,
   comRef_toGlobal(inst->tex    , tex    );
   comRef_toGlobal(inst->target , target );
 
+exit:
   comRef_scopePop();
-  return true;
-
-fail:
-  comRef_scopePop();
-  return false;
+  return result;
 }
 
 static bool downsample_init(void ** opaque)
