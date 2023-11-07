@@ -50,7 +50,7 @@ static bool d3d11_create(unsigned textures)
   DEBUG_ASSERT(!this);
   this = calloc(1,
     sizeof(struct D3D11Backend) +
-    sizeof(*this->texture) + textures);
+    sizeof(*this->texture) * textures);
 
   if (!this)
   {
