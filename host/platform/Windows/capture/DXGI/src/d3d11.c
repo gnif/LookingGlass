@@ -36,14 +36,12 @@ struct D3D11Backend
   struct
   {
     uint64_t           copyTime;
-    ID3D11Texture2D ** cpu;
+    ID3D11Texture2D ** tex;
   }
   texture[0];
 };
 
 static struct D3D11Backend  * this = NULL;
-
-static void d3d11_free(void);
 
 static bool d3d11_create(unsigned textures)
 {
@@ -72,7 +70,7 @@ static bool d3d11_configure(
 {
   HRESULT status;
 
-  D3D11_TEXTURE2D_DESC cpuTexDesc =
+  D3D11_TEXTURE2D_DESC texTexDesc =
   {
     .Width              = width,
     .Height             = height,
@@ -87,22 +85,22 @@ static bool d3d11_configure(
     .MiscFlags          = 0
   };
 
-  comRef_defineLocal(ID3D11Texture2D, cpu);
+  comRef_defineLocal(ID3D11Texture2D, tex);
   for(int i = 0; i < this->textures; ++i)
   {
-    status = ID3D11Device_CreateTexture2D(dxgi_getDevice(), &cpuTexDesc, NULL, cpu);
+    status = ID3D11Device_CreateTexture2D(dxgi_getDevice(), &texTexDesc, NULL, tex);
     if (FAILED(status))
     {
       DEBUG_WINERROR("Failed to create CPU texture", status);
       goto fail;
     }
-    comRef_toGlobal(this->texture[i].cpu, cpu);
+    comRef_toGlobal(this->texture[i].tex, tex);
   }
 
   // map the texture simply to get the pitch and stride
   D3D11_MAPPED_SUBRESOURCE mapping;
   status = ID3D11DeviceContext_Map(dxgi_getContext(),
-    *(ID3D11Resource **)this->texture[0].cpu, 0, D3D11_MAP_READ, 0, &mapping);
+    *(ID3D11Resource **)this->texture[0].tex, 0, D3D11_MAP_READ, 0, &mapping);
 
   if (FAILED(status))
   {
@@ -111,7 +109,7 @@ static bool d3d11_configure(
   }
 
   ID3D11DeviceContext_Unmap(dxgi_getContext(),
-    *(ID3D11Resource **)this->texture[0].cpu, 0);
+    *(ID3D11Resource **)this->texture[0].tex, 0);
 
   *pitch = mapping.RowPitch;
   return true;
@@ -139,7 +137,7 @@ static bool d3d11_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
 
 static bool d3d11_copyFull(ID3D11Texture2D * src, unsigned textureIndex)
 {
-  ID3D11Texture2D * dst = *this->texture[textureIndex].cpu;
+  ID3D11Texture2D * dst = *this->texture[textureIndex].tex;
 
   ID3D11DeviceContext_CopyResource(dxgi_getContext(),
     (ID3D11Resource *)dst, (ID3D11Resource *)src);
@@ -151,7 +149,7 @@ static bool d3d11_copyFull(ID3D11Texture2D * src, unsigned textureIndex)
 static bool d3d11_copyRect(ID3D11Texture2D * src, unsigned textureIndex,
   FrameDamageRect * rect)
 {
-  ID3D11Texture2D * dst = *this->texture[textureIndex].cpu;
+  ID3D11Texture2D * dst = *this->texture[textureIndex].tex;
 
   D3D11_BOX box =
   {
@@ -180,7 +178,7 @@ static bool d3d11_postCopy(ID3D11Texture2D * src, unsigned textureIndex)
 
 static CaptureResult d3d11_mapTexture(unsigned textureIndex, void ** map)
 {
-  ID3D11Resource * cpu = *(ID3D11Resource **)this->texture[textureIndex].cpu;
+  ID3D11Resource * tex = *(ID3D11Resource **)this->texture[textureIndex].tex;
 
   // sleep until it's close to time to map
   const uint64_t delta = microtime() - this->texture[textureIndex].copyTime;
@@ -195,7 +193,7 @@ static CaptureResult d3d11_mapTexture(unsigned textureIndex, void ** map)
     HRESULT status;
 
     dxgi_contextLock();
-    status = ID3D11DeviceContext_Map(dxgi_getContext(), cpu, 0, D3D11_MAP_READ,
+    status = ID3D11DeviceContext_Map(dxgi_getContext(), tex, 0, D3D11_MAP_READ,
       0x100000L, &mappedRes);
     dxgi_contextUnlock();
     if (status == DXGI_ERROR_WAS_STILL_DRAWING)
@@ -228,10 +226,10 @@ static CaptureResult d3d11_mapTexture(unsigned textureIndex, void ** map)
 
 static void d3d11_unmapTexture(unsigned textureIndex)
 {
-  ID3D11Resource * cpu = *(ID3D11Resource **)this->texture[textureIndex].cpu;
+  ID3D11Resource * tex = *(ID3D11Resource **)this->texture[textureIndex].tex;
 
   dxgi_contextLock();
-  ID3D11DeviceContext_Unmap(dxgi_getContext(), cpu, 0);
+  ID3D11DeviceContext_Unmap(dxgi_getContext(), tex, 0);
   dxgi_contextUnlock();
 }
 
