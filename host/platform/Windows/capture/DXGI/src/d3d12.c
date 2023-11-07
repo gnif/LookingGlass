@@ -551,7 +551,7 @@ static CaptureResult d3d12_mapTexture(Texture * parent)
   D3D12_RANGE range =
   {
     .Begin = 0,
-    .End   = dxgi->pitch * dxgi->height
+    .End   = this->pitch * this->height
   };
   status = ID3D12Resource_Map(*tex->tex, 0, &range, &parent->map);
 
