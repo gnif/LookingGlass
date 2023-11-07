@@ -212,6 +212,7 @@ static bool downsample_configure(void * opaque,
 
   comRef_toGlobal(inst->tex    , tex    );
   comRef_toGlobal(inst->target , target );
+  result = true;
 
 exit:
   comRef_scopePop();
