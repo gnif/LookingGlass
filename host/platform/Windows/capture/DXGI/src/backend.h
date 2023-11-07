@@ -21,10 +21,11 @@
 #ifndef _H_DXGI_BACKEND_
 #define _H_DXGI_BACKEND_
 
-#include "dxgi_capture.h"
+#include "common/types.h"
+#include "interface/capture.h"
 
-struct DXGIInterface;
-struct Texture;
+#include <stdbool.h>
+#include <d3d11.h>
 
 struct DXGICopyBackend
 {
@@ -70,5 +71,17 @@ struct DXGICopyBackend
   // called just before the frame is released by the frontend
   void (*preRelease)(void);
 };
+
+// these are functions exported by dxgi.c for use by the backends
+IDXGIAdapter1       * dxgi_getAdapter(void);
+ID3D11Device        * dxgi_getDevice(void);
+ID3D11DeviceContext * dxgi_getContext(void);
+
+// lock and unlock the context lock
+void                  dxgi_contextLock(void);
+void                  dxgi_contextUnlock(void);
+
+/* returns true if dxgi:debug is enabled */
+bool                  dxgi_debug(void);
 
 #endif

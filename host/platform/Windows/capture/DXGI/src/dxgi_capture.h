@@ -120,11 +120,4 @@ struct DXGIInterface
   struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
 };
 
-IDXGIAdapter1       * dxgi_getAdapter(void);
-ID3D11Device        * dxgi_getDevice(void);
-ID3D11DeviceContext * dxgi_getContext(void);
-void                  dxgi_contextLock(void);
-void                  dxgi_contextUnlock(void);
-bool                  dxgi_debug(void);
-
 #endif

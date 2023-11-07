@@ -21,6 +21,7 @@
 #include "com_ref.h"
 
 #include <assert.h>
+#include <dxgi1_2.h>
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
 #include "common/time.h"
