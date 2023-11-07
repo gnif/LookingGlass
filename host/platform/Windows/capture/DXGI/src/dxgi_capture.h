@@ -48,7 +48,7 @@ typedef struct Texture
   uint64_t                   copyTime;
   uint32_t                   damageRectsCount;
   FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
-  int32_t                    texDamageCount;
+  int                        texDamageCount;
   FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
 
   // post processing
@@ -109,6 +109,7 @@ struct DXGIInterface
   unsigned int    stride;
   unsigned int    padding;
   unsigned int    bpp;
+  double          scaleX, scaleY;
   CaptureFormat   format, outputFormat;
   CaptureRotation rotation;
 

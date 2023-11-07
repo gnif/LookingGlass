@@ -20,7 +20,6 @@
 
 #include "interface/capture.h"
 #include "interface/platform.h"
-#include "downsample_parser.h"
 #include "common/array.h"
 #include "common/debug.h"
 #include "common/windebug.h"
@@ -32,6 +31,7 @@
 #include "common/KVMFR.h"
 #include "common/vector.h"
 
+#include <math.h>
 #include <stdatomic.h>
 #include <unistd.h>
 #include <dxgi.h>
@@ -51,8 +51,16 @@
 #define LOCKED(...) INTERLOCKED_SECTION(this->deviceContextLock, __VA_ARGS__)
 
 //post processers
+extern const DXGIPostProcess DXGIPP_Downsample;
 extern const DXGIPostProcess DXGIPP_SDRWhiteLevel;
 extern const DXGIPostProcess DXGIPP_RGB24;
+
+const DXGIPostProcess * postProcessors[] =
+{
+  &DXGIPP_Downsample,
+  &DXGIPP_SDRWhiteLevel,
+  &DXGIPP_RGB24
+};
 
 typedef struct
 {
@@ -81,6 +89,7 @@ static struct DXGICopyBackend * backends[] = {
 static bool          dxgi_deinit(void);
 static CaptureResult dxgi_releaseFrame(void);
 
+static void ppEarlyInit(void);
 static bool ppInit(const DXGIPostProcess * pp, bool shareable);
 static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src,
   int * width, int * height,
@@ -119,7 +128,6 @@ static void dxgi_initOptions(void)
       .type           = OPTION_TYPE_STRING,
       .value.x_string = NULL
     },
-    DOWNSAMPLE_PARSER("dxgi"),
     {
       .module         = "dxgi",
       .name           = "maxTextures",
@@ -173,6 +181,7 @@ static void dxgi_initOptions(void)
   };
 
   option_register(options);
+  ppEarlyInit();
 }
 
 static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
@@ -693,14 +702,6 @@ static bool dxgi_init(void)
 
   this->outputWidth  = this->width;
   this->outputHeight = this->height;
-  DownsampleRule * rule = downsampleRule_match(this->width, this->height);
-  if (rule)
-  {
-    this->outputWidth  = rule->targetX;
-    this->outputHeight = rule->targetY;
-  }
-
-  DEBUG_INFO("Request Size      : %u x %u", this->outputWidth, this->outputHeight);
 
   const char * copyBackend = option_get_string("dxgi", "copyBackend");
   for (int i = 0; i < ARRAY_LENGTH(backends); ++i)
@@ -737,6 +738,13 @@ static bool dxgi_init(void)
 
   if (!initVertexShader())
     goto fail;
+
+  if (!ppInit(&DXGIPP_Downsample,
+      this->backend != &copyBackendD3D11 && !this->hdr))
+  {
+    DEBUG_ERROR("Failed to intiailize the downsample post processor");
+    goto fail;
+  }
 
   // if HDR add the SDRWhiteLevel post processor to correct the output
   if (this->hdr)
@@ -856,10 +864,10 @@ static void rectToFrameDamageRect(RECT * src, FrameDamageRect * dst)
 {
   *dst = (FrameDamageRect)
   {
-    .x      = src->left               ,
-    .y      = src->top                ,
-    .width  = (src->right - src->left),
-    .height = (src->bottom - src->top)
+    .x      = floor((double)src->left * this->scaleX),
+    .y      = floor((double)src->top  * this->scaleY),
+    .width  = ceil ((double)(src->right - src->left) * this->scaleX),
+    .height = ceil ((double)(src->bottom - src->top) * this->scaleY)
   };
 }
 
@@ -917,10 +925,12 @@ static void computeFrameDamage(Texture * tex)
 
     *texDamageRect++ = (FrameDamageRect)
     {
-      .x = moveRect->SourcePoint.x,
-      .y = moveRect->SourcePoint.y,
-      .width = moveRect->DestinationRect.right - moveRect->DestinationRect.left,
-      .height = moveRect->DestinationRect.bottom - moveRect->DestinationRect.top
+      .x      = floor((double)moveRect->SourcePoint.x * this->scaleX),
+      .y      = floor((double)moveRect->SourcePoint.y * this->scaleY),
+      .width  = ceil((double)(moveRect->DestinationRect.right  -
+        moveRect->DestinationRect.left) * this->scaleX),
+      .height = ceil((double)(moveRect->DestinationRect.bottom -
+        moveRect->DestinationRect.top ) * this->scaleY)
     };
 
     rectToFrameDamageRect(&moveRect->DestinationRect, texDamageRect++);
@@ -1038,14 +1048,6 @@ static CaptureResult dxgi_capture(void)
   {
     if (copyFrame)
     {
-      if (this->useAcquireLock)
-      {
-        LOCKED({ computeFrameDamage(tex); });
-      }
-      else
-        computeFrameDamage(tex);
-      computeTexDamage(tex);
-
       // run any postprocessors
       int width   = this->width;
       int height  = this->height;
@@ -1114,7 +1116,19 @@ static CaptureResult dxgi_capture(void)
         this->dataHeight        = rows;
         this->pitch             = pitch;
         this->stride            = pitch / this->bpp;
+
+        this->scaleX = (double)width  / this->width;
+        this->scaleY = (double)height / this->height;
       }
+
+      // compute the frame damage
+      if (this->useAcquireLock)
+      {
+        LOCKED({ computeFrameDamage(tex); });
+      }
+      else
+        computeFrameDamage(tex);
+      computeTexDamage(tex);
 
       if (!this->backend->copyFrame(tex, dst))
       {
@@ -1380,6 +1394,13 @@ static CaptureResult dxgi_releaseFrame(void)
   return CAPTURE_RESULT_OK;
 }
 
+static void ppEarlyInit(void)
+{
+  for(int i = 0; i < ARRAY_LENGTH(postProcessors); ++i)
+    if (postProcessors[i]->earlyInit)
+      postProcessors[i]->earlyInit();
+}
+
 static bool ppInit(const DXGIPostProcess * pp, bool shareable)
 {
   if (!pp->setup(this->device, this->deviceContext, this->output, shareable))
@@ -1448,7 +1469,7 @@ static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src,
         format))
       {
         LG_UNLOCK(this->deviceContextLock);
-        DEBUG_ERROR("setFormat failed on a post processor");
+        DEBUG_ERROR("setFormat failed on a post processor (%s)", inst->pp->name);
         return NULL;
       }
 
@@ -1476,15 +1497,8 @@ static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src,
     // run the post processor
     ID3D11Texture2D * out = inst->pp->run(inst->opaque, inst->srv);
 
-    // if the post processor failed
+    // if the post processor does nothing, just continue
     if (!out)
-    {
-      LG_UNLOCK(this->deviceContextLock);
-      return NULL;
-    }
-
-    // if the post processor did nothing, just continue
-    if (out == src)
     {
       LG_UNLOCK(this->deviceContextLock);
       continue;
@@ -1494,6 +1508,11 @@ static ID3D11Texture2D * ppRun(Texture * tex, ID3D11Texture2D * src,
     ID3D11DeviceContext_IASetPrimitiveTopology(
       *this->deviceContext, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     ID3D11DeviceContext_Draw(*this->deviceContext, 4, 0);
+
+    // unset the target render view
+    static ID3D11RenderTargetView * nullTarget = NULL;
+    ID3D11DeviceContext_OMSetRenderTargets(
+      *this->deviceContext, 1, &nullTarget, NULL);
 
     // the output is now the input
     src = out;
