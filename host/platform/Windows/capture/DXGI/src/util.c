@@ -18,6 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include "util.h"
 #include "common/debug.h"
 
 #include <d3d11.h>
@@ -319,4 +320,31 @@ float getSDRWhiteLevel(const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
     nits = level.SDRWhiteLevel / 1000.0f * 80.0f;
 
   return nits;
+}
+
+DXGI_FORMAT getDXGIFormat(CaptureFormat format)
+{
+  switch(format)
+  {
+    case CAPTURE_FMT_RGBA:
+      return DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    case CAPTURE_FMT_BGRA:
+      return DXGI_FORMAT_B8G8R8A8_UNORM;
+
+    case CAPTURE_FMT_RGBA10:
+      return DXGI_FORMAT_R10G10B10A2_UNORM;
+
+    case CAPTURE_FMT_RGBA16F:
+      return DXGI_FORMAT_R16G16B16A16_FLOAT;
+
+    case CAPTURE_FMT_BGR:
+      return DXGI_FORMAT_B8G8R8A8_UNORM;
+
+    default:
+      break;
+  }
+
+  DEBUG_ASSERT("Invalid capture format for DXGI");
+  return 0;
 }

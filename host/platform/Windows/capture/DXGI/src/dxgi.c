@@ -739,28 +739,29 @@ static bool dxgi_init(void)
   if (!initVertexShader())
     goto fail;
 
-  if (!ppInit(&DXGIPP_Downsample,
-      this->backend != &copyBackendD3D11 && !this->hdr))
-  {
-    DEBUG_ERROR("Failed to intiailize the downsample post processor");
-    goto fail;
-  }
-
-  // if HDR add the SDRWhiteLevel post processor to correct the output
+  bool shareable = this->backend != &copyBackendD3D11;
   if (this->hdr)
   {
-    if (!ppInit(&DXGIPP_SDRWhiteLevel, this->backend != &copyBackendD3D11))
+    //HDR content needs to be corrected and converted to HDR10
+    if (!ppInit(&DXGIPP_SDRWhiteLevel, shareable))
     {
       DEBUG_ERROR("Failed to initialize the SDRWhiteLevel post processor");
       goto fail;
     }
   }
-  else
+
+  //Downsampling must happen before conversion to RGB24
+  if (!ppInit(&DXGIPP_Downsample, shareable))
   {
-    // only support DX11 for this atm
-    if (this->backend == &copyBackendD3D11)
-      if (!ppInit(&DXGIPP_RGB24, false))
-        DEBUG_WARN("Failed to initialize the RGB24 post processor");
+    DEBUG_ERROR("Failed to intiailize the downsample post processor");
+    goto fail;
+  }
+
+  //If not HDR, pack to RGB24
+  if (!this->hdr)
+  {
+    if (!ppInit(&DXGIPP_RGB24, shareable))
+      DEBUG_WARN("Failed to initialize the RGB24 post processor");
   }
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)

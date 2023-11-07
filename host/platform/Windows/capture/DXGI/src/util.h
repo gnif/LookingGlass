@@ -19,7 +19,10 @@
  */
 
 #include <windows.h>
+#include <d3dcommon.h>
 #include <dxgi.h>
+
+#include "interface/capture.h"
 
 const char * getDXGIFormatStr(DXGI_FORMAT format);
 const char * getDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type);
@@ -30,3 +33,5 @@ bool compileShader(ID3DBlob ** dst, const char * entry, const char * target,
 bool getDisplayPathInfo(HMONITOR monitor, DISPLAYCONFIG_PATH_INFO * info);
 
 float getSDRWhiteLevel(const DISPLAYCONFIG_PATH_INFO * displayPathInfo);
+
+DXGI_FORMAT getDXGIFormat(CaptureFormat format);
