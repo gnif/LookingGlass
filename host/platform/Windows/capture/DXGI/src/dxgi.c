@@ -1244,16 +1244,16 @@ static CaptureResult dxgi_capture(void)
       {
         for (int i = 0; i < tex->texDamageCount; ++i)
         {
-          FrameDamageRect * rect = &tex->texDamageRects[i];
+          FrameDamageRect rect = tex->texDamageRects[i];
 
           // correct the damage rect for BGR packed data
           if (this->outputFormat == CAPTURE_FMT_BGR)
           {
-            rect->x     = (rect->x     * 3    ) / 4; // round down
-            rect->width = (rect->width * 3 + 3) / 4; // round up
+            rect.x     = (rect.x     * 3    ) / 4; // round down
+            rect.width = (rect.width * 3 + 3) / 4; // round up
           }
 
-          if (!this->backend->copyRect(dst, this->texWIndex, rect))
+          if (!this->backend->copyRect(dst, this->texWIndex, &rect))
           {
             result = CAPTURE_RESULT_ERROR;
             goto exit;
