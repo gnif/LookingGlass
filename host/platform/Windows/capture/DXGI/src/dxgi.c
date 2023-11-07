@@ -797,6 +797,7 @@ static bool dxgi_deinit(void)
       continue;
     this->backend->unmapTexture(i);
     tex->map = NULL;
+    tex->state = TEXTURE_STATE_UNUSED;
   }
 
   if (this->dup && *this->dup)
@@ -811,12 +812,6 @@ static bool dxgi_deinit(void)
     this->backendConfigured = false;
     this->backend->free();
     this->backend = NULL;
-  }
-
-  for (int i = 0; i < this->maxTextures; ++i)
-  {
-    this->texture[i].state = TEXTURE_STATE_UNUSED;
-    this->texture[i].impl  = NULL;
   }
 
   LG_LOCK_FREE(this->deviceContextLock);

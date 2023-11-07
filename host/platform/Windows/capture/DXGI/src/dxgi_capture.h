@@ -57,8 +57,6 @@ typedef struct Texture
 
   // post processing
   Vector                     pp;
-
-  void                     * impl;
 }
 Texture;
 
