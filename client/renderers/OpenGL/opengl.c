@@ -84,10 +84,10 @@ struct IntPoint
   int y;
 };
 
-struct IntRect
+struct MouseRect
 {
-  int x;
-  int y;
+  float x;
+  float y;
   int w;
   int h;
 };
@@ -124,6 +124,7 @@ struct Inst
   GLuint              dataFormat;
   size_t              texSize;
   size_t              texPos;
+  float               scaleX, scaleY;
   const FrameBuffer * frame;
 
   uint64_t          drawStart;
@@ -157,7 +158,7 @@ struct Inst
   bool              newShape;
   LG_RendererCursor mouseType;
   bool              mouseVisible;
-  struct IntRect    mousePos;
+  struct MouseRect  mousePos;
 };
 
 static bool _checkGLError(unsigned int line, const char * name);
@@ -356,12 +357,17 @@ bool opengl_onMouseEvent(LG_Renderer * renderer, const bool visible,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
-  if (this->mousePos.x == x && this->mousePos.y == y && this->mouseVisible == visible)
+  float fx = (float)x * this->scaleX;
+  float fy = (float)y * this->scaleY;
+
+  if (this->mousePos.x == fx &&
+      this->mousePos.y == fy &&
+      this->mouseVisible == visible)
     return true;
 
   this->mouseVisible = visible;
-  this->mousePos.x   = x;
-  this->mousePos.y   = y;
+  this->mousePos.x   = fx;
+  this->mousePos.y   = fy;
   this->mouseUpdate  = true;
   return false;
 }
@@ -372,6 +378,10 @@ bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format
 
   LG_LOCK(this->formatLock);
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+
+  this->scaleX = (float)this->format.frameWidth  / this->format.screenWidth;
+  this->scaleY = (float)this->format.frameHeight / this->format.screenHeight;
+
   this->reconfigure = true;
   LG_UNLOCK(this->formatLock);
   return true;
