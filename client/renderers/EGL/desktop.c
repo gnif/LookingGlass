@@ -345,7 +345,7 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
       break;
 
     case FRAME_TYPE_RGB_24:
-      pixFmt = EGL_PF_BGR_24;
+      pixFmt = EGL_PF_RGB_24;
       break;
 
     default:
