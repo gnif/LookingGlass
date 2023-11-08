@@ -196,7 +196,7 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
     for(int y = 0; y < update->height; ++y)
     {
       memcpy(dst, src, update->pitch);
-      dst += texture->format.bufferPitch;
+      dst += texture->format.pitch;
       src += update->pitch;
     }
   }
@@ -207,7 +207,7 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
     {
       src -= update->stride;
       memcpy(dst, src, update->stride);
-      dst += texture->format.bufferPitch;
+      dst += texture->format.pitch;
     }
   }
 

@@ -86,16 +86,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
   if (!fmt->pitch)
     fmt->pitch = fmt->stride * fmt->bpp;
 
-  fmt->bufferPitch = setup->pitch;
-
-  // adjust the stride for 24-bit in 32-bit buffers
-  // this is needed to keep values sane for DMABUF support
-//  if (setup->pixFmt == EGL_PF_BGR)
-//    fmt->bufferPitch = setup->width * 4;
-
-  fmt->dataSize   = fmt->height * fmt->pitch;
-  fmt->bufferSize = fmt->height * fmt->bufferPitch;
-
+  fmt->dataSize = fmt->height * fmt->pitch;
   return true;
 }
 
@@ -106,12 +97,12 @@ bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
   {
     EGL_TexBuffer *buffer = &buffers[i];
 
-    buffer->size = fmt->bufferSize;
+    buffer->size = fmt->dataSize;
     glGenBuffers(1, &buffer->pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
     g_egl_dynProcs.glBufferStorageEXT(
       GL_PIXEL_UNPACK_BUFFER,
-      fmt->bufferSize,
+      fmt->dataSize,
       NULL,
       GL_MAP_WRITE_BIT          |
       GL_MAP_PERSISTENT_BIT_EXT |

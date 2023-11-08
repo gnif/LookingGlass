@@ -37,10 +37,6 @@ typedef struct EGL_TexFormat
   size_t       dataSize;
   size_t       width , height;
   size_t       stride, pitch;
-
-  // for 24-bit BGR these are the physical adjusted values to get mapping working
-  size_t       bufferSize;
-  size_t       bufferPitch;
 }
 EGL_TexFormat;
 
