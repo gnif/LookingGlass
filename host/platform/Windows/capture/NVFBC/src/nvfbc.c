@@ -726,7 +726,7 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
         unsigned int width = (min(x2 << this->diffShift, this->grabWidth) -
           (x << this->diffShift)) * this->bpp;
         rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend,
-            x << (2 + this->diffShift), this->shmStride * this->bpp,
+            (x << this->diffShift) * this->bpp, this->shmStride * this->bpp,
             this->grabStride * this->bpp, width);
 
         x = x2;
