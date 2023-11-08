@@ -51,6 +51,7 @@ struct Option
   char * description;
   const char shortopt;
   bool preset;
+  void * opaque;
 
   enum OptionType type;
   union
@@ -67,6 +68,7 @@ struct Option
   bool         (*validator)(struct Option * opt, const char ** error);
   char       * (*toString )(struct Option * opt);
   StringList   (*getValues)(struct Option * opt);
+  void         (*cleanup  )(struct Option * opt);
 
   void    (*printHelp)(void);
 

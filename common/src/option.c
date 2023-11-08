@@ -280,6 +280,9 @@ void option_free(void)
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = state.options[i];
+    if (o->cleanup)
+      o->cleanup(o);
+
     if (o->type == OPTION_TYPE_STRING && o->value.x_string)
       free(o->value.x_string);
     free(o);

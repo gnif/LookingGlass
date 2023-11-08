@@ -50,12 +50,13 @@ typedef struct
 }
 DownsampleInst;
 
+static Vector downsampleRules = {0};
 
 static void downsample_earlyInit(void)
 {
   struct Option options[] =
   {
-    DOWNSAMPLE_PARSER("dxgi"),
+    DOWNSAMPLE_PARSER("dxgi", &downsampleRules),
     {0}
   };
 
@@ -99,7 +100,9 @@ static bool downsample_configure(void * opaque,
 
   if (!this.pshader)
   {
-    DownsampleRule * rule = downsampleRule_match(*width, *height);
+    DownsampleRule * rule = downsampleRule_match(&downsampleRules,
+      *width, *height);
+
     if (!rule || (rule->targetX == *width && rule->targetY == *height))
     {
       this.disabled = true;

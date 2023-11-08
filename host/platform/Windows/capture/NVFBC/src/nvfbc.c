@@ -136,11 +136,13 @@ static const char * nvfbc_getName(void)
   return "NVFBC";
 };
 
+static Vector downsampleRules = {0};
+
 static void nvfbc_initOptions(void)
 {
   struct Option options[] =
   {
-    DOWNSAMPLE_PARSER("nvfbc"),
+    DOWNSAMPLE_PARSER("nvfbc", &downsampleRules),
     {
       .module         = "nvfbc",
       .name           = "decoupleCursor",
@@ -202,12 +204,14 @@ static bool nvfbc_create(
 
 static void updateScale(void)
 {
-  DownsampleRule * rule = downsampleRule_match(this->width, this->height);
+  DownsampleRule * rule = downsampleRule_match(&downsampleRules,
+    this->width, this->height);
   if (rule)
   {
     this->scale        = true;
     this->targetWidth  = rule->targetX;
     this->targetHeight = rule->targetY;
+    DEBUG_INFO("Downsampling to %dx%d", this->targetWidth, this->targetHeight);
     return;
   }
 

@@ -24,6 +24,7 @@
 
 typedef struct
 {
+  const char * module;
   unsigned int id;
   bool         greater;
   unsigned int x;
@@ -33,18 +34,19 @@ typedef struct
 }
 DownsampleRule;
 
-extern Vector downsampleRules;
-
 bool downsampleParser(struct Option * opt, const char * str);
+void downsampleCleanup(struct Option * opt);
 
-DownsampleRule * downsampleRule_match(int x, int y);
+DownsampleRule * downsampleRule_match(Vector * rules, int x, int y);
 
-#define DOWNSAMPLE_PARSER(moduleName) \
+#define DOWNSAMPLE_PARSER(moduleName, vector) \
 { \
   .module         = moduleName, \
   .name           = "downsample", \
   .description    = "Downsample rules, format: [>](width)x(height):(toWidth)x(toHeight)", \
   .type           = OPTION_TYPE_STRING, \
   .value.x_string = NULL, \
-  .parser         = downsampleParser \
+  .parser         = downsampleParser, \
+  .cleanup        = downsampleCleanup, \
+  .opaque         = (void*)(vector) \
 }

@@ -32,10 +32,11 @@ bool downsampleParser(struct Option * opt, const char * str)
 
   opt->value.x_string = strdup(str);
 
-  if (downsampleRules.data)
-    vector_destroy(&downsampleRules);
+  Vector * downsampleRules = (Vector *)opt->opaque;
+  if (downsampleRules->data)
+    vector_destroy(downsampleRules);
 
-  if (!vector_create(&downsampleRules, sizeof(DownsampleRule), 10))
+  if (!vector_create(downsampleRules, sizeof(DownsampleRule), 10))
   {
     DEBUG_ERROR("Failed to allocate ram");
     return false;
@@ -53,6 +54,7 @@ bool downsampleParser(struct Option * opt, const char * str)
       ++token;
     }
 
+    rule.module = opt->module;
     if (sscanf(token, "%ux%u:%ux%u",
       &rule.x,
       &rule.y,
@@ -66,7 +68,9 @@ bool downsampleParser(struct Option * opt, const char * str)
     rule.id = count++;
 
     DEBUG_INFO(
-      "Rule %u: %ux%u IF X %s %4u %s Y %s %4u",
+      "%s:%s rule %u: %ux%u IF X %s %4u %s Y %s %4u",
+      opt->module,
+      opt->name,
       rule.id,
       rule.targetX,
       rule.targetY,
@@ -76,7 +80,7 @@ bool downsampleParser(struct Option * opt, const char * str)
       rule.greater ? "> "  : "==",
       rule.y
     );
-    vector_push(&downsampleRules, &rule);
+    vector_push(downsampleRules, &rule);
 
     token = strtok(NULL, ",");
   }
@@ -85,14 +89,20 @@ bool downsampleParser(struct Option * opt, const char * str)
   return true;
 }
 
-DownsampleRule * downsampleRule_match(int x, int y)
+void downsampleCleanup(struct Option * opt)
+{
+  Vector * downsampleRules = (Vector *)opt->opaque;
+  if (downsampleRules->data)
+    vector_destroy(downsampleRules);
+}
+
+DownsampleRule * downsampleRule_match(Vector * rules, int x, int y)
 {
   DownsampleRule * rule, * match = NULL;
-  vector_forEachRef(rule, &downsampleRules)
+  vector_forEachRef(rule, rules)
   {
-    if (
-      ( rule->greater && (x  > rule->x || y  > rule->y)) ||
-      (!rule->greater && (x == rule->x && y == rule->y)))
+    if (( rule->greater && (x  > rule->x || y  > rule->y)) ||
+        (!rule->greater && (x == rule->x && y == rule->y)))
     {
       match = rule;
     }
