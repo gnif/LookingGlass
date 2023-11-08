@@ -30,12 +30,17 @@
 
 bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
 {
+  fmt->pixFmt = setup->pixFmt;
+  fmt->width  = setup->width;
+  fmt->height = setup->height;
+  fmt->stride = setup->stride;
+  fmt->pitch  = setup->pitch;
+
   switch(setup->pixFmt)
   {
     //EGL has no support for 24-bit formats, so we stuff it into a 32-bit
     //texture to unpack with a shader later
     case EGL_PF_BGR_32:
-    case EGL_PF_RGB_24:
       // fallthrough
 
     case EGL_PF_BGRA:
@@ -70,16 +75,21 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->fourcc     = DRM_FORMAT_ABGR16161616F;
       break;
 
+    case EGL_PF_RGB_24:
+      fmt->bpp        = 3;
+      fmt->format     = GL_BGRA_EXT;
+      fmt->intFormat  = GL_BGRA_EXT;
+      fmt->dataType   = GL_UNSIGNED_BYTE;
+      fmt->fourcc     = DRM_FORMAT_ARGB8888;
+
+      // adjust the width as the texture is 32bpp but our source is 24bpp
+      fmt->width = fmt->width / 4 * 3;
+      break;
+
     default:
       DEBUG_ERROR("Unsupported pixel format");
       return false;
   }
-
-  fmt->pixFmt      = setup->pixFmt;
-  fmt->width       = setup->width;
-  fmt->height      = setup->height;
-  fmt->stride      = setup->stride;
-  fmt->pitch       = setup->pitch;
 
   if (!fmt->stride)
     fmt->stride = setup->width;
