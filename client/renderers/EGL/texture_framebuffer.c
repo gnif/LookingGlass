@@ -78,11 +78,6 @@ bool egl_texFBSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   return egl_texBufferStreamSetup(texture, setup);
 }
 
-static int scaleForBGR(int x)
-{
-  return x * 3 / 4;
-}
-
 static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
@@ -114,27 +109,43 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
       update->rectCount * sizeof(FrameDamageRect));
     damage->count += update->rectCount;
 
-    FrameDamageRect scaledDamageRects[damage->count];
-    for (int i = 0; i < damage->count; i++)
+    if (texture->format.pixFmt == EGL_PF_BGR)
     {
-      FrameDamageRect rect = damage->rects[i];
-      int originalX = rect.x;
-      int scaledX = scaleForBGR(originalX);
-      rect.x = scaledX;
-      rect.width = scaleForBGR(originalX + rect.width) - scaledX;
-      scaledDamageRects[i] = rect;
-    }
+      FrameDamageRect scaledDamageRects[damage->count];
+      for (int i = 0; i < damage->count; i++)
+      {
+        FrameDamageRect rect = damage->rects[i];
+        int originalX = rect.x;
+        int scaledX = originalX * 3 / 4;
+        rect.x = scaledX;
+        rect.width = (((originalX + rect.width) * 3 + 3) / 4) - scaledX;
+        scaledDamageRects[i] = rect;
+      }
 
-    rectsFramebufferToBuffer(
-      scaledDamageRects,
-      damage->count,
-      texture->format.bpp,
-      parent->buf[parent->bufIndex].map,
-      texture->format.pitch,
-      texture->format.height,
-      update->frame,
-      texture->format.pitch
-    );
+      rectsFramebufferToBuffer(
+        scaledDamageRects,
+        damage->count,
+        texture->format.bpp,
+        parent->buf[parent->bufIndex].map,
+        texture->format.pitch,
+        texture->format.height,
+        update->frame,
+        texture->format.pitch
+      );
+    }
+    else
+    {
+      rectsFramebufferToBuffer(
+        damage->rects,
+        damage->count,
+        texture->format.bpp,
+        parent->buf[parent->bufIndex].map,
+        texture->format.pitch,
+        texture->format.height,
+        update->frame,
+        texture->format.pitch
+      );
+    }
   }
 
   parent->buf[parent->bufIndex].updated = true;
