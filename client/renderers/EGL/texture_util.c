@@ -81,9 +81,6 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_BGRA_EXT;
       fmt->dataType   = GL_UNSIGNED_BYTE;
       fmt->fourcc     = DRM_FORMAT_ARGB8888;
-
-      // adjust the width as the texture is 32bpp but our source is 24bpp
-      fmt->width = fmt->width / 4 * 3;
       break;
 
     default:

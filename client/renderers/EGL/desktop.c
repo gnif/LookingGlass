@@ -346,6 +346,11 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 
     case FRAME_TYPE_RGB_24:
       pixFmt = EGL_PF_RGB_24;
+      // the data width is correct per the format, but we are going to use a
+      // 32-bit texture to load the data, so we need to alter the width for the
+      // different bpp
+      desktop->format.dataWidth =
+        desktop->format.dataWidth / 4 * 3;
       break;
 
     default:
@@ -361,10 +366,10 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
   if (!egl_textureSetup(
     desktop->texture,
     pixFmt,
-    format.dataWidth,
-    format.dataHeight,
-    format.stride,
-    format.pitch
+    desktop->format.dataWidth,
+    desktop->format.dataHeight,
+    desktop->format.stride,
+    desktop->format.pitch
   ))
   {
     DEBUG_ERROR("Failed to setup the desktop texture");
