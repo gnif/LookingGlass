@@ -267,8 +267,12 @@ static bool sendFrame(void)
       flags    |= FRAME_FLAG_HDR;
       break;
 
-    case CAPTURE_FMT_BGR:
-      fi->type = FRAME_TYPE_BGR;
+    case CAPTURE_FMT_BGR_32:
+      fi->type = FRAME_TYPE_BGR_32;
+      break;
+
+    case CAPTURE_FMT_RGB_24:
+      fi->type = FRAME_TYPE_RGB_24;
       break;
 
     default:

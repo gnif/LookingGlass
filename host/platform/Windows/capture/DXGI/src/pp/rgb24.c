@@ -192,7 +192,7 @@ static bool rgb24_configure(void * opaque,
 
   *cols   = this.width;
   *rows   = this.height;
-  *format = CAPTURE_FMT_BGR;
+  *format = CAPTURE_FMT_BGR_32;
 
   comRef_toGlobal(inst->tex   , tex    );
   comRef_toGlobal(inst->target, target );

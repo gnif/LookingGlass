@@ -38,7 +38,8 @@ typedef enum EGL_PixelFormat
   EGL_PF_BGRA,
   EGL_PF_RGBA10,
   EGL_PF_RGBA16F,
-  EGL_PF_BGR
+  EGL_PF_BGR_32,
+  EGL_PF_RGB_24
 }
 EGL_PixelFormat;
 

@@ -1170,15 +1170,12 @@ static CaptureResult dxgi_capture(void)
             this->dxgiFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
             break;
 
-          case CAPTURE_FMT_BGR:
+          case CAPTURE_FMT_BGR_32:
             this->bpp        = 4;
             this->dxgiFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
             break;
 
-          case CAPTURE_FMT_COLOR :
-          case CAPTURE_FMT_MONO  :
-          case CAPTURE_FMT_MASKED:
-          case CAPTURE_FMT_MAX   :
+          default:
             DEBUG_ERROR("Unsupported input format");
             result = CAPTURE_RESULT_ERROR;
             goto exit;
@@ -1247,7 +1244,7 @@ static CaptureResult dxgi_capture(void)
           FrameDamageRect rect = tex->texDamageRects[i];
 
           // correct the damage rect for BGR packed data
-          if (this->outputFormat == CAPTURE_FMT_BGR)
+          if (this->outputFormat == CAPTURE_FMT_BGR_32)
           {
             rect.x     = (rect.x     * 3    ) / 4; // round down
             rect.width = (rect.width * 3 + 3) / 4; // round up
@@ -1445,7 +1442,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
       tex->damageRectsCount * sizeof(*tex->damageRects));
     damage->count += tex->damageRectsCount;
 
-    if (this->outputFormat == CAPTURE_FMT_BGR)
+    if (this->outputFormat == CAPTURE_FMT_BGR_32)
     {
       FrameDamageRect scaledDamageRects[damage->count];
       for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {

@@ -34,7 +34,8 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
   {
     //EGL has no support for 24-bit formats, so we stuff it into a 32-bit
     //texture to unpack with a shader later
-    case EGL_PF_BGR:
+    case EGL_PF_BGR_32:
+    case EGL_PF_RGB_24:
       // fallthrough
 
     case EGL_PF_BGRA:

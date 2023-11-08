@@ -681,7 +681,8 @@ int main_frameThread(void * unused)
           lgrFormat.bpp  = 64;
           break;
 
-        case FRAME_TYPE_BGR:
+        case FRAME_TYPE_BGR_32:
+        case FRAME_TYPE_RGB_24:
           lgrFormat.bpp  = 24;
           break;
 

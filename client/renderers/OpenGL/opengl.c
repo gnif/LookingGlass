@@ -787,7 +787,13 @@ static enum ConfigStatus configure(struct Inst * this)
       this->dataFormat = GL_HALF_FLOAT;
       break;
 
-    case FRAME_TYPE_BGR:
+    case FRAME_TYPE_RGB_24:
+      this->intFormat  = GL_RGB8;
+      this->vboFormat  = GL_RGB;
+      this->dataFormat = GL_UNSIGNED_BYTE;
+      break;
+
+    case FRAME_TYPE_BGR_32:
       this->intFormat  = GL_RGB8;
       this->vboFormat  = GL_BGR;
       this->dataFormat = GL_UNSIGNED_BYTE;

@@ -88,7 +88,7 @@ static bool downsample_configure(void * opaque,
   bool result = false;
   DownsampleInst * inst = (DownsampleInst *)opaque;
 
-  if (*format == CAPTURE_FMT_BGR)
+  if (*format == CAPTURE_FMT_BGR_32)
     this.disabled = true;
 
   if (this.disabled)

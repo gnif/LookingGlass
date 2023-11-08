@@ -60,6 +60,7 @@ struct iface
 
   bool                       seperateCursor;
   bool                       dwmFlush;
+  bool                       noHDR;
   CaptureGetPointerBuffer    getPointerBufferFn;
   CapturePostPointerBuffer   postPointerBufferFn;
   LGThread                 * pointerThread;
@@ -70,10 +71,12 @@ struct iface
   bool         resChanged, scale;
   unsigned int targetWidth, targetHeight;
 
-  unsigned int formatVer;
-  unsigned int grabWidth, grabHeight, grabStride;
-  unsigned int shmStride;
-  bool         isHDR;
+  unsigned int  formatVer;
+  unsigned int  grabWidth, grabHeight, grabStride;
+  unsigned int  bpp;
+  CaptureFormat format;
+  unsigned int  shmStride;
+  bool          isHDR;
 
   uint8_t * frameBuffer;
   uint8_t * diffMap;
@@ -166,6 +169,13 @@ static void nvfbc_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
     },
+    {
+      .module         = "nvfbc",
+      .name           = "noHDR",
+      .description    = "Capture HDR content as SDR",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
     {0}
   };
 
@@ -183,6 +193,7 @@ static bool nvfbc_create(
 
   this->seperateCursor      = option_get_bool("nvfbc", "decoupleCursor");
   this->dwmFlush            = option_get_bool("nvfbc", "dwmFlush"      );
+  this->noHDR               = option_get_bool("nvfbc", "noHDR"         );
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
 
@@ -303,10 +314,13 @@ static bool nvfbc_init(void)
   getDesktopSize(&this->width, &this->height);
   updateScale();
 
+  this->bpp    = this->noHDR ? 3 : 4;
+  this->format = this->noHDR ? CAPTURE_FMT_RGB_24 : CAPTURE_FMT_RGBA10;
+
   HANDLE event;
   if (!NvFBCToSysSetup(
     this->nvfbc,
-    BUFFER_FMT_ARGB10,
+    this->noHDR ? BUFFER_FMT_RGB : BUFFER_FMT_ARGB10,
     !this->seperateCursor,
     this->seperateCursor,
     true,
@@ -655,7 +669,7 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     ++this->formatVer;
   }
 
-  const unsigned int maxHeight = maxFrameSize / (this->shmStride * 4);
+  const unsigned int maxHeight = maxFrameSize / (this->shmStride * this->bpp);
   this->dataHeight = min(maxHeight, this->grabHeight);
 
   frame->formatVer    = this->formatVer;
@@ -666,15 +680,15 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   frame->dataWidth    = this->grabWidth;
   frame->dataHeight   = this->dataHeight;
   frame->truncated    = maxHeight < this->grabHeight;
-  frame->pitch        = this->shmStride * 4;
+  frame->pitch        = this->shmStride * this->bpp;
   frame->stride       = this->shmStride;
   frame->rotation     = CAPTURE_ROT_0;
 
   updateDamageRects(frame);
 
-  frame->format = CAPTURE_FMT_RGBA10;
+  frame->format = this->format;
   frame->hdr    = this->grabInfo.bIsHDR;
-  frame->hdrPQ  = true;
+  frame->hdrPQ  = this->grabInfo.bIsHDR;
 
   return CAPTURE_RESULT_OK;
 }
@@ -705,16 +719,19 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
         }
 
         unsigned int x2 = x;
-        while (x2 < w && ((!wasFresh && info->diffMap[y * w + x2]) || this->diffMap[y * w + x2]))
+        while (x2 < w && ((!wasFresh && info->diffMap[y * w + x2]) ||
+          this->diffMap[y * w + x2]))
           ++x2;
 
-        unsigned int width = (min(x2 << this->diffShift, this->grabWidth) - (x << this->diffShift)) * 4;
-        rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend, x << (2 + this->diffShift),
-            this->shmStride * 4, this->grabStride * 4, width);
+        unsigned int width = (min(x2 << this->diffShift, this->grabWidth) -
+          (x << this->diffShift)) * this->bpp;
+        rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend,
+            x << (2 + this->diffShift), this->shmStride * this->bpp,
+            this->grabStride * this->bpp, width);
 
         x = x2;
       }
-      framebuffer_set_write_ptr(frame, yend * this->shmStride * 4);
+      framebuffer_set_write_ptr(frame, yend * this->shmStride * this->bpp);
     }
   }
   else if (this->grabStride != this->shmStride)
@@ -722,16 +739,17 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
     for (int y = 0; y < this->dataHeight; y += 64)
     {
       int yend = min(this->dataHeight, y + 128);
-      rectCopyUnaligned(frameData, this->frameBuffer, y, yend, 0, this->shmStride * 4,
-        this->grabStride * 4, this->grabWidth * 4);
-      framebuffer_set_write_ptr(frame, yend * this->shmStride * 4);
+      rectCopyUnaligned(frameData, this->frameBuffer, y, yend, 0,
+      this->shmStride * this->bpp, this->grabStride * this->bpp,
+      this->grabWidth * this->bpp);
+      framebuffer_set_write_ptr(frame, yend * this->shmStride * this->bpp);
     }
   }
   else
     framebuffer_write(
       frame,
       this->frameBuffer,
-      this->dataHeight * this->grabInfo.dwBufferWidth * 4
+      this->dataHeight * this->grabInfo.dwBufferWidth * this->bpp
     );
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)

@@ -111,7 +111,7 @@ static bool egl_filterBGRtoBGRASetup(EGL_Filter * filter,
 {
   EGL_FilterBGRtoBGRA * this = UPCAST(EGL_FilterBGRtoBGRA, filter);
 
-  if (pixFmt != EGL_PF_BGR)
+  if (pixFmt != EGL_PF_BGR_32 || pixFmt != EGL_PF_RGB_24)
     return false;
 
   if (this->useDMA != useDMA)

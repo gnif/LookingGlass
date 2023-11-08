@@ -55,7 +55,8 @@ typedef enum FrameType
   FRAME_TYPE_RGBA      , // RGBA interleaved: R,G,B,A 32bpp
   FRAME_TYPE_RGBA10    , // RGBA interleaved: R,G,B,A 10,10,10,2 bpp
   FRAME_TYPE_RGBA16F   , // RGBA interleaved: R,G,B,A 16,16,16,16 bpp float
-  FRAME_TYPE_BGR       , // BGR (DO NOT COMMIT THIS)
+  FRAME_TYPE_BGR_32    , // BGR 24-bpp in 32bpp
+  FRAME_TYPE_RGB_24    , // RGB 24-bpp
   FRAME_TYPE_MAX       , // sentinel value
 }
 FrameType;

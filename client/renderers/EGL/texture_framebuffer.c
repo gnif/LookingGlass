@@ -109,7 +109,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
       update->rectCount * sizeof(FrameDamageRect));
     damage->count += update->rectCount;
 
-    if (texture->format.pixFmt == EGL_PF_BGR)
+    if (texture->format.pixFmt == EGL_PF_BGR_32)
     {
       FrameDamageRect scaledDamageRects[damage->count];
       for (int i = 0; i < damage->count; i++)
