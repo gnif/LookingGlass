@@ -350,7 +350,7 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
       // 32-bit texture to load the data, so we need to alter the width for the
       // different bpp
       desktop->format.dataWidth =
-        desktop->format.dataWidth / 4 * 3;
+        desktop->format.pitch / 4;
       break;
 
     default:
