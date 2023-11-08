@@ -66,7 +66,7 @@ struct iface
 
   unsigned int maxWidth , maxHeight;
   unsigned int width    , height;
-  unsigned int frameHeight;
+  unsigned int dataHeight;
   bool         resChanged, scale;
   unsigned int targetWidth, targetHeight;
 
@@ -656,15 +656,15 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   }
 
   const unsigned int maxHeight = maxFrameSize / (this->shmStride * 4);
-  this->frameHeight = min(maxHeight, this->grabHeight);
+  this->dataHeight = min(maxHeight, this->grabHeight);
 
   frame->formatVer    = this->formatVer;
   frame->screenWidth  = this->width;
   frame->screenHeight = this->height;
-  frame->dataWidth    = this->width;
-  frame->dataHeight   = this->height;
   frame->frameWidth   = this->grabWidth;
-  frame->frameHeight  = this->frameHeight;
+  frame->frameHeight  = this->grabHeight;
+  frame->dataWidth    = this->grabWidth;
+  frame->dataHeight   = this->dataHeight;
   frame->truncated    = maxHeight < this->grabHeight;
   frame->pitch        = this->shmStride * 4;
   frame->stride       = this->shmStride;
@@ -693,7 +693,7 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
     for (unsigned int y = 0; y < h; ++y)
     {
       const unsigned int ystart = y << this->diffShift;
-      const unsigned int yend = min(this->frameHeight, (y + 1)
+      const unsigned int yend = min(this->dataHeight, (y + 1)
         << this->diffShift);
 
       for (unsigned int x = 0; x < w; )
@@ -719,9 +719,9 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
   }
   else if (this->grabStride != this->shmStride)
   {
-    for (int y = 0; y < this->frameHeight; y += 64)
+    for (int y = 0; y < this->dataHeight; y += 64)
     {
-      int yend = min(this->frameHeight, y + 128);
+      int yend = min(this->dataHeight, y + 128);
       rectCopyUnaligned(frameData, this->frameBuffer, y, yend, 0, this->shmStride * 4,
         this->grabStride * 4, this->grabWidth * 4);
       framebuffer_set_write_ptr(frame, yend * this->shmStride * 4);
@@ -731,7 +731,7 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
     framebuffer_write(
       frame,
       this->frameBuffer,
-      this->frameHeight * this->grabInfo.dwBufferWidth * 4
+      this->dataHeight * this->grabInfo.dwBufferWidth * 4
     );
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
