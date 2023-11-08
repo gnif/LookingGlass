@@ -29,14 +29,15 @@
 #include "cimgui.h"
 
 #include "basic.vert.h"
-#include "convert_bgr_bgra.frag.h"
+#include "convert_24bit.frag.h"
 
 
-typedef struct EGL_FilterBGRtoBGRA
+typedef struct EGL_Filter24bit
 {
   EGL_Filter base;
 
   bool enable;
+  EGL_PixelFormat format;
   int  useDMA;
   unsigned int width, height;
   unsigned int desktopWidth, desktopHeight;
@@ -48,11 +49,11 @@ typedef struct EGL_FilterBGRtoBGRA
   EGL_Framebuffer * fb;
   GLuint            sampler[2];
 }
-EGL_FilterBGRtoBGRA;
+EGL_Filter24bit;
 
-static bool egl_filterBGRtoBGRAInit(EGL_Filter ** filter)
+static bool egl_filter24bitInit(EGL_Filter ** filter)
 {
-  EGL_FilterBGRtoBGRA * this = calloc(1, sizeof(*this));
+  EGL_Filter24bit * this = calloc(1, sizeof(*this));
   if (!this)
   {
     DEBUG_ERROR("Failed to allocate ram");
@@ -94,9 +95,9 @@ error_this:
   return false;
 }
 
-static void egl_filterBGRtoBGRAFree(EGL_Filter * filter)
+static void egl_filter24bitFree(EGL_Filter * filter)
 {
-  EGL_FilterBGRtoBGRA * this = UPCAST(EGL_FilterBGRtoBGRA, filter);
+  EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
   egl_shaderFree(&this->shader);
   egl_framebufferFree(&this->fb);
@@ -104,22 +105,28 @@ static void egl_filterBGRtoBGRAFree(EGL_Filter * filter)
   free(this);
 }
 
-static bool egl_filterBGRtoBGRASetup(EGL_Filter * filter,
+static bool egl_filter24bitSetup(EGL_Filter * filter,
     enum EGL_PixelFormat pixFmt, unsigned int width, unsigned int height,
     unsigned int desktopWidth, unsigned int desktopHeight,
     bool useDMA)
 {
-  EGL_FilterBGRtoBGRA * this = UPCAST(EGL_FilterBGRtoBGRA, filter);
+  EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
   if (pixFmt != EGL_PF_BGR_32 && pixFmt != EGL_PF_RGB_24)
     return false;
 
-  if (this->useDMA != useDMA)
+  if (this->useDMA != useDMA || this->format != pixFmt)
   {
+    EGL_ShaderDefine defines[] =
+    {
+      {"OUTPUT", pixFmt == EGL_PF_BGR_32 ? "fragColor.bgra" : "fragColor.rgba" },
+      {0}
+    };
+
     if (!egl_shaderCompile(this->shader,
-          b_shader_basic_vert           , b_shader_basic_vert_size,
-          b_shader_convert_bgr_bgra_frag, b_shader_convert_bgr_bgra_frag_size,
-          useDMA)
+          b_shader_basic_vert        , b_shader_basic_vert_size,
+          b_shader_convert_24bit_frag, b_shader_convert_24bit_frag_size,
+          useDMA, defines)
        )
     {
       DEBUG_ERROR("Failed to compile the shader");
@@ -144,6 +151,7 @@ static bool egl_filterBGRtoBGRASetup(EGL_Filter * filter,
   if (!egl_framebufferSetup(this->fb, pixFmt, desktopWidth, desktopHeight))
     return false;
 
+  this->format        = pixFmt;
   this->width         = width;
   this->height        = height;
   this->desktopWidth  = desktopWidth;
@@ -153,17 +161,17 @@ static bool egl_filterBGRtoBGRASetup(EGL_Filter * filter,
   return true;
 }
 
-static void egl_filterBGRtoBGRAGetOutputRes(EGL_Filter * filter,
+static void egl_filter24bitGetOutputRes(EGL_Filter * filter,
     unsigned int *width, unsigned int *height)
 {
-  EGL_FilterBGRtoBGRA * this = UPCAST(EGL_FilterBGRtoBGRA, filter);
+  EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
   *width  = this->desktopWidth;
   *height = this->desktopHeight;
 }
 
-static bool egl_filterBGRtoBGRAPrepare(EGL_Filter * filter)
+static bool egl_filter24bitPrepare(EGL_Filter * filter)
 {
-  EGL_FilterBGRtoBGRA * this = UPCAST(EGL_FilterBGRtoBGRA, filter);
+  EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
   if (this->prepared)
     return true;
@@ -176,10 +184,10 @@ static bool egl_filterBGRtoBGRAPrepare(EGL_Filter * filter)
   return true;
 }
 
-static EGL_Texture * egl_filterBGRtoBGRARun(EGL_Filter * filter,
+static EGL_Texture * egl_filter24bitRun(EGL_Filter * filter,
     EGL_FilterRects * rects, EGL_Texture * texture)
 {
-  EGL_FilterBGRtoBGRA * this = UPCAST(EGL_FilterBGRtoBGRA, filter);
+  EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
   egl_framebufferBind(this->fb);
 
@@ -194,19 +202,19 @@ static EGL_Texture * egl_filterBGRtoBGRARun(EGL_Filter * filter,
   return egl_framebufferGetTexture(this->fb);
 }
 
-EGL_FilterOps egl_filterBGRtoBGRAOps =
+EGL_FilterOps egl_filter24bitOps =
 {
-  .id           = "bgrtobgra",
-  .name         = "BGRtoBGRA",
+  .id           = "24bit",
+  .name         = "24bit",
   .type         = EGL_FILTER_TYPE_INTERNAL,
   .earlyInit    = NULL,
-  .init         = egl_filterBGRtoBGRAInit,
-  .free         = egl_filterBGRtoBGRAFree,
+  .init         = egl_filter24bitInit,
+  .free         = egl_filter24bitFree,
   .imguiConfig  = NULL,
   .saveState    = NULL,
   .loadState    = NULL,
-  .setup        = egl_filterBGRtoBGRASetup,
-  .getOutputRes = egl_filterBGRtoBGRAGetOutputRes,
-  .prepare      = egl_filterBGRtoBGRAPrepare,
-  .run          = egl_filterBGRtoBGRARun
+  .setup        = egl_filter24bitSetup,
+  .getOutputRes = egl_filter24bitGetOutputRes,
+  .prepare      = egl_filter24bitPrepare,
+  .run          = egl_filter24bitRun
 };

@@ -23,7 +23,7 @@ void main()
   uint trd = (outputPos.x * 3u + 2u) / 4u;
   vec4 color_2 = texelFetch(sampler1, ivec2(trd, outputPos.y), 0);
 
-  fragColor.bgra = vec4(
+  OUTPUT = vec4(
     color_0.barg[outputPos.x % 4u],
     color_1.gbar[outputPos.x % 4u],
     color_2.rgba[outputPos.x % 4u],

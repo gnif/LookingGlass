@@ -114,7 +114,7 @@ static bool egl_initDesktopShader(
   if (!egl_shaderCompile(shader->shader,
         vertex_code  , vertex_size,
         fragment_code, fragment_size,
-        useDMA))
+        useDMA, NULL))
   {
     return false;
   }
@@ -207,7 +207,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
   }
 
   // this MUST be first
-  egl_postProcessAdd(desktop->pp, &egl_filterBGRtoBGRAOps);
+  egl_postProcessAdd(desktop->pp, &egl_filter24bitOps);
 
   egl_postProcessAdd(desktop->pp, &egl_filterDownscaleOps);
   egl_postProcessAdd(desktop->pp, &egl_filterFFXCASOps   );

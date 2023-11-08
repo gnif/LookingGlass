@@ -127,7 +127,7 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
   if (!egl_shaderCompile(this->rcas,
         b_shader_basic_vert        , b_shader_basic_vert_size,
         b_shader_ffx_fsr1_rcas_frag, b_shader_ffx_fsr1_rcas_frag_size,
-        false)
+        false, NULL)
      )
   {
     DEBUG_ERROR("Failed to compile the Rcas shader");
@@ -336,7 +336,7 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
     if (!egl_shaderCompile(this->easu,
           b_shader_basic_vert        , b_shader_basic_vert_size,
           b_shader_ffx_fsr1_easu_frag, b_shader_ffx_fsr1_easu_frag_size,
-          useDMA)
+          useDMA, NULL)
        )
     {
       DEBUG_ERROR("Failed to compile the Easu shader");

@@ -65,7 +65,8 @@ void egl_shaderFree(EGL_Shader ** shader)
 }
 
 bool egl_shaderLoad(EGL_Shader * this,
-    const char * vertex_file, const char * fragment_file, bool useDMA)
+    const char * vertex_file, const char * fragment_file, bool useDMA,
+    const EGL_ShaderDefine * defines)
 {
   char   * vertex_code, * fragment_code;
   size_t   vertex_size,   fragment_size;
@@ -89,7 +90,7 @@ bool egl_shaderLoad(EGL_Shader * this,
 
   bool ret = egl_shaderCompile(this,
       vertex_code, vertex_size, fragment_code, fragment_size,
-      useDMA);
+      useDMA, defines);
 
   free(vertex_code);
   free(fragment_code);
@@ -210,8 +211,12 @@ static bool shaderCompile(EGL_Shader * this, const char * vertex_code,
 
 bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
     size_t vertex_size, const char * fragment_code, size_t fragment_size,
-    bool useDMA)
+    bool useDMA, const EGL_ShaderDefine * defines)
 {
+  bool result      = false;
+  char * processed = NULL;
+  char * newCode   = NULL;
+
   if (useDMA)
   {
     const char * search  = "sampler2D";
@@ -225,12 +230,13 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
       src += strlen(search);
     }
 
-    const int diff = (strlen(replace) - strlen(search)) * instances;
-    char * newCode = malloc(fragment_size + diff + 1);
+    const int diff   = (strlen(replace) - strlen(search)) * instances;
+    const int newLen = fragment_size + diff;
+    newCode = malloc(newLen + 1);
     if (!newCode)
     {
       DEBUG_ERROR("Out of memory");
-      return false;
+      goto exit;
     }
 
     src        = fragment_code;
@@ -250,20 +256,94 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
 
     const int final = fragment_size - (src - fragment_code);
     memcpy(dst, src, final);
-    dst[final] = 0;
+    dst[final] = '\0';
 
-    bool result = shaderCompile(
-        this,
-        vertex_code, vertex_size,
-        newCode    , fragment_size + diff);
-
-    free(newCode);
-    return result;
+    fragment_code = newCode;
+    fragment_size = newLen;
   }
 
-  return shaderCompile(this,
+  if (defines)
+  {
+    // find the end of any existing lines starting with #
+    bool newLine   = true;
+    bool skip      = false;
+    int  insertPos = 0;
+    for(int i = 0; i < fragment_size; ++i)
+    {
+      if (skip)
+      {
+        if (fragment_code[i] == '\n')
+          skip = false;
+        continue;
+      }
+
+      switch(fragment_code[i])
+      {
+        case '\n':
+          newLine = true;
+          continue;
+
+        case ' ':
+        case '\t':
+        case '\r':
+          continue;
+
+        case '#':
+          if (newLine)
+          {
+            skip = true;
+            continue;
+          }
+          //fallthrough
+
+        default:
+          newLine = false;
+          break;
+      }
+
+      if (!newLine)
+      {
+        insertPos = i - 1;
+        break;
+      }
+    }
+
+    int processedLen = fragment_size;
+    const char * defineFormat = "#define %s %s\n";
+    for(const EGL_ShaderDefine * define = defines; define->name; ++define)
+      processedLen += snprintf(NULL, 0, defineFormat, define->name, define->value);
+
+    processed = malloc(processedLen);
+    if (!processed)
+    {
+      DEBUG_ERROR("Out of memory");
+      goto exit;
+    }
+
+    memcpy(processed, fragment_code, insertPos);
+
+    int offset = insertPos;
+    for(const EGL_ShaderDefine * define = defines; define->name; ++define)
+      offset += sprintf(processed + offset, defineFormat,
+          define->name, define->value);
+
+    memcpy(
+        processed       + offset,
+        fragment_code + insertPos,
+        fragment_size - insertPos);
+
+    fragment_code = processed;
+    fragment_size = processedLen;
+  }
+
+  result = shaderCompile(this,
       vertex_code  , vertex_size,
       fragment_code, fragment_size);
+
+exit:
+  free(processed);
+  free(newCode);
+  return result;
 }
 
 void egl_shaderSetUniforms(EGL_Shader * this, EGL_Uniform * uniforms, int count)

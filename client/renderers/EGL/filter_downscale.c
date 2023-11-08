@@ -316,7 +316,7 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
           b_shader_basic_vert    , b_shader_basic_vert_size,
           b_shader_downscale_frag,
           b_shader_downscale_frag_size,
-          useDMA)
+          useDMA, NULL)
        )
     {
       DEBUG_ERROR("Failed to compile the shader");
@@ -327,7 +327,7 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
           b_shader_basic_vert, b_shader_basic_vert_size,
           b_shader_downscale_linear_frag,
           b_shader_downscale_linear_frag_size,
-          useDMA)
+          useDMA, NULL)
        )
     {
       DEBUG_ERROR("Failed to compile the shader");
@@ -338,7 +338,7 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
           b_shader_basic_vert, b_shader_basic_vert_size,
           b_shader_downscale_lanczos2_frag,
           b_shader_downscale_lanczos2_frag_size,
-          useDMA)
+          useDMA, NULL)
        )
     {
       DEBUG_ERROR("Failed to compile the shader");

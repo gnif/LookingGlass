@@ -93,15 +93,22 @@ typedef struct EGL_Uniform
 }
 EGL_Uniform;
 
+typedef struct EGL_ShaderDefine
+{
+  const char * name;
+  const char * value;
+}
+EGL_ShaderDefine;
+
 bool egl_shaderInit(EGL_Shader ** shader);
 void egl_shaderFree(EGL_Shader ** shader);
 
 bool egl_shaderLoad(EGL_Shader * model, const char * vertex_file,
-    const char * fragment_file, bool useDMA);
+    const char * fragment_file, bool useDMA, const EGL_ShaderDefine * defines);
 
 bool egl_shaderCompile(EGL_Shader * model, const char * vertex_code,
     size_t vertex_size, const char * fragment_code, size_t fragment_size,
-    bool useDMA);
+    bool useDMA, const EGL_ShaderDefine * defines);
 
 void egl_shaderSetUniforms(EGL_Shader * shader, EGL_Uniform * uniforms,
     int count);

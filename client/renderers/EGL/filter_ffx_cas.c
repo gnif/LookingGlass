@@ -222,7 +222,7 @@ static bool egl_filterFFXCASSetup(EGL_Filter * filter,
     if (!egl_shaderCompile(this->shader,
           b_shader_basic_vert  , b_shader_basic_vert_size,
           b_shader_ffx_cas_frag, b_shader_ffx_cas_frag_size,
-          useDMA)
+          useDMA, NULL)
        )
     {
       DEBUG_ERROR("Failed to compile the shader");
