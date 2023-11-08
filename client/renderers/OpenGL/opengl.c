@@ -1178,7 +1178,7 @@ static bool drawFrame(struct Inst * this)
   g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[this->texWIndex]);
 
   int bpp = this->format.bpp / 8;
-  glPixelStorei(GL_UNPACK_ALIGNMENT , bpp < 4 ? 1 : 0);
+  glPixelStorei(GL_UNPACK_ALIGNMENT , bpp < 4 ? 1 : bpp);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.frameWidth);
 
   this->texPos = 0;
