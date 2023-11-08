@@ -663,7 +663,15 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     this->isHDR      = this->grabInfo.bIsHDR;
 
     // Round up stride in IVSHMEM to avoid issues with dmabuf import.
-    this->shmStride  = ALIGN_PAD(this->grabStride, 32);
+    if (this->format == CAPTURE_FMT_RGB_24)
+    {
+      // EGLImage via DMABUF does not support 24-bit images, the client will
+      // stuff this into a 32-bit texture so we need to ensure the padding is
+      // wide enough to keep things aligned.
+      this->shmStride = ALIGN_PAD(this->grabStride / 4, 64) * 4;
+    }
+    else
+      this->shmStride = ALIGN_PAD(this->grabStride, 64);
 
     this->resChanged = false;
     ++this->formatVer;
