@@ -23,7 +23,7 @@ endfunction()
 # the first entry here is the default
 add_desktop(xdg)
 
-pkg_check_modules(LIBDECOR REQUIRED IMPORTED_TARGET libdecor-0)
+pkg_check_modules(LIBDECOR IMPORTED_TARGET libdecor-0)
 if(LIBDECOR_FOUND)
   option(ENABLE_LIBDECOR "Build with libdecor support" ON)
 else()
