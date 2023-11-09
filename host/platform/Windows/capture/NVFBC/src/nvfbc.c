@@ -677,6 +677,10 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     else
       this->shmStride = ALIGN_PAD(this->grabStride, 64);
 
+    DEBUG_INFO("Mode: %dx%d, stride: %u, shmStride: %u",
+      this->grabWidth , this->grabHeight,
+      this->grabStride, this->shmStride);
+
     this->resChanged = false;
     ++this->formatVer;
   }
