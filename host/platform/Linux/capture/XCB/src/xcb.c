@@ -50,7 +50,8 @@ struct xcb
   LGThread                  * pointerThread;
 
   unsigned int width;
-  unsigned int height;
+  unsigned int height, dataHeight;
+  unsigned int pitch;
 
   int mouseX, mouseY, mouseHotX, mouseHotY;
 
@@ -131,6 +132,7 @@ static bool xcb_init(void)
   this->xcbScreen = iter.data;
   this->width     = iter.data->width_in_pixels;
   this->height    = iter.data->height_in_pixels;
+  this->pitch     = this->width * 4;
   DEBUG_INFO("Frame Size       : %u x %u", this->width, this->height);
 
   this->seg   = xcb_generate_id(this->xcb);
@@ -269,14 +271,18 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame,
 {
   lgWaitEvent(this->frameEvent, TIMEOUT_INFINITE);
 
-  const unsigned int maxHeight = maxFrameSize / (this->width * 4);
+  const unsigned int maxHeight = maxFrameSize / this->pitch;
+  this->dataHeight = min(maxHeight, this->height);
+
 
   frame->screenWidth  = this->width;
   frame->screenHeight = this->height;
+  frame->dataWidth    = this->width;
+  frame->dataHeight   = this->dataHeight;
   frame->frameWidth   = this->width;
-  frame->frameHeight  = min(maxHeight, this->height);
+  frame->frameHeight  = this->height;
   frame->truncated    = maxHeight < this->height;
-  frame->pitch        = this->width * 4;
+  frame->pitch        = this->pitch;
   frame->stride       = this->width;
   frame->format       = CAPTURE_FMT_BGRA;
   frame->rotation     = CAPTURE_ROT_0;
@@ -284,8 +290,7 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_getFrame(FrameBuffer * frame,
-    const unsigned int height, int frameIndex)
+static CaptureResult xcb_getFrame(FrameBuffer * frame, int frameIndex)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
@@ -298,7 +303,7 @@ static CaptureResult xcb_getFrame(FrameBuffer * frame,
     return CAPTURE_RESULT_ERROR;
   }
 
-  framebuffer_write(frame, this->data, this->width * height * 4);
+  framebuffer_write(frame, this->data, this->pitch);
   free(img);
 
   this->hasFrame = false;

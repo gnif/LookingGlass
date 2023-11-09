@@ -47,7 +47,7 @@ struct pipewire
   bool          stop;
   bool          hasFormat;
   bool          formatChanged;
-  int           width, height;
+  int           width, height, dataHeight, pitch;
   CaptureFormat format;
   bool          hdr;
   bool          hdrPQ;
@@ -191,6 +191,9 @@ static void streamParamChangedCallback(void * opaque, uint32_t id,
       SPA_VIDEO_FORMAT_xBGR_210LE |
       SPA_VIDEO_FORMAT_RGBA_F16);
   this->hdrPQ  = true; // this is assumed and untested
+
+  const int bpp = this->format == CAPTURE_FMT_RGBA16F ? 8 : 4;
+  this->pitch = this->width * bpp;
 
   if (this->hasFormat)
   {
@@ -427,8 +430,8 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
 
-  const int bpp = this->format == CAPTURE_FMT_RGBA16F ? 8 : 4;
-  const unsigned int maxHeight = maxFrameSize / (this->width * bpp);
+  const unsigned int maxHeight = maxFrameSize / this->pitch;
+  this->dataHeight = min(maxHeight, this->height);
 
   frame->formatVer    = this->formatVer;
   frame->format       = this->format;
@@ -436,10 +439,12 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
   frame->hdrPQ        = this->hdrPQ;
   frame->screenWidth  = this->width;
   frame->screenHeight = this->height;
+  frame->dataWidth    = this->width;
+  frame->dataHeight   = this->dataHeight;
   frame->frameWidth   = this->width;
-  frame->frameHeight  = min(maxHeight, this->height);
-  frame->truncated    = maxHeight < this->height;
-  frame->pitch        = this->width * bpp;
+  frame->frameHeight  = this->height;
+  frame->truncated    = maxHeight < this->dataHeight;
+  frame->pitch        = this->pitch;
   frame->stride       = this->width;
   frame->rotation     = CAPTURE_ROT_0;
 
@@ -449,14 +454,13 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult pipewire_getFrame(FrameBuffer * frame,
-    const unsigned int height, int frameIndex)
+static CaptureResult pipewire_getFrame(FrameBuffer * frame, int frameIndex)
 {
   if (this->stop || !this->frameData)
     return CAPTURE_RESULT_REINIT;
 
-  const int bpp = this->format == CAPTURE_FMT_RGBA16F ? 8 : 4;
-  framebuffer_write(frame, this->frameData, height * this->width * bpp);
+  framebuffer_write(frame, this->frameData,
+      this->dataHeight * this->pitch);
 
   pw_thread_loop_accept(this->threadLoop);
   return CAPTURE_RESULT_OK;
