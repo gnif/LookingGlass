@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 project(capture_XCB LANGUAGES C)
 
 add_library(capture_XCB STATIC
