@@ -117,6 +117,7 @@ static bool waylandInit(const LG_DSInitParams params)
   char compositor[1024];
   if (getCompositor(compositor, sizeof(compositor)))
   {
+    DEBUG_INFO("Compositor: %s", compositor);
     for(int i = 0; i < WL_DESKTOP_COUNT; ++i)
       if (strcmp(WL_Desktops[i]->compositor, compositor) == 0)
       {
@@ -124,7 +125,9 @@ static bool waylandInit(const LG_DSInitParams params)
         break;
       }
   }
-  DEBUG_INFO("Using %s", wlWm.desktop->name);
+  else
+    DEBUG_WARN("Compositor: UNKNOWN");
+  DEBUG_INFO("Selected  : %s", wlWm.desktop->name);
 
   wl_list_init(&wlWm.surfaceOutputs);
 
