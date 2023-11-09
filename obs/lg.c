@@ -646,6 +646,7 @@ static void lgVideoTick(void * data, float seconds)
 
       default:
         printf("invalid type %d\n", this->type);
+        lgmpClientMessageDone(this->frameQueue);
         os_sem_post(this->frameSem);
         obs_leave_graphics();
         return;
