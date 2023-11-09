@@ -40,13 +40,6 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
     wlWm.compositor = wl_registry_bind(wlWm.registry, name,
         // we only need v3 to run, but v4 can use eglSwapBuffersWithDamageKHR
         &wl_compositor_interface, version > 4 ? 4 : version);
-#ifndef ENABLE_LIBDECOR
-  else if (!strcmp(interface, xdg_wm_base_interface.name))
-    wlWm.xdgWmBase = wl_registry_bind(wlWm.registry, name, &xdg_wm_base_interface, 1);
-  else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
-    wlWm.xdgDecorationManager = wl_registry_bind(wlWm.registry, name,
-        &zxdg_decoration_manager_v1_interface, 1);
-#endif
   else if (!strcmp(interface, wp_presentation_interface.name))
     wlWm.presentation = wl_registry_bind(wlWm.registry, name,
         &wp_presentation_interface, 1);
@@ -75,6 +68,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, xdg_activation_v1_interface.name))
     wlWm.xdgActivation = wl_registry_bind(wlWm.registry, name,
         &xdg_activation_v1_interface, 1);
+  else if (wlWm.desktop->registryGlobalHandler(
+        data, registry, name, interface, version))
+    return;
 }
 
 static void registryGlobalRemoveHandler(void * data,

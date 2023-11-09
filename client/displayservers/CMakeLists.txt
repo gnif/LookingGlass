@@ -18,6 +18,9 @@ function(add_displayserver name)
   add_subdirectory(${name})
 endfunction()
 
+option(ENABLE_WAYLAND "Build with Wayland support" ON)
+add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
+
 # Add/remove displayservers here!
 if (ENABLE_WAYLAND)
   add_displayserver(Wayland)

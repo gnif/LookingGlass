@@ -89,18 +89,21 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
   if (wlWm.needsResize)
   {
     bool skipResize = false;
-    wl_egl_window_resize(wlWm.eglWindow, wl_fixed_to_int(wlWm.width * wlWm.scale),
-        wl_fixed_to_int(wlWm.height * wlWm.scale), 0, 0);
 
-    if (wlWm.width == 0 || wlWm.height == 0)
+    int width, height;
+    wlWm.desktop->getSize(&width, &height);
+    wl_egl_window_resize(wlWm.eglWindow, wl_fixed_to_int(width * wlWm.scale),
+        wl_fixed_to_int(height * wlWm.scale), 0, 0);
+
+    if (width == 0 || height == 0)
       skipResize = true;
     else if (wlWm.fractionalScale)
     {
       wl_surface_set_buffer_scale(wlWm.surface, 1);
       if (!wlWm.viewport)
         wlWm.viewport = wp_viewporter_get_viewport(wlWm.viewporter, wlWm.surface);
-      wp_viewport_set_source(wlWm.viewport, 0, 0, wlWm.width * wlWm.scale, wlWm.height * wlWm.scale);
-      wp_viewport_set_destination(wlWm.viewport, wlWm.width, wlWm.height);
+      wp_viewport_set_source(wlWm.viewport, 0, 0, width * wlWm.scale, height * wlWm.scale);
+      wp_viewport_set_destination(wlWm.viewport, width, height);
     }
     else
     {
@@ -120,18 +123,18 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
     }
 
     struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
-    wl_region_add(region, 0, 0, wlWm.width, wlWm.height);
+    wl_region_add(region, 0, 0, width, height);
     wl_surface_set_opaque_region(wlWm.surface, region);
     wl_region_destroy(region);
 
-    app_handleResizeEvent(wlWm.width, wlWm.height, wl_fixed_to_double(wlWm.scale),
+    app_handleResizeEvent(width, height, wl_fixed_to_double(wlWm.scale),
         (struct Border) {0, 0, 0, 0});
     app_invalidateWindow(true);
     waylandStopWaitFrame();
     wlWm.needsResize = skipResize;
   }
 
-  waylandShellAckConfigureIfNeeded();
+  wlWm.desktop->shellAckConfigureIfNeeded();
 }
 #endif
 

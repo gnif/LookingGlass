@@ -112,7 +112,8 @@ bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool 
 
   wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
-  if (!waylandShellInit(title, fullscreen, maximize, borderless, resizable))
+  if (!wlWm.desktop->shellInit(wlWm.display, wlWm.surface,
+        title, fullscreen, maximize, borderless, resizable))
     return false;
 
   wl_surface_commit(wlWm.surface);
@@ -127,12 +128,14 @@ void waylandWindowFree(void)
 
 void waylandSetWindowSize(int x, int y)
 {
-    waylandShellResize(x, y);
+    wlWm.desktop->shellResize(x, y);
 }
 
 bool waylandIsValidPointerPos(int x, int y)
 {
-  return x >= 0 && x < wlWm.width && y >= 0 && y < wlWm.height;
+  int width, height;
+  wlWm.desktop->getSize(&width, &height);
+  return x >= 0 && x < width && y >= 0 && y < height;
 }
 
 static void frameHandler(void * opaque, struct wl_callback * callback, unsigned int data)

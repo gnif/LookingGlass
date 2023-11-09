@@ -590,10 +590,13 @@ void waylandWarpPointer(int x, int y, bool exiting)
       return;
     }
 
+    int width, height;
+    wlWm.desktop->getSize(&width, &height);
+
     if (x < 0) x = 0;
-    else if (x >= wlWm.width) x = wlWm.width - 1;
+    else if (x >= width) x = width - 1;
     if (y < 0) y = 0;
-    else if (y >= wlWm.height) y = wlWm.height - 1;
+    else if (y >= height) y = height - 1;
 
     struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
     wl_region_add(region, x, y, 1, 1);

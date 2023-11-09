@@ -30,23 +30,6 @@
 #include "common/debug.h"
 #include "common/locking.h"
 
-#ifdef ENABLE_LIBDECOR
-#include <libdecor.h>
-#endif
-
-#define EPOLL_EVENTS 10 // Maximum number of fds we can process at once in waylandWait
-
-#ifndef ENABLE_LIBDECOR
-static void waylandDisplayCallback(uint32_t events, void * opaque)
-{
-  if (events & EPOLLERR)
-    wl_display_cancel_read(wlWm.display);
-  else
-    wl_display_read_events(wlWm.display);
-  wl_display_dispatch_pending(wlWm.display);
-}
-#endif
-
 bool waylandPollInit(void)
 {
   wlWm.epollFd = epoll_create1(EPOLL_CLOEXEC);
@@ -61,58 +44,12 @@ bool waylandPollInit(void)
   LG_LOCK_INIT(wlWm.pollLock);
   LG_LOCK_INIT(wlWm.pollFreeLock);
 
-#ifndef ENABLE_LIBDECOR
-  wlWm.displayFd = wl_display_get_fd(wlWm.display);
-  if (!waylandPollRegister(wlWm.displayFd, waylandDisplayCallback, NULL, EPOLLIN))
-  {
-    DEBUG_ERROR("Failed register display to epoll: %s", strerror(errno));
-    return false;
-  }
-#endif
-
-  return true;
+  return wlWm.desktop->pollInit(wlWm.display);
 }
 
 void waylandWait(unsigned int time)
 {
-#ifdef ENABLE_LIBDECOR
-  libdecor_dispatch(wlWm.libdecor, 0);
-#else
-  while (wl_display_prepare_read(wlWm.display))
-    wl_display_dispatch_pending(wlWm.display);
-  wl_display_flush(wlWm.display);
-#endif
-
-  struct epoll_event events[EPOLL_EVENTS];
-  int count;
-  if ((count = epoll_wait(wlWm.epollFd, events, EPOLL_EVENTS, time)) < 0)
-  {
-    if (errno != EINTR)
-      DEBUG_INFO("epoll failed: %s", strerror(errno));
-#ifndef ENABLE_LIBDECOR
-    wl_display_cancel_read(wlWm.display);
-#endif
-    return;
-  }
-
-#ifndef ENABLE_LIBDECOR
-  bool sawDisplay = false;
-#endif
-  for (int i = 0; i < count; ++i) {
-    struct WaylandPoll * poll = events[i].data.ptr;
-    if (!poll->removed)
-      poll->callback(events[i].events, poll->opaque);
-#ifndef ENABLE_LIBDECOR
-    if (poll->fd == wlWm.displayFd)
-      sawDisplay = true;
-#endif
-  }
-
-#ifndef ENABLE_LIBDECOR
-  if (!sawDisplay)
-    wl_display_cancel_read(wlWm.display);
-#endif
-
+  wlWm.desktop->pollWait(wlWm.display, wlWm.epollFd, time);
   INTERLOCKED_SECTION(wlWm.pollFreeLock,
   {
     struct WaylandPoll * node;

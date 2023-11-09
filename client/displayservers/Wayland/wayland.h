@@ -37,11 +37,10 @@
 #include "common/countedbuffer.h"
 #include "common/ringbuffer.h"
 #include "interface/displayserver.h"
+#include "interface/desktop.h"
 
-#include "wayland-xdg-shell-client-protocol.h"
 #include "wayland-presentation-time-client-protocol.h"
 #include "wayland-viewporter-client-protocol.h"
-#include "wayland-xdg-decoration-unstable-v1-client-protocol.h"
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
@@ -100,6 +99,8 @@ struct WaylandDSState
   bool pointerInSurface;
   bool focusedOnSurface;
 
+  WL_DesktopOps * desktop;
+
   struct wl_display * display;
   struct wl_surface * surface;
   struct wl_registry * registry;
@@ -107,13 +108,9 @@ struct WaylandDSState
   struct wl_shm * shm;
   struct wl_compositor * compositor;
 
-  int32_t width, height;
   wl_fixed_t scale;
   bool fractionalScale;
   bool needsResize;
-  bool fullscreen;
-  bool floating;
-  uint32_t resizeSerial;
   bool configured;
   bool warpSupport;
   double cursorX, cursorY;
@@ -133,17 +130,6 @@ struct WaylandDSState
   clockid_t clkId;
   RingBuffer photonTimings;
   GraphHandle photonGraph;
-
-#ifdef ENABLE_LIBDECOR
-  struct libdecor * libdecor;
-  struct libdecor_frame * libdecorFrame;
-#else
-  struct xdg_wm_base * xdgWmBase;
-  struct xdg_surface * xdgSurface;
-  struct xdg_toplevel * xdgToplevel;
-  struct zxdg_decoration_manager_v1 * xdgDecorationManager;
-  struct zxdg_toplevel_decoration_v1 * xdgToplevelDecoration;
-#endif
 
   const char             * cursorThemeName;
   int                      cursorSize;
@@ -314,14 +300,6 @@ void waylandPresentationFree(void);
 bool waylandRegistryInit(void);
 void waylandRegistryFree(void);
 
-// shell module
-bool waylandShellInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable);
-void waylandShellAckConfigureIfNeeded(void);
-void waylandSetFullscreen(bool fs);
-bool waylandGetFullscreen(void);
-void waylandMinimize(void);
-void waylandShellResize(int w, int h);
-
 // window module
 bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable);
 void waylandWindowFree(void);
@@ -331,3 +309,4 @@ bool waylandIsValidPointerPos(int x, int y);
 bool waylandWaitFrame(void);
 void waylandSkipFrame(void);
 void waylandStopWaitFrame(void);
+void waylandNeedsResize(void);

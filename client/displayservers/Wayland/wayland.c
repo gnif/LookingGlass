@@ -24,9 +24,12 @@
 #include <signal.h>
 #include <string.h>
 #include <wayland-client.h>
+#include <sys/socket.h>
 
 #include "common/debug.h"
 #include "common/option.h"
+
+#include "dynamic/wayland_desktops.h"
 
 static struct Option waylandOptions[] =
 {
@@ -68,21 +71,65 @@ static bool waylandProbe(void)
   return getenv("WAYLAND_DISPLAY") != NULL;
 }
 
+static bool getCompositor(char * dst, size_t size)
+{
+  int fd = wl_display_get_fd(wlWm.display);
+  struct ucred ucred;
+  socklen_t len = sizeof(struct ucred);
+
+  if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) == -1)
+  {
+    DEBUG_ERROR("Failed to get the pid of the socket");
+    return false;
+  }
+
+  char path[64];
+  snprintf(path, sizeof(path), "/proc/%d/comm", ucred.pid);
+  FILE *fp = fopen(path, "r");
+  if (!fp)
+  {
+    DEBUG_ERROR("Failed to open %s", path);
+    return false;
+  }
+
+  if (!fgets(dst, size, fp))
+  {
+    DEBUG_ERROR("Failed to read %s", path);
+    fclose(fp);
+    return false;
+  }
+  fclose(fp);
+
+  dst[strlen(dst) - 1] = 0;
+  return true;
+}
+
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
+  wlWm.desktop = WL_Desktops[0];
 
   wlWm.display = wl_display_connect(NULL);
   if (!wlWm.display)
     return false;
 
+  // select the desktop interface based on the compositor process name
+  char compositor[1024];
+  if (getCompositor(compositor, sizeof(compositor)))
+  {
+    for(int i = 0; i < WL_DESKTOP_COUNT; ++i)
+      if (strcmp(WL_Desktops[i]->compositor, compositor) == 0)
+      {
+        wlWm.desktop = WL_Desktops[0];
+        break;
+      }
+  }
+  DEBUG_INFO("Using %s", wlWm.desktop->name);
+
   wl_list_init(&wlWm.surfaceOutputs);
 
   wlWm.warpSupport        = option_get_bool("wayland", "warpSupport");
   wlWm.useFractionalScale = option_get_bool("wayland", "fractionScale");
-
-  wlWm.width = params.w;
-  wlWm.height = params.h;
 
   if (!waylandPollInit())
     return false;
@@ -108,7 +155,9 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandInputInit())
     return false;
 
-  if (!waylandWindowInit(params.title, params.fullscreen, params.maximize, params.borderless, params.resizable))
+  wlWm.desktop->setSize(params.w, params.h);
+  if (!waylandWindowInit(params.title, params.fullscreen, params.maximize,
+        params.borderless, params.resizable))
     return false;
 
   if (!waylandEGLInit(params.w, params.h))
@@ -118,9 +167,6 @@ static bool waylandInit(const LG_DSInitParams params)
   if (params.opengl && !waylandOpenGLInit())
     return false;
 #endif
-
-  wlWm.width = params.w;
-  wlWm.height = params.h;
 
   return true;
 }
@@ -154,6 +200,28 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
   }
 
   return false;
+}
+
+void waylandNeedsResize(void)
+{
+  wlWm.needsResize = true;
+  app_invalidateWindow(true);
+  waylandStopWaitFrame();
+}
+
+static void waylandSetFullscreen(bool fs)
+{
+  wlWm.desktop->setFullscreen(fs);
+}
+
+static bool waylandGetFullscreen(void)
+{
+  return wlWm.desktop->getFullscreen();
+}
+
+static void waylandMinimize(void)
+{
+  wlWm.desktop->minimize();
 }
 
 struct LG_DisplayServerOps LGDS_Wayland =

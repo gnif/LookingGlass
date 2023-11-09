@@ -45,12 +45,6 @@ add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support."
 option(ENABLE_X11 "Build with X11 support" ON)
 add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
 
-option(ENABLE_WAYLAND "Build with Wayland support" ON)
-add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
-
-option(ENABLE_LIBDECOR "Build with libdecor support" OFF)
-add_feature_info(ENABLE_LIBDECOR ENABLE_LIBDECOR "libdecor support.")
-
 option(ENABLE_PIPEWIRE "Build with PipeWire audio output support" ON)
 add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
 
