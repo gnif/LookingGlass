@@ -723,8 +723,12 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
     for (unsigned int y = 0; y < h; ++y)
     {
       const unsigned int ystart = y << this->diffShift;
-      const unsigned int yend = min(this->dataHeight, (y + 1)
-        << this->diffShift);
+      if (ystart > this->dataHeight)
+        break;
+
+      const unsigned int yend = min(
+        this->dataHeight,
+        (y + 1) << this->diffShift);
 
       for (unsigned int x = 0; x < w; )
       {
