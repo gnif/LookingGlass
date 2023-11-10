@@ -743,11 +743,19 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
           this->diffMap[y * w + x2]))
           ++x2;
 
-        unsigned int width = (min(x2 << this->diffShift, this->grabWidth) -
-          (x << this->diffShift)) * this->bpp;
-        rectCopyUnaligned(frameData, this->frameBuffer, ystart, yend,
-            (x << this->diffShift) * this->bpp, this->shmStride * this->bpp,
-            this->grabStride * this->bpp, width);
+        unsigned int xstart = x << this->diffShift;
+        unsigned int xend   = min(x2 << this->diffShift, this->grabWidth);
+        unsigned int width  = xend - xstart;
+
+        rectCopyUnaligned(
+          frameData,
+          this->frameBuffer,
+          ystart,
+          yend,
+          xstart           * this->bpp,
+          this->shmStride  * this->bpp,
+          this->grabStride * this->bpp,
+          width            * this->bpp);
 
         x = x2;
       }
@@ -759,9 +767,16 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
     for (int y = 0; y < this->dataHeight; y += 64)
     {
       int yend = min(this->dataHeight, y + 128);
-      rectCopyUnaligned(frameData, this->frameBuffer, y, yend, 0,
-      this->shmStride * this->bpp, this->grabStride * this->bpp,
-      this->grabWidth * this->bpp);
+      rectCopyUnaligned(
+        frameData,
+        this->frameBuffer,
+        y,
+        yend,
+        0,
+        this->shmStride  * this->bpp,
+        this->grabStride * this->bpp,
+        this->grabWidth  * this->bpp);
+
       framebuffer_set_write_ptr(frame, yend * this->shmStride * this->bpp);
     }
   }
