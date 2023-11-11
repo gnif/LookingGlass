@@ -73,7 +73,7 @@ bool util_fileGetContents(const char * filename, char ** buffer, size_t * length
   }
 
   fclose(fh);
-  buffer[fsize] = 0;
+  *buffer[fsize] = 0;
   *length = fsize;
   return true;
 }
