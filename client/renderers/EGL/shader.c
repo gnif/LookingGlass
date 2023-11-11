@@ -20,6 +20,7 @@
 
 #include "shader.h"
 #include "common/debug.h"
+#include "common/stringutils.h"
 #include "util.h"
 
 #include <stdlib.h>
@@ -219,18 +220,22 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
 
   if (useDMA)
   {
-    const char * search  = "sampler2D";
-    const char * replace = "samplerExternalOES";
+    const char search[]  = "sampler2D";
+    const char replace[] = "samplerExternalOES";
 
-    const char * src = fragment_code;
+    const char * offset = NULL;
     int instances = 0;
-    while((src = strstr(src, search)))
+
+    while((offset = memsearch(
+      fragment_code, fragment_size,
+      search       , sizeof(search)-1,
+      offset)))
     {
       ++instances;
-      src += strlen(search);
+      offset += sizeof(search)-1;
     }
 
-    const int diff   = (strlen(replace) - strlen(search)) * instances;
+    const int diff   = (sizeof(replace) - sizeof(search)) * instances;
     const int newLen = fragment_size + diff;
     newCode = malloc(newLen + 1);
     if (!newCode)
@@ -239,7 +244,7 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
       goto exit;
     }
 
-    src        = fragment_code;
+    const char * src = fragment_code;
     char * dst = newCode;
     for(int i = 0; i < instances; ++i)
     {
@@ -248,10 +253,10 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
 
       memcpy(dst, src, offset);
       dst += offset;
-      src  = pos + strlen(search);
+      src  = pos + sizeof(search)-1;
 
-      memcpy(dst, replace, strlen(replace));
-      dst += strlen(replace);
+      memcpy(dst, replace, sizeof(replace)-1);
+      dst += sizeof(replace)-1;
     }
 
     const int final = fragment_size - (src - fragment_code);

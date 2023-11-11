@@ -37,4 +37,10 @@ bool str_containsValue(const char * list, char delimiter, const char * value);
 // Local implementation of strdup
 char * lg_strdup(const char *s);
 
+// search a non null terminated buffer for a value
+const char * memsearch(
+    const char * haystack, size_t haystackSize,
+    const char * needle  , size_t needleSize  ,
+    const char * offset);
+
 #endif

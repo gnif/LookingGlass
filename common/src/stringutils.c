@@ -26,6 +26,7 @@
 #include <errno.h>
 
 #include "common/stringutils.h"
+#include "common/debug.h"
 
 int valloc_sprintf(char ** str, const char * format, va_list ap)
 {
@@ -109,4 +110,25 @@ char * lg_strdup(const char *s)
 
   memcpy(out, s, len);
   return out;
+}
+
+const char * memsearch(
+    const char * haystack, size_t haystackSize,
+    const char * needle  , size_t needleSize  ,
+    const char * offset)
+{
+  int i = 0;
+  if (offset)
+  {
+    DEBUG_ASSERT(offset >= haystack);
+    DEBUG_ASSERT(offset < haystack + haystackSize);
+    i = offset - haystack;
+  }
+
+  const int searchSize = haystackSize - needleSize + 1;
+  for(; i < searchSize; ++i)
+    if (memcmp(haystack + i, needle, needleSize) == 0)
+      return haystack + i;
+
+  return NULL;
 }
