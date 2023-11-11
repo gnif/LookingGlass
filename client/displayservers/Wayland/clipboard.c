@@ -376,7 +376,7 @@ static void clipboardReadCancel(struct ClipboardRead * data)
 static void clipboardReadCallback(uint32_t events, void * opaque)
 {
   struct ClipboardRead * data = opaque;
-  if (events & EPOLLERR) 
+  if (events & EPOLLERR)
   {
     clipboardReadCancel(data);
     return;
