@@ -39,13 +39,19 @@ typedef struct LGTimer LGTimer;
 static inline uint64_t microtime(void)
 {
 #if defined(_WIN32)
-  static LARGE_INTEGER freq = { .QuadPart = 0LL };
-  if (!freq.QuadPart)
+  static unsigned long div = 0;
+  if (div == 0)
+  {
+    LARGE_INTEGER freq = { .QuadPart = 0LL };
     QueryPerformanceFrequency(&freq);
+    div = freq.QuadPart / 1000000LL;
+    if(div == 0)
+      abort();
+  }
 
   LARGE_INTEGER time;
   QueryPerformanceCounter(&time);
-  return time.QuadPart / (freq.QuadPart / 1000000LL);
+  return time.QuadPart / div;
 #else
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
@@ -76,6 +82,9 @@ static inline uint64_t nanotime(void)
   {
     LARGE_INTEGER freq = { .QuadPart = 0LL };
     QueryPerformanceFrequency(&freq);
+    if (freq.QuadPart == 0)
+      abort();
+
     multiplier = 1e9 / freq.QuadPart;
   }
 
