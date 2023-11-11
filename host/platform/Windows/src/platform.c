@@ -66,6 +66,9 @@ struct AppState
   HANDLE         exitWait;
   HANDLE         taskHandle;
 
+  FILE * stdErrFile;
+  FILE * stdOutFile;
+
   _Atomic(bool)  hasPendingActivationRequest;
 };
 
@@ -349,10 +352,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int std_out_fd = _open_osfhandle((intptr_t)std_out, _O_TEXT);
 
     if (std_err_fd > 0)
-      *stderr = *_fdopen(std_err_fd, "w");
+    {
+      app.stdErrFile = _fdopen(std_err_fd, "w");
+      *stderr = *app.stdErrFile;
+    }
 
     if  (std_out_fd > 0)
-      *stdout = *_fdopen(std_out_fd, "w");
+    {
+      app.stdOutFile = _fdopen(std_out_fd, "w");
+      *stdout = *app.stdOutFile;
+    }
   }
 
   int result = 0;
@@ -473,6 +482,12 @@ finish:
 
   if (app.taskHandle)
     AvRevertMmThreadCharacteristics(app.taskHandle);
+
+  if (app.stdErrFile)
+    fclose(app.stdErrFile);
+
+  if (app.stdOutFile)
+    fclose(app.stdOutFile);
 
   return result;
 }
