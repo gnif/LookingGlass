@@ -149,16 +149,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
   }
   else
   {
-    struct stat st;
-    if (stat(shmDevice, &st) != 0)
-    {
-      DEBUG_ERROR("Failed to stat: %s", shmDevice);
-      DEBUG_ERROR("%s", strerror(errno));
-      return false;
-    }
-
-    devSize = st.st_size;
-    devFd   = open(shmDevice, O_RDWR, (mode_t)0600);
+    devFd = open(shmDevice, O_RDWR, (mode_t)0600);
     if (devFd < 0)
     {
       DEBUG_ERROR("Failed to open: %s", shmDevice);
@@ -166,7 +157,17 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
       return false;
     }
 
-    hasDMA = false;
+    struct stat st;
+    if (fstat(devFd, &st) != 0)
+    {
+      DEBUG_ERROR("Failed to stat: %s", shmDevice);
+      DEBUG_ERROR("%s", strerror(errno));
+      close(devFd);
+      return false;
+    }
+
+    devSize = st.st_size;
+    hasDMA  = false;
   }
 
   void * map = mmap(0, devSize, PROT_READ | PROT_WRITE, MAP_SHARED, devFd, 0);
