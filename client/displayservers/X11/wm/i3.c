@@ -71,9 +71,9 @@ static bool wm_i3_init(void)
     return false;
 
   struct sockaddr_un addr = { .sun_family = AF_UNIX };
-  char path[sizeof(addr.sun_path)];
+  char * path = (char *)&addr.sun_path;
   int pathLen;
-  if ((pathLen = fread(path, 1, sizeof(path), fd)) <= 0)
+  if ((pathLen = fread(path, 1, sizeof(addr.sun_path), fd)) <= 0)
   {
     pclose(fd);
     return false;
@@ -91,7 +91,6 @@ static bool wm_i3_init(void)
     return false;
   }
 
-  strncpy(addr.sun_path, path, sizeof(addr.sun_path));
   if (connect(i3.sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
   {
     DEBUG_ERROR("Failed to connect to the i3 IPC socket");
