@@ -62,6 +62,7 @@ bool downsampleParser(struct Option * opt, const char * str)
       &rule.targetY) != 4)
     {
       DEBUG_INFO("Unable to parse downsample rules");
+      free(tmp);
       return false;
     }
 
