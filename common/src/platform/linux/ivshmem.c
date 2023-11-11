@@ -119,7 +119,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 {
   DEBUG_ASSERT(dev);
 
-  unsigned int devSize;
+  int devSize;
   int devFd;
   bool hasDMA;
 
@@ -139,6 +139,12 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
 
     // get the device size
     devSize = ioctl(devFd, KVMFR_DMABUF_GETSIZE, 0);
+    if (devSize < 0)
+    {
+      DEBUG_ERROR("Failed to get the device size");
+      close(devFd);
+      return false;
+    }
     hasDMA = true;
   }
   else
