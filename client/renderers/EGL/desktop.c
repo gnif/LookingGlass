@@ -515,7 +515,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       &desktop->dmaShader : &desktop->shader;
 
   const float mapHDRGain =
-    desktop->maxCLL / desktop->peakLuminance;
+    (float)desktop->maxCLL / desktop->peakLuminance;
 
   EGL_Uniform uniforms[] =
   {
