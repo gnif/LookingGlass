@@ -52,6 +52,7 @@ struct SharedCache
 
 struct D3D12Backend
 {
+  HMODULE d3d12;
   unsigned width, height, pitch;
   DXGI_FORMAT format;
 
@@ -90,17 +91,28 @@ static void d3d12_free(void);
 static bool d3d12_create(unsigned textures)
 {
   DEBUG_ASSERT(!this);
-
+  comRef_scopePush();
+  bool result = false;
   HRESULT status;
 
-  HMODULE d3d12 = LoadLibrary("d3d12.dll");
-  if (!d3d12)
-    return false;
+  this = calloc(1,
+    sizeof(struct D3D12Backend) +
+    sizeof(*this->texture) * textures);
+
+  if (!this)
+  {
+    DEBUG_ERROR("failed to allocate D3D12Backend struct");
+    goto exit;
+  }
+
+  this->d3d12 = LoadLibrary("d3d12.dll");
+  if (!this->d3d12)
+    goto exit;
 
   if (dxgi_debug())
   {
     D3D12GetDebugInterface_t D3D12GetDebugInterface = (D3D12GetDebugInterface_t)
-      GetProcAddress(d3d12, "D3D12GetDebugInterface");
+      GetProcAddress(this->d3d12, "D3D12GetDebugInterface");
     ID3D12Debug1 * debug;
     if (FAILED(status = D3D12GetDebugInterface(&IID_ID3D12Debug1, (void **)&debug)))
       DEBUG_WINERROR("D3D12GetDebugInterface", status);
@@ -114,27 +126,14 @@ static bool d3d12_create(unsigned textures)
   }
 
   D3D12CreateDevice_t D3D12CreateDevice = (D3D12CreateDevice_t)
-    GetProcAddress(d3d12, "D3D12CreateDevice");
+    GetProcAddress(this->d3d12, "D3D12CreateDevice");
 
   if (!D3D12CreateDevice)
-    return false;
-
-  this = calloc(1,
-    sizeof(struct D3D12Backend) +
-    sizeof(*this->texture) * textures);
-
-  if (!this)
-  {
-    DEBUG_ERROR("failed to allocate D3D12Backend struct");
-    return false;
-  }
+    goto exit;
 
   this->textures  = textures;
   this->copySleep = option_get_float("dxgi", "d3d12CopySleep");
   DEBUG_INFO("Sleep before copy : %f ms", this->copySleep);
-
-  bool result = false;
-  comRef_scopePush();
 
   comRef_defineLocal(ID3D12Device, device);
   status = D3D12CreateDevice((IUnknown *)dxgi_getAdapter(),
@@ -335,6 +334,9 @@ static void d3d12_free(void)
 
   if (this->event)
     CloseHandle(this->event);
+
+  if (this->d3d12)
+    FreeLibrary(this->d3d12);
 
   free(this);
   this = NULL;
