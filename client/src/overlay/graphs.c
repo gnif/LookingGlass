@@ -143,6 +143,12 @@ static int graphs_render(void * udata, bool interactive,
       ++graphCount;
   }
 
+  if (!graphCount)
+  {
+    ll_unlock(gs.graphs);
+    return 0;
+  }
+
   ImVec2 pos = {0.0f, 0.0f};
   igSetNextWindowBgAlpha(0.4f);
   igSetNextWindowPos(pos, ImGuiCond_FirstUseEver, pos);
