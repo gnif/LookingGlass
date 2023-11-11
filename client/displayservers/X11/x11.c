@@ -897,7 +897,7 @@ static int x11EventThread(void * unused)
     XNextEvent(x11.display, &xe);
 
     // call the clipboard handling code
-    if (x11CBEventThread(xe))
+    if (x11CBEventThread(&xe))
       continue;
 
     switch(xe.type)

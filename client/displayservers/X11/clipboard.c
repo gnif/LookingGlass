@@ -60,38 +60,38 @@ static void x11CBSelectionIncr(const XPropertyEvent e);
 static void x11CBSelectionNotify(const XSelectionEvent e);
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e);
 
-bool x11CBEventThread(const XEvent xe)
+bool x11CBEventThread(const XEvent * xe)
 {
-  switch(xe.type)
+  switch(xe->type)
   {
     case SelectionRequest:
-      x11CBSelectionRequest(xe.xselectionrequest);
+      x11CBSelectionRequest(xe->xselectionrequest);
       return true;
 
     case SelectionClear:
-      x11CBSelectionClear(xe.xselectionclear);
+      x11CBSelectionClear(xe->xselectionclear);
       return true;
 
     case SelectionNotify:
-      x11CBSelectionNotify(xe.xselection);
+      x11CBSelectionNotify(xe->xselection);
       return true;
 
     case PropertyNotify:
-      if (xe.xproperty.state != PropertyNewValue)
+      if (xe->xproperty.state != PropertyNewValue)
         break;
 
-      if (xe.xproperty.atom == x11atoms.SEL_DATA)
+      if (xe->xproperty.atom == x11atoms.SEL_DATA)
       {
         if (x11cb.lowerBound == 0)
           return true;
 
-        x11CBSelectionIncr(xe.xproperty);
+        x11CBSelectionIncr(xe->xproperty);
         return true;
       }
       break;
 
     default:
-      if (xe.type == x11.eventBase + XFixesSelectionNotify)
+      if (xe->type == x11.eventBase + XFixesSelectionNotify)
       {
         XFixesSelectionNotifyEvent * sne = (XFixesSelectionNotifyEvent *)&xe;
         x11CBXFixesSelectionNotify(*sne);

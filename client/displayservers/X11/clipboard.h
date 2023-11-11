@@ -26,7 +26,7 @@
 
 #include "interface/displayserver.h"
 
-bool x11CBEventThread(const XEvent xe);
+bool x11CBEventThread(const XEvent * xe);
 
 bool x11CBInit(void);
 void x11CBNotice(LG_ClipboardData type);
