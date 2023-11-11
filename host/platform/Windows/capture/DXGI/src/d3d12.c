@@ -388,8 +388,9 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
     goto exit;
   }
 
+  comRef_defineLocal(ID3D12Resource, d12src);
   status = ID3D12Device_OpenSharedHandle(*this->device,
-      handle, &IID_ID3D12Resource, (void **)&this->d12src);
+      handle, &IID_ID3D12Resource, (void **)d12src);
 
   CloseHandle(handle);
 
@@ -404,7 +405,7 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
   {
     struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
     cache->tex = src;
-    *comRef_newGlobal(&cache->d12src) = (IUnknown *)this->d12src;
+    comRef_toGlobal(cache->d12src, d12src);
   }
   else
   {
