@@ -345,7 +345,10 @@ void app_handleKeyPress(int sc, int charcode)
     if (sc == KEY_ESC)
       app_setOverlay(false);
     else
-      g_state.io->KeysDown[sc] = true;
+    {
+      if (sc < sizeof(g_state.io->KeysDown))
+        g_state.io->KeysDown[sc] = true;
+    }
     return;
   }
 
@@ -388,7 +391,8 @@ void app_handleKeyRelease(int sc, int charcode)
 
   if (app_isOverlayMode())
   {
-    g_state.io->KeysDown[sc] = false;
+    if (sc < sizeof(g_state.io->KeysDown))
+      g_state.io->KeysDown[sc] = false;
     return;
   }
 
