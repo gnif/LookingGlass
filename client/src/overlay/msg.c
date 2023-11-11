@@ -163,7 +163,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
 
   if (destroy)
   {
-    ll_shift(l_msg.messages, NULL);
+    (void)ll_shift(l_msg.messages, NULL);
     freeMsg(msg);
     app_invalidateOverlay(false);
   }
