@@ -175,6 +175,7 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
   {
     DEBUG_ERROR("Failed to map the shared memory device: %s", shmDevice);
     DEBUG_ERROR("%s", strerror(errno));
+    close(devFd);
     return false;
   }
 
