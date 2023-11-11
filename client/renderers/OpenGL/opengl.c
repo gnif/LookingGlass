@@ -1146,7 +1146,9 @@ static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
     size,
     data
   );
-  check_gl_error("glBufferSubData");
+
+  if (check_gl_error("glBufferSubData"))
+    return false;
 
   this->texPos += size;
   return true;
