@@ -603,7 +603,8 @@ static bool newKVMFRData(KVMFRUserData * dst)
       .features = os_hasSetCursorPos() ? KVMFR_FEATURE_SETCURSORPOS : 0
     };
     strncpy(kvmfr.hostver, BUILD_VERSION, sizeof(kvmfr.hostver) - 1);
-    appendData(dst, &kvmfr, sizeof(kvmfr));
+    if (!appendData(dst, &kvmfr, sizeof(kvmfr)))
+      return false;
   }
 
   {
