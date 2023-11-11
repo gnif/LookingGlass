@@ -1816,7 +1816,7 @@ static void lg_shutdown(void)
   app_releaseAllKeybinds();
   ll_free(g_state.bindings);
 
-  if (g_state.dsInitialized)
+  if (g_state.ds && g_state.dsInitialized)
     g_state.ds->free();
 
   ivshmemClose(&g_state.shm);
