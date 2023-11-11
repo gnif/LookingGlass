@@ -558,10 +558,14 @@ bool app_init(void)
     }
   }
 
-  if (exitEvent &&
-      !RegisterWaitForSingleObject(&app.exitWait, exitEvent, exitEventCallback, NULL,
-        INFINITE, WT_EXECUTEONLYONCE))
-    DEBUG_WINERROR("Failed to register wait for exit event", GetLastError());
+  if (exitEvent)
+  {
+    if (!RegisterWaitForSingleObject(
+          &app.exitWait, exitEvent, exitEventCallback, NULL,
+          INFINITE, WT_EXECUTEONLYONCE))
+      DEBUG_WINERROR("Failed to register wait for exit event", GetLastError());
+    CloseHandle(exitEvent);
+  }
 
   return true;
 }
