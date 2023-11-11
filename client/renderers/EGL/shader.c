@@ -303,7 +303,9 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
 
       if (!newLine)
       {
-        insertPos = i - 1;
+        insertPos = i;
+        if (insertPos > 0)
+          --insertPos;
         break;
       }
     }
