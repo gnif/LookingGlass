@@ -179,7 +179,7 @@ void mouseHook_install(MouseHookFn callback)
   if (!mouseHook.updateEvent)
   {
     mouseHook.updateEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
-    if (!mouseHook.event)
+    if (!mouseHook.updateEvent)
     {
       DEBUG_WINERROR("Failed to create mouse hook update event",
           GetLastError());
