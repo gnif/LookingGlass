@@ -151,7 +151,7 @@ static const char * DXGI_FORMAT_STR[] = {
 
 const char * getDXGIFormatStr(DXGI_FORMAT format)
 {
-  if (format > sizeof(DXGI_FORMAT_STR) / sizeof(const char *))
+  if (format >= sizeof(DXGI_FORMAT_STR) / sizeof(const char *))
     return DXGI_FORMAT_STR[0];
   return DXGI_FORMAT_STR[format];
 }
@@ -190,7 +190,7 @@ const char * getDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type)
   if (type == DXGI_COLOR_SPACE_CUSTOM)
     return "DXGI_COLOR_SPACE_CUSTOM";
 
-  if (type > sizeof(DXGI_COLOR_SPACE_TYPE_STR) / sizeof(const char *))
+  if (type >= sizeof(DXGI_COLOR_SPACE_TYPE_STR) / sizeof(const char *))
     return "Invalid or Unknown";
 
   return DXGI_COLOR_SPACE_TYPE_STR[type];
