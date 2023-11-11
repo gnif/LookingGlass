@@ -761,6 +761,13 @@ int main_frameThread(void * unused)
           }
         }
 
+      if (!dma)
+      {
+        DEBUG_ERROR("Failed to obtain a free DMA buffer for use");
+        g_state.state = APP_STATE_SHUTDOWN;
+        break;
+      }
+
       /* open the buffer */
       if (dma->fd == -1)
       {
