@@ -412,7 +412,7 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
     // too many handles to cache, disable the cache entirely
     for(int i = 0; i < this->sharedCacheCount; ++i)
     {
-      struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
+      struct SharedCache *cache = &this->sharedCache[i];
       comRef_release(cache->d12src);
     }
     this->sharedCacheCount = -1;
