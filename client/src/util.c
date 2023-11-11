@@ -48,10 +48,17 @@ bool util_fileGetContents(const char * filename, char ** buffer, size_t * length
     return false;
   }
 
-  long fsize = ftell(fh);
   if (fseek(fh, 0, SEEK_SET) != 0)
   {
     DEBUG_ERROR("Failed to seek");
+    fclose(fh);
+    return false;
+  }
+
+  long fsize = ftell(fh);
+  if (fsize < 0)
+  {
+    DEBUG_ERROR("Failed to get the size");
     fclose(fh);
     return false;
   }
