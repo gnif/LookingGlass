@@ -595,6 +595,14 @@ static bool appendData(KVMFRUserData * dst, const void * src, const size_t size)
 
 static bool newKVMFRData(KVMFRUserData * dst)
 {
+  dst->data = malloc(1024);
+  if (!dst->data)
+  {
+    DEBUG_ERROR("Out of memory");
+    return false;
+  }
+  dst->size = 1024;
+
   {
     KVMFR kvmfr =
     {
@@ -669,7 +677,7 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
 {
   KVMFRUserData udata = { 0 };
   if (!newKVMFRData(&udata))
-    return false;
+    goto fail_init;
 
   LGMP_STATUS status;
   if ((status = lgmpHostInit(shmDev->mem, shmDev->size, &app.lgmp,
