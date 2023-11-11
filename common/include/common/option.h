@@ -49,7 +49,7 @@ struct Option
   char * module;
   char * name;
   char * description;
-  const char shortopt;
+  char shortopt;
   bool preset;
   void * opaque;
 
