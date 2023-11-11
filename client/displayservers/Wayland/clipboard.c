@@ -475,6 +475,7 @@ void waylandCBRequest(LG_ClipboardData type)
     close(data->fd);
     free(data->buf);
     free(data);
+    return;
   }
 
   wlCb.currentRead = data;

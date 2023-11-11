@@ -109,10 +109,17 @@ void waylandPresentationFrame(void)
     return;
 
   struct FrameData * data = malloc(sizeof(*data));
+  if (!data)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
+
   if (clock_gettime(wlWm.clkId, &data->sent))
   {
     DEBUG_ERROR("clock_gettime failed: %s\n", strerror(errno));
     free(data);
+    return;
   }
 
   struct wp_presentation_feedback * feedback = wp_presentation_feedback(wlWm.presentation, wlWm.surface);
