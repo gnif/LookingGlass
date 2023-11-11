@@ -58,7 +58,7 @@ static void calcRadialVectors(float vectors[][2], int segments)
 
 static void drawRadialGradient(ImDrawList * list, int x, int y, int w, int h,
     ImU32 innerColor, ImU32 outerColor,
-    float vectors[0][2], int segments)
+    float vectors[][2], int segments)
 {
   const ImVec2 uv = list->_Data->TexUvWhitePixel;
 
