@@ -68,13 +68,13 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
       case WAIT_FAILED:
         DEBUG_WINERROR("Wait for event failed", GetLastError());
         return false;
+
+      default:
+        DEBUG_ERROR("Unknown wait event return code");
+        return false;
     }
-
-    DEBUG_ERROR("Unknown wait event return code");
   }
-  while(0);
-
-  return false;
+  while(true);
 }
 
 bool lgSignalEvent(LGEvent * event)
