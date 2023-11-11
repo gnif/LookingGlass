@@ -155,7 +155,7 @@ struct DXGIInterface
   int  lastPointerX, lastPointerY;
   bool lastPointerVisible;
 
-  struct FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
+  FrameDamage frameDamage[LGMP_Q_FRAME_LEN];
 };
 
 // locals
@@ -1428,14 +1428,16 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
 
-  Texture * tex = &this->texture[this->texRIndex];
+  Texture     * tex    = &this->texture[this->texRIndex];
+  FrameDamage * damage = &this->frameDamage[frameIndex];
 
-  struct FrameDamage * damage = this->frameDamage + frameIndex;
-  bool damageAll = tex->damageRectsCount == 0 || damage->count < 0 ||
-      damage->count + tex->damageRectsCount > KVMFR_MAX_DAMAGE_RECTS;
-
-  if (damageAll)
+  if (tex->damageRectsCount                 == 0 ||
+      damage->count                          < 0 ||
+      damage->count + tex->damageRectsCount  > KVMFR_MAX_DAMAGE_RECTS)
+  {
+    // damage all
     framebuffer_write(frame, tex->map, this->pitch * this->dataHeight);
+  }
   else
   {
     memcpy(damage->rects + damage->count, tex->damageRects,
