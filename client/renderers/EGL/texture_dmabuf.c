@@ -157,7 +157,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
       break;
     }
 
-  if (image == EGL_NO_IMAGE)
+  if (unlikely(image == EGL_NO_IMAGE))
   {
     const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
     EGLAttrib attribs[] =
@@ -184,16 +184,16 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
         (EGLClientBuffer)NULL,
         attribs);
 
-    if (image == EGL_NO_IMAGE)
+    if (unlikely(image == EGL_NO_IMAGE))
     {
       DEBUG_EGL_ERROR("Failed to create EGLImage for DMA transfer");
       return false;
     }
 
-    if (!vector_push(&this->images, &(struct FdImage) {
+    if (unlikely(!vector_push(&this->images, &(struct FdImage) {
       .fd    = update->dmaFD,
       .image = image,
-    }))
+    })))
     {
       DEBUG_ERROR("Failed to store EGLImage");
       g_egl_dynProcs.eglDestroyImage(this->display, image);
@@ -206,7 +206,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[parent->bufIndex]);
     g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
 
-    if (parent->sync)
+    if (likely(parent->sync))
       glDeleteSync(parent->sync);
 
     parent->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);

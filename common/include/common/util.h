@@ -40,4 +40,7 @@
 
 #define ALIGN_TO(value, align) (((value) + (align) - 1) & -(align))
 
+#define unlikely(expr) __builtin_expect(!!(expr), 0)
+#define likely(expr)   __builtin_expect(!!(expr), 1)
+
 #endif

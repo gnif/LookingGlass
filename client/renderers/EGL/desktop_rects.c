@@ -296,7 +296,7 @@ bool egl_screenToDesktop(struct FrameDamageRect * output, const double matrix[6]
 
 void egl_desktopRectsRender(EGL_DesktopRects * rects)
 {
-  if (!rects->count)
+  if (unlikely(!rects->count))
     return;
 
   glBindVertexArray(rects->vao);

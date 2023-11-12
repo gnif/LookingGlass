@@ -382,9 +382,9 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
-  if (desktop->useDMA && dmaFd >= 0)
+  if (likely(desktop->useDMA && dmaFd >= 0))
   {
-    if (egl_textureUpdateFromDMA(desktop->texture, frame, dmaFd))
+    if (likely(egl_textureUpdateFromDMA(desktop->texture, frame, dmaFd)))
     {
       atomic_store(&desktop->processFrame, true);
       return true;
@@ -420,8 +420,8 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
       return false;
   }
 
-  if (egl_textureUpdateFromFrame(desktop->texture, frame,
-        damageRects, damageRectsCount))
+  if (likely(egl_textureUpdateFromFrame(desktop->texture, frame,
+        damageRects, damageRectsCount)))
   {
     atomic_store(&desktop->processFrame, true);
     return true;
@@ -443,7 +443,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   EGL_Texture * tex;
   int width, height;
 
-  if (desktop->useSpice)
+  if (unlikely(desktop->useSpice))
   {
     tex    = desktop->spiceTexture;
     width  = desktop->spiceWidth;
@@ -456,11 +456,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     height = desktop->height;
   }
 
-  if (outputWidth == 0 && outputHeight == 0)
+  if (unlikely(outputWidth == 0 && outputHeight == 0))
     DEBUG_FATAL("outputWidth || outputHeight == 0");
 
   enum EGL_TexStatus status;
-  if ((status = egl_textureProcess(tex)) != EGL_TEX_STATUS_OK)
+  if (unlikely((status = egl_textureProcess(tex)) != EGL_TEX_STATUS_OK))
   {
     if (status != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to process the desktop texture");

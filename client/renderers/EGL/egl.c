@@ -20,6 +20,7 @@
 
 #include "interface/renderer.h"
 
+#include "common/util.h"
 #include "common/debug.h"
 #include "common/KVMFR.h"
 #include "common/option.h"
@@ -580,7 +581,7 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   this->formatValid = true;
 
   /* this event runs in a second thread so we need to init it here */
-  if (!this->frameContext)
+  if (unlikely(!this->frameContext))
   {
     static EGLint attrs[] = {
       EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -600,7 +601,7 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
     }
   }
 
-  if (this->scalePointer)
+  if (likely(this->scalePointer))
   {
     float scale = max(1.0f, (float)format.screenWidth / this->width);
     egl_cursorSetScale(this->cursor, scale);
@@ -623,7 +624,8 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   uint64_t start = nanotime();
-  if (!egl_desktopUpdate(this->desktop, frame, dmaFd, damageRects, damageRectsCount))
+  if (unlikely(!egl_desktopUpdate(
+          this->desktop, frame, dmaFd, damageRects, damageRectsCount)))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
@@ -632,12 +634,17 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
-    if (damage->count == -1 || damageRectsCount == 0 ||
-        damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS)
+    if (unlikely(
+        damage->count                    == -1 ||
+        damageRectsCount                 == 0 ||
+        damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS))
+    {
       damage->count = -1;
+    }
     else
     {
-      memcpy(damage->rects + damage->count, damageRects, damageRectsCount * sizeof(FrameDamageRect));
+      memcpy(damage->rects + damage->count, damageRects,
+          damageRectsCount * sizeof(FrameDamageRect));
       damage->count += damageRectsCount;
     }
   });
@@ -1056,14 +1063,14 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   accumulated->count = 0;
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
-    if (!renderAll)
+    if (likely(!renderAll))
     {
       for (int i = 0; i < bufferAge; ++i)
       {
         struct DesktopDamage * damage = this->desktopDamage +
             IDX_AGO(this->desktopDamageIdx, i, DESKTOP_DAMAGE_COUNT);
 
-        if (damage->count < 0)
+        if (unlikely(damage->count < 0))
         {
           renderAll = true;
           break;
@@ -1087,7 +1094,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     this->desktopDamage[this->desktopDamageIdx].count = 0;
   });
 
-  if (!renderAll)
+  if (likely(!renderAll))
   {
     double matrix[6];
     egl_screenToDesktopMatrix(matrix,
@@ -1101,7 +1108,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
       int count = this->overlayHistoryCount[idx];
       struct Rect * damage = this->overlayHistory[idx];
 
-      if (count < 0)
+      if (unlikely(count < 0))
       {
         renderAll = true;
         break;
@@ -1114,11 +1121,12 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         );
     }
 
-    accumulated->count = rectsMergeOverlapping(accumulated->rects, accumulated->count);
+    accumulated->count = rectsMergeOverlapping(accumulated->rects,
+        accumulated->count);
   }
   ++this->overlayHistoryIdx;
 
-  if (this->destRect.w > 0 && this->destRect.h > 0)
+  if (likely(this->destRect.w > 0 && this->destRect.h > 0))
   {
     if (egl_desktopRender(this->desktop,
         this->destRect.w, this->destRect.h,
@@ -1136,41 +1144,39 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
   renderLetterBox(this);
 
-  hasOverlay |= egl_damageRender(this->damage, rotate, newFrame ? desktopDamage : NULL);
-  hasOverlay |= invalidateWindow;
+  hasOverlay |=
+    egl_damageRender(this->damage, rotate, newFrame ? desktopDamage : NULL) |
+    invalidateWindow;
 
   struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
   int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
-
-  switch (damageIdx)
+  if (unlikely(damageIdx != 0))
   {
-    case 0: // no overlay
-      break;
-    case -1: // full damage
+    if (damageIdx == -1)
       hasOverlay = true;
-      // fallthrough
-    default:
-      ImGui_ImplOpenGL3_NewFrame();
-      ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
 
-      for (int i = 0; i < damageIdx; ++i)
-        damage[i].y = this->height - damage[i].y - damage[i].h;
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
+
+    for (int i = 0; i < damageIdx; ++i)
+      damage[i].y = this->height - damage[i].y - damage[i].h;
   }
 
-  if (damageIdx >= 0 && cursorState.visible)
+  if (likely(damageIdx >= 0 && cursorState.visible))
     damage[damageIdx++] = cursorState.rect;
 
   int overlayHistoryIdx = this->overlayHistoryIdx % DESKTOP_DAMAGE_COUNT;
-  if (hasOverlay)
+  if (unlikely(hasOverlay))
     this->overlayHistoryCount[overlayHistoryIdx] = -1;
   else
   {
-    if (damageIdx > 0)
-      memcpy(this->overlayHistory[overlayHistoryIdx], damage, damageIdx * sizeof(struct Rect));
+    if (unlikely(damageIdx > 0))
+      memcpy(this->overlayHistory[overlayHistoryIdx],
+          damage, damageIdx * sizeof(struct Rect));
     this->overlayHistoryCount[overlayHistoryIdx] = damageIdx;
   }
 
-  if (!hasOverlay && !this->hadOverlay)
+  if (unlikely(!hasOverlay && !this->hadOverlay))
   {
     if (this->cursorLast.visible)
       damage[damageIdx++] = this->cursorLast.rect;
@@ -1197,7 +1203,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   this->cursorLast = cursorState;
 
   preSwap(udata);
-  app_eglSwapBuffers(this->display, this->surface, damage, this->noSwapDamage ? 0 : damageIdx);
+  app_eglSwapBuffers(this->display, this->surface, damage,
+      this->noSwapDamage ? 0 : damageIdx);
+
   return true;
 }
 

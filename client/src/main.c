@@ -209,17 +209,16 @@ static int renderThread(void * unused)
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
 
-  while(g_state.state != APP_STATE_SHUTDOWN)
+  while(likely(g_state.state != APP_STATE_SHUTDOWN))
   {
-    bool forceRender = false;
-    if (g_state.jitRender)
-      forceRender = g_state.ds->waitFrame();
-
-    app_handleRenderEvent(microtime());
     if (g_state.jitRender)
     {
+      const bool forceRender = g_state.ds->waitFrame();
+      app_handleRenderEvent(microtime());
+
       const uint64_t pending =
         atomic_load_explicit(&g_state.pendingCount, memory_order_acquire);
+
       if (!lgResetEvent(g_state.frameEvent)
           && !forceRender
           && !pending
@@ -235,9 +234,13 @@ static int renderThread(void * unused)
     }
     else if (g_params.fpsMin != 0)
     {
+      app_handleRenderEvent(microtime());
+
       float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
 
-      if (!lgWaitEventAbs(g_state.frameEvent, &time) || ups > g_params.fpsMin)
+      if (unlikely(
+            !lgWaitEventAbs(g_state.frameEvent, &time) ||
+            ups > g_params.fpsMin))
       {
         /* only update the time if we woke up early */
         clock_gettime(CLOCK_MONOTONIC, &time);
@@ -247,7 +250,7 @@ static int renderThread(void * unused)
     }
 
     int resize = atomic_load(&g_state.lgrResize);
-    if (resize)
+    if (unlikely(resize))
     {
       g_state.io->DisplaySize = (ImVec2) {
         .x = g_state.windowW,
@@ -286,8 +289,8 @@ static int renderThread(void * unused)
 
     renderQueue_process();
 
-    if (!RENDERER(render, g_params.winRotate, newFrame, invalidate,
-          preSwapCallback, (void *)&renderStart))
+    if (unlikely(!RENDERER(render, g_params.winRotate, newFrame, invalidate,
+          preSwapCallback, (void *)&renderStart)))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
@@ -300,7 +303,7 @@ static int renderThread(void * unused)
     g_state.lastRenderTime = t;
     atomic_fetch_add_explicit(&g_state.renderCount, 1, memory_order_relaxed);
 
-    if (g_state.lastRenderTimeValid)
+    if (likely(g_state.lastRenderTimeValid))
     {
       const float fdelta = (float)delta / 1e6f;
       ringbuffer_push(g_state.renderTimings, &fdelta);
@@ -308,7 +311,9 @@ static int renderThread(void * unused)
     g_state.lastRenderTimeValid = true;
 
     const uint64_t now = microtime();
-    if (!g_state.resizeDone && g_state.resizeTimeout < now)
+    if (unlikely(
+          !g_state.resizeDone &&
+          g_state.resizeTimeout < now))
     {
       if (g_params.autoResize)
       {
@@ -1739,9 +1744,9 @@ restart:
     return -1;
   }
 
-  while(g_state.state == APP_STATE_RUNNING)
+  while(likely(g_state.state == APP_STATE_RUNNING))
   {
-    if (!lgmpClientSessionValid(g_state.lgmp))
+    if (unlikely(!lgmpClientSessionValid(g_state.lgmp)))
     {
       g_state.lgHostConnected = false;
       DEBUG_INFO("Waiting for the host to restart...");

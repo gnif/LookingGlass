@@ -457,7 +457,7 @@ static CaptureResult nvfbc_capture(void)
 
   unsigned int width, height;
   getDesktopSize(&width, &height);
-  if (this->width != width || this->height != height)
+  if (unlikely(this->width != width || this->height != height))
   {
     this->resChanged = true;
     this->width      = width;
@@ -476,7 +476,7 @@ static CaptureResult nvfbc_capture(void)
     &grabInfo
   );
 
-  if (result != CAPTURE_RESULT_OK)
+  if (unlikely(result != CAPTURE_RESULT_OK))
     return result;
 
   bool changed = false;
@@ -651,15 +651,15 @@ done:
 static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
     const size_t maxFrameSize)
 {
-  if (this->stop)
+  if (unlikely(this->stop))
     return CAPTURE_RESULT_REINIT;
 
-  if (
+  if (unlikely(
     this->grabInfo.dwWidth       != this->grabWidth  ||
     this->grabInfo.dwHeight      != this->grabHeight ||
     this->grabInfo.dwBufferWidth != this->grabStride ||
     this->grabInfo.bIsHDR        != this->isHDR      ||
-    this->resChanged)
+    this->resChanged))
   {
     this->grabWidth  = this->grabInfo.dwWidth;
     this->grabHeight = this->grabInfo.dwHeight;
@@ -820,11 +820,11 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
 
 static int pointerThread(void * unused)
 {
-  while (!this->stop)
+  while (likely(!this->stop))
   {
     lgWaitEvent(this->cursorEvent, TIMEOUT_INFINITE);
 
-    if (this->stop)
+    if (unlikely(this->stop))
       break;
 
     CaptureResult  result;
@@ -832,14 +832,14 @@ static int pointerThread(void * unused)
 
     void * data;
     uint32_t size;
-    if (!this->getPointerBufferFn(&data, &size))
+    if (unlikely(!this->getPointerBufferFn(&data, &size)))
     {
       DEBUG_WARN("failed to get a pointer buffer");
       continue;
     }
 
     result = NvFBCToSysGetCursor(this->nvfbc, &pointer, data, size);
-    if (result != CAPTURE_RESULT_OK)
+    if (unlikely(result != CAPTURE_RESULT_OK))
     {
       DEBUG_WARN("NvFBCToSysGetCursor failed");
       continue;

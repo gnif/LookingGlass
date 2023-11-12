@@ -927,14 +927,16 @@ int app_main(int argc, char * argv[])
       }
     }
 
-    while(app.state != APP_STATE_SHUTDOWN && (
+    while(likely(app.state != APP_STATE_SHUTDOWN && (
           lgmpHostQueueHasSubs(app.pointerQueue) ||
-          lgmpHostQueueHasSubs(app.frameQueue)))
+          lgmpHostQueueHasSubs(app.frameQueue))))
     {
-      if (app.state == APP_STATE_RESTART || app.state == APP_STATE_REINIT)
+      if (unlikely(
+            app.state == APP_STATE_RESTART ||
+            app.state == APP_STATE_REINIT))
         break;
 
-      if (lgmpHostQueueNewSubs(app.pointerQueue) > 0)
+      if (unlikely(lgmpHostQueueNewSubs(app.pointerQueue) > 0))
       {
         LG_LOCK(app.pointerLock);
         sendPointer(true);
@@ -951,32 +953,37 @@ int app_main(int argc, char * argv[])
       }
 
       const uint64_t captureStart = microtime();
-      switch(app.iface->capture())
+      const CaptureResult result = app.iface->capture();
+      if (likely(result == CAPTURE_RESULT_OK))
+        previousFrameTime = captureStart;
+      else if (likely(result == CAPTURE_RESULT_TIMEOUT))
       {
-        case CAPTURE_RESULT_OK:
-          previousFrameTime = captureStart;
-          break;
+        if (!app.iface->asyncCapture)
+          if (unlikely(app.frameValid &&
+                lgmpHostQueueNewSubs(app.frameQueue) > 0))
+          {
+            LGMP_STATUS status;
+            if ((status = lgmpHostQueuePost(app.frameQueue, 0,
+                    app.frameMemory[app.frameIndex])) != LGMP_OK)
+              DEBUG_ERROR("%s", lgmpStatusString(status));
+          }
+      }
+      else
+      {
+        switch(result)
+        {
+          case CAPTURE_RESULT_REINIT:
+            app.state = APP_STATE_RESTART;
+            continue;
 
-        case CAPTURE_RESULT_TIMEOUT:
-          if (!app.iface->asyncCapture)
-            if (app.frameValid && lgmpHostQueueNewSubs(app.frameQueue) > 0)
-            {
-              LGMP_STATUS status;
-              if ((status = lgmpHostQueuePost(app.frameQueue, 0,
-                      app.frameMemory[app.frameIndex])) != LGMP_OK)
-                DEBUG_ERROR("%s", lgmpStatusString(status));
-            }
+          case CAPTURE_RESULT_ERROR:
+            DEBUG_ERROR("Capture interface reported a fatal error");
+            exitcode = LG_HOST_EXIT_FAILED;
+            goto fail_capture;
 
-          continue;
-
-        case CAPTURE_RESULT_REINIT:
-          app.state = APP_STATE_RESTART;
-          continue;
-
-        case CAPTURE_RESULT_ERROR:
-          DEBUG_ERROR("Capture interface reported a fatal error");
-          exitcode = LG_HOST_EXIT_FAILED;
-          goto fail_capture;
+          default:
+            DEBUG_ASSERT("Invalid capture result");
+        }
       }
 
       if (!app.iface->asyncCapture)
