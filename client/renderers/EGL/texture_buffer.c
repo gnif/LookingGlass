@@ -242,7 +242,7 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
     glBindTexture(GL_TEXTURE_2D, tex);
 
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.width);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.stride);
     glTexSubImage2D(GL_TEXTURE_2D,
         0, 0, 0,
         texture->format.width,
