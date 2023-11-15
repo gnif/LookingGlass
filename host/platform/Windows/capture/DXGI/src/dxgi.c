@@ -885,11 +885,20 @@ static bool dxgi_deinit(void)
   for (int i = 0; i < this->maxTextures; ++i)
   {
     Texture * tex = &this->texture[i];
-    if (!tex->map)
-      continue;
-    this->backend->unmapTexture(i);
-    tex->map = NULL;
-    tex->state = TEXTURE_STATE_UNUSED;
+    switch(tex->state)
+    {
+      case TEXTURE_STATE_MAPPED:
+        this->backend->unmapTexture(i);
+        tex->map = NULL;
+        //fallthrough
+
+      case TEXTURE_STATE_PENDING_MAP:
+        tex->state = TEXTURE_STATE_UNUSED;
+        //fallthrough
+
+      case TEXTURE_STATE_UNUSED:
+        break;
+    }
   }
 
   if (this->dup && *this->dup)
