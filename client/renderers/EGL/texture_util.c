@@ -81,6 +81,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_BGRA_EXT;
       fmt->dataType   = GL_UNSIGNED_BYTE;
       fmt->fourcc     = DRM_FORMAT_ARGB8888;
+      fmt->stride     = fmt->pitch / 4;
       break;
 
     default:

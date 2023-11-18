@@ -148,7 +148,7 @@ static bool egl_filter24bitSetup(EGL_Filter * filter,
       this->desktopHeight == desktopHeight)
     return true;
 
-  if (!egl_framebufferSetup(this->fb, pixFmt, desktopWidth, desktopHeight))
+  if (!egl_framebufferSetup(this->fb, EGL_PF_BGRA, desktopWidth, desktopHeight))
     return false;
 
   this->format        = pixFmt;
