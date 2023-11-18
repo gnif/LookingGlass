@@ -314,8 +314,12 @@ static void rectCopyUnaligned_memcpy(uint8_t * dst, const uint8_t * src,
   }
 }
 
-#pragma GCC push_options
-#pragma GCC target ("avx2")
+#ifdef __clang__
+  #pragma clang attribute push (__attribute__((target("avx"))), apply_to=function)
+#else
+  #pragma GCC push_options
+  #pragma GCC target ("avx")
+#endif
 static void rectCopyUnaligned_avx(uint8_t * dst, const uint8_t * src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
@@ -338,7 +342,11 @@ static void rectCopyUnaligned_avx(uint8_t * dst, const uint8_t * src,
     dst += dstPitch;
  }
 }
-#pragma GCC pop_options
+#ifdef __clang__
+  #pragma clang attribute pop
+#else
+  #pragma GCC pop_options
+#endif
 
 static void _rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)

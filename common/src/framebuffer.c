@@ -225,8 +225,12 @@ static bool framebuffer_write_sse4_1(FrameBuffer * frame,
   return true;
 }
 
-#pragma GCC push_options
-#pragma GCC target ("avx2")
+#ifdef __clang__
+  #pragma clang attribute push (__attribute__((target("avx2"))), apply_to=function)
+#else
+  #pragma GCC push_options
+  #pragma GCC target ("avx2")
+#endif
 bool framebuffer_write_avx2(FrameBuffer * frame,
     const void * restrict src, size_t size)
 {
@@ -303,7 +307,11 @@ bool framebuffer_write_avx2(FrameBuffer * frame,
 
   return true;
 }
-#pragma GCC pop_options
+#ifdef __clang__
+  #pragma clang attribute pop
+#else
+  #pragma GCC pop_options
+#endif
 
 static bool _framebuffer_write(FrameBuffer * frame,
     const void * restrict src, size_t size)
