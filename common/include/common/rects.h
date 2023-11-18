@@ -27,8 +27,18 @@
 #include "common/framebuffer.h"
 #include "common/types.h"
 
-void rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
-  int ystart, int yend, int dx, int dstPitch, int srcPitch, int width);
+inline static void rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
+{
+  src += ystart * srcPitch + dx;
+  dst += ystart * dstPitch + dx;
+  for (int i = ystart; i < yend; ++i)
+  {
+    memcpy(dst, src, width);
+    src += srcPitch;
+    dst += dstPitch;
+ }
+}
 
 void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
   FrameBuffer * frame, int dstPitch, int height,
