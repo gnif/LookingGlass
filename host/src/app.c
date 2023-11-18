@@ -618,7 +618,7 @@ static bool newKVMFRData(KVMFRUserData * dst)
   {
     int cpus, cores, sockets;
     char model[1024];
-    if (!lgCPUInfo(model, sizeof(model), &cpus, &cores, &sockets))
+    if (!cpuInfo_get(model, sizeof(model), &cpus, &cores, &sockets))
       return false;
 
     KVMFRRecord_VMInfo vmInfo =
@@ -807,7 +807,7 @@ int app_main(int argc, char * argv[])
     return LG_HOST_EXIT_FATAL;
 
   DEBUG_INFO("Looking Glass Host (%s)", BUILD_VERSION);
-  lgDebugCPU();
+  cpuInfo_log();
 
   struct IVSHMEM shmDev = { 0 };
   if (!ivshmemInit(&shmDev))

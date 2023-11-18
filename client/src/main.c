@@ -1632,7 +1632,7 @@ restart:
           int procs;
           int cores;
           int sockets;
-          if (lgCPUInfo(model, sizeof model, &procs, &cores, &sockets) &&
+          if (cpuInfo_get(model, sizeof model, &procs, &cores, &sockets) &&
               procs > cores)
             hostHasSMP = true;
 
@@ -1858,7 +1858,7 @@ int main(int argc, char * argv[])
 
   DEBUG_INFO("Looking Glass (%s)", BUILD_VERSION);
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
-  lgDebugCPU();
+  cpuInfo_log();
 
   if (!installCrashHandler("/proc/self/exe"))
     DEBUG_WARN("Failed to install the crash handler");

@@ -27,7 +27,7 @@
 #include <string.h>
 #include <ctype.h>
 
-bool lgCPUInfo(char * model, size_t modelSize, int * procs, int * cores,
+bool cpuInfo_get(char * model, size_t modelSize, int * procs, int * cores,
   int * sockets)
 {
   FILE * cpuinfo = fopen("/proc/cpuinfo", "r");

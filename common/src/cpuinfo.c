@@ -21,14 +21,14 @@
 #include "common/cpuinfo.h"
 #include "common/debug.h"
 
-void lgDebugCPU(void)
+void cpuInfo_log(void)
 {
   char model[1024];
   int procs;
   int cores;
   int sockets;
 
-  if (!lgCPUInfo(model, sizeof model, &procs, &cores, &sockets))
+  if (!cpuInfo_get(model, sizeof model, &procs, &cores, &sockets))
   {
     DEBUG_WARN("Failed to get CPU information");
     return;
