@@ -22,6 +22,45 @@
 #include "common/util.h"
 
 #include <stdlib.h>
+#include <immintrin.h>
+
+__attribute__((target("default")))
+void rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
+{
+  src += ystart * srcPitch + dx;
+  dst += ystart * dstPitch + dx;
+  for (int i = ystart; i < yend; ++i)
+  {
+    memcpy(dst, src, width);
+    src += srcPitch;
+    dst += dstPitch;
+  }
+}
+
+__attribute__((target("avx")))
+void rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
+{
+  src += ystart * srcPitch + dx;
+  dst += ystart * dstPitch + dx;
+  for (int i = ystart; i < yend; ++i)
+  {
+    int col;
+    for(col = 0; col <= width - 32; col += 32)
+    {
+      _mm_prefetch(src + col + 256, _MM_HINT_T0);
+      __m256i srcData = _mm256_loadu_si256((__m256i*)(src + col));
+      _mm256_storeu_si256((__m256i*)(dst + col), srcData);
+    }
+
+    for(; col < width; ++col)
+      dst[col] = src[col];
+
+    src += srcPitch;
+    dst += dstPitch;
+ }
+}
 
 struct Corner
 {
