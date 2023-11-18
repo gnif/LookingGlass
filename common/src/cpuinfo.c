@@ -20,6 +20,7 @@
 
 #include "common/cpuinfo.h"
 #include "common/debug.h"
+#include "common/util.h"
 
 void cpuInfo_log(void)
 {
@@ -37,3 +38,73 @@ void cpuInfo_log(void)
   DEBUG_INFO("CPU Model: %s", model);
   DEBUG_INFO("CPU: %d sockets, %d cores, %d threads", sockets, cores, procs);
 }
+
+const CPUInfoFeatures * cpuInfo_getFeatures(void)
+{
+  static bool initialized = false;
+  static CPUInfoFeatures features;
+
+  if (likely(initialized))
+    return &features;
+
+  int cpuid[4] = {0};
+
+  // leaf1
+  asm volatile
+  (
+    "cpuid;"
+    : "=a" (cpuid[0]),
+      "=b" (cpuid[1]),
+      "=c" (cpuid[2]),
+      "=d" (cpuid[3])
+    : "a" (1)
+  );
+
+  features.sse     = cpuid[3] & (1 << 25);
+  features.sse2    = cpuid[3] & (1 << 26);
+  features.sse3    = cpuid[2] & (1 <<  0);
+  features.ssse3   = cpuid[2] & (1 <<  9);
+  features.fma     = cpuid[2] & (1 << 12);
+  features.sse4_1  = cpuid[2] & (1 << 19);
+  features.sse4_2  = cpuid[2] & (1 << 20);
+  features.popcnt  = cpuid[2] & (1 << 23);
+  features.aes     = cpuid[2] & (1 << 25);
+  features.xsave   = cpuid[2] & (1 << 26);
+  features.osxsave = cpuid[2] & (1 << 27);
+  features.avx     = cpuid[2] & (1 << 28);
+
+  // leaf7
+  asm volatile
+  (
+    "cpuid;"
+    : "=a" (cpuid[0]),
+      "=b" (cpuid[1]),
+      "=c" (cpuid[2]),
+      "=d" (cpuid[3])
+    : "a" (7), "c" (0)
+  );
+
+  features.avx2 = cpuid[1] & (1 << 5);
+  features.bmi1 = cpuid[2] & (1 << 3);
+  features.bmi2 = cpuid[2] & (1 << 8);
+
+  if (features.osxsave && features.avx)
+  {
+    int xgetbv = 0;
+    asm volatile
+    (
+      "xgetbv;"
+      : "=a" (xgetbv)
+      : "c" (0)
+      : "edx"
+    );
+
+    if (!(xgetbv & 0x6))
+    {
+      features.avx  = false;
+      features.avx2 = false;
+    }
+  }
+
+  return &features;
+};

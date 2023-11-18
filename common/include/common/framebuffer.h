@@ -70,7 +70,8 @@ void framebuffer_prepare(FrameBuffer * frame);
 /**
  * Write data from the src buffer into the KVMFRFrame
  */
-bool framebuffer_write(FrameBuffer * frame, const void * src, size_t size);
+extern bool (*framebuffer_write)(FrameBuffer * frame,
+    const void * restrict src, size_t size);
 
 /**
  * Gets the underlying data buffer of the framebuffer.

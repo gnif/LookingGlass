@@ -20,8 +20,10 @@
 
 #include "common/rects.h"
 #include "common/util.h"
+#include "common/cpuinfo.h"
 
 #include <stdlib.h>
+#include <immintrin.h>
 
 struct Corner
 {
@@ -298,3 +300,58 @@ int rectsRejectContained(FrameDamageRect * rects, int count)
 
   return removeRects(rects, count, removed);
 }
+
+static void rectCopyUnaligned_memcpy(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
+{
+  src += ystart * srcPitch + dx;
+  dst += ystart * dstPitch + dx;
+  for (int i = ystart; i < yend; ++i)
+  {
+    memcpy(dst, src, width);
+    src += srcPitch;
+    dst += dstPitch;
+  }
+}
+
+#pragma GCC push_options
+#pragma GCC target ("avx2")
+static void rectCopyUnaligned_avx(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
+{
+  src += ystart * srcPitch + dx;
+  dst += ystart * dstPitch + dx;
+  for (int i = ystart; i < yend; ++i)
+  {
+    int col;
+    for(col = 0; col <= width - 32; col += 32)
+    {
+      _mm_prefetch(src + col + 256, _MM_HINT_T0);
+      __m256i srcData = _mm256_loadu_si256((__m256i*)(src + col));
+      _mm256_storeu_si256((__m256i*)(dst + col), srcData);
+    }
+
+    for(; col < width; ++col)
+      dst[col] = src[col];
+
+    src += srcPitch;
+    dst += dstPitch;
+ }
+}
+#pragma GCC pop_options
+
+static void _rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
+{
+  if (cpuInfo_getFeatures()->avx)
+    rectCopyUnaligned = &rectCopyUnaligned_avx;
+  else
+    rectCopyUnaligned = &rectCopyUnaligned_memcpy;
+
+  return rectCopyUnaligned(
+      dst, src, ystart, yend, dx, dstPitch, srcPitch, width);
+}
+
+void (*rectCopyUnaligned)(uint8_t * dst, const uint8_t * src,
+    int ystart, int yend, int dx, int dstPitch, int srcPitch, int width) =
+  &_rectCopyUnaligned;

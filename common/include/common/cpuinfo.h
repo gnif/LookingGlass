@@ -29,4 +29,19 @@ bool cpuInfo_get(char * model, size_t modelSize, int * procs, int * cores,
 
 void cpuInfo_log(void);
 
+typedef struct
+{
+  bool sse, sse2, sse3, ssse3;
+  bool fma;
+  bool sse4_1, sse4_2;
+  bool popcnt;
+  bool aes;
+  bool xsave, osxsave;
+  bool avx, avx2;
+  bool bmi1, bmi2;
+}
+CPUInfoFeatures;
+
+const CPUInfoFeatures * cpuInfo_getFeatures(void);
+
 #endif
