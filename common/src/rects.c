@@ -301,7 +301,8 @@ int rectsRejectContained(FrameDamageRect * rects, int count)
   return removeRects(rects, count, removed);
 }
 
-static void rectCopyUnaligned_memcpy(uint8_t * dst, const uint8_t * src,
+static void rectCopyUnaligned_memcpy(
+    uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
   src += ystart * srcPitch + dx;
@@ -320,27 +321,42 @@ static void rectCopyUnaligned_memcpy(uint8_t * dst, const uint8_t * src,
   #pragma GCC push_options
   #pragma GCC target ("avx")
 #endif
-static void rectCopyUnaligned_avx(uint8_t * dst, const uint8_t * src,
+static void rectCopyUnaligned_avx(
+    uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
   src += ystart * srcPitch + dx;
   dst += ystart * dstPitch + dx;
+
+  const int nvec = width / sizeof(__m256i);
+  const int rem  = width % sizeof(__m256i);
+
   for (int i = ystart; i < yend; ++i)
   {
-    int col;
-    for(col = 0; col <= width - 32; col += 32)
+    const __m256i *restrict s = (__m256i*)src;
+          __m256i *restrict d = (__m256i*)dst;
+
+    int vec;
+    for(vec = nvec; vec > 3; vec -= 4)
     {
-      _mm_prefetch(src + col + 256, _MM_HINT_T0);
-      __m256i srcData = _mm256_loadu_si256((__m256i*)(src + col));
-      _mm256_storeu_si256((__m256i*)(dst + col), srcData);
+      _mm256_stream_si256(d + 0, _mm256_load_si256(s + 0));
+      _mm256_stream_si256(d + 1, _mm256_load_si256(s + 1));
+      _mm256_stream_si256(d + 2, _mm256_load_si256(s + 2));
+      _mm256_stream_si256(d + 3, _mm256_load_si256(s + 3));
+
+      s += 4;
+      d += 4;
     }
 
-    for(; col < width; ++col)
+    for(; vec > 0; --vec, ++d, ++s)
+      _mm256_stream_si256(d, _mm256_load_si256(s));
+
+    for(int col = width - rem; col < width; ++col)
       dst[col] = src[col];
 
     src += srcPitch;
     dst += dstPitch;
- }
+  }
 }
 #ifdef __clang__
   #pragma clang attribute pop
@@ -348,7 +364,8 @@ static void rectCopyUnaligned_avx(uint8_t * dst, const uint8_t * src,
   #pragma GCC pop_options
 #endif
 
-static void _rectCopyUnaligned(uint8_t * dst, const uint8_t * src,
+static void _rectCopyUnaligned(
+  uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
   if (cpuInfo_getFeatures()->avx)

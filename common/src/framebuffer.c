@@ -251,22 +251,20 @@ bool framebuffer_write_avx2(FrameBuffer * frame,
   /* copy in chunks */
   while (size > 127)
   {
-    __m256i *_d = (__m256i *)d;
-    __m256i *_s = (__m256i *)s;
-    __m256i v1 = _mm256_stream_load_si256(_s + 0);
-    __m256i v2 = _mm256_stream_load_si256(_s + 1);
-    __m256i v3 = _mm256_stream_load_si256(_s + 2);
-    __m256i v4 = _mm256_stream_load_si256(_s + 3);
+    __m256i v1 = _mm256_stream_load_si256(s + 0);
+    __m256i v2 = _mm256_stream_load_si256(s + 1);
+    __m256i v3 = _mm256_stream_load_si256(s + 2);
+    __m256i v4 = _mm256_stream_load_si256(s + 3);
 
-    _mm256_stream_si256(_d + 0, v1);
-    _mm256_stream_si256(_d + 1, v2);
-    _mm256_stream_si256(_d + 2, v3);
-    _mm256_stream_si256(_d + 3, v4);
+    _mm256_stream_si256(d + 0, v1);
+    _mm256_stream_si256(d + 1, v2);
+    _mm256_stream_si256(d + 2, v3);
+    _mm256_stream_si256(d + 3, v4);
 
-    s += 4;
-    d += 4;
+    s    += 4;
+    d    += 4;
     size -= 128;
-    wp += 128;
+    wp   += 128;
 
     if (wp % FB_CHUNK_SIZE == 0)
       atomic_store_explicit(&frame->wp, wp, memory_order_release);
@@ -274,18 +272,16 @@ bool framebuffer_write_avx2(FrameBuffer * frame,
 
   if (size > 63)
   {
-    __m256i *_d = (__m256i *)d;
-    __m256i *_s = (__m256i *)s;
-    __m256i v1 = _mm256_stream_load_si256(_s);
-    __m256i v2 = _mm256_stream_load_si256(_s + 1);
+    __m256i v1 = _mm256_stream_load_si256(s);
+    __m256i v2 = _mm256_stream_load_si256(s + 1);
 
-    _mm256_stream_si256(_d, v1);
-    _mm256_stream_si256(_d + 1, v2);
+    _mm256_stream_si256(d, v1);
+    _mm256_stream_si256(d + 1, v2);
 
-    s += 2;
-    d += 2;
+    s    += 2;
+    d    += 2;
     size -= 64;
-    wp += 64;
+    wp   += 64;
 
     if (wp % FB_CHUNK_SIZE == 0)
       atomic_store_explicit(&frame->wp, wp, memory_order_release);

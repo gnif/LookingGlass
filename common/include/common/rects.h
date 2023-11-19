@@ -27,7 +27,8 @@
 #include "common/framebuffer.h"
 #include "common/types.h"
 
-extern void (*rectCopyUnaligned)(uint8_t * dst, const uint8_t * src,
+extern void (*rectCopyUnaligned)(
+    uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width);
 
 void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
