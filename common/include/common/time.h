@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
+#include "common/util.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -40,7 +41,7 @@ static inline uint64_t microtime(void)
 {
 #if defined(_WIN32)
   static unsigned long div = 0;
-  if (div == 0)
+  if (unlikely(div == 0))
   {
     LARGE_INTEGER freq = { .QuadPart = 0LL };
     QueryPerformanceFrequency(&freq);
@@ -78,7 +79,7 @@ static inline uint64_t nanotime(void)
 {
 #if defined(_WIN32)
   static double multiplier = 0.0;
-  if (!multiplier)
+  if (unlikely(!multiplier))
   {
     LARGE_INTEGER freq = { .QuadPart = 0LL };
     QueryPerformanceFrequency(&freq);
