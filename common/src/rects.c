@@ -328,29 +328,35 @@ static void rectCopyUnaligned_avx(
   src += ystart * srcPitch + dx;
   dst += ystart * dstPitch + dx;
 
-  const int nvec = width / sizeof(__m256i);
-  const int rem  = width % sizeof(__m256i);
+  const int nvec  = width / sizeof(__m256i);
+  const int rem   = width % sizeof(__m256i);
+  const int align = (uintptr_t)dst & 31;
 
   for (int i = ystart; i < yend; ++i)
   {
-    const __m256i *restrict s = (__m256i*)src;
-          __m256i *restrict d = (__m256i*)dst;
+    // copy the unaligned bytes
+    for(int col = align; col > 0; --col)
+      dst[col] = src[col];
+
+    const __m256i *restrict s = (__m256i*)(src + align);
+          __m256i *restrict d = (__m256i*)ALIGN_TO((uintptr_t)dst, 32);
 
     int vec;
     for(vec = nvec; vec > 3; vec -= 4)
     {
-      _mm256_stream_si256(d + 0, _mm256_load_si256(s + 0));
-      _mm256_stream_si256(d + 1, _mm256_load_si256(s + 1));
-      _mm256_stream_si256(d + 2, _mm256_load_si256(s + 2));
-      _mm256_stream_si256(d + 3, _mm256_load_si256(s + 3));
+      _mm256_stream_si256(d + 0, _mm256_loadu_si256(s + 0));
+      _mm256_stream_si256(d + 1, _mm256_loadu_si256(s + 1));
+      _mm256_stream_si256(d + 2, _mm256_loadu_si256(s + 2));
+      _mm256_stream_si256(d + 3, _mm256_loadu_si256(s + 3));
 
       s += 4;
       d += 4;
     }
 
     for(; vec > 0; --vec, ++d, ++s)
-      _mm256_stream_si256(d, _mm256_load_si256(s));
+      _mm256_stream_si256(d, _mm256_loadu_si256(s));
 
+    // copy any remaining bytes
     for(int col = width - rem; col < width; ++col)
       dst[col] = src[col];
 
