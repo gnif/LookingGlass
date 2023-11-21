@@ -38,11 +38,6 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
 
   switch(setup->pixFmt)
   {
-    //EGL has no support for 24-bit formats, so we stuff it into a 32-bit
-    //texture to unpack with a shader later
-    case EGL_PF_BGR_32:
-      // fallthrough
-
     case EGL_PF_BGRA:
       fmt->bpp        = 4;
       fmt->format     = GL_BGRA_EXT;
@@ -73,6 +68,16 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->intFormat  = GL_RGBA16F;
       fmt->dataType   = GL_HALF_FLOAT;
       fmt->fourcc     = DRM_FORMAT_XBGR16161616F;
+      break;
+
+    //EGL has no support for 24-bit formats, so we stuff it into a 32-bit
+    //texture to unpack with a shader later
+    case EGL_PF_BGR_32:
+      fmt->bpp        = 4;
+      fmt->format     = GL_BGRA_EXT;
+      fmt->intFormat  = GL_BGRA_EXT;
+      fmt->dataType   = GL_UNSIGNED_BYTE;
+      fmt->fourcc     = DRM_FORMAT_ARGB8888;
       break;
 
     case EGL_PF_RGB_24:
