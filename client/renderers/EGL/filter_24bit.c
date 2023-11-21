@@ -112,7 +112,7 @@ static bool egl_filter24bitSetup(EGL_Filter * filter,
 {
   EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
-  if (pixFmt != EGL_PF_BGR_32 && pixFmt != EGL_PF_RGB_24)
+  if (pixFmt != EGL_PF_BGR_32 && pixFmt != EGL_PF_RGB_24_32)
     return false;
 
   if (this->useDMA != useDMA || this->format != pixFmt)

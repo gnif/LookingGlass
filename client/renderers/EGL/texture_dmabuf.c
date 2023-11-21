@@ -37,12 +37,20 @@ typedef struct TexDMABUF
   TextureBuffer base;
 
   EGLDisplay display;
-  bool hasImportModifiers;
   Vector images;
+
+  EGL_PixelFormat pixFmt;
+  unsigned        fourcc;
+  unsigned        width;
+  GLuint          format;
 }
 TexDMABUF;
 
 EGL_TextureOps EGL_TextureDMABUF;
+
+static bool initDone           = false;
+static bool has24BitSupport    = true;
+static bool hasImportModifiers = true;
 
 // internal functions
 
@@ -94,9 +102,13 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGL_TexType type,
 
   this->display = display;
 
-  const char * client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
-  this->hasImportModifiers =
-    util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import_modifiers");
+  if (!initDone)
+  {
+    const char * client_exts = eglQueryString(this->display, EGL_EXTENSIONS);
+    hasImportModifiers =
+      util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import_modifiers");
+    initDone = true;
+  }
 
   return true;
 }
@@ -113,9 +125,18 @@ static void egl_texDMABUFFree(EGL_Texture * texture)
   free(this);
 }
 
-static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
+static bool texDMABUFSetup(EGL_Texture * texture)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
+  if (texture->format.pixFmt == EGL_PF_RGB_24 && !has24BitSupport)
+  {
+    this->pixFmt = EGL_PF_RGB_24_32;
+    this->width  = texture->format.pitch / 4;
+    this->fourcc = DRM_FORMAT_ARGB8888;
+    this->format = GL_BGRA_EXT;
+  }
 
   egl_texDMABUFCleanup(texture);
 
@@ -126,10 +147,10 @@ static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup
     glTexImage2D(GL_TEXTURE_EXTERNAL_OES,
         0,
         texture->format.intFormat,
-        texture->format.width,
+        this->width,
         texture->format.height,
         0,
-        texture->format.format,
+        this->format,
         texture->format.dataType,
         NULL);
   }
@@ -137,6 +158,50 @@ static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
   parent->rIndex = -1;
   return true;
+}
+
+static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
+{
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
+  this->pixFmt = texture->format.pixFmt;
+  this->width  = texture->format.width;
+  this->fourcc = texture->format.fourcc;
+  this->format = texture->format.format;
+
+  return texDMABUFSetup(texture);
+}
+
+static EGLImage createImage(EGL_Texture * texture, int fd)
+{
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
+  const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
+  EGLAttrib attribs[] =
+  {
+    EGL_WIDTH                         , this->width ,
+    EGL_HEIGHT                        , texture->format.height,
+    EGL_LINUX_DRM_FOURCC_EXT          , this->fourcc,
+    EGL_DMA_BUF_PLANE0_FD_EXT         , fd,
+    EGL_DMA_BUF_PLANE0_OFFSET_EXT     , 0,
+    EGL_DMA_BUF_PLANE0_PITCH_EXT      , texture->format.pitch,
+    EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (modifier & 0xffffffff),
+    EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (modifier >> 32),
+    EGL_NONE                          , EGL_NONE
+  };
+
+  if (!hasImportModifiers)
+    attribs[12] = attribs[13] =
+    attribs[14] = attribs[15] = EGL_NONE;
+
+  return g_egl_dynProcs.eglCreateImage(
+      this->display,
+      EGL_NO_CONTEXT,
+      EGL_LINUX_DMA_BUF_EXT,
+      (EGLClientBuffer)NULL,
+      attribs);
 }
 
 static bool egl_texDMABUFUpdate(EGL_Texture * texture,
@@ -159,30 +224,23 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   if (unlikely(image == EGL_NO_IMAGE))
   {
-    const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
-    EGLAttrib attribs[] =
+    bool setup = false;
+    if (texture->format.pixFmt == EGL_PF_RGB_24 && has24BitSupport)
     {
-      EGL_WIDTH                         , texture->format.width ,
-      EGL_HEIGHT                        , texture->format.height,
-      EGL_LINUX_DRM_FOURCC_EXT          , texture->format.fourcc,
-      EGL_DMA_BUF_PLANE0_FD_EXT         , update->dmaFD,
-      EGL_DMA_BUF_PLANE0_OFFSET_EXT     , 0,
-      EGL_DMA_BUF_PLANE0_PITCH_EXT      , texture->format.pitch,
-      EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (modifier & 0xffffffff),
-      EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (modifier >> 32),
-      EGL_NONE                          , EGL_NONE
-    };
+      image = createImage(texture, update->dmaFD);
+      if (image == EGL_NO_IMAGE)
+      {
+        DEBUG_INFO("Using 24-bit in 32-bit for DMA");
+        has24BitSupport = false;
+        setup = true;
+      }
+    }
 
-    if (!this->hasImportModifiers)
-      attribs[12] = attribs[13] =
-      attribs[14] = attribs[15] = EGL_NONE;
+    if (!has24BitSupport && setup)
+      texDMABUFSetup(texture);
 
-    image = g_egl_dynProcs.eglCreateImage(
-        this->display,
-        EGL_NO_CONTEXT,
-        EGL_LINUX_DMA_BUF_EXT,
-        (EGLClientBuffer)NULL,
-        attribs);
+    if (image == EGL_NO_IMAGE)
+      image = createImage(texture, update->dmaFD);
 
     if (unlikely(image == EGL_NO_IMAGE))
     {
@@ -220,9 +278,12 @@ static EGL_TexStatus egl_texDMABUFProcess(EGL_Texture * texture)
   return EGL_TEX_STATUS_OK;
 }
 
-static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex)
+static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
+    EGL_PixelFormat * fmt)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
   GLsync sync = 0;
 
   INTERLOCKED_SECTION(parent->copyLock,
@@ -265,6 +326,10 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex)
   }
 
   *tex = parent->tex[parent->rIndex];
+
+  if (fmt)
+    *fmt = this->pixFmt;
+
   return EGL_TEX_STATUS_OK;
 }
 
@@ -273,7 +338,7 @@ static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
   GLuint tex;
   EGL_TexStatus status;
 
-  if ((status = egl_texDMABUFGet(texture, &tex)) != EGL_TEX_STATUS_OK)
+  if ((status = egl_texDMABUFGet(texture, &tex, NULL)) != EGL_TEX_STATUS_OK)
     return status;
 
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);

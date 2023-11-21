@@ -92,7 +92,8 @@ typedef struct EGL_TextureOps
   enum EGL_TexStatus (*process)(EGL_Texture * texture);
 
   /* get the texture for use */
-  enum EGL_TexStatus (*get)(EGL_Texture * texture, GLuint * tex);
+  enum EGL_TexStatus (*get)(EGL_Texture * texture, GLuint * tex,
+      EGL_PixelFormat * fmt);
 
   /* bind the texture for use */
   enum EGL_TexStatus (*bind)(EGL_Texture * texture);
@@ -132,13 +133,15 @@ bool egl_textureUpdateFromDMA(EGL_Texture * texture,
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
 
 static inline EGL_TexStatus egl_textureGet(EGL_Texture * texture, GLuint * tex,
-    unsigned int * sizeX, unsigned int * sizeY)
+    unsigned int * sizeX, unsigned int * sizeY, EGL_PixelFormat * fmt)
 {
   if (sizeX)
     *sizeX = texture->format.width;
   if (sizeY)
     *sizeY = texture->format.height;
-  return texture->ops.get(texture, tex);
+  if (fmt)
+    *fmt = texture->format.pixFmt;
+  return texture->ops.get(texture, tex, fmt);
 }
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);

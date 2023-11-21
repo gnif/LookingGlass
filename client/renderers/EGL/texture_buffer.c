@@ -132,7 +132,8 @@ EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture)
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus egl_texBufferGet(EGL_Texture * texture, GLuint * tex)
+EGL_TexStatus egl_texBufferGet(EGL_Texture * texture, GLuint * tex,
+    EGL_PixelFormat * fmt)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
   *tex = this->tex[0];
@@ -260,7 +261,8 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex)
+EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex,
+    EGL_PixelFormat * fmt)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
@@ -298,7 +300,7 @@ EGL_TexStatus egl_texBufferBind(EGL_Texture * texture)
   GLuint tex;
   EGL_TexStatus status;
 
-  if ((status = texture->ops.get(texture, &tex)) != EGL_TEX_STATUS_OK)
+  if ((status = texture->ops.get(texture, &tex, NULL)) != EGL_TEX_STATUS_OK)
     return status;
 
   glBindTexture(GL_TEXTURE_2D, tex);

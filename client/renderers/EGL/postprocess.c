@@ -642,7 +642,9 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
 
   //TODO: clean this up
   GLuint _unused;
-  if (egl_textureGet(tex, &_unused, &sizeX, &sizeY) != EGL_TEX_STATUS_OK)
+  EGL_PixelFormat pixFmt;
+  if (egl_textureGet(tex, &_unused,
+        &sizeX, &sizeY, &pixFmt) != EGL_TEX_STATUS_OK)
     return false;
 
   if (atomic_exchange(&this->modified, false))
@@ -677,7 +679,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     {
       egl_filterSetOutputResHint(filter, targetX, targetY);
 
-      if (!egl_filterSetup(filter, tex->format.pixFmt, sizeX, sizeY,
+      if (!egl_filterSetup(filter, pixFmt, sizeX, sizeY,
             desktopWidth, desktopHeight, useDMA) ||
           !egl_filterPrepare(filter))
         continue;

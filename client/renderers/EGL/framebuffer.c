@@ -72,7 +72,7 @@ bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
   }
 
   GLuint tex;
-  egl_textureGet(this->tex, &tex, NULL, NULL);
+  egl_textureGet(this->tex, &tex, NULL, NULL, NULL);
 
   glBindTexture(GL_TEXTURE_2D, tex);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

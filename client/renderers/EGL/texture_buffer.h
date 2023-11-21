@@ -47,7 +47,8 @@ bool egl_texBufferInit(EGL_Texture ** texture_, EGL_TexType type,
 void egl_texBufferFree(EGL_Texture * texture_);
 bool egl_texBufferSetup(EGL_Texture * texture_, const EGL_TexSetup * setup);
 EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture_);
-EGL_TexStatus egl_texBufferGet(EGL_Texture * texture_, GLuint * tex);
+EGL_TexStatus egl_texBufferGet(EGL_Texture * texture_, GLuint * tex,
+    EGL_PixelFormat * fmt);
 EGL_TexStatus egl_texBufferBind(EGL_Texture * texture_);
 
 bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGL_TexType type,
@@ -55,4 +56,5 @@ bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGL_TexType type,
 bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
 EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_);
-EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture_, GLuint * tex);
+EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture_, GLuint * tex,
+    EGL_PixelFormat * fmt);

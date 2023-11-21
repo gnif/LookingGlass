@@ -48,7 +48,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->format     = GL_BGRA_EXT;
       fmt->intFormat  = GL_BGRA_EXT;
       fmt->dataType   = GL_UNSIGNED_BYTE;
-      fmt->fourcc     = DRM_FORMAT_ARGB8888;
+      fmt->fourcc     = DRM_FORMAT_XRGB8888;
       break;
 
     case EGL_PF_RGBA:
@@ -56,7 +56,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->format     = GL_RGBA;
       fmt->intFormat  = GL_RGBA;
       fmt->dataType   = GL_UNSIGNED_BYTE;
-      fmt->fourcc     = DRM_FORMAT_ABGR8888;
+      fmt->fourcc     = DRM_FORMAT_XBGR8888;
       break;
 
     case EGL_PF_RGBA10:
@@ -64,7 +64,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->format     = GL_RGBA;
       fmt->intFormat  = GL_RGB10_A2;
       fmt->dataType   = GL_UNSIGNED_INT_2_10_10_10_REV;
-      fmt->fourcc     = DRM_FORMAT_ABGR2101010;
+      fmt->fourcc     = DRM_FORMAT_XBGR2101010;
       break;
 
     case EGL_PF_RGBA16F:
@@ -72,16 +72,15 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
       fmt->format     = GL_RGBA;
       fmt->intFormat  = GL_RGBA16F;
       fmt->dataType   = GL_HALF_FLOAT;
-      fmt->fourcc     = DRM_FORMAT_ABGR16161616F;
+      fmt->fourcc     = DRM_FORMAT_XBGR16161616F;
       break;
 
     case EGL_PF_RGB_24:
       fmt->bpp        = 3;
-      fmt->format     = GL_BGRA_EXT;
+      fmt->format     = GL_RGB;
       fmt->intFormat  = GL_BGRA_EXT;
       fmt->dataType   = GL_UNSIGNED_BYTE;
-      fmt->fourcc     = DRM_FORMAT_ARGB8888;
-      fmt->stride     = fmt->pitch / 4;
+      fmt->fourcc     = DRM_FORMAT_RGB888;
       break;
 
     default:
