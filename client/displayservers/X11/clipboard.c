@@ -93,7 +93,7 @@ bool x11CBEventThread(const XEvent * xe)
     default:
       if (xe->type == x11.eventBase + XFixesSelectionNotify)
       {
-        XFixesSelectionNotifyEvent * sne = (XFixesSelectionNotifyEvent *)&xe;
+        XFixesSelectionNotifyEvent * sne = (XFixesSelectionNotifyEvent *)xe;
         x11CBXFixesSelectionNotify(*sne);
         return true;
       }
