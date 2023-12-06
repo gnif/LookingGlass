@@ -48,6 +48,7 @@ struct PipeWire
   {
     struct pw_stream * stream;
     struct spa_io_rate_match * rateMatch;
+    struct pw_time time;
 
     int            channels;
     int            sampleRate;
@@ -91,6 +92,14 @@ static void pipewire_onPlaybackProcess(void * userdata)
 {
   struct pw_buffer * pbuf;
 
+#if PW_CHECK_VERSION(0, 3, 50)
+  if (pw_stream_get_time_n(pw.playback.stream, &pw.playback.time,
+        sizeof(pw.playback.time)) < 0)
+#else
+  if (pw_stream_get_time(pw.playback.stream, &pw.playback.time) < 0)
+#endif
+    DEBUG_ERROR("pw_stream_get_time failed");
+
   if (!(pbuf = pw_stream_dequeue_buffer(pw.playback.stream)))
   {
     DEBUG_WARN("out of buffers");
@@ -115,6 +124,7 @@ static void pipewire_onPlaybackProcess(void * userdata)
     return;
   }
 
+  pbuf->size = frames;
   sbuf->datas[0].chunk->offset = 0;
   sbuf->datas[0].chunk->stride = pw.playback.stride;
   sbuf->datas[0].chunk->size   = frames * pw.playback.stride;
@@ -401,20 +411,32 @@ static void pipewire_playbackMute(bool mute)
   pw_thread_loop_unlock(pw.thread);
 }
 
-static size_t pipewire_playbackLatency(void)
+static uint64_t pipewire_playbackLatency(void)
 {
-  struct pw_time time = { 0 };
-
-  pw_thread_loop_lock(pw.thread);
 #if PW_CHECK_VERSION(0, 3, 50)
-  if (pw_stream_get_time_n(pw.playback.stream, &time, sizeof(time)) < 0)
-#else
-  if (pw_stream_get_time(pw.playback.stream, &time) < 0)
-#endif
-    DEBUG_ERROR("pw_stream_get_time failed");
-  pw_thread_loop_unlock(pw.thread);
+  if (pw.playback.time.rate.num == 0)
+    return 0;
 
-  return time.delay + time.queued / pw.playback.stride;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  // diff in ns
+  int64_t diff = SPA_TIMESPEC_TO_NSEC(&ts) - pw.playback.time.now;
+
+  // elapsed frames
+  int64_t elapsed =
+    (pw.playback.time.rate.denom * diff) /
+    (pw.playback.time.rate.num * SPA_NSEC_PER_SEC);
+
+  const int64_t buffered = pw.playback.time.buffered + pw.playback.time.queued;
+  int64_t latency = (buffered * 1000 / pw.playback.sampleRate) +
+     ((pw.playback.time.delay - elapsed) * 1000 *
+      pw.playback.time.rate.num / pw.playback.time.rate.denom);
+
+  return max(0, -latency);
+#else
+  return pw.playback.time.delay + pw.playback.time.queued / pw.playback.stride;
+#endif
 }
 
 static void pipewire_recordStopStream(void)
