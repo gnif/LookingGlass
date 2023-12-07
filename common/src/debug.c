@@ -45,11 +45,11 @@ inline static void debug_levelVA(enum DebugLevel level, const char * file,
   uint64_t sec     = elapsed / 1000000UL;
   uint64_t us      = elapsed % 1000000UL;
 
-  fprintf(stderr, "%02lu:%02lu:%02lu.%03lu %s %18s:%-4u | %-30s | ",
-      sec / 60 / 60,
-      sec / 60 % 60,
-      sec % 60,
-      us / 1000,
+  fprintf(stderr, "%02u:%02u:%02u.%03u %s %18s:%-4u | %-30s | ",
+      (unsigned)(sec / 60 / 60),
+      (unsigned)(sec / 60 % 60),
+      (unsigned)(sec % 60),
+      (unsigned)(us / 1000),
       debug_lookup[level],
       f,
       line, function);
