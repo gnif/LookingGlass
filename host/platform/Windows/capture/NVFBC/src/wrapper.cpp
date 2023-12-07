@@ -18,8 +18,12 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "wrapper.h"
-#include "common/windebug.h"
+extern "C"
+{
+  #include "wrapper.h"
+  #include "common/windebug.h"
+};
+
 #include <windows.h>
 #include <NvFBC/nvFBCToSys.h>
 
