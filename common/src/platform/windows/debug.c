@@ -22,7 +22,7 @@
 
 const char ** debug_lookup = NULL;
 
-void debug_init(void)
+void platform_debugInit(void)
 {
   static const char * plainLookup[] =
   {

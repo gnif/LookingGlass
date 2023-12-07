@@ -24,24 +24,56 @@
 #include <stdio.h>
 #include <string.h>
 
-inline static void debug_level(enum DebugLevel level, const char * file,
+static uint64_t startTime;
+
+void debug_init()
+{
+  startTime = microtime();
+  platform_debugInit();
+}
+
+inline static void debug_levelVA(enum DebugLevel level, const char * file,
     unsigned int line, const char * function, const char * format, va_list va)
 {
-  const char * f = strrchr(file, DIRECTORY_SEPARATOR) + 1;
-  fprintf(stderr, "%s%12" PRId64 "%20s:%-4u | %-30s | ",
-      debug_lookup[level], microtime(), f,
+  const char * f = strrchr(file, DIRECTORY_SEPARATOR);
+  if (!f)
+    f = file;
+  else
+    ++f;
+
+  uint64_t elapsed = microtime() - startTime;
+  uint64_t sec     = elapsed / 1000000UL;
+  uint64_t us      = elapsed % 1000000UL;
+
+  fprintf(stderr, "%02lu:%02lu:%02lu.%03lu %s %18s:%-4u | %-30s | ",
+      sec / 60 / 60,
+      sec / 60 % 60,
+      sec % 60,
+      us / 1000,
+      debug_lookup[level],
+      f,
       line, function);
+
   vfprintf(stderr, format, va);
   fprintf(stderr, "%s\n", debug_lookup[DEBUG_LEVEL_NONE]);
 }
 
+
+void debug_level(enum DebugLevel level, const char * file, unsigned int line,
+    const char * function, const char * format, ...)
+{
+  va_list va;
+  va_start(va, format);
+  debug_levelVA(level, file, line, function, format, va);
+  va_end(va);
+}
 
 void debug_info(const char * file, unsigned int line, const char * function,
     const char * format, ...)
 {
   va_list va;
   va_start(va, format);
-  debug_level(DEBUG_LEVEL_INFO, file, line, function, format, va);
+  debug_levelVA(DEBUG_LEVEL_INFO, file, line, function, format, va);
   va_end(va);
 }
 
@@ -50,7 +82,7 @@ void debug_warn(const char * file, unsigned int line, const char * function,
 {
   va_list va;
   va_start(va, format);
-  debug_level(DEBUG_LEVEL_WARN, file, line, function, format, va);
+  debug_levelVA(DEBUG_LEVEL_WARN, file, line, function, format, va);
   va_end(va);
 }
 
@@ -59,6 +91,6 @@ void debug_error(const char * file, unsigned int line, const char * function,
 {
   va_list va;
   va_start(va, format);
-  debug_level(DEBUG_LEVEL_ERROR, file, line, function, format, va);
+  debug_levelVA(DEBUG_LEVEL_ERROR, file, line, function, format, va);
   va_end(va);
 }

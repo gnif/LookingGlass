@@ -44,6 +44,9 @@ extern const char ** debug_lookup;
 
 void debug_init(void);
 
+// platform specific debug initialization
+void platform_debugInit(void);
+
 #ifdef ENABLE_BACKTRACE
 void printBacktrace(void);
 #define DEBUG_PRINT_BACKTRACE() printBacktrace()
@@ -64,6 +67,19 @@ void printBacktrace(void);
 #else
   #define DEBUG_UNREACHABLE_MARKER()
 #endif
+
+void debug_level(enum DebugLevel level, const char * file, unsigned int line,
+    const char * function, const char * format, ...)
+  __attribute__((format (printf, 5, 6)));
+
+void debug_info(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
+
+void debug_warn(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
+
+void debug_error(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
 
 #define STRIPPATH(s) ( \
   sizeof(s) >  2 && (s)[sizeof(s)- 3] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  2 : \
@@ -88,9 +104,8 @@ void printBacktrace(void);
   sizeof(s) > 21 && (s)[sizeof(s)-22] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) - 21 : (s))
 
 #define DEBUG_PRINT(level, fmt, ...) do { \
-  fprintf(stderr, "%s%12" PRId64 "%20s:%-4u | %-30s | " fmt "%s\n", \
-      debug_lookup[level], microtime(), STRIPPATH(__FILE__), \
-      __LINE__, __FUNCTION__, ##__VA_ARGS__, debug_lookup[DEBUG_LEVEL_NONE]); \
+  debug_level(level, STRIPPATH(__FILE__), __LINE__, __FUNCTION__, \
+      fmt, ##__VA_ARGS__); \
 } while (0)
 
 #define DEBUG_BREAK() DEBUG_PRINT(DEBUG_LEVEL_INFO, "================================================================================")
@@ -123,14 +138,5 @@ void printBacktrace(void);
 #else
   #define DEBUG_PROTO(fmt, ...) do {} while(0)
 #endif
-
-void debug_info(const char * file, unsigned int line, const char * function,
-    const char * format, ...) __attribute__((format (printf, 4, 5)));
-
-void debug_warn(const char * file, unsigned int line, const char * function,
-    const char * format, ...) __attribute__((format (printf, 4, 5)));
-
-void debug_error(const char * file, unsigned int line, const char * function,
-    const char * format, ...) __attribute__((format (printf, 4, 5)));
 
 #endif
