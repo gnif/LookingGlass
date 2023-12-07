@@ -128,8 +128,9 @@ static LONG CALLBACK exception_filter(EXCEPTION_POINTERS * exc)
         DWORD lineDisp;
 
         if (SymGetLineFromAddr64(hProcess, frame.AddrPC.Offset, &lineDisp, &line))
-          DEBUG_ERROR("[trace]: %2d: %s:%s+0x%" PRIx64 " (%s:%ld+0x%lx)", i, moduleName, symbol->Name, disp,
-            line.FileName, line.LineNumber, lineDisp);
+          DEBUG_ERROR("[trace]: %2d: %s:%s+0x%" PRIx64 " (%s:%" PRIx64 "+0x%" PRIx64 ")",
+              i, moduleName, symbol->Name, disp, line.FileName,
+              (uint64_t)line.LineNumber, (uint64_t)lineDisp);
         else
           DEBUG_ERROR("[trace]: %2d: %s:%s+0x%" PRIx64, i, moduleName, symbol->Name, disp);
       }
