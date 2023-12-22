@@ -141,6 +141,12 @@ static bool libdecor_shellInit(
   libdecor_frame_set_title(state.libdecorFrame, title);
   libdecor_frame_map(state.libdecorFrame);
 
+  if (fullscreen)
+    libdecor_frame_set_fullscreen(state.libdecorFrame, NULL);
+
+  if (maximize)
+    libdecor_frame_set_minimized(state.libdecorFrame);
+
   if (resizable)
     libdecor_frame_set_capabilities(state.libdecorFrame,
         LIBDECOR_ACTION_RESIZE);
