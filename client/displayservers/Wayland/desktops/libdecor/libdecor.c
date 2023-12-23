@@ -145,7 +145,7 @@ static bool libdecor_shellInit(
     libdecor_frame_set_fullscreen(state.libdecorFrame, NULL);
 
   if (maximize)
-    libdecor_frame_set_minimized(state.libdecorFrame);
+    libdecor_frame_set_maximized(state.libdecorFrame);
 
   if (resizable)
     libdecor_frame_set_capabilities(state.libdecorFrame,
