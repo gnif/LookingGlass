@@ -229,7 +229,7 @@ static void x11CheckEWMHSupport(void)
       x11.ewmhHasFocusEvent = true;
   }
 
-  DEBUG_INFO("EWMH-complient window manager detected: %s", wmName);
+  DEBUG_INFO("EWMH-compliant window manager detected: %s", wmName);
   x11.ewmhSupport = true;
 
   if (strcmp(wmName, "i3") == 0)
