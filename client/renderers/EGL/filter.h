@@ -80,9 +80,9 @@ typedef struct EGL_FilterOps
   void (*setOutputResHint)(EGL_Filter * filter,
       unsigned int x, unsigned int y);
 
-  /* returns the output resolution of the filter */
+  /* returns the output resolution and pixel format of the filter */
   void (*getOutputRes)(EGL_Filter * filter,
-      unsigned int *x, unsigned int *y);
+      unsigned int *x, unsigned int *y, enum EGL_PixelFormat *pixFmt);
 
   /* prepare the shader for use
    * A filter can return false to bypass it */
@@ -162,9 +162,9 @@ static inline void egl_filterSetOutputResHint(EGL_Filter * filter,
 }
 
 static inline void egl_filterGetOutputRes(EGL_Filter * filter,
-    unsigned int *x, unsigned int *y)
+    unsigned int *x, unsigned int *y, enum EGL_PixelFormat *pixFmt)
 {
-  return filter->ops.getOutputRes(filter, x, y);
+  return filter->ops.getOutputRes(filter, x, y, pixFmt);
 }
 
 static inline bool egl_filterPrepare(EGL_Filter * filter)

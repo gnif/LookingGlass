@@ -162,11 +162,12 @@ static bool egl_filter24bitSetup(EGL_Filter * filter,
 }
 
 static void egl_filter24bitGetOutputRes(EGL_Filter * filter,
-    unsigned int *width, unsigned int *height)
+    unsigned int *width, unsigned int *height, enum EGL_PixelFormat *pixFmt)
 {
   EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
   *width  = this->desktopWidth;
   *height = this->desktopHeight;
+  *pixFmt = EGL_PF_BGRA;
 }
 
 static bool egl_filter24bitPrepare(EGL_Filter * filter)

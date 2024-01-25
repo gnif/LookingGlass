@@ -685,7 +685,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
         continue;
 
       texture = egl_filterRun(filter, &filterRects, texture);
-      egl_filterGetOutputRes(filter, &sizeX, &sizeY);
+      egl_filterGetOutputRes(filter, &sizeX, &sizeY, &pixFmt);
 
       if (lastFilter)
         egl_filterRelease(lastFilter);

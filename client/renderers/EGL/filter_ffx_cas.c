@@ -254,11 +254,12 @@ static bool egl_filterFFXCASSetup(EGL_Filter * filter,
 }
 
 static void egl_filterFFXCASGetOutputRes(EGL_Filter * filter,
-    unsigned int *width, unsigned int *height)
+    unsigned int *width, unsigned int *height, enum EGL_PixelFormat *pixFmt)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
   *width  = this->width;
   *height = this->height;
+  *pixFmt = this->pixFmt;
 }
 
 static bool egl_filterFFXCASPrepare(EGL_Filter * filter)

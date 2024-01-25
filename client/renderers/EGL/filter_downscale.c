@@ -370,11 +370,12 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
 }
 
 static void egl_filterDownscaleGetOutputRes(EGL_Filter * filter,
-    unsigned int *width, unsigned int *height)
+    unsigned int *width, unsigned int *height, enum EGL_PixelFormat *pixFmt)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
   *width  = this->width;
   *height = this->height;
+  *pixFmt = this->pixFmt;
 }
 
 static bool egl_filterDownscalePrepare(EGL_Filter * filter)

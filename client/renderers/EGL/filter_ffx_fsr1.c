@@ -383,11 +383,12 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
 }
 
 static void egl_filterFFXFSR1GetOutputRes(EGL_Filter * filter,
-    unsigned int *width, unsigned int *height)
+    unsigned int *width, unsigned int *height, enum EGL_PixelFormat *pixFmt)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
   *width  = this->width;
   *height = this->height;
+  *pixFmt = this->pixFmt;
 }
 
 static bool egl_filterFFXFSR1Prepare(EGL_Filter * filter)
