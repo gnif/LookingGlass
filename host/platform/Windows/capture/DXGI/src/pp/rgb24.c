@@ -82,7 +82,7 @@ static bool rgb24_configure(void * opaque,
     this.width  = ALIGN_TO((*cols * 3 + 3) / 4, 64);
 
     /* adjust for the aligned width */
-    this.height = ((*rows * *cols) + this.width - 1) / this.width;
+    this.height = (((*rows * *cols) * 3 + 3) / 4) / this.width;
 
     char sOutputWidth[6], sOutputHeight[6];
     snprintf(sOutputWidth , sizeof(sOutputWidth) , "%d", this.width );
@@ -148,6 +148,7 @@ static bool rgb24_configure(void * opaque,
     DEBUG_INFO("RGBA to RGB packing enabled, %.2f MiB per frame saved",
       (float)((*width * *height - this.width * this.height) * 4) / 1048576
     );
+    DEBUG_INFO("Packed size: %ux%u", this.width, this.height);
   }
 
   // This texture is actually going to contain the packed BGR24 output
