@@ -27,7 +27,7 @@ add_compile_options(
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
 
-set(EXE_FLAGS "-Wl,--gc-sections")
+set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -47,6 +47,38 @@ else()
   set(OBS_PLUGIN_PREFIX ${CMAKE_INSTALL_DATADIR}/obs/obs-plugins)
 endif()
 
+include(MakeObject)
+function(build_effects header_dir)
+  file(GLOB headers "${header_dir}/*.h")
+  set(OBS_EFFECT_PROCESSED)
+  foreach(effect ${ARGN})
+    set(out_f "${CMAKE_CURRENT_BINARY_DIR}/${effect}")
+    add_custom_command(OUTPUT "${out_f}"
+      COMMAND "${AWK}" -f "${CMAKE_CURRENT_SOURCE_DIR}/glsl.include.awk"
+              "${CMAKE_CURRENT_SOURCE_DIR}/${effect}" > "${out_f}"
+      MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${effect}"
+      DEPENDS ${headers}
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/effect"
+      COMMENT "Preprocessing effect ${effect}"
+      VERBATIM
+    )
+  endforeach()
+
+  #  set(CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  make_object(
+    OBS_EFFECT
+    ${ARGN}
+  )
+
+  set(OBS_EFFECT_OBJS "${OBS_EFFECT_OBJS}" PARENT_SCOPE)
+  set(OBS_EFFECT_INCS "${OBS_EFFECT_INCS}" PARENT_SCOPE)
+endfunction()
+
+build_effects(
+  effect
+  effect/rgb24.effect
+)
+
 add_definitions(-D ATOMIC_LOCKING)
 
 add_custom_command(
@@ -59,6 +91,7 @@ add_custom_command(
 include_directories(
   ${PROJECT_SOURCE_DIR}/include
   ${CMAKE_BINARY_DIR}/include
+  ${OBS_EFFECT_INCS}
 )
 
 link_libraries(
@@ -76,7 +109,10 @@ set(SOURCES
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common")
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/lgmp"  )
 
-add_library(looking-glass-obs SHARED ${SOURCES})
+add_library(looking-glass-obs SHARED
+  ${SOURCES}
+  ${OBS_EFFECT_OBJS}
+)
 target_link_libraries(looking-glass-obs
   ${EXE_FLAGS}
   lg_common

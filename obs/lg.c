@@ -37,6 +37,8 @@
 #include <stdatomic.h>
 #include <GL/gl.h>
 
+#include "rgb24.effect.h"
+
 /**
  * the following comes from drm_fourcc.h and is included here to avoid the
  * external dependency for the few simple defines we need
@@ -74,6 +76,7 @@ typedef struct
   char            * shmFile;
   uint32_t          formatVer;
   uint32_t          screenWidth, screenHeight;
+  uint32_t          dataWidth, dataHeight;
   uint32_t          frameWidth, frameHeight;
   struct vec2       screenScale;
   FrameType         type;
@@ -82,6 +85,7 @@ typedef struct
   PLGMPClient       lgmp;
   PLGMPClientQueue  frameQueue, pointerQueue;
   gs_texture_t    * texture;
+  gs_texture_t    * dstTexture;
   uint8_t         * texData;
   uint32_t          linesize;
 
@@ -105,6 +109,11 @@ typedef struct
   unsigned int         cursorCurVer;
   uint32_t             cursorSize;
   uint32_t           * cursorData;
+
+  gs_effect_t * unpackEffect;
+  gs_eparam_t * image;
+  gs_eparam_t * outputSize;
+  gs_eparam_t * swap;
 }
 LGPlugin;
 
@@ -120,7 +129,26 @@ static const char * lgGetName(void * unused)
 static void * lgCreate(obs_data_t * settings, obs_source_t * context)
 {
   LGPlugin * this = bzalloc(sizeof(LGPlugin));
+
   this->context = context;
+
+  obs_enter_graphics();
+  char * error = NULL;
+  this->unpackEffect = gs_effect_create(b_effect_rgb24_effect, "rbg24", &error);
+  if (!this->unpackEffect)
+  {
+    blog(LOG_ERROR, "%s", error);
+    bfree(error);
+    bfree(this);
+    obs_leave_graphics();
+    return NULL;
+  }
+
+  this->image      = gs_effect_get_param_by_name(this->unpackEffect, "image"     );
+  this->outputSize = gs_effect_get_param_by_name(this->unpackEffect, "outputSize");
+  this->swap       = gs_effect_get_param_by_name(this->unpackEffect, "swap"      );
+  obs_leave_graphics();
+
   os_sem_init (&this->frameSem , 0);
   os_sem_init (&this->cursorSem, 1);
   atomic_store(&this->cursorVer, 0);
@@ -184,23 +212,32 @@ static void deinit(LGPlugin * this)
     this->shmFile = NULL;
   }
 
+  obs_enter_graphics();
+  if (this->dstTexture)
+  {
+    if (this->dstTexture == this->texture)
+      this->dstTexture = NULL;
+    else
+    {
+      gs_texture_destroy(this->dstTexture);
+      this->dstTexture = NULL;
+    }
+  }
+
   if (this->texture)
   {
-    obs_enter_graphics();
+    if (!this->dmabuf)
+      gs_texture_unmap(this->texture);
     gs_texture_destroy(this->texture);
-    gs_texture_unmap(this->texture);
-    obs_leave_graphics();
     this->texture = NULL;
   }
 
   if (this->cursorTex)
   {
-    obs_enter_graphics();
     gs_texture_destroy(this->cursorTex);
-    gs_texture_unmap(this->cursorTex);
-    obs_leave_graphics();
     this->cursorTex = NULL;
   }
+  obs_leave_graphics();
 
   this->state = STATE_STOPPED;
 }
@@ -211,6 +248,11 @@ static void lgDestroy(void * data)
   deinit(this);
   os_sem_destroy(this->frameSem );
   os_sem_destroy(this->cursorSem);
+
+  obs_enter_graphics();
+  gs_effect_destroy(this->unpackEffect);
+  obs_leave_graphics();
+
   bfree(this);
 }
 
@@ -505,7 +547,6 @@ static void lgVideoTick(void * data, float seconds)
 
   LGMP_STATUS status;
   LGMPMessage msg;
-  bool framebuffer = true;
 
   os_sem_wait(this->frameSem);
   if (this->state != STATE_RUNNING)
@@ -602,6 +643,8 @@ static void lgVideoTick(void * data, float seconds)
     this->formatVer    = frame->formatVer;
     this->screenWidth  = frame->screenWidth;
     this->screenHeight = frame->screenHeight;
+    this->dataWidth    = frame->dataWidth;
+    this->dataHeight   = frame->dataHeight;
     this->frameWidth   = frame->frameWidth;
     this->frameHeight  = frame->frameHeight;
     this->type         = frame->type;
@@ -612,13 +655,23 @@ static void lgVideoTick(void * data, float seconds)
     obs_enter_graphics();
     if (this->texture)
     {
-      gs_texture_unmap(this->texture);
+      if (this->dstTexture && this->dstTexture != this->texture)
+      {
+        gs_texture_destroy(this->dstTexture);
+        this->dstTexture = NULL;
+      }
+
+      if (!this->dmabuf)
+        gs_texture_unmap(this->texture);
+
       gs_texture_destroy(this->texture);
       this->texture = NULL;
     }
 
     enum gs_color_format format;
     uint32_t drm_format;
+    unsigned width = frame->dataWidth;
+    bool unpack = false;
 
     this->bpp = 4;
     switch(this->type)
@@ -638,6 +691,17 @@ static void lgVideoTick(void * data, float seconds)
         drm_format = DRM_FORMAT_BGRA1010102;
         break;
 
+      case FRAME_TYPE_RGB_24:
+        this->bpp  = 3;
+        width      = frame->pitch / 4;
+        /* fallthrough */
+
+      case FRAME_TYPE_BGR_32:
+        format     = GS_BGRA;
+        drm_format = DRM_FORMAT_ARGB8888;
+        unpack     = true;
+        break;
+
       case FRAME_TYPE_RGBA16F:
         this->bpp  = 8;
         format     = GS_RGBA16F;
@@ -652,79 +716,99 @@ static void lgVideoTick(void * data, float seconds)
         return;
     }
 
-    this->texture = NULL;
-
 #if LIBOBS_API_MAJOR_VER >= 27
     if (this->dmabuf)
     {
       int fd = dmabufGetFd(this, &msg, frame, frame->frameHeight * frame->pitch);
+      if (fd >= 0)
+      {
+        this->texture = gs_texture_create_from_dmabuf(
+          width,
+          this->dataHeight,
+          drm_format,
+          format,
+          1,
+          &fd,
+          &(uint32_t) { frame->pitch },
+          &(uint32_t) { 0 },
+          &(uint64_t) { 0 });
 
-      if (fd < 0)
-        goto dmabuf_fail;
+        if (!this->texture)
+        {
+          puts("Failed to create dmabuf texture");
+          this->dmabuf = false;
+        }
+      }
+    }
+#else
+    (void)drm_format;
+#endif
 
-      this->texture = gs_texture_create_from_dmabuf(
-        frame->frameWidth,
-        frame->frameHeight,
-        drm_format, format, 1, &fd, &(uint32_t) { frame->pitch },
-        &(uint32_t) { 0 }, &(uint64_t) { 0 });
+    if (!this->dmabuf)
+    {
+      this->texture = gs_texture_create(
+        width,
+        this->dataHeight,
+        format,
+        1,
+        NULL,
+        GS_DYNAMIC);
 
       if (!this->texture)
       {
-        puts("Failed to create dmabuf texture");
-        this->dmabuf = false;
-        goto dmabuf_fail;
+        printf("create texture failed\n");
+        lgmpClientMessageDone(this->frameQueue);
+        os_sem_post(this->frameSem);
+        obs_leave_graphics();
+        return;
       }
 
-      framebuffer = false;
+      gs_texture_map(this->texture, &this->texData, &this->linesize);
     }
 
-  dmabuf_fail:
-#else
-    (void) drm_format;
-#endif
-
-    if (!this->texture)
-      this->texture = gs_texture_create(
-          this->frameWidth, this->frameHeight, format, 1, NULL, GS_DYNAMIC);
-
-    if (!this->texture)
+    if (unpack)
     {
-      printf("create texture failed\n");
-      os_sem_post(this->frameSem);
-      obs_leave_graphics();
-      return;
+      // create the render target for format unpacking
+      this->dstTexture = gs_texture_create(
+        this->frameWidth,
+        this->frameHeight,
+        GS_BGRA,
+        1,
+        NULL,
+        GS_RENDER_TARGET);
     }
+    else
+      this->dstTexture = this->texture;
 
-    gs_texture_map(this->texture, &this->texData, &this->linesize);
     obs_leave_graphics();
   }
 
-  if (framebuffer && this->texture)
-  {
-    FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    framebuffer_read(
-        fb,
-        this->texData,      // dst
-        this->linesize,     // dstpitch
-        frame->frameHeight, // height
-        frame->frameWidth,  // width
-        this->bpp,          // bpp
-        frame->pitch        // linepitch
-    );
-
-    lgmpClientMessageDone(this->frameQueue);
-    os_sem_post(this->frameSem);
-
-    obs_enter_graphics();
-    gs_texture_unmap(this->texture);
-    gs_texture_map(this->texture, &this->texData, &this->linesize);
-    obs_leave_graphics();
-  }
-  else
+  // if using dmabuf there is nothing more here to do
+  if (!this->texture || this->dmabuf)
   {
     lgmpClientMessageDone(this->frameQueue);
     os_sem_post(this->frameSem);
+    return;
   }
+
+  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
+  framebuffer_read(
+      fb,
+      this->texData   , // dst
+      this->linesize  , // dstpitch
+      this->dataHeight, // height
+      this->dataWidth , // width
+      this->bpp       , // bpp
+      frame->pitch
+  );
+
+  lgmpClientMessageDone(this->frameQueue);
+  os_sem_post(this->frameSem);
+
+  obs_enter_graphics();
+  gs_texture_unmap(this->texture);
+  gs_texture_map(this->texture, &this->texData, &this->linesize);
+  obs_leave_graphics();
 }
 
 static void lgVideoRender(void * data, gs_effect_t * effect)
@@ -734,12 +818,24 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
   if (!this->texture)
     return;
 
-  effect = obs_get_base_effect(OBS_EFFECT_OPAQUE);
-  gs_eparam_t *image = gs_effect_get_param_by_name(effect, "image");
-  gs_effect_set_texture(image, this->texture);
+  if (this->type == FRAME_TYPE_RGB_24 || this->type == FRAME_TYPE_BGR_32)
+  {
+    effect = this->unpackEffect;
+    gs_effect_set_texture(this->image, this->texture);
+    struct vec2 outputSize;
+    vec2_set(&outputSize, this->frameWidth, this->frameHeight);
+    gs_effect_set_vec2(this->outputSize, &outputSize);
+    gs_effect_set_int(this->swap, this->type == FRAME_TYPE_RGB_24 ? 1 : 0);
+  }
+  else
+  {
+    effect = obs_get_base_effect(OBS_EFFECT_OPAQUE);
+    gs_eparam_t * image = gs_effect_get_param_by_name(effect, "image");
+    gs_effect_set_texture(image, this->texture);
+  }
 
   while (gs_effect_loop(effect, "Draw"))
-    gs_draw_sprite(this->texture, 0, 0, 0);
+    gs_draw_sprite(this->dstTexture, 0, 0, 0);
 
   if (this->cursorVisible && this->cursorTex)
   {
@@ -755,7 +851,7 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
     gs_set_scissor_rect(&r);
 
     effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-    image  = gs_effect_get_param_by_name(effect, "image");
+    gs_eparam_t * image = gs_effect_get_param_by_name(effect, "image");
     gs_effect_set_texture(image, this->cursorTex);
 
     gs_matrix_push();
@@ -826,5 +922,5 @@ struct obs_source_info lg_source =
   .video_render   = lgVideoRender,
   .get_width      = lgGetWidth,
   .get_height     = lgGetHeight,
-//  .icon_type      = OBS_ICON_TYPE_DESKTOP_CAPTURE
+  .icon_type      = OBS_ICON_TYPE_DESKTOP_CAPTURE
 };

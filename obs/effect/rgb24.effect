@@ -1,0 +1,53 @@
+uniform float4x4  ViewProj;
+uniform texture2d image;
+uniform float2    outputSize;
+uniform int       swap;
+
+struct VertData
+{
+  float4 pos : POSITION;
+  float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData vert_in)
+{
+  VertData vert_out;
+  vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
+  vert_out.uv  = vert_in.uv;
+  return vert_out;
+}
+
+float4 PSColorFilter(VertData vert_in) : TARGET
+{
+  uvec2 outputPos = uvec2(vert_in.uv * outputSize);
+
+  uint fst     = outputPos.x * 3u / 4u;
+  vec4 color_0 = texelFetch(image, ivec2(fst, outputPos.y), 0);
+  
+  uint snd     = (outputPos.x * 3u + 1u) / 4u;
+  vec4 color_1 = texelFetch(image, ivec2(snd, outputPos.y), 0);
+
+  uint trd     = (outputPos.x * 3u + 2u) / 4u;
+  vec4 color_2 = texelFetch(image, ivec2(trd, outputPos.y), 0);
+  
+  vec4 result = vec4(
+    color_0.barg[outputPos.x % 4u],
+    color_1.gbar[outputPos.x % 4u],
+    color_2.rgba[outputPos.x % 4u],
+    1.0
+  );
+
+  if (swap == 1)
+    return result.rgba;
+  else
+    return result.bgra;
+}
+
+technique Draw
+{
+  pass
+  {
+    vertex_shader = VSDefault(vert_in);
+    pixel_shader  = PSColorFilter(vert_in);
+  }
+}
