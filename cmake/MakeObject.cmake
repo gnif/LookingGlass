@@ -4,17 +4,20 @@ function(make_object out_var)
   foreach(in_f ${ARGN})
     file(RELATIVE_PATH out_f ${CMAKE_CURRENT_SOURCE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/${in_f}")
     set(out_h "${CMAKE_CURRENT_BINARY_DIR}/${out_f}.h")
-    set(out_f "${CMAKE_CURRENT_BINARY_DIR}/${out_f}.o")
+    set(out_f "${out_f}.o")
     string(REGEX REPLACE "[/.-]" "_" sym_in "${in_f}")
 
     add_custom_command(OUTPUT ${out_f}
-      COMMAND ${CMAKE_LINKER} -r -b binary -o ${out_f} "${in_f}"
+      COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/${in_f} ${out_f}.tmp
+      COMMAND dd if=/dev/zero bs=1 count=1 of=${out_f}.tmp oflag=append conv=notrunc status=none
+      COMMAND ${CMAKE_LINKER} -r -b binary -o ${out_f} ${out_f}.tmp
       COMMAND ${CMAKE_OBJCOPY} --rename-section .data=.rodata,CONTENTS,ALLOC,LOAD,READONLY,DATA ${out_f} ${out_f}
-      COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_start=b_${sym_in} ${out_f} ${out_f}
-      COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_end=b_${sym_in}_end ${out_f} ${out_f}
+      COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_o_tmp_start=b_${sym_in} ${out_f} ${out_f}
+      COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_o_tmp_end=b_${sym_in}_end ${out_f} ${out_f}
+      COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_o_tmp_size=b_${sym_in}_size ${out_f} ${out_f}
       COMMAND ${CMAKE_OBJCOPY} --strip-symbol _binary_${sym_in}_size ${out_f} ${out_f}
       DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${in_f}"
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       COMMENT "Creating object from ${in_f}"
       VERBATIM
     )
@@ -34,9 +37,10 @@ function(make_object out_var)
 endfunction()
 
 function(make_defines in_file out_file)
+  file(RELATIVE_PATH rel_f ${CMAKE_CURRENT_SOURCE_DIR} "${in_file}")
   add_custom_command(OUTPUT ${out_file}
     COMMAND grep "^#define" "${in_file}" > "${out_file}"
     DEPENDS ${in_file}
-    COMMENT "Creating #defines from ${in_file}"
+    COMMENT "Creating #defines from ${rel_f}"
   )
 endfunction()
