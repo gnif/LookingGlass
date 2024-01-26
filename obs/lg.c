@@ -677,12 +677,12 @@ static void lgVideoTick(void * data, float seconds)
     switch(this->type)
     {
       case FRAME_TYPE_BGRA:
-        format     = GS_BGRA;
+        format     = GS_BGRA_UNORM;
         drm_format = DRM_FORMAT_ARGB8888;
         break;
 
       case FRAME_TYPE_RGBA:
-        format     = GS_RGBA;
+        format     = GS_RGBA_UNORM;
         drm_format = DRM_FORMAT_ARGB8888;
         break;
 
@@ -697,7 +697,7 @@ static void lgVideoTick(void * data, float seconds)
         /* fallthrough */
 
       case FRAME_TYPE_BGR_32:
-        format     = GS_BGRA;
+        format     = GS_BGRA_UNORM;
         drm_format = DRM_FORMAT_ARGB8888;
         unpack     = true;
         break;
