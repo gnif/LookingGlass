@@ -78,8 +78,11 @@ static bool rgb24_configure(void * opaque,
 
   if (!this.pshader)
   {
-    this.width  = (*cols * 3 + 3) / 4;
-    this.height = *rows;
+    /* we must align to 64 byte boundaries to avoid breaking dmabuf import */
+    this.width  = ALIGN_TO((*cols * 3 + 3) / 4, 64);
+
+    /* adjust for the aligned width */
+    this.height = ((*rows * *cols) + this.width - 1) / this.width;
 
     char sOutputWidth[6], sOutputHeight[6];
     snprintf(sOutputWidth , sizeof(sOutputWidth) , "%d", this.width );
