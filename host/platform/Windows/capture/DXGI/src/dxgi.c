@@ -266,7 +266,7 @@ static void dxgi_initOptions(void)
       .name           = "allowRGB24",
       .description    = "Losslessly pack 32-bit RGBA8 into 24-bit RGB (saves bandwidth)",
       .type           = OPTION_TYPE_BOOL,
-      .value.x_bool   = false
+      .value.x_bool   = true
     },
     {0}
   };
