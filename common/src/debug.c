@@ -26,7 +26,7 @@
 
 static uint64_t startTime;
 
-void debug_init()
+void debug_init(void)
 {
   startTime = microtime();
   platform_debugInit();
