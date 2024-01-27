@@ -406,6 +406,7 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
     struct SharedCache *cache = &this->sharedCache[this->sharedCacheCount++];
     cache->tex = src;
     comRef_toGlobal(cache->d12src, d12src);
+    this->d12src = *cache->d12src;
   }
   else
   {
