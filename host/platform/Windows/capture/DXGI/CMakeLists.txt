@@ -14,7 +14,7 @@ add_library(capture_DXGI STATIC
   src/pp/rgb24.c
 )
 
-add_definitions("-DCOBJMACROS -DINITGUID")
+add_definitions("-DCOBJMACROS -DINITGUID -DWIDL_C_INLINE_WRAPPERS")
 
 target_link_libraries(capture_DXGI
   lg_common

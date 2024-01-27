@@ -185,8 +185,9 @@ static void nvfbc_initOptions(void)
 }
 
 static bool nvfbc_create(
-    CaptureGetPointerBuffer  getPointerBufferFn,
-    CapturePostPointerBuffer postPointerBufferFn)
+  void                   * ivshmemBase,
+  CaptureGetPointerBuffer  getPointerBufferFn,
+  CapturePostPointerBuffer postPointerBufferFn)
 {
   if (!NvFBCInit())
     return false;
@@ -220,7 +221,7 @@ static void updateScale(void)
   this->targetHeight = this->height;
 }
 
-static bool nvfbc_init(void)
+static bool nvfbc_init(unsigned * alignSize)
 {
   int adapterIndex = option_get_int("nvfbc", "adapterIndex");
 
@@ -447,7 +448,8 @@ static void nvfbc_free(void)
   NvFBCFree();
 }
 
-static CaptureResult nvfbc_capture(void)
+static CaptureResult nvfbc_capture(unsigned frameBufferIndex,
+  FrameBuffer * frameBuffer)
 {
   // this is a bit of a hack as it causes this thread to block until the next
   // present keeping us locked with the refresh rate of the monitor being

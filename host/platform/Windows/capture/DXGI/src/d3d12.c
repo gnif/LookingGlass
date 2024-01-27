@@ -35,7 +35,6 @@
 
 struct D3D12Texture
 {
-  ID3D12Resource            ** tex;
   ID3D12CommandAllocator    ** commandAllocator;
   ID3D12CommandList         ** commandList;
   ID3D12GraphicsCommandList ** graphicsCommandList;
@@ -58,6 +57,11 @@ struct D3D12Backend
 
   float                  copySleep;
   ID3D12Device        ** device;
+  ID3D12Device3       ** device3;
+  void                 * ivshmemBase;
+  ID3D12Heap          ** heap;
+  ID3D12Resource     *** frameBuffers;
+  ID3D12Resource      ** dstResource;
   ID3D12CommandQueue  ** commandQueue;
   UINT64                 fenceValue;
   ID3D12Fence         ** fence;
@@ -88,7 +92,11 @@ typedef HRESULT (*D3D12GetDebugInterface_t)(
 
 static void d3d12_free(void);
 
-static bool d3d12_create(unsigned textures)
+static bool d3d12_create(
+  void     * ivshmemBase,
+  unsigned * alignSize,
+  unsigned   frameBuffers,
+  unsigned   textures)
 {
   DEBUG_ASSERT(!this);
   comRef_scopePush();
@@ -108,6 +116,13 @@ static bool d3d12_create(unsigned textures)
   this->d3d12 = LoadLibrary("d3d12.dll");
   if (!this->d3d12)
     goto exit;
+
+  this->frameBuffers = calloc(frameBuffers, sizeof(*this->frameBuffers));
+  if (!this->frameBuffers)
+  {
+    DEBUG_ERROR("Failed to allocate the ID3D12Resource frame buffer array");
+    goto exit;
+  }
 
   if (dxgi_debug())
   {
@@ -144,6 +159,33 @@ static bool d3d12_create(unsigned textures)
     DEBUG_WINERROR("Failed to create D3D12 device", status);
     goto exit;
   }
+
+  comRef_defineLocal(ID3D12Device3, device3);
+  status = ID3D12Device_QueryInterface(
+    *device, &IID_ID3D12Device3, (void **)device3);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to obtain the ID3D12Device3 interface", status);
+    goto exit;
+  }
+
+  comRef_defineLocal(ID3D12Heap, heap);
+  status = ID3D12Device3_OpenExistingHeapFromAddress(
+    *device3,
+    ivshmemBase,
+    &IID_ID3D12Heap,
+    (void **)heap);
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to open the framebuffer as a heap", status);
+    return false;
+  }
+
+  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*heap);
+  DEBUG_INFO("ID3D12Heap        : Size:%I64u Alignment:%I64u",
+    heapDesc.SizeInBytes, heapDesc.Alignment);
+  *alignSize = heapDesc.Alignment;
 
   D3D12_COMMAND_QUEUE_DESC queueDesc =
   {
@@ -186,7 +228,11 @@ static bool d3d12_create(unsigned textures)
     goto exit;
   }
 
+  this->ivshmemBase = ivshmemBase;
+
   comRef_toGlobal(this->device      , device      );
+  comRef_toGlobal(this->device3     , device3     );
+  comRef_toGlobal(this->heap        , heap        );
   comRef_toGlobal(this->commandQueue, commandQueue);
   comRef_toGlobal(this->fence       , fence       );
 
@@ -213,48 +259,12 @@ static bool d3d12_configure(
   this->format = format;
   this->pitch  = ALIGN_TO(width * bpp, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 
-  D3D12_HEAP_PROPERTIES readbackHeapProperties =
-  {
-    .Type = D3D12_HEAP_TYPE_READBACK,
-  };
-
-  D3D12_RESOURCE_DESC texDesc =
-  {
-    .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
-    .Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
-    .Width              = this->pitch * height,
-    .Height             = 1,
-    .DepthOrArraySize   = 1,
-    .MipLevels          = 1,
-    .Format             = DXGI_FORMAT_UNKNOWN,
-    .SampleDesc.Count   = 1,
-    .SampleDesc.Quality = 0,
-    .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-    .Flags              = D3D12_RESOURCE_FLAG_NONE
-  };
-
-  comRef_defineLocal(ID3D12Resource           , texture            );
   comRef_defineLocal(ID3D12Fence              , fence              );
   comRef_defineLocal(ID3D12CommandAllocator   , commandAllocator   );
   comRef_defineLocal(ID3D12GraphicsCommandList, graphicsCommandList);
   comRef_defineLocal(ID3D12CommandList        , commandList        );
   for (int i = 0; i < this->textures; ++i)
   {
-    status = ID3D12Device_CreateCommittedResource(*this->device,
-        &readbackHeapProperties,
-        D3D12_HEAP_FLAG_NONE,
-        &texDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        NULL,
-        &IID_ID3D12Resource,
-        (void **)texture);
-
-    if (FAILED(status))
-    {
-      DEBUG_WINERROR("Failed to create texture", status);
-      goto exit;
-    }
-
     this->texture[i].event = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!this->texture[i].event)
     {
@@ -307,7 +317,6 @@ static bool d3d12_configure(
       goto exit;
     }
 
-    comRef_toGlobal(this->texture[i].tex                , texture            );
     comRef_toGlobal(this->texture[i].fence              , fence              );
     comRef_toGlobal(this->texture[i].commandAllocator   , commandAllocator   );
     comRef_toGlobal(this->texture[i].graphicsCommandList, graphicsCommandList);
@@ -320,6 +329,7 @@ static bool d3d12_configure(
 
 exit:
   comRef_scopePop();
+
   return result;
 }
 
@@ -328,12 +338,14 @@ static void d3d12_free(void)
   if (!this)
     return;
 
-  for (int i = 0; i < this->textures; ++i)
+  for(int i = 0; i < this->textures; ++i)
     if (this->texture[i].event)
       CloseHandle(this->texture[i].event);
 
   if (this->event)
     CloseHandle(this->event);
+
+  free(this->frameBuffers);
 
   if (this->d3d12)
     FreeLibrary(this->d3d12);
@@ -342,7 +354,11 @@ static void d3d12_free(void)
   this = NULL;
 }
 
-static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
+static bool d3d12_preCopy(
+  ID3D11Texture2D * src,
+  unsigned          textureIndex,
+  unsigned          frameBufferIndex,
+  FrameBuffer     * frameBuffer)
 {
   comRef_scopePush();
   bool result = false;
@@ -352,9 +368,6 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
   ID3D11DeviceContext_Flush(dxgi_getContext());
   dxgi_contextUnlock();
 
-  if (this->copySleep > 0)
-    nsleep((uint64_t)(this->copySleep * 1000000));
-
   this->d12src = NULL;
   if (this->sharedCacheCount > -1)
   {
@@ -363,8 +376,7 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
       if (this->sharedCache[i].tex == src)
       {
         this->d12src = *this->sharedCache[i].d12src;
-        result = true;
-        goto exit;
+        goto framebuffer;
       }
   }
 
@@ -419,7 +431,51 @@ static bool d3d12_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
     this->sharedCacheCount = -1;
   }
 
+framebuffer:
+  if (this->frameBuffers[frameBufferIndex])
+    goto done;
+
+  // prepare a IVSHMEM backed texture for the provided framebuffer
+  D3D12_RESOURCE_DESC desc =
+  {
+    .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
+    .Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
+    .Width              = this->height * this->pitch,
+    .Height             = 1,
+    .DepthOrArraySize   = 1,
+    .MipLevels          = 1,
+    .Format             = DXGI_FORMAT_UNKNOWN,
+    .SampleDesc.Count   = 1,
+    .SampleDesc.Quality = 0,
+    .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+    .Flags              = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER
+  };
+
+  comRef_defineLocal(ID3D12Resource, resource);
+  status = ID3D12Device3_CreatePlacedResource(
+    *this->device3,
+    *this->heap,
+    (uintptr_t)framebuffer_get_data(frameBuffer) - (uintptr_t)this->ivshmemBase,
+    &desc,
+    D3D12_RESOURCE_STATE_COPY_DEST,
+    NULL,
+    &IID_ID3D12Resource,
+    (void**)resource);
+
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to create D3D12 resource from heap", status);
+    goto exit;
+  }
+
+  comRef_toGlobal(this->frameBuffers[frameBufferIndex], resource);
+
+done:
+  this->dstResource = this->frameBuffers[frameBufferIndex];
   result = true;
+
+  if (this->copySleep > 0)
+    nsleep((uint64_t)(this->copySleep * 1000000));
 
 exit:
   if (!result)
@@ -441,7 +497,7 @@ static bool d3d12_copyFull(ID3D11Texture2D * src, unsigned textureIndex)
 
   D3D12_TEXTURE_COPY_LOCATION destLoc =
   {
-    .pResource       = *tex->tex,
+    .pResource       = *this->dstResource,
     .Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
     .PlacedFootprint =
     {
@@ -463,7 +519,6 @@ static bool d3d12_copyFull(ID3D11Texture2D * src, unsigned textureIndex)
   return true;
 }
 
-
 static bool d3d12_copyRect(ID3D11Texture2D * src, unsigned textureIndex,
   FrameDamageRect * rect)
 {
@@ -478,7 +533,7 @@ static bool d3d12_copyRect(ID3D11Texture2D * src, unsigned textureIndex,
 
   D3D12_TEXTURE_COPY_LOCATION destLoc =
   {
-    .pResource       = *tex->tex,
+    .pResource       = *this->dstResource,
     .Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
     .PlacedFootprint =
     {
@@ -561,7 +616,8 @@ static bool d3d12_postCopy(ID3D11Texture2D * src, unsigned textureIndex)
   result = true;
 
 exit:
-  comRef_scopePop(); //push is in pre-copy
+  //push is in preCopy
+  comRef_scopePop();
   return result;
 }
 
@@ -587,32 +643,17 @@ static CaptureResult d3d12_mapTexture(unsigned textureIndex, void ** map)
     return CAPTURE_RESULT_ERROR;
   }
 
-  D3D12_RANGE range =
-  {
-    .Begin = 0,
-    .End   = this->pitch * this->height
-  };
-  status = ID3D12Resource_Map(*tex->tex, 0, &range, map);
+  return CAPTURE_RESULT_OK;
+}
 
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to map the texture", status);
-    return CAPTURE_RESULT_ERROR;
-  }
-
+static CaptureResult d3d12_writeFrame(int textureIndex, FrameBuffer * frame)
+{
+  framebuffer_set_write_ptr(frame, this->height * this->pitch);
   return CAPTURE_RESULT_OK;
 }
 
 static void d3d12_unmapTexture(unsigned textureIndex)
 {
-  struct D3D12Texture * tex = &this->texture[textureIndex];
-
-  D3D12_RANGE range =
-  {
-    .Begin = 0,
-    .End   = 0
-  };
-  ID3D12Resource_Unmap(*tex->tex, 0, &range);
 }
 
 static void d3d12_preRelease(void)
@@ -632,6 +673,7 @@ struct DXGICopyBackend copyBackendD3D12 =
   .copyRect     = d3d12_copyRect,
   .postCopy     = d3d12_postCopy,
   .mapTexture   = d3d12_mapTexture,
+  .writeFrame   = d3d12_writeFrame,
   .unmapTexture = d3d12_unmapTexture,
   .preRelease   = d3d12_preRelease,
 };

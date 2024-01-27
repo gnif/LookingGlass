@@ -89,10 +89,13 @@ struct app
   unsigned int   pointerIndex;
   unsigned int   pointerShapeIndex;
 
-  long           pageSize;
+  unsigned       alignSize;
   size_t         maxFrameSize;
   PLGMPHostQueue frameQueue;
   PLGMPMemory    frameMemory[LGMP_Q_FRAME_LEN];
+  KVMFRFrame   * frame      [LGMP_Q_FRAME_LEN];
+  FrameBuffer  * frameBuffer[LGMP_Q_FRAME_LEN];
+
   unsigned int   frameIndex;
   bool           frameValid;
   uint32_t       frameSerial;
@@ -243,7 +246,7 @@ static bool sendFrame(void)
   if (++app.frameIndex == LGMP_Q_FRAME_LEN)
     app.frameIndex = 0;
 
-  KVMFRFrame * fi = lgmpHostMemPtr(app.frameMemory[app.frameIndex]);
+  KVMFRFrame * fi = app.frame[app.frameIndex];
   KVMFRFrameFlags flags =
     (frame.hdr   ? FRAME_FLAG_HDR    : 0) |
     (frame.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
@@ -311,7 +314,7 @@ static bool sendFrame(void)
   fi->frameHeight       = frame.frameHeight;
   fi->stride            = frame.stride;
   fi->pitch             = frame.pitch;
-  fi->offset            = app.pageSize - sizeof(FrameBuffer);
+  // fi->offset is initialized at startup
   fi->flags             = flags;
   fi->damageRectsCount  = frame.damageRectsCount;
   memcpy(fi->damageRects, frame.damageRects,
@@ -319,10 +322,7 @@ static bool sendFrame(void)
 
   app.frameValid = true;
 
-  // put the framebuffer on the border of the next page
-  // this is to allow for aligned DMA transfers by the receiver
-  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
-  framebuffer_prepare(fb);
+  framebuffer_prepare(app.frameBuffer[app.frameIndex]);
 
   /* we post and then get the frame, this is intentional! */
   if ((status = lgmpHostQueuePost(app.frameQueue, 0,
@@ -332,7 +332,7 @@ static bool sendFrame(void)
     return true;
   }
 
-  app.iface->getFrame(fb, app.frameIndex);
+  app.iface->getFrame(app.frameBuffer[app.frameIndex], app.frameIndex);
   return true;
 }
 
@@ -392,13 +392,13 @@ static bool captureStart(void)
 {
   if (app.state == APP_STATE_IDLE)
   {
-    if (!app.iface->init())
+    if (!app.iface->init(&app.alignSize))
     {
       DEBUG_ERROR("Failed to initialize the capture device");
       return false;
     }
 
-    if (app.iface->start && !app.iface->start())
+    if (app.iface->start && app.iface->start())
     {
       DEBUG_ERROR("Failed to start the capture device");
       return false;
@@ -720,18 +720,26 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
   }
 
   app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
-  app.maxFrameSize = (app.maxFrameSize - (app.pageSize - 1)) & ~(app.pageSize - 1);
+  app.maxFrameSize = (app.maxFrameSize - (app.alignSize - 1)) & ~(app.alignSize - 1);
   app.maxFrameSize /= LGMP_Q_FRAME_LEN;
   DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
 
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
     if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize,
-            app.pageSize, &app.frameMemory[i])) != LGMP_OK)
+            app.alignSize, &app.frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));
       goto fail_lgmp;
     }
+
+    app.frame[i] = lgmpHostMemPtr(app.frameMemory[i]);
+
+    /* put the framebuffer on the border of the next page, this is to allow for
+       aligned DMA transfers by the receiver */
+    const unsigned alignOffset = app.alignSize - sizeof(FrameBuffer);
+    app.frame[i]->offset = alignOffset;
+    app.frameBuffer[i] = (FrameBuffer *)(((uint8_t*)app.frame[i]) + alignOffset);
   }
 
   if (!lgCreateTimer(10, lgmpTimer, NULL, &app.lgmpTimer))
@@ -828,7 +836,7 @@ int app_main(int argc, char * argv[])
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
   DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);
 
-  app.pageSize          = sysinfo_getPageSize();
+  app.alignSize         = sysinfo_getPageSize();
   app.frameValid        = false;
   app.pointerShapeValid = false;
 
@@ -847,13 +855,16 @@ int app_main(int argc, char * argv[])
 
       DEBUG_INFO("Trying           : %s", iface->getName());
 
-      if (!iface->create(captureGetPointerBuffer, capturePostPointerBuffer))
+      if (!iface->create(
+        shmDev.mem,
+        captureGetPointerBuffer,
+        capturePostPointerBuffer))
       {
         iface = NULL;
         continue;
       }
 
-      if (iface->init())
+      if (iface->init(&app.alignSize))
         break;
 
       iface->free();
@@ -953,7 +964,14 @@ int app_main(int argc, char * argv[])
       }
 
       const uint64_t captureStart = microtime();
-      const CaptureResult result = app.iface->capture();
+
+      unsigned nextIndex = app.frameIndex + 1;
+      if (nextIndex == LGMP_Q_FRAME_LEN)
+        nextIndex = 0;
+
+      const CaptureResult result = app.iface->capture(
+        nextIndex, app.frameBuffer[nextIndex]);
+
       if (likely(result == CAPTURE_RESULT_OK))
         previousFrameTime = captureStart;
       else if (likely(result == CAPTURE_RESULT_TIMEOUT))

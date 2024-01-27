@@ -43,7 +43,11 @@ struct D3D11Backend
 
 static struct D3D11Backend  * this = NULL;
 
-static bool d3d11_create(unsigned textures)
+static bool d3d11_create(
+  void     * ivshmemBase,
+  unsigned * alignSize,
+  unsigned   frameBuffers,
+  unsigned   textures)
 {
   DEBUG_ASSERT(!this);
   this = calloc(1,
@@ -128,7 +132,11 @@ static void d3d11_free(void)
   this = NULL;
 }
 
-static bool d3d11_preCopy(ID3D11Texture2D * src, unsigned textureIndex)
+static bool d3d11_preCopy(
+  ID3D11Texture2D * src,
+  unsigned          textureIndex,
+  unsigned          frameBufferIndex,
+  FrameBuffer     * frameBuffer)
 {
   dxgi_contextLock();
   this->texture[textureIndex].copyTime = microtime();

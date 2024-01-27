@@ -125,6 +125,7 @@ struct DXGIInterface
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication  ** dup;
   int                        maxTextures;
+  void                     * ivshmemBase;
   Texture                  * texture;
   int                        texRIndex;
   int                        texWIndex;
@@ -275,7 +276,10 @@ static void dxgi_initOptions(void)
   ppEarlyInit();
 }
 
-static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
+static bool dxgi_create(
+  void                   * ivshmemBase,
+  CaptureGetPointerBuffer  getPointerBufferFn,
+  CapturePostPointerBuffer postPointerBufferFn)
 {
   DEBUG_ASSERT(!this);
   this = calloc(1, sizeof(*this));
@@ -302,6 +306,7 @@ static bool dxgi_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostP
   this->allowRGB24          = option_get_bool("dxgi", "allowRGB24");
   this->dwmFlush            = option_get_bool("dxgi", "dwmFlush");
   this->disableDamage       = option_get_bool("dxgi", "disableDamage");
+  this->ivshmemBase         = ivshmemBase;
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
@@ -360,7 +365,7 @@ static bool initVertexShader(void)
   return true;
 }
 
-static bool dxgi_init(void)
+static bool dxgi_init(unsigned * alignSize)
 {
   DEBUG_ASSERT(this);
 
@@ -800,7 +805,11 @@ static bool dxgi_init(void)
   {
     if (!strcasecmp(copyBackend, backends[i]->code))
     {
-      if (!backends[i]->create(this->maxTextures))
+      if (!backends[i]->create(
+        this->ivshmemBase,
+        alignSize,
+        LGMP_Q_FRAME_LEN,
+        this->maxTextures))
       {
         DEBUG_ERROR("Failed to initialize selected capture backend: %s", backends[i]->name);
         backends[i]->free();
@@ -1052,7 +1061,8 @@ static void computeTexDamage(Texture * tex)
   }
 }
 
-static CaptureResult dxgi_capture(void)
+static CaptureResult dxgi_capture(unsigned frameBufferIndex,
+  FrameBuffer * frameBuffer)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
@@ -1101,6 +1111,7 @@ static CaptureResult dxgi_capture(void)
   {
     if (result == CAPTURE_RESULT_ERROR)
       DEBUG_WINERROR("AcquireNextFrame failed", status);
+
     goto exit;
   }
 
@@ -1230,7 +1241,8 @@ static CaptureResult dxgi_capture(void)
         computeFrameDamage(tex);
       computeTexDamage(tex);
 
-      if (!this->backend->preCopy(dst, this->texWIndex))
+      if (!this->backend->preCopy(dst, this->texWIndex,
+        frameBufferIndex, frameBuffer))
       {
         result = CAPTURE_RESULT_ERROR;
         goto exit;
@@ -1440,39 +1452,48 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
   Texture     * tex    = &this->texture[this->texRIndex];
   FrameDamage * damage = &this->frameDamage[frameIndex];
 
-  if (tex->damageRectsCount                 == 0 ||
-      damage->count                          < 0 ||
-      damage->count + tex->damageRectsCount  > KVMFR_MAX_DAMAGE_RECTS)
+  if (this->backend->writeFrame)
   {
-    // damage all
-    framebuffer_write(frame, tex->map, this->pitch * this->dataHeight);
+    CaptureResult result = this->backend->writeFrame(frameIndex, frame);
+    if (result != CAPTURE_RESULT_OK)
+      return result;
   }
   else
   {
-    memcpy(damage->rects + damage->count, tex->damageRects,
-      tex->damageRectsCount * sizeof(*tex->damageRects));
-    damage->count += tex->damageRectsCount;
-
-    if (this->outputFormat == CAPTURE_FMT_BGR_32)
+    if (tex->damageRectsCount                 == 0 ||
+        damage->count                          < 0 ||
+        damage->count + tex->damageRectsCount  > KVMFR_MAX_DAMAGE_RECTS)
     {
-      FrameDamageRect scaledDamageRects[damage->count];
-      for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {
-        FrameDamageRect rect = damage->rects[i];
-        int originalX = rect.x;
-        int scaledX = originalX * 3 / 4;
-        rect.x = scaledX;
-        rect.width = (((originalX + rect.width) * 3 + 3) / 4) - scaledX;
-
-        scaledDamageRects[i] = rect;
-      }
-
-      rectsBufferToFramebuffer(scaledDamageRects, damage->count, this->bpp, frame,
-        this->pitch, this->dataHeight, tex->map, this->pitch);
+      // damage all
+      framebuffer_write(frame, tex->map, this->pitch * this->dataHeight);
     }
     else
     {
-      rectsBufferToFramebuffer(damage->rects, damage->count, this->bpp, frame,
-        this->pitch, this->dataHeight, tex->map, this->pitch);
+      memcpy(damage->rects + damage->count, tex->damageRects,
+        tex->damageRectsCount * sizeof(*tex->damageRects));
+      damage->count += tex->damageRectsCount;
+
+      if (this->outputFormat == CAPTURE_FMT_BGR_32)
+      {
+        FrameDamageRect scaledDamageRects[damage->count];
+        for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {
+          FrameDamageRect rect = damage->rects[i];
+          int originalX = rect.x;
+          int scaledX = originalX * 3 / 4;
+          rect.x = scaledX;
+          rect.width = (((originalX + rect.width) * 3 + 3) / 4) - scaledX;
+
+          scaledDamageRects[i] = rect;
+        }
+
+        rectsBufferToFramebuffer(scaledDamageRects, damage->count, this->bpp, frame,
+          this->pitch, this->dataHeight, tex->map, this->pitch);
+      }
+      else
+      {
+        rectsBufferToFramebuffer(damage->rects, damage->count, this->bpp, frame,
+          this->pitch, this->dataHeight, tex->map, this->pitch);
+      }
     }
   }
 
