@@ -398,7 +398,7 @@ static bool captureStart(void)
       return false;
     }
 
-    if (app.iface->start && app.iface->start())
+    if (app.iface->start && !app.iface->start())
     {
       DEBUG_ERROR("Failed to start the capture device");
       return false;
