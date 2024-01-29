@@ -29,6 +29,8 @@
 
 typedef struct RGB24
 {
+  ComScope * comScope;
+
   ID3D11Device        ** device;
   ID3D11DeviceContext ** context;
   bool shareable;
@@ -39,6 +41,9 @@ typedef struct RGB24
 }
 RGB24;
 static RGB24 this = {0};
+
+#define comRef_toGlobal(dst, src) \
+  _comRef_toGlobal(this.comScope, dst, src)
 
 typedef struct
 {
@@ -55,6 +60,7 @@ static bool rgb24_setup(
   bool                   shareable
 )
 {
+  comRef_initGlobalScope(10, this.comScope);
   this.device    = device;
   this.context   = context;
   this.shareable = shareable;
@@ -63,6 +69,7 @@ static bool rgb24_setup(
 
 static void rgb24_finish(void)
 {
+  comRef_freeScope(&this.comScope);
   memset(&this, 0, sizeof(this));
 }
 
@@ -74,7 +81,8 @@ static bool rgb24_configure(void * opaque,
   RGB24Inst * inst = (RGB24Inst *)opaque;
 
   HRESULT status;
-  comRef_scopePush();
+
+  comRef_scopePush(10);
 
   if (!this.pshader)
   {

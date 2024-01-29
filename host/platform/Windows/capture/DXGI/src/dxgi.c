@@ -106,6 +106,8 @@ FrameDamage;
 
 struct DXGIInterface
 {
+  ComScope * comScope;
+
   bool                       initialized;
   LARGE_INTEGER              perfFreq;
   LARGE_INTEGER              frameTime;
@@ -125,7 +127,6 @@ struct DXGIInterface
   D3D_FEATURE_LEVEL          featureLevel;
   IDXGIOutputDuplication  ** dup;
   int                        maxTextures;
-  void                     * ivshmemBase;
   Texture                  * texture;
   int                        texRIndex;
   int                        texWIndex;
@@ -140,6 +141,7 @@ struct DXGIInterface
 
   CaptureGetPointerBuffer    getPointerBufferFn;
   CapturePostPointerBuffer   postPointerBufferFn;
+  unsigned                   frameBuffers;
   LGEvent                  * frameEvent;
 
   unsigned int    formatVer;
@@ -160,6 +162,7 @@ struct DXGIInterface
 };
 
 // locals
+
 static struct DXGIInterface * this = NULL;
 
 extern struct DXGICopyBackend copyBackendD3D11;
@@ -168,6 +171,11 @@ static struct DXGICopyBackend * backends[] = {
   &copyBackendD3D12,
   &copyBackendD3D11,
 };
+
+// defines
+
+#define comRef_toGlobal(dst, src) \
+  _comRef_toGlobal(this->comScope, dst, src)
 
 // forwards
 
@@ -277,9 +285,9 @@ static void dxgi_initOptions(void)
 }
 
 static bool dxgi_create(
-  void                   * ivshmemBase,
   CaptureGetPointerBuffer  getPointerBufferFn,
-  CapturePostPointerBuffer postPointerBufferFn)
+  CapturePostPointerBuffer postPointerBufferFn,
+  unsigned                 frameBuffers)
 {
   DEBUG_ASSERT(!this);
   this = calloc(1, sizeof(*this));
@@ -306,16 +314,18 @@ static bool dxgi_create(
   this->allowRGB24          = option_get_bool("dxgi", "allowRGB24");
   this->dwmFlush            = option_get_bool("dxgi", "dwmFlush");
   this->disableDamage       = option_get_bool("dxgi", "disableDamage");
-  this->ivshmemBase         = ivshmemBase;
   this->texture             = calloc(this->maxTextures, sizeof(*this->texture));
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
+  this->frameBuffers        = frameBuffers;
 
   return true;
 }
 
 static bool initVertexShader(void)
 {
+  comRef_scopePush(10);
+
   static const char * vshaderSrc =
     "void main(\n"
     "  in  uint   vertexID : SV_VERTEXID,\n"
@@ -362,23 +372,16 @@ static bool initVertexShader(void)
   }
 
   comRef_toGlobal(this->vshader, vshader);
+  comRef_scopePop();
   return true;
 }
 
-static bool dxgi_init(unsigned * alignSize)
+static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
 {
   DEBUG_ASSERT(this);
 
-  if (!comRef_init(
-    20 + this->maxTextures * 16, //max total globals
-    20                           //max total locals
-  ))
-  {
-    DEBUG_ERROR("failed to intialize the comRef tracking");
-    return false;
-  }
-
-  comRef_scopePush();
+  comRef_initGlobalScope(20 + this->maxTextures * 16, this->comScope);
+  comRef_scopePush(20);
 
   this->desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
   if (!this->desktop)
@@ -411,9 +414,10 @@ static bool dxgi_init(unsigned * alignSize)
 
   lgResetEvent(this->frameEvent);
 
+  comRef_defineLocal(IDXGIFactory1, factory);
   status = CreateDXGIFactory2(this->debug ? DXGI_CREATE_FACTORY_DEBUG : 0,
     &IID_IDXGIFactory1,
-    (void **)comRef_newGlobal(&this->factory));
+    (void **)factory);
 
   if (FAILED(status))
   {
@@ -429,7 +433,7 @@ static bool dxgi_init(unsigned * alignSize)
 
   for (
     int i = 0;
-    IDXGIFactory1_EnumAdapters1(*this->factory, i, adapter)
+    IDXGIFactory1_EnumAdapters1(*factory, i, adapter)
       != DXGI_ERROR_NOT_FOUND;
     ++i, comRef_release(adapter))
   {
@@ -509,6 +513,7 @@ static bool dxgi_init(unsigned * alignSize)
     goto fail;
   }
 
+  comRef_toGlobal(this->factory, factory);
   comRef_toGlobal(this->adapter, adapter);
   comRef_toGlobal(this->output , output );
 
@@ -569,6 +574,8 @@ static bool dxgi_init(unsigned * alignSize)
     goto fail;
   }
 
+  comRef_defineLocal(ID3D11Device       , device       );
+  comRef_defineLocal(ID3D11DeviceContext, deviceContext);
   status = D3D11CreateDevice(
     *tmp,
     D3D_DRIVER_TYPE_UNKNOWN,
@@ -577,17 +584,19 @@ static bool dxgi_init(unsigned * alignSize)
       (this->debug ? D3D11_CREATE_DEVICE_DEBUG : 0),
     featureLevels, featureLevelCount,
     D3D11_SDK_VERSION,
-    (ID3D11Device **)comRef_newGlobal(&this->device),
+    device,
     &this->featureLevel,
-    (ID3D11DeviceContext **)comRef_newGlobal(&this->deviceContext));
-
-  LG_LOCK_INIT(this->deviceContextLock);
+    deviceContext);
 
   if (FAILED(status))
   {
     DEBUG_WINERROR("Failed to create D3D11 device", status);
     goto fail;
   }
+
+  comRef_toGlobal(this->device       , device       );
+  comRef_toGlobal(this->deviceContext, deviceContext);
+  LG_LOCK_INIT(this->deviceContextLock);
 
   switch(outputDesc.Rotation)
   {
@@ -648,6 +657,8 @@ static bool dxgi_init(unsigned * alignSize)
     IDXGIDevice1_SetMaximumFrameLatency(*dxgi, 1);
   }
 
+  comRef_defineLocal(IDXGIOutputDuplication, dup);
+
   comRef_defineLocal(IDXGIOutput5, output5);
   status = IDXGIOutput_QueryInterface(
     *this->output, &IID_IDXGIOutput5, (void **)output5);
@@ -671,8 +682,7 @@ static bool dxgi_init(unsigned * alignSize)
     for (int i = 0; i < 2; ++i)
     {
       status = IDXGIOutput1_DuplicateOutput(
-        *output1, (IUnknown *)*this->device,
-        (IDXGIOutputDuplication **)comRef_newGlobal(&this->dup));
+        *output1, *(IUnknown **)this->device, dup);
 
       if (SUCCEEDED(status))
         break;
@@ -703,7 +713,7 @@ static bool dxgi_init(unsigned * alignSize)
         0,
         ARRAY_LENGTH(supportedFormats),
         supportedFormats,
-        (IDXGIOutputDuplication **)comRef_newGlobal(&this->dup));
+        dup);
 
       if (SUCCEEDED(status))
         break;
@@ -720,6 +730,8 @@ static bool dxgi_init(unsigned * alignSize)
       DEBUG_WINERROR("DuplicateOutput1 Failed", status);
       goto fail;
     }
+
+    comRef_toGlobal(this->dup, dup);
 
     comRef_defineLocal(IDXGIOutput6, output6);
     status = IDXGIOutput_QueryInterface(
@@ -806,9 +818,9 @@ static bool dxgi_init(unsigned * alignSize)
     if (!strcasecmp(copyBackend, backends[i]->code))
     {
       if (!backends[i]->create(
-        this->ivshmemBase,
+        ivshmemBase,
         alignSize,
-        LGMP_Q_FRAME_LEN,
+        this->frameBuffers,
         this->maxTextures))
       {
         DEBUG_ERROR("Failed to initialize selected capture backend: %s", backends[i]->name);
@@ -914,7 +926,7 @@ static bool dxgi_deinit(void)
     dxgi_releaseFrame();
 
   // this MUST run before backend->free() & ppFreeAll.
-  comRef_free();
+  comRef_freeScope(&this->comScope);
 
   ppFreeAll();
   if (this->backend)
@@ -1066,7 +1078,7 @@ static CaptureResult dxgi_capture(unsigned frameBufferIndex,
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
-  comRef_scopePush();
+  comRef_scopePush(10);
 
   Texture                 * tex = NULL;
   CaptureResult             result;
@@ -1386,7 +1398,7 @@ static CaptureResult dxgi_capture(unsigned frameBufferIndex,
   if (postPointer)
   {
     pointer.visible = this->lastPointerVisible;
-    this->postPointerBufferFn(pointer);
+    this->postPointerBufferFn(&pointer);
   }
 
   result = CAPTURE_RESULT_OK;
@@ -1395,7 +1407,8 @@ exit:
   return result;
 }
 
-static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameSize)
+static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
+  CaptureFrame * frame, const size_t maxFrameSize)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
@@ -1444,17 +1457,18 @@ static CaptureResult dxgi_waitFrame(CaptureFrame * frame, const size_t maxFrameS
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
+static CaptureResult dxgi_getFrame(unsigned frameBufferIndex,
+  FrameBuffer * frame, const size_t maxFrameSize)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
 
   Texture     * tex    = &this->texture[this->texRIndex];
-  FrameDamage * damage = &this->frameDamage[frameIndex];
+  FrameDamage * damage = &this->frameDamage[frameBufferIndex];
 
   if (this->backend->writeFrame)
   {
-    CaptureResult result = this->backend->writeFrame(frameIndex, frame);
+    CaptureResult result = this->backend->writeFrame(frameBufferIndex, frame);
     if (result != CAPTURE_RESULT_OK)
       return result;
   }
@@ -1500,7 +1514,7 @@ static CaptureResult dxgi_getFrame(FrameBuffer * frame, int frameIndex)
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
     struct FrameDamage * damage = this->frameDamage + i;
-    if (i == frameIndex)
+    if (i == frameBufferIndex)
       damage->count = 0;
     else if (tex->damageRectsCount > 0 && damage->count >= 0 &&
              damage->count + tex->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)

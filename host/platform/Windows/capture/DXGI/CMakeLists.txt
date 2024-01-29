@@ -7,14 +7,11 @@ add_library(capture_DXGI STATIC
   src/d3d12.c
   src/ods_capture.c
   src/util.c
-  src/com_ref.c
 
   src/pp/downsample.c
   src/pp/sdrwhitelevel.c
   src/pp/rgb24.c
 )
-
-add_definitions("-DCOBJMACROS -DINITGUID -DWIDL_C_INLINE_WRAPPERS")
 
 target_link_libraries(capture_DXGI
   lg_common

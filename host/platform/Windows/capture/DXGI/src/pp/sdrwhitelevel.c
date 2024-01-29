@@ -29,6 +29,8 @@
 
 typedef struct SDRWhiteLevel
 {
+  ComScope * comScope;
+
   ID3D11Device        ** device;
   ID3D11DeviceContext ** context;
 
@@ -42,6 +44,9 @@ typedef struct SDRWhiteLevel
 }
 SDRWhiteLevel;
 static SDRWhiteLevel this = {0};
+
+#define comRef_toGlobal(dst, src) \
+  _comRef_toGlobal(this.comScope, dst, src)
 
 typedef struct
 {
@@ -66,12 +71,14 @@ static bool sdrWhiteLevel_setup(
 )
 {
   bool result = false;
-  comRef_scopePush();
   HRESULT status;
 
   this.device    = device;
   this.context   = context;
   this.shareable = shareable;
+
+  comRef_initGlobalScope(10, this.comScope);
+  comRef_scopePush(10);
 
   comRef_defineLocal(IDXGIOutput6, output6);
   status = IDXGIOutput_QueryInterface(
@@ -139,9 +146,8 @@ static bool sdrWhiteLevel_setup(
     .MaxLOD         = D3D11_FLOAT32_MAX
   };
 
-  status = ID3D11Device_CreateSamplerState(
-    *this.device, &samplerDesc,
-    (ID3D11SamplerState  **)comRef_newGlobal(&this.sampler));
+  comRef_defineLocal(ID3D11SamplerState, sampler);
+  status = ID3D11Device_CreateSamplerState(*this.device, &samplerDesc, sampler);
 
   if (FAILED(status))
   {
@@ -156,9 +162,10 @@ static bool sdrWhiteLevel_setup(
     .BindFlags      = D3D11_BIND_CONSTANT_BUFFER,
   };
 
+  comRef_defineLocal(ID3D11Buffer, buffer);
   status = ID3D11Device_CreateBuffer(
     *this.device, &bufferDesc, NULL,
-    (ID3D11Buffer **)comRef_newGlobal(&this.buffer));
+    buffer);
 
   if (FAILED(status))
   {
@@ -169,6 +176,8 @@ static bool sdrWhiteLevel_setup(
   updateConsts();
   DEBUG_INFO("SDR White Level   : %f"   , this.sdrWhiteLevel);
 
+  comRef_toGlobal(this.sampler, sampler);
+  comRef_toGlobal(this.buffer , buffer );
   result = true;
 
 exit:
@@ -178,6 +187,7 @@ exit:
 
 static void sdrWhiteLevel_finish(void)
 {
+  comRef_freeScope(&this.comScope);
   memset(&this, 0, sizeof(this));
 }
 
@@ -225,7 +235,7 @@ static bool sdrWhiteLevel_configure(void * opaque,
   if (inst->tex)
     return true;
 
-  comRef_scopePush();
+  comRef_scopePush(10);
 
   // create the output texture
   D3D11_TEXTURE2D_DESC texDesc =

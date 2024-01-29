@@ -128,7 +128,7 @@ static void on_mouseMove(int x, int y)
     .y              = y - this->mouseHotY
   };
 
-  this->postPointerBufferFn(pointer);
+  this->postPointerBufferFn(&pointer);
 }
 
 static const char * nvfbc_getName(void)
@@ -185,9 +185,9 @@ static void nvfbc_initOptions(void)
 }
 
 static bool nvfbc_create(
-  void                   * ivshmemBase,
   CaptureGetPointerBuffer  getPointerBufferFn,
-  CapturePostPointerBuffer postPointerBufferFn)
+  CapturePostPointerBuffer postPointerBufferFn,
+  unsigned                 frameBuffers)
 {
   if (!NvFBCInit())
     return false;
@@ -221,7 +221,7 @@ static void updateScale(void)
   this->targetHeight = this->height;
 }
 
-static bool nvfbc_init(unsigned * alignSize)
+static bool nvfbc_init(void * ivshmemBase, unsigned * alignSize)
 {
   int adapterIndex = option_get_int("nvfbc", "adapterIndex");
 
@@ -650,8 +650,8 @@ done:
   frame->damageRectsCount = rectId;
 }
 
-static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
-    const size_t maxFrameSize)
+static CaptureResult nvfbc_waitFrame(unsigned frameBufferIndex,
+    CaptureFrame * frame, const size_t maxFrameSize)
 {
   if (unlikely(this->stop))
     return CAPTURE_RESULT_REINIT;
@@ -711,12 +711,13 @@ static CaptureResult nvfbc_waitFrame(CaptureFrame * frame,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
+static CaptureResult nvfbc_getFrame(unsigned frameBufferIndex,
+    FrameBuffer * frame, const size_t maxFrameSize)
 {
   const unsigned int h = DIFF_MAP_DIM(this->grabHeight, this->diffShift);
   const unsigned int w = DIFF_MAP_DIM(this->grabWidth,  this->diffShift);
   uint8_t * frameData = framebuffer_get_data(frame);
-  struct FrameInfo * info = this->frameInfo + frameIndex;
+  struct FrameInfo * info = this->frameInfo + frameBufferIndex;
 
   if (info->width == this->grabWidth && info->height == this->grabHeight)
   {
@@ -791,7 +792,7 @@ static CaptureResult nvfbc_getFrame(FrameBuffer * frame, int frameIndex)
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    if (i == frameIndex)
+    if (i == frameBufferIndex)
     {
       this->frameInfo[i].width    = this->grabWidth;
       this->frameInfo[i].height   = this->grabHeight;
@@ -855,7 +856,7 @@ static int pointerThread(void * unused)
     pointer.x = this->mouseX - pointer.hx;
     pointer.y = this->mouseY - pointer.hy;
 
-    this->postPointerBufferFn(pointer);
+    this->postPointerBufferFn(&pointer);
   }
 
   return 0;

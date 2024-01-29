@@ -3,8 +3,9 @@ project(capture LANGUAGES C)
 
 include(PreCapture)
 
-option(USE_NVFBC "Enable NVFBC Support" OFF)
+option(USE_D12   "Enable DirectX12 Support" ON)
 option(USE_DXGI  "Enable DXGI Support" ON)
+option(USE_NVFBC "Enable NVFBC Support" OFF)
 
 if(NOT DEFINED NVFBC_SDK)
   set(NVFBC_SDK "C:/Program Files (x86)/NVIDIA Corporation/NVIDIA Capture SDK")
@@ -17,6 +18,10 @@ if(NOT EXISTS "${nvfbc_sdk}/inc" OR NOT IS_DIRECTORY "${nvfbc_sdk}/inc")
   set(USE_NVFBC OFF)
 endif()
 
+if(USE_D12)
+  add_capture("D12")
+endif()
+
 if(USE_DXGI)
   add_capture("DXGI")
 endif()
@@ -25,7 +30,8 @@ if(USE_NVFBC)
   add_capture("NVFBC")
 endif()
 
-add_feature_info(USE_DXGI USE_DXGI "DXGI Desktop Duplication capture backend.")
+add_feature_info(USE_D12   USE_D12   "DirectX12 capture backend.")
+add_feature_info(USE_DXGI  USE_DXGI  "DXGI Desktop Duplication capture backend.")
 add_feature_info(USE_NVFBC USE_NVFBC "NVFBC capture backend.")
 
 include("PostCapture")

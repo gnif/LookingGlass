@@ -29,6 +29,8 @@
 
 struct D3D11Backend
 {
+  ComScope * comScope;
+
   RunningAvg avgMapTime;
   uint64_t   usleepMapTime;
 
@@ -42,6 +44,9 @@ struct D3D11Backend
 };
 
 static struct D3D11Backend  * this = NULL;
+
+#define comRef_toGlobal(dst, src) \
+  _comRef_toGlobal(this->comScope, dst, src)
 
 static bool d3d11_create(
   void     * ivshmemBase,
@@ -62,6 +67,8 @@ static bool d3d11_create(
 
   this->avgMapTime = runningavg_new(10);
   this->textures   = textures;
+
+  comRef_initGlobalScope(10, this->comScope);
   return true;
 }
 
@@ -72,6 +79,7 @@ static bool d3d11_configure(
   unsigned    bpp,
   unsigned *  pitch)
 {
+  comRef_scopePush(10);
   HRESULT status;
 
   D3D11_TEXTURE2D_DESC texTexDesc =
@@ -116,9 +124,11 @@ static bool d3d11_configure(
     *(ID3D11Resource **)this->texture[0].tex, 0);
 
   *pitch = mapping.RowPitch;
+  comRef_scopePop();
   return true;
 
 fail:
+  comRef_scopePop();
   return false;
 }
 
@@ -128,6 +138,7 @@ static void d3d11_free(void)
     return;
 
   runningavg_free(&this->avgMapTime);
+  comRef_freeScope(&this->comScope);
   free(this);
   this = NULL;
 }

@@ -51,6 +51,8 @@ struct SharedCache
 
 struct D3D12Backend
 {
+  ComScope * comScope;
+
   HMODULE d3d12;
   unsigned width, height, pitch;
   DXGI_FORMAT format;
@@ -78,6 +80,9 @@ struct D3D12Backend
 
 static struct D3D12Backend * this = NULL;
 
+#define comRef_toGlobal(dst, src) \
+  _comRef_toGlobal(this->comScope, dst, src)
+
 typedef HRESULT (*D3D12CreateDevice_t)(
   IUnknown          *pAdapter,
   D3D_FEATURE_LEVEL MinimumFeatureLevel,
@@ -99,7 +104,6 @@ static bool d3d12_create(
   unsigned   textures)
 {
   DEBUG_ASSERT(!this);
-  comRef_scopePush();
   bool result = false;
   HRESULT status;
 
@@ -112,6 +116,9 @@ static bool d3d12_create(
     DEBUG_ERROR("failed to allocate D3D12Backend struct");
     goto exit;
   }
+
+  comRef_initGlobalScope(10, this->comScope);
+  comRef_scopePush(10);
 
   this->d3d12 = LoadLibrary("d3d12.dll");
   if (!this->d3d12)
@@ -252,7 +259,7 @@ static bool d3d12_configure(
 {
   bool result = false;
   HRESULT status;
-  comRef_scopePush();
+  comRef_scopePush(10);
 
   this->width  = width;
   this->height = height;
@@ -350,6 +357,7 @@ static void d3d12_free(void)
   if (this->d3d12)
     FreeLibrary(this->d3d12);
 
+  comRef_freeScope(&this->comScope);
   free(this);
   this = NULL;
 }
@@ -360,7 +368,7 @@ static bool d3d12_preCopy(
   unsigned          frameBufferIndex,
   FrameBuffer     * frameBuffer)
 {
-  comRef_scopePush();
+  comRef_scopePush(10);
   bool result = false;
 
   // we need to flush the DX11 context explicity or we get tons of lag
@@ -478,9 +486,7 @@ done:
     nsleep((uint64_t)(this->copySleep * 1000000));
 
 exit:
-  if (!result)
-    comRef_scopePop();
-
+  comRef_scopePop();
   return result;
 }
 
@@ -616,8 +622,6 @@ static bool d3d12_postCopy(ID3D11Texture2D * src, unsigned textureIndex)
   result = true;
 
 exit:
-  //push is in preCopy
-  comRef_scopePop();
   return result;
 }
 

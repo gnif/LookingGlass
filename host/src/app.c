@@ -78,6 +78,7 @@ struct app
   int exitcode;
 
   PLGMPHost lgmp;
+  void *ivshmemBase;
 
   PLGMPHostQueue pointerQueue;
   PLGMPMemory    pointerMemory[LGMP_Q_POINTER_LEN];
@@ -96,7 +97,8 @@ struct app
   KVMFRFrame   * frame      [LGMP_Q_FRAME_LEN];
   FrameBuffer  * frameBuffer[LGMP_Q_FRAME_LEN];
 
-  unsigned int   frameIndex;
+  unsigned int   captureIndex;
+  unsigned int   readIndex;
   bool           frameValid;
   uint32_t       frameSerial;
 
@@ -181,7 +183,7 @@ static bool lgmpTimer(void * opaque)
   return true;
 }
 
-static bool sendFrame(void)
+static bool sendFrame(CaptureResult result)
 {
   CaptureFrame frame = { 0 };
   bool repeatFrame = false;
@@ -197,7 +199,11 @@ static bool sendFrame(void)
   if (app.state != APP_STATE_RUNNING)
     return false;
 
-  switch(app.iface->waitFrame(&frame, app.maxFrameSize))
+  // only wait if the result from the capture was OK
+  if (result == CAPTURE_RESULT_OK)
+    result = app.iface->waitFrame(app.captureIndex, &frame, app.maxFrameSize);
+
+  switch(result)
   {
     case CAPTURE_RESULT_OK:
       // reading the new subs count zeros it
@@ -236,17 +242,12 @@ static bool sendFrame(void)
   if (repeatFrame)
   {
     if ((status = lgmpHostQueuePost(app.frameQueue, 0,
-           app.frameMemory[app.frameIndex])) != LGMP_OK)
+           app.frameMemory[app.readIndex])) != LGMP_OK)
       DEBUG_ERROR("%s", lgmpStatusString(status));
     return true;
   }
 
-  // we increment the index first so that if we need to repeat a frame
-  // the index still points to the latest valid frame
-  if (++app.frameIndex == LGMP_Q_FRAME_LEN)
-    app.frameIndex = 0;
-
-  KVMFRFrame * fi = app.frame[app.frameIndex];
+  KVMFRFrame * fi = app.frame[app.captureIndex];
   KVMFRFrameFlags flags =
     (frame.hdr   ? FRAME_FLAG_HDR    : 0) |
     (frame.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
@@ -322,17 +323,24 @@ static bool sendFrame(void)
 
   app.frameValid = true;
 
-  framebuffer_prepare(app.frameBuffer[app.frameIndex]);
+  framebuffer_prepare(app.frameBuffer[app.captureIndex]);
 
   /* we post and then get the frame, this is intentional! */
   if ((status = lgmpHostQueuePost(app.frameQueue, 0,
-    app.frameMemory[app.frameIndex])) != LGMP_OK)
+    app.frameMemory[app.captureIndex])) != LGMP_OK)
   {
     DEBUG_ERROR("%s", lgmpStatusString(status));
     return true;
   }
 
-  app.iface->getFrame(app.frameBuffer[app.frameIndex], app.frameIndex);
+  app.iface->getFrame(
+    app.captureIndex,
+    app.frameBuffer[app.captureIndex],
+    app.maxFrameSize);
+
+  app.readIndex = app.captureIndex;
+  if (++app.captureIndex == LGMP_Q_FRAME_LEN)
+    app.captureIndex = 0;
   return true;
 }
 
@@ -342,7 +350,7 @@ static int frameThread(void * opaque)
 
   while(app.state == APP_STATE_RUNNING)
   {
-    if (!sendFrame())
+    if (!sendFrame(CAPTURE_RESULT_OK))
       break;
   }
   DEBUG_INFO("Frame thread stopped");
@@ -392,7 +400,7 @@ static bool captureStart(void)
 {
   if (app.state == APP_STATE_IDLE)
   {
-    if (!app.iface->init(&app.alignSize))
+    if (!app.iface->init(app.ivshmemBase, &app.alignSize))
     {
       DEBUG_ERROR("Failed to initialize the capture device");
       return false;
@@ -419,6 +427,7 @@ static bool captureStop(void)
     return false;
   }
 
+  app.frameValid = false;
   return true;
 }
 
@@ -527,17 +536,17 @@ static void sendPointer(bool newClient)
   postPointer(flags, mem);
 }
 
-void capturePostPointerBuffer(CapturePointer pointer)
+void capturePostPointerBuffer(const CapturePointer * pointer)
 {
   LG_LOCK(app.pointerLock);
 
   int x = app.pointerInfo.x;
   int y = app.pointerInfo.y;
 
-  memcpy(&app.pointerInfo, &pointer, sizeof(CapturePointer));
+  memcpy(&app.pointerInfo, pointer, sizeof(CapturePointer));
 
   /* if there was not a position update, restore the x & y */
-  if (!pointer.positionUpdate)
+  if (!pointer->positionUpdate)
   {
     app.pointerInfo.x = x;
     app.pointerInfo.y = y;
@@ -829,6 +838,7 @@ int app_main(int argc, char * argv[])
     DEBUG_ERROR("Failed to open the IVSHMEM device");
     return LG_HOST_EXIT_FATAL;
   }
+  app.ivshmemBase = shmDev.mem;
 
   int exitcode  = 0;
   DEBUG_INFO("IVSHMEM Size     : %u MiB", shmDev.size / 1048576);
@@ -856,15 +866,15 @@ int app_main(int argc, char * argv[])
       DEBUG_INFO("Trying           : %s", iface->getName());
 
       if (!iface->create(
-        shmDev.mem,
         captureGetPointerBuffer,
-        capturePostPointerBuffer))
+        capturePostPointerBuffer,
+        ARRAY_LENGTH(app.frameBuffer)))
       {
         iface = NULL;
         continue;
       }
 
-      if (iface->init(&app.alignSize))
+      if (iface->init(app.ivshmemBase, &app.alignSize))
         break;
 
       iface->free();
@@ -965,12 +975,8 @@ int app_main(int argc, char * argv[])
 
       const uint64_t captureStart = microtime();
 
-      unsigned nextIndex = app.frameIndex + 1;
-      if (nextIndex == LGMP_Q_FRAME_LEN)
-        nextIndex = 0;
-
       const CaptureResult result = app.iface->capture(
-        nextIndex, app.frameBuffer[nextIndex]);
+        app.captureIndex, app.frameBuffer[app.captureIndex]);
 
       if (likely(result == CAPTURE_RESULT_OK))
         previousFrameTime = captureStart;
@@ -982,7 +988,7 @@ int app_main(int argc, char * argv[])
           {
             LGMP_STATUS status;
             if ((status = lgmpHostQueuePost(app.frameQueue, 0,
-                    app.frameMemory[app.frameIndex])) != LGMP_OK)
+                    app.frameMemory[app.readIndex])) != LGMP_OK)
               DEBUG_ERROR("%s", lgmpStatusString(status));
           }
       }
@@ -1005,7 +1011,7 @@ int app_main(int argc, char * argv[])
       }
 
       if (!app.iface->asyncCapture)
-        sendFrame();
+        sendFrame(result);
     }
 
     if (app.state != APP_STATE_SHUTDOWN)

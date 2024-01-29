@@ -31,6 +31,8 @@
 
 typedef struct Downsample
 {
+  ComScope * comScope;
+
   ID3D11Device        ** device;
   ID3D11DeviceContext ** context;
   bool shareable;
@@ -42,6 +44,9 @@ typedef struct Downsample
 }
 Downsample;
 static Downsample this = {0};
+
+#define comRef_toGlobal(dst, src) \
+  _comRef_toGlobal(this.comScope, dst, src)
 
 typedef struct
 {
@@ -73,11 +78,14 @@ static bool downsample_setup(
   this.device    = device;
   this.context   = context;
   this.shareable = shareable;
+
+  comRef_initGlobalScope(10, this.comScope);
   return true;
 }
 
 static void downsample_finish(void)
 {
+  comRef_freeScope(&this.comScope);
   memset(&this, 0, sizeof(this));
 }
 
@@ -96,7 +104,7 @@ static bool downsample_configure(void * opaque,
     return true;
 
   HRESULT status;
-  comRef_scopePush();
+  comRef_scopePush(10);
 
   if (!this.pshader)
   {

@@ -10,10 +10,13 @@ add_library(platform_Windows STATIC
   src/service.c
   src/mousehook.c
   src/force_compose.c
+  src/com_ref.c
 )
 
 # allow use of functions for Windows 7 or later
 add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
+
+add_definitions("-DCOBJMACROS -DINITGUID -DWIDL_C_INLINE_WRAPPERS")
 
 add_subdirectory("capture")
 

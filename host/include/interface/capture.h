@@ -106,7 +106,7 @@ typedef struct CapturePointer
 CapturePointer;
 
 typedef bool (*CaptureGetPointerBuffer )(void ** data, uint32_t * size);
-typedef void (*CapturePostPointerBuffer)(CapturePointer pointer);
+typedef void (*CapturePostPointerBuffer)(const CapturePointer * pointer);
 
 typedef struct CaptureInterface
 {
@@ -116,19 +116,27 @@ typedef struct CaptureInterface
   void         (*initOptions    )(void);
 
   bool(*create)(
-    void                   * ivshmemBase,
     CaptureGetPointerBuffer  getPointerBufferFn,
-    CapturePostPointerBuffer postPointerBufferFn
+    CapturePostPointerBuffer postPointerBufferFn,
+    unsigned                 frameBuffers
   );
 
-  bool          (*init         )(unsigned * alignSize);
+  bool          (*init         )(void * ivshmemBase, unsigned * alignSize);
   bool          (*start        )(void);
   void          (*stop         )(void);
   bool          (*deinit       )(void);
   void          (*free         )(void);
 
-  CaptureResult (*capture   )(unsigned frameBufferIndex, FrameBuffer * frame);
-  CaptureResult (*waitFrame )(CaptureFrame * frame, const size_t maxFrameSize);
-  CaptureResult (*getFrame  )(FrameBuffer  * frame, int frameIndex);
+  CaptureResult (*capture   )(
+    unsigned frameBufferIndex,
+    FrameBuffer * frame);
+  CaptureResult (*waitFrame )(
+    unsigned frameBufferIndex,
+    CaptureFrame * frame,
+    const size_t maxFrameSize);
+  CaptureResult (*getFrame  )(
+    unsigned frameBufferIndex,
+    FrameBuffer  * frame,
+    const size_t maxFrameSize);
 }
 CaptureInterface;
