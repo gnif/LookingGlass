@@ -95,6 +95,12 @@ typedef HRESULT (*D3D12GetDebugInterface_t)(
   void   **ppvDebug
 );
 
+static D3D12_HEAP_DESC _ID3D12Heap_GetDesc(ID3D12Heap* This)
+{
+  D3D12_HEAP_DESC __ret;
+  return *This->lpVtbl->GetDesc(This, &__ret);
+}
+
 static void d3d12_free(void);
 
 static bool d3d12_create(
@@ -189,7 +195,7 @@ static bool d3d12_create(
     return false;
   }
 
-  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*heap);
+  D3D12_HEAP_DESC heapDesc = _ID3D12Heap_GetDesc(*heap);
   DEBUG_INFO("ID3D12Heap        : Size:%I64u Alignment:%I64u",
     heapDesc.SizeInBytes, heapDesc.Alignment);
   *alignSize = heapDesc.Alignment;

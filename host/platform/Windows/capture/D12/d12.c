@@ -111,6 +111,19 @@ static ID3D12Resource * d12_frameBufferToResource(
   FrameBuffer * frameBuffer,
   unsigned size);
 
+// workarounds
+
+static D3D12_HEAP_DESC _ID3D12Heap_GetDesc(ID3D12Heap* This)
+{
+  D3D12_HEAP_DESC __ret;
+  return *This->lpVtbl->GetDesc(This, &__ret);
+}
+
+static D3D12_RESOURCE_DESC _ID3D12Resource_GetDesc(ID3D12Resource* This) {
+    D3D12_RESOURCE_DESC __ret;
+    return *This->lpVtbl->GetDesc(This,&__ret);
+}
+
 // implementation
 
 static const char * d12_getName(void)
@@ -262,7 +275,7 @@ retryCreateCommandQueue:
   }
 
   // Adjust the alignSize based on the required heap alignment
-  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
+  D3D12_HEAP_DESC heapDesc = _ID3D12Heap_GetDesc(*ivshmemHeap);
   *alignSize = heapDesc.Alignment;
 
   // initialize the backend
@@ -329,7 +342,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     goto exit;
   }
 
-  D3D12_RESOURCE_DESC desc = ID3D12Resource_GetDesc(*src);
+  D3D12_RESOURCE_DESC desc = _ID3D12Resource_GetDesc(*src);
   if (desc.Width != this->lastFormat.Width ||
       desc.Height != this->lastFormat.Height ||
       desc.Format != this->lastFormat.Format)
@@ -384,7 +397,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     goto exit;
 
   // copy into the framebuffer resource
-  D3D12_RESOURCE_DESC desc = ID3D12Resource_GetDesc(*src);
+  D3D12_RESOURCE_DESC desc = _ID3D12Resource_GetDesc(*src);
   D3D12_TEXTURE_COPY_LOCATION srcLoc =
   {
     .pResource        = *src,

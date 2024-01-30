@@ -16,7 +16,7 @@ add_library(platform_Windows STATIC
 # allow use of functions for Windows 7 or later
 add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
 
-add_definitions("-DCOBJMACROS -DINITGUID -DWIDL_C_INLINE_WRAPPERS")
+add_definitions("-DCOBJMACROS -DINITGUID")
 
 add_subdirectory("capture")
 

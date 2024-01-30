@@ -15,6 +15,7 @@ add_library(capture_DXGI STATIC
 
 target_link_libraries(capture_DXGI
   lg_common
+  platform_Windows
   d3d11
   dxgi
   dwmapi

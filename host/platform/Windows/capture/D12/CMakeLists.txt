@@ -6,10 +6,9 @@ add_library(capture_D12 STATIC
   backend/dd.c
 )
 
-add_definitions("-DCOBJMACROS -DINITGUID -DWIDL_C_INLINE_WRAPPERS")
-
 target_link_libraries(capture_D12
   lg_common
+  platform_Windows
   d3d11
   dxgi
   dwmapi

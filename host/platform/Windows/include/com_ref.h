@@ -18,6 +18,9 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifndef _H_COMREF_
+#define _H_COMREF_
+
 #include <stdbool.h>
 #include <windows.h>
 #include <malloc.h>
@@ -96,3 +99,5 @@ inline static ULONG comRef_release(IUnknown ** ref)
 }
 
 #define comRef_release(ref) comRef_release((IUnknown **)(ref))
+
+#endif
