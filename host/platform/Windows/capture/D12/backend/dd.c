@@ -29,8 +29,10 @@ typedef struct DDCacheInfo
 }
 DDCacheInfo;
 
-struct DDInstance
+typedef struct DDInstance
 {
+  D12Backend base;
+
   ComScope * comScope;
 
   HDESK desktop;
@@ -49,43 +51,47 @@ struct DDInstance
 
   void   * shapeBuffer;
   unsigned shapeBufferSize;
-};
-
-struct DDInstance * this = NULL;
+}
+DDInstance;
 
 #define comRef_toGlobal(dst, src) \
   _comRef_toGlobal(this->comScope, dst, src)
 
-static void d12_dd_openDesktop(void);
-static bool d12_dd_handleFrameUpdate(IDXGIResource * res);
+static void d12_dd_openDesktop(DDInstance * this);
+static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res);
 
-static void d12_dd_handlePointerMovement(DXGI_OUTDUPL_POINTER_POSITION * pos,
-  CapturePointer * pointer, bool * changed);
-static void d12_dd_handlePointerShape(
+static void d12_dd_handlePointerMovement(DDInstance * this,
+  DXGI_OUTDUPL_POINTER_POSITION * pos, CapturePointer * pointer, bool * changed);
+static void d12_dd_handlePointerShape(DDInstance * this,
   CapturePointer * pointer, size_t size, bool * changed);
 
-static bool d12_dd_getCache(ID3D11Texture2D * srcTex, DDCacheInfo ** result);
-static bool d12_dd_convertResource(ID3D11Texture2D * srcTex,
-  DDCacheInfo * cache);
+static bool d12_dd_getCache(DDInstance * this,
+  ID3D11Texture2D * srcTex, DDCacheInfo ** result);
+static bool d12_dd_convertResource(DDInstance * this,
+  ID3D11Texture2D * srcTex, DDCacheInfo * cache);
 
-static bool d12_dd_create(unsigned frameBuffers)
+static bool d12_dd_create(D12Backend ** instance, unsigned frameBuffers)
 {
-  this = calloc(1, sizeof(*this));
+  DDInstance * this = calloc(1, sizeof(*this));
   if (!this)
   {
     DEBUG_ERROR("out of memory");
     return false;
   }
 
+  *instance = &this->base;
   return true;
 }
 
 static bool d12_dd_init(
+  D12Backend         * instance,
   bool                 debug,
   ID3D12Device3      * device,
   IDXGIAdapter1      * adapter,
   IDXGIOutput        * output)
 {
+  DDInstance * this = UPCAST(DDInstance, instance);
+
   bool result = false;
   HRESULT hr;
 
@@ -93,7 +99,7 @@ static bool d12_dd_init(
   comRef_scopePush(10);
 
   // try to open the desktop so we can capture the secure desktop
-  d12_dd_openDesktop();
+  d12_dd_openDesktop(this);
 
   comRef_defineLocal(IDXGIAdapter, _adapter);
   hr = IDXGIAdapter1_QueryInterface(
@@ -249,8 +255,10 @@ exit:
   return result;
 }
 
-static bool d12_dd_deinit(void)
+static bool d12_dd_deinit(D12Backend * instance)
 {
+  DDInstance * this = UPCAST(DDInstance, instance);
+
   if (this->release)
   {
     IDXGIOutputDuplication_ReleaseFrame(*this->dup);
@@ -264,15 +272,17 @@ static bool d12_dd_deinit(void)
   }
 
   comRef_freeScope(&this->comScope);
-  memset(this, 0, sizeof(*this));
+  memset(this->cache, 0, sizeof(this->cache));
   return true;
 }
 
-static void d12_dd_free(void)
+static void d12_dd_free(D12Backend ** instance)
 {
+  DDInstance * this = UPCAST(DDInstance, *instance);
+
   free(this->shapeBuffer);
   free(this);
-  this = NULL;
+  *instance = NULL;
 }
 
 static CaptureResult d12_dd_hResultToCaptureResult(const HRESULT status)
@@ -295,8 +305,11 @@ static CaptureResult d12_dd_hResultToCaptureResult(const HRESULT status)
   }
 }
 
-static CaptureResult d12_dd_capture(unsigned frameBufferIndex)
+static CaptureResult d12_dd_capture(D12Backend * instance,
+  unsigned frameBufferIndex)
 {
+  DDInstance * this = UPCAST(DDInstance, instance);
+
   HRESULT hr;
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(10);
@@ -337,7 +350,7 @@ retry:
 
   // if we have a new frame
   if (frameInfo.LastPresentTime.QuadPart != 0)
-    if (!d12_dd_handleFrameUpdate(*res))
+    if (!d12_dd_handleFrameUpdate(this, *res))
     {
       result = CAPTURE_RESULT_ERROR;
       goto exit;
@@ -348,12 +361,12 @@ retry:
 
   // if the pointer has moved
   if (frameInfo.LastMouseUpdateTime.QuadPart != 0)
-    d12_dd_handlePointerMovement(
+    d12_dd_handlePointerMovement(this,
       &frameInfo.PointerPosition, &pointer, &postPointer);
 
   // if the pointer shape has changed
   if (frameInfo.PointerShapeBufferSize > 0)
-    d12_dd_handlePointerShape(
+    d12_dd_handlePointerShape(this,
       &pointer, frameInfo.PointerShapeBufferSize, &postPointer);
 
   if (postPointer)
@@ -368,8 +381,11 @@ exit:
   return result;
 }
 
-static CaptureResult d12_dd_sync(ID3D12CommandQueue * commandQueue)
+static CaptureResult d12_dd_sync(D12Backend * instance,
+  ID3D12CommandQueue * commandQueue)
 {
+  DDInstance * this = UPCAST(DDInstance, instance);
+
   if (!this->current)
     return CAPTURE_RESULT_TIMEOUT;
 
@@ -380,8 +396,11 @@ static CaptureResult d12_dd_sync(ID3D12CommandQueue * commandQueue)
   return CAPTURE_RESULT_OK;
 }
 
-static ID3D12Resource * d12_dd_fetch(unsigned frameBufferIndex)
+static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
+  unsigned frameBufferIndex)
 {
+  DDInstance * this = UPCAST(DDInstance, instance);
+
   if (!this->current)
     return NULL;
 
@@ -389,7 +408,7 @@ static ID3D12Resource * d12_dd_fetch(unsigned frameBufferIndex)
   return *this->current->d12Res;
 }
 
-static void d12_dd_openDesktop(void)
+static void d12_dd_openDesktop(DDInstance * this)
 {
   this->desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
   if (!this->desktop)
@@ -415,7 +434,7 @@ static void d12_dd_openDesktop(void)
   }
 }
 
-static bool d12_dd_handleFrameUpdate(IDXGIResource * res)
+static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
 {
   bool result = false;
   comRef_scopePush(1);
@@ -429,7 +448,7 @@ static bool d12_dd_handleFrameUpdate(IDXGIResource * res)
     goto exit;
   }
 
-  if (!d12_dd_getCache(*srcTex, &this->current))
+  if (!d12_dd_getCache(this, *srcTex, &this->current))
     goto exit;
 
   /**
@@ -447,8 +466,8 @@ exit:
   return result;
 }
 
-static void d12_dd_handlePointerMovement(DXGI_OUTDUPL_POINTER_POSITION * pos,
-  CapturePointer * pointer, bool * changed)
+static void d12_dd_handlePointerMovement(DDInstance * this,
+  DXGI_OUTDUPL_POINTER_POSITION * pos, CapturePointer * pointer, bool * changed)
 {
   bool setPos = false;
 
@@ -488,7 +507,7 @@ static void d12_dd_handlePointerMovement(DXGI_OUTDUPL_POINTER_POSITION * pos,
   this->lastPosValid = true;
 }
 
-static void d12_dd_handlePointerShape(
+static void d12_dd_handlePointerShape(DDInstance * this,
   CapturePointer * pointer, size_t size, bool * changed)
 {
   HRESULT hr;
@@ -556,7 +575,8 @@ retry:
   *changed = true;
 }
 
-static bool d12_dd_getCache(ID3D11Texture2D * srcTex, DDCacheInfo ** result)
+static bool d12_dd_getCache(DDInstance * this,
+  ID3D11Texture2D * srcTex, DDCacheInfo ** result)
 {
   *result = NULL;
   D3D11_TEXTURE2D_DESC srcDesc;
@@ -597,7 +617,7 @@ static bool d12_dd_getCache(ID3D11Texture2D * srcTex, DDCacheInfo ** result)
     return false;
 
   // convert the resource
-  if (!d12_dd_convertResource(srcTex, &this->cache[freeSlot]))
+  if (!d12_dd_convertResource(this, srcTex, &this->cache[freeSlot]))
     return false;
 
   // return the new cache entry
@@ -605,7 +625,8 @@ static bool d12_dd_getCache(ID3D11Texture2D * srcTex, DDCacheInfo ** result)
   return true;
 }
 
-static bool d12_dd_convertResource(ID3D11Texture2D * srcTex, DDCacheInfo * cache)
+static bool d12_dd_convertResource(DDInstance * this,
+  ID3D11Texture2D * srcTex, DDCacheInfo * cache)
 {
   bool result = false;
   HRESULT hr;

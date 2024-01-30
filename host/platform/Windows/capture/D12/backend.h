@@ -25,7 +25,9 @@
 #include <d3d12.h>
 #include "interface/capture.h"
 
-typedef struct D12Backend
+typedef struct D12Backend D12Backend;
+
+struct D12Backend
 {
   // friendly name
   const char * name;
@@ -34,21 +36,37 @@ typedef struct D12Backend
   const char * codeName;
 
   // creation/init/free
-  bool (*create)(unsigned frameBuffers);
+  bool (*create)(D12Backend ** instance, unsigned frameBuffers);
   bool (*init)(
+    D12Backend         * instance,
     bool                 debug,
     ID3D12Device3      * device,
     IDXGIAdapter1      * adapter,
     IDXGIOutput        * output);
-  bool (*deinit)(void);
-  void (*free)(void);
+  bool (*deinit)(D12Backend * instance);
+  void (*free)(D12Backend ** instance);
 
   // capture callbacks
-  CaptureResult    (*capture)(unsigned frameBufferIndex);
-  CaptureResult    (*sync   )(ID3D12CommandQueue * commandQueue);
-  ID3D12Resource * (*fetch  )(unsigned frameBufferIndex);
+  CaptureResult (*capture)(D12Backend * instance,
+    unsigned frameBufferIndex);
+
+  CaptureResult (*sync)(D12Backend * instance,
+    ID3D12CommandQueue * commandQueue);
+
+  ID3D12Resource * (*fetch)(D12Backend * instance,
+    unsigned frameBufferIndex);
+};
+
+// helpers for the interface
+
+static inline bool d12_createBackend(
+  D12Backend * backend, D12Backend ** instance, unsigned frameBuffers)
+{
+  if (!backend->create(instance, frameBuffers))
+    return false;
+  memcpy(*instance, backend, sizeof(*backend));
+  return true;
 }
-D12Backend;
 
 // apis for the backend
 void d12_updatePointer(

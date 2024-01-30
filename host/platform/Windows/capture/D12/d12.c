@@ -166,8 +166,7 @@ static bool d12_create(
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
 
-  this->backend = &D12Backend_DD;
-  if (!this->backend->create(frameBuffers))
+  if (!d12_createBackend(&D12Backend_DD, &this->backend, frameBuffers))
   {
     DEBUG_ERROR("backend \"%s\" failed to create", this->backend->codeName);
     CloseHandle(this->d3d12);
@@ -279,7 +278,8 @@ retryCreateCommandQueue:
   *alignSize = heapDesc.Alignment;
 
   // initialize the backend
-  if (!this->backend->init(this->debug, *device, *adapter, *output))
+  if (!this->backend->init(this->backend,
+      this->debug, *device, *adapter, *output))
     goto exit;
 
   comRef_toGlobal(this->factory     , factory     );
@@ -304,7 +304,7 @@ static void d12_stop(void)
 static bool d12_deinit(void)
 {
   bool result = true;
-  if (!this->backend->deinit())
+  if (!this->backend->deinit(this->backend))
     result = false;
 
   d12_freeCommandGroup(&this->copyCommand);
@@ -314,7 +314,7 @@ static bool d12_deinit(void)
 
 static void d12_free(void)
 {
-  this->backend->free();
+  this->backend->free(&this->backend);
   FreeLibrary(this->d3d12);
   free(this);
   this = NULL;
@@ -323,7 +323,7 @@ static void d12_free(void)
 static CaptureResult d12_capture(
   unsigned frameBufferIndex, FrameBuffer * frameBuffer)
 {
-  return this->backend->capture(frameBufferIndex);
+  return this->backend->capture(this->backend, frameBufferIndex);
 }
 
 static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
@@ -333,7 +333,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   comRef_scopePush(1);
 
   comRef_defineLocal(ID3D12Resource, src);
-  *src = this->backend->fetch(frameBufferIndex);
+  *src = this->backend->fetch(this->backend, frameBufferIndex);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -383,7 +383,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   comRef_scopePush(2);
 
   comRef_defineLocal(ID3D12Resource, src);
-  *src = this->backend->fetch(frameBufferIndex);
+  *src = this->backend->fetch(this->backend, frameBufferIndex);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -427,7 +427,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
 
   // allow the backend to insert a fence into the command queue if it needs it
-  result = this->backend->sync(*this->commandQueue);
+  result = this->backend->sync(this->backend, *this->commandQueue);
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
