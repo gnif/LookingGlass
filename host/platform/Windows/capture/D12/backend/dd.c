@@ -287,6 +287,7 @@ static CaptureResult d12_dd_hResultToCaptureResult(const HRESULT status)
 
     case WAIT_ABANDONED:
     case DXGI_ERROR_ACCESS_LOST:
+    case DXGI_ERROR_INVALID_CALL:
       return CAPTURE_RESULT_REINIT;
 
     default:
