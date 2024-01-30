@@ -57,9 +57,7 @@ struct D12Backend
     unsigned frameBufferIndex);
 };
 
-// helpers for the interface
-
-static inline bool d12_createBackend(
+static inline bool d12_backendCreate(
   D12Backend * backend, D12Backend ** instance, unsigned frameBuffers)
 {
   if (!backend->create(instance, frameBuffers))
@@ -68,9 +66,34 @@ static inline bool d12_createBackend(
   return true;
 }
 
-// apis for the backend
+static inline bool d12_backendInit(D12Backend * instance, bool debug,
+  ID3D12Device3 * device, IDXGIAdapter1 * adapter, IDXGIOutput * output)
+  { return instance->init(instance, debug, device, adapter, output); }
+
+static inline bool d12_backendDeinit(D12Backend * instance)
+  { return instance->deinit(instance); }
+
+static inline void d12_backendFree(D12Backend ** instance)
+  { (*instance)->free(instance); }
+
+static inline CaptureResult d12_backendCapture(D12Backend * instance,
+  unsigned frameBufferIndex)
+  { return instance->capture(instance, frameBufferIndex); }
+
+static inline CaptureResult d12_backendSync(D12Backend * instance,
+  ID3D12CommandQueue * commandQueue)
+  { return instance->sync(instance, commandQueue); }
+
+static inline ID3D12Resource * d12_backendFetch(D12Backend * instance,
+  unsigned frameBufferIndex)
+  { return instance->fetch(instance, frameBufferIndex); }
+
+// APIs for the backend to call
+
 void d12_updatePointer(
   CapturePointer * pointer, void * shape, size_t shapeSize);
+
+// Backend defines
 
 extern D12Backend D12Backend_DD;
 
