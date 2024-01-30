@@ -343,7 +343,6 @@ retry:
     }
 
   bool postPointer = false;
-  bool postShape   = false;
   CapturePointer pointer = {0};
 
   // if the pointer has moved
@@ -354,7 +353,7 @@ retry:
   // if the pointer shape has changed
   if (frameInfo.PointerShapeBufferSize > 0)
     d12_dd_handlePointerShape(
-      &pointer, frameInfo.PointerShapeBufferSize, &postShape);
+      &pointer, frameInfo.PointerShapeBufferSize, &postPointer);
 
   if (postPointer)
     d12_updatePointer(&pointer, this->shapeBuffer, this->shapeBufferSize);
