@@ -1,4 +1,25 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2024 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
 #include "backend.h"
+#include "d12.h"
 
 #include "com_ref.h"
 #include "common/debug.h"
@@ -33,8 +54,6 @@ typedef struct DDInstance
 {
   D12Backend base;
 
-  ComScope * comScope;
-
   HDESK desktop;
 
   ID3D12Device3          ** d12device;
@@ -53,9 +72,6 @@ typedef struct DDInstance
   unsigned shapeBufferSize;
 }
 DDInstance;
-
-#define comRef_toGlobal(dst, src) \
-  _comRef_toGlobal(this->comScope, dst, src)
 
 static void d12_dd_openDesktop(DDInstance * this);
 static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res);
@@ -95,7 +111,6 @@ static bool d12_dd_init(
   bool result = false;
   HRESULT hr;
 
-  comRef_initGlobalScope(10 + CACHE_SIZE * 2, this->comScope);
   comRef_scopePush(10);
 
   // try to open the desktop so we can capture the secure desktop
@@ -249,8 +264,6 @@ static bool d12_dd_init(
 
 exit:
   comRef_scopePop();
-  if (!result)
-    comRef_freeScope(&this->comScope);
 
   return result;
 }
@@ -271,7 +284,6 @@ static bool d12_dd_deinit(D12Backend * instance)
     this->desktop = NULL;
   }
 
-  comRef_freeScope(&this->comScope);
   memset(this->cache, 0, sizeof(this->cache));
   return true;
 }

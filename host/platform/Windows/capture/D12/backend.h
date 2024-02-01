@@ -88,11 +88,6 @@ static inline ID3D12Resource * d12_backendFetch(D12Backend * instance,
   unsigned frameBufferIndex)
   { return instance->fetch(instance, frameBufferIndex); }
 
-// APIs for the backend to call
-
-void d12_updatePointer(
-  CapturePointer * pointer, void * shape, size_t shapeSize);
-
 // Backend defines
 
 extern D12Backend D12Backend_DD;

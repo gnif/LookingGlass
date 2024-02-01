@@ -3,6 +3,7 @@ project(capture_D12 LANGUAGES C)
 
 add_library(capture_D12 STATIC
   d12.c
+  command_group.c
   backend/dd.c
 )
 

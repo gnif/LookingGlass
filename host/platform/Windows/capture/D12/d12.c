@@ -1,3 +1,25 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2024 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include "d12.h"
+
 #include "interface/capture.h"
 
 #include "common/array.h"
@@ -6,6 +28,7 @@
 #include "com_ref.h"
 
 #include "backend.h"
+#include "command_group.h"
 
 #include <dxgi.h>
 #include <dxgi1_3.h>
@@ -25,21 +48,8 @@ typedef HRESULT (*D3D12GetDebugInterface_t)(
   void   **ppvDebug
 );
 
-typedef struct D12CommandGroup
-{
-  ID3D12CommandAllocator    ** allocator;
-  ID3D12GraphicsCommandList ** gfxList;
-  ID3D12CommandList         ** cmdList;
-  ID3D12Fence               ** fence;
-  HANDLE                       event;
-  UINT64                       fenceValue;
-}
-D12CommandGroup;
-
 struct D12Interface
 {
-  ComScope * comScope;
-
   HMODULE                  d3d12;
   D3D12CreateDevice_t      D3D12CreateDevice;
   D3D12GetDebugInterface_t D3D12GetDebugInterface;
@@ -78,10 +88,9 @@ struct D12Interface
   frameBuffers[0];
 };
 
-// defines
+// gloabls
 
-#define comRef_toGlobal(dst, src) \
-  _comRef_toGlobal(this->comScope, dst, src)
+ComScope * d12_comScope = NULL;
 
 // locals
 
@@ -93,18 +102,6 @@ static bool d12_enumerateDevices(
   IDXGIFactory2 ** factory,
   IDXGIAdapter1 ** adapter,
   IDXGIOutput   ** output);
-
-static bool d12_createCommandGroup(
-  ID3D12Device3            * device,
-  D3D12_COMMAND_LIST_TYPE    type,
-  D12CommandGroup          * dst,
-  LPCWSTR name);
-
-static void d12_freeCommandGroup(
-  D12CommandGroup * grp);
-
-static bool d12_executeCommandGroup(
-  D12CommandGroup * grp);
 
 static ID3D12Resource * d12_frameBufferToResource(
   unsigned      frameBufferIndex,
@@ -180,7 +177,7 @@ static bool d12_create(
 static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 {
   bool result = false;
-  comRef_initGlobalScope(100, this->comScope);
+  comRef_initGlobalScope(100, d12_comScope);
   comRef_scopePush(10);
 
   // create a DXGI factory
@@ -258,7 +255,7 @@ retryCreateCommandQueue:
   }
   ID3D12CommandQueue_SetName(*commandQueue, L"Command Queue");
 
-  if (!d12_createCommandGroup(
+  if (!d12_commandGroupCreate(
     *device, D3D12_COMMAND_LIST_TYPE_COPY, &this->copyCommand, L"Copy"))
     goto exit;
 
@@ -291,7 +288,7 @@ retryCreateCommandQueue:
 exit:
   comRef_scopePop();
   if (!result)
-    comRef_freeScope(&this->comScope);
+    comRef_freeScope(&d12_comScope);
 
   return result;
 }
@@ -306,8 +303,8 @@ static bool d12_deinit(void)
   if (!this->backend->deinit(this->backend))
     result = false;
 
-  d12_freeCommandGroup(&this->copyCommand);
-  comRef_freeScope(&this->comScope);
+  d12_commandGroupFree(&this->copyCommand);
+  comRef_freeScope(&d12_comScope);
   return result;
 }
 
@@ -430,7 +427,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
-  d12_executeCommandGroup(&this->copyCommand);
+  d12_commandGroupExecute(*this->commandQueue, &this->copyCommand);
 
   framebuffer_set_write_ptr(frameBuffer, desc.Height * desc.Width * 4);
   result = CAPTURE_RESULT_OK;
@@ -520,140 +517,6 @@ static bool d12_enumerateDevices(
     (unsigned)(adapterDesc.DedicatedSystemMemory / 1048576));
   DEBUG_INFO("Shared Sys Mem    : %u MiB" ,
     (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
-
-  return true;
-}
-
-static bool d12_createCommandGroup(
-  ID3D12Device3            * device,
-  D3D12_COMMAND_LIST_TYPE    type,
-  D12CommandGroup          * dst,
-  LPCWSTR name)
-{
-  bool result = false;
-  HRESULT hr;
-  comRef_scopePush(10);
-
-  comRef_defineLocal(ID3D12CommandAllocator, allocator);
-  hr = ID3D12Device3_CreateCommandAllocator(
-    device,
-    type,
-    &IID_ID3D12CommandAllocator,
-    (void **)allocator);
-  if (FAILED(hr))
-  {
-    DEBUG_ERROR("Failed to create the ID3D12CommandAllocator");
-    goto exit;
-  }
-  ID3D12CommandAllocator_SetName(*allocator, name);
-
-  comRef_defineLocal(ID3D12GraphicsCommandList, gfxList);
-  hr = ID3D12Device3_CreateCommandList(
-    device,
-    0,
-    type,
-    *allocator,
-    NULL,
-    &IID_ID3D12GraphicsCommandList,
-    (void **)gfxList);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to create ID3D12GraphicsCommandList", hr);
-    goto exit;
-  }
-  ID3D12GraphicsCommandList_SetName(*gfxList, name);
-
-  comRef_defineLocal(ID3D12CommandList, cmdList);
-  hr = ID3D12GraphicsCommandList_QueryInterface(
-    *gfxList, &IID_ID3D12CommandList, (void **)cmdList);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to query the ID3D12CommandList interface", hr);
-    goto exit;
-  }
-
-  comRef_defineLocal(ID3D12Fence, fence);
-  hr = ID3D12Device3_CreateFence(
-    device, 0, D3D12_FENCE_FLAG_NONE, &IID_ID3D12Fence, (void **)fence);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to create ID3D12Fence", hr);
-    goto exit;
-  }
-
-  // Create the completion event for the fence
-  HANDLE event = CreateEvent(NULL, FALSE, FALSE, NULL);
-  if (!event)
-  {
-    DEBUG_WINERROR("Failed to create the completion event", GetLastError());
-    goto exit;
-  }
-
-  comRef_toGlobal(dst->allocator, allocator);
-  comRef_toGlobal(dst->gfxList  , gfxList  );
-  comRef_toGlobal(dst->cmdList  , cmdList  );
-  comRef_toGlobal(dst->fence    , fence    );
-  dst->event      = event;
-  dst->fenceValue = 0;
-
-  result = true;
-
-exit:
-  comRef_scopePop();
-  return result;
-}
-
-static void d12_freeCommandGroup(
-  D12CommandGroup * grp)
-{
-  // com objet release is handled by comRef, but the handle is not
-  if (grp->event)
-  {
-    CloseHandle(grp->event);
-    grp->event = NULL;
-  }
-}
-
-static bool d12_executeCommandGroup(
-  D12CommandGroup * grp)
-{
-  HRESULT hr = ID3D12GraphicsCommandList_Close(*grp->gfxList);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to close the command list", hr);
-    return false;
-  }
-
-  ID3D12CommandQueue_ExecuteCommandLists(
-    *this->commandQueue, 1, grp->cmdList);
-
-  hr = ID3D12CommandQueue_Signal(
-    *this->commandQueue, *grp->fence, ++grp->fenceValue);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to set the fence signal", hr);
-    return false;
-  }
-
-  if (ID3D12Fence_GetCompletedValue(*grp->fence) < grp->fenceValue)
-  {
-    ID3D12Fence_SetEventOnCompletion(*grp->fence, grp->fenceValue, grp->event);
-    WaitForSingleObject(grp->event, INFINITE);
-  }
-
-  hr = ID3D12CommandAllocator_Reset(*grp->allocator);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to reset the command allocator", hr);
-    return false;
-  }
-
-  hr = ID3D12GraphicsCommandList_Reset(*grp->gfxList, *grp->allocator, NULL);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to reset the graphics command list", hr);
-    return false;
-  }
 
   return true;
 }
