@@ -41,7 +41,11 @@
 typedef struct DDCacheInfo
 {
   D3D11_TEXTURE2D_DESC format;
-  ID3D11Texture2D   ** srcTex;
+
+  /* this value is likely released, only used to check if the texture supplied
+  by DD is different, do not rely on it pointing to valid memory! */
+  ID3D11Texture2D    * srcTex;
+
   ID3D12Resource    ** d12Res;
   ID3D11Fence       ** fence;
   ID3D12Fence       ** d12Fence;
@@ -386,7 +390,10 @@ retry:
 
   // if this was not a frame update, go back and try again
   if (frameInfo.LastPresentTime.QuadPart == 0)
+  {
+    comRef_release(res);
     goto retry;
+  }
 
 exit:
   comRef_scopePop();
@@ -605,7 +612,7 @@ static bool d12_dd_getCache(DDInstance * this,
     }
 
     // check for a resource match
-    if (*cache->srcTex != srcTex)
+    if (cache->srcTex != srcTex)
       continue;
 
     // check if the match is not valid
@@ -715,8 +722,8 @@ static bool d12_dd_convertResource(DDInstance * this,
   CloseHandle(sharedHandle);
 
   // store the details
-  ID3D11Texture2D_AddRef(srcTex);
-  comRef_toGlobal(cache->srcTex  , &srcTex );
+  cache->srcTex = srcTex;
+
   comRef_toGlobal(cache->d12Res  , dst     );
   comRef_toGlobal(cache->fence   , fence   );
   comRef_toGlobal(cache->d12Fence, d12Fence);
@@ -730,7 +737,7 @@ exit:
   return result;
 }
 
-D12Backend D12Backend_DD =
+const D12Backend D12Backend_DD =
 {
   .name     = "Desktop Duplication",
   .codeName = "DD",

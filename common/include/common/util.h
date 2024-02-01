@@ -21,6 +21,8 @@
 #ifndef _H_LG_COMMON_UTIL_
 #define _H_LG_COMMON_UTIL_
 
+#include <stddef.h>
+
 #ifndef min
 #define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); \
     _a < _b ? _a : _b; })
@@ -42,5 +44,8 @@
 
 #define unlikely(expr) __builtin_expect(!!(expr), 0)
 #define likely(expr)   __builtin_expect(!!(expr), 1)
+
+#define _STR(x) #x
+#define STR(x) _STR(x)
 
 #endif

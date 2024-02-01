@@ -129,13 +129,21 @@ bool d12_commandGroupExecute(ID3D12CommandQueue * queue, D12CommandGroup * grp)
     return false;
   }
 
-  if (ID3D12Fence_GetCompletedValue(*grp->fence) < grp->fenceValue)
-  {
-    ID3D12Fence_SetEventOnCompletion(*grp->fence, grp->fenceValue, grp->event);
-    WaitForSingleObject(grp->event, INFINITE);
-  }
+  return true;
+}
 
-  hr = ID3D12CommandAllocator_Reset(*grp->allocator);
+void d12_commandGroupWait(D12CommandGroup * grp)
+{
+  if (ID3D12Fence_GetCompletedValue(*grp->fence) >= grp->fenceValue)
+    return;
+
+  ID3D12Fence_SetEventOnCompletion(*grp->fence, grp->fenceValue, grp->event);
+  WaitForSingleObject(grp->event, INFINITE);
+}
+
+bool d12_commandGroupReset(D12CommandGroup * grp)
+{
+  HRESULT hr = ID3D12CommandAllocator_Reset(*grp->allocator);
   if (FAILED(hr))
   {
     DEBUG_WINERROR("Failed to reset the command allocator", hr);

@@ -42,4 +42,8 @@ void d12_commandGroupFree(D12CommandGroup * grp);
 
 bool d12_commandGroupExecute(ID3D12CommandQueue * queue, D12CommandGroup * grp);
 
+void d12_commandGroupWait(D12CommandGroup * grp);
+
+bool d12_commandGroupReset(D12CommandGroup * grp);
+
 #endif

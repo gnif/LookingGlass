@@ -57,8 +57,8 @@ struct D12Backend
     unsigned frameBufferIndex);
 };
 
-static inline bool d12_backendCreate(
-  D12Backend * backend, D12Backend ** instance, unsigned frameBuffers)
+static inline bool d12_backendCreate(const D12Backend * backend,
+  D12Backend ** instance, unsigned frameBuffers)
 {
   if (!backend->create(instance, frameBuffers))
     return false;
@@ -90,6 +90,6 @@ static inline ID3D12Resource * d12_backendFetch(D12Backend * instance,
 
 // Backend defines
 
-extern D12Backend D12Backend_DD;
+extern const D12Backend D12Backend_DD;
 
 #endif

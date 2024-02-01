@@ -5,6 +5,7 @@ add_library(capture_D12 STATIC
   d12.c
   command_group.c
   backend/dd.c
+  effect/rgb24.c
 )
 
 target_link_libraries(capture_D12

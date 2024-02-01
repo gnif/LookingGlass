@@ -28,6 +28,7 @@
 #include "com_ref.h"
 
 #include "backend.h"
+#include "effect.h"
 #include "command_group.h"
 
 #include <dxgi.h>
@@ -35,30 +36,17 @@
 #include <d3dcommon.h>
 
 // definitions
-
-typedef HRESULT (*D3D12CreateDevice_t)(
-  IUnknown          *pAdapter,
-  D3D_FEATURE_LEVEL MinimumFeatureLevel,
-  REFIID            riid,
-  void              **ppDevice
-);
-
-typedef HRESULT (*D3D12GetDebugInterface_t)(
-  REFIID riid,
-  void   **ppvDebug
-);
-
 struct D12Interface
 {
-  HMODULE                  d3d12;
-  D3D12CreateDevice_t      D3D12CreateDevice;
-  D3D12GetDebugInterface_t D3D12GetDebugInterface;
+  HMODULE d3d12;
 
   IDXGIFactory2      ** factory;
   ID3D12Device3      ** device;
 
-  ID3D12CommandQueue ** commandQueue;
+  ID3D12CommandQueue ** copyQueue;
+  ID3D12CommandQueue ** computeQueue;
   D12CommandGroup       copyCommand;
+  D12CommandGroup       computeCommand;
 
   void        * ivshmemBase;
   ID3D12Heap ** ivshmemHeap;
@@ -67,14 +55,19 @@ struct D12Interface
   CapturePostPointerBuffer postPointerBufferFn;
 
   D12Backend * backend;
+  D12Effect  * rgb24;
 
   // capture format tracking
-  D3D12_RESOURCE_DESC lastFormat;
+  D3D12_RESOURCE_DESC captureFormat;
   unsigned            formatVer;
+
+  // output format tracking
+  D3D12_RESOURCE_DESC dstFormat;
 
   // options
   bool debug;
 
+  unsigned frameBufferCount;
   // must be last
   struct
   {
@@ -90,7 +83,10 @@ struct D12Interface
 
 // gloabls
 
+struct DX12 DX12 = {0};
 ComScope * d12_comScope = NULL;
+
+// defines
 
 // locals
 
@@ -107,19 +103,6 @@ static ID3D12Resource * d12_frameBufferToResource(
   unsigned      frameBufferIndex,
   FrameBuffer * frameBuffer,
   unsigned size);
-
-// workarounds
-
-static D3D12_HEAP_DESC _ID3D12Heap_GetDesc(ID3D12Heap* This)
-{
-  D3D12_HEAP_DESC __ret;
-  return *This->lpVtbl->GetDesc(This, &__ret);
-}
-
-static D3D12_RESOURCE_DESC _ID3D12Resource_GetDesc(ID3D12Resource* This) {
-    D3D12_RESOURCE_DESC __ret;
-    return *This->lpVtbl->GetDesc(This,&__ret);
-}
 
 // implementation
 
@@ -154,11 +137,15 @@ static bool d12_create(
     return false;
   }
 
-  this->D3D12CreateDevice = (D3D12CreateDevice_t)
+  DX12.D3D12CreateDevice = (typeof(DX12.D3D12CreateDevice))
     GetProcAddress(this->d3d12, "D3D12CreateDevice");
 
-  this->D3D12GetDebugInterface = (D3D12GetDebugInterface_t)
+  DX12.D3D12GetDebugInterface = (typeof(DX12.D3D12GetDebugInterface))
     GetProcAddress(this->d3d12, "D3D12GetDebugInterface");
+
+  DX12.D3D12SerializeVersionedRootSignature =
+    (typeof(DX12.D3D12SerializeVersionedRootSignature))
+      GetProcAddress(this->d3d12, "D3D12SerializeVersionedRootSignature");
 
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
@@ -171,6 +158,7 @@ static bool d12_create(
     return false;
   }
 
+  this->frameBufferCount = frameBuffers;
   return true;
 }
 
@@ -202,7 +190,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   if (this->debug)
   {
     comRef_defineLocal(ID3D12Debug1, debug);
-    hr = this->D3D12GetDebugInterface(&IID_ID3D12Debug1, (void **)debug);
+    hr = DX12.D3D12GetDebugInterface(&IID_ID3D12Debug1, (void **)debug);
     if (FAILED(hr))
     {
       DEBUG_WINERROR("D3D12GetDebugInterface", hr);
@@ -216,7 +204,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 
   // create the D3D12 device
   comRef_defineLocal(ID3D12Device3, device);
-  hr = this->D3D12CreateDevice(
+  hr = DX12.D3D12CreateDevice(
     (IUnknown *)*adapter,
     D3D_FEATURE_LEVEL_12_0,
     &IID_ID3D12Device3,
@@ -237,10 +225,10 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE,
   };
 
-  comRef_defineLocal(ID3D12CommandQueue, commandQueue);
+  comRef_defineLocal(ID3D12CommandQueue, copyQueue);
 retryCreateCommandQueue:
   hr = ID3D12Device3_CreateCommandQueue(
-    *device, &queueDesc, &IID_ID3D12CommandQueue, (void **)commandQueue);
+    *device, &queueDesc, &IID_ID3D12CommandQueue, (void **)copyQueue);
   if (FAILED(hr))
   {
     if (queueDesc.Priority == D3D12_COMMAND_QUEUE_PRIORITY_GLOBAL_REALTIME)
@@ -250,13 +238,35 @@ retryCreateCommandQueue:
       goto retryCreateCommandQueue;
     }
 
-    DEBUG_WINERROR("Failed to create ID3D12CommandQueue", hr);
+    DEBUG_WINERROR("Failed to create ID3D12CommandQueue (copy)", hr);
     goto exit;
   }
-  ID3D12CommandQueue_SetName(*commandQueue, L"Command Queue");
+  ID3D12CommandQueue_SetName(*copyQueue, L"Copy");
+
+  // create the compute queue
+  D3D12_COMMAND_QUEUE_DESC computeQueueDesc =
+  {
+    .Type  = D3D12_COMMAND_LIST_TYPE_COMPUTE,
+    .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+  };
+  queueDesc.Priority = queueDesc.Priority;
+
+  comRef_defineLocal(ID3D12CommandQueue, computeQueue);
+  hr = ID3D12Device3_CreateCommandQueue(
+    *device, &computeQueueDesc, &IID_ID3D12CommandQueue, (void **)computeQueue);
+  if (FAILED(hr))
+  {
+    DEBUG_WINERROR("Failed to create the ID3D12CommandQueue (compute)", hr);
+    goto exit;
+  }
+  ID3D12CommandQueue_SetName(*computeQueue, L"Compute");
 
   if (!d12_commandGroupCreate(
     *device, D3D12_COMMAND_LIST_TYPE_COPY, &this->copyCommand, L"Copy"))
+    goto exit;
+
+  if (!d12_commandGroupCreate(
+    *device, D3D12_COMMAND_LIST_TYPE_COMPUTE, &this->computeCommand, L"Compute"))
     goto exit;
 
   // Create the IVSHMEM heap
@@ -271,17 +281,21 @@ retryCreateCommandQueue:
   }
 
   // Adjust the alignSize based on the required heap alignment
-  D3D12_HEAP_DESC heapDesc = _ID3D12Heap_GetDesc(*ivshmemHeap);
+  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
   *alignSize = heapDesc.Alignment;
 
   // initialize the backend
   if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output))
     goto exit;
 
-  comRef_toGlobal(this->factory     , factory     );
-  comRef_toGlobal(this->device      , device      );
-  comRef_toGlobal(this->commandQueue, commandQueue);
-  comRef_toGlobal(this->ivshmemHeap , ivshmemHeap );
+  if (!d12_effectCreate(&D12Effect_RGB24, &this->rgb24, *device))
+    goto exit;
+
+  comRef_toGlobal(this->factory     , factory      );
+  comRef_toGlobal(this->device      , device       );
+  comRef_toGlobal(this->copyQueue   , copyQueue    );
+  comRef_toGlobal(this->computeQueue, computeQueue );
+  comRef_toGlobal(this->ivshmemHeap , ivshmemHeap  );
 
   result = true;
 
@@ -300,11 +314,29 @@ static void d12_stop(void)
 static bool d12_deinit(void)
 {
   bool result = true;
-  if (!this->backend->deinit(this->backend))
+  d12_effectFree(&this->rgb24);
+
+  if (!d12_backendDeinit(this->backend))
     result = false;
 
-  d12_commandGroupFree(&this->copyCommand);
+  d12_commandGroupFree(&this->copyCommand   );
+  d12_commandGroupFree(&this->computeCommand);
+
+  IDXGIFactory2 * factory = *this->factory;
+  IDXGIFactory2_AddRef(factory);
   comRef_freeScope(&d12_comScope);
+  if (IDXGIFactory2_Release(factory) != 0)
+    DEBUG_WARN("MEMORY LEAK");
+
+  // zero the framebuffers
+  memset(this->frameBuffers, 0,
+    sizeof(*this->frameBuffers) * this->frameBufferCount);
+
+  /* zero the formats so we properly reinit otherwise we wont detect the format
+  change and setup the effect chain */
+  memset(&this->captureFormat, 0, sizeof(this->captureFormat));
+  memset(&this->dstFormat    , 0, sizeof(this->dstFormat    ));
+
   return result;
 }
 
@@ -338,28 +370,47 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     goto exit;
   }
 
-  D3D12_RESOURCE_DESC desc = _ID3D12Resource_GetDesc(*src);
-  if (desc.Width != this->lastFormat.Width ||
-      desc.Height != this->lastFormat.Height ||
-      desc.Format != this->lastFormat.Format)
+
+  D3D12_RESOURCE_DESC srcFormat = ID3D12Resource_GetDesc(*src);
+  D3D12_RESOURCE_DESC dstFormat = srcFormat;
+
+  // if the input format changed, reconfigure the effects
+  if (dstFormat.Width  != this->captureFormat.Width  ||
+      dstFormat.Height != this->captureFormat.Height ||
+      dstFormat.Format != this->captureFormat.Format)
   {
-    ++this->formatVer;
-    memcpy(&this->lastFormat, &desc, sizeof(desc));
+    this->captureFormat = dstFormat;
+
+    //TODO: loop through an effect array
+    if (!d12_effectSetFormat(this->rgb24, *this->device, &srcFormat, &dstFormat))
+    {
+      DEBUG_ERROR("Failed to set the effect input format");
+      goto exit;
+    }
+
+    // if the output format changed
+    if (dstFormat.Width  != this->dstFormat.Width  ||
+        dstFormat.Height != this->dstFormat.Height ||
+        dstFormat.Format != this->dstFormat.Format)
+    {
+      ++this->formatVer;
+      this->dstFormat = dstFormat;
+    }
   }
 
-  const unsigned int maxRows = maxFrameSize / (desc.Width * 4);
+  const unsigned int maxRows = maxFrameSize / (dstFormat.Width * 4);
 
   frame->formatVer        = this->formatVer;
-  frame->screenWidth      = desc.Width;
-  frame->screenHeight     = desc.Height;
-  frame->dataWidth        = desc.Width;
-  frame->dataHeight       = min(maxRows, desc.Height);
-  frame->frameWidth       = desc.Width;
-  frame->frameHeight      = desc.Height;
-  frame->truncated        = maxRows < desc.Height;
-  frame->pitch            = desc.Width * 4;
-  frame->stride           = desc.Width;
-  frame->format           = CAPTURE_FMT_BGRA;
+  frame->screenWidth      = srcFormat.Width;
+  frame->screenHeight     = srcFormat.Height;
+  frame->dataWidth        = dstFormat.Width;
+  frame->dataHeight       = min(maxRows, dstFormat.Height);
+  frame->frameWidth       = srcFormat.Width;
+  frame->frameHeight      = srcFormat.Height;
+  frame->truncated        = maxRows < dstFormat.Height;
+  frame->pitch            = dstFormat.Width * 4;
+  frame->stride           = dstFormat.Width;
+  frame->format           = CAPTURE_FMT_BGR_32;
   frame->hdr              = false;
   frame->hdrPQ            = false;
   frame->rotation         = CAPTURE_ROT_0;
@@ -376,7 +427,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   FrameBuffer * frameBuffer, const size_t maxFrameSize)
 {
   CaptureResult result = CAPTURE_RESULT_ERROR;
-  comRef_scopePush(2);
+  comRef_scopePush(3);
 
   comRef_defineLocal(ID3D12Resource, src);
   *src = d12_backendFetch(this->backend, frameBufferIndex);
@@ -392,11 +443,19 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (!*dst)
     goto exit;
 
+  // place a fence into the compute queue
+  result = d12_backendSync(this->backend, *this->computeQueue);
+  if (result != CAPTURE_RESULT_OK)
+    goto exit;
+
+  ID3D12Resource * next = *src;
+  next = d12_effectRun(
+    this->rgb24, *this->device, *this->computeCommand.gfxList, next);
+
   // copy into the framebuffer resource
-  D3D12_RESOURCE_DESC desc = _ID3D12Resource_GetDesc(*src);
   D3D12_TEXTURE_COPY_LOCATION srcLoc =
   {
-    .pResource        = *src,
+    .pResource        = next,
     .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
     .SubresourceIndex = 0
   };
@@ -410,11 +469,11 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
       .Offset = 0,
       .Footprint =
       {
-        .Format   = desc.Format,
-        .Width    = desc.Width,
-        .Height   = desc.Height,
+        .Format   = this->dstFormat.Format,
+        .Width    = this->dstFormat.Width,
+        .Height   = this->dstFormat.Height,
         .Depth    = 1,
-        .RowPitch = desc.Width * 4
+        .RowPitch = this->dstFormat.Width * 4
       }
     }
   };
@@ -422,14 +481,21 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   ID3D12GraphicsCommandList_CopyTextureRegion(
     *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
 
-  // allow the backend to insert a fence into the command queue if it needs it
-  result = d12_backendSync(this->backend, *this->commandQueue);
-  if (result != CAPTURE_RESULT_OK)
+  // execute all the commands
+  d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
+  d12_commandGroupWait(&this->computeCommand);
+  if (!d12_commandGroupReset(&this->computeCommand))
     goto exit;
 
-  d12_commandGroupExecute(*this->commandQueue, &this->copyCommand);
+  d12_commandGroupExecute(*this->copyQueue   , &this->copyCommand   );
+  d12_commandGroupWait(&this->copyCommand);
+  if (!d12_commandGroupReset(&this->copyCommand))
+    goto exit;
 
-  framebuffer_set_write_ptr(frameBuffer, desc.Height * desc.Width * 4);
+  // signal the frame is complete
+  framebuffer_set_write_ptr(frameBuffer,
+    this->dstFormat.Height * this->dstFormat.Width * 4);
+
   result = CAPTURE_RESULT_OK;
 
 exit:
