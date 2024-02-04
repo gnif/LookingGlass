@@ -372,13 +372,15 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
 
 
   D3D12_RESOURCE_DESC srcFormat = ID3D12Resource_GetDesc(*src);
-  D3D12_RESOURCE_DESC dstFormat = srcFormat;
+  D3D12_RESOURCE_DESC dstFormat = this->dstFormat;
 
   // if the input format changed, reconfigure the effects
-  if (dstFormat.Width  != this->captureFormat.Width  ||
+  if (dstFormat.Width  == 0 ||
+      dstFormat.Width  != this->captureFormat.Width  ||
       dstFormat.Height != this->captureFormat.Height ||
       dstFormat.Format != this->captureFormat.Format)
   {
+    dstFormat           = srcFormat;
     this->captureFormat = dstFormat;
 
     //TODO: loop through an effect array
