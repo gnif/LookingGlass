@@ -55,12 +55,17 @@ void comRef_freeScope(ComScope ** instance)
     typeof(scope->refs) ref = &scope->refs[i];
     if (ref->ref)
     {
-      IUnknown_Release(ref->ref);
+      ULONG count = IUnknown_Release(ref->ref);
+
+#ifdef DEBUG_COMREF
+      if (count > 0 && scope->free)
+        DEBUG_INFO("comRef %s release is %lu", ref->where, count);
+#else
+      (void)count;
+#endif
+
       ref->ref = NULL;
     }
-
-    *ref->ptr = NULL;
-    ref->ptr = NULL;
   }
 
   if (scope->threadSafe)
@@ -72,7 +77,7 @@ void comRef_freeScope(ComScope ** instance)
   *instance = NULL;
 }
 
-IUnknown ** comRef_new(ComScope * scope, IUnknown *** dst)
+IUnknown ** comRef_new(ComScope * scope, IUnknown *** dst, const char * where)
 {
   /* check if the value it points to is already in our memory range and if it
    * does, then reuse it */
@@ -97,8 +102,10 @@ IUnknown ** comRef_new(ComScope * scope, IUnknown *** dst)
   if (scope->threadSafe)
     LG_LOCK(scope->lock);
 
-  scope->refs[scope->used].ptr = dst;
-  *dst = &scope->refs[scope->used].ref;
+  typeof(scope->refs[0]) * ref = &scope->refs[scope->used];
+  ref->where = where;
+  *dst = &ref->ref;
+
   ++scope->used;
 
   if (scope->threadSafe)

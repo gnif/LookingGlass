@@ -25,6 +25,7 @@
 #include <windows.h>
 #include <malloc.h>
 
+#include "common/util.h"
 #include "common/locking.h"
 
 /**
@@ -42,10 +43,10 @@ struct ComScope
   unsigned      used;
   struct
   {
-    IUnknown *** ptr;
     IUnknown   * ref;
+    const char * where;
   }
-  * refs;
+  *refs;
 
   void (*free)(void * ptr);
 };
@@ -55,7 +56,7 @@ void comRef_initScope(unsigned size, ComScope ** instance,
 
 void comRef_freeScope(ComScope ** instance);
 
-IUnknown ** comRef_new(ComScope * scope, IUnknown *** dst);
+IUnknown ** comRef_new(ComScope * scope, IUnknown *** dst, const char * where);
 
 #define comRef_initGlobalScope(size, scope) \
   comRef_initScope((size), &(scope), malloc, free, true)
@@ -73,11 +74,13 @@ IUnknown ** comRef_new(ComScope * scope, IUnknown *** dst);
 
 #define comRef_defineLocal(type, name) \
   type ** name = NULL; \
-  comRef_new(_comRef_localScope, (IUnknown ***)&(name));
+  comRef_new(_comRef_localScope, (IUnknown ***)&(name), \
+    STR(name));
 
 #define _comRef_toGlobal(globalScope, dst, src) \
 { \
-  IUnknown ** global = comRef_new((globalScope), (IUnknown ***)&(dst)); \
+  IUnknown ** global = comRef_new((globalScope), (IUnknown ***)&(dst), \
+    STR(dst)); \
   *global = (IUnknown *)*(src); \
   *(src)  = NULL; \
 }
