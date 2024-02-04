@@ -25,6 +25,7 @@
 #include "common/array.h"
 #include "common/debug.h"
 #include "common/windebug.h"
+#include "common/option.h"
 #include "com_ref.h"
 
 #include "backend.h"
@@ -55,7 +56,7 @@ struct D12Interface
   CapturePostPointerBuffer postPointerBufferFn;
 
   D12Backend * backend;
-  D12Effect  * rgb24;
+  D12Effect  * effectRGB24;
 
   // capture format tracking
   D3D12_RESOURCE_DESC captureFormat;
@@ -66,6 +67,7 @@ struct D12Interface
 
   // options
   bool debug;
+  bool allowRGB24;
 
   unsigned frameBufferCount;
   // must be last
@@ -113,6 +115,20 @@ static const char * d12_getName(void)
 
 static void d12_initOptions(void)
 {
+  struct Option options[] =
+  {
+    {
+      .module       = "d12",
+      .name         = "allowRGB24",
+      .description  =
+        "Losslessly pack 32-bit RGBA8 into 24-bit RGB (saves bandwidth)",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = false
+    },
+    {0}
+  };
+
+  option_register(options);
 }
 
 static bool d12_create(
@@ -159,6 +175,9 @@ static bool d12_create(
   }
 
   this->frameBufferCount = frameBuffers;
+
+  this->allowRGB24 = option_get_bool("d12", "allowRGB24");
+
   return true;
 }
 
@@ -288,8 +307,11 @@ retryCreateCommandQueue:
   if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output))
     goto exit;
 
-  if (!d12_effectCreate(&D12Effect_RGB24, &this->rgb24, *device))
-    goto exit;
+  if (this->allowRGB24)
+  {
+    if (!d12_effectCreate(&D12Effect_RGB24, &this->effectRGB24, *device))
+      goto exit;
+  }
 
   comRef_toGlobal(this->factory     , factory      );
   comRef_toGlobal(this->device      , device       );
@@ -314,7 +336,7 @@ static void d12_stop(void)
 static bool d12_deinit(void)
 {
   bool result = true;
-  d12_effectFree(&this->rgb24);
+  d12_effectFree(&this->effectRGB24);
 
   if (!d12_backendDeinit(this->backend))
     result = false;
@@ -381,13 +403,17 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       dstFormat.Format != this->captureFormat.Format)
   {
     dstFormat           = srcFormat;
-    this->captureFormat = dstFormat;
+    this->captureFormat = srcFormat;
 
     //TODO: loop through an effect array
-    if (!d12_effectSetFormat(this->rgb24, *this->device, &srcFormat, &dstFormat))
+    if (this->allowRGB24)
     {
-      DEBUG_ERROR("Failed to set the effect input format");
-      goto exit;
+      if (!d12_effectSetFormat(
+        this->effectRGB24, *this->device, &srcFormat, &dstFormat))
+      {
+        DEBUG_ERROR("Failed to set the effect input format");
+        goto exit;
+      }
     }
 
     // if the output format changed
@@ -412,7 +438,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->truncated        = maxRows < dstFormat.Height;
   frame->pitch            = dstFormat.Width * 4;
   frame->stride           = dstFormat.Width;
-  frame->format           = CAPTURE_FMT_BGR_32;
+  frame->format           = this->allowRGB24 ? CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
   frame->hdr              = false;
   frame->hdrPQ            = false;
   frame->rotation         = CAPTURE_ROT_0;
@@ -445,14 +471,19 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (!*dst)
     goto exit;
 
-  // place a fence into the compute queue
-  result = d12_backendSync(this->backend, *this->computeQueue);
+  // place a fence into the queue
+  result = d12_backendSync(this->backend,
+    this->allowRGB24 ? *this->computeQueue : *this->copyQueue);
+
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
   ID3D12Resource * next = *src;
-  next = d12_effectRun(
-    this->rgb24, *this->device, *this->computeCommand.gfxList, next);
+  if (this->allowRGB24)
+  {
+    next = d12_effectRun(
+      this->effectRGB24, *this->device, *this->computeCommand.gfxList, next);
+  }
 
   // copy into the framebuffer resource
   D3D12_TEXTURE_COPY_LOCATION srcLoc =
@@ -484,11 +515,14 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
 
   // execute the compute commands
-  d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
+  if (this->allowRGB24)
+  {
+    d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
 
-  // insert a fence to wait for the compute commands to finish
-  ID3D12CommandQueue_Wait(*this->copyQueue,
-    *this->computeCommand.fence, this->computeCommand.fenceValue);
+    // insert a fence to wait for the compute commands to finish
+    ID3D12CommandQueue_Wait(*this->copyQueue,
+      *this->computeCommand.fence, this->computeCommand.fenceValue);
+  }
 
   // execute the copy commands
   d12_commandGroupExecute(*this->copyQueue, &this->copyCommand);
@@ -501,8 +535,11 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     this->dstFormat.Height * this->dstFormat.Width * 4);
 
   // reset the command queues
-  if (!d12_commandGroupReset(&this->computeCommand) ||
-      !d12_commandGroupReset(&this->copyCommand))
+  if (this->allowRGB24)
+    if (!d12_commandGroupReset(&this->computeCommand))
+      goto exit;
+
+  if (!d12_commandGroupReset(&this->copyCommand))
     goto exit;
 
   result = CAPTURE_RESULT_OK;

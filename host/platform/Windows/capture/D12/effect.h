@@ -55,7 +55,11 @@ static inline bool d12_effectCreate(const D12Effect * effect,
 }
 
 static inline void d12_effectFree(D12Effect ** instance)
-  { (*instance)->free(instance); }
+{
+  if (*instance)
+    (*instance)->free(instance);
+  *instance = NULL;
+}
 
 static inline bool d12_effectSetFormat(D12Effect * effect,
   ID3D12Device3             * device,
