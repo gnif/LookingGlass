@@ -483,20 +483,27 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   ID3D12GraphicsCommandList_CopyTextureRegion(
     *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
 
-  // execute all the commands
+  // execute the compute commands
   d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
-  d12_commandGroupWait(&this->computeCommand);
-  if (!d12_commandGroupReset(&this->computeCommand))
-    goto exit;
 
-  d12_commandGroupExecute(*this->copyQueue   , &this->copyCommand   );
+  // insert a fence to wait for the compute commands to finish
+  ID3D12CommandQueue_Wait(*this->copyQueue,
+    *this->computeCommand.fence, this->computeCommand.fenceValue);
+
+  // execute the copy commands
+  d12_commandGroupExecute(*this->copyQueue, &this->copyCommand);
+
+  // wait for the copy to complete
   d12_commandGroupWait(&this->copyCommand);
-  if (!d12_commandGroupReset(&this->copyCommand))
-    goto exit;
 
   // signal the frame is complete
   framebuffer_set_write_ptr(frameBuffer,
     this->dstFormat.Height * this->dstFormat.Width * 4);
+
+  // reset the command queues
+  if (!d12_commandGroupReset(&this->computeCommand) ||
+      !d12_commandGroupReset(&this->copyCommand))
+    goto exit;
 
   result = CAPTURE_RESULT_OK;
 
