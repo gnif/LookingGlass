@@ -85,7 +85,10 @@ static void xcb_initOptions(void)
   option_register(options);
 }
 
-static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
+static bool xcb_create(
+  CaptureGetPointerBuffer  getPointerBufferFn,
+  CapturePostPointerBuffer postPointerBufferFn,
+  unsigned                 frameBuffers)
 {
   DEBUG_ASSERT(!this);
   this             = calloc(1, sizeof(*this));
@@ -106,7 +109,7 @@ static bool xcb_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPo
   return true;
 }
 
-static bool xcb_init(void)
+static bool xcb_init(void * ivshmemBase, unsigned * alignSize)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(!this->initialized);
@@ -241,7 +244,8 @@ static void xcb_free(void)
   this = NULL;
 }
 
-static CaptureResult xcb_capture(void)
+static CaptureResult xcb_capture(
+  unsigned frameBufferIndex, FrameBuffer * frameBuffer)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
@@ -266,8 +270,8 @@ static CaptureResult xcb_capture(void)
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_waitFrame(CaptureFrame * frame,
-    const size_t maxFrameSize)
+static CaptureResult xcb_waitFrame(unsigned frameBufferIndex,
+  CaptureFrame * frame, const size_t maxFrameSize)
 {
   lgWaitEvent(this->frameEvent, TIMEOUT_INFINITE);
 
@@ -290,7 +294,8 @@ static CaptureResult xcb_waitFrame(CaptureFrame * frame,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult xcb_getFrame(FrameBuffer * frame, int frameIndex)
+static CaptureResult xcb_getFrame(unsigned frameBufferIndex,
+  FrameBuffer * frameBuffer, const size_t maxFrameSize)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
@@ -303,7 +308,7 @@ static CaptureResult xcb_getFrame(FrameBuffer * frame, int frameIndex)
     return CAPTURE_RESULT_ERROR;
   }
 
-  framebuffer_write(frame, this->data, this->pitch);
+  framebuffer_write(frameBuffer, this->data, this->pitch);
   free(img);
 
   this->hasFrame = false;
@@ -371,7 +376,7 @@ static int pointerThread(void * unused)
       pointer.height  = curReply->height;
       pointer.pitch   = curReply->width * 4;
 
-      this->postPointerBufferFn(pointer);
+      this->postPointerBufferFn(&pointer);
     }
 
     free(curReply);
