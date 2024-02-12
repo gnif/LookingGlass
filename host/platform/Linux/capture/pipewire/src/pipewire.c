@@ -68,7 +68,10 @@ static const char * pipewire_getName(void)
   return "PipeWire";
 }
 
-static bool pipewire_create(CaptureGetPointerBuffer getPointerBufferFn, CapturePostPointerBuffer postPointerBufferFn)
+static bool pipewire_create(
+  CaptureGetPointerBuffer  getPointerBufferFn,
+  CapturePostPointerBuffer postPointerBufferFn,
+  unsigned                 frameBuffers)
 {
   DEBUG_ASSERT(!this);
   pw_init(NULL, NULL);
@@ -231,7 +234,7 @@ static const struct pw_stream_events streamEvents = {
   .param_changed = streamParamChangedCallback,
 };
 
-static bool pipewire_init(void)
+static bool pipewire_init(void * ivshmemBase, unsigned * alignSize)
 {
   DEBUG_ASSERT(this);
   this->stop = false;
@@ -400,7 +403,8 @@ static void pipewire_free(void)
   this = NULL;
 }
 
-static CaptureResult pipewire_capture(void)
+static CaptureResult pipewire_capture(
+  unsigned frameBufferIndex, FrameBuffer * frameBuffer)
 {
   int result;
 
@@ -424,8 +428,8 @@ restart:
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
-    const size_t maxFrameSize)
+static CaptureResult pipewire_waitFrame(unsigned frameBufferIndex,
+  CaptureFrame * frame, const size_t maxFrameSize)
 {
   if (this->stop)
     return CAPTURE_RESULT_REINIT;
@@ -454,12 +458,13 @@ static CaptureResult pipewire_waitFrame(CaptureFrame * frame,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult pipewire_getFrame(FrameBuffer * frame, int frameIndex)
+static CaptureResult pipewire_getFrame(unsigned frameBufferIndex,
+  FrameBuffer * frameBuffer, const size_t maxFrameSize)
 {
   if (this->stop || !this->frameData)
     return CAPTURE_RESULT_REINIT;
 
-  framebuffer_write(frame, this->frameData,
+  framebuffer_write(frameBuffer, this->frameData,
       this->dataHeight * this->pitch);
 
   pw_thread_loop_accept(this->threadLoop);
