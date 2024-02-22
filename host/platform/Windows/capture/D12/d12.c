@@ -118,6 +118,20 @@ static void d12_initOptions(void)
   struct Option options[] =
   {
     {
+      .module         = "d12",
+      .name           = "adapter",
+      .description    = "The name of the adapter to capture",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = NULL
+    },
+    {
+      .module         = "d12",
+      .name           = "output",
+      .description    = "The name of the adapter's output to capture",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = NULL
+    },
+    {
       .module       = "d12",
       .name         = "allowRGB24",
       .description  =
@@ -557,6 +571,23 @@ static bool d12_enumerateDevices(
   DXGI_ADAPTER_DESC1 adapterDesc;
   DXGI_OUTPUT_DESC   outputDesc;
 
+  const char * _optAdapter = option_get_string("d12", "adapter");
+  const char * _optOutput  = option_get_string("d12", "output" );
+
+  wchar_t * optAdapter = NULL;
+  wchar_t * optOutput  = NULL;
+  if (_optAdapter)
+  {
+    optAdapter = malloc((strlen(_optAdapter) + 1) * 2);
+    mbstowcs(optAdapter, _optAdapter, strlen(_optAdapter));
+  }
+
+  if (_optOutput)
+  {
+    optOutput = malloc((strlen(_optOutput) + 1) * 2);
+    mbstowcs(optOutput, _optOutput, strlen(_optOutput));
+  }
+
   for(
     int i = 0;
     IDXGIFactory2_EnumAdapters1(*factory, i, adapter)
@@ -595,7 +626,15 @@ static bool d12_enumerateDevices(
     if (skip)
       continue;
 
-    // FIXME: Allow specifying the specific adapter
+    if (optAdapter)
+    {
+      if (wcsstr(adapterDesc.Description, optAdapter) == NULL)
+      {
+        DEBUG_INFO("Not using adapter: %ls", adapterDesc.Description);
+        continue;
+      }
+      DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
+    }
 
     for(
       int n = 0;
@@ -603,7 +642,17 @@ static bool d12_enumerateDevices(
       ++n, comRef_release(output))
     {
       IDXGIOutput_GetDesc(*output, &outputDesc);
-      // FIXME: Allow specifying the specific output
+
+      if (optOutput)
+      {
+        if (wcsstr(outputDesc.DeviceName, optOutput) == NULL)
+        {
+          DEBUG_INFO("Not using adapter output: %ls", outputDesc.DeviceName);
+          continue;
+        }
+
+        DEBUG_INFO("Adapter output matched, trying: %ls", outputDesc.DeviceName);
+      }
 
       if (outputDesc.AttachedToDesktop)
         break;
@@ -612,6 +661,9 @@ static bool d12_enumerateDevices(
     if (*output)
       break;
   }
+
+  free(optAdapter);
+  free(optOutput );
 
   if (!*output)
   {
