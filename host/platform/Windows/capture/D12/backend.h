@@ -25,6 +25,8 @@
 #include <d3d12.h>
 #include "interface/capture.h"
 
+#define D12_MAX_DIRTY_RECTS 256
+
 typedef struct D12Backend D12Backend;
 
 struct D12Backend
@@ -34,6 +36,9 @@ struct D12Backend
 
   // internal name
   const char * codeName;
+
+  // enable damage tracking
+  bool trackDamage;
 
   // creation/init/free
   bool (*create)(D12Backend ** instance, unsigned frameBuffers);
@@ -54,7 +59,9 @@ struct D12Backend
     ID3D12CommandQueue * commandQueue);
 
   ID3D12Resource * (*fetch)(D12Backend * instance,
-    unsigned frameBufferIndex);
+    unsigned frameBufferIndex,
+    const RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
+    unsigned * nbDirtyRects);
 };
 
 static inline bool d12_backendCreate(const D12Backend * backend,
@@ -67,8 +74,12 @@ static inline bool d12_backendCreate(const D12Backend * backend,
 }
 
 static inline bool d12_backendInit(D12Backend * instance, bool debug,
-  ID3D12Device3 * device, IDXGIAdapter1 * adapter, IDXGIOutput * output)
-  { return instance->init(instance, debug, device, adapter, output); }
+  ID3D12Device3 * device, IDXGIAdapter1 * adapter, IDXGIOutput * output,
+  bool trackDamage)
+{
+  instance->trackDamage = trackDamage;
+  return instance->init(instance, debug, device, adapter, output);
+}
 
 static inline bool d12_backendDeinit(D12Backend * instance)
   { return instance->deinit(instance); }
@@ -85,8 +96,10 @@ static inline CaptureResult d12_backendSync(D12Backend * instance,
   { return instance->sync(instance, commandQueue); }
 
 static inline ID3D12Resource * d12_backendFetch(D12Backend * instance,
-  unsigned frameBufferIndex)
-  { return instance->fetch(instance, frameBufferIndex); }
+  unsigned frameBufferIndex, const RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
+  unsigned * nbDirtyRects)
+  { return instance->fetch(instance, frameBufferIndex, dirtyRects,
+      nbDirtyRects); }
 
 // Backend defines
 

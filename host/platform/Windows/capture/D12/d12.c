@@ -65,8 +65,13 @@ struct D12Interface
   // output format tracking
   D3D12_RESOURCE_DESC dstFormat;
 
+  // prior frame dirty rects
+  RECT      dirtyRects[D12_MAX_DIRTY_RECTS];
+  unsigned  nbDirtyRects;
+
   // options
   bool debug;
+  bool trackDamage;
   bool allowRGB24;
 
   unsigned frameBufferCount;
@@ -132,12 +137,26 @@ static void d12_initOptions(void)
       .value.x_string = NULL
     },
     {
+      .module         = "d12",
+      .name           = "trackDamage",
+      .description    = "Perform damage-aware copies (saves bandwidth)",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
+    {
       .module       = "d12",
       .name         = "allowRGB24",
       .description  =
         "Losslessly pack 32-bit RGBA8 into 24-bit RGB (saves bandwidth)",
       .type         = OPTION_TYPE_BOOL,
       .value.x_bool = false
+    },
+    {
+      .module         = "d12",
+      .name           = "debug",
+      .description    = "Enable DirectX12 debugging and validation (SLOW!)",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
     },
     {0}
   };
@@ -158,7 +177,16 @@ static bool d12_create(
     return false;
   }
 
-  this->debug = false;
+  this->debug       = option_get_bool("d12", "debug"      );
+  this->trackDamage = option_get_bool("d12", "trackDamage");
+  this->allowRGB24  = option_get_bool("d12", "allowRGB24" );
+
+  DEBUG_INFO(
+    "debug:%d trackDamage:%d allowRGB24:%d",
+    this->debug,
+    this->trackDamage,
+    this->allowRGB24);
+
   this->d3d12 = LoadLibrary("d3d12.dll");
   if (!this->d3d12)
   {
@@ -189,8 +217,6 @@ static bool d12_create(
   }
 
   this->frameBufferCount = frameBuffers;
-
-  this->allowRGB24 = option_get_bool("d12", "allowRGB24");
 
   return true;
 }
@@ -318,7 +344,8 @@ retryCreateCommandQueue:
   *alignSize = heapDesc.Alignment;
 
   // initialize the backend
-  if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output))
+  if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output,
+    this->trackDamage))
     goto exit;
 
   if (this->allowRGB24)
@@ -396,8 +423,12 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(1);
 
+  const RECT * dirtyRects;
+  unsigned nbDirtyRects;
+
   comRef_defineLocal(ID3D12Resource, src);
-  *src = d12_backendFetch(this->backend, frameBufferIndex);
+  *src = d12_backendFetch(this->backend, frameBufferIndex,
+    &dirtyRects, &nbDirtyRects);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -457,7 +488,23 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->hdr              = false;
   frame->hdrPQ            = false;
   frame->rotation         = CAPTURE_ROT_0;
-  frame->damageRectsCount = 0;
+
+  // if there are too many rects
+  if (unlikely(nbDirtyRects > ARRAY_LENGTH(frame->damageRects)))
+    frame->damageRectsCount = 0;
+  else
+  {
+    // send the list of dirty rects for this frame
+    frame->damageRectsCount = nbDirtyRects;
+    for(unsigned i = 0; i < nbDirtyRects; ++i)
+      frame->damageRects[i] = (FrameDamageRect)
+      {
+        .x      = dirtyRects[i].left,
+        .y      = dirtyRects[i].top,
+        .width  = dirtyRects[i].right  - dirtyRects[i].left,
+        .height = dirtyRects[i].bottom - dirtyRects[i].top
+      };
+  }
 
   result = CAPTURE_RESULT_OK;
 
@@ -472,8 +519,12 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
+  const RECT * dirtyRects;
+  unsigned nbDirtyRects;
+
   comRef_defineLocal(ID3D12Resource, src);
-  *src = d12_backendFetch(this->backend, frameBufferIndex);
+  *src = d12_backendFetch(this->backend, frameBufferIndex,
+    &dirtyRects, &nbDirtyRects);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -526,8 +577,62 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     }
   };
 
-  ID3D12GraphicsCommandList_CopyTextureRegion(
-    *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
+  // if full frame damage
+  if (nbDirtyRects == 0)
+  {
+    this->nbDirtyRects = 0;
+    ID3D12GraphicsCommandList_CopyTextureRegion(
+      *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
+  }
+  else
+  {
+    /* we must update the rects that were dirty in the prior frame also,
+     * otherwise the frame in memory will not be consistent when areas need to
+     * be redrawn by the client, such as under the cursor */
+    if (this->nbDirtyRects > 0)
+    {
+      for(const RECT * rect = this->dirtyRects;
+        rect < this->dirtyRects + this->nbDirtyRects; ++rect)
+      {
+        D3D12_BOX box =
+        {
+          .left   = rect->left,
+          .top    = rect->top,
+          .front  = 0,
+          .back   = 1,
+          .right  = rect->right,
+          .bottom = rect->bottom
+        };
+
+        ID3D12GraphicsCommandList_CopyTextureRegion(
+          *this->copyCommand.gfxList, &dstLoc,
+          box.left, box.top, 0, &srcLoc, &box);
+      }
+    }
+
+    /* update the frame with the new dirty areas */
+    for(const RECT * rect = dirtyRects; rect < dirtyRects + nbDirtyRects; ++rect)
+    {
+      D3D12_BOX box =
+      {
+        .left   = rect->left,
+        .top    = rect->top,
+        .front  = 0,
+        .back   = 1,
+        .right  = rect->right,
+        .bottom = rect->bottom
+      };
+
+      ID3D12GraphicsCommandList_CopyTextureRegion(
+        *this->copyCommand.gfxList, &dstLoc,
+        box.left, box.top, 0, &srcLoc, &box);
+    }
+
+    /* store the dirty rects for the next frame */
+    memcpy(this->dirtyRects, dirtyRects,
+      nbDirtyRects * sizeof(*this->dirtyRects));
+    this->nbDirtyRects = nbDirtyRects;
+  }
 
   // execute the compute commands
   if (this->allowRGB24)

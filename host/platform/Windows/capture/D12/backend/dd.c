@@ -51,6 +51,9 @@ typedef struct DDCacheInfo
   ID3D12Fence       ** d12Fence;
   UINT64               fenceValue;
   bool                 ready;
+
+  RECT     dirtyRects[D12_MAX_DIRTY_RECTS];
+  unsigned nbDirtyRects;
 }
 DDCacheInfo;
 
@@ -416,12 +419,16 @@ static CaptureResult d12_dd_sync(D12Backend * instance,
 }
 
 static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
-  unsigned frameBufferIndex)
+  unsigned frameBufferIndex, const RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
+  unsigned * nbDirtyRects)
 {
   DDInstance * this = UPCAST(DDInstance, instance);
 
   if (!this->current)
     return NULL;
+
+  *dirtyRects   = this->current->dirtyRects;
+  *nbDirtyRects = this->current->nbDirtyRects;
 
   ID3D12Resource_AddRef(*this->current->d12Res);
   return *this->current->d12Res;
@@ -477,6 +484,75 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
   ++this->current->fenceValue;
   ID3D11DeviceContext4_Signal(
     *this->context, *this->current->fence, this->current->fenceValue);
+
+  // handle damage tracking
+  this->current->nbDirtyRects = 0;
+  if (this->base.trackDamage)
+  {
+    /* Get the frame damage, if there is too many damage rects, we disable
+     * damage tracking for the frame and assume full frame damage */
+
+    UINT requiredSize;
+    hr = IDXGIOutputDuplication_GetFrameDirtyRects(*this->dup,
+      sizeof(this->current->dirtyRects),
+      this->current->dirtyRects,
+      &requiredSize);
+    if (FAILED(hr))
+    {
+      if (hr != DXGI_ERROR_MORE_DATA)
+      {
+        DEBUG_WINERROR("GetFrameDirtyRects failed", hr);
+        goto exit;
+      }
+    }
+    else
+      this->current->nbDirtyRects =
+        requiredSize / sizeof(*this->current->dirtyRects);
+
+    DXGI_OUTDUPL_MOVE_RECT moveRects[
+      (ARRAY_LENGTH(this->current->dirtyRects) - this->current->nbDirtyRects) / 2
+    ];
+    hr = IDXGIOutputDuplication_GetFrameMoveRects(*this->dup,
+      sizeof(moveRects), moveRects, &requiredSize);
+    if (FAILED(hr))
+    {
+      this->current->nbDirtyRects = 0;
+      if (hr != DXGI_ERROR_MORE_DATA)
+      {
+        DEBUG_WINERROR("GetFrameMoveRects failed", hr);
+        goto exit;
+      }
+    }
+
+    /* Move rects are seemingly not generated on Windows 10, but incase it
+     * becomes a thing in the future we still need to implement this */
+    const unsigned moveRectCount = requiredSize / sizeof(*moveRects);
+    for(DXGI_OUTDUPL_MOVE_RECT *moveRect = moveRects; moveRect < moveRects +
+      moveRectCount; ++moveRect)
+    {
+      /* According to WebRTC source comments, the DirectX capture API may
+       * randomly return unmoved rects, which should be skipped to avoid
+       * unnecessary work */
+      if (moveRect->SourcePoint.x == moveRect->DestinationRect.left &&
+          moveRect->SourcePoint.y == moveRect->DestinationRect.top)
+        continue;
+
+      /* Add the source rect to the dirty array */
+      this->current->dirtyRects[this->current->nbDirtyRects++] = (RECT)
+      {
+        .left  = moveRect->SourcePoint.x,
+        .top   = moveRect->SourcePoint.y,
+        .right = moveRect->SourcePoint.x +
+          (moveRect->DestinationRect.right - moveRect->DestinationRect.left),
+        .bottom = moveRect->SourcePoint.y +
+          (moveRect->DestinationRect.bottom - moveRect->DestinationRect.top)
+      };
+
+      /* Add the destination rect to the dirty array */
+      this->current->dirtyRects[this->current->nbDirtyRects++] =
+        moveRect->DestinationRect;
+    }
+  }
 
   result = true;
 
