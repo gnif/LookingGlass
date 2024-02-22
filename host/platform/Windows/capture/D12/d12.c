@@ -452,7 +452,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->truncated        = maxRows < dstFormat.Height;
   frame->pitch            = dstFormat.Width * 4;
   frame->stride           = dstFormat.Width;
-  frame->format           = this->allowRGB24 ? CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
+  frame->format           = this->allowRGB24 ?
+    CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
   frame->hdr              = false;
   frame->hdrPQ            = false;
   frame->rotation         = CAPTURE_ROT_0;
