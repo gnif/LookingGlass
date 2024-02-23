@@ -401,6 +401,9 @@ static bool d12_deinit(void)
   memset(&this->captureFormat, 0, sizeof(this->captureFormat));
   memset(&this->dstFormat    , 0, sizeof(this->dstFormat    ));
 
+  /* dirty rect history is no longer valid */
+  this->nbDirtyRects = 0;
+
   return result;
 }
 
