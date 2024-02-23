@@ -506,8 +506,19 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
       }
     }
     else
-      this->current->nbDirtyRects =
-        requiredSize / sizeof(*this->current->dirtyRects);
+    {
+      unsigned nbDirtyRects = requiredSize / sizeof(*this->current->dirtyRects);
+
+      // if there is only one damage rect and it covers the entire frame
+      if (nbDirtyRects                      == 1 &&
+        this->current->dirtyRects[0].left   == 0 &&
+        this->current->dirtyRects[0].top    == 0 &&
+        this->current->dirtyRects[0].right  == this->current->format.Width &&
+        this->current->dirtyRects[0].bottom == this->current->format.Height)
+        goto fullDamage;
+
+      this->current->nbDirtyRects = nbDirtyRects;
+    }
 
     DXGI_OUTDUPL_MOVE_RECT moveRects[
       (ARRAY_LENGTH(this->current->dirtyRects) - this->current->nbDirtyRects) / 2
@@ -554,6 +565,7 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
     }
   }
 
+fullDamage:
   result = true;
 
 exit:

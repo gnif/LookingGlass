@@ -26,6 +26,7 @@
 #include "common/debug.h"
 #include "common/windebug.h"
 #include "common/option.h"
+#include "common/rects.h"
 #include "com_ref.h"
 
 #include "backend.h"
@@ -489,21 +490,30 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->hdrPQ            = false;
   frame->rotation         = CAPTURE_ROT_0;
 
-  // if there are too many rects
-  if (unlikely(nbDirtyRects > ARRAY_LENGTH(frame->damageRects)))
-    frame->damageRectsCount = 0;
-  else
   {
-    // send the list of dirty rects for this frame
-    frame->damageRectsCount = nbDirtyRects;
-    for(unsigned i = 0; i < nbDirtyRects; ++i)
-      frame->damageRects[i] = (FrameDamageRect)
-      {
-        .x      = dirtyRects[i].left,
-        .y      = dirtyRects[i].top,
-        .width  = dirtyRects[i].right  - dirtyRects[i].left,
-        .height = dirtyRects[i].bottom - dirtyRects[i].top
+    // create a clean list of rects
+    FrameDamageRect allRects[this->nbDirtyRects];
+    unsigned count = 0;
+    for(const RECT * rect = this->dirtyRects;
+      rect < this->dirtyRects + this->nbDirtyRects; ++rect)
+      allRects[count++] = (FrameDamageRect){
+        .x      = rect->left,
+        .y      = rect->top,
+        .width  = rect->right  - rect->left,
+        .height = rect->bottom - rect->top
       };
+
+    count = rectsMergeOverlapping(allRects, count);
+
+    // if there are too many rects
+    if (unlikely(count > ARRAY_LENGTH(frame->damageRects)))
+      frame->damageRectsCount = 0;
+    else
+    {
+      // send the list of dirty rects for this frame
+      frame->damageRectsCount = count;
+      memcpy(frame->damageRects, allRects, sizeof(*allRects) * count);
+    }
   }
 
   result = CAPTURE_RESULT_OK;
@@ -586,46 +596,60 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   }
   else
   {
-    /* we must update the rects that were dirty in the prior frame also,
-     * otherwise the frame in memory will not be consistent when areas need to
-     * be redrawn by the client, such as under the cursor */
-    if (this->nbDirtyRects > 0)
+    /* if the prior frame was a full update */
+    if (this->nbDirtyRects == 0)
     {
+      /* the prior frame was fully damaged, we must update everything */
+      ID3D12GraphicsCommandList_CopyTextureRegion(
+        *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
+    }
+    else
+    {
+      FrameDamageRect allRects[this->nbDirtyRects + nbDirtyRects];
+      unsigned count = 0;
+
+      /* we must update the rects that were dirty in the prior frame also,
+       * otherwise the frame in memory will not be consistent when areas need to
+       * be redrawn by the client, such as under the cursor */
       for(const RECT * rect = this->dirtyRects;
         rect < this->dirtyRects + this->nbDirtyRects; ++rect)
+        allRects[count++] = (FrameDamageRect){
+          .x      = rect->left,
+          .y      = rect->top,
+          .width  = rect->right  - rect->left,
+          .height = rect->bottom - rect->top
+        };
+
+      /* add the new dirtyRects to the array */
+      for(const RECT * rect = dirtyRects;
+        rect < dirtyRects + nbDirtyRects; ++rect)
+        allRects[count++] = (FrameDamageRect){
+          .x      = rect->left,
+          .y      = rect->top,
+          .width  = rect->right  - rect->left,
+          .height = rect->bottom - rect->top
+        };
+
+      /* resolve the rects */
+      count = rectsMergeOverlapping(allRects, count);
+
+      /* copy all the rects */
+      for(FrameDamageRect * rect = allRects; rect < allRects + count; ++rect)
       {
         D3D12_BOX box =
         {
-          .left   = rect->left,
-          .top    = rect->top,
+          .left   = rect->x,
+          .top    = rect->y,
           .front  = 0,
           .back   = 1,
-          .right  = rect->right,
-          .bottom = rect->bottom
+          .right  = rect->x + rect->width,
+          .bottom = rect->y + rect->height
         };
 
         ID3D12GraphicsCommandList_CopyTextureRegion(
           *this->copyCommand.gfxList, &dstLoc,
           box.left, box.top, 0, &srcLoc, &box);
       }
-    }
-
-    /* update the frame with the new dirty areas */
-    for(const RECT * rect = dirtyRects; rect < dirtyRects + nbDirtyRects; ++rect)
-    {
-      D3D12_BOX box =
-      {
-        .left   = rect->left,
-        .top    = rect->top,
-        .front  = 0,
-        .back   = 1,
-        .right  = rect->right,
-        .bottom = rect->bottom
-      };
-
-      ID3D12GraphicsCommandList_CopyTextureRegion(
-        *this->copyCommand.gfxList, &dstLoc,
-        box.left, box.top, 0, &srcLoc, &box);
     }
 
     /* store the dirty rects for the next frame */
