@@ -495,10 +495,9 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
 
   {
     // create a clean list of rects
-    FrameDamageRect allRects[this->nbDirtyRects];
+    FrameDamageRect allRects[nbDirtyRects];
     unsigned count = 0;
-    for(const RECT * rect = this->dirtyRects;
-      rect < this->dirtyRects + this->nbDirtyRects; ++rect)
+    for(const RECT * rect = dirtyRects; rect < dirtyRects + nbDirtyRects; ++rect)
       allRects[count++] = (FrameDamageRect){
         .x      = rect->left,
         .y      = rect->top,
