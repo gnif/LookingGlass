@@ -60,7 +60,7 @@ struct D12Backend
 
   ID3D12Resource * (*fetch)(D12Backend * instance,
     unsigned frameBufferIndex,
-    const RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
+    const RECT ** dirtyRects,
     unsigned * nbDirtyRects);
 };
 
@@ -96,7 +96,7 @@ static inline CaptureResult d12_backendSync(D12Backend * instance,
   { return instance->sync(instance, commandQueue); }
 
 static inline ID3D12Resource * d12_backendFetch(D12Backend * instance,
-  unsigned frameBufferIndex, const RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
+  unsigned frameBufferIndex, const RECT ** dirtyRects,
   unsigned * nbDirtyRects)
   { return instance->fetch(instance, frameBufferIndex, dirtyRects,
       nbDirtyRects); }
