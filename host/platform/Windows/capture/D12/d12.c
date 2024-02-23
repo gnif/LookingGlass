@@ -62,6 +62,7 @@ struct D12Interface
   // capture format tracking
   D3D12_RESOURCE_DESC captureFormat;
   unsigned            formatVer;
+  unsigned            pitch;
 
   // output format tracking
   D3D12_RESOURCE_DESC dstFormat;
@@ -441,7 +442,6 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     goto exit;
   }
 
-
   D3D12_RESOURCE_DESC srcFormat = ID3D12Resource_GetDesc(*src);
   D3D12_RESOURCE_DESC dstFormat = this->dstFormat;
 
@@ -475,7 +475,19 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     }
   }
 
-  const unsigned int maxRows = maxFrameSize / (dstFormat.Width * 4);
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
+  ID3D12Device3_GetCopyableFootprints(*this->device,
+    &srcFormat,
+    0       , // FirstSubresource
+    1       , // NumSubresources
+    0       , // BaseOffset,
+    &layout , // pLayouts
+    NULL    , // pNumRows,
+    NULL    , // pRowSizeInBytes,
+    NULL);  // pTotalBytes
+  this->pitch = layout.Footprint.RowPitch;
+
+  const unsigned int maxRows = maxFrameSize / layout.Footprint.RowPitch;
 
   frame->formatVer        = this->formatVer;
   frame->screenWidth      = srcFormat.Width;
@@ -485,8 +497,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->frameWidth       = srcFormat.Width;
   frame->frameHeight      = srcFormat.Height;
   frame->truncated        = maxRows < dstFormat.Height;
-  frame->pitch            = dstFormat.Width * 4;
-  frame->stride           = dstFormat.Width;
+  frame->pitch            = layout.Footprint.RowPitch;
+  frame->stride           = layout.Footprint.RowPitch / 4;
   frame->format           = this->allowRGB24 ?
     CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
   frame->hdr              = false;
@@ -584,7 +596,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
         .Width    = this->dstFormat.Width,
         .Height   = this->dstFormat.Height,
         .Depth    = 1,
-        .RowPitch = this->dstFormat.Width * 4
+        .RowPitch = this->pitch
       }
     }
   };
@@ -678,7 +690,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
 
   // signal the frame is complete
   framebuffer_set_write_ptr(frameBuffer,
-    this->dstFormat.Height * this->dstFormat.Width * 4);
+    this->dstFormat.Height * this->pitch);
 
   // reset the command queues
   if (this->allowRGB24)
