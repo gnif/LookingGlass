@@ -428,7 +428,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(1);
 
-  const RECT * dirtyRects;
+  RECT * dirtyRects;
   unsigned nbDirtyRects;
 
   comRef_defineLocal(ID3D12Resource, src);
@@ -543,7 +543,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
-  const RECT * dirtyRects;
+  RECT * dirtyRects;
   unsigned nbDirtyRects;
 
   comRef_defineLocal(ID3D12Resource, src);
@@ -572,7 +572,8 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (this->allowRGB24)
   {
     next = d12_effectRun(
-      this->effectRGB24, *this->device, *this->computeCommand.gfxList, next);
+      this->effectRGB24, *this->device, *this->computeCommand.gfxList, next,
+      dirtyRects, &nbDirtyRects);
   }
 
   // copy into the framebuffer resource

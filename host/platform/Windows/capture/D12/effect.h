@@ -41,8 +41,11 @@ struct D12Effect
           D3D12_RESOURCE_DESC * dst);
 
   ID3D12Resource * (*run)(D12Effect * effect,
-    ID3D12Device3 * device, ID3D12GraphicsCommandList * commandList,
-    ID3D12Resource * src);
+    ID3D12Device3             * device,
+    ID3D12GraphicsCommandList * commandList,
+    ID3D12Resource            * src,
+    RECT                        dirtyRects[],
+    unsigned                  * nbDirtyRects);
 };
 
 static inline bool d12_effectCreate(const D12Effect * effect,
@@ -68,9 +71,13 @@ static inline bool d12_effectSetFormat(D12Effect * effect,
   { return effect->setFormat(effect, device, src, dst); }
 
 static inline ID3D12Resource * d12_effectRun(D12Effect * effect,
-  ID3D12Device3 * device, ID3D12GraphicsCommandList  * commandList,
-  ID3D12Resource * src)
-  { return effect->run(effect, device, commandList, src); }
+  ID3D12Device3              * device,
+  ID3D12GraphicsCommandList  * commandList,
+  ID3D12Resource             * src,
+  RECT                         dirtyRects[],
+  unsigned                   * nbDirtyRects)
+  { return effect->run(effect, device, commandList, src,
+    dirtyRects, nbDirtyRects); }
 
 // effect defines
 

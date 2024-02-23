@@ -419,7 +419,7 @@ static CaptureResult d12_dd_sync(D12Backend * instance,
 }
 
 static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
-  unsigned frameBufferIndex, const RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
+  unsigned frameBufferIndex, RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
   unsigned * nbDirtyRects)
 {
   DDInstance * this = UPCAST(DDInstance, instance);

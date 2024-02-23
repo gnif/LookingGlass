@@ -278,7 +278,7 @@ exit:
 
 static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
   ID3D12Device3 * device, ID3D12GraphicsCommandList * commandList,
-  ID3D12Resource * src)
+  ID3D12Resource * src, RECT dirtyRects[], unsigned * nbDirtyRects)
 {
   TestInstance * this = UPCAST(TestInstance, effect);
 
@@ -363,6 +363,14 @@ static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
       }
     };
     ID3D12GraphicsCommandList_ResourceBarrier(commandList, 1, &barrier);
+  }
+
+  // adjust the dirty rects
+  for(RECT * rect = dirtyRects; rect < dirtyRects + *nbDirtyRects; ++rect)
+  {
+    unsigned width = rect->right - rect->left;
+    rect->left  = (rect->left * 3) / 4;
+    rect->right = rect->left + (width * 3 + 3) / 4;
   }
 
   // return the output buffer
