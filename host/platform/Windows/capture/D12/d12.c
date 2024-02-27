@@ -430,10 +430,11 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
 
   RECT * dirtyRects;
   unsigned nbDirtyRects;
+  CaptureRotation rotation;
 
   comRef_defineLocal(ID3D12Resource, src);
   *src = d12_backendFetch(this->backend, frameBufferIndex,
-    &dirtyRects, &nbDirtyRects);
+    &dirtyRects, &nbDirtyRects, &rotation);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -503,7 +504,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
   frame->hdr              = false;
   frame->hdrPQ            = false;
-  frame->rotation         = CAPTURE_ROT_0;
+  frame->rotation         = rotation;
 
   {
     // create a clean list of rects
@@ -545,10 +546,11 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
 
   RECT * dirtyRects;
   unsigned nbDirtyRects;
+  CaptureRotation rotation;
 
   comRef_defineLocal(ID3D12Resource, src);
   *src = d12_backendFetch(this->backend, frameBufferIndex,
-    &dirtyRects, &nbDirtyRects);
+    &dirtyRects, &nbDirtyRects, &rotation);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",

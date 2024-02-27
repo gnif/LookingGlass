@@ -66,6 +66,7 @@ typedef struct DDInstance
   ID3D11Device5          ** device;
   ID3D11DeviceContext4   ** context;
   IDXGIOutputDuplication ** dup;
+  CaptureRotation           rotation;
   bool                      release;
 
   DDCacheInfo cache[CACHE_SIZE];
@@ -261,6 +262,28 @@ static bool d12_dd_init(
     goto exit;
   }
 
+  DXGI_OUTDUPL_DESC dupDesc;
+  IDXGIOutputDuplication_GetDesc(*dup, &dupDesc);
+  switch(dupDesc.Rotation)
+  {
+    case DXGI_MODE_ROTATION_UNSPECIFIED:
+    case DXGI_MODE_ROTATION_IDENTITY:
+      this->rotation = CAPTURE_ROT_0;
+      break;
+
+    case DXGI_MODE_ROTATION_ROTATE90:
+      this->rotation = CAPTURE_ROT_90;
+      break;
+
+    case DXGI_MODE_ROTATION_ROTATE180:
+      this->rotation = CAPTURE_ROT_180;
+      break;
+
+    case DXGI_MODE_ROTATION_ROTATE270:
+      this->rotation = CAPTURE_ROT_270;
+      break;
+  }
+
   ID3D12Device3_AddRef(device);
   comRef_toGlobal(this->d12device, &device    );
   comRef_toGlobal(this->device   , d11device5 );
@@ -419,7 +442,7 @@ static CaptureResult d12_dd_sync(D12Backend * instance,
 
 static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
   unsigned frameBufferIndex, RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
-  unsigned * nbDirtyRects)
+  unsigned * nbDirtyRects, CaptureRotation * rotation)
 {
   DDInstance * this = UPCAST(DDInstance, instance);
 
@@ -428,6 +451,7 @@ static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
 
   *dirtyRects   = this->current->dirtyRects;
   *nbDirtyRects = this->current->nbDirtyRects;
+  *rotation     = this->rotation;
 
   ID3D12Resource_AddRef(*this->current->d12Res);
   return *this->current->d12Res;
