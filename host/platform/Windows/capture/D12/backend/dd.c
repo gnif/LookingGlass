@@ -441,17 +441,16 @@ static CaptureResult d12_dd_sync(D12Backend * instance,
 }
 
 static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
-  unsigned frameBufferIndex, RECT * dirtyRects[static D12_MAX_DIRTY_RECTS],
-  unsigned * nbDirtyRects, CaptureRotation * rotation)
+  unsigned frameBufferIndex, D12FetchDesc * desc)
 {
   DDInstance * this = UPCAST(DDInstance, instance);
 
   if (!this->current)
     return NULL;
 
-  *dirtyRects   = this->current->dirtyRects;
-  *nbDirtyRects = this->current->nbDirtyRects;
-  *rotation     = this->rotation;
+  desc->dirtyRects   = this->current->dirtyRects;
+  desc->nbDirtyRects = this->current->nbDirtyRects;
+  desc->rotation     = this->rotation;
 
   ID3D12Resource_AddRef(*this->current->d12Res);
   return *this->current->d12Res;

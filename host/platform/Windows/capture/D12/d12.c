@@ -428,13 +428,10 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(1);
 
-  RECT * dirtyRects;
-  unsigned nbDirtyRects;
-  CaptureRotation rotation;
+  D12FetchDesc desc;
 
   comRef_defineLocal(ID3D12Resource, src);
-  *src = d12_backendFetch(this->backend, frameBufferIndex,
-    &dirtyRects, &nbDirtyRects, &rotation);
+  *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -504,13 +501,14 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
   frame->hdr              = false;
   frame->hdrPQ            = false;
-  frame->rotation         = rotation;
+  frame->rotation         = desc.rotation;
 
   {
     // create a clean list of rects
-    FrameDamageRect allRects[nbDirtyRects];
+    FrameDamageRect allRects[desc.nbDirtyRects];
     unsigned count = 0;
-    for(const RECT * rect = dirtyRects; rect < dirtyRects + nbDirtyRects; ++rect)
+    for(const RECT * rect = desc.dirtyRects;
+      rect < desc.dirtyRects + desc.nbDirtyRects; ++rect)
       allRects[count++] = (FrameDamageRect){
         .x      = rect->left,
         .y      = rect->top,
@@ -544,13 +542,10 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
-  RECT * dirtyRects;
-  unsigned nbDirtyRects;
-  CaptureRotation rotation;
+  D12FetchDesc desc;
 
   comRef_defineLocal(ID3D12Resource, src);
-  *src = d12_backendFetch(this->backend, frameBufferIndex,
-    &dirtyRects, &nbDirtyRects, &rotation);
+  *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -575,7 +570,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   {
     next = d12_effectRun(
       this->effectRGB24, *this->device, *this->computeCommand.gfxList, next,
-      dirtyRects, &nbDirtyRects);
+      desc.dirtyRects, &desc.nbDirtyRects);
   }
 
   // copy into the framebuffer resource
@@ -605,7 +600,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   };
 
   // if full frame damage
-  if (nbDirtyRects == 0)
+  if (desc.nbDirtyRects == 0)
   {
     this->nbDirtyRects = 0;
     ID3D12GraphicsCommandList_CopyTextureRegion(
@@ -622,7 +617,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     }
     else
     {
-      FrameDamageRect allRects[this->nbDirtyRects + nbDirtyRects];
+      FrameDamageRect allRects[this->nbDirtyRects + desc.nbDirtyRects];
       unsigned count = 0;
 
       /* we must update the rects that were dirty in the prior frame also,
@@ -638,8 +633,8 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
         };
 
       /* add the new dirtyRects to the array */
-      for(const RECT * rect = dirtyRects;
-        rect < dirtyRects + nbDirtyRects; ++rect)
+      for(const RECT * rect = desc.dirtyRects;
+        rect < desc.dirtyRects + desc.nbDirtyRects; ++rect)
         allRects[count++] = (FrameDamageRect){
           .x      = rect->left,
           .y      = rect->top,
@@ -670,9 +665,9 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     }
 
     /* store the dirty rects for the next frame */
-    memcpy(this->dirtyRects, dirtyRects,
-      nbDirtyRects * sizeof(*this->dirtyRects));
-    this->nbDirtyRects = nbDirtyRects;
+    memcpy(this->dirtyRects, desc.dirtyRects,
+      desc.nbDirtyRects * sizeof(*this->dirtyRects));
+    this->nbDirtyRects = desc.nbDirtyRects;
   }
 
   // execute the compute commands
