@@ -67,6 +67,7 @@ typedef struct DDInstance
   ID3D11DeviceContext4   ** context;
   IDXGIOutputDuplication ** dup;
   CaptureRotation           rotation;
+  DXGI_COLOR_SPACE_TYPE     colorSpace;
   bool                      release;
 
   DDCacheInfo cache[CACHE_SIZE];
@@ -284,6 +285,17 @@ static bool d12_dd_init(
       break;
   }
 
+  comRef_defineLocal(IDXGIOutput6, output6);
+  hr = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutput6, (void **)output6);
+  if (FAILED(hr))
+    this->colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+  else
+  {
+    DXGI_OUTPUT_DESC1 desc1;
+    IDXGIOutput6_GetDesc1(*output6, &desc1);
+    this->colorSpace = desc1.ColorSpace;
+  }
+
   ID3D12Device3_AddRef(device);
   comRef_toGlobal(this->d12device, &device    );
   comRef_toGlobal(this->device   , d11device5 );
@@ -451,6 +463,7 @@ static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
   desc->dirtyRects   = this->current->dirtyRects;
   desc->nbDirtyRects = this->current->nbDirtyRects;
   desc->rotation     = this->rotation;
+  desc->colorSpace   = this->colorSpace;
 
   ID3D12Resource_AddRef(*this->current->d12Res);
   return *this->current->d12Res;

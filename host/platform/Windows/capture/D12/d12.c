@@ -499,7 +499,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->stride           = layout.Footprint.RowPitch / 4;
   frame->format           = this->allowRGB24 ?
     CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
-  frame->hdr              = false;
+  frame->hdr              = desc.colorSpace ==
+    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
   frame->hdrPQ            = false;
   frame->rotation         = desc.rotation;
 
@@ -565,8 +566,10 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
+  const bool isSDR = desc.colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+
   ID3D12Resource * next = *src;
-  if (this->allowRGB24)
+  if (this->allowRGB24 && isSDR)
   {
     next = d12_effectRun(
       this->effectRGB24, *this->device, *this->computeCommand.gfxList, next,
@@ -671,7 +674,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   }
 
   // execute the compute commands
-  if (this->allowRGB24)
+  if (this->allowRGB24 && isSDR)
   {
     d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
 
@@ -691,7 +694,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     this->dstFormat.Height * this->pitch);
 
   // reset the command queues
-  if (this->allowRGB24)
+  if (this->allowRGB24 && isSDR)
     if (!d12_commandGroupReset(&this->computeCommand))
       goto exit;
 

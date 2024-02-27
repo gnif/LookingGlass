@@ -66,9 +66,10 @@ struct D12Backend
 
 struct D12FetchDesc
 {
-  CaptureRotation rotation;
-  RECT          * dirtyRects;
-  unsigned        nbDirtyRects;
+  CaptureRotation       rotation;
+  RECT                * dirtyRects;
+  unsigned              nbDirtyRects;
+  DXGI_COLOR_SPACE_TYPE colorSpace;
 };
 
 static inline bool d12_backendCreate(const D12Backend * backend,
