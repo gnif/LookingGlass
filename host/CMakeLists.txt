@@ -49,6 +49,7 @@ set(CMAKE_C_STANDARD  11)
 
 if(WIN32)
   add_compile_options("-fdebug-prefix-map=${PROJECT_TOP}/=")
+  add_compile_definitions(__USE_MINGW_ANSI_STDIO=0)
 endif()
 
 if(ENABLE_ASAN)
