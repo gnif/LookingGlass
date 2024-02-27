@@ -453,7 +453,7 @@ static CaptureResult d12_dd_sync(D12Backend * instance,
 }
 
 static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
-  unsigned frameBufferIndex, D12FetchDesc * desc)
+  unsigned frameBufferIndex, D12FrameDesc * desc)
 {
   DDInstance * this = UPCAST(DDInstance, instance);
 

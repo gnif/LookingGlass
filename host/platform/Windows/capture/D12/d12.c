@@ -27,6 +27,7 @@
 #include "common/windebug.h"
 #include "common/option.h"
 #include "common/rects.h"
+#include "common/vector.h"
 #include "com_ref.h"
 
 #include "backend.h"
@@ -57,15 +58,15 @@ struct D12Interface
   CapturePostPointerBuffer postPointerBufferFn;
 
   D12Backend * backend;
-  D12Effect  * effectRGB24;
+  Vector       effects;
 
   // capture format tracking
-  D3D12_RESOURCE_DESC captureFormat;
-  unsigned            formatVer;
-  unsigned            pitch;
+  D12FrameFormat captureFormat;
+  unsigned       formatVer;
+  unsigned       pitch;
 
   // output format tracking
-  D3D12_RESOURCE_DESC dstFormat;
+  D12FrameFormat dstFormat;
 
   // prior frame dirty rects
   RECT      dirtyRects[D12_MAX_DIRTY_RECTS];
@@ -350,10 +351,17 @@ retryCreateCommandQueue:
     this->trackDamage))
     goto exit;
 
+  // create the vector of effects
+  vector_create(&this->effects, sizeof(D12Effect *), 0);
+
+  /* if RGB24 conversion is enabled add the effect to the list
+  NOTE: THIS MUST BE THE LAST EFFECT */
   if (this->allowRGB24)
   {
-    if (!d12_effectCreate(&D12Effect_RGB24, &this->effectRGB24, *device))
+    D12Effect * effect;
+    if (!d12_effectCreate(&D12Effect_RGB24, &effect, *device))
       goto exit;
+    vector_push(&this->effects, &effect);
   }
 
   comRef_toGlobal(this->factory     , factory      );
@@ -379,7 +387,11 @@ static void d12_stop(void)
 static bool d12_deinit(void)
 {
   bool result = true;
-  d12_effectFree(&this->effectRGB24);
+
+  D12Effect * effect;
+  vector_forEach(effect, &this->effects)
+    d12_effectFree(&effect);
+  vector_destroy(&this->effects);
 
   if (!d12_backendDeinit(this->backend))
     result = false;
@@ -428,7 +440,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(1);
 
-  D12FetchDesc desc;
+  D12FrameDesc desc;
 
   comRef_defineLocal(ID3D12Resource, src);
   *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
@@ -436,37 +448,79 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
       frameBufferIndex);
-    result = CAPTURE_RESULT_ERROR;
     goto exit;
   }
 
-  D3D12_RESOURCE_DESC srcFormat = ID3D12Resource_GetDesc(*src);
-  D3D12_RESOURCE_DESC dstFormat = this->dstFormat;
+  D12FrameFormat srcFormat =
+  {
+    .desc       = ID3D12Resource_GetDesc(*src),
+    .colorSpace = desc.colorSpace,
+    .width      = srcFormat.desc.Width,
+    .height     = srcFormat.desc.Height
+  };
+
+  switch(srcFormat.desc.Format)
+  {
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+      srcFormat.format = CAPTURE_FMT_BGRA;
+      break;
+
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+      srcFormat.format = CAPTURE_FMT_RGBA;
+      break;
+
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+      srcFormat.format = CAPTURE_FMT_RGBA10;
+      break;
+
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+      srcFormat.format = CAPTURE_FMT_RGBA16F;
+      break;
+
+    default:
+      DEBUG_ERROR("Unsupported source format");
+      goto exit;
+  }
+
+  D12FrameFormat dstFormat = this->dstFormat;
 
   // if the input format changed, reconfigure the effects
-  if (dstFormat.Width  == 0 ||
-      dstFormat.Width  != this->captureFormat.Width  ||
-      dstFormat.Height != this->captureFormat.Height ||
-      dstFormat.Format != this->captureFormat.Format)
+  if (srcFormat.desc.Width  == 0 ||
+      srcFormat.desc.Width  != this->captureFormat.desc.Width  ||
+      srcFormat.desc.Height != this->captureFormat.desc.Height ||
+      srcFormat.desc.Format != this->captureFormat.desc.Format ||
+      srcFormat.colorSpace  != this->captureFormat.colorSpace)
   {
-    dstFormat           = srcFormat;
     this->captureFormat = srcFormat;
 
-    //TODO: loop through an effect array
-    if (this->allowRGB24)
+    D12Effect * effect;
+    vector_forEach(effect, &this->effects)
     {
-      if (!d12_effectSetFormat(
-        this->effectRGB24, *this->device, &srcFormat, &dstFormat))
+      dstFormat = srcFormat;
+      switch(d12_effectSetFormat(effect, *this->device, &srcFormat, &dstFormat))
       {
-        DEBUG_ERROR("Failed to set the effect input format");
-        goto exit;
+        case D12_EFFECT_STATUS_OK:
+          effect->enabled = true;
+          break;
+
+        case D12_EFFECT_STATUS_ERROR:
+          DEBUG_ERROR("Failed to set the effect input format");
+          goto exit;
+
+        case D12_EFFECT_STATUS_BYPASS:
+          effect->enabled = false;
+          break;
       }
     }
 
     // if the output format changed
-    if (dstFormat.Width  != this->dstFormat.Width  ||
-        dstFormat.Height != this->dstFormat.Height ||
-        dstFormat.Format != this->dstFormat.Format)
+    if (dstFormat.desc.Width  != this->dstFormat.desc.Width  ||
+        dstFormat.desc.Height != this->dstFormat.desc.Height ||
+        dstFormat.desc.Format != this->dstFormat.desc.Format ||
+        dstFormat.colorSpace  != this->dstFormat.colorSpace  ||
+        dstFormat.width       != this->dstFormat.width       ||
+        dstFormat.height      != this->dstFormat.height      ||
+        dstFormat.format      != this->dstFormat.format)
     {
       ++this->formatVer;
       this->dstFormat = dstFormat;
@@ -475,7 +529,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
 
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
   ID3D12Device3_GetCopyableFootprints(*this->device,
-    &srcFormat,
+    &dstFormat.desc,
     0       , // FirstSubresource
     1       , // NumSubresources
     0       , // BaseOffset,
@@ -488,18 +542,17 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   const unsigned int maxRows = maxFrameSize / layout.Footprint.RowPitch;
 
   frame->formatVer        = this->formatVer;
-  frame->screenWidth      = srcFormat.Width;
-  frame->screenHeight     = srcFormat.Height;
-  frame->dataWidth        = dstFormat.Width;
-  frame->dataHeight       = min(maxRows, dstFormat.Height);
-  frame->frameWidth       = srcFormat.Width;
-  frame->frameHeight      = srcFormat.Height;
-  frame->truncated        = maxRows < dstFormat.Height;
+  frame->screenWidth      = srcFormat.desc.Width;
+  frame->screenHeight     = srcFormat.desc.Height;
+  frame->dataWidth        = dstFormat.desc.Width;
+  frame->dataHeight       = min(maxRows, dstFormat.desc.Height);
+  frame->frameWidth       = dstFormat.width;
+  frame->frameHeight      = dstFormat.height;
+  frame->truncated        = maxRows < dstFormat.desc.Height;
   frame->pitch            = layout.Footprint.RowPitch;
   frame->stride           = layout.Footprint.RowPitch / 4;
-  frame->format           = this->allowRGB24 ?
-    CAPTURE_FMT_BGR_32 : CAPTURE_FMT_BGRA;
-  frame->hdr              = desc.colorSpace ==
+  frame->format           = dstFormat.format;
+  frame->hdr              = dstFormat.colorSpace ==
     DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
   frame->hdrPQ            = false;
   frame->rotation         = desc.rotation;
@@ -543,7 +596,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
-  D12FetchDesc desc;
+  D12FrameDesc desc;
 
   comRef_defineLocal(ID3D12Resource, src);
   *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
@@ -566,14 +619,19 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
-  const bool isSDR = desc.colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-
   ID3D12Resource * next = *src;
-  if (this->allowRGB24 && isSDR)
+  D12Effect * effect;
+  vector_forEach(effect, &this->effects)
   {
-    next = d12_effectRun(
-      this->effectRGB24, *this->device, *this->computeCommand.gfxList, next,
-      desc.dirtyRects, &desc.nbDirtyRects);
+    if (!effect->enabled)
+      continue;
+
+    next = d12_effectRun(effect,
+      *this->device,
+      *this->computeCommand.gfxList,
+      next,
+      desc.dirtyRects,
+      &desc.nbDirtyRects);
   }
 
   // copy into the framebuffer resource
@@ -593,9 +651,9 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
       .Offset = 0,
       .Footprint =
       {
-        .Format   = this->dstFormat.Format,
-        .Width    = this->dstFormat.Width,
-        .Height   = this->dstFormat.Height,
+        .Format   = this->dstFormat.desc.Format,
+        .Width    = this->dstFormat.desc.Width,
+        .Height   = this->dstFormat.desc.Height,
         .Depth    = 1,
         .RowPitch = this->pitch
       }
@@ -674,7 +732,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   }
 
   // execute the compute commands
-  if (this->allowRGB24 && isSDR)
+  if (next != *src)
   {
     d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
 
@@ -691,10 +749,10 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
 
   // signal the frame is complete
   framebuffer_set_write_ptr(frameBuffer,
-    this->dstFormat.Height * this->pitch);
+    this->dstFormat.desc.Height * this->pitch);
 
   // reset the command queues
-  if (this->allowRGB24 && isSDR)
+  if (next != *src)
     if (!d12_commandGroupReset(&this->computeCommand))
       goto exit;
 

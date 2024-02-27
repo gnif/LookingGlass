@@ -35,6 +35,26 @@ extern ComScope * d12_comScope;
 void d12_updatePointer(
   CapturePointer * pointer, void * shape, size_t shapeSize);
 
+// Structures for backends and effects
+
+typedef struct D12FrameDesc
+{
+  CaptureRotation       rotation;
+  RECT                * dirtyRects;
+  unsigned              nbDirtyRects;
+  DXGI_COLOR_SPACE_TYPE colorSpace;
+}
+D12FrameDesc;
+
+typedef struct D12FrameFormat
+{
+  D3D12_RESOURCE_DESC   desc;
+  DXGI_COLOR_SPACE_TYPE colorSpace;
+  unsigned              width, height;
+  CaptureFormat         format;
+}
+D12FrameFormat;
+
 // DirectX12 library functions
 
 struct DX12

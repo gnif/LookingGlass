@@ -213,20 +213,20 @@ static void d12_effect_rgb24Free(D12Effect ** instance)
   free(this);
 }
 
-static bool d12_effect_rgb24SetFormat(D12Effect * effect,
+static D12EffectStatus d12_effect_rgb24SetFormat(D12Effect * effect,
   ID3D12Device3             * device,
-  const D3D12_RESOURCE_DESC * src,
-        D3D12_RESOURCE_DESC * dst)
+  const D12FrameFormat * src,
+        D12FrameFormat * dst)
 {
   TestInstance * this = UPCAST(TestInstance, effect);
   comRef_scopePush(1);
 
-  bool result = false;
+  D12EffectStatus result = D12_EFFECT_STATUS_ERROR;
   HRESULT hr;
 
-  if (src->Format != DXGI_FORMAT_B8G8R8A8_UNORM)
+  if (src->desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM)
   {
-    DEBUG_ERROR("RGB24 requires DXGI_FORMAT_B8G8R8A8_UNORM input");
+    result = D12_EFFECT_STATUS_BYPASS;
     goto exit;
   }
 
@@ -239,12 +239,12 @@ static bool d12_effect_rgb24SetFormat(D12Effect * effect,
     .VisibleNodeMask      = 1
   };
 
-  const unsigned packedPitch = ALIGN_TO(src->Width * 3, 4);
+  const unsigned packedPitch = ALIGN_TO(src->desc.Width * 3, 4);
   D3D12_RESOURCE_DESC desc =
   {
     .Format           = DXGI_FORMAT_B8G8R8A8_UNORM,
     .Width            = ALIGN_TO(packedPitch / 4, 64),
-    .Height           = (src->Width * src->Height) / (packedPitch / 3),
+    .Height           = (src->desc.Width * src->desc.Height) / (packedPitch / 3),
     .Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
     .Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
     .MipLevels        = 1,
@@ -268,8 +268,9 @@ static bool d12_effect_rgb24SetFormat(D12Effect * effect,
   this->threadsX = (desc.Width  + (THREADS-1)) / THREADS;
   this->threadsY = (desc.Height + (THREADS-1)) / THREADS;
 
-  *dst   = desc;
-  result = true;
+  dst->desc   = desc;
+  dst->format = CAPTURE_FMT_BGR_32;
+  result      = D12_EFFECT_STATUS_OK;
 
 exit:
   comRef_scopePop();

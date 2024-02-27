@@ -21,24 +21,36 @@
 #ifndef _H_D12_EFFECT_
 #define _H_D12_EFFECT_
 
+#include "d12.h"
+
 #include <stdbool.h>
 #include <d3d12.h>
 
 typedef struct D12Effect D12Effect;
 
+typedef enum D12EffectStatus
+{
+  D12_EFFECT_STATUS_OK,
+  D12_EFFECT_STATUS_ERROR,
+  D12_EFFECT_STATUS_BYPASS
+}
+D12EffectStatus;
+
 struct D12Effect
 {
   const char * name;
+
+  bool enabled;
 
   bool (*create)(D12Effect ** instance, ID3D12Device3 * device);
 
   void (*free)(D12Effect ** instance);
 
   // set the input format, and get the output format of the effect
-  bool (*setFormat)(D12Effect * effect,
+  D12EffectStatus (*setFormat)(D12Effect * effect,
     ID3D12Device3             * device,
-    const D3D12_RESOURCE_DESC * src,
-          D3D12_RESOURCE_DESC * dst);
+    const D12FrameFormat     * src,
+          D12FrameFormat     * dst);
 
   ID3D12Resource * (*run)(D12Effect * effect,
     ID3D12Device3             * device,
@@ -64,10 +76,10 @@ static inline void d12_effectFree(D12Effect ** instance)
   *instance = NULL;
 }
 
-static inline bool d12_effectSetFormat(D12Effect * effect,
-  ID3D12Device3             * device,
-  const D3D12_RESOURCE_DESC * src,
-        D3D12_RESOURCE_DESC * dst)
+static inline D12EffectStatus d12_effectSetFormat(D12Effect * effect,
+  ID3D12Device3         * device,
+  const D12FrameFormat * src,
+        D12FrameFormat * dst)
   { return effect->setFormat(effect, device, src, dst); }
 
 static inline ID3D12Resource * d12_effectRun(D12Effect * effect,

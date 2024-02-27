@@ -21,6 +21,8 @@
 #ifndef _H_D12_BACKEND_
 #define _H_D12_BACKEND_
 
+#include "d12.h"
+
 #include <stdbool.h>
 #include <d3d12.h>
 #include "interface/capture.h"
@@ -28,8 +30,6 @@
 #define D12_MAX_DIRTY_RECTS 256
 
 typedef struct D12Backend D12Backend;
-
-typedef struct D12FetchDesc D12FetchDesc;
 
 struct D12Backend
 {
@@ -61,15 +61,7 @@ struct D12Backend
     ID3D12CommandQueue * commandQueue);
 
   ID3D12Resource * (*fetch)(D12Backend * instance, unsigned frameBufferIndex,
-    D12FetchDesc * meta);
-};
-
-struct D12FetchDesc
-{
-  CaptureRotation       rotation;
-  RECT                * dirtyRects;
-  unsigned              nbDirtyRects;
-  DXGI_COLOR_SPACE_TYPE colorSpace;
+    D12FrameDesc * meta);
 };
 
 static inline bool d12_backendCreate(const D12Backend * backend,
@@ -104,7 +96,7 @@ static inline CaptureResult d12_backendSync(D12Backend * instance,
   { return instance->sync(instance, commandQueue); }
 
 static inline ID3D12Resource * d12_backendFetch(D12Backend * instance,
-  unsigned frameBufferIndex, D12FetchDesc * desc)
+  unsigned frameBufferIndex, D12FrameDesc * desc)
   { return instance->fetch(instance, frameBufferIndex, desc); }
 
 // Backend defines
