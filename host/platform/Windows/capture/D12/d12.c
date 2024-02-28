@@ -522,8 +522,6 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       goto exit;
   }
 
-  D12FrameFormat dstFormat = this->dstFormat;
-
   // if the input format changed, reconfigure the effects
   if (srcFormat.desc.Width  == 0 ||
       srcFormat.desc.Width  != this->captureFormat.desc.Width  ||
@@ -531,7 +529,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       srcFormat.desc.Format != this->captureFormat.desc.Format ||
       srcFormat.colorSpace  != this->captureFormat.colorSpace)
   {
-    this->captureFormat = srcFormat;
+    D12FrameFormat dstFormat = this->dstFormat;
+    this->captureFormat      = srcFormat;
 
     D12Effect * effect;
     D12FrameFormat curFormat = srcFormat;
@@ -571,7 +570,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
 
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
   ID3D12Device3_GetCopyableFootprints(*this->device,
-    &dstFormat.desc,
+    &this->dstFormat.desc,
     0       , // FirstSubresource
     1       , // NumSubresources
     0       , // BaseOffset,
@@ -581,20 +580,21 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     NULL);  // pTotalBytes
   this->pitch = layout.Footprint.RowPitch;
 
-  const unsigned int maxRows = maxFrameSize / layout.Footprint.RowPitch;
+  const unsigned maxRows = maxFrameSize / layout.Footprint.RowPitch;
+  const unsigned bpp     = this->dstFormat.format == CAPTURE_FMT_RGBA16F ? 8 : 4;
 
   frame->formatVer        = this->formatVer;
   frame->screenWidth      = srcFormat.width;
   frame->screenHeight     = srcFormat.height;
-  frame->dataWidth        = dstFormat.desc.Width;
-  frame->dataHeight       = min(maxRows, dstFormat.desc.Height);
-  frame->frameWidth       = dstFormat.width;
-  frame->frameHeight      = dstFormat.height;
-  frame->truncated        = maxRows < dstFormat.desc.Height;
-  frame->pitch            = layout.Footprint.RowPitch;
-  frame->stride           = layout.Footprint.RowPitch / 4;
-  frame->format           = dstFormat.format;
-  frame->hdr              = dstFormat.colorSpace ==
+  frame->dataWidth        = this->dstFormat.desc.Width;
+  frame->dataHeight       = min(maxRows, this->dstFormat.desc.Height);
+  frame->frameWidth       = this->dstFormat.width;
+  frame->frameHeight      = this->dstFormat.height;
+  frame->truncated        = maxRows < this->dstFormat.desc.Height;
+  frame->pitch            = this->pitch;
+  frame->stride           = this->pitch / bpp;
+  frame->format           = this->dstFormat.format;
+  frame->hdr              = this->dstFormat.colorSpace ==
     DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
   frame->hdrPQ            = false;
   frame->rotation         = desc.rotation;
