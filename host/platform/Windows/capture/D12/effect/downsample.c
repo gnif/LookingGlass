@@ -398,6 +398,12 @@ static void d12_effect_downsampleAdjustDamage(D12Effect * effect,
     rect->right  = min(this->width , rect->left + width);
     rect->top    = max(0, floor((double)rect->top * this->scaleY));
     rect->bottom = min(this->height, rect->top  + height);
+
+    // enlarge the rect to avoid missing damage due to sampler rounding
+    if (rect->left   > 0           ) rect->left   -= 1;
+    if (rect->top    > 0           ) rect->top    -= 1;
+    if (rect->right  < this->width ) rect->right  += 1;
+    if (rect->bottom < this->height) rect->bottom += 1;
   }
 }
 
