@@ -24,6 +24,7 @@
 
 #include "common/debug.h"
 #include "common/windebug.h"
+#include "common/display.h"
 
 #include <dxgi1_6.h>
 
@@ -92,7 +93,7 @@ static bool sdrWhiteLevel_setup(
 
   DXGI_OUTPUT_DESC1 desc1;
   IDXGIOutput6_GetDesc1(*output6, &desc1);
-  if (!getDisplayPathInfo(desc1.Monitor, &this.displayPathInfo))
+  if (!display_getPathInfo(desc1.Monitor, &this.displayPathInfo))
   {
     DEBUG_ERROR("Failed to get the display path info");
     goto exit;
@@ -214,7 +215,7 @@ static void sdrWhiteLevel_free(void * opaque)
 
 static void updateConsts(void)
 {
-  float nits = getSDRWhiteLevel(&this.displayPathInfo);
+  float nits = display_getSDRWhiteLevel(&this.displayPathInfo);
   if (nits == this.sdrWhiteLevel)
     return;
 

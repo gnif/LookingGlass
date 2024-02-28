@@ -18,16 +18,15 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifndef _H_COMMON_DISPLAY_
+#define _H_COMMON_DISPLAY_
+
+#if defined(_WIN32)
 #include <windows.h>
-#include <d3dcommon.h>
-#include <dxgi.h>
+#include <stdbool.h>
 
-#include "interface/capture.h"
+bool display_getPathInfo(HMONITOR monitor, DISPLAYCONFIG_PATH_INFO * info);
+float display_getSDRWhiteLevel(const DISPLAYCONFIG_PATH_INFO * displayPathInfo);
+#endif
 
-const char * getDXGIFormatStr(DXGI_FORMAT format);
-const char * getDXGIColorSpaceTypeStr(DXGI_COLOR_SPACE_TYPE type);
-
-bool compileShader(ID3DBlob ** dst, const char * entry, const char * target,
-  const char * code, const D3D_SHADER_MACRO * defines);
-
-DXGI_FORMAT getDXGIFormat(CaptureFormat format);
+#endif

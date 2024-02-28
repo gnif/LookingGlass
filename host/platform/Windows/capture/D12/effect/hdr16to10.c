@@ -7,28 +7,37 @@
 #include "common/debug.h"
 #include "common/windebug.h"
 #include "common/array.h"
+#include "common/display.h"
 
 #include <d3dcompiler.h>
 
-typedef struct TestInstance
+typedef struct HDR16to10Inst
 {
   D12Effect base;
+
+  const DISPLAYCONFIG_PATH_INFO * displayPathInfo;
+  struct
+  {
+    float SDRWhiteLevel;
+  }
+  consts;
 
   ID3D12RootSignature  ** rootSignature;
   ID3D12PipelineState  ** pso;
   ID3D12DescriptorHeap ** descHeap;
+  ID3D12Resource       ** constBuffer;
 
   unsigned threadsX, threadsY;
   ID3D12Resource ** dst;
 }
-TestInstance;
+HDR16to10Inst;
 
 #define THREADS 8
 
-static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device,
-  const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
+static bool d12_effect_hdr16to10Create(D12Effect ** instance,
+  ID3D12Device3 * device, const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
 {
-  TestInstance * this = calloc(1, sizeof(*this));
+  HDR16to10Inst * this = calloc(1, sizeof(*this));
   if (!this)
   {
     DEBUG_ERROR("out of memory");
@@ -39,9 +48,18 @@ static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device
   HRESULT hr;
   comRef_scopePush(10);
 
+  this->displayPathInfo = displayPathInfo;
+
   // shader resource view
-  D3D12_DESCRIPTOR_RANGE descriptorRanges[2] =
+  D3D12_DESCRIPTOR_RANGE descriptorRanges[3] =
   {
+    {
+      .RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+      .NumDescriptors                    = 1,
+      .BaseShaderRegister                = 0,
+      .RegisterSpace                     = 0,
+      .OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
+    },
     {
       .RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
       .NumDescriptors                    = 1,
@@ -58,7 +76,7 @@ static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device
     }
   };
 
-  // discriptor table
+  // descriptor table
   D3D12_ROOT_PARAMETER rootParams[1] =
   {
     {
@@ -115,29 +133,18 @@ static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device
 
   // Compile the shader
   const char * testCode =
+    "cbuffer Constants : register(b0)\n"
+    "{\n"
+    "  float SDRWhiteLevel;\n"
+    "};\n"
+    "\n"
     "Texture2D  <float4> src : register(t0);\n"
     "RWTexture2D<float4> dst : register(u0);\n"
     "\n"
     "[numthreads(" STR(THREADS) ", " STR(THREADS) ", 1)]\n"
     "void main(uint3 dt : SV_DispatchThreadID)\n"
     "{\n"
-    "  uint fstInputX = (dt.x * 4) / 3;\n"
-    "  float4 color0 = src[uint2(fstInputX, dt.y)];\n"
-    "\n"
-    "  uint sndInputX = fstInputX + 1;\n"
-    "  float4 color3 = src[uint2(sndInputX, dt.y)];\n"
-    "\n"
-    "  uint xmod3 = dt.x % 3;\n"
-    "\n"
-    "  float4 color1 = xmod3 <= 1 ? color0 : color3;\n"
-    "  float4 color2 = xmod3 == 0 ? color0 : color3;\n"
-    "\n"
-    "  float b = color0.bgr[xmod3];\n"
-    "  float g = color1.grb[xmod3];\n"
-    "  float r = color2.rbg[xmod3];\n"
-    "  float a = color3.bgr[xmod3];\n"
-    "\n"
-    "  dst[dt.xy] = float4(r, g, b, a);\n"
+    "  dst[dt.xy] = src[dt.xy] * SDRWhiteLevel;"
     "}\n";
 
   bool debug = false;
@@ -191,9 +198,48 @@ static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device
     goto exit;
   }
 
+  D3D12_HEAP_PROPERTIES constHeapProps =
+  {
+    .Type                 = D3D12_HEAP_TYPE_UPLOAD,
+    .CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+    .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN
+  };
+
+  D3D12_RESOURCE_DESC constBufferDesc =
+  {
+    .Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER,
+    .Width            = ALIGN_TO(sizeof(this->consts),
+      D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT),
+    .Height           = 1,
+    .DepthOrArraySize = 1,
+    .MipLevels        = 1,
+    .Format           = DXGI_FORMAT_UNKNOWN,
+    .SampleDesc.Count = 1,
+    .Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+    .Flags            = D3D12_RESOURCE_FLAG_NONE
+  };
+
+  comRef_defineLocal(ID3D12Resource, constBuffer);
+  hr = ID3D12Device3_CreateCommittedResource(
+    device,
+    &constHeapProps,
+    D3D12_HEAP_FLAG_NONE,
+    &constBufferDesc,
+    D3D12_RESOURCE_STATE_GENERIC_READ,
+    NULL,
+    &IID_ID3D12Resource,
+    (void **)constBuffer);
+
+  if (FAILED(hr))
+  {
+    DEBUG_WINERROR("Failed to create the constant buffer resource", hr);
+    goto exit;
+  }
+
   comRef_toGlobal(this->rootSignature, rootSignature);
   comRef_toGlobal(this->pso          , pso          );
   comRef_toGlobal(this->descHeap     , descHeap     );
+  comRef_toGlobal(this->constBuffer  , constBuffer  );
 
   result = true;
 
@@ -207,25 +253,26 @@ exit:
   return result;
 }
 
-static void d12_effect_rgb24Free(D12Effect ** instance)
+static void d12_effect_hdr16to10Free(D12Effect ** instance)
 {
-  TestInstance * this = UPCAST(TestInstance, *instance);
+  HDR16to10Inst * this = UPCAST(HDR16to10Inst, *instance);
 
   free(this);
 }
 
-static D12EffectStatus d12_effect_rgb24SetFormat(D12Effect * effect,
+static D12EffectStatus d12_effect_hdr16to10SetFormat(D12Effect * effect,
   ID3D12Device3             * device,
   const D12FrameFormat * src,
         D12FrameFormat * dst)
 {
-  TestInstance * this = UPCAST(TestInstance, effect);
+  HDR16to10Inst * this = UPCAST(HDR16to10Inst, effect);
   comRef_scopePush(1);
 
   D12EffectStatus result = D12_EFFECT_STATUS_ERROR;
   HRESULT hr;
 
-  if (src->desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM)
+  if (src->desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT ||
+      src->colorSpace  != DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
   {
     result = D12_EFFECT_STATUS_BYPASS;
     goto exit;
@@ -240,12 +287,11 @@ static D12EffectStatus d12_effect_rgb24SetFormat(D12Effect * effect,
     .VisibleNodeMask      = 1
   };
 
-  const unsigned packedPitch = ALIGN_TO(src->desc.Width * 3, 4);
   D3D12_RESOURCE_DESC desc =
   {
-    .Format           = DXGI_FORMAT_B8G8R8A8_UNORM,
-    .Width            = ALIGN_TO(packedPitch / 4, 64),
-    .Height           = (src->desc.Width * src->desc.Height) / (packedPitch / 3),
+    .Format           = DXGI_FORMAT_R10G10B10A2_UNORM,
+    .Width            = src->desc.Width,
+    .Height           = src->desc.Height,
     .Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
     .Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
     .MipLevels        = 1,
@@ -270,7 +316,7 @@ static D12EffectStatus d12_effect_rgb24SetFormat(D12Effect * effect,
   this->threadsY = (desc.Height + (THREADS-1)) / THREADS;
 
   dst->desc   = desc;
-  dst->format = CAPTURE_FMT_BGR_32;
+  dst->format = CAPTURE_FMT_RGBA10;
   result      = D12_EFFECT_STATUS_OK;
 
 exit:
@@ -278,11 +324,26 @@ exit:
   return result;
 }
 
-static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
+static ID3D12Resource * d12_effect_hdr16to10Run(D12Effect * effect,
   ID3D12Device3 * device, ID3D12GraphicsCommandList * commandList,
   ID3D12Resource * src, RECT dirtyRects[], unsigned * nbDirtyRects)
 {
-  TestInstance * this = UPCAST(TestInstance, effect);
+  HDR16to10Inst * this = UPCAST(HDR16to10Inst, effect);
+
+  float nits = 80.0f / display_getSDRWhiteLevel(this->displayPathInfo);
+  if (nits != this->consts.SDRWhiteLevel)
+  {
+    this->consts.SDRWhiteLevel = nits;
+
+    void * data;
+    D3D12_RANGE readRange = { 0, 0 };
+    HRESULT hr = ID3D12Resource_Map(*this->constBuffer, 0, &readRange, &data);
+    if (SUCCEEDED(hr))
+    {
+      memcpy(data, &this->consts, sizeof(this->consts));
+      ID3D12Resource_Unmap(*this->constBuffer, 0, NULL);
+    }
+  }
 
   // transition the destination texture to unordered access so we can write to it
   {
@@ -305,16 +366,28 @@ static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
   D3D12_CPU_DESCRIPTOR_HANDLE cpuSrvUavHandle =
     ID3D12DescriptorHeap_GetCPUDescriptorHandleForHeapStart(*this->descHeap);
 
+  // descriptor for input CBV
+  D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc =
+  {
+    .BufferLocation = ID3D12Resource_GetGPUVirtualAddress(*this->constBuffer),
+    .SizeInBytes    = ALIGN_TO(sizeof(this->consts),
+      D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT)
+  };
+  ID3D12Device3_CreateConstantBufferView(device, &cbvDesc, cpuSrvUavHandle);
+
+  // move to the next slot
+  cpuSrvUavHandle.ptr += ID3D12Device3_GetDescriptorHandleIncrementSize(
+    device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
   // descriptor for input SRV
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc =
   {
-    .Format                  = DXGI_FORMAT_B8G8R8A8_UNORM,
+    .Format                  = DXGI_FORMAT_R16G16B16A16_FLOAT,
     .ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D,
     .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
     .Texture2D.MipLevels     = 1
   };
-  ID3D12Device3_CreateShaderResourceView(
-    device, src, &srvDesc, cpuSrvUavHandle);
+  ID3D12Device3_CreateShaderResourceView(device, src, &srvDesc, cpuSrvUavHandle);
 
   // move to the next slot
   cpuSrvUavHandle.ptr += ID3D12Device3_GetDescriptorHandleIncrementSize(
@@ -323,7 +396,7 @@ static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
   // descriptor for the output UAV
   D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc =
   {
-    .Format        = DXGI_FORMAT_B8G8R8A8_UNORM,
+    .Format        = DXGI_FORMAT_R10G10B10A2_UNORM,
     .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D
   };
   ID3D12Device3_CreateUnorderedAccessView(
@@ -367,23 +440,15 @@ static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
     ID3D12GraphicsCommandList_ResourceBarrier(commandList, 1, &barrier);
   }
 
-  // adjust the dirty rects
-  for(RECT * rect = dirtyRects; rect < dirtyRects + *nbDirtyRects; ++rect)
-  {
-    unsigned width = rect->right - rect->left;
-    rect->left  = (rect->left * 3) / 4;
-    rect->right = rect->left + (width * 3 + 3) / 4;
-  }
-
   // return the output buffer
   return *this->dst;
 }
 
-const D12Effect D12Effect_RGB24 =
+const D12Effect D12Effect_HDR16to10 =
 {
-  .name      = "RGB24",
-  .create    = d12_effect_rgb24Create,
-  .free      = d12_effect_rgb24Free,
-  .setFormat = d12_effect_rgb24SetFormat,
-  .run       = d12_effect_rgb24Run
+  .name      = "HDR16to10",
+  .create    = d12_effect_hdr16to10Create,
+  .free      = d12_effect_hdr16to10Free,
+  .setFormat = d12_effect_hdr16to10SetFormat,
+  .run       = d12_effect_hdr16to10Run
 };

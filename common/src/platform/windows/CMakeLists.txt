@@ -39,6 +39,7 @@ add_library(lg_common_platform_code STATIC
   ivshmem.c
   time.c
   cpuinfo.c
+  display.c
 )
 
 target_link_libraries(lg_common_platform_code

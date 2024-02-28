@@ -28,6 +28,7 @@
 #include "common/option.h"
 #include "common/rects.h"
 #include "common/vector.h"
+#include "common/display.h"
 #include "com_ref.h"
 
 #include "backend.h"
@@ -36,6 +37,7 @@
 
 #include <dxgi.h>
 #include <dxgi1_3.h>
+#include <dxgi1_6.h>
 #include <d3dcommon.h>
 
 // definitions
@@ -45,6 +47,8 @@ struct D12Interface
 
   IDXGIFactory2      ** factory;
   ID3D12Device3      ** device;
+
+  DISPLAYCONFIG_PATH_INFO displayPathInfo;
 
   ID3D12CommandQueue ** copyQueue;
   ID3D12CommandQueue ** computeQueue;
@@ -76,6 +80,7 @@ struct D12Interface
   bool debug;
   bool trackDamage;
   bool allowRGB24;
+  bool hdr16to10;
 
   unsigned frameBufferCount;
   // must be last
@@ -155,6 +160,14 @@ static void d12_initOptions(void)
       .value.x_bool = false
     },
     {
+      .module       = "d12",
+      .name         = "HDR16to10",
+      .description  =
+        "Convert HDR16/8bpp to HDR10/4bpp (saves bandwidth)",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = true
+    },
+    {
       .module         = "d12",
       .name           = "debug",
       .description    = "Enable DirectX12 debugging and validation (SLOW!)",
@@ -180,9 +193,10 @@ static bool d12_create(
     return false;
   }
 
-  this->debug       = option_get_bool("d12", "debug"      );
-  this->trackDamage = option_get_bool("d12", "trackDamage");
-  this->allowRGB24  = option_get_bool("d12", "allowRGB24" );
+  this->debug       = option_get_bool("d12", "debug"       );
+  this->trackDamage = option_get_bool("d12", "trackDamage" );
+  this->allowRGB24  = option_get_bool("d12", "allowRGB24"  );
+  this->hdr16to10   = option_get_bool("d12", "HDR16to10"   );
 
   DEBUG_INFO(
     "debug:%d trackDamage:%d allowRGB24:%d",
@@ -262,6 +276,23 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     ID3D12Debug1_EnableDebugLayer(*debug);
     ID3D12Debug1_SetEnableGPUBasedValidation(*debug, TRUE);
     ID3D12Debug1_SetEnableSynchronizedCommandQueueValidation(*debug, TRUE);
+  }
+
+  // get the display path info
+  comRef_defineLocal(IDXGIOutput6, output6);
+  hr = IDXGIOutput_QueryInterface(*output, &IID_IDXGIOutput6, (void **)output6);
+  if (FAILED(hr))
+  {
+    DEBUG_WINERROR("Failed to obtain the IDXGIOutput6 interface", hr);
+    goto exit;
+  }
+
+  DXGI_OUTPUT_DESC1 desc1;
+  IDXGIOutput6_GetDesc1(*output6, &desc1);
+  if (!display_getPathInfo(desc1.Monitor, &this->displayPathInfo))
+  {
+    DEBUG_ERROR("Failed to get the display path info");
+    goto exit;
   }
 
   // create the D3D12 device
@@ -353,13 +384,22 @@ retryCreateCommandQueue:
 
   // create the vector of effects
   vector_create(&this->effects, sizeof(D12Effect *), 0);
+  D12Effect * effect;
+
+  if (this->hdr16to10)
+  {
+    if (!d12_effectCreate(&D12Effect_HDR16to10, &effect, *device,
+      &this->displayPathInfo))
+      goto exit;
+    vector_push(&this->effects, &effect);
+  }
 
   /* if RGB24 conversion is enabled add the effect to the list
   NOTE: THIS MUST BE THE LAST EFFECT */
   if (this->allowRGB24)
   {
-    D12Effect * effect;
-    if (!d12_effectCreate(&D12Effect_RGB24, &effect, *device))
+    if (!d12_effectCreate(&D12Effect_RGB24, &effect, *device,
+      &this->displayPathInfo))
       goto exit;
     vector_push(&this->effects, &effect);
   }
@@ -494,12 +534,14 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     this->captureFormat = srcFormat;
 
     D12Effect * effect;
+    D12FrameFormat curFormat = srcFormat;
     vector_forEach(effect, &this->effects)
     {
-      dstFormat = srcFormat;
-      switch(d12_effectSetFormat(effect, *this->device, &srcFormat, &dstFormat))
+      dstFormat = curFormat;
+      switch(d12_effectSetFormat(effect, *this->device, &curFormat, &dstFormat))
       {
         case D12_EFFECT_STATUS_OK:
+          curFormat       = dstFormat;
           effect->enabled = true;
           break;
 
@@ -542,8 +584,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   const unsigned int maxRows = maxFrameSize / layout.Footprint.RowPitch;
 
   frame->formatVer        = this->formatVer;
-  frame->screenWidth      = srcFormat.desc.Width;
-  frame->screenHeight     = srcFormat.desc.Height;
+  frame->screenWidth      = srcFormat.width;
+  frame->screenHeight     = srcFormat.height;
   frame->dataWidth        = dstFormat.desc.Width;
   frame->dataHeight       = min(maxRows, dstFormat.desc.Height);
   frame->frameWidth       = dstFormat.width;
