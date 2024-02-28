@@ -7,6 +7,7 @@ add_library(capture_D12 STATIC
   backend/dd.c
   effect/rgb24.c
   effect/hdr16to10.c
+  effect/downsample.c
 )
 
 target_link_libraries(capture_D12

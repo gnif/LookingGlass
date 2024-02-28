@@ -585,6 +585,11 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->hdrPQ            = false;
   frame->rotation         = desc.rotation;
 
+  D12Effect * effect;
+  vector_forEach(effect, &this->effects)
+    if (effect->enabled)
+      d12_effectAdjustDamage(effect, desc.dirtyRects, &desc.nbDirtyRects);
+
   {
     // create a clean list of rects
     FrameDamageRect allRects[desc.nbDirtyRects];
@@ -594,8 +599,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       allRects[count++] = (FrameDamageRect){
         .x      = rect->left,
         .y      = rect->top,
-        .width  = rect->right  - rect->left,
-        .height = rect->bottom - rect->top
+        .width  = (rect->right  - rect->left),
+        .height = (rect->bottom - rect->top)
       };
 
     count = rectsMergeOverlapping(allRects, count);

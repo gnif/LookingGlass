@@ -22,9 +22,11 @@
 
 extern const D12Effect D12Effect_HDR16to10;
 extern const D12Effect D12Effect_RGB24;
+extern const D12Effect D12Effect_Downsample;
 
 static const D12Effect * D12Effects[] =
 {
+  &D12Effect_Downsample,
   &D12Effect_HDR16to10,
 
   &D12Effect_RGB24, // this MUST be last

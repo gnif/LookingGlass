@@ -55,6 +55,10 @@ struct D12Effect
     const D12FrameFormat     * src,
           D12FrameFormat     * dst);
 
+  void (*adjustDamage)(D12Effect * effect,
+    RECT       dirtyRects[],
+    unsigned * nbDirtyRects);
+
   ID3D12Resource * (*run)(D12Effect * effect,
     ID3D12Device3             * device,
     ID3D12GraphicsCommandList * commandList,
@@ -89,6 +93,12 @@ static inline D12EffectStatus d12_effectSetFormat(D12Effect * effect,
   const D12FrameFormat * src,
         D12FrameFormat * dst)
   { return effect->setFormat(effect, device, src, dst); }
+
+static inline void d12_effectAdjustDamage(D12Effect * effect,
+  RECT dirtyRects[],
+  unsigned * nbDirtyRects)
+  { if (effect->adjustDamage)
+      effect->adjustDamage(effect, dirtyRects, nbDirtyRects); }
 
 static inline ID3D12Resource * d12_effectRun(D12Effect * effect,
   ID3D12Device3              * device,
