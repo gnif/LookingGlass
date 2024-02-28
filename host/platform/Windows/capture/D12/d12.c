@@ -63,6 +63,7 @@ struct D12Interface
 
   D12Backend * backend;
   Vector       effects;
+  bool         effectsActive;
 
   // capture format tracking
   D12FrameFormat captureFormat;
@@ -531,6 +532,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   {
     D12FrameFormat dstFormat = this->dstFormat;
     this->captureFormat      = srcFormat;
+    this->effectsActive      = false;
 
     D12Effect * effect;
     D12FrameFormat curFormat = srcFormat;
@@ -540,8 +542,9 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       switch(d12_effectSetFormat(effect, *this->device, &curFormat, &dstFormat))
       {
         case D12_EFFECT_STATUS_OK:
-          curFormat       = dstFormat;
-          effect->enabled = true;
+          this->effectsActive = true;
+          curFormat           = dstFormat;
+          effect->enabled     = true;
           break;
 
         case D12_EFFECT_STATUS_ERROR:
@@ -656,7 +659,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
 
   // place a fence into the queue
   result = d12_backendSync(this->backend,
-    this->allowRGB24 ? *this->computeQueue : *this->copyQueue);
+    this->effectsActive ? *this->computeQueue : *this->copyQueue);
 
   if (result != CAPTURE_RESULT_OK)
     goto exit;
@@ -774,7 +777,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   }
 
   // execute the compute commands
-  if (next != *src)
+  if (this->effectsActive)
   {
     d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
 
@@ -794,9 +797,8 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     this->dstFormat.desc.Height * this->pitch);
 
   // reset the command queues
-  if (next != *src)
-    if (!d12_commandGroupReset(&this->computeCommand))
-      goto exit;
+  if (this->effectsActive && !d12_commandGroupReset(&this->computeCommand))
+    goto exit;
 
   if (!d12_commandGroupReset(&this->copyCommand))
     goto exit;
