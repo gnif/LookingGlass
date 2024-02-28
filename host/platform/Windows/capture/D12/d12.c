@@ -32,7 +32,7 @@
 #include "com_ref.h"
 
 #include "backend.h"
-#include "effect.h"
+#include "effects.h"
 #include "command_group.h"
 
 #include <dxgi.h>
@@ -80,8 +80,6 @@ struct D12Interface
   // options
   bool debug;
   bool trackDamage;
-  bool allowRGB24;
-  bool hdr16to10;
 
   unsigned frameBufferCount;
   // must be last
@@ -153,22 +151,6 @@ static void d12_initOptions(void)
       .value.x_bool   = true
     },
     {
-      .module       = "d12",
-      .name         = "allowRGB24",
-      .description  =
-        "Losslessly pack 32-bit RGBA8 into 24-bit RGB (saves bandwidth)",
-      .type         = OPTION_TYPE_BOOL,
-      .value.x_bool = false
-    },
-    {
-      .module       = "d12",
-      .name         = "HDR16to10",
-      .description  =
-        "Convert HDR16/8bpp to HDR10/4bpp (saves bandwidth)",
-      .type         = OPTION_TYPE_BOOL,
-      .value.x_bool = true
-    },
-    {
       .module         = "d12",
       .name           = "debug",
       .description    = "Enable DirectX12 debugging and validation (SLOW!)",
@@ -179,6 +161,9 @@ static void d12_initOptions(void)
   };
 
   option_register(options);
+
+  for(const D12Effect ** effect = D12Effects; *effect; ++effect)
+    d12_effectInitOptions(*effect);
 }
 
 static bool d12_create(
@@ -196,14 +181,10 @@ static bool d12_create(
 
   this->debug       = option_get_bool("d12", "debug"       );
   this->trackDamage = option_get_bool("d12", "trackDamage" );
-  this->allowRGB24  = option_get_bool("d12", "allowRGB24"  );
-  this->hdr16to10   = option_get_bool("d12", "HDR16to10"   );
 
   DEBUG_INFO(
-    "debug:%d trackDamage:%d allowRGB24:%d",
-    this->debug,
-    this->trackDamage,
-    this->allowRGB24);
+    "debug:%d trackDamage:%d",
+    this->debug, this->trackDamage);
 
   this->d3d12 = LoadLibrary("d3d12.dll");
   if (!this->d3d12)
@@ -385,24 +366,25 @@ retryCreateCommandQueue:
 
   // create the vector of effects
   vector_create(&this->effects, sizeof(D12Effect *), 0);
-  D12Effect * effect;
 
-  if (this->hdr16to10)
+  // create all the effects
+  for(const D12Effect ** effect = D12Effects; *effect; ++effect)
   {
-    if (!d12_effectCreate(&D12Effect_HDR16to10, &effect, *device,
-      &this->displayPathInfo))
-      goto exit;
-    vector_push(&this->effects, &effect);
-  }
+    D12Effect * instance;
+    switch(d12_effectCreate(*effect, &instance, *device, &this->displayPathInfo))
+    {
+      case D12_EFFECT_STATUS_OK:
+        DEBUG_INFO("D12 Created Effect: %s", (*effect)->name);
+        vector_push(&this->effects, &instance);
+        break;
 
-  /* if RGB24 conversion is enabled add the effect to the list
-  NOTE: THIS MUST BE THE LAST EFFECT */
-  if (this->allowRGB24)
-  {
-    if (!d12_effectCreate(&D12Effect_RGB24, &effect, *device,
-      &this->displayPathInfo))
-      goto exit;
-    vector_push(&this->effects, &effect);
+      case D12_EFFECT_STATUS_BYPASS:
+        continue;
+
+      case D12_EFFECT_STATUS_ERROR:
+        DEBUG_ERROR("Failed to create effect: %s", (*effect)->name);
+        goto exit;
+    }
   }
 
   comRef_toGlobal(this->factory     , factory      );
@@ -545,6 +527,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
           this->effectsActive = true;
           curFormat           = dstFormat;
           effect->enabled     = true;
+          DEBUG_INFO("D12 Effect Active: %s", effect->name);
           break;
 
         case D12_EFFECT_STATUS_ERROR:

@@ -8,6 +8,7 @@
 #include "common/windebug.h"
 #include "common/array.h"
 #include "common/display.h"
+#include "common/option.h"
 
 #include <d3dcompiler.h>
 
@@ -34,17 +35,38 @@ HDR16to10Inst;
 
 #define THREADS 8
 
-static bool d12_effect_hdr16to10Create(D12Effect ** instance,
+static void d12_effect_hdr16to10InitOptions(void)
+{
+  struct Option options[] =
+  {
+    {
+      .module       = "d12",
+      .name         = "HDR16to10",
+      .description  =
+        "Convert HDR16/8bpp to HDR10/4bpp (saves bandwidth)",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = true
+    },
+    {0}
+  };
+
+  option_register(options);
+}
+
+static D12EffectStatus d12_effect_hdr16to10Create(D12Effect ** instance,
   ID3D12Device3 * device, const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
 {
+  if (!option_get_bool("d12", "HDR16to10"))
+    return D12_EFFECT_STATUS_BYPASS;
+
   HDR16to10Inst * this = calloc(1, sizeof(*this));
   if (!this)
   {
     DEBUG_ERROR("out of memory");
-    return false;
+    return D12_EFFECT_STATUS_ERROR;
   }
 
-  bool result = false;
+  bool result = D12_EFFECT_STATUS_ERROR;
   HRESULT hr;
   comRef_scopePush(10);
 
@@ -241,12 +263,11 @@ static bool d12_effect_hdr16to10Create(D12Effect ** instance,
   comRef_toGlobal(this->descHeap     , descHeap     );
   comRef_toGlobal(this->constBuffer  , constBuffer  );
 
-  result = true;
+  result = D12_EFFECT_STATUS_OK;
+  *instance = &this->base;
 
 exit:
-  if (result)
-    *instance = &this->base;
-  else
+  if (!*instance)
     free(this);
 
   comRef_scopePop();
@@ -446,9 +467,10 @@ static ID3D12Resource * d12_effect_hdr16to10Run(D12Effect * effect,
 
 const D12Effect D12Effect_HDR16to10 =
 {
-  .name      = "HDR16to10",
-  .create    = d12_effect_hdr16to10Create,
-  .free      = d12_effect_hdr16to10Free,
-  .setFormat = d12_effect_hdr16to10SetFormat,
-  .run       = d12_effect_hdr16to10Run
+  .name        = "HDR16to10",
+  .initOptions = d12_effect_hdr16to10InitOptions,
+  .create      = d12_effect_hdr16to10Create,
+  .free        = d12_effect_hdr16to10Free,
+  .setFormat   = d12_effect_hdr16to10SetFormat,
+  .run         = d12_effect_hdr16to10Run
 };

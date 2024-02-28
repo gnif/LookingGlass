@@ -42,7 +42,9 @@ struct D12Effect
 
   bool enabled;
 
-  bool (*create)(D12Effect ** instance, ID3D12Device3 * device,
+  void (*initOptions)(void);
+
+  D12EffectStatus (*create)(D12Effect ** instance, ID3D12Device3 * device,
     const DISPLAYCONFIG_PATH_INFO * displayPathInfo);
 
   void (*free)(D12Effect ** instance);
@@ -61,14 +63,18 @@ struct D12Effect
     unsigned                  * nbDirtyRects);
 };
 
-static inline bool d12_effectCreate(const D12Effect * effect,
+static inline void d12_effectInitOptions(const D12Effect * effect)
+  {  if (effect->initOptions) effect->initOptions(); }
+
+static inline D12EffectStatus d12_effectCreate(const D12Effect * effect,
   D12Effect ** instance, ID3D12Device3 * device,
   const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
 {
-  if (!effect->create(instance, device, displayPathInfo))
-    return false;
-  memcpy(*instance, effect, sizeof(*effect));
-  return true;
+  *instance = NULL;
+  D12EffectStatus status = effect->create(instance, device, displayPathInfo);
+  if (status == D12_EFFECT_STATUS_OK)
+    memcpy(*instance, effect, sizeof(*effect));
+  return status;
 }
 
 static inline void d12_effectFree(D12Effect ** instance)
@@ -92,10 +98,5 @@ static inline ID3D12Resource * d12_effectRun(D12Effect * effect,
   unsigned                   * nbDirtyRects)
   { return effect->run(effect, device, commandList, src,
     dirtyRects, nbDirtyRects); }
-
-// effect defines
-
-extern const D12Effect D12Effect_RGB24;
-extern const D12Effect D12Effect_HDR16to10;
 
 #endif

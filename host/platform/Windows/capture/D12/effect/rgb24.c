@@ -7,6 +7,7 @@
 #include "common/debug.h"
 #include "common/windebug.h"
 #include "common/array.h"
+#include "common/option.h"
 
 #include <d3dcompiler.h>
 
@@ -25,17 +26,38 @@ TestInstance;
 
 #define THREADS 8
 
-static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device,
+static void d12_effect_rgb24InitOptions(void)
+{
+  struct Option options[] =
+  {
+    {
+      .module       = "d12",
+      .name         = "allowRGB24",
+      .description  =
+        "Losslessly pack 32-bit RGBA8 into 24-bit RGB (saves bandwidth)",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = false
+    },
+    {0}
+  };
+
+  option_register(options);
+}
+
+static D12EffectStatus d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device,
   const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
 {
+  if (!option_get_bool("d12", "allowRGB24"))
+    return D12_EFFECT_STATUS_BYPASS;
+
   TestInstance * this = calloc(1, sizeof(*this));
   if (!this)
   {
     DEBUG_ERROR("out of memory");
-    return false;
+    return D12_EFFECT_STATUS_ERROR;
   }
 
-  bool result = false;
+  D12EffectStatus result = D12_EFFECT_STATUS_ERROR;
   HRESULT hr;
   comRef_scopePush(10);
 
@@ -195,12 +217,11 @@ static bool d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device
   comRef_toGlobal(this->pso          , pso          );
   comRef_toGlobal(this->descHeap     , descHeap     );
 
-  result = true;
+  result = D12_EFFECT_STATUS_OK;
+  *instance = &this->base;
 
 exit:
-  if (result)
-    *instance = &this->base;
-  else
+  if (!*instance)
     free(this);
 
   comRef_scopePop();
@@ -381,9 +402,10 @@ static ID3D12Resource * d12_effect_rgb24Run(D12Effect * effect,
 
 const D12Effect D12Effect_RGB24 =
 {
-  .name      = "RGB24",
-  .create    = d12_effect_rgb24Create,
-  .free      = d12_effect_rgb24Free,
-  .setFormat = d12_effect_rgb24SetFormat,
-  .run       = d12_effect_rgb24Run
+  .name        = "RGB24",
+  .initOptions = d12_effect_rgb24InitOptions,
+  .create      = d12_effect_rgb24Create,
+  .free        = d12_effect_rgb24Free,
+  .setFormat   = d12_effect_rgb24SetFormat,
+  .run         = d12_effect_rgb24Run
 };
