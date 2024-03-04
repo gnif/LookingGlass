@@ -704,23 +704,24 @@ bool option_validate(void)
 
     if (invalid)
     {
-      printf("\nInvalid value provided to the option: %s:%s\n", o->module, o->name);
+      fprintf(stderr, "\nInvalid value provided to the option: %s:%s\n",
+        o->module, o->name);
 
       if (error)
-        printf("\n Error: %s\n", error);
+        fprintf(stderr, "\n Error: %s\n", error);
 
       if (o->getValues)
       {
         StringList values = o->getValues(o);
-        printf("\nValid values are:\n\n");
+        fprintf(stderr, "\nValid values are:\n\n");
         for(unsigned int v = 0; v < stringlist_count(values); ++v)
-          printf("  * %s\n", stringlist_at(values, v));
+          fprintf(stderr, "  * %s\n", stringlist_at(values, v));
         stringlist_free(&values);
       }
 
       if (o->printHelp)
       {
-        printf("\n");
+        fprintf(stderr, "\n");
         o->printHelp();
       }
 
@@ -729,34 +730,33 @@ bool option_validate(void)
   }
 
   if (!ok)
-    printf("\n");
+    fprintf(stderr, "\n");
 
   return ok;
 }
 
 void option_print_hrule(char * headerLine, int maxLen, char ruleChar)
 {
-  printf("  +%c", ruleChar);
+  fprintf(stderr, "  +%c", ruleChar);
   for (int i = 0; i < maxLen; i++)
   {
     if(i < strlen(headerLine))
     {
       if (headerLine[i] == '|')
       {
-        putc('+', stdout);
+        putc('+', stderr);
         continue;
       }
     }
-    putc(ruleChar, stdout);
+    putc(ruleChar, stderr);
   }
-  printf("%c+\n", ruleChar);
+  fprintf(stderr, "%c+\n", ruleChar);
 }
 
 void option_print(void)
 {
-  printf(
-    "The following is a complete list of options accepted by this application\n\n"
-  );
+  fprintf(stderr, "The following is a complete list of options accepted by this "
+    "application\n\n");
 
   for(int g = 0; g < state.gCount; ++g)
   {
@@ -850,7 +850,7 @@ void option_print(void)
       }
 
       char * line = stringlist_at(lines, i);
-      printf("  | %-*s |\n", maxLen, line);
+      fprintf(stderr, "  | %-*s |\n", maxLen, line);
 
       if (i == 0)
       {
@@ -866,7 +866,7 @@ void option_print(void)
 
     stringlist_free(&lines);
 
-    printf("\n");
+    fprintf(stderr, "\n");
   }
 }
 
