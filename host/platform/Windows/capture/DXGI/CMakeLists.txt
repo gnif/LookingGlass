@@ -4,7 +4,6 @@ project(capture_DXGI LANGUAGES C)
 add_library(capture_DXGI STATIC
   src/dxgi.c
   src/d3d11.c
-  src/d3d12.c
   src/ods_capture.c
   src/util.c
 

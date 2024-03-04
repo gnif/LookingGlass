@@ -166,9 +166,7 @@ struct DXGIInterface
 static struct DXGIInterface * this = NULL;
 
 extern struct DXGICopyBackend copyBackendD3D11;
-extern struct DXGICopyBackend copyBackendD3D12;
 static struct DXGICopyBackend * backends[] = {
-  &copyBackendD3D12,
   &copyBackendD3D11,
 };
 
@@ -244,24 +242,10 @@ static void dxgi_initOptions(void)
     },
     {
       .module         = "dxgi",
-      .name           = "copyBackend",
-      .description    = "The copy backend to use, i.e. d3d11 or d3d12",
-      .type           = OPTION_TYPE_STRING,
-      .value.x_string = "d3d11",
-    },
-    {
-      .module         = "dxgi",
       .name           = "disableDamage",
       .description    = "Do not do damage-aware copies, i.e. always do full frame copies",
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
-    },
-    {
-      .module         = "dxgi",
-      .name           = "d3d12CopySleep",
-      .description    = "Milliseconds to sleep before copying frame with d3d12",
-      .type           = OPTION_TYPE_FLOAT,
-      .value.x_int    = 5
     },
     {
       .module         = "dxgi",
@@ -812,35 +796,21 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
   this->outputWidth  = this->width;
   this->outputHeight = this->height;
 
-  const char * copyBackend = option_get_string("dxgi", "copyBackend");
-  for (int i = 0; i < ARRAY_LENGTH(backends); ++i)
+  if (!backends[0]->create(
+    ivshmemBase,
+    alignSize,
+    this->frameBuffers,
+    this->maxTextures))
   {
-    if (!strcasecmp(copyBackend, backends[i]->code))
-    {
-      if (!backends[i]->create(
-        ivshmemBase,
-        alignSize,
-        this->frameBuffers,
-        this->maxTextures))
-      {
-        DEBUG_ERROR("Failed to initialize selected capture backend: %s", backends[i]->name);
-        backends[i]->free();
-        goto fail;
-      }
-
-      this->backend = backends[i];
-      break;
-    }
-  }
-
-  DEBUG_INFO("Output Size       : %u x %u", this->outputWidth, this->outputHeight);
-
-  if (!this->backend)
-  {
-    DEBUG_ERROR("Could not find copy backend: %s", copyBackend);
+    DEBUG_ERROR("Failed to initialize selected capture backend: %s",
+      backends[0]->name);
+    backends[0]->free();
     goto fail;
   }
 
+  this->backend = backends[0];
+
+  DEBUG_INFO("Output Size       : %u x %u", this->outputWidth, this->outputHeight);
   DEBUG_INFO("Copy backend      : %s", this->backend->name);
   DEBUG_INFO("Damage-aware copy : %s", this->disableDamage  ? "disabled" : "enabled" );
 
