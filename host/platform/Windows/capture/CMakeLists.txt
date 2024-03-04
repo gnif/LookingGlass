@@ -19,12 +19,12 @@ if(NOT EXISTS "${nvfbc_sdk}/inc" OR NOT IS_DIRECTORY "${nvfbc_sdk}/inc")
 endif()
 
 # NOTE: the order here denotes the default
-if(USE_DXGI)
-  add_capture("DXGI")
-endif()
-
 if(USE_D12)
   add_capture("D12")
+endif()
+
+if(USE_DXGI)
+  add_capture("DXGI")
 endif()
 
 if(USE_NVFBC)
