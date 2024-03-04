@@ -200,6 +200,12 @@ static bool nvfbc_create(
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
 
+  DEBUG_BREAK();
+  DEBUG_WARN("NvFBC IS DEPRECATED by NVIDIA");
+  DEBUG_WARN("As the new D12 capture engine is faster then NvFBC in every way");
+  DEBUG_WARN("we HIGHLY recommend you migrate to it");
+  DEBUG_BREAK();
+
   return true;
 }
 
