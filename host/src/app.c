@@ -123,6 +123,18 @@ static bool validateCaptureBackend(struct Option * opt, const char ** error)
   return false;
 }
 
+static StringList getValuesCaptureBackend(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
+
+  for (int i = 0; CaptureInterfaces[i]; ++i)
+    stringlist_push(sl, (char *)CaptureInterfaces[i]->shortName);
+
+  return sl;
+}
+
 static struct Option options[] =
 {
   {
@@ -132,6 +144,7 @@ static struct Option options[] =
     .type           = OPTION_TYPE_STRING,
     .value.x_string = "",
     .validator      = validateCaptureBackend,
+    .getValues      = getValuesCaptureBackend
   },
   {
     .module         = "app",
