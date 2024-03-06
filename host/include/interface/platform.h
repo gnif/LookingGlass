@@ -37,7 +37,7 @@
 int  app_main(int argc, char * argv[]);
 bool app_init(void);
 void app_shutdown(void);
-void app_quit(void);
+void app_quit(int exitcode);
 
 // these must be implemented for each OS
 const char * os_getExecutable(void);

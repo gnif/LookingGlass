@@ -246,7 +246,7 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
           NULL
         );
 
-             if (clicked == ID_MENU_EXIT    ) app_quit();
+             if (clicked == ID_MENU_EXIT    ) app_quit(LG_HOST_EXIT_USER);
         else if (clicked == ID_MENU_SHOW_LOG)
         {
           const char * logFile = option_get_string("os", "logFile");
@@ -258,6 +258,14 @@ LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
       break;
     }
+
+    case WM_WTSSESSION_CHANGE:
+      if (wParam == WTS_CONSOLE_DISCONNECT)
+      {
+        DEBUG_INFO("Console disconnected, shutting down");
+        app_quit(LG_HOST_EXIT_CAPTURE);
+      }
+      break;
 
     default:
       if (msg == app.trayRestartMsg)
@@ -440,6 +448,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   AppendMenu(app.trayMenu, MF_SEPARATOR, 0               , NULL           );
   AppendMenu(app.trayMenu, MF_STRING   , ID_MENU_EXIT    , "Exit"         );
 
+  if (!WTSRegisterSessionNotification(app.messageWnd, NOTIFY_FOR_THIS_SESSION))
+    DEBUG_WINERROR("WTSRegisterSessionNotification failed", GetLastError());
+
   // create the application thread
   LGThread * thread;
   if (!lgCreateThread("appThread", appThread, NULL, &thread))
@@ -470,6 +481,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   }
 
 shutdown:
+  WTSUnRegisterSessionNotification(app.messageWnd);
+
   DestroyMenu(app.trayMenu);
   app_shutdown();
   UnregisterWait(app.exitWait);

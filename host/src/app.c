@@ -68,8 +68,8 @@ enum AppState
 {
   APP_STATE_RUNNING,
   APP_STATE_IDLE,
-  APP_STATE_RESTART,
-  APP_STATE_REINIT,
+  APP_STATE_TRANSITION_TO_IDLE,
+  APP_STATE_REINIT_LGMP,
   APP_STATE_SHUTDOWN
 };
 
@@ -103,10 +103,12 @@ struct app
   uint32_t       frameSerial;
 
   CaptureInterface * iface;
+  bool captureStarted;
 
-  enum AppState state;
+  enum AppState state, lastState;
   LGTimer  * lgmpTimer;
   LGThread * frameThread;
+  bool threadsStarted;
 };
 
 static struct app app;
@@ -156,6 +158,14 @@ static struct Option options[] =
   {0}
 };
 
+inline static void setAppState(enum AppState state)
+{
+  if (app.state == APP_STATE_SHUTDOWN)
+    return;
+  app.lastState = app.state;
+  app.state     = state;
+}
+
 static bool lgmpTimer(void * opaque)
 {
   LGMP_STATUS status;
@@ -166,12 +176,12 @@ static bool lgmpTimer(void * opaque)
     {
       DEBUG_ERROR("LGMP reported the shared memory has been corrrupted, "
           "attempting to recover");
-      app.state = APP_STATE_REINIT;
+      setAppState(APP_STATE_REINIT_LGMP);
       return false;
     }
 
     DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
-    app.state = APP_STATE_SHUTDOWN;
+    setAppState(APP_STATE_SHUTDOWN);
     return false;
   }
 
@@ -196,7 +206,7 @@ static bool lgmpTimer(void * opaque)
   return true;
 }
 
-static bool sendFrame(CaptureResult result)
+static bool sendFrame(CaptureResult result, bool * restart)
 {
   CaptureFrame frame = { 0 };
   bool repeatFrame = false;
@@ -225,13 +235,14 @@ static bool sendFrame(CaptureResult result)
 
     case CAPTURE_RESULT_REINIT:
     {
-      app.state = APP_STATE_RESTART;
+      *restart = true;
       DEBUG_INFO("Frame thread reinit");
       return false;
     }
 
     case CAPTURE_RESULT_ERROR:
     {
+      *restart = false;
       DEBUG_ERROR("Failed to get the frame");
       return false;
     }
@@ -363,39 +374,43 @@ static int frameThread(void * opaque)
 
   while(app.state == APP_STATE_RUNNING)
   {
-    if (!sendFrame(CAPTURE_RESULT_OK))
+    bool restart = false;
+    if (!sendFrame(CAPTURE_RESULT_OK, &restart))
+    {
+      if (restart)
+        setAppState(APP_STATE_TRANSITION_TO_IDLE);
       break;
+    }
   }
   DEBUG_INFO("Frame thread stopped");
+
   return 0;
 }
 
 bool startThreads(void)
 {
-  app.state = APP_STATE_RUNNING;
-  if (!app.iface->asyncCapture)
+  if (app.threadsStarted)
     return true;
 
-  if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
-  {
-    DEBUG_ERROR("Failed to create the frame thread");
-    return false;
-  }
+  if (app.iface->asyncCapture)
+    if (!lgCreateThread("FrameThread", frameThread, NULL, &app.frameThread))
+    {
+      DEBUG_ERROR("Failed to create the frame thread");
+      return false;
+    }
 
+  app.threadsStarted = true;
   return true;
 }
 
 bool stopThreads(void)
 {
-  app.iface->stop();
-  if (app.state != APP_STATE_SHUTDOWN &&
-      app.state != APP_STATE_REINIT)
-    app.state = APP_STATE_IDLE;
-
-  if (!app.iface->asyncCapture)
+  if (!app.threadsStarted)
     return true;
 
-  if (app.frameThread)
+  app.iface->stop();
+
+  if (app.iface->asyncCapture && app.frameThread)
   {
     if (!lgJoinThread(app.frameThread, NULL))
     {
@@ -406,32 +421,37 @@ bool stopThreads(void)
     app.frameThread = NULL;
   }
 
+  app.threadsStarted = false;
   return true;
 }
 
 static bool captureStart(void)
 {
-  if (app.state == APP_STATE_IDLE)
-  {
-    if (!app.iface->init(app.ivshmemBase, &app.alignSize))
-    {
-      DEBUG_ERROR("Failed to initialize the capture device");
-      return false;
-    }
+  if (app.captureStarted)
+    return true;
 
-    if (app.iface->start && !app.iface->start())
-    {
-      DEBUG_ERROR("Failed to start the capture device");
-      return false;
-    }
+  if (!app.iface->init(app.ivshmemBase, &app.alignSize))
+  {
+    DEBUG_ERROR("Failed to initialize the capture device");
+    return false;
+  }
+
+  if (app.iface->start && !app.iface->start())
+  {
+    DEBUG_ERROR("Failed to start the capture device");
+    return false;
   }
 
   DEBUG_INFO("==== [ Capture Start ] ====");
+  app.captureStarted = true;
   return true;
 }
 
 static bool captureStop(void)
 {
+  if (!app.captureStarted)
+    return true;
+
   DEBUG_INFO("==== [ Capture Stop ] ====");
 
   if (!app.iface->deinit())
@@ -441,6 +461,7 @@ static bool captureStop(void)
   }
 
   app.frameValid = false;
+  app.captureStarted = false;
   return true;
 }
 
@@ -790,7 +811,8 @@ int app_main(int argc, char * argv[])
   // make sure rng is actually seeded for LGMP
   srand((unsigned)time(NULL));
 
-  app.state = APP_STATE_RUNNING;
+  app.lastState = APP_STATE_RUNNING;
+  app.state     = APP_STATE_RUNNING;
   ivshmemOptionsInit();
 
   // register capture interface options
@@ -887,7 +909,8 @@ int app_main(int argc, char * argv[])
         continue;
       }
 
-      if (iface->init(app.ivshmemBase, &app.alignSize))
+      app.iface = iface;
+      if (captureStart())
         break;
 
       iface->free();
@@ -896,6 +919,8 @@ int app_main(int argc, char * argv[])
 
     if (!iface)
     {
+      app.iface = NULL;
+
       if (*ifaceName)
         DEBUG_ERROR("Specified capture interface not supported");
       else
@@ -907,8 +932,6 @@ int app_main(int argc, char * argv[])
     DEBUG_INFO("Using            : %s", iface->getName());
     DEBUG_INFO("Capture Method   : %s", iface->asyncCapture ?
         "Asynchronous" : "Synchronous");
-
-    app.iface = iface;
   }
 
   if (!lgmpSetup(&shmDev))
@@ -919,141 +942,129 @@ int app_main(int argc, char * argv[])
 
   LG_LOCK_INIT(app.pointerLock);
 
-  if (app.iface->start && !app.iface->start())
+  do
   {
-    DEBUG_ERROR("Failed to start the capture interface");
-    exitcode = LG_HOST_EXIT_FATAL;
-    goto fail_lgmp;
-  }
-
-  while(app.state != APP_STATE_SHUTDOWN)
-  {
-    if (app.state == APP_STATE_REINIT)
+    switch(app.state)
     {
-      DEBUG_INFO("Performing LGMP reinitialization");
-      lgmpShutdown();
-      app.state = APP_STATE_RUNNING;
-      if (!lgmpSetup(&shmDev))
-        goto fail_lgmp;
-    }
-
-    if (app.state == APP_STATE_IDLE)
-    {
-      if(lgmpHostQueueHasSubs(app.pointerQueue) ||
-          lgmpHostQueueHasSubs(app.frameQueue))
-      {
-        if (!captureStart())
-        {
-          exitcode = LG_HOST_EXIT_FAILED;
-          goto fail_capture;
-        }
-
-        if (!startThreads())
-        {
-          exitcode = LG_HOST_EXIT_FAILED;
-          goto fail_threads;
-        }
-      }
-      else
-      {
-        usleep(100000);
-        continue;
-      }
-    }
-
-    while(likely(app.state != APP_STATE_SHUTDOWN && (
-          lgmpHostQueueHasSubs(app.pointerQueue) ||
-          lgmpHostQueueHasSubs(app.frameQueue))))
-    {
-      if (unlikely(
-            app.state == APP_STATE_RESTART ||
-            app.state == APP_STATE_REINIT))
+      case APP_STATE_REINIT_LGMP:
+        DEBUG_INFO("Performing LGMP reinitialization");
+        lgmpShutdown();
+        setAppState(app.lastState);
+        if (!lgmpSetup(&shmDev))
+          goto fail_lgmp;
         break;
 
-      if (unlikely(lgmpHostQueueNewSubs(app.pointerQueue) > 0))
-      {
-        LG_LOCK(app.pointerLock);
-        sendPointer(true);
-        LG_UNLOCK(app.pointerLock);
-      }
-
-      const uint64_t delta = microtime() - previousFrameTime;
-      if (delta < throttleUs)
-      {
-        const uint64_t us = throttleUs - delta;
-        // only delay if the time is reasonable
-        if (us > 1000)
-          nsleep(us * 1000);
-      }
-
-      const uint64_t captureStart = microtime();
-
-      const CaptureResult result = app.iface->capture(
-        app.captureIndex, app.frameBuffer[app.captureIndex]);
-
-      if (likely(result == CAPTURE_RESULT_OK))
-        previousFrameTime = captureStart;
-      else if (likely(result == CAPTURE_RESULT_TIMEOUT))
-      {
-        if (!app.iface->asyncCapture)
-          if (unlikely(app.frameValid &&
-                lgmpHostQueueNewSubs(app.frameQueue) > 0))
-          {
-            LGMP_STATUS status;
-            if ((status = lgmpHostQueuePost(app.frameQueue, 0,
-                    app.frameMemory[app.readIndex])) != LGMP_OK)
-              DEBUG_ERROR("%s", lgmpStatusString(status));
-          }
-      }
-      else
-      {
-        switch(result)
+      case APP_STATE_IDLE:
+        // if there are no clients subscribed, just remain idle
+        if (!lgmpHostQueueHasSubs(app.pointerQueue) &&
+            !lgmpHostQueueHasSubs(app.frameQueue))
         {
-          case CAPTURE_RESULT_REINIT:
-            app.state = APP_STATE_RESTART;
-            continue;
-
-          case CAPTURE_RESULT_ERROR:
-            DEBUG_ERROR("Capture interface reported a fatal error");
-            exitcode = LG_HOST_EXIT_FAILED;
-            goto fail_capture;
-
-          default:
-            DEBUG_ASSERT("Invalid capture result");
+          usleep(100000);
+          continue;
         }
-      }
 
-      if (!app.iface->asyncCapture)
-        sendFrame(result);
-    }
+        // clients subscribed, start the capture
+        if (!captureStart() || !startThreads())
+        {
+          exitcode = LG_HOST_EXIT_FAILED;
+          goto fail;
+        }
+        setAppState(APP_STATE_RUNNING);
+        break;
 
-    if (app.state != APP_STATE_SHUTDOWN)
-    {
-      if (!stopThreads())
+      case APP_STATE_TRANSITION_TO_IDLE:
+        if (!stopThreads() || !captureStop())
+        {
+          exitcode = LG_HOST_EXIT_FAILED;
+          goto fail;
+        }
+        setAppState(APP_STATE_IDLE);
+        break;
+
+      case APP_STATE_RUNNING:
       {
-        exitcode = LG_HOST_EXIT_FAILED;
-        goto fail_threads;
+        // if there are no clients subscribed, go idle
+        if (!lgmpHostQueueHasSubs(app.pointerQueue) &&
+            !lgmpHostQueueHasSubs(app.frameQueue))
+        {
+          setAppState(APP_STATE_TRANSITION_TO_IDLE);
+          break;
+        }
+
+        // if there is a brand new client, send them the pointer
+        if (unlikely(lgmpHostQueueNewSubs(app.pointerQueue) > 0))
+        {
+          LG_LOCK(app.pointerLock);
+          sendPointer(true);
+          LG_UNLOCK(app.pointerLock);
+        }
+
+        const uint64_t delta = microtime() - previousFrameTime;
+        if (delta < throttleUs)
+        {
+          const uint64_t us = throttleUs - delta;
+          // only delay if the time is reasonable
+          if (us > 1000)
+            nsleep(us * 1000);
+        }
+
+        const uint64_t captureStartTime = microtime();
+
+        const CaptureResult result = app.iface->capture(
+          app.captureIndex, app.frameBuffer[app.captureIndex]);
+
+        if (likely(result == CAPTURE_RESULT_OK))
+          previousFrameTime = captureStartTime;
+        else if (likely(result == CAPTURE_RESULT_TIMEOUT))
+        {
+          if (!app.iface->asyncCapture)
+            if (unlikely(app.frameValid &&
+                  lgmpHostQueueNewSubs(app.frameQueue) > 0))
+            {
+              LGMP_STATUS status;
+              if ((status = lgmpHostQueuePost(app.frameQueue, 0,
+                      app.frameMemory[app.readIndex])) != LGMP_OK)
+                DEBUG_ERROR("%s", lgmpStatusString(status));
+            }
+        }
+        else
+        {
+          switch(result)
+          {
+            case CAPTURE_RESULT_REINIT:
+              setAppState(APP_STATE_TRANSITION_TO_IDLE);
+              continue;
+
+            case CAPTURE_RESULT_ERROR:
+              DEBUG_ERROR("Capture interface reported a fatal error");
+              exitcode = LG_HOST_EXIT_FAILED;
+              goto fail;
+
+            default:
+              DEBUG_ASSERT("Invalid capture result");
+          }
+        }
+
+        if (!app.iface->asyncCapture)
+        {
+          bool restart = false;
+          if (!sendFrame(result, &restart) && restart)
+            setAppState(APP_STATE_TRANSITION_TO_IDLE);
+        }
+        break;
       }
 
-      if (!captureStop())
-      {
-        exitcode = LG_HOST_EXIT_FAILED;
-        goto fail_capture;
-      }
-
-      continue;
+      case APP_STATE_SHUTDOWN:
+        break;
     }
-
-    break;
   }
+  while(app.state != APP_STATE_SHUTDOWN);
 
   exitcode = app.exitcode;
+
+fail:
   stopThreads();
-
-fail_threads:
   captureStop();
-
-fail_capture:
   app.iface->free();
   LG_LOCK_FREE(app.pointerLock);
 
@@ -1072,7 +1083,7 @@ void app_shutdown(void)
   app.state = APP_STATE_SHUTDOWN;
 }
 
-void app_quit(void)
+void app_quit(int exitcode)
 {
   if (app.state == APP_STATE_SHUTDOWN)
   {
@@ -1080,6 +1091,6 @@ void app_quit(void)
     exit(LG_HOST_EXIT_USER);
   }
 
-  app.exitcode = LG_HOST_EXIT_USER;
+  app.exitcode = exitcode;
   app_shutdown();
 }

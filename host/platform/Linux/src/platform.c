@@ -62,7 +62,7 @@ int main(int argc, char * argv[])
 void sigHandler(int signo)
 {
   DEBUG_INFO("SIGINT");
-  app_quit();
+  app_quit(LG_HOST_EXIT_USER);
 }
 
 bool app_init(void)
