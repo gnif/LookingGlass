@@ -33,6 +33,7 @@
 #include <winternl.h>
 #include <dwmapi.h>
 #include <avrt.h>
+#include <sys/stat.h>
 
 #include "interface/platform.h"
 #include "common/debug.h"
@@ -45,7 +46,7 @@
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_EXIT     3001
-#define LOG_NAME         "looking-glass-host.txt"
+#define LOG_NAME         "looking-glass-host"
 
 struct AppState
 {
@@ -542,10 +543,35 @@ bool app_init(void)
   // redirect stderr to a file
   if (logFile && strcmp(logFile, "stderr") != 0)
   {
-    DEBUG_INFO("Logs will be written to: %s", logFile);
+    // if the log file already exists, rotate it out
+    char finalName[strlen(logFile)+5];
+    char name1[strlen(logFile)+7];
+    char name2[strlen(logFile)+7];
+
+    sprintf(finalName, "%s.txt", logFile);
+
+    struct stat st;
+    if (stat(finalName, &st) == 0)
+    {
+      sprintf(name2, "%s.%d.txt", logFile, 3);
+      if (stat(name2, &st) == 0)
+        unlink(name2);
+
+      for(int i = 2; i > 0; --i)
+      {
+        sprintf(name1, "%s.%d.txt", logFile, i);
+        if (stat(name1, &st) == 0)
+          rename(name1, name2);
+        strcpy(name2, name1);
+      }
+
+      rename(finalName, name2);
+    }
+
+    DEBUG_INFO("Logs will be written to: %s", finalName);
     DEBUG_INFO("Please see there for any further information");
 
-    if (!freopen(logFile, "a", stderr))
+    if (!freopen(finalName, "a", stderr))
       DEBUG_WARN("Failed to open log file, will log to stderr");
   }
 
