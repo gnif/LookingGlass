@@ -58,6 +58,7 @@ struct AppState
 
   char           executable[MAX_PATH + 1];
   char           systemLogDir[MAX_PATH];
+  char           systemTempDir[MAX_PATH];
   char         * osVersion;
   HWND           messageWnd;
   UINT           shellHookMsg;
@@ -299,6 +300,11 @@ static BOOL WINAPI CtrlHandler(DWORD dwCtrlType)
   return FALSE;
 }
 
+const char * getSystemTempDirectory(void)
+{
+  return app.systemTempDir;
+}
+
 const char *getSystemLogDirectory(void)
 {
   return app.systemLogDir;
@@ -340,6 +346,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   GetModuleFileName(NULL, app.executable, sizeof(app.executable));
   populateSystemLogDirectory();
+  GetTempPathA(sizeof(app.systemTempDir), app.systemTempDir);
 
   if (HandleService(app.argc, app.argv))
     return LG_HOST_EXIT_FAILED;

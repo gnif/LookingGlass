@@ -78,7 +78,13 @@ void doLogReal(const char * fmt, ...)
 static void setupLogging(void)
 {
   char logFilePath[MAX_PATH];
-  if (!PathCombineA(logFilePath, getSystemLogDirectory(), LOG_NAME))
+
+  // remove the old service log file if it exists
+  if (PathCombineA(logFilePath, getSystemLogDirectory(), LOG_NAME))
+    unlink(logFilePath);
+
+  // open the service file in the temp directory as we usually do not need it
+  if (!PathCombineA(logFilePath, getSystemTempDirectory(), LOG_NAME))
     strcpy(logFilePath, LOG_NAME);
   service.logFile = fopen(logFilePath, "a+");
   setbuf(service.logFile, NULL);

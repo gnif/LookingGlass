@@ -51,5 +51,6 @@ struct MSG_CALL_FUNCTION
 };
 
 bool windowsSetupAPI(void);
-const char *getSystemLogDirectory(void);
+const char * getSystemTempDirectory(void);
+const char * getSystemLogDirectory(void);
 LRESULT sendAppMessage(UINT Msg, WPARAM wParam, LPARAM lParam);
