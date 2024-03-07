@@ -11,6 +11,7 @@ add_library(platform_Windows STATIC
   src/mousehook.c
   src/force_compose.c
   src/com_ref.c
+  src/ods.c
 )
 
 # allow use of functions for Windows 7 or later

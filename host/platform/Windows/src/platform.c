@@ -21,6 +21,7 @@
 #include "platform.h"
 #include "service.h"
 #include "windows/mousehook.h"
+#include "ods.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -403,6 +404,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
       .type           = OPTION_TYPE_STRING,
       .value.x_string = ""
     },
+    {
+      .module         = "os",
+      .name           = "ods",
+      .description    = "Capture and log OutputDebugString messages",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
+    },
     {0}
   };
 
@@ -504,6 +512,8 @@ finish:
   if (app.taskHandle)
     AvRevertMmThreadCharacteristics(app.taskHandle);
 
+  ods_stop();
+
   if (app.stdErrFile)
     fclose(app.stdErrFile);
 
@@ -559,6 +569,7 @@ void CALLBACK exitEventCallback(PVOID opaque, BOOLEAN timedOut)
 bool app_init(void)
 {
   const char * logFile = option_get_string("os", "logFile");
+  const bool   ods     = option_get_bool  ("os", "ods"    );
 
   // redirect stderr to a file
   if (logFile && strcmp(logFile, "stderr") != 0)
@@ -597,6 +608,9 @@ bool app_init(void)
 
   // always flush stderr
   setbuf(stderr, NULL);
+
+  if (ods && !ods_start())
+    DEBUG_WARN("Failed to setup capture of debug messages");
 
   windowsSetTimerResolution();
 
