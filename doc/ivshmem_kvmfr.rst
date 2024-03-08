@@ -109,7 +109,7 @@ You should now also have the character device ``/dev/kvmfr0``
 
    If you start the VM prior to loading the module, QEMU will create the file
    ``/dev/kvmfr0`` as a regular file. You can confirm if this has happened by
-   running ``ls -l /dev/kvmfr0`` and checking if the filesize is greater then
+   running ``ls -l /dev/kvmfr0`` and checking if the file size is greater then
    zero, or the permissions do not start with ``c``. If this has occurred, you
    must delete the file and reload the module.
 

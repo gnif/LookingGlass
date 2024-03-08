@@ -6,7 +6,7 @@ IVSHMEM with standard shared memory
 
 This method is here for those that can not use the KVMFR kernel module. Please
 be aware that as a result you will not be able to take advantage of your GPUs
-abilit to access memory via it's hardware DMA engine if you use this method.
+ability to access memory via it's hardware DMA engine if you use this method.
 
 Add the following to your libvirt machine configuration inside the
 'devices' section by running ``virsh edit <VM>`` where ``<VM>`` is the name of
