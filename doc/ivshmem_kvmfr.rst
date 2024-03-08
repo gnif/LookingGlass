@@ -105,6 +105,11 @@ dmesg:
 
 You should now also have the character device ``/dev/kvmfr0``
 
+.. code:: bash
+
+   $ ls -l /dev/kvmfr0
+   crw------- 1 root root 242, 0 Mar  5 05:53 /dev/kvmfr0
+
 .. warning::
 
    If you start the VM prior to loading the module, QEMU will create the file
@@ -184,19 +189,32 @@ legacy syntax for IVSHMEM setup:
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
-to start:
+to start.
 
-- For AppArmor, create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if
-  it doesn't exist, and add the following::
+.. tip::
 
-     # Looking Glass
-     /dev/kvmfr0 rw,
+   If you are not sure, you likely have cgroups also as this is usually deployed
+   and configured by default by most distributions when you install libvirt.
 
-- For cgroups, edit ``/etc/libvirt/qemu.conf``, uncomment the
-  ``cgroup_device_acl`` block, and add ``/dev/kvmfr0`` to the list.
-  Then restart ``libvirtd``:
+AppArmor
+""""""""
 
-  .. code:: bash
+Create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if it doesn't exist
+and add the following:
+
+.. code:: text
+
+   # Looking Glass
+   /dev/kvmfr0 rw,
+
+cgroups
+"""""""
+
+Edit the file ``/etc/libvirt/qemu.conf`` and uncomment the ``cgroup_device_acl``
+block, adding ``/dev/kvmfr0`` to the list. To make this change active you then
+must restart ``libvirtd``
+
+.. code:: bash
 
    sudo systemctl restart libvirtd.service
 
