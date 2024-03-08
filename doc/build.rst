@@ -132,6 +132,15 @@ Fetching with APT
 
 You can fetch these dependencies with the following command:
 
+.. warning::
+
+   Do not just blindly install the list below, check if you are using PipeWire
+   or PulseAudio and adjust the list accordingly. Installing PipeWire libraries
+   on a PulseAudio system will result in a broken partial PipeWire install.
+
+   If you are not already using PipeWire we highly recommend you upgrade,
+   Looking Glass does not support audio input (microphone) with PulseAudio.
+
 .. code:: bash
 
    apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev \

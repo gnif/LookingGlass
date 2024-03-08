@@ -22,7 +22,7 @@ from lgrelease import release
 # -- Project information -----------------------------------------------------
 
 project = 'Looking Glass'
-copyright = '2022, Looking Glass team'
+copyright = '2024, Looking Glass team'
 author = 'Geoffrey McRae and the Looking Glass team'
 
 rst_prolog = """
