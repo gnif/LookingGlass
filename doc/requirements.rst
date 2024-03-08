@@ -77,11 +77,4 @@ NVIDIA for the guest
 NVIDIA unlike AMD do not seem to suffer from the same stability issues as AMD
 GPUs when operating as a passthrough GPU, however due to the closed source
 nature of their drivers NVIDIA can not make use of the DMABUF feature in the
-Linux kernel and as such it is not recommended for use as the host GPU.
-
-`It has been said <https://github.com/NVIDIA/open-gpu-kernel-modules/discussions/243#discussioncomment-3283415>`_
-that the open-source NVIDIA drivers as of release 525 will enable this support
-and we have made changes to `an experiemental branch <https://github.com/gnif/LookingGlass/tree/dmabuf-test>`_
-to support this, however until NVIDIA release this version and we can test these
-changes against the driver, support will not be included in the release builds
-of Looking Glass.
+Linux kernel unless you use the open source NVIDIA drivers.
