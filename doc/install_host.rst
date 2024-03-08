@@ -39,8 +39,8 @@ limitations.
 For Windows
 ^^^^^^^^^^^
 
-To begin, you must first run the Windows VM with the changes noted above in
-either the :ref:`libvirt` section.
+To begin, you must first run the Windows VM with the changes noted in the
+:doc:`install_libvirt` section.
 
 .. _installing_the_ivshmem_driver:
 
