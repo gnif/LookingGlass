@@ -63,7 +63,7 @@ AMD or Intel for the client
 
 AMD and Intel both support the `DMABUF` feature which enables offloading memory
 transfers to the GPU hardware. Please note that making use of this feature
-requires :doc:`loading the KVMFR kernel module <module>`.
+requires :doc:`loading the KVMFR kernel module <ivshmem_kvmfr>`.
 
 Additionally AMD GPUs suffer stability issues when operating as a passthrough
 device and as such we do not recommend their usage for such purposes. Models of
