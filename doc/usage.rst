@@ -219,127 +219,225 @@ the *Preset name* pull down. Presets are persistent and are stored on disk at
 All command line options
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block::
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | Long                   | Short | Value       | Description                                                                             |
+  +========================+=======+=============+=========================================================================================+
+  | app:configFile         | -C    | NULL        | A file to read additional configuration from                                            |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | app:renderer           | -g    | EGL         | Specify the renderer to use                                                             |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | app:license            | -l    | no          | Show the license for this application and then terminate                                |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | app:cursorPollInterval |       | 1000        | How often to check for a cursor update in microseconds                                  |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | app:framePollInterval  |       | 1000        | How often to check for a frame update in microseconds                                   |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | app:allowDMA           |       | yes         | Allow direct DMA transfers if supported (see `README.md` in the `module` dir)           |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
+  | app:shmFile            | -f    | /dev/kvmfr0 | The path to the shared memory file, or the name of the kvmfr device to use, e.g. kvmfr0 |
+  +------------------------+-------+-------------+-----------------------------------------------------------------------------------------+
 
-   +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
-   | Long                   | Short | Value                  | Description                                                                             |
-   +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
-   | app:configFile         | -C    | NULL                   | A file to read additional configuration from                                            |
-   | app:renderer           | -g    | auto                   | Specify the renderer to use                                                             |
-   | app:license            | -l    | no                     | Show the license for this application and then terminate                                |
-   | app:cursorPollInterval |       | 1000                   | How often to check for a cursor update in microseconds                                  |
-   | app:framePollInterval  |       | 1000                   | How often to check for a frame update in microseconds                                   |
-   | app:allowDMA           |       | yes                    | Allow direct DMA transfers if supported (see `README.md` in the `module` dir)           |
-   | app:shmFile            | -f    | /dev/shm/looking-glass | The path to the shared memory file, or the name of the kvmfr device to use, e.g. kvmfr0 |
-   +------------------------+-------+------------------------+-----------------------------------------------------------------------------------------+
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | Long                    | Short | Value                  | Description                                                          |
+  +=========================+=======+========================+======================================================================+
+  | win:title               |       | Looking Glass (client) | The window title                                                     |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:position            |       | center                 | Initial window position at startup                                   |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:size                |       | 1024x768               | Initial window size at startup                                       |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:autoResize          | -a    | no                     | Auto resize the window to the guest                                  |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:allowResize         | -n    | yes                    | Allow the window to be manually resized                              |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:keepAspect          | -r    | yes                    | Maintain the correct aspect ratio                                    |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:forceAspect         |       | yes                    | Force the window to maintain the aspect ratio                        |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:dontUpscale         |       | no                     | Never try to upscale the window                                      |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:intUpscale          |       | no                     | Allow only integer upscaling                                         |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:shrinkOnUpscale     |       | no                     | Limit the window dimensions when dontUpscale is enabled              |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:borderless          | -d    | no                     | Borderless mode                                                      |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:fullScreen          | -F    | no                     | Launch in fullscreen borderless mode                                 |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:maximize            | -T    | no                     | Launch window maximized                                              |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:minimizeOnFocusLoss |       | no                     | Minimize window on focus loss                                        |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:fpsMin              | -K    | -1                     | Frame rate minimum (0 = disable - not recommended, -1 = auto detect) |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (i.e. Alt+F4)                                |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:noScreensaver       | -S    | yes                    | Prevent the screensaver from starting                                |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:autoScreensaver     |       | no                     | Prevent the screensaver from starting when guest requests it         |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:alerts              | -q    | yes                    | Show on screen alert messages                                        |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:quickSplash         |       | no                     | Skip fading out the splash screen when a connection is established   |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:overlayDimsDesktop  |       | no                     | Dim the desktop when in interactive overlay mode                     |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:rotate              |       | 0                      | Rotate the displayed image (0, 90, 180, 270)                         |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:uiFont              |       | DejaVu Sans Mono       | The font to use when rendering on-screen UI                          |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:uiSize              |       | 14                     | The font size to use when rendering on-screen UI                     |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:jitRender           |       | no                     | Enable just-in-time rendering                                        |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:requestActivation   |       | yes                    | Request activation when attention is needed                          |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  | win:showFPS             | -k    | no                     | Enable the FPS & UPS display                                         |
+  +-------------------------+-------+------------------------+----------------------------------------------------------------------+
 
-   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
-   | Long                    | Short | Value                  | Description                                                          |
-   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
-   | win:title               |       | Looking Glass (client) | The window title                                                     |
-   | win:position            |       | center                 | Initial window position at startup                                   |
-   | win:size                |       | 1024x768               | Initial window size at startup                                       |
-   | win:autoResize          | -a    | no                     | Auto resize the window to the guest                                  |
-   | win:allowResize         | -n    | yes                    | Allow the window to be manually resized                              |
-   | win:keepAspect          | -r    | yes                    | Maintain the correct aspect ratio                                    |
-   | win:forceAspect         |       | yes                    | Force the window to maintain the aspect ratio                        |
-   | win:dontUpscale         |       | no                     | Never try to upscale the window                                      |
-   | win:intUpscale          |       | no                     | Allow only integer upscaling                                         |
-   | win:shrinkOnUpscale     |       | no                     | Limit the window dimensions when dontUpscale is enabled              |
-   | win:borderless          | -d    | no                     | Borderless mode                                                      |
-   | win:fullScreen          | -F    | no                     | Launch in fullscreen borderless mode                                 |
-   | win:maximize            | -T    | no                     | Launch window maximized                                              |
-   | win:minimizeOnFocusLoss |       | no                     | Minimize window on focus loss                                        |
-   | win:fpsMin              | -K    | -1                     | Frame rate minimum (0 = disable - not recommended, -1 = auto detect) |
-   | win:ignoreQuit          | -Q    | no                     | Ignore requests to quit (i.e. Alt+F4)                                |
-   | win:noScreensaver       | -S    | no                     | Prevent the screensaver from starting                                |
-   | win:autoScreensaver     |       | no                     | Prevent the screensaver from starting when guest requests it         |
-   | win:alerts              | -q    | yes                    | Show on screen alert messages                                        |
-   | win:quickSplash         |       | no                     | Skip fading out the splash screen when a connection is established   |
-   | win:overlayDimsDesktop  |       | yes                    | Dim the desktop when in interactive overlay mode                     |
-   | win:rotate              |       | 0                      | Rotate the displayed image (0, 90, 180, 270)                         |
-   | win:uiFont              |       | DejaVu Sans Mono       | The font to use when rendering on-screen UI                           |
-   | win:uiSize              |       | 14                     | The font size to use when rendering on-screen UI                     |
-   | win:jitRender           |       | no                     | Enable just-in-time rendering                                        |
-   | win:showFPS             | -k    | no                     | Enable the FPS & UPS display                                         |
-   +-------------------------+-------+------------------------+----------------------------------------------------------------------+
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | Long                         | Short | Value               | Description                                                                      |
+  +==============================+=======+=====================+==================================================================================+
+  | input:captureOnFocus         |       | no                  | Enable capture mode when the window becomes focused                              |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:grabKeyboard           | -G    | yes                 | Grab the keyboard in capture mode                                                |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:grabKeyboardOnFocus    |       | no                  | Grab the keyboard when focused                                                   |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:releaseKeysOnFocusLoss |       | yes                 | On focus loss, send key up events to guest for all held keys                     |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:escapeKey              | -m    | 70 = KEY_SCROLLLOCK | Specify the escape/menu key to use (use "help" to see valid values)              |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:ignoreWindowsKeys      |       | no                  | Do not pass events for the windows keys to the guest                             |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:hideCursor             | -M    | yes                 | Hide the local mouse cursor                                                      |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:mouseSens              |       | 0                   | Initial mouse sensitivity when in capture mode (-9 to 9)                         |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:mouseSmoothing         |       | yes                 | Apply simple mouse smoothing when rawMouse is not in use (helps reduce aliasing) |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:rawMouse               |       | yes                 | Use RAW mouse input when in capture mode (good for gaming)                       |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:mouseRedraw            |       | yes                 | Mouse movements trigger redraws (ignores FPS minimum)                            |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:autoCapture            |       | no                  | Try to keep the mouse captured when needed                                       |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:captureOnly            |       | no                  | Only enable input via SPICE if in capture mode                                   |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  | input:helpMenuDelay          |       | 200                 | Show help menu after holding down the escape key for this many milliseconds      |
+  +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
 
-   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
-   | Long                         | Short | Value               | Description                                                                      |
-   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
-   | input:grabKeyboard           | -G    | yes                 | Grab the keyboard in capture mode                                                |
-   | input:grabKeyboardOnFocus    |       | no                  | Grab the keyboard when focused                                                   |
-   | input:releaseKeysOnFocusLoss |       | yes                 | On focus loss, send key up events to guest for all held keys                     |
-   | input:escapeKey              | -m    | 70 = KEY_SCROLLLOCK | Specify the escape/menu key to use (use "help" to see valid values)              |
-   | input:ignoreWindowsKeys      |       | no                  | Do not pass events for the windows keys to the guest                             |
-   | input:hideCursor             | -M    | yes                 | Hide the local mouse cursor                                                      |
-   | input:mouseSens              |       | 0                   | Initial mouse sensitivity when in capture mode (-9 to 9)                         |
-   | input:mouseSmoothing         |       | yes                 | Apply simple mouse smoothing when rawMouse is not in use (helps reduce aliasing) |
-   | input:rawMouse               |       | no                  | Use RAW mouse input when in capture mode (good for gaming)                       |
-   | input:mouseRedraw            |       | yes                 | Mouse movements trigger redraws (ignores FPS minimum)                            |
-   | input:autoCapture            |       | no                  | Try to keep the mouse captured when needed                                       |
-   | input:captureOnly            |       | no                  | Only enable input via SPICE if in capture mode                                   |
-   | input:helpMenuDelay          |       | 200                 | Show help menu after holding down the escape key for this many milliseconds      |
-   +------------------------------+-------+---------------------+----------------------------------------------------------------------------------+
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | Long                   | Short | Value                             | Description                                                         |
+  +========================+=======+===================================+=====================================================================+
+  | spice:enable           | -s    | yes                               | Enable the built in SPICE client for input and/or clipboard support |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:host             | -c    | /opt/PVM/vms/Windows/windows.sock | The SPICE server host or UNIX socket                                |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:port             | -p    | 0                                 | The SPICE server port (0 = unix socket)                             |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:input            |       | yes                               | Use SPICE to send keyboard and mouse input events to the guest      |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:clipboard        |       | yes                               | Use SPICE to synchronize the clipboard contents with the guest      |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:clipboardToVM    |       | yes                               | Allow the clipboard to be synchronized TO the VM                    |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:clipboardToLocal |       | yes                               | Allow the clipboard to be synchronized FROM the VM                  |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:audio            |       | yes                               | Enable SPICE audio support                                          |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:scaleCursor      | -j    | yes                               | Scale cursor input position to screen size when up/down scaled      |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:captureOnStart   |       | no                                | Capture mouse and keyboard on start                                 |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:alwaysShowCursor |       | no                                | Always show host cursor                                             |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:showCursorDot    |       | yes                               | Use a "dot" cursor when the window does not have focus              |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
+  | spice:largeCursorDot   |       | yes                               | Use a larger version of the "dot" cursor                            |
+  +------------------------+-------+-----------------------------------+---------------------------------------------------------------------+
 
-   +------------------------+-------+-----------+---------------------------------------------------------------------+
-   | Long                   | Short | Value     | Description                                                         |
-   +------------------------+-------+-----------+---------------------------------------------------------------------+
-   | spice:enable           | -s    | yes       | Enable the built in SPICE client for input and/or clipboard support |
-   | spice:host             | -c    | 127.0.0.1 | The SPICE server host or UNIX socket                                |
-   | spice:port             | -p    | 5900      | The SPICE server port (0 = unix socket)                             |
-   | spice:input            |       | yes       | Use SPICE to send keyboard and mouse input events to the guest      |
-   | spice:clipboard        |       | yes       | Use SPICE to synchronize the clipboard contents with the guest      |
-   | spice:clipboardToVM    |       | yes       | Allow the clipboard to be synchronized TO the VM                    |
-   | spice:clipboardToLocal |       | yes       | Allow the clipboard to be synchronized FROM the VM                  |
-   | spice:audio            |       | yes       | Enable SPICE audio support                                          |
-   | spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
-   | spice:captureOnStart   |       | no        | Capture mouse and keyboard on start                                 |
-   | spice:alwaysShowCursor |       | no        | Always show host cursor                                             |
-   | spice:showCursorDot    |       | yes       | Use a "dot" cursor when the window does not have focus              |
-   +------------------------+-------+-----------+---------------------------------------------------------------------+
+  +------------------------+-------+-------+-------------------------------------------------------------------------------+
+  | Long                   | Short | Value | Description                                                                   |
+  +========================+=======+=======+===============================================================================+
+  | audio:periodSize       |       | 256   | Requested audio device period size in samples                                 |
+  +------------------------+-------+-------+-------------------------------------------------------------------------------+
+  | audio:bufferLatency    |       | 12    | Additional buffer latency in milliseconds                                     |
+  +------------------------+-------+-------+-------------------------------------------------------------------------------+
+  | audio:micDefault       |       | allow | Default action when an application opens the microphone (prompt, allow, deny) |
+  +------------------------+-------+-------+-------------------------------------------------------------------------------+
+  | audio:micShowIndicator |       | yes   | Display microphone usage indicator                                            |
+  +------------------------+-------+-------+-------------------------------------------------------------------------------+
+  | audio:syncVolume       |       | yes   | Synchronize the volume level with the guest                                   |
+  +------------------------+-------+-------+-------------------------------------------------------------------------------+
 
-   +------------------------+-------+--------+-------------------------------------------------------------------------------+
-   | Long                   | Short | Value  | Description                                                                   |
-   +------------------------+-------+--------+-------------------------------------------------------------------------------+
-   | audio:periodSize       |       | 2048   | Requested audio device period size in samples                                 |
-   | audio:bufferLatency    |       | 13     | Additional buffer latency in milliseconds                                     |
-   | audio:micDefault       |       | prompt | Default action when an application opens the microphone (prompt, allow, deny) |
-   | audio:micShowIndicator |       | yes    | Display microphone usage indicator                                            |
-   +------------------------+-------+--------+-------------------------------------------------------------------------------+
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | Long              | Short | Value | Description                                                               |
+  +===================+=======+=======+===========================================================================+
+  | egl:vsync         |       | no    | Enable vsync                                                              |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:doubleBuffer  |       | no    | Enable double buffering                                                   |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:multisample   |       | yes   | Enable Multisampling                                                      |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:nvGainMax     |       | 1     | The maximum night vision gain                                             |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:nvGain        |       | 0     | The initial night vision gain at startup                                  |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:cbMode        |       | 0     | Color Blind Mode (0 = Off, 1 = Protanope, 2 = Deuteranope, 3 = Tritanope) |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:scale         |       | 0     | Set the scale algorithm (0 = auto, 1 = nearest, 2 = linear)               |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:debug         |       | no    | Enable debug output                                                       |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:noBufferAge   |       | no    | Disable partial rendering based on buffer age                             |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:noSwapDamage  |       | no    | Disable swapping with damage                                              |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:scalePointer  |       | yes   | Keep the pointer size 1:1 when downscaling                                |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:mapHDRtoSDR   |       | yes   | Map HDR content to the SDR color space                                    |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:peakLuminance |       | 250   | The peak luminance level in nits for HDR to SDR mapping                   |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:maxCLL        |       | 10000 | Maximum content light level in nits for HDR to SDR mapping                |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
+  | egl:preset        |       | NULL  | The initial filter preset to load                                         |
+  +-------------------+-------+-------+---------------------------------------------------------------------------+
 
-   +------------------+-------+-------+---------------------------------------------------------------------------+
-   | Long             | Short | Value | Description                                                               |
-   +------------------+-------+-------+---------------------------------------------------------------------------+
-   | egl:vsync        |       | no    | Enable vsync                                                              |
-   | egl:doubleBuffer |       | no    | Enable double buffering                                                   |
-   | egl:multisample  |       | yes   | Enable Multisampling                                                      |
-   | egl:nvGainMax    |       | 1     | The maximum night vision gain                                             |
-   | egl:nvGain       |       | 0     | The initial night vision gain at startup                                  |
-   | egl:cbMode       |       | 0     | Color Blind Mode (0 = Off, 1 = Protanope, 2 = Deuteranope, 3 = Tritanope) |
-   | egl:scale        |       | 0     | Set the scale algorithm (0 = auto, 1 = nearest, 2 = linear)               |
-   | egl:debug        |       | no    | Enable debug output                                                       |
-   | egl:noBufferAge  |       | no    | Disable partial rendering based on buffer age                             |
-   | egl:noSwapDamage |       | no    | Disable swapping with damage                                              |
-   | egl:scalePointer |       | yes   | Keep the pointer size 1:1 when downscaling                                |
-   | egl:preset       |       | NULL  | The initial filter preset to load                                         |
-   +------------------+-------+-------+---------------------------------------------------------------------------+
+  +----------------------+-------+-------+---------------------------------------------+
+  | Long                 | Short | Value | Description                                 |
+  +======================+=======+=======+=============================================+
+  | opengl:mipmap        |       | yes   | Enable mipmapping                           |
+  +----------------------+-------+-------+---------------------------------------------+
+  | opengl:vsync         |       | no    | Enable vsync                                |
+  +----------------------+-------+-------+---------------------------------------------+
+  | opengl:preventBuffer |       | yes   | Prevent the driver from buffering frames    |
+  +----------------------+-------+-------+---------------------------------------------+
+  | opengl:amdPinnedMem  |       | yes   | Use GL_AMD_pinned_memory if it is available |
+  +----------------------+-------+-------+---------------------------------------------+
 
-   +----------------------+-------+-------+---------------------------------------------+
-   | Long                 | Short | Value | Description                                 |
-   +----------------------+-------+-------+---------------------------------------------+
-   | opengl:mipmap        |       | yes   | Enable mipmapping                           |
-   | opengl:vsync         |       | no    | Enable vsync                                |
-   | opengl:preventBuffer |       | yes   | Prevent the driver from buffering frames    |
-   | opengl:amdPinnedMem  |       | yes   | Use GL_AMD_pinned_memory if it is available |
-   +----------------------+-------+-------+---------------------------------------------+
+  +-----------------------+-------+-------+-------------------------+
+  | Long                  | Short | Value | Description             |
+  +=======================+=======+=======+=========================+
+  | wayland:warpSupport   |       | yes   | Enable cursor warping   |
+  +-----------------------+-------+-------+-------------------------+
+  | wayland:fractionScale |       | yes   | Enable fractional scale |
+  +-----------------------+-------+-------+-------------------------+
 
-   +-----------------------+-------+-------+-------------------------+
-   | Long                  | Short | Value | Description             |
-   +-----------------------+-------+-------+-------------------------+
-   | wayland:warpSupport   |       | yes   | Enable cursor warping   |
-   | wayland:fractionScale |       | yes   | Enable fractional scale |
-   +-----------------------+-------+-------+-------------------------+
+  +---------------------+-------+-------+----------------------------------------------------------+
+  | Long                | Short | Value | Description                                              |
+  +=====================+=======+=======+==========================================================+
+  | i3:globalFullScreen |       | yes   | Use i3's global full screen feature (spans all monitors) |
+  +---------------------+-------+-------+----------------------------------------------------------+
+
+  +--------------------+-------+---------------+------------------------------------+
+  | Long               | Short | Value         | Description                        |
+  +====================+=======+===============+====================================+
+  | pipewire:outDevice |       | Looking Glass | The default playback device to use |
+  +--------------------+-------+---------------+------------------------------------+
+  | pipewire:recDevice |       | PureNoise Mic | The default record device to use   |
+  +--------------------+-------+---------------+------------------------------------+
 
 .. _host_usage:
 
@@ -363,7 +461,7 @@ Capture interface
   Currently we only provide support for the Windows host application, Linux
   options are not currently documented.
 
-Currently under windows there are two capture interfaces available for use,
+Currently under windows there are three capture interfaces available for use,
 by default the most compatible and commonly supported interface is selected
 however this can be changed via the ini file with the following configuration:
 
@@ -372,17 +470,10 @@ however this can be changed via the ini file with the following configuration:
  [app]
  capture=<INTERFACE>
 
-Where ``<INTERFACE>`` is one of ``dxgi`` or ``nvfbc``
+Where ``<INTERFACE>`` is one of ``d12``, ``dxgi`` or ``nvfbc``
 
-.. _host_capture_dxgi:
-
-Microsoft DXGI Desktop Duplication
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-This interface (DXGI) is the default and most compatible capture interface for
-windows, unfortunately though it does suffer from several drawbacks over other
-options. DXGI capture can operate in two modes, DirectX 11 (default) or the
-experimental and unofficial DirectX 12 mode.
+DXGI Desktop Duplication Caveat
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Due to the design of Microsoft's DXGI API and the decision made to roll
 hardware cursor updates into the capture stream this interface can suffer from
@@ -391,77 +482,104 @@ guest applications that make use of the hardware cursor instead of compositing
 the cursor directly, as such titles that do not use a mouse (most FPV games)
 are not affected.
 
-The other drawback of this API is the overall system overhead, however this can
-be mitigated by using the DirectX 12 backend. Please be aware though that this
-backend is not experimental because its new, but rather it's a slight
-abuse/misuse of the DXGI API and allows us to bypass some Windows internals.
+Most people will not even notice this, but it needs to be said for those that
+do so that we do not get flooded with support requests for something we can not
+fix.
 
-To enable the DirectX 12 backend the following configuration needs to be added
-to the ``looking-glass-host.ini`` configuration:
+.. _host_capture_d12:
 
-.. code:: ini
+DirectX 12 DXGI Desktop Duplication
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  [app]
-  capture=dxgi
+This interface (``D12``) is the default and most performant capture interface
+for Windows 10 and later having been introduced with the Beta 7 release of
+Looking Glass. Impressively this new capture engine is faster then NvFBC, and
+has fewer overheads. This is because this interface can capture and download
+the captured frames directly from the GPU into the shared memory interface.
 
-  [dxgi]
-  copyBackend=d3d12
-  d3d12CopySleep=5
-  disableDamage=false
+D12 Configuration Options
+"""""""""""""""""""""""""
 
-The option ``d3d12CopySleep`` is to work around the lack of locking this misuse
-of the API allows and you will need to tune this value to what suits your
-hardware best. The default value is 5ms as this should work for most, lowing
-it below 2ms is doubtful to be of practical use to anyone. If this value is too
-low you may see screen corruption which is usually most evident while dragging
-a window around on the Windows desktop.
+* ``adapter`` - The name of the specific adapter you wish to capture
 
-.. note::
-   Lowering d3d12CopySleep can improve the UPS however the UPS metric makes
-   little sense when using the d3d12 backend as if this value is too low
-   unchanged frames will be doubled up.
+* ``output`` - The name of the specific output you wish to capture
 
-The ``disableDamage`` option may be needed to avoid screen corruption.  Note
-that this will increase the bandwidth required and in turn the overall load on
-your system.
+* ``trackDamage`` - Default enabled, this saves bandwidth by only updating and
+  transferring the regions of the capture that have changed since the last
+  frame.
 
-The DXGI capture interface also offers a feature that allows downsampling the
-captured frames in the guest GPU before transferring them to shared memory.
-This feature is very useful if you are super scaling for better picture quality
-and wish to reduce system memory pressure.
+* ``debug`` - Enables DirectX 12 debugging and validation, only enable this if
+  you're having problems and have been told to do so by our support team. Note
+  that you must have the DirectX SDK installed for this to work.
 
-The configuration for this is fairly straightforward and is defined as set of
-rules to determine when to perform this downsampling. The format is as follows:
+* ``downsample`` - See :ref:`host_downsampling`
 
-.. code:: ini
+* ``HDR16to10`` - Converts HDR16/8bpp content to HDR10/4bpp to save bandwidth.
+  Note that this incurs additional overheads in the guest and may decrease
+  performance. Default enabled, but only active if HDR is enabled in Windows.
 
-  [dxgi]
-  downsample=RULE1,RULE2,RULE3
+* ``allowRGB24`` - Losslessly packs 32-bit RGBA8 content into 24-bit RGB by
+  omitting the unused alpha channel. This saves bandwidth but requires
+  additional processing so may not yield a performance increase. Might be
+  helpful if you're already bandwidth constrained. Default disabled.
 
-The rules are written as follows:
+.. _host_capture_dxgi:
 
-.. code::
+DirectX 11 DXGI Desktop Duplication
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  (>|>=)(WIDTH)x(HEIGHT):(LEVEL)
+This interface (``DXGI``) is the most compatible capture interface for Windows,
+unfortunately though it does suffer from several drawbacks over other options.
+If the DirectX 12 (``D12``) capture interface fails to initialize Looking Glass
+will automatically fall back to using this capture interface instead.
 
-The ``LEVEL`` is the fractional scale level where 1 = 50%, 2 = 25%, 3 = 12.5%.
+Due to the design of Microsoft's DXGI API and the decision made to roll
+hardware cursor updates into the capture stream this interface can suffer from
+microstutters when the mouse is being moved/updated. This issue only affects
+guest applications that make use of the hardware cursor instead of compositing
+the cursor directly, as such titles that do not use a mouse (most FPV games)
+are not affected.
 
-**Examples:**
+The other drawback of this API is the overall system overhead as it requires
+copying the captured frames into a staging buffer before it is copied into the
+shared memory area.
 
-.. code:: ini
+DXGI Configuration Options
+""""""""""""""""""""""""""
 
- [dxgi]
- ; Downsample anything greater then 1920x1080 to 50% of its original size
- downsample=>1920:1080:1
+* ``adapter`` - The name of the specific adapter you wish to capture
 
- ; Downsample exactly 1920x1080 to 25% of its original size, and anything greater
- ; then 1920x1080 to 50% of its original size.
- downsample=1920x1080:1,>1920x1080:2
+* ``output`` - The name of the specific output you wish to capture
 
- ; Downsample anything greater or equal to 1920x1080 to 50% of its original size
- downsample=>=1920x1080:1
+* ``maxTextures`` - The maximum number of frames to buffer before skipping
+  frames. Default is 4 however realistically the this limit should never be
+  reached unless the Looking Glass client application is not keeping up.
+
+* ``useAcquireLock`` - Enable locking around ``AcquireNextFrame``. This is an
+  experimental feature and should be left enabled if you're not sure. Default
+  is enabled.
+
+* ``dwmFlush`` - Use ``DwmFlush`` to sync the capture to the windows
+  presentation interval. This is experimental and may degrade performance.
+  Default is disabled.
+
+* ``disableDamage`` - Default is false. This disables damage tracking which
+  normally would save bandwidth by only updating and transferring the regions
+  of the capture that have changed since the last frame.
+
+* ``debug`` - Enables DirectX 11 debugging, only enable this if you're having
+  problems and have been told to do so by our support team. Note that you must
+  have the DirectX SDK installed for this to work.
+
+* ``allowRGB24`` - Losslessly packs 32-bit RGBA8 content into 24-bit RGB by
+  omitting the unused alpha channel. This saves bandwidth but requires
+  additional processing so may not yield a performance increase. Might be
+  helpful if you're already bandwidth constrained. Default enabled.
+
+* ``downsample`` - See :ref:`host_downsampling`
 
 .. _host_capture_nvfbc:
+
 
 NVIDIA Frame Buffer Capture
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -475,6 +593,11 @@ If you are able to make use/enable this this feature it offers lower overall
 system load and lower latency capture, and does not suffer from the mouse
 motion stutter issues that DXGI suffers from.
 
+.. note::
+   As of Looking Glass Beta 7, the D12 capture interface is faster then NvFBC
+   while also reducing the memory bandwidth requirements. We recommend
+   migrating to D12 if at all possible.
+
 To enable its usage use the following configuration in the
 ``looking-glass-host.ini`` file:
 
@@ -487,43 +610,31 @@ If this feature is unavailable to you the host application will fail to start
 and the host log will contain an error stating that the feature is not
 available.
 
-The NVFBC capture interface also offers a feature much like DXGI to allow
-downsampling the captured frames in the guest GPU before transferring them to
-shared memory. However unlike DXGI which is limited to fractional scaling,
-NvFBC is able to scale to any arbitrary resolution.
+NvFBC Configuration Options
+"""""""""""""""""""""""""""
 
-The configuration for this is fairly straight forward and is defined as set of
-rules to determine when to perform this downsampling. The format is as follows:
+* ``decoupleCursor`` - This option prevents the cursor from being composited
+  before capture onto the captured frame, and instead sends cursor updates to
+  the client independent of frame updates. Default is true.
 
-.. code:: ini
+* ``diffRes`` - The resolution of the differential map, see the NvFBC capture
+  SDK documentation for more information. Default is 128.
 
-  [nvfbc]
-  downsample=RULE1,RULE2,RULE3
+* ``adapterIndex`` - If you have multiple adapters, you can select which to use
+  with this option. Default is to select the first valid device.
 
-The rules are written as follows:
+* ``dwmFlush`` - Use ``DwmFlush`` to sync the capture to the windows
+  presentation interval. This is experimental and may degrade performance.
+  Default is disabled.
 
-.. code::
+* ``noHDR`` - Force NvFBC to capture HDR content as SDR. Default is enabled.
 
-   (>|>=)(WIDTH)x(HEIGHT):(TARGET WIDTH)x(TARGET HEIGHT)
+* ``downsample`` - See :ref:`host_downsampling`
 
-**Examples:**
-
-.. code:: ini
-
-  [nvfbc]
-  ; Downsample exactly 3840x2160 to 1920x1080
-  downsample=3840x2160:1920x1080
-
-  ; Downsample anything greater then 1920x1080 to 1920x1080
-  downsample=>1920x1080:1920x1080
-
-  ; Downsample 3840x2160 to 1920x1080, or 3840x2400 to 1920x1200
-  downsample=3840x2160:1920x1080,3840x2400:1920x1200
 
 This capture interface also looks for and reads the value of the system
 environment variable ``NVFBC_PRIV_DATA`` if it has been set, documentation on
-its usage however is unavailable.
-
+its usage however is unavailable (Google is your friend).
 
 .. _host_select_ivshmem:
 
@@ -560,3 +671,35 @@ selected device)::
 
    [I]     19989544      …      IVSHMEM 0  on bus 0x6, device 0x3, function 0x0
    [I]     19990438      …      IVSHMEM 1* on bus 0x6, device 0x5, function 0x0
+
+.. _host_downsampling:
+
+Downsampling
+~~~~~~~~~~~~
+
+The host application is able to downsample the captured frame before transfer
+to the client application, this provides an opportunity to save some bandwidth
+on memory constrained systems. It also makes it possible to run the guest at a
+substantially higher resolution then your actual monitor for a super scaling
+type effect, without having to incur the bandwidth penalty that would normally
+occur when doing this.
+
+The configuration for this is fairly straightforward and is defined as set of
+rules to determine when to perform this downsampling. The format is as follows:
+
+.. code::
+
+   (>|>=)(WIDTH)x(HEIGHT):(TARGET WIDTH)x(TARGET HEIGHT)
+
+**Examples:**
+
+.. code:: ini
+
+  ; Downsample exactly 3840x2160 to 1920x1080
+  downsample=3840x2160:1920x1080
+
+  ; Downsample anything greater then 1920x1080 to 1920x1080
+  downsample=>1920x1080:1920x1080
+
+  ; Downsample 3840x2160 to 1920x1080, or 3840x2400 to 1920x1200
+  downsample=3840x2160:1920x1080,3840x2400:1920x1200

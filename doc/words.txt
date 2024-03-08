@@ -19,6 +19,7 @@ dmesg
 downsampling
 downscaler
 downscaling
+downsample
 fullscreen
 gcc
 globalFullScreen
@@ -34,6 +35,7 @@ libpulse
 libvirt
 linux
 LookingGlass
+Losslessly
 luminance
 memballoon
 MiB
@@ -48,6 +50,7 @@ Nvidia
 overlayed
 pacman
 passthrough
+performant
 pre
 protanope
 QEMU
