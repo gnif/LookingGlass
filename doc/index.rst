@@ -16,7 +16,6 @@ systems for legacy programs that require high-performance graphics.
    usage
    troubleshooting
    obs
-   module
    faq
    tech_faq
 
