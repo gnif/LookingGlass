@@ -90,7 +90,7 @@ IVSHMEM
 
 There are two methods of configuring IVSHMEM, using shared memory directly, or
 using the KVMFR kernel module. While the KVMFR module is slightly more
-complicated to configure, it substantially improves performace as it allows
+complicated to configure, it substantially improves performance as it allows
 Looking Glass to use your GPUs DMA engine to transfer the frame data.
 
 .. toctree::

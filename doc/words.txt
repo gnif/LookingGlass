@@ -15,6 +15,7 @@ dir
 DirectX
 distros
 dmabuf
+dmesg
 downsampling
 downscaler
 downscaling
