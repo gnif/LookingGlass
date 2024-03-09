@@ -894,10 +894,10 @@ int app_main(int argc, char * argv[])
     CaptureInterface * iface = NULL;
     for(int i = 0; CaptureInterfaces[i]; ++i)
     {
-      iface = CaptureInterfaces[i];
-      if (*ifaceName && strcasecmp(ifaceName, iface->shortName))
+      if (*ifaceName && strcasecmp(ifaceName, CaptureInterfaces[i]->shortName))
         continue;
 
+      iface = CaptureInterfaces[i];
       DEBUG_INFO("Trying           : %s", iface->getName());
 
       if (!iface->create(
@@ -1066,6 +1066,7 @@ fail:
   stopThreads();
   captureStop();
   app.iface->free();
+
   LG_LOCK_FREE(app.pointerLock);
 
 fail_lgmp:
