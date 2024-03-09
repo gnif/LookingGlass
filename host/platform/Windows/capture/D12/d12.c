@@ -291,28 +291,18 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     goto exit;
   }
 
-  /* make this static as we downgrade the priority on failure and we want to
-  remember it */
-  static D3D12_COMMAND_QUEUE_DESC queueDesc =
+  D3D12_COMMAND_QUEUE_DESC copyQueueDesc =
   {
     .Type     = D3D12_COMMAND_LIST_TYPE_COPY,
-    .Priority = D3D12_COMMAND_QUEUE_PRIORITY_GLOBAL_REALTIME,
-    .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE,
+    .Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
+    .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE
   };
 
   comRef_defineLocal(ID3D12CommandQueue, copyQueue);
-retryCreateCommandQueue:
   hr = ID3D12Device3_CreateCommandQueue(
-    *device, &queueDesc, &IID_ID3D12CommandQueue, (void **)copyQueue);
+    *device, &copyQueueDesc, &IID_ID3D12CommandQueue, (void **)copyQueue);
   if (FAILED(hr))
   {
-    if (queueDesc.Priority == D3D12_COMMAND_QUEUE_PRIORITY_GLOBAL_REALTIME)
-    {
-      DEBUG_WARN("Failed to create queue with real time priority");
-      queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
-      goto retryCreateCommandQueue;
-    }
-
     DEBUG_WINERROR("Failed to create ID3D12CommandQueue (copy)", hr);
     goto exit;
   }
@@ -321,10 +311,10 @@ retryCreateCommandQueue:
   // create the compute queue
   D3D12_COMMAND_QUEUE_DESC computeQueueDesc =
   {
-    .Type  = D3D12_COMMAND_LIST_TYPE_COMPUTE,
-    .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+    .Type     = D3D12_COMMAND_LIST_TYPE_COMPUTE,
+    .Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
+    .Flags    = D3D12_COMMAND_QUEUE_FLAG_NONE
   };
-  queueDesc.Priority = queueDesc.Priority;
 
   comRef_defineLocal(ID3D12CommandQueue, computeQueue);
   hr = ID3D12Device3_CreateCommandQueue(
