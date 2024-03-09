@@ -12,12 +12,12 @@ for Looking Glass allowing DMA GPU transfers.
 Prerequisites
 -------------
 
-The Linux kernel headers for your kernel version are required for building.
-Install them with ``apt-get``
+The Linux kernel headers for your kernel version are required for building
+along with `dkms` to manage the module when you upgrade your kernel.
 
 .. code:: bash
 
-   apt-get install linux-headers-$(uname -r)
+   apt-get install linux-headers-$(uname -r) dkms
 
 Then switch to the ``module/`` directory
 
@@ -26,18 +26,6 @@ Then switch to the ``module/`` directory
    cd module/
 
 .. _ivshmem_kvmfr_dkms:
-
-Using DKMS (recommended)
-------------------------
-
-You can use the kernel's DKMS feature to keep the module across upgrades.
-``dkms`` must be installed.
-
-.. code:: bash
-
-   apt-get install dkms
-
-.. _ivshmem_kvmfr_installing:
 
 Installing
 ~~~~~~~~~~

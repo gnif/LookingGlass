@@ -13,7 +13,7 @@ Downloading
 -----------
 
 Visit the Looking Glass `Download Page <https://looking-glass.io/downloads>`__,
-and download the stable version (**recommended**).
+and download the stable version (**Recommended**).
 You can also download a *bleeding-edge version*, or the latest RC version
 during a Release Candidate cycle.
 

@@ -11,7 +11,7 @@ Virtual Machine—through a low-latency transfer protocol over shared memory.
 You can get the host program in two ways:
 
 -  Download a pre-built binary from https://looking-glass.io/downloads
-   (**recommended**)
+   (**Recommended**)
 
 -  Download the source code as described in :ref:`building`, then
    :ref:`build the host <host_building>`.
