@@ -130,7 +130,7 @@ with the following contents::
 .. _ivshmem_kvmfr_libvirt:
 
 libvirt
-^^^^^^^
+~~~~~~~
 
 Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration is the
 default syntax. Users running QEMU 6.2 or later **and** libvirt 7.9 or later,
@@ -185,7 +185,7 @@ to start.
    and configured by default by most distributions when you install libvirt.
 
 AppArmor
-""""""""
+^^^^^^^^
 
 Create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if it doesn't exist
 and add the following:
@@ -196,7 +196,7 @@ and add the following:
    /dev/kvmfr0 rw,
 
 cgroups
-"""""""
+^^^^^^^
 
 Edit the file ``/etc/libvirt/qemu.conf`` and uncomment the ``cgroup_device_acl``
 block, adding ``/dev/kvmfr0`` to the list. To make this change active you then
@@ -209,7 +209,7 @@ must restart ``libvirtd``
 .. _ivshmem_kvmfr_qemu:
 
 QEMU
-^^^^
+~~~~
 
 If you are using QEMU directly without libvirt, add the following arguments to your
 ``qemu`` command line::
