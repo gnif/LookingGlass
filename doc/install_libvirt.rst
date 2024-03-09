@@ -246,10 +246,4 @@ required to obtain optimal performance.
    your guest operating system will not be aware of which CPU cores are
    hyper-thread pairs.
 
-7. NVIDIA users may want to enable NvFBC as an alternative capture API in the
-   guest. Note that NvFBC is officially available on professional cards only
-   and methods to enable NvFBC on non-supported GPUs is against the NVIDIA
-   Capture API SDK License Agreement even though GeForce Experience and
-   Steam make use of it on any NVIDIA GPU.
-
 How to perform these changes is left as an exercise to the reader.
