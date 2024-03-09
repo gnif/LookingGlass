@@ -334,21 +334,6 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     *device, D3D12_COMMAND_LIST_TYPE_COMPUTE, &this->computeCommand, L"Compute"))
     goto exit;
 
-  // Create the IVSHMEM heap
-  this->ivshmemBase = ivshmemBase;
-  comRef_defineLocal(ID3D12Heap, ivshmemHeap);
-  hr = ID3D12Device3_OpenExistingHeapFromAddress(
-    *device, ivshmemBase, &IID_ID3D12Heap, (void **)ivshmemHeap);
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to open the framebuffer as a D3D12Heap", hr);
-    goto exit;
-  }
-
-  // Adjust the alignSize based on the required heap alignment
-  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
-  *alignSize = heapDesc.Alignment;
-
   // initialize the backend
   if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output,
     this->trackDamage))
@@ -377,6 +362,21 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     }
   }
 
+  // Create the IVSHMEM heap
+  this->ivshmemBase = ivshmemBase;
+  comRef_defineLocal(ID3D12Heap, ivshmemHeap);
+  hr = ID3D12Device3_OpenExistingHeapFromAddress(
+    *device, ivshmemBase, &IID_ID3D12Heap, (void **)ivshmemHeap);
+  if (FAILED(hr))
+  {
+    DEBUG_WINERROR("Failed to open the framebuffer as a D3D12Heap", hr);
+    goto exit;
+  }
+
+  // Adjust the alignSize based on the required heap alignment
+  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
+  *alignSize = heapDesc.Alignment;
+
   comRef_toGlobal(this->factory     , factory      );
   comRef_toGlobal(this->device      , device       );
   comRef_toGlobal(this->copyQueue   , copyQueue    );
@@ -388,7 +388,13 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 exit:
   comRef_scopePop();
   if (!result)
+  {
+    D12Effect * effect;
+    vector_forEach(effect, &this->effects)
+      d12_effectFree(&effect);
+    vector_destroy(&this->effects);
     comRef_freeScope(&d12_comScope);
+  }
 
   return result;
 }
