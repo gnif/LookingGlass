@@ -118,7 +118,7 @@ change its ownership manually, i.e.:
 
 .. code:: bash
 
-   sudo chown user:user /dev/kvmfr0
+   sudo chown user:kvm /dev/kvmfr0
 
 As an example, you can create a new file in ``/etc/udev/rules.d/99-kvmfr.rules``
 with the following contents::
