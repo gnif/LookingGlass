@@ -894,8 +894,18 @@ int app_main(int argc, char * argv[])
     CaptureInterface * iface = NULL;
     for(int i = 0; CaptureInterfaces[i]; ++i)
     {
-      if (*ifaceName && strcasecmp(ifaceName, CaptureInterfaces[i]->shortName))
-        continue;
+      if (*ifaceName)
+      {
+        if (strcasecmp(ifaceName, CaptureInterfaces[i]->shortName) != 0)
+          continue;
+      }
+      else
+      {
+        /* do not try to init deprecated interfaces unless they are explicity
+        selected in the host configuration */
+        if (CaptureInterfaces[i]->deprecated)
+          continue;
+      }
 
       iface = CaptureInterfaces[i];
       DEBUG_INFO("Trying           : %s", iface->getName());

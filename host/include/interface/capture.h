@@ -112,6 +112,8 @@ typedef struct CaptureInterface
 {
   const char * shortName;
   const bool   asyncCapture;
+  const bool   deprecated;
+
   const char * (*getName        )(void);
   void         (*initOptions    )(void);
 
