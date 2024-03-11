@@ -133,17 +133,10 @@ static bool d12_dd_init(
     goto exit;
   }
 
+  // only 11.1 supports DX12 interoperability
   static const D3D_FEATURE_LEVEL featureLevels[] =
   {
-    D3D_FEATURE_LEVEL_12_1,
-    D3D_FEATURE_LEVEL_12_0,
-    D3D_FEATURE_LEVEL_11_1,
-    D3D_FEATURE_LEVEL_11_0,
-    D3D_FEATURE_LEVEL_10_1,
-    D3D_FEATURE_LEVEL_10_0,
-    D3D_FEATURE_LEVEL_9_3,
-    D3D_FEATURE_LEVEL_9_2,
-    D3D_FEATURE_LEVEL_9_1
+    D3D_FEATURE_LEVEL_11_1
   };
   D3D_FEATURE_LEVEL featureLevel;
 
@@ -168,6 +161,8 @@ static bool d12_dd_init(
     DEBUG_WINERROR("Failed to create the D3D11Device", hr);
     goto exit;
   }
+
+  DEBUG_INFO("Feature Level     : 0x%x", featureLevel);
 
   // get the updated interfaces
   comRef_defineLocal(ID3D11DeviceContext4, d11context4);
