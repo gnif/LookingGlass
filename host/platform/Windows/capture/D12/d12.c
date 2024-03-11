@@ -206,6 +206,16 @@ static bool d12_create(
     (typeof(DX12.D3D12SerializeVersionedRootSignature))
       GetProcAddress(this->d3d12, "D3D12SerializeVersionedRootSignature");
 
+  if (!DX12.D3D12CreateDevice      ||
+      !DX12.D3D12GetDebugInterface ||
+      !DX12.D3D12SerializeVersionedRootSignature)
+  {
+    DEBUG_ERROR("Failed to get required exports from d3d12.dll");
+    CloseHandle(this->d3d12);
+    free(this);
+    return false;
+  }
+
   this->getPointerBufferFn  = getPointerBufferFn;
   this->postPointerBufferFn = postPointerBufferFn;
 
