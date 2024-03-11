@@ -230,6 +230,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 
   // create a DXGI factory
   comRef_defineLocal(IDXGIFactory2, factory);
+  DEBUG_TRACE("CreateDXGIFactory2");
   HRESULT hr = CreateDXGIFactory2(
     this->debug ? DXGI_CREATE_FACTORY_DEBUG : 0,
     &IID_IDXGIFactory2,
@@ -281,6 +282,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 
   // create the D3D12 device
   comRef_defineLocal(ID3D12Device3, device);
+  DEBUG_TRACE("D3D12CreateDevice");
   hr = DX12.D3D12CreateDevice(
     (IUnknown *)*adapter,
     D3D_FEATURE_LEVEL_12_0,
@@ -301,6 +303,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   };
 
   comRef_defineLocal(ID3D12CommandQueue, copyQueue);
+  DEBUG_TRACE("D3D12Device3_CreateCommandQueue");
   hr = ID3D12Device3_CreateCommandQueue(
     *device, &copyQueueDesc, &IID_ID3D12CommandQueue, (void **)copyQueue);
   if (FAILED(hr))
@@ -319,6 +322,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   };
 
   comRef_defineLocal(ID3D12CommandQueue, computeQueue);
+  DEBUG_TRACE("D3D12Device3_CreateCommandQueue");
   hr = ID3D12Device3_CreateCommandQueue(
     *device, &computeQueueDesc, &IID_ID3D12CommandQueue, (void **)computeQueue);
   if (FAILED(hr))
@@ -328,10 +332,12 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   }
   ID3D12CommandQueue_SetName(*computeQueue, L"Compute");
 
+  DEBUG_TRACE("d12_commandGroupCreate Copy");
   if (!d12_commandGroupCreate(
     *device, D3D12_COMMAND_LIST_TYPE_COPY, &this->copyCommand, L"Copy"))
     goto exit;
 
+  DEBUG_TRACE("d12_commandGroupCreate Compute");
   if (!d12_commandGroupCreate(
     *device, D3D12_COMMAND_LIST_TYPE_COMPUTE, &this->computeCommand, L"Compute"))
     goto exit;
@@ -339,6 +345,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   // Create the IVSHMEM heap
   this->ivshmemBase = ivshmemBase;
   comRef_defineLocal(ID3D12Heap, ivshmemHeap);
+  DEBUG_TRACE("ID3D12Device3_OpenExistingHeapFromAddress");
   hr = ID3D12Device3_OpenExistingHeapFromAddress(
     *device, ivshmemBase, &IID_ID3D12Heap, (void **)ivshmemHeap);
   if (FAILED(hr))
@@ -355,6 +362,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
    * NOTE: It is safe to do this as the application has not yet setup the KVMFR
    * headers, so we can just attempt to create a resource at the start of the
    * heap without corrupting anything */
+  DEBUG_TRACE("d12_heapTest");
   if (!d12_heapTest(*device, *ivshmemHeap))
   {
     DEBUG_ERROR(
@@ -363,6 +371,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   }
 
   // initialize the backend
+  DEBUG_TRACE("d12_backendInit");
   if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output,
     this->trackDamage))
     goto exit;
@@ -396,12 +405,14 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   comRef_toGlobal(this->computeQueue, computeQueue );
   comRef_toGlobal(this->ivshmemHeap , ivshmemHeap  );
 
+  DEBUG_TRACE("Init success");
   result = true;
 
 exit:
   comRef_scopePop();
   if (!result)
   {
+    DEBUG_TRACE("Init failed");
     D12Effect * effect;
     vector_forEach(effect, &this->effects)
       d12_effectFree(&effect);
@@ -425,12 +436,15 @@ static bool d12_deinit(void)
     d12_effectFree(&effect);
   vector_destroy(&this->effects);
 
+  DEBUG_TRACE("Backend deinit");
   if (!d12_backendDeinit(this->backend))
     result = false;
 
+  DEBUG_TRACE("commandGroupFree");
   d12_commandGroupFree(&this->copyCommand   );
   d12_commandGroupFree(&this->computeCommand);
 
+  DEBUG_TRACE("comRef_freeScope");
   IDXGIFactory2 * factory = *this->factory;
   IDXGIFactory2_AddRef(factory);
   comRef_freeScope(&d12_comScope);
@@ -454,6 +468,7 @@ static bool d12_deinit(void)
 
 static void d12_free(void)
 {
+  DEBUG_TRACE("d12_backendFree");
   d12_backendFree(&this->backend);
   FreeLibrary(this->d3d12);
   free(this);
@@ -463,6 +478,7 @@ static void d12_free(void)
 static CaptureResult d12_capture(
   unsigned frameBufferIndex, FrameBuffer * frameBuffer)
 {
+  DEBUG_TRACE("d12_backendCapture");
   return d12_backendCapture(this->backend, frameBufferIndex);
 }
 
@@ -475,6 +491,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   D12FrameDesc desc;
 
   comRef_defineLocal(ID3D12Resource, src);
+  DEBUG_TRACE("d12_backendFetch");
   *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
   if (!*src)
   {
@@ -521,6 +538,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       srcFormat.desc.Format != this->captureFormat.desc.Format ||
       srcFormat.colorSpace  != this->captureFormat.colorSpace)
   {
+    DEBUG_TRACE("Capture format changed");
+
     D12FrameFormat dstFormat = this->dstFormat;
     this->captureFormat      = srcFormat;
     this->effectsActive      = false;
@@ -558,6 +577,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
         dstFormat.height      != this->dstFormat.height      ||
         dstFormat.format      != this->dstFormat.format)
     {
+      DEBUG_TRACE("Output format changed");
       ++this->formatVer;
       this->dstFormat = dstFormat;
     }
@@ -641,6 +661,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   D12FrameDesc desc;
 
   comRef_defineLocal(ID3D12Resource, src);
+  DEBUG_TRACE("d12_backendFetch");
   *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
   if (!*src)
   {
@@ -650,11 +671,13 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   }
 
   comRef_defineLocal(ID3D12Resource, dst)
+  DEBUG_TRACE("d12_frameBufferToResource");
   *dst = d12_frameBufferToResource(frameBufferIndex, frameBuffer, maxFrameSize);
   if (!*dst)
     goto exit;
 
   // place a fence into the queue
+  DEBUG_TRACE("d12_backendSync");
   result = d12_backendSync(this->backend,
     this->effectsActive ? *this->computeQueue : *this->copyQueue);
 
@@ -668,6 +691,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     if (!effect->enabled)
       continue;
 
+    DEBUG_TRACE("d12_effectRun: %s", effect->name);
     next = d12_effectRun(effect,
       *this->device,
       *this->computeCommand.gfxList,
@@ -705,6 +729,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   // if full frame damage
   if (desc.nbDirtyRects == 0)
   {
+    DEBUG_TRACE("Full frame damage");
     this->nbDirtyRects = 0;
     ID3D12GraphicsCommandList_CopyTextureRegion(
       *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
@@ -714,12 +739,16 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     /* if the prior frame was a full update */
     if (this->nbDirtyRects == 0)
     {
+      DEBUG_TRACE("Full frame update");
+
       /* the prior frame was fully damaged, we must update everything */
       ID3D12GraphicsCommandList_CopyTextureRegion(
         *this->copyCommand.gfxList, &dstLoc, 0, 0, 0, &srcLoc, NULL);
     }
     else
     {
+      DEBUG_TRACE("Damage aware update");
+
       FrameDamageRect allRects[this->nbDirtyRects + desc.nbDirtyRects];
       unsigned count = 0;
 
@@ -776,17 +805,21 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   // execute the compute commands
   if (this->effectsActive)
   {
+    DEBUG_TRACE("Execute compute commands");
     d12_commandGroupExecute(*this->computeQueue, &this->computeCommand);
 
     // insert a fence to wait for the compute commands to finish
+    DEBUG_TRACE("Fence wait");
     ID3D12CommandQueue_Wait(*this->copyQueue,
       *this->computeCommand.fence, this->computeCommand.fenceValue);
   }
 
   // execute the copy commands
+  DEBUG_TRACE("Execute copy commands");
   d12_commandGroupExecute(*this->copyQueue, &this->copyCommand);
 
   // wait for the copy to complete
+  DEBUG_TRACE("Fence wait");
   d12_commandGroupWait(&this->copyCommand);
 
   // signal the frame is complete
@@ -794,9 +827,14 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     this->dstFormat.desc.Height * this->pitch);
 
   // reset the command queues
-  if (this->effectsActive && !d12_commandGroupReset(&this->computeCommand))
-    goto exit;
+  if (this->effectsActive)
+  {
+    DEBUG_TRACE("Reset compute command group");
+    if (!d12_commandGroupReset(&this->computeCommand))
+      goto exit;
+  }
 
+  DEBUG_TRACE("Reset copy command group");
   if (!d12_commandGroupReset(&this->copyCommand))
     goto exit;
 
