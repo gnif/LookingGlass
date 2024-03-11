@@ -1014,6 +1014,15 @@ static bool d12_heapTest(ID3D12Device3 * device, ID3D12Heap * heap)
     goto exit;
   }
 
+  /* the above may succeed even if there was a fault, as such we also need to
+   * check if the device was removed */
+  hr = ID3D12Device3_GetDeviceRemovedReason(device);
+  if (hr != S_OK)
+  {
+    DEBUG_WINERROR("Device Removed: %s", hr);
+    goto exit;
+  }
+
   result = true;
 
 exit:
