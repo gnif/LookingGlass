@@ -113,6 +113,8 @@ static bool d12_enumerateDevices(
   IDXGIAdapter1 ** adapter,
   IDXGIOutput   ** output);
 
+static bool d12_heapTest(ID3D12Device3 * device, ID3D12Heap * heap);
+
 static ID3D12Resource * d12_frameBufferToResource(
   unsigned      frameBufferIndex,
   FrameBuffer * frameBuffer,
@@ -348,6 +350,17 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   // Adjust the alignSize based on the required heap alignment
   D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
   *alignSize = heapDesc.Alignment;
+
+  /* Ensure we can create resources in the ivshmem heap
+   * NOTE: It is safe to do this as the application has not yet setup the KVMFR
+   * headers, so we can just attempt to create a resource at the start of the
+   * heap without corrupting anything */
+  if (!d12_heapTest(*device, *ivshmemHeap))
+  {
+    DEBUG_ERROR(
+      "Unable to create resources in the IVSHMEM heap, is REBAR working?");
+    goto exit;
+  }
 
   // initialize the backend
   if (!d12_backendInit(this->backend, this->debug, *device, *adapter, *output,
@@ -914,6 +927,50 @@ static bool d12_enumerateDevices(
     (unsigned)(adapterDesc.SharedSystemMemory    / 1048576));
 
   return true;
+}
+
+static bool d12_heapTest(ID3D12Device3 * device, ID3D12Heap * heap)
+{
+  bool result = false;
+  comRef_scopePush(1);
+
+  D3D12_RESOURCE_DESC desc =
+  {
+    .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
+    .Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
+    .Width              = 1048576,
+    .Height             = 1,
+    .DepthOrArraySize   = 1,
+    .MipLevels          = 1,
+    .Format             = DXGI_FORMAT_UNKNOWN,
+    .SampleDesc.Count   = 1,
+    .SampleDesc.Quality = 0,
+    .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+    .Flags              = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER
+  };
+
+  comRef_defineLocal(ID3D12Resource, resource);
+  HRESULT hr = ID3D12Device3_CreatePlacedResource(
+    device,
+    heap,
+    0,
+    &desc,
+    D3D12_RESOURCE_STATE_COPY_DEST,
+    NULL,
+    &IID_ID3D12Resource,
+    (void **)resource);
+
+  if (FAILED(hr))
+  {
+    DEBUG_WINERROR("Failed to create the FrameBuffer ID3D12Resource", hr);
+    goto exit;
+  }
+
+  result = true;
+
+exit:
+  comRef_scopePop();
+  return result;
 }
 
 static ID3D12Resource * d12_frameBufferToResource(unsigned frameBufferIndex,
