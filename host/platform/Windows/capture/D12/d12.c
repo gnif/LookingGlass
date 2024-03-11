@@ -1019,7 +1019,7 @@ static bool d12_heapTest(ID3D12Device3 * device, ID3D12Heap * heap)
   hr = ID3D12Device3_GetDeviceRemovedReason(device);
   if (hr != S_OK)
   {
-    DEBUG_WINERROR("Device Removed: %s", hr);
+    DEBUG_WINERROR("Device Removed", hr);
     goto exit;
   }
 
