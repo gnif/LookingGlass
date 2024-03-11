@@ -30,6 +30,7 @@ void platform_debugInit(void)
     "[I] ", // DEBUG_LEVEL_INFO
     "[W] ", // DEBUG_LEVEL_WARN
     "[E] ", // DEBUG_LEVEL_ERROR
+    "[T] ", // DEBUG_LEVEL_TRACE
     "[F] ", // DEBUG_LEVEL_FIXME
     "[!] "  // DEBUG_LEVEL_FATAL
   };

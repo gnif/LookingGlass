@@ -571,6 +571,9 @@ bool app_init(void)
   const char * logFile = option_get_string("os", "logFile");
   const bool   ods     = option_get_bool  ("os", "ods"    );
 
+  if (ods)
+    debug_enableTracing();
+
   // redirect stderr to a file
   if (logFile && strcmp(logFile, "stderr") != 0)
   {

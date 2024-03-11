@@ -36,6 +36,7 @@ enum DebugLevel
   DEBUG_LEVEL_INFO,
   DEBUG_LEVEL_WARN,
   DEBUG_LEVEL_ERROR,
+  DEBUG_LEVEL_TRACE,
   DEBUG_LEVEL_FIXME,
   DEBUG_LEVEL_FATAL
 };
@@ -43,6 +44,7 @@ enum DebugLevel
 extern const char ** debug_lookup;
 
 void debug_init(void);
+void debug_enableTracing(void);
 
 // platform specific debug initialization
 void platform_debugInit(void);
@@ -81,6 +83,9 @@ void debug_warn(const char * file, unsigned int line, const char * function,
 void debug_error(const char * file, unsigned int line, const char * function,
     const char * format, ...) __attribute__((format (printf, 4, 5)));
 
+void debug_trace(const char * file, unsigned int line, const char * function,
+    const char * format, ...) __attribute__((format (printf, 4, 5)));
+
 #define STRIPPATH(s) ( \
   sizeof(s) >  2 && (s)[sizeof(s)- 3] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  2 : \
   sizeof(s) >  3 && (s)[sizeof(s)- 4] == DIRECTORY_SEPARATOR ? (s) + sizeof(s) -  3 : \
@@ -112,6 +117,7 @@ void debug_error(const char * file, unsigned int line, const char * function,
 #define DEBUG_INFO(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #define DEBUG_WARN(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #define DEBUG_ERROR(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define DEBUG_TRACE(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
 #define DEBUG_FIXME(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_FIXME, fmt, ##__VA_ARGS__)
 #define DEBUG_FATAL(fmt, ...) do { \
   DEBUG_BREAK(); \

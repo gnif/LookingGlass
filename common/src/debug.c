@@ -25,6 +25,7 @@
 #include <string.h>
 
 static uint64_t startTime;
+static bool     traceEnabled = false;
 
 void debug_init(void)
 {
@@ -32,9 +33,17 @@ void debug_init(void)
   platform_debugInit();
 }
 
+void debug_enableTracing(void)
+{
+  traceEnabled = true;
+}
+
 inline static void debug_levelVA(enum DebugLevel level, const char * file,
     unsigned int line, const char * function, const char * format, va_list va)
 {
+  if (level == DEBUG_LEVEL_TRACE && !traceEnabled)
+    return;
+
   const char * f = strrchr(file, DIRECTORY_SEPARATOR);
   if (!f)
     f = file;
@@ -92,5 +101,14 @@ void debug_error(const char * file, unsigned int line, const char * function,
   va_list va;
   va_start(va, format);
   debug_levelVA(DEBUG_LEVEL_ERROR, file, line, function, format, va);
+  va_end(va);
+}
+
+void debug_trace(const char * file, unsigned int line, const char * function,
+    const char * format, ...)
+{
+  va_list va;
+  va_start(va, format);
+  debug_levelVA(DEBUG_LEVEL_INFO, file, line, function, format, va);
   va_end(va);
 }

@@ -143,6 +143,8 @@ static bool d12_dd_init(
   // create a DirectX11 context
   comRef_defineLocal(ID3D11Device       , d11device);
   comRef_defineLocal(ID3D11DeviceContext, d11context);
+
+  DEBUG_TRACE("D3D11CreateDevice");
   hr = D3D11CreateDevice(
     *_adapter,
     D3D_DRIVER_TYPE_UNKNOWN,
@@ -215,6 +217,7 @@ static bool d12_dd_init(
     // we try this twice in case we still get an error on re-initialization
     for (int i = 0; i < 2; ++i)
     {
+      DEBUG_TRACE("IDXGIOutput1_DuplicateOutput");
       hr = IDXGIOutput1_DuplicateOutput(*output1, *(IUnknown **)d11device, dup);
       if (SUCCEEDED(hr))
         break;
@@ -233,6 +236,7 @@ static bool d12_dd_init(
     // we try this twice in case we still get an error on re-initialization
     for (int i = 0; i < 2; ++i)
     {
+      DEBUG_TRACE("IDXGIOutput5_DuplicateOutput1");
       hr = IDXGIOutput5_DuplicateOutput1(
         *output5,
         *(IUnknown **)d11device,
@@ -310,12 +314,14 @@ static bool d12_dd_deinit(D12Backend * instance)
 
   if (this->release)
   {
+    DEBUG_TRACE("IDXGIOutputDuplication_ReleaseFrame");
     IDXGIOutputDuplication_ReleaseFrame(*this->dup);
     this->release = false;
   }
 
   if (this->desktop)
   {
+    DEBUG_TRACE("CloseDesktop");
     CloseDesktop(this->desktop);
     this->desktop = NULL;
   }
@@ -466,14 +472,17 @@ static ID3D12Resource * d12_dd_fetch(D12Backend * instance,
 
 static void d12_dd_openDesktop(DDInstance * this)
 {
+  DEBUG_TRACE("OpenInputDesktop");
   this->desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
   if (!this->desktop)
     DEBUG_WINERROR("Failed to open the desktop", GetLastError());
   else
   {
+    DEBUG_TRACE("SetThreadDesktop");
     if (!SetThreadDesktop(this->desktop))
     {
       DEBUG_WINERROR("Failed to set the thread desktop", GetLastError());
+      DEBUG_TRACE("CloseDesktop");
       CloseDesktop(this->desktop);
       this->desktop = NULL;
     }

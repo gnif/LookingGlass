@@ -27,6 +27,7 @@
 #define COLOR_RED    "\033[0;31m"
 #define COLOR_CYAN   "\033[0;36m"
 #define COLOR_WHITE  "\033[0;37m"
+#define COLOR_GREY   "\033[0;90m"
 
 const char ** debug_lookup = NULL;
 
@@ -38,6 +39,7 @@ void platform_debugInit(void)
     COLOR_RESET  "[I] ", // DEBUG_LEVEL_INFO
     COLOR_YELLOW "[W] ", // DEBUG_LEVEL_WARN
     COLOR_RED    "[E] ", // DEBUG_LEVEL_ERROR
+    COLOR_GREY   "[T] ", // DEBUG_LEVEL_TRACE
     COLOR_CYAN   "[F] ", // DEBUG_LEVEL_FIXME
     COLOR_WHITE  "[!] "  // DEBUG_LEVEL_FATAL
   };
@@ -48,6 +50,7 @@ void platform_debugInit(void)
     "[I] ", // DEBUG_LEVEL_INFO
     "[W] ", // DEBUG_LEVEL_WARN
     "[E] ", // DEBUG_LEVEL_ERROR
+    "[T] ", // DEBUG_LEVEL_TRACE
     "[F] ", // DEBUG_LEVEL_FIXME
     "[!] "  // DEBUG_LEVEL_FATAL
   };
