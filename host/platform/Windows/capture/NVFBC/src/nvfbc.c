@@ -872,6 +872,7 @@ struct CaptureInterface Capture_NVFBC =
 {
   .shortName       = "NvFBC",
   .asyncCapture    = false,
+  .deprecated      = true,
   .getName         = nvfbc_getName,
   .initOptions     = nvfbc_initOptions,
 
