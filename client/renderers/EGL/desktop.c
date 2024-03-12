@@ -624,4 +624,5 @@ void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
 void egl_desktopSpiceShow(EGL_Desktop * desktop, bool show)
 {
   desktop->useSpice = show;
+  atomic_store(&desktop->processFrame, true);
 }
