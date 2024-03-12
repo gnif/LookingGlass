@@ -437,18 +437,21 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 {
   EGL_Texture * tex;
   int width, height;
+  bool dma;
 
   if (unlikely(desktop->useSpice))
   {
     tex    = desktop->spiceTexture;
     width  = desktop->spiceWidth;
     height = desktop->spiceHeight;
+    dma    = false;
   }
   else
   {
     tex    = desktop->texture;
     width  = desktop->width;
     height = desktop->height;
+    dma    = desktop->useDMA;
   }
 
   if (unlikely(outputWidth == 0 && outputHeight == 0))
@@ -470,7 +473,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   if (atomic_exchange(&desktop->processFrame, false) ||
       egl_postProcessConfigModified(desktop->pp))
     egl_postProcessRun(desktop->pp, tex, desktop->mesh,
-        width, height, outputWidth, outputHeight, desktop->useDMA);
+        width, height, outputWidth, outputHeight, dma);
 
   unsigned int finalSizeX, finalSizeY;
   EGL_Texture * texture = egl_postProcessGetOutput(desktop->pp,
