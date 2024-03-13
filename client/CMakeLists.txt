@@ -42,18 +42,11 @@ add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
 option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
 
-option(ENABLE_X11 "Build with X11 support" ON)
-add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
-
 option(ENABLE_PIPEWIRE "Build with PipeWire audio output support" ON)
 add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
 
 option(ENABLE_PULSEAUDIO "Build with PulseAudio audio output support" ON)
 add_feature_info(ENABLE_PULSEAUDIO ENABLE_PULSEAUDIO "PulseAudio audio support.")
-
-if (NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
-  message(FATAL_ERROR "Either ENABLE_X11 or ENABLE_WAYLAND must be on")
-endif()
 
 add_compile_options(
   "-Wall"

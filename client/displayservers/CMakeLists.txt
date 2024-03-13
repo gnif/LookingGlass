@@ -18,8 +18,15 @@ function(add_displayserver name)
   add_subdirectory(${name})
 endfunction()
 
+option(ENABLE_X11 "Build with X11 support" ON)
+add_feature_info(ENABLE_X11 ENABLE_X11 "X11 support.")
+
 option(ENABLE_WAYLAND "Build with Wayland support" ON)
 add_feature_info(ENABLE_WAYLAND ENABLE_WAYLAND "Wayland support.")
+
+if (NOT ENABLE_X11 AND NOT ENABLE_WAYLAND)
+  message(FATAL_ERROR "Either ENABLE_X11 or ENABLE_WAYLAND must be on")
+endif()
 
 # Add/remove displayservers here!
 if (ENABLE_WAYLAND)
