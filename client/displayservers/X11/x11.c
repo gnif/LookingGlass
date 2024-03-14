@@ -699,7 +699,7 @@ static bool x11Init(const LG_DSInitParams params)
     XMoveWindow(x11.display, x11.window, params.x, params.y);
 
   if (params.fullscreen)
-    x11SetFullscreen(true);
+    x11.doFullscreenOnExpose = true;
 
   XSetLocaleModifiers(""); // Load XMODIFIERS
   x11.xim = XOpenIM(x11.display, 0, 0, 0);
@@ -946,6 +946,11 @@ static int x11EventThread(void * unused)
       {
         atomic_store(&x11.lastWMEvent, microtime());
         x11.invalidateAll = true;
+        if (x11.doFullscreenOnExpose)
+        {
+          x11SetFullscreen(true);
+          x11.doFullscreenOnExpose = false;
+        }
         break;
       }
 

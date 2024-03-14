@@ -71,6 +71,7 @@ struct X11DSState
 
   _Atomic(uint64_t) lastWMEvent;
   bool              invalidateAll;
+  bool              doFullscreenOnExpose;
 
   int               xpresentOp;
   bool              jitRender;
