@@ -95,7 +95,9 @@ typedef struct
   DMAFrameInfo      dmaInfo[LGMP_Q_FRAME_LEN];
 #endif
 
+#if LIBOBS_API_MAJOR_VER >= 28
   enum gs_color_space colorSpace;
+#endif
 
   pthread_t         frameThread, pointerThread;
   os_sem_t        * frameSem;
@@ -681,19 +683,25 @@ static void lgVideoTick(void * data, float seconds)
       case FRAME_TYPE_BGRA:
         format           = GS_BGRA_UNORM;
         drm_format       = DRM_FORMAT_ARGB8888;
+#if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_SRGB;
+#endif
         break;
 
       case FRAME_TYPE_RGBA:
         format           = GS_RGBA_UNORM;
         drm_format       = DRM_FORMAT_ARGB8888;
+#if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_SRGB;
+#endif
         break;
 
       case FRAME_TYPE_RGBA10:
         format           = GS_R10G10B10A2;
         drm_format       = DRM_FORMAT_BGRA1010102;
+#if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_709_SCRGB;
+#endif
         break;
 
       case FRAME_TYPE_RGB_24:
@@ -704,7 +712,9 @@ static void lgVideoTick(void * data, float seconds)
       case FRAME_TYPE_BGR_32:
         format           = GS_BGRA_UNORM;
         drm_format       = DRM_FORMAT_ARGB8888;
+#if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_SRGB;
+#endif
         unpack     = true;
         break;
 
@@ -712,7 +722,9 @@ static void lgVideoTick(void * data, float seconds)
         this->bpp        = 8;
         format           = GS_RGBA16F;
         drm_format       = DRM_FORMAT_ABGR16161616F;
+#if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_709_SCRGB;
+#endif
         break;
 
       default:
@@ -901,12 +913,14 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
   }
 }
 
+#if LIBOBS_API_MAJOR_VER >= 28
 static enum gs_color_space lgVideoGetColorSpace(void *data, size_t count,
   const enum gs_color_space *preferred_spaces)
 {
   LGPlugin * this = (LGPlugin *)data;
   return this->colorSpace;
 }
+#endif
 
 static uint32_t lgGetWidth(void * data)
 {
@@ -934,7 +948,9 @@ struct obs_source_info lg_source =
   .get_properties        = lgGetProperties,
   .video_tick            = lgVideoTick,
   .video_render          = lgVideoRender,
+#if LIBOBS_API_MAJOR_VER >= 28
   .video_get_color_space = lgVideoGetColorSpace,
+#endif
   .get_width             = lgGetWidth,
   .get_height            = lgGetHeight,
   .icon_type             = OBS_ICON_TYPE_DESKTOP_CAPTURE
