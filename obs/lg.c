@@ -95,6 +95,8 @@ typedef struct
   DMAFrameInfo      dmaInfo[LGMP_Q_FRAME_LEN];
 #endif
 
+  enum gs_color_space colorSpace;
+
   pthread_t         frameThread, pointerThread;
   os_sem_t        * frameSem;
 
@@ -677,18 +679,21 @@ static void lgVideoTick(void * data, float seconds)
     switch(this->type)
     {
       case FRAME_TYPE_BGRA:
-        format     = GS_BGRA_UNORM;
-        drm_format = DRM_FORMAT_ARGB8888;
+        format           = GS_BGRA_UNORM;
+        drm_format       = DRM_FORMAT_ARGB8888;
+        this->colorSpace = GS_CS_SRGB;
         break;
 
       case FRAME_TYPE_RGBA:
-        format     = GS_RGBA_UNORM;
-        drm_format = DRM_FORMAT_ARGB8888;
+        format           = GS_RGBA_UNORM;
+        drm_format       = DRM_FORMAT_ARGB8888;
+        this->colorSpace = GS_CS_SRGB;
         break;
 
       case FRAME_TYPE_RGBA10:
-        format     = GS_R10G10B10A2;
-        drm_format = DRM_FORMAT_BGRA1010102;
+        format           = GS_R10G10B10A2;
+        drm_format       = DRM_FORMAT_BGRA1010102;
+        this->colorSpace = GS_CS_709_SCRGB;
         break;
 
       case FRAME_TYPE_RGB_24:
@@ -697,15 +702,17 @@ static void lgVideoTick(void * data, float seconds)
         /* fallthrough */
 
       case FRAME_TYPE_BGR_32:
-        format     = GS_BGRA_UNORM;
-        drm_format = DRM_FORMAT_ARGB8888;
+        format           = GS_BGRA_UNORM;
+        drm_format       = DRM_FORMAT_ARGB8888;
+        this->colorSpace = GS_CS_SRGB;
         unpack     = true;
         break;
 
       case FRAME_TYPE_RGBA16F:
-        this->bpp  = 8;
-        format     = GS_RGBA16F;
-        drm_format = DRM_FORMAT_ABGR16161616F;
+        this->bpp        = 8;
+        format           = GS_RGBA16F;
+        drm_format       = DRM_FORMAT_ABGR16161616F;
+        this->colorSpace = GS_CS_709_SCRGB;
         break;
 
       default:
@@ -894,6 +901,13 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
   }
 }
 
+static enum gs_color_space lgVideoGetColorSpace(void *data, size_t count,
+  const enum gs_color_space *preferred_spaces)
+{
+  LGPlugin * this = (LGPlugin *)data;
+  return this->colorSpace;
+}
+
 static uint32_t lgGetWidth(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
@@ -908,19 +922,20 @@ static uint32_t lgGetHeight(void * data)
 
 struct obs_source_info lg_source =
 {
-  .id             = "looking-glass-obs",
-  .type           = OBS_SOURCE_TYPE_INPUT,
-  .output_flags   = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW |
-                    OBS_SOURCE_DO_NOT_DUPLICATE,
-  .get_name       = lgGetName,
-  .create         = lgCreate,
-  .destroy        = lgDestroy,
-  .update         = lgUpdate,
-  .get_defaults   = lgGetDefaults,
-  .get_properties = lgGetProperties,
-  .video_tick     = lgVideoTick,
-  .video_render   = lgVideoRender,
-  .get_width      = lgGetWidth,
-  .get_height     = lgGetHeight,
-  .icon_type      = OBS_ICON_TYPE_DESKTOP_CAPTURE
+  .id                    = "looking-glass-obs",
+  .type                  = OBS_SOURCE_TYPE_INPUT,
+  .output_flags          = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW |
+                           OBS_SOURCE_DO_NOT_DUPLICATE | OBS_SOURCE_SRGB,
+  .get_name              = lgGetName,
+  .create                = lgCreate,
+  .destroy               = lgDestroy,
+  .update                = lgUpdate,
+  .get_defaults          = lgGetDefaults,
+  .get_properties        = lgGetProperties,
+  .video_tick            = lgVideoTick,
+  .video_render          = lgVideoRender,
+  .video_get_color_space = lgVideoGetColorSpace,
+  .get_width             = lgGetWidth,
+  .get_height            = lgGetHeight,
+  .icon_type             = OBS_ICON_TYPE_DESKTOP_CAPTURE
 };
