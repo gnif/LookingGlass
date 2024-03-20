@@ -45,6 +45,7 @@ mipmapping
 modprobe
 msys
 multisampling
+namespace
 Navi
 Nvidia
 overlayed
