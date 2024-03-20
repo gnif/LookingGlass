@@ -102,7 +102,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
       wl_surface_set_buffer_scale(wlWm.surface, 1);
       if (!wlWm.viewport)
         wlWm.viewport = wp_viewporter_get_viewport(wlWm.viewporter, wlWm.surface);
-      DEBUG_INFO("Scale: %.5f", wl_fixed_from_double(wlWm.scale));
+      DEBUG_INFO("Scale: %.5f", wl_fixed_to_double(wlWm.scale));
       wp_viewport_set_source(wlWm.viewport, wl_fixed_from_int(-1), wl_fixed_from_int(-1) , wl_fixed_from_int(-1), wl_fixed_from_int(-1));
       wp_viewport_set_destination(wlWm.viewport, width, height);
     }
