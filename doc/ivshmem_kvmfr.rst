@@ -132,6 +132,24 @@ with the following contents::
 libvirt
 ~~~~~~~
 
+Using the module in libvirt requires adding a ``<qemu:commandline>`` block to
+your libvirt XML configuration. That block, in turn, requires modifying the
+XML domain namespace. To modify the namespace edit the ``<domain>`` tag at
+the top of your XML config to:
+
+.. code:: xml
+
+   <domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+
+then add one of the ``<qemu:commandline>`` blocks below based on your
+QEMU/libvirt versions.
+
+.. note::
+
+   Make sure to add both the block and the domain namespace change in a
+   single editing session prior to saving it. Failure to do so will cause
+   libvirt to reject the changes.
+
 Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration is the
 default syntax. Users running QEMU 6.2 or later **and** libvirt 7.9 or later,
 should use this XML block to configure their VM for kvmfr:
@@ -168,12 +186,9 @@ legacy syntax for IVSHMEM setup:
 
 .. note::
 
-   -  Using the legacy syntax on QEMU 6.2/libvirt 7.9 may cause QEMU to
-      abort with the following error message:
-      "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
-
-   -  Remember to add ``xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'``
-      to the ``<domain>`` tag.
+   Using the legacy syntax on QEMU 6.2/libvirt 7.9 may cause QEMU to
+   abort with the following error message:
+   "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
