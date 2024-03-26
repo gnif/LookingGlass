@@ -121,7 +121,7 @@ static bool waylandInit(const LG_DSInitParams params)
     for(int i = 0; i < WL_DESKTOP_COUNT; ++i)
       if (strcmp(WL_Desktops[i]->compositor, compositor) == 0)
       {
-        wlWm.desktop = WL_Desktops[0];
+        wlWm.desktop = WL_Desktops[i];
         break;
       }
   }
