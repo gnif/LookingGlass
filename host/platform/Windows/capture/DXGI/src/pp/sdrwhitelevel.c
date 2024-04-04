@@ -78,8 +78,8 @@ static bool sdrWhiteLevel_setup(
   this.context   = context;
   this.shareable = shareable;
 
-  comRef_initGlobalScope(10, this.comScope);
-  comRef_scopePush(10);
+  comRef_initGlobalScope(11, this.comScope);
+  comRef_scopePush(11);
 
   comRef_defineLocal(IDXGIOutput6, output6);
   status = IDXGIOutput_QueryInterface(
@@ -174,11 +174,12 @@ static bool sdrWhiteLevel_setup(
     goto exit;
   }
 
+  comRef_toGlobal(this.sampler, sampler);
+  comRef_toGlobal(this.buffer , buffer );
+
   updateConsts();
   DEBUG_INFO("SDR White Level   : %f"   , this.sdrWhiteLevel);
 
-  comRef_toGlobal(this.sampler, sampler);
-  comRef_toGlobal(this.buffer , buffer );
   result = true;
 
 exit:
