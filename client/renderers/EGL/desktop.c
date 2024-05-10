@@ -609,9 +609,9 @@ void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
   for(int x = 0; x < width; ++x)
     line[x] = color;
 
-  for(; y < height; ++y)
+  for(int dy = 0; dy < height; ++dy)
     egl_textureUpdateRect(desktop->spiceTexture,
-        x, y, width, 1, width, sizeof(line), (uint8_t *)line, false);
+        x, y + dy, width, 1, width, sizeof(line), (uint8_t *)line, false);
 
   atomic_store(&desktop->processFrame, true);
 }
