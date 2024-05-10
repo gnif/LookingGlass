@@ -622,13 +622,13 @@ static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width
   glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
   glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
-  for(; y < height; ++y)
+  for(int dy = 0; dy < height; ++dy)
     glTexSubImage2D
     (
       GL_TEXTURE_2D,
       0      ,
       x      ,
-      y      ,
+      y + dy ,
       width  ,
       1      ,
       GL_BGRA,
