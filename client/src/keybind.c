@@ -172,7 +172,7 @@ void keybind_spiceRegister(void)
     app_registerKeybind(KEY_INSERT, 0, bind_mouseSens, (void *) true ,
         "Increase mouse sensitivity in capture mode");
     app_registerKeybind(KEY_DELETE, 0, bind_mouseSens, (void *) false,
-        "Descrease mouse sensitivity in capture mode");
+        "Decrease mouse sensitivity in capture mode");
 
     app_registerKeybind(KEY_UP  , 0 , bind_toggleKey, (void *) PS2_VOLUME_UP  ,
         "Send volume up to the guest");
