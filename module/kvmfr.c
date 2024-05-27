@@ -30,6 +30,7 @@
 #include <linux/highmem.h>
 #include <linux/memremap.h>
 #include <linux/version.h>
+#include <linux/vmalloc.h>
 
 #include <asm/io.h>
 
