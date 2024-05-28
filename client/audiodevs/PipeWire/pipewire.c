@@ -258,6 +258,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
 
   struct pw_properties * props =
     pw_properties_new(
+      PW_KEY_APP_NAME      , "Looking Glass",
       PW_KEY_NODE_NAME     , "Looking Glass",
       PW_KEY_MEDIA_TYPE    , "Audio",
       PW_KEY_MEDIA_CATEGORY, "Playback",
