@@ -157,15 +157,15 @@ should use this XML block to configure their VM for kvmfr:
 .. code:: xml
 
    <qemu:commandline>
-     <qemu:arg value='-device'/>
-     <qemu:arg value='{"driver":"ivshmem-plain","id":"shmem0","memdev":"looking-glass"}'/>
-     <qemu:arg value='-object'/>
-     <qemu:arg value='{"qom-type":"memory-backend-file","id":"looking-glass","mem-path":"/dev/kvmfr0","size":33554432,"share":true}'/>
+     <qemu:arg value="-device"/>
+     <qemu:arg value="{'driver':'ivshmem-plain','id':'shmem0','memdev':'looking-glass'}"/>
+     <qemu:arg value="-object"/>
+     <qemu:arg value="{'qom-type':'memory-backend-file','id':'looking-glass','mem-path':'/dev/kvmfr0','size':33554432,'share':true}"/>
    </qemu:commandline>
 
 .. note::
 
-   -  The ``"size"`` tag represents the size of the shared memory device in
+   -  The ``'size'`` tag represents the size of the shared memory device in
       bytes. Once you determine the proper size of the device as per
       :ref:`Determining Memory <libvirt_determining_memory>`, use the figure you
       got to calculate the size in bytes:
@@ -178,10 +178,10 @@ legacy syntax for IVSHMEM setup:
 .. code:: xml
 
    <qemu:commandline>
-     <qemu:arg value='-device'/>
-     <qemu:arg value='ivshmem-plain,id=shmem0,memdev=looking-glass'/>
-     <qemu:arg value='-object'/>
-     <qemu:arg value='memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=32M,share=yes'/>
+     <qemu:arg value="-device"/>
+     <qemu:arg value="ivshmem-plain,id=shmem0,memdev=looking-glass"/>
+     <qemu:arg value="-object"/>
+     <qemu:arg value="memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=32M,share=yes"/>
    </qemu:commandline>
 
 .. note::
