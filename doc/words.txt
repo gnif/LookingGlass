@@ -16,14 +16,16 @@ DirectX
 distros
 dmabuf
 dmesg
+downsample
 downsampling
 downscaler
 downscaling
-downsample
+framebuffer
 fullscreen
 gcc
 globalFullScreen
 gnif
+hypervisor
 i3
 imgui
 ini

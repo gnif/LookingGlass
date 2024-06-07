@@ -99,6 +99,10 @@ Looking Glass to use your GPUs DMA engine to transfer the frame data.
    ivshmem_kvmfr
    ivshmem_shm
 
+.. seealso::
+
+   :ref:`igpu_kvmfr_recommended`
+
 
 .. _libvirt_spice_server:
 

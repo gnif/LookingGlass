@@ -56,8 +56,6 @@ At this time the recommended configuration is as follows:
   * AMD or Intel brand GPU for the client application (usually your host system).
   * NVIDIA brand GPU for the guest system (virtual machine).
 
-The reason for these recommendations are as follows:
-
 AMD or Intel for the client
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -78,3 +76,23 @@ NVIDIA unlike AMD do not seem to suffer from the same stability issues as AMD
 GPUs when operating as a passthrough GPU, however due to the closed source
 nature of their drivers NVIDIA can not make use of the DMABUF feature in the
 Linux kernel unless you use the open source NVIDIA drivers.
+
+.. _igpu_kvmfr_recommended:
+
+iGPUs should use DMABUF
+^^^^^^^^^^^^^^^^^^^^^^^
+
+While `DMABUF` with the `KVMFR module <ivshmem_kvmfr>` offers performance
+benefits for all users, for the often bandwidth-starved users with an iGPU on
+their host it's considered necessary for a decent experience.
+
+When using a normal SHM file, many GPU drivers will copy incoming frames from
+shared memory to an intermediary buffer, then upload it from that buffer to the
+GPU's framebuffer. The KVMFR module will instead use the GPU's copy engine to
+download incoming frames directly from shared memory without using an
+intermediary buffer. This is especially helpful to iGPU users as it frees up RAM
+bandwidth, which an iGPU already uses extensively.
+
+An added benefit: since the upload is done with the iGPU's copy engine, the CPU
+load is reduced as the upload is done by the iGPU module rather than the
+processor cores.
