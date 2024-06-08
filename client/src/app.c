@@ -89,8 +89,7 @@ void app_updateCursorPos(double x, double y)
   g_cursor.pos.y = y;
   g_cursor.valid = true;
 
-  if (app_isOverlayMode())
-    g_state.io->MousePos = (ImVec2) { x, y };
+  g_state.io->MousePos = (ImVec2) { x, y };
 }
 
 void app_handleFocusEvent(bool focused)
