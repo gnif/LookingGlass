@@ -1361,7 +1361,8 @@ static int lg_run(void)
     .maximize            = g_params.maximize,
     .largeCursorDot      = g_params.largeCursorDot,
     .opengl              = needsOpenGL,
-    .jitRender           = g_params.jitRender
+    .jitRender           = g_params.jitRender,
+    .hideMouse           = g_params.hideMouse
   };
 
   g_state.dsInitialized = g_state.ds->init(params);
