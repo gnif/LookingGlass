@@ -88,8 +88,12 @@ static vm_fault_t kvmfr_vm_fault(struct vm_fault *vmf)
 {
   struct vm_area_struct *vma = vmf->vma;
   struct kvmfrbuf *kbuf = (struct kvmfrbuf *)vma->vm_private_data;
+  pgoff_t pgoff = vmf->pgoff;
 
-  vmf->page = kbuf->pages[vmf->pgoff];
+  if (pgoff >= kbuf->pagecount)
+    return VM_FAULT_SIGBUS;
+
+  vmf->page = kbuf->pages[pgoff];
   get_page(vmf->page);
   return 0;
 }
