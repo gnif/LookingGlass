@@ -335,7 +335,7 @@ static void rectCopyUnaligned_avx(
   for (int i = ystart; i < yend; ++i)
   {
     // copy the unaligned bytes
-    for(int col = align; col >= 0; --col)
+    for(int col = align - 1; col >= 0; --col)
       dst[col] = src[col];
 
     const __m256i *restrict s = (__m256i*)(src + align);
