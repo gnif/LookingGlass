@@ -86,6 +86,15 @@ static StringList ivshmemDeviceGetValues(struct Option * option)
 
 void ivshmemOptionsInit(void)
 {
+  char * shmFile;
+  struct stat st;
+
+  // if there is a kvmfr device, default to using it instead
+  if (stat("/dev/kvmfr0", &st) == 0)
+    shmFile = "/dev/kvmfr0";
+  else
+    shmFile = "/dev/shm/looking-glass";
+
   struct Option options[] =
   {
     {
@@ -94,7 +103,7 @@ void ivshmemOptionsInit(void)
       .shortopt       = 'f',
       .description    = "The path to the shared memory file, or the name of the kvmfr device to use, e.g. kvmfr0",
       .type           = OPTION_TYPE_STRING,
-      .value.x_string = "/dev/shm/looking-glass",
+      .value.x_string = shmFile,
       .validator      = ivshmemDeviceValidator,
       .getValues      = ivshmemDeviceGetValues
     },
