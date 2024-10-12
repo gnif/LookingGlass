@@ -114,6 +114,13 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "appId",
+    .description    = "The application Id",
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "looking-glass-client"
+  },
+  {
+    .module         = "win",
     .name           = "position",
     .description    = "Initial window position at startup",
     .type           = OPTION_TYPE_CUSTOM,
@@ -649,6 +656,7 @@ bool config_load(int argc, char * argv[])
   g_params.allowDMA           = option_get_bool  ("app"  , "allowDMA"          );
 
   g_params.windowTitle       = option_get_string("win", "title"             );
+  g_params.appId             = option_get_string("win", "appId"             );
   g_params.autoResize        = option_get_bool  ("win", "autoResize"        );
   g_params.allowResize       = option_get_bool  ("win", "allowResize"       );
   g_params.keepAspect        = option_get_bool  ("win", "keepAspect"        );

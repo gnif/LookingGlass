@@ -130,14 +130,14 @@ static void libdecorCallback(uint32_t events, void * opaque)
 
 static bool libdecor_shellInit(
     struct wl_display * display, struct wl_surface * surface,
-    const char * title, bool fullscreen,
+    const char * title, const char * appId, bool fullscreen,
     bool maximize, bool borderless, bool resizable)
 {
   state.libdecor = libdecor_new(display, &libdecorListener);
   state.libdecorFrame = libdecor_decorate(state.libdecor, surface,
       &libdecorFrameListener, NULL);
 
-  libdecor_frame_set_app_id(state.libdecorFrame, "looking-glass-client");
+  libdecor_frame_set_app_id(state.libdecorFrame, appId);
   libdecor_frame_set_title(state.libdecorFrame, title);
   libdecor_frame_map(state.libdecorFrame);
 

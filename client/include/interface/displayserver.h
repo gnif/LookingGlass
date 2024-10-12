@@ -84,6 +84,7 @@ LG_DSPointer;
 typedef struct LG_DSInitParams
 {
   const char * title;
+  const char * appId;
   int  x, y, w, h;
   bool center;
   bool fullscreen;
