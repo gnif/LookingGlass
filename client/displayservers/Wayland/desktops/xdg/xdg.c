@@ -130,7 +130,7 @@ static const struct xdg_toplevel_listener xdgToplevelListener = {
 };
 
 bool xdg_shellInit(struct wl_display * display, struct wl_surface * surface,
-    const char * title, bool fullscreen, bool maximize, bool borderless,
+    const char * title, const char * appId, bool fullscreen, bool maximize, bool borderless,
     bool resizable)
 {
   if (!state.wmBase)
@@ -147,7 +147,7 @@ bool xdg_shellInit(struct wl_display * display, struct wl_surface * surface,
   state.toplevel = xdg_surface_get_toplevel(state.surface);
   xdg_toplevel_add_listener(state.toplevel, &xdgToplevelListener, NULL);
   xdg_toplevel_set_title(state.toplevel, title);
-  xdg_toplevel_set_app_id(state.toplevel, "looking-glass-client");
+  xdg_toplevel_set_app_id(state.toplevel, appId);
 
   if (fullscreen)
     xdg_toplevel_set_fullscreen(state.toplevel, NULL);

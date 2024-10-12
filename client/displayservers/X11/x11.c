@@ -343,7 +343,7 @@ static bool x11Init(const LG_DSInitParams params)
   XClassHint hint =
   {
     .res_name  = strdup(params.title),
-    .res_class = strdup("looking-glass-client")
+    .res_class = strdup(params.appId)
   };
   XSetClassHint(x11.display, x11.window, &hint);
   free(hint.res_name);

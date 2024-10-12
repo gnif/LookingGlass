@@ -159,7 +159,7 @@ static bool waylandInit(const LG_DSInitParams params)
     return false;
 
   wlWm.desktop->setSize(params.w, params.h);
-  if (!waylandWindowInit(params.title, params.fullscreen, params.maximize,
+  if (!waylandWindowInit(params.title, params.appId, params.fullscreen, params.maximize,
         params.borderless, params.resizable))
     return false;
 

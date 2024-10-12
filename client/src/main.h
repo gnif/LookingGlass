@@ -211,6 +211,7 @@ struct AppParams
   unsigned int         forceRendererIndex;
 
   const char *         windowTitle;
+  const char *         appId;
   bool                 mouseRedraw;
   int                  mouseSens;
   bool                 mouseSmoothing;

@@ -301,7 +301,7 @@ bool waylandRegistryInit(void);
 void waylandRegistryFree(void);
 
 // window module
-bool waylandWindowInit(const char * title, bool fullscreen, bool maximize, bool borderless, bool resizable);
+bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, bool maximize, bool borderless, bool resizable);
 void waylandWindowFree(void);
 void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);

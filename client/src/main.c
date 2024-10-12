@@ -1350,6 +1350,7 @@ static int lg_run(void)
   const LG_DSInitParams params =
   {
     .title               = g_params.windowTitle,
+    .appId               = g_params.appId,
     .x                   = g_params.x,
     .y                   = g_params.y,
     .w                   = g_params.w,

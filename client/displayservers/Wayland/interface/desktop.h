@@ -34,7 +34,7 @@ typedef struct WL_DesktopOps
 
   bool (*shellInit)(
     struct wl_display * display, struct wl_surface * surface,
-    const char * title, bool fullscreen, bool maximize,
+    const char * title, const char * appId, bool fullscreen, bool maximize,
     bool borderless, bool resizable);
 
   void (*shellAckConfigureIfNeeded)(void);
