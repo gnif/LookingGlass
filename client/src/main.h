@@ -202,6 +202,7 @@ struct AppParams
   int                  uiSize;
   bool                 jitRender;
   bool                 requestActivation;
+  bool                 disableWaitingMessage;
 
   unsigned int         cursorPollInterval;
   unsigned int         framePollInterval;
