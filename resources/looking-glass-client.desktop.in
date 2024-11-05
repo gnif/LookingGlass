@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Looking Glass Client
+Comment=Clent for Looking Glass KVMFR
+Icon=looking-glass
+Exec=@CMAKE_INSTALL_PREFIX@/bin/looking-glass-client
+Terminal=false
+Keywords=KVM
+Categories=System;
+StartupWMClass=looking-glass-client
+SingleMainWindow=true

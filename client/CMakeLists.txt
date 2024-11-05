@@ -147,6 +147,7 @@ add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui" E
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
 
+configure_file("${PROJECT_TOP}/resources/looking-glass-client.desktop.in" "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop" @ONLY)
 add_executable(looking-glass-client ${SOURCES})
 
 target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
@@ -176,5 +177,11 @@ endif()
 install(TARGETS looking-glass-client
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT binary)
+
+install(FILES "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop"
+    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
+install(FILES "${PROJECT_TOP}/resources/lg-logo.svg"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps"
+        RENAME "looking-glass.svg")
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)
