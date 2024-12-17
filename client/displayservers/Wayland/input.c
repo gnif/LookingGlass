@@ -88,7 +88,7 @@ static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
 static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   uint32_t serial, uint32_t axis, wl_fixed_t value)
 {
-  if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
+  if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL && value != 0)
     return;
 
   int button = value > 0 ?
