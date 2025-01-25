@@ -33,6 +33,9 @@ add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
 option(ENABLE_EGL    "Enable the EGL renderer"          ON)
 add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
 
+option(ENABLE_VULKAN "Enable the Vulkan renderer"       OFF)
+add_feature_info(ENABLE_VULKAN ENABLE_VULKAN "Vulkan renderer.")
+
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 
@@ -72,6 +75,10 @@ endif()
 
 if (ENABLE_EGL)
   add_definitions(-D ENABLE_EGL)
+endif()
+
+if (ENABLE_VULKAN)
+  add_definitions(-D ENABLE_VULKAN)
 endif()
 
 if(ENABLE_ASAN)
