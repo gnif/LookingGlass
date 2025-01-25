@@ -138,8 +138,8 @@ typedef struct LG_RendererOps
   void (*onRestart)(LG_Renderer * renderer);
 
   /* called when the viewport has been resized
-   * Context: renderThrtead */
-  void (*onResize)(LG_Renderer * renderer, const int width, const int height,
+   * Context: renderThread */
+  bool (*onResize)(LG_Renderer * renderer, const int width, const int height,
       const double scale, const LG_RendererRect destRect,
       LG_RendererRotate rotate);
 

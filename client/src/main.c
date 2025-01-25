@@ -271,8 +271,14 @@ static int renderThread(void * unused)
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
       if (g_state.lgr)
-        RENDERER(onResize, g_state.windowW, g_state.windowH,
-            g_state.windowScale, g_state.dstRect, g_params.winRotate);
+      {
+        if (unlikely(!RENDERER(onResize, g_state.windowW, g_state.windowH,
+            g_state.windowScale, g_state.dstRect, g_params.winRotate)))
+        {
+          LG_UNLOCK(g_state.lgrLock);
+          break;
+        }
+      }
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 

@@ -288,7 +288,7 @@ static void setupModelView(struct Inst * this)
   );
 }
 
-void opengl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
+bool opengl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -316,6 +316,8 @@ void opengl_onResize(LG_Renderer * renderer, const int width, const int height, 
   ImGui_ImplOpenGL2_Shutdown();
   ImGui_ImplOpenGL2_Init();
   ImGui_ImplOpenGL2_NewFrame();
+
+  return true;
 }
 
 bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,

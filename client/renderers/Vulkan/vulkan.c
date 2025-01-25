@@ -24,13 +24,21 @@
 
 #include <vulkan/vulkan.h>
 
+#include <string.h>
+
 struct Inst
 {
   LG_Renderer base;
 
-  VkInstance instance;
-  VkSurfaceKHR surface;
-  VkDevice device;
+  VkInstance       instance;
+  VkSurfaceKHR     surface;
+  VkPhysicalDevice physicalDevice;
+  VkDevice         device;
+  VkSwapchainKHR   swapchain;
+
+  LG_RendererFormat format;
+
+  int               width, height;
 };
 
 static const char * vulkan_getName(void)
@@ -66,6 +74,9 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  if (this->swapchain)
+    vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
+
   if (this->device)
     vkDestroyDevice(this->device, NULL);
 
@@ -80,41 +91,251 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 
 static bool vulkan_supports(LG_Renderer * renderer, LG_RendererSupport flag)
 {
-  DEBUG_FATAL("vulkan_supports not implemented");
+  return false;
 }
 
 static void vulkan_onRestart(LG_Renderer * renderer)
 {
 }
 
-static void vulkan_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
-    const LG_RendererRect destRect, LG_RendererRotate rotate)
+static VkSwapchainKHR vulkan_createSwapchain(VkPhysicalDevice physicalDevice,
+    VkSurfaceKHR surface, VkDevice device, FrameType frameType, int width,
+    int height)
 {
-  DEBUG_FATAL("vulkan_onResize not implemented");
+  VkSurfaceCapabilitiesKHR surfaceCaps;
+  VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice,
+      surface, &surfaceCaps);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get surface capabilities (VkResult: %d)", result);
+    goto err;
+  }
+
+  uint32_t formatCount;
+  result = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface,
+      &formatCount, NULL);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get surface formats (VkResult: %d)", result);
+    goto err;
+  }
+
+  VkSurfaceFormatKHR * formats = malloc(
+      sizeof(VkSurfaceFormatKHR) * formatCount);
+  if (!formats)
+  {
+    DEBUG_ERROR("out of memory");
+    goto err;
+  }
+
+  result = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface,
+      &formatCount, formats);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get surface formats (VkResult: %d)", result);
+    goto err_formats;
+  }
+
+  // TODO: Handle 10-bit HDR
+  uint32_t formatIndex = UINT32_MAX;
+  if (frameType == FRAME_TYPE_RGBA16F)
+  {
+    for (uint32_t i = 0; i < formatCount; ++i)
+    {
+      if (formats[i].format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+          formats[i].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
+      {
+        formatIndex = i;
+        break;
+      }
+    }
+    if (formatIndex == UINT32_MAX)
+    {
+      DEBUG_WARN("Could not find suitable 16-bit surface format; HDR content will look bad");
+    }
+  }
+
+  if (formatIndex == UINT32_MAX)
+  {
+    for (uint32_t i = 0; i < formatCount; ++i)
+    {
+      if ((formats[i].format == VK_FORMAT_R8G8B8A8_UNORM || formats[i].format == VK_FORMAT_B8G8R8A8_UNORM) &&
+          formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+      {
+        formatIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (formatIndex == UINT32_MAX)
+  {
+    DEBUG_ERROR("Could not find any suitable surface format");
+    goto err_formats;
+  }
+
+  VkCompositeAlphaFlagBitsKHR compositeAlpha;
+  if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+    compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  else if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+    compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+  else if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
+    compositeAlpha = VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
+  else if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
+    compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+  else
+    DEBUG_FATAL("No supported composite alpha mode");
+
+  uint32_t modeCount;
+  result = vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface,
+      &modeCount, NULL);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get surface present modes (VkResult: %d)", result);
+    goto err;
+  }
+
+  VkPresentModeKHR * modes = malloc(sizeof(VkPresentModeKHR) * modeCount);
+  if (!modes)
+  {
+    DEBUG_ERROR("out of memory");
+    goto err;
+  }
+
+  result = vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface,
+      &modeCount, modes);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get surface present modes (VkResult: %d)", result);
+    goto err_modes;
+  }
+
+  VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+  for (uint32_t i = 0; i < modeCount; ++i)
+  {
+    if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+    {
+      presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+      break;
+    }
+  }
+
+  struct VkSwapchainCreateInfoKHR createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+    .surface = surface,
+    .minImageCount = surfaceCaps.minImageCount,
+    .imageFormat = formats[formatIndex].format,
+    .imageColorSpace = formats[formatIndex].colorSpace,
+    .imageExtent.width = width,
+    .imageExtent.height = height,
+    .imageArrayLayers = 1,
+    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    .preTransform = surfaceCaps.currentTransform,
+    .compositeAlpha = compositeAlpha,
+    .presentMode = presentMode,
+    .clipped = VK_TRUE
+  };
+
+  DEBUG_INFO("Min image count: %"PRIu32, createInfo.minImageCount);
+  DEBUG_INFO("Image format   : %d", createInfo.imageFormat);
+  DEBUG_INFO("Color space    : %d", createInfo.imageColorSpace);
+  DEBUG_INFO("Extent         : %"PRIu32"x%"PRIu32,
+      createInfo.imageExtent.width, createInfo.imageExtent.height);
+  DEBUG_INFO("Pre-transform  : %d", createInfo.preTransform);
+  DEBUG_INFO("Composite alpha: %d", createInfo.compositeAlpha);
+  DEBUG_INFO("Present mode   : %d", createInfo.presentMode);
+
+  VkSwapchainKHR swapchain;
+  result = vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create swapchain (VkResult: %d)", result);
+    goto err_modes;
+  }
+
+  free(modes);
+  free(formats);
+  return swapchain;
+
+err_modes:
+  free(modes);
+
+err_formats:
+  free(formats);
+
+err:
+  return NULL;
+}
+
+static bool vulkan_onResize(LG_Renderer * renderer, const int width,
+    const int height, const double scale, const LG_RendererRect destRect,
+    LG_RendererRotate rotate)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
+  this->width   = width * scale;
+  this->height  = height * scale;
+
+  if (this->swapchain)
+  {
+    vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
+    this->swapchain = NULL;
+  }
+
+  this->swapchain = vulkan_createSwapchain(this->physicalDevice, this->surface,
+    this->device, this->format.type, this->width, this->height);
+  if (!this->swapchain)
+    return false;
+
+  return true;
 }
 
 static bool vulkan_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
     const int width, const int height,
     const int pitch, const uint8_t * data)
 {
-  DEBUG_FATAL("vulkan_onMouseShape not implemented");
+  DEBUG_ERROR("vulkan_onMouseShape not implemented");
+  return true;
 }
 
 static bool vulkan_onMouseEvent(LG_Renderer * renderer, const bool visible,
     int x, int y, const int hx, const int hy)
 {
-  DEBUG_FATAL("vulkan_onMouseEvent not implemented");
+  DEBUG_ERROR("vulkan_onMouseEvent not implemented");
+  return true;
 }
 
-static bool vulkan_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format)
+static bool vulkan_onFrameFormat(LG_Renderer * renderer,
+    const LG_RendererFormat format)
 {
-  DEBUG_FATAL("vulkan_onFrameFormat not implemented");
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+
+  // TODO: Don't re-create swapchain unless switching between SDR and HDR modes
+  if (this->swapchain)
+  {
+    vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
+    this->swapchain = NULL;
+  }
+
+  this->swapchain = vulkan_createSwapchain(this->physicalDevice, this->surface,
+      this->device, this->format.type, this->width, this->height);
+  if (!this->swapchain)
+    goto err;
+
+  return true;
+
+err:
+  return false;
 }
 
-static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damageRects, int damageRectsCount)
+static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
+    int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount)
 {
-  DEBUG_FATAL("vulkan_onFrame not implemented");
+  DEBUG_ERROR("vulkan_onFrame not implemented");
+  return true;
 }
 
 static VkInstance vulkan_createInstance(void)
@@ -292,17 +513,17 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
     goto err_inst;
 
   uint32_t queueFamilyIndex;
-  VkPhysicalDevice physicalDevice = vulkan_pickPhysicalDevice(this->instance,
+  this->physicalDevice = vulkan_pickPhysicalDevice(this->instance,
       &queueFamilyIndex);
-  if (!physicalDevice)
+  if (!this->physicalDevice)
     goto err_surf;
 
-  this->device = vulkan_createDevice(this->instance, physicalDevice,
+  this->device = vulkan_createDevice(this->instance, this->physicalDevice,
       queueFamilyIndex);
   if (!this->device)
     goto err_surf;
 
-  DEBUG_FATAL("vulkan_renderStartup not implemented");
+  return true;
 
 err_surf:
   vkDestroySurfaceKHR(this->instance, this->surface, NULL);
@@ -320,18 +541,20 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     const bool newFrame, const bool invalidateWindow,
     void (*preSwap)(void * udata), void * udata)
 {
-  DEBUG_FATAL("vulkan_render not implemented");
+  DEBUG_ERROR("vulkan_render not implemented");
+  return true;
 }
 
 static void * vulkan_createTexture(LG_Renderer * renderer,
   int width, int height, uint8_t * data)
 {
-  DEBUG_FATAL("vulkan_createTexture not implemented");
+  DEBUG_ERROR("vulkan_createTexture not implemented");
+  return (void *) 1;
 }
 
 static void vulkan_freeTexture(LG_Renderer * renderer, void * texture)
 {
-  DEBUG_FATAL("vulkan_freeTexture not implemented");
+  DEBUG_ERROR("vulkan_freeTexture not implemented");
 }
 
 static void vulkan_spiceConfigure(LG_Renderer * renderer, int width, int height)
