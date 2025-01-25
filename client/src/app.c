@@ -648,6 +648,13 @@ void app_glSwapBuffers(void)
 }
 #endif
 
+#ifdef ENABLE_VULKAN
+VkSurfaceKHR app_createVulkanSurface(VkInstance instance)
+{
+  return g_state.ds->createVulkanSurface(instance);
+}
+#endif
+
 void app_alert(LG_MsgAlert type, const char * fmt, ...)
 {
   if (!g_state.lgr || !g_params.showAlerts)

@@ -259,6 +259,10 @@ void waylandGLSetSwapInterval(int interval);
 void waylandGLSwapBuffers(void);
 #endif
 
+#ifdef ENABLE_VULKAN
+VkSurfaceKHR waylandCreateVulkanSurface(VkInstance instance);
+#endif
+
 // idle module
 bool waylandIdleInit(void);
 void waylandIdleFree(void);

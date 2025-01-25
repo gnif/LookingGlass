@@ -1563,6 +1563,13 @@ static void x11GLSwapBuffers(void)
 }
 #endif
 
+#ifdef ENABLE_VULKAN
+static VkSurfaceKHR x11CreateVulkanSurface(VkInstance instance)
+{
+  DEBUG_FATAL("x11CreateVulkanSurface not implemented");
+}
+#endif
+
 static bool x11WaitFrame(void)
 {
   /* wait until we are woken up by the present event */
@@ -2008,6 +2015,9 @@ struct LG_DisplayServerOps LGDS_X11 =
   .glMakeCurrent      = x11GLMakeCurrent,
   .glSetSwapInterval  = x11GLSetSwapInterval,
   .glSwapBuffers      = x11GLSwapBuffers,
+#endif
+#ifdef ENABLE_VULKAN
+  .createVulkanSurface = x11CreateVulkanSurface,
 #endif
   .waitFrame           = x11WaitFrame,
   .stopWaitFrame       = x11StopWaitFrame,

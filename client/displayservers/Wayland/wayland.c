@@ -252,6 +252,10 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .glSetSwapInterval   = waylandGLSetSwapInterval,
   .glSwapBuffers       = waylandGLSwapBuffers,
 #endif
+
+#ifdef ENABLE_VULKAN
+  .createVulkanSurface = waylandCreateVulkanSurface,
+#endif
   .waitFrame           = waylandWaitFrame,
   .skipFrame           = waylandSkipFrame,
   .stopWaitFrame       = waylandStopWaitFrame,
