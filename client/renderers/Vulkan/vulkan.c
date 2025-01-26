@@ -65,6 +65,7 @@ struct Inst
 
   VkImage          desktopImage;
   VkImageView      desktopImageView;
+  VkDeviceSize     desktopImagePitch;
   VkDeviceMemory   desktopImageMemory;
   void *           desktopImageMap;
   VkImageLayout    desktopImageLayout;
@@ -909,24 +910,24 @@ static bool vulkan_createDesktopImage(struct Inst * this, VkFormat format)
     goto err_memory;
   }
 
-  // TODO: Delete
-  uint8_t *ptr = this->desktopImageMap;
-  for (int y = 0; y < 1440; ++y)
-  {
-    for (int x = 0; x < 2560; ++x)
-    {
-      ptr[y * 2560 * 4 + x * 4] = 255;
-      ptr[y * 2560 * 4 + x * 4 + 1] = 0;
-      ptr[y * 2560 * 4 + x * 4 + 2] = 0;
-      ptr[y * 2560 * 4 + x * 4 + 3] = 255;
-    }
-  }
+  memset(this->desktopImageMap, 0, memoryRequirements.size);
 
   this->desktopImageView = vulkan_createImageView(this->device,
       this->desktopImage, createInfo.format);
   if (!this->desktopImageView)
     goto err_memory_map;
 
+  VkImageSubresource subresource =
+  {
+    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    .mipLevel = 0,
+    .arrayLayer = 0
+  };
+  VkSubresourceLayout subresourceLayout;
+  vkGetImageSubresourceLayout(this->device, this->desktopImage, &subresource,
+      &subresourceLayout);
+
+  this->desktopImagePitch = subresourceLayout.rowPitch;
   this->desktopImageLayout = createInfo.initialLayout;
   this->desktopFormat = createInfo.format;
   this->desktopExtent.width = createInfo.extent.width;
@@ -1093,7 +1094,16 @@ err:
 static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
     int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount)
 {
-  DEBUG_ERROR("vulkan_onFrame not implemented");
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
+  if (!framebuffer_read(frame, this->desktopImageMap, this->desktopImagePitch,
+      this->desktopExtent.height, this->desktopExtent.width, this->format.bpp,
+      this->format.pitch))
+  {
+    DEBUG_ERROR("Failed to read from frame buffer");
+    return false;
+  }
+
   return true;
 }
 
