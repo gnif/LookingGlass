@@ -37,8 +37,10 @@ struct Inst
 
   VkSwapchainKHR   swapchain;
   VkFormat         swapchainFormat;
+  VkExtent2D       swapchainExtent;
   uint32_t         swapchainImageCount;
   VkImageView *    swapchainImageViews;
+  VkRenderPass     renderPass;
 
   LG_RendererFormat format;
 
@@ -92,12 +94,17 @@ static void vulkan_freeSwapchain(struct Inst * this)
     vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
     this->swapchain = NULL;
     this->swapchainFormat = VK_FORMAT_UNDEFINED;
+    this->swapchainExtent.width = 0;
+    this->swapchainExtent.height = 0;
   }
 }
 
 static void vulkan_deinitialize(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+
+  if (this->renderPass)
+    vkDestroyRenderPass(this->device, this->renderPass, NULL);
 
   vulkan_freeSwapchain(this);
 
@@ -209,21 +216,16 @@ err:
   return false;
 }
 
-static bool vulkan_createSwapchain(struct Inst * this)
+static VkSurfaceFormatKHR vulkan_selectSurfaceFormat(struct Inst * this,
+    FrameType frameType)
 {
-  vulkan_freeSwapchain(this);
-
-  VkSurfaceCapabilitiesKHR surfaceCaps;
-  VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-      this->physicalDevice, this->surface, &surfaceCaps);
-  if (result != VK_SUCCESS)
+  struct VkSurfaceFormatKHR format =
   {
-    DEBUG_ERROR("Failed to get surface capabilities (VkResult: %d)", result);
-    goto err;
-  }
+    .format = VK_FORMAT_UNDEFINED
+  };
 
   uint32_t formatCount;
-  result = vkGetPhysicalDeviceSurfaceFormatsKHR(this->physicalDevice,
+  VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(this->physicalDevice,
       this->surface, &formatCount, NULL);
   if (result != VK_SUCCESS)
   {
@@ -249,7 +251,7 @@ static bool vulkan_createSwapchain(struct Inst * this)
 
   // TODO: Handle 10-bit HDR
   uint32_t formatIndex = UINT32_MAX;
-  if (this->format.type == FRAME_TYPE_RGBA16F)
+  if (frameType == FRAME_TYPE_RGBA16F)
   {
     for (uint32_t i = 0; i < formatCount; ++i)
     {
@@ -284,8 +286,31 @@ static bool vulkan_createSwapchain(struct Inst * this)
     DEBUG_ERROR("Could not find any suitable surface format");
     goto err_formats;
   }
-  VkFormat format = formats[formatIndex].format;
-  VkColorSpaceKHR colorSpace = formats[formatIndex].colorSpace;
+
+  format = formats[formatIndex];
+  free(formats);
+  return format;
+
+err_formats:
+  free(formats);
+
+err:
+  return format;
+}
+
+static bool vulkan_createSwapchain(struct Inst * this,
+    VkSurfaceFormatKHR surfaceFormat)
+{
+  vulkan_freeSwapchain(this);
+
+  VkSurfaceCapabilitiesKHR surfaceCaps;
+  VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+      this->physicalDevice, this->surface, &surfaceCaps);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get surface capabilities (VkResult: %d)", result);
+    goto err;
+  }
 
   VkCompositeAlphaFlagBitsKHR compositeAlpha;
   if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
@@ -338,8 +363,8 @@ static bool vulkan_createSwapchain(struct Inst * this)
     .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
     .surface = this->surface,
     .minImageCount = surfaceCaps.minImageCount,
-    .imageFormat = format,
-    .imageColorSpace = colorSpace,
+    .imageFormat = surfaceFormat.format,
+    .imageColorSpace = surfaceFormat.colorSpace,
     .imageExtent.width = this->width,
     .imageExtent.height = this->height,
     .imageArrayLayers = 1,
@@ -367,25 +392,109 @@ static bool vulkan_createSwapchain(struct Inst * this)
     DEBUG_ERROR("Failed to create swapchain (VkResult: %d)", result);
     goto err_modes;
   }
-  this->swapchainFormat = format;
-
-  if (!vulkan_getSwapchainImages(this))
-    goto err_swapchain;
+  this->swapchainFormat = createInfo.imageFormat;
+  this->swapchainExtent = createInfo.imageExtent;
 
   free(modes);
-  free(formats);
   return true;
-
-err_swapchain:
-  vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
-  this->swapchain = NULL;
-  this->swapchainFormat = VK_FORMAT_UNDEFINED;
 
 err_modes:
   free(modes);
 
-err_formats:
-  free(formats);
+err:
+  return false;
+}
+
+static bool vulkan_createRenderPass(struct Inst * this)
+{
+  if (this->renderPass)
+  {
+    vkDestroyRenderPass(this->device, this->renderPass, NULL);
+    this->renderPass = NULL;
+  }
+
+  struct VkAttachmentDescription attachment =
+  {
+    .format = this->swapchainFormat,
+    .samples = VK_SAMPLE_COUNT_1_BIT,
+    .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+    .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+  };
+
+  struct VkAttachmentReference colorAttachment =
+  {
+    .attachment = 0,
+    .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+  };
+
+  struct VkSubpassDescription subpass =
+  {
+    .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+    .colorAttachmentCount = 1,
+    .pColorAttachments = &colorAttachment
+  };
+
+  struct VkSubpassDependency dependency =
+  {
+    .srcSubpass = VK_SUBPASS_EXTERNAL,
+    .dstSubpass = 0,
+    .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+  };
+
+  struct VkRenderPassCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+    .attachmentCount = 1,
+    .pAttachments = &attachment,
+    .subpassCount = 1,
+    .pSubpasses = &subpass,
+    .dependencyCount = 1,
+    .pDependencies = &dependency
+  };
+
+  VkResult result = vkCreateRenderPass(this->device, &createInfo, NULL,
+      &this->renderPass);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create render pass (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
+static bool vulkan_initPipeline(struct Inst * this)
+{
+  VkSurfaceFormatKHR surfaceFormat = vulkan_selectSurfaceFormat(this,
+      this->format.type);
+  if (surfaceFormat.format == VK_FORMAT_UNDEFINED)
+    goto err;
+
+  if (this->width != this->swapchainExtent.width ||
+      this->height != this->swapchainExtent.height ||
+      surfaceFormat.format != this->swapchainFormat)
+  {
+    if (!vulkan_createSwapchain(this, surfaceFormat))
+      goto err;
+
+    if (!vulkan_getSwapchainImages(this))
+      goto err_swapchain;
+
+    if (!vulkan_createRenderPass(this))
+      goto err_swapchain;
+  }
+
+  return true;
+
+err_swapchain:
+  vulkan_freeSwapchain(this);
 
 err:
   return false;
@@ -400,7 +509,7 @@ static bool vulkan_onResize(LG_Renderer * renderer, const int width,
   this->width   = width * scale;
   this->height  = height * scale;
 
-  if (!vulkan_createSwapchain(this))
+  if (!vulkan_initPipeline(this))
     return false;
 
   return true;
@@ -427,8 +536,7 @@ static bool vulkan_onFrameFormat(LG_Renderer * renderer,
   struct Inst * this = UPCAST(struct Inst, renderer);
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
 
-  // TODO: Don't re-create swapchain unless switching between SDR and HDR modes
-  if (!vulkan_createSwapchain(this))
+  if (!vulkan_initPipeline(this))
     goto err;
 
   return true;
