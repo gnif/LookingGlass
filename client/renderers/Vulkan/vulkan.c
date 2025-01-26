@@ -43,6 +43,7 @@ struct Inst
   VkShaderModule   fragmentShader;
   VkCommandPool    commandPool;
   VkCommandBuffer  commandBuffer;
+  VkPipelineLayout pipelineLayout;
   VkSemaphore      swapchainAcquireSemaphore;
   VkSemaphore      swapchainReleaseSemaphore;
   VkFence          fence;
@@ -53,6 +54,7 @@ struct Inst
   uint32_t         swapchainImageCount;
   VkImageView *    swapchainImageViews;
   VkRenderPass     renderPass;
+  VkPipeline       pipeline;
   VkFramebuffer *  framebuffers;
 
   LG_RendererFormat format;
@@ -132,6 +134,9 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 
   vulkan_freeFramebuffers(this);
   
+  if (this->pipeline)
+    vkDestroyPipeline(this->device, this->pipeline, NULL);
+
   if (this->renderPass)
     vkDestroyRenderPass(this->device, this->renderPass, NULL);
 
@@ -145,6 +150,9 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 
   if (this->swapchainAcquireSemaphore)
     vkDestroySemaphore(this->device, this->swapchainAcquireSemaphore, NULL);
+
+  if (this->pipelineLayout)
+    vkDestroyPipelineLayout(this->device, this->pipelineLayout, NULL);
 
   if (this->commandPool)
     vkDestroyCommandPool(this->device, this->commandPool, NULL);
@@ -517,6 +525,171 @@ static bool vulkan_createRenderPass(struct Inst * this)
   return true;
 }
 
+static bool vulkan_createGraphicsPipeline(struct Inst * this)
+{
+  if (this->pipeline)
+  {
+    vkDestroyPipeline(this->device, this->pipeline, NULL);
+    this->pipeline = NULL;
+  }
+
+  struct VkPipelineShaderStageCreateInfo stages[] =
+  {
+    {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .stage = VK_SHADER_STAGE_VERTEX_BIT,
+      .module = this->vertexShader,
+      .pName = "main",
+      .pSpecializationInfo = NULL
+    },
+    {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+      .module = this->fragmentShader,
+      .pName = "main",
+      .pSpecializationInfo = NULL
+    }
+  };
+
+  struct VkPipelineVertexInputStateCreateInfo vertexInputState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .vertexBindingDescriptionCount = 0,
+    .pVertexBindingDescriptions = NULL,
+    .vertexAttributeDescriptionCount = 0,
+    .pVertexAttributeDescriptions = NULL
+  };
+
+  struct VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,
+    .primitiveRestartEnable = VK_FALSE
+  };
+
+  struct VkPipelineViewportStateCreateInfo viewportState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .viewportCount = 1,
+    .pViewports = NULL,
+    .scissorCount = 1,
+    .pScissors = NULL
+  };
+
+  struct VkPipelineRasterizationStateCreateInfo rasterizationState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .depthClampEnable = VK_FALSE,
+    .rasterizerDiscardEnable = VK_FALSE,
+    .polygonMode = VK_POLYGON_MODE_FILL,
+    .cullMode = VK_CULL_MODE_BACK_BIT,
+    .frontFace = VK_FRONT_FACE_CLOCKWISE,
+    .depthBiasEnable = VK_FALSE,
+    .depthBiasConstantFactor = 0.0f,
+    .depthBiasClamp = 0.0f,
+    .depthBiasSlopeFactor = 0.0f,
+    .lineWidth = 1.0f
+  };
+
+  struct VkPipelineMultisampleStateCreateInfo multisampleState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    .sampleShadingEnable = VK_FALSE,
+    .minSampleShading = 0.0f,
+    .pSampleMask = NULL,
+    .alphaToCoverageEnable = VK_FALSE,
+    .alphaToOneEnable = VK_FALSE
+  };
+
+  struct VkPipelineColorBlendAttachmentState colorBlendAttachment =
+  {
+    .blendEnable = VK_FALSE,
+    .srcColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .colorBlendOp = VK_BLEND_OP_ADD,
+    .srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .alphaBlendOp = VK_BLEND_OP_ADD,
+    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+  };
+
+  struct VkPipelineColorBlendStateCreateInfo colorBlendState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .logicOpEnable = VK_FALSE,
+    .logicOp = VK_LOGIC_OP_CLEAR,
+    .attachmentCount = 1,
+    .pAttachments = &colorBlendAttachment,
+    .blendConstants = {0.0f, 0.0f, 0.0f, 0.0f}
+  };
+
+  VkDynamicState dynamicStates[] =
+  {
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_SCISSOR
+  };
+
+  struct VkPipelineDynamicStateCreateInfo dynamicState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .dynamicStateCount = 2,
+    .pDynamicStates = dynamicStates
+  };
+
+  struct VkGraphicsPipelineCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .stageCount = 2,
+    .pStages = stages,
+    .pVertexInputState = &vertexInputState,
+    .pInputAssemblyState = &inputAssemblyState,
+    .pTessellationState = NULL,
+    .pViewportState = &viewportState,
+    .pRasterizationState = &rasterizationState,
+    .pMultisampleState = &multisampleState,
+    .pDepthStencilState = NULL,
+    .pColorBlendState = &colorBlendState,
+    .pDynamicState = &dynamicState,
+    .layout = this->pipelineLayout,
+    .renderPass = this->renderPass,
+    .subpass = 0,
+    .basePipelineHandle = NULL,
+    .basePipelineIndex = 0
+  };
+
+  VkResult result = vkCreateGraphicsPipelines(this->device, NULL, 1,
+      &createInfo, NULL, &this->pipeline);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create swapchain (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_createFramebuffers(struct Inst * this)
 {
   vulkan_freeFramebuffers(this);
@@ -578,14 +751,24 @@ static bool vulkan_initPipeline(struct Inst * this)
     if (!vulkan_getSwapchainImages(this))
       goto err_swapchain;
 
-    if (formatChanged && !vulkan_createRenderPass(this))
-      goto err_swapchain;
+    if (formatChanged)
+    {
+      if (!vulkan_createRenderPass(this))
+        goto err_swapchain;
+
+      if (!vulkan_createGraphicsPipeline(this))
+        goto err_render_pass;
+    }
     
     if (!vulkan_createFramebuffers(this))
-      goto err_render_pass;
+      goto err_pipeline;
   }
 
   return true;
+
+err_pipeline:
+  vkDestroyPipeline(this->device, this->pipeline, NULL);
+  this->pipeline = NULL;
 
 err_render_pass:
   vkDestroyRenderPass(this->device, this->renderPass, NULL);
@@ -898,6 +1081,24 @@ static bool vulkan_allocateCommandBuffer(struct Inst * this)
   return true;
 }
 
+static bool vulkan_createPipelineLayout(struct Inst * this)
+{
+  struct VkPipelineLayoutCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+  };
+
+  VkResult result = vkCreatePipelineLayout(this->device, &createInfo, NULL,
+      &this->pipelineLayout);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create pipeline layout (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_createSemaphore(struct Inst * this, VkSemaphore *semaphore)
 {
   struct VkSemaphoreCreateInfo createInfo =
@@ -970,8 +1171,11 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_allocateCommandBuffer(this))
     goto err_command_pool;
 
-  if (!vulkan_createSemaphore(this, &this->swapchainAcquireSemaphore))
+  if (!vulkan_createPipelineLayout(this))
     goto err_command_pool;
+
+  if (!vulkan_createSemaphore(this, &this->swapchainAcquireSemaphore))
+    goto err_pipeline_layout;
 
   if (!vulkan_createSemaphore(this, &this->swapchainReleaseSemaphore))
     goto err_swapchain_acq_sem;
@@ -988,6 +1192,10 @@ err_swapchain_rel_sem:
 err_swapchain_acq_sem:
   vkDestroySemaphore(this->device, this->swapchainAcquireSemaphore, NULL);
   this->swapchainAcquireSemaphore = NULL;
+
+err_pipeline_layout:
+  vkDestroyPipelineLayout(this->device, this->pipelineLayout, NULL);
+  this->pipelineLayout = NULL;
 
 err_command_pool:
   vkDestroyCommandPool(this->device, this->commandPool, NULL);
