@@ -20,7 +20,7 @@ else()
 endif()
 
 include(MakeObject)
-function(build_shaders header_dir)
+function(build_gl_shaders header_dir)
   file(GLOB headers "${header_dir}/*.h")
   set(EGL_SHADER_PROCESSED)
   foreach(shader ${ARGN})
@@ -46,7 +46,7 @@ function(build_shaders header_dir)
   set(EGL_SHADER_INCS "${EGL_SHADER_INCS}" PARENT_SCOPE)
 endfunction()
 
-build_shaders(
+build_gl_shaders(
   shader
   shader/desktop.vert
   shader/desktop_rgb.frag
