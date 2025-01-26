@@ -36,6 +36,7 @@ struct Inst
   uint32_t         queueFamilyIndex;
   VkDevice         device;
   VkCommandPool    commandPool;
+  VkCommandBuffer  commandBuffer;
 
   VkSwapchainKHR   swapchain;
   VkFormat         swapchainFormat;
@@ -808,6 +809,27 @@ static bool vulkan_createCommandPool(struct Inst * this)
   return true;
 }
 
+static bool vulkan_allocateCommandBuffer(struct Inst * this)
+{
+  struct VkCommandBufferAllocateInfo allocateInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+    .commandPool = this->commandPool,
+    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    .commandBufferCount = 1
+  };
+
+  VkResult result = vkAllocateCommandBuffers(this->device, &allocateInfo,
+      &this->commandBuffer);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to allocate command buffer (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -833,7 +855,15 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_createCommandPool(this))
     goto err_device;
 
+  if (!vulkan_allocateCommandBuffer(this))
+    goto err_command_pool;
+
   return true;
+
+err_command_pool:
+  vkDestroyCommandPool(this->device, this->commandPool, NULL);
+  this->commandPool = NULL;
+  this->commandBuffer = NULL;
 
 err_device:
   vkDestroyDevice(this->device, NULL);
