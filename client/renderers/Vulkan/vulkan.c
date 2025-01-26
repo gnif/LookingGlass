@@ -33,7 +33,9 @@ struct Inst
   VkInstance       instance;
   VkSurfaceKHR     surface;
   VkPhysicalDevice physicalDevice;
+  uint32_t         queueFamilyIndex;
   VkDevice         device;
+  VkCommandPool    commandPool;
 
   VkSwapchainKHR   swapchain;
   VkFormat         swapchainFormat;
@@ -124,6 +126,9 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
     vkDestroyRenderPass(this->device, this->renderPass, NULL);
 
   vulkan_freeSwapchain(this);
+
+  if (this->commandPool)
+    vkDestroyCommandPool(this->device, this->commandPool, NULL);
 
   if (this->device)
     vkDestroyDevice(this->device, NULL);
@@ -782,6 +787,27 @@ static VkDevice vulkan_createDevice(VkInstance instance,
   return device;
 }
 
+static bool vulkan_createCommandPool(struct Inst * this)
+{
+  struct VkCommandPoolCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+    .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+    .queueFamilyIndex = this->queueFamilyIndex
+  };
+
+  VkResult result = vkCreateCommandPool(this->device, &createInfo, NULL,
+      &this->commandPool);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create command pool (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -794,18 +820,24 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!this->surface)
     goto err_inst;
 
-  uint32_t queueFamilyIndex;
   this->physicalDevice = vulkan_pickPhysicalDevice(this->instance,
-      &queueFamilyIndex);
+      &this->queueFamilyIndex);
   if (!this->physicalDevice)
     goto err_surf;
 
   this->device = vulkan_createDevice(this->instance, this->physicalDevice,
-      queueFamilyIndex);
+      this->queueFamilyIndex);
   if (!this->device)
     goto err_surf;
 
+  if (!vulkan_createCommandPool(this))
+    goto err_device;
+
   return true;
+
+err_device:
+  vkDestroyDevice(this->device, NULL);
+  this->device = NULL;
 
 err_surf:
   vkDestroySurfaceKHR(this->instance, this->surface, NULL);
