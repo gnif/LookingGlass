@@ -34,20 +34,25 @@ struct Inst
 {
   LG_Renderer base;
 
-  VkInstance       instance;
-  VkSurfaceKHR     surface;
-  VkPhysicalDevice physicalDevice;
-  uint32_t         queueFamilyIndex;
-  VkDevice         device;
-  VkQueue          queue;
-  VkShaderModule   vertexShader;
-  VkShaderModule   fragmentShader;
-  VkCommandPool    commandPool;
-  VkCommandBuffer  commandBuffer;
-  VkPipelineLayout pipelineLayout;
-  VkSemaphore      swapchainAcquireSemaphore;
-  VkSemaphore      swapchainReleaseSemaphore;
-  VkFence          fence;
+  VkInstance            instance;
+  VkSurfaceKHR          surface;
+  VkPhysicalDevice      physicalDevice;
+  uint32_t              queueFamilyIndex;
+  struct VkPhysicalDeviceMemoryProperties memoryProperties;
+  VkDevice              device;
+  VkQueue               queue;
+  VkShaderModule        vertexShader;
+  VkShaderModule        fragmentShader;
+  VkCommandPool         commandPool;
+  VkCommandBuffer       commandBuffer;
+  VkSampler             sampler;
+  VkDescriptorSetLayout descriptorSetLayout;
+  VkDescriptorPool      descriptorPool;
+  VkDescriptorSet       descriptorSet;
+  VkPipelineLayout      pipelineLayout;
+  VkSemaphore           swapchainAcquireSemaphore;
+  VkSemaphore           swapchainReleaseSemaphore;
+  VkFence               fence;
 
   VkSwapchainKHR   swapchain;
   VkFormat         swapchainFormat;
@@ -57,6 +62,14 @@ struct Inst
   VkRenderPass     renderPass;
   VkPipeline       pipeline;
   VkFramebuffer *  framebuffers;
+
+  VkImage          desktopImage;
+  VkImageView      desktopImageView;
+  VkDeviceMemory   desktopImageMemory;
+  void *           desktopImageMap;
+  VkImageLayout    desktopImageLayout;
+  VkFormat         desktopFormat;
+  VkExtent2D       desktopExtent;
 
   LG_RendererFormat format;
 
@@ -90,6 +103,37 @@ static bool vulkan_create(LG_Renderer ** renderer, const LG_RendererParams param
 static bool vulkan_initialize(LG_Renderer * renderer)
 {
   return true;
+}
+
+static void vulkan_freeDesktopImage(struct Inst * this)
+{
+  if (this->desktopImageView)
+  {
+    vkDestroyImageView(this->device, this->desktopImageView, NULL);
+    this->desktopImageView = NULL;
+  }
+
+  if (this->desktopImage)
+  {
+    vkDestroyImage(this->device, this->desktopImage, NULL);
+    this->desktopImage = NULL;
+    this->desktopImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    this->desktopFormat = VK_FORMAT_UNDEFINED;
+    this->desktopExtent.width = 0;
+    this->desktopExtent.height = 0;
+  }
+
+  if (this->desktopImageMap)
+  {
+    vkUnmapMemory(this->device, this->desktopImageMemory);
+    this->desktopImageMap = NULL;
+  }
+
+  if (this->desktopImageMemory)
+  {
+    vkFreeMemory(this->device, this->desktopImageMemory, NULL);
+    this->desktopImageMemory = NULL;
+  }
 }
 
 static void vulkan_freeSwapchain(struct Inst * this)
@@ -136,6 +180,8 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
   if (this->device)
     vkDeviceWaitIdle(this->device);
 
+  vulkan_freeDesktopImage(this);
+
   vulkan_freeFramebuffers(this);
   
   if (this->pipeline)
@@ -157,6 +203,15 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 
   if (this->pipelineLayout)
     vkDestroyPipelineLayout(this->device, this->pipelineLayout, NULL);
+
+  if (this->descriptorPool)
+    vkDestroyDescriptorPool(this->device, this->descriptorPool, NULL);
+
+  if (this->descriptorSetLayout)
+    vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayout, NULL);
+
+  if (this->sampler)
+    vkDestroySampler(this->device, this->sampler, NULL);
 
   if (this->commandPool)
     vkDestroyCommandPool(this->device, this->commandPool, NULL);
@@ -275,8 +330,7 @@ err:
   return false;
 }
 
-static VkSurfaceFormatKHR vulkan_selectSurfaceFormat(struct Inst * this,
-    FrameType frameType)
+static VkSurfaceFormatKHR vulkan_selectSurfaceFormat(struct Inst * this)
 {
   struct VkSurfaceFormatKHR format =
   {
@@ -310,7 +364,7 @@ static VkSurfaceFormatKHR vulkan_selectSurfaceFormat(struct Inst * this,
 
   // TODO: Handle 10-bit HDR
   uint32_t formatIndex = UINT32_MAX;
-  if (frameType == FRAME_TYPE_RGBA16F)
+  if (this->format.type == FRAME_TYPE_RGBA16F)
   {
     for (uint32_t i = 0; i < formatCount; ++i)
     {
@@ -736,18 +790,202 @@ err:
   return false;
 }
 
+static VkFormat vulkan_selectDesktopImageFormat(struct Inst * this)
+{
+  switch (this->format.type)
+  {
+    case FRAME_TYPE_BGRA:
+      return VK_FORMAT_B8G8R8A8_UNORM;
+    case FRAME_TYPE_RGBA:
+      return VK_FORMAT_R8G8B8A8_UNORM;
+    case FRAME_TYPE_RGBA10:
+      return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+    case FRAME_TYPE_RGBA16F:
+      return VK_FORMAT_R16G16B16A16_SFLOAT;
+    case FRAME_TYPE_BGR_32:
+      DEBUG_FATAL("FRAME_TYPE_BGR_32 not implemented");
+    case FRAME_TYPE_RGB_24:
+      DEBUG_FATAL("FRAME_TYPE_RGB_24 not implemented");
+    default:
+      DEBUG_FATAL("Could not determine Vulkan format for frame type %d",
+          this->format.type);
+  }
+}
+
+static uint32_t vulkan_findMemoryType(struct Inst * this,
+    uint32_t memoryTypeBits, VkMemoryPropertyFlags requiredProperties)
+{
+  for (uint32_t i = 0; i < this->memoryProperties.memoryTypeCount; ++i)
+  {
+    if ((memoryTypeBits & (1 << i)) == 0)
+      continue;
+
+    VkMemoryPropertyFlags properties =
+        this->memoryProperties.memoryTypes[i].propertyFlags;
+    if ((properties & requiredProperties) == requiredProperties)
+      return i;
+  }
+
+  return UINT32_MAX;
+}
+
+static bool vulkan_createDesktopImage(struct Inst * this, VkFormat format)
+{
+  vulkan_freeDesktopImage(this);
+
+  struct VkImageCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .imageType = VK_IMAGE_TYPE_2D,
+    .format = format,
+    .extent.width = this->format.frameWidth,
+    .extent.height = this->format.frameHeight,
+    .extent.depth = 1,
+    .mipLevels = 1,
+    .arrayLayers = 1,
+    .samples = VK_SAMPLE_COUNT_1_BIT,
+    .tiling = VK_IMAGE_TILING_LINEAR,
+    .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    .queueFamilyIndexCount = 0,
+    .pQueueFamilyIndices = NULL,
+    .initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED
+  };
+
+  VkResult result = vkCreateImage(this->device, &createInfo, NULL,
+      &this->desktopImage);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create desktop image (VkResult: %d)", result);
+    goto err;
+  }
+
+  struct VkMemoryRequirements memoryRequirements;
+  vkGetImageMemoryRequirements(this->device, this->desktopImage,
+      &memoryRequirements);
+  uint32_t memoryTypeIndex = vulkan_findMemoryType(this,
+      memoryRequirements.memoryTypeBits,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (memoryTypeIndex == UINT32_MAX)
+  {
+    DEBUG_ERROR("Could not find suitable memory type for desktop image");
+    goto err_image;
+  }
+
+  struct VkMemoryAllocateInfo allocateInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+    .pNext = NULL,
+    .allocationSize = memoryRequirements.size,
+    .memoryTypeIndex = memoryTypeIndex
+  };
+
+  result = vkAllocateMemory(this->device, &allocateInfo, NULL,
+      &this->desktopImageMemory);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to allocate desktop image memory (VkResult: %d)",
+        result);
+    goto err_image;
+  }
+
+  result = vkBindImageMemory(this->device, this->desktopImage,
+      this->desktopImageMemory, 0);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to bind desktop image memory (VkResult: %d)", result);
+    goto err_memory;
+  }
+
+  result = vkMapMemory(this->device, this->desktopImageMemory, 0, VK_WHOLE_SIZE,
+      0, &this->desktopImageMap);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to map desktop image memory (VkResult: %d)", result);
+    goto err_memory;
+  }
+
+  // TODO: Delete
+  uint8_t *ptr = this->desktopImageMap;
+  for (int y = 0; y < 1440; ++y)
+  {
+    for (int x = 0; x < 2560; ++x)
+    {
+      ptr[y * 2560 * 4 + x * 4] = 255;
+      ptr[y * 2560 * 4 + x * 4 + 1] = 0;
+      ptr[y * 2560 * 4 + x * 4 + 2] = 0;
+      ptr[y * 2560 * 4 + x * 4 + 3] = 255;
+    }
+  }
+
+  this->desktopImageView = vulkan_createImageView(this->device,
+      this->desktopImage, createInfo.format);
+  if (!this->desktopImageView)
+    goto err_memory_map;
+
+  this->desktopImageLayout = createInfo.initialLayout;
+  this->desktopFormat = createInfo.format;
+  this->desktopExtent.width = createInfo.extent.width;
+  this->desktopExtent.height = createInfo.extent.height;
+  return true;
+
+err_memory_map:
+  vkUnmapMemory(this->device, this->desktopImageMemory);
+  this->desktopImageMap = NULL;
+
+err_memory:
+  vkFreeMemory(this->device, this->desktopImageMemory, NULL);
+  this->desktopImageMemory = NULL;
+
+err_image:
+  vkDestroyImage(this->device, this->desktopImage, NULL);
+  this->desktopImage = NULL;
+
+err:
+  return false;
+}
+
+static void vulkan_updateDescriptorSet(struct Inst * this)
+{
+  struct VkDescriptorImageInfo imageInfo =
+  {
+    .sampler = NULL,
+    .imageView = this->desktopImageView,
+    .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+  };
+
+  struct VkWriteDescriptorSet descriptorWrite =
+  {
+    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+    .pNext = NULL,
+    .dstSet = this->descriptorSet,
+    .dstBinding = 0,
+    .dstArrayElement = 0,
+    .descriptorCount = 1,
+    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    .pImageInfo = &imageInfo,
+    .pBufferInfo = NULL,
+    .pTexelBufferView = NULL
+  };
+
+  vkUpdateDescriptorSets(this->device, 1, &descriptorWrite, 0, NULL);
+}
+
 static bool vulkan_initPipeline(struct Inst * this)
 {
-  VkSurfaceFormatKHR surfaceFormat = vulkan_selectSurfaceFormat(this,
-      this->format.type);
+  VkSurfaceFormatKHR surfaceFormat = vulkan_selectSurfaceFormat(this);
   if (surfaceFormat.format == VK_FORMAT_UNDEFINED)
     goto err;
 
-  bool formatChanged = surfaceFormat.format != this->swapchainFormat;
-  bool sizeChanged = this->width != this->swapchainExtent.width ||
-                     this->height != this->swapchainExtent.height;
+  bool surfaceFormatChanged = surfaceFormat.format != this->swapchainFormat;
+  bool surfaceSizeChanged = this->width != this->swapchainExtent.width ||
+      this->height != this->swapchainExtent.height;
 
-  if (formatChanged || sizeChanged)
+  if (surfaceFormatChanged || surfaceSizeChanged)
   {
     if (!vulkan_createSwapchain(this, surfaceFormat))
       goto err;
@@ -755,7 +993,7 @@ static bool vulkan_initPipeline(struct Inst * this)
     if (!vulkan_getSwapchainImages(this))
       goto err_swapchain;
 
-    if (formatChanged)
+    if (surfaceFormatChanged)
     {
       if (!vulkan_createRenderPass(this))
         goto err_swapchain;
@@ -768,7 +1006,30 @@ static bool vulkan_initPipeline(struct Inst * this)
       goto err_pipeline;
   }
 
+  if (this->format.type == FRAME_TYPE_INVALID)
+    vulkan_freeDesktopImage(this);
+  else
+  {
+    VkFormat desktopFormat = vulkan_selectDesktopImageFormat(this);
+
+    bool desktopFormatChanged = desktopFormat != this->desktopFormat;
+    bool desktopSizeChanged =
+        this->format.frameWidth != this->desktopExtent.width ||
+        this->format.frameHeight != this->desktopExtent.height;
+
+    if (desktopFormatChanged || desktopSizeChanged)
+    {
+      if (!vulkan_createDesktopImage(this, desktopFormat))
+        goto err_framebuffers;
+
+      vulkan_updateDescriptorSet(this);
+    }
+  }
+
   return true;
+
+err_framebuffers:
+  vulkan_freeFramebuffers(this);
 
 err_pipeline:
   vkDestroyPipeline(this->device, this->pipeline, NULL);
@@ -872,11 +1133,11 @@ static VkInstance vulkan_createInstance(void)
   return instance;
 }
 
-static VkPhysicalDevice vulkan_pickPhysicalDevice(VkInstance instance,
-    uint32_t * queueFamilyIndex)
+static bool vulkan_pickPhysicalDevice(struct Inst * this)
 {
   uint32_t deviceCount;
-  VkResult result = vkEnumeratePhysicalDevices(instance, &deviceCount, NULL);
+  VkResult result = vkEnumeratePhysicalDevices(this->instance, &deviceCount,
+      NULL);
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to enumerate physical devices (VkResult: %d)", result);
@@ -895,15 +1156,14 @@ static VkPhysicalDevice vulkan_pickPhysicalDevice(VkInstance instance,
     goto err;
   }
 
-  result = vkEnumeratePhysicalDevices(instance, &deviceCount, devices);
+  result = vkEnumeratePhysicalDevices(this->instance, &deviceCount, devices);
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to enumerate physical devices (VkResult: %d)", result);
     goto err_devices;
   }
 
-  VkPhysicalDevice device = NULL;
-  uint32_t queueFamily = UINT32_MAX;
+  this->queueFamilyIndex = UINT32_MAX;
   for (uint32_t i = 0; i < deviceCount; ++i)
   {
     uint32_t queueFamilyCount;
@@ -921,43 +1181,45 @@ static VkPhysicalDevice vulkan_pickPhysicalDevice(VkInstance instance,
     vkGetPhysicalDeviceQueueFamilyProperties(devices[i], &queueFamilyCount,
         queueFamilyProperties);
 
-    queueFamily = UINT32_MAX;
+    this->queueFamilyIndex = UINT32_MAX;
     for (uint32_t j = 0; j < queueFamilyCount; ++j)
     {
       if (queueFamilyProperties[j].queueFlags & VK_QUEUE_GRAPHICS_BIT)
       {
-        queueFamily = j;
+        this->queueFamilyIndex = j;
         break;
       }
     }
     free(queueFamilyProperties);
-    if (queueFamily == UINT32_MAX)
+    if (this->queueFamilyIndex == UINT32_MAX)
       continue;
 
-    device = devices[i];
+    this->physicalDevice = devices[i];
     break;
   }
-  if (device == NULL)
+  if (this->physicalDevice == NULL)
   {
     DEBUG_ERROR("Could not find any usable Vulkan device");
     goto err_devices;
   }
 
   VkPhysicalDeviceProperties properties;
-  vkGetPhysicalDeviceProperties(device, &properties);
+  vkGetPhysicalDeviceProperties(this->physicalDevice, &properties);
 
   DEBUG_INFO("Device      : %s", properties.deviceName);
-  DEBUG_INFO("Queue family: %"PRIu32, queueFamily);
+  DEBUG_INFO("Queue family: %"PRIu32, this->queueFamilyIndex);
+
+  vkGetPhysicalDeviceMemoryProperties(this->physicalDevice,
+      &this->memoryProperties);
 
   free(devices);
-  *queueFamilyIndex = queueFamily;
-  return device;
+  return true;
 
 err_devices:
   free(devices);
 
 err:
-  return NULL;
+  return false;
 }
 
 static bool vulkan_createDevice(struct Inst * this)
@@ -1085,11 +1347,118 @@ static bool vulkan_allocateCommandBuffer(struct Inst * this)
   return true;
 }
 
+static bool vulkan_createSampler(struct Inst * this)
+{
+  struct VkSamplerCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+    .magFilter = VK_FILTER_LINEAR,
+    .minFilter = VK_FILTER_LINEAR,
+    .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+    .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+    .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+    .borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
+  };
+
+  VkResult result = vkCreateSampler(this->device, &createInfo, NULL,
+      &this->sampler);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create sampler (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
+static bool vulkan_createDescriptorSetLayout(struct Inst * this)
+{
+  struct VkDescriptorSetLayoutBinding binding =
+  {
+    .binding = 0,
+    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    .descriptorCount = 1,
+    .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    .pImmutableSamplers = &this->sampler
+  };
+
+  struct VkDescriptorSetLayoutCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .bindingCount = 1,
+    .pBindings = &binding
+  };
+
+  VkResult result = vkCreateDescriptorSetLayout(this->device, &createInfo, NULL,
+      &this->descriptorSetLayout);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create descriptor set layout (VkResult: %d)",
+        result);
+    return false;
+  }
+
+  return true;
+}
+
+static bool vulkan_createDescriptorPool(struct Inst * this)
+{
+  struct VkDescriptorPoolSize poolSize =
+  {
+    .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    .descriptorCount = 1
+  };
+
+  struct VkDescriptorPoolCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+    .maxSets = 1,
+    .poolSizeCount = 1,
+    .pPoolSizes = &poolSize
+  };
+
+  VkResult result = vkCreateDescriptorPool(this->device, &createInfo, NULL,
+      &this->descriptorPool);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create descriptor pool (VkResult: %d)",
+        result);
+    return false;
+  }
+
+  return true;
+}
+
+static bool vulkan_allocateDescriptorSet(struct Inst * this)
+{
+  struct VkDescriptorSetAllocateInfo allocateInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+    .descriptorPool = this->descriptorPool,
+    .descriptorSetCount = 1,
+    .pSetLayouts = &this->descriptorSetLayout
+  };
+
+  VkResult result = vkAllocateDescriptorSets(this->device, &allocateInfo,
+      &this->descriptorSet);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to allocate descriptor set (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_createPipelineLayout(struct Inst * this)
 {
   struct VkPipelineLayoutCreateInfo createInfo =
   {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    .setLayoutCount = 1,
+    .pSetLayouts = &this->descriptorSetLayout
   };
 
   VkResult result = vkCreatePipelineLayout(this->device, &createInfo, NULL,
@@ -1151,9 +1520,7 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!this->surface)
     goto err_inst;
 
-  this->physicalDevice = vulkan_pickPhysicalDevice(this->instance,
-      &this->queueFamilyIndex);
-  if (!this->physicalDevice)
+  if (!vulkan_pickPhysicalDevice(this))
     goto err_surf;
 
   if (!vulkan_createDevice(this))
@@ -1173,8 +1540,20 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_allocateCommandBuffer(this))
     goto err_command_pool;
 
-  if (!vulkan_createPipelineLayout(this))
+  if (!vulkan_createSampler(this))
     goto err_command_pool;
+
+  if (!vulkan_createDescriptorSetLayout(this))
+    goto err_sampler;
+
+  if (!vulkan_createDescriptorPool(this))
+    goto err_descriptor_set_layout;
+
+  if (!vulkan_allocateDescriptorSet(this))
+    goto err_descriptor_set_layout;
+
+  if (!vulkan_createPipelineLayout(this))
+    goto err_descriptor_pool;
 
   if (!vulkan_createSemaphore(this, &this->swapchainAcquireSemaphore))
     goto err_pipeline_layout;
@@ -1198,6 +1577,19 @@ err_swapchain_acq_sem:
 err_pipeline_layout:
   vkDestroyPipelineLayout(this->device, this->pipelineLayout, NULL);
   this->pipelineLayout = NULL;
+
+err_descriptor_pool:
+  vkDestroyDescriptorPool(this->device, this->descriptorPool, NULL);
+  this->descriptorPool = NULL;
+  this->descriptorSet = NULL;
+
+err_descriptor_set_layout:
+  vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayout, NULL);
+  this->descriptorSetLayout = NULL;
+
+err_sampler:
+  vkDestroySampler(this->device, this->sampler, NULL);
+  this->sampler = NULL;
 
 err_command_pool:
   vkDestroyCommandPool(this->device, this->commandPool, NULL);
@@ -1243,6 +1635,36 @@ static uint32_t vulkan_acquireSwapchainImage(struct Inst * this)
   return imageIndex;
 }
 
+static void vulkan_preRenderBarrier(struct Inst * this)
+{
+  if (this->desktopImageLayout == VK_IMAGE_LAYOUT_GENERAL)
+    return;
+
+  struct VkImageMemoryBarrier desktopImageBarrier =
+  {
+    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    .pNext = NULL,
+    .srcAccessMask = VK_ACCESS_NONE,
+    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+    .oldLayout = this->desktopImageLayout,
+    .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    .image = this->desktopImage,
+    .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    .subresourceRange.baseMipLevel = 0,
+    .subresourceRange.levelCount = 1,
+    .subresourceRange.baseArrayLayer = 0,
+    .subresourceRange.layerCount = 1
+  };
+
+  vkCmdPipelineBarrier(this->commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1,
+      &desktopImageBarrier);
+
+  this->desktopImageLayout = desktopImageBarrier.newLayout;
+}
+
 static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex)
 {
   struct VkCommandBufferBeginInfo beginInfo =
@@ -1257,6 +1679,8 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex)
     DEBUG_ERROR("Failed to begin command buffer (VkResult: %d)", result);
     return false;
   }
+
+  vulkan_preRenderBarrier(this);
 
   VkViewport viewport =
   {
@@ -1289,6 +1713,9 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex)
   vkCmdBindPipeline(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
       this->pipeline);
 
+  vkCmdBindDescriptorSets(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      this->pipelineLayout, 0, 1, &this->descriptorSet, 0, NULL);
+
   vkCmdDraw(this->commandBuffer, 3, 1, 0, 0);
 
   vkCmdEndRenderPass(this->commandBuffer);
@@ -1308,6 +1735,12 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     void (*preSwap)(void * udata), void * udata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+
+  if (!this->desktopImage)
+  {
+    DEBUG_WARN("No desktop image; skipping render");
+    return true;
+  }
 
   uint32_t imageIndex = vulkan_acquireSwapchainImage(this);
   if (imageIndex == UINT32_MAX)
