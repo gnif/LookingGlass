@@ -71,19 +71,20 @@ LG_RendererRotate;
 
 typedef struct LG_RendererFormat
 {
-  FrameType         type;         // frame type
-  bool              hdr;          // if the frame is HDR or not
-  bool              hdrPQ;        // if the HDR content is PQ mapped
-  unsigned int      screenWidth;  // actual width of the host
-  unsigned int      screenHeight; // actual height of the host
-  unsigned int      dataWidth;    // the width of the packed data
-  unsigned int      dataHeight;   // the height of the packed data
-  unsigned int      frameWidth;   // width of frame transmitted
-  unsigned int      frameHeight;  // height of frame transmitted
-  unsigned int      stride;  // scanline width (zero if compresed)
-  unsigned int      pitch;   // scanline bytes (or compressed size)
-  unsigned int      bpp;     // bits per pixel (zero if compressed)
-  LG_RendererRotate rotate;  // guest rotation
+  FrameType         type;          // frame type
+  bool              hdr;           // if the frame is HDR or not
+  bool              hdrPQ;         // if the HDR content is PQ mapped
+  unsigned int      screenWidth;   // actual width of the host
+  unsigned int      screenHeight;  // actual height of the host
+  unsigned int      dataWidth;     // the width of the packed data
+  unsigned int      dataHeight;    // the height of the packed data
+  unsigned int      frameWidth;    // width of frame transmitted
+  unsigned int      frameHeight;   // height of frame transmitted
+  unsigned int      stride;        // scanline width (zero if compresed)
+  unsigned int      pitch;         // scanline bytes (or compressed size)
+  unsigned int      bpp;           // bits per pixel (zero if compressed)
+  LG_RendererRotate rotate;        // guest rotation
+  ColorMetadata     colorMetadata; // display color metadata (mainly for HDR)
 }
 LG_RendererFormat;
 

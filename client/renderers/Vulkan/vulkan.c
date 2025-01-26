@@ -75,6 +75,8 @@ struct Inst
   LG_RendererFormat format;
 
   int               width, height;
+
+  PFN_vkSetHdrMetadataEXT vkSetHdrMetadataEXT;
 };
 
 static const char * vulkan_getName(void)
@@ -508,6 +510,25 @@ static bool vulkan_createSwapchain(struct Inst * this,
   }
   this->swapchainFormat = createInfo.imageFormat;
   this->swapchainExtent = createInfo.imageExtent;
+
+  struct VkHdrMetadataEXT hdrMetadata =
+  {
+    .sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
+    .displayPrimaryRed.x = this->format.colorMetadata.redPrimaryX,
+    .displayPrimaryRed.y = this->format.colorMetadata.redPrimaryY,
+    .displayPrimaryGreen.x = this->format.colorMetadata.greenPrimaryX,
+    .displayPrimaryGreen.y = this->format.colorMetadata.greenPrimaryY,
+    .displayPrimaryBlue.x = this->format.colorMetadata.bluePrimaryX,
+    .displayPrimaryBlue.y = this->format.colorMetadata.bluePrimaryY,
+    .whitePoint.x = this->format.colorMetadata.whitePointX,
+    .whitePoint.y = this->format.colorMetadata.whitePointY,
+    .maxLuminance = this->format.colorMetadata.maxLuminance,
+    .minLuminance = this->format.colorMetadata.minLuminance,
+    .maxContentLightLevel = this->format.colorMetadata.maxLuminance,
+    .maxFrameAverageLightLevel = this->format.colorMetadata.maxFullFrameLuminance
+  };
+
+  this->vkSetHdrMetadataEXT(this->device, 1, &this->swapchain, &hdrMetadata);
 
   free(modes);
   return true;
@@ -1232,6 +1253,19 @@ err:
   return false;
 }
 
+static bool vulkan_getDeviceMethods(struct Inst * this)
+{
+  this->vkSetHdrMetadataEXT = (PFN_vkSetHdrMetadataEXT)
+      vkGetDeviceProcAddr(this->device, "vkSetHdrMetadataEXT");
+  if (!this->vkSetHdrMetadataEXT)
+  {
+    DEBUG_ERROR("Failed to get vkSetHdrMetadataEXT method");
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_createDevice(struct Inst * this)
 {
   float queuePriority = 1.0f;
@@ -1246,6 +1280,7 @@ static bool vulkan_createDevice(struct Inst * this)
 
   const char * extensions[] =
   {
+    "VK_EXT_hdr_metadata",
     "VK_KHR_swapchain"
   };
 
@@ -1263,12 +1298,22 @@ static bool vulkan_createDevice(struct Inst * this)
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to create Vulkan device (VkResult: %d)", result);
-    return false;
+    goto err;
   }
+
+  if (!vulkan_getDeviceMethods(this))
+    goto err_device;
 
   vkGetDeviceQueue(this->device, this->queueFamilyIndex, 0, &this->queue);
 
   return true;
+
+err_device:
+  vkDestroyDevice(this->device, NULL);
+  this->device = NULL;
+
+err:
+  return false;
 }
 
 static bool vulkan_loadShader(struct Inst * this, const char * spv, size_t len,

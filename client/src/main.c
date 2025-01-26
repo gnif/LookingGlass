@@ -633,17 +633,18 @@ int main_frameThread(void * unused)
     if (!g_state.formatValid || frame->formatVer != formatVer)
     {
       // setup the renderer format with the frame format details
-      lgrFormat.type         = frame->type;
-      lgrFormat.screenWidth  = frame->screenWidth;
-      lgrFormat.screenHeight = frame->screenHeight;
-      lgrFormat.dataWidth    = frame->dataWidth;
-      lgrFormat.dataHeight   = frame->dataHeight;
-      lgrFormat.frameWidth   = frame->frameWidth;
-      lgrFormat.frameHeight  = frame->frameHeight;
-      lgrFormat.stride       = frame->stride;
-      lgrFormat.pitch        = frame->pitch;
-      lgrFormat.hdr          = frame->flags & FRAME_FLAG_HDR;
-      lgrFormat.hdrPQ        = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.type          = frame->type;
+      lgrFormat.screenWidth   = frame->screenWidth;
+      lgrFormat.screenHeight  = frame->screenHeight;
+      lgrFormat.dataWidth     = frame->dataWidth;
+      lgrFormat.dataHeight    = frame->dataHeight;
+      lgrFormat.frameWidth    = frame->frameWidth;
+      lgrFormat.frameHeight   = frame->frameHeight;
+      lgrFormat.stride        = frame->stride;
+      lgrFormat.pitch         = frame->pitch;
+      lgrFormat.hdr           = frame->flags & FRAME_FLAG_HDR;
+      lgrFormat.hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.colorMetadata = frame->colorMetadata;
 
       if (frame->flags & FRAME_FLAG_TRUNCATED)
       {

@@ -72,19 +72,20 @@ CaptureRotation;
 typedef struct CaptureFrame
 {
   unsigned        formatVer;
-  unsigned        screenWidth;  // actual screen width
-  unsigned        screenHeight; // actual screen height
-  unsigned        dataWidth;    // the width of the packed frame data
-  unsigned        dataHeight;   // the height of the packed frame data
-  unsigned        frameWidth;   // width of the frame image
-  unsigned        frameHeight;  // height of the frame image
-  unsigned        pitch;        // total width of one row of data in bytes
-  unsigned        stride;       // total width of one row of data in pixels
-  CaptureFormat   format;       // the data format of the frame
-  bool            truncated;    // true if the frame data is truncated
-  bool            hdr;          // true if the frame format is HDR
-  bool            hdrPQ;        // true if the frame format is PQ transformed
-  CaptureRotation rotation;     // output rotation of the frame
+  unsigned        screenWidth;   // actual screen width
+  unsigned        screenHeight;  // actual screen height
+  unsigned        dataWidth;     // the width of the packed frame data
+  unsigned        dataHeight;    // the height of the packed frame data
+  unsigned        frameWidth;    // width of the frame image
+  unsigned        frameHeight;   // height of the frame image
+  unsigned        pitch;         // total width of one row of data in bytes
+  unsigned        stride;        // total width of one row of data in pixels
+  CaptureFormat   format;        // the data format of the frame
+  bool            truncated;     // true if the frame data is truncated
+  bool            hdr;           // true if the frame format is HDR
+  bool            hdrPQ;         // true if the frame format is PQ transformed
+  CaptureRotation rotation;      // output rotation of the frame
+  ColorMetadata   colorMetadata; // display color metadata (mainly for HDR)
 
   uint32_t        damageRectsCount;
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];

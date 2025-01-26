@@ -337,6 +337,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
   fi->dataHeight        = frame.dataHeight;
   fi->frameWidth        = frame.frameWidth;
   fi->frameHeight       = frame.frameHeight;
+  fi->colorMetadata     = frame.colorMetadata;
   fi->stride            = frame.stride;
   fi->pitch             = frame.pitch;
   // fi->offset is initialized at startup

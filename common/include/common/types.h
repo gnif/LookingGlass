@@ -79,6 +79,22 @@ typedef struct FrameDamageRect
 }
 FrameDamageRect;
 
+typedef struct ColorMetadata
+{
+  float redPrimaryX;
+  float redPrimaryY;
+  float greenPrimaryX;
+  float greenPrimaryY;
+  float bluePrimaryX;
+  float bluePrimaryY;
+  float whitePointX;
+  float whitePointY;
+  float minLuminance;
+  float maxLuminance;
+  float maxFullFrameLuminance;
+}
+ColorMetadata;
+
 extern const char * FrameTypeStr[FRAME_TYPE_MAX];
 
 typedef enum CursorType
