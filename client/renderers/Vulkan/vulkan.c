@@ -41,6 +41,7 @@ struct Inst
   uint32_t         swapchainImageCount;
   VkImageView *    swapchainImageViews;
   VkRenderPass     renderPass;
+  VkFramebuffer *  framebuffers;
 
   LG_RendererFormat format;
 
@@ -99,10 +100,26 @@ static void vulkan_freeSwapchain(struct Inst * this)
   }
 }
 
+static void vulkan_freeFramebuffers(struct Inst * this)
+{
+  if (this->framebuffers)
+  {
+    for (uint32_t i = 0; i < this->swapchainImageCount; ++i)
+    {
+      if (this->framebuffers[i])
+        vkDestroyFramebuffer(this->device, this->framebuffers[i], NULL);
+    }
+    free(this->framebuffers);
+    this->framebuffers = NULL;
+  }
+}
+
 static void vulkan_deinitialize(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  vulkan_freeFramebuffers(this);
+  
   if (this->renderPass)
     vkDestroyRenderPass(this->device, this->renderPass, NULL);
 
@@ -470,6 +487,48 @@ static bool vulkan_createRenderPass(struct Inst * this)
   return true;
 }
 
+static bool vulkan_createFramebuffers(struct Inst * this)
+{
+  vulkan_freeFramebuffers(this);
+
+  this->framebuffers = calloc(this->swapchainImageCount, sizeof(VkFramebuffer));
+  if (!this->framebuffers)
+  {
+    DEBUG_ERROR("out of memory");
+    goto err;
+  }
+
+  for (uint32_t i = 0; i < this->swapchainImageCount; ++i)
+  {
+    struct VkFramebufferCreateInfo createInfo =
+    {
+      .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+      .renderPass = this->renderPass,
+      .attachmentCount = 1,
+      .pAttachments = &this->swapchainImageViews[i],
+      .width = this->swapchainExtent.width,
+      .height = this->swapchainExtent.height,
+      .layers = 1
+    };
+
+    VkResult result = vkCreateFramebuffer(this->device, &createInfo, NULL,
+        &this->framebuffers[i]);
+    if (result != VK_SUCCESS)
+    {
+      DEBUG_ERROR("Failed to create framebuffer (VkResult: %d)", result);
+      goto err_framebuffers;
+    }
+  }
+
+  return true;
+
+err_framebuffers:
+  vulkan_freeFramebuffers(this);
+
+err:
+  return false;
+}
+
 static bool vulkan_initPipeline(struct Inst * this)
 {
   VkSurfaceFormatKHR surfaceFormat = vulkan_selectSurfaceFormat(this,
@@ -477,9 +536,11 @@ static bool vulkan_initPipeline(struct Inst * this)
   if (surfaceFormat.format == VK_FORMAT_UNDEFINED)
     goto err;
 
-  if (this->width != this->swapchainExtent.width ||
-      this->height != this->swapchainExtent.height ||
-      surfaceFormat.format != this->swapchainFormat)
+  bool formatChanged = surfaceFormat.format != this->swapchainFormat;
+  bool sizeChanged = this->width != this->swapchainExtent.width ||
+                     this->height != this->swapchainExtent.height;
+
+  if (formatChanged || sizeChanged)
   {
     if (!vulkan_createSwapchain(this, surfaceFormat))
       goto err;
@@ -487,12 +548,19 @@ static bool vulkan_initPipeline(struct Inst * this)
     if (!vulkan_getSwapchainImages(this))
       goto err_swapchain;
 
-    if (!vulkan_createRenderPass(this))
+    if (formatChanged && !vulkan_createRenderPass(this))
       goto err_swapchain;
+    
+    if (!vulkan_createFramebuffers(this))
+      goto err_render_pass;
   }
 
   return true;
 
+err_render_pass:
+  vkDestroyRenderPass(this->device, this->renderPass, NULL);
+  this->renderPass = NULL;
+  
 err_swapchain:
   vulkan_freeSwapchain(this);
 
