@@ -87,6 +87,7 @@ void app_glSwapBuffers(void);
 #endif
 
 #ifdef ENABLE_VULKAN
+const char * app_getVulkanSurfaceExtension(void);
 VkSurfaceKHR app_createVulkanSurface(VkInstance instance);
 #endif
 

@@ -260,6 +260,7 @@ void waylandGLSwapBuffers(void);
 #endif
 
 #ifdef ENABLE_VULKAN
+const char * waylandGetVulkanSurfaceExtension(void);
 VkSurfaceKHR waylandCreateVulkanSurface(VkInstance instance);
 #endif
 

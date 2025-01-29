@@ -254,6 +254,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
 #endif
 
 #ifdef ENABLE_VULKAN
+  .getVulkanSurfaceExtension = waylandGetVulkanSurfaceExtension,
   .createVulkanSurface = waylandCreateVulkanSurface,
 #endif
   .waitFrame           = waylandWaitFrame,

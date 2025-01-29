@@ -1564,6 +1564,11 @@ static void x11GLSwapBuffers(void)
 #endif
 
 #ifdef ENABLE_VULKAN
+static const char * x11GetVulkanSurfaceExtension(void)
+{
+  return "VK_KHR_xlib_surface";
+}
+
 static VkSurfaceKHR x11CreateVulkanSurface(VkInstance instance)
 {
   DEBUG_FATAL("x11CreateVulkanSurface not implemented");
@@ -2017,6 +2022,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .glSwapBuffers      = x11GLSwapBuffers,
 #endif
 #ifdef ENABLE_VULKAN
+  .getVulkanSurfaceExtension = x11GetVulkanSurfaceExtension,
   .createVulkanSurface = x11CreateVulkanSurface,
 #endif
   .waitFrame           = x11WaitFrame,

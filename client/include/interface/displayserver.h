@@ -164,6 +164,7 @@ struct LG_DisplayServerOps
 
 #ifdef ENABLE_VULKAN
   /* Vulkan support */
+  const char * (*getVulkanSurfaceExtension)(void);
   VkSurfaceKHR (*createVulkanSurface)(VkInstance instance);
 #endif
 

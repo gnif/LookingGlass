@@ -18,35 +18,10 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifdef ENABLE_VULKAN
-#include "wayland.h"
+#pragma once
 
-#include <vulkan/vulkan_wayland.h>
+#include <vulkan/vulkan.h>
 
-const char * waylandGetVulkanSurfaceExtension(void)
-{
-  return "VK_KHR_wayland_surface";
-}
-
-VkSurfaceKHR waylandCreateVulkanSurface(VkInstance instance)
-{
-  struct VkWaylandSurfaceCreateInfoKHR createInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
-    .display = wlWm.display,
-    .surface = wlWm.surface
-  };
-
-  VkSurfaceKHR surface;
-  VkResult result = vkCreateWaylandSurfaceKHR(instance, &createInfo, NULL,
-      &surface);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to create Vulkan Wayland surface (VkResult: %d)",
-        result);
-    return NULL;
-  }
-
-  return surface;
-}
-#endif
+const char ** vulkan_checkDeviceExtensions(VkPhysicalDevice physicalDevice,
+    uint32_t * enabledExtensionCount);
+const char ** vulkan_checkInstanceExtensions(uint32_t * enabledExtensionCount);
