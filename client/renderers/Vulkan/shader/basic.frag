@@ -1,6 +1,6 @@
 #version 460
 
-layout(binding = 0) uniform sampler2D sampler1;
+layout (binding = 1) uniform sampler2D sampler1;
 
 layout (location = 0) in vec2 uv;
 
