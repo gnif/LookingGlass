@@ -51,6 +51,10 @@
 #include "eglutil.h"
 #endif
 
+#ifdef ENABLE_VULKAN
+#include <vulkan/vulkan_xlib.h>
+#endif
+
 #include "app.h"
 #include "common/debug.h"
 #include "common/time.h"
@@ -1571,7 +1575,23 @@ static const char * x11GetVulkanSurfaceExtension(void)
 
 static VkSurfaceKHR x11CreateVulkanSurface(VkInstance instance)
 {
-  DEBUG_FATAL("x11CreateVulkanSurface not implemented");
+  struct VkXlibSurfaceCreateInfoKHR createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+    .dpy = x11.display,
+    .window = x11.window
+  };
+
+  VkSurfaceKHR surface;
+  VkResult result = vkCreateXlibSurfaceKHR(instance, &createInfo, NULL,
+      &surface);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create Vulkan Xlib surface (VkResult: %d)", result);
+    return NULL;
+  }
+
+  return surface;
 }
 #endif
 
