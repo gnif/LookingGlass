@@ -39,7 +39,9 @@ build_vulkan_shaders(
 
 add_library(renderer_Vulkan STATIC
   extensions.c
+  imgui.c
   vulkan.c
+  vulkan_util.c
   ${VULKAN_SHADER_OBJS}
 )
 
