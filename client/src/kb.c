@@ -19,7 +19,6 @@
  */
 
 #include "kb.h"
-#include "cimgui.h"
 
 const uint32_t linux_to_ps2[KEY_MAX] =
 {
@@ -411,28 +410,32 @@ const char * linux_to_display[KEY_MAX] =
   [KEY_STOPCD]           = "StopMedia",
 };
 
-void initImGuiKeyMap(int * keymap)
+ImGuiKey keyToImGui(int key)
 {
-  keymap[ImGuiKey_Tab        ] = KEY_TAB;
-  keymap[ImGuiKey_LeftArrow  ] = KEY_LEFT;
-  keymap[ImGuiKey_RightArrow ] = KEY_RIGHT;
-  keymap[ImGuiKey_UpArrow    ] = KEY_UP;
-  keymap[ImGuiKey_DownArrow  ] = KEY_DOWN;
-  keymap[ImGuiKey_PageUp     ] = KEY_PAGEUP;
-  keymap[ImGuiKey_PageDown   ] = KEY_PAGEDOWN;
-  keymap[ImGuiKey_Home       ] = KEY_HOME;
-  keymap[ImGuiKey_End        ] = KEY_END;
-  keymap[ImGuiKey_Insert     ] = KEY_INSERT;
-  keymap[ImGuiKey_Delete     ] = KEY_DELETE;
-  keymap[ImGuiKey_Backspace  ] = KEY_BACKSPACE;
-  keymap[ImGuiKey_Space      ] = KEY_SPACE;
-  keymap[ImGuiKey_Enter      ] = KEY_ENTER;
-  keymap[ImGuiKey_Escape     ] = KEY_SPACE;
-  keymap[ImGuiKey_KeypadEnter] = KEY_KPENTER;
-  keymap[ImGuiKey_A          ] = KEY_A;
-  keymap[ImGuiKey_C          ] = KEY_C;
-  keymap[ImGuiKey_V          ] = KEY_V;
-  keymap[ImGuiKey_X          ] = KEY_X;
-  keymap[ImGuiKey_Y          ] = KEY_Y;
-  keymap[ImGuiKey_Z          ] = KEY_Z;
+  switch (key)
+  {
+    case KEY_TAB: return ImGuiKey_Tab;
+    case KEY_LEFT: return ImGuiKey_LeftArrow;
+    case KEY_RIGHT: return ImGuiKey_RightArrow;
+    case KEY_UP: return ImGuiKey_UpArrow;
+    case KEY_DOWN: return ImGuiKey_DownArrow;
+    case KEY_PAGEUP: return ImGuiKey_PageUp;
+    case KEY_PAGEDOWN: return ImGuiKey_PageDown;
+    case KEY_HOME: return ImGuiKey_Home;
+    case KEY_END: return ImGuiKey_End;
+    case KEY_INSERT: return ImGuiKey_Insert;
+    case KEY_DELETE: return ImGuiKey_Delete;
+    case KEY_BACKSPACE: return ImGuiKey_Backspace;
+    case KEY_SPACE: return ImGuiKey_Space;
+    case KEY_ENTER: return ImGuiKey_Enter;
+    case KEY_ESC: return ImGuiKey_Escape;
+    case KEY_KPENTER: return ImGuiKey_KeypadEnter;
+    case KEY_A: return ImGuiKey_A;
+    case KEY_C: return ImGuiKey_C;
+    case KEY_V: return ImGuiKey_V;
+    case KEY_X: return ImGuiKey_X;
+    case KEY_Y: return ImGuiKey_Y;
+    case KEY_Z: return ImGuiKey_Z;
+    default: return ImGuiKey_None;
+  }
 }

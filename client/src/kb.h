@@ -24,6 +24,8 @@
 #include <linux/input.h>
 #include <stdint.h>
 
+#include "cimgui.h"
+
 #define PS2_MUTE        0xE020
 #define PS2_VOLUME_UP   0xE030
 #define PS2_VOLUME_DOWN 0xE02E
@@ -32,6 +34,6 @@ extern const uint32_t linux_to_ps2[KEY_MAX];
 extern const char *   linux_to_str[KEY_MAX];
 extern const char *   linux_to_display[KEY_MAX];
 
-void initImGuiKeyMap(int * keymap);
+ImGuiKey keyToImGui(int key);
 
 #endif
