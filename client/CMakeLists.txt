@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.19)
 project(looking-glass-client C CXX)
 
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
@@ -79,6 +79,9 @@ endif()
 
 if (ENABLE_VULKAN)
   add_definitions(-D ENABLE_VULKAN)
+
+  # Vulkan bindings are not present in the default generated bindings
+  set(CIMGUI_GEN_BINDINGS ON)
 endif()
 
 if(ENABLE_ASAN)
@@ -144,6 +147,20 @@ set(SOURCES
 
 # Force cimgui to build as a static library.
 set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
+
+# Only generate cimgui bindings if the defaults are not sufficient. This avoids
+# a potentially unnecessary dependency on LuaJIT
+if(CIMGUI_GEN_BINDINGS)
+  message(STATUS "Generating cimgui bindings")
+  file(LOCK "${PROJECT_TOP}/repos/cimgui/generator" DIRECTORY GUARD FILE)
+  execute_process(
+    COMMAND luajit ./generator.lua gcc internal opengl2 opengl3 vulkan
+    WORKING_DIRECTORY "${PROJECT_TOP}/repos/cimgui/generator"
+    OUTPUT_QUIET
+    ERROR_QUIET
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+endif()
 
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )

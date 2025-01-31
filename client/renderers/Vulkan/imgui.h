@@ -26,7 +26,8 @@
 
 typedef struct Vulkan_ImGui Vulkan_ImGui;
 
-bool vulkan_imGuiInit(Vulkan_ImGui ** imGui,
+bool vulkan_imGuiInit(Vulkan_ImGui ** imGui, VkInstance instance,
+    VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
     VkQueue queue, VkCommandBuffer commandBuffer, VkSampler sampler,
     VkDescriptorPool descriptorPool, VkFence fence);
@@ -35,3 +36,10 @@ void vulkan_imGuiFree(Vulkan_ImGui ** imGui);
 void * vulkan_imGuiCreateTexture(Vulkan_ImGui * imGui, int width, int height,
     uint8_t * data);
 void vulkan_imGuiFreeTexture(Vulkan_ImGui * imGui, void * texture);
+
+bool vulkan_imGuiInitPipeline(Vulkan_ImGui * imGui,
+    uint32_t swapchainImageCount, VkRenderPass renderPass);
+void vulkan_imGuiDeinitPipeline(Vulkan_ImGui * imGui);
+bool vulkan_imGuiUploadFonts(Vulkan_ImGui * imGui);
+
+bool vulkan_imGuiRecordCommandBuffer(Vulkan_ImGui * imGui);

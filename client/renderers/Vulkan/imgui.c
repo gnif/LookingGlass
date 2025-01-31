@@ -26,7 +26,12 @@
 
 #include <string.h>
 
+#include "cimgui.h"
+#include "generator/output/cimgui_impl.h"
+
 #include "vulkan_util.h"
+
+static VkResult vkResult;
 
 typedef struct Texture
 {
@@ -39,18 +44,24 @@ Texture;
 
 struct Vulkan_ImGui
 {
+  VkInstance            instance;
+  VkPhysicalDevice      physicalDevice;
+  uint32_t              queueFamilyIndex;
   struct VkPhysicalDeviceMemoryProperties * memoryProperties;
   VkDevice              device;
   VkQueue               queue;
   VkCommandBuffer       commandBuffer;
+  VkSampler             sampler;
   VkDescriptorPool      descriptorPool;
   VkFence               fence;
 
   VkDescriptorSetLayout descriptorSetLayout;
   Vector                textures;
+
+  bool                  initialized;
 };
 
-static bool createDescriptorSetLayout(Vulkan_ImGui * this, VkSampler sampler)
+static bool createDescriptorSetLayout(Vulkan_ImGui * this)
 {
   struct VkDescriptorSetLayoutBinding bindings[] =
   {
@@ -58,8 +69,7 @@ static bool createDescriptorSetLayout(Vulkan_ImGui * this, VkSampler sampler)
       .binding = 0,
       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-      .pImmutableSamplers = &sampler
+      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
     },
   };
 
@@ -82,7 +92,8 @@ static bool createDescriptorSetLayout(Vulkan_ImGui * this, VkSampler sampler)
   return true;
 }
 
-bool vulkan_imGuiInit(Vulkan_ImGui ** this,
+bool vulkan_imGuiInit(Vulkan_ImGui ** this, VkInstance instance,
+    VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
     VkQueue queue, VkCommandBuffer commandBuffer, VkSampler sampler,
     VkDescriptorPool descriptorPool, VkFence fence)
@@ -94,14 +105,18 @@ bool vulkan_imGuiInit(Vulkan_ImGui ** this,
     goto err;
   }
 
+  (*this)->instance = instance;
+  (*this)->physicalDevice = physicalDevice;
+  (*this)->queueFamilyIndex = queueFamilyIndex;
   (*this)->memoryProperties = memoryProperties;
   (*this)->device = device;
   (*this)->queue = queue;
   (*this)->commandBuffer = commandBuffer;
+  (*this)->sampler = sampler;
   (*this)->descriptorPool = descriptorPool;
   (*this)->fence = fence;
 
-  if (!createDescriptorSetLayout(*this, sampler))
+  if (!createDescriptorSetLayout(*this))
     goto err_imgui;
 
   vector_create(&(*this)->textures, sizeof(Texture), 0);
@@ -128,6 +143,9 @@ void vulkan_imGuiFree(Vulkan_ImGui ** imGui)
   Vulkan_ImGui * this = *imGui;
   if (!this)
     return;
+
+  if (this->initialized)
+    ImGui_ImplVulkan_Shutdown();
 
   if (this->descriptorSetLayout)
     vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayout, NULL);
@@ -324,6 +342,7 @@ void * vulkan_imGuiCreateTexture(Vulkan_ImGui * this, int width, int height,
 
   struct VkDescriptorImageInfo imageInfo =
   {
+    .sampler = this->sampler,
     .imageView = imageView,
     .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
   };
@@ -392,4 +411,88 @@ void vulkan_imGuiFreeTexture(Vulkan_ImGui * this, void * texture)
     }
   }
   DEBUG_FATAL("Unknown texture");
+}
+
+static void checkVkResult(VkResult result)
+{
+  if (result != VK_SUCCESS)
+    vkResult = result;
+}
+
+bool vulkan_imGuiInitPipeline(Vulkan_ImGui * this, uint32_t swapchainImageCount,
+    VkRenderPass renderPass)
+{
+  if (this->initialized)
+  {
+    ImGui_ImplVulkan_Shutdown();
+    this->initialized = false;
+  }
+
+  struct ImGui_ImplVulkan_InitInfo initInfo =
+  {
+    .Instance = this->instance,
+    .PhysicalDevice = this->physicalDevice,
+    .Device = this->device,
+    .QueueFamily = this->queueFamilyIndex,
+    .Queue = this->queue,
+    .DescriptorPool = this->descriptorPool,
+    .RenderPass = renderPass,
+    .MinImageCount = swapchainImageCount,
+    .ImageCount = swapchainImageCount,
+    .MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+    .CheckVkResultFn = checkVkResult
+  };
+
+  vkResult = VK_SUCCESS;
+  if (!ImGui_ImplVulkan_Init(&initInfo) || vkResult != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to initialize ImGui");
+    return false;
+  }
+
+  this->initialized = true;
+  return true;
+}
+
+void vulkan_imGuiDeinitPipeline(Vulkan_ImGui * this)
+{
+  if (this->initialized)
+  {
+    ImGui_ImplVulkan_Shutdown();
+    this->initialized = false;
+  }
+}
+
+bool vulkan_imGuiUploadFonts(Vulkan_ImGui * this)
+{
+  vkResult = VK_SUCCESS;
+  if (!ImGui_ImplVulkan_CreateFontsTexture() || vkResult != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create ImGui fonts texture (VkResult: %d)",
+        vkResult);
+    return false;
+  }
+
+  return true;
+}
+
+bool vulkan_imGuiRecordCommandBuffer(Vulkan_ImGui * this)
+{
+  vkResult = VK_SUCCESS;
+  ImGui_ImplVulkan_NewFrame();
+  if (vkResult != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to start ImGui frame (VkResult: %d)", vkResult);
+    return false;
+  }
+
+  vkResult = VK_SUCCESS;
+  ImGui_ImplVulkan_RenderDrawData(igGetDrawData(), this->commandBuffer, NULL);
+  if (vkResult != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to render ImGui (VkResult: %d)", vkResult);
+    return false;
+  }
+
+  return true;
 }

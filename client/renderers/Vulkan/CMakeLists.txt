@@ -43,11 +43,16 @@ add_library(renderer_Vulkan STATIC
   vulkan.c
   vulkan_util.c
   ${VULKAN_SHADER_OBJS}
+  ${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_vulkan.cpp
 )
+
+target_compile_definitions(renderer_Vulkan PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 CIMGUI_USE_VULKAN=1)
 
 target_link_libraries(renderer_Vulkan
   PkgConfig::RENDERER_Vulkan
   lg_common
+
+  cimgui
 )
 
 target_include_directories(renderer_Vulkan
