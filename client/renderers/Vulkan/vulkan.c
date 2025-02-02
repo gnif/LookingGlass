@@ -35,11 +35,6 @@
 #include "basic.vert.spv.h"
 #include "basic.frag.spv.h"
 
-struct UniformBuffer
-{
-  float transform[16];
-};
-
 struct Inst
 {
   LG_Renderer base;
@@ -734,11 +729,11 @@ static bool vulkan_createGraphicsPipeline(struct Inst * this)
 
   struct VkPipelineColorBlendAttachmentState colorBlendAttachment =
   {
-    .blendEnable = VK_FALSE,
-    .srcColorBlendFactor = VK_BLEND_FACTOR_ZERO,
-    .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .blendEnable = VK_TRUE,
+    .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+    .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
     .colorBlendOp = VK_BLEND_OP_ADD,
-    .srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
     .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
     .alphaBlendOp = VK_BLEND_OP_ADD,
     .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -971,52 +966,6 @@ err:
   return false;
 }
 
-static void vulkan_updateDescriptorSet(struct Inst * this)
-{
-  struct VkDescriptorBufferInfo bufferInfo =
-  {
-    .buffer = this->desktopUniformBuffer,
-    .offset = 0,
-    .range = VK_WHOLE_SIZE
-  };
-
-  struct VkDescriptorImageInfo imageInfo =
-  {
-    .sampler = NULL,
-    .imageView = this->desktopImageView,
-    .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-  };
-
-  struct VkWriteDescriptorSet descriptorWrites[] =
-  {
-    {
-      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-      .pNext = NULL,
-      .dstSet = this->descriptorSet,
-      .dstBinding = 0,
-      .dstArrayElement = 0,
-      .descriptorCount = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .pBufferInfo = &bufferInfo,
-      .pTexelBufferView = NULL
-    },
-    {
-      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-      .pNext = NULL,
-      .dstSet = this->descriptorSet,
-      .dstBinding = 1,
-      .dstArrayElement = 0,
-      .descriptorCount = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      .pImageInfo = &imageInfo,
-      .pBufferInfo = NULL,
-      .pTexelBufferView = NULL
-    }
-  };
-
-  vkUpdateDescriptorSets(this->device, 2, descriptorWrites, 0, NULL);
-}
-
 static bool vulkan_initPipeline(struct Inst * this)
 {
   VkSurfaceFormatKHR surfaceFormat = vulkan_selectSurfaceFormat(this);
@@ -1068,7 +1017,9 @@ static bool vulkan_initPipeline(struct Inst * this)
       if (!vulkan_createDesktopImage(this, desktopFormat))
         goto err_framebuffers;
 
-      vulkan_updateDescriptorSet(this);
+      vulkan_updateDescriptorSet(this->device, this->descriptorSet,
+          this->desktopUniformBuffer, this->desktopImageView,
+          VK_IMAGE_LAYOUT_GENERAL);
     }
   }
 
@@ -1593,7 +1544,7 @@ static bool vulkan_createDescriptorPool(struct Inst * this)
   {
     {
       .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .descriptorCount = 1
+      .descriptorCount = 2
     },
     {
       .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1681,7 +1632,7 @@ static bool vulkan_createFence(struct Inst * this)
 static bool vulkan_createDesktopUniformBuffer(struct Inst * this)
 {
   this->desktopUniformBuffer = vulkan_createBuffer(&this->memoryProperties,
-      this->device, sizeof(struct UniformBuffer),
+      this->device, sizeof(struct VulkanUniformBuffer),
       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, &this->desktopUniformBufferMemory,
       &this->desktopUniformBufferMap);
   if (!this->desktopUniformBuffer)
@@ -1752,7 +1703,8 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
     goto err_fence;
 
   if (!vulkan_cursorInit(&this->cursor, &this->memoryProperties, this->device,
-      this->commandBuffer))
+      this->commandBuffer, this->descriptorSetLayout, this->descriptorPool,
+      this->pipelineLayout))
     goto err_desktop_uniform;
 
   if (!vulkan_imGuiInit(&this->imGui, this->instance, this->physicalDevice,
@@ -1875,7 +1827,7 @@ static void vulkan_preRenderBarrier(struct Inst * this)
 }
 
 static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
-    bool drawImGui)
+    bool drawImGui, LG_RendererRotate rotate)
 {
   struct VkCommandBufferBeginInfo beginInfo =
   {
@@ -1945,6 +1897,10 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
     vkCmdDraw(this->commandBuffer, 3, 1, 0, 0);
   }
 
+  vulkan_cursorRender(this->cursor,
+      (this->format.rotate + rotate) % LG_ROTATE_MAX, this->width,
+      this->height);
+
   if (drawImGui)
     vulkan_imGuiRender(this->imGui);
 
@@ -1960,105 +1916,6 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
   return true;
 }
 
-static void vulkan_updateDesktopUniformBuffer(struct Inst * this,
-    LG_RendererRotate rotate)
-{
-  struct UniformBuffer uniformBuffer = {};
-
-  switch (rotate)
-  {
-    case LG_ROTATE_0:
-      uniformBuffer.transform[0 * 4 + 0] = this->scaleX;
-      uniformBuffer.transform[0 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 1] = this->scaleY;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = this->translateX;
-      uniformBuffer.transform[3 * 4 + 1] = this->translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-
-    case LG_ROTATE_90:
-      uniformBuffer.transform[0 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 1] = this->scaleY;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = -this->scaleX;
-      uniformBuffer.transform[1 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = this->translateX;
-      uniformBuffer.transform[3 * 4 + 1] = this->translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-
-    case LG_ROTATE_180:
-      uniformBuffer.transform[0 * 4 + 0] = -this->scaleX;
-      uniformBuffer.transform[0 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 1] = -this->scaleY;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = this->translateX;
-      uniformBuffer.transform[3 * 4 + 1] = this->translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-
-    case LG_ROTATE_270:
-      uniformBuffer.transform[0 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 1] = -this->scaleY;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = this->scaleX;
-      uniformBuffer.transform[1 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = this->translateX;
-      uniformBuffer.transform[3 * 4 + 1] = this->translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-  }
-
-  memcpy(this->desktopUniformBufferMap, &uniformBuffer, sizeof(uniformBuffer));
-}
-
 static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     const bool newFrame, const bool invalidateWindow,
     void (*preSwap)(void * udata), void * udata)
@@ -2069,13 +1926,14 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
   bool drawImGui = damageIdx != 0;
 
-  vulkan_updateDesktopUniformBuffer(this, rotate);
+  vulkan_updateUniformBuffer(this->desktopUniformBufferMap, this->translateX,
+      this->translateY, this->scaleX, this->scaleY, rotate);
 
   uint32_t imageIndex = vulkan_acquireSwapchainImage(this);
   if (imageIndex == UINT32_MAX)
     goto err;
 
-  if (!vulkan_recordCommandBuffer(this, imageIndex, drawImGui))
+  if (!vulkan_recordCommandBuffer(this, imageIndex, drawImGui, rotate))
     goto err;
 
   VkPipelineStageFlags waitDstStageMask =

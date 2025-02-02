@@ -24,6 +24,7 @@
 
 #include "vulkan_util.h"
 
+#include <math.h>
 #include <string.h>
 
 struct CursorPos
@@ -50,40 +51,45 @@ struct Vulkan_Cursor
   _Atomic(struct CursorPos) hs;
 
   struct VkPhysicalDeviceMemoryProperties * memoryProperties;
-  VkDevice        device;
-  VkCommandBuffer commandBuffer;
-  VkImage         image;
-  VkImageView     imageView;
-  VkDeviceMemory  imageMemory;
-  bool            imageValid;
-  uint32_t        imageSize;
-  VkBuffer        stagingBuffer;
-  VkDeviceMemory  stagingMemory;
-  void          * stagingMap;
+  VkDevice         device;
+  VkCommandBuffer  commandBuffer;
+  VkDescriptorPool descriptorPool;
+  VkDescriptorSet  descriptorSet;
+  VkPipelineLayout pipelineLayout;
+
+  VkBuffer         uniformBuffer;
+  VkDeviceMemory   uniformBufferMemory;
+  void           * uniformBufferMap;
+
+  VkImage          image;
+  VkImageView      imageView;
+  VkDeviceMemory   imageMemory;
+  bool             imageValid;
+  uint32_t         imageSize;
+  VkBuffer         stagingBuffer;
+  VkDeviceMemory   stagingMemory;
+  void           * stagingMap;
 };
 
-bool vulkan_cursorInit(Vulkan_Cursor ** cursor,
-    struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
-    VkCommandBuffer commandBuffer)
+static void freeUniformBuffer(Vulkan_Cursor * this)
 {
-  *cursor = calloc(1, sizeof(**cursor));
-  if (!*cursor)
+  if (this->uniformBuffer)
   {
-    DEBUG_ERROR("Failed to malloc Vulkan_Cursor");
-    return false;
+    vkDestroyBuffer(this->device, this->uniformBuffer, NULL);
+    this->uniformBuffer = NULL;
   }
 
-  LG_LOCK_INIT((*cursor)->lock);
-  (*cursor)->memoryProperties = memoryProperties;
-  (*cursor)->device = device;
-  (*cursor)->commandBuffer = commandBuffer;
+  if (this->uniformBufferMap)
+  {
+    vkUnmapMemory(this->device, this->uniformBufferMemory);
+    this->uniformBufferMap = NULL;
+  }
 
-  struct CursorPos  pos = { .x = 0, .y = 0 };
-  struct CursorPos  hs  = { .x = 0, .y = 0 };
-  atomic_init(&(*cursor)->pos, pos);
-  atomic_init(&(*cursor)->hs , hs );
-
-  return true;
+  if (this->uniformBufferMemory)
+  {
+    vkFreeMemory(this->device, this->uniformBufferMemory, NULL);
+    this->uniformBufferMemory = NULL;
+  }
 }
 
 static void freeImage(Vulkan_Cursor * this)
@@ -125,65 +131,6 @@ static void freeImage(Vulkan_Cursor * this)
     vkFreeMemory(this->device, this->stagingMemory, NULL);
     this->stagingMemory = NULL;
   }
-}
-
-void vulkan_cursorFree(Vulkan_Cursor ** cursor)
-{
-  Vulkan_Cursor * this = *cursor;
-  if (!this)
-    return;
-
-  LG_LOCK_FREE(this->lock);
-  if (this->data)
-    free(this->data);
-
-  freeImage(this);
-
-  free(this);
-  *cursor = NULL;
-}
-
-bool vulkan_cursorSetShape(Vulkan_Cursor * this, const LG_RendererCursor type,
-    const int width, const int height, const int stride, const uint8_t * data)
-{
-  LG_LOCK(this->lock);
-
-  this->type   = type;
-  this->width  = width;
-  this->height = (type == LG_CURSOR_MONOCHROME ? height / 2 : height);
-  this->stride = stride;
-
-  const size_t size = height * stride;
-  if (size > this->dataSize)
-  {
-    if (this->data)
-      free(this->data);
-
-    this->data = malloc(size);
-    if (!this->data)
-    {
-      DEBUG_ERROR("Failed to malloc buffer for cursor shape");
-      return false;
-    }
-
-    this->dataSize = size;
-  }
-
-  memcpy(this->data, data, size);
-  this->update = true;
-
-  LG_UNLOCK(this->lock);
-  return true;
-}
-
-void vulkan_cursorSetState(Vulkan_Cursor * cursor, const bool visible,
-    const float x, const float y, const float hx, const float hy)
-{
-  cursor->visible = visible;
-  struct CursorPos pos = { .x = x , .y = y  };
-  struct CursorPos hs  = { .x = hx, .y = hy };
-  atomic_store(&cursor->pos, pos);
-  atomic_store(&cursor->hs , hs);
 }
 
 static bool createImage(Vulkan_Cursor * this)
@@ -252,6 +199,11 @@ static bool createImage(Vulkan_Cursor * this)
   if (!this->stagingBuffer)
     goto err_image_view;
 
+  vulkan_updateDescriptorSet(this->device, this->descriptorSet,
+      this->uniformBuffer, this->imageView,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+  this->imageSize = actualSize;
   return true;
 
 err_image_view:
@@ -270,12 +222,133 @@ err:
   return false;
 }
 
+bool vulkan_cursorInit(Vulkan_Cursor ** cursor,
+    struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
+    VkCommandBuffer commandBuffer, VkDescriptorSetLayout descriptorSetLayout,
+    VkDescriptorPool descriptorPool, VkPipelineLayout pipelineLayout)
+{
+  *cursor = calloc(1, sizeof(**cursor));
+  if (!*cursor)
+  {
+    DEBUG_ERROR("Failed to malloc Vulkan_Cursor");
+    goto err;
+  }
+
+  LG_LOCK_INIT((*cursor)->lock);
+  (*cursor)->memoryProperties = memoryProperties;
+  (*cursor)->device = device;
+  (*cursor)->commandBuffer = commandBuffer;
+  (*cursor)->descriptorPool = descriptorPool;
+  (*cursor)->pipelineLayout = pipelineLayout;
+
+  (*cursor)->descriptorSet = vulkan_allocateDescriptorSet(device,
+      descriptorSetLayout, descriptorPool);
+  if (!(*cursor)->descriptorSet)
+    goto err_cursor;
+
+  (*cursor)->uniformBuffer = vulkan_createBuffer(memoryProperties, device,
+      sizeof(struct VulkanUniformBuffer), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      &(*cursor)->uniformBufferMemory, &(*cursor)->uniformBufferMap);
+  if (!(*cursor)->uniformBuffer)
+    goto err_descriptor_set;
+
+  if (!createImage(*cursor))
+    goto err_uniform;
+
+  struct CursorPos pos = { .x = 0, .y = 0 };
+  struct CursorPos hs  = { .x = 0, .y = 0 };
+  atomic_init(&(*cursor)->pos, pos);
+  atomic_init(&(*cursor)->hs , hs );
+
+  return true;
+
+err_uniform:
+  freeUniformBuffer(*cursor);
+
+err_descriptor_set:
+  vkFreeDescriptorSets(device, descriptorPool, 1, &(*cursor)->descriptorSet);
+
+err_cursor:
+  LG_LOCK_FREE((*cursor)->lock);
+  free(cursor);
+
+err:
+  return false;
+}
+
+void vulkan_cursorFree(Vulkan_Cursor ** cursor)
+{
+  Vulkan_Cursor * this = *cursor;
+  if (!this)
+    return;
+
+  LG_LOCK_FREE(this->lock);
+  if (this->data)
+    free(this->data);
+
+  freeImage(this);
+
+  freeUniformBuffer(this);
+
+  vkFreeDescriptorSets(this->device, this->descriptorPool, 1,
+      &this->descriptorSet);
+
+  free(this);
+  *cursor = NULL;
+}
+
+bool vulkan_cursorSetShape(Vulkan_Cursor * this, const LG_RendererCursor type,
+    const int width, const int height, const int stride, const uint8_t * data)
+{
+  LG_LOCK(this->lock);
+
+  this->type   = type;
+  this->width  = width;
+  this->height = (type == LG_CURSOR_MONOCHROME ? height / 2 : height);
+  this->stride = stride;
+
+  const size_t size = height * stride;
+  if (size > this->dataSize)
+  {
+    if (this->data)
+      free(this->data);
+
+    this->data = malloc(size);
+    if (!this->data)
+    {
+      DEBUG_ERROR("Failed to malloc buffer for cursor shape");
+      return false;
+    }
+
+    this->dataSize = size;
+  }
+
+  memcpy(this->data, data, size);
+  this->update = true;
+
+  LG_UNLOCK(this->lock);
+  return true;
+}
+
+void vulkan_cursorSetState(Vulkan_Cursor * cursor, const bool visible,
+    const float x, const float y, const float hx, const float hy)
+{
+  cursor->visible = visible;
+  struct CursorPos pos = { .x = x , .y = y  };
+  struct CursorPos hs  = { .x = hx, .y = hy };
+  atomic_store(&cursor->pos, pos);
+  atomic_store(&cursor->hs , hs);
+}
+
 static void updateImage(Vulkan_Cursor * this)
 {
-  if (this->type != LG_CURSOR_COLOR)
-    DEBUG_FATAL("Cursor type %d not implemented", this->type);
-
-  memcpy(this->stagingMap, this->data, this->width * this->height * 4);
+  if (this->type == LG_CURSOR_COLOR)
+    memcpy(this->stagingMap, this->data, this->width * this->height * 4);
+  else
+  {
+    DEBUG_ERROR("Cursor type %d not implemented", this->type);
+    memset(this->stagingMap, 0xff, this->width * this->height * 4);
+  }
 
   struct VkImageMemoryBarrier copyImageBarrier =
   {
@@ -372,4 +445,44 @@ bool vulkan_cursorPreRender(Vulkan_Cursor * this)
 
   LG_UNLOCK(this->lock);
   return true;
+}
+
+void vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
+    int width, int height)
+{
+  if (!this->visible || !this->imageValid)
+    return;
+
+  if (rotate != LG_ROTATE_0)
+    DEBUG_ERROR("Cursor rotation %d not implemented", rotate);
+
+  struct CursorPos  pos  = atomic_load(&this->pos );
+  struct CursorPos  hs   = atomic_load(&this->hs  );
+
+  pos.x -= hs.x;
+  pos.y -= hs.y;
+
+  float translateX = pos.x + (float) this->imageSize / (float) width;
+  float translateY = pos.y + (float) this->imageSize / (float) height;
+  float scaleX = (float) this->imageSize / (float) width;
+  float scaleY = (float) this->imageSize / (float) height;
+
+  vulkan_updateUniformBuffer(this->uniformBufferMap, translateX, translateY,
+      scaleX, scaleY, LG_ROTATE_0);
+
+  VkRect2D scissor =
+  {
+    .offset.x = (int32_t) lrint(max((pos.x * width + width) / 2.0, 0.0)),
+    .offset.y = (int32_t) lrint(max((pos.y * height + height) / 2.0, 0.0)),
+    .extent.width = this->width,
+    .extent.height = this->height
+  };
+
+  vkCmdSetScissor(this->commandBuffer, 0, 1, &scissor);
+
+  vkCmdBindDescriptorSets(this->commandBuffer,
+      VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipelineLayout, 0, 1,
+      &this->descriptorSet, 0, NULL);
+
+  vkCmdDraw(this->commandBuffer, 3, 1, 0, 0);
 }

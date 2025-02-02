@@ -20,7 +20,10 @@
 
 #include "vulkan_util.h"
 
+#include "common/array.h"
 #include "common/debug.h"
+
+#include <string.h>
 
 uint32_t vulkan_findMemoryType(
     struct VkPhysicalDeviceMemoryProperties * memoryProperties,
@@ -213,4 +216,142 @@ bool vulkan_waitFence(VkDevice device, VkFence fence)
   }
 
   return true;
+}
+
+void vulkan_updateDescriptorSet(VkDevice device, VkDescriptorSet descriptorSet,
+    VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout)
+{
+  struct VkDescriptorBufferInfo bufferInfo =
+  {
+    .buffer = uniformBuffer,
+    .range = VK_WHOLE_SIZE
+  };
+
+  struct VkDescriptorImageInfo imageInfo =
+  {
+    .imageView = imageView,
+    .imageLayout = imageLayout
+  };
+
+  struct VkWriteDescriptorSet descriptorWrites[] =
+  {
+    {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = descriptorSet,
+      .dstBinding = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .pBufferInfo = &bufferInfo
+    },
+    {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = descriptorSet,
+      .dstBinding = 1,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      .pImageInfo = &imageInfo
+    }
+  };
+
+  vkUpdateDescriptorSets(device, ARRAY_LENGTH(descriptorWrites),
+      descriptorWrites, 0, NULL);
+}
+
+void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
+    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate)
+{
+  struct VulkanUniformBuffer uniformBuffer = {};
+
+  switch (rotate)
+  {
+    case LG_ROTATE_0:
+      uniformBuffer.transform[0 * 4 + 0] = scaleX;
+      uniformBuffer.transform[0 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[1 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 1] = scaleY;
+      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
+      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[3 * 4 + 0] = translateX;
+      uniformBuffer.transform[3 * 4 + 1] = translateY;
+      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
+      break;
+
+    case LG_ROTATE_90:
+      uniformBuffer.transform[0 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 1] = scaleY;
+      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[1 * 4 + 0] = -scaleX;
+      uniformBuffer.transform[1 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
+      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[3 * 4 + 0] = translateX;
+      uniformBuffer.transform[3 * 4 + 1] = translateY;
+      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
+      break;
+
+    case LG_ROTATE_180:
+      uniformBuffer.transform[0 * 4 + 0] = -scaleX;
+      uniformBuffer.transform[0 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[1 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 1] = -scaleY;
+      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
+      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[3 * 4 + 0] = translateX;
+      uniformBuffer.transform[3 * 4 + 1] = translateY;
+      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
+      break;
+
+    case LG_ROTATE_270:
+      uniformBuffer.transform[0 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 1] = -scaleY;
+      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[1 * 4 + 0] = scaleX;
+      uniformBuffer.transform[1 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
+      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
+      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
+
+      uniformBuffer.transform[3 * 4 + 0] = translateX;
+      uniformBuffer.transform[3 * 4 + 1] = translateY;
+      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
+      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
+      break;
+  }
+
+  memcpy(bufferMap, &uniformBuffer, sizeof(uniformBuffer));
 }

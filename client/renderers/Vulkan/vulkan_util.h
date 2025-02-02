@@ -25,6 +25,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "interface/renderer.h"
+
+struct VulkanUniformBuffer
+{
+  float transform[16];
+};
+
 uint32_t vulkan_findMemoryType(
     struct VkPhysicalDeviceMemoryProperties * memoryProperties,
     uint32_t memoryTypeBits, VkMemoryPropertyFlags requiredProperties);
@@ -46,3 +53,9 @@ VkImageView vulkan_createImageView(VkDevice device, VkImage image,
     VkFormat format);
 
 bool vulkan_waitFence(VkDevice device, VkFence fence);
+
+void vulkan_updateDescriptorSet(VkDevice device, VkDescriptorSet descriptorSet,
+    VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout);
+
+void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
+    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate);

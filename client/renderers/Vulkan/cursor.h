@@ -28,7 +28,8 @@ typedef struct Vulkan_Cursor Vulkan_Cursor;
 
 bool vulkan_cursorInit(Vulkan_Cursor ** this,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
-    VkCommandBuffer commandBuffer);
+    VkCommandBuffer commandBuffer, VkDescriptorSetLayout descriptorSetLayout,
+    VkDescriptorPool descriptorPool, VkPipelineLayout pipelineLayout);
 void vulkan_cursorFree(Vulkan_Cursor ** cursor);
 
 bool vulkan_cursorSetShape(
@@ -43,3 +44,5 @@ void vulkan_cursorSetState(Vulkan_Cursor * this, const bool visible,
     const float x, const float y, const float hx, const float hy);
 
 bool vulkan_cursorPreRender(Vulkan_Cursor * this);
+void vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
+    int width, int height);
