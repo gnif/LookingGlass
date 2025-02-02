@@ -26,6 +26,7 @@
 
 #include <string.h>
 
+#include "cursor.h"
 #include "extensions.h"
 #include "imgui.h"
 #include "vulkan_util.h"
@@ -85,9 +86,11 @@ struct Inst
   VkDeviceMemory   desktopUniformBufferMemory;
   void           * desktopUniformBufferMap;
 
+  Vulkan_Cursor  * cursor;
   Vulkan_ImGui   * imGui;
 
   LG_RendererFormat format;
+  bool              formatValid;
 
   int               width, height;
   struct DoubleRect destRect;
@@ -95,6 +98,12 @@ struct Inst
 
   float translateX  , translateY;
   float scaleX      , scaleY;
+
+  bool  cursorVisible;
+  int   cursorX    , cursorY;
+  int   cursorHX   , cursorHY;
+  float mouseWidth , mouseHeight;
+  float mouseScaleX, mouseScaleY;
 
   PFN_vkSetHdrMetadataEXT vkSetHdrMetadataEXT;
 };
@@ -226,6 +235,9 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 
   if (this->imGui)
     vulkan_imGuiFree(&this->imGui);
+
+  if (this->cursor)
+    vulkan_cursorFree(&this->cursor);
 
   vulkan_freeDesktopUniformBuffer(this);
 
@@ -894,33 +906,14 @@ static bool vulkan_createDesktopImage(struct Inst * this, VkFormat format)
   struct VkMemoryRequirements memoryRequirements;
   vkGetImageMemoryRequirements(this->device, this->desktopImage,
       &memoryRequirements);
-  uint32_t memoryTypeIndex = vulkan_findMemoryType(&this->memoryProperties,
-      memoryRequirements.memoryTypeBits,
+
+  this->desktopImageMemory = vulkan_allocateMemory(&this->memoryProperties,
+      this->device, &memoryRequirements,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-  if (memoryTypeIndex == UINT32_MAX)
-  {
-    DEBUG_ERROR("Could not find suitable memory type for desktop image");
+  if (!this->desktopImageMemory)
     goto err_image;
-  }
-
-  struct VkMemoryAllocateInfo allocateInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    .pNext = NULL,
-    .allocationSize = memoryRequirements.size,
-    .memoryTypeIndex = memoryTypeIndex
-  };
-
-  result = vkAllocateMemory(this->device, &allocateInfo, NULL,
-      &this->desktopImageMemory);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to allocate desktop image memory (VkResult: %d)",
-        result);
-    goto err_image;
-  }
 
   result = vkBindImageMemory(this->device, this->desktopImage,
       this->desktopImageMemory, 0);
@@ -1108,6 +1101,63 @@ err:
   return false;
 }
 
+static void vulkan_calc_mouse_size(struct Inst * this)
+{
+  if (!this->formatValid)
+    return;
+
+  switch(this->format.rotate)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      this->mouseScaleX = 2.0f / this->format.screenWidth;
+      this->mouseScaleY = 2.0f / this->format.screenHeight;
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      this->mouseScaleX = 2.0f / this->format.screenHeight;
+      this->mouseScaleY = 2.0f / this->format.screenWidth;
+      break;
+
+    default:
+      DEBUG_UNREACHABLE();
+  }
+}
+
+static void vulkan_calc_mouse_state(struct Inst * this)
+{
+  if (!this->formatValid)
+    return;
+
+  switch((this->format.rotate + this->rotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+    case LG_ROTATE_180:
+      vulkan_cursorSetState(
+        this->cursor,
+        this->cursorVisible,
+        (((float)this->cursorX  * this->mouseScaleX) - 1.0f) * this->scaleX,
+        (((float)this->cursorY  * this->mouseScaleY) - 1.0f) * this->scaleY,
+        ((float)this->cursorHX * this->mouseScaleX) * this->scaleX,
+        ((float)this->cursorHY * this->mouseScaleY) * this->scaleY
+      );
+      break;
+
+    case LG_ROTATE_90:
+    case LG_ROTATE_270:
+      vulkan_cursorSetState(
+        this->cursor,
+        this->cursorVisible,
+        (((float)this->cursorX  * this->mouseScaleX) - 1.0f) * this->scaleY,
+        (((float)this->cursorY  * this->mouseScaleY) - 1.0f) * this->scaleX,
+        ((float)this->cursorHX * this->mouseScaleX) * this->scaleY,
+        ((float)this->cursorHY * this->mouseScaleY) * this->scaleX
+      );
+      break;
+  }
+}
+
 static bool vulkan_onResize(LG_Renderer * renderer, const int width,
     const int height, const double scale, const LG_RendererRect destRect,
     LG_RendererRotate rotate)
@@ -1134,20 +1184,41 @@ static bool vulkan_onResize(LG_Renderer * renderer, const int width,
   if (!vulkan_initPipeline(this))
     return false;
 
+  vulkan_calc_mouse_size(this);
+  vulkan_calc_mouse_state(this);
+
   return true;
 }
 
-static bool vulkan_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
-    const int width, const int height,
+static bool vulkan_onMouseShape(LG_Renderer * renderer,
+    const LG_RendererCursor cursor, const int width, const int height,
     const int pitch, const uint8_t * data)
 {
-  DEBUG_ERROR("vulkan_onMouseShape not implemented");
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
+  if (!vulkan_cursorSetShape(this->cursor, cursor, width, height, pitch, data))
+  {
+    DEBUG_ERROR("Failed to update the cursor shape");
+    return false;
+  }
+
+  this->mouseWidth  = width;
+  this->mouseHeight = height;
+  vulkan_calc_mouse_size(this);
+
   return true;
 }
 
 static bool vulkan_onMouseEvent(LG_Renderer * renderer, const bool visible,
     int x, int y, const int hx, const int hy)
 {
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  this->cursorVisible = visible;
+  this->cursorX       = x + hx;
+  this->cursorY       = y + hy;
+  this->cursorHX      = hx;
+  this->cursorHY      = hy;
+  vulkan_calc_mouse_state(this);
   return true;
 }
 
@@ -1156,6 +1227,7 @@ static bool vulkan_onFrameFormat(LG_Renderer * renderer,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   memcpy(&this->format, &format, sizeof(LG_RendererFormat));
+  this->formatValid = true;
 
   if (!vulkan_initPipeline(this))
     goto err;
@@ -1679,13 +1751,20 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_createDesktopUniformBuffer(this))
     goto err_fence;
 
+  if (!vulkan_cursorInit(&this->cursor, &this->memoryProperties, this->device,
+      this->commandBuffer))
+    goto err_desktop_uniform;
+
   if (!vulkan_imGuiInit(&this->imGui, this->instance, this->physicalDevice,
       this->queueFamilyIndex, &this->memoryProperties, this->device,
       this->queue, this->commandBuffer, this->sampler, this->descriptorPool,
       this->fence))
-    goto err_desktop_uniform;
+    goto err_cursor;
 
   return true;
+
+err_cursor:
+  vulkan_cursorFree(&this->cursor);
 
 err_desktop_uniform:
   vkDestroyBuffer(this->device, this->desktopUniformBuffer, NULL);
@@ -1813,6 +1892,9 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
 
   vulkan_preRenderBarrier(this);
 
+  if (!vulkan_cursorPreRender(this->cursor))
+    return false;
+
   VkViewport viewport =
   {
     .width = (float) this->swapchainExtent.width,
@@ -1856,14 +1938,15 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
 
   if (this->desktopImage)
   {
-    vkCmdBindDescriptorSets(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        this->pipelineLayout, 0, 1, &this->descriptorSet, 0, NULL);
+    vkCmdBindDescriptorSets(this->commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipelineLayout, 0, 1,
+        &this->descriptorSet, 0, NULL);
 
     vkCmdDraw(this->commandBuffer, 3, 1, 0, 0);
   }
 
   if (drawImGui)
-    vulkan_imGuiRecordCommandBuffer(this->imGui);
+    vulkan_imGuiRender(this->imGui);
 
   vkCmdEndRenderPass(this->commandBuffer);
 

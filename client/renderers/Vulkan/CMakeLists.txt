@@ -38,6 +38,7 @@ build_vulkan_shaders(
 )
 
 add_library(renderer_Vulkan STATIC
+  cursor.c
   extensions.c
   imgui.c
   vulkan.c

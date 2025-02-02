@@ -20,26 +20,26 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
-
 #include <stdbool.h>
 
-typedef struct Vulkan_ImGui Vulkan_ImGui;
+#include "interface/renderer.h"
 
-bool vulkan_imGuiInit(Vulkan_ImGui ** imGui, VkInstance instance,
-    VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
+typedef struct Vulkan_Cursor Vulkan_Cursor;
+
+bool vulkan_cursorInit(Vulkan_Cursor ** this,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
-    VkQueue queue, VkCommandBuffer commandBuffer, VkSampler sampler,
-    VkDescriptorPool descriptorPool, VkFence fence);
-void vulkan_imGuiFree(Vulkan_ImGui ** imGui);
+    VkCommandBuffer commandBuffer);
+void vulkan_cursorFree(Vulkan_Cursor ** cursor);
 
-void * vulkan_imGuiCreateTexture(Vulkan_ImGui * imGui, int width, int height,
-    uint8_t * data);
-void vulkan_imGuiFreeTexture(Vulkan_ImGui * imGui, void * texture);
+bool vulkan_cursorSetShape(
+    Vulkan_Cursor * this,
+    const LG_RendererCursor type,
+    const int width,
+    const int height,
+    const int stride,
+    const uint8_t * data);
 
-bool vulkan_imGuiInitPipeline(Vulkan_ImGui * imGui,
-    uint32_t swapchainImageCount, VkRenderPass renderPass);
-void vulkan_imGuiDeinitPipeline(Vulkan_ImGui * imGui);
-bool vulkan_imGuiUploadFonts(Vulkan_ImGui * imGui);
+void vulkan_cursorSetState(Vulkan_Cursor * this, const bool visible,
+    const float x, const float y, const float hx, const float hy);
 
-bool vulkan_imGuiRender(Vulkan_ImGui * imGui);
+bool vulkan_cursorPreRender(Vulkan_Cursor * this);

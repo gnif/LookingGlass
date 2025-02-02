@@ -40,6 +40,38 @@ uint32_t vulkan_findMemoryType(
   return UINT32_MAX;
 }
 
+VkDeviceMemory vulkan_allocateMemory(
+    struct VkPhysicalDeviceMemoryProperties *memoryProperties,
+    VkDevice device, struct VkMemoryRequirements *memoryRequirements,
+    VkMemoryPropertyFlags requiredProperties)
+{
+  uint32_t memoryTypeIndex = vulkan_findMemoryType(memoryProperties,
+      memoryRequirements->memoryTypeBits, requiredProperties);
+  if (memoryTypeIndex == UINT32_MAX)
+  {
+    DEBUG_ERROR("Could not find suitable memory type with properties %"PRIu32,
+        requiredProperties);
+    return NULL;
+  }
+
+  struct VkMemoryAllocateInfo allocateInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+    .allocationSize = memoryRequirements->size,
+    .memoryTypeIndex = memoryTypeIndex
+  };
+
+  VkDeviceMemory memory;
+  VkResult result = vkAllocateMemory(device, &allocateInfo, NULL, &memory);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to allocate memory (VkResult: %d)", result);
+    return NULL;
+  }
+
+  return memory;
+}
+
 VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
     VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool)
 {

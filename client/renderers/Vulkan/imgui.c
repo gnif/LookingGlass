@@ -287,28 +287,11 @@ void * vulkan_imGuiCreateTexture(Vulkan_ImGui * this, int width, int height,
 
   struct VkMemoryRequirements memoryRequirements;
   vkGetImageMemoryRequirements(this->device, image, &memoryRequirements);
-  uint32_t memoryTypeIndex = vulkan_findMemoryType(this->memoryProperties,
-      memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  if (memoryTypeIndex == UINT32_MAX)
-  {
-    DEBUG_ERROR("Could not find suitable memory type for image");
-    goto err_image;
-  }
 
-  struct VkMemoryAllocateInfo allocateInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    .allocationSize = memoryRequirements.size,
-    .memoryTypeIndex = memoryTypeIndex
-  };
-
-  VkDeviceMemory memory;
-  result = vkAllocateMemory(this->device, &allocateInfo, NULL, &memory);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to allocate image memory (VkResult: %d)", result);
+  VkDeviceMemory memory = vulkan_allocateMemory(this->memoryProperties,
+      this->device, &memoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (!memory)
     goto err_image;
-  }
 
   result = vkBindImageMemory(this->device, image, memory, 0);
   if (result != VK_SUCCESS)
@@ -476,7 +459,7 @@ bool vulkan_imGuiUploadFonts(Vulkan_ImGui * this)
   return true;
 }
 
-bool vulkan_imGuiRecordCommandBuffer(Vulkan_ImGui * this)
+bool vulkan_imGuiRender(Vulkan_ImGui * this)
 {
   vkResult = VK_SUCCESS;
   ImGui_ImplVulkan_NewFrame();

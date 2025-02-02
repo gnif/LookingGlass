@@ -29,6 +29,11 @@ uint32_t vulkan_findMemoryType(
     struct VkPhysicalDeviceMemoryProperties * memoryProperties,
     uint32_t memoryTypeBits, VkMemoryPropertyFlags requiredProperties);
 
+VkDeviceMemory vulkan_allocateMemory(
+    struct VkPhysicalDeviceMemoryProperties * memoryProperties,
+    VkDevice device, struct VkMemoryRequirements *memoryRequirements,
+    VkMemoryPropertyFlags requiredProperties);
+
 VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
     VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool);
 
