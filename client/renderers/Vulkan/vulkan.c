@@ -393,14 +393,28 @@ static VkSurfaceFormatKHR vulkan_selectSurfaceFormat(struct Inst * this)
     goto err_formats;
   }
 
-  // TODO: Handle 10-bit HDR
-  uint32_t formatIndex = UINT32_MAX;
+  VkFormat hdrFormat = VK_FORMAT_UNDEFINED;
+  VkColorSpaceKHR hdrColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   if (this->format.type == FRAME_TYPE_RGBA16F)
+  {
+    hdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    hdrColorSpace = VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
+  }
+  else if (this->format.type == FRAME_TYPE_RGBA10)
+  {
+    hdrFormat = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+    hdrColorSpace = this->format.hdrPQ ?
+        VK_COLOR_SPACE_HDR10_ST2084_EXT :
+        VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  }
+
+  uint32_t formatIndex = UINT32_MAX;
+  if (hdrFormat != VK_FORMAT_UNDEFINED)
   {
     for (uint32_t i = 0; i < formatCount; ++i)
     {
-      if (formats[i].format == VK_FORMAT_R16G16B16A16_SFLOAT &&
-          formats[i].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
+      if (formats[i].format == hdrFormat &&
+          formats[i].colorSpace == hdrColorSpace)
       {
         formatIndex = i;
         break;
@@ -408,7 +422,7 @@ static VkSurfaceFormatKHR vulkan_selectSurfaceFormat(struct Inst * this)
     }
     if (formatIndex == UINT32_MAX)
     {
-      DEBUG_WARN("Could not find suitable 16-bit surface format; HDR content will look bad");
+      DEBUG_WARN("Could not find suitable surface format; HDR content will look bad");
     }
   }
 
