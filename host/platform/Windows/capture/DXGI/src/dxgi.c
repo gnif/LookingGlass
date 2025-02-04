@@ -53,13 +53,13 @@
 
 //post processers
 extern const DXGIPostProcess DXGIPP_Downsample;
-extern const DXGIPostProcess DXGIPP_SDRWhiteLevel;
+extern const DXGIPostProcess DXGIPP_HDR16to10;
 extern const DXGIPostProcess DXGIPP_RGB24;
 
 const DXGIPostProcess * postProcessors[] =
 {
   &DXGIPP_Downsample,
-  &DXGIPP_SDRWhiteLevel,
+  &DXGIPP_HDR16to10,
   &DXGIPP_RGB24
 };
 
@@ -826,10 +826,10 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
   bool shareable = this->backend != &copyBackendD3D11;
   if (this->hdr)
   {
-    //HDR content needs to be corrected and converted to HDR10
-    if (!ppInit(&DXGIPP_SDRWhiteLevel, shareable))
+    //HDR content needs to be converted to HDR10
+    if (!ppInit(&DXGIPP_HDR16to10, shareable))
     {
-      DEBUG_ERROR("Failed to initialize the SDRWhiteLevel post processor");
+      DEBUG_ERROR("Failed to initialize the HDR16to10 post processor");
       goto fail;
     }
   }
@@ -1416,7 +1416,7 @@ static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
   frame->stride           = this->stride;
   frame->format           = this->outputFormat;
   frame->hdr              = this->hdr;
-  frame->hdrPQ            = false;
+  frame->hdrPQ            = this->outputFormat == CAPTURE_FMT_RGBA10;
   frame->rotation         = this->rotation;
 
   frame->damageRectsCount = tex->damageRectsCount;

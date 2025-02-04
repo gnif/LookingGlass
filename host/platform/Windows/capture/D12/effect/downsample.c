@@ -54,7 +54,7 @@ static void d12_effect_downsampleInitOptions(void)
 }
 
 static D12EffectStatus d12_effect_downsampleCreate(D12Effect ** instance,
-  ID3D12Device3 * device, const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
+  ID3D12Device3 * device)
 {
   DownsampleInst * this = calloc(1, sizeof(*this));
   if (!this)

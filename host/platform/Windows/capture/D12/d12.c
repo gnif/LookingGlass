@@ -406,7 +406,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   for(const D12Effect ** effect = D12Effects; *effect; ++effect)
   {
     D12Effect * instance;
-    switch(d12_effectCreate(*effect, &instance, *device, &this->displayPathInfo))
+    switch(d12_effectCreate(*effect, &instance, *device))
     {
       case D12_EFFECT_STATUS_OK:
         DEBUG_INFO("D12 Created Effect: %s", (*effect)->name);
@@ -634,7 +634,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->format           = this->dstFormat.format;
   frame->hdr              = this->dstFormat.colorSpace ==
     DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-  frame->hdrPQ            = false;
+  frame->hdrPQ            = this->dstFormat.format == CAPTURE_FMT_RGBA10;
   frame->rotation         = desc.rotation;
   frame->colorMetadata    = this->colorMetadata;
 

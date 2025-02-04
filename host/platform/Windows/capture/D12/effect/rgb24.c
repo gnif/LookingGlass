@@ -44,8 +44,7 @@ static void d12_effect_rgb24InitOptions(void)
   option_register(options);
 }
 
-static D12EffectStatus d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device,
-  const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
+static D12EffectStatus d12_effect_rgb24Create(D12Effect ** instance, ID3D12Device3 * device)
 {
   if (!option_get_bool("d12", "allowRGB24"))
     return D12_EFFECT_STATUS_BYPASS;
