@@ -1,6 +1,6 @@
 #version 460
 
-layout (binding = 0) uniform u
+layout (set = 1, binding = 0) uniform u
 {
   mat4 transform;
 };

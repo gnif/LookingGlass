@@ -75,6 +75,156 @@ VkDeviceMemory vulkan_allocateMemory(
   return memory;
 }
 
+VkShaderModule vulkan_loadShader(VkDevice device, const char * spv, size_t len)
+{
+  if (len % 4 != 0)
+  {
+    DEBUG_ERROR("SPIR-V length is not a multiple of 4");
+    goto err;
+  }
+
+  uint32_t *spvAligned = aligned_alloc(4, len);
+  if (!spvAligned)
+  {
+    DEBUG_ERROR("out of memory");
+    goto err;
+  }
+  memcpy(spvAligned, spv, len);
+
+  struct VkShaderModuleCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+    .codeSize = len,
+    .pCode = spvAligned
+  };
+
+  VkShaderModule shader;
+  VkResult result = vkCreateShaderModule(device, &createInfo, NULL, &shader);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create shader module (VkResult: %d)", result);
+    goto err_spv;
+  }
+
+  free(spvAligned);
+  return shader;
+
+err_spv:
+  free(spvAligned);
+
+err:
+  return NULL;
+}
+
+VkPipeline vulkan_createGraphicsPipeline(VkDevice device,
+    VkShaderModule vertexShader, VkShaderModule fragmentShader,
+    struct VkSpecializationInfo * fragmentSpecializationInfo,
+    VkPipelineLayout pipelineLayout, VkRenderPass renderPass)
+{
+  struct VkPipelineShaderStageCreateInfo stages[] =
+  {
+    {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+      .stage = VK_SHADER_STAGE_VERTEX_BIT,
+      .module = vertexShader,
+      .pName = "main"
+    },
+    {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+      .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+      .module = fragmentShader,
+      .pName = "main",
+      .pSpecializationInfo = fragmentSpecializationInfo
+    }
+  };
+
+  struct VkPipelineVertexInputStateCreateInfo vertexInputState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+  };
+
+  struct VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+  };
+
+  struct VkPipelineViewportStateCreateInfo viewportState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    .viewportCount = 1,
+    .scissorCount = 1
+  };
+
+  struct VkPipelineRasterizationStateCreateInfo rasterizationState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    .polygonMode = VK_POLYGON_MODE_FILL,
+    .cullMode = VK_CULL_MODE_BACK_BIT,
+    .frontFace = VK_FRONT_FACE_CLOCKWISE,
+    .lineWidth = 1.0f
+  };
+
+  struct VkPipelineMultisampleStateCreateInfo multisampleState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+  };
+
+  struct VkPipelineColorBlendAttachmentState colorBlendAttachment =
+  {
+    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+  };
+
+  struct VkPipelineColorBlendStateCreateInfo colorBlendState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    .attachmentCount = 1,
+    .pAttachments = &colorBlendAttachment
+  };
+
+  VkDynamicState dynamicStates[] =
+  {
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_SCISSOR
+  };
+
+  struct VkPipelineDynamicStateCreateInfo dynamicState =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    .dynamicStateCount = ARRAY_LENGTH(dynamicStates),
+    .pDynamicStates = dynamicStates
+  };
+
+  struct VkGraphicsPipelineCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+    .stageCount = ARRAY_LENGTH(stages),
+    .pStages = stages,
+    .pVertexInputState = &vertexInputState,
+    .pInputAssemblyState = &inputAssemblyState,
+    .pViewportState = &viewportState,
+    .pRasterizationState = &rasterizationState,
+    .pMultisampleState = &multisampleState,
+    .pColorBlendState = &colorBlendState,
+    .pDynamicState = &dynamicState,
+    .layout = pipelineLayout,
+    .renderPass = renderPass
+  };
+
+  VkPipeline pipeline;
+  VkResult result = vkCreateGraphicsPipelines(device, NULL, 1,
+      &createInfo, NULL, &pipeline);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create graphics pipeline (VkResult: %d)", result);
+    return NULL;
+  }
+
+  return pipeline;
+}
+
 VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
     VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool)
 {
@@ -218,7 +368,32 @@ bool vulkan_waitFence(VkDevice device, VkFence fence)
   return true;
 }
 
-void vulkan_updateDescriptorSet(VkDevice device, VkDescriptorSet descriptorSet,
+void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
+    VkImageView imageView)
+{
+  struct VkDescriptorImageInfo imageInfo =
+  {
+    .imageView = imageView,
+    .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+  };
+
+  struct VkWriteDescriptorSet descriptorWrites[] =
+  {
+    {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = descriptorSet,
+      .dstBinding = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+      .pImageInfo = &imageInfo
+    }
+  };
+
+  vkUpdateDescriptorSets(device, ARRAY_LENGTH(descriptorWrites),
+      descriptorWrites, 0, NULL);
+}
+
+void vulkan_updateDescriptorSet1(VkDevice device, VkDescriptorSet descriptorSet,
     VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout)
 {
   struct VkDescriptorBufferInfo bufferInfo =

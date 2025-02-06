@@ -28,9 +28,13 @@ typedef struct Vulkan_Cursor Vulkan_Cursor;
 
 bool vulkan_cursorInit(Vulkan_Cursor ** this,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
-    VkCommandBuffer commandBuffer, VkDescriptorSetLayout descriptorSetLayout,
-    VkDescriptorPool descriptorPool, VkPipelineLayout pipelineLayout);
+    VkShaderModule vertexShader, VkCommandBuffer commandBuffer,
+    VkDescriptorSetLayout descriptorSetLayout, VkDescriptorPool descriptorPool,
+    VkPipelineLayout pipelineLayout);
 void vulkan_cursorFree(Vulkan_Cursor ** cursor);
+
+bool vulkan_cursorInitPipeline(Vulkan_Cursor * this, VkRenderPass renderPass,
+    VkColorSpaceKHR colorSpace);
 
 bool vulkan_cursorSetShape(
     Vulkan_Cursor * this,

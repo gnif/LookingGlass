@@ -41,6 +41,13 @@ VkDeviceMemory vulkan_allocateMemory(
     VkDevice device, struct VkMemoryRequirements *memoryRequirements,
     VkMemoryPropertyFlags requiredProperties);
 
+VkShaderModule vulkan_loadShader(VkDevice device, const char * spv, size_t len);
+
+VkPipeline vulkan_createGraphicsPipeline(VkDevice device,
+    VkShaderModule vertexShader, VkShaderModule fragmentShader,
+    struct VkSpecializationInfo * fragmentSpecializationInfo,
+    VkPipelineLayout pipelineLayout, VkRenderPass renderPass);
+
 VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
     VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool);
 
@@ -54,7 +61,10 @@ VkImageView vulkan_createImageView(VkDevice device, VkImage image,
 
 bool vulkan_waitFence(VkDevice device, VkFence fence);
 
-void vulkan_updateDescriptorSet(VkDevice device, VkDescriptorSet descriptorSet,
+void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
+    VkImageView imageView);
+
+void vulkan_updateDescriptorSet1(VkDevice device, VkDescriptorSet descriptorSet,
     VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout);
 
 void vulkan_updateUniformBuffer(void * bufferMap, float translateX,

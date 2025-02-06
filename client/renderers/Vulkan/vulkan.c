@@ -51,9 +51,9 @@ struct Inst
   VkCommandPool         commandPool;
   VkCommandBuffer       commandBuffer;
   VkSampler             sampler;
-  VkDescriptorSetLayout descriptorSetLayout;
+  VkDescriptorSetLayout descriptorSetLayouts[2];
   VkDescriptorPool      descriptorPool;
-  VkDescriptorSet       descriptorSet;
+  VkDescriptorSet       descriptorSets[2];
   VkPipelineLayout      pipelineLayout;
   VkSemaphore           swapchainAcquireSemaphore;
   VkSemaphore           swapchainReleaseSemaphore;
@@ -63,6 +63,7 @@ struct Inst
   VkFormat         swapchainFormat;
   VkExtent2D       swapchainExtent;
   uint32_t         swapchainImageCount;
+  VkImage        * swapchainImages;
   VkImageView    * swapchainImageViews;
   VkRenderPass     renderPass;
   VkPipeline       pipeline;
@@ -197,6 +198,13 @@ static void vulkan_freeSwapchain(struct Inst * this)
     this->swapchainImageViews = NULL;
   }
 
+  if (this->swapchainImages)
+  {
+    free(this->swapchainImages);
+    this->swapchainImages = NULL;
+    this->swapchainImageCount = 0;
+  }
+
   if (this->swapchain)
   {
     vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
@@ -263,8 +271,10 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
   if (this->descriptorPool)
     vkDestroyDescriptorPool(this->device, this->descriptorPool, NULL);
 
-  if (this->descriptorSetLayout)
-    vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayout, NULL);
+  for (int i = 0; i < ARRAY_LENGTH(this->descriptorSetLayouts); ++i)
+    if (this->descriptorSetLayouts[i])
+      vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayouts[i],
+          NULL);
 
   if (this->sampler)
     vkDestroySampler(this->device, this->sampler, NULL);
@@ -341,8 +351,8 @@ static bool vulkan_getSwapchainImages(struct Inst * this)
     }
   }
 
-  free(images);
   this->swapchainImageCount = imageCount;
+  this->swapchainImages = images;
   this->swapchainImageViews = imageViews;
   return true;
 
@@ -526,7 +536,8 @@ static bool vulkan_createSwapchain(struct Inst * this,
     .imageExtent.width = this->width,
     .imageExtent.height = this->height,
     .imageArrayLayers = 1,
-    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
     .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
     .preTransform = surfaceCaps.currentTransform,
     .compositeAlpha = compositeAlpha,
@@ -605,27 +616,42 @@ static bool vulkan_createRenderPass(struct Inst * this)
     .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
   };
 
-  struct VkAttachmentReference colorAttachment =
+  struct VkAttachmentReference attachmentRef =
   {
     .attachment = 0,
-    .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    .layout = VK_IMAGE_LAYOUT_GENERAL
   };
 
   struct VkSubpassDescription subpass =
   {
     .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+    .inputAttachmentCount = 1,
+    .pInputAttachments = &attachmentRef,
     .colorAttachmentCount = 1,
-    .pColorAttachments = &colorAttachment
+    .pColorAttachments = &attachmentRef
   };
 
-  struct VkSubpassDependency dependency =
+  struct VkSubpassDependency dependencies[] =
   {
-    .srcSubpass = VK_SUBPASS_EXTERNAL,
-    .dstSubpass = 0,
-    .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-    .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+    {
+      .srcSubpass = VK_SUBPASS_EXTERNAL,
+      .dstSubpass = 0,
+      .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+    },
+    // This self-dependency allows us to insert pipeline barriers within the
+    // render pass, enabling programmatic blending
+    {
+      .srcSubpass = 0,
+      .dstSubpass = 0,
+      .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,
+      .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+    }
   };
 
   struct VkRenderPassCreateInfo createInfo =
@@ -635,8 +661,8 @@ static bool vulkan_createRenderPass(struct Inst * this)
     .pAttachments = &attachment,
     .subpassCount = 1,
     .pSubpasses = &subpass,
-    .dependencyCount = 1,
-    .pDependencies = &dependency
+    .dependencyCount = ARRAY_LENGTH(dependencies),
+    .pDependencies = dependencies
   };
 
   VkResult result = vkCreateRenderPass(this->device, &createInfo, NULL,
@@ -650,7 +676,7 @@ static bool vulkan_createRenderPass(struct Inst * this)
   return true;
 }
 
-static bool vulkan_createGraphicsPipeline(struct Inst * this)
+static bool vulkan_createDesktopPipeline(struct Inst * this)
 {
   if (this->pipeline)
   {
@@ -658,159 +684,11 @@ static bool vulkan_createGraphicsPipeline(struct Inst * this)
     this->pipeline = NULL;
   }
 
-  struct VkPipelineShaderStageCreateInfo stages[] =
-  {
-    {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-      .pNext = NULL,
-      .flags = 0,
-      .stage = VK_SHADER_STAGE_VERTEX_BIT,
-      .module = this->vertexShader,
-      .pName = "main",
-      .pSpecializationInfo = NULL
-    },
-    {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-      .pNext = NULL,
-      .flags = 0,
-      .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-      .module = this->fragmentShader,
-      .pName = "main",
-      .pSpecializationInfo = NULL
-    }
-  };
-
-  struct VkPipelineVertexInputStateCreateInfo vertexInputState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .vertexBindingDescriptionCount = 0,
-    .pVertexBindingDescriptions = NULL,
-    .vertexAttributeDescriptionCount = 0,
-    .pVertexAttributeDescriptions = NULL
-  };
-
-  struct VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
-    .primitiveRestartEnable = VK_FALSE
-  };
-
-  struct VkPipelineViewportStateCreateInfo viewportState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .viewportCount = 1,
-    .pViewports = NULL,
-    .scissorCount = 1,
-    .pScissors = NULL
-  };
-
-  struct VkPipelineRasterizationStateCreateInfo rasterizationState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .depthClampEnable = VK_FALSE,
-    .rasterizerDiscardEnable = VK_FALSE,
-    .polygonMode = VK_POLYGON_MODE_FILL,
-    .cullMode = VK_CULL_MODE_BACK_BIT,
-    .frontFace = VK_FRONT_FACE_CLOCKWISE,
-    .depthBiasEnable = VK_FALSE,
-    .depthBiasConstantFactor = 0.0f,
-    .depthBiasClamp = 0.0f,
-    .depthBiasSlopeFactor = 0.0f,
-    .lineWidth = 1.0f
-  };
-
-  struct VkPipelineMultisampleStateCreateInfo multisampleState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-    .sampleShadingEnable = VK_FALSE,
-    .minSampleShading = 0.0f,
-    .pSampleMask = NULL,
-    .alphaToCoverageEnable = VK_FALSE,
-    .alphaToOneEnable = VK_FALSE
-  };
-
-  struct VkPipelineColorBlendAttachmentState colorBlendAttachment =
-  {
-    .blendEnable = VK_TRUE,
-    .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-    .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-    .colorBlendOp = VK_BLEND_OP_ADD,
-    .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-    .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-    .alphaBlendOp = VK_BLEND_OP_ADD,
-    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
-  };
-
-  struct VkPipelineColorBlendStateCreateInfo colorBlendState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .logicOpEnable = VK_FALSE,
-    .logicOp = VK_LOGIC_OP_CLEAR,
-    .attachmentCount = 1,
-    .pAttachments = &colorBlendAttachment,
-    .blendConstants = {0.0f, 0.0f, 0.0f, 0.0f}
-  };
-
-  VkDynamicState dynamicStates[] =
-  {
-    VK_DYNAMIC_STATE_VIEWPORT,
-    VK_DYNAMIC_STATE_SCISSOR
-  };
-
-  struct VkPipelineDynamicStateCreateInfo dynamicState =
-  {
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .dynamicStateCount = 2,
-    .pDynamicStates = dynamicStates
-  };
-
-  struct VkGraphicsPipelineCreateInfo createInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .stageCount = 2,
-    .pStages = stages,
-    .pVertexInputState = &vertexInputState,
-    .pInputAssemblyState = &inputAssemblyState,
-    .pTessellationState = NULL,
-    .pViewportState = &viewportState,
-    .pRasterizationState = &rasterizationState,
-    .pMultisampleState = &multisampleState,
-    .pDepthStencilState = NULL,
-    .pColorBlendState = &colorBlendState,
-    .pDynamicState = &dynamicState,
-    .layout = this->pipelineLayout,
-    .renderPass = this->renderPass,
-    .subpass = 0,
-    .basePipelineHandle = NULL,
-    .basePipelineIndex = 0
-  };
-
-  VkResult result = vkCreateGraphicsPipelines(this->device, NULL, 1,
-      &createInfo, NULL, &this->pipeline);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to create swapchain (VkResult: %d)", result);
+  this->pipeline = vulkan_createGraphicsPipeline(this->device,
+      this->vertexShader, this->fragmentShader, NULL, this->pipelineLayout,
+      this->renderPass);
+  if (!this->pipeline)
     return false;
-  }
 
   return true;
 }
@@ -1003,8 +881,12 @@ static bool vulkan_initPipeline(struct Inst * this)
       if (!vulkan_createRenderPass(this))
         goto err_swapchain;
 
-      if (!vulkan_createGraphicsPipeline(this))
+      if (!vulkan_createDesktopPipeline(this))
         goto err_render_pass;
+
+      if (!vulkan_cursorInitPipeline(this->cursor, this->renderPass,
+          surfaceFormat.colorSpace))
+        goto err_pipeline;
 
       if (!vulkan_imGuiInitPipeline(this->imGui, this->swapchainImageCount,
           this->renderPass))
@@ -1031,7 +913,7 @@ static bool vulkan_initPipeline(struct Inst * this)
       if (!vulkan_createDesktopImage(this, desktopFormat))
         goto err_framebuffers;
 
-      vulkan_updateDescriptorSet(this->device, this->descriptorSet,
+      vulkan_updateDescriptorSet1(this->device, this->descriptorSets[1],
           this->desktopUniformBuffer, this->desktopImageView,
           VK_IMAGE_LAYOUT_GENERAL);
     }
@@ -1404,50 +1286,6 @@ err:
   return false;
 }
 
-static bool vulkan_loadShader(struct Inst * this, const char * spv, size_t len,
-    VkShaderModule * shader)
-{
-  if (len % 4 != 0)
-  {
-    DEBUG_ERROR("SPIR-V length is not a multiple of 4");
-    goto err;
-  }
-
-  uint32_t *spvAligned = aligned_alloc(4, len);
-  if (!spvAligned)
-  {
-    DEBUG_ERROR("out of memory");
-    goto err;
-  }
-  memcpy(spvAligned, spv, len);
-
-  struct VkShaderModuleCreateInfo createInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .codeSize = len,
-    .pCode = spvAligned,
-  };
-
-  VkResult result = vkCreateShaderModule(this->device, &createInfo, NULL,
-      shader);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to create shader module (VkResult: %d)", result);
-    goto err_spv;
-  }
-
-  free(spvAligned);
-  return true;
-
-err_spv:
-  free(spvAligned);
-
-err:
-  return false;
-}
-
 static bool vulkan_createCommandPool(struct Inst * this)
 {
   struct VkCommandPoolCreateInfo createInfo =
@@ -1514,7 +1352,38 @@ static bool vulkan_createSampler(struct Inst * this)
   return true;
 }
 
-static bool vulkan_createDescriptorSetLayout(struct Inst * this)
+static bool vulkan_createDescriptorSetLayout0(struct Inst * this)
+{
+  struct VkDescriptorSetLayoutBinding bindings[] =
+  {
+    {
+      .binding = 0,
+      .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+      .descriptorCount = 1,
+      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+    }
+  };
+
+  struct VkDescriptorSetLayoutCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    .bindingCount = ARRAY_LENGTH(bindings),
+    .pBindings = bindings
+  };
+
+  VkResult result = vkCreateDescriptorSetLayout(this->device, &createInfo, NULL,
+      &this->descriptorSetLayouts[0]);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create descriptor set layout 0 (VkResult: %d)",
+        result);
+    return false;
+  }
+
+  return true;
+}
+
+static bool vulkan_createDescriptorSetLayout1(struct Inst * this)
 {
   struct VkDescriptorSetLayoutBinding bindings[] =
   {
@@ -1541,10 +1410,10 @@ static bool vulkan_createDescriptorSetLayout(struct Inst * this)
   };
 
   VkResult result = vkCreateDescriptorSetLayout(this->device, &createInfo, NULL,
-      &this->descriptorSetLayout);
+      &this->descriptorSetLayouts[1]);
   if (result != VK_SUCCESS)
   {
-    DEBUG_ERROR("Failed to create descriptor set layout (VkResult: %d)",
+    DEBUG_ERROR("Failed to create descriptor set layout 1 (VkResult: %d)",
         result);
     return false;
   }
@@ -1563,6 +1432,10 @@ static bool vulkan_createDescriptorPool(struct Inst * this)
     {
       .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       .descriptorCount = 8
+    },
+    {
+      .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+      .descriptorCount = 1
     }
   };
 
@@ -1571,7 +1444,7 @@ static bool vulkan_createDescriptorPool(struct Inst * this)
     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
     .maxSets = 8,
-    .poolSizeCount = 2,
+    .poolSizeCount = ARRAY_LENGTH(poolSizes),
     .pPoolSizes = poolSizes
   };
 
@@ -1592,8 +1465,8 @@ static bool vulkan_createPipelineLayout(struct Inst * this)
   struct VkPipelineLayoutCreateInfo createInfo =
   {
     .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    .setLayoutCount = 1,
-    .pSetLayouts = &this->descriptorSetLayout
+    .setLayoutCount = ARRAY_LENGTH(this->descriptorSetLayouts),
+    .pSetLayouts = this->descriptorSetLayouts
   };
 
   VkResult result = vkCreatePipelineLayout(this->device, &createInfo, NULL,
@@ -1673,12 +1546,14 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_createDevice(this))
     goto err_surf;
 
-  if (!vulkan_loadShader(this, b_shader_basic_vert_spv,
-      b_shader_basic_vert_spv_size - 1, &this->vertexShader))
+  this->vertexShader = vulkan_loadShader(this->device, b_shader_basic_vert_spv,
+      b_shader_basic_vert_spv_size - 1);
+  if (!this->vertexShader)
     goto err_device;
 
-  if (!vulkan_loadShader(this, b_shader_basic_frag_spv,
-      b_shader_basic_frag_spv_size - 1, &this->fragmentShader))
+  this->fragmentShader = vulkan_loadShader(this->device,
+      b_shader_basic_frag_spv, b_shader_basic_frag_spv_size - 1);
+  if (!this->fragmentShader)
     goto err_vert_shader;
 
   if (!vulkan_createCommandPool(this))
@@ -1690,16 +1565,22 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_createSampler(this))
     goto err_command_pool;
 
-  if (!vulkan_createDescriptorSetLayout(this))
+  if (!vulkan_createDescriptorSetLayout0(this))
     goto err_sampler;
 
-  if (!vulkan_createDescriptorPool(this))
-    goto err_descriptor_set_layout;
+  if (!vulkan_createDescriptorSetLayout1(this))
+    goto err_descriptor_set_layout0;
 
-  this->descriptorSet = vulkan_allocateDescriptorSet(this->device,
-      this->descriptorSetLayout, this->descriptorPool);
-  if (!this->descriptorSet)
-    goto err_descriptor_set_layout;
+  if (!vulkan_createDescriptorPool(this))
+    goto err_descriptor_set_layout1;
+
+  for (int i = 0; i < ARRAY_LENGTH(this->descriptorSetLayouts); ++i)
+  {
+    this->descriptorSets[i] = vulkan_allocateDescriptorSet(this->device,
+        this->descriptorSetLayouts[i], this->descriptorPool);
+    if (!this->descriptorSets[i])
+      goto err_descriptor_set_layout1;
+  }
 
   if (!vulkan_createPipelineLayout(this))
     goto err_descriptor_pool;
@@ -1717,8 +1598,8 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
     goto err_fence;
 
   if (!vulkan_cursorInit(&this->cursor, &this->memoryProperties, this->device,
-      this->commandBuffer, this->descriptorSetLayout, this->descriptorPool,
-      this->pipelineLayout))
+      this->vertexShader, this->commandBuffer, this->descriptorSetLayouts[1],
+      this->descriptorPool, this->pipelineLayout))
     goto err_desktop_uniform;
 
   if (!vulkan_imGuiInit(&this->imGui, this->instance, this->physicalDevice,
@@ -1755,11 +1636,18 @@ err_pipeline_layout:
 err_descriptor_pool:
   vkDestroyDescriptorPool(this->device, this->descriptorPool, NULL);
   this->descriptorPool = NULL;
-  this->descriptorSet = NULL;
+  for (int i = 0; i < ARRAY_LENGTH(this->descriptorSets); ++i)
+    this->descriptorSets[i] = NULL;
 
-err_descriptor_set_layout:
-  vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayout, NULL);
-  this->descriptorSetLayout = NULL;
+err_descriptor_set_layout1:
+  vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayouts[1],
+      NULL);
+  this->descriptorSetLayouts[1] = NULL;
+
+err_descriptor_set_layout0:
+  vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayouts[0],
+      NULL);
+  this->descriptorSetLayouts[0] = NULL;
 
 err_sampler:
   vkDestroySampler(this->device, this->sampler, NULL);
@@ -1840,6 +1728,30 @@ static void vulkan_preRenderBarrier(struct Inst * this)
   this->desktopImageLayout = desktopImageBarrier.newLayout;
 }
 
+static void vulkan_framebufferBarrier(struct Inst * this, uint32_t imageIndex)
+{
+  // Make framebuffer writes visible to subsequent draw calls
+  struct VkImageMemoryBarrier imageBarrier =
+  {
+    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    .dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,
+    .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+    .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    .image = this->swapchainImages[imageIndex],
+    .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    .subresourceRange.levelCount = 1,
+    .subresourceRange.layerCount = 1
+  };
+
+  vkCmdPipelineBarrier(this->commandBuffer,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0,
+      NULL, 0, NULL, 1, &imageBarrier);
+}
+
 static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
     bool drawImGui, LG_RendererRotate rotate)
 {
@@ -1902,14 +1814,20 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
   vkCmdBindPipeline(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
       this->pipeline);
 
+  vkCmdBindDescriptorSets(this->commandBuffer,
+      VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipelineLayout, 0, 1,
+      &this->descriptorSets[0], 0, NULL);
+
   if (this->desktopImage)
   {
     vkCmdBindDescriptorSets(this->commandBuffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipelineLayout, 0, 1,
-        &this->descriptorSet, 0, NULL);
+        VK_PIPELINE_BIND_POINT_GRAPHICS, this->pipelineLayout, 1, 1,
+        &this->descriptorSets[1], 0, NULL);
 
     vkCmdDraw(this->commandBuffer, 3, 1, 0, 0);
   }
+
+  vulkan_framebufferBarrier(this, imageIndex);
 
   vulkan_cursorRender(this->cursor,
       (this->format.rotate + rotate) % LG_ROTATE_MAX, this->width,
@@ -1946,6 +1864,9 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   uint32_t imageIndex = vulkan_acquireSwapchainImage(this);
   if (imageIndex == UINT32_MAX)
     goto err;
+
+  vulkan_updateDescriptorSet0(this->device, this->descriptorSets[0],
+      this->swapchainImageViews[imageIndex]);
 
   if (!vulkan_recordCommandBuffer(this, imageIndex, drawImGui, rotate))
     goto err;

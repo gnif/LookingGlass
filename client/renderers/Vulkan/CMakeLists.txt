@@ -35,6 +35,7 @@ endfunction()
 build_vulkan_shaders(
   shader/basic.frag
   shader/basic.vert
+  shader/cursor_rgb.frag
 )
 
 add_library(renderer_Vulkan STATIC
