@@ -92,6 +92,7 @@ typedef struct ColorMetadata
   float minLuminance;
   float maxLuminance;
   float maxFullFrameLuminance;
+  float sdrWhiteLuminance;
 }
 ColorMetadata;
 

@@ -618,6 +618,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     NULL);  // pTotalBytes
   this->pitch = layout.Footprint.RowPitch;
 
+  this->colorMetadata.sdrWhiteLuminance = display_getSDRWhiteLevel(&this->displayPathInfo);
+
   const unsigned maxRows = maxFrameSize / layout.Footprint.RowPitch;
   const unsigned bpp     = this->dstFormat.format == CAPTURE_FMT_RGBA16F ? 8 : 4;
 
