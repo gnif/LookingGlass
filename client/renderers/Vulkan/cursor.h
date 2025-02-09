@@ -23,6 +23,7 @@
 #include <stdbool.h>
 
 #include "interface/renderer.h"
+#include "vulkan_util.h"
 
 typedef struct Vulkan_Cursor Vulkan_Cursor;
 
@@ -34,7 +35,7 @@ bool vulkan_cursorInit(Vulkan_Cursor ** this,
 void vulkan_cursorFree(Vulkan_Cursor ** cursor);
 
 bool vulkan_cursorInitPipeline(Vulkan_Cursor * this, VkRenderPass renderPass,
-    VkColorSpaceKHR colorSpace);
+    ShaderColorSpace colorSpace);
 
 bool vulkan_cursorSetShape(
     Vulkan_Cursor * this,
@@ -48,5 +49,5 @@ void vulkan_cursorSetState(Vulkan_Cursor * this, const bool visible,
     const float x, const float y, const float hx, const float hy);
 
 bool vulkan_cursorPreRender(Vulkan_Cursor * this);
-void vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
+bool vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
     int width, int height);

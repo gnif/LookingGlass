@@ -24,13 +24,16 @@
 
 #include <stdbool.h>
 
+#include "vulkan_util.h"
+
 typedef struct Vulkan_ImGui Vulkan_ImGui;
 
 bool vulkan_imGuiInit(Vulkan_ImGui ** imGui, VkInstance instance,
     VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
-    VkQueue queue, VkCommandBuffer commandBuffer, VkSampler sampler,
-    VkDescriptorPool descriptorPool, VkFence fence);
+    VkQueue queue, VkShaderModule vertexShader, VkCommandBuffer commandBuffer,
+    VkSampler sampler, VkDescriptorPool descriptorPool,
+    VkPipelineLayout pipelineLayout, VkFence fence);
 void vulkan_imGuiFree(Vulkan_ImGui ** imGui);
 
 void * vulkan_imGuiCreateTexture(Vulkan_ImGui * imGui, int width, int height,
@@ -38,8 +41,10 @@ void * vulkan_imGuiCreateTexture(Vulkan_ImGui * imGui, int width, int height,
 void vulkan_imGuiFreeTexture(Vulkan_ImGui * imGui, void * texture);
 
 bool vulkan_imGuiInitPipeline(Vulkan_ImGui * imGui,
-    uint32_t swapchainImageCount, VkRenderPass renderPass);
+    uint32_t swapchainImageCount, VkRenderPass renderPass,
+    ShaderColorSpace colorSpace);
 void vulkan_imGuiDeinitPipeline(Vulkan_ImGui * imGui);
 bool vulkan_imGuiUploadFonts(Vulkan_ImGui * imGui);
 
 bool vulkan_imGuiRender(Vulkan_ImGui * imGui);
+void vulkan_imGuiBlend(Vulkan_ImGui * imGui);

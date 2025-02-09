@@ -34,8 +34,10 @@ endfunction()
 
 build_vulkan_shaders(
   shader/basic.frag
-  shader/basic.vert
   shader/cursor_rgb.frag
+  shader/fullscreen.vert
+  shader/imgui_blend.frag
+  shader/transform_texture.vert
 )
 
 add_library(renderer_Vulkan STATIC

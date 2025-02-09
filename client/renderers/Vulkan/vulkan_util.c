@@ -210,7 +210,8 @@ VkPipeline vulkan_createGraphicsPipeline(VkDevice device,
     .pColorBlendState = &colorBlendState,
     .pDynamicState = &dynamicState,
     .layout = pipelineLayout,
-    .renderPass = renderPass
+    .renderPass = renderPass,
+    .subpass = 1
   };
 
   VkPipeline pipeline;
@@ -369,12 +370,18 @@ bool vulkan_waitFence(VkDevice device, VkFence fence)
 }
 
 void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
-    VkImageView imageView)
+    VkImageView swapchainImageView, VkImageView imGuiImageView)
 {
-  struct VkDescriptorImageInfo imageInfo =
+  struct VkDescriptorImageInfo imageInfos[] =
   {
-    .imageView = imageView,
-    .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    {
+      .imageView = swapchainImageView,
+      .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    },
+    {
+      .imageView = imGuiImageView,
+      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    }
   };
 
   struct VkWriteDescriptorSet descriptorWrites[] =
@@ -383,9 +390,9 @@ void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
       .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
       .dstSet = descriptorSet,
       .dstBinding = 0,
-      .descriptorCount = 1,
+      .descriptorCount = ARRAY_LENGTH(imageInfos),
       .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-      .pImageInfo = &imageInfo
+      .pImageInfo = imageInfos
     }
   };
 
