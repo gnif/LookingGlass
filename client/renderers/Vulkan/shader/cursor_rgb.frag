@@ -7,6 +7,12 @@ layout (constant_id = 0) const uint colorSpace = COLOR_SPACE_SRGB;
 
 layout (input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput framebuffer;
 
+layout (set = 1, binding = 0) uniform u
+{
+  mat4 transform;
+  float whiteLevel;
+};
+
 layout (set = 1, binding = 1) uniform sampler2D sampler1;
 
 layout (location = 0) in vec2 uv;
@@ -15,9 +21,6 @@ layout (location = 0) out vec4 color;
 
 void main()
 {
-  // TODO: Get this from the LG host
-  const float WHITE_LEVEL_NITS = 80.0;
-
   // Read the previously rendered value from the framebuffer. This is encoded
   // according to the configured color space
   vec4 fbPx = subpassLoad(framebuffer);
@@ -51,16 +54,14 @@ void main()
     case COLOR_SPACE_EXTENDED_SRGB_LINEAR:
       // Both BT.709. Adjust cursor to match current white level
       cursorPx = vec4(
-          cursorPx.rgb * WHITE_LEVEL_NITS / REFERENCE_LUMINANCE_NITS,
+          cursorPx.rgb * whiteLevel / REFERENCE_LUMINANCE_NITS,
           cursorPx.a);
       break;
 
     case COLOR_SPACE_HDR10_ST2084:
       // Convert cursor from BT.709 (sRGB colors) to BT.2020 (HDR10 colors) and
       // adjust to match current white level
-      cursorPx = vec4(
-          bt709ToBt2020(cursorPx.rgb) * WHITE_LEVEL_NITS,
-          cursorPx.a);
+      cursorPx = vec4(bt709ToBt2020(cursorPx.rgb) * whiteLevel, cursorPx.a);
       break;
   }
 

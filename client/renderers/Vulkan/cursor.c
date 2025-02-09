@@ -76,27 +76,6 @@ struct Vulkan_Cursor
   void           * stagingMap;
 };
 
-static void freeUniformBuffer(Vulkan_Cursor * this)
-{
-  if (this->uniformBuffer)
-  {
-    vkDestroyBuffer(this->device, this->uniformBuffer, NULL);
-    this->uniformBuffer = NULL;
-  }
-
-  if (this->uniformBufferMap)
-  {
-    vkUnmapMemory(this->device, this->uniformBufferMemory);
-    this->uniformBufferMap = NULL;
-  }
-
-  if (this->uniformBufferMemory)
-  {
-    vkFreeMemory(this->device, this->uniformBufferMemory, NULL);
-    this->uniformBufferMemory = NULL;
-  }
-}
-
 static void freeImage(Vulkan_Cursor * this)
 {
   if (this->imageView)
@@ -119,23 +98,8 @@ static void freeImage(Vulkan_Cursor * this)
     this->imageMemory = NULL;
   }
 
-  if (this->stagingMap)
-  {
-    vkUnmapMemory(this->device, this->stagingMemory);
-    this->stagingMap = NULL;
-  }
-
-  if (this->stagingBuffer)
-  {
-    vkDestroyBuffer(this->device, this->stagingBuffer, NULL);
-    this->stagingBuffer = NULL;
-  }
-
-  if (this->stagingMemory)
-  {
-    vkFreeMemory(this->device, this->stagingMemory, NULL);
-    this->stagingMemory = NULL;
-  }
+  vulkan_freeBuffer(this->device, &this->stagingBuffer, &this->stagingMemory,
+      &this->stagingMap);
 }
 
 static bool createImage(Vulkan_Cursor * this)
@@ -275,7 +239,8 @@ bool vulkan_cursorInit(Vulkan_Cursor ** cursor,
   return true;
 
 err_uniform:
-  freeUniformBuffer(*cursor);
+  vulkan_freeBuffer(device, &(*cursor)->uniformBuffer,
+      &(*cursor)->uniformBufferMemory, &(*cursor)->uniformBufferMap);
 
 err_descriptor_set:
   vkFreeDescriptorSets(device, descriptorPool, 1, &(*cursor)->descriptorSet);
@@ -309,7 +274,8 @@ void vulkan_cursorFree(Vulkan_Cursor ** cursor)
     this->pipeline = NULL;
   }
 
-  freeUniformBuffer(this);
+  vulkan_freeBuffer(this->device, &this->uniformBuffer,
+      &this->uniformBufferMemory, &this->uniformBufferMap);
 
   vkFreeDescriptorSets(this->device, this->descriptorPool, 1,
       &this->descriptorSet);
@@ -505,7 +471,7 @@ bool vulkan_cursorPreRender(Vulkan_Cursor * this)
 }
 
 bool vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
-    int width, int height)
+    int width, int height, float whiteLevel)
 {
   if (!this->visible || !this->imageValid)
     return false;
@@ -525,7 +491,7 @@ bool vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
   float scaleY = (float) this->imageSize / (float) height;
 
   vulkan_updateUniformBuffer(this->uniformBufferMap, translateX, translateY,
-      scaleX, scaleY, LG_ROTATE_0);
+      scaleX, scaleY, LG_ROTATE_0, whiteLevel);
 
   VkRect2D scissor =
   {

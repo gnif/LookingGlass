@@ -3,6 +3,7 @@
 layout (set = 1, binding = 0) uniform u
 {
   mat4 transform;
+  float whiteLevel;
 };
 
 layout(location = 0) out vec2 uv;

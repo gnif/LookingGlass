@@ -50,4 +50,4 @@ void vulkan_cursorSetState(Vulkan_Cursor * this, const bool visible,
 
 bool vulkan_cursorPreRender(Vulkan_Cursor * this);
 bool vulkan_cursorRender(Vulkan_Cursor * this, LG_RendererRotate rotate,
-    int width, int height);
+    int width, int height, float whiteLevel);

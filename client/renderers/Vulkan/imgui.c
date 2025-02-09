@@ -43,6 +43,11 @@ typedef struct Texture
 }
 Texture;
 
+struct BlendUniformBuffer
+{
+  float whiteLevel;
+};
+
 struct Vulkan_ImGui
 {
   VkInstance            instance;
@@ -59,15 +64,20 @@ struct Vulkan_ImGui
   VkPipelineLayout      pipelineLayout;
   VkFence               fence;
 
-  VkDescriptorSetLayout descriptorSetLayout;
+  VkDescriptorSetLayout textureDescriptorSetLayout;
   Vector                textures;
+
+  VkDescriptorSet       blendDescriptorSet;
+  VkBuffer              blendUniformBuffer;
+  VkDeviceMemory        blendUniformBufferMemory;
+  void                * blendUniformBufferMap;
 
   VkPipeline            blendPipeline;
 
   bool                  initialized;
 };
 
-static bool createDescriptorSetLayout(Vulkan_ImGui * this)
+static bool createTextureDescriptorSetLayout(Vulkan_ImGui * this)
 {
   struct VkDescriptorSetLayoutBinding bindings[] =
   {
@@ -87,7 +97,7 @@ static bool createDescriptorSetLayout(Vulkan_ImGui * this)
   };
 
   VkResult result = vkCreateDescriptorSetLayout(this->device, &createInfo, NULL,
-      &this->descriptorSetLayout);
+      &this->textureDescriptorSetLayout);
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to create descriptor set layout (VkResult: %d)",
@@ -98,12 +108,37 @@ static bool createDescriptorSetLayout(Vulkan_ImGui * this)
   return true;
 }
 
+static void updateBlendDescriptorSet(Vulkan_ImGui * this)
+{
+  struct VkDescriptorBufferInfo bufferInfo =
+  {
+    .buffer = this->blendUniformBuffer,
+    .range = VK_WHOLE_SIZE
+  };
+
+  struct VkWriteDescriptorSet descriptorWrites[] =
+  {
+    {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = this->blendDescriptorSet,
+      .dstBinding = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .pBufferInfo = &bufferInfo
+    }
+  };
+
+  vkUpdateDescriptorSets(this->device, ARRAY_LENGTH(descriptorWrites),
+      descriptorWrites, 0, NULL);
+}
+
 bool vulkan_imGuiInit(Vulkan_ImGui ** this, VkInstance instance,
     VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
     VkQueue queue, VkShaderModule vertexShader, VkCommandBuffer commandBuffer,
-    VkSampler sampler, VkDescriptorPool descriptorPool,
-    VkPipelineLayout pipelineLayout, VkFence fence)
+    VkSampler sampler, VkDescriptorSetLayout descriptorSetLayout1,
+    VkDescriptorPool descriptorPool, VkPipelineLayout pipelineLayout,
+    VkFence fence)
 {
   *this = calloc(1, sizeof(Vulkan_ImGui));
   if (!*this)
@@ -130,12 +165,33 @@ bool vulkan_imGuiInit(Vulkan_ImGui ** this, VkInstance instance,
   if (!(*this)->blendFragmentShader)
     goto err_imgui;
 
-  if (!createDescriptorSetLayout(*this))
+  if (!createTextureDescriptorSetLayout(*this))
     goto err_shader;
 
   vector_create(&(*this)->textures, sizeof(Texture), 0);
 
+  (*this)->blendDescriptorSet = vulkan_allocateDescriptorSet(device,
+      descriptorSetLayout1, descriptorPool);
+  if (!(*this)->blendDescriptorSet)
+    goto err_texture_descriptor_set_layout;
+
+  (*this)->blendUniformBuffer = vulkan_createBuffer(memoryProperties, device,
+      sizeof(struct VulkanUniformBuffer), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+      &(*this)->blendUniformBufferMemory, &(*this)->blendUniformBufferMap);
+  if (!(*this)->blendUniformBuffer)
+    goto err_blend_descriptor_set;
+
+  updateBlendDescriptorSet(*this);
+
   return true;
+
+err_blend_descriptor_set:
+  vkFreeDescriptorSets((*this)->device, (*this)->descriptorPool, 1,
+      &(*this)->blendDescriptorSet);
+
+err_texture_descriptor_set_layout:
+  vkDestroyDescriptorSetLayout((*this)->device,
+      (*this)->textureDescriptorSetLayout, NULL);
 
 err_shader:
   vkDestroyShaderModule((*this)->device, (*this)->blendFragmentShader, NULL);
@@ -167,13 +223,19 @@ void vulkan_imGuiFree(Vulkan_ImGui ** imGui)
   if (this->blendPipeline)
     vkDestroyPipeline(this->device, this->blendPipeline, NULL);
 
+  vulkan_freeBuffer(this->device, &this->blendUniformBuffer,
+      &this->blendUniformBufferMemory, &this->blendUniformBufferMap);
+
+  vkFreeDescriptorSets(this->device, this->descriptorPool, 1,
+    &this->blendDescriptorSet);
+
   Texture * texture;
   vector_forEachRef(texture, &this->textures)
     freeTexture(this, texture);
   vector_destroy(&this->textures);
 
-  if (this->descriptorSetLayout)
-    vkDestroyDescriptorSetLayout(this->device, this->descriptorSetLayout, NULL);
+  vkDestroyDescriptorSetLayout(this->device, this->textureDescriptorSetLayout,
+      NULL);
 
   vkDestroyShaderModule(this->device, this->blendFragmentShader, NULL);
 
@@ -341,7 +403,7 @@ void * vulkan_imGuiCreateTexture(Vulkan_ImGui * this, int width, int height,
     goto err_staging;
 
   VkDescriptorSet descriptorSet = vulkan_allocateDescriptorSet(this->device,
-      this->descriptorSetLayout, this->descriptorPool);
+      this->textureDescriptorSetLayout, this->descriptorPool);
   if (!descriptorSet)
     goto err_staging;
 
@@ -378,15 +440,11 @@ void * vulkan_imGuiCreateTexture(Vulkan_ImGui * this, int width, int height,
   if (!vector_push(&this->textures, &texture))
     goto err_staging;
 
-  vkUnmapMemory(this->device, stagingMemory);
-  vkDestroyBuffer(this->device, stagingBuffer, NULL);
-  vkFreeMemory(this->device, stagingMemory, NULL);
+  vulkan_freeBuffer(this->device, &stagingBuffer, &stagingMemory, &stagingMap);
   return descriptorSet;
 
 err_staging:
-  vkUnmapMemory(this->device, stagingMemory);
-  vkDestroyBuffer(this->device, stagingBuffer, NULL);
-  vkFreeMemory(this->device, stagingMemory, NULL);
+  vulkan_freeBuffer(this->device, &stagingBuffer, &stagingMemory, &stagingMap);
 
 err_image_view:
   vkDestroyImageView(this->device, imageView, NULL);
@@ -546,10 +604,24 @@ bool vulkan_imGuiRender(Vulkan_ImGui * this)
   return true;
 }
 
-void vulkan_imGuiBlend(Vulkan_ImGui * this)
+void updateBlendUniformBuffer(Vulkan_ImGui * this, float whiteLevel)
 {
+  struct BlendUniformBuffer uniformBuffer = {
+    .whiteLevel = whiteLevel == 0.0f ? 80.0f : whiteLevel
+  };
+
+  memcpy(this->blendUniformBufferMap, &uniformBuffer, sizeof(uniformBuffer));
+}
+
+void vulkan_imGuiBlend(Vulkan_ImGui * this, float whiteLevel)
+{
+  updateBlendUniformBuffer(this, whiteLevel);
+
   vkCmdBindPipeline(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
       this->blendPipeline);
+
+  vkCmdBindDescriptorSets(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      this->pipelineLayout, 1, 1, &this->blendDescriptorSet, 0, NULL);
 
   vkCmdDraw(this->commandBuffer, 3, 1, 0, 0);
 }

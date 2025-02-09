@@ -621,7 +621,8 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 }
 
 static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damageRects, int damageRectsCount)
+    const FrameDamageRect * damageRects, int damageRectsCount,
+    const ColorMetadata * colorMetadata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 

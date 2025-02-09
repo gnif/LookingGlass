@@ -390,7 +390,8 @@ bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format
 }
 
 bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damage, int damageCount)
+    const FrameDamageRect * damage, int damageCount,
+    const ColorMetadata * colorMetadata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 

@@ -32,8 +32,9 @@ bool vulkan_imGuiInit(Vulkan_ImGui ** imGui, VkInstance instance,
     VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
     VkQueue queue, VkShaderModule vertexShader, VkCommandBuffer commandBuffer,
-    VkSampler sampler, VkDescriptorPool descriptorPool,
-    VkPipelineLayout pipelineLayout, VkFence fence);
+    VkSampler sampler, VkDescriptorSetLayout descriptorSetLayout1,
+    VkDescriptorPool descriptorPool, VkPipelineLayout pipelineLayout,
+    VkFence fence);
 void vulkan_imGuiFree(Vulkan_ImGui ** imGui);
 
 void * vulkan_imGuiCreateTexture(Vulkan_ImGui * imGui, int width, int height,
@@ -47,4 +48,4 @@ void vulkan_imGuiDeinitPipeline(Vulkan_ImGui * imGui);
 bool vulkan_imGuiUploadFonts(Vulkan_ImGui * imGui);
 
 bool vulkan_imGuiRender(Vulkan_ImGui * imGui);
-void vulkan_imGuiBlend(Vulkan_ImGui * imGui);
+void vulkan_imGuiBlend(Vulkan_ImGui * imGui, float whiteLevel);

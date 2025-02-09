@@ -38,6 +38,7 @@ ShaderColorSpace;
 struct VulkanUniformBuffer
 {
   float transform[16];
+  float whiteLevel;
 };
 
 uint32_t vulkan_findMemoryType(
@@ -64,6 +65,9 @@ VkBuffer vulkan_createBuffer(
     VkDeviceSize size, VkBufferUsageFlags usage, VkDeviceMemory * memory,
     void * map);
 
+void vulkan_freeBuffer(VkDevice device, VkBuffer * buffer,
+    VkDeviceMemory * memory, void ** map);
+
 VkImageView vulkan_createImageView(VkDevice device, VkImage image,
     VkFormat format);
 
@@ -76,4 +80,5 @@ void vulkan_updateDescriptorSet1(VkDevice device, VkDescriptorSet descriptorSet,
     VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout);
 
 void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
-    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate);
+    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate,
+    float whiteLevel);

@@ -93,6 +93,7 @@ struct Inst
 
   LG_RendererFormat format;
   bool              formatValid;
+  float             whiteLevel;
 
   int               width, height;
   struct DoubleRect destRect;
@@ -191,27 +192,6 @@ static void vulkan_freeDesktopImage(struct Inst * this)
   }
 }
 
-static void vulkan_freeDesktopUniformBuffer(struct Inst * this)
-{
-  if (this->desktopUniformBuffer)
-  {
-    vkDestroyBuffer(this->device, this->desktopUniformBuffer, NULL);
-    this->desktopUniformBuffer = NULL;
-  }
-
-  if (this->desktopUniformBufferMap)
-  {
-    vkUnmapMemory(this->device, this->desktopUniformBufferMemory);
-    this->desktopUniformBufferMap = NULL;
-  }
-
-  if (this->desktopUniformBufferMemory)
-  {
-    vkFreeMemory(this->device, this->desktopUniformBufferMemory, NULL);
-    this->desktopUniformBufferMemory = NULL;
-  }
-}
-
 static void vulkan_freeSwapchain(struct Inst * this)
 {
   if (this->swapchainImageViews)
@@ -271,7 +251,8 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
   if (this->cursor)
     vulkan_cursorFree(&this->cursor);
 
-  vulkan_freeDesktopUniformBuffer(this);
+  vulkan_freeBuffer(this->device, &this->desktopUniformBuffer,
+      &this->desktopUniformBufferMemory, &this->desktopUniformBufferMap);
 
   vulkan_freeDesktopImage(this);
 
@@ -1265,7 +1246,8 @@ err:
 }
 
 static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
-    int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount)
+    int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount,
+    const ColorMetadata * colorMetadata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -1276,6 +1258,8 @@ static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
     DEBUG_ERROR("Failed to read from frame buffer");
     return false;
   }
+
+  this->whiteLevel = colorMetadata->sdrWhiteLuminance;
 
   return true;
 }
@@ -1578,7 +1562,7 @@ static bool vulkan_createDescriptorSetLayout1(struct Inst * this)
       .binding = 0,
       .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT
+      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     },
     {
       .binding = 1,
@@ -1614,7 +1598,7 @@ static bool vulkan_createDescriptorPool(struct Inst * this)
   {
     {
       .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .descriptorCount = 2
+      .descriptorCount = 4
     },
     {
       .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1800,7 +1784,8 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_imGuiInit(&this->imGui, this->instance, this->physicalDevice,
       this->queueFamilyIndex, &this->memoryProperties, this->device,
       this->queue, this->fullScreenVertexShader, this->commandBuffer,
-      this->sampler, this->descriptorPool, this->pipelineLayout, this->fence))
+      this->sampler, this->descriptorSetLayouts[1], this->descriptorPool,
+      this->pipelineLayout, this->fence))
     goto err_cursor;
 
   return true;
@@ -1809,8 +1794,8 @@ err_cursor:
   vulkan_cursorFree(&this->cursor);
 
 err_desktop_uniform:
-  vkDestroyBuffer(this->device, this->desktopUniformBuffer, NULL);
-  this->desktopUniformBuffer = NULL;
+  vulkan_freeBuffer(this->device, &this->desktopUniformBuffer,
+      &this->desktopUniformBufferMemory, &this->desktopUniformBufferMap);
 
 err_fence:
   vkDestroyFence(this->device, this->fence, NULL);
@@ -2038,7 +2023,7 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
 
   bool renderedCursor = vulkan_cursorRender(this->cursor,
       (this->format.rotate + rotate) % LG_ROTATE_MAX, this->width,
-      this->height);
+      this->height, this->whiteLevel);
 
   if (drawImGui)
   {
@@ -2047,7 +2032,7 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
 
     vkCmdSetScissor(this->commandBuffer, 0, 1, &renderArea);
 
-    vulkan_imGuiBlend(this->imGui);
+    vulkan_imGuiBlend(this->imGui, this->whiteLevel);
   }
 
   vkCmdEndRenderPass(this->commandBuffer);
@@ -2073,7 +2058,7 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   bool drawImGui = damageIdx != 0;
 
   vulkan_updateUniformBuffer(this->desktopUniformBufferMap, this->translateX,
-      this->translateY, this->scaleX, this->scaleY, rotate);
+      this->translateY, this->scaleX, this->scaleY, rotate, this->whiteLevel);
 
   uint32_t imageIndex = vulkan_acquireSwapchainImage(this);
   if (imageIndex == UINT32_MAX)

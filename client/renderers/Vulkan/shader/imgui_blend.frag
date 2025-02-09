@@ -8,13 +8,15 @@ layout (constant_id = 0) const uint colorSpace = COLOR_SPACE_SRGB;
 layout (input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput framebuffer;
 layout (input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput imGui;
 
+layout (set = 1, binding = 0) uniform u
+{
+  float whiteLevel;
+};
+
 layout (location = 0) out vec4 color;
 
 void main()
 {
-  // TODO: Get this from the LG host
-  const float WHITE_LEVEL_NITS = 80.0;
-
   /* We do blending here in non-linear sRGB space. This is not really 'correct'
    * (blending is typically done in linear space), but this is how it has always
    * been done within Looking Glass, so we retain this behavior in order to keep
@@ -45,9 +47,9 @@ void main()
         break;
     }
 
-    float maxNits = mix(MAX_HDR_NITS, WHITE_LEVEL_NITS, pow(imGuiPx.a, 0.02));
+    float maxNits = mix(MAX_HDR_NITS, whiteLevel, pow(imGuiPx.a, 0.02));
     fbPx.rgb = clamp(fbPx.rgb, 0.0, maxNits);
-    fbPx.rgb /= WHITE_LEVEL_NITS;
+    fbPx.rgb /= whiteLevel;
     fbPx.rgb = linearToSrgb(fbPx.rgb);
   }
 
@@ -62,14 +64,13 @@ void main()
   {
     case COLOR_SPACE_EXTENDED_SRGB_LINEAR:
       blendedPx.rgb = srgbToLinear(blendedPx.rgb);
-      blendedPx.rgb =
-          blendedPx.rgb * WHITE_LEVEL_NITS / REFERENCE_LUMINANCE_NITS;
+      blendedPx.rgb = blendedPx.rgb * whiteLevel / REFERENCE_LUMINANCE_NITS;
       break;
 
     case COLOR_SPACE_HDR10_ST2084:
       blendedPx.rgb = srgbToLinear(blendedPx.rgb);
       blendedPx.rgb = bt709ToBt2020(blendedPx.rgb);
-      blendedPx.rgb = linearToSt2084(blendedPx.rgb * WHITE_LEVEL_NITS);
+      blendedPx.rgb = linearToSt2084(blendedPx.rgb * whiteLevel);
       break;
   }
 

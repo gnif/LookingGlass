@@ -325,6 +325,28 @@ err:
   return false;
 }
 
+void vulkan_freeBuffer(VkDevice device, VkBuffer * buffer,
+    VkDeviceMemory * memory, void ** map)
+{
+  if (*buffer)
+  {
+    vkDestroyBuffer(device, *buffer, NULL);
+    *buffer = NULL;
+  }
+
+  if (*map)
+  {
+    vkUnmapMemory(device, *memory);
+    *map = NULL;
+  }
+
+  if (*memory)
+  {
+    vkFreeMemory(device, *memory, NULL);
+    *memory = NULL;
+  }
+}
+
 VkImageView vulkan_createImageView(VkDevice device, VkImage image,
     VkFormat format)
 {
@@ -440,9 +462,12 @@ void vulkan_updateDescriptorSet1(VkDevice device, VkDescriptorSet descriptorSet,
 }
 
 void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
-    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate)
+    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate,
+    float whiteLevel)
 {
-  struct VulkanUniformBuffer uniformBuffer = {};
+  struct VulkanUniformBuffer uniformBuffer = {
+      .whiteLevel = whiteLevel == 0.0f ? 80.0f : whiteLevel
+  };
 
   switch (rotate)
   {

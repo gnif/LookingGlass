@@ -162,7 +162,8 @@ typedef struct LG_RendererOps
   /* called when there is a new frame
    * Context: frameThread */
   bool (*onFrame)(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFD,
-      const FrameDamageRect * damage, int damageCount);
+      const FrameDamageRect * damage, int damageCount,
+      const ColorMetadata * colorMetadata);
 
   /* called when the rederer is to startup
    * Context: renderThread */

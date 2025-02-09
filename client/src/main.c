@@ -799,7 +799,7 @@ int main_frameThread(void * unused)
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
     if (!RENDERER(onFrame, fb, g_state.useDMA ? dma->fd : -1,
-          frame->damageRects, frame->damageRectsCount))
+          frame->damageRects, frame->damageRectsCount, &frame->colorMetadata))
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");
