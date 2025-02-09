@@ -2102,12 +2102,8 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     .pImageIndices = &imageIndex
   };
 
-  result = vkQueuePresentKHR(this->queue, &presentInfo);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to present swapchain image (VkResult: %d)", result);
+  if (!app_vulkanPresent(this->queue, &presentInfo))
     goto err_wait;
-  }
 
   if (!vulkan_waitFence(this->device, this->fence))
     goto err_wait;

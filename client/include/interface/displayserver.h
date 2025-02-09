@@ -166,6 +166,7 @@ struct LG_DisplayServerOps
   /* Vulkan support */
   const char * (*getVulkanSurfaceExtension)(void);
   VkSurfaceKHR (*createVulkanSurface)(VkInstance instance);
+  bool (*vulkanPresent)(VkQueue queue, struct VkPresentInfoKHR * presentInfo);
 #endif
 
   /* Waits for a good time to render the next frame in time for the next vblank.

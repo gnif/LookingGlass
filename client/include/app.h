@@ -89,6 +89,7 @@ void app_glSwapBuffers(void);
 #ifdef ENABLE_VULKAN
 const char * app_getVulkanSurfaceExtension(void);
 VkSurfaceKHR app_createVulkanSurface(VkInstance instance);
+bool app_vulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo);
 #endif
 
 #define MAX_OVERLAY_RECTS 10

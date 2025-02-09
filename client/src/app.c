@@ -660,6 +660,11 @@ VkSurfaceKHR app_createVulkanSurface(VkInstance instance)
 {
   return g_state.ds->createVulkanSurface(instance);
 }
+
+bool app_vulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo)
+{
+  return g_state.ds->vulkanPresent(queue, presentInfo);
+}
 #endif
 
 void app_alert(LG_MsgAlert type, const char * fmt, ...)

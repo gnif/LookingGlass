@@ -49,4 +49,25 @@ VkSurfaceKHR waylandCreateVulkanSurface(VkInstance instance)
 
   return surface;
 }
+
+bool waylandVulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo)
+{
+  // vkQueuePresentKHR issues a batch of Wayland requests terminated with a
+  // commit. This must be isolated from anything else that may issue a commit
+  // otherwise a half-completed batch may be committed, resulting in a protocol
+  // error and the present operation failing
+  VkResult result;
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
+  {
+    result = vkQueuePresentKHR(queue, presentInfo);
+  });
+
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to present swapchain image (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
 #endif

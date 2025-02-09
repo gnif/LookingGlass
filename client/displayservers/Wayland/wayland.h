@@ -107,6 +107,7 @@ struct WaylandDSState
   struct wl_seat * seat;
   struct wl_shm * shm;
   struct wl_compositor * compositor;
+  LG_Lock surfaceLock;
 
   wl_fixed_t scale;
   bool fractionalScale;
@@ -163,7 +164,6 @@ struct WaylandDSState
   struct zwp_locked_pointer_v1 * lockedPointer;
   bool showPointer;
   uint32_t pointerEnterSerial;
-  LG_Lock confineLock;
 
   struct zwp_idle_inhibit_manager_v1 * idleInhibitManager;
   struct zwp_idle_inhibitor_v1 * idleInhibitor;
@@ -262,6 +262,7 @@ void waylandGLSwapBuffers(void);
 #ifdef ENABLE_VULKAN
 const char * waylandGetVulkanSurfaceExtension(void);
 VkSurfaceKHR waylandCreateVulkanSurface(VkInstance instance);
+bool waylandVulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo);
 #endif
 
 // idle module
