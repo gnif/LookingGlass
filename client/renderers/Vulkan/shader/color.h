@@ -111,3 +111,47 @@ vec3 bt2020ToBt709(vec3 value)
   );
   return BT2020_TO_BT709 * value;
 }
+
+vec3 colorSpaceToSrgb(uint colorSpace, vec3 value, float whiteLevel,
+    float maxNits)
+{
+  if (colorSpace != COLOR_SPACE_SRGB)
+  {
+    switch (colorSpace)
+    {
+      case COLOR_SPACE_EXTENDED_SRGB_LINEAR:
+        value *= REFERENCE_LUMINANCE_NITS;
+        break;
+
+      case COLOR_SPACE_HDR10_ST2084:
+        value = st2084ToLinear(value);
+        value = bt2020ToBt709(value);
+        break;
+    }
+
+    value = clamp(value, 0.0, maxNits);
+    value /= whiteLevel;
+    value = linearToSrgb(value);
+  }
+
+  return value;
+}
+
+vec3 srgbToColorSpace(uint colorSpace, vec3 value, float whiteLevel)
+{
+  switch (colorSpace)
+  {
+    case COLOR_SPACE_EXTENDED_SRGB_LINEAR:
+      value = srgbToLinear(value);
+      value = value * whiteLevel / REFERENCE_LUMINANCE_NITS;
+      break;
+
+    case COLOR_SPACE_HDR10_ST2084:
+      value = srgbToLinear(value);
+      value = bt709ToBt2020(value);
+      value = linearToSt2084(value * whiteLevel);
+      break;
+  }
+
+  return value;
+}

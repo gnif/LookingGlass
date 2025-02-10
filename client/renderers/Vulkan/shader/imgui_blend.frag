@@ -36,21 +36,8 @@ void main()
   // opacities. This is to support fade effects without a jarring transition
   if (colorSpace != COLOR_SPACE_SRGB)
   {
-    switch (colorSpace)
-    {
-      case COLOR_SPACE_HDR10_ST2084:
-        fbPx.rgb = st2084ToLinear(fbPx.rgb);
-        break;
-
-      case COLOR_SPACE_EXTENDED_SRGB_LINEAR:
-        fbPx.rgb *= REFERENCE_LUMINANCE_NITS;
-        break;
-    }
-
     float maxNits = mix(MAX_HDR_NITS, whiteLevel, pow(imGuiPx.a, 0.02));
-    fbPx.rgb = clamp(fbPx.rgb, 0.0, maxNits);
-    fbPx.rgb /= whiteLevel;
-    fbPx.rgb = linearToSrgb(fbPx.rgb);
+    fbPx.rgb = colorSpaceToSrgb(colorSpace, fbPx.rgb, whiteLevel, maxNits);
   }
 
   // The ImGui rendered output is pre-multiplied alpha, so the source color
@@ -60,19 +47,7 @@ void main()
       fbPx.a + imGuiPx.a);
 
   // Convert back to the target color space
-  switch (colorSpace)
-  {
-    case COLOR_SPACE_EXTENDED_SRGB_LINEAR:
-      blendedPx.rgb = srgbToLinear(blendedPx.rgb);
-      blendedPx.rgb = blendedPx.rgb * whiteLevel / REFERENCE_LUMINANCE_NITS;
-      break;
-
-    case COLOR_SPACE_HDR10_ST2084:
-      blendedPx.rgb = srgbToLinear(blendedPx.rgb);
-      blendedPx.rgb = bt709ToBt2020(blendedPx.rgb);
-      blendedPx.rgb = linearToSt2084(blendedPx.rgb * whiteLevel);
-      break;
-  }
+  blendedPx.rgb = srgbToColorSpace(colorSpace, blendedPx.rgb, whiteLevel);
 
   color = blendedPx;
 }

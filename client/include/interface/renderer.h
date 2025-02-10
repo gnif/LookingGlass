@@ -106,6 +106,8 @@ typedef enum LG_RendererCursor
 }
 LG_RendererCursor;
 
+#define LG_CURSOR_MAX (LG_CURSOR_MASKED_COLOR+1)
+
 typedef struct LG_Renderer LG_Renderer;
 
 typedef struct LG_RendererOps

@@ -34,7 +34,7 @@ endfunction()
 
 build_vulkan_shaders(
   shader/basic.frag
-  shader/cursor_rgb.frag
+  shader/cursor.frag
   shader/fullscreen.vert
   shader/imgui_blend.frag
   shader/transform_texture.vert
