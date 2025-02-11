@@ -83,15 +83,18 @@ void ll_push(struct ll * list, void * data)
 bool ll_shift(struct ll * list, void ** data)
 {
   LG_LOCK(list->lock);
+  bool result = ll_shift_nl(list, data);
+  LG_UNLOCK(list->lock);
+  return result;
+}
+
+bool ll_shift_nl(struct ll * list, void ** data)
+{
   if (!list->head)
-  {
-    LG_UNLOCK(list->lock);
     return false;
-  }
 
   struct ll_item * item = list->head;
   ll_removeNL(list, item);
-  LG_UNLOCK(list->lock);
 
   if (data)
     *data = item->data;
@@ -103,29 +106,31 @@ bool ll_shift(struct ll * list, void ** data)
 bool ll_peek_head(struct ll * list, void ** data)
 {
   LG_LOCK(list->lock);
-  if (!list->head)
-  {
-    LG_UNLOCK(list->lock);
-    return false;
-  }
-
-  *data = list->head->data;
+  bool result = ll_peek_head_nl(list, data);
   LG_UNLOCK(list->lock);
+  return result;
+}
 
+bool ll_peek_head_nl(struct ll * list, void ** data)
+{
+  if (!list->head)
+    return false;
+  *data = list->head->data;
   return true;
 }
 
 bool ll_peek_tail(struct ll * list, void ** data)
 {
   LG_LOCK(list->lock);
-  if (!list->tail)
-  {
-    LG_UNLOCK(list->lock);
-    return false;
-  }
-
-  *data = list->tail->data;
+  bool result = ll_peek_tail_nl(list, data);
   LG_UNLOCK(list->lock);
+  return result;
+}
 
+bool ll_peek_tail_nl(struct ll * list, void ** data)
+{
+  if (!list->tail)
+    return false;
+  *data = list->tail->data;
   return true;
 }
