@@ -1266,6 +1266,21 @@ static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
 
 static VkInstance vulkan_createInstance(void)
 {
+  uint32_t instanceVersion;
+  VkResult result = vkEnumerateInstanceVersion(&instanceVersion);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to get Vulkan instance version (VkResult: %d)", result);
+    goto err;
+  }
+  if (instanceVersion < VK_API_VERSION_1_2)
+  {
+    DEBUG_ERROR(
+        "Vulkan instance does not support Vulkan 1.2 (instanceVersion: %u)",
+        instanceVersion);
+    goto err;
+  }
+
   uint32_t enabledExtensionCount;
   const char ** extensions = vulkan_checkInstanceExtensions(
       &enabledExtensionCount);
@@ -1276,7 +1291,7 @@ static VkInstance vulkan_createInstance(void)
   {
     .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
     .pApplicationName = "Looking Glass",
-    .apiVersion = VK_API_VERSION_1_0
+    .apiVersion = VK_API_VERSION_1_2
   };
 
   struct VkInstanceCreateInfo createInfo =
@@ -1288,7 +1303,7 @@ static VkInstance vulkan_createInstance(void)
   };
 
   VkInstance instance;
-  VkResult result = vkCreateInstance(&createInfo, NULL, &instance);
+  result = vkCreateInstance(&createInfo, NULL, &instance);
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to create Vulkan instance (VkResult: %d)", result);
@@ -1303,6 +1318,27 @@ err_extensions:
 
 err:
   return NULL;
+}
+
+static void vulkan_printDeviceDetails(struct Inst * this)
+{
+  struct VkPhysicalDeviceDriverProperties driverProperties =
+  {
+    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES
+  };
+
+  struct VkPhysicalDeviceProperties2 properties =
+  {
+    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+    .pNext = &driverProperties
+  };
+
+  vkGetPhysicalDeviceProperties2(this->physicalDevice, &properties);
+
+  DEBUG_INFO("Device      : %s", properties.properties.deviceName);
+  DEBUG_INFO("Driver name : %s", driverProperties.driverName);
+  DEBUG_INFO("Driver info : %s", driverProperties.driverInfo);
+  DEBUG_INFO("Queue family: %"PRIu32, this->queueFamilyIndex);
 }
 
 static bool vulkan_pickPhysicalDevice(struct Inst * this)
@@ -1338,6 +1374,11 @@ static bool vulkan_pickPhysicalDevice(struct Inst * this)
   this->queueFamilyIndex = UINT32_MAX;
   for (uint32_t i = 0; i < deviceCount; ++i)
   {
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(devices[i], &properties);
+    if (properties.apiVersion < VK_API_VERSION_1_2)
+      continue;
+
     uint32_t queueFamilyCount;
     vkGetPhysicalDeviceQueueFamilyProperties(devices[i], &queueFamilyCount,
         NULL);
@@ -1375,14 +1416,10 @@ static bool vulkan_pickPhysicalDevice(struct Inst * this)
     goto err_devices;
   }
 
-  VkPhysicalDeviceProperties properties;
-  vkGetPhysicalDeviceProperties(this->physicalDevice, &properties);
-
-  DEBUG_INFO("Device      : %s", properties.deviceName);
-  DEBUG_INFO("Queue family: %"PRIu32, this->queueFamilyIndex);
-
   vkGetPhysicalDeviceMemoryProperties(this->physicalDevice,
       &this->memoryProperties);
+
+  vulkan_printDeviceDetails(this);
 
   free(devices);
   return true;
