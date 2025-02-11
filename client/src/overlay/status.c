@@ -89,6 +89,7 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
   };
 
   int xPos = screen->x - marginX;
+  bool show = false;
   for(int i = 0; i < LG_USER_STATUS_MAX; ++i)
   {
     OverlayImage * img = &l_image[i];
@@ -98,6 +99,8 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
     // if the recording indicator is off, don't draw but reserve space
     if (i == LG_USER_STATUS_RECORDING && !l_recordToggle)
       goto next;
+
+    show = true;
 
     ImDrawList_AddImage(
       igGetBackgroundDrawList_Nil(),
@@ -117,6 +120,9 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
 next:
     xPos -= ICON_SIZE + gapX;
   }
+
+  if (!show)
+    return 0;
 
   *windowRects = rect;
   return 1;
