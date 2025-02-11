@@ -454,7 +454,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     dma    = desktop->useDMA;
   }
 
-  if (unlikely(outputWidth == 0 && outputHeight == 0))
+  if (unlikely(outputWidth == 0 || outputHeight == 0))
     DEBUG_FATAL("outputWidth || outputHeight == 0");
 
   enum EGL_TexStatus status;
