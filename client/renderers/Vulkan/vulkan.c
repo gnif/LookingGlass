@@ -214,6 +214,12 @@ static void vulkan_freeSwapchain(struct Inst * this)
 
   if (this->swapchain)
   {
+    // It is not safe to destroy the swapchain until the presentation engine is
+    // finished with it
+    VkResult result = vkQueueWaitIdle(this->queue);
+    if (result != VK_SUCCESS)
+      DEBUG_ERROR("Failed to wait for queue idle (VkResult: %d)", result);
+
     vkDestroySwapchainKHR(this->device, this->swapchain, NULL);
     this->swapchain = NULL;
     this->swapchainFormat = VK_FORMAT_UNDEFINED;
