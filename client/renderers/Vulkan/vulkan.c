@@ -21,6 +21,7 @@
 #include "interface/renderer.h"
 
 #include "common/array.h"
+#include "common/option.h"
 
 #include <vulkan/vulkan.h>
 
@@ -111,6 +112,19 @@ struct Inst
   PFN_vkSetHdrMetadataEXT vkSetHdrMetadataEXT;
 };
 
+static struct Option vulkan_options[] =
+{
+  {
+    .module       = "vulkan",
+    .name         = "validate",
+    .description  = "Enable Vulkan validation layer (SLOW!)",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = false
+  },
+
+  {0}
+};
+
 static const char * vulkan_getName(void)
 {
   return "Vulkan";
@@ -118,6 +132,7 @@ static const char * vulkan_getName(void)
 
 static void vulkan_setup(void)
 {
+  option_register(vulkan_options);
 }
 
 static bool vulkan_create(LG_Renderer ** renderer, const LG_RendererParams params,
@@ -1287,6 +1302,23 @@ static VkInstance vulkan_createInstance(void)
     goto err;
   }
 
+  uint32_t enabledLayerCount = 0;
+  const char ** enabledLayers = NULL;
+  if (option_get_bool("vulkan", "validate"))
+  {
+    bool hasValidationLayer;
+    if (!vulkan_hasValidationLayer(&hasValidationLayer))
+      goto err;
+    if (!hasValidationLayer)
+      DEBUG_WARN("Validation layer not installed");
+    else
+    {
+      DEBUG_INFO("Enabling validation layer");
+      enabledLayerCount = 1;
+      enabledLayers = &VULKAN_VALIDATION_LAYER;
+    }
+  }
+
   uint32_t enabledExtensionCount;
   const char ** extensions = vulkan_checkInstanceExtensions(
       &enabledExtensionCount);
@@ -1304,6 +1336,8 @@ static VkInstance vulkan_createInstance(void)
   {
     .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
     .pApplicationInfo = &appInfo,
+    .enabledLayerCount = enabledLayerCount,
+    .ppEnabledLayerNames = enabledLayers,
     .enabledExtensionCount = enabledExtensionCount,
     .ppEnabledExtensionNames = extensions
   };

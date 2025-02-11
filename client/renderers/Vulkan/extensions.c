@@ -28,6 +28,55 @@
 #include <stdlib.h>
 #include <string.h>
 
+const char * VULKAN_VALIDATION_LAYER = "VK_LAYER_KHRONOS_validation";
+
+bool vulkan_hasValidationLayer(bool * hasValidationLayer)
+{
+  uint32_t layerCount;
+  VkResult result = vkEnumerateInstanceLayerProperties(&layerCount, NULL);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to enumerate Vulkan instance layers (VkResult: %d)",
+        result);
+    goto err;
+  }
+
+  struct VkLayerProperties * layers = malloc(
+      sizeof(struct VkLayerProperties) * layerCount);
+  if (!layers)
+  {
+    DEBUG_ERROR("out of memory");
+    goto err;
+  }
+
+  result = vkEnumerateInstanceLayerProperties(&layerCount, layers);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to enumerate Vulkan instance layers (VkResult: %d)",
+        result);
+    goto err_layers;
+  }
+
+  *hasValidationLayer = false;
+  for (uint32_t i = 0; i < layerCount; ++i)
+  {
+    if (!strcmp(layers[i].layerName, VULKAN_VALIDATION_LAYER))
+    {
+      *hasValidationLayer = true;
+      break;
+    }
+  }
+
+  free(layers);
+  return true;
+
+err_layers:
+  free(layers);
+
+err:
+  return false;
+}
+
 static const char ** vulkan_checkExtensions(
     uint32_t extensionCount, VkExtensionProperties * extensions,
     size_t requiredExtensionCount, const char ** requiredExtensions,

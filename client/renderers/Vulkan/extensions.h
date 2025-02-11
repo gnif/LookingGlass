@@ -22,6 +22,11 @@
 
 #include <vulkan/vulkan.h>
 
+#include <stdbool.h>
+
+extern const char * VULKAN_VALIDATION_LAYER;
+
+bool vulkan_hasValidationLayer(bool * hasValidationLayer);
 const char ** vulkan_checkDeviceExtensions(VkPhysicalDevice physicalDevice,
     uint32_t * enabledExtensionCount);
 const char ** vulkan_checkInstanceExtensions(uint32_t * enabledExtensionCount);
