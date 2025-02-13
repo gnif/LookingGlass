@@ -372,6 +372,36 @@ VkImageView vulkan_createImageView(VkDevice device, VkImage image,
   return imageView;
 }
 
+bool vulkan_beginCommandBuffer(VkCommandBuffer commandBuffer)
+{
+  struct VkCommandBufferBeginInfo beginInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+  };
+
+  VkResult result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to begin command buffer (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
+bool vulkan_endCommandBuffer(VkCommandBuffer commandBuffer)
+{
+  VkResult result = vkEndCommandBuffer(commandBuffer);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to end command buffer (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 bool vulkan_waitFence(VkDevice device, VkFence fence)
 {
   VkResult result = vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);

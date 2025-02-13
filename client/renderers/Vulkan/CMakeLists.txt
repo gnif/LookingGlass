@@ -33,8 +33,8 @@ function(build_vulkan_shaders)
 endfunction()
 
 build_vulkan_shaders(
-  shader/basic.frag
   shader/cursor.frag
+  shader/desktop.frag
   shader/fullscreen.vert
   shader/imgui_blend.frag
   shader/transform_texture.vert
@@ -42,6 +42,7 @@ build_vulkan_shaders(
 
 add_library(renderer_Vulkan STATIC
   cursor.c
+  desktop.c
   extensions.c
   imgui.c
   vulkan.c

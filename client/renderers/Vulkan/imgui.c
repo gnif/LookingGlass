@@ -246,18 +246,8 @@ void vulkan_imGuiFree(Vulkan_ImGui ** imGui)
 static bool copyBufferToImage(Vulkan_ImGui * this, VkBuffer buffer,
     VkImage image, uint32_t width, uint32_t height)
 {
-  struct VkCommandBufferBeginInfo beginInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-  };
-
-  VkResult result = vkBeginCommandBuffer(this->commandBuffer, &beginInfo);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to begin command buffer (VkResult: %d)", result);
-    return false;
-  }
+  if (!vulkan_beginCommandBuffer(this->commandBuffer))
+    goto err;
 
   struct VkImageMemoryBarrier preImageBarrier =
   {
@@ -308,12 +298,8 @@ static bool copyBufferToImage(Vulkan_ImGui * this, VkBuffer buffer,
       VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1,
       &postImageBarrier);
 
-  result = vkEndCommandBuffer(this->commandBuffer);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to end command buffer (VkResult: %d)", result);
-    return false;
-  }
+  if (!vulkan_endCommandBuffer(this->commandBuffer))
+    goto err;
 
   struct VkSubmitInfo submitInfo =
   {
@@ -322,7 +308,7 @@ static bool copyBufferToImage(Vulkan_ImGui * this, VkBuffer buffer,
     .pCommandBuffers = &this->commandBuffer
   };
 
-  result = vkQueueSubmit(this->queue, 1, &submitInfo, this->fence);
+  VkResult result = vkQueueSubmit(this->queue, 1, &submitInfo, this->fence);
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to submit command buffer (VkResult: %d)", result);

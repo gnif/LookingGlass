@@ -71,6 +71,9 @@ void vulkan_freeBuffer(VkDevice device, VkBuffer * buffer,
 VkImageView vulkan_createImageView(VkDevice device, VkImage image,
     VkFormat format);
 
+bool vulkan_beginCommandBuffer(VkCommandBuffer commandBuffer);
+bool vulkan_endCommandBuffer(VkCommandBuffer commandBuffer);
+
 bool vulkan_waitFence(VkDevice device, VkFence fence);
 
 void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
