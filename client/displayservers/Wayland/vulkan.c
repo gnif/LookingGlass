@@ -52,6 +52,8 @@ VkSurfaceKHR waylandCreateVulkanSurface(VkInstance instance)
 
 bool waylandVulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo)
 {
+  waylandPresentationFrame();
+
   // vkQueuePresentKHR issues a batch of Wayland requests terminated with a
   // commit. This must be isolated from anything else that may issue a commit
   // otherwise a half-completed batch may be committed, resulting in a protocol

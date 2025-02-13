@@ -95,6 +95,9 @@ struct Inst
   float mouseWidth , mouseHeight;
   float mouseScaleX, mouseScaleY;
 
+  RingBuffer importTimings;
+  GraphHandle importGraph;
+
   PFN_vkSetHdrMetadataEXT vkSetHdrMetadataEXT;
 };
 
@@ -131,6 +134,10 @@ static bool vulkan_create(LG_Renderer ** renderer, const LG_RendererParams param
     return false;
   }
   *renderer = &this->base;
+
+  this->importTimings = ringbuffer_new(256, sizeof(float));
+  this->importGraph   = app_registerGraph("IMPORT", this->importTimings,
+      0.0f, 20.0f, NULL);
 
   *needsOpenGL = false;
   return true;
@@ -218,6 +225,8 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
 
   if (this->device)
     vkDeviceWaitIdle(this->device);
+
+  ringbuffer_free(&this->importTimings);
 
   vulkan_freeImGuiImage(this);
   vulkan_imGuiFree(&this->imGui);
@@ -1047,8 +1056,10 @@ static bool vulkan_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  uint64_t start = nanotime();
   if (!vulkan_desktopUpdate(this->desktop, frame))
     return false;
+  ringbuffer_push(this->importTimings, &(float){ (nanotime() - start) * 1e-6f });
 
   this->whiteLevel = colorMetadata->sdrWhiteLuminance;
 
@@ -1874,6 +1885,10 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
   if (!vulkan_waitFence(this->device, this->fence))
     goto err_wait;
+
+  // The fence above covers only the rendering work, so the frame will be handed
+  // off to the presentation engine immediately after the fence is signaled
+  preSwap(udata);
 
   return true;
 
