@@ -61,46 +61,53 @@ typedef enum
 }
 LGState;
 
+#if LIBOBS_API_MAJOR_VER >= 27
 typedef struct
 {
-  KVMFRFrame * frame;
-  size_t       dataSize;
-  int          fd;
+  KVMFRFrame   * frame;
+  size_t         dataSize;
+  int            fd;
+  gs_texture_t * texture;
 }
 DMAFrameInfo;
+#endif
 
 typedef struct
 {
-  obs_source_t    * context;
-  LGState           state;
-  char            * shmFile;
-  uint32_t          formatVer;
-  uint32_t          screenWidth, screenHeight;
-  uint32_t          dataWidth, dataHeight;
-  uint32_t          frameWidth, frameHeight;
-  struct vec2       screenScale;
-  FrameType         type;
-  int               bpp;
-  struct IVSHMEM    shmDev;
-  PLGMPClient       lgmp;
-  PLGMPClientQueue  frameQueue, pointerQueue;
-  gs_texture_t    * texture;
-  gs_texture_t    * dstTexture;
-  uint8_t         * texData;
-  uint32_t          linesize;
+  obs_source_t       * context;
+  LGState              state;
+  char               * shmFile;
+  uint32_t             formatVer;
+  uint32_t             screenWidth, screenHeight;
+  uint32_t             dataWidth, dataHeight;
+  uint32_t             frameWidth, frameHeight;
+  enum gs_color_format format;
+  bool                 unpack;
+  uint32_t             drmFormat;
+  struct vec2          screenScale;
+  FrameType            type;
+  int                  bpp;
+  struct IVSHMEM       shmDev;
+  PLGMPClient          lgmp;
+  PLGMPClientQueue     frameQueue, pointerQueue;
+  gs_texture_t       * texture;
+  gs_texture_t       * dstTexture;
+  uint8_t            * texData;
+  uint32_t             linesize;
 
-  bool              hideMouse;
+  bool                 hideMouse;
 #if LIBOBS_API_MAJOR_VER >= 27
-  bool              dmabuf;
-  DMAFrameInfo      dmaInfo[LGMP_Q_FRAME_LEN];
+  bool                 dmabuf;
+  DMAFrameInfo         dmaInfo[LGMP_Q_FRAME_LEN];
+  gs_texture_t       * dmaTexture;
 #endif
 
 #if LIBOBS_API_MAJOR_VER >= 28
   enum gs_color_space colorSpace;
 #endif
 
-  pthread_t         frameThread, pointerThread;
-  os_sem_t        * frameSem;
+  pthread_t            frameThread, pointerThread;
+  os_sem_t           * frameSem;
 
   bool                 cursorMono;
   gs_texture_t       * cursorTex;
@@ -217,15 +224,11 @@ static void deinit(LGPlugin * this)
   }
 
   obs_enter_graphics();
-  if (this->dstTexture)
+  if (this->unpack && this->dstTexture)
   {
-    if (this->dstTexture == this->texture)
-      this->dstTexture = NULL;
-    else
-    {
-      gs_texture_destroy(this->dstTexture);
-      this->dstTexture = NULL;
-    }
+    gs_texture_destroy(this->dstTexture);
+    this->dstTexture = NULL;
+    this->unpack     = false;
   }
 
   if (this->texture)
@@ -241,6 +244,17 @@ static void deinit(LGPlugin * this)
     gs_texture_destroy(this->cursorTex);
     this->cursorTex = NULL;
   }
+
+#if LIBOBS_API_MAJOR_VER >= 27
+  for (int i = 0 ; i < ARRAY_LENGTH(this->dmaInfo); ++i)
+    if (this->dmaInfo[i].texture)
+    {
+      gs_texture_destroy(this->dmaInfo[i].texture);
+      this->dmaInfo[i].texture = NULL;
+    }
+  this->dmaTexture = NULL;
+#endif
+
   obs_leave_graphics();
 
   this->state = STATE_STOPPED;
@@ -486,53 +500,58 @@ static void lgUpdate(void * data, obs_data_t * settings)
 }
 
 #if LIBOBS_API_MAJOR_VER >= 27
-static int dmabufGetFd(LGPlugin * this, LGMPMessage * msg, KVMFRFrame * frame, size_t dataSize)
+static DMAFrameInfo * dmabufOpenDMAFrameInfo(LGPlugin * this, LGMPMessage * msg,
+    KVMFRFrame * frame, size_t dataSize)
 {
-  DMAFrameInfo * dma = NULL;
+  DMAFrameInfo * fi = NULL;
 
   /* find the existing dma buffer if it exists */
   for (int i = 0; i < ARRAY_LENGTH(this->dmaInfo); ++i)
     if (this->dmaInfo[i].frame == frame)
+      fi = &this->dmaInfo[i];
+
+  /* if it's too small close it */
+  if (fi && fi->dataSize < dataSize)
+  {
+    if (fi->texture)
     {
-      dma = this->dmaInfo + i;
-      /* if it's too small close it */
-      if (dma->dataSize < dataSize)
-      {
-        close(dma->fd);
-        dma->fd = -1;
-      }
-      break;
+      gs_texture_destroy(fi->texture);
+      fi->texture = NULL;
     }
+    close(fi->fd);
+    fi->fd = -1;
+  }
 
   /* otherwise find a free buffer for use */
-  if (!dma)
+  if (!fi)
     for (int i = 0; i < ARRAY_LENGTH(this->dmaInfo); ++i)
       if (!this->dmaInfo[i].frame)
       {
-        dma = this->dmaInfo + i;
-        dma->frame = frame;
-        dma->fd    = -1;
+        fi = &this->dmaInfo[i];
+        fi->frame = frame;
+        fi->fd    = -1;
         break;
       }
 
-  assert(dma);
+  assert(fi);
 
   /* open the buffer */
-  if (dma->fd == -1)
+  if (fi->fd == -1)
   {
     const uintptr_t pos    = (uintptr_t) msg->mem - (uintptr_t) this->shmDev.mem;
     const uintptr_t offset = (uintptr_t) frame->offset + sizeof(FrameBuffer);
 
-    dma->dataSize = dataSize;
-    dma->fd       = ivshmemGetDMABuf(&this->shmDev, pos + offset, dataSize);
-    if (dma->fd < 0)
+    fi->dataSize = dataSize;
+    fi->fd       = ivshmemGetDMABuf(&this->shmDev, pos + offset, dataSize);
+    fi->texture  = NULL;
+    if (fi->fd < 0)
     {
       puts("Failed to get the DMA buffer for the frame");
-      return -1;
+      return NULL;
     }
   }
 
-  return dma->fd;
+  return fi;
 }
 #endif
 
@@ -659,7 +678,7 @@ static void lgVideoTick(void * data, float seconds)
     obs_enter_graphics();
     if (this->texture)
     {
-      if (this->dstTexture && this->dstTexture != this->texture)
+      if (this->unpack && this->dstTexture)
       {
         gs_texture_destroy(this->dstTexture);
         this->dstTexture = NULL;
@@ -672,56 +691,54 @@ static void lgVideoTick(void * data, float seconds)
       this->texture = NULL;
     }
 
-    enum gs_color_format format;
-    uint32_t drm_format;
-    unsigned width = frame->dataWidth;
-    bool unpack = false;
+    this->dataWidth = frame->dataWidth;
+    this->unpack    = false;
 
     this->bpp = 4;
     switch(this->type)
     {
       case FRAME_TYPE_BGRA:
-        format           = GS_BGRA_UNORM;
-        drm_format       = DRM_FORMAT_ARGB8888;
+        this->format     = GS_BGRA_UNORM;
+        this->drmFormat  = DRM_FORMAT_ARGB8888;
 #if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_SRGB;
 #endif
         break;
 
       case FRAME_TYPE_RGBA:
-        format           = GS_RGBA_UNORM;
-        drm_format       = DRM_FORMAT_ARGB8888;
+        this->format     = GS_RGBA_UNORM;
+        this->drmFormat  = DRM_FORMAT_ARGB8888;
 #if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_SRGB;
 #endif
         break;
 
       case FRAME_TYPE_RGBA10:
-        format           = GS_R10G10B10A2;
-        drm_format       = DRM_FORMAT_BGRA1010102;
+        this->format     = GS_R10G10B10A2;
+        this->drmFormat  = DRM_FORMAT_BGRA1010102;
 #if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_709_SCRGB;
 #endif
         break;
 
       case FRAME_TYPE_RGB_24:
-        this->bpp  = 3;
-        width      = frame->pitch / 4;
+        this->bpp       = 3;
+        this->dataWidth = frame->pitch / 4;
         /* fallthrough */
 
       case FRAME_TYPE_BGR_32:
-        format           = GS_BGRA_UNORM;
-        drm_format       = DRM_FORMAT_ARGB8888;
+        this->format    = GS_BGRA_UNORM;
+        this->drmFormat = DRM_FORMAT_ARGB8888;
 #if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_SRGB;
 #endif
-        unpack     = true;
+        this->unpack     = true;
         break;
 
       case FRAME_TYPE_RGBA16F:
         this->bpp        = 8;
-        format           = GS_RGBA16F;
-        drm_format       = DRM_FORMAT_ABGR16161616F;
+        this->format     = GS_RGBA16F;
+        this->drmFormat  = DRM_FORMAT_ABGR16161616F;
 #if LIBOBS_API_MAJOR_VER >= 28
         this->colorSpace = GS_CS_709_SCRGB;
 #endif
@@ -738,21 +755,23 @@ static void lgVideoTick(void * data, float seconds)
 #if LIBOBS_API_MAJOR_VER >= 27
     if (this->dmabuf)
     {
-      int fd = dmabufGetFd(this, &msg, frame, frame->frameHeight * frame->pitch);
-      if (fd >= 0)
+      DMAFrameInfo * fi = dmabufOpenDMAFrameInfo(this, &msg, frame,
+          frame->frameHeight * frame->pitch);
+      if (fi && !fi->texture)
       {
-        this->texture = gs_texture_create_from_dmabuf(
-          width,
+        // create the first texture now so we can test if dmabuf is usable
+        fi->texture = gs_texture_create_from_dmabuf(
+          this->dataWidth,
           this->dataHeight,
-          drm_format,
-          format,
+          this->drmFormat,
+          this->format,
           1,
-          &fd,
+          &fi->fd,
           &(uint32_t) { frame->pitch },
           &(uint32_t) { 0 },
           &(uint64_t) { 0 });
 
-        if (!this->texture)
+        if (!fi->texture)
         {
           puts("Failed to create dmabuf texture");
           this->dmabuf = false;
@@ -760,15 +779,15 @@ static void lgVideoTick(void * data, float seconds)
       }
     }
 #else
-    (void)drm_format;
+    (void)drmFormat;
 #endif
 
     if (!this->dmabuf)
     {
       this->texture = gs_texture_create(
-        width,
+        this->dataWidth,
         this->dataHeight,
-        format,
+        this->format,
         1,
         NULL,
         GS_DYNAMIC);
@@ -785,7 +804,7 @@ static void lgVideoTick(void * data, float seconds)
       gs_texture_map(this->texture, &this->texData, &this->linesize);
     }
 
-    if (unpack)
+    if (this->unpack)
     {
       // create the render target for format unpacking
       this->dstTexture = gs_texture_create(
@@ -796,14 +815,43 @@ static void lgVideoTick(void * data, float seconds)
         NULL,
         GS_RENDER_TARGET);
     }
-    else
-      this->dstTexture = this->texture;
 
     obs_leave_graphics();
   }
 
-  // if using dmabuf there is nothing more here to do
-  if (!this->texture || this->dmabuf)
+#if LIBOBS_API_MAJOR_VER >= 27
+  if (this->dmabuf)
+  {
+    DMAFrameInfo * fi = dmabufOpenDMAFrameInfo(this, &msg, frame,
+        frame->frameHeight * frame->pitch);
+
+    if (!fi->texture)
+    {
+        fi->texture = gs_texture_create_from_dmabuf(
+          this->dataWidth,
+          this->dataHeight,
+          this->drmFormat,
+          this->format,
+          1,
+          &fi->fd,
+          &(uint32_t) { frame->pitch },
+          &(uint32_t) { 0 },
+          &(uint64_t) { 0 });
+    }
+
+    lgmpClientMessageDone(this->frameQueue);
+
+    // wait for the frame to be complete before we try to use it
+    FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
+    framebuffer_wait(fb, frame->frameHeight * frame->pitch);
+
+    this->dmaTexture = fi->texture;
+    os_sem_post(this->frameSem);
+    return;
+  }
+#endif
+
+  if (!this->texture)
   {
     lgmpClientMessageDone(this->frameQueue);
     os_sem_post(this->frameSem);
@@ -833,14 +881,21 @@ static void lgVideoTick(void * data, float seconds)
 static void lgVideoRender(void * data, gs_effect_t * effect)
 {
   LGPlugin * this = (LGPlugin *)data;
+  gs_texture_t * texture;
 
-  if (!this->texture)
+#if LIBOBS_API_MAJOR_VER >= 27
+  texture = this->dmaTexture;
+  if (!texture)
+    texture = this->texture;
+#endif
+
+  if (!texture)
     return;
 
   if (this->type == FRAME_TYPE_RGB_24 || this->type == FRAME_TYPE_BGR_32)
   {
     effect = this->unpackEffect;
-    gs_effect_set_texture(this->image, this->texture);
+    gs_effect_set_texture(this->image, texture);
     struct vec2 outputSize;
     vec2_set(&outputSize, this->frameWidth, this->frameHeight);
     gs_effect_set_vec2(this->outputSize, &outputSize);
@@ -850,11 +905,14 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
   {
     effect = obs_get_base_effect(OBS_EFFECT_OPAQUE);
     gs_eparam_t * image = gs_effect_get_param_by_name(effect, "image");
-    gs_effect_set_texture(image, this->texture);
+    gs_effect_set_texture(image, texture);
   }
 
+  if (this->unpack)
+    texture = this->dstTexture;
+
   while (gs_effect_loop(effect, "Draw"))
-    gs_draw_sprite(this->dstTexture, 0, 0, 0);
+    gs_draw_sprite(texture, 0, 0, 0);
 
   if (this->cursorVisible && this->cursorTex)
   {
