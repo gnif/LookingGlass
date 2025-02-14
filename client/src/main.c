@@ -249,6 +249,7 @@ static int renderThread(void * unused)
       }
     }
 
+    LG_LOCK(g_state.lgrLock);
     int resize = atomic_load(&g_state.lgrResize);
     if (unlikely(resize))
     {
@@ -291,7 +292,6 @@ static int renderThread(void * unused)
     const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
 
     const uint64_t renderStart = nanotime();
-    LG_LOCK(g_state.lgrLock);
 
     renderQueue_process();
 
