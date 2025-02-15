@@ -82,17 +82,16 @@ Linux kernel unless you use the open source NVIDIA drivers.
 iGPUs should use DMABUF
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-While `DMABUF` with the `KVMFR module <ivshmem_kvmfr>` offers performance
+While `DMABUF` with the :doc:`KVMFR module <ivshmem_kvmfr>` offers performance
 benefits for all users, for the often bandwidth-starved users with an iGPU on
-their host it's considered necessary for a decent experience.
+their host it's considered a requirement for a decent experience.
 
 When using a normal SHM file, many GPU drivers will copy incoming frames from
 shared memory to an intermediary buffer, then upload it from that buffer to the
-GPU's framebuffer. The KVMFR module will instead use the GPU's copy engine to
-download incoming frames directly from shared memory without using an
-intermediary buffer. This is especially helpful to iGPU users as it frees up RAM
-bandwidth, which an iGPU already uses extensively.
+GPU's framebuffer. The KVMFR module will instead use Direct Memory Access (DMA)
+to download incoming frames directly from shared memory, which may depending on
+GPU design eliminate the intermediary buffer. This is especially helpful to iGPU
+users as it frees up RAM bandwidth, which an iGPU already uses extensively.
 
-An added benefit: since the upload is done with the iGPU's copy engine, the CPU
-load is reduced as the upload is done by the iGPU module rather than the
-processor cores.
+An added benefit: since the upload is done with the iGPU, the CPU load is
+reduced as the upload does not use processor cores.
