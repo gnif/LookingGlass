@@ -309,6 +309,13 @@ static struct Option options[] =
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true
   },
+  {
+    .module         = "win",
+    .name           = "noHostAppWarning",
+    .description    = "Don't show a warning message if the host application is not detected",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
 
   // input options
   {
@@ -678,6 +685,7 @@ bool config_load(int argc, char * argv[])
   g_params.uiSize            = option_get_int   ("win", "uiSize"            );
   g_params.jitRender         = option_get_bool  ("win", "jitRender"         );
   g_params.requestActivation = option_get_bool  ("win", "requestActivation" );
+  g_params.noHostAppWarning  = option_get_bool  ("win", "noHostAppWarning"  );
 
   if (g_params.noScreensaver && g_params.autoScreensaver)
   {

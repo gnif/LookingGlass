@@ -1494,7 +1494,7 @@ restart:
           DEBUG_INFO("Waiting for the host application to start...");
         }
 
-        if (waitCount == 30)
+        if (waitCount == 30 && !g_params.noHostAppWarning)
         {
           DEBUG_BREAK();
           msgs[msgsCount++] = app_msgBox(
