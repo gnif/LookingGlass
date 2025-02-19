@@ -57,6 +57,7 @@ struct D12Interface
 
   void        * ivshmemBase;
   ID3D12Heap ** ivshmemHeap;
+  bool          indirectCopy;
 
   CaptureGetPointerBuffer  getPointerBufferFn;
   CapturePostPointerBuffer postPointerBufferFn;
@@ -69,6 +70,7 @@ struct D12Interface
   D12FrameFormat captureFormat;
   unsigned       formatVer;
   unsigned       pitch;
+  unsigned       bpp;
 
   // output format tracking
   D12FrameFormat dstFormat;
@@ -91,6 +93,8 @@ struct D12Interface
     FrameBuffer    *  frameBuffer;
     // the resource backed by the framebuffer
     ID3D12Resource ** resource;
+    // the mapped resource if indirectCopy is in use
+    void           *  map;
   }
   frameBuffers[0];
 };
@@ -118,7 +122,8 @@ static bool d12_heapTest(ID3D12Device3 * device, ID3D12Heap * heap);
 static ID3D12Resource * d12_frameBufferToResource(
   unsigned      frameBufferIndex,
   FrameBuffer * frameBuffer,
-  unsigned size);
+  unsigned size,
+  void ** map);
 
 // implementation
 
@@ -159,6 +164,13 @@ static void d12_initOptions(void)
       .type           = OPTION_TYPE_BOOL,
       .value.x_bool   = false
     },
+    {
+      .module         = "d12",
+      .name           = "indirectCopy",
+      .description    = "Force the less optimal indirect copy method",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = false
+    },
     {0}
   };
 
@@ -181,12 +193,13 @@ static bool d12_create(
     return false;
   }
 
-  this->debug       = option_get_bool("d12", "debug"       );
-  this->trackDamage = option_get_bool("d12", "trackDamage" );
+  this->debug        = option_get_bool("d12", "debug"       );
+  this->trackDamage  = option_get_bool("d12", "trackDamage" );
+  this->indirectCopy = option_get_bool("d12", "indirectCopy");
 
   DEBUG_INFO(
-    "debug:%d trackDamage:%d",
-    this->debug, this->trackDamage);
+    "debug:%d trackDamage:%d indirectCopy:%d",
+    this->debug, this->trackDamage, this->indirectCopy);
 
   this->d3d12 = LoadLibrary("d3d12.dll");
   if (!this->d3d12)
@@ -352,32 +365,35 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     *device, D3D12_COMMAND_LIST_TYPE_COMPUTE, &this->computeCommand, L"Compute"))
     goto exit;
 
-  // Create the IVSHMEM heap
-  this->ivshmemBase = ivshmemBase;
   comRef_defineLocal(ID3D12Heap, ivshmemHeap);
-  DEBUG_TRACE("ID3D12Device3_OpenExistingHeapFromAddress");
-  hr = ID3D12Device3_OpenExistingHeapFromAddress(
-    *device, ivshmemBase, &IID_ID3D12Heap, (void **)ivshmemHeap);
-  if (FAILED(hr))
+  if (!this->indirectCopy)
   {
-    DEBUG_WINERROR("Failed to open the framebuffer as a D3D12Heap", hr);
-    goto exit;
-  }
+    // Create the IVSHMEM heap
+    this->ivshmemBase = ivshmemBase;
+    DEBUG_TRACE("ID3D12Device3_OpenExistingHeapFromAddress");
+    hr = ID3D12Device3_OpenExistingHeapFromAddress(
+      *device, ivshmemBase, &IID_ID3D12Heap, (void **)ivshmemHeap);
+    if (FAILED(hr))
+    {
+      DEBUG_WINERROR("Failed to open the framebuffer as a D3D12Heap", hr);
+      goto exit;
+    }
 
-  // Adjust the alignSize based on the required heap alignment
-  D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
-  *alignSize = heapDesc.Alignment;
+    // Adjust the alignSize based on the required heap alignment
+    D3D12_HEAP_DESC heapDesc = ID3D12Heap_GetDesc(*ivshmemHeap);
+    *alignSize = heapDesc.Alignment;
 
-  /* Ensure we can create resources in the ivshmem heap
-   * NOTE: It is safe to do this as the application has not yet setup the KVMFR
-   * headers, so we can just attempt to create a resource at the start of the
-   * heap without corrupting anything */
-  DEBUG_TRACE("d12_heapTest");
-  if (!d12_heapTest(*device, *ivshmemHeap))
-  {
-    DEBUG_ERROR(
-      "Unable to create resources in the IVSHMEM heap, is REBAR working?");
-    goto exit;
+    /* Ensure we can create resources in the ivshmem heap
+     * NOTE: It is safe to do this as the application has not yet setup the KVMFR
+     * headers, so we can just attempt to create a resource at the start of the
+     * heap without corrupting anything */
+    DEBUG_TRACE("d12_heapTest");
+    if (!d12_heapTest(*device, *ivshmemHeap))
+    {
+      this->indirectCopy = true;
+      DEBUG_WARN("Unable to create resources in the IVSHMEM heap, "
+        "falling back to indirect copy");
+    }
   }
 
   // initialize the backend
@@ -413,7 +429,9 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   comRef_toGlobal(this->device      , device       );
   comRef_toGlobal(this->copyQueue   , copyQueue    );
   comRef_toGlobal(this->computeQueue, computeQueue );
-  comRef_toGlobal(this->ivshmemHeap , ivshmemHeap  );
+
+  if (!this->indirectCopy)
+    comRef_toGlobal(this->ivshmemHeap, ivshmemHeap);
 
   DEBUG_TRACE("Init success");
   result = true;
@@ -440,6 +458,13 @@ static void d12_stop(void)
 static bool d12_deinit(void)
 {
   bool result = true;
+
+  if (this->indirectCopy)
+  {
+    for(int i = 0; i < this->frameBufferCount; ++i)
+      if (this->frameBuffers[i].map)
+        ID3D12Resource_Unmap(*this->frameBuffers[i].resource, 0, NULL);
+  }
 
   D12Effect * effect;
   vector_forEach(effect, &this->effects)
@@ -606,7 +631,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   this->pitch = layout.Footprint.RowPitch;
 
   const unsigned maxRows = maxFrameSize / layout.Footprint.RowPitch;
-  const unsigned bpp     = this->dstFormat.format == CAPTURE_FMT_RGBA16F ? 8 : 4;
+  this->bpp = this->dstFormat.format == CAPTURE_FMT_RGBA16F ? 8 : 4;
 
   frame->formatVer        = this->formatVer;
   frame->screenWidth      = srcFormat.width;
@@ -617,7 +642,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->frameHeight      = this->dstFormat.height;
   frame->truncated        = maxRows < this->dstFormat.desc.Height;
   frame->pitch            = this->pitch;
-  frame->stride           = this->pitch / bpp;
+  frame->stride           = this->pitch / this->bpp;
   frame->format           = this->dstFormat.format;
   frame->hdr              = this->dstFormat.colorSpace ==
     DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
@@ -673,6 +698,9 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   comRef_defineLocal(ID3D12Resource, src);
   DEBUG_TRACE("d12_backendFetch");
   *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
+  unsigned rectCount = 0;
+  FrameDamageRect allRects[this->nbDirtyRects + desc.nbDirtyRects];
+
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
@@ -680,9 +708,11 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     goto exit;
   }
 
+  void * map;
   comRef_defineLocal(ID3D12Resource, dst)
   DEBUG_TRACE("d12_frameBufferToResource");
-  *dst = d12_frameBufferToResource(frameBufferIndex, frameBuffer, maxFrameSize);
+  *dst = d12_frameBufferToResource(frameBufferIndex, frameBuffer, maxFrameSize,
+    &map);
   if (!*dst)
     goto exit;
 
@@ -759,15 +789,12 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     {
       DEBUG_TRACE("Damage aware update");
 
-      FrameDamageRect allRects[this->nbDirtyRects + desc.nbDirtyRects];
-      unsigned count = 0;
-
       /* we must update the rects that were dirty in the prior frame also,
        * otherwise the frame in memory will not be consistent when areas need to
        * be redrawn by the client, such as under the cursor */
       for(const RECT * rect = this->dirtyRects;
         rect < this->dirtyRects + this->nbDirtyRects; ++rect)
-        allRects[count++] = (FrameDamageRect){
+        allRects[rectCount++] = (FrameDamageRect){
           .x      = rect->left,
           .y      = rect->top,
           .width  = rect->right  - rect->left,
@@ -777,7 +804,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
       /* add the new dirtyRects to the array */
       for(const RECT * rect = desc.dirtyRects;
         rect < desc.dirtyRects + desc.nbDirtyRects; ++rect)
-        allRects[count++] = (FrameDamageRect){
+        allRects[rectCount++] = (FrameDamageRect){
           .x      = rect->left,
           .y      = rect->top,
           .width  = rect->right  - rect->left,
@@ -785,10 +812,10 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
         };
 
       /* resolve the rects */
-      count = rectsMergeOverlapping(allRects, count);
+      rectCount = rectsMergeOverlapping(allRects, rectCount);
 
       /* copy all the rects */
-      for(FrameDamageRect * rect = allRects; rect < allRects + count; ++rect)
+      for(FrameDamageRect * rect = allRects; rect < allRects + rectCount; ++rect)
       {
         D3D12_BOX box =
         {
@@ -832,9 +859,30 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   DEBUG_TRACE("Fence wait");
   d12_commandGroupWait(&this->copyCommand);
 
-  // signal the frame is complete
-  framebuffer_set_write_ptr(frameBuffer,
-    this->dstFormat.desc.Height * this->pitch);
+  if (this->indirectCopy)
+  {
+    if (rectCount == 0)
+    {
+      framebuffer_write(frameBuffer, map,
+        this->pitch * this->dstFormat.desc.Height);
+    }
+    else
+    {
+      /* copy all the rects */
+      rectsBufferToFramebuffer(allRects, rectCount, this->bpp, frameBuffer,
+        this->pitch, this->dstFormat.desc.Height, map, this->pitch);
+
+      // signal the frame is complete
+      framebuffer_set_write_ptr(frameBuffer,
+        this->dstFormat.desc.Height * this->pitch);
+    }
+  }
+  else
+  {
+    // signal the frame is complete
+    framebuffer_set_write_ptr(frameBuffer,
+      this->dstFormat.desc.Height * this->pitch);
+  }
 
   // reset the command queues
   if (this->effectsActive)
@@ -1031,7 +1079,7 @@ exit:
 }
 
 static ID3D12Resource * d12_frameBufferToResource(unsigned frameBufferIndex,
-  FrameBuffer * frameBuffer, unsigned size)
+  FrameBuffer * frameBuffer, unsigned size, void ** map)
 {
   ID3D12Resource * result = NULL;
   comRef_scopePush(10);
@@ -1042,6 +1090,7 @@ static ID3D12Resource * d12_frameBufferToResource(unsigned frameBufferIndex,
   if (fb->resource && fb->frameBuffer == frameBuffer && fb->size >= size)
   {
     result = *fb->resource;
+    *map   = fb->map;
     ID3D12Resource_AddRef(result);
     goto exit;
   }
@@ -1049,36 +1098,101 @@ static ID3D12Resource * d12_frameBufferToResource(unsigned frameBufferIndex,
   fb->size        = size;
   fb->frameBuffer = frameBuffer;
 
-  D3D12_RESOURCE_DESC desc =
-  {
-    .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
-    .Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
-    .Width              = size,
-    .Height             = 1,
-    .DepthOrArraySize   = 1,
-    .MipLevels          = 1,
-    .Format             = DXGI_FORMAT_UNKNOWN,
-    .SampleDesc.Count   = 1,
-    .SampleDesc.Quality = 0,
-    .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-    .Flags              = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER
-  };
-
   comRef_defineLocal(ID3D12Resource, resource);
-  HRESULT hr = ID3D12Device3_CreatePlacedResource(
-    *this->device,
-    *this->ivshmemHeap,
-    (uintptr_t)framebuffer_get_data(frameBuffer) - (uintptr_t)this->ivshmemBase,
-    &desc,
-    D3D12_RESOURCE_STATE_COPY_DEST,
-    NULL,
-    &IID_ID3D12Resource,
-    (void **)resource);
-
-  if (FAILED(hr))
+  HRESULT hr;
+  if (this->indirectCopy)
   {
-    DEBUG_WINERROR("Failed to create the FrameBuffer ID3D12Resource", hr);
-    goto exit;
+    if (fb->map)
+    {
+      ID3D12Resource_Unmap(*fb->resource, 0, NULL);
+      fb->map = NULL;
+    }
+
+    D3D12_HEAP_PROPERTIES heapProps =
+    {
+      .Type                 = D3D12_HEAP_TYPE_READBACK,
+      .CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+      .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+      .CreationNodeMask     = 1,
+      .VisibleNodeMask      = 1
+    };
+
+    D3D12_RESOURCE_DESC desc =
+    {
+      .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
+      .Alignment          = 0,
+      .Width              = size,
+      .Height             = 1,
+      .DepthOrArraySize   = 1,
+      .MipLevels          = 1,
+      .Format             = DXGI_FORMAT_UNKNOWN,
+      .SampleDesc.Count   = 1,
+      .SampleDesc.Quality = 0,
+      .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+      .Flags              = D3D12_RESOURCE_FLAG_NONE
+    };
+
+    hr = ID3D12Device3_CreateCommittedResource(
+      *this->device,
+      &heapProps,
+      D3D12_HEAP_FLAG_NONE,
+      &desc,
+      D3D12_RESOURCE_STATE_COPY_DEST,
+      NULL,
+      &IID_ID3D12Resource,
+      (void **)resource);
+
+
+    if (FAILED(hr))
+    {
+      DEBUG_WINERROR("Failed to create the intermediate ID3D12Resource", hr);
+      goto exit;
+    }
+
+    fb->map = NULL;
+    D3D12_RANGE range = {0, 0};
+    HRESULT hr = ID3D12Resource_Map(*resource, 0, &range, &fb->map);
+    if (FAILED(hr) || !fb->map)
+    {
+      DEBUG_WINERROR("Failed to map readback resource", hr);
+      goto exit;
+    }
+
+    *map = fb->map;
+  }
+  else
+  {
+    D3D12_RESOURCE_DESC desc =
+    {
+      .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
+      .Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
+      .Width              = size,
+      .Height             = 1,
+      .DepthOrArraySize   = 1,
+      .MipLevels          = 1,
+      .Format             = DXGI_FORMAT_UNKNOWN,
+      .SampleDesc.Count   = 1,
+      .SampleDesc.Quality = 0,
+      .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+      .Flags              = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER
+    };
+
+    hr = ID3D12Device3_CreatePlacedResource(
+      *this->device,
+      *this->ivshmemHeap,
+      (uintptr_t)framebuffer_get_data(frameBuffer) -
+        (uintptr_t)this->ivshmemBase,
+      &desc,
+      D3D12_RESOURCE_STATE_COPY_DEST,
+      NULL,
+      &IID_ID3D12Resource,
+      (void **)resource);
+
+    if (FAILED(hr))
+    {
+      DEBUG_WINERROR("Failed to create the FrameBuffer ID3D12Resource", hr);
+      goto exit;
+    }
   }
 
   // cache the resource
