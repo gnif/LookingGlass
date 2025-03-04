@@ -8,7 +8,7 @@ add_library(capture_DXGI STATIC
   src/util.c
 
   src/pp/downsample.c
-  src/pp/sdrwhitelevel.c
+  src/pp/hdr16to10.c
   src/pp/rgb24.c
 )
 

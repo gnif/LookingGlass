@@ -18,22 +18,15 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_KB_
-#define _H_LG_KB_
+#pragma once
 
-#include <linux/input.h>
-#include <stdint.h>
+#include <vulkan/vulkan.h>
 
-#include "cimgui.h"
+#include <stdbool.h>
 
-#define PS2_MUTE        0xE020
-#define PS2_VOLUME_UP   0xE030
-#define PS2_VOLUME_DOWN 0xE02E
+extern const char * VULKAN_VALIDATION_LAYER;
 
-extern const uint32_t linux_to_ps2[KEY_MAX];
-extern const char *   linux_to_str[KEY_MAX];
-extern const char *   linux_to_display[KEY_MAX];
-
-ImGuiKey keyToImGui(int key);
-
-#endif
+bool vulkan_hasValidationLayer(bool * hasValidationLayer);
+const char ** vulkan_checkDeviceExtensions(VkPhysicalDevice physicalDevice,
+    uint32_t * enabledExtensionCount);
+const char ** vulkan_checkInstanceExtensions(uint32_t * enabledExtensionCount);

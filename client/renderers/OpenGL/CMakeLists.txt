@@ -11,7 +11,7 @@ add_library(renderer_OpenGL STATIC
   ${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl2.cpp
 )
 
-target_compile_definitions(renderer_OpenGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
+target_compile_definitions(renderer_OpenGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 CIMGUI_USE_OPENGL2=1)
 
 target_link_libraries(renderer_OpenGL
   PkgConfig::RENDERER_OPENGL

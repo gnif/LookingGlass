@@ -303,7 +303,7 @@ static const struct wl_keyboard_listener keyboardListener = {
 
 static void waylandCleanUpPointer(void)
 {
-  INTERLOCKED_SECTION(wlWm.confineLock, {
+  INTERLOCKED_SECTION(wlWm.surfaceLock, {
     if (wlWm.lockedPointer)
     {
       zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
@@ -419,15 +419,12 @@ bool waylandInputInit(void)
   wl_seat_add_listener(wlWm.seat, &seatListener, NULL);
   wl_display_roundtrip(wlWm.display);
 
-  LG_LOCK_INIT(wlWm.confineLock);
-
   return true;
 }
 
 void waylandInputFree(void)
 {
   waylandUngrabPointer();
-  LG_LOCK_FREE(wlWm.confineLock);
 
   if (wlWm.pointer)
     waylandCleanUpPointer();
@@ -463,7 +460,7 @@ void waylandGrabPointer(void)
       &relativePointerListener, NULL);
   }
 
-  INTERLOCKED_SECTION(wlWm.confineLock,
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (!wlWm.confinedPointer && !wlWm.lockedPointer)
     {
@@ -477,7 +474,7 @@ void waylandGrabPointer(void)
 inline static void internalUngrabPointer(bool lock)
 {
   if (lock)
-    LG_LOCK(wlWm.confineLock);
+    LG_LOCK(wlWm.surfaceLock);
 
   if (wlWm.confinedPointer)
   {
@@ -486,7 +483,7 @@ inline static void internalUngrabPointer(bool lock)
   }
 
   if (lock)
-    LG_UNLOCK(wlWm.confineLock);
+    LG_UNLOCK(wlWm.surfaceLock);
 
   if (!wlWm.warpSupport)
   {
@@ -517,7 +514,7 @@ void waylandCapturePointer(void)
     return;
   }
 
-  INTERLOCKED_SECTION(wlWm.confineLock,
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (wlWm.confinedPointer)
     {
@@ -533,7 +530,7 @@ void waylandCapturePointer(void)
 
 void waylandUncapturePointer(void)
 {
-  INTERLOCKED_SECTION(wlWm.confineLock,
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (wlWm.lockedPointer)
     {
@@ -582,11 +579,11 @@ void waylandWarpPointer(int x, int y, bool exiting)
   if (!wlWm.pointerInSurface || wlWm.lockedPointer)
     return;
 
-  INTERLOCKED_SECTION(wlWm.confineLock,
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (wlWm.lockedPointer)
     {
-      LG_UNLOCK(wlWm.confineLock);
+      LG_UNLOCK(wlWm.surfaceLock);
       return;
     }
 

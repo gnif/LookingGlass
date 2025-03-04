@@ -22,6 +22,7 @@
 #include "interface/platform.h"
 #include "common/array.h"
 #include "common/debug.h"
+#include "common/display.h"
 #include "common/windebug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -53,13 +54,13 @@
 
 //post processers
 extern const DXGIPostProcess DXGIPP_Downsample;
-extern const DXGIPostProcess DXGIPP_SDRWhiteLevel;
+extern const DXGIPostProcess DXGIPP_HDR16to10;
 extern const DXGIPostProcess DXGIPP_RGB24;
 
 const DXGIPostProcess * postProcessors[] =
 {
   &DXGIPP_Downsample,
-  &DXGIPP_SDRWhiteLevel,
+  &DXGIPP_HDR16to10,
   &DXGIPP_RGB24
 };
 
@@ -135,6 +136,8 @@ struct DXGIInterface
   DXGI_FORMAT                dxgiSrcFormat, dxgiFormat;
   bool                       hdr;
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
+  DISPLAYCONFIG_PATH_INFO    displayPathInfo;
+  ColorMetadata              colorMetadata;
   ID3D11VertexShader      ** vshader;
   struct DXGICopyBackend   * backend;
   bool                       backendConfigured;
@@ -725,7 +728,25 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
     {
       DXGI_OUTPUT_DESC1 desc1;
       IDXGIOutput6_GetDesc1(*output6, &desc1);
+      if (!display_getPathInfo(desc1.Monitor, &this->displayPathInfo))
+      {
+        DEBUG_ERROR("Failed to get the display path info");
+        goto fail;
+      }
+
       this->dxgiColorSpace = desc1.ColorSpace;
+
+      this->colorMetadata.redPrimaryX = desc1.RedPrimary[0];
+      this->colorMetadata.redPrimaryY = desc1.RedPrimary[1];
+      this->colorMetadata.greenPrimaryX = desc1.GreenPrimary[0];
+      this->colorMetadata.greenPrimaryY = desc1.GreenPrimary[1];
+      this->colorMetadata.bluePrimaryX = desc1.BluePrimary[0];
+      this->colorMetadata.bluePrimaryY = desc1.BluePrimary[1];
+      this->colorMetadata.whitePointX = desc1.WhitePoint[0];
+      this->colorMetadata.whitePointY = desc1.WhitePoint[1];
+      this->colorMetadata.minLuminance = desc1.MinLuminance;
+      this->colorMetadata.maxLuminance = desc1.MaxLuminance;
+      this->colorMetadata.maxFullFrameLuminance = desc1.MaxFullFrameLuminance;
 
       DEBUG_INFO("Bits Per Color    : %u"   , desc1.BitsPerColor);
       DEBUG_INFO("Color Space       : %s"   , getDXGIColorSpaceTypeStr(this->dxgiColorSpace));
@@ -826,10 +847,10 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
   bool shareable = this->backend != &copyBackendD3D11;
   if (this->hdr)
   {
-    //HDR content needs to be corrected and converted to HDR10
-    if (!ppInit(&DXGIPP_SDRWhiteLevel, shareable))
+    //HDR content needs to be converted to HDR10
+    if (!ppInit(&DXGIPP_HDR16to10, shareable))
     {
-      DEBUG_ERROR("Failed to initialize the SDRWhiteLevel post processor");
+      DEBUG_ERROR("Failed to initialize the HDR16to10 post processor");
       goto fail;
     }
   }
@@ -1402,6 +1423,8 @@ static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
 
   tex->state = TEXTURE_STATE_MAPPED;
 
+  this->colorMetadata.sdrWhiteLuminance = display_getSDRWhiteLevel(&this->displayPathInfo);
+
   const unsigned int maxRows = maxFrameSize / this->pitch;
 
   frame->formatVer        = tex->formatVer;
@@ -1416,8 +1439,9 @@ static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
   frame->stride           = this->stride;
   frame->format           = this->outputFormat;
   frame->hdr              = this->hdr;
-  frame->hdrPQ            = false;
+  frame->hdrPQ            = this->outputFormat == CAPTURE_FMT_RGBA10;
   frame->rotation         = this->rotation;
+  frame->colorMetadata    = this->colorMetadata;
 
   frame->damageRectsCount = tex->damageRectsCount;
   memcpy(frame->damageRects, tex->damageRects,

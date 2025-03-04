@@ -173,7 +173,7 @@ static int renderThread(void * unused)
 {
   if (!RENDERER(renderStartup, g_state.useDMA))
   {
-    DEBUG_ERROR("EGL render failed to start");
+    DEBUG_ERROR("Renderer failed to start");
     g_state.state = APP_STATE_SHUTDOWN;
 
     /* unblock threads waiting on the condition */
@@ -249,6 +249,7 @@ static int renderThread(void * unused)
       }
     }
 
+    LG_LOCK(g_state.lgrLock);
     int resize = atomic_load(&g_state.lgrResize);
     if (unlikely(resize))
     {
@@ -271,8 +272,14 @@ static int renderThread(void * unused)
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
       if (g_state.lgr)
-        RENDERER(onResize, g_state.windowW, g_state.windowH,
-            g_state.windowScale, g_state.dstRect, g_params.winRotate);
+      {
+        if (unlikely(!RENDERER(onResize, g_state.windowW, g_state.windowH,
+            g_state.windowScale, g_state.dstRect, g_params.winRotate)))
+        {
+          LG_UNLOCK(g_state.lgrLock);
+          break;
+        }
+      }
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
@@ -285,7 +292,6 @@ static int renderThread(void * unused)
     const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
 
     const uint64_t renderStart = nanotime();
-    LG_LOCK(g_state.lgrLock);
 
     renderQueue_process();
 
@@ -627,17 +633,18 @@ int main_frameThread(void * unused)
     if (!g_state.formatValid || frame->formatVer != formatVer)
     {
       // setup the renderer format with the frame format details
-      lgrFormat.type         = frame->type;
-      lgrFormat.screenWidth  = frame->screenWidth;
-      lgrFormat.screenHeight = frame->screenHeight;
-      lgrFormat.dataWidth    = frame->dataWidth;
-      lgrFormat.dataHeight   = frame->dataHeight;
-      lgrFormat.frameWidth   = frame->frameWidth;
-      lgrFormat.frameHeight  = frame->frameHeight;
-      lgrFormat.stride       = frame->stride;
-      lgrFormat.pitch        = frame->pitch;
-      lgrFormat.hdr          = frame->flags & FRAME_FLAG_HDR;
-      lgrFormat.hdrPQ        = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.type          = frame->type;
+      lgrFormat.screenWidth   = frame->screenWidth;
+      lgrFormat.screenHeight  = frame->screenHeight;
+      lgrFormat.dataWidth     = frame->dataWidth;
+      lgrFormat.dataHeight    = frame->dataHeight;
+      lgrFormat.frameWidth    = frame->frameWidth;
+      lgrFormat.frameHeight   = frame->frameHeight;
+      lgrFormat.stride        = frame->stride;
+      lgrFormat.pitch         = frame->pitch;
+      lgrFormat.hdr           = frame->flags & FRAME_FLAG_HDR;
+      lgrFormat.hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.colorMetadata = frame->colorMetadata;
 
       if (frame->flags & FRAME_FLAG_TRUNCATED)
       {
@@ -792,7 +799,7 @@ int main_frameThread(void * unused)
 
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
     if (!RENDERER(onFrame, fb, g_state.useDMA ? dma->fd : -1,
-          frame->damageRects, frame->damageRectsCount))
+          frame->damageRects, frame->damageRectsCount, &frame->colorMetadata))
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");
@@ -1203,8 +1210,6 @@ static int lg_run(void)
   overlayGraph_register("FRAME" , g_state.renderTimings , 0.0f, 50.0f, NULL);
   overlayGraph_register("UPLOAD", g_state.uploadTimings , 0.0f, 50.0f, NULL);
   overlayGraph_register("RENDER", g_state.renderDuration, 0.0f, 10.0f, NULL);
-
-  initImGuiKeyMap(g_state.io->KeyMap);
 
   // unknown guest OS at this time
   g_state.guestOS = KVMFR_OS_OTHER;

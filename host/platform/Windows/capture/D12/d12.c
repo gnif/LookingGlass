@@ -49,6 +49,7 @@ struct D12Interface
   ID3D12Device3      ** device;
 
   DISPLAYCONFIG_PATH_INFO displayPathInfo;
+  ColorMetadata           colorMetadata;
 
   ID3D12CommandQueue ** copyQueue;
   ID3D12CommandQueue ** computeQueue;
@@ -303,6 +304,18 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     goto exit;
   }
 
+  this->colorMetadata.redPrimaryX = desc1.RedPrimary[0];
+  this->colorMetadata.redPrimaryY = desc1.RedPrimary[1];
+  this->colorMetadata.greenPrimaryX = desc1.GreenPrimary[0];
+  this->colorMetadata.greenPrimaryY = desc1.GreenPrimary[1];
+  this->colorMetadata.bluePrimaryX = desc1.BluePrimary[0];
+  this->colorMetadata.bluePrimaryY = desc1.BluePrimary[1];
+  this->colorMetadata.whitePointX = desc1.WhitePoint[0];
+  this->colorMetadata.whitePointY = desc1.WhitePoint[1];
+  this->colorMetadata.minLuminance = desc1.MinLuminance;
+  this->colorMetadata.maxLuminance = desc1.MaxLuminance;
+  this->colorMetadata.maxFullFrameLuminance = desc1.MaxFullFrameLuminance;
+
   // create the D3D12 device
   comRef_defineLocal(ID3D12Device3, device);
   DEBUG_TRACE("D3D12CreateDevice");
@@ -409,7 +422,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   for(const D12Effect ** effect = D12Effects; *effect; ++effect)
   {
     D12Effect * instance;
-    switch(d12_effectCreate(*effect, &instance, *device, &this->displayPathInfo))
+    switch(d12_effectCreate(*effect, &instance, *device))
     {
       case D12_EFFECT_STATUS_OK:
         DEBUG_INFO("D12 Created Effect: %s", (*effect)->name);
@@ -630,6 +643,8 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     NULL);  // pTotalBytes
   this->pitch = layout.Footprint.RowPitch;
 
+  this->colorMetadata.sdrWhiteLuminance = display_getSDRWhiteLevel(&this->displayPathInfo);
+
   const unsigned maxRows = maxFrameSize / layout.Footprint.RowPitch;
   this->bpp = this->dstFormat.format == CAPTURE_FMT_RGBA16F ? 8 : 4;
 
@@ -646,8 +661,9 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->format           = this->dstFormat.format;
   frame->hdr              = this->dstFormat.colorSpace ==
     DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-  frame->hdrPQ            = false;
+  frame->hdrPQ            = this->dstFormat.format == CAPTURE_FMT_RGBA10;
   frame->rotation         = desc.rotation;
+  frame->colorMetadata    = this->colorMetadata;
 
   D12Effect * effect;
   vector_forEach(effect, &this->effects)

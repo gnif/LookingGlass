@@ -71,19 +71,20 @@ LG_RendererRotate;
 
 typedef struct LG_RendererFormat
 {
-  FrameType         type;         // frame type
-  bool              hdr;          // if the frame is HDR or not
-  bool              hdrPQ;        // if the HDR content is PQ mapped
-  unsigned int      screenWidth;  // actual width of the host
-  unsigned int      screenHeight; // actual height of the host
-  unsigned int      dataWidth;    // the width of the packed data
-  unsigned int      dataHeight;   // the height of the packed data
-  unsigned int      frameWidth;   // width of frame transmitted
-  unsigned int      frameHeight;  // height of frame transmitted
-  unsigned int      stride;  // scanline width (zero if compresed)
-  unsigned int      pitch;   // scanline bytes (or compressed size)
-  unsigned int      bpp;     // bits per pixel (zero if compressed)
-  LG_RendererRotate rotate;  // guest rotation
+  FrameType         type;          // frame type
+  bool              hdr;           // if the frame is HDR or not
+  bool              hdrPQ;         // if the HDR content is PQ mapped
+  unsigned int      screenWidth;   // actual width of the host
+  unsigned int      screenHeight;  // actual height of the host
+  unsigned int      dataWidth;     // the width of the packed data
+  unsigned int      dataHeight;    // the height of the packed data
+  unsigned int      frameWidth;    // width of frame transmitted
+  unsigned int      frameHeight;   // height of frame transmitted
+  unsigned int      stride;        // scanline width (zero if compresed)
+  unsigned int      pitch;         // scanline bytes (or compressed size)
+  unsigned int      bpp;           // bits per pixel (zero if compressed)
+  LG_RendererRotate rotate;        // guest rotation
+  ColorMetadata     colorMetadata; // display color metadata (mainly for HDR)
 }
 LG_RendererFormat;
 
@@ -104,6 +105,8 @@ typedef enum LG_RendererCursor
   LG_CURSOR_MASKED_COLOR
 }
 LG_RendererCursor;
+
+#define LG_CURSOR_MAX (LG_CURSOR_MASKED_COLOR+1)
 
 typedef struct LG_Renderer LG_Renderer;
 
@@ -138,8 +141,8 @@ typedef struct LG_RendererOps
   void (*onRestart)(LG_Renderer * renderer);
 
   /* called when the viewport has been resized
-   * Context: renderThrtead */
-  void (*onResize)(LG_Renderer * renderer, const int width, const int height,
+   * Context: renderThread */
+  bool (*onResize)(LG_Renderer * renderer, const int width, const int height,
       const double scale, const LG_RendererRect destRect,
       LG_RendererRotate rotate);
 
@@ -161,7 +164,8 @@ typedef struct LG_RendererOps
   /* called when there is a new frame
    * Context: frameThread */
   bool (*onFrame)(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFD,
-      const FrameDamageRect * damage, int damageCount);
+      const FrameDamageRect * damage, int damageCount,
+      const ColorMetadata * colorMetadata);
 
   /* called when the rederer is to startup
    * Context: renderThread */

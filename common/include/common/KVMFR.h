@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 20
+#define KVMFR_VERSION 21
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -154,6 +154,7 @@ typedef struct KVMFRFrame
   uint32_t        frameWidth;         // the unpacked frame width
   uint32_t        frameHeight;        // the unpacked frame height
   FrameRotation   rotation;           // the frame rotation
+  ColorMetadata   colorMetadata;      // the display color metadata (mainly for HDR)
   uint32_t        stride;             // the row stride (zero if compressed data)
   uint32_t        pitch;              // the row pitch  (stride in bytes or the compressed frame size)
   uint32_t        offset;             // offset from the start of this header to the FrameBuffer header

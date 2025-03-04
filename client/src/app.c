@@ -346,8 +346,9 @@ void app_handleKeyPress(int sc, int charcode)
       app_setOverlay(false);
     else
     {
-      if (sc < sizeof(g_state.io->KeysDown))
-        g_state.io->KeysDown[sc] = true;
+      ImGuiKey key = keyToImGui(sc);
+      if (key != ImGuiKey_None)
+        ImGuiIO_AddKeyEvent(g_state.io, key, true);
     }
     return;
   }
@@ -391,8 +392,9 @@ void app_handleKeyRelease(int sc, int charcode)
 
   if (app_isOverlayMode())
   {
-    if (sc < sizeof(g_state.io->KeysDown))
-      g_state.io->KeysDown[sc] = false;
+    ImGuiKey key = keyToImGui(sc);
+    if (key != ImGuiKey_None)
+      ImGuiIO_AddKeyEvent(g_state.io, key, false);
     return;
   }
 
@@ -645,6 +647,23 @@ void app_glSetSwapInterval(int interval)
 void app_glSwapBuffers(void)
 {
   g_state.ds->glSwapBuffers();
+}
+#endif
+
+#ifdef ENABLE_VULKAN
+const char * app_getVulkanSurfaceExtension(void)
+{
+  return g_state.ds->getVulkanSurfaceExtension();
+}
+
+VkSurfaceKHR app_createVulkanSurface(VkInstance instance)
+{
+  return g_state.ds->createVulkanSurface(instance);
+}
+
+bool app_vulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo)
+{
+  return g_state.ds->vulkanPresent(queue, presentInfo);
 }
 #endif
 

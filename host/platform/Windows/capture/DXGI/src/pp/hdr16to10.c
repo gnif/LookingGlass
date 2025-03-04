@@ -24,11 +24,10 @@
 
 #include "common/debug.h"
 #include "common/windebug.h"
-#include "common/display.h"
 
 #include <dxgi1_6.h>
 
-typedef struct SDRWhiteLevel
+typedef struct HDR16to10
 {
   ComScope * comScope;
 
@@ -38,13 +37,9 @@ typedef struct SDRWhiteLevel
   bool shareable;
   ID3D11PixelShader   ** pshader;
   ID3D11SamplerState  ** sampler;
-  ID3D11Buffer        ** buffer;
-
-  DISPLAYCONFIG_PATH_INFO displayPathInfo;
-  float sdrWhiteLevel;
 }
-SDRWhiteLevel;
-static SDRWhiteLevel this = {0};
+HDR16to10;
+static HDR16to10 this = {0};
 
 #define comRef_toGlobal(dst, src) \
   _comRef_toGlobal(this.comScope, dst, src)
@@ -54,17 +49,9 @@ typedef struct
   ID3D11Texture2D        ** tex;
   ID3D11RenderTargetView ** target;
 }
-SDRWhiteLevelInst;
+HDR16to10Inst;
 
-struct ShaderConsts
-{
-  float sdrWhiteLevel;
-}
-__attribute__((aligned(16)));
-
-static void updateConsts(void);
-
-static bool sdrWhiteLevel_setup(
+static bool hdr16to10_setup(
   ID3D11Device        ** device,
   ID3D11DeviceContext ** context,
   IDXGIOutput         ** output,
@@ -91,29 +78,44 @@ static bool sdrWhiteLevel_setup(
     goto exit;
   }
 
-  DXGI_OUTPUT_DESC1 desc1;
-  IDXGIOutput6_GetDesc1(*output6, &desc1);
-  if (!display_getPathInfo(desc1.Monitor, &this.displayPathInfo))
-  {
-    DEBUG_ERROR("Failed to get the display path info");
-    goto exit;
-  }
-
   static const char * pshaderSrc =
     "Texture2D    gInputTexture : register(t0);\n"
     "SamplerState gSamplerState : register(s0);\n"
-    "cbuffer      gConsts       : register(b0)\n"
-    "{\n"
-    "  float SDRWhiteLevel;"
-    "};\n"
     "\n"
     "float4 main(\n"
     "  float4 position : SV_POSITION,\n"
     "  float2 texCoord : TEXCOORD0) : SV_TARGET"
     "{\n"
-    "  float4 color = gInputTexture.Sample(gSamplerState, texCoord);\n"
-    "  color.rgb   *= SDRWhiteLevel;\n"
-    "  return color;\n"
+    "  // scRGB uses the BT.709 color primaries\n"
+    "  float3 bt709 = gInputTexture.Sample(gSamplerState, texCoord);\n"
+    "\n"
+    "  // Convert to BT.2020 colors used by HDR10. Matrix values are from BT.2087-0\n"
+    "  const float3x3 BT709_TO_BT2020 =\n"
+    "  {\n"
+    "    0.6274, 0.3293, 0.0433,\n"
+    "    0.0691, 0.9195, 0.0114,\n"
+    "    0.0164, 0.0880, 0.8956\n"
+    "  };\n"
+    "  float3 bt2020 = mul(BT709_TO_BT2020, bt709);\n"
+    "\n"
+    "  // Convert to nits. In scRGB, 1.0 represents 80 nits\n"
+    "  const float SCRGB_REFERENCE_LUMINANCE = 80.0;\n"
+    "  float3 nits = bt2020 * SCRGB_REFERENCE_LUMINANCE;\n"
+    "\n"
+    "  // Apply SMPTE ST 2084 perceptual quantizer (PQ) inverse EOTF\n"
+    "  const float M1 = 1305.0 / 8192.0;\n"
+    "  const float M2 = 2523.0 / 32.0;\n"
+    "  const float C1 = 107.0 / 128.0;\n"
+    "  const float C2 = 2413.0 / 128.0;\n"
+    "  const float C3 = 2392.0 / 128.0;\n"
+    "\n"
+    "  float3 l = nits / 10000.0;\n"
+    "  float3 lM1 = pow(l, M1);\n"
+    "  float3 num = C1 + C2 * lM1;\n"
+    "  float3 den = 1.0 + C3 * lM1;\n"
+    "  float3 n = pow(num / den, M2);\n"
+    "\n"
+    "  return float4(n, 1.0);\n"
     "}\n";
 
   comRef_defineLocal(ID3DBlob, byteCode);
@@ -156,29 +158,7 @@ static bool sdrWhiteLevel_setup(
     goto exit;
   }
 
-  D3D11_BUFFER_DESC bufferDesc =
-  {
-    .ByteWidth      = sizeof(struct ShaderConsts),
-    .Usage          = D3D11_USAGE_DEFAULT,
-    .BindFlags      = D3D11_BIND_CONSTANT_BUFFER,
-  };
-
-  comRef_defineLocal(ID3D11Buffer, buffer);
-  status = ID3D11Device_CreateBuffer(
-    *this.device, &bufferDesc, NULL,
-    buffer);
-
-  if (FAILED(status))
-  {
-    DEBUG_WINERROR("Failed to create the constant buffer", status);
-    goto exit;
-  }
-
   comRef_toGlobal(this.sampler, sampler);
-  comRef_toGlobal(this.buffer , buffer );
-
-  updateConsts();
-  DEBUG_INFO("SDR White Level   : %f"   , this.sdrWhiteLevel);
 
   result = true;
 
@@ -187,15 +167,15 @@ exit:
   return result;
 }
 
-static void sdrWhiteLevel_finish(void)
+static void hdr16to10_finish(void)
 {
   comRef_freeScope(&this.comScope);
   memset(&this, 0, sizeof(this));
 }
 
-static bool sdrWhiteLevel_init(void ** opaque)
+static bool hdr16to10_init(void ** opaque)
 {
-  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)calloc(1, sizeof(*inst));
+  HDR16to10Inst * inst = (HDR16to10Inst *)calloc(1, sizeof(*inst));
   if (!inst)
   {
     DEBUG_ERROR("Failed to allocate memory");
@@ -206,34 +186,20 @@ static bool sdrWhiteLevel_init(void ** opaque)
  return true;
 }
 
-static void sdrWhiteLevel_free(void * opaque)
+static void hdr16to10_free(void * opaque)
 {
-  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
+  HDR16to10Inst * inst = (HDR16to10Inst *)opaque;
   comRef_release(inst->target);
   comRef_release(inst->tex   );
   free(inst);
 }
 
-static void updateConsts(void)
-{
-  float nits = display_getSDRWhiteLevel(&this.displayPathInfo);
-  if (nits == this.sdrWhiteLevel)
-    return;
-
-  this.sdrWhiteLevel = nits;
-
-  struct ShaderConsts consts = { .sdrWhiteLevel = 80.0f / nits };
-  ID3D11DeviceContext_UpdateSubresource(
-    *this.context, *(ID3D11Resource**)this.buffer,
-    0, NULL, &consts, 0, 0);
-}
-
-static bool sdrWhiteLevel_configure(void * opaque,
+static bool hdr16to10_configure(void * opaque,
   int * width, int * height,
   int * cols , int * rows,
   CaptureFormat * format)
 {
-  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
+  HDR16to10Inst * inst = (HDR16to10Inst *)opaque;
   if (inst->tex)
     return true;
 
@@ -295,12 +261,10 @@ fail:
   return false;
 }
 
-static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
+static ID3D11Texture2D * hdr16to10_run(void * opaque,
   ID3D11ShaderResourceView * srv)
 {
-  SDRWhiteLevelInst * inst = (SDRWhiteLevelInst *)opaque;
-
-  updateConsts();
+  HDR16to10Inst * inst = (HDR16to10Inst *)opaque;
 
   // set the pixel shader & resource
   ID3D11DeviceContext_PSSetShader(*this.context, *this.pshader, NULL, 0);
@@ -308,7 +272,6 @@ static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
   // set the pixel shader resources
   ID3D11DeviceContext_PSSetShaderResources(*this.context, 0, 1, &srv        );
   ID3D11DeviceContext_PSSetSamplers       (*this.context, 0, 1, this.sampler);
-  ID3D11DeviceContext_PSSetConstantBuffers(*this.context, 0, 1, this.buffer );
 
   // set the render target
   ID3D11DeviceContext_OMSetRenderTargets(*this.context, 1, inst->target, NULL);
@@ -316,14 +279,14 @@ static ID3D11Texture2D * sdrWhiteLevel_run(void * opaque,
   return *inst->tex;
 }
 
-DXGIPostProcess DXGIPP_SDRWhiteLevel =
+DXGIPostProcess DXGIPP_HDR16to10 =
 {
-  .name      = "SDRWhiteLevel",
+  .name      = "HDR16to10",
   .earlyInit = NULL,
-  .setup     = sdrWhiteLevel_setup,
-  .init      = sdrWhiteLevel_init,
-  .free      = sdrWhiteLevel_free,
-  .configure = sdrWhiteLevel_configure,
-  .run       = sdrWhiteLevel_run,
-  .finish    = sdrWhiteLevel_finish
+  .setup     = hdr16to10_setup,
+  .init      = hdr16to10_init,
+  .free      = hdr16to10_free,
+  .configure = hdr16to10_configure,
+  .run       = hdr16to10_run,
+  .finish    = hdr16to10_finish
 };

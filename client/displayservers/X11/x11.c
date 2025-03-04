@@ -51,6 +51,10 @@
 #include "eglutil.h"
 #endif
 
+#ifdef ENABLE_VULKAN
+#include <vulkan/vulkan_xlib.h>
+#endif
+
 #include "app.h"
 #include "common/debug.h"
 #include "common/time.h"
@@ -1563,6 +1567,47 @@ static void x11GLSwapBuffers(void)
 }
 #endif
 
+#ifdef ENABLE_VULKAN
+static const char * x11GetVulkanSurfaceExtension(void)
+{
+  return "VK_KHR_xlib_surface";
+}
+
+static VkSurfaceKHR x11CreateVulkanSurface(VkInstance instance)
+{
+  struct VkXlibSurfaceCreateInfoKHR createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+    .dpy = x11.display,
+    .window = x11.window
+  };
+
+  VkSurfaceKHR surface;
+  VkResult result = vkCreateXlibSurfaceKHR(instance, &createInfo, NULL,
+      &surface);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create Vulkan Xlib surface (VkResult: %d)", result);
+    return NULL;
+  }
+
+  return surface;
+}
+
+static bool x11VulkanPresent(VkQueue queue,
+    struct VkPresentInfoKHR * presentInfo)
+{
+  VkResult result = vkQueuePresentKHR(queue, presentInfo);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to present swapchain image (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+#endif
+
 static bool x11WaitFrame(void)
 {
   /* wait until we are woken up by the present event */
@@ -2008,6 +2053,11 @@ struct LG_DisplayServerOps LGDS_X11 =
   .glMakeCurrent      = x11GLMakeCurrent,
   .glSetSwapInterval  = x11GLSetSwapInterval,
   .glSwapBuffers      = x11GLSwapBuffers,
+#endif
+#ifdef ENABLE_VULKAN
+  .getVulkanSurfaceExtension = x11GetVulkanSurfaceExtension,
+  .createVulkanSurface = x11CreateVulkanSurface,
+  .vulkanPresent       = x11VulkanPresent,
 #endif
   .waitFrame           = x11WaitFrame,
   .stopWaitFrame       = x11StopWaitFrame,

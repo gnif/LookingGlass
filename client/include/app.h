@@ -86,6 +86,12 @@ void app_glSetSwapInterval(int interval);
 void app_glSwapBuffers(void);
 #endif
 
+#ifdef ENABLE_VULKAN
+const char * app_getVulkanSurfaceExtension(void);
+VkSurfaceKHR app_createVulkanSurface(VkInstance instance);
+bool app_vulkanPresent(VkQueue queue, struct VkPresentInfoKHR * presentInfo);
+#endif
+
 #define MAX_OVERLAY_RECTS 10
 void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params);
 void app_initOverlays(void);

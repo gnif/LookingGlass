@@ -195,7 +195,7 @@ static int splash_render(void * udata, bool interactive, struct Rect * windowRec
 
   ImDrawList_AddImage(
     list,
-    l_logo.tex,
+    (ImTextureID)l_logo.tex,
     (ImVec2){
       logoRect.x,
       logoRect.y

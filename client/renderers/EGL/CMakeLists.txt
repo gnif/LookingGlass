@@ -20,7 +20,7 @@ else()
 endif()
 
 include(MakeObject)
-function(build_shaders header_dir)
+function(build_gl_shaders header_dir)
   file(GLOB headers "${header_dir}/*.h")
   set(EGL_SHADER_PROCESSED)
   foreach(shader ${ARGN})
@@ -46,7 +46,7 @@ function(build_shaders header_dir)
   set(EGL_SHADER_INCS "${EGL_SHADER_INCS}" PARENT_SCOPE)
 endfunction()
 
-build_shaders(
+build_gl_shaders(
   shader
   shader/desktop.vert
   shader/desktop_rgb.frag
@@ -97,7 +97,7 @@ add_library(renderer_EGL STATIC
   ${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp
 )
 
-target_compile_definitions(renderer_EGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 IMGUI_IMPL_OPENGL_ES3)
+target_compile_definitions(renderer_EGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 CIMGUI_USE_OPENGL3=1 IMGUI_IMPL_OPENGL_ES3)
 
 target_link_libraries(renderer_EGL
   PkgConfig::RENDERER_EGL

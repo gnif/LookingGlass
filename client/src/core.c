@@ -662,8 +662,7 @@ void core_resetOverlayInputState(void)
   g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
   g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
   g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
-  for(int key = 0; key < ARRAY_LENGTH(g_state.io->KeysDown); key++)
-    g_state.io->KeysDown[key] = false;
+  ImGuiIO_ClearInputKeys(g_state.io);
 }
 
 void core_updateOverlayState(void)

@@ -483,7 +483,7 @@ void egl_resetViewport(EGL * this)
   glViewport(0, 0, this->width, this->height);
 }
 
-static void egl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
+static bool egl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -540,6 +540,8 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
 
   egl_damageResize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
   egl_desktopResize(this->desktop, this->width, this->height);
+
+  return true;
 }
 
 static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
@@ -619,7 +621,8 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 }
 
 static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damageRects, int damageRectsCount)
+    const FrameDamageRect * damageRects, int damageRectsCount,
+    const ColorMetadata * colorMetadata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 

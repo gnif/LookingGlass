@@ -171,6 +171,8 @@ static bool waylandInit(const LG_DSInitParams params)
     return false;
 #endif
 
+  LG_LOCK_INIT(wlWm.surfaceLock);
+
   return true;
 }
 
@@ -184,6 +186,7 @@ static void waylandShutdown(void)
 
 static void waylandFree(void)
 {
+  LG_LOCK_FREE(wlWm.surfaceLock);
   waylandIdleFree();
   waylandWindowFree();
   waylandPresentationFree();
@@ -251,6 +254,12 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .glMakeCurrent       = waylandGLMakeCurrent,
   .glSetSwapInterval   = waylandGLSetSwapInterval,
   .glSwapBuffers       = waylandGLSwapBuffers,
+#endif
+
+#ifdef ENABLE_VULKAN
+  .getVulkanSurfaceExtension = waylandGetVulkanSurfaceExtension,
+  .createVulkanSurface = waylandCreateVulkanSurface,
+  .vulkanPresent       = waylandVulkanPresent,
 #endif
   .waitFrame           = waylandWaitFrame,
   .skipFrame           = waylandSkipFrame,

@@ -1,0 +1,87 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2024 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#pragma once
+
+#include <vulkan/vulkan.h>
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "interface/renderer.h"
+
+typedef enum ShaderColorSpace
+{
+  SHADER_COLOR_SPACE_SRGB,
+  SHADER_COLOR_SPACE_EXTENDED_SRGB_LINEAR,
+  SHADER_COLOR_SPACE_HDR10_ST2084,
+}
+ShaderColorSpace;
+
+struct VulkanUniformBuffer
+{
+  float transform[16];
+  float whiteLevel;
+};
+
+uint32_t vulkan_findMemoryType(
+    struct VkPhysicalDeviceMemoryProperties * memoryProperties,
+    uint32_t memoryTypeBits, VkMemoryPropertyFlags requiredProperties);
+
+VkDeviceMemory vulkan_allocateMemory(
+    struct VkPhysicalDeviceMemoryProperties * memoryProperties,
+    VkDevice device, struct VkMemoryRequirements *memoryRequirements,
+    VkMemoryPropertyFlags requiredProperties);
+
+VkShaderModule vulkan_loadShader(VkDevice device, const char * spv, size_t len);
+
+VkPipeline vulkan_createGraphicsPipeline(VkDevice device,
+    VkShaderModule vertexShader, VkShaderModule fragmentShader,
+    struct VkSpecializationInfo * fragmentSpecializationInfo,
+    VkPipelineLayout pipelineLayout, VkRenderPass renderPass);
+
+VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
+    VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool);
+
+VkBuffer vulkan_createBuffer(
+    struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
+    VkDeviceSize size, VkBufferUsageFlags usage, VkDeviceMemory * memory,
+    void * map);
+
+void vulkan_freeBuffer(VkDevice device, VkBuffer * buffer,
+    VkDeviceMemory * memory, void ** map);
+
+VkImageView vulkan_createImageView(VkDevice device, VkImage image,
+    VkFormat format);
+
+bool vulkan_beginCommandBuffer(VkCommandBuffer commandBuffer);
+bool vulkan_endCommandBuffer(VkCommandBuffer commandBuffer);
+
+bool vulkan_waitFence(VkDevice device, VkFence fence);
+
+void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
+    VkImageView swapchainImageView, VkImageView imGuiImageView);
+
+void vulkan_updateDescriptorSet1(VkDevice device, VkDescriptorSet descriptorSet,
+    VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout);
+
+void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
+    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate,
+    float whiteLevel);

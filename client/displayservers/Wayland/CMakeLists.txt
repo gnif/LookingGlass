@@ -22,6 +22,7 @@ add_library(displayserver_Wayland STATIC
   presentation.c
   state.c
   registry.c
+  vulkan.c
   wayland.c
   window.c
 )

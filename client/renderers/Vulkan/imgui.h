@@ -1,0 +1,51 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2024 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#pragma once
+
+#include <vulkan/vulkan.h>
+
+#include <stdbool.h>
+
+#include "vulkan_util.h"
+
+typedef struct Vulkan_ImGui Vulkan_ImGui;
+
+bool vulkan_imGuiInit(Vulkan_ImGui ** imGui, VkInstance instance,
+    VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
+    struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
+    VkQueue queue, VkShaderModule vertexShader, VkCommandBuffer commandBuffer,
+    VkSampler sampler, VkDescriptorSetLayout descriptorSetLayout1,
+    VkDescriptorPool descriptorPool, VkPipelineLayout pipelineLayout,
+    VkFence fence);
+void vulkan_imGuiFree(Vulkan_ImGui ** imGui);
+
+void * vulkan_imGuiCreateTexture(Vulkan_ImGui * imGui, int width, int height,
+    uint8_t * data);
+void vulkan_imGuiFreeTexture(Vulkan_ImGui * imGui, void * texture);
+
+bool vulkan_imGuiInitPipeline(Vulkan_ImGui * imGui,
+    uint32_t swapchainImageCount, VkRenderPass renderPass,
+    ShaderColorSpace colorSpace);
+void vulkan_imGuiDeinitPipeline(Vulkan_ImGui * imGui);
+bool vulkan_imGuiUploadFonts(Vulkan_ImGui * imGui);
+
+bool vulkan_imGuiRender(Vulkan_ImGui * imGui);
+void vulkan_imGuiBlend(Vulkan_ImGui * imGui, float whiteLevel);

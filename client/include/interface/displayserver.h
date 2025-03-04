@@ -26,6 +26,10 @@
 #include "common/types.h"
 #include "common/debug.h"
 
+#ifdef ENABLE_VULKAN
+#include <vulkan/vulkan.h>
+#endif
+
 typedef enum LG_ClipboardData
 {
   LG_CLIPBOARD_DATA_TEXT = 0,
@@ -156,6 +160,13 @@ struct LG_DisplayServerOps
   void (*glMakeCurrent)(LG_DSGLContext context);
   void (*glSetSwapInterval)(int interval);
   void (*glSwapBuffers)(void);
+#endif
+
+#ifdef ENABLE_VULKAN
+  /* Vulkan support */
+  const char * (*getVulkanSurfaceExtension)(void);
+  VkSurfaceKHR (*createVulkanSurface)(VkInstance instance);
+  bool (*vulkanPresent)(VkQueue queue, struct VkPresentInfoKHR * presentInfo);
 #endif
 
   /* Waits for a good time to render the next frame in time for the next vblank.

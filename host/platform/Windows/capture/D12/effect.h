@@ -44,8 +44,7 @@ struct D12Effect
 
   void (*initOptions)(void);
 
-  D12EffectStatus (*create)(D12Effect ** instance, ID3D12Device3 * device,
-    const DISPLAYCONFIG_PATH_INFO * displayPathInfo);
+  D12EffectStatus (*create)(D12Effect ** instance, ID3D12Device3 * device);
 
   void (*free)(D12Effect ** instance);
 
@@ -71,11 +70,10 @@ static inline void d12_effectInitOptions(const D12Effect * effect)
   {  if (effect->initOptions) effect->initOptions(); }
 
 static inline D12EffectStatus d12_effectCreate(const D12Effect * effect,
-  D12Effect ** instance, ID3D12Device3 * device,
-  const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
+  D12Effect ** instance, ID3D12Device3 * device)
 {
   *instance = NULL;
-  D12EffectStatus status = effect->create(instance, device, displayPathInfo);
+  D12EffectStatus status = effect->create(instance, device);
   if (status == D12_EFFECT_STATUS_OK)
     memcpy(*instance, effect, sizeof(*effect));
   return status;
