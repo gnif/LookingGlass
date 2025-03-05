@@ -198,7 +198,7 @@ static int graphs_render(void * udata, bool interactive,
     }
 
     igPlotLines_FloatPtr(
-        "",
+        "##",
         (float *)ringbuffer_getValues(graph->buffer),
         ringbuffer_getLength(graph->buffer),
         ringbuffer_getStart (graph->buffer),

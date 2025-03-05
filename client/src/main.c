@@ -1204,8 +1204,6 @@ static int lg_run(void)
   overlayGraph_register("UPLOAD", g_state.uploadTimings , 0.0f, 50.0f, NULL);
   overlayGraph_register("RENDER", g_state.renderDuration, 0.0f, 10.0f, NULL);
 
-  initImGuiKeyMap(g_state.io->KeyMap);
-
   // unknown guest OS at this time
   g_state.guestOS = KVMFR_OS_OTHER;
 

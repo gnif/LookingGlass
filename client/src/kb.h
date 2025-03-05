@@ -31,7 +31,6 @@
 extern const uint32_t linux_to_ps2[KEY_MAX];
 extern const char *   linux_to_str[KEY_MAX];
 extern const char *   linux_to_display[KEY_MAX];
-
-void initImGuiKeyMap(int * keymap);
+extern const int      linux_to_imgui[KEY_MAX];
 
 #endif

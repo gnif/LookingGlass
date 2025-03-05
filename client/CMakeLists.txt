@@ -137,6 +137,8 @@ set(SOURCES
 
 # Force cimgui to build as a static library.
 set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
+add_definitions("-DCIMGUI_USE_OPENGL2=1")
+add_definitions("-DCIMGUI_USE_OPENGL3=1")
 
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )

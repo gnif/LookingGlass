@@ -346,8 +346,8 @@ void app_handleKeyPress(int sc, int charcode)
       app_setOverlay(false);
     else
     {
-      if (sc < sizeof(g_state.io->KeysDown))
-        g_state.io->KeysDown[sc] = true;
+      if (linux_to_imgui[sc])
+        ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], true);
     }
     return;
   }
@@ -365,7 +365,10 @@ void app_handleKeyPress(int sc, int charcode)
       return;
 
     if (purespice_keyDown(ps2))
-      g_state.keyDown[sc] = true;
+    {
+      if (linux_to_imgui[sc])
+        ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], true);
+    }
     else
     {
       DEBUG_ERROR("app_handleKeyPress: failed to send message");
@@ -391,8 +394,8 @@ void app_handleKeyRelease(int sc, int charcode)
 
   if (app_isOverlayMode())
   {
-    if (sc < sizeof(g_state.io->KeysDown))
-      g_state.io->KeysDown[sc] = false;
+    if (linux_to_imgui[sc])
+      ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], false);
     return;
   }
 
