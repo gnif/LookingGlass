@@ -2,7 +2,7 @@ name: build
 on: [push, pull_request]
 jobs:
   client:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -15,12 +15,6 @@ jobs:
     - uses: actions/checkout@v2
       with:
         submodules: recursive
-    - name: Install libdecor PPA
-      run: sudo add-apt-repository ppa:christianrauch/libdecoration
-      if: ${{ matrix.wayland_shell == 'libdecor' }}
-    - name: Install PipeWire repository
-      run: |
-        echo 'deb [trusted=yes] https://pipewire-ubuntu.quantum5.workers.dev ./' | sudo tee /etc/apt/sources.list.d/pipewire.list
     - name: Update apt
       run: |
         sudo apt-get update
@@ -76,9 +70,6 @@ jobs:
     - uses: actions/checkout@v2
       with:
         submodules: recursive
-    - name: Install PipeWire repository
-      run: |
-        echo 'deb [trusted=yes] https://pipewire-ubuntu.quantum5.workers.dev ./' | sudo tee /etc/apt/sources.list.d/pipewire.list
     - name: Update apt
       run: |
         sudo apt-get update
