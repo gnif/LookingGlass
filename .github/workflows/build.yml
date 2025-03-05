@@ -85,7 +85,7 @@ jobs:
     - name: Install Linux host dependencies
       run: |
         sudo apt-get install binutils-dev libglib2.0-dev libxcb-xfixes0-dev \
-          libpipewire-0.3-dev
+          libpipewire-0.3-dev libxcb-shm0-dev
     - name: Configure Linux host
       run: |
         mkdir host/build
