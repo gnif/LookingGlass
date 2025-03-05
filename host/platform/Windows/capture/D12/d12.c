@@ -247,6 +247,7 @@ static bool d12_create(
 
 static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 {
+  bool reInit = false;
   bool result = false;
   comRef_initGlobalScope(100, d12_comScope);
   comRef_scopePush(10);
@@ -393,6 +394,10 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
       this->indirectCopy = true;
       DEBUG_WARN("Unable to create resources in the IVSHMEM heap, "
         "falling back to indirect copy");
+
+      // we need to retry from scratch this failure acts like the GPU crashed
+      reInit = true;
+      goto exit;
     }
   }
 
@@ -446,6 +451,12 @@ exit:
       d12_effectFree(&effect);
     vector_destroy(&this->effects);
     comRef_freeScope(&d12_comScope);
+
+    if (reInit)
+    {
+      DEBUG_INFO("Attempting to reinitialize with indirectCopy=1");
+      return d12_init(ivshmemBase, alignSize);
+    }
   }
 
   return result;
