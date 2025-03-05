@@ -365,10 +365,7 @@ void app_handleKeyPress(int sc, int charcode)
       return;
 
     if (purespice_keyDown(ps2))
-    {
-      if (linux_to_imgui[sc])
-        ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], true);
-    }
+      g_state.keyDown[sc] = true;
     else
     {
       DEBUG_ERROR("app_handleKeyPress: failed to send message");
