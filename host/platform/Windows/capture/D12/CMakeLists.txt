@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(capture_D12 LANGUAGES C)
 
 add_library(capture_D12 STATIC

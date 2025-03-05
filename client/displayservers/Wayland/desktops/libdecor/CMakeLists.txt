@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(wayland_desktop_libdecor LANGUAGES C)
 
 add_library(wayland_desktop_libdecor STATIC

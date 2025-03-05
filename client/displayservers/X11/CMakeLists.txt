@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(displayserver_X11 LANGUAGES C)
 
 find_package(PkgConfig)

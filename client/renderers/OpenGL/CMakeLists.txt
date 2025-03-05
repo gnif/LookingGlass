@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(renderer_Opengl LANGUAGES C CXX)
 
 find_package(PkgConfig)

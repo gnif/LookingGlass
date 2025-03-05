@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(wayland_desktops LANGUAGES C)
 
 set(DESKTOP_H "${CMAKE_BINARY_DIR}/include/dynamic/wayland_desktops.h")
