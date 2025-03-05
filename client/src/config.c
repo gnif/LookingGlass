@@ -1,6 +1,6 @@
 /**
  * Looking Glass
- * Copyright © 2017-2024 The Looking Glass Authors
+ * Copyright © 2017-2025 The Looking Glass Authors
  * https://looking-glass.io
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -765,7 +765,7 @@ static void doLicense(void)
     // BEGIN LICENSE BLOCK
     "\n"
     "Looking Glass\n"
-    "Copyright © 2017-2024 The Looking Glass Authors\n"
+    "Copyright © 2017-2025 The Looking Glass Authors\n"
     "https://looking-glass.io\n"
     "\n"
     "This program is free software; you can redistribute it and/or modify it under\n"
