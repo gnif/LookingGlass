@@ -952,7 +952,7 @@ float option_get_float(const char * module, const char * name)
   if (!o)
   {
     DEBUG_ERROR("BUG: Failed to get the value for option %s:%s", module, name);
-    return NAN;
+    return 0.0f;
   }
   DEBUG_ASSERT(o->type == OPTION_TYPE_FLOAT);
   return o->value.x_float;
