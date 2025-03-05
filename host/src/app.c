@@ -69,8 +69,14 @@ enum AppState
   APP_STATE_RUNNING,
   APP_STATE_IDLE,
   APP_STATE_TRANSITION_TO_IDLE,
-  APP_STATE_REINIT_LGMP,
   APP_STATE_SHUTDOWN
+};
+
+enum LGMPTimerState
+{
+  LGMP_TIMER_STATE_OK,
+  LGMP_TIMER_STATE_CORRUPTED,
+  LGMP_TIMER_STATE_FAULTED
 };
 
 struct app
@@ -105,7 +111,8 @@ struct app
   CaptureInterface * iface;
   bool captureStarted;
 
-  enum AppState state, lastState;
+  enum AppState state;
+  enum LGMPTimerState lgmpTimerState;
   LGTimer  * lgmpTimer;
   LGThread * frameThread;
   bool threadsStarted;
@@ -162,8 +169,7 @@ inline static void setAppState(enum AppState state)
 {
   if (app.state == APP_STATE_SHUTDOWN)
     return;
-  app.lastState = app.state;
-  app.state     = state;
+  app.state = state;
 }
 
 static bool lgmpTimer(void * opaque)
@@ -176,12 +182,12 @@ static bool lgmpTimer(void * opaque)
     {
       DEBUG_ERROR("LGMP reported the shared memory has been corrrupted, "
           "attempting to recover");
-      setAppState(APP_STATE_REINIT_LGMP);
+      atomic_store(&app.lgmpTimerState, LGMP_TIMER_STATE_CORRUPTED);
       return false;
     }
 
     DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
-    setAppState(APP_STATE_SHUTDOWN);
+    atomic_store(&app.lgmpTimerState, LGMP_TIMER_STATE_FAULTED);
     return false;
   }
 
@@ -785,6 +791,7 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
     app.frameBuffer[i] = (FrameBuffer *)(((uint8_t*)app.frame[i]) + alignOffset);
   }
 
+  atomic_store(&app.lgmpTimerState, LGMP_TIMER_STATE_OK);
   if (!lgCreateTimer(10, lgmpTimer, NULL, &app.lgmpTimer))
   {
     DEBUG_ERROR("Failed to create the LGMP timer");
@@ -811,8 +818,7 @@ int app_main(int argc, char * argv[])
   // make sure rng is actually seeded for LGMP
   srand((unsigned)time(NULL));
 
-  app.lastState = APP_STATE_RUNNING;
-  app.state     = APP_STATE_RUNNING;
+  app.state = APP_STATE_RUNNING;
   ivshmemOptionsInit();
 
   // register capture interface options
@@ -954,16 +960,25 @@ int app_main(int argc, char * argv[])
 
   do
   {
-    switch(app.state)
+    switch(atomic_load(&app.lgmpTimerState))
     {
-      case APP_STATE_REINIT_LGMP:
+      case LGMP_TIMER_STATE_OK:
+        break;
+
+      case LGMP_TIMER_STATE_CORRUPTED:
         DEBUG_INFO("Performing LGMP reinitialization");
         lgmpShutdown();
-        setAppState(app.lastState);
         if (!lgmpSetup(&shmDev))
           goto fail_lgmp;
         break;
 
+      case LGMP_TIMER_STATE_FAULTED:
+        setAppState(APP_STATE_SHUTDOWN);
+        break;
+    }
+
+    switch(app.state)
+    {
       case APP_STATE_IDLE:
         // if there are no clients subscribed, just remain idle
         if (!lgmpHostQueueHasSubs(app.pointerQueue) &&

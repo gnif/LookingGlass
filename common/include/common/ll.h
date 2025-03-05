@@ -41,11 +41,14 @@ struct ll
 };
 
 struct ll *  ll_new(void);
-void         ll_free     (struct ll * list);
-void         ll_push     (struct ll * list, void * data);
-bool         ll_shift    (struct ll * list, void ** data);
-bool         ll_peek_head(struct ll * list, void ** data);
-bool         ll_peek_tail(struct ll * list, void ** data);
+void         ll_free        (struct ll * list);
+void         ll_push        (struct ll * list, void * data);
+bool         ll_shift       (struct ll * list, void ** data);
+bool         ll_shift_nl    (struct ll * list, void ** data);
+bool         ll_peek_head   (struct ll * list, void ** data);
+bool         ll_peek_head_nl(struct ll * list, void ** data);
+bool         ll_peek_tail   (struct ll * list, void ** data);
+bool         ll_peek_tail_nl(struct ll * list, void ** data);
 
 #define ll_lock(ll) LG_LOCK((ll)->lock)
 #define ll_unlock(ll) LG_UNLOCK((ll)->lock)

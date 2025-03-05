@@ -85,9 +85,14 @@ static bool msg_needsOverlay(void * udata)
 static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
     int maxRects)
 {
+  ll_lock(l_msg.messages);
+
   struct Msg * msg;
-  if (!ll_peek_head(l_msg.messages, (void **)&msg))
+  if (!ll_peek_head_nl(l_msg.messages, (void **)&msg))
+  {
+    ll_unlock(l_msg.messages);
     return 0;
+  }
 
   ImVec2 * screen = overlayGetScreenSize();
   igSetNextWindowBgAlpha(0.8f);
@@ -163,7 +168,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
 
   if (destroy)
   {
-    (void)ll_shift(l_msg.messages, NULL);
+    (void)ll_shift_nl(l_msg.messages, NULL);
     freeMsg(msg);
     app_invalidateOverlay(false);
   }
@@ -171,6 +176,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
   overlayGetImGuiRect(windowRects);
   igEnd();
 
+  ll_unlock(l_msg.messages);
   return 1;
 }
 

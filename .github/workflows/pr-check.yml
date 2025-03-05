@@ -3,16 +3,36 @@ on: pull_request
 jobs:
   authors:
     runs-on: ubuntu-latest
+    permissions:
+        pull-requests: write
     steps:
     - uses: actions/checkout@v1
     - name: Check AUTHORS file
+      id: check-authors
       run: |
         user="$(curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' -s https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }} | jq -r .user.login)"
+        echo "user=$user" >> "$GITHUB_OUTPUT"
         echo "Checking if GitHub user $user is in AUTHORS file..."
         if grep -q -E '> \('"$user"'\)' AUTHORS; then
           echo "$user found in AUTHORS file, all good!"
         else
           echo "$user not found in AUTHORS file."
           echo "Please add yourself to the AUTHORS file and try again."
-          exit 1
+          echo "not-found=yes" >> "$GITHUB_OUTPUT"
         fi
+    - name: 'Not found: Create review requesting changes'
+      if: ${{ steps.check-authors.outputs.not-found }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+            github.rest.pulls.createReview({
+                owner: context.issue.owner,
+                repo: context.issue.repo,
+                pull_number: context.issue.number,
+                event: "REQUEST_CHANGES",
+                body: "@${{ steps.check-authors.outputs.user }} not found in AUTHORS file.\n" +
+                      "Please add yourself to the AUTHORS file and try again."
+            });
+    - name: 'Not found: Fail job'
+      if: ${{ steps.check-authors.outputs.not-found }}
+      run: exit 1
