@@ -26,6 +26,7 @@ jobs:
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
           libwayland-dev libxkbcommon-dev \
+          libfontconfig-dev \
           libsamplerate0-dev libpipewire-0.3-dev libpulse-dev \
           $([ '${{ matrix.wayland_shell }}' = libdecor ] && echo 'libdecor-0-dev libdbus-1-dev') \
           $([ '${{ matrix.compiler.cc }}' = clang ] && echo 'clang-tools')
