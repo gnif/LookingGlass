@@ -112,7 +112,7 @@ struct app
   bool captureStarted;
 
   enum AppState state;
-  enum LGMPTimerState lgmpTimerState;
+  _Atomic(enum LGMPTimerState) lgmpTimerState;
   LGTimer  * lgmpTimer;
   LGThread * frameThread;
   bool threadsStarted;
