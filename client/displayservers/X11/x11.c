@@ -1087,8 +1087,9 @@ static void setFocus(bool focused, double x, double y)
   app_handleFocusEvent(focused);
 }
 
-static int getCharcode(int detail)
+static int x11GetCharCode(int detail)
 {
+  detail += x11.minKeycode;
   if (detail < x11.minKeycode || detail > x11.maxKeycode)
     return 0;
 
@@ -1229,8 +1230,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIDeviceEvent *device = cookie->data;
-      app_handleKeyPress(device->detail - x11.minKeycode,
-          getCharcode(device->detail));
+      app_handleKeyPress(device->detail - x11.minKeycode);
 
       if (!x11.xic || !app_isOverlayMode())
         return;
@@ -1280,8 +1280,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIDeviceEvent *device = cookie->data;
-      app_handleKeyRelease(device->detail - x11.minKeycode,
-          getCharcode(device->detail));
+      app_handleKeyRelease(device->detail - x11.minKeycode);
 
       if (!x11.xic || !app_isOverlayMode())
         return;
@@ -1310,8 +1309,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIRawEvent *raw = cookie->data;
-      app_handleKeyPress(raw->detail - x11.minKeycode,
-          getCharcode(raw->detail));
+      app_handleKeyPress(raw->detail - x11.minKeycode);
       return;
     }
 
@@ -1321,8 +1319,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIRawEvent *raw = cookie->data;
-      app_handleKeyRelease(raw->detail - x11.minKeycode,
-          getCharcode(raw->detail));
+      app_handleKeyRelease(raw->detail - x11.minKeycode);
       return;
     }
 
@@ -2017,6 +2014,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabPointer       = x11UngrabPointer,
   .capturePointer      = x11CapturePointer,
   .uncapturePointer    = x11UncapturePointer,
+  .getCharCode         = x11GetCharCode,
   .grabKeyboard        = x11GrabKeyboard,
   .ungrabKeyboard      = x11UngrabKeyboard,
   .warpPointer         = x11WarpPointer,

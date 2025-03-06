@@ -119,7 +119,7 @@ void app_handleFocusEvent(bool focused)
     if (g_params.releaseKeysOnFocusLoss)
       for (int key = 0; key < KEY_MAX; key++)
         if (g_state.keyDown[key])
-          app_handleKeyRelease(key, 0);
+          app_handleKeyRelease(key);
 
     g_state.escapeActive = false;
 
@@ -311,7 +311,7 @@ void app_handleWheelMotion(double motion)
     g_state.io->MouseWheel -= motion;
 }
 
-void app_handleKeyPress(int sc, int charcode)
+void app_handleKeyPress(int sc)
 {
   if (!app_isOverlayMode() || !g_state.io->WantCaptureKeyboard)
   {
@@ -327,6 +327,7 @@ void app_handleKeyPress(int sc, int charcode)
     {
       g_state.escapeAction = sc;
       KeybindHandle handle;
+      int charcode = g_state.ds->getCharCode(sc);
       ll_forEachNL(g_state.bindings, item, handle)
       {
         if ((handle->sc       && handle->sc       == sc       ) ||
@@ -374,7 +375,7 @@ void app_handleKeyPress(int sc, int charcode)
   }
 }
 
-void app_handleKeyRelease(int sc, int charcode)
+void app_handleKeyRelease(int sc)
 {
   if (g_state.escapeActive)
   {

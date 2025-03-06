@@ -64,6 +64,7 @@
 #include "overlay_utils.h"
 #include "util.h"
 #include "render_queue.h"
+#include "evdev.h"
 
 // forwards
 static int renderThread(void * unused);
@@ -1240,6 +1241,14 @@ static int lg_run(void)
     return -1;
   }
 
+  if (evdev_start())
+  {
+    DEBUG_INFO("Using evdev for keyboard capture");
+    //override the display server's grab methods if we are using evdev
+    g_state.ds->grabKeyboard   = &evdev_grabKeyboard;
+    g_state.ds->ungrabKeyboard = &evdev_ungrabKeyboard;
+  }
+
   // override the SIGINIT handler so that we can tell the difference between
   // SIGINT and the user sending a close event, such as ALT+F4
   signal(SIGINT , intHandler);
@@ -1890,6 +1899,8 @@ int main(int argc, char * argv[])
   for(unsigned int i = 0; i < LG_AUDIODEV_COUNT; ++i)
     if (LG_AudioDevs[i]->earlyInit)
       LG_AudioDevs[i]->earlyInit();
+
+  evdev_earlyInit();
 
   if (!config_load(argc, argv))
     return -1;

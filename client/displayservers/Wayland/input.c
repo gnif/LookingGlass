@@ -209,7 +209,7 @@ done:
   close(fd);
 }
 
-static int getCharcode(uint32_t key)
+int waylandGetCharCode(int key)
 {
   key += 8; // xkb scancode is evdev scancode + 8
   xkb_keysym_t sym = xkb_state_key_get_one_sym(wlWm.xkbState, key);
@@ -232,7 +232,7 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
 
   uint32_t * key;
   wl_array_for_each(key, keys)
-    app_handleKeyPress(*key, getCharcode(*key));
+    app_handleKeyPress(*key);
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
@@ -253,9 +253,9 @@ static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     return;
 
   if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
-    app_handleKeyPress(key, getCharcode(key));
+    app_handleKeyPress(key);
   else
-    app_handleKeyRelease(key, getCharcode(key));
+    app_handleKeyRelease(key);
 
   if (!wlWm.xkbState || !app_isOverlayMode() || state != WL_KEYBOARD_KEY_STATE_PRESSED)
     return;

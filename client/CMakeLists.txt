@@ -124,6 +124,7 @@ set(SOURCES
   src/eglutil.c
   src/overlay_utils.c
   src/render_queue.c
+  src/evdev.c
 
   src/overlay/splash.c
   src/overlay/alert.c
