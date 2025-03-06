@@ -279,7 +279,10 @@ static void lgDestroy(void * data)
 
 static void lgGetDefaults(obs_data_t * defaults)
 {
-  obs_data_set_default_string(defaults, "shmFile", "/dev/shm/looking-glass");
+  obs_data_set_default_string(defaults, "shmFile", "/dev/kvmfr0");
+#if LIBOBS_API_MAJOR_VER >= 27
+  obs_data_set_default_bool(defaults, "dmabuf", true);
+#endif
 }
 
 static obs_properties_t * lgGetProperties(void * data)
