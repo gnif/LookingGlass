@@ -155,9 +155,12 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
     return NULL;
   }
 
-  this->image      = gs_effect_get_param_by_name(this->unpackEffect, "image"     );
-  this->outputSize = gs_effect_get_param_by_name(this->unpackEffect, "outputSize");
-  this->swap       = gs_effect_get_param_by_name(this->unpackEffect, "swap"      );
+  this->image      = gs_effect_get_param_by_name(
+      this->unpackEffect, "image"     );
+  this->outputSize = gs_effect_get_param_by_name(
+      this->unpackEffect, "outputSize");
+  this->swap       = gs_effect_get_param_by_name(
+      this->unpackEffect, "swap"      );
   obs_leave_graphics();
 
   os_sem_init (&this->frameSem , 0);
@@ -283,10 +286,13 @@ static obs_properties_t * lgGetProperties(void * data)
 {
   obs_properties_t * props = obs_properties_create();
 
-  obs_properties_add_text(props, "shmFile", obs_module_text("SHM File"), OBS_TEXT_DEFAULT);
-  obs_properties_add_bool(props, "hideMouse", obs_module_text("Hide mouse cursor"));
+  obs_properties_add_text(props, "shmFile",
+      obs_module_text("SHM File"), OBS_TEXT_DEFAULT);
+  obs_properties_add_bool(props, "hideMouse",
+      obs_module_text("Hide mouse cursor"));
 #if LIBOBS_API_MAJOR_VER >= 27
-  obs_properties_add_bool(props, "dmabuf",  obs_module_text("Use DMABUF import (requires kvmfr device)"));
+  obs_properties_add_bool(props, "dmabuf",
+      obs_module_text("Use DMABUF import (requires kvmfr device)"));
 #else
   obs_property_t * dmabuf = obs_properties_add_bool(props, "dmabuf",
       obs_module_text("Use DMABUF import (requires OBS 27+ and kvmfr device)"));
@@ -300,7 +306,8 @@ static void * frameThread(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
 
-  if (lgmpClientSubscribe(this->lgmp, LGMP_Q_FRAME, &this->frameQueue) != LGMP_OK)
+  if (lgmpClientSubscribe(
+        this->lgmp, LGMP_Q_FRAME, &this->frameQueue) != LGMP_OK)
   {
     this->state = STATE_STOPPING;
     return NULL;
@@ -346,7 +353,8 @@ static void * pointerThread(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
 
-  if (lgmpClientSubscribe(this->lgmp, LGMP_Q_POINTER, &this->pointerQueue) != LGMP_OK)
+  if (lgmpClientSubscribe(
+        this->lgmp, LGMP_Q_POINTER, &this->pointerQueue) != LGMP_OK)
   {
     this->state = STATE_STOPPING;
     return NULL;
@@ -414,8 +422,10 @@ static void * pointerThread(void * data)
               const uint8_t  * srcAnd  = data   + (cursor->pitch * y) + (x / 8);
               const uint8_t  * srcXor  = srcAnd + cursor->pitch * hheight;
               const uint8_t    mask    = 0x80 >> (x % 8);
-              const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
-              const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
+              const uint32_t   andMask = (*srcAnd & mask) ?
+                0xFFFFFFFF : 0xFF000000;
+              const uint32_t   xorMask = (*srcXor & mask) ?
+                0x00FFFFFF : 0x00000000;
 
               d[y * cursor->width + x                          ] = andMask;
               d[y * cursor->width + x + cursor->width * hheight] = xorMask;
@@ -467,7 +477,8 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   this->hideMouse = obs_data_get_bool(settings, "hideMouse") ? 1 : 0;
 #if LIBOBS_API_MAJOR_VER >= 27
-  this->dmabuf = obs_data_get_bool(settings, "dmabuf") && ivshmemHasDMA(&this->shmDev);
+  this->dmabuf = obs_data_get_bool(settings, "dmabuf") &&
+    ivshmemHasDMA(&this->shmDev);
 #endif
 
   this->state = STATE_OPEN;
