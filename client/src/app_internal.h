@@ -21,6 +21,8 @@
 #ifndef _H_LG_APP_INTERNAL_
 #define _H_LG_APP_INTERNAL_
 
+#include "app.h"
+
 void app_handleKeyPressInternal(int scancode);
 void app_handleKeyReleaseInternal(int scancode);
 

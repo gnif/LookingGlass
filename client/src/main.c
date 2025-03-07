@@ -1242,12 +1242,7 @@ static int lg_run(void)
   }
 
   if (evdev_start())
-  {
     DEBUG_INFO("Using evdev for keyboard capture");
-    //override the display server's grab methods if we are using evdev
-    g_state.ds->grabKeyboard   = &evdev_grabKeyboard;
-    g_state.ds->ungrabKeyboard = &evdev_ungrabKeyboard;
-  }
 
   // override the SIGINIT handler so that we can tell the difference between
   // SIGINT and the user sending a close event, such as ALT+F4

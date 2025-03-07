@@ -27,7 +27,8 @@
 #include <string.h>
 #include <sys/epoll.h>
 
-#include "app.h"
+#include "app_internal.h"
+#include "main.h"
 
 #include "common/debug.h"
 #include "common/option.h"
@@ -47,9 +48,23 @@ struct EvdevState
   char        * deviceList;
   EvdevDevice * devices;
   int           deviceCount;
+  bool          exclusive;
+  int           keys[KEY_MAX];
+
+  void (*dsGrabKeyboard)(void);
+  void (*dsUngrabKeyboard)(void);
+
   int           epoll;
   LGThread    * thread;
   bool          grabbed;
+
+  enum
+  {
+    PENDING_NONE,
+    PENDING_GRAB,
+    PENDING_UNGRAB
+  }
+  pending;
 };
 
 static struct EvdevState state = {};
@@ -63,6 +78,14 @@ static struct Option options[] =
       "for capture mode (ie: /dev/input/by-id/usb-some_device-event-kbd)",
     .type           = OPTION_TYPE_STRING,
     .value.x_string = NULL,
+  },
+  {
+    .module       = "input",
+    .name         = "evdevExclusive",
+    .description  = "Only use evdev devices for keyboard input when in capture "
+      "mode",
+    .type         = OPTION_TYPE_BOOL,
+    .value.x_bool = true
   },
   {0}
 };
@@ -89,13 +112,35 @@ static int evdev_thread(void * opaque)
         continue;
       }
 
-      if (!state.grabbed || ev.type != EV_KEY)
+      if (ev.type != EV_KEY)
         continue;
 
+      bool grabbed = state.grabbed;
       if (ev.value == 1)
-        app_handleKeyPress(ev.code);
-      else if (ev.value == 0)
-        app_handleKeyRelease(ev.code);
+      {
+        ++state.keys[ev.code];
+
+        if (grabbed && state.keys[ev.code] == 1)
+          app_handleKeyPressInternal(ev.code);
+      }
+      else if (ev.value == 0 && --state.keys[ev.code] <= 0)
+      {
+        state.keys[ev.code] = 0;
+
+        if (state.pending == PENDING_GRAB)
+        {
+          state.pending = PENDING_NONE;
+          evdev_grabKeyboard();
+        }
+        else if (state.pending == PENDING_UNGRAB)
+        {
+          state.pending = PENDING_NONE;
+          evdev_ungrabKeyboard();
+        }
+
+        if (grabbed)
+          app_handleKeyReleaseInternal(ev.code);
+      }
     }
   }
   DEBUG_INFO("evdev_thread Stopped");
@@ -127,6 +172,8 @@ bool evdev_start(void)
   // nothing to do if there are no configured devices
   if (state.deviceCount == 0)
     return false;
+
+  state.exclusive = option_get("input", "evdevExclusive");
 
   state.epoll = epoll_create1(0);
   if (state.epoll < 0)
@@ -166,6 +213,12 @@ bool evdev_start(void)
     return false;
   }
 
+   //hook the display server's grab methods
+   state.dsGrabKeyboard       = g_state.ds->grabKeyboard;
+   state.dsUngrabKeyboard     = g_state.ds->ungrabKeyboard;
+   g_state.ds->grabKeyboard   = &evdev_grabKeyboard;
+   g_state.ds->ungrabKeyboard = &evdev_ungrabKeyboard;
+
   return true;
 }
 
@@ -201,6 +254,19 @@ void evdev_stop(void)
 
 void evdev_grabKeyboard(void)
 {
+  if (state.grabbed)
+    return;
+
+  // we must be in a neutral state
+  for(int i = 0; i < KEY_MAX; ++i)
+    if (state.keys[i] > 0)
+    {
+      state.pending = PENDING_GRAB;
+      return;
+    }
+
+//  state.dsGrabKeyboard();
+
   for(EvdevDevice * device = state.devices; device->path; ++device)
   {
     if (device->fd <= 0 || device->grabbed)
@@ -220,6 +286,17 @@ void evdev_grabKeyboard(void)
 
 void evdev_ungrabKeyboard(void)
 {
+  if (!state.grabbed)
+    return;
+
+  // we must be in a neutral state
+  for(int i = 0; i < KEY_MAX; ++i)
+    if (state.keys[i] > 0)
+    {
+      state.pending = PENDING_UNGRAB;
+      return;
+    }
+
   for(EvdevDevice * device = state.devices; device->path; ++device)
   {
     if (device->fd <= 0 || !device->grabbed)
@@ -234,5 +311,13 @@ void evdev_ungrabKeyboard(void)
     DEBUG_INFO("Ungrabbed %s", device->path);
     device->grabbed = false;
   }
+
+//  state.dsUngrabKeyboard();
+
   state.grabbed = false;
+}
+
+bool evdev_isExclusive(void)
+{
+  return state.exclusive && state.grabbed && !app_isOverlayMode();
 }

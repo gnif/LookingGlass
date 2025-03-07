@@ -44,3 +44,8 @@ void evdev_grabKeyboard(void);
  * ungrab the keyboard
  */
 void evdev_ungrabKeyboard(void);
+
+/**
+ * returns true if input should only be processed by evdev
+ */
+bool evdev_isExclusive(void);

@@ -72,6 +72,7 @@ struct AppState
   bool             modSuper;
   uint64_t         lastImGuiFrame;
   bool             renderImGuiTwice;
+  bool             exclusiveEvdev;
 
   struct LG_DisplayServerOps * ds;
   bool                         dsInitialized;
