@@ -141,6 +141,13 @@ void core_setGrabQuiet(bool enable)
     core_setCursorInView(true);
     g_state.ignoreInput = false;
 
+    /* ensure the local mouse is inside the window before we capture, this fixes
+     * odd UI behaviour if the user is using focus follows mouse and the window
+     * was focused without the cursor being in window already */
+    struct DoublePoint local;
+    util_guestCurToLocal(&local);
+    core_warpPointer(local.x, local.y, true);
+
     if (g_params.grabKeyboard)
       g_state.ds->grabKeyboard();
 
