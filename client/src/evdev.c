@@ -95,20 +95,104 @@ void evdev_earlyInit(void)
   option_register(options);
 }
 
+static bool evdev_grabDevice(EvdevDevice * device)
+{
+  if (device->grabbed)
+    return true;
+
+  if (ioctl(device->fd, EVIOCGRAB, (void *)1) < 0)
+  {
+    DEBUG_ERROR("EVIOCGRAB=1 failed: %s", strerror(errno));
+    return false;
+  }
+
+  DEBUG_INFO("Grabbed %s", device->path);
+  device->grabbed = true;
+  return true;
+}
+
+static bool evdev_openDevice(EvdevDevice * device, bool quiet)
+{
+  device->fd = open(device->path, O_RDWR);
+  if (device->fd < 0)
+  {
+    if (errno != ENOENT || !quiet)
+      DEBUG_ERROR("Unable to open %s (%s)", device->path, strerror(errno));
+    goto err;
+  }
+
+  struct epoll_event event =
+  {
+    .events   = EPOLLIN,
+    .data.ptr = device
+  };
+
+  if (epoll_ctl(state.epoll, EPOLL_CTL_ADD, device->fd, &event) != 0)
+  {
+    DEBUG_ERROR("Failed to add fd to epoll");
+    goto err;
+  }
+
+  DEBUG_INFO("Opened: %s", device->path);
+
+  if (state.grabbed)
+    evdev_grabDevice(device);
+
+  return true;
+
+err:
+  close(device->fd);
+  device->fd = 0;
+  return false;
+}
+
 static int evdev_thread(void * opaque)
 {
   struct epoll_event * events = alloca(sizeof(*events) * state.deviceCount);
   DEBUG_INFO("evdev_thread Started");
   while(app_isRunning())
   {
+    int openDevices = 0;
+    for(int i = 0; i < state.deviceCount; ++i)
+    {
+      EvdevDevice * dev = &state.devices[i];
+      if (dev->fd <= 0)
+      {
+        if (evdev_openDevice(dev, true))
+          ++openDevices;
+      }
+      else
+        ++openDevices;
+    }
+
+    if (openDevices == 0)
+    {
+      usleep(1000);
+      continue;
+    }
+
     int waiting = epoll_wait(state.epoll, events, state.deviceCount, 100);
     for(int i = 0; i < waiting; ++i)
     {
       struct input_event ev;
-      size_t n = read(events[i].data.fd, &ev, sizeof(ev));
+      EvdevDevice * device = (EvdevDevice *)events[i].data.ptr;
+
+      size_t n = read(device->fd, &ev, sizeof(ev));
       if (n != sizeof(ev))
       {
-        DEBUG_WARN("Failed to read evdev event");
+        if (errno == ENODEV)
+        {
+          DEBUG_WARN("Device was removed: %s", device->path);
+          epoll_ctl(state.epoll, EPOLL_CTL_DEL, device->fd, NULL);
+          close(device->fd);
+          device->fd = 0;
+          device->grabbed = false;
+          continue;
+        }
+
+        DEBUG_WARN("Failed to read evdev event: %s (%s)",
+            device->path, strerror(errno));
+
         continue;
       }
 
@@ -185,26 +269,8 @@ bool evdev_start(void)
   for(int i = 0; i < state.deviceCount; ++i)
   {
     EvdevDevice * device = &state.devices[i];
-    device->fd = open(device->path, O_RDWR);
-    if (device->fd < 0)
-    {
-      DEBUG_ERROR("Unable to open %s (%s)", device->path, strerror(errno));
+    if (!evdev_openDevice(device, false))
       return false;
-    }
-
-    struct epoll_event event =
-    {
-      .events  = EPOLLIN,
-      .data.fd = device->fd
-    };
-
-    if (epoll_ctl(state.epoll, EPOLL_CTL_ADD, device->fd, &event) != 0)
-    {
-      DEBUG_ERROR("Failed to add fd to epoll");
-      return false;
-    }
-
-    DEBUG_INFO("Opened: %s", device->path);
   }
 
   if (!lgCreateThread("Evdev", evdev_thread, NULL, &state.thread))
@@ -269,18 +335,10 @@ void evdev_grabKeyboard(void)
 
   for(EvdevDevice * device = state.devices; device->path; ++device)
   {
-    if (device->fd <= 0 || device->grabbed)
-      continue;
-
-    if (ioctl(device->fd, EVIOCGRAB, (void *)1) < 0)
-    {
-      DEBUG_ERROR("EVIOCGRAB=1 failed: %s", strerror(errno));
-      continue;
-    }
-
-    DEBUG_INFO("Grabbed %s", device->path);
-    device->grabbed = true;
+    if (device->fd > 0)
+      evdev_grabDevice(device);
   }
+
   state.grabbed = true;
 }
 
