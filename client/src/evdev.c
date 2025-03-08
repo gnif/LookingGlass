@@ -149,6 +149,8 @@ err:
 static int evdev_thread(void * opaque)
 {
   struct epoll_event * events = alloca(sizeof(*events) * state.deviceCount);
+  struct input_event msgs[256];
+
   DEBUG_INFO("evdev_thread Started");
   while(app_isRunning())
   {
@@ -174,11 +176,9 @@ static int evdev_thread(void * opaque)
     int waiting = epoll_wait(state.epoll, events, state.deviceCount, 100);
     for(int i = 0; i < waiting; ++i)
     {
-      struct input_event ev;
       EvdevDevice * device = (EvdevDevice *)events[i].data.ptr;
-
-      size_t n = read(device->fd, &ev, sizeof(ev));
-      if (n != sizeof(ev))
+      int n = read(device->fd, msgs, sizeof(msgs));
+      if (n < 0)
       {
         if (errno == ENODEV)
         {
@@ -196,34 +196,42 @@ static int evdev_thread(void * opaque)
         continue;
       }
 
-      if (ev.type != EV_KEY)
-        continue;
+      if (n % sizeof(*msgs) != 0)
+        DEBUG_WARN("Incomplete evdev read: %s", device->path);
 
-      bool grabbed = state.grabbed;
-      if (ev.value == 1)
+      int    count = n / sizeof(*msgs);
+      struct input_event *ev = msgs;
+      for(int i = 0; i < count; ++i, ++ev)
       {
-        ++state.keys[ev.code];
+        if (ev->type != EV_KEY)
+          continue;
 
-        if (grabbed && state.keys[ev.code] == 1)
-          app_handleKeyPressInternal(ev.code);
-      }
-      else if (ev.value == 0 && --state.keys[ev.code] <= 0)
-      {
-        state.keys[ev.code] = 0;
-
-        if (state.pending == PENDING_GRAB)
+        bool grabbed = state.grabbed;
+        if (ev->value == 1)
         {
-          state.pending = PENDING_NONE;
-          evdev_grabKeyboard();
-        }
-        else if (state.pending == PENDING_UNGRAB)
-        {
-          state.pending = PENDING_NONE;
-          evdev_ungrabKeyboard();
-        }
+          ++state.keys[ev->code];
 
-        if (grabbed)
-          app_handleKeyReleaseInternal(ev.code);
+          if (grabbed && state.keys[ev->code] == 1)
+            app_handleKeyPressInternal(ev->code);
+        }
+        else if (ev->value == 0 && --state.keys[ev->code] <= 0)
+        {
+          state.keys[ev->code] = 0;
+
+          if (state.pending == PENDING_GRAB)
+          {
+            state.pending = PENDING_NONE;
+            evdev_grabKeyboard();
+          }
+          else if (state.pending == PENDING_UNGRAB)
+          {
+            state.pending = PENDING_NONE;
+            evdev_ungrabKeyboard();
+          }
+
+          if (grabbed)
+            app_handleKeyReleaseInternal(ev->code);
+        }
       }
     }
   }
