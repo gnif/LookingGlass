@@ -131,16 +131,16 @@ bool option_register(struct Option options[])
   for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
     ++new;
 
-  state.options = realloc(
+  void * tmp = realloc(
     state.options,
     sizeof(*state.options) * (state.oCount + new)
   );
-
-  if (!state.options)
+  if (!tmp)
   {
     DEBUG_ERROR("out of memory");
     return false;
   }
+  state.options = tmp;
 
   for(int i = 0; options[i].type != OPTION_TYPE_NONE; ++i)
   {
@@ -229,15 +229,16 @@ bool option_register(struct Option options[])
         continue;
 
       found = true;
-      group->options = realloc(
+      void * tmp = realloc(
         group->options,
         sizeof(*group->options) * (group->count + 1)
       );
-      if (!group->options)
+      if (!tmp)
       {
         DEBUG_ERROR("out of memory");
         return false;
       }
+      group->options = tmp;
       group->options[group->count] = o;
 
       int len = strlen(o->name);
@@ -250,15 +251,16 @@ bool option_register(struct Option options[])
 
     if (!found)
     {
-      state.groups = realloc(
+      void * new = realloc(
         state.groups,
         sizeof(*state.groups) * (state.gCount + 1)
       );
-      if (!state.groups)
+      if (!new)
       {
         DEBUG_ERROR("out of memory");
         return false;
       }
+      state.groups = new;
 
       struct OptionGroup * group = &state.groups[state.gCount];
       ++state.gCount;

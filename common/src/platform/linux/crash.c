@@ -164,7 +164,14 @@ static int dl_iterate_phdr_callback(struct dl_phdr_info * info, size_t size, voi
       ttl += hdr.p_memsz;
   }
 
-  crash.ranges = realloc(crash.ranges, sizeof(*crash.ranges) * (crash.rangeCount + 1));
+  void * tmp = realloc(crash.ranges,
+      sizeof(*crash.ranges) * (crash.rangeCount + 1));
+  if (!tmp)
+  {
+    DEBUG_ERROR("out of memory");
+    return 1;
+  }
+  crash.ranges = tmp;
   crash.ranges[crash.rangeCount].start = info->dlpi_addr;
   crash.ranges[crash.rangeCount].end   = info->dlpi_addr + ttl;
   ++crash.rangeCount;

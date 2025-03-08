@@ -626,12 +626,13 @@ static bool appendData(KVMFRUserData * dst, const void * src, const size_t size)
   if (size > dst->size - dst->used)
   {
     size_t newSize = dst->size + max(1024, size);
-    dst->data = realloc(dst->data, newSize);
-    if (!dst->data)
+    void * tmp = realloc(dst->data, newSize);
+    if (!tmp)
     {
       DEBUG_ERROR("Out of memory");
       return false;
     }
+    dst->data = tmp;
 
     memset(dst->data + dst->size, 0, newSize - dst->size);
     dst->size = newSize;
