@@ -28,6 +28,7 @@
 #include <sys/epoll.h>
 
 #include "app_internal.h"
+#include "core.h"
 #include "main.h"
 
 #include "common/debug.h"
@@ -74,7 +75,7 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "evdev",
-    .description    = "csv list of evdev keyboard devices to use "
+    .description    = "csv list of evdev input devices to use "
       "for capture mode (ie: /dev/input/by-id/usb-some_device-event-kbd)",
     .type           = OPTION_TYPE_STRING,
     .value.x_string = NULL,
@@ -82,8 +83,7 @@ static struct Option options[] =
   {
     .module       = "input",
     .name         = "evdevExclusive",
-    .description  = "Only use evdev devices for keyboard input when in capture "
-      "mode",
+    .description  = "Only use evdev devices for input when in capture mode",
     .type         = OPTION_TYPE_BOOL,
     .value.x_bool = true
   },
@@ -199,40 +199,92 @@ static int evdev_thread(void * opaque)
       if (n % sizeof(*msgs) != 0)
         DEBUG_WARN("Incomplete evdev read: %s", device->path);
 
+      bool grabbed = state.grabbed;
+
       int    count = n / sizeof(*msgs);
       struct input_event *ev = msgs;
+      int mouseX = 0, mouseY = 0;
+
       for(int i = 0; i < count; ++i, ++ev)
       {
-        if (ev->type != EV_KEY)
-          continue;
-
-        bool grabbed = state.grabbed;
-        if (ev->value == 1)
+        switch(ev->type)
         {
-          ++state.keys[ev->code];
-
-          if (grabbed && state.keys[ev->code] == 1)
-            app_handleKeyPressInternal(ev->code);
-        }
-        else if (ev->value == 0 && --state.keys[ev->code] <= 0)
-        {
-          state.keys[ev->code] = 0;
-
-          if (state.pending == PENDING_GRAB)
+          case EV_KEY:
           {
-            state.pending = PENDING_NONE;
-            evdev_grabKeyboard();
-          }
-          else if (state.pending == PENDING_UNGRAB)
-          {
-            state.pending = PENDING_NONE;
-            evdev_ungrabKeyboard();
+            bool isMouseBtn = ev->code >= BTN_MOUSE && ev->code <= BTN_BACK;
+            static const int mouseBtnMap[] = {1, 3, 2, 6, 7, 0, 0};
+
+            if (ev->value == 1)
+            {
+              ++state.keys[ev->code];
+
+              if (grabbed && state.keys[ev->code] == 1)
+              {
+                if (isMouseBtn)
+                  app_handleButtonPress(mouseBtnMap[ev->code - BTN_MOUSE]);
+                else
+                  app_handleKeyPressInternal(ev->code);
+              }
+            }
+            else if (ev->value == 0 && --state.keys[ev->code] <= 0)
+            {
+              state.keys[ev->code] = 0;
+
+              if (state.pending == PENDING_GRAB)
+              {
+                state.pending = PENDING_NONE;
+                evdev_grabKeyboard();
+              }
+              else if (state.pending == PENDING_UNGRAB)
+              {
+                state.pending = PENDING_NONE;
+                evdev_ungrabKeyboard();
+              }
+
+              if (grabbed)
+              {
+                if (isMouseBtn)
+                  app_handleButtonRelease(mouseBtnMap[ev->code - BTN_MOUSE]);
+                else
+                  app_handleKeyReleaseInternal(ev->code);
+              }
+            }
+            break;
           }
 
-          if (grabbed)
-            app_handleKeyReleaseInternal(ev->code);
+           case EV_REL:
+            if (!grabbed)
+              continue;
+
+            switch(ev->code)
+            {
+              case REL_X:
+                mouseX += ev->value;
+                break;
+
+              case REL_Y:
+                mouseY += ev->value;
+                break;
+
+              case REL_WHEEL:
+              {
+                int btn;
+                if (ev->value > 0)
+                  btn = 4;
+                else
+                  btn = 5;
+
+                app_handleButtonPress  (btn);
+                app_handleButtonRelease(btn);
+                break;
+              }
+            }
+            break;
         }
       }
+
+      if (mouseX != 0 || mouseY != 0)
+        core_handleMouseGrabbed(mouseX, mouseY);
     }
   }
   DEBUG_INFO("evdev_thread Stopped");
