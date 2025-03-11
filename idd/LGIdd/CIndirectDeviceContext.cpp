@@ -451,6 +451,8 @@ void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FO
   fi->frameSerial  = m_frameSerial++;
   fi->screenWidth  = width;
   fi->screenHeight = height;
+  fi->dataWidth    = width;
+  fi->dataHeight   = height;
   fi->frameWidth   = width;
   fi->frameHeight  = height;
   fi->stride       = width * bpp;

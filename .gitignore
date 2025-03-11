@@ -11,6 +11,7 @@ module/modules.order
 __pycache__
 *.py[co]
 */.vs
+*.user
 idd/Debug
 idd/x64
 idd/LGIdd/x64
