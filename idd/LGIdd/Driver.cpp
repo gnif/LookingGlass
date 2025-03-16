@@ -46,15 +46,18 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING Reg
   if (!NT_SUCCESS(status))
   {
     TraceEvents(TRACE_LEVEL_ERROR, TRACE_DRIVER, "WdfDriverCreate failed %!STATUS!", status);
-#if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
-    WPP_CLEANUP();
-#else
-    WPP_CLEANUP(DriverObject);
-#endif
-    return status;
+    goto fail;
   }
 
   TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Exit");
+  return status;
+
+fail:
+#if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
+  WPP_CLEANUP();
+#else
+  WPP_CLEANUP(DriverObject);
+#endif
   return status;
 }
 

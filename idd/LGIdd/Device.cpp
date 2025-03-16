@@ -140,7 +140,8 @@ NTSTATUS LGIddMonitorQueryTargetModes(IDDCX_MONITOR monitor, const IDARG_IN_QUER
 NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSWAPCHAIN* inArgs)
 {
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  wrapper->context->AssignSwapChain(inArgs->hSwapChain, inArgs->RenderAdapterLuid, inArgs->hNextSurfaceAvailable);
+  wrapper->context->AssignSwapChain(
+    inArgs->hSwapChain, inArgs->RenderAdapterLuid, inArgs->hNextSurfaceAvailable);
   return STATUS_SUCCESS;
 }
 

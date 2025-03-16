@@ -102,7 +102,7 @@ bool CIVSHMEM::Init()
   {
     DWORD bus = it->busAddr >> 32;
     DWORD addr = it->busAddr & 0xFFFFFFFF;
-    DBGPRINT("IVSHMEM %u%c on bus 0x%lx, device 0x%lx, function 0x%lx\n",
+    DBGPRINT("IVSHMEM %u%c on bus 0x%lx, device 0x%lx, function 0x%lx",
       i, i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
 
     if (i == shmDevice)

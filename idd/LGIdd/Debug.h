@@ -25,4 +25,8 @@
 
 VOID _DBGPRINT(PCSTR kszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, ...);
 #define DBGPRINT(kszDebugFormatString, ...) \
-  _DBGPRINT(__FUNCTION__, __LINE__, kszDebugFormatString, __VA_ARGS__)
+  _DBGPRINT(__FUNCTION__, __LINE__, kszDebugFormatString "\n", __VA_ARGS__)
+
+VOID _DBGPRINT_HR(PCSTR kwszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, HRESULT status, ...);
+#define DBGPRINT_HR(status, kszDebugFormatString, ...) \
+  _DBGPRINT_HR(__FUNCTION__, __LINE__, kszDebugFormatString "\n", status, __VA_ARGS__)

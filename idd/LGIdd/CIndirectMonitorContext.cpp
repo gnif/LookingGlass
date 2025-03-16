@@ -19,7 +19,7 @@
  */
 
 #include "CIndirectMonitorContext.h"
-#include "Direct3DDevice.h"
+#include "CPlatformInfo.h"
 #include "Debug.h"
 
 CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device) :
@@ -28,7 +28,6 @@ CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIn
 {
   m_terminateEvent .Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_thread.Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
   m_shapeBuffer = new BYTE[512 * 512 * 4];
 }
 
@@ -42,14 +41,27 @@ CIndirectMonitorContext::~CIndirectMonitorContext()
 void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
 {
   m_swapChain.reset();
-  auto device = std::make_shared<Direct3DDevice>(renderAdapter);
-  if (FAILED(device->Init()))
+  m_dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
+  if (FAILED(m_dx11Device->Init()))
   {
     WdfObjectDelete(swapChain);
     return;
   }
 
-  m_swapChain.reset(new CSwapChainProcessor(m_devContext, swapChain, device, newFrameEvent));
+  UINT64 alignSize = CPlatformInfo::GetPageSize();
+  m_dx12Device = std::make_shared<CD3D12Device>(renderAdapter);
+  if (!m_dx12Device->Init(m_devContext->GetIVSHMEM(), alignSize))
+  {
+    WdfObjectDelete(swapChain);
+    return;
+  }
+  
+  if (!m_devContext->SetupLGMP(alignSize))
+  {
+    WdfObjectDelete(swapChain);
+    DBGPRINT("SetupLGMP failed");
+    return;
+  }
 
   IDARG_IN_SETUP_HWCURSOR c = {};
   c.CursorInfo.Size                  = sizeof(c.CursorInfo);
@@ -60,12 +72,21 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
   c.hNewCursorDataAvailable          = m_cursorDataEvent.Get();
   NTSTATUS status = IddCxMonitorSetupHardwareCursor(m_monitor, &c);
   if (!NT_SUCCESS(status))
+  {
+    WdfObjectDelete(swapChain);
     DBGPRINT("IddCxMonitorSetupHardwareCursor Failed: %08x", status);
+    return;
+  }
+
+  m_swapChain.reset(new CSwapChainProcessor(m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
+  m_thread.Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
 }
 
 void CIndirectMonitorContext::UnassignSwapChain()
 {
-  m_swapChain.reset();
+  m_swapChain.reset();  
+  m_dx11Device.reset();
+  m_dx12Device.reset();
 }
 
 DWORD CALLBACK CIndirectMonitorContext::_CursorThread(LPVOID arg)

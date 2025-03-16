@@ -38,24 +38,36 @@
     <None Include="cpp.hint" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CD3D12CommandQueue.cpp" />
+    <ClCompile Include="CFrameBufferPool.cpp" />
+    <ClCompile Include="CFrameBufferResource.cpp" />
     <ClCompile Include="CIndirectDeviceContext.cpp" />
     <ClCompile Include="CIndirectMonitorContext.cpp" />
+    <ClCompile Include="CInteropResourcePool.cpp" />
+    <ClCompile Include="CInteropResource.cpp" />
     <ClCompile Include="CIVSHMEM.cpp" />
     <ClCompile Include="CPlatformInfo.cpp" />
     <ClCompile Include="CSwapChainProcessor.cpp" />
+    <ClCompile Include="CD3D12Device.cpp" />
     <ClCompile Include="Debug.cpp" />
     <ClCompile Include="Device.cpp" />
-    <ClCompile Include="Direct3DDevice.cpp" />
+    <ClCompile Include="CD3D11Device.cpp" />
     <ClCompile Include="Driver.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CD3D12CommandQueue.h" />
+    <ClInclude Include="CFrameBufferPool.h" />
+    <ClInclude Include="CFrameBufferResource.h" />
     <ClInclude Include="CIndirectMonitorContext.h" />
+    <ClInclude Include="CInteropResourcePool.h" />
+    <ClInclude Include="CInteropResource.h" />
     <ClInclude Include="CIVSHMEM.h" />
     <ClInclude Include="CPlatformInfo.h" />
     <ClInclude Include="CSwapChainProcessor.h" />
+    <ClInclude Include="CD3D12Device.h" />
     <ClInclude Include="Debug.h" />
     <ClInclude Include="Device.h" />
-    <ClInclude Include="Direct3DDevice.h" />
+    <ClInclude Include="CD3D11Device.h" />
     <ClInclude Include="Driver.h" />
     <ClInclude Include="CIndirectDeviceContext.h" />
     <ClInclude Include="Public.h" />
@@ -257,7 +269,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -272,7 +284,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>

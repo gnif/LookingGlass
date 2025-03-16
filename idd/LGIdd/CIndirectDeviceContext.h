@@ -56,6 +56,7 @@ private:
   bool m_cursorVisible = false;
   int m_cursorX = 0, m_cursorY = 0;
 
+  size_t         m_alignSize    = 0;
   size_t         m_maxFrameSize = 0;
   int            m_frameIndex   = 0;
   uint32_t       m_formatVer    = 0;
@@ -67,7 +68,7 @@ private:
   int         m_pitch  = 0;
   DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
 
-  bool SetupLGMP();
+  void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor();  
 
@@ -75,14 +76,29 @@ public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
     m_wdfDevice(wdfDevice) {};
 
-  virtual ~CIndirectDeviceContext();
+  virtual ~CIndirectDeviceContext() { DeInitLGMP(); }
+
+  bool SetupLGMP(size_t alignSize);
 
   void InitAdapter();
 
   void FinishInit(UINT connectorIndex);
 
-  void SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data);
+  size_t GetAlignSize() { return m_alignSize; }
+  size_t GetMaxFrameSize() { return m_maxFrameSize; }
+
+  struct PreparedFrameBuffer
+  {
+    unsigned frameIndex;
+    uint8_t* mem;
+  };
+
+  PreparedFrameBuffer PrepareFrameBuffer(int width, int height, int pitch, DXGI_FORMAT format);
+  void FinalizeFrameBuffer();
+
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);
+
+  CIVSHMEM &GetIVSHMEM() { return m_ivshmem; }
 };
 
 struct CIndirectDeviceContextWrapper

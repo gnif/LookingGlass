@@ -40,29 +40,9 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
   1000                //subTimeout
 };
 
-CIndirectDeviceContext::~CIndirectDeviceContext()
-{
-  if (m_lgmp == nullptr)
-    return;
-
-  if (m_lgmpTimer)
-  {
-    WdfTimerStop(m_lgmpTimer, TRUE);
-    m_lgmpTimer = nullptr;
-  }
-
-  for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
-    lgmpHostMemFree(&m_frameMemory[i]);
-  for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
-    lgmpHostMemFree(&m_pointerMemory[i]);
-  for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
-    lgmpHostMemFree(&m_pointerShapeMemory[i]);
-  lgmpHostFree(&m_lgmp);
-}
-
 void CIndirectDeviceContext::InitAdapter()
 {
-  if (!SetupLGMP())
+  if (!m_ivshmem.Init() || !m_ivshmem.Open())
     return;
 
   IDDCX_ADAPTER_CAPS caps = {};
@@ -193,11 +173,15 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   status = IddCxMonitorArrival(m_monitor, &out);
 }
 
-bool CIndirectDeviceContext::SetupLGMP()
+bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 {
-  if (!m_ivshmem.Init() || !m_ivshmem.Open())
-    return false;
+  // this may get called multiple times as we need to delay calling it until
+  // we can determine the required alignment from the GPU in use
+  if (m_lgmp)
+    return true;
 
+  m_alignSize = alignSize;
+  
   std::stringstream ss;
   {
     KVMFR kvmfr = {};
@@ -310,13 +294,13 @@ bool CIndirectDeviceContext::SetupLGMP()
   }
 
   m_maxFrameSize = lgmpHostMemAvail(m_lgmp);
-  m_maxFrameSize = (m_maxFrameSize -(CPlatformInfo::GetPageSize() - 1)) & ~(CPlatformInfo::GetPageSize() - 1);
+  m_maxFrameSize = (m_maxFrameSize -(m_alignSize - 1)) & ~(m_alignSize - 1);
   m_maxFrameSize /= LGMP_Q_FRAME_LEN;
-  DBGPRINT("Max Frame Size: %u MiB\n", (unsigned int)(m_maxFrameSize / 1048576LL));
+  DBGPRINT("Max Frame Size: %u MiB", (unsigned int)(m_maxFrameSize / 1048576LL));
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     if ((status = lgmpHostMemAllocAligned(m_lgmp, (uint32_t)m_maxFrameSize,
-        (uint32_t)CPlatformInfo::GetPageSize(), &m_frameMemory[i])) != LGMP_OK)
+        (uint32_t)m_alignSize, &m_frameMemory[i])) != LGMP_OK)
     {
       DBGPRINT("lgmpHostMemAllocAligned Failed (Frame): %s", lgmpStatusString(status));
       return false;
@@ -351,6 +335,26 @@ bool CIndirectDeviceContext::SetupLGMP()
   WdfTimerStart(m_lgmpTimer, WDF_REL_TIMEOUT_IN_MS(10));
 
   return true;
+}
+
+void CIndirectDeviceContext::DeInitLGMP()
+{
+  if (m_lgmp == nullptr)
+    return;
+
+  if (m_lgmpTimer)
+  {
+    WdfTimerStop(m_lgmpTimer, TRUE);
+    m_lgmpTimer = nullptr;
+  }
+
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    lgmpHostMemFree(&m_frameMemory[i]);
+  for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
+    lgmpHostMemFree(&m_pointerMemory[i]);
+  for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
+    lgmpHostMemFree(&m_pointerShapeMemory[i]);
+  lgmpHostFree(&m_lgmp);
 }
 
 void CIndirectDeviceContext::LGMPTimer()
@@ -399,10 +403,22 @@ void CIndirectDeviceContext::LGMPTimer()
     ResendCursor();
 }
 
-void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FORMAT format, void* data)
+//FIXME: this should not really be done here, this is a hack
+#pragma warning(push)
+#pragma warning(disable: 4200)
+struct FrameBuffer
 {
+  volatile uint32_t wp;
+  uint8_t data[0];
+};
+#pragma warning(pop)
+
+CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(int width, int height, int pitch, DXGI_FORMAT format)
+{
+  PreparedFrameBuffer result = {};
+
   if (!m_lgmp || !m_frameQueue)
-    return;
+    return result;
 
   if (m_width != width || m_height != height || m_pitch != pitch || m_format != format)
   {
@@ -413,13 +429,15 @@ void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FO
     ++m_formatVer;
   }
 
-  while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
-    Sleep(0);
-
   if (++m_frameIndex == LGMP_Q_FRAME_LEN)
     m_frameIndex = 0;
 
   KVMFRFrame * fi = (KVMFRFrame *)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+
+  // wait until there is room in the queue
+  while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
+    Sleep(0);
+
   int bpp = 4;
   switch (format)
   {
@@ -434,18 +452,8 @@ void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FO
 
     default:
       DBGPRINT("Unsuppoted DXGI format");
-      return;
+      return result;
   }
-
-  //FIXME: this should not really be done here, this is a hack
-  #pragma warning(push)
-  #pragma warning(disable: 4200)
-  struct FrameBuffer
-  {
-    volatile uint32_t wp;
-    uint8_t data[0];
-  };
-  #pragma warning(pop)
 
   fi->formatVer    = m_formatVer;
   fi->frameSerial  = m_frameSerial++;
@@ -457,18 +465,30 @@ void CIndirectDeviceContext::SendFrame(int width, int height, int pitch, DXGI_FO
   fi->frameHeight  = height;
   fi->stride       = width * bpp;
   fi->pitch        = pitch;
-  fi->offset       = (uint32_t)(CPlatformInfo::GetPageSize() - sizeof(FrameBuffer));
+  fi->offset       = (uint32_t)(m_alignSize - sizeof(FrameBuffer));
   fi->flags        = 0;
   fi->rotation     = FRAME_ROT_0;
-
   fi->damageRectsCount = 0;
 
-  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
+  FrameBuffer* fb = (FrameBuffer*)(((uint8_t*)fi) + fi->offset);
   fb->wp = 0;
 
   lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
-  memcpy(fb->data, data, (size_t)height * (size_t)pitch);
-  fb->wp = height * pitch;
+
+  result.frameIndex = m_frameIndex;
+  result.mem        = fb->data;
+
+  return result;
+}
+
+void CIndirectDeviceContext::FinalizeFrameBuffer()
+{
+  if (!m_lgmp || !m_frameQueue)
+    return;
+
+  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
+  fb->wp = m_height * m_pitch;
 }
 
 void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data)
@@ -504,7 +524,7 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   if (info.CursorShapeInfo.CursorType != IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
   {
     memcpy(cursor + 1, data,
-      (size_t)(info.CursorShapeInfo.Height * info.CursorShapeInfo.Pitch));
+      (size_t)info.CursorShapeInfo.Height * info.CursorShapeInfo.Pitch);
 
     cursor->hx     = (int8_t  )info.CursorShapeInfo.XHot;
     cursor->hy     = (int8_t  )info.CursorShapeInfo.YHot;

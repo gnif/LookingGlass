@@ -26,21 +26,29 @@
 #include <dxgi1_5.h>
 #include <d3d11_4.h>
 
-struct Direct3DDevice
+using namespace Microsoft::WRL;
+
+struct CD3D11Device
 {
-  Direct3DDevice(LUID adapterLuid) :
+private:
+  LUID m_adapterLuid;
+  ComPtr<IDXGIFactory5       > m_factory;
+  ComPtr<IDXGIAdapter1       > m_adapter;
+  ComPtr<ID3D11Device5       > m_device;
+  ComPtr<ID3D11DeviceContext4> m_context;
+
+public:
+  CD3D11Device(LUID adapterLuid) :
     m_adapterLuid(adapterLuid) {};
 
-  Direct3DDevice()
+  CD3D11Device()
   {
     m_adapterLuid = LUID{};
   }
 
   HRESULT Init();
 
-  LUID m_adapterLuid;
-  Microsoft::WRL::ComPtr<IDXGIFactory5      > m_factory;
-  Microsoft::WRL::ComPtr<IDXGIAdapter1      > m_adapter;
-  Microsoft::WRL::ComPtr<ID3D11Device       > m_device;
-  Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;
+  ComPtr<ID3D11Device5> GetDevice() { return m_device; }
+
+  ComPtr<ID3D11DeviceContext4> GetContext() { return m_context; }
 };

@@ -22,18 +22,21 @@
 #include <malloc.h>
 #include <strsafe.h>
 
+#include "Debug.h"
+
 /* credit: https://stackoverflow.com/questions/29049686/is-there-a-better-way-to-pass-formatted-output-to-outputdebugstring */
-VOID _DBGPRINT(PCSTR kwszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, ...) \
+VOID _DBGPRINT(PCSTR kwszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, ...)
 {
   INT cbFormatString = 0;
   va_list args;
   PCHAR szDebugString = NULL;
-  size_t st_Offset = 0;
+  size_t stOffset = 0;
 
   va_start(args, kszDebugFormatString);
 
-  cbFormatString = _scprintf("[%s:%d] ", kwszFunction, iLineNumber) * sizeof(CHAR);
-  cbFormatString += _vscprintf(kszDebugFormatString, args) * sizeof(CHAR) + 2;
+  cbFormatString = _scprintf("[%s:%d] ", kwszFunction, iLineNumber);
+  cbFormatString += _vscprintf(kszDebugFormatString, args);
+  cbFormatString += 2;
 
   /* Depending on the size of the format string, allocate space on the stack or the heap. */
   szDebugString = (PCHAR)_malloca(cbFormatString);
@@ -42,11 +45,64 @@ VOID _DBGPRINT(PCSTR kwszFunction, INT iLineNumber, LPCSTR kszDebugFormatString,
 
   /* Populate the buffer with the contents of the format string. */
   StringCbPrintfA(szDebugString, cbFormatString, "[%s:%d] ", kwszFunction, iLineNumber);
-  StringCbLengthA(szDebugString, cbFormatString, &st_Offset);
-  StringCbVPrintfA(&szDebugString[st_Offset / sizeof(CHAR)], cbFormatString - st_Offset, kszDebugFormatString, args);
+  StringCbLengthA(szDebugString, cbFormatString, &stOffset);
+  StringCbVPrintfA(&szDebugString[stOffset], cbFormatString - stOffset, kszDebugFormatString, args);
 
   OutputDebugStringA(szDebugString);
 
   _freea(szDebugString);
   va_end(args);
+}
+
+VOID _DBGPRINT_HR(PCSTR kwszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, HRESULT status, ...)
+{
+  char * buffer;
+  if (!FormatMessageA(
+    FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
+    NULL,
+    status,
+    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+    (char*)&buffer,
+    1024,
+    NULL
+  ))
+  {
+    DBGPRINT("FormatMessage failed with code 0x%08x", GetLastError());
+    return;
+  }
+
+  INT cbFormatString = 0;
+  va_list args;
+  PCHAR szDebugString = NULL;
+  size_t stOffset = 0;
+
+  va_start(args, kszDebugFormatString);
+
+  cbFormatString = _scprintf("[%s:%d] ", kwszFunction, iLineNumber);
+  cbFormatString += _vscprintf(kszDebugFormatString, args);
+  cbFormatString += 2 + 4 + (int)strlen(buffer);
+
+  /* Depending on the size of the format string, allocate space on the stack or the heap. */
+  szDebugString = (PCHAR)_malloca(cbFormatString);
+  if (!szDebugString)
+  {
+    va_end(args);
+    return;
+  }
+
+  /* Populate the buffer with the contents of the format string. */
+  StringCbPrintfA(szDebugString, cbFormatString, "[%s:%d] ", kwszFunction, iLineNumber);
+  StringCbLengthA(szDebugString, cbFormatString, &stOffset);
+  StringCbVPrintfA(&szDebugString[stOffset], cbFormatString - stOffset, kszDebugFormatString, args);
+
+  /* append the formatted error */
+  StringCbLengthA(szDebugString, cbFormatString, &stOffset);
+  StringCbPrintfA(&szDebugString[stOffset], cbFormatString - stOffset, " (%s)", buffer);
+
+  OutputDebugStringA(szDebugString);
+
+  _freea(szDebugString);
+  va_end(args);
+
+  LocalFree(buffer);
 }
