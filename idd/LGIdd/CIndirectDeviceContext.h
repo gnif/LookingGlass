@@ -63,10 +63,11 @@ private:
   uint32_t       m_frameSerial  = 0;
   PLGMPMemory    m_frameMemory[LGMP_Q_FRAME_LEN] = {};
 
-  int         m_width  = 0;
-  int         m_height = 0;
-  int         m_pitch  = 0;
-  DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
+  int         m_width    = 0;
+  int         m_height   = 0;
+  int         m_pitch    = 0;
+  DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
+  bool        m_hasFrame = false;
 
   void DeInitLGMP();
   void LGMPTimer();

@@ -63,6 +63,4 @@ public:
 
   CIndirectDeviceContext * GetDevice() { return m_devContext; }
   std::shared_ptr<CD3D12Device> GetD3D12Device() { return m_dx12Device; }
-
-  void ResendLastFrame();
 };

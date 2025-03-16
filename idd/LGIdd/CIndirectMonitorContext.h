@@ -58,12 +58,6 @@ public:
   
   void AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent);
   void UnassignSwapChain();
-
-  inline void ResendLastFrame()
-  {
-    if (m_swapChain)
-      m_swapChain->ResendLastFrame();
-  }
 };
 
 struct CIndirectMonitorContextWrapper

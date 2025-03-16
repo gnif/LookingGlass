@@ -218,22 +218,3 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   m_devContext->FinalizeFrameBuffer();
 }
-
-void CSwapChainProcessor::ResendLastFrame()
-{
-/*
-  LOCK_CONTEXT()
-  StagingTexture & st = m_cpuTex[m_lastIndex];
-  LOCK_ST(st);
-  UNLOCK_CONTEXT();
-
-  if (!st.map.pData)
-  {
-    UNLOCK_ST(st);
-    return;
-  }
-
-  m_devContext->SendFrame(st.width, st.height, st.map.RowPitch, st.format, st.map.pData);
-  UNLOCK_ST(st);
-*/
-}

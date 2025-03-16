@@ -339,6 +339,8 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
 void CIndirectDeviceContext::DeInitLGMP()
 {
+  m_hasFrame = false;
+
   if (m_lgmp == nullptr)
     return;
 
@@ -394,9 +396,8 @@ void CIndirectDeviceContext::LGMPTimer()
 
   if (lgmpHostQueueNewSubs(m_frameQueue) && m_monitor)
   {
-    auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(m_monitor);
-    if (wrapper)
-      wrapper->context->ResendLastFrame();
+    if (m_hasFrame)
+      lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
   }
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
@@ -478,6 +479,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   result.frameIndex = m_frameIndex;
   result.mem        = fb->data;
 
+  m_hasFrame = true;
   return result;
 }
 
