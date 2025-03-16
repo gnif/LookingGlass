@@ -159,10 +159,10 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   status = IddCxGetVersion(&ver);
   if (FAILED(status))
   {
-    DBGPRINT("IddCxGetVersion Failed");
+    DEBUG_ERROR("IddCxGetVersion Failed");
     return status;
   }
-  DBGPRINT("Version: 0x%04x", ver.IddCxVersion);
+  DEBUG_INFO("Version: 0x%04x", ver.IddCxVersion);
 
   WDF_PNPPOWER_EVENT_CALLBACKS pnpPowerCallbacks;
   WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);

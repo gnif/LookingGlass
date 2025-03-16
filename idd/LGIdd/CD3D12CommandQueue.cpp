@@ -13,7 +13,7 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
   hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_queue));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the CommandQueue (%ls)", name);
+    DEBUG_ERROR_HR(hr, "Failed to create the CommandQueue (%ls)", name);
     return false;
   }
   m_queue->SetName(name);
@@ -21,14 +21,14 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
   hr = device->CreateCommandAllocator(type, IID_PPV_ARGS(&m_allocator));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the CommandAllocator (%ls)", name);
+    DEBUG_ERROR_HR(hr, "Failed to create the CommandAllocator (%ls)", name);
     return false;
   }
 
   hr = device->CreateCommandList(0, type, m_allocator.Get(), NULL, IID_PPV_ARGS(&m_gfxList));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the Graphics CommandList (%ls)", name);
+    DEBUG_ERROR_HR(hr, "Failed to create the Graphics CommandList (%ls)", name);
     return false;
   }
   m_gfxList->SetName(name);
@@ -36,27 +36,27 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
   m_cmdList = m_gfxList;  
   if (!m_cmdList)
   {
-    DBGPRINT_HR(hr, "Failed to get the CommandList (%ls)", name);
+    DEBUG_ERROR_HR(hr, "Failed to get the CommandList (%ls)", name);
     return false;
   }
 
   hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the Fence (%ls)", name);
+    DEBUG_ERROR_HR(hr, "Failed to create the Fence (%ls)", name);
     return false;
   }
 
   m_event.Attach(CreateEvent(NULL, FALSE, FALSE, NULL));
   if (m_event.Get() == INVALID_HANDLE_VALUE)
   {
-    DBGPRINT_HR(GetLastError(), "Failed to create the completion event (%ls)", name);
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create the completion event (%ls)", name);
     return false;
   }
 
   m_name       = name;
   m_fenceValue = 0;
-  DBGPRINT("Created CD3D12CommandQueue(%ls)", name);
+  DEBUG_INFO("Created CD3D12CommandQueue(%ls)", name);
   return true;
 }
 
@@ -65,7 +65,7 @@ bool CD3D12CommandQueue::Execute()
   HRESULT hr = m_gfxList->Close();
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to close the command list (%ls)", m_name);
+    DEBUG_ERROR_HR(hr, "Failed to close the command list (%ls)", m_name);
     return false;
   }
 
@@ -75,7 +75,7 @@ bool CD3D12CommandQueue::Execute()
   m_queue->Signal(m_fence.Get(), ++m_fenceValue);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to set the fence signal (%ls)", m_name);
+    DEBUG_ERROR_HR(hr, "Failed to set the fence signal (%ls)", m_name);
     return false;
   }
 
@@ -98,14 +98,14 @@ bool CD3D12CommandQueue::Reset()
   hr = m_allocator->Reset();
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to reset the command allocator (%ls)", m_name);
+    DEBUG_ERROR_HR(hr, "Failed to reset the command allocator (%ls)", m_name);
     return false;
   }
 
   hr = m_gfxList->Reset(m_allocator.Get(), NULL);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to reset the graphics command list (%ls)", m_name);
+    DEBUG_ERROR_HR(hr, "Failed to reset the graphics command list (%ls)", m_name);
     return false;
   }
 

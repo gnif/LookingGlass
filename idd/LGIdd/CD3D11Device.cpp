@@ -54,7 +54,7 @@ HRESULT CD3D11Device::Init()
   if (FAILED(hr))
     return hr;
 
-  DBGPRINT("Feature Level: 0x%x", featureLevel);
+  DEBUG_INFO("Feature Level: 0x%x", featureLevel);
 
   hr = device.As(&m_device);
   if (FAILED(hr))

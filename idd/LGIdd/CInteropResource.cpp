@@ -12,7 +12,7 @@ bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::share
   hr = srcTex.As(&rSrcTex);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to obtain the IDXGIResource1 interface");
+    DEBUG_ERROR_HR(hr, "Failed to obtain the IDXGIResource1 interface");
     return false;
   }
 
@@ -21,7 +21,7 @@ bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::share
   hr = rSrcTex->CreateSharedHandle(NULL, DXGI_SHARED_RESOURCE_READ, NULL, &h);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the shared handle");
+    DEBUG_ERROR_HR(hr, "Failed to create the shared handle");
     return false;
   }
   sharedHandle.Attach(h);
@@ -30,7 +30,7 @@ bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::share
   hr = dx12Device->GetDevice()->OpenSharedHandle(sharedHandle.Get(), IID_PPV_ARGS(&dst));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to open the D3D12Resource from the handle");
+    DEBUG_ERROR_HR(hr, "Failed to open the D3D12Resource from the handle");
     return false;
   }
 
@@ -40,14 +40,14 @@ bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::share
   hr = dx11Device->GetDevice()->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(&d11Fence));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the d3d11 fence");
+    DEBUG_ERROR_HR(hr, "Failed to create the d3d11 fence");
     return false;
   }
 
   hr = d11Fence->CreateSharedHandle(NULL, GENERIC_ALL, NULL, &h);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the d3d11 fence shared handle");
+    DEBUG_ERROR_HR(hr, "Failed to create the d3d11 fence shared handle");
     return false;
   }
   sharedHandle.Attach(h);
@@ -56,7 +56,7 @@ bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::share
   hr = dx12Device->GetDevice()->OpenSharedHandle(sharedHandle.Get(), IID_PPV_ARGS(&d12Fence));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to open the D3D12Fence from the handle");
+    DEBUG_ERROR_HR(hr, "Failed to open the D3D12Fence from the handle");
     return false;
   }
 

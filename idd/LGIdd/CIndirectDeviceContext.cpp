@@ -84,7 +84,7 @@ void CIndirectDeviceContext::InitAdapter()
   NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
   if (!NT_SUCCESS(status))
   {
-    DBGPRINT("IddCxAdapterInitAsync Failed");
+    DEBUG_ERROR_HR(status, "IddCxAdapterInitAsync Failed");
     return;
   }
 
@@ -161,7 +161,7 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   NTSTATUS status = IddCxMonitorCreate(m_adapter, &create, &createOut);
   if (!NT_SUCCESS(status))
   {
-    DBGPRINT("IddCxMonitorCreate Failed");
+    DEBUG_ERROR_HR(status, "IddCxMonitorCreate Failed");
     return;
   }
 
@@ -198,7 +198,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     KVMFRRecord_VMInfo * vmInfo = static_cast<KVMFRRecord_VMInfo *>(calloc(1, sizeof(*vmInfo)));
     if (!vmInfo)
     {
-      DBGPRINT("Failed to allocate KVMFRRecord_VMInfo");
+      DEBUG_ERROR("Failed to allocate KVMFRRecord_VMInfo");
       return false;
     }
     vmInfo->cpus    = static_cast<uint8_t>(CPlatformInfo::GetProcCount  ());
@@ -212,7 +212,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     KVMFRRecord * record = static_cast<KVMFRRecord *>(calloc(1, sizeof(*record)));
     if (!record)
     {
-      DBGPRINT("Failed to allocate KVMFRRecord");
+      DEBUG_ERROR("Failed to allocate KVMFRRecord");
       return false;
     }
 
@@ -228,7 +228,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     KVMFRRecord_OSInfo * osInfo = static_cast<KVMFRRecord_OSInfo *>(calloc(1, sizeof(*osInfo)));
     if (!osInfo)
     {
-      DBGPRINT("Failed to allocate KVMFRRecord_OSInfo");
+      DEBUG_ERROR("Failed to allocate KVMFRRecord_OSInfo");
       return false;
     }
 
@@ -239,7 +239,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     KVMFRRecord* record = static_cast<KVMFRRecord*>(calloc(1, sizeof(*record)));
     if (!record)
     {
-      DBGPRINT("Failed to allocate KVMFRRecord");
+      DEBUG_ERROR("Failed to allocate KVMFRRecord");
       return false;
     }
 
@@ -257,19 +257,19 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   if ((status = lgmpHostInit(m_ivshmem.GetMem(), (uint32_t)m_ivshmem.GetSize(),
     &m_lgmp, (uint32_t)udata.size(), (uint8_t*)&udata[0])) != LGMP_OK)
   {
-    DBGPRINT("lgmpHostInit Failed: %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
     return false;
   }
 
   if ((status = lgmpHostQueueNew(m_lgmp, FRAME_QUEUE_CONFIG, &m_frameQueue)) != LGMP_OK)
   {
-    DBGPRINT("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame): %s", lgmpStatusString(status));
     return false;
   }
 
   if ((status = lgmpHostQueueNew(m_lgmp, POINTER_QUEUE_CONFIG, &m_pointerQueue)) != LGMP_OK)
   {
-    DBGPRINT("lgmpHostQueueCreate Failed (Pointer): %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostQueueCreate Failed (Pointer): %s", lgmpStatusString(status));
     return false;
   }
 
@@ -277,7 +277,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   {
     if ((status = lgmpHostMemAlloc(m_lgmp, MAX_POINTER_SIZE, &m_pointerMemory[i])) != LGMP_OK)
     {
-      DBGPRINT("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s", lgmpStatusString(status));
       return false;
     }
     memset(lgmpHostMemPtr(m_pointerMemory[i]), 0, MAX_POINTER_SIZE);
@@ -287,7 +287,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   {
     if ((status = lgmpHostMemAlloc(m_lgmp, MAX_POINTER_SIZE, &m_pointerShapeMemory[i])) != LGMP_OK)
     {
-      DBGPRINT("lgmpHostMemAlloc Failed (Pointer Shapes): %s", lgmpStatusString(status));
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Shapes): %s", lgmpStatusString(status));
       return false;
     }
     memset(lgmpHostMemPtr(m_pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
@@ -296,13 +296,13 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   m_maxFrameSize = lgmpHostMemAvail(m_lgmp);
   m_maxFrameSize = (m_maxFrameSize -(m_alignSize - 1)) & ~(m_alignSize - 1);
   m_maxFrameSize /= LGMP_Q_FRAME_LEN;
-  DBGPRINT("Max Frame Size: %u MiB", (unsigned int)(m_maxFrameSize / 1048576LL));
+  DEBUG_INFO("Max Frame Size: %u MiB", (unsigned int)(m_maxFrameSize / 1048576LL));
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     if ((status = lgmpHostMemAllocAligned(m_lgmp, (uint32_t)m_maxFrameSize,
         (uint32_t)m_alignSize, &m_frameMemory[i])) != LGMP_OK)
     {
-      DBGPRINT("lgmpHostMemAllocAligned Failed (Frame): %s", lgmpStatusString(status));
+      DEBUG_ERROR("lgmpHostMemAllocAligned Failed (Frame): %s", lgmpStatusString(status));
       return false;
     }
 
@@ -329,7 +329,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   NTSTATUS s = WdfTimerCreate(&config, &attribs, &m_lgmpTimer);
   if (!NT_SUCCESS(s))
   {
-    DBGPRINT("Timer creation failed: 0x%08x", s);
+    DEBUG_ERROR_HR(s, "Timer creation failed");
     return false;
   }
   WdfTimerStart(m_lgmpTimer, WDF_REL_TIMEOUT_IN_MS(10));
@@ -364,12 +364,12 @@ void CIndirectDeviceContext::LGMPTimer()
   {
     if (status == LGMP_ERR_CORRUPTED)
     {
-      DBGPRINT("LGMP reported the shared memory has been corrupted, attempting to recover\n");
+      DEBUG_WARN("LGMP reported the shared memory has been corrupted, attempting to recover\n");
       //TODO: fixme - reinit
       return;
     }
 
-    DBGPRINT("lgmpHostProcess Failed: %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
     //TODO: fixme - shutdown
     return;
   }
@@ -451,7 +451,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
       break;
 
     default:
-      DBGPRINT("Unsuppoted DXGI format");
+      DEBUG_ERROR("Unsuppoted DXGI format 0x%08x", format);
       return result;
   }
 
@@ -556,7 +556,7 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
       continue;
     }
 
-    DBGPRINT("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
     break;
   }
 }
@@ -584,7 +584,7 @@ void CIndirectDeviceContext::ResendCursor()
       continue;
     }
 
-    DBGPRINT("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
+    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
     break;
   }
 }

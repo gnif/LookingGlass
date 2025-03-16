@@ -11,7 +11,7 @@ CD3D12Device::CD3D12Device(LUID adapterLuid) :
     HRESULT hr = D3D12GetDebugInterface(IID_PPV_ARGS(&m_dxDebug));
     if (FAILED(hr))
     {
-      DBGPRINT_HR(hr, "Failed to get the debug interface");
+      DEBUG_ERROR_HR(hr, "Failed to get the debug interface");
       return;
     }
 
@@ -32,7 +32,7 @@ static void CALLBACK _D3D12DebugCallback(
 {
   (void)context;
 
-  DBGPRINT("category:%d severity:%d id:%d desc:%s",
+  DEBUG_INFO("category:%d severity:%d id:%d desc:%s",
     category,
     severity,
     id,
@@ -47,21 +47,21 @@ reInit:
   hr = CreateDXGIFactory2(m_debug ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&m_factory));  
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the DXGI factory");
+    DEBUG_ERROR_HR(hr, "Failed to create the DXGI factory");
     return false;
   }
 
   hr = m_factory->EnumAdapterByLuid(m_adapterLuid, IID_PPV_ARGS(&m_adapter));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to enumerate the adapter");
+    DEBUG_ERROR_HR(hr, "Failed to enumerate the adapter");
     return false;
   }
 
   hr = D3D12CreateDevice(m_adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_device));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the DirectX12 device");
+    DEBUG_ERROR_HR(hr, "Failed to create the DirectX12 device");
     return false;
   }
 
@@ -70,7 +70,7 @@ reInit:
     hr = m_device.As(&m_infoQueue);
     if (FAILED(hr))
     {
-      DBGPRINT_HR(hr, "Failed to get the ID3D12InfoQueue1 interface");
+      DEBUG_WARN_HR(hr, "Failed to get the ID3D12InfoQueue1 interface");
       //non-fatal do not exit
     }
     else
@@ -83,7 +83,7 @@ reInit:
     hr = m_device->OpenExistingHeapFromAddress(ivshmem.GetMem(), IID_PPV_ARGS(&m_ivshmemHeap));
     if (FAILED(hr))
     {
-      DBGPRINT_HR(hr, "Failed to open IVSHMEM as a D3D12Heap");
+      DEBUG_ERROR_HR(hr, "Failed to open IVSHMEM as a D3D12Heap");
       return false;
     }
     m_ivshmemHeap->SetName(L"IVSHMEM");
@@ -94,7 +94,7 @@ reInit:
     // test that the heap is usable
     if (!HeapTest())
     {
-      DBGPRINT("Unable to create resources in the IVSHMEM heap, falling back to indirect copy");
+      DEBUG_WARN("Unable to create resources in the IVSHMEM heap, falling back to indirect copy");
 
       // failure often results in the device being removed and we need to completely reinit when this occurs
       m_indirectCopy = true;
@@ -104,7 +104,7 @@ reInit:
       goto reInit;
     }
 
-    DBGPRINT("Using IVSHMEM as a D3D12Heap");
+    DEBUG_INFO("Using IVSHMEM as a D3D12Heap");
   }
 
   if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy"))
@@ -113,7 +113,7 @@ reInit:
   //if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute"))
     //return false;
 
-  DBGPRINT("Created CD3D12Device");
+  DEBUG_INFO("Created CD3D12Device");
   return true;
 }
 
@@ -151,7 +151,7 @@ bool CD3D12Device::HeapTest()
     IID_PPV_ARGS(&resource));
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the ivshmem ID3D12Resource");
+    DEBUG_ERROR_HR(hr, "Failed to create the ivshmem ID3D12Resource");
     return false;
   }
   resource->SetName(L"HeapTest");
@@ -161,7 +161,7 @@ bool CD3D12Device::HeapTest()
   hr = m_device->GetDeviceRemovedReason();
   if (hr != S_OK)
   {
-    DBGPRINT_HR(hr, "Device Removed");
+    DEBUG_ERROR_HR(hr, "Device Removed");
     return false;
   }
 

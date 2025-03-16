@@ -39,7 +39,7 @@ CDebug::CDebug()
   DWORD pathLen = GetTempPathA(sizeof(tempPath), tempPath);
   if (pathLen == 0)
   {
-    DBGPRINT_HR(GetLastError(), "Failed to get the temp path");
+    DEBUG_ERROR_HR(GetLastError(), "Failed to get the temp path");
     return;
   }
 
@@ -74,11 +74,11 @@ CDebug::CDebug()
   std::ofstream stream(logFile, std::ios::out | std::ios::trunc);
   if (!stream.is_open())
   {
-    DBGPRINT_HR(GetLastError(), "Failed to open the log file %s", logFile.c_str());
+    DEBUG_ERROR_HR(GetLastError(), "Failed to open the log file %s", logFile.c_str());
     return;
   }
   else
-    DBGPRINT("Logging to: %s", logFile.c_str());
+    DEBUG_INFO("Logging to: %s", logFile.c_str());
 
   m_stream = std::move(stream);
 }
@@ -140,7 +140,7 @@ void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int l
     NULL
   ))
   {
-    DBGPRINT("FormatMessage failed with code 0x%08x", GetLastError());
+    DEBUG_INFO("FormatMessage failed with code 0x%08x", GetLastError());
     return;
   }
 

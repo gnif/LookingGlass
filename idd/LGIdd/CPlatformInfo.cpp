@@ -60,7 +60,7 @@ void CPlatformInfo::Init()
     if (status != ERROR_SUCCESS)
     {
       m_productName = "Unknown";
-      DBGPRINT("Failed to read the ProductName");
+      DEBUG_ERROR("Failed to read the ProductName");
     }
     else
       m_productName.resize(bufferSize - 1); // remove the double null termination
@@ -167,14 +167,14 @@ void CPlatformInfo::InitUUID()
   smbData     = (RawSMBIOSData*)new BYTE[smbDataSize];
   if (!smbData)
   {
-    DBGPRINT("out of memory");
+    DEBUG_ERROR("out of memory");
     return;
   }
 
   if (GetSystemFirmwareTable(TABLE_SIG("RSMB"), 0, smbData, smbDataSize)
       != smbDataSize)
   {
-    DBGPRINT("Failed to read the RSMB table");
+    DEBUG_ERROR("Failed to read the RSMB table");
     delete[] smbData;
     return;
   }
@@ -220,7 +220,7 @@ void CPlatformInfo::InitCPUInfo()
     if (status != ERROR_SUCCESS)
     {
       m_model = "Unknown";
-      DBGPRINT("Failed to read the CPU Model");
+      DEBUG_ERROR("Failed to read the CPU Model");
     }
     else
     {
@@ -233,20 +233,20 @@ void CPlatformInfo::InitCPUInfo()
   GetLogicalProcessorInformationEx(RelationAll, nullptr, &cb);
   if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
   {
-    DBGPRINT("Failed to call GetLogicalProcessorInformationEx");
+    DEBUG_ERROR("Failed to call GetLogicalProcessorInformationEx");
     return;
   }
 
   BYTE * buffer = static_cast<BYTE *>(_malloca(cb));
   if (!buffer)
   {
-    DBGPRINT("Failed to allocate buffer for processor information");
+    DEBUG_ERROR("Failed to allocate buffer for processor information");
     return;
   }
   if (!GetLogicalProcessorInformationEx(RelationAll,
     (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer, &cb))
   {
-    DBGPRINT("Failed to call GetLogicalProcessorInformationEx");
+    DEBUG_ERROR("Failed to call GetLogicalProcessorInformationEx");
     _freea(buffer);
     return;
   }

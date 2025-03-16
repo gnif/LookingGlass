@@ -59,7 +59,7 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
   if (!m_devContext->SetupLGMP(alignSize))
   {
     WdfObjectDelete(swapChain);
-    DBGPRINT("SetupLGMP failed");
+    DEBUG_ERROR("SetupLGMP failed");
     return;
   }
 
@@ -74,7 +74,7 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
   if (!NT_SUCCESS(status))
   {
     WdfObjectDelete(swapChain);
-    DBGPRINT("IddCxMonitorSetupHardwareCursor Failed: %08x", status);
+    DEBUG_ERROR_HR(status, "IddCxMonitorSetupHardwareCursor Failed");
     return;
   }
 
@@ -114,7 +114,7 @@ void CIndirectMonitorContext::CursorThread()
     else if (waitResult != WAIT_OBJECT_0)
     {
       hr = HRESULT_FROM_WIN32(waitResult);
-      DBGPRINT("WaitForMultipleObjects: %08", hr);
+      DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
       return;
     }
 
@@ -127,7 +127,7 @@ void CIndirectMonitorContext::CursorThread()
     NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
     if (FAILED(status))
     {
-      DBGPRINT("IddCxMonitorQueryHardwareCursor failed: %08x", status);
+      DEBUG_ERROR_HR(status, "IddCxMonitorQueryHardwareCursor failed");
       return;
     }
 

@@ -35,7 +35,7 @@ CInteropResource* CInteropResourcePool::Get(ComPtr<ID3D11Texture2D> srcTex)
 
   if (freeSlot == POOL_SIZE)
   {
-    DBGPRINT("Interop Resouce Pool Full");
+    DEBUG_ERROR("Interop Resouce Pool Full");
     return nullptr;
   }
 

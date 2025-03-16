@@ -6,7 +6,7 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
 {
   if (size > swapChain->GetDevice()->GetMaxFrameSize())
   {
-    DBGPRINT("Frame size of %lu is too large to fit in available shared ram");
+    DEBUG_ERROR("Frame size of %lu is too large to fit in available shared ram");
     return false;
   }
 
@@ -33,7 +33,7 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
 
   if (swapChain->GetD3D12Device()->IsIndirectCopy())
   {
-    DBGPRINT("Creating standard resource for %p", base);
+    DEBUG_TRACE("Creating standard resource for %p", base);
     D3D12_HEAP_PROPERTIES heapProps = {};
     heapProps.Type                 = D3D12_HEAP_TYPE_READBACK;
     heapProps.CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
@@ -53,7 +53,7 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
   }
   else
   {
-    DBGPRINT("Creating ivshmem resource for %p", base);
+    DEBUG_TRACE("Creating ivshmem resource for %p", base);
     desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
     desc.Flags     = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
 
@@ -70,7 +70,7 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
 
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to create the FrameBuffer ID3D12Resource");
+    DEBUG_ERROR_HR(hr, "Failed to create the FrameBuffer ID3D12Resource");
     return false;
   }
 

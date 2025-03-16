@@ -64,8 +64,17 @@ class CDebug
 
 extern CDebug g_debug;
 
-#define DBGPRINT(kszDebugFormatString, ...) \
-  g_debug.Log(CDebug::LEVEL_INFO, __FUNCTION__, __LINE__, kszDebugFormatString, __VA_ARGS__)
+#define DEBUG_INFO(fmt, ...) g_debug.Log(CDebug::LEVEL_INFO, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_WARN(fmt, ...) g_debug.Log(CDebug::LEVEL_WARN, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_ERROR(fmt, ...) g_debug.Log(CDebug::LEVEL_ERROR, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_TRACE(fmt, ...) g_debug.Log(CDebug::LEVEL_TRACE, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_FIXME(fmt, ...) g_debug.Log(CDebug::LEVEL_FIXME, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_FATAL(fmt, ...) g_debug.Log(CDebug::LEVEL_FATAL, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
 
-#define DBGPRINT_HR(status, kszDebugFormatString, ...) \
-  g_debug.LogHR(CDebug::LEVEL_INFO, status, __FUNCTION__, __LINE__, kszDebugFormatString, __VA_ARGS__)
+
+#define DEBUG_INFO_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_INFO, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_WARN_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_WARN, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_ERROR_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_ERROR, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_TRACE_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_TRACE, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_FIXME_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_FIXME, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_FATAL_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_FATAL, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)

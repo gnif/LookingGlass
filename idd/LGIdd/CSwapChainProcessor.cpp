@@ -72,7 +72,7 @@ void CSwapChainProcessor::SwapChainThread()
   DWORD  avTask       = 0;
   HANDLE avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
 
-  DBGPRINT("Start");
+  DEBUG_INFO("Start Thread");
   SwapChainThreadCore();
 
   WdfObjectDelete((WDFOBJECT)m_hSwapChain);
@@ -87,21 +87,22 @@ void CSwapChainProcessor::SwapChainThreadCore()
   HRESULT hr = m_dx11Device->GetDevice().As(&dxgiDevice);
   if (FAILED(hr))
   {
-    DBGPRINT("Failed to get the dxgiDevice");
+    DEBUG_ERROR_HR(hr, "Failed to get the dxgiDevice");
     return;
   }
 
   if (IDD_IS_FUNCTION_AVAILABLE(IddCxSetRealtimeGPUPriority))
   {
-    DBGPRINT("Using IddCxSetRealtimeGPUPriority");
+    DEBUG_INFO("Using IddCxSetRealtimeGPUPriority");
     IDARG_IN_SETREALTIMEGPUPRIORITY arg;
     arg.pDevice = dxgiDevice.Get();
-    if (FAILED(IddCxSetRealtimeGPUPriority(m_hSwapChain, &arg)))
-      DBGPRINT("Failed to set realtime GPU thread priority");
+    hr = IddCxSetRealtimeGPUPriority(m_hSwapChain, &arg);
+    if (FAILED(hr))
+      DEBUG_ERROR_HR(hr, "Failed to set realtime GPU thread priority");
   }
   else
   {
-    DBGPRINT("Using SetGPUThreadPriority");
+    DEBUG_INFO("Using SetGPUThreadPriority");
     dxgiDevice->SetGPUThreadPriority(7);
   }
 
@@ -111,7 +112,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
   hr = IddCxSwapChainSetDevice(m_hSwapChain, &setDevice);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "IddCxSwapChainSetDevice Failed");
+    DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
     return;
   }
 
@@ -164,14 +165,14 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   HRESULT hr = acquiredBuffer.As(&texture);
   if (FAILED(hr))
   {
-    DBGPRINT_HR(hr, "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
+    DEBUG_ERROR_HR(hr, "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
     return;
   }
 
   CInteropResource * srcRes = m_resPool.Get(texture);
   if (!srcRes)
   {
-    DBGPRINT("Failed to get a CInteropResource from the pool");
+    DEBUG_ERROR("Failed to get a CInteropResource from the pool");
     return;
   }
 
@@ -199,7 +200,7 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   if (!fbRes)
   {
-    DBGPRINT("Failed to get a CFrameBufferResource from the pool");
+    DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
     return;
   }
   
