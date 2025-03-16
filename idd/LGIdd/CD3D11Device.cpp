@@ -44,7 +44,7 @@ HRESULT CD3D11Device::Init()
     m_adapter.Get(),
     D3D_DRIVER_TYPE_UNKNOWN,
     nullptr,
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT |  D3D11_CREATE_DEVICE_DEBUG,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
     featureLevels,
     ARRAYSIZE(featureLevels),
     D3D11_SDK_VERSION,
