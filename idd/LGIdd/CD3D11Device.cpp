@@ -19,7 +19,7 @@
  */
 
 #include "CD3D11Device.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 HRESULT CD3D11Device::Init()
 {

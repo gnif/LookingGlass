@@ -1,5 +1,5 @@
 #include "CInteropResourcePool.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 void CInteropResourcePool::Init(std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device)
 {

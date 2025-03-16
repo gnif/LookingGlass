@@ -20,7 +20,7 @@
 
 #include "CPlatformInfo.h"
 
-#include "Debug.h"
+#include "CDebug.h"
 #include <Windows.h>
 
 size_t      CPlatformInfo::m_pageSize = 0;

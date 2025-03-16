@@ -21,12 +21,51 @@
 #pragma once
 
 #include <Windows.h>
-#include <tchar.h>
+#include <wdf.h>
+#include <fstream>
 
-VOID _DBGPRINT(PCSTR kszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, ...);
+class CDebug
+{
+  private:
+    std::ofstream m_stream;
+    void Write(const char * line);
+
+  public:
+    CDebug();
+
+    enum Level
+    {
+      LEVEL_NONE = 0,
+      LEVEL_INFO,
+      LEVEL_WARN,
+      LEVEL_ERROR,
+      LEVEL_TRACE,
+      LEVEL_FIXME,
+      LEVEL_FATAL,
+      
+      LEVEL_MAX
+    };
+
+    void Log(CDebug::Level level, const char * function, int line, const char * fmt, ...);
+    void LogHR(CDebug::Level level, HRESULT hr, const char* function, int line, const char* fmt, ...);
+
+  private:
+    const char* m_levelStr[LEVEL_MAX] =
+    {
+      " ",
+      "I",
+      "W",
+      "E",
+      "T",
+      "!",
+      "F"
+    };
+};
+
+extern CDebug g_debug;
+
 #define DBGPRINT(kszDebugFormatString, ...) \
-  _DBGPRINT(__FUNCTION__, __LINE__, kszDebugFormatString "\n", __VA_ARGS__)
+  g_debug.Log(CDebug::LEVEL_INFO, __FUNCTION__, __LINE__, kszDebugFormatString, __VA_ARGS__)
 
-VOID _DBGPRINT_HR(PCSTR kwszFunction, INT iLineNumber, LPCSTR kszDebugFormatString, HRESULT status, ...);
 #define DBGPRINT_HR(status, kszDebugFormatString, ...) \
-  _DBGPRINT_HR(__FUNCTION__, __LINE__, kszDebugFormatString "\n", status, __VA_ARGS__)
+  g_debug.LogHR(CDebug::LEVEL_INFO, status, __FUNCTION__, __LINE__, kszDebugFormatString, __VA_ARGS__)

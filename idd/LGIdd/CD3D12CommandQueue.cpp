@@ -1,5 +1,5 @@
 #include "CD3D12CommandQueue.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type, const WCHAR* name)
 {

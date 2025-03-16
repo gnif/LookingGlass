@@ -49,7 +49,7 @@
     <ClCompile Include="CPlatformInfo.cpp" />
     <ClCompile Include="CSwapChainProcessor.cpp" />
     <ClCompile Include="CD3D12Device.cpp" />
-    <ClCompile Include="Debug.cpp" />
+    <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="Device.cpp" />
     <ClCompile Include="CD3D11Device.cpp" />
     <ClCompile Include="Driver.cpp" />
@@ -65,7 +65,7 @@
     <ClInclude Include="CPlatformInfo.h" />
     <ClInclude Include="CSwapChainProcessor.h" />
     <ClInclude Include="CD3D12Device.h" />
-    <ClInclude Include="Debug.h" />
+    <ClInclude Include="CDebug.h" />
     <ClInclude Include="Device.h" />
     <ClInclude Include="CD3D11Device.h" />
     <ClInclude Include="Driver.h" />

@@ -1,6 +1,6 @@
 #include "CFrameBufferResource.h"
 #include "CSwapChainProcessor.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base, size_t size)
 {

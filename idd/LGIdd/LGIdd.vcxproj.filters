@@ -51,7 +51,7 @@
     <ClInclude Include="CIVSHMEM.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Debug.h">
+    <ClInclude Include="CDebug.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPlatformInfo.h">
@@ -98,7 +98,7 @@
     <ClCompile Include="CIVSHMEM.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Debug.cpp">
+    <ClCompile Include="CDebug.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CPlatformInfo.cpp">

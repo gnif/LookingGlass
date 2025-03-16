@@ -1,6 +1,5 @@
 #include "CInteropResource.h"
-
-#include "Debug.h"
+#include "CDebug.h"
 
 bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, ComPtr<ID3D11Texture2D> srcTex)
 {

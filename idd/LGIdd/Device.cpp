@@ -29,7 +29,7 @@
 #include <avrt.h>
 #include <wrl.h>
 
-#include "Debug.h"
+#include "CDebug.h"
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
 

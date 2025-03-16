@@ -22,7 +22,7 @@
 #include "CIndirectMonitorContext.h"
 
 #include "CPlatformInfo.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 #include <sstream>
 

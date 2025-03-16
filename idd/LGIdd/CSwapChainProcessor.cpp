@@ -21,7 +21,7 @@
 #include "CSwapChainProcessor.h"
 
 #include <avrt.h>
-#include "Debug.h"
+#include "CDebug.h"
 
 #define LOCK(lock) \
   while (InterlockedCompareExchange((volatile LONG*)&(lock), 1, 0) != 0) {};
@@ -111,7 +111,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
   hr = IddCxSwapChainSetDevice(m_hSwapChain, &setDevice);
   if (FAILED(hr))
   {
-    DBGPRINT("IddCxSwapChainSetDevice Failed (%08x)", hr);
+    DBGPRINT_HR(hr, "IddCxSwapChainSetDevice Failed");
     return;
   }
 

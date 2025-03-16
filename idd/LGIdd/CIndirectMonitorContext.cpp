@@ -20,7 +20,7 @@
 
 #include "CIndirectMonitorContext.h"
 #include "CPlatformInfo.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device) :
   m_monitor(monitor),

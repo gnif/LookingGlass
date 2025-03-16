@@ -1,5 +1,5 @@
 #include "CD3D12Device.h"
-#include "Debug.h"
+#include "CDebug.h"
 
 CD3D12Device::CD3D12Device(LUID adapterLuid) :
   m_adapterLuid(adapterLuid),

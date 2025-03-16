@@ -25,7 +25,7 @@
 #include <algorithm>
 #include <winioctl.h>
 
-#include "Debug.h"
+#include "CDebug.h"
 #include "ivshmem/ivshmem.h"
 
 CIVSHMEM::CIVSHMEM()
