@@ -23,17 +23,6 @@
 #include <avrt.h>
 #include "CDebug.h"
 
-#define LOCK(lock) \
-  while (InterlockedCompareExchange((volatile LONG*)&(lock), 1, 0) != 0) {};
-
-#define UNLOCK(lock) \
-  InterlockedExchange((volatile LONG*)&(lock), 0);
-
-#define LOCK_CONTEXT()   LOCK(m_contextLock);
-#define UNLOCK_CONTEXT() UNLOCK(m_contextLock);
-#define LOCK_ST(st)      LOCK((st).lock);
-#define UNLOCK_ST(st)    UNLOCK((st).lock);
-
 CSwapChainProcessor::CSwapChainProcessor(CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent) :
   m_devContext(devContext),
