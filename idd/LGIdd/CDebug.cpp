@@ -48,7 +48,6 @@ CDebug::CDebug()
   std::string ext      = ".txt";
   std::string logFile  = folder + baseName + ext;
 
-
   //rotate out old logs
   DeleteFileA((folder + baseName + ".5" + ext).c_str());
   for (int i = 4; i >= 0; --i)
