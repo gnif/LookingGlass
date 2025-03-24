@@ -18,6 +18,7 @@ steps:
       - branch: master
         event: [push, manual]
     image: lg-vs2022:latest
+    user: ContainerUser
     pull: true
     environment:
       VS_PATH: "\"C:\\\\Program Files (x86)\\\\Microsoft Visual Studio\\\\2022\\\\\""
