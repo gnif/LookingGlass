@@ -11,6 +11,8 @@ clone:
   - name: clone
     image: woodpeckerci/plugin-git
     pull: false
+    settings:
+      tags: true
 
 steps:
   - name: idd
