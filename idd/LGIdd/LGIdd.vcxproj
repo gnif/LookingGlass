@@ -1,5 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props" Condition="Exists('..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props')" />
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -36,6 +37,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
+    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CD3D12CommandQueue.cpp" />
@@ -327,6 +329,30 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets">
-  </ImportGroup>
+  <ImportGroup Label="ExtensionTargets" />
+  <Target Name="EnsureNuGetPackageBuildImports">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\GitVersion.MsBuild.6.1.0\build\GitVersion.MsBuild.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\GitVersion.MsBuild.6.1.0\build\GitVersion.MsBuild.props'))" />
+    <Error Condition="!Exists('..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props'))" />
+  </Target>
+  <Target Name="GenerateVersionInfo" BeforeTargets="ClCompile">
+    <Exec Command="&quot;$(Git)&quot; describe --always --abbrev=10 --dirty=+ --tags" ConsoleToMSBuild="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitVersion" />
+    </Exec>
+    <ItemGroup>
+      <VersionInfoLines Include="#define LG_VERSION_STR &quot;$(GitVersion)&quot;" />
+      <VersionInfoLines Include="#define LG_CURRENT_YEAR $(CurrentYear)" />
+    </ItemGroup>
+    <WriteLinesToFile File="VersionInfo.h" Lines="@(VersionInfoLines)" Overwrite="true" />
+  </Target>
+  <Target Name="Build" DependsOnTargets="$(BuildDependsOn)" />
+  <PropertyGroup>
+    <CurrentYear>$([System.DateTime]::Now.ToString("yyyy"))</CurrentYear>
+    <BuildDependsOn>
+      GenerateVersionInfo;
+      $(BuildDependsOn);
+    </BuildDependsOn>
+  </PropertyGroup>
 </Project>

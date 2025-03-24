@@ -23,6 +23,7 @@
 
 #include "CPlatformInfo.h"
 #include "CDebug.h"
+#include "VersionInfo.h"
 
 #include <sstream>
 
@@ -62,7 +63,7 @@ void CIndirectDeviceContext::InitAdapter()
   caps.EndPointDiagnostics.GammaSupport     = IDDCX_FEATURE_IMPLEMENTATION_NONE;
   caps.EndPointDiagnostics.TransmissionType = IDDCX_TRANSMISSION_TYPE_OTHER;
 
-  caps.EndPointDiagnostics.pEndPointFriendlyName     = L"Looking Glass IDD Device";
+  caps.EndPointDiagnostics.pEndPointFriendlyName     = L"Looking Glass IDD Driver";
   caps.EndPointDiagnostics.pEndPointManufacturerName = L"Looking Glass";
   caps.EndPointDiagnostics.pEndPointModelName        = L"Looking Glass";
 
@@ -188,7 +189,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     memcpy_s(kvmfr.magic, sizeof(kvmfr.magic), KVMFR_MAGIC, sizeof(KVMFR_MAGIC) - 1);
     kvmfr.version  = KVMFR_VERSION;
     kvmfr.features = KVMFR_FEATURE_SETCURSORPOS;
-    strncpy_s(kvmfr.hostver, "FIXME-IDD", sizeof(kvmfr.hostver) - 1);
+    strncpy_s(kvmfr.hostver, LG_VERSION_STR, sizeof(kvmfr.hostver) - 1);
     ss.write(reinterpret_cast<const char *>(&kvmfr), sizeof(kvmfr));
   }
 
@@ -207,7 +208,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
     const uint8_t * uuid = CPlatformInfo::GetUUID();
     memcpy_s (vmInfo->uuid, sizeof(vmInfo->uuid), uuid, 16);
-    strncpy_s(vmInfo->capture, "Idd Driver", sizeof(vmInfo->capture));
+    strncpy_s(vmInfo->capture, "Looking Glass IDD Driver", sizeof(vmInfo->capture));
 
     KVMFRRecord * record = static_cast<KVMFRRecord *>(calloc(1, sizeof(*record)));
     if (!record)

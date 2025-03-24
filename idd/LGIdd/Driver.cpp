@@ -21,10 +21,14 @@
 #include "driver.h"
 #include "driver.tmh"
 
+#include "CDebug.h"
 #include "CPlatformInfo.h"
+#include "VersionInfo.h"
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {
+  DEBUG_INFO("Looking Glass IDD Driver (" LG_VERSION_STR ")");
+
   WDF_DRIVER_CONFIG config;
   NTSTATUS status;
   WDF_OBJECT_ATTRIBUTES attributes;

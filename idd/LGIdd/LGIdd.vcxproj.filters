@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
+    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="LGIdd.inf">

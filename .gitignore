@@ -16,3 +16,5 @@ idd/Debug
 idd/x64
 idd/LGIdd/x64
 idd/LGIdd/Debug
+idd/LGIdd/VersionInfo.h
+idd/packages

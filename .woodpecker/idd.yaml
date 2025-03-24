@@ -26,5 +26,5 @@ steps:
       - /C
       - >
         %VS_PATH%\BuildTools\Common7\Tools\VsDevCmd.bat -arch=amd64 &&
-        msbuild idd\LGIdd.sln /p:Configuration=${BUILD_TYPE} /p:Platform=x64 /p:SignMode=Off /m &&
+        msbuild /restore idd\LGIdd.sln /p:Configuration=${BUILD_TYPE} /p:Platform=x64 /p:SignMode=Off /m &&
         IF EXIST C:\artifacts\build.cmd (cmd /C C:\artifacts\build.cmd)
