@@ -490,11 +490,22 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   return result;
 }
 
+void CIndirectDeviceContext::WriteFrameBuffer(void* src, size_t offset, size_t len, bool setWritePos)
+{
+  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+  FrameBuffer * fb = (FrameBuffer*)(((uint8_t*)fi) + fi->offset);
+
+  memcpy(
+    (void *)((uintptr_t)fb->data + offset),
+    (void *)((uintptr_t)src + offset),
+    len);
+
+  if (setWritePos)
+    fb->wp = (uint32_t)(offset + len);
+}
+
 void CIndirectDeviceContext::FinalizeFrameBuffer()
 {
-  if (!m_lgmp || !m_frameQueue)
-    return;
-
   KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
   FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
   fb->wp = m_height * m_pitch;

@@ -95,6 +95,7 @@ public:
   };
 
   PreparedFrameBuffer PrepareFrameBuffer(int width, int height, int pitch, DXGI_FORMAT format);
+  void WriteFrameBuffer(void* src, size_t offset, size_t len, bool setWritePos);
   void FinalizeFrameBuffer();
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);

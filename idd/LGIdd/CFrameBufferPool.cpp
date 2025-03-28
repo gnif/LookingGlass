@@ -14,7 +14,9 @@ void CFrameBufferPool::Reset()
     m_buffers[i].Reset();
 }
 
-CFrameBufferResource * CFrameBufferPool::Get(const CIndirectDeviceContext::PreparedFrameBuffer& buffer, size_t minSize)
+CFrameBufferResource * CFrameBufferPool::Get(
+  const CIndirectDeviceContext::PreparedFrameBuffer& buffer,
+  size_t minSize)
 {
   if (buffer.frameIndex > ARRAYSIZE(m_buffers) - 1)
     return nullptr;

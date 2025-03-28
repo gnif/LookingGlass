@@ -50,6 +50,17 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
       IID_PPV_ARGS(&m_res)
     );
     resName = L"STAGING";
+
+    if (SUCCEEDED(hr))
+    {
+      D3D12_RANGE range = {0, 0};
+      hr = m_res->Map(0, &range, &m_map);
+      if (FAILED(hr))
+      {
+        DEBUG_ERROR_HR(hr, "Failed to map the resource");
+        return false;
+      }
+    }
   }
   else
   {
@@ -84,6 +95,12 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
 
 void CFrameBufferResource::Reset()
 {
+  if (m_map)
+  {
+    m_res->Unmap(0, NULL);
+    m_map = NULL;
+  }
+
   m_base = nullptr;
   m_size = 0;
   m_res.Reset();
