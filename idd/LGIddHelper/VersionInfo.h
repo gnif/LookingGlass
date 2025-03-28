@@ -1,0 +1,2 @@
+#define LG_VERSION_STR "B7-25-gbf59e45118+"
+#define LG_CURRENT_YEAR 2025

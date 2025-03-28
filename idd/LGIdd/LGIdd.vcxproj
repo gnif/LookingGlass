@@ -40,6 +40,7 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
     <ClCompile Include="CD3D12CommandQueue.cpp" />
     <ClCompile Include="CFrameBufferPool.cpp" />
     <ClCompile Include="CFrameBufferResource.cpp" />
@@ -48,15 +49,16 @@
     <ClCompile Include="CInteropResourcePool.cpp" />
     <ClCompile Include="CInteropResource.cpp" />
     <ClCompile Include="CIVSHMEM.cpp" />
+    <ClCompile Include="CPipeServer.cpp" />
     <ClCompile Include="CPlatformInfo.cpp" />
     <ClCompile Include="CSwapChainProcessor.cpp" />
     <ClCompile Include="CD3D12Device.cpp" />
-    <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="Device.cpp" />
     <ClCompile Include="CD3D11Device.cpp" />
     <ClCompile Include="Driver.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
     <ClInclude Include="CD3D12CommandQueue.h" />
     <ClInclude Include="CFrameBufferPool.h" />
     <ClInclude Include="CFrameBufferResource.h" />
@@ -64,10 +66,10 @@
     <ClInclude Include="CInteropResourcePool.h" />
     <ClInclude Include="CInteropResource.h" />
     <ClInclude Include="CIVSHMEM.h" />
+    <ClInclude Include="CPipeServer.h" />
     <ClInclude Include="CPlatformInfo.h" />
     <ClInclude Include="CSwapChainProcessor.h" />
     <ClInclude Include="CD3D12Device.h" />
-    <ClInclude Include="CDebug.h" />
     <ClInclude Include="Device.h" />
     <ClInclude Include="CD3D11Device.h" />
     <ClInclude Include="Driver.h" />
@@ -99,12 +101,10 @@
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
   </PropertyGroup>
   <PropertyGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
   </PropertyGroup>
   <PropertyGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
   </PropertyGroup>
@@ -164,6 +164,7 @@
     <UMDF_VERSION_MINOR>25</UMDF_VERSION_MINOR>
     <UMDF_MINIMUM_VERSION_REQUIRED>25</UMDF_MINIMUM_VERSION_REQUIRED>
     <_NT_TARGET_VERSION>0xA000005</_NT_TARGET_VERSION>
+    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <TargetVersion>Windows10</TargetVersion>
@@ -176,6 +177,7 @@
     <UMDF_VERSION_MINOR>25</UMDF_VERSION_MINOR>
     <UMDF_MINIMUM_VERSION_REQUIRED>25</UMDF_MINIMUM_VERSION_REQUIRED>
     <_NT_TARGET_VERSION>0xA000005</_NT_TARGET_VERSION>
+    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'" Label="Configuration">
     <TargetVersion>Windows10</TargetVersion>
@@ -268,7 +270,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=9 /DIDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)LGCommon;$(SolutionDir)..\repos\LGMP\lgmp\include;$(SolutionDir)..\vendor;$(SolutionDir)..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib</AdditionalDependencies>
@@ -283,7 +285,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=9 /DIDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)LGCommon;$(SolutionDir)..\repos\LGMP\lgmp\include;$(SolutionDir)..\vendor;$(SolutionDir)..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib</AdditionalDependencies>
@@ -330,11 +332,10 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
-  <Target Name="EnsureNuGetPackageBuildImports">
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\GitVersion.MsBuild.6.1.0\build\GitVersion.MsBuild.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\GitVersion.MsBuild.6.1.0\build\GitVersion.MsBuild.props'))" />
     <Error Condition="!Exists('..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props'))" />
   </Target>
   <Target Name="GenerateVersionInfo" BeforeTargets="ClCompile">

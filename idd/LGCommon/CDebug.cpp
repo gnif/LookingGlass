@@ -28,7 +28,7 @@
 
 CDebug g_debug;
 
-CDebug::CDebug()
+void CDebug::Init(const char * name)
 {
   // don't redirect the debug output if running under a debugger
   if (IsDebuggerPresent())
@@ -44,13 +44,13 @@ CDebug::CDebug()
   }
 
   std::string folder   = tempPath;
-  std::string baseName = "looking-glass-idd";
+  std::string baseName = name;
   std::string ext      = ".txt";
   std::string logFile  = folder + baseName + ext;
 
   //rotate out old logs
-  DeleteFileA((folder + baseName + ".5" + ext).c_str());
-  for (int i = 4; i >= 0; --i)
+  DeleteFileA((folder + baseName + ".4" + ext).c_str());
+  for (int i = 3; i >= 0; --i)
   {
     std::string oldPath;
     std::string newPath;

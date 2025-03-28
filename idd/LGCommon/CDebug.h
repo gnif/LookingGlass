@@ -21,7 +21,6 @@
 #pragma once
 
 #include <Windows.h>
-#include <wdf.h>
 #include <fstream>
 
 class CDebug
@@ -31,7 +30,6 @@ class CDebug
     void Write(const char * line);
 
   public:
-    CDebug();
 
     enum Level
     {
@@ -46,6 +44,7 @@ class CDebug
       LEVEL_MAX
     };
 
+    void Init(const char * name);
     void Log(CDebug::Level level, const char * function, int line, const char * fmt, ...);
     void LogHR(CDebug::Level level, HRESULT hr, const char* function, int line, const char* fmt, ...);
 

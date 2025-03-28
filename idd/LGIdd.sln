@@ -5,10 +5,20 @@ VisualStudioVersion = 17.5.33530.505
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGIdd", "LGIdd\LGIdd.vcxproj", "{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}"
 	ProjectSection(ProjectDependencies) = postProject
+		{0045D7AD-3F26-4B87-81CB-78D18839596D} = {0045D7AD-3F26-4B87-81CB-78D18839596D}
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65} = {FFCC376C-4D98-4B50-B431-E1BBC9C67E65}
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGMP", "..\repos\LGMP\LGMP.vcxproj", "{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGIddHelper", "LGIddHelper\LGIddHelper.vcxproj", "{0045D7AD-3F26-4B87-81CB-78D18839596D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "LGCommon", "LGCommon", "{ACB90E34-01CA-4B86-813B-3D20904994C6}"
+	ProjectSection(SolutionItems) = preProject
+		LGCommon\CDebug.cpp = LGCommon\CDebug.cpp
+		LGCommon\CDebug.h = LGCommon\CDebug.h
+		LGCommon\PipeMsg.h = LGCommon\PipeMsg.h
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -60,6 +70,22 @@ Global
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x86.ActiveCfg = Release|Win32
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x86.Build.0 = Release|Win32
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x86.Deploy.0 = Release|Win32
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|ARM.ActiveCfg = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|ARM.Build.0 = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|ARM64.ActiveCfg = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|ARM64.Build.0 = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x64.ActiveCfg = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x64.Build.0 = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x86.ActiveCfg = Debug|Win32
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x86.Build.0 = Debug|Win32
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|ARM.ActiveCfg = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|ARM.Build.0 = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|ARM64.ActiveCfg = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|ARM64.Build.0 = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x64.ActiveCfg = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x64.Build.0 = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x86.ActiveCfg = Release|Win32
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

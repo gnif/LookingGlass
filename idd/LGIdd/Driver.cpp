@@ -24,20 +24,29 @@
 #include "CDebug.h"
 #include "CPlatformInfo.h"
 #include "VersionInfo.h"
+#include "CPipeServer.h"
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {
+  g_debug.Init("looking-glass-idd");
   DEBUG_INFO("Looking Glass IDD Driver (" LG_VERSION_STR ")");
 
-  WDF_DRIVER_CONFIG config;
-  NTSTATUS status;
-  WDF_OBJECT_ATTRIBUTES attributes;
-
+  NTSTATUS status = STATUS_SUCCESS;
 #if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
   WPP_INIT_TRACING(MYDRIVER_TRACING_ID);
 #else
   WPP_INIT_TRACING(DriverObject, RegistryPath);
 #endif
+
+  if (!g_pipe.Init())
+  {
+    status = STATUS_UNSUCCESSFUL;
+    DEBUG_ERROR("Failed to setup IPC pipe");
+    goto fail;
+  }
+
+  WDF_DRIVER_CONFIG config;
+  WDF_OBJECT_ATTRIBUTES attributes;
 
   TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
 
@@ -81,6 +90,8 @@ VOID LGIddEvtDriverContextCleanup(_In_ WDFOBJECT DriverObject)
   UNREFERENCED_PARAMETER(DriverObject);
 
   TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
+
+  g_pipe.DeInit();
 
 #if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
   WPP_CLEANUP();

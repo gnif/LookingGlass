@@ -22,6 +22,7 @@
 #include "CIndirectMonitorContext.h"
 
 #include "CPlatformInfo.h"
+#include "CPipeServer.h"
 #include "CDebug.h"
 #include "VersionInfo.h"
 
@@ -114,7 +115,7 @@ void CIndirectDeviceContext::InitAdapter()
   factory->Release();
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
-  wrapper->context = this;
+  wrapper->context = this;  
 }
 
 static const BYTE EDID[] =
@@ -172,6 +173,11 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 
   IDARG_OUT_MONITORARRIVAL out;
   status = IddCxMonitorArrival(m_monitor, &out);
+  if (FAILED(status))
+  {
+    DEBUG_ERROR_HR(status, "IddCxMonitorArrival Failed");
+    return;
+  }
 }
 
 bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
@@ -386,8 +392,8 @@ void CIndirectDeviceContext::LGMPTimer()
     {
       case KVMFR_MESSAGE_SETCURSORPOS:
       {
-        KVMFRSetCursorPos *sp = (KVMFRSetCursorPos *)msg;
-        SetCursorPos(sp->x, sp->y);
+        KVMFRSetCursorPos* sp = (KVMFRSetCursorPos*)msg;
+        g_pipe.SetCursorPos(sp->x, sp->y);
         break;
       }
     }
