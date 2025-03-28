@@ -23,6 +23,7 @@
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
+#include <vector>
 
 #include "CIVSHMEM.h"
 
@@ -38,8 +39,9 @@ class CIndirectDeviceContext
 {
 private:
   WDFDEVICE     m_wdfDevice;
-  IDDCX_ADAPTER m_adapter = nullptr;
-  IDDCX_MONITOR m_monitor = nullptr;
+  IDDCX_ADAPTER m_adapter       = nullptr;
+  IDDCX_MONITOR m_monitor       = nullptr;
+  bool          m_replugMonitor = false;
 
   CIVSHMEM m_ivshmem;
 
@@ -71,7 +73,16 @@ private:
 
   void DeInitLGMP();
   void LGMPTimer();
-  void ResendCursor();  
+  void ResendCursor();
+
+  struct DisplayMode
+  {
+    unsigned width;
+    unsigned height;
+    unsigned refresh;
+    bool     preferred;
+  };
+  std::vector<DisplayMode> m_displayModes;
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
@@ -82,10 +93,18 @@ public:
   bool SetupLGMP(size_t alignSize);
 
   void InitAdapter();
-
   void FinishInit(UINT connectorIndex);
+  void ReplugMonitor(UINT connectorIndex);
+  void UnassignSwapChain();
 
-  size_t GetAlignSize() { return m_alignSize; }
+  NTSTATUS ParseMonitorDescription(
+    const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);
+  NTSTATUS MonitorGetDefaultModes(
+    const IDARG_IN_GETDEFAULTDESCRIPTIONMODES* inArgs, IDARG_OUT_GETDEFAULTDESCRIPTIONMODES* outArgs);
+  NTSTATUS MonitorQueryTargetModes(
+    const IDARG_IN_QUERYTARGETMODES* inArgs, IDARG_OUT_QUERYTARGETMODES* outArgs);
+
+  size_t GetAlignSize()    { return m_alignSize;    }
   size_t GetMaxFrameSize() { return m_maxFrameSize; }
 
   struct PreparedFrameBuffer

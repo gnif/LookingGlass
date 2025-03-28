@@ -114,6 +114,14 @@ void CIndirectDeviceContext::InitAdapter()
   }
   factory->Release();
 
+  // setup some default display modes
+  DisplayMode m;
+  m.refresh = 120;
+
+  m.width = 800 ; m.height = 600 ; m.preferred = false; m_displayModes.push_back(m);
+  m.width = 1024; m.height = 768 ; m.preferred = false; m_displayModes.push_back(m);
+  m.width = 1920; m.height = 1200; m.preferred = true ; m_displayModes.push_back(m);
+
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;  
 }
@@ -180,6 +188,118 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   }
 }
 
+void CIndirectDeviceContext::ReplugMonitor(UINT connectorIndex)
+{
+  if (m_monitor == WDF_NO_HANDLE)
+  {
+    FinishInit(connectorIndex);
+    return;
+  }
+
+  if (m_replugMonitor)
+    return;
+
+  DEBUG_TRACE("ReplugMonitor %u", connectorIndex);
+  m_replugMonitor = true;
+  NTSTATUS status = IddCxMonitorDeparture(m_monitor);
+  if (!NT_SUCCESS(status))
+  {
+    m_replugMonitor = false;
+    DEBUG_ERROR("IddCxMonitorDeparture Failed (0x%08x)", status);
+    return;
+  }
+}
+
+void CIndirectDeviceContext::UnassignSwapChain()
+{
+  if (m_replugMonitor)
+  {
+    m_replugMonitor = false;
+    FinishInit(0);
+  }
+}
+
+static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
+{
+  mode.totalSize.cx = mode.activeSize.cx = width;
+  mode.totalSize.cy = mode.activeSize.cy = height;
+
+  mode.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
+  mode.AdditionalSignalInfo.videoStandard    = 255;
+  
+  mode.vSyncFreq.Numerator   = vsync;
+  mode.vSyncFreq.Denominator = 1;
+  mode.hSyncFreq.Numerator   = vsync * height;
+  mode.hSyncFreq.Denominator = 1;
+
+  mode.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
+  mode.pixelRate        = ((UINT64)vsync) * ((UINT64)width) * ((UINT64)height);
+}
+
+NTSTATUS CIndirectDeviceContext::ParseMonitorDescription(
+  const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
+{
+  outArgs->MonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  if (inArgs->MonitorModeBufferInputCount < (UINT)m_displayModes.size())
+    return (inArgs->MonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
+
+  auto * mode = inArgs->pMonitorModes;
+  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  {
+    mode->Size = sizeof(IDDCX_MONITOR_MODE);
+    mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
+    FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
+
+    if (it->preferred)
+      outArgs->PreferredMonitorModeIdx =
+        (UINT)std::distance(m_displayModes.cbegin(), it);
+  }
+
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS CIndirectDeviceContext::MonitorGetDefaultModes(
+  const IDARG_IN_GETDEFAULTDESCRIPTIONMODES* inArgs,
+  IDARG_OUT_GETDEFAULTDESCRIPTIONMODES* outArgs)
+{
+  outArgs->DefaultMonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  if (inArgs->DefaultMonitorModeBufferInputCount < (UINT)m_displayModes.size())
+    return (inArgs->DefaultMonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
+
+  auto* mode = inArgs->pDefaultMonitorModes;
+  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  {
+    mode->Size = sizeof(IDDCX_MONITOR_MODE);
+    mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_DRIVER;
+    FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
+
+    if (it->preferred)
+      outArgs->PreferredMonitorModeIdx =
+      (UINT)std::distance(m_displayModes.cbegin(), it);
+  }
+
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes(
+  const IDARG_IN_QUERYTARGETMODES* inArgs,
+  IDARG_OUT_QUERYTARGETMODES* outArgs)
+{
+  outArgs->TargetModeBufferOutputCount = (UINT)m_displayModes.size();
+  if (inArgs->TargetModeBufferInputCount < (UINT)m_displayModes.size())
+    return (inArgs->TargetModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
+
+  auto* mode = inArgs->pTargetModes;
+  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  {
+    mode->Size = sizeof(IDDCX_TARGET_MODE);
+    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
+  }
+
+  return STATUS_SUCCESS;
+}
+
 bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 {
   // this may get called multiple times as we need to delay calling it until
@@ -194,7 +314,9 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     KVMFR kvmfr = {};
     memcpy_s(kvmfr.magic, sizeof(kvmfr.magic), KVMFR_MAGIC, sizeof(KVMFR_MAGIC) - 1);
     kvmfr.version  = KVMFR_VERSION;
-    kvmfr.features = KVMFR_FEATURE_SETCURSORPOS;
+    kvmfr.features =
+      KVMFR_FEATURE_SETCURSORPOS |
+      KVMFR_FEATURE_WINDOWSIZE;
     strncpy_s(kvmfr.hostver, LG_VERSION_STR, sizeof(kvmfr.hostver) - 1);
     ss.write(reinterpret_cast<const char *>(&kvmfr), sizeof(kvmfr));
   }
@@ -395,6 +517,19 @@ void CIndirectDeviceContext::LGMPTimer()
         KVMFRSetCursorPos* sp = (KVMFRSetCursorPos*)msg;
         g_pipe.SetCursorPos(sp->x, sp->y);
         break;
+      }
+
+      case KVMFR_MESSAGE_WINDOWSIZE:
+      {
+        KVMFRWindowSize* ws = (KVMFRWindowSize*)msg;
+        m_displayModes.clear();
+        DisplayMode m;
+        m.width     = ws->w;
+        m.height    = ws->h;
+        m.refresh   = 120;
+        m.preferred = true;
+        m_displayModes.push_back(m);
+        ReplugMonitor(0);
       }
     }
 

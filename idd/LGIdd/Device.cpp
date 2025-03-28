@@ -33,10 +33,11 @@
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
 
+WDFDEVICE l_wdfDevice = nullptr;
+
 NTSTATUS LGIddDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
   UNREFERENCED_PARAMETER(previousState);
-  UNREFERENCED_PARAMETER(device);
   
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
   wrapper->context->InitAdapter();
@@ -81,60 +82,25 @@ static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD 
 NTSTATUS LGIddParseMonitorDescription(const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
 {
-  outArgs->MonitorModeBufferOutputCount = ARRAYSIZE(DisplayModes);
-  if (inArgs->MonitorModeBufferInputCount < ARRAYSIZE(DisplayModes))
-    return (inArgs->MonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
-   
-  for (UINT i = 0; i < ARRAYSIZE(DisplayModes); ++i)
-  {
-    inArgs->pMonitorModes[i].Size   = sizeof(IDDCX_MONITOR_MODE);
-    inArgs->pMonitorModes[i].Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
-    FillSignalInfo(inArgs->pMonitorModes[i].MonitorVideoSignalInfo,
-      DisplayModes[i][0], DisplayModes[i][1], DisplayModes[i][2], true);
-  }
+  if (!l_wdfDevice)
+    return STATUS_INVALID_PARAMETER;
 
-  outArgs->PreferredMonitorModeIdx = PreferredDisplayMode;
-  return STATUS_SUCCESS;
+  auto* wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(l_wdfDevice);
+  return wrapper->context->ParseMonitorDescription(inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorGetDefaultModes(IDDCX_MONITOR monitor, const IDARG_IN_GETDEFAULTDESCRIPTIONMODES * inArgs,
   IDARG_OUT_GETDEFAULTDESCRIPTIONMODES * outArgs)
 {
-  UNREFERENCED_PARAMETER(monitor);
-
-  outArgs->DefaultMonitorModeBufferOutputCount = ARRAYSIZE(DisplayModes);
-  if (inArgs->DefaultMonitorModeBufferInputCount < ARRAYSIZE(DisplayModes))
-    return (inArgs->DefaultMonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
-
-  for (UINT i = 0; i < ARRAYSIZE(DisplayModes); ++i)
-  {
-    inArgs->pDefaultMonitorModes[i].Size   = sizeof(IDDCX_MONITOR_MODE);
-    inArgs->pDefaultMonitorModes[i].Origin = IDDCX_MONITOR_MODE_ORIGIN_DRIVER;
-    FillSignalInfo(inArgs->pDefaultMonitorModes[i].MonitorVideoSignalInfo,
-      DisplayModes[i][0], DisplayModes[i][1], DisplayModes[i][2], true);
-  }
-
-  outArgs->PreferredMonitorModeIdx = PreferredDisplayMode;
-  return STATUS_SUCCESS;
+  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  return wrapper->context->GetDeviceContext()->MonitorGetDefaultModes(inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorQueryTargetModes(IDDCX_MONITOR monitor, const IDARG_IN_QUERYTARGETMODES * inArgs,
   IDARG_OUT_QUERYTARGETMODES * outArgs)
 {
-  UNREFERENCED_PARAMETER(monitor);
-
-  outArgs->TargetModeBufferOutputCount = ARRAYSIZE(DisplayModes);
-  if (inArgs->TargetModeBufferInputCount < ARRAYSIZE(DisplayModes))
-    return (inArgs->TargetModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
-
-  for (UINT i = 0; i < ARRAYSIZE(DisplayModes); ++i)
-  {
-    inArgs->pTargetModes[i].Size = sizeof(IDDCX_TARGET_MODE);    
-    FillSignalInfo(inArgs->pTargetModes[i].TargetVideoSignalInfo.targetVideoSignalInfo,
-      DisplayModes[i][0], DisplayModes[i][1], DisplayModes[i][2], false);
-  }
-
-  return STATUS_SUCCESS;
+  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  return wrapper->context->GetDeviceContext()->MonitorQueryTargetModes(inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSWAPCHAIN* inArgs)
@@ -149,6 +115,7 @@ NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 {
   auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   wrapper->context->UnassignSwapChain();
+  wrapper->context->GetDeviceContext()->UnassignSwapChain();
   return STATUS_SUCCESS;
 }
 
@@ -190,12 +157,20 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
     auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(object);
     if (wrapper)
       wrapper->Cleanup();
+    l_wdfDevice = nullptr;
   };
 
   WDFDEVICE device = nullptr;
   status = WdfDeviceCreate(&deviceInit, &deviceAttributes, &device);
   if (!NT_SUCCESS(status))
     return status;
+
+  /*
+   * Because we are limited to IddCx 1.5 to retain Windows 10 support we have
+   * no way of getting the device context in `LGIdddapterCommitModes`, as such
+   * we need to store this for later.
+   */
+  l_wdfDevice = device;
 
   status = IddCxDeviceInitialize(device);
 

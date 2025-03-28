@@ -33,8 +33,7 @@ CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIn
 
 CIndirectMonitorContext::~CIndirectMonitorContext()
 {
-  m_swapChain.reset();
-  SetEvent(m_terminateEvent.Get());
+  UnassignSwapChain();
   delete[] m_shapeBuffer;
 }
 
@@ -84,6 +83,10 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
 
 void CIndirectMonitorContext::UnassignSwapChain()
 {
+  SetEvent(m_terminateEvent.Get());
+  if (m_thread.IsValid())
+    WaitForSingleObject(m_thread.Get(), INFINITE);
+
   m_swapChain.reset();  
   m_dx11Device.reset();
   m_dx12Device.reset();
