@@ -82,16 +82,13 @@ void CDebug::Init(const char * name)
   m_stream = std::move(stream);
 }
 
-void CDebug::Log(CDebug::Level level, const char * function, int line, const char * fmt, ...)
+void CDebug::Log_va(CDebug::Level level, const char* function, int line, const char* fmt, va_list args)
 {
   if (level < 0 || level >= LEVEL_MAX)
     level = LEVEL_NONE;
 
   static const char* fmtTemplate = "[%s] %40s:%-4d | ";
   const char* levelStr = m_levelStr[level];
-
-  va_list args;
-  va_start(args, fmt);
 
   int length = 0;
   length = _scprintf(fmtTemplate, levelStr, function, line);
@@ -102,10 +99,7 @@ void CDebug::Log(CDebug::Level level, const char * function, int line, const cha
   PCHAR buffer;
   buffer = (PCHAR)_malloca(length);
   if (!buffer)
-  {
-    va_end(args);
     return;
-  }
 
   /* Populate the buffer with the contents of the format string. */
   StringCbPrintfA(buffer, length, fmtTemplate, levelStr, function, line);
@@ -113,14 +107,21 @@ void CDebug::Log(CDebug::Level level, const char * function, int line, const cha
   size_t offset = 0;
   StringCbLengthA(buffer, length, &offset);
   StringCbVPrintfA(&buffer[offset], length - offset, fmt, args);
-  va_end(args);
 
-  buffer[length-2] = '\n';
-  buffer[length-1] = '\0';
+  buffer[length - 2] = '\n';
+  buffer[length - 1] = '\0';
 
   Write(buffer);
 
   _freea(buffer);
+}
+
+void CDebug::Log(CDebug::Level level, const char * function, int line, const char * fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  Log_va(level, function, line, fmt, args);
+  va_end(args);
 }
 
 void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int line, const char * fmt, ...)
@@ -140,6 +141,11 @@ void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int l
   ))
   {
     DEBUG_INFO("FormatMessage failed with code 0x%08x", GetLastError());
+
+    va_list args;
+    va_start(args, fmt);
+    Log_va(level, function, line, fmt, args);
+    va_end(args);
     return;
   }
 

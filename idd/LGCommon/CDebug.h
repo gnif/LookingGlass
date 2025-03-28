@@ -45,6 +45,7 @@ class CDebug
     };
 
     void Init(const char * name);
+    void Log_va(CDebug::Level level, const char* function, int line, const char* fmt, va_list args);
     void Log(CDebug::Level level, const char * function, int line, const char * fmt, ...);
     void LogHR(CDebug::Level level, HRESULT hr, const char* function, int line, const char* fmt, ...);
 
