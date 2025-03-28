@@ -94,7 +94,7 @@ public:
 
   void InitAdapter();
   void FinishInit(UINT connectorIndex);
-  void ReplugMonitor(UINT connectorIndex);
+  void ReplugMonitor();
   void UnassignSwapChain();
 
   NTSTATUS ParseMonitorDescription(

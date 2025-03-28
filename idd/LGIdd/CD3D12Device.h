@@ -36,7 +36,14 @@ struct CD3D12Device
     CD3D12Device(LUID adapterLUID);
     ~CD3D12Device() { DeInit(); }
 
-    bool Init(CIVSHMEM &ivshmem, UINT64 &alignSize);
+    enum InitResult
+    {
+      RETRY,
+      FAILURE,
+      SUCCESS
+    };
+
+    InitResult Init(CIVSHMEM &ivshmem, UINT64 &alignSize);
     void DeInit();
 
     ComPtr<ID3D12Device3> GetDevice() { return m_device; }

@@ -49,10 +49,19 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
 
   UINT64 alignSize = CPlatformInfo::GetPageSize();
   m_dx12Device = std::make_shared<CD3D12Device>(renderAdapter);
-  if (!m_dx12Device->Init(m_devContext->GetIVSHMEM(), alignSize))
+  switch (m_dx12Device->Init(m_devContext->GetIVSHMEM(), alignSize))
   {
-    WdfObjectDelete(swapChain);
-    return;
+    case CD3D12Device::SUCCESS:
+      break;
+
+    case CD3D12Device::FAILURE:
+      WdfObjectDelete(swapChain);
+      return;
+
+    case CD3D12Device::RETRY:
+      WdfObjectDelete(swapChain);
+      m_devContext->ReplugMonitor();
+      return;
   }
   
   if (!m_devContext->SetupLGMP(alignSize))

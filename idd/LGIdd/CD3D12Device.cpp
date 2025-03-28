@@ -39,30 +39,29 @@ static void CALLBACK _D3D12DebugCallback(
     description);
 }
 
-bool CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize)
+CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize)
 {
-reInit:
   HRESULT hr;
 
   hr = CreateDXGIFactory2(m_debug ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&m_factory));  
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to create the DXGI factory");
-    return false;
+    return InitResult::FAILURE;
   }
 
   hr = m_factory->EnumAdapterByLuid(m_adapterLuid, IID_PPV_ARGS(&m_adapter));
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to enumerate the adapter");
-    return false;
+    return InitResult::FAILURE;
   }
 
   hr = D3D12CreateDevice(m_adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_device));
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to create the DirectX12 device");
-    return false;
+    return InitResult::FAILURE;
   }
 
   if (m_debug)
@@ -84,7 +83,8 @@ reInit:
     if (FAILED(hr))
     {
       DEBUG_ERROR_HR(hr, "Failed to open IVSHMEM as a D3D12Heap");
-      return false;
+      m_indirectCopy = true;
+      return InitResult::RETRY;
     }
     m_ivshmemHeap->SetName(L"IVSHMEM");
   
@@ -98,23 +98,20 @@ reInit:
 
       // failure often results in the device being removed and we need to completely reinit when this occurs
       m_indirectCopy = true;
-      m_device.Reset();
-      m_adapter.Reset();
-      m_factory.Reset();
-      goto reInit;
+      return InitResult::RETRY;
     }
 
     DEBUG_INFO("Using IVSHMEM as a D3D12Heap");
   }
 
   if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy"))
-    return false;
+    return InitResult::FAILURE;
 
   //if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute"))
-    //return false;
+    //return InitResult::FAILURE;
 
   DEBUG_INFO("Created CD3D12Device");
-  return true;
+  return InitResult::SUCCESS;
 }
 
 void CD3D12Device::DeInit()

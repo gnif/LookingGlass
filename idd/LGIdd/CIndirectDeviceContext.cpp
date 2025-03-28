@@ -188,18 +188,18 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   }
 }
 
-void CIndirectDeviceContext::ReplugMonitor(UINT connectorIndex)
+void CIndirectDeviceContext::ReplugMonitor()
 {
   if (m_monitor == WDF_NO_HANDLE)
   {
-    FinishInit(connectorIndex);
+    FinishInit(0);
     return;
   }
 
   if (m_replugMonitor)
     return;
 
-  DEBUG_TRACE("ReplugMonitor %u", connectorIndex);
+  DEBUG_TRACE("ReplugMonitor");
   m_replugMonitor = true;
   NTSTATUS status = IddCxMonitorDeparture(m_monitor);
   if (!NT_SUCCESS(status))
@@ -529,7 +529,7 @@ void CIndirectDeviceContext::LGMPTimer()
         m.refresh   = 120;
         m.preferred = true;
         m_displayModes.push_back(m);
-        ReplugMonitor(0);
+        ReplugMonitor();
       }
     }
 
