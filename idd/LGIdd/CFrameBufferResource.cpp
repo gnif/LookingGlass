@@ -12,7 +12,10 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
 
   // nothing to do if the resource already exists and is large enough
   if (m_base == base && m_size >= size)
+  {
+    m_frameSize = size;
     return true;
+  }
 
   Reset();
 
@@ -87,9 +90,10 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base,
 
   m_res->SetName(resName);
 
-  m_base  = base;
-  m_size  = size;
-  m_valid = true;
+  m_base      = base;
+  m_size      = size;
+  m_frameSize = size;
+  m_valid     = true;
   return true;
 }
 

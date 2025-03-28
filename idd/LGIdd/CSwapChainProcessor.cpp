@@ -217,7 +217,8 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   m_dx12Device->GetCopyQueue().Reset();
 
   if (m_dx12Device->IsIndirectCopy())
-    m_devContext->WriteFrameBuffer(fbRes->GetMap(), 0, fbRes->GetSize(), true);
+    m_devContext->WriteFrameBuffer(
+      fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
   else
     m_devContext->FinalizeFrameBuffer();
 }
