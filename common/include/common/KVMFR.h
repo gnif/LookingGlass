@@ -56,14 +56,16 @@ typedef uint32_t KVMFRCursorFlags;
 
 enum
 {
-  KVMFR_FEATURE_SETCURSORPOS = 0x1
+  KVMFR_FEATURE_SETCURSORPOS = 0x1,
+  KVMFR_FEATURE_WINDOWSIZE   = 0x2
 };
 
 typedef uint32_t KVMFRFeatureFlags;
 
 enum
 {
-  KVMFR_MESSAGE_SETCURSORPOS
+  KVMFR_MESSAGE_SETCURSORPOS,
+  KVMFR_MESSAGE_WINDOWSIZE
 };
 
 typedef uint32_t KVMFRMessageType;
@@ -175,6 +177,13 @@ typedef struct KVMFRSetCursorPos
   int32_t x, y;
 }
 KVMFRSetCursorPos;
+
+typedef struct KVMFRWindowSize
+{
+  KVMFRMessage msg;
+  uint32_t w, h;
+}
+KVMFRWindowSize;
 
 #ifdef _MSC_VER
 #pragma warning(pop)

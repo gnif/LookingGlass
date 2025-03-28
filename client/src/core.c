@@ -190,6 +190,21 @@ bool core_warpPointer(int x, int y, bool exiting)
 
 void core_updatePositionInfo(void)
 {
+  if (g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE)
+  {
+    const KVMFRWindowSize msg = {
+      .msg.type = KVMFR_MESSAGE_WINDOWSIZE,
+      .w        = g_state.windowW,
+      .h        = g_state.windowH
+    };
+
+    uint32_t serial;
+    LGMP_STATUS status;
+    if ((status = lgmpClientSendData(g_state.pointerQueue,
+          &msg, sizeof(msg), &serial)) != LGMP_OK)
+      DEBUG_WARN("Message send failed: %s", lgmpStatusString(status));
+  }
+
   if (!g_state.haveSrcSize)
     goto done;
 
