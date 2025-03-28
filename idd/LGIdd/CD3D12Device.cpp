@@ -1,10 +1,11 @@
 #include "CD3D12Device.h"
 #include "CDebug.h"
 
+bool CD3D12Device::m_indirectCopy = false;
+
 CD3D12Device::CD3D12Device(LUID adapterLuid) :
   m_adapterLuid(adapterLuid),
-  m_debug(false),
-  m_indirectCopy(false)
+  m_debug(false)
 {
   if (m_debug)
   {

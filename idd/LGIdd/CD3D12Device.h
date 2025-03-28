@@ -16,7 +16,9 @@ struct CD3D12Device
   private:
     LUID m_adapterLuid;
     bool m_debug;
-    bool m_indirectCopy;
+
+    // static as this needs to persist if set
+    static bool m_indirectCopy;
 
     ComPtr<ID3D12Debug6    > m_dxDebug;
     ComPtr<ID3D12InfoQueue1> m_infoQueue;
