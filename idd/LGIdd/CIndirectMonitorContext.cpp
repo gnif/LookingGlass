@@ -102,6 +102,9 @@ void CIndirectMonitorContext::UnassignSwapChain()
   m_swapChain.reset();  
   m_dx11Device.reset();
   m_dx12Device.reset();
+
+  ResetEvent(m_terminateEvent .Get());
+  ResetEvent(m_cursorDataEvent.Get());
 }
 
 DWORD CALLBACK CIndirectMonitorContext::_CursorThread(LPVOID arg)
