@@ -52,9 +52,6 @@
     <ClInclude Include="CIVSHMEM.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="CDebug.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="CPlatformInfo.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -79,6 +76,10 @@
     <ClInclude Include="CFrameBufferPool.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
+    <ClInclude Include="CPipeServer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Device.cpp">
@@ -97,9 +98,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CIVSHMEM.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CDebug.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CPlatformInfo.cpp">
@@ -124,6 +122,10 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CFrameBufferPool.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
+    <ClCompile Include="CPipeServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
