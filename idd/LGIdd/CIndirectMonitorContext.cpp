@@ -88,6 +88,8 @@ reInit:
   }
 
   m_swapChain.reset(new CSwapChainProcessor(m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
+
+  m_lastShapeId = 0;
   m_thread.Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
 }
 
@@ -111,24 +113,37 @@ DWORD CALLBACK CIndirectMonitorContext::_CursorThread(LPVOID arg)
 void CIndirectMonitorContext::CursorThread()
 {
   HRESULT hr = 0;
+  bool running = true;
 
-  for (;;)
+  while(running)
   {
     HANDLE waitHandles[] =
     {
       m_cursorDataEvent.Get(),
       m_terminateEvent.Get()
     };
-    DWORD waitResult = WaitForMultipleObjects(ARRAYSIZE(waitHandles), waitHandles, FALSE, 100);
-    if (waitResult == WAIT_TIMEOUT)
-      continue;
-    else if (waitResult == WAIT_OBJECT_0 + 1)
-      break;
-    else if (waitResult != WAIT_OBJECT_0)
+
+    DWORD waitResult = WaitForMultipleObjects(
+      ARRAYSIZE(waitHandles), waitHandles, FALSE, 100);
+
+    switch (waitResult)
     {
-      hr = HRESULT_FROM_WIN32(waitResult);
-      DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
-      return;
+      case WAIT_TIMEOUT:
+        continue;
+      
+      // cursorDataEvent
+      case WAIT_OBJECT_0:
+        break;
+      
+      // terminateEvent
+      case WAIT_OBJECT_0 + 1:
+        running = false;
+        continue;
+
+      default:
+        hr = HRESULT_FROM_WIN32(waitResult);
+        DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
+        return;
     }
 
     IDARG_IN_QUERY_HWCURSOR in  = {};
