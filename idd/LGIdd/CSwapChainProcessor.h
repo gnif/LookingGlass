@@ -54,7 +54,7 @@ private:
   
   void SwapChainThread();
   void SwapChainThreadCore();
-  void SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer);
+  bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer);
 
 public:
   CSwapChainProcessor(CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,

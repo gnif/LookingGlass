@@ -134,12 +134,9 @@ void CSwapChainProcessor::SwapChainThreadCore()
       if (buffer.MetaData.PresentationFrameNumber != lastFrameNumber)
       {
         lastFrameNumber = buffer.MetaData.PresentationFrameNumber;
-        SwapChainNewFrame(buffer.MetaData.pSurface);
+        if (!SwapChainNewFrame(buffer.MetaData.pSurface))
+          break;
       }
-
-      hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
-      if (FAILED(hr))
-        break;
     }
     else
     {
@@ -148,21 +145,21 @@ void CSwapChainProcessor::SwapChainThreadCore()
   }
 }
 
-void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer)
+bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer)
 {
   ComPtr<ID3D11Texture2D> texture;  
   HRESULT hr = acquiredBuffer.As(&texture);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
-    return;
+    return false;
   }
 
   CInteropResource * srcRes = m_resPool.Get(texture);
   if (!srcRes)
   {
     DEBUG_ERROR("Failed to get a CInteropResource from the pool");
-    return;
+    return false;
   }
 
   /**
@@ -182,7 +179,7 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     srcRes->GetFormat().Format);
 
   if (!buffer.mem)
-    return;
+    return false;
 
   CFrameBufferResource * fbRes = m_fbPool.Get(buffer,
     ((size_t)srcRes->GetFormat().Width * 4) * srcRes->GetFormat().Height);
@@ -190,7 +187,7 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!fbRes)
   {
     DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
-    return;
+    return false;
   }
   
   D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
@@ -213,12 +210,25 @@ void CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     &dstLoc, 0, 0, 0, &srcLoc, NULL);
 
   m_dx12Device->GetCopyQueue().Execute();
+
+  // report that all GPU processing for this frame has been queued
+  hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
+  if (FAILED(hr))
+  {
+    DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
+    return false;
+  }
+
+  // wait for the completion
   m_dx12Device->GetCopyQueue().Wait();
   m_dx12Device->GetCopyQueue().Reset();
 
+  // copy/finialize
   if (m_dx12Device->IsIndirectCopy())
     m_devContext->WriteFrameBuffer(
       fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
   else
     m_devContext->FinalizeFrameBuffer();
+
+  return true;
 }
