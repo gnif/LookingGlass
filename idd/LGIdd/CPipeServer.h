@@ -54,6 +54,7 @@ class CPipeServer
     void DeInit();
 
     void SetCursorPos(uint32_t x, uint32_t y);
+    void SetDisplayMode(uint32_t width, uint32_t height);
 };
 
 extern CPipeServer g_pipe;

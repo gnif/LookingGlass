@@ -28,7 +28,8 @@ struct LGPipeMsg
   unsigned size;
   enum
   {
-    SETCURSORPOS
+    SETCURSORPOS,
+    SETDISPLAYMODE
   }
   type;
   union
@@ -39,5 +40,12 @@ struct LGPipeMsg
       uint32_t y;
     }
     curorPos;
+
+    struct
+    {
+      uint32_t width;
+      uint32_t height;
+    }
+    displayMode;
   };
 };

@@ -161,3 +161,16 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
   msg.curorPos.y = y;
   WriteMsg(msg);
 }
+
+void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height)
+{
+  if (!m_connected)
+    return;
+
+  LGPipeMsg msg;
+  msg.size               = sizeof(msg);
+  msg.type               = LGPipeMsg::SETDISPLAYMODE;
+  msg.displayMode.width  = width;
+  msg.displayMode.height = height;
+  WriteMsg(msg);
+}

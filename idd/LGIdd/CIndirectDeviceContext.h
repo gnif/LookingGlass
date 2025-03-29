@@ -83,6 +83,8 @@ private:
     bool     preferred;
   };
   std::vector<DisplayMode> m_displayModes;
+  DisplayMode m_customMode    = {};
+  bool        m_setCustomMode = false;
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
@@ -92,10 +94,13 @@ public:
 
   bool SetupLGMP(size_t alignSize);
 
+  void PopulateDefaultModes(bool setDefaultMode);
   void InitAdapter();
   void FinishInit(UINT connectorIndex);
   void ReplugMonitor();
-  void UnassignSwapChain();
+
+  void OnAssignSwapChain();
+  void OnUnassignedSwapChain();
 
   NTSTATUS ParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);
@@ -103,6 +108,8 @@ public:
     const IDARG_IN_GETDEFAULTDESCRIPTIONMODES* inArgs, IDARG_OUT_GETDEFAULTDESCRIPTIONMODES* outArgs);
   NTSTATUS MonitorQueryTargetModes(
     const IDARG_IN_QUERYTARGETMODES* inArgs, IDARG_OUT_QUERYTARGETMODES* outArgs);
+
+  void SetResolution(int width, int height);
 
   size_t GetAlignSize()    { return m_alignSize;    }
   size_t GetMaxFrameSize() { return m_maxFrameSize; }

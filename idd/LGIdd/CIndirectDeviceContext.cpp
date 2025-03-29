@@ -42,10 +42,57 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
   1000                //subTimeout
 };
 
+const DWORD DefaultDisplayModes[][3] =
+{
+  {7680, 4800, 120}, {7680, 4320, 120}, {6016, 3384, 120}, {5760, 3600, 120},
+  {5760, 3240, 120}, {5120, 2800, 120}, {4096, 2560, 120}, {4096, 2304, 120},
+  {3840, 2400, 120}, {3840, 2160, 120}, {3200, 2400, 120}, {3200, 1800, 120},
+  {3008, 1692, 120}, {2880, 1800, 120}, {2880, 1620, 120}, {2560, 1600, 120},
+  {2560, 1440, 120}, {1920, 1440, 120}, {1920, 1200, 120}, {1920, 1080, 120},
+  {1600, 1200, 120}, {1600, 1024, 120}, {1600, 1050, 120}, {1600, 900 , 120},
+  {1440, 900 , 120}, {1400, 1050, 120}, {1366, 768 , 120}, {1360, 768 , 120},
+  {1280, 1024, 120}, {1280, 960 , 120}, {1280, 800 , 120}, {1280, 768 , 120},
+  {1280, 720 , 120}, {1280, 600 , 120}, {1152, 864 , 120}, {1024, 768 , 120},
+  {800 , 600 , 120}, {640 , 480 , 120}
+};
+
+static const BYTE EDID[] =
+{
+  0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x30,0xE8,0x34,0x12,0xC9,0x07,0xCC,0x00,
+  0x01,0x21,0x01,0x04,0xA5,0x3C,0x22,0x78,0xFB,0x6C,0xE5,0xA5,0x55,0x50,0xA0,0x23,
+  0x0B,0x50,0x54,0x00,0x02,0x00,0xD1,0xC0,0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
+  0x01,0x01,0x01,0x01,0x01,0x01,0x58,0xE3,0x00,0xA0,0xA0,0xA0,0x29,0x50,0x30,0x20,
+  0x35,0x00,0x55,0x50,0x21,0x00,0x00,0x1A,0x00,0x00,0x00,0xFF,0x00,0x4C,0x6F,0x6F,
+  0x6B,0x69,0x6E,0x67,0x47,0x6C,0x61,0x73,0x73,0x0A,0x00,0x00,0x00,0xFC,0x00,0x4C,
+  0x6F,0x6F,0x6B,0x69,0x6E,0x67,0x20,0x47,0x6C,0x61,0x73,0x73,0x00,0x00,0x00,0xFD,
+  0x00,0x28,0x9B,0xFA,0xFA,0x40,0x01,0x0A,0x20,0x20,0x20,0x20,0x20,0x20,0x00,0x4A
+};
+
+const DWORD DefaultPreferredDisplayMode = 19;
+
+void CIndirectDeviceContext::PopulateDefaultModes(bool setDefaultMode)
+{
+  m_displayModes.reserve(m_displayModes.size() +
+    ARRAYSIZE(DefaultDisplayModes));
+
+  for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
+  {
+    DisplayMode m;
+    m.width     = DefaultDisplayModes[i][0];
+    m.height    = DefaultDisplayModes[i][1];
+    m.refresh   = DefaultDisplayModes[i][2];
+    m.preferred = setDefaultMode && (i == DefaultPreferredDisplayMode);
+    m_displayModes.push_back(m);
+  }
+}
+
 void CIndirectDeviceContext::InitAdapter()
 {
   if (!m_ivshmem.Init() || !m_ivshmem.Open())
     return;
+
+  m_displayModes.clear();
+  PopulateDefaultModes(true);
 
   IDDCX_ADAPTER_CAPS caps = {};
   caps.Size = sizeof(caps);
@@ -114,29 +161,9 @@ void CIndirectDeviceContext::InitAdapter()
   }
   factory->Release();
 
-  // setup some default display modes
-  DisplayMode m;
-  m.refresh = 120;
-
-  m.width = 800 ; m.height = 600 ; m.preferred = false; m_displayModes.push_back(m);
-  m.width = 1024; m.height = 768 ; m.preferred = false; m_displayModes.push_back(m);
-  m.width = 1920; m.height = 1200; m.preferred = true ; m_displayModes.push_back(m);
-
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;  
 }
-
-static const BYTE EDID[] =
-{
-  0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x30,0xE8,0x34,0x12,0xC9,0x07,0xCC,0x00,
-  0x01,0x21,0x01,0x04,0xA5,0x3C,0x22,0x78,0xFB,0x6C,0xE5,0xA5,0x55,0x50,0xA0,0x23,
-  0x0B,0x50,0x54,0x00,0x02,0x00,0xD1,0xC0,0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
-  0x01,0x01,0x01,0x01,0x01,0x01,0x58,0xE3,0x00,0xA0,0xA0,0xA0,0x29,0x50,0x30,0x20,
-  0x35,0x00,0x55,0x50,0x21,0x00,0x00,0x1A,0x00,0x00,0x00,0xFF,0x00,0x4C,0x6F,0x6F,
-  0x6B,0x69,0x6E,0x67,0x47,0x6C,0x61,0x73,0x73,0x0A,0x00,0x00,0x00,0xFC,0x00,0x4C,
-  0x6F,0x6F,0x6B,0x69,0x6E,0x67,0x20,0x47,0x6C,0x61,0x73,0x73,0x00,0x00,0x00,0xFD,
-  0x00,0x28,0x9B,0xFA,0xFA,0x40,0x01,0x0A,0x20,0x20,0x20,0x20,0x20,0x20,0x00,0x4A
-};
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 {
@@ -210,7 +237,16 @@ void CIndirectDeviceContext::ReplugMonitor()
   }
 }
 
-void CIndirectDeviceContext::UnassignSwapChain()
+void CIndirectDeviceContext::OnAssignSwapChain()
+{
+  if (m_setCustomMode)
+  {
+    m_setCustomMode = false;
+    g_pipe.SetDisplayMode(m_customMode.width, m_customMode.height);
+  }
+}
+
+void CIndirectDeviceContext::OnUnassignedSwapChain()
 {
   if (m_replugMonitor)
   {
@@ -298,6 +334,89 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes(
   }
 
   return STATUS_SUCCESS;
+}
+
+void CIndirectDeviceContext::SetResolution(int width, int height)
+{
+  m_displayModes.clear();
+  m_customMode.width     = width;
+  m_customMode.height    = height;
+  m_customMode.refresh   = 120;
+  m_customMode.preferred = true;
+  m_displayModes.push_back(m_customMode);
+  PopulateDefaultModes(false);
+
+  m_setCustomMode = true;
+
+#if 1
+  ReplugMonitor();
+#else
+
+  if (IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorUpdateModes2))
+  {
+    IDDCX_TARGET_MODE2* modes = (IDDCX_TARGET_MODE2*)_malloca(
+      m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
+
+    if (!modes)
+    {
+      DEBUG_ERROR("Failed to allocate memory for the mode list");
+      return;
+    }
+
+    ZeroMemory(modes, m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
+
+    IDARG_IN_UPDATEMODES2 um = {};
+    um.Reason          = IDDCX_UPDATE_REASON_OTHER;
+    um.TargetModeCount = (UINT)m_displayModes.size();
+    um.pTargetModes    = modes;
+    auto* mode = modes;
+    for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+    {      
+      mode->Size                 = sizeof(IDDCX_TARGET_MODE2);
+      mode->RequiredBandwidth    = (UINT64)(it->width * it->height * it->refresh * 32);
+      mode->BitsPerComponent.Rgb = IDDCX_BITS_PER_COMPONENT_8;
+
+      FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, true);
+    }
+
+    NTSTATUS status = IddCxMonitorUpdateModes2(m_monitor, &um);
+    if (!NT_SUCCESS(status))
+      DEBUG_ERROR("IddCxMonitorUpdateModes2 Failed (0x%08x)", status);
+
+    _freea(modes);
+  }
+  else
+  {
+    IDDCX_TARGET_MODE* modes = (IDDCX_TARGET_MODE*)_malloca(
+      m_displayModes.size() * sizeof(IDDCX_TARGET_MODE));
+
+    if (!modes)
+    {
+      DEBUG_ERROR("Failed to allocate memory for the mode list");
+      return;
+    }
+
+    IDARG_IN_UPDATEMODES um = {};
+    um.Reason          = IDDCX_UPDATE_REASON_OTHER;
+    um.TargetModeCount = (UINT)m_displayModes.size();
+    um.pTargetModes    = modes;
+  
+    auto* mode = modes;
+    for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+    {
+      mode->Size              = sizeof(IDDCX_TARGET_MODE);
+      mode->RequiredBandwidth = (UINT64)(it->width * it->height * it->refresh * 32);
+
+      FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, true);
+    }
+
+    NTSTATUS status = IddCxMonitorUpdateModes(m_monitor, &um);
+    if (!NT_SUCCESS(status))
+      DEBUG_ERROR("IddCxMonitorUpdateModes Failed (0x%08x)", status);
+
+    _freea(modes);
+  }
+#endif
 }
 
 bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
@@ -522,14 +641,7 @@ void CIndirectDeviceContext::LGMPTimer()
       case KVMFR_MESSAGE_WINDOWSIZE:
       {
         KVMFRWindowSize* ws = (KVMFRWindowSize*)msg;
-        m_displayModes.clear();
-        DisplayMode m;
-        m.width     = ws->w;
-        m.height    = ws->h;
-        m.refresh   = 120;
-        m.preferred = true;
-        m_displayModes.push_back(m);
-        ReplugMonitor();
+        SetResolution(ws->w, ws->h);
       }
     }
 

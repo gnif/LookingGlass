@@ -40,7 +40,8 @@ CIndirectMonitorContext::~CIndirectMonitorContext()
 void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
 {
 reInit:
-  m_swapChain.reset();
+  UnassignSwapChain();
+
   m_dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
   if (FAILED(m_dx11Device->Init()))
   {
