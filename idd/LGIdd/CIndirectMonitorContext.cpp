@@ -83,7 +83,7 @@ reInit:
   if (!NT_SUCCESS(status))
   {
     WdfObjectDelete(swapChain);
-    DEBUG_ERROR_HR(status, "IddCxMonitorSetupHardwareCursor Failed");
+    DEBUG_ERROR("IddCxMonitorSetupHardwareCursor Failed (0x%08x)", status);
     return;
   }
 
@@ -140,7 +140,7 @@ void CIndirectMonitorContext::CursorThread()
     NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
     if (FAILED(status))
     {
-      DEBUG_ERROR_HR(status, "IddCxMonitorQueryHardwareCursor failed");
+      DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
       return;
     }
 
