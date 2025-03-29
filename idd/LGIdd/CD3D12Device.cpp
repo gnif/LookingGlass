@@ -74,8 +74,10 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize
       //non-fatal do not exit
     }
     else
+    {
       m_infoQueue->RegisterMessageCallback(
-      _D3D12DebugCallback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, NULL, &m_callbackCookie);
+        _D3D12DebugCallback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, NULL, &m_callbackCookie);
+    }
   }
 
   if (!m_indirectCopy)
