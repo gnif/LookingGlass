@@ -134,8 +134,16 @@ void CSwapChainProcessor::SwapChainThreadCore()
       if (buffer.MetaData.PresentationFrameNumber != lastFrameNumber)
       {
         lastFrameNumber = buffer.MetaData.PresentationFrameNumber;
-        if (!SwapChainNewFrame(buffer.MetaData.pSurface))
+        SwapChainNewFrame(buffer.MetaData.pSurface);
+
+        // report that all GPU processing for this frame has been queued
+        hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
+        if (FAILED(hr))
+        {
+          DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
           break;
+        }
+
       }
     }
     else
@@ -204,6 +212,15 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
     return false;
   }
+
+  auto copyQueue = m_dx12Device->GetCopyQueue();
+  if (!copyQueue)
+  {
+    DEBUG_ERROR("Failed to get a CopyQueue");
+    return false;
+  }
+
+  copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
   
   D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
   srcLoc.pResource        = srcRes->GetRes().Get();
@@ -220,27 +237,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.PlacedFootprint.Footprint.Depth    = 1;
   dstLoc.PlacedFootprint.Footprint.RowPitch = srcRes->GetFormat().Width * 4; //FIXME
 
-  auto copyQueue = m_dx12Device->GetCopyQueue();
-  if (!copyQueue)
-  {
-    DEBUG_ERROR("Failed to get a CopyQueue");
-    return false;
-  }
-
-  copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
-
   srcRes->Sync(*copyQueue);
   copyQueue->GetGfxList()->CopyTextureRegion(
     &dstLoc, 0, 0, 0, &srcLoc, NULL);
   copyQueue->Execute();
-
-  // report that all GPU processing for this frame has been queued
-  hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
-  if (FAILED(hr))
-  {
-    DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
-    return false;
-  }
 
   return true;
 }
