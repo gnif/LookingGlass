@@ -1,7 +1,7 @@
 #include "CD3D12CommandQueue.h"
 #include "CDebug.h"
 
-bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type, const WCHAR* name)
+bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type, const WCHAR* name, CallbackMode callbackMode)
 {
   HRESULT hr;
   D3D12_COMMAND_QUEUE_DESC queueDesc = {};
@@ -54,16 +54,22 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
     return false;
   }
 
-  RegisterWaitForSingleObject(
-    &m_waitHandle,
-    m_event.Get(),
-    [](PVOID param, BOOLEAN timeout){
-      if (!timeout)
-        ((CD3D12CommandQueue*)param)->OnCompletion();
-    },
-    this,
-    INFINITE,
-    WT_EXECUTEINPERSISTENTTHREAD);
+  if (callbackMode != DISABLED)
+  {
+    ULONG flags = (callbackMode == FAST) ?
+      WT_EXECUTEINWAITTHREAD : WT_EXECUTEINPERSISTENTTHREAD;
+  
+    RegisterWaitForSingleObject(
+      &m_waitHandle,
+      m_event.Get(),
+      [](PVOID param, BOOLEAN timeout){
+        if (!timeout)
+          ((CD3D12CommandQueue*)param)->OnCompletion();
+      },
+      this,
+      INFINITE,
+      flags);
+  }
 
   m_name       = name;
   m_fenceValue = 0;
@@ -92,15 +98,18 @@ bool CD3D12CommandQueue::Execute()
   ID3D12CommandList * lists[] = { m_cmdList.Get() };
   m_queue->ExecuteCommandLists(1, lists);
 
-  m_queue->Signal(m_fence.Get(), ++m_fenceValue);
+  m_pending    = true;
+  m_needsReset = true;
+  ++m_fenceValue;
+
+  m_fence->SetEventOnCompletion(m_fenceValue, m_event.Get());
+  m_queue->Signal(m_fence.Get(), m_fenceValue);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to set the fence signal (%ls)", m_name);
     return false;
   }
 
-  m_fence->SetEventOnCompletion(m_fenceValue, m_event.Get());
-  m_pending = true;
   return true;
 }
 
@@ -121,6 +130,9 @@ void CD3D12CommandQueue::Wait()
 
 bool CD3D12CommandQueue::Reset()
 {
+  if (!m_needsReset)
+    return true;
+
   HRESULT hr;
   
   hr = m_allocator->Reset();
@@ -137,6 +149,7 @@ bool CD3D12CommandQueue::Reset()
     return false;
   }
 
+  m_needsReset = false;
   return true;
 }
 

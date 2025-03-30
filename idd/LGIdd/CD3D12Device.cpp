@@ -108,7 +108,8 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize
   }
 
   for(int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
-    if (!m_copyQueue[i].Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy"))
+    if (!m_copyQueue[i].Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy",
+        m_indirectCopy ? CD3D12CommandQueue::NORMAL : CD3D12CommandQueue::FAST))
       return InitResult::FAILURE;
 
   //if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute"))
@@ -176,8 +177,11 @@ CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
     for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
     {
       auto& queue = m_copyQueue[i];
-      if (queue.IsReady())
-        return &queue;
+      if (!queue.IsReady())
+        continue;
+
+      queue.Reset();
+      return &queue;
     }
     Sleep(1);
   }

@@ -54,6 +54,8 @@ private:
   
   void SwapChainThread();
   void SwapChainThreadCore();
+
+  static void CompletionFunction(CD3D12CommandQueue * queue, void * param1, void * param2);
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer);
 
 public:

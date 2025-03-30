@@ -4,7 +4,6 @@
 #include <wdf.h>
 #include <wrl.h>
 #include <d3d12.h>
-#include <functional>
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -25,27 +24,35 @@ class CD3D12CommandQueue
     HandleT<HANDLENullTraits> m_event;
     HANDLE m_waitHandle = INVALID_HANDLE_VALUE;
     UINT64 m_fenceValue = 0;
+    bool m_needsReset = false;
 
-    typedef std::function<void(CD3D12CommandQueue * queue, void * param1, void * param2)> CompletionFunction;
-    CompletionFunction m_completionCallback = nullptr;
-    void * m_completionParams[2];
+    typedef void (*CompletionFunction)(CD3D12CommandQueue * queue, void * param1, void * param2);
+    CompletionFunction   m_completionCallback = nullptr;
+    void               * m_completionParams[2];
 
-    bool Reset();
     void OnCompletion()
     {
-      Reset();
-      m_pending = false;
       if (m_completionCallback)
         m_completionCallback(
           this,
           m_completionParams[0],
           m_completionParams[1]);
+      m_pending = false;
     }
 
   public:
     ~CD3D12CommandQueue() { DeInit(); }
 
-    bool Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type, const WCHAR * name);
+    enum CallbackMode
+    {
+      DISABLED, // no callbacks
+      FAST,     // callback is expected to return almost immediately
+      NORMAL    // normal callback
+    };
+
+    bool Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type, const WCHAR * name,
+      CallbackMode callbackMode = DISABLED);
+
     void DeInit();
 
     void SetCompletionCallback(CompletionFunction fn, void * param1, void * param2)
@@ -55,10 +62,11 @@ class CD3D12CommandQueue
       m_completionParams[1] = param2;
     }
 
+    bool Reset();
     bool Execute();
 
     //void Wait();
-    bool IsReady() { return !m_pending; }
+    bool   IsReady () { return !m_pending; }
     HANDLE GetEvent() { return m_event.Get(); }
 
     ComPtr<ID3D12CommandQueue       > GetCmdQueue() { return m_queue;   }

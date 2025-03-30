@@ -145,6 +145,21 @@ void CSwapChainProcessor::SwapChainThreadCore()
   }
 }
 
+void CSwapChainProcessor::CompletionFunction(CD3D12CommandQueue * queue, void * param1, void * param2)
+{
+  UNREFERENCED_PARAMETER(queue);
+
+  auto sc    = (CSwapChainProcessor *)param1;
+  auto fbRes = (CFrameBufferResource*)param2;
+
+  if (sc->m_dx12Device->IsIndirectCopy())
+    sc->m_devContext->WriteFrameBuffer(
+      fbRes->GetFrameIndex(),
+      fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
+  else
+    sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+}
+
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer)
 {
   ComPtr<ID3D11Texture2D> texture;  
@@ -212,23 +227,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  copyQueue->SetCompletionCallback(
-    [](CD3D12CommandQueue * copyQueue, void * param1, void * param2)
-    {
-      UNREFERENCED_PARAMETER(copyQueue);
-
-      auto sc    = (CSwapChainProcessor  *)param1;
-      auto fbRes = (CFrameBufferResource *)param2;
-
-      if (sc->m_dx12Device->IsIndirectCopy())
-        sc->m_devContext->WriteFrameBuffer(
-          fbRes->GetFrameIndex(),
-          fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
-      else
-        sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-    },
-    this,
-    fbRes);
+  copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
 
   srcRes->Sync(*copyQueue);
   copyQueue->GetGfxList()->CopyTextureRegion(
