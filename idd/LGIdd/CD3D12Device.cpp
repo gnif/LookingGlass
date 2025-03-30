@@ -171,21 +171,17 @@ bool CD3D12Device::HeapTest()
 
 CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
 {
-  HANDLE waitOn[ARRAYSIZE(m_copyQueue)];
-
-  for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
+  for(int c = 0; c < 100; ++c)
   {
-    auto& queue = m_copyQueue[i];
-    if (queue.IsReady())
-      return &queue;
-
-    waitOn[i] = queue.GetEvent();
+    for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
+    {
+      auto& queue = m_copyQueue[i];
+      if (queue.IsReady())
+        return &queue;
+    }
+    Sleep(1);
   }
 
-  DEBUG_TRACE("Wait");
-  DWORD ready = WaitForMultipleObjects(ARRAYSIZE(waitOn), waitOn, FALSE, INFINITE);
-  if (ready < ARRAYSIZE(waitOn))
-    return &m_copyQueue[ready];
-
+  DEBUG_ERROR("Failed to get a copy queue");
   return nullptr;
 }
