@@ -33,7 +33,7 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
   }
   m_gfxList->SetName(name);
 
-  m_cmdList = m_gfxList;  
+  m_cmdList = m_gfxList;
   if (!m_cmdList)
   {
     DEBUG_ERROR_HR(hr, "Failed to get the CommandList (%ls)", name);
@@ -58,13 +58,15 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
   {
     ULONG flags = (callbackMode == FAST) ?
       WT_EXECUTEINWAITTHREAD : WT_EXECUTEINPERSISTENTTHREAD;
-  
+
     RegisterWaitForSingleObject(
       &m_waitHandle,
       m_event.Get(),
       [](PVOID param, BOOLEAN timeout){
-        if (!timeout)
-          ((CD3D12CommandQueue*)param)->OnCompletion();
+        CD3D12CommandQueue * queue = (CD3D12CommandQueue*)param;
+        if (timeout)
+          queue->m_completionResult = false;
+        queue->OnCompletion();
       },
       this,
       INFINITE,
@@ -88,28 +90,35 @@ void CD3D12CommandQueue::DeInit()
 
 bool CD3D12CommandQueue::Execute()
 {
+  m_needsReset       = true;
+  m_completionResult = true;
+
   HRESULT hr = m_gfxList->Close();
   if (FAILED(hr))
   {
+    m_completionResult = false;
+    SetEvent(m_event.Get());
+
     DEBUG_ERROR_HR(hr, "Failed to close the command list (%ls)", m_name);
     return false;
   }
 
   ID3D12CommandList * lists[] = { m_cmdList.Get() };
   m_queue->ExecuteCommandLists(1, lists);
-
-  m_pending    = true;
-  m_needsReset = true;
   ++m_fenceValue;
 
-  m_fence->SetEventOnCompletion(m_fenceValue, m_event.Get());
-  m_queue->Signal(m_fence.Get(), m_fenceValue);
+  hr = m_fence->SetEventOnCompletion(m_fenceValue, m_event.Get());
   if (FAILED(hr))
   {
+    m_completionResult = false;
+    SetEvent(m_event.Get());
+
     DEBUG_ERROR_HR(hr, "Failed to set the fence signal (%ls)", m_name);
     return false;
   }
 
+  m_pending = true;
+  m_queue->Signal(m_fence.Get(), m_fenceValue);
   return true;
 }
 
@@ -134,7 +143,7 @@ bool CD3D12CommandQueue::Reset()
     return true;
 
   HRESULT hr;
-  
+
   hr = m_allocator->Reset();
   if (FAILED(hr))
   {
@@ -152,5 +161,3 @@ bool CD3D12CommandQueue::Reset()
   m_needsReset = false;
   return true;
 }
-
-

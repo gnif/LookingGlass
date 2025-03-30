@@ -71,7 +71,7 @@ void CSwapChainProcessor::SwapChainThread()
 }
 
 void CSwapChainProcessor::SwapChainThreadCore()
-{  
+{
   ComPtr<IDXGIDevice> dxgiDevice;
   HRESULT hr = m_dx11Device->GetDevice().As(&dxgiDevice);
   if (FAILED(hr))
@@ -153,12 +153,20 @@ void CSwapChainProcessor::SwapChainThreadCore()
   }
 }
 
-void CSwapChainProcessor::CompletionFunction(CD3D12CommandQueue * queue, void * param1, void * param2)
+void CSwapChainProcessor::CompletionFunction(
+  CD3D12CommandQueue * queue, bool result, void * param1, void * param2)
 {
   UNREFERENCED_PARAMETER(queue);
 
   auto sc    = (CSwapChainProcessor *)param1;
   auto fbRes = (CFrameBufferResource*)param2;
+
+  // fail gracefully
+  if (!result)
+  {
+    sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+    return;
+  }
 
   if (sc->m_dx12Device->IsIndirectCopy())
     sc->m_devContext->WriteFrameBuffer(
@@ -170,7 +178,7 @@ void CSwapChainProcessor::CompletionFunction(CD3D12CommandQueue * queue, void * 
 
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer)
 {
-  ComPtr<ID3D11Texture2D> texture;  
+  ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
   if (FAILED(hr))
   {
@@ -221,7 +229,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   }
 
   copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
-  
+
   D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
   srcLoc.pResource        = srcRes->GetRes().Get();
   srcLoc.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;

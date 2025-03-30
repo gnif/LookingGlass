@@ -26,15 +26,19 @@ class CD3D12CommandQueue
     UINT64 m_fenceValue = 0;
     bool m_needsReset = false;
 
-    typedef void (*CompletionFunction)(CD3D12CommandQueue * queue, void * param1, void * param2);
+    typedef void (*CompletionFunction)(CD3D12CommandQueue * queue,
+      bool result, void * param1, void * param2);
+
     CompletionFunction   m_completionCallback = nullptr;
     void               * m_completionParams[2];
+    bool                 m_completionResult = true;
 
     void OnCompletion()
     {
       if (m_completionCallback)
         m_completionCallback(
           this,
+          m_completionResult,
           m_completionParams[0],
           m_completionParams[1]);
       m_pending = false;
