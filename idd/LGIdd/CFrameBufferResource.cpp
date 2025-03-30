@@ -2,8 +2,10 @@
 #include "CSwapChainProcessor.h"
 #include "CDebug.h"
 
-bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, uint8_t * base, size_t size)
+bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size)
 {
+  m_frameIndex = frameIndex;
+
   if (size > swapChain->GetDevice()->GetMaxFrameSize())
   {
     DEBUG_ERROR("Frame size of %lu is too large to fit in available shared ram");

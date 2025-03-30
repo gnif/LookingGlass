@@ -107,8 +107,9 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize
     DEBUG_INFO("Using IVSHMEM as a D3D12Heap");
   }
 
-  if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy"))
-    return InitResult::FAILURE;
+  for(int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
+    if (!m_copyQueue[i].Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy"))
+      return InitResult::FAILURE;
 
   //if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute"))
     //return InitResult::FAILURE;
@@ -166,4 +167,25 @@ bool CD3D12Device::HeapTest()
   }
 
   return true;
+}
+
+CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
+{
+  HANDLE waitOn[ARRAYSIZE(m_copyQueue)];
+
+  for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
+  {
+    auto& queue = m_copyQueue[i];
+    if (queue.IsReady())
+      return &queue;
+
+    waitOn[i] = queue.GetEvent();
+  }
+
+  DEBUG_TRACE("Wait");
+  DWORD ready = WaitForMultipleObjects(ARRAYSIZE(waitOn), waitOn, FALSE, INFINITE);
+  if (ready < ARRAYSIZE(waitOn))
+    return &m_copyQueue[ready];
+
+  return nullptr;
 }

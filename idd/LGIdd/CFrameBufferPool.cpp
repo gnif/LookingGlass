@@ -25,7 +25,7 @@ CFrameBufferResource * CFrameBufferPool::Get(
   if (!fbr->IsValid() || fbr->GetBase() != buffer.mem || fbr->GetSize() < minSize)
   {
     fbr->Reset();
-    if (!fbr->Init(m_swapChain, buffer.mem, minSize))
+    if (!fbr->Init(m_swapChain, buffer.frameIndex, buffer.mem, minSize))
       return nullptr;
   }
 

@@ -29,7 +29,7 @@ struct CD3D12Device
     ComPtr<ID3D12Device3> m_device;
     ComPtr<ID3D12Heap   > m_ivshmemHeap;
 
-    CD3D12CommandQueue m_copyQueue;
+    CD3D12CommandQueue m_copyQueue[2];
     CD3D12CommandQueue m_computeQueue;
 
     bool HeapTest();
@@ -52,6 +52,6 @@ struct CD3D12Device
     ComPtr<ID3D12Heap   > GetHeap() { return m_ivshmemHeap; }
     bool IsIndirectCopy() { return m_indirectCopy; }
 
-    CD3D12CommandQueue& GetCopyQueue() { return m_copyQueue; }
-    CD3D12CommandQueue& GetComputeQueue() { return m_computeQueue; }
+    CD3D12CommandQueue * GetCopyQueue();
+    CD3D12CommandQueue & GetComputeQueue() { return m_computeQueue; }
 };

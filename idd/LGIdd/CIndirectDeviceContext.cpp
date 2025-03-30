@@ -737,9 +737,9 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   return result;
 }
 
-void CIndirectDeviceContext::WriteFrameBuffer(void* src, size_t offset, size_t len, bool setWritePos)
+void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos)
 {
-  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[frameIndex]);
   FrameBuffer * fb = (FrameBuffer*)(((uint8_t*)fi) + fi->offset);
 
   memcpy(
@@ -751,9 +751,9 @@ void CIndirectDeviceContext::WriteFrameBuffer(void* src, size_t offset, size_t l
     fb->wp = (uint32_t)(offset + len);
 }
 
-void CIndirectDeviceContext::FinalizeFrameBuffer()
+void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex)
 {
-  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[frameIndex]);
   FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
   fb->wp = m_height * m_pitch;
 }

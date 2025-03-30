@@ -54,10 +54,30 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE ty
     return false;
   }
 
+  RegisterWaitForSingleObject(
+    &m_waitHandle,
+    m_event.Get(),
+    [](PVOID param, BOOLEAN timeout){
+      if (!timeout)
+        ((CD3D12CommandQueue*)param)->OnCompletion();
+    },
+    this,
+    INFINITE,
+    WT_EXECUTEINPERSISTENTTHREAD);
+
   m_name       = name;
   m_fenceValue = 0;
   DEBUG_INFO("Created CD3D12CommandQueue(%ls)", name);
   return true;
+}
+
+void CD3D12CommandQueue::DeInit()
+{
+  if (m_waitHandle != INVALID_HANDLE_VALUE)
+  {
+    UnregisterWait(m_waitHandle);
+    m_waitHandle = INVALID_HANDLE_VALUE;
+  }
 }
 
 bool CD3D12CommandQueue::Execute()
@@ -79,17 +99,25 @@ bool CD3D12CommandQueue::Execute()
     return false;
   }
 
+  m_fence->SetEventOnCompletion(m_fenceValue, m_event.Get());
+  m_pending = true;
   return true;
 }
 
+#if 0
 void CD3D12CommandQueue::Wait()
 {
   if (m_fence->GetCompletedValue() >= m_fenceValue)
+  {
+    m_pending = false;
     return;
+  }
 
   m_fence->SetEventOnCompletion(m_fenceValue, m_event.Get());
   WaitForSingleObject(m_event.Get(), INFINITE);
+  m_pending = false;
 }
+#endif
 
 bool CD3D12CommandQueue::Reset()
 {

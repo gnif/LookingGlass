@@ -205,11 +205,35 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.PlacedFootprint.Footprint.Depth    = 1;
   dstLoc.PlacedFootprint.Footprint.RowPitch = srcRes->GetFormat().Width * 4; //FIXME
 
-  srcRes->Sync(m_dx12Device->GetCopyQueue());
-  m_dx12Device->GetCopyQueue().GetGfxList()->CopyTextureRegion(
-    &dstLoc, 0, 0, 0, &srcLoc, NULL);
+  auto copyQueue = m_dx12Device->GetCopyQueue();
+  if (!copyQueue)
+  {
+    DEBUG_ERROR("Failed to get a CopyQueue");
+    return false;
+  }
 
-  m_dx12Device->GetCopyQueue().Execute();
+  copyQueue->SetCompletionCallback(
+    [](CD3D12CommandQueue * copyQueue, void * param1, void * param2)
+    {
+      UNREFERENCED_PARAMETER(copyQueue);
+
+      auto sc    = (CSwapChainProcessor  *)param1;
+      auto fbRes = (CFrameBufferResource *)param2;
+
+      if (sc->m_dx12Device->IsIndirectCopy())
+        sc->m_devContext->WriteFrameBuffer(
+          fbRes->GetFrameIndex(),
+          fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
+      else
+        sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+    },
+    this,
+    fbRes);
+
+  srcRes->Sync(*copyQueue);
+  copyQueue->GetGfxList()->CopyTextureRegion(
+    &dstLoc, 0, 0, 0, &srcLoc, NULL);
+  copyQueue->Execute();
 
   // report that all GPU processing for this frame has been queued
   hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -218,17 +242,6 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
     return false;
   }
-
-  // wait for the completion
-  m_dx12Device->GetCopyQueue().Wait();
-  m_dx12Device->GetCopyQueue().Reset();
-
-  // copy/finialize
-  if (m_dx12Device->IsIndirectCopy())
-    m_devContext->WriteFrameBuffer(
-      fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
-  else
-    m_devContext->FinalizeFrameBuffer();
 
   return true;
 }
