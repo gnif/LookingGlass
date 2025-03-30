@@ -175,14 +175,17 @@ CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
   // try for up to a maximum of 100ms to find a free copy queue
   for (int c = 0; c < 100; ++c)
   {
-    auto& queue = m_copyQueue[m_copyQueueIndex++];
-    if (m_copyQueueIndex == ARRAYSIZE(m_copyQueue))
-      m_copyQueueIndex = 0;
-
-    if (queue.IsReady())
+    for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
     {
-      queue.Reset();
-      return &queue;
+      auto& queue = m_copyQueue[m_copyQueueIndex++];
+      if (m_copyQueueIndex == ARRAYSIZE(m_copyQueue))
+        m_copyQueueIndex = 0;
+
+      if (queue.IsReady())
+      {
+        queue.Reset();
+        return &queue;
+      }
     }
     Sleep(1);
   }
