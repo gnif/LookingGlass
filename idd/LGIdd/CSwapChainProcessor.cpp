@@ -248,14 +248,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcLoc.SubresourceIndex = 0;
 
   D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-  dstLoc.pResource                          = fbRes->Get().Get();
-  dstLoc.Type                               = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  dstLoc.PlacedFootprint.Offset             = 0;
-  dstLoc.PlacedFootprint.Footprint.Format   = desc.Format;
-  dstLoc.PlacedFootprint.Footprint.Width    = (UINT)desc.Width;
-  dstLoc.PlacedFootprint.Footprint.Height   = (UINT)desc.Height;
-  dstLoc.PlacedFootprint.Footprint.Depth    = 1;
-  dstLoc.PlacedFootprint.Footprint.RowPitch = layout.Footprint.RowPitch;
+  dstLoc.pResource       = fbRes->Get().Get();
+  dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dstLoc.PlacedFootprint = layout;
 
   srcRes->Sync(*copyQueue);
   copyQueue->GetGfxList()->CopyTextureRegion(

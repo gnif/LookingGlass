@@ -547,12 +547,23 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   DEBUG_INFO("Max Frame Size: %u MiB", (unsigned int)(m_maxFrameSize / 1048576LL));
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
     if ((status = lgmpHostMemAllocAligned(m_lgmp, (uint32_t)m_maxFrameSize,
         (uint32_t)m_alignSize, &m_frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAllocAligned Failed (Frame): %s", lgmpStatusString(status));
       return false;
     }
+
+    m_frame[i] = (KVMFRFrame *)lgmpHostMemPtr(m_frameMemory[i]);
+
+    /**
+     * put the framebuffer on the border of the next page, this is to allow for
+     * aligned DMA tranfers by the reciever */
+    const size_t alignOffset = alignSize - sizeof(FrameBuffer);
+    m_frame[i]->offset = (uint32_t)alignOffset;
+    m_frameBuffer[i] = (FrameBuffer*)(((uint8_t*)m_frame[i]) + alignOffset);
+  }
 
   WDF_TIMER_CONFIG config;
   WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
@@ -658,16 +669,6 @@ void CIndirectDeviceContext::LGMPTimer()
     ResendCursor();
 }
 
-//FIXME: this should not really be done here, this is a hack
-#pragma warning(push)
-#pragma warning(disable: 4200)
-struct FrameBuffer
-{
-  volatile uint32_t wp;
-  uint8_t data[0];
-};
-#pragma warning(pop)
-
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(int width, int height, int pitch, DXGI_FORMAT format)
 {
   PreparedFrameBuffer result = {};
@@ -687,7 +688,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   if (++m_frameIndex == LGMP_Q_FRAME_LEN)
     m_frameIndex = 0;
 
-  KVMFRFrame * fi = (KVMFRFrame *)lgmpHostMemPtr(m_frameMemory[m_frameIndex]);
+  KVMFRFrame * fi = m_frame[m_frameIndex];
 
   // wait until there is room in the queue
   while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
@@ -710,22 +711,22 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
       return result;
   }
 
-  fi->formatVer    = m_formatVer;
-  fi->frameSerial  = m_frameSerial++;
-  fi->screenWidth  = width;
-  fi->screenHeight = height;
-  fi->dataWidth    = width;
-  fi->dataHeight   = height;
-  fi->frameWidth   = width;
-  fi->frameHeight  = height;
-  fi->stride       = width * bpp;
-  fi->pitch        = pitch;
-  fi->offset       = (uint32_t)(m_alignSize - sizeof(FrameBuffer));
-  fi->flags        = 0;
-  fi->rotation     = FRAME_ROT_0;
+  fi->formatVer        = m_formatVer;
+  fi->frameSerial      = m_frameSerial++;
+  fi->screenWidth      = width;
+  fi->screenHeight     = height;
+  fi->dataWidth        = width;
+  fi->dataHeight       = height;
+  fi->frameWidth       = width;
+  fi->frameHeight      = height;
+  fi->stride           = width * bpp;
+  fi->pitch            = pitch;
+  // fi->offset is initialized at startup
+  fi->flags            = 0;
+  fi->rotation         = FRAME_ROT_0;
   fi->damageRectsCount = 0;
 
-  FrameBuffer* fb = (FrameBuffer*)(((uint8_t*)fi) + fi->offset);
+  FrameBuffer* fb = m_frameBuffer[m_frameIndex];  
   fb->wp = 0;
 
   lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
@@ -739,8 +740,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
 
 void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos)
 {
-  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[frameIndex]);
-  FrameBuffer * fb = (FrameBuffer*)(((uint8_t*)fi) + fi->offset);
+  FrameBuffer * fb = m_frameBuffer[frameIndex];
 
   memcpy(
     (void *)((uintptr_t)fb->data + offset),
@@ -753,8 +753,7 @@ void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, si
 
 void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex)
 {
-  KVMFRFrame  * fi = (KVMFRFrame*)lgmpHostMemPtr(m_frameMemory[frameIndex]);
-  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)fi) + fi->offset);
+  FrameBuffer * fb = m_frameBuffer[frameIndex];
   fb->wp = m_height * m_pitch;
 }
 

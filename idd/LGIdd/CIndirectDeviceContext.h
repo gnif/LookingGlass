@@ -35,6 +35,16 @@ extern "C" {
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (512 * 512 * 4))
 #define POINTER_SHAPE_BUFFERS 3
 
+//FIXME: this should not really be done here, this is a hack
+#pragma warning(push)
+#pragma warning(disable: 4200)
+struct FrameBuffer
+{
+  volatile uint32_t wp;
+  uint8_t data[0];
+};
+#pragma warning(pop)
+
 class CIndirectDeviceContext
 {
 private:
@@ -64,6 +74,8 @@ private:
   uint32_t       m_formatVer    = 0;
   uint32_t       m_frameSerial  = 0;
   PLGMPMemory    m_frameMemory[LGMP_Q_FRAME_LEN] = {};
+  KVMFRFrame   * m_frame      [LGMP_Q_FRAME_LEN] = {};
+  FrameBuffer  * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
 
   int         m_width    = 0;
   int         m_height   = 0;
