@@ -203,17 +203,29 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   //FIXME: handle dirty rects
   srcRes->SetFullDamage();
 
+  D3D12_RESOURCE_DESC desc = srcRes->GetRes()->GetDesc();
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
+  m_dx12Device->GetDevice()->GetCopyableFootprints(
+    &desc,
+    0,
+    1,
+    0,
+    &layout,
+    NULL, 
+    NULL,
+    NULL);
+
   auto buffer = m_devContext->PrepareFrameBuffer(
-    srcRes->GetFormat().Width,
-    srcRes->GetFormat().Height,
-    srcRes->GetFormat().Width * 4,
-    srcRes->GetFormat().Format);
+    (int)desc.Width,
+    (int)desc.Height,
+    (int)layout.Footprint.RowPitch,
+    desc.Format);
 
   if (!buffer.mem)
     return false;
 
   CFrameBufferResource * fbRes = m_fbPool.Get(buffer,
-    ((size_t)srcRes->GetFormat().Width * 4) * srcRes->GetFormat().Height);
+    (size_t)layout.Footprint.RowPitch * desc.Height);
 
   if (!fbRes)
   {
@@ -239,11 +251,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.pResource                          = fbRes->Get().Get();
   dstLoc.Type                               = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dstLoc.PlacedFootprint.Offset             = 0;
-  dstLoc.PlacedFootprint.Footprint.Format   = srcRes->GetFormat().Format;
-  dstLoc.PlacedFootprint.Footprint.Width    = srcRes->GetFormat().Width;
-  dstLoc.PlacedFootprint.Footprint.Height   = srcRes->GetFormat().Height;
+  dstLoc.PlacedFootprint.Footprint.Format   = desc.Format;
+  dstLoc.PlacedFootprint.Footprint.Width    = (UINT)desc.Width;
+  dstLoc.PlacedFootprint.Footprint.Height   = (UINT)desc.Height;
   dstLoc.PlacedFootprint.Footprint.Depth    = 1;
-  dstLoc.PlacedFootprint.Footprint.RowPitch = srcRes->GetFormat().Width * 4; //FIXME
+  dstLoc.PlacedFootprint.Footprint.RowPitch = layout.Footprint.RowPitch;
 
   srcRes->Sync(*copyQueue);
   copyQueue->GetGfxList()->CopyTextureRegion(
