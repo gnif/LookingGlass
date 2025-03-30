@@ -29,7 +29,8 @@ struct CD3D12Device
     ComPtr<ID3D12Device3> m_device;
     ComPtr<ID3D12Heap   > m_ivshmemHeap;
 
-    CD3D12CommandQueue m_copyQueue[2];
+    CD3D12CommandQueue m_copyQueue[4];
+    unsigned           m_copyQueueIndex = 0;
     CD3D12CommandQueue m_computeQueue;
 
     bool HeapTest();
