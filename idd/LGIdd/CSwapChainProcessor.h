@@ -51,11 +51,12 @@ private:
   Wrappers::Event m_terminateEvent;
 
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
-  
+
   void SwapChainThread();
   void SwapChainThreadCore();
 
-  static void CompletionFunction(CD3D12CommandQueue * queue, void * param1, void * param2);
+  static void CompletionFunction(
+    CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer);
 
 public:
