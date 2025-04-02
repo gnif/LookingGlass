@@ -195,11 +195,14 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
   if (!g_state.pointerQueue)
     return;
 
+  if (g_state.srcSize.x == width && g_state.srcSize.y == height)
+    return;
+
   const KVMFRWindowSize msg =
   {
     .msg.type = KVMFR_MESSAGE_WINDOWSIZE,
-    .w        = g_state.windowW,
-    .h        = g_state.windowH
+    .w        = width,
+    .h        = height
   };
 
   uint32_t serial;
