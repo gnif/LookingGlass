@@ -42,7 +42,7 @@ struct ll
 
 struct ll *  ll_new(void);
 void         ll_free        (struct ll * list);
-void         ll_push        (struct ll * list, void * data);
+bool         ll_push        (struct ll * list, void * data);
 bool         ll_shift       (struct ll * list, void ** data);
 bool         ll_shift_nl    (struct ll * list, void ** data);
 bool         ll_peek_head   (struct ll * list, void ** data);

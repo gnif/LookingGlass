@@ -48,13 +48,13 @@ void ll_free(struct ll * list)
   free(list);
 }
 
-void ll_push(struct ll * list, void * data)
+bool ll_push(struct ll * list, void * data)
 {
   struct ll_item * item = malloc(sizeof(*item));
   if (!item)
   {
     DEBUG_ERROR("out of memory");
-    return;
+    return false;
   }
 
   item->data = data;
@@ -69,7 +69,7 @@ void ll_push(struct ll * list, void * data)
     list->head = item;
     list->tail = item;
     LG_UNLOCK(list->lock);
-    return;
+    return true;
   }
 
   item->prev = list->tail;
@@ -78,6 +78,7 @@ void ll_push(struct ll * list, void * data)
   list->tail       = item;
 
   LG_UNLOCK(list->lock);
+  return true;
 }
 
 bool ll_shift(struct ll * list, void ** data)
