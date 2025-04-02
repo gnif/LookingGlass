@@ -105,8 +105,8 @@ void lgMessage_process(void)
         continue;
       }
 
-      case LG_MSG_VIDEO:
       default:
+        DEBUG_ERROR("Unhandled %d", event->msg.type);
         break;
     }
 
