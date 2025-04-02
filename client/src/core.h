@@ -29,6 +29,7 @@ void core_setCursorInView(bool enable);
 void core_setGrab(bool enable);
 void core_setGrabQuiet(bool enable);
 bool core_warpPointer(int x, int y, bool exiting);
+void core_onWindowSizeChanged(unsigned width, unsigned height);
 void core_updatePositionInfo(void);
 void core_alignToGuest(void);
 bool core_isValidPointerPos(int x, int y);

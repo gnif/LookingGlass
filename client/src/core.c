@@ -23,6 +23,8 @@
 #include "app.h"
 #include "util.h"
 #include "kb.h"
+#include "message.h"
+#include "message.h"
 
 #include "common/time.h"
 #include "common/debug.h"
@@ -188,29 +190,39 @@ bool core_warpPointer(int x, int y, bool exiting)
   return true;
 }
 
+void core_onWindowSizeChanged(unsigned width, unsigned height)
+{
+  if (!g_state.pointerQueue)
+    return;
+
+  const KVMFRWindowSize msg =
+  {
+    .msg.type = KVMFR_MESSAGE_WINDOWSIZE,
+    .w        = g_state.windowW,
+    .h        = g_state.windowH
+  };
+
+  uint32_t serial;
+  LGMP_STATUS status;
+  if ((status = lgmpClientSendData(g_state.pointerQueue,
+        &msg, sizeof(msg), &serial)) != LGMP_OK)
+    DEBUG_WARN("Message send failed: %s", lgmpStatusString(status));
+}
+
 void core_updatePositionInfo(void)
 {
-  if (g_state.pointerQueue &&
-      g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE)
+  if (g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE)
   {
-    static unsigned lastW = 0, lastH = 0;
-    if (lastW != g_state.windowW || lastH != g_state.windowH)
+    LGMsg msg =
     {
-      lastW = g_state.windowW;
-      lastH = g_state.windowH;
-
-      const KVMFRWindowSize msg = {
-        .msg.type = KVMFR_MESSAGE_WINDOWSIZE,
-        .w        = g_state.windowW,
-        .h        = g_state.windowH
-      };
-
-      uint32_t serial;
-      LGMP_STATUS status;
-      if ((status = lgmpClientSendData(g_state.pointerQueue,
-            &msg, sizeof(msg), &serial)) != LGMP_OK)
-        DEBUG_WARN("Message send failed: %s", lgmpStatusString(status));
-    }
+      .type = LG_MSG_WINDOWSIZE,
+      .windowSize =
+      {
+        .width  = g_state.windowW,
+        .height = g_state.windowH
+      }
+    };
+    lgMessage_post(&msg);
   }
 
   if (!g_state.haveSrcSize)

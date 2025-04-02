@@ -113,6 +113,7 @@ set(SOURCES
   src/main.c
   src/core.c
   src/app.c
+  src/message.c
   src/audio.c
   src/config.c
   src/keybind.c

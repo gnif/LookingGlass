@@ -52,6 +52,7 @@
 #include "common/cpuinfo.h"
 #include "common/ll.h"
 
+#include "message.h"
 #include "core.h"
 #include "app.h"
 #include "audio.h"
@@ -1756,6 +1757,7 @@ restart:
       g_state.state = APP_STATE_RESTART;
       break;
     }
+    lgMessage_process();
     g_state.ds->wait(100);
   }
 
@@ -1872,6 +1874,9 @@ int main(int argc, char * argv[])
   egl_dynProcsInit();
   gl_dynProcsInit();
 
+  if (!lgMessage_init())
+    return -1;
+
   g_state.bindings = ll_new();
 
   g_state.overlays = ll_new();
@@ -1902,6 +1907,7 @@ int main(int argc, char * argv[])
 
   const int ret = lg_run();
   lg_shutdown();
+  lgMessage_deinit();
 
   config_free();
 
