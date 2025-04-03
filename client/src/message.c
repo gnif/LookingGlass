@@ -64,6 +64,9 @@ void lgMessage_deinit(void)
 {
   if (this.list)
   {
+    void * tmp;
+    while(ll_shift(this.list, &tmp))
+      free(tmp);
     ll_free(this.list);
     this.list = NULL;
   }
