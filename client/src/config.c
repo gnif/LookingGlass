@@ -222,6 +222,14 @@ static struct Option options[] =
   },
   {
     .module         = "win",
+    .name           = "setGuestRes",
+    .description    = "On window size change, request the guest to match"
+      " resoution (if supported by the guest, currently LG IDD only)",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true,
+  },
+  {
+    .module         = "win",
     .name           = "fpsMin",
     .description    = "Frame rate minimum (0 = disable - not recommended, -1 = auto detect)",
     .shortopt       = 'K',
@@ -717,6 +725,7 @@ bool config_load(int argc, char * argv[])
   g_params.helpMenuDelayUs = option_get_int("input", "helpMenuDelay") * (uint64_t) 1000;
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
+  g_params.setGuestRes         = option_get_bool("win", "setGuestRes"        );
 
   if ((g_params.useSpice = option_get_bool("spice", "enable")))
   {

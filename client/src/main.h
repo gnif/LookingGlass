@@ -172,6 +172,7 @@ struct AppParams
   bool                 center;
   int                  x, y;
   unsigned int         w, h;
+  bool                 setGuestRes;
   int                  fpsMin;
   LG_RendererRotate    winRotate;
   bool                 useSpice;
