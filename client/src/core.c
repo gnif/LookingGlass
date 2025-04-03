@@ -192,7 +192,7 @@ bool core_warpPointer(int x, int y, bool exiting)
 
 void core_onWindowSizeChanged(unsigned width, unsigned height)
 {
-  if (!g_params.setGuestRes || !g_state.pointerQueue)
+  if (!g_state.pointerQueue)
     return;
 
   if (g_state.srcSize.x == width && g_state.srcSize.y == height)
@@ -214,7 +214,7 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
 
 void core_updatePositionInfo(void)
 {
-  if (g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE)
+  if (g_params.setGuestRes && g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE)
   {
     LGMsg msg =
     {

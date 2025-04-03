@@ -25,6 +25,7 @@
 #include "audio.h"
 #include "core.h"
 #include "kb.h"
+#include "message.h"
 
 #include <purespice.h>
 #include <stdio.h>
@@ -125,6 +126,26 @@ static void bind_toggleKey(int sc, void * opaque)
   purespice_keyUp((uintptr_t) opaque);
 }
 
+static void bind_setGuestRes(int sc, void * opaque)
+{
+  if (!(g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE))
+  {
+    app_alert(LG_ALERT_INFO, "The guest doesn't support this feature");
+    return;
+  }
+
+  LGMsg msg =
+  {
+    .type = LG_MSG_WINDOWSIZE,
+    .windowSize =
+    {
+      .width  = g_state.windowW,
+      .height = g_state.windowH
+    }
+  };
+  lgMessage_post(&msg);
+}
+
 void keybind_commonRegister(void)
 {
   app_registerKeybind(0, 'F', bind_fullscreen   , NULL,
@@ -137,6 +158,8 @@ void keybind_commonRegister(void)
       "Quit");
   app_registerKeybind(0, 'O', bind_toggleOverlay, NULL,
       "Toggle overlay");
+  app_registerKeybind(0, '=', bind_setGuestRes, NULL,
+      "Set guest resolution to match window size");
 }
 
 #if ENABLE_AUDIO
