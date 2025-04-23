@@ -205,6 +205,9 @@ bool opengl_create(LG_Renderer ** renderer, const LG_RendererParams params,
   this->opt.preventBuffer = option_get_bool("opengl", "preventBuffer");
   this->opt.amdPinnedMem  = option_get_bool("opengl", "amdPinnedMem" );
 
+  this->scaleX = 1.0f;
+  this->scaleY = 1.0f;
+
   LG_LOCK_INIT(this->formatLock);
   LG_LOCK_INIT(this->frameLock );
   LG_LOCK_INIT(this->mouseLock );
