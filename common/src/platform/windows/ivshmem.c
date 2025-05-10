@@ -81,7 +81,8 @@ bool ivshmemInit(struct IVSHMEM * dev)
   SP_DEVICE_INTERFACE_DATA         devInterfaceData = {0};
   Vector                           devices;
 
-  devInfoSet = SetupDiGetClassDevs(&GUID_DEVINTERFACE_IVSHMEM, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+  devInfoSet = SetupDiGetClassDevs(&GUID_DEVINTERFACE_IVSHMEM, NULL, NULL,
+      DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
   devInfoData.cbSize      = sizeof(SP_DEVINFO_DATA);
   devInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
@@ -96,17 +97,19 @@ bool ivshmemInit(struct IVSHMEM * dev)
     struct IVSHMEMData * device = vector_push(&devices, NULL);
 
     DWORD bus, addr;
-    if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData, SPDRP_BUSNUMBER,
-        NULL, (void*) &bus, sizeof(bus), NULL))
+    if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData,
+          SPDRP_BUSNUMBER, NULL, (void*) &bus, sizeof(bus), NULL))
     {
-      DEBUG_WINERROR("Failed to SetupDiGetDeviceRegistryProperty", GetLastError());
+      DEBUG_WINERROR("Failed to SetupDiGetDeviceRegistryProperty",
+          GetLastError());
       bus = 0xFFFF;
     }
 
-    if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData, SPDRP_ADDRESS,
-        NULL, (void*) &addr, sizeof(addr), NULL))
+    if (!SetupDiGetDeviceRegistryProperty(devInfoSet, &devInfoData,
+          SPDRP_ADDRESS, NULL, (void*) &addr, sizeof(addr), NULL))
     {
-      DEBUG_WINERROR("Failed to SetupDiGetDeviceRegistryProperty", GetLastError());
+      DEBUG_WINERROR("Failed to SetupDiGetDeviceRegistryProperty",
+          GetLastError());
       addr = 0xFFFFFFFF;
     }
 
@@ -121,22 +124,37 @@ bool ivshmemInit(struct IVSHMEM * dev)
     return false;
   }
 
+  if (vector_size(&devices) == 0)
+  {
+    vector_destroy(&devices);
+    DEBUG_ERROR("Failed to find any IVSHMEM devices, unable to continue");
+    DEBUG_ERROR("Did you remember to add the device to your VM "
+        "and is the driver installed?");
+    return false;
+  }
+
   const int shmDevice = option_get_int("os", "shmDevice");
-  qsort(vector_data(&devices), vector_size(&devices), sizeof(struct IVSHMEMData), ivshmemComparator);
+  qsort(vector_data(&devices), vector_size(&devices), sizeof(struct IVSHMEMData),
+      ivshmemComparator);
 
   struct IVSHMEMData * device;
   vector_forEachRefIdx(i, device, &devices)
   {
-    DWORD bus = device->busAddr >> 32;
+    DWORD bus  = device->busAddr >> 32;
     DWORD addr = device->busAddr & 0xFFFFFFFF;
-    DEBUG_INFO("IVSHMEM %" PRIuPTR "%c on bus 0x%lx, device 0x%lx, function 0x%lx", i,
-      i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
+    DEBUG_INFO(
+      "IVSHMEM %" PRIuPTR "%c on bus 0x%lx, device 0x%lx, function 0x%lx",
+      i,
+      i == shmDevice ? '*' : ' ',
+      bus,
+      addr >> 16,
+      addr & 0xFFFF);
   }
 
-  if (!device)
+  if (shmDevice >= vector_size(&devices))
   {
     vector_destroy(&devices);
-    DEBUG_ERROR("Unable to find a IVSHMEM device");
+    DEBUG_ERROR("os:shmDevice %d does not exist", shmDevice);
     return false;
   }
 
@@ -144,14 +162,16 @@ bool ivshmemInit(struct IVSHMEM * dev)
   memcpy(&devInfoData, &device->devInfoData, sizeof(SP_DEVINFO_DATA));
   vector_destroy(&devices);
 
-  if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
+  if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData,
+        &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
   {
     DEBUG_WINERROR("SetupDiEnumDeviceInterfaces failed", GetLastError());
     return false;
   }
 
   DWORD reqSize = 0;
-  SetupDiGetDeviceInterfaceDetail(devInfoSet, &devInterfaceData, NULL, 0, &reqSize, NULL);
+  SetupDiGetDeviceInterfaceDetail(devInfoSet, &devInterfaceData,
+      NULL, 0, &reqSize, NULL);
   if (!reqSize)
   {
     DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
@@ -160,7 +180,8 @@ bool ivshmemInit(struct IVSHMEM * dev)
 
   infData         = calloc(1, reqSize);
   infData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-  if (!SetupDiGetDeviceInterfaceDetail(devInfoSet, &devInterfaceData, infData, reqSize, NULL, NULL))
+  if (!SetupDiGetDeviceInterfaceDetail(devInfoSet, &devInterfaceData, infData,
+        reqSize, NULL, NULL))
   {
     free(infData);
     DEBUG_WINERROR("SetupDiGetDeviceInterfaceDetail", GetLastError());
@@ -195,7 +216,8 @@ bool ivshmemOpen(struct IVSHMEM * dev)
   struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)dev->opaque;
 
   IVSHMEM_SIZE size;
-  if (!DeviceIoControl(info->handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size, sizeof(IVSHMEM_SIZE), NULL, NULL))
+  if (!DeviceIoControl(info->handle, IOCTL_IVSHMEM_REQUEST_SIZE, NULL, 0, &size,
+        sizeof(IVSHMEM_SIZE), NULL, NULL))
   {
     DEBUG_WINERROR("DeviceIoControl Failed", GetLastError());
     return false;
@@ -225,7 +247,8 @@ void ivshmemClose(struct IVSHMEM * dev)
 
   struct IVSHMEMInfo * info = (struct IVSHMEMInfo *)dev->opaque;
 
-  if (!DeviceIoControl(info->handle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL, 0, NULL, NULL))
+  if (!DeviceIoControl(info->handle, IOCTL_IVSHMEM_RELEASE_MMAP, NULL, 0, NULL,
+        0, NULL, NULL))
     DEBUG_WINERROR("DeviceIoControl failed", GetLastError());
 
   dev->size = 0;
