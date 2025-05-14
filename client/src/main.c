@@ -1500,18 +1500,21 @@ restart:
         if (waitCount == 30)
         {
           DEBUG_BREAK();
-          msgs[msgsCount++] = app_msgBox(
-              "Host Application Not Running",
-              "It seems the host application is not running or your\n"
-              "virtual machine is still starting up\n"
-              "\n"
-              "If the the VM is running and booted please check the\n"
-              "host application log for errors. You can find the\n"
-              "log through the shortcut in your start menu\n"
-              "\n"
-              "Continuing to wait...");
+          if (!g_params.disableWaitingMessage) 
+          {
+            msgs[msgsCount++] = app_msgBox(
+                "Host Application Not Running",
+                "It seems the host application is not running or your\n"
+                "virtual machine is still starting up\n"
+                "\n"
+                "If the the VM is running and booted please check the\n"
+                "host application log for errors. You can find the\n"
+                "log through the shortcut in your start menu\n"
+                "\n"
+                "Continuing to wait...");
 
-          msgs[msgsCount++] = showSpiceInputHelp();
+            msgs[msgsCount++] = showSpiceInputHelp();
+          }
 
           DEBUG_INFO("Check the host log in your guest at %%ProgramData%%\\Looking Glass (host)\\looking-glass-host.txt");
           DEBUG_INFO("Continuing to wait...");
