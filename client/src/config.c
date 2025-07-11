@@ -224,7 +224,7 @@ static struct Option options[] =
     .module         = "win",
     .name           = "setGuestRes",
     .description    = "On window size change, request the guest to match"
-      " resoution (if supported by the guest, currently LG IDD only)",
+      " resolution (if supported by the guest, currently LG IDD only)",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },
