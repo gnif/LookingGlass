@@ -49,6 +49,7 @@ typedef struct XDGState
   uint32_t resizeSerial;
   bool fullscreen;
   bool floating;
+  bool resizable;
   int displayFd;
 }
 XDGState;
@@ -155,6 +156,13 @@ bool xdg_shellInit(struct wl_display * display, struct wl_surface * surface,
   if (maximize)
     xdg_toplevel_set_maximized(state.toplevel);
 
+  if (!resizable)
+  {
+    xdg_toplevel_set_min_size(state.toplevel, state.width, state.height);
+    xdg_toplevel_set_max_size(state.toplevel, state.width, state.height);
+  }
+  state.resizable = resizable;
+
   if (state.decorationManager)
   {
     state.toplevelDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
@@ -200,7 +208,7 @@ static void xdg_minimize(void)
 
 static void xdg_shellResize(int w, int h)
 {
-  if (!state.floating)
+  if (!state.floating || !state.resizable)
     return;
 
   state.width  = w;
