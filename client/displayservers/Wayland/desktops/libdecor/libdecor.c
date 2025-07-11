@@ -46,6 +46,7 @@ typedef struct LibDecorState
   int32_t width, height;
   bool     needsResize;
   bool     fullscreen;
+  bool     borderless;
   uint32_t resizeSerial;
 }
 LibDecorState;
@@ -147,6 +148,10 @@ static bool libdecor_shellInit(
   if (maximize)
     libdecor_frame_set_maximized(state.libdecorFrame);
 
+  if (borderless)
+    libdecor_frame_set_visibility(state.libdecorFrame, false);
+  state.borderless = borderless;
+
   if (resizable)
     libdecor_frame_set_capabilities(state.libdecorFrame,
         LIBDECOR_ACTION_RESIZE);
@@ -183,7 +188,8 @@ static void libdecor_setFullscreen(bool fs)
   else
     libdecor_frame_unset_fullscreen(state.libdecorFrame);
 
-  libdecor_frame_set_visibility(state.libdecorFrame, !fs);
+  if (!state.borderless)
+    libdecor_frame_set_visibility(state.libdecorFrame, !fs);
 }
 
 static bool libdecor_getFullscreen(void)
