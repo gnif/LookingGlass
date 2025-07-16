@@ -168,6 +168,12 @@ static bool pipewire_init(void)
   pw_init(NULL, NULL);
 
   pw.loop = pw_loop_new(NULL);
+#if PW_CHECK_VERSION(1, 3, 81)
+  pw.context = pw_context_new(
+    pw.loop,
+    NULL,
+    0);
+#else
   pw.context = pw_context_new(
     pw.loop,
     pw_properties_new(
@@ -176,6 +182,7 @@ static bool pipewire_init(void)
       NULL
     ),
     0);
+#endif
   if (!pw.context)
   {
     DEBUG_ERROR("Failed to create a context");
