@@ -1,3 +1,9 @@
+---
+name: Bug report
+about: Report bugs in Looking Glass (only confirmed bugs and feature requests please)
+
+---
+
 ### Issues are for Bug Reports and Feature Requests Only!
 
 If you are looking for help or support please use one of the following methods
@@ -64,3 +70,4 @@ https://www.youtube.com/watch?v=EqxxJK9Yo64
 ```
 PASTE FULL BACKTRACE HERE
 ```
+
