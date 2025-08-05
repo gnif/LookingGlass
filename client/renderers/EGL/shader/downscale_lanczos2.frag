@@ -2,6 +2,7 @@
 #extension GL_OES_EGL_image_external_essl3 : enable
 
 precision highp float;
+precision highp int;
 
 #define PI 3.141592653589793
 
