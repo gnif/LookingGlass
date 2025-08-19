@@ -120,12 +120,17 @@ change its ownership manually, i.e.:
 
    sudo chown user:kvm /dev/kvmfr0
 
-As an example, you can create a new file in ``/etc/udev/rules.d/99-kvmfr.rules``
+(replace ``user`` with your username)
+
+As an example, you can create a new file in ``/etc/udev/rules.d/70-kvmfr.rules``
 with the following contents::
 
-   SUBSYSTEM=="kvmfr", OWNER="user", GROUP="kvm", MODE="0660"
+   SUBSYSTEM=="kvmfr", GROUP="kvm", MODE="0660", TAG+="uaccess"
 
-(replace ``user`` with your username)
+.. note::
+
+   Make sure the udev rule file name ordinal value is below (lexically sorts before) ``73-seat-late.rules``
+   to allow the uaccess tag to be processed properly.
 
 .. _ivshmem_kvmfr_libvirt:
 
