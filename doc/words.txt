@@ -31,6 +31,7 @@ imgui
 ini
 kvmfr
 laggy
+lexically
 libdecor
 libpipewire
 libpulse
@@ -73,6 +74,7 @@ Threadripper
 toolchain
 tritanope
 tunable
+uaccess
 udev
 UEFI
 uncheck
