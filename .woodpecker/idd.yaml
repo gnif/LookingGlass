@@ -17,8 +17,9 @@ clone:
 steps:
   - name: idd
     when:
-      - branch: master
-        event: [push, manual]
+      - event: push
+        branch: master
+        repo: gnif/LookingGlass
     image: lg-vs2022:latest
     pull: true
     environment:
