@@ -7,6 +7,11 @@ matrix:
     - Debug
     - Release
 
+when:
+  - event: push
+    branch: master
+    repo: gnif/LookingGlass
+
 clone:
   - name: clone
     image: woodpeckerci/plugin-git
@@ -16,10 +21,6 @@ clone:
 
 steps:
   - name: idd
-    when:
-      - event: push
-        branch: master
-        repo: gnif/LookingGlass
     image: lg-vs2022:latest
     pull: true
     environment:
