@@ -36,7 +36,7 @@
 #define LGMP_Q_FRAME       2
 
 #define LGMP_Q_FRAME_LEN   2
-#define LGMP_Q_POINTER_LEN 20
+#define LGMP_Q_POINTER_LEN 32
 
 
 #ifdef _MSC_VER
