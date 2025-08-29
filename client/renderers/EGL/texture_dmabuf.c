@@ -141,22 +141,8 @@ static bool texDMABUFSetup(EGL_Texture * texture)
   egl_texDMABUFCleanup(texture);
 
   glGenTextures(parent->texCount, parent->tex);
-  for(int i = 0; i < parent->texCount; ++i)
-  {
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[i]);
-    glTexImage2D(GL_TEXTURE_EXTERNAL_OES,
-        0,
-        texture->format.intFormat,
-        this->width,
-        texture->format.height,
-        0,
-        this->format,
-        texture->format.dataType,
-        NULL);
-  }
-
-  glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
   parent->rIndex = -1;
+
   return true;
 }
 
