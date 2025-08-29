@@ -719,7 +719,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->dataHeight       = height;
   fi->frameWidth       = width;
   fi->frameHeight      = height;
-  fi->stride           = width * bpp;
+  fi->stride           = pitch / bpp;
   fi->pitch            = pitch;
   // fi->offset is initialized at startup
   fi->flags            = 0;
