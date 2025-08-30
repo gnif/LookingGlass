@@ -333,6 +333,10 @@ void CSwapChainProcessor::CursorThread()
     NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
     if (FAILED(status))
     {
+      // this occurs if the display went away (ie, screen blanking or disabled)
+      if (status == ERROR_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+        return;
+
       DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
       return;
     }
