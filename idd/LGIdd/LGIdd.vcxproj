@@ -51,6 +51,7 @@
     <ClCompile Include="CIVSHMEM.cpp" />
     <ClCompile Include="CPipeServer.cpp" />
     <ClCompile Include="CPlatformInfo.cpp" />
+    <ClCompile Include="CSettings.cpp" />
     <ClCompile Include="CSwapChainProcessor.cpp" />
     <ClCompile Include="CD3D12Device.cpp" />
     <ClCompile Include="Device.cpp" />
@@ -68,6 +69,7 @@
     <ClInclude Include="CIVSHMEM.h" />
     <ClInclude Include="CPipeServer.h" />
     <ClInclude Include="CPlatformInfo.h" />
+    <ClInclude Include="CSettings.h" />
     <ClInclude Include="CSwapChainProcessor.h" />
     <ClInclude Include="CD3D12Device.h" />
     <ClInclude Include="Device.h" />

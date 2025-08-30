@@ -32,6 +32,7 @@
 #include "CDebug.h"
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
+#include "CSettings.h"
 
 WDFDEVICE l_wdfDevice = nullptr;
 
