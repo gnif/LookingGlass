@@ -38,6 +38,7 @@ using namespace Microsoft::WRL;
 class CSwapChainProcessor
 {
 private:
+  IDDCX_MONITOR                   m_monitor;
   CIndirectDeviceContext        * m_devContext;
   IDDCX_SWAPCHAIN                 m_hSwapChain;
   std::shared_ptr<CD3D11Device>   m_dx11Device;
@@ -50,17 +51,23 @@ private:
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[2];
   Wrappers::Event m_terminateEvent;
 
-  static DWORD CALLBACK _SwapChainThread(LPVOID arg);
+  Wrappers::Event m_cursorDataEvent;
+  BYTE*           m_shapeBuffer;
+  DWORD           m_lastShapeId = 0;
 
+  static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();
   void SwapChainThreadCore();
+
+  static DWORD CALLBACK _CursorThread(LPVOID arg);
+  void CursorThread();
 
   static void CompletionFunction(
     CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer);
 
 public:
-  CSwapChainProcessor(CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
+  CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent);
   ~CSwapChainProcessor();
 

@@ -26,15 +26,11 @@ CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIn
   m_monitor(monitor),
   m_devContext(device)
 {
-  m_terminateEvent .Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_shapeBuffer = new BYTE[512 * 512 * 4];
 }
 
 CIndirectMonitorContext::~CIndirectMonitorContext()
 {
   UnassignSwapChain();
-  delete[] m_shapeBuffer;
 }
 
 void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
@@ -73,96 +69,12 @@ reInit:
     return;
   }
 
-  IDARG_IN_SETUP_HWCURSOR c = {};
-  c.CursorInfo.Size                  = sizeof(c.CursorInfo);
-  c.CursorInfo.AlphaCursorSupport    = TRUE;
-  c.CursorInfo.ColorXorCursorSupport = IDDCX_XOR_CURSOR_SUPPORT_FULL;
-  c.CursorInfo.MaxX                  = 512;
-  c.CursorInfo.MaxY                  = 512;
-  c.hNewCursorDataAvailable          = m_cursorDataEvent.Get();
-  NTSTATUS status = IddCxMonitorSetupHardwareCursor(m_monitor, &c);
-  if (!NT_SUCCESS(status))
-  {
-    WdfObjectDelete(swapChain);
-    DEBUG_ERROR("IddCxMonitorSetupHardwareCursor Failed (0x%08x)", status);
-    return;
-  }
-
-  m_swapChain.reset(new CSwapChainProcessor(m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
-
-  m_lastShapeId = 0;
-  m_thread.Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
+  m_swapChain.reset(new CSwapChainProcessor(m_monitor, m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
 }
 
 void CIndirectMonitorContext::UnassignSwapChain()
 {
-  SetEvent(m_terminateEvent.Get());
-  if (m_thread.IsValid())
-    WaitForSingleObject(m_thread.Get(), INFINITE);
-
   m_swapChain.reset();  
   m_dx11Device.reset();
   m_dx12Device.reset();
-
-  ResetEvent(m_terminateEvent .Get());
-  ResetEvent(m_cursorDataEvent.Get());
-}
-
-DWORD CALLBACK CIndirectMonitorContext::_CursorThread(LPVOID arg)
-{
-  reinterpret_cast<CIndirectMonitorContext*>(arg)->CursorThread();
-  return 0;
-}
-
-void CIndirectMonitorContext::CursorThread()
-{
-  HRESULT hr = 0;
-  bool running = true;
-
-  while(running)
-  {
-    HANDLE waitHandles[] =
-    {
-      m_cursorDataEvent.Get(),
-      m_terminateEvent.Get()
-    };
-
-    DWORD waitResult = WaitForMultipleObjects(
-      ARRAYSIZE(waitHandles), waitHandles, FALSE, 100);
-
-    switch (waitResult)
-    {
-      case WAIT_TIMEOUT:
-        continue;
-      
-      // cursorDataEvent
-      case WAIT_OBJECT_0:
-        break;
-      
-      // terminateEvent
-      case WAIT_OBJECT_0 + 1:
-        running = false;
-        continue;
-
-      default:
-        hr = HRESULT_FROM_WIN32(waitResult);
-        DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
-        return;
-    }
-
-    IDARG_IN_QUERY_HWCURSOR in  = {};
-    in.LastShapeId            = m_lastShapeId;
-    in.pShapeBuffer           = m_shapeBuffer;
-    in.ShapeBufferSizeInBytes = 512 * 512 * 4;
-
-    IDARG_OUT_QUERY_HWCURSOR out = {};
-    NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
-    if (FAILED(status))
-    {
-      DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
-      return;
-    }
-
-    m_devContext->SendCursor(out, m_shapeBuffer);
-  }
 }

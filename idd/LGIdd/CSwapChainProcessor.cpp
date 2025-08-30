@@ -23,8 +23,9 @@
 #include <avrt.h>
 #include "CDebug.h"
 
-CSwapChainProcessor::CSwapChainProcessor(CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
+CSwapChainProcessor::CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent) :
+  m_monitor(monitor),
   m_devContext(devContext),
   m_hSwapChain(hSwapChain),
   m_dx11Device(dx11Device),
@@ -36,6 +37,9 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectDeviceContext* devContext, IDD
 
   m_terminateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_thread[0].Attach(CreateThread(nullptr, 0, _SwapChainThread, this, 0, nullptr));
+
+  m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  m_shapeBuffer = new BYTE[512 * 512 * 4];
 }
 
 CSwapChainProcessor::~CSwapChainProcessor()
@@ -48,6 +52,7 @@ CSwapChainProcessor::~CSwapChainProcessor()
 
   m_resPool.Reset();
   m_fbPool.Reset();
+  delete[] m_shapeBuffer;
 }
 
 DWORD CALLBACK CSwapChainProcessor::_SwapChainThread(LPVOID arg)
@@ -104,6 +109,23 @@ void CSwapChainProcessor::SwapChainThreadCore()
     DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
     return;
   }
+
+  IDARG_IN_SETUP_HWCURSOR c = {};
+  c.CursorInfo.Size                  = sizeof(c.CursorInfo);
+  c.CursorInfo.AlphaCursorSupport    = TRUE;
+  c.CursorInfo.ColorXorCursorSupport = IDDCX_XOR_CURSOR_SUPPORT_FULL;
+  c.CursorInfo.MaxX                  = 512;
+  c.CursorInfo.MaxY                  = 512;
+  c.hNewCursorDataAvailable          = m_cursorDataEvent.Get();
+  NTSTATUS status = IddCxMonitorSetupHardwareCursor(m_monitor, &c);
+  if (!NT_SUCCESS(status))
+  {
+    DEBUG_ERROR("IddCxMonitorSetupHardwareCursor Failed (0x%08x)", status);
+    return;
+  }
+
+  m_lastShapeId = 0;
+  m_thread[1].Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
 
   UINT lastFrameNumber = 0;
   for (;;)
@@ -258,4 +280,63 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   copyQueue->Execute();
 
   return true;
+}
+
+DWORD CALLBACK CSwapChainProcessor::_CursorThread(LPVOID arg)
+{
+  reinterpret_cast<CSwapChainProcessor*>(arg)->CursorThread();
+  return 0;
+}
+
+void CSwapChainProcessor::CursorThread()
+{
+  HRESULT hr = 0;
+  bool running = true;
+
+  while (running)
+  {
+    HANDLE waitHandles[] =
+    {
+      m_cursorDataEvent.Get(),
+      m_terminateEvent.Get()
+    };
+
+    DWORD waitResult = WaitForMultipleObjects(
+      ARRAYSIZE(waitHandles), waitHandles, FALSE, 100);
+
+    switch (waitResult)
+    {
+    case WAIT_TIMEOUT:
+      continue;
+
+      // cursorDataEvent
+    case WAIT_OBJECT_0:
+      break;
+
+      // terminateEvent
+    case WAIT_OBJECT_0 + 1:
+      running = false;
+      continue;
+
+    default:
+      hr = HRESULT_FROM_WIN32(waitResult);
+      DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
+      return;
+    }
+
+    IDARG_IN_QUERY_HWCURSOR in = {};
+    in.LastShapeId = m_lastShapeId;
+    in.pShapeBuffer = m_shapeBuffer;
+    in.ShapeBufferSizeInBytes = 512 * 512 * 4;
+
+    IDARG_OUT_QUERY_HWCURSOR out = {};
+    NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
+    if (FAILED(status))
+    {
+      DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
+      return;
+    }
+
+    m_devContext->SendCursor(out, m_shapeBuffer);
+  }
 }

@@ -41,16 +41,6 @@ private:
   CIndirectDeviceContext * m_devContext;
   std::unique_ptr<CSwapChainProcessor> m_swapChain;
 
-  Wrappers::Event m_terminateEvent;
-  Wrappers::Event m_cursorDataEvent;
-  Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread;
-  BYTE * m_shapeBuffer;
-
-  DWORD m_lastShapeId = 0;
-
-  static DWORD CALLBACK _CursorThread(LPVOID arg);
-  void CursorThread();
-
 public:
   CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device);
 
