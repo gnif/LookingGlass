@@ -22,7 +22,7 @@
 #include "texture_buffer.h"
 #include "util.h"
 
-#include "common/vector.h"
+#include "common/array.h"
 #include "egl_dynprocs.h"
 #include "egldebug.h"
 
@@ -30,6 +30,8 @@ struct FdImage
 {
   int fd;
   EGLImage image;
+  GLsync   sync;
+  int      texIndex;
 };
 
 typedef struct TexDMABUF
@@ -37,7 +39,9 @@ typedef struct TexDMABUF
   TextureBuffer base;
 
   EGLDisplay display;
-  Vector images;
+
+  struct FdImage images[2];
+  int            lastIndex;
 
   EGL_PixelFormat pixFmt;
   unsigned        fourcc;
@@ -59,21 +63,26 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
-  struct FdImage * image;
-  vector_forEachRef(image, &this->images)
-    g_egl_dynProcs.eglDestroyImage(this->display, image->image);
-  vector_clear(&this->images);
+  for(int i = 0; i < ARRAY_LENGTH(this->images); ++i)
+  {
+    if (this->images[i].image != EGL_NO_IMAGE)
+    {
+      g_egl_dynProcs.eglDestroyImage(this->display, this->images[i].image);
+      this->images[i].image = EGL_NO_IMAGE;
+    }
+    if (this->images[i].sync)
+    {
+      glDeleteSync(this->images[i].sync);
+      this->images[i].sync = 0;
+    }
+    this->images[i].fd       = -1;
+    this->images[i].texIndex = -1;
+  }
 
   egl_texUtilFreeBuffers(parent->buf, parent->texCount);
 
   if (parent->tex[0])
     glDeleteTextures(parent->texCount, parent->tex);
-
-  if (parent->sync)
-  {
-    glDeleteSync(parent->sync);
-    parent->sync = 0;
-  }
 }
 
 // dmabuf functions
@@ -84,17 +93,18 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGL_TexType type,
   TexDMABUF * this = calloc(1, sizeof(*this));
   *texture = &this->base.base;
 
-  if (!vector_create(&this->images, sizeof(struct FdImage), 2))
+  for(int i = 0; i < ARRAY_LENGTH(this->images); ++i)
   {
-    free(this);
-    *texture = NULL;
-    return false;
+    this->images[i].fd       = -1;
+    this->images[i].image    = EGL_NO_IMAGE;
+    this->images[i].sync     = 0;
+    this->images[i].texIndex = -1;
   }
+  this->lastIndex = -1;
 
   EGL_Texture * parent = &this->base.base;
   if (!egl_texBufferStreamInit(&parent, type, display))
   {
-    vector_destroy(&this->images);
     free(this);
     *texture = NULL;
     return false;
@@ -119,8 +129,6 @@ static void egl_texDMABUFFree(EGL_Texture * texture)
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
   egl_texDMABUFCleanup(texture);
-  vector_destroy(&this->images);
-
   egl_texBufferFree(&parent->base);
   free(this);
 }
@@ -198,16 +206,12 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_DMABUF);
 
-  EGLImage image = EGL_NO_IMAGE;
-
-  struct FdImage * fdImage;
-  vector_forEachRef(fdImage, &this->images)
-    if (fdImage->fd == update->dmaFD)
-    {
-      image = fdImage->image;
-      break;
-    }
-
+  struct FdImage *fdImage =
+    (this->images[0].fd == update->dmaFD) ? &this->images[0] :
+    (this->images[1].fd == update->dmaFD) ? &this->images[1] :
+    (this->images[0].fd == -1)            ? &this->images[0] :
+                                            &this->images[1];
+  EGLImage image = fdImage->image;
   if (unlikely(image == EGL_NO_IMAGE))
   {
     bool setup = false;
@@ -234,28 +238,26 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
       return false;
     }
 
-    if (unlikely(!vector_push(&this->images, &(struct FdImage) {
-      .fd    = update->dmaFD,
-      .image = image,
-    })))
+    fdImage->fd    = update->dmaFD;
+    fdImage->image = image;
+
+    int slot = (fdImage == &this->images[0]) ? 0 : 1;
+    fdImage->texIndex = slot;
+    INTERLOCKED_SECTION(parent->copyLock,
     {
-      DEBUG_ERROR("Failed to store EGLImage");
-      g_egl_dynProcs.eglDestroyImage(this->display, image);
-      return false;
-    }
+      glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[slot]);
+      g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
+    });
   }
 
+  this->lastIndex = (fdImage == &this->images[0]) ? 0 : 1;
   INTERLOCKED_SECTION(parent->copyLock,
   {
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[parent->bufIndex]);
-    g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
-
-    if (likely(parent->sync))
-      glDeleteSync(parent->sync);
-
-    parent->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (fdImage->sync)
+      glDeleteSync(fdImage->sync);
+    fdImage->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   });
-  glFlush();
+
   return true;
 }
 
@@ -270,23 +272,22 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
+  if (unlikely(this->lastIndex < 0))
+    return EGL_TEX_STATUS_NOTREADY;
+
+  struct FdImage *cur = &this->images[this->lastIndex];
   GLsync sync = 0;
 
-  INTERLOCKED_SECTION(parent->copyLock,
-  {
-    if (parent->sync)
-    {
-      sync           = parent->sync;
-      parent->sync   = 0;
-      parent->rIndex = parent->bufIndex;
-      if (++parent->bufIndex == parent->texCount)
-        parent->bufIndex = 0;
+  INTERLOCKED_SECTION(parent->copyLock, {
+    if (cur->sync) {
+      sync = cur->sync;
+      cur->sync = 0;
     }
   });
 
   if (sync)
   {
-    switch(glClientWaitSync(sync, 0, 20000000)) // 20ms
+    switch (glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, 20000000)) //20ms
     {
       case GL_ALREADY_SIGNALED:
       case GL_CONDITION_SATISFIED:
@@ -294,10 +295,11 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
         break;
 
       case GL_TIMEOUT_EXPIRED:
+        // Put it back for next try
         INTERLOCKED_SECTION(parent->copyLock,
         {
-          if (!parent->sync)
-            parent->sync = sync;
+          if (!cur->sync)
+            cur->sync = sync;
           else
             glDeleteSync(sync);
         });
@@ -311,7 +313,7 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
     }
   }
 
-  *tex = parent->tex[parent->rIndex];
+  *tex = parent->tex[cur->texIndex];
 
   if (fmt)
     *fmt = this->pixFmt;
