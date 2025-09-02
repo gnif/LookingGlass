@@ -255,7 +255,6 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     this->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    glFlush();
   }
 
   return EGL_TEX_STATUS_OK;
@@ -271,7 +270,8 @@ EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex,
 
   if (this->sync)
   {
-    switch(glClientWaitSync(this->sync, 0, 40000000)) // 40ms
+    switch(glClientWaitSync(
+          this->sync, GL_SYNC_FLUSH_COMMANDS_BIT, 40000000)) //40ms
     {
       case GL_ALREADY_SIGNALED:
       case GL_CONDITION_SATISFIED:
