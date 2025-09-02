@@ -246,7 +246,12 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     INTERLOCKED_SECTION(parent->copyLock,
     {
       glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[slot]);
-      g_egl_dynProcs.glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      g_egl_dynProcs.glEGLImageTargetTexture2DOES(
+          GL_TEXTURE_EXTERNAL_OES, image);
     });
   }
 
