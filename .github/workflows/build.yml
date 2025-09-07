@@ -128,8 +128,20 @@ jobs:
     - name: Install NSIS
       shell: powershell
       run: |
-        winget source disable msstore --accept-source-agreements -ErrorAction SilentlyContinue
         winget install -e --id NSIS.NSIS --silent --accept-source-agreements --accept-package-agreements
+        $paths = @(
+          "$Env:ProgramFiles\NSIS\Bin",
+          "$Env:ProgramFiles(x86)\NSIS\Bin"
+        ) | Where-Object { Test-Path $_ }
+
+        if ($paths.Count -eq 0) {
+          Write-Error "NSIS 'Bin' folder not found after install."
+          exit 1
+        }
+
+        $paths | ForEach-Object { Add-Content -Path $env:GITHUB_PATH -Value $_ }
+        Write-Host "makensis location(s): $($paths -join ', ')"
+        makensis /VERSION
     - name: Configure Windows host for native MinGW-w64
       run: |
         mkdir host\build
