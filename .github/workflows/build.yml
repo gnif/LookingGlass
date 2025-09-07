@@ -128,7 +128,7 @@ jobs:
     - name: Install NSIS
       shell: powershell
       run: |
-        winget source disable msstore --accept-source-agreements || $true
+        winget source disable msstore --accept-source-agreements -ErrorAction SilentlyContinue
         winget install -e --id NSIS.NSIS --silent --accept-source-agreements --accept-package-agreements
     - name: Configure Windows host for native MinGW-w64
       run: |
