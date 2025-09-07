@@ -479,7 +479,19 @@ void core_handleMouseNormal(double ex, double ey)
 {
   // prevent cursor handling outside of capture if the position is not known
   if (!g_cursor.guest.valid)
+  {
+    if (app_guestIsWindows())
+    {
+      // wiggle the mouse when the guest has not provided any information, we need
+      // to do this because windows doesn't enable a cursor at all until it has
+      // been moved for the first time.
+      if (!purespice_mouseMotion(1, 1))
+        DEBUG_ERROR("failed to send mouse motion message");
+      if (!purespice_mouseMotion(-1, -1))
+        DEBUG_ERROR("failed to send mouse motion message");
+    }
     return;
+  }
 
   if (g_cursor.realigning)
     return;
