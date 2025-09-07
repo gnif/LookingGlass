@@ -136,6 +136,7 @@ jobs:
         mingw32-make "-j$([Environment]::ProcessorCount)"
     - name: Build Windows host installer
       run: |
+        winget install -e --id NSIS.NSIS
         cd host\build
         makensis -DBUILD_32BIT platform\Windows\installer.nsi
 
