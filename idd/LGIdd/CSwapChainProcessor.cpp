@@ -288,6 +288,32 @@ DWORD CALLBACK CSwapChainProcessor::_CursorThread(LPVOID arg)
   return 0;
 }
 
+bool CSwapChainProcessor::QueryHWCursor()
+{
+  IDARG_IN_QUERY_HWCURSOR in = {};
+  in.LastShapeId            = m_lastShapeId;
+  in.pShapeBuffer           = m_shapeBuffer;
+  in.ShapeBufferSizeInBytes = 512 * 512 * 4;
+
+  IDARG_OUT_QUERY_HWCURSOR out = {};
+  NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
+  if (FAILED(status))
+  {
+    // this occurs if the display went away (ie, screen blanking or disabled)
+    if (status == ERROR_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+      return false;
+
+    DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
+    return false;
+  }
+
+  if (out.IsCursorShapeUpdated)
+    m_lastShapeId = out.CursorShapeInfo.ShapeId;
+
+  m_devContext->SendCursor(out, m_shapeBuffer);
+  return true;
+}
+
 void CSwapChainProcessor::CursorThread()
 {
   HRESULT hr = 0;
@@ -311,7 +337,9 @@ void CSwapChainProcessor::CursorThread()
 
       // cursorDataEvent
     case WAIT_OBJECT_0:
-      break;
+      if (!QueryHWCursor())
+        return;
+      continue;
 
       // terminateEvent
     case WAIT_OBJECT_0 + 1:
@@ -323,24 +351,5 @@ void CSwapChainProcessor::CursorThread()
       DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
       return;
     }
-
-    IDARG_IN_QUERY_HWCURSOR in = {};
-    in.LastShapeId = m_lastShapeId;
-    in.pShapeBuffer = m_shapeBuffer;
-    in.ShapeBufferSizeInBytes = 512 * 512 * 4;
-
-    IDARG_OUT_QUERY_HWCURSOR out = {};
-    NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
-    if (FAILED(status))
-    {
-      // this occurs if the display went away (ie, screen blanking or disabled)
-      if (status == ERROR_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
-        return;
-
-      DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
-      return;
-    }
-
-    m_devContext->SendCursor(out, m_shapeBuffer);
   }
 }

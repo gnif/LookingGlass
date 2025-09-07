@@ -60,6 +60,7 @@ private:
   void SwapChainThreadCore();
 
   static DWORD CALLBACK _CursorThread(LPVOID arg);
+  bool QueryHWCursor();
   void CursorThread();
 
   static void CompletionFunction(
