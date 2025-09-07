@@ -323,12 +323,61 @@ static void ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD d
 
 static bool EnablePriv(const char * name)
 {
+  TOKEN_PRIVILEGES tp = { 0 };
+  LUID luid;
+  HandleT<HANDLENullTraits> hToken;
+
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+    hToken.GetAddressOf()))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "OpenProcessToken");
+    return false;
+  }
+
+  if (!LookupPrivilegeValueA(NULL, name, &luid))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "LookupPrivilegeValue %s", name);
+    return false;
+  }
+
+  tp.PrivilegeCount = 1;
+  tp.Privileges[0].Luid = luid;
+  tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+  if (!AdjustTokenPrivileges(hToken.Get(), FALSE, &tp, sizeof(tp), NULL, NULL))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "AdjustTokenPrivileges %s", name);
+    return false;
+  }
+
   return true;
 }
 
 static void DisablePriv(const char * name)
 {
+  TOKEN_PRIVILEGES tp = {0};
+  LUID luid;
+  HandleT<HANDLENullTraits> hToken;
 
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+    hToken.GetAddressOf()))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "OpenProcessToken");
+    return;
+  }
+
+  if (!LookupPrivilegeValueA(NULL, name, &luid))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "LookupPrivilegeValue %s", name);
+    return;
+  }
+
+  tp.PrivilegeCount = 1;
+  tp.Privileges[0].Luid = luid;
+  tp.Privileges[0].Attributes = 0;
+
+  if (!AdjustTokenPrivileges(hToken.Get(), FALSE, &tp, sizeof(tp), NULL, NULL))
+    DEBUG_ERROR_HR(GetLastError(), "AdjustTokenPrivileges %s", name);
 }
 
 static void Launch()
