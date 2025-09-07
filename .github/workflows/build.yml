@@ -125,6 +125,11 @@ jobs:
     - uses: actions/checkout@v2
       with:
         submodules: recursive
+    - name: Install NSIS
+      shell: powershell
+      run: |
+        winget source disable msstore --accept-source-agreements || $true
+        winget install -e --id NSIS.NSIS --silent --accept-source-agreements --accept-package-agreements
     - name: Configure Windows host for native MinGW-w64
       run: |
         mkdir host\build
@@ -136,7 +141,6 @@ jobs:
         mingw32-make "-j$([Environment]::ProcessorCount)"
     - name: Build Windows host installer
       run: |
-        winget install -e --id NSIS.NSIS
         cd host\build
         makensis -DBUILD_32BIT platform\Windows\installer.nsi
 
