@@ -139,8 +139,13 @@ jobs:
           exit 1
         }
 
-        $paths | ForEach-Object { Add-Content -Path $env:GITHUB_PATH -Value $_ }
+        $paths | ForEach-Object {
+          Add-Content -Path $env:GITHUB_PATH -Value $_
+        }
+
         Write-Host "makensis location(s): $($paths -join ', ')"
+    - name: Test NSIS
+      run: |
         makensis /VERSION
     - name: Configure Windows host for native MinGW-w64
       run: |
