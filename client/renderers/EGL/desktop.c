@@ -479,6 +479,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   EGL_Texture * texture = egl_postProcessGetOutput(desktop->pp,
       &finalSizeX, &finalSizeY);
 
+  if (!texture)
+    texture = tex;
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   egl_resetViewport(desktop->egl);
 
