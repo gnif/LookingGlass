@@ -83,6 +83,10 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <Manifest />
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -100,6 +104,10 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <Manifest />
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -121,6 +129,10 @@
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
 copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
     </PostBuildEvent>
+    <Manifest />
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -146,6 +158,10 @@ copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Com
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
 copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
     </PostBuildEvent>
+    <Manifest />
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
