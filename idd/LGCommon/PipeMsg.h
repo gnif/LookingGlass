@@ -1,6 +1,6 @@
 /**
  * Looking Glass
- * Copyright © 2017-2025 The Looking Glass Authors
+ * Copyright Â© 2017-2025 The Looking Glass Authors
  * https://looking-glass.io
  *
  * This program is free software; you can redistribute it and/or modify it
