@@ -161,6 +161,25 @@ jobs:
         cd host\build
         makensis -DBUILD_32BIT platform\Windows\installer.nsi
 
+  idd:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: recursive
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v2
+      with:
+        msbuild-architecture: x64
+    - name: Install NuGet packages
+      run: |
+        cd idd
+        nuget restore LGIdd.sln
+    - name: Build IDD
+      run: |
+        cd idd
+        msbuild.exe LGIdd.sln /t:Build /p:Configuration=Release /p:Platform=x64
+
   obs:
     runs-on: ubuntu-latest
     strategy:
