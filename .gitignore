@@ -17,4 +17,5 @@ idd/x64
 idd/*/x64
 idd/*/Debug
 idd/*/VersionInfo.h
+idd/*/VERSION
 idd/packages

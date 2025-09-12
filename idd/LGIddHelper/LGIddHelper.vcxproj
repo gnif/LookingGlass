@@ -83,6 +83,11 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
+    </PostBuildEvent>
     <Manifest />
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -104,6 +109,11 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
+    </PostBuildEvent>
     <Manifest />
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -127,7 +137,8 @@
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
-copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
     </PostBuildEvent>
     <Manifest />
     <Manifest>
@@ -156,7 +167,8 @@ copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Com
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
-copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
     </PostBuildEvent>
     <Manifest />
     <Manifest>
@@ -186,6 +198,7 @@ copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Com
       <VersionInfoLines Include="#define LG_CURRENT_YEAR $(CurrentYear)" />
     </ItemGroup>
     <WriteLinesToFile File="VersionInfo.h" Lines="@(VersionInfoLines)" Overwrite="true" />
+    <WriteLinesToFile File="VERSION" Lines="$(GitVersion)" Overwrite="true" />
   </Target>
   <Target Name="Build" DependsOnTargets="$(BuildDependsOn)" />
   <PropertyGroup>
