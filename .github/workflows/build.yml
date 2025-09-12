@@ -120,7 +120,7 @@ jobs:
         makensis -DIVSHMEM platform/Windows/installer.nsi
 
   host-windows-native:
-    runs-on: windows-latest
+    runs-on: windows-2025
     steps:
     - uses: actions/checkout@v2
       with:
