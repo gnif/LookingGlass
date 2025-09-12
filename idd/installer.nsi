@@ -175,9 +175,9 @@ Section "!Indirect Display Driver (IDD)" Section1
   "DisplayIcon" "$\"$INSTDIR\icon.ico$\""
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
   "NoRepair" "1"
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
   "NoModify" "1"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)" \
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
   "DisplayVersion" ${VERSION}
 
   !insertmacro StopLGIddHelper
@@ -203,10 +203,8 @@ Section "Uninstall" Section6
   DetailPrint "Clean up helper service"
   nsExec::Exec 'sc.exe delete LGIddHelper'
 
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (host)"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)"
   Delete "$INSTDIR\uninstaller.exe"
-  Delete "$INSTDIR\looking-glass-host.exe"
-  Delete "$INSTDIR\looking-glass-host.pdb"
   Delete "$INSTDIR\ivshmem.cat"
   Delete "$INSTDIR\ivshmem.inf"
   Delete "$INSTDIR\ivshmem.sys"
