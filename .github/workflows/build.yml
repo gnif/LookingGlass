@@ -179,6 +179,17 @@ jobs:
       run: |
         cd idd
         msbuild.exe LGIdd.sln /t:Build /p:Configuration=Release /p:Platform=x64
+    - name: Build NSIS Installer
+      run: |
+        cd idd\x64\Release\LGIdd
+        makensis -DBUILD_32BIT installer.nsi
+    - name: Build NSIS installer with IVSHMEM drivers
+      run: |
+        cd idd\x64\Release
+        Invoke-WebRequest https://dl.quantum2.xyz/ivshmem.tar.gz -OutFile ivshmem.tar.gz
+        tar -xzvf ivshmem.tar.gz
+        cd LGIdd
+        makensis -DBUILD_32BIT -DIVSHMEM installer.nsi
 
   obs:
     runs-on: ubuntu-latest
