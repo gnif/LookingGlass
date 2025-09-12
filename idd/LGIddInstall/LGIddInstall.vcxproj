@@ -83,6 +83,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -99,6 +103,13 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(SolutionDir)installer.nsi"  "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(SolutionDir)..\resources\icon.ico"  "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(SolutionDir)..\LICENSE"  "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\LICENSE.txt"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -113,6 +124,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -129,6 +144,13 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
+copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(SolutionDir)installer.nsi"  "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(SolutionDir)..\resources\icon.ico"  "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"
+copy /Y "$(SolutionDir)..\LICENSE"  "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\LICENSE.txt"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="LGIddInstall.c" />
