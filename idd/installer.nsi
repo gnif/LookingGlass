@@ -18,6 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+!define MUI_CUSTOMFUNCTION_GUIINIT customGUIInit
+
 ;Include
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -92,7 +94,7 @@ Function .onInit
 
 !ifdef IVSHMEM
   Var /GlOBAL option_ivshmem
-  StrCpy $option_ivshmem       0
+  StrCpy $option_ivshmem 0
 !endif
 
   Push $R0
@@ -117,7 +119,6 @@ FunctionEnd
     DetailPrint "Stop service: LGIddHelper"
     nsExec::ExecToLog 'net.exe STOP LGIddHelper'
   ${EndIf}
-
 !macroend
 
 ;Install 
@@ -140,6 +141,12 @@ Section "-IVSHMEM Driver"
   ${EndIf}
 SectionEnd
 !endif
+
+Section /o "" Section2
+  DetailPrint "Disabling the old Looking Glass host application..."
+  nsExec::Exec 'net.exe STOP "Looking Glass (host)"'
+  nsExec::Exec 'sc.exe config "Looking Glass (host)" start=disabled'
+SectionEnd
 
 Section "!Indirect Display Driver (IDD)" Section1
   SectionIn RO
@@ -222,13 +229,25 @@ Section "Uninstall" Section6
   RMDir $INSTDIR
 SectionEnd
 
+Function customGUIInit
+  nsExec::Exec 'sc.exe query "Looking Glass (host)"'
+  Pop $0 ; SC.exe error level
+
+  ${If} $0 == 0 ; If error level is 0, service exists
+    SectionSetText  ${Section2} "Disable old host app"
+    SectionSetFlags ${Section2} ${SF_SELECTED}
+  ${EndIf}
+FunctionEnd
+
 ;Description text for selection of install items
 LangString DESC_Section0 ${LANG_ENGLISH} "Install the IVSHMEM driver. This driver is needed for Looking Glass to function. This will replace the driver if it is already installed."
 LangString DESC_Section1 ${LANG_ENGLISH} "Install the Indirect Display Driver (IDD)"
+LangString DESC_Section2 ${LANG_ENGLISH} "Disables the old Looking Glass host application. You can re-enable the service if you want to use it again, or uninstall it later."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
 !ifdef IVSHMEM
   !insertmacro MUI_DESCRIPTION_TEXT ${Section0} $(DESC_Section0)
 !endif
 !insertmacro MUI_DESCRIPTION_TEXT ${Section1} $(DESC_Section1)
+!insertmacro MUI_DESCRIPTION_TEXT ${Section2} $(DESC_Section2)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
