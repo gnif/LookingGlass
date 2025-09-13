@@ -123,7 +123,7 @@ FunctionEnd
 
 !macro CreateDriverRegKey
 
-  ${If} ${RunningX64}
+  ${If} ${RunningX64} == 1
     SetRegView 64
   ${EndIf}
 
@@ -138,7 +138,7 @@ FunctionEnd
 
 !macro RemoveDriverRegKey
 
-  ${If} ${RunningX64}
+  ${If} ${RunningX64} == 1
     SetRegView 64
   ${EndIf}
 
