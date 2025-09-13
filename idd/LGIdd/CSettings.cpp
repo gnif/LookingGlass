@@ -4,7 +4,8 @@
 #include <wdf.h>
 
 CSettings g_settings;
-static const std::wstring subKey = L"SOFTWARE\\LookingGlass\\IDD";
+
+#define LGIDD_REGKEY L"SOFTWARE\\LookingGlass\\IDD"
 
 static const DWORD DefaultDisplayModes[][3] =
 {
@@ -79,7 +80,7 @@ void CSettings::SetExtraMode(const DisplayMode& mode)
   DWORD disp = 0;
   LONG  ec = RegCreateKeyExW(
     HKEY_LOCAL_MACHINE,
-    L"Software\\LookingGlass\\IDD",
+    LGIDD_REGKEY,
     0, NULL, REG_OPTION_NON_VOLATILE,
     KEY_SET_VALUE,
     NULL, &hKey, &disp);
@@ -102,7 +103,7 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
   HKEY hKey = nullptr;
   LONG ec = RegOpenKeyExW(
     HKEY_LOCAL_MACHINE,
-    L"Software\\LookingGlass\\IDD",
+    LGIDD_REGKEY,
     0,
     KEY_QUERY_VALUE,
     &hKey
@@ -137,7 +138,7 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
 bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
 {
   HKEY hKey = nullptr;
-  LONG st   = RegOpenKeyExW(HKEY_LOCAL_MACHINE, subKey.c_str(), 0, KEY_QUERY_VALUE, &hKey);
+  LONG st   = RegOpenKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
   if (st != ERROR_SUCCESS)
     return false;
 
