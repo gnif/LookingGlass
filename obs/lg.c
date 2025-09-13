@@ -64,10 +64,10 @@ LGState;
 #if LIBOBS_API_MAJOR_VER >= 27
 typedef struct
 {
-  KVMFRFrame   * frame;
-  size_t         dataSize;
-  int            fd;
-  gs_texture_t * texture;
+  const KVMFRFrame * frame;
+  size_t             dataSize;
+  int                fd;
+  gs_texture_t     * texture;
 }
 DMAFrameInfo;
 #endif
@@ -98,6 +98,7 @@ typedef struct
   bool                 hideMouse;
 #if LIBOBS_API_MAJOR_VER >= 27
   bool                 dmabuf;
+  bool                 dmabufTested;
   DMAFrameInfo         dmaInfo[LGMP_Q_FRAME_LEN];
   gs_texture_t       * dmaTexture;
 #endif
@@ -515,7 +516,7 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
 #if LIBOBS_API_MAJOR_VER >= 27
 static DMAFrameInfo * dmabufOpenDMAFrameInfo(LGPlugin * this, LGMPMessage * msg,
-    KVMFRFrame * frame, size_t dataSize)
+    const KVMFRFrame * frame, size_t dataSize)
 {
   DMAFrameInfo * fi = NULL;
 
@@ -569,11 +570,173 @@ static DMAFrameInfo * dmabufOpenDMAFrameInfo(LGPlugin * this, LGMPMessage * msg,
 }
 #endif
 
+static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
+    LGMPMessage * msg)
+{
+  this->formatVer    = frame->formatVer;
+  this->screenWidth  = frame->screenWidth;
+  this->screenHeight = frame->screenHeight;
+  this->dataWidth    = frame->dataWidth;
+  this->dataHeight   = frame->dataHeight;
+  this->frameWidth   = frame->frameWidth;
+  this->frameHeight  = frame->frameHeight;
+  this->type         = frame->type;
+
+  this->screenScale.x = this->screenWidth  / this->frameWidth ;
+  this->screenScale.y = this->screenHeight / this->frameHeight;
+
+  obs_enter_graphics();
+  if (this->texture)
+  {
+    if (this->unpack && this->dstTexture)
+    {
+      gs_texture_destroy(this->dstTexture);
+      this->dstTexture = NULL;
+    }
+
+    if (!this->dmabuf)
+      gs_texture_unmap(this->texture);
+
+    gs_texture_destroy(this->texture);
+    this->texture = NULL;
+  }
+
+  this->dataWidth = frame->dataWidth;
+  this->unpack    = false;
+
+  this->bpp = 4;
+  switch(this->type)
+  {
+    case FRAME_TYPE_BGRA:
+      this->format     = GS_BGRA_UNORM;
+      this->drmFormat  = DRM_FORMAT_ARGB8888;
+#if LIBOBS_API_MAJOR_VER >= 28
+      this->colorSpace = GS_CS_SRGB;
+#endif
+      break;
+
+    case FRAME_TYPE_RGBA:
+      this->format     = GS_RGBA_UNORM;
+      this->drmFormat  = DRM_FORMAT_ARGB8888;
+#if LIBOBS_API_MAJOR_VER >= 28
+      this->colorSpace = GS_CS_SRGB;
+#endif
+      break;
+
+    case FRAME_TYPE_RGBA10:
+      this->format     = GS_R10G10B10A2;
+      this->drmFormat  = DRM_FORMAT_BGRA1010102;
+#if LIBOBS_API_MAJOR_VER >= 28
+      this->colorSpace = GS_CS_709_SCRGB;
+#endif
+      break;
+
+    case FRAME_TYPE_RGB_24:
+      this->bpp       = 3;
+      this->dataWidth = frame->pitch / 4;
+      /* fallthrough */
+
+    case FRAME_TYPE_BGR_32:
+      this->format    = GS_BGRA_UNORM;
+      this->drmFormat = DRM_FORMAT_ARGB8888;
+#if LIBOBS_API_MAJOR_VER >= 28
+      this->colorSpace = GS_CS_SRGB;
+#endif
+      this->unpack     = true;
+      break;
+
+    case FRAME_TYPE_RGBA16F:
+      this->bpp        = 8;
+      this->format     = GS_RGBA16F;
+      this->drmFormat  = DRM_FORMAT_ABGR16161616F;
+#if LIBOBS_API_MAJOR_VER >= 28
+      this->colorSpace = GS_CS_709_SCRGB;
+#endif
+      break;
+
+    default:
+      printf("invalid type %d\n", this->type);
+      lgmpClientMessageDone(this->frameQueue);
+      os_sem_post(this->frameSem);
+      obs_leave_graphics();
+      return;
+  }
+
+#if LIBOBS_API_MAJOR_VER >= 27
+  if (this->dmabuf)
+  {
+    DMAFrameInfo * fi = dmabufOpenDMAFrameInfo(this, msg, frame,
+        frame->frameHeight * frame->pitch);
+    if (fi && !fi->texture)
+    {
+      // create the first texture now so we can test if dmabuf is usable
+      fi->texture = gs_texture_create_from_dmabuf(
+        this->dataWidth,
+        this->dataHeight,
+        this->drmFormat,
+        this->format,
+        1,
+        &fi->fd,
+        &(uint32_t) { frame->pitch },
+        &(uint32_t) { 0 },
+        &(uint64_t) { 0 });
+
+      if (!fi->texture)
+      {
+        puts("Failed to create dmabuf texture");
+        this->dmabuf = false;
+      }
+
+      this->dmabufTested = true;
+    }
+  }
+#else
+  (void)drmFormat;
+#endif
+
+  if (!this->dmabuf)
+  {
+    this->texture = gs_texture_create(
+      this->dataWidth,
+      this->dataHeight,
+      this->format,
+      1,
+      NULL,
+      GS_DYNAMIC);
+
+    if (!this->texture)
+    {
+      printf("create texture failed\n");
+      lgmpClientMessageDone(this->frameQueue);
+      os_sem_post(this->frameSem);
+      obs_leave_graphics();
+      return;
+    }
+
+    gs_texture_map(this->texture, &this->texData, &this->linesize);
+  }
+
+  if (this->unpack)
+  {
+    // create the render target for format unpacking
+    this->dstTexture = gs_texture_create(
+      this->frameWidth,
+      this->frameHeight,
+      GS_BGRA,
+      1,
+      NULL,
+      GS_RENDER_TARGET);
+  }
+
+  obs_leave_graphics();
+}
+
 static void lgVideoTick(void * data, float seconds)
 {
   LGPlugin * this = (LGPlugin *)data;
 
-  if (this->state == STATE_RESTARTING) {
+  if (this->state == STATE_RESTARTING)
+  {
     waitThreads(this);
 
     this->state = STATE_STARTING;
@@ -674,164 +837,11 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
-  KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
-  if (!this->texture || this->formatVer != frame->formatVer)
-  {
-    this->formatVer    = frame->formatVer;
-    this->screenWidth  = frame->screenWidth;
-    this->screenHeight = frame->screenHeight;
-    this->dataWidth    = frame->dataWidth;
-    this->dataHeight   = frame->dataHeight;
-    this->frameWidth   = frame->frameWidth;
-    this->frameHeight  = frame->frameHeight;
-    this->type         = frame->type;
+  const KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
 
-    this->screenScale.x = this->screenWidth  / this->frameWidth ;
-    this->screenScale.y = this->screenHeight / this->frameHeight;
-
-    obs_enter_graphics();
-    if (this->texture)
-    {
-      if (this->unpack && this->dstTexture)
-      {
-        gs_texture_destroy(this->dstTexture);
-        this->dstTexture = NULL;
-      }
-
-      if (!this->dmabuf)
-        gs_texture_unmap(this->texture);
-
-      gs_texture_destroy(this->texture);
-      this->texture = NULL;
-    }
-
-    this->dataWidth = frame->dataWidth;
-    this->unpack    = false;
-
-    this->bpp = 4;
-    switch(this->type)
-    {
-      case FRAME_TYPE_BGRA:
-        this->format     = GS_BGRA_UNORM;
-        this->drmFormat  = DRM_FORMAT_ARGB8888;
-#if LIBOBS_API_MAJOR_VER >= 28
-        this->colorSpace = GS_CS_SRGB;
-#endif
-        break;
-
-      case FRAME_TYPE_RGBA:
-        this->format     = GS_RGBA_UNORM;
-        this->drmFormat  = DRM_FORMAT_ARGB8888;
-#if LIBOBS_API_MAJOR_VER >= 28
-        this->colorSpace = GS_CS_SRGB;
-#endif
-        break;
-
-      case FRAME_TYPE_RGBA10:
-        this->format     = GS_R10G10B10A2;
-        this->drmFormat  = DRM_FORMAT_BGRA1010102;
-#if LIBOBS_API_MAJOR_VER >= 28
-        this->colorSpace = GS_CS_709_SCRGB;
-#endif
-        break;
-
-      case FRAME_TYPE_RGB_24:
-        this->bpp       = 3;
-        this->dataWidth = frame->pitch / 4;
-        /* fallthrough */
-
-      case FRAME_TYPE_BGR_32:
-        this->format    = GS_BGRA_UNORM;
-        this->drmFormat = DRM_FORMAT_ARGB8888;
-#if LIBOBS_API_MAJOR_VER >= 28
-        this->colorSpace = GS_CS_SRGB;
-#endif
-        this->unpack     = true;
-        break;
-
-      case FRAME_TYPE_RGBA16F:
-        this->bpp        = 8;
-        this->format     = GS_RGBA16F;
-        this->drmFormat  = DRM_FORMAT_ABGR16161616F;
-#if LIBOBS_API_MAJOR_VER >= 28
-        this->colorSpace = GS_CS_709_SCRGB;
-#endif
-        break;
-
-      default:
-        printf("invalid type %d\n", this->type);
-        lgmpClientMessageDone(this->frameQueue);
-        os_sem_post(this->frameSem);
-        obs_leave_graphics();
-        return;
-    }
-
-#if LIBOBS_API_MAJOR_VER >= 27
-    if (this->dmabuf)
-    {
-      DMAFrameInfo * fi = dmabufOpenDMAFrameInfo(this, &msg, frame,
-          frame->frameHeight * frame->pitch);
-      if (fi && !fi->texture)
-      {
-        // create the first texture now so we can test if dmabuf is usable
-        fi->texture = gs_texture_create_from_dmabuf(
-          this->dataWidth,
-          this->dataHeight,
-          this->drmFormat,
-          this->format,
-          1,
-          &fi->fd,
-          &(uint32_t) { frame->pitch },
-          &(uint32_t) { 0 },
-          &(uint64_t) { 0 });
-
-        if (!fi->texture)
-        {
-          puts("Failed to create dmabuf texture");
-          this->dmabuf = false;
-        }
-      }
-    }
-#else
-    (void)drmFormat;
-#endif
-
-    if (!this->dmabuf)
-    {
-      this->texture = gs_texture_create(
-        this->dataWidth,
-        this->dataHeight,
-        this->format,
-        1,
-        NULL,
-        GS_DYNAMIC);
-
-      if (!this->texture)
-      {
-        printf("create texture failed\n");
-        lgmpClientMessageDone(this->frameQueue);
-        os_sem_post(this->frameSem);
-        obs_leave_graphics();
-        return;
-      }
-
-      gs_texture_map(this->texture, &this->texData, &this->linesize);
-    }
-
-    if (this->unpack)
-    {
-      // create the render target for format unpacking
-      this->dstTexture = gs_texture_create(
-        this->frameWidth,
-        this->frameHeight,
-        GS_BGRA,
-        1,
-        NULL,
-        GS_RENDER_TARGET);
-    }
-
-    obs_leave_graphics();
-  }
+  bool textureValid = (this->dmabufTested && this->dmabuf) || this->texture;
+  if (!textureValid || this->formatVer != frame->formatVer)
+    lgFormatInit(this, frame, &msg);
 
 #if LIBOBS_API_MAJOR_VER >= 27
   if (this->dmabuf)
@@ -841,16 +851,18 @@ static void lgVideoTick(void * data, float seconds)
 
     if (!fi->texture)
     {
-        fi->texture = gs_texture_create_from_dmabuf(
-          this->dataWidth,
-          this->dataHeight,
-          this->drmFormat,
-          this->format,
-          1,
-          &fi->fd,
-          &(uint32_t) { frame->pitch },
-          &(uint32_t) { 0 },
-          &(uint64_t) { 0 });
+      obs_enter_graphics();
+      fi->texture = gs_texture_create_from_dmabuf(
+        this->dataWidth,
+        this->dataHeight,
+        this->drmFormat,
+        this->format,
+        1,
+        &fi->fd,
+        &(uint32_t) { frame->pitch },
+        &(uint32_t) { 0 },
+        &(uint64_t) { 0 });
+      obs_leave_graphics();
     }
 
     lgmpClientMessageDone(this->frameQueue);
