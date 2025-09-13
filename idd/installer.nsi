@@ -163,7 +163,6 @@ Section "!Indirect Display Driver (IDD)" Section1
 
   DetailPrint "Extracting support files"
   File LICENSE.txt
-  File icon.ico
   WriteUninstaller $INSTDIR\uninstaller.exe
 
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
@@ -181,7 +180,7 @@ Section "!Indirect Display Driver (IDD)" Section1
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
   "Publisher" "Geoffrey McRae"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
-  "DisplayIcon" "$\"$INSTDIR\icon.ico$\""
+  "DisplayIcon" "$\"$INSTDIR\LGIddHelper.exe$\""
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
   "NoRepair" "1"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
@@ -223,7 +222,6 @@ Section "Uninstall" Section6
   Delete "$INSTDIR\LGIdd.inf"
   Delete "$INSTDIR\LGIddHelper.exe"
   Delete "$INSTDIR\LGIddInstall.exe"
-  Delete "$INSTDIR\icon.ico"
   Delete "$INSTDIR\LICENSE.txt"
 
   RMDir $INSTDIR
