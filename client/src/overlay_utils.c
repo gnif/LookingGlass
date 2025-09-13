@@ -29,7 +29,15 @@
 #define NANOSVG_IMPLEMENTATION
 #define NANOSVG_ALL_COLOR_KEYWORDS
 #define NANOSVGRAST_IMPLEMENTATION
-#include "nanosvgrast.h"
+
+#ifndef __clang__
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+  #include "nanosvgrast.h"
+  #pragma GCC diagnostic pop
+#else
+  #include "nanosvgrast.h"
+#endif
 
 void overlayGetImGuiRect(struct Rect * rect)
 {
