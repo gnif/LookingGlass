@@ -1,4 +1,4 @@
-#include <Windows.h>
+﻿#include <Windows.h>
 #include <wrl.h>
 #include <UserEnv.h>
 
@@ -11,6 +11,7 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 #include "CDebug.h"
 #include "VersionInfo.h"
 #include "CPipeClient.h"
+#include "CWindow.h"
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof*(x))
 #define SVCNAME L"Looking Glass (IDD Helper)"
@@ -30,11 +31,6 @@ static HandleT<EventTraits>      l_exitEvent;
 static std::wstring              l_exitEventName;
 
 static void Launch();
-
-LRESULT CALLBACK DummyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-  return DefWindowProc(hwnd, msg, wParam, lParam);
-}
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd)
 {
@@ -80,24 +76,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return EXIT_FAILURE;
   }
 
-  WNDCLASSEX wx = {};
-  wx.cbSize        = sizeof(WNDCLASSEX);
-  wx.lpfnWndProc   = DummyWndProc;
-  wx.hInstance     = hInstance;
-  wx.lpszClassName = L"DUMMY_CLASS";
-  wx.hIcon         = LoadIcon(NULL, IDI_APPLICATION);
-  wx.hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
-  wx.hCursor       = LoadCursor(NULL, IDC_ARROW);
-  wx.hbrBackground = (HBRUSH)COLOR_APPWORKSPACE;
-  ATOM aclass;
-  if (!(aclass = RegisterClassEx(&wx)))
+  if (!CWindow::registerClass())
   {
     DEBUG_ERROR("Failed to register message window class");
     return EXIT_FAILURE;
   }
 
-  HWND msgWnd = CreateWindowEx(0, MAKEINTATOM(aclass), NULL,
-    0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
+  CWindow window;
 
   bool running = g_pipe.Init();
   while (running)
@@ -128,7 +113,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   }
   g_pipe.DeInit();
 
-  DestroyWindow(msgWnd);
   return EXIT_SUCCESS;
 }
 
