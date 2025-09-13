@@ -3,10 +3,15 @@
 #include <CDebug.h>
 
 ATOM CWindow::s_atom = 0;
+UINT CWindow::s_taskbarCreated = 0;
 static HINSTANCE hInstance = (HINSTANCE)GetModuleHandle(NULL);
 
 bool CWindow::registerClass()
 {
+  s_taskbarCreated = RegisterWindowMessage(L"TaskbarCreated");
+  if (!s_taskbarCreated)
+    DEBUG_WARN_HR(GetLastError(), "RegisterWindowMessage(TaskbarCreated)");
+
   WNDCLASSEX wx = {};
   wx.cbSize = sizeof(WNDCLASSEX);
   wx.lpfnWndProc = wndProc;
@@ -21,7 +26,7 @@ bool CWindow::registerClass()
   return s_atom;
 }
 
-CWindow::CWindow()
+CWindow::CWindow() : m_iconData({ 0 })
 {
   CreateWindowEx(0, MAKEINTATOM(s_atom), NULL,
     0, 0, 0, 0, 0, NULL, NULL, hInstance, this);
@@ -50,7 +55,38 @@ LRESULT CWindow::wndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 LRESULT CWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-  return DefWindowProc(m_hwnd, uMsg, wParam, lParam);  
+  switch (uMsg)
+  {
+  case WM_CREATE:
+    onCreate();
+    return 0;
+  default:
+    if (s_taskbarCreated && uMsg == s_taskbarCreated)
+    {
+      registerIcon();
+      return 0;
+    }
+    return DefWindowProc(m_hwnd, uMsg, wParam, lParam);
+  }
+}
+
+LRESULT CWindow::onCreate()
+{
+  registerIcon();
+  return 0;
+}
+
+void CWindow::registerIcon()
+{
+  m_iconData.cbSize = sizeof m_iconData;
+  m_iconData.hWnd = m_hwnd;
+  m_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+  m_iconData.uCallbackMessage = WM_NOTIFY_ICON;
+  m_iconData.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
+  StringCbCopy(m_iconData.szTip, sizeof m_iconData.szTip, L"Looking Glass (IDD)");
+
+  if (!Shell_NotifyIcon(NIM_ADD, &m_iconData))
+    DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_ADD)");
 }
 
 CWindow::~CWindow()
