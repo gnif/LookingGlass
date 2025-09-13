@@ -1,0 +1,61 @@
+﻿/**
+ * Looking Glass
+ * Copyright © 2017-2025 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#pragma code_page(65001)
+#include "winuser.h"
+#include "winver.h"
+#include "VersionInfo.h"
+
+IDI_APPLICATION ICON "../../resources/icon.ico"
+
+#define STRINGIFY2(s) L#s
+#define STRINGIFY(s) STRINGIFY2(s)
+#define COPYRIGHT_TEXT(year) \xa9 2017-year The Looking Glass Developers
+#define COPYRIGHT_STR(year) STRINGIFY(COPYRIGHT_TEXT(year))
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     0,0,0,0
+PRODUCTVERSION  0,0,0,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "CompanyName",      "The Looking Glass Developers"
+            VALUE "FileDescription",  "Looking Glass IDD Helper"
+            VALUE "FileVersion",      LG_VERSION_STR
+            VALUE "InternalName",     "LGIddHelper.exe"
+            VALUE "LegalCopyright",   COPYRIGHT_STR(LG_CURRENT_YEAR)
+            VALUE "OriginalFilename", "LGIddHelper.exe"
+            VALUE "ProductName",      "Looking Glass IDD Helper"
+            VALUE "ProductVersion",   LG_VERSION_STR
+        END
+    END
+
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 0
+    END
+END
