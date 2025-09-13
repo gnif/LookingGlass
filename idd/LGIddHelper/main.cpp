@@ -12,7 +12,8 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 #include "VersionInfo.h"
 #include "CPipeClient.h"
 
-#define SVCNAME "Looking Glass (IDD Helper)"
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof*(x))
+#define SVCNAME L"Looking Glass (IDD Helper)"
 
 static SERVICE_STATUS_HANDLE l_svcStatusHandle;
 static SERVICE_STATUS        l_svcStatus;
@@ -23,10 +24,10 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv);
 static void WINAPI SvcCtrlHandler(DWORD dwControl);
 static void ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD dwWaitHint);
 
-static std::string               l_executable;
+static std::wstring              l_executable;
 static HandleT<HANDLENullTraits> l_process;
 static HandleT<EventTraits>      l_exitEvent;
-static std::string               l_exitEventName;
+static std::wstring              l_exitEventName;
 
 static void Launch();
 
@@ -40,8 +41,8 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   g_debug.Init("looking-glass-iddhelper");
   DEBUG_INFO("Looking Glass IDD Helper (" LG_VERSION_STR ")");
 
-  char buffer[MAX_PATH];
-  DWORD result = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+  wchar_t buffer[MAX_PATH];
+  DWORD result = GetModuleFileName(NULL, buffer, MAX_PATH);
   if (result == 0)
   {
     DEBUG_ERROR("Failed to get the executable path");
@@ -51,24 +52,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
   int argc = 0;
   LPWSTR * wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-  std::vector<std::string> args;
+  std::vector<std::wstring> args;
   args.reserve(argc);
   for (int i = 0; i < argc; ++i)
-  {
-    size_t len = wcslen(wargv[i]);
-    size_t bufSize = (len + 1) * 2;
-    std::vector<char> buffer(bufSize);
-
-    size_t converted = 0;
-    errno_t err = wcstombs_s(&converted, buffer.data(), bufSize, wargv[i], bufSize - 1);
-    if (err != 0)
-    {
-      DEBUG_ERROR("Conversion failed");
-      return EXIT_FAILURE;
-    }
-
-    args.emplace_back(buffer.data());
-  }
+    args.emplace_back(wargv[i]);
   LocalFree(wargv);
 
   if (argc == 1)
@@ -97,7 +84,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   wx.cbSize        = sizeof(WNDCLASSEX);
   wx.lpfnWndProc   = DummyWndProc;
   wx.hInstance     = hInstance;
-  wx.lpszClassName = "DUMMY_CLASS";
+  wx.lpszClassName = L"DUMMY_CLASS";
   wx.hIcon         = LoadIcon(NULL, IDI_APPLICATION);
   wx.hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
   wx.hCursor       = LoadCursor(NULL, IDC_ARROW);
@@ -109,7 +96,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return EXIT_FAILURE;
   }
 
-  HWND msgWnd = CreateWindowExA(0, MAKEINTATOM(aclass), NULL,
+  HWND msgWnd = CreateWindowEx(0, MAKEINTATOM(aclass), NULL,
     0, 0, 0, 0, 0, NULL, NULL, hInstance, NULL);
 
   bool running = g_pipe.Init();
@@ -149,7 +136,7 @@ bool HandleService()
 {  
   SERVICE_TABLE_ENTRY DispatchTable[] =
   {
-    { (char *)SVCNAME, SvcMain },
+    { (LPWSTR) SVCNAME, SvcMain },
     { NULL, NULL }
   };
 
@@ -207,7 +194,7 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
   }
 
   UUID uuid;
-  RPC_CSTR uuidStr;
+  RPC_WSTR uuidStr;
   RPC_STATUS status = UuidCreate(&uuid);
   if (status != RPC_S_OK && status != RPC_S_UUID_LOCAL_ONLY && status != RPC_S_UUID_NO_ADDRESS)
   {
@@ -218,8 +205,8 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
 
   if (UuidToString(&uuid, &uuidStr) == RPC_S_OK)
   {
-    l_exitEventName = "Global\\";
-    l_exitEventName += (const char *)uuidStr;
+    l_exitEventName = L"Global\\";
+    l_exitEventName += (wchar_t*) uuidStr;
     RpcStringFree(&uuidStr);
 
     l_exitEvent.Attach(CreateEvent(NULL, FALSE, FALSE, l_exitEventName.c_str()));
@@ -321,7 +308,7 @@ static void ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD d
 
 //static void 
 
-static bool EnablePriv(const char * name)
+static bool EnablePriv(LPCWSTR name)
 {
   TOKEN_PRIVILEGES tp = { 0 };
   LUID luid;
@@ -334,7 +321,7 @@ static bool EnablePriv(const char * name)
     return false;
   }
 
-  if (!LookupPrivilegeValueA(NULL, name, &luid))
+  if (!LookupPrivilegeValue(NULL, name, &luid))
   {
     DEBUG_ERROR_HR(GetLastError(), "LookupPrivilegeValue %s", name);
     return false;
@@ -353,7 +340,7 @@ static bool EnablePriv(const char * name)
   return true;
 }
 
-static void DisablePriv(const char * name)
+static void DisablePriv(LPCWSTR name)
 {
   TOKEN_PRIVILEGES tp = {0};
   LUID luid;
@@ -366,7 +353,7 @@ static void DisablePriv(const char * name)
     return;
   }
 
-  if (!LookupPrivilegeValueA(NULL, name, &luid))
+  if (!LookupPrivilegeValue(NULL, name, &luid))
   {
     DEBUG_ERROR_HR(GetLastError(), "LookupPrivilegeValue %s", name);
     return;
@@ -434,21 +421,16 @@ static void Launch()
   si.cb          = sizeof(si);
   si.dwFlags     = STARTF_USESHOWWINDOW;
   si.wShowWindow = SW_SHOW;
-  si.lpDesktop   = (LPSTR)"WinSta0\\Default";
+  si.lpDesktop   = (LPWSTR) L"WinSta0\\Default";
 
-  char * cmdLine = NULL;
-  char cmdBuf[128];
+  wchar_t cmdBuf[128] = { 0 };
   if (l_exitEvent.IsValid())
-  {
-    snprintf(cmdBuf, sizeof(cmdBuf), "LGIddHelper.exe %s",
-      l_exitEventName.c_str());
-    cmdLine = cmdBuf;
-  }
+    _snwprintf_s(cmdBuf, ARRAY_SIZE(cmdBuf), L"LGIddHelper.exe %s", l_exitEventName.c_str());
 
-  if (!CreateProcessAsUserA(
+  if (!CreateProcessAsUser(
     token.Get(),
     l_executable.c_str(),
-    cmdLine,
+    cmdBuf,
     NULL,
     NULL,
     FALSE,
