@@ -50,49 +50,6 @@ void debugWinError(const wchar_t *desc, HRESULT status)
   LocalFree(buffer);
 }
 
-static bool resolveSidFromName(PCWSTR account, PSID* ppSid)
-{
-  *ppSid = NULL;
-  DWORD cbSid = 0, cchRefDom = 0, dwError;
-  SID_NAME_USE use;
-
-  LookupAccountNameW(NULL, account, NULL, &cbSid, NULL, &cchRefDom, &use);
-  dwError = GetLastError();
-
-  if (dwError != ERROR_INSUFFICIENT_BUFFER)
-  {
-    debugWinError(L"LookupAccountNameW buffer calculation", dwError);
-    return false;
-  }
-
-  PSID sid = malloc(cbSid);
-  if (!sid)
-  {
-    fwprintf(stderr, L"out of memory\n");
-    return false;
-  }
-
-  PWSTR refDom = malloc(cchRefDom * sizeof(WCHAR));
-  if (!refDom)
-  {
-    fwprintf(stderr, L"out of memory\n");
-    free(sid);
-    return false;
-  }
-
-  if (!LookupAccountNameW(NULL, account, sid, &cbSid, refDom, &cchRefDom, &use))
-  {
-    debugWinError(L"LookupAccountNameW", GetLastError());
-    free(refDom);
-    free(sid);
-    return false;
-  }
-
-  free(refDom);
-  *ppSid = sid;
-  return true;
-}
-
 bool ensureKeyWithAce()
 {
   bool result = false;
@@ -104,7 +61,7 @@ bool ensureKeyWithAce()
   PACL oldDacl = NULL;
   PSECURITY_DESCRIPTOR psd = NULL;
   PACL newDacl = NULL;
-  PSID sid = NULL;
+  PSID pSid = NULL;
 
   DWORD ec = RegCreateKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, NULL, 0, sam, NULL, &hKey, &disp);
   if (ec != ERROR_SUCCESS)
@@ -120,15 +77,20 @@ bool ensureKeyWithAce()
     goto cleanup;
   }
 
-  if (!resolveSidFromName(accountName, &sid))
+  pSid = malloc(SECURITY_MAX_SID_SIZE);
+  DWORD cbSid = SECURITY_MAX_SID_SIZE;
+  if (!CreateWellKnownSid(WinUserModeDriversSid, NULL, pSid, &cbSid))
+  {
+    debugWinError(L"CreateWellKnownSid", GetLastError());
     goto cleanup;
+  }
 
   EXPLICIT_ACCESSW ea = {0};
   ea.grfAccessPermissions = KEY_ALL_ACCESS;
   ea.grfAccessMode        = GRANT_ACCESS;
   ea.grfInheritance       = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
   ea.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
-  ea.Trustee.ptstrName    = (LPWSTR)sid;
+  ea.Trustee.ptstrName    = (LPWSTR)pSid;
 
   ec = SetEntriesInAclW(1, &ea, oldDacl, &newDacl);
   if (ec != ERROR_SUCCESS)
@@ -151,7 +113,7 @@ bool ensureKeyWithAce()
 
   cleanup:
   if (newDacl) LocalFree(newDacl);
-  if (sid)     free(sid);
+  if (pSid)    free(pSid);
   if (psd)     LocalFree(psd);
   RegCloseKey(hKey);
 
