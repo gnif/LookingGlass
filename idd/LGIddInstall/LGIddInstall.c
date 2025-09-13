@@ -9,12 +9,15 @@
 #include <setupapi.h>
 #include <shlwapi.h>
 #include <newdev.h>
+#include <sddl.h>
+#include <aclapi.h>
 
 #define LGIDD_CLASS_GUID GUID_DEVCLASS_DISPLAY
 #define LGIDD_CLASS_NAME L"Display"
 #define LGIDD_HWID L"Root\\LGIdd"
 #define LGIDD_HWID_MULTI_SZ (LGIDD_HWID "\0")
 #define LGIDD_INF_NAME L"LGIdd.inf"
+#define LGIDD_REGKEY L"Software\\LookingGlass\\IDD"
 
 void usage(wchar_t *program)
 {
@@ -45,6 +48,111 @@ void debugWinError(const wchar_t *desc, HRESULT status)
 
   fwprintf(stderr, L"%s: 0x%08lx: %s\n", desc, status, buffer);
   LocalFree(buffer);
+}
+
+static DWORD resolveSidFromName(PCWSTR account, PSID* ppSid)
+{
+  *ppSid = NULL;
+  DWORD cbSid = 0, cchRefDom = 0;
+  SID_NAME_USE use;
+
+  LookupAccountNameW(NULL, account, NULL, &cbSid, NULL, &cchRefDom, &use);
+
+  if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+    return GetLastError();
+
+  PSID sid = (PSID)LocalAlloc(LMEM_FIXED, cbSid);
+  if (!sid)
+    return ERROR_OUTOFMEMORY;
+
+  PWSTR refDom = (PWSTR)LocalAlloc(LMEM_FIXED, cchRefDom * sizeof(WCHAR));
+  if (!refDom)
+  {
+    LocalFree(sid); return ERROR_OUTOFMEMORY;
+  }
+
+  if (!LookupAccountNameW(NULL, account, sid, &cbSid, refDom, &cchRefDom, &use))
+  {
+    DWORD ec = GetLastError();
+    LocalFree(refDom);
+    LocalFree(sid);
+    return ec;
+  }
+
+  LocalFree(refDom);
+  *ppSid = sid;
+  return ERROR_SUCCESS;
+}
+
+DWORD ensureKeyWithAce()
+{
+  const PCWSTR accountName = L"NT AUTHORITY\\USER MODE DRIVERS";
+
+  HKEY hKey = NULL;
+  DWORD disp = 0;
+  REGSAM sam = KEY_READ | KEY_WRITE | WRITE_DAC | READ_CONTROL | KEY_WOW64_64KEY;
+
+  DWORD ec = RegCreateKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, NULL, 0, sam, NULL, &hKey, &disp);
+  if (ec != ERROR_SUCCESS)
+    return ec;
+
+  PACL oldDacl = NULL;
+  PSECURITY_DESCRIPTOR psd = NULL;
+  ec = GetSecurityInfo(hKey, SE_REGISTRY_KEY, DACL_SECURITY_INFORMATION, NULL, NULL, &oldDacl, NULL, &psd);
+  if (ec != ERROR_SUCCESS)
+  {
+    RegCloseKey(hKey);
+    return ec;
+  }
+
+  PSID sid = NULL;
+  ec = resolveSidFromName(accountName, &sid);
+  if (ec != ERROR_SUCCESS)
+  {
+    LocalFree(psd);
+    RegCloseKey(hKey);
+    return ec;
+  }
+
+  EXPLICIT_ACCESSW ea = {0};
+  ea.grfAccessPermissions = KEY_ALL_ACCESS;
+  ea.grfAccessMode        = GRANT_ACCESS;
+  ea.grfInheritance       = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+  ea.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+  ea.Trustee.ptstrName    = (LPWSTR)sid;
+
+  PACL newDacl = NULL;
+  ec = SetEntriesInAclW(1, &ea, oldDacl, &newDacl);
+  if (ec != ERROR_SUCCESS)
+  {
+    LocalFree(sid);
+    LocalFree(psd);
+    RegCloseKey(hKey);
+    return ec;
+  }
+
+  ec = SetSecurityInfo(hKey, SE_REGISTRY_KEY,
+    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+    sid, NULL, newDacl, NULL);
+
+  if (newDacl) LocalFree(newDacl);
+  if (sid)     LocalFree(sid);
+  if (psd)     LocalFree(psd);
+  RegCloseKey(hKey);
+
+  return ec;
+}
+
+DWORD deleteKeyTreeHKLM()
+{
+  HKEY h;
+  DWORD ec = RegOpenKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_WRITE | KEY_WOW64_64KEY, &h);
+  if (ec != ERROR_SUCCESS)
+    return ec;
+
+  ec = RegDeleteTreeW(h, NULL);
+  RegCloseKey(h);
+  return ec;
 }
 
 typedef bool (*IDD_FOUND_PROC)(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void *pContext);
@@ -142,6 +250,13 @@ enum DeviceCreated isIddDeviceCreated()
 
 bool createIddDevice(void)
 {
+  DWORD ec = ensureKeyWithAce();
+  if (ec != ERROR_SUCCESS)
+  {
+    debugWinError(L"ensureKeyWithAce", ec);
+    return false;
+  }
+
   HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(&LGIDD_CLASS_GUID, NULL);
   if (hDevInfo == INVALID_HANDLE_VALUE)
   {
@@ -220,6 +335,13 @@ uninstall:
       debugWinError(L"DiUninstallDriverW", GetLastError());
   }
 
+  DWORD ec = deleteKeyTreeHKLM();
+  if (ec != ERROR_SUCCESS)
+  {
+    debugWinError(L"deleteKeyTreeHKLM failed", ec);
+    // this is non-fatal
+  }
+
   return true;
 }
 
@@ -261,6 +383,13 @@ bool installIddInf(PBOOL pbNeedRestart)
 
   if (!getIddInfPath(szInf))
     return false;
+
+  DWORD ec = ensureKeyWithAce();
+  if (ec != ERROR_SUCCESS)
+  {
+    debugWinError(L"ensureKeyWithAce", ec);
+    return false;
+  }
 
   if (!DiInstallDriverW(NULL, szInf, DIIRFLAG_FORCE_INF, pbNeedRestart))
   {
