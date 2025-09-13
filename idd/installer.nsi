@@ -25,6 +25,8 @@
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 !include "Sections.nsh"
+!include "AccessControl.nsh"
+!include "x64.nsh"
 
 ;Settings
 Name "Looking Glass (IDD)"
