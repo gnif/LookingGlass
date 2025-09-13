@@ -121,6 +121,32 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+!macro CreateDriverRegKey
+
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
+
+  ; Create just the key
+  WriteRegStr HKLM "Software\\LookingGlass\\IDD" "" ""
+
+  ; Grant FullAccess to SYSTEM (SID S-1-5-18)
+  AccessControl::GrantOnRegKey HKLM "Software\\LookingGlass\\IDD" "(S-1-5-18)" "FullAccess"
+  Pop $R0
+
+!macroend
+
+!macro RemoveDriverRegKey
+
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
+
+  ; Remove the entire key
+  DeleteRegKey HKLM "Software\\LookingGlass"
+
+!macroend
+
 ;Install 
 !ifdef IVSHMEM
 Section "IVSHMEM Driver" Section0
@@ -190,6 +216,7 @@ Section "!Indirect Display Driver (IDD)" Section1
   !insertmacro StopLGIddHelper
 
   DetailPrint "Installing IDD"
+  !insertmacro CreateDriverRegKey
   nsExec::ExecToLog '"$INSTDIR\LGIddInstall.exe" install'
 
   Pop $0
@@ -206,6 +233,7 @@ Section "Uninstall" Section6
 
   DetailPrint "Uninstalling IDD"
   nsExec::ExecToLog '"$INSTDIR\LGIddInstall.exe" uninstall'
+  !insertmacro RemoveDriverRegKey
 
   DetailPrint "Clean up helper service"
   nsExec::Exec 'sc.exe delete LGIddHelper'
