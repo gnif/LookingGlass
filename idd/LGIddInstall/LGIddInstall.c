@@ -50,69 +50,78 @@ void debugWinError(const wchar_t *desc, HRESULT status)
   LocalFree(buffer);
 }
 
-static DWORD resolveSidFromName(PCWSTR account, PSID* ppSid)
+static bool resolveSidFromName(PCWSTR account, PSID* ppSid)
 {
   *ppSid = NULL;
-  DWORD cbSid = 0, cchRefDom = 0;
+  DWORD cbSid = 0, cchRefDom = 0, dwError;
   SID_NAME_USE use;
 
   LookupAccountNameW(NULL, account, NULL, &cbSid, NULL, &cchRefDom, &use);
+  dwError = GetLastError();
 
-  if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-    return GetLastError();
+  if (dwError != ERROR_INSUFFICIENT_BUFFER)
+  {
+    debugWinError(L"LookupAccountNameW buffer calculation", dwError);
+    return false;
+  }
 
-  PSID sid = (PSID)LocalAlloc(LMEM_FIXED, cbSid);
+  PSID sid = malloc(cbSid);
   if (!sid)
-    return ERROR_OUTOFMEMORY;
+  {
+    fwprintf(stderr, L"out of memory\n");
+    return false;
+  }
 
-  PWSTR refDom = (PWSTR)LocalAlloc(LMEM_FIXED, cchRefDom * sizeof(WCHAR));
+  PWSTR refDom = malloc(cchRefDom * sizeof(WCHAR));
   if (!refDom)
   {
-    LocalFree(sid); return ERROR_OUTOFMEMORY;
+    fwprintf(stderr, L"out of memory\n");
+    free(sid);
+    return false;
   }
 
   if (!LookupAccountNameW(NULL, account, sid, &cbSid, refDom, &cchRefDom, &use))
   {
-    DWORD ec = GetLastError();
-    LocalFree(refDom);
-    LocalFree(sid);
-    return ec;
+    debugWinError(L"LookupAccountNameW", GetLastError());
+    free(refDom);
+    free(sid);
+    return false;
   }
 
-  LocalFree(refDom);
+  free(refDom);
   *ppSid = sid;
-  return ERROR_SUCCESS;
+  return true;
 }
 
-DWORD ensureKeyWithAce()
+bool ensureKeyWithAce()
 {
+  bool result = false;
   const PCWSTR accountName = L"NT AUTHORITY\\USER MODE DRIVERS";
 
   HKEY hKey = NULL;
   DWORD disp = 0;
   REGSAM sam = KEY_READ | KEY_WRITE | WRITE_DAC | READ_CONTROL | KEY_WOW64_64KEY;
+  PACL oldDacl = NULL;
+  PSECURITY_DESCRIPTOR psd = NULL;
+  PACL newDacl = NULL;
+  PSID sid = NULL;
 
   DWORD ec = RegCreateKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, NULL, 0, sam, NULL, &hKey, &disp);
   if (ec != ERROR_SUCCESS)
-    return ec;
+  {
+    debugWinError(L"RegCreateKeyExW", ec);
+    return false;
+  }
 
-  PACL oldDacl = NULL;
-  PSECURITY_DESCRIPTOR psd = NULL;
   ec = GetSecurityInfo(hKey, SE_REGISTRY_KEY, DACL_SECURITY_INFORMATION, NULL, NULL, &oldDacl, NULL, &psd);
   if (ec != ERROR_SUCCESS)
   {
-    RegCloseKey(hKey);
-    return ec;
+    debugWinError(L"GetSecurityInfo", ec);
+    goto cleanup;
   }
 
-  PSID sid = NULL;
-  ec = resolveSidFromName(accountName, &sid);
-  if (ec != ERROR_SUCCESS)
-  {
-    LocalFree(psd);
-    RegCloseKey(hKey);
-    return ec;
-  }
+  if (!resolveSidFromName(accountName, &sid))
+    goto cleanup;
 
   EXPLICIT_ACCESSW ea = {0};
   ea.grfAccessPermissions = KEY_ALL_ACCESS;
@@ -121,26 +130,32 @@ DWORD ensureKeyWithAce()
   ea.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
   ea.Trustee.ptstrName    = (LPWSTR)sid;
 
-  PACL newDacl = NULL;
   ec = SetEntriesInAclW(1, &ea, oldDacl, &newDacl);
   if (ec != ERROR_SUCCESS)
   {
-    LocalFree(sid);
-    LocalFree(psd);
-    RegCloseKey(hKey);
-    return ec;
+    debugWinError(L"SetEntriesInAclW", ec);
+    goto cleanup;
   }
 
   ec = SetSecurityInfo(hKey, SE_REGISTRY_KEY,
     DACL_SECURITY_INFORMATION,
     NULL, NULL, newDacl, NULL);
 
+  if (ec != ERROR_SUCCESS)
+  {
+    debugWinError(L"SetSecurityInfo", ec);
+    goto cleanup;
+  }
+
+  result = true;
+
+  cleanup:
   if (newDacl) LocalFree(newDacl);
-  if (sid)     LocalFree(sid);
+  if (sid)     free(sid);
   if (psd)     LocalFree(psd);
   RegCloseKey(hKey);
 
-  return ec;
+  return result;
 }
 
 DWORD deleteKeyTreeHKLM()
@@ -397,13 +412,9 @@ void install()
 
     // fallthrough
   case DEVICE_CREATED:
-    _putws("Preparing registry key...");
-    DWORD ec = ensureKeyWithAce();
-    if (ec != ERROR_SUCCESS)
-    {
-      debugWinError(L"ensureKeyWithAce", ec);
+    _putws(L"Preparing registry key...");
+    if (!ensureKeyWithAce())
       exit(1);
-    }
 
     _putws(L"Installing INF...");
     BOOL bNeedRestart;
