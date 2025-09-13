@@ -178,11 +178,13 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CPipeClient.cpp" />
+    <ClCompile Include="CWindow.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CPipeClient.h" />
+    <ClInclude Include="CWindow.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
