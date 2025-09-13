@@ -68,10 +68,12 @@ Function ShowHelpMessage
   !define line2 "/S - silent install (must be uppercase)$\r$\n"
   !define line3 "/D=path\to\install\folder - Change install directory$\r$\n"
   !define line4 "   (Must be uppercase, the last option given and no quotes)$\r$\n$\r$\n"
-  !define line5 "/startmenu - create start menu shortcut$\r$\n"
-  !define line6 "/desktop - create desktop shortcut$\r$\n"
-  !define line7 "/noservice - do not create a service to auto start and elevate the host"
-  MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}${line6}${line7}"
+!ifdef IVSHMEM
+  !define line5 "/ivshmem - install the IVSHMEM driver$\r$\n"
+!else
+  !define line5 ""
+!endif
+  MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}"
   Abort
 FunctionEnd
 
@@ -100,7 +102,7 @@ Function .onInit
   Push $R0
 
 !ifdef IVSHMEM
-  ${GetOptions} $cmdLineParams '/driver' $R0
+  ${GetOptions} $cmdLineParams '/ivshmem' $R0
   IfErrors +2 0
   StrCpy $option_ivshmem 1
 !endif
