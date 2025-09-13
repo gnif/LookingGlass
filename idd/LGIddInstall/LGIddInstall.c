@@ -250,13 +250,6 @@ enum DeviceCreated isIddDeviceCreated()
 
 bool createIddDevice(void)
 {
-  DWORD ec = ensureKeyWithAce();
-  if (ec != ERROR_SUCCESS)
-  {
-    debugWinError(L"ensureKeyWithAce", ec);
-    return false;
-  }
-
   HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(&LGIDD_CLASS_GUID, NULL);
   if (hDevInfo == INVALID_HANDLE_VALUE)
   {
@@ -384,13 +377,6 @@ bool installIddInf(PBOOL pbNeedRestart)
   if (!getIddInfPath(szInf))
     return false;
 
-  DWORD ec = ensureKeyWithAce();
-  if (ec != ERROR_SUCCESS)
-  {
-    debugWinError(L"ensureKeyWithAce", ec);
-    return false;
-  }
-
   if (!DiInstallDriverW(NULL, szInf, DIIRFLAG_FORCE_INF, pbNeedRestart))
   {
     debugWinError(L"DiInstallDriverW", GetLastError());
@@ -407,14 +393,22 @@ void install()
   case DEVICE_NOT_CREATED:
     wprintf(L"Creating LGIdd device: %s...\n", LGIDD_HWID);
     if (!createIddDevice())
-      return;
+      exit(1);
 
     // fallthrough
   case DEVICE_CREATED:
+    _putws("Preparing registry key...");
+    DWORD ec = ensureKeyWithAce();
+    if (ec != ERROR_SUCCESS)
+    {
+      debugWinError(L"ensureKeyWithAce", ec);
+      exit(1);
+    }
+
     _putws(L"Installing INF...");
     BOOL bNeedRestart;
     if (!installIddInf(&bNeedRestart))
-      return;
+      exit(1);
 
     if (bNeedRestart)
     {
