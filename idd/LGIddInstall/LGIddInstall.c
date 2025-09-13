@@ -132,8 +132,8 @@ DWORD ensureKeyWithAce()
   }
 
   ec = SetSecurityInfo(hKey, SE_REGISTRY_KEY,
-    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-    sid, NULL, newDacl, NULL);
+    DACL_SECURITY_INFORMATION,
+    NULL, NULL, newDacl, NULL);
 
   if (newDacl) LocalFree(newDacl);
   if (sid)     LocalFree(sid);
