@@ -68,76 +68,69 @@ void CSettings::LoadModes()
     }
 }
 
-void CSettings::SetExtraMode(const DisplayMode & mode)
+void CSettings::SetExtraMode(const DisplayMode& mode)
 {
   WCHAR buf[64];
   _snwprintf_s(buf, _countof(buf), _TRUNCATE, L"%ux%u@%u%s",
-    mode.width, mode.height, mode.refresh, mode.preferred ? L"*" : L"");
+    mode.width, mode.height, mode.refresh,
+    mode.preferred ? L"*" : L"");
 
-  WDFKEY paramsKey = nullptr;
-  NTSTATUS status = WdfDriverOpenParametersRegistryKey(
-    WdfGetDriver(),
+  HKEY  hKey = NULL;
+  DWORD disp = 0;
+  LONG  ec = RegCreateKeyExW(
+    HKEY_LOCAL_MACHINE,
+    L"Software\\LookingGlass\\IDD",
+    0, NULL, REG_OPTION_NON_VOLATILE,
     KEY_SET_VALUE,
-    WDF_NO_OBJECT_ATTRIBUTES,
-    &paramsKey
-  );
-  if (!NT_SUCCESS(status)) return;
+    NULL, &hKey, &disp);
 
-  UNICODE_STRING valName;
-  RtlInitUnicodeString(&valName, L"ExtraMode");
-
-  UNICODE_STRING uData;
-  RtlInitUnicodeString(&uData, buf);
-
-  WDFSTRING hStr = nullptr;
-  status = WdfStringCreate(&uData, WDF_NO_OBJECT_ATTRIBUTES, &hStr);
-  if (NT_SUCCESS(status)) {
-    status = WdfRegistryAssignString(paramsKey, &valName, hStr);
-    WdfObjectDelete(hStr);
+  if (ec != ERROR_SUCCESS)
+  {
+    DEBUG_INFO("Failed to write key");
+    return;
   }
 
-  WdfRegistryClose(paramsKey);
+  const WCHAR* valueName = L"ExtraMode";
+  const DWORD  cb = (DWORD)((wcslen(buf) + 1) * sizeof(WCHAR));
+
+  RegSetValueExW(hKey, valueName, 0, REG_SZ, (const BYTE*)buf, cb);
+  RegCloseKey(hKey);
 }
 
-bool CSettings::GetExtraMode(DisplayMode & mode)
+bool CSettings::GetExtraMode(DisplayMode& mode)
 {
-  WDFKEY paramsKey = nullptr;
-  NTSTATUS st = WdfDriverOpenParametersRegistryKey(
-    WdfGetDriver(),
+  HKEY hKey = nullptr;
+  LONG ec = RegOpenKeyExW(
+    HKEY_LOCAL_MACHINE,
+    L"Software\\LookingGlass\\IDD",
+    0,
     KEY_QUERY_VALUE,
-    WDF_NO_OBJECT_ATTRIBUTES,
-    &paramsKey
+    &hKey
   );
-  if (!NT_SUCCESS(st))
+
+  if (ec != ERROR_SUCCESS)
     return false;
 
-  UNICODE_STRING name;  RtlInitUnicodeString(&name, L"ExtraMode");
-  UNICODE_STRING empty; RtlInitUnicodeString(&empty, L"");
+  DWORD type = 0;
+  DWORD cb = 0;
 
-  WDFSTRING hStr = nullptr;
-  st = WdfStringCreate(&empty, WDF_NO_OBJECT_ATTRIBUTES, &hStr);
-  if (!NT_SUCCESS(st))
+  ec = RegQueryValueExW(hKey, L"ExtraMode", nullptr, &type, nullptr, &cb);
+  if (ec != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || cb == 0)
   {
-    WdfRegistryClose(paramsKey);
+    RegCloseKey(hKey);
     return false;
   }
 
-  st = WdfRegistryQueryString(paramsKey, &name, hStr);
-  if (!NT_SUCCESS(st))
-  {
-    WdfObjectDelete(hStr);
-    WdfRegistryClose(paramsKey);
+  std::vector<wchar_t> buf(cb / sizeof(wchar_t) + 1);
+  ec = RegQueryValueExW(hKey, L"ExtraMode", nullptr, &type,
+    reinterpret_cast<LPBYTE>(buf.data()), &cb);
+  RegCloseKey(hKey);
+  if (ec != ERROR_SUCCESS)
     return false;
-  }
 
-  UNICODE_STRING us{};
-  WdfStringGetUnicodeString(hStr, &us);
+  buf.back() = L'\0';
 
-  std::wstring s(us.Buffer, us.Length / sizeof(wchar_t));
-
-  WdfObjectDelete(hStr);
-  WdfRegistryClose(paramsKey);
-
+  std::wstring s(buf.data());
   return ParseModeString(s, mode);
 }
 
