@@ -47,6 +47,8 @@ LRESULT CWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     return onClose();
   case WM_DESTROY:
     return onDestroy();
+  case WM_NCDESTROY:
+    return onFinal();
   default:
     return DefWindowProc(m_hwnd, uMsg, wParam, lParam);
   }
@@ -67,13 +69,16 @@ LRESULT CWindow::onDestroy()
   return 0;
 }
 
+LRESULT CWindow::onFinal()
+{
+  m_hwnd = 0;
+  return 0;
+}
+
 void CWindow::destroy()
 {
   if (m_hwnd)
-  {
     DestroyWindow(m_hwnd);
-    m_hwnd = NULL;
-  }
 }
 
 CWindow::~CWindow()

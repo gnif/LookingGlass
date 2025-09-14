@@ -1,7 +1,8 @@
 ﻿#pragma once
 #include "CWindow.h"
+#include <memory>
 
-#define WM_NOTIFY_ICON (WM_USER)
+class CConfigWindow;
 
 class CNotifyWindow : public CWindow
 {
@@ -11,6 +12,7 @@ class CNotifyWindow : public CWindow
   NOTIFYICONDATA m_iconData;
   HMENU m_menu;
   bool closeRequested;
+  std::unique_ptr<CConfigWindow> m_config;
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
@@ -18,6 +20,7 @@ class CNotifyWindow : public CWindow
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
   virtual LRESULT onClose() override;
+  virtual LRESULT onFinal() override;
 
 public:
   CNotifyWindow();

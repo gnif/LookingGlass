@@ -1,9 +1,14 @@
 ﻿#include "CNotifyWindow.h"
+#include "CConfigWindow.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
 
+#define WM_NOTIFY_ICON (WM_USER)
+#define WM_CLEAN_UP_CONFIG (WM_USER+1)
+
 #define ID_MENU_SHOW_LOG 3000
+#define ID_MENU_SHOW_CONFIG 3001
 
 ATOM CNotifyWindow::s_atom = 0;
 UINT CNotifyWindow::s_taskbarCreated = 0;
@@ -31,6 +36,7 @@ CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_menu(CreatePopupMenu()),
   if (m_menu)
   {
     AppendMenu(m_menu, MF_STRING, ID_MENU_SHOW_LOG, L"Open log directory");
+    AppendMenu(m_menu, MF_STRING, ID_MENU_SHOW_CONFIG, L"Open configuration");
   }
 }
 
@@ -43,11 +49,15 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   switch (uMsg)
   {
-  case WM_NCDESTROY:
-    PostQuitMessage(0);
-    return 0;
   case WM_NOTIFY_ICON:
     return onNotifyIcon(LOWORD(lParam), HIWORD(lParam), GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam));
+  case WM_CLEAN_UP_CONFIG:
+    if (m_config && !m_config->hwnd())
+    {
+      DEBUG_INFO("Config window closed");
+      m_config.reset();
+    }
+    return 0;
   default:
     if (s_taskbarCreated && uMsg == s_taskbarCreated)
     {
@@ -71,6 +81,12 @@ LRESULT CNotifyWindow::onClose()
   return 0;
 }
 
+LRESULT CNotifyWindow::onFinal()
+{
+  PostQuitMessage(0);
+  return CWindow::onFinal();
+}
+
 LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
 {
   switch (uEvent)
@@ -80,6 +96,14 @@ LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
     {
     case ID_MENU_SHOW_LOG:
       ShellExecute(m_hwnd, L"open", g_debug.logDir(), NULL, NULL, SW_NORMAL);
+      break;
+    case ID_MENU_SHOW_CONFIG:
+      DEBUG_INFO("Config window opened");
+      m_config.reset(new CConfigWindow());
+      m_config->onDestroy([this]() {
+        PostMessage(m_hwnd, WM_CLEAN_UP_CONFIG, 0, 0);
+      });
+      ShowWindow(*m_config, SW_NORMAL);
       break;
     }
     break;

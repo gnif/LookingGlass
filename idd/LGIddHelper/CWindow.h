@@ -7,11 +7,12 @@
 class CWindow {
   static LRESULT CALLBACK wndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
+protected:
   virtual LRESULT onCreate();
   virtual LRESULT onClose();
   virtual LRESULT onDestroy();
+  virtual LRESULT onFinal();
 
-protected:
   static HINSTANCE hInstance;
   static void populateWindowClass(WNDCLASSEX &wx);
 
@@ -24,4 +25,5 @@ public:
   void destroy();
 
   HWND hwnd() { return m_hwnd; }
+  operator HWND() { return m_hwnd; }
 };

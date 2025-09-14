@@ -13,6 +13,7 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 #include "VersionInfo.h"
 #include "CPipeClient.h"
 #include "CNotifyWindow.h"
+#include "CConfigWindow.h"
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof*(x))
 #define SVCNAME L"Looking Glass (IDD Helper)"
@@ -83,6 +84,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   if (!CNotifyWindow::registerClass())
   {
     DEBUG_ERROR("Failed to register message window class");
+    return EXIT_FAILURE;
+  }
+
+  if (!CConfigWindow::registerClass())
+  {
+    DEBUG_ERROR("Failed to register config window class");
     return EXIT_FAILURE;
   }
 
