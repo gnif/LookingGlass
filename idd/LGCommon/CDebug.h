@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2025 The Looking Glass Authors
  * https://looking-glass.io
@@ -27,7 +27,7 @@ class CDebug
 {
   private:
     std::ofstream m_stream;
-    void Write(const char * line);
+    void Write(const wchar_t *line);
 
   public:
 
@@ -44,22 +44,18 @@ class CDebug
       LEVEL_MAX
     };
 
-    void Init(const char * name);
-    void Log_va(CDebug::Level level, const char* function, int line, const char* fmt, va_list args);
-    void Log(CDebug::Level level, const char * function, int line, const char * fmt, ...);
-    void LogHR(CDebug::Level level, HRESULT hr, const char* function, int line, const char* fmt, ...);
+    void Init(const wchar_t * name);
+    void Log_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args);
+    void Log(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...);
+    void Log_va(CDebug::Level level, const char *function, int line, const char *fmt, va_list args);
+    void Log(CDebug::Level level, const char *function, int line, const char *fmt, ...);
+    void LogHR(CDebug::Level level, HRESULT hr, const char *function, int line, const char *fmt, ...);
+    void LogHR(CDebug::Level level, HRESULT hr, const char *function, int line, const wchar_t *fmt, ...);
 
   private:
-    const char* m_levelStr[LEVEL_MAX] =
-    {
-      " ",
-      "I",
-      "W",
-      "E",
-      "T",
-      "!",
-      "F"
-    };
+    void LogStr(CDebug::Level level, const char *function, int line, bool wide, const void *str);
+    void LogStrHR(CDebug::Level level, HRESULT hr, const char *function, int line, bool wide, const void *str);
+    static const char *s_levelStr[LEVEL_MAX];
 };
 
 extern CDebug g_debug;

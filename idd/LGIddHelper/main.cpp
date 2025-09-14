@@ -52,7 +52,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
   if (argc == 1)
   {
-    g_debug.Init("looking-glass-idd-service");
+    g_debug.Init(L"looking-glass-idd-service");
     DEBUG_INFO("Looking Glass IDD Helper Service (" LG_VERSION_STR ")");
     if (!HandleService())
       return EXIT_FAILURE;
@@ -63,7 +63,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return EXIT_FAILURE;
 
   // child process
-  g_debug.Init("looking-glass-idd-helper");
+  g_debug.Init(L"looking-glass-idd-helper");
   DEBUG_INFO("Looking Glass IDD Helper Process (" LG_VERSION_STR ")");
 
   HandleT<HANDLENullTraits> hParent(OpenProcess(SYNCHRONIZE, FALSE, std::stoul(args[1])));

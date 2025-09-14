@@ -21,6 +21,7 @@
 #include <Windows.h>
 #include <string>
 
+#include <stdio.h>
 #include <malloc.h>
 #include <strsafe.h>
 
@@ -28,45 +29,106 @@
 
 CDebug g_debug;
 
-inline static void iso8601(char *buf, size_t count)
+const char *CDebug::s_levelStr[CDebug::LEVEL_MAX] =
+{
+  " ",
+  "I",
+  "W",
+  "E",
+  "T",
+  "!",
+  "F"
+};
+
+int vasprintf(char **pstr, const char *fmt, va_list args)
+{
+  int len = _vscprintf(fmt, args);
+  if (len < 0)
+    return -1;
+
+  char *str = (char *)malloc(len + 1);
+  if (!str)
+    return -1;
+
+  int r = vsprintf_s(str, len + 1, fmt, args);
+  if (r < 0)
+  {
+    free(str);
+    return -1;
+  }
+
+  *pstr = str;
+  return r;
+}
+
+int vaswprintf(wchar_t **pstr, const wchar_t *fmt, va_list args)
+{
+  int len = _vscwprintf(fmt, args);
+  if (len < 0)
+    return -1;
+
+  wchar_t *str = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
+  if (!str)
+    return -1;
+
+  int r = vswprintf_s(str, len + 1, fmt, args);
+  if (r < 0)
+  {
+    free(str);
+    return -1;
+  }
+
+  *pstr = str;
+  return r;
+}
+
+int aswprintf(wchar_t **pstr, const wchar_t *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int r = vaswprintf(pstr, fmt, ap);
+  va_end(ap);
+  return r;
+}
+
+inline static void iso8601(wchar_t *buf, size_t count)
 {
   struct tm utc;
   time_t unix;
   time(&unix);
   gmtime_s(&utc, &unix);
-  strftime(buf, count, "%Y-%m-%d %H:%M:%SZ", &utc);
+  wcsftime(buf, count, L"%Y-%m-%d %H:%M:%SZ", &utc);
 }
 
-void CDebug::Init(const char * name)
+void CDebug::Init(const wchar_t * name)
 {
   // don't redirect the debug output if running under a debugger
   if (IsDebuggerPresent())
     return;
 
-  std::string folder   = "C:\\ProgramData\\Looking Glass (IDD)\\";
-  std::string baseName = name;
-  std::string ext      = ".txt";
-  std::string logFile  = folder + baseName + ext;
+  std::wstring folder   = L"C:\\ProgramData\\Looking Glass (IDD)\\";
+  std::wstring baseName = name;
+  std::wstring ext      = L".txt";
+  std::wstring logFile  = folder + baseName + ext;
 
   //rotate out old logs
-  DeleteFileA((folder + baseName + ".4" + ext).c_str());
+  DeleteFileW((folder + baseName + L".4" + ext).c_str());
   for (int i = 3; i >= 0; --i)
   {
-    std::string oldPath;
-    std::string newPath;
+    std::wstring oldPath;
+    std::wstring newPath;
 
     if (i == 0)
     {
       oldPath = logFile;
-      newPath = folder + baseName + ".1" + ext;
+      newPath = folder + baseName + L".1" + ext;
     }
     else    
     {
-      oldPath = folder + baseName + "." + std::to_string(i) + ext;
-      newPath = folder + baseName + "." + std::to_string(i + 1) + ext;
+      oldPath = folder + baseName + L"." + std::to_wstring(i) + ext;
+      newPath = folder + baseName + L"." + std::to_wstring(i + 1) + ext;
     }
 
-    MoveFileA(oldPath.c_str(), newPath.c_str());
+    MoveFileW(oldPath.c_str(), newPath.c_str());
   }
 
   /// open the new log file
@@ -76,50 +138,45 @@ void CDebug::Init(const char * name)
     DEBUG_ERROR_HR(GetLastError(), "Failed to open the log file %s", logFile.c_str());
     return;
   }
-  else
-    DEBUG_INFO("Logging to: %s", logFile.c_str());
 
+  DEBUG_INFO(L"Logging to: %s", logFile.c_str());
   m_stream = std::move(stream);
 }
 
-void CDebug::Log_va(CDebug::Level level, const char* function, int line, const char* fmt, va_list args)
+void CDebug::LogStr(CDebug::Level level, const char *function, int line, bool wide, const void *str)
 {
   if (level < 0 || level >= LEVEL_MAX)
     level = LEVEL_NONE;
 
-  char timestamp[50];
-  iso8601(timestamp, sizeof timestamp);
+  wchar_t timestamp[50];
+  iso8601(timestamp, ARRAYSIZE(timestamp));
 
-  static const char* fmtTemplate = "[%s] [%s] %40s:%-4d | ";
-  const char* levelStr = m_levelStr[level];
-
-  int length = 0;
-  length = _scprintf(fmtTemplate, timestamp, levelStr, function, line);
-  length += _vscprintf(fmt, args);
-  length += 2;
-
-  /* Depending on the size of the format string, allocate space on the stack or the heap. */
-  PCHAR buffer;
-  buffer = (PCHAR)_malloca(length);
-  if (!buffer)
+  wchar_t *result;
+  if (aswprintf(&result, wide ? L"[%s] [%S] %40S:%-4d | %s\n" : L"[%s] [%S] %40S:%-4d | %S\n",
+    timestamp, s_levelStr[level], function, line, str) < 0)
+  {
+    Write(L"Out of memory while logging");
     return;
+  }
 
-  /* Populate the buffer with the contents of the format string. */
-  StringCbPrintfA(buffer, length, fmtTemplate, timestamp, levelStr, function, line);
-
-  size_t offset = 0;
-  StringCbLengthA(buffer, length, &offset);
-  StringCbVPrintfA(&buffer[offset], length - offset, fmt, args);
-
-  buffer[length - 2] = '\n';
-  buffer[length - 1] = '\0';
-
-  Write(buffer);
-
-  _freea(buffer);
+  Write(result);
+  free(result);
 }
 
-void CDebug::Log(CDebug::Level level, const char * function, int line, const char * fmt, ...)
+void CDebug::Log_va(CDebug::Level level, const char *function, int line, const char *fmt, va_list args)
+{
+  char *result;
+  if (vasprintf(&result, fmt, args) < 0)
+  {
+    Write(L"Out of memory while logging");
+    return;
+  }
+
+  LogStr(level, function, line, false, result);
+  free(result);
+}
+
+void CDebug::Log(CDebug::Level level, const char *function, int line, const char *fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
@@ -127,84 +184,112 @@ void CDebug::Log(CDebug::Level level, const char * function, int line, const cha
   va_end(args);
 }
 
-void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int line, const char * fmt, ...)
+void CDebug::Log_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args)
 {
-  if (level < 0 || level >= LEVEL_MAX)
-    level = LEVEL_NONE;
+  wchar_t *result;
+  if (vaswprintf(&result, fmt, args) < 0)
+  {
+    Write(L"Out of memory while logging");
+    return;
+  }
 
-  char * hrBuffer;
-  if (!FormatMessageA(
+  LogStr(level, function, line, true, result);
+  free(result);
+}
+
+void CDebug::Log(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  Log_va(level, function, line, fmt, args);
+  va_end(args);
+}
+
+void CDebug::LogStrHR(CDebug::Level level, HRESULT hr, const char *function, int line, bool wide, const void *str)
+{
+  wchar_t *hrBuffer;
+  if (!FormatMessageW(
     FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
     NULL,
     hr,
     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-    (char*)&hrBuffer,
+    (LPWSTR)&hrBuffer,
     1024,
     NULL
   ))
   {
-    DEBUG_INFO("FormatMessage failed with code 0x%08x", GetLastError());
-
-    va_list args;
-    va_start(args, fmt);
-    Log_va(level, function, line, fmt, args);
-    va_end(args);
+    DEBUG_ERROR("FormatMessage for 0x%08lX (%u) failed with code 0x%08x", hr, hr, GetLastError());
+    LogStr(level, function, line, wide, str);
     return;
   }
 
   // Remove trailing CRLF in hrBuffer
-  size_t len = strlen(hrBuffer);
-  while (len && (hrBuffer[len - 1] == '\n' || hrBuffer[len - 1] == '\r'))
-    hrBuffer[--len] = '\0';
+  size_t len = wcslen(hrBuffer);
+  while (len && (hrBuffer[len - 1] == L'\n' || hrBuffer[len - 1] == L'\r'))
+    hrBuffer[--len] = L'\0';
 
-  char timestamp[50];
-  iso8601(timestamp, sizeof timestamp);
-
-  static const char* fmtTemplate = "[%s] [%s] %40s:%-4d | ";
-  const char* levelStr = m_levelStr[level];
-
-  va_list args;
-  va_start(args, fmt);
-
-  int length = 0;
-  length = _scprintf(fmtTemplate, timestamp, levelStr, function, line);
-  length += _vscprintf(fmt, args);
-  length += 16 + (int)strlen(hrBuffer) + 1;
-
-  /* Depending on the size of the format string, allocate space on the stack or the heap. */
-  PCHAR buffer;
-  buffer = (PCHAR)_malloca(length);
-  if (!buffer)
+  wchar_t *result;
+  if (aswprintf(&result, wide ? L"%s (0x%08lX (%u): %s)" : L"%S (0x%08lX (%u): %s)", str, hr, hr, hrBuffer) < 0)
   {
-    va_end(args);
+    Write(L"Out of memory while logging");
     return;
   }
 
-  /* Populate the buffer with the contents of the format string. */
-  StringCbPrintfA(buffer, length, fmtTemplate, timestamp, levelStr, function, line);
-
-  size_t offset = 0;
-  StringCbLengthA(buffer, length, &offset);
-  StringCbVPrintfA(&buffer[offset], length - offset, fmt, args);
-  va_end(args);
-
-  /* append the formatted error */
-  StringCbLengthA(buffer, length, &offset);
-  StringCbPrintfA(&buffer[offset], length - offset, " (0x%08X: %s)\n", hr, hrBuffer);
-
-  Write(buffer);
-
-  _freea(buffer);
-  LocalFree(hrBuffer);
+  LogStr(level, function, line, true, result);
+  free(result);
 }
 
-void CDebug::Write(const char * line)
+void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char *function, int line, const char *fmt, ...)
 {
-  if (m_stream.is_open())
+  char *result;
+  va_list args;
+  va_start(args, fmt);
+  if (vasprintf(&result, fmt, args) < 0)
   {
-    m_stream << line;
-    m_stream.flush();
+    va_end(args);
+    Write(L"Out of memory while logging");
+    return;
   }
-  else
-    OutputDebugStringA(line);
+
+  va_end(args);
+  LogStrHR(level, hr, function, line, false, result);
+  free(result);
+}
+
+void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char *function, int line, const wchar_t *fmt, ...)
+{
+  wchar_t *result;
+  va_list args;
+  va_start(args, fmt);
+  if (vaswprintf(&result, fmt, args) < 0)
+  {
+    va_end(args);
+    Write(L"Out of memory while logging");
+    return;
+  }
+
+  va_end(args);
+  LogStrHR(level, hr, function, line, true, result);
+  free(result);
+}
+
+void CDebug::Write(const wchar_t *line)
+{
+  if (!m_stream.is_open())
+  {
+    OutputDebugStringW(line);
+    return;
+  }
+
+  DWORD cbRequired = WideCharToMultiByte(CP_UTF8, 0, line, -1, NULL, 0, NULL, NULL);
+  LPSTR utf8 = (LPSTR) malloc(cbRequired);
+  if (!utf8)
+  {
+    m_stream << "Out of memory while logging" << std::endl;
+    return;
+  }
+
+  WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8, cbRequired, NULL, NULL);
+  m_stream << utf8 << std::flush;
+  free(utf8);
 }
