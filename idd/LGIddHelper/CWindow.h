@@ -8,6 +8,8 @@ class CWindow {
   static LRESULT CALLBACK wndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
   virtual LRESULT onCreate();
+  virtual LRESULT onClose();
+  virtual LRESULT onDestroy();
 
 protected:
   static HINSTANCE hInstance;
