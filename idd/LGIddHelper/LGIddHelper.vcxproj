@@ -177,6 +177,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
+    <ClCompile Include="CConfigWindow.cpp" />
     <ClCompile Include="CNotifyWindow.cpp" />
     <ClCompile Include="CPipeClient.cpp" />
     <ClCompile Include="CWindow.cpp" />
@@ -184,6 +185,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <ClInclude Include="CConfigWindow.h" />
     <ClInclude Include="CNotifyWindow.h" />
     <ClInclude Include="CPipeClient.h" />
     <ClInclude Include="CWindow.h" />
