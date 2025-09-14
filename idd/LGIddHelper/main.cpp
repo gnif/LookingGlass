@@ -84,21 +84,31 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
   CWindow window;
 
-  bool running = g_pipe.Init();
-  while (running)
+  if (!g_pipe.Init())
   {
-    switch (MsgWaitForMultipleObjects(1, l_exitEvent.GetAddressOf(),
+    window.destroy();
+    l_exitEvent.Close();
+  }
+
+  while (true)
+  {
+    switch (MsgWaitForMultipleObjects(
+      l_exitEvent.IsValid() ? 1 : 0,
+      l_exitEvent.GetAddressOf(),
       FALSE, INFINITE, QS_ALLINPUT))
     {
       case WAIT_OBJECT_0:
-        running = false;
+        window.destroy();
+        l_exitEvent.Close();
         break;
 
       case WAIT_OBJECT_0 + 1:
       {
         MSG msg;
-        if (GetMessage(&msg, NULL, 0, 0))
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
+          if (msg.message == WM_QUIT)
+            goto exit;
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
@@ -107,10 +117,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
       case WAIT_FAILED:
         DEBUG_ERROR_HR(GetLastError(), "MsgWaitForMultipleObjects Failed");
-        running = false;
-        break;
+        goto exit;
     }    
   }
+
+exit:
   g_pipe.DeInit();
 
   return EXIT_SUCCESS;

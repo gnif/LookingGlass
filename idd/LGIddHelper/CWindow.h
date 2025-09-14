@@ -21,6 +21,7 @@ public:
   static bool registerClass();
   CWindow();
   ~CWindow();
+  void destroy();
 
   HWND hwnd() { return m_hwnd; }
 };
