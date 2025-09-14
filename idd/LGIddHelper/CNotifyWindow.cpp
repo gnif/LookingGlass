@@ -22,7 +22,8 @@ bool CNotifyWindow::registerClass()
   return s_atom;
 }
 
-CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_menu(CreatePopupMenu())
+CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_menu(CreatePopupMenu()),
+  closeRequested(false)
 {
   CreateWindowEx(0, MAKEINTATOM(s_atom), NULL,
     0, 0, 0, 0, 0, NULL, NULL, hInstance, this);
@@ -63,6 +64,13 @@ LRESULT CNotifyWindow::onCreate()
   return 0;
 }
 
+LRESULT CNotifyWindow::onClose()
+{
+  if (closeRequested)
+    destroy();
+  return 0;
+}
+
 LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
 {
   switch (uEvent)
@@ -94,4 +102,10 @@ void CNotifyWindow::registerIcon()
 
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
+}
+
+void CNotifyWindow::close()
+{
+  closeRequested = true;
+  PostMessage(m_hwnd, WM_CLOSE, 0, 0);
 }
