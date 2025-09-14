@@ -22,10 +22,25 @@
     <ClCompile Include="CPipeClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
+    <ClCompile Include="CWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CNotifyWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CPipeClient.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <ClInclude Include="CWindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CNotifyWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
