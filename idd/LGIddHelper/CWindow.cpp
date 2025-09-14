@@ -60,6 +60,9 @@ LRESULT CWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
   case WM_CREATE:
     onCreate();
     return 0;
+  case WM_NCDESTROY:
+    PostQuitMessage(0);
+    return 0;
   default:
     if (s_taskbarCreated && uMsg == s_taskbarCreated)
     {
@@ -89,8 +92,18 @@ void CWindow::registerIcon()
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_ADD)");
 }
 
-CWindow::~CWindow()
+
+void CWindow::destroy()
 {
   if (m_hwnd)
+  {
     DestroyWindow(m_hwnd);
+    m_hwnd = NULL;
+  }
+}
+
+
+CWindow::~CWindow()
+{
+  destroy();
 }
