@@ -13,8 +13,11 @@ class CWindow {
 
   HWND m_hwnd = NULL;
   NOTIFYICONDATA m_iconData;
+  HMENU m_menu;
+
   LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam);
   LRESULT onCreate();
+  LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
 
 public:
