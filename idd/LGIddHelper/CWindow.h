@@ -4,26 +4,21 @@
 #include <windows.h>
 #include <shellapi.h>
 
-#define WM_NOTIFY_ICON (WM_USER)
-
 class CWindow {
-  static ATOM s_atom;
-  static UINT s_taskbarCreated;
   static LRESULT CALLBACK wndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
-  HWND m_hwnd = NULL;
-  NOTIFYICONDATA m_iconData;
-  HMENU m_menu;
+  virtual LRESULT onCreate();
 
-  LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam);
-  LRESULT onCreate();
-  LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
-  void registerIcon();
+protected:
+  static HINSTANCE hInstance;
+  static void populateWindowClass(WNDCLASSEX &wx);
+
+  virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  HWND m_hwnd = NULL;
 
 public:
-  static bool registerClass();
-  CWindow();
-  ~CWindow();
+  virtual ~CWindow();
   void destroy();
 
   HWND hwnd() { return m_hwnd; }
