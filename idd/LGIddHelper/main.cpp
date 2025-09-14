@@ -2,6 +2,7 @@
 #include <wrl.h>
 #include <UserEnv.h>
 
+#include <cinttypes>
 #include <vector>
 #include <string>
 
@@ -27,8 +28,6 @@ static void ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD d
 
 static std::wstring              l_executable;
 static HandleT<HANDLENullTraits> l_process;
-static HandleT<EventTraits>      l_exitEvent;
-static std::wstring              l_exitEventName;
 
 static void Launch();
 
@@ -67,10 +66,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   g_debug.Init("looking-glass-idd-helper");
   DEBUG_INFO("Looking Glass IDD Helper Process (" LG_VERSION_STR ")");
 
-  l_exitEvent.Attach(OpenEvent(SYNCHRONIZE, FALSE, args[1].c_str()));
-  if (!l_exitEvent.IsValid())
+  HandleT<HANDLENullTraits> hParent(OpenProcess(SYNCHRONIZE, FALSE, std::stoul(args[1])));
+  if (!hParent.IsValid())
   {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to open the exit event: %s", args[1].c_str());
+    DEBUG_ERROR_HR(GetLastError(), "Failed to open parent process");
     return EXIT_FAILURE;
   }
 
@@ -85,44 +84,43 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   if (!g_pipe.Init())
   {
     window.destroy();
-    l_exitEvent.Close();
+    hParent.Close();
   }
 
   while (true)
   {
-    switch (MsgWaitForMultipleObjects(
-      l_exitEvent.IsValid() ? 1 : 0,
-      l_exitEvent.GetAddressOf(),
-      FALSE, INFINITE, QS_ALLINPUT))
+    DWORD dwHandles = hParent.IsValid() ? 1 : 0;
+    LPHANDLE lpHandles = hParent.GetAddressOf();
+
+    DWORD dwResult = MsgWaitForMultipleObjects(dwHandles, lpHandles, FALSE, INFINITE, QS_ALLINPUT);
+    if (dwResult == WAIT_FAILED)
     {
-      case WAIT_OBJECT_0:
-        window.destroy();
-        l_exitEvent.Close();
-        break;
-
-      case WAIT_OBJECT_0 + 1:
+      DEBUG_ERROR_HR(GetLastError(), "MsgWaitForMultipleObjects Failed");
+      g_pipe.DeInit();
+      return EXIT_FAILURE;
+    }
+    else if (dwResult == WAIT_OBJECT_0 + dwHandles)
+    {
+      MSG msg;
+      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
       {
-        MSG msg;
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-          if (msg.message == WM_QUIT)
-            goto exit;
-          TranslateMessage(&msg);
-          DispatchMessage(&msg);
-        }
-        break;
+        if (msg.message == WM_QUIT)
+          goto exit;
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
       }
-
-      case WAIT_FAILED:
-        DEBUG_ERROR_HR(GetLastError(), "MsgWaitForMultipleObjects Failed");
-        g_pipe.DeInit();
-        return EXIT_FAILURE;
+    }
+    else
+    {
+      DEBUG_INFO("Parent process exited, exiting...");
+      hParent.Close();
+      window.destroy();
     }
   }
 
 exit:
+  DEBUG_INFO("Helper window destroyed.");
   g_pipe.DeInit();
-
   return EXIT_SUCCESS;
 }
 
@@ -185,31 +183,6 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
     DEBUG_ERROR_HR(GetLastError(), "CreateEvent Failed");
     ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
     return;
-  }
-
-  UUID uuid;
-  RPC_WSTR uuidStr;
-  RPC_STATUS status = UuidCreate(&uuid);
-  if (status != RPC_S_OK && status != RPC_S_UUID_LOCAL_ONLY && status != RPC_S_UUID_NO_ADDRESS)
-  {
-    DEBUG_ERROR("UuidCreate Failed: 0x%x", status);
-    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
-    return;
-  }
-
-  if (UuidToString(&uuid, &uuidStr) == RPC_S_OK)
-  {
-    l_exitEventName = L"Global\\";
-    l_exitEventName += (wchar_t*) uuidStr;
-    RpcStringFree(&uuidStr);
-
-    l_exitEvent.Attach(CreateEvent(NULL, FALSE, FALSE, l_exitEventName.c_str()));
-    if (!l_exitEvent.IsValid())
-    {
-      DEBUG_ERROR_HR(GetLastError(), "CreateEvent Failed");
-      ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
-      return;
-    }
   }
 
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
@@ -276,7 +249,6 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
     Sleep(1000);
   }
 
-  SetEvent(l_exitEvent.Get());
   ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
 }
 
@@ -417,9 +389,17 @@ static void Launch()
   si.wShowWindow = SW_SHOW;
   si.lpDesktop   = (LPWSTR) L"WinSta0\\Default";
 
-  wchar_t cmdBuf[128] = { 0 };
-  if (l_exitEvent.IsValid())
-    _snwprintf_s(cmdBuf, ARRAY_SIZE(cmdBuf), L"LGIddHelper.exe %s", l_exitEventName.c_str());
+  HandleT<HANDLENullTraits> hProcSync;
+  if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
+    hProcSync.GetAddressOf(), SYNCHRONIZE, TRUE, 0))
+  {
+    DEBUG_ERROR("Failed to duplicate own handle for synchronization");
+    return;
+  }
+
+  wchar_t cmdBuf[128];
+  _snwprintf_s(cmdBuf, ARRAY_SIZE(cmdBuf), L"LGIddHelper.exe %" PRId32,
+    GetCurrentProcessId());
 
   if (!CreateProcessAsUser(
     token.Get(),
