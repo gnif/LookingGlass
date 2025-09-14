@@ -1,5 +1,6 @@
 ﻿#define WIN32_LEAN_AND_MEAN
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -408,6 +409,8 @@ void uninstall()
 
 int wmain(int argc, wchar_t **argv)
 {
+  _setmode(_fileno(stderr), _O_U16TEXT);
+
   if (argc != 2)
     usage(argv[0]);
 
