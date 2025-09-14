@@ -9,7 +9,7 @@
 	url = https://github.com/cimgui/cimgui.git
 [submodule "repos/wayland-protocols"]
 	path = repos/wayland-protocols
-	url = https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+	url = https://anongit.freedesktop.org/git/wayland/wayland-protocols
 [submodule "repos/nanosvg"]
 	path = repos/nanosvg
 	url = https://github.com/memononen/nanosvg.git
