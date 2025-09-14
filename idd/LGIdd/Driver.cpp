@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2025 The Looking Glass Authors
  * https://looking-glass.io
@@ -28,7 +28,7 @@
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {
-  g_debug.Init("looking-glass-idd");
+  g_debug.Init(L"looking-glass-idd");
   DEBUG_INFO("Looking Glass IDD Driver (" LG_VERSION_STR ")");
 
   NTSTATUS status = STATUS_SUCCESS;
