@@ -34,9 +34,6 @@ static void Launch();
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd)
 {
-  g_debug.Init("looking-glass-iddhelper");
-  DEBUG_INFO("Looking Glass IDD Helper (" LG_VERSION_STR ")");
-
   wchar_t buffer[MAX_PATH];
   DWORD result = GetModuleFileName(NULL, buffer, MAX_PATH);
   if (result == 0)
@@ -56,18 +53,19 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
   if (argc == 1)
   {
+    g_debug.Init("looking-glass-idd-service");
+    DEBUG_INFO("Looking Glass IDD Helper Service (" LG_VERSION_STR ")");
     if (!HandleService())
       return EXIT_FAILURE;
     return EXIT_SUCCESS;
   }
 
-  // child process
   if (argc != 2)
-  {
-    // the one and only value we should see is the exit event name
-    DEBUG_ERROR("Invalid invocation");
     return EXIT_FAILURE;
-  }
+
+  // child process
+  g_debug.Init("looking-glass-idd-helper");
+  DEBUG_INFO("Looking Glass IDD Helper Process (" LG_VERSION_STR ")");
 
   l_exitEvent.Attach(OpenEvent(SYNCHRONIZE, FALSE, args[1].c_str()));
   if (!l_exitEvent.IsValid())
@@ -117,8 +115,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
       case WAIT_FAILED:
         DEBUG_ERROR_HR(GetLastError(), "MsgWaitForMultipleObjects Failed");
-        goto exit;
-    }    
+        g_pipe.DeInit();
+        return EXIT_FAILURE;
+    }
   }
 
 exit:
