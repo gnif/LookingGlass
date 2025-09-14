@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <malloc.h>
 #include <strsafe.h>
+#include <shlobj.h>
 
 #include "CDebug.h"
 
@@ -99,19 +100,35 @@ inline static void iso8601(wchar_t *buf, size_t count)
   wcsftime(buf, count, L"%Y-%m-%d %H:%M:%SZ", &utc);
 }
 
+inline static std::wstring getLogPath() {
+  PWSTR pszPath;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramData, 0, NULL, &pszPath)))
+  {
+    DEBUG_ERROR("Failed to get ProgramData path");
+    return L"";
+  }
+
+  std::wstring result(pszPath);
+  CoTaskMemFree(pszPath);
+
+  result += L"\\Looking Glass (IDD)\\";
+  return result;
+}
+
 void CDebug::Init(const wchar_t * name)
 {
+  m_logDir = getLogPath();
+
   // don't redirect the debug output if running under a debugger
   if (IsDebuggerPresent())
     return;
 
-  std::wstring folder   = L"C:\\ProgramData\\Looking Glass (IDD)\\";
   std::wstring baseName = name;
   std::wstring ext      = L".txt";
-  std::wstring logFile  = folder + baseName + ext;
+  std::wstring logFile  = m_logDir + baseName + ext;
 
   //rotate out old logs
-  DeleteFileW((folder + baseName + L".4" + ext).c_str());
+  DeleteFileW((m_logDir + baseName + L".4" + ext).c_str());
   for (int i = 3; i >= 0; --i)
   {
     std::wstring oldPath;
@@ -120,12 +137,12 @@ void CDebug::Init(const wchar_t * name)
     if (i == 0)
     {
       oldPath = logFile;
-      newPath = folder + baseName + L".1" + ext;
+      newPath = m_logDir + baseName + L".1" + ext;
     }
     else    
     {
-      oldPath = folder + baseName + L"." + std::to_wstring(i) + ext;
-      newPath = folder + baseName + L"." + std::to_wstring(i + 1) + ext;
+      oldPath = m_logDir + baseName + L"." + std::to_wstring(i) + ext;
+      newPath = m_logDir + baseName + L"." + std::to_wstring(i + 1) + ext;
     }
 
     MoveFileW(oldPath.c_str(), newPath.c_str());

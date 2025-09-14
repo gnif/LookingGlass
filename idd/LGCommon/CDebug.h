@@ -27,6 +27,7 @@ class CDebug
 {
   private:
     std::ofstream m_stream;
+    std::wstring m_logDir;
     void Write(const wchar_t *line);
 
   public:
@@ -44,6 +45,7 @@ class CDebug
       LEVEL_MAX
     };
 
+    const wchar_t *logDir() { return m_logDir.c_str(); }
     void Init(const wchar_t * name);
     void Log_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args);
     void Log(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...);
