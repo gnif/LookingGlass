@@ -78,6 +78,7 @@ Function ShowHelpMessage
 FunctionEnd
 
 Function .onInit
+  SetShellVarContext all
 
   var /GLOBAL cmdLineParams
   Push $R0
@@ -153,6 +154,9 @@ SectionEnd
 Section "!Indirect Display Driver (IDD)" Section1
   SectionIn RO
 
+  DetailPrint "Creating log directory"
+  CreateDirectory "$APPDATA\Looking Glass (IDD)"
+
   DetailPrint "Extracting IDD"
   SetOutPath $INSTDIR
   File lgidd.cat
@@ -201,8 +205,6 @@ Section "!Indirect Display Driver (IDD)" Section1
 SectionEnd
 
 Section "Uninstall" Section6
-  SetShellVarContext all
-
   !insertmacro StopLGIddHelper
 
   DetailPrint "Uninstalling IDD"

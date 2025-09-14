@@ -34,16 +34,7 @@ void CDebug::Init(const char * name)
   if (IsDebuggerPresent())
     return;
 
-  // get the system temp directory
-  char tempPath[MAX_PATH];
-  DWORD pathLen = GetTempPathA(sizeof(tempPath), tempPath);
-  if (pathLen == 0)
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to get the temp path");
-    return;
-  }
-
-  std::string folder   = tempPath;
+  std::string folder   = "C:\\ProgramData\\Looking Glass (IDD)\\";
   std::string baseName = name;
   std::string ext      = ".txt";
   std::string logFile  = folder + baseName + ext;
