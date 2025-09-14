@@ -100,7 +100,8 @@ inline static void iso8601(wchar_t *buf, size_t count)
   wcsftime(buf, count, L"%Y-%m-%d %H:%M:%SZ", &utc);
 }
 
-inline static std::wstring getLogPath() {
+inline static std::wstring getLogPath()
+{
   PWSTR pszPath;
   if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramData, 0, NULL, &pszPath)))
   {
