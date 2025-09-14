@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2025 The Looking Glass Authors
  * https://looking-glass.io
@@ -27,6 +27,15 @@
 #include "CDebug.h"
 
 CDebug g_debug;
+
+inline static void iso8601(char *buf, size_t count)
+{
+  struct tm utc;
+  time_t unix;
+  time(&unix);
+  gmtime_s(&utc, &unix);
+  strftime(buf, count, "%Y-%m-%d %H:%M:%SZ", &utc);
+}
 
 void CDebug::Init(const char * name)
 {
@@ -87,11 +96,14 @@ void CDebug::Log_va(CDebug::Level level, const char* function, int line, const c
   if (level < 0 || level >= LEVEL_MAX)
     level = LEVEL_NONE;
 
-  static const char* fmtTemplate = "[%s] %40s:%-4d | ";
+  char timestamp[50];
+  iso8601(timestamp, sizeof timestamp);
+
+  static const char* fmtTemplate = "[%s] [%s] %40s:%-4d | ";
   const char* levelStr = m_levelStr[level];
 
   int length = 0;
-  length = _scprintf(fmtTemplate, levelStr, function, line);
+  length = _scprintf(fmtTemplate, timestamp, levelStr, function, line);
   length += _vscprintf(fmt, args);
   length += 2;
 
@@ -102,7 +114,7 @@ void CDebug::Log_va(CDebug::Level level, const char* function, int line, const c
     return;
 
   /* Populate the buffer with the contents of the format string. */
-  StringCbPrintfA(buffer, length, fmtTemplate, levelStr, function, line);
+  StringCbPrintfA(buffer, length, fmtTemplate, timestamp, levelStr, function, line);
 
   size_t offset = 0;
   StringCbLengthA(buffer, length, &offset);
@@ -154,16 +166,19 @@ void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int l
   while (len && (hrBuffer[len - 1] == '\n' || hrBuffer[len - 1] == '\r'))
     hrBuffer[--len] = '\0';
 
-  static const char* fmtTemplate = "[%s] %40s:%-4d | ";
+  char timestamp[50];
+  iso8601(timestamp, sizeof timestamp);
+
+  static const char* fmtTemplate = "[%s] [%s] %40s:%-4d | ";
   const char* levelStr = m_levelStr[level];
 
   va_list args;
   va_start(args, fmt);
 
   int length = 0;
-  length = _scprintf(fmtTemplate, levelStr, function, line);
+  length = _scprintf(fmtTemplate, timestamp, levelStr, function, line);
   length += _vscprintf(fmt, args);
-  length += 2 + 4 + (int)strlen(hrBuffer) + 1;
+  length += 16 + (int)strlen(hrBuffer) + 1;
 
   /* Depending on the size of the format string, allocate space on the stack or the heap. */
   PCHAR buffer;
@@ -175,7 +190,7 @@ void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int l
   }
 
   /* Populate the buffer with the contents of the format string. */
-  StringCbPrintfA(buffer, length, fmtTemplate, levelStr, function, line);
+  StringCbPrintfA(buffer, length, fmtTemplate, timestamp, levelStr, function, line);
 
   size_t offset = 0;
   StringCbLengthA(buffer, length, &offset);
@@ -184,7 +199,7 @@ void CDebug::LogHR(CDebug::Level level, HRESULT hr, const char * function, int l
 
   /* append the formatted error */
   StringCbLengthA(buffer, length, &offset);
-  StringCbPrintfA(&buffer[offset], length - offset, " (%s)\n", hrBuffer);
+  StringCbPrintfA(&buffer[offset], length - offset, " (0x%08X: %s)\n", hr, hrBuffer);
 
   Write(buffer);
 
