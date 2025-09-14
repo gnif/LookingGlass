@@ -43,12 +43,26 @@ LRESULT CWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
   {
   case WM_CREATE:
     return onCreate();
+  case WM_CLOSE:
+    return onClose();
+  case WM_DESTROY:
+    return onDestroy();
   default:
     return DefWindowProc(m_hwnd, uMsg, wParam, lParam);
   }
 }
 
 LRESULT CWindow::onCreate()
+{
+  return 0;
+}
+
+LRESULT CWindow::onClose()
+{
+  return DefWindowProc(m_hwnd, WM_CLOSE, 0, 0);
+}
+
+LRESULT CWindow::onDestroy()
 {
   return 0;
 }
