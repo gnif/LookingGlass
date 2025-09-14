@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2025 The Looking Glass Authors
  * https://looking-glass.io
@@ -33,8 +33,10 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 class CPipeClient
 {
 private:
-  HandleT<HANDLENullTraits> m_pipe;
+  HandleT<HANDLETraits> m_pipe;
   HandleT<HANDLENullTraits> m_thread;
+  HandleT<EventTraits> m_signal;
+
   bool m_running = false;
   bool m_connected = false;
 
