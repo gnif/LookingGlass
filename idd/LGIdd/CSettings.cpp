@@ -83,7 +83,7 @@ void CSettings::SetExtraMode(const DisplayMode& mode)
   RegCloseKey(hKey);
 }
 
-bool CSettings::GetExtraMode(DisplayMode& mode)
+std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* default)
 {
   HKEY hKey = nullptr;
   LONG ec = RegOpenKeyExW(
@@ -95,29 +95,38 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
   );
 
   if (ec != ERROR_SUCCESS)
-    return false;
+    return std::wstring(default);
 
   DWORD type = 0;
   DWORD cb = 0;
 
-  ec = RegQueryValueExW(hKey, L"ExtraMode", nullptr, &type, nullptr, &cb);
+  ec = RegQueryValueExW(hKey, name, nullptr, &type, nullptr, &cb);
   if (ec != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || cb == 0)
   {
     RegCloseKey(hKey);
-    return false;
+    return std::wstring(default);
   }
 
   std::vector<wchar_t> buf(cb / sizeof(wchar_t) + 1);
-  ec = RegQueryValueExW(hKey, L"ExtraMode", nullptr, &type,
+  ec = RegQueryValueExW(hKey, name, nullptr, &type,
     reinterpret_cast<LPBYTE>(buf.data()), &cb);
   RegCloseKey(hKey);
   if (ec != ERROR_SUCCESS)
-    return false;
+    return  std::wstring(default);
 
   buf.back() = L'\0';
 
   std::wstring s(buf.data());
-  return ParseModeString(s, mode);
+  return s;
+}
+
+bool CSettings::GetExtraMode(DisplayMode& mode)
+{
+  std::wstring extraMode = ReadStringValue(L"ExtraMode", NULL);
+  if (extraMode.empty())
+    return false;
+
+  return ParseModeString(extraMode, mode);
 }
 
 bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
