@@ -31,6 +31,13 @@ static HandleT<HANDLENullTraits> l_process;
 
 static void Launch();
 
+void CALLBACK DestroyNotifyWindow(PVOID lpParam, BOOLEAN bTimedOut)
+{
+  DEBUG_INFO("Parent process exited, exiting...");
+  CNotifyWindow *window = (CNotifyWindow *)lpParam;
+  window->close();
+}
+
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd)
 {
   wchar_t buffer[MAX_PATH];
@@ -79,46 +86,24 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return EXIT_FAILURE;
   }
 
+  if (!g_pipe.Init())
+    return EXIT_FAILURE;
+
   CNotifyWindow window;
 
-  if (!g_pipe.Init())
+  HANDLE hWait;
+  if (!RegisterWaitForSingleObject(&hWait, hParent.Get(), DestroyNotifyWindow, &window, INFINITE, WT_EXECUTEONLYONCE))
+    DEBUG_ERROR_HR(GetLastError(), "Failed to RegisterWaitForSingleObject");
+
+  MSG msg;
+  while (GetMessage(&msg, NULL, 0, 0) > 0)
   {
-    window.destroy();
-    hParent.Close();
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
   }
 
-  while (true)
-  {
-    DWORD dwHandles = hParent.IsValid() ? 1 : 0;
-    LPHANDLE lpHandles = hParent.GetAddressOf();
+  (void) UnregisterWait(hWait);
 
-    DWORD dwResult = MsgWaitForMultipleObjects(dwHandles, lpHandles, FALSE, INFINITE, QS_ALLINPUT);
-    if (dwResult == WAIT_FAILED)
-    {
-      DEBUG_ERROR_HR(GetLastError(), "MsgWaitForMultipleObjects Failed");
-      g_pipe.DeInit();
-      return EXIT_FAILURE;
-    }
-    else if (dwResult == WAIT_OBJECT_0 + dwHandles)
-    {
-      MSG msg;
-      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-      {
-        if (msg.message == WM_QUIT)
-          goto exit;
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-      }
-    }
-    else
-    {
-      DEBUG_INFO("Parent process exited, exiting...");
-      hParent.Close();
-      window.destroy();
-    }
-  }
-
-exit:
   DEBUG_INFO("Helper window destroyed.");
   g_pipe.DeInit();
   return EXIT_SUCCESS;
