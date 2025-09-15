@@ -2,6 +2,7 @@
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
+#include "VersionInfo.h"
 
 ATOM CConfigWindow::s_atom = 0;
 
@@ -24,6 +25,8 @@ CConfigWindow::CConfigWindow()
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to create window");
   }
+
+  m_version.reset(new CStaticWidget(L"Looking Glass IDD " LG_VERSION_STR, WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
 }
 
 LRESULT CConfigWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
