@@ -180,6 +180,8 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClCompile Include="CConfigWindow.cpp" />
     <ClCompile Include="CNotifyWindow.cpp" />
     <ClCompile Include="CPipeClient.cpp" />
+    <ClCompile Include="CStaticWidget.cpp" />
+    <ClCompile Include="CWidget.cpp" />
     <ClCompile Include="CWindow.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
@@ -188,6 +190,8 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClInclude Include="CConfigWindow.h" />
     <ClInclude Include="CNotifyWindow.h" />
     <ClInclude Include="CPipeClient.h" />
+    <ClInclude Include="CStaticWidget.h" />
+    <ClInclude Include="CWidget.h" />
     <ClInclude Include="CWindow.h" />
   </ItemGroup>
   <ItemGroup>
