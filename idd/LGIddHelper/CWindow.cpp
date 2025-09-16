@@ -13,7 +13,7 @@ void CWindow::populateWindowClass(WNDCLASSEX &wx)
   wx.hIcon = LoadIcon(NULL, IDI_APPLICATION);
   wx.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
   wx.hCursor = LoadCursor(NULL, IDC_ARROW);
-  wx.hbrBackground = (HBRUSH)COLOR_APPWORKSPACE;
+  wx.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 }
 
 LRESULT CWindow::wndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
