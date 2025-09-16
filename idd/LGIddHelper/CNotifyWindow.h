@@ -20,6 +20,7 @@ class CNotifyWindow : public CWindow
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
   virtual LRESULT onClose() override;
+  virtual LRESULT onDestroy() override;
   virtual LRESULT onFinal() override;
 
 public:

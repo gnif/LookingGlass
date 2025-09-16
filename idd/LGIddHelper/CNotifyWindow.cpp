@@ -81,6 +81,12 @@ LRESULT CNotifyWindow::onClose()
   return 0;
 }
 
+LRESULT CNotifyWindow::onDestroy()
+{
+  Shell_NotifyIcon(NIM_DELETE, &m_iconData);
+  return 0;
+}
+
 LRESULT CNotifyWindow::onFinal()
 {
   PostQuitMessage(0);
