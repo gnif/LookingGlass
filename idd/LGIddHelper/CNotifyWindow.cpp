@@ -76,6 +76,7 @@ LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
   switch (uEvent)
   {
   case WM_CONTEXTMENU:
+    SetForegroundWindow(m_hwnd);
     switch (TrackPopupMenu(m_menu, TPM_RETURNCMD | TPM_NONOTIFY, x, y, 0, m_hwnd, NULL))
     {
     case ID_MENU_SHOW_LOG:
