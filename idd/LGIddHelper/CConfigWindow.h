@@ -3,6 +3,8 @@
 #include "CStaticWidget.h"
 #include <functional>
 #include <memory>
+#include <wrl.h>
+#include "UIHelpers.h"
 
 class CConfigWindow : public CWindow
 {
@@ -11,10 +13,15 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CStaticWidget> m_version;
 
   std::function<void()> m_onDestroy;
+  double m_scale;
+  Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;
+
+  void updateFont();
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
   virtual LRESULT onFinal() override;
+  LRESULT onResize(DWORD width, DWORD height);
 
 public:
   CConfigWindow();

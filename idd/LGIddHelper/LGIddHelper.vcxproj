@@ -192,6 +192,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClInclude Include="CPipeClient.h" />
     <ClInclude Include="CStaticWidget.h" />
     <ClInclude Include="CWidget.h" />
+    <ClInclude Include="UIHelpers.h" />
     <ClInclude Include="CWindow.h" />
   </ItemGroup>
   <ItemGroup>
