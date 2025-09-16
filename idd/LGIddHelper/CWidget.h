@@ -14,5 +14,5 @@ public:
   void destroy();
 
   HWND hwnd() { return m_hwnd; }
-  operator HWND() { return m_hwnd; }
+  operator HWND() const { return m_hwnd; }
 };

@@ -29,6 +29,16 @@
     <ClCompile Include="CNotifyWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
+    <ClCompile Include="CConfigWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CStaticWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
@@ -41,6 +51,20 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CNotifyWindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <ClInclude Include="CConfigWindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CStaticWidget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CWidget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UIHelpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
