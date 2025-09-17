@@ -39,6 +39,7 @@ ManifestDPIAware true
 Target AMD64-Unicode
 InstallDir "$PROGRAMFILES\Looking Glass (IDD)"
 !else
+!include "x64.nsh"
 InstallDir "$PROGRAMFILES64\Looking Glass (IDD)"
 !endif
 
@@ -140,7 +141,13 @@ Section "-IVSHMEM Driver"
     File /nonfatal ..\ivshmem\ivshmem.pdb
 
     DetailPrint "Installing IVSHMEM driver"
+!ifdef BUILD_32BIT
+    ${DisableX64FSRedirection}
+!endif
     nsExec::ExecToLog '"$SYSDIR\pnputil.exe" /add-driver "$INSTDIR\ivshmem.inf" /install'
+!ifdef BUILD_32BIT
+    ${EnableX64FSRedirection}
+!endif
   ${EndIf}
 SectionEnd
 !endif
