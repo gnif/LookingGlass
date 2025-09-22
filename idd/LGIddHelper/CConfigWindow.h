@@ -1,20 +1,27 @@
 ﻿#pragma once
 #include "CWindow.h"
 #include "CStaticWidget.h"
+#include "CRegistrySettings.h"
 #include <functional>
 #include <memory>
+#include <optional>
 #include <wrl.h>
 #include "UIHelpers.h"
+
+class CListBox;
 
 class CConfigWindow : public CWindow
 {
   static ATOM s_atom;
 
   std::unique_ptr<CStaticWidget> m_version;
+  std::unique_ptr<CListBox> m_modeBox;
 
   std::function<void()> m_onDestroy;
   double m_scale;
   Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;
+  CRegistrySettings m_settings;
+  std::optional<std::vector<DisplayMode>> m_modes;
 
   void updateFont();
 
