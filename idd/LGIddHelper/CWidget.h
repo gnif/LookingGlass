@@ -6,7 +6,7 @@ class CWidget {
 protected:
   HWND m_hwnd = NULL;
 
-  HWND createWindowSimple(LPCWSTR cls, LPCWSTR title, DWORD style, HWND parent);
+  HWND createWindowSimple(LPCWSTR cls, LPCWSTR title, DWORD style, HWND parent, DWORD dwExStyle = 0);
 
 public:
   virtual ~CWidget();
