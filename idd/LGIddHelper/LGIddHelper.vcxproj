@@ -187,6 +187,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClCompile Include="CWidget.cpp" />
     <ClCompile Include="CWindow.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="UIHelpers.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />

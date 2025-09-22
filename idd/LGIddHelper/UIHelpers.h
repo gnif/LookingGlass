@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <cmath>
 #include <windows.h>
 
 struct FontTraits
@@ -13,19 +14,16 @@ class WidgetPositioner
   HDWP hdwp;
   double m_scale;
   DWORD width, height;
-  inline int scale(int value) { return (int)round(value * m_scale); }
+  inline int scale(int value) { return (int)std::round(value * m_scale); }
 
 public:
   WidgetPositioner(double scale, DWORD width, DWORD height) :
     m_scale(scale), width(width), height(height),
     hdwp(BeginDeferWindowPos(10)) {}
 
-  ~WidgetPositioner() { EndDeferWindowPos(hdwp); }
+  ~WidgetPositioner();
 
-  void move(HWND child, int x, int y, int cx, int cy)
-  {
-    hdwp = DeferWindowPos(hdwp, child, nullptr, x, y, cx, cy, SWP_NOACTIVATE | SWP_NOZORDER);
-  }
+  void move(HWND child, int x, int y, int cx, int cy);
 
   void pinTopLeft(HWND child, int x, int y, int cx, int cy)
   {
@@ -44,6 +42,6 @@ public:
 
   void pinLeftTopBottom(HWND child, int x, int y, int cx, int by)
   {
-    move(child, scale(x), scale(y), cx, height - scale(y + by));
+    move(child, scale(x), scale(y), scale(cx), height - scale(y + by));
   }
 };
