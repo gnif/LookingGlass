@@ -85,6 +85,8 @@
     <ClInclude Include="CSettings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
+    <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Device.cpp">
@@ -137,5 +139,6 @@
     <ClCompile Include="CSettings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
   </ItemGroup>
 </Project>
