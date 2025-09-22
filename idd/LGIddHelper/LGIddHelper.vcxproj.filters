@@ -43,6 +43,9 @@
     <ClCompile Include="CRegistrySettings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CListBox.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="UIHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -77,6 +80,9 @@
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CRegistrySettings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CListBox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

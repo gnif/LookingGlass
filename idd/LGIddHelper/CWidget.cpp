@@ -1,8 +1,8 @@
 ﻿#include "CWidget.h"
 
-HWND CWidget::createWindowSimple(LPCWSTR cls, LPCWSTR title, DWORD style, HWND parent)
+HWND CWidget::createWindowSimple(LPCWSTR cls, LPCWSTR title, DWORD style, HWND parent, DWORD dwExStyle)
 {
-  return CreateWindow(cls, title, style, 0, 0, 0, 0, parent,
+  return CreateWindowEx(dwExStyle, cls, title, style, 0, 0, 0, 0, parent,
     NULL, (HINSTANCE)GetModuleHandle(NULL), NULL);
 }
 
