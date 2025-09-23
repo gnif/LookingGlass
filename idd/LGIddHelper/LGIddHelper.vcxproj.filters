@@ -49,6 +49,10 @@
     <ClCompile Include="UIHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
+    <ClCompile Include="CGroupBox.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
@@ -83,6 +87,11 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CListBox.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <ClInclude Include="CGroupBox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

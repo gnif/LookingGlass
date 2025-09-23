@@ -1,5 +1,6 @@
 ﻿#include "CConfigWindow.h"
 #include "CListBox.h"
+#include "CGroupBox.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -28,7 +29,7 @@ CConfigWindow::CConfigWindow() : m_scale(1)
     m_modes = m_settings.getModes();
 
   if (!CreateWindowEx(0, MAKEINTATOM(s_atom), L"Looking Glass IDD Configuration",
-    WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 500, 400,
+    WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 400,
     NULL, NULL, hInstance, this))
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to create window");
@@ -52,7 +53,7 @@ void CConfigWindow::updateFont()
     return;
   }
 
-  for (HWND child : std::initializer_list<HWND>({ *m_version, *m_modeBox }))
+  for (HWND child : std::initializer_list<HWND>({ *m_version, *m_modeGroup, *m_modeBox }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
 
@@ -83,6 +84,8 @@ LRESULT CConfigWindow::onCreate()
   m_scale = GetDpiForWindow(m_hwnd) / 96.0;
   m_version.reset(new CStaticWidget(L"Looking Glass IDD " LG_VERSION_STR, WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
 
+  m_modeGroup.reset(new CGroupBox(L"Custom modes", WS_CHILD | WS_VISIBLE, m_hwnd));
+
   m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | LBS_NOTIFY, m_hwnd));
   if (m_modes)
   {
@@ -106,6 +109,7 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
 {
   WidgetPositioner pos(m_scale, width, height);
   pos.pinTopLeftRight(*m_version, 12, 12, 12, 20);
-  pos.pinLeftTopBottom(*m_modeBox, 12, 40, 200, 12);
+  pos.pinLeftTopBottom(*m_modeGroup, 12, 40, 200, 12);
+  pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 24);
   return 0;
 }
