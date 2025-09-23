@@ -9,12 +9,14 @@
 #include "UIHelpers.h"
 
 class CListBox;
+class CGroupBox;
 
 class CConfigWindow : public CWindow
 {
   static ATOM s_atom;
 
   std::unique_ptr<CStaticWidget> m_version;
+  std::unique_ptr<CGroupBox> m_modeGroup;
   std::unique_ptr<CListBox> m_modeBox;
 
   std::function<void()> m_onDestroy;
