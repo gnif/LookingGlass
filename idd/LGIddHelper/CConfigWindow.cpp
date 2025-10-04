@@ -150,11 +150,18 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
   }
   else if (hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
   {
-    auto &mode = (*m_modes)[m_modeBox->getSelData()];
+    int sel = m_modeBox->getSel();
+    int index = m_modeBox->getData(sel);
+    auto &mode = (*m_modes)[index];
     mode.width = m_modeWidth->getNumericValue();
     mode.height = m_modeHeight->getNumericValue();
     mode.refresh = m_modeRefresh->getNumericValue();
-    DEBUG_INFO(L"Updated mode to %s", mode.toString().c_str());
+    m_modeBox->delItem(sel);
+    m_modeBox->setSel(m_modeBox->addItem(mode.toString().c_str(), index));
+
+    LRESULT result = m_settings.setModes(*m_modes);
+    if (result != ERROR_SUCCESS)
+      DEBUG_ERROR_HR(result, "Failed to save modes");
   }
   return 0;
 }

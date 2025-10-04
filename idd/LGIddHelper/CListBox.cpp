@@ -29,6 +29,12 @@ int CListBox::addItem(const std::wstring &display, LPARAM data)
   return result;
 }
 
+void CListBox::delItem(int index)
+{
+  if (!ListBox_DeleteString(m_hwnd, index))
+    DEBUG_ERROR("listbox: failed to delete string at %d", index);
+}
+
 int CListBox::getSel()
 {
   return ListBox_GetCurSel(m_hwnd);
@@ -36,5 +42,16 @@ int CListBox::getSel()
 
 int CListBox::getSelData()
 {
-  return ListBox_GetItemData(m_hwnd, getSel());
+  return getData(getSel());
+}
+
+int CListBox::getData(int index)
+{
+  return ListBox_GetItemData(m_hwnd, index);
+}
+
+void CListBox::setSel(int index)
+{
+  if (!ListBox_SetCurSel(m_hwnd, index))
+    DEBUG_ERROR("listbox: failed to set selection to %d", index);
 }
