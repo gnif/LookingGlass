@@ -74,6 +74,8 @@ LRESULT CConfigWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     RedrawWindow(m_hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
     return 0;
   }
+  case WM_COMMAND:
+    return onCommand(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
   default:
     return CWindow::handleMessage(uMsg, wParam, lParam);
   }
@@ -111,5 +113,14 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinTopLeftRight(*m_version, 12, 12, 12, 20);
   pos.pinLeftTopBottom(*m_modeGroup, 12, 40, 200, 12);
   pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 24);
+  return 0;
+}
+
+LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
+{
+  if (hwnd == *m_modeBox && code == LBN_SELCHANGE && m_modes)
+  {
+    DEBUG_INFO(L"Selection changed to: %s", (*m_modes)[m_modeBox->getSelData()].toString().c_str());
+  }
   return 0;
 }
