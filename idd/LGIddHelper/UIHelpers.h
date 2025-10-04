@@ -44,4 +44,9 @@ public:
   {
     move(child, scale(x), scale(y), scale(cx), height - scale(y + by));
   }
+
+  void pinBottomLeft(HWND child, int x, int by, int cx, int cy)
+  {
+    move(child, scale(x), height - scale(by + cy), scale(cx), scale(cy));
+  }
 };
