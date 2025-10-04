@@ -110,6 +110,7 @@ LRESULT CConfigWindow::onCreate()
   m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
 
   m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE, m_hwnd));
+  EnableWindow(*m_modeUpdate, FALSE);
 
   updateFont();
 
@@ -143,14 +144,25 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 {
   if (hwnd == *m_modeBox && code == LBN_SELCHANGE && m_modes)
   {
-    auto &mode = (*m_modes)[m_modeBox->getSelData()];
+    int sel = m_modeBox->getSel();
+    if (sel == LB_ERR)
+    {
+      EnableWindow(*m_modeUpdate, FALSE);
+      return 0;
+    }
+
+    auto &mode = (*m_modes)[m_modeBox->getData(sel)];
     m_modeWidth->setNumericValue(mode.width);
     m_modeHeight->setNumericValue(mode.height);
     m_modeRefresh->setNumericValue(mode.refresh);
+    EnableWindow(*m_modeUpdate, TRUE);
   }
   else if (hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
   {
     int sel = m_modeBox->getSel();
+    if (sel == LB_ERR)
+      return 0;
+
     int index = m_modeBox->getData(sel);
     auto &mode = (*m_modes)[index];
     mode.width = m_modeWidth->getNumericValue();

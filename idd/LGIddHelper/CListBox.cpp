@@ -40,11 +40,6 @@ int CListBox::getSel()
   return ListBox_GetCurSel(m_hwnd);
 }
 
-int CListBox::getSelData()
-{
-  return getData(getSel());
-}
-
 int CListBox::getData(int index)
 {
   return ListBox_GetItemData(m_hwnd, index);
