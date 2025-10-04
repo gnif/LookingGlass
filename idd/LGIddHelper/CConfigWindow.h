@@ -10,6 +10,7 @@
 
 class CListBox;
 class CGroupBox;
+class CEditWidget;
 
 class CConfigWindow : public CWindow
 {
@@ -22,6 +23,10 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CStaticWidget> m_widthLabel;
   std::unique_ptr<CStaticWidget> m_heightLabel;
   std::unique_ptr<CStaticWidget> m_refreshLabel;
+
+  std::unique_ptr<CEditWidget> m_modeWidth;
+  std::unique_ptr<CEditWidget> m_modeHeight;
+  std::unique_ptr<CEditWidget> m_modeRefresh;
 
   std::function<void()> m_onDestroy;
   double m_scale;
