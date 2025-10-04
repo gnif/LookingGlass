@@ -19,6 +19,10 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CGroupBox> m_modeGroup;
   std::unique_ptr<CListBox> m_modeBox;
 
+  std::unique_ptr<CStaticWidget> m_widthLabel;
+  std::unique_ptr<CStaticWidget> m_heightLabel;
+  std::unique_ptr<CStaticWidget> m_refreshLabel;
+
   std::function<void()> m_onDestroy;
   double m_scale;
   Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;

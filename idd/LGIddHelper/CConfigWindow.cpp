@@ -53,7 +53,9 @@ void CConfigWindow::updateFont()
     return;
   }
 
-  for (HWND child : std::initializer_list<HWND>({ *m_version, *m_modeGroup, *m_modeBox }))
+  for (HWND child : std::initializer_list<HWND>({
+    *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
+  }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
 
@@ -95,6 +97,11 @@ LRESULT CConfigWindow::onCreate()
     for (size_t i = 0; i < modes.size(); ++i)
       m_modeBox->addItem(modes[i].toString(), i);
   }
+
+  m_widthLabel.reset(new CStaticWidget(L"Width:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+  m_heightLabel.reset(new CStaticWidget(L"Height:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+  m_refreshLabel.reset(new CStaticWidget(L"Refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+
   updateFont();
 
   return 0;
@@ -112,7 +119,10 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   WidgetPositioner pos(m_scale, width, height);
   pos.pinTopLeftRight(*m_version, 12, 12, 12, 20);
   pos.pinLeftTopBottom(*m_modeGroup, 12, 40, 200, 12);
-  pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 24);
+  pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 96);
+  pos.pinBottomLeft(*m_widthLabel, 24, 72, 50, 20);
+  pos.pinBottomLeft(*m_heightLabel, 24, 48, 50, 20);
+  pos.pinBottomLeft(*m_refreshLabel, 24, 24, 50, 20);
   return 0;
 }
 
