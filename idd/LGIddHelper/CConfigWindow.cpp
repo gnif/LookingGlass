@@ -1,6 +1,7 @@
 ﻿#include "CConfigWindow.h"
 #include "CListBox.h"
 #include "CGroupBox.h"
+#include "CEditWidget.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -55,6 +56,7 @@ void CConfigWindow::updateFont()
 
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
+    *m_modeWidth, *m_modeHeight, *m_modeRefresh,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
@@ -102,6 +104,10 @@ LRESULT CConfigWindow::onCreate()
   m_heightLabel.reset(new CStaticWidget(L"Height:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
   m_refreshLabel.reset(new CStaticWidget(L"Refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
 
+  m_modeWidth.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
+  m_modeHeight.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
+  m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
+
   updateFont();
 
   return 0;
@@ -123,6 +129,9 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_widthLabel, 24, 72, 50, 20);
   pos.pinBottomLeft(*m_heightLabel, 24, 48, 50, 20);
   pos.pinBottomLeft(*m_refreshLabel, 24, 24, 50, 20);
+  pos.pinBottomLeft(*m_modeWidth, 75, 72, 50, 20);
+  pos.pinBottomLeft(*m_modeHeight, 75, 48, 50, 20);
+  pos.pinBottomLeft(*m_modeRefresh, 75, 24, 50, 20);
   return 0;
 }
 
@@ -130,7 +139,10 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 {
   if (hwnd == *m_modeBox && code == LBN_SELCHANGE && m_modes)
   {
-    DEBUG_INFO(L"Selection changed to: %s", (*m_modes)[m_modeBox->getSelData()].toString().c_str());
+    auto &mode = (*m_modes)[m_modeBox->getSelData()];
+    m_modeWidth->setNumericValue(mode.width);
+    m_modeHeight->setNumericValue(mode.height);
+    m_modeRefresh->setNumericValue(mode.refresh);
   }
   return 0;
 }
