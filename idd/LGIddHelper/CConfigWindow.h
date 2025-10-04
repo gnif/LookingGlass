@@ -11,6 +11,7 @@
 class CListBox;
 class CGroupBox;
 class CEditWidget;
+class CButton;
 
 class CConfigWindow : public CWindow
 {
@@ -27,6 +28,8 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CEditWidget> m_modeWidth;
   std::unique_ptr<CEditWidget> m_modeHeight;
   std::unique_ptr<CEditWidget> m_modeRefresh;
+
+  std::unique_ptr<CButton> m_modeUpdate;
 
   std::function<void()> m_onDestroy;
   double m_scale;

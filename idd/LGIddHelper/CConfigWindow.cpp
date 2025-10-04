@@ -2,6 +2,7 @@
 #include "CListBox.h"
 #include "CGroupBox.h"
 #include "CEditWidget.h"
+#include "CButton.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -56,7 +57,7 @@ void CConfigWindow::updateFont()
 
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
-    *m_modeWidth, *m_modeHeight, *m_modeRefresh,
+    *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
@@ -108,6 +109,8 @@ LRESULT CConfigWindow::onCreate()
   m_modeHeight.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
   m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
 
+  m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE, m_hwnd));
+
   updateFont();
 
   return 0;
@@ -125,13 +128,14 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   WidgetPositioner pos(m_scale, width, height);
   pos.pinTopLeftRight(*m_version, 12, 12, 12, 20);
   pos.pinLeftTopBottom(*m_modeGroup, 12, 40, 200, 12);
-  pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 96);
-  pos.pinBottomLeft(*m_widthLabel, 24, 72, 50, 20);
-  pos.pinBottomLeft(*m_heightLabel, 24, 48, 50, 20);
-  pos.pinBottomLeft(*m_refreshLabel, 24, 24, 50, 20);
-  pos.pinBottomLeft(*m_modeWidth, 75, 72, 50, 20);
-  pos.pinBottomLeft(*m_modeHeight, 75, 48, 50, 20);
-  pos.pinBottomLeft(*m_modeRefresh, 75, 24, 50, 20);
+  pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 120);
+  pos.pinBottomLeft(*m_widthLabel, 24, 96, 50, 20);
+  pos.pinBottomLeft(*m_heightLabel, 24, 72, 50, 20);
+  pos.pinBottomLeft(*m_refreshLabel, 24, 48, 50, 20);
+  pos.pinBottomLeft(*m_modeWidth, 75, 96, 50, 20);
+  pos.pinBottomLeft(*m_modeHeight, 75, 72, 50, 20);
+  pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
+  pos.pinBottomLeft(*m_modeUpdate, 24, 20, 50, 24);
   return 0;
 }
 
@@ -143,6 +147,14 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     m_modeWidth->setNumericValue(mode.width);
     m_modeHeight->setNumericValue(mode.height);
     m_modeRefresh->setNumericValue(mode.refresh);
+  }
+  else if (hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
+  {
+    auto &mode = (*m_modes)[m_modeBox->getSelData()];
+    mode.width = m_modeWidth->getNumericValue();
+    mode.height = m_modeHeight->getNumericValue();
+    mode.refresh = m_modeRefresh->getNumericValue();
+    DEBUG_INFO(L"Updated mode to %s", mode.toString().c_str());
   }
   return 0;
 }
