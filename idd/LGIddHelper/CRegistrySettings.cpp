@@ -17,7 +17,7 @@ CRegistrySettings::~CRegistrySettings()
 LSTATUS CRegistrySettings::open()
 {
   HKEY key;
-  LSTATUS result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &key);
+  LSTATUS result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key);
 
   if (result == ERROR_SUCCESS)
     hKey = key;

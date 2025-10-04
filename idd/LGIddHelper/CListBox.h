@@ -8,6 +8,9 @@ public:
   CListBox(DWORD style, HWND parent);
   void initStorage(DWORD count, size_t perItem);
   int addItem(const std::wstring &display, LPARAM data);
+  void delItem(int index);
   int getSel();
   int getSelData();
+  int getData(int index);
+  void setSel(int index);
 };
