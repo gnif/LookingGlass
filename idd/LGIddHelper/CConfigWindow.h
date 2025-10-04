@@ -31,6 +31,7 @@ class CConfigWindow : public CWindow
   virtual LRESULT onCreate() override;
   virtual LRESULT onFinal() override;
   LRESULT onResize(DWORD width, DWORD height);
+  LRESULT onCommand(WORD id, WORD code, HWND hwnd);
 
 public:
   CConfigWindow();

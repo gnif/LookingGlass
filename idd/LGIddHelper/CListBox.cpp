@@ -28,3 +28,13 @@ int CListBox::addItem(const std::wstring &display, LPARAM data)
   ListBox_SetItemData(m_hwnd, result, data);
   return result;
 }
+
+int CListBox::getSel()
+{
+  return ListBox_GetCurSel(m_hwnd);
+}
+
+int CListBox::getSelData()
+{
+  return ListBox_GetItemData(m_hwnd, getSel());
+}
