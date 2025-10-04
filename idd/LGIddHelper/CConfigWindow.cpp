@@ -96,6 +96,8 @@ LRESULT CConfigWindow::onCreate()
   m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | LBS_NOTIFY, m_hwnd));
   if (m_modes)
   {
+    m_modeBox->addItem(L"<add new>", -1);
+
     auto &modes = *m_modes;
     for (size_t i = 0; i < modes.size(); ++i)
       m_modeBox->addItem(modes[i].toString(), i);
@@ -151,10 +153,21 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
       return 0;
     }
 
-    auto &mode = (*m_modes)[m_modeBox->getData(sel)];
-    m_modeWidth->setNumericValue(mode.width);
-    m_modeHeight->setNumericValue(mode.height);
-    m_modeRefresh->setNumericValue(mode.refresh);
+    int index = m_modeBox->getData(sel);
+
+    if (index >= 0)
+    {
+      auto &mode = (*m_modes)[index];
+      m_modeWidth->setNumericValue(mode.width);
+      m_modeHeight->setNumericValue(mode.height);
+      m_modeRefresh->setNumericValue(mode.refresh);
+    }
+    else
+    {
+      m_modeWidth->setValue(L"");
+      m_modeHeight->setValue(L"");
+      m_modeRefresh->setValue(L"");
+    }
     EnableWindow(*m_modeUpdate, TRUE);
   }
   else if (hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
@@ -164,11 +177,14 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
       return 0;
 
     int index = m_modeBox->getData(sel);
-    auto &mode = (*m_modes)[index];
+    auto &mode = index >= 0 ? (*m_modes)[index] : m_modes->emplace_back();
     mode.width = m_modeWidth->getNumericValue();
     mode.height = m_modeHeight->getNumericValue();
     mode.refresh = m_modeRefresh->getNumericValue();
-    m_modeBox->delItem(sel);
+
+    if (index >= 0)
+      m_modeBox->delItem(sel);
+
     m_modeBox->setSel(m_modeBox->addItem(mode.toString().c_str(), index));
 
     LRESULT result = m_settings.setModes(*m_modes);
