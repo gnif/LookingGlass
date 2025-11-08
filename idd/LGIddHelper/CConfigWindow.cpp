@@ -93,7 +93,7 @@ LRESULT CConfigWindow::onCreate()
 
   m_modeGroup.reset(new CGroupBox(L"Custom modes", WS_CHILD | WS_VISIBLE, m_hwnd));
 
-  m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | LBS_NOTIFY, m_hwnd));
+  m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY, m_hwnd));
   if (m_modes)
   {
     m_modeBox->addItem(L"<add new>", -1);
