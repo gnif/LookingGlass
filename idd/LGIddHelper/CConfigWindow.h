@@ -30,6 +30,7 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CEditWidget> m_modeRefresh;
 
   std::unique_ptr<CButton> m_modeUpdate;
+  std::unique_ptr<CButton> m_modeDelete;
 
   std::function<void()> m_onDestroy;
   double m_scale;
@@ -38,6 +39,8 @@ class CConfigWindow : public CWindow
   std::optional<std::vector<DisplayMode>> m_modes;
 
   void updateFont();
+  void updateModeList();
+  void onModeListSelectChange();
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;

@@ -12,4 +12,5 @@ public:
   int getSel();
   int getData(int index);
   void setSel(int index);
+  void clear();
 };

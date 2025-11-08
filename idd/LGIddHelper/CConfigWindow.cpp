@@ -57,9 +57,18 @@ void CConfigWindow::updateFont()
 
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
-    *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate,
+    *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
+}
+
+void CConfigWindow::updateModeList()
+{
+  m_modeBox->addItem(L"<add new>", -1);
+
+  auto &modes = *m_modes;
+  for (size_t i = 0; i < modes.size(); ++i)
+    m_modeBox->addItem(modes[i].toString(), i);
 }
 
 LRESULT CConfigWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -95,13 +104,7 @@ LRESULT CConfigWindow::onCreate()
 
   m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY, m_hwnd));
   if (m_modes)
-  {
-    m_modeBox->addItem(L"<add new>", -1);
-
-    auto &modes = *m_modes;
-    for (size_t i = 0; i < modes.size(); ++i)
-      m_modeBox->addItem(modes[i].toString(), i);
-  }
+    updateModeList();
 
   m_widthLabel.reset(new CStaticWidget(L"Width:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
   m_heightLabel.reset(new CStaticWidget(L"Height:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
@@ -112,7 +115,9 @@ LRESULT CConfigWindow::onCreate()
   m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT, m_hwnd));
 
   m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_modeDelete.reset(new CButton(L"Delete", WS_CHILD | WS_VISIBLE, m_hwnd));
   EnableWindow(*m_modeUpdate, FALSE);
+  EnableWindow(*m_modeDelete, FALSE);
 
   updateFont();
 
@@ -139,36 +144,38 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeHeight, 75, 72, 50, 20);
   pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
   pos.pinBottomLeft(*m_modeUpdate, 24, 20, 50, 24);
+  pos.pinBottomLeft(*m_modeDelete, 75, 20, 50, 24);
   return 0;
+}
+
+void CConfigWindow::onModeListSelectChange()
+{
+  int sel = m_modeBox->getSel();
+  if (sel == LB_ERR)
+  {
+    EnableWindow(*m_modeUpdate, FALSE);
+    EnableWindow(*m_modeDelete, FALSE);
+    return;
+  }
+
+  int index = m_modeBox->getData(sel);
+
+  if (index >= 0)
+  {
+    auto &mode = (*m_modes)[index];
+    m_modeWidth->setNumericValue(mode.width);
+    m_modeHeight->setNumericValue(mode.height);
+    m_modeRefresh->setNumericValue(mode.refresh);
+  }
+  EnableWindow(*m_modeUpdate, TRUE);
+  EnableWindow(*m_modeDelete, index >= 0);
 }
 
 LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 {
   if (hwnd == *m_modeBox && code == LBN_SELCHANGE && m_modes)
   {
-    int sel = m_modeBox->getSel();
-    if (sel == LB_ERR)
-    {
-      EnableWindow(*m_modeUpdate, FALSE);
-      return 0;
-    }
-
-    int index = m_modeBox->getData(sel);
-
-    if (index >= 0)
-    {
-      auto &mode = (*m_modes)[index];
-      m_modeWidth->setNumericValue(mode.width);
-      m_modeHeight->setNumericValue(mode.height);
-      m_modeRefresh->setNumericValue(mode.refresh);
-    }
-    else
-    {
-      m_modeWidth->setValue(L"");
-      m_modeHeight->setValue(L"");
-      m_modeRefresh->setValue(L"");
-    }
-    EnableWindow(*m_modeUpdate, TRUE);
+    onModeListSelectChange();
   }
   else if (hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
   {
@@ -198,6 +205,23 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     LRESULT result = m_settings.setModes(*m_modes);
     if (result != ERROR_SUCCESS)
       DEBUG_ERROR_HR(result, "Failed to save modes");
+  }
+  else if (hwnd == *m_modeDelete && code == BN_CLICKED && m_modes)
+  {
+    int sel = m_modeBox->getSel();
+    if (sel == LB_ERR)
+      return 0;
+
+    int index = m_modeBox->getData(sel);
+    m_modeBox->clear();
+    m_modes->erase(m_modes->begin() + index);
+
+    LRESULT result = m_settings.setModes(*m_modes);
+    if (result != ERROR_SUCCESS)
+      DEBUG_ERROR_HR(result, "Failed to save modes");
+
+    updateModeList();
+    onModeListSelectChange();
   }
   return 0;
 }

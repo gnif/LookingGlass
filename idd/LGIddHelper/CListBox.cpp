@@ -50,3 +50,8 @@ void CListBox::setSel(int index)
   if (!ListBox_SetCurSel(m_hwnd, index))
     DEBUG_ERROR("listbox: failed to set selection to %d", index);
 }
+
+void CListBox::clear()
+{
+  ListBox_ResetContent(m_hwnd);
+}
