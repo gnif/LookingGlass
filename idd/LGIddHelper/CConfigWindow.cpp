@@ -178,9 +178,17 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 
     int index = m_modeBox->getData(sel);
     auto &mode = index >= 0 ? (*m_modes)[index] : m_modes->emplace_back();
-    mode.width = m_modeWidth->getNumericValue();
-    mode.height = m_modeHeight->getNumericValue();
-    mode.refresh = m_modeRefresh->getNumericValue();
+
+    try
+    {
+      mode.width = m_modeWidth->getNumericValue();
+      mode.height = m_modeHeight->getNumericValue();
+      mode.refresh = m_modeRefresh->getNumericValue();
+    }
+    catch (std::logic_error&)
+    {
+      return 0;
+    }
 
     if (index >= 0)
       m_modeBox->delItem(sel);
