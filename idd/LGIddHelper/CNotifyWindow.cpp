@@ -51,6 +51,7 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
   {
   case WM_NOTIFY_ICON:
     return onNotifyIcon(LOWORD(lParam), HIWORD(lParam), GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam));
+
   case WM_CLEAN_UP_CONFIG:
     if (m_config && !m_config->hwnd())
     {
@@ -58,6 +59,7 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
       m_config.reset();
     }
     return 0;
+
   default:
     if (s_taskbarCreated && uMsg == s_taskbarCreated)
     {
@@ -70,6 +72,9 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 LRESULT CNotifyWindow::onCreate()
 {
+  // Allow explorer to send us this message to register the notification icon.
+  ChangeWindowMessageFilterEx(m_hwnd, s_taskbarCreated, MSGFLT_ALLOW, NULL);
+
   registerIcon();
   return 0;
 }
@@ -129,7 +134,10 @@ void CNotifyWindow::registerIcon()
   StringCbCopy(m_iconData.szTip, sizeof m_iconData.szTip, L"Looking Glass (IDD)");
 
   if (!Shell_NotifyIcon(NIM_ADD, &m_iconData))
+  {
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_ADD)");
+    return;
+  }
 
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
