@@ -58,6 +58,7 @@ void CConfigWindow::updateFont()
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
     *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete,
+    *m_autosizeGroup, *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
@@ -119,6 +120,15 @@ LRESULT CConfigWindow::onCreate()
   EnableWindow(*m_modeUpdate, FALSE);
   EnableWindow(*m_modeDelete, FALSE);
 
+  m_autosizeGroup.reset(new CGroupBox(L"Autosizing", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+  m_defRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_defRefreshHz.reset(new CStaticWidget(L"Hz", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+
+  RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(300 * m_scale) };
+  AdjustWindowRect(&client, WS_OVERLAPPEDWINDOW, FALSE);
+  SetWindowPos(m_hwnd, NULL, 0, 0, client.right - client.left, client.bottom - client.top, SWP_NOMOVE | SWP_NOZORDER);
+
   updateFont();
 
   return 0;
@@ -135,6 +145,7 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
 {
   WidgetPositioner pos(m_scale, width, height);
   pos.pinTopLeftRight(*m_version, 12, 12, 12, 20);
+
   pos.pinLeftTopBottom(*m_modeGroup, 12, 40, 200, 12);
   pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 120);
   pos.pinBottomLeft(*m_widthLabel, 24, 96, 50, 20);
@@ -145,6 +156,11 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
   pos.pinBottomLeft(*m_modeUpdate, 24, 20, 50, 24);
   pos.pinBottomLeft(*m_modeDelete, 75, 20, 50, 24);
+
+  pos.pinTopLeft(*m_autosizeGroup, 224, 40, 200, 52);
+  pos.pinTopLeft(*m_defRefreshLabel, 236, 64, 95, 20);
+  pos.pinTopLeft(*m_defRefresh, 331, 64, 63, 20);
+  pos.pinTopLeft(*m_defRefreshHz, 398, 64, 16, 20);
   return 0;
 }
 
