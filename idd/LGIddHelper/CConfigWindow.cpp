@@ -103,7 +103,7 @@ LRESULT CConfigWindow::onCreate()
 
   m_modeGroup.reset(new CGroupBox(L"Custom modes", WS_CHILD | WS_VISIBLE, m_hwnd));
 
-  m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY, m_hwnd));
+  m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | LBS_NOTIFY, m_hwnd));
   if (m_modes)
     updateModeList();
 
@@ -111,18 +111,18 @@ LRESULT CConfigWindow::onCreate()
   m_heightLabel.reset(new CStaticWidget(L"Height:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
   m_refreshLabel.reset(new CStaticWidget(L"Refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
 
-  m_modeWidth.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modeHeight.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modeWidth.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modeHeight.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
 
-  m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE, m_hwnd));
-  m_modeDelete.reset(new CButton(L"Delete", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
+  m_modeDelete.reset(new CButton(L"Delete", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
   EnableWindow(*m_modeUpdate, FALSE);
   EnableWindow(*m_modeDelete, FALSE);
 
   m_autosizeGroup.reset(new CGroupBox(L"Autosizing", WS_CHILD | WS_VISIBLE, m_hwnd));
   m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
-  m_defRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_defRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
   m_defRefreshHz.reset(new CStaticWidget(L"Hz", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
 
   RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(300 * m_scale) };

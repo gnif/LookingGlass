@@ -105,8 +105,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   MSG msg;
   while (GetMessage(&msg, NULL, 0, 0) > 0)
   {
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
+    HWND hDlg = window.hwndDialog();
+    if (!hDlg || !IsDialogMessage(hDlg, &msg))
+    {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
   }
 
   (void) UnregisterWait(hWait);

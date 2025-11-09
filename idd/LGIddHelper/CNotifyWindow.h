@@ -28,5 +28,6 @@ public:
   ~CNotifyWindow() override;
   static bool registerClass();
 
+  HWND hwndDialog();
   void close();
 };
