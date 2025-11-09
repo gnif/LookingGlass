@@ -32,6 +32,11 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CButton> m_modeUpdate;
   std::unique_ptr<CButton> m_modeDelete;
 
+  std::unique_ptr<CGroupBox> m_autosizeGroup;
+  std::unique_ptr<CStaticWidget> m_defRefreshLabel;
+  std::unique_ptr<CEditWidget> m_defRefresh;
+  std::unique_ptr<CStaticWidget> m_defRefreshHz;
+
   std::function<void()> m_onDestroy;
   double m_scale;
   Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;
