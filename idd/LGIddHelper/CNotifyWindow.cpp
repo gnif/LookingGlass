@@ -143,6 +143,11 @@ void CNotifyWindow::registerIcon()
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
 }
 
+HWND CNotifyWindow::hwndDialog()
+{
+  return m_config ? m_config->hwnd() : nullptr;
+}
+
 void CNotifyWindow::close()
 {
   closeRequested = true;
