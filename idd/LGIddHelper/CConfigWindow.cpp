@@ -220,7 +220,7 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 
     LRESULT result = m_settings.setModes(*m_modes);
     if (result != ERROR_SUCCESS)
-      DEBUG_ERROR_HR(result, "Failed to save modes");
+      DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
   }
   else if (hwnd == *m_modeDelete && code == BN_CLICKED && m_modes)
   {
@@ -234,7 +234,7 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 
     LRESULT result = m_settings.setModes(*m_modes);
     if (result != ERROR_SUCCESS)
-      DEBUG_ERROR_HR(result, "Failed to save modes");
+      DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
 
     updateModeList();
     onModeListSelectChange();
