@@ -4,6 +4,8 @@
 #include <regex>
 #include <CDebug.h>
 
+#include "DefaultDisplayModes.h"
+
 #define LGIDD_REGKEY L"SOFTWARE\\LookingGlass\\IDD"
 
 CRegistrySettings::CRegistrySettings() : hKey(nullptr) {}
@@ -60,8 +62,25 @@ std::optional<std::vector<DisplayMode>> CRegistrySettings::getModes()
 
   DWORD type = 0, cb = 0;
   status = RegGetValue(hKey, nullptr, L"Modes", RRF_RT_REG_MULTI_SZ, &type, nullptr, &cb);
-  if (status != ERROR_SUCCESS)
+  switch (status)
   {
+  case ERROR_SUCCESS:
+    break;
+  case ERROR_FILE_NOT_FOUND:
+  {
+    std::vector<DisplayMode> result;
+    for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
+    {
+      DisplayMode mode;
+      mode.width = DefaultDisplayModes[i][0];
+      mode.height = DefaultDisplayModes[i][1];
+      mode.refresh = DefaultDisplayModes[i][2];
+      mode.preferred = i == DefaultPreferredDisplayMode;
+      result.emplace_back(mode);
+    }
+    return result;
+  }
+  default:
     DEBUG_ERROR_HR(status, "RegGetValue(Modes) length computation");
     return {};
   }
