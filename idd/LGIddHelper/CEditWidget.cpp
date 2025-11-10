@@ -15,7 +15,7 @@ std::wstring CEditWidget::getValue()
 {
   std::wstring result;
   result.resize(Edit_GetTextLength(m_hwnd));
-  Edit_GetText(m_hwnd, result.data(), result.size() + 1);
+  Edit_GetText(m_hwnd, result.data(), (int) (result.size() + 1));
   return result;
 }
 

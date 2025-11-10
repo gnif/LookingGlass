@@ -42,7 +42,7 @@ int CListBox::getSel()
 
 int CListBox::getData(int index)
 {
-  return ListBox_GetItemData(m_hwnd, index);
+  return (int) ListBox_GetItemData(m_hwnd, index);
 }
 
 void CListBox::setSel(int index)
