@@ -17,6 +17,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "LGCommon", "LGCommon", "{AC
 	ProjectSection(SolutionItems) = preProject
 		LGCommon\CDebug.cpp = LGCommon\CDebug.cpp
 		LGCommon\CDebug.h = LGCommon\CDebug.h
+		LGCommon\DefaultDisplayModes.h = LGCommon\DefaultDisplayModes.h
 		LGCommon\PipeMsg.h = LGCommon\PipeMsg.h
 	EndProjectSection
 EndProject
