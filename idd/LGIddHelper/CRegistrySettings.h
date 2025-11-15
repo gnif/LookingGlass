@@ -26,4 +26,7 @@ public:
 
   std::optional<std::vector<DisplayMode>> getModes();
   LSTATUS setModes(const std::vector<DisplayMode> &modes);
+
+  std::optional<DWORD> getDefaultRefresh();
+  LSTATUS setDefaultRefresh(DWORD refresh);
 };

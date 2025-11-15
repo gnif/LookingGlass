@@ -42,6 +42,7 @@ class CConfigWindow : public CWindow
   Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;
   CRegistrySettings m_settings;
   std::optional<std::vector<DisplayMode>> m_modes;
+  std::optional<DWORD> m_defaultRefresh;
 
   void updateFont();
   void updateModeList();

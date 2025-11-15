@@ -8,6 +8,8 @@
 
 #define LGIDD_REGKEY L"SOFTWARE\\LookingGlass\\IDD"
 
+const DWORD DEFAULT_REFRESH = 120;
+
 CRegistrySettings::CRegistrySettings() : hKey(nullptr) {}
 
 CRegistrySettings::~CRegistrySettings()
@@ -135,4 +137,26 @@ std::wstring DisplayMode::toString()
   if (preferred)
     serialized.push_back('*');
   return serialized;
+}
+
+std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
+{
+  DWORD result, cbData = sizeof result;
+
+  LSTATUS status = RegGetValue(hKey, nullptr, L"DefaultRefresh", RRF_RT_REG_DWORD, nullptr, &result, &cbData);
+  switch (status)
+  {
+  case ERROR_SUCCESS:
+    return result;
+  case ERROR_FILE_NOT_FOUND:
+    return DEFAULT_REFRESH;
+  default:
+    DEBUG_ERROR_HR(status, "RegGetValue(Modes) length computation");
+    return {};
+  }
+}
+
+LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refresh)
+{
+  return RegSetValueEx(hKey, L"DefaultRefresh", 0, REG_DWORD, (LPBYTE) &refresh, sizeof(DWORD));
 }
