@@ -28,7 +28,10 @@ CConfigWindow::CConfigWindow() : m_scale(1)
   if (error != ERROR_SUCCESS)
     DEBUG_ERROR_HR(error, "Failed to load settings");
   else
+  {
     m_modes = m_settings.getModes();
+    m_defaultRefresh = m_settings.getDefaultRefresh();
+  }
 
   if (!CreateWindowEx(0, MAKEINTATOM(s_atom), L"Looking Glass IDD Configuration",
     WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 400,
@@ -124,6 +127,11 @@ LRESULT CConfigWindow::onCreate()
   m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
   m_defRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
   m_defRefreshHz.reset(new CStaticWidget(L"Hz", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+
+  if (m_defaultRefresh)
+    m_defRefresh->setNumericValue(*m_defaultRefresh);
+  else
+    m_defRefresh->disable();
 
   RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(300 * m_scale) };
   AdjustWindowRect(&client, WS_OVERLAPPEDWINDOW, FALSE);
@@ -238,6 +246,23 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 
     updateModeList();
     onModeListSelectChange();
+  }
+  else if (hwnd == *m_defRefresh && code == EN_CHANGE && m_defaultRefresh)
+  {
+    int value;
+    try
+    {
+      value = m_defRefresh->getNumericValue();
+    }
+    catch (std::logic_error &)
+    {
+      return 0;
+    }
+
+    m_defaultRefresh = value;
+    LRESULT result = m_settings.setDefaultRefresh(value);
+    if (result != ERROR_SUCCESS)
+      DEBUG_ERROR_HR((HRESULT)result, "Failed to default refresh");
   }
   return 0;
 }
