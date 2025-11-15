@@ -24,6 +24,11 @@ int CEditWidget::getNumericValue()
   return std::stoi(getValue());
 }
 
+bool CEditWidget::enable(bool enabled)
+{
+  return Edit_Enable(m_hwnd, enabled);
+}
+
 void CEditWidget::setValue(const std::wstring &value)
 {
   if (!Edit_SetText(m_hwnd, value.c_str()))
