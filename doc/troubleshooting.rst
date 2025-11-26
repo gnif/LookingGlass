@@ -42,3 +42,30 @@ The clipboard is not working
       -  The Spice VDAgent is available in both Spice Guest Tools, and
          standalone as a separate installer. Check your installed programs
          and uninstall the VDAgent if it's installed separately.
+
+.. _keyboard_shortcuts_not_captured_on_gnome_wayland:
+
+Keyboard shortcuts are not captured on GNOME Wayland
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Capture mode may fail to capture compositor shortcuts like
+ALT+Tab or ALT+Middle Mouse - they go to GNOME instead of the guest VM.
+
+When Looking Glass first requests to inhibit shortcuts, GNOME shows a
+dialog asking for permission. If you clicked "Deny" (or dismissed the dialog),
+GNOME permanently blocks the application and never shows the dialog again.
+
+Use the ``flatpak`` command to view or grant the permission, this works even
+if LookingGlass is not a Flatpak application, as GNOME stores these permissions
+in Flatpak's database:
+
+.. code:: bash
+
+   flatpak permission-set gnome shortcuts-inhibitor looking-glass-client.desktop GRANTED
+
+To verify the permission was set:
+
+.. code:: bash
+
+   flatpak permissions gnome shortcuts-inhibitor
+
