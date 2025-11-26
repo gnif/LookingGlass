@@ -21,6 +21,7 @@ downsampling
 downscaler
 downscaling
 evdev
+Flatpak
 framebuffer
 fullscreen
 gcc
