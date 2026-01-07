@@ -62,7 +62,7 @@ struct WaylandPoll
 struct WaylandOutput
 {
   uint32_t name;
-  wl_fixed_t scale;
+  double scale;
   int32_t scaleInt;
   int32_t logicalWidth;
   int32_t logicalHeight;
@@ -108,7 +108,7 @@ struct WaylandDSState
   struct wl_shm * shm;
   struct wl_compositor * compositor;
 
-  wl_fixed_t scale;
+  double scale;
   bool fractionalScale;
   bool needsResize;
   bool configured;
@@ -285,7 +285,7 @@ bool waylandOutputInit(void);
 void waylandOutputFree(void);
 void waylandOutputBind(uint32_t name, uint32_t version);
 void waylandOutputTryUnbind(uint32_t name);
-wl_fixed_t waylandOutputGetScale(struct wl_output * output);
+double waylandOutputGetScale(struct wl_output * output);
 
 // poll module
 bool waylandPollInit(void);

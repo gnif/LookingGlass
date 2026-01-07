@@ -29,14 +29,14 @@
 
 static void outputUpdateScale(struct WaylandOutput * node)
 {
-  wl_fixed_t original = node->scale;
+  double original = node->scale;
 
   if (!wlWm.useFractionalScale || !wlWm.viewporter || !node->logicalWidth)
-    node->scale = wl_fixed_from_int(node->scaleInt);
+    node->scale = node->scaleInt;
   else
   {
     int32_t modeWidth = node->modeRotate ? node->modeHeight : node->modeWidth;
-    node->scale = wl_fixed_from_double(1.0 * modeWidth / node->logicalWidth);
+    node->scale = 1.0 * modeWidth / node->logicalWidth;
   }
 
   if (original != node->scale)
@@ -209,12 +209,12 @@ void waylandOutputTryUnbind(uint32_t name)
   }
 }
 
-wl_fixed_t waylandOutputGetScale(struct wl_output * output)
+double waylandOutputGetScale(struct wl_output * output)
 {
   struct WaylandOutput * node;
 
   wl_list_for_each(node, &wlWm.outputs, link)
     if (node->output == output)
       return node->scale;
-  return 0;
+  return 0.0;
 }

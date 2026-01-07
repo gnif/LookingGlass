@@ -92,8 +92,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
 
     int width, height;
     wlWm.desktop->getSize(&width, &height);
-    wl_egl_window_resize(wlWm.eglWindow, wl_fixed_to_int(width * wlWm.scale),
-        wl_fixed_to_int(height * wlWm.scale), 0, 0);
+    wl_egl_window_resize(wlWm.eglWindow, width * wlWm.scale, height * wlWm.scale, 0, 0);
 
     if (width == 0 || height == 0)
       skipResize = true;
@@ -123,7 +122,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
         wp_viewport_destroy(wlWm.viewport);
         wlWm.viewport = NULL;
       }
-      wl_surface_set_buffer_scale(wlWm.surface, wl_fixed_to_int(wlWm.scale));
+      wl_surface_set_buffer_scale(wlWm.surface, floor(wlWm.scale));
     }
 
     struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
@@ -131,7 +130,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
     wl_surface_set_opaque_region(wlWm.surface, region);
     wl_region_destroy(region);
 
-    app_handleResizeEvent(width, height, wl_fixed_to_double(wlWm.scale),
+    app_handleResizeEvent(width, height, wlWm.scale,
         (struct Border) {0, 0, 0, 0});
     app_invalidateWindow(true);
     waylandStopWaitFrame();

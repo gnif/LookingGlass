@@ -33,12 +33,12 @@
 
 void waylandWindowUpdateScale(void)
 {
-  wl_fixed_t maxScale = 0;
+  double maxScale = 0;
   struct SurfaceOutput * node;
 
   wl_list_for_each(node, &wlWm.surfaceOutputs, link)
   {
-    wl_fixed_t scale = waylandOutputGetScale(node->output);
+    double scale = waylandOutputGetScale(node->output);
     if (scale > maxScale)
       maxScale = scale;
   }
@@ -46,7 +46,7 @@ void waylandWindowUpdateScale(void)
   if (maxScale)
   {
     wlWm.scale = maxScale;
-    wlWm.fractionalScale = wl_fixed_from_int(wl_fixed_to_int(maxScale)) != maxScale;
+    wlWm.fractionalScale = floor(maxScale) != maxScale;
     wlWm.needsResize = true;
     waylandCursorScaleChange();
     app_invalidateWindow(true);
@@ -87,7 +87,7 @@ static const struct wl_surface_listener wlSurfaceListener = {
 
 bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, bool maximize, bool borderless, bool resizable)
 {
-  wlWm.scale = wl_fixed_from_int(1);
+  wlWm.scale = 1.0;
 
   wlWm.frameEvent = lgCreateEvent(true, 0);
   if (!wlWm.frameEvent)
