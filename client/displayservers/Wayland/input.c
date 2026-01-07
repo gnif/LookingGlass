@@ -91,11 +91,15 @@ static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
     return;
 
-  int button = value > 0 ?
-    5 /* SPICE_MOUSE_BUTTON_DOWN */ :
-    4 /* SPICE_MOUSE_BUTTON_UP */;
-  app_handleButtonPress(button);
-  app_handleButtonRelease(button);
+  if (value != 0)
+  {
+    int button = value > 0 ?
+      5 /* SPICE_MOUSE_BUTTON_DOWN */ :
+      4 /* SPICE_MOUSE_BUTTON_UP */;
+    app_handleButtonPress(button);
+    app_handleButtonRelease(button);
+  }
+
   app_handleWheelMotion(wl_fixed_to_double(value) / 15.0);
 }
 
