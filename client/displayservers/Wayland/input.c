@@ -32,6 +32,9 @@
 #include "app.h"
 #include "common/debug.h"
 
+const double WL_SCROLL_STEP = 15.0;
+const double WL_HALF_SCROLL_STEP = WL_SCROLL_STEP / 2.0;
+
 // Mouse-handling listeners.
 
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
@@ -91,12 +94,25 @@ static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
     return;
 
-  int button = value > 0 ?
-    5 /* SPICE_MOUSE_BUTTON_DOWN */ :
-    4 /* SPICE_MOUSE_BUTTON_UP */;
-  app_handleButtonPress(button);
-  app_handleButtonRelease(button);
-  app_handleWheelMotion(wl_fixed_to_double(value) / 15.0);
+  double delta = wl_fixed_to_double(value);
+
+  wlWm.scrollState += delta;
+
+  while (wlWm.scrollState > WL_HALF_SCROLL_STEP)
+  {
+    app_handleButtonPress(5 /* SPICE_MOUSE_BUTTON_DOWN */);
+    app_handleButtonRelease(5 /* SPICE_MOUSE_BUTTON_DOWN */);
+    wlWm.scrollState -= WL_SCROLL_STEP;
+  }
+
+  while (wlWm.scrollState < -WL_HALF_SCROLL_STEP)
+  {
+    app_handleButtonPress(4 /* SPICE_MOUSE_BUTTON_UP */);
+    app_handleButtonRelease(4 /* SPICE_MOUSE_BUTTON_UP */);
+    wlWm.scrollState += WL_SCROLL_STEP;
+  }
+
+  app_handleWheelMotion(delta / WL_SCROLL_STEP);
 }
 
 static int mapWaylandToSpiceButton(uint32_t button)

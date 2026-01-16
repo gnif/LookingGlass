@@ -114,6 +114,7 @@ struct WaylandDSState
   bool configured;
   bool warpSupport;
   double cursorX, cursorY;
+  double scrollState;
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
   struct wl_egl_window * eglWindow;
