@@ -37,8 +37,8 @@ Developers can clone the source code repo with ``git``.
 
 .. _build_client_section:
 
-Client
-------
+Client Application
+------------------
 
 .. _installing_build_dependencies:
 
@@ -209,8 +209,21 @@ it directly from the build directory:
 
 .. _host_building:
 
-Host
-----
+Host Application
+----------------
+
+.. note::
+
+   `Host` in this context refers to the `Looking Glass (LG) host server application`,
+   to which the LG client connects to, it thus does not refer to the `host OS`!
+   
+   A common setup is to have a `host OS` running a `guest VM`. In such a setup
+   the `client application` runs on the `host OS`; and the `host application`
+   on the `guest VM`.
+
+   The term `Host application` was choosen over `Guest application`, because LG 
+   can be run in a VM to VM configuration, in which case both Host Application and
+   Client Application are run inside VM Guests.
 
 These instructions help you build the host yourself from the
 :ref:`downloaded source code <download_source>`.
