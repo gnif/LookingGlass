@@ -20,3 +20,19 @@ Source code for the documentation can be found in the `/doc` directory.
 
 You may view this locally as HTML by running `make html` with `python3-sphinx`
 and `python3-sphinx-rtd-theme` installed.
+
+## Development
+
+```shell
+podman build --target app --build-arg DISTRO=debian --build-arg DISTRO_VERSION=13 .
+podman build --target app --build-arg DISTRO=ubuntu --build-arg DISTRO_VERSION=25.10 .
+```
+
+### Debug
+
+For debugging, you need to change `--target` to `builder` & run your built image:
+
+```shell
+IMAGE_ID=$(podman build --target builder --build-arg DISTRO=debian --build-arg DISTRO_VERSION=13 . | awk 'END{print}')
+podman run --rm -it -v .:/srv/app -w /srv/app ${IMAGE_ID} bash
+```
