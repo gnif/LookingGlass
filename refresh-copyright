@@ -12,6 +12,8 @@ EXTENSIONS = ('.c', '.cpp', '.h', '.nsi', '.rc')
 START_YEAR = 2017
 CURRENT_YEAR = datetime.date.today().year
 
+UTF8_BOM = '\ufeff'
+
 reignore = re.compile('^vendor/|.*/shader/|.*/d3d12.h$')
 recopyright = re.compile(r'\A/\*.*?\*/\s+', re.DOTALL)
 
@@ -34,6 +36,24 @@ more details.''',
 You should have received a copy of the GNU General Public License along
 with this program; if not, write to the Free Software Foundation, Inc., 59
 Temple Place, Suite 330, Boston, MA 02111-1307 USA''']
+
+
+def read_utf8_preserve_bom(file):
+    with open(file, encoding='utf-8') as f:
+        data = f.read()
+
+    has_bom = data.startswith(UTF8_BOM)
+    if has_bom:
+        data = data[len(UTF8_BOM):]
+
+    return data, has_bom
+
+
+def write_utf8_preserve_bom(file, data, has_bom):
+    with open(file, 'w', encoding='utf-8') as f:
+        if has_bom:
+            f.write(UTF8_BOM)
+        f.write(data)
 
 
 def make_comment_block():
@@ -59,11 +79,11 @@ def gen_c_literal():
 
 def update_c_style(file, copyright):
     print(f'Updating copyright for {file}...')
-    with open(file, encoding='utf-8') as f:
-        data = recopyright.sub('', f.read())
-    with open(file, 'w', encoding='utf-8') as f:
-        f.write(copyright)
-        f.write(data)
+
+    data, has_bom = read_utf8_preserve_bom(file)
+    data = recopyright.sub('', data)
+
+    write_utf8_preserve_bom(file, copyright + data, has_bom)
 
 
 def update_config_c(file):
@@ -73,21 +93,20 @@ def update_config_c(file):
 
     print(f'Refresh embedded copyright string in {file}...')
 
-    with open(file, encoding='utf-8') as f:
-        for line in f:
-            if '// BEGIN LICENSE BLOCK' in line:
-                prefix.append(line)
-                current = []
-            elif '// END LICENSE BLOCK' in line:
-                suffix.append(line)
-                current = suffix
-            else:
-                current.append(line)
+    data, has_bom = read_utf8_preserve_bom(file)
 
-    with open(file, 'w', encoding='utf-8') as f:
-        f.writelines(prefix)
-        f.write(gen_c_literal())
-        f.writelines(suffix)
+    for line in data.splitlines(keepends=True):
+        if '// BEGIN LICENSE BLOCK' in line:
+            prefix.append(line)
+            current = []
+        elif '// END LICENSE BLOCK' in line:
+            suffix.append(line)
+            current = suffix
+        else:
+            current.append(line)
+
+    data = ''.join(prefix) + gen_c_literal() + ''.join(suffix)
+    write_utf8_preserve_bom(file, data, has_bom)
 
 
 def appstring_license():
@@ -105,31 +124,36 @@ def appstring_license():
 
 def update_appstrings(file):
     print(f'Refresh app string in {file}...')
+
+    data, has_bom = read_utf8_preserve_bom(file)
+
     lines = []
+    f = iter(data.splitlines(keepends=True))
 
-    with open(file, encoding='utf-8') as f:
-        f = iter(f)
-        for line in f:
-            lines.append(line)
-            if 'LG_COPYRIGHT_STR' in line:
-                next(f)
-                lines.append(f'  "{copyright}";\n')
-            elif 'LG_WEBSITE_STR' in line:
-                next(f)
-                lines.append(f'  "{project_url}";\n')
-            elif 'LG_LICENSE_STR' in line:
-                lines += [f'{line}\n' for line in appstring_license()]
-                for line in f:
-                    if '";' in line:
-                        break
+    for line in f:
+        lines.append(line)
 
-    with open(file, 'w', encoding='utf-8') as f:
-        f.writelines(lines)
+        if 'LG_COPYRIGHT_STR' in line:
+            next(f)
+            lines.append(f'  "{copyright}";\n')
+
+        elif 'LG_WEBSITE_STR' in line:
+            next(f)
+            lines.append(f'  "{project_url}";\n')
+
+        elif 'LG_LICENSE_STR' in line:
+            lines += [f'{line}\n' for line in appstring_license()]
+            for line in f:
+                if '";' in line:
+                    break
+
+    write_utf8_preserve_bom(file, ''.join(lines), has_bom)
 
 
 def main():
     comment_block = make_comment_block()
     files = subprocess.check_output(['git', '-C', PROJECT, 'ls-files', '-z']).decode('utf-8').split('\0')
+
     for file in files:
         if reignore.match(file):
             continue
@@ -138,6 +162,7 @@ def main():
 
     update_config_c(os.path.join(PROJECT, 'client', 'src', 'config.c'))
     update_appstrings(os.path.join(PROJECT, 'common', 'src', 'appstrings.c'))
+
 
 if __name__ == '__main__':
     main()
