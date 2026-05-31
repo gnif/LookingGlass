@@ -183,7 +183,7 @@ void waylandCursorFree(void)
 
 void waylandCursorScaleChange(void)
 {
-  int newScale = ceil(wl_fixed_to_double(wlWm.scale));
+  int newScale = waylandScaleCeil(wlWm.scale);
   if (newScale == wlWm.cursorScale)
     return;
 
