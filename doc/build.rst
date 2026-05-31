@@ -216,12 +216,12 @@ Host Application
 
    `Host` in this context refers to the `Looking Glass (LG) host server application`,
    to which the LG client connects to, it thus does not refer to the `host OS`!
-   
+
    A common setup is to have a `host OS` running a `guest VM`. In such a setup
    the `client application` runs on the `host OS`; and the `host application`
    on the `guest VM`.
 
-   The term `Host application` was choosen over `Guest application`, because LG 
+   The term `Host application` was chosen over `Guest application`, because LG
    can be run in a VM to VM configuration, in which case both Host Application and
    Client Application are run inside VM Guests.
 
