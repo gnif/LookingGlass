@@ -102,9 +102,13 @@ void lgMessage_process(void)
       case LG_MSG_WINDOWSIZE:
       {
         // retain the last/latest windowsize event
-        if (windowSize)
+        if (!windowSize || windowSize->timestamp > event->timestamp)
+        {
           free(windowSize);
-        windowSize = event;
+          windowSize = event;
+        }
+        else
+          free(event);
         continue;
       }
 
@@ -123,7 +127,7 @@ void lgMessage_process(void)
     if (time - windowSize->timestamp < 500000)
     {
       // requeue the event for later
-      if (!ll_push(this.list, event))
+      if (!ll_push(this.list, windowSize))
       {
         DEBUG_ERROR("Failed to re-queue the windowSize event");
         free(windowSize);
