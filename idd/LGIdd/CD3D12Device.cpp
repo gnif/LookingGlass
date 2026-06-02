@@ -132,8 +132,9 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize
         m_indirectCopy ? CD3D12CommandQueue::NORMAL : CD3D12CommandQueue::FAST))
       return InitResult::FAILURE;
 
-  //if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute"))
-    //return InitResult::FAILURE;
+  if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute",
+      CD3D12CommandQueue::FAST))
+    return InitResult::FAILURE;
 
   DEBUG_INFO("Created CD3D12Device");
   return InitResult::SUCCESS;
@@ -211,5 +212,21 @@ CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
   }
 
   DEBUG_ERROR("Failed to get a copy queue");
+  return nullptr;
+}
+
+CD3D12CommandQueue * CD3D12Device::GetComputeQueue()
+{
+  for (int c = 0; c < 100; ++c)
+  {
+    if (m_computeQueue.IsReady())
+    {
+      m_computeQueue.Reset();
+      return &m_computeQueue;
+    }
+    Sleep(1);
+  }
+
+  DEBUG_ERROR("Failed to get a compute queue");
   return nullptr;
 }

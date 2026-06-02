@@ -34,6 +34,8 @@ CSwapChainProcessor::CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceC
 {
   m_resPool.Init(dx11Device, dx12Device);
   m_fbPool.Init(this);
+  if (!m_postProcessor.Init(dx12Device))
+    DEBUG_ERROR("Failed to initialize post processor");
 
   m_terminateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_thread[0].Attach(CreateThread(nullptr, 0, _SwapChainThread, this, 0, nullptr));
@@ -50,6 +52,7 @@ CSwapChainProcessor::~CSwapChainProcessor()
   if (m_thread[1].Get())
     WaitForSingleObject(m_thread[1].Get(), INFINITE);
 
+  m_postProcessor.Reset();
   m_resPool.Reset();
   m_fbPool.Reset();
   delete[] m_shapeBuffer;
@@ -268,6 +271,44 @@ static void CopyDirtyRect(ComPtr<ID3D12GraphicsCommandList> list,
   list->CopyTextureRegion(dstLoc, box.left, box.top, 0, srcLoc, &box);
 }
 
+static bool ClipDirtyRect(RECT& rect, const D3D12_RESOURCE_DESC& desc)
+{
+  const LONG maxRight  = (LONG)desc.Width;
+  const LONG maxBottom = (LONG)desc.Height;
+
+  if (rect.left   < 0        ) rect.left   = 0;
+  if (rect.top    < 0        ) rect.top    = 0;
+  if (rect.right  > maxRight ) rect.right  = maxRight;
+  if (rect.bottom > maxBottom) rect.bottom = maxBottom;
+
+  return rect.left < rect.right && rect.top < rect.bottom;
+}
+
+static void ClipDirtyRects(RECT dirtyRects[], unsigned * nbDirtyRects,
+  const D3D12_RESOURCE_DESC& desc)
+{
+  unsigned out = 0;
+  for (unsigned i = 0; i < *nbDirtyRects; ++i)
+  {
+    RECT rect = dirtyRects[i];
+    if (ClipDirtyRect(rect, desc))
+      dirtyRects[out++] = rect;
+  }
+  *nbDirtyRects = out;
+}
+
+static FrameType GetFrameType(DXGI_FORMAT format)
+{
+  switch (format)
+  {
+    case DXGI_FORMAT_B8G8R8A8_UNORM    : return FRAME_TYPE_BGRA;
+    case DXGI_FORMAT_R8G8B8A8_UNORM    : return FRAME_TYPE_RGBA;
+    case DXGI_FORMAT_R10G10B10A2_UNORM : return FRAME_TYPE_RGBA10;
+    case DXGI_FORMAT_R16G16B16A16_FLOAT: return FRAME_TYPE_RGBA16F;
+    default                            : return FRAME_TYPE_INVALID;
+  }
+}
+
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount)
 {
   ComPtr<ID3D11Texture2D> texture;
@@ -314,37 +355,47 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       srcRes->SetDirtyRects(dirtyRects, dirtyOut.DirtyRectOutCount);
   }
 
-  D3D12_RESOURCE_DESC desc = srcRes->GetRes()->GetDesc();
+  D3D12_RESOURCE_DESC srcDesc = srcRes->GetRes()->GetDesc();
+  D12FrameFormat srcFormat = {};
+  srcFormat.desc   = srcDesc;
+  srcFormat.width  = (unsigned)srcDesc.Width;
+  srcFormat.height = srcDesc.Height;
+  srcFormat.format = GetFrameType(srcDesc.Format);
+  srcFormat.hdr    = srcDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+  srcFormat.hdrPQ  = false;
+
+  bool postProcessFormatChanged = false;
+  if (!m_postProcessor.Configure(srcFormat, &postProcessFormatChanged))
+    return false;
+
+  if (postProcessFormatChanged)
+    m_nbDirtyRects = 0;
+
+  const D12FrameFormat& dstFormat = m_postProcessor.GetOutputFormat();
+
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
   m_dx12Device->GetDevice()->GetCopyableFootprints(
-    &desc,
+    &dstFormat.desc,
     0,
     1,
     0,
     &layout,
-    NULL, 
+    NULL,
     NULL,
     NULL);
 
-  auto buffer = m_devContext->PrepareFrameBuffer(
-    (int)desc.Width,
-    (int)desc.Height,
-    (int)layout.Footprint.RowPitch,
-    desc.Format,
-    srcRes->GetDirtyRects(),
-    srcRes->GetDirtyRectCount());
-
-  if (!buffer.mem)
-    return false;
-
-  CFrameBufferResource * fbRes = m_fbPool.Get(buffer,
-    (size_t)layout.Footprint.RowPitch * desc.Height);
-
-  if (!fbRes)
+  RECT currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+  RECT frameDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+  unsigned nbDirtyRects = srcRes->GetDirtyRectCount();
+  if (nbDirtyRects > ARRAYSIZE(currentDirtyRects))
+    nbDirtyRects = 0;
+  else
   {
-    DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
-    return false;
+    memcpy(currentDirtyRects, srcRes->GetDirtyRects(), nbDirtyRects * sizeof(*currentDirtyRects));
+    memcpy(frameDirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*frameDirtyRects));
   }
+  unsigned frameDirtyRectCount = nbDirtyRects;
+  m_postProcessor.AdjustFrameDamage(frameDirtyRects, &frameDirtyRectCount);
 
   auto copyQueue = m_dx12Device->GetCopyQueue();
   if (!copyQueue)
@@ -353,10 +404,53 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
+  ComPtr<ID3D12Resource> copySrcResource = srcRes->GetRes();
+  CD3D12CommandQueue * computeQueue = nullptr;
+  if (m_postProcessor.HasActiveEffects())
+  {
+    computeQueue = m_dx12Device->GetComputeQueue();
+    if (!computeQueue)
+    {
+      DEBUG_ERROR("Failed to get a ComputeQueue");
+      return false;
+    }
+
+    srcRes->Sync(*computeQueue);
+    copySrcResource = m_postProcessor.Run(
+      computeQueue->GetGfxList(), copySrcResource,
+      currentDirtyRects, &nbDirtyRects);
+
+    computeQueue->Execute();
+    copyQueue->WaitFor(*computeQueue);
+  }
+  else
+    srcRes->Sync(*copyQueue);
+
+  ClipDirtyRects(currentDirtyRects, &nbDirtyRects, dstFormat.desc);
+
+  auto buffer = m_devContext->PrepareFrameBuffer(
+    (unsigned)layout.Footprint.RowPitch,
+    srcFormat,
+    dstFormat,
+    frameDirtyRects,
+    frameDirtyRectCount);
+
+  if (!buffer.mem)
+    return false;
+
+  CFrameBufferResource * fbRes = m_fbPool.Get(buffer,
+    (size_t)layout.Footprint.RowPitch * dstFormat.desc.Height);
+
+  if (!fbRes)
+  {
+    DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
+    return false;
+  }
+
   copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
 
   D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-  srcLoc.pResource        = srcRes->GetRes().Get();
+  srcLoc.pResource        = copySrcResource.Get();
   srcLoc.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
   srcLoc.SubresourceIndex = 0;
 
@@ -365,11 +459,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dstLoc.PlacedFootprint = layout;
 
-  srcRes->Sync(*copyQueue);
-
-  const RECT * currentDirtyRects = srcRes->GetDirtyRects();
-  unsigned nbDirtyRects = srcRes->GetDirtyRectCount();
-  if (IsFullDamage(currentDirtyRects, nbDirtyRects, desc) ||
+  if (IsFullDamage(currentDirtyRects, nbDirtyRects, dstFormat.desc) ||
       nbDirtyRects > KVMFR_MAX_DAMAGE_RECTS || m_nbDirtyRects == 0)
   {
     copyQueue->GetGfxList()->CopyTextureRegion(
@@ -383,7 +473,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   else
   {
     for (const RECT * rect = m_dirtyRects; rect < m_dirtyRects + m_nbDirtyRects; ++rect)
-      CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
+    {
+      RECT clipped = *rect;
+      if (ClipDirtyRect(clipped, dstFormat.desc))
+        CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, clipped);
+    }
 
     for (const RECT * rect = currentDirtyRects; rect < currentDirtyRects + nbDirtyRects; ++rect)
       CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);

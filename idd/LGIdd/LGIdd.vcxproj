@@ -36,6 +36,11 @@
     <ClCompile Include="CIVSHMEM.cpp" />
     <ClCompile Include="CPipeServer.cpp" />
     <ClCompile Include="CPlatformInfo.cpp" />
+    <ClCompile Include="CPostProcessor.cpp" />
+    <ClCompile Include="effect\CComputeEffect.cpp" />
+    <ClCompile Include="effect\CDownsampleEffect.cpp" />
+    <ClCompile Include="effect\CHDR16to10Effect.cpp" />
+    <ClCompile Include="effect\CRGB24Effect.cpp" />
     <ClCompile Include="CSettings.cpp" />
     <ClCompile Include="CSwapChainProcessor.cpp" />
     <ClCompile Include="CD3D12Device.cpp" />
@@ -55,6 +60,11 @@
     <ClInclude Include="CIVSHMEM.h" />
     <ClInclude Include="CPipeServer.h" />
     <ClInclude Include="CPlatformInfo.h" />
+    <ClInclude Include="CPostProcessor.h" />
+    <ClInclude Include="effect\CComputeEffect.h" />
+    <ClInclude Include="effect\CDownsampleEffect.h" />
+    <ClInclude Include="effect\CHDR16to10Effect.h" />
+    <ClInclude Include="effect\CRGB24Effect.h" />
     <ClInclude Include="CSettings.h" />
     <ClInclude Include="CSwapChainProcessor.h" />
     <ClInclude Include="CD3D12Device.h" />
@@ -179,7 +189,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -194,7 +204,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -209,7 +219,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)LGCommon;$(SolutionDir)..\repos\LGMP\lgmp\include;$(SolutionDir)..\vendor;$(SolutionDir)..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -224,7 +234,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)LGCommon;$(SolutionDir)..\repos\LGMP\lgmp\include;$(SolutionDir)..\vendor;$(SolutionDir)..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>

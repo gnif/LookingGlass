@@ -803,7 +803,8 @@ void CIndirectDeviceContext::LGMPTimer()
 }
 
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
-  unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format, const RECT * dirtyRects, unsigned nbDirtyRects)
+  unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
+  const RECT * dirtyRects, unsigned nbDirtyRects)
 {
   PreparedFrameBuffer result = {};
 
@@ -811,15 +812,20 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     return result;
 
   if (InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0) &&
-      width == m_setMode.width && height == m_setMode.height)
+      srcFormat.width == m_setMode.width && srcFormat.height == m_setMode.height)
     InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
 
-  if (m_width != width || m_height != height || m_pitch != pitch || m_format != format)
+  if (m_width     != dstFormat.desc.Width  ||
+      m_height    != dstFormat.desc.Height ||
+      m_pitch     != pitch                 ||
+      m_format    != dstFormat.desc.Format ||
+      m_frameType != dstFormat.format)
   {
-    m_width  = width;
-    m_height = height;
-    m_format = format;
-    m_pitch  = pitch;
+    m_width     = (unsigned)dstFormat.desc.Width;
+    m_height    = dstFormat.desc.Height;
+    m_format    = dstFormat.desc.Format;
+    m_frameType = dstFormat.format;
+    m_pitch     = pitch;
     ++m_formatVer;
   }
 
@@ -832,36 +838,38 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
     Sleep(0);
 
-  int bpp = 4;
-  switch (format)
+  if (dstFormat.format == FRAME_TYPE_INVALID)
   {
-    case DXGI_FORMAT_B8G8R8A8_UNORM    : fi->type = FRAME_TYPE_BGRA   ; break;
-    case DXGI_FORMAT_R8G8B8A8_UNORM    : fi->type = FRAME_TYPE_RGBA   ; break;
-    case DXGI_FORMAT_R10G10B10A2_UNORM : fi->type = FRAME_TYPE_RGBA10 ; break;
-
-    case DXGI_FORMAT_R16G16B16A16_FLOAT:
-      fi->type = FRAME_TYPE_RGBA16F;
-      bpp = 8;
-      break;
-
-    default:
-      DEBUG_ERROR("Unsuppoted DXGI format 0x%08x", format);
-      return result;
+    DEBUG_ERROR("Unsupported frame format, skipping frame");
+    return result;
   }
+
+  const unsigned maxRows = (unsigned)(m_maxFrameSize / pitch);
+  const int bpp = dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
+  KVMFRFrameFlags flags =
+    (dstFormat.hdr   ? FRAME_FLAG_HDR    : 0) |
+    (dstFormat.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
+
+  if (dstFormat.format == FRAME_TYPE_RGBA16F)
+    flags |= FRAME_FLAG_HDR;
+
+  if (maxRows < dstFormat.desc.Height)
+    flags |= FRAME_FLAG_TRUNCATED;
 
   fi->formatVer        = m_formatVer;
   fi->frameSerial      = m_frameSerial++;
-  fi->screenWidth      = width;
-  fi->screenHeight     = height;
-  fi->dataWidth        = width;
-  fi->dataHeight       = height;
-  fi->frameWidth       = width;
-  fi->frameHeight      = height;
+  fi->screenWidth      = srcFormat.width;
+  fi->screenHeight     = srcFormat.height;
+  fi->dataWidth        = (unsigned)dstFormat.desc.Width;
+  fi->dataHeight       = min(maxRows, dstFormat.desc.Height);
+  fi->frameWidth       = dstFormat.width;
+  fi->frameHeight      = dstFormat.height;
   fi->stride           = pitch / bpp;
   fi->pitch            = pitch;
   // fi->offset is initialized at startup
-  fi->flags            = 0;
+  fi->flags            = flags;
   fi->rotation         = FRAME_ROT_0;
+  fi->type             = dstFormat.format;
   fi->damageRectsCount = 0;
   if (nbDirtyRects <= ARRAYSIZE(fi->damageRects))
   {
@@ -875,7 +883,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     }
   }
 
-  FrameBuffer* fb = m_frameBuffer[m_frameIndex];  
+  FrameBuffer* fb = m_frameBuffer[m_frameIndex];
   fb->wp = 0;
 
   lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
