@@ -62,7 +62,10 @@ class CInteropResource
     void Signal();
     void Sync(CD3D12CommandQueue& queue);
     void SetFullDamage();
+    void SetDirtyRects(const RECT * dirtyRects, unsigned nbDirtyRects);
 
     const ComPtr<ID3D12Resource>& GetRes() { return m_d12Res; }
     const D3D11_TEXTURE2D_DESC& GetFormat() { return m_format; }
+    const RECT * GetDirtyRects() { return m_dirtyRects; }
+    unsigned GetDirtyRectCount() { return m_nbDirtyRects; }
 };

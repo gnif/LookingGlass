@@ -803,7 +803,7 @@ void CIndirectDeviceContext::LGMPTimer()
 }
 
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
-  unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format)
+  unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format, const RECT * dirtyRects, unsigned nbDirtyRects)
 {
   PreparedFrameBuffer result = {};
 
@@ -863,6 +863,17 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->flags            = 0;
   fi->rotation         = FRAME_ROT_0;
   fi->damageRectsCount = 0;
+  if (nbDirtyRects <= ARRAYSIZE(fi->damageRects))
+  {
+    fi->damageRectsCount = nbDirtyRects;
+    for (unsigned i = 0; i < nbDirtyRects; ++i)
+    {
+      fi->damageRects[i].x      = dirtyRects[i].left;
+      fi->damageRects[i].y      = dirtyRects[i].top;
+      fi->damageRects[i].width  = dirtyRects[i].right  - dirtyRects[i].left;
+      fi->damageRects[i].height = dirtyRects[i].bottom - dirtyRects[i].top;
+    }
+  }
 
   FrameBuffer* fb = m_frameBuffer[m_frameIndex];  
   fb->wp = 0;
@@ -876,7 +887,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   return result;
 }
 
-void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos)
+void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const
 {
   FrameBuffer * fb = m_frameBuffer[frameIndex];
 
@@ -889,7 +900,7 @@ void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, si
     fb->wp = (uint32_t)(offset + len);
 }
 
-void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex)
+void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex) const
 {
   FrameBuffer * fb = m_frameBuffer[frameIndex];
   fb->wp = m_height * m_pitch;
@@ -965,7 +976,7 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   }
 }
 
-void CIndirectDeviceContext::ResendCursor()
+void CIndirectDeviceContext::ResendCursor() const
 {
   PLGMPMemory mem = m_pointerShape;
   if (!mem)

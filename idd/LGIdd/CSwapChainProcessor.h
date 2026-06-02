@@ -55,6 +55,9 @@ private:
   BYTE*           m_shapeBuffer;
   DWORD           m_lastShapeId = 0;
 
+  RECT     m_dirtyRects[LG_MAX_DIRTY_RECTS] = {};
+  unsigned m_nbDirtyRects = 0;
+
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();
   void SwapChainThreadCore();
@@ -65,7 +68,7 @@ private:
 
   static void CompletionFunction(
     CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
-  bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer);
+  bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount);
 
 public:
   CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,

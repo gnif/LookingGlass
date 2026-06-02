@@ -86,24 +86,26 @@ bool CInteropResource::Init(std::shared_ptr<CD3D11Device> dx11Device, std::share
   m_dx12Device = dx12Device;
 
   memcpy(&m_format, &srcDesc, sizeof(m_format));
-  m_srcTex     = srcTex.Get();
-  m_d12Res     = dst;
-  m_d11Fence   = d11Fence;
-  m_d12Fence   = d12Fence;
-  m_fenceValue = 0;
-  m_ready      = true;
+  m_srcTex       = srcTex.Get();
+  m_d12Res       = dst;
+  m_d11Fence     = d11Fence;
+  m_d12Fence     = d12Fence;
+  m_fenceValue   = 0;
+  m_nbDirtyRects = 0;
+  m_ready        = true;
 
   return true;
 }
 
 void CInteropResource::Reset()
 {
-  m_ready      = false;
-  m_fenceValue = 0;
+  m_ready         = false;
+  m_fenceValue    = 0;
   m_d12Fence.Reset();
   m_d11Fence.Reset();
   m_d12Res  .Reset();
-  m_srcTex    = NULL;
+  m_srcTex       = NULL;
+  m_nbDirtyRects = 0;
   memset(&m_format, 0, sizeof(m_format));
 
   m_dx12Device.reset();
@@ -143,4 +145,15 @@ void CInteropResource::SetFullDamage()
   m_dirtyRects[0].right  = m_format.Width;
   m_dirtyRects[0].bottom = m_format.Height;
   m_nbDirtyRects = 1;
+}
+void CInteropResource::SetDirtyRects(const RECT * dirtyRects, unsigned nbDirtyRects)
+{
+  if (nbDirtyRects > LG_MAX_DIRTY_RECTS)
+  {
+    SetFullDamage();
+    return;
+  }
+
+  memcpy(m_dirtyRects, dirtyRects, nbDirtyRects * sizeof(*m_dirtyRects));
+  m_nbDirtyRects = nbDirtyRects;
 }

@@ -88,7 +88,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
   if (IDD_IS_FUNCTION_AVAILABLE(IddCxSetRealtimeGPUPriority))
   {
     DEBUG_INFO("Using IddCxSetRealtimeGPUPriority");
-    IDARG_IN_SETREALTIMEGPUPRIORITY arg;
+    IDARG_IN_SETREALTIMEGPUPRIORITY arg = {0};
     arg.pDevice = dxgiDevice.Get();
     hr = IddCxSetRealtimeGPUPriority(m_hSwapChain, &arg);
     if (FAILED(hr))
@@ -134,6 +134,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
       break;
 
     UINT frameNumber = 0;
+    UINT dirtyRectCount = 0;
     ComPtr<IDXGIResource> surface;
 
 #if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
@@ -151,6 +152,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
       if (SUCCEEDED(hr))
       {
         frameNumber = buffer.MetaData.PresentationFrameNumber;
+        dirtyRectCount = buffer.MetaData.DirtyRectCount;
         surface = buffer.MetaData.pSurface;
       }
     }
@@ -163,6 +165,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
       if (SUCCEEDED(hr))
       {
         frameNumber = buffer.MetaData.PresentationFrameNumber;
+        dirtyRectCount = buffer.MetaData.DirtyRectCount;
         surface = buffer.MetaData.pSurface;
       }
     }
@@ -190,7 +193,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
       if (frameNumber != lastFrameNumber)
       {
         lastFrameNumber = frameNumber;
-        SwapChainNewFrame(surface);
+        SwapChainNewFrame(surface, dirtyRectCount);
 
         // report that all GPU processing for this frame has been queued
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -237,7 +240,35 @@ void CSwapChainProcessor::CompletionFunction(
     sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
 }
 
-bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer)
+
+static bool IsFullDamage(const RECT * dirtyRects, unsigned nbDirtyRects,
+  const D3D12_RESOURCE_DESC& desc)
+{
+  return nbDirtyRects == 0 ||
+    (nbDirtyRects == 1 &&
+      dirtyRects[0].left   == 0 &&
+      dirtyRects[0].top    == 0 &&
+      dirtyRects[0].right  == (LONG)desc.Width &&
+      dirtyRects[0].bottom == (LONG)desc.Height);
+}
+
+static void CopyDirtyRect(ComPtr<ID3D12GraphicsCommandList> list,
+  D3D12_TEXTURE_COPY_LOCATION * dstLoc,
+  D3D12_TEXTURE_COPY_LOCATION * srcLoc,
+  const RECT& rect)
+{
+  D3D12_BOX box = {};
+  box.left   = rect.left;
+  box.top    = rect.top;
+  box.front  = 0;
+  box.right  = rect.right;
+  box.bottom = rect.bottom;
+  box.back   = 1;
+
+  list->CopyTextureRegion(dstLoc, box.left, box.top, 0, srcLoc, &box);
+}
+
+bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount)
 {
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
@@ -261,8 +292,27 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
    */
   srcRes->Signal();
 
-  //FIXME: handle dirty rects
-  srcRes->SetFullDamage();
+  RECT dirtyRects[LG_MAX_DIRTY_RECTS] = {0};
+  if (dirtyRectCount > ARRAYSIZE(dirtyRects))
+  {
+    srcRes->SetFullDamage();
+  }
+  else
+  {
+    IDARG_IN_GETDIRTYRECTS dirtyIn = {};
+    dirtyIn.DirtyRectInCount = dirtyRectCount;
+    dirtyIn.pDirtyRects      = dirtyRects;
+
+    IDARG_OUT_GETDIRTYRECTS dirtyOut = {};
+    hr = IddCxSwapChainGetDirtyRects(m_hSwapChain, &dirtyIn, &dirtyOut);
+    if (FAILED(hr))
+    {
+      DEBUG_ERROR_HR(hr, "IddCxSwapChainGetDirtyRects Failed");
+      srcRes->SetFullDamage();
+    }
+    else
+      srcRes->SetDirtyRects(dirtyRects, dirtyOut.DirtyRectOutCount);
+  }
 
   D3D12_RESOURCE_DESC desc = srcRes->GetRes()->GetDesc();
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
@@ -280,7 +330,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     (int)desc.Width,
     (int)desc.Height,
     (int)layout.Footprint.RowPitch,
-    desc.Format);
+    desc.Format,
+    srcRes->GetDirtyRects(),
+    srcRes->GetDirtyRectCount());
 
   if (!buffer.mem)
     return false;
@@ -314,8 +366,32 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.PlacedFootprint = layout;
 
   srcRes->Sync(*copyQueue);
-  copyQueue->GetGfxList()->CopyTextureRegion(
-    &dstLoc, 0, 0, 0, &srcLoc, NULL);
+
+  const RECT * currentDirtyRects = srcRes->GetDirtyRects();
+  unsigned nbDirtyRects = srcRes->GetDirtyRectCount();
+  if (IsFullDamage(currentDirtyRects, nbDirtyRects, desc) ||
+      nbDirtyRects > KVMFR_MAX_DAMAGE_RECTS || m_nbDirtyRects == 0)
+  {
+    copyQueue->GetGfxList()->CopyTextureRegion(
+      &dstLoc, 0, 0, 0, &srcLoc, NULL);
+  }
+  else if (m_nbDirtyRects + nbDirtyRects > LG_MAX_DIRTY_RECTS)
+  {
+    copyQueue->GetGfxList()->CopyTextureRegion(
+      &dstLoc, 0, 0, 0, &srcLoc, NULL);
+  }
+  else
+  {
+    for (const RECT * rect = m_dirtyRects; rect < m_dirtyRects + m_nbDirtyRects; ++rect)
+      CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
+
+    for (const RECT * rect = currentDirtyRects; rect < currentDirtyRects + nbDirtyRects; ++rect)
+      CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
+  }
+
+  memcpy(m_dirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*m_dirtyRects));
+  m_nbDirtyRects = nbDirtyRects;
+
   copyQueue->Execute();
 
   return true;
