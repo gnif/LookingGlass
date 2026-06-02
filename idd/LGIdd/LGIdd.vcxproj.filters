@@ -17,6 +17,12 @@
       <UniqueIdentifier>{8E41214B-6785-4CFE-B992-037D68949A14}</UniqueIdentifier>
       <Extensions>inf;inv;inx;mof;mc;</Extensions>
     </Filter>
+    <Filter Include="Source Files\effect">
+      <UniqueIdentifier>{52F1286F-0C64-41B9-92A9-4453C80B1001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\effect">
+      <UniqueIdentifier>{DB623F3B-5D6A-4F8C-8884-83588A1B58D2}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
@@ -85,6 +91,21 @@
     <ClInclude Include="CSettings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CPostProcessor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="effect\CComputeEffect.h">
+      <Filter>Header Files\effect</Filter>
+    </ClInclude>
+    <ClInclude Include="effect\CDownsampleEffect.h">
+      <Filter>Header Files\effect</Filter>
+    </ClInclude>
+    <ClInclude Include="effect\CHDR16to10Effect.h">
+      <Filter>Header Files\effect</Filter>
+    </ClInclude>
+    <ClInclude Include="effect\CRGB24Effect.h">
+      <Filter>Header Files\effect</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
     <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
   </ItemGroup>
@@ -138,6 +159,21 @@
     <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
     <ClCompile Include="CSettings.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CPostProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="effect\CComputeEffect.cpp">
+      <Filter>Source Files\effect</Filter>
+    </ClCompile>
+    <ClCompile Include="effect\CDownsampleEffect.cpp">
+      <Filter>Source Files\effect</Filter>
+    </ClCompile>
+    <ClCompile Include="effect\CHDR16to10Effect.cpp">
+      <Filter>Source Files\effect</Filter>
+    </ClCompile>
+    <ClCompile Include="effect\CRGB24Effect.cpp">
+      <Filter>Source Files\effect</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
   </ItemGroup>

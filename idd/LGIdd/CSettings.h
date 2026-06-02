@@ -43,8 +43,8 @@ class CSettings
     bool GetExtraMode(DisplayMode & mode);
     unsigned GetDefaultRefresh() const;
 
-    std::wstring ReadStringValue(const wchar_t* name, const wchar_t* defaultValue);
-    bool ReadBoolValue(const wchar_t* name, bool defaultValue);
+    std::wstring ReadStringValue(const wchar_t* name, const wchar_t* defaultValue = nullptr);
+    bool ReadBoolValue(const wchar_t* name, bool defaultValue = false);
 
   private:
     DisplayModes m_displayModes;

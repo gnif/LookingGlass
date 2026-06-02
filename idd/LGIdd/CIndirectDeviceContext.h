@@ -28,6 +28,7 @@
 #include "CIVSHMEM.h"
 #include "CSettings.h"
 #include "CEdid.h"
+#include "CPostProcessor.h"
 
 extern "C" {
   #include "lgmp/host.h"
@@ -83,6 +84,7 @@ private:
   unsigned    m_height   = 0;
   unsigned    m_pitch    = 0;
   DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
+  FrameType   m_frameType = FRAME_TYPE_INVALID;
   bool        m_hasFrame = false;
 
   UINT m_iddCxVersion = 0;
@@ -148,7 +150,7 @@ public:
     uint8_t* mem;
   };
 
-  PreparedFrameBuffer PrepareFrameBuffer(unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format, const RECT * dirtyRects, unsigned nbDirtyRects);
+  PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 

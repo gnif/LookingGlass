@@ -25,6 +25,7 @@
 #include "CIndirectDeviceContext.h"
 #include "CInteropResourcePool.h"
 #include "CFrameBufferPool.h"
+#include "CPostProcessor.h"
 
 #include <Windows.h>
 #include <wrl.h>
@@ -47,6 +48,7 @@ private:
 
   CInteropResourcePool m_resPool;
   CFrameBufferPool     m_fbPool;
+  CPostProcessor       m_postProcessor;
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[2];
   Wrappers::Event m_terminateEvent;

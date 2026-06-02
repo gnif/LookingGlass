@@ -74,5 +74,5 @@ struct CD3D12Device
     bool IsIndirectCopy() { return m_indirectCopy; }
 
     CD3D12CommandQueue * GetCopyQueue();
-    CD3D12CommandQueue & GetComputeQueue() { return m_computeQueue; }
+    CD3D12CommandQueue * GetComputeQueue();
 };
