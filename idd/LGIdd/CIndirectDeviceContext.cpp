@@ -269,6 +269,8 @@ void CIndirectDeviceContext::ReplugMonitor()
 
 void CIndirectDeviceContext::OnAssignSwapChain()
 {
+  InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
+
   if (m_doSetMode)
   {
     m_doSetMode = false;
@@ -278,11 +280,29 @@ void CIndirectDeviceContext::OnAssignSwapChain()
 
 void CIndirectDeviceContext::OnUnassignedSwapChain()
 {
+  InterlockedExchange(&m_replugMonitorQueued, 0);
+  InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
+
   if (m_replugMonitor)
   {
     m_replugMonitor = false;
     FinishInit(0);
   }
+}
+
+void CIndirectDeviceContext::OnSwapChainLost()
+{
+  // A mode update normally keeps the swap chain alive. If Windows instead
+  // reports the existing path disappeared before we see a frame at the new
+  // size, recover by scheduling the old replug path from the LGMP timer so we
+  // do not tear down the swap chain from one of its worker threads.
+  if (!InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0))
+    return;
+
+  if (InterlockedExchange(&m_replugMonitorQueued, 1))
+    return;
+
+  DEBUG_WARN("Swap chain was lost after a mode update, falling back to monitor replug");
 }
 
 static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
@@ -421,6 +441,85 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
 }
 #endif
 
+bool CIndirectDeviceContext::UpdateMonitorModes()
+{
+  if (!m_monitor)
+    return false;
+
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  if (CanUseIddCx110DDIs())
+  {
+    IDDCX_TARGET_MODE2* modes = (IDDCX_TARGET_MODE2*)_malloca(
+      m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
+    if (!modes)
+    {
+      DEBUG_WARN("Failed to allocate memory for the mode list");
+      return false;
+    }
+
+    ZeroMemory(modes, m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
+
+    auto* mode = modes;
+    for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+    {
+      mode->Size              = sizeof(IDDCX_TARGET_MODE2);
+      mode->RequiredBandwidth = (UINT64)it->width * it->height * it->refresh * 32;
+      mode->BitsPerComponent  = GetWireBitsPerComponent(CanUseIddCx110DDIs());
+      FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
+    }
+
+    IDARG_IN_UPDATEMODES2 updateModes = {};
+    updateModes.Reason          = IDDCX_UPDATE_REASON_OTHER;
+    updateModes.TargetModeCount = (UINT)m_displayModes.size();
+    updateModes.pTargetModes    = modes;
+
+    NTSTATUS status = IddCxMonitorUpdateModes2(m_monitor, &updateModes);
+    _freea(modes);
+    if (!NT_SUCCESS(status))
+    {
+      DEBUG_WARN("IddCxMonitorUpdateModes2 Failed (0x%08x)", status);
+      return false;
+    }
+
+    return true;
+  }
+#endif
+
+  IDDCX_TARGET_MODE* modes = (IDDCX_TARGET_MODE*)_malloca(
+    m_displayModes.size() * sizeof(IDDCX_TARGET_MODE));
+  if (!modes)
+  {
+    DEBUG_WARN("Failed to allocate memory for the mode list");
+    return false;
+  }
+
+  ZeroMemory(modes, m_displayModes.size() * sizeof(IDDCX_TARGET_MODE));
+
+  auto* mode = modes;
+  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  {
+    mode->Size              = sizeof(IDDCX_TARGET_MODE);
+    mode->RequiredBandwidth = (UINT64)it->width * it->height * it->refresh * 32;
+    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
+  }
+
+  IDARG_IN_UPDATEMODES updateModes = {};
+  updateModes.Reason          = IDDCX_UPDATE_REASON_OTHER;
+  updateModes.TargetModeCount = (UINT)m_displayModes.size();
+  updateModes.pTargetModes    = modes;
+
+  NTSTATUS status = IddCxMonitorUpdateModes(m_monitor, &updateModes);
+  _freea(modes);
+  if (!NT_SUCCESS(status))
+  {
+    DEBUG_WARN("IddCxMonitorUpdateModes Failed (0x%08x)", status);
+    return false;
+  }
+
+  return true;
+}
+
 void CIndirectDeviceContext::SetResolution(int width, int height)
 {
   m_setMode.width     = width;
@@ -430,77 +529,20 @@ void CIndirectDeviceContext::SetResolution(int width, int height)
   g_settings.SetExtraMode(m_setMode);
 
   PopulateDefaultModes();
+
+  if (UpdateMonitorModes())
+  {
+    DEBUG_TRACE("Updated monitor modes without replugging");
+    m_doSetMode = false;
+    InterlockedExchange(&m_recoverModeUpdateSwapChain, 1);
+    g_pipe.SetDisplayMode(m_setMode.width, m_setMode.height, m_setMode.refresh);
+    return;
+  }
+
+  DEBUG_TRACE("Falling back to monitor replug for mode update");
   m_doSetMode = true;
-
-#if 1
+  InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
   ReplugMonitor();
-#else
-
-  if (IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorUpdateModes2))
-  {
-    IDDCX_TARGET_MODE2* modes = (IDDCX_TARGET_MODE2*)_malloca(
-      m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
-
-    if (!modes)
-    {
-      DEBUG_ERROR("Failed to allocate memory for the mode list");
-      return;
-    }
-
-    ZeroMemory(modes, m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
-
-    IDARG_IN_UPDATEMODES2 um = {};
-    um.Reason          = IDDCX_UPDATE_REASON_OTHER;
-    um.TargetModeCount = (UINT)m_displayModes.size();
-    um.pTargetModes    = modes;
-    auto* mode = modes;
-    for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
-    {      
-      mode->Size                 = sizeof(IDDCX_TARGET_MODE2);
-      mode->RequiredBandwidth    = (UINT64)(it->width * it->height * it->refresh * 32);
-      mode->BitsPerComponent.Rgb = IDDCX_BITS_PER_COMPONENT_8;
-
-      FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, true);
-    }
-
-    NTSTATUS status = IddCxMonitorUpdateModes2(m_monitor, &um);
-    if (!NT_SUCCESS(status))
-      DEBUG_ERROR("IddCxMonitorUpdateModes2 Failed (0x%08x)", status);
-
-    _freea(modes);
-  }
-  else
-  {
-    IDDCX_TARGET_MODE* modes = (IDDCX_TARGET_MODE*)_malloca(
-      m_displayModes.size() * sizeof(IDDCX_TARGET_MODE));
-
-    if (!modes)
-    {
-      DEBUG_ERROR("Failed to allocate memory for the mode list");
-      return;
-    }
-
-    IDARG_IN_UPDATEMODES um = {};
-    um.Reason          = IDDCX_UPDATE_REASON_OTHER;
-    um.TargetModeCount = (UINT)m_displayModes.size();
-    um.pTargetModes    = modes;
-  
-    auto* mode = modes;
-    for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
-    {
-      mode->Size              = sizeof(IDDCX_TARGET_MODE);
-      mode->RequiredBandwidth = (UINT64)(it->width * it->height * it->refresh * 32);
-
-      FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, true);
-    }
-
-    NTSTATUS status = IddCxMonitorUpdateModes(m_monitor, &um);
-    if (!NT_SUCCESS(status))
-      DEBUG_ERROR("IddCxMonitorUpdateModes Failed (0x%08x)", status);
-
-    _freea(modes);
-  }
-#endif
 }
 
 bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
@@ -704,6 +746,13 @@ void CIndirectDeviceContext::DeInitLGMP()
 
 void CIndirectDeviceContext::LGMPTimer()
 {
+  if (InterlockedExchange(&m_replugMonitorQueued, 0))
+  {
+    m_doSetMode = true;
+    ReplugMonitor();
+    return;
+  }
+
   LGMP_STATUS status;
   if ((status = lgmpHostProcess(m_lgmp)) != LGMP_OK)
   {
@@ -753,12 +802,17 @@ void CIndirectDeviceContext::LGMPTimer()
     ResendCursor();
 }
 
-CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(int width, int height, int pitch, DXGI_FORMAT format)
+CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
+  unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format)
 {
   PreparedFrameBuffer result = {};
 
   if (!m_lgmp || !m_frameQueue)
     return result;
+
+  if (InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0) &&
+      width == m_setMode.width && height == m_setMode.height)
+    InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
 
   if (m_width != width || m_height != height || m_pitch != pitch || m_format != format)
   {
