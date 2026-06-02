@@ -43,6 +43,59 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
   1000                //subTimeout
 };
 
+static const UINT IDDCX_VERSION_1_10 = 0x1A00;
+
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
+{
+  IDDCX_WIRE_BITS_PER_COMPONENT bits = {};
+  bits.Rgb = IDDCX_BITS_PER_COMPONENT_8;
+  if (hdr)
+    bits.Rgb = (IDDCX_BITS_PER_COMPONENT)(bits.Rgb | IDDCX_BITS_PER_COMPONENT_10);
+  bits.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
+  bits.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
+  bits.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
+  return bits;
+}
+#endif
+
+void CIndirectDeviceContext::QueryIddCxCapabilities()
+{
+  IDARG_OUT_GETVERSION ver = {};
+  NTSTATUS status = IddCxGetVersion(&ver);
+  if (!NT_SUCCESS(status))
+  {
+    m_iddCxVersion = 0;
+    m_canProcessFP16 = false;
+    DEBUG_ERROR_HR(status, "IddCxGetVersion Failed");
+    return;
+  }
+
+  m_iddCxVersion = ver.IddCxVersion;
+
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  const bool hasIddCx110DDIs =
+    !!IDD_IS_FUNCTION_AVAILABLE(IddCxSwapChainReleaseAndAcquireBuffer2) &&
+    !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorQueryHardwareCursor3) &&
+    !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorUpdateModes2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterQueryTargetInfo) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterCommitModes2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxParseMonitorDescription2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorQueryTargetModes2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetDefaultHdrMetaData) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetGammaRamp);
+#else
+  const bool hasIddCx110DDIs = false;
+#endif
+
+  m_canProcessFP16 = m_iddCxVersion >= IDDCX_VERSION_1_10 && hasIddCx110DDIs;
+
+  DEBUG_INFO("IddCx version: 0x%04x", m_iddCxVersion);
+  DEBUG_INFO("IddCx 1.10 HDR/WCG DDIs: %s", m_canProcessFP16 ? "available" : "unavailable");
+}
+
 void CIndirectDeviceContext::PopulateDefaultModes()
 {
   g_settings.LoadModes();
@@ -60,6 +113,7 @@ void CIndirectDeviceContext::InitAdapter()
   if (!m_ivshmem.Init() || !m_ivshmem.Open())
     return;
 
+  QueryIddCxCapabilities();
   PopulateDefaultModes();
 
   IDDCX_ADAPTER_CAPS caps = {};
@@ -72,6 +126,11 @@ void CIndirectDeviceContext::InitAdapter()
    * driver will not work. This behaviour is not documented by Microsoft.
    */
   caps.Flags = IDDCX_ADAPTER_FLAGS_USE_SMALLEST_MODE;
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  if (CanUseIddCx110DDIs())
+    caps.Flags |= IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16;
+#endif
 
   caps.MaxMonitorsSupported = 1;
 
@@ -99,6 +158,17 @@ void CIndirectDeviceContext::InitAdapter()
 
   IDARG_OUT_ADAPTER_INIT initOut;
   NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
+  if (!NT_SUCCESS(status) && CanUseIddCx110DDIs())
+  {
+    DEBUG_WARN(
+      "IddCxAdapterInitAsync rejected FP16 adapter capabilities (0x%08x), retrying without HDR/WCG",
+      status);
+    m_canProcessFP16 = false;
+    caps.Flags = (IDDCX_ADAPTER_FLAGS)(caps.Flags & ~IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16);
+    ZeroMemory(&initOut, sizeof(initOut));
+    status = IddCxAdapterInitAsync(&init, &initOut);
+  }
+
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "IddCxAdapterInitAsync Failed");
@@ -237,6 +307,7 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription(
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
 {
   outArgs->MonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  outArgs->PreferredMonitorModeIdx = 0;
   if (inArgs->MonitorModeBufferInputCount < (UINT)m_displayModes.size())
     return (inArgs->MonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
 
@@ -260,6 +331,7 @@ NTSTATUS CIndirectDeviceContext::MonitorGetDefaultModes(
   IDARG_OUT_GETDEFAULTDESCRIPTIONMODES* outArgs)
 {
   outArgs->DefaultMonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  outArgs->PreferredMonitorModeIdx = 0;
   if (inArgs->DefaultMonitorModeBufferInputCount < (UINT)m_displayModes.size())
     return (inArgs->DefaultMonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
 
@@ -295,6 +367,59 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes(
 
   return STATUS_SUCCESS;
 }
+
+
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+NTSTATUS CIndirectDeviceContext::ParseMonitorDescription2(
+  const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
+{
+  outArgs->MonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  outArgs->PreferredMonitorModeIdx = 0;
+  if (inArgs->MonitorModeBufferInputCount < (UINT)m_displayModes.size())
+    return (inArgs->MonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
+
+  auto * mode = inArgs->pMonitorModes;
+  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  {
+    ZeroMemory(mode, sizeof(*mode));
+    mode->Size = sizeof(IDDCX_MONITOR_MODE2);
+    mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
+    FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
+    mode->BitsPerComponent = GetWireBitsPerComponent(CanUseIddCx110DDIs());
+
+    if (it->preferred)
+      outArgs->PreferredMonitorModeIdx =
+        (UINT)std::distance(m_displayModes.cbegin(), it);
+  }
+
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
+  const IDARG_IN_QUERYTARGETMODES2* inArgs,
+  IDARG_OUT_QUERYTARGETMODES* outArgs)
+{
+  outArgs->TargetModeBufferOutputCount = (UINT)m_displayModes.size();
+  if (inArgs->TargetModeBufferInputCount < (UINT)m_displayModes.size())
+    return STATUS_SUCCESS;
+
+  if (!inArgs->pTargetModes)
+    return STATUS_INVALID_PARAMETER;
+
+  auto* mode = inArgs->pTargetModes;
+  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  {
+    ZeroMemory(mode, sizeof(*mode));
+    mode->Size = sizeof(IDDCX_TARGET_MODE2);
+    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
+    mode->BitsPerComponent = GetWireBitsPerComponent(CanUseIddCx110DDIs());
+  }
+
+  return STATUS_SUCCESS;
+}
+#endif
 
 void CIndirectDeviceContext::SetResolution(int width, int height)
 {

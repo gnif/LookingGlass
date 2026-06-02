@@ -85,6 +85,12 @@ private:
   DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
   bool        m_hasFrame = false;
 
+  UINT m_iddCxVersion = 0;
+  bool m_canProcessFP16 = false;
+
+  void QueryIddCxCapabilities();
+  bool CanUseIddCx110DDIs() const { return m_canProcessFP16; }
+
   void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor();
@@ -118,10 +124,19 @@ public:
   NTSTATUS MonitorQueryTargetModes(
     const IDARG_IN_QUERYTARGETMODES* inArgs, IDARG_OUT_QUERYTARGETMODES* outArgs);
 
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  NTSTATUS ParseMonitorDescription2(
+    const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);
+  NTSTATUS MonitorQueryTargetModes2(
+    const IDARG_IN_QUERYTARGETMODES2* inArgs, IDARG_OUT_QUERYTARGETMODES* outArgs);
+#endif
+
   void SetResolution(int width, int height);
 
-  size_t GetAlignSize()    { return m_alignSize;    }
-  size_t GetMaxFrameSize() { return m_maxFrameSize; }
+  size_t GetAlignSize()         { return m_alignSize;      }
+  size_t GetMaxFrameSize()      { return m_maxFrameSize;   }
+  bool   CanProcessFP16() const { return m_canProcessFP16; }
 
   struct PreparedFrameBuffer
   {

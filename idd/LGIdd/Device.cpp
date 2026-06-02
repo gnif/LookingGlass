@@ -36,6 +36,28 @@
 
 WDFDEVICE l_wdfDevice = nullptr;
 
+static const UINT IDDCX_VERSION_1_10 = 0x1A00;
+
+static bool LGIddCanUseIddCx110DDIs(UINT iddCxVersion)
+{
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  return iddCxVersion >= IDDCX_VERSION_1_10 &&
+    !!IDD_IS_FUNCTION_AVAILABLE(IddCxSwapChainReleaseAndAcquireBuffer2) &&
+    !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorQueryHardwareCursor3) &&
+    !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorUpdateModes2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterQueryTargetInfo) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterCommitModes2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxParseMonitorDescription2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorQueryTargetModes2) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetDefaultHdrMetaData) &&
+    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetGammaRamp);
+#else
+  UNREFERENCED_PARAMETER(iddCxVersion);
+  return false;
+#endif
+}
+
 NTSTATUS LGIddDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
   UNREFERENCED_PARAMETER(previousState);
@@ -104,6 +126,65 @@ NTSTATUS LGIddMonitorQueryTargetModes(IDDCX_MONITOR monitor, const IDARG_IN_QUER
   return wrapper->context->GetDeviceContext()->MonitorQueryTargetModes(inArgs, outArgs);
 }
 
+
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+NTSTATUS LGIddParseMonitorDescription2(const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
+{
+  if (!l_wdfDevice)
+    return STATUS_INVALID_PARAMETER;
+
+  auto* wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(l_wdfDevice);
+  return wrapper->context->ParseMonitorDescription2(inArgs, outArgs);
+}
+
+NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
+  IDARG_IN_QUERYTARGET_INFO* inArgs, IDARG_OUT_QUERYTARGET_INFO* outArgs)
+{
+  UNREFERENCED_PARAMETER(adapter);
+  UNREFERENCED_PARAMETER(inArgs);
+
+  outArgs->TargetCaps =
+    (IDDCX_TARGET_CAPS)(IDDCX_TARGET_CAPS_WIDE_COLOR_SPACE | IDDCX_TARGET_CAPS_HIGH_COLOR_SPACE);
+  outArgs->DitheringSupport.Rgb =
+    (IDDCX_BITS_PER_COMPONENT)(IDDCX_BITS_PER_COMPONENT_8 | IDDCX_BITS_PER_COMPONENT_10);
+  outArgs->DitheringSupport.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
+  outArgs->DitheringSupport.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
+  outArgs->DitheringSupport.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS LGIddAdapterCommitModes2(IDDCX_ADAPTER adapter, const IDARG_IN_COMMITMODES2* args)
+{
+  UNREFERENCED_PARAMETER(adapter);
+  UNREFERENCED_PARAMETER(args);
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
+  const IDARG_IN_MONITOR_SET_DEFAULT_HDR_METADATA* inArgs)
+{
+  UNREFERENCED_PARAMETER(monitor);
+  UNREFERENCED_PARAMETER(inArgs);
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMMARAMP* inArgs)
+{
+  UNREFERENCED_PARAMETER(monitor);
+  UNREFERENCED_PARAMETER(inArgs);
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS LGIddMonitorQueryTargetModes2(IDDCX_MONITOR monitor, const IDARG_IN_QUERYTARGETMODES2* inArgs,
+  IDARG_OUT_QUERYTARGETMODES* outArgs)
+{
+  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  return wrapper->context->GetDeviceContext()->MonitorQueryTargetModes2(inArgs, outArgs);
+}
+#endif
+
 NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSWAPCHAIN* inArgs)
 {
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
@@ -131,7 +212,9 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
     DEBUG_ERROR("IddCxGetVersion Failed");
     return status;
   }
+  const bool hasIddCx110DDIs = LGIddCanUseIddCx110DDIs(ver.IddCxVersion);
   DEBUG_INFO("Version: 0x%04x", ver.IddCxVersion);
+  DEBUG_INFO("IddCx 1.10 HDR/WCG DDIs: %s", hasIddCx110DDIs ? "available" : "unavailable");
 
   WDF_PNPPOWER_EVENT_CALLBACKS pnpPowerCallbacks;
   WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
@@ -141,12 +224,28 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   IDD_CX_CLIENT_CONFIG config;
   IDD_CX_CLIENT_CONFIG_INIT(&config);
   config.EvtIddCxAdapterInitFinished               = LGIddAdapterInitFinished;
-  config.EvtIddCxAdapterCommitModes                = LGIddAdapterCommitModes;
-  config.EvtIddCxParseMonitorDescription           = LGIddParseMonitorDescription;
   config.EvtIddCxMonitorGetDefaultDescriptionModes = LGIddMonitorGetDefaultModes;
-  config.EvtIddCxMonitorQueryTargetModes           = LGIddMonitorQueryTargetModes;
   config.EvtIddCxMonitorAssignSwapChain            = LGIddMonitorAssignSwapChain;
   config.EvtIddCxMonitorUnassignSwapChain          = LGIddMonitorUnassignSwapChain;
+
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  if (hasIddCx110DDIs)
+  {
+    config.EvtIddCxParseMonitorDescription2      = LGIddParseMonitorDescription2;
+    config.EvtIddCxMonitorQueryTargetModes2      = LGIddMonitorQueryTargetModes2;
+    config.EvtIddCxAdapterCommitModes2           = LGIddAdapterCommitModes2;
+    config.EvtIddCxAdapterQueryTargetInfo        = LGIddAdapterQueryTargetInfo;
+    config.EvtIddCxMonitorSetDefaultHdrMetaData  = LGIddMonitorSetDefaultHdrMetadata;
+    config.EvtIddCxMonitorSetGammaRamp           = LGIddMonitorSetGammaRamp;
+  }
+  else
+#endif
+  {
+    config.EvtIddCxAdapterCommitModes      = LGIddAdapterCommitModes;
+    config.EvtIddCxParseMonitorDescription = LGIddParseMonitorDescription;
+    config.EvtIddCxMonitorQueryTargetModes = LGIddMonitorQueryTargetModes;
+  }
 
   status = IddCxDeviceInitConfig(deviceInit, &config);
   if (!NT_SUCCESS(status))
@@ -168,9 +267,8 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
     return status;
 
   /*
-   * Because we are limited to IddCx 1.5 to retain Windows 10 support we have
-   * no way of getting the device context in `LGIdddapterCommitModes`, as such
-   * we need to store this for later.
+   * Keep the WDF device cached so callbacks that do not provide an adapter or
+   * monitor context can still reach the device context on down-level IddCx.
    */
   l_wdfDevice = device;
 
