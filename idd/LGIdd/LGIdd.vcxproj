@@ -26,6 +26,7 @@
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
     <ClCompile Include="CD3D12CommandQueue.cpp" />
+    <ClCompile Include="CEdid.cpp" />
     <ClCompile Include="CFrameBufferPool.cpp" />
     <ClCompile Include="CFrameBufferResource.cpp" />
     <ClCompile Include="CIndirectDeviceContext.cpp" />
@@ -45,6 +46,7 @@
   <ItemGroup>
     <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
     <ClInclude Include="CD3D12CommandQueue.h" />
+    <ClInclude Include="CEdid.h" />
     <ClInclude Include="CFrameBufferPool.h" />
     <ClInclude Include="CFrameBufferResource.h" />
     <ClInclude Include="CIndirectMonitorContext.h" />
