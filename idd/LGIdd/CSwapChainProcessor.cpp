@@ -130,9 +130,40 @@ void CSwapChainProcessor::SwapChainThreadCore()
   UINT lastFrameNumber = 0;
   for (;;)
   {
-    IDARG_OUT_RELEASEANDACQUIREBUFFER buffer = {};
+    UINT frameNumber = 0;
+    ComPtr<IDXGIResource> surface;
 
-    hr = IddCxSwapChainReleaseAndAcquireBuffer(m_hSwapChain, &buffer);
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+    if (m_devContext->CanProcessFP16())
+    {
+      IDARG_IN_RELEASEANDACQUIREBUFFER2 acquireIn = {};
+      acquireIn.Size = sizeof(acquireIn);
+      acquireIn.AcquireSystemMemoryBuffer = FALSE;
+
+      IDARG_OUT_RELEASEANDACQUIREBUFFER2 buffer = {};
+      buffer.MetaData.Size = sizeof(buffer.MetaData);
+
+      hr = IddCxSwapChainReleaseAndAcquireBuffer2(m_hSwapChain, &acquireIn, &buffer);
+      if (SUCCEEDED(hr))
+      {
+        frameNumber = buffer.MetaData.PresentationFrameNumber;
+        surface = buffer.MetaData.pSurface;
+      }
+    }
+    else
+#endif
+    {
+      IDARG_OUT_RELEASEANDACQUIREBUFFER buffer = {};
+
+      hr = IddCxSwapChainReleaseAndAcquireBuffer(m_hSwapChain, &buffer);
+      if (SUCCEEDED(hr))
+      {
+        frameNumber = buffer.MetaData.PresentationFrameNumber;
+        surface = buffer.MetaData.pSurface;
+      }
+    }
+
     if (hr == E_PENDING)
     {
       HANDLE waitHandles[] =
@@ -153,10 +184,10 @@ void CSwapChainProcessor::SwapChainThreadCore()
     }
     else if (SUCCEEDED(hr))
     {
-      if (buffer.MetaData.PresentationFrameNumber != lastFrameNumber)
+      if (frameNumber != lastFrameNumber)
       {
-        lastFrameNumber = buffer.MetaData.PresentationFrameNumber;
-        SwapChainNewFrame(buffer.MetaData.pSurface);
+        lastFrameNumber = frameNumber;
+        SwapChainNewFrame(surface);
 
         // report that all GPU processing for this frame has been queued
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -296,7 +327,25 @@ bool CSwapChainProcessor::QueryHWCursor()
   in.ShapeBufferSizeInBytes = 512 * 512 * 4;
 
   IDARG_OUT_QUERY_HWCURSOR out = {};
-  NTSTATUS status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
+  NTSTATUS status;
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+  if (m_devContext->CanProcessFP16())
+  {
+    IDARG_OUT_QUERY_HWCURSOR3 out3 = {};
+    status = IddCxMonitorQueryHardwareCursor3(m_monitor, &in, &out3);
+    out.IsCursorVisible      = out3.IsCursorVisible;
+    out.X                    = out3.X;
+    out.Y                    = out3.Y;
+    out.IsCursorShapeUpdated = out3.IsCursorShapeUpdated;
+    out.CursorShapeInfo      = out3.CursorShapeInfo;
+  }
+  else
+#endif
+  {
+    status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
+  }
+
   if (FAILED(status))
   {
     // this occurs if the display went away (ie, screen blanking or disabled)

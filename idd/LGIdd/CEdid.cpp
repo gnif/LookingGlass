@@ -123,7 +123,7 @@ void CEdid::Build(const CSettings::DisplayModes& modes)
   base[17] = 36; // 1990 + 36 = 2026
   base[18] = 1;
   base[19] = 4;
-  base[20] = 0xa5; // digital input, 10-bit capable
+  base[20] = 0xb2; // digital input, 10-bit HDMI-A
   base[21] = 52;
   base[22] = 29;
   base[23] = 0x78; // gamma 2.2
@@ -163,18 +163,41 @@ void CEdid::Build(const CSettings::DisplayModes& modes)
   cta[1] = 0x03;
 
   UINT dataOffset = 4;
-  // CTA extended colorimetry data block: advertise BT.2020 colorimetry.
+  // CTA HDR Static Metadata data block: HDR, PQ and HLG with type 1 metadata and luminance data.
+  cta[dataOffset++] = (7 << 5) | 6;
+  cta[dataOffset++] = 0x06;
+  cta[dataOffset++] = 0x0d;
+  cta[dataOffset++] = 0x01;
+  cta[dataOffset++] = 0xa2;
+  cta[dataOffset++] = 0xa2;
+  cta[dataOffset++] = 0x10;
+
+  // CTA extended colorimetry data block: advertise BT.2020 and DCI-P3 colorimetry.
   cta[dataOffset++] = (7 << 5) | 3;
   cta[dataOffset++] = 0x05;
-  cta[dataOffset++] = 0xe0;
+  cta[dataOffset++] = 0xd8;
   cta[dataOffset++] = 0x00;
 
-  // CTA HDR Static Metadata data block: SDR, traditional HDR, PQ and HLG with type 1 metadata.
-  cta[dataOffset++] = (7 << 5) | 4;
-  cta[dataOffset++] = 0x06;
-  cta[dataOffset++] = 0x0f;
+  // HDMI Forum vendor-specific data block.
+  cta[dataOffset++] = (3 << 5) | 7;
+  cta[dataOffset++] = 0xd8;
+  cta[dataOffset++] = 0x5d;
+  cta[dataOffset++] = 0xc4;
   cta[dataOffset++] = 0x01;
+  cta[dataOffset++] = 0x6e;
+  cta[dataOffset++] = 0x80;
   cta[dataOffset++] = 0x00;
+
+  // HDMI vendor-specific data block.
+  cta[dataOffset++] = (3 << 5) | 8;
+  cta[dataOffset++] = 0x03;
+  cta[dataOffset++] = 0x0c;
+  cta[dataOffset++] = 0x00;
+  cta[dataOffset++] = 0x00;
+  cta[dataOffset++] = 0x00;
+  cta[dataOffset++] = 0x30;
+  cta[dataOffset++] = 0x00;
+  cta[dataOffset++] = 0x0b;
 
   UINT ctaDtdOffset = dataOffset;
   if (ctaDtdOffset < 4)
