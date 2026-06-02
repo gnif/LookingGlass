@@ -554,6 +554,7 @@ void core_handleMouseNormal(double ex, double ey)
       {
         /* wait for the move request to be processed */
         g_cursor.realigning = true;
+        unsigned timeout = 200;
         do
         {
           LG_LOCK(g_state.pointerQueueLock);
@@ -576,6 +577,14 @@ void core_handleMouseNormal(double ex, double ey)
 
           if (hostSerial >= setPosSerial)
             break;
+
+          if (--timeout == 0)
+          {
+            DEBUG_ERROR(
+                "pointerQueue serial not updating, expected %u but stuck at %u",
+                setPosSerial, hostSerial);
+            break;
+          }
 
           g_state.ds->wait(1);
         }
