@@ -41,6 +41,7 @@ class CSettings
     const DisplayModes& GetDisplayModes() { return m_displayModes; }
     void SetExtraMode(const DisplayMode & mode);
     bool GetExtraMode(DisplayMode & mode);
+    unsigned GetDefaultRefresh() const;
 
   private:
     DisplayModes m_displayModes;

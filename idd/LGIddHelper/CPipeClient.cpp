@@ -290,10 +290,11 @@ void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 {
   DEVMODE dm = {};
-  dm.dmSize       = sizeof(dm);
-  dm.dmPelsWidth  = msg.displayMode.width;
-  dm.dmPelsHeight = msg.displayMode.height;
-  dm.dmFields     = DM_PELSWIDTH | DM_PELSHEIGHT;
+  dm.dmSize             = sizeof(dm);
+  dm.dmPelsWidth        = msg.displayMode.width;
+  dm.dmPelsHeight       = msg.displayMode.height;
+  dm.dmDisplayFrequency = msg.displayMode.refresh;
+  dm.dmFields           = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
 
   LONG result = ChangeDisplaySettingsEx(NULL, &dm, NULL, CDS_UPDATEREGISTRY, NULL);
   if (result != DISP_CHANGE_SUCCESSFUL)
