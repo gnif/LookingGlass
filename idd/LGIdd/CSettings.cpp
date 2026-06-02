@@ -158,6 +158,51 @@ std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defa
   return std::wstring(buf.data());
 }
 
+bool CSettings::ReadBoolValue(const wchar_t* name, bool defaultValue)
+{
+  HKEY hKey = nullptr;
+  LONG ec = RegOpenKeyExW(
+    HKEY_LOCAL_MACHINE,
+    LGIDD_REGKEY,
+    0,
+    KEY_QUERY_VALUE,
+    &hKey
+  );
+
+  if (ec != ERROR_SUCCESS)
+    return defaultValue;
+
+  DWORD type = 0;
+  DWORD cb = 0;
+
+  ec = RegQueryValueExW(hKey, name, nullptr, &type, nullptr, &cb);
+  if (ec != ERROR_SUCCESS || type != REG_DWORD || cb != sizeof(DWORD))
+  {
+    RegCloseKey(hKey);
+    return defaultValue;
+  }
+
+  DWORD value = 0;
+  DWORD type2 = 0;
+  DWORD cb2 = sizeof(value);
+
+  ec = RegQueryValueExW(
+    hKey,
+    name,
+    nullptr,
+    &type2,
+    reinterpret_cast<LPBYTE>(&value),
+    &cb2
+  );
+
+  RegCloseKey(hKey);
+
+  if (ec != ERROR_SUCCESS || type2 != REG_DWORD || cb2 != sizeof(DWORD))
+    return defaultValue;
+
+  return value != 0;
+}
+
 bool CSettings::GetExtraMode(DisplayMode& mode)
 {
   std::wstring extraMode = ReadStringValue(L"ExtraMode", NULL);
