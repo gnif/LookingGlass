@@ -130,6 +130,9 @@ void CSwapChainProcessor::SwapChainThreadCore()
   UINT lastFrameNumber = 0;
   for (;;)
   {
+    if (WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+      break;
+
     UINT frameNumber = 0;
     ComPtr<IDXGIResource> surface;
 
@@ -193,7 +196,10 @@ void CSwapChainProcessor::SwapChainThreadCore()
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
         if (FAILED(hr))
         {
-          DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
+          if (hr == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+            m_devContext->OnSwapChainLost();
+          else
+            DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
           break;
         }
 
@@ -201,6 +207,8 @@ void CSwapChainProcessor::SwapChainThreadCore()
     }
     else
     {
+      if (hr == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+        m_devContext->OnSwapChainLost();
       break;
     }
   }
@@ -349,8 +357,12 @@ bool CSwapChainProcessor::QueryHWCursor()
   if (FAILED(status))
   {
     // this occurs if the display went away (ie, screen blanking or disabled)
-    if (status == ERROR_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+    if (status == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+    {
+      m_devContext->OnSwapChainLost();
+      SetEvent(m_terminateEvent.Get());
       return false;
+    }
 
     DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
     return false;

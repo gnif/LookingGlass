@@ -79,9 +79,9 @@ private:
   KVMFRFrame   * m_frame      [LGMP_Q_FRAME_LEN] = {};
   FrameBuffer  * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
 
-  int         m_width    = 0;
-  int         m_height   = 0;
-  int         m_pitch    = 0;
+  unsigned    m_width    = 0;
+  unsigned    m_height   = 0;
+  unsigned    m_pitch    = 0;
   DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
   bool        m_hasFrame = false;
 
@@ -94,12 +94,15 @@ private:
   void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor();
+  bool UpdateMonitorModes();
 
   CSettings::DisplayModes m_displayModes;
   CEdid                   m_edid;
 
-  CSettings::DisplayMode m_setMode;
-  bool m_doSetMode;
+  CSettings::DisplayMode m_setMode = {};
+  bool m_doSetMode = false;
+  volatile LONG m_replugMonitorQueued = 0;
+  volatile LONG m_recoverModeUpdateSwapChain = 0;
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
@@ -116,6 +119,7 @@ public:
 
   void OnAssignSwapChain();
   void OnUnassignedSwapChain();
+  void OnSwapChainLost();
 
   NTSTATUS ParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);
@@ -144,7 +148,7 @@ public:
     uint8_t* mem;
   };
 
-  PreparedFrameBuffer PrepareFrameBuffer(int width, int height, int pitch, DXGI_FORMAT format);
+  PreparedFrameBuffer PrepareFrameBuffer(unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos);
   void FinalizeFrameBuffer(unsigned frameIndex);
 
