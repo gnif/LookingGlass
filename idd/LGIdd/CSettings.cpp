@@ -34,6 +34,7 @@ CSettings::CSettings()
 
 void CSettings::LoadModes()
 {
+  const unsigned defaultRefresh = GetDefaultRefresh();
   m_displayModes.clear();
 
   bool hasPreferred = false;
@@ -55,7 +56,7 @@ void CSettings::LoadModes()
     {
       m.width     = DefaultDisplayModes[i][0];
       m.height    = DefaultDisplayModes[i][1];
-      m.refresh   = DefaultDisplayModes[i][2];
+      m.refresh   = defaultRefresh;
       m.preferred = !hasPreferred && (i == DefaultPreferredDisplayMode);
       m_displayModes.push_back(m);
     }
