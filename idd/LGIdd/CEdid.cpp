@@ -529,7 +529,7 @@ bool CEdid::WriteDetailedTiming(BYTE* dtd, const CSettings::DisplayMode& mode)
 
 void CEdid::Build(const CSettings::DisplayModes& modes)
 {
-  m_data.assign(EDID_BLOCK_SIZE * 2, 0);
+  m_data.assign(static_cast<std::vector<BYTE, std::allocator<BYTE>>::size_type>(EDID_BLOCK_SIZE) * 2, 0);
 
   EdidBaseBlock baseBlock = {};
   InitEdidBaseBlock(baseBlock);

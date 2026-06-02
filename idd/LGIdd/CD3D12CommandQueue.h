@@ -90,8 +90,8 @@ class CD3D12CommandQueue
     bool Execute();
 
     //void Wait();
-    bool   IsReady () { return !m_pending; }
-    HANDLE GetEvent() { return m_event.Get(); }
+    bool   IsReady () const { return !m_pending   ; }
+    HANDLE GetEvent() const { return m_event.Get(); }
 
     ComPtr<ID3D12CommandQueue       > GetCmdQueue() { return m_queue;   }
     ComPtr<ID3D12GraphicsCommandList> GetGfxList()  { return m_gfxList; }

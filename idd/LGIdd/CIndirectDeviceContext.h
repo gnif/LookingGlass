@@ -93,7 +93,7 @@ private:
 
   void DeInitLGMP();
   void LGMPTimer();
-  void ResendCursor();
+  void ResendCursor() const;
   bool UpdateMonitorModes();
 
   CSettings::DisplayModes m_displayModes;
@@ -138,9 +138,9 @@ public:
 
   void SetResolution(int width, int height);
 
-  size_t GetAlignSize()         { return m_alignSize;      }
-  size_t GetMaxFrameSize()      { return m_maxFrameSize;   }
-  bool   CanProcessFP16() const { return m_canProcessFP16; }
+  size_t GetAlignSize   () const { return m_alignSize     ; }
+  size_t GetMaxFrameSize() const { return m_maxFrameSize  ; }
+  bool   CanProcessFP16 () const { return m_canProcessFP16; }
 
   struct PreparedFrameBuffer
   {
@@ -148,9 +148,9 @@ public:
     uint8_t* mem;
   };
 
-  PreparedFrameBuffer PrepareFrameBuffer(unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format);
-  void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos);
-  void FinalizeFrameBuffer(unsigned frameIndex);
+  PreparedFrameBuffer PrepareFrameBuffer(unsigned width, unsigned height, unsigned pitch, DXGI_FORMAT format, const RECT * dirtyRects, unsigned nbDirtyRects);
+  void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
+  void FinalizeFrameBuffer(unsigned frameIndex) const;
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);
 
