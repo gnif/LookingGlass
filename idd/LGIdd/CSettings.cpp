@@ -103,8 +103,11 @@ void CSettings::SetExtraMode(const DisplayMode& mode)
   RegCloseKey(hKey);
 }
 
-std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* default)
+std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defaultValue)
 {
+  if (!defaultValue)
+    defaultValue = L"";
+
   HKEY hKey = nullptr;
   LONG ec = RegOpenKeyExW(
     HKEY_LOCAL_MACHINE,
@@ -115,29 +118,43 @@ std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defa
   );
 
   if (ec != ERROR_SUCCESS)
-    return std::wstring(default);
+    return std::wstring(defaultValue);
 
   DWORD type = 0;
   DWORD cb = 0;
 
   ec = RegQueryValueExW(hKey, name, nullptr, &type, nullptr, &cb);
-  if (ec != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || cb == 0)
+  if (ec != ERROR_SUCCESS ||
+    (type != REG_SZ && type != REG_EXPAND_SZ) ||
+    cb == 0 ||
+    (cb % sizeof(wchar_t)) != 0)
   {
     RegCloseKey(hKey);
-    return std::wstring(default);
+    return std::wstring(defaultValue);
   }
 
-  std::vector<wchar_t> buf(cb / sizeof(wchar_t) + 1);
-  ec = RegQueryValueExW(hKey, name, nullptr, &type,
-    reinterpret_cast<LPBYTE>(buf.data()), &cb);
+  std::vector<wchar_t> buf((cb / sizeof(wchar_t)) + 1, L'\0');
+
+  DWORD type2 = 0;
+  DWORD cb2 = cb;
+
+  ec = RegQueryValueExW(
+    hKey,
+    name,
+    nullptr,
+    &type2,
+    reinterpret_cast<LPBYTE>(buf.data()),
+    &cb2
+  );
+
   RegCloseKey(hKey);
-  if (ec != ERROR_SUCCESS)
-    return  std::wstring(default);
 
-  buf.back() = L'\0';
+  if (ec != ERROR_SUCCESS || (type2 != REG_SZ && type2 != REG_EXPAND_SZ) ||
+    cb2 == 0 || (cb2 % sizeof(wchar_t)) != 0 || cb2 > cb)
+    return std::wstring(defaultValue);
 
-  std::wstring s(buf.data());
-  return s;
+  buf[cb2 / sizeof(wchar_t)] = L'\0';
+  return std::wstring(buf.data());
 }
 
 bool CSettings::GetExtraMode(DisplayMode& mode)
@@ -225,6 +242,15 @@ bool CSettings::ParseModeString(const std::wstring& in, DisplayMode& out)
       !toUnsigned(s.substr(xPos + 1, atPos - (xPos + 1)), out.height) ||
       !toUnsigned(s.substr(atPos + 1), out.refresh))
       return false;
+
+  // sanity check
+  if (out.width   < 640   ||
+      out.height  < 480   ||
+      out.width   > 16384 ||
+      out.height  > 16384 ||
+      out.refresh < 30    ||
+      out.refresh > 1000)
+    return false;
 
   return true;
 }
