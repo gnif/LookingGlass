@@ -51,6 +51,8 @@ void CIndirectDeviceContext::PopulateDefaultModes()
   m_displayModes.reserve(g_settings.GetDisplayModes().size());
   for (auto& dm : g_settings.GetDisplayModes())
     m_displayModes.push_back(dm);
+
+  m_edid.Build(m_displayModes);
 }
 
 void CIndirectDeviceContext::InitAdapter()
@@ -143,8 +145,8 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 
   info.MonitorDescription.Size     = sizeof(info.MonitorDescription);
   info.MonitorDescription.Type     = IDDCX_MONITOR_DESCRIPTION_TYPE_EDID;
-  info.MonitorDescription.DataSize = 0;
-  info.MonitorDescription.pData    = nullptr;
+  info.MonitorDescription.DataSize = m_edid.Size();
+  info.MonitorDescription.pData    = const_cast<BYTE*>(m_edid.Data());
 
   CoCreateGuid(&info.MonitorContainerId);
 

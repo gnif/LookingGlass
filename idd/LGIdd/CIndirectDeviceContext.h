@@ -27,6 +27,7 @@
 
 #include "CIVSHMEM.h"
 #include "CSettings.h"
+#include "CEdid.h"
 
 extern "C" {
   #include "lgmp/host.h"
@@ -89,6 +90,7 @@ private:
   void ResendCursor();
 
   CSettings::DisplayModes m_displayModes;
+  CEdid                   m_edid;
 
   CSettings::DisplayMode m_setMode;
   bool m_doSetMode;
