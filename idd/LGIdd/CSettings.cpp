@@ -166,6 +166,26 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
   return ParseModeString(extraMode, mode);
 }
 
+unsigned CSettings::GetDefaultRefresh() const
+{
+  DWORD refresh = 60;
+  DWORD cb      = sizeof(refresh);
+  HKEY  hKey    = nullptr;
+
+  LONG st = RegOpenKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
+  if (st == ERROR_SUCCESS)
+  {
+    DWORD type = 0;
+    st = RegGetValueW(hKey, nullptr, L"DefaultRefresh", RRF_RT_REG_DWORD, &type, &refresh, &cb);
+    RegCloseKey(hKey);
+  }
+
+  if (st != ERROR_SUCCESS || refresh < 30 || refresh > 1000)
+    return 60;
+
+  return refresh;
+}
+
 bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
 {
   HKEY hKey = nullptr;

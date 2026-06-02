@@ -202,7 +202,7 @@ void CIndirectDeviceContext::OnAssignSwapChain()
   if (m_doSetMode)
   {
     m_doSetMode = false;
-    g_pipe.SetDisplayMode(m_setMode.width, m_setMode.height); //FIXME: refresh
+    g_pipe.SetDisplayMode(m_setMode.width, m_setMode.height, m_setMode.refresh);
   }
 }
 
@@ -300,7 +300,7 @@ void CIndirectDeviceContext::SetResolution(int width, int height)
 {
   m_setMode.width     = width;
   m_setMode.height    = height;
-  m_setMode.refresh   = 120; //FIXME
+  m_setMode.refresh   = g_settings.GetDefaultRefresh();
   m_setMode.preferred = true;
   g_settings.SetExtraMode(m_setMode);
 
