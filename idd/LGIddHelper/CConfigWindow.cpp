@@ -89,7 +89,7 @@ void CConfigWindow::updateFont()
   }
 
   for (HWND child : std::initializer_list<HWND>({
-    *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
+    *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel, *m_modePreferred,
     *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete, *m_modeReset,
     *m_autosizeGroup, *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
     *m_prefGroup, *m_prefNoGPU,
@@ -97,13 +97,20 @@ void CConfigWindow::updateFont()
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
 
-void CConfigWindow::updateModeList()
+int CConfigWindow::updateModeList(int wanted)
 {
+  int result = 0;
   m_modeBox->addItem(L"<add new>", -1);
 
   auto &modes = *m_modes;
   for (size_t i = 0; i < modes.size(); ++i)
-    m_modeBox->addItem(modes[i].toString(), i);
+  {
+    int idx = m_modeBox->addItem(modes[i].toString(), i);
+    if (wanted == i)
+      result = idx;
+  }
+
+  return result;
 }
 
 LRESULT CConfigWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -154,6 +161,7 @@ LRESULT CConfigWindow::onCreate()
   m_modeWidth.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
   m_modeHeight.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
   m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modePreferred.reset(new CCheckbox(L"prefer", WS_CHILD | WS_VISIBLE, m_hwnd));
 
   m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
   m_modeDelete.reset(new CButton(L"Delete", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
@@ -206,6 +214,7 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeWidth, 75, 96, 50, 20);
   pos.pinBottomLeft(*m_modeHeight, 75, 72, 50, 20);
   pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
+  pos.pinBottomLeft(*m_modePreferred, 130, 96, 70, 20);
   pos.pinBottomLeft(*m_modeUpdate, 24, 20, 50, 24);
   pos.pinBottomLeft(*m_modeDelete, 75, 20, 50, 24);
   pos.pinBottomLeft(*m_modeReset, 126, 20, 50, 24);
@@ -238,6 +247,7 @@ void CConfigWindow::onModeListSelectChange()
     m_modeWidth->setNumericValue(mode.width);
     m_modeHeight->setNumericValue(mode.height);
     m_modeRefresh->setNumericValue(mode.refresh);
+    m_modePreferred->setChecked(mode.preferred);
   }
   EnableWindow(*m_modeUpdate, TRUE);
   EnableWindow(*m_modeDelete, index >= 0);
@@ -249,6 +259,10 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
   {
     onModeListSelectChange();
   }
+  else if (m_modePreferred && hwnd == *m_modePreferred && code == BN_CLICKED && m_modes)
+  {
+    m_modePreferred->setChecked(!m_modePreferred->isChecked());
+  }
   else if (m_modeUpdate && hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
   {
     int sel = m_modeBox->getSel();
@@ -258,21 +272,23 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     int index = m_modeBox->getData(sel);
     auto &mode = index >= 0 ? (*m_modes)[index] : m_modes->emplace_back();
 
+    for (auto &mode : *m_modes)
+      mode.preferred = false;
+
     try
     {
       mode.width = m_modeWidth->getNumericValue();
       mode.height = m_modeHeight->getNumericValue();
       mode.refresh = m_modeRefresh->getNumericValue();
+      mode.preferred = m_modePreferred->isChecked();
     }
     catch (std::logic_error&)
     {
       return 0;
     }
 
-    if (index >= 0)
-      m_modeBox->delItem(sel);
-
-    m_modeBox->setSel(m_modeBox->addItem(mode.toString().c_str(), index));
+    m_modeBox->clear();
+    m_modeBox->setSel(updateModeList(index));
 
     LRESULT result = m_settings.setModes(*m_modes);
     if (result != ERROR_SUCCESS)

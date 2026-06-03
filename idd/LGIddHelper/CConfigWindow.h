@@ -49,6 +49,7 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CEditWidget> m_modeWidth;
   std::unique_ptr<CEditWidget> m_modeHeight;
   std::unique_ptr<CEditWidget> m_modeRefresh;
+  std::unique_ptr<CCheckbox> m_modePreferred;
 
   std::unique_ptr<CButton> m_modeUpdate;
   std::unique_ptr<CButton> m_modeDelete;
@@ -72,7 +73,7 @@ class CConfigWindow : public CWindow
 
   void getMinimumSize(LONG &width, LONG &height);
   void updateFont();
-  void updateModeList();
+  int updateModeList(int wanted = -1);
   void onModeListSelectChange();
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
