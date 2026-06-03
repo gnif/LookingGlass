@@ -78,6 +78,24 @@ static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
   return mode;
 }
 
+std::vector<DisplayMode> CRegistrySettings::getDefaultModes()
+{
+  auto defaultRefresh = getDefaultRefresh();
+  int refresh = defaultRefresh ? *defaultRefresh : DEFAULT_REFRESH;
+
+  std::vector<DisplayMode> result;
+  for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
+  {
+    DisplayMode mode;
+    mode.width = DefaultDisplayModes[i][0];
+    mode.height = DefaultDisplayModes[i][1];
+    mode.refresh = refresh;
+    mode.preferred = i == DefaultPreferredDisplayMode;
+    result.emplace_back(mode);
+  }
+  return result;
+}
+
 std::optional<std::vector<DisplayMode>> CRegistrySettings::getModes()
 {
   LSTATUS status;
@@ -89,19 +107,7 @@ std::optional<std::vector<DisplayMode>> CRegistrySettings::getModes()
   case ERROR_SUCCESS:
     break;
   case ERROR_FILE_NOT_FOUND:
-  {
-    std::vector<DisplayMode> result;
-    for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
-    {
-      DisplayMode mode;
-      mode.width = DefaultDisplayModes[i][0];
-      mode.height = DefaultDisplayModes[i][1];
-      mode.refresh = DefaultDisplayModes[i][2];
-      mode.preferred = i == DefaultPreferredDisplayMode;
-      result.emplace_back(mode);
-    }
-    return result;
-  }
+    return getDefaultModes();
   default:
     DEBUG_ERROR_HR(status, "RegGetValue(Modes) length computation");
     return {};

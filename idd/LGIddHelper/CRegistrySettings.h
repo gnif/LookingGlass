@@ -44,6 +44,7 @@ public:
   LSTATUS open();
   bool isOpen() { return !!hKey; }
 
+  std::vector<DisplayMode> getDefaultModes();
   std::optional<std::vector<DisplayMode>> getModes();
   LSTATUS setModes(const std::vector<DisplayMode> &modes);
 
