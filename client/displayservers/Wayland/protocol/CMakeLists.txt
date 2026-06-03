@@ -60,6 +60,9 @@ wayland_generate(
 wayland_generate(
   "${WAYLAND_PROTOCOLS_BASE}/staging/xdg-activation/xdg-activation-v1.xml"
   "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-activation-v1-client-protocol")
+wayland_generate(
+  "${WAYLAND_PROTOCOLS_BASE}/staging/fractional-scale/fractional-scale-v1.xml"
+  "${CMAKE_BINARY_DIR}/wayland/wayland-fractional-scale-v1-client-protocol")
 
 target_link_libraries(wayland_protocol
   PkgConfig::WAYLAND
