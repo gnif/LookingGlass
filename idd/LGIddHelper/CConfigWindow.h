@@ -32,6 +32,7 @@ class CListBox;
 class CGroupBox;
 class CEditWidget;
 class CButton;
+class CCheckbox;
 
 class CConfigWindow : public CWindow
 {
@@ -58,12 +59,16 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CEditWidget> m_defRefresh;
   std::unique_ptr<CStaticWidget> m_defRefreshHz;
 
+  std::unique_ptr<CGroupBox> m_prefGroup;
+  std::unique_ptr<CCheckbox> m_prefNoGPU;
+
   std::function<void()> m_onDestroy;
   double m_scale;
   Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;
   CRegistrySettings m_settings;
   std::optional<std::vector<DisplayMode>> m_modes;
   std::optional<DWORD> m_defaultRefresh;
+  std::optional<bool> m_noGPU;
 
   void getMinimumSize(LONG &width, LONG &height);
   void updateFont();

@@ -180,6 +180,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CButton.cpp" />
+    <ClCompile Include="CCheckbox.cpp" />
     <ClCompile Include="CConfigWindow.cpp" />
     <ClCompile Include="CEditWidget.cpp" />
     <ClCompile Include="CGroupBox.cpp" />
@@ -190,12 +191,14 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClCompile Include="CStaticWidget.cpp" />
     <ClCompile Include="CWidget.cpp" />
     <ClCompile Include="CWindow.cpp" />
+    <ClCompile Include="Devices.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="UIHelpers.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CButton.h" />
+    <ClInclude Include="CCheckbox.h" />
     <ClInclude Include="CConfigWindow.h" />
     <ClInclude Include="CEditWidget.h" />
     <ClInclude Include="CGroupBox.h" />
@@ -205,6 +208,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClInclude Include="CRegistrySettings.h" />
     <ClInclude Include="CStaticWidget.h" />
     <ClInclude Include="CWidget.h" />
+    <ClInclude Include="Devices.h" />
     <ClInclude Include="UIHelpers.h" />
     <ClInclude Include="CWindow.h" />
   </ItemGroup>

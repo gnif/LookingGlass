@@ -18,37 +18,21 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#pragma once
-#include "CWindow.h"
-#include <memory>
+#include "CCheckbox.h"
+#include <windowsx.h>
+#include <CDebug.h>
 
-class CConfigWindow;
-
-class CNotifyWindow : public CWindow
+CCheckbox::CCheckbox(LPCWSTR title, DWORD style, HWND parent) :
+  CButton(title, style | BS_CHECKBOX, parent)
 {
-  static UINT s_taskbarCreated;
-  static ATOM s_atom;
+}
 
-  NOTIFYICONDATA m_iconData;
-  HMENU m_menu;
-  bool closeRequested;
-  std::unique_ptr<CConfigWindow> m_config;
+bool CCheckbox::isChecked()
+{
+  return Button_GetCheck(m_hwnd) == BST_CHECKED;
+}
 
-  LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
-  void registerIcon();
-  void noGPUNotification();
-
-  virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
-  virtual LRESULT onCreate() override;
-  virtual LRESULT onClose() override;
-  virtual LRESULT onDestroy() override;
-  virtual LRESULT onFinal() override;
-
-public:
-  CNotifyWindow();
-  ~CNotifyWindow() override;
-  static bool registerClass();
-
-  HWND hwndDialog();
-  void close();
-};
+void CCheckbox::setChecked(bool checked)
+{
+  Button_SetCheck(m_hwnd, checked ? BST_CHECKED : BST_UNCHECKED);
+}

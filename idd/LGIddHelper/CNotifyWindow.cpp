@@ -20,6 +20,7 @@
 
 #include "CNotifyWindow.h"
 #include "CConfigWindow.h"
+#include "Devices.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -161,6 +162,42 @@ void CNotifyWindow::registerIcon()
 
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
+
+  bool hasGPU;
+  if (!checkGPU(hasGPU))
+    DEBUG_ERROR("Failed to check if the system has a GPU");
+  else if (hasGPU)
+    DEBUG_INFO("GPU identified");
+  else
+  {
+    DEBUG_INFO("System has no GPU");
+    noGPUNotification();
+  }
+}
+
+void CNotifyWindow::noGPUNotification()
+{
+  CRegistrySettings settings;
+  LSTATUS error = settings.open();
+  if (error != ERROR_SUCCESS)
+    DEBUG_ERROR_HR(error, "Failed to load settings");
+
+  auto noGPU = settings.getNoGPU();
+  if (noGPU.has_value() && noGPU.value())
+    return;
+
+  NOTIFYICONDATA nid;
+  memcpy(&nid, &m_iconData, sizeof nid);
+
+  nid.uFlags = NIF_INFO;
+  nid.dwInfoFlags = NIIF_WARNING;
+  StringCbCopy(nid.szInfoTitle, sizeof nid.szInfoTitle, L"No GPU found!");
+  StringCbCopy(nid.szInfo, sizeof nid.szInfo,
+    L"GPU acceleration will not be available. "
+    L"Looking Glass will use software rendering.");
+
+  if (!Shell_NotifyIcon(NIM_MODIFY, &nid))
+    DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_MODIFY)");
 }
 
 HWND CNotifyWindow::hwndDialog()

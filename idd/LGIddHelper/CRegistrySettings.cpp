@@ -177,7 +177,7 @@ std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
   case ERROR_FILE_NOT_FOUND:
     return DEFAULT_REFRESH;
   default:
-    DEBUG_ERROR_HR(status, "RegGetValue(Modes) length computation");
+    DEBUG_ERROR_HR(status, "RegGetValue(Modes)");
     return {};
   }
 }
@@ -185,4 +185,27 @@ std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
 LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refresh)
 {
   return RegSetValueEx(hKey, L"DefaultRefresh", 0, REG_DWORD, (LPBYTE) &refresh, sizeof(DWORD));
+}
+
+std::optional<bool> CRegistrySettings::getNoGPU()
+{
+  DWORD result, cbData = sizeof result;
+
+  LSTATUS status = RegGetValue(hKey, nullptr, L"NoGPU", RRF_RT_REG_DWORD, nullptr, &result, &cbData);
+  switch (status)
+  {
+  case ERROR_SUCCESS:
+    return !!result;
+  case ERROR_FILE_NOT_FOUND:
+    return false;
+  default:
+    DEBUG_ERROR_HR(status, "RegGetValue(NoGPU)");
+    return {};
+  }
+}
+
+LSTATUS CRegistrySettings::setNoGPU(bool noGPU)
+{
+  DWORD dwValue = noGPU;
+  return RegSetValueEx(hKey, L"NoGPU", 0, REG_DWORD, (LPBYTE)&dwValue, sizeof(DWORD));
 }

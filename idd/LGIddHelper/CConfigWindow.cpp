@@ -23,6 +23,7 @@
 #include "CGroupBox.h"
 #include "CEditWidget.h"
 #include "CButton.h"
+#include "CCheckbox.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -51,6 +52,7 @@ CConfigWindow::CConfigWindow() : m_scale(1)
   {
     m_modes = m_settings.getModes();
     m_defaultRefresh = m_settings.getDefaultRefresh();
+    m_noGPU = m_settings.getNoGPU();
   }
 
   if (!CreateWindowEx(0, MAKEINTATOM(s_atom), L"Looking Glass IDD Configuration",
@@ -90,6 +92,7 @@ void CConfigWindow::updateFont()
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
     *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete, *m_modeReset,
     *m_autosizeGroup, *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
+    *m_prefGroup, *m_prefNoGPU,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
@@ -168,6 +171,12 @@ LRESULT CConfigWindow::onCreate()
   else
     m_defRefresh->disable();
 
+  m_prefGroup.reset(new CGroupBox(L"Preferences", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_prefNoGPU.reset(new CCheckbox(L"Disable no GPU warning", WS_CHILD | WS_VISIBLE, m_hwnd));
+
+  if (m_noGPU)
+    m_prefNoGPU->setChecked(*m_noGPU);
+
   LONG width, height;
   getMinimumSize(width, height);
   SetWindowPos(m_hwnd, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
@@ -205,6 +214,9 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinTopLeft(*m_defRefreshLabel, 236, 64, 95, 20);
   pos.pinTopLeft(*m_defRefresh, 331, 64, 63, 20);
   pos.pinTopLeft(*m_defRefreshHz, 398, 64, 16, 20);
+
+  pos.pinTopLeft(*m_prefGroup, 224, 100, 200, 52);
+  pos.pinTopLeft(*m_prefNoGPU, 236, 124, 176, 20);
   return 0;
 }
 
@@ -307,6 +319,13 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     LRESULT result = m_settings.setDefaultRefresh(value);
     if (result != ERROR_SUCCESS)
       DEBUG_ERROR_HR((HRESULT)result, "Failed to default refresh");
+  }
+  else if (m_prefNoGPU && hwnd == *m_prefNoGPU && code == BN_CLICKED && m_noGPU)
+  {
+    DEBUG_INFO("GPU button clicked");
+    *m_noGPU ^= true;
+    m_settings.setNoGPU(*m_noGPU);
+    m_prefNoGPU->setChecked(*m_noGPU);
   }
   return 0;
 }
