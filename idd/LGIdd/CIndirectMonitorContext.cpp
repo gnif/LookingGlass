@@ -21,6 +21,7 @@
 #include "CIndirectMonitorContext.h"
 #include "CPlatformInfo.h"
 #include "CDebug.h"
+#include "CPipeServer.h"
 
 CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIndirectDeviceContext * device) :
   m_monitor(monitor),
@@ -70,6 +71,7 @@ reInit:
   }
 
   m_swapChain.reset(new CSwapChainProcessor(m_monitor, m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
+  g_pipe.SetGPUStatus(m_dx11Device->IsSoftware());
 }
 
 void CIndirectMonitorContext::UnassignSwapChain()
