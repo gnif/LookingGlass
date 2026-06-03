@@ -34,13 +34,24 @@
 void waylandWindowUpdateScale(void)
 {
   struct WaylandScale maxScale = waylandScaleFromInt(0);
-  struct SurfaceOutput * node;
 
-  wl_list_for_each(node, &wlWm.surfaceOutputs, link)
+  // When the compositor supports wp_fractional_scale_v1 it tells us the exact
+  // scale to use for this surface. This is authoritative and pixel-exact, so
+  // prefer it over deriving the scale from output geometry (which is only an
+  // approximation, since the logical size it is computed from has already been
+  // rounded by the compositor, and leads to a blurry/distorted image after the
+  // resulting buffer is resampled).
+  if (wlWm.fractionalScaleHandle && waylandScaleValid(wlWm.preferredScale))
+    maxScale = wlWm.preferredScale;
+  else
   {
-    struct WaylandScale scale = waylandOutputGetScale(node->output);
-    if (waylandScaleCmp(scale, maxScale) > 0)
-      maxScale = scale;
+    struct SurfaceOutput * node;
+    wl_list_for_each(node, &wlWm.surfaceOutputs, link)
+    {
+      struct WaylandScale scale = waylandOutputGetScale(node->output);
+      if (waylandScaleCmp(scale, maxScale) > 0)
+        maxScale = scale;
+    }
   }
 
   if (waylandScaleValid(maxScale))
@@ -85,6 +96,18 @@ static const struct wl_surface_listener wlSurfaceListener = {
   .leave = wlSurfaceLeaveHandler,
 };
 
+static void fractionalScalePreferredScale(void * data,
+    struct wp_fractional_scale_v1 * fractionalScale, uint32_t scale)
+{
+  // scale is the numerator of a fraction with a denominator of 120.
+  wlWm.preferredScale = waylandScaleFromRatio(scale, 120);
+  waylandWindowUpdateScale();
+}
+
+static const struct wp_fractional_scale_v1_listener fractionalScaleListener = {
+  .preferred_scale = fractionalScalePreferredScale,
+};
+
 bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, bool maximize, bool borderless, bool resizable)
 {
   wlWm.scale = waylandScaleFromInt(1);
@@ -112,6 +135,17 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
   wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
+  // Ask the compositor for the exact fractional scale of this surface. This is
+  // only usable together with wp_viewporter; without it we fall back to the
+  // output-geometry heuristic in waylandWindowUpdateScale.
+  if (wlWm.useFractionalScale && wlWm.viewporter && wlWm.fractionalScaleManager)
+  {
+    wlWm.fractionalScaleHandle = wp_fractional_scale_manager_v1_get_fractional_scale(
+        wlWm.fractionalScaleManager, wlWm.surface);
+    wp_fractional_scale_v1_add_listener(wlWm.fractionalScaleHandle,
+        &fractionalScaleListener, NULL);
+  }
+
   if (!wlWm.desktop->shellInit(wlWm.display, wlWm.surface,
         title, appId, fullscreen, maximize, borderless, resizable))
     return false;
@@ -122,6 +156,8 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
 void waylandWindowFree(void)
 {
+  if (wlWm.fractionalScaleHandle)
+    wp_fractional_scale_v1_destroy(wlWm.fractionalScaleHandle);
   wl_surface_destroy(wlWm.surface);
   lgFreeEvent(wlWm.frameEvent);
 }

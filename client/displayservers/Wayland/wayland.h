@@ -41,6 +41,7 @@
 
 #include "wayland-presentation-time-client-protocol.h"
 #include "wayland-viewporter-client-protocol.h"
+#include "wayland-fractional-scale-v1-client-protocol.h"
 #include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-pointer-constraints-unstable-v1-client-protocol.h"
 #include "wayland-relative-pointer-unstable-v1-client-protocol.h"
@@ -112,6 +113,8 @@ struct WaylandDSState
 
   struct WaylandScale scale;
   bool fractionalScale;
+  // exact per-surface scale reported by wp_fractional_scale_v1 (invalid if unknown)
+  struct WaylandScale preferredScale;
   bool needsResize;
   bool configured;
   bool warpSupport;
@@ -175,6 +178,8 @@ struct WaylandDSState
 
   struct wp_viewporter * viewporter;
   struct wp_viewport * viewport;
+  struct wp_fractional_scale_manager_v1 * fractionalScaleManager;
+  struct wp_fractional_scale_v1 * fractionalScaleHandle;
   struct zxdg_output_manager_v1 * xdgOutputManager;
   struct wl_list outputs; // WaylandOutput::link
   struct wl_list surfaceOutputs; // SurfaceOutput::link

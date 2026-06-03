@@ -92,8 +92,14 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
 
     int width, height;
     wlWm.desktop->getSize(&width, &height);
-    wl_egl_window_resize(wlWm.eglWindow, waylandScaleMulInt(wlWm.scale, width),
-        waylandScaleMulInt(wlWm.scale, height), 0, 0);
+
+    // Size the buffer to ceil(logical * scale) so it exactly covers the
+    // viewport destination. Truncating (floor) would leave the buffer up to a
+    // pixel short and force the compositor to stretch (and thus resample) the
+    // image, producing the distortion seen with fractional scale.
+    wl_egl_window_resize(wlWm.eglWindow,
+        waylandScaleMulIntCeil(wlWm.scale, width),
+        waylandScaleMulIntCeil(wlWm.scale, height), 0, 0);
 
     if (width == 0 || height == 0)
       skipResize = true;

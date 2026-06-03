@@ -74,6 +74,11 @@ static inline int waylandScaleMulInt(struct WaylandScale scale, int value)
   return (int)(((int64_t)value * scale.num) / scale.den);
 }
 
+static inline int waylandScaleMulIntCeil(struct WaylandScale scale, int value)
+{
+  return (int)(((int64_t)value * scale.num + scale.den - 1) / scale.den);
+}
+
 static inline double waylandScaleToDouble(struct WaylandScale scale)
 {
   return (double)scale.num / (double)scale.den;

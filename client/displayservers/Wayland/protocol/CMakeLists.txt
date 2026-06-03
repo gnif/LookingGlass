@@ -39,6 +39,11 @@ wayland_generate(
 wayland_generate(
   "${WAYLAND_PROTOCOLS_BASE}/stable/viewporter/viewporter.xml"
   "${CMAKE_BINARY_DIR}/wayland/wayland-viewporter-client-protocol")
+# fractional-scale-v1 is bundled locally because the pinned wayland-protocols
+# submodule predates it (it was added upstream in wayland-protocols 1.31).
+wayland_generate(
+  "${CMAKE_CURRENT_SOURCE_DIR}/fractional-scale-v1.xml"
+  "${CMAKE_BINARY_DIR}/wayland/wayland-fractional-scale-v1-client-protocol")
 wayland_generate(
   "${WAYLAND_PROTOCOLS_BASE}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"
   "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-decoration-unstable-v1-client-protocol")
