@@ -30,6 +30,13 @@ HRESULT CD3D11Device::Init()
   hr = m_factory->EnumAdapterByLuid(m_adapterLuid, IID_PPV_ARGS(&m_adapter));
   if (FAILED(hr))
     return hr;
+
+  DXGI_ADAPTER_DESC1 desc = {};
+  hr = m_adapter->GetDesc1(&desc);
+  if (FAILED(hr))
+    return hr;
+
+  m_isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
   
   // only 11.1 supports DX12 interoperabillity
   static const D3D_FEATURE_LEVEL featureLevels[] =

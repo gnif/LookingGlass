@@ -90,7 +90,7 @@ void CConfigWindow::updateFont()
 
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel,
-    *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete,
+    *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete, *m_modeReset,
     *m_autosizeGroup, *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
     *m_prefGroup, *m_prefNoGPU,
   }))
@@ -157,6 +157,7 @@ LRESULT CConfigWindow::onCreate()
 
   m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
   m_modeDelete.reset(new CButton(L"Delete", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
+  m_modeReset.reset(new CButton(L"Reset", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
   EnableWindow(*m_modeUpdate, FALSE);
   EnableWindow(*m_modeDelete, FALSE);
 
@@ -207,6 +208,7 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
   pos.pinBottomLeft(*m_modeUpdate, 24, 20, 50, 24);
   pos.pinBottomLeft(*m_modeDelete, 75, 20, 50, 24);
+  pos.pinBottomLeft(*m_modeReset, 126, 20, 50, 24);
 
   pos.pinTopLeft(*m_autosizeGroup, 224, 40, 200, 52);
   pos.pinTopLeft(*m_defRefreshLabel, 236, 64, 95, 20);
@@ -290,6 +292,14 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     if (result != ERROR_SUCCESS)
       DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
 
+    updateModeList();
+    onModeListSelectChange();
+  }
+  else if (m_modeReset && hwnd == *m_modeReset && code == BN_CLICKED && m_modes)
+  {
+    *m_modes = m_settings.getDefaultModes();
+    m_settings.setModes(*m_modes);
+    m_modeBox->clear();
     updateModeList();
     onModeListSelectChange();
   }

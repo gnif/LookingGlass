@@ -30,7 +30,8 @@ struct LGPipeMsg
   enum
   {
     SETCURSORPOS,
-    SETDISPLAYMODE
+    SETDISPLAYMODE,
+    GPUSTATUS
   }
   type;
   union
@@ -49,5 +50,11 @@ struct LGPipeMsg
       uint32_t refresh;
     }
     displayMode;
+
+    struct
+    {
+      bool software;
+    }
+    gpuStatus;
   };
 };
