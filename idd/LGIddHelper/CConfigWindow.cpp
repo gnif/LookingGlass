@@ -231,11 +231,11 @@ void CConfigWindow::onModeListSelectChange()
 
 LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 {
-  if (hwnd == *m_modeBox && code == LBN_SELCHANGE && m_modes)
+  if (m_modeBox && hwnd == *m_modeBox && code == LBN_SELCHANGE && m_modes)
   {
     onModeListSelectChange();
   }
-  else if (hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
+  else if (m_modeUpdate && hwnd == *m_modeUpdate && code == BN_CLICKED && m_modes)
   {
     int sel = m_modeBox->getSel();
     if (sel == LB_ERR)
@@ -264,7 +264,7 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     if (result != ERROR_SUCCESS)
       DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
   }
-  else if (hwnd == *m_modeDelete && code == BN_CLICKED && m_modes)
+  else if (m_modeDelete && hwnd == *m_modeDelete && code == BN_CLICKED && m_modes)
   {
     int sel = m_modeBox->getSel();
     if (sel == LB_ERR)
@@ -281,7 +281,7 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     updateModeList();
     onModeListSelectChange();
   }
-  else if (hwnd == *m_defRefresh && code == EN_CHANGE && m_defaultRefresh)
+  else if (m_defRefresh && hwnd == *m_defRefresh && code == EN_CHANGE && m_defaultRefresh)
   {
     int value;
     try
