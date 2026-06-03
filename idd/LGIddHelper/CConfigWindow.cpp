@@ -61,6 +61,14 @@ CConfigWindow::CConfigWindow() : m_scale(1)
   }
 }
 
+void CConfigWindow::getMinimumSize(LONG &width, LONG &height)
+{
+  RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(300 * m_scale) };
+  AdjustWindowRect(&client, WS_OVERLAPPEDWINDOW, FALSE);
+  width = client.right - client.left;
+  height = client.bottom - client.top;
+}
+
 void CConfigWindow::updateFont()
 {
   NONCLIENTMETRICS ncmMetrics = { sizeof(NONCLIENTMETRICS) };
@@ -112,6 +120,12 @@ LRESULT CConfigWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     RedrawWindow(m_hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
     return 0;
   }
+  case WM_GETMINMAXINFO:
+  {
+    LPMINMAXINFO lpMmi = (LPMINMAXINFO)lParam;
+    getMinimumSize(lpMmi->ptMinTrackSize.x, lpMmi->ptMinTrackSize.y);
+    return 0;
+  }
   case WM_COMMAND:
     return onCommand(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
   default:
@@ -153,9 +167,9 @@ LRESULT CConfigWindow::onCreate()
   else
     m_defRefresh->disable();
 
-  RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(300 * m_scale) };
-  AdjustWindowRect(&client, WS_OVERLAPPEDWINDOW, FALSE);
-  SetWindowPos(m_hwnd, NULL, 0, 0, client.right - client.left, client.bottom - client.top, SWP_NOMOVE | SWP_NOZORDER);
+  LONG width, height;
+  getMinimumSize(width, height);
+  SetWindowPos(m_hwnd, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
 
   updateFont();
 

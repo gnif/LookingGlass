@@ -64,6 +64,7 @@ class CConfigWindow : public CWindow
   std::optional<std::vector<DisplayMode>> m_modes;
   std::optional<DWORD> m_defaultRefresh;
 
+  void getMinimumSize(LONG &width, LONG &height);
   void updateFont();
   void updateModeList();
   void onModeListSelectChange();
