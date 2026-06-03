@@ -51,6 +51,7 @@ class CConfigWindow : public CWindow
 
   std::unique_ptr<CButton> m_modeUpdate;
   std::unique_ptr<CButton> m_modeDelete;
+  std::unique_ptr<CButton> m_modeReset;
 
   std::unique_ptr<CGroupBox> m_autosizeGroup;
   std::unique_ptr<CStaticWidget> m_defRefreshLabel;
