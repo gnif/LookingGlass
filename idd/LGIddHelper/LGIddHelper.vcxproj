@@ -190,6 +190,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClCompile Include="CStaticWidget.cpp" />
     <ClCompile Include="CWidget.cpp" />
     <ClCompile Include="CWindow.cpp" />
+    <ClCompile Include="Devices.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="UIHelpers.cpp" />
   </ItemGroup>
@@ -205,6 +206,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClInclude Include="CRegistrySettings.h" />
     <ClInclude Include="CStaticWidget.h" />
     <ClInclude Include="CWidget.h" />
+    <ClInclude Include="Devices.h" />
     <ClInclude Include="UIHelpers.h" />
     <ClInclude Include="CWindow.h" />
   </ItemGroup>

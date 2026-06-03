@@ -20,6 +20,7 @@
 
 #include "CNotifyWindow.h"
 #include "CConfigWindow.h"
+#include "Devices.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -161,6 +162,14 @@ void CNotifyWindow::registerIcon()
 
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
+
+  bool hasGPU;
+  if (!checkGPU(hasGPU))
+    DEBUG_ERROR("Failed to check if the system has a GPU");
+  else if (hasGPU)
+    DEBUG_INFO("GPU identified");
+  else
+    DEBUG_INFO("System has no GPU");
 }
 
 HWND CNotifyWindow::hwndDialog()
