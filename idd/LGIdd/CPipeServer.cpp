@@ -175,3 +175,15 @@ void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height, uint32_t refre
   msg.displayMode.refresh = refresh;
   WriteMsg(msg);
 }
+
+void CPipeServer::SetGPUStatus(bool software)
+{
+  if (!m_connected)
+    return;
+
+  LGPipeMsg msg;
+  msg.size               = sizeof(msg);
+  msg.type               = LGPipeMsg::GPUSTATUS;
+  msg.gpuStatus.software = software;
+  WriteMsg(msg);
+}

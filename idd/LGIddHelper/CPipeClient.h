@@ -49,6 +49,7 @@ private:
   
   void HandleSetCursorPos(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
+  void HandleGPUStatus(const LGPipeMsg& msg);
 
 public:
   ~CPipeClient() { DeInit(); }

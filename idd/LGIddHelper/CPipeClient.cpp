@@ -264,6 +264,10 @@ void CPipeClient::Thread()
           HandleSetDisplayMode(msg);
           break;
 
+        case LGPipeMsg::GPUSTATUS:
+          HandleGPUStatus(msg);
+          break;
+
         default:
           DEBUG_ERROR("Unknown message type %d", msg.type);
           break;
@@ -299,4 +303,9 @@ void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
   LONG result = ChangeDisplaySettingsEx(NULL, &dm, NULL, CDS_UPDATEREGISTRY, NULL);
   if (result != DISP_CHANGE_SUCCESSFUL)
     DEBUG_ERROR("ChangeDisplaySettingsEx Failed (0x%08x)", result);
+}
+
+void CPipeClient::HandleGPUStatus(const LGPipeMsg& msg)
+{
+  // TODO: implement me
 }

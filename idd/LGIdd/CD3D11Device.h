@@ -36,6 +36,7 @@ private:
   ComPtr<IDXGIAdapter1       > m_adapter;
   ComPtr<ID3D11Device5       > m_device;
   ComPtr<ID3D11DeviceContext4> m_context;
+  bool m_isSoftware;
 
 public:
   CD3D11Device(LUID adapterLuid) :
@@ -51,4 +52,6 @@ public:
   ComPtr<ID3D11Device5> GetDevice() { return m_device; }
 
   ComPtr<ID3D11DeviceContext4> GetContext() { return m_context; }
+
+  bool IsSoftware() { return m_isSoftware; }
 };
