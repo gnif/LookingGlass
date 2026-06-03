@@ -22,14 +22,12 @@
     <ClCompile Include="CPipeClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CNotifyWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CConfigWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -39,7 +37,6 @@
     <ClCompile Include="CWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CRegistrySettings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -49,18 +46,15 @@
     <ClCompile Include="UIHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CGroupBox.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CButton.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CEditWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="CCheckbox.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -70,16 +64,12 @@
     <ClInclude Include="CPipeClient.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CNotifyWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CConfigWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -92,31 +82,21 @@
     <ClInclude Include="UIHelpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CRegistrySettings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CListBox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CGroupBox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CButton.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CEditWidget.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
-    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="CCheckbox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
