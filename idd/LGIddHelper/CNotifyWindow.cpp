@@ -169,7 +169,35 @@ void CNotifyWindow::registerIcon()
   else if (hasGPU)
     DEBUG_INFO("GPU identified");
   else
+  {
     DEBUG_INFO("System has no GPU");
+    noGPUNotification();
+  }
+}
+
+void CNotifyWindow::noGPUNotification()
+{
+  CRegistrySettings settings;
+  LSTATUS error = settings.open();
+  if (error != ERROR_SUCCESS)
+    DEBUG_ERROR_HR(error, "Failed to load settings");
+
+  auto noGPU = settings.getNoGPU();
+  if (noGPU.has_value() && noGPU.value())
+    return;
+
+  NOTIFYICONDATA nid;
+  memcpy(&nid, &m_iconData, sizeof nid);
+
+  nid.uFlags = NIF_INFO;
+  nid.dwInfoFlags = NIIF_WARNING;
+  StringCbCopy(nid.szInfoTitle, sizeof nid.szInfoTitle, L"No GPU found!");
+  StringCbCopy(nid.szInfo, sizeof nid.szInfo,
+    L"GPU acceleration will not be available. "
+    L"Looking Glass will use software rendering.");
+
+  if (!Shell_NotifyIcon(NIM_MODIFY, &nid))
+    DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_MODIFY)");
 }
 
 HWND CNotifyWindow::hwndDialog()
