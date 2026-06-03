@@ -49,4 +49,7 @@ public:
 
   std::optional<DWORD> getDefaultRefresh();
   LSTATUS setDefaultRefresh(DWORD refresh);
+
+  std::optional<bool> getNoGPU();
+  LSTATUS setNoGPU(bool noGPU);
 };
