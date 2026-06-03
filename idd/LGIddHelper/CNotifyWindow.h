@@ -36,7 +36,7 @@ class CNotifyWindow : public CWindow
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
-  void noGPUNotification();
+  void handleNoGPUNotification();
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
@@ -44,10 +44,25 @@ class CNotifyWindow : public CWindow
   virtual LRESULT onDestroy() override;
   virtual LRESULT onFinal() override;
 
-public:
   CNotifyWindow();
   ~CNotifyWindow() override;
+
+public:
+  CNotifyWindow(const CNotifyWindow&) = delete;
+  CNotifyWindow& operator=(const CNotifyWindow&) = delete;
+
+  CNotifyWindow(CNotifyWindow&&) = delete;
+  CNotifyWindow& operator=(CNotifyWindow&&) = delete;
+
+  static CNotifyWindow& instance()
+  {
+    static CNotifyWindow window;
+    return window;
+  }
+
   static bool registerClass();
+
+  void noGPUNotification();
 
   HWND hwndDialog();
   void close();

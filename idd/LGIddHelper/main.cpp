@@ -113,10 +113,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return EXIT_FAILURE;
   }
 
+  CNotifyWindow& window = CNotifyWindow::instance();
+
+  // the pipe must be initialized after the CNotifyWindow
+  // has been created to avoid a potential race
   if (!g_pipe.Init())
     return EXIT_FAILURE;
-
-  CNotifyWindow window;
 
   HANDLE hWait;
   if (!RegisterWaitForSingleObject(&hWait, hParent.Get(), DestroyNotifyWindow, &window, INFINITE, WT_EXECUTEONLYONCE))

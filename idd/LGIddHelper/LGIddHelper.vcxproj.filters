@@ -60,7 +60,8 @@
     <ClCompile Include="CEditWidget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Devices.cpp">
+    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
+    <ClCompile Include="CCheckbox.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -113,7 +114,10 @@
     <ClInclude Include="CEditWidget.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Devices.h">
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <CLInclude Include="$(SolutionDir)LGCommon\*.h" />
+    <ClInclude Include="CCheckbox.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

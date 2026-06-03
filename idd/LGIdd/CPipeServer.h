@@ -24,6 +24,7 @@
 #include <wdf.h>
 #include <stdint.h>
 #include <wrl.h>
+#include <vector>
 
 #include "PipeMsg.h"
 
@@ -36,6 +37,7 @@ class CPipeServer
   private:
     HandleT<HANDLENullTraits> m_pipe;
     HandleT<HANDLENullTraits> m_thread;
+    std::vector<LGPipeMsg>    m_queue;
 
     bool m_running   = false;
     bool m_connected = false;
@@ -45,7 +47,7 @@ class CPipeServer
     static DWORD WINAPI _pipeThread(LPVOID lpParam) { ((CPipeServer*)lpParam)->Thread(); return 0; }
     void Thread();
 
-    void WriteMsg(LGPipeMsg & msg);
+    void WriteMsg(const LGPipeMsg & msg);
 
   public:
     ~CPipeServer() { DeInit(); }

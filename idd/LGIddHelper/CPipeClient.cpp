@@ -20,6 +20,7 @@
 
 #include "CPipeClient.h"
 #include "CDebug.h"
+#include "CNotifyWindow.h"
 
 #include <setupapi.h>
 #include <tchar.h>
@@ -307,5 +308,6 @@ void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 
 void CPipeClient::HandleGPUStatus(const LGPipeMsg& msg)
 {
-  // TODO: implement me
+  if (msg.gpuStatus.software)
+    CNotifyWindow::instance().noGPUNotification();
 }

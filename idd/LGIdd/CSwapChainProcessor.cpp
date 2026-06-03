@@ -22,6 +22,7 @@
 
 #include <avrt.h>
 #include "CDebug.h"
+#include "CPipeServer.h"
 
 CSwapChainProcessor::CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent) :
@@ -129,6 +130,10 @@ void CSwapChainProcessor::SwapChainThreadCore()
 
   m_lastShapeId = 0;
   m_thread[1].Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
+
+  // postpone sending this to ensure we dont spam messages if we end up in a
+  // restart loop while waiting for a valid configuration
+  g_pipe.SetGPUStatus(m_dx11Device->IsSoftware());
 
   UINT lastFrameNumber = 0;
   for (;;)
