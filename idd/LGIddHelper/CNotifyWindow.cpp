@@ -20,13 +20,13 @@
 
 #include "CNotifyWindow.h"
 #include "CConfigWindow.h"
-#include "Devices.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
 
-#define WM_NOTIFY_ICON (WM_USER)
+#define WM_NOTIFY_ICON     (WM_USER)
 #define WM_CLEAN_UP_CONFIG (WM_USER+1)
+#define WM_NO_GPU          (WM_USER+2)
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_SHOW_CONFIG 3001
@@ -79,6 +79,10 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
       DEBUG_INFO("Config window closed");
       m_config.reset();
     }
+    return 0;
+
+  case WM_NO_GPU:
+    handleNoGPUNotification();
     return 0;
 
   default:
@@ -162,20 +166,14 @@ void CNotifyWindow::registerIcon()
 
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
-
-  bool hasGPU;
-  if (!checkGPU(hasGPU))
-    DEBUG_ERROR("Failed to check if the system has a GPU");
-  else if (hasGPU)
-    DEBUG_INFO("GPU identified");
-  else
-  {
-    DEBUG_INFO("System has no GPU");
-    noGPUNotification();
-  }
 }
 
 void CNotifyWindow::noGPUNotification()
+{
+  PostMessage(m_hwnd, WM_NO_GPU, 0, 0);
+}
+
+void CNotifyWindow::handleNoGPUNotification()
 {
   CRegistrySettings settings;
   LSTATUS error = settings.open();

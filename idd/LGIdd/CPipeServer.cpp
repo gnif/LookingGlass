@@ -114,6 +114,11 @@ void CPipeServer::Thread()
     DEBUG_TRACE("Client connected");
 
     m_connected = true;
+
+    for (const auto& msg : m_queue)
+      WriteMsg(msg);
+    m_queue.clear();
+
     while (m_running && m_connected)
     {
       //TODO: Read messages from the client
@@ -129,8 +134,14 @@ void CPipeServer::Thread()
   DEBUG_TRACE("Pipe thread shutdown");
 }
 
-void CPipeServer::WriteMsg(LGPipeMsg & msg)
+void CPipeServer::WriteMsg(const LGPipeMsg & msg)
 {
+  if (!m_connected)
+  {
+    m_queue.push_back(msg);
+    return;
+  }
+
   DWORD written;
   if (!WriteFile(m_pipe.Get(), &msg, sizeof(msg), &written, NULL))
   {
@@ -151,6 +162,7 @@ void CPipeServer::WriteMsg(LGPipeMsg & msg)
 
 void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
 {
+  // do not send cursor messages if we are not connected or they will end up queued
   if (!m_connected)
     return;
 
@@ -164,9 +176,6 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
 
 void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height, uint32_t refresh)
 {
-  if (!m_connected)
-    return;
-
   LGPipeMsg msg;
   msg.size                = sizeof(msg);
   msg.type                = LGPipeMsg::SETDISPLAYMODE;
@@ -178,9 +187,6 @@ void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height, uint32_t refre
 
 void CPipeServer::SetGPUStatus(bool software)
 {
-  if (!m_connected)
-    return;
-
   LGPipeMsg msg;
   msg.size               = sizeof(msg);
   msg.type               = LGPipeMsg::GPUSTATUS;

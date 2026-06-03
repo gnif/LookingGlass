@@ -71,7 +71,6 @@ reInit:
   }
 
   m_swapChain.reset(new CSwapChainProcessor(m_monitor, m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
-  g_pipe.SetGPUStatus(m_dx11Device->IsSoftware());
 }
 
 void CIndirectMonitorContext::UnassignSwapChain()
