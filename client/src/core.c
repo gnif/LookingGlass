@@ -221,8 +221,8 @@ void core_updatePositionInfo(void)
       .type = LG_MSG_WINDOWSIZE,
       .windowSize =
       {
-        .width  = g_state.windowW,
-        .height = g_state.windowH
+        .width  = round(g_state.windowW * g_state.windowScale),
+        .height = round(g_state.windowH * g_state.windowScale)
       }
     };
     lgMessage_post(&msg);
