@@ -21,6 +21,7 @@
 #pragma once
 #include "CWindow.h"
 #include <memory>
+#include <optional>
 
 class CConfigWindow;
 
@@ -31,14 +32,14 @@ class CNotifyWindow : public CWindow
 
   NOTIFYICONDATA m_iconData;
   bool m_iconRegistered;
-  bool m_noGPUQueued;
+  std::optional<bool> m_gpuQueue;
   HMENU m_menu;
   bool closeRequested;
   std::unique_ptr<CConfigWindow> m_config;
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
-  void handleNoGPUNotification();
+  void handleGPUNotification(bool hasGPU);
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
@@ -64,7 +65,7 @@ public:
 
   static bool registerClass();
 
-  void noGPUNotification();
+  void setGPU(bool hasGPU);
 
   HWND hwndDialog();
   void close();

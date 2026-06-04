@@ -308,6 +308,5 @@ void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 
 void CPipeClient::HandleGPUStatus(const LGPipeMsg& msg)
 {
-  if (msg.gpuStatus.software)
-    CNotifyWindow::instance().noGPUNotification();
+  CNotifyWindow::instance().setGPU(!msg.gpuStatus.software);
 }
