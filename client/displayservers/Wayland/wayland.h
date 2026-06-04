@@ -47,6 +47,7 @@
 #include "wayland-idle-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-xdg-output-unstable-v1-client-protocol.h"
 #include "wayland-xdg-activation-v1-client-protocol.h"
+#include "wayland-fractional-scale-v1-client-protocol.h"
 
 #include "scale.h"
 
@@ -175,6 +176,8 @@ struct WaylandDSState
 
   struct wp_viewporter * viewporter;
   struct wp_viewport * viewport;
+  struct wp_fractional_scale_manager_v1 * fractionalScaleManager;
+  struct wp_fractional_scale_v1 * fractionalScaleInterface;
   struct zxdg_output_manager_v1 * xdgOutputManager;
   struct wl_list outputs; // WaylandOutput::link
   struct wl_list surfaceOutputs; // SurfaceOutput::link

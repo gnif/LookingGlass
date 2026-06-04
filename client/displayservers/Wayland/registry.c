@@ -46,6 +46,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, wp_viewporter_interface.name))
     wlWm.viewporter = wl_registry_bind(wlWm.registry, name,
         &wp_viewporter_interface, 1);
+  else if (!strcmp(interface, wp_fractional_scale_manager_v1_interface.name))
+    wlWm.fractionalScaleManager = wl_registry_bind(wlWm.registry, name,
+        &wp_fractional_scale_manager_v1_interface, 1);
   else if (!strcmp(interface, zwp_relative_pointer_manager_v1_interface.name))
     wlWm.relativePointerManager = wl_registry_bind(wlWm.registry, name,
         &zwp_relative_pointer_manager_v1_interface, 1);

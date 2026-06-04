@@ -31,8 +31,21 @@
 
 // Surface-handling listeners.
 
+static void setScale(struct WaylandScale newScale)
+{
+  wlWm.scale = newScale;
+  wlWm.fractionalScale = waylandScaleIsFractional(newScale);
+  wlWm.needsResize = true;
+  waylandCursorScaleChange();
+  app_invalidateWindow(true);
+  waylandStopWaitFrame();
+}
+
 void waylandWindowUpdateScale(void)
 {
+  if (wlWm.fractionalScaleInterface)
+    return;
+
   struct WaylandScale maxScale = waylandScaleFromInt(0);
   struct SurfaceOutput * node;
 
@@ -44,14 +57,7 @@ void waylandWindowUpdateScale(void)
   }
 
   if (waylandScaleValid(maxScale))
-  {
-    wlWm.scale = maxScale;
-    wlWm.fractionalScale = waylandScaleIsFractional(maxScale);
-    wlWm.needsResize = true;
-    waylandCursorScaleChange();
-    app_invalidateWindow(true);
-    waylandStopWaitFrame();
-  }
+    setScale(maxScale);
 }
 
 static void wlSurfaceEnterHandler(void * data, struct wl_surface * surface, struct wl_output * output)
@@ -85,6 +91,16 @@ static const struct wl_surface_listener wlSurfaceListener = {
   .leave = wlSurfaceLeaveHandler,
 };
 
+static void fractionalScalePreferredScale(void * data,
+    struct wp_fractional_scale_v1 * fractionalScale, uint32_t scale)
+{
+  setScale(waylandScaleFromRatio(scale, 120));
+}
+
+static const struct wp_fractional_scale_v1_listener fractionalScaleListener = {
+  .preferred_scale = fractionalScalePreferredScale,
+};
+
 bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, bool maximize, bool borderless, bool resizable)
 {
   wlWm.scale = waylandScaleFromInt(1);
@@ -110,7 +126,15 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     return false;
   }
 
-  wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
+  if (wlWm.fractionalScaleManager)
+  {
+    wlWm.fractionalScaleInterface = wp_fractional_scale_manager_v1_get_fractional_scale(
+        wlWm.fractionalScaleManager, wlWm.surface);
+    wp_fractional_scale_v1_add_listener(wlWm.fractionalScaleInterface,
+        &fractionalScaleListener, NULL);
+  }
+  else
+    wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
   if (!wlWm.desktop->shellInit(wlWm.display, wlWm.surface,
         title, appId, fullscreen, maximize, borderless, resizable))
@@ -122,6 +146,8 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
 void waylandWindowFree(void)
 {
+  if (wlWm.fractionalScaleInterface)
+    wp_fractional_scale_v1_destroy(wlWm.fractionalScaleInterface);
   wl_surface_destroy(wlWm.surface);
   lgFreeEvent(wlWm.frameEvent);
 }
