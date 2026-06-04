@@ -49,7 +49,7 @@ bool CNotifyWindow::registerClass()
 }
 
 CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_iconRegistered(false),
-  m_noGPUQueued(false), m_menu(CreatePopupMenu()), closeRequested(false)
+  m_menu(CreatePopupMenu()), closeRequested(false)
 {
   CreateWindowEx(0, MAKEINTATOM(s_atom), NULL,
     0, 0, 0, 0, 0, NULL, NULL, hInstance, this);
@@ -82,7 +82,7 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     return 0;
 
   case WM_NO_GPU:
-    handleNoGPUNotification();
+    handleGPUNotification((bool)wParam);
     return 0;
 
   default:
@@ -152,7 +152,7 @@ void CNotifyWindow::registerIcon()
 {
   m_iconData.cbSize = sizeof m_iconData;
   m_iconData.hWnd = m_hwnd;
-  m_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+  m_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
   m_iconData.uCallbackMessage = WM_NOTIFY_ICON;
   m_iconData.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
   m_iconData.uVersion = NOTIFYICON_VERSION_4;
@@ -168,23 +168,36 @@ void CNotifyWindow::registerIcon()
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
 
-  if (m_noGPUQueued)
+  if (m_gpuQueue)
   {
-    m_noGPUQueued = false;
-    handleNoGPUNotification();
+    handleGPUNotification(*m_gpuQueue);
+    m_gpuQueue.reset();
   }
 }
 
-void CNotifyWindow::noGPUNotification()
+void CNotifyWindow::setGPU(bool hasGPU)
 {
   if (m_iconRegistered)
-    PostMessage(m_hwnd, WM_NO_GPU, 0, 0);
+    PostMessage(m_hwnd, WM_NO_GPU, hasGPU, 0);
   else
-    m_noGPUQueued = true;
+    m_gpuQueue.emplace(hasGPU);
 }
 
-void CNotifyWindow::handleNoGPUNotification()
+void CNotifyWindow::handleGPUNotification(bool hasGPU)
 {
+  StringCbCopy(m_iconData.szTip, sizeof m_iconData.szTip, hasGPU ?
+    L"Looking Glass (IDD) with GPU acceleration" :
+    L"Looking Glass (IDD) with software rendering");
+
+  if (!Shell_NotifyIcon(NIM_MODIFY, &m_iconData))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_ADD)");
+    return;
+  }
+
+  if (hasGPU)
+    return;
+
   CRegistrySettings settings;
   LSTATUS error = settings.open();
   if (error != ERROR_SUCCESS)
@@ -197,7 +210,7 @@ void CNotifyWindow::handleNoGPUNotification()
   NOTIFYICONDATA nid;
   memcpy(&nid, &m_iconData, sizeof nid);
 
-  nid.uFlags = NIF_INFO;
+  nid.uFlags = NIF_INFO | NIF_SHOWTIP;
   nid.dwInfoFlags = NIIF_WARNING;
   StringCbCopy(nid.szInfoTitle, sizeof nid.szInfoTitle, L"No GPU found!");
   StringCbCopy(nid.szInfo, sizeof nid.szInfo,
