@@ -30,6 +30,8 @@ class CNotifyWindow : public CWindow
   static ATOM s_atom;
 
   NOTIFYICONDATA m_iconData;
+  bool m_iconRegistered;
+  bool m_noGPUQueued;
   HMENU m_menu;
   bool closeRequested;
   std::unique_ptr<CConfigWindow> m_config;

@@ -48,8 +48,8 @@ bool CNotifyWindow::registerClass()
   return s_atom;
 }
 
-CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_menu(CreatePopupMenu()),
-  closeRequested(false)
+CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_iconRegistered(false),
+  m_noGPUQueued(false), m_menu(CreatePopupMenu()), closeRequested(false)
 {
   CreateWindowEx(0, MAKEINTATOM(s_atom), NULL,
     0, 0, 0, 0, 0, NULL, NULL, hInstance, this);
@@ -164,13 +164,23 @@ void CNotifyWindow::registerIcon()
     return;
   }
 
+  m_iconRegistered = true;
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
+
+  if (m_noGPUQueued)
+  {
+    m_noGPUQueued = false;
+    handleNoGPUNotification();
+  }
 }
 
 void CNotifyWindow::noGPUNotification()
 {
-  PostMessage(m_hwnd, WM_NO_GPU, 0, 0);
+  if (m_iconRegistered)
+    PostMessage(m_hwnd, WM_NO_GPU, 0, 0);
+  else
+    m_noGPUQueued = true;
 }
 
 void CNotifyWindow::handleNoGPUNotification()
