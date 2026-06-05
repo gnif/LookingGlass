@@ -59,6 +59,8 @@ public:
   bool Init();
   void DeInit();
   bool IsRunning() { return m_running; }
+
+  void ReloadSettings();
 };
 
 extern CPipeClient g_pipe;

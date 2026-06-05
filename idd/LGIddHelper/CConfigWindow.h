@@ -64,6 +64,8 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CCheckbox> m_prefNoGPU;
 
   std::function<void()> m_onDestroy;
+  std::function<void()> m_onSettingChange;
+
   double m_scale;
   Microsoft::WRL::Wrappers::HandleT<FontTraits> m_font;
   CRegistrySettings m_settings;
@@ -75,6 +77,7 @@ class CConfigWindow : public CWindow
   void updateFont();
   int updateModeList(int wanted = -1);
   void onModeListSelectChange();
+  void sendSettingChange() { if (m_onSettingChange) m_onSettingChange(); }
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
@@ -87,4 +90,5 @@ public:
   static bool registerClass();
 
   void onDestroy(std::function<void()> func) { m_onDestroy = std::move(func); }
+  void onSettingChange(std::function<void()> func) { m_onSettingChange = std::move(func); }
 };

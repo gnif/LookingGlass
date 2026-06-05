@@ -291,7 +291,9 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     m_modeBox->setSel(updateModeList(index));
 
     LRESULT result = m_settings.setModes(*m_modes);
-    if (result != ERROR_SUCCESS)
+    if (result == ERROR_SUCCESS)
+      sendSettingChange();
+    else
       DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
   }
   else if (m_modeDelete && hwnd == *m_modeDelete && code == BN_CLICKED && m_modes)
@@ -304,20 +306,27 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     m_modeBox->clear();
     m_modes->erase(m_modes->begin() + index);
 
-    LRESULT result = m_settings.setModes(*m_modes);
-    if (result != ERROR_SUCCESS)
-      DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
-
     updateModeList();
     onModeListSelectChange();
+
+    LRESULT result = m_settings.setModes(*m_modes);
+    if (result == ERROR_SUCCESS)
+      sendSettingChange();
+    else
+      DEBUG_ERROR_HR((HRESULT) result, "Failed to save modes");
   }
   else if (m_modeReset && hwnd == *m_modeReset && code == BN_CLICKED && m_modes)
   {
     *m_modes = m_settings.getDefaultModes();
-    m_settings.setModes(*m_modes);
     m_modeBox->clear();
     updateModeList();
     onModeListSelectChange();
+
+    LRESULT result = m_settings.setModes(*m_modes);
+    if (result == ERROR_SUCCESS)
+      sendSettingChange();
+    else
+      DEBUG_ERROR_HR((HRESULT)result, "Failed to save modes");
   }
   else if (m_defRefresh && hwnd == *m_defRefresh && code == EN_CHANGE && m_defaultRefresh)
   {
@@ -332,8 +341,11 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     }
 
     m_defaultRefresh = value;
+
     LRESULT result = m_settings.setDefaultRefresh(value);
-    if (result != ERROR_SUCCESS)
+    if (result == ERROR_SUCCESS)
+      sendSettingChange();
+    else
       DEBUG_ERROR_HR((HRESULT)result, "Failed to default refresh");
   }
   else if (m_prefNoGPU && hwnd == *m_prefNoGPU && code == BN_CLICKED && m_noGPU)

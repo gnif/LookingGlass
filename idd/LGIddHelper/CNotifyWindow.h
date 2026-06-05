@@ -20,6 +20,7 @@
 
 #pragma once
 #include "CWindow.h"
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -36,6 +37,8 @@ class CNotifyWindow : public CWindow
   HMENU m_menu;
   bool closeRequested;
   std::unique_ptr<CConfigWindow> m_config;
+
+  std::function<void()> m_onSettingChange;
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
@@ -69,4 +72,6 @@ public:
 
   HWND hwndDialog();
   void close();
+
+  void onSettingChange(std::function<void()> func) { m_onSettingChange = std::move(func); }
 };
