@@ -105,7 +105,6 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libxkbcommon-dev``
    -  ``libwayland-bin``
    -  ``libwayland-dev``
-   -  ``wayland-protocols``
 
 -  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
 
@@ -146,7 +145,7 @@ You can fetch these dependencies with the following command:
    apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev \
    gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev \
    nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
-   libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols \
+   libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev \
    libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
 
 You may omit some dependencies if you disable the feature which requires them
