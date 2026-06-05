@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -35,8 +35,9 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 class CPipeServer
 {
   private:
-    HandleT<HANDLENullTraits> m_pipe;
+    HandleT<HANDLETraits>     m_pipe;
     HandleT<HANDLENullTraits> m_thread;
+    HandleT<EventTraits>      m_signal;
     std::vector<LGPipeMsg>    m_queue;
 
     bool m_running   = false;
@@ -48,6 +49,8 @@ class CPipeServer
     void Thread();
 
     void WriteMsg(const LGPipeMsg & msg);
+
+    void HandleReloadSettings();
 
   public:
     ~CPipeServer() { DeInit(); }
