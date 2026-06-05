@@ -170,6 +170,17 @@ void CPipeClient::WriteMsg(const LGPipeMsg& msg)
   FlushFileBuffers(m_pipe.Get());
 }
 
+void CPipeClient::ReloadSettings()
+{
+  if (!m_connected)
+    return;
+
+  LGPipeMsg msg;
+  msg.size = sizeof(msg);
+  msg.type = LGPipeMsg::RELOADSETTINGS;
+  WriteMsg(msg);
+}
+
 void CPipeClient::Thread()
 {
   DEBUG_INFO("Pipe thread started");

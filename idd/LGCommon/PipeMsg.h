@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -31,7 +31,8 @@ struct LGPipeMsg
   {
     SETCURSORPOS,
     SETDISPLAYMODE,
-    GPUSTATUS
+    GPUSTATUS,
+    RELOADSETTINGS
   }
   type;
   union

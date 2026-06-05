@@ -140,6 +140,8 @@ LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
       m_config->onDestroy([this]() {
         PostMessage(m_hwnd, WM_CLEAN_UP_CONFIG, 0, 0);
       });
+      if (m_onSettingChange)
+        m_config->onSettingChange(m_onSettingChange);
       ShowWindow(*m_config, SW_NORMAL);
       break;
     }
