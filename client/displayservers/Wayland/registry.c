@@ -71,6 +71,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, xdg_activation_v1_interface.name))
     wlWm.xdgActivation = wl_registry_bind(wlWm.registry, name,
         &xdg_activation_v1_interface, 1);
+  else if (!strcmp(interface, wp_content_type_manager_v1_interface.name))
+    wlWm.contentTypeManager = wl_registry_bind(wlWm.registry, name,
+        &wp_content_type_manager_v1_interface, 1);
   else if (wlWm.desktop->registryGlobalHandler(
         data, registry, name, interface, version))
     return;
