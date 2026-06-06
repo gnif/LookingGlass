@@ -20,6 +20,7 @@
 
 #include "CNotifyWindow.h"
 #include "CConfigWindow.h"
+#include "Resources.h"
 #include <CDebug.h>
 #include <windowsx.h>
 #include <strsafe.h>
@@ -156,7 +157,7 @@ void CNotifyWindow::registerIcon()
   m_iconData.hWnd = m_hwnd;
   m_iconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
   m_iconData.uCallbackMessage = WM_NOTIFY_ICON;
-  m_iconData.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
+  m_iconData.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(ID_MAIN_ICON));
   m_iconData.uVersion = NOTIFYICON_VERSION_4;
   StringCbCopy(m_iconData.szTip, sizeof m_iconData.szTip, L"Looking Glass (IDD)");
 
