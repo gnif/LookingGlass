@@ -136,6 +136,13 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
   else
     wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
+  if (wlWm.contentTypeManager)
+  {
+    wlWm.contentType = wp_content_type_manager_v1_get_surface_content_type(
+        wlWm.contentTypeManager, wlWm.surface);
+    wp_content_type_v1_set_content_type(wlWm.contentType, WP_CONTENT_TYPE_V1_TYPE_GAME);
+  }
+
   if (!wlWm.desktop->shellInit(wlWm.display, wlWm.surface,
         title, appId, fullscreen, maximize, borderless, resizable))
     return false;
@@ -148,6 +155,8 @@ void waylandWindowFree(void)
 {
   if (wlWm.fractionalScaleInterface)
     wp_fractional_scale_v1_destroy(wlWm.fractionalScaleInterface);
+  if (wlWm.contentType)
+    wp_content_type_v1_destroy(wlWm.contentType);
   wl_surface_destroy(wlWm.surface);
   lgFreeEvent(wlWm.frameEvent);
 }

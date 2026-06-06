@@ -48,6 +48,7 @@
 #include "wayland-xdg-output-unstable-v1-client-protocol.h"
 #include "wayland-xdg-activation-v1-client-protocol.h"
 #include "wayland-fractional-scale-v1-client-protocol.h"
+#include "wayland-content-type-v1-client-protocol.h"
 
 #include "scale.h"
 
@@ -182,6 +183,9 @@ struct WaylandDSState
   struct wl_list outputs; // WaylandOutput::link
   struct wl_list surfaceOutputs; // SurfaceOutput::link
   bool useFractionalScale;
+
+  struct wp_content_type_manager_v1 * contentTypeManager;
+  struct wp_content_type_v1 * contentType;
 
   LGEvent * frameEvent;
 
