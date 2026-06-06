@@ -192,6 +192,11 @@ void CNotifyWindow::handleGPUNotification(bool hasGPU)
     L"Looking Glass (IDD) with GPU acceleration" :
     L"Looking Glass (IDD) with software rendering");
 
+  if (hasGPU)
+    m_iconData.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(ID_GPU_ICON));
+  else
+    m_iconData.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(ID_NO_GPU_ICON));
+
   if (!Shell_NotifyIcon(NIM_MODIFY, &m_iconData))
   {
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_ADD)");
