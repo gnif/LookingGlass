@@ -22,8 +22,9 @@
 #include "winuser.h"
 #include "winver.h"
 #include "VersionInfo.h"
+#include "Resources.h"
 
-IDI_APPLICATION ICON "../../resources/icon.ico"
+ID_MAIN_ICON ICON "../../resources/icon.ico"
 
 #define STRINGIFY2(s) L#s
 #define STRINGIFY(s) STRINGIFY2(s)

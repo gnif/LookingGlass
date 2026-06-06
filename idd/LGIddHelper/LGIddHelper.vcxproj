@@ -211,6 +211,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
     <ClInclude Include="CRegistrySettings.h" />
     <ClInclude Include="CStaticWidget.h" />
     <ClInclude Include="CWidget.h" />
+    <ClInclude Include="Resources.h" />
     <ClInclude Include="UIHelpers.h" />
     <ClInclude Include="CWindow.h" />
   </ItemGroup>

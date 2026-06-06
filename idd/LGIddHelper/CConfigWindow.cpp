@@ -35,7 +35,6 @@ bool CConfigWindow::registerClass()
 {
   WNDCLASSEX wx = {};
   populateWindowClass(wx);
-  wx.hIconSm = wx.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
   wx.hbrBackground = (HBRUSH)(COLOR_3DFACE + 1);
   wx.lpszClassName = L"LookingGlassIddConfig";
 

@@ -22,6 +22,7 @@
 #include <windowsx.h>
 #include <strsafe.h>
 #include <CDebug.h>
+#include "Resources.h"
 
 HINSTANCE CWindow::hInstance = (HINSTANCE)GetModuleHandle(NULL);
 
@@ -30,8 +31,8 @@ void CWindow::populateWindowClass(WNDCLASSEX &wx)
   wx.cbSize = sizeof(WNDCLASSEX);
   wx.lpfnWndProc = wndProc;
   wx.hInstance = hInstance;
-  wx.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-  wx.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+  wx.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(ID_MAIN_ICON));
+  wx.hIconSm = wx.hIcon;
   wx.hCursor = LoadCursor(NULL, IDC_ARROW);
   wx.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 }
