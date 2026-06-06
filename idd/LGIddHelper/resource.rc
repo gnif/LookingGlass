@@ -25,6 +25,8 @@
 #include "Resources.h"
 
 ID_MAIN_ICON ICON "../../resources/icon.ico"
+ID_GPU_ICON ICON "../../resources/icon-gpu.ico"
+ID_NO_GPU_ICON ICON "../../resources/icon-nogpu.ico"
 
 #define STRINGIFY2(s) L#s
 #define STRINGIFY(s) STRINGIFY2(s)
