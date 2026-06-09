@@ -94,7 +94,7 @@ static bool rgb24_configure(void * opaque,
     /* adjust for the aligned width */
     this.height = (*cols * *rows) / (packedPitch / 3);
 
-    char sOutputWidth[6], sOutputHeight[6];
+    char sOutputWidth[11], sOutputHeight[11];
     snprintf(sOutputWidth , sizeof(sOutputWidth) , "%d", this.width );
     snprintf(sOutputHeight, sizeof(sOutputHeight), "%d", this.height);
 
