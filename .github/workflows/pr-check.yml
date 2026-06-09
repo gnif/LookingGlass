@@ -4,7 +4,8 @@ jobs:
   authors:
     runs-on: ubuntu-latest
     permissions:
-        pull-requests: write
+      contents: read
+      pull-requests: write
     steps:
     - uses: actions/checkout@v1
     - name: Check AUTHORS file
