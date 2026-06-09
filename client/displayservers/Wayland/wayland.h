@@ -85,13 +85,6 @@ struct SurfaceOutput
   struct wl_list link;
 };
 
-enum EGLSwapWithDamageState {
-  SWAP_WITH_DAMAGE_UNKNOWN,
-  SWAP_WITH_DAMAGE_UNSUPPORTED,
-  SWAP_WITH_DAMAGE_KHR,
-  SWAP_WITH_DAMAGE_EXT,
-};
-
 struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
