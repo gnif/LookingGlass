@@ -989,9 +989,10 @@ static bool d12_enumerateDevices(
 
     for(
       int n = 0;
-      IDXGIAdapter1_EnumOutputs(*adapter, n, output) != DXGI_ERROR_NOT_FOUND;
+      IDXGIAdapter1_EnumOutputs(*adapter, n, output) == S_OK;
       ++n, comRef_release(output))
     {
+      if (!*output) break;
       IDXGIOutput_GetDesc(*output, &outputDesc);
 
       if (optOutput)
