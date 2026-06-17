@@ -987,11 +987,17 @@ static bool d12_enumerateDevices(
       DEBUG_INFO("Adapter matched, trying: %ls", adapterDesc.Description);
     }
 
-    for(
-      int n = 0;
-      IDXGIAdapter1_EnumOutputs(*adapter, n, output) != DXGI_ERROR_NOT_FOUND;
-      ++n, comRef_release(output))
+    for (int n = 0; ; ++n, comRef_release(output))
     {
+      HRESULT hr = IDXGIAdapter1_EnumOutputs(*adapter, n, output);
+
+      if (FAILED(hr))
+      {
+        if (hr != DXGI_ERROR_NOT_FOUND)
+          DEBUG_WINERROR("Failed to IDXGIAdapter::EnumOutputs", hr);
+        break;
+      }
+
       IDXGIOutput_GetDesc(*output, &outputDesc);
 
       if (optOutput)
