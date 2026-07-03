@@ -304,6 +304,11 @@ void xdg_pollWait(struct wl_display * display, int epollFd,
     wl_display_cancel_read(display);
 }
 
+bool xdg_configured(void)
+{
+  return state.configured;
+}
+
 WL_DesktopOps WLD_xdg =
 {
   .name                      = "xdg",
@@ -318,5 +323,6 @@ WL_DesktopOps WLD_xdg =
   .getSize                   = xdg_getSize,
   .registryGlobalHandler     = xdg_registryGlobalHandler,
   .pollInit                  = xdg_pollInit,
-  .pollWait                  = xdg_pollWait
+  .pollWait                  = xdg_pollWait,
+  .configured                = xdg_configured
 };

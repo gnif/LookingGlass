@@ -263,6 +263,11 @@ void libdecor_pollWait(struct wl_display * display, int epollFd,
   }
 }
 
+bool libdecor_configured(void)
+{
+  return state.configured;
+}
+
 WL_DesktopOps WLD_libdecor =
 {
   .name                      = "libdecor",
@@ -277,5 +282,6 @@ WL_DesktopOps WLD_libdecor =
   .getSize                   = libdecor_getSize,
   .registryGlobalHandler     = libdecor_registryGlobalHandler,
   .pollInit                  = libdecor_pollInit,
-  .pollWait                  = libdecor_pollWait
+  .pollWait                  = libdecor_pollWait,
+  .configured                = libdecor_configured
 };
