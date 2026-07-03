@@ -36,9 +36,13 @@ static void setScale(struct WaylandScale newScale)
   wlWm.scale = newScale;
   wlWm.fractionalScale = waylandScaleIsFractional(newScale);
   wlWm.needsResize = true;
-  waylandCursorScaleChange();
-  app_invalidateWindow(true);
-  waylandStopWaitFrame();
+
+  if (wlWm.desktop->configured())
+  {
+    waylandCursorScaleChange();
+    app_invalidateWindow(true);
+    waylandStopWaitFrame();
+  }
 }
 
 void waylandWindowUpdateScale(void)
