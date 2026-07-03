@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -32,6 +32,60 @@ int         CPlatformInfo::m_cores   = 0;
 int         CPlatformInfo::m_procs   = 0;
 int         CPlatformInfo::m_sockets = 0;
 
+typedef PWSTR (WINAPI *PFN_BRANDING_FORMAT_STRING)(__in PCWSTR pstrFormat);
+
+inline bool brandingVersionString(std::string &output)
+{
+  HMODULE hWinBrand = LoadLibraryExA("winbrand.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (!hWinBrand)
+    return false;
+
+  PFN_BRANDING_FORMAT_STRING BrandingFormatString =
+    (PFN_BRANDING_FORMAT_STRING) GetProcAddress(hWinBrand, "BrandingFormatString");
+
+  bool succeeded = false;
+
+  if (BrandingFormatString)
+  {
+    PWSTR pwstrOSName = BrandingFormatString(L"%WINDOWS_LONG%");
+
+    if (pwstrOSName)
+    {
+      int cbSize = WideCharToMultiByte(CP_UTF8, 0, pwstrOSName, -1, nullptr, 0, nullptr, nullptr);
+      output.resize(cbSize - 1);
+
+      if (WideCharToMultiByte(CP_UTF8, 0, pwstrOSName, -1, &output[0], cbSize, nullptr, nullptr))
+        succeeded = true;
+
+      GlobalFree((HGLOBAL)pwstrOSName);
+    }
+  }
+
+  FreeLibrary(hWinBrand);
+  return succeeded;
+}
+
+inline bool registryVersionString(std::string &output)
+{
+  DWORD bufferSize = 0;
+  LSTATUS status = RegGetValueA(HKEY_LOCAL_MACHINE,
+    "Software\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
+    RRF_RT_REG_SZ, nullptr, nullptr, &bufferSize);
+
+  if (status == ERROR_SUCCESS)
+  {
+    output.resize(bufferSize - 1);
+    status = RegGetValueA(HKEY_LOCAL_MACHINE,
+      "Software\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
+      RRF_RT_REG_SZ, nullptr, &output[0], &bufferSize);
+
+    if (status == ERROR_SUCCESS)
+      return true;
+  }
+
+  return false;
+}
+
 void CPlatformInfo::Init()
 {
   SYSTEM_INFO si;
@@ -46,26 +100,7 @@ void CPlatformInfo::Init()
   GetVersionExA(&osvi);
 #pragma warning(pop)
 
-  DWORD bufferSize = 0;
-  LSTATUS status = RegGetValueA(HKEY_LOCAL_MACHINE,
-    "Software\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
-    RRF_RT_REG_SZ, nullptr, nullptr, &bufferSize);
-  if (status == ERROR_SUCCESS)
-  {
-    m_productName.resize(bufferSize);
-    status = RegGetValueA(HKEY_LOCAL_MACHINE,
-      "Software\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
-      RRF_RT_REG_SZ, nullptr, &m_productName[0], &bufferSize);
-
-    if (status != ERROR_SUCCESS)
-    {
-      m_productName = "Unknown";
-      DEBUG_ERROR("Failed to read the ProductName");
-    }
-    else
-      m_productName.resize(bufferSize - 1); // remove the double null termination
-  }
-  else
+  if (!brandingVersionString(m_productName) && !registryVersionString(m_productName))
   {
     m_productName = "Windows " +
       std::to_string(osvi.dwMajorVersion) + "." +
