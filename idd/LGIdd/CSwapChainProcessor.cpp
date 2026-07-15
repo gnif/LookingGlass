@@ -366,11 +366,16 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcFormat.height = srcDesc.Height;
   srcFormat.format = GetFrameType(srcDesc.Format);
 
-  // Determine HDR status from both format and color space.
-  // HDR metadata loading is handled inside each branch so the logic
-  // is self-contained: first identify the content type, then load the
-  // matching metadata.
-  if (srcDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
+  // Only HDR-capable formats can carry HDR content.
+  // 8-bit formats (BGRA, RGBA) cannot represent HDR,
+  // even if IsHDRActive() is momentarily stale during mode switches.
+  if (srcDesc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT &&
+      srcDesc.Format != DXGI_FORMAT_R10G10B10A2_UNORM)
+  {
+    srcFormat.hdr   = false;
+    srcFormat.hdrPQ = false;
+  }
+  else if (srcDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
   {
     // FP16 is HDR content (scRGB / linear, not PQ-curve).
     // FP16 always carries HDR color data regardless of OS HDR mode,
@@ -408,7 +413,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
     // Load HDR metadata; if none is available the frame is not HDR.
     if (!m_devContext->GetHDRMetadata(srcFormat))
-      srcFormat.hdr = false;
+    {
+      srcFormat.hdr   = false;
+      srcFormat.hdrPQ = false;
+    }
   }
 
   bool postProcessFormatChanged = false;
