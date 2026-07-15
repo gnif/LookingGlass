@@ -61,7 +61,7 @@ static bool LGIddCanUseIddCx110DDIs(UINT iddCxVersion)
 NTSTATUS LGIddDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
   UNREFERENCED_PARAMETER(previousState);
-  
+
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
   wrapper->context->InitAdapter();
 
@@ -92,7 +92,7 @@ static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD 
 
   mode.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
   mode.AdditionalSignalInfo.videoStandard    = 255;
-  
+
   mode.vSyncFreq.Numerator   = vsync;
   mode.vSyncFreq.Denominator = 1;
   mode.hSyncFreq.Numerator   = vsync * height;

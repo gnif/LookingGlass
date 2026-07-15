@@ -201,7 +201,7 @@ void CIndirectDeviceContext::InitAdapter()
   factory->Release();
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
-  wrapper->context = this;  
+  wrapper->context = this;
 }
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
@@ -313,7 +313,7 @@ static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD 
 
   mode.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
   mode.AdditionalSignalInfo.videoStandard    = 255;
-  
+
   mode.vSyncFreq.Numerator   = vsync;
   mode.vSyncFreq.Denominator = 1;
   mode.hSyncFreq.Numerator   = vsync * height;
@@ -554,7 +554,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     return true;
 
   m_alignSize = alignSize;
-  
+
   std::stringstream ss;
   {
     KVMFR kvmfr = {};
@@ -970,7 +970,7 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   }
 
   KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
-  
+
   m_cursorVisible = info.IsCursorVisible;
   uint32_t flags  = 0;
 
