@@ -618,6 +618,11 @@ bool app_getProp(LG_DSProperty prop, void * ret)
   return g_state.ds->getProp(prop, ret);
 }
 
+bool app_getHDRDescFailed(void)
+{
+  return atomic_load(&g_state.hdrDescFailed);
+}
+
 #ifdef ENABLE_EGL
 EGLDisplay app_getEGLDisplay(void)
 {

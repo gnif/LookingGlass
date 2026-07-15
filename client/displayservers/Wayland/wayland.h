@@ -49,6 +49,7 @@
 #include "wayland-xdg-activation-v1-client-protocol.h"
 #include "wayland-fractional-scale-v1-client-protocol.h"
 #include "wayland-content-type-v1-client-protocol.h"
+#include "wayland-color-management-v1-client-protocol.h"
 
 #include "scale.h"
 
@@ -120,7 +121,8 @@ struct WaylandDSState
 
 #ifdef ENABLE_OPENGL
   EGLDisplay glDisplay;
-  EGLConfig glConfig;
+  EGLConfig  glConfig;    // primary config (best bit depth probed)
+  EGLConfig  glConfigSDR; // fallback 8-bit SDR config
   EGLSurface glSurface;
 #endif
 
@@ -179,6 +181,41 @@ struct WaylandDSState
 
   struct wp_content_type_manager_v1 * contentTypeManager;
   struct wp_content_type_v1 * contentType;
+
+  // Color management (HDR)
+  struct wp_color_manager_v1                    * colorManager;
+  struct wp_color_management_surface_v1         * colorSurface;
+  struct wp_image_description_v1                * hdrImageDesc;
+  struct wp_image_description_creator_params_v1 * hdrImageCreator;
+
+  // Set to true when an HDR image description is active on the surface
+  bool hdrActive;
+
+  // wp_color_manager_v1 feature advertisement tracking.
+  // Set to true after the done event for the color-manager has been received
+  // and all compositor capabilities have been recorded.
+  bool cmFeaturesDone;
+  bool cmHasParametric;
+  bool cmHasLuminances;
+  bool cmHasMasteringPrimaries;
+  bool cmHasTFSt2084PQ;
+  bool cmHasTFExtLinear;
+  bool cmHasPrimariesBT2020;
+  bool cmHasPrimariesSRGB;
+  bool cmCanDoHDR;       // true if compositor supports features needed for HDR
+
+  // Pending HDR format to apply (set by frame thread, applied in swap buffers).
+  // pendingHDRApply and pendingHDRClear are accessed from multiple threads
+  // without a lock, so they must be atomic.
+  _Atomic(bool) pendingHDRApply;
+  _Atomic(bool) pendingHDRClear;
+  bool          pendingHDRPQ;
+  uint16_t      pendingHDRDisplayPrimary[3][2];
+  uint16_t      pendingHDRWhitePoint[2];
+  uint32_t      pendingHDRMaxDisplayLuminance;
+  uint32_t      pendingHDRMinDisplayLuminance;
+  uint32_t      pendingHDRMaxCLL;
+  uint32_t      pendingHDRMaxFALL;
 
   LGEvent * frameEvent;
 
@@ -261,6 +298,24 @@ void waylandGLMakeCurrent(LG_DSGLContext context);
 void waylandGLSetSwapInterval(int interval);
 void waylandGLSwapBuffers(void);
 #endif
+
+// HDR color management (Wayland color-management-v1)
+bool waylandColorMgmtInit(void);
+void waylandColorMgmtFree(void);
+void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
+    const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
+    uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
+    bool hdrPQ);
+void waylandClearHDRImageDescription(void);
+
+// Queue HDR change from any thread (applied in waylandEGLSwapBuffers).
+// Returns true if the request was queued, false if HDR is not available
+// (no color manager, missing features, or unsupported TF/primaries).
+bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
+    const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
+    uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
+    bool hdrPQ);
+void waylandRequestClearHDR(void);
 
 // idle module
 bool waylandIdleInit(void);

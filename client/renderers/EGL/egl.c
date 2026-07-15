@@ -121,6 +121,9 @@ struct Inst
 
   bool showSpice;
   int  spiceWidth, spiceHeight;
+
+  bool configSupportsHDR; // true if we probed FP16 or 10-bit EGL config
+  bool hdr;               // true if current frame format is HDR
 };
 
 static struct Option egl_options[] =
@@ -607,6 +610,26 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
     egl_cursorSetScale(this->cursor, scale);
   }
 
+  // Track HDR state and warn if HDR frames arrive without any HDR path
+  this->hdr = format.hdr;
+  if (format.hdr)
+  {
+    bool nativeHDR = false;
+    app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
+    if (!this->configSupportsHDR && !nativeHDR)
+      DEBUG_WARN("HDR frames being displayed on an 8-bit EGL surface "
+          "without a color-managed compositor; tones may be incorrect");
+  }
+
+  // If the display server supports native HDR (via setHDRImageDescription),
+  // disable software tone-mapping to avoid double tone-mapping.
+  // However, if the last call to setHDRImageDescription actually failed
+  // (e.g., compositor missing required primaries), keep tone-mapping on.
+  bool nativeHDR = false;
+  app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
+  egl_desktopSetNativeHDR(this->desktop,
+      format.hdr && nativeHDR && !app_getHDRDescFailed());
+
   egl_update_scale_type(this);
   egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
 
@@ -774,21 +797,50 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     }
   }
 
-  EGLint attr[] =
+  // Probe for best available color depth: FP16 → 10-bit → 8-bit
+  static const struct { EGLint r, g, b, a, depth; const char * desc; } configs[] =
   {
-    EGL_BUFFER_SIZE    , 30,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-    EGL_SAMPLE_BUFFERS , maxSamples > 0 ? 1 : 0,
-    EGL_SAMPLES        , maxSamples,
-    EGL_NONE
+    { 16, 16, 16,  0, 48, "FP16 (RGBA16F)"  },
+    { 10, 10, 10,  2, 32, "10-bit (RGBA10)" },
+    {  8,  8,  8,  0, 24, "8-bit (RGBA8)"   },
   };
+  EGLint       num_config;
+  const char * configDesc = NULL;
+  int          chosen     = -1;
 
-  EGLint num_config;
-  if (!eglChooseConfig(this->display, attr, &this->configs, 1, &num_config))
+  for (int i = 0; i < (int)(sizeof(configs) / sizeof(configs[0])); ++i)
   {
-    DEBUG_ERROR("Failed to choose config (eglError: 0x%x)", eglGetError());
+    EGLint attr[] =
+    {
+      EGL_RED_SIZE        , configs[i].r,
+      EGL_GREEN_SIZE      , configs[i].g,
+      EGL_BLUE_SIZE       , configs[i].b,
+      EGL_ALPHA_SIZE      , configs[i].a,
+      EGL_BUFFER_SIZE     , configs[i].depth,
+      EGL_RENDERABLE_TYPE , EGL_OPENGL_ES2_BIT,
+      EGL_SAMPLE_BUFFERS  , maxSamples > 0 ? 1 : 0,
+      EGL_SAMPLES         , maxSamples,
+      EGL_NONE
+    };
+
+    if (eglChooseConfig(this->display, attr, &this->configs, 1, &num_config) &&
+        num_config > 0)
+    {
+      configDesc = configs[i].desc;
+      chosen     = i;
+      break;
+    }
+  }
+
+  if (chosen < 0)
+  {
+    DEBUG_ERROR("Failed to choose any EGL config");
     return false;
   }
+
+  this->configSupportsHDR = chosen <= 1; // FP16 or 10-bit
+  DEBUG_INFO("EGL config: %s%s", configDesc,
+      this->configSupportsHDR ? " (HDR capable)" : "");
 
   const EGLint surfattr[] =
   {

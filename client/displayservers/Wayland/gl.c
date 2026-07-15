@@ -70,6 +70,52 @@ EGLDisplay waylandGetEGLDisplay(void)
   return eglGetDisplay(native);
 }
 
+static void applyHDRPending(void)
+{
+  if (wlWm.pendingHDRApply)
+  {
+    wlWm.pendingHDRApply = false;
+    atomic_thread_fence(memory_order_acquire);
+    waylandSetHDRImageDescription(
+        wlWm.pendingHDRDisplayPrimary, wlWm.pendingHDRWhitePoint,
+        wlWm.pendingHDRMaxDisplayLuminance,
+        wlWm.pendingHDRMinDisplayLuminance,
+        wlWm.pendingHDRMaxCLL,
+        wlWm.pendingHDRMaxFALL,
+        wlWm.pendingHDRPQ);
+  }
+  else if (wlWm.pendingHDRClear)
+  {
+    wlWm.pendingHDRClear = false;
+    waylandClearHDRImageDescription();
+  }
+}
+
+void waylandClearHDRImageDescription(void)
+{
+  if (!wlWm.hdrActive)
+    return;
+
+  if (wlWm.hdrImageCreator)
+  {
+    wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
+    wlWm.hdrImageCreator = NULL;
+  }
+  if (wlWm.hdrImageDesc)
+  {
+    wp_image_description_v1_destroy(wlWm.hdrImageDesc);
+    wlWm.hdrImageDesc = NULL;
+  }
+  if (wlWm.colorSurface)
+  {
+    wp_color_management_surface_v1_destroy(wlWm.colorSurface);
+    wlWm.colorSurface = NULL;
+  }
+
+  wlWm.hdrActive = false;
+  DEBUG_INFO("HDR image description cleared");
+}
+
 void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
 {
   if (!wlWm.swapWithDamage.init)
@@ -84,6 +130,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
   }
 
   waylandPresentationFrame();
+  applyHDRPending();
   swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
 
   if (wlWm.needsResize)
@@ -149,23 +196,226 @@ EGLNativeWindowType waylandGetEGLNativeWindow(void)
 }
 #endif
 
+// HDR color management support
+void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
+    const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
+    uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
+    bool hdrPQ)
+{
+  if (!wlWm.colorManager)
+    return;
+
+  if (!wlWm.cmFeaturesDone)
+  {
+    DEBUG_WARN("Color management features not yet advertised, deferring HDR");
+    return;
+  }
+
+  if (!wlWm.cmHasParametric)
+  {
+    DEBUG_WARN("Compositor does not support parametric image descriptions");
+    return;
+  }
+
+  // Verify the compositor supports the transfer function we need
+  if (hdrPQ && !wlWm.cmHasTFSt2084PQ)
+  {
+    DEBUG_WARN("Compositor does not support ST2084_PQ transfer function");
+    return;
+  }
+  if (!hdrPQ && !wlWm.cmHasTFExtLinear)
+  {
+    DEBUG_WARN("Compositor does not support EXT_LINEAR transfer function");
+    return;
+  }
+
+  // Verify primaries support for the target color space
+  if (hdrPQ && !wlWm.cmHasPrimariesBT2020)
+  {
+    DEBUG_WARN("Compositor does not support BT.2020 primaries");
+    return;
+  }
+  if (!hdrPQ && !wlWm.cmHasPrimariesSRGB)
+  {
+    DEBUG_WARN("Compositor does not support sRGB primaries");
+    return;
+  }
+
+  // Clean up any previous description (allows re-application with updated metadata)
+  if (wlWm.hdrImageCreator)
+  {
+    wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
+    wlWm.hdrImageCreator = NULL;
+  }
+  if (wlWm.hdrImageDesc)
+  {
+    wp_image_description_v1_destroy(wlWm.hdrImageDesc);
+    wlWm.hdrImageDesc = NULL;
+  }
+  if (wlWm.colorSurface)
+  {
+    wp_color_management_surface_v1_destroy(wlWm.colorSurface);
+    wlWm.colorSurface = NULL;
+  }
+
+  wlWm.hdrActive = false;
+
+  wlWm.hdrImageCreator =
+    wp_color_manager_v1_create_parametric_creator(wlWm.colorManager);
+  if (!wlWm.hdrImageCreator)
+  {
+    DEBUG_WARN("Failed to create parametric image description creator");
+    return;
+  }
+
+  // Set primaries: BT.2020 for PQ HDR10, sRGB for scRGB/FP16
+  wp_image_description_creator_params_v1_set_primaries_named(
+      wlWm.hdrImageCreator,
+      hdrPQ ? WP_COLOR_MANAGER_V1_PRIMARIES_BT2020
+            : WP_COLOR_MANAGER_V1_PRIMARIES_SRGB);
+
+  // Select transfer function: PQ for PQ-encoded content, linear for scRGB/FP16
+  wp_image_description_creator_params_v1_set_tf_named(
+      wlWm.hdrImageCreator,
+      hdrPQ ? WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ
+            : WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR);
+
+  // Set luminance range from metadata (values already in 0.0001 cd/m² units)
+  wp_image_description_creator_params_v1_set_luminances(
+      wlWm.hdrImageCreator,
+      minDisplayLuminance > 0 ? minDisplayLuminance : 50,
+      maxDisplayLuminance > 0 ? maxDisplayLuminance : 10000000,
+      hdrPQ                   ? 2030000             : 800000);
+
+  // Set mastering display primaries from frame HDR metadata.
+  // Always set when the compositor supports it, falling back to the
+  // primaries from the metadata (even if zero, in which case the
+  // compositor uses its own defaults).
+  if (wlWm.cmHasMasteringPrimaries)
+    wp_image_description_creator_params_v1_set_mastering_display_primaries(
+        wlWm.hdrImageCreator,
+        displayPrimary[0][0], displayPrimary[0][1],
+        displayPrimary[1][0], displayPrimary[1][1],
+        displayPrimary[2][0], displayPrimary[2][1],
+        whitePoint[0], whitePoint[1]);
+
+  if (maxCLL > 0)
+    wp_image_description_creator_params_v1_set_max_cll(wlWm.hdrImageCreator, maxCLL);
+  if (maxFALL > 0)
+    wp_image_description_creator_params_v1_set_max_fall(wlWm.hdrImageCreator, maxFALL);
+
+  wlWm.hdrImageDesc =
+    wp_image_description_creator_params_v1_create(wlWm.hdrImageCreator);
+  wlWm.hdrImageCreator = NULL; // consumed by create
+
+  if (!wlWm.hdrImageDesc)
+  {
+    DEBUG_WARN("Failed to create HDR image description");
+    return;
+  }
+
+  wlWm.colorSurface =
+    wp_color_manager_v1_get_surface(wlWm.colorManager, wlWm.surface);
+  if (!wlWm.colorSurface)
+  {
+    DEBUG_WARN("Failed to get color management surface");
+    wp_image_description_v1_destroy(wlWm.hdrImageDesc);
+    wlWm.hdrImageDesc = NULL;
+    return;
+  }
+
+  wp_color_management_surface_v1_set_image_description(
+      wlWm.colorSurface, wlWm.hdrImageDesc,
+      WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+
+  wlWm.hdrActive = true;
+  DEBUG_INFO("HDR image description set on surface (%s, %s, %u nits)",
+      hdrPQ ? "PQ" : "scRGB", hdrPQ ? "BT.2020" : "sRGB", maxDisplayLuminance);
+}
+
+bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
+    const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
+    uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
+    bool hdrPQ)
+{
+  if (!wlWm.cmFeaturesDone || !wlWm.cmHasParametric)
+    return false;
+  if (hdrPQ && !wlWm.cmHasTFSt2084PQ)
+    return false;
+  if (!hdrPQ && !wlWm.cmHasTFExtLinear)
+    return false;
+  if (hdrPQ && !wlWm.cmHasPrimariesBT2020)
+    return false;
+  if (!hdrPQ && !wlWm.cmHasPrimariesSRGB)
+    return false;
+
+  wlWm.pendingHDRPQ = hdrPQ;
+
+  // Write all metadata before setting the apply flag to ensure the
+  // render thread sees the complete HDR metadata when it observes
+  // pendingHDRApply == true.
+  memcpy(wlWm.pendingHDRDisplayPrimary, displayPrimary,
+      sizeof(wlWm.pendingHDRDisplayPrimary));
+  memcpy(wlWm.pendingHDRWhitePoint, whitePoint,
+      sizeof(wlWm.pendingHDRWhitePoint));
+  wlWm.pendingHDRMaxDisplayLuminance = maxDisplayLuminance;
+  wlWm.pendingHDRMinDisplayLuminance = minDisplayLuminance;
+  wlWm.pendingHDRMaxCLL              = maxCLL;
+  wlWm.pendingHDRMaxFALL             = maxFALL;
+
+  wlWm.pendingHDRClear = false;
+  atomic_thread_fence(memory_order_release);
+  wlWm.pendingHDRApply = true;
+  return true;
+}
+
+void waylandRequestClearHDR(void)
+{
+  wlWm.pendingHDRClear = true;
+  wlWm.pendingHDRApply = false;
+}
+
 #ifdef ENABLE_OPENGL
+
+static const EGLint eglBaseAttrs[] =
+{
+  EGL_CONFORMANT       , EGL_OPENGL_BIT,
+  EGL_RENDERABLE_TYPE  , EGL_OPENGL_BIT,
+  EGL_COLOR_BUFFER_TYPE, EGL_RGB_BUFFER,
+  EGL_SAMPLE_BUFFERS   , 0,
+  EGL_SAMPLES          , 0,
+  EGL_NONE
+};
+
+static bool eglChooseConfigWithDepth(EGLDisplay display, EGLint red,
+    EGLint green, EGLint blue, EGLint alpha, EGLint depth,
+    EGLConfig * config, const char ** desc)
+{
+  // Build attr array with the base attrs plus color depth
+  EGLint attr[32];
+  int   ai = 0;
+  attr[ai++] = EGL_RED_SIZE  ; attr[ai++] = red;
+  attr[ai++] = EGL_GREEN_SIZE; attr[ai++] = green;
+  attr[ai++] = EGL_BLUE_SIZE ; attr[ai++] = blue;
+  attr[ai++] = EGL_ALPHA_SIZE; attr[ai++] = alpha;
+  attr[ai++] = EGL_BUFFER_SIZE; attr[ai++] = depth;
+  for (int i = 0; eglBaseAttrs[i] != EGL_NONE; ++i)
+    attr[ai++] = eglBaseAttrs[i];
+  attr[ai] = EGL_NONE;
+
+  EGLint num_config;
+  if (eglChooseConfig(display, attr, config, 1, &num_config) && num_config > 0)
+  {
+    if (desc)
+      *desc = red >= 16 ? "FP16 (RGBA16F)" :
+              red >= 10 ? "10-bit (RGBA10)" : "8-bit (RGBA8)";
+    return true;
+  }
+  return false;
+}
+
 bool waylandOpenGLInit(void)
 {
-  EGLint attr[] =
-  {
-    EGL_BUFFER_SIZE      , 24,
-    EGL_CONFORMANT       , EGL_OPENGL_BIT,
-    EGL_RENDERABLE_TYPE  , EGL_OPENGL_BIT,
-    EGL_COLOR_BUFFER_TYPE, EGL_RGB_BUFFER,
-    EGL_RED_SIZE         , 8,
-    EGL_GREEN_SIZE       , 8,
-    EGL_BLUE_SIZE        , 8,
-    EGL_SAMPLE_BUFFERS   , 0,
-    EGL_SAMPLES          , 0,
-    EGL_NONE
-  };
-
   wlWm.glDisplay = waylandGetEGLDisplay();
 
   int maj, min;
@@ -181,12 +431,30 @@ bool waylandOpenGLInit(void)
     return false;
   }
 
-  EGLint num_config;
-  if (!eglChooseConfig(wlWm.glDisplay, attr, &wlWm.glConfig, 1, &num_config))
+  EGLConfig config;
+  const char * configDesc = NULL;
+
+  // Probe for best available color depth: FP16 → 10-bit → 8-bit
+  if (!eglChooseConfigWithDepth(wlWm.glDisplay,
+        16, 16, 16, 0, 48, &config, &configDesc) &&
+      !eglChooseConfigWithDepth(wlWm.glDisplay,
+        10, 10, 10, 2, 32, &config, &configDesc) &&
+      !eglChooseConfigWithDepth(wlWm.glDisplay,
+        8, 8, 8, 0, 24, &config, &configDesc))
   {
-    DEBUG_ERROR("Failed to choose config (eglError: 0x%x)", eglGetError());
+    DEBUG_ERROR("Failed to choose any EGL config");
     return false;
   }
+
+  wlWm.glConfig = config;
+  DEBUG_INFO("EGL config: %s", configDesc);
+
+  // Also store the 8-bit fallback for SDR contexts
+  if (configDesc && strcmp(configDesc, "8-bit (RGBA8)") != 0)
+    eglChooseConfigWithDepth(wlWm.glDisplay,
+        8, 8, 8, 0, 24, &wlWm.glConfigSDR, NULL);
+  else
+    wlWm.glConfigSDR = wlWm.glConfig;
 
   wlWm.glSurface = eglCreateWindowSurface(wlWm.glDisplay, wlWm.glConfig, wlWm.eglWindow, NULL);
   if (wlWm.glSurface == EGL_NO_SURFACE)

@@ -84,6 +84,14 @@ typedef struct LG_RendererFormat
   unsigned int      pitch;   // scanline bytes (or compressed size)
   unsigned int      bpp;     // bits per pixel (zero if compressed)
   LG_RendererRotate rotate;  // guest rotation
+
+  // HDR static metadata (from KVMFRFrame, valid when hdr is true)
+  uint16_t hdrDisplayPrimary[3][2];
+  uint16_t hdrWhitePoint[2];
+  uint32_t hdrMaxDisplayLuminance;
+  uint32_t hdrMinDisplayLuminance;
+  uint32_t hdrMaxContentLightLevel;
+  uint32_t hdrMaxFrameAverageLightLevel;
 }
 LG_RendererFormat;
 
