@@ -36,14 +36,24 @@ bool CHDR16to10Effect::Init(const ComPtr<ID3D12Device3>& device)
   const char * shader =
     "cbuffer Constants : register(b0)\n"
     "{\n"
-    "  float SDRWhiteLevel;\n"
+    "  float ReferenceWhiteNits;\n"
     "};\n"
     "Texture2D<float4> src : register(t0);\n"
     "RWTexture2D<float4> dst : register(u0);\n"
+    "static const float PQ_m1 = 0.1593017578125;\n"
+    "static const float PQ_m2 = 78.84375;\n"
+    "static const float PQ_c1 = 0.8359375;\n"
+    "static const float PQ_c2 = 18.8515625;\n"
+    "static const float PQ_c3 = 18.6875;\n"
     "[numthreads(" POST_PROCESS_THREADS_STR ", " POST_PROCESS_THREADS_STR ", 1)]\n"
     "void main(uint3 dt : SV_DispatchThreadID)\n"
     "{\n"
-    "  dst[dt.xy] = float4(src[dt.xy].rgb * SDRWhiteLevel, src[dt.xy].a);\n"
+    "  float3 linear = src[dt.xy].rgb * ReferenceWhiteNits;\n"
+    "  // scRGB to PQ (ST.2084)\n"
+    "  float3 Y = linear / 10000.0;\n"
+    "  float3 Ym1 = pow(max(Y, 0.0), PQ_m1);\n"
+    "  float3 pq = pow((PQ_c1 + PQ_c2 * Ym1) / (1.0 + PQ_c3 * Ym1), PQ_m2);\n"
+    "  dst[dt.xy] = float4(pq, src[dt.xy].a);\n"
     "}\n";
 
   if (!InitCompute(device, ranges, ARRAYSIZE(ranges), nullptr, 0, shader))
@@ -99,10 +109,20 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
   m_threadsX = ((unsigned)desc.Width  + (Threads - 1)) / Threads;
   m_threadsY = ((unsigned)desc.Height + (Threads - 1)) / Threads;
 
-  dst.desc         = desc;
+  dst.desc   = desc;
   dst.format = FRAME_TYPE_RGBA10;
-  dst.hdr          = true;
-  dst.hdrPQ        = false;
+  dst.hdr    = true;
+  dst.hdrPQ  = true;
+
+  // Explicitly propagate HDR static metadata so it survives post-processing.
+  // Do not rely on the caller's copy semantics in CPostProcessor::Configure().
+  memcpy(dst.displayPrimary, src.displayPrimary, sizeof(dst.displayPrimary));
+  memcpy(dst.whitePoint    , src.whitePoint    , sizeof(dst.whitePoint    ));
+  dst.maxDisplayLuminance       = src.maxDisplayLuminance;
+  dst.minDisplayLuminance       = src.minDisplayLuminance;
+  dst.maxContentLightLevel      = src.maxContentLightLevel;
+  dst.maxFrameAverageLightLevel = src.maxFrameAverageLightLevel;
+
   return PostProcessStatus::SUCCESS;
 }
 

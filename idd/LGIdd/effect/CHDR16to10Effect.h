@@ -18,8 +18,8 @@ class CHDR16to10Effect : public CComputeEffect
 private:
   struct Consts
   {
-    float SDRWhiteLevel;
-  } m_consts = { 1.0f };
+    float ReferenceWhiteNits; // scRGB reference white in nits (typically 80)
+  } m_consts = { 80.0f };
   ComPtr<ID3D12Resource> m_constBuffer;
 
 public:

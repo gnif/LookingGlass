@@ -165,8 +165,11 @@ NTSTATUS LGIddAdapterCommitModes2(IDDCX_ADAPTER adapter, const IDARG_IN_COMMITMO
 NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
   const IDARG_IN_MONITOR_SET_DEFAULT_HDR_METADATA* inArgs)
 {
-  UNREFERENCED_PARAMETER(monitor);
-  UNREFERENCED_PARAMETER(inArgs);
+  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  auto* ctx     = wrapper->context->GetDeviceContext();
+
+  ctx->SetHDRActive(inArgs->pHdrMetaData);
+
   return STATUS_SUCCESS;
 }
 
