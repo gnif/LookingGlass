@@ -40,8 +40,7 @@ static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
 static bool LGIddCanUseIddCx110DDIs(UINT iddCxVersion)
 {
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   return iddCxVersion >= IDDCX_VERSION_1_10 &&
     !!IDD_IS_FUNCTION_AVAILABLE(IddCxSwapChainReleaseAndAcquireBuffer2) &&
     !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorQueryHardwareCursor3) &&
@@ -127,8 +126,7 @@ NTSTATUS LGIddMonitorQueryTargetModes(IDDCX_MONITOR monitor, const IDARG_IN_QUER
 }
 
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
 NTSTATUS LGIddParseMonitorDescription2(const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
 {
@@ -231,8 +229,7 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   config.EvtIddCxMonitorAssignSwapChain            = LGIddMonitorAssignSwapChain;
   config.EvtIddCxMonitorUnassignSwapChain          = LGIddMonitorUnassignSwapChain;
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   if (hasIddCx110DDIs)
   {
     config.EvtIddCxParseMonitorDescription2      = LGIddParseMonitorDescription2;

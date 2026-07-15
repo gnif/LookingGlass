@@ -45,8 +45,7 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
 static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
 {
   IDDCX_WIRE_BITS_PER_COMPONENT bits = {};
@@ -75,8 +74,7 @@ void CIndirectDeviceContext::QueryIddCxCapabilities()
 
   m_iddCxVersion = ver.IddCxVersion;
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   const bool hasIddCx110DDIs =
     !!IDD_IS_FUNCTION_AVAILABLE(IddCxSwapChainReleaseAndAcquireBuffer2) &&
     !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorQueryHardwareCursor3) &&
@@ -127,8 +125,7 @@ void CIndirectDeviceContext::InitAdapter()
    * driver will not work. This behaviour is not documented by Microsoft.
    */
   caps.Flags = IDDCX_ADAPTER_FLAGS_USE_SMALLEST_MODE;
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   if (CanUseIddCx110DDIs())
     caps.Flags |= IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16;
 #endif
@@ -390,8 +387,7 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes(
 }
 
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
 NTSTATUS CIndirectDeviceContext::ParseMonitorDescription2(
   const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
@@ -447,8 +443,7 @@ bool CIndirectDeviceContext::UpdateMonitorModes()
   if (!m_monitor)
     return false;
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   if (CanUseIddCx110DDIs())
   {
     IDDCX_TARGET_MODE2* modes = (IDDCX_TARGET_MODE2*)_malloca(
@@ -1023,6 +1018,7 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   }
 }
 
+#ifdef HAS_IDDCX_110
 void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR_METADATA * hdrMeta)
 {
   AcquireSRWLockExclusive(&m_hdrLock);
@@ -1054,6 +1050,7 @@ void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR_METADATA * hdrM
 
   ReleaseSRWLockExclusive(&m_hdrLock);
 }
+#endif
 
 bool CIndirectDeviceContext::GetHDRMetadata(D12FrameFormat & format) const
 {

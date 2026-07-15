@@ -145,8 +145,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
     UINT dirtyRectCount = 0;
     ComPtr<IDXGIResource> surface;
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
     if (m_devContext->CanProcessFP16())
     {
       IDARG_IN_RELEASEANDACQUIREBUFFER2 acquireIn = {};
@@ -554,8 +553,7 @@ bool CSwapChainProcessor::QueryHWCursor()
 
   IDARG_OUT_QUERY_HWCURSOR out = {};
   NTSTATUS status;
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   if (m_devContext->CanProcessFP16())
   {
     IDARG_OUT_QUERY_HWCURSOR3 out3 = {};

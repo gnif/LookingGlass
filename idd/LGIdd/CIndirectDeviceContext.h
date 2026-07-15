@@ -35,6 +35,15 @@ extern "C" {
 }
 
 #include "common/KVMFR.h"
+
+// IddCx 1.10 HDR/WCG types are only visible when the WDK targets
+// (NTDDI >= 0x0A000005) *and* the build flags IDDCX_VERSION_MAJOR/MINOR are set to >= 1.10.
+#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
+  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10)) && \
+  NTDDI_VERSION >= 0x0A000005
+  #define HAS_IDDCX_110
+#endif
+
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (512 * 512 * 4))
 #define POINTER_SHAPE_BUFFERS 3
 
@@ -151,8 +160,7 @@ public:
   NTSTATUS MonitorQueryTargetModes(
     const IDARG_IN_QUERYTARGETMODES* inArgs, IDARG_OUT_QUERYTARGETMODES* outArgs);
 
-#if defined(IDDCX_VERSION_MAJOR) && defined(IDDCX_VERSION_MINOR) && \
-  (IDDCX_VERSION_MAJOR > 1 || (IDDCX_VERSION_MAJOR == 1 && IDDCX_VERSION_MINOR >= 10))
+#ifdef HAS_IDDCX_110
   NTSTATUS ParseMonitorDescription2(
     const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);
   NTSTATUS MonitorQueryTargetModes2(
