@@ -1438,6 +1438,7 @@ static int lg_run(void)
     core_setGrab(true);
 
   uint32_t udataSize;
+  uint32_t remoteVersion;
   KVMFR *udata;
   int waitCount = 0;
 
@@ -1462,7 +1463,7 @@ restart:
     }
 
     status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata,
-        NULL);
+        NULL, &remoteVersion);
     switch(status)
     {
       case LGMP_OK:
@@ -1480,6 +1481,8 @@ restart:
             "Please download and install the matching version."
           );
 
+          DEBUG_INFO("LGMP host:%u client:%u",
+              remoteVersion, LGMP_PROTOCOL_VERSION);
           DEBUG_INFO("Waiting for you to upgrade the host application");
         }
 
