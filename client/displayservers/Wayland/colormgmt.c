@@ -97,7 +97,6 @@ bool waylandColorMgmtInit(void)
     return true;
 
   wp_color_manager_v1_add_listener(wlWm.colorManager, &cmListener, NULL);
-  wl_display_roundtrip(wlWm.display);
   return true;
 }
 
