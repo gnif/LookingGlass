@@ -281,11 +281,12 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
             : WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR);
 
   // Set luminance range from metadata (values already in 0.0001 cd/m² units)
-  wp_image_description_creator_params_v1_set_luminances(
-      wlWm.hdrImageCreator,
-      minDisplayLuminance > 0 ? minDisplayLuminance : 50,
-      maxDisplayLuminance > 0 ? maxDisplayLuminance : 10000000,
-      hdrPQ                   ? 2030000             : 800000);
+  if (wlWm.cmHasLuminances)
+    wp_image_description_creator_params_v1_set_luminances(
+        wlWm.hdrImageCreator,
+        minDisplayLuminance > 0 ? minDisplayLuminance : 50,
+        maxDisplayLuminance > 0 ? maxDisplayLuminance : 10000000,
+        hdrPQ                   ? 2030000             : 800000);
 
   // Set mastering display primaries from frame HDR metadata.
   // Always set when the compositor supports it, falling back to the

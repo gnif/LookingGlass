@@ -202,6 +202,7 @@ struct WaylandDSState
   bool cmHasTFExtLinear;
   bool cmHasPrimariesBT2020;
   bool cmHasPrimariesSRGB;
+  bool cmHasPerceptualIntent;
   bool cmCanDoHDR;       // true if compositor supports features needed for HDR
 
   // Pending HDR format to apply (set by frame thread, applied in swap buffers).
