@@ -96,6 +96,7 @@ typedef struct
   uint32_t             linesize;
 
   bool                 hideMouse;
+  bool                 hdr;
 #if LIBOBS_API_MAJOR_VER >= 27
   bool                 dmabuf;
   bool                 dmabufTested;
@@ -619,6 +620,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
 
   this->dataWidth = frame->dataWidth;
   this->unpack    = false;
+  this->hdr       = frame->flags & FRAME_FLAG_HDR;
 
   this->bpp = 4;
   switch(this->type)
@@ -643,7 +645,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
       this->format     = GS_R10G10B10A2;
       this->drmFormat  = DRM_FORMAT_BGRA1010102;
 #if LIBOBS_API_MAJOR_VER >= 28
-      this->colorSpace = GS_CS_709_SCRGB;
+      this->colorSpace = this->hdr ? GS_CS_709_SCRGB : GS_CS_SRGB;
 #endif
       break;
 
