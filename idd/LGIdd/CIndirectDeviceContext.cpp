@@ -52,7 +52,8 @@ static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
   IDDCX_WIRE_BITS_PER_COMPONENT bits = {};
   bits.Rgb = IDDCX_BITS_PER_COMPONENT_8;
   if (hdr)
-    bits.Rgb = (IDDCX_BITS_PER_COMPONENT)(bits.Rgb | IDDCX_BITS_PER_COMPONENT_10);
+    bits.Rgb = (IDDCX_BITS_PER_COMPONENT)(bits.Rgb |
+      IDDCX_BITS_PER_COMPONENT_10 | IDDCX_BITS_PER_COMPONENT_16);
   bits.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
   bits.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
   bits.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
@@ -188,7 +189,7 @@ void CIndirectDeviceContext::InitAdapter()
     dxgiAdapter->Release();
 
     if ((adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) || // Microsoft Basic Render Driver
-        (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL      
+        (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL
         (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))   // QEMU Standard VGA
       continue;
 
@@ -829,6 +830,35 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     ++m_formatVer;
   }
 
+  // Detect HDR metadata changes that require a format version bump
+  // so the client knows to re-apply the HDR image description.
+  if (srcFormat.hdr)
+  {
+    if (!m_lastHDRActive ||
+        memcmp(m_lastHDRDisplayPrimary, srcFormat.displayPrimary, sizeof(m_lastHDRDisplayPrimary)) != 0 ||
+        memcmp(m_lastHDRWhitePoint    , srcFormat.whitePoint    , sizeof(m_lastHDRWhitePoint    )) != 0 ||
+        m_lastHDRMaxDisplayLuminance       != srcFormat.maxDisplayLuminance       ||
+        m_lastHDRMinDisplayLuminance       != srcFormat.minDisplayLuminance       ||
+        m_lastHDRMaxContentLightLevel      != srcFormat.maxContentLightLevel      ||
+        m_lastHDRMaxFrameAverageLightLevel != srcFormat.maxFrameAverageLightLevel)
+    {
+      ++m_formatVer;
+    }
+  }
+  else if (m_lastHDRActive)
+  {
+    // HDR was turned off
+    ++m_formatVer;
+  }
+
+  m_lastHDRActive = srcFormat.hdr;
+  memcpy(m_lastHDRDisplayPrimary, srcFormat.displayPrimary, sizeof(m_lastHDRDisplayPrimary));
+  memcpy(m_lastHDRWhitePoint    , srcFormat.whitePoint    , sizeof(m_lastHDRWhitePoint    ));
+  m_lastHDRMaxDisplayLuminance       = srcFormat.maxDisplayLuminance;
+  m_lastHDRMinDisplayLuminance       = srcFormat.minDisplayLuminance;
+  m_lastHDRMaxContentLightLevel      = srcFormat.maxContentLightLevel;
+  m_lastHDRMaxFrameAverageLightLevel = srcFormat.maxFrameAverageLightLevel;
+
   if (++m_frameIndex == LGMP_Q_FRAME_LEN)
     m_frameIndex = 0;
 
@@ -850,9 +880,6 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     (dstFormat.hdr   ? FRAME_FLAG_HDR    : 0) |
     (dstFormat.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
 
-  if (dstFormat.format == FRAME_TYPE_RGBA16F)
-    flags |= FRAME_FLAG_HDR;
-
   if (maxRows < dstFormat.desc.Height)
     flags |= FRAME_FLAG_TRUNCATED;
 
@@ -870,6 +897,18 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->flags            = flags;
   fi->rotation         = FRAME_ROT_0;
   fi->type             = dstFormat.format;
+
+  // Populate HDR metadata if the frame is HDR
+  if (flags & FRAME_FLAG_HDR)
+  {
+    memcpy(fi->hdrDisplayPrimary, srcFormat.displayPrimary, sizeof(fi->hdrDisplayPrimary));
+    memcpy(fi->hdrWhitePoint    , srcFormat.whitePoint    , sizeof(fi->hdrWhitePoint));
+    fi->hdrMaxDisplayLuminance       = srcFormat.maxDisplayLuminance;
+    fi->hdrMinDisplayLuminance       = srcFormat.minDisplayLuminance;
+    fi->hdrMaxContentLightLevel      = srcFormat.maxContentLightLevel;
+    fi->hdrMaxFrameAverageLightLevel = srcFormat.maxFrameAverageLightLevel;
+  }
+
   fi->damageRectsCount = 0;
   if (nbDirtyRects <= ARRAYSIZE(fi->damageRects))
   {
@@ -982,6 +1021,59 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
     DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s", lgmpStatusString(status));
     break;
   }
+}
+
+void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR_METADATA * hdrMeta)
+{
+  AcquireSRWLockExclusive(&m_hdrLock);
+
+  if (!hdrMeta)
+  {
+    m_hdrActive = false;
+    ReleaseSRWLockExclusive(&m_hdrLock);
+    return;
+  }
+
+  auto& hdr10 = hdrMeta->Hdr10;
+
+  m_hdrActive = true;
+
+  m_hdrDisplayPrimary[0][0] = hdr10.RedPrimary  [0];
+  m_hdrDisplayPrimary[0][1] = hdr10.RedPrimary  [1];
+  m_hdrDisplayPrimary[1][0] = hdr10.GreenPrimary[0];
+  m_hdrDisplayPrimary[1][1] = hdr10.GreenPrimary[1];
+  m_hdrDisplayPrimary[2][0] = hdr10.BluePrimary [0];
+  m_hdrDisplayPrimary[2][1] = hdr10.BluePrimary [1];
+  m_hdrWhitePoint    [0]    = hdr10.WhitePoint  [0];
+  m_hdrWhitePoint    [1]    = hdr10.WhitePoint  [1];
+
+  m_hdrMaxDisplayLuminance       = hdr10.MaxMasteringLuminance;
+  m_hdrMinDisplayLuminance       = hdr10.MinMasteringLuminance;
+  m_hdrMaxContentLightLevel      = hdr10.MaxContentLightLevel;
+  m_hdrMaxFrameAverageLightLevel = hdr10.MaxFrameAverageLightLevel;
+
+  ReleaseSRWLockExclusive(&m_hdrLock);
+}
+
+bool CIndirectDeviceContext::GetHDRMetadata(D12FrameFormat & format) const
+{
+  AcquireSRWLockShared(&m_hdrLock);
+
+  if (!m_hdrActive)
+  {
+    ReleaseSRWLockShared(&m_hdrLock);
+    return false;
+  }
+
+  memcpy(format.displayPrimary, m_hdrDisplayPrimary, sizeof(format.displayPrimary));
+  memcpy(format.whitePoint    , m_hdrWhitePoint    , sizeof(format.whitePoint    ));
+  format.maxDisplayLuminance       = m_hdrMaxDisplayLuminance;
+  format.minDisplayLuminance       = m_hdrMinDisplayLuminance;
+  format.maxContentLightLevel      = m_hdrMaxContentLightLevel;
+  format.maxFrameAverageLightLevel = m_hdrMaxFrameAverageLightLevel;
+
+  ReleaseSRWLockShared(&m_hdrLock);
+  return true;
 }
 
 void CIndirectDeviceContext::ResendCursor() const

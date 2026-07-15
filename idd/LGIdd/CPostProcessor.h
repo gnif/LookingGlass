@@ -41,6 +41,19 @@ struct D12FrameFormat
   FrameType           format = FRAME_TYPE_INVALID;
   bool                hdr = false;
   bool                hdrPQ = false;
+
+  // HDR static metadata (SMPTE ST 2086)
+  // Display color primaries in 0.00002 units (xy coordinates)
+  uint16_t displayPrimary[3][2];
+  // White point in 0.00002 units
+  uint16_t whitePoint[2];
+  // Max display luminance in 0.0001 cd/m² units
+  uint32_t maxDisplayLuminance;
+  // Min display luminance in 0.0001 cd/m² units
+  uint32_t minDisplayLuminance;
+  // MaxCLL and MaxFALL in cd/m²
+  uint32_t maxContentLightLevel;
+  uint32_t maxFrameAverageLightLevel;
 };
 
 class CPostProcessEffect

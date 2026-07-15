@@ -366,8 +366,51 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcFormat.width  = (unsigned)srcDesc.Width;
   srcFormat.height = srcDesc.Height;
   srcFormat.format = GetFrameType(srcDesc.Format);
-  srcFormat.hdr    = srcDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
-  srcFormat.hdrPQ  = false;
+
+  // Determine HDR status from both format and color space.
+  // HDR metadata loading is handled inside each branch so the logic
+  // is self-contained: first identify the content type, then load the
+  // matching metadata.
+  if (srcDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
+  {
+    // FP16 is HDR content (scRGB / linear, not PQ-curve).
+    // FP16 always carries HDR color data regardless of OS HDR mode,
+    // but metadata (primaries, luminances) may be unavailable.
+    srcFormat.hdr   = true;
+    srcFormat.hdrPQ = false;
+    if (!m_devContext->GetHDRMetadata(srcFormat))
+    {
+      // No HDR metadata from the OS; provide reasonable defaults
+      // so downstream consumers have valid primaries and luminances.
+      // BT.709/sRGB primaries (in 0.00002 units):
+      srcFormat.displayPrimary[0][0] = 13250; // Rx
+      srcFormat.displayPrimary[0][1] = 34500; // Ry
+      srcFormat.displayPrimary[1][0] =  7500; // Gx
+      srcFormat.displayPrimary[1][1] = 30000; // Gy
+      srcFormat.displayPrimary[2][0] = 34000; // Bx
+      srcFormat.displayPrimary[2][1] = 16000; // By
+      // D65 white point (in 0.00002 units):
+      srcFormat.whitePoint[0] = 15635;
+      srcFormat.whitePoint[1] = 16450;
+      // 80 cd/m² display, 0.005 cd/m² black (in 0.0001 cd/m² units):
+      srcFormat.maxDisplayLuminance = 800000;
+      srcFormat.minDisplayLuminance = 50;
+      // Content light levels unknown:
+      srcFormat.maxContentLightLevel      = 0;
+      srcFormat.maxFrameAverageLightLevel = 0;
+    }
+  }
+  else if (m_devContext->CanProcessFP16() && m_devContext->IsHDRActive())
+  {
+    // Non-FP16 format (e.g., RGBA10) with OS HDR mode active.
+    // Windows applies the PQ (ST.2084) transfer function for non-FP16 HDR.
+    srcFormat.hdr   = true;
+    srcFormat.hdrPQ = true;
+
+    // Load HDR metadata; if none is available the frame is not HDR.
+    if (!m_devContext->GetHDRMetadata(srcFormat))
+      srcFormat.hdr = false;
+  }
 
   bool postProcessFormatChanged = false;
   if (!m_postProcessor.Configure(srcFormat, &postProcessFormatChanged))
