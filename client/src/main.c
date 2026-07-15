@@ -641,6 +641,25 @@ int main_frameThread(void * unused)
       lgrFormat.hdr          = frame->flags & FRAME_FLAG_HDR;
       lgrFormat.hdrPQ        = frame->flags & FRAME_FLAG_HDR_PQ;
 
+      if (lgrFormat.hdr)
+      {
+        memcpy(lgrFormat.hdrDisplayPrimary, frame->hdrDisplayPrimary, sizeof(lgrFormat.hdrDisplayPrimary));
+        memcpy(lgrFormat.hdrWhitePoint    , frame->hdrWhitePoint    , sizeof(lgrFormat.hdrWhitePoint    ));
+        lgrFormat.hdrMaxDisplayLuminance       = frame->hdrMaxDisplayLuminance;
+        lgrFormat.hdrMinDisplayLuminance       = frame->hdrMinDisplayLuminance;
+        lgrFormat.hdrMaxContentLightLevel      = frame->hdrMaxContentLightLevel;
+        lgrFormat.hdrMaxFrameAverageLightLevel = frame->hdrMaxFrameAverageLightLevel;
+      }
+      else
+      {
+        memset(lgrFormat.hdrDisplayPrimary, 0, sizeof(lgrFormat.hdrDisplayPrimary));
+        memset(lgrFormat.hdrWhitePoint    , 0, sizeof(lgrFormat.hdrWhitePoint    ));
+        lgrFormat.hdrMaxDisplayLuminance       = 0;
+        lgrFormat.hdrMinDisplayLuminance       = 0;
+        lgrFormat.hdrMaxContentLightLevel      = 0;
+        lgrFormat.hdrMaxFrameAverageLightLevel = 0;
+      }
+
       if (frame->flags & FRAME_FLAG_TRUNCATED)
       {
         const float needed =
@@ -727,6 +746,17 @@ int main_frameThread(void * unused)
         break;
       }
       LG_UNLOCK(g_state.lgrLock);
+
+      if (g_state.ds->setHDRImageDescription)
+      {
+        if (!g_state.ds->setHDRImageDescription(&lgrFormat))
+        {
+          DEBUG_WARN("Display server failed to apply HDR image description");
+          atomic_store(&g_state.hdrDescFailed, true);
+        }
+        else
+          atomic_store(&g_state.hdrDescFailed, false);
+      }
 
       g_state.srcSize.x = lgrFormat.screenWidth;
       g_state.srcSize.y = lgrFormat.screenHeight;

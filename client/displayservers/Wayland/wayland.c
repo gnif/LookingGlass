@@ -28,6 +28,7 @@
 
 #include "common/debug.h"
 #include "common/option.h"
+#include "interface/renderer.h"
 
 #include "dynamic/wayland_desktops.h"
 
@@ -143,6 +144,9 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandRegistryInit())
     return false;
 
+  if (!waylandColorMgmtInit())
+    return false;
+
   if (!waylandActivationInit())
     return false;
 
@@ -189,6 +193,7 @@ static void waylandFree(void)
   waylandPresentationFree();
   waylandInputFree();
   waylandOutputFree();
+  waylandColorMgmtFree();
   waylandRegistryFree();
   waylandCursorFree();
   wl_display_disconnect(wlWm.display);
@@ -199,6 +204,12 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
   if (prop == LG_DS_WARP_SUPPORT)
   {
     *(enum LG_DSWarpSupport*)ret = wlWm.warpSupport ? LG_DS_WARP_SURFACE : LG_DS_WARP_NONE;
+    return true;
+  }
+
+  if (prop == LG_DS_NATIVE_HDR)
+  {
+    *(bool *)ret = wlWm.cmCanDoHDR;
     return true;
   }
 
@@ -225,6 +236,22 @@ static bool waylandGetFullscreen(void)
 static void waylandMinimize(void)
 {
   wlWm.desktop->minimize();
+}
+
+static bool waylandHDRCallback(const void * rendererFormat)
+{
+  if (!wlWm.colorManager)
+    return false;
+
+  const LG_RendererFormat * format = (const LG_RendererFormat *)rendererFormat;
+  if (format->hdr)
+    return waylandRequestHDR(format->hdrDisplayPrimary, format->hdrWhitePoint,
+        format->hdrMaxDisplayLuminance, format->hdrMinDisplayLuminance,
+        format->hdrMaxContentLightLevel, format->hdrMaxFrameAverageLightLevel,
+        format->hdrPQ);
+  else
+    waylandRequestClearHDR();
+  return true;
 }
 
 struct LG_DisplayServerOps LGDS_Wayland =
@@ -275,6 +302,8 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .setFullscreen       = waylandSetFullscreen,
   .getFullscreen       = waylandGetFullscreen,
   .minimize            = waylandMinimize,
+
+  .setHDRImageDescription = waylandHDRCallback,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,

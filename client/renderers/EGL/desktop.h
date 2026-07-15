@@ -42,6 +42,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
 void egl_desktopFree(EGL_Desktop ** desktop);
 
 void egl_desktopConfigUI(EGL_Desktop * desktop);
+void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR);
 bool egl_desktopSetup (EGL_Desktop * desktop, const LG_RendererFormat format);
 bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount);

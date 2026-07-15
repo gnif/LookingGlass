@@ -13,6 +13,7 @@ find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
 add_library(displayserver_Wayland STATIC
   activation.c
   clipboard.c
+  colormgmt.c
   cursor.c
   gl.c
   idle.c

@@ -91,6 +91,7 @@ struct EGL_Desktop
 
   // map HDR content to SDR
   bool  mapHDRtoSDR;
+  bool  nativeHDR;
   int   peakLuminance;
   int   maxCLL;
 
@@ -548,7 +549,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     {
       .type        = EGL_UNIFORM_TYPE_1I,
       .location    = shader->uCBMode,
-      .f           = { desktop->cbMode }
+      .i           = { desktop->cbMode }
     },
     {
       .type        = EGL_UNIFORM_TYPE_1I,
@@ -558,7 +559,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     {
       .type        = EGL_UNIFORM_TYPE_1I,
       .location    = shader->uMapHDRtoSDR,
-      .i           = { desktop->mapHDRtoSDR }
+      .i           = { desktop->mapHDRtoSDR && !desktop->nativeHDR }
     },
     {
       .type        = EGL_UNIFORM_TYPE_1F,
@@ -568,7 +569,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     {
       .type        = EGL_UNIFORM_TYPE_1I,
       .location    = shader->uMapHDRPQ,
-      .f           = { desktop->hdrPQ }
+      .i           = { desktop->hdrPQ }
     }
   };
 
@@ -577,6 +578,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   egl_desktopRectsRender(desktop->mesh);
   glBindTexture(GL_TEXTURE_2D, 0);
   return true;
+}
+
+void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR)
+{
+  desktop->nativeHDR = nativeHDR;
 }
 
 void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)

@@ -53,6 +53,14 @@ typedef enum LG_DSProperty
    * return data type: bool
    */
   LG_DS_WARP_SUPPORT,
+
+  /**
+   * returns true if the display server supports native HDR via
+   * setHDRImageDescription (i.e., the compositor actually has the
+   * required color-management features to process HDR content).
+   * return data type: bool
+   */
+  LG_DS_NATIVE_HDR,
 }
 LG_DSProperty;
 
@@ -212,6 +220,13 @@ struct LG_DisplayServerOps
   bool (*getFullscreen)(void);
   void (*setFullscreen)(bool fs);
   void (*minimize)(void);
+
+  /* HDR color management - set display image description.
+   * Optional, if not supported set to NULL.
+   * Returns true on success, false if the description could not be applied
+   * (e.g., compositor doesn't support the required transfer function or
+   * primaries, or the image description creation failed). */
+  bool (*setHDRImageDescription)(const void * rendererFormat);
 
   /* clipboard support, optional, if not supported set to NULL */
   bool (*cbInit)(void);
