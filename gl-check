@@ -49,7 +49,7 @@ getCalls() {
   cat > "$tempdir/query" <<EOF
 set output print
 set bind-root false
-m callExpr(callee(functionDecl(matchesName("::$query")).bind("func")))
+m callExpr(callee(functionDecl(matchesName("::$query"), unless(isStatic())).bind("func")))
 EOF
 
   "${command[@]}" -exec "$CLANG_QUERY" -p "$BUILD_DIR/compile_commands.json" -f "$tempdir/query" {} + | \
