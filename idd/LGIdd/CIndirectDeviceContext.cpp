@@ -1019,7 +1019,7 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
 }
 
 #ifdef HAS_IDDCX_110
-void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR_METADATA * hdrMeta)
+void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta)
 {
   AcquireSRWLockExclusive(&m_hdrLock);
 
@@ -1030,23 +1030,21 @@ void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR_METADATA * hdrM
     return;
   }
 
-  auto& hdr10 = hdrMeta->Hdr10;
-
   m_hdrActive = true;
 
-  m_hdrDisplayPrimary[0][0] = hdr10.RedPrimary  [0];
-  m_hdrDisplayPrimary[0][1] = hdr10.RedPrimary  [1];
-  m_hdrDisplayPrimary[1][0] = hdr10.GreenPrimary[0];
-  m_hdrDisplayPrimary[1][1] = hdr10.GreenPrimary[1];
-  m_hdrDisplayPrimary[2][0] = hdr10.BluePrimary [0];
-  m_hdrDisplayPrimary[2][1] = hdr10.BluePrimary [1];
-  m_hdrWhitePoint    [0]    = hdr10.WhitePoint  [0];
-  m_hdrWhitePoint    [1]    = hdr10.WhitePoint  [1];
+  m_hdrDisplayPrimary[0][0] = hdrMeta->RedPrimary  [0];
+  m_hdrDisplayPrimary[0][1] = hdrMeta->RedPrimary  [1];
+  m_hdrDisplayPrimary[1][0] = hdrMeta->GreenPrimary[0];
+  m_hdrDisplayPrimary[1][1] = hdrMeta->GreenPrimary[1];
+  m_hdrDisplayPrimary[2][0] = hdrMeta->BluePrimary [0];
+  m_hdrDisplayPrimary[2][1] = hdrMeta->BluePrimary [1];
+  m_hdrWhitePoint    [0]    = hdrMeta->WhitePoint  [0];
+  m_hdrWhitePoint    [1]    = hdrMeta->WhitePoint  [1];
 
-  m_hdrMaxDisplayLuminance       = hdr10.MaxMasteringLuminance;
-  m_hdrMinDisplayLuminance       = hdr10.MinMasteringLuminance;
-  m_hdrMaxContentLightLevel      = hdr10.MaxContentLightLevel;
-  m_hdrMaxFrameAverageLightLevel = hdr10.MaxFrameAverageLightLevel;
+  m_hdrMaxDisplayLuminance       = hdrMeta->MaxMasteringLuminance;
+  m_hdrMinDisplayLuminance       = hdrMeta->MinMasteringLuminance;
+  m_hdrMaxContentLightLevel      = hdrMeta->MaxContentLightLevel;
+  m_hdrMaxFrameAverageLightLevel = hdrMeta->MaxFrameAverageLightLevel;
 
   ReleaseSRWLockExclusive(&m_hdrLock);
 }

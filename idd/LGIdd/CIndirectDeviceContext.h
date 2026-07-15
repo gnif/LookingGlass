@@ -186,7 +186,7 @@ public:
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);
 
   // Tracks HDR state from EvtIddCxMonitorSetDefaultHdrMetadata
-  void SetHDRActive(const struct IDDCX_HDR_METADATA * hdrMeta);
+  void SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta);
 
   // Returns true if the display is currently in HDR mode
   bool IsHDRActive() const
