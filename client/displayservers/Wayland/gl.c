@@ -286,7 +286,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   if (wlWm.cmHasLuminances)
     wp_image_description_creator_params_v1_set_luminances(
         wlWm.hdrImageCreator,
-        minDisplayLuminance > 0 ? minDisplayLuminance / 10000 : 50,
+        minDisplayLuminance > 0 ? minDisplayLuminance : 50,
         maxDisplayLuminance > 0 ? maxDisplayLuminance / 10000 : 1000,
         hdrPQ                   ? 203                         : 80);
 
@@ -295,12 +295,22 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   // primaries from the metadata (even if zero, in which case the
   // compositor uses its own defaults).
   if (wlWm.cmHasMasteringPrimaries)
+  {
     wp_image_description_creator_params_v1_set_mastering_display_primaries(
         wlWm.hdrImageCreator,
         displayPrimary[0][0], displayPrimary[0][1],
         displayPrimary[1][0], displayPrimary[1][1],
         displayPrimary[2][0], displayPrimary[2][1],
         whitePoint[0], whitePoint[1]);
+
+    // Set mastering luminance range so the compositor knows the target
+    // color volume for tone mapping.  min_lum is in ×10000 units (0.0001 cd/m²),
+    // max_lum is in unscaled cd/m².
+    wp_image_description_creator_params_v1_set_mastering_luminance(
+        wlWm.hdrImageCreator,
+        minDisplayLuminance > 0 ? minDisplayLuminance : 50,
+        maxDisplayLuminance > 0 ? maxDisplayLuminance / 10000 : 1000);
+  }
 
   if (maxCLL > 0)
     wp_image_description_creator_params_v1_set_max_cll(wlWm.hdrImageCreator, maxCLL);
