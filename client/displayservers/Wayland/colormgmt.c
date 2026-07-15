@@ -26,6 +26,12 @@
 
 #include "common/debug.h"
 
+static void cmIntent(void * data, struct wp_color_manager_v1 * cm, uint32_t intent)
+{
+  if (intent == WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL)
+    wlWm.cmHasPerceptualIntent = true;
+}
+
 static void cmFeature(void * data, struct wp_color_manager_v1 * cm, uint32_t feature)
 {
   switch (feature)
@@ -78,7 +84,7 @@ static void cmDone(void * data, struct wp_color_manager_v1 * cm)
 }
 
 static const struct wp_color_manager_v1_listener cmListener = {
-  .supported_intent          = NULL,
+  .supported_intent          = cmIntent,
   .supported_feature         = cmFeature,
   .supported_tf_named        = cmTFNamed,
   .supported_primaries_named = cmPrimariesNamed,
