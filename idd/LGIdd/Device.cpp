@@ -166,7 +166,7 @@ NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
   auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   auto* ctx     = wrapper->context->GetDeviceContext();
 
-  ctx->SetHDRActive(inArgs->pHdrMetaData);
+  ctx->SetHDRActive(inArgs->Data.pHdr10);
 
   return STATUS_SUCCESS;
 }
