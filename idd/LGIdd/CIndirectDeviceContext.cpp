@@ -574,9 +574,61 @@ void CIndirectDeviceContext::SetResolution(int width, int height)
   mode.refresh   = g_settings.GetDefaultRefresh();
   mode.preferred = true;
 
+  // A window resize streams many WINDOWSIZE requests in quick succession.
+  // Record the latest request and (re)start a timer; the actual mode change and
+  // replug only happen once the requested resolution has settled (i.e. no new
+  // request has arrived) for m_resChangeDelayMs. Each new request restarts the
+  // countdown, coalescing a burst of resizes into a single replug.
   AcquireSRWLockExclusive(&m_stateLock);
-  m_setMode   = mode;
-  m_doSetMode = true;
+  m_pendingMode      = mode;
+  m_resChangePending = true;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  // Create the debounce timer once; WdfTimerStart on an already-queued
+  // non-periodic timer simply updates its due time, giving us the restart.
+  if (!m_resChangeTimer)
+  {
+    WDF_TIMER_CONFIG config;
+    WDF_TIMER_CONFIG_INIT(&config,
+      [](WDFTIMER timer) -> void
+      {
+        WDFOBJECT parent = WdfTimerGetParentObject(timer);
+        auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(parent);
+        wrapper->context->ApplyResolution();
+      });
+    config.AutomaticSerialization = FALSE;
+
+    WDF_OBJECT_ATTRIBUTES attribs;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
+    attribs.ParentObject   = m_wdfDevice;
+    attribs.ExecutionLevel = WdfExecutionLevelDispatch;
+
+    NTSTATUS status = WdfTimerCreate(&config, &attribs, &m_resChangeTimer);
+    if (!NT_SUCCESS(status))
+    {
+      DEBUG_ERROR_HR(status, "Resolution change timer creation failed");
+      m_resChangeTimer = nullptr;
+      // Fall back to applying immediately so a resize is not lost.
+      ApplyResolution();
+      return;
+    }
+  }
+
+  WdfTimerStart(m_resChangeTimer, WDF_REL_TIMEOUT_IN_MS(m_resChangeDelayMs));
+}
+
+void CIndirectDeviceContext::ApplyResolution()
+{
+  AcquireSRWLockExclusive(&m_stateLock);
+  if (!m_resChangePending)
+  {
+    ReleaseSRWLockExclusive(&m_stateLock);
+    return;
+  }
+  CSettings::DisplayMode mode = m_pendingMode;
+  m_resChangePending = false;
+  m_setMode          = mode;
+  m_doSetMode        = true;
   ReleaseSRWLockExclusive(&m_stateLock);
 
   g_settings.SetExtraMode(mode);
@@ -777,6 +829,14 @@ void CIndirectDeviceContext::DeInitLGMP()
   {
     WdfTimerStop(m_initTimer, TRUE);
     m_initTimer = nullptr;
+  }
+
+  // The resolution debounce timer callback dereferences this context too; stop
+  // and drain it before tearing anything down.
+  if (m_resChangeTimer)
+  {
+    WdfTimerStop(m_resChangeTimer, TRUE);
+    m_resChangeTimer = nullptr;
   }
 
   if (m_lgmp == nullptr)
