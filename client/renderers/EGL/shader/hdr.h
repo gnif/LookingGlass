@@ -102,7 +102,12 @@ vec3 bt2020to709(vec3 bt2020)
 vec3 mapToSDR(vec3 color, float gain, bool pq)
 {
   if (pq)
+  {
+    // HDR10: PQ-encoded BT.2020. Linearise then convert the gamut to BT.709.
     color = pq2lin(color.rgb, gain);
-  color = bt2020to709(color);
+    color = bt2020to709(color);
+  }
+  // else: scRGB is already linear BT.709 (1.0 == SDR white), so no EOTF or
+  // gamut conversion is required - only highlight compression below.
   return lin2srgb(compress(color));
 }
