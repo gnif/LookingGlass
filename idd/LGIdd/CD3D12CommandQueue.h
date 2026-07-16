@@ -24,6 +24,7 @@
 #include <wdf.h>
 #include <wrl.h>
 #include <d3d12.h>
+#include <atomic>
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -40,7 +41,7 @@ class CD3D12CommandQueue
     ComPtr<ID3D12CommandList        > m_cmdList;
     ComPtr<ID3D12Fence              > m_fence;
 
-    bool m_pending = false;
+    std::atomic<bool> m_pending = false;
     HandleT<HANDLENullTraits> m_event;
     HANDLE m_waitHandle = INVALID_HANDLE_VALUE;
     UINT64 m_fenceValue = 0;

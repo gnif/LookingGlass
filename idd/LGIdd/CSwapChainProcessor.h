@@ -62,7 +62,7 @@ private:
 
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();
-  void SwapChainThreadCore();
+  bool SwapChainThreadCore();
 
   static DWORD CALLBACK _CursorThread(LPVOID arg);
   bool QueryHWCursor();

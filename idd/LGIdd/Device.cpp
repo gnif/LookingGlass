@@ -199,7 +199,6 @@ NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 {
   auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   wrapper->context->UnassignSwapChain();
-  wrapper->context->GetDeviceContext()->OnUnassignedSwapChain();
   return STATUS_SUCCESS;
 }
 

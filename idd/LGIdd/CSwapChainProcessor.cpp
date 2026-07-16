@@ -38,7 +38,9 @@ CSwapChainProcessor::CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceC
   if (!m_postProcessor.Init(dx12Device))
     DEBUG_ERROR("Failed to initialize post processor");
 
-  m_terminateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  // Manual-reset: both worker threads wait on this, so it must stay signalled
+  // once set or only one thread would ever observe termination.
+  m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
   m_thread[0].Attach(CreateThread(nullptr, 0, _SwapChainThread, this, 0, nullptr));
 
   m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
@@ -52,6 +54,11 @@ CSwapChainProcessor::~CSwapChainProcessor()
     WaitForSingleObject(m_thread[0].Get(), INFINITE);
   if (m_thread[1].Get())
     WaitForSingleObject(m_thread[1].Get(), INFINITE);
+
+  // Drain in-flight GPU work / completion callbacks before releasing the
+  // resources they reference. The swap chain was already released in the
+  // worker epilogue, so this does not hold an IddCx frame.
+  m_dx12Device->WaitForIdle();
 
   m_postProcessor.Reset();
   m_resPool.Reset();
@@ -71,22 +78,26 @@ void CSwapChainProcessor::SwapChainThread()
   HANDLE avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
 
   DEBUG_INFO("Start Thread");
-  SwapChainThreadCore();
 
-  WdfObjectDelete((WDFOBJECT)m_hSwapChain);
+  // Only delete the swap chain if we took ownership of it (SetDevice
+  // succeeded). If SetDevice failed IddCx still owns and tears it down, so
+  // deleting it here would double-free the WDF object. Releasing it when we do
+  // own it hands the acquired frame back to IddCx promptly.
+  if (SwapChainThreadCore())
+    WdfObjectDelete((WDFOBJECT)m_hSwapChain);
   m_hSwapChain = nullptr;
 
   AvRevertMmThreadCharacteristics(avTaskHandle);
 }
 
-void CSwapChainProcessor::SwapChainThreadCore()
+bool CSwapChainProcessor::SwapChainThreadCore()
 {
   ComPtr<IDXGIDevice> dxgiDevice;
   HRESULT hr = m_dx11Device->GetDevice().As(&dxgiDevice);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to get the dxgiDevice");
-    return;
+    return false;
   }
 
   if (IDD_IS_FUNCTION_AVAILABLE(IddCxSetRealtimeGPUPriority))
@@ -107,12 +118,17 @@ void CSwapChainProcessor::SwapChainThreadCore()
   IDARG_IN_SWAPCHAINSETDEVICE setDevice = {};
   setDevice.pDevice = dxgiDevice.Get();
 
+  // A failure here (commonly DXGI_ERROR_ACCESS_LOST on the first assignment)
+  // is not recoverable on this handle - IddCx reassigns a fresh swap chain,
+  // which is what actually succeeds. Bail cleanly and let that happen.
   hr = IddCxSwapChainSetDevice(m_hSwapChain, &setDevice);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
-    return;
+    return false;
   }
+  // Past this point SetDevice succeeded: we own the swap chain and are
+  // responsible for deleting it.
 
   IDARG_IN_SETUP_HWCURSOR c = {};
   c.CursorInfo.Size                  = sizeof(c.CursorInfo);
@@ -125,7 +141,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR("IddCxMonitorSetupHardwareCursor Failed (0x%08x)", status);
-    return;
+    return true;
   }
 
   m_lastShapeId = 0;
@@ -206,9 +222,9 @@ void CSwapChainProcessor::SwapChainThreadCore()
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
         if (FAILED(hr))
         {
-          if (hr == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
-            m_devContext->OnSwapChainLost();
-          else
+          // A lost path is normal (mode change/topology rebuild); Windows
+          // reassigns a fresh swap chain. Just exit and let it.
+          if (hr != STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
             DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
           break;
         }
@@ -216,12 +232,10 @@ void CSwapChainProcessor::SwapChainThreadCore()
       }
     }
     else
-    {
-      if (hr == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
-        m_devContext->OnSwapChainLost();
       break;
-    }
   }
+
+  return true;
 }
 
 void CSwapChainProcessor::CompletionFunction(
@@ -584,7 +598,6 @@ bool CSwapChainProcessor::QueryHWCursor()
     // this occurs if the display went away (ie, screen blanking or disabled)
     if (status == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
     {
-      m_devContext->OnSwapChainLost();
       SetEvent(m_terminateEvent.Get());
       return false;
     }
