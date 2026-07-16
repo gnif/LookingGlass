@@ -155,6 +155,12 @@ private:
   bool m_doSetMode = false;
   volatile LONG m_replugMonitorQueued = 0;
   volatile LONG m_recoverModeUpdateSwapChain = 0;
+  // Set from the IddCx unassign callback to defer the monitor rebuild
+  // (FinishInit) onto the LGMP timer. Creating/arriving a new monitor from
+  // inside the old monitor's unassign callback re-enters IddCx while its
+  // swap-chain teardown is still unwinding, which leaves the new swap-chain
+  // surfaces in a lost/abandoned state.
+  volatile LONG m_finishInitQueued = 0;
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :

@@ -390,8 +390,13 @@ void CIndirectDeviceContext::OnUnassignedSwapChain()
   m_replugMonitor = false;
   ReleaseSRWLockExclusive(&m_stateLock);
 
+  // Do NOT rebuild the monitor from inside this callback. Creating and arriving
+  // a new monitor here re-enters IddCx while the old monitor's swap-chain
+  // teardown is still unwinding on this thread, which leaves the new swap
+  // chain's surfaces lost/abandoned (DXGI_ERROR_ACCESS_LOST). Defer to the LGMP
+  // timer, matching how the departure is scheduled.
   if (replug)
-    FinishInit(0);
+    InterlockedExchange(&m_finishInitQueued, 1);
 }
 
 void CIndirectDeviceContext::OnSwapChainLost()
@@ -910,6 +915,14 @@ void CIndirectDeviceContext::LGMPTimer()
     m_doSetMode = true;
     ReleaseSRWLockExclusive(&m_stateLock);
     ReplugMonitor();
+    return;
+  }
+
+  // Rebuild the monitor deferred from the IddCx unassign callback, off that
+  // callback's thread and after its swap-chain teardown has fully unwound.
+  if (InterlockedExchange(&m_finishInitQueued, 0))
+  {
+    FinishInit(0);
     return;
   }
 
