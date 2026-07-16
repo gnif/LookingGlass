@@ -70,7 +70,8 @@ private:
 
   static void CompletionFunction(
     CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
-  bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount);
+  bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
+    DXGI_COLOR_SPACE_TYPE colorSpace);
 
 public:
   CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
