@@ -627,8 +627,11 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   // (e.g., compositor missing required primaries), keep tone-mapping on.
   bool nativeHDR = false;
   app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
-  egl_desktopSetNativeHDR(this->desktop,
-      format.hdr && nativeHDR && !app_getHDRDescFailed());
+  bool useNativeHDR = format.hdr && nativeHDR && !app_getHDRDescFailed();
+  egl_desktopSetNativeHDR(this->desktop, useNativeHDR);
+
+  // Tell the cursor shader about HDR state so it can do SDR→PQ conversion
+  egl_cursorSetHDRState(this->cursor, useNativeHDR, format.hdrPQ);
 
   egl_update_scale_type(this);
   egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
