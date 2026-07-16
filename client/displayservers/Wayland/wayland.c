@@ -170,6 +170,8 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandEGLInit(params.w, params.h))
     return false;
 
+  waylandIconInit();
+
 #ifdef ENABLE_OPENGL
   if (params.opengl && !waylandOpenGLInit())
     return false;

@@ -50,6 +50,7 @@
 #include "wayland-fractional-scale-v1-client-protocol.h"
 #include "wayland-content-type-v1-client-protocol.h"
 #include "wayland-color-management-v1-client-protocol.h"
+#include "wayland-xdg-toplevel-icon-v1-client-protocol.h"
 
 #include "scale.h"
 
@@ -204,6 +205,12 @@ struct WaylandDSState
   bool cmHasPrimariesSRGB;
   bool cmHasPerceptualIntent;
   bool cmCanDoHDR;       // true if compositor supports features needed for HDR
+
+  // toplevel icon manager
+  struct xdg_toplevel_icon_manager_v1 * iconManager;
+
+  // set by the active desktop backend during shellInit
+  void * xdgToplevel;
 
   // Pending HDR format to apply (set by frame thread, applied in swap buffers).
   // pendingHDRApply and pendingHDRClear are accessed from multiple threads
@@ -370,3 +377,6 @@ bool waylandWaitFrame(void);
 void waylandSkipFrame(void);
 void waylandStopWaitFrame(void);
 void waylandNeedsResize(void);
+
+// icon module
+bool waylandIconInit(void);

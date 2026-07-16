@@ -617,7 +617,7 @@ static bool x11Init(const LG_DSInitParams params)
     32,
     PropModeReplace,
     (unsigned char *)icondata,
-    sizeof(icondata) / sizeof(icondata[0])
+    icondataSize / sizeof(icondata[0])
   );
 
   /* create the blank cursor */

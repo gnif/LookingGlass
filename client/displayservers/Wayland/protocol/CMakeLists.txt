@@ -69,6 +69,9 @@ wayland_generate(
 wayland_generate(
   "${WAYLAND_PROTOCOLS_BASE}/staging/color-management/color-management-v1.xml"
   "${CMAKE_BINARY_DIR}/wayland/wayland-color-management-v1-client-protocol")
+wayland_generate(
+  "${WAYLAND_PROTOCOLS_BASE}/staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml"
+  "${CMAKE_BINARY_DIR}/wayland/wayland-xdg-toplevel-icon-v1-client-protocol")
 
 target_link_libraries(wayland_protocol
   PkgConfig::WAYLAND
