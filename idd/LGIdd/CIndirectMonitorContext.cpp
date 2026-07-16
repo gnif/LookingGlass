@@ -32,50 +32,78 @@ CIndirectMonitorContext::CIndirectMonitorContext(_In_ IDDCX_MONITOR monitor, CIn
 CIndirectMonitorContext::~CIndirectMonitorContext()
 {
   UnassignSwapChain();
+  m_devContext->OnMonitorDestroyed(m_monitor);
 }
 
 void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
 {
-reInit:
   UnassignSwapChain();
 
-  m_dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
-  if (FAILED(m_dx11Device->Init()))
-  {
-    WdfObjectDelete(swapChain);
-    return;
-  }
+  // Build everything into locals so the members are never observed
+  // half-constructed by a concurrent unassign, and so the processor (which
+  // spawns a worker thread) is created outside the lock.
+  std::shared_ptr<CD3D11Device> dx11Device;
+  std::shared_ptr<CD3D12Device> dx12Device;
 
-  UINT64 alignSize = CPlatformInfo::GetPageSize();
-  m_dx12Device = std::make_shared<CD3D12Device>(renderAdapter);
-  switch (m_dx12Device->Init(m_devContext->GetIVSHMEM(), alignSize))
+  for (;;)
   {
-    case CD3D12Device::SUCCESS:
-      break;
-
-    case CD3D12Device::FAILURE:
+    dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
+    if (FAILED(dx11Device->Init()))
+    {
       WdfObjectDelete(swapChain);
       return;
+    }
 
-    case CD3D12Device::RETRY:
-      m_dx12Device.reset();
-      m_dx11Device.reset();
-      goto reInit;
-  }
-  
-  if (!m_devContext->SetupLGMP(alignSize))
-  {
-    WdfObjectDelete(swapChain);
-    DEBUG_ERROR("SetupLGMP failed");
-    return;
+    UINT64 alignSize = CPlatformInfo::GetPageSize();
+    dx12Device = std::make_shared<CD3D12Device>(renderAdapter);
+    CD3D12Device::InitResult r = dx12Device->Init(m_devContext->GetIVSHMEM(), alignSize);
+    if (r == CD3D12Device::RETRY)
+    {
+      dx12Device.reset();
+      dx11Device.reset();
+      continue;
+    }
+    if (r == CD3D12Device::FAILURE)
+    {
+      WdfObjectDelete(swapChain);
+      return;
+    }
+
+    if (!m_devContext->SetupLGMP(alignSize))
+    {
+      WdfObjectDelete(swapChain);
+      DEBUG_ERROR("SetupLGMP failed");
+      return;
+    }
+    break;
   }
 
-  m_swapChain.reset(new CSwapChainProcessor(m_monitor, m_devContext, swapChain, m_dx11Device, m_dx12Device, newFrameEvent));
+  std::unique_ptr<CSwapChainProcessor> processor(new CSwapChainProcessor(
+    m_monitor, m_devContext, swapChain, dx11Device, dx12Device, newFrameEvent));
+
+  AcquireSRWLockExclusive(&m_lock);
+  m_dx11Device = std::move(dx11Device);
+  m_dx12Device = std::move(dx12Device);
+  m_swapChain  = std::move(processor);
+  ReleaseSRWLockExclusive(&m_lock);
 }
 
 void CIndirectMonitorContext::UnassignSwapChain()
 {
-  m_swapChain.reset();  
-  m_dx11Device.reset();
-  m_dx12Device.reset();
+  // Detach under the lock, then destroy outside it. Destroying the processor
+  // joins its worker thread, whose teardown (WdfObjectDelete) re-enters this
+  // method on another thread - holding the lock across that would deadlock.
+  std::unique_ptr<CSwapChainProcessor> processor;
+  std::shared_ptr<CD3D11Device>        dx11Device;
+  std::shared_ptr<CD3D12Device>        dx12Device;
+
+  AcquireSRWLockExclusive(&m_lock);
+  processor  = std::move(m_swapChain);
+  dx11Device = std::move(m_dx11Device);
+  dx12Device = std::move(m_dx12Device);
+  ReleaseSRWLockExclusive(&m_lock);
+
+  processor.reset();
+  dx11Device.reset();
+  dx12Device.reset();
 }

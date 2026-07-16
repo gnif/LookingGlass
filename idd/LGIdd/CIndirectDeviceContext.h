@@ -140,7 +140,6 @@ private:
   void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor() const;
-  bool UpdateMonitorModes();
 
   // Guards m_displayModes and m_edid. The mode list is rebuilt on the LGMP
   // timer thread (SetResolution) while IddCx concurrently enumerates it on its
@@ -153,13 +152,9 @@ private:
 
   CSettings::DisplayMode m_setMode = {};
   bool m_doSetMode = false;
-  volatile LONG m_replugMonitorQueued = 0;
-  volatile LONG m_recoverModeUpdateSwapChain = 0;
-  // Set from the IddCx unassign callback to defer the monitor rebuild
-  // (FinishInit) onto the LGMP timer. Creating/arriving a new monitor from
-  // inside the old monitor's unassign callback re-enters IddCx while its
-  // swap-chain teardown is still unwinding, which leaves the new swap-chain
-  // surfaces in a lost/abandoned state.
+
+  // Set by ReplugMonitor after a departure to rebuild the monitor from the LGMP
+  // timer, off the IddCx callback thread.
   volatile LONG m_finishInitQueued = 0;
 
 public:
@@ -175,9 +170,8 @@ public:
   void FinishInit(UINT connectorIndex);
   void ReplugMonitor();
 
+  void OnMonitorDestroyed(IDDCX_MONITOR monitor);
   void OnAssignSwapChain();
-  void OnUnassignedSwapChain();
-  void OnSwapChainLost();
 
   NTSTATUS ParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);

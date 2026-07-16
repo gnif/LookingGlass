@@ -69,6 +69,11 @@ struct CD3D12Device
     InitResult Init(CIVSHMEM &ivshmem, UINT64 &alignSize);
     void DeInit();
 
+    // Wait for all command queues to finish in-flight GPU work and run their
+    // completion callbacks. Used at swap-chain teardown so no callback touches
+    // resources we are about to release.
+    void WaitForIdle();
+
     ComPtr<ID3D12Device3> GetDevice() { return m_device; }
     ComPtr<ID3D12Heap   > GetHeap() { return m_ivshmemHeap; }
     bool IsIndirectCopy() { return m_indirectCopy; }

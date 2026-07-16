@@ -147,6 +147,22 @@ void CD3D12Device::DeInit()
   m_infoQueue.Reset();
 }
 
+void CD3D12Device::WaitForIdle()
+{
+  // A queue is ready once its GPU work has signalled and its completion
+  // callback has run (clearing the pending flag). Bound the wait so a
+  // removed/hung device cannot stall teardown indefinitely.
+  auto drain = [](CD3D12CommandQueue& queue)
+  {
+    for (int i = 0; i < 1000 && !queue.IsReady(); ++i)
+      Sleep(1);
+  };
+
+  for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
+    drain(m_copyQueue[i]);
+  drain(m_computeQueue);
+}
+
 bool CD3D12Device::HeapTest()
 {
   D3D12_RESOURCE_DESC desc = {};

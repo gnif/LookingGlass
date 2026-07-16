@@ -278,6 +278,17 @@ void CIndirectDeviceContext::InitAdapter()
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 {
+  // We support a single monitor; never create a second one if one already
+  // exists (a replug must clear m_monitor via departure first).
+  AcquireSRWLockExclusive(&m_stateLock);
+  bool haveMonitor = m_monitor != WDF_NO_HANDLE;
+  ReleaseSRWLockExclusive(&m_stateLock);
+  if (haveMonitor)
+  {
+    DEBUG_WARN("FinishInit skipped: a monitor already exists");
+    return;
+  }
+
   WDF_OBJECT_ATTRIBUTES attr;
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attr, CIndirectMonitorContextWrapper);
 
@@ -332,18 +343,7 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 
 void CIndirectDeviceContext::ReplugMonitor()
 {
-  // Sample and mutate the replug state atomically. The monitor handle is
-  // published by FinishInit on an IddCx thread while this can run from the
-  // timer thread, so a plain check-then-act would race.
   AcquireSRWLockExclusive(&m_stateLock);
-  IDDCX_MONITOR monitor = m_monitor;
-
-  if (monitor == WDF_NO_HANDLE)
-  {
-    ReleaseSRWLockExclusive(&m_stateLock);
-    FinishInit(0);
-    return;
-  }
 
   if (m_replugMonitor)
   {
@@ -351,7 +351,21 @@ void CIndirectDeviceContext::ReplugMonitor()
     return;
   }
 
+  IDDCX_MONITOR monitor = m_monitor;
+  if (monitor == WDF_NO_HANDLE)
+  {
+    ReleaseSRWLockExclusive(&m_stateLock);
+    // Either no monitor yet, or one is already pending; build it now and
+    // cancel any queued rebuild so we do not create two.
+    InterlockedExchange(&m_finishInitQueued, 0);
+    FinishInit(0);
+    return;
+  }
+
+  // Clear the handle before departing so nothing calls an IddCx monitor API on
+  // a departing/destroyed handle. FinishInit publishes the new one.
   m_replugMonitor = true;
+  m_monitor       = nullptr;
   ReleaseSRWLockExclusive(&m_stateLock);
 
   DEBUG_TRACE("ReplugMonitor");
@@ -360,16 +374,28 @@ void CIndirectDeviceContext::ReplugMonitor()
   {
     AcquireSRWLockExclusive(&m_stateLock);
     m_replugMonitor = false;
+    m_monitor       = monitor;
     ReleaseSRWLockExclusive(&m_stateLock);
     DEBUG_ERROR("IddCxMonitorDeparture Failed (0x%08x)", status);
     return;
   }
+
+  // Always queue the rebuild here rather than relying on the unassign callback:
+  // if the monitor had no swap chain (e.g. recovering from a lost path) no
+  // unassign fires. The timer runs FinishInit off this thread.
+  InterlockedExchange(&m_finishInitQueued, 1);
+}
+
+void CIndirectDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
+{
+  AcquireSRWLockExclusive(&m_stateLock);
+  if (m_monitor == monitor)
+    m_monitor = nullptr;
+  ReleaseSRWLockExclusive(&m_stateLock);
 }
 
 void CIndirectDeviceContext::OnAssignSwapChain()
 {
-  InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
-
   AcquireSRWLockExclusive(&m_stateLock);
   bool doSetMode = m_doSetMode;
   CSettings::DisplayMode mode = m_setMode;
@@ -378,40 +404,6 @@ void CIndirectDeviceContext::OnAssignSwapChain()
 
   if (doSetMode)
     g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
-}
-
-void CIndirectDeviceContext::OnUnassignedSwapChain()
-{
-  InterlockedExchange(&m_replugMonitorQueued, 0);
-  InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
-
-  AcquireSRWLockExclusive(&m_stateLock);
-  bool replug = m_replugMonitor;
-  m_replugMonitor = false;
-  ReleaseSRWLockExclusive(&m_stateLock);
-
-  // Do NOT rebuild the monitor from inside this callback. Creating and arriving
-  // a new monitor here re-enters IddCx while the old monitor's swap-chain
-  // teardown is still unwinding on this thread, which leaves the new swap
-  // chain's surfaces lost/abandoned (DXGI_ERROR_ACCESS_LOST). Defer to the LGMP
-  // timer, matching how the departure is scheduled.
-  if (replug)
-    InterlockedExchange(&m_finishInitQueued, 1);
-}
-
-void CIndirectDeviceContext::OnSwapChainLost()
-{
-  // A mode update normally keeps the swap chain alive. If Windows instead
-  // reports the existing path disappeared before we see a frame at the new
-  // size, recover by scheduling the old replug path from the LGMP timer so we
-  // do not tear down the swap chain from one of its worker threads.
-  if (!InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0))
-    return;
-
-  if (InterlockedExchange(&m_replugMonitorQueued, 1))
-    return;
-
-  DEBUG_WARN("Swap chain was lost after a mode update, falling back to monitor replug");
 }
 
 static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
@@ -574,96 +566,6 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
 }
 #endif
 
-bool CIndirectDeviceContext::UpdateMonitorModes()
-{
-  AcquireSRWLockExclusive(&m_stateLock);
-  IDDCX_MONITOR monitor = m_monitor;
-  ReleaseSRWLockExclusive(&m_stateLock);
-
-  if (!monitor)
-    return false;
-
-  // Snapshot the mode list so we do not hold m_modeLock across the IddCx call
-  // below - IddCxMonitorUpdateModes can synchronously re-enter our mode
-  // enumeration callbacks (which also take m_modeLock).
-  CSettings::DisplayModes displayModes;
-  AcquireSRWLockShared(&m_modeLock);
-  displayModes = m_displayModes;
-  ReleaseSRWLockShared(&m_modeLock);
-
-#ifdef HAS_IDDCX_110
-  if (CanUseIddCx110DDIs())
-  {
-    IDDCX_TARGET_MODE2* modes = (IDDCX_TARGET_MODE2*)_malloca(
-      displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
-    if (!modes)
-    {
-      DEBUG_WARN("Failed to allocate memory for the mode list");
-      return false;
-    }
-
-    ZeroMemory(modes, displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
-
-    auto* mode = modes;
-    for (auto it = displayModes.cbegin(); it != displayModes.cend(); ++it, ++mode)
-    {
-      mode->Size              = sizeof(IDDCX_TARGET_MODE2);
-      mode->RequiredBandwidth = (UINT64)it->width * it->height * it->refresh * 32;
-      mode->BitsPerComponent  = GetWireBitsPerComponent(CanUseIddCx110DDIs());
-      FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
-    }
-
-    IDARG_IN_UPDATEMODES2 updateModes = {};
-    updateModes.Reason          = IDDCX_UPDATE_REASON_OTHER;
-    updateModes.TargetModeCount = (UINT)displayModes.size();
-    updateModes.pTargetModes    = modes;
-
-    NTSTATUS status = IddCxMonitorUpdateModes2(monitor, &updateModes);
-    _freea(modes);
-    if (!NT_SUCCESS(status))
-    {
-      DEBUG_WARN("IddCxMonitorUpdateModes2 Failed (0x%08x)", status);
-      return false;
-    }
-
-    return true;
-  }
-#endif
-
-  IDDCX_TARGET_MODE* modes = (IDDCX_TARGET_MODE*)_malloca(
-    displayModes.size() * sizeof(IDDCX_TARGET_MODE));
-  if (!modes)
-  {
-    DEBUG_WARN("Failed to allocate memory for the mode list");
-    return false;
-  }
-
-  ZeroMemory(modes, displayModes.size() * sizeof(IDDCX_TARGET_MODE));
-
-  auto* mode = modes;
-  for (auto it = displayModes.cbegin(); it != displayModes.cend(); ++it, ++mode)
-  {
-    mode->Size              = sizeof(IDDCX_TARGET_MODE);
-    mode->RequiredBandwidth = (UINT64)it->width * it->height * it->refresh * 32;
-    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
-  }
-
-  IDARG_IN_UPDATEMODES updateModes = {};
-  updateModes.Reason          = IDDCX_UPDATE_REASON_OTHER;
-  updateModes.TargetModeCount = (UINT)displayModes.size();
-  updateModes.pTargetModes    = modes;
-
-  NTSTATUS status = IddCxMonitorUpdateModes(monitor, &updateModes);
-  _freea(modes);
-  if (!NT_SUCCESS(status))
-  {
-    DEBUG_WARN("IddCxMonitorUpdateModes Failed (0x%08x)", status);
-    return false;
-  }
-
-  return true;
-}
-
 void CIndirectDeviceContext::SetResolution(int width, int height)
 {
   CSettings::DisplayMode mode = {};
@@ -673,29 +575,17 @@ void CIndirectDeviceContext::SetResolution(int width, int height)
   mode.preferred = true;
 
   AcquireSRWLockExclusive(&m_stateLock);
-  m_setMode = mode;
+  m_setMode   = mode;
+  m_doSetMode = true;
   ReleaseSRWLockExclusive(&m_stateLock);
 
   g_settings.SetExtraMode(mode);
 
   PopulateDefaultModes();
 
-  if (UpdateMonitorModes())
-  {
-    DEBUG_TRACE("Updated monitor modes without replugging");
-    AcquireSRWLockExclusive(&m_stateLock);
-    m_doSetMode = false;
-    ReleaseSRWLockExclusive(&m_stateLock);
-    InterlockedExchange(&m_recoverModeUpdateSwapChain, 1);
-    g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
-    return;
-  }
-
-  DEBUG_TRACE("Falling back to monitor replug for mode update");
-  AcquireSRWLockExclusive(&m_stateLock);
-  m_doSetMode = true;
-  ReleaseSRWLockExclusive(&m_stateLock);
-  InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
+  // IddCxMonitorUpdateModes[2] does not invalidate Windows' cached mode list,
+  // so the only reliable way to apply a new mode is to depart and re-arrive the
+  // monitor, forcing Windows to rebuild the topology from the new mode list.
   ReplugMonitor();
 }
 
@@ -909,20 +799,13 @@ void CIndirectDeviceContext::DeInitLGMP()
 
 void CIndirectDeviceContext::LGMPTimer()
 {
-  if (InterlockedExchange(&m_replugMonitorQueued, 0))
-  {
-    AcquireSRWLockExclusive(&m_stateLock);
-    m_doSetMode = true;
-    ReleaseSRWLockExclusive(&m_stateLock);
-    ReplugMonitor();
-    return;
-  }
-
-  // Rebuild the monitor deferred from the IddCx unassign callback, off that
-  // callback's thread and after its swap-chain teardown has fully unwound.
+  // Rebuild the monitor queued by ReplugMonitor, off the IddCx callback thread.
   if (InterlockedExchange(&m_finishInitQueued, 0))
   {
     FinishInit(0);
+    AcquireSRWLockExclusive(&m_stateLock);
+    m_replugMonitor = false;
+    ReleaseSRWLockExclusive(&m_stateLock);
     return;
   }
 
@@ -983,17 +866,6 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
 
   if (!m_lgmp || !m_frameQueue)
     return result;
-
-  if (InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0))
-  {
-    AcquireSRWLockShared(&m_stateLock);
-    const bool sizeMatches =
-      srcFormat.width == m_setMode.width && srcFormat.height == m_setMode.height;
-    ReleaseSRWLockShared(&m_stateLock);
-
-    if (sizeMatches)
-      InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
-  }
 
   if (m_width     != dstFormat.desc.Width  ||
       m_height    != dstFormat.desc.Height ||

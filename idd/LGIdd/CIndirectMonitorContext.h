@@ -35,6 +35,10 @@ class CIndirectMonitorContext
 private:
   IDDCX_MONITOR m_monitor;
 
+  // Guards the swap chain and device pointers. Assign and unassign can run
+  // concurrently (an unassign triggered by the worker's WdfObjectDelete can
+  // race the next assign), and shared_ptr copy/reset is not thread safe.
+  SRWLOCK m_lock = SRWLOCK_INIT;
   std::shared_ptr<CD3D11Device> m_dx11Device;
   std::shared_ptr<CD3D12Device> m_dx12Device;
 
