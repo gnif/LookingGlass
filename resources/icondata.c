@@ -536,4 +536,4 @@ const unsigned long icondata[] = {
   0xff9761c4, 0xff9761c4, 0xff9660c3, 0xf0905cbc, 0xaa905cbc, 0x4e8554af, 0x068150aa, 0x00000000,
   0x00000000, 0x00000000
 };
-
+const unsigned icondataSize = sizeof(icondata);

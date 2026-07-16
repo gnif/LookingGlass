@@ -149,6 +149,7 @@ bool xdg_shellInit(struct wl_display * display, struct wl_surface * surface,
   xdg_toplevel_add_listener(state.toplevel, &xdgToplevelListener, NULL);
   xdg_toplevel_set_title(state.toplevel, title);
   xdg_toplevel_set_app_id(state.toplevel, appId);
+  wlWm.xdgToplevel = state.toplevel;
 
   if (fullscreen)
     xdg_toplevel_set_fullscreen(state.toplevel, NULL);

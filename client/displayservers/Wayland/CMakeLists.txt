@@ -16,6 +16,7 @@ add_library(displayserver_Wayland STATIC
   colormgmt.c
   cursor.c
   gl.c
+  icon.c
   idle.c
   input.c
   output.c
@@ -33,6 +34,7 @@ add_subdirectory(desktops)
 target_link_libraries(displayserver_Wayland
   PkgConfig::DISPLAYSERVER_Wayland
   lg_common
+  lg_resources
   wayland_protocol
   wayland_desktops
 )
