@@ -222,6 +222,16 @@ void CPipeServer::WriteMsg(const LGPipeMsg & msg)
 {
   if (!m_connected)
   {
+    // Not connected yet: keep only the latest message of each type. These are
+    // all latest-state-wins messages, so a burst (e.g. display mode changes
+    // while resizing) must collapse to the final state rather than replay every
+    // intermediate value when the helper reconnects.
+    for (auto & queued : m_queue)
+      if (queued.type == msg.type)
+      {
+        queued = msg;
+        return;
+      }
     m_queue.push_back(msg);
     return;
   }
