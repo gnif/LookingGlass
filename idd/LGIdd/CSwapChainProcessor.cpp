@@ -161,6 +161,11 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     UINT dirtyRectCount = 0;
     ComPtr<IDXGIResource> surface;
 
+    // The surface colour space is the source of truth for the content format.
+    // Only the buffer2 acquisition path (IddCx 1.10+) reports it; on the legacy
+    // path HDR is not available, so default to SDR.
+    DXGI_COLOR_SPACE_TYPE colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+
 #ifdef HAS_IDDCX_110
     if (m_devContext->CanProcessFP16())
     {
@@ -177,6 +182,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
         frameNumber = buffer.MetaData.PresentationFrameNumber;
         dirtyRectCount = buffer.MetaData.DirtyRectCount;
         surface = buffer.MetaData.pSurface;
+        colorSpace = buffer.MetaData.SurfaceColorSpace;
       }
     }
     else
@@ -216,7 +222,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       if (frameNumber != lastFrameNumber)
       {
         lastFrameNumber = frameNumber;
-        SwapChainNewFrame(surface, dirtyRectCount);
+        SwapChainNewFrame(surface, dirtyRectCount, colorSpace);
 
         // report that all GPU processing for this frame has been queued
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -327,7 +333,8 @@ static FrameType GetFrameType(DXGI_FORMAT format)
   }
 }
 
-bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount)
+bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
+  DXGI_COLOR_SPACE_TYPE colorSpace)
 {
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
@@ -380,58 +387,74 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcFormat.height = srcDesc.Height;
   srcFormat.format = GetFrameType(srcDesc.Format);
 
-  // Only HDR-capable formats can carry HDR content.
-  // 8-bit formats (BGRA, RGBA) cannot represent HDR,
-  // even if IsHDRActive() is momentarily stale during mode switches.
-  if (srcDesc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT &&
-      srcDesc.Format != DXGI_FORMAT_R10G10B10A2_UNORM)
+  switch (colorSpace)
   {
-    srcFormat.hdr   = false;
-    srcFormat.hdrPQ = false;
-  }
-  else if (srcDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
-  {
-    // FP16 is HDR content (scRGB / linear, not PQ-curve).
-    // FP16 always carries HDR color data regardless of OS HDR mode,
-    // but metadata (primaries, luminances) may be unavailable.
-    srcFormat.hdr   = true;
-    srcFormat.hdrPQ = false;
-    if (!m_devContext->GetHDRMetadata(srcFormat))
-    {
-      // No HDR metadata from the OS; provide reasonable defaults
-      // so downstream consumers have valid primaries and luminances.
-      // BT.709/sRGB primaries (in 0.00002 units):
-      srcFormat.displayPrimary[0][0] = 13250; // Rx
-      srcFormat.displayPrimary[0][1] = 34500; // Ry
-      srcFormat.displayPrimary[1][0] =  7500; // Gx
-      srcFormat.displayPrimary[1][1] = 30000; // Gy
-      srcFormat.displayPrimary[2][0] = 34000; // Bx
-      srcFormat.displayPrimary[2][1] = 16000; // By
-      // D65 white point (in 0.00002 units):
-      srcFormat.whitePoint[0] = 15635;
-      srcFormat.whitePoint[1] = 16450;
-      // Mastering luminances follow SMPTE ST 2086 units: max in whole cd/m²,
-      // min in 0.0001 cd/m². 80 cd/m² display, 0.005 cd/m² black:
-      srcFormat.maxDisplayLuminance = 80;
-      srcFormat.minDisplayLuminance = 50;
-      // Content light levels unknown:
-      srcFormat.maxContentLightLevel      = 0;
-      srcFormat.maxFrameAverageLightLevel = 0;
-    }
-  }
-  else if (m_devContext->CanProcessFP16() && m_devContext->IsHDRActive())
-  {
-    // Non-FP16 format (e.g., RGBA10) with OS HDR mode active.
-    // Windows applies the PQ (ST.2084) transfer function for non-FP16 HDR.
-    srcFormat.hdr   = true;
-    srcFormat.hdrPQ = true;
+    case DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:
+    case DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020:
+      // HDR10: BT.2020 primaries with the PQ (ST.2084) transfer function
+      // already applied to the pixel data.
+      srcFormat.hdr   = true;
+      srcFormat.hdrPQ = true;
+      if (!m_devContext->GetHDRMetadata(srcFormat))
+      {
+        // HDR is active but the OS has not delivered static metadata yet
+        // (e.g. a brief window during a mode switch). The pixels are still
+        // PQ-encoded, so keep the PQ flag and supply BT.2020/PQ defaults
+        // rather than mislabel the frame as SDR.
+        // BT.2020 primaries (in 0.00002 units):
+        srcFormat.displayPrimary[0][0] = 35400; // Rx
+        srcFormat.displayPrimary[0][1] = 14600; // Ry
+        srcFormat.displayPrimary[1][0] =  8500; // Gx
+        srcFormat.displayPrimary[1][1] = 39850; // Gy
+        srcFormat.displayPrimary[2][0] =  6550; // Bx
+        srcFormat.displayPrimary[2][1] =  2300; // By
+        // D65 white point (in 0.00002 units):
+        srcFormat.whitePoint[0] = 15635;
+        srcFormat.whitePoint[1] = 16450;
+        // Mastering luminances follow SMPTE ST 2086 units: max in whole cd/m²,
+        // min in 0.0001 cd/m². 1000 cd/m² display, 0.0001 cd/m² black:
+        srcFormat.maxDisplayLuminance = 1000;
+        srcFormat.minDisplayLuminance = 1;
+        // Content light levels unknown:
+        srcFormat.maxContentLightLevel      = 0;
+        srcFormat.maxFrameAverageLightLevel = 0;
+      }
+      break;
 
-    // Load HDR metadata; if none is available the frame is not HDR.
-    if (!m_devContext->GetHDRMetadata(srcFormat))
-    {
+    case DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:
+      // scRGB: linear (FP16) content with BT.709 primaries. HDR, but the PQ
+      // curve has not been applied.
+      srcFormat.hdr   = true;
+      srcFormat.hdrPQ = false;
+      if (!m_devContext->GetHDRMetadata(srcFormat))
+      {
+        // No HDR metadata from the OS; provide reasonable defaults
+        // so downstream consumers have valid primaries and luminances.
+        // BT.709/sRGB primaries (in 0.00002 units):
+        srcFormat.displayPrimary[0][0] = 13250; // Rx
+        srcFormat.displayPrimary[0][1] = 34500; // Ry
+        srcFormat.displayPrimary[1][0] =  7500; // Gx
+        srcFormat.displayPrimary[1][1] = 30000; // Gy
+        srcFormat.displayPrimary[2][0] = 34000; // Bx
+        srcFormat.displayPrimary[2][1] = 16000; // By
+        // D65 white point (in 0.00002 units):
+        srcFormat.whitePoint[0] = 15635;
+        srcFormat.whitePoint[1] = 16450;
+        // Mastering luminances follow SMPTE ST 2086 units: max in whole cd/m²,
+        // min in 0.0001 cd/m². 80 cd/m² display, 0.005 cd/m² black:
+        srcFormat.maxDisplayLuminance = 80;
+        srcFormat.minDisplayLuminance = 50;
+        // Content light levels unknown:
+        srcFormat.maxContentLightLevel      = 0;
+        srcFormat.maxFrameAverageLightLevel = 0;
+      }
+      break;
+
+    default:
+      // Everything else (e.g. RGB_FULL_G22_NONE_P709) is SDR.
       srcFormat.hdr   = false;
       srcFormat.hdrPQ = false;
-    }
+      break;
   }
 
   bool postProcessFormatChanged = false;
