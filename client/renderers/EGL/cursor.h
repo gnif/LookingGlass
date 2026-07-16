@@ -52,3 +52,5 @@ void egl_cursorSetState(EGL_Cursor * cursor, const bool visible,
 
 struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     LG_RendererRotate rotate, int width, int height);
+
+void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ);
