@@ -43,6 +43,16 @@ CIVSHMEM::~CIVSHMEM()
 
 bool CIVSHMEM::Init()
 {
+  // Init may be called more than once (the adapter init is retried at boot
+  // until IVSHMEM enumerates). Release any handle from a prior attempt so we
+  // do not leak it when re-enumerating.
+  if (m_handle != INVALID_HANDLE_VALUE)
+  {
+    Close();
+    CloseHandle(m_handle);
+    m_handle = INVALID_HANDLE_VALUE;
+  }
+
   HDEVINFO                         devInfoSet;
   SP_DEVINFO_DATA                  devInfoData;
   SP_DEVICE_INTERFACE_DATA         devInterfaceData;

@@ -99,18 +99,88 @@ void CIndirectDeviceContext::PopulateDefaultModes()
 {
   g_settings.LoadModes();
 
-  m_displayModes.clear();
-  m_displayModes.reserve(g_settings.GetDisplayModes().size());
+  // Build the new mode list and EDID into locals first so we only hold the
+  // lock for the swap. IddCx readers may be iterating the live containers on
+  // another thread; a clear()/push_back() under them would reallocate the
+  // backing store and crash. std::move makes the publish a pointer swap.
+  CSettings::DisplayModes newModes;
+  newModes.reserve(g_settings.GetDisplayModes().size());
   for (auto& dm : g_settings.GetDisplayModes())
-    m_displayModes.push_back(dm);
+    newModes.push_back(dm);
 
-  m_edid.Build(m_displayModes);
+  CEdid newEdid;
+  newEdid.Build(newModes);
+
+  AcquireSRWLockExclusive(&m_modeLock);
+  m_displayModes = std::move(newModes);
+  m_edid         = std::move(newEdid);
+  ReleaseSRWLockExclusive(&m_modeLock);
+}
+
+void CIndirectDeviceContext::ScheduleInitRetry()
+{
+  // Create the retry timer once; if it already exists it is either running or
+  // will be (re)started below.
+  if (!m_initTimer)
+  {
+    WDF_TIMER_CONFIG config;
+    WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
+      [](WDFTIMER timer) -> void
+      {
+        WDFOBJECT parent = WdfTimerGetParentObject(timer);
+        auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(parent);
+        wrapper->context->InitAdapter();
+      },
+      500);
+    config.AutomaticSerialization = FALSE;
+
+    WDF_OBJECT_ATTRIBUTES attribs;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
+    attribs.ParentObject   = m_wdfDevice;
+    attribs.ExecutionLevel = WdfExecutionLevelDispatch;
+
+    NTSTATUS status = WdfTimerCreate(&config, &attribs, &m_initTimer);
+    if (!NT_SUCCESS(status))
+    {
+      DEBUG_ERROR_HR(status, "Init retry timer creation failed");
+      m_initTimer = nullptr;
+      return;
+    }
+  }
+
+  WdfTimerStart(m_initTimer, WDF_REL_TIMEOUT_IN_MS(500));
+}
+
+void CIndirectDeviceContext::StopInitRetry()
+{
+  if (m_initTimer)
+    WdfTimerStop(m_initTimer, FALSE);
 }
 
 void CIndirectDeviceContext::InitAdapter()
 {
-  if (!m_ivshmem.Init() || !m_ivshmem.Open())
+  // The adapter only needs to be created once. D0Entry and the retry timer can
+  // both land here, so guard against re-entrancy and repeated creation.
+  if (m_adapter)
     return;
+
+  if (InterlockedCompareExchange(&m_initInProgress, 1, 0) != 0)
+    return;
+
+  // At boot the IVSHMEM PCI device may not have enumerated yet. Rather than
+  // silently abandoning the adapter (leaving the device loaded but with no
+  // monitor), retry from a timer until the shared memory becomes available.
+  if (!m_ivshmemOpened)
+  {
+    if (!m_ivshmem.Init() || !m_ivshmem.Open())
+    {
+      DEBUG_WARN("IVSHMEM not available yet, scheduling init retry");
+      ScheduleInitRetry();
+      InterlockedExchange(&m_initInProgress, 0);
+      return;
+    }
+    m_ivshmemOpened = true;
+  }
 
   QueryIddCxCapabilities();
   PopulateDefaultModes();
@@ -170,6 +240,7 @@ void CIndirectDeviceContext::InitAdapter()
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "IddCxAdapterInitAsync Failed");
+    InterlockedExchange(&m_initInProgress, 0);
     return;
   }
 
@@ -199,12 +270,25 @@ void CIndirectDeviceContext::InitAdapter()
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;
+
+  // Adapter is up; no need to keep retrying.
+  StopInitRetry();
+  InterlockedExchange(&m_initInProgress, 0);
 }
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 {
   WDF_OBJECT_ATTRIBUTES attr;
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attr, CIndirectMonitorContextWrapper);
+
+  // Take a private copy of the EDID so a concurrent PopulateDefaultModes on
+  // the timer thread cannot reallocate the buffer out from under
+  // IddCxMonitorCreate. The copy lives for the duration of the synchronous
+  // create call below.
+  std::vector<BYTE> edid;
+  AcquireSRWLockShared(&m_modeLock);
+  edid.assign(m_edid.Data(), m_edid.Data() + m_edid.Size());
+  ReleaseSRWLockShared(&m_modeLock);
 
   IDDCX_MONITOR_INFO info = {};
   info.Size           = sizeof(info);
@@ -213,8 +297,8 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 
   info.MonitorDescription.Size     = sizeof(info.MonitorDescription);
   info.MonitorDescription.Type     = IDDCX_MONITOR_DESCRIPTION_TYPE_EDID;
-  info.MonitorDescription.DataSize = m_edid.Size();
-  info.MonitorDescription.pData    = const_cast<BYTE*>(m_edid.Data());
+  info.MonitorDescription.DataSize = (UINT)edid.size();
+  info.MonitorDescription.pData    = edid.empty() ? nullptr : edid.data();
 
   CoCreateGuid(&info.MonitorContainerId);
 
@@ -230,7 +314,10 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
     return;
   }
 
+  AcquireSRWLockExclusive(&m_stateLock);
   m_monitor = createOut.MonitorObject;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(m_monitor);
   wrapper->context = new CIndirectMonitorContext(m_monitor, this);
 
@@ -245,21 +332,35 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 
 void CIndirectDeviceContext::ReplugMonitor()
 {
-  if (m_monitor == WDF_NO_HANDLE)
+  // Sample and mutate the replug state atomically. The monitor handle is
+  // published by FinishInit on an IddCx thread while this can run from the
+  // timer thread, so a plain check-then-act would race.
+  AcquireSRWLockExclusive(&m_stateLock);
+  IDDCX_MONITOR monitor = m_monitor;
+
+  if (monitor == WDF_NO_HANDLE)
   {
+    ReleaseSRWLockExclusive(&m_stateLock);
     FinishInit(0);
     return;
   }
 
   if (m_replugMonitor)
+  {
+    ReleaseSRWLockExclusive(&m_stateLock);
     return;
+  }
+
+  m_replugMonitor = true;
+  ReleaseSRWLockExclusive(&m_stateLock);
 
   DEBUG_TRACE("ReplugMonitor");
-  m_replugMonitor = true;
-  NTSTATUS status = IddCxMonitorDeparture(m_monitor);
+  NTSTATUS status = IddCxMonitorDeparture(monitor);
   if (!NT_SUCCESS(status))
   {
+    AcquireSRWLockExclusive(&m_stateLock);
     m_replugMonitor = false;
+    ReleaseSRWLockExclusive(&m_stateLock);
     DEBUG_ERROR("IddCxMonitorDeparture Failed (0x%08x)", status);
     return;
   }
@@ -269,11 +370,14 @@ void CIndirectDeviceContext::OnAssignSwapChain()
 {
   InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
 
-  if (m_doSetMode)
-  {
-    m_doSetMode = false;
-    g_pipe.SetDisplayMode(m_setMode.width, m_setMode.height, m_setMode.refresh);
-  }
+  AcquireSRWLockExclusive(&m_stateLock);
+  bool doSetMode = m_doSetMode;
+  CSettings::DisplayMode mode = m_setMode;
+  m_doSetMode = false;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  if (doSetMode)
+    g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
 }
 
 void CIndirectDeviceContext::OnUnassignedSwapChain()
@@ -281,11 +385,13 @@ void CIndirectDeviceContext::OnUnassignedSwapChain()
   InterlockedExchange(&m_replugMonitorQueued, 0);
   InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
 
-  if (m_replugMonitor)
-  {
-    m_replugMonitor = false;
+  AcquireSRWLockExclusive(&m_stateLock);
+  bool replug = m_replugMonitor;
+  m_replugMonitor = false;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  if (replug)
     FinishInit(0);
-  }
 }
 
 void CIndirectDeviceContext::OnSwapChainLost()
@@ -324,13 +430,18 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription(
   const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
 {
-  outArgs->MonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  CSettings::DisplayModes modes;
+  AcquireSRWLockShared(&m_modeLock);
+  modes = m_displayModes;
+  ReleaseSRWLockShared(&m_modeLock);
+
+  outArgs->MonitorModeBufferOutputCount = (UINT)modes.size();
   outArgs->PreferredMonitorModeIdx = 0;
-  if (inArgs->MonitorModeBufferInputCount < (UINT)m_displayModes.size())
+  if (inArgs->MonitorModeBufferInputCount < (UINT)modes.size())
     return (inArgs->MonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
 
   auto * mode = inArgs->pMonitorModes;
-  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     mode->Size = sizeof(IDDCX_MONITOR_MODE);
     mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
@@ -338,7 +449,7 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription(
 
     if (it->preferred)
       outArgs->PreferredMonitorModeIdx =
-        (UINT)std::distance(m_displayModes.cbegin(), it);
+        (UINT)std::distance(modes.cbegin(), it);
   }
 
   return STATUS_SUCCESS;
@@ -348,13 +459,18 @@ NTSTATUS CIndirectDeviceContext::MonitorGetDefaultModes(
   const IDARG_IN_GETDEFAULTDESCRIPTIONMODES* inArgs,
   IDARG_OUT_GETDEFAULTDESCRIPTIONMODES* outArgs)
 {
-  outArgs->DefaultMonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  CSettings::DisplayModes modes;
+  AcquireSRWLockShared(&m_modeLock);
+  modes = m_displayModes;
+  ReleaseSRWLockShared(&m_modeLock);
+
+  outArgs->DefaultMonitorModeBufferOutputCount = (UINT)modes.size();
   outArgs->PreferredMonitorModeIdx = 0;
-  if (inArgs->DefaultMonitorModeBufferInputCount < (UINT)m_displayModes.size())
+  if (inArgs->DefaultMonitorModeBufferInputCount < (UINT)modes.size())
     return (inArgs->DefaultMonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
 
   auto* mode = inArgs->pDefaultMonitorModes;
-  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     mode->Size = sizeof(IDDCX_MONITOR_MODE);
     mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_DRIVER;
@@ -362,7 +478,7 @@ NTSTATUS CIndirectDeviceContext::MonitorGetDefaultModes(
 
     if (it->preferred)
       outArgs->PreferredMonitorModeIdx =
-      (UINT)std::distance(m_displayModes.cbegin(), it);
+      (UINT)std::distance(modes.cbegin(), it);
   }
 
   return STATUS_SUCCESS;
@@ -372,12 +488,17 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes(
   const IDARG_IN_QUERYTARGETMODES* inArgs,
   IDARG_OUT_QUERYTARGETMODES* outArgs)
 {
-  outArgs->TargetModeBufferOutputCount = (UINT)m_displayModes.size();
-  if (inArgs->TargetModeBufferInputCount < (UINT)m_displayModes.size())
+  CSettings::DisplayModes modes;
+  AcquireSRWLockShared(&m_modeLock);
+  modes = m_displayModes;
+  ReleaseSRWLockShared(&m_modeLock);
+
+  outArgs->TargetModeBufferOutputCount = (UINT)modes.size();
+  if (inArgs->TargetModeBufferInputCount < (UINT)modes.size())
     return (inArgs->TargetModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
 
   auto* mode = inArgs->pTargetModes;
-  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     mode->Size = sizeof(IDDCX_TARGET_MODE);
     FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
@@ -392,13 +513,18 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription2(
   const IDARG_IN_PARSEMONITORDESCRIPTION2* inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
 {
-  outArgs->MonitorModeBufferOutputCount = (UINT)m_displayModes.size();
+  CSettings::DisplayModes modes;
+  AcquireSRWLockShared(&m_modeLock);
+  modes = m_displayModes;
+  ReleaseSRWLockShared(&m_modeLock);
+
+  outArgs->MonitorModeBufferOutputCount = (UINT)modes.size();
   outArgs->PreferredMonitorModeIdx = 0;
-  if (inArgs->MonitorModeBufferInputCount < (UINT)m_displayModes.size())
+  if (inArgs->MonitorModeBufferInputCount < (UINT)modes.size())
     return (inArgs->MonitorModeBufferInputCount > 0) ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS;
 
   auto * mode = inArgs->pMonitorModes;
-  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     ZeroMemory(mode, sizeof(*mode));
     mode->Size = sizeof(IDDCX_MONITOR_MODE2);
@@ -408,7 +534,7 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription2(
 
     if (it->preferred)
       outArgs->PreferredMonitorModeIdx =
-        (UINT)std::distance(m_displayModes.cbegin(), it);
+        (UINT)std::distance(modes.cbegin(), it);
   }
 
   return STATUS_SUCCESS;
@@ -418,15 +544,20 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
   const IDARG_IN_QUERYTARGETMODES2* inArgs,
   IDARG_OUT_QUERYTARGETMODES* outArgs)
 {
-  outArgs->TargetModeBufferOutputCount = (UINT)m_displayModes.size();
-  if (inArgs->TargetModeBufferInputCount < (UINT)m_displayModes.size())
+  CSettings::DisplayModes modes;
+  AcquireSRWLockShared(&m_modeLock);
+  modes = m_displayModes;
+  ReleaseSRWLockShared(&m_modeLock);
+
+  outArgs->TargetModeBufferOutputCount = (UINT)modes.size();
+  if (inArgs->TargetModeBufferInputCount < (UINT)modes.size())
     return STATUS_SUCCESS;
 
   if (!inArgs->pTargetModes)
     return STATUS_INVALID_PARAMETER;
 
   auto* mode = inArgs->pTargetModes;
-  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     ZeroMemory(mode, sizeof(*mode));
     mode->Size = sizeof(IDDCX_TARGET_MODE2);
@@ -440,24 +571,36 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
 
 bool CIndirectDeviceContext::UpdateMonitorModes()
 {
-  if (!m_monitor)
+  AcquireSRWLockExclusive(&m_stateLock);
+  IDDCX_MONITOR monitor = m_monitor;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  if (!monitor)
     return false;
+
+  // Snapshot the mode list so we do not hold m_modeLock across the IddCx call
+  // below - IddCxMonitorUpdateModes can synchronously re-enter our mode
+  // enumeration callbacks (which also take m_modeLock).
+  CSettings::DisplayModes displayModes;
+  AcquireSRWLockShared(&m_modeLock);
+  displayModes = m_displayModes;
+  ReleaseSRWLockShared(&m_modeLock);
 
 #ifdef HAS_IDDCX_110
   if (CanUseIddCx110DDIs())
   {
     IDDCX_TARGET_MODE2* modes = (IDDCX_TARGET_MODE2*)_malloca(
-      m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
+      displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
     if (!modes)
     {
       DEBUG_WARN("Failed to allocate memory for the mode list");
       return false;
     }
 
-    ZeroMemory(modes, m_displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
+    ZeroMemory(modes, displayModes.size() * sizeof(IDDCX_TARGET_MODE2));
 
     auto* mode = modes;
-    for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+    for (auto it = displayModes.cbegin(); it != displayModes.cend(); ++it, ++mode)
     {
       mode->Size              = sizeof(IDDCX_TARGET_MODE2);
       mode->RequiredBandwidth = (UINT64)it->width * it->height * it->refresh * 32;
@@ -467,10 +610,10 @@ bool CIndirectDeviceContext::UpdateMonitorModes()
 
     IDARG_IN_UPDATEMODES2 updateModes = {};
     updateModes.Reason          = IDDCX_UPDATE_REASON_OTHER;
-    updateModes.TargetModeCount = (UINT)m_displayModes.size();
+    updateModes.TargetModeCount = (UINT)displayModes.size();
     updateModes.pTargetModes    = modes;
 
-    NTSTATUS status = IddCxMonitorUpdateModes2(m_monitor, &updateModes);
+    NTSTATUS status = IddCxMonitorUpdateModes2(monitor, &updateModes);
     _freea(modes);
     if (!NT_SUCCESS(status))
     {
@@ -483,17 +626,17 @@ bool CIndirectDeviceContext::UpdateMonitorModes()
 #endif
 
   IDDCX_TARGET_MODE* modes = (IDDCX_TARGET_MODE*)_malloca(
-    m_displayModes.size() * sizeof(IDDCX_TARGET_MODE));
+    displayModes.size() * sizeof(IDDCX_TARGET_MODE));
   if (!modes)
   {
     DEBUG_WARN("Failed to allocate memory for the mode list");
     return false;
   }
 
-  ZeroMemory(modes, m_displayModes.size() * sizeof(IDDCX_TARGET_MODE));
+  ZeroMemory(modes, displayModes.size() * sizeof(IDDCX_TARGET_MODE));
 
   auto* mode = modes;
-  for (auto it = m_displayModes.cbegin(); it != m_displayModes.cend(); ++it, ++mode)
+  for (auto it = displayModes.cbegin(); it != displayModes.cend(); ++it, ++mode)
   {
     mode->Size              = sizeof(IDDCX_TARGET_MODE);
     mode->RequiredBandwidth = (UINT64)it->width * it->height * it->refresh * 32;
@@ -502,10 +645,10 @@ bool CIndirectDeviceContext::UpdateMonitorModes()
 
   IDARG_IN_UPDATEMODES updateModes = {};
   updateModes.Reason          = IDDCX_UPDATE_REASON_OTHER;
-  updateModes.TargetModeCount = (UINT)m_displayModes.size();
+  updateModes.TargetModeCount = (UINT)displayModes.size();
   updateModes.pTargetModes    = modes;
 
-  NTSTATUS status = IddCxMonitorUpdateModes(m_monitor, &updateModes);
+  NTSTATUS status = IddCxMonitorUpdateModes(monitor, &updateModes);
   _freea(modes);
   if (!NT_SUCCESS(status))
   {
@@ -518,25 +661,35 @@ bool CIndirectDeviceContext::UpdateMonitorModes()
 
 void CIndirectDeviceContext::SetResolution(int width, int height)
 {
-  m_setMode.width     = width;
-  m_setMode.height    = height;
-  m_setMode.refresh   = g_settings.GetDefaultRefresh();
-  m_setMode.preferred = true;
-  g_settings.SetExtraMode(m_setMode);
+  CSettings::DisplayMode mode = {};
+  mode.width     = width;
+  mode.height    = height;
+  mode.refresh   = g_settings.GetDefaultRefresh();
+  mode.preferred = true;
+
+  AcquireSRWLockExclusive(&m_stateLock);
+  m_setMode = mode;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  g_settings.SetExtraMode(mode);
 
   PopulateDefaultModes();
 
   if (UpdateMonitorModes())
   {
     DEBUG_TRACE("Updated monitor modes without replugging");
+    AcquireSRWLockExclusive(&m_stateLock);
     m_doSetMode = false;
+    ReleaseSRWLockExclusive(&m_stateLock);
     InterlockedExchange(&m_recoverModeUpdateSwapChain, 1);
-    g_pipe.SetDisplayMode(m_setMode.width, m_setMode.height, m_setMode.refresh);
+    g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
     return;
   }
 
   DEBUG_TRACE("Falling back to monitor replug for mode update");
+  AcquireSRWLockExclusive(&m_stateLock);
   m_doSetMode = true;
+  ReleaseSRWLockExclusive(&m_stateLock);
   InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
   ReplugMonitor();
 }
@@ -722,6 +875,15 @@ void CIndirectDeviceContext::DeInitLGMP()
 {
   m_hasFrame = false;
 
+  // The retry timer callback dereferences this context, so make sure it is
+  // stopped and drained before we tear anything down. Wait for any in-flight
+  // callback to complete.
+  if (m_initTimer)
+  {
+    WdfTimerStop(m_initTimer, TRUE);
+    m_initTimer = nullptr;
+  }
+
   if (m_lgmp == nullptr)
     return;
 
@@ -744,7 +906,9 @@ void CIndirectDeviceContext::LGMPTimer()
 {
   if (InterlockedExchange(&m_replugMonitorQueued, 0))
   {
+    AcquireSRWLockExclusive(&m_stateLock);
     m_doSetMode = true;
+    ReleaseSRWLockExclusive(&m_stateLock);
     ReplugMonitor();
     return;
   }
@@ -807,9 +971,16 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   if (!m_lgmp || !m_frameQueue)
     return result;
 
-  if (InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0) &&
-      srcFormat.width == m_setMode.width && srcFormat.height == m_setMode.height)
-    InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
+  if (InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0))
+  {
+    AcquireSRWLockShared(&m_stateLock);
+    const bool sizeMatches =
+      srcFormat.width == m_setMode.width && srcFormat.height == m_setMode.height;
+    ReleaseSRWLockShared(&m_stateLock);
+
+    if (sizeMatches)
+      InterlockedExchange(&m_recoverModeUpdateSwapChain, 0);
+  }
 
   if (m_width     != dstFormat.desc.Width  ||
       m_height    != dstFormat.desc.Height ||

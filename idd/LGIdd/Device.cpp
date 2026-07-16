@@ -267,14 +267,16 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
     return status;
 
   /*
-   * Keep the WDF device cached so callbacks that do not provide an adapter or
-   * monitor context can still reach the device context on down-level IddCx.
+   * Construct the device context and cache the WDF device BEFORE calling
+   * IddCxDeviceInitialize. IddCxDeviceInitialize arms the IddCx callbacks, and
+   * callbacks that resolve the context via l_wdfDevice (down-level IddCx that
+   * provides no adapter/monitor context) must never observe a null context.
    */
+  auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
+  wrapper->context = new CIndirectDeviceContext(device);
+
   l_wdfDevice = device;
 
   status = IddCxDeviceInitialize(device);
-
-  auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
-  wrapper->context = new CIndirectDeviceContext(device);
   return status;
 }

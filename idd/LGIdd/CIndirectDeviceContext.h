@@ -65,6 +65,17 @@ private:
   IDDCX_MONITOR m_monitor       = nullptr;
   bool          m_replugMonitor = false;
 
+  // Guards the adapter/monitor init handshake and the replug state machine
+  // (m_monitor, m_replugMonitor, m_doSetMode, m_setMode). These are touched
+  // from the IddCx callback threads and the LGMP timer thread.
+  SRWLOCK m_stateLock = SRWLOCK_INIT;
+
+  // Retry state for InitAdapter. At boot the IVSHMEM device may not have
+  // enumerated yet; if so we re-attempt from a timer instead of giving up.
+  WDFTIMER      m_initTimer     = nullptr;
+  bool          m_ivshmemOpened = false;
+  volatile LONG m_initInProgress = 0;
+
   CIVSHMEM m_ivshmem;
 
   PLGMPHost      m_lgmp       = nullptr;
@@ -123,10 +134,19 @@ private:
   void QueryIddCxCapabilities();
   bool CanUseIddCx110DDIs() const { return m_canProcessFP16; }
 
+  void ScheduleInitRetry();
+  void StopInitRetry();
+
   void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor() const;
   bool UpdateMonitorModes();
+
+  // Guards m_displayModes and m_edid. The mode list is rebuilt on the LGMP
+  // timer thread (SetResolution) while IddCx concurrently enumerates it on its
+  // own callback threads (ParseMonitorDescription / MonitorQueryTargetModes /
+  // FinishInit). Never held across an IddCx API call - snapshot then call.
+  mutable SRWLOCK m_modeLock = SRWLOCK_INIT;
 
   CSettings::DisplayModes m_displayModes;
   CEdid                   m_edid;
