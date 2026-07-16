@@ -102,7 +102,7 @@ void lgMessage_process(void)
       case LG_MSG_WINDOWSIZE:
       {
         // retain the last/latest windowsize event
-        if (!windowSize || windowSize->timestamp > event->timestamp)
+        if (!windowSize || event->timestamp > windowSize->timestamp)
         {
           free(windowSize);
           windowSize = event;
@@ -135,14 +135,14 @@ void lgMessage_process(void)
     }
     else
     {
-      if (event->msg.windowSize.width  != this.lastWindowSize.width ||
-          event->msg.windowSize.height != this.lastWindowSize.height)
+      if (windowSize->msg.windowSize.width  != this.lastWindowSize.width ||
+          windowSize->msg.windowSize.height != this.lastWindowSize.height)
       {
-        this.lastWindowSize.width  = event->msg.windowSize.width;
-        this.lastWindowSize.height = event->msg.windowSize.height;
+        this.lastWindowSize.width  = windowSize->msg.windowSize.width;
+        this.lastWindowSize.height = windowSize->msg.windowSize.height;
         core_onWindowSizeChanged(
-            event->msg.windowSize.width,
-            event->msg.windowSize.height);
+            windowSize->msg.windowSize.width,
+            windowSize->msg.windowSize.height);
       }
       free(windowSize);
     }
