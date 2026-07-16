@@ -1,0 +1,52 @@
+uniform float4x4  ViewProj;
+uniform texture2d image;
+uniform float2    outputSize;
+uniform float3    colorMatrix0;
+uniform float3    colorMatrix1;
+uniform float3    colorMatrix2;
+uniform float     scale;
+
+struct VertData
+{
+  float4 pos : POSITION;
+  float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData vert_in)
+{
+  VertData vert_out;
+  vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
+  vert_out.uv  = vert_in.uv;
+  return vert_out;
+}
+
+float4 PSHDRPQ(VertData vert_in) : TARGET
+{
+  uvec2 outputPos = uvec2(vert_in.uv * outputSize);
+  vec4  pixel     = texelFetch(image, ivec2(outputPos), 0);
+
+  /* SMPTE ST.2084 (PQ) EOTF: recover normalised linear light where 1.0
+   * corresponds to 10000 cd/m² */
+  vec3 e   = pow(max(pixel.rgb, 0.0), vec3(1.0 / 78.84375));
+  vec3 num = max(e - 0.8359375, 0.0);
+  vec3 den = 18.8515625 - 18.6875 * e;
+  vec3 lin = pow(num / den, vec3(1.0 / 0.1593017578125));
+
+  /* convert from the source display primaries to BT.709 in linear light */
+  vec3 rgb709 = vec3(
+    dot(colorMatrix0, lin),
+    dot(colorMatrix1, lin),
+    dot(colorMatrix2, lin));
+
+  /* scale to the scRGB reference white convention (1.0 = 80 cd/m²) */
+  return float4(rgb709 * scale, pixel.a);
+}
+
+technique Draw
+{
+  pass
+  {
+    vertex_shader = VSDefault(vert_in);
+    pixel_shader  = PSHDRPQ(vert_in);
+  }
+}

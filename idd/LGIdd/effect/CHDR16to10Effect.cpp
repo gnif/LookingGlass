@@ -49,8 +49,17 @@ bool CHDR16to10Effect::Init(const ComPtr<ID3D12Device3>& device)
     "void main(uint3 dt : SV_DispatchThreadID)\n"
     "{\n"
     "  float3 linearValue = src[dt.xy].rgb * ReferenceWhiteNits;\n"
+    "  // scRGB uses BT.709 primaries whereas HDR10/PQ output uses BT.2020.\n"
+    "  // Rotate the gamut in linear light (BT.2087) BEFORE applying the PQ\n"
+    "  // curve, otherwise the BT.709 values are later reinterpreted as BT.2020\n"
+    "  // and saturated colours (most visibly red) are pushed outside their\n"
+    "  // intended gamut.\n"
+    "  float3 rec2020 = float3(\n"
+    "    dot(linearValue, float3(0.6274039, 0.3292830, 0.0433131)),\n"
+    "    dot(linearValue, float3(0.0690973, 0.9195404, 0.0113623)),\n"
+    "    dot(linearValue, float3(0.0163914, 0.0880133, 0.8955953)));\n"
     "  // scRGB to PQ (ST.2084)\n"
-    "  float3 Y = linearValue / 10000.0;\n"
+    "  float3 Y = rec2020 / 10000.0;\n"
     "  float3 Ym1 = pow(max(Y, 0.0), PQ_m1);\n"
     "  float3 pq = pow((PQ_c1 + PQ_c2 * Ym1) / (1.0 + PQ_c3 * Ym1), PQ_m2);\n"
     "  dst[dt.xy] = float4(pq, src[dt.xy].a);\n"
@@ -116,7 +125,16 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
 
   // Explicitly propagate HDR static metadata so it survives post-processing.
   // Do not rely on the caller's copy semantics in CPostProcessor::Configure().
-  memcpy(dst.displayPrimary, src.displayPrimary, sizeof(dst.displayPrimary));
+  // The shader rotates the gamut from BT.709 to BT.2020, so advertise BT.2020
+  // mastering primaries here rather than forwarding the source's BT.709 set
+  // (in 0.00002 units) - otherwise consumers see PQ/BT.2020 content tagged
+  // with BT.709 primaries.
+  dst.displayPrimary[0][0] = 35400; // Rx
+  dst.displayPrimary[0][1] = 14600; // Ry
+  dst.displayPrimary[1][0] =  8500; // Gx
+  dst.displayPrimary[1][1] = 39850; // Gy
+  dst.displayPrimary[2][0] =  6550; // Bx
+  dst.displayPrimary[2][1] =  2300; // By
   memcpy(dst.whitePoint    , src.whitePoint    , sizeof(dst.whitePoint    ));
   dst.maxDisplayLuminance       = src.maxDisplayLuminance;
   dst.minDisplayLuminance       = src.minDisplayLuminance;
