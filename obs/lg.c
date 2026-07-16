@@ -38,6 +38,12 @@
 #include <GL/gl.h>
 
 #include "rgb24.effect.h"
+#include "hdrpq.effect.h"
+
+/* scRGB reference white in cd/m² (OBS GS_CS_709_SCRGB is defined as
+ * 1.0 = 80 cd/m²). PQ encodes an absolute 0..10000 cd/m² range, so linear
+ * PQ output is scaled by 10000 / 80 to reach the scRGB convention. */
+#define LG_SCRGB_REFERENCE_WHITE 80.0f
 
 /**
  * the following comes from drm_fourcc.h and is included here to avoid the
@@ -97,6 +103,9 @@ typedef struct
 
   bool                 hideMouse;
   bool                 hdr;
+  bool                 hdrPQ;
+  struct vec3          colorMatrix[3]; // source primaries -> BT.709 (linear)
+  float                hdrScale;       // scRGB reference white scaling
 #if LIBOBS_API_MAJOR_VER >= 27
   bool                 dmabuf;
   bool                 dmabufTested;
@@ -127,6 +136,12 @@ typedef struct
   gs_eparam_t * image;
   gs_eparam_t * outputSize;
   gs_eparam_t * swap;
+
+  gs_effect_t * hdrEffect;
+  gs_eparam_t * hdrImage;
+  gs_eparam_t * hdrOutputSize;
+  gs_eparam_t * hdrColorMatrix[3];
+  gs_eparam_t * hdrScaleParam;
 }
 LGPlugin;
 
@@ -163,6 +178,30 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
       this->unpackEffect, "outputSize");
   this->swap       = gs_effect_get_param_by_name(
       this->unpackEffect, "swap"      );
+
+  this->hdrEffect = gs_effect_create(b_effect_hdrpq_effect, "hdrpq", &error);
+  if (!this->hdrEffect)
+  {
+    blog(LOG_ERROR, "%s", error);
+    bfree(error);
+    gs_effect_destroy(this->unpackEffect);
+    bfree(this);
+    obs_leave_graphics();
+    return NULL;
+  }
+
+  this->hdrImage         = gs_effect_get_param_by_name(
+      this->hdrEffect, "image"       );
+  this->hdrOutputSize    = gs_effect_get_param_by_name(
+      this->hdrEffect, "outputSize"  );
+  this->hdrColorMatrix[0] = gs_effect_get_param_by_name(
+      this->hdrEffect, "colorMatrix0");
+  this->hdrColorMatrix[1] = gs_effect_get_param_by_name(
+      this->hdrEffect, "colorMatrix1");
+  this->hdrColorMatrix[2] = gs_effect_get_param_by_name(
+      this->hdrEffect, "colorMatrix2");
+  this->hdrScaleParam    = gs_effect_get_param_by_name(
+      this->hdrEffect, "scale"       );
   obs_leave_graphics();
 
   os_sem_init (&this->frameSem , 0);
@@ -274,6 +313,7 @@ static void lgDestroy(void * data)
 
   obs_enter_graphics();
   gs_effect_destroy(this->unpackEffect);
+  gs_effect_destroy(this->hdrEffect);
   obs_leave_graphics();
 
   bfree(this);
@@ -587,6 +627,121 @@ static DMAFrameInfo * dmabufOpenDMAFrameInfo(LGPlugin * this, LGMPMessage * msg,
 }
 #endif
 
+/* chromaticity coordinates are transported in SMPTE ST 2086 units of
+ * 0.00002 */
+#define LG_ST2086_UNIT 0.00002
+
+static bool mat3Inverse(const double m[9], double out[9])
+{
+  const double det =
+    m[0] * (m[4] * m[8] - m[5] * m[7]) -
+    m[1] * (m[3] * m[8] - m[5] * m[6]) +
+    m[2] * (m[3] * m[7] - m[4] * m[6]);
+
+  if (det == 0.0)
+    return false;
+
+  const double inv = 1.0 / det;
+  out[0] = (m[4] * m[8] - m[5] * m[7]) * inv;
+  out[1] = (m[2] * m[7] - m[1] * m[8]) * inv;
+  out[2] = (m[1] * m[5] - m[2] * m[4]) * inv;
+  out[3] = (m[5] * m[6] - m[3] * m[8]) * inv;
+  out[4] = (m[0] * m[8] - m[2] * m[6]) * inv;
+  out[5] = (m[2] * m[3] - m[0] * m[5]) * inv;
+  out[6] = (m[3] * m[7] - m[4] * m[6]) * inv;
+  out[7] = (m[1] * m[6] - m[0] * m[7]) * inv;
+  out[8] = (m[0] * m[4] - m[1] * m[3]) * inv;
+  return true;
+}
+
+static void mat3Mul(const double a[9], const double b[9], double out[9])
+{
+  for (int r = 0; r < 3; ++r)
+    for (int c = 0; c < 3; ++c)
+      out[r * 3 + c] =
+        a[r * 3 + 0] * b[0 * 3 + c] +
+        a[r * 3 + 1] * b[1 * 3 + c] +
+        a[r * 3 + 2] * b[2 * 3 + c];
+}
+
+/* build the linear RGB -> CIE XYZ matrix for a set of primaries and white
+ * point (Bruce Lindbloom's method) */
+static bool primariesToXYZ(double xr, double yr, double xg, double yg,
+    double xb, double yb, double xw, double yw, double out[9])
+{
+  if (yr == 0.0 || yg == 0.0 || yb == 0.0 || yw == 0.0)
+    return false;
+
+  const double Xr = xr / yr, Yr = 1.0, Zr = (1.0 - xr - yr) / yr;
+  const double Xg = xg / yg, Yg = 1.0, Zg = (1.0 - xg - yg) / yg;
+  const double Xb = xb / yb, Yb = 1.0, Zb = (1.0 - xb - yb) / yb;
+
+  const double P[9] =
+  {
+    Xr, Xg, Xb,
+    Yr, Yg, Yb,
+    Zr, Zg, Zb
+  };
+
+  double Pinv[9];
+  if (!mat3Inverse(P, Pinv))
+    return false;
+
+  const double Xw = xw / yw, Yw = 1.0, Zw = (1.0 - xw - yw) / yw;
+  const double Sr = Pinv[0] * Xw + Pinv[1] * Yw + Pinv[2] * Zw;
+  const double Sg = Pinv[3] * Xw + Pinv[4] * Yw + Pinv[5] * Zw;
+  const double Sb = Pinv[6] * Xw + Pinv[7] * Yw + Pinv[8] * Zw;
+
+  out[0] = Sr * Xr; out[1] = Sg * Xg; out[2] = Sb * Xb;
+  out[3] = Sr * Yr; out[4] = Sg * Yg; out[5] = Sb * Yb;
+  out[6] = Sr * Zr; out[7] = Sg * Zg; out[8] = Sb * Zb;
+  return true;
+}
+
+/* compute the linear-light matrix that converts the frame's source display
+ * primaries to BT.709. Falls back to identity (assume BT.709) if the metadata
+ * is missing or degenerate. */
+static void lgComputeColorMatrix(LGPlugin * this, const KVMFRFrame * frame)
+{
+  static const double bt709[9] =
+  {
+    1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    0.0, 0.0, 1.0
+  };
+  const double * result = bt709;
+  double src[9], dst709[9], dst709inv[9], conv[9];
+
+  const double xr = frame->hdrDisplayPrimary[0][0] * LG_ST2086_UNIT;
+  const double yr = frame->hdrDisplayPrimary[0][1] * LG_ST2086_UNIT;
+  const double xg = frame->hdrDisplayPrimary[1][0] * LG_ST2086_UNIT;
+  const double yg = frame->hdrDisplayPrimary[1][1] * LG_ST2086_UNIT;
+  const double xb = frame->hdrDisplayPrimary[2][0] * LG_ST2086_UNIT;
+  const double yb = frame->hdrDisplayPrimary[2][1] * LG_ST2086_UNIT;
+  const double xw = frame->hdrWhitePoint[0] * LG_ST2086_UNIT;
+  const double yw = frame->hdrWhitePoint[1] * LG_ST2086_UNIT;
+
+  /* BT.709 / D65 target */
+  if (primariesToXYZ(xr, yr, xg, yg, xb, yb, xw, yw, src) &&
+      primariesToXYZ(0.640, 0.330, 0.300, 0.600, 0.150, 0.060,
+        0.3127, 0.3290, dst709) &&
+      mat3Inverse(dst709, dst709inv))
+  {
+    mat3Mul(dst709inv, src, conv);
+    result = conv;
+  }
+  else
+    printf("HDR metadata missing or invalid, assuming BT.709 primaries\n");
+
+  for (int r = 0; r < 3; ++r)
+    vec3_set(&this->colorMatrix[r],
+      (float)result[r * 3 + 0],
+      (float)result[r * 3 + 1],
+      (float)result[r * 3 + 2]);
+
+  this->hdrScale = 10000.0f / LG_SCRGB_REFERENCE_WHITE;
+}
+
 static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
     LGMPMessage * msg)
 {
@@ -621,6 +776,10 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
   this->dataWidth = frame->dataWidth;
   this->unpack    = false;
   this->hdr       = frame->flags & FRAME_FLAG_HDR;
+  this->hdrPQ     = frame->flags & FRAME_FLAG_HDR_PQ;
+
+  if (this->hdr && this->hdrPQ)
+    lgComputeColorMatrix(this, frame);
 
   this->bpp = 4;
   switch(this->type)
@@ -936,6 +1095,9 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
   if (!texture)
     return;
 
+  const bool hdrDecode =
+    this->type == FRAME_TYPE_RGBA10 && this->hdr && this->hdrPQ;
+
   if (this->type == FRAME_TYPE_RGB_24 || this->type == FRAME_TYPE_BGR_32)
   {
     effect = this->unpackEffect;
@@ -944,6 +1106,19 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
     vec2_set(&outputSize, this->frameWidth, this->frameHeight);
     gs_effect_set_vec2(this->outputSize, &outputSize);
     gs_effect_set_int(this->swap, this->type == FRAME_TYPE_RGB_24 ? 1 : 0);
+  }
+  else if (hdrDecode)
+  {
+    /* decode the PQ (ST.2084) encoded frame to linear scRGB and remap the
+     * source primaries to BT.709 so OBS receives valid GS_CS_709_SCRGB data */
+    effect = this->hdrEffect;
+    gs_effect_set_texture(this->hdrImage, texture);
+    struct vec2 outputSize;
+    vec2_set(&outputSize, this->frameWidth, this->frameHeight);
+    gs_effect_set_vec2(this->hdrOutputSize, &outputSize);
+    for (int i = 0; i < 3; ++i)
+      gs_effect_set_vec3(this->hdrColorMatrix[i], &this->colorMatrix[i]);
+    gs_effect_set_float(this->hdrScaleParam, this->hdrScale);
   }
   else
   {
