@@ -77,6 +77,7 @@ endfunction()
 build_effects(
   effect
   effect/rgb24.effect
+  effect/hdrpq.effect
 )
 
 add_definitions(-D ATOMIC_LOCKING)
