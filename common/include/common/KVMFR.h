@@ -167,7 +167,11 @@ typedef struct KVMFRFrame
   // Display color primaries in 0.00002 units (SMPTE ST 2086 format)
   uint16_t hdrDisplayPrimary[3][2];      // Rx,Ry, Gx,Gy, Bx,By
   uint16_t hdrWhitePoint[2];             // Wx, Wy
-  uint32_t hdrMaxDisplayLuminance;       // Max mastering display luminance (0.0001 cd/m²)
+  // Mastering display luminances follow SMPTE ST 2086 units: the maximum is
+  // in whole cd/m², the minimum in 0.0001 cd/m². (Note: the DXGI docs
+  // describe MaxMasteringLuminance as 0.0001 cd/m², but IddCx/ST 2086 provide
+  // it in whole cd/m².)
+  uint32_t hdrMaxDisplayLuminance;       // Max mastering display luminance (cd/m²)
   uint32_t hdrMinDisplayLuminance;       // Min mastering display luminance (0.0001 cd/m²)
   uint32_t hdrMaxContentLightLevel;      // MaxCLL (cd/m²)
   uint32_t hdrMaxFrameAverageLightLevel; // MaxFALL (cd/m²)

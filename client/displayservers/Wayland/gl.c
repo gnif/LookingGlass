@@ -280,20 +280,20 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
       hdrPQ ? WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ
             : WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR);
 
-  // Set luminance range from metadata.
-  // min_lum is in 0.0001 cd/m² units (multiplied by 10000 as per protocol).
-  // max_lum and reference_lum are in unscaled cd/m² units.
+  // Set the primary colour volume luminances.
+  //   min_lum       : 0.0001 cd/m² (source already scaled) -> pass through
+  //   max_lum       : cd/m² (used only for scRGB; ignored for PQ, where the
+  //                   compositor forces it to min_lum + 10000 cd/m²)
+  //   reference_lum : cd/m² -> BT.2408 diffuse white (203 PQ / 80 scRGB)
   if (wlWm.cmHasLuminances)
     wp_image_description_creator_params_v1_set_luminances(
         wlWm.hdrImageCreator,
-        minDisplayLuminance > 0 ? minDisplayLuminance / 10000 : 50,
-        maxDisplayLuminance > 0 ? maxDisplayLuminance / 10000 : 1000,
-        hdrPQ                   ? 203                         : 80);
+        minDisplayLuminance > 0 ? minDisplayLuminance : 50,
+        maxDisplayLuminance > 0 ? maxDisplayLuminance : 1000,
+        hdrPQ                   ? 203                 : 80);
 
-  // Set mastering display primaries from frame HDR metadata.
-  // Always set when the compositor supports it, falling back to the
-  // primaries from the metadata (even if zero, in which case the
-  // compositor uses its own defaults).
+  // Advertise the content primaries (BT.2020 for PQ). These describe the real
+  // colour gamut of the signal and are safe to forward.
   if (wlWm.cmHasMasteringPrimaries)
     wp_image_description_creator_params_v1_set_mastering_display_primaries(
         wlWm.hdrImageCreator,
@@ -302,10 +302,16 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
         displayPrimary[2][0], displayPrimary[2][1],
         whitePoint[0], whitePoint[1]);
 
-  if (maxCLL > 0)
-    wp_image_description_creator_params_v1_set_max_cll(wlWm.hdrImageCreator, maxCLL);
-  if (maxFALL > 0)
-    wp_image_description_creator_params_v1_set_max_fall(wlWm.hdrImageCreator, maxFALL);
+  // NOTE: we deliberately do NOT forward the host's mastering luminance range,
+  // MaxCLL or MaxFALL. Those values describe the *virtual display* the IDD
+  // advertises to Windows (~1000 cd/m² from our EDID), not the content. LG
+  // captures the full-range scRGB desktop composition and passes it through to
+  // PQ without tone mapping, so the signal spans the entire PQ range (scRGB
+  // 125.0 == 10000 cd/m²). Advertising the virtual display's peak as the
+  // content peak makes the compositor place its tone-mapping knee there and
+  // hard-clip everything brighter, crushing highlights. Leaving these unset
+  // lets the content be treated as standard full-range PQ so the compositor
+  // tone-maps it to the actual physical display.
 
   wlWm.hdrImageDesc =
     wp_image_description_creator_params_v1_create(wlWm.hdrImageCreator);
@@ -332,8 +338,10 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
       WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
 
   wlWm.hdrActive = true;
-  DEBUG_INFO("HDR image description set on surface (%s, %s, %u nits)",
-      hdrPQ ? "PQ" : "scRGB", hdrPQ ? "BT.2020" : "sRGB", maxDisplayLuminance);
+  DEBUG_INFO("HDR image description set on surface (%s, %s, "
+      "maxLum:%u cd/m² minLum:%u (0.0001 cd/m²) maxCLL:%u maxFALL:%u)",
+      hdrPQ ? "PQ" : "scRGB", hdrPQ ? "BT.2020" : "sRGB",
+      maxDisplayLuminance, minDisplayLuminance, maxCLL, maxFALL);
 }
 
 bool waylandRequestHDR(const uint16_t displayPrimary[3][2],

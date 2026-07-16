@@ -396,8 +396,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       // D65 white point (in 0.00002 units):
       srcFormat.whitePoint[0] = 15635;
       srcFormat.whitePoint[1] = 16450;
-      // 80 cd/m² display, 0.005 cd/m² black (in 0.0001 cd/m² units):
-      srcFormat.maxDisplayLuminance = 800000;
+      // Mastering luminances follow SMPTE ST 2086 units: max in whole cd/m²,
+      // min in 0.0001 cd/m². 80 cd/m² display, 0.005 cd/m² black:
+      srcFormat.maxDisplayLuminance = 80;
       srcFormat.minDisplayLuminance = 50;
       // Content light levels unknown:
       srcFormat.maxContentLightLevel      = 0;
