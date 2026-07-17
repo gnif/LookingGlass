@@ -923,13 +923,19 @@ void CIndirectDeviceContext::LGMPTimer()
     ResendCursor();
 }
 
+bool CIndirectDeviceContext::FrameBufferAvailable() const
+{
+  return m_lgmp && m_frameQueue &&
+    lgmpHostQueuePending(m_frameQueue) < LGMP_Q_FRAME_LEN;
+}
+
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
   unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
   const RECT * dirtyRects, unsigned nbDirtyRects)
 {
   PreparedFrameBuffer result = {};
 
-  if (!m_lgmp || !m_frameQueue)
+  if (!FrameBufferAvailable())
     return result;
 
   if (m_width     != dstFormat.desc.Width  ||
@@ -987,10 +993,6 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     m_frameIndex = 0;
 
   KVMFRFrame * fi = m_frame[m_frameIndex];
-
-  // wait until there is room in the queue
-  while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
-    Sleep(0);
 
   if (dstFormat.format == FRAME_TYPE_INVALID)
   {

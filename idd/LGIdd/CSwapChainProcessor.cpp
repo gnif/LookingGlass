@@ -226,18 +226,18 @@ bool CSwapChainProcessor::SwapChainThreadCore()
         lastFrameNumber = frameNumber;
         if (!SwapChainNewFrame(surface, dirtyRectCount, colorSpace, sdrWhiteLevel))
           DEBUG_WARN("Failed to submit frame");
+      }
 
-        // report that all GPU processing for this frame has been queued
-        hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
-        if (FAILED(hr))
-        {
-          // A lost path is normal (mode change/topology rebuild); Windows
-          // reassigns a fresh swap chain. Just exit and let it.
-          if (hr != STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
-            DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
-          break;
-        }
-
+      // Every acquired frame must be finished before the next acquire, even if
+      // its presentation number was a duplicate and no work was submitted.
+      hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
+      if (FAILED(hr))
+      {
+        // A lost path is normal (mode change/topology rebuild); Windows
+        // reassigns a fresh swap chain. Just exit and let it.
+        if (hr != STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+          DEBUG_ERROR_HR(hr, "IddCxSwapChainFinishedProcessingFrame Failed");
+        break;
       }
     }
     else
@@ -339,6 +339,11 @@ static FrameType GetFrameType(DXGI_FORMAT format)
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel)
 {
+  // Never hold an IddCx frame waiting for a slow or disconnected client. In
+  // particular, monitor departure cannot complete until the frame is released.
+  if (!m_devContext->FrameBufferAvailable())
+    return true;
+
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
   if (FAILED(hr))
@@ -532,8 +537,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     frameDirtyRects,
     frameDirtyRectCount);
 
+  // The LGMP timer can fill the queue with a subscriber resend after the early
+  // availability check. Treat this as a dropped frame rather than an error.
   if (!buffer.mem)
-    return false;
+    return true;
 
   CFrameBufferResource * fbRes = m_fbPool.Get(buffer,
     (size_t)layout.Footprint.RowPitch * dstFormat.desc.Height);

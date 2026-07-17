@@ -210,6 +210,7 @@ public:
     uint8_t* mem;
   };
 
+  bool FrameBufferAvailable() const;
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   bool PublishFrameBuffer(unsigned frameIndex);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
