@@ -49,7 +49,7 @@ struct EGL_Damage
   LG_RendererRotate rotate;
 
   // uniforms
-  GLint uTransform;
+  EGL_Uniform * uTransform;
 };
 
 void egl_damageConfigUI(EGL_Damage * damage)
@@ -143,8 +143,8 @@ bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struc
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+  egl_uniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
   egl_shaderUse(damage->shader);
-  glUniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
 
   if (data && data->count != 0)
     egl_desktopRectsUpdate(damage->mesh, (const struct DamageRects *) data,

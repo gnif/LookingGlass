@@ -19,9 +19,8 @@
  */
 
 #include "filter.h"
-#include "framebuffer.h"
+#include "effect.h"
 
-#include "common/countedbuffer.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "cimgui.h"
@@ -34,18 +33,18 @@ typedef struct EGL_FilterFFXCAS
 {
   EGL_Filter base;
 
-  EGL_Shader * shader;
-  bool         enable;
+  EGL_Shader     * shader;
+  EGL_Uniform    * uConsts;
+  EGL_Effect     * effect;
+  EGL_EffectPass * pass;
+  bool             enable;
 
   int useDMA;
   enum EGL_PixelFormat pixFmt;
   unsigned int width, height;
   float sharpness;
-  CountedBuffer * consts;
+  GLuint consts[8];
   bool prepared;
-
-  EGL_Framebuffer * fb;
-  GLuint            sampler;
 }
 EGL_FilterFFXCAS;
 
@@ -77,9 +76,10 @@ static void egl_filterFFXCASEarlyInit(void)
 
 static void casUpdateConsts(EGL_FilterFFXCAS * this)
 {
-  ffxCasConst((uint32_t *) this->consts->data, this->sharpness,
+  ffxCasConst((uint32_t *)this->consts, this->sharpness,
       this->width, this->height,
       this->width, this->height);
+  egl_uniform4uiv(this->uConsts, 2, this->consts);
 }
 
 static void egl_filterFFXCASSaveState(EGL_Filter * filter)
@@ -115,32 +115,26 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
     goto error_this;
   }
 
-  this->consts = countedBufferNew(8 * sizeof(GLuint));
-  if (!this->consts)
+  if (!egl_effectInit(&this->effect))
   {
-    DEBUG_ERROR("Failed to allocate consts buffer");
+    DEBUG_ERROR("Failed to initialize the effect");
     goto error_shader;
   }
 
-  egl_filterFFXCASLoadState(&this->base);
-
-  if (!egl_framebufferInit(&this->fb))
+  if (!egl_effectAddPass(this->effect, this->shader, &this->pass))
   {
-    DEBUG_ERROR("Failed to initialize the framebuffer");
-    goto error_consts;
+    DEBUG_ERROR("Failed to initialize the effect pass");
+    goto error_effect;
   }
 
-  glGenSamplers(1, &this->sampler);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+  this->uConsts = egl_shaderGetUniform(this->shader, "uConsts");
+  egl_filterFFXCASLoadState(&this->base);
 
   *filter = &this->base;
   return true;
 
-error_consts:
-   countedBufferRelease(&this->consts);
+error_effect:
+  egl_effectFree(&this->effect);
 
 error_shader:
   egl_shaderFree(&this->shader);
@@ -154,10 +148,8 @@ static void egl_filterFFXCASFree(EGL_Filter * filter)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
+  egl_effectFree(&this->effect);
   egl_shaderFree(&this->shader);
-  countedBufferRelease(&this->consts);
-  egl_framebufferFree(&this->fb);
-  glDeleteSamplers(1, &this->sampler);
   free(this);
 }
 
@@ -229,19 +221,13 @@ static bool egl_filterFFXCASSetup(EGL_Filter * filter,
       return false;
     }
 
-    egl_shaderSetUniforms(this->shader, &(EGL_Uniform) {
-      .type     = EGL_UNIFORM_TYPE_4UIV,
-      .location = egl_shaderGetUniform(this->shader, "uConsts"),
-      .v        = this->consts,
-    }, 1);
-
     this->useDMA = useDMA;
   }
 
   if (pixFmt == this->pixFmt && this->width == width && this->height == height)
     return true;
 
-  if (!egl_framebufferSetup(this->fb, pixFmt, width, height))
+  if (!egl_effectPassSetup(this->pass, pixFmt, width, height))
     return false;
 
   this->pixFmt   = pixFmt;
@@ -279,16 +265,7 @@ static EGL_Texture * egl_filterFFXCASRun(EGL_Filter * filter,
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
 
-  egl_framebufferBind(this->fb);
-
-  glActiveTexture(GL_TEXTURE0);
-  egl_textureBind(texture);
-  glBindSampler(0, this->sampler);
-
-  egl_shaderUse(this->shader);
-  egl_filterRectsRender(this->shader, rects);
-
-  return egl_framebufferGetTexture(this->fb);
+  return egl_effectRun(this->effect, rects, texture);
 }
 
 EGL_FilterOps egl_filterFFXCASOps =

@@ -85,9 +85,9 @@ add_library(renderer_EGL STATIC
   cursor.c
   damage.c
   framebuffer.c
+  effect.c
   postprocess.c
   ffx.c
-  filter.c
   filter_24bit.c
   filter_ffx_cas.c
   filter_ffx_fsr1.c

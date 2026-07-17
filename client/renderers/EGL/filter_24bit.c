@@ -19,11 +19,10 @@
  */
 
 #include "filter.h"
-#include "framebuffer.h"
+#include "effect.h"
 
 #include <math.h>
 
-#include "common/array.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "cimgui.h"
@@ -43,11 +42,11 @@ typedef struct EGL_Filter24bit
   unsigned int desktopWidth, desktopHeight;
   bool prepared;
 
-  EGL_Uniform       uOutputSize;
+  EGL_Uniform     * uOutputSize;
 
-  EGL_Shader      * shader;
-  EGL_Framebuffer * fb;
-  GLuint            sampler[2];
+  EGL_Shader     * shader;
+  EGL_Effect     * effect;
+  EGL_EffectPass * pass;
 }
 EGL_Filter24bit;
 
@@ -68,24 +67,26 @@ static bool egl_filter24bitInit(EGL_Filter ** filter)
     goto error_this;
   }
 
-  if (!egl_framebufferInit(&this->fb))
+  if (!egl_effectInit(&this->effect))
   {
-    DEBUG_ERROR("Failed to initialize the framebuffer");
+    DEBUG_ERROR("Failed to initialize the effect");
     goto error_shader;
   }
 
-  glGenSamplers(ARRAY_LENGTH(this->sampler), this->sampler);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+  if (!egl_effectAddPass(this->effect, this->shader, &this->pass))
+  {
+    DEBUG_ERROR("Failed to initialize the effect pass");
+    goto error_effect;
+  }
+
+  egl_effectPassSetFilter(this->pass, GL_NEAREST, GL_NEAREST);
+  this->uOutputSize = egl_shaderGetUniform(this->shader, "outputSize");
 
   *filter = &this->base;
   return true;
+
+error_effect:
+  egl_effectFree(&this->effect);
 
 error_shader:
   egl_shaderFree(&this->shader);
@@ -99,9 +100,8 @@ static void egl_filter24bitFree(EGL_Filter * filter)
 {
   EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
+  egl_effectFree(&this->effect);
   egl_shaderFree(&this->shader);
-  egl_framebufferFree(&this->fb);
-  glDeleteSamplers(ARRAY_LENGTH(this->sampler), this->sampler);
   free(this);
 }
 
@@ -133,10 +133,6 @@ static bool egl_filter24bitSetup(EGL_Filter * filter,
       return false;
     }
 
-    this->uOutputSize.type     = EGL_UNIFORM_TYPE_2F;
-    this->uOutputSize.location =
-      egl_shaderGetUniform(this->shader, "outputSize");
-
     this->useDMA   = useDMA;
     this->prepared = false;
   }
@@ -148,7 +144,7 @@ static bool egl_filter24bitSetup(EGL_Filter * filter,
       this->desktopHeight == desktopHeight)
     return true;
 
-  if (!egl_framebufferSetup(this->fb, EGL_PF_BGRA, desktopWidth, desktopHeight))
+  if (!egl_effectPassSetup(this->pass, EGL_PF_BGRA, desktopWidth, desktopHeight))
     return false;
 
   this->format        = pixFmt;
@@ -177,9 +173,7 @@ static bool egl_filter24bitPrepare(EGL_Filter * filter)
   if (this->prepared)
     return true;
 
-  this->uOutputSize.f[0] = this->desktopWidth;
-  this->uOutputSize.f[1] = this->desktopHeight;
-  egl_shaderSetUniforms(this->shader, &this->uOutputSize, 1);
+  egl_uniform2f(this->uOutputSize, this->desktopWidth, this->desktopHeight);
 
   this->prepared = true;
   return true;
@@ -190,17 +184,7 @@ static EGL_Texture * egl_filter24bitRun(EGL_Filter * filter,
 {
   EGL_Filter24bit * this = UPCAST(EGL_Filter24bit, filter);
 
-  egl_framebufferBind(this->fb);
-
-  glActiveTexture(GL_TEXTURE0);
-  egl_textureBind(texture);
-
-  glBindSampler(0, this->sampler[0]);
-
-  egl_shaderUse(this->shader);
-  egl_filterRectsRender(this->shader, rects);
-
-  return egl_framebufferGetTexture(this->fb);
+  return egl_effectRun(this->effect, rects, texture);
 }
 
 EGL_FilterOps egl_filter24bitOps =

@@ -41,12 +41,12 @@ struct CursorTex
 {
   struct EGL_Texture * texture;
   struct EGL_Shader  * shader;
-  GLuint uMousePos;
-  GLuint uScale;
-  GLuint uRotate;
-  GLuint uCBMode;
-  GLint  uMapSDRtoPQ;
-  GLint  uSDRWhiteLevel;
+  EGL_Uniform * uMousePos;
+  EGL_Uniform * uScale;
+  EGL_Uniform * uRotate;
+  EGL_Uniform * uCBMode;
+  EGL_Uniform * uMapSDRtoPQ;
+  EGL_Uniform * uSDRWhiteLevel;
 };
 
 struct CursorPos
@@ -124,12 +124,12 @@ static inline void setCursorTexUniforms(EGL_Cursor * cursor,
     struct CursorTex * t, bool mono, float x, float y,
     float w, float h, float scale)
 {
-  glUniform4f(t->uMousePos     , x, y, w, mono ? h / 2 : h);
-  glUniform1f(t->uScale        , scale);
-  glUniform1i(t->uRotate       , cursor->rotate);
-  glUniform1i(t->uCBMode       , cursor->cbMode);
-  glUniform1i(t->uMapSDRtoPQ   , !mono && atomic_load(&cursor->mapSDRtoPQ));
-  glUniform1f(t->uSDRWhiteLevel, atomic_load(&cursor->sdrWhiteLevel));
+  egl_uniform4f(t->uMousePos     , x, y, w, mono ? h / 2 : h);
+  egl_uniform1f(t->uScale        , scale);
+  egl_uniform1i(t->uRotate       , cursor->rotate);
+  egl_uniform1i(t->uCBMode       , cursor->cbMode);
+  egl_uniform1i(t->uMapSDRtoPQ   , !mono && atomic_load(&cursor->mapSDRtoPQ));
+  egl_uniform1f(t->uSDRWhiteLevel, atomic_load(&cursor->sdrWhiteLevel));
 }
 
 static void cursorTexFree(struct CursorTex * t)
@@ -391,16 +391,16 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
   {
     case LG_CURSOR_MONOCHROME:
     {
-      egl_shaderUse(cursor->norm.shader);
       setCursorTexUniforms(cursor, &cursor->norm, true, pos.x, pos.y,
           size.w, size.h, scale);
+      egl_shaderUse(cursor->norm.shader);
       glBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
-      egl_shaderUse(cursor->mono.shader);
       setCursorTexUniforms(cursor, &cursor->mono, true, pos.x, pos.y,
           size.w, size.h, scale);
+      egl_shaderUse(cursor->mono.shader);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
       egl_modelRender(cursor->model);
@@ -409,16 +409,16 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
     case LG_CURSOR_MASKED_COLOR:
     {
-      egl_shaderUse(cursor->norm.shader);
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
+      egl_shaderUse(cursor->norm.shader);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
-      egl_shaderUse(cursor->mono.shader);
       setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y,
           size.w, size.h, scale);
+      egl_shaderUse(cursor->mono.shader);
       glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
       egl_modelRender(cursor->model);
@@ -427,9 +427,9 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
     case LG_CURSOR_COLOR:
     {
-      egl_shaderUse(cursor->norm.shader);
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
+      egl_shaderUse(cursor->norm.shader);
       glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
