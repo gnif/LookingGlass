@@ -1,0 +1,64 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float multiplier;
+
+sampler_state def_sampler
+{
+  Filter   = Linear;
+  AddressU = Clamp;
+  AddressV = Clamp;
+};
+
+struct VertData
+{
+  float4 pos : POSITION;
+  float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData vert_in)
+{
+  VertData vert_out;
+  vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
+  vert_out.uv  = vert_in.uv;
+  return vert_out;
+}
+
+float srgbToLinearChannel(float value)
+{
+  return value <= 0.04045 ? value / 12.92 :
+    pow((value + 0.055) / 1.055, 2.4);
+}
+
+float3 srgbToLinear(float3 color)
+{
+  return float3(
+    srgbToLinearChannel(color.r),
+    srgbToLinearChannel(color.g),
+    srgbToLinearChannel(color.b));
+}
+
+float4 PSCursor(VertData vert_in) : TARGET
+{
+  float4 pixel = image.Sample(def_sampler, vert_in.uv);
+
+  if (pixel.a > 0.0)
+  {
+    /* Cursor RGB is premultiplied in nonlinear sRGB. Recover the straight
+     * color before decoding it, then premultiply again in linear light. */
+    float3 srgb = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
+    pixel.rgb = srgbToLinear(srgb) * pixel.a * multiplier;
+  }
+  else
+    pixel.rgb = float3(0.0, 0.0, 0.0);
+
+  return pixel;
+}
+
+technique Draw
+{
+  pass
+  {
+    vertex_shader = VSDefault(vert_in);
+    pixel_shader  = PSCursor(vert_in);
+  }
+}
