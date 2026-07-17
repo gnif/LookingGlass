@@ -1196,6 +1196,25 @@ static MsgBoxHandle showSpiceInputHelp(void)
     "through SPICE if you press the capture key.");
 }
 
+struct LGMPClientSessionProbe
+{
+  PLGMPClient client;
+  uint32_t    udataSize;
+  uint8_t *   udata;
+  uint32_t    remoteVersion;
+  LGMP_STATUS status;
+  atomic_bool done;
+};
+
+static int lgmpClientSessionProbe(void * opaque)
+{
+  struct LGMPClientSessionProbe * probe = opaque;
+  probe->status = lgmpClientSessionInit(probe->client, &probe->udataSize,
+      &probe->udata, NULL, &probe->remoteVersion);
+  atomic_store_explicit(&probe->done, true, memory_order_release);
+  return 0;
+}
+
 static int lg_run(void)
 {
   g_cursor.sens = g_params.mouseSens;
@@ -1495,8 +1514,36 @@ restart:
       initialSpiceEnable = 0;
     }
 
-    status = lgmpClientSessionInit(g_state.lgmp, &udataSize, (uint8_t **)&udata,
-        NULL, &remoteVersion);
+    struct LGMPClientSessionProbe probe =
+    {
+      .client = g_state.lgmp,
+      .done   = false,
+    };
+    LGThread * probeThread;
+    if (!lgCreateThread("lgmpSession", lgmpClientSessionProbe, &probe,
+          &probeThread))
+    {
+      DEBUG_ERROR("Failed to create LGMP session probe thread");
+      return -1;
+    }
+
+    while (g_state.state == APP_STATE_RUNNING &&
+        !atomic_load_explicit(&probe.done, memory_order_acquire))
+      g_state.ds->wait(100);
+
+    if (!lgJoinThread(probeThread, NULL))
+    {
+      DEBUG_ERROR("Failed to join LGMP session probe thread");
+      return -1;
+    }
+
+    if (g_state.state != APP_STATE_RUNNING)
+      return -1;
+
+    status        = probe.status;
+    udataSize     = probe.udataSize;
+    udata         = (KVMFR *)probe.udata;
+    remoteVersion = probe.remoteVersion;
     switch(status)
     {
       case LGMP_OK:
