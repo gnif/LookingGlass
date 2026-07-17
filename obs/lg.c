@@ -104,6 +104,7 @@ typedef struct
   bool                 hideMouse;
   bool                 hdr;
   bool                 hdrPQ;
+  float                sdrWhiteLevel;  // source SDR white level in nits
   struct vec3          colorMatrix[3]; // source primaries -> BT.709 (linear)
   float                hdrScale;       // scRGB reference white scaling
 #if LIBOBS_API_MAJOR_VER >= 27
@@ -822,10 +823,12 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
     this->texture = NULL;
   }
 
-  this->dataWidth = frame->dataWidth;
-  this->unpack    = false;
-  this->hdr       = frame->flags & FRAME_FLAG_HDR;
-  this->hdrPQ     = frame->flags & FRAME_FLAG_HDR_PQ;
+  this->dataWidth     = frame->dataWidth;
+  this->unpack        = false;
+  this->hdr           = frame->flags & FRAME_FLAG_HDR;
+  this->hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
+  this->sdrWhiteLevel = frame->sdrWhiteLevel ?
+    (float)frame->sdrWhiteLevel : (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
   if (this->hdr && this->hdrPQ)
     lgComputeColorMatrix(this, frame);
@@ -1223,14 +1226,14 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
     gs_set_scissor_rect(&r);
 
     /* Color cursor pixels are premultiplied sRGB. When rendering into OBS's
-     * linear scRGB space, decode and scale them to its configured SDR white. */
+     * linear scRGB space, decode them and reproduce the source display's SDR
+     * white level reported by the IDD. */
     bool mapCursorToScRGB = false;
     float cursorScale = 1.0f;
 #if LIBOBS_API_MAJOR_VER >= 28
     mapCursorToScRGB = this->colorSpace == GS_CS_709_SCRGB;
     if (mapCursorToScRGB)
-      cursorScale =
-        obs_get_video_sdr_white_level() / LG_SCRGB_REFERENCE_WHITE;
+      cursorScale = this->sdrWhiteLevel / LG_SCRGB_REFERENCE_WHITE;
 #endif
 
     effect = mapCursorToScRGB && !this->cursorMono ?
@@ -1261,9 +1264,13 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
       if (this->cursor.type == CURSOR_TYPE_MASKED_COLOR &&
           this->cursorXorTex)
       {
-        effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-        image  = gs_effect_get_param_by_name(effect, "image");
+        effect = mapCursorToScRGB ?
+          this->cursorEffect : obs_get_base_effect(OBS_EFFECT_DEFAULT);
+        image = mapCursorToScRGB ?
+          this->cursorImage : gs_effect_get_param_by_name(effect, "image");
         gs_effect_set_texture(image, this->cursorXorTex);
+        if (mapCursorToScRGB)
+          gs_effect_set_float(this->cursorMultiplier, cursorScale);
         gs_blend_function_separate(
             GS_BLEND_INVDSTCOLOR, GS_BLEND_INVSRCALPHA,
             GS_BLEND_ZERO       , GS_BLEND_ONE);

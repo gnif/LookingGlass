@@ -957,7 +957,8 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
         m_lastHDRMaxDisplayLuminance       != dstFormat.maxDisplayLuminance       ||
         m_lastHDRMinDisplayLuminance       != dstFormat.minDisplayLuminance       ||
         m_lastHDRMaxContentLightLevel      != dstFormat.maxContentLightLevel      ||
-        m_lastHDRMaxFrameAverageLightLevel != dstFormat.maxFrameAverageLightLevel)
+        m_lastHDRMaxFrameAverageLightLevel != dstFormat.maxFrameAverageLightLevel ||
+        m_lastSDRWhiteLevel                != dstFormat.sdrWhiteLevel)
     {
       ++m_formatVer;
     }
@@ -975,6 +976,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   m_lastHDRMinDisplayLuminance       = dstFormat.minDisplayLuminance;
   m_lastHDRMaxContentLightLevel      = dstFormat.maxContentLightLevel;
   m_lastHDRMaxFrameAverageLightLevel = dstFormat.maxFrameAverageLightLevel;
+  m_lastSDRWhiteLevel                = dstFormat.sdrWhiteLevel;
 
   if (++m_frameIndex == LGMP_Q_FRAME_LEN)
     m_frameIndex = 0;
@@ -1012,6 +1014,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->pitch            = pitch;
   // fi->offset is initialized at startup
   fi->flags            = flags;
+  fi->sdrWhiteLevel    = dstFormat.sdrWhiteLevel;
   fi->rotation         = FRAME_ROT_0;
   fi->type             = dstFormat.format;
 

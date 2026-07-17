@@ -10,6 +10,7 @@ out vec4 color;
 uniform sampler2D sampler1;
 uniform float     scale;
 uniform bool      mapSDRtoPQ;
+uniform float     sdrWhiteLevel;
 
 void main()
 {
@@ -32,7 +33,7 @@ void main()
   if (mapSDRtoPQ)
   {
     vec3 linear = bt709to2020(srgb2lin(tmp.rgb));
-    tmp.rgb = lin2pq(linear * (203.0 / 10000.0));
+    tmp.rgb = lin2pq(linear * (sdrWhiteLevel / 10000.0));
   }
 
   color = tmp;

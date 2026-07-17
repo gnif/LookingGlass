@@ -46,6 +46,7 @@ struct CursorTex
   GLuint uRotate;
   GLuint uCBMode;
   GLint  uMapSDRtoPQ;
+  GLint  uSDRWhiteLevel;
 };
 
 struct CursorPos
@@ -79,6 +80,7 @@ struct EGL_Cursor
   _Atomic(struct CursorSize) size;
   _Atomic(float)             scale;
   _Atomic(bool)              mapSDRtoPQ;
+  _Atomic(float)             sdrWhiteLevel;
 
   struct CursorTex norm;
   struct CursorTex mono;
@@ -108,11 +110,12 @@ static bool cursorTexInit(struct CursorTex * t,
     return false;
   }
 
-  t->uMousePos   = egl_shaderGetUniform(t->shader, "mouse"     );
-  t->uScale      = egl_shaderGetUniform(t->shader, "scale"     );
-  t->uRotate     = egl_shaderGetUniform(t->shader, "rotate"    );
-  t->uCBMode     = egl_shaderGetUniform(t->shader, "cbMode"    );
-  t->uMapSDRtoPQ = egl_shaderGetUniform(t->shader, "mapSDRtoPQ");
+  t->uMousePos      = egl_shaderGetUniform(t->shader, "mouse"        );
+  t->uScale         = egl_shaderGetUniform(t->shader, "scale"        );
+  t->uRotate        = egl_shaderGetUniform(t->shader, "rotate"       );
+  t->uCBMode        = egl_shaderGetUniform(t->shader, "cbMode"       );
+  t->uMapSDRtoPQ    = egl_shaderGetUniform(t->shader, "mapSDRtoPQ"   );
+  t->uSDRWhiteLevel = egl_shaderGetUniform(t->shader, "sdrWhiteLevel");
 
   return true;
 }
@@ -121,11 +124,12 @@ static inline void setCursorTexUniforms(EGL_Cursor * cursor,
     struct CursorTex * t, bool mono, float x, float y,
     float w, float h, float scale)
 {
-  glUniform4f(t->uMousePos  , x, y, w, mono ? h / 2 : h);
-  glUniform1f(t->uScale     , scale);
-  glUniform1i(t->uRotate    , cursor->rotate);
-  glUniform1i(t->uCBMode    , cursor->cbMode);
-  glUniform1i(t->uMapSDRtoPQ, !mono && atomic_load(&cursor->mapSDRtoPQ));
+  glUniform4f(t->uMousePos     , x, y, w, mono ? h / 2 : h);
+  glUniform1f(t->uScale        , scale);
+  glUniform1i(t->uRotate       , cursor->rotate);
+  glUniform1i(t->uCBMode       , cursor->cbMode);
+  glUniform1i(t->uMapSDRtoPQ   , !mono && atomic_load(&cursor->mapSDRtoPQ));
+  glUniform1f(t->uSDRWhiteLevel, atomic_load(&cursor->sdrWhiteLevel));
 }
 
 static void cursorTexFree(struct CursorTex * t)
@@ -174,6 +178,8 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   atomic_init(&(*cursor)->size      , size );
   atomic_init(&(*cursor)->scale     , 1.0f );
   atomic_init(&(*cursor)->mapSDRtoPQ, false);
+  atomic_init(&(*cursor)->sdrWhiteLevel,
+      (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT);
 
   return true;
 }
@@ -435,7 +441,10 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
   return state;
 }
 
-void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ)
+void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
+    float sdrWhiteLevel)
 {
+  atomic_store(&cursor->sdrWhiteLevel, sdrWhiteLevel > 0.0f ?
+      sdrWhiteLevel : (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT);
   atomic_store(&cursor->mapSDRtoPQ, hdrActive && hdrPQ);
 }

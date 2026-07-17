@@ -165,6 +165,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     // Only the buffer2 acquisition path (IddCx 1.10+) reports it; on the legacy
     // path HDR is not available, so default to SDR.
     DXGI_COLOR_SPACE_TYPE colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    UINT sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
 #ifdef HAS_IDDCX_110
     if (m_devContext->CanProcessFP16())
@@ -179,10 +180,11 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       hr = IddCxSwapChainReleaseAndAcquireBuffer2(m_hSwapChain, &acquireIn, &buffer);
       if (SUCCEEDED(hr))
       {
-        frameNumber = buffer.MetaData.PresentationFrameNumber;
+        frameNumber    = buffer.MetaData.PresentationFrameNumber;
         dirtyRectCount = buffer.MetaData.DirtyRectCount;
-        surface = buffer.MetaData.pSurface;
-        colorSpace = buffer.MetaData.SurfaceColorSpace;
+        surface        = buffer.MetaData.pSurface;
+        colorSpace     = buffer.MetaData.SurfaceColorSpace;
+        sdrWhiteLevel  = buffer.MetaData.SdrWhiteLevel;
       }
     }
     else
@@ -222,7 +224,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       if (frameNumber != lastFrameNumber)
       {
         lastFrameNumber = frameNumber;
-        SwapChainNewFrame(surface, dirtyRectCount, colorSpace);
+        SwapChainNewFrame(surface, dirtyRectCount, colorSpace, sdrWhiteLevel);
 
         // report that all GPU processing for this frame has been queued
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -334,7 +336,7 @@ static FrameType GetFrameType(DXGI_FORMAT format)
 }
 
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
-  DXGI_COLOR_SPACE_TYPE colorSpace)
+  DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel)
 {
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
@@ -382,10 +384,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   D3D12_RESOURCE_DESC srcDesc = srcRes->GetRes()->GetDesc();
   D12FrameFormat srcFormat = {};
-  srcFormat.desc   = srcDesc;
-  srcFormat.width  = (unsigned)srcDesc.Width;
-  srcFormat.height = srcDesc.Height;
-  srcFormat.format = GetFrameType(srcDesc.Format);
+  srcFormat.desc          = srcDesc;
+  srcFormat.width         = (unsigned)srcDesc.Width;
+  srcFormat.height        = srcDesc.Height;
+  srcFormat.format        = GetFrameType(srcDesc.Format);
+  srcFormat.sdrWhiteLevel = sdrWhiteLevel;
 
   switch (colorSpace)
   {

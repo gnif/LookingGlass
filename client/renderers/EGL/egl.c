@@ -631,7 +631,8 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   egl_desktopSetNativeHDR(this->desktop, useNativeHDR);
 
   // Tell the cursor shader whether to map SDR cursor colors into PQ
-  egl_cursorSetHDRState(this->cursor, useNativeHDR, format.hdrPQ);
+  egl_cursorSetHDRState(this->cursor, useNativeHDR, format.hdrPQ,
+      format.sdrWhiteLevel);
 
   egl_update_scale_type(this);
   egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);

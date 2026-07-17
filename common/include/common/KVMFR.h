@@ -28,7 +28,11 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 20
+#define KVMFR_VERSION 21
+
+// Fallback used by producers that cannot report the source display's SDR
+// white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
+#define KVMFR_SDR_WHITE_LEVEL_DEFAULT 203u
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
@@ -175,6 +179,10 @@ typedef struct KVMFRFrame
   uint32_t hdrMinDisplayLuminance;       // Min mastering display luminance (0.0001 cd/m²)
   uint32_t hdrMaxContentLightLevel;      // MaxCLL (cd/m²)
   uint32_t hdrMaxFrameAverageLightLevel; // MaxFALL (cd/m²)
+
+  // White level in nits for SDR content composited into an HDR frame, such as
+  // the hardware cursor. Valid for all frames; SDR modes normally report 80.
+  uint32_t sdrWhiteLevel;
 }
 KVMFRFrame;
 

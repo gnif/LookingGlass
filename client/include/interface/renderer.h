@@ -92,6 +92,7 @@ typedef struct LG_RendererFormat
   uint32_t hdrMinDisplayLuminance;
   uint32_t hdrMaxContentLightLevel;
   uint32_t hdrMaxFrameAverageLightLevel;
+  uint32_t sdrWhiteLevel;
 }
 LG_RendererFormat;
 

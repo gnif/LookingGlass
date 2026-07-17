@@ -347,6 +347,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
   fi->pitch             = frame.pitch;
   // fi->offset is initialized at startup
   fi->flags             = flags;
+  fi->sdrWhiteLevel     = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
   fi->damageRectsCount  = frame.damageRectsCount;
   memcpy(fi->damageRects, frame.damageRects,
     frame.damageRectsCount * sizeof(FrameDamageRect));
