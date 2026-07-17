@@ -34,6 +34,9 @@ void egl_postProcessFree(EGL_PostProcess ** pp);
 /* create and add a filter to this processor */
 bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops);
 
+/* mark the filter chain for rebuilding before its next run */
+void egl_postProcessInvalidate(EGL_PostProcess * this);
+
 /* returns true if the configuration was modified since the last run */
 bool egl_postProcessConfigModified(EGL_PostProcess * this);
 

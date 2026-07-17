@@ -76,6 +76,9 @@ static void egl_filterFFXCASEarlyInit(void)
 
 static void casUpdateConsts(EGL_FilterFFXCAS * this)
 {
+  if (!this->width || !this->height)
+    return;
+
   ffxCasConst((uint32_t *)this->consts, this->sharpness,
       this->width, this->height,
       this->width, this->height);
@@ -96,6 +99,8 @@ static void egl_filterFFXCASLoadState(EGL_Filter * filter)
 
   this->enable    = option_get_bool ("eglFilter", "ffxCAS");
   this->sharpness = option_get_float("eglFilter", "ffxCASSharpness");
+  casUpdateConsts(this);
+  this->prepared = false;
 }
 
 static bool egl_filterFFXCASInit(EGL_Filter ** filter)

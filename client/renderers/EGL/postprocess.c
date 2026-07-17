@@ -48,12 +48,25 @@ static const EGL_FilterOps * EGL_Filters[] =
 
 struct EGL_PostProcess
 {
-  Vector filters, internalFilters;
+  Vector filters, internalFilters, activeFilters;
   EGL_Texture * output;
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
 
+  struct
+  {
+    bool valid;
+    EGL_PixelFormat pixFmt;
+    unsigned int inputX, inputY;
+    int desktopWidth, desktopHeight;
+    unsigned int targetX, targetY;
+    bool useDMA;
+    unsigned int outputX, outputY;
+  }
+  config;
+
   EGL_DesktopRects * rects;
+  GLfloat matrix[6];
 
   StringList presets;
   char * presetDir;
@@ -253,6 +266,13 @@ static void reorderFilters(struct EGL_PostProcess * this)
   {
     DEBUG_ERROR("Failed to allocate memory");
     stringlist_free(&order);
+    return;
+  }
+
+  if (!*orderStr)
+  {
+    stringlist_free(&order);
+    free(orderStr);
     return;
   }
 
@@ -515,7 +535,7 @@ static void configUI(void * opaque, int * id)
     igSetTooltip(filters[moveIdx]->ops.name);
   }
 
-  if (doMove)
+  if (doMove && mouseIdx != moveIdx)
   {
     EGL_Filter * tmp = filters[moveIdx];
     if (mouseIdx > moveIdx) // moving down
@@ -530,11 +550,12 @@ static void configUI(void * opaque, int * id)
           (moveIdx - mouseIdx) * sizeof(EGL_Filter *));
 
     filters[mouseIdx] = tmp;
+    redraw = true;
   }
 
   if (redraw)
   {
-    atomic_store(&this->modified, true);
+    egl_postProcessInvalidate(this);
     app_invalidateWindow(true);
   }
 }
@@ -547,6 +568,7 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     DEBUG_ERROR("Failed to allocate memory");
     return false;
   }
+  atomic_init(&this->modified, false);
 
   if (!vector_create(&this->filters,
         sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters)))
@@ -562,10 +584,17 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
     goto error_filters;
   }
 
+  if (!vector_create(&this->activeFilters,
+        sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters) + 1))
+  {
+    DEBUG_ERROR("Failed to allocate the active filter list");
+    goto error_internal;
+  }
+
   if (!egl_desktopRectsInit(&this->rects, 1))
   {
     DEBUG_ERROR("Failed to initialize the desktop rects");
-    goto error_internal;
+    goto error_active;
   }
 
   loadPresetList(this);
@@ -574,6 +603,9 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
 
   *pp = this;
   return true;
+
+error_active:
+  vector_destroy(&this->activeFilters);
 
 error_internal:
   vector_destroy(&this->internalFilters);
@@ -592,6 +624,8 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
     return;
 
   EGL_PostProcess * this = *pp;
+
+  vector_destroy(&this->activeFilters);
 
   EGL_Filter ** filter;
   vector_forEachRef(filter, &this->filters)
@@ -618,55 +652,62 @@ bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
   if (!egl_filterInit(ops, &filter))
     return false;
 
-  if (ops->type == EGL_FILTER_TYPE_INTERNAL)
-    vector_push(&this->internalFilters, &filter);
-  else
-    vector_push(&this->filters, &filter);
+  Vector * filters = ops->type == EGL_FILTER_TYPE_INTERNAL ?
+    &this->internalFilters : &this->filters;
+  if (!vector_push(filters, &filter))
+  {
+    egl_filterFree(&filter);
+    return false;
+  }
+
+  if (ops->type != EGL_FILTER_TYPE_INTERNAL)
+    reorderFilters(this);
+
+  egl_postProcessInvalidate(this);
   return true;
+}
+
+void egl_postProcessInvalidate(EGL_PostProcess * this)
+{
+  atomic_store_explicit(&this->modified, true, memory_order_release);
 }
 
 bool egl_postProcessConfigModified(EGL_PostProcess * this)
 {
-  return atomic_load(&this->modified);
+  return atomic_load_explicit(&this->modified, memory_order_acquire);
 }
 
-bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
-    EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
+static bool configMatches(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
+    unsigned int inputX, unsigned int inputY,
+    int desktopWidth, int desktopHeight,
     unsigned int targetX, unsigned int targetY, bool useDMA)
 {
-  if (targetX == 0 && targetY == 0)
-    DEBUG_FATAL("targetX || targetY == 0");
+  return
+    this->config.valid                         &&
+    this->config.pixFmt        == pixFmt       &&
+    this->config.inputX        == inputX       &&
+    this->config.inputY        == inputY       &&
+    this->config.desktopWidth  == desktopWidth &&
+    this->config.desktopHeight == desktopHeight &&
+    this->config.targetX       == targetX      &&
+    this->config.targetY       == targetY      &&
+    this->config.useDMA        == useDMA;
+}
 
-  EGL_Filter * lastFilter = NULL;
-  unsigned int sizeX, sizeY;
+static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
+    unsigned int inputX, unsigned int inputY,
+    int desktopWidth, int desktopHeight,
+    unsigned int targetX, unsigned int targetY, bool useDMA)
+{
+  this->config.valid = false;
+  vector_clear(&this->activeFilters);
 
-  //TODO: clean this up
-  GLuint _unused;
-  EGL_PixelFormat pixFmt;
-  if (egl_textureGet(tex, &_unused,
-        &sizeX, &sizeY, &pixFmt) != EGL_TEX_STATUS_OK)
-    return false;
-
-  if (atomic_exchange(&this->modified, false))
-  {
-    rects = this->rects;
-    egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
-  }
-
-  GLfloat matrix[6];
-  egl_desktopRectsMatrix(matrix, desktopWidth, desktopHeight, 0.0f, 0.0f,
-      1.0f, 1.0f, LG_ROTATE_0);
-
-  EGL_FilterRects filterRects = {
-    .rects  = rects,
-    .matrix = matrix,
-    .width  = desktopWidth,
-    .height = desktopHeight,
-  };
+  unsigned int outputX = inputX;
+  unsigned int outputY = inputY;
+  EGL_PixelFormat outputFormat = pixFmt;
+  bool inputDMA = useDMA;
 
   EGL_Filter * filter;
-  EGL_Texture * texture = tex;
-
   const Vector * lists[] =
   {
     &this->internalFilters,
@@ -679,26 +720,108 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     {
       egl_filterSetOutputResHint(filter, targetX, targetY);
 
-      if (!egl_filterSetup(filter, pixFmt, sizeX, sizeY,
-            desktopWidth, desktopHeight, useDMA) ||
+      if (!egl_filterSetup(filter, outputFormat, outputX, outputY,
+            desktopWidth, desktopHeight, inputDMA) ||
           !egl_filterPrepare(filter))
         continue;
 
-      texture = egl_filterRun(filter, &filterRects, texture);
-      egl_filterGetOutputRes(filter, &sizeX, &sizeY, &pixFmt);
+      if (!vector_push(&this->activeFilters, &filter))
+      {
+        vector_clear(&this->activeFilters);
+        return false;
+      }
 
-      if (lastFilter)
-        egl_filterRelease(lastFilter);
+      egl_filterGetOutputRes(filter, &outputX, &outputY, &outputFormat);
 
-      lastFilter = filter;
-
-      // the first filter to run will convert to a normal texture
-      useDMA = false;
+      /* The first active filter converts external DMA textures into a normal
+       * texture for every subsequent filter. */
+      inputDMA = false;
     }
 
+  egl_desktopRectsMatrix(this->matrix,
+      desktopWidth, desktopHeight, 0.0f, 0.0f, 1.0f, 1.0f, LG_ROTATE_0);
+
+  this->config.pixFmt        = pixFmt;
+  this->config.inputX        = inputX;
+  this->config.inputY        = inputY;
+  this->config.desktopWidth  = desktopWidth;
+  this->config.desktopHeight = desktopHeight;
+  this->config.targetX       = targetX;
+  this->config.targetY       = targetY;
+  this->config.useDMA        = useDMA;
+  this->config.outputX       = outputX;
+  this->config.outputY       = outputY;
+  this->config.valid         = true;
+  return true;
+}
+
+bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
+    EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
+    unsigned int targetX, unsigned int targetY, bool useDMA)
+{
+  if (targetX == 0 && targetY == 0)
+    DEBUG_FATAL("targetX || targetY == 0");
+
+  unsigned int inputX, inputY;
+  GLuint _unused;
+  EGL_PixelFormat pixFmt;
+  if (egl_textureGet(tex, &_unused,
+        &inputX, &inputY, &pixFmt) != EGL_TEX_STATUS_OK)
+    return false;
+
+  const bool modified =
+    atomic_load_explicit(&this->modified, memory_order_acquire);
+  const bool reconfigure = modified ||
+    !configMatches(this, pixFmt, inputX, inputY,
+        desktopWidth, desktopHeight, targetX, targetY, useDMA);
+
+  if (reconfigure)
+  {
+    if (modified)
+      atomic_exchange_explicit(
+          &this->modified, false, memory_order_acq_rel);
+
+    if (!configureChain(this, pixFmt, inputX, inputY,
+          desktopWidth, desktopHeight, targetX, targetY, useDMA))
+    {
+      egl_postProcessInvalidate(this);
+      return false;
+    }
+
+    rects = this->rects;
+    egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
+  }
+
+  EGL_FilterRects filterRects = {
+    .rects  = rects,
+    .matrix = this->matrix,
+    .width  = desktopWidth,
+    .height = desktopHeight,
+  };
+
+  EGL_Texture * texture = tex;
+  EGL_Filter * filter;
+  EGL_Filter * lastFilter = NULL;
+  vector_forEach(filter, &this->activeFilters)
+  {
+    texture = egl_filterRun(filter, &filterRects, texture);
+    if (!texture)
+    {
+      DEBUG_ERROR("EGL filter '%s' failed", filter->ops.id);
+      this->output = NULL;
+      egl_postProcessInvalidate(this);
+      return false;
+    }
+
+    if (lastFilter)
+      egl_filterRelease(lastFilter);
+
+    lastFilter = filter;
+  }
+
   this->output  = texture;
-  this->outputX = sizeX;
-  this->outputY = sizeY;
+  this->outputX = this->config.outputX;
+  this->outputY = this->config.outputY;
   return true;
 }
 
