@@ -723,7 +723,38 @@ KVMFROS os_getKVMFRType(void)
   return KVMFR_OS_WINDOWS;
 }
 
-static bool getProductName(char * buffer, DWORD bufferSize)
+typedef PWSTR (WINAPI *PFN_BRANDING_FORMAT_STRING)(PCWSTR pstrFormat);
+
+static bool getBrandingVersionString(char * buffer, DWORD bufferSize)
+{
+  HMODULE hWinBrand = LoadLibraryExA("winbrand.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+
+  if (!hWinBrand)
+    return false;
+
+  PFN_BRANDING_FORMAT_STRING BrandingFormatString =
+    (PFN_BRANDING_FORMAT_STRING) GetProcAddress(hWinBrand, "BrandingFormatString");
+
+  bool succeeded = false;
+
+  if (BrandingFormatString)
+  {
+    PWSTR pwstrOSName = BrandingFormatString(L"%WINDOWS_LONG%");
+
+    if (pwstrOSName)
+    {
+      if (WideCharToMultiByte(CP_UTF8, 0, pwstrOSName, -1, buffer, bufferSize, NULL, NULL))
+        succeeded = true;
+
+      GlobalFree((HGLOBAL)pwstrOSName);
+    }
+  }
+
+  FreeLibrary(hWinBrand);
+  return succeeded;
+}
+
+static bool getRegistryProductName(char * buffer, DWORD bufferSize)
 {
   LSTATUS status = RegGetValueA(HKEY_LOCAL_MACHINE,
     "Software\\Microsoft\\Windows NT\\CurrentVersion", "ProductName",
@@ -748,7 +779,8 @@ const char * os_getOSName(void)
   GetVersionExA(&osvi);
 
   char productName[1024];
-  if (getProductName(productName, sizeof(productName)))
+  if (getBrandingVersionString(productName, sizeof(productName)) ||
+      getRegistryProductName(productName, sizeof(productName)))
   {
     alloc_sprintf(
       &app.osVersion,
