@@ -38,6 +38,7 @@
 
 #include "rgb24.effect.h"
 #include "hdrpq.effect.h"
+#include "cursor.effect.h"
 
 /* scRGB reference white in cd/m² (OBS GS_CS_709_SCRGB is defined as
  * 1.0 = 80 cd/m²). PQ encodes an absolute 0..10000 cd/m² range, so linear
@@ -142,6 +143,10 @@ typedef struct
   gs_eparam_t * hdrOutputSize;
   gs_eparam_t * hdrColorMatrix[3];
   gs_eparam_t * hdrScaleParam;
+
+  gs_effect_t * cursorEffect;
+  gs_eparam_t * cursorImage;
+  gs_eparam_t * cursorMultiplier;
 }
 LGPlugin;
 
@@ -202,6 +207,24 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
       this->hdrEffect, "colorMatrix2");
   this->hdrScaleParam    = gs_effect_get_param_by_name(
       this->hdrEffect, "scale"       );
+
+  this->cursorEffect = gs_effect_create(
+      b_effect_cursor_effect, "cursor", &error);
+  if (!this->cursorEffect)
+  {
+    blog(LOG_ERROR, "%s", error);
+    bfree(error);
+    gs_effect_destroy(this->hdrEffect);
+    gs_effect_destroy(this->unpackEffect);
+    bfree(this);
+    obs_leave_graphics();
+    return NULL;
+  }
+
+  this->cursorImage      = gs_effect_get_param_by_name(
+      this->cursorEffect, "image"     );
+  this->cursorMultiplier = gs_effect_get_param_by_name(
+      this->cursorEffect, "multiplier");
   obs_leave_graphics();
 
   os_sem_init (&this->frameSem , 0);
@@ -320,6 +343,7 @@ static void lgDestroy(void * data)
   obs_enter_graphics();
   gs_effect_destroy(this->unpackEffect);
   gs_effect_destroy(this->hdrEffect);
+  gs_effect_destroy(this->cursorEffect);
   obs_leave_graphics();
 
   bfree(this);
@@ -1198,9 +1222,24 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
     };
     gs_set_scissor_rect(&r);
 
-    effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-    gs_eparam_t * image = gs_effect_get_param_by_name(effect, "image");
+    /* Color cursor pixels are premultiplied sRGB. When rendering into OBS's
+     * linear scRGB space, decode and scale them to its configured SDR white. */
+    bool mapCursorToScRGB = false;
+    float cursorScale = 1.0f;
+#if LIBOBS_API_MAJOR_VER >= 28
+    mapCursorToScRGB = this->colorSpace == GS_CS_709_SCRGB;
+    if (mapCursorToScRGB)
+      cursorScale =
+        obs_get_video_sdr_white_level() / LG_SCRGB_REFERENCE_WHITE;
+#endif
+
+    effect = mapCursorToScRGB && !this->cursorMono ?
+      this->cursorEffect : obs_get_base_effect(OBS_EFFECT_DEFAULT);
+    gs_eparam_t * image = mapCursorToScRGB && !this->cursorMono ?
+      this->cursorImage : gs_effect_get_param_by_name(effect, "image");
     gs_effect_set_texture(image, this->cursorTex);
+    if (mapCursorToScRGB && !this->cursorMono)
+      gs_effect_set_float(this->cursorMultiplier, cursorScale);
 
     gs_matrix_push();
     gs_matrix_translate3f(
@@ -1213,13 +1252,17 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
 
     if (!this->cursorMono)
     {
-      gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
+      gs_blend_function_separate(
+          GS_BLEND_ONE, GS_BLEND_INVSRCALPHA,
+          GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
       while (gs_effect_loop(effect, "Draw"))
         gs_draw_sprite(this->cursorTex, 0, 0, 0);
 
       if (this->cursor.type == CURSOR_TYPE_MASKED_COLOR &&
           this->cursorXorTex)
       {
+        effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+        image  = gs_effect_get_param_by_name(effect, "image");
         gs_effect_set_texture(image, this->cursorXorTex);
         gs_blend_function_separate(
             GS_BLEND_INVDSTCOLOR, GS_BLEND_INVSRCALPHA,

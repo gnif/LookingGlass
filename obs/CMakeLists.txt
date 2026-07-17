@@ -78,6 +78,7 @@ build_effects(
   effect
   effect/rgb24.effect
   effect/hdrpq.effect
+  effect/cursor.effect
 )
 
 add_definitions(-D ATOMIC_LOCKING)
