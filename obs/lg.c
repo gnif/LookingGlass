@@ -677,10 +677,6 @@ static DMAFrameInfo * dmabufOpenDMAFrameInfo(LGPlugin * this, LGMPMessage * msg,
 }
 #endif
 
-/* chromaticity coordinates are transported in SMPTE ST 2086 units of
- * 0.00002 */
-#define LG_ST2086_UNIT 0.00002
-
 static bool mat3Inverse(const double m[9], double out[9])
 {
   const double det =
@@ -748,10 +744,10 @@ static bool primariesToXYZ(double xr, double yr, double xg, double yg,
   return true;
 }
 
-/* compute the linear-light matrix that converts the frame's source display
- * primaries to BT.709. Falls back to identity (assume BT.709) if the metadata
- * is missing or degenerate. */
-static void lgComputeColorMatrix(LGPlugin * this, const KVMFRFrame * frame)
+/* Compute the linear-light matrix that converts BT.2020 to BT.709. HDR10
+ * mastering-display primaries describe the display used to master the
+ * content; they do not change the BT.2020 encoding gamut of the pixels. */
+static void lgComputeColorMatrix(LGPlugin * this)
 {
   static const double bt709[9] =
   {
@@ -762,14 +758,11 @@ static void lgComputeColorMatrix(LGPlugin * this, const KVMFRFrame * frame)
   const double * result = bt709;
   double src[9], dst709[9], dst709inv[9], conv[9];
 
-  const double xr = frame->hdrDisplayPrimary[0][0] * LG_ST2086_UNIT;
-  const double yr = frame->hdrDisplayPrimary[0][1] * LG_ST2086_UNIT;
-  const double xg = frame->hdrDisplayPrimary[1][0] * LG_ST2086_UNIT;
-  const double yg = frame->hdrDisplayPrimary[1][1] * LG_ST2086_UNIT;
-  const double xb = frame->hdrDisplayPrimary[2][0] * LG_ST2086_UNIT;
-  const double yb = frame->hdrDisplayPrimary[2][1] * LG_ST2086_UNIT;
-  const double xw = frame->hdrWhitePoint[0] * LG_ST2086_UNIT;
-  const double yw = frame->hdrWhitePoint[1] * LG_ST2086_UNIT;
+  /* BT.2020 / D65 source */
+  const double xr = 0.7080, yr = 0.2920;
+  const double xg = 0.1700, yg = 0.7970;
+  const double xb = 0.1310, yb = 0.0460;
+  const double xw = 0.3127, yw = 0.3290;
 
   /* BT.709 / D65 target */
   if (primariesToXYZ(xr, yr, xg, yg, xb, yb, xw, yw, src) &&
@@ -781,7 +774,7 @@ static void lgComputeColorMatrix(LGPlugin * this, const KVMFRFrame * frame)
     result = conv;
   }
   else
-    printf("HDR metadata missing or invalid, assuming BT.709 primaries\n");
+    printf("Failed to compute BT.2020 to BT.709 color matrix\n");
 
   for (int r = 0; r < 3; ++r)
     vec3_set(&this->colorMatrix[r],
@@ -831,7 +824,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
     (float)frame->sdrWhiteLevel : (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
   if (this->hdr && this->hdrPQ)
-    lgComputeColorMatrix(this, frame);
+    lgComputeColorMatrix(this);
 
   this->bpp = 4;
   switch(this->type)
