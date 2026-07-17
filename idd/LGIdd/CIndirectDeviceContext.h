@@ -64,10 +64,15 @@ private:
   IDDCX_ADAPTER m_adapter       = nullptr;
   IDDCX_MONITOR m_monitor       = nullptr;
   bool          m_replugMonitor = false;
+  bool          m_replugPending = false;
+  bool          m_monitorDeparted = false;
+  bool          m_swapChainAssigned = false;
+  bool          m_swapChainReady = false;
+  bool          m_waitForSwapChainRelease = false;
 
   // Guards the adapter/monitor init handshake and the replug state machine
-  // (m_monitor, m_replugMonitor, m_doSetMode, m_setMode). These are touched
-  // from the IddCx callback threads and the LGMP timer thread.
+  // (monitor/replug/swap-chain state, m_doSetMode, m_setMode). These are
+  // touched from the IddCx callback threads, swap-chain thread and LGMP timer.
   SRWLOCK m_stateLock = SRWLOCK_INIT;
 
   // Retry state for InitAdapter. At boot the IVSHMEM device may not have
@@ -166,6 +171,7 @@ private:
   // Set by ReplugMonitor after a departure to rebuild the monitor from the LGMP
   // timer, off the IddCx callback thread.
   volatile LONG m_finishInitQueued = 0;
+  volatile LONG m_replugQueued     = 0;
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
@@ -182,6 +188,9 @@ public:
 
   void OnMonitorDestroyed(IDDCX_MONITOR monitor);
   void OnAssignSwapChain();
+  void OnSwapChainAssigned();
+  void OnSwapChainReleased();
+  void OnSwapChainReady();
 
   NTSTATUS ParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs, IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs);

@@ -348,8 +348,11 @@ void CIndirectDeviceContext::ReplugMonitor()
 {
   AcquireSRWLockExclusive(&m_stateLock);
 
-  if (m_replugMonitor)
+  if (m_replugMonitor || (m_swapChainAssigned && !m_swapChainReady))
   {
+    // Coalesce changes received while a swap chain is being initialized, the
+    // old one is draining, or its replacement is being initialized.
+    m_replugPending = true;
     ReleaseSRWLockExclusive(&m_stateLock);
     return;
   }
@@ -357,6 +360,8 @@ void CIndirectDeviceContext::ReplugMonitor()
   IDDCX_MONITOR monitor = m_monitor;
   if (monitor == WDF_NO_HANDLE)
   {
+    m_replugMonitor   = true;
+    m_monitorDeparted = true;
     ReleaseSRWLockExclusive(&m_stateLock);
     // Either no monitor yet, or one is already pending; build it now and
     // cancel any queued rebuild so we do not create two.
@@ -367,8 +372,10 @@ void CIndirectDeviceContext::ReplugMonitor()
 
   // Clear the handle before departing so nothing calls an IddCx monitor API on
   // a departing/destroyed handle. FinishInit publishes the new one.
-  m_replugMonitor = true;
-  m_monitor       = nullptr;
+  m_replugMonitor             = true;
+  m_monitorDeparted           = false;
+  m_waitForSwapChainRelease   = m_swapChainAssigned;
+  m_monitor                   = nullptr;
   ReleaseSRWLockExclusive(&m_stateLock);
 
   DEBUG_TRACE("ReplugMonitor");
@@ -376,17 +383,25 @@ void CIndirectDeviceContext::ReplugMonitor()
   if (!NT_SUCCESS(status))
   {
     AcquireSRWLockExclusive(&m_stateLock);
-    m_replugMonitor = false;
-    m_monitor       = monitor;
+    m_replugMonitor           = false;
+    m_replugPending           = false;
+    m_monitorDeparted         = false;
+    m_waitForSwapChainRelease = false;
+    m_monitor                 = monitor;
     ReleaseSRWLockExclusive(&m_stateLock);
     DEBUG_ERROR("IddCxMonitorDeparture Failed (0x%08x)", status);
     return;
   }
 
-  // Always queue the rebuild here rather than relying on the unassign callback:
-  // if the monitor had no swap chain (e.g. recovering from a lost path) no
-  // unassign fires. The timer runs FinishInit off this thread.
-  InterlockedExchange(&m_finishInitQueued, 1);
+  AcquireSRWLockExclusive(&m_stateLock);
+  m_monitorDeparted = true;
+  const bool rebuild = !m_waitForSwapChainRelease;
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  // If there was no swap chain there will be no unassign callback to queue the
+  // rebuild. Otherwise OnSwapChainReleased does so after teardown has drained.
+  if (rebuild)
+    InterlockedExchange(&m_finishInitQueued, 1);
 }
 
 void CIndirectDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
@@ -407,6 +422,63 @@ void CIndirectDeviceContext::OnAssignSwapChain()
 
   if (doSetMode)
     g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
+}
+
+void CIndirectDeviceContext::OnSwapChainAssigned()
+{
+  AcquireSRWLockExclusive(&m_stateLock);
+  m_swapChainAssigned = true;
+  m_swapChainReady    = false;
+  ReleaseSRWLockExclusive(&m_stateLock);
+}
+
+void CIndirectDeviceContext::OnSwapChainReleased()
+{
+  bool rebuild = false;
+
+  AcquireSRWLockExclusive(&m_stateLock);
+  m_swapChainAssigned = false;
+  m_swapChainReady    = false;
+  if (m_replugMonitor && m_waitForSwapChainRelease)
+  {
+    m_waitForSwapChainRelease = false;
+    rebuild = m_monitorDeparted;
+  }
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  if (rebuild)
+    InterlockedExchange(&m_finishInitQueued, 1);
+}
+
+void CIndirectDeviceContext::OnSwapChainReady()
+{
+  bool replug = false;
+
+  AcquireSRWLockExclusive(&m_stateLock);
+  m_swapChainReady = true;
+  if (m_replugMonitor)
+  {
+    m_replugMonitor   = false;
+    m_monitorDeparted = false;
+    if (m_replugPending)
+    {
+      m_replugPending = false;
+      replug = true;
+    }
+  }
+  else if (m_replugPending)
+  {
+    m_replugPending = false;
+    replug = true;
+  }
+  ReleaseSRWLockExclusive(&m_stateLock);
+
+  // Do not expose the context to pipe reload requests until the initial swap
+  // chain has reached the same ready state used by the replug gate.
+  g_pipe.SetDeviceContext(this);
+
+  if (replug)
+    InterlockedExchange(&m_replugQueued, 1);
 }
 
 static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
@@ -866,9 +938,12 @@ void CIndirectDeviceContext::LGMPTimer()
   if (InterlockedExchange(&m_finishInitQueued, 0))
   {
     FinishInit(0);
-    AcquireSRWLockExclusive(&m_stateLock);
-    m_replugMonitor = false;
-    ReleaseSRWLockExclusive(&m_stateLock);
+    return;
+  }
+
+  if (InterlockedExchange(&m_replugQueued, 0))
+  {
+    ReplugMonitor();
     return;
   }
 
