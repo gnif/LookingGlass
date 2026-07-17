@@ -110,6 +110,9 @@ struct AppState
   bool                 alignToGuest;
   bool                 spiceClose;
 
+  atomic_uint_least64_t shaderMousePosition;
+  atomic_uint_least32_t shaderMouseState;
+
   LG_Renderer        * lgr;
   atomic_int           lgrResize;
   LG_Lock              lgrLock;

@@ -205,6 +205,35 @@ bool egl_effectPassSetup(EGL_EffectPass * pass, enum EGL_PixelFormat pixFmt,
   return true;
 }
 
+EGL_Texture * egl_effectPassGetTexture(EGL_EffectPass * pass)
+{
+  return pass->configured ? egl_framebufferGetTexture(pass->framebuffer) : NULL;
+}
+
+EGL_Texture * egl_effectPassRun(EGL_EffectPass * pass, EGL_FilterRects * rects,
+    EGL_Texture * const * textures, unsigned int textureCount)
+{
+  if (!pass->configured || !pass->shader || !textureCount)
+  {
+    DEBUG_ERROR("Attempted to run an unconfigured EGL effect pass");
+    return NULL;
+  }
+
+  egl_framebufferBind(pass->framebuffer);
+
+  for (unsigned int i = 0; i < textureCount; ++i)
+    if (egl_textureBindUnitWithSampler(textures[i], i, pass->sampler) !=
+        EGL_TEX_STATUS_OK)
+      return NULL;
+
+  egl_uniformMatrix3x2fv(pass->uTransform, 1, GL_FALSE, rects->matrix);
+  egl_uniform2f(pass->uDesktopSize, rects->width, rects->height);
+  egl_shaderUse(pass->shader);
+  egl_desktopRectsRender(rects->rects);
+
+  return egl_framebufferGetTexture(pass->framebuffer);
+}
+
 EGL_Texture * egl_effectRun(EGL_Effect * effect, EGL_FilterRects * rects,
     EGL_Texture * texture)
 {
@@ -213,22 +242,9 @@ EGL_Texture * egl_effectRun(EGL_Effect * effect, EGL_FilterRects * rects,
     if (!pass->enabled)
       continue;
 
-    if (!pass->configured || !pass->shader)
-    {
-      DEBUG_ERROR("Attempted to run an unconfigured EGL effect pass");
+    texture = egl_effectPassRun(pass, rects, &texture, 1);
+    if (!texture)
       return NULL;
-    }
-
-    egl_framebufferBind(pass->framebuffer);
-
-    egl_textureBindWithSampler(texture, pass->sampler);
-
-    egl_uniformMatrix3x2fv(pass->uTransform, 1, GL_FALSE, rects->matrix);
-    egl_uniform2f(pass->uDesktopSize, rects->width, rects->height);
-    egl_shaderUse(pass->shader);
-    egl_desktopRectsRender(rects->rects);
-
-    texture = egl_framebufferGetTexture(pass->framebuffer);
   }
 
   return texture;

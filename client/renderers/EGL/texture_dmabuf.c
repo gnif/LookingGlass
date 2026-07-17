@@ -328,7 +328,7 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
   return EGL_TEX_STATUS_OK;
 }
 
-static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
+static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture, GLuint unit)
 {
   GLuint tex;
   EGL_TexStatus status;
@@ -336,7 +336,7 @@ static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
   if ((status = egl_texDMABUFGet(texture, &tex, NULL)) != EGL_TEX_STATUS_OK)
     return status;
 
-  egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, tex);
+  egl_stateBindTexture(unit, GL_TEXTURE_EXTERNAL_OES, tex);
   return EGL_TEX_STATUS_OK;
 }
 

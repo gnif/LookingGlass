@@ -363,6 +363,7 @@ void core_updatePositionInfo(void)
   }
 
 done:
+  app_updateMouseState();
   atomic_fetch_add(&g_state.lgrResize, 1);
 }
 

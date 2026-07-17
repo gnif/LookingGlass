@@ -48,6 +48,10 @@ void egl_effectPassSetWrap(EGL_EffectPass * pass, GLenum wrapS,
 
 bool egl_effectPassSetup(EGL_EffectPass * pass, enum EGL_PixelFormat pixFmt,
     unsigned int width, unsigned int height);
+EGL_Texture * egl_effectPassGetTexture(EGL_EffectPass * pass);
+EGL_Texture * egl_effectPassRun(EGL_EffectPass * pass,
+    struct EGL_FilterRects * rects, EGL_Texture * const * textures,
+    unsigned int textureCount);
 
 EGL_Texture * egl_effectRun(EGL_Effect * effect,
     struct EGL_FilterRects * rects, EGL_Texture * texture);

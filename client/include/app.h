@@ -22,6 +22,7 @@
 #define _H_LG_APP_
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <linux/input.h>
 
 #include "common/ringbuffer.h"
@@ -38,6 +39,19 @@ typedef enum LG_MsgAlert
 }
 LG_MsgAlert;
 
+typedef struct LG_MouseState
+{
+  /* Normalized guest cursor hotspot coordinates. */
+  float x, y;
+
+  /* Bit 0: left, bit 1: middle, bit 2: right, etc. */
+  uint32_t buttons;
+
+  /* True when the guest cursor position is known. */
+  bool valid;
+}
+LG_MouseState;
+
 bool app_isRunning(void);
 bool app_inputEnabled(void);
 bool app_isCaptureMode(void);
@@ -45,6 +59,8 @@ bool app_isCaptureOnlyMode(void);
 bool app_isFormatValid(void);
 bool app_isOverlayMode(void);
 void app_updateCursorPos(double x, double y);
+void app_updateMouseState(void);
+void app_getMouseState(LG_MouseState * state);
 void app_updateWindowPos(int x, int y);
 void app_handleResizeEvent(int w, int h, double scale, const struct Border border);
 void app_invalidateWindow(bool full);

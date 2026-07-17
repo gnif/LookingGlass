@@ -205,6 +205,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
   egl_postProcessAdd(desktop->pp, &egl_filterDownscaleOps);
   egl_postProcessAdd(desktop->pp, &egl_filterFFXCASOps   );
   egl_postProcessAdd(desktop->pp, &egl_filterFFXFSR1Ops  );
+  egl_postProcessAdd(desktop->pp, &egl_filterGLSLOps     );
   return true;
 }
 
@@ -424,7 +425,8 @@ void egl_desktopResize(EGL_Desktop * desktop, int width, int height)
 bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
-    LG_RendererRotate rotate, const struct DamageRects * rects)
+    LG_RendererRotate rotate, const struct DamageRects * rects,
+    bool * fullFrame)
 {
   EGL_Texture * tex;
   int width, height;
@@ -461,10 +463,19 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       width, height, x, y, scaleX, scaleY, rotate);
   egl_desktopRectsUpdate(desktop->mesh, rects, width, height);
 
-  if (atomic_exchange(&desktop->processFrame, false) ||
-      egl_postProcessConfigModified(desktop->pp))
-    egl_postProcessRun(desktop->pp, tex, desktop->mesh,
-        width, height, outputWidth, outputHeight, dma);
+  *fullFrame = false;
+  const bool processFrame = atomic_exchange(&desktop->processFrame, false) ||
+    egl_postProcessConfigModified(desktop->pp);
+  if (processFrame &&
+      egl_postProcessRun(desktop->pp, tex, desktop->mesh,
+        width, height, outputWidth, outputHeight, dma) &&
+      egl_postProcessNeedsFullFrame(desktop->pp))
+  {
+    /* The filter output may have changed everywhere, but this only applies to
+     * the render that actually evaluated the filter. */
+    egl_desktopRectsUpdate(desktop->mesh, NULL, width, height);
+    *fullFrame = true;
+  }
 
   unsigned int finalSizeX, finalSizeY;
   EGL_Texture * texture = egl_postProcessGetOutput(desktop->pp,

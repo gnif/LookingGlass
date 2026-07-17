@@ -40,6 +40,9 @@ void egl_postProcessInvalidate(EGL_PostProcess * this);
 /* returns true if the configuration was modified since the last run */
 bool egl_postProcessConfigModified(EGL_PostProcess * this);
 
+/* true when an active filter requires full-frame rendering and damage */
+bool egl_postProcessNeedsFullFrame(EGL_PostProcess * this);
+
 /* apply the filters to the supplied texture
  * targetX/Y is the final target output dimension hint if scalers are present */
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,

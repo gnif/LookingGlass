@@ -37,6 +37,8 @@ typedef struct EGL_FilterRects
 EGL_FilterRects;
 
 typedef struct EGL_Filter EGL_Filter;
+/* Takes ownership of filter when it returns true. */
+typedef bool (*EGL_FilterAddFn)(void * opaque, EGL_Filter * filter);
 
 typedef struct EGL_FilterOps
 {
@@ -49,8 +51,15 @@ typedef struct EGL_FilterOps
   /* the type of this filter */
   EGL_FilterType type;
 
+  /* disable partial rendering and swap damage while this filter is active */
+  bool fullFrame;
+
   /* early initialization for registration of options */
   void (*earlyInit)(void);
+
+  /* create one or more filter instances
+   * this is optional and used by runtime filter providers */
+  bool (*create)(EGL_FilterAddFn add, void * opaque);
 
   /* initialize the filter */
   bool (*init)(EGL_Filter ** filter);

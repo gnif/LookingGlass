@@ -43,7 +43,8 @@ static const EGL_FilterOps * EGL_Filters[] =
 {
   &egl_filterDownscaleOps,
   &egl_filterFFXFSR1Ops,
-  &egl_filterFFXCASOps
+  &egl_filterFFXCASOps,
+  &egl_filterGLSLOps
 };
 
 struct EGL_PostProcess
@@ -62,6 +63,7 @@ struct EGL_PostProcess
     unsigned int targetX, targetY;
     bool useDMA;
     unsigned int outputX, outputY;
+    bool fullFrame;
   }
   config;
 
@@ -646,18 +648,36 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
   *pp = NULL;
 }
 
-bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
+static bool addFilter(void * opaque, EGL_Filter * filter)
 {
-  EGL_Filter * filter;
-  if (!egl_filterInit(ops, &filter))
-    return false;
+  EGL_PostProcess * this = opaque;
 
-  Vector * filters = ops->type == EGL_FILTER_TYPE_INTERNAL ?
+  Vector * filters = filter->ops.type == EGL_FILTER_TYPE_INTERNAL ?
     &this->internalFilters : &this->filters;
   if (!vector_push(filters, &filter))
-  {
-    egl_filterFree(&filter);
     return false;
+
+  return true;
+}
+
+bool egl_postProcessAdd(EGL_PostProcess * this, const EGL_FilterOps * ops)
+{
+  if (ops->create)
+  {
+    if (!ops->create(addFilter, this))
+      return false;
+  }
+  else
+  {
+    EGL_Filter * filter;
+    if (!egl_filterInit(ops, &filter))
+      return false;
+
+    if (!addFilter(this, filter))
+    {
+      egl_filterFree(&filter);
+      return false;
+    }
   }
 
   if (ops->type != EGL_FILTER_TYPE_INTERNAL)
@@ -675,6 +695,11 @@ void egl_postProcessInvalidate(EGL_PostProcess * this)
 bool egl_postProcessConfigModified(EGL_PostProcess * this)
 {
   return atomic_load_explicit(&this->modified, memory_order_acquire);
+}
+
+bool egl_postProcessNeedsFullFrame(EGL_PostProcess * this)
+{
+  return this->config.valid && this->config.fullFrame;
 }
 
 static bool configMatches(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
@@ -706,6 +731,7 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
   unsigned int outputY = inputY;
   EGL_PixelFormat outputFormat = pixFmt;
   bool inputDMA = useDMA;
+  bool fullFrame = false;
 
   EGL_Filter * filter;
   const Vector * lists[] =
@@ -731,6 +757,8 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
         return false;
       }
 
+      fullFrame |= filter->ops.fullFrame;
+
       egl_filterGetOutputRes(filter, &outputX, &outputY, &outputFormat);
 
       /* The first active filter converts external DMA textures into a normal
@@ -751,6 +779,7 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
   this->config.useDMA        = useDMA;
   this->config.outputX       = outputX;
   this->config.outputY       = outputY;
+  this->config.fullFrame     = fullFrame;
   this->config.valid         = true;
   return true;
 }
@@ -788,6 +817,12 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
       return false;
     }
 
+    rects = this->rects;
+    egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
+  }
+
+  if (this->config.fullFrame)
+  {
     rects = this->rects;
     egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
   }
