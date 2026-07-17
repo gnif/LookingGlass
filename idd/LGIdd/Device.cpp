@@ -75,7 +75,6 @@ NTSTATUS LGIddAdapterInitFinished(IDDCX_ADAPTER adapter, const IDARG_IN_ADAPTER_
     return STATUS_SUCCESS;
 
   wrapper->context->FinishInit(0);
-  g_pipe.SetDeviceContext(wrapper->context);
   return STATUS_SUCCESS;
 }
 

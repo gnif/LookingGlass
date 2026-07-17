@@ -147,6 +147,10 @@ bool CSwapChainProcessor::SwapChainThreadCore()
   m_lastShapeId = 0;
   m_thread[1].Attach(CreateThread(nullptr, 0, _CursorThread, this, 0, nullptr));
 
+  // The replacement swap chain is fully initialized and no frame has been
+  // acquired yet, so a coalesced follow-up replug may now proceed safely.
+  m_devContext->OnSwapChainReady();
+
   // postpone sending this to ensure we dont spam messages if we end up in a
   // restart loop while waiting for a valid configuration
   g_pipe.SetGPUStatus(m_dx11Device->IsSoftware());

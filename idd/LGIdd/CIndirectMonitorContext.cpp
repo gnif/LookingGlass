@@ -78,6 +78,7 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
     break;
   }
 
+  m_devContext->OnSwapChainAssigned();
   std::unique_ptr<CSwapChainProcessor> processor(new CSwapChainProcessor(
     m_monitor, m_devContext, swapChain, dx11Device, dx12Device, newFrameEvent));
 
@@ -103,7 +104,11 @@ void CIndirectMonitorContext::UnassignSwapChain()
   dx12Device = std::move(m_dx12Device);
   ReleaseSRWLockExclusive(&m_lock);
 
+  const bool hadSwapChain = !!processor;
   processor.reset();
   dx11Device.reset();
   dx12Device.reset();
+
+  if (hadSwapChain)
+    m_devContext->OnSwapChainReleased();
 }
