@@ -19,6 +19,7 @@
  */
 
 #include "framebuffer.h"
+#include "state.h"
 #include "texture.h"
 
 #include <stdlib.h>
@@ -62,6 +63,7 @@ void egl_framebufferFree(EGL_Framebuffer ** fb)
 
   egl_textureFree(&this->tex);
   glDeleteFramebuffers(1, &this->fbo);
+  egl_stateInvalidate();
   free(this);
   *fb = NULL;
 }
@@ -78,11 +80,11 @@ bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
   GLuint tex;
   egl_textureGet(this->tex, &tex, NULL, NULL, NULL);
 
-  glBindTexture(GL_TEXTURE_2D, tex);
+  egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-  glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
+  egl_stateBindFramebuffer(this->fbo);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
       GL_TEXTURE_2D, tex, 0);
   glDrawBuffers(1, &(GLenum){GL_COLOR_ATTACHMENT0});
@@ -90,19 +92,20 @@ bool egl_framebufferSetup(EGL_Framebuffer * this, enum EGL_PixelFormat pixFmt,
   GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE)
   {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    egl_stateBindFramebuffer(0);
     DEBUG_ERROR("Failed to setup the framebuffer: 0x%x", status);
     return false;
   }
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  egl_stateBindFramebuffer(0);
 
   return true;
 }
 
 void egl_framebufferBind(EGL_Framebuffer * this)
 {
-  glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
-  glViewport(0, 0, this->tex->format.width, this->tex->format.height);
+  egl_stateBindFramebuffer(this->fbo);
+  egl_stateViewport(0, 0,
+      this->tex->format.width, this->tex->format.height);
 }
 
 EGL_Texture * egl_framebufferGetTexture(EGL_Framebuffer * this)

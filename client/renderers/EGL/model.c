@@ -20,6 +20,7 @@
 
 #include "model.h"
 #include "shader.h"
+#include "state.h"
 #include "texture.h"
 
 #include "common/debug.h"
@@ -87,6 +88,8 @@ void egl_modelFree(EGL_Model ** model)
 
   if ((*model)->vao)
     glDeleteVertexArrays(1, &(*model)->vao);
+
+  egl_stateInvalidateShared();
 
   free(*model);
   *model = NULL;
@@ -169,16 +172,19 @@ void egl_modelRender(EGL_Model * model)
   if (model->rebuild)
   {
     if (model->buffer)
+    {
       glDeleteBuffers(1, &model->buffer);
+      egl_stateInvalidateShared();
+    }
 
     if (!model->vao)
       glGenVertexArrays(1, &model->vao);
 
-    glBindVertexArray(model->vao);
+    egl_stateBindVertexArray(model->vao);
 
     /* create a buffer large enough */
     glGenBuffers(1, &model->buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, model->buffer);
+    egl_stateBindBuffer(GL_ARRAY_BUFFER, model->buffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * (model->vertexCount * 5), NULL, GL_STATIC_DRAW);
 
     GLintptr offset = 0;
@@ -206,12 +212,10 @@ void egl_modelRender(EGL_Model * model)
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, (void*)(sizeof(GLfloat) * model->vertexCount * 3));
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
     model->rebuild = false;
   }
 
-  glBindVertexArray(model->vao);
+  egl_stateBindVertexArray(model->vao);
 
   if (model->shader)
     egl_shaderUse(model->shader);
@@ -230,10 +234,6 @@ void egl_modelRender(EGL_Model * model)
   }
   ll_unlock(model->verticies);
 
-  /* unbind and cleanup */
-  glBindTexture(GL_TEXTURE_2D, 0);
-  glBindVertexArray(0);
-  glUseProgram(0);
 }
 
 void egl_modelSetShader(EGL_Model * model, EGL_Shader * shader)

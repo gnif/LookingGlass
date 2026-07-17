@@ -19,6 +19,7 @@
  */
 
 #include "texture_buffer.h"
+#include "state.h"
 
 #include "egldebug.h"
 
@@ -35,7 +36,10 @@ static void egl_texBuffer_cleanup(TextureBuffer * this)
   egl_texUtilFreeBuffers(this->buf, this->texCount);
 
   if (this->tex[0])
+  {
     glDeleteTextures(this->texCount, this->tex);
+    egl_stateInvalidateShared();
+  }
 
   for (int i = 0; i < EGL_TEX_BUFFER_MAX; ++i)
   {
@@ -89,9 +93,10 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   egl_texBuffer_cleanup(this);
 
   glGenTextures(this->texCount, this->tex);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   for(int i = 0; i < this->texCount; ++i)
   {
-    glBindTexture(GL_TEXTURE_2D, this->tex[i]);
+    egl_stateBindTexture(0, GL_TEXTURE_2D, this->tex[i]);
     glTexImage2D(GL_TEXTURE_2D,
         0,
         texture->format.intFormat,
@@ -103,7 +108,6 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
         NULL);
   }
 
-  glBindTexture(GL_TEXTURE_2D, 0);
   this->bufIndex = 0;
   this->rIndex = -1;
 
@@ -118,7 +122,8 @@ static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * upd
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_BUFFER);
 
-  glBindTexture(GL_TEXTURE_2D, this->tex[0]);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  egl_stateBindTexture(0, GL_TEXTURE_2D, this->tex[0]);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, update->stride);
   glTexSubImage2D(GL_TEXTURE_2D,
       0,
@@ -129,8 +134,6 @@ static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * upd
       texture->format.format,
       texture->format.dataType,
       update->buffer);
-  glBindTexture(GL_TEXTURE_2D, 0);
-
   return true;
 }
 
@@ -292,8 +295,8 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
   if (!keepLocked)
     LG_UNLOCK(this->copyLock);
 
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
-  glBindTexture(GL_TEXTURE_2D, tex);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+  egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
 
   glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.stride);
   glTexSubImage2D(GL_TEXTURE_2D,
@@ -303,9 +306,6 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
       texture->format.format,
       texture->format.dataType,
       (const void *)0);
-  glBindTexture(GL_TEXTURE_2D, 0);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
   this->sync[index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   if (unlikely(!this->sync[index]))
   {
@@ -348,7 +348,7 @@ EGL_TexStatus egl_texBufferBind(EGL_Texture * texture)
   if ((status = texture->ops.get(texture, &tex, NULL)) != EGL_TEX_STATUS_OK)
     return status;
 
-  glBindTexture(GL_TEXTURE_2D, tex);
+  egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
   return EGL_TEX_STATUS_OK;
 }
 

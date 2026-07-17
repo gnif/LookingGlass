@@ -19,6 +19,7 @@
  */
 
 #include "desktop_rects.h"
+#include "state.h"
 #include "common/debug.h"
 #include "common/KVMFR.h"
 #include "common/locking.h"
@@ -54,14 +55,13 @@ bool egl_desktopRectsInit(EGL_DesktopRects ** rects_, int maxCount)
   memset(rects, 0, sizeof(*rects));
 
   glGenVertexArrays(1, &rects->vao);
-  glBindVertexArray(rects->vao);
+  egl_stateBindVertexArray(rects->vao);
 
   glGenBuffers(2, rects->buffers);
-  glBindBuffer(GL_ARRAY_BUFFER, rects->buffers[0]);
+  egl_stateBindBuffer(GL_ARRAY_BUFFER, rects->buffers[0]);
   glBufferData(GL_ARRAY_BUFFER, maxCount * 8 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
   glEnableVertexAttribArray(0);
   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   GLushort indices[maxCount * 6];
   for (int i = 0; i < maxCount; ++i)
@@ -77,8 +77,6 @@ bool egl_desktopRectsInit(EGL_DesktopRects ** rects_, int maxCount)
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rects->buffers[1]);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof indices, indices, GL_STATIC_DRAW);
 
-  glBindVertexArray(0);
-
   rects->count    = 0;
   rects->maxCount = maxCount;
   return true;
@@ -92,6 +90,7 @@ void egl_desktopRectsFree(EGL_DesktopRects ** rects_)
 
   glDeleteVertexArrays(1, &rects->vao);
   glDeleteBuffers(2, rects->buffers);
+  egl_stateInvalidateShared();
   free(rects->lastVertices);
   free(rects);
   *rects_ = NULL;
@@ -161,9 +160,8 @@ void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects *
   rects->lastVerticesCount = count;
   memcpy(rects->lastVertices, vertices, sizeof(GLfloat) * count);
 
-  glBindBuffer(GL_ARRAY_BUFFER, rects->buffers[0]);
+  egl_stateBindBuffer(GL_ARRAY_BUFFER, rects->buffers[0]);
   glBufferSubData(GL_ARRAY_BUFFER, 0, rects->count * 8 * sizeof(GLfloat), vertices);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 static void desktopToGLSpace(double matrix[6], int width, int height, double translateX,
@@ -299,7 +297,6 @@ void egl_desktopRectsRender(EGL_DesktopRects * rects)
   if (unlikely(!rects->count))
     return;
 
-  glBindVertexArray(rects->vao);
+  egl_stateBindVertexArray(rects->vao);
   glDrawElements(GL_TRIANGLES, 6 * rects->count, GL_UNSIGNED_SHORT, NULL);
-  glBindVertexArray(0);
 }

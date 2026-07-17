@@ -26,6 +26,7 @@
 #include "app.h"
 #include "desktop_rects.h"
 #include "shader.h"
+#include "state.h"
 #include "cimgui.h"
 
 #include <stdlib.h>
@@ -140,8 +141,8 @@ bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struc
     update_matrix(damage);
   }
 
-  glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  egl_stateBlend(true);
+  egl_stateBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   egl_uniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
   egl_shaderUse(damage->shader);
@@ -152,6 +153,6 @@ bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struc
 
   egl_desktopRectsRender(damage->mesh);
 
-  glDisable(GL_BLEND);
+  egl_stateBlend(false);
   return true;
 }

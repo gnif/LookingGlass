@@ -145,6 +145,8 @@ static inline EGL_TexStatus egl_textureGet(EGL_Texture * texture, GLuint * tex,
 }
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * texture);
+enum EGL_TexStatus egl_textureBindWithSampler(EGL_Texture * texture,
+    GLuint sampler);
 
 typedef void * PostProcessHandle;
 PostProcessHandle egl_textureAddFilter(EGL_Texture * texture,

@@ -19,6 +19,7 @@
  */
 
 #include "texture.h"
+#include "state.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -88,6 +89,7 @@ void egl_textureFree(EGL_Texture ** tex)
     return;
 
   glDeleteSamplers(1, &this->sampler);
+  egl_stateInvalidateShared();
 
   this->ops.free(this);
   *tex = NULL;
@@ -207,7 +209,12 @@ enum EGL_TexStatus egl_textureProcess(EGL_Texture * this)
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
 {
-  glActiveTexture(GL_TEXTURE0);
-  glBindSampler(0, this->sampler);
+  return egl_textureBindWithSampler(this, this->sampler);
+}
+
+enum EGL_TexStatus egl_textureBindWithSampler(EGL_Texture * this,
+    GLuint sampler)
+{
+  egl_stateBindSampler(0, sampler);
   return this->ops.bind(this);
 }
