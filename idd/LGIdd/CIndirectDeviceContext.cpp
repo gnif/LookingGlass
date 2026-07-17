@@ -99,21 +99,25 @@ void CIndirectDeviceContext::PopulateDefaultModes()
 {
   g_settings.LoadModes();
 
-  // Build the new mode list and EDID into locals first so we only hold the
-  // lock for the swap. IddCx readers may be iterating the live containers on
-  // another thread; a clear()/push_back() under them would reallocate the
-  // backing store and crash. std::move makes the publish a pointer swap.
+  // Build the new mode list into a local first so we only hold the lock for
+  // the swap. IddCx readers may be iterating the live container on another
+  // thread; a clear()/push_back() under them would reallocate the backing
+  // store and crash. std::move makes the publish a pointer swap.
   CSettings::DisplayModes newModes;
   newModes.reserve(g_settings.GetDisplayModes().size());
   for (auto& dm : g_settings.GetDisplayModes())
     newModes.push_back(dm);
 
-  CEdid newEdid;
-  newEdid.Build(newModes);
-
   AcquireSRWLockExclusive(&m_modeLock);
   m_displayModes = std::move(newModes);
-  m_edid         = std::move(newEdid);
+  ReleaseSRWLockExclusive(&m_modeLock);
+}
+
+void CIndirectDeviceContext::InitializeEdid()
+{
+  AcquireSRWLockExclusive(&m_modeLock);
+  if (!m_edid.Size())
+    m_edid.Build(m_displayModes);
   ReleaseSRWLockExclusive(&m_modeLock);
 }
 
@@ -184,6 +188,7 @@ void CIndirectDeviceContext::InitAdapter()
 
   QueryIddCxCapabilities();
   PopulateDefaultModes();
+  InitializeEdid();
 
   IDDCX_ADAPTER_CAPS caps = {};
   caps.Size = sizeof(caps);
@@ -292,10 +297,8 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   WDF_OBJECT_ATTRIBUTES attr;
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attr, CIndirectMonitorContextWrapper);
 
-  // Take a private copy of the EDID so a concurrent PopulateDefaultModes on
-  // the timer thread cannot reallocate the buffer out from under
-  // IddCxMonitorCreate. The copy lives for the duration of the synchronous
-  // create call below.
+  // Take a private copy of the immutable EDID. The copy lives for the duration
+  // of the synchronous create call below.
   std::vector<BYTE> edid;
   AcquireSRWLockShared(&m_modeLock);
   edid.assign(m_edid.Data(), m_edid.Data() + m_edid.Size());
