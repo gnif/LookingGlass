@@ -187,7 +187,6 @@ public:
   void ReplugMonitor();
 
   void OnMonitorDestroyed(IDDCX_MONITOR monitor);
-  void OnAssignSwapChain();
   void OnSwapChainAssigned();
   void OnSwapChainReleased();
   void OnSwapChainReady();
