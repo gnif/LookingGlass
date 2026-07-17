@@ -26,7 +26,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 HWND CWidget::createWindowSimple(LPCWSTR cls, LPCWSTR title, DWORD style, HWND parent, DWORD dwExStyle)
 {
-  return CreateWindowEx(dwExStyle, cls, title, style, 0, 0, 0, 0, parent,
+  return CreateWindowEx(dwExStyle, cls, title, style | WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, parent,
     NULL, (HINSTANCE)GetModuleHandle(NULL), NULL);
 }
 
