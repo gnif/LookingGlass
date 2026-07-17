@@ -47,6 +47,7 @@
 #include "damage.h"
 #include "desktop.h"
 #include "cursor.h"
+#include "hdr_overlay.h"
 #include "postprocess.h"
 #include "util.h"
 
@@ -78,6 +79,7 @@ struct Inst
   EGL_Desktop     * desktop; // the desktop
   EGL_Cursor      * cursor;  // the mouse cursor
   EGL_Damage      * damage;  // the damage display
+  EGL_HDROverlay  * hdrOverlay;
   bool              imgui;   // if imgui was initialized
 
   LG_RendererFormat    format;
@@ -309,6 +311,7 @@ static void egl_deinitialize(LG_Renderer * renderer)
   egl_desktopFree(&this->desktop);
   egl_cursorFree (&this->cursor);
   egl_damageFree (&this->damage);
+  egl_hdrOverlayFree(&this->hdrOverlay);
 
   LG_LOCK_FREE(this->lock);
   LG_LOCK_FREE(this->desktopDamageLock);
@@ -541,6 +544,9 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
     this->desktopDamage[this->desktopDamageIdx].count = -1;
   });
 
+  if (!egl_hdrOverlayResize(this->hdrOverlay, this->width, this->height))
+    DEBUG_ERROR("Failed to resize the HDR overlay framebuffer");
+
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplOpenGL3_Init("#version 300 es");
@@ -643,6 +649,16 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   // Tell the cursor shader whether to map SDR cursor colors into PQ
   egl_cursorSetHDRState(this->cursor, useNativeHDR, format.hdrPQ,
       format.sdrWhiteLevel);
+
+  LG_DSHDRWhiteLevels whiteLevels =
+  {
+    .pq    = 203,
+    .scRGB = 80,
+  };
+  if (useNativeHDR && !app_getProp(LG_DS_HDR_WHITE_LEVELS, &whiteLevels))
+    DEBUG_WARN("Display server did not provide native HDR white levels");
+  egl_hdrOverlaySetState(this->hdrOverlay, useNativeHDR, format.hdrPQ,
+      format.hdrPQ ? whiteLevels.pq : whiteLevels.scRGB);
 
   egl_update_scale_type(this);
   egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
@@ -1045,6 +1061,12 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
+  if (!egl_hdrOverlayInit(&this->hdrOverlay))
+  {
+    DEBUG_ERROR("Failed to initialize the HDR overlay");
+    return false;
+  }
+
   if (!ImGui_ImplOpenGL3_Init("#version 300 es"))
   {
     DEBUG_ERROR("Failed to initialize ImGui");
@@ -1225,9 +1247,13 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     if (damageIdx == -1)
       hasOverlay = true;
 
+    const bool hdrOverlay = egl_hdrOverlayBegin(this->hdrOverlay,
+        damage, damageIdx);
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
     egl_stateInvalidate();
+    if (hdrOverlay)
+      egl_hdrOverlayEnd(this->hdrOverlay, damage, damageIdx);
 
     for (int i = 0; i < damageIdx; ++i)
       damage[i].y = this->height - damage[i].y - damage[i].h;

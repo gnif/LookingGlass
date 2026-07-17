@@ -61,8 +61,23 @@ typedef enum LG_DSProperty
    * return data type: bool
    */
   LG_DS_NATIVE_HDR,
+
+  /**
+   * returns the local reference-white luminance configured for each native
+   * HDR transfer function. This describes locally rendered content, not the
+   * guest's SDR white level.
+   * return data type: LG_DSHDRWhiteLevels
+   */
+  LG_DS_HDR_WHITE_LEVELS,
 }
 LG_DSProperty;
+
+typedef struct LG_DSHDRWhiteLevels
+{
+  uint32_t pq;
+  uint32_t scRGB;
+}
+LG_DSHDRWhiteLevels;
 
 enum LG_DSWarpSupport
 {

@@ -55,6 +55,8 @@ build_shaders(
   shader/cursor_mono.frag
   shader/damage.vert
   shader/damage.frag
+  shader/hdr_overlay.vert
+  shader/hdr_overlay.frag
   shader/basic.vert
   shader/convert_24bit.frag
   shader/ffx_cas.frag
@@ -85,6 +87,7 @@ add_library(renderer_EGL STATIC
   desktop_rects.c
   cursor.c
   damage.c
+  hdr_overlay.c
   framebuffer.c
   effect.c
   postprocess.c
