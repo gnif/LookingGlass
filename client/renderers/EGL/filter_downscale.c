@@ -379,32 +379,13 @@ static bool egl_filterDownscalePrepare(EGL_Filter * filter)
   if (this->prepared)
     return true;
 
+  EGL_Shader * shader;
+  GLenum sampling;
   switch (this->filter)
   {
     case DOWNSCALE_NEAREST:
       egl_uniform3f(this->uNearest, this->pixelSize,
           this->vOffset, this->hOffset);
-      break;
-
-    default:
-      break;
-  }
-  this->prepared = true;
-
-  return true;
-}
-
-static EGL_Texture * egl_filterDownscaleRun(EGL_Filter * filter,
-    EGL_FilterRects * rects, EGL_Texture * texture)
-{
-  EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
-
-  EGL_Shader * shader;
-  GLenum sampling;
-
-  switch (this->filter)
-  {
-    case DOWNSCALE_NEAREST:
       shader = this->nearest;
       sampling = GL_NEAREST;
       break;
@@ -425,6 +406,15 @@ static EGL_Texture * egl_filterDownscaleRun(EGL_Filter * filter,
 
   egl_effectPassSetShader(this->pass, shader);
   egl_effectPassSetFilter(this->pass, sampling, sampling);
+  this->prepared = true;
+
+  return true;
+}
+
+static EGL_Texture * egl_filterDownscaleRun(EGL_Filter * filter,
+    EGL_FilterRects * rects, EGL_Texture * texture)
+{
+  EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
   return egl_effectRun(this->effect, rects, texture);
 }
 

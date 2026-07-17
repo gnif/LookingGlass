@@ -68,14 +68,14 @@ typedef struct EGL_FilterOps
   /* reads filter state from options */
   void (*loadState)(EGL_Filter * filter);
 
-  /* set the input format of the filter
+  /* configure the input format of the filter when the chain changes
    * useDMA will be true if the texture provided needs to use samplerExternalOES
    */
   bool (*setup)(EGL_Filter * filter, enum EGL_PixelFormat pixFmt,
       unsigned int width, unsigned int height,
       unsigned int desktopWidth, unsigned int desktopHeight, bool useDMA);
 
-  /* set the output resolution hint for the filter
+  /* set the output resolution hint while configuring the chain
    * this is optional and only a hint */
   void (*setOutputResHint)(EGL_Filter * filter,
       unsigned int x, unsigned int y);
@@ -84,7 +84,7 @@ typedef struct EGL_FilterOps
   void (*getOutputRes)(EGL_Filter * filter,
       unsigned int *x, unsigned int *y, enum EGL_PixelFormat *pixFmt);
 
-  /* prepare the shader for use
+  /* finalize the filter while configuring the chain
    * A filter can return false to bypass it */
   bool (*prepare)(EGL_Filter * filter);
 

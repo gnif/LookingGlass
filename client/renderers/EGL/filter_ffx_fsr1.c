@@ -101,6 +101,8 @@ static void egl_filterFFXFSR1LoadState(EGL_Filter * filter)
 
   this->enable    = option_get_bool ("eglFilter", "ffxFSR");
   this->sharpness = option_get_float("eglFilter", "ffxFSRSharpness");
+  rcasUpdateUniform(this);
+  this->prepared = false;
 }
 
 static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
@@ -159,7 +161,6 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
   this->uRcasConsts = egl_shaderGetUniform(this->rcas, "uConsts");
 
   egl_filterFFXFSR1LoadState(&this->base);
-  rcasUpdateUniform(this);
 
   *filter = &this->base;
   return true;
