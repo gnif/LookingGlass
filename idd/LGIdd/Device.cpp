@@ -32,6 +32,7 @@
 #include "CDebug.h"
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
+#include "CPipeServer.h"
 #include "CSettings.h"
 
 WDFDEVICE l_wdfDevice = nullptr;
@@ -74,6 +75,7 @@ NTSTATUS LGIddAdapterInitFinished(IDDCX_ADAPTER adapter, const IDARG_IN_ADAPTER_
     return STATUS_SUCCESS;
 
   wrapper->context->FinishInit(0);
+  g_pipe.SetDeviceContext(wrapper->context);
   return STATUS_SUCCESS;
 }
 
@@ -256,7 +258,10 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   {
     auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(object);
     if (wrapper)
+    {
+      g_pipe.SetDeviceContext(nullptr);
       wrapper->Cleanup();
+    }
     l_wdfDevice = nullptr;
   };
 

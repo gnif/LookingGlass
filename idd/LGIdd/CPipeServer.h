@@ -32,6 +32,8 @@ using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
 using namespace Microsoft::WRL::Wrappers::HandleTraits;
 
+class CIndirectDeviceContext;
+
 class CPipeServer
 {
   private:
@@ -42,6 +44,9 @@ class CPipeServer
 
     bool m_running   = false;
     bool m_connected = false;
+
+    SRWLOCK                 m_deviceContextLock = SRWLOCK_INIT;
+    CIndirectDeviceContext* m_deviceContext     = nullptr;
 
     void _DeInit();
 
@@ -57,6 +62,8 @@ class CPipeServer
 
     bool Init();
     void DeInit();
+
+    void SetDeviceContext(CIndirectDeviceContext* context);
 
     void SetCursorPos(uint32_t x, uint32_t y);
     void SetDisplayMode(uint32_t width, uint32_t height, uint32_t refresh);
