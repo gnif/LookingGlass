@@ -35,7 +35,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdatomic.h>
-#include <GL/gl.h>
 
 #include "rgb24.effect.h"
 #include "hdrpq.effect.h"
@@ -122,6 +121,7 @@ typedef struct
 
   bool                 cursorMono;
   gs_texture_t       * cursorTex;
+  gs_texture_t       * cursorXorTex;
   struct gs_rect       cursorRect;
 
   bool                 cursorVisible;
@@ -289,6 +289,12 @@ static void deinit(LGPlugin * this)
     this->cursorTex = NULL;
   }
 
+  if (this->cursorXorTex)
+  {
+    gs_texture_destroy(this->cursorXorTex);
+    this->cursorXorTex = NULL;
+  }
+
 #if LIBOBS_API_MAJOR_VER >= 27
   for (int i = 0 ; i < ARRAY_LENGTH(this->dmaInfo); ++i)
     if (this->dmaInfo[i].texture)
@@ -436,13 +442,33 @@ static void * pointerThread(void * data)
       {
         case CURSOR_TYPE_MASKED_COLOR:
         {
-          dataSize = cursor->height * cursor->pitch;
+          const size_t pixels = (size_t)cursor->width * cursor->height;
+          dataSize = pixels * sizeof(uint32_t) * 2;
           allocCursorData(this, dataSize);
 
-          const uint32_t * s = (const uint32_t *)data;
-          uint32_t * d       = this->cursorData;
-          for(int i = 0; i < dataSize / sizeof(uint32_t); ++i, ++s, ++d)
-            *d = (*s & ~0xFF000000) | (*s & 0xFF000000 ? 0x0 : 0xFF000000);
+          uint32_t * normal = this->cursorData;
+          uint32_t * xorData = normal + pixels;
+          for(int y = 0; y < cursor->height; ++y)
+            for(int x = 0; x < cursor->width; ++x)
+            {
+              const uint32_t src = *(const uint32_t *)
+                (data + cursor->pitch * y + sizeof(uint32_t) * x);
+
+              const uint32_t rgb    = src & 0x00FFFFFF;
+              const bool     masked = src & 0xFF000000;
+              const size_t   pos    = y * cursor->width + x;
+
+              if (masked)
+              {
+                normal [pos] = 0x00000000;
+                xorData[pos] = rgb ? rgb | 0xFF000000 : 0x00000000;
+              }
+              else
+              {
+                normal [pos] = rgb | 0xFF000000;
+                xorData[pos] = 0x00000000;
+              }
+            }
           break;
         }
 
@@ -456,24 +482,22 @@ static void * pointerThread(void * data)
 
         case CURSOR_TYPE_MONOCHROME:
         {
-          dataSize = cursor->height * cursor->width * sizeof(uint32_t);
+          const int height = cursor->height / 2;
+          dataSize = height * cursor->width * sizeof(uint32_t);
           allocCursorData(this, dataSize);
 
-          const int hheight = cursor->height / 2;
           uint32_t * d = this->cursorData;
-          for(int y = 0; y < hheight; ++y)
+          for(int y = 0; y < height; ++y)
             for(int x = 0; x < cursor->width; ++x)
             {
               const uint8_t  * srcAnd  = data   + (cursor->pitch * y) + (x / 8);
-              const uint8_t  * srcXor  = srcAnd + cursor->pitch * hheight;
+              const uint8_t  * srcXor  = srcAnd + cursor->pitch * height;
               const uint8_t    mask    = 0x80 >> (x % 8);
-              const uint32_t   andMask = (*srcAnd & mask) ?
-                0xFFFFFFFF : 0xFF000000;
-              const uint32_t   xorMask = (*srcXor & mask) ?
-                0x00FFFFFF : 0x00000000;
-
-              d[y * cursor->width + x                          ] = andMask;
-              d[y * cursor->width + x + cursor->width * hheight] = xorMask;
+              const bool       andMask = *srcAnd & mask;
+              const bool       xorMask = *srcXor & mask;
+              d[y * cursor->width + x] = andMask ?
+                (xorMask ? 0xFFFFFFFF : 0x00000000) :
+                (xorMask ? 0x00FFFFFF : 0xFF000000);
             }
 
           break;
@@ -486,7 +510,8 @@ static void * pointerThread(void * data)
 
       this->cursor.type   = cursor->type;
       this->cursor.width  = cursor->width;
-      this->cursor.height = cursor->height;
+      this->cursor.height = cursor->type == CURSOR_TYPE_MONOCHROME ?
+        cursor->height / 2 : cursor->height;
 
       atomic_fetch_add_explicit(&this->cursorVer, 1, memory_order_relaxed);
       os_sem_post(this->cursorSem);
@@ -948,10 +973,37 @@ static void lgVideoTick(void * data, float seconds)
       this->cursorTex = NULL;
     }
 
+    if (this->cursorXorTex)
+    {
+      gs_texture_destroy(this->cursorXorTex);
+      this->cursorXorTex = NULL;
+    }
+
     switch(this->cursor.type)
     {
       case CURSOR_TYPE_MASKED_COLOR:
-        /* fallthrough */
+      {
+        const uint8_t * normal = (const uint8_t *)this->cursorData;
+        const uint8_t * xorData = normal +
+          this->cursor.width * this->cursor.height * sizeof(uint32_t);
+
+        this->cursorMono   = false;
+        this->cursorTex    = gs_texture_create(
+            this->cursor.width,
+            this->cursor.height,
+            GS_BGRA,
+            1,
+            &normal,
+            GS_DYNAMIC);
+        this->cursorXorTex = gs_texture_create(
+            this->cursor.width,
+            this->cursor.height,
+            GS_BGRA,
+            1,
+            &xorData,
+            GS_DYNAMIC);
+        break;
+      }
 
       case CURSOR_TYPE_COLOR:
         this->cursorMono  = false;
@@ -1156,35 +1208,36 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
         this->cursorRect.y / this->screenScale.y,
         0.0f);
 
+    gs_blend_state_push();
+    gs_enable_blending(true);
+
     if (!this->cursorMono)
     {
       gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
       while (gs_effect_loop(effect, "Draw"))
         gs_draw_sprite(this->cursorTex, 0, 0, 0);
-      gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+
+      if (this->cursor.type == CURSOR_TYPE_MASKED_COLOR &&
+          this->cursorXorTex)
+      {
+        gs_effect_set_texture(image, this->cursorXorTex);
+        gs_blend_function_separate(
+            GS_BLEND_INVDSTCOLOR, GS_BLEND_INVSRCALPHA,
+            GS_BLEND_ZERO       , GS_BLEND_ONE);
+        while (gs_effect_loop(effect, "Draw"))
+          gs_draw_sprite(this->cursorXorTex, 0, 0, 0);
+      }
     }
     else
     {
+      gs_blend_function_separate(
+          GS_BLEND_INVDSTCOLOR, GS_BLEND_INVSRCALPHA,
+          GS_BLEND_ONE        , GS_BLEND_INVSRCALPHA);
       while (gs_effect_loop(effect, "Draw"))
-      {
-        glEnable(GL_COLOR_LOGIC_OP);
-
-        glLogicOp(GL_AND);
-        gs_draw_sprite_subregion(
-            this->cursorTex    , 0,
-            0                  , 0,
-            this->cursorRect.cx, this->cursorRect.cy / 2);
-
-        glLogicOp(GL_XOR);
-        gs_draw_sprite_subregion(
-            this->cursorTex    , 0,
-            0                  , this->cursorRect.cy / 2,
-            this->cursorRect.cx, this->cursorRect.cy / 2);
-
-        glDisable(GL_COLOR_LOGIC_OP);
-      }
+        gs_draw_sprite(this->cursorTex, 0, 0, 0);
     }
 
+    gs_blend_state_pop();
     gs_matrix_pop();
     gs_set_scissor_rect(NULL);
   }
