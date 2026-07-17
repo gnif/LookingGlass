@@ -127,8 +127,9 @@ void CFrameBufferResource::Reset()
     m_map = NULL;
   }
 
-  m_base = nullptr;
-  m_size = 0;
+  m_base      = nullptr;
+  m_size      = 0;
+  m_frameSize = 0;
   m_res.Reset();
-  m_valid = false;
+  m_valid     = false;
 }

@@ -33,13 +33,13 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
-    bool                   m_valid;
-    unsigned               m_frameIndex;
-    uint8_t              * m_base;
-    size_t                 m_size;
-    size_t                 m_frameSize;
+    bool                   m_valid      = false;
+    unsigned               m_frameIndex = 0;
+    uint8_t              * m_base       = nullptr;
+    size_t                 m_size       = 0;
+    size_t                 m_frameSize  = 0;
     ComPtr<ID3D12Resource> m_res;
-    void                 * m_map;
+    void                 * m_map        = nullptr;
 
   public:
     bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size);
