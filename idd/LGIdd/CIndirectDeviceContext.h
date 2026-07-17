@@ -140,11 +140,12 @@ private:
   void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor() const;
+  void InitializeEdid();
 
   // Guards m_displayModes and m_edid. The mode list is rebuilt on the LGMP
   // timer thread (SetResolution) while IddCx concurrently enumerates it on its
-  // own callback threads (ParseMonitorDescription / MonitorQueryTargetModes /
-  // FinishInit). Never held across an IddCx API call - snapshot then call.
+  // own callback threads. The EDID is initialized once and remains immutable.
+  // Never held across an IddCx API call - snapshot then call.
   mutable SRWLOCK m_modeLock = SRWLOCK_INIT;
 
   CSettings::DisplayModes m_displayModes;
