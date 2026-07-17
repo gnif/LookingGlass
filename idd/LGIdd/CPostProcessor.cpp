@@ -66,14 +66,15 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
   if (formatChanged)
     *formatChanged = false;
 
-  if (srcFormat.desc.Width  == m_srcFormat.desc.Width  &&
-      srcFormat.desc.Height == m_srcFormat.desc.Height &&
-      srcFormat.desc.Format == m_srcFormat.desc.Format &&
-      srcFormat.format      == m_srcFormat.format      &&
-      srcFormat.width       == m_srcFormat.width       &&
-      srcFormat.height      == m_srcFormat.height      &&
-      srcFormat.hdr         == m_srcFormat.hdr         &&
-      srcFormat.hdrPQ       == m_srcFormat.hdrPQ)
+  if (srcFormat.desc.Width    == m_srcFormat.desc.Width  &&
+      srcFormat.desc.Height   == m_srcFormat.desc.Height &&
+      srcFormat.desc.Format   == m_srcFormat.desc.Format &&
+      srcFormat.format        == m_srcFormat.format      &&
+      srcFormat.width         == m_srcFormat.width       &&
+      srcFormat.height        == m_srcFormat.height      &&
+      srcFormat.hdr           == m_srcFormat.hdr         &&
+      srcFormat.hdrPQ         == m_srcFormat.hdrPQ       &&
+      srcFormat.sdrWhiteLevel == m_srcFormat.sdrWhiteLevel)
     return true;
 
   D12FrameFormat oldDst = m_dstFormat;
@@ -105,14 +106,15 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
 
   m_dstFormat = cur;
   if (formatChanged)
-    *formatChanged = oldDst.desc.Width  != m_dstFormat.desc.Width  ||
-                     oldDst.desc.Height != m_dstFormat.desc.Height ||
-                     oldDst.desc.Format != m_dstFormat.desc.Format ||
-                     oldDst.format      != m_dstFormat.format      ||
-                     oldDst.width       != m_dstFormat.width       ||
-                     oldDst.height      != m_dstFormat.height      ||
-                     oldDst.hdr         != m_dstFormat.hdr         ||
-                     oldDst.hdrPQ       != m_dstFormat.hdrPQ;
+    *formatChanged = oldDst.desc.Width    != m_dstFormat.desc.Width  ||
+                     oldDst.desc.Height   != m_dstFormat.desc.Height ||
+                     oldDst.desc.Format   != m_dstFormat.desc.Format ||
+                     oldDst.format        != m_dstFormat.format      ||
+                     oldDst.width         != m_dstFormat.width       ||
+                     oldDst.height        != m_dstFormat.height      ||
+                     oldDst.hdr           != m_dstFormat.hdr         ||
+                     oldDst.hdrPQ         != m_dstFormat.hdrPQ       ||
+                     oldDst.sdrWhiteLevel != m_dstFormat.sdrWhiteLevel;
   return true;
 }
 

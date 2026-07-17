@@ -629,17 +629,19 @@ int main_frameThread(void * unused)
     if (!g_state.formatValid || frame->formatVer != formatVer)
     {
       // setup the renderer format with the frame format details
-      lgrFormat.type         = frame->type;
-      lgrFormat.screenWidth  = frame->screenWidth;
-      lgrFormat.screenHeight = frame->screenHeight;
-      lgrFormat.dataWidth    = frame->dataWidth;
-      lgrFormat.dataHeight   = frame->dataHeight;
-      lgrFormat.frameWidth   = frame->frameWidth;
-      lgrFormat.frameHeight  = frame->frameHeight;
-      lgrFormat.stride       = frame->stride;
-      lgrFormat.pitch        = frame->pitch;
-      lgrFormat.hdr          = frame->flags & FRAME_FLAG_HDR;
-      lgrFormat.hdrPQ        = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.type          = frame->type;
+      lgrFormat.screenWidth   = frame->screenWidth;
+      lgrFormat.screenHeight  = frame->screenHeight;
+      lgrFormat.dataWidth     = frame->dataWidth;
+      lgrFormat.dataHeight    = frame->dataHeight;
+      lgrFormat.frameWidth    = frame->frameWidth;
+      lgrFormat.frameHeight   = frame->frameHeight;
+      lgrFormat.stride        = frame->stride;
+      lgrFormat.pitch         = frame->pitch;
+      lgrFormat.hdr           = frame->flags & FRAME_FLAG_HDR;
+      lgrFormat.hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.sdrWhiteLevel = frame->sdrWhiteLevel ?
+        frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
       if (lgrFormat.hdr)
       {
@@ -728,14 +730,15 @@ int main_frameThread(void * unused)
       g_state.formatValid = true;
       formatVer = frame->formatVer;
 
-      DEBUG_INFO("Format: %s %ux%u (%ux%u) stride:%u pitch:%u rotation:%d hdr:%d pq:%d",
+      DEBUG_INFO("Format: %s %ux%u (%ux%u) stride:%u pitch:%u rotation:%d hdr:%d pq:%d sdrWhite:%u nits",
           FrameTypeStr[frame->type],
           frame->frameWidth, frame->frameHeight,
           frame->dataWidth , frame->dataHeight ,
           frame->stride, frame->pitch,
           frame->rotation,
           frame->flags & FRAME_FLAG_HDR    ? 1 : 0,
-          frame->flags & FRAME_FLAG_HDR_PQ ? 1 : 0);
+          frame->flags & FRAME_FLAG_HDR_PQ ? 1 : 0,
+          lgrFormat.sdrWhiteLevel);
 
       LG_LOCK(g_state.lgrLock);
       if (!RENDERER(onFrameFormat, lgrFormat))
@@ -1533,7 +1536,7 @@ restart:
         if (waitCount == 30)
         {
           DEBUG_BREAK();
-          if (!g_params.disableWaitingMessage) 
+          if (!g_params.disableWaitingMessage)
           {
             msgs[msgsCount++] = app_msgBox(
                 "Host Application Not Running",

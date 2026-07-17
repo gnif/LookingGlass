@@ -140,6 +140,7 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
   dst.minDisplayLuminance       = src.minDisplayLuminance;
   dst.maxContentLightLevel      = src.maxContentLightLevel;
   dst.maxFrameAverageLightLevel = src.maxFrameAverageLightLevel;
+  dst.sdrWhiteLevel             = src.sdrWhiteLevel;
 
   return PostProcessStatus::SUCCESS;
 }

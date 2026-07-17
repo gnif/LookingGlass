@@ -129,6 +129,7 @@ private:
   uint32_t m_lastHDRMinDisplayLuminance       = 0;
   uint32_t m_lastHDRMaxContentLightLevel      = 0;
   uint32_t m_lastHDRMaxFrameAverageLightLevel = 0;
+  uint32_t m_lastSDRWhiteLevel                = 0;
   bool     m_lastHDRActive                    = false;
 
   void QueryIddCxCapabilities();

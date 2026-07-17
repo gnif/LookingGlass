@@ -21,6 +21,7 @@
 struct CD3D12Device;
 
 extern "C" {
+  #include "common/KVMFR.h"
   #include "common/types.h"
 }
 
@@ -41,6 +42,7 @@ struct D12FrameFormat
   FrameType           format = FRAME_TYPE_INVALID;
   bool                hdr = false;
   bool                hdrPQ = false;
+  uint32_t            sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
   // HDR static metadata (SMPTE ST 2086)
   // Display color primaries in 0.00002 units (xy coordinates)

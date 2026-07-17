@@ -12,6 +12,7 @@ uniform sampler2D sampler1;
 uniform float     scale;
 uniform int       cbMode;
 uniform bool      mapSDRtoPQ;
+uniform float     sdrWhiteLevel;
 
 void main()
 {
@@ -38,7 +39,7 @@ void main()
       // then premultiply again so the blend operation remains valid.
       vec3 srgb = clamp(color.rgb / color.a, 0.0, 1.0);
       vec3 linear = bt709to2020(srgb2lin(srgb));
-      color.rgb = lin2pq(linear * (203.0 / 10000.0)) * color.a;
+      color.rgb = lin2pq(linear * (sdrWhiteLevel / 10000.0)) * color.a;
     }
     else
       color.rgb = vec3(0.0);
