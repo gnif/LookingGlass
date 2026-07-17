@@ -43,6 +43,7 @@
 #include "egl_dynprocs.h"
 #include "model.h"
 #include "shader.h"
+#include "state.h"
 #include "damage.h"
 #include "desktop.h"
 #include "cursor.h"
@@ -298,7 +299,10 @@ static void egl_deinitialize(LG_Renderer * renderer)
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   if (this->imgui)
+  {
     ImGui_ImplOpenGL3_Shutdown();
+    egl_stateInvalidate();
+  }
 
   ringbuffer_free(&this->importTimings);
 
@@ -483,13 +487,14 @@ static void egl_update_scale_type(struct Inst * this)
 
 void egl_resetViewport(EGL * this)
 {
-  glViewport(0, 0, this->width, this->height);
+  egl_stateViewport(0, 0, this->width, this->height);
 }
 
 static void egl_onResize(LG_Renderer * renderer, const int width, const int height, const double scale,
     const LG_RendererRect destRect, LG_RendererRotate rotate)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_stateCheckShared();
 
   this->width   = width * scale;
   this->height  = height * scale;
@@ -501,7 +506,7 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   this->destRect.w = destRect.w * scale;
   this->destRect.h = destRect.h * scale;
 
-  glViewport(0, 0, this->width, this->height);
+  egl_stateViewport(0, 0, this->width, this->height);
 
   if (destRect.valid)
   {
@@ -540,6 +545,7 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplOpenGL3_Init("#version 300 es");
   ImGui_ImplOpenGL3_NewFrame();
+  egl_stateInvalidate();
 
   egl_damageResize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
   egl_desktopResize(this->desktop, this->width, this->height);
@@ -602,7 +608,11 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
       DEBUG_ERROR("Failed to make the frame context current");
       return false;
     }
+
+    egl_stateInvalidate();
   }
+
+  egl_stateCheckShared();
 
   if (likely(this->scalePointer))
   {
@@ -649,6 +659,7 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
     const FrameDamageRect * damageRects, int damageRectsCount)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_stateCheckShared();
 
   uint64_t start = nanotime();
   if (unlikely(!egl_desktopUpdate(
@@ -922,6 +933,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   }
 
   eglMakeCurrent(this->display, this->surface, this->surface, this->context);
+  egl_stateInvalidate();
   const char * gl_exts = (const char *)glGetString(GL_EXTENSIONS);
   if (!gl_exts)
   {
@@ -1038,6 +1050,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     DEBUG_ERROR("Failed to initialize ImGui");
     return false;
   }
+  egl_stateInvalidate();
 
   app_overlayConfigRegister("EGL", egl_configUI, this);
 
@@ -1067,7 +1080,7 @@ inline static void renderLetterBox(struct Inst * this)
   if (hLB || vLB)
   {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glEnable(GL_SCISSOR_TEST);
+    egl_stateScissor(true);
 
     if (hLB)
     {
@@ -1094,7 +1107,7 @@ inline static void renderLetterBox(struct Inst * this)
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
-    glDisable(GL_SCISSOR_TEST);
+    egl_stateScissor(false);
   }
 }
 
@@ -1103,6 +1116,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     void (*preSwap)(void * udata), void * udata)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_stateCheckShared();
   EGLint bufferAge   = egl_bufferAge(this);
   bool renderAll     = invalidateWindow || this->hadOverlay ||
                        bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
@@ -1213,6 +1227,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
+    egl_stateInvalidate();
 
     for (int i = 0; i < damageIdx; ++i)
       damage[i].y = this->height - damage[i].y - damage[i].h;
@@ -1268,9 +1283,12 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 static void * egl_createTexture(LG_Renderer * renderer,
   int width, int height, uint8_t * data)
 {
+  egl_stateCheckShared();
+
   GLuint tex;
   glGenTextures(1, &tex);
-  glBindTexture(GL_TEXTURE_2D, tex);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
 
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1289,8 +1307,6 @@ static void * egl_createTexture(LG_Renderer * renderer,
       GL_UNSIGNED_BYTE,
       data);
 
-  glBindTexture(GL_TEXTURE_2D, 0);
-
   return (void*)(intptr_t)tex;
 }
 
@@ -1298,11 +1314,13 @@ static void egl_freeTexture(LG_Renderer * renderer, void * texture)
 {
   GLuint tex = (GLuint)(intptr_t)texture;
   glDeleteTextures(1, &tex);
+  egl_stateInvalidateShared();
 }
 
 static void egl_spiceConfigure(LG_Renderer * renderer, int width, int height)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_stateCheckShared();
   this->spiceWidth   = width;
   this->spiceHeight  = height;
   egl_desktopSpiceConfigure(this->desktop, width, height);
@@ -1312,6 +1330,7 @@ static void egl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width,
     int height, uint32_t color)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_stateCheckShared();
   egl_desktopSpiceDrawFill(this->desktop, x, y, width, height, color);
 }
 
@@ -1319,6 +1338,7 @@ static void egl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int width,
     int height, int stride, uint8_t * data, bool topDown)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_stateCheckShared();
   egl_desktopSpiceDrawBitmap(this->desktop, x, y, width, height, stride,
       data, topDown);
 }

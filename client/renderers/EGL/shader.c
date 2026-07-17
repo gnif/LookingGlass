@@ -19,6 +19,7 @@
  */
 
 #include "shader.h"
+#include "state.h"
 #include "common/debug.h"
 #include "common/stringutils.h"
 #include "util.h"
@@ -78,7 +79,10 @@ void egl_shaderFree(EGL_Shader ** shader)
     return;
 
   if (this->hasShader)
+  {
     glDeleteProgram(this->shader);
+    egl_stateInvalidateShared();
+  }
 
   EGL_Uniform * uniform = this->uniforms;
   while (uniform)
@@ -161,6 +165,7 @@ static bool shaderCompile(EGL_Shader * this, const char * vertex_code,
   if (this->hasShader)
   {
     glDeleteProgram(this->shader);
+    egl_stateInvalidateShared();
     this->hasShader = false;
   }
 
@@ -714,7 +719,7 @@ void egl_shaderUse(EGL_Shader * this)
     return;
   }
 
-  glUseProgram(this->shader);
+  egl_stateUseProgram(this->shader);
 
   while(this->dirtyUniforms)
   {

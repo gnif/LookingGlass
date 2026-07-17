@@ -73,6 +73,7 @@ make_defines(
 add_library(renderer_EGL STATIC
   egl.c
   egldebug.c
+  state.c
   shader.c
   texture_util.c
   texture.c

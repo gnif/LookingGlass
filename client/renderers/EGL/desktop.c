@@ -19,6 +19,7 @@
  */
 
 #include "desktop.h"
+#include "state.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -476,10 +477,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     finalSizeY = height;
   }
 
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  egl_stateBindFramebuffer(0);
   egl_resetViewport(desktop->egl);
 
-  glActiveTexture(GL_TEXTURE0);
   egl_textureBind(texture);
 
   if (finalSizeX > width || finalSizeY > height)
@@ -523,7 +523,6 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   egl_uniform1i         (shader->uMapHDRPQ   , desktop->hdrPQ);
   egl_shaderUse(shader->shader);
   egl_desktopRectsRender(desktop->mesh);
-  glBindTexture(GL_TEXTURE_2D, 0);
   return true;
 }
 

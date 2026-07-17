@@ -20,6 +20,7 @@
 
 #include "texture.h"
 #include "texture_buffer.h"
+#include "state.h"
 #include "util.h"
 
 #include "common/array.h"
@@ -82,7 +83,10 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
   egl_texUtilFreeBuffers(parent->buf, parent->texCount);
 
   if (parent->tex[0])
+  {
     glDeleteTextures(parent->texCount, parent->tex);
+    egl_stateInvalidateShared();
+  }
 }
 
 // dmabuf functions
@@ -245,7 +249,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     fdImage->texIndex = slot;
     INTERLOCKED_SECTION(parent->copyLock,
     {
-      glBindTexture(GL_TEXTURE_EXTERNAL_OES, parent->tex[slot]);
+      egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, parent->tex[slot]);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -332,7 +336,7 @@ static EGL_TexStatus egl_texDMABUFBind(EGL_Texture * texture)
   if ((status = egl_texDMABUFGet(texture, &tex, NULL)) != EGL_TEX_STATUS_OK)
     return status;
 
-  glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
+  egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, tex);
   return EGL_TEX_STATUS_OK;
 }
 

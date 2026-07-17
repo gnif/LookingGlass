@@ -22,6 +22,7 @@
 
 #include "filter.h"
 #include "framebuffer.h"
+#include "state.h"
 #include "texture.h"
 
 #include "common/debug.h"
@@ -74,15 +75,20 @@ void egl_effectFree(EGL_Effect ** effect)
   if (!*effect)
     return;
 
+  bool deletedSampler = false;
   EGL_EffectPass * pass = (*effect)->passes;
   while(pass)
   {
     EGL_EffectPass * next = pass->next;
     glDeleteSamplers(1, &pass->sampler);
+    deletedSampler = true;
     egl_framebufferFree(&pass->framebuffer);
     free(pass);
     pass = next;
   }
+
+  if (deletedSampler)
+    egl_stateInvalidateShared();
 
   free(*effect);
   *effect = NULL;
@@ -215,9 +221,7 @@ EGL_Texture * egl_effectRun(EGL_Effect * effect, EGL_FilterRects * rects,
 
     egl_framebufferBind(pass->framebuffer);
 
-    glActiveTexture(GL_TEXTURE0);
-    egl_textureBind(texture);
-    glBindSampler(0, pass->sampler);
+    egl_textureBindWithSampler(texture, pass->sampler);
 
     egl_uniformMatrix3x2fv(pass->uTransform, 1, GL_FALSE, rects->matrix);
     egl_uniform2f(pass->uDesktopSize, rects->width, rects->height);

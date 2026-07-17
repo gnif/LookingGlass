@@ -25,6 +25,7 @@
 
 #include "texture.h"
 #include "shader.h"
+#include "state.h"
 #include "model.h"
 #include "util.h"
 
@@ -386,7 +387,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
   state.rect.x = max(0, state.rect.x - 1);
   state.rect.y = max(0, state.rect.y - 1);
 
-  glEnable(GL_BLEND);
+  egl_stateBlend(true);
   switch(cursor->type)
   {
     case LG_CURSOR_MONOCHROME:
@@ -394,14 +395,14 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       setCursorTexUniforms(cursor, &cursor->norm, true, pos.x, pos.y,
           size.w, size.h, scale);
       egl_shaderUse(cursor->norm.shader);
-      glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+      egl_stateBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
       setCursorTexUniforms(cursor, &cursor->mono, true, pos.x, pos.y,
           size.w, size.h, scale);
       egl_shaderUse(cursor->mono.shader);
-      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+      egl_stateBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
       egl_modelRender(cursor->model);
       break;
@@ -412,14 +413,14 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
       egl_shaderUse(cursor->norm.shader);
-      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      egl_stateBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
       setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y,
           size.w, size.h, scale);
       egl_shaderUse(cursor->mono.shader);
-      glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+      egl_stateBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
       egl_modelRender(cursor->model);
       break;
@@ -430,13 +431,13 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
           size.w, size.h, scale);
       egl_shaderUse(cursor->norm.shader);
-      glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+      egl_stateBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
       break;
     }
   }
-  glDisable(GL_BLEND);
+  egl_stateBlend(false);
 
   return state;
 }

@@ -19,6 +19,7 @@
  */
 
 #include "texture.h"
+#include "state.h"
 #include "texture_util.h"
 
 #include <EGL/egl.h>
@@ -112,7 +113,7 @@ bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
 
     buffer->size = fmt->dataSize;
     glGenBuffers(1, &buffer->pbo);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+    egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
     g_egl_dynProcs.glBufferStorageEXT(
       GL_PIXEL_UNPACK_BUFFER,
       fmt->dataSize,
@@ -131,6 +132,7 @@ bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
 
 void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
 {
+  bool deleted = false;
   for(int i = 0; i < count; ++i)
   {
     EGL_TexBuffer *buffer = &buffers[i];
@@ -140,13 +142,17 @@ void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
 
     egl_texUtilUnmapBuffer(buffer);
     glDeleteBuffers(1, &buffer->pbo);
+    deleted = true;
     buffer->pbo = 0;
   }
+
+  if (deleted)
+    egl_stateInvalidateShared();
 }
 
 bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer)
 {
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
   buffer->map = glMapBufferRange(
       GL_PIXEL_UNPACK_BUFFER,
       0,
@@ -160,7 +166,7 @@ bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer)
   if (!buffer->map)
     DEBUG_GL_ERROR("glMapBufferRange failed of %lu bytes", buffer->size);
 
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   return buffer->map;
 }
 
@@ -169,8 +175,8 @@ void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer)
   if (!buffer->map)
     return;
 
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
   glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   buffer->map = NULL;
 }
