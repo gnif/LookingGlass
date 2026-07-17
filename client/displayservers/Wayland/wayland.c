@@ -108,7 +108,12 @@ static bool getCompositor(char * dst, size_t size)
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
-  wlWm.desktop = WL_Desktops[0];
+  wlWm.desktop        = WL_Desktops[0];
+  wlWm.hdrWhiteLevels = (LG_DSHDRWhiteLevels)
+  {
+    .pq    = 203,
+    .scRGB = 80,
+  };
 
   wlWm.display = wl_display_connect(NULL);
   if (!wlWm.display)
@@ -212,6 +217,12 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
   if (prop == LG_DS_NATIVE_HDR)
   {
     *(bool *)ret = wlWm.cmCanDoHDR;
+    return true;
+  }
+
+  if (prop == LG_DS_HDR_WHITE_LEVELS)
+  {
+    *(LG_DSHDRWhiteLevels *)ret = wlWm.hdrWhiteLevels;
     return true;
   }
 

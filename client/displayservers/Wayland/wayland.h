@@ -206,6 +206,9 @@ struct WaylandDSState
   bool cmHasPerceptualIntent;
   bool cmCanDoHDR;       // true if compositor supports features needed for HDR
 
+  // Reference white configured on native HDR surface image descriptions.
+  LG_DSHDRWhiteLevels hdrWhiteLevels;
+
   // toplevel icon manager
   struct xdg_toplevel_icon_manager_v1 * iconManager;
 

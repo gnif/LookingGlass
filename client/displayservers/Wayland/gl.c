@@ -284,13 +284,15 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   //   min_lum       : 0.0001 cd/m² (source already scaled) -> pass through
   //   max_lum       : cd/m² (used only for scRGB; ignored for PQ, where the
   //                   compositor forces it to min_lum + 10000 cd/m²)
-  //   reference_lum : cd/m² -> BT.2408 diffuse white (203 PQ / 80 scRGB)
+  //   reference_lum : cd/m² -> locally configured reference white
   if (wlWm.cmHasLuminances)
     wp_image_description_creator_params_v1_set_luminances(
         wlWm.hdrImageCreator,
         minDisplayLuminance > 0 ? minDisplayLuminance : 50,
         maxDisplayLuminance > 0 ? maxDisplayLuminance : 1000,
-        hdrPQ                   ? 203                 : 80);
+        hdrPQ                   ?
+          wlWm.hdrWhiteLevels.pq :
+          wlWm.hdrWhiteLevels.scRGB);
 
   // Advertise the content primaries (BT.2020 for PQ). These describe the real
   // colour gamut of the signal and are safe to forward.
