@@ -75,11 +75,7 @@ static void libdecorFrameConfigure(struct libdecor_frame * frame,
     struct libdecor_configuration * configuration, void * opaque)
 {
   if (!state.configured)
-  {
     xdg_surface_ack_configure(libdecor_frame_get_xdg_surface(frame), configuration->serial);
-    state.configured = true;
-    return;
-  }
 
   int width, height;
   if (libdecor_configuration_get_content_size(configuration, frame, &width, &height))
@@ -95,6 +91,12 @@ static void libdecorFrameConfigure(struct libdecor_frame * frame,
   enum libdecor_window_state windowState;
   if (libdecor_configuration_get_window_state(configuration, &windowState))
     state.fullscreen = windowState & LIBDECOR_WINDOW_STATE_FULLSCREEN;
+
+  if (!state.configured)
+  {
+    state.configured = true;
+    return;
+  }
 
   state.resizeSerial = configuration->serial;
   waylandNeedsResize();

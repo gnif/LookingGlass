@@ -172,8 +172,15 @@ static bool waylandInit(const LG_DSInitParams params)
         params.borderless, params.resizable))
     return false;
 
-  if (!waylandEGLInit(params.w, params.h))
+  int width, height;
+  wlWm.desktop->getSize(&width, &height);
+
+  if (!waylandEGLInit(waylandScaleMulInt(wlWm.scale, width),
+        waylandScaleMulInt(wlWm.scale, height)))
     return false;
+
+  app_handleResizeEvent(width, height, waylandScaleToDouble(wlWm.scale),
+      (struct Border) {0, 0, 0, 0});
 
   waylandIconInit();
 
