@@ -35,7 +35,7 @@ typedef struct TextureBuffer
   GLuint        tex[EGL_TEX_BUFFER_MAX];
   EGL_TexBuffer buf[EGL_TEX_BUFFER_MAX];
   int           bufFree;
-  GLsync        sync;
+  GLsync        sync[EGL_TEX_BUFFER_MAX];
   LG_Lock       copyLock;
   int           bufIndex;
   int           rIndex;
@@ -55,6 +55,8 @@ bool egl_texBufferStreamInit(EGL_Texture ** texture_, EGL_TexType type,
     EGLDisplay * display);
 bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
+/* Returns with copyLock held when the current upload buffer is safe to write. */
+bool egl_texBufferStreamLock(TextureBuffer * texture);
 EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_);
 EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture_, GLuint * tex,
     EGL_PixelFormat * fmt);

@@ -37,10 +37,13 @@ static void egl_texBuffer_cleanup(TextureBuffer * this)
   if (this->tex[0])
     glDeleteTextures(this->texCount, this->tex);
 
-  if (this->sync)
+  for (int i = 0; i < EGL_TEX_BUFFER_MAX; ++i)
   {
-    glDeleteSync(this->sync);
-    this->sync = 0;
+    if (!this->sync[i])
+      continue;
+
+    glDeleteSync(this->sync[i]);
+    this->sync[i] = 0;
   }
 }
 
@@ -101,7 +104,11 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   }
 
   glBindTexture(GL_TEXTURE_2D, 0);
+  this->bufIndex = 0;
   this->rIndex = -1;
+
+  for (int i = 0; i < this->texCount; ++i)
+    this->buf[i].updated = false;
 
   return true;
 }
@@ -179,13 +186,50 @@ bool egl_texBufferStreamSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   return egl_texUtilGenBuffers(&texture->format, this->buf, this->texCount);
 }
 
+bool egl_texBufferStreamLock(TextureBuffer * this)
+{
+  for (;;)
+  {
+    LG_LOCK(this->copyLock);
+
+    GLsync sync = this->sync[this->bufIndex];
+    if (!sync)
+      return true;
+
+    /* The slot cannot be submitted again until this function marks it
+     * updated, so ownership of its fence can be transferred while unlocked. */
+    this->sync[this->bufIndex] = 0;
+    LG_UNLOCK(this->copyLock);
+
+    GLenum result = glClientWaitSync(sync, 0, GL_TIMEOUT_IGNORED);
+    glDeleteSync(sync);
+
+    switch(result)
+    {
+      case GL_ALREADY_SIGNALED:
+      case GL_CONDITION_SATISFIED:
+        break;
+
+      case GL_TIMEOUT_EXPIRED:
+        DEBUG_ERROR("Upload buffer sync unexpectedly timed out");
+        return false;
+
+      case GL_WAIT_FAILED:
+      case GL_INVALID_VALUE:
+        DEBUG_GL_ERROR("glClientWaitSync failed while reusing upload buffer");
+        return false;
+    }
+  }
+}
+
 static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
     const EGL_TexUpdate * update)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_BUFFER);
 
-  LG_LOCK(this->copyLock);
+  if (!egl_texBufferStreamLock(this))
+    return false;
 
   uint8_t * dst = this->buf[this->bufIndex].map +
     texture->format.pitch * update->y +
@@ -224,38 +268,60 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
 
   LG_LOCK(this->copyLock);
 
-  GLuint          tex    = this->tex[this->bufIndex];
-  EGL_TexBuffer * buffer = &this->buf[this->bufIndex];
+  const int       index  = this->bufIndex;
+  GLuint          tex    = this->tex[index];
+  EGL_TexBuffer * buffer = &this->buf[index];
 
-  if (buffer->updated && this->sync == 0)
+  if (!buffer->updated)
   {
-    this->rIndex = this->bufIndex;
-    if (++this->bufIndex == this->texCount)
-      this->bufIndex = 0;
+    LG_UNLOCK(this->copyLock);
+    return EGL_TEX_STATUS_OK;
   }
 
-  LG_UNLOCK(this->copyLock);
+  DEBUG_ASSERT(!this->sync[index]);
 
-  if (buffer->updated)
+  this->rIndex = index;
+  if (++this->bufIndex == this->texCount)
+    this->bufIndex = 0;
+  buffer->updated = false;
+
+  /* With more than one slot the producer can fill the next PBO while this
+   * upload is queued. A single-slot texture must remain locked until its
+   * fence exists so the mapped buffer cannot be overwritten concurrently. */
+  const bool keepLocked = this->texCount == 1;
+  if (!keepLocked)
+    LG_UNLOCK(this->copyLock);
+
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+  glBindTexture(GL_TEXTURE_2D, tex);
+
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.stride);
+  glTexSubImage2D(GL_TEXTURE_2D,
+      0, 0, 0,
+      texture->format.width,
+      texture->format.height,
+      texture->format.format,
+      texture->format.dataType,
+      (const void *)0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+  this->sync[index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (unlikely(!this->sync[index]))
   {
-    buffer->updated = false;
-
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
-    glBindTexture(GL_TEXTURE_2D, tex);
-
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.stride);
-    glTexSubImage2D(GL_TEXTURE_2D,
-        0, 0, 0,
-        texture->format.width,
-        texture->format.height,
-        texture->format.format,
-        texture->format.dataType,
-        (const void *)0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-    this->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    DEBUG_GL_ERROR("Failed to create upload buffer sync");
+    glFinish();
+    if (keepLocked)
+      LG_UNLOCK(this->copyLock);
+    return EGL_TEX_STATUS_ERROR;
   }
+
+  /* A different shared context may wait when this PBO is reused. Flushing
+   * here makes the fence visible without making the render thread wait. */
+  glFlush();
+
+  if (keepLocked)
+    LG_UNLOCK(this->copyLock);
 
   return EGL_TEX_STATUS_OK;
 }
@@ -268,29 +334,8 @@ EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex,
   if (this->rIndex == -1)
     return EGL_TEX_STATUS_NOTREADY;
 
-  if (this->sync)
-  {
-    switch(glClientWaitSync(
-          this->sync, GL_SYNC_FLUSH_COMMANDS_BIT, 40000000)) //40ms
-    {
-      case GL_ALREADY_SIGNALED:
-      case GL_CONDITION_SATISFIED:
-        glDeleteSync(this->sync);
-        this->sync = 0;
-        break;
-
-      case GL_TIMEOUT_EXPIRED:
-        return EGL_TEX_STATUS_NOTREADY;
-
-      case GL_WAIT_FAILED:
-      case GL_INVALID_VALUE:
-        glDeleteSync(this->sync);
-        this->sync = 0;
-        DEBUG_GL_ERROR("glClientWaitSync failed");
-        return EGL_TEX_STATUS_ERROR;
-    }
-  }
-
+  /* Upload and sampling are ordered in the same context. Waiting here would
+   * only stall submission of the draw and delay presentation. */
   *tex = this->tex[this->rIndex];
   return EGL_TEX_STATUS_OK;
 }

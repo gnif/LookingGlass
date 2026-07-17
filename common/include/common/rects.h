@@ -35,7 +35,7 @@ void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
   FrameBuffer * frame, int dstPitch, int height,
   const uint8_t * src, int srcPitch);
 
-void rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch);
 

@@ -85,10 +85,10 @@ static int cornerCompare(const void * a_, const void * b_)
   return 0;
 }
 
-inline static void rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
+inline static bool rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstStride, int height,
   const uint8_t * src, int srcStride, void * opaque,
-  void (*rowCopyStart)(int y, void * opaque),
+  bool (*rowCopyStart)(int y, void * opaque),
   void (*rowCopyFinish)(int y, void * opaque))
 {
   const int cornerCount = 4 * count;
@@ -138,8 +138,8 @@ inline static void rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
       change[changes++] = (struct Edge) { .x = x, .delta = delta };
     }
 
-    if (rowCopyStart)
-      rowCopyStart(y, opaque);
+    if (rowCopyStart && !rowCopyStart(y, opaque))
+      return false;
 
     struct Edge * active = active_[activeRow];
     int x1 = 0;
@@ -191,6 +191,8 @@ inline static void rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
     rs = re;
     activeRow ^= 1;
   }
+
+  return true;
 }
 
 struct ToFramebufferData
@@ -221,18 +223,18 @@ struct FromFramebufferData
   int pitch;
 };
 
-static void fbRowStart(int y, void * opaque)
+static bool fbRowStart(int y, void * opaque)
 {
   struct FromFramebufferData * data = opaque;
-  framebuffer_wait(data->frame, y * data->pitch);
+  return framebuffer_wait(data->frame, y * data->pitch);
 }
 
-void rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch)
 {
   struct FromFramebufferData data = { .frame = frame, .pitch = srcPitch };
-  rectsBufferCopy(rects, count, bpp, dst, dstPitch, height,
+  return rectsBufferCopy(rects, count, bpp, dst, dstPitch, height,
     framebuffer_get_buffer(frame), srcPitch, &data, fbRowStart, NULL);
 }
 
