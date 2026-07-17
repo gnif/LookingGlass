@@ -20,6 +20,7 @@
 
 #include "CPipeServer.h"
 #include "CDebug.h"
+#include "CIndirectDeviceContext.h"
 
 CPipeServer g_pipe;
 
@@ -257,7 +258,19 @@ void CPipeServer::WriteMsg(const LGPipeMsg & msg)
 
 void CPipeServer::HandleReloadSettings()
 {
-  DEBUG_INFO("TODO: reload settings");
+  DEBUG_INFO("Reloading settings");
+
+  AcquireSRWLockShared(&m_deviceContextLock);
+  if (m_deviceContext)
+    m_deviceContext->ReplugMonitor();
+  ReleaseSRWLockShared(&m_deviceContextLock);
+}
+
+void CPipeServer::SetDeviceContext(CIndirectDeviceContext* context)
+{
+  AcquireSRWLockExclusive(&m_deviceContextLock);
+  m_deviceContext = context;
+  ReleaseSRWLockExclusive(&m_deviceContextLock);
 }
 
 void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
