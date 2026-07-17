@@ -152,6 +152,18 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     return false;
 
   wl_surface_commit(wlWm.surface);
+
+  // The initial configure supplies the compositor-selected size for states
+  // such as fullscreen. It must be received before the first buffer is made.
+  while (!wlWm.desktop->configured())
+  {
+    if (wl_display_roundtrip(wlWm.display) < 0)
+    {
+      DEBUG_ERROR("Failed waiting for the initial Wayland configure");
+      return false;
+    }
+  }
+
   return true;
 }
 

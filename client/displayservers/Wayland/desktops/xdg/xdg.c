@@ -93,8 +93,13 @@ static const struct xdg_surface_listener xdgSurfaceListener = {
 static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
     int32_t width, int32_t height, struct wl_array * states)
 {
-  state.width      = width;
-  state.height     = height;
+  // A zero size means that the compositor is leaving the size up to us.
+  if (width > 0 && height > 0)
+  {
+    state.width  = width;
+    state.height = height;
+  }
+
   state.fullscreen = false;
   state.floating   = true;
 
