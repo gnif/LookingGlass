@@ -25,9 +25,8 @@
 
 #include <GLES3/gl3.h>
 
-#include "common/countedbuffer.h"
-
-typedef struct EGL_Shader EGL_Shader;
+typedef struct EGL_Shader  EGL_Shader;
+typedef struct EGL_Uniform EGL_Uniform;
 
 enum EGL_UniformType
 {
@@ -70,29 +69,6 @@ enum EGL_UniformType
   EGL_UNIFORM_TYPE_M4x3FV
 };
 
-typedef struct EGL_Uniform
-{
-  enum EGL_UniformType type;
-  GLint location;
-
-  union
-  {
-    GLfloat f [4];
-    GLint   i [4];
-    GLuint  ui[4];
-
-    CountedBuffer * v;
-
-    struct
-    {
-      CountedBuffer * v;
-      GLboolean transpose;
-    }
-    m;
-  };
-}
-EGL_Uniform;
-
 typedef struct EGL_ShaderDefine
 {
   const char * name;
@@ -103,19 +79,37 @@ EGL_ShaderDefine;
 bool egl_shaderInit(EGL_Shader ** shader);
 void egl_shaderFree(EGL_Shader ** shader);
 
-bool egl_shaderLoad(EGL_Shader * model, const char * vertex_file,
-    const char * fragment_file, bool useDMA, const EGL_ShaderDefine * defines);
+bool egl_shaderLoad(EGL_Shader * shader, const char * vertex_file,
+    const char * fragment_file, bool useDMA,
+    const EGL_ShaderDefine * defines);
 
-bool egl_shaderCompile(EGL_Shader * model, const char * vertex_code,
+bool egl_shaderCompile(EGL_Shader * shader, const char * vertex_code,
     size_t vertex_size, const char * fragment_code, size_t fragment_size,
     bool useDMA, const EGL_ShaderDefine * defines);
 
-void egl_shaderSetUniforms(EGL_Shader * shader, EGL_Uniform * uniforms,
-    int count);
-void egl_shaderFreeUniforms(EGL_Shader * shader);
+/*
+ * Uniform handles remain valid when a shader is recompiled. Values are copied
+ * into the shader and are only uploaded when they have changed or the program
+ * has been relinked. count is the number of vectors or matrices in data.
+ */
+EGL_Uniform * egl_shaderGetUniform(EGL_Shader * shader, const char * name);
+bool egl_uniformSet(EGL_Uniform * uniform, enum EGL_UniformType type,
+    GLsizei count, GLboolean transpose, const void * data);
+
+bool egl_uniform1f (EGL_Uniform * uniform, GLfloat x);
+bool egl_uniform2f (EGL_Uniform * uniform, GLfloat x, GLfloat y);
+bool egl_uniform3f (EGL_Uniform * uniform, GLfloat x, GLfloat y, GLfloat z);
+bool egl_uniform4f (EGL_Uniform * uniform, GLfloat x, GLfloat y, GLfloat z,
+    GLfloat w);
+bool egl_uniform1i (EGL_Uniform * uniform, GLint x);
+bool egl_uniform1ui(EGL_Uniform * uniform, GLuint x);
+bool egl_uniform4ui(EGL_Uniform * uniform, GLuint x, GLuint y, GLuint z,
+    GLuint w);
+
+bool egl_uniform4uiv(EGL_Uniform * uniform, GLsizei count,
+    const GLuint * value);
+bool egl_uniformMatrix3x2fv(EGL_Uniform * uniform, GLsizei count,
+    GLboolean transpose, const GLfloat * value);
 
 void egl_shaderUse(EGL_Shader * shader);
-
-void egl_shaderAssocTextures(EGL_Shader * shader, const int count);
-
-GLint egl_shaderGetUniform(EGL_Shader * shader, const char * name);
+void egl_shaderAssocTextures(EGL_Shader * shader, int count);

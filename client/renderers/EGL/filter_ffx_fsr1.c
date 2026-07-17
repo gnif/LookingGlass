@@ -19,10 +19,8 @@
  */
 
 #include "filter.h"
-#include "framebuffer.h"
+#include "effect.h"
 
-#include "common/array.h"
-#include "common/countedbuffer.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "cimgui.h"
@@ -36,11 +34,16 @@ typedef struct EGL_FilterFFXFSR1
 {
   EGL_Filter base;
 
-  EGL_Shader    * easu, * rcas;
-  bool            enable, active;
-  float           sharpness;
-  CountedBuffer * consts;
-  EGL_Uniform     easuUniform[2], rcasUniform;
+  EGL_Shader     * easu, * rcas;
+  EGL_Uniform    * uEasuConsts;
+  EGL_Uniform    * uEasuOutRes;
+  EGL_Uniform    * uRcasConsts;
+  EGL_Effect     * effect;
+  EGL_EffectPass * easuPass, * rcasPass;
+  bool             enable, active;
+  float            sharpness;
+  GLuint           easuConsts[16];
+  GLuint           rcasConsts[4];
 
   int useDMA;
   enum EGL_PixelFormat pixFmt;
@@ -49,8 +52,6 @@ typedef struct EGL_FilterFFXFSR1
   bool sizeChanged;
   bool prepared;
 
-  EGL_Framebuffer * easuFb, * rcasFb;
-  GLuint            sampler;
 }
 EGL_FilterFFXFSR1;
 
@@ -82,7 +83,8 @@ static void egl_filterFFXFSR1EarlyInit(void)
 
 static void rcasUpdateUniform(EGL_FilterFFXFSR1 * this)
 {
-  ffxFsrRcasConst(this->rcasUniform.ui, 2.0f - this->sharpness * 2.0f);
+  ffxFsrRcasConst(this->rcasConsts, 2.0f - this->sharpness * 2.0f);
+  egl_uniform4uiv(this->uRcasConsts, 1, this->rcasConsts);
 }
 
 static void egl_filterFFXFSR1SaveState(EGL_Filter * filter)
@@ -134,45 +136,36 @@ static bool egl_filterFFXFSR1Init(EGL_Filter ** filter)
     goto error_rcas;
   }
 
-  this->consts = countedBufferNew(16 * sizeof(GLuint));
-  if (!this->consts)
+  if (!egl_effectInit(&this->effect))
   {
-    DEBUG_ERROR("Failed to allocate consts buffer");
+    DEBUG_ERROR("Failed to initialize the effect");
     goto error_rcas;
   }
 
+  if (!egl_effectAddPass(this->effect, this->easu, &this->easuPass))
+  {
+    DEBUG_ERROR("Failed to initialize the Easu effect pass");
+    goto error_effect;
+  }
+
+  if (!egl_effectAddPass(this->effect, this->rcas, &this->rcasPass))
+  {
+    DEBUG_ERROR("Failed to initialize the Rcas effect pass");
+    goto error_effect;
+  }
+
+  this->uEasuConsts = egl_shaderGetUniform(this->easu, "uConsts");
+  this->uEasuOutRes = egl_shaderGetUniform(this->easu, "uOutRes");
+  this->uRcasConsts = egl_shaderGetUniform(this->rcas, "uConsts");
+
   egl_filterFFXFSR1LoadState(&this->base);
-
-  this->rcasUniform.type = EGL_UNIFORM_TYPE_4UI;
-  this->rcasUniform.location = egl_shaderGetUniform(this->rcas, "uConsts");
   rcasUpdateUniform(this);
-
-  if (!egl_framebufferInit(&this->easuFb))
-  {
-    DEBUG_ERROR("Failed to initialize the Easu framebuffer");
-    goto error_consts;
-  }
-
-  if (!egl_framebufferInit(&this->rcasFb))
-  {
-    DEBUG_ERROR("Failed to initialize the Rcas framebuffer");
-    goto error_easuFb;
-  }
-
-  glGenSamplers(1, &this->sampler);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
 
   *filter = &this->base;
   return true;
 
-error_easuFb:
-  egl_framebufferFree(&this->rcasFb);
-
-error_consts:
-  countedBufferRelease(&this->consts);
+error_effect:
+  egl_effectFree(&this->effect);
 
 error_rcas:
   egl_shaderFree(&this->rcas);
@@ -189,12 +182,9 @@ static void egl_filterFFXFSR1Free(EGL_Filter * filter)
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
+  egl_effectFree(&this->effect);
   egl_shaderFree(&this->easu);
   egl_shaderFree(&this->rcas);
-  countedBufferRelease(&this->consts);
-  egl_framebufferFree(&this->easuFb);
-  egl_framebufferFree(&this->rcasFb);
-  glDeleteSamplers(1, &this->sampler);
   free(this);
 }
 
@@ -343,14 +333,6 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
       return false;
     }
 
-    this->easuUniform[0].type = EGL_UNIFORM_TYPE_4UIV;
-    this->easuUniform[0].location =
-      egl_shaderGetUniform(this->easu, "uConsts");
-    this->easuUniform[0].v = this->consts;
-    this->easuUniform[1].type = EGL_UNIFORM_TYPE_2F;
-    this->easuUniform[1].location =
-      egl_shaderGetUniform(this->easu, "uOutRes");
-
     this->useDMA = useDMA;
   }
 
@@ -362,10 +344,10 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
       width == this->inWidth && height == this->inHeight)
     return true;
 
-  if (!egl_framebufferSetup(this->easuFb, pixFmt, this->width, this->height))
+  if (!egl_effectPassSetup(this->easuPass, pixFmt, this->width, this->height))
     return false;
 
-  if (!egl_framebufferSetup(this->rcasFb, pixFmt, this->width, this->height))
+  if (!egl_effectPassSetup(this->rcasPass, pixFmt, this->width, this->height))
     return false;
 
   this->inWidth     = width;
@@ -374,10 +356,10 @@ static bool egl_filterFFXFSR1Setup(EGL_Filter * filter,
   this->pixFmt      = pixFmt;
   this->prepared    = false;
 
-  this->easuUniform[1].f[0] = this->width;
-  this->easuUniform[1].f[1] = this->height;
-  ffxFsrEasuConst((uint32_t *)this->consts->data, this->inWidth, this->inHeight,
+  egl_uniform2f(this->uEasuOutRes, this->width, this->height);
+  ffxFsrEasuConst(this->easuConsts, this->inWidth, this->inHeight,
     this->inWidth, this->inHeight, this->width, this->height);
+  egl_uniform4uiv(this->uEasuConsts, 4, this->easuConsts);
 
   return true;
 }
@@ -401,8 +383,6 @@ static bool egl_filterFFXFSR1Prepare(EGL_Filter * filter)
   if (this->prepared)
     return true;
 
-  egl_shaderSetUniforms(this->easu, this->easuUniform, ARRAY_LENGTH(this->easuUniform));
-  egl_shaderSetUniforms(this->rcas, &this->rcasUniform, 1);
   this->prepared = true;
 
   return true;
@@ -413,25 +393,7 @@ static EGL_Texture * egl_filterFFXFSR1Run(EGL_Filter * filter,
 {
   EGL_FilterFFXFSR1 * this = UPCAST(EGL_FilterFFXFSR1, filter);
 
-  // pass 1, Easu
-  egl_framebufferBind(this->easuFb);
-  glActiveTexture(GL_TEXTURE0);
-  egl_textureBind(texture);
-  glBindSampler(0, this->sampler);
-  egl_shaderUse(this->easu);
-  egl_filterRectsRender(this->easu, rects);
-  texture = egl_framebufferGetTexture(this->easuFb);
-
-  // pass 2, Rcas
-  egl_framebufferBind(this->rcasFb);
-  glActiveTexture(GL_TEXTURE0);
-  egl_textureBind(texture);
-  glBindSampler(0, this->sampler);
-  egl_shaderUse(this->rcas);
-  egl_filterRectsRender(this->rcas, rects);
-  texture = egl_framebufferGetTexture(this->rcasFb);
-
-  return texture;
+  return egl_effectRun(this->effect, rects, texture);
 }
 
 EGL_FilterOps egl_filterFFXFSR1Ops =

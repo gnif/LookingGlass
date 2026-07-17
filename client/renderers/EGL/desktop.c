@@ -22,7 +22,6 @@
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
-#include "common/array.h"
 
 #include "app.h"
 #include "texture.h"
@@ -44,16 +43,15 @@
 struct DesktopShader
 {
   EGL_Shader * shader;
-  GLint uTransform;
-  GLint uDesktopSize;
-  GLint uSamplerType;
-  GLint uScaleAlgo;
-  GLint uNVGain;
-  GLint uCBMode;
-  GLint uIsHDR;
-  GLint uMapHDRtoSDR;
-  GLint uMapHDRGain;
-  GLint uMapHDRPQ;
+  EGL_Uniform * uTransform;
+  EGL_Uniform * uDesktopSize;
+  EGL_Uniform * uScaleAlgo;
+  EGL_Uniform * uNVGain;
+  EGL_Uniform * uCBMode;
+  EGL_Uniform * uIsHDR;
+  EGL_Uniform * uMapHDRtoSDR;
+  EGL_Uniform * uMapHDRGain;
+  EGL_Uniform * uMapHDRPQ;
 };
 
 struct EGL_Desktop
@@ -64,7 +62,7 @@ struct EGL_Desktop
   EGL_Texture          * texture;
   struct DesktopShader dmaShader, shader;
   EGL_DesktopRects     * mesh;
-  CountedBuffer        * matrix;
+  GLfloat                matrix[6];
 
   // internals
   int               width, height;
@@ -160,13 +158,6 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     return false;
   }
 
-  desktop->matrix = countedBufferNew(6 * sizeof(GLfloat));
-  if (!desktop->matrix)
-  {
-    DEBUG_ERROR("Failed to allocate the desktop matrix buffer");
-    return false;
-  }
-
   if (!egl_initDesktopShader(
     &desktop->shader,
     b_shader_desktop_vert    , b_shader_desktop_vert_size,
@@ -248,8 +239,6 @@ void egl_desktopFree(EGL_Desktop ** desktop)
   egl_shaderFree     (&(*desktop)->shader   .shader);
   egl_shaderFree     (&(*desktop)->dmaShader.shader);
   egl_desktopRectsFree(&(*desktop)->mesh           );
-  countedBufferRelease(&(*desktop)->matrix         );
-
   egl_postProcessFree(&(*desktop)->pp);
 
   free(*desktop);
@@ -467,7 +456,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   int scaleAlgo = EGL_SCALE_NEAREST;
 
-  egl_desktopRectsMatrix((float *)desktop->matrix->data,
+  egl_desktopRectsMatrix(desktop->matrix,
       width, height, x, y, scaleX, scaleY, rotate);
   egl_desktopRectsUpdate(desktop->mesh, rects, width, height);
 
@@ -523,57 +512,15 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   const float mapHDRGain =
     (float)desktop->maxCLL / desktop->peakLuminance;
 
-  EGL_Uniform uniforms[] =
-  {
-    {
-      .type        = EGL_UNIFORM_TYPE_1I,
-      .location    = shader->uScaleAlgo,
-      .i           = { scaleAlgo },
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_2F,
-      .location    = shader->uDesktopSize,
-      .f           = { width, height },
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_M3x2FV,
-      .location    = shader->uTransform,
-      .m.transpose = GL_FALSE,
-      .m.v         = desktop->matrix
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_1F,
-      .location    = shader->uNVGain,
-      .f           = { (float)desktop->nvGain }
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_1I,
-      .location    = shader->uCBMode,
-      .i           = { desktop->cbMode }
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_1I,
-      .location    = shader->uIsHDR,
-      .i           = { desktop->hdr }
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_1I,
-      .location    = shader->uMapHDRtoSDR,
-      .i           = { desktop->mapHDRtoSDR && !desktop->nativeHDR }
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_1F,
-      .location    = shader->uMapHDRGain,
-      .f           = { mapHDRGain }
-    },
-    {
-      .type        = EGL_UNIFORM_TYPE_1I,
-      .location    = shader->uMapHDRPQ,
-      .i           = { desktop->hdrPQ }
-    }
-  };
-
-  egl_shaderSetUniforms(shader->shader, uniforms, ARRAY_LENGTH(uniforms));
+  egl_uniform1i         (shader->uScaleAlgo  , scaleAlgo);
+  egl_uniform2f         (shader->uDesktopSize, width, height);
+  egl_uniformMatrix3x2fv(shader->uTransform  , 1, GL_FALSE, desktop->matrix);
+  egl_uniform1f         (shader->uNVGain     , desktop->nvGain);
+  egl_uniform1i         (shader->uCBMode     , desktop->cbMode);
+  egl_uniform1i         (shader->uIsHDR      , desktop->hdr);
+  egl_uniform1i         (shader->uMapHDRtoSDR, desktop->mapHDRtoSDR && !desktop->nativeHDR);
+  egl_uniform1f         (shader->uMapHDRGain , mapHDRGain);
+  egl_uniform1i         (shader->uMapHDRPQ   , desktop->hdrPQ);
   egl_shaderUse(shader->shader);
   egl_desktopRectsRender(desktop->mesh);
   glBindTexture(GL_TEXTURE_2D, 0);

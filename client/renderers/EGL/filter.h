@@ -183,5 +183,3 @@ static inline void egl_filterRelease(EGL_Filter * filter)
   if (filter->ops.release)
     filter->ops.release(filter);
 }
-
-void egl_filterRectsRender(EGL_Shader * shader, EGL_FilterRects * rects);

@@ -57,7 +57,11 @@ void egl_framebufferFree(EGL_Framebuffer ** fb)
 {
   EGL_Framebuffer * this = *fb;
 
+  if (!this)
+    return;
+
   egl_textureFree(&this->tex);
+  glDeleteFramebuffers(1, &this->fbo);
   free(this);
   *fb = NULL;
 }

@@ -19,11 +19,10 @@
  */
 
 #include "filter.h"
-#include "framebuffer.h"
+#include "effect.h"
 
 #include <math.h>
 
-#include "common/array.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "cimgui.h"
@@ -55,9 +54,11 @@ typedef struct EGL_FilterDownscale
 
   bool         enable;
   EGL_Shader * nearest;
-  EGL_Uniform  uNearest;
+  EGL_Uniform * uNearest;
   EGL_Shader * linear;
   EGL_Shader * lanczos2;
+  EGL_Effect * effect;
+  EGL_EffectPass * pass;
 
   DownscaleFilter filter;
   int useDMA;
@@ -67,8 +68,6 @@ typedef struct EGL_FilterDownscale
   float vOffset, hOffset;
   bool prepared;
 
-  EGL_Framebuffer * fb;
-  GLuint            sampler[2];
 }
 EGL_FilterDownscale;
 
@@ -163,48 +162,48 @@ static bool egl_filterDownscaleInit(EGL_Filter ** filter)
   if (!egl_shaderInit(&this->nearest))
   {
     DEBUG_ERROR("Failed to initialize the shader");
-    goto error_this;
+    goto error_shader;
   }
 
   if (!egl_shaderInit(&this->linear))
   {
     DEBUG_ERROR("Failed to initialize the shader");
-    goto error_this;
+    goto error_shader;
   }
 
   if (!egl_shaderInit(&this->lanczos2))
   {
     DEBUG_ERROR("Failed to initialize the shader");
-    goto error_this;
-  }
-
-  if (!egl_framebufferInit(&this->fb))
-  {
-    DEBUG_ERROR("Failed to initialize the framebuffer");
     goto error_shader;
   }
 
-  glGenSamplers(ARRAY_LENGTH(this->sampler), this->sampler);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler[0], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-  glSamplerParameteri(this->sampler[1], GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+  if (!egl_effectInit(&this->effect))
+  {
+    DEBUG_ERROR("Failed to initialize the effect");
+    goto error_shader;
+  }
+
+  if (!egl_effectAddPass(this->effect, this->nearest, &this->pass))
+  {
+    DEBUG_ERROR("Failed to initialize the effect pass");
+    goto error_effect;
+  }
+
+  this->uNearest = egl_shaderGetUniform(this->nearest, "uConfig");
 
   egl_filterDownscaleLoadState(&this->base);
 
   *filter = &this->base;
   return true;
 
+error_effect:
+  egl_effectFree(&this->effect);
+
 error_shader:
   egl_shaderFree(&this->nearest);
   egl_shaderFree(&this->linear);
   egl_shaderFree(&this->lanczos2);
 
-error_this:
   free(this);
   return false;
 }
@@ -213,11 +212,10 @@ static void egl_filterDownscaleFree(EGL_Filter * filter)
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
 
+  egl_effectFree(&this->effect);
   egl_shaderFree(&this->nearest);
   egl_shaderFree(&this->linear);
   egl_shaderFree(&this->lanczos2);
-  egl_framebufferFree(&this->fb);
-  glDeleteSamplers(ARRAY_LENGTH(this->sampler), this->sampler);
   free(this);
 }
 
@@ -345,10 +343,6 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
       return false;
     }
 
-    this->uNearest.type = EGL_UNIFORM_TYPE_3F;
-    this->uNearest.location =
-      egl_shaderGetUniform(this->nearest, "uConfig");
-
     this->useDMA = useDMA;
   }
 
@@ -358,7 +352,7 @@ static bool egl_filterDownscaleSetup(EGL_Filter * filter,
       this->height == height)
     return this->pixelSize > 1.0f;
 
-  if (!egl_framebufferSetup(this->fb, pixFmt, width, height))
+  if (!egl_effectPassSetup(this->pass, pixFmt, width, height))
     return false;
 
   this->pixFmt   = pixFmt;
@@ -388,10 +382,8 @@ static bool egl_filterDownscalePrepare(EGL_Filter * filter)
   switch (this->filter)
   {
     case DOWNSCALE_NEAREST:
-      this->uNearest.f[0] = this->pixelSize;
-      this->uNearest.f[1] = this->vOffset;
-      this->uNearest.f[2] = this->hOffset;
-      egl_shaderSetUniforms(this->nearest, &this->uNearest, 1);
+      egl_uniform3f(this->uNearest, this->pixelSize,
+          this->vOffset, this->hOffset);
       break;
 
     default:
@@ -407,38 +399,33 @@ static EGL_Texture * egl_filterDownscaleRun(EGL_Filter * filter,
 {
   EGL_FilterDownscale * this = UPCAST(EGL_FilterDownscale, filter);
 
-  egl_framebufferBind(this->fb);
-
-  glActiveTexture(GL_TEXTURE0);
-  egl_textureBind(texture);
-
   EGL_Shader * shader;
+  GLenum sampling;
 
   switch (this->filter)
   {
     case DOWNSCALE_NEAREST:
-      glBindSampler(0, this->sampler[0]);
       shader = this->nearest;
+      sampling = GL_NEAREST;
       break;
 
     case DOWNSCALE_LINEAR:
-      glBindSampler(0, this->sampler[1]);
       shader = this->linear;
+      sampling = GL_LINEAR;
       break;
 
     case DOWNSCALE_LANCZOS2:
-      glBindSampler(0, this->sampler[0]);
       shader = this->lanczos2;
+      sampling = GL_NEAREST;
       break;
 
     default:
       DEBUG_UNREACHABLE();
   }
 
-  egl_shaderUse(shader);
-  egl_filterRectsRender(shader, rects);
-
-  return egl_framebufferGetTexture(this->fb);
+  egl_effectPassSetShader(this->pass, shader);
+  egl_effectPassSetFilter(this->pass, sampling, sampling);
+  return egl_effectRun(this->effect, rects, texture);
 }
 
 EGL_FilterOps egl_filterDownscaleOps =
