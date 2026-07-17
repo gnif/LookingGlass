@@ -92,6 +92,7 @@ add_library(renderer_EGL STATIC
   effect.c
   postprocess.c
   ffx.c
+  filter_glsl.c
   filter_24bit.c
   filter_ffx_cas.c
   filter_ffx_fsr1.c

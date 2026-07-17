@@ -1218,13 +1218,15 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   }
   ++this->overlayHistoryIdx;
 
+  bool fullFrame = false;
   if (likely(this->destRect.w > 0 && this->destRect.h > 0))
   {
     if (egl_desktopRender(this->desktop,
         this->destRect.w, this->destRect.h,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
-        this->scaleType , rotate, renderAll ? NULL : accumulated))
+        this->scaleType , rotate, renderAll ? NULL : accumulated,
+        &fullFrame))
     {
       cursorState = egl_cursorRender(this->cursor,
           (this->format.rotate + rotate) % LG_ROTATE_MAX,
@@ -1233,6 +1235,11 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     else
       hasOverlay = true;
   }
+
+  /* Preserve the full update in the damage history so buffer-age repair still
+   * redraws older swapchain buffers correctly. */
+  if (fullFrame)
+    desktopDamage->count = -1;
 
   renderLetterBox(this);
 

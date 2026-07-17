@@ -506,6 +506,7 @@ int main_cursorThread(void * unused)
       core_handleGuestMouseUpdate();
     }
 
+    app_updateMouseState();
     g_cursor.redraw = false;
 
     RENDERER(onMouseEvent,

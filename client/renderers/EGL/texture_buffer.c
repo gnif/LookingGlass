@@ -340,7 +340,7 @@ EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex,
   return EGL_TEX_STATUS_OK;
 }
 
-EGL_TexStatus egl_texBufferBind(EGL_Texture * texture)
+EGL_TexStatus egl_texBufferBind(EGL_Texture * texture, GLuint unit)
 {
   GLuint tex;
   EGL_TexStatus status;
@@ -348,7 +348,7 @@ EGL_TexStatus egl_texBufferBind(EGL_Texture * texture)
   if ((status = texture->ops.get(texture, &tex, NULL)) != EGL_TEX_STATUS_OK)
     return status;
 
-  egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
+  egl_stateBindTexture(unit, GL_TEXTURE_2D, tex);
   return EGL_TEX_STATUS_OK;
 }
 

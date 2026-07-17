@@ -215,6 +215,12 @@ enum EGL_TexStatus egl_textureBind(EGL_Texture * this)
 enum EGL_TexStatus egl_textureBindWithSampler(EGL_Texture * this,
     GLuint sampler)
 {
-  egl_stateBindSampler(0, sampler);
-  return this->ops.bind(this);
+  return egl_textureBindUnitWithSampler(this, 0, sampler);
+}
+
+enum EGL_TexStatus egl_textureBindUnitWithSampler(EGL_Texture * this,
+    GLuint unit, GLuint sampler)
+{
+  egl_stateBindSampler(unit, sampler);
+  return this->ops.bind(this, unit);
 }

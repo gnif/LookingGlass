@@ -41,6 +41,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#define SHADER_MOUSE_VALID (UINT32_C(1) << 31)
+
 bool app_isRunning(void)
 {
   return
@@ -92,6 +94,74 @@ void app_updateCursorPos(double x, double y)
 
   if (app_isOverlayMode())
     g_state.io->MousePos = (ImVec2) { x, y };
+}
+
+void app_updateMouseState(void)
+{
+  LG_MouseState state = { 0 };
+
+  if (g_cursor.guest.valid &&
+      g_state.srcSize.x > 0 && g_state.srcSize.y > 0)
+  {
+    state.x = (float)(g_cursor.guest.x + g_cursor.guest.hx) /
+      g_state.srcSize.x;
+    state.y = (float)(g_cursor.guest.y + g_cursor.guest.hy) /
+      g_state.srcSize.y;
+    state.valid = true;
+  }
+
+  if (!state.valid)
+  {
+    atomic_fetch_and_explicit(&g_state.shaderMouseState,
+        ~SHADER_MOUSE_VALID, memory_order_release);
+    return;
+  }
+
+  uint32_t position[2];
+  memcpy(position + 0, &state.x, sizeof(state.x));
+  memcpy(position + 1, &state.y, sizeof(state.y));
+  const uint64_t packedPosition =
+    (uint64_t)position[0] | (uint64_t)position[1] << 32;
+
+  atomic_store_explicit(&g_state.shaderMousePosition, packedPosition,
+      memory_order_release);
+  atomic_fetch_or_explicit(&g_state.shaderMouseState,
+      SHADER_MOUSE_VALID, memory_order_release);
+}
+
+static void app_updateMouseButtons(void)
+{
+  const uint_least32_t buttons =
+    (g_cursor.buttons >> 1) & ~SHADER_MOUSE_VALID;
+  uint_least32_t current = atomic_load_explicit(&g_state.shaderMouseState,
+      memory_order_relaxed);
+
+  for (;;)
+  {
+    const uint_least32_t updated =
+      (current & SHADER_MOUSE_VALID) | buttons;
+    if (atomic_compare_exchange_weak_explicit(&g_state.shaderMouseState,
+          &current, updated, memory_order_release, memory_order_relaxed))
+      return;
+  }
+}
+
+void app_getMouseState(LG_MouseState * state)
+{
+  const uint32_t packedState = atomic_load_explicit(
+      &g_state.shaderMouseState, memory_order_acquire);
+  const uint64_t packedPosition = atomic_load_explicit(
+      &g_state.shaderMousePosition, memory_order_acquire);
+
+  const uint32_t position[2] = {
+    packedPosition,
+    packedPosition >> 32,
+  };
+
+  memcpy(&state->x, position + 0, sizeof(state->x));
+  memcpy(&state->y, position + 1, sizeof(state->y));
+  state->buttons = packedState & ~SHADER_MOUSE_VALID;
+  state->valid = !!(packedState & SHADER_MOUSE_VALID);
 }
 
 void app_handleFocusEvent(bool focused)
@@ -271,6 +341,7 @@ static int mapSpiceToImGuiButton(uint32_t button)
 void app_handleButtonPress(int button)
 {
   g_cursor.buttons |= (1U << button);
+  app_updateMouseButtons();
 
   if (app_isOverlayMode())
   {
@@ -290,6 +361,7 @@ void app_handleButtonPress(int button)
 void app_handleButtonRelease(int button)
 {
   g_cursor.buttons &= ~(1U << button);
+  app_updateMouseButtons();
 
   if (app_isOverlayMode())
   {
