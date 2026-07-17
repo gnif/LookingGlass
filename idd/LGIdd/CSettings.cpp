@@ -64,16 +64,15 @@ void CSettings::LoadModes()
     return;
   }
 
-  DEBUG_INFO("Parsed Modes:");
   for (const auto& line : entries)
     if (ParseModeString(line, m))
     {
-      DEBUG_INFO("  %ux%u@%u%s", m.width, m.height, m.refresh, m.preferred ? "*" : "");
-
       if (hasPreferred)
         m.preferred = false;
       m_displayModes.push_back(m);
     }
+
+  DEBUG_INFO("Parsed %d modes", m_displayModes.size());
 }
 
 void CSettings::SetExtraMode(const DisplayMode& mode)
