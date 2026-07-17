@@ -145,41 +145,41 @@ LRESULT CConfigWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 LRESULT CConfigWindow::onCreate()
 {
   m_scale = GetDpiForWindow(m_hwnd) / 96.0;
-  m_version.reset(new CStaticWidget(L"Looking Glass IDD " LG_VERSION_STR, WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+  m_version.reset(new CStaticWidget(L"Looking Glass IDD " LG_VERSION_STR, SS_CENTERIMAGE, m_hwnd));
 
-  m_modeGroup.reset(new CGroupBox(L"Custom modes", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_modeGroup.reset(new CGroupBox(L"Custom modes", 0, m_hwnd));
 
-  m_modeBox.reset(new CListBox(WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | LBS_NOTIFY, m_hwnd));
+  m_modeBox.reset(new CListBox(WS_VSCROLL | WS_TABSTOP | LBS_NOTIFY, m_hwnd));
   if (m_modes)
     updateModeList();
 
-  m_widthLabel.reset(new CStaticWidget(L"Width:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
-  m_heightLabel.reset(new CStaticWidget(L"Height:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
-  m_refreshLabel.reset(new CStaticWidget(L"Refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+  m_widthLabel.reset(new CStaticWidget(L"Width:", SS_CENTERIMAGE, m_hwnd));
+  m_heightLabel.reset(new CStaticWidget(L"Height:", SS_CENTERIMAGE, m_hwnd));
+  m_refreshLabel.reset(new CStaticWidget(L"Refresh:", SS_CENTERIMAGE, m_hwnd));
 
-  m_modeWidth.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modeHeight.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modeRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modePreferred.reset(new CCheckbox(L"prefer", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_modeWidth.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modeHeight.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modeRefresh.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modePreferred.reset(new CCheckbox(L"prefer", 0, m_hwnd));
 
-  m_modeUpdate.reset(new CButton(L"Save", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
-  m_modeDelete.reset(new CButton(L"Delete", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
-  m_modeReset.reset(new CButton(L"Reset", WS_CHILD | WS_VISIBLE | WS_TABSTOP, m_hwnd));
+  m_modeUpdate.reset(new CButton(L"Save", WS_TABSTOP, m_hwnd));
+  m_modeDelete.reset(new CButton(L"Delete", WS_TABSTOP, m_hwnd));
+  m_modeReset.reset(new CButton(L"Reset", WS_TABSTOP, m_hwnd));
   EnableWindow(*m_modeUpdate, FALSE);
   EnableWindow(*m_modeDelete, FALSE);
 
-  m_autosizeGroup.reset(new CGroupBox(L"Autosizing", WS_CHILD | WS_VISIBLE, m_hwnd));
-  m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
-  m_defRefresh.reset(new CEditWidget(WS_CHILD | WS_VISIBLE | ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
-  m_defRefreshHz.reset(new CStaticWidget(L"Hz", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE, m_hwnd));
+  m_autosizeGroup.reset(new CGroupBox(L"Autosizing", 0, m_hwnd));
+  m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", SS_CENTERIMAGE, m_hwnd));
+  m_defRefresh.reset(new CEditWidget(ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
+  m_defRefreshHz.reset(new CStaticWidget(L"Hz", SS_CENTERIMAGE, m_hwnd));
 
   if (m_defaultRefresh)
     m_defRefresh->setNumericValue(*m_defaultRefresh);
   else
     m_defRefresh->disable();
 
-  m_prefGroup.reset(new CGroupBox(L"Preferences", WS_CHILD | WS_VISIBLE, m_hwnd));
-  m_prefNoGPU.reset(new CCheckbox(L"Disable no GPU warning", WS_CHILD | WS_VISIBLE, m_hwnd));
+  m_prefGroup.reset(new CGroupBox(L"Preferences", 0, m_hwnd));
+  m_prefNoGPU.reset(new CCheckbox(L"Disable no GPU warning", 0, m_hwnd));
 
   if (m_noGPU)
     m_prefNoGPU->setChecked(*m_noGPU);
