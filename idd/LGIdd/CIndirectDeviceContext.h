@@ -159,15 +159,6 @@ private:
   CSettings::DisplayMode m_setMode = {};
   bool m_doSetMode = false;
 
-  // Debounce for resolution changes. A window resize streams many WINDOWSIZE
-  // requests in quick succession; rather than replug the monitor for each, we
-  // (re)start a timer and only apply the last requested resolution once it has
-  // remained unchanged for m_resChangeDelayMs. Guarded by m_stateLock.
-  static const ULONG     m_resChangeDelayMs = 1000;
-  WDFTIMER               m_resChangeTimer   = nullptr;
-  CSettings::DisplayMode m_pendingMode      = {};
-  bool                   m_resChangePending = false;
-
   // Set by ReplugMonitor after a departure to rebuild the monitor from the LGMP
   // timer, off the IddCx callback thread.
   volatile LONG m_finishInitQueued = 0;
@@ -206,7 +197,6 @@ public:
 #endif
 
   void SetResolution(int width, int height);
-  void ApplyResolution();
 
   size_t GetAlignSize   () const { return m_alignSize     ; }
   size_t GetMaxFrameSize() const { return m_maxFrameSize  ; }
