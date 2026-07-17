@@ -58,6 +58,7 @@ void CSettings::LoadModes()
       m.height    = DefaultDisplayModes[i][1];
       m.refresh   = defaultRefresh;
       m.preferred = !hasPreferred && (i == DefaultPreferredDisplayMode);
+      m.extraMode = false;
       m_displayModes.push_back(m);
     }
     return;
@@ -209,7 +210,11 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
   if (extraMode.empty())
     return false;
 
-  return ParseModeString(extraMode, mode);
+  if (!ParseModeString(extraMode, mode))
+    return false;
+
+  mode.extraMode = true;
+  return true;
 }
 
 unsigned CSettings::GetDefaultRefresh() const
@@ -318,5 +323,6 @@ bool CSettings::ParseModeString(const std::wstring& in, DisplayMode& out)
       out.refresh > 1000)
     return false;
 
+  out.extraMode = false;
   return true;
 }

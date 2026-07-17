@@ -554,6 +554,10 @@ void CEdid::Build(const CSettings::DisplayModes& modes)
     baseDtdIndex < EDID_BASE_DETAILED_TIMING_COUNT;
     ++modeIndex)
   {
+    // never include the extra mode in the EDID
+    if (sorted[modeIndex].extraMode)
+      continue;
+
     if (MakeDetailedTiming(
       baseBlock.descriptors[baseDtdIndex].detailedTiming,
       sorted[modeIndex]))
@@ -589,6 +593,10 @@ void CEdid::Build(const CSettings::DisplayModes& modes)
     ctaDtdWrite + EDID_DTD_SIZE <= EDID_BLOCK_SIZE - 1;
     ++modeIndex)
   {
+    // never include the extra mode in the EDID
+    if (sorted[modeIndex].extraMode)
+      continue;
+
     if (WriteDetailedTiming(cta + ctaDtdWrite, sorted[modeIndex]))
       ctaDtdWrite += EDID_DTD_SIZE;
   }

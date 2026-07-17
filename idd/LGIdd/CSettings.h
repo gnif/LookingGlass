@@ -32,6 +32,7 @@ class CSettings
       unsigned height;
       unsigned refresh;
       bool     preferred;
+      bool     extraMode;
     };
     typedef std::vector<DisplayMode> DisplayModes;
 
