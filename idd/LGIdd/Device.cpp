@@ -192,7 +192,6 @@ NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSW
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   wrapper->context->AssignSwapChain(
     inArgs->hSwapChain, inArgs->RenderAdapterLuid, inArgs->hNextSurfaceAvailable);
-  wrapper->context->GetDeviceContext()->OnAssignSwapChain();
   return STATUS_SUCCESS;
 }
 

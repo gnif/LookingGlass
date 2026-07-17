@@ -412,18 +412,6 @@ void CIndirectDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
   ReleaseSRWLockExclusive(&m_stateLock);
 }
 
-void CIndirectDeviceContext::OnAssignSwapChain()
-{
-  AcquireSRWLockExclusive(&m_stateLock);
-  bool doSetMode = m_doSetMode;
-  CSettings::DisplayMode mode = m_setMode;
-  m_doSetMode = false;
-  ReleaseSRWLockExclusive(&m_stateLock);
-
-  if (doSetMode)
-    g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
-}
-
 void CIndirectDeviceContext::OnSwapChainAssigned()
 {
   AcquireSRWLockExclusive(&m_stateLock);
@@ -452,7 +440,9 @@ void CIndirectDeviceContext::OnSwapChainReleased()
 
 void CIndirectDeviceContext::OnSwapChainReady()
 {
-  bool replug = false;
+  bool replug    = false;
+  bool doSetMode = false;
+  CSettings::DisplayMode mode = {};
 
   AcquireSRWLockExclusive(&m_stateLock);
   m_swapChainReady = true;
@@ -471,6 +461,15 @@ void CIndirectDeviceContext::OnSwapChainReady()
     m_replugPending = false;
     replug = true;
   }
+
+  // Do not consume the requested mode on an intermediate replacement swap
+  // chain. The last coalesced replug must be the one that applies it.
+  if (!replug && m_doSetMode)
+  {
+    mode        = m_setMode;
+    m_doSetMode = false;
+    doSetMode   = true;
+  }
   ReleaseSRWLockExclusive(&m_stateLock);
 
   // Do not expose the context to pipe reload requests until the initial swap
@@ -479,6 +478,8 @@ void CIndirectDeviceContext::OnSwapChainReady()
 
   if (replug)
     InterlockedExchange(&m_replugQueued, 1);
+  else if (doSetMode)
+    g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
 }
 
 static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
