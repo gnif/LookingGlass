@@ -21,6 +21,8 @@ const float ratio         = 4.0;     // Compressor ratio: 1 = disabled, <1 = exp
 const float compressor = 1.0 / ratio;
 
 // PQ constants
+const float m1    = 2610.0 / 16384.0;
+const float m2    = 2523.0 / 32.0;
 const float m1inv = 16384.0 / 2610.0;
 const float m2inv = 32.0 / 2523.0;
 const float c1    = 3424.0 / 4096.0;
@@ -72,6 +74,13 @@ vec3 pq2lin(vec3 pq, float gain)
   return pow(d, vec3(m1inv)) * gain;
 }
 
+vec3 lin2pq(vec3 linear)
+{
+  // ST.2084 uses absolute luminance normalized to 10000 cd/m².
+  vec3 p = pow(linear, vec3(m1));
+  return pow((c1 + c2 * p) / (1.0 + c3 * p), vec3(m2));
+}
+
 vec3 srgb2lin(vec3 c)
 {
   vec3 v = c / 12.92;
@@ -97,6 +106,15 @@ vec3 bt2020to709(vec3 bt2020)
     bt2020.r *  1.6605 + bt2020.g * -0.5876 + bt2020.b * -0.0728,
     bt2020.r * -0.1246 + bt2020.g *  1.1329 + bt2020.b * -0.0083,
     bt2020.r * -0.0182 + bt2020.g * -0.1006 + bt2020.b * 1.1187);
+}
+
+// in linear space
+vec3 bt709to2020(vec3 bt709)
+{
+  return vec3(
+    bt709.r * 0.6274 + bt709.g * 0.3293 + bt709.b * 0.0433,
+    bt709.r * 0.0691 + bt709.g * 0.9195 + bt709.b * 0.0114,
+    bt709.r * 0.0164 + bt709.g * 0.0880 + bt709.b * 0.8956);
 }
 
 vec3 mapToSDR(vec3 color, float gain, bool pq)
