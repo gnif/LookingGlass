@@ -194,7 +194,8 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
   };
 
   /* wait for completion */
-  framebuffer_wait(frame, this->format.dataSize);
+  if (unlikely(!framebuffer_wait(frame, this->format.dataSize)))
+    return false;
 
   return this->ops.update(this, &update);
 }

@@ -85,15 +85,17 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_FRAMEBUFFER);
 
-  LG_LOCK(parent->copyLock);
+  if (!egl_texBufferStreamLock(parent))
+    return false;
 
   struct TexDamage * damage = this->damage + parent->bufIndex;
   bool damageAll = !update->rects || update->rectCount == 0 || damage->count < 0 ||
     damage->count + update->rectCount > KVMFR_MAX_DAMAGE_RECTS;
+  bool complete;
 
   if (damageAll)
   {
-     framebuffer_read(
+    complete = framebuffer_read(
       update->frame,
       parent->buf[parent->bufIndex].map,
       texture->format.pitch,
@@ -122,7 +124,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
         scaledDamageRects[i] = rect;
       }
 
-      rectsFramebufferToBuffer(
+      complete = rectsFramebufferToBuffer(
         scaledDamageRects,
         damage->count,
         texture->format.bpp,
@@ -135,7 +137,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
     }
     else
     {
-      rectsFramebufferToBuffer(
+      complete = rectsFramebufferToBuffer(
         damage->rects,
         damage->count,
         texture->format.bpp,
@@ -146,6 +148,16 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
         texture->format.pitch
       );
     }
+  }
+
+  if (unlikely(!complete))
+  {
+    /* The mapped PBO may contain a partial copy. Force a full refresh if the
+     * caller recovers, and never expose this slot to the render context. */
+    damage->count = -1;
+    parent->buf[parent->bufIndex].updated = false;
+    LG_UNLOCK(parent->copyLock);
+    return false;
   }
 
   parent->buf[parent->bufIndex].updated = true;

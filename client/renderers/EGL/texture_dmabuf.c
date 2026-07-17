@@ -255,13 +255,25 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     });
   }
 
-  this->lastIndex = (fdImage == &this->images[0]) ? 0 : 1;
+  GLsync sync = 0;
   INTERLOCKED_SECTION(parent->copyLock,
   {
     if (fdImage->sync)
       glDeleteSync(fdImage->sync);
-    fdImage->sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    fdImage->sync = sync;
+    this->lastIndex = (fdImage == &this->images[0]) ? 0 : 1;
   });
+
+  if (unlikely(!sync))
+  {
+    DEBUG_GL_ERROR("Failed to create DMABUF sync");
+    return false;
+  }
+
+  /* The fence is consumed by the shared render context. Submit it from the
+   * frame context now so the render context can wait without blocking the CPU. */
+  glFlush();
 
   return true;
 }
@@ -277,48 +289,34 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
-  if (unlikely(this->lastIndex < 0))
-    return EGL_TEX_STATUS_NOTREADY;
+  int index    = -1;
+  int texIndex = -1;
+  GLsync sync  = 0;
 
-  struct FdImage *cur = &this->images[this->lastIndex];
-  GLsync sync = 0;
-
-  INTERLOCKED_SECTION(parent->copyLock, {
-    if (cur->sync) {
+  INTERLOCKED_SECTION(parent->copyLock,
+  {
+    index = this->lastIndex;
+    if (index >= 0)
+    {
+      struct FdImage * cur = &this->images[index];
+      texIndex = cur->texIndex;
       sync = cur->sync;
       cur->sync = 0;
     }
   });
 
+  if (unlikely(index < 0))
+    return EGL_TEX_STATUS_NOTREADY;
+
   if (sync)
   {
-    switch (glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, 20000000)) //20ms
-    {
-      case GL_ALREADY_SIGNALED:
-      case GL_CONDITION_SATISFIED:
-        glDeleteSync(sync);
-        break;
-
-      case GL_TIMEOUT_EXPIRED:
-        // Put it back for next try
-        INTERLOCKED_SECTION(parent->copyLock,
-        {
-          if (!cur->sync)
-            cur->sync = sync;
-          else
-            glDeleteSync(sync);
-        });
-        return EGL_TEX_STATUS_NOTREADY;
-
-      case GL_WAIT_FAILED:
-      case GL_INVALID_VALUE:
-        glDeleteSync(sync);
-        DEBUG_GL_ERROR("glClientWaitSync failed");
-        return EGL_TEX_STATUS_ERROR;
-    }
+    /* Keep the cross-context dependency on the GPU timeline. Subsequent
+     * sampling waits for the import without delaying render submission. */
+    glWaitSync(sync, 0, GL_TIMEOUT_IGNORED);
+    glDeleteSync(sync);
   }
 
-  *tex = parent->tex[cur->texIndex];
+  *tex = parent->tex[texIndex];
 
   if (fmt)
     *fmt = this->pixFmt;
