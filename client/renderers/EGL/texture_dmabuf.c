@@ -247,6 +247,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
     int slot = (fdImage == &this->images[0]) ? 0 : 1;
     fdImage->texIndex = slot;
+    GLsync sync = 0;
     INTERLOCKED_SECTION(parent->copyLock,
     {
       egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, parent->tex[slot]);
@@ -256,28 +257,27 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
       glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       g_egl_dynProcs.glEGLImageTargetTexture2DOES(
           GL_TEXTURE_EXTERNAL_OES, image);
+
+      sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+      fdImage->sync = sync;
     });
+
+    if (unlikely(!sync))
+    {
+      DEBUG_GL_ERROR("Failed to create DMABUF sync");
+      return false;
+    }
+
+    /* Publish the texture attachment to the shared render context once. The
+     * backing memory is synchronized separately by framebuffer_wait(), so
+     * subsequent frames do not add any GL commands to this context. */
+    glFlush();
   }
 
-  GLsync sync = 0;
   INTERLOCKED_SECTION(parent->copyLock,
   {
-    if (fdImage->sync)
-      glDeleteSync(fdImage->sync);
-    sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    fdImage->sync = sync;
     this->lastIndex = (fdImage == &this->images[0]) ? 0 : 1;
   });
-
-  if (unlikely(!sync))
-  {
-    DEBUG_GL_ERROR("Failed to create DMABUF sync");
-    return false;
-  }
-
-  /* The fence is consumed by the shared render context. Submit it from the
-   * frame context now so the render context can wait without blocking the CPU. */
-  glFlush();
 
   return true;
 }
