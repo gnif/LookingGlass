@@ -91,11 +91,12 @@ private:
   bool m_cursorVisible = false;
   int m_cursorX = 0, m_cursorY = 0;
 
-  size_t         m_alignSize    = 0;
-  size_t         m_maxFrameSize = 0;
-  int            m_frameIndex   = 0;
-  uint32_t       m_formatVer    = 0;
-  uint32_t       m_frameSerial  = 0;
+  size_t         m_alignSize           = 0;
+  size_t         m_maxFrameSize        = 0;
+  int            m_frameIndex          = 0;
+  volatile LONG  m_publishedFrameIndex = -1;
+  uint32_t       m_formatVer           = 0;
+  uint32_t       m_frameSerial         = 0;
   PLGMPMemory    m_frameMemory[LGMP_Q_FRAME_LEN] = {};
   KVMFRFrame   * m_frame      [LGMP_Q_FRAME_LEN] = {};
   FrameBuffer  * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
@@ -105,8 +106,6 @@ private:
   unsigned    m_pitch    = 0;
   DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
   FrameType   m_frameType = FRAME_TYPE_INVALID;
-  bool        m_hasFrame = false;
-
   UINT m_iddCxVersion = 0;
   bool m_canProcessFP16 = false;
 
@@ -211,6 +210,7 @@ public:
   };
 
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
+  bool PublishFrameBuffer(unsigned frameIndex);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 

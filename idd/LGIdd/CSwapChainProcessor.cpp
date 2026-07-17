@@ -224,7 +224,8 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       if (frameNumber != lastFrameNumber)
       {
         lastFrameNumber = frameNumber;
-        SwapChainNewFrame(surface, dirtyRectCount, colorSpace, sdrWhiteLevel);
+        if (!SwapChainNewFrame(surface, dirtyRectCount, colorSpace, sdrWhiteLevel))
+          DEBUG_WARN("Failed to submit frame");
 
         // report that all GPU processing for this frame has been queued
         hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -582,9 +583,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   memcpy(m_dirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*m_dirtyRects));
   m_nbDirtyRects = nbDirtyRects;
 
-  copyQueue->Execute();
+  if (!copyQueue->Execute())
+    return false;
 
-  return true;
+  return m_devContext->PublishFrameBuffer(buffer.frameIndex);
 }
 
 DWORD CALLBACK CSwapChainProcessor::_CursorThread(LPVOID arg)

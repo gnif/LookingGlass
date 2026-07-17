@@ -820,7 +820,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
 void CIndirectDeviceContext::DeInitLGMP()
 {
-  m_hasFrame = false;
+  InterlockedExchange(&m_publishedFrameIndex, -1);
 
   // The retry timer callback dereferences this context, so make sure it is
   // stopped and drained before we tear anything down. Wait for any in-flight
@@ -910,8 +910,10 @@ void CIndirectDeviceContext::LGMPTimer()
 
   if (lgmpHostQueueNewSubs(m_frameQueue) && m_monitor)
   {
-    if (m_hasFrame)
-      lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
+    const LONG frameIndex =
+      InterlockedCompareExchange(&m_publishedFrameIndex, 0, 0);
+    if (frameIndex >= 0)
+      lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
   }
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
@@ -1047,13 +1049,31 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   FrameBuffer* fb = m_frameBuffer[m_frameIndex];
   fb->wp = 0;
 
-  lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
-
   result.frameIndex = m_frameIndex;
   result.mem        = fb->data;
 
-  m_hasFrame = true;
   return result;
+}
+
+bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
+{
+  if (!m_frameQueue || frameIndex >= LGMP_Q_FRAME_LEN)
+    return false;
+
+  /* Make resends select this submitted frame before posting it. This prevents
+   * a new subscriber racing publication from receiving the previous frame
+   * after the new one. */
+  InterlockedExchange(&m_publishedFrameIndex, (LONG)frameIndex);
+
+  const LGMP_STATUS status =
+    lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
+  if (status != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to publish frame: %s", lgmpStatusString(status));
+    return false;
+  }
+
+  return true;
 }
 
 void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const
