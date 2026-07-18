@@ -826,9 +826,28 @@ int main_frameThread(void * unused)
       }
     }
 
+    uint32_t damageRectsCount =
+      frame->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS ?
+        frame->damageRectsCount : 0;
+    bool invalidDamage = damageRectsCount != frame->damageRectsCount;
+    for (uint32_t i = 0; !invalidDamage && i < damageRectsCount; ++i)
+    {
+      const FrameDamageRect * rect = frame->damageRects + i;
+      invalidDamage =
+        rect->x > frame->frameWidth ||
+        rect->y > frame->frameHeight ||
+        rect->width  > frame->frameWidth  - rect->x ||
+        rect->height > frame->frameHeight - rect->y;
+    }
+    if (unlikely(invalidDamage))
+    {
+      DEBUG_WARN("Invalid damage rectangles, forcing a full update");
+      damageRectsCount = 0;
+    }
+
     FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
     if (!RENDERER(onFrame, fb, g_state.useDMA ? dma->fd : -1,
-          frame->damageRects, frame->damageRectsCount))
+          frame->damageRects, damageRectsCount))
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");
