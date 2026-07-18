@@ -39,6 +39,7 @@ private:
 
   bool m_running = false;
   bool m_connected = false;
+  SRWLOCK m_displayLock = SRWLOCK_INIT;
 
   static DWORD WINAPI _pipeThread(LPVOID lpParam) { ((CPipeClient*)lpParam)->Thread(); return 0; }
   void Thread();
@@ -46,6 +47,8 @@ private:
   void WriteMsg(const LGPipeMsg& msg);
 
   void SetActiveDesktop();
+
+  bool EnsureOnlyDisplayLocked();
   
   void HandleSetCursorPos(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
@@ -61,6 +64,7 @@ public:
   bool IsRunning() { return m_running; }
 
   void ReloadSettings();
+  bool EnsureOnlyDisplay();
 };
 
 extern CPipeClient g_pipe;

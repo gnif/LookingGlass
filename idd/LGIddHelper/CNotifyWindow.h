@@ -39,10 +39,12 @@ class CNotifyWindow : public CWindow
   std::unique_ptr<CConfigWindow> m_config;
 
   std::function<void()> m_onSettingChange;
+  std::function<bool()> m_onDisplayChange;
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
   void handleGPUNotification(bool hasGPU);
+  void scheduleDisplayCheck(UINT delay);
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
@@ -74,4 +76,5 @@ public:
   void close();
 
   void onSettingChange(std::function<void()> func) { m_onSettingChange = std::move(func); }
+  void onDisplayChange(std::function<bool()> func);
 };
