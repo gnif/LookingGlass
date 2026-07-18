@@ -337,9 +337,14 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
       path.targetInfo.modeInfoIdx = 1;
       path.flags |= DISPLAYCONFIG_PATH_ACTIVE;
 
+      // Keep a bootable physical-display topology in the persistence
+      // database. Persisting an LG-only topology creates a dependency cycle
+      // on Windows 10 at the next boot: IddCx waits for display topology
+      // initialization while the saved topology waits for this IDD adapter.
+      // The helper reapplies this temporary topology on startup, display
+      // changes and periodically, so it remains enforced for the session.
       result = SetDisplayConfig(1, &path, 2, selectedModes,
-        SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG |
-        SDC_ALLOW_CHANGES | SDC_SAVE_TO_DATABASE);
+        SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES);
       if (result != ERROR_SUCCESS)
       {
         DEBUG_ERROR("Failed to apply the LG-only display topology (%ld)",
