@@ -641,10 +641,11 @@ int main_frameThread(void * unused)
       lgrFormat.pitch         = frame->pitch;
       lgrFormat.hdr           = frame->flags & FRAME_FLAG_HDR;
       lgrFormat.hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.hdrMetadata   = frame->flags & FRAME_FLAG_HDR_METADATA;
       lgrFormat.sdrWhiteLevel = frame->sdrWhiteLevel ?
         frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
-      if (lgrFormat.hdr)
+      if (lgrFormat.hdrMetadata)
       {
         memcpy(lgrFormat.hdrDisplayPrimary, frame->hdrDisplayPrimary, sizeof(lgrFormat.hdrDisplayPrimary));
         memcpy(lgrFormat.hdrWhitePoint    , frame->hdrWhitePoint    , sizeof(lgrFormat.hdrWhitePoint    ));

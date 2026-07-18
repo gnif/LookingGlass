@@ -74,6 +74,7 @@ typedef struct LG_RendererFormat
   FrameType         type;         // frame type
   bool              hdr;          // if the frame is HDR or not
   bool              hdrPQ;        // if the HDR content is PQ mapped
+  bool              hdrMetadata;  // if the HDR static metadata is valid
   unsigned int      screenWidth;  // actual width of the host
   unsigned int      screenHeight; // actual height of the host
   unsigned int      dataWidth;    // the width of the packed data
@@ -85,7 +86,7 @@ typedef struct LG_RendererFormat
   unsigned int      bpp;     // bits per pixel (zero if compressed)
   LG_RendererRotate rotate;  // guest rotation
 
-  // HDR static metadata (from KVMFRFrame, valid when hdr is true)
+  // HDR static metadata (from KVMFRFrame, valid when hdrMetadata is true)
   uint16_t hdrDisplayPrimary[3][2];
   uint16_t hdrWhitePoint[2];
   uint32_t hdrMaxDisplayLuminance;

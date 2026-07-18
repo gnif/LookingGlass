@@ -221,6 +221,7 @@ struct WaylandDSState
   _Atomic(bool) pendingHDRApply;
   _Atomic(bool) pendingHDRClear;
   bool          pendingHDRPQ;
+  bool          pendingHDRMetadata;
   uint16_t      pendingHDRDisplayPrimary[3][2];
   uint16_t      pendingHDRWhitePoint[2];
   uint32_t      pendingHDRMaxDisplayLuminance;
@@ -316,7 +317,7 @@ void waylandColorMgmtFree(void);
 void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ);
+    bool hdrPQ, bool hdrMetadata);
 void waylandClearHDRImageDescription(void);
 
 // Queue HDR change from any thread (applied in waylandEGLSwapBuffers).
@@ -325,7 +326,7 @@ void waylandClearHDRImageDescription(void);
 bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ);
+    bool hdrPQ, bool hdrMetadata);
 void waylandRequestClearHDR(void);
 
 // idle module
