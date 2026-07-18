@@ -62,18 +62,34 @@ NTSTATUS LGIddDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousSta
 {
   UNREFERENCED_PARAMETER(previousState);
 
+  DEBUG_INFO("Device entered D0, starting adapter initialization");
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
   wrapper->context->InitAdapter();
 
+  DEBUG_INFO("Device D0 entry completed");
   return STATUS_SUCCESS;
 }
 
 NTSTATUS LGIddAdapterInitFinished(IDDCX_ADAPTER adapter, const IDARG_IN_ADAPTER_INIT_FINISHED * args)
 {
+  DEBUG_INFO("Adapter initialization callback completed with status 0x%08x",
+    args->AdapterInitStatus);
+
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(adapter);
   if (!NT_SUCCESS(args->AdapterInitStatus))
+  {
+    DEBUG_ERROR_HR(args->AdapterInitStatus,
+      "IddCx adapter initialization failed asynchronously");
     return STATUS_SUCCESS;
+  }
 
+  if (!wrapper->context)
+  {
+    DEBUG_ERROR("Adapter initialization completed before its context was attached");
+    return STATUS_INVALID_DEVICE_STATE;
+  }
+
+  DEBUG_INFO("Adapter initialized, creating monitor");
   wrapper->context->FinishInit(0);
   return STATUS_SUCCESS;
 }
@@ -82,6 +98,7 @@ NTSTATUS LGIddAdapterCommitModes(IDDCX_ADAPTER adapter, const IDARG_IN_COMMITMOD
 {
   UNREFERENCED_PARAMETER(adapter);
   UNREFERENCED_PARAMETER(args);
+  DEBUG_INFO("Display modes committed");
   return STATUS_SUCCESS;
 }
 
@@ -158,6 +175,7 @@ NTSTATUS LGIddAdapterCommitModes2(IDDCX_ADAPTER adapter, const IDARG_IN_COMMITMO
 {
   UNREFERENCED_PARAMETER(adapter);
   UNREFERENCED_PARAMETER(args);
+  DEBUG_INFO("Display modes committed through IddCx 1.10");
   return STATUS_SUCCESS;
 }
 
@@ -189,6 +207,7 @@ NTSTATUS LGIddMonitorQueryTargetModes2(IDDCX_MONITOR monitor, const IDARG_IN_QUE
 
 NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSWAPCHAIN* inArgs)
 {
+  DEBUG_INFO("Swap chain assigned to monitor %p", monitor);
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   wrapper->context->AssignSwapChain(
     inArgs->hSwapChain, inArgs->RenderAdapterLuid, inArgs->hNextSurfaceAvailable);
@@ -197,6 +216,7 @@ NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSW
 
 NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 {
+  DEBUG_INFO("Swap chain unassigned from monitor %p", monitor);
   auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   wrapper->context->UnassignSwapChain();
   return STATUS_SUCCESS;
@@ -280,5 +300,9 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   l_wdfDevice = device;
 
   status = IddCxDeviceInitialize(device);
+  if (!NT_SUCCESS(status))
+    DEBUG_ERROR_HR(status, "IddCxDeviceInitialize Failed");
+  else
+    DEBUG_INFO("IddCx device initialized");
   return status;
 }

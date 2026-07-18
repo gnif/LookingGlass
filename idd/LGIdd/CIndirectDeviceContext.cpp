@@ -163,13 +163,21 @@ void CIndirectDeviceContext::StopInitRetry()
 
 void CIndirectDeviceContext::InitAdapter()
 {
+  DEBUG_TRACE("InitAdapter");
+
   // The adapter only needs to be created once. D0Entry and the retry timer can
   // both land here, so guard against re-entrancy and repeated creation.
   if (m_adapter)
+  {
+    DEBUG_TRACE("Adapter initialization skipped: adapter already exists");
     return;
+  }
 
   if (InterlockedCompareExchange(&m_initInProgress, 1, 0) != 0)
+  {
+    DEBUG_TRACE("Adapter initialization skipped: initialization already in progress");
     return;
+  }
 
   // At boot the IVSHMEM PCI device may not have enumerated yet. Rather than
   // silently abandoning the adapter (leaving the device loaded but with no
@@ -187,8 +195,17 @@ void CIndirectDeviceContext::InitAdapter()
   }
 
   QueryIddCxCapabilities();
+  DEBUG_TRACE("Loading configured display modes");
   PopulateDefaultModes();
+  DEBUG_TRACE("Initializing monitor EDID");
   InitializeEdid();
+
+  AcquireSRWLockShared(&m_modeLock);
+  const size_t modeCount = m_displayModes.size();
+  const UINT edidSize = m_edid.Size();
+  ReleaseSRWLockShared(&m_modeLock);
+  DEBUG_INFO("Initializing adapter with %llu modes and a %u-byte EDID",
+    (unsigned long long)modeCount, edidSize);
 
   IDDCX_ADAPTER_CAPS caps = {};
   caps.Size = sizeof(caps);
@@ -229,7 +246,9 @@ void CIndirectDeviceContext::InitAdapter()
   init.pCaps            = &caps;
   init.ObjectAttributes = &attr;
 
-  IDARG_OUT_ADAPTER_INIT initOut;
+  IDARG_OUT_ADAPTER_INIT initOut = {};
+  DEBUG_INFO("Calling IddCxAdapterInitAsync with flags 0x%08x",
+    caps.Flags);
   NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
   if (!NT_SUCCESS(status) && CanUseIddCx110DDIs())
   {
@@ -250,39 +269,91 @@ void CIndirectDeviceContext::InitAdapter()
   }
 
   m_adapter = initOut.AdapterObject;
-
-  // try to co-exist with the virtual video device by telling IddCx which adapter we prefer to render on
-  IDXGIFactory * factory = NULL;
-  IDXGIAdapter * dxgiAdapter;
-  CreateDXGIFactory(__uuidof(IDXGIFactory), (void **)&factory);
-  for (UINT i = 0; factory->EnumAdapters(i, &dxgiAdapter) != DXGI_ERROR_NOT_FOUND; ++i)
+  if (!m_adapter)
   {
-    DXGI_ADAPTER_DESC adapterDesc;
-    dxgiAdapter->GetDesc(&adapterDesc);
-    dxgiAdapter->Release();
-
-    if ((adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) || // Microsoft Basic Render Driver
-        (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL
-        (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))   // QEMU Standard VGA
-      continue;
-
-    IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
-    args.PreferredRenderAdapter = adapterDesc.AdapterLuid;
-    IddCxAdapterSetRenderAdapter(m_adapter, &args);
-    break;
+    DEBUG_ERROR("IddCxAdapterInitAsync succeeded without returning an adapter object");
+    InterlockedExchange(&m_initInProgress, 0);
+    return;
   }
-  factory->Release();
+
+  DEBUG_INFO("IddCxAdapterInitAsync started successfully (adapter %p)",
+    m_adapter);
+
+  // Try to co-exist with the virtual video device by telling IddCx which
+  // hardware adapter we prefer to render on.
+  IDXGIFactory * factory = NULL;
+  HRESULT factoryStatus = CreateDXGIFactory(
+    __uuidof(IDXGIFactory), (void **)&factory);
+  if (FAILED(factoryStatus))
+    DEBUG_ERROR_HR(factoryStatus, "CreateDXGIFactory Failed");
+  else
+  {
+    bool renderAdapterSelected = false;
+    for (UINT i = 0;; ++i)
+    {
+      IDXGIAdapter * dxgiAdapter = nullptr;
+      HRESULT enumStatus = factory->EnumAdapters(i, &dxgiAdapter);
+      if (enumStatus == DXGI_ERROR_NOT_FOUND)
+        break;
+      if (FAILED(enumStatus))
+      {
+        DEBUG_ERROR_HR(enumStatus, "Failed to enumerate DXGI adapter %u", i);
+        break;
+      }
+
+      DXGI_ADAPTER_DESC adapterDesc = {};
+      HRESULT descStatus = dxgiAdapter->GetDesc(&adapterDesc);
+      dxgiAdapter->Release();
+      if (FAILED(descStatus))
+      {
+        DEBUG_ERROR_HR(descStatus, "Failed to query DXGI adapter %u", i);
+        continue;
+      }
+
+      if (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c)
+      {
+        DEBUG_INFO("Ignoring software render adapter %ls", adapterDesc.Description);
+        continue;
+      }
+
+      if ((adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL
+          (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))   // QEMU Standard VGA
+      {
+        DEBUG_INFO("Ignoring display-only adapter %ls (vendor 0x%04x, device 0x%04x)",
+          adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
+        continue;
+      }
+
+      DEBUG_INFO("Selecting render adapter %ls (vendor 0x%04x, device 0x%04x)",
+        adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
+      IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
+      args.PreferredRenderAdapter = adapterDesc.AdapterLuid;
+      IddCxAdapterSetRenderAdapter(m_adapter, &args);
+      DEBUG_INFO("Preferred render adapter set");
+      renderAdapterSelected = true;
+      break;
+    }
+
+    if (!renderAdapterSelected)
+      DEBUG_INFO("No preferred hardware render adapter was selected");
+
+    factory->Release();
+  }
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;
+  DEBUG_INFO("Adapter context attached; waiting for initialization callback");
 
   // Adapter is up; no need to keep retrying.
   StopInitRetry();
   InterlockedExchange(&m_initInProgress, 0);
+  DEBUG_INFO("Adapter initialization request complete; returning to IddCx");
 }
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
 {
+  DEBUG_INFO("Creating monitor on connector %u", connectorIndex);
+
   // We support a single monitor; never create a second one if one already
   // exists (a replug must clear m_monitor via departure first).
   AcquireSRWLockExclusive(&m_stateLock);
@@ -303,6 +374,7 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   AcquireSRWLockShared(&m_modeLock);
   edid.assign(m_edid.Data(), m_edid.Data() + m_edid.Size());
   ReleaseSRWLockShared(&m_modeLock);
+  DEBUG_INFO("Using %llu-byte monitor EDID", (unsigned long long)edid.size());
 
   IDDCX_MONITOR_INFO info = {};
   info.Size           = sizeof(info);
@@ -314,19 +386,26 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   info.MonitorDescription.DataSize = (UINT)edid.size();
   info.MonitorDescription.pData    = edid.empty() ? nullptr : edid.data();
 
-  CoCreateGuid(&info.MonitorContainerId);
+  HRESULT hr = CoCreateGuid(&info.MonitorContainerId);
+  if (FAILED(hr))
+  {
+    DEBUG_ERROR_HR(hr, "Failed to create the monitor container ID");
+    return;
+  }
 
   IDARG_IN_MONITORCREATE create = {};
   create.ObjectAttributes = &attr;
   create.pMonitorInfo     = &info;
 
-  IDARG_OUT_MONITORCREATE createOut;
+  IDARG_OUT_MONITORCREATE createOut = {};
   NTSTATUS status = IddCxMonitorCreate(m_adapter, &create, &createOut);
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "IddCxMonitorCreate Failed");
     return;
   }
+
+  DEBUG_INFO("Monitor object created (%p)", createOut.MonitorObject);
 
   AcquireSRWLockExclusive(&m_stateLock);
   m_monitor = createOut.MonitorObject;
@@ -335,13 +414,15 @@ void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(m_monitor);
   wrapper->context = new CIndirectMonitorContext(m_monitor, this);
 
-  IDARG_OUT_MONITORARRIVAL out;
+  IDARG_OUT_MONITORARRIVAL out = {};
   status = IddCxMonitorArrival(m_monitor, &out);
   if (FAILED(status))
   {
     DEBUG_ERROR_HR(status, "IddCxMonitorArrival Failed");
     return;
   }
+
+  DEBUG_INFO("Monitor arrival reported successfully");
 }
 
 void CIndirectDeviceContext::ReplugMonitor()
