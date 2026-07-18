@@ -21,6 +21,7 @@
 #include "interface/renderer.h"
 
 #include "common/util.h"
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/KVMFR.h"
 #include "common/option.h"
@@ -839,7 +840,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   const char * configDesc = NULL;
   int          chosen     = -1;
 
-  for (int i = 0; i < (int)(sizeof(configs) / sizeof(configs[0])); ++i)
+  for (int i = 0; i < (int)ARRAY_LENGTH(configs); ++i)
   {
     EGLint attr[] =
     {
