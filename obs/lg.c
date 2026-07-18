@@ -105,7 +105,7 @@ typedef struct
   bool                 hideMouse;
   bool                 hdr;
   bool                 hdrPQ;
-  float                sdrWhiteLevel;  // source SDR white level in nits
+  _Atomic(float)       sdrWhiteLevel;  // source cursor white level in nits
   struct vec3          colorMatrix[3]; // source primaries -> BT.709 (linear)
   float                hdrScale;       // scRGB reference white scaling
 #if LIBOBS_API_MAJOR_VER >= 27
@@ -132,6 +132,11 @@ typedef struct
   os_sem_t           * cursorSem;
   atomic_uint          cursorVer;
   unsigned int         cursorCurVer;
+  KVMFRColorTransform  pendingCursorTransform;
+  KVMFRColorTransform  activeCursorTransform;
+  atomic_uint          cursorTransformVer;
+  unsigned int         cursorTransformCurVer;
+  gs_texture_t       * cursorLUT;
   uint32_t             cursorSize;
   uint32_t           * cursorData;
 
@@ -149,6 +154,13 @@ typedef struct
   gs_effect_t * cursorEffect;
   gs_eparam_t * cursorImage;
   gs_eparam_t * cursorMultiplier;
+  gs_eparam_t * cursorSDRWhiteLevel;
+  gs_eparam_t * cursorOutputTransfer;
+  gs_eparam_t * cursorMatrixEnabled;
+  gs_eparam_t * cursorLUTEnabled;
+  gs_eparam_t * cursorColorMatrix[3];
+  gs_eparam_t * cursorColorScalar;
+  gs_eparam_t * cursorColorLUT;
 }
 LGPlugin;
 
@@ -231,11 +243,31 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
       this->cursorEffect, "image"     );
   this->cursorMultiplier = gs_effect_get_param_by_name(
       this->cursorEffect, "multiplier");
+  this->cursorSDRWhiteLevel = gs_effect_get_param_by_name(
+      this->cursorEffect, "sdrWhiteLevel");
+  this->cursorOutputTransfer = gs_effect_get_param_by_name(
+      this->cursorEffect, "outputTransfer");
+  this->cursorMatrixEnabled = gs_effect_get_param_by_name(
+      this->cursorEffect, "matrixEnabled");
+  this->cursorLUTEnabled = gs_effect_get_param_by_name(
+      this->cursorEffect, "lutEnabled");
+  this->cursorColorMatrix[0] = gs_effect_get_param_by_name(
+      this->cursorEffect, "colorMatrix0");
+  this->cursorColorMatrix[1] = gs_effect_get_param_by_name(
+      this->cursorEffect, "colorMatrix1");
+  this->cursorColorMatrix[2] = gs_effect_get_param_by_name(
+      this->cursorEffect, "colorMatrix2");
+  this->cursorColorScalar = gs_effect_get_param_by_name(
+      this->cursorEffect, "colorScalar");
+  this->cursorColorLUT = gs_effect_get_param_by_name(
+      this->cursorEffect, "colorLUT");
   obs_leave_graphics();
 
   os_sem_init (&this->frameSem , 0);
   os_sem_init (&this->cursorSem, 1);
   atomic_store(&this->cursorVer, 0);
+  atomic_store(&this->cursorTransformVer, 0);
+  atomic_store(&this->sdrWhiteLevel, KVMFR_SDR_WHITE_LEVEL_DEFAULT);
   lgUpdate(this, settings);
   return this;
 }
@@ -352,6 +384,21 @@ static void deinit(LGPlugin * this)
     gs_texture_destroy(this->cursorXorTex);
     this->cursorXorTex = NULL;
   }
+
+  if (this->cursorLUT)
+  {
+    gs_effect_set_texture(this->cursorColorLUT, NULL);
+    gs_texture_destroy(this->cursorLUT);
+    this->cursorLUT = NULL;
+  }
+  memset(&this->pendingCursorTransform, 0,
+      sizeof(this->pendingCursorTransform));
+  memset(&this->activeCursorTransform, 0,
+      sizeof(this->activeCursorTransform));
+  this->pendingCursorTransform.scalar = 1.0f;
+  this->activeCursorTransform.scalar = 1.0f;
+  atomic_store(&this->cursorTransformVer, 0);
+  this->cursorTransformCurVer = 0;
 
 #if LIBOBS_API_MAJOR_VER >= 27
   dmabufReset(this);
@@ -488,8 +535,13 @@ static void * pointerThread(void * data)
     }
 
     const KVMFRCursor * const cursor = (const KVMFRCursor * const)msg.mem;
-    this->cursorVisible = this->hideMouse ?
-      0 : msg.udata & CURSOR_FLAG_VISIBLE;
+    if (msg.udata & CURSOR_FLAG_VISIBLE_VALID)
+    {
+      this->cursorVisible = this->hideMouse ?
+        0 : msg.udata & CURSOR_FLAG_VISIBLE;
+      if (cursor->sdrWhiteLevel)
+        atomic_store(&this->sdrWhiteLevel, cursor->sdrWhiteLevel);
+    }
 
     if (msg.udata & CURSOR_FLAG_SHAPE)
     {
@@ -573,6 +625,21 @@ static void * pointerThread(void * data)
         cursor->height / 2 : cursor->height;
 
       atomic_fetch_add_explicit(&this->cursorVer, 1, memory_order_relaxed);
+      os_sem_post(this->cursorSem);
+    }
+
+    if (msg.udata & CURSOR_FLAG_COLOR_TRANSFORM)
+    {
+      const size_t shapeSize = msg.udata & CURSOR_FLAG_SHAPE ?
+        (size_t)cursor->height * cursor->pitch : 0;
+      const KVMFRColorTransform * transform =
+        (const KVMFRColorTransform *)((const uint8_t *)(cursor + 1) +
+          shapeSize);
+
+      os_sem_wait(this->cursorSem);
+      this->pendingCursorTransform = *transform;
+      atomic_fetch_add_explicit(
+          &this->cursorTransformVer, 1, memory_order_release);
       os_sem_post(this->cursorSem);
     }
 
@@ -882,8 +949,8 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
   this->unpack        = false;
   this->hdr           = frame->flags & FRAME_FLAG_HDR;
   this->hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
-  this->sdrWhiteLevel = frame->sdrWhiteLevel ?
-    frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  atomic_store(&this->sdrWhiteLevel, frame->sdrWhiteLevel ?
+      frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT);
 
   if (this->hdr && this->hdrPQ)
     lgComputeColorMatrix(this);
@@ -1113,6 +1180,36 @@ static void lgVideoTick(void * data, float seconds)
     os_sem_post(this->cursorSem);
   }
 
+  const unsigned int cursorTransformVer = atomic_load_explicit(
+      &this->cursorTransformVer, memory_order_acquire);
+  if (cursorTransformVer != this->cursorTransformCurVer)
+  {
+    os_sem_wait(this->cursorSem);
+    this->activeCursorTransform = this->pendingCursorTransform;
+
+    obs_enter_graphics();
+    if (this->cursorLUT)
+    {
+      gs_effect_set_texture(this->cursorColorLUT, NULL);
+      gs_texture_destroy(this->cursorLUT);
+      this->cursorLUT = NULL;
+    }
+
+    if (this->activeCursorTransform.flags & KVMFR_COLOR_TRANSFORM_LUT)
+    {
+      const uint8_t * lut =
+        (const uint8_t *)this->activeCursorTransform.lut;
+      this->cursorLUT = gs_texture_create(
+          4096, 1, GS_RGBA32F, 1, &lut, GS_DYNAMIC);
+      if (!this->cursorLUT)
+        blog(LOG_ERROR, "Failed to create cursor colour-transform LUT");
+    }
+    obs_leave_graphics();
+
+    this->cursorTransformCurVer = cursorTransformVer;
+    os_sem_post(this->cursorSem);
+  }
+
   if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
   {
     if (status != LGMP_ERR_QUEUE_EMPTY)
@@ -1206,6 +1303,29 @@ static void lgVideoTick(void * data, float seconds)
   obs_leave_graphics();
 }
 
+static void lgSetupCursorEffect(LGPlugin * this, int outputTransfer)
+{
+  const KVMFRColorTransform * transform = &this->activeCursorTransform;
+  const bool matrixEnabled =
+    transform->flags & KVMFR_COLOR_TRANSFORM_MATRIX;
+  const bool lutEnabled =
+    (transform->flags & KVMFR_COLOR_TRANSFORM_LUT) && this->cursorLUT;
+  const float whiteLevel = atomic_load(&this->sdrWhiteLevel);
+
+  gs_effect_set_float(this->cursorMultiplier,
+      whiteLevel / LG_SCRGB_REFERENCE_WHITE);
+  gs_effect_set_float(this->cursorSDRWhiteLevel, whiteLevel);
+  gs_effect_set_int(this->cursorOutputTransfer, outputTransfer);
+  gs_effect_set_bool(this->cursorMatrixEnabled, matrixEnabled);
+  gs_effect_set_bool(this->cursorLUTEnabled, lutEnabled);
+  for (int i = 0; i < 3; ++i)
+    gs_effect_set_val(this->cursorColorMatrix[i],
+        transform->matrix[i], sizeof(transform->matrix[i]));
+  gs_effect_set_float(this->cursorColorScalar, transform->scalar);
+  if (lutEnabled)
+    gs_effect_set_texture(this->cursorColorLUT, this->cursorLUT);
+}
+
 static void lgVideoRender(void * data, gs_effect_t * effect)
 {
   LGPlugin * this = (LGPlugin *)data;
@@ -1275,20 +1395,24 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
      * linear scRGB space, decode them and reproduce the source display's SDR
      * white level reported by the IDD. */
     bool mapCursorToScRGB = false;
-    float cursorScale = 1.0f;
 #if LIBOBS_API_MAJOR_VER >= 28
     mapCursorToScRGB = this->colorSpace == GS_CS_709_SCRGB;
-    if (mapCursorToScRGB)
-      cursorScale = this->sdrWhiteLevel / LG_SCRGB_REFERENCE_WHITE;
 #endif
 
-    effect = mapCursorToScRGB && !this->cursorMono ?
+    const bool hasCursorTransform =
+      this->activeCursorTransform.flags != 0;
+    const bool useCursorEffect = !this->cursorMono &&
+      (mapCursorToScRGB || hasCursorTransform);
+    const int cursorOutputTransfer = !mapCursorToScRGB ? 0 :
+      (this->hdrPQ ? 2 : 1);
+
+    effect = useCursorEffect ?
       this->cursorEffect : obs_get_base_effect(OBS_EFFECT_DEFAULT);
-    gs_eparam_t * image = mapCursorToScRGB && !this->cursorMono ?
+    gs_eparam_t * image = useCursorEffect ?
       this->cursorImage : gs_effect_get_param_by_name(effect, "image");
     gs_effect_set_texture(image, this->cursorTex);
-    if (mapCursorToScRGB && !this->cursorMono)
-      gs_effect_set_float(this->cursorMultiplier, cursorScale);
+    if (useCursorEffect)
+      lgSetupCursorEffect(this, cursorOutputTransfer);
 
     gs_matrix_push();
     gs_matrix_translate3f(
@@ -1310,13 +1434,13 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
       if (this->cursor.type == CURSOR_TYPE_MASKED_COLOR &&
           this->cursorXorTex)
       {
-        effect = mapCursorToScRGB ?
+        effect = useCursorEffect ?
           this->cursorEffect : obs_get_base_effect(OBS_EFFECT_DEFAULT);
-        image = mapCursorToScRGB ?
+        image = useCursorEffect ?
           this->cursorImage : gs_effect_get_param_by_name(effect, "image");
         gs_effect_set_texture(image, this->cursorXorTex);
-        if (mapCursorToScRGB)
-          gs_effect_set_float(this->cursorMultiplier, cursorScale);
+        if (useCursorEffect)
+          lgSetupCursorEffect(this, cursorOutputTransfer);
         gs_blend_function_separate(
             GS_BLEND_INVDSTCOLOR, GS_BLEND_INVSRCALPHA,
             GS_BLEND_ZERO       , GS_BLEND_ONE);

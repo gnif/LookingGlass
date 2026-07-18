@@ -1,10 +1,26 @@
 uniform float4x4 ViewProj;
 uniform texture2d image;
+uniform texture2d colorLUT;
 uniform float multiplier;
+uniform float sdrWhiteLevel;
+uniform int outputTransfer; /* 0: sRGB, 1: scRGB, 2: PQ decoded to scRGB */
+uniform bool matrixEnabled;
+uniform bool lutEnabled;
+uniform float4 colorMatrix0;
+uniform float4 colorMatrix1;
+uniform float4 colorMatrix2;
+uniform float colorScalar;
 
 sampler_state def_sampler
 {
   Filter   = Linear;
+  AddressU = Clamp;
+  AddressV = Clamp;
+};
+
+sampler_state lut_sampler
+{
+  Filter   = Point;
   AddressU = Clamp;
   AddressV = Clamp;
 };
@@ -37,6 +53,99 @@ float3 srgbToLinear(float3 color)
     srgbToLinearChannel(color.b));
 }
 
+float3 pow3(float3 value, float exponent)
+{
+  return pow(value, float3(exponent, exponent, exponent));
+}
+
+float3 linearToSrgb(float3 value)
+{
+  float3 low = value * 12.92;
+  float3 high = 1.055 * pow3(max(value, 0.0), 1.0 / 2.4) - 0.055;
+  return lerp(low, high, step(0.0031308, value));
+}
+
+float3 bt709ToXYZ(float3 rgb)
+{
+  return float3(
+    dot(rgb, float3(0.4123908, 0.3575843, 0.1804808)),
+    dot(rgb, float3(0.2126390, 0.7151687, 0.0721923)),
+    dot(rgb, float3(0.0193308, 0.1191948, 0.9505322)));
+}
+
+float3 xyzToBT709(float3 xyz)
+{
+  return float3(
+    dot(xyz, float3( 3.2409699, -1.5373832, -0.4986108)),
+    dot(xyz, float3(-0.9692436,  1.8759675,  0.0415551)),
+    dot(xyz, float3( 0.0556301, -0.2039770,  1.0569715)));
+}
+
+float3 xyzToBT2020(float3 xyz)
+{
+  return float3(
+    dot(xyz, float3( 1.7166512, -0.3556708, -0.2533663)),
+    dot(xyz, float3(-0.6666844,  1.6164812,  0.0157685)),
+    dot(xyz, float3( 0.0176399, -0.0427706,  0.9421031)));
+}
+
+float3 bt709ToBT2020(float3 rgb)
+{
+  return xyzToBT2020(bt709ToXYZ(rgb));
+}
+
+float3 bt2020ToBT709(float3 rgb)
+{
+  return float3(
+    dot(rgb, float3( 1.6604910, -0.5876411, -0.0728499)),
+    dot(rgb, float3(-0.1245505,  1.1328999, -0.0083494)),
+    dot(rgb, float3(-0.0181508, -0.1005789,  1.1187297)));
+}
+
+float3 linearToPQ(float3 value)
+{
+  const float m1 = 0.1593017578125;
+  const float m2 = 78.84375;
+  const float c1 = 0.8359375;
+  const float c2 = 18.8515625;
+  const float c3 = 18.6875;
+  float3 p = pow3(max(value, 0.0), m1);
+  return pow3((c1 + c2 * p) / (1.0 + c3 * p), m2);
+}
+
+float3 pqToLinear(float3 value)
+{
+  const float m1 = 0.1593017578125;
+  const float m2 = 78.84375;
+  const float c1 = 0.8359375;
+  const float c2 = 18.8515625;
+  const float c3 = 18.6875;
+  float3 p = pow3(max(value, 0.0), 1.0 / m2);
+  return pow3(max(p - c1, 0.0) / max(c2 - c3 * p, 0.000001),
+      1.0 / m1);
+}
+
+float3 applyLUT(float3 value)
+{
+  float3 pos = clamp(value, 0.0, 1.0) * 4095.0;
+  float3 lo = floor(pos);
+  float3 hi = min(lo + 1.0, 4095.0);
+  float3 f = frac(pos);
+  float2 rlo = float2((lo.r + 0.5) / 4096.0, 0.5);
+  float2 rhi = float2((hi.r + 0.5) / 4096.0, 0.5);
+  float2 glo = float2((lo.g + 0.5) / 4096.0, 0.5);
+  float2 ghi = float2((hi.g + 0.5) / 4096.0, 0.5);
+  float2 blo = float2((lo.b + 0.5) / 4096.0, 0.5);
+  float2 bhi = float2((hi.b + 0.5) / 4096.0, 0.5);
+  return float3(
+    lerp(colorLUT.Sample(lut_sampler, rlo).r,
+         colorLUT.Sample(lut_sampler, rhi).r, f.r),
+    lerp(colorLUT.Sample(lut_sampler, glo).g,
+         colorLUT.Sample(lut_sampler, ghi).g, f.g),
+    lerp(colorLUT.Sample(lut_sampler, blo).b,
+         colorLUT.Sample(lut_sampler, bhi).b, f.b));
+}
+
 float4 PSCursor(VertData vert_in) : TARGET
 {
   float4 pixel = image.Sample(def_sampler, vert_in.uv);
@@ -46,7 +155,40 @@ float4 PSCursor(VertData vert_in) : TARGET
     /* Cursor RGB is premultiplied in nonlinear sRGB. Recover the straight
      * color before decoding it, then premultiply again in linear light. */
     float3 srgb = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
-    pixel.rgb = srgbToLinear(srgb) * pixel.a * multiplier;
+    float3 value = srgbToLinear(srgb);
+    if (matrixEnabled)
+    {
+      float3 xyz = bt709ToXYZ(value);
+      xyz = float3(
+        dot(float4(xyz, 1.0), colorMatrix0),
+        dot(float4(xyz, 1.0), colorMatrix1),
+        dot(float4(xyz, 1.0), colorMatrix2)) * colorScalar;
+      value = outputTransfer == 2 ? xyzToBT2020(xyz) : xyzToBT709(xyz);
+    }
+    else if (outputTransfer == 2)
+      value = bt709ToBT2020(value);
+
+    if (outputTransfer == 2)
+    {
+      value = linearToPQ(value * (sdrWhiteLevel / 10000.0));
+      if (lutEnabled)
+        value = applyLUT(value);
+      value = bt2020ToBT709(pqToLinear(value)) * 125.0;
+    }
+    else if (outputTransfer == 1)
+    {
+      value *= multiplier;
+      if (lutEnabled)
+        value = applyLUT(value);
+    }
+    else
+    {
+      value = linearToSrgb(value);
+      if (lutEnabled)
+        value = applyLUT(value);
+    }
+
+    pixel.rgb = value * pixel.a;
   }
   else
     pixel.rgb = float3(0.0, 0.0, 0.0);
