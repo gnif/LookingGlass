@@ -128,6 +128,7 @@ struct Inst
 
   bool configSupportsHDR; // true if we probed FP16 or 10-bit EGL config
   bool hdr;               // true if current frame format is HDR
+  bool nativeHDR;         // true only while the surface HDR description is active
 };
 
 static struct Option egl_options[] =
@@ -597,6 +598,34 @@ static bool egl_onMouseEvent(LG_Renderer * renderer, const bool visible,
   return true;
 }
 
+static bool egl_updateHDRState(struct Inst * this, bool force)
+{
+  bool nativeHDR = false;
+  app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
+  const bool useNativeHDR = this->format.hdr && nativeHDR &&
+    !app_getHDRDescFailed();
+
+  if (!force && this->nativeHDR == useNativeHDR)
+    return false;
+
+  this->nativeHDR = useNativeHDR;
+  egl_desktopSetNativeHDR(this->desktop, useNativeHDR);
+  egl_cursorSetHDRState(this->cursor, useNativeHDR, this->format.hdrPQ,
+      this->format.sdrWhiteLevel);
+
+  LG_DSHDRWhiteLevels whiteLevels =
+  {
+    .pq    = 203,
+    .scRGB = 80,
+  };
+  if (useNativeHDR && !app_getProp(LG_DS_HDR_WHITE_LEVELS, &whiteLevels))
+    DEBUG_WARN("Display server did not provide native HDR white levels");
+  egl_hdrOverlaySetState(this->hdrOverlay, useNativeHDR,
+      this->format.hdrPQ,
+      this->format.hdrPQ ? whiteLevels.pq : whiteLevels.scRGB);
+  return true;
+}
+
 static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -645,28 +674,7 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
           "without a color-managed compositor; tones may be incorrect");
   }
 
-  // If the display server supports native HDR (via setHDRImageDescription),
-  // disable software tone-mapping to avoid double tone-mapping.
-  // However, if the last call to setHDRImageDescription actually failed
-  // (e.g., compositor missing required primaries), keep tone-mapping on.
-  bool nativeHDR = false;
-  app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
-  bool useNativeHDR = format.hdr && nativeHDR && !app_getHDRDescFailed();
-  egl_desktopSetNativeHDR(this->desktop, useNativeHDR);
-
-  // Tell the cursor shader whether to map SDR cursor colors into PQ
-  egl_cursorSetHDRState(this->cursor, useNativeHDR, format.hdrPQ,
-      format.sdrWhiteLevel);
-
-  LG_DSHDRWhiteLevels whiteLevels =
-  {
-    .pq    = 203,
-    .scRGB = 80,
-  };
-  if (useNativeHDR && !app_getProp(LG_DS_HDR_WHITE_LEVELS, &whiteLevels))
-    DEBUG_WARN("Display server did not provide native HDR white levels");
-  egl_hdrOverlaySetState(this->hdrOverlay, useNativeHDR, format.hdrPQ,
-      format.hdrPQ ? whiteLevels.pq : whiteLevels.scRGB);
+  egl_updateHDRState(this, true);
 
   egl_update_scale_type(this);
   egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
@@ -1194,7 +1202,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
   EGLint bufferAge   = egl_bufferAge(this);
-  bool renderAll     = invalidateWindow || this->hadOverlay ||
+  const bool hdrStateChanged = egl_updateHDRState(this, false);
+  bool renderAll     = hdrStateChanged ||
+                       invalidateWindow || this->hadOverlay ||
                        bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
                        this->showSpice;
 
@@ -1235,6 +1245,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     this->desktopDamageIdx = (this->desktopDamageIdx + 1) % DESKTOP_DAMAGE_COUNT;
     this->desktopDamage[this->desktopDamageIdx].count = 0;
   });
+
+  if (hdrStateChanged)
+    desktopDamage->count = -1;
 
   if (likely(!renderAll))
   {
