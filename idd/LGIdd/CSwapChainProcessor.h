@@ -61,8 +61,19 @@ private:
   BYTE*           m_shapeBuffer;
   DWORD           m_lastShapeId = 0;
 
+  // Output-space damage from the previous published frame. The shared-memory
+  // frame buffers alternate, so this must be copied along with the current
+  // damage to bring the older target buffer up to date.
   RECT     m_dirtyRects[LG_MAX_DIRTY_RECTS] = {};
   unsigned m_nbDirtyRects = 0;
+
+  // Source-space damage accumulated since the last published frame. Frames
+  // can be dropped while the LGMP queue is full, but their damage must be
+  // included in the next frame sent to the client. A count of zero represents
+  // full-frame damage when m_hasPendingDamage is set.
+  RECT     m_pendingDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+  unsigned m_nbPendingDirtyRects = 0;
+  bool     m_hasPendingDamage = true;
 
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();
@@ -74,6 +85,8 @@ private:
 
   static void CompletionFunction(
     CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
+  void AccumulateFrameDamage(const RECT * dirtyRects, unsigned nbDirtyRects);
+  void SetFullPendingDamage();
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel);
 
