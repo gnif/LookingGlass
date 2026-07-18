@@ -268,7 +268,7 @@ static bool waylandHDRCallback(const void * rendererFormat)
     return waylandRequestHDR(format->hdrDisplayPrimary, format->hdrWhitePoint,
         format->hdrMaxDisplayLuminance, format->hdrMinDisplayLuminance,
         format->hdrMaxContentLightLevel, format->hdrMaxFrameAverageLightLevel,
-        format->hdrPQ);
+        format->hdrPQ, format->hdrMetadata);
   else
     waylandRequestClearHDR();
   return true;

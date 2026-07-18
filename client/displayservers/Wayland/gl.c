@@ -82,7 +82,8 @@ static void applyHDRPending(void)
         wlWm.pendingHDRMinDisplayLuminance,
         wlWm.pendingHDRMaxCLL,
         wlWm.pendingHDRMaxFALL,
-        wlWm.pendingHDRPQ);
+        wlWm.pendingHDRPQ,
+        wlWm.pendingHDRMetadata);
   }
   else if (wlWm.pendingHDRClear)
   {
@@ -200,7 +201,7 @@ EGLNativeWindowType waylandGetEGLNativeWindow(void)
 void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ)
+    bool hdrPQ, bool hdrMetadata)
 {
   if (!wlWm.colorManager)
     return;
@@ -294,26 +295,32 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
           wlWm.hdrWhiteLevels.pq :
           wlWm.hdrWhiteLevels.scRGB);
 
-  // Advertise the content primaries (BT.2020 for PQ). These describe the real
-  // colour gamut of the signal and are safe to forward.
-  if (wlWm.cmHasMasteringPrimaries)
+  // KVMFR uses the ST 2086/DXGI scale of 50,000 units per coordinate while
+  // color-management-v1 uses 1,000,000 units per coordinate.
+  if (hdrPQ && hdrMetadata && wlWm.cmHasMasteringPrimaries)
+  {
     wp_image_description_creator_params_v1_set_mastering_display_primaries(
         wlWm.hdrImageCreator,
-        displayPrimary[0][0], displayPrimary[0][1],
-        displayPrimary[1][0], displayPrimary[1][1],
-        displayPrimary[2][0], displayPrimary[2][1],
-        whitePoint[0], whitePoint[1]);
+        displayPrimary[0][0] * 20, displayPrimary[0][1] * 20,
+        displayPrimary[1][0] * 20, displayPrimary[1][1] * 20,
+        displayPrimary[2][0] * 20, displayPrimary[2][1] * 20,
+        whitePoint[0] * 20, whitePoint[1] * 20);
 
-  // NOTE: we deliberately do NOT forward the host's mastering luminance range,
-  // MaxCLL or MaxFALL. Those values describe the *virtual display* the IDD
-  // advertises to Windows (~1000 cd/m² from our EDID), not the content. LG
-  // captures the full-range scRGB desktop composition and passes it through to
-  // PQ without tone mapping, so the signal spans the entire PQ range (scRGB
-  // 125.0 == 10000 cd/m²). Advertising the virtual display's peak as the
-  // content peak makes the compositor place its tone-mapping knee there and
-  // hard-clip everything brighter, crushing highlights. Leaving these unset
-  // lets the content be treated as standard full-range PQ so the compositor
-  // tone-maps it to the actual physical display.
+    if ((uint64_t)maxDisplayLuminance * 10000 > minDisplayLuminance)
+      wp_image_description_creator_params_v1_set_mastering_luminance(
+          wlWm.hdrImageCreator,
+          minDisplayLuminance, maxDisplayLuminance);
+  }
+
+  if (hdrPQ && hdrMetadata)
+  {
+    if (maxCLL > 0)
+      wp_image_description_creator_params_v1_set_max_cll(
+          wlWm.hdrImageCreator, maxCLL);
+    if (maxFALL > 0 && (maxCLL == 0 || maxFALL <= maxCLL))
+      wp_image_description_creator_params_v1_set_max_fall(
+          wlWm.hdrImageCreator, maxFALL);
+  }
 
   wlWm.hdrImageDesc =
     wp_image_description_creator_params_v1_create(wlWm.hdrImageCreator);
@@ -349,7 +356,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
 bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ)
+    bool hdrPQ, bool hdrMetadata)
 {
   if (!wlWm.cmFeaturesDone || !wlWm.cmHasParametric)
     return false;
@@ -363,6 +370,7 @@ bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
     return false;
 
   wlWm.pendingHDRPQ = hdrPQ;
+  wlWm.pendingHDRMetadata = hdrMetadata;
 
   // Write all metadata before setting the apply flag to ensure the
   // render thread sees the complete HDR metadata when it observes
