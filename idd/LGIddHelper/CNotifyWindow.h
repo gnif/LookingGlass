@@ -39,7 +39,7 @@ class CNotifyWindow : public CWindow
   std::unique_ptr<CConfigWindow> m_config;
 
   std::function<void()> m_onSettingChange;
-  std::function<bool()> m_onDisplayChange;
+  std::function<bool()> m_onEnsureOnlyDisplay;
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
@@ -76,5 +76,5 @@ public:
   void close();
 
   void onSettingChange(std::function<void()> func) { m_onSettingChange = std::move(func); }
-  void onDisplayChange(std::function<bool()> func);
+  void onEnsureOnlyDisplay(std::function<bool()> func);
 };
