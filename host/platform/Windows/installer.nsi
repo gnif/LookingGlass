@@ -18,6 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+!define MUI_CUSTOMFUNCTION_GUIINIT customGUIInit
+
 ;Include
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -60,6 +62,7 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Var IDD_UNINST
 
 Function ShowHelpMessage
   !define line1 "Command line options:$\r$\n$\r$\n"
@@ -196,6 +199,14 @@ Section "-Install" Section1
 
 SectionEnd
 
+Section /o "" Section7
+  DetailPrint "Uninstalling the Looking Glass IDD..."
+  nsExec::ExecToLog '$IDD_UNINST'
+
+  ; Wait for the IDD to relinquish the IVSHMEM, which takes time.
+  Sleep 5000
+SectionEnd
+
 Section "Looking Glass (host) Service" Section2
 
   ${If} $option_noservice == 0
@@ -252,12 +263,36 @@ Section "Uninstall" Section6
   RMDir $INSTDIR
 SectionEnd
 
+Function customGUIInit
+  ClearErrors
+
+  SetRegView 64
+  ReadRegStr $IDD_UNINST HKLM \
+    "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
+    "QuietUninstallString"
+  SetRegView lastused
+
+  IfErrors +1 +4
+
+  SetRegView 32
+  ReadRegStr $IDD_UNINST HKLM \
+    "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
+    "QuietUninstallString"
+  SetRegView lastused
+
+  ${Unless} ${Errors}
+    SectionSetText  ${Section7} "Uninstall LG IDD"
+    SectionSetFlags ${Section7} ${SF_SELECTED}
+  ${EndUnless}
+FunctionEnd
+
 ;Description text for selection of install items
 LangString DESC_Section0 ${LANG_ENGLISH} "Install the IVSHMEM driver. This driver is needed for Looking Glass to function. This will replace the driver if it is already installed."
 LangString DESC_Section1 ${LANG_ENGLISH} "Install Files into $INSTDIR"
 LangString DESC_Section2 ${LANG_ENGLISH} "Install service to automatically start Looking Glass (host)."
 LangString DESC_Section3 ${LANG_ENGLISH} "Create desktop shortcut icon."
 LangString DESC_Section4 ${LANG_ENGLISH} "Create start menu shortcut."
+LangString DESC_Section7 ${LANG_ENGLISH} "Uninstall the Looking Glass Indirect Display Driver (IDD), which is detected on this system."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
 !ifdef IVSHMEM
@@ -267,4 +302,5 @@ LangString DESC_Section4 ${LANG_ENGLISH} "Create start menu shortcut."
   !insertmacro MUI_DESCRIPTION_TEXT ${Section2} $(DESC_Section2)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section3} $(DESC_Section3)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section4} $(DESC_Section4)
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section7} $(DESC_Section7)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
