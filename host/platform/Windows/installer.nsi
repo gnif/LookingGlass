@@ -50,7 +50,11 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${NSISDIR}\Contrib\Graphics\Wizard\nsis3-grey.bmp"
 !define /file VERSION "../../VERSION"
 
-!define MUI_WELCOMEPAGE_TEXT "You are about to install $(^Name) version ${VERSION}.$\r$\n$\r$\nWhen upgrading, you don't need to close your Looking Glass client, but should install the ${VERSION} client after installation is complete.$\r$\n$\r$\nPress Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "\
+  You are about to install $(^Name) version ${VERSION}.$\n$\n\
+  When upgrading, you don't need to close your Looking Glass client, but should \
+  install the ${VERSION} client after installation is complete.$\n$\n\
+  Press Next to continue."
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_WELCOME
@@ -65,14 +69,14 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 Var IDD_UNINST
 
 Function ShowHelpMessage
-  !define line1 "Command line options:$\r$\n$\r$\n"
-  !define line2 "/S - silent install (must be uppercase)$\r$\n"
-  !define line3 "/D=path\to\install\folder - Change install directory$\r$\n"
-  !define line4 "   (Must be uppercase, the last option given and no quotes)$\r$\n$\r$\n"
-  !define line5 "/startmenu - create start menu shortcut$\r$\n"
-  !define line6 "/desktop - create desktop shortcut$\r$\n"
-  !define line7 "/noservice - do not create a service to auto start and elevate the host"
-  MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}${line6}${line7}"
+  MessageBox MB_OK "\
+    Command line options:$\n\
+    /S - silent install (must be uppercase)$\n\
+    /D=path\to\install\folder - Change install directory$\n\
+       (Must be uppercase, the last option given and no quotes)$\r$\n$\n\
+    /startmenu - create start menu shortcut$\n\
+    /desktop - create desktop shortcut$\n\
+    /noservice - do not create a service to auto start and elevate the host"
   Abort
 FunctionEnd
 
@@ -287,12 +291,17 @@ Function customGUIInit
 FunctionEnd
 
 ;Description text for selection of install items
-LangString DESC_Section0 ${LANG_ENGLISH} "Install the IVSHMEM driver. This driver is needed for Looking Glass to function. This will replace the driver if it is already installed."
+LangString DESC_Section0 ${LANG_ENGLISH} "\
+  Install the IVSHMEM driver. \
+  This driver is needed for Looking Glass to function. \
+  This will replace the driver if it is already installed."
 LangString DESC_Section1 ${LANG_ENGLISH} "Install Files into $INSTDIR"
 LangString DESC_Section2 ${LANG_ENGLISH} "Install service to automatically start Looking Glass (host)."
 LangString DESC_Section3 ${LANG_ENGLISH} "Create desktop shortcut icon."
 LangString DESC_Section4 ${LANG_ENGLISH} "Create start menu shortcut."
-LangString DESC_Section7 ${LANG_ENGLISH} "Uninstall the Looking Glass Indirect Display Driver (IDD), which is detected on this system."
+LangString DESC_Section7 ${LANG_ENGLISH} "\
+  Uninstall the Looking Glass Indirect Display Driver (IDD), \
+  which is detected on this system."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
 !ifdef IVSHMEM
