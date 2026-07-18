@@ -206,6 +206,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
         surface        = buffer.MetaData.pSurface;
         colorSpace     = buffer.MetaData.SurfaceColorSpace;
         sdrWhiteLevel  = buffer.MetaData.SdrWhiteLevel;
+        m_sdrWhiteLevel.store(sdrWhiteLevel, std::memory_order_relaxed);
         UpdateHDRMetadata(buffer.MetaData);
       }
     }
@@ -776,6 +777,7 @@ bool CSwapChainProcessor::QueryHWCursor()
   in.ShapeBufferSizeInBytes = 512 * 512 * 4;
 
   IDARG_OUT_QUERY_HWCURSOR out = {};
+  UINT cursorWhiteLevel = m_sdrWhiteLevel.load(std::memory_order_relaxed);
   NTSTATUS status;
 #ifdef HAS_IDDCX_110
   if (m_devContext->CanProcessFP16())
@@ -787,6 +789,8 @@ bool CSwapChainProcessor::QueryHWCursor()
     out.Y                    = out3.Y;
     out.IsCursorShapeUpdated = out3.IsCursorShapeUpdated;
     out.CursorShapeInfo      = out3.CursorShapeInfo;
+    if (out3.SdrWhiteLevel)
+      cursorWhiteLevel = out3.SdrWhiteLevel;
   }
   else
 #endif
@@ -810,7 +814,7 @@ bool CSwapChainProcessor::QueryHWCursor()
   if (out.IsCursorShapeUpdated)
     m_lastShapeId = out.CursorShapeInfo.ShapeId;
 
-  m_devContext->SendCursor(out, m_shapeBuffer);
+  m_devContext->SendCursor(out, m_shapeBuffer, cursorWhiteLevel);
   return true;
 }
 

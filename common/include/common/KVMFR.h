@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 22
+#define KVMFR_VERSION 23
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -54,7 +54,10 @@ enum
   CURSOR_FLAG_POSITION        = 0x1,
   CURSOR_FLAG_VISIBLE         = 0x2,
   CURSOR_FLAG_SHAPE           = 0x4,
-  CURSOR_FLAG_COLOR_TRANSFORM = 0x8
+  CURSOR_FLAG_COLOR_TRANSFORM = 0x8,
+  // CURSOR_FLAG_VISIBLE contains a new visibility state. This distinguishes
+  // an invisible cursor update from messages carrying unrelated cursor data.
+  CURSOR_FLAG_VISIBLE_VALID   = 0x10
 };
 
 typedef uint32_t KVMFRCursorFlags;
@@ -135,6 +138,7 @@ typedef struct KVMFRCursor
   uint32_t   width;       // width of the shape
   uint32_t   height;      // height of the shape
   uint32_t   pitch;       // row length in bytes of the shape
+  uint32_t   sdrWhiteLevel; // cursor white level in nits for HDR composition
 }
 KVMFRCursor;
 

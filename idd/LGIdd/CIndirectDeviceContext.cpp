@@ -1222,7 +1222,8 @@ void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex) const
   fb->wp = m_height * m_pitch;
 }
 
-void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data)
+void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
+  const BYTE * data, UINT sdrWhiteLevel)
 {
   PLGMPMemory mem;
   if (info.CursorShapeInfo.CursorType == IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
@@ -1239,9 +1240,11 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   }
 
   KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
+  cursor->sdrWhiteLevel = sdrWhiteLevel ?
+    sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
   m_cursorVisible = info.IsCursorVisible;
-  uint32_t flags  = 0;
+  uint32_t flags  = CURSOR_FLAG_VISIBLE_VALID;
 
   if (info.IsCursorVisible)
   {
@@ -1416,7 +1419,7 @@ void CIndirectDeviceContext::ResendCursor()
   cursor->y = (int16_t)m_cursorY;
 
   const uint32_t flags =
-    CURSOR_FLAG_POSITION | CURSOR_FLAG_SHAPE |
+    CURSOR_FLAG_POSITION | CURSOR_FLAG_SHAPE | CURSOR_FLAG_VISIBLE_VALID |
     (m_cursorVisible ? CURSOR_FLAG_VISIBLE : 0);
 
   LGMP_STATUS status;

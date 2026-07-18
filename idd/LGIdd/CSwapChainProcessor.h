@@ -30,6 +30,7 @@
 #include <Windows.h>
 #include <wrl.h>
 #include <IddCx.h>
+#include <atomic>
 #include <memory>
 
 using namespace Microsoft::WRL;
@@ -60,6 +61,7 @@ private:
   Wrappers::Event m_cursorDataEvent;
   BYTE*           m_shapeBuffer;
   DWORD           m_lastShapeId = 0;
+  std::atomic<UINT> m_sdrWhiteLevel { KVMFR_SDR_WHITE_LEVEL_DEFAULT };
 
   // Output-space damage from the previous published frame. The shared-memory
   // frame buffers alternate, so this must be copied along with the current

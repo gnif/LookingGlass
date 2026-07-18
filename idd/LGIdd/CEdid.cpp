@@ -309,6 +309,41 @@ static EdidStandardTiming MakeUnusedStandardTiming()
   return timing;
 }
 
+#include <algorithm> // Ensure this header is included for std::min and std::max
+
+static WORD EdidChromaticity(double value)
+{
+ return (WORD)min(1023.0, max(0.0, value * 1024.0 + 0.5));
+}
+
+static void SetChromaticityCoordinates(BYTE coordinates[10])
+{
+  // The virtual display transports HDR in the BT.2020 container. Describe
+  // that full container gamut and its D65 white point rather than leaving an
+  // invalid all-zero base-block colour volume.
+  const WORD rx = EdidChromaticity(0.7080);
+  const WORD ry = EdidChromaticity(0.2920);
+  const WORD gx = EdidChromaticity(0.1700);
+  const WORD gy = EdidChromaticity(0.7970);
+  const WORD bx = EdidChromaticity(0.1310);
+  const WORD by = EdidChromaticity(0.0460);
+  const WORD wx = EdidChromaticity(0.3127);
+  const WORD wy = EdidChromaticity(0.3290);
+
+  coordinates[0] = (BYTE)(((rx & 3) << 6) | ((ry & 3) << 4) |
+      ((gx & 3) << 2) | (gy & 3));
+  coordinates[1] = (BYTE)(((bx & 3) << 6) | ((by & 3) << 4) |
+      ((wx & 3) << 2) | (wy & 3));
+  coordinates[2] = (BYTE)(rx >> 2);
+  coordinates[3] = (BYTE)(ry >> 2);
+  coordinates[4] = (BYTE)(gx >> 2);
+  coordinates[5] = (BYTE)(gy >> 2);
+  coordinates[6] = (BYTE)(bx >> 2);
+  coordinates[7] = (BYTE)(by >> 2);
+  coordinates[8] = (BYTE)(wx >> 2);
+  coordinates[9] = (BYTE)(wy >> 2);
+}
+
 static void InitEdidBaseBlock(EdidBaseBlock& base)
 {
   memcpy(base.header, EDID_HEADER, sizeof(base.header));
@@ -328,6 +363,7 @@ static void InitEdidBaseBlock(EdidBaseBlock& base)
   base.verticalSizeCm       = EDID_VERTICAL_SIZE_CM;
   base.displayGamma         = EDID_DISPLAY_GAMMA_2_2;
   base.supportedFeatures    = EDID_FEATURES_PREFERRED_TIMING_RGB;
+  SetChromaticityCoordinates(base.chromaticityCoordinates);
 
   for (UINT i = 0; i < EDID_STANDARD_TIMING_COUNT; ++i)
     base.standardTimings[i] = MakeUnusedStandardTiming();

@@ -515,8 +515,9 @@ static void sendPointer(bool newClient)
     KVMFRCursor *cursor = lgmpHostMemPtr(mem);
     cursor->x = app.pointerInfo.x;
     cursor->y = app.pointerInfo.y;
+    cursor->sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
-    const uint32_t flags = CURSOR_FLAG_POSITION |
+    const uint32_t flags = CURSOR_FLAG_POSITION | CURSOR_FLAG_VISIBLE_VALID |
       (app.pointerShapeValid   ? CURSOR_FLAG_SHAPE   : 0) |
       (app.pointerInfo.visible ? CURSOR_FLAG_VISIBLE : 0);
 
@@ -524,7 +525,7 @@ static void sendPointer(bool newClient)
     return;
   }
 
-  uint32_t flags = 0;
+  uint32_t flags = CURSOR_FLAG_VISIBLE_VALID;
   PLGMPMemory mem;
   if (app.pointerInfo.shapeUpdate)
   {
@@ -539,6 +540,7 @@ static void sendPointer(bool newClient)
       app.pointerIndex = 0;
   }
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
+  cursor->sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
   if (app.pointerInfo.positionUpdate || newClient)
   {

@@ -225,7 +225,8 @@ public:
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 
-  void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);
+  void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data,
+    UINT sdrWhiteLevel);
 
   // Tracks HDR state from EvtIddCxMonitorSetDefaultHdrMetadata
   void SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta);
