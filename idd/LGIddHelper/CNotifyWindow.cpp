@@ -32,6 +32,11 @@
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_SHOW_CONFIG 3001
 
+#define ID_DISPLAY_CHECK_TIMER 1
+#define DISPLAY_SETTLE_DELAY   250
+#define DISPLAY_RETRY_DELAY    1000
+#define DISPLAY_CHECK_INTERVAL 5000
+
 ATOM CNotifyWindow::s_atom = 0;
 UINT CNotifyWindow::s_taskbarCreated = 0;
 
@@ -86,6 +91,20 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     handleGPUNotification((bool)wParam);
     return 0;
 
+  case WM_DISPLAYCHANGE:
+    scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+    return 0;
+
+  case WM_TIMER:
+    if (wParam == ID_DISPLAY_CHECK_TIMER)
+    {
+      KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+      const bool success = m_onDisplayChange && m_onDisplayChange();
+      scheduleDisplayCheck(success ? DISPLAY_CHECK_INTERVAL : DISPLAY_RETRY_DELAY);
+      return 0;
+    }
+    return CWindow::handleMessage(uMsg, wParam, lParam);
+
   default:
     if (s_taskbarCreated && uMsg == s_taskbarCreated)
     {
@@ -114,6 +133,7 @@ LRESULT CNotifyWindow::onClose()
 
 LRESULT CNotifyWindow::onDestroy()
 {
+  KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
   Shell_NotifyIcon(NIM_DELETE, &m_iconData);
   return 0;
 }
@@ -238,4 +258,20 @@ void CNotifyWindow::close()
 {
   closeRequested = true;
   PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+}
+
+void CNotifyWindow::scheduleDisplayCheck(UINT delay)
+{
+  if (!m_onDisplayChange)
+    return;
+
+  KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+  if (!SetTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER, delay, NULL))
+    DEBUG_ERROR_HR(GetLastError(), "Failed to schedule primary display check");
+}
+
+void CNotifyWindow::onDisplayChange(std::function<bool()> func)
+{
+  m_onDisplayChange = std::move(func);
+  scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
 }

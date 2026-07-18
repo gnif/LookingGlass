@@ -124,6 +124,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     g_pipe.ReloadSettings();
   });
 
+  window.onDisplayChange([]() {
+    return g_pipe.EnsureOnlyDisplay();
+  });
+
   HANDLE hWait;
   if (!RegisterWaitForSingleObject(&hWait, hParent.Get(), DestroyNotifyWindow, &window, INFINITE, WT_EXECUTEONLYONCE))
     DEBUG_ERROR_HR(GetLastError(), "Failed to RegisterWaitForSingleObject");
