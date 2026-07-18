@@ -45,6 +45,7 @@ static const BYTE EDID_MANUFACTURE_YEAR_2026 = 36; // 1990 + 36 = 2026
 static const BYTE EDID_VERSION               = 1;
 static const BYTE EDID_REVISION              = 4;
 
+static const BYTE EDID_VIDEO_INPUT_DIGITAL_8BPC_HDMI_A  = 0xa2;
 static const BYTE EDID_VIDEO_INPUT_DIGITAL_10BPC_HDMI_A = 0xb2;
 static const BYTE EDID_HORIZONTAL_SIZE_CM               = 52;
 static const BYTE EDID_VERTICAL_SIZE_CM                 = 29;
@@ -316,17 +317,16 @@ static WORD EdidChromaticity(double value)
  return (WORD)min(1023.0, max(0.0, value * 1024.0 + 0.5));
 }
 
-static void SetChromaticityCoordinates(BYTE coordinates[10])
+static void SetChromaticityCoordinates(BYTE coordinates[10], bool hdr)
 {
-  // The virtual display transports HDR in the BT.2020 container. Describe
-  // that full container gamut and its D65 white point rather than leaving an
-  // invalid all-zero base-block colour volume.
-  const WORD rx = EdidChromaticity(0.7080);
-  const WORD ry = EdidChromaticity(0.2920);
-  const WORD gx = EdidChromaticity(0.1700);
-  const WORD gy = EdidChromaticity(0.7970);
-  const WORD bx = EdidChromaticity(0.1310);
-  const WORD by = EdidChromaticity(0.0460);
+  // Describe the wire gamut. Accelerated HDR uses the BT.2020 container;
+  // software rendering is SDR-only and uses the standard sRGB/BT.709 gamut.
+  const WORD rx = EdidChromaticity(hdr ? 0.7080 : 0.6400);
+  const WORD ry = EdidChromaticity(hdr ? 0.2920 : 0.3300);
+  const WORD gx = EdidChromaticity(hdr ? 0.1700 : 0.3000);
+  const WORD gy = EdidChromaticity(hdr ? 0.7970 : 0.6000);
+  const WORD bx = EdidChromaticity(hdr ? 0.1310 : 0.1500);
+  const WORD by = EdidChromaticity(hdr ? 0.0460 : 0.0600);
   const WORD wx = EdidChromaticity(0.3127);
   const WORD wy = EdidChromaticity(0.3290);
 
@@ -344,7 +344,7 @@ static void SetChromaticityCoordinates(BYTE coordinates[10])
   coordinates[9] = (BYTE)(wy >> 2);
 }
 
-static void InitEdidBaseBlock(EdidBaseBlock& base)
+static void InitEdidBaseBlock(EdidBaseBlock& base, bool hdr)
 {
   memcpy(base.header, EDID_HEADER, sizeof(base.header));
 
@@ -358,12 +358,14 @@ static void InitEdidBaseBlock(EdidBaseBlock& base)
   base.version         = EDID_VERSION;
   base.revision        = EDID_REVISION;
 
-  base.videoInputDefinition = EDID_VIDEO_INPUT_DIGITAL_10BPC_HDMI_A;
+  base.videoInputDefinition = hdr ?
+    EDID_VIDEO_INPUT_DIGITAL_10BPC_HDMI_A :
+    EDID_VIDEO_INPUT_DIGITAL_8BPC_HDMI_A;
   base.horizontalSizeCm     = EDID_HORIZONTAL_SIZE_CM;
   base.verticalSizeCm       = EDID_VERTICAL_SIZE_CM;
   base.displayGamma         = EDID_DISPLAY_GAMMA_2_2;
   base.supportedFeatures    = EDID_FEATURES_PREFERRED_TIMING_RGB;
-  SetChromaticityCoordinates(base.chromaticityCoordinates);
+  SetChromaticityCoordinates(base.chromaticityCoordinates, hdr);
 
   for (UINT i = 0; i < EDID_STANDARD_TIMING_COUNT; ++i)
     base.standardTimings[i] = MakeUnusedStandardTiming();
@@ -572,12 +574,12 @@ bool CEdid::WriteDetailedTiming(BYTE* dtd, const CSettings::DisplayMode& mode)
   return true;
 }
 
-void CEdid::Build(const CSettings::DisplayModes& modes)
+void CEdid::Build(const CSettings::DisplayModes& modes, bool hdr)
 {
   m_data.assign(static_cast<std::vector<BYTE, std::allocator<BYTE>>::size_type>(EDID_BLOCK_SIZE) * 2, 0);
 
   EdidBaseBlock baseBlock = {};
-  InitEdidBaseBlock(baseBlock);
+  InitEdidBaseBlock(baseBlock, hdr);
 
   CSettings::DisplayModes sorted = modes;
   std::stable_sort(sorted.begin(), sorted.end(),
@@ -625,10 +627,13 @@ void CEdid::Build(const CSettings::DisplayModes& modes)
   ctaBlock.revision = CTA_REVISION;
 
   UINT dataOffset = CTA_HEADER_SIZE;
-  AppendCtaDataBlock(cta, dataOffset, MakeCtaHdrStaticMetadataDataBlock      ());
-  AppendCtaDataBlock(cta, dataOffset, MakeCtaColorimetryDataBlock            ());
-  AppendCtaDataBlock(cta, dataOffset, MakeCtaHdmiForumVendorSpecificDataBlock());
-  AppendCtaDataBlock(cta, dataOffset, MakeCtaHdmiVendorSpecificDataBlock     ());
+  if (hdr)
+  {
+    AppendCtaDataBlock(cta, dataOffset, MakeCtaHdrStaticMetadataDataBlock      ());
+    AppendCtaDataBlock(cta, dataOffset, MakeCtaColorimetryDataBlock            ());
+    AppendCtaDataBlock(cta, dataOffset, MakeCtaHdmiForumVendorSpecificDataBlock());
+    AppendCtaDataBlock(cta, dataOffset, MakeCtaHdmiVendorSpecificDataBlock     ());
+  }
 
   ctaBlock.dtdOffset = (BYTE)dataOffset;
   ctaBlock.flags     = 0x00;

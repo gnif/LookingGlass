@@ -52,6 +52,7 @@ struct CD3D12Device
     CD3D12CommandQueue m_copyQueue[4];
     unsigned           m_copyQueueIndex = 0;
     CD3D12CommandQueue m_computeQueue;
+    bool m_computeEnabled = false;
 
     bool HeapTest();
 
@@ -66,7 +67,8 @@ struct CD3D12Device
       SUCCESS
     };
 
-    InitResult Init(CIVSHMEM &ivshmem, UINT64 &alignSize);
+    InitResult Init(CIVSHMEM &ivshmem, UINT64 &alignSize,
+      bool enableCompute);
     void DeInit();
 
     // Wait for all command queues to finish in-flight GPU work and run their

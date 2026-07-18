@@ -30,6 +30,46 @@
 #include <cstring>
 #include <utility>
 
+namespace
+{
+  bool NearlyEqual(float a, float b, float tolerance)
+  {
+    const float delta = a - b;
+    return delta >= -tolerance && delta <= tolerance;
+  }
+}
+
+bool IsIdentityColorTransform(const D12ColorTransform& transform)
+{
+  static const float matrixTolerance = 1.0f / 1048576.0f;
+  static const float lutTolerance    = 1.0f / 65535.0f;
+
+  if (transform.matrixEnabled)
+  {
+    for (unsigned row = 0; row < 3; ++row)
+      for (unsigned column = 0; column < 4; ++column)
+      {
+        const float expected = row == column ? 1.0f : 0.0f;
+        const float effective =
+          transform.matrix[row][column] * transform.scalar;
+        if (!NearlyEqual(effective, expected, matrixTolerance))
+          return false;
+      }
+  }
+
+  if (transform.lutEnabled)
+    for (unsigned i = 0; i < 4096; ++i)
+    {
+      const float expected = (float)i / 4095.0f;
+      if (!NearlyEqual(transform.lut[i][0], expected, lutTolerance) ||
+          !NearlyEqual(transform.lut[i][1], expected, lutTolerance) ||
+          !NearlyEqual(transform.lut[i][2], expected, lutTolerance))
+        return false;
+    }
+
+  return true;
+}
+
 static void CopyHDRMetadata(D12FrameFormat& dst, const D12FrameFormat& src)
 {
   dst.hdrMetadata   = src.hdrMetadata;

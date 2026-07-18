@@ -115,7 +115,9 @@ private:
   DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
   FrameType   m_frameType = FRAME_TYPE_INVALID;
   UINT m_iddCxVersion = 0;
+  bool m_hasIddCx110DDIs = false;
   bool m_canProcessFP16 = false;
+  bool m_softwareMode   = true;
 
   // HDR state from EvtIddCxMonitorSetDefaultHdrMetadata (IddCx 1.10+)
   // Protected by m_hdrLock - accessed from both the IDD callback thread
@@ -147,7 +149,6 @@ private:
   std::shared_ptr<const D12ColorTransform> m_colorTransform;
 
   void QueryIddCxCapabilities();
-  bool CanUseIddCx110DDIs() const { return m_canProcessFP16; }
 
   void ScheduleInitRetry();
   void StopInitRetry();
@@ -211,7 +212,9 @@ public:
 
   size_t GetAlignSize   () const { return m_alignSize     ; }
   size_t GetMaxFrameSize() const { return m_maxFrameSize  ; }
+  bool   HasIddCx110DDIs() const { return m_hasIddCx110DDIs; }
   bool   CanProcessFP16 () const { return m_canProcessFP16; }
+  bool   IsSoftwareMode () const { return m_softwareMode  ; }
 
   struct PreparedFrameBuffer
   {

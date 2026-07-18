@@ -52,6 +52,8 @@ struct D12ColorTransform
   float lut[4096][4]  = {};
 };
 
+bool IsIdentityColorTransform(const D12ColorTransform& transform);
+
 struct D12FrameFormat
 {
   D3D12_RESOURCE_DESC desc = {};

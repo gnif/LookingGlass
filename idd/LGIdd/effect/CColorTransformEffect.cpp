@@ -208,7 +208,7 @@ PostProcessStatus CColorTransformEffect::SetFormat(
   const ComPtr<ID3D12Device3>& device,
   const D12FrameFormat& src, D12FrameFormat& dst)
 {
-  if (!src.colorTransform ||
+  if (!src.colorTransform || IsIdentityColorTransform(*src.colorTransform) ||
       (!src.colorTransform->matrixEnabled && !src.colorTransform->lutEnabled))
     return PostProcessStatus::BYPASS_EFFECT;
 

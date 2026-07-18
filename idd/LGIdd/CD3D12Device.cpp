@@ -60,9 +60,12 @@ static void CALLBACK _D3D12DebugCallback(
     description);
 }
 
-CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize)
+CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
+  UINT64 &alignSize, bool enableCompute)
 {
   HRESULT hr;
+
+  m_computeEnabled = enableCompute;
 
   hr = CreateDXGIFactory2(m_debug ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&m_factory));  
   if (FAILED(hr))
@@ -132,8 +135,9 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem, UINT64 &alignSize
         m_indirectCopy ? CD3D12CommandQueue::NORMAL : CD3D12CommandQueue::FAST))
       return InitResult::FAILURE;
 
-  if (!m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Compute",
-      CD3D12CommandQueue::FAST))
+  if (m_computeEnabled &&
+      !m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE,
+        L"Compute", CD3D12CommandQueue::FAST))
     return InitResult::FAILURE;
 
   DEBUG_INFO("Created CD3D12Device");
@@ -160,7 +164,8 @@ void CD3D12Device::WaitForIdle()
 
   for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
     drain(m_copyQueue[i]);
-  drain(m_computeQueue);
+  if (m_computeEnabled)
+    drain(m_computeQueue);
 }
 
 bool CD3D12Device::HeapTest()
@@ -233,6 +238,12 @@ CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
 
 CD3D12CommandQueue * CD3D12Device::GetComputeQueue()
 {
+  if (!m_computeEnabled)
+  {
+    DEBUG_ERROR("Compute queue requested while compute processing is disabled");
+    return nullptr;
+  }
+
   for (int c = 0; c < 100; ++c)
   {
     if (m_computeQueue.IsReady())

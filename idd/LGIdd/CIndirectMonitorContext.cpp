@@ -64,7 +64,8 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
 
     UINT64 alignSize = CPlatformInfo::GetPageSize();
     dx12Device = std::make_shared<CD3D12Device>(renderAdapter);
-    CD3D12Device::InitResult r = dx12Device->Init(m_devContext->GetIVSHMEM(), alignSize);
+    CD3D12Device::InitResult r = dx12Device->Init(
+      m_devContext->GetIVSHMEM(), alignSize, !dx11Device->IsSoftware());
     if (r == CD3D12Device::RETRY)
     {
       dx12Device.reset();

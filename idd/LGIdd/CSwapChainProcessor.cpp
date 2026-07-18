@@ -40,7 +40,9 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 {
   m_resPool.Init(dx11Device, dx12Device);
   m_fbPool.Init(this);
-  if (!m_postProcessor.Init(dx12Device))
+  if (m_dx11Device->IsSoftware())
+    DEBUG_INFO("Software render adapter: post-processing disabled");
+  else if (!m_postProcessor.Init(dx12Device))
     DEBUG_ERROR("Failed to initialize post processor");
 
   // Manual-reset: both worker threads wait on this, so it must stay signalled
@@ -189,7 +191,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     UINT sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
 #ifdef HAS_IDDCX_110
-    if (m_devContext->CanProcessFP16())
+    if (m_devContext->HasIddCx110DDIs())
     {
       IDARG_IN_RELEASEANDACQUIREBUFFER2 acquireIn = {};
       acquireIn.Size = sizeof(acquireIn);
@@ -780,7 +782,7 @@ bool CSwapChainProcessor::QueryHWCursor()
   UINT cursorWhiteLevel = m_sdrWhiteLevel.load(std::memory_order_relaxed);
   NTSTATUS status;
 #ifdef HAS_IDDCX_110
-  if (m_devContext->CanProcessFP16())
+  if (m_devContext->HasIddCx110DDIs())
   {
     IDARG_OUT_QUERY_HWCURSOR3 out3 = {};
     status = IddCxMonitorQueryHardwareCursor3(m_monitor, &in, &out3);

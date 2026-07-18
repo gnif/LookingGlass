@@ -29,7 +29,7 @@
 class CEdid
 {
 public:
-  void Build(const CSettings::DisplayModes& modes);
+  void Build(const CSettings::DisplayModes& modes, bool hdr);
 
   const BYTE* Data() const { return m_data.empty() ? nullptr : m_data.data(); }
   UINT Size() const { return (UINT)m_data.size(); }

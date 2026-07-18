@@ -160,13 +160,20 @@ NTSTATUS LGIddParseMonitorDescription2(const IDARG_IN_PARSEMONITORDESCRIPTION2* 
 NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
   IDARG_IN_QUERYTARGET_INFO* inArgs, IDARG_OUT_QUERYTARGET_INFO* outArgs)
 {
-  UNREFERENCED_PARAMETER(adapter);
   UNREFERENCED_PARAMETER(inArgs);
 
-  outArgs->TargetCaps =
-    (IDDCX_TARGET_CAPS)(IDDCX_TARGET_CAPS_WIDE_COLOR_SPACE | IDDCX_TARGET_CAPS_HIGH_COLOR_SPACE);
-  outArgs->DitheringSupport.Rgb =
-    (IDDCX_BITS_PER_COMPONENT)(IDDCX_BITS_PER_COMPONENT_8 | IDDCX_BITS_PER_COMPONENT_10);
+  auto* wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(adapter);
+  const bool hdr = wrapper && wrapper->context &&
+    wrapper->context->CanProcessFP16();
+
+  outArgs->TargetCaps = hdr ?
+    (IDDCX_TARGET_CAPS)(IDDCX_TARGET_CAPS_WIDE_COLOR_SPACE |
+      IDDCX_TARGET_CAPS_HIGH_COLOR_SPACE) :
+    (IDDCX_TARGET_CAPS)0;
+  outArgs->DitheringSupport.Rgb = hdr ?
+    (IDDCX_BITS_PER_COMPONENT)(IDDCX_BITS_PER_COMPONENT_8 |
+      IDDCX_BITS_PER_COMPONENT_10) :
+    IDDCX_BITS_PER_COMPONENT_8;
   outArgs->DitheringSupport.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
   outArgs->DitheringSupport.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
   outArgs->DitheringSupport.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
@@ -187,6 +194,12 @@ NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
   auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   auto* ctx     = wrapper->context->GetDeviceContext();
 
+  if (ctx->IsSoftwareMode())
+  {
+    ctx->SetHDRActive(nullptr);
+    return STATUS_SUCCESS;
+  }
+
   ctx->SetHDRActive(inArgs->Data.pHdr10);
 
   return STATUS_SUCCESS;
@@ -196,6 +209,13 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
 {
   auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
   auto* ctx     = wrapper->context->GetDeviceContext();
+
+  if (ctx->IsSoftwareMode())
+  {
+    ctx->SetColorTransform(nullptr);
+    DEBUG_INFO("Ignoring display color transform in software mode");
+    return STATUS_SUCCESS;
+  }
 
   if (inArgs->Type == IDDCX_GAMMARAMP_TYPE_DEFAULT)
   {
@@ -234,6 +254,13 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
     transform->lut[i][1] = input->LookupTable1D[i].Green;
     transform->lut[i][2] = input->LookupTable1D[i].Blue;
     transform->lut[i][3] = 1.0f;
+  }
+
+  if (IsIdentityColorTransform(*transform))
+  {
+    ctx->SetColorTransform(nullptr);
+    DEBUG_INFO("Ignoring identity display color transform");
+    return STATUS_SUCCESS;
   }
 
   ctx->SetColorTransform(std::move(transform));

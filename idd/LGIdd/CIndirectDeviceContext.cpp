@@ -27,6 +27,7 @@
 #include "CDebug.h"
 #include "VersionInfo.h"
 
+#include <dxgi1_2.h>
 #include <sstream>
 
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
@@ -67,6 +68,7 @@ void CIndirectDeviceContext::QueryIddCxCapabilities()
   if (!NT_SUCCESS(status))
   {
     m_iddCxVersion = 0;
+    m_hasIddCx110DDIs = false;
     m_canProcessFP16 = false;
     DEBUG_ERROR_HR(status, "IddCxGetVersion Failed");
     return;
@@ -89,10 +91,15 @@ void CIndirectDeviceContext::QueryIddCxCapabilities()
   const bool hasIddCx110DDIs = false;
 #endif
 
-  m_canProcessFP16 = m_iddCxVersion >= IDDCX_VERSION_1_10 && hasIddCx110DDIs;
+  m_hasIddCx110DDIs =
+    m_iddCxVersion >= IDDCX_VERSION_1_10 && hasIddCx110DDIs;
+  m_canProcessFP16 = !m_softwareMode && m_hasIddCx110DDIs;
 
   DEBUG_INFO("IddCx version: 0x%04x", m_iddCxVersion);
-  DEBUG_INFO("IddCx 1.10 HDR/WCG DDIs: %s", m_canProcessFP16 ? "available" : "unavailable");
+  DEBUG_INFO("IddCx 1.10 HDR/WCG DDIs: %s",
+    m_hasIddCx110DDIs ? "available" : "unavailable");
+  if (m_softwareMode && m_hasIddCx110DDIs)
+    DEBUG_INFO("HDR/WCG disabled for software rendering");
 }
 
 void CIndirectDeviceContext::PopulateDefaultModes()
@@ -117,7 +124,7 @@ void CIndirectDeviceContext::InitializeEdid()
 {
   AcquireSRWLockExclusive(&m_modeLock);
   if (!m_edid.Size())
-    m_edid.Build(m_displayModes);
+    m_edid.Build(m_displayModes, CanProcessFP16());
   ReleaseSRWLockExclusive(&m_modeLock);
 }
 
@@ -194,6 +201,68 @@ void CIndirectDeviceContext::InitAdapter()
     m_ivshmemOpened = true;
   }
 
+  // Select the render adapter before advertising capabilities. If no hardware
+  // adapter is available, this is a software-rendered display and must remain
+  // SDR-only; the software path must never depend on compute processing.
+  bool havePreferredRenderAdapter = false;
+  LUID preferredRenderAdapter = {};
+  IDXGIFactory1 * factory = NULL;
+  HRESULT factoryStatus = CreateDXGIFactory(
+    __uuidof(IDXGIFactory1), (void **)&factory);
+  if (FAILED(factoryStatus))
+    DEBUG_ERROR_HR(factoryStatus, "CreateDXGIFactory Failed");
+  else
+  {
+    for (UINT i = 0;; ++i)
+    {
+      IDXGIAdapter1 * dxgiAdapter = nullptr;
+      HRESULT enumStatus = factory->EnumAdapters1(i, &dxgiAdapter);
+      if (enumStatus == DXGI_ERROR_NOT_FOUND)
+        break;
+      if (FAILED(enumStatus))
+      {
+        DEBUG_ERROR_HR(enumStatus, "Failed to enumerate DXGI adapter %u", i);
+        break;
+      }
+
+      DXGI_ADAPTER_DESC1 adapterDesc = {};
+      HRESULT descStatus = dxgiAdapter->GetDesc1(&adapterDesc);
+      dxgiAdapter->Release();
+      if (FAILED(descStatus))
+      {
+        DEBUG_ERROR_HR(descStatus, "Failed to query DXGI adapter %u", i);
+        continue;
+      }
+
+      if ((adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) ||
+          (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c))
+      {
+        DEBUG_INFO("Ignoring software render adapter %ls", adapterDesc.Description);
+        continue;
+      }
+
+      if ((adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL
+          (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))   // QEMU Standard VGA
+      {
+        DEBUG_INFO("Ignoring display-only adapter %ls (vendor 0x%04x, device 0x%04x)",
+          adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
+        continue;
+      }
+
+      DEBUG_INFO("Selected render adapter %ls (vendor 0x%04x, device 0x%04x)",
+        adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
+      preferredRenderAdapter = adapterDesc.AdapterLuid;
+      havePreferredRenderAdapter = true;
+      break;
+    }
+
+    factory->Release();
+  }
+
+  m_softwareMode = !havePreferredRenderAdapter;
+  if (m_softwareMode)
+    DEBUG_INFO("No hardware render adapter available; using SDR software mode");
+
   QueryIddCxCapabilities();
   DEBUG_TRACE("Loading configured display modes");
   PopulateDefaultModes();
@@ -218,7 +287,7 @@ void CIndirectDeviceContext::InitAdapter()
    */
   caps.Flags = IDDCX_ADAPTER_FLAGS_USE_SMALLEST_MODE;
 #ifdef HAS_IDDCX_110
-  if (CanUseIddCx110DDIs())
+  if (CanProcessFP16())
     caps.Flags |= IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16;
 #endif
 
@@ -250,12 +319,17 @@ void CIndirectDeviceContext::InitAdapter()
   DEBUG_INFO("Calling IddCxAdapterInitAsync with flags 0x%08x",
     caps.Flags);
   NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
-  if (!NT_SUCCESS(status) && CanUseIddCx110DDIs())
+  if (!NT_SUCCESS(status) && CanProcessFP16())
   {
     DEBUG_WARN(
       "IddCxAdapterInitAsync rejected FP16 adapter capabilities (0x%08x), retrying without HDR/WCG",
       status);
     m_canProcessFP16 = false;
+    // The monitor has not been created yet, so replace the provisional HDR
+    // EDID before Windows can observe it.
+    AcquireSRWLockExclusive(&m_modeLock);
+    m_edid.Build(m_displayModes, false);
+    ReleaseSRWLockExclusive(&m_modeLock);
     caps.Flags = (IDDCX_ADAPTER_FLAGS)(caps.Flags & ~IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16);
     ZeroMemory(&initOut, sizeof(initOut));
     status = IddCxAdapterInitAsync(&init, &initOut);
@@ -281,63 +355,12 @@ void CIndirectDeviceContext::InitAdapter()
 
   // Try to co-exist with the virtual video device by telling IddCx which
   // hardware adapter we prefer to render on.
-  IDXGIFactory * factory = NULL;
-  HRESULT factoryStatus = CreateDXGIFactory(
-    __uuidof(IDXGIFactory), (void **)&factory);
-  if (FAILED(factoryStatus))
-    DEBUG_ERROR_HR(factoryStatus, "CreateDXGIFactory Failed");
-  else
+  if (havePreferredRenderAdapter)
   {
-    bool renderAdapterSelected = false;
-    for (UINT i = 0;; ++i)
-    {
-      IDXGIAdapter * dxgiAdapter = nullptr;
-      HRESULT enumStatus = factory->EnumAdapters(i, &dxgiAdapter);
-      if (enumStatus == DXGI_ERROR_NOT_FOUND)
-        break;
-      if (FAILED(enumStatus))
-      {
-        DEBUG_ERROR_HR(enumStatus, "Failed to enumerate DXGI adapter %u", i);
-        break;
-      }
-
-      DXGI_ADAPTER_DESC adapterDesc = {};
-      HRESULT descStatus = dxgiAdapter->GetDesc(&adapterDesc);
-      dxgiAdapter->Release();
-      if (FAILED(descStatus))
-      {
-        DEBUG_ERROR_HR(descStatus, "Failed to query DXGI adapter %u", i);
-        continue;
-      }
-
-      if (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c)
-      {
-        DEBUG_INFO("Ignoring software render adapter %ls", adapterDesc.Description);
-        continue;
-      }
-
-      if ((adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL
-          (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))   // QEMU Standard VGA
-      {
-        DEBUG_INFO("Ignoring display-only adapter %ls (vendor 0x%04x, device 0x%04x)",
-          adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
-        continue;
-      }
-
-      DEBUG_INFO("Selecting render adapter %ls (vendor 0x%04x, device 0x%04x)",
-        adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
-      IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
-      args.PreferredRenderAdapter = adapterDesc.AdapterLuid;
-      IddCxAdapterSetRenderAdapter(m_adapter, &args);
-      DEBUG_INFO("Preferred render adapter set");
-      renderAdapterSelected = true;
-      break;
-    }
-
-    if (!renderAdapterSelected)
-      DEBUG_INFO("No preferred hardware render adapter was selected");
-
-    factory->Release();
+    IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
+    args.PreferredRenderAdapter = preferredRenderAdapter;
+    IddCxAdapterSetRenderAdapter(m_adapter, &args);
+    DEBUG_INFO("Preferred render adapter set");
   }
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
@@ -684,7 +707,7 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription2(
     mode->Size = sizeof(IDDCX_MONITOR_MODE2);
     mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
     FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
-    mode->BitsPerComponent = GetWireBitsPerComponent(CanUseIddCx110DDIs());
+    mode->BitsPerComponent = GetWireBitsPerComponent(CanProcessFP16());
 
     if (it->preferred)
       outArgs->PreferredMonitorModeIdx =
@@ -716,7 +739,7 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
     ZeroMemory(mode, sizeof(*mode));
     mode->Size = sizeof(IDDCX_TARGET_MODE2);
     FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
-    mode->BitsPerComponent = GetWireBitsPerComponent(CanUseIddCx110DDIs());
+    mode->BitsPerComponent = GetWireBitsPerComponent(CanProcessFP16());
   }
 
   return STATUS_SUCCESS;
