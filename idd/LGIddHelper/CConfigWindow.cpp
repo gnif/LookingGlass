@@ -55,7 +55,7 @@ CConfigWindow::CConfigWindow() : m_scale(1)
   }
 
   if (!CreateWindowEx(0, MAKEINTATOM(s_atom), L"Looking Glass IDD Configuration",
-    WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 400,
+    WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
     NULL, NULL, hInstance, this))
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to create window");
@@ -64,7 +64,7 @@ CConfigWindow::CConfigWindow() : m_scale(1)
 
 void CConfigWindow::getMinimumSize(LONG &width, LONG &height)
 {
-  RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(300 * m_scale) };
+  RECT client = { 0, 0, (LONG)(436 * m_scale), (LONG)(340 * m_scale) };
   AdjustWindowRect(&client, WS_OVERLAPPEDWINDOW, FALSE);
   width = client.right - client.left;
   height = client.bottom - client.top;
@@ -90,7 +90,7 @@ void CConfigWindow::updateFont()
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel, *m_modePreferred,
     *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete, *m_modeReset,
-    *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
+    *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz, *m_modeSave, *m_modeRevert,
     *m_prefGroup, *m_prefNoGPU,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
@@ -168,6 +168,9 @@ LRESULT CConfigWindow::onCreate()
   EnableWindow(*m_modeUpdate, FALSE);
   EnableWindow(*m_modeDelete, FALSE);
 
+  m_modeSave.reset(new CButton(L"Save && reload driver", WS_TABSTOP, m_hwnd));
+  m_modeRevert.reset(new CButton(L"Revert", WS_TABSTOP, m_hwnd));
+
   m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", SS_CENTERIMAGE, m_hwnd));
   m_defRefresh.reset(new CEditWidget(ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
   m_defRefreshHz.reset(new CStaticWidget(L"Hz", SS_CENTERIMAGE, m_hwnd));
@@ -208,17 +211,19 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinTopLeft(*m_defRefreshLabel, 24, 64, 95, 20);
   pos.pinTopLeft(*m_defRefresh, 119, 64, 63, 20);
   pos.pinTopLeft(*m_defRefreshHz, 186, 64, 16, 20);
-  pos.pinLeftTopBottom(*m_modeBox, 24, 90, 176, 120);
-  pos.pinBottomLeft(*m_widthLabel, 24, 96, 50, 20);
-  pos.pinBottomLeft(*m_heightLabel, 24, 72, 50, 20);
-  pos.pinBottomLeft(*m_refreshLabel, 24, 48, 50, 20);
-  pos.pinBottomLeft(*m_modeWidth, 75, 96, 50, 20);
-  pos.pinBottomLeft(*m_modeHeight, 75, 72, 50, 20);
-  pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
-  pos.pinBottomLeft(*m_modePreferred, 130, 96, 70, 20);
-  pos.pinBottomLeft(*m_modeUpdate, 20, 20, 50, 24);
-  pos.pinBottomLeft(*m_modeDelete, 72, 20, 50, 24);
-  pos.pinBottomLeft(*m_modeReset, 122, 20, 82, 24);
+  pos.pinLeftTopBottom(*m_modeBox, 24, 90, 176, 148);
+  pos.pinBottomLeft(*m_widthLabel, 24, 124, 50, 20);
+  pos.pinBottomLeft(*m_heightLabel, 24, 100, 50, 20);
+  pos.pinBottomLeft(*m_refreshLabel, 24, 76, 50, 20);
+  pos.pinBottomLeft(*m_modeWidth, 75, 124, 50, 20);
+  pos.pinBottomLeft(*m_modeHeight, 75, 100, 50, 20);
+  pos.pinBottomLeft(*m_modeRefresh, 75, 76, 50, 20);
+  pos.pinBottomLeft(*m_modePreferred, 130, 124, 70, 20);
+  pos.pinBottomLeft(*m_modeUpdate, 20, 48, 50, 24);
+  pos.pinBottomLeft(*m_modeDelete, 72, 48, 50, 24);
+  pos.pinBottomLeft(*m_modeReset, 122, 48, 82, 24);
+  pos.pinBottomLeft(*m_modeSave, 20, 20, 132, 24);
+  pos.pinBottomLeft(*m_modeRevert, 154, 20, 50, 24);
 
   pos.pinTopLeft(*m_prefGroup, 224, 40, 200, 52);
   pos.pinTopLeft(*m_prefNoGPU, 236, 64, 176, 20);
