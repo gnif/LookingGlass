@@ -22,15 +22,67 @@
 
 #include <string.h>
 
+#include "common/debug.h"
 #include "common/ll.h"
 #include "main.h"
 #include "overlays.h"
 
 struct ll * l_renderQueue = NULL;
+static bool l_showSpice;
+static bool l_surfaceFormatValid;
+static bool l_rendererSupportsNativeHDR;
+static LG_RendererFormat l_surfaceFormat;
+
+static void updateSurfaceFormat(void)
+{
+  if (!g_state.ds->setHDRImageDescription)
+    return;
+
+  LG_RendererFormat format = {};
+  if (l_surfaceFormatValid)
+    format = l_surfaceFormat;
+
+  if (l_showSpice)
+  {
+    // The SPICE display is always 8-bit SDR, regardless of the last format
+    // received from the Looking Glass host.
+    format.hdr         = false;
+    format.hdrPQ       = false;
+    format.hdrMetadata = false;
+    g_state.ds->setHDRImageDescription(&format);
+    atomic_store(&g_state.hdrDescFailed, false);
+    return;
+  }
+
+  if (!l_surfaceFormatValid)
+    return;
+
+  if (format.hdr && !l_rendererSupportsNativeHDR)
+  {
+    format.hdr         = false;
+    format.hdrPQ       = false;
+    format.hdrMetadata = false;
+    g_state.ds->setHDRImageDescription(&format);
+    DEBUG_WARN("Renderer surface cannot represent the native HDR encoding; "
+        "using software HDR mapping");
+    atomic_store(&g_state.hdrDescFailed, true);
+  }
+  else if (!g_state.ds->setHDRImageDescription(&format))
+  {
+    DEBUG_WARN("Display server failed to apply HDR image description");
+    atomic_store(&g_state.hdrDescFailed, true);
+  }
+  else
+    atomic_store(&g_state.hdrDescFailed, false);
+}
 
 void renderQueue_init(void)
 {
-  l_renderQueue = ll_new();
+  l_renderQueue               = ll_new();
+  l_showSpice                 = false;
+  l_surfaceFormatValid        = false;
+  l_rendererSupportsNativeHDR = false;
+  memset(&l_surfaceFormat, 0, sizeof(l_surfaceFormat));
 }
 
 void renderQueue_free(void)
@@ -103,6 +155,18 @@ void renderQueue_spiceShow(bool show)
   app_invalidateWindow(true);
 }
 
+void renderQueue_surfaceFormat(const LG_RendererFormat format,
+    bool rendererSupportsNativeHDR)
+{
+  RenderCommand * cmd = malloc(sizeof(*cmd));
+  cmd->op = SURFACE_OP_FORMAT;
+  cmd->surfaceFormat.format = format;
+  cmd->surfaceFormat.rendererSupportsNativeHDR =
+    rendererSupportsNativeHDR;
+  ll_push(l_renderQueue, cmd);
+  app_invalidateWindow(true);
+}
+
 void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy)
 {
   RenderCommand * cmd      = malloc(sizeof(*cmd));
@@ -157,9 +221,19 @@ void renderQueue_process(void)
         break;
 
       case SPICE_OP_SHOW:
+        l_showSpice = cmd->spiceShow.show;
         RENDERER(spiceShow, cmd->spiceShow.show);
+        updateSurfaceFormat();
         if (cmd->spiceShow.show)
           overlaySplash_show(false);
+        break;
+
+      case SURFACE_OP_FORMAT:
+        l_surfaceFormat = cmd->surfaceFormat.format;
+        l_surfaceFormatValid = true;
+        l_rendererSupportsNativeHDR =
+          cmd->surfaceFormat.rendererSupportsNativeHDR;
+        updateSurfaceFormat();
         break;
 
       case CURSOR_OP_STATE:

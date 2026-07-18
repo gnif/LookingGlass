@@ -464,12 +464,13 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   egl_desktopRectsUpdate(desktop->mesh, rects, width, height);
 
   *fullFrame = false;
+  const bool hdr = desktop->hdr && !desktop->useSpice;
   const bool processFrame = atomic_exchange(&desktop->processFrame, false) ||
     egl_postProcessConfigModified(desktop->pp);
   if (processFrame &&
       egl_postProcessRun(desktop->pp, tex, desktop->mesh,
         width, height, outputWidth, outputHeight, dma,
-        desktop->hdr && desktop->hdrPQ) &&
+        hdr && desktop->hdrPQ) &&
       egl_postProcessNeedsFullFrame(desktop->pp))
   {
     /* The filter output may have changed everywhere, but this only applies to
@@ -529,7 +530,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   egl_uniformMatrix3x2fv(shader->uTransform  , 1, GL_FALSE, desktop->matrix);
   egl_uniform1f         (shader->uNVGain     , desktop->nvGain);
   egl_uniform1i         (shader->uCBMode     , desktop->cbMode);
-  egl_uniform1i         (shader->uIsHDR      , desktop->hdr);
+  egl_uniform1i         (shader->uIsHDR      , hdr);
   egl_uniform1i         (shader->uMapHDRtoSDR, desktop->mapHDRtoSDR && !desktop->nativeHDR);
   egl_uniform1f         (shader->uMapHDRGain , mapHDRGain);
   egl_uniform1i         (shader->uMapHDRPQ   , desktop->hdrPQ);

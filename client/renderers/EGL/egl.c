@@ -619,8 +619,8 @@ static bool egl_updateHDRState(struct Inst * this, bool force)
   app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
   const bool surfaceCompatible = this->format.hdrPQ ?
     this->surfaceSupportsPQ : this->surfaceSupportsSCRGB;
-  const bool useNativeHDR = this->format.hdr && surfaceCompatible && nativeHDR &&
-    !app_getHDRDescFailed();
+  const bool useNativeHDR = !this->showSpice && this->format.hdr &&
+    surfaceCompatible && nativeHDR && !app_getHDRDescFailed();
 
   if (!force && this->nativeHDR == useNativeHDR)
     return false;

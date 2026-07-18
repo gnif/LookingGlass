@@ -778,26 +778,7 @@ int main_frameThread(void * unused)
         !g_state.lgr->ops.supports || RENDERER(supports,
           lgrFormat.hdrPQ ? LG_SUPPORTS_HDR_PQ : LG_SUPPORTS_HDR_SCRGB);
       LG_UNLOCK(g_state.lgrLock);
-
-      if (g_state.ds->setHDRImageDescription)
-      {
-        if (lgrFormat.hdr && !rendererSupportsNativeHDR)
-        {
-          LG_RendererFormat sdrSurfaceFormat = lgrFormat;
-          sdrSurfaceFormat.hdr = false;
-          g_state.ds->setHDRImageDescription(&sdrSurfaceFormat);
-          DEBUG_WARN("Renderer surface cannot represent the native HDR "
-              "encoding; using software HDR mapping");
-          atomic_store(&g_state.hdrDescFailed, true);
-        }
-        else if (!g_state.ds->setHDRImageDescription(&lgrFormat))
-        {
-          DEBUG_WARN("Display server failed to apply HDR image description");
-          atomic_store(&g_state.hdrDescFailed, true);
-        }
-        else
-          atomic_store(&g_state.hdrDescFailed, false);
-      }
+      renderQueue_surfaceFormat(lgrFormat, rendererSupportsNativeHDR);
 
       g_state.srcSize.x = lgrFormat.screenWidth;
       g_state.srcSize.y = lgrFormat.screenHeight;

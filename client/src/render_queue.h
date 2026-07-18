@@ -19,6 +19,7 @@
  */
 
 #include "common/ll.h"
+#include "interface/renderer.h"
 
 typedef struct
 {
@@ -28,6 +29,7 @@ typedef struct
     SPICE_OP_DRAW_FILL,
     SPICE_OP_DRAW_BITMAP,
     SPICE_OP_SHOW,
+    SURFACE_OP_FORMAT,
     CURSOR_OP_STATE,
     CURSOR_OP_IMAGE,
   }
@@ -67,6 +69,13 @@ typedef struct
 
     struct
     {
+      LG_RendererFormat format;
+      bool rendererSupportsNativeHDR;
+    }
+    surfaceFormat;
+
+    struct
+    {
       bool visible;
       int  x;
       int  y;
@@ -102,6 +111,9 @@ void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride
     void * data, bool topDown);
 
 void renderQueue_spiceShow(bool show);
+
+void renderQueue_surfaceFormat(const LG_RendererFormat format,
+    bool rendererSupportsNativeHDR);
 
 void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy);
 
