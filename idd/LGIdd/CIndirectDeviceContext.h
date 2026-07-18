@@ -45,6 +45,7 @@ extern "C" {
 #endif
 
 #define MAX_POINTER_SIZE (sizeof(KVMFRCursor) + (512 * 512 * 4))
+#define COLOR_TRANSFORM_BUFFERS 3
 #define POINTER_SHAPE_BUFFERS 3
 
 //FIXME: this should not really be done here, this is a hack
@@ -90,9 +91,11 @@ private:
   PLGMPHostQueue m_pointerQueue = nullptr;
   PLGMPMemory    m_pointerMemory     [LGMP_Q_POINTER_LEN   ] = {};
   PLGMPMemory    m_pointerShapeMemory[POINTER_SHAPE_BUFFERS] = {};
+  PLGMPMemory    m_pointerTransformMemory[COLOR_TRANSFORM_BUFFERS] = {};
   PLGMPMemory    m_pointerShape = nullptr;
   int m_pointerMemoryIndex = 0;
   int m_pointerShapeIndex  = 0;
+  int m_pointerTransformIndex = 0;
   bool m_cursorVisible = false;
   int m_cursorX = 0, m_cursorY = 0;
 
@@ -137,6 +140,12 @@ private:
   bool     m_lastHDRActive                    = false;
   bool     m_lastHDRMetadata                  = false;
 
+  // Windows display calibration transform. The callback publishes immutable
+  // snapshots so the swap-chain thread never observes a partially updated
+  // matrix or LUT.
+  mutable SRWLOCK m_colorTransformLock = SRWLOCK_INIT;
+  std::shared_ptr<const D12ColorTransform> m_colorTransform;
+
   void QueryIddCxCapabilities();
   bool CanUseIddCx110DDIs() const { return m_canProcessFP16; }
 
@@ -145,7 +154,8 @@ private:
 
   void DeInitLGMP();
   void LGMPTimer();
-  void ResendCursor() const;
+  void ResendCursor();
+  void SendColorTransform();
   void InitializeEdid();
 
   // Guards m_displayModes and m_edid. The mode list is rebuilt on the LGMP
@@ -219,6 +229,9 @@ public:
 
   // Tracks HDR state from EvtIddCxMonitorSetDefaultHdrMetadata
   void SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta);
+
+  void SetColorTransform(std::shared_ptr<const D12ColorTransform> transform);
+  std::shared_ptr<const D12ColorTransform> GetColorTransform() const;
 
   // Returns true if the display is currently in HDR mode
   bool IsHDRActive() const

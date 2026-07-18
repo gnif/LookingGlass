@@ -158,6 +158,11 @@ typedef struct LG_RendererOps
   bool (*onMouseShape)(LG_Renderer * renderer, const LG_RendererCursor cursor,
       const int width, const int height, const int pitch, const uint8_t * data);
 
+  /* optional display calibration update for hardware cursor composition
+   * Context: cursorThread */
+  void (*onMouseColorTransform)(LG_Renderer * renderer,
+      const KVMFRColorTransform * transform);
+
   /* called when the mouse has moved or changed visibillity
    * Context: cursorThread */
   bool (*onMouseEvent)(LG_Renderer * renderer, const bool visible, int x, int y,

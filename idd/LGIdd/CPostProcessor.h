@@ -34,6 +34,15 @@ enum class PostProcessStatus
   FAILED
 };
 
+struct D12ColorTransform
+{
+  bool  matrixEnabled = false;
+  float matrix[3][4]  = {};
+  float scalar        = 1.0f;
+  bool  lutEnabled    = false;
+  float lut[4096][4]  = {};
+};
+
 struct D12FrameFormat
 {
   D3D12_RESOURCE_DESC desc = {};
@@ -44,6 +53,7 @@ struct D12FrameFormat
   bool                hdrPQ = false;
   bool                hdrMetadata = false;
   uint32_t            sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  std::shared_ptr<const D12ColorTransform> colorTransform;
 
   // HDR static metadata (SMPTE ST 2086)
   // Display color primaries in 0.00002 units (xy coordinates)

@@ -46,8 +46,11 @@ struct CursorTex
   EGL_Uniform * uScale;
   EGL_Uniform * uRotate;
   EGL_Uniform * uCBMode;
-  EGL_Uniform * uMapSDRtoPQ;
+  EGL_Uniform * uWireTransfer;
   EGL_Uniform * uSDRWhiteLevel;
+  EGL_Uniform * uColorTransformFlags;
+  EGL_Uniform * uColorMatrix;
+  EGL_Uniform * uColorScalar;
 };
 
 struct CursorPos
@@ -80,8 +83,13 @@ struct EGL_Cursor
   _Atomic(struct CursorPos)  hs;
   _Atomic(struct CursorSize) size;
   _Atomic(float)             scale;
-  _Atomic(bool)              mapSDRtoPQ;
+  _Atomic(int)               wireTransfer;
   _Atomic(float)             sdrWhiteLevel;
+
+  bool                colorTransformUpdate;
+  KVMFRColorTransform pendingColorTransform;
+  KVMFRColorTransform activeColorTransform;
+  GLuint              colorLUT;
 
   struct CursorTex norm;
   struct CursorTex mono;
@@ -115,8 +123,13 @@ static bool cursorTexInit(struct CursorTex * t,
   t->uScale         = egl_shaderGetUniform(t->shader, "scale"        );
   t->uRotate        = egl_shaderGetUniform(t->shader, "rotate"       );
   t->uCBMode        = egl_shaderGetUniform(t->shader, "cbMode"       );
-  t->uMapSDRtoPQ    = egl_shaderGetUniform(t->shader, "mapSDRtoPQ"   );
+  t->uWireTransfer  = egl_shaderGetUniform(t->shader, "wireTransfer" );
   t->uSDRWhiteLevel = egl_shaderGetUniform(t->shader, "sdrWhiteLevel");
+  t->uColorTransformFlags =
+    egl_shaderGetUniform(t->shader, "colorTransformFlags");
+  t->uColorMatrix = egl_shaderGetUniform(t->shader, "colorMatrix[0]");
+  t->uColorScalar = egl_shaderGetUniform(t->shader, "colorTransformScalar");
+  egl_shaderAssocTextures(t->shader, 2);
 
   return true;
 }
@@ -129,8 +142,16 @@ static inline void setCursorTexUniforms(EGL_Cursor * cursor,
   egl_uniform1f(t->uScale        , scale);
   egl_uniform1i(t->uRotate       , cursor->rotate);
   egl_uniform1i(t->uCBMode       , cursor->cbMode);
-  egl_uniform1i(t->uMapSDRtoPQ   , !mono && atomic_load(&cursor->mapSDRtoPQ));
+  egl_uniform1i(t->uWireTransfer,
+      mono ? 0 : atomic_load(&cursor->wireTransfer));
   egl_uniform1f(t->uSDRWhiteLevel, atomic_load(&cursor->sdrWhiteLevel));
+  egl_uniform1ui(t->uColorTransformFlags,
+      mono ? 0 : cursor->activeColorTransform.flags);
+  egl_uniformSet(t->uColorMatrix, EGL_UNIFORM_TYPE_4FV, 3, GL_FALSE,
+      cursor->activeColorTransform.matrix);
+  egl_uniform1f(t->uColorScalar, cursor->activeColorTransform.scalar);
+  if (!mono && cursor->colorLUT)
+    egl_stateBindTexture(1, GL_TEXTURE_2D, cursor->colorLUT);
 }
 
 static void cursorTexFree(struct CursorTex * t)
@@ -178,7 +199,7 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   atomic_init(&(*cursor)->hs        , hs   );
   atomic_init(&(*cursor)->size      , size );
   atomic_init(&(*cursor)->scale     , 1.0f );
-  atomic_init(&(*cursor)->mapSDRtoPQ, false);
+  atomic_init(&(*cursor)->wireTransfer, 0);
   atomic_init(&(*cursor)->sdrWhiteLevel,
       KVMFR_SDR_WHITE_LEVEL_DEFAULT);
 
@@ -196,6 +217,8 @@ void egl_cursorFree(EGL_Cursor ** cursor)
 
   cursorTexFree(&(*cursor)->norm);
   cursorTexFree(&(*cursor)->mono);
+  if ((*cursor)->colorLUT)
+    glDeleteTextures(1, &(*cursor)->colorLUT);
   egl_modelFree(&(*cursor)->model);
 
   free(*cursor);
@@ -222,6 +245,7 @@ bool egl_cursorSetShape(EGL_Cursor * cursor, const LG_RendererCursor type,
     if (!cursor->data)
     {
       DEBUG_ERROR("Failed to malloc buffer for cursor shape");
+      LG_UNLOCK(cursor->lock);
       return false;
     }
 
@@ -233,6 +257,15 @@ bool egl_cursorSetShape(EGL_Cursor * cursor, const LG_RendererCursor type,
 
   LG_UNLOCK(cursor->lock);
   return true;
+}
+
+void egl_cursorSetColorTransform(EGL_Cursor * cursor,
+    const KVMFRColorTransform * transform)
+{
+  LG_LOCK(cursor->lock);
+  cursor->pendingColorTransform = *transform;
+  cursor->colorTransformUpdate = true;
+  LG_UNLOCK(cursor->lock);
 }
 
 void egl_cursorSetSize(EGL_Cursor * cursor, const float w, const float h)
@@ -262,14 +295,36 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
   if (!cursor->visible)
     return (struct CursorState) { .visible = false };
 
-  if (cursor->update)
+  if (cursor->update || cursor->colorTransformUpdate)
   {
     LG_LOCK(cursor->lock);
+    const bool updateShape = cursor->update;
     cursor->update = false;
 
-    uint8_t * data = cursor->data;
-    switch(cursor->type)
+    if (cursor->colorTransformUpdate)
     {
+      cursor->activeColorTransform = cursor->pendingColorTransform;
+      cursor->colorTransformUpdate = false;
+
+      if (cursor->activeColorTransform.flags & KVMFR_COLOR_TRANSFORM_LUT)
+      {
+        if (!cursor->colorLUT)
+          glGenTextures(1, &cursor->colorLUT);
+        egl_stateBindTexture(1, GL_TEXTURE_2D, cursor->colorLUT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 4096, 1, 0,
+            GL_RGBA, GL_FLOAT, cursor->activeColorTransform.lut);
+      }
+    }
+
+    if (updateShape)
+    {
+      uint8_t * data = cursor->data;
+      switch(cursor->type)
+      {
       case LG_CURSOR_MASKED_COLOR:
       {
         uint32_t xor[cursor->height][cursor->width];
@@ -329,6 +384,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
         egl_textureUpdate(cursor->norm.texture, (uint8_t *)and, true);
         egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
         break;
+      }
       }
     }
     LG_UNLOCK(cursor->lock);
@@ -447,5 +503,5 @@ void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
 {
   atomic_store(&cursor->sdrWhiteLevel, sdrWhiteLevel > 0.0f ?
       sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT);
-  atomic_store(&cursor->mapSDRtoPQ, hdrActive && hdrPQ);
+  atomic_store(&cursor->wireTransfer, !hdrActive ? 0 : (hdrPQ ? 2 : 1));
 }

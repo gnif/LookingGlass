@@ -868,6 +868,20 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     memset(lgmpHostMemPtr(m_pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
   }
 
+  for (int i = 0; i < COLOR_TRANSFORM_BUFFERS; ++i)
+  {
+    if ((status = lgmpHostMemAlloc(m_lgmp,
+        sizeof(KVMFRCursor) + sizeof(KVMFRColorTransform),
+        &m_pointerTransformMemory[i])) != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer Transform): %s",
+        lgmpStatusString(status));
+      return false;
+    }
+    memset(lgmpHostMemPtr(m_pointerTransformMemory[i]), 0,
+      sizeof(KVMFRCursor) + sizeof(KVMFRColorTransform));
+  }
+
   m_maxFrameSize = lgmpHostMemAvail(m_lgmp);
   m_maxFrameSize = (m_maxFrameSize -(m_alignSize - 1)) & ~(m_alignSize - 1);
   m_maxFrameSize /= LGMP_Q_FRAME_LEN;
@@ -951,6 +965,9 @@ void CIndirectDeviceContext::DeInitLGMP()
     lgmpHostMemFree(&m_pointerMemory[i]);
   for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
     lgmpHostMemFree(&m_pointerShapeMemory[i]);
+
+  for (int i = 0; i < COLOR_TRANSFORM_BUFFERS; ++i)
+    lgmpHostMemFree(&m_pointerTransformMemory[i]);
   lgmpHostFree(&m_lgmp);
 }
 
@@ -1017,7 +1034,10 @@ void CIndirectDeviceContext::LGMPTimer()
   }
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
+  {
     ResendCursor();
+    SendColorTransform();
+  }
 }
 
 bool CIndirectDeviceContext::FrameBufferAvailable() const
@@ -1272,6 +1292,24 @@ void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, co
   }
 }
 
+void CIndirectDeviceContext::SetColorTransform(
+  std::shared_ptr<const D12ColorTransform> transform)
+{
+  AcquireSRWLockExclusive(&m_colorTransformLock);
+  m_colorTransform = std::move(transform);
+  ReleaseSRWLockExclusive(&m_colorTransformLock);
+  SendColorTransform();
+}
+
+std::shared_ptr<const D12ColorTransform>
+CIndirectDeviceContext::GetColorTransform() const
+{
+  AcquireSRWLockShared(&m_colorTransformLock);
+  auto transform = m_colorTransform;
+  ReleaseSRWLockShared(&m_colorTransformLock);
+  return transform;
+}
+
 #ifdef HAS_IDDCX_110
 void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta)
 {
@@ -1325,7 +1363,49 @@ bool CIndirectDeviceContext::GetHDRMetadata(D12FrameFormat & format) const
   return true;
 }
 
-void CIndirectDeviceContext::ResendCursor() const
+void CIndirectDeviceContext::SendColorTransform()
+{
+  if (!m_pointerQueue || !m_pointerTransformMemory[0])
+    return;
+
+  PLGMPMemory mem = m_pointerTransformMemory[m_pointerTransformIndex];
+  if (++m_pointerTransformIndex == COLOR_TRANSFORM_BUFFERS)
+    m_pointerTransformIndex = 0;
+
+  KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
+  KVMFRColorTransform * output =
+    (KVMFRColorTransform *)(cursor + 1);
+  const auto transform = GetColorTransform();
+
+  output->flags = 0;
+  if (transform)
+  {
+    if (transform->matrixEnabled)
+      output->flags |= KVMFR_COLOR_TRANSFORM_MATRIX;
+    if (transform->lutEnabled)
+      output->flags |= KVMFR_COLOR_TRANSFORM_LUT;
+    memcpy(output->matrix, transform->matrix, sizeof(output->matrix));
+    output->scalar = transform->scalar;
+    memcpy(output->lut, transform->lut, sizeof(output->lut));
+  }
+
+  LGMP_STATUS status;
+  while ((status = lgmpHostQueuePost(m_pointerQueue,
+      CURSOR_FLAG_COLOR_TRANSFORM, mem)) != LGMP_OK)
+  {
+    if (status == LGMP_ERR_QUEUE_FULL)
+    {
+      Sleep(1);
+      continue;
+    }
+
+    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer Transform): %s",
+      lgmpStatusString(status));
+    break;
+  }
+}
+
+void CIndirectDeviceContext::ResendCursor()
 {
   PLGMPMemory mem = m_pointerShape;
   if (!mem)

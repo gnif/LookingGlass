@@ -538,6 +538,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcFormat.height        = srcDesc.Height;
   srcFormat.format        = GetFrameType(srcDesc.Format);
   srcFormat.sdrWhiteLevel = sdrWhiteLevel;
+  srcFormat.colorTransform = m_devContext->GetColorTransform();
 
   switch (colorSpace)
   {

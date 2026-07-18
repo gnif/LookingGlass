@@ -28,7 +28,7 @@
 #include "types.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 21
+#define KVMFR_VERSION 22
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -51,9 +51,10 @@
 
 enum
 {
-  CURSOR_FLAG_POSITION = 0x1,
-  CURSOR_FLAG_VISIBLE  = 0x2,
-  CURSOR_FLAG_SHAPE    = 0x4
+  CURSOR_FLAG_POSITION        = 0x1,
+  CURSOR_FLAG_VISIBLE         = 0x2,
+  CURSOR_FLAG_SHAPE           = 0x4,
+  CURSOR_FLAG_COLOR_TRANSFORM = 0x8
 };
 
 typedef uint32_t KVMFRCursorFlags;
@@ -136,6 +137,28 @@ typedef struct KVMFRCursor
   uint32_t   pitch;       // row length in bytes of the shape
 }
 KVMFRCursor;
+
+enum
+{
+  KVMFR_COLOR_TRANSFORM_MATRIX = 0x1,
+  KVMFR_COLOR_TRANSFORM_LUT    = 0x2,
+};
+
+typedef uint32_t KVMFRColorTransformFlags;
+
+// Optional payload appended to KVMFRCursor when
+// CURSOR_FLAG_COLOR_TRANSFORM is present. The matrix is an XYZ-to-XYZ
+// adjustment; the LUT is applied after encoding to the active wire transfer
+// function. Four LUT components keep the payload directly uploadable as an
+// RGBA32F texture, with alpha reserved and set to 1.0.
+typedef struct KVMFRColorTransform
+{
+  KVMFRColorTransformFlags flags;
+  float matrix[3][4];
+  float scalar;
+  float lut[4096][4];
+}
+KVMFRColorTransform;
 
 enum
 {

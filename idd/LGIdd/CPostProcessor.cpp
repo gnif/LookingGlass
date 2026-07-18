@@ -13,6 +13,7 @@
 
 #include "CD3D12Device.h"
 #include "CDebug.h"
+#include "effect/CColorTransformEffect.h"
 #include "effect/CDownsampleEffect.h"
 #include "effect/CHDR16to10Effect.h"
 #include "effect/CRGB24Effect.h"
@@ -37,6 +38,15 @@ bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device)
   m_dx12Device = dx12Device;
   m_device = dx12Device->GetDevice();
   m_effects.clear();
+
+  std::unique_ptr<CColorTransformEffect> colorTransform(new CColorTransformEffect());
+  if (colorTransform->Init(m_device))
+  {
+    DEBUG_INFO("Created post-processing effect: %s", colorTransform->GetName());
+    m_effects.push_back(std::move(colorTransform));
+  }
+  else
+    return false;
 
   std::unique_ptr<CDownsampleEffect> downsample(new CDownsampleEffect());
   if (downsample->Init(m_device))
@@ -86,7 +96,8 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
       srcFormat.width         == m_srcFormat.width       &&
       srcFormat.height        == m_srcFormat.height      &&
       srcFormat.hdr           == m_srcFormat.hdr         &&
-      srcFormat.hdrPQ         == m_srcFormat.hdrPQ)
+      srcFormat.hdrPQ         == m_srcFormat.hdrPQ       &&
+      srcFormat.colorTransform == m_srcFormat.colorTransform)
   {
     // Static HDR metadata may change independently of the resource format.
     // Propagate it without recreating textures or post-processing state.
@@ -132,7 +143,8 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
                      oldDst.height        != m_dstFormat.height      ||
                      oldDst.hdr           != m_dstFormat.hdr         ||
                      oldDst.hdrPQ         != m_dstFormat.hdrPQ       ||
-                     oldDst.sdrWhiteLevel != m_dstFormat.sdrWhiteLevel;
+                     oldDst.sdrWhiteLevel != m_dstFormat.sdrWhiteLevel ||
+                     oldDst.colorTransform != m_dstFormat.colorTransform;
   return true;
 }
 

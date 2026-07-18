@@ -577,6 +577,13 @@ static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cur
   return true;
 }
 
+static void egl_onMouseColorTransform(LG_Renderer * renderer,
+    const KVMFRColorTransform * transform)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_cursorSetColorTransform(this->cursor, transform);
+}
+
 static bool egl_onMouseEvent(LG_Renderer * renderer, const bool visible,
     int x, int y, const int hx, const int hy)
 {
@@ -1438,22 +1445,23 @@ static void egl_spiceShow(LG_Renderer * renderer, bool show)
 
 struct LG_RendererOps LGR_EGL =
 {
-  .getName       = egl_getName,
-  .setup         = egl_setup,
-  .create        = egl_create,
-  .initialize    = egl_initialize,
-  .deinitialize  = egl_deinitialize,
-  .supports      = egl_supports,
-  .onRestart     = egl_onRestart,
-  .onResize      = egl_onResize,
-  .onMouseShape  = egl_onMouseShape,
-  .onMouseEvent  = egl_onMouseEvent,
-  .onFrameFormat = egl_onFrameFormat,
-  .onFrame       = egl_onFrame,
-  .renderStartup = egl_renderStartup,
-  .render        = egl_render,
-  .createTexture = egl_createTexture,
-  .freeTexture   = egl_freeTexture,
+  .getName               = egl_getName,
+  .setup                 = egl_setup,
+  .create                = egl_create,
+  .initialize            = egl_initialize,
+  .deinitialize          = egl_deinitialize,
+  .supports              = egl_supports,
+  .onRestart             = egl_onRestart,
+  .onResize              = egl_onResize,
+  .onMouseShape          = egl_onMouseShape,
+  .onMouseColorTransform = egl_onMouseColorTransform,
+  .onMouseEvent          = egl_onMouseEvent,
+  .onFrameFormat         = egl_onFrameFormat,
+  .onFrame               = egl_onFrame,
+  .renderStartup         = egl_renderStartup,
+  .render                = egl_render,
+  .createTexture         = egl_createTexture,
+  .freeTexture           = egl_freeTexture,
 
   .spiceConfigure  = egl_spiceConfigure,
   .spiceDrawFill   = egl_spiceDrawFill,

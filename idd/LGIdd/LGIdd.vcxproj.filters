@@ -94,6 +94,9 @@
     <ClInclude Include="CPostProcessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="effect\CColorTransformEffect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="effect\CComputeEffect.h">
       <Filter>Header Files\effect</Filter>
     </ClInclude>
@@ -161,6 +164,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CPostProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="effect\CColorTransformEffect.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="effect\CComputeEffect.cpp">
