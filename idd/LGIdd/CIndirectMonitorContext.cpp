@@ -37,11 +37,19 @@ CIndirectMonitorContext::~CIndirectMonitorContext()
 
 void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
 {
-  UnassignSwapChain();
+  std::lock_guard<std::mutex> assignGuard(m_assignMutex);
 
-  // Build everything into locals so the members are never observed
-  // half-constructed by a concurrent unassign, and so the processor (which
-  // spawns a worker thread) is created outside the lock.
+  // Finish tearing down the previous assignment before reserving a generation
+  // for the new one. Deleting the old processor can itself cause IddCx to
+  // re-enter UnassignSwapChain, and that old callback must happen before the
+  // new generation is established.
+  DetachSwapChain();
+
+  const UINT64 assignmentGeneration =
+    m_assignmentGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+  // Build the devices into locals so the members are never observed
+  // half-constructed and the expensive initialization stays outside m_lock.
   std::shared_ptr<CD3D11Device> dx11Device;
   std::shared_ptr<CD3D12Device> dx12Device;
 
@@ -78,19 +86,33 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
     break;
   }
 
-  m_devContext->OnSwapChainAssigned();
-  std::unique_ptr<CSwapChainProcessor> processor(new CSwapChainProcessor(
-    m_monitor, m_devContext, swapChain, dx11Device, dx12Device, newFrameEvent));
-
   AcquireSRWLockExclusive(&m_lock);
+  if (!IsAssignmentCurrent(assignmentGeneration))
+  {
+    ReleaseSRWLockExclusive(&m_lock);
+    DEBUG_INFO("Swap chain assignment canceled before processor startup");
+    return;
+  }
+
+  // Publish the assignment atomically with starting its worker. An unassign
+  // now blocks on m_lock until m_swapChain exists, at which point it can
+  // signal and join the processor normally.
+  m_devContext->OnSwapChainAssigned();
   m_dx11Device = std::move(dx11Device);
   m_dx12Device = std::move(dx12Device);
-  m_swapChain  = std::move(processor);
+  m_swapChain.reset(new CSwapChainProcessor(
+    this, assignmentGeneration, m_monitor, m_devContext, swapChain,
+    m_dx11Device, m_dx12Device, newFrameEvent));
   ReleaseSRWLockExclusive(&m_lock);
 }
 
-void CIndirectMonitorContext::UnassignSwapChain()
+void CIndirectMonitorContext::DetachSwapChain()
 {
+  // Invalidate setup in progress before waiting for m_lock. This also lets a
+  // worker about to call SetDevice observe an unassign whose callback is
+  // blocked waiting for the processor to be published.
+  m_assignmentGeneration.fetch_add(1, std::memory_order_acq_rel);
+
   // Detach under the lock, then destroy outside it. Destroying the processor
   // joins its worker thread, whose teardown (WdfObjectDelete) re-enters this
   // method on another thread - holding the lock across that would deadlock.
@@ -111,4 +133,9 @@ void CIndirectMonitorContext::UnassignSwapChain()
 
   if (hadSwapChain)
     m_devContext->OnSwapChainReleased();
+}
+
+void CIndirectMonitorContext::UnassignSwapChain()
+{
+  DetachSwapChain();
 }

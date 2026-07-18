@@ -19,13 +19,18 @@
  */
 
 #include "CSwapChainProcessor.h"
+#include "CIndirectMonitorContext.h"
 
 #include <avrt.h>
 #include "CDebug.h"
 #include "CPipeServer.h"
 
-CSwapChainProcessor::CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
+CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContext,
+    UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
+    CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent) :
+  m_monitorContext(monitorContext),
+  m_assignmentGeneration(assignmentGeneration),
   m_monitor(monitor),
   m_devContext(devContext),
   m_hSwapChain(hSwapChain),
@@ -41,10 +46,11 @@ CSwapChainProcessor::CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceC
   // Manual-reset: both worker threads wait on this, so it must stay signalled
   // once set or only one thread would ever observe termination.
   m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
-  m_thread[0].Attach(CreateThread(nullptr, 0, _SwapChainThread, this, 0, nullptr));
-
   m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_shapeBuffer = new BYTE[512 * 512 * 4];
+
+  // Start the worker only after every object it can access is initialized.
+  m_thread[0].Attach(CreateThread(nullptr, 0, _SwapChainThread, this, 0, nullptr));
 }
 
 CSwapChainProcessor::~CSwapChainProcessor()
@@ -118,13 +124,24 @@ bool CSwapChainProcessor::SwapChainThreadCore()
   IDARG_IN_SWAPCHAINSETDEVICE setDevice = {};
   setDevice.pDevice = dxgiDevice.Get();
 
+  // IddCx can unassign a swap chain while its devices are still being
+  // created. In that case the owner signals termination and IddCx retains
+  // responsibility for the handle because SetDevice has not succeeded.
+  if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+      WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+    return false;
+
   // A failure here (commonly DXGI_ERROR_ACCESS_LOST on the first assignment)
   // is not recoverable on this handle - IddCx reassigns a fresh swap chain,
   // which is what actually succeeds. Bail cleanly and let that happen.
   hr = IddCxSwapChainSetDevice(m_hSwapChain, &setDevice);
   if (FAILED(hr))
   {
-    DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
+    if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+        WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+      DEBUG_INFO("Swap chain was unassigned during device setup");
+    else
+      DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
     return false;
   }
   // Past this point SetDevice succeeded: we own the swap chain and are
