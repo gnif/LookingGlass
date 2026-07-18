@@ -35,7 +35,8 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 #include "CNotifyWindow.h"
 #include "CConfigWindow.h"
 
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof*(x))
+#include "common/array.h"
+
 #define SVCNAME L"Looking Glass (IDD Helper)"
 
 static SERVICE_STATUS_HANDLE l_svcStatusHandle;
@@ -424,7 +425,7 @@ static void Launch()
   }
 
   wchar_t cmdBuf[128];
-  _snwprintf_s(cmdBuf, ARRAY_SIZE(cmdBuf), L"LGIddHelper.exe %" PRId32,
+  _snwprintf_s(cmdBuf, ARRAY_LENGTH(cmdBuf), L"LGIddHelper.exe %" PRId32,
     GetCurrentProcessId());
 
   if (!CreateProcessAsUser(
