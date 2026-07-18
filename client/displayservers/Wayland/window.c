@@ -76,6 +76,7 @@ static void wlSurfaceEnterHandler(void * data, struct wl_surface * surface, stru
   node->output = output;
   wl_list_insert(&wlWm.surfaceOutputs, &node->link);
   waylandWindowUpdateScale();
+  waylandOutputUpdateHDRWhiteLevel();
 }
 
 static void wlSurfaceLeaveHandler(void * data, struct wl_surface * surface, struct wl_output * output)
@@ -85,9 +86,11 @@ static void wlSurfaceLeaveHandler(void * data, struct wl_surface * surface, stru
     if (node->output == output)
     {
       wl_list_remove(&node->link);
+      free(node);
       break;
     }
   waylandWindowUpdateScale();
+  waylandOutputUpdateHDRWhiteLevel();
 }
 
 static const struct wl_surface_listener wlSurfaceListener = {
@@ -169,6 +172,14 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
 void waylandWindowFree(void)
 {
+  struct SurfaceOutput * output;
+  struct SurfaceOutput * temp;
+  wl_list_for_each_safe(output, temp, &wlWm.surfaceOutputs, link)
+  {
+    wl_list_remove(&output->link);
+    free(output);
+  }
+
   if (wlWm.fractionalScaleInterface)
     wp_fractional_scale_v1_destroy(wlWm.fractionalScaleInterface);
   if (wlWm.contentType)

@@ -98,6 +98,7 @@ static void applyHDRPending(void)
 
 void waylandClearHDRImageDescription(void)
 {
+  LG_LOCK(wlWm.hdrLock);
   if (wlWm.hdrImageCreator)
   {
     wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
@@ -114,19 +115,25 @@ void waylandClearHDRImageDescription(void)
     wp_color_management_surface_v1_unset_image_description(wlWm.colorSurface);
 
   atomic_store(&wlWm.hdrActive, false);
+  LG_UNLOCK(wlWm.hdrLock);
   DEBUG_INFO("HDR image description removed from surface");
 }
 
 static void hdrImageDescriptionReady(struct wp_image_description_v1 * desc)
 {
+  LG_LOCK(wlWm.hdrLock);
   if (desc != wlWm.hdrImageDesc)
+  {
+    LG_UNLOCK(wlWm.hdrLock);
     return;
+  }
 
   if (!wlWm.colorSurface)
   {
     DEBUG_WARN("HDR image description became ready without a color surface");
     wp_image_description_v1_destroy(desc);
     wlWm.hdrImageDesc = NULL;
+    LG_UNLOCK(wlWm.hdrLock);
     return;
   }
 
@@ -134,16 +141,22 @@ static void hdrImageDescriptionReady(struct wp_image_description_v1 * desc)
   // then switch to native HDR for the next render, and that native frame and
   // its image description become active in the same following commit.
   wlWm.hdrImageDescReady = true;
+  const bool pq = wlWm.hdrImageDescPQ;
+  LG_UNLOCK(wlWm.hdrLock);
   DEBUG_INFO("HDR image description is ready (%s)",
-      wlWm.hdrImageDescPQ ? "PQ" : "scRGB");
+      pq ? "PQ" : "scRGB");
   app_invalidateWindow(true);
   waylandStopWaitFrame();
 }
 
 static void activateReadyHDRImageDescription(void)
 {
+  LG_LOCK(wlWm.hdrLock);
   if (!wlWm.hdrImageDesc || !wlWm.hdrImageDescReady || !wlWm.colorSurface)
+  {
+    LG_UNLOCK(wlWm.hdrLock);
     return;
+  }
 
   struct wp_image_description_v1 * desc = wlWm.hdrImageDesc;
   wp_color_management_surface_v1_set_image_description(
@@ -157,9 +170,11 @@ static void activateReadyHDRImageDescription(void)
   wlWm.hdrImageDesc = NULL;
   wlWm.hdrImageDescReady = false;
   wp_image_description_v1_destroy(desc);
+  const bool pq = atomic_load(&wlWm.hdrActivePQ);
+  LG_UNLOCK(wlWm.hdrLock);
 
   DEBUG_INFO("HDR image description pending next surface commit (%s)",
-      atomic_load(&wlWm.hdrActivePQ) ? "PQ" : "scRGB");
+      pq ? "PQ" : "scRGB");
   app_invalidateWindow(true);
   waylandStopWaitFrame();
 }
@@ -168,14 +183,19 @@ static void hdrImageDescriptionFailed(void * data,
     struct wp_image_description_v1 * desc, uint32_t cause, const char * message)
 {
   (void)data;
+  LG_LOCK(wlWm.hdrLock);
   if (desc != wlWm.hdrImageDesc)
+  {
+    LG_UNLOCK(wlWm.hdrLock);
     return;
+  }
 
   DEBUG_WARN("Failed to create HDR image description (cause:%u): %s",
       cause, message);
   wlWm.hdrImageDesc = NULL;
   wlWm.hdrImageDescReady = false;
   wp_image_description_v1_destroy(desc);
+  LG_UNLOCK(wlWm.hdrLock);
   app_invalidateWindow(true);
   waylandStopWaitFrame();
 }
@@ -295,13 +315,19 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   if (!wlWm.colorManager)
     return;
 
-  if (!wlWm.cmFeaturesDone)
+  if (!atomic_load_explicit(&wlWm.cmFeaturesDone, memory_order_acquire))
   {
     DEBUG_WARN("Color management features not yet advertised, deferring HDR");
     return;
   }
 
-  if (!wlWm.cmHasParametric)
+  if (!wlWm.cmHasPerceptualIntent)
+  {
+    DEBUG_WARN("Compositor does not support the perceptual render intent");
+    return;
+  }
+
+  if (hdrPQ && !wlWm.cmHasParametric)
   {
     DEBUG_WARN("Compositor does not support parametric image descriptions");
     return;
@@ -313,9 +339,9 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     DEBUG_WARN("Compositor does not support ST2084_PQ transfer function");
     return;
   }
-  if (!hdrPQ && !wlWm.cmHasTFExtLinear)
+  if (!hdrPQ && !wlWm.cmHasWindowsSCRGB)
   {
-    DEBUG_WARN("Compositor does not support EXT_LINEAR transfer function");
+    DEBUG_WARN("Compositor does not support Windows-scRGB image descriptions");
     return;
   }
 
@@ -325,11 +351,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     DEBUG_WARN("Compositor does not support BT.2020 primaries");
     return;
   }
-  if (!hdrPQ && !wlWm.cmHasPrimariesSRGB)
-  {
-    DEBUG_WARN("Compositor does not support sRGB primaries");
-    return;
-  }
+  LG_LOCK(wlWm.hdrLock);
 
   // Cancel only an in-flight replacement. The active surface description is
   // retained until this replacement is ready.
@@ -360,8 +382,29 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     if (!wlWm.colorSurface)
     {
       DEBUG_WARN("Failed to get color management surface");
+      LG_UNLOCK(wlWm.hdrLock);
       return;
     }
+  }
+
+  if (!hdrPQ)
+  {
+    wlWm.hdrImageDesc =
+      wp_color_manager_v1_create_windows_scrgb(wlWm.colorManager);
+    if (!wlWm.hdrImageDesc)
+    {
+      DEBUG_WARN("Failed to create Windows-scRGB image description");
+      LG_UNLOCK(wlWm.hdrLock);
+      return;
+    }
+
+    wlWm.hdrImageDescPQ = false;
+    wlWm.hdrImageDescReady = false;
+    wp_image_description_v1_add_listener(
+        wlWm.hdrImageDesc, &hdrImageDescListener, NULL);
+    LG_UNLOCK(wlWm.hdrLock);
+    DEBUG_INFO("HDR image description requested (scRGB, Windows-scRGB)");
+    return;
   }
 
   wlWm.hdrImageCreator =
@@ -369,20 +412,19 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   if (!wlWm.hdrImageCreator)
   {
     DEBUG_WARN("Failed to create parametric image description creator");
+    LG_UNLOCK(wlWm.hdrLock);
     return;
   }
 
   // Set primaries: BT.2020 for PQ HDR10, sRGB for scRGB/FP16
   wp_image_description_creator_params_v1_set_primaries_named(
       wlWm.hdrImageCreator,
-      hdrPQ ? WP_COLOR_MANAGER_V1_PRIMARIES_BT2020
-            : WP_COLOR_MANAGER_V1_PRIMARIES_SRGB);
+      WP_COLOR_MANAGER_V1_PRIMARIES_BT2020);
 
   // Select transfer function: PQ for PQ-encoded content, linear for scRGB/FP16
   wp_image_description_creator_params_v1_set_tf_named(
       wlWm.hdrImageCreator,
-      hdrPQ ? WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ
-            : WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR);
+      WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ);
 
   // Set the primary colour volume luminances.
   //   min_lum       : 0.0001 cd/m² (source already scaled) -> pass through
@@ -394,9 +436,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
         wlWm.hdrImageCreator,
         minDisplayLuminance > 0 ? minDisplayLuminance : 50,
         maxDisplayLuminance > 0 ? maxDisplayLuminance : 1000,
-        hdrPQ                   ?
-          wlWm.hdrWhiteLevels.pq :
-          wlWm.hdrWhiteLevels.scRGB);
+        atomic_load(&wlWm.hdrPQWhiteLevel));
 
   // KVMFR uses the ST 2086/DXGI scale of 50,000 units per coordinate while
   // color-management-v1 uses 1,000,000 units per coordinate.
@@ -432,6 +472,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   if (!wlWm.hdrImageDesc)
   {
     DEBUG_WARN("Failed to create HDR image description");
+    LG_UNLOCK(wlWm.hdrLock);
     return;
   }
 
@@ -439,6 +480,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   wlWm.hdrImageDescReady = false;
   wp_image_description_v1_add_listener(
       wlWm.hdrImageDesc, &hdrImageDescListener, NULL);
+  LG_UNLOCK(wlWm.hdrLock);
 
   DEBUG_INFO("HDR image description requested (%s, %s, "
       "maxLum:%u cd/m² minLum:%u (0.0001 cd/m²) maxCLL:%u maxFALL:%u)",
@@ -451,15 +493,14 @@ bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
     bool hdrPQ, bool hdrMetadata)
 {
-  if (!wlWm.cmFeaturesDone || !wlWm.cmHasParametric)
+  if (!atomic_load_explicit(&wlWm.cmFeaturesDone, memory_order_acquire))
     return false;
-  if (hdrPQ && !wlWm.cmHasTFSt2084PQ)
+  if (!wlWm.cmHasPerceptualIntent)
     return false;
-  if (!hdrPQ && !wlWm.cmHasTFExtLinear)
+  if (hdrPQ && (!wlWm.cmHasParametric || !wlWm.cmHasTFSt2084PQ ||
+        !wlWm.cmHasPrimariesBT2020))
     return false;
-  if (hdrPQ && !wlWm.cmHasPrimariesBT2020)
-    return false;
-  if (!hdrPQ && !wlWm.cmHasPrimariesSRGB)
+  if (!hdrPQ && !wlWm.cmHasWindowsSCRGB)
     return false;
 
   atomic_store(&wlWm.hdrRequestedPQ, hdrPQ);

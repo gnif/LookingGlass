@@ -45,6 +45,9 @@ static void cmFeature(void * data, struct wp_color_manager_v1 * cm, uint32_t fea
     case WP_COLOR_MANAGER_V1_FEATURE_SET_MASTERING_DISPLAY_PRIMARIES:
       wlWm.cmHasMasteringPrimaries = true;
       break;
+    case WP_COLOR_MANAGER_V1_FEATURE_WINDOWS_SCRGB:
+      wlWm.cmHasWindowsSCRGB = true;
+      break;
     default:
       break;
   }
@@ -69,18 +72,22 @@ static void cmPrimariesNamed(void * data, struct wp_color_manager_v1 * cm,
 
 static void cmDone(void * data, struct wp_color_manager_v1 * cm)
 {
-  wlWm.cmFeaturesDone = true;
-  wlWm.cmCanDoHDR = wlWm.cmHasParametric &&
-    ((wlWm.cmHasTFSt2084PQ && wlWm.cmHasPrimariesBT2020) ||
-     (wlWm.cmHasTFExtLinear && wlWm.cmHasPrimariesSRGB));
+  const bool canPQ = wlWm.cmHasPerceptualIntent && wlWm.cmHasParametric &&
+    wlWm.cmHasTFSt2084PQ && wlWm.cmHasPrimariesBT2020;
+  atomic_store_explicit(&wlWm.cmCanDoHDR,
+      canPQ || (wlWm.cmHasPerceptualIntent && wlWm.cmHasWindowsSCRGB),
+      memory_order_relaxed);
+  atomic_store_explicit(&wlWm.cmFeaturesDone, true, memory_order_release);
   DEBUG_INFO("Color management features: parametric:%d luminances:%d "
       "mastering_primaries:%d st2084_pq:%d ext_linear:%d bt2020:%d srgb:%d "
+      "windows_scrgb:%d perceptual:%d "
       "can_do_hdr:%d",
       wlWm.cmHasParametric, wlWm.cmHasLuminances,
       wlWm.cmHasMasteringPrimaries,
       wlWm.cmHasTFSt2084PQ, wlWm.cmHasTFExtLinear,
       wlWm.cmHasPrimariesBT2020, wlWm.cmHasPrimariesSRGB,
-      wlWm.cmCanDoHDR);
+      wlWm.cmHasWindowsSCRGB, wlWm.cmHasPerceptualIntent,
+      atomic_load(&wlWm.cmCanDoHDR));
 }
 
 static const struct wp_color_manager_v1_listener cmListener = {
@@ -97,6 +104,7 @@ bool waylandColorMgmtInit(void)
     return true;
 
   wp_color_manager_v1_add_listener(wlWm.colorManager, &cmListener, NULL);
+  waylandOutputColorMgmtInitAll();
   return true;
 }
 
@@ -105,6 +113,7 @@ void waylandColorMgmtFree(void)
   if (!wlWm.colorManager)
     return;
 
+  LG_LOCK(wlWm.hdrLock);
   if (wlWm.hdrImageCreator)
   {
     wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
@@ -121,6 +130,7 @@ void waylandColorMgmtFree(void)
     wp_color_management_surface_v1_destroy(wlWm.colorSurface);
     wlWm.colorSurface = NULL;
   }
+  LG_UNLOCK(wlWm.hdrLock);
 
   wp_color_manager_v1_destroy(wlWm.colorManager);
   wlWm.colorManager = NULL;

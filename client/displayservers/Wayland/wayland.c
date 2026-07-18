@@ -109,12 +109,12 @@ static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
   LG_LOCK_INIT(wlWm.pendingHDRLock);
+  LG_LOCK_INIT(wlWm.hdrLock);
   wlWm.desktop        = WL_Desktops[0];
-  wlWm.hdrWhiteLevels = (LG_DSHDRWhiteLevels)
-  {
-    .pq    = 203,
-    .scRGB = 80,
-  };
+  atomic_init(&wlWm.cmFeaturesDone, false);
+  atomic_init(&wlWm.cmCanDoHDR, false);
+  atomic_init(&wlWm.hdrPQWhiteLevel, 203);
+  atomic_init(&wlWm.hdrScRGBWhiteLevel, 80);
 
   wlWm.display = wl_display_connect(NULL);
   if (!wlWm.display)
@@ -212,6 +212,7 @@ static void waylandFree(void)
   waylandRegistryFree();
   waylandCursorFree();
   wl_display_disconnect(wlWm.display);
+  LG_LOCK_FREE(wlWm.hdrLock);
   LG_LOCK_FREE(wlWm.pendingHDRLock);
 }
 
@@ -234,7 +235,11 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 
   if (prop == LG_DS_HDR_WHITE_LEVELS)
   {
-    *(LG_DSHDRWhiteLevels *)ret = wlWm.hdrWhiteLevels;
+    *(LG_DSHDRWhiteLevels *)ret = (LG_DSHDRWhiteLevels)
+    {
+      .pq    = atomic_load(&wlWm.hdrPQWhiteLevel),
+      .scRGB = atomic_load(&wlWm.hdrScRGBWhiteLevel),
+    };
     return true;
   }
 

@@ -19,6 +19,8 @@
  */
 
 #include <stdbool.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #include <wayland-client.h>
@@ -65,6 +67,8 @@ struct WaylandPoll
   struct wl_list link;
 };
 
+struct OutputColorDescription;
+
 struct WaylandOutput
 {
   uint32_t name;
@@ -77,6 +81,10 @@ struct WaylandOutput
   bool    modeRotate;
   struct wl_output * output;
   struct zxdg_output_v1 * xdgOutput;
+  struct wp_color_management_output_v1 * colorOutput;
+  struct OutputColorDescription * colorDescription;
+  uint32_t referenceWhiteLevel;
+  bool referenceWhiteValid;
   uint32_t version;
   struct wl_list link;
 };
@@ -216,11 +224,12 @@ struct WaylandDSState
   _Atomic(bool) hdrRequestedPQ;
   bool          hdrImageDescPQ;
   bool          hdrImageDescReady;
+  LG_Lock       hdrLock;
 
   // wp_color_manager_v1 feature advertisement tracking.
   // Set to true after the done event for the color-manager has been received
   // and all compositor capabilities have been recorded.
-  bool cmFeaturesDone;
+  _Atomic(bool) cmFeaturesDone;
   bool cmHasParametric;
   bool cmHasLuminances;
   bool cmHasMasteringPrimaries;
@@ -228,11 +237,13 @@ struct WaylandDSState
   bool cmHasTFExtLinear;
   bool cmHasPrimariesBT2020;
   bool cmHasPrimariesSRGB;
+  bool cmHasWindowsSCRGB;
   bool cmHasPerceptualIntent;
-  bool cmCanDoHDR;       // true if compositor supports features needed for HDR
+  _Atomic(bool) cmCanDoHDR; // compositor supports a native HDR encoding
 
-  // Reference white configured on native HDR surface image descriptions.
-  LG_DSHDRWhiteLevels hdrWhiteLevels;
+  // Local output reference whites used for native overlay composition.
+  _Atomic(uint32_t) hdrPQWhiteLevel;
+  _Atomic(uint32_t) hdrScRGBWhiteLevel;
 
   // toplevel icon manager
   struct xdg_toplevel_icon_manager_v1 * iconManager;
@@ -373,6 +384,9 @@ void waylandOutputFree(void);
 void waylandOutputBind(uint32_t name, uint32_t version);
 void waylandOutputTryUnbind(uint32_t name);
 struct WaylandScale waylandOutputGetScale(struct wl_output * output);
+void waylandOutputColorMgmtInit(struct WaylandOutput * output);
+void waylandOutputColorMgmtInitAll(void);
+void waylandOutputUpdateHDRWhiteLevel(void);
 
 // poll module
 bool waylandPollInit(void);
