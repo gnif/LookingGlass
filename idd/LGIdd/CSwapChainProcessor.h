@@ -36,9 +36,13 @@ using namespace Microsoft::WRL;
 
 #define STAGING_TEXTURES 3
 
+class CIndirectMonitorContext;
+
 class CSwapChainProcessor
 {
 private:
+  CIndirectMonitorContext         * m_monitorContext;
+  UINT64                            m_assignmentGeneration;
   IDDCX_MONITOR                   m_monitor;
   CIndirectDeviceContext        * m_devContext;
   IDDCX_SWAPCHAIN                 m_hSwapChain;
@@ -74,7 +78,8 @@ private:
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel);
 
 public:
-  CSwapChainProcessor(IDDCX_MONITOR monitor, CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
+  CSwapChainProcessor(CIndirectMonitorContext * monitorContext, UINT64 assignmentGeneration,
+    IDDCX_MONITOR monitor, CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
     std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent);
   ~CSwapChainProcessor();
 
