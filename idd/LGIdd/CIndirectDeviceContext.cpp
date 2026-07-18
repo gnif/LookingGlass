@@ -207,7 +207,7 @@ void CIndirectDeviceContext::InitAdapter()
   bool havePreferredRenderAdapter = false;
   LUID preferredRenderAdapter = {};
   IDXGIFactory1 * factory = NULL;
-  HRESULT factoryStatus = CreateDXGIFactory(
+  HRESULT factoryStatus = CreateDXGIFactory1(
     __uuidof(IDXGIFactory1), (void **)&factory);
   if (FAILED(factoryStatus))
     DEBUG_ERROR_HR(factoryStatus, "CreateDXGIFactory Failed");
