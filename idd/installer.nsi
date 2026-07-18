@@ -51,7 +51,11 @@ InstallDir "$PROGRAMFILES64\Looking Glass (IDD)"
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${NSISDIR}\Contrib\Graphics\Wizard\nsis3-grey.bmp"
 !define /file VERSION "VERSION"
 
-!define MUI_WELCOMEPAGE_TEXT "You are about to install $(^Name) version ${VERSION}.$\r$\n$\r$\nWhen upgrading, you don't need to close your Looking Glass client, but should install the ${VERSION} client after installation is complete.$\r$\n$\r$\nPress Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "\
+  You are about to install $(^Name) version ${VERSION}.$\n$\n\
+  When upgrading, you don't need to close your Looking Glass client, \
+  but should install the ${VERSION} client after installation is complete.$\n$\n\
+  Press Next to continue."
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_WELCOME
@@ -65,16 +69,17 @@ InstallDir "$PROGRAMFILES64\Looking Glass (IDD)"
 
 
 Function ShowHelpMessage
-  !define line1 "Command line options:$\r$\n$\r$\n"
-  !define line2 "/S - silent install (must be uppercase)$\r$\n"
-  !define line3 "/D=path\to\install\folder - Change install directory$\r$\n"
-  !define line4 "   (Must be uppercase, the last option given and no quotes)$\r$\n$\r$\n"
 !ifdef IVSHMEM
-  !define line5 "/ivshmem - install the IVSHMEM driver$\r$\n"
+  !define ivshmem_line "/ivshmem - install the IVSHMEM driver$\n"
 !else
-  !define line5 ""
+  !define ivshmem_line ""
 !endif
-  MessageBox MB_OK "${line1}${line2}${line3}${line4}${line5}"
+  MessageBox MB_OK "\
+    Command line options:$\n\
+    /S - silent install (must be uppercase)$\n\
+    /D=path\to\install\folder - Change install directory$\n\
+       (Must be uppercase, the last option given and no quotes)$\n\
+    ${ivshmem_line}"
   Abort
 FunctionEnd
 
@@ -247,9 +252,14 @@ Function customGUIInit
 FunctionEnd
 
 ;Description text for selection of install items
-LangString DESC_Section0 ${LANG_ENGLISH} "Install the IVSHMEM driver. This driver is needed for Looking Glass to function. This will replace the driver if it is already installed."
+LangString DESC_Section0 ${LANG_ENGLISH} "\
+  Install the IVSHMEM driver. \
+  This driver is needed for Looking Glass to function. \
+  This will replace the driver if it is already installed."
 LangString DESC_Section1 ${LANG_ENGLISH} "Install the Indirect Display Driver (IDD)"
-LangString DESC_Section2 ${LANG_ENGLISH} "Disables the old Looking Glass host application. You can re-enable the service if you want to use it again, or uninstall it later."
+LangString DESC_Section2 ${LANG_ENGLISH} "\
+  Disables the old Looking Glass host application. \
+  You can re-enable the service if you want to use it again, or uninstall it later."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
 !ifdef IVSHMEM
