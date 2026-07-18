@@ -108,6 +108,7 @@ static bool getCompositor(char * dst, size_t size)
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
+  LG_LOCK_INIT(wlWm.pendingHDRLock);
   wlWm.desktop        = WL_Desktops[0];
   wlWm.hdrWhiteLevels = (LG_DSHDRWhiteLevels)
   {
@@ -211,6 +212,7 @@ static void waylandFree(void)
   waylandRegistryFree();
   waylandCursorFree();
   wl_display_disconnect(wlWm.display);
+  LG_LOCK_FREE(wlWm.pendingHDRLock);
 }
 
 static bool waylandGetProp(LG_DSProperty prop, void * ret)
@@ -223,7 +225,10 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 
   if (prop == LG_DS_NATIVE_HDR)
   {
-    *(bool *)ret = wlWm.cmCanDoHDR;
+    const bool active = atomic_load(&wlWm.hdrActive);
+    const bool requested = atomic_load(&wlWm.hdrRequested);
+    *(bool *)ret = active && requested &&
+      atomic_load(&wlWm.hdrActivePQ) == atomic_load(&wlWm.hdrRequestedPQ);
     return true;
   }
 

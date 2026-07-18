@@ -72,31 +72,32 @@ EGLDisplay waylandGetEGLDisplay(void)
 
 static void applyHDRPending(void)
 {
-  if (wlWm.pendingHDRApply)
+  enum WaylandHDRPendingAction action;
+  struct WaylandHDRParameters params;
+
+  LG_LOCK(wlWm.pendingHDRLock);
+  action = wlWm.pendingHDRAction;
+  params = wlWm.pendingHDR;
+  wlWm.pendingHDRAction = WAYLAND_HDR_PENDING_NONE;
+  LG_UNLOCK(wlWm.pendingHDRLock);
+
+  if (action == WAYLAND_HDR_PENDING_APPLY)
   {
-    wlWm.pendingHDRApply = false;
-    atomic_thread_fence(memory_order_acquire);
     waylandSetHDRImageDescription(
-        wlWm.pendingHDRDisplayPrimary, wlWm.pendingHDRWhitePoint,
-        wlWm.pendingHDRMaxDisplayLuminance,
-        wlWm.pendingHDRMinDisplayLuminance,
-        wlWm.pendingHDRMaxCLL,
-        wlWm.pendingHDRMaxFALL,
-        wlWm.pendingHDRPQ,
-        wlWm.pendingHDRMetadata);
+        params.displayPrimary, params.whitePoint,
+        params.maxDisplayLuminance,
+        params.minDisplayLuminance,
+        params.maxCLL,
+        params.maxFALL,
+        params.pq,
+        params.metadata);
   }
-  else if (wlWm.pendingHDRClear)
-  {
-    wlWm.pendingHDRClear = false;
+  else if (action == WAYLAND_HDR_PENDING_CLEAR)
     waylandClearHDRImageDescription();
-  }
 }
 
 void waylandClearHDRImageDescription(void)
 {
-  if (!wlWm.hdrActive)
-    return;
-
   if (wlWm.hdrImageCreator)
   {
     wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
@@ -107,15 +108,102 @@ void waylandClearHDRImageDescription(void)
     wp_image_description_v1_destroy(wlWm.hdrImageDesc);
     wlWm.hdrImageDesc = NULL;
   }
-  if (wlWm.colorSurface)
+  wlWm.hdrImageDescReady = false;
+
+  if (wlWm.colorSurface && atomic_load(&wlWm.hdrActive))
+    wp_color_management_surface_v1_unset_image_description(wlWm.colorSurface);
+
+  atomic_store(&wlWm.hdrActive, false);
+  DEBUG_INFO("HDR image description removed from surface");
+}
+
+static void hdrImageDescriptionReady(struct wp_image_description_v1 * desc)
+{
+  if (desc != wlWm.hdrImageDesc)
+    return;
+
+  if (!wlWm.colorSurface)
   {
-    wp_color_management_surface_v1_destroy(wlWm.colorSurface);
-    wlWm.colorSurface = NULL;
+    DEBUG_WARN("HDR image description became ready without a color surface");
+    wp_image_description_v1_destroy(desc);
+    wlWm.hdrImageDesc = NULL;
+    return;
   }
 
-  wlWm.hdrActive = false;
-  DEBUG_INFO("HDR image description cleared");
+  // Defer attachment until just after the current surface commit. EGL can
+  // then switch to native HDR for the next render, and that native frame and
+  // its image description become active in the same following commit.
+  wlWm.hdrImageDescReady = true;
+  DEBUG_INFO("HDR image description is ready (%s)",
+      wlWm.hdrImageDescPQ ? "PQ" : "scRGB");
+  app_invalidateWindow(true);
+  waylandStopWaitFrame();
 }
+
+static void activateReadyHDRImageDescription(void)
+{
+  if (!wlWm.hdrImageDesc || !wlWm.hdrImageDescReady || !wlWm.colorSurface)
+    return;
+
+  struct wp_image_description_v1 * desc = wlWm.hdrImageDesc;
+  wp_color_management_surface_v1_set_image_description(
+      wlWm.colorSurface, desc,
+      WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+  atomic_store(&wlWm.hdrActivePQ, wlWm.hdrImageDescPQ);
+  atomic_store(&wlWm.hdrActive, true);
+
+  // set_image_description has copy semantics; the protocol object is no
+  // longer needed once it has been attached to the pending surface state.
+  wlWm.hdrImageDesc = NULL;
+  wlWm.hdrImageDescReady = false;
+  wp_image_description_v1_destroy(desc);
+
+  DEBUG_INFO("HDR image description pending next surface commit (%s)",
+      atomic_load(&wlWm.hdrActivePQ) ? "PQ" : "scRGB");
+  app_invalidateWindow(true);
+  waylandStopWaitFrame();
+}
+
+static void hdrImageDescriptionFailed(void * data,
+    struct wp_image_description_v1 * desc, uint32_t cause, const char * message)
+{
+  (void)data;
+  if (desc != wlWm.hdrImageDesc)
+    return;
+
+  DEBUG_WARN("Failed to create HDR image description (cause:%u): %s",
+      cause, message);
+  wlWm.hdrImageDesc = NULL;
+  wlWm.hdrImageDescReady = false;
+  wp_image_description_v1_destroy(desc);
+  app_invalidateWindow(true);
+  waylandStopWaitFrame();
+}
+
+static void hdrImageDescriptionReadyV1(void * data,
+    struct wp_image_description_v1 * desc, uint32_t identity)
+{
+  (void)data;
+  (void)identity;
+  hdrImageDescriptionReady(desc);
+}
+
+static void hdrImageDescriptionReadyV2(void * data,
+    struct wp_image_description_v1 * desc, uint32_t identityHi,
+    uint32_t identityLo)
+{
+  (void)data;
+  (void)identityHi;
+  (void)identityLo;
+  hdrImageDescriptionReady(desc);
+}
+
+static const struct wp_image_description_v1_listener hdrImageDescListener =
+{
+  .failed = hdrImageDescriptionFailed,
+  .ready  = hdrImageDescriptionReadyV1,
+  .ready2 = hdrImageDescriptionReadyV2,
+};
 
 void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
 {
@@ -133,6 +221,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
   waylandPresentationFrame();
   applyHDRPending();
   swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
+  activateReadyHDRImageDescription();
 
   if (wlWm.needsResize)
   {
@@ -242,7 +331,8 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     return;
   }
 
-  // Clean up any previous description (allows re-application with updated metadata)
+  // Cancel only an in-flight replacement. The active surface description is
+  // retained until this replacement is ready.
   if (wlWm.hdrImageCreator)
   {
     wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
@@ -253,13 +343,26 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     wp_image_description_v1_destroy(wlWm.hdrImageDesc);
     wlWm.hdrImageDesc = NULL;
   }
-  if (wlWm.colorSurface)
+  wlWm.hdrImageDescReady = false;
+  // If the encoding changed, remove the old description in the same surface
+  // commit that presents the software-mapped transition frame.
+  if (atomic_load(&wlWm.hdrActive) &&
+      atomic_load(&wlWm.hdrActivePQ) != hdrPQ)
   {
-    wp_color_management_surface_v1_destroy(wlWm.colorSurface);
-    wlWm.colorSurface = NULL;
+    wp_color_management_surface_v1_unset_image_description(wlWm.colorSurface);
+    atomic_store(&wlWm.hdrActive, false);
   }
 
-  wlWm.hdrActive = false;
+  if (!wlWm.colorSurface)
+  {
+    wlWm.colorSurface =
+      wp_color_manager_v1_get_surface(wlWm.colorManager, wlWm.surface);
+    if (!wlWm.colorSurface)
+    {
+      DEBUG_WARN("Failed to get color management surface");
+      return;
+    }
+  }
 
   wlWm.hdrImageCreator =
     wp_color_manager_v1_create_parametric_creator(wlWm.colorManager);
@@ -332,22 +435,12 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     return;
   }
 
-  wlWm.colorSurface =
-    wp_color_manager_v1_get_surface(wlWm.colorManager, wlWm.surface);
-  if (!wlWm.colorSurface)
-  {
-    DEBUG_WARN("Failed to get color management surface");
-    wp_image_description_v1_destroy(wlWm.hdrImageDesc);
-    wlWm.hdrImageDesc = NULL;
-    return;
-  }
+  wlWm.hdrImageDescPQ = hdrPQ;
+  wlWm.hdrImageDescReady = false;
+  wp_image_description_v1_add_listener(
+      wlWm.hdrImageDesc, &hdrImageDescListener, NULL);
 
-  wp_color_management_surface_v1_set_image_description(
-      wlWm.colorSurface, wlWm.hdrImageDesc,
-      WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
-
-  wlWm.hdrActive = true;
-  DEBUG_INFO("HDR image description set on surface (%s, %s, "
+  DEBUG_INFO("HDR image description requested (%s, %s, "
       "maxLum:%u cd/m² minLum:%u (0.0001 cd/m²) maxCLL:%u maxFALL:%u)",
       hdrPQ ? "PQ" : "scRGB", hdrPQ ? "BT.2020" : "sRGB",
       maxDisplayLuminance, minDisplayLuminance, maxCLL, maxFALL);
@@ -369,31 +462,31 @@ bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
   if (!hdrPQ && !wlWm.cmHasPrimariesSRGB)
     return false;
 
-  wlWm.pendingHDRPQ = hdrPQ;
-  wlWm.pendingHDRMetadata = hdrMetadata;
+  atomic_store(&wlWm.hdrRequestedPQ, hdrPQ);
+  atomic_store(&wlWm.hdrRequested, true);
 
-  // Write all metadata before setting the apply flag to ensure the
-  // render thread sees the complete HDR metadata when it observes
-  // pendingHDRApply == true.
-  memcpy(wlWm.pendingHDRDisplayPrimary, displayPrimary,
-      sizeof(wlWm.pendingHDRDisplayPrimary));
-  memcpy(wlWm.pendingHDRWhitePoint, whitePoint,
-      sizeof(wlWm.pendingHDRWhitePoint));
-  wlWm.pendingHDRMaxDisplayLuminance = maxDisplayLuminance;
-  wlWm.pendingHDRMinDisplayLuminance = minDisplayLuminance;
-  wlWm.pendingHDRMaxCLL              = maxCLL;
-  wlWm.pendingHDRMaxFALL             = maxFALL;
-
-  wlWm.pendingHDRClear = false;
-  atomic_thread_fence(memory_order_release);
-  wlWm.pendingHDRApply = true;
+  LG_LOCK(wlWm.pendingHDRLock);
+  wlWm.pendingHDR.pq       = hdrPQ;
+  wlWm.pendingHDR.metadata = hdrMetadata;
+  memcpy(wlWm.pendingHDR.displayPrimary, displayPrimary,
+      sizeof(wlWm.pendingHDR.displayPrimary));
+  memcpy(wlWm.pendingHDR.whitePoint, whitePoint,
+      sizeof(wlWm.pendingHDR.whitePoint));
+  wlWm.pendingHDR.maxDisplayLuminance = maxDisplayLuminance;
+  wlWm.pendingHDR.minDisplayLuminance = minDisplayLuminance;
+  wlWm.pendingHDR.maxCLL              = maxCLL;
+  wlWm.pendingHDR.maxFALL             = maxFALL;
+  wlWm.pendingHDRAction = WAYLAND_HDR_PENDING_APPLY;
+  LG_UNLOCK(wlWm.pendingHDRLock);
   return true;
 }
 
 void waylandRequestClearHDR(void)
 {
-  wlWm.pendingHDRClear = true;
-  wlWm.pendingHDRApply = false;
+  atomic_store(&wlWm.hdrRequested, false);
+  LG_LOCK(wlWm.pendingHDRLock);
+  wlWm.pendingHDRAction = WAYLAND_HDR_PENDING_CLEAR;
+  LG_UNLOCK(wlWm.pendingHDRLock);
 }
 
 #ifdef ENABLE_OPENGL

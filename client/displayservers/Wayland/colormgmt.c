@@ -105,6 +105,23 @@ void waylandColorMgmtFree(void)
   if (!wlWm.colorManager)
     return;
 
+  if (wlWm.hdrImageCreator)
+  {
+    wp_image_description_creator_params_v1_destroy(wlWm.hdrImageCreator);
+    wlWm.hdrImageCreator = NULL;
+  }
+  if (wlWm.hdrImageDesc)
+  {
+    wp_image_description_v1_destroy(wlWm.hdrImageDesc);
+    wlWm.hdrImageDesc = NULL;
+  }
+  wlWm.hdrImageDescReady = false;
+  if (wlWm.colorSurface)
+  {
+    wp_color_management_surface_v1_destroy(wlWm.colorSurface);
+    wlWm.colorSurface = NULL;
+  }
+
   wp_color_manager_v1_destroy(wlWm.colorManager);
   wlWm.colorManager = NULL;
 }

@@ -91,6 +91,25 @@ struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
 
+enum WaylandHDRPendingAction
+{
+  WAYLAND_HDR_PENDING_NONE,
+  WAYLAND_HDR_PENDING_APPLY,
+  WAYLAND_HDR_PENDING_CLEAR,
+};
+
+struct WaylandHDRParameters
+{
+  bool     pq;
+  bool     metadata;
+  uint16_t displayPrimary[3][2];
+  uint16_t whitePoint[2];
+  uint32_t maxDisplayLuminance;
+  uint32_t minDisplayLuminance;
+  uint32_t maxCLL;
+  uint32_t maxFALL;
+};
+
 struct WaylandDSState
 {
   bool pointerGrabbed;
@@ -189,8 +208,14 @@ struct WaylandDSState
   struct wp_image_description_v1                * hdrImageDesc;
   struct wp_image_description_creator_params_v1 * hdrImageCreator;
 
-  // Set to true when an HDR image description is active on the surface
-  bool hdrActive;
+  // Active and requested encodings are atomic because getProp runs on the
+  // renderer while description events are dispatched by Wayland.
+  _Atomic(bool) hdrActive;
+  _Atomic(bool) hdrActivePQ;
+  _Atomic(bool) hdrRequested;
+  _Atomic(bool) hdrRequestedPQ;
+  bool          hdrImageDescPQ;
+  bool          hdrImageDescReady;
 
   // wp_color_manager_v1 feature advertisement tracking.
   // Set to true after the done event for the color-manager has been received
@@ -215,19 +240,12 @@ struct WaylandDSState
   // set by the active desktop backend during shellInit
   void * xdgToplevel;
 
-  // Pending HDR format to apply (set by frame thread, applied in swap buffers).
-  // pendingHDRApply and pendingHDRClear are accessed from multiple threads
-  // without a lock, so they must be atomic.
-  _Atomic(bool) pendingHDRApply;
-  _Atomic(bool) pendingHDRClear;
-  bool          pendingHDRPQ;
-  bool          pendingHDRMetadata;
-  uint16_t      pendingHDRDisplayPrimary[3][2];
-  uint16_t      pendingHDRWhitePoint[2];
-  uint32_t      pendingHDRMaxDisplayLuminance;
-  uint32_t      pendingHDRMinDisplayLuminance;
-  uint32_t      pendingHDRMaxCLL;
-  uint32_t      pendingHDRMaxFALL;
+  // Pending HDR format is published by the frame thread and consumed by the
+  // render thread. Keep the action and all metadata in one locked snapshot so
+  // a replacement request cannot tear a request already being consumed.
+  LG_Lock                      pendingHDRLock;
+  enum WaylandHDRPendingAction pendingHDRAction;
+  struct WaylandHDRParameters  pendingHDR;
 
   LGEvent * frameEvent;
 
