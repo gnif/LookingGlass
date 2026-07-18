@@ -19,6 +19,7 @@
  */
 
 !define MUI_CUSTOMFUNCTION_GUIINIT customGUIInit
+!define MUI_CUSTOMFUNCTION_ABORT   customGUIAbort
 
 ;Include
 !include "MUI2.nsh"
@@ -58,6 +59,9 @@ InstallDir "$PROGRAMFILES64\Looking Glass (host)"
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_WELCOME
+
+Page custom IddWarningLoad IddWarningUnload
+
 !insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
@@ -288,6 +292,87 @@ Function customGUIInit
     SectionSetText  ${Section7} "Uninstall LG IDD"
     SectionSetFlags ${Section7} ${SF_SELECTED}
   ${EndUnless}
+FunctionEnd
+
+LangString IDD_WARN_TITLE ${LANG_ENGLISH} "Looking Glass Indirect Display Driver"
+LangString IDD_WARN_SUBTITLE ${LANG_ENGLISH} "Are you aware that it exists?"
+
+LangString IDD_NOTICE_1 ${LANG_ENGLISH} "\
+  Starting in Looking Glass B8 release candidates, a new Indirect Display Driver (IDD) is now available. \
+  Henceforth, this will be the primary way of acquiring video from Windows guests."
+
+LangString IDD_NOTICE_2 ${LANG_ENGLISH} "\
+  The IDD supports the following new features absent from the host application:$\n\
+  • Acting as a true display in Windows and rendering directly into shared memory, bypassing    \
+    any need for video capture and the associated overhead;$\n\
+  • Running without a display output or a dummy plug attached;$\n\
+  • Running on muxless laptops without hacky third-party IDDs;$\n\
+  • Automatically resizing the Windows desktop to match the client viewport;$\n\
+  • Acting as a display output for virtual machines without a GPU; and$\n\
+  • High Dynamic Range (HDR) support."
+
+LangString IDD_NOTICE_3 ${LANG_ENGLISH} "The host application is no longer recommended for users who can use the IDD."
+
+LangString IDD_NOTICE_4 ${LANG_ENGLISH} "Download the Looking Glass IDD here:"
+
+LangString IDD_NOTICE_5 ${LANG_ENGLISH} "\
+  Only continue installation if the IDD doesn't work or \
+  directed to do so by a developer."
+
+Var IS_IDD_PAGE
+
+Function IddWarningLoad
+  !insertmacro MUI_HEADER_TEXT $(IDD_WARN_TITLE) $(IDD_WARN_SUBTITLE)
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+      Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0 0 100% 20u $(IDD_NOTICE_1)
+  Pop $0
+
+  ${NSD_CreateLabel} 0 20u 100% 68u $(IDD_NOTICE_2)
+  Pop $0
+
+  ${NSD_CreateLabel} 0 88u 100% 12u $(IDD_NOTICE_3)
+  Pop $0
+
+  ${NSD_CreateLabel} 0 100u 100% 8u $(IDD_NOTICE_4)
+  Pop $0
+
+  ${NSD_CreateLink} 0 108u 100% 12u "https://looking-glass.io/downloads"
+  Pop $0
+  ${NSD_OnClick} $0 OpenDownload
+
+  ${NSD_CreateLabel} 0 120u 100% 12u $(IDD_NOTICE_5)
+  Pop $0
+  SetCtlColors $0 0xFF0000 transparent
+
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 ${WM_SETTEXT} "0" "STR:Continue"
+
+  GetDlgItem $0 $HWNDPARENT 2
+  SendMessage $0 ${WM_SETTEXT} "0" "STR:Use IDD"
+
+  StrCpy $IS_IDD_PAGE 1
+
+  nsDialogs::Show
+FunctionEnd
+
+Function IddWarningUnload
+  StrCpy $IS_IDD_PAGE 0
+FunctionEnd
+
+Function OpenDownload
+  ExecShell "open" "https://looking-glass.io/downloads"
+FunctionEnd
+
+Function customGUIAbort
+  ${If} $IS_IDD_PAGE == 1
+    Call OpenDownload
+  ${EndIf}
 FunctionEnd
 
 ;Description text for selection of install items
