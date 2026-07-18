@@ -883,7 +883,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
   this->hdr           = frame->flags & FRAME_FLAG_HDR;
   this->hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
   this->sdrWhiteLevel = frame->sdrWhiteLevel ?
-    (float)frame->sdrWhiteLevel : (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+    frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
   if (this->hdr && this->hdrPQ)
     lgComputeColorMatrix(this);

@@ -32,7 +32,7 @@
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
-#define KVMFR_SDR_WHITE_LEVEL_DEFAULT 203u
+#define KVMFR_SDR_WHITE_LEVEL_DEFAULT 203
 
 #define KVMFR_MAX_DAMAGE_RECTS 64
 
