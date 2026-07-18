@@ -123,18 +123,10 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
   dst.hdr    = true;
   dst.hdrPQ  = true;
 
-  // Explicitly propagate HDR static metadata so it survives post-processing.
-  // Do not rely on the caller's copy semantics in CPostProcessor::Configure().
-  // The shader rotates the gamut from BT.709 to BT.2020, so advertise BT.2020
-  // mastering primaries here rather than forwarding the source's BT.709 set
-  // (in 0.00002 units) - otherwise consumers see PQ/BT.2020 content tagged
-  // with BT.709 primaries.
-  dst.displayPrimary[0][0] = 35400; // Rx
-  dst.displayPrimary[0][1] = 14600; // Ry
-  dst.displayPrimary[1][0] =  8500; // Gx
-  dst.displayPrimary[1][1] = 39850; // Gy
-  dst.displayPrimary[2][0] =  6550; // Bx
-  dst.displayPrimary[2][1] =  2300; // By
+  // Gamut conversion changes the signal's container primaries to BT.2020, but
+  // does not change the mastering display chromaticities described by ST 2086.
+  dst.hdrMetadata = src.hdrMetadata;
+  memcpy(dst.displayPrimary, src.displayPrimary, sizeof(dst.displayPrimary));
   memcpy(dst.whitePoint    , src.whitePoint    , sizeof(dst.whitePoint    ));
   dst.maxDisplayLuminance       = src.maxDisplayLuminance;
   dst.minDisplayLuminance       = src.minDisplayLuminance;

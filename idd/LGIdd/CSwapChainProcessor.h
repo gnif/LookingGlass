@@ -75,6 +75,14 @@ private:
   unsigned m_nbPendingDirtyRects = 0;
   bool     m_hasPendingDamage = true;
 
+#ifdef HAS_IDDCX_110
+  // The per-frame metadata stream can select the monitor default, provide a
+  // replacement block, or retain the selection from the previous frame.
+  bool                 m_useDefaultHDRMetadata = true;
+  bool                 m_hasNewHDRMetadata     = false;
+  IDDCX_HDR10_METADATA m_newHDRMetadata        = {};
+#endif
+
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();
   bool SwapChainThreadCore();
@@ -87,6 +95,10 @@ private:
     CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
   void AccumulateFrameDamage(const RECT * dirtyRects, unsigned nbDirtyRects);
   void SetFullPendingDamage();
+#ifdef HAS_IDDCX_110
+  void UpdateHDRMetadata(const IDDCX_METADATA2& metadata);
+#endif
+  bool GetHDRMetadata(D12FrameFormat& format) const;
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel);
 

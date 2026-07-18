@@ -17,7 +17,20 @@
 #include "effect/CHDR16to10Effect.h"
 #include "effect/CRGB24Effect.h"
 
+#include <cstring>
 #include <utility>
+
+static void CopyHDRMetadata(D12FrameFormat& dst, const D12FrameFormat& src)
+{
+  dst.hdrMetadata   = src.hdrMetadata;
+  dst.sdrWhiteLevel = src.sdrWhiteLevel;
+  std::memcpy(dst.displayPrimary, src.displayPrimary, sizeof(dst.displayPrimary));
+  std::memcpy(dst.whitePoint, src.whitePoint, sizeof(dst.whitePoint));
+  dst.maxDisplayLuminance       = src.maxDisplayLuminance;
+  dst.minDisplayLuminance       = src.minDisplayLuminance;
+  dst.maxContentLightLevel      = src.maxContentLightLevel;
+  dst.maxFrameAverageLightLevel = src.maxFrameAverageLightLevel;
+}
 
 bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device)
 {
@@ -73,9 +86,14 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
       srcFormat.width         == m_srcFormat.width       &&
       srcFormat.height        == m_srcFormat.height      &&
       srcFormat.hdr           == m_srcFormat.hdr         &&
-      srcFormat.hdrPQ         == m_srcFormat.hdrPQ       &&
-      srcFormat.sdrWhiteLevel == m_srcFormat.sdrWhiteLevel)
+      srcFormat.hdrPQ         == m_srcFormat.hdrPQ)
+  {
+    // Static HDR metadata may change independently of the resource format.
+    // Propagate it without recreating textures or post-processing state.
+    CopyHDRMetadata(m_srcFormat, srcFormat);
+    CopyHDRMetadata(m_dstFormat, srcFormat);
     return true;
+  }
 
   D12FrameFormat oldDst = m_dstFormat;
   D12FrameFormat cur = srcFormat;
