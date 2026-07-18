@@ -29,6 +29,7 @@
 #include <X11/Xatom.h>
 
 #include "app.h"
+#include "common/array.h"
 #include "common/debug.h"
 
 struct X11ClipboardState
@@ -176,14 +177,15 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     targets[1] = x11cb.aTypes[x11cb.type];
 
     XChangeProperty(
-        e.display,
-        e.requestor,
-        e.property,
-        XA_ATOM,
-        32,
-        PropModeReplace,
-        (unsigned char*)targets,
-        sizeof(targets) / sizeof(Atom));
+      e.display,
+      e.requestor,
+      e.property,
+      XA_ATOM,
+      32,
+      PropModeReplace,
+      (unsigned char*)targets,
+      ARRAY_LENGTH(targets)
+    );
 
     goto send;
   }
