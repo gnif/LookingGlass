@@ -51,8 +51,9 @@
 #include "postprocess.h"
 #include "util.h"
 
-#define MAX_BUFFER_AGE       3
-#define DESKTOP_DAMAGE_COUNT 4
+#define MAX_BUFFER_AGE        3
+#define DESKTOP_DAMAGE_COUNT  4
+#define DESKTOP_DAMAGE_MARGIN 1
 #define MAX_ACCUMULATED_DAMAGE ((KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
 #define IDX_AGO(counter, i, total) (((counter) + (total) - (i)) % (total))
 
@@ -1094,6 +1095,52 @@ inline static EGLint egl_bufferAge(struct Inst * this)
   return result;
 }
 
+static FrameDamageRect egl_expandDesktopDamage(
+    const struct Inst * this, const FrameDamageRect * rect)
+{
+  const uint32_t x = rect->x > DESKTOP_DAMAGE_MARGIN ?
+    rect->x - DESKTOP_DAMAGE_MARGIN : 0;
+  const uint32_t y = rect->y > DESKTOP_DAMAGE_MARGIN ?
+    rect->y - DESKTOP_DAMAGE_MARGIN : 0;
+  const uint32_t right = (uint32_t)min((uint64_t)this->format.frameWidth,
+    (uint64_t)rect->x + rect->width + DESKTOP_DAMAGE_MARGIN);
+  const uint32_t bottom = (uint32_t)min((uint64_t)this->format.frameHeight,
+    (uint64_t)rect->y + rect->height + DESKTOP_DAMAGE_MARGIN);
+
+  return (FrameDamageRect) {
+    .x      = x,
+    .y      = y,
+    .width  = right  > x ? right  - x : 0,
+    .height = bottom > y ? bottom - y : 0,
+  };
+}
+
+static int egl_clipSurfaceDamage(
+    struct Rect * damage, int count, int width, int height)
+{
+  int out = 0;
+  for (int i = 0; i < count; ++i)
+  {
+    const int64_t x2 = (int64_t)damage[i].x + damage[i].w;
+    const int64_t y2 = (int64_t)damage[i].y + damage[i].h;
+    const int x1 = clamp(damage[i].x, 0, width);
+    const int y1 = clamp(damage[i].y, 0, height);
+    const int right  = (int)clamp(x2, 0, width);
+    const int bottom = (int)clamp(y2, 0, height);
+    if (right <= x1 || bottom <= y1)
+      continue;
+
+    damage[out++] = (struct Rect) {
+      .x = x1,
+      .y = y1,
+      .w = right  - x1,
+      .h = bottom - y1,
+    };
+  }
+
+  return out;
+}
+
 inline static void renderLetterBox(struct Inst * this)
 {
   bool hLB = this->destRect.x > 0;
@@ -1170,14 +1217,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
         for (int j = 0; j < damage->count; ++j)
         {
-          struct FrameDamageRect * rect = damage->rects + j;
-          int x = rect->x > 0 ? rect->x - 1 : 0;
-          int y = rect->y > 0 ? rect->y - 1 : 0;
-          accumulated->rects[accumulated->count++] = (struct FrameDamageRect) {
-            .x = x, .y = y,
-            .width  = min(this->format.frameWidth  - x, rect->width  + 2),
-            .height = min(this->format.frameHeight - y, rect->height + 2),
-          };
+          const FrameDamageRect rect =
+            egl_expandDesktopDamage(this, damage->rects + j);
+          if (rect.width && rect.height)
+            accumulated->rects[accumulated->count++] = rect;
         }
       }
     }
@@ -1297,11 +1340,20 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
           this->width, this->height);
 
       for (int i = 0; i < desktopDamage->count; ++i)
-        damage[damageIdx++] = egl_desktopToScreen(matrix, desktopDamage->rects + i);
+      {
+        const FrameDamageRect rect =
+          egl_expandDesktopDamage(this, desktopDamage->rects + i);
+        if (rect.width && rect.height)
+          damage[damageIdx++] = egl_desktopToScreen(matrix, &rect);
+      }
     }
   }
   else
     damageIdx = 0;
+
+  if (damageIdx > 0)
+    damageIdx = egl_clipSurfaceDamage(
+      damage, damageIdx, this->width, this->height);
 
   this->hadOverlay = hasOverlay;
   this->cursorLast = cursorState;
