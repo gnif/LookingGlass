@@ -431,8 +431,11 @@ int main_cursorThread(void * unused)
     }
 
     KVMFRCursor * tmp = (KVMFRCursor *)msg.mem;
-    const int neededSize = sizeof(*tmp) +
-      (msg.udata & CURSOR_FLAG_SHAPE ? tmp->height * tmp->pitch : 0);
+    const int shapeSize = msg.udata & CURSOR_FLAG_SHAPE ?
+      tmp->height * tmp->pitch : 0;
+    const int neededSize = sizeof(*tmp) + shapeSize +
+      (msg.udata & CURSOR_FLAG_COLOR_TRANSFORM ?
+        sizeof(KVMFRColorTransform) : 0);
 
     if (cursor && neededSize > cursorSize)
     {
@@ -488,6 +491,15 @@ int main_cursorThread(void * unused)
       }
     }
 
+    if ((msg.udata & CURSOR_FLAG_COLOR_TRANSFORM) &&
+        g_state.lgr->ops.onMouseColorTransform)
+    {
+      const KVMFRColorTransform * transform =
+        (const KVMFRColorTransform *)((const uint8_t *)(cursor + 1) +
+          shapeSize);
+      g_state.lgr->ops.onMouseColorTransform(g_state.lgr, transform);
+    }
+
     if (msg.udata & CURSOR_FLAG_POSITION)
     {
       bool valid = g_cursor.guest.valid;
@@ -517,7 +529,9 @@ int main_cursorThread(void * unused)
       g_cursor.guest.hy
     );
 
-    if (g_params.mouseRedraw && g_cursor.guest.visible && !g_state.stopVideo)
+    if ((g_params.mouseRedraw ||
+         (msg.udata & CURSOR_FLAG_COLOR_TRANSFORM)) &&
+        g_cursor.guest.visible && !g_state.stopVideo)
       lgSignalEvent(g_state.frameEvent);
   }
 

@@ -28,6 +28,8 @@
 #include <IddCx.h>
 #include <avrt.h>
 #include <wrl.h>
+#include <memory>
+#include <utility>
 
 #include "CDebug.h"
 #include "CIndirectDeviceContext.h"
@@ -192,8 +194,51 @@ NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
 
 NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMMARAMP* inArgs)
 {
-  UNREFERENCED_PARAMETER(monitor);
-  UNREFERENCED_PARAMETER(inArgs);
+  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  auto* ctx     = wrapper->context->GetDeviceContext();
+
+  if (inArgs->Type == IDDCX_GAMMARAMP_TYPE_DEFAULT)
+  {
+    ctx->SetColorTransform(nullptr);
+    DEBUG_INFO("Display color transform reset to default");
+    return STATUS_SUCCESS;
+  }
+
+  if (inArgs->Type != IDDCX_GAMMARAMP_TYPE_3x4_COLORSPACE_TRANSFORM)
+  {
+    DEBUG_WARN("Unsupported gamma ramp type %u", inArgs->Type);
+    return STATUS_NOT_SUPPORTED;
+  }
+
+  if (!inArgs->pGammaRampData ||
+      inArgs->GammaRampSizeInBytes <
+        sizeof(IDDCX_GAMMARAMP_3X4_COLORSPACE_TRANSFORM))
+  {
+    DEBUG_ERROR("Invalid 3x4 color transform buffer (%u bytes)",
+      inArgs->GammaRampSizeInBytes);
+    return STATUS_INVALID_PARAMETER;
+  }
+
+  const auto* input = static_cast<
+    const IDDCX_GAMMARAMP_3X4_COLORSPACE_TRANSFORM*>(
+      inArgs->pGammaRampData);
+  auto transform = std::make_shared<D12ColorTransform>();
+  transform->matrixEnabled = !!input->MatrixEnabled;
+  transform->scalar        = input->ScalarMultiplier;
+  transform->lutEnabled    = !!input->LutEnabled;
+  memcpy(transform->matrix, input->ColorMatrix3x4,
+    sizeof(transform->matrix));
+  for (unsigned i = 0; i < 4096; ++i)
+  {
+    transform->lut[i][0] = input->LookupTable1D[i].Red;
+    transform->lut[i][1] = input->LookupTable1D[i].Green;
+    transform->lut[i][2] = input->LookupTable1D[i].Blue;
+    transform->lut[i][3] = 1.0f;
+  }
+
+  ctx->SetColorTransform(std::move(transform));
+  DEBUG_INFO("Display color transform updated (matrix:%d lut:%d)",
+    input->MatrixEnabled, input->LutEnabled);
   return STATUS_SUCCESS;
 }
 
