@@ -62,6 +62,7 @@ struct EGL_PostProcess
     int desktopWidth, desktopHeight;
     unsigned int targetX, targetY;
     bool useDMA;
+    bool hdrPQ;
     unsigned int outputX, outputY;
     bool fullFrame;
   }
@@ -705,7 +706,7 @@ bool egl_postProcessNeedsFullFrame(EGL_PostProcess * this)
 static bool configMatches(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
     unsigned int inputX, unsigned int inputY,
     int desktopWidth, int desktopHeight,
-    unsigned int targetX, unsigned int targetY, bool useDMA)
+    unsigned int targetX, unsigned int targetY, bool useDMA, bool hdrPQ)
 {
   return
     this->config.valid                         &&
@@ -716,13 +717,14 @@ static bool configMatches(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
     this->config.desktopHeight == desktopHeight &&
     this->config.targetX       == targetX      &&
     this->config.targetY       == targetY      &&
-    this->config.useDMA        == useDMA;
+    this->config.useDMA        == useDMA       &&
+    this->config.hdrPQ         == hdrPQ;
 }
 
 static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
     unsigned int inputX, unsigned int inputY,
     int desktopWidth, int desktopHeight,
-    unsigned int targetX, unsigned int targetY, bool useDMA)
+    unsigned int targetX, unsigned int targetY, bool useDMA, bool hdrPQ)
 {
   this->config.valid = false;
   vector_clear(&this->activeFilters);
@@ -744,6 +746,13 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
   for(const Vector ** filters = lists; *filters; ++filters)
     vector_forEach(filter, *filters)
     {
+      // These filters operate on their input signal directly. PQ must be
+      // decoded to linear light before resampling or enhancement, and none of
+      // the current external filters declares such support. Keep only the
+      // mandatory format-conversion filters in a PQ chain.
+      if (hdrPQ && filter->ops.type != EGL_FILTER_TYPE_INTERNAL)
+        continue;
+
       egl_filterSetOutputResHint(filter, targetX, targetY);
 
       if (!egl_filterSetup(filter, outputFormat, outputX, outputY,
@@ -777,6 +786,7 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
   this->config.targetX       = targetX;
   this->config.targetY       = targetY;
   this->config.useDMA        = useDMA;
+  this->config.hdrPQ         = hdrPQ;
   this->config.outputX       = outputX;
   this->config.outputY       = outputY;
   this->config.fullFrame     = fullFrame;
@@ -786,7 +796,7 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
 
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
-    unsigned int targetX, unsigned int targetY, bool useDMA)
+    unsigned int targetX, unsigned int targetY, bool useDMA, bool hdrPQ)
 {
   if (targetX == 0 && targetY == 0)
     DEBUG_FATAL("targetX || targetY == 0");
@@ -802,7 +812,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     atomic_load_explicit(&this->modified, memory_order_acquire);
   const bool reconfigure = modified ||
     !configMatches(this, pixFmt, inputX, inputY,
-        desktopWidth, desktopHeight, targetX, targetY, useDMA);
+        desktopWidth, desktopHeight, targetX, targetY, useDMA, hdrPQ);
 
   if (reconfigure)
   {
@@ -811,7 +821,7 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
           &this->modified, false, memory_order_acq_rel);
 
     if (!configureChain(this, pixFmt, inputX, inputY,
-          desktopWidth, desktopHeight, targetX, targetY, useDMA))
+          desktopWidth, desktopHeight, targetX, targetY, useDMA, hdrPQ))
     {
       egl_postProcessInvalidate(this);
       return false;

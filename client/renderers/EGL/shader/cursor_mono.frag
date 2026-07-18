@@ -9,7 +9,7 @@ out vec4 color;
 
 uniform sampler2D sampler1;
 uniform float     scale;
-uniform bool      mapSDRtoPQ;
+uniform int       wireTransfer; // 0: sRGB, 1: scRGB, 2: PQ
 uniform float     sdrWhiteLevel;
 
 void main()
@@ -30,11 +30,13 @@ void main()
   if (tmp.rgb == vec3(0.0, 0.0, 0.0))
     discard;
 
-  if (mapSDRtoPQ)
+  if (wireTransfer == 2)
   {
     vec3 linear = bt709to2020(srgb2lin(tmp.rgb));
     tmp.rgb = lin2pq(linear * (sdrWhiteLevel / 10000.0));
   }
+  else if (wireTransfer == 1)
+    tmp.rgb = srgb2lin(tmp.rgb) * (sdrWhiteLevel / 80.0);
 
   color = tmp;
 }

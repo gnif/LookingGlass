@@ -26,6 +26,27 @@ uniform bool  mapHDRtoSDR;
 uniform float mapHDRGain;
 uniform bool  mapHDRPQ;
 
+vec4 samplePQLinear(vec2 coord)
+{
+  ivec2 size = textureSize(sampler1, 0);
+  vec2 samplePos = coord * vec2(size) - 0.5;
+  ivec2 base = ivec2(floor(samplePos));
+  vec2 f = fract(samplePos);
+  ivec2 limit = size - ivec2(1);
+
+  vec3 c00 = pq2lin(texelFetch(sampler1,
+      clamp(base, ivec2(0), limit), 0).rgb, 1.0);
+  vec3 c10 = pq2lin(texelFetch(sampler1,
+      clamp(base + ivec2(1, 0), ivec2(0), limit), 0).rgb, 1.0);
+  vec3 c01 = pq2lin(texelFetch(sampler1,
+      clamp(base + ivec2(0, 1), ivec2(0), limit), 0).rgb, 1.0);
+  vec3 c11 = pq2lin(texelFetch(sampler1,
+      clamp(base + ivec2(1, 1), ivec2(0), limit), 0).rgb, 1.0);
+
+  vec3 linear = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+  return vec4(lin2pq(max(linear, 0.0)), 1.0);
+}
+
 void main()
 {
   switch (scaleAlgo)
@@ -39,7 +60,7 @@ void main()
 
     case EGL_SCALE_LINEAR:
     {
-      color = texture(sampler1, uv);
+      color = isHDR && mapHDRPQ ? samplePQLinear(uv) : texture(sampler1, uv);
       break;
     }
   }
@@ -47,10 +68,13 @@ void main()
   if (isHDR && mapHDRtoSDR)
     color.rgb = mapToSDR(color.rgb, mapHDRGain, mapHDRPQ);
 
-  if (cbMode > 0)
+  // The legacy effects are defined for an SDR signal. Do not apply them to a
+  // native HDR signal where their nonlinear operations would alter luminance
+  // and gamut incorrectly. They remain available after HDR-to-SDR mapping.
+  if (cbMode > 0 && (!isHDR || mapHDRtoSDR))
     color = cbTransform(color, cbMode);
 
-  if (nvGain > 0.0)
+  if (nvGain > 0.0 && (!isHDR || mapHDRtoSDR))
   {
     highp float lumi = (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b);
     if (lumi < 0.5)

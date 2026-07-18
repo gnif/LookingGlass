@@ -501,7 +501,12 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
     float sdrWhiteLevel)
 {
+  egl_cursorSetSDRWhiteLevel(cursor, sdrWhiteLevel);
+  atomic_store(&cursor->wireTransfer, !hdrActive ? 0 : (hdrPQ ? 2 : 1));
+}
+
+void egl_cursorSetSDRWhiteLevel(EGL_Cursor * cursor, float sdrWhiteLevel)
+{
   atomic_store(&cursor->sdrWhiteLevel, sdrWhiteLevel > 0.0f ?
       sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT);
-  atomic_store(&cursor->wireTransfer, !hdrActive ? 0 : (hdrPQ ? 2 : 1));
 }

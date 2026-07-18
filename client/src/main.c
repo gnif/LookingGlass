@@ -459,8 +459,8 @@ int main_cursorThread(void * unused)
     memcpy(cursor, msg.mem, neededSize);
     lgmpClientMessageDone(g_state.pointerQueue);
 
-    g_cursor.guest.visible =
-      msg.udata & CURSOR_FLAG_VISIBLE;
+    if (msg.udata & CURSOR_FLAG_VISIBLE_VALID)
+      g_cursor.guest.visible = msg.udata & CURSOR_FLAG_VISIBLE;
 
     if (msg.udata & CURSOR_FLAG_SHAPE)
     {
@@ -499,6 +499,11 @@ int main_cursorThread(void * unused)
           shapeSize);
       g_state.lgr->ops.onMouseColorTransform(g_state.lgr, transform);
     }
+
+    if ((msg.udata & CURSOR_FLAG_VISIBLE_VALID) &&
+        cursor->sdrWhiteLevel && g_state.lgr->ops.onMouseWhiteLevel)
+      g_state.lgr->ops.onMouseWhiteLevel(
+          g_state.lgr, cursor->sdrWhiteLevel);
 
     if (msg.udata & CURSOR_FLAG_POSITION)
     {
@@ -764,11 +769,28 @@ int main_frameThread(void * unused)
         LG_UNLOCK(g_state.lgrLock);
         break;
       }
+
+      // Renderers which expose HDR surface capabilities must match the wire
+      // encoding. Legacy renderers do not advertise this interface, so retain
+      // their existing display-server behaviour rather than silently forcing
+      // them through a conversion path they may not implement.
+      const bool rendererSupportsNativeHDR = !lgrFormat.hdr ||
+        !g_state.lgr->ops.supports || RENDERER(supports,
+          lgrFormat.hdrPQ ? LG_SUPPORTS_HDR_PQ : LG_SUPPORTS_HDR_SCRGB);
       LG_UNLOCK(g_state.lgrLock);
 
       if (g_state.ds->setHDRImageDescription)
       {
-        if (!g_state.ds->setHDRImageDescription(&lgrFormat))
+        if (lgrFormat.hdr && !rendererSupportsNativeHDR)
+        {
+          LG_RendererFormat sdrSurfaceFormat = lgrFormat;
+          sdrSurfaceFormat.hdr = false;
+          g_state.ds->setHDRImageDescription(&sdrSurfaceFormat);
+          DEBUG_WARN("Renderer surface cannot represent the native HDR "
+              "encoding; using software HDR mapping");
+          atomic_store(&g_state.hdrDescFailed, true);
+        }
+        else if (!g_state.ds->setHDRImageDescription(&lgrFormat))
         {
           DEBUG_WARN("Display server failed to apply HDR image description");
           atomic_store(&g_state.hdrDescFailed, true);

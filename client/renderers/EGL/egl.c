@@ -32,6 +32,7 @@
 #include "util.h"
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GLES3/gl32.h>
 
 #include "cimgui.h"
@@ -126,7 +127,8 @@ struct Inst
   bool showSpice;
   int  spiceWidth, spiceHeight;
 
-  bool configSupportsHDR; // true if we probed FP16 or 10-bit EGL config
+  bool surfaceSupportsPQ;
+  bool surfaceSupportsSCRGB;
   bool hdr;               // true if current frame format is HDR
   bool nativeHDR;         // true only while the surface HDR description is active
 };
@@ -339,6 +341,12 @@ static bool egl_supports(LG_Renderer * renderer, LG_RendererSupport flag)
   {
     case LG_SUPPORTS_DMABUF:
       return this->dmaSupport;
+
+    case LG_SUPPORTS_HDR_PQ:
+      return this->surfaceSupportsPQ;
+
+    case LG_SUPPORTS_HDR_SCRGB:
+      return this->surfaceSupportsSCRGB;
 
     default:
       return false;
@@ -585,6 +593,13 @@ static void egl_onMouseColorTransform(LG_Renderer * renderer,
   egl_cursorSetColorTransform(this->cursor, transform);
 }
 
+static void egl_onMouseWhiteLevel(LG_Renderer * renderer,
+    uint32_t sdrWhiteLevel)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  egl_cursorSetSDRWhiteLevel(this->cursor, sdrWhiteLevel);
+}
+
 static bool egl_onMouseEvent(LG_Renderer * renderer, const bool visible,
     int x, int y, const int hx, const int hy)
 {
@@ -602,7 +617,9 @@ static bool egl_updateHDRState(struct Inst * this, bool force)
 {
   bool nativeHDR = false;
   app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
-  const bool useNativeHDR = this->format.hdr && nativeHDR &&
+  const bool surfaceCompatible = this->format.hdrPQ ?
+    this->surfaceSupportsPQ : this->surfaceSupportsSCRGB;
+  const bool useNativeHDR = this->format.hdr && surfaceCompatible && nativeHDR &&
     !app_getHDRDescFailed();
 
   if (!force && this->nativeHDR == useNativeHDR)
@@ -669,9 +686,11 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   {
     bool nativeHDR = false;
     app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
-    if (!this->configSupportsHDR && !nativeHDR)
+    const bool surfaceCompatible = format.hdrPQ ?
+      this->surfaceSupportsPQ : this->surfaceSupportsSCRGB;
+    if (!surfaceCompatible)
       DEBUG_WARN("HDR frames being displayed on an 8-bit EGL surface "
-          "without a color-managed compositor; tones may be incorrect");
+          "or an EGL surface incompatible with the source encoding");
   }
 
   egl_updateHDRState(this, true);
@@ -844,31 +863,57 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     }
   }
 
-  // Probe for best available color depth: FP16 → 10-bit → 8-bit
-  static const struct { EGLint r, g, b, a, depth; const char * desc; } configs[] =
+  // Probe for best available color depth: floating-point FP16, then fixed
+  // 10-bit, then fixed 8-bit. Component type defaults to fixed-point in EGL,
+  // so it must be requested explicitly for an scRGB-capable surface.
+#ifndef EGL_COLOR_COMPONENT_TYPE_EXT
+#define EGL_COLOR_COMPONENT_TYPE_EXT       0x3339
+#define EGL_COLOR_COMPONENT_TYPE_FIXED_EXT 0x333A
+#define EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT 0x333B
+#endif
+  static const struct
   {
-    { 16, 16, 16,  0, 48, "FP16 (RGBA16F)"  },
-    { 10, 10, 10,  2, 32, "10-bit (RGBA10)" },
-    {  8,  8,  8,  0, 24, "8-bit (RGBA8)"   },
+    EGLint r, g, b, a, depth, componentType;
+    bool pq, scRGB;
+    const char * desc;
+  } configs[] =
+  {
+    { 16, 16, 16,  0, 48, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT,
+      true, true, "FP16 (RGBA16F)" },
+    { 10, 10, 10,  2, 32, EGL_COLOR_COMPONENT_TYPE_FIXED_EXT,
+      true, false, "10-bit (RGBA10)" },
+    {  8,  8,  8,  0, 24, EGL_COLOR_COMPONENT_TYPE_FIXED_EXT,
+      false, false, "8-bit (RGBA8)" },
   };
+  const char * eglExtensions = eglQueryString(this->display, EGL_EXTENSIONS);
+  const bool hasFloatConfigs = eglExtensions &&
+    util_hasGLExt(eglExtensions, "EGL_EXT_pixel_format_float");
   EGLint       num_config;
   const char * configDesc = NULL;
   int          chosen     = -1;
 
   for (int i = 0; i < (int)(sizeof(configs) / sizeof(configs[0])); ++i)
   {
-    EGLint attr[] =
-    {
-      EGL_RED_SIZE        , configs[i].r,
-      EGL_GREEN_SIZE      , configs[i].g,
-      EGL_BLUE_SIZE       , configs[i].b,
-      EGL_ALPHA_SIZE      , configs[i].a,
-      EGL_BUFFER_SIZE     , configs[i].depth,
-      EGL_RENDERABLE_TYPE , EGL_OPENGL_ES2_BIT,
-      EGL_SAMPLE_BUFFERS  , maxSamples > 0 ? 1 : 0,
-      EGL_SAMPLES         , maxSamples,
-      EGL_NONE
-    };
+    if (configs[i].componentType == EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT &&
+        !hasFloatConfigs)
+      continue;
+
+    EGLint attr[23];
+    int ai = 0;
+#define EGL_CONFIG_ATTR(name, value) \
+    do { attr[ai++] = (name); attr[ai++] = (value); } while (0)
+    EGL_CONFIG_ATTR(EGL_RED_SIZE       , configs[i].r);
+    EGL_CONFIG_ATTR(EGL_GREEN_SIZE     , configs[i].g);
+    EGL_CONFIG_ATTR(EGL_BLUE_SIZE      , configs[i].b);
+    EGL_CONFIG_ATTR(EGL_ALPHA_SIZE     , configs[i].a);
+    EGL_CONFIG_ATTR(EGL_BUFFER_SIZE    , configs[i].depth);
+    if (hasFloatConfigs)
+      EGL_CONFIG_ATTR(EGL_COLOR_COMPONENT_TYPE_EXT, configs[i].componentType);
+    EGL_CONFIG_ATTR(EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT);
+    EGL_CONFIG_ATTR(EGL_SAMPLE_BUFFERS , maxSamples > 0 ? 1 : 0);
+    EGL_CONFIG_ATTR(EGL_SAMPLES        , maxSamples);
+    attr[ai] = EGL_NONE;
+#undef EGL_CONFIG_ATTR
 
     if (eglChooseConfig(this->display, attr, &this->configs, 1, &num_config) &&
         num_config > 0)
@@ -885,9 +930,10 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
-  this->configSupportsHDR = chosen <= 1; // FP16 or 10-bit
+  this->surfaceSupportsPQ    = configs[chosen].pq;
+  this->surfaceSupportsSCRGB = configs[chosen].scRGB;
   DEBUG_INFO("EGL config: %s%s", configDesc,
-      this->configSupportsHDR ? " (HDR capable)" : "");
+      this->surfaceSupportsPQ ? " (HDR capable)" : "");
 
   const EGLint surfattr[] =
   {
@@ -1468,6 +1514,7 @@ struct LG_RendererOps LGR_EGL =
   .onResize              = egl_onResize,
   .onMouseShape          = egl_onMouseShape,
   .onMouseColorTransform = egl_onMouseColorTransform,
+  .onMouseWhiteLevel     = egl_onMouseWhiteLevel,
   .onMouseEvent          = egl_onMouseEvent,
   .onFrameFormat         = egl_onFrameFormat,
   .onFrame               = egl_onFrame,

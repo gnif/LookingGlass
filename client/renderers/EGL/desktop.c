@@ -468,7 +468,8 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     egl_postProcessConfigModified(desktop->pp);
   if (processFrame &&
       egl_postProcessRun(desktop->pp, tex, desktop->mesh,
-        width, height, outputWidth, outputHeight, dma) &&
+        width, height, outputWidth, outputHeight, dma,
+        desktop->hdr && desktop->hdrPQ) &&
       egl_postProcessNeedsFullFrame(desktop->pp))
   {
     /* The filter output may have changed everywhere, but this only applies to

@@ -58,3 +58,4 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
 void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
     float sdrWhiteLevel);
+void egl_cursorSetSDRWhiteLevel(EGL_Cursor * cursor, float sdrWhiteLevel);

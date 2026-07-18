@@ -52,7 +52,9 @@ LG_RendererParams;
 
 typedef enum LG_RendererSupport
 {
-  LG_SUPPORTS_DMABUF
+  LG_SUPPORTS_DMABUF,
+  LG_SUPPORTS_HDR_PQ,
+  LG_SUPPORTS_HDR_SCRGB
 }
 LG_RendererSupport;
 
@@ -162,6 +164,10 @@ typedef struct LG_RendererOps
    * Context: cursorThread */
   void (*onMouseColorTransform)(LG_Renderer * renderer,
       const KVMFRColorTransform * transform);
+
+  /* updates the cursor-specific SDR white level reported by IddCx
+   * Context: cursorThread */
+  void (*onMouseWhiteLevel)(LG_Renderer * renderer, uint32_t sdrWhiteLevel);
 
   /* called when the mouse has moved or changed visibillity
    * Context: cursorThread */
