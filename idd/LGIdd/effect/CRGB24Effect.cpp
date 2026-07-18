@@ -114,9 +114,10 @@ ComPtr<ID3D12Resource> CRGB24Effect::Run(const ComPtr<ID3D12Device3>& device,
 
   for (RECT * rect = dirtyRects; rect < dirtyRects + *nbDirtyRects; ++rect)
   {
-    unsigned width = rect->right - rect->left;
-    rect->left  = (rect->left * 3) / 4;
-    rect->right = rect->left + (width * 3 + 3) / 4;
+    const LONG left  = rect->left;
+    const LONG right = rect->right;
+    rect->left  = (left  * 3) / 4;
+    rect->right = (right * 3 + 3) / 4;
   }
 
   return m_dst;
