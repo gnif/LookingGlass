@@ -53,4 +53,7 @@ public:
 
   std::optional<bool> getNoGPU();
   LSTATUS setNoGPU(bool noGPU);
+
+  std::optional<bool> getExclusiveMonitor();
+  LSTATUS setExclusiveMonitor(bool exclusive);
 };
