@@ -32,43 +32,15 @@
 #include "common/debug.h"
 #include "resources/icondata.h"
 
-// icondata is defined as an array of unsigned long, but on 64-bit platforms
-// unsigned long is 8 bytes while the actual data is 32-bit ARGB packed in
-// unsigned long values (the top 32 bits are zero). The first two values are
-// width and height (both 64), followed by pixel rows.
-// We need to convert this to a uint32_t buffer for wl_shm (ARGB8888).
-//
-// Note: sizeof(icondata) / sizeof(icondata[0]) gives the total array length,
-// which includes the 2 header values + 64*64 = 4096 pixel values = 4098 total.
-
-#define ICON_SIZE 64
-// header: width and height, then pixel data
-#define ICON_HEADER_WORDS 2
-#define ICON_PIXEL_WORDS (ICON_SIZE * ICON_SIZE)
-#define ICON_TOTAL_WORDS (ICON_HEADER_WORDS + ICON_PIXEL_WORDS)
-
-static uint32_t g_iconPixels[ICON_SIZE * ICON_SIZE];
+static const uint32_t iconPixels[] = { LG_ICON_PIXELS };
 
 bool waylandIconInit(void)
 {
   if (!wlWm.iconManager || !wlWm.xdgToplevel || !wlWm.shm)
     return true; // not an error, just no support
 
-  for (size_t i = 0; i < ICON_TOTAL_WORDS; ++i)
-  {
-    if (i >= icondataSize / sizeof(icondata[0]))
-    {
-      DEBUG_ERROR("Icon data array is smaller than expected");
-      return true;
-    }
-    uint32_t val = (uint32_t)icondata[i];
-    // First two words are width/height, skip them
-    if (i >= ICON_HEADER_WORDS)
-      g_iconPixels[i - ICON_HEADER_WORDS] = val;
-  }
-
   // Create shared memory buffer for the icon
-  size_t dataSize = sizeof(g_iconPixels);
+  size_t dataSize = sizeof(iconPixels);
   int fd = memfd_create("lg-icon", 0);
   if (fd < 0)
   {
@@ -92,12 +64,12 @@ bool waylandIconInit(void)
     goto fail;
   }
 
-  memcpy(shm_data, g_iconPixels, dataSize);
+  memcpy(shm_data, iconPixels, dataSize);
   munmap(shm_data, dataSize);
 
   struct wl_shm_pool * pool = wl_shm_create_pool(wlWm.shm, fd, (int32_t)dataSize);
-  buffer = wl_shm_pool_create_buffer(pool, 0, ICON_SIZE, ICON_SIZE,
-      ICON_SIZE * 4, WL_SHM_FORMAT_ARGB8888);
+  buffer = wl_shm_pool_create_buffer(pool, 0, LG_ICON_WIDTH, LG_ICON_HEIGHT,
+      LG_ICON_WIDTH * 4, WL_SHM_FORMAT_ARGB8888);
   wl_shm_pool_destroy(pool);
 
   if (!buffer)
@@ -119,11 +91,6 @@ bool waylandIconInit(void)
 
   // After set_icon, the icon object is immutable. We can destroy it;
   // the compositor retains its data.
-  xdg_toplevel_icon_v1_destroy(icon);
-  wl_buffer_destroy(buffer);
-
-  close(fd);
-  return true;
 
 fail:
   if (icon)
@@ -132,5 +99,5 @@ fail:
     wl_buffer_destroy(buffer);
   close(fd);
 
-  return true; // not fatal
+  return true; // not fatal even if failed
 }
