@@ -135,6 +135,7 @@ private:
   uint32_t m_lastHDRMaxFrameAverageLightLevel = 0;
   uint32_t m_lastSDRWhiteLevel                = 0;
   bool     m_lastHDRActive                    = false;
+  bool     m_lastHDRMetadata                  = false;
 
   void QueryIddCxCapabilities();
   bool CanUseIddCx110DDIs() const { return m_canProcessFP16; }

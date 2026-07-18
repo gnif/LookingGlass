@@ -143,7 +143,8 @@ enum
   FRAME_FLAG_REQUEST_ACTIVATION = 0x2 ,
   FRAME_FLAG_TRUNCATED          = 0x4 , // ivshmem was too small for the frame
   FRAME_FLAG_HDR                = 0x8 , // RGBA10 may not be HDR
-  FRAME_FLAG_HDR_PQ             = 0x10  // HDR PQ has been applied to the frame
+  FRAME_FLAG_HDR_PQ             = 0x10, // HDR PQ has been applied to the frame
+  FRAME_FLAG_HDR_METADATA       = 0x20  // HDR static metadata fields are valid
 };
 
 typedef uint32_t KVMFRFrameFlags;
@@ -167,7 +168,7 @@ typedef struct KVMFRFrame
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
   KVMFRFrameFlags flags;              // bit field combination of FRAME_FLAG_*
 
-  // HDR static metadata (valid when FRAME_FLAG_HDR is set)
+  // HDR static metadata (valid when FRAME_FLAG_HDR_METADATA is set)
   // Display color primaries in 0.00002 units (SMPTE ST 2086 format)
   uint16_t hdrDisplayPrimary[3][2];      // Rx,Ry, Gx,Gy, Bx,By
   uint16_t hdrWhitePoint[2];             // Wx, Wy

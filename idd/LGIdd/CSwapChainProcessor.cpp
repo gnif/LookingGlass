@@ -206,6 +206,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
         surface        = buffer.MetaData.pSurface;
         colorSpace     = buffer.MetaData.SurfaceColorSpace;
         sdrWhiteLevel  = buffer.MetaData.SdrWhiteLevel;
+        UpdateHDRMetadata(buffer.MetaData);
       }
     }
     else
@@ -398,6 +399,72 @@ void CSwapChainProcessor::AccumulateFrameDamage(
   m_nbPendingDirtyRects += nbDirtyRects;
 }
 
+#ifdef HAS_IDDCX_110
+void CSwapChainProcessor::UpdateHDRMetadata(const IDDCX_METADATA2& metadata)
+{
+  if (!(metadata.ValidFlags & IDDCX_METADATA2_VALID_FLAGS_HDR10METADATA))
+    return;
+
+  const IDDCX_HDR10_FRAME_METADATA& frame = metadata.Hdr10FrameMetaData;
+  switch (frame.Type)
+  {
+    case IDDCX_HDR10_FRAME_METADATA_TYPE_DEFAULT:
+      if (!m_useDefaultHDRMetadata)
+        DEBUG_TRACE("HDR10 frame metadata switched to the monitor default");
+      m_useDefaultHDRMetadata = true;
+      m_hasNewHDRMetadata     = false;
+      break;
+
+    case IDDCX_HDR10_FRAME_METADATA_TYPE_UNCHANGED:
+      break;
+
+    case IDDCX_HDR10_FRAME_METADATA_TYPE_NEW:
+      if (!m_hasNewHDRMetadata ||
+          memcmp(&m_newHDRMetadata, &frame.NewMetaData,
+            sizeof(m_newHDRMetadata)) != 0)
+        DEBUG_TRACE("Received new HDR10 frame metadata");
+      m_newHDRMetadata        = frame.NewMetaData;
+      m_useDefaultHDRMetadata = false;
+      m_hasNewHDRMetadata     = true;
+      break;
+
+    default:
+      DEBUG_WARN("Invalid HDR10 frame metadata type %u",
+        static_cast<unsigned>(frame.Type));
+      break;
+  }
+}
+#endif
+
+bool CSwapChainProcessor::GetHDRMetadata(D12FrameFormat& format) const
+{
+#ifdef HAS_IDDCX_110
+  if (m_useDefaultHDRMetadata)
+    return m_devContext->GetHDRMetadata(format);
+
+  if (!m_hasNewHDRMetadata)
+    return false;
+
+  const IDDCX_HDR10_METADATA& metadata = m_newHDRMetadata;
+  format.displayPrimary[0][0]      = metadata.RedPrimary  [0];
+  format.displayPrimary[0][1]      = metadata.RedPrimary  [1];
+  format.displayPrimary[1][0]      = metadata.GreenPrimary[0];
+  format.displayPrimary[1][1]      = metadata.GreenPrimary[1];
+  format.displayPrimary[2][0]      = metadata.BluePrimary [0];
+  format.displayPrimary[2][1]      = metadata.BluePrimary [1];
+  format.whitePoint    [0]         = metadata.WhitePoint  [0];
+  format.whitePoint    [1]         = metadata.WhitePoint  [1];
+  format.maxDisplayLuminance       = metadata.MaxMasteringLuminance;
+  format.minDisplayLuminance       = metadata.MinMasteringLuminance;
+  format.maxContentLightLevel      = metadata.MaxContentLightLevel;
+  format.maxFrameAverageLightLevel = metadata.MaxFrameAverageLightLevel;
+  return true;
+#else
+  UNREFERENCED_PARAMETER(format);
+  return false;
+#endif
+}
+
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel)
 {
@@ -480,7 +547,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       // already applied to the pixel data.
       srcFormat.hdr   = true;
       srcFormat.hdrPQ = true;
-      if (!m_devContext->GetHDRMetadata(srcFormat))
+      if (!GetHDRMetadata(srcFormat))
       {
         // HDR is active but the OS has not delivered static metadata yet
         // (e.g. a brief window during a mode switch). The pixels are still
@@ -504,6 +571,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
         srcFormat.maxContentLightLevel      = 0;
         srcFormat.maxFrameAverageLightLevel = 0;
       }
+      else
+        srcFormat.hdrMetadata = true;
       break;
 
     case DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:
@@ -511,7 +580,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       // curve has not been applied.
       srcFormat.hdr   = true;
       srcFormat.hdrPQ = false;
-      if (!m_devContext->GetHDRMetadata(srcFormat))
+      if (!GetHDRMetadata(srcFormat))
       {
         // No HDR metadata from the OS; provide reasonable defaults
         // so downstream consumers have valid primaries and luminances.
@@ -533,6 +602,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
         srcFormat.maxContentLightLevel      = 0;
         srcFormat.maxFrameAverageLightLevel = 0;
       }
+      else
+        srcFormat.hdrMetadata = true;
       break;
 
     default:

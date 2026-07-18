@@ -1052,24 +1052,21 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   // Detect HDR metadata changes that require a format version bump
   // so the client knows to re-apply the HDR image description.
   //
-  // Use dstFormat: post-processing (CHDR16to10Effect) can rotate the gamut
-  // (BT.709 scRGB -> BT.2020 PQ), so the metadata describing the *emitted*
-  // frame lives in dstFormat, not srcFormat. Forwarding srcFormat here would
-  // tag PQ/BT.2020 pixels with the source's BT.709 primaries and mislead
-  // consumers that derive their colour conversion from these values.
+  // Use dstFormat so post-processing can propagate any metadata adjustments.
   if (dstFormat.hdr)
   {
-    if (!m_lastHDRActive ||
-        memcmp(m_lastHDRDisplayPrimary, dstFormat.displayPrimary, sizeof(m_lastHDRDisplayPrimary)) != 0 ||
+    const bool metadataChanged =
+      m_lastHDRMetadata != dstFormat.hdrMetadata ||
+      (dstFormat.hdrMetadata &&
+       (memcmp(m_lastHDRDisplayPrimary, dstFormat.displayPrimary, sizeof(m_lastHDRDisplayPrimary)) != 0 ||
         memcmp(m_lastHDRWhitePoint    , dstFormat.whitePoint    , sizeof(m_lastHDRWhitePoint    )) != 0 ||
         m_lastHDRMaxDisplayLuminance       != dstFormat.maxDisplayLuminance       ||
         m_lastHDRMinDisplayLuminance       != dstFormat.minDisplayLuminance       ||
         m_lastHDRMaxContentLightLevel      != dstFormat.maxContentLightLevel      ||
-        m_lastHDRMaxFrameAverageLightLevel != dstFormat.maxFrameAverageLightLevel ||
-        m_lastSDRWhiteLevel                != dstFormat.sdrWhiteLevel)
-    {
+        m_lastHDRMaxFrameAverageLightLevel != dstFormat.maxFrameAverageLightLevel));
+
+    if (!m_lastHDRActive || metadataChanged || m_lastSDRWhiteLevel != dstFormat.sdrWhiteLevel)
       ++m_formatVer;
-    }
   }
   else if (m_lastHDRActive)
   {
@@ -1077,7 +1074,8 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     ++m_formatVer;
   }
 
-  m_lastHDRActive = dstFormat.hdr;
+  m_lastHDRActive   = dstFormat.hdr;
+  m_lastHDRMetadata = dstFormat.hdrMetadata;
   memcpy(m_lastHDRDisplayPrimary, dstFormat.displayPrimary, sizeof(m_lastHDRDisplayPrimary));
   memcpy(m_lastHDRWhitePoint    , dstFormat.whitePoint    , sizeof(m_lastHDRWhitePoint    ));
   m_lastHDRMaxDisplayLuminance       = dstFormat.maxDisplayLuminance;
@@ -1100,8 +1098,9 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   const unsigned maxRows = (unsigned)(m_maxFrameSize / pitch);
   const int bpp = dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
   KVMFRFrameFlags flags =
-    (dstFormat.hdr   ? FRAME_FLAG_HDR    : 0) |
-    (dstFormat.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
+    (dstFormat.hdr         ? FRAME_FLAG_HDR          : 0) |
+    (dstFormat.hdrPQ       ? FRAME_FLAG_HDR_PQ       : 0) |
+    (dstFormat.hdrMetadata ? FRAME_FLAG_HDR_METADATA : 0);
 
   if (maxRows < dstFormat.desc.Height)
     flags |= FRAME_FLAG_TRUNCATED;
@@ -1122,10 +1121,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->rotation         = FRAME_ROT_0;
   fi->type             = dstFormat.format;
 
-  // Populate HDR metadata if the frame is HDR. Use dstFormat so the primaries
-  // describe the emitted frame after any gamut conversion in post-processing
-  // (see the metadata-change detection above).
-  if (flags & FRAME_FLAG_HDR)
+  if (flags & FRAME_FLAG_HDR_METADATA)
   {
     memcpy(fi->hdrDisplayPrimary, dstFormat.displayPrimary, sizeof(fi->hdrDisplayPrimary));
     memcpy(fi->hdrWhitePoint    , dstFormat.whitePoint    , sizeof(fi->hdrWhitePoint));
@@ -1133,6 +1129,15 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     fi->hdrMinDisplayLuminance       = dstFormat.minDisplayLuminance;
     fi->hdrMaxContentLightLevel      = dstFormat.maxContentLightLevel;
     fi->hdrMaxFrameAverageLightLevel = dstFormat.maxFrameAverageLightLevel;
+  }
+  else
+  {
+    memset(fi->hdrDisplayPrimary, 0, sizeof(fi->hdrDisplayPrimary));
+    memset(fi->hdrWhitePoint    , 0, sizeof(fi->hdrWhitePoint    ));
+    fi->hdrMaxDisplayLuminance       = 0;
+    fi->hdrMinDisplayLuminance       = 0;
+    fi->hdrMaxContentLightLevel      = 0;
+    fi->hdrMaxFrameAverageLightLevel = 0;
   }
 
   fi->damageRectsCount = 0;
