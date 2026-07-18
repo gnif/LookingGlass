@@ -52,6 +52,7 @@ CConfigWindow::CConfigWindow() : m_scale(1)
     m_modes = m_settings.getModes();
     m_defaultRefresh = m_settings.getDefaultRefresh();
     m_noGPU = m_settings.getNoGPU();
+    m_exclusive = m_settings.getExclusiveMonitor();
   }
 
   if (!CreateWindowEx(0, MAKEINTATOM(s_atom), L"Looking Glass IDD Configuration",
@@ -186,6 +187,9 @@ LRESULT CConfigWindow::onCreate()
 
   if (m_noGPU)
     m_prefNoGPU->setChecked(*m_noGPU);
+
+  if (m_exclusive)
+    m_prefExclusive->setChecked(*m_exclusive);
 
   LONG width, height;
   getMinimumSize(width, height);
@@ -329,6 +333,12 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     *m_noGPU ^= true;
     m_settings.setNoGPU(*m_noGPU);
     m_prefNoGPU->setChecked(*m_noGPU);
+  }
+  else if (m_prefExclusive && hwnd == *m_prefExclusive && code == BN_CLICKED && m_exclusive)
+  {
+    *m_exclusive ^= true;
+    m_settings.setExclusiveMonitor(*m_exclusive);
+    m_prefExclusive->setChecked(*m_exclusive);
   }
   else if (m_modeSave && hwnd == *m_modeSave && code == BN_CLICKED)
   {
