@@ -90,7 +90,7 @@ void CConfigWindow::updateFont()
   for (HWND child : std::initializer_list<HWND>({
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel, *m_modePreferred,
     *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete, *m_modeReset,
-    *m_autosizeGroup, *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
+    *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz,
     *m_prefGroup, *m_prefNoGPU,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
@@ -147,7 +147,7 @@ LRESULT CConfigWindow::onCreate()
   m_scale = GetDpiForWindow(m_hwnd) / 96.0;
   m_version.reset(new CStaticWidget(L"Looking Glass IDD " LG_VERSION_STR, SS_CENTERIMAGE, m_hwnd));
 
-  m_modeGroup.reset(new CGroupBox(L"Custom modes", 0, m_hwnd));
+  m_modeGroup.reset(new CGroupBox(L"Driver mode settings", 0, m_hwnd));
 
   m_modeBox.reset(new CListBox(WS_VSCROLL | WS_TABSTOP | LBS_NOTIFY, m_hwnd));
   if (m_modes)
@@ -162,13 +162,12 @@ LRESULT CConfigWindow::onCreate()
   m_modeRefresh.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
   m_modePreferred.reset(new CCheckbox(L"prefer", 0, m_hwnd));
 
-  m_modeUpdate.reset(new CButton(L"Save", WS_TABSTOP, m_hwnd));
+  m_modeUpdate.reset(new CButton(L"Update", WS_TABSTOP, m_hwnd));
   m_modeDelete.reset(new CButton(L"Delete", WS_TABSTOP, m_hwnd));
-  m_modeReset.reset(new CButton(L"Reset", WS_TABSTOP, m_hwnd));
+  m_modeReset.reset(new CButton(L"Load default", WS_TABSTOP, m_hwnd));
   EnableWindow(*m_modeUpdate, FALSE);
   EnableWindow(*m_modeDelete, FALSE);
 
-  m_autosizeGroup.reset(new CGroupBox(L"Autosizing", 0, m_hwnd));
   m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", SS_CENTERIMAGE, m_hwnd));
   m_defRefresh.reset(new CEditWidget(ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
   m_defRefreshHz.reset(new CStaticWidget(L"Hz", SS_CENTERIMAGE, m_hwnd));
@@ -206,7 +205,10 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinTopLeftRight(*m_version, 12, 12, 12, 20);
 
   pos.pinLeftTopBottom(*m_modeGroup, 12, 40, 200, 12);
-  pos.pinLeftTopBottom(*m_modeBox, 24, 64, 176, 120);
+  pos.pinTopLeft(*m_defRefreshLabel, 24, 64, 95, 20);
+  pos.pinTopLeft(*m_defRefresh, 119, 64, 63, 20);
+  pos.pinTopLeft(*m_defRefreshHz, 186, 64, 16, 20);
+  pos.pinLeftTopBottom(*m_modeBox, 24, 90, 176, 120);
   pos.pinBottomLeft(*m_widthLabel, 24, 96, 50, 20);
   pos.pinBottomLeft(*m_heightLabel, 24, 72, 50, 20);
   pos.pinBottomLeft(*m_refreshLabel, 24, 48, 50, 20);
@@ -214,17 +216,12 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeHeight, 75, 72, 50, 20);
   pos.pinBottomLeft(*m_modeRefresh, 75, 48, 50, 20);
   pos.pinBottomLeft(*m_modePreferred, 130, 96, 70, 20);
-  pos.pinBottomLeft(*m_modeUpdate, 24, 20, 50, 24);
-  pos.pinBottomLeft(*m_modeDelete, 75, 20, 50, 24);
-  pos.pinBottomLeft(*m_modeReset, 126, 20, 50, 24);
+  pos.pinBottomLeft(*m_modeUpdate, 20, 20, 50, 24);
+  pos.pinBottomLeft(*m_modeDelete, 72, 20, 50, 24);
+  pos.pinBottomLeft(*m_modeReset, 122, 20, 82, 24);
 
-  pos.pinTopLeft(*m_autosizeGroup, 224, 40, 200, 52);
-  pos.pinTopLeft(*m_defRefreshLabel, 236, 64, 95, 20);
-  pos.pinTopLeft(*m_defRefresh, 331, 64, 63, 20);
-  pos.pinTopLeft(*m_defRefreshHz, 398, 64, 16, 20);
-
-  pos.pinTopLeft(*m_prefGroup, 224, 100, 200, 52);
-  pos.pinTopLeft(*m_prefNoGPU, 236, 124, 176, 20);
+  pos.pinTopLeft(*m_prefGroup, 224, 40, 200, 52);
+  pos.pinTopLeft(*m_prefNoGPU, 236, 64, 176, 20);
   return 0;
 }
 
