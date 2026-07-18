@@ -63,6 +63,7 @@ class CConfigWindow : public CWindow
 
   std::unique_ptr<CGroupBox> m_prefGroup;
   std::unique_ptr<CCheckbox> m_prefNoGPU;
+  std::unique_ptr<CCheckbox> m_prefExclusive;
 
   std::function<void()> m_onDestroy;
   std::function<void()> m_onSettingChange;

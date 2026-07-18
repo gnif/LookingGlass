@@ -91,7 +91,7 @@ void CConfigWindow::updateFont()
     *m_version, *m_modeGroup, *m_modeBox, *m_widthLabel, *m_heightLabel, *m_refreshLabel, *m_modePreferred,
     *m_modeWidth, *m_modeHeight, *m_modeRefresh, *m_modeUpdate, *m_modeDelete, *m_modeReset,
     *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz, *m_modeSave, *m_modeRevert,
-    *m_prefGroup, *m_prefNoGPU,
+    *m_prefGroup, *m_prefNoGPU, *m_prefExclusive,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
@@ -182,6 +182,7 @@ LRESULT CConfigWindow::onCreate()
 
   m_prefGroup.reset(new CGroupBox(L"Preferences", 0, m_hwnd));
   m_prefNoGPU.reset(new CCheckbox(L"Disable no GPU warning", 0, m_hwnd));
+  m_prefExclusive.reset(new CCheckbox(L"Make LG the only monitor", 0, m_hwnd));
 
   if (m_noGPU)
     m_prefNoGPU->setChecked(*m_noGPU);
@@ -225,8 +226,9 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeSave, 20, 20, 132, 24);
   pos.pinBottomLeft(*m_modeRevert, 154, 20, 50, 24);
 
-  pos.pinTopLeft(*m_prefGroup, 224, 40, 200, 52);
+  pos.pinTopLeft(*m_prefGroup, 224, 40, 200, 72);
   pos.pinTopLeft(*m_prefNoGPU, 236, 64, 176, 20);
+  pos.pinTopLeft(*m_prefExclusive, 236, 84, 176, 20);
   return 0;
 }
 
