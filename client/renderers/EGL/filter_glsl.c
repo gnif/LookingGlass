@@ -33,6 +33,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdarg.h>
@@ -601,6 +602,20 @@ static bool expressionValue(const GLSLContext * context, const char * token,
   return true;
 }
 
+static bool expressionValueFinite(double value)
+{
+  _Static_assert(sizeof(double) == sizeof(uint64_t) &&
+      DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024,
+      "GLSL expressions require IEEE-754 binary64 doubles");
+
+  /* isfinite() is not valid with -ffinite-math-only under Clang. Inspect the
+   * binary64 exponent directly so expression overflow can still be rejected. */
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  return (bits & UINT64_C(0x7ff0000000000000)) !=
+    UINT64_C(0x7ff0000000000000);
+}
+
 static bool evaluateExpression(const GLSLContext * context,
     const char * expression, double fallback, double * result)
 {
@@ -653,7 +668,7 @@ static bool evaluateExpression(const GLSLContext * context,
       goto fail;
   }
 
-  if (count != 1 || !isfinite(stack[0]))
+  if (count != 1 || !expressionValueFinite(stack[0]))
     goto fail;
   *result = stack[0];
   free(copy);
