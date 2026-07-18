@@ -52,6 +52,7 @@
 #endif
 
 #include "app.h"
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/time.h"
 #include "common/event.h"
@@ -78,6 +79,10 @@ enum {
   MWM_FUNC_MINIMIZE     = (1L << 3),
   MWM_FUNC_MAXIMIZE     = (1L << 4),
   MWM_FUNC_CLOSE        = (1L << 5)
+};
+
+static const unsigned long icondata[] = {
+  LG_ICON_WIDTH, LG_ICON_HEIGHT, LG_ICON_PIXELS,
 };
 
 // forwards
@@ -617,7 +622,7 @@ static bool x11Init(const LG_DSInitParams params)
     32,
     PropModeReplace,
     (unsigned char *)icondata,
-    icondataSize / sizeof(icondata[0])
+    ARRAY_LENGTH(icondata)
   );
 
   /* create the blank cursor */

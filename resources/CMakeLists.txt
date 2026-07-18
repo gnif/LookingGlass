@@ -14,10 +14,6 @@ function(build_resources)
 	set(LG_RESOURCES_INCS "${LG_RESOURCES_INCS}" PARENT_SCOPE)
 endfunction()
 
-set(RESOURCES_SOURCES
-	icondata.c
-)
-
 build_resources(
 	lg-logo.svg
 	status/spice.svg
@@ -26,5 +22,5 @@ build_resources(
 	no-input-cursor/32.xcur
 )
 
-add_library(lg_resources STATIC ${RESOURCES_SOURCES} ${LG_RESOURCES_OBJS})
+add_library(lg_resources STATIC ${LG_RESOURCES_OBJS})
 set_target_properties(lg_resources PROPERTIES LINKER_LANGUAGE C)
