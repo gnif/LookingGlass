@@ -180,7 +180,7 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   atomic_init(&(*cursor)->scale     , 1.0f );
   atomic_init(&(*cursor)->mapSDRtoPQ, false);
   atomic_init(&(*cursor)->sdrWhiteLevel,
-      (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+      KVMFR_SDR_WHITE_LEVEL_DEFAULT);
 
   return true;
 }
@@ -446,6 +446,6 @@ void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
     float sdrWhiteLevel)
 {
   atomic_store(&cursor->sdrWhiteLevel, sdrWhiteLevel > 0.0f ?
-      sdrWhiteLevel : (float)KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+      sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT);
   atomic_store(&cursor->mapSDRtoPQ, hdrActive && hdrPQ);
 }
