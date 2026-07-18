@@ -35,7 +35,6 @@
 #define ID_DISPLAY_CHECK_TIMER 1
 #define DISPLAY_SETTLE_DELAY   250
 #define DISPLAY_RETRY_DELAY    1000
-#define DISPLAY_CHECK_INTERVAL 5000
 
 ATOM CNotifyWindow::s_atom = 0;
 UINT CNotifyWindow::s_taskbarCreated = 0;
@@ -96,14 +95,17 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     return 0;
 
   case WM_TIMER:
-    if (wParam == ID_DISPLAY_CHECK_TIMER)
+    switch (wParam)
     {
+    case ID_DISPLAY_CHECK_TIMER:
       KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
-      const bool success = m_onDisplayChange && m_onDisplayChange();
-      scheduleDisplayCheck(success ? DISPLAY_CHECK_INTERVAL : DISPLAY_RETRY_DELAY);
-      return 0;
+      if (m_onEnsureOnlyDisplay && m_onEnsureOnlyDisplay())
+        DEBUG_INFO("Enforced Looking Glass as the only display");
+      else
+        DEBUG_WARN("Failed to ensure Looking Glass is the only display");
+      break;
     }
-    return CWindow::handleMessage(uMsg, wParam, lParam);
+    return 0;
 
   default:
     if (s_taskbarCreated && uMsg == s_taskbarCreated)
@@ -262,16 +264,24 @@ void CNotifyWindow::close()
 
 void CNotifyWindow::scheduleDisplayCheck(UINT delay)
 {
-  if (!m_onDisplayChange)
+  if (!m_onEnsureOnlyDisplay)
     return;
 
-  KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+  CRegistrySettings settings;
+  LSTATUS error = settings.open();
+  if (error != ERROR_SUCCESS)
+    DEBUG_ERROR_HR(error, "Failed to load settings");
+
+  auto exclusive = settings.getExclusiveMonitor();
+  if (!exclusive.has_value() || !exclusive.value())
+    return;
+
   if (!SetTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER, delay, NULL))
     DEBUG_ERROR_HR(GetLastError(), "Failed to schedule primary display check");
 }
 
-void CNotifyWindow::onDisplayChange(std::function<bool()> func)
+void CNotifyWindow::onEnsureOnlyDisplay(std::function<bool()> func)
 {
-  m_onDisplayChange = std::move(func);
+  m_onEnsureOnlyDisplay = std::move(func);
   scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
 }
