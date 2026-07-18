@@ -357,19 +357,65 @@ static FrameType GetFrameType(DXGI_FORMAT format)
   }
 }
 
+void CSwapChainProcessor::SetFullPendingDamage()
+{
+  m_hasPendingDamage    = true;
+  m_nbPendingDirtyRects = 0;
+}
+
+void CSwapChainProcessor::AccumulateFrameDamage(
+  const RECT * dirtyRects, unsigned nbDirtyRects)
+{
+  if (nbDirtyRects > LG_MAX_DIRTY_RECTS)
+    nbDirtyRects = 0;
+
+  if (!m_hasPendingDamage)
+  {
+    m_hasPendingDamage    = true;
+    m_nbPendingDirtyRects = nbDirtyRects;
+    if (nbDirtyRects)
+      memcpy(m_pendingDirtyRects, dirtyRects,
+        nbDirtyRects * sizeof(*m_pendingDirtyRects));
+    return;
+  }
+
+  // Zero dirty rectangles represents full-frame damage. Once any skipped
+  // frame requires a full update, no later rectangles can narrow it again.
+  if (m_nbPendingDirtyRects == 0 || nbDirtyRects == 0)
+  {
+    m_nbPendingDirtyRects = 0;
+    return;
+  }
+
+  if (m_nbPendingDirtyRects + nbDirtyRects > LG_MAX_DIRTY_RECTS)
+  {
+    m_nbPendingDirtyRects = 0;
+    return;
+  }
+
+  memcpy(m_pendingDirtyRects + m_nbPendingDirtyRects, dirtyRects,
+    nbDirtyRects * sizeof(*m_pendingDirtyRects));
+  m_nbPendingDirtyRects += nbDirtyRects;
+}
+
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel)
 {
-  // Never hold an IddCx frame waiting for a slow or disconnected client. In
-  // particular, monitor departure cannot complete until the frame is released.
+  // Preserve the fast drop path: never hold an IddCx frame while waiting for
+  // a slow or disconnected client. We have not read its rectangles, so force
+  // the next published frame to invalidate the entire image.
   if (!m_devContext->FrameBufferAvailable())
+  {
+    SetFullPendingDamage();
     return true;
+  }
 
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
+    SetFullPendingDamage();
     return false;
   }
 
@@ -377,6 +423,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!srcRes)
   {
     DEBUG_ERROR("Failed to get a CInteropResource from the pool");
+    SetFullPendingDamage();
     return false;
   }
 
@@ -410,6 +457,14 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   }
 
   D3D12_RESOURCE_DESC srcDesc = srcRes->GetRes()->GetDesc();
+  AccumulateFrameDamage(
+    srcRes->GetDirtyRects(), srcRes->GetDirtyRectCount());
+
+  // Never hold an IddCx frame waiting for a slow or disconnected client. Read
+  // and retain its damage first so the next published frame remains complete.
+  if (!m_devContext->FrameBufferAvailable())
+    return true;
+
   D12FrameFormat srcFormat = {};
   srcFormat.desc          = srcDesc;
   srcFormat.width         = (unsigned)srcDesc.Width;
@@ -492,7 +547,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
 
   if (postProcessFormatChanged)
+  {
     m_nbDirtyRects = 0;
+    SetFullPendingDamage();
+  }
 
   const D12FrameFormat& dstFormat = m_postProcessor.GetOutputFormat();
 
@@ -509,12 +567,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   RECT currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
   RECT frameDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned nbDirtyRects = srcRes->GetDirtyRectCount();
-  if (nbDirtyRects > ARRAYSIZE(currentDirtyRects))
-    nbDirtyRects = 0;
-  else
+  unsigned nbDirtyRects = m_nbPendingDirtyRects;
+  if (nbDirtyRects)
   {
-    memcpy(currentDirtyRects, srcRes->GetDirtyRects(), nbDirtyRects * sizeof(*currentDirtyRects));
+    memcpy(currentDirtyRects, m_pendingDirtyRects, nbDirtyRects * sizeof(*currentDirtyRects));
     memcpy(frameDirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*frameDirtyRects));
   }
   unsigned frameDirtyRectCount = nbDirtyRects;
@@ -543,7 +599,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       computeQueue->GetGfxList(), copySrcResource,
       currentDirtyRects, &nbDirtyRects);
 
-    computeQueue->Execute();
+    if (!computeQueue->Execute())
+    {
+      SetFullPendingDamage();
+      return false;
+    }
     copyQueue->WaitFor(*computeQueue);
   }
   else
@@ -569,6 +629,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!fbRes)
   {
     DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
+    SetFullPendingDamage();
     return false;
   }
 
@@ -608,13 +669,25 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
   }
 
-  memcpy(m_dirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*m_dirtyRects));
-  m_nbDirtyRects = nbDirtyRects;
-
   if (!copyQueue->Execute())
+  {
+    SetFullPendingDamage();
     return false;
+  }
 
-  return m_devContext->PublishFrameBuffer(buffer.frameIndex);
+  if (!m_devContext->PublishFrameBuffer(buffer.frameIndex))
+  {
+    SetFullPendingDamage();
+    return false;
+  }
+
+  memcpy(m_dirtyRects, currentDirtyRects,
+    nbDirtyRects * sizeof(*m_dirtyRects));
+  m_nbDirtyRects        = nbDirtyRects;
+  m_hasPendingDamage    = false;
+  m_nbPendingDirtyRects = 0;
+
+  return true;
 }
 
 DWORD CALLBACK CSwapChainProcessor::_CursorThread(LPVOID arg)
