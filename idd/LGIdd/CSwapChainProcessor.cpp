@@ -25,6 +25,9 @@
 #include "CDebug.h"
 #include "CPipeServer.h"
 
+static const uint32_t HDR_PQ_MIN_LUMINANCE = 50;
+static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
+
 CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
     CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
@@ -439,13 +442,12 @@ void CSwapChainProcessor::UpdateHDRMetadata(const IDDCX_METADATA2& metadata)
 }
 #endif
 
-bool CSwapChainProcessor::GetHDRMetadata(D12FrameFormat& format) const
+bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
 {
 #ifdef HAS_IDDCX_110
-  if (m_useDefaultHDRMetadata)
-    return m_devContext->GetHDRMetadata(format);
-
-  if (!m_hasNewHDRMetadata)
+  // The monitor default describes the virtual display, not the content. Only
+  // publish an explicit per-frame metadata block to downstream consumers.
+  if (m_useDefaultHDRMetadata || !m_hasNewHDRMetadata)
     return false;
 
   const IDDCX_HDR10_METADATA& metadata = m_newHDRMetadata;
@@ -551,12 +553,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       // already applied to the pixel data.
       srcFormat.hdr   = true;
       srcFormat.hdrPQ = true;
-      if (!GetHDRMetadata(srcFormat))
+      if (!GetContentHDRMetadata(srcFormat))
       {
-        // HDR is active but the OS has not delivered static metadata yet
-        // (e.g. a brief window during a mode switch). The pixels are still
-        // PQ-encoded, so keep the PQ flag and supply BT.2020/PQ defaults
-        // rather than mislabel the frame as SDR.
+        // No per-content metadata is active. The pixels are still PQ-encoded,
+        // so keep the PQ flag and use BT.2020/PQ defaults internally rather
+        // than publishing the virtual monitor metadata as content metadata.
         // BT.2020 primaries (in 0.00002 units):
         srcFormat.displayPrimary[0][0] = 35400; // Rx
         srcFormat.displayPrimary[0][1] = 14600; // Ry
@@ -567,10 +568,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
         // D65 white point (in 0.00002 units):
         srcFormat.whitePoint[0] = 15635;
         srcFormat.whitePoint[1] = 16450;
-        // Mastering luminances follow SMPTE ST 2086 units: max in whole cd/m²,
-        // min in 0.0001 cd/m². 1000 cd/m² display, 0.0001 cd/m² black:
-        srcFormat.maxDisplayLuminance = 1000;
-        srcFormat.minDisplayLuminance = 1;
+        // Cover the complete PQ signal range.
+        srcFormat.maxDisplayLuminance = HDR_PQ_MAX_LUMINANCE;
+        srcFormat.minDisplayLuminance = HDR_PQ_MIN_LUMINANCE;
         // Content light levels unknown:
         srcFormat.maxContentLightLevel      = 0;
         srcFormat.maxFrameAverageLightLevel = 0;
@@ -584,10 +584,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       // curve has not been applied.
       srcFormat.hdr   = true;
       srcFormat.hdrPQ = false;
-      if (!GetHDRMetadata(srcFormat))
+      if (!GetContentHDRMetadata(srcFormat))
       {
-        // No HDR metadata from the OS; provide reasonable defaults
-        // so downstream consumers have valid primaries and luminances.
+        // No per-content metadata is active. Use reasonable internal defaults
+        // without publishing the virtual monitor metadata downstream.
         // BT.709/sRGB primaries (in 0.00002 units):
         srcFormat.displayPrimary[0][0] = 13250; // Rx
         srcFormat.displayPrimary[0][1] = 34500; // Ry

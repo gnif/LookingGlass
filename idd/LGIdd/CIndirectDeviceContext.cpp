@@ -1336,59 +1336,6 @@ CIndirectDeviceContext::GetColorTransform() const
   return transform;
 }
 
-#ifdef HAS_IDDCX_110
-void CIndirectDeviceContext::SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta)
-{
-  AcquireSRWLockExclusive(&m_hdrLock);
-
-  if (!hdrMeta)
-  {
-    m_hdrActive = false;
-    ReleaseSRWLockExclusive(&m_hdrLock);
-    return;
-  }
-
-  m_hdrActive = true;
-
-  m_hdrDisplayPrimary[0][0] = hdrMeta->RedPrimary  [0];
-  m_hdrDisplayPrimary[0][1] = hdrMeta->RedPrimary  [1];
-  m_hdrDisplayPrimary[1][0] = hdrMeta->GreenPrimary[0];
-  m_hdrDisplayPrimary[1][1] = hdrMeta->GreenPrimary[1];
-  m_hdrDisplayPrimary[2][0] = hdrMeta->BluePrimary [0];
-  m_hdrDisplayPrimary[2][1] = hdrMeta->BluePrimary [1];
-  m_hdrWhitePoint    [0]    = hdrMeta->WhitePoint  [0];
-  m_hdrWhitePoint    [1]    = hdrMeta->WhitePoint  [1];
-
-  m_hdrMaxDisplayLuminance       = hdrMeta->MaxMasteringLuminance;
-  m_hdrMinDisplayLuminance       = hdrMeta->MinMasteringLuminance;
-  m_hdrMaxContentLightLevel      = hdrMeta->MaxContentLightLevel;
-  m_hdrMaxFrameAverageLightLevel = hdrMeta->MaxFrameAverageLightLevel;
-
-  ReleaseSRWLockExclusive(&m_hdrLock);
-}
-#endif
-
-bool CIndirectDeviceContext::GetHDRMetadata(D12FrameFormat & format) const
-{
-  AcquireSRWLockShared(&m_hdrLock);
-
-  if (!m_hdrActive)
-  {
-    ReleaseSRWLockShared(&m_hdrLock);
-    return false;
-  }
-
-  memcpy(format.displayPrimary, m_hdrDisplayPrimary, sizeof(format.displayPrimary));
-  memcpy(format.whitePoint    , m_hdrWhitePoint    , sizeof(format.whitePoint    ));
-  format.maxDisplayLuminance       = m_hdrMaxDisplayLuminance;
-  format.minDisplayLuminance       = m_hdrMinDisplayLuminance;
-  format.maxContentLightLevel      = m_hdrMaxContentLightLevel;
-  format.maxFrameAverageLightLevel = m_hdrMaxFrameAverageLightLevel;
-
-  ReleaseSRWLockShared(&m_hdrLock);
-  return true;
-}
-
 void CIndirectDeviceContext::SendColorTransform()
 {
   if (!m_pointerQueue || !m_pointerTransformMemory[0])

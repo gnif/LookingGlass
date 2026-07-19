@@ -191,17 +191,11 @@ NTSTATUS LGIddAdapterCommitModes2(IDDCX_ADAPTER adapter, const IDARG_IN_COMMITMO
 NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
   const IDARG_IN_MONITOR_SET_DEFAULT_HDR_METADATA* inArgs)
 {
-  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  auto* ctx     = wrapper->context->GetDeviceContext();
+  UNREFERENCED_PARAMETER(monitor);
+  UNREFERENCED_PARAMETER(inArgs);
 
-  if (ctx->IsSoftwareMode())
-  {
-    ctx->SetHDRActive(nullptr);
-    return STATUS_SUCCESS;
-  }
-
-  ctx->SetHDRActive(inArgs->Data.pHdr10);
-
+  // This metadata describes the virtual monitor. Explicit per-content HDR10
+  // metadata is obtained from the swap chain and forwarded separately.
   return STATUS_SUCCESS;
 }
 

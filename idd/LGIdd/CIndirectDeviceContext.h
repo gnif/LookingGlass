@@ -119,18 +119,6 @@ private:
   bool m_canProcessFP16 = false;
   bool m_softwareMode   = true;
 
-  // HDR state from EvtIddCxMonitorSetDefaultHdrMetadata (IddCx 1.10+)
-  // Protected by m_hdrLock - accessed from both the IDD callback thread
-  // (SetHDRActive) and the swap-chain thread (PrepareFrameBuffer, GetHDRMetadata).
-  mutable SRWLOCK m_hdrLock               = SRWLOCK_INIT;
-  bool     m_hdrActive                    = false;
-  uint16_t m_hdrDisplayPrimary[3][2]      = {};
-  uint16_t m_hdrWhitePoint[2]             = {};
-  uint32_t m_hdrMaxDisplayLuminance       = 0;
-  uint32_t m_hdrMinDisplayLuminance       = 0;
-  uint32_t m_hdrMaxContentLightLevel      = 0;
-  uint32_t m_hdrMaxFrameAverageLightLevel = 0;
-
   // Previous HDR metadata used to detect changes for formatVer bumps
   uint16_t m_lastHDRDisplayPrimary[3][2]      = {};
   uint16_t m_lastHDRWhitePoint[2]             = {};
@@ -231,24 +219,8 @@ public:
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data,
     UINT sdrWhiteLevel);
 
-  // Tracks HDR state from EvtIddCxMonitorSetDefaultHdrMetadata
-  void SetHDRActive(const struct IDDCX_HDR10_METADATA * hdrMeta);
-
   void SetColorTransform(std::shared_ptr<const D12ColorTransform> transform);
   std::shared_ptr<const D12ColorTransform> GetColorTransform() const;
-
-  // Returns true if the display is currently in HDR mode
-  bool IsHDRActive() const
-  {
-    AcquireSRWLockShared(&m_hdrLock);
-    bool result = m_hdrActive;
-    ReleaseSRWLockShared(&m_hdrLock);
-    return result;
-  }
-
-  // Copies current HDR metadata into the provided D12FrameFormat.
-  // Returns true if HDR is active and metadata was copied.
-  bool GetHDRMetadata(D12FrameFormat & format) const;
 
   CIVSHMEM &GetIVSHMEM() { return m_ivshmem; }
 };

@@ -100,7 +100,7 @@ private:
 #ifdef HAS_IDDCX_110
   void UpdateHDRMetadata(const IDDCX_METADATA2& metadata);
 #endif
-  bool GetHDRMetadata(D12FrameFormat& format) const;
+  bool GetContentHDRMetadata(D12FrameFormat& format) const;
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel);
 
