@@ -162,6 +162,9 @@ static void activateReadyHDRImageDescription(void)
   wp_color_management_surface_v1_set_image_description(
       wlWm.colorSurface, desc,
       WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+  if (wlWm.hdrImageDescPQ)
+    atomic_store(&wlWm.hdrActivePQWhiteLevel,
+        wlWm.hdrImageDescWhiteLevel);
   atomic_store(&wlWm.hdrActivePQ, wlWm.hdrImageDescPQ);
   atomic_store(&wlWm.hdrActive, true);
 
@@ -192,6 +195,8 @@ static void hdrImageDescriptionFailed(void * data,
 
   DEBUG_WARN("Failed to create HDR image description (cause:%u): %s",
       cause, message);
+  if (atomic_load(&wlWm.hdrActive))
+    DEBUG_WARN("Retaining the previous active HDR image description");
   wlWm.hdrImageDesc = NULL;
   wlWm.hdrImageDescReady = false;
   wp_image_description_v1_destroy(desc);
@@ -426,6 +431,8 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
       wlWm.hdrImageCreator,
       WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ);
 
+  wlWm.hdrImageDescWhiteLevel = atomic_load(&wlWm.hdrPQWhiteLevel);
+
   // Set the primary colour volume luminances.
   //   min_lum       : 0.0001 cd/m² (source already scaled) -> pass through
   //   max_lum       : cd/m² (used only for scRGB; ignored for PQ, where the
@@ -436,7 +443,7 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
         wlWm.hdrImageCreator,
         minDisplayLuminance > 0 ? minDisplayLuminance : 50,
         maxDisplayLuminance > 0 ? maxDisplayLuminance : 1000,
-        atomic_load(&wlWm.hdrPQWhiteLevel));
+        wlWm.hdrImageDescWhiteLevel);
 
   // KVMFR uses the ST 2086/DXGI scale of 50,000 units per coordinate while
   // color-management-v1 uses 1,000,000 units per coordinate.

@@ -115,6 +115,7 @@ static bool waylandInit(const LG_DSInitParams params)
   atomic_init(&wlWm.cmCanDoHDR, false);
   atomic_init(&wlWm.hdrPQWhiteLevel, 203);
   atomic_init(&wlWm.hdrScRGBWhiteLevel, 80);
+  atomic_init(&wlWm.hdrActivePQWhiteLevel, 203);
 
   wlWm.display = wl_display_connect(NULL);
   if (!wlWm.display)
@@ -235,9 +236,12 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 
   if (prop == LG_DS_HDR_WHITE_LEVELS)
   {
+    const bool activePQ = atomic_load(&wlWm.hdrActive) &&
+      atomic_load(&wlWm.hdrActivePQ);
     *(LG_DSHDRWhiteLevels *)ret = (LG_DSHDRWhiteLevels)
     {
-      .pq    = atomic_load(&wlWm.hdrPQWhiteLevel),
+      .pq    = activePQ ? atomic_load(&wlWm.hdrActivePQWhiteLevel) :
+        atomic_load(&wlWm.hdrPQWhiteLevel),
       .scRGB = atomic_load(&wlWm.hdrScRGBWhiteLevel),
     };
     return true;

@@ -222,9 +222,11 @@ struct WaylandDSState
   _Atomic(bool) hdrActivePQ;
   _Atomic(bool) hdrRequested;
   _Atomic(bool) hdrRequestedPQ;
-  bool          hdrImageDescPQ;
-  bool          hdrImageDescReady;
-  LG_Lock       hdrLock;
+  bool              hdrImageDescPQ;
+  bool              hdrImageDescReady;
+  uint32_t          hdrImageDescWhiteLevel;
+  _Atomic(uint32_t) hdrActivePQWhiteLevel;
+  LG_Lock           hdrLock;
 
   // wp_color_manager_v1 feature advertisement tracking.
   // Set to true after the done event for the color-manager has been received
