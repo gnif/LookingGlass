@@ -589,12 +589,12 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
         // No per-content metadata is active. Use reasonable internal defaults
         // without publishing the virtual monitor metadata downstream.
         // BT.709/sRGB primaries (in 0.00002 units):
-        srcFormat.displayPrimary[0][0] = 13250; // Rx
-        srcFormat.displayPrimary[0][1] = 34500; // Ry
-        srcFormat.displayPrimary[1][0] =  7500; // Gx
+        srcFormat.displayPrimary[0][0] = 32000; // Rx
+        srcFormat.displayPrimary[0][1] = 16500; // Ry
+        srcFormat.displayPrimary[1][0] = 15000; // Gx
         srcFormat.displayPrimary[1][1] = 30000; // Gy
-        srcFormat.displayPrimary[2][0] = 34000; // Bx
-        srcFormat.displayPrimary[2][1] = 16000; // By
+        srcFormat.displayPrimary[2][0] =  7500; // Bx
+        srcFormat.displayPrimary[2][1] =  3000; // By
         // D65 white point (in 0.00002 units):
         srcFormat.whitePoint[0] = 15635;
         srcFormat.whitePoint[1] = 16450;

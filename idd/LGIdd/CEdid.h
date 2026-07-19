@@ -29,7 +29,23 @@
 class CEdid
 {
 public:
+  struct Timing
+  {
+    DWORD  hActive;
+    DWORD  hBlank;
+    DWORD  hFront;
+    DWORD  hSync;
+    DWORD  vActive;
+    DWORD  vBlank;
+    DWORD  vFront;
+    DWORD  vSync;
+    UINT64 pixelClock;
+  };
+
   void Build(const CSettings::DisplayModes& modes, bool hdr);
+
+  static bool GetTiming(Timing& timing,
+    const CSettings::DisplayMode& mode);
 
   const BYTE* Data() const { return m_data.empty() ? nullptr : m_data.data(); }
   UINT Size() const { return (UINT)m_data.size(); }

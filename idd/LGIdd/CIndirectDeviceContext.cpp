@@ -50,10 +50,13 @@ static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
 {
   IDDCX_WIRE_BITS_PER_COMPONENT bits = {};
+  // This describes the virtual monitor wire, not the swap-chain format.
+  // HDR uses a 10-bpc PQ wire while CAN_PROCESS_FP16 requests the FP16/scRGB
+  // source surface that Looking Glass converts for transport.
   bits.Rgb = IDDCX_BITS_PER_COMPONENT_8;
   if (hdr)
     bits.Rgb = (IDDCX_BITS_PER_COMPONENT)(bits.Rgb |
-      IDDCX_BITS_PER_COMPONENT_10 | IDDCX_BITS_PER_COMPONENT_16);
+      IDDCX_BITS_PER_COMPONENT_10);
   bits.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
   bits.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
   bits.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
@@ -586,21 +589,28 @@ void CIndirectDeviceContext::OnSwapChainReady()
     g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
 }
 
-static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
+static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO& signal,
+  const CSettings::DisplayMode& mode, bool monitorMode)
 {
-  mode.totalSize.cx = mode.activeSize.cx = width;
-  mode.totalSize.cy = mode.activeSize.cy = height;
+  CEdid::Timing timing;
+  if (!CEdid::GetTiming(timing, mode))
+    return;
 
-  mode.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
-  mode.AdditionalSignalInfo.videoStandard    = 255;
+  signal.activeSize.cx = timing.hActive;
+  signal.activeSize.cy = timing.vActive;
+  signal.totalSize.cx  = timing.hActive + timing.hBlank;
+  signal.totalSize.cy  = timing.vActive + timing.vBlank;
 
-  mode.vSyncFreq.Numerator   = vsync;
-  mode.vSyncFreq.Denominator = 1;
-  mode.hSyncFreq.Numerator   = vsync * height;
-  mode.hSyncFreq.Denominator = 1;
+  signal.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
+  signal.AdditionalSignalInfo.videoStandard    = 255;
 
-  mode.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
-  mode.pixelRate        = ((UINT64)vsync) * ((UINT64)width) * ((UINT64)height);
+  signal.vSyncFreq.Numerator   = mode.refresh;
+  signal.vSyncFreq.Denominator = 1;
+  signal.hSyncFreq.Numerator   = mode.refresh * signal.totalSize.cy;
+  signal.hSyncFreq.Denominator = 1;
+
+  signal.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
+  signal.pixelRate        = timing.pixelClock;
 }
 
 NTSTATUS CIndirectDeviceContext::ParseMonitorDescription(
@@ -620,9 +630,9 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription(
   auto * mode = inArgs->pMonitorModes;
   for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
-    mode->Size = sizeof(IDDCX_MONITOR_MODE);
+    mode->Size   = sizeof(IDDCX_MONITOR_MODE);
     mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
-    FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
+    FillSignalInfo(mode->MonitorVideoSignalInfo, *it, true);
 
     if (it->preferred)
       outArgs->PreferredMonitorModeIdx =
@@ -649,9 +659,9 @@ NTSTATUS CIndirectDeviceContext::MonitorGetDefaultModes(
   auto* mode = inArgs->pDefaultMonitorModes;
   for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
-    mode->Size = sizeof(IDDCX_MONITOR_MODE);
+    mode->Size   = sizeof(IDDCX_MONITOR_MODE);
     mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_DRIVER;
-    FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
+    FillSignalInfo(mode->MonitorVideoSignalInfo, *it, true);
 
     if (it->preferred)
       outArgs->PreferredMonitorModeIdx =
@@ -678,7 +688,7 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes(
   for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     mode->Size = sizeof(IDDCX_TARGET_MODE);
-    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
+    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, *it, false);
   }
 
   return STATUS_SUCCESS;
@@ -704,9 +714,9 @@ NTSTATUS CIndirectDeviceContext::ParseMonitorDescription2(
   for (auto it = modes.cbegin(); it != modes.cend(); ++it, ++mode)
   {
     ZeroMemory(mode, sizeof(*mode));
-    mode->Size = sizeof(IDDCX_MONITOR_MODE2);
-    mode->Origin = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
-    FillSignalInfo(mode->MonitorVideoSignalInfo, it->width, it->height, it->refresh, true);
+    mode->Size             = sizeof(IDDCX_MONITOR_MODE2);
+    mode->Origin           = IDDCX_MONITOR_MODE_ORIGIN_MONITORDESCRIPTOR;
+    FillSignalInfo(mode->MonitorVideoSignalInfo, *it, true);
     mode->BitsPerComponent = GetWireBitsPerComponent(CanProcessFP16());
 
     if (it->preferred)
@@ -738,7 +748,7 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
   {
     ZeroMemory(mode, sizeof(*mode));
     mode->Size = sizeof(IDDCX_TARGET_MODE2);
-    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, it->width, it->height, it->refresh, false);
+    FillSignalInfo(mode->TargetVideoSignalInfo.targetVideoSignalInfo, *it, false);
     mode->BitsPerComponent = GetWireBitsPerComponent(CanProcessFP16());
   }
 

@@ -104,23 +104,6 @@ NTSTATUS LGIddAdapterCommitModes(IDDCX_ADAPTER adapter, const IDARG_IN_COMMITMOD
   return STATUS_SUCCESS;
 }
 
-static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO & mode, DWORD width, DWORD height, DWORD vsync, bool monitorMode)
-{
-  mode.totalSize.cx = mode.activeSize.cx = width;
-  mode.totalSize.cy = mode.activeSize.cy = height;
-
-  mode.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
-  mode.AdditionalSignalInfo.videoStandard    = 255;
-
-  mode.vSyncFreq.Numerator   = vsync;
-  mode.vSyncFreq.Denominator = 1;
-  mode.hSyncFreq.Numerator   = vsync * height;
-  mode.hSyncFreq.Denominator = 1;
-
-  mode.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
-  mode.pixelRate        = ((UINT64)vsync) * ((UINT64)width) * ((UINT64)height);
-}
-
 NTSTATUS LGIddParseMonitorDescription(const IDARG_IN_PARSEMONITORDESCRIPTION* inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION* outArgs)
 {
@@ -170,10 +153,8 @@ NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
     (IDDCX_TARGET_CAPS)(IDDCX_TARGET_CAPS_WIDE_COLOR_SPACE |
       IDDCX_TARGET_CAPS_HIGH_COLOR_SPACE) :
     (IDDCX_TARGET_CAPS)0;
-  outArgs->DitheringSupport.Rgb = hdr ?
-    (IDDCX_BITS_PER_COMPONENT)(IDDCX_BITS_PER_COMPONENT_8 |
-      IDDCX_BITS_PER_COMPONENT_10) :
-    IDDCX_BITS_PER_COMPONENT_8;
+
+  outArgs->DitheringSupport.Rgb      = IDDCX_BITS_PER_COMPONENT_NONE;
   outArgs->DitheringSupport.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
   outArgs->DitheringSupport.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
   outArgs->DitheringSupport.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
