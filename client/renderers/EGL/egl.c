@@ -50,6 +50,7 @@
 #include "desktop.h"
 #include "cursor.h"
 #include "hdr_overlay.h"
+#include "hdr_compose.h"
 #include "postprocess.h"
 #include "util.h"
 
@@ -83,6 +84,7 @@ struct Inst
   EGL_Cursor      * cursor;  // the mouse cursor
   EGL_Damage      * damage;  // the damage display
   EGL_HDROverlay  * hdrOverlay;
+  EGL_HDRCompose  * hdrCompose;
   bool              imgui;   // if imgui was initialized
 
   LG_RendererFormat    format;
@@ -132,6 +134,9 @@ struct Inst
   bool surfaceSupportsSCRGB;
   bool hdr;               // true if current frame format is HDR
   bool nativeHDR;         // true only while the surface HDR description is active
+  bool nativeHDRPQ;
+  float nativeReferenceWhiteLevel;
+  bool linearHDRComposition;
 };
 
 static struct Option egl_options[] =
@@ -317,6 +322,7 @@ static void egl_deinitialize(LG_Renderer * renderer)
   egl_cursorFree (&this->cursor);
   egl_damageFree (&this->damage);
   egl_hdrOverlayFree(&this->hdrOverlay);
+  egl_hdrComposeFree(&this->hdrCompose);
 
   LG_LOCK_FREE(this->lock);
   LG_LOCK_FREE(this->desktopDamageLock);
@@ -344,7 +350,8 @@ static bool egl_supports(LG_Renderer * renderer, LG_RendererSupport flag)
       return this->dmaSupport;
 
     case LG_SUPPORTS_HDR_PQ:
-      return this->surfaceSupportsPQ;
+      return this->surfaceSupportsPQ &&
+        egl_hdrComposeIsConfigured(this->hdrCompose);
 
     case LG_SUPPORTS_HDR_SCRGB:
       return this->surfaceSupportsSCRGB;
@@ -557,6 +564,9 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
 
   if (!egl_hdrOverlayResize(this->hdrOverlay, this->width, this->height))
     DEBUG_ERROR("Failed to resize the HDR overlay framebuffer");
+  if (this->hdrCompose &&
+      !egl_hdrComposeResize(this->hdrCompose, this->width, this->height))
+    DEBUG_FATAL("Failed to resize the linear HDR composition framebuffer");
 
   // this is needed to refresh the font atlas texture
   ImGui_ImplOpenGL3_Shutdown();
@@ -619,17 +629,11 @@ static bool egl_updateHDRState(struct Inst * this, bool force)
   bool nativeHDR = false;
   app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
   const bool surfaceCompatible = this->format.hdrPQ ?
-    this->surfaceSupportsPQ : this->surfaceSupportsSCRGB;
+    (this->surfaceSupportsPQ &&
+      egl_hdrComposeIsConfigured(this->hdrCompose)) :
+    this->surfaceSupportsSCRGB;
   const bool useNativeHDR = !this->showSpice && this->format.hdr &&
     surfaceCompatible && nativeHDR && !app_getHDRDescFailed();
-
-  if (!force && this->nativeHDR == useNativeHDR)
-    return false;
-
-  this->nativeHDR = useNativeHDR;
-  egl_desktopSetNativeHDR(this->desktop, useNativeHDR);
-  egl_cursorSetHDRState(this->cursor, useNativeHDR, this->format.hdrPQ,
-      this->format.sdrWhiteLevel);
 
   LG_DSHDRWhiteLevels whiteLevels =
   {
@@ -638,9 +642,29 @@ static bool egl_updateHDRState(struct Inst * this, bool force)
   };
   if (useNativeHDR && !app_getProp(LG_DS_HDR_WHITE_LEVELS, &whiteLevels))
     DEBUG_WARN("Display server did not provide native HDR white levels");
+  const float referenceWhiteLevel = this->format.hdrPQ ?
+    whiteLevels.pq : whiteLevels.scRGB;
+  const bool stateChanged        = this->nativeHDR != useNativeHDR ||
+    (useNativeHDR &&
+      (this->nativeHDRPQ != this->format.hdrPQ ||
+       this->nativeReferenceWhiteLevel != referenceWhiteLevel));
+
+  if (!force && !stateChanged)
+    return false;
+
+  this->nativeHDR                 = useNativeHDR;
+  this->nativeHDRPQ               = this->format.hdrPQ;
+  this->nativeReferenceWhiteLevel = referenceWhiteLevel;
+  this->linearHDRComposition      = useNativeHDR && this->format.hdrPQ;
+  egl_hdrComposeSetActive(this->hdrCompose,
+      this->linearHDRComposition);
+  egl_desktopSetNativeHDR(this->desktop, useNativeHDR,
+      this->linearHDRComposition);
   egl_hdrOverlaySetState(this->hdrOverlay, useNativeHDR,
-      this->format.hdrPQ,
-      this->format.hdrPQ ? whiteLevels.pq : whiteLevels.scRGB);
+      this->format.hdrPQ && !this->linearHDRComposition,
+      referenceWhiteLevel);
+  egl_damageSetHDRState(this->damage, useNativeHDR,
+      referenceWhiteLevel);
   return true;
 }
 
@@ -688,7 +712,9 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
     bool nativeHDR = false;
     app_getProp(LG_DS_NATIVE_HDR, &nativeHDR);
     const bool surfaceCompatible = format.hdrPQ ?
-      this->surfaceSupportsPQ : this->surfaceSupportsSCRGB;
+      (this->surfaceSupportsPQ &&
+        egl_hdrComposeIsConfigured(this->hdrCompose)) :
+      this->surfaceSupportsSCRGB;
     if (!surfaceCompatible)
       DEBUG_WARN("HDR frames being displayed on an 8-bit EGL surface "
           "or an EGL surface incompatible with the source encoding");
@@ -1049,6 +1075,15 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
+  if (this->surfaceSupportsPQ &&
+      !util_hasGLExt(gl_exts, "GL_EXT_color_buffer_half_float") &&
+      !util_hasGLExt(gl_exts, "GL_EXT_color_buffer_float"))
+  {
+    DEBUG_WARN("Half-float render targets are unavailable; native PQ "
+        "composition disabled");
+    this->surfaceSupportsPQ = false;
+  }
+
   this->hasBufferAge = util_hasGLExt(client_exts, "EGL_EXT_buffer_age");
   if (!this->hasBufferAge)
     DEBUG_WARN("GL_EXT_buffer_age is not supported, will not perform as well.");
@@ -1130,6 +1165,14 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
+  if (this->surfaceSupportsPQ &&
+      !egl_hdrComposeInit(&this->hdrCompose))
+  {
+    DEBUG_WARN("Native PQ output disabled: failed to initialize linear "
+        "HDR composition");
+    this->surfaceSupportsPQ = false;
+  }
+
   if (!ImGui_ImplOpenGL3_Init("#version 300 es"))
   {
     DEBUG_ERROR("Failed to initialize ImGui");
@@ -1203,6 +1246,36 @@ static int egl_clipSurfaceDamage(
   return out;
 }
 
+static int egl_mergeSurfaceDamage(struct Rect * damage, int count)
+{
+  if (count <= 1)
+    return count;
+
+  FrameDamageRect rects[count];
+  for (int i = 0; i < count; ++i)
+  {
+    rects[i] = (FrameDamageRect) {
+      .x      = damage[i].x,
+      .y      = damage[i].y,
+      .width  = damage[i].w,
+      .height = damage[i].h,
+    };
+  }
+
+  count = rectsMergeOverlapping(rects, count);
+  for (int i = 0; i < count; ++i)
+  {
+    damage[i] = (struct Rect) {
+      .x = rects[i].x,
+      .y = rects[i].y,
+      .w = rects[i].width,
+      .h = rects[i].height,
+    };
+  }
+
+  return count;
+}
+
 inline static void renderLetterBox(struct Inst * this)
 {
   bool hLB = this->destRect.x > 0;
@@ -1248,12 +1321,20 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
-  EGLint bufferAge   = egl_bufferAge(this);
+  EGLint     bufferAge       = egl_bufferAge(this);
   const bool hdrStateChanged = egl_updateHDRState(this, false);
-  bool renderAll     = hdrStateChanged ||
-                       invalidateWindow || this->hadOverlay ||
-                       bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
-                       this->showSpice;
+  bool       mapCursorHDR;
+  float      mapCursorGain;
+  float      mapCursorContentPeak;
+  egl_desktopGetHDRMapping(this->desktop, &mapCursorHDR,
+      &mapCursorGain, &mapCursorContentPeak);
+  egl_cursorSetHDRState(this->cursor,
+      this->format.hdr && !this->showSpice, this->nativeHDR, mapCursorHDR,
+      this->format.hdrPQ, mapCursorGain, mapCursorContentPeak);
+  bool renderAll = hdrStateChanged ||
+                   invalidateWindow || this->hadOverlay ||
+                   bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
+                   this->showSpice;
 
   bool hasOverlay = false;
   struct CursorState cursorState = { .visible = false };
@@ -1328,7 +1409,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   }
   ++this->overlayHistoryIdx;
 
-  bool fullFrame = false;
+  bool       fullFrame             = false;
+  const bool linearHDRComposition  = egl_hdrComposeBegin(this->hdrCompose);
+  bool       deferredLogicalCursor = false;
   if (likely(this->destRect.w > 0 && this->destRect.h > 0))
   {
     if (egl_desktopRender(this->desktop,
@@ -1336,11 +1419,12 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated,
-        &fullFrame))
+        &fullFrame, egl_hdrComposeGetFramebuffer(this->hdrCompose)))
     {
       cursorState = egl_cursorRender(this->cursor,
           (this->format.rotate + rotate) % LG_ROTATE_MAX,
-          this->width, this->height);
+          this->width, this->height,
+          linearHDRComposition, &deferredLogicalCursor);
     }
     else
       hasOverlay = true;
@@ -1364,13 +1448,18 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     if (damageIdx == -1)
       hasOverlay = true;
 
-    const bool hdrOverlay = egl_hdrOverlayBegin(this->hdrOverlay,
-        damage, damageIdx);
+    const bool hdrOverlay  = egl_hdrOverlayBegin(
+        this->hdrOverlay, damage, damageIdx);
+    const bool drawOverlay = !this->nativeHDR || hdrOverlay;
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
-    egl_stateInvalidate();
+    if (drawOverlay)
+    {
+      ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
+      egl_stateInvalidate();
+    }
     if (hdrOverlay)
-      egl_hdrOverlayEnd(this->hdrOverlay, damage, damageIdx);
+      egl_hdrOverlayEnd(this->hdrOverlay, damage, damageIdx,
+          egl_hdrComposeGetFramebuffer(this->hdrCompose));
 
     for (int i = 0; i < damageIdx; ++i)
       damage[i].y = this->height - damage[i].y - damage[i].h;
@@ -1421,6 +1510,37 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   if (damageIdx > 0)
     damageIdx = egl_clipSurfaceDamage(
       damage, damageIdx, this->width, this->height);
+
+  struct Rect * encodeDamage      = damage;
+  int           encodeDamageCount =
+    linearHDRComposition && renderAll ? 0 : damageIdx;
+  if (linearHDRComposition && encodeDamageCount > 0)
+  {
+    const int capacity = damageIdx + accumulated->count;
+    encodeDamage       = alloca(capacity * sizeof(*encodeDamage));
+    memcpy(encodeDamage, damage, damageIdx * sizeof(*encodeDamage));
+    encodeDamageCount  = damageIdx;
+
+    double matrix[6];
+    egl_desktopToScreenMatrix(matrix,
+        this->format.frameWidth, this->format.frameHeight,
+        this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
+        this->width, this->height);
+    for (int i = 0; i < accumulated->count; ++i)
+      encodeDamage[encodeDamageCount++] =
+        egl_desktopToScreen(matrix, accumulated->rects + i);
+
+    encodeDamageCount = egl_clipSurfaceDamage(
+        encodeDamage, encodeDamageCount, this->width, this->height);
+    encodeDamageCount = egl_mergeSurfaceDamage(
+        encodeDamage, encodeDamageCount);
+  }
+
+  egl_hdrComposeEnd(this->hdrCompose, encodeDamage, encodeDamageCount);
+  if (deferredLogicalCursor && cursorState.visible)
+    egl_cursorRender(this->cursor,
+        (this->format.rotate + rotate) % LG_ROTATE_MAX,
+        this->width, this->height, false, NULL);
 
   this->hadOverlay = hasOverlay;
   this->cursorLast = cursorState;

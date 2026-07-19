@@ -29,47 +29,24 @@ const float c1    = 3424.0 / 4096.0;
 const float c2    = 2413.0 / 128.0;
 const float c3    = 2392.0 / 128.0;
 
-float minGain(vec3 pixel) { return min(pixel.r, min(pixel.g, pixel.b)); }
-float maxGain(vec3 pixel) { return max(pixel.r, max(pixel.g, pixel.b)); }
-float midGain(vec3 pixel)
-{
-  return pixel.r < pixel.g ?
-    (pixel.r < pixel.b ?
-      min(pixel.g, pixel.b) : // min = r
-      min(pixel.r, pixel.g)) : // min = b
-    (pixel.g < pixel.b ?
-      min(pixel.r, pixel.b) : // min = g
-      min(pixel.r, pixel.g)); // min = b
-}
+const int TRANSFER_SRGB  = 0;
+const int TRANSFER_SCRGB = 1;
+const int TRANSFER_PQ    = 2;
 
 vec3 compress(vec3 pixel)
 {
-  float maxGain = maxGain(pixel);
-  return pixel * (maxGain < knee ? maxGain :
-      knee + max(maxGain - knee, 0.0) * compressor) / maxGain;
-}
-
-vec3 fixClip(vec3 pixel)
-{
-  // keep the (mid - min) / (max - min) ratio
-  float preMin  = minGain(pixel);
-  float preMid  = midGain(pixel);
-  float preMax  = maxGain(pixel);
-  vec3  clip    = clamp(pixel, 0.0, 1.0);
-  float postMin = minGain(clip);
-  float postMid = midGain(clip);
-  float postMax = maxGain(clip);
-  float ratio   = (preMid - preMin) / (preMax - preMin);
-  float newMid  = ratio * (postMax - postMin) + postMin;
-  return vec3(clip.r != postMid ? clip.r : newMid,
-                clip.g != postMid ? clip.g : newMid,
-                clip.b != postMid ? clip.b : newMid);
+  pixel = max(pixel, 0.0);
+  float peak = max(pixel.r, max(pixel.g, pixel.b));
+  if (peak <= 0.0)
+    return vec3(0.0);
+  return pixel * (peak < knee ? peak :
+      knee + (peak - knee) * compressor) / peak;
 }
 
 // Returns luminance in nits
 vec3 pq2lin(vec3 pq, float gain)
 {
-  vec3 p = pow(pq, vec3(m2inv));
+  vec3 p = pow(max(pq, 0.0), vec3(m2inv));
   vec3 d = max(p - c1, vec3(0.0)) / (c2 - c3 * p);
   return pow(d, vec3(m1inv)) * gain;
 }
@@ -77,25 +54,25 @@ vec3 pq2lin(vec3 pq, float gain)
 vec3 lin2pq(vec3 linear)
 {
   // ST.2084 uses absolute luminance normalized to 10000 cd/m².
-  vec3 p = pow(linear, vec3(m1));
+  vec3 p = pow(max(linear, 0.0), vec3(m1));
   return pow((c1 + c2 * p) / (1.0 + c3 * p), vec3(m2));
 }
 
 vec3 srgb2lin(vec3 c)
 {
-  vec3 v = c / 12.92;
-  vec3 v2 = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
+  vec3 v         = c / 12.92;
+  vec3 v2        = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
   vec3 threshold = vec3(0.04045);
-  vec3 result = mix(v, v2, greaterThanEqual(c, threshold));
+  vec3 result    = mix(v, v2, greaterThanEqual(c, threshold));
   return result;
 }
 
 vec3 lin2srgb(vec3 c)
 {
-  vec3 v = c * 12.92;
-  vec3 v2 = pow(c, vec3(1.0/2.4)) * 1.055 - 0.055;
+  vec3 v         = c * 12.92;
+  vec3 v2        = pow(max(c, 0.0), vec3(1.0/2.4)) * 1.055 - 0.055;
   vec3 threshold = vec3(0.0031308);
-  vec3 result = mix(v, v2, greaterThanEqual(c, threshold));
+  vec3 result    = mix(v, v2, greaterThanEqual(c, threshold));
   return result;
 }
 
@@ -103,29 +80,42 @@ vec3 lin2srgb(vec3 c)
 vec3 bt2020to709(vec3 bt2020)
 {
   return vec3(
-    bt2020.r *  1.6605 + bt2020.g * -0.5876 + bt2020.b * -0.0728,
-    bt2020.r * -0.1246 + bt2020.g *  1.1329 + bt2020.b * -0.0083,
-    bt2020.r * -0.0182 + bt2020.g * -0.1006 + bt2020.b * 1.1187);
+    bt2020.r *  1.6604910 + bt2020.g * -0.5876411 + bt2020.b * -0.0728499,
+    bt2020.r * -0.1245505 + bt2020.g *  1.1328999 + bt2020.b * -0.0083494,
+    bt2020.r * -0.0181508 + bt2020.g * -0.1005789 + bt2020.b * 1.1187297);
 }
 
 // in linear space
 vec3 bt709to2020(vec3 bt709)
 {
   return vec3(
-    bt709.r * 0.6274 + bt709.g * 0.3293 + bt709.b * 0.0433,
-    bt709.r * 0.0691 + bt709.g * 0.9195 + bt709.b * 0.0114,
-    bt709.r * 0.0164 + bt709.g * 0.0880 + bt709.b * 0.8956);
+    bt709.r * 0.6274039 + bt709.g * 0.3292830 + bt709.b * 0.0433131,
+    bt709.r * 0.0690973 + bt709.g * 0.9195404 + bt709.b * 0.0113623,
+    bt709.r * 0.0163914 + bt709.g * 0.0880133 + bt709.b * 0.8955953);
 }
 
-vec3 mapToSDR(vec3 color, float gain, bool pq)
+vec3 mapToSDR(vec3 color, float gain, float contentPeak, bool pq)
 {
   if (pq)
   {
-    // HDR10: PQ-encoded BT.2020. Linearise then convert the gamut to BT.709.
+    // HDR10: PQ-encoded BT.2020. Decode the absolute 10000-nit PQ range into
+    // values relative to the configured SDR display peak. MaxCLL constrains
+    // content luminance without changing that absolute unit conversion.
     color = pq2lin(color.rgb, gain);
+    float luminance2020 =
+      dot(color, vec3(0.2627002, 0.6779981, 0.0593017));
+    if (contentPeak > 0.0 && luminance2020 > contentPeak)
+      color *= contentPeak / luminance2020;
     color = bt2020to709(color);
   }
-  // else: scRGB is already linear BT.709 (1.0 == SDR white), so no EOTF or
-  // gamut conversion is required - only highlight compression below.
-  return lin2srgb(compress(color));
+  else
+  {
+    // scRGB is linear BT.709 with 1.0 fixed at 80 nits. Use the same
+    // absolute-luminance mapping as PQ before compressing the highlights.
+    color *= gain;
+    float luminance709 = dot(color, vec3(0.2126390, 0.7151687, 0.0721923));
+    if (contentPeak > 0.0 && luminance709 > contentPeak)
+      color *= contentPeak / luminance709;
+  }
+  return lin2srgb(clamp(compress(color), 0.0, 1.0));
 }

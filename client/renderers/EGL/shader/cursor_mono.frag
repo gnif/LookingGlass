@@ -2,15 +2,11 @@
 precision highp float;
 precision highp int;
 
-#include "hdr.h"
-
 in  vec2 uv;
 out vec4 color;
 
 uniform sampler2D sampler1;
 uniform float     scale;
-uniform int       wireTransfer; // 0: sRGB, 1: scRGB, 2: PQ
-uniform float     sdrWhiteLevel;
 
 void main()
 {
@@ -30,13 +26,7 @@ void main()
   if (tmp.rgb == vec3(0.0, 0.0, 0.0))
     discard;
 
-  if (wireTransfer == 2)
-  {
-    vec3 linear = bt709to2020(srgb2lin(tmp.rgb));
-    tmp.rgb = lin2pq(linear * (sdrWhiteLevel / 10000.0));
-  }
-  else if (wireTransfer == 1)
-    tmp.rgb = srgb2lin(tmp.rgb) * (sdrWhiteLevel / 80.0);
-
+  // Logical cursor masks operate on the encoded destination values. Their
+  // binary AND/XOR operands must not be colour converted.
   color = tmp;
 }

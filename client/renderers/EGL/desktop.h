@@ -25,7 +25,8 @@
 #include "egl.h"
 #include "desktop_rects.h"
 
-typedef struct EGL_Desktop EGL_Desktop;
+typedef struct EGL_Desktop     EGL_Desktop;
+typedef struct EGL_Framebuffer EGL_Framebuffer;
 
 enum EGL_DesktopScaleType
 {
@@ -42,7 +43,10 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop, EGLDisplay * display,
 void egl_desktopFree(EGL_Desktop ** desktop);
 
 void egl_desktopConfigUI(EGL_Desktop * desktop);
-void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR);
+void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR,
+    bool linearComposition);
+void egl_desktopGetHDRMapping(EGL_Desktop * desktop, bool * enabled,
+    float * gain, float * contentPeak);
 bool egl_desktopSetup (EGL_Desktop * desktop, const LG_RendererFormat format);
 bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount);
@@ -51,7 +55,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects,
-    bool * fullFrame);
+    bool * fullFrame, EGL_Framebuffer * target);
 
 void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height);
 void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,

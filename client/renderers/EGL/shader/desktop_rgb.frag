@@ -24,15 +24,17 @@ uniform int   cbMode;
 uniform bool  isHDR;
 uniform bool  mapHDRtoSDR;
 uniform float mapHDRGain;
+uniform float mapHDRContentPeak;
 uniform bool  mapHDRPQ;
+uniform bool  outputHDRLinear;
 
-vec4 samplePQLinear(vec2 coord)
+vec3 samplePQLinear(vec2 coord)
 {
-  ivec2 size = textureSize(sampler1, 0);
-  vec2 samplePos = coord * vec2(size) - 0.5;
-  ivec2 base = ivec2(floor(samplePos));
-  vec2 f = fract(samplePos);
-  ivec2 limit = size - ivec2(1);
+  ivec2 size      = textureSize(sampler1, 0);
+  vec2  samplePos = coord * vec2(size) - 0.5;
+  ivec2 base      = ivec2(floor(samplePos));
+  vec2  f         = fract(samplePos);
+  ivec2 limit     = size - ivec2(1);
 
   vec3 c00 = pq2lin(texelFetch(sampler1,
       clamp(base, ivec2(0), limit), 0).rgb, 1.0);
@@ -44,11 +46,12 @@ vec4 samplePQLinear(vec2 coord)
       clamp(base + ivec2(1, 1), ivec2(0), limit), 0).rgb, 1.0);
 
   vec3 linear = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-  return vec4(lin2pq(max(linear, 0.0)), 1.0);
+  return max(linear, 0.0);
 }
 
 void main()
 {
+  bool sampledPQLinear = false;
   switch (scaleAlgo)
   {
     case EGL_SCALE_NEAREST:
@@ -60,13 +63,28 @@ void main()
 
     case EGL_SCALE_LINEAR:
     {
-      color = isHDR && mapHDRPQ ? samplePQLinear(uv) : texture(sampler1, uv);
+      if (isHDR && mapHDRPQ)
+      {
+        vec3 linear     = samplePQLinear(uv);
+        color           = vec4(
+            outputHDRLinear ? linear : lin2pq(linear), 1.0);
+        sampledPQLinear = outputHDRLinear;
+      }
+      else
+        color = texture(sampler1, uv);
       break;
     }
   }
 
   if (isHDR && mapHDRtoSDR)
-    color.rgb = mapToSDR(color.rgb, mapHDRGain, mapHDRPQ);
+    color.rgb = mapToSDR(color.rgb, mapHDRGain,
+        mapHDRContentPeak, mapHDRPQ);
+  else if (isHDR && outputHDRLinear && mapHDRPQ)
+  {
+    vec3 linear2020 = sampledPQLinear ?
+      color.rgb : pq2lin(color.rgb, 1.0);
+    color.rgb = bt2020to709(linear2020) * 125.0;
+  }
 
   // The legacy effects are defined for an SDR signal. Do not apply them to a
   // native HDR signal where their nonlinear operations would alter luminance

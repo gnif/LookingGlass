@@ -202,10 +202,16 @@ bool egl_hdrOverlayBegin(EGL_HDROverlay * this,
 }
 
 void egl_hdrOverlayEnd(EGL_HDROverlay * this,
-    const struct Rect * damage, int damageCount)
+    const struct Rect * damage, int damageCount,
+    EGL_Framebuffer * target)
 {
-  egl_stateBindFramebuffer(0);
-  egl_stateViewport(0, 0, this->width, this->height);
+  if (target)
+    egl_framebufferBind(target);
+  else
+  {
+    egl_stateBindFramebuffer(0);
+    egl_stateViewport(0, 0, this->width, this->height);
+  }
 
   egl_uniform1i(this->uPQ, this->renderPQ);
   egl_uniform1f(this->uReferenceWhiteLevel,

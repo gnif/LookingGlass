@@ -38,6 +38,13 @@
 #include "cursor_rgb.frag.h"
 #include "cursor_mono.frag.h"
 
+enum CursorTransfer
+{
+  CURSOR_TRANSFER_SRGB  = 0,
+  CURSOR_TRANSFER_SCRGB = 1,
+  CURSOR_TRANSFER_PQ    = 2,
+};
+
 struct CursorTex
 {
   struct EGL_Texture * texture;
@@ -46,11 +53,15 @@ struct CursorTex
   EGL_Uniform * uScale;
   EGL_Uniform * uRotate;
   EGL_Uniform * uCBMode;
-  EGL_Uniform * uWireTransfer;
+  EGL_Uniform * uSourceTransfer;
   EGL_Uniform * uSDRWhiteLevel;
+  EGL_Uniform * uMapHDRtoSDR;
+  EGL_Uniform * uMapHDRGain;
+  EGL_Uniform * uMapHDRContentPeak;
   EGL_Uniform * uColorTransformFlags;
   EGL_Uniform * uColorMatrix;
   EGL_Uniform * uColorScalar;
+  EGL_Uniform * uLinearComposition;
 };
 
 struct CursorPos
@@ -79,12 +90,15 @@ struct EGL_Cursor
   LG_RendererRotate rotate;
   int               cbMode;
 
-  _Atomic(struct CursorPos)  pos;
-  _Atomic(struct CursorPos)  hs;
-  _Atomic(struct CursorSize) size;
-  _Atomic(float)             scale;
-  _Atomic(int)               wireTransfer;
-  _Atomic(float)             sdrWhiteLevel;
+  _Atomic(struct CursorPos)    pos;
+  _Atomic(struct CursorPos)    hs;
+  _Atomic(struct CursorSize)   size;
+  _Atomic(float)               scale;
+  _Atomic(enum CursorTransfer) sourceTransfer;
+  _Atomic(float)               sdrWhiteLevel;
+  _Atomic(bool)                mapHDRtoSDR;
+  _Atomic(float)               mapHDRGain;
+  _Atomic(float)               mapHDRContentPeak;
 
   bool                colorTransformUpdate;
   KVMFRColorTransform pendingColorTransform;
@@ -119,16 +133,23 @@ static bool cursorTexInit(struct CursorTex * t,
     return false;
   }
 
-  t->uMousePos      = egl_shaderGetUniform(t->shader, "mouse"        );
-  t->uScale         = egl_shaderGetUniform(t->shader, "scale"        );
-  t->uRotate        = egl_shaderGetUniform(t->shader, "rotate"       );
-  t->uCBMode        = egl_shaderGetUniform(t->shader, "cbMode"       );
-  t->uWireTransfer  = egl_shaderGetUniform(t->shader, "wireTransfer" );
-  t->uSDRWhiteLevel = egl_shaderGetUniform(t->shader, "sdrWhiteLevel");
-  t->uColorTransformFlags =
+  t->uMousePos             = egl_shaderGetUniform(t->shader, "mouse"        );
+  t->uScale                = egl_shaderGetUniform(t->shader, "scale"        );
+  t->uRotate               = egl_shaderGetUniform(t->shader, "rotate"       );
+  t->uCBMode               = egl_shaderGetUniform(t->shader, "cbMode"       );
+  t->uSourceTransfer       = egl_shaderGetUniform(t->shader, "sourceTransfer");
+  t->uSDRWhiteLevel        = egl_shaderGetUniform(t->shader, "sdrWhiteLevel");
+  t->uMapHDRtoSDR          = egl_shaderGetUniform(t->shader, "mapHDRtoSDR"  );
+  t->uMapHDRGain           = egl_shaderGetUniform(t->shader, "mapHDRGain"   );
+  t->uMapHDRContentPeak    =
+    egl_shaderGetUniform(t->shader, "mapHDRContentPeak");
+  t->uColorTransformFlags  =
     egl_shaderGetUniform(t->shader, "colorTransformFlags");
-  t->uColorMatrix = egl_shaderGetUniform(t->shader, "colorMatrix[0]");
-  t->uColorScalar = egl_shaderGetUniform(t->shader, "colorTransformScalar");
+  t->uColorMatrix          = egl_shaderGetUniform(t->shader, "colorMatrix[0]");
+  t->uColorScalar          =
+    egl_shaderGetUniform(t->shader, "colorTransformScalar");
+  t->uLinearComposition    =
+    egl_shaderGetUniform(t->shader, "linearComposition");
   egl_shaderAssocTextures(t->shader, 2);
 
   return true;
@@ -136,20 +157,37 @@ static bool cursorTexInit(struct CursorTex * t,
 
 static inline void setCursorTexUniforms(EGL_Cursor * cursor,
     struct CursorTex * t, bool mono, float x, float y,
-    float w, float h, float scale)
+    float w, float h, float scale, bool linearComposition)
 {
-  egl_uniform4f(t->uMousePos     , x, y, w, mono ? h / 2 : h);
-  egl_uniform1f(t->uScale        , scale);
-  egl_uniform1i(t->uRotate       , cursor->rotate);
-  egl_uniform1i(t->uCBMode       , cursor->cbMode);
-  egl_uniform1i(t->uWireTransfer,
-      mono ? 0 : atomic_load(&cursor->wireTransfer));
-  egl_uniform1f(t->uSDRWhiteLevel, atomic_load(&cursor->sdrWhiteLevel));
-  egl_uniform1ui(t->uColorTransformFlags,
+  const enum CursorTransfer sourceTransfer = mono ? CURSOR_TRANSFER_SRGB :
+    atomic_load(&cursor->sourceTransfer);
+  egl_uniform4f (t->uMousePos            , x, y, w, mono ? h / 2 : h);
+  egl_uniform1f (t->uScale               , scale);
+  egl_uniform1i (t->uRotate              , cursor->rotate);
+  // The colour-blind transform is defined for SDR signals. The desktop
+  // disables it while passing native HDR through, so keep the cursor on the
+  // same path rather than altering encoded PQ or linear scRGB independently.
+  egl_uniform1i (t->uCBMode              ,
+      (sourceTransfer == CURSOR_TRANSFER_SRGB ||
+       atomic_load(&cursor->mapHDRtoSDR)) ?
+        cursor->cbMode : 0);
+  egl_uniform1i (t->uSourceTransfer      , sourceTransfer);
+  egl_uniform1f (t->uSDRWhiteLevel       ,
+      atomic_load(&cursor->sdrWhiteLevel));
+  egl_uniform1i (t->uMapHDRtoSDR         ,
+      !mono && atomic_load(&cursor->mapHDRtoSDR));
+  egl_uniform1f (t->uMapHDRGain          ,
+      atomic_load(&cursor->mapHDRGain));
+  egl_uniform1f (t->uMapHDRContentPeak   ,
+      atomic_load(&cursor->mapHDRContentPeak));
+  egl_uniform1ui(t->uColorTransformFlags ,
       mono ? 0 : cursor->activeColorTransform.flags);
-  egl_uniformSet(t->uColorMatrix, EGL_UNIFORM_TYPE_4FV, 3, GL_FALSE,
+  egl_uniformSet (t->uColorMatrix        , EGL_UNIFORM_TYPE_4FV, 3, GL_FALSE,
       cursor->activeColorTransform.matrix);
-  egl_uniform1f(t->uColorScalar, cursor->activeColorTransform.scalar);
+  egl_uniform1f (t->uColorScalar         ,
+      cursor->activeColorTransform.scalar);
+  egl_uniform1i (t->uLinearComposition   ,
+      !mono && linearComposition);
   if (!mono && cursor->colorLUT)
     egl_stateBindTexture(1, GL_TEXTURE_2D, cursor->colorLUT);
 }
@@ -195,13 +233,16 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   struct CursorPos  pos  = { .x = 0, .y = 0 };
   struct CursorPos  hs   = { .x = 0, .y = 0 };
   struct CursorSize size = { .w = 0, .h = 0 };
-  atomic_init(&(*cursor)->pos       , pos  );
-  atomic_init(&(*cursor)->hs        , hs   );
-  atomic_init(&(*cursor)->size      , size );
-  atomic_init(&(*cursor)->scale     , 1.0f );
-  atomic_init(&(*cursor)->wireTransfer, 0);
-  atomic_init(&(*cursor)->sdrWhiteLevel,
+  atomic_init(&(*cursor)->pos              , pos  );
+  atomic_init(&(*cursor)->hs               , hs   );
+  atomic_init(&(*cursor)->size             , size );
+  atomic_init(&(*cursor)->scale            , 1.0f );
+  atomic_init(&(*cursor)->sourceTransfer   , CURSOR_TRANSFER_SRGB);
+  atomic_init(&(*cursor)->sdrWhiteLevel    ,
       KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+  atomic_init(&(*cursor)->mapHDRtoSDR      , false);
+  atomic_init(&(*cursor)->mapHDRGain       , 1.0f );
+  atomic_init(&(*cursor)->mapHDRContentPeak, 1.0f );
 
   return true;
 }
@@ -290,8 +331,12 @@ void egl_cursorSetState(EGL_Cursor * cursor, const bool visible,
 }
 
 struct CursorState egl_cursorRender(EGL_Cursor * cursor,
-    LG_RendererRotate rotate, int width, int height)
+    LG_RendererRotate rotate, int width, int height,
+    bool linearComposition, bool * logicalDeferred)
 {
+  if (logicalDeferred)
+    *logicalDeferred = false;
+
   if (!cursor->visible)
     return (struct CursorState) { .visible = false };
 
@@ -443,20 +488,27 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
   state.rect.x = max(0, state.rect.x - 1);
   state.rect.y = max(0, state.rect.y - 1);
 
+  if (linearComposition && cursor->type != LG_CURSOR_COLOR)
+  {
+    if (logicalDeferred)
+      *logicalDeferred = true;
+    return state;
+  }
+
   egl_stateBlend(true);
   switch(cursor->type)
   {
     case LG_CURSOR_MONOCHROME:
     {
       setCursorTexUniforms(cursor, &cursor->norm, true, pos.x, pos.y,
-          size.w, size.h, scale);
+          size.w, size.h, scale, false);
       egl_shaderUse(cursor->norm.shader);
       egl_stateBlendFunc(GL_ZERO, GL_SRC_COLOR);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
       setCursorTexUniforms(cursor, &cursor->mono, true, pos.x, pos.y,
-          size.w, size.h, scale);
+          size.w, size.h, scale, false);
       egl_shaderUse(cursor->mono.shader);
       egl_stateBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
@@ -467,14 +519,14 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_MASKED_COLOR:
     {
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
-          size.w, size.h, scale);
+          size.w, size.h, scale, linearComposition);
       egl_shaderUse(cursor->norm.shader);
       egl_stateBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
       egl_modelRender(cursor->model);
 
       setCursorTexUniforms(cursor, &cursor->mono, false, pos.x, pos.y,
-          size.w, size.h, scale);
+          size.w, size.h, scale, linearComposition);
       egl_shaderUse(cursor->mono.shader);
       egl_stateBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
       egl_modelSetTexture(cursor->model, cursor->mono.texture);
@@ -485,7 +537,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
     case LG_CURSOR_COLOR:
     {
       setCursorTexUniforms(cursor, &cursor->norm, false, pos.x, pos.y,
-          size.w, size.h, scale);
+          size.w, size.h, scale, linearComposition);
       egl_shaderUse(cursor->norm.shader);
       egl_stateBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
       egl_modelSetTexture(cursor->model, cursor->norm.texture);
@@ -498,11 +550,19 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
   return state;
 }
 
-void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
-    float sdrWhiteLevel)
+void egl_cursorSetHDRState(EGL_Cursor * cursor, bool sourceHDR,
+    bool nativeHDR, bool mapHDRtoSDR, bool hdrPQ,
+    float mapGain, float mapContentPeak)
 {
-  egl_cursorSetSDRWhiteLevel(cursor, sdrWhiteLevel);
-  atomic_store(&cursor->wireTransfer, !hdrActive ? 0 : (hdrPQ ? 2 : 1));
+  // The cursor's white level is supplied independently by the pointer queue.
+  // Do not replace it with the frame-level fallback during every render.
+  atomic_store(&cursor->sourceTransfer,
+      !sourceHDR ? CURSOR_TRANSFER_SRGB :
+        (hdrPQ ? CURSOR_TRANSFER_PQ : CURSOR_TRANSFER_SCRGB));
+  atomic_store(&cursor->mapHDRtoSDR,
+      sourceHDR && !nativeHDR && mapHDRtoSDR);
+  atomic_store(&cursor->mapHDRGain, mapGain);
+  atomic_store(&cursor->mapHDRContentPeak, mapContentPeak);
 }
 
 void egl_cursorSetSDRWhiteLevel(EGL_Cursor * cursor, float sdrWhiteLevel)

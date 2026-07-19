@@ -20,6 +20,7 @@
 
 #include "desktop.h"
 #include "state.h"
+#include "framebuffer.h"
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -52,7 +53,9 @@ struct DesktopShader
   EGL_Uniform * uIsHDR;
   EGL_Uniform * uMapHDRtoSDR;
   EGL_Uniform * uMapHDRGain;
+  EGL_Uniform * uMapHDRContentPeak;
   EGL_Uniform * uMapHDRPQ;
+  EGL_Uniform * uOutputHDRLinear;
 };
 
 struct EGL_Desktop
@@ -91,6 +94,7 @@ struct EGL_Desktop
   // map HDR content to SDR
   bool  mapHDRtoSDR;
   bool  nativeHDR;
+  bool  linearComposition;
   int   peakLuminance;
   int   maxCLL;
 
@@ -119,15 +123,28 @@ static bool egl_initDesktopShader(
     return false;
   }
 
-  shader->uDesktopSize  = egl_shaderGetUniform(shader->shader, "desktopSize" );
-  shader->uTransform    = egl_shaderGetUniform(shader->shader, "transform"   );
-  shader->uScaleAlgo    = egl_shaderGetUniform(shader->shader, "scaleAlgo"   );
-  shader->uNVGain       = egl_shaderGetUniform(shader->shader, "nvGain"      );
-  shader->uCBMode       = egl_shaderGetUniform(shader->shader, "cbMode"      );
-  shader->uIsHDR        = egl_shaderGetUniform(shader->shader, "isHDR"       );
-  shader->uMapHDRtoSDR  = egl_shaderGetUniform(shader->shader, "mapHDRtoSDR" );
-  shader->uMapHDRGain   = egl_shaderGetUniform(shader->shader, "mapHDRGain"  );
-  shader->uMapHDRPQ     = egl_shaderGetUniform(shader->shader, "mapHDRPQ"    );
+  shader->uDesktopSize       =
+    egl_shaderGetUniform(shader->shader, "desktopSize");
+  shader->uTransform         =
+    egl_shaderGetUniform(shader->shader, "transform");
+  shader->uScaleAlgo         =
+    egl_shaderGetUniform(shader->shader, "scaleAlgo");
+  shader->uNVGain            =
+    egl_shaderGetUniform(shader->shader, "nvGain");
+  shader->uCBMode            =
+    egl_shaderGetUniform(shader->shader, "cbMode");
+  shader->uIsHDR             =
+    egl_shaderGetUniform(shader->shader, "isHDR");
+  shader->uMapHDRtoSDR       =
+    egl_shaderGetUniform(shader->shader, "mapHDRtoSDR");
+  shader->uMapHDRGain        =
+    egl_shaderGetUniform(shader->shader, "mapHDRGain");
+  shader->uMapHDRContentPeak =
+    egl_shaderGetUniform(shader->shader, "mapHDRContentPeak");
+  shader->uMapHDRPQ          =
+    egl_shaderGetUniform(shader->shader, "mapHDRPQ");
+  shader->uOutputHDRLinear   =
+    egl_shaderGetUniform(shader->shader, "outputHDRLinear");
 
   return true;
 }
@@ -426,7 +443,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects,
-    bool * fullFrame)
+    bool * fullFrame, EGL_Framebuffer * target)
 {
   EGL_Texture * tex;
   int width, height;
@@ -490,8 +507,13 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     finalSizeY = height;
   }
 
-  egl_stateBindFramebuffer(0);
-  egl_resetViewport(desktop->egl);
+  if (target)
+    egl_framebufferBind(target);
+  else
+  {
+    egl_stateBindFramebuffer(0);
+    egl_resetViewport(desktop->egl);
+  }
 
   egl_textureBind(texture);
 
@@ -522,26 +544,47 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     desktop->useDMA && texture == desktop->texture ?
       &desktop->dmaShader : &desktop->shader;
 
-  const float mapHDRGain =
+  /* PQ is normalized to 10000 nits, while scRGB defines 1.0 as 80 nits.
+   * Convert either encoding into values relative to the selected SDR peak. */
+  const float mapHDRGain        = (desktop->hdrPQ ? 10000.0f : 80.0f) /
+    desktop->peakLuminance;
+  const float mapHDRContentPeak =
     (float)desktop->maxCLL / desktop->peakLuminance;
 
-  egl_uniform1i         (shader->uScaleAlgo  , scaleAlgo);
-  egl_uniform2f         (shader->uDesktopSize, width, height);
-  egl_uniformMatrix3x2fv(shader->uTransform  , 1, GL_FALSE, desktop->matrix);
-  egl_uniform1f         (shader->uNVGain     , desktop->nvGain);
-  egl_uniform1i         (shader->uCBMode     , desktop->cbMode);
-  egl_uniform1i         (shader->uIsHDR      , hdr);
-  egl_uniform1i         (shader->uMapHDRtoSDR, desktop->mapHDRtoSDR && !desktop->nativeHDR);
-  egl_uniform1f         (shader->uMapHDRGain , mapHDRGain);
-  egl_uniform1i         (shader->uMapHDRPQ   , desktop->hdrPQ);
+  egl_uniform1i         (shader->uScaleAlgo        , scaleAlgo);
+  egl_uniform2f         (shader->uDesktopSize      , width, height);
+  egl_uniformMatrix3x2fv(shader->uTransform        ,
+      1, GL_FALSE, desktop->matrix);
+  egl_uniform1f         (shader->uNVGain           , desktop->nvGain);
+  egl_uniform1i         (shader->uCBMode           , desktop->cbMode);
+  egl_uniform1i         (shader->uIsHDR            , hdr);
+  egl_uniform1i         (shader->uMapHDRtoSDR      ,
+      desktop->mapHDRtoSDR && !desktop->nativeHDR);
+  egl_uniform1f         (shader->uMapHDRGain       , mapHDRGain);
+  egl_uniform1f         (shader->uMapHDRContentPeak, mapHDRContentPeak);
+  egl_uniform1i         (shader->uMapHDRPQ         , desktop->hdrPQ);
+  egl_uniform1i         (shader->uOutputHDRLinear  ,
+      desktop->linearComposition);
   egl_shaderUse(shader->shader);
   egl_desktopRectsRender(desktop->mesh);
   return true;
 }
 
-void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR)
+void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR,
+    bool linearComposition)
 {
-  desktop->nativeHDR = nativeHDR;
+  desktop->nativeHDR         = nativeHDR;
+  desktop->linearComposition = nativeHDR && linearComposition;
+}
+
+void egl_desktopGetHDRMapping(EGL_Desktop * desktop, bool * enabled,
+    float * gain, float * contentPeak)
+{
+  *enabled     = desktop->hdr && !desktop->useSpice &&
+    desktop->mapHDRtoSDR && !desktop->nativeHDR;
+  *gain        = (desktop->hdrPQ ? 10000.0f : 80.0f) /
+    desktop->peakLuminance;
+  *contentPeak = (float)desktop->maxCLL / desktop->peakLuminance;
 }
 
 void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)

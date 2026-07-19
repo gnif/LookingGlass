@@ -40,5 +40,7 @@ void egl_damageConfigUI(EGL_Damage * damage);
 void egl_damageSetup(EGL_Damage * damage, int width, int height);
 void egl_damageResize(EGL_Damage * damage, float translateX, float translateY,
     float scaleX, float scaleY);
+void egl_damageSetHDRState(EGL_Damage * damage, bool active,
+    float referenceWhiteLevel);
 bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate,
     const struct DesktopDamage * data);

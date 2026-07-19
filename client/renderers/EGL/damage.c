@@ -51,6 +51,11 @@ struct EGL_Damage
 
   // uniforms
   EGL_Uniform * uTransform;
+  EGL_Uniform * uLinearOutput;
+  EGL_Uniform * uReferenceWhiteLevel;
+
+  bool  linearOutput;
+  float referenceWhiteLevel;
 };
 
 void egl_damageConfigUI(EGL_Damage * damage)
@@ -90,7 +95,13 @@ bool egl_damageInit(EGL_Damage ** damage)
     return false;
   }
 
-  (*damage)->uTransform = egl_shaderGetUniform((*damage)->shader, "transform");
+  (*damage)->uTransform           =
+    egl_shaderGetUniform((*damage)->shader, "transform");
+  (*damage)->uLinearOutput        =
+    egl_shaderGetUniform((*damage)->shader, "linearOutput");
+  (*damage)->uReferenceWhiteLevel =
+    egl_shaderGetUniform((*damage)->shader, "referenceWhiteLevel");
+  (*damage)->referenceWhiteLevel  = 80.0f;
 
   return true;
 }
@@ -130,6 +141,14 @@ void egl_damageResize(EGL_Damage * damage, float translateX, float translateY,
   update_matrix(damage);
 }
 
+void egl_damageSetHDRState(EGL_Damage * damage, bool active,
+    float referenceWhiteLevel)
+{
+  damage->linearOutput        = active;
+  damage->referenceWhiteLevel = referenceWhiteLevel > 0.0f ?
+    referenceWhiteLevel : 80.0f;
+}
+
 bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struct DesktopDamage * data)
 {
   if (!damage->show)
@@ -145,6 +164,9 @@ bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struc
   egl_stateBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   egl_uniformMatrix3x2fv(damage->uTransform, 1, GL_FALSE, damage->transform);
+  egl_uniform1i(damage->uLinearOutput, damage->linearOutput);
+  egl_uniform1f(damage->uReferenceWhiteLevel,
+      damage->referenceWhiteLevel);
   egl_shaderUse(damage->shader);
 
   if (data && data->count != 0)

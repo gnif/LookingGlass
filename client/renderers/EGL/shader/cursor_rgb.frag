@@ -12,11 +12,15 @@ uniform sampler2D sampler1;
 uniform sampler2D sampler2;
 uniform float     scale;
 uniform int       cbMode;
-uniform int       wireTransfer; // 0: sRGB, 1: scRGB, 2: PQ
+uniform int       sourceTransfer;
 uniform float     sdrWhiteLevel;
+uniform bool      mapHDRtoSDR;
+uniform float     mapHDRGain;
+uniform float     mapHDRContentPeak;
 uniform uint      colorTransformFlags;
 uniform vec4      colorMatrix[3];
 uniform float     colorTransformScalar;
+uniform bool      linearComposition;
 
 const uint COLOR_TRANSFORM_MATRIX = 1u;
 const uint COLOR_TRANSFORM_LUT    = 2u;
@@ -47,10 +51,10 @@ vec3 xyzToBT2020(vec3 xyz)
 
 vec3 applyColorLUT(vec3 value)
 {
-  vec3 pos = clamp(value, 0.0, 1.0) * 4095.0;
-  ivec3 lo = ivec3(floor(pos));
-  ivec3 hi = min(lo + ivec3(1), ivec3(4095));
-  vec3 f = fract(pos);
+  vec3  pos = clamp(value, 0.0, 1.0) * 4095.0;
+  ivec3 lo  = ivec3(floor(pos));
+  ivec3 hi  = min(lo + ivec3(1), ivec3(4095));
+  vec3  f   = fract(pos);
   return vec3(
     mix(texelFetch(sampler2, ivec2(lo.r, 0), 0).r,
         texelFetch(sampler2, ivec2(hi.r, 0), 0).r, f.r),
@@ -74,10 +78,9 @@ void main()
   else
     color = texture(sampler1, uv);
 
-  if (cbMode > 0)
-    color = cbTransform(color, cbMode);
-
-  if (color.a > 0.0 && (wireTransfer != 0 || colorTransformFlags != 0u))
+  if (color.a > 0.0 &&
+      (sourceTransfer != TRANSFER_SRGB ||
+       colorTransformFlags != 0u || cbMode > 0))
   {
     // Cursor pixels are premultiplied sRGB. Work on straight, linear BT.709
     // values through the XYZ calibration stage, encode for the active wire
@@ -90,20 +93,36 @@ void main()
         dot(vec4(xyz, 1.0), colorMatrix[0]),
         dot(vec4(xyz, 1.0), colorMatrix[1]),
         dot(vec4(xyz, 1.0), colorMatrix[2])) * colorTransformScalar;
-      value = wireTransfer == 2 ? xyzToBT2020(xyz) : xyzToBT709(xyz);
+      value = sourceTransfer == TRANSFER_PQ ?
+        xyzToBT2020(xyz) : xyzToBT709(xyz);
     }
-    else if (wireTransfer == 2)
+    else if (sourceTransfer == TRANSFER_PQ)
       value = bt709to2020(value);
 
-    if (wireTransfer == 2)
+    if (sourceTransfer == TRANSFER_PQ)
       value = lin2pq(max(value, 0.0) * (sdrWhiteLevel / 10000.0));
-    else if (wireTransfer == 1)
+    else if (sourceTransfer == TRANSFER_SCRGB)
       value *= sdrWhiteLevel / 80.0;
     else
       value = lin2srgb(max(value, 0.0));
 
     if ((colorTransformFlags & COLOR_TRANSFORM_LUT) != 0u)
       value = applyColorLUT(value);
+
+    if (mapHDRtoSDR)
+      value = mapToSDR(value, mapHDRGain,
+          mapHDRContentPeak, sourceTransfer == TRANSFER_PQ);
+    // Native PQ surfaces are composed through a linear scRGB framebuffer.
+    // Preserve the guest's transfer-domain LUT by decoding it only after the
+    // complete guest transform has been applied.
+    else if (linearComposition && sourceTransfer == TRANSFER_PQ)
+      value = bt2020to709(pq2lin(value, 1.0)) * 125.0;
+
+    // Apply SDR-only accessibility transforms after HDR-to-SDR mapping and
+    // to straight colour so translucent cursor edges remain premultiplied
+    // correctly.
+    if (cbMode > 0)
+      value = cbTransform(vec4(value, 1.0), cbMode).rgb;
     color.rgb = value * color.a;
   }
   else if (color.a == 0.0)

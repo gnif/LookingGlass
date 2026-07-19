@@ -24,24 +24,16 @@
 
 #include <stdbool.h>
 
-typedef struct EGL_HDROverlay  EGL_HDROverlay;
 typedef struct EGL_Framebuffer EGL_Framebuffer;
+typedef struct EGL_HDRCompose  EGL_HDRCompose;
 
-bool egl_hdrOverlayInit(EGL_HDROverlay ** overlay);
-void egl_hdrOverlayFree(EGL_HDROverlay ** overlay);
-
-bool egl_hdrOverlayResize(EGL_HDROverlay * overlay, unsigned int width,
-    unsigned int height);
-void egl_hdrOverlaySetState(EGL_HDROverlay * overlay, bool active, bool pq,
-    float referenceWhiteLevel);
-
-/*
- * Begin returns true when ImGui should be rendered into the HDR overlay
- * framebuffer. The caller must then call egl_hdrOverlayEnd after ImGui has
- * finished rendering and the EGL state cache has been invalidated.
- */
-bool egl_hdrOverlayBegin(EGL_HDROverlay * overlay,
+bool egl_hdrComposeInit(EGL_HDRCompose ** compose);
+void egl_hdrComposeFree(EGL_HDRCompose ** compose);
+bool egl_hdrComposeResize(EGL_HDRCompose * compose,
+    unsigned int width, unsigned int height);
+void egl_hdrComposeSetActive(EGL_HDRCompose * compose, bool active);
+bool egl_hdrComposeIsConfigured(EGL_HDRCompose * compose);
+bool egl_hdrComposeBegin(EGL_HDRCompose * compose);
+void egl_hdrComposeEnd(EGL_HDRCompose * compose,
     const struct Rect * damage, int damageCount);
-void egl_hdrOverlayEnd(EGL_HDROverlay * overlay,
-    const struct Rect * damage, int damageCount,
-    EGL_Framebuffer * target);
+EGL_Framebuffer * egl_hdrComposeGetFramebuffer(EGL_HDRCompose * compose);

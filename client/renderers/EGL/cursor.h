@@ -54,8 +54,10 @@ void egl_cursorSetState(EGL_Cursor * cursor, const bool visible,
     const float x, const float y, const float hx, const float hy);
 
 struct CursorState egl_cursorRender(EGL_Cursor * cursor,
-    LG_RendererRotate rotate, int width, int height);
+    LG_RendererRotate rotate, int width, int height,
+    bool linearComposition, bool * logicalDeferred);
 
-void egl_cursorSetHDRState(EGL_Cursor * cursor, bool hdrActive, bool hdrPQ,
-    float sdrWhiteLevel);
+void egl_cursorSetHDRState(EGL_Cursor * cursor, bool sourceHDR,
+    bool nativeHDR, bool mapHDRtoSDR, bool hdrPQ,
+    float mapGain, float mapContentPeak);
 void egl_cursorSetSDRWhiteLevel(EGL_Cursor * cursor, float sdrWhiteLevel);
