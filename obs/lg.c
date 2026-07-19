@@ -949,8 +949,8 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
   this->unpack        = false;
   this->hdr           = frame->flags & FRAME_FLAG_HDR;
   this->hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
-  atomic_store(&this->sdrWhiteLevel, frame->sdrWhiteLevel ?
-      frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+  /* Keep the white level supplied with the cursor message. The frame value
+   * is only a general SDR-content level and can differ from QueryHWCursor3. */
 
   if (this->hdr && this->hdrPQ)
     lgComputeColorMatrix(this);
@@ -1434,13 +1434,12 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
       if (this->cursor.type == CURSOR_TYPE_MASKED_COLOR &&
           this->cursorXorTex)
       {
-        effect = useCursorEffect ?
-          this->cursorEffect : obs_get_base_effect(OBS_EFFECT_DEFAULT);
-        image = useCursorEffect ?
-          this->cursorImage : gs_effect_get_param_by_name(effect, "image");
+        /* The XOR plane is a logical operand, not SDR colour. Applying the
+         * cursor colour transform or white-level mapping changes the mask
+         * before the inverse-destination blend. */
+        effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+        image  = gs_effect_get_param_by_name(effect, "image");
         gs_effect_set_texture(image, this->cursorXorTex);
-        if (useCursorEffect)
-          lgSetupCursorEffect(this, cursorOutputTransfer);
         gs_blend_function_separate(
             GS_BLEND_INVDSTCOLOR, GS_BLEND_INVSRCALPHA,
             GS_BLEND_ZERO       , GS_BLEND_ONE);
