@@ -60,6 +60,7 @@ build_shaders(
   shader/hdr_compose.vert
   shader/hdr_compose.frag
   shader/basic.vert
+  shader/hdr_decode.frag
   shader/convert_24bit.frag
   shader/ffx_cas.frag
   shader/ffx_fsr1_easu.frag
@@ -97,6 +98,7 @@ add_library(renderer_EGL STATIC
   ffx.c
   filter_glsl.c
   filter_24bit.c
+  filter_hdr.c
   filter_ffx_cas.c
   filter_ffx_fsr1.c
   filter_downscale.c

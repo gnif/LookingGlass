@@ -18,11 +18,20 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#pragma once
+#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : enable
 
-extern EGL_FilterOps egl_filter24bitOps;
-extern EGL_FilterOps egl_filterHDRDecodeOps;
-extern EGL_FilterOps egl_filterDownscaleOps;
-extern EGL_FilterOps egl_filterFFXCASOps;
-extern EGL_FilterOps egl_filterFFXFSR1Ops;
-extern EGL_FilterOps egl_filterGLSLOps;
+precision highp float;
+
+#include "hdr.h"
+
+in  vec2 fragCoord;
+out vec4 fragColor;
+
+uniform sampler2D sampler1;
+
+void main()
+{
+  vec4 pq = texture(sampler1, fragCoord);
+  fragColor = vec4(bt2020to709(pq2lin(pq.rgb, 1.0)) * 125.0, pq.a);
+}

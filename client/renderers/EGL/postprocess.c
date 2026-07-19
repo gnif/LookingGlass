@@ -49,7 +49,11 @@ static const EGL_FilterOps * EGL_Filters[] =
 
 struct EGL_PostProcess
 {
-  Vector filters, internalFilters, activeFilters;
+  Vector filters;
+  Vector internalFilters;
+  Vector activeFilters;
+  Vector effectFilters;
+  EGL_Filter  * hdrDecode;
   EGL_Texture * output;
   unsigned int outputX, outputY;
   _Atomic(bool) modified;
@@ -64,6 +68,7 @@ struct EGL_PostProcess
     bool useDMA;
     bool hdrPQ;
     unsigned int outputX, outputY;
+    bool outputHDRPQ;
     bool fullFrame;
   }
   config;
@@ -588,16 +593,29 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
   }
 
   if (!vector_create(&this->activeFilters,
-        sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters) + 1))
+        sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters) + 2))
   {
     DEBUG_ERROR("Failed to allocate the active filter list");
     goto error_internal;
   }
 
+  if (!vector_create(&this->effectFilters,
+        sizeof(EGL_Filter *), ARRAY_LENGTH(EGL_Filters)))
+  {
+    DEBUG_ERROR("Failed to allocate the effect filter list");
+    goto error_active;
+  }
+
+  if (!egl_filterInit(&egl_filterHDRDecodeOps, &this->hdrDecode))
+  {
+    DEBUG_ERROR("Failed to initialize the HDR decode filter");
+    goto error_effect;
+  }
+
   if (!egl_desktopRectsInit(&this->rects, 1))
   {
     DEBUG_ERROR("Failed to initialize the desktop rects");
-    goto error_active;
+    goto error_hdr;
   }
 
   loadPresetList(this);
@@ -606,6 +624,12 @@ bool egl_postProcessInit(EGL_PostProcess ** pp)
 
   *pp = this;
   return true;
+
+error_hdr:
+  egl_filterFree(&this->hdrDecode);
+
+error_effect:
+  vector_destroy(&this->effectFilters);
 
 error_active:
   vector_destroy(&this->activeFilters);
@@ -628,6 +652,8 @@ void egl_postProcessFree(EGL_PostProcess ** pp)
 
   EGL_PostProcess * this = *pp;
 
+  egl_filterFree(&this->hdrDecode);
+  vector_destroy(&this->effectFilters);
   vector_destroy(&this->activeFilters);
 
   EGL_Filter ** filter;
@@ -728,6 +754,7 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
 {
   this->config.valid = false;
   vector_clear(&this->activeFilters);
+  vector_clear(&this->effectFilters);
 
   unsigned int outputX = inputX;
   unsigned int outputY = inputY;
@@ -736,44 +763,96 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
   bool fullFrame = false;
 
   EGL_Filter * filter;
-  const Vector * lists[] =
+  vector_forEach(filter, &this->internalFilters)
   {
-    &this->internalFilters,
-    &this->filters,
-    NULL
-  };
+    egl_filterSetOutputResHint(filter, targetX, targetY);
 
-  for(const Vector ** filters = lists; *filters; ++filters)
-    vector_forEach(filter, *filters)
+    if (!egl_filterSetup(filter, outputFormat, outputX, outputY,
+          desktopWidth, desktopHeight, inputDMA) ||
+        !egl_filterPrepare(filter))
+      continue;
+
+    if (!vector_push(&this->activeFilters, &filter))
     {
-      // These filters operate on their input signal directly. PQ must be
-      // decoded to linear light before resampling or enhancement, and none of
-      // the current external filters declares such support. Keep only the
-      // mandatory format-conversion filters in a PQ chain.
-      if (hdrPQ && filter->ops.type != EGL_FILTER_TYPE_INTERNAL)
-        continue;
-
-      egl_filterSetOutputResHint(filter, targetX, targetY);
-
-      if (!egl_filterSetup(filter, outputFormat, outputX, outputY,
-            desktopWidth, desktopHeight, inputDMA) ||
-          !egl_filterPrepare(filter))
-        continue;
-
-      if (!vector_push(&this->activeFilters, &filter))
-      {
-        vector_clear(&this->activeFilters);
-        return false;
-      }
-
-      fullFrame |= filter->ops.fullFrame;
-
-      egl_filterGetOutputRes(filter, &outputX, &outputY, &outputFormat);
-
-      /* The first active filter converts external DMA textures into a normal
-       * texture for every subsequent filter. */
-      inputDMA = false;
+      vector_clear(&this->activeFilters);
+      return false;
     }
+
+    fullFrame |= filter->ops.fullFrame;
+    egl_filterGetOutputRes(filter, &outputX, &outputY, &outputFormat);
+    inputDMA = false;
+  }
+
+  const unsigned int    baseOutputX      = outputX;
+  const unsigned int    baseOutputY      = outputY;
+  const EGL_PixelFormat baseOutputFormat = outputFormat;
+  const bool            baseInputDMA     = inputDMA;
+  const bool            baseFullFrame    = fullFrame;
+
+  // Effects operate in linear scRGB. Probe them against the format produced
+  // by the decoder first so an inactive chain does not compile or execute an
+  // otherwise unnecessary conversion pass.
+  if (hdrPQ)
+  {
+    outputFormat = EGL_PF_RGBA16F;
+    inputDMA     = false;
+  }
+
+  vector_forEach(filter, &this->filters)
+  {
+    egl_filterSetOutputResHint(filter, targetX, targetY);
+
+    if (!egl_filterSetup(filter, outputFormat, outputX, outputY,
+          desktopWidth, desktopHeight, inputDMA) ||
+        !egl_filterPrepare(filter))
+      continue;
+
+    if (!vector_push(&this->effectFilters, &filter))
+    {
+      vector_clear(&this->activeFilters);
+      vector_clear(&this->effectFilters);
+      return false;
+    }
+
+    fullFrame |= filter->ops.fullFrame;
+    egl_filterGetOutputRes(filter, &outputX, &outputY, &outputFormat);
+    inputDMA = false;
+  }
+
+  bool effectsActive = vector_size(&this->effectFilters) > 0;
+  if (effectsActive && hdrPQ)
+  {
+    if (!egl_filterSetup(this->hdrDecode,
+          baseOutputFormat, baseOutputX, baseOutputY,
+          desktopWidth, desktopHeight, baseInputDMA) ||
+        !egl_filterPrepare(this->hdrDecode))
+    {
+      DEBUG_ERROR("Failed to prepare HDR input for the EGL effect chain");
+      vector_clear(&this->effectFilters);
+      effectsActive = false;
+      fullFrame     = baseFullFrame;
+    }
+    else if (!vector_push(&this->activeFilters, &this->hdrDecode))
+    {
+      vector_clear(&this->activeFilters);
+      vector_clear(&this->effectFilters);
+      return false;
+    }
+  }
+
+  vector_forEach(filter, &this->effectFilters)
+    if (!vector_push(&this->activeFilters, &filter))
+    {
+      vector_clear(&this->activeFilters);
+      vector_clear(&this->effectFilters);
+      return false;
+    }
+
+  if (!effectsActive)
+  {
+    outputX = baseOutputX;
+    outputY = baseOutputY;
+  }
 
   egl_desktopRectsMatrix(this->matrix,
       desktopWidth, desktopHeight, 0.0f, 0.0f, 1.0f, 1.0f, LG_ROTATE_0);
@@ -789,6 +868,7 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
   this->config.hdrPQ         = hdrPQ;
   this->config.outputX       = outputX;
   this->config.outputY       = outputY;
+  this->config.outputHDRPQ   = hdrPQ && !effectsActive;
   this->config.fullFrame     = fullFrame;
   this->config.valid         = true;
   return true;
@@ -871,9 +951,10 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
 }
 
 EGL_Texture * egl_postProcessGetOutput(EGL_PostProcess * this,
-    unsigned int * outputX, unsigned int * outputY)
+    unsigned int * outputX, unsigned int * outputY, bool * hdrPQ)
 {
   *outputX = this->outputX;
   *outputY = this->outputY;
+  *hdrPQ   = this->config.outputHDRPQ;
   return this->output;
 }

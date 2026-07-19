@@ -49,5 +49,6 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
     unsigned int targetX, unsigned int targetY, bool useDMA, bool hdrPQ);
 
+/* Return the current output texture and whether it remains PQ encoded. */
 EGL_Texture * egl_postProcessGetOutput(EGL_PostProcess * this,
-    unsigned int * outputX, unsigned int * outputY);
+    unsigned int * outputX, unsigned int * outputY, bool * hdrPQ);

@@ -497,14 +497,16 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   }
 
   unsigned int finalSizeX, finalSizeY;
+  bool outputHDRPQ = desktop->hdrPQ;
   EGL_Texture * texture = egl_postProcessGetOutput(desktop->pp,
-      &finalSizeX, &finalSizeY);
+      &finalSizeX, &finalSizeY, &outputHDRPQ);
 
   if (unlikely(!texture))
   {
-    texture    = tex;
-    finalSizeX = width;
-    finalSizeY = height;
+    texture     = tex;
+    finalSizeX  = width;
+    finalSizeY  = height;
+    outputHDRPQ = desktop->hdrPQ;
   }
 
   if (target)
@@ -546,7 +548,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   /* PQ is normalized to 10000 nits, while scRGB defines 1.0 as 80 nits.
    * Convert either encoding into values relative to the selected SDR peak. */
-  const float mapHDRGain        = (desktop->hdrPQ ? 10000.0f : 80.0f) /
+  const float mapHDRGain        = (outputHDRPQ ? 10000.0f : 80.0f) /
     desktop->peakLuminance;
   const float mapHDRContentPeak =
     (float)desktop->maxCLL / desktop->peakLuminance;
@@ -562,7 +564,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       desktop->mapHDRtoSDR && !desktop->nativeHDR);
   egl_uniform1f         (shader->uMapHDRGain       , mapHDRGain);
   egl_uniform1f         (shader->uMapHDRContentPeak, mapHDRContentPeak);
-  egl_uniform1i         (shader->uMapHDRPQ         , desktop->hdrPQ);
+  egl_uniform1i         (shader->uMapHDRPQ         , outputHDRPQ);
   egl_uniform1i         (shader->uOutputHDRLinear  ,
       desktop->linearComposition);
   egl_shaderUse(shader->shader);
