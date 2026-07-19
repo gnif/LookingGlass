@@ -314,6 +314,8 @@ EGLNativeWindowType waylandGetEGLNativeWindow(void)
 // HDR color management support
 enum
 {
+  HDR_CHROMATICITY_SCALE     = 20,
+  HDR_MIN_LUMINANCE_SCALE    = 10000,
   HDR_PQ_MIN_LUMINANCE       = 50,
   HDR_PQ_MAX_LUMINANCE       = 10000,
   HDR_PQ_DEFAULT_WHITE_LEVEL = 203,
@@ -346,35 +348,20 @@ static bool hdrPointInBT2020(int32_t x, int32_t y)
     (edge0 <= 0 && edge1 <= 0 && edge2 <= 0);
 }
 
-static bool hdrChromaticitiesValid(const uint16_t primary[3][2],
+static bool hdrTargetPrimariesContained(const uint16_t primary[3][2],
     const uint16_t whitePoint[2])
-{
-  for (unsigned i = 0; i < 3; ++i)
-    if (primary[i][1] == 0 || primary[i][0] > 50000 ||
-        primary[i][1] > 50000 ||
-        (uint32_t)primary[i][0] + primary[i][1] > 50000)
-      return false;
-
-  if (whitePoint[1] == 0 || whitePoint[0] > 50000 ||
-      whitePoint[1] > 50000 ||
-      (uint32_t)whitePoint[0] + whitePoint[1] > 50000)
-    return false;
-
-  return hdrTriangleEdge(
-      primary[0][0], primary[0][1], primary[1][0], primary[1][1],
-      primary[2][0], primary[2][1]) != 0;
-}
-
-static bool hdrTargetVolumeContained(const uint16_t primary[3][2],
-    const uint16_t whitePoint[2], uint32_t minLuminance,
-    uint32_t maxLuminance)
 {
   for (unsigned i = 0; i < 3; ++i)
     if (!hdrPointInBT2020(primary[i][0], primary[i][1]))
       return false;
 
-  return hdrPointInBT2020(whitePoint[0], whitePoint[1]) &&
-    minLuminance >= HDR_PQ_MIN_LUMINANCE &&
+  return hdrPointInBT2020(whitePoint[0], whitePoint[1]);
+}
+
+static bool hdrTargetLuminanceContained(uint32_t minLuminance,
+    uint32_t maxLuminance)
+{
+  return minLuminance >= HDR_PQ_MIN_LUMINANCE &&
     maxLuminance <= HDR_PQ_MAX_LUMINANCE;
 }
 
@@ -511,33 +498,55 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
 
   // KVMFR uses the ST 2086/DXGI scale of 50,000 units per coordinate while
   // color-management-v1 uses 1,000,000 units per coordinate.
-  const bool validMasteringLuminance =
-    (uint64_t)maxDisplayLuminance * 10000 > minDisplayLuminance;
-  const bool validMasteringChromaticities =
-    hdrChromaticitiesValid(displayPrimary, whitePoint);
-  const bool targetVolumeContained = hdrTargetVolumeContained(
-      displayPrimary, whitePoint, minDisplayLuminance,
-      maxDisplayLuminance);
-  const bool canSetMasteringMetadata = hdrPQ && hdrMetadata &&
-    wlWm.cmHasMasteringPrimaries && validMasteringLuminance &&
-    validMasteringChromaticities &&
-    (targetVolumeContained || wlWm.cmHasExtendedTargetVolume);
-  if (canSetMasteringMetadata)
+  const bool canSetMastering              = hdrPQ && hdrMetadata &&
+    wlWm.cmHasMasteringPrimaries;
+  const bool masteringPrimariesContained  =
+    hdrTargetPrimariesContained(displayPrimary, whitePoint);
+  const bool masteringLuminanceContained  =
+    hdrTargetLuminanceContained(minDisplayLuminance,
+        maxDisplayLuminance);
+  const bool validMasteringLuminance      =
+    (uint64_t)maxDisplayLuminance * HDR_MIN_LUMINANCE_SCALE >
+      minDisplayLuminance;
+  if (canSetMastering &&
+      (masteringPrimariesContained || wlWm.cmHasExtendedTargetVolume))
   {
     wp_image_description_creator_params_v1_set_mastering_display_primaries(
         wlWm.hdrImageCreator,
-        displayPrimary[0][0] * 20, displayPrimary[0][1] * 20,
-        displayPrimary[1][0] * 20, displayPrimary[1][1] * 20,
-        displayPrimary[2][0] * 20, displayPrimary[2][1] * 20,
-        whitePoint[0] * 20, whitePoint[1] * 20);
+        displayPrimary[0][0] * HDR_CHROMATICITY_SCALE,
+        displayPrimary[0][1] * HDR_CHROMATICITY_SCALE,
+        displayPrimary[1][0] * HDR_CHROMATICITY_SCALE,
+        displayPrimary[1][1] * HDR_CHROMATICITY_SCALE,
+        displayPrimary[2][0] * HDR_CHROMATICITY_SCALE,
+        displayPrimary[2][1] * HDR_CHROMATICITY_SCALE,
+        whitePoint[0] * HDR_CHROMATICITY_SCALE,
+        whitePoint[1] * HDR_CHROMATICITY_SCALE);
+  }
+  else if (canSetMastering)
+    DEBUG_WARN("HDR mastering primaries exceed the BT.2020 primary volume "
+        "without extended target-volume support; omitting them "
+        "(R:%u,%u G:%u,%u B:%u,%u W:%u,%u)",
+        displayPrimary[0][0], displayPrimary[0][1],
+        displayPrimary[1][0], displayPrimary[1][1],
+        displayPrimary[2][0], displayPrimary[2][1],
+        whitePoint[0], whitePoint[1]);
 
+  if (canSetMastering && validMasteringLuminance &&
+      (masteringLuminanceContained || wlWm.cmHasExtendedTargetVolume))
+  {
     wp_image_description_creator_params_v1_set_mastering_luminance(
         wlWm.hdrImageCreator,
         minDisplayLuminance, maxDisplayLuminance);
   }
-  else if (hdrPQ && hdrMetadata && wlWm.cmHasMasteringPrimaries)
-    DEBUG_WARN("HDR mastering target volume is invalid or unsupported; "
-        "omitting mastering display metadata");
+  else if (canSetMastering && !validMasteringLuminance)
+    DEBUG_WARN("Invalid HDR mastering luminance range; omitting it "
+        "(max:%u cd/m^2 min:%u (0.0001 cd/m^2))",
+        maxDisplayLuminance, minDisplayLuminance);
+  else if (canSetMastering)
+    DEBUG_WARN("HDR mastering luminance exceeds the PQ primary volume "
+        "without extended target-volume support; omitting it "
+        "(max:%u cd/m^2 min:%u (0.0001 cd/m^2))",
+        maxDisplayLuminance, minDisplayLuminance);
 
   if (hdrPQ && hdrMetadata)
   {
