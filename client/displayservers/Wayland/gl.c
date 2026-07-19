@@ -89,6 +89,7 @@ static void applyHDRPending(void)
         params.minDisplayLuminance,
         params.maxCLL,
         params.maxFALL,
+        params.referenceWhiteLevel,
         params.pq,
         params.metadata);
   }
@@ -162,9 +163,6 @@ static void activateReadyHDRImageDescription(void)
   wp_color_management_surface_v1_set_image_description(
       wlWm.colorSurface, desc,
       WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
-  if (wlWm.hdrImageDescPQ)
-    atomic_store(&wlWm.hdrActivePQWhiteLevel,
-        wlWm.hdrImageDescWhiteLevel);
   atomic_store(&wlWm.hdrActivePQ, wlWm.hdrImageDescPQ);
   atomic_store(&wlWm.hdrActive, true);
 
@@ -368,7 +366,7 @@ static bool hdrTargetLuminanceContained(uint32_t minLuminance,
 void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ, bool hdrMetadata)
+    uint32_t referenceWhiteLevel, bool hdrPQ, bool hdrMetadata)
 {
   if (!wlWm.colorManager)
     return;
@@ -484,17 +482,22 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
       wlWm.hdrImageCreator,
       WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ);
 
-  wlWm.hdrImageDescWhiteLevel = wlWm.cmHasLuminances ?
-    atomic_load(&wlWm.hdrPQWhiteLevel) : HDR_PQ_DEFAULT_WHITE_LEVEL;
+  const uint32_t sourceWhiteLevel = referenceWhiteLevel ?
+    referenceWhiteLevel : HDR_PQ_DEFAULT_WHITE_LEVEL;
 
   // The primary colour volume describes the PQ encoding itself. Mastering
   // display luminances are target-volume metadata and are set separately.
+  // Reference white describes the guest image content; the Wayland output
+  // reference white is used independently when composing local overlays.
   if (wlWm.cmHasLuminances)
     wp_image_description_creator_params_v1_set_luminances(
         wlWm.hdrImageCreator,
         HDR_PQ_MIN_LUMINANCE,
         HDR_PQ_MAX_LUMINANCE,
-        wlWm.hdrImageDescWhiteLevel);
+        sourceWhiteLevel);
+  else if (sourceWhiteLevel != HDR_PQ_DEFAULT_WHITE_LEVEL)
+    DEBUG_WARN("Compositor cannot accept the guest reference white level; "
+        "using the PQ default");
 
   // KVMFR uses the ST 2086/DXGI scale of 50,000 units per coordinate while
   // color-management-v1 uses 1,000,000 units per coordinate.
@@ -576,15 +579,17 @@ void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
   LG_UNLOCK(wlWm.hdrLock);
 
   DEBUG_INFO("HDR image description requested (%s, %s, "
-      "maxLum:%u cd/m² minLum:%u (0.0001 cd/m²) maxCLL:%u maxFALL:%u)",
+      "referenceWhite:%u cd/m² maxLum:%u cd/m² "
+      "minLum:%u (0.0001 cd/m²) maxCLL:%u maxFALL:%u)",
       hdrPQ ? "PQ" : "scRGB", hdrPQ ? "BT.2020" : "sRGB",
-      maxDisplayLuminance, minDisplayLuminance, maxCLL, maxFALL);
+      sourceWhiteLevel, maxDisplayLuminance, minDisplayLuminance,
+      maxCLL, maxFALL);
 }
 
 bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ, bool hdrMetadata)
+    uint32_t referenceWhiteLevel, bool hdrPQ, bool hdrMetadata)
 {
   if (!atomic_load_explicit(&wlWm.cmFeaturesDone, memory_order_acquire))
     return false;
@@ -600,16 +605,18 @@ bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
   atomic_store(&wlWm.hdrRequested, true);
 
   LG_LOCK(wlWm.pendingHDRLock);
-  wlWm.pendingHDR.pq       = hdrPQ;
-  wlWm.pendingHDR.metadata = hdrMetadata;
+  wlWm.pendingHDR.pq                    = hdrPQ;
+  wlWm.pendingHDR.metadata              = hdrMetadata;
+  wlWm.pendingHDR.maxDisplayLuminance   = maxDisplayLuminance;
+  wlWm.pendingHDR.minDisplayLuminance   = minDisplayLuminance;
+  wlWm.pendingHDR.maxCLL                = maxCLL;
+  wlWm.pendingHDR.maxFALL               = maxFALL;
+  wlWm.pendingHDR.referenceWhiteLevel   = referenceWhiteLevel;
   memcpy(wlWm.pendingHDR.displayPrimary, displayPrimary,
       sizeof(wlWm.pendingHDR.displayPrimary));
   memcpy(wlWm.pendingHDR.whitePoint, whitePoint,
       sizeof(wlWm.pendingHDR.whitePoint));
-  wlWm.pendingHDR.maxDisplayLuminance = maxDisplayLuminance;
-  wlWm.pendingHDR.minDisplayLuminance = minDisplayLuminance;
-  wlWm.pendingHDR.maxCLL              = maxCLL;
-  wlWm.pendingHDR.maxFALL             = maxFALL;
+
   wlWm.pendingHDRAction = WAYLAND_HDR_PENDING_APPLY;
   LG_UNLOCK(wlWm.pendingHDRLock);
   return true;

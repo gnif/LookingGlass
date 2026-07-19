@@ -116,6 +116,7 @@ struct WaylandHDRParameters
   uint32_t minDisplayLuminance;
   uint32_t maxCLL;
   uint32_t maxFALL;
+  uint32_t referenceWhiteLevel;
 };
 
 struct WaylandDSState
@@ -222,11 +223,9 @@ struct WaylandDSState
   _Atomic(bool) hdrActivePQ;
   _Atomic(bool) hdrRequested;
   _Atomic(bool) hdrRequestedPQ;
-  bool              hdrImageDescPQ;
-  bool              hdrImageDescReady;
-  uint32_t          hdrImageDescWhiteLevel;
-  _Atomic(uint32_t) hdrActivePQWhiteLevel;
-  LG_Lock           hdrLock;
+  bool    hdrImageDescPQ;
+  bool    hdrImageDescReady;
+  LG_Lock hdrLock;
 
   // wp_color_manager_v1 feature advertisement tracking.
   // Set to true after the done event for the color-manager has been received
@@ -349,7 +348,7 @@ void waylandColorMgmtFree(void);
 void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ, bool hdrMetadata);
+    uint32_t referenceWhiteLevel, bool hdrPQ, bool hdrMetadata);
 void waylandClearHDRImageDescription(void);
 
 // Queue HDR change from any thread (applied in waylandEGLSwapBuffers).
@@ -358,7 +357,7 @@ void waylandClearHDRImageDescription(void);
 bool waylandRequestHDR(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
-    bool hdrPQ, bool hdrMetadata);
+    uint32_t referenceWhiteLevel, bool hdrPQ, bool hdrMetadata);
 void waylandRequestClearHDR(void);
 
 // idle module

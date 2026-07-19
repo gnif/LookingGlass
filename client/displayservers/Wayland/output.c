@@ -82,12 +82,6 @@ void waylandOutputUpdateHDRWhiteLevel(void)
   if ((oldPQ != pqWhite || oldScRGB != scRGBWhite) && wlWm.frameEvent)
   {
     DEBUG_INFO("Wayland output reference white: %u cd/m²", pqWhite);
-    if (atomic_load(&wlWm.hdrRequested))
-    {
-      LG_LOCK(wlWm.pendingHDRLock);
-      wlWm.pendingHDRAction = WAYLAND_HDR_PENDING_APPLY;
-      LG_UNLOCK(wlWm.pendingHDRLock);
-    }
     app_invalidateWindow(true);
     waylandStopWaitFrame();
   }
