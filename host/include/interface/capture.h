@@ -84,7 +84,16 @@ typedef struct CaptureFrame
   bool            truncated;    // true if the frame data is truncated
   bool            hdr;          // true if the frame format is HDR
   bool            hdrPQ;        // true if the frame format is PQ transformed
+  bool            hdrMetadata;  // true if the HDR static metadata is valid
   CaptureRotation rotation;     // output rotation of the frame
+
+  uint16_t        hdrDisplayPrimary[3][2];
+  uint16_t        hdrWhitePoint[2];
+  uint32_t        hdrMaxDisplayLuminance;
+  uint32_t        hdrMinDisplayLuminance;
+  uint32_t        hdrMaxContentLightLevel;
+  uint32_t        hdrMaxFrameAverageLightLevel;
+  uint32_t        sdrWhiteLevel;
 
   uint32_t        damageRectsCount;
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];

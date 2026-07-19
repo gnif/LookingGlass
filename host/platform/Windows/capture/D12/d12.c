@@ -39,6 +39,7 @@
 #include <dxgi1_3.h>
 #include <dxgi1_6.h>
 #include <d3dcommon.h>
+#include <math.h>
 
 // definitions
 struct D12Interface
@@ -49,6 +50,7 @@ struct D12Interface
   ID3D12Device3      ** device;
 
   DISPLAYCONFIG_PATH_INFO displayPathInfo;
+  DXGI_OUTPUT_DESC1       outputDesc;
 
   ID3D12CommandQueue ** copyQueue;
   ID3D12CommandQueue ** computeQueue;
@@ -109,6 +111,54 @@ ComScope * d12_comScope = NULL;
 // locals
 
 static struct D12Interface * this = NULL;
+
+static bool d12_setHDRMetadata(CaptureFrame * frame,
+    const DXGI_OUTPUT_DESC1 * desc)
+{
+  const float coordinates[] =
+  {
+    desc->RedPrimary  [0], desc->RedPrimary  [1],
+    desc->GreenPrimary[0], desc->GreenPrimary[1],
+    desc->BluePrimary [0], desc->BluePrimary [1],
+    desc->WhitePoint  [0], desc->WhitePoint  [1],
+  };
+
+  for (unsigned i = 0; i < ARRAY_LENGTH(coordinates); ++i)
+    if (coordinates[i] < 0.0f || coordinates[i] > 1.0f)
+      return false;
+
+  if (desc->RedPrimary[1] == 0.0f || desc->GreenPrimary[1] == 0.0f ||
+      desc->BluePrimary[1] == 0.0f || desc->WhitePoint[1] == 0.0f ||
+      desc->MaxLuminance <= 0.0f)
+    return false;
+
+  frame->hdrDisplayPrimary[0][0] = (uint16_t)lroundf(
+      desc->RedPrimary[0] * 50000.0f);
+  frame->hdrDisplayPrimary[0][1] = (uint16_t)lroundf(
+      desc->RedPrimary[1] * 50000.0f);
+  frame->hdrDisplayPrimary[1][0] = (uint16_t)lroundf(
+      desc->GreenPrimary[0] * 50000.0f);
+  frame->hdrDisplayPrimary[1][1] = (uint16_t)lroundf(
+      desc->GreenPrimary[1] * 50000.0f);
+  frame->hdrDisplayPrimary[2][0] = (uint16_t)lroundf(
+      desc->BluePrimary[0] * 50000.0f);
+  frame->hdrDisplayPrimary[2][1] = (uint16_t)lroundf(
+      desc->BluePrimary[1] * 50000.0f);
+  frame->hdrWhitePoint[0] = (uint16_t)lroundf(
+      desc->WhitePoint[0] * 50000.0f);
+  frame->hdrWhitePoint[1] = (uint16_t)lroundf(
+      desc->WhitePoint[1] * 50000.0f);
+  frame->hdrMaxDisplayLuminance = (uint32_t)lroundf(desc->MaxLuminance);
+  frame->hdrMinDisplayLuminance = desc->MinLuminance > 0.0f ?
+    (uint32_t)lroundf(desc->MinLuminance * 10000.0f) : 0;
+
+  if ((uint64_t)frame->hdrMaxDisplayLuminance * 10000 <=
+      frame->hdrMinDisplayLuminance)
+    return false;
+
+  frame->hdrMetadata = true;
+  return true;
+}
 
 // forwards
 
@@ -298,6 +348,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 
   DXGI_OUTPUT_DESC1 desc1;
   IDXGIOutput6_GetDesc1(*output6, &desc1);
+  this->outputDesc = desc1;
   if (!display_getPathInfo(desc1.Monitor, &this->displayPathInfo))
   {
     DEBUG_ERROR("Failed to get the display path info");
@@ -546,12 +597,16 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     goto exit;
   }
 
+  const D3D12_RESOURCE_DESC srcDesc = ID3D12Resource_GetDesc(*src);
   D12FrameFormat srcFormat =
   {
-    .desc       = ID3D12Resource_GetDesc(*src),
+    .desc       = srcDesc,
     .colorSpace = desc.colorSpace,
-    .width      = srcFormat.desc.Width,
-    .height     = srcFormat.desc.Height
+    .width      = srcDesc.Width,
+    .height     = srcDesc.Height,
+    .hdr        = desc.colorSpace ==
+      DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+    .hdrPQ      = false,
   };
 
   switch(srcFormat.desc.Format)
@@ -577,12 +632,25 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
       goto exit;
   }
 
+  if (srcFormat.hdr)
+  {
+    if (srcFormat.format == CAPTURE_FMT_RGBA10)
+      srcFormat.hdrPQ = true;
+    else if (srcFormat.format != CAPTURE_FMT_RGBA16F)
+    {
+      DEBUG_ERROR("HDR capture did not provide an FP16 scRGB or PQ texture");
+      goto exit;
+    }
+  }
+
   // if the input format changed, reconfigure the effects
   if (srcFormat.desc.Width  == 0 ||
       srcFormat.desc.Width  != this->captureFormat.desc.Width  ||
       srcFormat.desc.Height != this->captureFormat.desc.Height ||
       srcFormat.desc.Format != this->captureFormat.desc.Format ||
-      srcFormat.colorSpace  != this->captureFormat.colorSpace)
+      srcFormat.colorSpace  != this->captureFormat.colorSpace  ||
+      srcFormat.hdr         != this->captureFormat.hdr         ||
+      srcFormat.hdrPQ       != this->captureFormat.hdrPQ)
   {
     DEBUG_TRACE("Capture format changed");
 
@@ -621,7 +689,9 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
         dstFormat.colorSpace  != this->dstFormat.colorSpace  ||
         dstFormat.width       != this->dstFormat.width       ||
         dstFormat.height      != this->dstFormat.height      ||
-        dstFormat.format      != this->dstFormat.format)
+        dstFormat.format      != this->dstFormat.format      ||
+        dstFormat.hdr         != this->dstFormat.hdr         ||
+        dstFormat.hdrPQ       != this->dstFormat.hdrPQ)
     {
       DEBUG_TRACE("Output format changed");
       ++this->formatVer;
@@ -655,9 +725,12 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->pitch            = this->pitch;
   frame->stride           = this->pitch / this->bpp;
   frame->format           = this->dstFormat.format;
-  frame->hdr              = this->dstFormat.colorSpace ==
-    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-  frame->hdrPQ            = false;
+  frame->hdr              = this->dstFormat.hdr;
+  frame->hdrPQ            = this->dstFormat.hdrPQ;
+  frame->sdrWhiteLevel    = (uint32_t)lroundf(
+      display_getSDRWhiteLevel(&this->displayPathInfo));
+  if (frame->hdr)
+    d12_setHDRMetadata(frame, &this->outputDesc);
   frame->rotation         = desc.rotation;
 
   D12Effect * effect;

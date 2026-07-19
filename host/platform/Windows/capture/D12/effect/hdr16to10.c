@@ -27,7 +27,6 @@
 #include "common/debug.h"
 #include "common/windebug.h"
 #include "common/array.h"
-#include "common/display.h"
 #include "common/option.h"
 
 #include <d3dcompiler.h>
@@ -36,17 +35,9 @@ typedef struct HDR16to10Inst
 {
   D12Effect base;
 
-  const DISPLAYCONFIG_PATH_INFO * displayPathInfo;
-  struct
-  {
-    float SDRWhiteLevel;
-  }
-  consts;
-
   ID3D12RootSignature  ** rootSignature;
   ID3D12PipelineState  ** pso;
   ID3D12DescriptorHeap ** descHeap;
-  ID3D12Resource       ** constBuffer;
 
   unsigned threadsX, threadsY;
   ID3D12Resource ** dst;
@@ -76,6 +67,8 @@ static void d12_effect_hdr16to10InitOptions(void)
 static D12EffectStatus d12_effect_hdr16to10Create(D12Effect ** instance,
   ID3D12Device3 * device, const DISPLAYCONFIG_PATH_INFO * displayPathInfo)
 {
+  (void)displayPathInfo;
+
   if (!option_get_bool("d12", "HDR16to10"))
     return D12_EFFECT_STATUS_BYPASS;
 
@@ -90,18 +83,9 @@ static D12EffectStatus d12_effect_hdr16to10Create(D12Effect ** instance,
   HRESULT hr;
   comRef_scopePush(10);
 
-  this->displayPathInfo = displayPathInfo;
-
   // shader resource view
-  D3D12_DESCRIPTOR_RANGE descriptorRanges[3] =
+  D3D12_DESCRIPTOR_RANGE descriptorRanges[2] =
   {
-    {
-      .RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-      .NumDescriptors                    = 1,
-      .BaseShaderRegister                = 0,
-      .RegisterSpace                     = 0,
-      .OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND
-    },
     {
       .RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
       .NumDescriptors                    = 1,
@@ -175,18 +159,27 @@ static D12EffectStatus d12_effect_hdr16to10Create(D12Effect ** instance,
 
   // Compile the shader
   const char * testCode =
-    "cbuffer Constants : register(b0)\n"
-    "{\n"
-    "  float SDRWhiteLevel;\n"
-    "};\n"
-    "\n"
     "Texture2D  <float4> src : register(t0);\n"
     "RWTexture2D<float4> dst : register(u0);\n"
+    "static const float PQ_m1 = 0.1593017578125;\n"
+    "static const float PQ_m2 = 78.84375;\n"
+    "static const float PQ_c1 = 0.8359375;\n"
+    "static const float PQ_c2 = 18.8515625;\n"
+    "static const float PQ_c3 = 18.6875;\n"
     "\n"
     "[numthreads(" STR(THREADS) ", " STR(THREADS) ", 1)]\n"
     "void main(uint3 dt : SV_DispatchThreadID)\n"
     "{\n"
-    "  dst[dt.xy] = src[dt.xy] * SDRWhiteLevel;"
+    "  float4 color = src[dt.xy];\n"
+    "  float3 linear709 = color.rgb * (80.0 / 10000.0);\n"
+    "  float3 linear2020 = float3(\n"
+    "    dot(linear709, float3(0.6274039, 0.3292830, 0.0433131)),\n"
+    "    dot(linear709, float3(0.0690973, 0.9195404, 0.0113623)),\n"
+    "    dot(linear709, float3(0.0163914, 0.0880133, 0.8955953)));\n"
+    "  float3 p = pow(max(linear2020, 0.0), PQ_m1);\n"
+    "  float3 pq = pow((PQ_c1 + PQ_c2 * p) /\n"
+    "    (1.0 + PQ_c3 * p), PQ_m2);\n"
+    "  dst[dt.xy] = float4(pq, color.a);\n"
     "}\n";
 
   bool debug = false;
@@ -240,48 +233,9 @@ static D12EffectStatus d12_effect_hdr16to10Create(D12Effect ** instance,
     goto exit;
   }
 
-  D3D12_HEAP_PROPERTIES constHeapProps =
-  {
-    .Type                 = D3D12_HEAP_TYPE_UPLOAD,
-    .CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-    .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN
-  };
-
-  D3D12_RESOURCE_DESC constBufferDesc =
-  {
-    .Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER,
-    .Width            = ALIGN_TO(sizeof(this->consts),
-      D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT),
-    .Height           = 1,
-    .DepthOrArraySize = 1,
-    .MipLevels        = 1,
-    .Format           = DXGI_FORMAT_UNKNOWN,
-    .SampleDesc.Count = 1,
-    .Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-    .Flags            = D3D12_RESOURCE_FLAG_NONE
-  };
-
-  comRef_defineLocal(ID3D12Resource, constBuffer);
-  hr = ID3D12Device3_CreateCommittedResource(
-    device,
-    &constHeapProps,
-    D3D12_HEAP_FLAG_NONE,
-    &constBufferDesc,
-    D3D12_RESOURCE_STATE_GENERIC_READ,
-    NULL,
-    &IID_ID3D12Resource,
-    (void **)constBuffer);
-
-  if (FAILED(hr))
-  {
-    DEBUG_WINERROR("Failed to create the constant buffer resource", hr);
-    goto exit;
-  }
-
   comRef_toGlobal(this->rootSignature, rootSignature);
   comRef_toGlobal(this->pso          , pso          );
   comRef_toGlobal(this->descHeap     , descHeap     );
-  comRef_toGlobal(this->constBuffer  , constBuffer  );
 
   result = D12_EFFECT_STATUS_OK;
   *instance = &this->base;
@@ -313,7 +267,7 @@ static D12EffectStatus d12_effect_hdr16to10SetFormat(D12Effect * effect,
   HRESULT hr;
 
   if (src->desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT ||
-      src->colorSpace  != DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+      !src->hdr || src->hdrPQ)
   {
     result = D12_EFFECT_STATUS_BYPASS;
     goto exit;
@@ -358,6 +312,8 @@ static D12EffectStatus d12_effect_hdr16to10SetFormat(D12Effect * effect,
 
   dst->desc   = desc;
   dst->format = CAPTURE_FMT_RGBA10;
+  dst->hdr    = true;
+  dst->hdrPQ  = true;
   result      = D12_EFFECT_STATUS_OK;
 
 exit:
@@ -370,21 +326,6 @@ static ID3D12Resource * d12_effect_hdr16to10Run(D12Effect * effect,
   ID3D12Resource * src, RECT dirtyRects[], unsigned * nbDirtyRects)
 {
   HDR16to10Inst * this = UPCAST(HDR16to10Inst, effect);
-
-  float nits = 80.0f / display_getSDRWhiteLevel(this->displayPathInfo);
-  if (nits != this->consts.SDRWhiteLevel)
-  {
-    this->consts.SDRWhiteLevel = nits;
-
-    void * data;
-    D3D12_RANGE readRange = { 0, 0 };
-    HRESULT hr = ID3D12Resource_Map(*this->constBuffer, 0, &readRange, &data);
-    if (SUCCEEDED(hr))
-    {
-      memcpy(data, &this->consts, sizeof(this->consts));
-      ID3D12Resource_Unmap(*this->constBuffer, 0, NULL);
-    }
-  }
 
   // transition the destination texture to unordered access so we can write to it
   {
@@ -406,19 +347,6 @@ static ID3D12Resource * d12_effect_hdr16to10Run(D12Effect * effect,
   // get the heap handle
   D3D12_CPU_DESCRIPTOR_HANDLE cpuSrvUavHandle =
     ID3D12DescriptorHeap_GetCPUDescriptorHandleForHeapStart(*this->descHeap);
-
-  // descriptor for input CBV
-  D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc =
-  {
-    .BufferLocation = ID3D12Resource_GetGPUVirtualAddress(*this->constBuffer),
-    .SizeInBytes    = ALIGN_TO(sizeof(this->consts),
-      D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT)
-  };
-  ID3D12Device3_CreateConstantBufferView(device, &cbvDesc, cpuSrvUavHandle);
-
-  // move to the next slot
-  cpuSrvUavHandle.ptr += ID3D12Device3_GetDescriptorHandleIncrementSize(
-    device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
   // descriptor for input SRV
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc =

@@ -52,6 +52,8 @@ typedef struct D12FrameFormat
   DXGI_COLOR_SPACE_TYPE colorSpace;
   unsigned              width, height;
   CaptureFormat         format;
+  bool                  hdr;
+  bool                  hdrPQ;
 }
 D12FrameFormat;
 

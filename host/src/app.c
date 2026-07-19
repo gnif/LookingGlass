@@ -107,6 +107,18 @@ struct app
   unsigned int   readIndex;
   bool           frameValid;
   uint32_t       frameSerial;
+  uint32_t       formatVer;
+  unsigned int   captureFormatVer;
+  bool           hdr;
+  bool           hdrPQ;
+  bool           hdrMetadata;
+  uint16_t       hdrDisplayPrimary[3][2];
+  uint16_t       hdrWhitePoint[2];
+  uint32_t       hdrMaxDisplayLuminance;
+  uint32_t       hdrMinDisplayLuminance;
+  uint32_t       hdrMaxContentLightLevel;
+  uint32_t       hdrMaxFrameAverageLightLevel;
+  _Atomic(uint32_t) sdrWhiteLevel;
 
   CaptureInterface * iface;
   bool captureStarted;
@@ -278,9 +290,44 @@ static bool sendFrame(CaptureResult result, bool * restart)
   }
 
   KVMFRFrame * fi = app.frame[app.captureIndex];
+  const uint32_t sdrWhiteLevel = frame.sdrWhiteLevel ?
+    frame.sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  const bool metadataChanged =
+    app.hdrMetadata != frame.hdrMetadata ||
+    (frame.hdrMetadata &&
+     (memcmp(app.hdrDisplayPrimary, frame.hdrDisplayPrimary,
+          sizeof(app.hdrDisplayPrimary)) != 0 ||
+      memcmp(app.hdrWhitePoint, frame.hdrWhitePoint,
+          sizeof(app.hdrWhitePoint)) != 0 ||
+      app.hdrMaxDisplayLuminance != frame.hdrMaxDisplayLuminance ||
+      app.hdrMinDisplayLuminance != frame.hdrMinDisplayLuminance ||
+      app.hdrMaxContentLightLevel != frame.hdrMaxContentLightLevel ||
+      app.hdrMaxFrameAverageLightLevel !=
+        frame.hdrMaxFrameAverageLightLevel));
+
+  if (!app.frameValid || app.captureFormatVer != frame.formatVer ||
+      app.hdr != frame.hdr || app.hdrPQ != frame.hdrPQ ||
+      metadataChanged || atomic_load(&app.sdrWhiteLevel) != sdrWhiteLevel)
+    ++app.formatVer;
+
+  app.captureFormatVer = frame.formatVer;
+  app.hdr              = frame.hdr;
+  app.hdrPQ            = frame.hdrPQ;
+  app.hdrMetadata      = frame.hdrMetadata;
+  memcpy(app.hdrDisplayPrimary, frame.hdrDisplayPrimary,
+      sizeof(app.hdrDisplayPrimary));
+  memcpy(app.hdrWhitePoint, frame.hdrWhitePoint,
+      sizeof(app.hdrWhitePoint));
+  app.hdrMaxDisplayLuminance       = frame.hdrMaxDisplayLuminance;
+  app.hdrMinDisplayLuminance       = frame.hdrMinDisplayLuminance;
+  app.hdrMaxContentLightLevel      = frame.hdrMaxContentLightLevel;
+  app.hdrMaxFrameAverageLightLevel = frame.hdrMaxFrameAverageLightLevel;
+  atomic_store(&app.sdrWhiteLevel, sdrWhiteLevel);
+
   KVMFRFrameFlags flags =
-    (frame.hdr   ? FRAME_FLAG_HDR    : 0) |
-    (frame.hdrPQ ? FRAME_FLAG_HDR_PQ : 0);
+    (frame.hdr         ? FRAME_FLAG_HDR          : 0) |
+    (frame.hdrPQ       ? FRAME_FLAG_HDR_PQ       : 0) |
+    (frame.hdrMetadata ? FRAME_FLAG_HDR_METADATA : 0);
 
   switch(frame.format)
   {
@@ -335,7 +382,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
   if (frame.truncated)
     flags |= FRAME_FLAG_TRUNCATED;
 
-  fi->formatVer         = frame.formatVer;
+  fi->formatVer         = app.formatVer;
   fi->frameSerial       = app.frameSerial++;
   fi->screenWidth       = frame.screenWidth;
   fi->screenHeight      = frame.screenHeight;
@@ -347,7 +394,28 @@ static bool sendFrame(CaptureResult result, bool * restart)
   fi->pitch             = frame.pitch;
   // fi->offset is initialized at startup
   fi->flags             = flags;
-  fi->sdrWhiteLevel     = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  fi->sdrWhiteLevel     = sdrWhiteLevel;
+  if (frame.hdrMetadata)
+  {
+    memcpy(fi->hdrDisplayPrimary, frame.hdrDisplayPrimary,
+        sizeof(fi->hdrDisplayPrimary));
+    memcpy(fi->hdrWhitePoint, frame.hdrWhitePoint,
+        sizeof(fi->hdrWhitePoint));
+    fi->hdrMaxDisplayLuminance       = frame.hdrMaxDisplayLuminance;
+    fi->hdrMinDisplayLuminance       = frame.hdrMinDisplayLuminance;
+    fi->hdrMaxContentLightLevel      = frame.hdrMaxContentLightLevel;
+    fi->hdrMaxFrameAverageLightLevel =
+      frame.hdrMaxFrameAverageLightLevel;
+  }
+  else
+  {
+    memset(fi->hdrDisplayPrimary, 0, sizeof(fi->hdrDisplayPrimary));
+    memset(fi->hdrWhitePoint, 0, sizeof(fi->hdrWhitePoint));
+    fi->hdrMaxDisplayLuminance       = 0;
+    fi->hdrMinDisplayLuminance       = 0;
+    fi->hdrMaxContentLightLevel      = 0;
+    fi->hdrMaxFrameAverageLightLevel = 0;
+  }
   fi->damageRectsCount  = frame.damageRectsCount;
   memcpy(fi->damageRects, frame.damageRects,
     frame.damageRectsCount * sizeof(FrameDamageRect));
@@ -515,7 +583,7 @@ static void sendPointer(bool newClient)
     KVMFRCursor *cursor = lgmpHostMemPtr(mem);
     cursor->x = app.pointerInfo.x;
     cursor->y = app.pointerInfo.y;
-    cursor->sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+    cursor->sdrWhiteLevel = atomic_load(&app.sdrWhiteLevel);
 
     const uint32_t flags = CURSOR_FLAG_POSITION | CURSOR_FLAG_VISIBLE_VALID |
       (app.pointerShapeValid   ? CURSOR_FLAG_SHAPE   : 0) |
@@ -540,7 +608,7 @@ static void sendPointer(bool newClient)
       app.pointerIndex = 0;
   }
   KVMFRCursor *cursor = lgmpHostMemPtr(mem);
-  cursor->sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  cursor->sdrWhiteLevel = atomic_load(&app.sdrWhiteLevel);
 
   if (app.pointerInfo.positionUpdate || newClient)
   {
@@ -795,6 +863,8 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
     app.frameBuffer[i] = (FrameBuffer *)(((uint8_t*)app.frame[i]) + alignOffset);
   }
 
+  atomic_store(&app.sdrWhiteLevel,
+      KVMFR_SDR_WHITE_LEVEL_DEFAULT);
   atomic_store(&app.lgmpTimerState, LGMP_TIMER_STATE_OK);
   if (!lgCreateTimer(10, lgmpTimer, NULL, &app.lgmpTimer))
   {

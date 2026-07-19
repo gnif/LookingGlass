@@ -22,6 +22,7 @@
 #include "interface/platform.h"
 #include "common/array.h"
 #include "common/debug.h"
+#include "common/display.h"
 #include "common/windebug.h"
 #include "common/option.h"
 #include "common/locking.h"
@@ -53,13 +54,13 @@
 
 //post processers
 extern const DXGIPostProcess DXGIPP_Downsample;
-extern const DXGIPostProcess DXGIPP_SDRWhiteLevel;
+extern const DXGIPostProcess DXGIPP_HDR16to10;
 extern const DXGIPostProcess DXGIPP_RGB24;
 
 const DXGIPostProcess * postProcessors[] =
 {
   &DXGIPP_Downsample,
-  &DXGIPP_SDRWhiteLevel,
+  &DXGIPP_HDR16to10,
   &DXGIPP_RGB24
 };
 
@@ -135,6 +136,10 @@ struct DXGIInterface
   DXGI_FORMAT                dxgiSrcFormat, dxgiFormat;
   bool                       hdr;
   DXGI_COLOR_SPACE_TYPE      dxgiColorSpace;
+  DXGI_OUTPUT_DESC1          outputDesc;
+  bool                       outputDescValid;
+  DISPLAYCONFIG_PATH_INFO    displayPathInfo;
+  bool                       displayPathInfoValid;
   ID3D11VertexShader      ** vshader;
   struct DXGICopyBackend   * backend;
   bool                       backendConfigured;
@@ -164,6 +169,54 @@ struct DXGIInterface
 // locals
 
 static struct DXGIInterface * this = NULL;
+
+static bool dxgi_setHDRMetadata(CaptureFrame * frame,
+    const DXGI_OUTPUT_DESC1 * desc)
+{
+  const float coordinates[] =
+  {
+    desc->RedPrimary  [0], desc->RedPrimary  [1],
+    desc->GreenPrimary[0], desc->GreenPrimary[1],
+    desc->BluePrimary [0], desc->BluePrimary [1],
+    desc->WhitePoint  [0], desc->WhitePoint  [1],
+  };
+
+  for (unsigned i = 0; i < ARRAY_LENGTH(coordinates); ++i)
+    if (coordinates[i] < 0.0f || coordinates[i] > 1.0f)
+      return false;
+
+  if (desc->RedPrimary[1] == 0.0f || desc->GreenPrimary[1] == 0.0f ||
+      desc->BluePrimary[1] == 0.0f || desc->WhitePoint[1] == 0.0f ||
+      desc->MaxLuminance <= 0.0f)
+    return false;
+
+  frame->hdrDisplayPrimary[0][0] = (uint16_t)lroundf(
+      desc->RedPrimary[0] * 50000.0f);
+  frame->hdrDisplayPrimary[0][1] = (uint16_t)lroundf(
+      desc->RedPrimary[1] * 50000.0f);
+  frame->hdrDisplayPrimary[1][0] = (uint16_t)lroundf(
+      desc->GreenPrimary[0] * 50000.0f);
+  frame->hdrDisplayPrimary[1][1] = (uint16_t)lroundf(
+      desc->GreenPrimary[1] * 50000.0f);
+  frame->hdrDisplayPrimary[2][0] = (uint16_t)lroundf(
+      desc->BluePrimary[0] * 50000.0f);
+  frame->hdrDisplayPrimary[2][1] = (uint16_t)lroundf(
+      desc->BluePrimary[1] * 50000.0f);
+  frame->hdrWhitePoint[0] = (uint16_t)lroundf(
+      desc->WhitePoint[0] * 50000.0f);
+  frame->hdrWhitePoint[1] = (uint16_t)lroundf(
+      desc->WhitePoint[1] * 50000.0f);
+  frame->hdrMaxDisplayLuminance = (uint32_t)lroundf(desc->MaxLuminance);
+  frame->hdrMinDisplayLuminance = desc->MinLuminance > 0.0f ?
+    (uint32_t)lroundf(desc->MinLuminance * 10000.0f) : 0;
+
+  if ((uint64_t)frame->hdrMaxDisplayLuminance * 10000 <=
+      frame->hdrMinDisplayLuminance)
+    return false;
+
+  frame->hdrMetadata = true;
+  return true;
+}
 
 extern struct DXGICopyBackend copyBackendD3D11;
 static struct DXGICopyBackend * backends[] = {
@@ -363,6 +416,15 @@ static bool initVertexShader(void)
 static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
 {
   DEBUG_ASSERT(this);
+
+  // These describe the output selected by this initialization. Do not retain
+  // metadata from a previous duplication session if the replacement output
+  // does not expose IDXGIOutput6 or display path information.
+  this->dxgiColorSpace       = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+  this->outputDescValid      = false;
+  this->displayPathInfoValid = false;
+  memset(&this->outputDesc     , 0, sizeof(this->outputDesc     ));
+  memset(&this->displayPathInfo, 0, sizeof(this->displayPathInfo));
 
   comRef_initGlobalScope(20 + this->maxTextures * 16, this->comScope);
   comRef_scopePush(20);
@@ -725,7 +787,11 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
     {
       DXGI_OUTPUT_DESC1 desc1;
       IDXGIOutput6_GetDesc1(*output6, &desc1);
-      this->dxgiColorSpace = desc1.ColorSpace;
+      this->dxgiColorSpace        = desc1.ColorSpace;
+      this->outputDesc            = desc1;
+      this->outputDescValid       = true;
+      this->displayPathInfoValid =
+        display_getPathInfo(desc1.Monitor, &this->displayPathInfo);
 
       DEBUG_INFO("Bits Per Color    : %u"   , desc1.BitsPerColor);
       DEBUG_INFO("Color Space       : %s"   , getDXGIColorSpaceTypeStr(this->dxgiColorSpace));
@@ -793,6 +859,12 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
       goto fail;
   }
 
+  if (this->hdr && this->format != CAPTURE_FMT_RGBA16F)
+  {
+    DEBUG_ERROR("HDR capture did not provide an FP16 scRGB texture");
+    goto fail;
+  }
+
   this->outputWidth  = this->width;
   this->outputHeight = this->height;
 
@@ -824,21 +896,21 @@ static bool dxgi_init(void * ivshmemBase, unsigned * alignSize)
     goto fail;
 
   bool shareable = this->backend != &copyBackendD3D11;
-  if (this->hdr)
-  {
-    //HDR content needs to be corrected and converted to HDR10
-    if (!ppInit(&DXGIPP_SDRWhiteLevel, shareable))
-    {
-      DEBUG_ERROR("Failed to initialize the SDRWhiteLevel post processor");
-      goto fail;
-    }
-  }
-
-  //Downsampling must happen before conversion to RGB24
+  // Downsampling must happen in linear light, before HDR conversion or RGB24
+  // packing.
   if (!ppInit(&DXGIPP_Downsample, shareable))
   {
     DEBUG_ERROR("Failed to intiailize the downsample post processor");
     goto fail;
+  }
+
+  if (this->hdr)
+  {
+    if (!ppInit(&DXGIPP_HDR16to10, shareable))
+    {
+      DEBUG_ERROR("Failed to initialize the HDR16to10 post processor");
+      goto fail;
+    }
   }
 
   //If not HDR, pack to RGB24
@@ -1416,7 +1488,11 @@ static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
   frame->stride           = this->stride;
   frame->format           = this->outputFormat;
   frame->hdr              = this->hdr;
-  frame->hdrPQ            = false;
+  frame->hdrPQ            = this->hdr;
+  frame->sdrWhiteLevel    = this->displayPathInfoValid ?
+    (uint32_t)lroundf(display_getSDRWhiteLevel(&this->displayPathInfo)) : 0;
+  if (frame->hdr && this->outputDescValid)
+    dxgi_setHDRMetadata(frame, &this->outputDesc);
   frame->rotation         = this->rotation;
 
   frame->damageRectsCount = tex->damageRectsCount;
