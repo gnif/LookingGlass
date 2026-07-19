@@ -235,6 +235,7 @@ struct WaylandDSState
   bool cmHasParametric;
   bool cmHasLuminances;
   bool cmHasMasteringPrimaries;
+  bool cmHasExtendedTargetVolume;
   bool cmHasTFSt2084PQ;
   bool cmHasTFExtLinear;
   bool cmHasPrimariesBT2020;

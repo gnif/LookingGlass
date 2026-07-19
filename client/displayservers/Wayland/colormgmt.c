@@ -45,6 +45,9 @@ static void cmFeature(void * data, struct wp_color_manager_v1 * cm, uint32_t fea
     case WP_COLOR_MANAGER_V1_FEATURE_SET_MASTERING_DISPLAY_PRIMARIES:
       wlWm.cmHasMasteringPrimaries = true;
       break;
+    case WP_COLOR_MANAGER_V1_FEATURE_EXTENDED_TARGET_VOLUME:
+      wlWm.cmHasExtendedTargetVolume = true;
+      break;
     case WP_COLOR_MANAGER_V1_FEATURE_WINDOWS_SCRGB:
       wlWm.cmHasWindowsSCRGB = true;
       break;
@@ -79,11 +82,12 @@ static void cmDone(void * data, struct wp_color_manager_v1 * cm)
       memory_order_relaxed);
   atomic_store_explicit(&wlWm.cmFeaturesDone, true, memory_order_release);
   DEBUG_INFO("Color management features: parametric:%d luminances:%d "
-      "mastering_primaries:%d st2084_pq:%d ext_linear:%d bt2020:%d srgb:%d "
-      "windows_scrgb:%d perceptual:%d "
+      "mastering_primaries:%d extended_target:%d st2084_pq:%d "
+      "ext_linear:%d bt2020:%d srgb:%d windows_scrgb:%d perceptual:%d "
       "can_do_hdr:%d",
       wlWm.cmHasParametric, wlWm.cmHasLuminances,
       wlWm.cmHasMasteringPrimaries,
+      wlWm.cmHasExtendedTargetVolume,
       wlWm.cmHasTFSt2084PQ, wlWm.cmHasTFExtLinear,
       wlWm.cmHasPrimariesBT2020, wlWm.cmHasPrimariesSRGB,
       wlWm.cmHasWindowsSCRGB, wlWm.cmHasPerceptualIntent,
