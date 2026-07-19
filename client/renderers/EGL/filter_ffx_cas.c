@@ -29,12 +29,15 @@
 #include "basic.vert.h"
 #include "ffx_cas.frag.h"
 
+#define CAS_SCRGB_REFERENCE_WHITE 80.0f
+
 typedef struct EGL_FilterFFXCAS
 {
   EGL_Filter base;
 
   EGL_Shader     * shader;
   EGL_Uniform    * uConsts;
+  EGL_Uniform    * uHDRScale;
   EGL_Effect     * effect;
   EGL_EffectPass * pass;
   bool             enable;
@@ -132,7 +135,8 @@ static bool egl_filterFFXCASInit(EGL_Filter ** filter)
     goto error_effect;
   }
 
-  this->uConsts = egl_shaderGetUniform(this->shader, "uConsts");
+  this->uConsts   = egl_shaderGetUniform(this->shader, "uConsts"  );
+  this->uHDRScale = egl_shaderGetUniform(this->shader, "uHDRScale");
   egl_filterFFXCASLoadState(&this->base);
 
   *filter = &this->base;
@@ -269,6 +273,10 @@ static EGL_Texture * egl_filterFFXCASRun(EGL_Filter * filter,
     EGL_FilterRects * rects, EGL_Texture * texture)
 {
   EGL_FilterFFXCAS * this = UPCAST(EGL_FilterFFXCAS, filter);
+
+  const float hdrScale = rects->hdrPeak > 0.0f ?
+    CAS_SCRGB_REFERENCE_WHITE / rects->hdrPeak : 0.0f;
+  egl_uniform1f(this->uHDRScale, hdrScale);
 
   return egl_effectRun(this->effect, rects, texture);
 }

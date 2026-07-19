@@ -33,6 +33,8 @@ typedef struct EGL_FilterRects
   EGL_DesktopRects * rects;
   GLfloat * matrix;
   int width, height;
+  /* zero for SDR, otherwise the HDR signal peak in cd/mÂ² */
+  float hdrPeak;
 }
 EGL_FilterRects;
 

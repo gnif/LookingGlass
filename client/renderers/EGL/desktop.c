@@ -42,6 +42,13 @@
 #include "postprocess.h"
 #include "filters.h"
 
+enum
+{
+  HDR_PEAK_LUMINANCE_MIN     = 80,
+  HDR_PEAK_LUMINANCE_DEFAULT = 10000,
+  HDR_PEAK_LUMINANCE_MAX     = 10000
+};
+
 struct DesktopShader
 {
   EGL_Shader * shader;
@@ -482,12 +489,24 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   *fullFrame = false;
   const bool hdr = desktop->hdr && !desktop->useSpice;
+  uint32_t hdrPeak = 0;
+  if (hdr)
+  {
+    hdrPeak = max(desktop->format.hdrMaxDisplayLuminance,
+        desktop->format.hdrMaxContentLightLevel);
+    if (!hdrPeak)
+      hdrPeak = HDR_PEAK_LUMINANCE_DEFAULT;
+    else
+      hdrPeak = clamp(hdrPeak,
+          HDR_PEAK_LUMINANCE_MIN, HDR_PEAK_LUMINANCE_MAX);
+  }
+
   const bool processFrame = atomic_exchange(&desktop->processFrame, false) ||
     egl_postProcessConfigModified(desktop->pp);
   if (processFrame &&
       egl_postProcessRun(desktop->pp, tex, desktop->mesh,
         width, height, outputWidth, outputHeight, dma,
-        hdr && desktop->hdrPQ) &&
+        hdr && desktop->hdrPQ, (float)hdrPeak) &&
       egl_postProcessNeedsFullFrame(desktop->pp))
   {
     /* The filter output may have changed everywhere, but this only applies to

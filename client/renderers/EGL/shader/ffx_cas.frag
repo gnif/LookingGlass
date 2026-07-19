@@ -5,12 +5,14 @@ precision highp float;
 precision highp int;
 
 #include "compat.h"
+#include "hdr.h"
 
 in  vec2  fragCoord;
 out vec4  fragColor;
 
 uniform sampler2D sampler1;
 uniform uvec4     uConsts[2];
+uniform float     uHDRScale;
 
 #define A_GPU 1
 #define A_GLSL 1
@@ -19,7 +21,11 @@ uniform uvec4     uConsts[2];
 
 vec3 imageLoad(ivec2 point)
 {
-  return texelFetch(sampler1, point, 0).rgb;
+  vec3 color = texelFetch(sampler1, point, 0).rgb;
+  if (uHDRScale > 0.0)
+    color = max(bt709to2020(color * uHDRScale), vec3(0.0));
+
+  return color;
 }
 
 AF3 CasLoad(ASU2 p)
@@ -39,4 +45,9 @@ void main()
   CasFilter(
     fragColor.r, fragColor.g, fragColor.b,
     point, uConsts[0], uConsts[1], true);
+
+  if (uHDRScale > 0.0)
+    fragColor.rgb = bt2020to709(fragColor.rgb) / uHDRScale;
+
+  fragColor.a = 1.0;
 }

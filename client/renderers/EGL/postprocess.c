@@ -876,7 +876,8 @@ static bool configureChain(EGL_PostProcess * this, EGL_PixelFormat pixFmt,
 
 bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     EGL_DesktopRects * rects, int desktopWidth, int desktopHeight,
-    unsigned int targetX, unsigned int targetY, bool useDMA, bool hdrPQ)
+    unsigned int targetX, unsigned int targetY, bool useDMA, bool hdrPQ,
+    float hdrPeak)
 {
   if (targetX == 0 && targetY == 0)
     DEBUG_FATAL("targetX || targetY == 0");
@@ -918,10 +919,11 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
   }
 
   EGL_FilterRects filterRects = {
-    .rects  = rects,
-    .matrix = this->matrix,
-    .width  = desktopWidth,
-    .height = desktopHeight,
+    .rects   = rects,
+    .matrix  = this->matrix,
+    .width   = desktopWidth,
+    .height  = desktopHeight,
+    .hdrPeak = hdrPeak,
   };
 
   EGL_Texture * texture = tex;
