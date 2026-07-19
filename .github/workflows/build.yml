@@ -43,6 +43,7 @@ jobs:
           -DCMAKE_LINKER:FILEPATH=/usr/bin/ld \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DENABLE_LIBDECOR=${{ matrix.wayland_shell == 'libdecor' }}  \
+          -DOPTIMIZE_FOR_NATIVE=OFF \
           ..
     - name: Build client
       run: |
@@ -210,7 +211,9 @@ jobs:
       run: |
         mkdir obs/build
         cd obs/build
-        CC=/usr/bin/${{ matrix.cc }} cmake ..
+        CC=/usr/bin/${{ matrix.cc }} cmake \
+          -DOPTIMIZE_FOR_NATIVE=OFF \
+          ..
     - name: Build obs plugin
       run: |
         cd obs/build
