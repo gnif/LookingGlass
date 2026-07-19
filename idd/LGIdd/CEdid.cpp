@@ -75,9 +75,15 @@ static const BYTE CTA_HDR_EOTF_TRADITIONAL_SDR            = (BYTE)(1 << 0);
 static const BYTE CTA_HDR_EOTF_SMPTE_ST_2084              = (BYTE)(1 << 2);
 static const BYTE CTA_HDR_EOTF_HLG                        = (BYTE)(1 << 3);
 static const BYTE CTA_HDR_STATIC_METADATA_TYPE_1          = (BYTE)(1 << 0);
-static const BYTE CTA_HDR_DESIRED_MAX_LUMINANCE           = 138;
-static const BYTE CTA_HDR_DESIRED_MAX_FRAME_AVG_LUMINANCE = 115;
-static const BYTE CTA_HDR_DESIRED_MIN_LUMINANCE           = 14;
+// The virtual display is a transport rather than a physical light-emitting
+// device. Advertise the complete PQ range so Windows preserves HDR content
+// for the real host display instead of mapping it to an arbitrary virtual
+// peak or frame-average limit. The maximum values encode approximately
+// 10,000 cd/m^2, while zero leaves the nonexistent physical black level
+// unspecified.
+static const BYTE CTA_HDR_DESIRED_MAX_LUMINANCE           = 245;
+static const BYTE CTA_HDR_DESIRED_MAX_FRAME_AVG_LUMINANCE = 245;
+static const BYTE CTA_HDR_DESIRED_MIN_LUMINANCE           = 0;
 
 static const BYTE CTA_COLORIMETRY_OPYCC_601  = (BYTE)(1 << 3);
 static const BYTE CTA_COLORIMETRY_OPRGB      = (BYTE)(1 << 4);
