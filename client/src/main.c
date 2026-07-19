@@ -777,8 +777,12 @@ int main_frameThread(void * unused)
       const bool rendererSupportsNativeHDR = !lgrFormat.hdr ||
         !g_state.lgr->ops.supports || RENDERER(supports,
           lgrFormat.hdrPQ ? LG_SUPPORTS_HDR_PQ : LG_SUPPORTS_HDR_SCRGB);
-      LG_UNLOCK(g_state.lgrLock);
+      // Publish the matching surface format before allowing the render thread
+      // to consume the renderer format. Otherwise it can present one frame in
+      // the new encoding while the display server still has the old image
+      // description attached.
       renderQueue_surfaceFormat(lgrFormat, rendererSupportsNativeHDR);
+      LG_UNLOCK(g_state.lgrLock);
 
       g_state.srcSize.x = lgrFormat.screenWidth;
       g_state.srcSize.y = lgrFormat.screenHeight;
