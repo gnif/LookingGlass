@@ -21,7 +21,6 @@
 #include "desktop_rects.h"
 #include "state.h"
 #include "common/debug.h"
-#include "common/KVMFR.h"
 #include "common/locking.h"
 
 #include <math.h>

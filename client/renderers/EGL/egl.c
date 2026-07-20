@@ -23,7 +23,6 @@
 #include "common/util.h"
 #include "common/array.h"
 #include "common/debug.h"
-#include "common/KVMFR.h"
 #include "common/option.h"
 #include "common/sysinfo.h"
 #include "common/rects.h"
@@ -57,7 +56,7 @@
 #define MAX_BUFFER_AGE        3
 #define DESKTOP_DAMAGE_COUNT  4
 #define DESKTOP_DAMAGE_MARGIN 1
-#define MAX_ACCUMULATED_DAMAGE ((KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
+#define MAX_ACCUMULATED_DAMAGE ((LG_MAX_FRAME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
 #define IDX_AGO(counter, i, total) (((counter) + (total) - (i)) % (total))
 
 struct Options
@@ -361,6 +360,23 @@ static bool egl_supports(LG_Renderer * renderer, LG_RendererSupport flag)
   }
 }
 
+static bool egl_getInterop(LG_Renderer * renderer,
+    LG_RendererInterop * interop)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  if (!this->display || !this->context || !this->configs ||
+      interop->size < sizeof(*interop))
+    return false;
+
+  interop->version          = LG_RENDERER_INTEROP_VERSION;
+  interop->type             = LG_RENDERER_INTEROP_EGL;
+  interop->egl.display      = this->display;
+  interop->egl.config       = this->configs;
+  interop->egl.shareContext = this->context;
+  interop->egl.dmaBufImport = this->dmaSupport;
+  return true;
+}
+
 static void egl_onRestart(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -598,7 +614,7 @@ static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cur
 }
 
 static void egl_onMouseColorTransform(LG_Renderer * renderer,
-    const KVMFRColorTransform * transform)
+    const LGColorTransform * transform)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_cursorSetColorTransform(this->cursor, transform);
@@ -753,7 +769,7 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
     if (unlikely(
         damage->count                    == -1 ||
         damageRectsCount                 == 0 ||
-        damage->count + damageRectsCount >= KVMFR_MAX_DAMAGE_RECTS))
+        damage->count + damageRectsCount >= LG_MAX_FRAME_DAMAGE_RECTS))
     {
       damage->count = -1;
     }
@@ -1441,7 +1457,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     egl_damageRender(this->damage, rotate, newFrame ? desktopDamage : NULL) |
     invalidateWindow;
 
-  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
+  struct Rect damage[LG_MAX_FRAME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
   int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
   if (unlikely(damageIdx != 0))
   {
@@ -1631,6 +1647,7 @@ struct LG_RendererOps LGR_EGL =
   .initialize            = egl_initialize,
   .deinitialize          = egl_deinitialize,
   .supports              = egl_supports,
+  .getInterop            = egl_getInterop,
   .onRestart             = egl_onRestart,
   .onResize              = egl_onResize,
   .onMouseShape          = egl_onMouseShape,

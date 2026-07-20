@@ -1174,27 +1174,27 @@ void app_invalidateOverlay(bool renderTwice)
 
 bool app_guestIsLinux(void)
 {
-  return g_state.guestOS == KVMFR_OS_LINUX;
+  return g_state.guestOS == LG_TRANSPORT_OS_LINUX;
 }
 
 bool app_guestIsWindows(void)
 {
-  return g_state.guestOS == KVMFR_OS_WINDOWS;
+  return g_state.guestOS == LG_TRANSPORT_OS_WINDOWS;
 }
 
 bool app_guestIsOSX(void)
 {
-  return g_state.guestOS == KVMFR_OS_OSX;
+  return g_state.guestOS == LG_TRANSPORT_OS_OSX;
 }
 
 bool app_guestIsBSD(void)
 {
-  return g_state.guestOS == KVMFR_OS_BSD;
+  return g_state.guestOS == LG_TRANSPORT_OS_BSD;
 }
 
 bool app_guestIsOther(void)
 {
-  return g_state.guestOS == KVMFR_OS_OTHER;
+  return g_state.guestOS == LG_TRANSPORT_OS_OTHER;
 }
 
 void app_stopVideo(bool stop)

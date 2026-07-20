@@ -28,16 +28,14 @@
 
 #include "common/thread.h"
 #include "common/types.h"
-#include "common/ivshmem.h"
 #include "common/locking.h"
 #include "common/ringbuffer.h"
 #include "common/event.h"
 #include "common/ll.h"
 
 #include <purespice.h>
-#include <lgmp/client.h>
-
 #include "cimgui.h"
+#include "interface/transport.h"
 
 enum RunState
 {
@@ -91,7 +89,7 @@ struct AppState
 
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
-  KVMFROS guestOS;
+  LG_TransportGuestOS guestOS;
 
   atomic_bool lgHostConnected;
 
@@ -133,11 +131,9 @@ struct AppState
   size_t               cbXfer;
   struct ll          * cbRequestList;
 
-  struct IVSHMEM       shm;
-  PLGMPClient          lgmp;
-  PLGMPClientQueue     pointerQueue;
-  LG_Lock              pointerQueueLock;
-  KVMFRFeatureFlags    kvmfrFeatures;
+  LG_Transport              * transport;
+  const LG_TransportOps     * transportOps;
+  LG_TransportFeatureFlags    transportFeatures;
 
   LGThread            * cursorThread;
   LGThread            * frameThread;
@@ -223,9 +219,7 @@ struct AppParams
   bool                 requestActivation;
   bool                 disableWaitingMessage;
 
-  unsigned int         cursorPollInterval;
-  unsigned int         framePollInterval;
-  bool                 allowDMA;
+  const char         * transport;
 
   bool                 forceRenderer;
   unsigned int         forceRendererIndex;

@@ -23,7 +23,7 @@
 #include <stdbool.h>
 
 #include "app.h"
-#include "common/KVMFR.h"
+#include "common/types.h"
 #include "common/framebuffer.h"
 
 #define IS_LG_RENDERER_VALID(x) \
@@ -88,7 +88,7 @@ typedef struct LG_RendererFormat
   unsigned int      bpp;     // bits per pixel (zero if compressed)
   LG_RendererRotate rotate;  // guest rotation
 
-  // HDR static metadata (from KVMFRFrame, valid when hdrMetadata is true)
+  // HDR static metadata, valid when hdrMetadata is true
   uint16_t hdrDisplayPrimary[3][2];
   uint16_t hdrWhitePoint[2];
   uint32_t hdrMaxDisplayLuminance;
@@ -119,6 +119,31 @@ LG_RendererCursor;
 
 typedef struct LG_Renderer LG_Renderer;
 
+typedef enum LG_RendererInteropType
+{
+  LG_RENDERER_INTEROP_NONE,
+  LG_RENDERER_INTEROP_EGL,
+}
+LG_RendererInteropType;
+
+#define LG_RENDERER_INTEROP_VERSION 1
+
+typedef struct LG_RendererInterop
+{
+  uint32_t version;
+  uint32_t size;
+  LG_RendererInteropType type;
+  struct
+  {
+    EGLDisplay display;
+    EGLConfig config;
+    EGLContext shareContext;
+    bool dmaBufImport;
+  }
+  egl;
+}
+LG_RendererInterop;
+
 typedef struct LG_RendererOps
 {
   /* returns the friendly name of the renderer */
@@ -145,6 +170,11 @@ typedef struct LG_RendererOps
    * Context: renderThread */
   bool (*supports)(LG_Renderer * renderer, LG_RendererSupport support);
 
+  /* optionally exposes the initialized renderer device context to a transport.
+   * The transport must create its own shared context and release it before the
+   * renderer is deinitialized. Context: lg_run */
+  bool (*getInterop)(LG_Renderer * renderer, LG_RendererInterop * interop);
+
   /* called when the renderer is to reset it's state
    * Context: lg_run & frameThread */
   void (*onRestart)(LG_Renderer * renderer);
@@ -163,7 +193,7 @@ typedef struct LG_RendererOps
   /* optional display calibration update for hardware cursor composition
    * Context: cursorThread */
   void (*onMouseColorTransform)(LG_Renderer * renderer,
-      const KVMFRColorTransform * transform);
+      const LGColorTransform * transform);
 
   /* updates the cursor-specific SDR white level reported by IddCx
    * Context: cursorThread */

@@ -20,7 +20,6 @@
 
 #include "damage.h"
 #include "common/debug.h"
-#include "common/KVMFR.h"
 #include "common/locking.h"
 
 #include "app.h"
@@ -89,7 +88,7 @@ bool egl_damageInit(EGL_Damage ** damage)
     return false;
   }
 
-  if (!egl_desktopRectsInit(&(*damage)->mesh, KVMFR_MAX_DAMAGE_RECTS))
+  if (!egl_desktopRectsInit(&(*damage)->mesh, LG_MAX_FRAME_DAMAGE_RECTS))
   {
     DEBUG_ERROR("Failed to initialize the mesh");
     return false;

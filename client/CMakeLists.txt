@@ -33,6 +33,10 @@ add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
 option(ENABLE_EGL    "Enable the EGL renderer"          ON)
 add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
 
+option(ENABLE_TEST_TRANSPORT "Enable the test transport" OFF)
+add_feature_info(ENABLE_TEST_TRANSPORT ENABLE_TEST_TRANSPORT
+  "Synthetic frames for graphics-pipeline validation.")
+
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
 
@@ -134,6 +138,7 @@ set(SOURCES
   src/overlay_utils.c
   src/render_queue.c
   src/evdev.c
+  src/transport.c
 
   src/overlay/splash.c
   src/overlay/alert.c
@@ -158,6 +163,7 @@ add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui" E
 
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
+add_subdirectory(transports)
 
 configure_file("${PROJECT_TOP}/resources/looking-glass-client.desktop.in" "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop" @ONLY)
 add_executable(looking-glass-client ${SOURCES})
@@ -191,9 +197,9 @@ target_link_libraries(looking-glass-client
   lg_resources
   lg_common
   displayservers
-  lgmp
   purespice
   renderers
+  transports
   cimgui
 )
 

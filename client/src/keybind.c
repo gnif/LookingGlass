@@ -128,7 +128,7 @@ static void bind_toggleKey(int sc, void * opaque)
 
 static void bind_setGuestRes(int sc, void * opaque)
 {
-  if (!(g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE))
+  if (!(g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE))
   {
     app_alert(LG_ALERT_INFO, "The guest doesn't support this feature");
     return;

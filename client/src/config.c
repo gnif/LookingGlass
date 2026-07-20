@@ -47,6 +47,7 @@ static StringList optScancodeValues    (struct Option * opt);
 static bool       optScancodeValidate  (struct Option * opt, const char ** error);
 static char *     optScancodeToString  (struct Option * opt);
 static bool       optRotateValidate    (struct Option * opt, const char ** error);
+static bool       optTransportValidate (struct Option * opt, const char ** error);
 static bool       optMicDefaultParse   (struct Option * opt, const char * str);
 static StringList optMicDefaultValues  (struct Option * opt);
 static char *     optMicDefaultToString(struct Option * opt);
@@ -87,25 +88,12 @@ static struct Option options[] =
     .value.x_bool   = false,
   },
   {
-    .module        = "app",
-    .name          = "cursorPollInterval",
-    .description   = "How often to check for a cursor update in microseconds",
-    .type          = OPTION_TYPE_INT,
-    .value.x_int   = 1000
-  },
-  {
-    .module        = "app",
-    .name          = "framePollInterval",
-    .description   = "How often to check for a frame update in microseconds",
-    .type          = OPTION_TYPE_INT,
-    .value.x_int   = 1000
-  },
-  {
-    .module        = "app",
-    .name          = "allowDMA",
-    .description   = "Allow direct DMA transfers if supported (see `README.md` in the `module` dir)",
-    .type          = OPTION_TYPE_BOOL,
-    .value.x_bool  = true
+    .module         = "app",
+    .name           = "transport",
+    .description    = "Transport backend to use",
+    .type           = OPTION_TYPE_STRING,
+    .value.x_string = "lgmp",
+    .validator      = optTransportValidate,
   },
 
   // window options
@@ -686,9 +674,7 @@ bool config_load(int argc, char * argv[])
   }
 
   // setup the application params for the basic types
-  g_params.cursorPollInterval   = option_get_int   ("app"  , "cursorPollInterval");
-  g_params.framePollInterval    = option_get_int   ("app"  , "framePollInterval" );
-  g_params.allowDMA             = option_get_bool  ("app"  , "allowDMA"          );
+  g_params.transport            = option_get_string("app", "transport"         );
 
   g_params.windowTitle            = option_get_string("win", "title"             );
   g_params.appId                  = option_get_string("win", "appId"             );
@@ -1022,6 +1008,15 @@ static bool optRotateValidate(struct Option * opt, const char ** error)
   }
 
   *error = "Rotation angle must be one of 0, 90, 180 or 270";
+  return false;
+}
+
+static bool optTransportValidate(struct Option * opt, const char ** error)
+{
+  if (lgTransport_isValid(opt->value.x_string))
+    return true;
+
+  *error = "Unknown transport (expected lgmp or test)";
   return false;
 }
 

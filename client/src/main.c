@@ -40,12 +40,10 @@
 #include "common/array.h"
 #include "common/debug.h"
 #include "common/crash.h"
-#include "common/KVMFR.h"
 #include "common/stringutils.h"
 #include "common/thread.h"
 #include "common/locking.h"
 #include "common/event.h"
-#include "common/ivshmem.h"
 #include "common/time.h"
 #include "common/version.h"
 #include "common/paths.h"
@@ -349,6 +347,9 @@ static int renderThread(void * unused)
   core_stopCursorThread();
   core_stopFrameThread();
 
+  if (g_state.transportOps && g_state.transportOps->detachRenderer)
+    g_state.transportOps->detachRenderer(g_state.transport);
+
   RENDERER(deinitialize);
   g_state.lgr = NULL;
   LG_LOCK_FREE(g_state.lgrLock);
@@ -356,204 +357,109 @@ static int renderThread(void * unused)
   return 0;
 }
 
+
 int main_cursorThread(void * unused)
 {
-  LGMP_STATUS         status;
-  LG_RendererCursor   cursorType = LG_CURSOR_COLOR;
-  KVMFRCursor *       cursor     = NULL;
-  int                 cursorSize = 0;
+  LG_RendererCursor cursorType = LG_CURSOR_COLOR;
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   // subscribe to the pointer queue
-  while(app_getState() == APP_STATE_RUNNING)
-  {
-    status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_POINTER,
-        &g_state.pointerQueue);
-    if (status == LGMP_OK)
-      break;
-
-    if (status == LGMP_ERR_NO_SUCH_QUEUE)
-    {
-      usleep(1000);
-      continue;
-    }
-
-    DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
-    app_setState(APP_STATE_SHUTDOWN);
-    break;
-  }
-
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
-    LGMPMessage msg;
-    if ((status = lgmpClientProcess(g_state.pointerQueue, &msg)) != LGMP_OK)
+    LG_TransportPointer pointer;
+    const LG_TransportStatus status = g_state.transportOps->nextPointer(
+        g_state.transport, &pointer);
+    if (status != LG_TRANSPORT_OK)
     {
-      if (status == LGMP_ERR_QUEUE_EMPTY)
+      if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
       {
         if (g_cursor.redraw && g_cursor.guest.valid)
         {
           g_cursor.redraw = false;
           RENDERER(onMouseEvent,
-            g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
-            g_cursor.guest.x,
-            g_cursor.guest.y,
-            g_cursor.guest.hx,
-            g_cursor.guest.hy
-          );
-
+            g_cursor.guest.visible &&
+              (g_cursor.draw || !g_params.useSpiceInput),
+            g_cursor.guest.x, g_cursor.guest.y,
+            g_cursor.guest.hx, g_cursor.guest.hy);
           if (!g_state.stopVideo)
             lgSignalEvent(g_state.frameEvent);
         }
-
-        struct timespec req =
-        {
-          .tv_sec  = 0,
-          .tv_nsec = g_params.cursorPollInterval * 1000L
-        };
-
-        struct timespec rem;
-        while(nanosleep(&req, &rem) < 0)
-        {
-          if (errno != -EINTR)
-          {
-            DEBUG_ERROR("nanosleep failed");
-            break;
-          }
-          req = rem;
-        }
-
         continue;
       }
 
-      if (status == LGMP_ERR_INVALID_SESSION)
-        app_setState(APP_STATE_RESTART);
-      else
-      {
-        DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
-        app_setState(APP_STATE_SHUTDOWN);
-      }
+      app_setState(status == LG_TRANSPORT_DISCONNECTED ?
+        APP_STATE_RESTART : APP_STATE_SHUTDOWN);
+      if (status != LG_TRANSPORT_DISCONNECTED)
+        DEBUG_ERROR("Pointer transport failed with status %d", status);
       break;
     }
 
-    KVMFRCursor * tmp = (KVMFRCursor *)msg.mem;
-    const int shapeSize = msg.udata & CURSOR_FLAG_SHAPE ?
-      tmp->height * tmp->pitch : 0;
-    const int neededSize = sizeof(*tmp) + shapeSize +
-      (msg.udata & CURSOR_FLAG_COLOR_TRANSFORM ?
-        sizeof(KVMFRColorTransform) : 0);
+    if (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID)
+      g_cursor.guest.visible =
+        pointer.flags & LG_TRANSPORT_POINTER_VISIBLE;
 
-    if (cursor && neededSize > cursorSize)
+    if (pointer.flags & LG_TRANSPORT_POINTER_SHAPE)
     {
-      free(cursor);
-      cursor = NULL;
-    }
-
-    /* copy and release the message ASAP */
-    if (!cursor)
-    {
-      cursor = malloc(neededSize);
-      if (!cursor)
-      {
-        DEBUG_ERROR("failed to allocate %d bytes for cursor", neededSize);
-        app_setState(APP_STATE_SHUTDOWN);
-        break;
-      }
-      cursorSize = neededSize;
-    }
-
-    memcpy(cursor, msg.mem, neededSize);
-    lgmpClientMessageDone(g_state.pointerQueue);
-
-    if (msg.udata & CURSOR_FLAG_VISIBLE_VALID)
-      g_cursor.guest.visible = msg.udata & CURSOR_FLAG_VISIBLE;
-
-    if (msg.udata & CURSOR_FLAG_SHAPE)
-    {
-      switch(cursor->type)
+      switch (pointer.type)
       {
         case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
         case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
           DEBUG_ERROR("Invalid cursor type");
+          g_state.transportOps->releasePointer(g_state.transport, &pointer);
           continue;
       }
 
-      g_cursor.guest.hx = cursor->hx;
-      g_cursor.guest.hy = cursor->hy;
-
-      const uint8_t * data = (const uint8_t *)(cursor + 1);
-      if (!RENDERER(onMouseShape,
-        cursorType,
-        cursor->width,
-        cursor->height,
-        cursor->pitch,
-        data)
-      )
+      g_cursor.guest.hx = pointer.hx;
+      g_cursor.guest.hy = pointer.hy;
+      if (!RENDERER(onMouseShape, cursorType, pointer.width, pointer.height,
+            pointer.pitch, pointer.shape))
       {
         DEBUG_ERROR("Failed to update mouse shape");
+        g_state.transportOps->releasePointer(g_state.transport, &pointer);
         continue;
       }
     }
 
-    if ((msg.udata & CURSOR_FLAG_COLOR_TRANSFORM) &&
+    if ((pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM) &&
         g_state.lgr->ops.onMouseColorTransform)
-    {
-      const KVMFRColorTransform * transform =
-        (const KVMFRColorTransform *)((const uint8_t *)(cursor + 1) +
-          shapeSize);
-      g_state.lgr->ops.onMouseColorTransform(g_state.lgr, transform);
-    }
+      g_state.lgr->ops.onMouseColorTransform(g_state.lgr,
+          pointer.colorTransform);
 
-    if ((msg.udata & CURSOR_FLAG_VISIBLE_VALID) &&
-        cursor->sdrWhiteLevel && g_state.lgr->ops.onMouseWhiteLevel)
-      g_state.lgr->ops.onMouseWhiteLevel(
-          g_state.lgr, cursor->sdrWhiteLevel);
+    if ((pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID) &&
+        pointer.sdrWhiteLevel && g_state.lgr->ops.onMouseWhiteLevel)
+      g_state.lgr->ops.onMouseWhiteLevel(g_state.lgr,
+          pointer.sdrWhiteLevel);
 
-    if (msg.udata & CURSOR_FLAG_POSITION)
+    if (pointer.flags & LG_TRANSPORT_POINTER_POSITION)
     {
-      bool valid = g_cursor.guest.valid;
-      g_cursor.guest.x     = cursor->x;
-      g_cursor.guest.y     = cursor->y;
+      const bool wasValid = g_cursor.guest.valid;
+      g_cursor.guest.x     = pointer.x;
+      g_cursor.guest.y     = pointer.y;
       g_cursor.guest.valid = true;
-
-      // if the state just became valid
-      if (valid != true && core_inputEnabled())
+      if (!wasValid && core_inputEnabled())
       {
         core_alignToGuest();
         app_resyncMouseBasic();
       }
-
-      // tell the DS there was an update
       core_handleGuestMouseUpdate();
     }
 
     app_updateMouseState();
     g_cursor.redraw = false;
-
     RENDERER(onMouseEvent,
       g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
-      g_cursor.guest.x,
-      g_cursor.guest.y,
-      g_cursor.guest.hx,
-      g_cursor.guest.hy
-    );
+      g_cursor.guest.x, g_cursor.guest.y,
+      g_cursor.guest.hx, g_cursor.guest.hy);
 
     if ((g_params.mouseRedraw ||
-         (msg.udata & CURSOR_FLAG_COLOR_TRANSFORM)) &&
+         (pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) &&
         g_cursor.guest.visible && !g_state.stopVideo)
       lgSignalEvent(g_state.frameEvent);
-  }
 
-  LG_LOCK(g_state.pointerQueueLock);
-  lgmpClientUnsubscribe(&g_state.pointerQueue);
-  LG_UNLOCK(g_state.pointerQueueLock);
-
-  if (cursor)
-  {
-    free(cursor);
-    cursor = NULL;
+    g_state.transportOps->releasePointer(g_state.transport, &pointer);
   }
 
   return 0;
@@ -561,22 +467,10 @@ int main_cursorThread(void * unused)
 
 int main_frameThread(void * unused)
 {
-  struct DMAFrameInfo
-  {
-    KVMFRFrame * frame;
-    size_t       dataSize;
-    int          fd;
-  };
+  uint64_t          frameSerial   = 0;
+  uint32_t          formatVersion = 0;
+  LG_RendererFormat rendererFormat;
 
-  LGMP_STATUS      status;
-  PLGMPClientQueue queue;
-
-  uint32_t          frameSerial = 0;
-  uint32_t          formatVer   = 0;
-  size_t            dataSize    = 0;
-  LG_RendererFormat lgrFormat;
-
-  struct DMAFrameInfo dmaInfo[LGMP_Q_FRAME_LEN] = {0};
   if (g_state.useDMA)
     DEBUG_INFO("Using DMA buffer support");
 
@@ -584,313 +478,197 @@ int main_frameThread(void * unused)
   if (app_getState() != APP_STATE_RUNNING)
     return 0;
 
-  // subscribe to the frame queue
-  while(app_getState() == APP_STATE_RUNNING)
-  {
-    status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_FRAME, &queue);
-    if (status == LGMP_OK)
-      break;
-
-    if (status == LGMP_ERR_NO_SUCH_QUEUE)
-    {
-      usleep(1000);
-      continue;
-    }
-
-    DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
-    app_setState(APP_STATE_SHUTDOWN);
-    break;
-  }
-
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
-    LGMPMessage msg;
-    if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
+    LG_TransportFrame frame;
+    const LG_TransportStatus status = g_state.transportOps->nextFrame(
+        g_state.transport, g_state.useDMA, &frame);
+    if (status != LG_TRANSPORT_OK)
     {
-      if (status == LGMP_ERR_QUEUE_EMPTY)
-      {
-        struct timespec req =
-        {
-          .tv_sec  = 0,
-          .tv_nsec = g_params.framePollInterval * 1000L
-        };
-
-        struct timespec rem;
-        while(nanosleep(&req, &rem) < 0)
-        {
-          if (errno != -EINTR)
-          {
-            DEBUG_ERROR("nanosleep failed");
-            break;
-          }
-          req = rem;
-        }
-
+      if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
         continue;
-      }
-
-      if (status == LGMP_ERR_INVALID_SESSION)
+      if (status == LG_TRANSPORT_DISCONNECTED)
         app_setState(APP_STATE_RESTART);
+      else if (status == LG_TRANSPORT_END)
+        app_setState(APP_STATE_SHUTDOWN);
       else
       {
-        DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
+        DEBUG_ERROR("Frame transport failed with status %d", status);
         app_setState(APP_STATE_SHUTDOWN);
       }
       break;
     }
 
-    KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
-
-    // ignore any repeated frames, this happens when a new client connects to
-    // the same host application.
-    if (frame->frameSerial == frameSerial && g_state.formatValid)
+    if (frame.serial == frameSerial && g_state.formatValid)
     {
-      lgmpClientMessageDone(queue);
+      g_state.transportOps->releaseFrame(g_state.transport, &frame);
       continue;
     }
-    frameSerial = frame->frameSerial;
+    frameSerial = frame.serial;
 
-    struct DMAFrameInfo *dma = NULL;
-
-    if (!g_state.formatValid || frame->formatVer != formatVer)
+    const LG_TransportFrameFormat * format = frame.format;
+    if (!format)
     {
-      // setup the renderer format with the frame format details
-      lgrFormat.type          = frame->type;
-      lgrFormat.screenWidth   = frame->screenWidth;
-      lgrFormat.screenHeight  = frame->screenHeight;
-      lgrFormat.dataWidth     = frame->dataWidth;
-      lgrFormat.dataHeight    = frame->dataHeight;
-      lgrFormat.frameWidth    = frame->frameWidth;
-      lgrFormat.frameHeight   = frame->frameHeight;
-      lgrFormat.stride        = frame->stride;
-      lgrFormat.pitch         = frame->pitch;
-      lgrFormat.hdr           = frame->flags & FRAME_FLAG_HDR;
-      lgrFormat.hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
-      lgrFormat.hdrMetadata   = frame->flags & FRAME_FLAG_HDR_METADATA;
-      lgrFormat.sdrWhiteLevel = frame->sdrWhiteLevel ?
-        frame->sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+      DEBUG_ERROR("Transport returned a frame without format metadata");
+      g_state.transportOps->releaseFrame(g_state.transport, &frame);
+      app_setState(APP_STATE_SHUTDOWN);
+      break;
+    }
+    if (!g_state.formatValid || format->version != formatVersion)
+    {
+      memset(&rendererFormat, 0, sizeof(rendererFormat));
+      rendererFormat.type          = format->type;
+      rendererFormat.screenWidth   = format->screenWidth;
+      rendererFormat.screenHeight  = format->screenHeight;
+      rendererFormat.dataWidth     = format->dataWidth;
+      rendererFormat.dataHeight    = format->dataHeight;
+      rendererFormat.frameWidth    = format->frameWidth;
+      rendererFormat.frameHeight   = format->frameHeight;
+      rendererFormat.stride        = format->stride;
+      rendererFormat.pitch         = format->pitch;
+      rendererFormat.hdr           = format->hdr;
+      rendererFormat.hdrPQ         = format->hdrPQ;
+      rendererFormat.hdrMetadata   = format->hdrMetadata;
+      rendererFormat.sdrWhiteLevel = format->sdrWhiteLevel;
 
-      if (lgrFormat.hdrMetadata)
+      if (rendererFormat.hdrMetadata)
       {
-        memcpy(lgrFormat.hdrDisplayPrimary, frame->hdrDisplayPrimary, sizeof(lgrFormat.hdrDisplayPrimary));
-        memcpy(lgrFormat.hdrWhitePoint    , frame->hdrWhitePoint    , sizeof(lgrFormat.hdrWhitePoint    ));
-        lgrFormat.hdrMaxDisplayLuminance       = frame->hdrMaxDisplayLuminance;
-        lgrFormat.hdrMinDisplayLuminance       = frame->hdrMinDisplayLuminance;
-        lgrFormat.hdrMaxContentLightLevel      = frame->hdrMaxContentLightLevel;
-        lgrFormat.hdrMaxFrameAverageLightLevel = frame->hdrMaxFrameAverageLightLevel;
+        memcpy(rendererFormat.hdrDisplayPrimary, format->hdrDisplayPrimary,
+            sizeof(rendererFormat.hdrDisplayPrimary));
+        memcpy(rendererFormat.hdrWhitePoint, format->hdrWhitePoint,
+            sizeof(rendererFormat.hdrWhitePoint));
+        rendererFormat.hdrMaxDisplayLuminance       =
+          format->hdrMaxDisplayLuminance;
+        rendererFormat.hdrMinDisplayLuminance       =
+          format->hdrMinDisplayLuminance;
+        rendererFormat.hdrMaxContentLightLevel      =
+          format->hdrMaxContentLightLevel;
+        rendererFormat.hdrMaxFrameAverageLightLevel =
+          format->hdrMaxFrameAverageLightLevel;
       }
-      else
-      {
-        memset(lgrFormat.hdrDisplayPrimary, 0, sizeof(lgrFormat.hdrDisplayPrimary));
-        memset(lgrFormat.hdrWhitePoint    , 0, sizeof(lgrFormat.hdrWhitePoint    ));
-        lgrFormat.hdrMaxDisplayLuminance       = 0;
-        lgrFormat.hdrMinDisplayLuminance       = 0;
-        lgrFormat.hdrMaxContentLightLevel      = 0;
-        lgrFormat.hdrMaxFrameAverageLightLevel = 0;
-      }
 
-      if (frame->flags & FRAME_FLAG_TRUNCATED)
+      if (frame.flags & LG_TRANSPORT_FRAME_TRUNCATED)
       {
-        const float needed =
-          ((frame->screenHeight * frame->pitch * 2) / 1048576.0f) + 10.0f;
-        const int   size   = (int)powf(2.0f, ceilf(logf(needed) / logf(2.0f)));
-
         DEBUG_BREAK();
-        DEBUG_WARN("IVSHMEM too small, screen truncated");
-        DEBUG_WARN("Recommend increase size to %d MiB", size);
+        DEBUG_WARN("Transport buffer too small, screen truncated");
         DEBUG_BREAK();
-
-        app_msgBox(
-          "IVSHMEM too small",
-          "IVSHMEM too small\n"
-          "Please increase the size to %d MiB",
-          size);
+        app_msgBox("Transport buffer too small",
+            "The transport buffer is too small for this frame.");
       }
 
-      switch(frame->rotation)
+      switch (format->rotation)
       {
-        case FRAME_ROT_0  : lgrFormat.rotate = LG_ROTATE_0  ; break;
-        case FRAME_ROT_90 : lgrFormat.rotate = LG_ROTATE_90 ; break;
-        case FRAME_ROT_180: lgrFormat.rotate = LG_ROTATE_180; break;
-        case FRAME_ROT_270: lgrFormat.rotate = LG_ROTATE_270; break;
-
+        case FRAME_ROT_0  : rendererFormat.rotate = LG_ROTATE_0  ; break;
+        case FRAME_ROT_90 : rendererFormat.rotate = LG_ROTATE_90 ; break;
+        case FRAME_ROT_180: rendererFormat.rotate = LG_ROTATE_180; break;
+        case FRAME_ROT_270: rendererFormat.rotate = LG_ROTATE_270; break;
         default:
-          DEBUG_ERROR("Unsupported/invalid frame rotation");
-          lgrFormat.rotate = LG_ROTATE_0;
+          DEBUG_ERROR("Unsupported frame rotation");
+          rendererFormat.rotate = LG_ROTATE_0;
           break;
       }
-      g_state.rotate = lgrFormat.rotate;
+      g_state.rotate = rendererFormat.rotate;
 
-      dataSize = lgrFormat.dataHeight * lgrFormat.pitch;
-
-      bool error = false;
-      switch(frame->type)
+      bool invalid = false;
+      switch (format->type)
       {
         case FRAME_TYPE_RGBA:
         case FRAME_TYPE_BGRA:
         case FRAME_TYPE_RGBA10:
-          lgrFormat.bpp  = 32;
+          rendererFormat.bpp = 32;
           break;
-
         case FRAME_TYPE_RGBA16F:
-          lgrFormat.bpp  = 64;
+          rendererFormat.bpp = 64;
           break;
-
         case FRAME_TYPE_BGR_32:
         case FRAME_TYPE_RGB_24:
-          lgrFormat.bpp  = 24;
+          rendererFormat.bpp = 24;
           break;
-
         default:
-          DEBUG_ERROR("Unsupported frameType");
-          error = true;
+          invalid = true;
           break;
       }
 
-      if (error)
+      if (invalid)
       {
-        lgmpClientMessageDone(queue);
+        DEBUG_ERROR("Unsupported frame type");
+        g_state.transportOps->releaseFrame(g_state.transport, &frame);
         app_setState(APP_STATE_SHUTDOWN);
         break;
       }
 
       g_state.formatValid = true;
-      formatVer = frame->formatVer;
-
+      formatVersion       = format->version;
       DEBUG_INFO("Format: %s %ux%u (%ux%u) stride:%u pitch:%u rotation:%d hdr:%d pq:%d sdrWhite:%u nits",
-          FrameTypeStr[frame->type],
-          frame->frameWidth, frame->frameHeight,
-          frame->dataWidth , frame->dataHeight ,
-          frame->stride, frame->pitch,
-          frame->rotation,
-          frame->flags & FRAME_FLAG_HDR    ? 1 : 0,
-          frame->flags & FRAME_FLAG_HDR_PQ ? 1 : 0,
-          lgrFormat.sdrWhiteLevel);
+          FrameTypeStr[format->type], format->frameWidth, format->frameHeight,
+          format->dataWidth, format->dataHeight, format->stride, format->pitch,
+          format->rotation, format->hdr ? 1 : 0, format->hdrPQ ? 1 : 0,
+          rendererFormat.sdrWhiteLevel);
 
       LG_LOCK(g_state.lgrLock);
-      if (!RENDERER(onFrameFormat, lgrFormat))
+      if (!RENDERER(onFrameFormat, rendererFormat))
       {
-        DEBUG_ERROR("renderer failed to configure format");
-        app_setState(APP_STATE_SHUTDOWN);
         LG_UNLOCK(g_state.lgrLock);
+        DEBUG_ERROR("Renderer failed to configure format");
+        g_state.transportOps->releaseFrame(g_state.transport, &frame);
+        app_setState(APP_STATE_SHUTDOWN);
         break;
       }
-
-      // Renderers which expose HDR surface capabilities must match the wire
-      // encoding. Legacy renderers do not advertise this interface, so retain
-      // their existing display-server behaviour rather than silently forcing
-      // them through a conversion path they may not implement.
-      const bool rendererSupportsNativeHDR = !lgrFormat.hdr ||
+      const bool rendererSupportsNativeHDR = !rendererFormat.hdr ||
         !g_state.lgr->ops.supports || RENDERER(supports,
-          lgrFormat.hdrPQ ? LG_SUPPORTS_HDR_PQ : LG_SUPPORTS_HDR_SCRGB);
+          rendererFormat.hdrPQ ? LG_SUPPORTS_HDR_PQ : LG_SUPPORTS_HDR_SCRGB);
       // Publish the matching surface format before allowing the render thread
       // to consume the renderer format. Otherwise it can present one frame in
       // the new encoding while the display server still has the old image
       // description attached.
-      renderQueue_surfaceFormat(lgrFormat, rendererSupportsNativeHDR);
+      renderQueue_surfaceFormat(rendererFormat, rendererSupportsNativeHDR);
       LG_UNLOCK(g_state.lgrLock);
 
-      g_state.srcSize.x = lgrFormat.screenWidth;
-      g_state.srcSize.y = lgrFormat.screenHeight;
+      g_state.srcSize.x    = rendererFormat.screenWidth;
+      g_state.srcSize.y    = rendererFormat.screenHeight;
       g_state.haveSrcSize = true;
       if (g_params.autoResize)
-        g_state.ds->setWindowSize(lgrFormat.frameWidth, lgrFormat.frameHeight);
-
+        g_state.ds->setWindowSize(rendererFormat.frameWidth,
+            rendererFormat.frameHeight);
       core_updatePositionInfo();
     }
 
-    if (g_state.useDMA)
+    uint32_t damageCount = frame.damageRectsCount <=
+      LG_TRANSPORT_MAX_DAMAGE_RECTS ? frame.damageRectsCount : 0;
+    bool invalidDamage = damageCount != frame.damageRectsCount ||
+      (damageCount && !frame.damageRects);
+    for (uint32_t i = 0; !invalidDamage && i < damageCount; ++i)
     {
-      /* find the existing dma buffer if it exists */
-      for(int i = 0; i < ARRAY_LENGTH(dmaInfo); ++i)
-      {
-        if (dmaInfo[i].frame == frame)
-        {
-          dma = &dmaInfo[i];
-          /* if it's too small close it */
-          if (dma->dataSize < dataSize)
-          {
-            close(dma->fd);
-            dma->fd = -1;
-          }
-          break;
-        }
-      }
-
-      /* otherwise find a free buffer for use */
-      if (!dma)
-        for(int i = 0; i < ARRAY_LENGTH(dmaInfo); ++i)
-        {
-          if (!dmaInfo[i].frame)
-          {
-            dma = &dmaInfo[i];
-            dma->frame = frame;
-            dma->fd    = -1;
-            break;
-          }
-        }
-
-      if (!dma)
-      {
-        DEBUG_ERROR("Failed to obtain a free DMA buffer for use");
-        app_setState(APP_STATE_SHUTDOWN);
-        break;
-      }
-
-      /* open the buffer */
-      if (dma->fd == -1)
-      {
-        const uintptr_t pos    = (uintptr_t)msg.mem - (uintptr_t)g_state.shm.mem;
-        const uintptr_t offset = (uintptr_t)frame->offset + sizeof(FrameBuffer);
-
-        dma->dataSize = dataSize;
-        dma->fd       = ivshmemGetDMABuf(&g_state.shm, pos + offset, dataSize);
-        if (dma->fd < 0)
-        {
-          DEBUG_ERROR("Failed to get the DMA buffer for the frame");
-          app_setState(APP_STATE_SHUTDOWN);
-          break;
-        }
-      }
+      const FrameDamageRect * rect = &frame.damageRects[i];
+      invalidDamage = rect->x > format->frameWidth ||
+        rect->y > format->frameHeight ||
+        rect->width > format->frameWidth - rect->x ||
+        rect->height > format->frameHeight - rect->y;
     }
-
-    uint32_t damageRectsCount =
-      frame->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS ?
-        frame->damageRectsCount : 0;
-    bool invalidDamage = damageRectsCount != frame->damageRectsCount;
-    for (uint32_t i = 0; !invalidDamage && i < damageRectsCount; ++i)
-    {
-      const FrameDamageRect * rect = frame->damageRects + i;
-      invalidDamage =
-        rect->x > frame->frameWidth ||
-        rect->y > frame->frameHeight ||
-        rect->width  > frame->frameWidth  - rect->x ||
-        rect->height > frame->frameHeight - rect->y;
-    }
-    if (unlikely(invalidDamage))
+    if (invalidDamage)
     {
       DEBUG_WARN("Invalid damage rectangles, forcing a full update");
-      damageRectsCount = 0;
+      damageCount = 0;
     }
 
-    FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-    if (!RENDERER(onFrame, fb, g_state.useDMA ? dma->fd : -1,
-          frame->damageRects, damageRectsCount))
+    if (!RENDERER(onFrame, frame.framebuffer, frame.dmaFD,
+          frame.damageRects, damageCount))
     {
-      lgmpClientMessageDone(queue);
-      DEBUG_ERROR("renderer on frame returned failure");
+      g_state.transportOps->releaseFrame(g_state.transport, &frame);
+      DEBUG_ERROR("Renderer onFrame returned failure");
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
 
     overlaySplash_show(false);
-
-    if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION &&
+    if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
         g_params.requestActivation)
       g_state.ds->requestActivation();
 
-    const bool blockScreensaver = frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER;
-    if (g_params.autoScreensaver && g_state.autoIdleInhibitState != blockScreensaver)
+    const bool blockScreensaver =
+      frame.flags & LG_TRANSPORT_FRAME_BLOCK_SCREENSAVER;
+    if (g_params.autoScreensaver &&
+        g_state.autoIdleInhibitState != blockScreensaver)
     {
       if (blockScreensaver)
         g_state.ds->inhibitIdle();
@@ -899,10 +677,9 @@ int main_frameThread(void * unused)
       g_state.autoIdleInhibitState = blockScreensaver;
     }
 
-    const uint64_t t      = nanotime();
-    const uint64_t delta  = t - g_state.lastFrameTime;
-    g_state.lastFrameTime = t;
-
+    const uint64_t now   = nanotime();
+    const uint64_t delta = now - g_state.lastFrameTime;
+    g_state.lastFrameTime = now;
     if (g_state.lastFrameTimeValid)
       ringbuffer_push(g_state.uploadTimings, &(float) { delta * 1e-6f });
     g_state.lastFrameTimeValid = true;
@@ -917,29 +694,15 @@ int main_frameThread(void * unused)
     else
       lgSignalEvent(g_state.frameEvent);
 
-    lgmpClientMessageDone(queue);
-
-    // switch over to the LG stream
+    g_state.transportOps->releaseFrame(g_state.transport, &frame);
     app_useSpiceDisplay(false);
   }
-
-  lgmpClientUnsubscribe(&queue);
 
   RENDERER(onRestart);
 
   if (app_getState() != APP_STATE_SHUTDOWN)
-  {
     if (!app_useSpiceDisplay(true))
       overlaySplash_show(true);
-  }
-
-  if (g_state.useDMA)
-  {
-    for(int i = 0; i < ARRAY_LENGTH(dmaInfo); ++i)
-      if (dmaInfo[i].fd >= 0)
-        close(dmaInfo[i].fd);
-  }
-
   return 0;
 }
 
@@ -1302,21 +1065,19 @@ static MsgBoxHandle showSpiceInputHelp(void)
     "through SPICE if you press the capture key.");
 }
 
-struct LGMPClientSessionProbe
+struct TransportSessionProbe
 {
-  PLGMPClient client;
-  uint32_t    udataSize;
-  uint8_t *   udata;
-  uint32_t    remoteVersion;
-  LGMP_STATUS status;
+  LG_Transport * transport;
+  const LG_TransportOps * ops;
+  LG_TransportSession session;
+  LG_TransportStatus status;
   atomic_bool done;
 };
 
-static int lgmpClientSessionProbe(void * opaque)
+static int transportSessionProbe(void * opaque)
 {
-  struct LGMPClientSessionProbe * probe = opaque;
-  probe->status = lgmpClientSessionInit(probe->client, &probe->udataSize,
-      &probe->udata, NULL, &probe->remoteVersion);
+  struct TransportSessionProbe * probe = opaque;
+  probe->status = probe->ops->connect(probe->transport, &probe->session);
   atomic_store_explicit(&probe->done, true, memory_order_release);
   return 0;
 }
@@ -1365,7 +1126,7 @@ static int lg_run(void)
   overlayGraph_register("RENDER", g_state.renderDuration, 0.0f, 10.0f, NULL);
 
   // unknown guest OS at this time
-  g_state.guestOS = KVMFR_OS_OTHER;
+  g_state.guestOS = LG_TRANSPORT_OS_OTHER;
 
   // search for the best displayserver ops to use
   for(int i = 0; i < LG_DISPLAYSERVER_COUNT; ++i)
@@ -1408,12 +1169,13 @@ static int lg_run(void)
   signal(SIGINT , intHandler);
   signal(SIGTERM, intHandler);
 
-  // try map the shared memory
-  if (!ivshmemOpen(&g_state.shm))
+  if (!lgTransport_create(g_params.transport, &g_state.transport,
+        &g_state.transportOps))
   {
-    DEBUG_ERROR("Failed to map memory");
+    DEBUG_ERROR("Failed to create transport: %s", g_params.transport);
     return -1;
   }
+  DEBUG_INFO("Using Transport: %s", g_state.transportOps->name);
 
   // setup the spice startup condition
   if (!(e_spice = lgCreateEvent(false, 0)))
@@ -1495,9 +1257,7 @@ static int lg_run(void)
     return -1;
   }
 
-  g_state.useDMA =
-    g_params.allowDMA &&
-    ivshmemHasDMA(&g_state.shm);
+  g_state.useDMA = g_state.transportOps->supportsDMA(g_state.transport);
 
   // initialize the window dimensions at init for renderers
   g_state.windowW  = g_params.w;
@@ -1570,43 +1330,35 @@ static int lg_run(void)
   // the end of the output
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
+  LG_RendererInterop interop = {
+    .version = LG_RENDERER_INTEROP_VERSION,
+    .size    = sizeof(interop),
+  };
+  const LG_RendererInterop * interopPtr = NULL;
+  if (g_state.lgr->ops.getInterop &&
+      g_state.lgr->ops.getInterop(g_state.lgr, &interop))
+    interopPtr = &interop;
+  if (g_state.transportOps->attachRenderer &&
+      !g_state.transportOps->attachRenderer(g_state.transport, interopPtr))
+  {
+    DEBUG_ERROR("Failed to attach the renderer to the transport");
+    return -1;
+  }
+
   g_state.ds->startup();
   g_state.cbAvailable = g_state.ds->cbInit && g_state.ds->cbInit();
   if (g_state.cbAvailable)
     g_state.cbRequestList = ll_new();
 
-  LGMP_STATUS status;
-
-  while(app_getState() == APP_STATE_RUNNING)
-  {
-    if ((status = lgmpClientInit(g_state.shm.mem, g_state.shm.size, &g_state.lgmp)) == LGMP_OK)
-      break;
-
-    DEBUG_ERROR("lgmpClientInit Failed: %s", lgmpStatusString(status));
-    return -1;
-  }
-
-  /* this short timeout is to allow the LGMP host to update the timestamp before
-   * we start checking for a valid session */
-  g_state.ds->wait(200);
-
   if (g_params.captureOnStart)
     core_setGrab(true);
 
-  uint32_t   udataSize     = 0;
-  uint32_t   remoteVersion = 0;
-  KVMFR    * udata         = NULL;
-  bool       sessionReady  = false;
-  int        waitCount     = 0;
-
+  int waitCount = 0;
+  LG_TransportSession session;
   MsgBoxHandle msgs[10];
   int msgsCount;
 
 restart:
-  udataSize     = 0;
-  remoteVersion = 0;
-  udata         = NULL;
-  sessionReady  = false;
   msgsCount = 0;
   memset(msgs, 0, sizeof(msgs));
 
@@ -1616,23 +1368,20 @@ restart:
   {
     if (initialSpiceEnable && microtime() > initialSpiceEnable)
     {
-      /* use the spice display until we get frames from the LG host application
-       * it is safe to call this before connect as it will be delayed until
-       * spiceReady is called */
       app_useSpiceDisplay(true);
       initialSpiceEnable = 0;
     }
 
-    struct LGMPClientSessionProbe probe =
-    {
-      .client = g_state.lgmp,
-      .done   = false,
+    struct TransportSessionProbe probe = {
+      .transport = g_state.transport,
+      .ops       = g_state.transportOps,
+      .done      = false,
     };
     LGThread * probeThread;
-    if (!lgCreateThread("lgmpSession", lgmpClientSessionProbe, &probe,
+    if (!lgCreateThread("transportSession", transportSessionProbe, &probe,
           &probeThread))
     {
-      DEBUG_ERROR("Failed to create LGMP session probe thread");
+      DEBUG_ERROR("Failed to create transport session probe thread");
       return -1;
     }
 
@@ -1642,315 +1391,136 @@ restart:
 
     if (!lgJoinThread(probeThread, NULL))
     {
-      DEBUG_ERROR("Failed to join LGMP session probe thread");
+      DEBUG_ERROR("Failed to join transport session probe thread");
       return -1;
     }
 
     if (app_getState() != APP_STATE_RUNNING)
       return -1;
 
-    status        = probe.status;
-    udataSize     = probe.udataSize;
-    udata         = (KVMFR *)probe.udata;
-    remoteVersion = probe.remoteVersion;
-    switch(status)
+    if (probe.status == LG_TRANSPORT_OK)
     {
-      case LGMP_OK:
-        initialSpiceEnable = 0;
-        break;
-
-      case LGMP_ERR_INVALID_VERSION:
-      {
-        if (waitCount++ == 0)
-        {
-          reportBadVersion();
-          msgs[msgsCount++] = app_msgBox(
-            "Incompatible LGMP Version",
-            "The host application is not compatible with this client.\n"
-            "Please download and install the matching version."
-          );
-
-          DEBUG_INFO("LGMP host:%u client:%u",
-              remoteVersion, LGMP_PROTOCOL_VERSION);
-          DEBUG_INFO("Waiting for you to upgrade the host application");
-        }
-
-        g_state.ds->wait(1000);
-        continue;
-      }
-
-      case LGMP_ERR_INVALID_SESSION:
-      case LGMP_ERR_INVALID_MAGIC:
-      {
-        if (waitCount++ == 0)
-        {
-          DEBUG_BREAK();
-          DEBUG_INFO("The host application seems to not be running");
-          DEBUG_INFO("Waiting for the host application to start...");
-        }
-
-        if (waitCount == 30)
-        {
-          DEBUG_BREAK();
-          if (!g_params.disableWaitingMessage)
-          {
-            msgs[msgsCount++] = app_msgBox(
-                "Host Application Not Running",
-                "It seems the host application is not running or your\n"
-                "virtual machine is still starting up\n"
-                "\n"
-                "If the the VM is running and booted please check the\n"
-                "host application log for errors. You can find the\n"
-                "log through the shortcut in your start menu\n"
-                "\n"
-                "Continuing to wait...");
-
-            msgs[msgsCount++] = showSpiceInputHelp();
-          }
-
-          DEBUG_INFO("Check the host log in your guest at %%ProgramData%%\\Looking Glass (host)\\looking-glass-host.txt");
-          DEBUG_INFO("Continuing to wait...");
-        }
-
-        g_state.ds->wait(1000);
-        continue;
-      }
-
-      default:
-        DEBUG_ERROR("lgmpClientSessionInit Failed: %s", lgmpStatusString(status));
-        return -1;
+      session = probe.session;
+      initialSpiceEnable = 0;
+      break;
     }
 
-    if (app_getState() != APP_STATE_RUNNING)
-      return -1;
-
-    // dont show warnings again after the first successful startup
-    waitCount = 100;
-
-    const bool headerValid = udata && udataSize >= sizeof(*udata);
-    const bool magicMatches = headerValid &&
-      memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
-    if (!headerValid || !magicMatches || udata->version != KVMFR_VERSION)
+    if (probe.status == LG_TRANSPORT_INVALID_VERSION)
     {
-      static bool alertsDone = false;
-      if (alertsDone)
+      if (waitCount++ == 0)
       {
-        if (app_getState() == APP_STATE_RUNNING)
-          g_state.ds->wait(1000);
-        continue;
-      }
-
-      reportBadVersion();
-      if (magicMatches)
-      {
+        reportBadVersion();
         msgs[msgsCount++] = app_msgBox(
-          "Incompatible KVMFR Version",
-          "The host application is not compatible with this client.\n"
-          "Please download and install the matching version.\n"
-          "\n"
-          "Client Version: %s\n"
-          "Host Version: %s",
-          BUILD_VERSION,
-          udata->version >= 2 ? udata->hostver : NULL
-        );
-
-        DEBUG_ERROR("Expected KVMFR version %d, got %d", KVMFR_VERSION, udata->version);
-        DEBUG_ERROR("Client version: %s", BUILD_VERSION);
-        if (udata->version >= 2)
-          DEBUG_ERROR("  Host version: %s", udata->hostver);
+            "Incompatible Transport Version",
+            "The selected transport source is not compatible with this client.\n"
+            "Please install matching versions.");
+        DEBUG_INFO("Remote transport version: %u", probe.session.remoteVersion);
       }
-      else
-        DEBUG_ERROR("Invalid KVMFR magic");
 
-      DEBUG_BREAK();
-
-      msgs[msgsCount++] = showSpiceInputHelp();
-
-      DEBUG_INFO("Waiting for you to upgrade the host application");
-
-      alertsDone = true;
-      if (app_getState() == APP_STATE_RUNNING)
-        g_state.ds->wait(1000);
-
+      g_state.ds->wait(1000);
       continue;
     }
 
-    sessionReady = true;
-    break;
+    if (probe.status == LG_TRANSPORT_UNAVAILABLE ||
+        probe.status == LG_TRANSPORT_DISCONNECTED)
+    {
+      if (waitCount++ == 0)
+      {
+        DEBUG_BREAK();
+        DEBUG_INFO("The transport source is not available");
+        DEBUG_INFO("Waiting for the source to start...");
+      }
+      if (waitCount == 30 && !g_params.disableWaitingMessage)
+      {
+        msgs[msgsCount++] = app_msgBox(
+            "Transport Source Not Available",
+            "The selected transport source is not available.\n"
+            "Continuing to wait...");
+        msgs[msgsCount++] = showSpiceInputHelp();
+      }
+      g_state.ds->wait(1000);
+      continue;
+    }
+
+    DEBUG_ERROR("Transport connection failed with status %d", probe.status);
+    return -1;
   }
 
-  if (!sessionReady || app_getState() != APP_STATE_RUNNING)
+  if (app_getState() != APP_STATE_RUNNING)
     return -1;
 
-  /* close any informational message boxes from above as we now connected
-   * successfully */
-
-  for(int i = 0; i < msgsCount; ++i)
+  waitCount = 100;
+  for (int i = 0; i < msgsCount; ++i)
     if (msgs[i])
       app_msgBoxClose(msgs[i]);
 
   DEBUG_INFO("Guest Information:");
-  DEBUG_INFO("Version  : %s", udata->hostver);
+  DEBUG_INFO("Version  : %s", session.version[0] ? session.version : "unknown");
+  if (session.cpuModel[0])
+    DEBUG_INFO("CPU Model: %s", session.cpuModel);
+  if (session.cpus)
+    DEBUG_INFO("CPU      : %u sockets, %u cores, %u threads",
+        session.sockets, session.cores, session.cpus);
+  if (session.capture[0])
+    DEBUG_INFO("Using    : %s", session.capture);
 
-  /* parse the kvmfr records from the userdata */
-  udataSize -= sizeof(*udata);
-  uint8_t * p = (uint8_t *)(udata + 1);
-  while(udataSize >= sizeof(KVMFRRecord))
+  if (session.cpuModel[0] && session.cpus && session.cores)
   {
-    KVMFRRecord * record = (KVMFRRecord *)p;
-    p         += sizeof(*record);
-    udataSize -= sizeof(*record);
-    if (record->size > udataSize)
+    char hostModel[1024] = {};
+    int hostProcs   = 0;
+    int hostCores   = 0;
+    int hostSockets = 0;
+    if (cpuInfo_get(hostModel, sizeof(hostModel), &hostProcs, &hostCores,
+        &hostSockets))
     {
-      DEBUG_WARN("KVMFRecord size is invalid, aborting parsing.");
-      break;
-    }
-
-    switch(record->type)
-    {
-      case KVMFR_RECORD_VMINFO:
+      if (hostProcs > hostCores && session.cpus <= session.cores)
       {
-        KVMFRRecord_VMInfo * vmInfo = (KVMFRRecord_VMInfo *)p;
-        DEBUG_INFO("UUID     : "
-          "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-          vmInfo->uuid[ 0], vmInfo->uuid[ 1], vmInfo->uuid[ 2],
-          vmInfo->uuid[ 3], vmInfo->uuid[ 4], vmInfo->uuid[ 5],
-          vmInfo->uuid[ 6], vmInfo->uuid[ 7], vmInfo->uuid[ 8],
-          vmInfo->uuid[ 9], vmInfo->uuid[10], vmInfo->uuid[11],
-          vmInfo->uuid[12], vmInfo->uuid[13], vmInfo->uuid[14],
-          vmInfo->uuid[15]);
-
-        DEBUG_INFO("CPU Model: %s", vmInfo->model);
-        DEBUG_INFO("CPU      : %u sockets, %u cores, %u threads",
-            vmInfo->sockets, vmInfo->cores, vmInfo->cpus);
-        DEBUG_INFO("Using    : %s", vmInfo->capture);
-
-        bool hostHasSMP  = false;
-        bool guestHasSMP = false;
-        bool guestCPUPt  = false;
-        bool hostIsAMD   = false;
-        {
-          char model[1024];
-          int procs;
-          int cores;
-          int sockets;
-          if (cpuInfo_get(model, sizeof model, &procs, &cores, &sockets) &&
-              procs > cores)
-            hostHasSMP = true;
-
-          if (vmInfo->cpus > vmInfo->cores)
-            guestHasSMP = true;
-
-          if (strncmp(model, "AMD ", 4) == 0)
-            hostIsAMD = true;
-
-          if (strcmp(vmInfo->model, model) == 0)
-            guestCPUPt = true;
-        }
-
-        if (hostHasSMP && !guestHasSMP)
-        {
-          DEBUG_BREAK();
-          DEBUG_WARN(
-              "I have detected you have a CPU with hyperthreads but your guest"
-              " is not aware of this");
-          DEBUG_WARN(
-              "This will result in a degredation of latency sensitive tasks"
-              " including the use of Looking Glass");
-
-          if (hostIsAMD)
-            DEBUG_WARN("As you have an AMD CPU, please be sure you have enabled"
-                " the `topoext` cpu feature flag for your virtual machine");
-          DEBUG_BREAK();
-        }
-
-        if (!guestCPUPt)
-        {
-          DEBUG_BREAK();
-          DEBUG_WARN(
-              "Your guest is unaware of the acceleration features your CPU has");
-          DEBUG_WARN(
-              "Please be sure to set your CPU type to `host-passthrough` in"
-              " your VM configuration");
-          DEBUG_BREAK();
-        }
-
-        bool uuidValid = false;
-        for(int i = 0; i < sizeof(vmInfo->uuid); ++i)
-         if (vmInfo->uuid[i])
-         {
-           uuidValid = true;
-           break;
-         }
-
-        if (!uuidValid)
-          break;
-
-        memcpy(g_state.guestUUID, vmInfo->uuid, sizeof(g_state.guestUUID));
-        g_state.guestUUIDValid = true;
-        break;
+        DEBUG_BREAK();
+        DEBUG_WARN("The host CPU has hardware threads but the guest is not aware of them");
+        DEBUG_WARN("This can degrade latency-sensitive tasks including Looking Glass");
+        if (strncmp(hostModel, "AMD ", 4) == 0)
+          DEBUG_WARN("For AMD CPUs, enable the `topoext` CPU feature for the virtual machine");
+        DEBUG_BREAK();
       }
 
-      case KVMFR_RECORD_OSINFO:
+      if (strcmp(session.cpuModel, hostModel) != 0)
       {
-        KVMFRRecord_OSInfo * osInfo = (KVMFRRecord_OSInfo *)p;
-        static const char * typeStr[] =
-        {
-          "Linux",
-          "BSD",
-          "OSX",
-          "Windows",
-          "Other"
-        };
-
-        const char * type;
-        if (osInfo->os >= ARRAY_LENGTH(typeStr))
-          type = "Unknown";
-        else
-          type = typeStr[osInfo->os];
-
-        DEBUG_INFO("OS       : %s", type);
-        if (osInfo->name[0])
-          DEBUG_INFO("OS Name  : %s", osInfo->name);
-
-        g_state.guestOS = osInfo->os;
-
-        if (atomic_load_explicit(&g_state.spiceReady, memory_order_acquire) &&
-            g_params.useSpiceInput)
-          keybind_spiceRegister();
-        break;
+        DEBUG_BREAK();
+        DEBUG_WARN("The guest is unaware of the acceleration features of the host CPU");
+        DEBUG_WARN("Set the virtual machine CPU type to `host-passthrough`");
+        DEBUG_BREAK();
       }
-
-      default:
-        DEBUG_WARN("Unhandled KVMFRecord type: %d", record->type);
-        break;
     }
-
-    p         += record->size;
-    udataSize -= record->size;
   }
 
+  static const char * osNames[] = { "Linux", "BSD", "OSX", "Windows", "Other" };
+  const char * os = session.os < LG_TRANSPORT_OS_OTHER + 1 ?
+    osNames[session.os] : "Unknown";
+  DEBUG_INFO("OS       : %s", os);
+  if (session.osName[0])
+    DEBUG_INFO("OS Name  : %s", session.osName);
+
+  g_state.guestOS        = session.os;
+  g_state.guestUUIDValid = session.uuidValid;
+  if (session.uuidValid)
+    memcpy(g_state.guestUUID, session.uuid, sizeof(g_state.guestUUID));
+  g_state.transportFeatures = session.features;
+
+  if (g_state.spiceReady && g_params.useSpiceInput)
+    keybind_spiceRegister();
   checkUUID();
+  DEBUG_INFO("Starting session");
+  atomic_store_explicit(
+      &g_state.lgHostConnected, true, memory_order_release);
 
-  if (app_getState() == APP_STATE_RUNNING)
-  {
-    DEBUG_INFO("Starting session");
-    atomic_store_explicit(
-        &g_state.lgHostConnected, true, memory_order_release);
-  }
+  g_state.lgHostConnected = true;
 
-  g_state.kvmfrFeatures = udata->features;
-
-  LG_LOCK_INIT(g_state.pointerQueueLock);
   if (!core_startCursorThread() || !core_startFrameThread())
-  {
-    LG_LOCK_FREE(g_state.pointerQueueLock);
     return -1;
-  }
 
   while(likely(app_getState() == APP_STATE_RUNNING))
   {
-    if (unlikely(!lgmpClientSessionValid(g_state.lgmp)))
+    if (unlikely(!g_state.transportOps->sessionValid(g_state.transport)))
     {
       atomic_store_explicit(
           &g_state.lgHostConnected, false, memory_order_release);
@@ -1969,13 +1539,13 @@ restart:
 
     core_stopFrameThread();
     core_stopCursorThread();
+    g_state.transportOps->disconnect(g_state.transport);
 
     app_setState(APP_STATE_RUNNING);
     lgInit();
     goto restart;
   }
 
-  LG_LOCK_FREE(g_state.pointerQueueLock);
   return 0;
 }
 
@@ -1995,7 +1565,8 @@ static void lg_shutdown(void)
     lgJoinThread(t_render, NULL);
   }
 
-  lgmpClientFree(&g_state.lgmp);
+  if (g_state.transportOps)
+    g_state.transportOps->destroy(&g_state.transport);
 
   if (g_state.frameEvent)
   {
@@ -2029,8 +1600,6 @@ static void lg_shutdown(void)
 
   if (g_state.ds && g_state.dsInitialized)
     g_state.ds->free();
-
-  ivshmemClose(&g_state.shm);
 
   renderQueue_free();
 
@@ -2071,7 +1640,7 @@ int main(int argc, char * argv[])
 
   lgPathsInit("looking-glass");
   config_init();
-  ivshmemOptionsInit();
+  lgTransport_setup();
   egl_dynProcsInit();
   gl_dynProcsInit();
 

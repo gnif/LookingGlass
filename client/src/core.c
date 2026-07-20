@@ -192,29 +192,30 @@ bool core_warpPointer(int x, int y, bool exiting)
 
 void core_onWindowSizeChanged(unsigned width, unsigned height)
 {
-  if (!g_state.pointerQueue)
+  if (!g_state.transport ||
+      !(g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE))
     return;
 
   if (g_state.srcSize.x == width && g_state.srcSize.y == height)
     return;
 
-  const KVMFRWindowSize msg =
+  const LG_TransportControl control =
   {
-    .msg.type = KVMFR_MESSAGE_WINDOWSIZE,
-    .w        = width,
-    .h        = height
+    .type       = LG_TRANSPORT_CONTROL_WINDOW_SIZE,
+    .windowSize = { .width = width, .height = height },
   };
 
-  uint32_t serial;
-  LGMP_STATUS status;
-  if ((status = lgmpClientSendData(g_state.pointerQueue,
-        &msg, sizeof(msg), &serial)) != LGMP_OK)
-    DEBUG_WARN("Message send failed: %s", lgmpStatusString(status));
+  LG_TransportControlToken token;
+  const LG_TransportStatus status = g_state.transportOps->sendControl(
+      g_state.transport, &control, &token);
+  if (status != LG_TRANSPORT_OK && status != LG_TRANSPORT_UNAVAILABLE)
+    DEBUG_WARN("Window-size control failed with status %d", status);
 }
 
 void core_updatePositionInfo(void)
 {
-  if (g_params.setGuestRes && g_state.kvmfrFeatures & KVMFR_FEATURE_WINDOWSIZE)
+  if (g_params.setGuestRes &&
+      g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE)
   {
     LGMsg msg =
     {
@@ -535,20 +536,19 @@ void core_handleMouseNormal(double ex, double ey)
     util_localCurToGuest(&guest);
 
     if (!g_state.stopVideo &&
-      g_state.kvmfrFeatures & KVMFR_FEATURE_SETCURSORPOS)
+      g_state.transportFeatures & LG_TRANSPORT_FEATURE_SET_CURSOR_POS)
     {
-      const KVMFRSetCursorPos msg = {
-        .msg.type = KVMFR_MESSAGE_SETCURSORPOS,
-        .x        = round(guest.x),
-        .y        = round(guest.y)
+      const LG_TransportControl control = {
+        .type      = LG_TRANSPORT_CONTROL_SET_CURSOR_POS,
+        .cursorPos = { .x = round(guest.x), .y = round(guest.y) },
       };
 
-      uint32_t setPosSerial;
-      LGMP_STATUS status;
-      if ((status = lgmpClientSendData(g_state.pointerQueue,
-            &msg, sizeof(msg), &setPosSerial)) != LGMP_OK)
+      LG_TransportControlToken token;
+      LG_TransportStatus status = g_state.transportOps->sendControl(
+          g_state.transport, &control, &token);
+      if (status != LG_TRANSPORT_OK)
       {
-        DEBUG_WARN("Message send failed: %s", lgmpStatusString(status));
+        DEBUG_WARN("Cursor-position control failed with status %d", status);
         goto fallback;
       }
       else
@@ -558,32 +558,24 @@ void core_handleMouseNormal(double ex, double ey)
         unsigned timeout = 200;
         do
         {
-          LG_LOCK(g_state.pointerQueueLock);
-          if (!g_state.pointerQueue)
+          status = g_state.transportOps->controlStatus(g_state.transport,
+              token);
+          if (status == LG_TRANSPORT_DISCONNECTED)
           {
-            /* the queue is nolonger valid, assume complete */
             g_cursor.realigning = false;
-            LG_UNLOCK(g_state.pointerQueueLock);
             break;
           }
-
-          uint32_t hostSerial;
-          if (lgmpClientGetSerial(g_state.pointerQueue, &hostSerial) != LGMP_OK)
+          if (status == LG_TRANSPORT_OK)
+            break;
+          if (status != LG_TRANSPORT_UNAVAILABLE)
           {
             g_cursor.realigning = false;
-            LG_UNLOCK(g_state.pointerQueueLock);
             return;
           }
-          LG_UNLOCK(g_state.pointerQueueLock);
-
-          if (hostSerial >= setPosSerial)
-            break;
 
           if (--timeout == 0)
           {
-            DEBUG_ERROR(
-                "pointerQueue serial not updating, expected %u but stuck at %u",
-                setPosSerial, hostSerial);
+            DEBUG_ERROR("Cursor-position control was not acknowledged");
             break;
           }
 
@@ -591,8 +583,8 @@ void core_handleMouseNormal(double ex, double ey)
         }
         while(app_isRunning());
 
-        g_cursor.guest.x    = msg.x;
-        g_cursor.guest.y    = msg.y;
+        g_cursor.guest.x    = control.cursorPos.x;
+        g_cursor.guest.y    = control.cursorPos.y;
         g_cursor.realign    = false;
         g_cursor.realigning = false;
         g_cursor.redraw     = true;

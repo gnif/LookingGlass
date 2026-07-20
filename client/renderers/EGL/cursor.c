@@ -101,8 +101,8 @@ struct EGL_Cursor
   _Atomic(float)               mapHDRContentPeak;
 
   bool                colorTransformUpdate;
-  KVMFRColorTransform pendingColorTransform;
-  KVMFRColorTransform activeColorTransform;
+  LGColorTransform pendingColorTransform;
+  LGColorTransform activeColorTransform;
   GLuint              colorLUT;
 
   struct CursorTex norm;
@@ -239,7 +239,7 @@ bool egl_cursorInit(EGL_Cursor ** cursor)
   atomic_init(&(*cursor)->scale            , 1.0f );
   atomic_init(&(*cursor)->sourceTransfer   , CURSOR_TRANSFER_SRGB);
   atomic_init(&(*cursor)->sdrWhiteLevel    ,
-      KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+      LG_SDR_WHITE_LEVEL_DEFAULT);
   atomic_init(&(*cursor)->mapHDRtoSDR      , false);
   atomic_init(&(*cursor)->mapHDRGain       , 1.0f );
   atomic_init(&(*cursor)->mapHDRContentPeak, 1.0f );
@@ -301,7 +301,7 @@ bool egl_cursorSetShape(EGL_Cursor * cursor, const LG_RendererCursor type,
 }
 
 void egl_cursorSetColorTransform(EGL_Cursor * cursor,
-    const KVMFRColorTransform * transform)
+    const LGColorTransform * transform)
 {
   LG_LOCK(cursor->lock);
   cursor->pendingColorTransform = *transform;
@@ -351,7 +351,7 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
       cursor->activeColorTransform = cursor->pendingColorTransform;
       cursor->colorTransformUpdate = false;
 
-      if (cursor->activeColorTransform.flags & KVMFR_COLOR_TRANSFORM_LUT)
+      if (cursor->activeColorTransform.flags & LG_COLOR_TRANSFORM_LUT)
       {
         if (!cursor->colorLUT)
           glGenTextures(1, &cursor->colorLUT);
@@ -568,5 +568,5 @@ void egl_cursorSetHDRState(EGL_Cursor * cursor, bool sourceHDR,
 void egl_cursorSetSDRWhiteLevel(EGL_Cursor * cursor, float sdrWhiteLevel)
 {
   atomic_store(&cursor->sdrWhiteLevel, sdrWhiteLevel > 0.0f ?
-      sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+      sdrWhiteLevel : LG_SDR_WHITE_LEVEL_DEFAULT);
 }

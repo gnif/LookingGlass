@@ -22,13 +22,12 @@
 
 #include "texture_buffer.h"
 #include "common/debug.h"
-#include "common/KVMFR.h"
 #include "common/rects.h"
 
 struct TexDamage
 {
   int             count;
-  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
+  FrameDamageRect rects[LG_MAX_FRAME_DAMAGE_RECTS];
 };
 
 typedef struct TexFB
@@ -90,7 +89,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 
   struct TexDamage * damage = this->damage + parent->bufIndex;
   bool damageAll = !update->rects || update->rectCount == 0 || damage->count < 0 ||
-    damage->count + update->rectCount > KVMFR_MAX_DAMAGE_RECTS;
+    damage->count + update->rectCount > LG_MAX_FRAME_DAMAGE_RECTS;
   bool complete;
 
   if (damageAll)
@@ -168,7 +167,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
     if (i == parent->bufIndex)
       damage->count = 0;
     else if (update->rects && update->rectCount > 0 && damage->count >= 0 &&
-             damage->count + update->rectCount <= KVMFR_MAX_DAMAGE_RECTS)
+             damage->count + update->rectCount <= LG_MAX_FRAME_DAMAGE_RECTS)
     {
       memcpy(damage->rects + damage->count, update->rects,
         update->rectCount * sizeof(FrameDamageRect));

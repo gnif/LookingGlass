@@ -18,29 +18,42 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#pragma once
+#include "interface/transport.h"
+#include "dynamic/transports.h"
 
-#include <stdbool.h>
-#include "common/types.h"
-#include "interface/renderer.h"
-#include "desktop_rects.h"
+#include <string.h>
 
-struct DesktopDamage
+void lgTransport_setup(void)
 {
-  int count;
-  FrameDamageRect rects[LG_MAX_FRAME_DAMAGE_RECTS];
-};
+  for (unsigned i = 0; i < LG_TRANSPORT_COUNT; ++i)
+    if (LG_Transports[i]->setup)
+      LG_Transports[i]->setup();
+}
 
-typedef struct EGL_Damage EGL_Damage;
+bool lgTransport_isValid(const char * name)
+{
+  if (!name)
+    return false;
+  for (unsigned i = 0; i < LG_TRANSPORT_COUNT; ++i)
+    if (strcmp(LG_Transports[i]->name, name) == 0)
+      return true;
+  return false;
+}
 
-bool egl_damageInit(EGL_Damage ** damage);
-void egl_damageFree(EGL_Damage ** damage);
+bool lgTransport_create(const char * name, LG_Transport ** transport,
+    const LG_TransportOps ** ops)
+{
+  for (unsigned i = 0; i < LG_TRANSPORT_COUNT; ++i)
+  {
+    if (strcmp(LG_Transports[i]->name, name) != 0)
+      continue;
 
-void egl_damageConfigUI(EGL_Damage * damage);
-void egl_damageSetup(EGL_Damage * damage, int width, int height);
-void egl_damageResize(EGL_Damage * damage, float translateX, float translateY,
-    float scaleX, float scaleY);
-void egl_damageSetHDRState(EGL_Damage * damage, bool active,
-    float referenceWhiteLevel);
-bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate,
-    const struct DesktopDamage * data);
+    if (!LG_Transports[i]->create(transport))
+      return false;
+
+    *ops = LG_Transports[i];
+    return true;
+  }
+
+  return false;
+}
