@@ -22,6 +22,7 @@
 #include "common/option.h"
 #include "common/crash.h"
 #include "common/KVMFR.h"
+#include "common/LGMPConfig.h"
 #include "common/locking.h"
 #include "common/stringutils.h"
 #include "common/ivshmem.h"

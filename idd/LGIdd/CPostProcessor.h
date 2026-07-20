@@ -30,7 +30,6 @@
 struct CD3D12Device;
 
 extern "C" {
-  #include "common/KVMFR.h"
   #include "common/types.h"
 }
 
@@ -63,7 +62,7 @@ struct D12FrameFormat
   bool                hdr = false;
   bool                hdrPQ = false;
   bool                hdrMetadata = false;
-  uint32_t            sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  uint32_t            sdrWhiteLevel = LG_SDR_WHITE_LEVEL_DEFAULT;
   std::shared_ptr<const D12ColorTransform> colorTransform;
 
   // HDR static metadata (SMPTE ST 2086)

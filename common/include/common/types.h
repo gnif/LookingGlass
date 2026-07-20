@@ -89,6 +89,26 @@ typedef enum CursorType
 }
 CursorType;
 
+enum
+{
+  LG_COLOR_TRANSFORM_MATRIX = 0x1,
+  LG_COLOR_TRANSFORM_LUT    = 0x2,
+};
+
+typedef uint32_t LGColorTransformFlags;
+
+#define LG_SDR_WHITE_LEVEL_DEFAULT 203
+#define LG_MAX_FRAME_DAMAGE_RECTS  64
+
+typedef struct LGColorTransform
+{
+  LGColorTransformFlags flags;
+  float matrix[3][4];
+  float scalar;
+  float lut[4096][4];
+}
+LGColorTransform;
+
 typedef struct StringPair
 {
   const char * name;

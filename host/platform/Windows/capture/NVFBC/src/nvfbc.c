@@ -31,6 +31,7 @@
 #include "common/rects.h"
 #include "common/thread.h"
 #include "common/KVMFR.h"
+#include "common/LGMPConfig.h"
 #include "common/vector.h"
 #include <stdlib.h>
 #include <stdatomic.h>

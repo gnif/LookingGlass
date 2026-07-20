@@ -26,22 +26,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "types.h"
+#include "LGMPConfig.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
 #define KVMFR_VERSION 23
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
-#define KVMFR_SDR_WHITE_LEVEL_DEFAULT 203
+#define KVMFR_SDR_WHITE_LEVEL_DEFAULT LG_SDR_WHITE_LEVEL_DEFAULT
 
-#define KVMFR_MAX_DAMAGE_RECTS 64
-
-#define LGMP_Q_POINTER     1
-#define LGMP_Q_FRAME       2
-
-#define LGMP_Q_FRAME_LEN   2
-#define LGMP_Q_POINTER_LEN 32
-
+#define KVMFR_MAX_DAMAGE_RECTS LG_MAX_FRAME_DAMAGE_RECTS
 
 #ifdef _MSC_VER
  // don't warn on zero length arrays
@@ -144,25 +138,18 @@ KVMFRCursor;
 
 enum
 {
-  KVMFR_COLOR_TRANSFORM_MATRIX = 0x1,
-  KVMFR_COLOR_TRANSFORM_LUT    = 0x2,
+  KVMFR_COLOR_TRANSFORM_MATRIX = LG_COLOR_TRANSFORM_MATRIX,
+  KVMFR_COLOR_TRANSFORM_LUT    = LG_COLOR_TRANSFORM_LUT,
 };
 
-typedef uint32_t KVMFRColorTransformFlags;
+typedef LGColorTransformFlags KVMFRColorTransformFlags;
 
 // Optional payload appended to KVMFRCursor when
 // CURSOR_FLAG_COLOR_TRANSFORM is present. The matrix is an XYZ-to-XYZ
 // adjustment; the LUT is applied after encoding to the active wire transfer
 // function. Four LUT components keep the payload directly uploadable as an
 // RGBA32F texture, with alpha reserved and set to 1.0.
-typedef struct KVMFRColorTransform
-{
-  KVMFRColorTransformFlags flags;
-  float matrix[3][4];
-  float scalar;
-  float lut[4096][4];
-}
-KVMFRColorTransform;
+typedef LGColorTransform KVMFRColorTransform;
 
 enum
 {

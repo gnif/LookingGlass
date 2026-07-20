@@ -30,6 +30,7 @@
 #include "common/rects.h"
 #include "common/runningavg.h"
 #include "common/KVMFR.h"
+#include "common/LGMPConfig.h"
 #include "common/vector.h"
 
 #include <math.h>

@@ -22,6 +22,7 @@
 #define _H_LG_COMMON_STRINGUTILS
 
 #include <stdbool.h>
+#include <stddef.h>
 
 // vsprintf but with buffer allocation
 int valloc_sprintf(char ** str, const char * format, va_list ap)
@@ -36,6 +37,9 @@ bool str_containsValue(const char * list, char delimiter, const char * value);
 
 // Local implementation of strdup
 char * lg_strdup(const char *s);
+
+// copy a potentially unterminated string into a null-terminated buffer
+void str_copy(char * dst, size_t dstSize, const char * src, size_t srcSize);
 
 // search a non null terminated buffer for a value
 const char * memsearch(

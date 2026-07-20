@@ -112,6 +112,20 @@ char * lg_strdup(const char *s)
   return out;
 }
 
+void str_copy(char * dst, size_t dstSize, const char * src, size_t srcSize)
+{
+  if (!dstSize)
+    return;
+
+  const char * end       = memchr(src, 0, srcSize);
+  const size_t srcLength = end ? (size_t)(end - src) : srcSize;
+  const size_t copySize  = srcLength < dstSize - 1 ?
+    srcLength : dstSize - 1;
+
+  memcpy(dst, src, copySize);
+  dst[copySize] = 0;
+}
+
 const char * memsearch(
     const char * haystack, size_t haystackSize,
     const char * needle  , size_t needleSize  ,

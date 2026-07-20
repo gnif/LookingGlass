@@ -29,6 +29,7 @@
 #include <common/array.h>
 #include <common/ivshmem.h>
 #include <common/KVMFR.h>
+#include <common/LGMPConfig.h>
 #include <common/framebuffer.h>
 #include <lgmp/client.h>
 
