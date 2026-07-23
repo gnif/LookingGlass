@@ -19,3 +19,4 @@ idd/*/Debug
 idd/*/VersionInfo.h
 idd/*/VERSION
 idd/packages
+/build/
