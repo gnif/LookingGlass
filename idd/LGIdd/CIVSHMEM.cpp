@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -188,6 +188,7 @@ bool CIVSHMEM::Open()
   m_size = (size_t)size;
   m_mem  = map.ptr;
 
+  DEBUG_INFO("IVSHMEM opened, size: %zu MiB", m_size / 1048576);
   return true;
 }
 
