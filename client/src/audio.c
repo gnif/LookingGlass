@@ -761,12 +761,12 @@ static void realRecordStart(int channels, int sampleRate, PSAudioFormat format)
   // if a volume level was stored, set it before we return
   if (audio.record.volumeChannels)
     audio.audioDev->record.volume(
-        audio.playback.volumeChannels,
-        audio.playback.volume);
+        audio.record.volumeChannels,
+        audio.record.volume);
 
   // set the inital mute state
   if (audio.audioDev->record.mute)
-    audio.audioDev->record.mute(audio.playback.mute);
+    audio.audioDev->record.mute(audio.record.mute);
 
   if (g_params.micShowIndicator)
     app_showRecord(true);
