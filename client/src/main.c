@@ -968,23 +968,25 @@ void spiceReady(void)
   purespice_mouseMode(true);
 
   PSServerInfo info;
-  if (!purespice_getServerInfo(&info))
-    return;
-
-  bool uuidValid = false;
-  for(int i = 0; i < sizeof(info.uuid); ++i)
-    if (info.uuid[i])
-    {
-      uuidValid = true;
-      break;
-    }
-
-  if (uuidValid)
+  if (purespice_getServerInfo(&info))
   {
-    memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
-    checkUUID();
+    bool uuidValid = false;
+    for(int i = 0; i < sizeof(info.uuid); ++i)
+      if (info.uuid[i])
+      {
+        uuidValid = true;
+        break;
+      }
+
+    if (uuidValid)
+    {
+      memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
+      checkUUID();
+    }
+    purespice_freeServerInfo(&info);
   }
-  purespice_freeServerInfo(&info);
+  else
+    DEBUG_WARN("Failed to obtain SPICE server information");
 
   if (g_params.useSpiceInput)
     keybind_spiceRegister();
