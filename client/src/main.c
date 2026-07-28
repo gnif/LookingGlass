@@ -993,8 +993,30 @@ void spiceReady(void)
 static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
     unsigned int width, unsigned int height)
 {
-  DEBUG_INFO("Create SPICE surface: id: %d, size: %dx%d",
+  if (surfaceId != 0)
+  {
+    DEBUG_INFO("Ignoring secondary SPICE surface: id: %u, size: %ux%u",
+        surfaceId, width, height);
+    return;
+  }
+
+  switch(format)
+  {
+    case PS_SURFACE_FMT_32_xRGB:
+    case PS_SURFACE_FMT_32_ARGB:
+      break;
+
+    default:
+      DEBUG_ERROR("Unsupported primary SPICE surface format: %d", format);
+      g_state.spicePrimarySurfaceValid = false;
+      app_useSpiceDisplay(false);
+      return;
+  }
+
+  DEBUG_INFO("Create primary SPICE surface: id: %u, size: %ux%u",
       surfaceId, width, height);
+
+  g_state.spicePrimarySurfaceValid = true;
 
   g_state.srcSize.x   = width;
   g_state.srcSize.y   = height;
@@ -1007,19 +1029,44 @@ static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
 
 static void spice_surfaceDestroy(unsigned int surfaceId)
 {
-  DEBUG_INFO("Destroy spice surface %d", surfaceId);
+  if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
+  {
+    DEBUG_INFO("Ignoring destruction of inactive or secondary SPICE surface %u",
+        surfaceId);
+    return;
+  }
+
+  DEBUG_INFO("Destroy primary SPICE surface %u", surfaceId);
+  g_state.spicePrimarySurfaceValid = false;
   app_useSpiceDisplay(false);
 }
 
 static void spice_drawFill(unsigned int surfaceId, int x, int y, int width,
     int height, uint32_t color)
 {
+  if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
+    return;
+
   renderQueue_spiceDrawFill(x, y, width, height, color);
 }
 
 static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
     bool topDown, int x, int y, int width, int height, int stride, void * data)
 {
+  if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
+    return;
+
+  switch(format)
+  {
+    case PS_BITMAP_FMT_32BIT:
+    case PS_BITMAP_FMT_RGBA:
+      break;
+
+    default:
+      DEBUG_ERROR("Unsupported SPICE bitmap format: %d", format);
+      return;
+  }
+
   renderQueue_spiceDrawBitmap(x, y, width, height, stride, data, topDown);
 }
 
