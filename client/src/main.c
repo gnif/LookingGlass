@@ -1445,9 +1445,7 @@ static int lg_run(void)
 
   g_state.micDefaultState = g_params.micDefaultState;
 
-  if (g_params.useSpiceInput     ||
-      g_params.useSpiceClipboard ||
-      g_params.useSpiceAudio)
+  if (g_params.useSpice)
   {
     if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
     {
