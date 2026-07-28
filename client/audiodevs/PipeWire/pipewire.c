@@ -22,8 +22,11 @@
 
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/props.h>
+#include <spa/utils/result.h>
 #include <pipewire/pipewire.h>
+#include <limits.h>
 #include <math.h>
+#include <stdatomic.h>
 
 #include "common/debug.h"
 #include "common/stringutils.h"
@@ -48,7 +51,7 @@ struct PipeWire
   {
     struct pw_stream * stream;
     struct spa_io_rate_match * rateMatch;
-    struct pw_time time;
+    _Atomic(int64_t) presentationDeadline;
 
     int            channels;
     int            sampleRate;
@@ -77,6 +80,42 @@ struct PipeWire
 
 static struct PipeWire pw = {0};
 
+static int64_t pipewire_monotonicTime(void)
+{
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+  return SPA_TIMESPEC_TO_NSEC(&time);
+}
+
+static void pipewire_updatePlaybackLatency(void)
+{
+  struct pw_time time;
+#if PW_CHECK_VERSION(0, 3, 50)
+  if (pw_stream_get_time_n(pw.playback.stream, &time, sizeof(time)) < 0)
+#else
+  if (pw_stream_get_time(pw.playback.stream, &time) < 0)
+#endif
+  {
+    DEBUG_ERROR("pw_stream_get_time failed");
+    return;
+  }
+
+  if (time.rate.num == 0 || time.rate.denom == 0)
+    return;
+
+#if PW_CHECK_VERSION(0, 3, 50)
+  const double latencyTicks =
+    time.delay + (double)time.queued + time.buffered;
+#else
+  const double latencyTicks =
+    time.delay + (double)time.queued / pw.playback.stride;
+#endif
+  const int64_t latencyNs = llrint(max(0.0, latencyTicks) *
+      time.rate.num * SPA_NSEC_PER_SEC / time.rate.denom);
+  atomic_store_explicit(&pw.playback.presentationDeadline,
+      time.now + latencyNs, memory_order_release);
+}
+
 static void pipewire_onPlaybackIoChanged(void * userdata, uint32_t id,
   void * data, uint32_t size)
 {
@@ -92,14 +131,6 @@ static void pipewire_onPlaybackProcess(void * userdata)
 {
   struct pw_buffer * pbuf;
 
-#if PW_CHECK_VERSION(0, 3, 50)
-  if (pw_stream_get_time_n(pw.playback.stream, &pw.playback.time,
-        sizeof(pw.playback.time)) < 0)
-#else
-  if (pw_stream_get_time(pw.playback.stream, &pw.playback.time) < 0)
-#endif
-    DEBUG_ERROR("pw_stream_get_time failed");
-
   if (!(pbuf = pw_stream_dequeue_buffer(pw.playback.stream)))
   {
     DEBUG_WARN("out of buffers");
@@ -110,7 +141,10 @@ static void pipewire_onPlaybackProcess(void * userdata)
   uint8_t * dst;
 
   if (!(dst = sbuf->datas[0].data))
+  {
+    pw_stream_return_buffer(pw.playback.stream, pbuf);
     return;
+  }
 
   int frames = sbuf->datas[0].maxsize / pw.playback.stride;
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
@@ -121,6 +155,7 @@ static void pipewire_onPlaybackProcess(void * userdata)
   {
     sbuf->datas[0].chunk->size = 0;
     pw_stream_queue_buffer(pw.playback.stream, pbuf);
+    pipewire_updatePlaybackLatency();
     return;
   }
 
@@ -130,6 +165,7 @@ static void pipewire_onPlaybackProcess(void * userdata)
   sbuf->datas[0].chunk->size   = frames * pw.playback.stride;
 
   pw_stream_queue_buffer(pw.playback.stream, pbuf);
+  pipewire_updatePlaybackLatency();
 }
 
 static void pipewire_onPlaybackDrained(void * userdata)
@@ -221,10 +257,12 @@ static void pipewire_playbackStopStream(void)
   pw_stream_destroy(pw.playback.stream);
   pw.playback.stream    = NULL;
   pw.playback.rateMatch = NULL;
+  atomic_store_explicit(
+      &pw.playback.presentationDeadline, 0, memory_order_release);
   pw_thread_loop_unlock(pw.thread);
 }
 
-static void pipewire_playbackSetup(int channels, int sampleRate,
+static bool pipewire_playbackSetup(int channels, int sampleRate,
     int requestedPeriodFrames, int * maxPeriodFrames, int * startFrames,
     LG_AudioPullFn pullFn)
 {
@@ -245,7 +283,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   {
     *maxPeriodFrames = pw.playback.maxPeriodFrames;
     *startFrames     = pw.playback.startFrames;
-    return;
+    return true;
   }
 
   pipewire_playbackStopStream();
@@ -271,6 +309,12 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_KEY_NODE_LATENCY  , requestedNodeLatency,
       NULL
     );
+  if (!props)
+  {
+    pw_thread_loop_unlock(pw.thread);
+    DEBUG_ERROR("Failed to create playback stream properties");
+    return false;
+  }
 
   const char * device = option_get_string("pipewire", "outDevice");
   if (device)
@@ -290,23 +334,31 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
     NULL
   );
 
+  if (!pw.playback.stream)
+  {
+    pw_thread_loop_unlock(pw.thread);
+    DEBUG_ERROR("Failed to create the stream");
+    return false;
+  }
+
   // The user can override the default node latency with the PIPEWIRE_LATENCY
   // environment variable, so get the actual node latency value from the stream.
   // The actual quantum size may be lower than this value depending on what else
   // is using the audio device, but we can treat this value as a maximum
   const struct pw_properties * properties =
     pw_stream_get_properties(pw.playback.stream);
-  const char *actualNodeLatency =
-    pw_properties_get(properties, PW_KEY_NODE_LATENCY);
-  DEBUG_ASSERT(actualNodeLatency != NULL);
+  const char *actualNodeLatency = properties ?
+    pw_properties_get(properties, PW_KEY_NODE_LATENCY) : NULL;
 
   unsigned num, denom;
-  if (sscanf(actualNodeLatency, "%u/%u", &num, &denom) != 2 ||
-    denom != sampleRate)
+  if (!actualNodeLatency ||
+    sscanf(actualNodeLatency, "%u/%u", &num, &denom) != 2 ||
+    num == 0 || num > INT_MAX || denom != sampleRate)
   {
     DEBUG_WARN(
       "PIPEWIRE_LATENCY value '%s' is invalid or does not match stream sample "
-      "rate; using %d/%d", actualNodeLatency, requestedPeriodFrames,
+      "rate; using %d/%d",
+      actualNodeLatency ? actualNodeLatency : "(unset)", requestedPeriodFrames,
       sampleRate);
 
     struct spa_dict_item items[] = {
@@ -327,13 +379,6 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
   *maxPeriodFrames = pw.playback.maxPeriodFrames;
   *startFrames     = pw.playback.startFrames;
 
-  if (!pw.playback.stream)
-  {
-    pw_thread_loop_unlock(pw.thread);
-    DEBUG_ERROR("Failed to create the stream");
-    return;
-  }
-
   params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
       &SPA_AUDIO_INFO_RAW_INIT(
         .format   = SPA_AUDIO_FORMAT_F32,
@@ -341,7 +386,7 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
         .rate     = sampleRate
         ));
 
-  pw_stream_connect(
+  const int result = pw_stream_connect(
       pw.playback.stream,
       PW_DIRECTION_OUTPUT,
       PW_ID_ANY,
@@ -351,7 +396,21 @@ static void pipewire_playbackSetup(int channels, int sampleRate,
       PW_STREAM_FLAG_INACTIVE,
       params, 1);
 
+  if (result < 0)
+  {
+    DEBUG_ERROR("Failed to connect playback stream: %s", spa_strerror(result));
+    pw_stream_destroy(pw.playback.stream);
+    pw.playback.stream = NULL;
+    pw.playback.rateMatch = NULL;
+    pw_thread_loop_unlock(pw.thread);
+    return false;
+  }
+
+  pw.playback.state = STREAM_STATE_INACTIVE;
+  atomic_store_explicit(
+      &pw.playback.presentationDeadline, 0, memory_order_release);
   pw_thread_loop_unlock(pw.thread);
+  return true;
 }
 
 static void pipewire_playbackStart(void)
@@ -431,30 +490,12 @@ static void pipewire_playbackMute(bool mute)
 
 static uint64_t pipewire_playbackLatency(void)
 {
-#if PW_CHECK_VERSION(0, 3, 50)
-  if (pw.playback.time.rate.num == 0)
+  const int64_t deadline = atomic_load_explicit(
+      &pw.playback.presentationDeadline, memory_order_acquire);
+  if (deadline <= 0)
     return 0;
 
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-
-  // diff in ns
-  int64_t diff = SPA_TIMESPEC_TO_NSEC(&ts) - pw.playback.time.now;
-
-  // elapsed frames
-  int64_t elapsed =
-    (pw.playback.time.rate.denom * diff) /
-    (pw.playback.time.rate.num * SPA_NSEC_PER_SEC);
-
-  const int64_t buffered = pw.playback.time.buffered + pw.playback.time.queued;
-  int64_t latency = (buffered * 1000 / pw.playback.sampleRate) +
-     ((pw.playback.time.delay - elapsed) * 1000 *
-      pw.playback.time.rate.num / pw.playback.time.rate.denom);
-
-  return max(0, -latency);
-#else
-  return pw.playback.time.delay + pw.playback.time.queued / pw.playback.stride;
-#endif
+  return max(INT64_C(0), deadline - pipewire_monotonicTime()) / 1000;
 }
 
 static void pipewire_recordStopStream(void)

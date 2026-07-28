@@ -29,10 +29,35 @@
 #include "dynamic/audiodev.h"
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <samplerate.h>
 #include <stdalign.h>
+#include <stdatomic.h>
 #include <string.h>
+
+#define PLAYBACK_CLOCK_BANDWIDTH_HZ 0.05
+#define PLAYBACK_PHASE_BANDWIDTH_HZ 0.005
+#define PLAYBACK_OFFSET_FILTER_BANDWIDTH_HZ \
+  (20.0 * PLAYBACK_PHASE_BANDWIDTH_HZ)
+#define PLAYBACK_PHASE_DEADBAND_SEC 0.0005
+#define PLAYBACK_MAX_RATE_CORRECTION 0.005
+#define PLAYBACK_MAX_RATE_SLEW_PER_SEC 0.005
+#define PLAYBACK_MAX_JITTER_SEC 0.1
+/* libsamplerate does not expose its buffered-frame delay. SRC_SINC_FASTEST
+ * retains 20 frames at unity; the bounded ratio range changes this by less
+ * than one frame. Keep it in the latency model, but not in the safety buffer. */
+#define PLAYBACK_RESAMPLER_DELAY_FRAMES 20
+#define PLAYBACK_TIMESTAMP_DISCONTINUITY_MS 2000
+#define PLAYBACK_RATE_WINDOW_MS 60000
+#define PLAYBACK_RATE_MIN_SPAN_MS 45000
+#define PLAYBACK_RATE_SAMPLE_INTERVAL_MS 100
+#define PLAYBACK_RATE_FILTER_TIME_SEC 60.0
+#define PLAYBACK_RATE_MAX_SAMPLES 1024
+#define PLAYBACK_DEVICE_RATE_CHECK_SEC 1.0
+#define PLAYBACK_DEVICE_RATE_STABLE_SEC 2.0
+#define PLAYBACK_DEVICE_RATE_STABLE_DELTA_PPM 50.0
+#define PLAYBACK_DEVICE_RATE_MAX_ACQUIRE_SEC 20.0
 
 typedef enum
 {
@@ -56,42 +81,94 @@ StreamState;
 
 typedef struct
 {
-  int     periodFrames;
-  double  periodSec;
-  int64_t nextTime;
   int64_t nextPosition;
-  double  b;
-  double  c;
 }
 PlaybackDeviceData;
 
 typedef struct
 {
+  bool    valid;
+  unsigned int updates;
+  int64_t time;
+  int64_t position;
+  double  frameSec;
+  double  phaseResidualSec;
+}
+PlaybackClock;
+
+typedef struct
+{
+  int64_t timeMs;
+  int64_t position;
+}
+PlaybackRateSample;
+
+typedef struct
+{
   float * framesIn;
   float * framesOut;
+  int     framesInSize;
   int     framesOutSize;
 
-  int     periodFrames;
-  double  periodSec;
-  int64_t nextTime;
-  int64_t nextPosition;
-  double  b;
-  double  c;
+  int64_t inputPosition;
+  int64_t outputPosition;
+
+  uint32_t mediaTime;
+  int64_t  mediaTimeMs;
+  int64_t  mediaLocalOrigin;
+  int64_t  lastPacketTime;
+  int64_t  lastArrivalTime;
+  double   arrivalJitterSec;
+  bool     mediaClockValid;
+
+  PlaybackRateSample rateSamples[PLAYBACK_RATE_MAX_SAMPLES];
+  unsigned int rateSampleStart;
+  unsigned int rateSampleCount;
+  int64_t      rateLastSampleTimeMs;
+  int64_t      rateFilterTimeMs;
+  double       sourceRateRawFrameSec;
+  double       sourceRateFrameSec;
+  bool         sourceRateValid;
+  bool         startupSyncPending;
 
   int     devPeriodFrames;
-  int64_t devLastTime;
-  int64_t devNextTime;
-  int64_t devLastPosition;
-  int64_t devNextPosition;
+  int64_t devReadPosition;
+  unsigned int deviceTimingSequence;
+  int64_t deviceClockAcquireStart;
+  int64_t deviceClockCheckTime;
+  double  deviceClockCheckFrameSec;
+  double  deviceClockStableSec;
+  bool    deviceClockStable;
 
   double  offsetError;
   double  offsetErrorIntegral;
-
   double  ratioIntegral;
+  double  lastRatio;
+  double  lastClockRatio;
+  int64_t nextLogTime;
 
+  int64_t      debugBufferFramesSum;
+  int          debugBufferFramesMin;
+  int          debugBufferFramesMax;
+  double       debugSourcePhaseSumSec;
+  double       debugSourcePhaseSquaredSec;
+  double       debugSourcePhaseAbsMaxSec;
+  unsigned int debugSamples;
+
+  PlaybackClock sourceClock;
+  PlaybackClock deviceClock;
   SRC_STATE * src;
 }
 PlaybackSpiceData;
+
+typedef struct
+{
+  atomic_uint       sequence;
+  atomic_int        periodFrames;
+  _Atomic(int64_t)  time;
+  _Atomic(int64_t)  position;
+}
+PlaybackDeviceTiming;
 
 typedef struct
 {
@@ -111,7 +188,8 @@ typedef struct
     int         deviceStartFrames;
     int         targetStartFrames;
     RingBuffer  buffer;
-    RingBuffer  deviceTiming;
+    PlaybackDeviceTiming deviceTiming;
+    atomic_uint underruns;
 
     RingBuffer  timings;
     GraphHandle graph;
@@ -158,6 +236,338 @@ typedef struct
   int64_t nextPosition;
 }
 PlaybackDeviceTick;
+
+static void playbackClockReset(PlaybackClock * clock, int64_t time,
+    int64_t position, double frameSec)
+{
+  clock->valid    = true;
+  clock->updates  = 1;
+  clock->time     = time;
+  clock->position = position;
+  clock->frameSec = frameSec;
+  clock->phaseResidualSec = 0.0;
+}
+
+static bool playbackClockUpdate(PlaybackClock * clock, int64_t time,
+    int64_t position, double nominalFrameSec)
+{
+  if (!clock->valid)
+  {
+    playbackClockReset(clock, time, position, nominalFrameSec);
+    return true;
+  }
+
+  const int64_t frames = position - clock->position;
+  if (frames <= 0)
+    return frames == 0;
+
+  const double predicted =
+    clock->time + frames * clock->frameSec * 1.0e9;
+  const double error = (time - predicted) * 1.0e-9;
+  if (fabs(error) >= 0.2)
+  {
+    playbackClockReset(clock, time, position, nominalFrameSec);
+    return false;
+  }
+  clock->phaseResidualSec = error;
+
+  const double periodSec = frames * clock->frameSec;
+  const double omega =
+    2.0 * M_PI * PLAYBACK_CLOCK_BANDWIDTH_HZ * periodSec;
+  const double b = M_SQRT2 * omega;
+  const double c = omega * omega;
+
+  clock->time = llrint(predicted + b * error * 1.0e9);
+  clock->position = position;
+  clock->frameSec += c * error / frames;
+  clock->frameSec = clamp(clock->frameSec,
+      nominalFrameSec * (1.0 - PLAYBACK_MAX_RATE_CORRECTION),
+      nominalFrameSec * (1.0 + PLAYBACK_MAX_RATE_CORRECTION));
+  ++clock->updates;
+  return true;
+}
+
+static bool playbackSourceClockUpdate(PlaybackClock * clock, int64_t time,
+    int64_t position, double nominalFrameSec)
+{
+  if (!clock->valid)
+  {
+    playbackClockReset(clock, time, position, nominalFrameSec);
+    return true;
+  }
+
+  const int64_t frames = position - clock->position;
+  if (frames <= 0)
+    return frames == 0;
+
+  const double predicted =
+    clock->time + frames * clock->frameSec * 1.0e9;
+  const double residual = (time - predicted) * 1.0e-9;
+  if (fabs(residual) >= 0.2)
+  {
+    playbackClockReset(clock, time, position, nominalFrameSec);
+    return false;
+  }
+
+  /* SPICE multimedia time periodically changes phase by several
+   * milliseconds. Preserve it as a diagnostic and discontinuity signal, but
+   * advance the source clock solely from decoded sample position. Short-term
+   * timestamp corrections must not move the playback buffer. */
+  clock->time = llrint(predicted);
+  clock->position = position;
+  clock->phaseResidualSec = residual;
+  ++clock->updates;
+  return true;
+}
+
+static void playbackDeviceClockAcquireReset(PlaybackSpiceData * spiceData)
+{
+  spiceData->deviceClockAcquireStart  = INT64_MIN;
+  spiceData->deviceClockCheckTime     = INT64_MIN;
+  spiceData->deviceClockStableSec     = 0.0;
+  spiceData->deviceClockStable        = false;
+}
+
+static bool playbackDeviceClockAcquire(
+    PlaybackSpiceData * spiceData, int64_t time)
+{
+  if (spiceData->deviceClockStable)
+    return false;
+
+  if (spiceData->deviceClockAcquireStart == INT64_MIN)
+  {
+    spiceData->deviceClockAcquireStart = time;
+    spiceData->deviceClockCheckTime = time;
+    spiceData->deviceClockCheckFrameSec =
+      spiceData->deviceClock.frameSec;
+    return false;
+  }
+
+  const double checkSec =
+    (time - spiceData->deviceClockCheckTime) * 1.0e-9;
+  if (checkSec < PLAYBACK_DEVICE_RATE_CHECK_SEC)
+    return false;
+
+  const double rateDeltaPpm = fabs(
+      spiceData->deviceClock.frameSec /
+        spiceData->deviceClockCheckFrameSec - 1.0) * 1.0e6;
+  if (rateDeltaPpm <= PLAYBACK_DEVICE_RATE_STABLE_DELTA_PPM)
+    spiceData->deviceClockStableSec += checkSec;
+  else
+    spiceData->deviceClockStableSec = 0.0;
+
+  spiceData->deviceClockCheckTime = time;
+  spiceData->deviceClockCheckFrameSec =
+    spiceData->deviceClock.frameSec;
+
+  const double acquireSec =
+    (time - spiceData->deviceClockAcquireStart) * 1.0e-9;
+  if (spiceData->deviceClockStableSec <
+        PLAYBACK_DEVICE_RATE_STABLE_SEC &&
+      acquireSec < PLAYBACK_DEVICE_RATE_MAX_ACQUIRE_SEC)
+    return false;
+
+  spiceData->deviceClockStable = true;
+  return true;
+}
+
+static double playbackClockPosition(const PlaybackClock * clock, int64_t time)
+{
+  return clock->position +
+    (time - clock->time) * 1.0e-9 / clock->frameSec;
+}
+
+static void playbackSourceRateReset(PlaybackSpiceData * spiceData)
+{
+  spiceData->rateSampleStart      = 0;
+  spiceData->rateSampleCount      = 0;
+  spiceData->rateLastSampleTimeMs = INT64_MIN;
+  spiceData->rateFilterTimeMs     = INT64_MIN;
+  spiceData->sourceRateValid      = false;
+}
+
+static void playbackSourceRateAdd(
+    PlaybackSpiceData * spiceData, double nominalFrameSec)
+{
+  const int64_t timeMs = spiceData->mediaTimeMs;
+  if (spiceData->rateLastSampleTimeMs != INT64_MIN &&
+      timeMs - spiceData->rateLastSampleTimeMs <
+        PLAYBACK_RATE_SAMPLE_INTERVAL_MS)
+    return;
+
+  spiceData->rateLastSampleTimeMs = timeMs;
+
+  while (spiceData->rateSampleCount > 0)
+  {
+    const PlaybackRateSample * oldest =
+      &spiceData->rateSamples[spiceData->rateSampleStart];
+    if (timeMs - oldest->timeMs <= PLAYBACK_RATE_WINDOW_MS)
+      break;
+
+    spiceData->rateSampleStart =
+      (spiceData->rateSampleStart + 1) % PLAYBACK_RATE_MAX_SAMPLES;
+    --spiceData->rateSampleCount;
+  }
+
+  if (spiceData->rateSampleCount == PLAYBACK_RATE_MAX_SAMPLES)
+  {
+    spiceData->rateSampleStart =
+      (spiceData->rateSampleStart + 1) % PLAYBACK_RATE_MAX_SAMPLES;
+    --spiceData->rateSampleCount;
+  }
+
+  const unsigned int index =
+    (spiceData->rateSampleStart + spiceData->rateSampleCount) %
+      PLAYBACK_RATE_MAX_SAMPLES;
+  spiceData->rateSamples[index] = (PlaybackRateSample)
+  {
+    .timeMs   = timeMs,
+    .position = spiceData->inputPosition
+  };
+  ++spiceData->rateSampleCount;
+
+  const PlaybackRateSample * first =
+    &spiceData->rateSamples[spiceData->rateSampleStart];
+  if (spiceData->rateSampleCount < 2 ||
+      timeMs - first->timeMs < PLAYBACK_RATE_MIN_SPAN_MS)
+    return;
+
+  double sumPosition = 0.0;
+  double sumTime     = 0.0;
+  double sumPosition2 = 0.0;
+  double sumPositionTime = 0.0;
+  for (unsigned int i = 0; i < spiceData->rateSampleCount; ++i)
+  {
+    const PlaybackRateSample * sample =
+      &spiceData->rateSamples[
+        (spiceData->rateSampleStart + i) % PLAYBACK_RATE_MAX_SAMPLES];
+    const double position = sample->position - first->position;
+    const double timeSec = (sample->timeMs - first->timeMs) / 1000.0;
+
+    sumPosition     += position;
+    sumTime         += timeSec;
+    sumPosition2    += position * position;
+    sumPositionTime += position * timeSec;
+  }
+
+  const double count = spiceData->rateSampleCount;
+  const double denominator =
+    sumPosition2 - sumPosition * sumPosition / count;
+  if (denominator <= 0.0)
+    return;
+
+  const double frameSec =
+    (sumPositionTime - sumPosition * sumTime / count) / denominator;
+  if (frameSec < nominalFrameSec *
+        (1.0 - PLAYBACK_MAX_RATE_CORRECTION) ||
+      frameSec > nominalFrameSec *
+        (1.0 + PLAYBACK_MAX_RATE_CORRECTION))
+    return;
+
+  spiceData->sourceRateRawFrameSec = frameSec;
+  if (!spiceData->sourceRateValid)
+  {
+    spiceData->sourceRateFrameSec = frameSec;
+    spiceData->sourceRateValid = true;
+  }
+  else
+  {
+    const double elapsedSec =
+      (timeMs - spiceData->rateFilterTimeMs) / 1000.0;
+    const double alpha =
+      -expm1(-elapsedSec / PLAYBACK_RATE_FILTER_TIME_SEC);
+    spiceData->sourceRateFrameSec +=
+      alpha * (frameSec - spiceData->sourceRateFrameSec);
+  }
+  spiceData->rateFilterTimeMs = timeMs;
+}
+
+static void playbackPublishDeviceTiming(
+    int periodFrames, int64_t time, int64_t position)
+{
+  PlaybackDeviceTiming * timing = &audio.playback.deviceTiming;
+  atomic_fetch_add_explicit(&timing->sequence, 1, memory_order_relaxed);
+  atomic_store_explicit(
+      &timing->periodFrames, periodFrames, memory_order_relaxed);
+  atomic_store_explicit(&timing->time, time, memory_order_relaxed);
+  atomic_store_explicit(&timing->position, position, memory_order_relaxed);
+  atomic_fetch_add_explicit(&timing->sequence, 1, memory_order_release);
+}
+
+static bool playbackReadDeviceTiming(
+    unsigned int previousSequence, PlaybackDeviceTick * tick,
+    unsigned int * sequence)
+{
+  PlaybackDeviceTiming * timing = &audio.playback.deviceTiming;
+  unsigned int before;
+  unsigned int after;
+
+  do
+  {
+    before = atomic_load_explicit(&timing->sequence, memory_order_acquire);
+    if ((before & 1) || before == previousSequence)
+      return false;
+
+    tick->periodFrames =
+      atomic_load_explicit(&timing->periodFrames, memory_order_relaxed);
+    tick->nextTime =
+      atomic_load_explicit(&timing->time, memory_order_relaxed);
+    tick->nextPosition =
+      atomic_load_explicit(&timing->position, memory_order_relaxed);
+    atomic_thread_fence(memory_order_acquire);
+    after = atomic_load_explicit(&timing->sequence, memory_order_relaxed);
+  }
+  while (before != after);
+
+  *sequence = after;
+  return true;
+}
+
+static void playbackResetMediaClock(
+    PlaybackSpiceData * spiceData, uint32_t time, int64_t now)
+{
+  spiceData->mediaTime        = time;
+  spiceData->mediaTimeMs      = 0;
+  spiceData->mediaLocalOrigin = now;
+  spiceData->lastPacketTime   = INT64_MIN;
+  spiceData->lastArrivalTime  = INT64_MIN;
+  spiceData->mediaClockValid  = true;
+  spiceData->inputPosition    = 0;
+  spiceData->sourceClock.valid = false;
+  playbackSourceRateReset(spiceData);
+}
+
+static void playbackPrepareMediaClock(
+    PlaybackSpiceData * spiceData, uint32_t time)
+{
+  spiceData->mediaTime       = time;
+  spiceData->mediaClockValid = false;
+  spiceData->inputPosition   = 0;
+  spiceData->sourceClock.valid = false;
+  playbackSourceRateReset(spiceData);
+}
+
+static int64_t playbackMapMediaTime(PlaybackSpiceData * spiceData,
+    uint32_t time, int64_t now, bool * discontinuity)
+{
+  if (!spiceData->mediaClockValid)
+  {
+    playbackResetMediaClock(spiceData, time, now);
+    return now;
+  }
+
+  const int32_t deltaMs = (int32_t)(time - spiceData->mediaTime);
+  if (deltaMs < 0 || deltaMs > PLAYBACK_TIMESTAMP_DISCONTINUITY_MS)
+  {
+    playbackResetMediaClock(spiceData, time, now);
+    *discontinuity = true;
+    return now;
+  }
+
+  spiceData->mediaTime = time;
+  spiceData->mediaTimeMs += deltaMs;
+  return spiceData->mediaLocalOrigin + spiceData->mediaTimeMs * 1000000;
+}
 
 static void playbackStop(void);
 static MsgBoxHandle recordCancelConfirmLocked(void);
@@ -286,7 +696,6 @@ static void playbackStop(void)
 
   playbackSetState(STREAM_STATE_STOP);
   ringbuffer_free(&audio.playback.buffer);
-  ringbuffer_free(&audio.playback.deviceTiming);
   audio.playback.spiceData.src = src_delete(audio.playback.spiceData.src);
 
   if (audio.playback.spiceData.framesIn)
@@ -295,11 +704,14 @@ static void playbackStop(void)
     free(audio.playback.spiceData.framesOut);
     audio.playback.spiceData.framesIn = NULL;
     audio.playback.spiceData.framesOut = NULL;
+    audio.playback.spiceData.framesInSize = 0;
+    audio.playback.spiceData.framesOutSize = 0;
   }
 
   if (audio.playback.timings)
   {
     app_unregisterGraph(audio.playback.graph);
+    audio.playback.graph = NULL;
     ringbuffer_free(&audio.playback.timings);
   }
 }
@@ -320,12 +732,14 @@ static int playbackPullFrames(uint8_t * dst, int frames)
   {
     if (playbackGetState() == STREAM_STATE_SETUP_DEVICE)
     {
-      /* If necessary, slew backwards to play silence until we reach the target
-       * startup latency. This avoids underrunning the buffer if the audio
-       * device starts earlier than required. */
-      int offset = ringbuffer_getCount(audio.playback.buffer) -
+      /* The backend may begin pulling either immediately or long after it was
+       * activated. Align the buffer in both directions on its first callback:
+       * insert silence if it started early, or discard the oldest queued audio
+       * if it started late. This always leaves the newest audio at the requested
+       * startup latency. */
+      const int offset = ringbuffer_getCount(audio.playback.buffer) -
         audio.playback.targetStartFrames;
-      if (offset < 0)
+      if (offset != 0)
       {
         data->nextPosition += offset;
         ringbuffer_consume(audio.playback.buffer, NULL, offset);
@@ -334,65 +748,17 @@ static int playbackPullFrames(uint8_t * dst, int frames)
       playbackSetState(STREAM_STATE_RUN);
     }
 
-    // Measure the device clock and post to the Spice thread
-    if (frames != data->periodFrames)
-    {
-      double newPeriodSec = (double) frames / audio.playback.sampleRate;
-
-      bool init = data->periodFrames == 0;
-      if (init)
-        data->nextTime = now + llrint(newPeriodSec * 1.0e9);
-      else
-        /* Due to the double-buffered nature of audio playback, we are filling
-         * in the next buffer while the device is playing the previous buffer.
-         * This results in slightly unintuitive behaviour when the period size
-         * changes. The device will request enough samples for the new period
-         * size, but won't call us again until the previous buffer at the old
-         * size has finished playing. So, to avoid a blip in the timing
-         * calculations, we must set the estimated next wakeup time based upon
-         * the previous period size, not the new one. */
-        data->nextTime += llrint(data->periodSec * 1.0e9);
-
-      data->periodFrames  = frames;
-      data->periodSec     = newPeriodSec;
-      data->nextPosition += frames;
-
-      double bandwidth = 0.05;
-      double omega = 2.0 * M_PI * bandwidth * data->periodSec;
-      data->b = M_SQRT2 * omega;
-      data->c = omega * omega;
-    }
-    else
-    {
-      double error = (now - data->nextTime) * 1.0e-9;
-      if (fabs(error) >= 0.2)
-      {
-        // Clock error is too high; slew the read pointer and reset the timing
-        // parameters to avoid getting too far out of sync
-        int slewFrames = round(error * audio.playback.sampleRate);
-        ringbuffer_consume(audio.playback.buffer, NULL, slewFrames);
-
-        data->periodSec     = (double) frames / audio.playback.sampleRate;
-        data->nextTime      = now + llrint(data->periodSec * 1.0e9);
-        data->nextPosition += slewFrames + frames;
-      }
-      else
-      {
-        data->nextTime     +=
-          llrint((data->b * error + data->periodSec) * 1.0e9);
-        data->periodSec    += data->c * error;
-        data->nextPosition += frames;
-      }
-    }
-
-    PlaybackDeviceTick tick =
-    {
-      .periodFrames = data->periodFrames,
-      .nextTime     = data->nextTime,
-      .nextPosition = data->nextPosition
-    };
-    ringbuffer_push(audio.playback.deviceTiming, &tick);
-
+    /* Timestamp the dequeue boundary before the current pull. The position
+     * delta then describes the buffer requested by the previous callback,
+     * which is also what determines the elapsed device time. This remains
+     * correct when the backend changes quantum size. */
+    playbackPublishDeviceTiming(frames, now, data->nextPosition);
+    data->nextPosition += frames;
+    if (g_params.audioDebug &&
+        playbackGetState() == STREAM_STATE_RUN &&
+        ringbuffer_getCount(audio.playback.buffer) < frames)
+      atomic_fetch_add_explicit(
+          &audio.playback.underruns, 1, memory_order_relaxed);
     ringbuffer_consume(audio.playback.buffer, dst, frames);
   }
   else
@@ -428,18 +794,33 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (!audio.audioDev)
     return;
 
+  if (channels < 1 || channels > 8 || sampleRate < 8000 ||
+      sampleRate > 384000 || format != PS_AUDIO_FMT_S16)
+  {
+    DEBUG_ERROR("Invalid playback format: %d channels, %d Hz, format %d",
+        channels, sampleRate, format);
+    if (playbackGetState() != STREAM_STATE_STOP)
+      playbackStop();
+    return;
+  }
+
   static int lastChannels   = 0;
   static int lastSampleRate = 0;
+  static PSAudioFormat lastFormat = PS_AUDIO_FMT_INVALID;
 
   StreamState state = playbackGetState();
   if (state == STREAM_STATE_KEEP_ALIVE &&
-      channels == lastChannels && sampleRate == lastSampleRate)
+      channels == lastChannels && sampleRate == lastSampleRate &&
+      format == lastFormat)
   {
     StreamState expected = STREAM_STATE_KEEP_ALIVE;
     if (atomic_compare_exchange_strong_explicit(
           &audio.playback.state, &expected, STREAM_STATE_RESUMING,
           memory_order_acq_rel, memory_order_acquire))
+    {
+      playbackPrepareMediaClock(&audio.playback.spiceData, time);
       return;
+    }
 
     state = expected;
   }
@@ -458,36 +839,75 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   const int bufferFrames = sampleRate;
   audio.playback.buffer = ringbuffer_newUnbounded(bufferFrames,
       channels * sizeof(float));
-
-  audio.playback.deviceTiming = ringbuffer_new(16, sizeof(PlaybackDeviceTick));
+  if (!audio.playback.buffer)
+  {
+    audio.playback.spiceData.src =
+      src_delete(audio.playback.spiceData.src);
+    return;
+  }
 
   lastChannels   = channels;
   lastSampleRate = sampleRate;
+  lastFormat     = format;
 
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(float);
   playbackSetState(STREAM_STATE_SETUP_SPICE);
 
-  audio.playback.deviceData.periodFrames       = 0;
   audio.playback.deviceData.nextPosition       = 0;
 
-  audio.playback.spiceData.periodFrames        = 0;
-  audio.playback.spiceData.nextPosition        = 0;
+  audio.playback.spiceData.inputPosition       = 0;
+  audio.playback.spiceData.outputPosition      = 0;
   audio.playback.spiceData.devPeriodFrames     = 0;
-  audio.playback.spiceData.devLastTime         = INT64_MIN;
-  audio.playback.spiceData.devNextTime         = INT64_MIN;
+  audio.playback.spiceData.devReadPosition     = 0;
+  audio.playback.spiceData.deviceTimingSequence = 0;
+  playbackDeviceClockAcquireReset(&audio.playback.spiceData);
   audio.playback.spiceData.offsetError         = 0.0;
   audio.playback.spiceData.offsetErrorIntegral = 0.0;
   audio.playback.spiceData.ratioIntegral       = 0.0;
+  audio.playback.spiceData.lastRatio           = 1.0;
+  audio.playback.spiceData.lastClockRatio      = 1.0;
+  audio.playback.spiceData.startupSyncPending  = true;
+  audio.playback.spiceData.nextLogTime         =
+    nanotime() + INT64_C(5000000000);
+  audio.playback.spiceData.debugBufferFramesSum = 0;
+  audio.playback.spiceData.debugBufferFramesMin = INT_MAX;
+  audio.playback.spiceData.debugBufferFramesMax = INT_MIN;
+  audio.playback.spiceData.debugSourcePhaseSumSec = 0.0;
+  audio.playback.spiceData.debugSourcePhaseSquaredSec = 0.0;
+  audio.playback.spiceData.debugSourcePhaseAbsMaxSec = 0.0;
+  audio.playback.spiceData.debugSamples        = 0;
+  audio.playback.spiceData.arrivalJitterSec    = 0.0;
+  audio.playback.spiceData.deviceClock.valid   = false;
+  playbackPrepareMediaClock(&audio.playback.spiceData, time);
 
-  int requestedPeriodFrames = max(g_params.audioPeriodSize, 1);
+  atomic_store_explicit(
+      &audio.playback.deviceTiming.sequence, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.deviceTiming.periodFrames, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.deviceTiming.time, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.deviceTiming.position, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.underruns, 0, memory_order_relaxed);
+
+  const int requestedPeriodFrames = g_params.audioPeriodSize > 0 ?
+    clamp(g_params.audioPeriodSize, 1, sampleRate) :
+    max(sampleRate / 100, 1);
   audio.playback.deviceMaxPeriodFrames = 0;
   audio.playback.deviceStartFrames     = 0;
-  audio.audioDev->playback.setup(channels, sampleRate, requestedPeriodFrames,
-    &audio.playback.deviceMaxPeriodFrames, &audio.playback.deviceStartFrames,
-    playbackPullFrames);
-  DEBUG_ASSERT(audio.playback.deviceMaxPeriodFrames > 0);
+  if (!audio.audioDev->playback.setup(channels, sampleRate,
+        requestedPeriodFrames, &audio.playback.deviceMaxPeriodFrames,
+        &audio.playback.deviceStartFrames, playbackPullFrames) ||
+      audio.playback.deviceMaxPeriodFrames <= 0 ||
+      audio.playback.deviceStartFrames < 0)
+  {
+    DEBUG_ERROR("Failed to configure audio playback device");
+    playbackStop();
+    return;
+  }
 
   // if a volume level was stored, set it before we return
   if (audio.playback.volumeChannels)
@@ -499,10 +919,18 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (audio.audioDev->playback.mute)
     audio.audioDev->playback.mute(audio.playback.mute);
 
-  // if the audio dev can report it's latency setup a timing graph
-  audio.playback.timings = ringbuffer_new(1200, sizeof(float));
-  audio.playback.graph   = app_registerGraph("PLAYBACK",
-      audio.playback.timings, 0.0f, 200.0f, audioGraphFormatFn);
+  // Set up synchronization instrumentation only when explicitly requested.
+  if (g_params.audioDebug)
+  {
+    audio.playback.timings = ringbuffer_new(1200, sizeof(float));
+    if (audio.playback.timings)
+    {
+      audio.playback.graph = app_registerGraph("PLAYBACK",
+          audio.playback.timings, 0.0f, 200.0f, audioGraphFormatFn);
+      if (!audio.playback.graph)
+        ringbuffer_free(&audio.playback.timings);
+    }
+  }
 
   atomic_store_explicit(
       &audio.playback.callbackState, 0, memory_order_release);
@@ -579,15 +1007,47 @@ void audio_playbackMute(bool mute)
 
 static double computeDevicePosition(int64_t curTime)
 {
-  // Interpolate to calculate the current device position
-  PlaybackSpiceData * spiceData = &audio.playback.spiceData;
-  return spiceData->devLastPosition +
-    (spiceData->devNextPosition - spiceData->devLastPosition) *
-      ((double) (curTime - spiceData->devLastTime) /
-        (spiceData->devNextTime - spiceData->devLastTime));
+  return playbackClockPosition(
+      &audio.playback.spiceData.deviceClock, curTime);
 }
 
-void audio_playbackData(uint8_t * data, size_t size)
+static bool playbackEnsureConversionBuffers(
+    PlaybackSpiceData * spiceData, int frames)
+{
+  if (frames > spiceData->framesInSize)
+  {
+    float * framesIn = realloc(spiceData->framesIn,
+        (size_t)frames * audio.playback.stride);
+    if (!framesIn)
+    {
+      DEBUG_ERROR("Failed to grow playback input buffer");
+      return false;
+    }
+
+    spiceData->framesIn = framesIn;
+    spiceData->framesInSize = frames;
+  }
+
+  const int framesOut =
+    (int)ceil(frames * (1.0 + PLAYBACK_MAX_RATE_CORRECTION)) + 64;
+  if (framesOut > spiceData->framesOutSize)
+  {
+    float * output = realloc(spiceData->framesOut,
+        (size_t)framesOut * audio.playback.stride);
+    if (!output)
+    {
+      DEBUG_ERROR("Failed to grow playback output buffer");
+      return false;
+    }
+
+    spiceData->framesOut = output;
+    spiceData->framesOutSize = framesOut;
+  }
+
+  return true;
+}
+
+void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
 {
   StreamState state = playbackGetState();
   if (state == STREAM_STATE_STOP_PENDING)
@@ -600,212 +1060,251 @@ void audio_playbackData(uint8_t * data, size_t size)
     return;
 
   PlaybackSpiceData * spiceData = &audio.playback.spiceData;
-  int64_t now = nanotime();
+  const int64_t now = nanotime();
+  const double nominalFrameSec = 1.0 / audio.playback.sampleRate;
 
-  // Convert from s16 to f32 samples
-  int spiceStride    = audio.playback.channels * sizeof(int16_t);
-  int frames         = size / spiceStride;
-  bool periodChanged = frames != spiceData->periodFrames;
-  bool init          = spiceData->periodFrames == 0;
-
-  if (periodChanged)
+  const int spiceStride = audio.playback.channels * sizeof(int16_t);
+  if (size % spiceStride != 0 || size / spiceStride > INT_MAX)
   {
-    if (spiceData->framesIn)
-    {
-      free(spiceData->framesIn);
-      free(spiceData->framesOut);
-    }
-    spiceData->periodFrames  = frames;
-    spiceData->framesIn      = malloc(frames * audio.playback.stride);
-    if (!spiceData->framesIn)
-    {
-      DEBUG_ERROR("Failed to malloc framesIn");
-      playbackStop();
-      return;
-    }
-
-    spiceData->framesOutSize = round(frames * 1.1);
-    spiceData->framesOut     =
-      malloc(spiceData->framesOutSize * audio.playback.stride);
-    if (!spiceData->framesOut)
-    {
-      DEBUG_ERROR("Failed to malloc framesOut");
-      playbackStop();
-      return;
-    }
+    DEBUG_ERROR("Invalid playback packet size: %zu bytes for stride %d",
+        size, spiceStride);
+    playbackStop();
+    return;
   }
 
+  const int frames = size / spiceStride;
+  if (frames == 0 || frames > audio.playback.sampleRate * 2)
+  {
+    DEBUG_ERROR("Invalid playback packet length: %d frames", frames);
+    playbackStop();
+    return;
+  }
+
+  if (!playbackEnsureConversionBuffers(spiceData, frames))
+  {
+    playbackStop();
+    return;
+  }
   src_short_to_float_array((int16_t *) data, spiceData->framesIn,
     frames * audio.playback.channels);
 
-  // Receive timing information from the audio device thread
+  bool discontinuity = false;
+  const int64_t packetTime =
+    playbackMapMediaTime(spiceData, time, now, &discontinuity);
+
+  if (spiceData->lastPacketTime != INT64_MIN &&
+      spiceData->lastArrivalTime != INT64_MIN)
+  {
+    const double mediaDelta =
+      (packetTime - spiceData->lastPacketTime) * 1.0e-9;
+    const double arrivalDelta =
+      (now - spiceData->lastArrivalTime) * 1.0e-9;
+    const double jitter = fabs(arrivalDelta - mediaDelta);
+
+    /* Keep a slowly decaying peak rather than feeding arrival jitter into the
+     * virtual clock. This lets the buffer absorb real delivery jitter while
+     * the rate controller follows only the SPICE multimedia clock. */
+    spiceData->arrivalJitterSec =
+      min(PLAYBACK_MAX_JITTER_SEC,
+          max(jitter, spiceData->arrivalJitterSec * 0.999));
+  }
+  spiceData->lastPacketTime  = packetTime;
+  spiceData->lastArrivalTime = now;
+
+  playbackSourceRateAdd(spiceData, nominalFrameSec);
+  if (!playbackSourceClockUpdate(&spiceData->sourceClock,
+        packetTime, spiceData->inputPosition, nominalFrameSec))
+    discontinuity = true;
+  if (spiceData->sourceRateValid)
+    spiceData->sourceClock.frameSec = spiceData->sourceRateFrameSec;
+  int64_t curTime = spiceData->sourceClock.time;
+  int64_t curPosition = spiceData->outputPosition;
+
+  // Receive the newest timing information from the audio device thread.
   PlaybackDeviceTick deviceTick;
-  while (ringbuffer_consume(audio.playback.deviceTiming, &deviceTick, 1))
+  unsigned int deviceSequence;
+  bool deviceClockBecameStable = false;
+  if (playbackReadDeviceTiming(spiceData->deviceTimingSequence,
+        &deviceTick, &deviceSequence))
   {
+    spiceData->deviceTimingSequence = deviceSequence;
     spiceData->devPeriodFrames = deviceTick.periodFrames;
-    spiceData->devLastTime     = spiceData->devNextTime;
-    spiceData->devLastPosition = spiceData->devNextPosition;
-    spiceData->devNextTime     = deviceTick.nextTime;
-    spiceData->devNextPosition = deviceTick.nextPosition;
-  }
-
-  /* Determine the target latency. This is made up of the maximum audio device
-   * period (or the current actual period, if larger than the expected maximum),
-   * plus a little extra to absorb timing jitter, and a configurable
-   * additional buffer period. The default is set high enough to absorb typical
-   * timing jitter from qemu. */
-  int configLatencyMs = max(g_params.audioBufferLatency, 0);
-  int maxPeriodFrames =
-    max(audio.playback.deviceMaxPeriodFrames, spiceData->devPeriodFrames);
-  double targetLatencyFrames =
-    maxPeriodFrames * 1.1 +
-    configLatencyMs * audio.playback.sampleRate / 1000.0;
-
-  /* If the device is currently at a lower period size than its maximum (which
-   * can happen, for example, if another application has requested a lower
-   * latency) then we need to take that into account in our target latency.
-   *
-   * The reason to do this is not necessarily obvious, since we already set the
-   * target latency based upon the maximum period size. The problem stems from
-   * the way the device changes the period size. When the period size is
-   * reduced, there will be a transitional period where `playbackPullFrames` is
-   * invoked with the new smaller period size, but the time until the next
-   * invocation is based upon the previous size. This happens because the device
-   * is preparing the next small buffer while still playing back the previous
-   * large buffer. The result of this is that we end up with a surplus of data
-   * in the ring buffer. The overall latency is unchanged, but the balance has
-   * shifted: there is more data in our ring buffer and less in the device
-   * buffer.
-   *
-   * Unaccounted for, this would be detected as an offset error and playback
-   * would be sped up to bring things back in line. In isolation, this is not
-   * inherently problematic, and may even be desirable because it would reduce
-   * the overall latency. The real problem occurs when the period size goes back
-   * up.
-   *
-   * When the period size increases, the exact opposite happens. The device will
-   * suddenly request data at the new period size, but the timing interval will
-   * be based upon the previous period size during the transition. If there is
-   * not enough data to satisfy this then playback will start severely
-   * underrunning until the timing loop can correct for the error.
-   *
-   * To counteract this issue, if the current period size is smaller than the
-   * maximum period size then we increase the target latency by the difference.
-   * This keeps the offset error stable and ensures we have enough data in the
-   * buffer to absorb rate increases. */
-  if (spiceData->devPeriodFrames != 0 &&
-    spiceData->devPeriodFrames < audio.playback.deviceMaxPeriodFrames)
-    targetLatencyFrames +=
-      audio.playback.deviceMaxPeriodFrames - spiceData->devPeriodFrames;
-
-  // Measure the Spice audio clock
-  int64_t curTime;
-  int64_t curPosition;
-  double devPosition = DBL_MIN;
-  if (periodChanged)
-  {
-    if (init)
-      spiceData->nextTime = now;
-
-    curTime     = spiceData->nextTime;
-    curPosition = spiceData->nextPosition;
-
-    spiceData->periodSec = (double) frames / audio.playback.sampleRate;
-    spiceData->nextTime += llrint(spiceData->periodSec * 1.0e9);
-
-    double bandwidth = 0.05;
-    double omega = 2.0 * M_PI * bandwidth * spiceData->periodSec;
-    spiceData->b = M_SQRT2 * omega;
-    spiceData->c = omega * omega;
-  }
-  else
-  {
-    double error = (now - spiceData->nextTime) * 1.0e-9;
-    state = playbackGetState();
-    if (fabs(error) >= 0.2 ||
-        state == STREAM_STATE_KEEP_ALIVE ||
-        state == STREAM_STATE_RESUMING)
+    spiceData->devReadPosition =
+      deviceTick.nextPosition + deviceTick.periodFrames;
+    if (!playbackClockUpdate(&spiceData->deviceClock,
+          deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec))
     {
-      /* Clock error is too high or we are starting a new playback; slew the
-       * write pointer and reset the timing parameters to get back in sync. If
-       * we know the device playback position then we can slew directly to the
-       * target latency, otherwise just slew based upon the error amount */
-      int slewFrames;
-      if (spiceData->devLastTime != INT64_MIN)
-      {
-        devPosition = computeDevicePosition(now);
-        double targetPosition = devPosition + targetLatencyFrames;
+      playbackDeviceClockAcquireReset(spiceData);
+      discontinuity = true;
+    }
+    else
+      deviceClockBecameStable =
+        playbackDeviceClockAcquire(spiceData, deviceTick.nextTime);
+  }
 
-        // If starting a new playback we need to allow a little extra time for
-        // the resampler startup latency
-        if (state == STREAM_STATE_KEEP_ALIVE ||
-            state == STREAM_STATE_RESUMING)
-        {
-          int resamplerLatencyFrames = 20;
-          targetPosition += resamplerLatencyFrames;
-        }
+  if (deviceClockBecameStable)
+  {
+    /* The first device callback already aligned the logical ring. Anchor the
+     * now-stable clock model to that exact read position without changing
+     * buffered audio. */
+    curTime = llrint(
+        spiceData->deviceClock.time +
+        (spiceData->devReadPosition -
+          spiceData->deviceClock.position) *
+          spiceData->deviceClock.frameSec * 1.0e9);
+    spiceData->sourceClock.time = curTime;
+    spiceData->offsetError = 0.0;
+    spiceData->offsetErrorIntegral = 0.0;
+    spiceData->ratioIntegral = 0.0;
+  }
 
-        slewFrames = round(targetPosition - spiceData->nextPosition);
-      }
-      else
-        slewFrames = round(error * audio.playback.sampleRate);
+  const int configLatencyMs = max(g_params.audioBufferLatency, 0);
+  const int maxPeriodFrames =
+    max(audio.playback.deviceMaxPeriodFrames, spiceData->devPeriodFrames);
+  const double configuredJitterFrames =
+    configLatencyMs * audio.playback.sampleRate / 1000.0;
+  const double measuredJitterFrames =
+    (spiceData->arrivalJitterSec + 0.001) * audio.playback.sampleRate;
+  const double targetBufferFrames =
+    maxPeriodFrames * 1.1 +
+    max(configuredJitterFrames, measuredJitterFrames);
+  const double targetLatencyFrames =
+    targetBufferFrames + PLAYBACK_RESAMPLER_DELAY_FRAMES;
 
-      ringbuffer_append(audio.playback.buffer, NULL, slewFrames);
+  if (spiceData->startupSyncPending &&
+      spiceData->deviceClock.valid)
+  {
+    /* Remove any unused backend startup reserve using only logical producer
+     * and consumer positions. The device clock is still acquiring here and
+     * must not participate in this one-time alignment. */
+    const double slew =
+      spiceData->devReadPosition + targetBufferFrames - curPosition;
+    const int slewFrames = clamp(llrint(slew), (int64_t)INT_MIN,
+        (int64_t)INT_MAX);
+    ringbuffer_append(audio.playback.buffer, NULL, slewFrames);
+    spiceData->outputPosition += slewFrames;
+    curPosition += slewFrames;
+    spiceData->startupSyncPending = false;
+  }
 
-      curTime     = now;
-      curPosition = spiceData->nextPosition + slewFrames;
+  double devPosition = DBL_MIN;
+  state = playbackGetState();
+  if ((discontinuity ||
+       state == STREAM_STATE_KEEP_ALIVE ||
+       state == STREAM_STATE_RESUMING) &&
+      spiceData->deviceClock.valid &&
+      spiceData->deviceClockStable)
+  {
+    devPosition = computeDevicePosition(curTime);
+    const double slew = devPosition + targetBufferFrames - curPosition;
+    const int slewFrames = clamp(llrint(slew), (int64_t)INT_MIN,
+        (int64_t)INT_MAX);
+    ringbuffer_append(audio.playback.buffer, NULL, slewFrames);
+    spiceData->outputPosition += slewFrames;
+    curPosition += slewFrames;
 
-      spiceData->periodSec    = (double) frames / audio.playback.sampleRate;
-      spiceData->nextTime     = now + llrint(spiceData->periodSec * 1.0e9);
-      spiceData->nextPosition = curPosition;
+    spiceData->offsetError         = 0.0;
+    spiceData->offsetErrorIntegral = 0.0;
+    spiceData->ratioIntegral       = 0.0;
+    playbackSetState(STREAM_STATE_RUN);
+  }
 
-      spiceData->offsetError         = 0.0;
-      spiceData->offsetErrorIntegral = 0.0;
-      spiceData->ratioIntegral       = 0.0;
+  double actualLatencyFrames = 0.0;
+  if (spiceData->deviceClock.valid)
+  {
+    if (spiceData->deviceClockStable)
+    {
+      if (devPosition == DBL_MIN)
+        devPosition = computeDevicePosition(curTime);
 
-      playbackSetState(STREAM_STATE_RUN);
+      actualLatencyFrames =
+        curPosition - devPosition + PLAYBACK_RESAMPLER_DELAY_FRAMES;
+      const double actualOffsetError =
+        targetLatencyFrames - actualLatencyFrames;
+      const double error = actualOffsetError - spiceData->offsetError;
+
+      const double periodSec = frames * nominalFrameSec;
+      const double omega =
+        2.0 * M_PI * PLAYBACK_OFFSET_FILTER_BANDWIDTH_HZ * periodSec;
+      const double b = M_SQRT2 * omega;
+      const double c = omega * omega;
+
+      spiceData->offsetError += b * error +
+        spiceData->offsetErrorIntegral;
+      spiceData->offsetErrorIntegral += c * error;
     }
     else
     {
-      curTime     = spiceData->nextTime;
-      curPosition = spiceData->nextPosition;
-
-      spiceData->nextTime  +=
-        llrint((spiceData->b * error + spiceData->periodSec) * 1.0e9);
-      spiceData->periodSec += spiceData->c * error;
+      actualLatencyFrames =
+        curPosition - spiceData->devReadPosition +
+          PLAYBACK_RESAMPLER_DELAY_FRAMES;
+      spiceData->offsetError = 0.0;
+      spiceData->offsetErrorIntegral = 0.0;
+      spiceData->ratioIntegral = 0.0;
     }
   }
 
-  /* Measure the offset between the Spice position and the device position,
-   * and how far away this is from the target latency. We use this to adjust
-   * the playback speed to bring them back in line. This value can change
-   * quite rapidly, particularly at the start of playback, so filter it to
-   * avoid sudden pitch shifts which will be noticeable to the user. */
-  double actualOffset = 0.0;
-  double offsetError = spiceData->offsetError;
-  if (spiceData->devLastTime != INT64_MIN)
+  /* Feed forward the measured source/device rate ratio, then use a slow,
+   * bounded phase controller to keep the ring at its target. The gains are
+   * derived from the requested loop bandwidth rather than arbitrary constants.
+   *
+   * Transfer changes in the clock estimate into the phase-controller
+   * integral. This makes feed-forward updates bumpless: learning a better
+   * clock ratio changes how the current correction is represented without
+   * immediately changing the resampler ratio and moving the buffer. */
+  const double naturalFrequency =
+    2.0 * M_PI * PLAYBACK_PHASE_BANDWIDTH_HZ;
+  const double kp =
+    M_SQRT2 * naturalFrequency / audio.playback.sampleRate;
+  const double ki =
+    naturalFrequency * naturalFrequency / audio.playback.sampleRate;
+  if (spiceData->deviceClockStable &&
+      spiceData->sourceRateValid &&
+      spiceData->deviceClock.updates >= 2)
   {
-    if (devPosition == DBL_MIN)
-      devPosition = computeDevicePosition(curTime);
-
-    actualOffset = curPosition - devPosition;
-    double actualOffsetError = -(actualOffset - targetLatencyFrames);
-
-    double error = actualOffsetError - offsetError;
-    spiceData->offsetError += spiceData->b * error +
-      spiceData->offsetErrorIntegral;
-    spiceData->offsetErrorIntegral += spiceData->c * error;
+    const double clockRatio = clamp(
+        spiceData->sourceRateFrameSec /
+          spiceData->deviceClock.frameSec,
+        1.0 - PLAYBACK_MAX_RATE_CORRECTION,
+        1.0 + PLAYBACK_MAX_RATE_CORRECTION);
+    spiceData->ratioIntegral -=
+      (clockRatio - spiceData->lastClockRatio) / ki;
+    spiceData->lastClockRatio = clockRatio;
   }
 
-  // Resample the audio to adjust the playback speed. Use a PI controller to
-  // adjust the resampling ratio based upon the measured offset
-  double kp = 0.5e-6;
-  double ki = 1.0e-16;
+  const double periodSec = frames * nominalFrameSec;
+  /* SPICE timestamps have millisecond resolution. Do not resample in
+   * response to phase error that cannot be distinguished from quantization;
+   * subtracting the deadband outside it keeps the response continuous. */
+  const double phaseDeadbandFrames =
+    PLAYBACK_PHASE_DEADBAND_SEC * audio.playback.sampleRate;
+  double phaseError = spiceData->offsetError;
+  if (fabs(phaseError) <= phaseDeadbandFrames)
+    phaseError = 0.0;
+  else
+    phaseError -= copysign(phaseDeadbandFrames, phaseError);
 
-  spiceData->ratioIntegral += offsetError * spiceData->periodSec;
+  const double candidateIntegral =
+    spiceData->ratioIntegral + phaseError * periodSec;
+  const double phaseCorrection =
+    kp * phaseError + ki * candidateIntegral;
+  const double desiredRatio =
+    spiceData->lastClockRatio + phaseCorrection;
+  const double boundedRatio = clamp(desiredRatio,
+      1.0 - PLAYBACK_MAX_RATE_CORRECTION,
+      1.0 + PLAYBACK_MAX_RATE_CORRECTION);
 
-  double piOutput = kp * offsetError + ki * spiceData->ratioIntegral;
-  double ratio = 1.0 + piOutput;
+  if (desiredRatio == boundedRatio ||
+      (desiredRatio > boundedRatio && phaseError < 0.0) ||
+      (desiredRatio < boundedRatio && phaseError > 0.0))
+    spiceData->ratioIntegral = candidateIntegral;
+
+  const double maxRatioStep =
+    PLAYBACK_MAX_RATE_SLEW_PER_SEC * periodSec;
+  const double ratio = clamp(boundedRatio,
+      spiceData->lastRatio - maxRatioStep,
+      spiceData->lastRatio + maxRatioStep);
+  spiceData->lastRatio = ratio;
 
   int consumed = 0;
   while (consumed < frames)
@@ -827,6 +1326,14 @@ void audio_playbackData(uint8_t * data, size_t size)
     if (error)
     {
       DEBUG_ERROR("Resampling failed: %s", src_strerror(error));
+      playbackStop();
+      return;
+    }
+
+    if (srcData.input_frames_used == 0 && srcData.output_frames_gen == 0)
+    {
+      DEBUG_ERROR("Resampler made no progress");
+      playbackStop();
       return;
     }
 
@@ -834,38 +1341,117 @@ void audio_playbackData(uint8_t * data, size_t size)
       srcData.output_frames_gen);
 
     consumed += srcData.input_frames_used;
-    spiceData->nextPosition += srcData.output_frames_gen;
+    spiceData->outputPosition += srcData.output_frames_gen;
   }
+  spiceData->inputPosition += frames;
 
   if (playbackGetState() == STREAM_STATE_SETUP_SPICE)
   {
-    /* Latency corrections at startup can be quite significant due to poor
-     * packet pacing from Spice, so require at least two full Spice periods'
-     * worth of data in addition to the startup delay requested by the device
-     * before starting playback to minimise the chances of underrunning. */
-    int startFrames =
-      spiceData->periodFrames * 2 + audio.playback.deviceStartFrames;
-    audio.playback.targetStartFrames = startFrames;
-
-    /* The actual time between opening the device and the device starting to
-     * pull data can range anywhere between nearly instant and hundreds of
-     * milliseconds. To minimise startup latency, we open the device
-     * immediately. If the device starts earlier than required (as per the
-     * `startFrames` value we just calculated), then a period of silence will be
-     * inserted at the beginning of playback to avoid underrunning. If it starts
-     * later, then we just accept the higher latency and let the adaptive
-     * resampling deal with it. */
+    /* Reserve enough data for the backend's immediate startup pulls while
+     * leaving the requested steady-state target afterwards. */
+    audio.playback.targetStartFrames =
+      ceil(targetBufferFrames) + audio.playback.deviceStartFrames;
     playbackSetState(STREAM_STATE_SETUP_DEVICE);
     audio.audioDev->playback.start();
   }
 
-  double latencyFrames = actualOffset;
-  if (audio.audioDev->playback.latency)
-    latencyFrames += audio.audioDev->playback.latency();
+  if (!g_params.audioDebug)
+    return;
 
-  const float latency = latencyFrames * 1000.0 / audio.playback.sampleRate;
-  ringbuffer_push(audio.playback.timings, &latency);
-  app_invalidateGraph(audio.playback.graph);
+  if (spiceData->deviceClock.valid &&
+      spiceData->sourceClock.updates >= 2)
+  {
+    const int64_t bufferFrames64 =
+      curPosition - spiceData->devReadPosition;
+    const int bufferFrames = clamp(
+        bufferFrames64, (int64_t)INT_MIN, (int64_t)INT_MAX);
+    const double sourcePhaseSec =
+      spiceData->sourceClock.phaseResidualSec;
+
+    spiceData->debugBufferFramesSum += bufferFrames;
+    spiceData->debugBufferFramesMin =
+      min(spiceData->debugBufferFramesMin, bufferFrames);
+    spiceData->debugBufferFramesMax =
+      max(spiceData->debugBufferFramesMax, bufferFrames);
+    spiceData->debugSourcePhaseSumSec += sourcePhaseSec;
+    spiceData->debugSourcePhaseSquaredSec +=
+      sourcePhaseSec * sourcePhaseSec;
+    spiceData->debugSourcePhaseAbsMaxSec =
+      max(spiceData->debugSourcePhaseAbsMaxSec, fabs(sourcePhaseSec));
+    ++spiceData->debugSamples;
+  }
+
+  const double softwareLatencyMs =
+    actualLatencyFrames * 1000.0 / audio.playback.sampleRate;
+  double backendLatencyMs = 0.0;
+  if (audio.audioDev->playback.latency)
+    backendLatencyMs = audio.audioDev->playback.latency() / 1000.0;
+  const double latencyMs = softwareLatencyMs + backendLatencyMs;
+
+  if (audio.playback.timings)
+  {
+    const float latency = latencyMs;
+    ringbuffer_push(audio.playback.timings, &latency);
+    app_invalidateGraph(audio.playback.graph);
+  }
+
+  if (now >= spiceData->nextLogTime)
+  {
+    const double sourcePpm = spiceData->sourceRateValid ?
+      (spiceData->sourceRateFrameSec / nominalFrameSec - 1.0) * 1.0e6 :
+      0.0;
+    const double sourceRawPpm = spiceData->sourceRateValid ?
+      (spiceData->sourceRateRawFrameSec / nominalFrameSec - 1.0) * 1.0e6 :
+      0.0;
+    const double devicePpm = spiceData->deviceClock.valid ?
+      (spiceData->deviceClock.frameSec / nominalFrameSec - 1.0) * 1.0e6 :
+      0.0;
+    const unsigned int underruns = atomic_exchange_explicit(
+        &audio.playback.underruns, 0, memory_order_relaxed);
+
+    DEBUG_INFO(
+        "Audio sync: software latency %.2f/%.2f ms, backend %.2f ms, "
+        "ratio %+.1f ppm, clocks "
+        "source %+.1f (raw %+.1f)/device %+.1f ppm (%s), "
+        "phase error %+.2f ms, arrival jitter %.2f ms, "
+        "underruns %u",
+        softwareLatencyMs,
+        targetLatencyFrames * 1000.0 / audio.playback.sampleRate,
+        backendLatencyMs, (ratio - 1.0) * 1.0e6, sourcePpm, sourceRawPpm,
+        devicePpm,
+        spiceData->deviceClockStable ? "stable" : "acquiring",
+        spiceData->offsetError * 1000.0 / audio.playback.sampleRate,
+        spiceData->arrivalJitterSec * 1000.0, underruns);
+
+    if (spiceData->debugSamples > 0)
+    {
+      const double samples = spiceData->debugSamples;
+      const double frameMs = 1000.0 / audio.playback.sampleRate;
+      const double sourcePhaseMeanMs =
+        spiceData->debugSourcePhaseSumSec * 1000.0 / samples;
+      const double sourcePhaseRmsMs =
+        sqrt(spiceData->debugSourcePhaseSquaredSec / samples) * 1000.0;
+
+      DEBUG_INFO(
+          "Audio sync detail: ring at packet start "
+          "%.2f/%.2f/%.2f ms avg/min/max, "
+          "SPICE phase residual %+.3f/%.3f/%.3f ms mean/rms/max",
+          spiceData->debugBufferFramesSum * frameMs / samples,
+          spiceData->debugBufferFramesMin * frameMs,
+          spiceData->debugBufferFramesMax * frameMs,
+          sourcePhaseMeanMs, sourcePhaseRmsMs,
+          spiceData->debugSourcePhaseAbsMaxSec * 1000.0);
+    }
+
+    spiceData->debugBufferFramesSum = 0;
+    spiceData->debugBufferFramesMin = INT_MAX;
+    spiceData->debugBufferFramesMax = INT_MIN;
+    spiceData->debugSourcePhaseSumSec = 0.0;
+    spiceData->debugSourcePhaseSquaredSec = 0.0;
+    spiceData->debugSourcePhaseAbsMaxSec = 0.0;
+    spiceData->debugSamples = 0;
+    spiceData->nextLogTime = now + INT64_C(5000000000);
+  }
 }
 
 bool audio_supportsRecord(void)

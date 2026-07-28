@@ -237,6 +237,7 @@ struct AppParams
   bool                 showCursorDot;
   bool                 largeCursorDot;
 
+  bool                 audioDebug;
   int                  audioPeriodSize;
   int                  audioBufferLatency;
   bool                 micShowIndicator;

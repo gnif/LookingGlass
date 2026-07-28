@@ -44,10 +44,11 @@ struct LG_AudioDevOps
 
   struct
   {
-    /* setup the stream for playback but don't start it yet
+    /* setup the stream for playback but don't start it yet, returning false
+     * if the stream could not be configured
      * Note: the pull function returns f32 samples
      */
-    void (*setup)(int channels, int sampleRate, int requestedPeriodFrames,
+    bool (*setup)(int channels, int sampleRate, int requestedPeriodFrames,
       int * maxPeriodFrames, int * startFrames, LG_AudioPullFn pullFn);
 
     /* called when there is data available to start playback */

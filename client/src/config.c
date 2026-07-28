@@ -532,17 +532,24 @@ static struct Option options[] =
   // audio options
   {
     .module         = "audio",
+    .name           = "debug",
+    .description    = "Enable audio synchronization diagnostics",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+  {
+    .module         = "audio",
     .name           = "periodSize",
-    .description    = "Requested audio device period size in samples",
+    .description    = "Requested audio device period size in samples (0 = 10 ms)",
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = 2048
+    .value.x_int    = 0
   },
   {
     .module         = "audio",
     .name           = "bufferLatency",
     .description    = "Additional buffer latency in milliseconds",
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = 13
+    .value.x_int    = 4
   },
   {
     .module         = "audio",
@@ -763,6 +770,7 @@ bool config_load(int argc, char * argv[])
     g_params.largeCursorDot   = option_get_bool("spice", "largeCursorDot");
   }
 
+  g_params.audioDebug = option_get_bool("audio", "debug");
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
   g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
   g_params.micShowIndicator   = option_get_bool("audio", "micShowIndicator");
