@@ -82,6 +82,7 @@ StreamState;
 typedef struct
 {
   int64_t nextPosition;
+  int     startupSilenceFrames;
 }
 PlaybackDeviceData;
 
@@ -130,6 +131,7 @@ typedef struct
   double       sourceRateFrameSec;
   bool         sourceRateValid;
   bool         startupSyncPending;
+  bool         bufferOverrunPending;
 
   int     devPeriodFrames;
   int64_t devReadPosition;
@@ -146,6 +148,8 @@ typedef struct
   double  lastRatio;
   double  lastClockRatio;
   int64_t nextLogTime;
+  unsigned int bufferOverruns;
+  int          maxAbsSlewFrames;
 
   int64_t      debugBufferFramesSum;
   int          debugBufferFramesMin;
@@ -726,7 +730,7 @@ static int playbackPullFrames(uint8_t * dst, int frames)
     return 0;
 
   PlaybackDeviceData * data = &audio.playback.deviceData;
-  int64_t now = nanotime();
+  const int64_t now = nanotime();
 
   if (audio.playback.buffer)
   {
@@ -739,10 +743,18 @@ static int playbackPullFrames(uint8_t * dst, int frames)
        * startup latency. */
       const int offset = ringbuffer_getCount(audio.playback.buffer) -
         audio.playback.targetStartFrames;
-      if (offset != 0)
+      if (offset > 0)
       {
         data->nextPosition += offset;
         ringbuffer_consume(audio.playback.buffer, NULL, offset);
+      }
+      else if (offset < 0)
+      {
+        /* Seeking the reader backwards exposes storage from a previous ring
+         * wrap. Preserve the logical position but generate the missing startup
+         * reserve explicitly as silence. */
+        data->nextPosition += offset;
+        data->startupSilenceFrames = -offset;
       }
 
       playbackSetState(STREAM_STATE_RUN);
@@ -754,12 +766,23 @@ static int playbackPullFrames(uint8_t * dst, int frames)
      * correct when the backend changes quantum size. */
     playbackPublishDeviceTiming(frames, now, data->nextPosition);
     data->nextPosition += frames;
+
+    const int silenceFrames =
+      min(frames, data->startupSilenceFrames);
+    if (silenceFrames > 0)
+    {
+      memset(dst, 0, (size_t)silenceFrames * audio.playback.stride);
+      data->startupSilenceFrames -= silenceFrames;
+    }
+
+    const int audioFrames = frames - silenceFrames;
     if (g_params.audioDebug &&
         playbackGetState() == STREAM_STATE_RUN &&
-        ringbuffer_getCount(audio.playback.buffer) < frames)
+        ringbuffer_getCount(audio.playback.buffer) < audioFrames)
       atomic_fetch_add_explicit(
           &audio.playback.underruns, 1, memory_order_relaxed);
-    ringbuffer_consume(audio.playback.buffer, dst, frames);
+    ringbuffer_consume(audio.playback.buffer,
+        dst + (size_t)silenceFrames * audio.playback.stride, audioFrames);
   }
   else
     frames = 0;
@@ -855,7 +878,8 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.stride     = channels * sizeof(float);
   playbackSetState(STREAM_STATE_SETUP_SPICE);
 
-  audio.playback.deviceData.nextPosition       = 0;
+  audio.playback.deviceData.nextPosition         = 0;
+  audio.playback.deviceData.startupSilenceFrames = 0;
 
   audio.playback.spiceData.inputPosition       = 0;
   audio.playback.spiceData.outputPosition      = 0;
@@ -869,6 +893,9 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.spiceData.lastRatio           = 1.0;
   audio.playback.spiceData.lastClockRatio      = 1.0;
   audio.playback.spiceData.startupSyncPending  = true;
+  audio.playback.spiceData.bufferOverrunPending = false;
+  audio.playback.spiceData.bufferOverruns      = 0;
+  audio.playback.spiceData.maxAbsSlewFrames    = 0;
   audio.playback.spiceData.nextLogTime         =
     nanotime() + INT64_C(5000000000);
   audio.playback.spiceData.debugBufferFramesSum = 0;
@@ -1047,6 +1074,54 @@ static bool playbackEnsureConversionBuffers(
   return true;
 }
 
+static int playbackAppendFrames(
+    PlaybackSpiceData * spiceData, const void * frames, int count)
+{
+  const int occupancy = ringbuffer_getCount(audio.playback.buffer);
+  const int length = ringbuffer_getLength(audio.playback.buffer);
+  const int64_t available = (int64_t)length - occupancy;
+  const int append = clamp(
+      (int64_t)count, INT64_C(0), max(INT64_C(0), available));
+
+  const int advanced =
+    ringbuffer_append(audio.playback.buffer, frames, append);
+  DEBUG_ASSERT(advanced == append);
+
+  if (append != count)
+  {
+    /* Never allow the logical writer to get beyond the physical storage.
+     * Doing so makes a positive buffer count refer to overwritten samples and
+     * sounds like corrupted PCM rather than an underrun. Resynchronize on the
+     * next packet after dropping the excess output. */
+    spiceData->bufferOverrunPending = true;
+    ++spiceData->bufferOverruns;
+  }
+
+  return advanced;
+}
+
+static int playbackSlewBuffer(
+    PlaybackSpiceData * spiceData, int requested)
+{
+  const int occupancy = ringbuffer_getCount(audio.playback.buffer);
+  const int length = ringbuffer_getLength(audio.playback.buffer);
+  const int64_t minimum = -max(occupancy, 0);
+  const int64_t maximum = (int64_t)length - occupancy;
+  const int slew = clamp((int64_t)requested, minimum, maximum);
+
+  const int advanced =
+    ringbuffer_append(audio.playback.buffer, NULL, slew);
+  DEBUG_ASSERT(advanced == slew);
+
+  spiceData->maxAbsSlewFrames =
+    max(spiceData->maxAbsSlewFrames,
+        slew == INT_MIN ? INT_MAX : abs(slew));
+  if (slew != requested)
+    spiceData->bufferOverrunPending = true;
+
+  return advanced;
+}
+
 void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
 {
   StreamState state = playbackGetState();
@@ -1091,6 +1166,11 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
   bool discontinuity = false;
   const int64_t packetTime =
     playbackMapMediaTime(spiceData, time, now, &discontinuity);
+  if (spiceData->bufferOverrunPending)
+  {
+    discontinuity = true;
+    spiceData->bufferOverrunPending = false;
+  }
 
   if (spiceData->lastPacketTime != INT64_MIN &&
       spiceData->lastArrivalTime != INT64_MIN)
@@ -1181,9 +1261,9 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
       spiceData->devReadPosition + targetBufferFrames - curPosition;
     const int slewFrames = clamp(llrint(slew), (int64_t)INT_MIN,
         (int64_t)INT_MAX);
-    ringbuffer_append(audio.playback.buffer, NULL, slewFrames);
-    spiceData->outputPosition += slewFrames;
-    curPosition += slewFrames;
+    const int actualSlew = playbackSlewBuffer(spiceData, slewFrames);
+    spiceData->outputPosition += actualSlew;
+    curPosition += actualSlew;
     spiceData->startupSyncPending = false;
   }
 
@@ -1199,9 +1279,9 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     const double slew = devPosition + targetBufferFrames - curPosition;
     const int slewFrames = clamp(llrint(slew), (int64_t)INT_MIN,
         (int64_t)INT_MAX);
-    ringbuffer_append(audio.playback.buffer, NULL, slewFrames);
-    spiceData->outputPosition += slewFrames;
-    curPosition += slewFrames;
+    const int actualSlew = playbackSlewBuffer(spiceData, slewFrames);
+    spiceData->outputPosition += actualSlew;
+    curPosition += actualSlew;
 
     spiceData->offsetError         = 0.0;
     spiceData->offsetErrorIntegral = 0.0;
@@ -1337,22 +1417,31 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
       return;
     }
 
-    ringbuffer_append(audio.playback.buffer, spiceData->framesOut,
-      srcData.output_frames_gen);
+    const int outputFrames = playbackAppendFrames(
+        spiceData, spiceData->framesOut, srcData.output_frames_gen);
 
     consumed += srcData.input_frames_used;
-    spiceData->outputPosition += srcData.output_frames_gen;
+    spiceData->outputPosition += outputFrames;
   }
   spiceData->inputPosition += frames;
 
   if (playbackGetState() == STREAM_STATE_SETUP_SPICE)
   {
     /* Reserve enough data for the backend's immediate startup pulls while
-     * leaving the requested steady-state target afterwards. */
-    audio.playback.targetStartFrames =
-      ceil(targetBufferFrames) + audio.playback.deviceStartFrames;
-    playbackSetState(STREAM_STATE_SETUP_DEVICE);
-    audio.audioDev->playback.start();
+     * leaving the requested steady-state target afterwards. Tiny device
+     * periods must still cover at least one complete source packet. Wait for
+     * that reserve instead of seeking the reader backwards into stale ring
+     * storage. */
+    audio.playback.targetStartFrames = min(
+      ceil(targetBufferFrames) +
+        max(audio.playback.deviceStartFrames, frames),
+      ringbuffer_getLength(audio.playback.buffer));
+    if (ringbuffer_getCount(audio.playback.buffer) >=
+        audio.playback.targetStartFrames)
+    {
+      playbackSetState(STREAM_STATE_SETUP_DEVICE);
+      audio.audioDev->playback.start();
+    }
   }
 
   if (!g_params.audioDebug)
@@ -1414,14 +1503,16 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
         "ratio %+.1f ppm, clocks "
         "source %+.1f (raw %+.1f)/device %+.1f ppm (%s), "
         "phase error %+.2f ms, arrival jitter %.2f ms, "
-        "underruns %u",
+        "underruns %u, overruns %u, max slew %.2f ms",
         softwareLatencyMs,
         targetLatencyFrames * 1000.0 / audio.playback.sampleRate,
         backendLatencyMs, (ratio - 1.0) * 1.0e6, sourcePpm, sourceRawPpm,
         devicePpm,
         spiceData->deviceClockStable ? "stable" : "acquiring",
         spiceData->offsetError * 1000.0 / audio.playback.sampleRate,
-        spiceData->arrivalJitterSec * 1000.0, underruns);
+        spiceData->arrivalJitterSec * 1000.0, underruns,
+        spiceData->bufferOverruns,
+        spiceData->maxAbsSlewFrames * 1000.0 / audio.playback.sampleRate);
 
     if (spiceData->debugSamples > 0)
     {
@@ -1450,6 +1541,8 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     spiceData->debugSourcePhaseSquaredSec = 0.0;
     spiceData->debugSourcePhaseAbsMaxSec = 0.0;
     spiceData->debugSamples = 0;
+    spiceData->bufferOverruns = 0;
+    spiceData->maxAbsSlewFrames = 0;
     spiceData->nextLogTime = now + INT64_C(5000000000);
   }
 }

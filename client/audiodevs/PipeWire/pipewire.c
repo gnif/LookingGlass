@@ -140,19 +140,31 @@ static void pipewire_onPlaybackProcess(void * userdata)
   struct spa_buffer * sbuf = pbuf->buffer;
   uint8_t * dst;
 
-  if (!(dst = sbuf->datas[0].data))
+  if (sbuf->n_datas == 0 || !sbuf->datas[0].chunk ||
+      !(dst = sbuf->datas[0].data))
   {
+#if PW_CHECK_VERSION(1, 4, 0)
     pw_stream_return_buffer(pw.playback.stream, pbuf);
+#else
+    pw_stream_queue_buffer(pw.playback.stream, pbuf);
+#endif
     return;
   }
 
   int frames = sbuf->datas[0].maxsize / pw.playback.stride;
   if (pw.playback.rateMatch && pw.playback.rateMatch->size > 0)
     frames = min(frames, pw.playback.rateMatch->size);
+#if PW_CHECK_VERSION(0, 3, 50)
+  else if (pbuf->requested > 0)
+    frames = min(frames, pbuf->requested);
+#endif
 
   frames = pw.playback.pullFn(dst, frames);
   if (!frames)
   {
+    pbuf->size = 0;
+    sbuf->datas[0].chunk->offset = 0;
+    sbuf->datas[0].chunk->stride = pw.playback.stride;
     sbuf->datas[0].chunk->size = 0;
     pw_stream_queue_buffer(pw.playback.stream, pbuf);
     pipewire_updatePlaybackLatency();
