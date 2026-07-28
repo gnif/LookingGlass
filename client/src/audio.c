@@ -1241,13 +1241,13 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
   const int configLatencyMs = max(g_params.audioBufferLatency, 0);
   const int maxPeriodFrames =
     max(audio.playback.deviceMaxPeriodFrames, spiceData->devPeriodFrames);
-  const double configuredJitterFrames =
+  const double configuredLatencyFrames =
     configLatencyMs * audio.playback.sampleRate / 1000.0;
   const double measuredJitterFrames =
     (spiceData->arrivalJitterSec + 0.001) * audio.playback.sampleRate;
   const double targetBufferFrames =
     maxPeriodFrames * 1.1 +
-    max(configuredJitterFrames, measuredJitterFrames);
+    configuredLatencyFrames + measuredJitterFrames;
   const double targetLatencyFrames =
     targetBufferFrames + PLAYBACK_RESAMPLER_DELAY_FRAMES;
 
