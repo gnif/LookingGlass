@@ -1428,13 +1428,12 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
   if (playbackGetState() == STREAM_STATE_SETUP_SPICE)
   {
     /* Reserve enough data for the backend's immediate startup pulls while
-     * leaving the requested steady-state target afterwards. Tiny device
-     * periods must still cover at least one complete source packet. Wait for
-     * that reserve instead of seeking the reader backwards into stale ring
-     * storage. */
+     * leaving the requested steady-state target afterwards. Do not add a
+     * complete source packet to the reserve: it can be much larger than the
+     * device period and unnecessarily delays activation by another packet. */
     audio.playback.targetStartFrames = min(
       ceil(targetBufferFrames) +
-        max(audio.playback.deviceStartFrames, frames),
+        audio.playback.deviceStartFrames,
       ringbuffer_getLength(audio.playback.buffer));
     if (ringbuffer_getCount(audio.playback.buffer) >=
         audio.playback.targetStartFrames)
