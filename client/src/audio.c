@@ -40,12 +40,19 @@ typedef enum
   STREAM_STATE_SETUP_SPICE,
   STREAM_STATE_SETUP_DEVICE,
   STREAM_STATE_RUN,
-  STREAM_STATE_KEEP_ALIVE
+  STREAM_STATE_KEEP_ALIVE,
+  STREAM_STATE_RESUMING,
+  STREAM_STATE_STOP_PENDING
 }
 StreamState;
 
 #define STREAM_ACTIVE(state) \
-  (state == STREAM_STATE_RUN || state == STREAM_STATE_KEEP_ALIVE)
+  (state == STREAM_STATE_RUN        || \
+   state == STREAM_STATE_KEEP_ALIVE || \
+   state == STREAM_STATE_RESUMING)
+
+#define PLAYBACK_CALLBACK_DISABLED (UINT32_C(1) << 31)
+#define PLAYBACK_CALLBACK_COUNT_MASK (PLAYBACK_CALLBACK_DISABLED - 1)
 
 typedef struct
 {
@@ -92,7 +99,8 @@ typedef struct
 
   struct
   {
-    StreamState state;
+    _Atomic(StreamState) state;
+    atomic_uint          callbackState;
     int         volumeChannels;
     uint16_t    volume[8];
     bool        mute;
@@ -118,17 +126,21 @@ typedef struct
 
   struct
   {
+    LG_Lock       lock;
+    bool          shuttingDown;
     bool          requested;
     bool          started;
     int           volumeChannels;
     uint16_t      volume[8];
     bool          mute;
-    int           stride;
+    atomic_int    stride;
     uint32_t      time;
     int           lastChannels;
     int           lastSampleRate;
     PSAudioFormat lastFormat;
     MsgBoxHandle  confirmHandle;
+    uint64_t      confirmGeneration;
+    bool          confirmPending;
     int           confirmChannels;
     int           confirmSampleRate;
     PSAudioFormat confirmFormat;
@@ -148,10 +160,70 @@ typedef struct
 PlaybackDeviceTick;
 
 static void playbackStop(void);
-static void realRecordStop(void);
+static MsgBoxHandle recordCancelConfirmLocked(void);
+static void realRecordStartLocked(
+    int channels, int sampleRate, PSAudioFormat format);
+static void realRecordStopLocked(void);
+
+static StreamState playbackGetState(void)
+{
+  return atomic_load_explicit(
+      &audio.playback.state, memory_order_acquire);
+}
+
+static void playbackSetState(StreamState state)
+{
+  atomic_store_explicit(
+      &audio.playback.state, state, memory_order_release);
+}
+
+static bool playbackCallbackEnter(void)
+{
+  unsigned int state = atomic_load_explicit(
+      &audio.playback.callbackState, memory_order_relaxed);
+  for (;;)
+  {
+    if (state & PLAYBACK_CALLBACK_DISABLED)
+      return false;
+
+    DEBUG_ASSERT((state & PLAYBACK_CALLBACK_COUNT_MASK) !=
+        PLAYBACK_CALLBACK_COUNT_MASK);
+    if (atomic_compare_exchange_weak_explicit(
+          &audio.playback.callbackState, &state, state + 1,
+          memory_order_acquire, memory_order_relaxed))
+      return true;
+  }
+}
+
+static void playbackCallbackExit(void)
+{
+  atomic_fetch_sub_explicit(
+      &audio.playback.callbackState, 1, memory_order_release);
+}
+
+static void playbackDisableCallbacks(void)
+{
+  atomic_fetch_or_explicit(
+      &audio.playback.callbackState, PLAYBACK_CALLBACK_DISABLED,
+      memory_order_acq_rel);
+}
+
+static void playbackWaitForCallbacks(void)
+{
+  while((atomic_load_explicit(
+          &audio.playback.callbackState, memory_order_acquire) &
+        PLAYBACK_CALLBACK_COUNT_MASK) != 0)
+    ;
+}
 
 void audio_init(void)
 {
+  LG_LOCK_INIT(audio.record.lock);
+  audio.record.shuttingDown = false;
+  atomic_store_explicit(
+      &audio.playback.callbackState, PLAYBACK_CALLBACK_DISABLED,
+      memory_order_release);
+
   // search for the best audiodev to use
   for(int i = 0; i < LG_AUDIODEV_COUNT; ++i)
     if (LG_AudioDevs[i]->init())
@@ -166,15 +238,26 @@ void audio_init(void)
 
 void audio_free(void)
 {
-  if (!audio.audioDev)
-    return;
-
   // immediate stop of the stream, do not wait for drain
-  playbackStop();
-  audio_recordStop();
+  if (audio.audioDev)
+    playbackStop();
 
-  audio.audioDev->free();
+  LG_LOCK(audio.record.lock);
+  audio.record.shuttingDown = true;
+  audio.record.requested = false;
+  MsgBoxHandle confirm = recordCancelConfirmLocked();
+
+  if (audio.audioDev && audio.record.started)
+    realRecordStopLocked();
+
+  struct LG_AudioDevOps * audioDev = audio.audioDev;
   audio.audioDev = NULL;
+  LG_UNLOCK(audio.record.lock);
+
+  app_msgBoxClose(confirm);
+
+  if (audioDev)
+    audioDev->free();
 }
 
 bool audio_supportsPlayback(void)
@@ -194,11 +277,14 @@ static const char * audioGraphFormatFn(const char * name,
 
 static void playbackStop(void)
 {
-  if (audio.playback.state == STREAM_STATE_STOP)
+  if (playbackGetState() == STREAM_STATE_STOP)
     return;
 
-  audio.playback.state = STREAM_STATE_STOP;
+  playbackDisableCallbacks();
   audio.audioDev->playback.stop();
+  playbackWaitForCallbacks();
+
+  playbackSetState(STREAM_STATE_STOP);
   ringbuffer_free(&audio.playback.buffer);
   ringbuffer_free(&audio.playback.deviceTiming);
   audio.playback.spiceData.src = src_delete(audio.playback.spiceData.src);
@@ -224,12 +310,15 @@ static int playbackPullFrames(uint8_t * dst, int frames)
   if (frames == 0)
     return frames;
 
+  if (!playbackCallbackEnter())
+    return 0;
+
   PlaybackDeviceData * data = &audio.playback.deviceData;
   int64_t now = nanotime();
 
   if (audio.playback.buffer)
   {
-    if (audio.playback.state == STREAM_STATE_SETUP_DEVICE)
+    if (playbackGetState() == STREAM_STATE_SETUP_DEVICE)
     {
       /* If necessary, slew backwards to play silence until we reach the target
        * startup latency. This avoids underrunning the buffer if the audio
@@ -242,7 +331,7 @@ static int playbackPullFrames(uint8_t * dst, int frames)
         ringbuffer_consume(audio.playback.buffer, NULL, offset);
       }
 
-      audio.playback.state = STREAM_STATE_RUN;
+      playbackSetState(STREAM_STATE_RUN);
     }
 
     // Measure the device clock and post to the Spice thread
@@ -310,14 +399,26 @@ static int playbackPullFrames(uint8_t * dst, int frames)
     frames = 0;
 
   // Close the stream if nothing has played for a while
-  if (audio.playback.state == STREAM_STATE_KEEP_ALIVE)
+  if (audio.playback.buffer &&
+      playbackGetState() == STREAM_STATE_KEEP_ALIVE)
   {
     int stopTimeSec = 30;
     int stopTimeFrames = stopTimeSec * audio.playback.sampleRate;
     if (ringbuffer_getCount(audio.playback.buffer) <= -stopTimeFrames)
-      playbackStop();
+    {
+      StreamState expected = STREAM_STATE_KEEP_ALIVE;
+      if (atomic_compare_exchange_strong_explicit(
+            &audio.playback.state, &expected, STREAM_STATE_STOP_PENDING,
+            memory_order_acq_rel, memory_order_acquire))
+      {
+        playbackDisableCallbacks();
+        audio.audioDev->playback.stop();
+        frames = 0;
+      }
+    }
   }
 
+  playbackCallbackExit();
   return frames;
 }
 
@@ -330,10 +431,20 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   static int lastChannels   = 0;
   static int lastSampleRate = 0;
 
-  if (audio.playback.state == STREAM_STATE_KEEP_ALIVE &&
-    channels == lastChannels && sampleRate == lastSampleRate)
-    return;
-  if (audio.playback.state != STREAM_STATE_STOP)
+  StreamState state = playbackGetState();
+  if (state == STREAM_STATE_KEEP_ALIVE &&
+      channels == lastChannels && sampleRate == lastSampleRate)
+  {
+    StreamState expected = STREAM_STATE_KEEP_ALIVE;
+    if (atomic_compare_exchange_strong_explicit(
+          &audio.playback.state, &expected, STREAM_STATE_RESUMING,
+          memory_order_acq_rel, memory_order_acquire))
+      return;
+
+    state = expected;
+  }
+
+  if (state != STREAM_STATE_STOP)
     playbackStop();
 
   int srcError;
@@ -356,7 +467,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(float);
-  audio.playback.state      = STREAM_STATE_SETUP_SPICE;
+  playbackSetState(STREAM_STATE_SETUP_SPICE);
 
   audio.playback.deviceData.periodFrames       = 0;
   audio.playback.deviceData.nextPosition       = 0;
@@ -392,6 +503,9 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.timings = ringbuffer_new(1200, sizeof(float));
   audio.playback.graph   = app_registerGraph("PLAYBACK",
       audio.playback.timings, 0.0f, 200.0f, audioGraphFormatFn);
+
+  atomic_store_explicit(
+      &audio.playback.callbackState, 0, memory_order_release);
 }
 
 void audio_playbackStop(void)
@@ -399,13 +513,14 @@ void audio_playbackStop(void)
   if (!audio.audioDev)
     return;
 
-  switch (audio.playback.state)
+  switch (playbackGetState())
   {
     case STREAM_STATE_RUN:
+    case STREAM_STATE_RESUMING:
     {
       // Keep the audio device open for a while to reduce startup latency if
       // playback starts again
-      audio.playback.state = STREAM_STATE_KEEP_ALIVE;
+      playbackSetState(STREAM_STATE_KEEP_ALIVE);
 
       // Reset the resampler so it is safe to use for the next playback
       int error = src_reset(audio.playback.spiceData.src);
@@ -420,6 +535,7 @@ void audio_playbackStop(void)
 
     case STREAM_STATE_SETUP_SPICE:
     case STREAM_STATE_SETUP_DEVICE:
+    case STREAM_STATE_STOP_PENDING:
       // Playback hasn't actually started yet so just clean up
       playbackStop();
       break;
@@ -442,7 +558,7 @@ void audio_playbackVolume(int channels, const uint16_t volume[])
   memcpy(audio.playback.volume, volume, sizeof(uint16_t) * channels);
   audio.playback.volumeChannels = channels;
 
-  if (!STREAM_ACTIVE(audio.playback.state))
+  if (!STREAM_ACTIVE(playbackGetState()))
     return;
 
   audio.audioDev->playback.volume(channels, volume);
@@ -455,7 +571,7 @@ void audio_playbackMute(bool mute)
 
   // store the value so we can restore it if the stream is restarted
   audio.playback.mute = mute;
-  if (!STREAM_ACTIVE(audio.playback.state))
+  if (!STREAM_ACTIVE(playbackGetState()))
     return;
 
   audio.audioDev->playback.mute(mute);
@@ -473,7 +589,14 @@ static double computeDevicePosition(int64_t curTime)
 
 void audio_playbackData(uint8_t * data, size_t size)
 {
-  if (audio.playback.state == STREAM_STATE_STOP || !audio.audioDev || size == 0)
+  StreamState state = playbackGetState();
+  if (state == STREAM_STATE_STOP_PENDING)
+  {
+    playbackStop();
+    return;
+  }
+
+  if (state == STREAM_STATE_STOP || !audio.audioDev || size == 0)
     return;
 
   PlaybackSpiceData * spiceData = &audio.playback.spiceData;
@@ -598,7 +721,10 @@ void audio_playbackData(uint8_t * data, size_t size)
   else
   {
     double error = (now - spiceData->nextTime) * 1.0e-9;
-    if (fabs(error) >= 0.2 || audio.playback.state == STREAM_STATE_KEEP_ALIVE)
+    state = playbackGetState();
+    if (fabs(error) >= 0.2 ||
+        state == STREAM_STATE_KEEP_ALIVE ||
+        state == STREAM_STATE_RESUMING)
     {
       /* Clock error is too high or we are starting a new playback; slew the
        * write pointer and reset the timing parameters to get back in sync. If
@@ -612,7 +738,8 @@ void audio_playbackData(uint8_t * data, size_t size)
 
         // If starting a new playback we need to allow a little extra time for
         // the resampler startup latency
-        if (audio.playback.state == STREAM_STATE_KEEP_ALIVE)
+        if (state == STREAM_STATE_KEEP_ALIVE ||
+            state == STREAM_STATE_RESUMING)
         {
           int resamplerLatencyFrames = 20;
           targetPosition += resamplerLatencyFrames;
@@ -636,7 +763,7 @@ void audio_playbackData(uint8_t * data, size_t size)
       spiceData->offsetErrorIntegral = 0.0;
       spiceData->ratioIntegral       = 0.0;
 
-      audio.playback.state = STREAM_STATE_RUN;
+      playbackSetState(STREAM_STATE_RUN);
     }
     else
     {
@@ -710,7 +837,7 @@ void audio_playbackData(uint8_t * data, size_t size)
     spiceData->nextPosition += srcData.output_frames_gen;
   }
 
-  if (audio.playback.state == STREAM_STATE_SETUP_SPICE)
+  if (playbackGetState() == STREAM_STATE_SETUP_SPICE)
   {
     /* Latency corrections at startup can be quite significant due to poor
      * packet pacing from Spice, so require at least two full Spice periods'
@@ -728,7 +855,7 @@ void audio_playbackData(uint8_t * data, size_t size)
      * inserted at the beginning of playback to avoid underrunning. If it starts
      * later, then we just accept the higher latency and let the adaptive
      * resampling deal with it. */
-    audio.playback.state = STREAM_STATE_SETUP_DEVICE;
+    playbackSetState(STREAM_STATE_SETUP_DEVICE);
     audio.audioDev->playback.start();
   }
 
@@ -748,13 +875,26 @@ bool audio_supportsRecord(void)
 
 static void recordPushFrames(uint8_t * data, int frames)
 {
-  purespice_writeAudio(data, frames * audio.record.stride, 0);
+  const int stride = atomic_load_explicit(
+      &audio.record.stride, memory_order_acquire);
+  purespice_writeAudio(data, frames * stride, 0);
 }
 
-static void realRecordStart(int channels, int sampleRate, PSAudioFormat format)
+static MsgBoxHandle recordCancelConfirmLocked(void)
+{
+  MsgBoxHandle handle = audio.record.confirmHandle;
+  audio.record.confirmHandle = NULL;
+  audio.record.confirmPending = false;
+  ++audio.record.confirmGeneration;
+  return handle;
+}
+
+static void realRecordStartLocked(
+    int channels, int sampleRate, PSAudioFormat format)
 {
   audio.record.started = true;
-  audio.record.stride  = channels * sizeof(uint16_t);
+  atomic_store_explicit(&audio.record.stride,
+      channels * sizeof(uint16_t), memory_order_release);
 
   audio.audioDev->record.start(channels, sampleRate, recordPushFrames);
 
@@ -781,25 +921,44 @@ struct AudioFormat
 
 static void recordConfirm(bool yes, void * opaque)
 {
-  if (yes)
+  const uint64_t generation = (uint64_t)(uintptr_t)opaque;
+
+  LG_LOCK(audio.record.lock);
+  if (!audio.record.confirmPending ||
+      generation != audio.record.confirmGeneration)
+  {
+    LG_UNLOCK(audio.record.lock);
+    return;
+  }
+
+  audio.record.confirmPending = false;
+  audio.record.confirmHandle  = NULL;
+
+  if (yes && audio.record.requested &&
+      !audio.record.shuttingDown && audio.audioDev)
   {
     DEBUG_INFO("Microphone access granted");
-    realRecordStart(
-      audio.record.confirmChannels,
-      audio.record.confirmSampleRate,
-      audio.record.confirmFormat
-    );
+    realRecordStartLocked(
+        audio.record.confirmChannels,
+        audio.record.confirmSampleRate,
+        audio.record.confirmFormat);
   }
+  else if (yes)
+    DEBUG_INFO("Ignoring stale microphone access confirmation");
   else
     DEBUG_INFO("Microphone access denied");
 
-  audio.record.confirmHandle = NULL;
+  LG_UNLOCK(audio.record.lock);
 }
 
 void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
 {
-  if (!audio.audioDev)
+  LG_LOCK(audio.record.lock);
+  if (!audio.audioDev || audio.record.shuttingDown)
+  {
+    LG_UNLOCK(audio.record.lock);
     return;
+  }
 
   const bool restart = audio.record.started;
   if (audio.record.started)
@@ -807,41 +966,68 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
     if (channels   == audio.record.lastChannels &&
         sampleRate == audio.record.lastSampleRate &&
         format     == audio.record.lastFormat)
+    {
+      LG_UNLOCK(audio.record.lock);
       return;
+    }
 
-    realRecordStop();
+    realRecordStopLocked();
   }
 
+  MsgBoxHandle oldConfirm = recordCancelConfirmLocked();
   audio.record.requested      = true;
   audio.record.lastChannels   = channels;
   audio.record.lastSampleRate = sampleRate;
   audio.record.lastFormat     = format;
 
   if (restart)
-    realRecordStart(channels, sampleRate, format);
+    realRecordStartLocked(channels, sampleRate, format);
   else if (g_state.micDefaultState == MIC_DEFAULT_DENY)
     DEBUG_INFO("Microphone access denied by default");
   else if (g_state.micDefaultState == MIC_DEFAULT_ALLOW)
   {
     DEBUG_INFO("Microphone access granted by default");
-    realRecordStart(channels, sampleRate, format);
+    realRecordStartLocked(channels, sampleRate, format);
   }
   else
   {
-    if (audio.record.confirmHandle)
-      app_msgBoxClose(audio.record.confirmHandle);
-
     audio.record.confirmChannels   = channels;
     audio.record.confirmSampleRate = sampleRate;
     audio.record.confirmFormat     = format;
-    audio.record.confirmHandle     = app_confirmMsgBox(
-      "Microphone", recordConfirm, NULL,
-      "An application just opened the microphone!\n"
-      "Do you want it to access your microphone?");
+    audio.record.confirmPending    = true;
+    const uint64_t generation = ++audio.record.confirmGeneration;
+    LG_UNLOCK(audio.record.lock);
+
+    app_msgBoxClose(oldConfirm);
+
+    LG_LOCK(audio.record.lock);
+    const bool current =
+      audio.record.confirmPending &&
+      generation == audio.record.confirmGeneration &&
+      audio.record.requested &&
+      !audio.record.shuttingDown &&
+      audio.audioDev;
+    if (current)
+    {
+      audio.record.confirmHandle = app_confirmMsgBox(
+        "Microphone", recordConfirm, (void *)(uintptr_t)generation,
+        "An application just opened the microphone!\n"
+        "Do you want it to access your microphone?");
+      if (!audio.record.confirmHandle)
+      {
+        audio.record.confirmPending = false;
+        ++audio.record.confirmGeneration;
+      }
+    }
+    LG_UNLOCK(audio.record.lock);
+    return;
   }
+
+  LG_UNLOCK(audio.record.lock);
+  app_msgBoxClose(oldConfirm);
 }
 
-static void realRecordStop(void)
+static void realRecordStopLocked(void)
 {
   audio.audioDev->record.stop();
   audio.record.started = false;
@@ -852,46 +1038,70 @@ static void realRecordStop(void)
 
 void audio_recordStop(void)
 {
+  LG_LOCK(audio.record.lock);
   audio.record.requested = false;
-  if (!audio.audioDev || !audio.record.started)
-    return;
+  MsgBoxHandle confirm = recordCancelConfirmLocked();
 
-  DEBUG_INFO("Microphone recording stopped");
-  realRecordStop();
+  if (audio.audioDev && audio.record.started)
+  {
+    DEBUG_INFO("Microphone recording stopped");
+    realRecordStopLocked();
+  }
+  LG_UNLOCK(audio.record.lock);
+
+  app_msgBoxClose(confirm);
 }
 
 void audio_recordToggleKeybind(int sc, void * opaque)
 {
-  if (!audio.audioDev)
+  LG_LOCK(audio.record.lock);
+  if (!audio.audioDev || audio.record.shuttingDown)
+  {
+    LG_UNLOCK(audio.record.lock);
     return;
+  }
 
   if (!audio.record.requested)
   {
+    LG_UNLOCK(audio.record.lock);
     app_alert(LG_ALERT_WARNING,
       "No application is requesting microphone access.");
     return;
   }
 
+  MsgBoxHandle confirm = recordCancelConfirmLocked();
+  bool started;
   if (audio.record.started)
   {
-    app_alert(LG_ALERT_INFO, "Microphone disabled");
     DEBUG_INFO("Microphone recording stopped by user");
-    realRecordStop();
+    realRecordStopLocked();
+    started = false;
   }
   else
   {
-    app_alert(LG_ALERT_INFO, "Microphone enabled");
     DEBUG_INFO("Microphone recording started by user");
-    realRecordStart(audio.record.lastChannels, audio.record.lastSampleRate,
-      audio.record.lastFormat);
+    realRecordStartLocked(
+        audio.record.lastChannels,
+        audio.record.lastSampleRate,
+        audio.record.lastFormat);
+    started = true;
   }
+  LG_UNLOCK(audio.record.lock);
+
+  app_msgBoxClose(confirm);
+  app_alert(LG_ALERT_INFO,
+      started ? "Microphone enabled" : "Microphone disabled");
 }
 
 void audio_recordVolume(int channels, const uint16_t volume[])
 {
+  LG_LOCK(audio.record.lock);
   if (!audio.audioDev || !audio.audioDev->record.volume ||
-      !g_params.audioSyncVolume)
+      !g_params.audioSyncVolume || audio.record.shuttingDown)
+  {
+    LG_UNLOCK(audio.record.lock);
     return;
+  }
 
   // store the values so we can restore the state if the stream is restarted
   channels = min(ARRAY_LENGTH(audio.record.volume), channels);
@@ -899,22 +1109,35 @@ void audio_recordVolume(int channels, const uint16_t volume[])
   audio.record.volumeChannels = channels;
 
   if (!audio.record.started)
+  {
+    LG_UNLOCK(audio.record.lock);
     return;
+  }
 
   audio.audioDev->record.volume(channels, volume);
+  LG_UNLOCK(audio.record.lock);
 }
 
 void audio_recordMute(bool mute)
 {
-  if (!audio.audioDev || !audio.audioDev->record.mute)
+  LG_LOCK(audio.record.lock);
+  if (!audio.audioDev || !audio.audioDev->record.mute ||
+      audio.record.shuttingDown)
+  {
+    LG_UNLOCK(audio.record.lock);
     return;
+  }
 
   // store the value so we can restore it if the stream is restarted
   audio.record.mute = mute;
   if (!audio.record.started)
+  {
+    LG_UNLOCK(audio.record.lock);
     return;
+  }
 
   audio.audioDev->record.mute(mute);
+  LG_UNLOCK(audio.record.lock);
 }
 
 #endif
