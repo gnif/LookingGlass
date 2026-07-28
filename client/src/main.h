@@ -55,7 +55,7 @@ enum MicDefaultState {
 
 struct AppState
 {
-  enum RunState state;
+  _Atomic(enum RunState) state;
 
   ImGuiIO        * io;
   ImGuiStyle     * style;
@@ -79,7 +79,7 @@ struct AppState
   bool                         jitRender;
 
   uint8_t     spiceUUID[16];
-  bool        spiceReady;
+  atomic_bool spiceReady;
   atomic_bool spiceDisplayRequested;
   atomic_bool spiceDisplayActive;
   atomic_bool spiceDisplayTransition;
@@ -89,7 +89,7 @@ struct AppState
   bool    guestUUIDValid;
   KVMFROS guestOS;
 
-  bool lgHostConnected;
+  atomic_bool lgHostConnected;
 
   bool                 stopVideo;
   bool                 ignoreInput;
@@ -98,7 +98,7 @@ struct AppState
   int                  escapeAction;
   bool                 escapeHelp;
   struct ll          * bindings;
-  bool                 keyDown[KEY_MAX];
+  atomic_bool          keyDown[KEY_MAX];
 
   bool                 haveSrcSize;
   struct Point         windowPos;
@@ -112,7 +112,7 @@ struct AppState
   LG_RendererRect      dstRect;
   bool                 posInfoValid;
   bool                 alignToGuest;
-  bool                 spiceClose;
+  atomic_bool          spiceClose;
 
   atomic_uint_least64_t shaderMousePosition;
   atomic_uint_least32_t shaderMouseState;
@@ -341,6 +341,16 @@ struct CursorState
 extern struct AppState    g_state;
 extern struct CursorState g_cursor;
 extern struct AppParams   g_params;
+
+static inline enum RunState app_getState(void)
+{
+  return atomic_load_explicit(&g_state.state, memory_order_acquire);
+}
+
+static inline void app_setState(enum RunState state)
+{
+  atomic_store_explicit(&g_state.state, state, memory_order_release);
+}
 
 int main_cursorThread(void * unused);
 int main_frameThread(void * unused);

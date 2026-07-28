@@ -176,7 +176,7 @@ static int renderThread(void * unused)
   if (!RENDERER(renderStartup, g_state.useDMA))
   {
     DEBUG_ERROR("EGL render failed to start");
-    g_state.state = APP_STATE_SHUTDOWN;
+    app_setState(APP_STATE_SHUTDOWN);
 
     /* unblock threads waiting on the condition */
     lgSignalEvent(e_startup);
@@ -211,7 +211,7 @@ static int renderThread(void * unused)
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
 
-  while(likely(g_state.state != APP_STATE_SHUTDOWN))
+  while(likely(app_getState() != APP_STATE_SHUTDOWN))
   {
     if (g_state.jitRender)
     {
@@ -328,7 +328,7 @@ static int renderThread(void * unused)
     }
   }
 
-  g_state.state = APP_STATE_SHUTDOWN;
+  app_setState(APP_STATE_SHUTDOWN);
 
   if (g_state.overlays)
   {
@@ -360,7 +360,7 @@ int main_cursorThread(void * unused)
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   // subscribe to the pointer queue
-  while(g_state.state == APP_STATE_RUNNING)
+  while(app_getState() == APP_STATE_RUNNING)
   {
     status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_POINTER,
         &g_state.pointerQueue);
@@ -374,11 +374,11 @@ int main_cursorThread(void * unused)
     }
 
     DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
-    g_state.state = APP_STATE_SHUTDOWN;
+    app_setState(APP_STATE_SHUTDOWN);
     break;
   }
 
-  while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
+  while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LGMPMessage msg;
     if ((status = lgmpClientProcess(g_state.pointerQueue, &msg)) != LGMP_OK)
@@ -421,11 +421,11 @@ int main_cursorThread(void * unused)
       }
 
       if (status == LGMP_ERR_INVALID_SESSION)
-        g_state.state = APP_STATE_RESTART;
+        app_setState(APP_STATE_RESTART);
       else
       {
         DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
       }
       break;
     }
@@ -450,7 +450,7 @@ int main_cursorThread(void * unused)
       if (!cursor)
       {
         DEBUG_ERROR("failed to allocate %d bytes for cursor", neededSize);
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
         break;
       }
       cursorSize = neededSize;
@@ -575,11 +575,11 @@ int main_frameThread(void * unused)
     DEBUG_INFO("Using DMA buffer support");
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
-  if (g_state.state != APP_STATE_RUNNING)
+  if (app_getState() != APP_STATE_RUNNING)
     return 0;
 
   // subscribe to the frame queue
-  while(g_state.state == APP_STATE_RUNNING)
+  while(app_getState() == APP_STATE_RUNNING)
   {
     status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_FRAME, &queue);
     if (status == LGMP_OK)
@@ -592,11 +592,11 @@ int main_frameThread(void * unused)
     }
 
     DEBUG_ERROR("lgmpClientSubscribe Failed: %s", lgmpStatusString(status));
-    g_state.state = APP_STATE_SHUTDOWN;
+    app_setState(APP_STATE_SHUTDOWN);
     break;
   }
 
-  while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
+  while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LGMPMessage msg;
     if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
@@ -624,11 +624,11 @@ int main_frameThread(void * unused)
       }
 
       if (status == LGMP_ERR_INVALID_SESSION)
-        g_state.state = APP_STATE_RESTART;
+        app_setState(APP_STATE_RESTART);
       else
       {
         DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
       }
       break;
     }
@@ -744,7 +744,7 @@ int main_frameThread(void * unused)
       if (error)
       {
         lgmpClientMessageDone(queue);
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
         break;
       }
 
@@ -765,7 +765,7 @@ int main_frameThread(void * unused)
       if (!RENDERER(onFrameFormat, lgrFormat))
       {
         DEBUG_ERROR("renderer failed to configure format");
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
         LG_UNLOCK(g_state.lgrLock);
         break;
       }
@@ -827,7 +827,7 @@ int main_frameThread(void * unused)
       if (!dma)
       {
         DEBUG_ERROR("Failed to obtain a free DMA buffer for use");
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
         break;
       }
 
@@ -842,7 +842,7 @@ int main_frameThread(void * unused)
         if (dma->fd < 0)
         {
           DEBUG_ERROR("Failed to get the DMA buffer for the frame");
-          g_state.state = APP_STATE_SHUTDOWN;
+          app_setState(APP_STATE_SHUTDOWN);
           break;
         }
       }
@@ -873,7 +873,7 @@ int main_frameThread(void * unused)
     {
       lgmpClientMessageDone(queue);
       DEBUG_ERROR("renderer on frame returned failure");
-      g_state.state = APP_STATE_SHUTDOWN;
+      app_setState(APP_STATE_SHUTDOWN);
       break;
     }
 
@@ -921,7 +921,7 @@ int main_frameThread(void * unused)
 
   RENDERER(onRestart);
 
-  if (g_state.state != APP_STATE_SHUTDOWN)
+  if (app_getState() != APP_STATE_SHUTDOWN)
   {
     if (!app_useSpiceDisplay(true))
       overlaySplash_show(true);
@@ -939,7 +939,8 @@ int main_frameThread(void * unused)
 
 static void checkUUID(void)
 {
-  if (!g_state.spiceReady || !g_state.guestUUIDValid)
+  if (!atomic_load_explicit(&g_state.spiceReady, memory_order_acquire) ||
+      !g_state.guestUUIDValid)
     return;
 
   if (memcmp(g_state.spiceUUID, g_state.guestUUID,
@@ -952,13 +953,13 @@ static void checkUUID(void)
       "Input will not function until this is corrected.");
 
   g_params.useSpiceInput = false;
-  g_state.spiceClose = true;
+  atomic_store_explicit(&g_state.spiceClose, true, memory_order_release);
   purespice_disconnect();
 }
 
 void spiceReady(void)
 {
-  g_state.spiceReady = true;
+  atomic_store_explicit(&g_state.spiceReady, true, memory_order_release);
   if (atomic_load_explicit(&g_state.spiceDisplayRequested,
         memory_order_acquire))
     app_useSpiceDisplay(true);
@@ -1172,7 +1173,7 @@ int spiceThread(void * arg)
   }
 
   // process all spice messages
-  while(g_state.state != APP_STATE_SHUTDOWN)
+  while(app_getState() != APP_STATE_SHUTDOWN)
   {
     PSStatus status;
     if ((status = purespice_process(100)) != PS_STATUS_RUN)
@@ -1187,11 +1188,13 @@ int spiceThread(void * arg)
   if (g_params.useSpiceInput)
   {
     for(int scancode = 0; scancode < KEY_MAX; ++scancode)
-      if (g_state.keyDown[scancode])
+      if (atomic_load_explicit(
+            &g_state.keyDown[scancode], memory_order_relaxed))
       {
         const uint32_t ps2 = linux_to_ps2[scancode];
         if (ps2 && purespice_keyUp(ps2))
-          g_state.keyDown[scancode] = false;
+          atomic_store_explicit(
+              &g_state.keyDown[scancode], false, memory_order_relaxed);
         else
           DEBUG_ERROR("Failed to release key %d during SPICE shutdown",
               scancode);
@@ -1206,8 +1209,8 @@ end:
 
   // if the connection was disconnected intentionally we don't want to shutdown
   // so that the user can see the message box and take action
-  if (!g_state.spiceClose)
-    g_state.state = APP_STATE_SHUTDOWN;
+  if (!atomic_load_explicit(&g_state.spiceClose, memory_order_acquire))
+    app_setState(APP_STATE_SHUTDOWN);
 
   lgSignalEvent(e_spice);
   return 0;
@@ -1219,10 +1222,10 @@ void intHandler(int sig)
   {
     case SIGINT:
     case SIGTERM:
-      if (g_state.state != APP_STATE_SHUTDOWN)
+      if (app_getState() != APP_STATE_SHUTDOWN)
       {
         DEBUG_INFO("Caught signal, shutting down...");
-        g_state.state = APP_STATE_SHUTDOWN;
+        app_setState(APP_STATE_SHUTDOWN);
       }
       else
       {
@@ -1451,7 +1454,7 @@ static int lg_run(void)
     }
 
     lgWaitEvent(e_spice, TIMEOUT_INFINITE);
-    if (!g_state.spiceReady)
+    if (!atomic_load_explicit(&g_state.spiceReady, memory_order_acquire))
       return -1;
   }
 
@@ -1567,7 +1570,7 @@ static int lg_run(void)
 
   LGMP_STATUS status;
 
-  while(g_state.state == APP_STATE_RUNNING)
+  while(app_getState() == APP_STATE_RUNNING)
   {
     if ((status = lgmpClientInit(g_state.shm.mem, g_state.shm.size, &g_state.lgmp)) == LGMP_OK)
       break;
@@ -1597,7 +1600,7 @@ restart:
 
   uint64_t initialSpiceEnable = microtime() + 1000 * 1000;
 
-  while(g_state.state == APP_STATE_RUNNING)
+  while(app_getState() == APP_STATE_RUNNING)
   {
     if (initialSpiceEnable && microtime() > initialSpiceEnable)
     {
@@ -1621,7 +1624,7 @@ restart:
       return -1;
     }
 
-    while (g_state.state == APP_STATE_RUNNING &&
+    while (app_getState() == APP_STATE_RUNNING &&
         !atomic_load_explicit(&probe.done, memory_order_acquire))
       g_state.ds->wait(100);
 
@@ -1631,7 +1634,7 @@ restart:
       return -1;
     }
 
-    if (g_state.state != APP_STATE_RUNNING)
+    if (app_getState() != APP_STATE_RUNNING)
       return -1;
 
     status        = probe.status;
@@ -1706,7 +1709,7 @@ restart:
         return -1;
     }
 
-    if (g_state.state != APP_STATE_RUNNING)
+    if (app_getState() != APP_STATE_RUNNING)
       return -1;
 
     // dont show warnings again after the first successful startup
@@ -1718,7 +1721,7 @@ restart:
       static bool alertsDone = false;
       if (alertsDone)
       {
-        if(g_state.state == APP_STATE_RUNNING)
+        if (app_getState() == APP_STATE_RUNNING)
           g_state.ds->wait(1000);
         continue;
       }
@@ -1752,7 +1755,7 @@ restart:
       DEBUG_INFO("Waiting for you to upgrade the host application");
 
       alertsDone = true;
-      if(g_state.state == APP_STATE_RUNNING)
+      if (app_getState() == APP_STATE_RUNNING)
         g_state.ds->wait(1000);
 
       continue;
@@ -1761,7 +1764,7 @@ restart:
     break;
   }
 
-  if(g_state.state != APP_STATE_RUNNING)
+  if (app_getState() != APP_STATE_RUNNING)
     return -1;
 
   /* close any informational message boxes from above as we now connected
@@ -1897,7 +1900,8 @@ restart:
 
         g_state.guestOS = osInfo->os;
 
-        if (g_state.spiceReady && g_params.useSpiceInput)
+        if (atomic_load_explicit(&g_state.spiceReady, memory_order_acquire) &&
+            g_params.useSpiceInput)
           keybind_spiceRegister();
         break;
       }
@@ -1913,10 +1917,11 @@ restart:
 
   checkUUID();
 
-  if (g_state.state == APP_STATE_RUNNING)
+  if (app_getState() == APP_STATE_RUNNING)
   {
     DEBUG_INFO("Starting session");
-    g_state.lgHostConnected = true;
+    atomic_store_explicit(
+        &g_state.lgHostConnected, true, memory_order_release);
   }
 
   g_state.kvmfrFeatures = udata->features;
@@ -1928,20 +1933,21 @@ restart:
     return -1;
   }
 
-  while(likely(g_state.state == APP_STATE_RUNNING))
+  while(likely(app_getState() == APP_STATE_RUNNING))
   {
     if (unlikely(!lgmpClientSessionValid(g_state.lgmp)))
     {
-      g_state.lgHostConnected = false;
+      atomic_store_explicit(
+          &g_state.lgHostConnected, false, memory_order_release);
       DEBUG_INFO("Waiting for the host to restart...");
-      g_state.state = APP_STATE_RESTART;
+      app_setState(APP_STATE_RESTART);
       break;
     }
     lgMessage_process();
     g_state.ds->wait(100);
   }
 
-  if (g_state.state == APP_STATE_RESTART)
+  if (app_getState() == APP_STATE_RESTART)
   {
     lgSignalEvent(e_startup);
     lgSignalEvent(g_state.frameEvent);
@@ -1949,7 +1955,7 @@ restart:
     core_stopFrameThread();
     core_stopCursorThread();
 
-    g_state.state = APP_STATE_RUNNING;
+    app_setState(APP_STATE_RUNNING);
     lgInit();
     goto restart;
   }
@@ -1960,7 +1966,7 @@ restart:
 
 static void lg_shutdown(void)
 {
-  g_state.state = APP_STATE_SHUTDOWN;
+  app_setState(APP_STATE_SHUTDOWN);
 
   if (t_spice)
     lgJoinThread(t_spice, NULL);

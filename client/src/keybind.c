@@ -66,7 +66,7 @@ static void bind_input(int sc, void * opaque)
 
 static void bind_quit(int sc, void * opaque)
 {
-  g_state.state = APP_STATE_SHUTDOWN;
+  app_setState(APP_STATE_SHUTDOWN);
 }
 
 static void bind_mouseSens(int sc, void * opaque)

@@ -45,9 +45,10 @@
 
 bool app_isRunning(void)
 {
+  const enum RunState state = app_getState();
   return
-    g_state.state == APP_STATE_RUNNING ||
-    g_state.state == APP_STATE_RESTART;
+    state == APP_STATE_RUNNING ||
+    state == APP_STATE_RESTART;
 }
 
 bool app_isCaptureMode(void)
@@ -189,7 +190,7 @@ void app_handleFocusEvent(bool focused)
 
     if (g_params.releaseKeysOnFocusLoss)
       for (int key = 0; key < KEY_MAX; key++)
-        if (g_state.keyDown[key])
+        if (atomic_load_explicit(&g_state.keyDown[key], memory_order_relaxed))
           app_handleKeyReleaseInternal(key);
 
     g_state.escapeActive = false;
@@ -432,14 +433,14 @@ void app_handleKeyPressInternal(int sc)
   if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
     return;
 
-  if (!g_state.keyDown[sc])
+  if (!atomic_load_explicit(&g_state.keyDown[sc], memory_order_relaxed))
   {
     uint32_t ps2 = linux_to_ps2[sc];
     if (!ps2)
       return;
 
     if (purespice_keyDown(ps2))
-      g_state.keyDown[sc] = true;
+      atomic_store_explicit(&g_state.keyDown[sc], true, memory_order_relaxed);
     else
     {
       DEBUG_ERROR("app_handleKeyPress: failed to send message");
@@ -474,7 +475,7 @@ void app_handleKeyReleaseInternal(int sc)
     return;
 
   // avoid sending key up events when we didn't send a down
-  if (!g_state.keyDown[sc])
+  if (!atomic_load_explicit(&g_state.keyDown[sc], memory_order_relaxed))
     return;
 
   if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
@@ -485,7 +486,7 @@ void app_handleKeyReleaseInternal(int sc)
     return;
 
   if (purespice_keyUp(ps2))
-    g_state.keyDown[sc] = false;
+    atomic_store_explicit(&g_state.keyDown[sc], false, memory_order_relaxed);
   else
   {
     DEBUG_ERROR("app_handleKeyRelease: failed to send message");
@@ -648,7 +649,7 @@ void app_invalidateWindow(bool full)
 void app_handleCloseEvent(void)
 {
   if (!g_params.ignoreQuit || !g_cursor.inView)
-    g_state.state = APP_STATE_SHUTDOWN;
+    app_setState(APP_STATE_SHUTDOWN);
 }
 
 void app_handleRenderEvent(const uint64_t timeUs)
@@ -1099,7 +1100,7 @@ void app_overlayConfigRegisterTab(const char * title,
 
 void app_invalidateOverlay(bool renderTwice)
 {
-  if (g_state.state == APP_STATE_SHUTDOWN)
+  if (app_getState() == APP_STATE_SHUTDOWN)
     return;
 
   if (renderTwice)
@@ -1138,7 +1139,7 @@ void app_stopVideo(bool stop)
     return;
 
   // do not change the state if the host app is not connected
-  if (!g_state.lgHostConnected)
+  if (!atomic_load_explicit(&g_state.lgHostConnected, memory_order_acquire))
     return;
 
   g_state.stopVideo = stop;
@@ -1169,7 +1170,7 @@ bool app_useSpiceDisplay(bool enable)
       memory_order_release);
 
   // if spice is not yet ready, flag the state we want for when it is
-  if (!g_state.spiceReady)
+  if (!atomic_load_explicit(&g_state.spiceReady, memory_order_acquire))
     return false;
 
   bool active = atomic_load_explicit(&g_state.spiceDisplayActive,
@@ -1178,7 +1179,8 @@ bool app_useSpiceDisplay(bool enable)
     return active;
 
   // do not allow stopping of the host app if not connected
-  if (!enable && !g_state.lgHostConnected)
+  if (!enable && !atomic_load_explicit(
+        &g_state.lgHostConnected, memory_order_acquire))
   {
     atomic_store_explicit(&g_state.spiceDisplayRequested, active,
         memory_order_release);
