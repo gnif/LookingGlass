@@ -595,7 +595,8 @@ void waylandCBNotice(LG_ClipboardData type)
 {
   wlCb.haveRequest = true;
   wlCb.type        = type;
-  app_clipboardRequest(waylandCBReplyFn, NULL);
+  if (!app_clipboardRequest(waylandCBReplyFn, NULL))
+    DEBUG_ERROR("Failed to request SPICE clipboard data");
 }
 
 void waylandCBRelease(void)

@@ -151,7 +151,7 @@ void app_clipboardRelease(void);
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count);
 void app_clipboardNotifySize(const LG_ClipboardData type, size_t size);
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size);
-void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque);
+bool app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque);
 
 /**
  * Show an alert on screen

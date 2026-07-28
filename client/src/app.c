@@ -348,24 +348,43 @@ void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
     DEBUG_ERROR("Failed to send SPICE clipboard data");
 }
 
-void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
+bool app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
 {
-  if (!g_params.clipboardToLocal)
-    return;
+  if (!g_params.clipboardToLocal || !replyFn || !g_state.cbRequestList)
+    return false;
 
+  const PSDataType type = g_state.cbType;
   struct CBRequest * cbr = malloc(sizeof(*cbr));
   if (!cbr)
   {
     DEBUG_ERROR("out of memory");
-    return;
+    return false;
   }
 
-  cbr->type    = g_state.cbType;
+  cbr->type    = type;
   cbr->replyFn = replyFn;
   cbr->opaque  = opaque;
-  ll_push(g_state.cbRequestList, cbr);
 
-  purespice_clipboardRequest(g_state.cbType);
+  if (!ll_push(g_state.cbRequestList, cbr))
+  {
+    free(cbr);
+    return false;
+  }
+
+  if (purespice_clipboardRequest(type))
+    return true;
+
+  /*
+   * Queue the callback before sending so a fast response cannot arrive before
+   * its request is visible. If another thread has already consumed it, the
+   * callback owns both cbr and opaque and the request completed successfully
+   * from the caller's perspective.
+   */
+  if (!ll_removeData(g_state.cbRequestList, cbr))
+    return true;
+
+  free(cbr);
+  return false;
 }
 
 static int mapSpiceToImGuiButton(uint32_t button)

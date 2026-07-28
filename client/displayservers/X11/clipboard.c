@@ -195,8 +195,9 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     if (x11cb.aTypes[i] == e.target && x11cb.type == i)
     {
       // request the data
-      app_clipboardRequest(x11CBReplyFn, s);
-      return;
+      if (app_clipboardRequest(x11CBReplyFn, s))
+        return;
+      goto nodata;
     }
 
 nodata:
