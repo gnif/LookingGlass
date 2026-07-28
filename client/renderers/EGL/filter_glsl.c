@@ -55,6 +55,7 @@ typedef struct GLSLInput
 {
   EGL_Texture * texture;
   bool original;
+  bool external;
 }
 GLSLInput;
 
@@ -724,8 +725,7 @@ static bool appendAlias(StringBuffer * source, const char * alias,
       alias, target, alias, target, alias, target, alias, target);
 }
 
-static bool compilePass(EGL_FilterGLSL * filter, GLSLPass * pass,
-    const bool * external)
+static bool compilePass(EGL_FilterGLSL * filter, GLSLPass * pass)
 {
   StringBuffer source = { 0 };
   if (!bufferAppend(&source, "#version 300 es\n"))
@@ -733,7 +733,7 @@ static bool compilePass(EGL_FilterGLSL * filter, GLSLPass * pass,
 
   bool needsExternal = false;
   for (unsigned int i = 0; i < pass->bindCount; ++i)
-    needsExternal |= external[i];
+    needsExternal |= pass->inputs[i].external;
   if (needsExternal && !bufferAppend(&source,
         "#extension GL_OES_EGL_image_external_essl3 : require\n"))
     goto oom;
@@ -753,7 +753,8 @@ static bool compilePass(EGL_FilterGLSL * filter, GLSLPass * pass,
 
   for (unsigned int i = 0; i < pass->bindCount; ++i)
     if (!bufferAppendF(&source, "uniform %s sampler%u;\nuniform vec4 textureInfo%u;\n",
-          external[i] ? "samplerExternalOES" : "sampler2D", i + 1, i + 1))
+          pass->inputs[i].external ? "samplerExternalOES" : "sampler2D",
+          i + 1, i + 1))
       goto oom;
 
   for (unsigned int i = 0; i < pass->bindCount; ++i)
@@ -786,7 +787,7 @@ static bool compilePass(EGL_FilterGLSL * filter, GLSLPass * pass,
     char name[32];
     snprintf(name, sizeof(name), "textureInfo%u", i + 1);
     pass->uTextureInfo[i] = egl_shaderGetUniform(pass->shader, name);
-    pass->external[i] = external[i];
+    pass->external[i] = pass->inputs[i].external;
   }
   pass->uInputSize = egl_shaderGetUniform(pass->shader, "input_size");
   pass->uTargetSize = egl_shaderGetUniform(pass->shader, "target_size");
@@ -899,7 +900,6 @@ static bool glslSetup(EGL_Filter * filter, EGL_PixelFormat pixFmt,
       .targetHeight = this->targetHeight,
     };
 
-    bool external[GLSL_MAX_TEXTURES] = { 0 };
     bool missingSaved = false;
     for (unsigned int i = 0; i < pass->bindCount; ++i)
     {
@@ -917,7 +917,7 @@ static bool glslSetup(EGL_Filter * filter, EGL_PixelFormat pixFmt,
       }
       pass->inputs[i].texture = resource->texture;
       pass->inputs[i].original = resource->original;
-      external[i] = resource->external;
+      pass->inputs[i].external = resource->external;
     }
     if (missingSaved)
       continue;
@@ -946,8 +946,8 @@ static bool glslSetup(EGL_Filter * filter, EGL_PixelFormat pixFmt,
 
     bool compile = !pass->compiled;
     for (unsigned int i = 0; i < pass->bindCount && !compile; ++i)
-      compile = pass->external[i] != external[i];
-    if (compile && !compilePass(this, pass, external))
+      compile = pass->external[i] != pass->inputs[i].external;
+    if (compile && !compilePass(this, pass))
       goto fail;
 
     /* Uniform handles are resolved by compilePass, so upload texture metadata
