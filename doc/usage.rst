@@ -370,9 +370,9 @@ All command line options
   +------------------------+-------+--------+-------------------------------------------------------------------------------+
   | Long                   | Short | Value  | Description                                                                   |
   +========================+=======+========+===============================================================================+
-  | audio:periodSize       |       | 2048   | Requested audio device period size in samples                                 |
+  | audio:periodSize       |       | 512    | Requested audio device period size in samples                                 |
   +------------------------+-------+--------+-------------------------------------------------------------------------------+
-  | audio:bufferLatency    |       | 13     | Additional buffer latency in milliseconds                                     |
+  | audio:latencyOffset    |       | 4      | Latency offset added to the calculated minimum in milliseconds                |
   +------------------------+-------+--------+-------------------------------------------------------------------------------+
   | audio:micDefault       |       | prompt | Default action when an application opens the microphone (prompt, allow, deny) |
   +------------------------+-------+--------+-------------------------------------------------------------------------------+

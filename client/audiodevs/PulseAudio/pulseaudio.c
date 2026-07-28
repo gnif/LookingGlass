@@ -300,9 +300,12 @@ static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
 }
 
 static bool pulseaudio_setup(int channels, int sampleRate,
-    int requestedPeriodFrames, int * maxPeriodFrames, int * startFrames,
+    int requestedPeriodFrames, bool requestResampler,
+    bool * resamplerEnabled, int * maxPeriodFrames, int * startFrames,
     LG_AudioPullFn pullFn)
 {
+  *resamplerEnabled = false;
+
   if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
   {
     *maxPeriodFrames = pa.sinkMaxPeriodFrames;

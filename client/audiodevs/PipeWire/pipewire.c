@@ -60,6 +60,12 @@ struct PipeWire
     atomic_bool      latencyUpdateRequested;
     atomic_uint      bufferErrors;
     atomic_uint      timingErrors;
+#if PW_CHECK_VERSION(1, 4, 0)
+    double           appliedResampleRatio;
+    atomic_int       resampleError;
+#endif
+    enum pw_stream_state connectionState;
+    bool                 resamplerEnabled;
 
     int            channels;
     int            sampleRate;
@@ -105,6 +111,10 @@ static void pipewire_reportPlaybackErrors(void)
       &pw.playback.bufferErrors, 0, memory_order_relaxed);
   const unsigned int timingErrors = atomic_exchange_explicit(
       &pw.playback.timingErrors, 0, memory_order_relaxed);
+#if PW_CHECK_VERSION(1, 4, 0)
+  const int resampleError = atomic_exchange_explicit(
+      &pw.playback.resampleError, 0, memory_order_relaxed);
+#endif
 
   if (bufferErrors)
     DEBUG_WARN("PipeWire playback ran out of buffers %u time(s)",
@@ -112,6 +122,11 @@ static void pipewire_reportPlaybackErrors(void)
   if (timingErrors)
     DEBUG_WARN("PipeWire playback timing query failed %u time(s)",
         timingErrors);
+#if PW_CHECK_VERSION(1, 4, 0)
+  if (resampleError)
+    DEBUG_WARN("PipeWire resampler rate update failed: %s",
+        spa_strerror(resampleError));
+#endif
 }
 
 static void pipewire_reportRecordErrors(void)
@@ -175,6 +190,50 @@ static inline void pipewire_updatePlaybackLatency(void)
       time.now + latencyNs, memory_order_release);
 }
 
+#if PW_CHECK_VERSION(1, 4, 0)
+static bool pipewire_playbackSetRate(double ratio)
+{
+  if (ratio <= 0.0 ||
+      !pw.playback.resamplerEnabled)
+    return false;
+  if (ratio == pw.playback.appliedResampleRatio)
+    return true;
+
+  const int result = pw_stream_set_rate(pw.playback.stream, ratio);
+  if (result < 0)
+  {
+    int expected = 0;
+    atomic_compare_exchange_strong_explicit(
+        &pw.playback.resampleError, &expected, result,
+        memory_order_relaxed, memory_order_relaxed);
+    return false;
+  }
+
+  pw.playback.appliedResampleRatio = ratio;
+  return true;
+}
+
+static bool pipewire_configurePlaybackResampler(bool enable)
+{
+  pw.playback.resamplerEnabled = false;
+  pw.playback.appliedResampleRatio = 0.0;
+
+  if (!enable)
+  {
+    pw_stream_set_rate(pw.playback.stream, 0.0);
+    return false;
+  }
+
+  const int result = pw_stream_set_rate(pw.playback.stream, 1.0);
+  if (result < 0)
+    return false;
+
+  pw.playback.resamplerEnabled = true;
+  pw.playback.appliedResampleRatio = 1.0;
+  return true;
+}
+#endif
+
 static void pipewire_onPlaybackIoChanged(void * userdata, uint32_t id,
   void * data, uint32_t size)
 {
@@ -184,6 +243,17 @@ static void pipewire_onPlaybackIoChanged(void * userdata, uint32_t id,
       pw.playback.rateMatch = data;
       break;
   }
+}
+
+static void pipewire_onPlaybackStateChanged(void * userdata,
+    enum pw_stream_state old, enum pw_stream_state state,
+    const char * error)
+{
+  pw.playback.connectionState = state;
+  if (state == PW_STREAM_STATE_ERROR)
+    DEBUG_ERROR("PipeWire playback stream failed: %s",
+        error ? error : "unknown error");
+  pw_thread_loop_signal(pw.thread, false);
 }
 
 static void pipewire_onPlaybackProcess(void * userdata)
@@ -332,6 +402,7 @@ static void pipewire_playbackStopStream(void)
   pw_stream_destroy(pw.playback.stream);
   pw.playback.stream    = NULL;
   pw.playback.rateMatch = NULL;
+  pw.playback.resamplerEnabled = false;
   atomic_store_explicit(
       &pw.playback.presentationDeadline, 0, memory_order_release);
   atomic_store_explicit(
@@ -341,24 +412,34 @@ static void pipewire_playbackStopStream(void)
 }
 
 static bool pipewire_playbackSetup(int channels, int sampleRate,
-    int requestedPeriodFrames, int * maxPeriodFrames, int * startFrames,
+    int requestedPeriodFrames, bool requestResampler,
+    bool * resamplerEnabled, int * maxPeriodFrames, int * startFrames,
     LG_AudioPullFn pullFn)
 {
+  *resamplerEnabled = false;
+
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
   struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
   static const struct pw_stream_events events =
   {
-    .version    = PW_VERSION_STREAM_EVENTS,
-    .io_changed = pipewire_onPlaybackIoChanged,
-    .process    = pipewire_onPlaybackProcess,
-    .drained    = pipewire_onPlaybackDrained
+    .version       = PW_VERSION_STREAM_EVENTS,
+    .state_changed = pipewire_onPlaybackStateChanged,
+    .io_changed    = pipewire_onPlaybackIoChanged,
+    .process       = pipewire_onPlaybackProcess,
+    .drained       = pipewire_onPlaybackDrained
   };
 
   if (pw.playback.stream &&
       pw.playback.channels == channels &&
       pw.playback.sampleRate == sampleRate)
   {
+#if PW_CHECK_VERSION(1, 4, 0)
+    atomic_store_explicit(
+        &pw.playback.resampleError, 0, memory_order_relaxed);
+    *resamplerEnabled =
+      pipewire_configurePlaybackResampler(requestResampler);
+#endif
     *maxPeriodFrames = pw.playback.maxPeriodFrames;
     *startFrames     = pw.playback.startFrames;
     return true;
@@ -464,6 +545,7 @@ static bool pipewire_playbackSetup(int channels, int sampleRate,
         .rate     = sampleRate
         ));
 
+  pw.playback.connectionState = PW_STREAM_STATE_CONNECTING;
   const int result = pw_stream_connect(
       pw.playback.stream,
       PW_DIRECTION_OUTPUT,
@@ -484,6 +566,19 @@ static bool pipewire_playbackSetup(int channels, int sampleRate,
     return false;
   }
 
+  while (pw.playback.connectionState == PW_STREAM_STATE_CONNECTING)
+    pw_thread_loop_wait(pw.thread);
+
+  if (pw.playback.connectionState != PW_STREAM_STATE_PAUSED)
+  {
+    DEBUG_ERROR("PipeWire playback stream did not become ready");
+    pw_stream_destroy(pw.playback.stream);
+    pw.playback.stream = NULL;
+    pw.playback.rateMatch = NULL;
+    pw_thread_loop_unlock(pw.thread);
+    return false;
+  }
+
   pw.playback.state = STREAM_STATE_INACTIVE;
   atomic_store_explicit(
       &pw.playback.presentationDeadline, 0, memory_order_release);
@@ -493,6 +588,14 @@ static bool pipewire_playbackSetup(int channels, int sampleRate,
       &pw.playback.bufferErrors, 0, memory_order_relaxed);
   atomic_store_explicit(
       &pw.playback.timingErrors, 0, memory_order_relaxed);
+#if PW_CHECK_VERSION(1, 4, 0)
+  atomic_store_explicit(
+      &pw.playback.resampleError, 0, memory_order_relaxed);
+  *resamplerEnabled =
+    pipewire_configurePlaybackResampler(requestResampler);
+#else
+  (void)requestResampler;
+#endif
   pw_thread_loop_unlock(pw.thread);
   return true;
 }
@@ -932,6 +1035,9 @@ struct LG_AudioDevOps LGAD_PipeWire =
     .stop    = pipewire_playbackStop,
     .volume  = pipewire_playbackVolume,
     .mute    = pipewire_playbackMute,
+#if PW_CHECK_VERSION(1, 4, 0)
+    .setRate = pipewire_playbackSetRate,
+#endif
     .latency = pipewire_playbackLatency
   },
   .record =

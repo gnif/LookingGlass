@@ -50,6 +50,10 @@ static bool       optRotateValidate    (struct Option * opt, const char ** error
 static bool       optMicDefaultParse   (struct Option * opt, const char * str);
 static StringList optMicDefaultValues  (struct Option * opt);
 static char *     optMicDefaultToString(struct Option * opt);
+static bool       optAudioResamplerParse   (struct Option * opt,
+    const char * str);
+static StringList optAudioResamplerValues  (struct Option * opt);
+static char *     optAudioResamplerToString(struct Option * opt);
 
 static void doLicense(void);
 
@@ -542,14 +546,23 @@ static struct Option options[] =
     .name           = "periodSize",
     .description    = "Requested audio device period size in samples (0 = 10 ms)",
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = 0
+    .value.x_int    = 512
   },
   {
     .module         = "audio",
-    .name           = "bufferLatency",
-    .description    = "Additional buffer latency in milliseconds",
+    .name           = "latencyOffset",
+    .description    = "Latency offset added to the calculated minimum in milliseconds",
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = 4
+    .value.x_int    = 6
+  },
+  {
+    .module         = "audio",
+    .name           = "resampler",
+    .description    = "Audio resampler to use (auto, libsamplerate, backend)",
+    .type           = OPTION_TYPE_CUSTOM,
+    .parser         = optAudioResamplerParse,
+    .getValues      = optAudioResamplerValues,
+    .toString       = optAudioResamplerToString
   },
   {
     .module         = "audio",
@@ -772,7 +785,7 @@ bool config_load(int argc, char * argv[])
 
   g_params.audioDebug = option_get_bool("audio", "debug");
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");
-  g_params.audioBufferLatency = option_get_int("audio", "bufferLatency");
+  g_params.audioLatencyOffset = option_get_int("audio", "latencyOffset");
   g_params.micShowIndicator   = option_get_bool("audio", "micShowIndicator");
   g_params.audioSyncVolume = option_get_bool("audio", "syncVolume");
 
@@ -1051,6 +1064,51 @@ static char * optMicDefaultToString(struct Option * opt)
       return strdup("allow");
     case MIC_DEFAULT_DENY:
       return strdup("deny");
+  }
+
+  return NULL;
+}
+
+static bool optAudioResamplerParse(
+    struct Option * opt, const char * str)
+{
+  if (!str)
+    return false;
+
+  if (strcasecmp(str, "auto") == 0)
+    g_params.audioResampler = AUDIO_RESAMPLER_AUTO;
+  else if (strcasecmp(str, "libsamplerate") == 0)
+    g_params.audioResampler = AUDIO_RESAMPLER_LIBSAMPLERATE;
+  else if (strcasecmp(str, "backend") == 0)
+    g_params.audioResampler = AUDIO_RESAMPLER_BACKEND;
+  else
+    return false;
+
+  return true;
+}
+
+static StringList optAudioResamplerValues(struct Option * opt)
+{
+  StringList sl = stringlist_new(false);
+  if (!sl)
+    return NULL;
+
+  stringlist_push(sl, (char *)"auto");
+  stringlist_push(sl, (char *)"libsamplerate");
+  stringlist_push(sl, (char *)"backend");
+  return sl;
+}
+
+static char * optAudioResamplerToString(struct Option * opt)
+{
+  switch (g_params.audioResampler)
+  {
+    case AUDIO_RESAMPLER_AUTO:
+      return strdup("auto");
+    case AUDIO_RESAMPLER_LIBSAMPLERATE:
+      return strdup("libsamplerate");
+    case AUDIO_RESAMPLER_BACKEND:
+      return strdup("backend");
   }
 
   return NULL;

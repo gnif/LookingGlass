@@ -53,6 +53,12 @@ enum MicDefaultState {
 };
 #define MIC_DEFAULT_MAX (MIC_DEFAULT_DENY + 1)
 
+enum AudioResampler {
+  AUDIO_RESAMPLER_AUTO,
+  AUDIO_RESAMPLER_LIBSAMPLERATE,
+  AUDIO_RESAMPLER_BACKEND
+};
+
 struct AppState
 {
   _Atomic(enum RunState) state;
@@ -239,7 +245,8 @@ struct AppParams
 
   bool                 audioDebug;
   int                  audioPeriodSize;
-  int                  audioBufferLatency;
+  int                  audioLatencyOffset;
+  enum AudioResampler  audioResampler;
   bool                 micShowIndicator;
   enum MicDefaultState micDefaultState;
   bool                 audioSyncVolume;
