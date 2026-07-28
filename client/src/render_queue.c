@@ -20,6 +20,7 @@
 
 #include "render_queue.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include "common/debug.h"
@@ -132,17 +133,61 @@ void renderQueue_spiceDrawFill(int x, int y, int width, int height,
 void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride,
     void * data, bool topDown)
 {
+  if (width <= 0 || height <= 0 || stride <= 0)
+  {
+    if (width < 0 || height < 0 || stride < 0)
+      DEBUG_ERROR("Invalid SPICE bitmap dimensions: %dx%d, stride: %d",
+          width, height, stride);
+    return;
+  }
+
+  if (!data)
+  {
+    DEBUG_ERROR("SPICE bitmap data is NULL");
+    return;
+  }
+
+  if ((size_t)height > SIZE_MAX / (size_t)stride)
+  {
+    DEBUG_ERROR("SPICE bitmap size overflows: height: %d, stride: %d",
+        height, stride);
+    return;
+  }
+
+  const size_t size = (size_t)height * (size_t)stride;
   RenderCommand * cmd = malloc(sizeof(*cmd));
+  if (!cmd)
+  {
+    DEBUG_ERROR("Failed to allocate SPICE bitmap command");
+    return;
+  }
+
+  uint8_t * copy = malloc(size);
+  if (!copy)
+  {
+    DEBUG_ERROR("Failed to allocate %zu bytes for SPICE bitmap", size);
+    free(cmd);
+    return;
+  }
+
+  memcpy(copy, data, size);
+
   cmd->op                      = SPICE_OP_DRAW_BITMAP;
   cmd->spiceDrawBitmap.x       = x;
   cmd->spiceDrawBitmap.y       = y;
   cmd->spiceDrawBitmap.width   = width;
   cmd->spiceDrawBitmap.height  = height;
   cmd->spiceDrawBitmap.stride  = stride;
-  cmd->spiceDrawBitmap.data    = malloc(height * stride);
+  cmd->spiceDrawBitmap.data    = copy;
   cmd->spiceDrawBitmap.topDown = topDown;
-  memcpy(cmd->spiceDrawBitmap.data, data, height * stride);
-  ll_push(l_renderQueue, cmd);
+
+  if (!ll_push(l_renderQueue, cmd))
+  {
+    free(copy);
+    free(cmd);
+    return;
+  }
+
   app_invalidateWindow(true);
 }
 
