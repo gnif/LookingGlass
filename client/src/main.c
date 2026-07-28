@@ -1189,8 +1189,12 @@ int spiceThread(void * arg)
     for(int scancode = 0; scancode < KEY_MAX; ++scancode)
       if (g_state.keyDown[scancode])
       {
-        g_state.keyDown[scancode] = false;
-        purespice_keyUp(scancode);
+        const uint32_t ps2 = linux_to_ps2[scancode];
+        if (ps2 && purespice_keyUp(ps2))
+          g_state.keyDown[scancode] = false;
+        else
+          DEBUG_ERROR("Failed to release key %d during SPICE shutdown",
+              scancode);
       }
   }
 
