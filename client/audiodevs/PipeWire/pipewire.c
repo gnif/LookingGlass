@@ -134,10 +134,8 @@ static void pipewire_onPlaybackProcess(void * userdata)
 
 static void pipewire_onPlaybackDrained(void * userdata)
 {
-  pw_thread_loop_lock(pw.thread);
   pw_stream_set_active(pw.playback.stream, false);
   pw.playback.state = STREAM_STATE_INACTIVE;
-  pw_thread_loop_unlock(pw.thread);
 }
 
 static struct Option pipewire_options[] =
@@ -361,10 +359,9 @@ static void pipewire_playbackStart(void)
   if (!pw.playback.stream)
     return;
 
+  pw_thread_loop_lock(pw.thread);
   if (pw.playback.state != STREAM_STATE_ACTIVE)
   {
-    pw_thread_loop_lock(pw.thread);
-
     switch (pw.playback.state)
     {
       case STREAM_STATE_INACTIVE:
@@ -380,20 +377,33 @@ static void pipewire_playbackStart(void)
       default:
         DEBUG_UNREACHABLE();
     }
-
-    pw_thread_loop_unlock(pw.thread);
   }
+  pw_thread_loop_unlock(pw.thread);
 }
 
 static void pipewire_playbackStop(void)
 {
-  if (pw.playback.state != STREAM_STATE_ACTIVE)
-    return;
+  const bool inThread = pw_thread_loop_in_thread(pw.thread);
+  if (!inThread)
+    pw_thread_loop_lock(pw.thread);
 
-  pw_thread_loop_lock(pw.thread);
-  pw_stream_flush(pw.playback.stream, true);
-  pw.playback.state = STREAM_STATE_DRAINING;
-  pw_thread_loop_unlock(pw.thread);
+  if (pw.playback.state != STREAM_STATE_ACTIVE)
+    goto done;
+
+  if (inThread)
+  {
+    pw_stream_set_active(pw.playback.stream, false);
+    pw.playback.state = STREAM_STATE_INACTIVE;
+  }
+  else
+  {
+    pw_stream_flush(pw.playback.stream, true);
+    pw.playback.state = STREAM_STATE_DRAINING;
+  }
+
+done:
+  if (!inThread)
+    pw_thread_loop_unlock(pw.thread);
 }
 
 static void pipewire_playbackVolume(int channels, const uint16_t volume[])
