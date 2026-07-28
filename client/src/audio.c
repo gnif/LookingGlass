@@ -148,6 +148,7 @@ typedef struct
 PlaybackDeviceTick;
 
 static void playbackStop(void);
+static void realRecordStop(void);
 
 void audio_init(void)
 {
@@ -800,15 +801,15 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   if (!audio.audioDev)
     return;
 
-  static int lastChannels   = 0;
-  static int lastSampleRate = 0;
-
+  const bool restart = audio.record.started;
   if (audio.record.started)
   {
-    if (channels != lastChannels || sampleRate != lastSampleRate)
-      audio.audioDev->record.stop();
-    else
+    if (channels   == audio.record.lastChannels &&
+        sampleRate == audio.record.lastSampleRate &&
+        format     == audio.record.lastFormat)
       return;
+
+    realRecordStop();
   }
 
   audio.record.requested      = true;
@@ -816,7 +817,7 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   audio.record.lastSampleRate = sampleRate;
   audio.record.lastFormat     = format;
 
-  if (audio.record.started)
+  if (restart)
     realRecordStart(channels, sampleRate, format);
   else if (g_state.micDefaultState == MIC_DEFAULT_DENY)
     DEBUG_INFO("Microphone access denied by default");
