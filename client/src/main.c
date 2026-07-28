@@ -1590,15 +1590,20 @@ static int lg_run(void)
   if (g_params.captureOnStart)
     core_setGrab(true);
 
-  uint32_t udataSize;
-  uint32_t remoteVersion;
-  KVMFR *udata;
-  int waitCount = 0;
+  uint32_t   udataSize     = 0;
+  uint32_t   remoteVersion = 0;
+  KVMFR    * udata         = NULL;
+  bool       sessionReady  = false;
+  int        waitCount     = 0;
 
   MsgBoxHandle msgs[10];
   int msgsCount;
 
 restart:
+  udataSize     = 0;
+  remoteVersion = 0;
+  udata         = NULL;
+  sessionReady  = false;
   msgsCount = 0;
   memset(msgs, 0, sizeof(msgs));
 
@@ -1719,8 +1724,10 @@ restart:
     // dont show warnings again after the first successful startup
     waitCount = 100;
 
-    const bool magicMatches = memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
-    if (udataSize < sizeof(*udata) || !magicMatches || udata->version != KVMFR_VERSION)
+    const bool headerValid = udata && udataSize >= sizeof(*udata);
+    const bool magicMatches = headerValid &&
+      memcmp(udata->magic, KVMFR_MAGIC, sizeof(udata->magic)) == 0;
+    if (!headerValid || !magicMatches || udata->version != KVMFR_VERSION)
     {
       static bool alertsDone = false;
       if (alertsDone)
@@ -1765,10 +1772,11 @@ restart:
       continue;
     }
 
+    sessionReady = true;
     break;
   }
 
-  if (app_getState() != APP_STATE_RUNNING)
+  if (!sessionReady || app_getState() != APP_STATE_RUNNING)
     return -1;
 
   /* close any informational message boxes from above as we now connected
