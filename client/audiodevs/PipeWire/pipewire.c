@@ -24,14 +24,19 @@
 #include <spa/param/props.h>
 #include <spa/utils/result.h>
 #include <pipewire/pipewire.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <semaphore.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 
 #include "common/debug.h"
 #include "common/stringutils.h"
 #include "common/util.h"
 #include "common/option.h"
+#include "common/ringbuffer.h"
+#include "common/thread.h"
 
 typedef enum
 {
@@ -52,6 +57,9 @@ struct PipeWire
     struct pw_stream * stream;
     struct spa_io_rate_match * rateMatch;
     _Atomic(int64_t) presentationDeadline;
+    atomic_bool      latencyUpdateRequested;
+    atomic_uint      bufferErrors;
+    atomic_uint      timingErrors;
 
     int            channels;
     int            sampleRate;
@@ -73,12 +81,57 @@ struct PipeWire
     int            stride;
     LG_AudioPushFn pushFn;
 
-    bool   active;
+    RingBuffer  sendQueue;
+    uint8_t *   sendBuffer;
+    int         sendBufferFrames;
+    sem_t       sendWake;
+    bool        sendWakeInitialized;
+    LGThread *  sendThread;
+    atomic_bool sendStop;
+    atomic_uint bufferErrors;
+    atomic_uint droppedFrames;
+    atomic_uint signalErrors;
+
+    bool active;
   }
   record;
 };
 
 static struct PipeWire pw = {0};
+
+static void pipewire_reportPlaybackErrors(void)
+{
+  const unsigned int bufferErrors = atomic_exchange_explicit(
+      &pw.playback.bufferErrors, 0, memory_order_relaxed);
+  const unsigned int timingErrors = atomic_exchange_explicit(
+      &pw.playback.timingErrors, 0, memory_order_relaxed);
+
+  if (bufferErrors)
+    DEBUG_WARN("PipeWire playback ran out of buffers %u time(s)",
+        bufferErrors);
+  if (timingErrors)
+    DEBUG_WARN("PipeWire playback timing query failed %u time(s)",
+        timingErrors);
+}
+
+static void pipewire_reportRecordErrors(void)
+{
+  const unsigned int bufferErrors = atomic_exchange_explicit(
+      &pw.record.bufferErrors, 0, memory_order_relaxed);
+  const unsigned int droppedFrames = atomic_exchange_explicit(
+      &pw.record.droppedFrames, 0, memory_order_relaxed);
+  const unsigned int signalErrors = atomic_exchange_explicit(
+      &pw.record.signalErrors, 0, memory_order_relaxed);
+
+  if (bufferErrors)
+    DEBUG_WARN("PipeWire recording encountered %u buffer error(s)",
+        bufferErrors);
+  if (droppedFrames)
+    DEBUG_WARN("PipeWire recording dropped %u frame(s)", droppedFrames);
+  if (signalErrors)
+    DEBUG_WARN("PipeWire recording worker notification failed %u time(s)",
+        signalErrors);
+}
 
 static int64_t pipewire_monotonicTime(void)
 {
@@ -87,8 +140,13 @@ static int64_t pipewire_monotonicTime(void)
   return SPA_TIMESPEC_TO_NSEC(&time);
 }
 
-static void pipewire_updatePlaybackLatency(void)
+static inline void pipewire_updatePlaybackLatency(void)
 {
+  if (!atomic_exchange_explicit(
+        &pw.playback.latencyUpdateRequested, false,
+        memory_order_acquire))
+    return;
+
   struct pw_time time;
 #if PW_CHECK_VERSION(0, 3, 50)
   if (pw_stream_get_time_n(pw.playback.stream, &time, sizeof(time)) < 0)
@@ -96,7 +154,8 @@ static void pipewire_updatePlaybackLatency(void)
   if (pw_stream_get_time(pw.playback.stream, &time) < 0)
 #endif
   {
-    DEBUG_ERROR("pw_stream_get_time failed");
+    atomic_fetch_add_explicit(
+        &pw.playback.timingErrors, 1, memory_order_relaxed);
     return;
   }
 
@@ -133,7 +192,8 @@ static void pipewire_onPlaybackProcess(void * userdata)
 
   if (!(pbuf = pw_stream_dequeue_buffer(pw.playback.stream)))
   {
-    DEBUG_WARN("out of buffers");
+    atomic_fetch_add_explicit(
+        &pw.playback.bufferErrors, 1, memory_order_relaxed);
     return;
   }
 
@@ -263,7 +323,10 @@ err:
 static void pipewire_playbackStopStream(void)
 {
   if (!pw.playback.stream)
+  {
+    pipewire_reportPlaybackErrors();
     return;
+  }
 
   pw_thread_loop_lock(pw.thread);
   pw_stream_destroy(pw.playback.stream);
@@ -271,7 +334,10 @@ static void pipewire_playbackStopStream(void)
   pw.playback.rateMatch = NULL;
   atomic_store_explicit(
       &pw.playback.presentationDeadline, 0, memory_order_release);
+  atomic_store_explicit(
+      &pw.playback.latencyUpdateRequested, false, memory_order_relaxed);
   pw_thread_loop_unlock(pw.thread);
+  pipewire_reportPlaybackErrors();
 }
 
 static bool pipewire_playbackSetup(int channels, int sampleRate,
@@ -421,6 +487,12 @@ static bool pipewire_playbackSetup(int channels, int sampleRate,
   pw.playback.state = STREAM_STATE_INACTIVE;
   atomic_store_explicit(
       &pw.playback.presentationDeadline, 0, memory_order_release);
+  atomic_store_explicit(
+      &pw.playback.latencyUpdateRequested, false, memory_order_relaxed);
+  atomic_store_explicit(
+      &pw.playback.bufferErrors, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &pw.playback.timingErrors, 0, memory_order_relaxed);
   pw_thread_loop_unlock(pw.thread);
   return true;
 }
@@ -502,6 +574,10 @@ static void pipewire_playbackMute(bool mute)
 
 static uint64_t pipewire_playbackLatency(void)
 {
+  pipewire_reportPlaybackErrors();
+  atomic_store_explicit(
+      &pw.playback.latencyUpdateRequested, true, memory_order_release);
+
   const int64_t deadline = atomic_load_explicit(
       &pw.playback.presentationDeadline, memory_order_acquire);
   if (deadline <= 0)
@@ -510,15 +586,141 @@ static uint64_t pipewire_playbackLatency(void)
   return max(INT64_C(0), deadline - pipewire_monotonicTime()) / 1000;
 }
 
+static int pipewire_recordSendThread(void * opaque)
+{
+  for (;;)
+  {
+    int available;
+    while ((available = ringbuffer_getCount(pw.record.sendQueue)) > 0)
+    {
+      const int frames = min(available, pw.record.sendBufferFrames);
+      const int consumed = ringbuffer_consume(
+          pw.record.sendQueue, pw.record.sendBuffer, frames);
+      DEBUG_ASSERT(consumed == frames);
+      pw.record.pushFn(pw.record.sendBuffer, frames);
+    }
+
+    pipewire_reportRecordErrors();
+    if (atomic_load_explicit(&pw.record.sendStop, memory_order_acquire))
+      break;
+
+    int result;
+    do
+      result = sem_wait(&pw.record.sendWake);
+    while (result < 0 && errno == EINTR);
+
+    if (result < 0)
+    {
+      DEBUG_ERROR("Failed to wait for the PipeWire recording worker");
+      break;
+    }
+  }
+
+  pipewire_reportRecordErrors();
+  return 0;
+}
+
+static void pipewire_recordStopSender(void)
+{
+  if (pw.record.sendThread)
+  {
+    atomic_store_explicit(
+        &pw.record.sendStop, true, memory_order_release);
+    if (sem_post(&pw.record.sendWake) < 0)
+      DEBUG_ERROR("Failed to stop the PipeWire recording worker");
+    lgJoinThread(pw.record.sendThread, NULL);
+    pw.record.sendThread = NULL;
+  }
+
+  if (pw.record.sendWakeInitialized)
+  {
+    sem_destroy(&pw.record.sendWake);
+    pw.record.sendWakeInitialized = false;
+  }
+
+  ringbuffer_free(&pw.record.sendQueue);
+  free(pw.record.sendBuffer);
+  pw.record.sendBuffer = NULL;
+  pw.record.sendBufferFrames = 0;
+  pipewire_reportRecordErrors();
+}
+
+static bool pipewire_recordStartSender(int sampleRate)
+{
+  /* This is overload capacity, not a prebuffer. The sender drains whatever is
+   * available as soon as the RT callback transitions the queue from empty. */
+  const int queueFrames = max(sampleRate / 10, 1);
+  const int sendFrames = max(sampleRate / 100, 1);
+
+  pw.record.sendQueue = ringbuffer_new(
+      queueFrames, pw.record.stride);
+  pw.record.sendBuffer = malloc(
+      (size_t)sendFrames * pw.record.stride);
+  pw.record.sendBufferFrames = sendFrames;
+  if (!pw.record.sendQueue || !pw.record.sendBuffer)
+  {
+    DEBUG_ERROR("Failed to allocate the PipeWire recording queue");
+    pipewire_recordStopSender();
+    return false;
+  }
+
+  if (sem_init(&pw.record.sendWake, 0, 0) < 0)
+  {
+    DEBUG_ERROR("Failed to create the PipeWire recording worker semaphore");
+    pipewire_recordStopSender();
+    return false;
+  }
+  pw.record.sendWakeInitialized = true;
+
+  atomic_store_explicit(
+      &pw.record.sendStop, false, memory_order_relaxed);
+  atomic_store_explicit(
+      &pw.record.bufferErrors, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &pw.record.droppedFrames, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &pw.record.signalErrors, 0, memory_order_relaxed);
+  if (!lgCreateThread("pwRecordSend", pipewire_recordSendThread,
+        NULL, &pw.record.sendThread))
+  {
+    pipewire_recordStopSender();
+    return false;
+  }
+
+  return true;
+}
+
 static void pipewire_recordStopStream(void)
 {
-  if (!pw.record.stream)
-    return;
+  if (pw.record.stream)
+  {
+    pw_thread_loop_lock(pw.thread);
+    pw_stream_destroy(pw.record.stream);
+    pw.record.stream = NULL;
+    pw_thread_loop_unlock(pw.thread);
+  }
 
-  pw_thread_loop_lock(pw.thread);
-  pw_stream_destroy(pw.record.stream);
-  pw.record.stream = NULL;
-  pw_thread_loop_unlock(pw.thread);
+  pw.record.active = false;
+  pipewire_recordStopSender();
+}
+
+static void pipewire_recordQueueFrames(const void * data, int frames)
+{
+  const int occupancy = ringbuffer_getCount(pw.record.sendQueue);
+  const int available =
+    max(0, ringbuffer_getLength(pw.record.sendQueue) - occupancy);
+  const int append = min(frames, available);
+  const int advanced =
+    ringbuffer_append(pw.record.sendQueue, data, append);
+  DEBUG_ASSERT(advanced == append);
+
+  if (append != frames)
+    atomic_fetch_add_explicit(
+        &pw.record.droppedFrames, frames - append, memory_order_relaxed);
+
+  if (occupancy == 0 && append > 0 && sem_post(&pw.record.sendWake) < 0)
+    atomic_fetch_add_explicit(
+        &pw.record.signalErrors, 1, memory_order_relaxed);
 }
 
 static void pipewire_onRecordProcess(void * userdata)
@@ -527,22 +729,34 @@ static void pipewire_onRecordProcess(void * userdata)
 
   if (!(pbuf = pw_stream_dequeue_buffer(pw.record.stream)))
   {
-    DEBUG_WARN("out of buffers");
+    atomic_fetch_add_explicit(
+        &pw.record.bufferErrors, 1, memory_order_relaxed);
     return;
   }
 
   struct spa_buffer * sbuf = pbuf->buffer;
-  uint8_t * dst;
-
-  if (!(dst = sbuf->datas[0].data))
+  if (!sbuf || sbuf->n_datas == 0 || !sbuf->datas[0].data ||
+      !sbuf->datas[0].chunk ||
+      sbuf->datas[0].chunk->offset > sbuf->datas[0].maxsize)
+  {
+    atomic_fetch_add_explicit(
+        &pw.record.bufferErrors, 1, memory_order_relaxed);
+#if PW_CHECK_VERSION(1, 4, 0)
+    pw_stream_return_buffer(pw.record.stream, pbuf);
+#else
+    pw_stream_queue_buffer(pw.record.stream, pbuf);
+#endif
     return;
+  }
 
-  dst += sbuf->datas[0].chunk->offset;
-  pw.record.pushFn(dst,
-    min(
+  const uint32_t offset = sbuf->datas[0].chunk->offset;
+  const uint32_t bytes = min(
       sbuf->datas[0].chunk->size,
-      sbuf->datas[0].maxsize - sbuf->datas[0].chunk->offset) / pw.record.stride
-    );
+      sbuf->datas[0].maxsize - offset);
+  const int frames = bytes / pw.record.stride;
+  if (frames > 0)
+    pipewire_recordQueueFrames(
+        (uint8_t *)sbuf->datas[0].data + offset, frames);
 
   pw_stream_queue_buffer(pw.record.stream, pbuf);
 }
@@ -579,6 +793,8 @@ static void pipewire_recordStart(int channels, int sampleRate,
   pw.record.sampleRate = sampleRate;
   pw.record.stride     = sizeof(uint16_t) * channels;
   pw.record.pushFn     = pushFn;
+  if (!pipewire_recordStartSender(sampleRate))
+    return;
 
   struct pw_properties * props =
     pw_properties_new(
@@ -588,6 +804,12 @@ static void pipewire_recordStart(int channels, int sampleRate,
       PW_KEY_MEDIA_ROLE    , "Music",
       NULL
     );
+  if (!props)
+  {
+    DEBUG_ERROR("Failed to create recording stream properties");
+    pipewire_recordStopSender();
+    return;
+  }
 
   const char * device = option_get_string("pipewire", "recDevice");
   if (device)
@@ -612,6 +834,7 @@ static void pipewire_recordStart(int channels, int sampleRate,
   {
     pw_thread_loop_unlock(pw.thread);
     DEBUG_ERROR("Failed to create the stream");
+    pipewire_recordStopSender();
     return;
   }
 
@@ -622,7 +845,7 @@ static void pipewire_recordStart(int channels, int sampleRate,
         .rate     = sampleRate
         ));
 
-  pw_stream_connect(
+  const int result = pw_stream_connect(
       pw.record.stream,
       PW_DIRECTION_INPUT,
       PW_ID_ANY,
@@ -630,6 +853,17 @@ static void pipewire_recordStart(int channels, int sampleRate,
       PW_STREAM_FLAG_MAP_BUFFERS |
       PW_STREAM_FLAG_RT_PROCESS,
       params, 1);
+
+  if (result < 0)
+  {
+    DEBUG_ERROR("Failed to connect recording stream: %s",
+        spa_strerror(result));
+    pw_stream_destroy(pw.record.stream);
+    pw.record.stream = NULL;
+    pw_thread_loop_unlock(pw.thread);
+    pipewire_recordStopSender();
+    return;
+  }
 
   pw_thread_loop_unlock(pw.thread);
   pw.record.active = true;
