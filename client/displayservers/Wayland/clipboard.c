@@ -563,6 +563,9 @@ static const struct wl_data_source_listener dataSourceListener = {
 static void waylandCBReplyFn(void * opaque, LG_ClipboardData type,
    	uint8_t * data, uint32_t size)
 {
+  if (type == LG_CLIPBOARD_DATA_NONE)
+    return;
+
   struct WCBTransfer * transfer = malloc(sizeof(*transfer));
   if (!transfer)
   {

@@ -71,6 +71,21 @@ void cb_spiceData(const PSDataType type, uint8_t * buffer, uint32_t size)
   if (!g_params.clipboardToLocal)
     return;
 
+  struct CBRequest * cbr;
+  if (!ll_shift(g_state.cbRequestList, (void **)&cbr))
+  {
+    DEBUG_ERROR("Received unsolicited SPICE clipboard data");
+    return;
+  }
+
+  if (type != cbr->type || (size && !buffer))
+  {
+    DEBUG_ERROR("Invalid SPICE clipboard response");
+    cbr->replyFn(cbr->opaque, LG_CLIPBOARD_DATA_NONE, NULL, 0);
+    free(cbr);
+    return;
+  }
+
   if (type == SPICE_DATA_TEXT)
   {
     // dos2unix
@@ -89,12 +104,8 @@ void cb_spiceData(const PSDataType type, uint8_t * buffer, uint32_t size)
     size = newSize;
   }
 
-  struct CBRequest * cbr;
-  if (ll_shift(g_state.cbRequestList, (void **)&cbr))
-  {
-    cbr->replyFn(cbr->opaque, cb_spiceTypeToLGType(type), buffer, size);
-    free(cbr);
-  }
+  cbr->replyFn(cbr->opaque, cb_spiceTypeToLGType(type), buffer, size);
+  free(cbr);
 }
 
 void cb_spiceRelease(void)

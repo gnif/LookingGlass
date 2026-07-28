@@ -135,15 +135,18 @@ static void x11CBReplyFn(void * opaque, LG_ClipboardData type,
 {
   XEvent *s = (XEvent *)opaque;
 
-  XChangeProperty(
-      x11.display          ,
-      s->xselection.requestor,
-      s->xselection.property ,
-      s->xselection.target   ,
-      8,
-      PropModeReplace,
-      data,
-      size);
+  if (type == LG_CLIPBOARD_DATA_NONE)
+    s->xselection.property = None;
+  else
+    XChangeProperty(
+        x11.display          ,
+        s->xselection.requestor,
+        s->xselection.property ,
+        s->xselection.target   ,
+        8,
+        PropModeReplace,
+        data,
+        size);
 
   XSendEvent(x11.display, s->xselection.requestor, 0, 0, s);
   XFlush(x11.display);
