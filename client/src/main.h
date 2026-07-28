@@ -78,10 +78,13 @@ struct AppState
   bool                         dsInitialized;
   bool                         jitRender;
 
-  uint8_t spiceUUID[16];
-  bool    spiceReady;
-  bool    initialSpiceDisplay;
-  bool    spicePrimarySurfaceValid;
+  uint8_t     spiceUUID[16];
+  bool        spiceReady;
+  atomic_bool spiceDisplayRequested;
+  atomic_bool spiceDisplayActive;
+  atomic_bool spiceDisplayTransition;
+  bool        spicePrimarySurfaceValid;
+
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
   KVMFROS guestOS;

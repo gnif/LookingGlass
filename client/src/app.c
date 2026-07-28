@@ -1162,38 +1162,92 @@ void app_stopVideo(bool stop)
 
 bool app_useSpiceDisplay(bool enable)
 {
-  static bool lastState = false;
-  if (!g_params.useSpice || lastState == enable)
-    return g_params.useSpice && lastState;
+  if (!g_params.useSpice)
+    return false;
+
+  atomic_store_explicit(&g_state.spiceDisplayRequested, enable,
+      memory_order_release);
 
   // if spice is not yet ready, flag the state we want for when it is
   if (!g_state.spiceReady)
-  {
-    g_state.initialSpiceDisplay = enable;
     return false;
-  }
 
-  if (!purespice_hasChannel(PS_CHANNEL_DISPLAY))
-    return false;
+  bool active = atomic_load_explicit(&g_state.spiceDisplayActive,
+      memory_order_acquire);
+  if (active == enable)
+    return active;
 
   // do not allow stopping of the host app if not connected
   if (!enable && !g_state.lgHostConnected)
+  {
+    atomic_store_explicit(&g_state.spiceDisplayRequested, active,
+        memory_order_release);
     return false;
+  }
 
-  lastState = enable;
+  bool expected = false;
+  if (!atomic_compare_exchange_strong_explicit(
+        &g_state.spiceDisplayTransition, &expected, true,
+        memory_order_acquire, memory_order_relaxed))
+    return atomic_load_explicit(&g_state.spiceDisplayActive,
+        memory_order_acquire);
+
+  active = atomic_load_explicit(&g_state.spiceDisplayActive,
+      memory_order_relaxed);
+  if (active == enable)
+    goto done;
+
   if (enable)
   {
-    purespice_connectChannel(PS_CHANNEL_DISPLAY);
-    purespice_connectChannel(PS_CHANNEL_CURSOR);
+    if (!purespice_hasChannel(PS_CHANNEL_DISPLAY) ||
+        !purespice_hasChannel(PS_CHANNEL_CURSOR))
+      goto fail;
+
+    if (!purespice_connectChannel(PS_CHANNEL_DISPLAY))
+      goto fail;
+
+    if (!purespice_connectChannel(PS_CHANNEL_CURSOR))
+    {
+      purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
+      goto fail;
+    }
+
     renderQueue_spiceShow(true);
   }
   else
   {
+    if (!purespice_disconnectChannel(PS_CHANNEL_DISPLAY))
+      goto fail;
+
+    if (!purespice_disconnectChannel(PS_CHANNEL_CURSOR))
+    {
+      purespice_connectChannel(PS_CHANNEL_DISPLAY);
+      goto fail;
+    }
+
     renderQueue_spiceShow(false);
-    purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
-    purespice_disconnectChannel(PS_CHANNEL_CURSOR);
   }
 
+  active = enable;
+  atomic_store_explicit(&g_state.spiceDisplayActive, active,
+      memory_order_release);
   overlayStatus_set(LG_USER_STATUS_SPICE, enable);
-  return enable;
+
+done:
+  atomic_store_explicit(&g_state.spiceDisplayTransition, false,
+      memory_order_release);
+
+  enable = atomic_load_explicit(&g_state.spiceDisplayRequested,
+      memory_order_acquire);
+  if (enable != active)
+    return app_useSpiceDisplay(enable);
+
+  return active;
+
+fail:
+  DEBUG_ERROR("Failed to %s the SPICE display",
+      enable ? "enable" : "disable");
+  atomic_store_explicit(&g_state.spiceDisplayRequested, active,
+      memory_order_release);
+  goto done;
 }

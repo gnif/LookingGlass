@@ -959,7 +959,8 @@ static void checkUUID(void)
 void spiceReady(void)
 {
   g_state.spiceReady = true;
-  if (g_state.initialSpiceDisplay)
+  if (atomic_load_explicit(&g_state.spiceDisplayRequested,
+        memory_order_acquire))
     app_useSpiceDisplay(true);
 
   // set the intial mouse mode
