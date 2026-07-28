@@ -289,9 +289,9 @@ void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
     return;
   }
 
-  g_state.cbType    = spiceType;
-  g_state.cbChunked = true;
-  g_state.cbXfer    = size;
+  g_state.cbWriteType = spiceType;
+  g_state.cbChunked   = true;
+  g_state.cbXfer      = size;
 }
 
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
@@ -311,7 +311,7 @@ void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
 
   if (g_state.cbChunked)
   {
-    if (spiceType != g_state.cbType)
+    if (spiceType != g_state.cbWriteType)
     {
       DEBUG_ERROR("SPICE clipboard transfer type changed");
       return;
@@ -332,8 +332,8 @@ void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
     g_state.cbXfer -= size;
     if (g_state.cbXfer == 0)
     {
-      g_state.cbType    = SPICE_DATA_NONE;
-      g_state.cbChunked = false;
+      g_state.cbWriteType = SPICE_DATA_NONE;
+      g_state.cbChunked   = false;
     }
     return;
   }
@@ -353,7 +353,8 @@ bool app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
   if (!g_params.clipboardToLocal || !replyFn || !g_state.cbRequestList)
     return false;
 
-  const PSDataType type = g_state.cbType;
+  const PSDataType type = atomic_load_explicit(
+      &g_state.cbRemoteType, memory_order_acquire);
   struct CBRequest * cbr = malloc(sizeof(*cbr));
   if (!cbr)
   {

@@ -62,7 +62,8 @@ void cb_spiceNotice(const PSDataType type)
   if (!g_state.cbAvailable)
     return;
 
-  g_state.cbType = type;
+  atomic_store_explicit(
+      &g_state.cbRemoteType, type, memory_order_release);
   g_state.ds->cbNotice(cb_spiceTypeToLGType(type));
 }
 
@@ -112,6 +113,9 @@ void cb_spiceRelease(void)
 {
   if (!g_params.clipboardToLocal)
     return;
+
+  atomic_store_explicit(
+      &g_state.cbRemoteType, SPICE_DATA_NONE, memory_order_release);
 
   if (g_state.cbAvailable)
     g_state.ds->cbRelease();

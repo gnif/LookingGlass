@@ -123,7 +123,8 @@ struct AppState
   bool                 useDMA;
 
   bool                 cbAvailable;
-  PSDataType           cbType;
+  _Atomic(PSDataType)  cbRemoteType;
+  PSDataType           cbWriteType;
   bool                 cbChunked;
   size_t               cbXfer;
   struct ll          * cbRequestList;

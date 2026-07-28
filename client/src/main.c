@@ -75,7 +75,11 @@ static LGEvent  *e_spice   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 
-struct AppState g_state = { 0 };
+struct AppState g_state =
+{
+  .cbRemoteType = SPICE_DATA_NONE,
+  .cbWriteType  = SPICE_DATA_NONE,
+};
 struct CursorState g_cursor;
 
 // this structure is initialized in config.c
