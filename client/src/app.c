@@ -279,11 +279,19 @@ void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
     return;
   }
 
-  g_state.cbType    = cb_lgTypeToSpiceType(type);
-  g_state.cbChunked = size > 0;
-  g_state.cbXfer    = size;
+  const PSDataType spiceType = cb_lgTypeToSpiceType(type);
+  if (spiceType == SPICE_DATA_NONE)
+    return;
 
-  purespice_clipboardDataStart(g_state.cbType, size);
+  if (!purespice_clipboardDataStart(spiceType, size))
+  {
+    DEBUG_ERROR("Failed to start a %zu-byte SPICE clipboard transfer", size);
+    return;
+  }
+
+  g_state.cbType    = spiceType;
+  g_state.cbChunked = true;
+  g_state.cbXfer    = size;
 }
 
 void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
@@ -291,17 +299,53 @@ void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
   if (!g_params.clipboardToVM)
     return;
 
-  if (g_state.cbChunked && size > g_state.cbXfer)
+  const PSDataType spiceType = cb_lgTypeToSpiceType(type);
+  if (spiceType == SPICE_DATA_NONE)
+    return;
+
+  if (size && !data)
   {
-    DEBUG_ERROR("refusing to send more then cbXfer bytes for chunked xfer");
-    size = g_state.cbXfer;
+    DEBUG_ERROR("SPICE clipboard data is NULL");
+    return;
   }
 
-  if (!g_state.cbChunked)
-    purespice_clipboardDataStart(g_state.cbType, size);
+  if (g_state.cbChunked)
+  {
+    if (spiceType != g_state.cbType)
+    {
+      DEBUG_ERROR("SPICE clipboard transfer type changed");
+      return;
+    }
 
-  purespice_clipboardData(g_state.cbType, data, (uint32_t)size);
-  g_state.cbXfer -= size;
+    if (size > g_state.cbXfer)
+    {
+      DEBUG_ERROR("SPICE clipboard chunk exceeds the remaining transfer size");
+      return;
+    }
+
+    if (size && !purespice_clipboardData(spiceType, data, size))
+    {
+      DEBUG_ERROR("Failed to send SPICE clipboard data");
+      return;
+    }
+
+    g_state.cbXfer -= size;
+    if (g_state.cbXfer == 0)
+    {
+      g_state.cbType    = SPICE_DATA_NONE;
+      g_state.cbChunked = false;
+    }
+    return;
+  }
+
+  if (!purespice_clipboardDataStart(spiceType, size))
+  {
+    DEBUG_ERROR("Failed to start a %zu-byte SPICE clipboard transfer", size);
+    return;
+  }
+
+  if (size && !purespice_clipboardData(spiceType, data, size))
+    DEBUG_ERROR("Failed to send SPICE clipboard data");
 }
 
 void app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
