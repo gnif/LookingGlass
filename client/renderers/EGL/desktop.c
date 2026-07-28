@@ -638,25 +638,73 @@ void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)
 void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
     int height, uint32_t color)
 {
+  if (!desktop->spiceTexture || width <= 0 || height <= 0)
+    return;
+
+  const int64_t right  = (int64_t)x + width;
+  const int64_t bottom = (int64_t)y + height;
+  if (x >= desktop->spiceWidth || y >= desktop->spiceHeight ||
+      right <= 0 || bottom <= 0)
+    return;
+
+  x      = x < 0 ? 0 : x;
+  y      = y < 0 ? 0 : y;
+  width  = (right  > desktop->spiceWidth  ?
+      desktop->spiceWidth  : (int)right ) - x;
+  height = (bottom > desktop->spiceHeight ?
+      desktop->spiceHeight : (int)bottom) - y;
+
   /* this is a fairly hacky way to do this, but since it's only for the fallback
    * spice display it's not really an issue */
 
-  uint32_t line[width];
-  for(int x = 0; x < width; ++x)
-    line[x] = color;
+  uint32_t * line = malloc((size_t)width * sizeof(*line));
+  if (!line)
+  {
+    DEBUG_ERROR("Failed to allocate SPICE fill row");
+    return;
+  }
+
+  for(int i = 0; i < width; ++i)
+    line[i] = color;
 
   for(int dy = 0; dy < height; ++dy)
     egl_textureUpdateRect(desktop->spiceTexture,
-        x, y + dy, width, 1, width, sizeof(line), (uint8_t *)line, false);
+        x, y + dy, width, 1, width, width * sizeof(*line),
+        (uint8_t *)line, false);
 
+  free(line);
   atomic_store(&desktop->processFrame, true);
 }
 
 void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
     int height, int stride, uint8_t * data, bool topDown)
 {
+  if (!desktop->spiceTexture || !data ||
+      width <= 0 || height <= 0 || stride <= 0 || width > stride / 4)
+    return;
+
+  const int originalHeight = height;
+  const int64_t right      = (int64_t)x + width;
+  const int64_t bottom     = (int64_t)y + height;
+  if (x >= desktop->spiceWidth || y >= desktop->spiceHeight ||
+      right <= 0 || bottom <= 0)
+    return;
+
+  const int sourceX = x < 0 ? -x : 0;
+  const int sourceY = y < 0 ? -y : 0;
+  x      = x < 0 ? 0 : x;
+  y      = y < 0 ? 0 : y;
+  width  = (right  > desktop->spiceWidth  ?
+      desktop->spiceWidth  : (int)right ) - x;
+  height = (bottom > desktop->spiceHeight ?
+      desktop->spiceHeight : (int)bottom) - y;
+
+  const int sourceRow = topDown ?
+    sourceY : originalHeight - sourceY - height;
+  data += (size_t)sourceRow * stride + (size_t)sourceX * 4;
+
   egl_textureUpdateRect(desktop->spiceTexture,
-      x, y, width, height, width, stride, data, topDown);
+      x, y, width, height, stride / 4, stride, data, topDown);
   atomic_store(&desktop->processFrame, true);
 }
 

@@ -615,12 +615,34 @@ static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  if (width <= 0 || height <= 0)
+    return;
+
+  const int64_t right  = (int64_t)x + width;
+  const int64_t bottom = (int64_t)y + height;
+  if (x >= this->spiceSize.x || y >= this->spiceSize.y ||
+      right <= 0 || bottom <= 0)
+    return;
+
+  x      = x < 0 ? 0 : x;
+  y      = y < 0 ? 0 : y;
+  width  = (right  > this->spiceSize.x ?
+      this->spiceSize.x : (int)right ) - x;
+  height = (bottom > this->spiceSize.y ?
+      this->spiceSize.y : (int)bottom) - y;
+
   /* this is a fairly hacky way to do this, but since it's only for the fallback
    * spice display it's not really an issue */
 
-  uint32_t line[width];
-  for(int x = 0; x < width; ++x)
-    line[x] = color;
+  uint32_t * line = malloc((size_t)width * sizeof(*line));
+  if (!line)
+  {
+    DEBUG_ERROR("Failed to allocate SPICE fill row");
+    return;
+  }
+
+  for(int i = 0; i < width; ++i)
+    line[i] = color;
 
   glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
@@ -639,6 +661,7 @@ static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width
       line
     );
   glBindTexture(GL_TEXTURE_2D, 0);
+  free(line);
 }
 
 static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int width,
@@ -646,10 +669,20 @@ static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int wid
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  if (!data || width <= 0 || height <= 0 ||
+      stride <= 0 || width > stride / 4)
+    return;
+
   if (!topDown)
   {
     // this is non-optimal but as spice is a fallback it's not too critical
-    uint8_t line[stride];
+    uint8_t * line = malloc((size_t)stride);
+    if (!line)
+    {
+      DEBUG_ERROR("Failed to allocate SPICE bitmap row");
+      return;
+    }
+
     for(int y = 0; y < height / 2; ++y)
     {
       uint8_t * top = data + y                * stride;
@@ -658,7 +691,24 @@ static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int wid
       memcpy(top , btm , stride);
       memcpy(btm , line, stride);
     }
+    free(line);
   }
+
+  const int64_t right  = (int64_t)x + width;
+  const int64_t bottom = (int64_t)y + height;
+  if (x >= this->spiceSize.x || y >= this->spiceSize.y ||
+      right <= 0 || bottom <= 0)
+    return;
+
+  const int sourceX = x < 0 ? -x : 0;
+  const int sourceY = y < 0 ? -y : 0;
+  x      = x < 0 ? 0 : x;
+  y      = y < 0 ? 0 : y;
+  width  = (right  > this->spiceSize.x ?
+      this->spiceSize.x : (int)right ) - x;
+  height = (bottom > this->spiceSize.y ?
+      this->spiceSize.y : (int)bottom) - y;
+  data  += (size_t)sourceY * stride + (size_t)sourceX * 4;
 
   glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4         );
