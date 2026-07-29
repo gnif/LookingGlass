@@ -111,6 +111,8 @@ static void lgmp_setup(void)
     {
       .module         = "lgmp",
       .name           = "shmDevice",
+      .old_module     = "app",
+      .old_name       = "shmFile",
       .shortopt       = 'f',
       .description    = "Shared memory file or KVMFR device path",
       .type           = OPTION_TYPE_STRING,
@@ -121,6 +123,8 @@ static void lgmp_setup(void)
     {
       .module       = "lgmp",
       .name         = "allowDMA",
+      .old_module   = "app",
+      .old_name     = "allowDMA",
       .description  = "Allow direct DMA transfers when supported",
       .type         = OPTION_TYPE_BOOL,
       .value.x_bool = true,
@@ -128,6 +132,8 @@ static void lgmp_setup(void)
     {
       .module      = "lgmp",
       .name        = "framePollInterval",
+      .old_module  = "app",
+      .old_name    = "framePollInterval",
       .description = "Frame queue polling interval in microseconds",
       .type        = OPTION_TYPE_INT,
       .value.x_int = 1000,
@@ -135,6 +141,8 @@ static void lgmp_setup(void)
     {
       .module      = "lgmp",
       .name        = "cursorPollInterval",
+      .old_module  = "app",
+      .old_name    = "cursorPollInterval",
       .description = "Pointer queue polling interval in microseconds",
       .type        = OPTION_TYPE_INT,
       .value.x_int = 1000,
