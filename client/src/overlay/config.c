@@ -160,8 +160,6 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
   if (!interactive)
     return 0;
 
-  int id = 1000;
-
   const ImGuiViewport * viewport = igGetMainViewport();
   igSetNextWindowPos(
       (ImVec2){
@@ -176,12 +174,10 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
       (ImVec2){550, 680},
       ImGuiCond_FirstUseEver);
 
-  igPushID_Int(id++);
   if (!igBegin("Configuration", NULL, 0))
   {
     overlayGetImGuiRect(windowRects);
     igEnd();
-    igPopID();
     return 1;
   }
 
@@ -200,11 +196,14 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     ll_lock(cfg.callbacks);
     ll_forEachNL(cfg.callbacks, item, cb)
     {
-      if (!igCollapsingHeader_BoolPtr(cb->title, NULL, 0))
-        continue;
+      igPushID_Ptr(cb);
 
-      igPushID_Int(id++);
-      cb->callback(cb->udata, &id);
+      if (igCollapsingHeader_BoolPtr(cb->title, NULL, 0))
+      {
+        int id = 0;
+        cb->callback(cb->udata, &id);
+      }
+
       igPopID();
     }
     ll_unlock(cfg.callbacks);
@@ -214,13 +213,16 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
   ll_lock(cfg.tabCallbacks);
   ll_forEachNL(cfg.tabCallbacks, item, cb)
   {
-    if (!igBeginTabItem(cb->title, NULL, 0))
-      continue;
+    igPushID_Ptr(cb);
 
-    igPushID_Int(id++);
-    cb->callback(cb->udata, &id);
+    if (igBeginTabItem(cb->title, NULL, 0))
+    {
+      int id = 0;
+      cb->callback(cb->udata, &id);
+      igEndTabItem();
+    }
+
     igPopID();
-    igEndTabItem();
   }
   ll_unlock(cfg.tabCallbacks);
 
@@ -234,7 +236,6 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
 
   overlayGetImGuiRect(windowRects);
   igEnd();
-  igPopID();
   return 1;
 }
 
