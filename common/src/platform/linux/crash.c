@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <ucontext.h>
@@ -41,9 +42,18 @@
 #include <inttypes.h>
 #define CRASH_MAX_FRAMES 64
 
+enum CrashRequestType
+{
+  CRASH_REQUEST_BACKTRACE,
+  CRASH_REQUEST_FATAL,
+  CRASH_REQUEST_ALL_THREADS
+};
+
 struct CrashRequest
 {
+  enum CrashRequestType type;
   int       signal;
+  pid_t     threadId;
   uintptr_t faultAddress;
   unsigned  frameCount;
   uintptr_t frames[CRASH_MAX_FRAMES];
@@ -106,11 +116,12 @@ static bool readAll(int fd, void * buffer, size_t size)
   return true;
 }
 
-static void reportFrame(Dwfl * dwfl, unsigned index, uintptr_t pc)
+static void reportFrame(Dwfl * dwfl, unsigned index, uintptr_t pc,
+    bool isActivation)
 {
-  // Except for the faulting instruction, an IP is a return address. Looking
-  // up the preceding byte attributes it to the call instruction.
-  Dwarf_Addr address = pc - (index != 0 && pc != 0);
+  // A non-activation IP is a return address. Looking up the preceding byte
+  // attributes it to the call instruction.
+  Dwarf_Addr address = pc - (!isActivation && pc != 0);
   Dwfl_Module * module = dwfl_addrmodule(dwfl, address);
   if (!module)
   {
@@ -151,9 +162,106 @@ static void reportFrame(Dwfl * dwfl, unsigned index, uintptr_t pc)
       moduleName, (uint64_t)(address - moduleStart), pc);
 }
 
-static void reportCrash(pid_t parent, const struct CrashRequest * request)
+struct ThreadFrames
 {
-  if (request->signal)
+  Dwfl * dwfl;
+  unsigned index;
+};
+
+static int reportThreadFrame(Dwfl_Frame * frame, void * opaque)
+{
+  struct ThreadFrames * frames = opaque;
+  Dwarf_Addr pc;
+  bool isActivation;
+  if (dwfl_frame_pc(frame, &pc, &isActivation))
+    reportFrame(frames->dwfl, frames->index++, pc, isActivation);
+
+  return DWARF_CB_OK;
+}
+
+struct AllThreads
+{
+  Dwfl * dwfl;
+  pid_t processId;
+  unsigned threadCount;
+  unsigned unwindCount;
+};
+
+static void getThreadName(pid_t processId, pid_t threadId, char * name,
+    size_t size)
+{
+  char path[64];
+  snprintf(path, sizeof(path), "/proc/%d/task/%d/comm", processId, threadId);
+
+  int fd = open(path, O_RDONLY);
+  if (fd < 0)
+    return;
+
+  ssize_t length = read(fd, name, size - 1);
+  close(fd);
+  if (length <= 0)
+    return;
+
+  if (name[length - 1] == '\n')
+    --length;
+  name[length] = '\0';
+}
+
+static int reportThread(Dwfl_Thread * thread, void * opaque)
+{
+  struct AllThreads * all = opaque;
+  const pid_t threadId = dwfl_thread_tid(thread);
+  char name[64] = "unknown";
+  getThreadName(all->processId, threadId, name, sizeof(name));
+
+  DEBUG_ERROR("---- thread %d (%s) ----", threadId, name);
+
+  struct ThreadFrames frames =
+  {
+    .dwfl = all->dwfl
+  };
+  if (dwfl_thread_getframes(thread, reportThreadFrame, &frames) < 0)
+    DEBUG_ERROR("Unable to unwind thread %d: %s", threadId, dwfl_errmsg(-1));
+  if (frames.index)
+    ++all->unwindCount;
+
+  ++all->threadCount;
+  return DWARF_CB_OK;
+}
+
+static void reportAllThreads(Dwfl * dwfl, pid_t parent,
+    const struct CrashRequest * request)
+{
+  DEBUG_ERROR("==== ALL THREAD BACKTRACES (%s) ====", BUILD_VERSION);
+
+  if (dwfl_linux_proc_attach(dwfl, parent, false) == 0)
+  {
+    struct AllThreads all =
+    {
+      .dwfl      = dwfl,
+      .processId = parent
+    };
+
+    int result = dwfl_getthreads(dwfl, reportThread, &all);
+    if (result == 0 && all.unwindCount)
+      return;
+
+    if (result < 0)
+      DEBUG_ERROR("Unable to enumerate threads: %s", dwfl_errmsg(-1));
+    else
+      DEBUG_ERROR("Unable to unwind any of %u threads", all.threadCount);
+  }
+  else
+    DEBUG_ERROR("Unable to attach to process %d: %s", parent, dwfl_errmsg(-1));
+
+  DEBUG_ERROR("Falling back to the requesting thread %d", request->threadId);
+  for (unsigned i = 0; i < request->frameCount; ++i)
+    reportFrame(dwfl, i, request->frames[i], i == 0);
+}
+
+static void reportRequest(pid_t parent, const struct CrashRequest * request)
+{
+  if (request->type == CRASH_REQUEST_FATAL)
   {
     DEBUG_ERROR("==== FATAL CRASH (%s) ====", BUILD_VERSION);
     DEBUG_ERROR("signal %d (%s), address is 0x%" PRIxPTR, request->signal,
@@ -183,8 +291,11 @@ static void reportCrash(pid_t parent, const struct CrashRequest * request)
     goto raw;
   }
 
-  for (unsigned i = 0; i < request->frameCount; ++i)
-    reportFrame(dwfl, i, request->frames[i]);
+  if (request->type == CRASH_REQUEST_ALL_THREADS)
+    reportAllThreads(dwfl, parent, request);
+  else
+    for (unsigned i = 0; i < request->frameCount; ++i)
+      reportFrame(dwfl, i, request->frames[i], i == 0);
 
   dwfl_end(dwfl);
   return;
@@ -209,7 +320,7 @@ static void reporterLoop(pid_t parent, int requestFd, int responseFd)
   struct CrashRequest request;
   while (readAll(requestFd, &request, sizeof(request)))
   {
-    reportCrash(parent, &request);
+    reportRequest(parent, &request);
 
     const uint8_t complete = 1;
     if (!writeAll(responseFd, &complete, sizeof(complete)))
@@ -270,6 +381,10 @@ static bool startReporter(void)
   crash.requestFd  = requestPipe [1];
   crash.responseFd = responsePipe[0];
 
+  if (prctl(PR_SET_PTRACER, child) != 0)
+    DEBUG_WARN("Unable to grant the crash reporter ptrace access; "
+      "all-thread backtraces may be unavailable");
+
   uint8_t ready;
   if (!readAll(crash.responseFd, &ready, sizeof(ready)))
   {
@@ -303,22 +418,17 @@ void cleanupCrashHandler(void)
   }
 }
 
-void printBacktrace(void)
+static void collectBacktrace(struct CrashRequest * request, unsigned skip)
 {
-  struct CrashRequest request =
-  {
-    .signal = 0
-  };
-
   unw_context_t context;
   unw_cursor_t cursor;
   if (unw_getcontext(&context) < 0 ||
       unw_init_local(&cursor, &context) < 0)
     return;
 
-  // Omit unw_getcontext and printBacktrace itself.
-  if (unw_step(&cursor) <= 0 || unw_step(&cursor) <= 0)
-    return;
+  while (skip--)
+    if (unw_step(&cursor) <= 0)
+      return;
 
   do
   {
@@ -326,22 +436,53 @@ void printBacktrace(void)
     if (unw_get_reg(&cursor, UNW_REG_IP, &pc) < 0 || !pc)
       break;
 
-    request.frames[request.frameCount++] = (uintptr_t)pc;
+    request->frames[request->frameCount++] = (uintptr_t)pc;
   }
-  while (request.frameCount < CRASH_MAX_FRAMES && unw_step(&cursor) > 0);
+  while (request->frameCount < CRASH_MAX_FRAMES && unw_step(&cursor) > 0);
+}
 
+static void sendRequest(const struct CrashRequest * request)
+{
   if (crash.requestFd >= 0 && crash.responseFd >= 0 &&
-      writeAll(crash.requestFd, &request, sizeof(request)))
+      writeAll(crash.requestFd, request, sizeof(*request)))
   {
     uint8_t complete;
     readAll(crash.responseFd, &complete, sizeof(complete));
   }
 }
 
+void printBacktrace(void)
+{
+  struct CrashRequest request =
+  {
+    .type     = CRASH_REQUEST_BACKTRACE,
+    .threadId = (pid_t)syscall(SYS_gettid)
+  };
+
+  // Omit collectBacktrace and printBacktrace itself.
+  collectBacktrace(&request, 2);
+  sendRequest(&request);
+}
+
+void printAllThreadBacktraces(void)
+{
+  struct CrashRequest request =
+  {
+    .type     = CRASH_REQUEST_ALL_THREADS,
+    .threadId = (pid_t)syscall(SYS_gettid)
+  };
+
+  // These frames provide a useful fallback when ptrace is unavailable.
+  collectBacktrace(&request, 2);
+  sendRequest(&request);
+}
+
 static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
 {
   struct CrashRequest request;
+  request.type         = CRASH_REQUEST_FATAL;
   request.signal       = sig_num;
+  request.threadId     = (pid_t)syscall(SYS_gettid);
   request.faultAddress = (uintptr_t)info->si_addr;
   request.frameCount   = 0;
 
@@ -361,12 +502,7 @@ static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
       unw_step(&cursor) > 0);
   }
 
-  if (crash.requestFd >= 0 && crash.responseFd >= 0 &&
-      writeAll(crash.requestFd, &request, sizeof(request)))
-  {
-    uint8_t complete;
-    readAll(crash.responseFd, &complete, sizeof(complete));
-  }
+  sendRequest(&request);
 
   // SA_RESETHAND has restored the default disposition and SA_NODEFER leaves
   // this signal unblocked, so this preserves the original fatal signal and
@@ -410,6 +546,10 @@ void cleanupCrashHandler(void)
 }
 
 void printBacktrace(void)
+{
+}
+
+void printAllThreadBacktraces(void)
 {
 }
 

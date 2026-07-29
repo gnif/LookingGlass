@@ -154,9 +154,17 @@ bool installCrashHandler(const char * exe)
   return true;
 }
 
+void printAllThreadBacktraces(void)
+{
+}
+
 #else
 bool installCrashHandler(const char * exe)
 {
   return true;
+}
+
+void printAllThreadBacktraces(void)
+{
 }
 #endif

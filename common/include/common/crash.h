@@ -25,5 +25,6 @@
 
 bool installCrashHandler(const char * exe);
 void cleanupCrashHandler(void);
+void printAllThreadBacktraces(void);
 
 #endif

@@ -1236,6 +1236,7 @@ void intHandler(int sig)
       else
       {
         DEBUG_INFO("Caught second signal, force quitting...");
+        printAllThreadBacktraces();
         signal(sig, SIG_DFL);
         raise(sig);
       }
