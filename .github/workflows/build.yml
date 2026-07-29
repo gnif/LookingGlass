@@ -21,7 +21,7 @@ jobs:
     - name: Install client dependencies
       run: |
         sudo apt-get install \
-          binutils-dev \
+          libdw-dev libunwind-dev \
           libspice-protocol-dev nettle-dev \
           libgl-dev libgles-dev \
           libx11-dev libxss-dev libxi-dev libxinerama-dev libxcursor-dev libxpresent-dev \
@@ -77,8 +77,8 @@ jobs:
         sudo apt-get update
     - name: Install Linux host dependencies
       run: |
-        sudo apt-get install binutils-dev libglib2.0-dev libxcb-xfixes0-dev \
-          libpipewire-0.3-dev libxcb-shm0-dev
+        sudo apt-get install libdw-dev libunwind-dev libglib2.0-dev \
+          libxcb-xfixes0-dev libpipewire-0.3-dev libxcb-shm0-dev
     - name: Configure Linux host
       run: |
         mkdir host/build
@@ -206,7 +206,7 @@ jobs:
         sudo apt-get update
     - name: Install obs plugin dependencies
       run: |
-        sudo apt-get install binutils-dev libobs-dev libgl1-mesa-dev
+        sudo apt-get install libdw-dev libunwind-dev libobs-dev libgl1-mesa-dev
     - name: Configure obs plugin
       run: |
         mkdir obs/build

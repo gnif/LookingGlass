@@ -24,226 +24,374 @@
 
 #if defined(ENABLE_BACKTRACE)
 
-#include <execinfo.h>
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+#include <elfutils/libdwfl.h>
+
+#include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <ucontext.h>
 #include <unistd.h>
 #include <inttypes.h>
-#include <limits.h>
+#define CRASH_MAX_FRAMES 64
 
-#include <link.h>
-#include "bfd.inc.h"
-
-struct range
+struct CrashRequest
 {
-  intptr_t start, end;
+  int       signal;
+  uintptr_t faultAddress;
+  unsigned  frameCount;
+  uintptr_t frames[CRASH_MAX_FRAMES];
 };
 
-struct crash
+struct CrashState
 {
-  char         * exe;
-  struct range * ranges;
-  int            rangeCount;
-  bfd          * fd;
-  asection     * section;
-  asymbol     ** syms;
-  long           symCount;
-  bool           loaded;
+  pid_t reporter;
+  int   requestFd;
+  int   responseFd;
 };
 
-static struct crash crash = {0};
-
-static bool load_symbols(void)
+static struct CrashState crash =
 {
-  bfd_init();
-  crash.fd = bfd_openr(crash.exe, NULL);
-  if (!crash.fd)
-  {
-    DEBUG_ERROR("failed to open '%s'", crash.exe);
-    return false;
-  }
+  .reporter   = -1,
+  .requestFd  = -1,
+  .responseFd = -1
+};
 
-  crash.fd->flags |= BFD_DECOMPRESS;
-
-  char **matching;
-  if (!bfd_check_format_matches(crash.fd, bfd_object, &matching))
+static bool writeAll(int fd, const void * buffer, size_t size)
+{
+  const uint8_t * pos = buffer;
+  while (size)
   {
-    DEBUG_ERROR("executable is not a bfd_object");
-    return false;
-  }
+    ssize_t written = write(fd, pos, size);
+    if (written < 0)
+    {
+      if (errno == EINTR)
+        continue;
+      return false;
+    }
 
-  crash.section = bfd_get_section_by_name(crash.fd, ".text");
-  if (!crash.section)
-  {
-    DEBUG_ERROR("failed to find .text section");
-    return false;
-  }
-
-  if ((bfd_get_file_flags(crash.fd) & HAS_SYMS) == 0)
-  {
-    DEBUG_ERROR("executable '%s' has no symbols", crash.exe);
-    return false;
-  }
-
-  long storage   = bfd_get_symtab_upper_bound(crash.fd);
-  crash.syms     = malloc(storage);
-  crash.symCount = bfd_canonicalize_symtab(crash.fd, crash.syms);
-  if (crash.symCount < 0)
-  {
-    DEBUG_ERROR("failed to get the symbol count");
-    return false;
+    pos  += written;
+    size -= written;
   }
 
   return true;
 }
 
-static bool lookup_address(bfd_vma pc, const char ** filename, const char ** function, unsigned int * line, unsigned int * discriminator)
+static bool readAll(int fd, void * buffer, size_t size)
 {
-#ifdef bfd_get_section_flags
-  if ((bfd_get_section_flags(crash.fd, crash.section) & SEC_ALLOC) == 0)
-#else
-  if ((bfd_section_flags(crash.section) & SEC_ALLOC) == 0)
-#endif
-    return false;
+  uint8_t * pos = buffer;
+  while (size)
+  {
+    ssize_t received = read(fd, pos, size);
+    if (received == 0)
+      return false;
 
-#ifdef bfd_get_section_size
-  bfd_size_type size = bfd_get_section_size(crash.section);
-#else
-  bfd_size_type size = bfd_section_size(crash.section);
-#endif
-  if (pc >= size)
-    return false;
+    if (received < 0)
+    {
+      if (errno == EINTR)
+        continue;
+      return false;
+    }
 
-  if (!bfd_find_nearest_line_discriminator(
-    crash.fd,
-    crash.section,
-    crash.syms,
-    pc,
-    filename,
-    function,
-    line,
-    discriminator
-  ))
-    return false;
+    pos  += received;
+    size -= received;
+  }
 
-  if (!*filename)
+  return true;
+}
+
+static void reportFrame(Dwfl * dwfl, unsigned index, uintptr_t pc)
+{
+  // Except for the faulting instruction, an IP is a return address. Looking
+  // up the preceding byte attributes it to the call instruction.
+  Dwarf_Addr address = pc - (index != 0 && pc != 0);
+  Dwfl_Module * module = dwfl_addrmodule(dwfl, address);
+  if (!module)
+  {
+    DEBUG_ERROR("[trace]: (%u) 0x%" PRIxPTR, index, pc);
+    return;
+  }
+
+  GElf_Off functionOffset = 0;
+  GElf_Sym symbol;
+  const char * function = dwfl_module_addrinfo(module, address,
+    &functionOffset, &symbol, NULL, NULL, NULL);
+  Dwfl_Line * source = dwfl_module_getsrc(module, address);
+  if (source)
+  {
+    int line = 0;
+    int column = 0;
+    const char * filename =
+      dwfl_lineinfo(source, NULL, &line, &column, NULL, NULL);
+    if (filename)
+    {
+      DEBUG_ERROR("[trace]: (%u) %s:%d:%d (%s)", index, filename, line,
+        column, function ? function : "unknown");
+      return;
+    }
+  }
+
+  Dwarf_Addr moduleStart = 0;
+  const char * moduleName = dwfl_module_info(module, NULL, &moduleStart,
+    NULL, NULL, NULL, NULL, NULL);
+  if (!moduleName)
+    moduleName = "unknown";
+
+  if (function)
+    DEBUG_ERROR("[trace]: (%u) %s+0x%" PRIx64 " (%s)", index, function,
+      (uint64_t)functionOffset, moduleName);
+  else
+    DEBUG_ERROR("[trace]: (%u) %s+0x%" PRIx64 " [0x%" PRIxPTR "]", index,
+      moduleName, (uint64_t)(address - moduleStart), pc);
+}
+
+static void reportCrash(pid_t parent, const struct CrashRequest * request)
+{
+  if (request->signal)
+  {
+    DEBUG_ERROR("==== FATAL CRASH (%s) ====", BUILD_VERSION);
+    DEBUG_ERROR("signal %d (%s), address is 0x%" PRIxPTR, request->signal,
+      strsignal(request->signal), request->faultAddress);
+  }
+
+  static const Dwfl_Callbacks callbacks =
+  {
+    .find_elf       = dwfl_linux_proc_find_elf,
+    .find_debuginfo = dwfl_standard_find_debuginfo
+  };
+
+  Dwfl * dwfl = dwfl_begin(&callbacks);
+  if (!dwfl)
+  {
+    DEBUG_ERROR("Failed to initialize stack trace symbolizer: %s",
+      dwfl_errmsg(-1));
+    goto raw;
+  }
+
+  if (dwfl_linux_proc_report(dwfl, parent) != 0 ||
+      dwfl_report_end(dwfl, NULL, NULL) != 0)
+  {
+    DEBUG_ERROR("Failed to inspect the crashed process: %s",
+      dwfl_errmsg(-1));
+    dwfl_end(dwfl);
+    goto raw;
+  }
+
+  for (unsigned i = 0; i < request->frameCount; ++i)
+    reportFrame(dwfl, i, request->frames[i]);
+
+  dwfl_end(dwfl);
+  return;
+
+raw:
+  for (unsigned i = 0; i < request->frameCount; ++i)
+    DEBUG_ERROR("[trace]: (%u) 0x%" PRIxPTR, i, request->frames[i]);
+}
+
+static void reporterLoop(pid_t parent, int requestFd, int responseFd)
+{
+  // Do not leave an orphaned reporter if the client exits unexpectedly before
+  // it closes the request pipe.
+  prctl(PR_SET_PDEATHSIG, SIGKILL);
+  if (getppid() != parent)
+    return;
+
+  const uint8_t ready = 1;
+  if (!writeAll(responseFd, &ready, sizeof(ready)))
+    return;
+
+  struct CrashRequest request;
+  while (readAll(requestFd, &request, sizeof(request)))
+  {
+    reportCrash(parent, &request);
+
+    const uint8_t complete = 1;
+    if (!writeAll(responseFd, &complete, sizeof(complete)))
+      return;
+  }
+}
+
+static bool startReporter(void)
+{
+  int requestPipe[2];
+  int responsePipe[2];
+  if (pipe(requestPipe) != 0)
+  {
+    DEBUG_ERROR("Failed to create crash reporter request pipe");
     return false;
+  }
+
+  if (pipe(responsePipe) != 0)
+  {
+    DEBUG_ERROR("Failed to create crash reporter response pipe");
+    close(requestPipe[0]);
+    close(requestPipe[1]);
+    return false;
+  }
+
+  for (unsigned i = 0; i < 2; ++i)
+  {
+    fcntl(requestPipe[i], F_SETFD, FD_CLOEXEC);
+    fcntl(responsePipe[i], F_SETFD, FD_CLOEXEC);
+  }
+
+  const pid_t parent = getpid();
+  const pid_t child = fork();
+  if (child < 0)
+  {
+    DEBUG_ERROR("Failed to start the crash reporter");
+    close(requestPipe [0]);
+    close(requestPipe [1]);
+    close(responsePipe[0]);
+    close(responsePipe[1]);
+    return false;
+  }
+
+  if (child == 0)
+  {
+    close(requestPipe [1]);
+    close(responsePipe[0]);
+    reporterLoop(parent, requestPipe[0], responsePipe[1]);
+    close(requestPipe [0]);
+    close(responsePipe[1]);
+    _exit(0);
+  }
+
+  close(requestPipe [0]);
+  close(responsePipe[1]);
+
+  crash.reporter   = child;
+  crash.requestFd  = requestPipe [1];
+  crash.responseFd = responsePipe[0];
+
+  uint8_t ready;
+  if (!readAll(crash.responseFd, &ready, sizeof(ready)))
+  {
+    DEBUG_ERROR("Crash reporter failed to initialize");
+    cleanupCrashHandler();
+    return false;
+  }
 
   return true;
 }
 
 void cleanupCrashHandler(void)
 {
-  if (crash.syms)
-    free(crash.syms);
-
-  if (crash.fd)
-    bfd_close(crash.fd);
-
-  if (crash.ranges)
-    free(crash.ranges);
-
-  if (crash.exe)
-    free(crash.exe);
-}
-
-static int dl_iterate_phdr_callback(struct dl_phdr_info * info, size_t size, void * data)
-{
-  // we are not a module, and as such we don't have a name
-  if (strlen(info->dlpi_name) != 0)
-    return 0;
-
-  size_t ttl = 0;
-  for(int i = 0; i < info->dlpi_phnum; ++i)
+  if (crash.requestFd >= 0)
   {
-    const ElfW(Phdr) hdr = info->dlpi_phdr[i];
-    if (hdr.p_type == PT_LOAD && (hdr.p_flags & PF_X) == PF_X)
-      ttl += hdr.p_memsz;
+    close(crash.requestFd);
+    crash.requestFd = -1;
   }
 
-  void * tmp = realloc(crash.ranges,
-      sizeof(*crash.ranges) * (crash.rangeCount + 1));
-  if (!tmp)
+  if (crash.responseFd >= 0)
   {
-    DEBUG_ERROR("out of memory");
-    return 1;
+    close(crash.responseFd);
+    crash.responseFd = -1;
   }
-  crash.ranges = tmp;
-  crash.ranges[crash.rangeCount].start = info->dlpi_addr;
-  crash.ranges[crash.rangeCount].end   = info->dlpi_addr + ttl;
-  ++crash.rangeCount;
 
-  return 0;
+  if (crash.reporter > 0)
+  {
+    while (waitpid(crash.reporter, NULL, 0) < 0 && errno == EINTR)
+      continue;
+    crash.reporter = -1;
+  }
 }
 
 void printBacktrace(void)
 {
-  void *             array[50];
-  char **            messages;
-  int                size, i;
-
-  size     = backtrace(array, 50);
-  messages = backtrace_symbols(array, size);
-
-  for (i = 2; i < size && messages != NULL; ++i)
+  struct CrashRequest request =
   {
-    intptr_t base = -1;
-    for(int c = 0; c < crash.rangeCount; ++c)
-    {
-      if ((intptr_t)array[i] >= crash.ranges[c].start && (intptr_t)array[i] < crash.ranges[c].end)
-      {
-        base = crash.ranges[c].start + crash.section->vma;
-        break;
-      }
-    }
+    .signal = 0
+  };
 
-    if (base != -1)
-    {
-      const char * filename, * function;
-      unsigned int line, discriminator;
-      if (lookup_address((intptr_t)array[i] - base, &filename, &function, &line, &discriminator))
-      {
-        DEBUG_ERROR("[trace]: (%d) %s:%u (%s)", i - 2, filename, line, function);
-        continue;
-      }
-    }
+  unw_context_t context;
+  unw_cursor_t cursor;
+  if (unw_getcontext(&context) < 0 ||
+      unw_init_local(&cursor, &context) < 0)
+    return;
 
-    DEBUG_ERROR("[trace]: (%d) %s", i - 2, messages[i]);
+  // Omit unw_getcontext and printBacktrace itself.
+  if (unw_step(&cursor) <= 0 || unw_step(&cursor) <= 0)
+    return;
+
+  do
+  {
+    unw_word_t pc;
+    if (unw_get_reg(&cursor, UNW_REG_IP, &pc) < 0 || !pc)
+      break;
+
+    request.frames[request.frameCount++] = (uintptr_t)pc;
   }
+  while (request.frameCount < CRASH_MAX_FRAMES && unw_step(&cursor) > 0);
 
-  free(messages);
+  if (crash.requestFd >= 0 && crash.responseFd >= 0 &&
+      writeAll(crash.requestFd, &request, sizeof(request)))
+  {
+    uint8_t complete;
+    readAll(crash.responseFd, &complete, sizeof(complete));
+  }
 }
 
 static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
 {
-  DEBUG_ERROR("==== FATAL CRASH (%s) ====", BUILD_VERSION);
-  DEBUG_ERROR("signal %d (%s), address is %p", sig_num, strsignal(sig_num), info->si_addr);
-  printBacktrace();
-  cleanupCrashHandler();
-  abort();
+  struct CrashRequest request;
+  request.signal       = sig_num;
+  request.faultAddress = (uintptr_t)info->si_addr;
+  request.frameCount   = 0;
+
+  unw_cursor_t cursor;
+  if (unw_init_local2(&cursor, (unw_context_t *)ucontext,
+        UNW_INIT_SIGNAL_FRAME) >= 0)
+  {
+    do
+    {
+      unw_word_t pc;
+      if (unw_get_reg(&cursor, UNW_REG_IP, &pc) < 0 || !pc)
+        break;
+
+      request.frames[request.frameCount++] = (uintptr_t)pc;
+    }
+    while (request.frameCount < CRASH_MAX_FRAMES &&
+      unw_step(&cursor) > 0);
+  }
+
+  if (crash.requestFd >= 0 && crash.responseFd >= 0 &&
+      writeAll(crash.requestFd, &request, sizeof(request)))
+  {
+    uint8_t complete;
+    readAll(crash.responseFd, &complete, sizeof(complete));
+  }
+
+  // SA_RESETHAND has restored the default disposition and SA_NODEFER leaves
+  // this signal unblocked, so this preserves the original fatal signal and
+  // still permits the operating system to produce a core dump.
+  kill(getpid(), sig_num);
+  _exit(128 + sig_num);
 }
 
 bool installCrashHandler(const char * exe)
 {
+  (void)exe;
+
+  if (!startReporter())
+    return false;
+
   struct sigaction sigact = { 0 };
-
-  crash.exe = realpath(exe, NULL);
-  if (!load_symbols())
-  {
-    DEBUG_WARN("Unable to load the binary symbols, not installing crash handler");
-    return true;
-  }
-  dl_iterate_phdr(dl_iterate_phdr_callback, NULL);
-
   sigact.sa_sigaction = crit_err_hdlr;
-  sigact.sa_flags = SA_RESTART | SA_SIGINFO;
+  sigact.sa_flags =
+    SA_RESTART | SA_SIGINFO | SA_NODEFER | SA_RESETHAND;
+  sigemptyset(&sigact.sa_mask);
 
-  if (sigaction(SIGSEGV, &sigact, (struct sigaction *)NULL) != 0)
+  if (sigaction(SIGSEGV, &sigact, NULL) != 0)
   {
-    DEBUG_ERROR("Error setting signal handler for %d (%s)", SIGSEGV, strsignal(SIGSEGV));
+    DEBUG_ERROR("Error setting SIGSEGV handler");
+    cleanupCrashHandler();
     return false;
   }
 

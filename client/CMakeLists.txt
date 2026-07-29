@@ -57,11 +57,19 @@ add_compile_options(
   "$<$<C_COMPILER_ID:GNU>:-Wimplicit-fallthrough=2>"
   "-Werror"
   "-Wfatal-errors"
+  "-g"
   "-ffast-math"
   "-fdata-sections"
   "-ffunction-sections"
   "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
 )
+
+if(ENABLE_BACKTRACE)
+  add_compile_options(
+    "-fno-omit-frame-pointer"
+    "-fno-optimize-sibling-calls"
+  )
+endif()
 
 set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
@@ -156,6 +164,27 @@ add_executable(looking-glass-client ${SOURCES})
 
 target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
 
+if(NOT CMAKE_OBJCOPY)
+  message(FATAL_ERROR "objcopy is required to generate the client debug file")
+endif()
+
+if(NOT CMAKE_STRIP)
+  message(FATAL_ERROR "strip is required to generate the client debug file")
+endif()
+
+set(CLIENT_DEBUG_FILE
+  "${CMAKE_CURRENT_BINARY_DIR}/looking-glass-client.debug")
+
+add_custom_command(TARGET looking-glass-client POST_BUILD
+  COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
+    "$<TARGET_FILE:looking-glass-client>" "${CLIENT_DEBUG_FILE}"
+  COMMAND "${CMAKE_STRIP}" --strip-debug "$<TARGET_FILE:looking-glass-client>"
+  COMMAND "${CMAKE_OBJCOPY}" "--add-gnu-debuglink=${CLIENT_DEBUG_FILE}"
+    "$<TARGET_FILE:looking-glass-client>"
+  COMMENT "Extracting Looking Glass client debug information"
+  VERBATIM
+)
+
 target_link_libraries(looking-glass-client
   ${EXE_FLAGS}
   PkgConfig::FONTCONFIG
@@ -180,6 +209,10 @@ endif()
 
 install(TARGETS looking-glass-client
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT binary)
+
+install(FILES "${CLIENT_DEBUG_FILE}"
+  DESTINATION "${CMAKE_INSTALL_BINDIR}/.debug"
   COMPONENT binary)
 
 install(FILES "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop"

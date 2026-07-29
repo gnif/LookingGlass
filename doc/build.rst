@@ -67,6 +67,7 @@ Required dependencies
    All required packages must be listed.
 
 -  ``cmake``
+-  ``binutils``
 -  ``gcc``, ``g++`` \| ``clang``
 -  ``libegl-dev``
 -  ``libgl-dev``
@@ -88,7 +89,8 @@ feature is disabled when running :ref:`cmake <client_building>`.
 
 -  Disable with ``cmake -DENABLE_BACKTRACE=no ..``
 
-   -  ``binutils-dev``
+   -  ``libdw-dev``
+   -  ``libunwind-dev``
 
 -  Disable with ``cmake -DENABLE_X11=no ..``
 
@@ -142,9 +144,9 @@ You can fetch these dependencies with the following command:
 
 .. code:: bash
 
-   apt-get install binutils-dev cmake fonts-dejavu-core libfontconfig-dev \
-   gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev \
-   nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
+   apt-get install binutils cmake fonts-dejavu-core libdw-dev libfontconfig-dev \
+   libunwind-dev gcc g++ pkg-config libegl-dev libgl-dev libgles-dev \
+   libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
    libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev \
    libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
 
@@ -169,7 +171,10 @@ into the *LookingGlass* directory.
    make
 
 This will build the ``looking-glass-client`` binary, which is used to display
-frames from the guest.
+frames from the guest. It also produces ``looking-glass-client.debug``. Keep
+this file with the matching binary to obtain source locations in crash stack
+traces. The install target places it in the standard ``bin/.debug`` location
+automatically.
 
 You can then :ref:`continue installing Looking Glass <client_install>`, or run
 it directly from the build directory:

@@ -20,8 +20,13 @@ add_library(lg_common_platform_code STATIC
 )
 
 if(ENABLE_BACKTRACE)
-  find_package(BFD)
-  target_link_libraries(lg_common_platform_code ${BFD_LIBRARIES})
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBUNWIND REQUIRED IMPORTED_TARGET libunwind)
+  pkg_check_modules(LIBDW REQUIRED IMPORTED_TARGET libdw)
+  target_link_libraries(lg_common_platform_code
+    PkgConfig::LIBUNWIND
+    PkgConfig::LIBDW
+  )
 endif()
 
 target_link_libraries(lg_common_platform_code
