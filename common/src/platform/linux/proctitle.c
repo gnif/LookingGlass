@@ -87,7 +87,7 @@ void lgInitProcessTitle(int argc, char ***pargv)
     initialized = true;
     return;
   }
-  *pargv = argv;
+  *pargv = newArgv;
 
   char * envEnd = end;
   int vars = extendContiguous(&envEnd, environ);
