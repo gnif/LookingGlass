@@ -42,5 +42,6 @@ void core_handleMouseGrabbed(double ex, double ey);
 void core_handleMouseNormal(double ex, double ey);
 void core_resetOverlayInputState(void);
 void core_updateOverlayState(void);
+void core_setTitle(const char * title);
 
 #endif
