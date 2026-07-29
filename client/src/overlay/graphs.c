@@ -57,7 +57,9 @@ static void configCallback(void * udata, int * id)
   ll_forEachNL(gs.graphs, item, graph)
   {
     igTableNextColumn();
+    igPushID_Ptr(graph);
     igCheckbox(graph->name, &graph->enabled);
+    igPopID();
   }
   ll_unlock(gs.graphs);
 
@@ -197,8 +199,9 @@ static int graphs_render(void * udata, bool interactive,
       title = _title;
     }
 
+    igPushID_Ptr(graph);
     igPlotLines_FloatPtr(
-        (void *)graph,
+        "##graph",
         (float *)ringbuffer_getValues(graph->buffer),
         ringbuffer_getLength(graph->buffer),
         ringbuffer_getStart (graph->buffer),
@@ -207,6 +210,7 @@ static int graphs_render(void * udata, bool interactive,
         graph->max,
         (ImVec2){ winSize.x, height },
         sizeof(float));
+    igPopID();
   };
   ll_unlock(gs.graphs);
 
