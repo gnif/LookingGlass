@@ -84,29 +84,33 @@ static void config_renderLGTab(void)
   {
     igTextWrapped("%s", LG_DONATION_STR);
 
-    igBeginTable("donations_split", 2, 0, (ImVec2){}, 0.0f);
-    igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize, 0);
-    igTableNextColumn();
-    igBulletText("");
-    igTableNextColumn();
-    overlayTextURL(LG_DONATION_URL, NULL);
-
-    igEndTable();
+    if (igBeginTable("donations_split", 2, 0, (ImVec2){}, 0.0f))
+    {
+      igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize, 0);
+      igTableNextColumn();
+      igBulletText("");
+      igTableNextColumn();
+      overlayTextURL(LG_DONATION_URL, NULL);
+      igEndTable();
+    }
   }
 
   if (igCollapsingHeader_BoolPtr("Help & Support", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
-    igBeginTable("help_support_split", 2, 0, (ImVec2){}, 0.0f);
-    igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize * 9.0f, 0);
-    for(const StringPair * help = LG_HELP_LINKS; help->name; ++help)
+    if (igBeginTable("help_support_split", 2, 0, (ImVec2){}, 0.0f))
     {
-      igTableNextColumn();
-      igBulletText("%s", help->name);
-      igTableNextColumn();
-      overlayTextMaybeURL(help->value, true);
+      igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
+          fontSize * 9.0f, 0);
+      for(const StringPair * help = LG_HELP_LINKS; help->name; ++help)
+      {
+        igTableNextColumn();
+        igBulletText("%s", help->name);
+        igTableNextColumn();
+        overlayTextMaybeURL(help->value, true);
+      }
+      igEndTable();
     }
-    igEndTable();
   }
 
   if (igCollapsingHeader_BoolPtr("The Looking Glass Team", NULL,
@@ -126,17 +130,21 @@ static void config_renderLGTab(void)
               "do so directly via the following platform%s:",
               member->donate[1].name ? "s" : "");
 
-          igBeginTable("member_donations_split", 2, 0, (ImVec2){}, 0.0f);
-          igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
-              fontSize * 10.0f, 0);
-          for(const StringPair * donate = member->donate; donate->name; ++donate)
+          if (igBeginTable("member_donations_split", 2, 0,
+                (ImVec2){}, 0.0f))
           {
-            igTableNextColumn();
-            igBulletText("%s", donate->name);
-            igTableNextColumn();
-            overlayTextMaybeURL(donate->value, false);
+            igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
+                fontSize * 10.0f, 0);
+            for(const StringPair * donate = member->donate;
+                donate->name; ++donate)
+            {
+              igTableNextColumn();
+              igBulletText("%s", donate->name);
+              igTableNextColumn();
+              overlayTextMaybeURL(donate->value, false);
+            }
+            igEndTable();
           }
-          igEndTable();
         }
         igTreePop();
         igSeparator();
@@ -181,58 +189,59 @@ static int config_render(void * udata, bool interactive, struct Rect * windowRec
     return 1;
   }
 
-  igBeginTabBar("Configuration#tabs", 0);
-
-  if (igBeginTabItem("About", NULL, 0))
+  if (igBeginTabBar("Configuration#tabs", 0))
   {
-    config_renderLGTab();
-    igEndTabItem();
-  }
+    if (igBeginTabItem("About", NULL, 0))
+    {
+      config_renderLGTab();
+      igEndTabItem();
+    }
 
-  ConfigCallback * cb;
+    ConfigCallback * cb;
 
-  if (igBeginTabItem("Settings", NULL, 0))
-  {
-    ll_lock(cfg.callbacks);
-    ll_forEachNL(cfg.callbacks, item, cb)
+    if (igBeginTabItem("Settings", NULL, 0))
+    {
+      ll_lock(cfg.callbacks);
+      ll_forEachNL(cfg.callbacks, item, cb)
+      {
+        igPushID_Ptr(cb);
+
+        if (igCollapsingHeader_BoolPtr(cb->title, NULL, 0))
+        {
+          int id = 0;
+          cb->callback(cb->udata, &id);
+        }
+
+        igPopID();
+      }
+      ll_unlock(cfg.callbacks);
+      igEndTabItem();
+    }
+
+    ll_lock(cfg.tabCallbacks);
+    ll_forEachNL(cfg.tabCallbacks, item, cb)
     {
       igPushID_Ptr(cb);
 
-      if (igCollapsingHeader_BoolPtr(cb->title, NULL, 0))
+      if (igBeginTabItem(cb->title, NULL, 0))
       {
         int id = 0;
         cb->callback(cb->udata, &id);
+        igEndTabItem();
       }
 
       igPopID();
     }
-    ll_unlock(cfg.callbacks);
-    igEndTabItem();
-  }
+    ll_unlock(cfg.tabCallbacks);
 
-  ll_lock(cfg.tabCallbacks);
-  ll_forEachNL(cfg.tabCallbacks, item, cb)
-  {
-    igPushID_Ptr(cb);
-
-    if (igBeginTabItem(cb->title, NULL, 0))
+    if (igBeginTabItem("License", NULL, 0))
     {
-      int id = 0;
-      cb->callback(cb->udata, &id);
+      config_renderLicenseTab();
       igEndTabItem();
     }
 
-    igPopID();
+    igEndTabBar();
   }
-  ll_unlock(cfg.tabCallbacks);
-
-  if (igBeginTabItem("License", NULL, 0))
-  {
-    config_renderLicenseTab();
-    igEndTabItem();
-  }
-
-  igEndTabBar();
 
   overlayGetImGuiRect(windowRects);
   igEnd();

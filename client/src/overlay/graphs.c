@@ -51,20 +51,21 @@ static void configCallback(void * udata, int * id)
   igCheckbox("Show timing graphs", &gs.show);
   igSeparator();
 
-  igBeginTable("graphs_split", 2, 0, (ImVec2){}, 0);
-
-  GraphHandle graph;
-  ll_lock(gs.graphs);
-  ll_forEachNL(gs.graphs, item, graph)
+  if (igBeginTable("graphs_split", 2, 0, (ImVec2){}, 0))
   {
-    igTableNextColumn();
-    igPushID_Ptr(graph);
-    igCheckbox(graph->name, &graph->enabled);
-    igPopID();
-  }
-  ll_unlock(gs.graphs);
+    GraphHandle graph;
+    ll_lock(gs.graphs);
+    ll_forEachNL(gs.graphs, item, graph)
+    {
+      igTableNextColumn();
+      igPushID_Ptr(graph);
+      igCheckbox(graph->name, &graph->enabled);
+      igPopID();
+    }
+    ll_unlock(gs.graphs);
 
-  igEndTable();
+    igEndTable();
+  }
 }
 
 static void showTimingKeybind(int sc, void * opaque)
