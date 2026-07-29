@@ -240,7 +240,7 @@ static void outputRequestColorDescription(struct WaylandOutput * output)
       desc->description, &outputDescriptionListener, desc);
 }
 
-static void outputImageDescriptionChanged(void * data,
+static void outputImageDescChanged(void * data,
     struct wp_color_management_output_v1 * colorOutput)
 {
   outputRequestColorDescription(data);
@@ -248,7 +248,7 @@ static void outputImageDescriptionChanged(void * data,
 
 static const struct wp_color_management_output_v1_listener colorOutputListener =
 {
-  .image_description_changed = outputImageDescriptionChanged,
+  .image_description_changed = outputImageDescChanged,
 };
 
 void waylandOutputColorMgmtInit(struct WaylandOutput * output)

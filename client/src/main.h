@@ -169,7 +169,7 @@ struct AppState
 
   int spiceHotX, spiceHotY;
 
-  // Set to true when setHDRImageDescription() returns false, indicating
+  // Set to true when setHDRImageDesc() returns false, indicating
   // the display server could not apply the HDR image description.
   // Checked by the renderer to fall back to software tone-mapping.
   _Atomic(bool) hdrDescFailed;

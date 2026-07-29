@@ -89,7 +89,7 @@ bool app_getFullscreen(void);
 bool app_getProp(LG_DSProperty prop, void * ret);
 
 /**
- * Returns true if the last call to setHDRImageDescription() failed.
+ * Returns true if the last call to setHDRImageDesc() failed.
  * When this returns true, the renderer should fall back to software
  * tone-mapping even on a compositor that reports LG_DS_NATIVE_HDR.
  */

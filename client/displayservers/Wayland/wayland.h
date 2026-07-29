@@ -345,11 +345,11 @@ void waylandGLSwapBuffers(void);
 // HDR color management (Wayland color-management-v1)
 bool waylandColorMgmtInit(void);
 void waylandColorMgmtFree(void);
-void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
+void waylandSetHDRImageDesc(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
     uint32_t referenceWhiteLevel, bool hdrPQ, bool hdrMetadata);
-void waylandClearHDRImageDescription(void);
+void waylandClearHDRImageDesc(void);
 
 // Queue HDR change from any thread (applied in waylandEGLSwapBuffers).
 // Returns true if the request was queued, false if HDR is not available

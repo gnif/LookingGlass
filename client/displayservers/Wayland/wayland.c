@@ -333,7 +333,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .getFullscreen       = waylandGetFullscreen,
   .minimize            = waylandMinimize,
 
-  .setHDRImageDescription = waylandHDRCallback,
+  .setHDRImageDesc = waylandHDRCallback,
 
   .cbInit    = waylandCBInit,
   .cbNotice  = waylandCBNotice,

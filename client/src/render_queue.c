@@ -36,7 +36,7 @@ static LG_RendererFormat l_surfaceFormat;
 
 static void updateSurfaceFormat(void)
 {
-  if (!g_state.ds->setHDRImageDescription)
+  if (!g_state.ds->setHDRImageDesc)
     return;
 
   LG_RendererFormat format = {};
@@ -50,7 +50,7 @@ static void updateSurfaceFormat(void)
     format.hdr         = false;
     format.hdrPQ       = false;
     format.hdrMetadata = false;
-    g_state.ds->setHDRImageDescription(&format);
+    g_state.ds->setHDRImageDesc(&format);
     atomic_store(&g_state.hdrDescFailed, false);
     return;
   }
@@ -63,12 +63,12 @@ static void updateSurfaceFormat(void)
     format.hdr         = false;
     format.hdrPQ       = false;
     format.hdrMetadata = false;
-    g_state.ds->setHDRImageDescription(&format);
+    g_state.ds->setHDRImageDesc(&format);
     DEBUG_WARN("Renderer surface cannot represent the native HDR encoding; "
         "using software HDR mapping");
     atomic_store(&g_state.hdrDescFailed, true);
   }
-  else if (!g_state.ds->setHDRImageDescription(&format))
+  else if (!g_state.ds->setHDRImageDesc(&format))
   {
     DEBUG_WARN("Display server failed to apply HDR image description");
     atomic_store(&g_state.hdrDescFailed, true);

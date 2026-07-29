@@ -83,7 +83,7 @@ static void applyHDRPending(void)
 
   if (action == WAYLAND_HDR_PENDING_APPLY)
   {
-    waylandSetHDRImageDescription(
+    waylandSetHDRImageDesc(
         params.displayPrimary, params.whitePoint,
         params.maxDisplayLuminance,
         params.minDisplayLuminance,
@@ -94,10 +94,10 @@ static void applyHDRPending(void)
         params.metadata);
   }
   else if (action == WAYLAND_HDR_PENDING_CLEAR)
-    waylandClearHDRImageDescription();
+    waylandClearHDRImageDesc();
 }
 
-void waylandClearHDRImageDescription(void)
+void waylandClearHDRImageDesc(void)
 {
   LG_LOCK(wlWm.hdrLock);
   if (wlWm.hdrImageCreator)
@@ -120,7 +120,7 @@ void waylandClearHDRImageDescription(void)
   DEBUG_INFO("HDR image description removed from surface");
 }
 
-static void hdrImageDescriptionReady(struct wp_image_description_v1 * desc)
+static void hdrImageDescReady(struct wp_image_description_v1 * desc)
 {
   LG_LOCK(wlWm.hdrLock);
   if (desc != wlWm.hdrImageDesc)
@@ -150,7 +150,7 @@ static void hdrImageDescriptionReady(struct wp_image_description_v1 * desc)
   waylandStopWaitFrame();
 }
 
-static void activateReadyHDRImageDescription(void)
+static void activateReadyHDRImageDesc(void)
 {
   LG_LOCK(wlWm.hdrLock);
   if (!wlWm.hdrImageDesc || !wlWm.hdrImageDescReady || !wlWm.colorSurface)
@@ -180,7 +180,7 @@ static void activateReadyHDRImageDescription(void)
   waylandStopWaitFrame();
 }
 
-static void hdrImageDescriptionFailed(void * data,
+static void hdrImageDescFailed(void * data,
     struct wp_image_description_v1 * desc, uint32_t cause, const char * message)
 {
   (void)data;
@@ -203,29 +203,29 @@ static void hdrImageDescriptionFailed(void * data,
   waylandStopWaitFrame();
 }
 
-static void hdrImageDescriptionReadyV1(void * data,
+static void hdrImageDescReadyV1(void * data,
     struct wp_image_description_v1 * desc, uint32_t identity)
 {
   (void)data;
   (void)identity;
-  hdrImageDescriptionReady(desc);
+  hdrImageDescReady(desc);
 }
 
-static void hdrImageDescriptionReadyV2(void * data,
+static void hdrImageDescReadyV2(void * data,
     struct wp_image_description_v1 * desc, uint32_t identityHi,
     uint32_t identityLo)
 {
   (void)data;
   (void)identityHi;
   (void)identityLo;
-  hdrImageDescriptionReady(desc);
+  hdrImageDescReady(desc);
 }
 
 static const struct wp_image_description_v1_listener hdrImageDescListener =
 {
-  .failed = hdrImageDescriptionFailed,
-  .ready  = hdrImageDescriptionReadyV1,
-  .ready2 = hdrImageDescriptionReadyV2,
+  .failed = hdrImageDescFailed,
+  .ready  = hdrImageDescReadyV1,
+  .ready2 = hdrImageDescReadyV2,
 };
 
 void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
@@ -244,7 +244,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
   waylandPresentationFrame();
   applyHDRPending();
   swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
-  activateReadyHDRImageDescription();
+  activateReadyHDRImageDesc();
 
   if (wlWm.needsResize)
   {
@@ -363,7 +363,7 @@ static bool hdrTargetLuminanceContained(uint32_t minLuminance,
     maxLuminance <= HDR_PQ_MAX_LUMINANCE;
 }
 
-void waylandSetHDRImageDescription(const uint16_t displayPrimary[3][2],
+void waylandSetHDRImageDesc(const uint16_t displayPrimary[3][2],
     const uint16_t whitePoint[2], uint32_t maxDisplayLuminance,
     uint32_t minDisplayLuminance, uint32_t maxCLL, uint32_t maxFALL,
     uint32_t referenceWhiteLevel, bool hdrPQ, bool hdrMetadata)

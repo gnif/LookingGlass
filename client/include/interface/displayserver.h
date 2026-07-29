@@ -56,7 +56,7 @@ typedef enum LG_DSProperty
 
   /**
    * returns true if the display server supports native HDR via
-   * setHDRImageDescription (i.e., the compositor actually has the
+   * setHDRImageDesc (i.e., the compositor actually has the
    * required color-management features to process HDR content).
    * return data type: bool
    */
@@ -241,7 +241,7 @@ struct LG_DisplayServerOps
    * Returns true on success, false if the description could not be applied
    * (e.g., compositor doesn't support the required transfer function or
    * primaries, or the image description creation failed). */
-  bool (*setHDRImageDescription)(const void * rendererFormat);
+  bool (*setHDRImageDesc)(const void * rendererFormat);
 
   /* clipboard support, optional, if not supported set to NULL */
   bool (*cbInit)(void);
