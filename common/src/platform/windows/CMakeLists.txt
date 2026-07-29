@@ -40,6 +40,7 @@ add_library(lg_common_platform_code STATIC
   time.c
   cpuinfo.c
   display.c
+  proctitle.c
 )
 
 target_link_libraries(lg_common_platform_code
