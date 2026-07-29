@@ -908,6 +908,19 @@ struct Option * option_get(const char * module, const char * name)
     struct Option * o = state.options[i];
     if ((strcasecmp(o->module, module) == 0) && (strcasecmp(o->name, name) == 0))
       return o;
+
+    // check for usage of renamed options
+    if (o->old_module && o->old_name &&
+      (strcasecmp(o->old_module, module) == 0) &&
+      (strcasecmp(o->old_name  , name) == 0))
+    {
+      // not fatal, but be noisy
+      DEBUG_WARN(
+          "%s:%s has been renamed to %s:%s, please update your configuration",
+          o->old_module, o->old_name,
+          o->module    , o->name   );
+      return o;
+    }
   }
   return NULL;
 }

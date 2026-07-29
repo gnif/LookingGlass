@@ -48,6 +48,11 @@ struct Option
 {
   char * module;
   char * name;
+
+  // for migrating to new names
+  char * old_module;
+  char * old_name;
+
   char * description;
   char shortopt;
   bool preset;
