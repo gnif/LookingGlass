@@ -75,6 +75,8 @@ static LGEvent  *e_spice   = NULL;
 static LGThread *t_spice   = NULL;
 static LGThread *t_render  = NULL;
 
+_Atomic(enum RunState) p_appState = APP_STATE_RUNNING;
+
 struct AppState g_state =
 {
   .cbRemoteType = SPICE_DATA_NONE,

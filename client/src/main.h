@@ -61,8 +61,6 @@ enum AudioResampler {
 
 struct AppState
 {
-  _Atomic(enum RunState) state;
-
   ImGuiIO        * io;
   ImGuiStyle     * style;
   struct ll      * overlays;
@@ -353,12 +351,14 @@ extern struct AppParams   g_params;
 
 static inline enum RunState app_getState(void)
 {
-  return atomic_load_explicit(&g_state.state, memory_order_acquire);
+  extern _Atomic(enum RunState) p_appState;
+  return atomic_load_explicit(&p_appState, memory_order_acquire);
 }
 
 static inline void app_setState(enum RunState state)
 {
-  atomic_store_explicit(&g_state.state, state, memory_order_release);
+  extern _Atomic(enum RunState) p_appState;
+  atomic_store_explicit(&p_appState, state, memory_order_release);
 }
 
 int main_cursorThread(void * unused);
