@@ -75,7 +75,7 @@ static int help_render(void * udata, bool interactive, struct Rect * windowRects
       else
         igText("%s+%c", escapeName, handle->charcode);
       igTableNextColumn();
-      igText(handle->description);
+      igTextUnformatted(handle->description, NULL);
     }
 
     igEndTable();

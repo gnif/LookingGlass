@@ -69,7 +69,7 @@ static void overlayAddUnderline(ImU32 color)
 
 void overlayTextURL(const char * url, const char * text)
 {
-  igText(text ? text : url);
+  igTextUnformatted(text ? text : url, NULL);
 
   if (igIsItemHovered(ImGuiHoveredFlags_None))
   {
@@ -87,9 +87,9 @@ void overlayTextMaybeURL(const char * text, bool wrapped)
   if (strncmp(text, "https://", 8) == 0)
     overlayTextURL(text, NULL);
   else if (wrapped)
-    igTextWrapped(text);
+    igTextWrapped("%s", text);
   else
-    igText(text);
+    igTextUnformatted(text, NULL);
 }
 
 bool overlayLoadSVG(const char * data, unsigned int size, OverlayImage * image,

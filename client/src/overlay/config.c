@@ -28,10 +28,11 @@
 
 #include "common/debug.h"
 #include "common/appstrings.h"
+#include "common/stringutils.h"
 
 typedef struct ConfigCallback
 {
-  const char * title;
+  char * title;
   void * udata;
   void (*callback)(void * udata, int * id);
 }
@@ -61,7 +62,10 @@ static void config_freeList(struct ll * list)
 {
   ConfigCallback * cb;
   while(ll_shift(list, (void **)&cb))
+  {
+    free(cb->title);
     free(cb);
+  }
   ll_free(list);
 }
 
@@ -78,9 +82,9 @@ static void config_renderLGTab(void)
   if (igCollapsingHeader_BoolPtr("Donations", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
-    igTextWrapped(LG_DONATION_STR);
+    igTextWrapped("%s", LG_DONATION_STR);
 
-    igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
+    igBeginTable("donations_split", 2, 0, (ImVec2){}, 0.0f);
     igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize, 0);
     igTableNextColumn();
     igBulletText("");
@@ -93,12 +97,12 @@ static void config_renderLGTab(void)
   if (igCollapsingHeader_BoolPtr("Help & Support", NULL,
         ImGuiTreeNodeFlags_DefaultOpen))
   {
-    igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
+    igBeginTable("help_support_split", 2, 0, (ImVec2){}, 0.0f);
     igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, fontSize * 9.0f, 0);
     for(const StringPair * help = LG_HELP_LINKS; help->name; ++help)
     {
       igTableNextColumn();
-      igBulletText(help->name);
+      igBulletText("%s", help->name);
       igTableNextColumn();
       overlayTextMaybeURL(help->value, true);
     }
@@ -113,7 +117,7 @@ static void config_renderLGTab(void)
       if (igTreeNode_Str(member->name))
       {
         igSpacing();
-        igTextWrapped(member->blurb);
+        igTextWrapped("%s", member->blurb);
         if (member->donate[0].name)
         {
           igSeparator();
@@ -122,13 +126,13 @@ static void config_renderLGTab(void)
               "do so directly via the following platform%s:",
               member->donate[1].name ? "s" : "");
 
-          igBeginTable("split", 2, 0, (ImVec2){}, 0.0f);
+          igBeginTable("member_donations_split", 2, 0, (ImVec2){}, 0.0f);
           igTableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
               fontSize * 10.0f, 0);
           for(const StringPair * donate = member->donate; donate->name; ++donate)
           {
             igTableNextColumn();
-            igBulletText(donate->name);
+            igBulletText("%s", donate->name);
             igTableNextColumn();
             overlayTextMaybeURL(donate->value, false);
           }
@@ -143,11 +147,11 @@ static void config_renderLGTab(void)
 
 static void config_renderLicenseTab(void)
 {
-  igText(LG_COPYRIGHT_STR);
+  igTextUnformatted(LG_COPYRIGHT_STR, NULL);
   overlayTextURL(LG_WEBSITE_URL, NULL);
-  igText(LG_VERSION_STR);
+  igTextUnformatted(LG_VERSION_STR, NULL);
   igSeparator();
-  igTextWrapped(LG_LICENSE_STR);
+  igTextWrapped("%s", LG_LICENSE_STR);
 }
 
 static int config_render(void * udata, bool interactive, struct Rect * windowRects,
@@ -246,6 +250,12 @@ struct LG_OverlayOps LGOverlayConfig =
 static void config_addToList(struct ll * list, const char * title,
     void(*callback)(void * udata, int * id), void * udata)
 {
+  if (!title || !*title)
+  {
+    DEBUG_ERROR("configuration title must not be empty");
+    return;
+  }
+
   ConfigCallback * cb = calloc(1, sizeof(*cb));
   if (!cb)
   {
@@ -253,7 +263,14 @@ static void config_addToList(struct ll * list, const char * title,
     return;
   }
 
-  cb->title    = title;
+  cb->title = lg_strdup(title);
+  if (!cb->title)
+  {
+    DEBUG_ERROR("failed to allocate ram");
+    free(cb);
+    return;
+  }
+
   cb->udata    = udata;
   cb->callback = callback;
   ll_push(list, cb);

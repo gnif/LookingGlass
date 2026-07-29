@@ -24,6 +24,7 @@
 #include "../main.h"
 
 #include "common/debug.h"
+#include "common/stringutils.h"
 #include "overlay_utils.h"
 
 struct GraphState
@@ -36,7 +37,7 @@ static struct GraphState gs = {0};
 
 struct OverlayGraph
 {
-  const char *  name;
+  char *        name;
   RingBuffer    buffer;
   bool          enabled;
   float         min;
@@ -50,7 +51,7 @@ static void configCallback(void * udata, int * id)
   igCheckbox("Show timing graphs", &gs.show);
   igSeparator();
 
-  igBeginTable("split", 2, 0, (ImVec2){}, 0);
+  igBeginTable("graphs_split", 2, 0, (ImVec2){}, 0);
 
   GraphHandle graph;
   ll_lock(gs.graphs);
@@ -89,7 +90,10 @@ static void graphs_free(void * udata)
 {
   struct OverlayGraph * graph;
   while(ll_shift(gs.graphs, (void **)&graph))
+  {
+    free(graph->name);
     free(graph);
+  }
   ll_free(gs.graphs);
   gs.graphs = NULL;
 }
@@ -231,6 +235,12 @@ struct LG_OverlayOps LGOverlayGraphs =
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn)
 {
+  if (!name || !*name)
+  {
+    DEBUG_ERROR("graph name must not be empty");
+    return NULL;
+  }
+
   struct OverlayGraph * graph = malloc(sizeof(*graph));
   if (!graph)
   {
@@ -238,7 +248,14 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     return NULL;
   }
 
-  graph->name     = name;
+  graph->name = lg_strdup(name);
+  if (!graph->name)
+  {
+    DEBUG_ERROR("out of memory");
+    free(graph);
+    return NULL;
+  }
+
   graph->buffer   = buffer;
   graph->enabled  = true;
   graph->min      = min;
@@ -250,10 +267,11 @@ GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
 
 void overlayGraph_unregister(GraphHandle handle)
 {
-  if (!gs.graphs)
+  if (!gs.graphs || !handle)
     return;
 
   ll_removeData(gs.graphs, handle);
+  free(handle->name);
   free(handle);
 
   if (gs.show)

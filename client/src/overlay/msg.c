@@ -205,35 +205,56 @@ MsgBoxHandle overlayMsg_show(
     const char * caption, MsgBoxConfirmCallback confirm, void * opaque,
     const char * fmt, va_list args)
 {
-  struct Msg * msg = malloc(sizeof(*msg));
+  struct Msg * msg = calloc(1, sizeof(*msg));
   if (!msg)
   {
     DEBUG_ERROR("out of memory");
     return NULL;
   }
 
-  msg->caption = strdup(caption);
+  msg->caption = lg_strdup(caption && *caption ? caption : "Message");
+  if (!msg->caption)
+  {
+    DEBUG_ERROR("out of memory");
+    free(msg);
+    return NULL;
+  }
+
   msg->lines   = stringlist_new(false);
+  if (!msg->lines)
+  {
+    free(msg->caption);
+    free(msg);
+    return NULL;
+  }
+
   msg->confirm = confirm;
   msg->opaque  = opaque;
-  valloc_sprintf(&msg->message, fmt, args);
+  if (valloc_sprintf(&msg->message, fmt ? fmt : "", args) < 0)
+  {
+    DEBUG_ERROR("failed to format message");
+    freeMsg(msg);
+    return NULL;
+  }
 
   char * token = msg->message;
-  char * rest  = msg->message;
-  do
+  for(char * rest = msg->message; ; ++rest)
   {
     if (*rest == '\n')
     {
       *rest = '\0';
       stringlist_push(msg->lines, token);
       token = rest + 1;
+      continue;
     }
-    ++rest;
-  }
-  while(*rest != '\0');
 
-  if (*token)
-    stringlist_push(msg->lines, token);
+    if (*rest == '\0')
+    {
+      if (*token)
+        stringlist_push(msg->lines, token);
+      break;
+    }
+  }
 
   ll_push(l_msg.messages, msg);
   app_invalidateOverlay(false);
