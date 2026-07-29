@@ -51,6 +51,7 @@
 #include "common/paths.h"
 #include "common/cpuinfo.h"
 #include "common/ll.h"
+#include "common/proctitle.h"
 
 #include "message.h"
 #include "core.h"
@@ -976,6 +977,8 @@ void spiceReady(void)
   PSServerInfo info;
   if (purespice_getServerInfo(&info))
   {
+    core_setTitle(info.name);
+
     bool uuidValid = false;
     for(int i = 0; i < sizeof(info.uuid); ++i)
       if (info.uuid[i])
@@ -2061,6 +2064,9 @@ int main(int argc, char * argv[])
     DEBUG_ERROR("Do not run looking glass as setuid!");
     return -1;
   }
+
+  lgInitProcessTitle(argc, &argv);
+  core_setTitle(NULL);
 
   DEBUG_INFO("Looking Glass (%s)", BUILD_VERSION);
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
