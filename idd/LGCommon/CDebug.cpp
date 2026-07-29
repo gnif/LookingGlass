@@ -161,13 +161,18 @@ void CDebug::Init(const wchar_t * name)
   m_stream = std::move(stream);
 }
 
-void CDebug::LogStr(CDebug::Level level, const char *function, int line, bool wide, const void *str)
+void CDebug::LogStr(CDebug::Level level, const char *function, int line, bool wide, const void *str,
+  const wchar_t *timestamp)
 {
   if (level < 0 || level >= LEVEL_MAX)
     level = LEVEL_NONE;
 
-  wchar_t timestamp[50];
-  iso8601(timestamp, ARRAYSIZE(timestamp));
+  wchar_t currentTimestamp[50];
+  if (!timestamp)
+  {
+    iso8601(currentTimestamp, ARRAYSIZE(currentTimestamp));
+    timestamp = currentTimestamp;
+  }
 
   wchar_t *result;
   if (aswprintf(&result, wide ? L"[%s] [%S] %40S:%-4d | %s\n" : L"[%s] [%S] %40S:%-4d | %S\n",
@@ -202,6 +207,47 @@ void CDebug::Log(CDebug::Level level, const char *function, int line, const char
   va_end(args);
 }
 
+void CDebug::LogML_va(CDebug::Level level, const char *function, int line, const char *fmt, va_list args)
+{
+  char *result;
+  if (vasprintf(&result, fmt, args) < 0)
+  {
+    Write(L"Out of memory while logging");
+    return;
+  }
+
+  wchar_t timestamp[50];
+  iso8601(timestamp, ARRAYSIZE(timestamp));
+
+  char *start = result;
+  while (true)
+  {
+    char *end = strchr(start, '\n');
+    if (end)
+      *end = '\0';
+
+    size_t length = strlen(start);
+    if (length && start[length - 1] == '\r')
+      start[length - 1] = '\0';
+
+    LogStr(level, function, line, false, start, timestamp);
+
+    if (!end || !end[1])
+      break;
+    start = end + 1;
+  }
+
+  free(result);
+}
+
+void CDebug::LogML(CDebug::Level level, const char *function, int line, const char *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  LogML_va(level, function, line, fmt, args);
+  va_end(args);
+}
+
 void CDebug::Log_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args)
 {
   wchar_t *result;
@@ -220,6 +266,47 @@ void CDebug::Log(CDebug::Level level, const char *function, int line, const wcha
   va_list args;
   va_start(args, fmt);
   Log_va(level, function, line, fmt, args);
+  va_end(args);
+}
+
+void CDebug::LogML_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args)
+{
+  wchar_t *result;
+  if (vaswprintf(&result, fmt, args) < 0)
+  {
+    Write(L"Out of memory while logging");
+    return;
+  }
+
+  wchar_t timestamp[50];
+  iso8601(timestamp, ARRAYSIZE(timestamp));
+
+  wchar_t *start = result;
+  while (true)
+  {
+    wchar_t *end = wcschr(start, L'\n');
+    if (end)
+      *end = L'\0';
+
+    size_t length = wcslen(start);
+    if (length && start[length - 1] == L'\r')
+      start[length - 1] = L'\0';
+
+    LogStr(level, function, line, true, start, timestamp);
+
+    if (!end || !end[1])
+      break;
+    start = end + 1;
+  }
+
+  free(result);
+}
+
+void CDebug::LogML(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  LogML_va(level, function, line, fmt, args);
   va_end(args);
 }
 

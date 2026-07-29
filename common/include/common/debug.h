@@ -74,6 +74,10 @@ void debug_level(enum DebugLevel level, const char * file, unsigned int line,
     const char * function, const char * format, ...)
   __attribute__((format (printf, 5, 6)));
 
+void debug_levelML(enum DebugLevel level, const char * file, unsigned int line,
+    const char * function, const char * format, ...)
+  __attribute__((format (printf, 5, 6)));
+
 void debug_info(const char * file, unsigned int line, const char * function,
     const char * format, ...) __attribute__((format (printf, 4, 5)));
 
@@ -113,15 +117,32 @@ void debug_trace(const char * file, unsigned int line, const char * function,
       fmt, ##__VA_ARGS__); \
 } while (0)
 
+#define DEBUG_PRINT_ML(level, fmt, ...) do { \
+  debug_levelML(level, STRIPPATH(__FILE__), __LINE__, __FUNCTION__, \
+      fmt, ##__VA_ARGS__); \
+} while (0)
+
 #define DEBUG_BREAK() DEBUG_PRINT(DEBUG_LEVEL_INFO, "================================================================================")
 #define DEBUG_INFO(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #define DEBUG_WARN(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #define DEBUG_ERROR(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #define DEBUG_TRACE(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
 #define DEBUG_FIXME(fmt, ...) DEBUG_PRINT(DEBUG_LEVEL_FIXME, fmt, ##__VA_ARGS__)
+#define DEBUG_INFO_ML(fmt, ...) DEBUG_PRINT_ML(DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define DEBUG_WARN_ML(fmt, ...) DEBUG_PRINT_ML(DEBUG_LEVEL_WARN, fmt, ##__VA_ARGS__)
+#define DEBUG_ERROR_ML(fmt, ...) DEBUG_PRINT_ML(DEBUG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define DEBUG_TRACE_ML(fmt, ...) DEBUG_PRINT_ML(DEBUG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define DEBUG_FIXME_ML(fmt, ...) DEBUG_PRINT_ML(DEBUG_LEVEL_FIXME, fmt, ##__VA_ARGS__)
 #define DEBUG_FATAL(fmt, ...) do { \
   DEBUG_BREAK(); \
   DEBUG_PRINT(DEBUG_LEVEL_FATAL, fmt, ##__VA_ARGS__); \
+  DEBUG_PRINT_BACKTRACE(); \
+  abort(); \
+  DEBUG_UNREACHABLE_MARKER(); \
+} while(0)
+#define DEBUG_FATAL_ML(fmt, ...) do { \
+  DEBUG_BREAK(); \
+  DEBUG_PRINT_ML(DEBUG_LEVEL_FATAL, fmt, ##__VA_ARGS__); \
   DEBUG_PRINT_BACKTRACE(); \
   abort(); \
   DEBUG_UNREACHABLE_MARKER(); \

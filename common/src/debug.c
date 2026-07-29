@@ -38,19 +38,15 @@ void debug_enableTracing(void)
   traceEnabled = true;
 }
 
-inline static void debug_levelVA(enum DebugLevel level, const char * file,
-    unsigned int line, const char * function, const char * format, va_list va)
+inline static void debug_printPrefix(enum DebugLevel level, const char * file,
+    unsigned int line, const char * function, uint64_t elapsed)
 {
-  if (level == DEBUG_LEVEL_TRACE && !traceEnabled)
-    return;
-
   const char * f = strrchr(file, DIRECTORY_SEPARATOR);
   if (!f)
     f = file;
   else
     ++f;
 
-  uint64_t elapsed = microtime() - startTime;
   uint64_t sec     = elapsed / 1000000UL;
   uint64_t us      = elapsed % 1000000UL;
 
@@ -62,9 +58,64 @@ inline static void debug_levelVA(enum DebugLevel level, const char * file,
       debug_lookup[level],
       f,
       line, function);
+}
 
+inline static void debug_levelVA(enum DebugLevel level, const char * file,
+    unsigned int line, const char * function, const char * format, va_list va)
+{
+  if (level == DEBUG_LEVEL_TRACE && !traceEnabled)
+    return;
+
+  debug_printPrefix(level, file, line, function, microtime() - startTime);
   vfprintf(stderr, format, va);
   fprintf(stderr, "%s\n", debug_lookup[DEBUG_LEVEL_NONE]);
+}
+
+inline static void debug_levelMLVA(enum DebugLevel level, const char * file,
+    unsigned int line, const char * function, const char * format, va_list va)
+{
+  if (level == DEBUG_LEVEL_TRACE && !traceEnabled)
+    return;
+
+  va_list copy;
+  va_copy(copy, va);
+  int length = vsnprintf(NULL, 0, format, copy);
+  va_end(copy);
+  if (length < 0)
+    return;
+
+  char * message = malloc((size_t)length + 1);
+  if (!message)
+    return;
+
+  va_copy(copy, va);
+  int result = vsnprintf(message, (size_t)length + 1, format, copy);
+  va_end(copy);
+  if (result < 0)
+  {
+    free(message);
+    return;
+  }
+
+  const uint64_t elapsed = microtime() - startTime;
+  const char * start = message;
+  while (true)
+  {
+    const char * end = strchr(start, '\n');
+    size_t lineLength = end ? (size_t)(end - start) : strlen(start);
+    if (lineLength && start[lineLength - 1] == '\r')
+      --lineLength;
+
+    debug_printPrefix(level, file, line, function, elapsed);
+    fwrite(start, 1, lineLength, stderr);
+    fprintf(stderr, "%s\n", debug_lookup[DEBUG_LEVEL_NONE]);
+
+    if (!end || !end[1])
+      break;
+    start = end + 1;
+  }
+
+  free(message);
 }
 
 
@@ -74,6 +125,15 @@ void debug_level(enum DebugLevel level, const char * file, unsigned int line,
   va_list va;
   va_start(va, format);
   debug_levelVA(level, file, line, function, format, va);
+  va_end(va);
+}
+
+void debug_levelML(enum DebugLevel level, const char * file, unsigned int line,
+    const char * function, const char * format, ...)
+{
+  va_list va;
+  va_start(va, format);
+  debug_levelMLVA(level, file, line, function, format, va);
   va_end(va);
 }
 

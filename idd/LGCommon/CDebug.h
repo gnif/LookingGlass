@@ -51,11 +51,16 @@ class CDebug
     void Log(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...);
     void Log_va(CDebug::Level level, const char *function, int line, const char *fmt, va_list args);
     void Log(CDebug::Level level, const char *function, int line, const char *fmt, ...);
+    void LogML_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args);
+    void LogML(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...);
+    void LogML_va(CDebug::Level level, const char *function, int line, const char *fmt, va_list args);
+    void LogML(CDebug::Level level, const char *function, int line, const char *fmt, ...);
     void LogHR(CDebug::Level level, HRESULT hr, const char *function, int line, const char *fmt, ...);
     void LogHR(CDebug::Level level, HRESULT hr, const char *function, int line, const wchar_t *fmt, ...);
 
   private:
-    void LogStr(CDebug::Level level, const char *function, int line, bool wide, const void *str);
+    void LogStr(CDebug::Level level, const char *function, int line, bool wide, const void *str,
+      const wchar_t *timestamp = nullptr);
     void LogStrHR(CDebug::Level level, HRESULT hr, const char *function, int line, bool wide, const void *str);
     static const char *s_levelStr[LEVEL_MAX];
 };
@@ -69,6 +74,12 @@ extern CDebug g_debug;
 #define DEBUG_FIXME(fmt, ...) g_debug.Log(CDebug::LEVEL_FIXME, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
 #define DEBUG_FATAL(fmt, ...) g_debug.Log(CDebug::LEVEL_FATAL, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
 
+#define DEBUG_INFO_ML(fmt, ...) g_debug.LogML(CDebug::LEVEL_INFO, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_WARN_ML(fmt, ...) g_debug.LogML(CDebug::LEVEL_WARN, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_ERROR_ML(fmt, ...) g_debug.LogML(CDebug::LEVEL_ERROR, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_TRACE_ML(fmt, ...) g_debug.LogML(CDebug::LEVEL_TRACE, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_FIXME_ML(fmt, ...) g_debug.LogML(CDebug::LEVEL_FIXME, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
+#define DEBUG_FATAL_ML(fmt, ...) g_debug.LogML(CDebug::LEVEL_FATAL, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
 
 #define DEBUG_INFO_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_INFO, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
 #define DEBUG_WARN_HR(hr, fmt, ...) g_debug.LogHR(CDebug::LEVEL_WARN, hr, __FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
