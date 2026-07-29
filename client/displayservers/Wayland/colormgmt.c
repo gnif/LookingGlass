@@ -81,16 +81,29 @@ static void cmDone(void * data, struct wp_color_manager_v1 * cm)
       canPQ || (wlWm.cmHasPerceptualIntent && wlWm.cmHasWindowsSCRGB),
       memory_order_relaxed);
   atomic_store_explicit(&wlWm.cmFeaturesDone, true, memory_order_release);
-  DEBUG_INFO("Color management features: parametric:%d luminances:%d "
-      "mastering_primaries:%d extended_target:%d st2084_pq:%d "
-      "ext_linear:%d bt2020:%d srgb:%d windows_scrgb:%d perceptual:%d "
-      "can_do_hdr:%d",
-      wlWm.cmHasParametric, wlWm.cmHasLuminances,
+  DEBUG_INFO_ML(
+    "Color management features:\n"
+    "  parametric         : %d\n"
+    "  luminances         : %d\n"
+    "  mastering_primaries: %d\n"
+    "  extended_target    : %d\n"
+    "  st2084_pq          : %d\n"
+    "  ext_linear         : %d\n"
+    "  bt2020             : %d\n"
+    "  srgb               : %d\n"
+    "  windows_scrgb      : %d\n"
+    "  perceptual         : %d\n"
+    "  can_do_hdr         : %d",
+      wlWm.cmHasParametric,
+      wlWm.cmHasLuminances,
       wlWm.cmHasMasteringPrimaries,
       wlWm.cmHasExtendedTargetVolume,
-      wlWm.cmHasTFSt2084PQ, wlWm.cmHasTFExtLinear,
-      wlWm.cmHasPrimariesBT2020, wlWm.cmHasPrimariesSRGB,
-      wlWm.cmHasWindowsSCRGB, wlWm.cmHasPerceptualIntent,
+      wlWm.cmHasTFSt2084PQ,
+      wlWm.cmHasTFExtLinear,
+      wlWm.cmHasPrimariesBT2020,
+      wlWm.cmHasPrimariesSRGB,
+      wlWm.cmHasWindowsSCRGB,
+      wlWm.cmHasPerceptualIntent,
       atomic_load(&wlWm.cmCanDoHDR));
 }
 
