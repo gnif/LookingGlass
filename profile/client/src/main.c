@@ -212,7 +212,7 @@ int main(int argc, char * argv[])
 {
   DEBUG_INFO("Looking Glass (" BUILD_VERSION ") - Client Profiler");
 
-  if (!installCrashHandler("/proc/self/exe"))
+  if (!installCrashHandler("/proc/self/exe", argv[0]))
     DEBUG_WARN("Failed to install the crash handler");
 
   option_register(options);

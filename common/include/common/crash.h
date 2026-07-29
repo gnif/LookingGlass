@@ -23,7 +23,7 @@
 
 #include <stdbool.h>
 
-bool installCrashHandler(const char * exe);
+bool installCrashHandler(const char * exe, char * argv0);
 void cleanupCrashHandler(void);
 void printAllThreadBacktraces(void);
 

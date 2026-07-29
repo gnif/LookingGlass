@@ -41,6 +41,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #define CRASH_MAX_FRAMES 64
+#define CRASH_REPORTER_NAME "lg_crash_handler"
 
 enum CrashRequestType
 {
@@ -305,8 +306,26 @@ raw:
     DEBUG_ERROR("[trace]: (%u) 0x%" PRIxPTR, i, request->frames[i]);
 }
 
-static void reporterLoop(pid_t parent, int requestFd, int responseFd)
+static void reporterLoop(
+  pid_t parent, int requestFd, int responseFd, char * argv0)
 {
+  if (prctl(PR_SET_NAME, CRASH_REPORTER_NAME) != 0)
+    DEBUG_WARN("Unable to set the crash reporter process name");
+
+  if (argv0)
+  {
+    const size_t capacity = strlen(argv0);
+    const size_t nameLength = strlen(CRASH_REPORTER_NAME);
+    const size_t copyLength =
+      capacity < nameLength ? capacity : nameLength;
+
+    memset(argv0, 0, capacity);
+    memcpy(argv0, CRASH_REPORTER_NAME, copyLength);
+
+    if (capacity < nameLength)
+      DEBUG_WARN("Unable to set the full crash reporter command line name");
+  }
+
   // Do not leave an orphaned reporter if the client exits unexpectedly before
   // it closes the request pipe.
   prctl(PR_SET_PDEATHSIG, SIGKILL);
@@ -328,7 +347,7 @@ static void reporterLoop(pid_t parent, int requestFd, int responseFd)
   }
 }
 
-static bool startReporter(void)
+static bool startReporter(char * argv0)
 {
   int requestPipe[2];
   int responsePipe[2];
@@ -368,7 +387,7 @@ static bool startReporter(void)
   {
     close(requestPipe [1]);
     close(responsePipe[0]);
-    reporterLoop(parent, requestPipe[0], responsePipe[1]);
+    reporterLoop(parent, requestPipe[0], responsePipe[1], argv0);
     close(requestPipe [0]);
     close(responsePipe[1]);
     _exit(0);
@@ -511,11 +530,11 @@ static void crit_err_hdlr(int sig_num, siginfo_t * info, void * ucontext)
   _exit(128 + sig_num);
 }
 
-bool installCrashHandler(const char * exe)
+bool installCrashHandler(const char * exe, char * argv0)
 {
   (void)exe;
 
-  if (!startReporter())
+  if (!startReporter(argv0))
     return false;
 
   struct sigaction sigact = { 0 };
@@ -536,8 +555,10 @@ bool installCrashHandler(const char * exe)
 
 #else //ENABLE_BACKTRACE
 
-bool installCrashHandler(const char * exe)
+bool installCrashHandler(const char * exe, char * argv0)
 {
+  (void)exe;
+  (void)argv0;
   return true;
 }
 

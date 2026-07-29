@@ -886,7 +886,7 @@ fail_init:
 // this is called from the platform specific startup routine
 int app_main(int argc, char * argv[])
 {
-  if (!installCrashHandler(os_getExecutable()))
+  if (!installCrashHandler(os_getExecutable(), argv[0]))
     DEBUG_WARN("Failed to install the crash handler");
 
   // make sure rng is actually seeded for LGMP

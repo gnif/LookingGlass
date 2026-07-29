@@ -148,8 +148,10 @@ fail:
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
-bool installCrashHandler(const char * exe)
+bool installCrashHandler(const char * exe, char * argv0)
 {
+  (void)exe;
+  (void)argv0;
   SetUnhandledExceptionFilter(exception_filter);
   return true;
 }
@@ -159,8 +161,10 @@ void printAllThreadBacktraces(void)
 }
 
 #else
-bool installCrashHandler(const char * exe)
+bool installCrashHandler(const char * exe, char * argv0)
 {
+  (void)exe;
+  (void)argv0;
   return true;
 }
 

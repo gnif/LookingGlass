@@ -2064,7 +2064,7 @@ int main(int argc, char * argv[])
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
   cpuInfo_log();
 
-  if (!installCrashHandler("/proc/self/exe"))
+  if (!installCrashHandler("/proc/self/exe", argv[0]))
     DEBUG_WARN("Failed to install the crash handler");
 
   lgPathsInit("looking-glass");
