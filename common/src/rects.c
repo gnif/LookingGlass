@@ -330,12 +330,20 @@ static void rectCopyUnaligned_avx(
   src += ystart * srcPitch + dx;
   dst += ystart * dstPitch + dx;
 
-  const int align = (32 - ((uintptr_t)dst & 31)) & 31;
-  const int nvec  = (width - align) / sizeof(__m256i);
-  const int rem   = (width - align) % sizeof(__m256i);
-
+  bool streamed = false;
   for (int i = ystart; i < yend; ++i)
   {
+    /*
+     * dstPitch is not necessarily a multiple of the AVX store alignment.
+     * Recalculate the prefix for every row so the streaming stores remain
+     * aligned for packed 24-bit and odd-width framebuffers.
+     */
+    const int rowAlign = (32 - ((uintptr_t)dst & 31)) & 31;
+    const int align    = min(rowAlign, width);
+    const int nvec     = (width - align) / sizeof(__m256i);
+    const int rem      = (width - align) % sizeof(__m256i);
+    streamed |= nvec > 0;
+
     // copy the unaligned bytes
     for(int col = align - 1; col >= 0; --col)
       dst[col] = src[col];
@@ -365,6 +373,9 @@ static void rectCopyUnaligned_avx(
     src += srcPitch;
     dst += dstPitch;
   }
+
+  if (streamed)
+    _mm_sfence();
 }
 #ifdef __clang__
   #pragma clang attribute pop
