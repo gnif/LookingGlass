@@ -320,7 +320,6 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .uncapturePointer    = waylandUncapturePointer,
   .grabKeyboard        = waylandGrabKeyboard,
   .ungrabKeyboard      = waylandUngrabKeyboard,
-  .getCharCode         = waylandGetCharCode,
   .warpPointer         = waylandWarpPointer,
   .realignPointer      = waylandRealignPointer,
   .isValidPointerPos   = waylandIsValidPointerPos,

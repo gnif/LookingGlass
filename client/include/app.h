@@ -176,16 +176,15 @@ typedef void (*KeybindFn)(int sc, void * opaque);
 void app_showRecord(bool show);
 
 /**
- * Register a handler for the <super>+<key> combination
- * @param sc       The scancode to register
- * @param charcode The charcode to register (used instead of sc if non zero)
+ * Register a handler for the configured escape key + key combination
+ * @param sc       The Linux keycode to register
  * @param callback The function to be called when the combination is pressed
  * @param opaque   A pointer to be passed to the callback, may be NULL
  * @retval A handle for the binding or NULL on failure.
  *         The caller is required to release the handle via `app_releaseKeybind` when it is no longer required
  */
-KeybindHandle app_registerKeybind(int sc, int charcode, KeybindFn callback,
-    void * opaque, const char * description);
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque,
+    const char * description);
 
 /**
  * Release an existing key binding

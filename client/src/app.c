@@ -39,7 +39,6 @@
 #include <stdarg.h>
 #include <math.h>
 #include <string.h>
-#include <ctype.h>
 
 #define SHADER_MOUSE_VALID (UINT32_C(1) << 31)
 
@@ -465,11 +464,9 @@ void app_handleKeyPressInternal(int sc)
     {
       g_state.escapeAction = sc;
       KeybindHandle handle;
-      int charcode = g_state.ds->getCharCode(sc);
       ll_forEachNL(g_state.bindings, item, handle)
       {
-        if ((handle->sc       && handle->sc       == sc       ) ||
-            (handle->charcode && handle->charcode == charcode))
+        if (handle->sc == sc)
         {
           handle->callback(sc, handle->opaque);
           break;
@@ -849,18 +846,12 @@ void app_showRecord(bool show)
   overlayStatus_set(LG_USER_STATUS_RECORDING, show);
 }
 
-KeybindHandle app_registerKeybind(int sc, int charcode, KeybindFn callback,
-    void * opaque, const char * description)
+KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque,
+    const char * description)
 {
-  if (charcode != 0 && sc != 0)
+  if (sc <= KEY_RESERVED || sc >= KEY_MAX || !linux_to_display[sc])
   {
-    DEBUG_ERROR("invalid keybind, one of scancode or charcode must be 0");
-    return NULL;
-  }
-
-  if (charcode && islower(charcode))
-  {
-    DEBUG_ERROR("invalid keybind, charcode must be uppercase");
+    DEBUG_ERROR("invalid keybind keycode: %d", sc);
     return NULL;
   }
 
@@ -869,8 +860,7 @@ KeybindHandle app_registerKeybind(int sc, int charcode, KeybindFn callback,
   // don't allow duplicate binds
   ll_forEachNL(g_state.bindings, item, handle)
   {
-    if ((sc       && handle->sc       == sc      ) ||
-        (charcode && handle->charcode == charcode))
+    if (handle->sc == sc)
     {
       DEBUG_INFO("Key already bound");
       return NULL;
@@ -885,7 +875,6 @@ KeybindHandle app_registerKeybind(int sc, int charcode, KeybindFn callback,
   }
 
   handle->sc          = sc;
-  handle->charcode    = charcode;
   handle->callback    = callback;
   handle->description = description;
   handle->opaque      = opaque;

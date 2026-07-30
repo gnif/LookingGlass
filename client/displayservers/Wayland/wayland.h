@@ -378,8 +378,6 @@ void waylandUncapturePointer(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
 void waylandGuestPointerUpdated(double x, double y, double localX, double localY);
-int waylandGetCharCode(int key);
-
 // output module
 bool waylandOutputInit(void);
 void waylandOutputFree(void);

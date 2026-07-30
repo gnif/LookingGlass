@@ -254,7 +254,6 @@ struct CBRequest
 struct KeybindHandle
 {
   int          sc;
-  int          charcode;
   KeybindFn    callback;
   const char * description;
   void *       opaque;

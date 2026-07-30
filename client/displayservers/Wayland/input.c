@@ -225,17 +225,6 @@ done:
   close(fd);
 }
 
-int waylandGetCharCode(int key)
-{
-  key += 8; // xkb scancode is evdev scancode + 8
-  xkb_keysym_t sym = xkb_state_key_get_one_sym(wlWm.xkbState, key);
-  if (sym == XKB_KEY_NoSymbol)
-    return 0;
-
-  sym = xkb_keysym_to_upper(sym);
-  return xkb_keysym_to_utf32(sym);
-}
-
 static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {

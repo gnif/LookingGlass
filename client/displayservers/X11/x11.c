@@ -40,8 +40,6 @@
 #include <X11/extensions/Xpresent.h>
 #include <X11/Xcursor/Xcursor.h>
 
-#include <xkbcommon/xkbcommon.h>
-
 #include <GL/glx.h>
 #include <GL/glxext.h>
 
@@ -570,9 +568,8 @@ static bool x11Init(const LG_DSInitParams params)
     goto fail_window;
   }
 
-  XDisplayKeycodes(x11.display, &x11.minKeycode, &x11.maxKeycode);
-  x11.keysyms = XGetKeyboardMapping(x11.display, x11.minKeycode,
-      x11.maxKeycode - x11.minKeycode, &x11.symsPerKeycode);
+  int maxKeycode;
+  XDisplayKeycodes(x11.display, &x11.minKeycode, &maxKeycode);
 
   XIFreeDeviceInfo(devinfo);
 
@@ -785,9 +782,6 @@ static void x11Free(void)
   for(int i = 0; i < LG_POINTER_COUNT; ++i)
     if (x11.cursors[i])
       XFreeCursor(x11.display, x11.cursors[i]);
-
-  if (x11.keysyms)
-    XFree(x11.keysyms);
 
   x11.wm->deinit();
   XCloseDisplay(x11.display);
@@ -1090,18 +1084,6 @@ static void setFocus(bool focused, double x, double y)
   x11.focused = focused;
   app_updateCursorPos(x, y);
   app_handleFocusEvent(focused);
-}
-
-static int x11GetCharCode(int detail)
-{
-  detail += x11.minKeycode;
-  if (detail < x11.minKeycode || detail > x11.maxKeycode)
-    return 0;
-
-  KeySym sym = x11.keysyms[(detail - x11.minKeycode) *
-      x11.symsPerKeycode];
-  sym = xkb_keysym_to_upper(sym);
-  return xkb_keysym_to_utf32(sym);
 }
 
 static void x11XInputEvent(XGenericEventCookie *cookie)
@@ -2019,7 +2001,6 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabPointer       = x11UngrabPointer,
   .capturePointer      = x11CapturePointer,
   .uncapturePointer    = x11UncapturePointer,
-  .getCharCode         = x11GetCharCode,
   .grabKeyboard        = x11GrabKeyboard,
   .ungrabKeyboard      = x11UngrabKeyboard,
   .warpPointer         = x11WarpPointer,

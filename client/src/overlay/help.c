@@ -70,10 +70,7 @@ static int help_render(void * udata, bool interactive, struct Rect * windowRects
         continue;
 
       igTableNextColumn();
-      if (handle->sc)
-        igText("%s+%s", escapeName, linux_to_display[handle->sc]);
-      else
-        igText("%s+%c", escapeName, handle->charcode);
+      igText("%s+%s", escapeName, linux_to_display[handle->sc]);
       igTableNextColumn();
       igTextUnformatted(handle->description, NULL);
     }
