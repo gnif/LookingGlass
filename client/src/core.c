@@ -723,7 +723,7 @@ void core_resetOverlayInputState(void)
   g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
   g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
   g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
-  for(int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; key++)
+  for(int key = 0; key < KEY_MAX; key++)
     if (linux_to_imgui[key])
       ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[key], false);
 }
