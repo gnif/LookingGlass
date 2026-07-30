@@ -124,6 +124,7 @@ static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * upd
 
   egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   egl_stateBindTexture(0, GL_TEXTURE_2D, this->tex[0]);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, update->stride);
   glTexSubImage2D(GL_TEXTURE_2D,
       0,
@@ -298,6 +299,7 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
   egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
   egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
 
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.stride);
   glTexSubImage2D(GL_TEXTURE_2D,
       0, 0, 0,
