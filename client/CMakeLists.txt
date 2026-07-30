@@ -18,6 +18,7 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cma
 include(CheckSubmodule)
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
+include(CMakeDependentOption)
 include(FeatureSummary)
 
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
@@ -59,11 +60,31 @@ add_feature_info(ENABLE_ASAN ENABLE_ASAN "AddressSanitizer support.")
 option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 add_feature_info(ENABLE_UBSAN ENABLE_UBSAN "UndefinedBehaviorSanitizer support.")
 
-option(ENABLE_PIPEWIRE "Build with PipeWire audio output support" ON)
+option(ENABLE_AUDIO "Build with audio support" ON)
+
+cmake_dependent_option(
+  ENABLE_PIPEWIRE
+  "Build with PipeWire audio output support"
+  ON
+  "ENABLE_AUDIO"
+  OFF
+)
 add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
 
-option(ENABLE_PULSEAUDIO "Build with PulseAudio audio output support" ON)
+cmake_dependent_option(
+  ENABLE_PULSEAUDIO
+  "Build with PulseAudio audio output support"
+  ON
+  "ENABLE_AUDIO"
+  OFF
+)
 add_feature_info(ENABLE_PULSEAUDIO ENABLE_PULSEAUDIO "PulseAudio audio support.")
+
+if(ENABLE_AUDIO AND NOT (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO))
+  message(STATUS "No audio backends enabled, disabling audio support")
+  set(ENABLE_AUDIO OFF)
+endif()
+add_feature_info(ENABLE_AUDIO ENABLE_AUDIO "Audio support.")
 
 add_compile_options(
   "-Wall"
@@ -139,7 +160,6 @@ set(SOURCES
   src/core.c
   src/app.c
   src/message.c
-  src/audio.c
   src/config.c
   src/keybind.c
   src/util.c
@@ -163,6 +183,10 @@ set(SOURCES
   src/overlay/status.c
 )
 
+if(ENABLE_AUDIO)
+  list(APPEND SOURCES src/audio.c)
+endif()
+
 # Force cimgui to build as a static library.
 set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
 # Support Unicode codepoints outside the basic multilingual plane.
@@ -179,6 +203,7 @@ add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui" E
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
 add_subdirectory(transports)
+add_subdirectory(audiodevs)
 
 configure_file("${PROJECT_TOP}/resources/looking-glass-client.desktop.in" "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop" @ONLY)
 add_executable(looking-glass-client ${SOURCES})
@@ -215,6 +240,7 @@ target_link_libraries(looking-glass-client
   purespice
   renderers
   transports
+  audiodevs
   cimgui
 )
 
@@ -224,13 +250,11 @@ if(ENABLE_RENDER_TESTS)
   add_subdirectory(tests)
 endif()
 
-if (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO)
-  add_definitions(-D ENABLE_AUDIO)
-  add_subdirectory(audiodevs)
+if(ENABLE_AUDIO)
+  target_compile_definitions(looking-glass-client PRIVATE ENABLE_AUDIO)
   pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
   target_link_libraries(looking-glass-client
     PkgConfig::SAMPLERATE
-    audiodevs
   )
 endif()
 

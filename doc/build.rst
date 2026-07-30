@@ -108,15 +108,21 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libwayland-bin``
    -  ``libwayland-dev``
 
+-  Disable all audio support with ``cmake -DENABLE_AUDIO=no ..``
+
+   -  ``libpipewire-0.3-dev``
+   -  ``libpulse-dev``
+   -  ``libsamplerate0-dev``
+
 -  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
 
    -  ``libpipewire-0.3-dev``
-   -  ``libsamplerate0-dev``
 
 -  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
 
    -  ``libpulse-dev``
-   -  ``libsamplerate0-dev``
+
+``libsamplerate0-dev`` is required whenever audio support remains enabled.
 
 .. _client_deps_recommended:
 

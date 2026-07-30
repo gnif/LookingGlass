@@ -36,7 +36,7 @@ foreach(audiodev ${AUDIODEVS})
   file(APPEND ${AUDIODEV_C} "extern struct LG_AudioDevOps LGAD_${audiodev};\n")
 endforeach()
 
-file(APPEND ${AUDIODEV_C} "\nconst struct LG_AudioDevOps * LG_AudioDevs[] =\n{\n")
+file(APPEND ${AUDIODEV_C} "\nstruct LG_AudioDevOps * LG_AudioDevs[] =\n{\n")
 foreach(audiodev ${AUDIODEVS})
   file(APPEND ${AUDIODEV_C} "  &LGAD_${audiodev},\n")
 endforeach()
