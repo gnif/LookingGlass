@@ -1114,9 +1114,14 @@ static int lg_run(void)
     ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder();
   ImFontGlyphRangesBuilder_AddRanges(
     rangeBuilder,
+    ImFontAtlas_GetGlyphRangesDefault(g_state.io->Fonts));
+  ImFontGlyphRangesBuilder_AddRanges(
+    rangeBuilder,
+    ImFontAtlas_GetGlyphRangesGreek(g_state.io->Fonts));
+  ImFontGlyphRangesBuilder_AddRanges(
+    rangeBuilder,
     ImFontAtlas_GetGlyphRangesCyrillic(g_state.io->Fonts));
   ImFontGlyphRangesBuilder_AddRanges(rangeBuilder, (ImWchar[]) {
-    0x0020, 0x00FF, // Basic Latin + Latin Supplement
     0x2190, 0x2193, // four directional arrows
     0,
   });
