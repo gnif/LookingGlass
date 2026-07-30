@@ -268,11 +268,23 @@ static int renderThread(void * unused)
         .y = g_state.windowScale,
       };
       g_state.io->FontGlobalScale = 1.0f / g_state.windowScale;
+    }
 
+    const bool fontDirty = atomic_exchange(&g_state.fontDirty, false);
+    if (unlikely(fontDirty || g_state.fontScale != g_state.windowScale))
+    {
       if (!util_buildUIFontAtlas(g_state.io->Fonts,
             g_params.uiSize * g_state.windowScale, &g_state.fontLarge))
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
+      if (g_state.lgr && !RENDERER(onFontUpdate))
+        DEBUG_FATAL("Failed to upload the ImGui font atlas");
+
+      g_state.fontScale = g_state.windowScale;
+    }
+
+    if (unlikely(resize))
+    {
       if (g_state.lgr)
         RENDERER(onResize, g_state.windowW, g_state.windowH,
             g_state.windowScale, g_state.dstRect, g_params.winRotate);

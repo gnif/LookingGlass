@@ -314,11 +314,12 @@ void opengl_onResize(LG_Renderer * renderer, const int width, const int height, 
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
   glOrtho(0, this->window.x, this->window.y, 0, -1, 1);
+}
 
-  // this is needed to refresh the font atlas texture
-  ImGui_ImplOpenGL2_Shutdown();
-  ImGui_ImplOpenGL2_Init();
-  ImGui_ImplOpenGL2_NewFrame();
+static bool opengl_onFontUpdate(LG_Renderer * renderer)
+{
+  ImGui_ImplOpenGL2_DestroyFontsTexture();
+  return ImGui_ImplOpenGL2_CreateFontsTexture();
 }
 
 bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
@@ -744,6 +745,7 @@ const LG_RendererOps LGR_OpenGL =
   .deinitialize  = opengl_deinitialize,
   .onRestart     = opengl_onRestart,
   .onResize      = opengl_onResize,
+  .onFontUpdate  = opengl_onFontUpdate,
   .onMouseShape  = opengl_onMouseShape,
   .onMouseEvent  = opengl_onMouseEvent,
   .onFrameFormat = opengl_onFrameFormat,

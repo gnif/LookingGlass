@@ -106,6 +106,7 @@ struct AppState
   int                  windowW, windowH;
   int                  windowCX, windowCY;
   double               windowScale;
+  double               fontScale;
   LG_RendererRotate    rotate;
   bool                 focused;
   struct Border        border;
@@ -120,6 +121,7 @@ struct AppState
 
   LG_Renderer        * lgr;
   atomic_int           lgrResize;
+  atomic_bool          fontDirty;
   LG_Lock              lgrLock;
   bool                 useDMA;
 

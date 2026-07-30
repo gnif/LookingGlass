@@ -33,6 +33,7 @@
    (x)->deinitialize    && \
    (x)->onRestart       && \
    (x)->onResize        && \
+   (x)->onFontUpdate    && \
    (x)->onMouseShape    && \
    (x)->onMouseEvent    && \
    (x)->renderStartup   && \
@@ -184,6 +185,10 @@ typedef struct LG_RendererOps
   void (*onResize)(LG_Renderer * renderer, const int width, const int height,
       const double scale, const LG_RendererRect destRect,
       LG_RendererRotate rotate);
+
+  /* called when the Dear ImGui font atlas texture must be uploaded
+   * Context: renderThread */
+  bool (*onFontUpdate)(LG_Renderer * renderer);
 
   /* called when the mouse shape has changed
    * Context: cursorThread */

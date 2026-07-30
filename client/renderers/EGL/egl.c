@@ -584,14 +584,16 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
       !egl_hdrComposeResize(this->hdrCompose, this->width, this->height))
     DEBUG_FATAL("Failed to resize the linear HDR composition framebuffer");
 
-  // this is needed to refresh the font atlas texture
-  ImGui_ImplOpenGL3_Shutdown();
-  ImGui_ImplOpenGL3_Init("#version 300 es");
-  ImGui_ImplOpenGL3_NewFrame();
-  egl_stateInvalidate();
-
   egl_damageResize(this->damage, this->translateX, this->translateY, this->scaleX, this->scaleY);
   egl_desktopResize(this->desktop, this->width, this->height);
+}
+
+static bool egl_onFontUpdate(LG_Renderer * renderer)
+{
+  ImGui_ImplOpenGL3_DestroyFontsTexture();
+  const bool result = ImGui_ImplOpenGL3_CreateFontsTexture();
+  egl_stateInvalidate();
+  return result;
 }
 
 static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
@@ -1650,6 +1652,7 @@ struct LG_RendererOps LGR_EGL =
   .getInterop            = egl_getInterop,
   .onRestart             = egl_onRestart,
   .onResize              = egl_onResize,
+  .onFontUpdate          = egl_onFontUpdate,
   .onMouseShape          = egl_onMouseShape,
   .onMouseColorTransform = egl_onMouseColorTransform,
   .onMouseWhiteLevel     = egl_onMouseWhiteLevel,

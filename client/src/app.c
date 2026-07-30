@@ -1157,7 +1157,7 @@ void app_registerImGuiText(const char * text)
   if (!util_uiFontAddText(text))
     return;
 
-  atomic_fetch_add(&g_state.lgrResize, 1);
+  atomic_store(&g_state.fontDirty, true);
   app_invalidateOverlay(false);
 }
 
