@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -109,6 +110,28 @@ typedef struct LG_RendererRect
   int  h;
 }
 LG_RendererRect;
+
+typedef enum LG_RendererCaptureFormat
+{
+  LG_CAPTURE_RGBA8,
+  LG_CAPTURE_RGB10_A2,
+  LG_CAPTURE_RGBA32F,
+}
+LG_RendererCaptureFormat;
+
+typedef struct LG_RendererCapture
+{
+  unsigned int width;
+  unsigned int height;
+  size_t       stride;
+  size_t       dataSize;
+  LG_RendererCaptureFormat format;
+  bool         hdr;
+  bool         hdrPQ;
+  bool         nativeHDR;
+  void       * data;
+}
+LG_RendererCapture;
 
 typedef enum LG_RendererCursor
 {
@@ -228,6 +251,11 @@ typedef struct LG_RendererOps
   bool (*render)(LG_Renderer * renderer, LG_RendererRotate rotate,
       const bool newFrame, const bool invalidateWindow,
       void (*preSwap)(void * udata), void * udata);
+
+  /* Optional test/diagnostic readback of the fully composed framebuffer.
+   * Called on the render thread before swap while the graphics context is
+   * current. The caller owns capture->data and must free it. */
+  bool (*capture)(LG_Renderer * renderer, LG_RendererCapture * capture);
 
   /* called to create a texture from the specified 32-bit RGB image data. This
    * method is for use with Dear ImGui

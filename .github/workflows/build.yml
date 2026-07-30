@@ -236,3 +236,47 @@ jobs:
       run: |
         cd doc
         make dirhtml SPHINXOPTS='-b spelling -W' -j$(nproc)
+
+  render-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install \
+            weston libgtest-dev libgl1-mesa-dri \
+            libdw-dev libunwind-dev \
+            libspice-protocol-dev nettle-dev \
+            libgl-dev libgles-dev \
+            libx11-dev libxss-dev libxi-dev libxinerama-dev \
+            libxcursor-dev libxpresent-dev \
+            libwayland-dev libxkbcommon-dev libfontconfig-dev \
+            libsamplerate0-dev libpipewire-0.3-dev libpulse-dev
+
+      - name: Configure
+        run: |
+          cmake -S client -B client/build-render-tests \
+            -DOPTIMIZE_FOR_NATIVE=OFF \
+            -DENABLE_LIBDECOR=OFF \
+            -DENABLE_TEST_TRANSPORT=ON \
+            -DENABLE_RENDER_TESTS=ON
+
+      - name: Build
+        run: cmake --build client/build-render-tests --parallel
+
+      - name: Run rendering matrix
+        run: |
+          ctest --test-dir client/build-render-tests \
+            --output-on-failure \
+            -R looking-glass-render-tests
+
+      - name: Upload failed captures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-test-failures
+          path: /tmp/lg-render-case.*

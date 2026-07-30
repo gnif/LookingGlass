@@ -36,6 +36,19 @@ add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
 option(ENABLE_TEST_TRANSPORT "Enable the test transport" OFF)
 add_feature_info(ENABLE_TEST_TRANSPORT ENABLE_TEST_TRANSPORT
   "Synthetic frames for graphics-pipeline validation.")
+if(ENABLE_TEST_TRANSPORT)
+  add_definitions(-D ENABLE_TEST_TRANSPORT)
+endif()
+
+option(ENABLE_RENDER_TESTS "Build framebuffer rendering integration tests" OFF)
+add_feature_info(ENABLE_RENDER_TESTS ENABLE_RENDER_TESTS
+  "Pixel-accurate EGL rendering tests using the test transport.")
+if(ENABLE_RENDER_TESTS AND NOT ENABLE_TEST_TRANSPORT)
+  message(FATAL_ERROR "ENABLE_RENDER_TESTS requires ENABLE_TEST_TRANSPORT")
+endif()
+if(ENABLE_RENDER_TESTS AND NOT ENABLE_EGL)
+  message(FATAL_ERROR "ENABLE_RENDER_TESTS requires ENABLE_EGL")
+endif()
 
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
 add_feature_info(ENABLE_BACKTRACE ENABLE_BACKTRACE "Backtrace support.")
@@ -204,6 +217,12 @@ target_link_libraries(looking-glass-client
   transports
   cimgui
 )
+
+if(ENABLE_RENDER_TESTS)
+  include(CTest)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
 
 if (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO)
   add_definitions(-D ENABLE_AUDIO)

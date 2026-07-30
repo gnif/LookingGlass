@@ -39,6 +39,7 @@
 #include "generator/output/cimgui_impl.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "egl_dynprocs.h"
@@ -131,6 +132,7 @@ struct Inst
 
   bool surfaceSupportsPQ;
   bool surfaceSupportsSCRGB;
+  LG_RendererCaptureFormat captureFormat;
   bool hdr;               // true if current frame format is HDR
   bool nativeHDR;         // true only while the surface HDR description is active
   bool nativeHDRPQ;
@@ -977,6 +979,8 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   this->surfaceSupportsPQ    = configs[chosen].pq;
   this->surfaceSupportsSCRGB = configs[chosen].scRGB;
+  this->captureFormat        = chosen == 0 ? LG_CAPTURE_RGBA32F :
+    chosen == 1 ? LG_CAPTURE_RGB10_A2 : LG_CAPTURE_RGBA8;
   DEBUG_INFO("EGL config: %s%s", configDesc,
       this->surfaceSupportsPQ ? " (HDR capable)" : "");
 
@@ -1570,6 +1574,71 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   return true;
 }
 
+static bool egl_capture(LG_Renderer * renderer, LG_RendererCapture * capture)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  if (!capture || this->width <= 0 || this->height <= 0)
+    return false;
+
+  size_t bytesPerPixel;
+  GLenum dataType;
+  switch (this->captureFormat)
+  {
+    case LG_CAPTURE_RGBA8:
+      bytesPerPixel = 4;
+      dataType      = GL_UNSIGNED_BYTE;
+      break;
+
+    case LG_CAPTURE_RGB10_A2:
+      bytesPerPixel = 4;
+      dataType      = GL_UNSIGNED_INT_2_10_10_10_REV;
+      break;
+
+    case LG_CAPTURE_RGBA32F:
+      bytesPerPixel = sizeof(float) * 4;
+      dataType      = GL_FLOAT;
+      break;
+
+    default:
+      return false;
+  }
+
+  if ((size_t)this->width > SIZE_MAX / bytesPerPixel ||
+      (size_t)this->height >
+        SIZE_MAX / ((size_t)this->width * bytesPerPixel))
+    return false;
+
+  const size_t stride   = (size_t)this->width * bytesPerPixel;
+  const size_t dataSize = stride * this->height;
+  void * data = malloc(dataSize);
+  if (!data)
+    return false;
+
+  while (glGetError() != GL_NO_ERROR)
+    ;
+  glPixelStorei(GL_PACK_ALIGNMENT, 1);
+  glReadPixels(0, 0, this->width, this->height, GL_RGBA, dataType, data);
+  if (glGetError() != GL_NO_ERROR)
+  {
+    free(data);
+    DEBUG_ERROR("Failed to read the composed EGL framebuffer");
+    return false;
+  }
+
+  *capture = (LG_RendererCapture) {
+    .width     = this->width,
+    .height    = this->height,
+    .stride    = stride,
+    .dataSize  = dataSize,
+    .format    = this->captureFormat,
+    .hdr       = this->format.hdr,
+    .hdrPQ     = this->format.hdrPQ,
+    .nativeHDR = this->nativeHDR,
+    .data      = data,
+  };
+  return true;
+}
+
 static void * egl_createTexture(LG_Renderer * renderer,
   int width, int height, uint8_t * data)
 {
@@ -1661,6 +1730,7 @@ struct LG_RendererOps LGR_EGL =
   .onFrame               = egl_onFrame,
   .renderStartup         = egl_renderStartup,
   .render                = egl_render,
+  .capture               = egl_capture,
   .createTexture         = egl_createTexture,
   .freeTexture           = egl_freeTexture,
 

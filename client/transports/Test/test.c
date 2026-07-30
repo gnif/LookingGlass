@@ -34,6 +34,17 @@
 #define TEST_BUFFER_COUNT 2
 #define TEST_PQ_LUT_SIZE  4096
 
+enum TestDamageMode
+{
+  TEST_DAMAGE_MOVING,
+  TEST_DAMAGE_FULL,
+  TEST_DAMAGE_OVERLAP,
+  TEST_DAMAGE_MAX,
+  TEST_DAMAGE_INVALID,
+  TEST_DAMAGE_NULL,
+  TEST_DAMAGE_ZERO,
+};
+
 struct TestFormat
 {
   const char * name;
@@ -66,6 +77,8 @@ struct LG_Transport
   unsigned                frameCount;
   bool                    realtime;
   bool                    cycleFormats;
+  bool                    holdLastFrame;
+  enum TestDamageMode     damageMode;
   unsigned                formatIndex;
 
   bool                    connected;
@@ -74,7 +87,7 @@ struct LG_Transport
   uint64_t                nextFrameTime;
   unsigned                bufferIndex;
   struct TestBuffer       buffers[TEST_BUFFER_COUNT];
-  FrameDamageRect         damage[2];
+  FrameDamageRect         damage[LG_TRANSPORT_MAX_DAMAGE_RECTS];
   LG_TransportFrameFormat format;
   uint16_t                pqLUT[TEST_PQ_LUT_SIZE + 1];
 };
@@ -126,6 +139,43 @@ static void test_setup(void)
       .type           = OPTION_TYPE_STRING,
       .value.x_string = "bgra",
     },
+    {
+      .module         = "test",
+      .name           = "damage",
+      .description    = "Damage mode: moving, full, overlap, max, invalid, "
+                        "null, or zero",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = "moving",
+    },
+    {
+      .module       = "test",
+      .name         = "holdLastFrame",
+      .description  =
+        "Keep the session alive after generating frameCount frames",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = false,
+    },
+    {
+      .module         = "test",
+      .name           = "captureFile",
+      .description    = "Write a composed framebuffer capture to this file",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = NULL,
+    },
+    {
+      .module      = "test",
+      .name        = "captureFrame",
+      .description = "Capture after this synthetic frame serial is submitted",
+      .type        = OPTION_TYPE_INT,
+      .value.x_int = 0,
+    },
+    {
+      .module      = "test",
+      .name        = "captureDelay",
+      .description = "Stable render passes to wait before framebuffer capture",
+      .type        = OPTION_TYPE_INT,
+      .value.x_int = 4,
+    },
     {0}
   };
 
@@ -138,6 +188,25 @@ static int test_findFormat(const char * name)
     if (strcmp(name, testFormats[i].name) == 0)
       return (int)i;
 
+  return -1;
+}
+
+static int test_findDamageMode(const char * name)
+{
+  static const char * names[] =
+  {
+    [TEST_DAMAGE_MOVING]  = "moving",
+    [TEST_DAMAGE_FULL]    = "full",
+    [TEST_DAMAGE_OVERLAP] = "overlap",
+    [TEST_DAMAGE_MAX]     = "max",
+    [TEST_DAMAGE_INVALID] = "invalid",
+    [TEST_DAMAGE_NULL]    = "null",
+    [TEST_DAMAGE_ZERO]    = "zero",
+  };
+
+  for (unsigned i = 0; i < ARRAY_LENGTH(names); ++i)
+    if (strcmp(name, names[i]) == 0)
+      return (int)i;
   return -1;
 }
 
@@ -251,11 +320,13 @@ static bool test_create(LG_Transport ** result)
   const int      frameRate    = option_get_int("test", "frameRate");
   const int      frameCount   = option_get_int("test", "frameCount");
   const char *   format       = option_get_string("test", "format");
+  const char *   damage       = option_get_string("test", "damage");
+  const int      damageMode   = damage ? test_findDamageMode(damage) : -1;
   const bool     cycleFormats = strcmp(format, "cycle") == 0;
   const int      formatIndex  = cycleFormats ? 0 : test_findFormat(format);
   const unsigned maxBytesPerPixel = formatIndex < 0 ? 0 :
     cycleFormats ? 8 : testFormats[formatIndex].bytesPerPixel;
-  if (width < 1 || height < 1 || !maxBytesPerPixel ||
+  if (width < 1 || height < 1 || !maxBytesPerPixel || damageMode < 0 ||
       width > (int)(UINT32_MAX / maxBytesPerPixel) ||
       frameRate < 1 || frameRate > 1000000000 || frameCount < 0 ||
       (size_t)width > (SIZE_MAX - sizeof(FrameBuffer)) /
@@ -273,6 +344,8 @@ static bool test_create(LG_Transport ** result)
   this->frameCount   = frameCount;
   this->realtime     = option_get_bool("test", "realtime");
   this->cycleFormats = cycleFormats;
+  this->holdLastFrame = option_get_bool("test", "holdLastFrame");
+  this->damageMode    = damageMode;
   this->formatIndex  = (unsigned)formatIndex;
   test_initPQLUT(this);
 
@@ -489,7 +562,12 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
   if (this->framePending)
     return LG_TRANSPORT_ERROR;
   if (this->frameCount && this->serial >= this->frameCount)
-    return LG_TRANSPORT_END;
+  {
+    if (!this->holdLastFrame)
+      return LG_TRANSPORT_END;
+    usleep(1000);
+    return LG_TRANSPORT_TIMEOUT;
+  }
 
   if (this->realtime)
   {
@@ -518,7 +596,8 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
   frame->framebuffer = buffer->framebuffer;
   frame->dmaFD       = -1;
 
-  if (this->serial == 1 || formatChanged)
+  if (this->damageMode == TEST_DAMAGE_FULL ||
+      this->serial == 1 || formatChanged)
     frame->damageRectsCount = 0;
   else
   {
@@ -542,8 +621,46 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
       .width  = boxSize,
       .height = boxSize,
     };
-    frame->damageRects      = this->damage;
-    frame->damageRectsCount = 2;
+    frame->damageRects = this->damage;
+    switch (this->damageMode)
+    {
+      case TEST_DAMAGE_MOVING:
+        frame->damageRectsCount = 2;
+        break;
+
+      case TEST_DAMAGE_OVERLAP:
+        this->damage[2] = this->damage[0];
+        this->damage[3] = this->damage[1];
+        frame->damageRectsCount = 4;
+        break;
+
+      case TEST_DAMAGE_MAX:
+        for (unsigned i = 2; i < ARRAY_LENGTH(this->damage); ++i)
+          this->damage[i] = (FrameDamageRect) {0};
+        frame->damageRectsCount = ARRAY_LENGTH(this->damage);
+        break;
+
+      case TEST_DAMAGE_INVALID:
+        this->damage[0] = (FrameDamageRect) {
+          .x = this->width, .y = 0, .width = 1, .height = 1
+        };
+        frame->damageRectsCount = 1;
+        break;
+
+      case TEST_DAMAGE_NULL:
+        frame->damageRects      = NULL;
+        frame->damageRectsCount = 1;
+        break;
+
+      case TEST_DAMAGE_ZERO:
+        this->damage[2] = (FrameDamageRect) {0};
+        frame->damageRectsCount = 3;
+        break;
+
+      case TEST_DAMAGE_FULL:
+        DEBUG_UNREACHABLE();
+        break;
+    }
   }
 
   this->framePending = true;

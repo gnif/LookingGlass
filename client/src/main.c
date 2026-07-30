@@ -30,10 +30,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include <stdlib.h>
 #include <stdatomic.h>
 #include <linux/input.h>
 
@@ -49,6 +51,7 @@
 #include "common/paths.h"
 #include "common/cpuinfo.h"
 #include "common/ll.h"
+#include "common/option.h"
 #include "common/proctitle.h"
 
 #include "message.h"
@@ -65,6 +68,16 @@
 #include "util.h"
 #include "render_queue.h"
 #include "evdev.h"
+
+#ifdef ENABLE_TEST_TRANSPORT
+#include "interface/test_capture.h"
+_Static_assert((int)LG_CAPTURE_RGBA8 == (int)LG_TEST_CAPTURE_RGBA8,
+    "capture format mismatch");
+_Static_assert((int)LG_CAPTURE_RGB10_A2 == (int)LG_TEST_CAPTURE_RGB10_A2,
+    "capture format mismatch");
+_Static_assert((int)LG_CAPTURE_RGBA32F == (int)LG_TEST_CAPTURE_RGBA32F,
+    "capture format mismatch");
+#endif
 
 // forwards
 static int renderThread(void * unused);
@@ -85,6 +98,23 @@ struct CursorState g_cursor;
 
 // this structure is initialized in config.c
 struct AppParams g_params = { 0 };
+
+#ifdef ENABLE_TEST_TRANSPORT
+static struct
+{
+  const char * path;
+  uint64_t     targetSerial;
+  uint64_t     lastSerial;
+  unsigned     delay;
+  unsigned     stableRenders;
+  bool         enabled;
+  bool         complete;
+}
+l_testCapture;
+
+static atomic_uint_least64_t l_testFrameSerial;
+static _Atomic(FrameType)    l_testFrameType;
+#endif
 
 static void lgInit(void)
 {
@@ -174,6 +204,74 @@ static void preSwapCallback(void * udata)
   const uint64_t * renderStart = (const uint64_t *)udata;
   ringbuffer_push(g_state.renderDuration,
       &(float) {(nanotime() - *renderStart) * 1e-6f});
+
+#ifdef ENABLE_TEST_TRANSPORT
+  if (!l_testCapture.enabled || l_testCapture.complete)
+    return;
+
+  const uint64_t serial =
+    atomic_load_explicit(&l_testFrameSerial, memory_order_acquire);
+  if (serial < l_testCapture.targetSerial)
+    return;
+
+  if (l_testCapture.lastSerial != serial)
+  {
+    l_testCapture.lastSerial    = serial;
+    l_testCapture.stableRenders = 0;
+    return;
+  }
+
+  if (l_testCapture.stableRenders++ < l_testCapture.delay)
+    return;
+
+  l_testCapture.complete = true;
+  LG_RendererCapture capture;
+  if (!g_state.lgr->ops.capture ||
+      !RENDERER(capture, &capture))
+  {
+    DEBUG_ERROR("The selected renderer cannot capture its framebuffer");
+    app_setState(APP_STATE_SHUTDOWN);
+    return;
+  }
+
+  const FrameType sourceType =
+    atomic_load_explicit(&l_testFrameType, memory_order_acquire);
+  const LG_TestCaptureHeader header = {
+    .magic         = LG_TEST_CAPTURE_MAGIC,
+    .version       = LG_TEST_CAPTURE_VERSION,
+    .headerSize    = sizeof(header),
+    .frameSerial   = serial,
+    .sourceType    = sourceType,
+    .captureFormat = capture.format,
+    .width         = capture.width,
+    .height        = capture.height,
+    .stride        = capture.stride,
+    .flags         = (capture.hdr       ? LG_TEST_CAPTURE_HDR        : 0) |
+                     (capture.hdrPQ     ? LG_TEST_CAPTURE_HDR_PQ     : 0) |
+                     (capture.nativeHDR ? LG_TEST_CAPTURE_NATIVE_HDR : 0) |
+                     LG_TEST_CAPTURE_BOTTOM_UP,
+    .dataSize      = capture.dataSize,
+  };
+
+  FILE * file = fopen(l_testCapture.path, "wb");
+  bool written = false;
+  if (file)
+  {
+    written =
+      fwrite(&header, sizeof(header), 1, file) == 1 &&
+      fwrite(capture.data, capture.dataSize, 1, file) == 1;
+    if (fclose(file) != 0)
+      written = false;
+  }
+  free(capture.data);
+
+  if (!written)
+    DEBUG_ERROR("Failed to write test capture to: %s", l_testCapture.path);
+  else
+    DEBUG_INFO("Wrote test capture for frame %" PRIu64 " to: %s",
+        serial, l_testCapture.path);
+  app_setState(APP_STATE_SHUTDOWN);
+#endif
 }
 
 static int renderThread(void * unused)
@@ -608,6 +706,10 @@ int main_frameThread(void * unused)
 
       g_state.formatValid = true;
       formatVersion       = format->version;
+#ifdef ENABLE_TEST_TRANSPORT
+      atomic_store_explicit(&l_testFrameType, format->type,
+          memory_order_release);
+#endif
       DEBUG_INFO("Format: %s %ux%u (%ux%u) stride:%u pitch:%u rotation:%d hdr:%d pq:%d sdrWhite:%u nits",
           FrameTypeStr[format->type], format->frameWidth, format->frameHeight,
           format->dataWidth, format->dataHeight, format->stride, format->pitch,
@@ -694,6 +796,10 @@ int main_frameThread(void * unused)
     g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
+#ifdef ENABLE_TEST_TRANSPORT
+    atomic_store_explicit(&l_testFrameSerial, frame.serial,
+        memory_order_release);
+#endif
     if (g_state.jitRender)
     {
       if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
@@ -1095,6 +1201,32 @@ static int transportSessionProbe(void * opaque)
 
 static int lg_run(void)
 {
+#ifdef ENABLE_TEST_TRANSPORT
+  memset(&l_testCapture, 0, sizeof(l_testCapture));
+  atomic_store_explicit(&l_testFrameSerial, 0, memory_order_relaxed);
+  atomic_store_explicit(&l_testFrameType, FRAME_TYPE_INVALID,
+      memory_order_relaxed);
+  if (strcmp(g_params.transport, "test") == 0)
+  {
+    const char * capturePath = option_get_string("test", "captureFile");
+    const int captureFrame   = option_get_int("test", "captureFrame");
+    const int captureDelay   = option_get_int("test", "captureDelay");
+    if (capturePath)
+    {
+      if (captureFrame < 1 || captureDelay < 0)
+      {
+        DEBUG_ERROR("test capture requires captureFrame >= 1 and "
+            "captureDelay >= 0");
+        return -1;
+      }
+      l_testCapture.path         = capturePath;
+      l_testCapture.targetSerial = captureFrame;
+      l_testCapture.delay        = captureDelay;
+      l_testCapture.enabled      = true;
+    }
+  }
+#endif
+
   g_cursor.sens = g_params.mouseSens;
        if (g_cursor.sens < -9) g_cursor.sens = -9;
   else if (g_cursor.sens >  9) g_cursor.sens =  9;
