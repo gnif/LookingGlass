@@ -225,6 +225,20 @@ done:
   close(fd);
 }
 
+bool waylandGetKeyLabel(int key, char * label, size_t size)
+{
+  if (!wlWm.xkbState)
+    return false;
+
+  key += 8; // xkb scancode is evdev scancode + 8
+  xkb_keysym_t sym = xkb_state_key_get_one_sym(wlWm.xkbState, key);
+  sym = xkb_keysym_to_upper(sym);
+
+  const uint32_t codepoint = xkb_keysym_to_utf32(sym);
+  return codepoint > 0x20 && codepoint != 0x7F &&
+    xkb_keysym_to_utf8(sym, label, size) > 0;
+}
+
 static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {

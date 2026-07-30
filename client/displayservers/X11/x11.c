@@ -39,6 +39,9 @@
 #include <X11/extensions/Xinerama.h>
 #include <X11/extensions/Xpresent.h>
 #include <X11/Xcursor/Xcursor.h>
+#include <X11/XKBlib.h>
+
+#include <xkbcommon/xkbcommon.h>
 
 #include <GL/glx.h>
 #include <GL/glxext.h>
@@ -88,6 +91,7 @@ static void x11SetFullscreen(bool fs);
 static int  x11EventThread(void * unused);
 static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
+static void x11UpdateKeyboardGroup(void);
 static void x11GrabPointer(void);
 
 static void x11DoPresent(uint64_t msc)
@@ -568,8 +572,8 @@ static bool x11Init(const LG_DSInitParams params)
     goto fail_window;
   }
 
-  int maxKeycode;
-  XDisplayKeycodes(x11.display, &x11.minKeycode, &maxKeycode);
+  XDisplayKeycodes(x11.display, &x11.minKeycode, &x11.maxKeycode);
+  x11UpdateKeyboardGroup();
 
   XIFreeDeviceInfo(devinfo);
 
@@ -1076,14 +1080,39 @@ static void updateModifiers(void)
   );
 }
 
+static void x11UpdateKeyboardGroup(void)
+{
+  XkbStateRec state;
+  if (XkbGetState(x11.display, XkbUseCoreKbd, &state) == Success)
+    atomic_store(&x11.keyboardGroup, state.group);
+}
+
 static void setFocus(bool focused, double x, double y)
 {
   if (x11.focused == focused)
     return;
 
+  if (focused)
+    x11UpdateKeyboardGroup();
+
   x11.focused = focused;
   app_updateCursorPos(x, y);
   app_handleFocusEvent(focused);
+}
+
+static bool x11GetKeyLabel(int sc, char * label, size_t size)
+{
+  const int keycode = sc + x11.minKeycode;
+  if (keycode < x11.minKeycode || keycode > x11.maxKeycode)
+    return false;
+
+  xkb_keysym_t sym = XkbKeycodeToKeysym(
+      x11.display, keycode, atomic_load(&x11.keyboardGroup), 0);
+  sym = xkb_keysym_to_upper(sym);
+
+  const uint32_t codepoint = xkb_keysym_to_utf32(sym);
+  return codepoint > 0x20 && codepoint != 0x7F &&
+    xkb_keysym_to_utf8(sym, label, size) > 0;
 }
 
 static void x11XInputEvent(XGenericEventCookie *cookie)
@@ -1217,6 +1246,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIDeviceEvent *device = cookie->data;
+      atomic_store(&x11.keyboardGroup, device->group.effective);
       app_handleKeyPress(device->detail - x11.minKeycode);
 
       if (!x11.xic || !app_isOverlayMode())
@@ -2001,6 +2031,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabPointer       = x11UngrabPointer,
   .capturePointer      = x11CapturePointer,
   .uncapturePointer    = x11UncapturePointer,
+  .getKeyLabel         = x11GetKeyLabel,
   .grabKeyboard        = x11GrabKeyboard,
   .ungrabKeyboard      = x11UngrabKeyboard,
   .warpPointer         = x11WarpPointer,

@@ -22,6 +22,7 @@
 #define _H_I_DISPLAYSERVER_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <EGL/egl.h>
 #include "common/types.h"
 #include "common/debug.h"
@@ -206,6 +207,9 @@ struct LG_DisplayServerOps
   void (*capturePointer)(void);
   void (*uncapturePointer)(void);
 
+  /* get the active keymap's display label for the provided Linux keycode */
+  bool (*getKeyLabel)(int sc, char * label, size_t size);
+
   /* exiting = true if the warp is to leave the window */
   void (*warpPointer)(int x, int y, bool exiting);
 
@@ -283,6 +287,7 @@ struct LG_DisplayServerOps
   DEBUG_ASSERT((x)->ungrabPointer      ); \
   DEBUG_ASSERT((x)->capturePointer     ); \
   DEBUG_ASSERT((x)->uncapturePointer   ); \
+  DEBUG_ASSERT((x)->getKeyLabel        ); \
   DEBUG_ASSERT((x)->warpPointer        ); \
   DEBUG_ASSERT((x)->realignPointer     ); \
   DEBUG_ASSERT((x)->isValidPointerPos  ); \
