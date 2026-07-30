@@ -116,6 +116,7 @@ typedef struct LG_DSInitParams
   bool borderless;
   bool maximize;
   bool largeCursorDot;
+  bool allowNoInput;
 
   // if true the renderer requires an OpenGL context
   bool opengl;

@@ -367,7 +367,7 @@ void waylandInhibitIdle(void);
 void waylandUninhibitIdle(void);
 
 // input module
-bool waylandInputInit(void);
+bool waylandInputInit(bool allowNoInput);
 void waylandInputFree(void);
 void waylandGrabKeyboard(void);
 void waylandGrabPointer(void);

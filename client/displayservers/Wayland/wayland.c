@@ -166,7 +166,7 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandCursorInit())
     return false;
 
-  if (!waylandInputInit())
+  if (!waylandInputInit(params.allowNoInput))
     return false;
 
   wlWm.desktop->setSize(params.w, params.h);

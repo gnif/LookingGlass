@@ -405,10 +405,17 @@ static const struct wl_seat_listener seatListener = {
     .name = seatNameHandler,
 };
 
-bool waylandInputInit(void)
+bool waylandInputInit(bool allowNoInput)
 {
   if (!wlWm.seat)
   {
+    if (allowNoInput)
+    {
+      DEBUG_WARN("Compositor missing wl_seat, input will be disabled");
+      wlWm.warpSupport = false;
+      return true;
+    }
+
     DEBUG_ERROR("Compositor missing wl_seat, will not proceed");
     return false;
   }
@@ -444,6 +451,9 @@ bool waylandInputInit(void)
 
 void waylandInputFree(void)
 {
+  if (!wlWm.seat)
+    return;
+
   waylandUngrabPointer();
 
   if (wlWm.pointer)
@@ -468,7 +478,8 @@ void waylandInputFree(void)
 
 void waylandGrabPointer(void)
 {
-  if (!wlWm.relativePointerManager || !wlWm.pointerConstraints)
+  if (!wlWm.pointer ||
+      !wlWm.relativePointerManager || !wlWm.pointerConstraints)
     return;
 
   if (!wlWm.warpSupport && !wlWm.relativePointer)
@@ -493,6 +504,9 @@ void waylandGrabPointer(void)
 
 inline static void internalUngrabPointer(bool lock)
 {
+  if (!wlWm.pointer)
+    return;
+
   if (lock)
     LG_LOCK(wlWm.surfaceLock);
 
@@ -578,7 +592,8 @@ void waylandUncapturePointer(void)
 
 void waylandGrabKeyboard(void)
 {
-  if (wlWm.keyboardInhibitManager && !wlWm.keyboardInhibitor)
+  if (wlWm.seat &&
+      wlWm.keyboardInhibitManager && !wlWm.keyboardInhibitor)
   {
     wlWm.keyboardInhibitor = zwp_keyboard_shortcuts_inhibit_manager_v1_inhibit_shortcuts(
         wlWm.keyboardInhibitManager, wlWm.surface, wlWm.seat);

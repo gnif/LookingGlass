@@ -342,6 +342,12 @@ bool waylandCBInit(void)
 {
   memset(&wlCb, 0, sizeof(wlCb));
 
+  if (!wlWm.seat)
+  {
+    DEBUG_WARN("Clipboard unavailable without wl_seat");
+    return false;
+  }
+
   if (!wlWm.dataDeviceManager)
   {
     DEBUG_ERROR("Missing wl_data_device_manager interface (version 3+)");
