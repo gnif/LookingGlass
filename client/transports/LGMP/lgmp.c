@@ -67,6 +67,10 @@ struct LG_Transport
 
 static bool lgmp_deviceValidator(struct Option * opt, const char ** error)
 {
+  const char * transport = option_get_string("app", "transport");
+  if (!transport || strcmp(transport, "lgmp") != 0)
+    return true;
+
   if (strlen(opt->value.x_string) > 3 &&
       memcmp(opt->value.x_string, "kvmfr", 5) != 0)
   {
