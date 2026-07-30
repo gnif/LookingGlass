@@ -12,7 +12,7 @@ jobs:
         wayland_shell: [xdg-shell, libdecor]
         build_type: [Release, Debug]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Update apt
@@ -58,7 +58,7 @@ jobs:
   module:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Build kernel module
@@ -69,7 +69,7 @@ jobs:
   host-linux:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Update apt
@@ -92,7 +92,7 @@ jobs:
   host-windows-cross:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Update apt
@@ -123,7 +123,7 @@ jobs:
   host-windows-native:
     runs-on: windows-2025
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Install NSIS
@@ -165,11 +165,11 @@ jobs:
   idd:
     runs-on: windows-2022
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v2
+      uses: microsoft/setup-msbuild@v3
       with:
         msbuild-architecture: x64
     - name: Install NuGet packages
@@ -198,7 +198,7 @@ jobs:
       matrix:
         cc: [gcc, clang]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Update apt
@@ -222,7 +222,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Update apt
@@ -240,7 +240,7 @@ jobs:
   render-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -276,7 +276,7 @@ jobs:
 
       - name: Upload failed captures
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: render-test-failures
           path: /tmp/lg-render-case.*

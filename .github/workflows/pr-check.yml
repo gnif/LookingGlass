@@ -6,7 +6,7 @@ jobs:
     permissions:
         pull-requests: write
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v5
     - name: Check AUTHORS file
       id: check-authors
       run: |
@@ -22,7 +22,7 @@ jobs:
         fi
     - name: 'Not found: Create review requesting changes'
       if: ${{ steps.check-authors.outputs.not-found }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
             github.rest.pulls.createReview({
