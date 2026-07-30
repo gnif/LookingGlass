@@ -131,6 +131,11 @@ void app_freeOverlays(void);
  */
 void app_invalidateOverlay(bool renderTwice);
 
+/**
+ * Ensure that user-supplied UTF-8 text has glyphs in the UI font atlas.
+ */
+void app_registerImGuiText(const char * text);
+
 struct OverlayGraph;
 typedef struct OverlayGraph * GraphHandle;
 typedef const char * (*GraphFormatFn)(const char * name,

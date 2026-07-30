@@ -26,6 +26,9 @@
 #include "common/types.h"
 #include "common/util.h"
 
+struct ImFont;
+struct ImFontAtlas;
+
 // reads the specified file into a new buffer
 // the callee must free the buffer
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length);
@@ -46,5 +49,8 @@ static inline double util_clamp(double x, double min, double max)
 bool util_initUIFonts(void);
 void util_freeUIFonts(void);
 char * util_getUIFont(const char * fontName);
+bool util_uiFontAddText(const char * text);
+bool util_buildUIFontAtlas(
+    struct ImFontAtlas * atlas, float size, struct ImFont ** large);
 
 #endif

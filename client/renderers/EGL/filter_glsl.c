@@ -1080,6 +1080,7 @@ static bool createFilter(const char * root, const char * relative,
   char * extension = strrchr((char *)this->base.ops.name, '.');
   if (extension && !strcasecmp(extension, ".glsl"))
     *extension = '\0';
+  app_registerImGuiText(this->base.ops.name);
 
   parseFile(this);
   this->enable = enabledInOption(this->base.ops.id);

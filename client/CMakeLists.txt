@@ -152,6 +152,8 @@ set(SOURCES
 
 # Force cimgui to build as a static library.
 set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
+# Support Unicode codepoints outside the basic multilingual plane.
+set(IMGUI_WCHAR32 "yes")
 add_definitions("-DCIMGUI_USE_OPENGL2=1")
 add_definitions("-DCIMGUI_USE_OPENGL3=1")
 

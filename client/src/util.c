@@ -30,7 +30,228 @@
 #include <math.h>
 #include <fontconfig/fontconfig.h>
 
+struct UIFontFace
+{
+  char * file;
+  int index;
+  ImVector_ImWchar ranges;
+};
+
 static FcConfig * FontConfig = NULL;
+static FcPattern * UIFontQuery = NULL;
+static FcPattern * UIFontPrimary = NULL;
+static FcCharSet * UIFontChars = NULL;
+static FcCharSet * UIFontRequested = NULL;
+static struct UIFontFace * UIFontFaces = NULL;
+static unsigned int UIFontFaceCount = 0;
+static LG_Lock UIFontLock;
+static bool UIFontLockInitialized = false;
+
+static void uiFontClearFaces(void)
+{
+  for (unsigned int i = 0; i < UIFontFaceCount; ++i)
+  {
+    free(UIFontFaces[i].file);
+    ImVector_ImWchar_UnInit(&UIFontFaces[i].ranges);
+  }
+
+  free(UIFontFaces);
+  UIFontFaces = NULL;
+  UIFontFaceCount = 0;
+}
+
+static void uiFontAddRanges(const ImWchar * ranges)
+{
+  for (; ranges[0]; ranges += 2)
+    for (FcChar32 c = ranges[0]; c <= (FcChar32)ranges[1]; ++c)
+      FcCharSetAddChar(UIFontChars, c);
+}
+
+static bool uiFontCharsetToRanges(
+    const FcCharSet * charset, ImVector_ImWchar * ranges)
+{
+  ImFontGlyphRangesBuilder * builder =
+    ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder();
+  if (!builder)
+    return false;
+
+  FcChar32 map[FC_CHARSET_MAP_SIZE];
+  FcChar32 next;
+  for (FcChar32 base = FcCharSetFirstPage(charset, map, &next);
+       base != FC_CHARSET_DONE;
+       base = FcCharSetNextPage(charset, map, &next))
+  {
+    for (unsigned int i = 0; i < FC_CHARSET_MAP_SIZE; ++i)
+      for (unsigned int bit = 0; bit < 32; ++bit)
+      {
+        if (!(map[i] & (UINT32_C(1) << bit)))
+          continue;
+
+        const FcChar32 c = base + i * 32 + bit;
+        if (c >= 0x20 && c <= IM_UNICODE_CODEPOINT_MAX)
+          ImFontGlyphRangesBuilder_AddChar(builder, (ImWchar)c);
+      }
+  }
+
+  ImVector_ImWchar_Init(ranges);
+  ImFontGlyphRangesBuilder_BuildRanges(builder, ranges);
+  ImFontGlyphRangesBuilder_destroy(builder);
+  return ranges->Size > 1;
+}
+
+static bool uiFontAddFace(const FcPattern * pattern, FcCharSet ** remainingPtr)
+{
+  FcCharSet * remaining = *remainingPtr;
+  FcChar8 * file;
+  FcCharSet * charset;
+  FcBool outline = FcTrue;
+
+  if (FcPatternGetString(pattern, FC_FILE, 0, &file) != FcResultMatch ||
+      FcPatternGetCharSet(pattern, FC_CHARSET, 0, &charset) != FcResultMatch)
+    return true;
+
+  if (FcPatternGetBool(pattern, FC_OUTLINE, 0, &outline) == FcResultMatch &&
+      !outline)
+    return true;
+
+  FcCharSet * covered = FcCharSetIntersect(remaining, charset);
+  if (!covered)
+    return false;
+
+  if (FcCharSetCount(covered) == 0)
+  {
+    FcCharSetDestroy(covered);
+    return true;
+  }
+
+  struct UIFontFace * faces = realloc(UIFontFaces,
+      sizeof(*UIFontFaces) * (UIFontFaceCount + 1));
+  if (!faces)
+  {
+    FcCharSetDestroy(covered);
+    return false;
+  }
+  UIFontFaces = faces;
+
+  struct UIFontFace * face = &UIFontFaces[UIFontFaceCount];
+  memset(face, 0, sizeof(*face));
+  face->file = strdup((const char *)file);
+  if (!face->file || !uiFontCharsetToRanges(covered, &face->ranges))
+  {
+    free(face->file);
+    face->file = NULL;
+    FcCharSetDestroy(covered);
+    return false;
+  }
+
+  int index = 0;
+  if (FcPatternGetInteger(pattern, FC_INDEX, 0, &index) == FcResultMatch)
+    face->index = index & 0xFFFF;
+
+  ++UIFontFaceCount;
+
+  FcCharSet * next = FcCharSetSubtract(remaining, covered);
+  FcCharSetDestroy(covered);
+  if (!next)
+    return false;
+
+  FcCharSetDestroy(remaining);
+  *remainingPtr = next;
+  return true;
+}
+
+static bool uiFontBuildFaces(ImFontAtlas * atlas)
+{
+  uiFontClearFaces();
+
+  uiFontAddRanges(ImFontAtlas_GetGlyphRangesDefault(atlas));
+  uiFontAddRanges((ImWchar[]) {
+    0x2190, 0x2193, // four directional arrows
+    0,
+  });
+
+  FcCharSet * remaining = FcCharSetCopy(UIFontChars);
+  if (!remaining)
+    return false;
+
+  if (!uiFontAddFace(UIFontPrimary, &remaining))
+    goto fail;
+
+  if (FcCharSetCount(remaining) > 0)
+  {
+    FcPattern * query = FcPatternDuplicate(UIFontQuery);
+    if (!query)
+      goto fail;
+
+    FcPatternDel(query, FC_CHARSET);
+    FcPatternAddCharSet(query, FC_CHARSET, remaining);
+
+    FcResult result;
+    FcFontSet * fonts = FcFontSort(FontConfig, query, FcTrue, NULL, &result);
+    FcPatternDestroy(query);
+    if (!fonts)
+      goto fail;
+
+    for (int i = 0; i < fonts->nfont && FcCharSetCount(remaining) > 0; ++i)
+      if (!uiFontAddFace(fonts->fonts[i], &remaining))
+      {
+        FcFontSetSortDestroy(fonts);
+        goto fail;
+      }
+
+    FcFontSetSortDestroy(fonts);
+  }
+
+  if (FcCharSetCount(remaining) > 0)
+  {
+    FcCharSet * missing = FcCharSetIntersect(remaining, UIFontRequested);
+    if (missing)
+    {
+      if (FcCharSetCount(missing) > 0)
+        DEBUG_WARN("%u requested UI glyphs have no usable outline font",
+            FcCharSetCount(missing));
+      FcCharSetDestroy(missing);
+    }
+  }
+
+  FcCharSetDestroy(remaining);
+  return UIFontFaceCount > 0;
+
+fail:
+  FcCharSetDestroy(remaining);
+  uiFontClearFaces();
+  return false;
+}
+
+static ImFont * uiFontAddSize(ImFontAtlas * atlas, float size)
+{
+  ImFont * result = NULL;
+
+  for (unsigned int i = 0; i < UIFontFaceCount; ++i)
+  {
+    ImFontConfig * config = ImFontConfig_ImFontConfig();
+    if (!config)
+      return NULL;
+
+    config->MergeMode = result != NULL;
+    config->FontNo = UIFontFaces[i].index;
+
+    ImFont * font = ImFontAtlas_AddFontFromFileTTF(atlas,
+        UIFontFaces[i].file, size, config, UIFontFaces[i].ranges.Data);
+    ImFontConfig_destroy(config);
+
+    if (!font)
+    {
+      DEBUG_WARN("Failed to add UI font face: %s", UIFontFaces[i].file);
+      continue;
+    }
+
+    if (!result)
+      result = font;
+  }
+
+  return result;
+}
 
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length)
 {
@@ -238,6 +459,25 @@ bool util_initUIFonts(void)
     return false;
   }
 
+  UIFontChars = FcCharSetCreate();
+  UIFontRequested = FcCharSetCreate();
+  if (!UIFontChars || !UIFontRequested)
+  {
+    DEBUG_ERROR("FcCharSetCreate Failed");
+    if (UIFontChars)
+      FcCharSetDestroy(UIFontChars);
+    if (UIFontRequested)
+      FcCharSetDestroy(UIFontRequested);
+    UIFontChars = NULL;
+    UIFontRequested = NULL;
+    FcConfigDestroy(FontConfig);
+    FontConfig = NULL;
+    FcFini();
+    return false;
+  }
+
+  LG_LOCK_INIT(UIFontLock);
+  UIFontLockInitialized = true;
   return true;
 }
 
@@ -264,11 +504,22 @@ char * util_getUIFont(const char * fontName)
     goto fail_parse;
   }
 
+  FcPatternDestroy(UIFontQuery);
+  FcPatternDestroy(UIFontPrimary);
+  UIFontQuery = FcPatternDuplicate(pat);
+  UIFontPrimary = FcPatternDuplicate(match);
+  if (!UIFontQuery || !UIFontPrimary)
+  {
+    DEBUG_ERROR("Failed to save the UI font pattern");
+    goto fail_match;
+  }
+
   if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch)
     ttf = strdup((char *) file);
   else
     DEBUG_ERROR("Failed to locate the requested font: %s", fontName);
 
+fail_match:
   FcPatternDestroy(match);
 
 fail_parse:
@@ -276,10 +527,96 @@ fail_parse:
   return ttf;
 }
 
+bool util_uiFontAddText(const char * text)
+{
+  if (!UIFontChars || !text)
+    return false;
+
+  bool changed = false;
+  LG_LOCK(UIFontLock);
+
+  const char * pos = text;
+  while (*pos)
+  {
+    unsigned int c;
+    const int length = igImTextCharFromUtf8(&c, pos, NULL);
+    if (length <= 0)
+      break;
+    pos += length;
+
+    if (c < 0x20 || c > IM_UNICODE_CODEPOINT_MAX)
+      continue;
+
+    FcCharSetAddChar(UIFontRequested, c);
+    if (!FcCharSetHasChar(UIFontChars, c) &&
+        FcCharSetAddChar(UIFontChars, c))
+      changed = true;
+  }
+
+  LG_UNLOCK(UIFontLock);
+  return changed;
+}
+
+bool util_buildUIFontAtlas(
+    ImFontAtlas * atlas, float size, ImFont ** large)
+{
+  if (!atlas || !UIFontQuery || !UIFontPrimary || !UIFontChars)
+    return false;
+
+  bool result = false;
+  LG_LOCK(UIFontLock);
+
+  ImFontAtlas_Clear(atlas);
+  if (!uiFontBuildFaces(atlas))
+  {
+    DEBUG_ERROR("Failed to resolve UI fonts");
+    goto done;
+  }
+
+  if (!uiFontAddSize(atlas, size))
+  {
+    DEBUG_ERROR("Failed to add the primary UI font");
+    goto done;
+  }
+
+  *large = uiFontAddSize(atlas, size * 1.3f);
+  if (!*large)
+  {
+    DEBUG_ERROR("Failed to add the large UI font");
+    goto done;
+  }
+
+  result = ImFontAtlas_Build(atlas);
+
+done:
+  LG_UNLOCK(UIFontLock);
+  return result;
+}
+
 void util_freeUIFonts(void)
 {
   if (!FontConfig)
     return;
+
+  if (UIFontLockInitialized)
+    LG_LOCK(UIFontLock);
+
+  uiFontClearFaces();
+  FcCharSetDestroy(UIFontChars);
+  FcCharSetDestroy(UIFontRequested);
+  FcPatternDestroy(UIFontQuery);
+  FcPatternDestroy(UIFontPrimary);
+  UIFontChars = NULL;
+  UIFontRequested = NULL;
+  UIFontQuery = NULL;
+  UIFontPrimary = NULL;
+
+  if (UIFontLockInitialized)
+  {
+    LG_UNLOCK(UIFontLock);
+    LG_LOCK_FREE(UIFontLock);
+    UIFontLockInitialized = false;
+  }
 
   FcConfigDestroy(FontConfig);
   FontConfig = NULL;

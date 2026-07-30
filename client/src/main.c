@@ -269,12 +269,8 @@ static int renderThread(void * unused)
       };
       g_state.io->FontGlobalScale = 1.0f / g_state.windowScale;
 
-      ImFontAtlas_Clear(g_state.io->Fonts);
-      ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts, g_state.fontName,
-        g_params.uiSize * g_state.windowScale, NULL, g_state.fontRange.Data);
-      g_state.fontLarge = ImFontAtlas_AddFontFromFileTTF(g_state.io->Fonts,
-        g_state.fontName, 1.3f * g_params.uiSize * g_state.windowScale, NULL, g_state.fontRange.Data);
-      if (!ImFontAtlas_Build(g_state.io->Fonts))
+      if (!util_buildUIFontAtlas(g_state.io->Fonts,
+            g_params.uiSize * g_state.windowScale, &g_state.fontLarge))
         DEBUG_FATAL("Failed to build font atlas: %s (%s)", g_params.uiFont, g_state.fontName);
 
       if (g_state.lgr)
@@ -1103,22 +1099,19 @@ static int lg_run(void)
   g_state.io->BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
 
   g_state.windowScale = 1.0;
-  if (util_initUIFonts())
+  if (!util_initUIFonts())
   {
-    g_state.fontName = util_getUIFont(g_params.uiFont);
-    DEBUG_INFO("Using font: %s", g_state.fontName);
+    DEBUG_ERROR("Failed to initialize UI fonts");
+    return -1;
   }
 
-  ImVector_ImWchar_Init(&g_state.fontRange);
-  ImFontGlyphRangesBuilder * rangeBuilder =
-    ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder();
-  ImFontGlyphRangesBuilder_AddRanges(rangeBuilder, (ImWchar[]) {
-    0x0020, 0x00FF, // Basic Latin + Latin Supplement
-    0x2190, 0x2193, // four directional arrows
-    0,
-  });
-  ImFontGlyphRangesBuilder_BuildRanges(rangeBuilder, &g_state.fontRange);
-  ImFontGlyphRangesBuilder_destroy(rangeBuilder);
+  g_state.fontName = util_getUIFont(g_params.uiFont);
+  if (!g_state.fontName)
+  {
+    DEBUG_ERROR("Failed to load UI font: %s", g_params.uiFont);
+    return -1;
+  }
+  DEBUG_INFO("Using font: %s", g_state.fontName);
 
   // initialize metrics ringbuffers
   g_state.renderTimings  = ringbuffer_new(256, sizeof(float));
@@ -1612,7 +1605,6 @@ static void lg_shutdown(void)
   ringbuffer_free(&g_state.renderDuration);
 
   free(g_state.fontName);
-  ImVector_ImWchar_UnInit(&g_state.fontRange);
   igDestroyContext(NULL);
   free(g_state.imGuiIni);
 }

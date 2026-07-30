@@ -159,6 +159,7 @@ static void loadPresetList(struct EGL_PostProcess * this)
       goto fail;
     }
     stringlist_push(this->presets, name);
+    app_registerImGuiText(name);
 
     if (preset && strcmp(preset, name) == 0)
       this->activePreset = stringlist_count(this->presets) - 1;

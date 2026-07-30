@@ -569,6 +569,7 @@ void app_handleKeyRelease(int sc)
 
 void app_handleKeyboardTyped(const char * typed)
 {
+  app_registerImGuiText(typed);
   ImGuiIO_AddInputCharactersUTF8(g_state.io, typed);
 }
 
@@ -1149,6 +1150,15 @@ void app_overlayConfigRegisterTab(const char * title,
     void (*callback)(void * udata, int * id), void * udata)
 {
   overlayConfig_registerTab(title, callback, udata);
+}
+
+void app_registerImGuiText(const char * text)
+{
+  if (!util_uiFontAddText(text))
+    return;
+
+  atomic_fetch_add(&g_state.lgrResize, 1);
+  app_invalidateOverlay(false);
 }
 
 void app_invalidateOverlay(bool renderTwice)
