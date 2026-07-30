@@ -154,7 +154,10 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
         title, appId, fullscreen, maximize, borderless, resizable))
     return false;
 
-  wl_surface_commit(wlWm.surface);
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
+  {
+    wl_surface_commit(wlWm.surface);
+  });
 
   // The initial configure supplies the compositor-selected size for states
   // such as fullscreen. It must be received before the first buffer is made.
@@ -214,9 +217,12 @@ bool waylandWaitFrame(void)
 {
   lgWaitEvent(wlWm.frameEvent, TIMEOUT_INFINITE);
 
-  struct wl_callback * callback = wl_surface_frame(wlWm.surface);
-  if (callback)
-    wl_callback_add_listener(callback, &frame_listener, NULL);
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
+  {
+    struct wl_callback * callback = wl_surface_frame(wlWm.surface);
+    if (callback)
+      wl_callback_add_listener(callback, &frame_listener, NULL);
+  });
 
   return false;
 }
@@ -224,7 +230,10 @@ bool waylandWaitFrame(void)
 void waylandSkipFrame(void)
 {
   // If we decided to not render, we must commit the surface so that the callback is registered.
-  wl_surface_commit(wlWm.surface);
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
+  {
+    wl_surface_commit(wlWm.surface);
+  });
 }
 
 void waylandStopWaitFrame(void)

@@ -230,21 +230,27 @@ static const struct wp_image_description_v1_listener hdrImageDescListener =
 
 void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
 {
-  if (!wlWm.swapWithDamage.init)
+  // EGL presentation sends a batch of Wayland requests ending in a surface
+  // commit. A concurrent commit would apply a partial batch and, when explicit
+  // sync is active, omit one of the required acquire/release timeline points.
+  INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
-    if (wl_proxy_get_version((struct wl_proxy *) wlWm.surface) < 4)
+    if (!wlWm.swapWithDamage.init)
     {
-      DEBUG_INFO("Swapping buffers with damage: not supported, need wl_compositor v4");
-      swapWithDamageDisable(&wlWm.swapWithDamage);
+      if (wl_proxy_get_version((struct wl_proxy *) wlWm.surface) < 4)
+      {
+        DEBUG_INFO("Swapping buffers with damage: not supported, need wl_compositor v4");
+        swapWithDamageDisable(&wlWm.swapWithDamage);
+      }
+      else
+        swapWithDamageInit(&wlWm.swapWithDamage, display);
     }
-    else
-      swapWithDamageInit(&wlWm.swapWithDamage, display);
-  }
 
-  waylandPresentationFrame();
-  applyHDRPending();
-  swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
-  activateReadyHDRImageDesc();
+    waylandPresentationFrame();
+    applyHDRPending();
+    swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
+    activateReadyHDRImageDesc();
+  });
 
   if (wlWm.needsResize)
   {

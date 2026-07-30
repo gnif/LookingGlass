@@ -108,6 +108,7 @@ static bool getCompositor(char * dst, size_t size)
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
+  LG_LOCK_INIT(wlWm.surfaceLock);
   LG_LOCK_INIT(wlWm.pendingHDRLock);
   LG_LOCK_INIT(wlWm.hdrLock);
   wlWm.desktop        = WL_Desktops[0];
@@ -214,6 +215,7 @@ static void waylandFree(void)
   wl_display_disconnect(wlWm.display);
   LG_LOCK_FREE(wlWm.hdrLock);
   LG_LOCK_FREE(wlWm.pendingHDRLock);
+  LG_LOCK_FREE(wlWm.surfaceLock);
 }
 
 static bool waylandGetProp(LG_DSProperty prop, void * ret)
