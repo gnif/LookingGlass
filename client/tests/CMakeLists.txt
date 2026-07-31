@@ -1,5 +1,22 @@
 cmake_minimum_required(VERSION 3.10)
 
+add_executable(font-tests
+  font_test.c
+  ../src/font.c
+)
+target_compile_definitions(font-tests PRIVATE
+  FONT_TEST_FILE="${PROJECT_TOP}/repos/cimgui/imgui/misc/fonts/DroidSans.ttf"
+)
+target_include_directories(font-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+)
+add_test(NAME font-tests
+  COMMAND font-tests
+)
+set_tests_properties(font-tests PROPERTIES
+  TIMEOUT 10
+)
+
 if(ENABLE_TRANSPORT_TESTS)
   add_executable(lgmp-transport-tests
     lgmp_transport_test.c
