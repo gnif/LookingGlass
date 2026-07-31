@@ -21,6 +21,7 @@ jobs:
     - name: Install client dependencies
       run: |
         sudo apt-get install \
+          weston libgtest-dev \
           libdw-dev libunwind-dev \
           libspice-protocol-dev nettle-dev \
           libgl-dev libgles-dev \
@@ -43,6 +44,7 @@ jobs:
           -DCMAKE_LINKER:FILEPATH=/usr/bin/ld \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DENABLE_LIBDECOR=${{ matrix.wayland_shell == 'libdecor' }}  \
+          -DENABLE_TESTS=ON \
           -DOPTIMIZE_FOR_NATIVE=OFF \
           ..
     - name: Build client
@@ -54,6 +56,14 @@ jobs:
     - name: Check GL function calls
       if: matrix.compiler.cc == 'clang'
       run: WAYLAND_SHELL='${{ matrix.wayland_shell }}' ./gl-check
+    - name: Package client build
+      run: tar -cf client-build.tar -C client build
+    - name: Upload client build
+      uses: actions/upload-artifact@v6
+      with:
+        name: client-build-${{ matrix.compiler.cc }}-${{ matrix.wayland_shell }}-${{ matrix.build_type }}
+        path: client-build.tar
+        retention-days: 1
 
   module:
     runs-on: ubuntu-latest
@@ -238,7 +248,16 @@ jobs:
         make dirhtml SPHINXOPTS='-b spelling -W' -j$(nproc)
 
   client-tests:
+    needs: client
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - {cc: gcc, cxx: g++}
+          - {cc: clang, cxx: clang++}
+        wayland_shell: [xdg-shell, libdecor]
+        build_type: [Release, Debug]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -249,6 +268,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install \
             weston libgtest-dev libgl1-mesa-dri \
+            libdecor-0-dev libdbus-1-dev \
             libdw-dev libunwind-dev \
             libspice-protocol-dev nettle-dev \
             libgl-dev libgles-dev \
@@ -257,25 +277,23 @@ jobs:
             libwayland-dev libxkbcommon-dev libfontconfig-dev \
             libsamplerate0-dev libpipewire-0.3-dev libpulse-dev
 
-      - name: Configure
-        run: |
-          cmake -S client -B client/build-client-tests \
-            -DOPTIMIZE_FOR_NATIVE=OFF \
-            -DENABLE_LIBDECOR=OFF \
-            -DENABLE_TESTS=ON
-
-      - name: Build
-        run: cmake --build client/build-client-tests --parallel
+      - name: Download client build
+        uses: actions/download-artifact@v6
+        with:
+          name: client-build-${{ matrix.compiler.cc }}-${{ matrix.wayland_shell }}-${{ matrix.build_type }}
+          path: client-build
 
       - name: Run client tests
+        id: tests
         run: |
-          ctest --test-dir client/build-client-tests
+          tar -xf client-build/client-build.tar -C client
+          ctest --test-dir client/build --output-on-failure
 
       - name: Upload client test failures
-        if: failure()
+        if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@v6
         with:
-          name: client-test-failures
+          name: client-test-failures-${{ matrix.compiler.cc }}-${{ matrix.wayland_shell }}-${{ matrix.build_type }}
           path: |
-            client/build-client-tests/Testing/
+            client/build/Testing/
             /tmp/lg-render-case.*
