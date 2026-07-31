@@ -569,6 +569,9 @@ int main_cursorThread(void * unused)
     g_state.transportOps->releasePointer(g_state.transport, &pointer);
   }
 
+  if (g_state.transportOps->stopPointer)
+    g_state.transportOps->stopPointer(g_state.transport);
+
   return 0;
 }
 
@@ -583,7 +586,11 @@ int main_frameThread(void * unused)
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   if (app_getState() != APP_STATE_RUNNING)
+  {
+    if (g_state.transportOps->stopFrame)
+      g_state.transportOps->stopFrame(g_state.transport);
     return 0;
+  }
 
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
@@ -812,6 +819,9 @@ int main_frameThread(void * unused)
     g_state.transportOps->releaseFrame(g_state.transport, &frame);
     app_useSpiceDisplay(false);
   }
+
+  if (g_state.transportOps->stopFrame)
+    g_state.transportOps->stopFrame(g_state.transport);
 
   RENDERER(onRestart);
 

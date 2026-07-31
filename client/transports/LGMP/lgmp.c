@@ -204,18 +204,45 @@ static bool lgmp_create(LG_Transport ** result)
   return true;
 }
 
-static void lgmp_closeQueues(struct LG_Transport * this)
+static void lgmp_stopFrame(struct LG_Transport * this)
 {
   if (this->framePending && this->frameQueue)
   {
-    lgmpClientMessageDone(this->frameQueue);
-    this->framePending = false;
+    const LGMP_STATUS status = lgmpClientMessageDone(this->frameQueue);
+    if (status != LGMP_OK)
+      DEBUG_WARN("Failed to release pending LGMP frame: %s",
+          lgmpStatusString(status));
   }
-  lgmpClientUnsubscribe(&this->frameQueue);
+  this->framePending = false;
+  LGMP_STATUS status = lgmpClientUnsubscribe(&this->frameQueue);
+  if (status != LGMP_OK)
+  {
+    DEBUG_WARN("Failed to unsubscribe from the LGMP frame queue: %s",
+        lgmpStatusString(status));
+    this->frameQueue = NULL;
+  }
 
+  this->frameSerial = 0;
+  this->formatValid = false;
+}
+
+static void lgmp_stopPointer(struct LG_Transport * this)
+{
   LG_LOCK(this->pointerLock);
-  lgmpClientUnsubscribe(&this->pointerQueue);
+  const LGMP_STATUS status = lgmpClientUnsubscribe(&this->pointerQueue);
+  if (status != LGMP_OK)
+  {
+    DEBUG_WARN("Failed to unsubscribe from the LGMP pointer queue: %s",
+        lgmpStatusString(status));
+    this->pointerQueue = NULL;
+  }
   LG_UNLOCK(this->pointerLock);
+}
+
+static void lgmp_closeQueues(struct LG_Transport * this)
+{
+  lgmp_stopFrame(this);
+  lgmp_stopPointer(this);
 }
 
 static void lgmp_closeDMA(struct LG_Transport * this)
@@ -358,9 +385,7 @@ static void lgmp_disconnect(LG_Transport * this)
 {
   lgmp_closeQueues(this);
   lgmp_closeDMA(this);
-  this->connected   = false;
-  this->frameSerial = 0;
-  this->formatValid = false;
+  this->connected = false;
 }
 
 static bool lgmp_sessionValid(LG_Transport * this)
@@ -389,10 +414,13 @@ static LG_TransportStatus lgmp_subscribe(PLGMPClient client, uint32_t id,
   if (*queue)
     return LG_TRANSPORT_OK;
 
-  LGMP_STATUS status = lgmpClientSubscribe(client, id, queue);
+  PLGMPClientQueue subscribed = NULL;
+  LGMP_STATUS status = lgmpClientSubscribe(client, id, &subscribed);
   switch (status)
   {
-    case LGMP_OK:                return LG_TRANSPORT_OK;
+    case LGMP_OK:
+      *queue = subscribed;
+      return LG_TRANSPORT_OK;
     case LGMP_ERR_NO_SUCH_QUEUE: return LG_TRANSPORT_TIMEOUT;
     case LGMP_ERR_INVALID_SESSION: return LG_TRANSPORT_DISCONNECTED;
     default:
@@ -594,10 +622,16 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   uint32_t pointerFlags  = 0;
   size_t   shapeSize     = 0;
   size_t   transformSize = 0;
-  LG_LOCK(this->pointerLock);
-  LG_TransportStatus status = lgmp_subscribe(this->client, LGMP_Q_POINTER,
-      &this->pointerQueue);
-  LG_UNLOCK(this->pointerLock);
+  LG_TransportStatus status = LG_TRANSPORT_OK;
+  if (!this->pointerQueue)
+  {
+    LG_LOCK(this->pointerLock);
+    status = lgmp_subscribe(this->client, LGMP_Q_POINTER,
+        &this->pointerQueue);
+    LG_UNLOCK(this->pointerLock);
+    if (status == LG_TRANSPORT_TIMEOUT)
+      usleep(1000);
+  }
   if (status == LG_TRANSPORT_OK)
   {
     LGMPMessage message;
@@ -649,11 +683,7 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
     }
   }
   if (status != LG_TRANSPORT_OK)
-  {
-    if (status == LG_TRANSPORT_TIMEOUT)
-      usleep(1000);
     return status;
-  }
 
   const KVMFRCursor * cursor = (const KVMFRCursor *)this->pointerData;
   memset(result, 0, sizeof(*result));
@@ -771,8 +801,10 @@ const LG_TransportOps LGT_LGMP =
   .detachRenderer = lgmp_detachRenderer,
   .nextFrame      = lgmp_nextFrame,
   .releaseFrame   = lgmp_releaseFrame,
+  .stopFrame      = lgmp_stopFrame,
   .nextPointer    = lgmp_nextPointer,
   .releasePointer = lgmp_releasePointer,
+  .stopPointer    = lgmp_stopPointer,
   .sendControl    = lgmp_sendControl,
   .controlStatus  = lgmp_controlStatus,
 };

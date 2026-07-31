@@ -201,11 +201,17 @@ typedef struct LG_TransportOps
   LG_TransportStatus (*nextFrame)(LG_Transport * transport, bool useDMA,
       LG_TransportFrame * frame);
   void (*releaseFrame)(LG_Transport * transport, LG_TransportFrame * frame);
+  /* Called by the frame consumer as it exits. A backend may release transient
+   * stream resources; nextFrame must reacquire them when the consumer restarts. */
+  void (*stopFrame)(LG_Transport * transport);
 
   LG_TransportStatus (*nextPointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
   void (*releasePointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
+  /* Called by the pointer consumer as it exits. A backend may release transient
+   * stream resources; nextPointer must reacquire them when the consumer restarts. */
+  void (*stopPointer)(LG_Transport * transport);
 
   LG_TransportStatus (*sendControl)(LG_Transport * transport,
       const LG_TransportControl * control, LG_TransportControlToken * token);
