@@ -44,6 +44,10 @@ endif()
 option(ENABLE_RENDER_TESTS "Build framebuffer rendering integration tests" OFF)
 add_feature_info(ENABLE_RENDER_TESTS ENABLE_RENDER_TESTS
   "Pixel-accurate EGL rendering tests using the test transport.")
+option(ENABLE_TRANSPORT_TESTS "Build transport integration tests"
+  ${ENABLE_RENDER_TESTS})
+add_feature_info(ENABLE_TRANSPORT_TESTS ENABLE_TRANSPORT_TESTS
+  "Transport lifecycle and protocol integration tests.")
 if(ENABLE_RENDER_TESTS AND NOT ENABLE_TEST_TRANSPORT)
   message(FATAL_ERROR "ENABLE_RENDER_TESTS requires ENABLE_TEST_TRANSPORT")
 endif()
@@ -244,7 +248,7 @@ target_link_libraries(looking-glass-client
   cimgui
 )
 
-if(ENABLE_RENDER_TESTS)
+if(ENABLE_RENDER_TESTS OR ENABLE_TRANSPORT_TESTS)
   include(CTest)
   enable_testing()
   add_subdirectory(tests)

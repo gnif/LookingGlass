@@ -1,43 +1,63 @@
 cmake_minimum_required(VERSION 3.10)
 
-find_package(GTest REQUIRED)
-find_program(WESTON_EXECUTABLE NAMES weston)
-if(NOT WESTON_EXECUTABLE)
-  message(FATAL_ERROR "weston is required to run framebuffer rendering tests")
+if(ENABLE_TRANSPORT_TESTS)
+  add_executable(lgmp-transport-tests
+    lgmp_transport_test.c
+  )
+  target_link_libraries(lgmp-transport-tests
+    ${EXE_FLAGS}
+    transport_LGMP
+    lg_common
+    lgmp
+  )
+  add_test(NAME lgmp-transport-tests
+    COMMAND lgmp-transport-tests
+  )
+  set_tests_properties(lgmp-transport-tests PROPERTIES
+    TIMEOUT 10
+  )
 endif()
 
-add_executable(looking-glass-render-tests
-  render_test.cpp
-)
-add_dependencies(looking-glass-render-tests looking-glass-client)
+if(ENABLE_RENDER_TESTS)
+  find_package(GTest REQUIRED)
+  find_program(WESTON_EXECUTABLE NAMES weston)
+  if(NOT WESTON_EXECUTABLE)
+    message(FATAL_ERROR "weston is required to run framebuffer rendering tests")
+  endif()
 
-set_target_properties(looking-glass-render-tests PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-)
+  add_executable(render-tests
+    render_test.cpp
+  )
+  add_dependencies(render-tests looking-glass-client)
 
-target_compile_definitions(looking-glass-render-tests PRIVATE
-  LG_CLIENT_PATH="$<TARGET_FILE:looking-glass-client>"
-)
+  set_target_properties(render-tests PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+  )
 
-target_include_directories(looking-glass-render-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-  "${PROJECT_TOP}/common/include"
-)
+  target_compile_definitions(render-tests PRIVATE
+    LG_CLIENT_PATH="$<TARGET_FILE:looking-glass-client>"
+  )
 
-if(TARGET GTest::gtest_main)
-  target_link_libraries(looking-glass-render-tests GTest::gtest_main)
-else()
-  target_link_libraries(looking-glass-render-tests GTest::Main)
+  target_include_directories(render-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${PROJECT_TOP}/common/include"
+  )
+
+  if(TARGET GTest::gtest_main)
+    target_link_libraries(render-tests GTest::gtest_main)
+  else()
+    target_link_libraries(render-tests GTest::Main)
+  endif()
+
+  add_test(NAME render-tests
+    COMMAND /bin/bash
+      "${CMAKE_CURRENT_SOURCE_DIR}/run-with-weston.sh"
+      "${WESTON_EXECUTABLE}"
+      "$<TARGET_FILE:render-tests>"
+  )
+
+  set_tests_properties(render-tests PROPERTIES
+    TIMEOUT 120
+  )
 endif()
-
-add_test(NAME looking-glass-render-tests
-  COMMAND /bin/bash
-    "${CMAKE_CURRENT_SOURCE_DIR}/run-with-weston.sh"
-    "${WESTON_EXECUTABLE}"
-    "$<TARGET_FILE:looking-glass-render-tests>"
-)
-
-set_tests_properties(looking-glass-render-tests PROPERTIES
-  TIMEOUT 120
-)

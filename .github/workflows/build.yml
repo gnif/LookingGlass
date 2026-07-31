@@ -237,7 +237,7 @@ jobs:
         cd doc
         make dirhtml SPHINXOPTS='-b spelling -W' -j$(nproc)
 
-  render-tests:
+  client-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -259,24 +259,24 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S client -B client/build-render-tests \
+          cmake -S client -B client/build-client-tests \
             -DOPTIMIZE_FOR_NATIVE=OFF \
             -DENABLE_LIBDECOR=OFF \
             -DENABLE_TEST_TRANSPORT=ON \
             -DENABLE_RENDER_TESTS=ON
 
       - name: Build
-        run: cmake --build client/build-render-tests --parallel
+        run: cmake --build client/build-client-tests --parallel
 
-      - name: Run rendering matrix
+      - name: Run client tests
         run: |
-          ctest --test-dir client/build-render-tests \
-            --output-on-failure \
-            -R looking-glass-render-tests
+          ctest --test-dir client/build-client-tests
 
-      - name: Upload failed captures
+      - name: Upload client test failures
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: render-test-failures
-          path: /tmp/lg-render-case.*
+          name: client-test-failures
+          path: |
+            client/build-client-tests/Testing/
+            /tmp/lg-render-case.*

@@ -26,7 +26,7 @@ cmake -S client -B client/build \
   -DENABLE_RENDER_TESTS=ON
 cmake --build client/build
 ctest --test-dir client/build --output-on-failure \
-  -R looking-glass-render-tests
+  -R render-tests
 ```
 
 GoogleTest and Weston are required when `ENABLE_RENDER_TESTS` is enabled.
@@ -37,7 +37,7 @@ To exercise native HDR on the current Wayland session instead of the headless
 SDR compositor:
 
 ```sh
-client/build/tests/looking-glass-render-tests \
+client/build/tests/render-tests \
   --gtest_filter='*rgba10*:*rgba16f*'
 ```
 
