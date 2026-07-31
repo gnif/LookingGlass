@@ -29,6 +29,7 @@
 #include "common/debug.h"
 #include "common/array.h"
 #include "common/proctitle.h"
+#include "common/stringutils.h"
 #include "common/version.h"
 
 #include <math.h>
@@ -765,8 +766,8 @@ void core_setTitle(const char * title)
     return;
 
   char * string;
-  if (asprintf(&string, "Looking Glass Client %s%s%s", BUILD_VERSION,
-               title && *title ? ": " : "", title ? title : "") >= 0)
+  if (alloc_sprintf(&string, "Looking Glass Client %s%s%s", BUILD_VERSION,
+                    title && *title ? ": " : "", title ? title : "") >= 0)
   {
     lgSetProcessTitle(string);
     free(string);
