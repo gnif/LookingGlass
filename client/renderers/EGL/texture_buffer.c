@@ -325,7 +325,7 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
   if (keepLocked)
     LG_UNLOCK(this->copyLock);
 
-  return EGL_TEX_STATUS_OK;
+  return EGL_TEX_STATUS_UPDATED;
 }
 
 EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture, GLuint * tex,

@@ -431,12 +431,14 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
       return false;
   }
 
+  /*
+   * Streamed textures trigger post-processing when the render context submits
+   * the upload. Signalling here can race with that submission and process the
+   * previous texture contents instead.
+   */
   if (likely(egl_textureUpdateFromFrame(desktop->texture, frame,
         damageRects, damageRectsCount)))
-  {
-    atomic_store(&desktop->processFrame, true);
     return true;
-  }
 
   return false;
 }
@@ -474,8 +476,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   if (unlikely(outputWidth == 0 || outputHeight == 0))
     DEBUG_FATAL("outputWidth || outputHeight == 0");
 
-  enum EGL_TexStatus status;
-  if (unlikely((status = egl_textureProcess(tex)) != EGL_TEX_STATUS_OK))
+  const enum EGL_TexStatus status = egl_textureProcess(tex);
+  const bool textureUpdated = status == EGL_TEX_STATUS_UPDATED;
+  if (unlikely(status != EGL_TEX_STATUS_OK && !textureUpdated))
   {
     if (status != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to process the desktop texture");
@@ -501,8 +504,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
           HDR_PEAK_LUMINANCE_MIN, HDR_PEAK_LUMINANCE_MAX);
   }
 
-  const bool processFrame = atomic_exchange(&desktop->processFrame, false) ||
-    egl_postProcessConfigModified(desktop->pp);
+  bool processFrame = textureUpdated;
+  processFrame |= atomic_exchange(&desktop->processFrame, false);
+  processFrame |= egl_postProcessConfigModified(desktop->pp);
   if (processFrame &&
       egl_postProcessRun(desktop->pp, tex, desktop->mesh,
         width, height, outputWidth, outputHeight, dma,
