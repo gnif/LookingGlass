@@ -69,7 +69,7 @@
 #include "render_queue.h"
 #include "evdev.h"
 
-#ifdef ENABLE_TEST_TRANSPORT
+#ifdef ENABLE_TESTS
 #include "interface/test_capture.h"
 _Static_assert((int)LG_CAPTURE_RGBA8 == (int)LG_TEST_CAPTURE_RGBA8,
     "capture format mismatch");
@@ -99,7 +99,7 @@ struct CursorState g_cursor;
 // this structure is initialized in config.c
 struct AppParams g_params = { 0 };
 
-#ifdef ENABLE_TEST_TRANSPORT
+#ifdef ENABLE_TESTS
 static struct
 {
   const char * path;
@@ -205,7 +205,7 @@ static void preSwapCallback(void * udata)
   ringbuffer_push(g_state.renderDuration,
       &(float) {(nanotime() - *renderStart) * 1e-6f});
 
-#ifdef ENABLE_TEST_TRANSPORT
+#ifdef ENABLE_TESTS
   if (!l_testCapture.enabled || l_testCapture.complete)
     return;
 
@@ -713,7 +713,7 @@ int main_frameThread(void * unused)
 
       g_state.formatValid = true;
       formatVersion       = format->version;
-#ifdef ENABLE_TEST_TRANSPORT
+#ifdef ENABLE_TESTS
       atomic_store_explicit(&l_testFrameType, format->type,
           memory_order_release);
 #endif
@@ -803,7 +803,7 @@ int main_frameThread(void * unused)
     g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
-#ifdef ENABLE_TEST_TRANSPORT
+#ifdef ENABLE_TESTS
     atomic_store_explicit(&l_testFrameSerial, frame.serial,
         memory_order_release);
 #endif
@@ -1211,7 +1211,7 @@ static int transportSessionProbe(void * opaque)
 
 static int lg_run(void)
 {
-#ifdef ENABLE_TEST_TRANSPORT
+#ifdef ENABLE_TESTS
   memset(&l_testCapture, 0, sizeof(l_testCapture));
   atomic_store_explicit(&l_testFrameSerial, 0, memory_order_relaxed);
   atomic_store_explicit(&l_testFrameType, FRAME_TYPE_INVALID,

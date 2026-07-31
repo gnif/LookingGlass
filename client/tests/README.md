@@ -22,14 +22,13 @@ luminance, MaxCLL, and MaxFALL in the client log.
 
 ```sh
 cmake -S client -B client/build \
-  -DENABLE_TEST_TRANSPORT=ON \
-  -DENABLE_RENDER_TESTS=ON
+  -DENABLE_TESTS=ON
 cmake --build client/build
 ctest --test-dir client/build --output-on-failure \
   -R render-tests
 ```
 
-GoogleTest and Weston are required when `ENABLE_RENDER_TESTS` is enabled.
+GoogleTest and Weston are required when `ENABLE_TESTS` is enabled.
 Failed cases retain their capture and client log under `/tmp` and print the
 artifact paths.
 

@@ -262,8 +262,7 @@ jobs:
           cmake -S client -B client/build-client-tests \
             -DOPTIMIZE_FOR_NATIVE=OFF \
             -DENABLE_LIBDECOR=OFF \
-            -DENABLE_TEST_TRANSPORT=ON \
-            -DENABLE_RENDER_TESTS=ON
+            -DENABLE_TESTS=ON
 
       - name: Build
         run: cmake --build client/build-client-tests --parallel

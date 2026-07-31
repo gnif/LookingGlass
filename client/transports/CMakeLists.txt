@@ -20,7 +20,7 @@ endfunction()
 
 # Add/remove transports here!
 add_transport(LGMP)
-if(ENABLE_TEST_TRANSPORT)
+if(ENABLE_TESTS)
   add_transport(Test)
 endif()
 

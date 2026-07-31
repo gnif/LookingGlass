@@ -34,25 +34,14 @@ add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
 option(ENABLE_EGL    "Enable the EGL renderer"          ON)
 add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
 
-option(ENABLE_TEST_TRANSPORT "Enable the test transport" OFF)
-add_feature_info(ENABLE_TEST_TRANSPORT ENABLE_TEST_TRANSPORT
-  "Synthetic frames for graphics-pipeline validation.")
-if(ENABLE_TEST_TRANSPORT)
-  add_definitions(-D ENABLE_TEST_TRANSPORT)
-endif()
-
-option(ENABLE_RENDER_TESTS "Build framebuffer rendering integration tests" OFF)
-add_feature_info(ENABLE_RENDER_TESTS ENABLE_RENDER_TESTS
-  "Pixel-accurate EGL rendering tests using the test transport.")
-option(ENABLE_TRANSPORT_TESTS "Build transport integration tests"
-  ${ENABLE_RENDER_TESTS})
-add_feature_info(ENABLE_TRANSPORT_TESTS ENABLE_TRANSPORT_TESTS
-  "Transport lifecycle and protocol integration tests.")
-if(ENABLE_RENDER_TESTS AND NOT ENABLE_TEST_TRANSPORT)
-  message(FATAL_ERROR "ENABLE_RENDER_TESTS requires ENABLE_TEST_TRANSPORT")
-endif()
-if(ENABLE_RENDER_TESTS AND NOT ENABLE_EGL)
-  message(FATAL_ERROR "ENABLE_RENDER_TESTS requires ENABLE_EGL")
+option(ENABLE_TESTS "Build all client tests and test support" OFF)
+add_feature_info(ENABLE_TESTS ENABLE_TESTS
+  "Client unit and integration tests with synthetic transport support.")
+if(ENABLE_TESTS)
+  if(NOT ENABLE_EGL)
+    message(FATAL_ERROR "ENABLE_TESTS requires ENABLE_EGL")
+  endif()
+  add_definitions(-D ENABLE_TESTS)
 endif()
 
 option(ENABLE_BACKTRACE "Enable backtrace support on crash" ON)
@@ -249,7 +238,7 @@ target_link_libraries(looking-glass-client
   cimgui
 )
 
-if(ENABLE_RENDER_TESTS OR ENABLE_TRANSPORT_TESTS)
+if(ENABLE_TESTS)
   include(CTest)
   enable_testing()
   add_subdirectory(tests)
