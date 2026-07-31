@@ -19,8 +19,8 @@
  */
 
 #include "font.h"
+#include "test.h"
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -29,33 +29,33 @@ static void testInvalidFontData(void)
   const unsigned char emptySfnt[12] = {
     0x00, 0x01, 0x00, 0x00,
   };
-  assert(!font_isStbTruetypeCompatible(
+  CHECK(!font_isStbTruetypeCompatible(
         emptySfnt, sizeof(emptySfnt), 0));
 
   const unsigned char truncatedTableDirectory[12] = {
     0x00, 0x01, 0x00, 0x00,
     0x00, 0x01,
   };
-  assert(!font_isStbTruetypeCompatible(
+  CHECK(!font_isStbTruetypeCompatible(
         truncatedTableDirectory, sizeof(truncatedTableDirectory), 0));
 }
 
 static void testValidFontData(void)
 {
   FILE * file = fopen(FONT_TEST_FILE, "rb");
-  assert(file);
-  assert(fseek(file, 0, SEEK_END) == 0);
+  CHECK(file);
+  CHECK(fseek(file, 0, SEEK_END) == 0);
   const long length = ftell(file);
-  assert(length > 0);
-  assert(fseek(file, 0, SEEK_SET) == 0);
+  CHECK(length > 0);
+  CHECK(fseek(file, 0, SEEK_SET) == 0);
 
   void * data = malloc((size_t)length);
-  assert(data);
-  assert(fread(data, 1, (size_t)length, file) == (size_t)length);
-  assert(fclose(file) == 0);
+  CHECK(data);
+  CHECK(fread(data, 1, (size_t)length, file) == (size_t)length);
+  CHECK(fclose(file) == 0);
 
-  assert(font_isStbTruetypeCompatible(data, (size_t)length, 0));
-  assert(!font_isStbTruetypeCompatible(data, (size_t)length, 1));
+  CHECK(font_isStbTruetypeCompatible(data, (size_t)length, 0));
+  CHECK(!font_isStbTruetypeCompatible(data, (size_t)length, 1));
   free(data);
 }
 

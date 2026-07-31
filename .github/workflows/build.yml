@@ -278,7 +278,7 @@ jobs:
             libsamplerate0-dev libpipewire-0.3-dev libpulse-dev
 
       - name: Download client build
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: client-build-${{ matrix.compiler.cc }}-${{ matrix.wayland_shell }}-${{ matrix.build_type }}
           path: client-build
