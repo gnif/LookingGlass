@@ -166,6 +166,7 @@ set(SOURCES
   src/message.c
   src/config.c
   src/keybind.c
+  src/font.c
   src/util.c
   src/clipboard.c
   src/kb.c

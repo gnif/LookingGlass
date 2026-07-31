@@ -20,6 +20,7 @@
 
 #include "util.h"
 #include "main.h"
+#include "font.h"
 
 #include "common/debug.h"
 #include "common/stringutils.h"
@@ -105,6 +106,7 @@ static bool uiFontAddFace(const FcPattern * pattern, FcCharSet ** remainingPtr)
   FcChar8 * file;
   FcCharSet * charset;
   FcBool outline = FcTrue;
+  int index = 0;
 
   if (FcPatternGetString(pattern, FC_FILE, 0, &file) != FcResultMatch ||
       FcPatternGetCharSet(pattern, FC_CHARSET, 0, &charset) != FcResultMatch)
@@ -114,12 +116,36 @@ static bool uiFontAddFace(const FcPattern * pattern, FcCharSet ** remainingPtr)
       !outline)
     return true;
 
+  if (FcPatternGetInteger(pattern, FC_INDEX, 0, &index) == FcResultMatch)
+    index &= 0xFFFF;
+
   FcCharSet * covered = FcCharSetIntersect(remaining, charset);
   if (!covered)
     return false;
 
   if (FcCharSetCount(covered) == 0)
   {
+    FcCharSetDestroy(covered);
+    return true;
+  }
+
+  size_t fontDataSize;
+  void * fontData = igImFileLoadToMemory(
+      (const char *)file, "rb", &fontDataSize, 0);
+  if (!fontData)
+  {
+    DEBUG_WARN("Failed to read UI font face: %s", file);
+    FcCharSetDestroy(covered);
+    return true;
+  }
+
+  const bool compatible = font_isStbTruetypeCompatible(
+      fontData, fontDataSize, index);
+  igMemFree(fontData);
+  if (!compatible)
+  {
+    DEBUG_WARN("Skipping stb-incompatible UI font face: %s (index %d)",
+        file, index);
     FcCharSetDestroy(covered);
     return true;
   }
@@ -144,9 +170,7 @@ static bool uiFontAddFace(const FcPattern * pattern, FcCharSet ** remainingPtr)
     return false;
   }
 
-  int index = 0;
-  if (FcPatternGetInteger(pattern, FC_INDEX, 0, &index) == FcResultMatch)
-    face->index = index & 0xFFFF;
+  face->index = index;
 
   ++UIFontFaceCount;
 
