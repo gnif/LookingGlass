@@ -518,7 +518,12 @@ void app_handleKeyReleaseInternal(int sc)
     {
       if (!g_state.escapeHelp && g_params.useSpiceInput &&
           !app_isOverlayMode())
-        core_setGrab(!g_cursor.grab);
+      {
+        const bool enable = !g_cursor.grab;
+        core_setGrab(enable);
+        if (!enable && g_params.minimizeOnCaptureRelease)
+          g_state.ds->minimize();
+      }
     }
 
     if (sc == g_params.escapeKey)
