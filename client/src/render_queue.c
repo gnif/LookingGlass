@@ -224,16 +224,16 @@ void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy)
   ll_push(l_renderQueue, cmd);
 }
 
-void renderQueue_cursorImage(bool monochrome, int width, int height, int pitch,
-    uint8_t * data)
+void renderQueue_cursorImage(LG_RendererCursor type,
+    int width, int height, int pitch, uint8_t * data)
 {
-  RenderCommand * cmd         = malloc(sizeof(*cmd));
-  cmd->op                     = CURSOR_OP_IMAGE;
-  cmd->cursorImage.monochrome = monochrome;
-  cmd->cursorImage.width      = width;
-  cmd->cursorImage.height     = height;
-  cmd->cursorImage.pitch      = pitch;
-  cmd->cursorImage.data       = data;
+  RenderCommand * cmd     = malloc(sizeof(*cmd));
+  cmd->op                 = CURSOR_OP_IMAGE;
+  cmd->cursorImage.type   = type;
+  cmd->cursorImage.width  = width;
+  cmd->cursorImage.height = height;
+  cmd->cursorImage.pitch  = pitch;
+  cmd->cursorImage.data   = data;
   ll_push(l_renderQueue, cmd);
 }
 
@@ -288,7 +288,7 @@ void renderQueue_process(void)
 
       case CURSOR_OP_IMAGE:
         RENDERER(onMouseShape,
-            cmd->cursorImage.monochrome ? LG_CURSOR_MONOCHROME : LG_CURSOR_COLOR,
+            cmd->cursorImage.type,
             cmd->cursorImage.width, cmd->cursorImage.height,
             cmd->cursorImage.pitch, cmd->cursorImage.data);
         free(cmd->cursorImage.data);

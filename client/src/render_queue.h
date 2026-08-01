@@ -86,11 +86,11 @@ typedef struct
 
     struct
     {
-      bool      monochrome;
-      int       width;
-      int       height;
-      int       pitch;
-      uint8_t * data;
+      LG_RendererCursor type;
+      int               width;
+      int               height;
+      int               pitch;
+      uint8_t         * data;
     }
     cursorImage;
   };
@@ -117,5 +117,6 @@ void renderQueue_surfaceFormat(const LG_RendererFormat format,
 
 void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy);
 
-void renderQueue_cursorImage(bool monochrome, int width, int height, int pitch,
+void renderQueue_cursorImage(LG_RendererCursor type,
+    int width, int height, int pitch,
     uint8_t * data);

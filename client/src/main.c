@@ -976,9 +976,17 @@ static void spice_setCursorRGBAImage(int width, int height, int hx, int hy,
   g_state.spiceHotX = hx;
   g_state.spiceHotY = hy;
 
-  void * copied = malloc(width * height * 4);
-  memcpy(copied, data, width * height * 4);
-  renderQueue_cursorImage(false, width, height, width * 4, copied);
+  const uint8_t * rgba = data;
+  uint8_t * bgra = malloc(width * height * 4);
+  for (int i = 0; i < width * height; ++i)
+  {
+    bgra[i * 4 + 0] = rgba[i * 4 + 2];
+    bgra[i * 4 + 1] = rgba[i * 4 + 1];
+    bgra[i * 4 + 2] = rgba[i * 4 + 0];
+    bgra[i * 4 + 3] = rgba[i * 4 + 3];
+  }
+  renderQueue_cursorImage(
+      LG_CURSOR_COLOR, width, height, width * 4, bgra);
 }
 
 static void spice_setCursorMonoImage(int width, int height, int hx, int hy,
@@ -989,9 +997,37 @@ static void spice_setCursorMonoImage(int width, int height, int hx, int hy,
 
   int stride = (width + 7) / 8;
   uint8_t * buffer = malloc(stride * height * 2);
-  memcpy(buffer, xorMask, stride * height);
-  memcpy(buffer + stride * height, andMask, stride * height);
-  renderQueue_cursorImage(true, width, height * 2, stride, buffer);
+  memcpy(buffer, andMask, stride * height);
+  memcpy(buffer + stride * height, xorMask, stride * height);
+  renderQueue_cursorImage(
+      LG_CURSOR_MONOCHROME, width, height * 2, stride, buffer);
+}
+
+static void spice_setCursorColorImage(int width, int height, int hx, int hy,
+    const void * data, const void * maskData)
+{
+  g_state.spiceHotX = hx;
+  g_state.spiceHotY = hy;
+
+  const uint8_t * rgba = data;
+  const uint8_t * andMask = maskData;
+  const int maskStride = (width + 7) / 8;
+  uint8_t * bgra = malloc(width * height * 4);
+  for (int y = 0; y < height; ++y)
+  {
+    for (int x = 0; x < width; ++x)
+    {
+      const int i = y * width + x;
+      bgra[i * 4 + 0] = rgba[i * 4 + 2];
+      bgra[i * 4 + 1] = rgba[i * 4 + 1];
+      bgra[i * 4 + 2] = rgba[i * 4 + 0];
+      bgra[i * 4 + 3] =
+        andMask[y * maskStride + x / 8] & (0x80U >> (x % 8)) ? 255 : 0;
+    }
+  }
+
+  renderQueue_cursorImage(
+      LG_CURSOR_MASKED_COLOR, width, height, width * 4, bgra);
 }
 
 static void spice_setCursorState(bool visible, int x, int y)
@@ -1034,11 +1070,12 @@ int spiceThread(void * arg)
     },
     .cursor   =
     {
-      .enable       = true,
-      .autoConnect  = false,
-      .setRGBAImage = spice_setCursorRGBAImage,
-      .setMonoImage = spice_setCursorMonoImage,
-      .setState     = spice_setCursorState,
+      .enable        = true,
+      .autoConnect   = false,
+      .setRGBAImage  = spice_setCursorRGBAImage,
+      .setMonoImage  = spice_setCursorMonoImage,
+      .setColorImage = spice_setCursorColorImage,
+      .setState      = spice_setCursorState,
     },
 #if ENABLE_AUDIO
     .playback =
