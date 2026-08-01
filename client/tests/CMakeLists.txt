@@ -49,6 +49,10 @@ set_target_properties(render-tests PROPERTIES
   CXX_STANDARD_REQUIRED ON
 )
 
+target_compile_options(render-tests PRIVATE
+  -fno-fast-math
+)
+
 target_compile_definitions(render-tests PRIVATE
   LG_CLIENT_PATH="$<TARGET_FILE:looking-glass-client>"
 )

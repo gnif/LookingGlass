@@ -5,6 +5,10 @@ add_library(transport_Test STATIC
   test.c
 )
 
+target_compile_options(transport_Test PRIVATE
+  -fno-fast-math
+)
+
 target_link_libraries(transport_Test
   lg_common
 )
