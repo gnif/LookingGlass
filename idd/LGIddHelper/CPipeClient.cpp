@@ -252,7 +252,7 @@ void CPipeClient::ReloadSettings()
   if (!m_connected)
     return;
 
-  LGPipeMsg msg;
+  LGPipeMsg msg = {};
   msg.size = sizeof(msg);
   msg.type = LGPipeMsg::RELOADSETTINGS;
   WriteMsg(msg);

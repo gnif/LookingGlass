@@ -279,7 +279,7 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
   if (!m_connected)
     return;
 
-  LGPipeMsg msg;
+  LGPipeMsg msg = {};
   msg.size       = sizeof(msg);
   msg.type       = LGPipeMsg::SETCURSORPOS;
   msg.curorPos.x = x;
@@ -289,7 +289,7 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
 
 void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height, uint32_t refresh)
 {
-  LGPipeMsg msg;
+  LGPipeMsg msg = {};
   msg.size                = sizeof(msg);
   msg.type                = LGPipeMsg::SETDISPLAYMODE;
   msg.displayMode.width   = width;
@@ -300,7 +300,7 @@ void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height, uint32_t refre
 
 void CPipeServer::SetGPUStatus(bool software)
 {
-  LGPipeMsg msg;
+  LGPipeMsg msg = {};
   msg.size               = sizeof(msg);
   msg.type               = LGPipeMsg::GPUSTATUS;
   msg.gpuStatus.software = software;
@@ -310,7 +310,7 @@ void CPipeServer::SetGPUStatus(bool software)
 void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
   uint32_t requiredSizeMiB)
 {
-  LGPipeMsg msg;
+  LGPipeMsg msg = {};
   msg.size = sizeof(msg);
   msg.type = LGPipeMsg::RESOLUTIONREJECTED;
   msg.resolutionRejected.width = width;
