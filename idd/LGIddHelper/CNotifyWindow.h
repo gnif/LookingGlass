@@ -20,6 +20,7 @@
 
 #pragma once
 #include "CWindow.h"
+#include <stdint.h>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -44,6 +45,8 @@ class CNotifyWindow : public CWindow
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
   void handleGPUNotification(bool hasGPU);
+  void handleResolutionRejected(uint32_t width, uint32_t height,
+    uint32_t requiredSizeMiB);
   void scheduleDisplayCheck(UINT delay);
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
@@ -71,6 +74,8 @@ public:
   static bool registerClass();
 
   void setGPU(bool hasGPU);
+  void notifyResolutionRejected(uint32_t width, uint32_t height,
+    uint32_t requiredSizeMiB);
 
   HWND hwndDialog();
   void close();

@@ -22,12 +22,14 @@
 #include "CConfigWindow.h"
 #include "Resources.h"
 #include <CDebug.h>
+#include <new>
 #include <windowsx.h>
 #include <strsafe.h>
 
-#define WM_NOTIFY_ICON     (WM_USER)
-#define WM_CLEAN_UP_CONFIG (WM_USER+1)
-#define WM_NO_GPU          (WM_USER+2)
+#define WM_NOTIFY_ICON         (WM_USER)
+#define WM_CLEAN_UP_CONFIG     (WM_USER+1)
+#define WM_NO_GPU              (WM_USER+2)
+#define WM_RESOLUTION_REJECTED (WM_USER+3)
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_SHOW_CONFIG 3001
@@ -38,6 +40,16 @@
 
 ATOM CNotifyWindow::s_atom = 0;
 UINT CNotifyWindow::s_taskbarCreated = 0;
+
+namespace
+{
+  struct ResolutionRejectedNotification
+  {
+    uint32_t width;
+    uint32_t height;
+    uint32_t requiredSizeMiB;
+  };
+}
 
 bool CNotifyWindow::registerClass()
 {
@@ -89,6 +101,16 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
   case WM_NO_GPU:
     handleGPUNotification((bool)wParam);
     return 0;
+
+  case WM_RESOLUTION_REJECTED:
+  {
+    std::unique_ptr<ResolutionRejectedNotification> notification(
+      reinterpret_cast<ResolutionRejectedNotification*>(lParam));
+    if (notification)
+      handleResolutionRejected(notification->width, notification->height,
+        notification->requiredSizeMiB);
+    return 0;
+  }
 
   case WM_DISPLAYCHANGE:
     scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
@@ -246,6 +268,46 @@ void CNotifyWindow::handleGPUNotification(bool hasGPU)
   StringCbCopy(nid.szInfo, sizeof nid.szInfo,
     L"GPU acceleration will not be available. "
     L"Looking Glass will use software rendering.");
+
+  if (!Shell_NotifyIcon(NIM_MODIFY, &nid))
+    DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_MODIFY)");
+}
+
+void CNotifyWindow::notifyResolutionRejected(uint32_t width, uint32_t height,
+  uint32_t requiredSizeMiB)
+{
+  auto notification = new (std::nothrow) ResolutionRejectedNotification
+    { width, height, requiredSizeMiB };
+  if (!notification)
+  {
+    DEBUG_ERROR("Failed to allocate resolution rejection notification");
+    return;
+  }
+
+  if (!PostMessage(m_hwnd, WM_RESOLUTION_REJECTED, 0,
+      reinterpret_cast<LPARAM>(notification)))
+  {
+    delete notification;
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to queue resolution rejection notification");
+  }
+}
+
+void CNotifyWindow::handleResolutionRejected(uint32_t width, uint32_t height,
+  uint32_t requiredSizeMiB)
+{
+  NOTIFYICONDATA nid;
+  memcpy(&nid, &m_iconData, sizeof nid);
+
+  nid.uFlags = NIF_INFO | NIF_SHOWTIP;
+  nid.dwInfoFlags = NIIF_WARNING;
+  StringCbCopy(nid.szInfoTitle, sizeof nid.szInfoTitle,
+    L"Resolution change refused");
+  StringCbPrintf(nid.szInfo, sizeof nid.szInfo,
+    L"The requested resolution %ux%u does not fit in shared memory. "
+    L"Change the total IVSHMEM size to at least %u MiB.",
+    width, height,
+    requiredSizeMiB);
 
   if (!Shell_NotifyIcon(NIM_MODIFY, &nid))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_MODIFY)");

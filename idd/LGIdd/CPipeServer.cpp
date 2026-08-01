@@ -306,3 +306,15 @@ void CPipeServer::SetGPUStatus(bool software)
   msg.gpuStatus.software = software;
   WriteMsg(msg);
 }
+
+void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
+  uint32_t requiredSizeMiB)
+{
+  LGPipeMsg msg;
+  msg.size = sizeof(msg);
+  msg.type = LGPipeMsg::RESOLUTIONREJECTED;
+  msg.resolutionRejected.width = width;
+  msg.resolutionRejected.height = height;
+  msg.resolutionRejected.requiredSizeMiB = requiredSizeMiB;
+  WriteMsg(msg);
+}

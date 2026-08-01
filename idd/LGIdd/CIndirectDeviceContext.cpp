@@ -46,6 +46,35 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
+static const UINT64 MIB = 1024ULL * 1024ULL;
+static const UINT64 FRAME_BYTES_PER_PIXEL = 4;
+
+static bool AlignUp(UINT64 value, UINT64 alignment, UINT64& result)
+{
+  if (!alignment || (alignment & (alignment - 1)))
+    return false;
+
+  const UINT64 mask = alignment - 1;
+  if (value > UINT64_MAX - mask)
+    return false;
+
+  result = (value + mask) & ~mask;
+  return true;
+}
+
+static uint32_t RecommendedIVSHMEMSizeMiB(UINT64 requiredSize)
+{
+  UINT64 sizeMiB = requiredSize / MIB;
+  if (requiredSize % MIB)
+    ++sizeMiB;
+
+  UINT64 result = 1;
+  while (result < sizeMiB && result <= UINT32_MAX / 2)
+    result <<= 1;
+
+  return result < sizeMiB ? UINT32_MAX : (uint32_t)result;
+}
+
 #ifdef HAS_IDDCX_110
 static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
 {
@@ -756,8 +785,66 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
 }
 #endif
 
-void CIndirectDeviceContext::SetResolution(int width, int height)
+bool CIndirectDeviceContext::GetResolutionMemoryRequirements(
+  uint32_t width, uint32_t height, UINT64& frameSize,
+  UINT64& ivshmemSize) const
 {
+  frameSize = 0;
+  ivshmemSize = 0;
+
+  if (!width || !height || !m_alignSize || !m_frameMemoryOffset)
+    return false;
+
+  UINT64 pitch;
+  if (!AlignUp((UINT64)width * FRAME_BYTES_PER_PIXEL,
+      D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, pitch) ||
+      pitch > UINT64_MAX / height)
+    return false;
+
+  frameSize = pitch * height;
+
+  UINT64 frameAllocationSize;
+  if (frameSize > UINT64_MAX - m_alignSize ||
+      !AlignUp(frameSize + m_alignSize, m_alignSize,
+        frameAllocationSize))
+    return false;
+
+  UINT64 frameMemoryStart;
+  if (!AlignUp(m_frameMemoryOffset, m_alignSize, frameMemoryStart) ||
+      frameAllocationSize >
+        (UINT64_MAX - frameMemoryStart) / LGMP_Q_FRAME_LEN)
+    return false;
+
+  ivshmemSize = frameMemoryStart +
+    frameAllocationSize * LGMP_Q_FRAME_LEN;
+  return true;
+}
+
+void CIndirectDeviceContext::SetResolution(uint32_t width, uint32_t height)
+{
+  UINT64 frameSize;
+  UINT64 requiredIVSHMEMSize;
+  if (!GetResolutionMemoryRequirements(width, height, frameSize,
+      requiredIVSHMEMSize))
+  {
+    DEBUG_WARN("Ignoring invalid resolution request: %ux%u", width, height);
+    return;
+  }
+
+  if (frameSize > m_maxFrameSize)
+  {
+    const uint32_t requiredMiB =
+      RecommendedIVSHMEMSizeMiB(requiredIVSHMEMSize);
+    DEBUG_WARN(
+      "Refusing resolution %ux%u: frame requires %llu bytes, only %llu bytes are available; IVSHMEM must be at least %u MiB",
+      width, height,
+      (unsigned long long)frameSize,
+      (unsigned long long)m_maxFrameSize,
+      requiredMiB);
+    g_pipe.ResolutionRejected(width, height, requiredMiB);
+    return;
+  }
+
   CSettings::DisplayMode mode = {};
   mode.width     = width;
   mode.height    = height;
@@ -915,14 +1002,55 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
       sizeof(KVMFRCursor) + sizeof(KVMFRColorTransform));
   }
 
-  m_maxFrameSize = lgmpHostMemAvail(m_lgmp);
-  m_maxFrameSize = (m_maxFrameSize -(m_alignSize - 1)) & ~(m_alignSize - 1);
-  m_maxFrameSize /= LGMP_Q_FRAME_LEN;
-  DEBUG_INFO("Max Frame Size: %u MiB", (unsigned int)(m_maxFrameSize / 1048576LL));
+  if (!m_alignSize || (m_alignSize & (m_alignSize - 1)) ||
+      m_alignSize < sizeof(KVMFRFrame) + sizeof(FrameBuffer))
+  {
+    DEBUG_ERROR("Invalid frame buffer alignment: %llu",
+      (unsigned long long)m_alignSize);
+    return false;
+  }
+
+  const size_t available = lgmpHostMemAvail(m_lgmp);
+  m_frameMemoryOffset = m_ivshmem.GetSize() - available;
+
+  UINT64 alignedFrameMemoryOffset;
+  if (!AlignUp(m_frameMemoryOffset, m_alignSize,
+      alignedFrameMemoryOffset))
+  {
+    DEBUG_ERROR("Unable to align the frame memory offset");
+    return false;
+  }
+
+  const size_t alignmentPadding =
+    (size_t)(alignedFrameMemoryOffset - m_frameMemoryOffset);
+  if (available <= alignmentPadding)
+  {
+    DEBUG_ERROR("Insufficient shared memory for frame buffers");
+    return false;
+  }
+
+  const size_t alignmentMask = m_alignSize - 1;
+  size_t frameAllocationSize =
+    (available - alignmentPadding) / LGMP_Q_FRAME_LEN;
+  frameAllocationSize &= ~alignmentMask;
+  if (frameAllocationSize <= m_alignSize ||
+      frameAllocationSize > UINT32_MAX)
+  {
+    DEBUG_ERROR("Invalid frame allocation size: %llu",
+      (unsigned long long)frameAllocationSize);
+    return false;
+  }
+
+  // The KVMFR frame header and FrameBuffer write position occupy the first
+  // alignment unit. Only the bytes after it are usable for pixel data.
+  m_maxFrameSize = frameAllocationSize - m_alignSize;
+  DEBUG_INFO("Max Frame Data Size: %u MiB",
+    (unsigned int)(m_maxFrameSize / MIB));
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    if ((status = lgmpHostMemAllocAligned(m_lgmp, (uint32_t)m_maxFrameSize,
+    if ((status = lgmpHostMemAllocAligned(m_lgmp,
+        (uint32_t)frameAllocationSize,
         (uint32_t)m_alignSize, &m_frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAllocAligned Failed (Frame): %s", lgmpStatusString(status));

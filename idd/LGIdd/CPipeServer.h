@@ -68,6 +68,8 @@ class CPipeServer
     void SetCursorPos(uint32_t x, uint32_t y);
     void SetDisplayMode(uint32_t width, uint32_t height, uint32_t refresh);
     void SetGPUStatus(bool software);
+    void ResolutionRejected(uint32_t width, uint32_t height,
+      uint32_t requiredSizeMiB);
 };
 
 extern CPipeServer g_pipe;

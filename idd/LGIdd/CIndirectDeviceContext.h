@@ -100,6 +100,7 @@ private:
   int m_cursorX = 0, m_cursorY = 0;
 
   size_t         m_alignSize           = 0;
+  size_t         m_frameMemoryOffset   = 0;
   size_t         m_maxFrameSize        = 0;
   int            m_frameIndex          = 0;
   volatile LONG  m_publishedFrameIndex = -1;
@@ -146,6 +147,8 @@ private:
   void ResendCursor();
   void SendColorTransform();
   void InitializeEdid();
+  bool GetResolutionMemoryRequirements(uint32_t width, uint32_t height,
+    UINT64& frameSize, UINT64& ivshmemSize) const;
 
   // Guards m_displayModes and m_edid. The mode list is rebuilt on the LGMP
   // timer thread (SetResolution) while IddCx concurrently enumerates it on its
@@ -196,7 +199,7 @@ public:
     const IDARG_IN_QUERYTARGETMODES2* inArgs, IDARG_OUT_QUERYTARGETMODES* outArgs);
 #endif
 
-  void SetResolution(int width, int height);
+  void SetResolution(uint32_t width, uint32_t height);
 
   size_t GetAlignSize   () const { return m_alignSize     ; }
   size_t GetMaxFrameSize() const { return m_maxFrameSize  ; }

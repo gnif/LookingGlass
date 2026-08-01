@@ -471,6 +471,10 @@ void CPipeClient::Thread()
           HandleGPUStatus(msg);
           break;
 
+        case LGPipeMsg::RESOLUTIONREJECTED:
+          HandleResolutionRejected(msg);
+          break;
+
         default:
           DEBUG_ERROR("Unknown message type %d", msg.type);
           break;
@@ -527,4 +531,12 @@ void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 void CPipeClient::HandleGPUStatus(const LGPipeMsg& msg)
 {
   CNotifyWindow::instance().setGPU(!msg.gpuStatus.software);
+}
+
+void CPipeClient::HandleResolutionRejected(const LGPipeMsg& msg)
+{
+  CNotifyWindow::instance().notifyResolutionRejected(
+    msg.resolutionRejected.width,
+    msg.resolutionRejected.height,
+    msg.resolutionRejected.requiredSizeMiB);
 }

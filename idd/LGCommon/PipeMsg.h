@@ -32,7 +32,8 @@ struct LGPipeMsg
     SETCURSORPOS,
     SETDISPLAYMODE,
     GPUSTATUS,
-    RELOADSETTINGS
+    RELOADSETTINGS,
+    RESOLUTIONREJECTED
   }
   type;
   union
@@ -57,5 +58,13 @@ struct LGPipeMsg
       bool software;
     }
     gpuStatus;
+
+    struct
+    {
+      uint32_t width;
+      uint32_t height;
+      uint32_t requiredSizeMiB;
+    }
+    resolutionRejected;
   };
 };
