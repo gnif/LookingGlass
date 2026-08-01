@@ -127,7 +127,7 @@ void CIndirectDeviceContext::InitializeEdid()
 {
   AcquireSRWLockExclusive(&m_modeLock);
   if (!m_edid.Size())
-    m_edid.Build(m_displayModes, CanProcessFP16());
+    m_edid.Build(CanProcessFP16());
   ReleaseSRWLockExclusive(&m_modeLock);
 }
 
@@ -331,7 +331,7 @@ void CIndirectDeviceContext::InitAdapter()
     // The monitor has not been created yet, so replace the provisional HDR
     // EDID before Windows can observe it.
     AcquireSRWLockExclusive(&m_modeLock);
-    m_edid.Build(m_displayModes, false);
+    m_edid.Build(false);
     ReleaseSRWLockExclusive(&m_modeLock);
     caps.Flags = (IDDCX_ADAPTER_FLAGS)(caps.Flags & ~IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16);
     ZeroMemory(&initOut, sizeof(initOut));

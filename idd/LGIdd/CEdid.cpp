@@ -81,6 +81,15 @@ static const BYTE CTA_HDR_DESIRED_MIN_LUMINANCE           = 0;
 
 static const BYTE CTA_COLORIMETRY_BT2020_RGB = (BYTE)(1 << 7);
 
+// Keep the EDID mode list independent of the configured and dynamically
+// requested modes. Windows uses the EDID as part of the monitor identity, so
+// changing these timings at runtime can make it treat the IDD as a new monitor.
+static const CSettings::DisplayMode EDID_DISPLAY_MODES[] =
+{
+  { 1024, 768, 60, true , false },
+  {  800, 600, 60, false, false }
+};
+
 #pragma pack(push, 1)
 struct EdidLe16
 {
@@ -534,7 +543,7 @@ bool CEdid::WriteDetailedTiming(BYTE* dtd, const CSettings::DisplayMode& mode)
   return true;
 }
 
-void CEdid::Build(const CSettings::DisplayModes& modes, bool hdr)
+void CEdid::Build(bool hdr)
 {
   m_data.assign(
     static_cast<std::vector<BYTE, std::allocator<BYTE>>::size_type>(
@@ -544,33 +553,16 @@ void CEdid::Build(const CSettings::DisplayModes& modes, bool hdr)
   EdidBaseBlock baseBlock = {};
   InitEdidBaseBlock(baseBlock, hdr);
 
-  CSettings::DisplayModes sorted = modes;
-  std::stable_sort(sorted.begin(), sorted.end(),
-    [](const CSettings::DisplayMode& a, const CSettings::DisplayMode& b)
-    {
-      if (a.preferred != b.preferred)
-        return a.preferred && !b.preferred;
-      if (a.width != b.width)
-        return a.width > b.width;
-      if (a.height != b.height)
-        return a.height > b.height;
-      return a.refresh > b.refresh;
-    });
-
   UINT modeIndex    = 0;
   UINT baseDtdIndex = 0;
 
-  for (; modeIndex < sorted.size() &&
+  for (; modeIndex < ARRAYSIZE(EDID_DISPLAY_MODES) &&
     baseDtdIndex < EDID_BASE_DETAILED_TIMING_COUNT;
     ++modeIndex)
   {
-    // never include the extra mode in the EDID
-    if (sorted[modeIndex].extraMode)
-      continue;
-
     if (MakeDetailedTiming(
       baseBlock.descriptors[baseDtdIndex].detailedTiming,
-      sorted[modeIndex]))
+      EDID_DISPLAY_MODES[modeIndex]))
     {
       ++baseDtdIndex;
     }
@@ -600,15 +592,12 @@ void CEdid::Build(const CSettings::DisplayModes& modes, bool hdr)
   ctaBlock.flags     = 0x00;
 
   UINT ctaDtdWrite = dataOffset;
-  for (; modeIndex < sorted.size() &&
+  for (; modeIndex < ARRAYSIZE(EDID_DISPLAY_MODES) &&
     ctaDtdWrite + EDID_DTD_SIZE <= EDID_BLOCK_SIZE - 1;
     ++modeIndex)
   {
-    // never include the extra mode in the EDID
-    if (sorted[modeIndex].extraMode)
-      continue;
-
-    if (WriteDetailedTiming(cta + ctaDtdWrite, sorted[modeIndex]))
+    if (WriteDetailedTiming(cta + ctaDtdWrite,
+      EDID_DISPLAY_MODES[modeIndex]))
       ctaDtdWrite += EDID_DTD_SIZE;
   }
 

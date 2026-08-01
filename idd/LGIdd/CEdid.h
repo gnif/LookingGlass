@@ -42,7 +42,7 @@ public:
     UINT64 pixelClock;
   };
 
-  void Build(const CSettings::DisplayModes& modes, bool hdr);
+  void Build(bool hdr);
 
   static bool GetTiming(Timing& timing,
     const CSettings::DisplayMode& mode);
