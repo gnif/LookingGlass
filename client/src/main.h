@@ -148,14 +148,9 @@ struct AppState
   RingBuffer            renderTimings;
   RingBuffer            frameLatency;
   uint64_t              frameImportTime;
+  uint64_t              frameImportWaitTime;
 
   atomic_uint_least64_t pendingCount;
-  atomic_uint           frameTimingSequence;
-  atomic_uint_least64_t producerCaptureTime;
-  atomic_uint_least64_t producerPostProcessTime;
-  atomic_uint_least64_t producerCopyTime;
-  atomic_uint_least64_t producerReadyTime;
-  atomic_uint_least64_t clientImportTime;
   atomic_uint_least64_t renderCount, frameCount;
   _Atomic(float)        fps, ups;
 

@@ -156,12 +156,14 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
   {
     /* The mapped PBO may contain a partial copy. Force a full refresh if the
      * caller recovers, and never expose this slot to the render context. */
-    damage->count = -1;
+    damage->count                         = -1;
     parent->buf[parent->bufIndex].updated = false;
+    parent->slotToken[parent->bufIndex]   = LG_RENDERER_FRAME_TOKEN_NONE;
     LG_UNLOCK(parent->copyLock);
     return false;
   }
 
+  parent->slotToken[parent->bufIndex]   = update->frameToken;
   parent->buf[parent->bufIndex].updated = true;
 
   for (int i = 0; i < EGL_TEX_BUFFER_MAX; ++i)

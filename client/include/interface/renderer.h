@@ -133,6 +133,25 @@ typedef struct LG_RendererCapture
 }
 LG_RendererCapture;
 
+#define LG_RENDERER_FRAME_TOKEN_NONE 0
+
+typedef uint64_t LG_RendererFrameToken;
+
+/* Renderer timings are client-clock durations in nanoseconds. frameToken is
+ * the received frame actually consumed by this render, or
+ * LG_RENDERER_FRAME_TOKEN_NONE when the render only refreshed existing
+ * content. */
+typedef struct LG_RendererFrameTiming
+{
+  LG_RendererFrameToken frameToken;  /* frame consumed by this render */
+  uint64_t              setupTime;   /* render entry to desktop processing */
+  uint64_t              effectsTime; /* post-processing work */
+  uint64_t              desktopTime; /* desktop work, excluding effects */
+  uint64_t              composeTime; /* composition, excluding UI overlay */
+  uint64_t              swapTime;    /* display-server buffer swap */
+}
+LG_RendererFrameTiming;
+
 typedef enum LG_RendererCursor
 {
   LG_CURSOR_COLOR       ,
@@ -237,20 +256,24 @@ typedef struct LG_RendererOps
   bool (*onFrameFormat)(LG_Renderer * renderer,
       const LG_RendererFormat format);
 
-  /* called when there is a new frame
-   * Context: frameThread */
+  /* called when there is a new frame. frameToken must remain attached to the
+   * update if the renderer coalesces it, and must be reported by render only
+   * when that update is consumed. Context: frameThread */
   bool (*onFrame)(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFD,
-      const FrameDamageRect * damage, int damageCount);
+      const FrameDamageRect * damage, int damageCount,
+      LG_RendererFrameToken frameToken);
 
   /* called when the rederer is to startup
    * Context: renderThread */
   bool (*renderStartup)(LG_Renderer * renderer, bool useDMA);
 
-  /* called to render the scene
-   * Context: renderThread */
+  /* called to render the scene. The renderer must not consume a received
+   * frame newer than frameTokenLimit, and reports the token it did consume in
+   * timing (or LG_RENDERER_FRAME_TOKEN_NONE). Context: renderThread */
   bool (*render)(LG_Renderer * renderer, LG_RendererRotate rotate,
-      const bool newFrame, const bool invalidateWindow,
-      void (*preSwap)(void * udata), void * udata);
+      LG_RendererFrameToken frameTokenLimit, const bool invalidateWindow,
+      void (*preSwap)(void * udata), void * udata,
+      LG_RendererFrameTiming * timing);
 
   /* Optional test/diagnostic readback of the fully composed framebuffer.
    * Called on the render thread before swap while the graphics context is

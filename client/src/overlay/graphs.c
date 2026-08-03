@@ -64,6 +64,49 @@ struct OverlayGraph
   GraphFormatFn         formatFn;
 };
 
+static void graphFree(struct OverlayGraph * graph)
+{
+  free(graph->name);
+  free(graph);
+}
+
+static struct OverlayGraph * graphNew(const char * name, RingBuffer buffer)
+{
+  if (!name || !*name)
+  {
+    DEBUG_ERROR("graph name must not be empty");
+    return NULL;
+  }
+
+  struct OverlayGraph * graph = calloc(1, sizeof(*graph));
+  if (!graph)
+  {
+    DEBUG_ERROR("out of memory");
+    return NULL;
+  }
+
+  graph->name = lg_strdup(name);
+  if (!graph->name)
+  {
+    DEBUG_ERROR("out of memory");
+    graphFree(graph);
+    return NULL;
+  }
+
+  graph->buffer  = buffer;
+  graph->enabled = true;
+  return graph;
+}
+
+static GraphHandle graphPublish(struct OverlayGraph * graph)
+{
+  if (!ll_push(gs.graphs, graph))
+  {
+    graphFree(graph);
+    return NULL;
+  }
+  return graph;
+}
 
 static void configCallback(void * udata, int * id)
 {
@@ -127,10 +170,7 @@ static void graphs_free(void * udata)
 {
   struct OverlayGraph * graph;
   while(ll_shift(gs.graphs, (void **)&graph))
-  {
-    free(graph->name);
-    free(graph);
-  }
+    graphFree(graph);
   ll_free(gs.graphs);
   gs.graphs = NULL;
 
@@ -175,20 +215,37 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
   return true;
 }
 
-#define TIMING_PLOT_BUCKETS   100
-#define TIMING_PLOT_WINDOW_NS 20000000000ULL
-#define TIMING_PLOT_BUCKET_NS \
+#define TIMING_PLOT_BUCKETS        100
+#define TIMING_PLOT_WINDOW_NS      20000000000ULL
+#define TIMING_PLOT_BUCKET_NS      \
   (TIMING_PLOT_WINDOW_NS / TIMING_PLOT_BUCKETS)
-#define TIMING_STAGE_COUNT    6
+#define FRAME_TIMING_STAGE_COUNT   OVERLAY_FRAME_TIMING_COUNT
+
+static const char * const frameTimingLabels[FRAME_TIMING_STAGE_COUNT] = {
+  "Capture",
+  "Post",
+  "Copy",
+  "Ready",
+  "Import",
+  "Dispatch",
+  "Queue",
+  "Prepare",
+  "Setup",
+  "Effects",
+  "Desktop",
+  "Compose",
+  "Swap",
+};
 
 struct TimingPlotData
 {
   uint64_t windowStart;
   uint64_t windowEnd;
-  float    stageMin[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
-  float    stageMax[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
-  float    stageSum[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
-  unsigned count[TIMING_PLOT_BUCKETS];
+  float    stageMin[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
+  float    stageMax[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
+  float    stageSum[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
+  unsigned stageSamples[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS];
+  unsigned samples[TIMING_PLOT_BUCKETS];
 };
 
 static float roundTimingScale(float value)
@@ -223,8 +280,10 @@ static float graphRowWeight(const struct OverlayGraph * graph)
   return graph->compact ? 0.5f : 1.0f;
 }
 
-static bool accumulateTimingSample(int index, void * value_, void * udata_)
+static bool accumulateFrameTimingSample(int index, void * value_, void * udata_)
 {
+  (void)index;
+
   struct TimingPlotData    * data   = udata_;
   const OverlayFrameTiming * timing = value_;
   if (timing->timestamp < data->windowStart)
@@ -232,29 +291,44 @@ static bool accumulateTimingSample(int index, void * value_, void * udata_)
   if (timing->timestamp >= data->windowEnd)
     return false;
 
-  const uint64_t offset = timing->timestamp - data->windowStart;
-  const int bucket = min(offset / TIMING_PLOT_BUCKET_NS,
-      TIMING_PLOT_BUCKETS - 1);
-  const float values[TIMING_STAGE_COUNT] = {
+  const float values[FRAME_TIMING_STAGE_COUNT] = {
     timing->capture,
     timing->postProcess,
     timing->copy,
     timing->ready,
     timing->import,
-    timing->render,
+    timing->dispatch,
+    timing->queue,
+    timing->prepare,
+    timing->setup,
+    timing->effects,
+    timing->desktop,
+    timing->compose,
+    timing->swap,
   };
-  for (int i = 0; i < TIMING_STAGE_COUNT; ++i)
+
+  const uint64_t offset = timing->timestamp - data->windowStart;
+  const int      bucket = min(offset / TIMING_PLOT_BUCKET_NS,
+      TIMING_PLOT_BUCKETS - 1);
+  for (int stage = 0; stage < FRAME_TIMING_STAGE_COUNT; ++stage)
   {
-    if (!data->count[bucket])
-      data->stageMin[i][bucket] = data->stageMax[i][bucket] = values[i];
+    if (!(timing->validMask & (1U << stage)))
+      continue;
+
+    const float value = values[stage];
+    if (!data->stageSamples[stage][bucket])
+      data->stageMin[stage][bucket] = data->stageMax[stage][bucket] = value;
     else
     {
-      data->stageMin[i][bucket] = min(data->stageMin[i][bucket], values[i]);
-      data->stageMax[i][bucket] = max(data->stageMax[i][bucket], values[i]);
+      data->stageMin[stage][bucket] =
+        min(data->stageMin[stage][bucket], value);
+      data->stageMax[stage][bucket] =
+        max(data->stageMax[stage][bucket], value);
     }
-    data->stageSum[i][bucket] += values[i];
+    data->stageSum[stage][bucket] += value;
+    ++data->stageSamples[stage][bucket];
   }
-  ++data->count[bucket];
+  ++data->samples[bucket];
   return true;
 }
 
@@ -315,20 +389,24 @@ static void renderLineGraph(struct OverlayGraph * graph, bool interactive,
 
 static void renderTimingStatistic(struct OverlayGraph * graph,
     const char * statistic, int statisticId,
-    const float values[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS],
+    const float values[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS],
     bool interactive, ImVec2 size)
 {
-  float cumulative[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
-  float zero[TIMING_PLOT_BUCKETS] = {};
+  float cumulative[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
+  float zero[TIMING_PLOT_BUCKETS];
   float xValues[TIMING_PLOT_BUCKETS];
   float peak = 0.0f;
   for (int bucket = 0; bucket < TIMING_PLOT_BUCKETS; ++bucket)
   {
+    const bool populated = isfinite(values[0][bucket]);
     xValues[bucket] = bucket;
-    for (int stage = 0; stage < TIMING_STAGE_COUNT; ++stage)
-      cumulative[stage][bucket] = values[stage][bucket] +
-        (stage ? cumulative[stage - 1][bucket] : 0.0f);
-    peak = max(peak, cumulative[TIMING_STAGE_COUNT - 1][bucket]);
+    zero[bucket]    = populated ? 0.0f : NAN;
+    for (int stage = 0; stage < FRAME_TIMING_STAGE_COUNT; ++stage)
+      cumulative[stage][bucket] = populated ? values[stage][bucket] +
+        (stage ? cumulative[stage - 1][bucket] : 0.0f) : NAN;
+
+    if (populated)
+      peak = max(peak, cumulative[FRAME_TIMING_STAGE_COUNT - 1][bucket]);
   }
   const float valueMax = graphScale(graph, statisticId, peak);
 
@@ -346,26 +424,20 @@ static void renderTimingStatistic(struct OverlayGraph * graph,
   ImPlot_SetupLegend(ImPlotLocation_South,
       ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal);
 
-  const char * labels[TIMING_STAGE_COUNT] = {
-    "Capture",
-    "Post",
-    "Copy",
-    "Ready",
-    "Import",
-    "Render",
-  };
-
   gs.plotSpec->Offset = 0;
   gs.plotSpec->Stride = sizeof(float);
-  for (int stage = 0; stage < TIMING_STAGE_COUNT; ++stage)
+  const int colorCount = ImPlot_GetColormapSize(ImPlotColormap_Paired);
+  for (int stage = 0; stage < FRAME_TIMING_STAGE_COUNT; ++stage)
   {
-    const ImVec4 color =
-      ImPlot_GetColormapColor(stage, ImPlotColormap_Deep);
+    const ImVec4 color = stage < colorCount ?
+      ImPlot_GetColormapColor(stage, ImPlotColormap_Paired) :
+      (ImVec4) {0.75f, 0.75f, 0.75f, 1.0f};
     gs.plotSpec->FillColor  = color;
     gs.plotSpec->FillAlpha  = 0.35f;
     gs.plotSpec->LineWeight = 1.0f;
     gs.plotSpec->Flags      = ImPlotShadedFlags_None;
-    ImPlot_PlotShaded_FloatPtrFloatPtrFloatPtr(labels[stage], xValues,
+    ImPlot_PlotShaded_FloatPtrFloatPtrFloatPtr(
+        frameTimingLabels[stage], xValues,
         stage ? cumulative[stage - 1] : zero, cumulative[stage],
         TIMING_PLOT_BUCKETS, *gs.plotSpec);
 
@@ -373,7 +445,7 @@ static void renderTimingStatistic(struct OverlayGraph * graph,
     gs.plotSpec->LineWeight = 1.0f;
     gs.plotSpec->FillAlpha  = 1.0f;
     gs.plotSpec->Flags      = ImPlotLineFlags_None;
-    ImPlot_PlotLine_FloatPtrInt(labels[stage], cumulative[stage],
+    ImPlot_PlotLine_FloatPtrInt(frameTimingLabels[stage], cumulative[stage],
         TIMING_PLOT_BUCKETS, 1.0, 0.0, *gs.plotSpec);
   }
 
@@ -383,31 +455,39 @@ static void renderTimingStatistic(struct OverlayGraph * graph,
   ImPlot_EndPlot();
 }
 
-static void renderTimingGraph(struct OverlayGraph * graph, bool interactive,
-    ImVec2 size)
+static void renderFrameTimingGraph(struct OverlayGraph * graph,
+    bool interactive, ImVec2 size)
 {
   struct TimingPlotData data = {};
-  data.windowEnd = nanotime() / TIMING_PLOT_BUCKET_NS * TIMING_PLOT_BUCKET_NS;
+  data.windowEnd =
+    nanotime() / TIMING_PLOT_BUCKET_NS * TIMING_PLOT_BUCKET_NS;
   data.windowStart = data.windowEnd > TIMING_PLOT_WINDOW_NS ?
     data.windowEnd - TIMING_PLOT_WINDOW_NS : 0;
-  ringbuffer_forEach(graph->buffer, accumulateTimingSample, &data, false);
+  ringbuffer_forEach(
+      graph->buffer, accumulateFrameTimingSample, &data, false);
 
-  float minimum[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
-  float maximum[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
-  float average[TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
+  float minimum[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
+  float maximum[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
+  float average[FRAME_TIMING_STAGE_COUNT][TIMING_PLOT_BUCKETS] = {};
   for (int bucket = 0; bucket < TIMING_PLOT_BUCKETS; ++bucket)
-  {
-    if (!data.count[bucket])
-      continue;
-
-    for (int stage = 0; stage < TIMING_STAGE_COUNT; ++stage)
+    for (int stage = 0; stage < FRAME_TIMING_STAGE_COUNT; ++stage)
     {
+      if (!data.samples[bucket])
+      {
+        minimum[stage][bucket] = NAN;
+        maximum[stage][bucket] = NAN;
+        average[stage][bucket] = NAN;
+        continue;
+      }
+
+      if (!data.stageSamples[stage][bucket])
+        continue;
+
       minimum[stage][bucket] = data.stageMin[stage][bucket];
       maximum[stage][bucket] = data.stageMax[stage][bucket];
       average[stage][bucket] =
-        data.stageSum[stage][bucket] / data.count[bucket];
+        data.stageSum[stage][bucket] / data.stageSamples[stage][bucket];
     }
-  }
 
   const float spacing = igGetStyle()->ItemSpacing.y;
   const float height  = (size.y - spacing * 2.0f) / 3.0f;
@@ -477,7 +557,8 @@ static int graphs_render(void * udata, bool interactive,
       igPushID_Ptr(graph);
       const float height = rowHeight * graphRowWeight(graph);
       if (graph->type == OVERLAY_GRAPH_FRAME_TIMING)
-        renderTimingGraph(graph, interactive, (ImVec2) {winSize.x, height});
+        renderFrameTimingGraph(graph, interactive,
+            (ImVec2) {winSize.x, height});
       else
         renderLineGraph(graph, interactive, (ImVec2) {winSize.x, height});
       igPopID();
@@ -502,47 +583,26 @@ struct LG_OverlayOps LGOverlayGraphs =
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn)
 {
-  if (!name || !*name)
-  {
-    DEBUG_ERROR("graph name must not be empty");
-    return NULL;
-  }
-
-  struct OverlayGraph * graph = malloc(sizeof(*graph));
+  struct OverlayGraph * graph = graphNew(name, buffer);
   if (!graph)
-  {
-    DEBUG_ERROR("out of memory");
     return NULL;
-  }
 
-  graph->name = lg_strdup(name);
-  if (!graph->name)
-  {
-    DEBUG_ERROR("out of memory");
-    free(graph);
-    return NULL;
-  }
-
-  graph->buffer   = buffer;
-  graph->enabled  = true;
-  graph->compact  = false;
   graph->type     = OVERLAY_GRAPH_LINE;
   graph->min      = min;
   graph->max      = max;
-  for (int i = 0; i < TIMING_STATISTIC_COUNT; ++i)
-    graph->yScale[i] = 0.0f;
   graph->formatFn = formatFn;
-  ll_push(gs.graphs, graph);
-  return graph;
+  return graphPublish(graph);
 }
 
 GraphHandle overlayGraph_registerFrameTiming(const char * name,
     RingBuffer buffer)
 {
-  GraphHandle graph = overlayGraph_register(name, buffer, 0.0f, 0.0f, NULL);
-  if (graph)
-    graph->type = OVERLAY_GRAPH_FRAME_TIMING;
-  return graph;
+  struct OverlayGraph * graph = graphNew(name, buffer);
+  if (!graph)
+    return NULL;
+
+  graph->type = OVERLAY_GRAPH_FRAME_TIMING;
+  return graphPublish(graph);
 }
 
 void overlayGraph_unregister(GraphHandle handle)
@@ -551,8 +611,7 @@ void overlayGraph_unregister(GraphHandle handle)
     return;
 
   ll_removeData(gs.graphs, handle);
-  free(handle->name);
-  free(handle);
+  graphFree(handle);
 
   if (gs.show)
     app_invalidateWindow(false);

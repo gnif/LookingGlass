@@ -27,6 +27,7 @@
 #include "model.h"
 #include "common/framebuffer.h"
 #include "common/types.h"
+#include "interface/renderer.h"
 
 #include "util.h"
 
@@ -40,8 +41,9 @@ typedef struct EGL_Model EGL_Model;
 typedef struct EGL_TexUpdate
 {
   /* the type of this update */
-  EGL_TexType type;
-  uint64_t  * waitTimeNs;
+  EGL_TexType           type;
+  LG_RendererFrameToken frameToken;
+  uint64_t            * waitTimeNs;
 
   int x, y, width, height;
 
@@ -90,7 +92,8 @@ typedef struct EGL_TextureOps
   bool (*update)(EGL_Texture * texture, const EGL_TexUpdate * update);
 
   /* called from a background job to prepare the texture for use before bind */
-  enum EGL_TexStatus (*process)(EGL_Texture * texture);
+  enum EGL_TexStatus (*process)(EGL_Texture * texture,
+      LG_RendererFrameToken frameTokenLimit);
 
   /* get the texture for use */
   enum EGL_TexStatus (*get)(EGL_Texture * texture, GLuint * tex,
@@ -104,10 +107,11 @@ EGL_TextureOps;
 struct EGL_Texture
 {
   struct EGL_TextureOps ops;
-  EGL_TexType type;
-  GLuint sampler;
+  EGL_TexType           type;
+  GLuint                sampler;
+  LG_RendererFrameToken frameToken;
 
-  EGL_TexFormat format;
+  EGL_TexFormat         format;
 };
 
 bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
@@ -125,13 +129,24 @@ bool egl_textureUpdateRect(EGL_Texture * texture,
     const uint8_t * buffer, bool topDown);
 
 bool egl_textureUpdateFromFrame(EGL_Texture * texture,
-    const FrameBuffer * frame, const FrameDamageRect * damageRects,
-    int damageRectsCount, uint64_t * waitTimeNs);
+    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const FrameDamageRect * damageRects, int damageRectsCount,
+    uint64_t * waitTimeNs);
 
 bool egl_textureUpdateFromDMA(EGL_Texture * texture,
-    const FrameBuffer * frame, const int dmaFd, uint64_t * waitTimeNs);
+    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const int dmaFd, uint64_t * waitTimeNs);
 
-enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
+enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture,
+    LG_RendererFrameToken frameTokenLimit,
+    LG_RendererFrameToken * consumedFrameToken);
+
+static inline bool egl_textureFrameAllowed(LG_RendererFrameToken frameToken,
+    LG_RendererFrameToken frameTokenLimit)
+{
+  return frameToken == LG_RENDERER_FRAME_TOKEN_NONE ||
+    frameToken <= frameTokenLimit;
+}
 
 static inline EGL_TexStatus egl_textureGet(EGL_Texture * texture, GLuint * tex,
     unsigned int * sizeX, unsigned int * sizeY, EGL_PixelFormat * fmt)

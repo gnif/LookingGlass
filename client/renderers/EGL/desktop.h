@@ -48,7 +48,8 @@ void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR,
 void egl_desktopGetHDRMapping(EGL_Desktop * desktop, bool * enabled,
     float * gain, float * contentPeak);
 bool egl_desktopSetup (EGL_Desktop * desktop, const LG_RendererFormat format);
-bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
+    LG_RendererFrameToken frameToken, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount,
     uint64_t * waitTimeNs);
 void egl_desktopResize(EGL_Desktop * desktop, int width, int height);
@@ -56,7 +57,10 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects,
-    bool * fullFrame, EGL_Framebuffer * target);
+    LG_RendererFrameToken damageFrameToken,
+    LG_RendererFrameToken frameTokenLimit, bool * fullFrame,
+    LG_RendererFrameToken * consumedFrameToken,
+    uint64_t * effectsTime, EGL_Framebuffer * target);
 
 void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height);
 void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,

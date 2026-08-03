@@ -36,6 +36,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define LGMP_TIMING_SPIN_COUNT 4096
+
 struct DMAFrameInfo
 {
   const KVMFRFrame * frame;
@@ -622,18 +624,21 @@ static void lgmp_getFrameTiming(LG_Transport * this,
       this->pendingFrame->frameSerial != frame->serial)
     return;
 
-  /* The producer writes these immediately after completing the framebuffer.
-   * nextFrame can observe the header earlier, so sample them only after the
-   * renderer's onFrame call has consumed the framebuffer. */
+  /* The producer writes these immediately after publishing FrameBuffer::wp.
+   * nextFrame can observe the header earlier, so briefly observe the
+   * publication tail after onFrame consumes the framebuffer without sleeping
+   * the frame-acquisition thread. */
   for (unsigned i = 0;
        !lgmp_frameTimingReady(this->pendingFrame) &&
-       i < 1000;
+       i < LGMP_TIMING_SPIN_COUNT;
        ++i)
-    usleep(1);
+  {
+  }
 
   if (!lgmp_frameTimingReady(this->pendingFrame))
     return;
 
+  timing->valid           = true;
   timing->captureTime     = this->pendingFrame->captureTime;
   timing->postProcessTime = this->pendingFrame->postProcessTime;
   timing->copyTime        = this->pendingFrame->copyTime;

@@ -146,7 +146,9 @@ GraphHandle app_registerGraph(const char * name, RingBuffer buffer,
 void app_unregisterGraph(GraphHandle handle);
 void app_invalidateGraph(GraphHandle handle);
 void app_setGraphCompact(GraphHandle handle, bool compact);
-void app_setFrameImportTime(uint64_t time);
+/* Records nanosecond durations for the current frame's renderer import. The
+ * wait component overlaps producer work and is accounted for separately. */
+void app_setFrameImportTiming(uint64_t importTime, uint64_t importWaitTime);
 
 void app_overlayConfigRegister(const char * title,
     void (*callback)(void * udata, int * id), void * udata);

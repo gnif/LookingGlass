@@ -378,6 +378,8 @@ static void egl_onRestart(LG_Renderer * renderer)
   this->frameContext = NULL;
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
+    this->desktopDamage[this->desktopDamageIdx].frameToken =
+      LG_RENDERER_FRAME_TOKEN_NONE;
     this->desktopDamage[this->desktopDamageIdx].count = -1;
   });
 }
@@ -742,8 +744,9 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   return egl_desktopSetup(this->desktop, format);
 }
 
-static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damageRects, int damageRectsCount)
+static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
+    int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount,
+    LG_RendererFrameToken frameToken)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
@@ -751,21 +754,23 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
   const uint64_t start      = nanotime();
   uint64_t       waitTimeNs = 0;
   if (unlikely(!egl_desktopUpdate(
-          this->desktop, frame, dmaFd, damageRects, damageRectsCount,
-          &waitTimeNs)))
+          this->desktop, frame, frameToken, dmaFd,
+          damageRects, damageRectsCount, &waitTimeNs)))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
   }
+
   const uint64_t elapsed = nanotime() - start;
 
   /* Producer Copy already covers the interval before FrameBuffer::wp becomes
    * ready. Exclude that overlapping wait from the client Import stage. */
-  app_setFrameImportTime(
-      elapsed > waitTimeNs ? elapsed - waitTimeNs : 0);
+  app_setFrameImportTiming(
+      elapsed > waitTimeNs ? elapsed - waitTimeNs : 0, waitTimeNs);
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
-    struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
+    struct DesktopDamage * damage =
+      this->desktopDamage + this->desktopDamageIdx;
     if (unlikely(
         damage->count                    == -1 ||
         damageRectsCount                 == 0 ||
@@ -779,6 +784,7 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
           damageRectsCount * sizeof(FrameDamageRect));
       damage->count += damageRectsCount;
     }
+    damage->frameToken = frameToken;
   });
 
   return true;
@@ -1334,10 +1340,14 @@ inline static void renderLetterBox(struct Inst * this)
 }
 
 static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
-    const bool newFrame, const bool invalidateWindow,
-    void (*preSwap)(void * udata), void * udata)
+    LG_RendererFrameToken frameTokenLimit, const bool invalidateWindow,
+    void (*preSwap)(void * udata), void * udata,
+    LG_RendererFrameTiming * timing)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  *timing = (LG_RendererFrameTiming) {};
+
+  const uint64_t setupStart = nanotime();
   egl_stateCheckShared();
   EGLint     bufferAge       = egl_bufferAge(this);
   const bool hdrStateChanged = egl_updateHDRState(this, false);
@@ -1354,9 +1364,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
                    bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
                    this->showSpice;
 
-  bool hasOverlay = false;
-  struct CursorState cursorState = { .visible = false };
-  struct DesktopDamage * desktopDamage;
+  bool                   hasOverlay      = false;
+  struct CursorState     cursorState     = { .visible = false };
+  struct DesktopDamage   noDesktopDamage = {};
+  struct DesktopDamage * desktopDamage   = NULL;
 
   struct DamageRects * accumulated = (struct DamageRects *)alloca(
     sizeof(struct DamageRects) +
@@ -1365,12 +1376,20 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   accumulated->count = 0;
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
+    struct DesktopDamage * pendingDamage =
+      this->desktopDamage + this->desktopDamageIdx;
+    const bool damageQueued =
+      pendingDamage->frameToken == LG_RENDERER_FRAME_TOKEN_NONE ||
+      pendingDamage->frameToken <= frameTokenLimit;
+    const int historyOffset = damageQueued ? 0 : 1;
+
     if (likely(!renderAll))
     {
       for (int i = 0; i < bufferAge; ++i)
       {
         struct DesktopDamage * damage = this->desktopDamage +
-            IDX_AGO(this->desktopDamageIdx, i, DESKTOP_DAMAGE_COUNT);
+          IDX_AGO(this->desktopDamageIdx, i + historyOffset,
+              DESKTOP_DAMAGE_COUNT);
 
         if (unlikely(damage->count < 0))
         {
@@ -1387,9 +1406,18 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         }
       }
     }
-    desktopDamage = this->desktopDamage + this->desktopDamageIdx;
-    this->desktopDamageIdx = (this->desktopDamageIdx + 1) % DESKTOP_DAMAGE_COUNT;
-    this->desktopDamage[this->desktopDamageIdx].count = 0;
+
+    if (damageQueued)
+    {
+      desktopDamage = pendingDamage;
+      this->desktopDamageIdx =
+        (this->desktopDamageIdx + 1) % DESKTOP_DAMAGE_COUNT;
+      this->desktopDamage[this->desktopDamageIdx].frameToken =
+        LG_RENDERER_FRAME_TOKEN_NONE;
+      this->desktopDamage[this->desktopDamageIdx].count = 0;
+    }
+    else
+      desktopDamage = &noDesktopDamage;
   });
 
   if (hdrStateChanged)
@@ -1427,17 +1455,46 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   }
   ++this->overlayHistoryIdx;
 
-  bool       fullFrame             = false;
-  const bool linearHDRComposition  = egl_hdrComposeBegin(this->hdrCompose);
-  bool       deferredLogicalCursor = false;
-  if (likely(this->destRect.w > 0 && this->destRect.h > 0))
+  bool                  fullFrame             = false;
+  const bool            linearHDRComposition  = egl_hdrComposeBegin(
+      this->hdrCompose);
+  bool                  deferredLogicalCursor = false;
+  const bool            haveDesktop           = likely(
+      this->destRect.w > 0 && this->destRect.h > 0);
+  bool                  desktopRendered       = false;
+  const uint64_t        desktopStart          = nanotime();
+  uint64_t              effectsTime           = 0;
+  LG_RendererFrameToken frameToken            = LG_RENDERER_FRAME_TOKEN_NONE;
+
+  timing->setupTime = desktopStart - setupStart;
+  if (haveDesktop)
   {
-    if (egl_desktopRender(this->desktop,
+    desktopRendered = egl_desktopRender(this->desktop,
         this->destRect.w, this->destRect.h,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated,
-        &fullFrame, egl_hdrComposeGetFramebuffer(this->hdrCompose)))
+        desktopDamage->frameToken, frameTokenLimit, &fullFrame, &frameToken,
+        &effectsTime,
+        egl_hdrComposeGetFramebuffer(this->hdrCompose));
+  }
+  const uint64_t composeStart = nanotime();
+  if (haveDesktop)
+  {
+    const uint64_t totalDesktopTime = composeStart - desktopStart;
+    timing->effectsTime = effectsTime;
+    timing->desktopTime = totalDesktopTime > effectsTime ?
+      totalDesktopTime - effectsTime : 0;
+  }
+  else
+    timing->setupTime += composeStart - desktopStart;
+
+  timing->frameToken       = frameToken;
+  const bool frameConsumed = frameToken != LG_RENDERER_FRAME_TOKEN_NONE;
+
+  if (haveDesktop)
+  {
+    if (desktopRendered)
     {
       cursorState = egl_cursorRender(this->cursor,
           (this->format.rotate + rotate) % LG_ROTATE_MAX,
@@ -1456,8 +1513,12 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   renderLetterBox(this);
 
   hasOverlay |=
-    egl_damageRender(this->damage, rotate, newFrame ? desktopDamage : NULL) |
+    egl_damageRender(
+        this->damage, rotate, frameConsumed ? desktopDamage : NULL) |
     invalidateWindow;
+
+  /* The diagnostics being displayed must not contribute to Compose. */
+  timing->composeTime = nanotime() - composeStart;
 
   struct Rect damage[LG_MAX_FRAME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
   int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
@@ -1482,6 +1543,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     for (int i = 0; i < damageIdx; ++i)
       damage[i].y = this->height - damage[i].y - damage[i].h;
   }
+  const uint64_t postOverlayStart = nanotime();
 
   if (likely(damageIdx >= 0 && cursorState.visible))
     damage[damageIdx++] = cursorState.rect;
@@ -1559,13 +1621,19 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     egl_cursorRender(this->cursor,
         (this->format.rotate + rotate) % LG_ROTATE_MAX,
         this->width, this->height, false, NULL);
-
   this->hadOverlay = hasOverlay;
   this->cursorLast = cursorState;
 
   preSwap(udata);
+
+  const uint64_t composeEnd = nanotime();
+  timing->composeTime += composeEnd - postOverlayStart;
+
+  const uint64_t swapStart = nanotime();
   app_eglSwapBuffers(this->display, this->surface, damage,
       this->noSwapDamage ? 0 : damageIdx);
+  const uint64_t swapEnd = nanotime();
+  timing->swapTime = swapEnd - swapStart;
 
   return true;
 }

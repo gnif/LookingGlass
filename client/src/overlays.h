@@ -47,14 +47,45 @@ void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args);
 typedef struct OverlayFrameTiming
 {
   uint64_t timestamp;
+  uint32_t validMask;
   float    capture;
   float    postProcess;
   float    copy;
   float    ready;
   float    import;
-  float    render;
+  float    dispatch;
+  float    queue;
+  float    prepare;
+  float    setup;
+  float    effects;
+  float    desktop;
+  float    compose;
+  float    swap;
 }
 OverlayFrameTiming;
+
+enum OverlayFrameTimingStage
+{
+  OVERLAY_FRAME_TIMING_CAPTURE,
+  OVERLAY_FRAME_TIMING_POST_PROCESS,
+  OVERLAY_FRAME_TIMING_COPY,
+  OVERLAY_FRAME_TIMING_READY,
+  OVERLAY_FRAME_TIMING_IMPORT,
+  OVERLAY_FRAME_TIMING_DISPATCH,
+  OVERLAY_FRAME_TIMING_QUEUE,
+  OVERLAY_FRAME_TIMING_PREPARE,
+  OVERLAY_FRAME_TIMING_SETUP,
+  OVERLAY_FRAME_TIMING_EFFECTS,
+  OVERLAY_FRAME_TIMING_DESKTOP,
+  OVERLAY_FRAME_TIMING_COMPOSE,
+  OVERLAY_FRAME_TIMING_SWAP,
+  OVERLAY_FRAME_TIMING_COUNT,
+};
+
+#define OVERLAY_FRAME_TIMING_VALID_ALL \
+  ((1U << OVERLAY_FRAME_TIMING_COUNT) - 1U)
+#define OVERLAY_FRAME_TIMING_VALID_PRODUCER \
+  ((1U << OVERLAY_FRAME_TIMING_IMPORT) - 1U)
 
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn);

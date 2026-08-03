@@ -24,6 +24,7 @@
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
+#include "common/time.h"
 
 #include "app.h"
 #include "texture.h"
@@ -390,14 +391,15 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
   return true;
 }
 
-bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
+bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
+    LG_RendererFrameToken frameToken, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount,
     uint64_t * waitTimeNs)
 {
   if (likely(desktop->useDMA && dmaFd >= 0))
   {
     if (likely(egl_textureUpdateFromDMA(
-            desktop->texture, frame, dmaFd, waitTimeNs)))
+            desktop->texture, frame, frameToken, dmaFd, waitTimeNs)))
     {
       atomic_store(&desktop->processFrame, true);
       return true;
@@ -438,7 +440,7 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
    * the upload. Signalling here can race with that submission and process the
    * previous texture contents instead.
    */
-  if (likely(egl_textureUpdateFromFrame(desktop->texture, frame,
+  if (likely(egl_textureUpdateFromFrame(desktop->texture, frame, frameToken,
         damageRects, damageRectsCount, waitTimeNs)))
     return true;
 
@@ -454,7 +456,10 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,
     const float scaleX, const float scaleY, enum EGL_DesktopScaleType scaleType,
     LG_RendererRotate rotate, const struct DamageRects * rects,
-    bool * fullFrame, EGL_Framebuffer * target)
+    LG_RendererFrameToken damageFrameToken,
+    LG_RendererFrameToken frameTokenLimit, bool * fullFrame,
+    LG_RendererFrameToken * consumedFrameToken,
+    uint64_t * effectsTime, EGL_Framebuffer * target)
 {
   EGL_Texture * tex;
   int width, height;
@@ -478,12 +483,25 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   if (unlikely(outputWidth == 0 || outputHeight == 0))
     DEBUG_FATAL("outputWidth || outputHeight == 0");
 
-  const enum EGL_TexStatus status = egl_textureProcess(tex);
-  const bool textureUpdated = status == EGL_TEX_STATUS_UPDATED;
+  LG_RendererFrameToken    frameToken;
+  const enum EGL_TexStatus status =
+    egl_textureProcess(tex, frameTokenLimit, &frameToken);
+  const bool               textureUpdated = status == EGL_TEX_STATUS_UPDATED;
+
+  *consumedFrameToken = frameToken;
+  *effectsTime        = 0;
   if (unlikely(status != EGL_TEX_STATUS_OK && !textureUpdated))
   {
     if (status != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to process the desktop texture");
+  }
+
+  *fullFrame = false;
+  if (frameToken != LG_RENDERER_FRAME_TOKEN_NONE &&
+      frameToken != damageFrameToken)
+  {
+    rects      = NULL;
+    *fullFrame = true;
   }
 
   int scaleAlgo = EGL_SCALE_NEAREST;
@@ -492,7 +510,6 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       width, height, x, y, scaleX, scaleY, rotate);
   egl_desktopRectsUpdate(desktop->mesh, rects, width, height);
 
-  *fullFrame = false;
   const bool hdr = desktop->hdr && !desktop->useSpice;
   uint32_t hdrPeak = 0;
   if (hdr)
@@ -509,16 +526,22 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   bool processFrame = textureUpdated;
   processFrame |= atomic_exchange(&desktop->processFrame, false);
   processFrame |= egl_postProcessConfigModified(desktop->pp);
-  if (processFrame &&
-      egl_postProcessRun(desktop->pp, tex, desktop->mesh,
-        width, height, outputWidth, outputHeight, dma,
-        hdr && desktop->hdrPQ, (float)hdrPeak) &&
-      egl_postProcessNeedsFullFrame(desktop->pp))
+  if (processFrame)
   {
-    /* The filter output may have changed everywhere, but this only applies to
-     * the render that actually evaluated the filter. */
-    egl_desktopRectsUpdate(desktop->mesh, NULL, width, height);
-    *fullFrame = true;
+    const uint64_t effectsStart  = nanotime();
+    const bool     postProcessed = egl_postProcessRun(
+        desktop->pp, tex, desktop->mesh,
+        width, height, outputWidth, outputHeight, dma,
+        hdr && desktop->hdrPQ, (float)hdrPeak);
+    *effectsTime = nanotime() - effectsStart;
+
+    if (postProcessed && egl_postProcessNeedsFullFrame(desktop->pp))
+    {
+      /* The filter output may have changed everywhere, but this only applies
+       * to the render that actually evaluated the filter. */
+      egl_desktopRectsUpdate(desktop->mesh, NULL, width, height);
+      *fullFrame = true;
+    }
   }
 
   unsigned int finalSizeX, finalSizeY;

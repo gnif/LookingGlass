@@ -160,12 +160,14 @@ bool egl_textureUpdateRect(EGL_Texture * this,
 }
 
 bool egl_textureUpdateFromFrame(EGL_Texture * this,
-    const FrameBuffer * frame, const FrameDamageRect * damageRects,
-    int damageRectsCount, uint64_t * waitTimeNs)
+    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const FrameDamageRect * damageRects, int damageRectsCount,
+    uint64_t * waitTimeNs)
 {
   const struct EGL_TexUpdate update =
   {
     .type       = EGL_TEXTYPE_FRAMEBUFFER,
+    .frameToken = frameToken,
     .x          = 0,
     .y          = 0,
     .width      = this->format.width,
@@ -182,18 +184,20 @@ bool egl_textureUpdateFromFrame(EGL_Texture * this,
 }
 
 bool egl_textureUpdateFromDMA(EGL_Texture * this,
-    const FrameBuffer * frame, const int dmaFd, uint64_t * waitTimeNs)
+    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const int dmaFd, uint64_t * waitTimeNs)
 {
   const struct EGL_TexUpdate update =
   {
-    .type    = EGL_TEXTYPE_DMABUF,
-    .x       = 0,
-    .y       = 0,
-    .width   = this->format.width,
-    .height  = this->format.height,
-    .pitch   = this->format.pitch,
-    .stride  = this->format.stride,
-    .dmaFD   = dmaFd
+    .type       = EGL_TEXTYPE_DMABUF,
+    .frameToken = frameToken,
+    .x          = 0,
+    .y          = 0,
+    .width      = this->format.width,
+    .height     = this->format.height,
+    .pitch      = this->format.pitch,
+    .stride     = this->format.stride,
+    .dmaFD      = dmaFd
   };
 
   /* wait for completion */
@@ -204,9 +208,18 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
   return this->ops.update(this, &update);
 }
 
-enum EGL_TexStatus egl_textureProcess(EGL_Texture * this)
+enum EGL_TexStatus egl_textureProcess(EGL_Texture * this,
+    LG_RendererFrameToken frameTokenLimit,
+    LG_RendererFrameToken * consumedFrameToken)
 {
-  return this->ops.process(this);
+  if (consumedFrameToken)
+    *consumedFrameToken = LG_RENDERER_FRAME_TOKEN_NONE;
+
+  const enum EGL_TexStatus status =
+    this->ops.process(this, frameTokenLimit);
+  if (status == EGL_TEX_STATUS_UPDATED && consumedFrameToken)
+    *consumedFrameToken = this->frameToken;
+  return status;
 }
 
 enum EGL_TexStatus egl_textureBind(EGL_Texture * this)

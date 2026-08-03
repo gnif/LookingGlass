@@ -199,82 +199,296 @@ static bool tickTimerFn(void * unused)
   return true;
 }
 
-struct RenderTiming
+#define FRAME_TIMING_RECORD_COUNT       1024
+#define FRAME_TIMING_PUBLISH_BATCH_SIZE 32
+
+enum FrameTimingReady
 {
-  uint64_t renderStart;
+  FRAME_TIMING_FRAME_READY  = 1 << 0,
+  FRAME_TIMING_RENDER_READY = 1 << 1,
+};
+
+struct FrameTimingRecord
+{
+  LG_RendererFrameToken token;
+  unsigned              readyMask;
+  bool                  producerValid;
+
   uint64_t captureTime;
   uint64_t postProcessTime;
   uint64_t copyTime;
   uint64_t readyTime;
   uint64_t importTime;
+  uint64_t importWaitTime;
+  uint64_t dispatchTime;
+  uint64_t queueStart;
+
+  uint64_t prepareStart;
+  uint64_t prepareTime;
+  uint64_t timestamp;
+  uint64_t setupTime;
+  uint64_t effectsTime;
+  uint64_t desktopTime;
+  uint64_t composeTime;
+  uint64_t swapTime;
 };
 
-static struct RenderTiming frameTimingLoad(void)
+static struct
 {
-  struct RenderTiming timing = {};
+  LG_Lock                        lock;
+  _Atomic(LG_RendererFrameToken) queuedToken;
+  LG_RendererFrameToken          nextToken;
+  LG_RendererFrameToken          retireToken;
+  unsigned                       publishRead;
+  unsigned                       publishWrite;
+  unsigned                       publishCount;
+  bool                           overflowWarning;
+  LG_RendererFrameToken          publishToken[FRAME_TIMING_RECORD_COUNT];
+  struct FrameTimingRecord       record[FRAME_TIMING_RECORD_COUNT];
+}
+l_frameTiming;
 
-  for (;;)
-  {
-    const unsigned sequence = atomic_load_explicit(
-        &g_state.frameTimingSequence, memory_order_seq_cst);
-    if (sequence & 1)
-      continue;
+/* The frame and render threads complete records independently. A token is
+ * published only after both halves have arrived, while queuedToken prevents a
+ * renderer that woke for unrelated work from consuming an unqueued frame. */
 
-    timing.captureTime     = atomic_load_explicit(
-        &g_state.producerCaptureTime, memory_order_seq_cst);
-    timing.postProcessTime = atomic_load_explicit(
-        &g_state.producerPostProcessTime, memory_order_seq_cst);
-    timing.copyTime        = atomic_load_explicit(
-        &g_state.producerCopyTime, memory_order_seq_cst);
-    timing.readyTime       = atomic_load_explicit(
-        &g_state.producerReadyTime, memory_order_seq_cst);
-    timing.importTime      = atomic_load_explicit(
-        &g_state.clientImportTime, memory_order_seq_cst);
-
-    if (sequence == atomic_load_explicit(
-          &g_state.frameTimingSequence, memory_order_seq_cst))
-      return timing;
-  }
+static void frameTimingInit(void)
+{
+  LG_LOCK_INIT(l_frameTiming.lock);
+  atomic_store_explicit(&l_frameTiming.queuedToken,
+      LG_RENDERER_FRAME_TOKEN_NONE, memory_order_relaxed);
+  l_frameTiming.nextToken       = LG_RENDERER_FRAME_TOKEN_NONE;
+  l_frameTiming.retireToken     = 1;
+  l_frameTiming.publishRead     = 0;
+  l_frameTiming.publishWrite    = 0;
+  l_frameTiming.publishCount    = 0;
+  l_frameTiming.overflowWarning = false;
+  memset(l_frameTiming.record, 0, sizeof(l_frameTiming.record));
 }
 
-static void frameTimingStore(const LG_TransportFrameTiming * timing,
-    uint64_t importTime)
+static void frameTimingReset(void)
 {
-  atomic_fetch_add_explicit(
-      &g_state.frameTimingSequence, 1, memory_order_seq_cst);
-  atomic_store_explicit(&g_state.producerCaptureTime,
-      timing->captureTime, memory_order_seq_cst);
-  atomic_store_explicit(&g_state.producerPostProcessTime,
-      timing->postProcessTime, memory_order_seq_cst);
-  atomic_store_explicit(&g_state.producerCopyTime,
-      timing->copyTime, memory_order_seq_cst);
-  atomic_store_explicit(&g_state.producerReadyTime,
-      timing->readyTime, memory_order_seq_cst);
-  atomic_store_explicit(&g_state.clientImportTime,
-      importTime, memory_order_seq_cst);
-  atomic_fetch_add_explicit(
-      &g_state.frameTimingSequence, 1, memory_order_seq_cst);
+  INTERLOCKED_SECTION(l_frameTiming.lock, {
+    memset(l_frameTiming.record, 0, sizeof(l_frameTiming.record));
+    l_frameTiming.retireToken     = l_frameTiming.nextToken + 1;
+    l_frameTiming.publishRead     = 0;
+    l_frameTiming.publishWrite    = 0;
+    l_frameTiming.publishCount    = 0;
+    l_frameTiming.overflowWarning = false;
+  });
+  /* Tokens remain monotonic across reconnects so stale renderer state can
+   * never alias a new frame. No frame is consumable until it is queued. */
+  atomic_store_explicit(&l_frameTiming.queuedToken,
+      LG_RENDERER_FRAME_TOKEN_NONE, memory_order_release);
+}
+
+static struct FrameTimingRecord * frameTimingRecord(
+    LG_RendererFrameToken token)
+{
+  return &l_frameTiming.record[
+    (token - 1) % FRAME_TIMING_RECORD_COUNT];
+}
+
+static LG_RendererFrameToken frameTimingReserve(void)
+{
+  LG_RendererFrameToken token;
+
+  LG_LOCK(l_frameTiming.lock);
+  token = ++l_frameTiming.nextToken;
+  if (unlikely(token == LG_RENDERER_FRAME_TOKEN_NONE))
+    token = ++l_frameTiming.nextToken;
+
+  struct FrameTimingRecord * record = frameTimingRecord(token);
+  const bool recordActive =
+    record->token != LG_RENDERER_FRAME_TOKEN_NONE &&
+    ((record->readyMask & FRAME_TIMING_RENDER_READY) ||
+     record->token >= l_frameTiming.retireToken);
+  if (unlikely(recordActive && !l_frameTiming.overflowWarning))
+  {
+    DEBUG_WARN("Frame timing record pool exhausted; samples will be lost");
+    l_frameTiming.overflowWarning = true;
+  }
+  *record = (struct FrameTimingRecord) { .token = token };
+  LG_UNLOCK(l_frameTiming.lock);
+  return token;
+}
+
+static void frameTimingCancel(LG_RendererFrameToken token)
+{
+  INTERLOCKED_SECTION(l_frameTiming.lock, {
+    struct FrameTimingRecord * record = frameTimingRecord(token);
+    if (record->token == token)
+      *record = (struct FrameTimingRecord) {};
+  });
+}
+
+static void frameTimingQueue(LG_RendererFrameToken token, uint64_t importTime,
+    uint64_t importWaitTime, uint64_t dispatchStart, uint64_t queueStart)
+{
+  INTERLOCKED_SECTION(l_frameTiming.lock, {
+    struct FrameTimingRecord * record = frameTimingRecord(token);
+    if (record->token == token)
+    {
+      const uint64_t elapsed   = queueStart > dispatchStart ?
+        queueStart - dispatchStart : 0;
+      const uint64_t accounted = importTime + importWaitTime;
+      record->importTime     = importTime;
+      record->importWaitTime = importWaitTime;
+      record->dispatchTime   = elapsed > accounted ? elapsed - accounted : 0;
+      record->queueStart     = queueStart;
+      if (record->timestamp < queueStart)
+        record->timestamp = queueStart;
+    }
+  });
+
+  atomic_store_explicit(
+      &l_frameTiming.queuedToken, token, memory_order_release);
+}
+
+static LG_RendererFrameToken frameTimingQueuedToken(void)
+{
+  return atomic_load_explicit(
+      &l_frameTiming.queuedToken, memory_order_acquire);
+}
+
+static void frameTimingFinishFrame(LG_RendererFrameToken token,
+    const LG_TransportFrameTiming * timing)
+{
+  const uint64_t timestamp = nanotime();
+
+  INTERLOCKED_SECTION(l_frameTiming.lock, {
+    struct FrameTimingRecord * record = frameTimingRecord(token);
+    if (record->token == token)
+    {
+      if (token < l_frameTiming.retireToken &&
+          !(record->readyMask & FRAME_TIMING_RENDER_READY))
+        *record = (struct FrameTimingRecord) {};
+      else
+      {
+        record->producerValid   = timing->valid;
+        record->captureTime     = timing->captureTime;
+        record->postProcessTime = timing->postProcessTime;
+        record->copyTime        = timing->copyTime;
+        record->readyTime       = timing->readyTime;
+        if (record->timestamp < timestamp)
+          record->timestamp = timestamp;
+        record->readyMask      |= FRAME_TIMING_FRAME_READY;
+      }
+    }
+  });
+}
+
+static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
+    uint64_t prepareStart, uint64_t prepareTime, uint64_t timestamp)
+{
+  INTERLOCKED_SECTION(l_frameTiming.lock, {
+    if (l_frameTiming.retireToken <= timing->frameToken)
+      l_frameTiming.retireToken = timing->frameToken + 1;
+
+    struct FrameTimingRecord * record = frameTimingRecord(timing->frameToken);
+    if (record->token == timing->frameToken)
+    {
+      record->prepareStart = prepareStart;
+      record->prepareTime  = prepareTime;
+      if (record->timestamp < timestamp)
+        record->timestamp = timestamp;
+      record->setupTime   = timing->setupTime;
+      record->effectsTime = timing->effectsTime;
+      record->desktopTime = timing->desktopTime;
+      record->composeTime = timing->composeTime;
+      record->swapTime    = timing->swapTime;
+      record->readyMask  |= FRAME_TIMING_RENDER_READY;
+
+      if (unlikely(
+          l_frameTiming.publishCount == FRAME_TIMING_RECORD_COUNT))
+      {
+        if (!l_frameTiming.overflowWarning)
+        {
+          DEBUG_WARN("Frame timing publish queue exhausted; sample lost");
+          l_frameTiming.overflowWarning = true;
+        }
+        *record = (struct FrameTimingRecord) {};
+      }
+      else
+      {
+        l_frameTiming.publishToken[l_frameTiming.publishWrite] =
+          timing->frameToken;
+        l_frameTiming.publishWrite =
+          (l_frameTiming.publishWrite + 1) % FRAME_TIMING_RECORD_COUNT;
+        ++l_frameTiming.publishCount;
+      }
+    }
+  });
+}
+
+static void frameTimingPublishReady(void)
+{
+  struct FrameTimingRecord ready[FRAME_TIMING_PUBLISH_BATCH_SIZE];
+  unsigned                 readyCount = 0;
+
+  LG_LOCK(l_frameTiming.lock);
+  while (readyCount < FRAME_TIMING_PUBLISH_BATCH_SIZE &&
+      l_frameTiming.publishCount)
+  {
+    const LG_RendererFrameToken token =
+      l_frameTiming.publishToken[l_frameTiming.publishRead];
+    struct FrameTimingRecord * record = frameTimingRecord(token);
+
+    if (record->token != token ||
+        !(record->readyMask & FRAME_TIMING_RENDER_READY))
+    {
+      l_frameTiming.publishRead =
+        (l_frameTiming.publishRead + 1) % FRAME_TIMING_RECORD_COUNT;
+      --l_frameTiming.publishCount;
+      continue;
+    }
+
+    if (!(record->readyMask & FRAME_TIMING_FRAME_READY))
+      break;
+
+    ready[readyCount++] = *record;
+    *record = (struct FrameTimingRecord) {};
+    l_frameTiming.publishRead =
+      (l_frameTiming.publishRead + 1) % FRAME_TIMING_RECORD_COUNT;
+    --l_frameTiming.publishCount;
+  }
+  LG_UNLOCK(l_frameTiming.lock);
+
+  for (unsigned i = 0; i < readyCount; ++i)
+  {
+    const struct FrameTimingRecord * record    = &ready[i];
+    const uint64_t                   queueTime =
+      record->prepareStart > record->queueStart ?
+      record->prepareStart - record->queueStart : 0;
+    const uint32_t                   validMask =
+      OVERLAY_FRAME_TIMING_VALID_ALL &
+      (record->producerValid ? UINT32_MAX :
+        ~OVERLAY_FRAME_TIMING_VALID_PRODUCER);
+    const OverlayFrameTiming         timing = {
+      .timestamp   = record->timestamp,
+      .validMask   = validMask,
+      .capture     = record->captureTime     * 1e-6f,
+      .postProcess = record->postProcessTime * 1e-6f,
+      .copy        = record->copyTime        * 1e-6f,
+      .ready       = record->readyTime       * 1e-6f,
+      .import      = (record->importTime +
+        (record->producerValid ? 0 : record->importWaitTime)) * 1e-6f,
+      .dispatch    = record->dispatchTime    * 1e-6f,
+      .queue       = queueTime               * 1e-6f,
+      .prepare     = record->prepareTime     * 1e-6f,
+      .setup       = record->setupTime       * 1e-6f,
+      .effects     = record->effectsTime     * 1e-6f,
+      .desktop     = record->desktopTime     * 1e-6f,
+      .compose     = record->composeTime     * 1e-6f,
+      .swap        = record->swapTime        * 1e-6f,
+    };
+    ringbuffer_push(g_state.frameLatency, &timing);
+  }
 }
 
 static void preSwapCallback(void * udata)
 {
-  const struct RenderTiming * timing = (const struct RenderTiming *)udata;
-  const uint64_t timestamp  = nanotime();
-  const uint64_t renderTime = timestamp - timing->renderStart;
-  if (timing->captureTime || timing->postProcessTime || timing->copyTime ||
-      timing->readyTime || timing->importTime)
-  {
-    const OverlayFrameTiming frameTiming = {
-      .timestamp   = timestamp,
-      .capture     = timing->captureTime     * 1e-6f,
-      .postProcess = timing->postProcessTime * 1e-6f,
-      .copy        = timing->copyTime        * 1e-6f,
-      .ready       = timing->readyTime       * 1e-6f,
-      .import      = timing->importTime      * 1e-6f,
-      .render      = renderTime              * 1e-6f,
-    };
-    ringbuffer_push(g_state.frameLatency, &frameTiming);
-  }
+  (void)udata;
 
 #ifdef ENABLE_TESTS
   if (!l_testCapture.enabled || l_testCapture.complete)
@@ -425,6 +639,8 @@ static int renderThread(void * unused)
       }
     }
 
+    frameTimingPublishReady();
+
     int resize = atomic_load(&g_state.lgrResize);
     if (unlikely(resize))
     {
@@ -460,28 +676,31 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    static uint64_t lastFrameCount = 0;
-    const uint64_t frameCount =
-      atomic_load_explicit(&g_state.frameCount, memory_order_relaxed);
-    const bool newFrame = frameCount != lastFrameCount;
-    lastFrameCount = frameCount;
-
     const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
 
-    struct RenderTiming renderTiming =
-      newFrame ? frameTimingLoad() : (struct RenderTiming) {};
-    renderTiming.renderStart = nanotime();
+    const LG_RendererFrameToken frameTokenLimit = frameTimingQueuedToken();
+    const uint64_t              prepareStart    = nanotime();
+
     LG_LOCK(g_state.lgrLock);
 
     renderQueue_process();
 
-    if (unlikely(!RENDERER(render, g_params.winRotate, newFrame, invalidate,
-          preSwapCallback, (void *)&renderTiming)))
+    const uint64_t prepareTime = nanotime() - prepareStart;
+
+    LG_RendererFrameTiming rendererTiming = {};
+    if (unlikely(!RENDERER(render, g_params.winRotate, frameTokenLimit,
+          invalidate, preSwapCallback, NULL, &rendererTiming)))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
     }
+    const uint64_t renderEnd = nanotime();
     LG_UNLOCK(g_state.lgrLock);
+
+    if (rendererTiming.frameToken != LG_RENDERER_FRAME_TOKEN_NONE)
+      frameTimingFinishRender(
+          &rendererTiming, prepareStart, prepareTime, renderEnd);
+    frameTimingPublishReady();
 
     const uint64_t t     = nanotime();
     const uint64_t delta = t - g_state.lastRenderTime;
@@ -692,6 +911,7 @@ int main_frameThread(void * unused)
       continue;
     }
     frameSerial = frame.serial;
+    const uint64_t dispatchStart = nanotime();
 
     const LG_TransportFrameFormat * format = frame.format;
     if (!format)
@@ -842,22 +1062,41 @@ int main_frameThread(void * unused)
       damageCount = 0;
     }
 
-    g_state.frameImportTime = 0;
+    const LG_RendererFrameToken frameToken = frameTimingReserve();
+    g_state.frameImportTime     = 0;
+    g_state.frameImportWaitTime = 0;
     if (!RENDERER(onFrame, frame.framebuffer, frame.dmaFD,
-          frame.damageRects, damageCount))
+          frame.damageRects, damageCount, frameToken))
     {
+      frameTimingCancel(frameToken);
       g_state.transportOps->releaseFrame(g_state.transport, &frame);
       DEBUG_ERROR("Renderer onFrame returned failure");
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
 
+    const uint64_t queueStart = nanotime();
+    atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
+#ifdef ENABLE_TESTS
+    atomic_store_explicit(&l_testFrameSerial, frame.serial,
+        memory_order_release);
+#endif
+    frameTimingQueue(frameToken, g_state.frameImportTime,
+        g_state.frameImportWaitTime, dispatchStart, queueStart);
+
+    if (g_state.jitRender)
+    {
+      if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
+        atomic_fetch_add_explicit(&g_state.pendingCount, 1,
+            memory_order_release);
+    }
+    else
+      lgSignalEvent(g_state.frameEvent);
+
     LG_TransportFrameTiming timing = {};
     if (g_state.transportOps->getFrameTiming)
       g_state.transportOps->getFrameTiming(
           g_state.transport, &frame, &timing);
-
-    frameTimingStore(&timing, g_state.frameImportTime);
 
     overlaySplash_show(false);
     if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
@@ -876,19 +1115,7 @@ int main_frameThread(void * unused)
       g_state.autoIdleInhibitState = blockScreensaver;
     }
 
-    atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
-#ifdef ENABLE_TESTS
-    atomic_store_explicit(&l_testFrameSerial, frame.serial,
-        memory_order_release);
-#endif
-    if (g_state.jitRender)
-    {
-      if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
-        atomic_fetch_add_explicit(&g_state.pendingCount, 1,
-            memory_order_release);
-    }
-    else
-      lgSignalEvent(g_state.frameEvent);
+    frameTimingFinishFrame(frameToken, &timing);
 
     g_state.transportOps->releaseFrame(g_state.transport, &frame);
     app_useSpiceDisplay(false);
@@ -1322,6 +1549,8 @@ static int transportSessionProbe(void * opaque)
 
 static int lg_run(void)
 {
+  frameTimingInit();
+
 #ifdef ENABLE_TESTS
   memset(&l_testCapture, 0, sizeof(l_testCapture));
   atomic_store_explicit(&l_testFrameSerial, 0, memory_order_relaxed);
@@ -1620,6 +1849,7 @@ static int lg_run(void)
   int msgsCount;
 
 restart:
+  frameTimingReset();
   msgsCount = 0;
   memset(msgs, 0, sizeof(msgs));
 
@@ -1867,6 +2097,7 @@ static void lg_shutdown(void)
   // free metrics ringbuffers
   ringbuffer_free(&g_state.renderTimings);
   ringbuffer_free(&g_state.frameLatency);
+  LG_LOCK_FREE(l_frameTiming.lock);
 
   free(g_state.fontName);
   igDestroyContext(NULL);

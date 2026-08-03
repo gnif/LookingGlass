@@ -94,6 +94,7 @@ typedef uint32_t LG_TransportFrameFlags;
 
 typedef struct LG_TransportFrameTiming
 {
+  bool     valid; /* producer fields below are available and coherent */
   uint64_t captureTime;
   uint64_t postProcessTime;
   uint64_t copyTime;

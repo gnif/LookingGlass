@@ -31,14 +31,15 @@ typedef struct TextureBuffer
   EGL_Texture base;
   bool free;
 
-  int           texCount;
-  GLuint        tex[EGL_TEX_BUFFER_MAX];
-  EGL_TexBuffer buf[EGL_TEX_BUFFER_MAX];
-  int           bufFree;
-  GLsync        sync[EGL_TEX_BUFFER_MAX];
-  LG_Lock       copyLock;
-  int           bufIndex;
-  int           rIndex;
+  int                   texCount;
+  GLuint                tex[EGL_TEX_BUFFER_MAX];
+  EGL_TexBuffer         buf[EGL_TEX_BUFFER_MAX];
+  int                   bufFree;
+  GLsync                sync[EGL_TEX_BUFFER_MAX];
+  LG_RendererFrameToken slotToken[EGL_TEX_BUFFER_MAX];
+  LG_Lock               copyLock;
+  int                   bufIndex;
+  int                   rIndex;
 }
 TextureBuffer;
 
@@ -46,7 +47,8 @@ bool egl_texBufferInit(EGL_Texture ** texture_, EGL_TexType type,
     EGLDisplay * display);
 void egl_texBufferFree(EGL_Texture * texture_);
 bool egl_texBufferSetup(EGL_Texture * texture_, const EGL_TexSetup * setup);
-EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture_,
+    LG_RendererFrameToken frameTokenLimit);
 EGL_TexStatus egl_texBufferGet(EGL_Texture * texture_, GLuint * tex,
     EGL_PixelFormat * fmt);
 EGL_TexStatus egl_texBufferBind(EGL_Texture * texture_, GLuint unit);
@@ -57,6 +59,7 @@ bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
 /* Returns with copyLock held when the current upload buffer is safe to write. */
 bool egl_texBufferStreamLock(TextureBuffer * texture);
-EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_);
+EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_,
+    LG_RendererFrameToken frameTokenLimit);
 EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture_, GLuint * tex,
     EGL_PixelFormat * fmt);

@@ -29,10 +29,11 @@
 
 struct FdImage
 {
-  int fd;
-  EGLImage image;
-  GLsync   sync;
-  int      texIndex;
+  int                   fd;
+  EGLImage              image;
+  GLsync                sync;
+  int                   texIndex;
+  LG_RendererFrameToken frameToken;
 };
 
 typedef struct TexDMABUF
@@ -43,6 +44,7 @@ typedef struct TexDMABUF
 
   struct FdImage images[2];
   int            lastIndex;
+  int            renderIndex;
 
   EGL_PixelFormat pixFmt;
   unsigned        fourcc;
@@ -76,9 +78,15 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
       glDeleteSync(this->images[i].sync);
       this->images[i].sync = 0;
     }
-    this->images[i].fd       = -1;
-    this->images[i].texIndex = -1;
+    this->images[i].fd         = -1;
+    this->images[i].texIndex   = -1;
+    this->images[i].frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
   }
+
+  this->lastIndex        = -1;
+  this->renderIndex      = -1;
+  parent->rIndex         = -1;
+  texture->frameToken    = LG_RENDERER_FRAME_TOKEN_NONE;
 
   egl_texUtilFreeBuffers(parent->buf, parent->texCount);
 
@@ -99,12 +107,14 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGL_TexType type,
 
   for(int i = 0; i < ARRAY_LENGTH(this->images); ++i)
   {
-    this->images[i].fd       = -1;
-    this->images[i].image    = EGL_NO_IMAGE;
-    this->images[i].sync     = 0;
-    this->images[i].texIndex = -1;
+    this->images[i].fd         = -1;
+    this->images[i].image      = EGL_NO_IMAGE;
+    this->images[i].sync       = 0;
+    this->images[i].texIndex   = -1;
+    this->images[i].frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
   }
-  this->lastIndex = -1;
+  this->lastIndex   = -1;
+  this->renderIndex = -1;
 
   EGL_Texture * parent = &this->base.base;
   if (!egl_texBufferStreamInit(&parent, type, display))
@@ -276,15 +286,45 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   INTERLOCKED_SECTION(parent->copyLock,
   {
-    this->lastIndex = (fdImage == &this->images[0]) ? 0 : 1;
+    fdImage->frameToken = update->frameToken;
+    this->lastIndex     = (fdImage == &this->images[0]) ? 0 : 1;
   });
 
   return true;
 }
 
-static EGL_TexStatus egl_texDMABUFProcess(EGL_Texture * texture)
+static EGL_TexStatus egl_texDMABUFProcess(EGL_Texture * texture,
+    LG_RendererFrameToken frameTokenLimit)
 {
-  return EGL_TEX_STATUS_OK;
+  TextureBuffer * parent = UPCAST(TextureBuffer, texture);
+  TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
+  int  index     = -1;
+  bool haveImage = false;
+  bool updated   = false;
+  INTERLOCKED_SECTION(parent->copyLock,
+  {
+    index     = this->lastIndex;
+    haveImage = this->renderIndex >= 0;
+    if (index >= 0 && egl_textureFrameAllowed(
+          this->images[index].frameToken, frameTokenLimit))
+    {
+      const struct FdImage * pending = &this->images[index];
+      if (this->renderIndex != index ||
+          texture->frameToken != pending->frameToken)
+      {
+        this->renderIndex    = index;
+        parent->rIndex       = pending->texIndex;
+        texture->frameToken = pending->frameToken;
+        updated              = true;
+        haveImage            = true;
+      }
+    }
+  });
+
+  if (unlikely(!haveImage))
+    return EGL_TEX_STATUS_NOTREADY;
+  return updated ? EGL_TEX_STATUS_UPDATED : EGL_TEX_STATUS_OK;
 }
 
 static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
@@ -299,7 +339,7 @@ static EGL_TexStatus egl_texDMABUFGet(EGL_Texture * texture, GLuint * tex,
 
   INTERLOCKED_SECTION(parent->copyLock,
   {
-    index = this->lastIndex;
+    index = this->renderIndex;
     if (index >= 0)
     {
       struct FdImage * cur = &this->images[index];

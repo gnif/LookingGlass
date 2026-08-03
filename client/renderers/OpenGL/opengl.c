@@ -107,44 +107,46 @@ struct Inst
   LG_RendererParams     params;
   struct OpenGL_Options opt;
 
-  bool              amdPinnedMemSupport;
-  bool              renderStarted;
-  bool              configured;
-  bool              reconfigure;
-  LG_DSGLContext    glContext;
+  bool           amdPinnedMemSupport;
+  bool           renderStarted;
+  bool           configured;
+  bool           reconfigure;
+  LG_DSGLContext glContext;
 
-  struct IntPoint   window;
-  float             uiScale;
-  _Atomic(bool)     frameUpdate;
+  struct IntPoint window;
+  float           uiScale;
+  _Atomic(bool)   frameUpdate;
 
-  LG_Lock             formatLock;
-  LG_RendererFormat   format;
-  GLuint              intFormat;
-  GLuint              vboFormat;
-  GLuint              dataFormat;
-  size_t              texSize;
-  size_t              texPos;
-  float               scaleX, scaleY;
-  const FrameBuffer * frame;
+  LG_Lock               formatLock;
+  LG_RendererFormat     format;
+  GLuint                intFormat;
+  GLuint                vboFormat;
+  GLuint                dataFormat;
+  size_t                texSize;
+  size_t                texPos;
+  float                 scaleX, scaleY;
+  const FrameBuffer   * frame;
+  LG_RendererFrameToken pendingFrameToken;
 
-  uint64_t          drawStart;
-  bool              hasBuffers;
-  GLuint            vboID[BUFFER_COUNT];
-  uint8_t         * texPixels[BUFFER_COUNT];
-  LG_Lock           frameLock;
-  bool              texReady;
-  int               texWIndex, texRIndex;
-  int               texList;
-  int               mouseList;
-  int               spiceList;
-  LG_RendererRect   destRect;
-  struct IntPoint   spiceSize;
-  bool              spiceShow;
+  uint64_t        drawStart;
+  bool            hasBuffers;
+  GLuint          vboID[BUFFER_COUNT];
+  uint8_t       * texPixels[BUFFER_COUNT];
+  LG_Lock         frameLock;
+  bool            texReady;
+  int             texWIndex, texRIndex;
+  int             texList;
+  int             mouseList;
+  int             spiceList;
+  LG_RendererRect destRect;
+  struct IntPoint spiceSize;
+  bool            spiceShow;
 
-  bool              hasTextures, hasFrames;
-  GLuint            frames[BUFFER_COUNT];
-  GLsync            fences[BUFFER_COUNT];
-  GLuint            textures[TEXTURE_COUNT];
+  bool                  hasTextures, hasFrames;
+  GLuint                frames[BUFFER_COUNT];
+  GLsync                fences[BUFFER_COUNT];
+  LG_RendererFrameToken frameToken[BUFFER_COUNT];
+  GLuint                textures[TEXTURE_COUNT];
 
   LG_Lock           mouseLock;
   LG_RendererCursor mouseCursor;
@@ -174,7 +176,9 @@ enum ConfigStatus
 static void deconfigure(struct Inst * this);
 static enum ConfigStatus configure(struct Inst * this);
 static void updateMouseShape(struct Inst * this);
-static bool drawFrame(struct Inst * this);
+static bool drawFrame(struct Inst * this,
+    LG_RendererFrameToken frameTokenLimit,
+    LG_RendererFrameToken * consumedFrameToken);
 static void drawMouse(struct Inst * this);
 
 const char * opengl_getName(void)
@@ -391,12 +395,14 @@ bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format
 }
 
 bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damage, int damageCount)
+    const FrameDamageRect * damage, int damageCount,
+    LG_RendererFrameToken frameToken)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   LG_LOCK(this->frameLock);
-  this->frame = frame;
+  this->frame             = frame;
+  this->pendingFrameToken = frameToken;
   atomic_store_explicit(&this->frameUpdate, true, memory_order_release);
   LG_UNLOCK(this->frameLock);
 
@@ -486,10 +492,13 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
   return true;
 }
 
-bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool newFrame,
-    const bool invalidateWindow, void (*preSwap)(void * udata), void * udata)
+bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
+    LG_RendererFrameToken frameTokenLimit, const bool invalidateWindow,
+    void (*preSwap)(void * udata), void * udata,
+    LG_RendererFrameTiming * timing)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+  *timing = (LG_RendererFrameTiming) {};
 
   setupModelView(this);
 
@@ -501,7 +510,7 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate, const bool 
 
     case CONFIG_STATUS_NOOP :
     case CONFIG_STATUS_OK   :
-      if (!drawFrame(this))
+      if (!drawFrame(this, frameTokenLimit, &timing->frameToken))
         return false;
   }
 
@@ -1024,16 +1033,17 @@ static void deconfigure(struct Inst * this)
     this->hasBuffers = false;
   }
 
-  if (this->amdPinnedMemSupport)
+  for(int i = 0; i < BUFFER_COUNT; ++i)
   {
-    for(int i = 0; i < BUFFER_COUNT; ++i)
+    if (this->fences[i])
     {
-      if (this->fences[i])
-      {
-        g_gl_dynProcs.glDeleteSync(this->fences[i]);
-        this->fences[i] = NULL;
-      }
+      g_gl_dynProcs.glDeleteSync(this->fences[i]);
+      this->fences[i] = NULL;
+    }
+    this->frameToken[i] = LG_RENDERER_FRAME_TOKEN_NONE;
 
+    if (this->amdPinnedMemSupport)
+    {
       if (this->texPixels[i])
       {
         free(this->texPixels[i]);
@@ -1208,8 +1218,12 @@ static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
   return true;
 }
 
-static bool drawFrame(struct Inst * this)
+static bool drawFrame(struct Inst * this,
+    LG_RendererFrameToken frameTokenLimit,
+    LG_RendererFrameToken * consumedFrameToken)
 {
+  *consumedFrameToken = LG_RENDERER_FRAME_TOKEN_NONE;
+
   if (g_gl_dynProcs.glIsSync(this->fences[this->texWIndex]))
   {
     switch(g_gl_dynProcs.glClientWaitSync(this->fences[this->texWIndex], 0, GL_TIMEOUT_IGNORED))
@@ -1234,16 +1248,21 @@ static bool drawFrame(struct Inst * this)
     this->fences[this->texWIndex] = NULL;
 
     this->texRIndex = this->texWIndex;
+    *consumedFrameToken = this->frameToken[this->texRIndex];
+    this->frameToken[this->texRIndex] = LG_RENDERER_FRAME_TOKEN_NONE;
     if (++this->texWIndex == BUFFER_COUNT)
       this->texWIndex = 0;
   }
 
   LG_LOCK(this->frameLock);
-  if (!atomic_exchange_explicit(&this->frameUpdate, false, memory_order_acquire))
+  if (!atomic_load_explicit(&this->frameUpdate, memory_order_acquire) ||
+      this->pendingFrameToken > frameTokenLimit)
   {
     LG_UNLOCK(this->frameLock);
     return true;
   }
+  atomic_store_explicit(&this->frameUpdate, false, memory_order_release);
+  const LG_RendererFrameToken pendingFrameToken = this->pendingFrameToken;
 
   LG_LOCK(this->formatLock);
   glBindTexture(GL_TEXTURE_2D, this->frames[this->texWIndex]);
@@ -1317,6 +1336,7 @@ static bool drawFrame(struct Inst * this)
   // set a fence so we don't overwrite a buffer in use
   this->fences[this->texWIndex] =
     g_gl_dynProcs.glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  this->frameToken[this->texWIndex] = pendingFrameToken;
   glFlush();
 
   LG_UNLOCK(this->formatLock);

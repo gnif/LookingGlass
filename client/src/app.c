@@ -922,9 +922,10 @@ void app_setGraphCompact(GraphHandle handle, bool compact)
   overlayGraph_setCompact(handle, compact);
 }
 
-void app_setFrameImportTime(uint64_t time)
+void app_setFrameImportTiming(uint64_t importTime, uint64_t importWaitTime)
 {
-  g_state.frameImportTime = time;
+  g_state.frameImportTime     = importTime;
+  g_state.frameImportWaitTime = importWaitTime;
 }
 
 void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)

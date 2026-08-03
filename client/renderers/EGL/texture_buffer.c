@@ -108,11 +108,15 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
         NULL);
   }
 
-  this->bufIndex = 0;
-  this->rIndex = -1;
+  this->bufIndex      = 0;
+  this->rIndex        = -1;
+  texture->frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
 
   for (int i = 0; i < this->texCount; ++i)
+  {
     this->buf[i].updated = false;
+    this->slotToken[i]   = LG_RENDERER_FRAME_TOKEN_NONE;
+  }
 
   return true;
 }
@@ -138,8 +142,10 @@ static bool egl_texBufferUpdate(EGL_Texture * texture, const EGL_TexUpdate * upd
   return true;
 }
 
-EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture)
+EGL_TexStatus egl_texBufferProcess(EGL_Texture * texture,
+    LG_RendererFrameToken frameTokenLimit)
 {
+  (void)frameTokenLimit;
   return EGL_TEX_STATUS_OK;
 }
 
@@ -260,13 +266,15 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
     }
   }
 
+  this->slotToken[this->bufIndex]   = update->frameToken;
   this->buf[this->bufIndex].updated = true;
   LG_UNLOCK(this->copyLock);
 
   return true;
 }
 
-EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
+EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
+    LG_RendererFrameToken frameTokenLimit)
 {
   TextureBuffer * this = UPCAST(TextureBuffer, texture);
 
@@ -276,7 +284,8 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
   GLuint          tex    = this->tex[index];
   EGL_TexBuffer * buffer = &this->buf[index];
 
-  if (!buffer->updated)
+  if (!buffer->updated ||
+      !egl_textureFrameAllowed(this->slotToken[index], frameTokenLimit))
   {
     LG_UNLOCK(this->copyLock);
     return EGL_TEX_STATUS_OK;
@@ -284,7 +293,8 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture)
 
   DEBUG_ASSERT(!this->sync[index]);
 
-  this->rIndex = index;
+  this->rIndex        = index;
+  texture->frameToken = this->slotToken[index];
   if (++this->bufIndex == this->texCount)
     this->bufIndex = 0;
   buffer->updated = false;
