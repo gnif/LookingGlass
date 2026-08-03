@@ -1066,7 +1066,11 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     const size_t alignOffset = alignSize - sizeof(FrameBuffer);
     m_frame[i]->offset = (uint32_t)alignOffset;
     m_frameBuffer[i] = (FrameBuffer*)(((uint8_t*)m_frame[i]) + alignOffset);
+    m_frameInFlight[i].store(false, std::memory_order_release);
   }
+
+  m_publishedFrameIndex.store(-1, std::memory_order_release);
+  m_frameResendPending = false;
 
   WDF_TIMER_CONFIG config;
   WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
@@ -1101,8 +1105,6 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
 void CIndirectDeviceContext::DeInitLGMP()
 {
-  m_publishedFrameIndex.store(-1);
-
   // The retry timer callback dereferences this context, so make sure it is
   // stopped and drained before we tear anything down. Wait for any in-flight
   // callback to complete.
@@ -1113,13 +1115,25 @@ void CIndirectDeviceContext::DeInitLGMP()
   }
 
   if (m_lgmp == nullptr)
+  {
+    m_publishedFrameIndex.store(-1, std::memory_order_release);
+    m_frameResendPending = false;
     return;
+  }
 
   if (m_lgmpTimer)
   {
     WdfTimerStop(m_lgmpTimer, TRUE);
     m_lgmpTimer = nullptr;
   }
+
+  AcquireSRWLockExclusive(&m_framePublishLock);
+  m_publishedFrameIndex.store(-1, std::memory_order_release);
+  m_frameResendPending = false;
+  ReleaseSRWLockExclusive(&m_framePublishLock);
+
+  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    m_frameInFlight[i].store(false, std::memory_order_release);
 
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     lgmpHostMemFree(&m_frameMemory[i]);
@@ -1187,12 +1201,26 @@ void CIndirectDeviceContext::LGMPTimer()
     lgmpHostAckData(m_pointerQueue);
   }
 
-  if (lgmpHostQueueNewSubs(m_frameQueue) && m_monitor)
+  AcquireSRWLockExclusive(&m_framePublishLock);
+  if (lgmpHostQueueNewSubs(m_frameQueue))
+    m_frameResendPending = true;
+
+  if (m_frameResendPending && m_monitor &&
+      lgmpHostQueuePending(m_frameQueue) == 0)
   {
-    const LONG frameIndex = m_publishedFrameIndex.load();
+    const LONG frameIndex =
+      m_publishedFrameIndex.load(std::memory_order_acquire);
     if (frameIndex >= 0)
-      lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
+    {
+      status = lgmpHostQueuePost(
+        m_frameQueue, 0, m_frameMemory[frameIndex]);
+      if (status == LGMP_OK)
+        m_frameResendPending = false;
+      else if (status != LGMP_ERR_QUEUE_FULL)
+        DEBUG_ERROR("Failed to resend frame: %s", lgmpStatusString(status));
+    }
   }
+  ReleaseSRWLockExclusive(&m_framePublishLock);
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
   {
@@ -1203,8 +1231,16 @@ void CIndirectDeviceContext::LGMPTimer()
 
 bool CIndirectDeviceContext::FrameBufferAvailable() const
 {
-  return m_lgmp && m_frameQueue &&
-    lgmpHostQueuePending(m_frameQueue) < LGMP_Q_FRAME_LEN;
+  if (!m_lgmp || !m_frameQueue ||
+      lgmpHostQueuePending(m_frameQueue) >= LGMP_Q_FRAME_LEN)
+    return false;
+
+  const LONG publishedFrameIndex =
+    m_publishedFrameIndex.load(std::memory_order_acquire);
+  const unsigned frameIndex =
+    static_cast<unsigned>(publishedFrameIndex + 1) % LGMP_Q_FRAME_LEN;
+
+  return !m_frameInFlight[frameIndex].load(std::memory_order_acquire);
 }
 
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
@@ -1214,6 +1250,22 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   PreparedFrameBuffer result = {};
 
   if (!FrameBufferAvailable())
+    return result;
+
+  if (dstFormat.format == FRAME_TYPE_INVALID)
+  {
+    DEBUG_ERROR("Unsupported frame format, skipping frame");
+    return result;
+  }
+
+  const LONG publishedFrameIndex =
+    m_publishedFrameIndex.load(std::memory_order_acquire);
+  const unsigned frameIndex =
+    static_cast<unsigned>(publishedFrameIndex + 1) % LGMP_Q_FRAME_LEN;
+
+  bool expected = false;
+  if (!m_frameInFlight[frameIndex].compare_exchange_strong(
+      expected, true, std::memory_order_acq_rel))
     return result;
 
   if (m_width     != dstFormat.desc.Width  ||
@@ -1265,16 +1317,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   m_lastHDRMaxFrameAverageLightLevel = dstFormat.maxFrameAverageLightLevel;
   m_lastSDRWhiteLevel                = dstFormat.sdrWhiteLevel;
 
-  if (++m_frameIndex == LGMP_Q_FRAME_LEN)
-    m_frameIndex = 0;
-
-  KVMFRFrame * fi = m_frame[m_frameIndex];
-
-  if (dstFormat.format == FRAME_TYPE_INVALID)
-  {
-    DEBUG_ERROR("Unsupported frame format, skipping frame");
-    return result;
-  }
+  KVMFRFrame * fi = m_frame[frameIndex];
 
   const unsigned maxRows = (unsigned)(m_maxFrameSize / pitch);
   const int bpp = dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
@@ -1340,10 +1383,10 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     }
   }
 
-  FrameBuffer* fb = m_frameBuffer[m_frameIndex];
+  FrameBuffer* fb = m_frameBuffer[frameIndex];
   fb->wp = 0;
 
-  result.frameIndex = m_frameIndex;
+  result.frameIndex = frameIndex;
   result.mem        = fb->data;
 
   return result;
@@ -1354,13 +1397,17 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
   if (!m_frameQueue || frameIndex >= LGMP_Q_FRAME_LEN)
     return false;
 
-  /* Make resends select this submitted frame before posting it. This prevents
-   * a new subscriber racing publication from receiving the previous frame
-   * after the new one. */
-  m_publishedFrameIndex.store(static_cast<LONG>(frameIndex));
-
+  AcquireSRWLockExclusive(&m_framePublishLock);
   const LGMP_STATUS status =
     lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
+  if (status == LGMP_OK)
+  {
+    m_publishedFrameIndex.store(
+      static_cast<LONG>(frameIndex), std::memory_order_release);
+    m_frameResendPending = false;
+  }
+  ReleaseSRWLockExclusive(&m_framePublishLock);
+
   if (status != LGMP_OK)
   {
     DEBUG_ERROR("Failed to publish frame: %s", lgmpStatusString(status));
@@ -1368,6 +1415,32 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
   }
 
   return true;
+}
+
+void CIndirectDeviceContext::AbortFrameBuffer(unsigned frameIndex)
+{
+  if (frameIndex >= LGMP_Q_FRAME_LEN)
+    return;
+
+  m_frameBuffer[frameIndex]->wp = 0;
+  InterlockedExchange((volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
+  m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+}
+
+void CIndirectDeviceContext::FailFrameBuffer(unsigned frameIndex)
+{
+  if (frameIndex >= LGMP_Q_FRAME_LEN)
+    return;
+
+  InterlockedExchange((volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
+  FinalizeFrameBuffer(frameIndex);
+  CompleteFrameBuffer(frameIndex);
+}
+
+void CIndirectDeviceContext::CompleteFrameBuffer(unsigned frameIndex)
+{
+  if (frameIndex < LGMP_Q_FRAME_LEN)
+    m_frameInFlight[frameIndex].store(false, std::memory_order_release);
 }
 
 void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
@@ -1401,8 +1474,9 @@ void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, si
 
 void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex) const
 {
-  FrameBuffer * fb = m_frameBuffer[frameIndex];
-  fb->wp = m_height * m_pitch;
+  const KVMFRFrame * frame = m_frame[frameIndex];
+  FrameBuffer      * fb    = m_frameBuffer[frameIndex];
+  fb->wp = frame->dataHeight * frame->pitch;
 }
 
 void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,

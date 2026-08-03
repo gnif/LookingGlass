@@ -31,96 +31,148 @@ using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
 using namespace Microsoft::WRL::Wrappers::HandleTraits;
 
-class CD3D12CommandQueue
-{
-  private:
-    const WCHAR * m_name = nullptr;
+class CD3D12CommandQueue;
 
-    ComPtr<ID3D12CommandQueue       > m_queue;
+class CD3D12CommandSlot
+{
+  friend class CD3D12CommandQueue;
+
+  private:
+    enum State
+    {
+      STATE_FREE,
+      STATE_RECORDING,
+      STATE_CANCELLING,
+      STATE_SUBMITTED,
+      STATE_COMPLETING,
+      STATE_FAILED,
+    };
+
+    struct FenceWait
+    {
+      ComPtr<ID3D12Fence> fence;
+      UINT64              value = 0;
+    };
+
+    static const UINT MAX_FENCE_WAITS = 2;
+
+    const WCHAR          * m_name  = nullptr;
+    CD3D12CommandQueue   * m_queue = nullptr;
     ComPtr<ID3D12CommandAllocator   > m_allocator;
     ComPtr<ID3D12GraphicsCommandList> m_gfxList;
     ComPtr<ID3D12CommandList        > m_cmdList;
-    ComPtr<ID3D12Fence              > m_fence;
 
-    ComPtr<ID3D12QueryHeap>  m_timestampHeap;
-    ComPtr<ID3D12Resource >  m_timestampReadback;
-    UINT64                 * m_timestampMap       = nullptr;
-    UINT64                   m_timestampFrequency = 0;
-    UINT64                   m_calibrationGPU     = 0;
-    UINT64                   m_calibrationCPU     = 0;
-    UINT64                   m_qpcFrequency       = 0;
-    bool                     m_timingSupported    = false;
-    bool                     m_timingActive       = false;
-
-    std::atomic<bool>         m_pending    = false;
+    std::atomic<State>        m_state       = STATE_FREE;
+    std::atomic<bool>         m_submitted   = false;
     HandleT<HANDLENullTraits> m_event;
-    HANDLE                    m_waitHandle = INVALID_HANDLE_VALUE;
-    UINT64                    m_fenceValue = 0;
-    bool                      m_needsReset = false;
+    HANDLE                    m_waitHandle  = INVALID_HANDLE_VALUE;
+    bool                      m_needsReset  = false;
+    UINT64                    m_fenceTarget = 0;
 
-    typedef void (*CompletionFunction)(CD3D12CommandQueue * queue,
+    FenceWait m_fenceWaits[MAX_FENCE_WAITS];
+    UINT      m_fenceWaitCount = 0;
+
+    typedef void (*CompletionFunction)(CD3D12CommandSlot * slot,
       bool result, void * param1, void * param2);
 
-    CompletionFunction   m_completionCallback = nullptr;
-    void               * m_completionParams[2];
-    bool                 m_completionResult = true;
+    CompletionFunction m_completionCallback  = nullptr;
+    void             * m_completionParams[2] = {};
+    bool               m_completionResult    = true;
 
-    bool InitTiming(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type);
-    void UpdateClockCalibration();
-    bool ConvertGPUTimestamp(UINT64 timestamp, uint64_t& result) const;
+    UINT   m_queryBase          = 0;
+    bool   m_timingActive       = false;
+    UINT64 m_timestampFrequency = 0;
+    UINT64 m_calibrationGPU     = 0;
+    UINT64 m_calibrationCPU     = 0;
 
-    void OnCompletion()
-    {
-      if (m_completionCallback)
-        m_completionCallback(
-          this,
-          m_completionResult,
-          m_completionParams[0],
-          m_completionParams[1]);
-      UpdateClockCalibration();
-      m_pending = false;
-    }
+    bool Init(ID3D12Device3 * device, CD3D12CommandQueue * queue,
+      const WCHAR * name, UINT queryBase, ULONG waitFlags);
+    void DeInit();
+    void OnCompletion(bool timeout);
 
   public:
-    ~CD3D12CommandQueue() { DeInit(); }
-
     enum CallbackMode
     {
-      DISABLED, // no callbacks
-      FAST,     // callback is expected to return almost immediately
-      NORMAL    // normal callback
+      FAST,
+      NORMAL,
     };
 
-    bool Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type, const WCHAR * name,
-      CallbackMode callbackMode = DISABLED);
+    ~CD3D12CommandSlot() { DeInit(); }
 
-    void DeInit();
+    bool Acquire();
+    void Cancel();
+    bool Execute();
 
-    void SetCompletionCallback(CompletionFunction fn, void * param1, void * param2)
+    bool BeginTiming();
+    void EndTiming();
+    bool GetGPUTimes(uint64_t& start, uint64_t& end) const;
+
+    bool WaitFor(ID3D12Fence * fence, UINT64 value);
+    bool WaitFor(const CD3D12CommandSlot& slot);
+
+    void SetCompletionCallback(CompletionFunction fn,
+      void * param1, void * param2)
     {
       m_completionCallback  = fn;
       m_completionParams[0] = param1;
       m_completionParams[1] = param2;
     }
 
-    bool Reset();
-    bool Execute();
-
-    bool BeginTiming();
-    void EndTiming();
-
-    // Return the copy boundaries in QueryPerformanceCounter-domain ns.
-    bool GetGPUTimes(uint64_t& start, uint64_t& end) const;
-
-    //void Wait();
-    bool   IsReady () const { return !m_pending   ; }
-    HANDLE GetEvent() const { return m_event.Get(); }
-
-    void WaitFor(CD3D12CommandQueue& queue)
+    bool IsIdle() const
     {
-      m_queue->Wait(queue.m_fence.Get(), queue.m_fenceValue);
+      const State state = m_state.load(std::memory_order_acquire);
+      return state == STATE_FREE ||
+        (state == STATE_FAILED &&
+         !m_submitted.load(std::memory_order_acquire));
     }
 
-    ComPtr<ID3D12CommandQueue       > GetCmdQueue() { return m_queue;   }
-    ComPtr<ID3D12GraphicsCommandList> GetGfxList()  { return m_gfxList; }
+    bool HasSubmittedWork() const
+    {
+      return m_submitted.load(std::memory_order_acquire);
+    }
+
+    ComPtr<ID3D12GraphicsCommandList> GetGfxList() { return m_gfxList; }
+};
+
+class CD3D12CommandQueue
+{
+  friend class CD3D12CommandSlot;
+
+  private:
+    static const UINT MAX_SLOTS = 2;
+
+    const WCHAR * m_name = nullptr;
+
+    ComPtr<ID3D12CommandQueue> m_queue;
+    ComPtr<ID3D12Fence       > m_fence;
+    UINT64                     m_fenceValue     = 0;
+    SRWLOCK                    m_submitLock     = SRWLOCK_INIT;
+    std::atomic<bool>          m_failed         = false;
+
+    CD3D12CommandSlot m_slots[MAX_SLOTS];
+    UINT              m_slotCount = 0;
+
+    ComPtr<ID3D12QueryHeap> m_timestampHeap;
+    ComPtr<ID3D12Resource > m_timestampReadback;
+    UINT64                * m_timestampMap    = nullptr;
+    UINT64                  m_qpcFrequency    = 0;
+    bool                    m_timingSupported = false;
+
+    bool InitTiming(ID3D12Device3 * device, UINT slotCount);
+    bool Submit(CD3D12CommandSlot& slot);
+    bool SnapshotTiming(CD3D12CommandSlot& slot) const;
+    bool GetGPUTimes(const CD3D12CommandSlot& slot,
+      uint64_t& start, uint64_t& end) const;
+
+  public:
+    ~CD3D12CommandQueue() { DeInit(); }
+
+    bool Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type,
+      const WCHAR * name, CD3D12CommandSlot::CallbackMode callbackMode,
+      UINT slotCount, bool enableTiming = false);
+    void DeInit();
+
+    CD3D12CommandSlot * Acquire(UINT slotIndex);
+    CD3D12CommandSlot * Acquire();
+    void WaitForIdle();
 };

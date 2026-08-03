@@ -59,8 +59,8 @@ class CInteropResource
 
     bool IsReady() { return m_ready; }
     bool Compare(const ComPtr<ID3D11Texture2D>& srcTex);
-    void Signal();
-    void Sync(CD3D12CommandQueue& queue);
+    bool Signal();
+    bool Sync(CD3D12CommandSlot& slot);
     void SetFullDamage();
     void SetDirtyRects(const RECT * dirtyRects, unsigned nbDirtyRects);
 

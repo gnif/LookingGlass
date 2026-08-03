@@ -94,7 +94,7 @@ private:
   void CursorThread();
 
   static void CompletionFunction(
-    CD3D12CommandQueue * queue, bool result, void * param1, void * param2);
+    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
   void AccumulateFrameDamage(const RECT * dirtyRects, unsigned nbDirtyRects);
   void SetFullPendingDamage();
 #ifdef HAS_IDDCX_110

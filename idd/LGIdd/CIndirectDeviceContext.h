@@ -103,8 +103,10 @@ private:
   size_t            m_alignSize           = 0;
   size_t            m_frameMemoryOffset   = 0;
   size_t            m_maxFrameSize        = 0;
-  int               m_frameIndex          = 0;
   std::atomic<LONG> m_publishedFrameIndex = -1;
+  std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_LEN] = {};
+  SRWLOCK           m_framePublishLock    = SRWLOCK_INIT;
+  bool              m_frameResendPending  = false;
   uint32_t          m_formatVer           = 0;
   uint32_t          m_frameSerial         = 0;
   PLGMPMemory       m_frameMemory[LGMP_Q_FRAME_LEN] = {};
@@ -217,6 +219,9 @@ public:
   bool FrameBufferAvailable() const;
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   bool PublishFrameBuffer(unsigned frameIndex);
+  void AbortFrameBuffer(unsigned frameIndex);
+  void FailFrameBuffer(unsigned frameIndex);
+  void CompleteFrameBuffer(unsigned frameIndex);
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;

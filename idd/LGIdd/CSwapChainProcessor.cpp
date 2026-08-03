@@ -316,23 +316,31 @@ bool CSwapChainProcessor::SwapChainThreadCore()
 }
 
 void CSwapChainProcessor::CompletionFunction(
-  CD3D12CommandQueue * queue, bool result, void * param1, void * param2)
+  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
 {
   auto sc    = (CSwapChainProcessor   *)param1;
   auto fbRes = (CFrameBufferResource *)param2;
+
+  if (!result)
+  {
+    // A submitted frame may already be in LGMP, or publication may race this
+    // callback. Make the message releasable even though its contents failed.
+    sc->m_devContext->FailFrameBuffer(fbRes->GetFrameIndex());
+    return;
+  }
 
   const uint64_t cpuCopyStart = fbRes->GetCopyStart();
   uint64_t       gpuCopyStart = 0;
   uint64_t       gpuCopyEnd   = 0;
 
-  if (result && sc->m_dx12Device->IsIndirectCopy())
+  if (sc->m_dx12Device->IsIndirectCopy())
     sc->m_devContext->WriteFrameBuffer(
       fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
 
   // Queue waits execute before the start timestamp. The end timestamp follows
   // the last CopyTextureRegion, separating GPU work from readiness dispatch.
-  const bool gpuTimingValid = result &&
-    queue->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
+  const bool gpuTimingValid =
+    slot->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
 
   // Publish readiness before sampling the endpoint. Timing has its own valid
   // flag and is published immediately afterwards.
@@ -353,6 +361,7 @@ void CSwapChainProcessor::CompletionFunction(
 
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
+  sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex());
 }
 
 
@@ -652,7 +661,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
    * use a fence. Because we share this texture with DirectX12 it is able to
    * read from it before the desktop duplication API has finished updating it.
    */
-  srcRes->Signal();
+  if (!srcRes->Signal())
+  {
+    SetFullPendingDamage();
+    return false;
+  }
 
   RECT dirtyRects[LG_MAX_DIRTY_RECTS] = {0};
   bool noImageUpdate = false;
@@ -819,38 +832,34 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   unsigned frameDirtyRectCount = nbDirtyRects;
   m_postProcessor.AdjustFrameDamage(frameDirtyRects, &frameDirtyRectCount);
 
-  auto copyQueue = m_dx12Device->GetCopyQueue();
-  if (!copyQueue)
-  {
-    DEBUG_ERROR("Failed to get a CopyQueue");
-    return false;
-  }
-
   ComPtr<ID3D12Resource> copySrcResource = srcRes->GetRes();
-  CD3D12CommandQueue * computeQueue = nullptr;
+  CD3D12CommandSlot * computeSlot = nullptr;
   if (m_postProcessor.HasActiveEffects())
   {
-    computeQueue = m_dx12Device->GetComputeQueue();
-    if (!computeQueue)
+    computeSlot = m_dx12Device->GetComputeSlot();
+    if (!computeSlot)
     {
-      DEBUG_ERROR("Failed to get a ComputeQueue");
+      DEBUG_ERROR("Failed to get a compute CommandSlot");
       return false;
     }
 
-    srcRes->Sync(*computeQueue);
+    if (!srcRes->Sync(*computeSlot))
+    {
+      computeSlot->Cancel();
+      SetFullPendingDamage();
+      return false;
+    }
+
     copySrcResource = m_postProcessor.Run(
-      computeQueue->GetGfxList(), copySrcResource,
+      computeSlot->GetGfxList(), copySrcResource,
       currentDirtyRects, &nbDirtyRects);
 
-    if (!computeQueue->Execute())
+    if (!computeSlot->Execute())
     {
       SetFullPendingDamage();
       return false;
     }
-    copyQueue->WaitFor(*computeQueue);
   }
-  else
-    srcRes->Sync(*copyQueue);
 
   ClipDirtyRects(currentDirtyRects, &nbDirtyRects, dstFormat.desc);
 
@@ -861,8 +870,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     frameDirtyRects,
     frameDirtyRectCount);
 
-  // The LGMP timer can fill the queue with a subscriber resend after the early
-  // availability check. Treat this as a dropped frame rather than an error.
+  // Queue or framebuffer ownership can change after the early availability
+  // check. Treat this as a dropped frame rather than an error.
   if (!buffer.mem)
     return true;
 
@@ -871,7 +880,29 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   if (!fbRes)
   {
+    m_devContext->AbortFrameBuffer(buffer.frameIndex);
     DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
+    SetFullPendingDamage();
+    return false;
+  }
+
+  CD3D12CommandSlot * copySlot =
+    m_dx12Device->GetCopySlot(buffer.frameIndex);
+  if (!copySlot)
+  {
+    m_devContext->AbortFrameBuffer(buffer.frameIndex);
+    DEBUG_ERROR("Failed to get a copy CommandSlot");
+    SetFullPendingDamage();
+    return false;
+  }
+
+  const bool syncResult = computeSlot ?
+    copySlot->WaitFor(*computeSlot) : srcRes->Sync(*copySlot);
+  if (!syncResult)
+  {
+    copySlot->Cancel();
+    m_devContext->AbortFrameBuffer(buffer.frameIndex);
+    DEBUG_ERROR("Failed to queue copy synchronization");
     SetFullPendingDamage();
     return false;
   }
@@ -879,7 +910,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   const uint64_t copyStart = Nanotime();
   fbRes->SetTiming(captureTime, postProcessStart, copyStart);
 
-  copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
+  copySlot->SetCompletionCallback(&CompletionFunction, this, fbRes);
 
   D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
   srcLoc.pResource        = copySrcResource.Get();
@@ -924,24 +955,26 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
           copyDirtyRects, nbCopyDirtyRects, dstFormat.desc);
   }
 
-  // The source/compute waits were inserted directly on the queue above. The
-  // command-list timestamp therefore marks the first actual copy operation.
-  copyQueue->BeginTiming();
+  // Source/compute waits are submitted immediately before this command list.
+  // The timestamp therefore marks the first actual copy operation.
+  copySlot->BeginTiming();
   if (fullCopy)
   {
-    copyQueue->GetGfxList()->CopyTextureRegion(
+    copySlot->GetGfxList()->CopyTextureRegion(
       &dstLoc, 0, 0, 0, &srcLoc, NULL);
   }
   else
   {
     for (const RECT * rect = copyDirtyRects;
          rect < copyDirtyRects + nbCopyDirtyRects; ++rect)
-      CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
+      CopyDirtyRect(copySlot->GetGfxList(), &dstLoc, &srcLoc, *rect);
   }
-  copyQueue->EndTiming();
+  copySlot->EndTiming();
 
-  if (!copyQueue->Execute())
+  if (!copySlot->Execute())
   {
+    if (!copySlot->HasSubmittedWork())
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
     SetFullPendingDamage();
     return false;
   }

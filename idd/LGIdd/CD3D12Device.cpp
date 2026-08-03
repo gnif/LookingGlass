@@ -130,14 +130,14 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
     DEBUG_INFO("Using IVSHMEM as a D3D12Heap");
   }
 
-  for(int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
-    if (!m_copyQueue[i].Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY, L"Copy",
-        m_indirectCopy ? CD3D12CommandQueue::NORMAL : CD3D12CommandQueue::FAST))
-      return InitResult::FAILURE;
+  if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY,
+      L"Copy", m_indirectCopy ? CD3D12CommandSlot::NORMAL :
+                               CD3D12CommandSlot::FAST, 2, true))
+    return InitResult::FAILURE;
 
   if (m_computeEnabled &&
       !m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE,
-        L"Compute", CD3D12CommandQueue::FAST))
+        L"Compute", CD3D12CommandSlot::FAST, 1))
     return InitResult::FAILURE;
 
   DEBUG_INFO("Created CD3D12Device");
@@ -153,19 +153,9 @@ void CD3D12Device::DeInit()
 
 void CD3D12Device::WaitForIdle()
 {
-  // A queue is ready once its GPU work has signalled and its completion
-  // callback has run (clearing the pending flag). Bound the wait so a
-  // removed/hung device cannot stall teardown indefinitely.
-  auto drain = [](CD3D12CommandQueue& queue)
-  {
-    for (int i = 0; i < 1000 && !queue.IsReady(); ++i)
-      Sleep(1);
-  };
-
-  for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
-    drain(m_copyQueue[i]);
+  m_copyQueue.WaitForIdle();
   if (m_computeEnabled)
-    drain(m_computeQueue);
+    m_computeQueue.WaitForIdle();
 }
 
 bool CD3D12Device::HeapTest()
@@ -212,31 +202,12 @@ bool CD3D12Device::HeapTest()
   return true;
 }
 
-CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
+CD3D12CommandSlot * CD3D12Device::GetCopySlot(unsigned frameIndex)
 {
-  // try for up to a maximum of 100ms to find a free copy queue
-  for (int c = 0; c < 100; ++c)
-  {
-    for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
-    {
-      auto& queue = m_copyQueue[m_copyQueueIndex++];
-      if (m_copyQueueIndex == ARRAYSIZE(m_copyQueue))
-        m_copyQueueIndex = 0;
-
-      if (queue.IsReady())
-      {
-        queue.Reset();
-        return &queue;
-      }
-    }
-    Sleep(1);
-  }
-
-  DEBUG_ERROR("Failed to get a copy queue");
-  return nullptr;
+  return m_copyQueue.Acquire(frameIndex);
 }
 
-CD3D12CommandQueue * CD3D12Device::GetComputeQueue()
+CD3D12CommandSlot * CD3D12Device::GetComputeSlot()
 {
   if (!m_computeEnabled)
   {
@@ -244,16 +215,5 @@ CD3D12CommandQueue * CD3D12Device::GetComputeQueue()
     return nullptr;
   }
 
-  for (int c = 0; c < 100; ++c)
-  {
-    if (m_computeQueue.IsReady())
-    {
-      m_computeQueue.Reset();
-      return &m_computeQueue;
-    }
-    Sleep(1);
-  }
-
-  DEBUG_ERROR("Failed to get a compute queue");
-  return nullptr;
+  return m_computeQueue.Acquire();
 }

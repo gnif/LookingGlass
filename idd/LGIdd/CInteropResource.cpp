@@ -126,16 +126,33 @@ bool CInteropResource::Compare(const ComPtr<ID3D11Texture2D>& srcTex)
     m_format.Format == format.Format;
 }
 
-void CInteropResource::Signal()
+bool CInteropResource::Signal()
 {
-  ++m_fenceValue;
-  m_dx11Device->GetContext()->Signal(m_d11Fence.Get(), m_fenceValue);
+  const UINT64 fenceValue = m_fenceValue + 1;
+  const HRESULT hr =
+    m_dx11Device->GetContext()->Signal(m_d11Fence.Get(), fenceValue);
+  if (FAILED(hr))
+  {
+    DEBUG_ERROR_HR(hr, "Failed to signal the D3D11 source fence");
+    return false;
+  }
+
+  m_fenceValue = fenceValue;
+  return true;
 }
 
-void CInteropResource::Sync(CD3D12CommandQueue& queue)
+bool CInteropResource::Sync(CD3D12CommandSlot& slot)
 {
-  if (m_d11Fence->GetCompletedValue() < m_fenceValue)
-    queue.GetCmdQueue()->Wait(m_d12Fence.Get(), m_fenceValue);
+  if (m_d11Fence->GetCompletedValue() >= m_fenceValue)
+    return true;
+
+  if (!slot.WaitFor(m_d12Fence.Get(), m_fenceValue))
+  {
+    DEBUG_ERROR("Failed to queue a wait for the D3D11 source fence");
+    return false;
+  }
+
+  return true;
 }
 
 void CInteropResource::SetFullDamage()
