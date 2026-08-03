@@ -280,9 +280,9 @@ ComPtr<ID3D12Resource> CColorTransformEffect::Run(
   UNREFERENCED_PARAMETER(dirtyRects);
   UNREFERENCED_PARAMETER(nbDirtyRects);
 
-  // GetComputeSlot waits for the previous submission before Run is called,
-  // so this is the first point where the shared upload buffers are guaranteed
-  // not to be in use by the GPU.
+  // The framebuffer-indexed compute slot waits for this chain's previous
+  // submission before Run is called, so this is the first point where its
+  // upload buffers are guaranteed not to be in use by the GPU.
   if (m_uploadPending)
   {
     if (!Upload(m_constBuffer, &m_consts, sizeof(m_consts)) ||

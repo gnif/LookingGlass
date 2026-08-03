@@ -81,8 +81,32 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
   m_fbPool.Init(this);
   if (m_dx11Device->IsSoftware())
     DEBUG_INFO("Software render adapter: post-processing disabled");
-  else if (!m_postProcessor.Init(dx12Device))
-    DEBUG_ERROR("Failed to initialize post processor");
+  else
+  {
+    bool initialized = true;
+    for (CPostProcessor& postProcessor : m_postProcessors)
+      if (!postProcessor.Init(dx12Device))
+      {
+        initialized = false;
+        break;
+      }
+
+    if (initialized)
+      for (unsigned i = 1; i < ARRAYSIZE(m_postProcessors); ++i)
+        if (!m_postProcessors[0].HasSameEffectChain(m_postProcessors[i]))
+        {
+          DEBUG_ERROR("Post processor effect chains do not match");
+          initialized = false;
+          break;
+        }
+
+    if (!initialized)
+    {
+      for (CPostProcessor& postProcessor : m_postProcessors)
+        postProcessor.Reset();
+      DEBUG_ERROR("Failed to initialize post processors");
+    }
+  }
 
   // Manual-reset: both worker threads wait on this, so it must stay signalled
   // once set or only one thread would ever observe termination.
@@ -107,7 +131,8 @@ CSwapChainProcessor::~CSwapChainProcessor()
   // worker epilogue, so this does not hold an IddCx frame.
   m_dx12Device->WaitForIdle();
 
-  m_postProcessor.Reset();
+  for (CPostProcessor& postProcessor : m_postProcessors)
+    postProcessor.Reset();
   m_resPool.Reset();
   m_fbPool.Reset();
   delete[] m_shapeBuffer;
@@ -792,10 +817,38 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   }
 
   const bool frameMetadataChanged = noImageUpdate &&
-    FrameMetadataChanged(m_postProcessor.GetOutputFormat(), srcFormat);
+    FrameMetadataChanged(m_postProcessors[0].GetOutputFormat(), srcFormat);
+
+  bool needsReconfigure = false;
+  for (const CPostProcessor& postProcessor : m_postProcessors)
+    if (postProcessor.NeedsReconfigure(srcFormat))
+    {
+      needsReconfigure = true;
+      break;
+    }
+
+  // SetFormat can replace resources still being read by the COPY queue. Format
+  // changes are rare, so drain both queues before updating either frame chain.
+  if (needsReconfigure)
+  {
+    m_nbDirtyRects = 0;
+    SetFullPendingDamage();
+    m_dx12Device->WaitForIdle();
+  }
+
   bool postProcessFormatChanged = false;
-  if (!m_postProcessor.Configure(srcFormat, &postProcessFormatChanged))
-    return false;
+  for (unsigned i = 0; i < ARRAYSIZE(m_postProcessors); ++i)
+  {
+    bool formatChanged = false;
+    if (!m_postProcessors[i].Configure(srcFormat, &formatChanged))
+    {
+      SetFullPendingDamage();
+      return false;
+    }
+
+    if (i == 0)
+      postProcessFormatChanged = formatChanged;
+  }
 
   if (postProcessFormatChanged)
   {
@@ -808,7 +861,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (noImageUpdate && !m_hasPendingDamage)
     return true;
 
-  const D12FrameFormat& dstFormat = m_postProcessor.GetOutputFormat();
+  const D12FrameFormat& dstFormat =
+    m_postProcessors[0].GetOutputFormat();
 
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
   m_dx12Device->GetDevice()->GetCopyableFootprints(
@@ -830,38 +884,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     memcpy(frameDirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*frameDirtyRects));
   }
   unsigned frameDirtyRectCount = nbDirtyRects;
-  m_postProcessor.AdjustFrameDamage(frameDirtyRects, &frameDirtyRectCount);
-
-  ComPtr<ID3D12Resource> copySrcResource = srcRes->GetRes();
-  CD3D12CommandSlot * computeSlot = nullptr;
-  if (m_postProcessor.HasActiveEffects())
-  {
-    computeSlot = m_dx12Device->GetComputeSlot();
-    if (!computeSlot)
-    {
-      DEBUG_ERROR("Failed to get a compute CommandSlot");
-      return false;
-    }
-
-    if (!srcRes->Sync(*computeSlot))
-    {
-      computeSlot->Cancel();
-      SetFullPendingDamage();
-      return false;
-    }
-
-    copySrcResource = m_postProcessor.Run(
-      computeSlot->GetGfxList(), copySrcResource,
-      currentDirtyRects, &nbDirtyRects);
-
-    if (!computeSlot->Execute())
-    {
-      SetFullPendingDamage();
-      return false;
-    }
-  }
-
-  ClipDirtyRects(currentDirtyRects, &nbDirtyRects, dstFormat.desc);
+  m_postProcessors[0].AdjustFrameDamage(
+    frameDirtyRects, &frameDirtyRectCount);
 
   auto buffer = m_devContext->PrepareFrameBuffer(
     (unsigned)layout.Footprint.RowPitch,
@@ -886,6 +910,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
+  CPostProcessor& postProcessor = m_postProcessors[buffer.frameIndex];
+
   CD3D12CommandSlot * copySlot =
     m_dx12Device->GetCopySlot(buffer.frameIndex);
   if (!copySlot)
@@ -896,16 +922,71 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  const bool syncResult = computeSlot ?
-    copySlot->WaitFor(*computeSlot) : srcRes->Sync(*copySlot);
-  if (!syncResult)
+  ComPtr<ID3D12Resource> copySrcResource = srcRes->GetRes();
+  CD3D12CommandSlot    * computeSlot     = nullptr;
+  if (postProcessor.HasActiveEffects())
+  {
+    computeSlot = m_dx12Device->GetComputeSlot(buffer.frameIndex);
+    if (!computeSlot)
+    {
+      copySlot->Cancel();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      DEBUG_ERROR("Failed to get a compute CommandSlot");
+      SetFullPendingDamage();
+      return false;
+    }
+
+    if (!srcRes->Sync(*computeSlot))
+    {
+      computeSlot->Cancel();
+      copySlot->Cancel();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      SetFullPendingDamage();
+      return false;
+    }
+
+    copySrcResource = postProcessor.Run(
+      computeSlot->GetGfxList(), copySrcResource,
+      currentDirtyRects, &nbDirtyRects);
+    if (!copySrcResource)
+    {
+      computeSlot->Cancel();
+      copySlot->Cancel();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      DEBUG_ERROR("Post processor returned no output resource");
+      SetFullPendingDamage();
+      return false;
+    }
+
+    if (!computeSlot->Execute())
+    {
+      copySlot->Cancel();
+      m_dx12Device->WaitForIdle();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      SetFullPendingDamage();
+      return false;
+    }
+
+    if (!copySlot->WaitFor(*computeSlot))
+    {
+      copySlot->Cancel();
+      m_dx12Device->WaitForIdle();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      DEBUG_ERROR("Failed to queue compute synchronization");
+      SetFullPendingDamage();
+      return false;
+    }
+  }
+  else if (!srcRes->Sync(*copySlot))
   {
     copySlot->Cancel();
     m_devContext->AbortFrameBuffer(buffer.frameIndex);
-    DEBUG_ERROR("Failed to queue copy synchronization");
+    DEBUG_ERROR("Failed to queue source synchronization");
     SetFullPendingDamage();
     return false;
   }
+
+  ClipDirtyRects(currentDirtyRects, &nbDirtyRects, dstFormat.desc);
 
   const uint64_t copyStart = Nanotime();
   fbRes->SetTiming(captureTime, postProcessStart, copyStart);
@@ -974,7 +1055,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!copySlot->Execute())
   {
     if (!copySlot->HasSubmittedWork())
+    {
+      if (computeSlot)
+        m_dx12Device->WaitForIdle();
       m_devContext->AbortFrameBuffer(buffer.frameIndex);
+    }
     SetFullPendingDamage();
     return false;
   }

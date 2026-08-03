@@ -128,25 +128,46 @@ void CPostProcessor::Reset()
   m_effects.clear();
   m_dx12Device.reset();
   m_device.Reset();
-  m_srcFormat = {};
-  m_dstFormat = {};
+  m_srcFormat     = {};
+  m_dstFormat     = {};
   m_effectsActive = false;
+  m_configured    = false;
 }
 
-bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatChanged)
+bool CPostProcessor::HasSameEffectChain(const CPostProcessor& other) const
+{
+  if (m_effects.size() != other.m_effects.size())
+    return false;
+
+  for (size_t i = 0; i < m_effects.size(); ++i)
+    if (std::strcmp(m_effects[i]->GetName(),
+                    other.m_effects[i]->GetName()) != 0)
+      return false;
+
+  return true;
+}
+
+bool CPostProcessor::NeedsReconfigure(const D12FrameFormat& srcFormat) const
+{
+  return !m_configured ||
+    srcFormat.desc.Width     != m_srcFormat.desc.Width  ||
+    srcFormat.desc.Height    != m_srcFormat.desc.Height ||
+    srcFormat.desc.Format    != m_srcFormat.desc.Format ||
+    srcFormat.format         != m_srcFormat.format      ||
+    srcFormat.width          != m_srcFormat.width       ||
+    srcFormat.height         != m_srcFormat.height      ||
+    srcFormat.hdr            != m_srcFormat.hdr         ||
+    srcFormat.hdrPQ          != m_srcFormat.hdrPQ       ||
+    srcFormat.colorTransform != m_srcFormat.colorTransform;
+}
+
+bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
+  bool * formatChanged)
 {
   if (formatChanged)
     *formatChanged = false;
 
-  if (srcFormat.desc.Width    == m_srcFormat.desc.Width  &&
-      srcFormat.desc.Height   == m_srcFormat.desc.Height &&
-      srcFormat.desc.Format   == m_srcFormat.desc.Format &&
-      srcFormat.format        == m_srcFormat.format      &&
-      srcFormat.width         == m_srcFormat.width       &&
-      srcFormat.height        == m_srcFormat.height      &&
-      srcFormat.hdr           == m_srcFormat.hdr         &&
-      srcFormat.hdrPQ         == m_srcFormat.hdrPQ       &&
-      srcFormat.colorTransform == m_srcFormat.colorTransform)
+  if (!NeedsReconfigure(srcFormat))
   {
     // Static HDR metadata may change independently of the resource format.
     // Propagate it without recreating textures or post-processing state.
@@ -155,10 +176,9 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
     return true;
   }
 
-  D12FrameFormat oldDst = m_dstFormat;
-  D12FrameFormat cur = srcFormat;
-  m_srcFormat = srcFormat;
-  m_effectsActive = false;
+  D12FrameFormat oldDst        = m_dstFormat;
+  D12FrameFormat cur           = srcFormat;
+  bool           effectsActive = false;
 
   for (const auto& effect : m_effects)
   {
@@ -167,8 +187,8 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
     {
     case PostProcessStatus::SUCCESS:
       effect->Enabled = true;
-      m_effectsActive = true;
-      cur = dst;
+      effectsActive   = true;
+      cur             = dst;
       DEBUG_INFO("Post-processing effect active: %s", effect->GetName());
       break;
 
@@ -182,18 +202,22 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat, bool * formatCha
     }
   }
 
-  m_dstFormat = cur;
+  m_srcFormat     = srcFormat;
+  m_dstFormat     = cur;
+  m_effectsActive = effectsActive;
+  m_configured    = true;
   if (formatChanged)
-    *formatChanged = oldDst.desc.Width    != m_dstFormat.desc.Width  ||
-                     oldDst.desc.Height   != m_dstFormat.desc.Height ||
-                     oldDst.desc.Format   != m_dstFormat.desc.Format ||
-                     oldDst.format        != m_dstFormat.format      ||
-                     oldDst.width         != m_dstFormat.width       ||
-                     oldDst.height        != m_dstFormat.height      ||
-                     oldDst.hdr           != m_dstFormat.hdr         ||
-                     oldDst.hdrPQ         != m_dstFormat.hdrPQ       ||
-                     oldDst.sdrWhiteLevel != m_dstFormat.sdrWhiteLevel ||
-                     oldDst.colorTransform != m_dstFormat.colorTransform;
+    *formatChanged =
+      oldDst.desc.Width     != m_dstFormat.desc.Width     ||
+      oldDst.desc.Height    != m_dstFormat.desc.Height    ||
+      oldDst.desc.Format    != m_dstFormat.desc.Format    ||
+      oldDst.format         != m_dstFormat.format         ||
+      oldDst.width          != m_dstFormat.width          ||
+      oldDst.height         != m_dstFormat.height         ||
+      oldDst.hdr            != m_dstFormat.hdr            ||
+      oldDst.hdrPQ          != m_dstFormat.hdrPQ          ||
+      oldDst.sdrWhiteLevel  != m_dstFormat.sdrWhiteLevel  ||
+      oldDst.colorTransform != m_dstFormat.colorTransform;
   return true;
 }
 

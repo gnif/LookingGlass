@@ -137,7 +137,7 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
 
   if (m_computeEnabled &&
       !m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE,
-        L"Compute", CD3D12CommandSlot::FAST, 1))
+        L"Compute", CD3D12CommandSlot::FAST, 2))
     return InitResult::FAILURE;
 
   DEBUG_INFO("Created CD3D12Device");
@@ -207,7 +207,7 @@ CD3D12CommandSlot * CD3D12Device::GetCopySlot(unsigned frameIndex)
   return m_copyQueue.Acquire(frameIndex);
 }
 
-CD3D12CommandSlot * CD3D12Device::GetComputeSlot()
+CD3D12CommandSlot * CD3D12Device::GetComputeSlot(unsigned frameIndex)
 {
   if (!m_computeEnabled)
   {
@@ -215,5 +215,5 @@ CD3D12CommandSlot * CD3D12Device::GetComputeSlot()
     return nullptr;
   }
 
-  return m_computeQueue.Acquire();
+  return m_computeQueue.Acquire(frameIndex);
 }

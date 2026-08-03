@@ -79,6 +79,6 @@ struct CD3D12Device
     ComPtr<ID3D12Heap   > GetHeap() { return m_ivshmemHeap; }
     bool IsIndirectCopy() { return m_indirectCopy; }
 
-    CD3D12CommandSlot * GetCopySlot(unsigned frameIndex);
-    CD3D12CommandSlot * GetComputeSlot();
+    CD3D12CommandSlot * GetCopySlot   (unsigned frameIndex);
+    CD3D12CommandSlot * GetComputeSlot(unsigned frameIndex);
 };

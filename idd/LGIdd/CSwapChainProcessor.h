@@ -53,7 +53,7 @@ private:
 
   CInteropResourcePool m_resPool;
   CFrameBufferPool     m_fbPool;
-  CPostProcessor       m_postProcessor;
+  CPostProcessor       m_postProcessors[LGMP_Q_FRAME_LEN];
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[2];
   Wrappers::Event m_terminateEvent;

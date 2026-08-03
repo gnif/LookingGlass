@@ -97,17 +97,20 @@ public:
 class CPostProcessor
 {
 private:
-  std::shared_ptr<CD3D12Device> m_dx12Device;
-  ComPtr<ID3D12Device3> m_device;
+  std::shared_ptr<CD3D12Device>                    m_dx12Device;
+  ComPtr<ID3D12Device3>                            m_device;
   std::vector<std::unique_ptr<CPostProcessEffect>> m_effects;
-  D12FrameFormat m_srcFormat = {};
-  D12FrameFormat m_dstFormat = {};
-  bool m_effectsActive = false;
+  D12FrameFormat                                   m_srcFormat     = {};
+  D12FrameFormat                                   m_dstFormat     = {};
+  bool                                             m_effectsActive = false;
+  bool                                             m_configured    = false;
 
 public:
   bool Init(std::shared_ptr<CD3D12Device> dx12Device);
   void Reset();
 
+  bool HasSameEffectChain(const CPostProcessor& other) const;
+  bool NeedsReconfigure(const D12FrameFormat& srcFormat) const;
   bool Configure(const D12FrameFormat& srcFormat, bool * formatChanged);
   void AdjustFrameDamage(RECT dirtyRects[], unsigned * nbDirtyRects);
   ComPtr<ID3D12Resource> Run(
