@@ -44,6 +44,23 @@ static uint64_t Nanotime()
     ticks % frequency * 1000000000ULL / frequency;
 }
 
+static bool FrameMetadataChanged(const D12FrameFormat& previous,
+  const D12FrameFormat& current)
+{
+  return
+    previous.hdrMetadata   != current.hdrMetadata   ||
+    previous.sdrWhiteLevel != current.sdrWhiteLevel ||
+    (current.hdrMetadata &&
+      (memcmp(previous.displayPrimary, current.displayPrimary,
+         sizeof(current.displayPrimary)) != 0 ||
+       memcmp(previous.whitePoint, current.whitePoint,
+         sizeof(current.whitePoint)) != 0 ||
+       previous.maxDisplayLuminance       != current.maxDisplayLuminance       ||
+       previous.minDisplayLuminance       != current.minDisplayLuminance       ||
+       previous.maxContentLightLevel      != current.maxContentLightLevel      ||
+       previous.maxFrameAverageLightLevel != current.maxFrameAverageLightLevel));
+}
+
 CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
     CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
@@ -199,8 +216,9 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     if (WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
       break;
 
-    UINT frameNumber = 0;
-    UINT dirtyRectCount = 0;
+    UINT frameNumber     = 0;
+    UINT dirtyRectCount  = 0;
+    UINT moveRegionCount = 0;
     ComPtr<IDXGIResource> surface;
 
     // The surface colour space is the source of truth for the content format.
@@ -240,9 +258,10 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       hr = IddCxSwapChainReleaseAndAcquireBuffer(m_hSwapChain, &buffer);
       if (SUCCEEDED(hr))
       {
-        frameNumber = buffer.MetaData.PresentationFrameNumber;
-        dirtyRectCount = buffer.MetaData.DirtyRectCount;
-        surface = buffer.MetaData.pSurface;
+        frameNumber     = buffer.MetaData.PresentationFrameNumber;
+        dirtyRectCount  = buffer.MetaData.DirtyRectCount;
+        moveRegionCount = buffer.MetaData.MoveRegionCount;
+        surface         = buffer.MetaData.pSurface;
       }
     }
 
@@ -269,8 +288,8 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       if (frameNumber != lastFrameNumber)
       {
         lastFrameNumber = frameNumber;
-        if (!SwapChainNewFrame(surface, dirtyRectCount, colorSpace,
-              sdrWhiteLevel, Nanotime() - captureStart))
+        if (!SwapChainNewFrame(surface, dirtyRectCount, moveRegionCount,
+              colorSpace, sdrWhiteLevel, Nanotime() - captureStart))
           DEBUG_WARN("Failed to submit frame");
       }
 
@@ -494,8 +513,9 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
 }
 
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
-  unsigned dirtyRectCount, DXGI_COLOR_SPACE_TYPE colorSpace,
-  UINT sdrWhiteLevel, uint64_t captureTime)
+  unsigned dirtyRectCount, unsigned moveRegionCount,
+  DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
+  uint64_t captureTime)
 {
   // Preserve the fast drop path: never hold an IddCx frame while waiting for
   // a slow or disconnected client. We have not read its rectangles, so force
@@ -533,8 +553,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcRes->Signal();
 
   RECT dirtyRects[LG_MAX_DIRTY_RECTS] = {0};
-  if (dirtyRectCount > ARRAYSIZE(dirtyRects))
+  bool noImageUpdate = false;
+  if (moveRegionCount || dirtyRectCount > ARRAYSIZE(dirtyRects))
   {
+    // Move regions are not represented by the dirty rectangle list. Copy the
+    // full surface so the alternating destinations remain coherent.
     srcRes->SetFullDamage();
   }
   else
@@ -550,13 +573,23 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       DEBUG_ERROR_HR(hr, "IddCxSwapChainGetDirtyRects Failed");
       srcRes->SetFullDamage();
     }
+    else if (dirtyOut.DirtyRectOutCount == 1 &&
+        dirtyRects[0].left   == 0 && dirtyRects[0].top    == 0 &&
+        dirtyRects[0].right  == 0 && dirtyRects[0].bottom == 0)
+    {
+      // One empty rectangle is IddCx's static-desktop re-encode marker. It
+      // does not describe an image update and must not become full damage.
+      noImageUpdate = true;
+      srcRes->SetDirtyRects(nullptr, 0);
+    }
     else
       srcRes->SetDirtyRects(dirtyRects, dirtyOut.DirtyRectOutCount);
   }
 
   D3D12_RESOURCE_DESC srcDesc = srcRes->GetRes()->GetDesc();
-  AccumulateFrameDamage(
-    srcRes->GetDirtyRects(), srcRes->GetDirtyRectCount());
+  if (!noImageUpdate)
+    AccumulateFrameDamage(
+      srcRes->GetDirtyRects(), srcRes->GetDirtyRectCount());
 
   // Never hold an IddCx frame waiting for a slow or disconnected client. Read
   // and retain its damage first so the next published frame remains complete.
@@ -564,11 +597,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return true;
 
   D12FrameFormat srcFormat = {};
-  srcFormat.desc          = srcDesc;
-  srcFormat.width         = (unsigned)srcDesc.Width;
-  srcFormat.height        = srcDesc.Height;
-  srcFormat.format        = GetFrameType(srcDesc.Format);
-  srcFormat.sdrWhiteLevel = sdrWhiteLevel;
+  srcFormat.desc           = srcDesc;
+  srcFormat.width          = (unsigned)srcDesc.Width;
+  srcFormat.height         = srcDesc.Height;
+  srcFormat.format         = GetFrameType(srcDesc.Format);
+  srcFormat.sdrWhiteLevel  = sdrWhiteLevel;
   srcFormat.colorTransform = m_devContext->GetColorTransform();
 
   switch (colorSpace)
@@ -643,6 +676,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       break;
   }
 
+  const bool frameMetadataChanged = noImageUpdate &&
+    FrameMetadataChanged(m_postProcessor.GetOutputFormat(), srcFormat);
   bool postProcessFormatChanged = false;
   if (!m_postProcessor.Configure(srcFormat, &postProcessFormatChanged))
     return false;
@@ -652,6 +687,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     m_nbDirtyRects = 0;
     SetFullPendingDamage();
   }
+  else if (frameMetadataChanged)
+    SetFullPendingDamage();
+
+  if (noImageUpdate && !m_hasPendingDamage)
+    return true;
 
   const D12FrameFormat& dstFormat = m_postProcessor.GetOutputFormat();
 

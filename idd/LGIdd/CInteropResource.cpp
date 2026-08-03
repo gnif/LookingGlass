@@ -154,6 +154,7 @@ void CInteropResource::SetDirtyRects(const RECT * dirtyRects, unsigned nbDirtyRe
     return;
   }
 
-  memcpy(m_dirtyRects, dirtyRects, nbDirtyRects * sizeof(*m_dirtyRects));
+  if (nbDirtyRects)
+    memcpy(m_dirtyRects, dirtyRects, nbDirtyRects * sizeof(*m_dirtyRects));
   m_nbDirtyRects = nbDirtyRects;
 }
