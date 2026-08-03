@@ -25,7 +25,7 @@
 
 #include "common/types.h"
 
-typedef struct ImVec2 ImVec2;
+typedef struct ImVec2_c ImVec2;
 
 typedef struct
 {

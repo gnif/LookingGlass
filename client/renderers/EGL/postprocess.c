@@ -496,10 +496,6 @@ static void configUI(void * opaque, int * id)
 
   bool   doMove = false;
 
-  ImVec2 window, pos;
-  igGetWindowPos(&window);
-  igGetMousePos(&pos);
-
   EGL_Filter ** filters = vector_data(&this->filters);
   size_t count = vector_size(&this->filters);
   for (size_t i = 0; i < count; ++i)

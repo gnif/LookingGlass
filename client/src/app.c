@@ -917,6 +917,16 @@ void app_invalidateGraph(GraphHandle handle)
   overlayGraph_invalidate(handle);
 }
 
+void app_setGraphCompact(GraphHandle handle, bool compact)
+{
+  overlayGraph_setCompact(handle, compact);
+}
+
+void app_setFrameImportTime(uint64_t time)
+{
+  g_state.frameImportTime = time;
+}
+
 void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
 {
   ASSERT_LG_OVERLAY_VALID(ops);

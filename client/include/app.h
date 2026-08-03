@@ -145,6 +145,8 @@ GraphHandle app_registerGraph(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn);
 void app_unregisterGraph(GraphHandle handle);
 void app_invalidateGraph(GraphHandle handle);
+void app_setGraphCompact(GraphHandle handle, bool compact);
+void app_setFrameImportTime(uint64_t time);
 
 void app_overlayConfigRegister(const char * title,
     void (*callback)(void * udata, int * id), void * udata);

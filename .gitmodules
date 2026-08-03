@@ -5,7 +5,7 @@
 	path = repos/PureSpice
 	url = https://github.com/gnif/PureSpice
 [submodule "repos/cimgui"]
-	path = repos/cimgui
+	path = repos/gui/cimgui
 	url = https://github.com/cimgui/cimgui.git
 [submodule "repos/wayland-protocols"]
 	path = repos/wayland-protocols
@@ -13,3 +13,6 @@
 [submodule "repos/nanosvg"]
 	path = repos/nanosvg
 	url = https://github.com/memononen/nanosvg.git
+[submodule "repos/cimplot"]
+	path = repos/gui/cimplot
+	url = https://github.com/cimgui/cimplot.git

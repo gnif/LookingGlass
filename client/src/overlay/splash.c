@@ -122,7 +122,7 @@ static void renderText(ImDrawList * list, int x, int y, ImU32 color,
   if (textHeight == 0.0f)
   {
     const char * tmp = "W";
-    igCalcTextSize(&size, tmp, tmp + 1, false, 0.0f);
+    size       = igCalcTextSize(tmp, tmp + 1, false, 0.0f);
     textHeight = size.y;
   }
 
@@ -133,7 +133,7 @@ static void renderText(ImDrawList * list, int x, int y, ImU32 color,
     const char * text = stringlist_at(lines, topAlign ? i : count - i - 1);
     const int    len  = strlen(text);
 
-    igCalcTextSize(&size, text, text + len, false, 0.0f);
+    size = igCalcTextSize(text, text + len, false, 0.0f);
     ImDrawList_AddText_Vec2(
       list,
       (ImVec2){
@@ -195,7 +195,7 @@ static int splash_render(void * udata, bool interactive, struct Rect * windowRec
 
   ImDrawList_AddImage(
     list,
-    (ImTextureID)l_logo.tex,
+    (ImTextureRef) { ._TexID = (ImTextureID)(uintptr_t)l_logo.tex },
     (ImVec2){
       logoRect.x,
       logoRect.y

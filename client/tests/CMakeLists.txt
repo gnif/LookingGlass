@@ -5,7 +5,7 @@ add_executable(font-tests
   ../src/font.c
 )
 target_compile_definitions(font-tests PRIVATE
-  FONT_TEST_FILE="${PROJECT_TOP}/repos/cimgui/imgui/misc/fonts/DroidSans.ttf"
+  FONT_TEST_FILE="${PROJECT_TOP}/repos/gui/cimgui/imgui/misc/fonts/DroidSans.ttf"
 )
 target_include_directories(font-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../include"

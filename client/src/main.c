@@ -202,18 +202,73 @@ static bool tickTimerFn(void * unused)
 struct RenderTiming
 {
   uint64_t renderStart;
-  uint64_t producerTime;
+  uint64_t captureTime;
+  uint64_t postProcessTime;
+  uint64_t copyTime;
+  uint64_t importTime;
 };
+
+static struct RenderTiming frameTimingLoad(void)
+{
+  struct RenderTiming timing = {};
+
+  for (;;)
+  {
+    const unsigned sequence = atomic_load_explicit(
+        &g_state.frameTimingSequence, memory_order_seq_cst);
+    if (sequence & 1)
+      continue;
+
+    timing.captureTime     = atomic_load_explicit(
+        &g_state.producerCaptureTime, memory_order_seq_cst);
+    timing.postProcessTime = atomic_load_explicit(
+        &g_state.producerPostProcessTime, memory_order_seq_cst);
+    timing.copyTime        = atomic_load_explicit(
+        &g_state.producerCopyTime, memory_order_seq_cst);
+    timing.importTime      = atomic_load_explicit(
+        &g_state.clientImportTime, memory_order_seq_cst);
+
+    if (sequence == atomic_load_explicit(
+          &g_state.frameTimingSequence, memory_order_seq_cst))
+      return timing;
+  }
+}
+
+static void frameTimingStore(const LG_TransportFrameTiming * timing,
+    uint64_t importTime)
+{
+  atomic_fetch_add_explicit(
+      &g_state.frameTimingSequence, 1, memory_order_seq_cst);
+  atomic_store_explicit(&g_state.producerCaptureTime,
+      timing->captureTime, memory_order_seq_cst);
+  atomic_store_explicit(&g_state.producerPostProcessTime,
+      timing->postProcessTime, memory_order_seq_cst);
+  atomic_store_explicit(&g_state.producerCopyTime,
+      timing->copyTime, memory_order_seq_cst);
+  atomic_store_explicit(&g_state.clientImportTime,
+      importTime, memory_order_seq_cst);
+  atomic_fetch_add_explicit(
+      &g_state.frameTimingSequence, 1, memory_order_seq_cst);
+}
 
 static void preSwapCallback(void * udata)
 {
   const struct RenderTiming * timing = (const struct RenderTiming *)udata;
-  const uint64_t renderTime = nanotime() - timing->renderStart;
-  ringbuffer_push(g_state.renderDuration, &(float) {renderTime * 1e-6f});
-
-  if (timing->producerTime)
-    ringbuffer_push(g_state.endToEndDuration,
-        &(float) {(timing->producerTime + renderTime) * 1e-6f});
+  const uint64_t timestamp  = nanotime();
+  const uint64_t renderTime = timestamp - timing->renderStart;
+  if (timing->captureTime || timing->postProcessTime || timing->copyTime ||
+      timing->importTime)
+  {
+    const OverlayFrameTiming frameTiming = {
+      .timestamp   = timestamp,
+      .capture     = timing->captureTime     * 1e-6f,
+      .postProcess = timing->postProcessTime * 1e-6f,
+      .copy        = timing->copyTime        * 1e-6f,
+      .import      = timing->importTime      * 1e-6f,
+      .render      = renderTime              * 1e-6f,
+    };
+    ringbuffer_push(g_state.frameLatency, &frameTiming);
+  }
 
 #ifdef ENABLE_TESTS
   if (!l_testCapture.enabled || l_testCapture.complete)
@@ -375,7 +430,7 @@ static int renderThread(void * unused)
         .x = g_state.windowScale,
         .y = g_state.windowScale,
       };
-      g_state.io->FontGlobalScale = 1.0f / g_state.windowScale;
+      igGetStyle()->FontScaleMain = 1.0f / g_state.windowScale;
     }
 
     const bool fontDirty = atomic_exchange(&g_state.fontDirty, false);
@@ -407,11 +462,9 @@ static int renderThread(void * unused)
 
     const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
 
-    const struct RenderTiming renderTiming = {
-      .renderStart  = nanotime(),
-      .producerTime = newFrame ? atomic_load_explicit(
-          &g_state.producerFrameTime, memory_order_acquire) : 0,
-    };
+    struct RenderTiming renderTiming =
+      newFrame ? frameTimingLoad() : (struct RenderTiming) {};
+    renderTiming.renderStart = nanotime();
     LG_LOCK(g_state.lgrLock);
 
     renderQueue_process();
@@ -783,6 +836,7 @@ int main_frameThread(void * unused)
       damageCount = 0;
     }
 
+    g_state.frameImportTime = 0;
     if (!RENDERER(onFrame, frame.framebuffer, frame.dmaFD,
           frame.damageRects, damageCount))
     {
@@ -797,15 +851,7 @@ int main_frameThread(void * unused)
       g_state.transportOps->getFrameTiming(
           g_state.transport, &frame, &timing);
 
-    ringbuffer_push(g_state.captureDuration,
-        &(float) {timing.captureTime * 1e-6f});
-    ringbuffer_push(g_state.postProcessDuration,
-        &(float) {timing.postProcessTime * 1e-6f});
-    ringbuffer_push(g_state.copyDuration,
-        &(float) {timing.copyTime * 1e-6f});
-    atomic_store_explicit(&g_state.producerFrameTime,
-        timing.captureTime + timing.postProcessTime + timing.copyTime,
-        memory_order_release);
+    frameTimingStore(&timing, g_state.frameImportTime);
 
     overlaySplash_show(false);
     if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
@@ -823,13 +869,6 @@ int main_frameThread(void * unused)
         g_state.ds->uninhibitIdle();
       g_state.autoIdleInhibitState = blockScreensaver;
     }
-
-    const uint64_t now   = nanotime();
-    const uint64_t delta = now - g_state.lastFrameTime;
-    g_state.lastFrameTime = now;
-    if (g_state.lastFrameTimeValid)
-      ringbuffer_push(g_state.uploadTimings, &(float) { delta * 1e-6f });
-    g_state.lastFrameTimeValid = true;
 
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
 #ifdef ENABLE_TESTS
@@ -1309,7 +1348,7 @@ static int lg_run(void)
 
   /* setup imgui */
   igCreateContext(NULL);
-  g_state.io    = igGetIO();
+  g_state.io    = igGetIO_Nil();
   g_state.style = igGetStyle();
 
   g_state.style->Colors[ImGuiCol_ModalWindowDimBg] = (ImVec4) { 0.0f, 0.0f, 0.0f, 0.4f };
@@ -1334,20 +1373,11 @@ static int lg_run(void)
   DEBUG_INFO("Using font: %s", g_state.fontName);
 
   // initialize metrics ringbuffers
-  g_state.renderTimings       = ringbuffer_new(256, sizeof(float));
-  g_state.uploadTimings       = ringbuffer_new(256, sizeof(float));
-  g_state.renderDuration      = ringbuffer_new(256, sizeof(float));
-  g_state.captureDuration     = ringbuffer_new(256, sizeof(float));
-  g_state.postProcessDuration = ringbuffer_new(256, sizeof(float));
-  g_state.copyDuration        = ringbuffer_new(256, sizeof(float));
-  g_state.endToEndDuration    = ringbuffer_new(256, sizeof(float));
-  overlayGraph_register("FRAME"       , g_state.renderTimings      , 0.0f, 50.0f, NULL);
-  overlayGraph_register("UPLOAD"      , g_state.uploadTimings      , 0.0f, 50.0f, NULL);
-  overlayGraph_register("RENDER"      , g_state.renderDuration     , 0.0f, 10.0f, NULL);
-  overlayGraph_register("CAPTURE"     , g_state.captureDuration    , 0.0f, 20.0f, NULL);
-  overlayGraph_register("POST PROCESS", g_state.postProcessDuration, 0.0f, 20.0f, NULL);
-  overlayGraph_register("COPY"        , g_state.copyDuration       , 0.0f, 20.0f, NULL);
-  overlayGraph_register("END TO END"  , g_state.endToEndDuration   , 0.0f, 50.0f, NULL);
+  g_state.renderTimings = ringbuffer_new(256, sizeof(float));
+  g_state.frameLatency  = ringbuffer_new(4096, sizeof(OverlayFrameTiming));
+  overlayGraph_setCompact(overlayGraph_register(
+        "FRAME", g_state.renderTimings, 0.0f, 50.0f, NULL), true);
+  overlayGraph_registerFrameTiming("FRAME LATENCY", g_state.frameLatency);
 
   // unknown guest OS at this time
   g_state.guestOS = LG_TRANSPORT_OS_OTHER;
@@ -1830,12 +1860,7 @@ static void lg_shutdown(void)
 
   // free metrics ringbuffers
   ringbuffer_free(&g_state.renderTimings);
-  ringbuffer_free(&g_state.uploadTimings);
-  ringbuffer_free(&g_state.renderDuration);
-  ringbuffer_free(&g_state.captureDuration);
-  ringbuffer_free(&g_state.postProcessDuration);
-  ringbuffer_free(&g_state.copyDuration);
-  ringbuffer_free(&g_state.endToEndDuration);
+  ringbuffer_free(&g_state.frameLatency);
 
   free(g_state.fontName);
   igDestroyContext(NULL);

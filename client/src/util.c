@@ -610,7 +610,7 @@ bool util_buildUIFontAtlas(
     goto done;
   }
 
-  result = ImFontAtlas_Build(atlas);
+  result = true;
 
 done:
   LG_UNLOCK(UIFontLock);

@@ -29,7 +29,7 @@
 #include <GL/gl.h>
 
 #include "cimgui.h"
-#include "generator/output/cimgui_impl.h"
+#include "cimgui_impl.h"
 
 #include "common/debug.h"
 #include "common/option.h"
@@ -318,8 +318,7 @@ void opengl_onResize(LG_Renderer * renderer, const int width, const int height, 
 
 static bool opengl_onFontUpdate(LG_Renderer * renderer)
 {
-  ImGui_ImplOpenGL2_DestroyFontsTexture();
-  return ImGui_ImplOpenGL2_CreateFontsTexture();
+  return true;
 }
 
 bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,

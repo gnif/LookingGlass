@@ -104,7 +104,6 @@ add_library(renderer_EGL STATIC
   filter_downscale.c
   ${EGL_SHADER_OBJS}
   "${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
-  ${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl3.cpp
 )
 
 target_compile_definitions(renderer_EGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 IMGUI_IMPL_OPENGL_ES3)
@@ -113,7 +112,7 @@ target_link_libraries(renderer_EGL
   PkgConfig::RENDERER_EGL
   lg_common
 
-  cimgui
+  lg_gui
 )
 if(RENDERER_EGL_OPT_FOUND)
   target_link_libraries(renderer_EGL

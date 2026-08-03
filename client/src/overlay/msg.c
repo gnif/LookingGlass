@@ -125,7 +125,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
       continue;
     }
 
-    igCalcTextSize(&textSize, line, NULL, false, 0.0);
+    textSize = igCalcTextSize(line, NULL, false, 0.0);
     igSetCursorPosX((igGetWindowWidth() * 0.5f) - (textSize.x * 0.5f));
     igText("%s", stringlist_at(msg->lines, i));
   }
@@ -135,7 +135,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
   bool destroy = false;
   if (msg->confirm)
   {
-    igCalcTextSize(&textSize, "Yes", NULL, false, 0.0);
+    textSize = igCalcTextSize("Yes", NULL, false, 0.0);
     ImGuiStyle * style = igGetStyle();
     textSize.x += (style->FramePadding.x * 2.0f) * 8.0f;
     textSize.y += (style->FramePadding.y * 2.0f) * 1.5f;
@@ -156,7 +156,7 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
   }
   else
   {
-    igCalcTextSize(&textSize, "OK", NULL, false, 0.0);
+    textSize = igCalcTextSize("OK", NULL, false, 0.0);
     ImGuiStyle * style = igGetStyle();
     textSize.x += (style->FramePadding.x * 2.0f) * 8.0f;
     textSize.y += (style->FramePadding.y * 2.0f) * 1.5f;

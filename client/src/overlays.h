@@ -44,9 +44,23 @@ extern struct LG_OverlayOps LGOverlayStatus;
 
 void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args);
 
+typedef struct OverlayFrameTiming
+{
+  uint64_t timestamp;
+  float    capture;
+  float    postProcess;
+  float    copy;
+  float    import;
+  float    render;
+}
+OverlayFrameTiming;
+
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn);
+GraphHandle overlayGraph_registerFrameTiming(const char * name,
+    RingBuffer buffer);
 void overlayGraph_unregister(GraphHandle handle);
+void overlayGraph_setCompact(GraphHandle handle, bool compact);
 void overlayGraph_iterate(void (*callback)(GraphHandle handle, const char * name,
     bool * enabled, void * udata), void * udata);
 void overlayGraph_invalidate(GraphHandle handle);

@@ -29,7 +29,7 @@
 #endif
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "repos/cimgui/imgui/imstb_truetype.h"
+#include "repos/gui/cimgui/imgui/imstb_truetype.h"
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif

@@ -143,20 +143,18 @@ struct AppState
   bool                  formatValid;
   uint64_t              frameTime;
   uint64_t              overlayFrameTime;
-  uint64_t              lastFrameTime;
-  bool                  lastFrameTimeValid;
   uint64_t              lastRenderTime;
   bool                  lastRenderTimeValid;
   RingBuffer            renderTimings;
-  RingBuffer            renderDuration;
-  RingBuffer            uploadTimings;
-  RingBuffer            captureDuration;
-  RingBuffer            postProcessDuration;
-  RingBuffer            copyDuration;
-  RingBuffer            endToEndDuration;
+  RingBuffer            frameLatency;
+  uint64_t              frameImportTime;
 
   atomic_uint_least64_t pendingCount;
-  atomic_uint_least64_t producerFrameTime;
+  atomic_uint           frameTimingSequence;
+  atomic_uint_least64_t producerCaptureTime;
+  atomic_uint_least64_t producerPostProcessTime;
+  atomic_uint_least64_t producerCopyTime;
+  atomic_uint_least64_t clientImportTime;
   atomic_uint_least64_t renderCount, frameCount;
   _Atomic(float)        fps, ups;
 

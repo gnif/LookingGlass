@@ -8,7 +8,6 @@ pkg_check_modules(RENDERER_OPENGL REQUIRED IMPORTED_TARGET
 
 add_library(renderer_OpenGL STATIC
   opengl.c
-  ${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_opengl2.cpp
 )
 
 target_compile_definitions(renderer_OpenGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
@@ -17,7 +16,7 @@ target_link_libraries(renderer_OpenGL
   PkgConfig::RENDERER_OPENGL
   lg_common
 
-  cimgui
+  lg_gui
 )
 
 target_include_directories(renderer_OpenGL

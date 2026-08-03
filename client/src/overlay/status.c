@@ -101,7 +101,7 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
 
     ImDrawList_AddImage(
       igGetBackgroundDrawList_Nil(),
-      (ImTextureID)img->tex,
+      (ImTextureRef) { ._TexID = (ImTextureID)(uintptr_t)img->tex },
       (ImVec2){
         xPos,
         marginY

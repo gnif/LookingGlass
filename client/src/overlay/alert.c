@@ -80,7 +80,7 @@ static int alert_render(void * udata, bool interactive, struct Rect * windowRect
     ImGuiWindowFlags_NoNav           | ImGuiWindowFlags_NoTitleBar
   );
 
-  igPushFont(g_state.fontLarge);
+  igPushFont(g_state.fontLarge, 0.0f);
   igText("%s", l_alert.message);
   igPopFont();
 

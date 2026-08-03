@@ -41,11 +41,8 @@
 
 void overlayGetImGuiRect(struct Rect * rect)
 {
-  ImVec2 size;
-  ImVec2 pos;
-
-  igGetWindowPos(&pos);
-  igGetWindowSize(&size);
+  ImVec2 pos  = igGetWindowPos();
+  ImVec2 size = igGetWindowSize();
 
   rect->x = pos.x;
   rect->y = pos.y;
@@ -60,9 +57,8 @@ ImVec2 * overlayGetScreenSize(void)
 
 static void overlayAddUnderline(ImU32 color)
 {
-  ImVec2 min, max;
-  igGetItemRectMin(&min);
-  igGetItemRectMax(&max);
+  ImVec2 min = igGetItemRectMin();
+  ImVec2 max = igGetItemRectMax();
   min.y = max.y;
   ImDrawList_AddLine(igGetWindowDrawList(), min, max, color, 1.0f);
 }

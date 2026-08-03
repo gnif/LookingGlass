@@ -181,18 +181,11 @@ if(ENABLE_AUDIO)
   list(APPEND SOURCES src/audio.c)
 endif()
 
-# Force cimgui to build as a static library.
-set(IMGUI_STATIC "yes" CACHE STRING "Build as a static library")
-# Support Unicode codepoints outside the basic multilingual plane.
-set(IMGUI_WCHAR32 "yes")
-add_definitions("-DCIMGUI_USE_OPENGL2=1")
-add_definitions("-DCIMGUI_USE_OPENGL3=1")
-
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
 add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
-add_subdirectory("${PROJECT_TOP}/repos/cimgui"    "${CMAKE_BINARY_DIR}/cimgui" EXCLUDE_FROM_ALL)
+add_subdirectory("${PROJECT_TOP}/repos/gui"       "${CMAKE_BINARY_DIR}/gui"      EXCLUDE_FROM_ALL)
 
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
@@ -235,7 +228,7 @@ target_link_libraries(looking-glass-client
   renderers
   transports
   audiodevs
-  cimgui
+  lg_gui
 )
 
 if(ENABLE_TESTS)

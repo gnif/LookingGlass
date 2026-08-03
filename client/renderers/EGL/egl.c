@@ -36,7 +36,7 @@
 #include <GLES3/gl32.h>
 
 #include "cimgui.h"
-#include "generator/output/cimgui_impl.h"
+#include "cimgui_impl.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -123,9 +123,6 @@ struct Inst
   struct Rect  overlayHistory[DESKTOP_DAMAGE_COUNT][MAX_OVERLAY_RECTS + 1];
   int          overlayHistoryCount[DESKTOP_DAMAGE_COUNT];
   unsigned int overlayHistoryIdx;
-
-  RingBuffer importTimings;
-  GraphHandle importGraph;
 
   bool showSpice;
   int  spiceWidth, spiceHeight;
@@ -292,10 +289,6 @@ static bool egl_create(LG_Renderer ** renderer, const LG_RendererParams params,
   LG_LOCK_INIT(this->desktopDamageLock);
   this->desktopDamage[0].count = -1;
 
-  this->importTimings = ringbuffer_new(256, sizeof(float));
-  this->importGraph   = app_registerGraph("IMPORT", this->importTimings,
-      0.0f, 5.0f, NULL);
-
   *needsOpenGL = false;
   return true;
 }
@@ -316,8 +309,6 @@ static void egl_deinitialize(LG_Renderer * renderer)
     ImGui_ImplOpenGL3_Shutdown();
     egl_stateInvalidate();
   }
-
-  ringbuffer_free(&this->importTimings);
 
   egl_desktopFree(&this->desktop);
   egl_cursorFree (&this->cursor);
@@ -592,10 +583,8 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
 
 static bool egl_onFontUpdate(LG_Renderer * renderer)
 {
-  ImGui_ImplOpenGL3_DestroyFontsTexture();
-  const bool result = ImGui_ImplOpenGL3_CreateFontsTexture();
   egl_stateInvalidate();
-  return result;
+  return true;
 }
 
 static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
@@ -759,14 +748,14 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
 
-  uint64_t start = nanotime();
+  const uint64_t start = nanotime();
   if (unlikely(!egl_desktopUpdate(
           this->desktop, frame, dmaFd, damageRects, damageRectsCount)))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
   }
-  ringbuffer_push(this->importTimings, &(float){ (nanotime() - start) * 1e-6f });
+  app_setFrameImportTime(nanotime() - start);
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;
